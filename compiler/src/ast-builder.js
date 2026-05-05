@@ -2834,6 +2834,106 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   }
 
   /**
+   * Phase A1a Step 2 — V5-strict structural state-decl recognition.
+   *
+   * Recognizes the v0.next form `<NAME> = expr` (Shape 1, plain reactive cell)
+   * or `const <NAME> = expr` (Shape 3, derived reactive value) at expression-
+   * statement-start position inside `${...}` logic blocks. Without this hook,
+   * the `<NAME>` form is silently consumed as `kind: "html-fragment"` raw text
+   * (the deceptive-success pattern documented in PARSER-AUDIT-2026-05-05.md).
+   *
+   * Caller invariants:
+   * - `startTok` is the FIRST token of the decl: either the `<` PUNCT itself
+   *   (Shape 1) or the `const` KEYWORD token (Shape 3, where `const` has
+   *   already been consumed).
+   * - When `isConst === true`, the `const` keyword has already been consumed
+   *   and peek() is now the `<` PUNCT.
+   * - When `isConst === false`, peek() is the `<` PUNCT.
+   *
+   * The recognizer matches:  `<` IDENT `>` `=` expr
+   * or                       `<` IDENT `>=` expr   (when no whitespace, the
+   *                                                  tokenizer fuses `>` and
+   *                                                  `=` into one OPERATOR
+   *                                                  token; treat as `>` `=`).
+   *
+   * Does NOT match (deferred to later A1a steps):
+   * - bareword attrs between IDENT and `>` (Shape 2 / validators) — Step 5
+   * - `>` followed by `:` (typed annotation) — Step 5/6
+   * - `>` followed by `{` (compound block, Variant C) — Step 11
+   *
+   * Returns the constructed `kind: "reactive-decl"` AST node on match (with
+   * `structuralForm: true` and, for Shape 3, `isConst: true`). Returns null
+   * if the lookahead does not match — caller MUST fall through to existing
+   * dispatch (markup-tag/html-fragment paths) without tokens consumed.
+   *
+   * Per AST-CONTRACTS-AND-DECOMPOSITION §1.1: kind stays `reactive-decl`
+   * pre-Step-3 rename. Step 3 will rename to `state-decl`. Step 4 will add
+   * the `shape` discriminant (`"plain"` / `"derived"`) once all RHS shapes
+   * are recognized.
+   */
+  function tryParseStructuralDecl(startTok, isConst) {
+    // peek() must be `<` (PUNCT). If not, decline.
+    const lt = peek();
+    if (!(lt && lt.kind === "PUNCT" && lt.text === "<")) return null;
+
+    // peek(1) must be IDENT (the cell name). If not, decline. This guards
+    // against `<` used in JS comparisons — but at statement-start position,
+    // a bare `<` followed by IDENT is unambiguous: scrml + JS have no other
+    // construct of this shape.
+    const nameTok = peek(1);
+    if (!nameTok || nameTok.kind !== "IDENT") return null;
+
+    // peek(2) must be either:
+    //   - PUNCT `>` followed by PUNCT `=`  (whitespace form: `<count> = 0`)
+    //   - OPERATOR `>=`                    (no-whitespace form: `<count>=0`)
+    // Anything else (e.g., `<count>:T`, `<count>{...}`, `<span>hello</span>`)
+    // is out of Step 2 scope; decline so caller falls through.
+    const t2 = peek(2);
+    let consumedThru = -1; // index past the `>` `=` sequence (or `>=`)
+    if (!t2) return null;
+    if (t2.kind === "PUNCT" && t2.text === ">") {
+      const t3 = peek(3);
+      if (!t3 || t3.kind !== "PUNCT" || t3.text !== "=") return null;
+      // Reject `>==` (compound `==` after `>`) — that would be `>` `==` not `>` `=`.
+      // peek(3).text === "=" with PUNCT means standalone `=` token.
+      // Also reject `>=>` etc. — peek(3) === PUNCT `=` standalone is enough.
+      consumedThru = 4; // tokens 0..3 inclusive consumed; expr starts at index 4
+    } else if (t2.kind === "OPERATOR" && t2.text === ">=") {
+      // `>=` fused token — treat as `>` followed by `=`. The tokens covered
+      // are `<` (0), IDENT (1), `>=` (2), then expr starts at index 3.
+      consumedThru = 3;
+    } else {
+      return null;
+    }
+
+    // Pattern matched. Consume tokens through the `=` (or the fused `>=`).
+    consume(); // consume `<`
+    consume(); // consume IDENT
+    consume(); // consume `>` or `>=`
+    if (consumedThru === 4) {
+      consume(); // consume standalone `=` (whitespace form only)
+    }
+
+    const name = nameTok.text;
+
+    // Collect the RHS expression (stops at `;`, unbalanced `}`, STMT_KEYWORDS,
+    // BLOCK_REF, or EOF — same boundary rules as the legacy `@NAME = init` path).
+    const { expr } = collectExpr();
+
+    const node = {
+      id: ++counter.next,
+      kind: "reactive-decl",
+      name,
+      init: expr,
+      initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0),
+      structuralForm: true,
+      span: spanOf(startTok, peek()),
+    };
+    if (isConst) node.isConst = true;
+    return node;
+  }
+
+  /**
    * Parse a single statement and return an AST node.
    * Handles: let, const, @reactive, lift, for, if, while, return, bare-expr.
    */
@@ -2927,6 +3027,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     }
 
     // CONST — may be `const @name = expr` (reactive-derived-decl) or `const name = expr`
+    // or `const <name> = expr` (Shape 3 derived state-decl, A1a Step 2).
     if (tok.kind === "KEYWORD" && tok.text === "const") {
       const startTok = consume();
       // Check for `const @name = expr` or `const @name: T = expr` — derived reactive value.
@@ -2945,6 +3046,20 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         } else {
           return { id: ++counter.next, kind: "reactive-derived-decl", name: derivedName, init: "", ...(typeAnnotation ? { typeAnnotation } : {}), span: spanOf(startTok, peek()) };
         }
+      }
+      // Phase A1a Step 2 — Shape 3 derived: `const <derived> = expr` (V5-strict).
+      // Per SPEC §6.6.1, this is the canonical declaration syntax for derived
+      // reactive values. Without this hook, `const <doubled> = @count * 2`
+      // falls through to the const-decl path with name="" and an empty body
+      // (the `<` is unrecognized so the IDENT-collection at line below sees `<`).
+      // On match, returns a `kind: "reactive-decl"` node with `isConst: true`
+      // and `structuralForm: true`. Step 4 will populate `shape: "derived"`.
+      if (peek().kind === "PUNCT" && peek().text === "<") {
+        const declNode = tryParseStructuralDecl(startTok, true);
+        if (declNode) return declNode;
+        // No match — fall through. Tokens are unconsumed; the const path below
+        // will continue with the remaining `<` token (which produces the
+        // legacy const-decl with empty name — same behavior as today).
       }
       let name = "";
       if (peek().kind === "IDENT" || peek().kind === "KEYWORD") name = consume().text;
@@ -4006,6 +4121,17 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       const { body, span: bodySpan } = collectBracedBody();
       const _dm1 = `cleanup(() => { ${body} })`;
       return { id: ++counter.next, kind: "bare-expr", expr: _dm1, exprNode: safeParseExprToNode(_dm1, 0), span: spanOf(startTok, peek()) };
+    }
+
+    // Phase A1a Step 2 — V5-strict structural state-decl: `<NAME> = expr` (Shape 1).
+    // Recognized at expression-statement-start position. Without this hook,
+    // `<count> = 0` is silently swallowed as `kind: "html-fragment"` raw text
+    // (PARSER-AUDIT §F1c — the deceptive-success pattern). On match, returns
+    // a `kind: "reactive-decl"` node with `structuralForm: true`. On no-match,
+    // tokens are unconsumed and execution falls through to the default branch.
+    if (tok.kind === "PUNCT" && tok.text === "<") {
+      const declNode = tryParseStructuralDecl(tok, false);
+      if (declNode) return declNode;
     }
 
     // Default: bare-expr (or html-fragment for HTML tokens)
@@ -5105,6 +5231,22 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           });
         }
         continue;
+      }
+
+      // Phase A1a Step 2 — Shape 3 derived: `const <derived> = expr` (V5-strict).
+      // Top-level branch — mirrors the parseOneStatement Shape 3 hook above.
+      // Per SPEC §6.6.1, `const <name> = expr` is the canonical declaration
+      // syntax for derived reactive values. Returns `kind: "reactive-decl"`
+      // with `isConst: true` and `structuralForm: true`. Step 4 will populate
+      // `shape: "derived"`.
+      if (peek().kind === "PUNCT" && peek().text === "<") {
+        const declNode = tryParseStructuralDecl(startTok, true);
+        if (declNode) {
+          nodes.push(declNode);
+          continue;
+        }
+        // No match — fall through. Tokens are unconsumed; the const path below
+        // will continue with the remaining `<` token.
       }
 
       let name = "";
@@ -6437,6 +6579,19 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       const _dm2 = `cleanup(() => { ${body} })`;
       nodes.push({ id: ++counter.next, kind: "bare-expr", expr: _dm2, exprNode: safeParseExprToNode(_dm2, 0), span: spanOf(startTok, peek()) });
       continue;
+    }
+
+    // Phase A1a Step 2 — V5-strict structural state-decl: `<NAME> = expr` (Shape 1).
+    // Recognized at top-level statement-start position inside `${...}` logic
+    // blocks. Mirrors the parseOneStatement hook for nested bodies. Without
+    // this hook, `<count> = 0` is silently swallowed as `kind: "html-fragment"`
+    // (PARSER-AUDIT §F1c — the deceptive-success pattern).
+    if (tok.kind === "PUNCT" && tok.text === "<") {
+      const declNode = tryParseStructuralDecl(tok, false);
+      if (declNode) {
+        nodes.push(declNode);
+        continue;
+      }
     }
 
     // Anything else: BareExpr or html-fragment — collect until statement boundary
