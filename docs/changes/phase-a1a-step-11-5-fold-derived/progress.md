@@ -92,9 +92,55 @@ Per BRIEF §3.6 + Steps 4-7 precedent: self-host parity is typically deferred at
 
 ## Steps
 
-- [ ] WIP 1: Survey commit (this file)
-- [ ] WIP 2: Parser rewire (ast-builder.js)
-- [ ] WIP 3: Consumer-site sweep (9 src files)
-- [ ] WIP 4: Types update + kind-enum cleanup (types/ast.ts)
-- [ ] WIP 5: Test updates + new cases
-- [ ] Final: Compile commit
+- [x] WIP 1: Survey + consumer-site inventory (`32b53ea`)
+- [x] WIP 2: Consumer forward-compat extension (`d9a4c9d`) — extended consumers to recognize BOTH old + new kinds; tests still 8874/0; byte-clean
+- [x] WIP 3: Parser rewire — const @x emits state-decl (`44cb562`) — both ast-builder.js construction sites updated; LSP handler updated; 6 test files updated; 1 self-host test deferred-skipped; 8873/0
+- [x] WIP 4: Consumer-site sweep + test fixture migration (`8377171`) — 10 src files sweep dead branches; 4 test files migrate inline AST construction sites; deduplication fix in dependency-graph collectAllReactiveDecls; 8873/0; byte-output verified preserved
+- [x] WIP 5: Types kind-enum cleanup + new F11.5 invariant tests (`e575038`) — ReactiveDerivedDeclNode removed from LogicStatement union; interface kept @deprecated; 5 new test cases F11.5.1-5 added; 8878/0
+- [ ] Final: Compile commit (NEXT)
+
+## Final test counts
+
+| | Pass | Skip | Fail | Total | Files |
+|---|---|---|---|---|---|
+| Baseline (b3c446d) | 8874 | 43 | 0 | 8917 | 439 |
+| Step 11.5 final (post-WIP-5) | 8878 | 44 | 0 | 8922 | 439 |
+| Delta | +4 | +1 | 0 | +5 | 0 |
+
+Within ±5 per BRIEF §4. Net positive: 5 new F11.5 invariant tests minus 1 deferred self-host parity test.
+
+## Definition of done — verified
+
+1. ✓ Parser path producing `reactive-derived-decl` rewired to produce `state-decl` (WIP 3, 4 construction lines updated).
+2. ✓ All consumer sites swept; `grep -rn "reactive-derived-decl" compiler/src/` returns only documentation comments and the deprecated interface (zero live code references).
+3. ✓ `compiler/src/types/ast.ts` kind enum (ASTNodeKind = ASTNode["kind"]) no longer includes `"reactive-derived-decl"` — `ReactiveDerivedDeclNode` removed from `LogicStatement` union (the only union that referenced it).
+4. ✓ Test sweep complete; no parser test asserts the retired kind. The few literal-AST tests (4 files) migrated to use the unified shape.
+5. ✓ Self-host parity: deferred per Steps 4-7 policy. One self-host test marked `test.skip` with deferral note.
+6. ✓ Full `bun run test`: 0 fail, 44 skip, +5 total within ±5 BRIEF §4 plan.
+7. ✓ Codegen byte-output preserved for legacy `const @x = expr`. Verified by direct probe compile (output identical to pre-fold _scrml_derived_declare + _scrml_derived_subscribe).
+8. ✓ Branch clean. NO `--no-verify` used.
+9. ✓ progress.md updated with cumulative log + survey findings + per-consumer-site dispositions.
+
+## Risk surface findings
+
+- **Hidden coupling — codegen.** Confirmed and addressed. emit-logic.ts dispatches derived (_scrml_derived_declare path) vs plain (_scrml_reactive_set path) on entirely different runtime helpers. The fold gates the derived path on `shape:"derived" && isConst:true && structuralForm:false`, preserving byte-output for the legacy form. Shape 3 V5-strict (structuralForm:true) is left on the latent-buggy path per BRIEF §2.2 (deferred to A1c).
+- **Hidden coupling — dep-graph.** Discovered and fixed during WIP 4. Pre-fix, both `collectAllReactiveDecls` (state-decl plain) AND `collectAllReactiveDerivedDecls` (state-decl derived) would pick up the same folded-derived state-decl, producing duplicate DG nodes. Fixed by adding `isFoldedDerived` exclusion filter to `collectAllReactiveDecls` so derived state-decls flow through the derived collector exclusively. T15 dep-tracking tests caught this.
+- **Type-system uniformity gain.** Folded `const @x = expr` now flows through `case "state-decl"` in type-system.ts, which has full predicate/machine/scope handling. Pre-fold, the dedicated `case "reactive-derived-decl"` was minimal (ident-check + scope-bind only). No tests regressed — verified by running full suite. This is a forward-compatible behavioral upgrade (predicate/machine handling now applies uniformly).
+
+## Surprises
+
+- BRIEF §3 said grep counts were ~10 src + 11 tests + 9 self-host. Actual: 10 src files / 32 references + 11 test files + 6 self-host files / 16 references. Self-host count was lower than estimated; survey corrected.
+- Discovered Shape 3 V5-strict (`const <doubled> = @count * 2`) emits `_scrml_reactive_set` (NOT `_scrml_derived_declare`) — pre-existing latent gap from Step 4. Documented and DEFERRED per BRIEF §2.2 (out-of-scope: codegen behavior change is A1c).
+
+## Tags
+
+#phase-a1a #step-11-5 #fold-derived #adr-option-a #L21-substrate #ast-kind-cleanup #state-decl-unification #t2-tier #byte-output-preserved
+
+## Links
+
+- BRIEF: `docs/changes/phase-a1a-step-11-5-fold-derived/BRIEF.md`
+- ADR (ratified): `docs/changes/reactive-derived-decl-divergence/ADR.md`
+- AST contract: `docs/changes/phase-a1a-lex-parse/AST-CONTRACTS-AND-DECOMPOSITION.md` §1.1
+- SPEC §6.6 — derived-cell spec: `compiler/SPEC.md`
+- Branch: `phase-a1a-step-11-5-fold-derived`
+- Parent commit: `b3c446d` (S60 final wrap)
