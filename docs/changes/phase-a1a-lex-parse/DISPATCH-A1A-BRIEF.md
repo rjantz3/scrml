@@ -257,7 +257,23 @@ Your worktree path is: <ABSOLUTE-WORKTREE-PATH>
    pass / 43 skip / 0 fail across 432 files. The full `bun test` (without
    pretest) is NOT a valid baseline gate — must use `bun run test`.
 
-If ANY check fails: DO NOT proceed. Report the mismatch and exit.
+   **Flake handling (S59 rev-2 finding):** ~1-3 happy-dom effect / subscriber
+   tests in the browser suite are timing-sensitive and may produce 1-3
+   transient failures on the FIRST run after pretest, then stabilize at
+   the brief's expected counts on subsequent runs. These tests are
+   ORTHOGONAL to A1a's lex+parse scope. Protocol:
+     - If first `bun run test` matches expected (8,720/43/0/8,763) — proceed.
+     - If first run produces ≤3 fails AND a second run (back-to-back) lands
+       exactly at expected — TREAT THIS AS BASELINE STABLE. Note the flake
+       in progress.md (one line: which tests, run 1 result, run 2 result)
+       and proceed. Do NOT halt — the flake is known-orthogonal.
+     - If second run still fails OR fails differ from happy-dom timing
+       shape (e.g., parser tests fail, AST tests fail, anything in
+       compiler/tests/unit or compiler/tests/integration) — HALT and report.
+     - If fails > 3 on either run — HALT and report.
+
+If ANY check fails (per the protocol above): DO NOT proceed. Report the
+mismatch and exit.
 
 ## Path discipline (enforce on EVERY Read/Write/Edit call)
 
