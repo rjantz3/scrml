@@ -8792,6 +8792,149 @@ docs/reviews/language/spec-review-§18-TS-C-gate-2026-03-27.md. E-EXHAUST-001 re
 E-TYPE-020 is the single canonical error code for non-exhaustive match. E-TYPE-006
 retained for union-type match exhaustiveness (distinct case). See §18-007 below.
 
+**Revised:** 2026-05-04 (S57 Stage 0b D2.8) — added §18.0 (two match shapes — block-form
+for markup, JS-style for value-return), §18.0.1 (block-form `<match for=Type [on=expr]>`),
+§18.0.2 (match attributes — `rule=` legal-but-inert; `effect=` / `<onTransition>`
+forbidden), §18.0.3 (bare-variant inference). These are Tier 1 of the case-analysis
+ladder (§17.0 / §1.5).
+
+---
+
+### 18.0 Two match shapes — block-form for markup, JS-style for value-return
+
+scrml has TWO match forms, distinguished by **syntactic context**:
+
+| Shape | Syntax | Used in | Tier |
+|---|---|---|---|
+| **Block-form** | `<match for=Type [on=expr]> ... </>` | Markup-emit context (UI case-analysis on enums) | Tier 1 of §17.0 ladder |
+| **JS-style** | `match expr { .Variant => ... }` | Value-return context (server logic, derivations, computed expressions) | (pre-existing form) |
+
+Both shapes share a single internal AST and the same exhaustiveness-checking pass — only
+the surface syntax and the output category (markup vs value) differ. The block-form is
+defined in §18.0.1 below; the JS-style form is defined in §18.1-§18.18.
+
+**Promotion path (cross-ref §17.0):** A Tier-0 `if=` region promotes to Tier 1 by wrapping
+in `<match for=Type>`. State-children carry forward verbatim. The wrapper swap IS the
+commitment moment. From Tier 1, the same state-children promote to Tier 2 (`<engine for=Type
+initial=.X>`) by changing only the opener (§51).
+
+**Cross-references:**
+- §17.0 — the easy-street ladder for case analysis (Tier 0/1/2 overview)
+- §18.0.1 — block-form syntax + exhaustiveness
+- §18.0.2 — attribute legality inside `<match>` (`rule=` inert; `effect=` / `<onTransition>` forbidden)
+- §18.0.3 — bare-variant inference in arm patterns
+- §51 — Tier 2 (`<engine>`) where rules become active
+
+#### 18.0.1 Block-form `<match for=Type [on=expr]>`
+
+The block-form is a markup-emit construct. It produces UI fragments based on the variant
+of an enum-typed reactive cell. It is the Tier 1 wrapper of the §17.0 case-analysis ladder.
+
+**Syntax:**
+
+```scrml
+<match for=LoadPhase [on=@loadPhase]>
+  <NotAsked>          : <p>Press to load.</p>
+  <Loading>           : <p>Loading…</p>
+  <Ready(rows)>       : <ul>${ for (let r of rows) { lift <li>${r.name}</li> } }</ul>
+  <Failed(msg)>       : <p class="error">${msg}</p>
+</>
+```
+
+- **`for=Type`** — REQUIRED. The enum type the match is over.
+- **`on=expr`** — REQUIRED when the matched-on value is not auto-implied. Auto-implied
+  ONLY when an `<engine for=Type>` for the same `Type` is in scope (most-local-semantics-friendly
+  resolution). Outside that scope, `on=` is mandatory.
+- **State-children** with variant names match enum variants. Payload variants destructure
+  positionally: `<Ready(rows)>` binds `rows` for that arm's body.
+- **Bodies** use the three legitimate body forms (cross-ref §4 / §51):
+  - Self-closing `<Variant/>` — no body, renders nothing for that variant
+  - Bare body `<Variant>...</>` — markup body with text, `${}` interpolation, nested tags
+  - Single-expression body `<Variant> : expr` — `:`-shorthand
+- **Exhaustiveness** — the compiler verifies every variant of `Type` has a matching
+  state-child OR a wildcard `<_>` catch-all is present. Otherwise: `E-MATCH-NOT-EXHAUSTIVE`.
+
+**Output category:** the block-form emits MARKUP. Use it inside markup contexts (component
+bodies, `<page>`, anywhere a tag is legal). Use the JS-style form (§18.1+) inside
+value-return contexts (server logic, derivations).
+
+**Auto-implied `on=` with engine in scope:**
+
+```scrml
+<engine for=MarioState initial=.Small>
+  <Small rule=.Big> : "🧍"
+  <Big rule=.Small> : "🧍 🧍"
+</>
+
+<!-- Later in the same file, in a different markup region: -->
+<match for=MarioState>          <!-- on= auto-implied: @marioState (the engine var) -->
+  <Small> : <span>still small</span>
+  <Big>   : <span>now big</span>
+</>
+```
+
+When NO engine for the same `Type` is in scope, `on=` is required. The compiler emits
+a clear diagnostic at parse time.
+
+#### 18.0.2 Match attributes — `rule=` legal-but-inert; `effect=` and `<onTransition>` forbidden
+
+Inside a `<match>` block, attribute legality on state-children differs from inside an
+`<engine>`:
+
+| Attribute | Inside `<match>` | Reasoning |
+|---|---|---|
+| `rule=` | **LEGAL but INERT** (warning `W-MATCH-RULE-INERT`) | Rules in match-block don't enforce — match is read-only on the matched-on value. Legality permits forward-staging: progressively add rules at Tier 1 in preparation for the Tier 2 engine promotion. The wrapper swap then activates them. |
+| `effect=` | **FORBIDDEN** (`E-MATCH-EFFECT-FORBIDDEN`) | Effects presuppose transitions; transitions don't occur in match. Use `<engine>` (§51). |
+| `<onTransition>` | **FORBIDDEN** (`E-MATCH-ONTRANSITION-FORBIDDEN`) | Same reasoning as `effect=`. |
+
+**`W-MATCH-RULE-INERT` (warning, §34):**
+> "Rule inert in match-block. Promote to `<engine>` to activate enforcement."
+
+The lint teaches the wrapper-swap promotion path. It can be silenced via the standard
+lint suppression mechanism (the developer's prerogative).
+
+**`E-MATCH-EFFECT-FORBIDDEN` and `E-MATCH-ONTRANSITION-FORBIDDEN` (errors, §34):**
+> "`effect=` (or `<onTransition>`) is engine-only. The match-block is read-only on its
+>  matched-on value; promote to `<engine>` to use transition handlers."
+
+#### 18.0.3 Bare-variant inference in arm patterns
+
+When the matched-on type is statically known (the common case under `for=Type`), arm
+patterns MAY omit the type qualifier:
+
+```scrml
+<match for=MarioState on=@marioState>
+  <Small>   : "🧍"             <!-- .Small inferred as MarioState.Small -->
+  <Big>     : "🧍 🧍"
+  <Fire>    : "🔥"
+  <Cape>    : "🦸"
+</>
+```
+
+The compiler resolves the bare variant name against the `for=` type. This applies to
+both block-form (state-children) and JS-style match (cross-ref §18.13 — bare variant
+shorthand in JS-style arms).
+
+**Ambiguous case:** when the matched-on type is a UNION and multiple union members declare
+the same bare variant name, the bare pattern is AMBIGUOUS:
+
+```scrml
+type MarioState  = enum { Small, Big, Fire, Cape }
+type HealthRisk  = enum { Small, Critical }     // also has .Small
+
+let v: MarioState | HealthRisk = ...
+
+<match for=MarioState | HealthRisk on=v>
+  <Small> : "?"      <!-- E-VARIANT-AMBIGUOUS — could be either -->
+</>
+```
+
+Use the qualified form (`<MarioState.Small>`) to disambiguate. Otherwise the compiler
+emits `E-VARIANT-AMBIGUOUS` (§34).
+
+**When bare is unambiguous:** prefer it. Density is a kickstarter-aligned virtue
+(cross-ref `docs/articles/llm-kickstarter-v2-2026-05-04.md` §3.1).
+
 ---
 
 ### 18.1 Overview and AST Status
@@ -13368,6 +13511,23 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-SYNTHESIZED-WRITE | §6.11 | Assignment to an auto-synthesized property (e.g., `@signup.isValid = false`). Synthesized validity surface properties are read-only. See §55 for full validity surface specification. | Error |
 | E-RESET-NO-ARG | §6.8 | `reset()` called with no argument. The `reset` keyword requires an explicit cell argument: `reset(@cell)` or `reset(@compound.field)`. | Error |
 | W-LIFECYCLE-CANDIDATE | §1.5 | A `<program>` body, component body, or file scope has more than 2 reactive boolean cells gating the same UI region. Consider promoting to a `<match>` block (Tier 1) or `<engine>` (Tier 2) for structural exhaustiveness. | Warning |
+| W-MATCH-RULE-INERT | §18.0.2 | `rule=` declared on a state-child inside a `<match>` block. Rules are legal-but-inert in match (read-only on the matched-on value); promote to `<engine>` (Tier 2) to activate enforcement. | Warning |
+| E-MATCH-EFFECT-FORBIDDEN | §18.0.2 | `effect=` attribute used on a state-child inside a `<match>` block. Effects presuppose transitions; transitions don't occur in match. Use `<engine>` (Tier 2). | Error |
+| E-MATCH-ONTRANSITION-FORBIDDEN | §18.0.2 | `<onTransition>` element used inside a `<match>` block. Transition handlers are engine-only. Use `<engine>` (Tier 2). | Error |
+| E-MATCH-NOT-EXHAUSTIVE | §18.0.1 | Block-form `<match for=Type>` is missing variants of `Type` and has no wildcard `<_>` catch-all. Add the missing variants or add `<_>`. | Error |
+| E-VARIANT-AMBIGUOUS | §18.0.3 | Bare arm pattern (e.g., `<Small>` without type qualifier) is ambiguous in a union-typed match context where multiple union members declare the same variant name. Qualify the variant: `<TypeName.Small>`. | Error |
+| E-ENGINE-INVALID-TRANSITION | §51.0.F, §51.0.G | Direct write to engine variable or `.advance()` violates the from-state's `rule=` contract. Statically rejected when from-state is known; runtime-thrown otherwise. | Runtime |
+| E-ENGINE-EFFECT-AMBIGUOUS | §51.0.H | `effect=` attribute used on a state-child whose `rule=` is multi-target. Use `<onTransition>` element child(ren) instead — `effect=` requires a single-target rule. | Error |
+| E-ENGINE-VAR-DUPLICATE | §51.0.C | Separate declaration of the engine's auto-declared variable (e.g., `<marioState> = .Small` while `<engine for=MarioState ...>` also exists in scope). The engine OWNS its variable; use `var=` on the engine to override the auto-derived name. | Error |
+| W-ENGINE-INITIAL-MISSING | §51.0.E | `initial=` omitted on a non-derived `<engine>`. Compiler defaults to the first state-child's variant. Add `initial=.Variant` to silence the warning. | Warning |
+| E-DERIVED-ENGINE-NO-RULES | §51.0.J | `rule=` declared on a state-child of a derived engine (`<engine derived=...>`). Transitions are determined by the source expression, not authored. Remove `rule=`. | Error |
+| E-DERIVED-ENGINE-NO-INITIAL | §51.0.J, §51.0.E | `initial=` declared on a derived engine. Initial value computed from `derived=expr` at engine-init time; remove `initial=`. | Error |
+| E-DERIVED-ENGINE-NO-WRITE | §51.0.J | Direct write to the auto-declared variable of a derived engine. Derived-engine variables are read-only. | Error |
+| E-DERIVED-ENGINE-INITIAL-UNDEFINED | §51.0.J | `derived=expr` returns no value when the source is in its initial state. Add a default arm or use a wildcard arm in the derivation. | Error |
+| E-DERIVED-ENGINE-CIRCULAR | §51.0.J | Chained derivation (engine A → engine B → engine A) forms a cycle. Detected at compile time by the dependency-graph machinery (§31). Break the cycle. | Error |
+| E-COMPONENT-ENGINE-SCOPE | §51.0.K | A component declaration body contains an `<engine>` element. Engines are singletons; instantiating a component multiple times would produce multiple "singletons", violating the invariant. Use plain reactive cells inside components, or define the engine outside the component. | Error |
+| E-VALIDATOR-CIRCULAR-DEP | §55.11 | Two or more validators reference each other via cross-field predicate args (e.g., `<a eq(@b)>` and `<b eq(@a)>`). The validator dependency graph is a DAG; cycles are forbidden. | Error |
+| E-DERIVED-WITH-VALIDATORS | §55.14 | Validators applied to a derived cell (`const <x ...>`). Derived cells are read-only; validators imply gating which is incoherent on a computed value. Use a refinement type instead (`const <x>: number(>=0) = ...`). | Error |
 
 ---
 
@@ -18617,7 +18777,452 @@ E-ASSIGN-001: `let` declaration at line 3 appears in an expression position.
 **Destructuring assignment as expression.** `[a, b] = fn()` and `{x, y} = obj` are currently not specified as expression forms. A future amendment MAY specify destructuring-assignment-as-expression. The result value of such an expression is non-obvious (the right-hand side value, or the destructured binding, or a tuple of bound values) and requires a dedicated spec section before implementation.
 ## 51. State Transition Rules and `< machine>` State Type
 
-### 51.1 Overview
+**Revised:** 2026-05-04 (S57 Stage 0b D2.8) — added §51.0 (engines as Tier 2 of the case-analysis
+ladder). §51.0 is the v0.next-aligned authoritative entry for new engine declarations
+(`<engine for=Type initial=.X>` with state-children, `rule=` contract, `effect=` /
+`<onTransition>`, derived engines). The pre-existing §51.1-§51.16 content is preserved
+verbatim as the historical / legacy `<machine>` semantics record (the §51.3.2 deprecation
+clause already documented `W-DEPRECATED-001`); cross-refs from §51.0 to §51.1+ are
+explicit. Where §51.0 and the legacy content disagree on surface syntax, §51.0 is
+authoritative for v0.next.
+
+### 51.0 Engines — Tier 2 of the Case-Analysis Ladder
+
+This subsection (§51.0) is the v0.next entry-point for engine declarations. It expands
+S55-S57 outcomes (locks L1-L20 + moves M4-M18) into normative spec text. Sub-subsections
+A-L below each cover one focused topic. The pre-existing §51.1+ content remains
+authoritative for `<machine>`-keyword historical syntax, audit clause, temporal
+transitions, replay, three-sites cross-check, and cross-file type resolution.
+
+Cross-references at a glance:
+- §1.5 — north star + the Tier 0/1/2 ladder
+- §17.0 — Tier 0 (`if=` attribute, `${ if (...) lift ... }`)
+- §18.0 — Tier 1 (`<match for=Type [on=expr]>` block-form)
+- §51.0 (this section) — Tier 2 (`<engine for=Type initial=.X>`)
+- §54 — nested substates compose with engine state-children
+- §55 — validators (engines have rule= contract; cells have validators)
+
+#### 51.0.A Overview — engines as singleton state machines
+
+> **North star (§1.5):** the UI of a scrml application SHOULD be a fully-handled state
+> machine. Engines are the implementation surface that delivers it.
+
+An **engine** is a singleton state machine declared with the `<engine>` element. It owns
+exactly one auto-declared state cell of an enum type, and its body declares — via
+state-children — the variants of that enum together with their transition rules,
+transition effects, and (optionally) the markup that renders for each variant.
+
+**Defining traits:**
+
+1. **Singleton.** Each engine declaration produces exactly ONE running state machine.
+   Cross-file mounts (`<EngineName/>` at multiple use-sites) reference the SAME instance
+   — see §51.0.D. If you want multi-instance, use a component (§15), not an engine.
+2. **Tier 2 commitment.** Engines deliver the full deal: structural exhaustiveness over
+   variants + active transition rules (`rule=`) + transition handlers (`effect=` /
+   `<onTransition>`).
+3. **Wrapper-swap promotion.** A `<match for=Type>` block becomes an `<engine for=Type
+   initial=.Variant>` by changing only the opener. State-children carry forward verbatim
+   (cross-ref §17.0, §18.0).
+4. **Components are distinct (Move 20).** Engines are singletons; components are
+   multi-instance presentation factories. They do not collapse into one another. A
+   component body that instantiates an engine is forbidden — `E-COMPONENT-ENGINE-SCOPE`.
+
+#### 51.0.B Engine declaration syntax
+
+```scrml
+<engine for=Type [initial=.Variant] [derived=expr] [pinned] [var=name]>
+  <Variant1 [rule=...] [effect=...]>...</>
+  <Variant2 [rule=...]>...</>
+  ...
+</>
+```
+
+**Attributes:**
+
+| Attribute | Required? | Meaning |
+|---|---|---|
+| `for=Type` | REQUIRED | The enum type the engine is over. |
+| `initial=.Variant` | REQUIRED on non-derived engines (lint-checked, see §51.0.E) | Sets the starting state. |
+| `derived=expr` | mutually exclusive with `initial=` | Engine value computed from a reactive expression — see §51.0.J. |
+| `pinned` | optional | Opt-out from hoisting per §6.10. Covers BOTH the engine identifier AND the auto-declared variable. |
+| `var=identifier` | optional | Override the auto-derived variable name (§51.0.C). Use for disambiguation when the auto-name collides. |
+
+**State-children** are tags inside the body, named after variants of `Type`. Each
+state-child may carry:
+- `rule=Variant` or `rule=(VariantA \| VariantB \| ...)` — outgoing transitions (§51.0.F)
+- `effect=${ ... }` — single-target transition effect (§51.0.H)
+- `<onTransition>` element child — multi-target / attribute-bearing transition handler (§51.0.H)
+- a body — markup rendered when the engine is in this variant (§51.0.C, §51.0.I)
+
+**Worked example — the canonical Mario engine:**
+
+```scrml
+<engine for=MarioState initial=.Small>
+  <Small  rule=.Big>                       : "🧍"
+  <Big    rule=(.Fire | .Cape | .Small)>   : "🧍 🧍"
+  <Fire   rule=.Small>                     : "🔥"
+  <Cape   rule=.Small>                     : "🦸"
+</>
+```
+
+This declaration:
+- Auto-declares the reactive cell `@marioState: MarioState` (§51.0.C)
+- Renders `"🧍"` when `@marioState == .Small`, `"🧍 🧍"` when `.Big`, etc. — the engine's
+  declaration position IS its mount position (§51.0.D)
+- Validates writes to `@marioState` against the from-state's `rule=` (§51.0.F)
+- The `<engine>` body is an inline state-machine definition AND its rendered output
+
+#### 51.0.C Auto-declared variable + auto-derived var name
+
+When you declare `<engine for=Type ...>`, the compiler **auto-declares** a reactive state
+cell typed as `Type`. The variable name is derived from the type name (Move 16):
+
+| Type name | Auto-derived var name | Rationale |
+|---|---|---|
+| `MarioState` | `marioState` | Lowercase-first-character of the type name |
+| `LoadPhase` | `loadPhase` | Lowercase-first-character |
+| `MarioMachine` (legacy) | `marioMachine` (literal lowercase-first; `Machine` suffix kept) | Pre-engine-rename naming; new code prefers names that don't end in `Machine` |
+| `Health` | `health` | Lowercase-first-character |
+
+The variable is reactive and readable everywhere via canonical access (`@marioState`,
+`@loadPhase`, etc., per §6 V5-strict).
+
+**Override via `var=` attribute** when the auto-derived name collides with another
+identifier in scope:
+
+```scrml
+<engine for=Health var=playerHealth initial=.Healthy>
+  <Healthy/>
+  <AtRisk/>
+  <Critical/>
+</>
+
+<!-- Reads use @playerHealth, not @health -->
+${ @playerHealth == .Critical ? "warning" : "ok" }
+```
+
+**You SHALL NOT separately declare the engine's variable.** Writing `<marioState> = .Small`
+in the same scope as `<engine for=MarioState ...>` is `E-ENGINE-VAR-DUPLICATE` (§34) — the
+engine OWNS its variable. Use `<engine ... var=otherName>` if you need a non-default name.
+
+**Writability:** the auto-declared variable is writable per the rule= contract (§51.0.F).
+On a *derived* engine (§51.0.J), it is NOT writable (`E-DERIVED-ENGINE-NO-WRITE`).
+
+#### 51.0.D Mount position rules — declaration IS mount; cross-file via `<EngineName/>`
+
+**Same-file:** the engine's declaration position IS its rendered output position. There is
+NO separate `<EngineName/>` mount tag for same-file engines:
+
+```scrml
+<div class="game">
+  <h1>Mario</h1>
+
+  <engine for=MarioState initial=.Small>     <!-- renders here -->
+    <Small rule=.Big> : "🧍"
+    <Big rule=.Small> : "🧍 🧍"
+  </>
+
+  <p>Press the button to grow.</p>
+</div>
+```
+
+The `<engine>` element's body is the rendered fragment at the source position.
+
+**Cross-file:** to use an engine from another module, import + mount via the engine's
+identifier (Move 18):
+
+```scrml
+${ import { MarioMachine } from './engines.scrml' }
+
+<page>
+  <header>Welcome</header>
+  <MarioMachine/>     <!-- renders the imported engine here -->
+  <footer>...</footer>
+</page>
+```
+
+**Singleton semantics across mount sites (open-Q §7.5 resolved):** an imported engine is
+SINGLETON. `<MarioMachine/>` at multiple use-sites in the same project — even across
+multiple files — references the **same instance**. State is shared. Transitions in any
+mount-site location update the same underlying cell.
+
+> **If you need multi-instance, you want a component (§15), not an engine.** Engines are
+> singletons by design (north star §1.5: ONE running state machine per declaration); they
+> deliver the "fully-handled state machine" promise. Component bodies that try to
+> instantiate an engine (`<engine>` inside a component decl) emit
+> `E-COMPONENT-ENGINE-SCOPE` (§34, §51.0.K).
+
+**Render-only mount with no body:** `<MarioMachine/>` is self-closing at the use-site —
+the body lives at the declaration site. Adding a body at the use-site is a parse error
+(use-site mount tags are render-only, not redefinitions).
+
+#### 51.0.E The `initial=` attribute — required (lint) on non-derived engines
+
+`initial=.Variant` sets the engine's starting state.
+
+**Lint behavior:**
+- On a NON-derived engine, `initial=` is REQUIRED. If omitted, the compiler emits
+  `W-ENGINE-INITIAL-MISSING` (§34) and DEFAULTS to the FIRST state-child's variant.
+  Per the kickstarter v2 lint policy ("lint rules teach the scrml way; turning them off
+  is the developer's prerogative"), the warning can be silenced via the standard lint
+  suppression mechanism — but the default-to-first behavior remains.
+- On a DERIVED engine (§51.0.J), `initial=` is FORBIDDEN. Derived engines compute their
+  initial value from the source expression at engine-init time. Setting `initial=`
+  emits `E-DERIVED-ENGINE-NO-INITIAL` (§34).
+
+**Worked example — the lint:**
+
+```scrml
+<engine for=MarioState>     <!-- W-ENGINE-INITIAL-MISSING: defaulting to .Small (first state-child) -->
+  <Small rule=.Big> : "🧍"
+  <Big rule=.Small> : "🧍 🧍"
+</>
+```
+
+Fix:
+```scrml
+<engine for=MarioState initial=.Small>
+  ...
+</>
+```
+
+#### 51.0.F The `rule=` contract — three forms; compile-time + runtime enforcement
+
+The `rule=` attribute on a state-child specifies the legal transitions FROM that variant.
+Three accepted forms:
+
+| Form | Syntax | Meaning |
+|---|---|---|
+| **Single-target** | `rule=.NextVariant` | One legal target |
+| **Multi-target** | `rule=(.A \| .B \| .C)` | Any of the listed variants |
+| **Wildcard** | `rule=*` | Any variant of the type (escape hatch; loses static guarantees) |
+
+**Worked example:**
+
+```scrml
+<engine for=MarioState initial=.Small>
+  <Small  rule=.Big>                       : "🧍"
+  <Big    rule=(.Fire | .Cape | .Small)>   : "🧍 🧍"
+  <Fire   rule=.Small>                     : "🔥"
+  <Cape   rule=.Small>                     : "🦸"
+</>
+```
+
+**Direct write enforcement (Move 12):** assignment to the engine's auto-declared variable
+is intercepted and validated against the FROM-state's `rule=`:
+
+```scrml
+@marioState = .Big           // legal from .Small
+@marioState = .Fire          // illegal from .Small (E-ENGINE-INVALID-TRANSITION)
+```
+
+**Compile-time validation when from-state is statically known.** Inside a state-child
+body, the compiler knows `@marioState == .ThisVariant`. So:
+
+```scrml
+<Small rule=.Big>
+  <button onclick=${ @marioState = .Cape }/>     <!-- COMPILE ERROR: .Cape not in .Small.rule -->
+</>
+```
+
+This is the M4 + M5 + M12 composition — exhaustiveness for transitions falls out of
+co-locating the rule with the state-child body. Inside `<Small>`'s body the compiler
+knows the from-state; the rule= contract gives the legal targets; any other target is
+rejected statically.
+
+When the from-state is dynamic (write outside any state-child body, or after a chain of
+conditionals), the rule= is enforced at runtime — invalid transitions throw with
+`E-ENGINE-INVALID-TRANSITION` (§34, runtime severity).
+
+The `rule=` attribute is therefore a **CONTRACT on writes**, not just metadata.
+
+#### 51.0.G `.advance(.X)` — explicit, throws-on-failure transition (Move 13)
+
+The auto-declared engine variable provides a method-style transition API:
+
+```scrml
+@marioState.advance(.Big)        // attempt transition to .Big
+```
+
+**Semantics:**
+- Same rule= validation as direct write (§51.0.F).
+- On invalid transition: throws with an "asserted advance failed" tag (runtime severity;
+  same `E-ENGINE-INVALID-TRANSITION` family, but the assertion-style framing is captured
+  in the runtime error message).
+- Use direct write (`@marioState = .Big`) when you HAVE the target as an expression and
+  want quiet validation.
+- Use `.advance(.Variant)` when you want LOUD failure on invalid transitions — i.e.,
+  "this MUST work; if it doesn't, halt loudly."
+
+**`.tryAdvance` is OUT.** A silent-no-op variant was explicitly considered and rejected
+during S55 deliberation. Silent failures hide bugs. For "transition only if currently in
+some state" intent, use:
+
+```scrml
+if (@marioState == .Small) @marioState = .Big       // explicit-conditional intent
+```
+
+This makes the gating condition visible at the call site.
+
+#### 51.0.H `effect=` attribute and `<onTransition>` element (Move 14)
+
+Engines support two surface forms for transition effects, picked by complexity.
+
+**Form 1 — `effect=` attribute (single-target only):**
+
+```scrml
+<Small rule=.Big effect=${ playSound("grow") }>
+  : "🧍"
+</>
+```
+
+`effect=` is a logic-context expression that runs when the transition fires. Legal ONLY
+when `rule=` is single-target. Combining `effect=` with a multi-target `rule=` is
+ambiguous (which target triggers it?) — `E-ENGINE-EFFECT-AMBIGUOUS` (§34).
+
+**Form 2 — `<onTransition>` element child (multi-target or attribute-bearing):**
+
+```scrml
+<Big rule=(.Fire | .Cape | .Small)>
+  <onTransition to=.Fire>${ playSound("fire"); animateFlame() }</>
+  <onTransition to=.Cape once>${ playSound("cape") }</>
+  <onTransition to=.Small if=(@gameOver == false)>${ log("regression") }</>
+  "🧍 🧍"
+</>
+```
+
+**Built-in `<onTransition>` attributes:**
+
+| Attribute | Meaning |
+|---|---|
+| `to=.Variant` | Target — fires when leaving this from-state TOWARD `.Variant`. |
+| `from=.Variant` | Source — placed in TARGET state-child to fire on incoming transitions FROM `.Variant`. Inverts directionality. |
+| `once` | Bare attribute — handler runs at most ONCE for the engine's lifetime, then is dropped. |
+| `if=expr` | Conditional gating — handler fires only when `expr` evaluates true at transition time. |
+
+**Default semantics — `effect=` and `<onTransition to=X>` placed in the FROM state-child
+fire when LEAVING that state.** To-side semantics achieved via `<onTransition from=X>`
+placed in the TARGET state-child. Single concept; bidirectional via from/to.
+
+**Skipped (intentional):** `<onEnter>` / `<onLeave>` lifecycle elements. The from/to
+bidirectionality covers both directions without doubling the surface.
+
+**Co-existence:** a single state-child MAY have BOTH an `effect=` attribute (for the
+common single-target case) and additional `<onTransition>` children (for less common
+targets). When this combination appears: `effect=` fires for its own target; each
+`<onTransition>` fires for its declared `to=`. No conflict.
+
+**Cross-ref:** §18.0.2 — `effect=` and `<onTransition>` are FORBIDDEN inside `<match>`
+blocks (Tier 1 is read-only). They are engine-only.
+
+#### 51.0.I `:`-shorthand for single-expression body (Move 15)
+
+A state-child with NO `</>` closer MAY use `<tag attrs> : expr` shorthand where `expr`
+becomes the rendered body. Cross-ref §4 (block grammar) for the underlying form.
+
+**Three legitimate body forms (mutually exclusive by syntactic shape):**
+
+| Form | Job |
+|---|---|
+| `<Variant/>` | Self-closing. No body. State-child declares transitions only. |
+| `<Variant>...</>` | Bare body. Markup body — text, `${}` interpolation, nested tags, child elements. |
+| `<Variant> : expr` | Single-expression body shorthand. `expr` becomes the body. |
+
+The `:`-shorthand is the high-density default; it composes elegantly with bare-variant
+arms in match blocks (§18.0.3) and with the kickstarter recipe shape (`docs/articles/llm-kickstarter-v2-2026-05-04.md` §11.1).
+
+**Mixed engines (some bodied, some self-closing) are legal and useful.** Self-closing
+state-children declare transition rules without contributing to render. Bodied
+state-children render their body when the engine is in that variant.
+
+#### 51.0.J Derived engines — `derived=expr` (Lock L20)
+
+A **derived engine** computes its current value from a reactive expression instead of
+being driven by direct writes. The engine remains a singleton state machine — but its
+state is FUNCTION of an upstream source rather than authored.
+
+**Syntax:**
+
+```scrml
+<engine for=Health derived=match @marioState {
+  .Small | .Big => .Healthy
+  .Fire | .Cape => .AtRisk
+  _              => .Critical
+}>
+  <Healthy/>
+  <AtRisk>
+    <onTransition from=.Healthy>${ playSound("warning") }</>
+  </>
+  <Critical>
+    <onTransition from=.AtRisk effect=showDangerOverlay()/>
+  </>
+</>
+```
+
+**Rules for derived engines:**
+
+| Rule | Behavior |
+|---|---|
+| `derived=expr` | REQUIRED. Any reactive expression of the engine's type. JS-style `match` block is the typical shape; function calls and conditionals also work. |
+| `rule=` on state-children | REJECTED — `E-DERIVED-ENGINE-NO-RULES` (§34). Transitions are determined by the source, not authored. |
+| `initial=` on the engine | REJECTED — `E-DERIVED-ENGINE-NO-INITIAL` (§34). Initial value computed from `derived=expr` at engine-init time. |
+| Direct writes to the auto-declared variable | REJECTED — `E-DERIVED-ENGINE-NO-WRITE` (§34). The variable is read-only. |
+| `<onTransition>` and `effect=` on state-children | LEGAL — fire on derived state changes (the value changed; transition is real, just initiated by source-cell update, not user code). |
+| Initial-value undefined | If `derived=expr` returns no value when the source is in its `initial=` state — `E-DERIVED-ENGINE-INITIAL-UNDEFINED` (§34). |
+| Chained derivation (A → B → C) | LEGAL. Cycle detection at compile time → `E-DERIVED-ENGINE-CIRCULAR` (§34). |
+| `pinned` interaction | Moot — no writes possible; hoisting opt-out applies only to the identifier, not the value. Document and continue (open-Q §7.6 resolution). |
+
+**For non-engine derived state**, use `const <derived> = expr` (cross-ref §6) — that is the
+plain-cell equivalent. Use `<engine derived=>` only when you want the full engine surface
+(state-children with effects/handlers, exhaustiveness, the singleton instance).
+
+#### 51.0.K Components vs engines — DO NOT collapse (Move 20)
+
+Engines and components are **distinct constructs**. They MAY NOT be unified.
+
+| | Engine (`<engine>`) | Component (`<ComponentName>`) |
+|---|---|---|
+| **Instance count** | Singleton (one running machine per declaration) | Multi-instance (one instance per use-site) |
+| **Job** | Manage a state cell + variants + transitions | Reusable presentation factory parameterized by props |
+| **Body** | State-children + transition rules + handlers | Markup template + slots + lifecycle |
+| **Use-site** | Render at decl position OR `<EngineName/>` (cross-file singleton mount) | `<ComponentName ...props/>` — instantiates a fresh copy |
+
+**A component body that instantiates an engine is FORBIDDEN.** Per the impact assessment
+§7.7 PA-recommendation, the compiler emits `E-COMPONENT-ENGINE-SCOPE` (§34) if a component
+declaration contains an `<engine>` element in its body. Reasoning: instantiating a
+component multiple times would create multiple "singleton" engines, violating the
+singleton invariant. If you want per-instance state machines, use plain reactive cells
+(`@cell`) inside the component, not engines.
+
+**Conversely:** an engine body MAY instantiate components. That direction is fine —
+components are presentation factories that engines can use to render variant bodies.
+
+#### 51.0.L Pre-existing audit / validation content — relationship to §51.0
+
+The pre-existing §51.1-§51.16 content (legacy `<machine>` syntax, `transitions {}`
+type-level blocks, audit clause, temporal transitions, replay primitive, three-sites
+cross-check) remains authoritative for those topics. Where §51.0 (this section) and
+the legacy content disagree on surface syntax, §51.0 is authoritative for new code:
+
+- **`<engine>` is canonical.** `<machine>` is deprecated; emits `W-DEPRECATED-001` (§34).
+  In v0.next P1 both keywords compile; P3 promotes `W-DEPRECATED-001` to
+  `E-DEPRECATED-001`.
+- **`rule=` on state-children is the v0.next surface for transitions.** The legacy
+  `transitions {}` block (§51.2) and the `< machine name=... for=...>` named override
+  graph (§51.3) remain available for projects already using them and for the
+  three-sites cross-check (§51.15).
+- **State-children co-locate transitions with their from-state.** This is the M4 + M12
+  composition. The legacy form lists transitions in a separate `transitions {}` block
+  away from the variant declarations.
+- **Audit, temporal, replay, projection-machines.** Preserved verbatim — these features
+  are not redesigned by §51.0; they apply transparently to engines via the legacy
+  vocabulary and the new `<engine>` keyword.
+
+**Cross-ref §31** for the dependency-graph machinery used by `derived=` cycle detection.
+
+---
+
+### 51.1 Overview (legacy `<machine>` framing — preserved)
 
 A scrml enum type defines what values exist. A **transition rule** defines which moves
 between those values are legal. Transition rules are a first-class language feature; they
@@ -22005,6 +22610,16 @@ and `integer`.
 nested substate grammar, state-local transition declarations, and five new error codes
 that together close the narrow state-machine completeness gap identified in the debate.
 
+**Composition with §51.0 engines (2026-05-04 D2.8 note):** the nested substate grammar
+in this section composes with engines (§51.0). When an engine's `for=Type` references an
+enum whose variants are themselves substate-bearing types (or any state type with nested
+substates per §54.2), the engine's state-children expand uniformly — each variant
+state-child may itself contain nested substate-children, and `rule=` on those inner
+state-children declares state-local transitions per §54.3. The terminology shift from
+`<machine>` to `<engine>` (§51.3.2 deprecation, §51.0.L) does not change §54 semantics;
+read all §54.7.x cross-refs to "machine" as also applying to "engine" (the keyword
+distinction is decided at TAB-time per `W-DEPRECATED-001`).
+
 ### 54.1 Overview
 
 Scrml state types (`< StateName>` blocks declared via §4.2 or §6.3; formerly §11) MAY contain **nested substates** and **state-local transition declarations**. This section defines:
@@ -22286,3 +22901,484 @@ Replay applies to machine-bound variables and bypasses runtime machine guards.
 #### 54.7.8 E-STATE-COMPLETE × `lift` in `fn` bodies (§48.5)
 
 **Normative:** `lift < Substate> ... </>` inside a `fn` body — E-STATE-COMPLETE SHALL fire at the `</>` of the lifted literal, at the `lift` statement's location, before the lift accumulates. The `lift` statement does not produce its own diagnostic — the state-literal check runs universally.
+
+---
+
+## 55. Validators and the Auto-Synthesized Validity Surface
+
+**Added 2026-05-04 (S57 Stage 0b D2.8).** Ratifies S56 locks L4 (validators), L11
+(auto-synth validity), L12 (4-level error message resolution), L13 (`<errors of=>`
+element), and L14 (cross-field). This section defines a unified declarative validator
+surface that fires across three loci (state cells, refinement types, schema columns) and
+auto-synthesizes a reactive validity surface (`isValid`, `errors`, `touched`, `submitted`)
+without requiring the developer to author it.
+
+The validator surface is the kickstarter v2 §6 LOCKED form. Where this section and the
+kickstarter disagree on surface syntax, the kickstarter wins (per dispatch authorization
+§4 — "Tiebreaker if spec contradicts — kickstarter wins").
+
+### 55.1 The shared validator core vocabulary (L4)
+
+A small fixed set of predicates ("the universal core") is the shared validator vocabulary
+across all three loci where validation appears: state-cell declarations (§55.2),
+refinement type expressions (§55.3), and schema columns (§55.4). The same predicates fire
+with the same semantics at all three; what differs is the enforcement context (compile-time
+vs runtime, blocking vs reporting), not the validator name.
+
+**Universal-core predicates:**
+
+| Predicate | Meaning | Example use | Error tag on failure |
+|---|---|---|---|
+| `req` | Non-empty value (`""` fails; null/undefined fail) | `<name req>` | `.Required` |
+| `is some` | Value exists (null/undefined fail). `""` IS some — coexists with `req`. | `<x is some>` | `.NotSome` |
+| `length(predicate)` | String/array length matches the inner predicate | `<name length(>=2)>` | `.LengthFailed(predicate)` |
+| `pattern(regex)` | String matches the regex | `<email pattern(/^[^@]+@[^@]+$/)>` | `.PatternMismatch(regex)` |
+| `min(n)` | Numeric minimum | `<age min(18)>` | `.MinFailed(n)` |
+| `max(n)` | Numeric maximum | `<age max(120)>` | `.MaxFailed(n)` |
+| `gt(expr)`, `lt(expr)`, `gte(expr)`, `lte(expr)` | Comparisons (cross-field via predicate args) | `<endDate gte(@startDate)>` | `.GtFailed(expected)` etc. |
+| `eq(expr)`, `neq(expr)` | Equality / inequality | `<confirm eq(@password)>` | `.EqFailed(expected)` / `.NeqFailed(forbidden)` |
+| `oneOf([...])`, `notIn([...])` | Set membership | `<role oneOf([.Admin, .Editor])>` | `.OneOfFailed(set)` / `.NotInFailed(set)` |
+
+**Application as bare attributes.** Validators apply as bare attributes on a state-cell
+declaration (`<name req length(>=2)>`); each predicate is positional and order-independent
+(except for short-circuit semantics — see §55.12). The compiler enforces predicate
+applicability to the cell's type — applying `pattern(re)` to a `number` cell is a
+compile-time type error (E-TYPE-031 family).
+
+**Cross-ref §6.2** for the underlying decl-coupled-with-render-spec mechanism (Shape 2).
+Validators on Shape-1 plain cells and Shape-2 form-coupled cells fire identically; on
+Shape-3 derived cells they are REJECTED — see §55.10.
+
+### 55.2 Validators on state-cell declarations (L4)
+
+Bare-attribute syntax on the structural decl (cross-ref §6 for Shape 1/2/3):
+
+```scrml
+<signup>
+  <name      req length(>=2)>           = <input type="text"/>
+  <email     req>                       = <input type="email"/>
+  <password  req length(>=8)>           = <input type="password"/>
+  <confirm   req eq(@signup.password)>  = <input type="password"/>
+</>
+```
+
+**Firing semantics:**
+
+- **Reactive recompute.** Each validator recomputes when its cell value changes OR when
+  any cell referenced in the predicate args changes (cross-field — see §55.11).
+- **Failure populates `errors`.** A failing predicate appends a `ValidationError` enum tag
+  (§55.9) to the cell's auto-synthesized `errors` array (§55.5, §55.6).
+- **Form-validity gating.** `@signup.isValid` is `false` until ALL fields pass their
+  validators; `true` when all pass.
+- **Touched / submitted lifecycle.** Errors are computed continuously, but a UI may want
+  to suppress them until the user has interacted with a field. The synthesized `touched`
+  and `submitted` flags (§55.5, §55.7) provide the gating timing without requiring the
+  developer to track it.
+
+**Edge — `<x req length(>=N)>` short-circuit.** When `req` fails on an empty value, the
+remaining validators are SKIPPED — only `.Required` is reported. Vacuous failures on
+empty strings (e.g., "an empty string fails `length(>=2)`") would be noise. See §55.12 for
+the full short-circuit rules.
+
+**Inline messaging override** is supported per L12; see §55.10.
+
+### 55.3 Validators on refinement type expressions (cross-ref §53)
+
+Refinement types use the same predicate vocabulary inside type annotations to constrain
+the inhabitable values of a type:
+
+```scrml
+let age: number(>=18 && <=120) = readAge()
+
+type Email = string(pattern(/^[^@]+@[^@]+$/))
+
+function rate(score: number(min(0) && max(100))) {
+  // score is statically known to be in [0, 100]
+}
+```
+
+**Stronger than state validators.** A value that doesn't satisfy the refinement predicate
+CANNOT inhabit the type — the constraint is a TYPE-LEVEL invariant. The compiler enforces
+at compile-time wherever provable (literal values, statically-known dataflow); the runtime
+inserts boundary checks where it cannot (function entry, deserialization boundaries).
+
+**Where this differs from state validators:** state validators (§55.2) report failures
+declaratively into `errors`; refinement violations RAISE `E-CONTRACT-001` (compile-time)
+or `E-CONTRACT-001-RT` (runtime) — see §53.11. They are not for form-display flow; they
+are for data-integrity invariants.
+
+**Cross-ref §53** (Inline Type Predicates) for the full refinement-type spec.
+
+### 55.4 Validators on `<schema>` columns (cross-ref §39)
+
+Schema columns retain SQL-mirror vocabulary (`not null`, `unique`, `references`,
+`default(literal)`) as the canonical source-level form. The shared core vocabulary
+(§55.1) is ADDITIVE — both forms are legal, and both lower to standard SQL DDL on emit:
+
+```scrml
+<schema>
+  users {
+    email: text not null unique          // SQL-mirror native
+    name:  text req length(>=2)          // shared-core additive — req lowers to NOT NULL,
+                                          // length(>=2) lowers to CHECK (length(name) >= 2)
+  }
+</>
+```
+
+**Lowering rules (§55.4 → §39 emit-pass):**
+
+| Shared-core predicate | Lowers to SQL DDL |
+|---|---|
+| `req` | `NOT NULL` |
+| `length(>=N)` | `CHECK (length(col) >= N)` |
+| `length(<=N)` | `CHECK (length(col) <= N)` |
+| `pattern(re)` | `CHECK (col REGEXP '...')` (driver-dependent; emits portable form where possible) |
+| `min(n)` / `max(n)` | `CHECK (col >= n)` / `CHECK (col <= n)` |
+| `oneOf([...])` | `CHECK (col IN (...))` |
+
+**Cross-ref §39** for the schema declaration grammar and the migration emit pass.
+
+### 55.5 Auto-synthesized validity surface — compound-level (L11)
+
+When a compound state declaration contains ANY field with validators, the compiler
+auto-synthesizes a reactive validity surface accessible at the compound level. No
+authoring required.
+
+**Synthesized properties on a compound `@signup`:**
+
+```
+@signup.isValid    : boolean
+                     (true ↔ ALL fields pass their validators)
+
+@signup.errors     : { fieldName: [...errorTags], ... }
+                     (map of arrays of ValidationError enum tags, keyed by field name)
+
+@signup.touched    : { fieldName: bool, ... }
+                     (per-field first-interaction tracking — true once user has touched the field)
+
+@signup.submitted  : boolean
+                     (true after first submit-form attempt; compound-level)
+```
+
+**Read-only.** ALL synthesized properties are read-only. Writing to any of them is
+`E-SYNTHESIZED-WRITE` (§34, already in the §34 table from D1).
+
+**No-validator compounds.** When a compound has NO validators, `isValid` is trivially
+`true`; `errors` is empty per-field; `touched` and `submitted` exist as conceptual
+empty structures. Predictability over namespace savings — applications can check
+`@form.isValid` without first asking "does this compound have any validators?"
+
+**Single-value Tier-1 cells DO NOT get the auto-namespace.** Per L11 Edge A, a top-level
+`<count req min(0)>` cell does NOT synthesize `count.isValid` / `count.errors` — those
+properties are available only on COMPOUND cells (cells with internal field structure).
+The validator on a single-value cell still fires; failure is tracked via the type-system
+(refinement type) or via the parent compound if any. For form cells, a one-field
+compound is the conventional pattern (`<form><name req/></>`).
+
+### 55.6 Auto-synthesized validity surface — per-field (L11)
+
+The same surface is scoped per-field on the auto-namespaced compound:
+
+```
+@signup.name.isValid     : boolean
+@signup.name.errors      : [...errorTags]      (array of ValidationError tags for this field)
+@signup.name.touched     : boolean
+```
+
+**Reactive recomputation:**
+- A change to `@signup.name` recomputes that field's surface.
+- A change to a cell referenced in a cross-field predicate arg (e.g., `@signup.password`
+  referenced from `<confirm req eq(@signup.password)>`) recomputes the dependent field's
+  surface.
+- The compound's `@signup.isValid` recomputes whenever ANY field's surface changes.
+
+**No-validator field.** Per L11 Edge B, a per-field surface exists EVEN when the field has
+no validators — `@signup.someUnvalidated.isValid` is trivially `true`; `errors` is `[]`.
+This is the predictability rule (§55.5): field-level access works regardless of whether
+validators are declared.
+
+### 55.7 Synthesized-property semantics
+
+Behavior of the four synthesized properties at both compound and per-field scope:
+
+| Property | Update timing | Default value (no validators) |
+|---|---|---|
+| `isValid` | Reactive — recomputes whenever any contributing validator's inputs change. | `true` |
+| `errors` | Reactive — recomputes per-field on cell change or cross-field dep change. | `[]` (empty array) per-field; `{}` (empty object) compound-level |
+| `touched` | Becomes `true` on first interaction with the field — defined as ANY of: `bind:value` change, `bind:checked` change, OR first focus-out. The most-permissive trigger is chosen so the surface "feels right" with idiomatic UI. Per-field timing. Once true, never reverts (until `reset` — §55.13). | `false` |
+| `submitted` | Compound-level. Becomes `true` on first submit-form attempt. Once true, never reverts (until `reset`). | `false` |
+
+**All read-only.** Writing to any synthesized property is `E-SYNTHESIZED-WRITE` (§34).
+Reactive consumers wire to them like any other reactive cell.
+
+### 55.8 The `<errors of=expr/>` first-class element (L13)
+
+Errors render via the first-class `<errors of=expr/>` markup element. Composable per-field
+or compound:
+
+```scrml
+<form onsubmit=submit()>
+  <div class="field">
+    <label>Name</label>
+    <name/>
+    <errors of=@signup.name/>      <!-- per-field; renders first error -->
+  </div>
+  <div class="field">
+    <label>Email</label>
+    <email/>
+    <errors of=@signup.email/>
+  </div>
+  ...
+  <button type="submit" disabled=!@signup.isValid>Save</button>
+  <errors of=@signup all/>          <!-- compound rollup, all errors -->
+</form>
+```
+
+**Attributes:**
+
+| Attribute | Required? | Meaning |
+|---|---|---|
+| `of=expr` | REQUIRED | References either a per-field cell (`@signup.name`) or a compound cell (`@signup`). The compiler reads `.errors` from the referenced cell by convention — same logic as `<engine for=Type>` reading auto-state from the type. |
+| `all` | optional flag | When present, renders the FULL error array. Default behavior renders the first error only. |
+
+**Default rendering.** A single first error wrapped as:
+```html
+<p class="scrml-error">${ messageFor(errors[0]) }</p>
+```
+
+`messageFor` (§55.10) walks the resolution chain. When `errors.length == 0`, the element
+produces NO DOM at all (not a hidden element with `display:none`; literally nothing
+rendered).
+
+**Body override** for full custom rendering:
+```scrml
+<errors of=@signup.name>
+  ${(err) => <span class="my-error">⚠️ ${ messageFor(err) }</span>}
+</>
+```
+
+Body, when present, REPLACES the default render. The body is an arrow-function-shaped
+expression that takes one error tag at a time (the iteration is the compiler's; the
+arrow body produces markup per error). Cross-ref §15 (component bodies) and §16 (slots) —
+this body shape composes cleanly with both.
+
+**No-validator-field rendering.** `<errors of=@signup.someUnvalidated/>` is legal and
+produces no DOM (its `errors` is empty per §55.6). This is the L11 Edge B resolution.
+
+### 55.9 The `ValidationError` enum (L12)
+
+Built-in `ValidationError` enum provides a structured error tag for every shipped
+validator failure (and for custom validators):
+
+```scrml
+type ValidationError = enum {
+  Required,
+  NotSome,
+  LengthFailed(predicate: string),
+  PatternMismatch(re: regex),
+  MinFailed(threshold: number),
+  MaxFailed(threshold: number),
+  GtFailed(expected: any),    LtFailed(expected: any),
+  GteFailed(expected: any),   LteFailed(expected: any),
+  EqFailed(expected: any),    NeqFailed(forbidden: any),
+  OneOfFailed(set: array),    NotInFailed(set: array),
+  Custom(tag: string),        // for developer-defined custom validators (Edge G)
+}
+```
+
+**Why an enum, not strings.** Strings are programmer-fragile (typos), inflexible (no
+payload structure), and inert at the type system (no exhaustiveness). The enum gives
+exhaustiveness for `match` over errors, payload data for parameterization (e.g., the
+threshold in `MinFailed(18)`), and a single canonical reference for project-registered
+messages and i18n (§55.10).
+
+**`@signup.errors` arrays contain these enum values.** Render via `messageFor` (§55.10)
+or via `match` over `ValidationError` (the JS-style match form, §18.1+, or block-form,
+§18.0.1).
+
+### 55.10 The 4-level error message resolution chain (L12)
+
+Resolution order when rendering an error tag to a user-facing string:
+
+**Level 1 — Inline override on field declaration** (highest priority, static-string only):
+
+```scrml
+<name req("Please enter your name") length(>=2, "Name must be at least 2 chars")> = <input/>
+```
+
+Per-field, per-validator. Static-string only (per L12 Edge F — no expression
+interpolation; no `${}` inside the message). Reasoning: messages should be statically
+extractable for i18n tooling; expressions defeat that.
+
+**Level 2 — Project-registered messages** (i18n + brand-voice hook):
+
+```scrml
+${
+  use scrml:data
+  data.registerMessages({
+    .Required:        (field) => `Please fill in ${field}.`,
+    .LengthFailed:    (field, pred) => `${field} must satisfy ${pred}.`,
+    .PatternMismatch: (field, re) => `${field} doesn't match the expected pattern.`,
+    ...
+  })
+}
+```
+
+The `data.registerMessages` API is part of `scrml:data` (cross-ref §41). Each entry is a
+function from `(fieldName, ...errorTagPayload)` to a string. Functions can return
+template-interpolated strings, including reactive references.
+
+**Level 3 — `scrml:data` shipped English defaults** (zero-config; works for prototype-phase
+apps without any registration). Always available; the floor of the resolution chain.
+
+**Level 4 — `match` escape hatch** (full developer control at the call site):
+
+```scrml
+<match for=ValidationError on=@signup.name.errors[0]>
+  <Required>                : "Name is required"
+  <LengthFailed("(>=2)")>   : "Name must be at least 2 characters"
+  <_>                       : ""
+</>
+```
+
+When the developer wants total control over a specific field's error rendering — bypass
+`messageFor` and use `match` (§18.0.1 block-form). This is the kickstarter v2 §6
+canonical "full control" pattern.
+
+**Resolution function — `messageFor(errorTag)`:** auto-imported via `use scrml:data`,
+walks Levels 1 → 2 → 3 automatically. If a Level-1 inline override is present for the
+specific (field, validator) pair, it wins. Otherwise check the project registration.
+Otherwise fall back to the shipped English defaults.
+
+**Why 4 levels.** Per L12 deliberation: prototype apps use Level 3 (zero config); apps
+that need brand voice or i18n use Level 2 (one-shot registration); per-field exceptions
+use Level 1 (inline static string); total-control rendering uses Level 4 (match). All
+four are useful in different phases of an app's lifecycle, and they compose without
+conflict (Level N takes precedence over Level N+1).
+
+### 55.11 Cross-field validation via predicate args (L14)
+
+Cross-field validation falls out of the universal-core predicate vocabulary when predicate
+args contain expressions referencing other cells:
+
+```scrml
+<signup>
+  <password req length(>=8)>           = <input type="password"/>
+  <confirm  req eq(@signup.password)>  = <input type="password"/>
+</>
+```
+
+**Mechanics:**
+- The compiler tracks dependencies through the predicate arg expression.
+- Reactive recomputation: when ANY cell referenced in the expression changes, the
+  validator recomputes.
+- The reactive dependency graph machinery (cross-ref §31) handles the bookkeeping —
+  validators are reactive consumers like any other.
+
+**Edges:**
+
+| Edge | Behavior |
+|---|---|
+| **Circular deps** | `<a eq(@b)>` + `<b eq(@a)>` → `E-VALIDATOR-CIRCULAR-DEP` (§34) at compile time. The validator-dep graph is a DAG; cycles are forbidden. |
+| **Predicate args beyond bare cell-reference** | `<endDate gte(@startDate.plus(1, "day"))>` is legal. The dependency tracker recurses through the expression to find all cell references. |
+| **Cells outside the compound** | Legal. Predicate args are arbitrary expressions in the surrounding scope; references to compound-external cells (e.g., a global `@maxAge`) work the same way. |
+| **Predicate args with non-reactive expressions** | Static expressions (e.g., `length(>=2)` where `2` is a literal) — no dependency tracking; validator recomputes only on cell change. |
+
+### 55.12 Multiple errors per field — short-circuit and composition
+
+Validators on a single cell COMPOSE — a non-empty value can fail both `length` and
+`pattern` simultaneously, producing TWO error tags in `errors`. Default
+`<errors of=...>` shows only the first; `<errors of=... all/>` shows all.
+
+**Short-circuit rule:** when `req` (or `is some`) FAILS on an empty / null cell, the
+remaining validators are SKIPPED. Only `.Required` (or `.NotSome`) is reported.
+Reasoning: the other validators on an empty value are vacuous noise.
+
+**Order of error tags in the array.** When multiple validators fail, the order matches
+the source-code declaration order on the cell. So `<x req length(>=2) pattern(re)>` with
+both `length` and `pattern` failing yields `[.LengthFailed(...), .PatternMismatch(...)]`
+(req short-circuits if it fired, hiding both; otherwise the others compose in order).
+
+**Custom validators** (`.Custom(tag)`) interleave with built-in validators in declaration
+order — the compiler doesn't reorder.
+
+### 55.13 The `reset` keyword interaction (cross-ref §6.8)
+
+The `reset(@cell)` keyword (§6.8) clears synthesized validity state in addition to
+resetting the underlying value:
+
+| Reset call | Effect |
+|---|---|
+| `reset(@signup)` | Resets every field of the compound. All synthesized properties revert: per-field `errors` becomes `[]`, per-field `touched` becomes `false`, compound `submitted` becomes `false`, compound `isValid` recomputes (likely `false` again immediately, since fields are now empty and `req` fires). |
+| `reset(@signup.name)` | Resets the named field only. That field's `errors`, `touched` revert; the compound's `isValid` recomputes; `submitted` is unchanged. |
+
+`reset` is a language keyword (`E-RESET-NO-ARG` if called with no argument; `E-RESERVED-IDENTIFIER`
+if shadowed); see §6.8 for the underlying semantics. Synthesized-property-side effects
+are part of the reset action — applications don't need to manually clear `errors` or
+`touched`.
+
+### 55.14 Validators on engine state-cells and derived cells
+
+**Validators on engine auto-declared variables (cross-ref §51.0):** the engine's state
+cell type is an enum; the universal-core vocabulary applies (e.g., `oneOf([...])` makes
+sense). HOWEVER, the engine's `rule=` contract (§51.0.F) is the canonical mechanism for
+constraining engine state — it provides static + runtime exhaustiveness for transitions.
+Validators on engine cells are LEGAL but typically REDUNDANT when `rule=` is the
+constraining contract. When both apply (rule= + a validator), both fire; the cell is
+valid only if both agree.
+
+**Validators on derived cells (`const <x ...>` or `<engine derived=>`):** REJECTED. Per
+open-Q §7.9 resolution: derived cells are READ-ONLY; validators imply gating which is
+incoherent on a read-only computed value. The compiler emits `E-DERIVED-WITH-VALIDATORS`
+(§34) at parse-time. If the developer wants validation on a derived value, they should
+add a refinement type (`const <x>: number(>=0) = ...`) — that is the type-level
+invariant equivalent.
+
+### 55.15 Cross-references summary and error-code listing
+
+**Cross-references:**
+
+| Topic | Section |
+|---|---|
+| Decl-coupled-with-render-spec (Shape 1/2/3 cells) | §6 |
+| `reset` keyword + `default=` attribute | §6.8 |
+| Block-form match (Tier 1; used in Level-4 error rendering) | §18.0.1 |
+| `<engine>` Tier 2 + rule= contract | §51.0 |
+| Refinement types (validators on type expressions) | §53 |
+| Schema columns (validators on DDL) | §39 |
+| Use system / `scrml:data` / registerMessages / messageFor | §41 |
+| Error codes index | §34 |
+| Reactive dependency graph (cross-field machinery) | §31 |
+
+**Error codes introduced or referenced by §55** (each is added to §34's table; see §3.6
+of the original D2 brief for the canonical listing):
+
+| Code | Severity | Brief |
+|---|---|---|
+| `E-SYNTHESIZED-WRITE` | Error | Assignment to auto-synthesized property (already in §34 from D1). |
+| `E-VALIDATOR-CIRCULAR-DEP` | Error | Circular dependency via cross-field predicate args (§55.11). |
+| `E-DERIVED-WITH-VALIDATORS` | Error | Validators applied to a derived cell (§55.14). |
+| `W-MATCH-RULE-INERT` | Warning | rule= legal but inert inside a match-block (§18.0.2). |
+| `E-MATCH-EFFECT-FORBIDDEN` | Error | effect= forbidden inside match-block (§18.0.2). |
+| `E-MATCH-ONTRANSITION-FORBIDDEN` | Error | <onTransition> forbidden inside match-block (§18.0.2). |
+| `E-MATCH-NOT-EXHAUSTIVE` | Error | Block-form match missing variants and no wildcard (§18.0.1). |
+| `E-VARIANT-AMBIGUOUS` | Error | Bare variant arm pattern ambiguous in union-typed context (§18.0.3). |
+| `E-ENGINE-INVALID-TRANSITION` | Runtime | Direct write or .advance violates rule= contract (§51.0.F-G). |
+| `E-ENGINE-EFFECT-AMBIGUOUS` | Error | effect= on a multi-target rule= (§51.0.H). |
+| `E-ENGINE-VAR-DUPLICATE` | Error | Separate decl of engine's auto-declared variable (§51.0.C). |
+| `W-ENGINE-INITIAL-MISSING` | Warning | initial= omitted on non-derived engine (§51.0.E). |
+| `E-DERIVED-ENGINE-NO-RULES` | Error | rule= on state-child of derived engine (§51.0.J). |
+| `E-DERIVED-ENGINE-NO-INITIAL` | Error | initial= on derived engine (§51.0.J). |
+| `E-DERIVED-ENGINE-NO-WRITE` | Error | Direct write to derived engine variable (§51.0.J). |
+| `E-DERIVED-ENGINE-INITIAL-UNDEFINED` | Error | derived=expr undefined for source's initial state (§51.0.J). |
+| `E-DERIVED-ENGINE-CIRCULAR` | Error | Chained derivation cycle (§51.0.J). |
+| `E-COMPONENT-ENGINE-SCOPE` | Error | Component body instantiates an engine (§51.0.K). |
+
+The full normative definitions (severity, trigger, fix recommendation, example) live in
+the relevant sections; §34 indexes them.
+
+---
+
+
+
+

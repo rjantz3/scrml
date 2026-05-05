@@ -1,9 +1,16 @@
 # SPEC.md Section Index
 
 > Auto-generated line numbers. Regenerate: `bash scripts/update-spec-index.sh`
-> Last updated: 2026-04-29 (S49 — Tailwind 3 (§26 substantially extended: §26.3 retitled, new §26.4 arbitrary values, new §26.5 open items); W-TAILWIND-001 + E-TAILWIND-001 added to §34. Sections from §22 onward have minor accumulated drift; comprehensive realign deferred to next session-wrap.)
+> Last updated: 2026-05-04 (S57 Stage 0b D2.8 — major v0.next additions:
+> §17.0 (Tier ladder); §18.0 (block-form match — Tier 1) + §18.0.1-§18.0.3;
+> §51.0 (engines — Tier 2) + §51.0.A-§51.0.L; §54 composition note;
+> §55 NEW (Validators + auto-synth validity surface, §55.1-§55.15);
+> §34 +17 error codes (match/engine/derived-engine/component-engine-scope/
+> validator-circular/derived-with-validators). Section line numbers for §17
+> onward have shifted; subsection-level line numbers in Quick Lookup may
+> have minor drift — comprehensive realign deferred.
 
-Total lines: 22,253 | Total sections: 54 + appendices
+Total lines: 23,384 | Total sections: 55 + appendices
 
 > **Note on §49 heading format:** SPEC.md §49 uses a single `#` (H1) at line 15800 instead of the `## N.` pattern every other section uses. The regenerator script will not pick it up automatically — keep this in mind when running the script.
 
@@ -28,8 +35,8 @@ Total lines: 22,253 | Total sections: 54 + appendices
 | 14 | Type System | 5830-6352 | 523 | Structs (§14.3.2 enum fields), enums, pattern matching, asIs, schema types, snippet type |
 | 15 | Component System | 6353-7083 | 731 | Definition, props, shapes, slots, callbacks, rendering syntax, reactive scope (§15.13) |
 | 16 | Component Slots | 7084-7351 | 268 | Named slots, unnamed children, fill syntax, render validation |
-| 17 | Control Flow | 7352-8026 | 675 | if=, show=, lifecycle, iteration, overloading, if-as-expression (§17.6) |
-| 18 | Pattern Matching and Enums | 8027-9159 | 1133 | match syntax, exhaustiveness, guards, literals, `is` operator, `partial match` (§18.18) |
+| 17 | Control Flow | 8072-8781 | 710 | **§17.0 Tier ladder (S57 D2.8)**: Tier 0 (`if=`) + cross-refs to §18 / §51 + W-LIFECYCLE-CANDIDATE; if=, show=, lifecycle, iteration, overloading, if-as-expression (§17.6) |
+| 18 | Pattern Matching and Enums | 8782-10057 | 1276 | **§18.0 (S57 D2.8)**: two match shapes — block-form `<match for=Type>` (Tier 1, §18.0.1) + JS-style; §18.0.2 attribute legality (rule= inert, effect=/onTransition forbidden); §18.0.3 bare-variant inference; existing JS-style match content preserved (§18.1+) |
 | 19 | Error Handling (Revised) | 9160-10031 | 872 | Renderable enum variants, fail, ?, !, errorBoundary, renders clause, **§19.10.5 implicit per-handler tx** |
 | A | Appendix A: Interaction Matrix | 10032-10050 | 19 | Error system feature interactions |
 | B | Appendix B: Superseded Spec Text | 10051-10059 | 9 | What §19 replaced |
@@ -67,10 +74,11 @@ Total lines: 22,253 | Total sections: 54 + appendices
 | 48 | The `fn` Keyword — Pure Functions | 15147-15799 | 653 | Body prohibitions, return-site completeness, lift in fn, calling conventions; **S32: Layer 2 retired, §54 cross-ref** |
 | 49 | `while` and `do...while` Loops | 15800-16502 | 703 | Grammar, break/continue, labels, lift in loops, E-LOOP errors (heading uses H1, not H2) |
 | 50 | Assignment as Expression | 16503-16969 | 467 | Assign-expr syntax, semantics, type rules, fn interaction |
-| 51 | State Transition Rules / `< machine>` | 16970-18692 | 1723 | Type-level transitions, machine declarations, runtime guards, event object, `\|` alternation, payload binding, derived/projection machines, §51.11 audit clause, §51.3.2 attribute-form opener, §51.12 temporal transitions (`after Ns =>`), §51.13 auto-property-tests (`--emit-machine-tests`), **§51.15 three-sites cross-check (S32)** |
+| 51 | State Transition Rules / `< machine>` / `<engine>` | 18778-21080 | 2303 | **§51.0 (S57 D2.8) — engines as Tier 2**: §51.0.A overview/singleton; §51.0.B declaration syntax; §51.0.C auto-declared variable + var=; §51.0.D mount position (decl=mount; cross-file singleton); §51.0.E initial= + W-ENGINE-INITIAL-MISSING; §51.0.F rule= contract (compile-time + runtime); §51.0.G .advance() loud; §51.0.H effect= / <onTransition> (to/from/once/if=); §51.0.I :-shorthand; §51.0.J derived engines (L20); §51.0.K components vs engines (Move 20, E-COMPONENT-ENGINE-SCOPE); §51.0.L relationship to legacy §51.1+. Legacy `<machine>` content preserved §51.1-§51.16. |
 | 52 | State Authority Declarations | 18693-19221 | 529 | Two-tier authority, server @var, sync infrastructure |
 | 53 | Inline Type Predicates | 19222-20160 | 939 | Value constraints, SPARK zones, named shapes, bind:value HTML attrs |
-| 54 | Nested Substates and State-Local Transitions | 20161-20448 | 288 | **S32 (2026-04-20).** Nested substate grammar (§54.2), state-local transitions (§54.3), field narrowing (§54.4), terminal states (§54.5), 4 new error codes (§54.6), interaction matrix (§54.7). Companion to §51.15 cross-check. |
+| 54 | Nested Substates and State-Local Transitions | 22606-22906 | 301 | **S32 (2026-04-20).** Nested substate grammar (§54.2), state-local transitions (§54.3), field narrowing (§54.4), terminal states (§54.5), 4 new error codes (§54.6), interaction matrix (§54.7). Companion to §51.15 cross-check. **S57 D2.8 composition note**: §54 composes uniformly with §51.0 engine state-children. |
+| 55 | Validators and the Auto-Synthesized Validity Surface | 22907-23383 | 477 | **NEW S57 D2.8.** §55.1 universal-core vocabulary (req, length, pattern, min/max, gt/lt/gte/lte, eq/neq, oneOf/notIn — L4); §55.2 state-cell validators; §55.3 refinement-type validators (cross-ref §53); §55.4 schema-column validators (cross-ref §39); §55.5/§55.6 auto-synth validity surface compound + per-field (L11) — isValid/errors/touched/submitted; §55.7 synthesized-property semantics (read-only); §55.8 `<errors of=expr/>` first-class element (L13); §55.9 ValidationError enum (L12); §55.10 4-level message resolution chain (L12); §55.11 cross-field via predicate args (L14); §55.12 multi-errors / short-circuit; §55.13 reset interaction (cross-ref §6.8); §55.14 engine + derived cells; §55.15 cross-refs + error-code listing. |
 
 ## Quick Lookup: Topic → Section
 
@@ -162,8 +170,51 @@ Total lines: 22,253 | Total sections: 54 + appendices
 - §51.15 machine cross-check (S32) → §51 (~18439+)
 - state authority / server @var → §52 (18693-19221)
 - inline predicates / constraints → §53 (19222-20160)
-- nested substates / state-local transitions → §54 (20161-20448)
-- E-STATE-COMPLETE (S32) → §54.6 (20327+)
-- state-local transitions (S32) → §54.3 (20224+)
-- field narrowing on substates (S32) → §54.4 (20299+)
-- terminal states (S32) → §54.5 (20316+)
+- nested substates / state-local transitions → §54 (22606-22906)
+- E-STATE-COMPLETE (S32) → §54.6 (~22782+)
+- state-local transitions (S32) → §54.3 (~22669+)
+- field narrowing on substates (S32) → §54.4 (~22748+)
+- terminal states (S32) → §54.5 (~22765+)
+
+<!-- Stage 0b D2.8 (2026-05-04) — v0.next additions -->
+- Tier 0/1/2 ladder → §1.5 (145+) + §17.0 (8074+) + §18.0 (8803+) + §51.0 (18788+)
+- match block / `<match for=Type [on=expr]>` → §18.0.1 (8828+)
+- W-MATCH-RULE-INERT / E-MATCH-EFFECT-FORBIDDEN / E-MATCH-ONTRANSITION-FORBIDDEN → §18.0.2 (8879+)
+- E-MATCH-NOT-EXHAUSTIVE → §18.0.1 (~8870+)
+- bare-variant inference → §18.0.3 (8900+)
+- E-VARIANT-AMBIGUOUS → §18.0.3 (~8920+)
+- engine declaration / `<engine for=Type initial=.X>` → §51.0.B (18813+)
+- engines as singleton → §51.0.A (18788+)
+- auto-declared engine variable → §51.0.C (18858+)
+- engine `var=` override → §51.0.C (~18880+)
+- E-ENGINE-VAR-DUPLICATE → §51.0.C (~18890+)
+- engine mount position (decl=mount; cross-file singleton) → §51.0.D (18894+)
+- engine `initial=` + W-ENGINE-INITIAL-MISSING → §51.0.E (18942+)
+- engine `rule=` contract (single/multi-target/wildcard) → §51.0.F (18972+)
+- E-ENGINE-INVALID-TRANSITION → §51.0.F (~19015+)
+- `.advance(.X)` engine method → §51.0.G (19022+)
+- engine `effect=` / `<onTransition>` (to/from/once/if=) → §51.0.H (19050+)
+- E-ENGINE-EFFECT-AMBIGUOUS → §51.0.H (~19075+)
+- `:`-shorthand for state-child body → §51.0.I (19101+)
+- derived engines / `derived=expr` (L20) → §51.0.J (19121+)
+- E-DERIVED-ENGINE-NO-RULES / -NO-INITIAL / -NO-WRITE / -INITIAL-UNDEFINED / -CIRCULAR → §51.0.J (~19145+)
+- components vs engines (Move 20) / E-COMPONENT-ENGINE-SCOPE → §51.0.K (19162+)
+- `<engine>` keyword vs legacy `<machine>` deprecation → §51.0.L (19183+) + W-DEPRECATED-001 (§34)
+- validators / req / is some / length / pattern / min / max / gt / gte / eq / oneOf → §55.1 (22920+)
+- validators on state cells (L4) → §55.2 (22952+)
+- validators on refinement types → §55.3 (22985+) (cross-ref §53)
+- validators on schema columns → §55.4 (23012+) (cross-ref §39)
+- auto-synthesized validity / isValid / errors / touched / submitted (compound) → §55.5 (23041+)
+- per-field validity surface → §55.6 (23078+)
+- synthesized-property semantics (read-only) → §55.7 (23100+)
+- E-SYNTHESIZED-WRITE → §55.7 + §34 + §6.11
+- `<errors of=expr/>` first-class element (L13) → §55.8 (23114+)
+- ValidationError enum (L12) → §55.9 (23168+)
+- error message resolution / 4-level / messageFor → §55.10 (23199+)
+- registerMessages / `scrml:data` → §55.10 (23215+) + §41
+- cross-field validation (L14) → §55.11 (23259+)
+- E-VALIDATOR-CIRCULAR-DEP → §55.11 + §34
+- multiple errors per field / short-circuit → §55.12 (23287+)
+- reset + validity surface → §55.13 (23305+) (cross-ref §6.8)
+- validators on engine state-cells / derived cells → §55.14 (23320+)
+- E-DERIVED-WITH-VALIDATORS → §55.14 + §34
