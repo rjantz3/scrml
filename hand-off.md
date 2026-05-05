@@ -1,4 +1,4 @@
-# scrmlTS — Session 61 (OPEN — Step 11.5 LANDED + SPEC head cleanup + Step 12 SURVEY pre-staged)
+# scrmlTS — Session 61 (OPEN — Steps 11.5 + 12 LANDED + Curation Batches A+C + 2 P-FUP BRIEFs)
 
 **Date opened:** 2026-05-05
 **Previous:** `handOffs/hand-off-60.md` (S60 close — 8 dispatch cycles, A1a 14/17 done, A1b/A1c FULLY RATIFIED, ADR ratified Option A FOLD as Step 11.5, Step 11 escalation FULLY CLOSED)
@@ -9,23 +9,26 @@
 
 | Item | State |
 |---|---|
-| **scrmlTS HEAD** | **`a020ea1`** (`compile(a1a-step-11-5): fold reactive-derived-decl into state-decl`) + S61 doc bundle pending |
-| **Origin sync** | **8 commits ahead of origin** at this snapshot (1 SPEC cleanup `0a48700` + 6 Step 11.5 `3cdf9cc..a020ea1` + 1 incoming doc bundle); push pending |
-| **scrml-support HEAD** | `f7b935a` — clean, untouched this session |
-| **Tests** | **8,878 pass / 44 skip / 0 fail / 8,922 across 439 files** (S61 baseline post Step 11.5; +4 pass / +1 skip / +5 net vs S60 close; +1 skip is deferred self-host parity test) |
+| **scrmlTS HEAD** | **`7be23aa`** (`compile(a1a-step-12): existing-test deltas — 175 files, 330 site rewrites`) + S61-extension bookkeeping doc bundle pending |
+| **scrml-support HEAD** | **`9943174`** (`archive(s61-curation-batch-c): scrmlTS docs/changes/dispatch-app-* → archive/changes/`) — clean, pushed |
+| **Origin sync** | scrmlTS 9 commits ahead of origin (Step 12 cherry-pick chain) + 1 incoming bookkeeping bundle. scrml-support clean+pushed. |
+| **Tests** | **8,878 pass / 44 skip / 0 fail / 8,922 across 439 files** (S61 baseline; ZERO net delta since Step 11.5; Step 12 was zero-delta migration) |
 | **Inbox** | empty |
 | **Branch** | `main` |
-| **Working tree (both repos)** | scrmlTS has S61 doc bundle staged; scrml-support clean |
-| **Maps state** | `.claude/maps/` last touched 2026-04-24 — S61 refresh attempted but agent's Write tool was permission-denied; findings returned as text + actionable non-compliance items captured. Maps refresh root cause investigation deferred to next session. |
+| **Working tree (both repos)** | scrmlTS has bookkeeping bundle staged; scrml-support clean |
+| **Maps state** | `.claude/maps/` last touched 2026-04-24 — S61 refresh attempted but agent's Write tool was permission-denied; findings returned as text. Item #1 (SPEC head) actioned. Item #2 (curation) in progress (Batches A + C done; 8 batches remaining). |
 
 ---
 
 ## 1. Where we are in v0.next migration
 
-- **Phase A1a: 15/17 done.** Steps 1-11 + 11.0a/b/c + **11.5 (LANDED S61, `a020ea1`)** all complete. Remaining: **12 (existing-test deltas; SURVEY pre-staged + Q1+Q2 ratified S61)** → **13 (final commit + CHANGELOG, ~0.5h)**.
-- **A1b SCOPE FULLY RATIFIED** at S60 close. 22 steps; ~85-120h focused work. Sequence locked: 12 → 13 → A1b/B1.
-- **A1c SCOPE FULLY RATIFIED** at S60 close. 24 steps including new C0 feature-usage analyzer (Q3 Option C compile-time elision selected). ~96-136h. **Pre-existing Shape 3 V5-strict codegen gap deferred to A1c** (surfaced S61 Step 11.5; documented in §6.4 of A1c plan).
-- **ADR ratified S60 + LANDED S61.** Option A FOLD landed as Step 11.5 commit `a020ea1`.
+- **Phase A1a: 16/19 done.** Steps 1-12 + 11.0a/b/c + **11.5 (LANDED S61, `a020ea1`)** + **12 (LANDED S61, `7be23aa`)** all complete. Remaining: **11.0d (P-FUP-1; top-level Shape 1, ~3-6h, BRIEF queued)** → **11.0e (P-FUP-2; `<x> = not\n<y>` boundary, ~1-3h, BRIEF queued)** → **13 (final commit + CHANGELOG + cleanup `scripts/step12-*.mjs`, ~0.5h)**.
+- **A1b SCOPE FULLY RATIFIED** at S60 close. 22 steps; ~85-120h focused work. Sequence: 11.0d/e → 13 → A1b/B1.
+- **A1c SCOPE FULLY RATIFIED** at S60 close. 24 steps including new C0 feature-usage analyzer. ~96-136h. **Pre-existing Shape 3 V5-strict codegen gap deferred to A1c** (surfaced S61 Step 11.5; documented in §6.4 of A1c plan).
+- **2 NEW parser-gap follow-ups surfaced S61 Step 12** — both BRIEFs drafted:
+  - **P-FUP-1 → Step 11.0d:** top-level Shape 1 NOT implemented in BS despite SPEC §6.2. The 3 dispatch-named samples reverted (`test-002-with-logic`, `test-009-test-reactive`, `modern-003-full-app`).
+  - **P-FUP-2 → Step 11.0e:** `<x> = not\n<y>` boundary bug. 5 files reverted (`combined-007-crud`, `gauntlet-r10-go-contacts`, `gauntlet-r10-odin-filebrowser`, `gauntlet-r10-rails-blog`, `integration-001-stripe-mini`).
+- **Curation pass started** — `docs/changes/` 103 → 84 (Batches A + C done; 8 batches remaining).
 
 ---
 
@@ -33,13 +36,19 @@
 
 1. ✅ Session-open checklist completed (pa.md, PA-SCRML-PRIMER, hand-off, user-voice tail, sync hygiene).
 2. ✅ Test baseline 8,874 / 43 / 0 / 8,917 confirmed at open.
-3. ✅ **Step 11.5 dispatched + landed.** T2-tier; 6-commit chain on `phase-a1a-step-11-5-fold-derived`; cherry-picked clean onto main as `a020ea1`. Hidden coupling at emit-logic.ts caught + resolved. Pre-existing Shape 3 codegen gap surfaced + deferred to A1c.
-4. ✅ **SPEC head broken-path cleanup** committed `0a48700`. 4 dead path refs → 1 archive pointer.
-5. ✅ **Step 12 SURVEY pre-staged** (`docs/changes/phase-a1a-step-12-existing-test-deltas/SURVEY.md`) + **Q1+Q2 ratified S61.** Q1 transition-decl OUT-OF-SCOPE (P3 + A2 territory). Q2 legacy `@x = init` decl form REWRITE to V5-strict canon.
+3. ✅ **Step 11.5 dispatched + landed** as `a020ea1`. T2-tier; 6-commit chain. Hidden coupling at emit-logic.ts caught + resolved. Pre-existing Shape 3 codegen gap surfaced + deferred to A1c.
+4. ✅ **SPEC head broken-path cleanup** committed `0a48700`.
+5. ✅ **Step 12 SURVEY pre-staged** + Q1+Q2 ratified.
 6. ✅ Maps refresh attempted (Write-denied; agent returned text findings + 8 non-compliance categories surfaced).
-7. ⏸ **Step 12 dispatch** — ready to dispatch on user signal. ~4-8h estimate.
-8. ⏸ **Step 13** — wrap A1a after 12.
-9. ⏸ **A1b/B1 dispatch** — begins after Step 13.
+7. ✅ **Curation Batch A** RATIFIED + EXECUTED. 12 P-series dirs dereffed to scrml-support archive (`f4c0081` scrmlTS / `df2f3d2` scrml-support).
+8. ✅ **Curation Batch C** RATIFIED + EXECUTED. 7 dispatch-app M-series dirs dereffed (`729e57c` scrmlTS / `9943174` scrml-support).
+9. ✅ **Step 12 dispatched + landed** as `7be23aa`. T2-tier; 9-commit chain. **ZERO net delta** (175 sample files migrated; same baseline). **2 NEW parser-gap follow-ups surfaced** — see below.
+10. ✅ **P-FUP-1 + P-FUP-2 BRIEFs drafted** at `docs/changes/phase-a1a-step-11-0{d,e}-*/BRIEF.md`.
+11. ⏸ **Step 11.0e dispatch** — about to launch (per S61 latest user direction; small narrow patch ~1-3h).
+12. ⏸ **Step 11.0d dispatch** — queued after 11.0e (medium ~3-6h).
+13. ⏸ **Step 13** — wrap A1a after 11.0d/e.
+14. ⏸ **8 curation batches remaining** (B, D, E, F, G, H, I, J — total ~58 dirs).
+15. ⏸ **A1b/B1 dispatch** — begins after Step 13.
 
 ---
 
@@ -100,11 +109,19 @@
 - **Step 12 SURVEY** drafted PA-side (`docs/changes/phase-a1a-step-12-existing-test-deltas/SURVEY.md`). Q1 (transition-decl) + Q2 (legacy `@x = init`) ratified by user this session. Q1 OUT-OF-SCOPE; Q2 REWRITE Option A.
 - **SPEC head cleanup** committed `0a48700` (4 broken-path lines → 1 archive pointer).
 - **Step 11.5 landed** clean: 8,878 / 44 / 0 / 8,922; 6-commit chain cherry-picked onto main as `3cdf9cc..a020ea1`. Hidden coupling caught + resolved. Pre-existing Shape 3 codegen gap deferred to A1c.
-- **Doc bundle pending commit** at this snapshot: hand-off + master-list + changelog + AST-CONTRACTS + A1c plan + SURVEY.md additions.
-- **8 commits ahead of origin** at this snapshot. Push pending.
+- **S61 first doc bundle** committed `1e1ac10`. 8-commit batch pushed.
+
+### S61 progress — Curation pass + Step 12 + P-FUPs
+- **Curation matrix drafted** (`docs/curation/2026-05-05-changes-dir-disposition.md`). 103 docs/changes/ dirs classified into 10 batches; PA proposes per-dir disposition; user ratifies per-batch.
+- **Curation Batch A (P-series, 12 dirs) RATIFIED + EXECUTED** as cross-repo cluster. scrmlTS commit `f4c0081`; scrml-support commit `df2f3d2`. Both pushed. 1 cross-ref fix in `examples/23-trucking-dispatch/FRICTION.md`.
+- **Curation Batch C (dispatch-app M-series, 7 dirs) RATIFIED + EXECUTED** as cross-repo cluster. scrmlTS commit `729e57c`; scrml-support commit `9943174`. Both pushed. 2 cross-ref fixes in `examples/23-trucking-dispatch/README.md`.
+- **Step 12 dispatched** to `scrml-dev-pipeline` worktree. 9-commit chain produced; 175 sample files migrated; ZERO net delta confirmed. **2 NEW parser-gap follow-ups (P-FUP-1, P-FUP-2)** surfaced. Cherry-picked onto main as `1fcb30c..7be23aa` (final commit empty marker via `--allow-empty -C 8038f8b`).
+- **P-FUP BRIEFs drafted** for Step 11.0d (top-level Shape 1; ~3-6h) + Step 11.0e (`<x> = not\n<y>` boundary; ~1-3h).
+- **Master-list, AST-CONTRACTS, changelog, hand-off updated** for 16/19 done + new P-FUPs + curation status.
+- **`docs/changes/` count: 103 → 84.** Path discipline pattern: `git -C <abs-path>` for cross-tree ops continues to work.
 
 ---
 
 ## 6. Tags
 
-#session-61 #step-11-5-landed #spec-head-cleanup #step-12-survey-ratified #q1-ratified-out-of-scope #q2-ratified-option-a #phase-a1a-15-of-17 #a020ea1 #a1b-ratified #a1c-ratified #adr-option-a-folded #shape-3-codegen-deferred-to-a1c
+#session-61 #step-11-5-landed #step-12-landed #spec-head-cleanup #q1-ratified-out-of-scope #q2-ratified-option-a #phase-a1a-16-of-19 #a020ea1 #7be23aa #curation-batch-a-executed #curation-batch-c-executed #p-fup-1-step-11-0d-queued #p-fup-2-step-11-0e-queued #zero-net-delta-step-12 #shape-3-codegen-deferred-to-a1c

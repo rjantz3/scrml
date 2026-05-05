@@ -2,9 +2,9 @@
 
 **Purpose:** Live inventory of what exists in scrmlTS, plus the **v0.2.0 migration dashboard**. Current truth only. Historical session-by-session detail lives in `docs/changelog.md`; deep-dives live in `scrml-support/docs/deep-dives/`.
 
-**Last updated:** 2026-05-05 (S61 — A1a 15/17 done; Step 11.5 FOLD landed; SPEC head broken-path cleanup landed)
+**Last updated:** 2026-05-05 (S61 — A1a 16/19 done; Step 12 landed; 2 P-FUPs queued as Steps 11.0d + 11.0e; Curation Batches A + C executed)
 
-**Tests (current):** **8,878 pass / 44 skip / 0 fail / 8,922 across 439 files** (post A1a Step 11.5; S61 baseline; +4 pass / +1 skip vs S60 close). The +1 skip is a deferred self-host parity test catching up at next bootstrap regen. Pre-commit subset ~8,149 / 33 / 0.
+**Tests (current):** **8,878 pass / 44 skip / 0 fail / 8,922 across 439 files** (post A1a Step 12; S61 baseline; +4 pass / +1 skip vs S60 close). Step 12 was zero-net-delta (175 samples migrated to V5-strict, no test additions). Pre-commit subset ~8,154 / 33 / 0.
 
 **Currently shipped baseline:** **scrml v0.1.0** (16-module stdlib, 32 examples, full SQL passthrough via Bun.SQL, LSP + VSCode + neovim editor support, server-fn boundary, `<machine>` engines, `<channel>` channels, `?{}` SQL passthrough, `<schema>` blocks, `<program>` config + wrapper, ~24,739 LOC compiler / ~14,135 LOC codegen).
 
@@ -27,7 +27,7 @@
 | Stage 0a | Impact assessment | done | ✅ | `IMPACT-ASSESSMENT.md` (446 lines) |
 | Stage 0b | SPEC + PIPELINE + INDEX rewrite | 70-127h | ✅ | D1+D2 (S57) + D3+D4 (S58) all landed |
 | Stage 0b+ | L21 lock E-DERIVED-VALUE-MUTATE | done | ✅ | S59 commit `1217b41` |
-| **A1 — Foundational lex/parse (A1a + A1b + A1c three-phase split)** | `<NAME> = RHS` decl recognition + Shapes 1/2/3 + Variant C; resolve+type; codegen+runtime+PIPELINE prose | **A1a 35-50h + A1b 85-120h + A1c 96-136h** | **🟡 A1a 15/17 done** | **A1a (lex+parse) 15/17 done at S61 (~4.5-8.5h remaining):** Steps 1-11 + 11.0a + 11.0b + 11.0c + 11.5 all landed. Steps remaining: 12 (existing-test deltas, ~4-8h, BRIEF + SURVEY pre-staged S61), 13 (final CHANGELOG, 0.5h, BRIEF). **Step 11.5 (FOLD `reactive-derived-decl` → `state-decl{shape:"derived",isConst:true}`)** landed S61 (`a020ea1`, T2 tier, +4 pass / +1 skip; byte-output preserved; 1 hidden coupling resolved; pre-existing Shape 3 V5-strict codegen gap deferred to A1c). **Step 12 SURVEY pre-staged S61** with Q1 + Q2 ratified: Q1 transition-decl tests OUT-OF-SCOPE (owned by P3 + A2); Q2 legacy `@x = init` decl form REWRITE to V5-strict canon. **A1b (resolve+type) RATIFIED S60** (`docs/changes/phase-a1b-resolve-type/SCOPE-AND-DECOMPOSITION.md`): 22 steps B1-B22, 5 waves; sequence ratified as 11.0b → 11.0c → 11.5 → 12 → 13 → A1b; selective parallel Wave 5 cap 2-3 agents; refinement-zone subset; new `validators.ts` file (final call deferred to B9 survey). **A1c (codegen+runtime) RATIFIED S60** (`docs/changes/phase-a1c-codegen/SCOPE-AND-DECOMPOSITION.md`): **24 steps** C0-C23 (C0 added by Q3 ratification — feature-usage analyzer for compile-time elision), 6 waves; **runtime library Option C compile-time elision**; refinement-zone subset; Postgres+SQLite+MySQL only. **ADR ratified S60 + LANDED S61:** `reactive-derived-decl` → `state-decl{shape:"derived",isConst:true}` Option A FOLD landed as Step 11.5. |
+| **A1 — Foundational lex/parse (A1a + A1b + A1c three-phase split)** | `<NAME> = RHS` decl recognition + Shapes 1/2/3 + Variant C; resolve+type; codegen+runtime+PIPELINE prose | **A1a 35-50h + A1b 85-120h + A1c 96-136h** | **🟡 A1a 16/19 done** | **A1a (lex+parse) 16/19 done at S61 (~4.5-9.5h remaining):** Steps 1-12 + 11.0a + 11.0b + 11.0c + 11.5 all landed. Steps remaining: **11.0d (P-FUP-1; top-level Shape 1, ~3-6h, BRIEF)**, **11.0e (P-FUP-2; `<x> = not\n<y>` newline boundary, ~1-3h, BRIEF)**, 13 (final CHANGELOG + cleanup `scripts/step12-*.mjs`, 0.5h, BRIEF). **Step 12 (existing-test deltas) landed S61** (`7be23aa`, T2 tier, ZERO net delta — 175 sample files migrated to V5-strict canon in `samples/compilation-tests/`; 2 NEW parser-gap follow-ups surfaced as Steps 11.0d + 11.0e; 624 sites in broader `samples/` deliberately left in legacy form per SURVEY scope). **Step 11.5 (FOLD `reactive-derived-decl` → `state-decl{shape:"derived",isConst:true}`)** landed S61 (`a020ea1`, T2 tier, +4 pass / +1 skip; byte-output preserved; 1 hidden coupling resolved; pre-existing Shape 3 V5-strict codegen gap deferred to A1c). **A1b (resolve+type) RATIFIED S60** (`docs/changes/phase-a1b-resolve-type/SCOPE-AND-DECOMPOSITION.md`): 22 steps B1-B22, 5 waves; refinement-zone subset; new `validators.ts` file (final call deferred to B9 survey). **A1c (codegen+runtime) RATIFIED S60** (`docs/changes/phase-a1c-codegen/SCOPE-AND-DECOMPOSITION.md`): **24 steps** C0-C23 (C0 added by Q3 ratification — feature-usage analyzer for compile-time elision), 6 waves; **runtime library Option C compile-time elision**; refinement-zone subset; Postgres+SQLite+MySQL only; **§6.4 carry-forward: Shape 3 V5-strict codegen gap from S61 Step 11.5**. **ADR ratified S60 + LANDED S61:** `reactive-derived-decl` → `state-decl{shape:"derived",isConst:true}` Option A FOLD landed as Step 11.5. |
 | A2 — Structural elements | `<engine>`, `<match>` block, `<channel>`, `<errors>`, `<onTransition>` | 25-40h | ⏸️ pending A1 | |
 | A3 — Validators + synth surface | bareword validator scan + auto-synth + `<errors of=…/>` | 20-35h | ⏸️ pending A2 | |
 | A4 — Schema + refinement + pinned | shared-core in schema; refinement-type predicates; pinned on imports | 15-25h | ⏸️ pending A3 | |
@@ -64,7 +64,7 @@ L1 markup-as-first-class-value (PILLAR — held since scrml8) · L2 Variant C co
 - **`reactive-decl` rename to `state-decl`** — RESOLVED + LANDED in Step 3 (commit `8fa26e1`). ~514 changes across ~120 file updates. 0 regressions.
 - **Depth-of-survey discount pattern** (S59 captured) — see `scrml-support/design-insights.md` "Depth-of-survey discount" entry. Three confirmed occurrences (S51 W2, S52 DD4, S59 Step 2). PA-SCRML-PRIMER §12 has the session-start pointer + mitigation checklist.
 
-### §0.5 A1a 17-step status (rev 3 decomposition — incl. 11.0a/b/c + 11.5)
+### §0.5 A1a 19-step status (rev 4 decomposition — incl. 11.0a/b/c + 11.5 + 11.0d/e)
 
 | # | Step | Status |
 |---|---|---|
@@ -83,10 +83,12 @@ L1 markup-as-first-class-value (PILLAR — held since scrml8) · L2 Variant C co
 | 11.0b | Newline-as-statement-separator | ✅ S60 `a7dd96a` |
 | 11.0c | Typed-decl recognizer | ✅ S60 `92af2ca` |
 | **11.5** | **FOLD `reactive-derived-decl` → `state-decl{shape:"derived",isConst:true}`** | ✅ **S61 `a020ea1`** (T2 tier; +4 pass / +1 skip; byte-output preserved; 1 hidden coupling resolved at emit-logic.ts; 1 dep-graph dedup resolved with `isFoldedDerived` filter; pre-existing Shape 3 V5-strict codegen gap deferred to A1c; self-host parity test marked `test.skip` per Steps 4-7 policy — catches up at next bootstrap regen) |
-| 12 | Existing-test deltas: rewrite + drop | ⏸ (BRIEF + SURVEY pre-staged S61; Q1+Q2 ratified) |
-| 13 | Final commit + CHANGELOG draft | ⏸ |
+| 12 | Existing-test deltas: rewrite + drop | ✅ **S61 `7be23aa`** (T2 tier; **ZERO net delta** — same baseline 8,878/44/0/8,922; 175 sample files in `samples/compilation-tests/` migrated to V5-strict canon; 2 NEW parser-gap follow-ups surfaced — see 11.0d / 11.0e below; 624 sites in broader `samples/` deliberately left in legacy form per SURVEY scope) |
+| **11.0d** | **Top-level structural Shape 1 recognition** (P-FUP-1 from Step 12) | ⏸ NEW S61 (BRIEF at `docs/changes/phase-a1a-step-11-0d-toplevel-shape-1/BRIEF.md`; ~3-6h; restores 3 reverted Step 12 samples) |
+| **11.0e** | **`<x> = not\n<y>` newline-as-separator boundary fix** (P-FUP-2 from Step 12) | ⏸ NEW S61 (BRIEF at `docs/changes/phase-a1a-step-11-0e-not-newline-boundary/BRIEF.md`; ~1-3h; restores 5 reverted Step 12 samples) |
+| 13 | Final commit + CHANGELOG draft + cleanup `scripts/step12-*.mjs` helpers | ⏸ |
 
-**15/17 done at S61.** Remaining: ~4.5-8.5h across Steps 12, 13. Each step a focused single-file dispatch with PA cherry-pick to main between steps.
+**16/19 done at S61.** Remaining: ~4.5-9.5h across Steps 11.0d, 11.0e, 13. Each step a focused single-file dispatch with PA cherry-pick to main between steps.
 
 **Side landings during A1a (parallel work):**
 - Documentary `<program>` attributes (`title=`, `description=`, `version=`, `author=`, `license=`) — SPEC §40.7 + emit-html.ts head injection + tier-ladder article update. Commit `4620290`.
@@ -95,7 +97,13 @@ L1 markup-as-first-class-value (PILLAR — held since scrml8) · L2 Variant C co
 
 **`reactive-derived-decl` AST kind divergence (S59 Step 4 surfaced; FOLDED S61 Step 11.5):** RESOLVED. The legacy `const @NAME = expr` parser path now produces `state-decl{shape:"derived",isConst:true,structuralForm:false}` per ADR Option A. ~20 consumer sites swept; AST kind enum cleaned. Single-walker model for L21 enforcement substrate. Spec coherence with §6.6 restored. Final commit `a020ea1` (S61). 6 self-host files still contain literal `reactive-derived-decl` references; catches up at next bootstrap regen.
 
-**Pre-existing Shape 3 V5-strict codegen gap (S61 Step 11.5 surfaced):** Surfaced during 11.5 emit-logic.ts work. Shape 3 V5-strict `const <x> = expr` declarations emit `_scrml_reactive_set` instead of `_scrml_derived_declare`. Out-of-scope for 11.5 per BRIEF §2.2; **deferred to A1c codegen pass.** Documented in 11.5 progress.md.
+**Pre-existing Shape 3 V5-strict codegen gap (S61 Step 11.5 surfaced):** Surfaced during 11.5 emit-logic.ts work. Shape 3 V5-strict `const <x> = expr` declarations emit `_scrml_reactive_set` instead of `_scrml_derived_declare`. Out-of-scope for 11.5 per BRIEF §2.2; **deferred to A1c codegen pass.** Documented in 11.5 progress.md + A1c plan §6.4.
+
+**P-FUP-1: Top-level structural Shape 1 not implemented in BS (S61 Step 12 surfaced):** SPEC §6.2 documents `<count> = 0` at file top-level as canonical, but BS (block-splitter) treats `<count>` at line-start as HTML markup tag opener. Step 12 reverted 3 samples on this gap (`test-002-with-logic.scrml`, `test-009-test-reactive.scrml`, `modern-003-full-app.scrml`). **Queued as Step 11.0d** (BRIEF at `docs/changes/phase-a1a-step-11-0d-toplevel-shape-1/BRIEF.md`; estimate 3-6h; matches Step 2's foundational decl-recognition pattern but at top-level scope).
+
+**P-FUP-2: `<x> = not\n<y>` newline-as-separator boundary (S61 Step 12 surfaced):** The `not` keyword (M11 modifier) followed by newline causes parser to lose subsequent state-decl siblings in V5-strict structural form. Pre-V5-strict form (`@x = not\n@y`) doesn't trigger. Step 12 reverted 5 files (`combined-007-crud`, `gauntlet-r10-go-contacts`, `gauntlet-r10-odin-filebrowser`, `gauntlet-r10-rails-blog`, `integration-001-stripe-mini`). Likely sits at the Step 11.0b ASI-NEWLINE branch interaction. **Queued as Step 11.0e** (BRIEF at `docs/changes/phase-a1a-step-11-0e-not-newline-boundary/BRIEF.md`; estimate 1-3h; narrow patch).
+
+**Curation pass S61 — `docs/changes/` 103-dir wholesale curation:** Triggered by S61 maps-refresh agent's non-compliance scan. Disposition matrix at `docs/curation/2026-05-05-changes-dir-disposition.md`. Batches A (P-series, 12 dirs) + C (dispatch-app, 7 dirs) RATIFIED + EXECUTED — 19 dirs dereffed to `scrml-support/archive/changes/`. 8 batches remaining: B (expr-ast-phase-4d, 4), D (F-series, 11), E (GITI, 2), F (BUG-letters, 2), G (bun-sql, 2), H (LSP L1-L4, 5), I (fix-*, 20), J (misc, 12). `docs/changes/` count: 103 → 84.
 
 **§S4.10 discriminant invariant test (Step 5 dependency):** RESOLVED — Step 5 (`505531f`) relaxed the assertion. Now admits `shape ∈ {"plain","derived","decl-with-spec"}`.
 
