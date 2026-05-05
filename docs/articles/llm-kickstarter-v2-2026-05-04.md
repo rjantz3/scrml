@@ -757,6 +757,8 @@ scrml ships a focused stdlib that covers ~80% of typical-app npm needs. Import f
 | `scrml:router` | `match(pattern, path)`, `parseQuery`, `buildUrl(pattern, params, query)`, `navigate(url, opts)`, `currentPath`, `onNavigate(pattern, handler)` | path-to-regexp, qs |
 | `scrml:test` | Assertion family: `assertEqual`, `assertNotEqual`, `assertTruthy`, `assertFalsy`, `assertNull`, `assertDefined`, `assertThrows`, `assertNoThrow`, `assertInRange`, `assertContains`; `group(label, fn)` | chai, parts of jest/expect |
 | `scrml:fs`, `scrml:path`, `scrml:process` | Node compat layer — file ops, path manipulation, env/argv/cwd/exit | (Node built-ins) |
+| `scrml:redis` | Wraps `Bun.redis` (Bun ≥1.3). `get(key)`, `set(key, value)`, `setex(key, value, seconds)`, `del`, `exists`, `expire`, `ttl`, `incr`, `decr`, `getBuffer`; sets: `sadd/srem/sismember/smembers`; pub/sub: `publish(channel, msg)`, `subscribe(channel, fn)`, `unsubscribe`; custom URL: `createClient(url, opts)`; raw: `send(cmd, args)`; `close()`. All ops are async. Server-side only. | ioredis, redis (npm) |
+| `scrml:cron` | Wraps `Bun.cron` (Bun ≥1.3.12). `schedule(pattern, handler)` — returns CronJob handle with `.stop()/.ref()/.unref()`. `nextOccurrence(pattern, [relativeDate])` (Bun ≥1.3.12 only) — preview next fire as Date. `stop(job)` — convenience. Standard 5-field cron + `@daily/@weekly/@monthly/@yearly`. Server-side only; in-process. | node-cron, croner (npm) |
 
 If you reach for `import X from 'some-npm-package'` while writing scrml, stop. Check this table first; if you don't see what you need, read the module's `index.scrml` before npm-installing.
 

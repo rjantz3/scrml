@@ -1,0 +1,225 @@
+<program>
+${
+    // ---------------------------------------------------------------------------
+    // scrml:redis — Redis / Valkey client (Bun.redis wrapper)
+    //
+    // Thin wrapper over Bun.redis (Bun ≥1.3). Server-side only.
+    //
+    // Connection: by default uses the REDIS_URL or VALKEY_URL env var
+    // (falling back to redis://localhost:6379). Pass an explicit URL to
+    // createClient() for a custom connection.
+    //
+    // Usage:
+    //   ${ import { get, set, expire, publish } from 'scrml:redis' }
+    //
+    //   server function cacheUser(id, user) {
+    //       await set("user:" + id, JSON.stringify(user))
+    //       await expire("user:" + id, 3600)
+    //   }
+    //
+    // Pub/sub note: subscribe/unsubscribe are useful for ad-hoc cross-process
+    // signalling. For real-time client-facing state use scrml's <channel>
+    // primitive instead — channels are the language-native abstraction.
+    //
+    // All operations are async (return Promises). Most stdlib modules in scrml
+    // return values directly because they wrap synchronous APIs; redis is
+    // network-bound so async is structural, not stylistic.
+    // ---------------------------------------------------------------------------
+
+    import { redis, RedisClient } from "bun"
+
+    /**
+     * Get a string value by key. Returns null if the key does not exist.
+     *
+     * @param key — the key to look up
+     * @returns Promise<string | null>
+     */
+    export async function get(key) {
+        return await redis.get(key)
+    }
+
+    /**
+     * Set a string value. Overwrites any existing value at this key.
+     *
+     * @param key   — the key to set
+     * @param value — the string value (non-string values should be serialized
+     *                first via JSON.stringify or similar)
+     * @returns Promise<void>
+     */
+    export async function set(key, value) {
+        await redis.set(key, value)
+    }
+
+    /**
+     * Set a value AND expiration in one round-trip. Convenience for the
+     * common cache pattern.
+     *
+     * @param key     — the key to set
+     * @param value   — the string value
+     * @param seconds — TTL in seconds
+     */
+    export async function setex(key, value, seconds) {
+        await redis.set(key, value)
+        await redis.expire(key, seconds)
+    }
+
+    /**
+     * Delete a key. Idempotent — deleting a missing key is not an error.
+     */
+    export async function del(key) {
+        await redis.del(key)
+    }
+
+    /**
+     * Check whether a key exists.
+     *
+     * @returns Promise<boolean>
+     */
+    export async function exists(key) {
+        return await redis.exists(key)
+    }
+
+    /**
+     * Set the expiration for a key, in seconds.
+     */
+    export async function expire(key, seconds) {
+        await redis.expire(key, seconds)
+    }
+
+    /**
+     * Get the remaining TTL for a key, in seconds. Returns -2 if the key
+     * does not exist, -1 if the key exists but has no TTL.
+     */
+    export async function ttl(key) {
+        return await redis.ttl(key)
+    }
+
+    /**
+     * Atomically increment a counter and return the new value. The key is
+     * created with value 0 if it did not exist.
+     */
+    export async function incr(key) {
+        return await redis.incr(key)
+    }
+
+    /**
+     * Atomically decrement a counter and return the new value.
+     */
+    export async function decr(key) {
+        return await redis.decr(key)
+    }
+
+    /**
+     * Get binary data as a Uint8Array. Useful for storing serialized
+     * non-text payloads.
+     */
+    export async function getBuffer(key) {
+        return await redis.getBuffer(key)
+    }
+
+    // -- Set operations --------------------------------------------------------
+
+    /**
+     * Add a member to a set. Returns nothing (the underlying Bun API
+     * does not return the added-count).
+     */
+    export async function sadd(key, member) {
+        await redis.sadd(key, member)
+    }
+
+    /**
+     * Remove a member from a set.
+     */
+    export async function srem(key, member) {
+        await redis.srem(key, member)
+    }
+
+    /**
+     * Check whether a value is a member of a set.
+     *
+     * @returns Promise<boolean>
+     */
+    export async function sismember(key, member) {
+        return await redis.sismember(key, member)
+    }
+
+    /**
+     * Return all members of a set.
+     *
+     * @returns Promise<string[]>
+     */
+    export async function smembers(key) {
+        return await redis.smembers(key)
+    }
+
+    // -- Pub/Sub ---------------------------------------------------------------
+
+    /**
+     * Publish a message to a channel.
+     *
+     * @param channel — channel name
+     * @param message — message string (serialize complex payloads first)
+     */
+    export async function publish(channel, message) {
+        await redis.publish(channel, message)
+    }
+
+    /**
+     * Subscribe to a channel. The handler is called with (message, channel)
+     * for every published message until unsubscribed.
+     *
+     * NOTE: For real-time client-facing state, prefer scrml's <channel>
+     * primitive — it is the language-native real-time abstraction.
+     *
+     * @param channel  — channel name
+     * @param handler  — function(message, channel)
+     */
+    export async function subscribe(channel, handler) {
+        await redis.subscribe(channel, handler)
+    }
+
+    /**
+     * Unsubscribe from a channel. If channel is omitted, unsubscribes from
+     * all channels.
+     */
+    export async function unsubscribe(channel) {
+        if (channel) {
+            await redis.unsubscribe(channel)
+        } else {
+            await redis.unsubscribe()
+        }
+    }
+
+    // -- Custom client ---------------------------------------------------------
+
+    /**
+     * Create a custom Redis client (for non-default URLs or special options).
+     * Returns a RedisClient instance with the same method surface as the
+     * default `redis` client.
+     *
+     * @param url     — redis://, rediss://, redis+tls://, redis+unix:// etc.
+     * @param options — optional ConnectionOptions: connectionTimeout,
+     *                  idleTimeout, autoReconnect, maxRetries,
+     *                  enableOfflineQueue, enableAutoPipelining, tls
+     */
+    export function createClient(url, options) {
+        return new RedisClient(url, options)
+    }
+
+    /**
+     * Send a raw Redis command. Escape hatch for commands not covered by
+     * the wrapper above.
+     */
+    export async function send(command, args) {
+        return await redis.send(command, args || [])
+    }
+
+    /**
+     * Close the default client. Call at process shutdown if needed.
+     * Subsequent operations will reconnect.
+     */
+    export function close() {
+        redis.close()
+    }
+}
+</program>
