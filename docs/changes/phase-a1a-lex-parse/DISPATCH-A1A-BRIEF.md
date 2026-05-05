@@ -36,8 +36,8 @@ The dispatch is **strictly additive at the AST layer:** extend existing AST node
 - These already exist in the tokenizer; verify they remain stable under v0.next shapes (no regression tests should drop).
 
 **Reserved keywords:**
-- `reset` — already partially recognized; ensure it's a reserved word (lexer-level), so `function reset() {}` and `let reset = ...` produce a `reset`-keyword token at the use site (parser then emits `E-RESERVED-IDENTIFIER`). The reservation is a LEXER concern; the error emission is a PARSER concern.
-- `not` — already recognized as a unary operator in expressions (per Stage 0b D3). Verify it's still recognized; ensure no parser regression.
+- `reset` — **NOT currently in `KEYWORDS`** (verified S60 dispatch agent against `tokenizer.ts` lines 55-85; the brief originally claimed "already partially recognized" — that was stale). Add `reset` to KEYWORDS so `function reset() {}` and `let reset = ...` produce a `reset`-keyword token at the use site (parser then emits `E-RESERVED-IDENTIFIER`). Reservation is a LEXER concern; error emission is a PARSER concern.
+- `not` — already recognized at line 78 of `tokenizer.ts`. Verify no regression; no work expected.
 
 **Attribute names with semantic meaning (parser-level — these are tokenized as plain identifiers; the parser interprets them):**
 - `default=` — parses as a generic attribute on any state-cell decl (`<x default=expr> = init`).
