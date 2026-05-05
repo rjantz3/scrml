@@ -431,6 +431,27 @@ Surfaced from S57 Bun audit (Bun 1.3.0 → 1.3.13 release notes). Not v0.2.0 sco
 | **CI: parallel + sharded tests** | `bun test --parallel --shard --changed --isolate` (1.3.13) | Test posture for ~7,851+ tests across A1+ rewrite. Parallel + shard = real CI speedup; `--changed` for iterative dev. | Phase A1 entry — switch CI config when test count growth makes it pay. |
 | **Headless browser testing** | `Bun.WebView` (1.3.12) | Replace Puppeteer in CI for rendered-output testing. Drops a heavy npm dep. | Stretch — Puppeteer works today; only swap if Bun.WebView covers the matrix. |
 
+### SPEC.md split (per-section files + concat build) — v0.3.0+ candidate
+
+**Surfaced from S57 D2.6 halt** (agent `a6846bf3ea56e0ad8`). SPEC.md is now ~22,288 lines / ~380k tokens after the §6 V5-strict major rewrite (D1.5). At this size:
+
+- Reading the file requires ~16 chunked Read calls (Read tool caps at 25k tokens/call)
+- Full-file Write-back is infeasible (380k tokens per call exceeds single-turn output budgets)
+- Future Edit-tool stress as the file approaches 30k+ lines after D2/D3/D4
+- IDE responsiveness on the file is degrading (LSP indexing, scrolling, search latency)
+
+**Proposed v0.3.0+ shape:** split SPEC.md into per-section files under `compiler/spec/` (e.g., `01-overview.md`, `03-context.md`, `06-reactivity.md`, `34-error-codes.md`, etc.) with a concat build script `scripts/build-spec.sh` that emits a unified `compiler/SPEC.md` for grep / browse / publication. SPEC-INDEX.md regen would key off the per-section files directly.
+
+**Trade-offs:**
+- (+) Each section file is small enough for any tool path
+- (+) Per-section editing has clean diff scope
+- (+) Index regeneration becomes mechanical (file-per-section maps cleanly to TOC)
+- (-) One-time migration cost for existing SPEC.md cross-refs
+- (-) Build step needed for the canonical unified view
+- (-) Authors must be aware of the split (or treat the unified file as canonical and split as cache)
+
+**Defer until v0.3.0+** unless Stage 0b D3 or D4 also hit the size wall (likely: D3 adds §38 + §39 + §53; D4 cleanup grows further). If they do, prioritize earlier — possibly after Phase A1 stabilizes.
+
 ### Bun version pin
 
 `package.json` engines pinned to `bun >=1.3.13` (S57). Captures the perf wins (5.5× gzip via zlib-ng, structuredClone 25× faster on arrays, 2.3× faster URLPattern, range request support in Bun.serve) and unlocks the candidates above.
