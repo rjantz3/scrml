@@ -151,6 +151,8 @@ What you got from the wrapper:
 
 The state-children are the same blocks of markup you would have written in Tier 0, just gathered under their variant. Promotion is mostly cut-and-paste, plus the `type` decl.
 
+One detail worth being precise about: `rule="..."` attributes are *allowed* inside `<match>` variants. They parse, and the compiler may check them as-if — the transition graph they imply has to be internally well-formed — but they do nothing at Tier 1. `<match>` is a render-time projection, not a state machine. The rules sit there inert. Tier 1's contract is structural exhaustiveness, not transition enforcement; writing rules in a match documents intent, not behavior. Promotion to `<engine>` is what makes them load-bearing.
+
 This is enough for many apps. Ship it.
 
 ## The second nudge
@@ -262,10 +264,11 @@ The only thing that changes between tiers is the wrapper.
 
 ```
 Tier 0:  if= chains scattered across markup           (no wrapper)
-Tier 1:  <match for=Phase> { state-children }         (structural exhaustiveness)
+Tier 1:  <match for=Phase> { state-children }         (structural exhaustiveness;
+                                                       rule= allowed but inert)
 Tier 2:  <engine for=Phase initial=...> {             (transition validation +
-            state-children                              transition handlers)
-            + rule= attributes
+            state-children                              transition handlers;
+            + rule= attributes (now active)             rule= now load-bearing)
             + <onTransition> blocks
          }
 ```

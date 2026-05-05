@@ -431,6 +431,17 @@ Surfaced from S57 Bun audit (Bun 1.3.0 → 1.3.13 release notes). Not v0.2.0 sco
 | **CI: parallel + sharded tests** | `bun test --parallel --shard --changed --isolate` (1.3.13) | Test posture for ~7,851+ tests across A1+ rewrite. Parallel + shard = real CI speedup; `--changed` for iterative dev. | Phase A1 entry — switch CI config when test count growth makes it pay. |
 | **Headless browser testing** | `Bun.WebView` (1.3.12) | Replace Puppeteer in CI for rendered-output testing. Drops a heavy npm dep. | Stretch — Puppeteer works today; only swap if Bun.WebView covers the matrix. |
 
+### `scrml:oauth` extensions — v0.3.0+ candidates (S58)
+
+Surfaced from S58 `scrml:oauth` dispatch. The module shipped without these on principle — both are surface-area enlargers that need their own scope to ship safely. Ship-decision was "decode-only + caller-injected storage now; harden later when felt need surfaces."
+
+| Candidate | What it adds | Trigger |
+|---|---|---|
+| **JWKS signature verification** for `parseGoogleIdToken` | Currently decode-only — caller must NOT use for security-critical claim trust without out-of-band verification. v0.3.0 adds JWKS endpoint fetching + signature verification + key rotation cache. Likely extends to `parseIdToken(provider, token)` for any OIDC provider. | When app authors hit "I want to trust the ID token claims directly" demand — especially for serverless contexts where session lookup is expensive. |
+| **OIDC discovery (RFC 8414)** | Currently provider configs (google/github/microsoft/discord) are statically encoded. RFC 8414 well-known discovery endpoint (`/.well-known/openid-configuration`) lets a provider config be derived at runtime. Useful for Auth0 / Okta / Keycloak / self-hosted IDPs without writing a preset. | When third-party IDP support (beyond the 4 hard-coded presets) becomes a felt need. |
+
+Both deferrals are documented inline in `stdlib/oauth/index.scrml` source comments at the relevant API surface so consumers don't get surprised.
+
 ### SPEC.md split (per-section files + concat build) — v0.3.0+ candidate
 
 **Surfaced from S57 D2.6 halt** (agent `a6846bf3ea56e0ad8`). SPEC.md is now ~22,288 lines / ~380k tokens after the §6 V5-strict major rewrite (D1.5). At this size:

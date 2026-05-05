@@ -139,10 +139,24 @@
 
 ## 8. Files modified mid-S58 (not committed yet)
 
-- `hand-off.md` (this file)
-- `handOffs/hand-off-58.md` (S57-close snapshot, also touched at session start)
-- `docs/PA-SCRML-PRIMER.md` (D3 + oauth update — last-updated stamp, §9 rewrite, §10 oauth row + count, honesty-position bump)
-- `.claude/settings.local.json` (additionalDirectories whitelist for cross-repo reads)
+Held since the doc commit at `acdd9b9`:
+
+- `docs/changes/v0next-spec-impact/IMPLEMENTATION-ROADMAP.md` — §8.5 v0.3.0+ candidates: appended `scrml:oauth` JWKS sig verification + OIDC discovery (RFC 8414) deferrals as their own subsection (between Bun-piggyback table and SPEC.md-split entry).
+- `docs/articles/tier-ladder-promotion-devto-2026-05-04.md` — Tier 1 section: added paragraph framing `rule=` attributes as "allowed but inert" inside `<match>`; ladder diagram updated to mark "rule= allowed but inert" at Tier 1 and "rule= now load-bearing" at Tier 2. Matches user's prior framing: rules are allowed, possibly checked-as-if, but not enforced at Tier 1.
+
+(Already committed/pushed today: hand-off.md, handOffs/hand-off-58.md, docs/PA-SCRML-PRIMER.md at `acdd9b9`. Not staged again — wait for next cluster.)
+
+## 8.1 D4 status (background dispatch)
+
+Agent `a3219027b50e48f08`, branch `changes/v0next-spec-impact-d4` from `acdd9b9`.
+
+Last check (early in session): 6 commits, ~5/25 plan items — through §13.5 RemoteData cross-ref. Pace healthy, no anomalies, pre-commit clean each WIP. PIPELINE.md rewrite is the bulk and hasn't started yet (Tier 11 is later in plan).
+
+Will check again or wait for completion notification.
+
+## 8.2 Open questions resolved this session-mid
+
+- ✅ "Rules-inert framing missing from article" — surfaced and closed; both inline paragraph and ladder diagram updated.
 
 ---
 
