@@ -8,7 +8,7 @@ imports, real-time channels, lin tokens, state machines, role gating).
 > **Status: M1-M6 shipped.** All 6 milestones complete. Schema + auth scaffold,
 > dispatcher / driver / customer slices, real-time integration, lin tokens,
 > README + final friction summary. See
-> `../../docs/changes/dispatch-app/scoping.md` for the original roadmap and
+> `scrml-support/archive/changes/dispatch-app/scoping.md` for the original roadmap (moved from `docs/changes/dispatch-app/` in S61 curation pass) and
 > `FRICTION.md` for the load-bearing artifact: **26+ entries** logged across
 > M1-M6 documenting validation-principle violations, silent-failure patterns,
 > and DX gaps surfaced while building this app.
@@ -297,7 +297,7 @@ of the entire 6-milestone exercise.
 
 ## Links
 
-- [Scoping doc](../../docs/changes/dispatch-app/scoping.md) — original roadmap
+- Scoping doc — `scrml-support/archive/changes/dispatch-app/scoping.md` — original roadmap (moved from `docs/changes/dispatch-app/` in S61 curation pass)
 - [LLM kickstarter v1](../../docs/articles/llm-kickstarter-v1-2026-04-25.md) — required brief for any scrml-writing dispatch
 - [Multi-file precedent](../22-multifile/) — closest precedent for §21 imports
 - [Lin token reference](../19-lin-token.scrml) — canonical `lin` pattern

@@ -97,19 +97,19 @@ Grouped into sub-batches for easier user review/ratification. Each sub-batch is 
 
 **Disposition:** all 4 → `scrml-support/archive/dispatches/expr-ast-phase-4d/<name>/`.
 
-### §3.3 Batch C: dispatch-app M-series (7 dirs) — S38-39 multi-stage dispatch
+### §3.3 Batch C: dispatch-app M-series (7 dirs) — ✅ RATIFIED + EXECUTED S61 (2026-05-05)
 
-| Dir | Era / What |
+| Dir | Final location |
 |---|---|
-| `dispatch-app/` | S38-39 |
-| `dispatch-app-m1/` | S38-39 |
-| `dispatch-app-m2/` | S38-39 |
-| `dispatch-app-m3/` | S38-39 |
-| `dispatch-app-m4/` | S38-39 |
-| `dispatch-app-m5/` | S38-39 |
-| `dispatch-app-m6/` | S38-39 |
+| `dispatch-app/` | `scrml-support/archive/changes/dispatch-app/` |
+| `dispatch-app-m1/` | `scrml-support/archive/changes/dispatch-app-m1/` |
+| `dispatch-app-m2/` | `scrml-support/archive/changes/dispatch-app-m2/` |
+| `dispatch-app-m3/` | `scrml-support/archive/changes/dispatch-app-m3/` |
+| `dispatch-app-m4/` | `scrml-support/archive/changes/dispatch-app-m4/` |
+| `dispatch-app-m5/` | `scrml-support/archive/changes/dispatch-app-m5/` |
+| `dispatch-app-m6/` | `scrml-support/archive/changes/dispatch-app-m6/` |
 
-**Disposition:** all 7 → `scrml-support/archive/dispatches/dispatch-app/<name>/`.
+**Cross-refs fixed:** 2 in `examples/23-trucking-dispatch/README.md` (header status box + Links section).
 
 ### §3.4 Batch D: F-* feature/fix series (11 dirs) — S29-S37 era
 
@@ -247,7 +247,7 @@ Suggested ratification cadence: 1-2 batches per session to avoid overload. PA ha
 ## §6 PA recommended sequence
 
 1. ✅ **Batch A (P-series, 12 dirs)** — RATIFIED + EXECUTED S61 (2026-05-05). 12 dirs → `scrml-support/archive/changes/`; cross-ref in FRICTION.md fixed.
-2. **Batch C (dispatch-app, 7 dirs)** — single multi-stage dispatch; clean cluster.
+2. ✅ **Batch C (dispatch-app, 7 dirs)** — RATIFIED + EXECUTED S61 (2026-05-05). 7 dirs → `scrml-support/archive/changes/`; 2 cross-refs in 23-trucking-dispatch/README.md fixed.
 3. **Batch B (expr-ast-phase-4d, 4 dirs)** — single subsystem cluster.
 4. **Batch I (fix-*, 20 dirs)** — large but uniform; deref-friendly.
 5. **Batch D (f-* feature/fix, 11 dirs)** — hotfix-level work.
