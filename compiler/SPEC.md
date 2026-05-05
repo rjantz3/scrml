@@ -19659,6 +19659,43 @@ E-ASSIGN-001: `let` declaration at line 3 appears in an expression position.
 **Compound assignment operators as expressions.** `+=`, `-=`, `*=`, `/=`, `%=` are currently statement-only in scrml. A future amendment MAY extend expression semantics to compound assignment. If adopted, they would follow the same double-parentheses convention in condition positions and produce the post-assignment value. This is deferred pending evidence of need.
 
 **Destructuring assignment as expression.** `[a, b] = fn()` and `{x, y} = obj` are currently not specified as expression forms. A future amendment MAY specify destructuring-assignment-as-expression. The result value of such an expression is non-obvious (the right-hand side value, or the destructured binding, or a tuple of bound values) and requires a dedicated spec section before implementation.
+
+### 50.14 Composition with the markup-as-value pillar (Stage 0b D4 — L1)
+
+**Added:** 2026-05-04 — composes assignment-as-expression with the §1.4 markup-as-value pillar.
+
+Under the L1 pillar (§1.4), markup is a first-class value type. Assignment-as-expression composes cleanly:
+
+```scrml
+<currentView> = <p>Hello</>           // markup value as RHS of assignment
+${ const refreshed = (@currentView = <p>Refreshed at ${Date.now()}</>) }
+                                      // assignment-expression evaluates to the assigned markup value
+```
+
+Inside markup interpolation `${@x = newValue}` is a legal expression position — the assignment-expression evaluates to the new value and is rendered (or coerced per the parent context's coercion rules, §10.2 / §22.4).
+
+**Normative reaffirmation:**
+- An assignment-expression's RHS MAY be a markup value (per L1, markup is a value).
+- An assignment-expression to a markup-typed cell IS a legal markup-typed expression at the use-site.
+- The rendering trigger is positional per §1.4 — a markup-typed assignment-expression in a markup parent context renders the assigned value at that position.
+
+### 50.15 Composition with bare-form event handlers (Stage 0b D4 — L19)
+
+**Added:** 2026-05-04 — cross-references §5.2.3's bare-form event handler rule.
+
+Bare-form event handlers (§5.2.3) accept three single-expression shapes: bare call, bare assignment, bare single-expression. The bare-assignment shape uses assignment-as-expression directly:
+
+```scrml
+<button onclick=@phase = .Loading>Begin</>
+```
+
+The expression `@phase = .Loading` is a single assignment-expression whose result value is `.Loading`. The bare-form discipline (§5.2.3) makes this legal because it is one expression. Multi-statement intent (`@phase = .Loading; track()`) forces a named function — assignment-as-expression does not loosen that rule.
+
+**Cross-references:**
+- §5.2.3 — bare-form event handler shapes (the rule that admits bare-assignment).
+- §1.4 — markup-as-value pillar.
+- §50.3 — assignment-expression result-value semantics (the assigned value IS the expression's result).
+
 ## 51. State Transition Rules and `< machine>` State Type
 
 **Revised:** 2026-05-04 (S57 Stage 0b D2.8) — added §51.0 (engines as Tier 2 of the case-analysis
