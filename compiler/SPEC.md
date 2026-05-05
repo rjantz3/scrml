@@ -5132,7 +5132,7 @@ Type annotations appear on variable declarations, function parameters, and funct
 ```
 type-expr       ::= primitive-type | identifier | type-expr '[]' | type-expr '|' type-expr | type-expr '?'
 primitive-type  ::= 'string' | 'number' | 'boolean' | 'void' | 'not'
-reactive-decl   ::= '@' identifier [ ':' type-expr ] '=' expr
+state-decl   ::= '@' identifier [ ':' type-expr ] '=' expr
 param-decl      ::= identifier ':' type-expr | identifier '?' ':' type-expr
 return-type     ::= '->' type-expr
 ```
@@ -22425,7 +22425,7 @@ Expected compiler output: no errors. `@draft` is `CardDraft` (local). `@cards` i
 #### 52.4.1 Syntax
 
 ```ebnf
-reactive-decl      ::= (server-modifier ws)? "@" identifier ws "=" ws expr
+state-decl      ::= (server-modifier ws)? "@" identifier ws "=" ws expr
 server-modifier    ::= "server"
 ```
 

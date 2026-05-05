@@ -1,5 +1,7 @@
 # v0.next parser audit — 2026-05-05 (S59)
 
+> **Note (Step 3 / 2026-05-05):** when this audit was written, the AST kind was `"state-decl"`. Phase A1a Step 3 renamed it to `"state-decl"`. References in this document that previously read `kind: "state-decl"` have been mass-renamed to `kind: "state-decl"` for forward-consistency. The historical name is preserved in this banner only.
+
 **Status:** diagnostic snapshot of compiler/src/ parser support for v0.next language features as of HEAD `92ef014`. Driven by Phase A1a re-decomposition after rev-3 dispatch surfaced a fundamental parser-vs-spec mismatch.
 
 **Methodology:** PA-direct probe (general-purpose audit agent stalled). 25 v0.next features + 2 legacy-path sanity checks compiled via `bun run compiler/src/cli.js compile`. Each probe also AST-dumped via `splitBlocks + buildAST` to determine whether the parser produces an actual decl-shape AST node or silently swallows the source as `html-fragment` text. **Compile-OK is NOT sufficient** — many forms compile clean but produce `html-fragment` raw text instead of state-decl AST. Audit table classifies on AST shape, not compile status.
@@ -8,7 +10,7 @@
 
 ## §1 Summary
 
-**The vast majority of v0.next is NOT supported by the current parser.** The sole parser-recognized state-decl form today is `@NAME = RHS` inside `${...}` logic blocks, producing `kind: "reactive-decl"`. The V5-strict `<NAME> = RHS` form — central to v0.next per SPEC §6 + L1/L2/L3 pillars — is **silently parsed as `html-fragment` text in every position probed**. Compile passes return zero errors, masking the gap. The deception is the danger: tests that round-trip "compile clean" without inspecting AST shape would falsely greenlight v0.next migration progress.
+**The vast majority of v0.next is NOT supported by the current parser.** The sole parser-recognized state-decl form today is `@NAME = RHS` inside `${...}` logic blocks, producing `kind: "state-decl"`. The V5-strict `<NAME> = RHS` form — central to v0.next per SPEC §6 + L1/L2/L3 pillars — is **silently parsed as `html-fragment` text in every position probed**. Compile passes return zero errors, masking the gap. The deception is the danger: tests that round-trip "compile clean" without inspecting AST shape would falsely greenlight v0.next migration progress.
 
 **Three error-shape buckets across 25 v0.next probes:**
 
@@ -16,7 +18,7 @@
 - **6 features hard-error**: F1a (top-level `<NAME>=` outside `<program>`), F16 (block-form `<match>`), F18/F19 (engine + onTransition — legacy `<machine>` sentence form expected), F20/F21 (file-level `<channel>`), F25 (`<errors of=...>`).
 - **2 features parse partially** as existing legacy nodes: F17 (JS-style match expression — works as a statement form somehow), F22 (`<schema>` parses as `kind: "state" stateType="schema"` via existing markup-tag-style state opener path; content body is text not parsed against the shared-core vocabulary).
 
-**Legacy `@NAME = init` paths** parse cleanly into `reactive-decl` nodes (L1) — confirms the current scrml syntax is alive and well; v0.next migration is genuinely additive, not a rewrite of working parser code.
+**Legacy `@NAME = init` paths** parse cleanly into `state-decl` nodes (L1) — confirms the current scrml syntax is alive and well; v0.next migration is genuinely additive, not a rewrite of working parser code.
 
 **Biggest gaps (priority-ordered for re-decomposition):**
 
@@ -67,7 +69,7 @@ Status legend:
 | F23 | Refinement-type predicate `<email>: string(pattern(...)) req = <input/>` | §53 | HTML-FRAGMENT | swallowed | Subsumed by F1c + type-annotation parser |
 | F24 | Auto-synth `${@signup.isValid}` read | §55.5 | HTML-FRAGMENT (compound side); `@signup.isValid` parses as member-access | compound decl swallowed; member access works | Subsumed by F7 (and A1b synthesizes the surface — A1a just needs to parse compound) |
 | F25 | `<errors of=expr/>` element | §55.8 | NOT-AT-ALL | E-SCOPE-001 — `of=@signup.email` rejected as unquoted ident | Medium — new structural element + attribute-as-expression parsing |
-| L1 | `@count = 0` inside `${}` | (current scrml) | PARSES-NOW | `kind: "reactive-decl" name="count" init="0"` | n/a — baseline |
+| L1 | `@count = 0` inside `${}` | (current scrml) | PARSES-NOW | `kind: "state-decl" name="count" init="0"` | n/a — baseline |
 | L2 | Plain JS `${ const x = 1 }` | (current scrml) | PARSES-NOW | parses as expected | n/a — baseline |
 
 ---
@@ -81,9 +83,9 @@ Status legend:
 <program>${ <count> = 0 }<div>${@count}</div></program>
 ```
 
-**Result:** compiles with 0 errors. AST contains `kind: "html-fragment"` with `content: "< count > = 0"`. **There is no `reactive-decl`, `state`, or `const-decl` node corresponding to the source** — the `<count>` opening token is consumed by markup-fragment tokenization inside the logic-block expression position, and `= 0` follows as raw text. The reference `${@count}` later does NOT resolve to a state cell (because the cell was never registered).
+**Result:** compiles with 0 errors. AST contains `kind: "html-fragment"` with `content: "< count > = 0"`. **There is no `state-decl`, `state`, or `const-decl` node corresponding to the source** — the `<count>` opening token is consumed by markup-fragment tokenization inside the logic-block expression position, and `= 0` follows as raw text. The reference `${@count}` later does NOT resolve to a state cell (because the cell was never registered).
 
-**Current path:** `${ @count = 0 }` parses cleanly as `kind: "reactive-decl" name="count" init="0"`.
+**Current path:** `${ @count = 0 }` parses cleanly as `kind: "state-decl" name="count" init="0"`.
 
 **Migration shape:** lexer or expression-parser must recognize `<NAME>` at expression-statement-start as a decl-site marker, not a markup-tag opener. Likely needs a context-aware rule: in logic-block / expression-statement position with `<IDENT>` followed by `=` (or `:` for typed decls, or end-of-line for compound parents), treat `<IDENT>` as decl-site. Decision affects block-splitter (which currently produces markup-fragment text from `<` in expression context).
 
@@ -127,7 +129,7 @@ Status legend:
 
 ### L1 — `@count = 0` inside `${}` (legacy baseline)
 
-**Result:** parses to `kind: "reactive-decl" name="count" init="0" initExpr={Literal: 0}`. **This is the only state-decl form parser produces today.** All v0.next paths must either extend this node kind OR introduce a new kind that A1b/A1c handle alongside.
+**Result:** parses to `kind: "state-decl" name="count" init="0" initExpr={Literal: 0}`. **This is the only state-decl form parser produces today.** All v0.next paths must either extend this node kind OR introduce a new kind that A1b/A1c handle alongside.
 
 ---
 
@@ -135,7 +137,7 @@ Status legend:
 
 ### §4.1 The deceptive-success pattern
 
-The most dangerous finding: 17 of 25 v0.next features compile WITH ZERO ERRORS while producing AST that doesn't reflect the source intent. The `<NAME> = RHS` form is consistently parsed as `html-fragment` raw text; downstream codegen emits the text as DOM content; tests asserting "compiles cleanly" pass without catching the gap. **Any A1a sub-step DoD that checks compile-success without AST-shape introspection is meaningless.** Phase A1a tests must assert `ast contains { kind: "reactive-decl"|"state-decl"|... }` not just "no compile errors."
+The most dangerous finding: 17 of 25 v0.next features compile WITH ZERO ERRORS while producing AST that doesn't reflect the source intent. The `<NAME> = RHS` form is consistently parsed as `html-fragment` raw text; downstream codegen emits the text as DOM content; tests asserting "compiles cleanly" pass without catching the gap. **Any A1a sub-step DoD that checks compile-success without AST-shape introspection is meaningless.** Phase A1a tests must assert `ast contains { kind: "state-decl"|"state-decl"|... }` not just "no compile errors."
 
 ### §4.2 Subsystem cluster of gaps
 
@@ -152,7 +154,7 @@ The most dangerous finding: 17 of 25 v0.next features compile WITH ZERO ERRORS w
 
 ### §4.3 What ALREADY works (good news)
 
-- `@NAME = RHS` inside `${...}` → `reactive-decl` (L1).
+- `@NAME = RHS` inside `${...}` → `state-decl` (L1).
 - Plain JS `let`/`const` inside `${...}` → standard JS decls (L2).
 - `@cell.path` reads + writes → member-access expressions (F9).
 - `<schema>` opener — at least the wrapper.
@@ -164,7 +166,7 @@ The `@`-form is the load-bearing bridge: V5-strict access for reads/writes (`@x 
 
 | Kind | Current role | v0.next migration shape |
 |---|---|---|
-| `reactive-decl` | `@NAME = init` decl in `${}` | Either rename / extend with `shape`, `isConst`, `validators`, `defaultExpr`, `pinned`, `renderSpec`, OR introduce parallel `state-decl` kind |
+| `state-decl` | `@NAME = init` decl in `${}` | Either rename / extend with `shape`, `isConst`, `validators`, `defaultExpr`, `pinned`, `renderSpec`, OR introduce parallel `state-decl` kind |
 | `state` | markup-tag-style state opener `<StateName attrs>...</>` (e.g. `<schema>`, type-constructor decls) | Used unchanged for `<engine>`, `<match>`, `<channel>`, `<errors>` after structural-element registry expansion |
 | `state-constructor-def` | typed state-constructor definition | Existing — no v0.next interaction |
 | `html-fragment` | raw markup text inside expression context | The "drain" that silently swallows misclassified `<NAME>` decls — the central diagnostic signature |
@@ -200,7 +202,7 @@ The S60 11-step plan in `AST-CONTRACTS-AND-DECOMPOSITION.md` is partially salvag
 
 ### §5.3 Suggested architectural moves (descriptive, not prescriptive)
 
-1. **Foundational pass first:** introduce `<NAME>` decl-site recognition in expression-statement position. The simplest framing: in `${...}` logic-body parsing, when a top-level statement starts with `<` followed by IDENT followed by `>` (or attributes-then-`>`) followed by `=` (or `:` for typed) or block-start `{`, treat as state-decl form. Output AST: extend `reactive-decl` with `shape`, `isConst`, etc., OR introduce parallel `state-decl` kind. Per the AST contracts doc S60 leans on `kind: "state"` extension — that target was wrong; the correct extension target is `reactive-decl`.
+1. **Foundational pass first:** introduce `<NAME>` decl-site recognition in expression-statement position. The simplest framing: in `${...}` logic-body parsing, when a top-level statement starts with `<` followed by IDENT followed by `>` (or attributes-then-`>`) followed by `=` (or `:` for typed) or block-start `{`, treat as state-decl form. Output AST: extend `state-decl` with `shape`, `isConst`, etc., OR introduce parallel `state-decl` kind. Per the AST contracts doc S60 leans on `kind: "state"` extension — that target was wrong; the correct extension target is `state-decl`.
 2. **Then per-shape variants:** Shape 2 adds `renderSpec` sub-node + validator scan; Shape 3 adds `isConst` + derived-cell linkage.
 3. **Then structural elements:** `<engine>`, `<channel>`, `<match>`, `<errors>` each need registration in the structural-element registry (§4 + §24) so their openers parse to dedicated `kind`s rather than html-fragment / E-COMPONENT-035 / E-ENGINE-020.
 4. **Then refinement types + schema vocab + pinned-on-imports** in any order.
@@ -212,7 +214,7 @@ Every A1a sub-step's DoD must include: **AST shape assertions, not just compile-
 ### §5.5 Re-decomposition recommendation
 
 PA should re-write `AST-CONTRACTS-AND-DECOMPOSITION.md` based on this audit:
-- Correct AST extension target (`reactive-decl`, not `kind: "state"`).
+- Correct AST extension target (`state-decl`, not `kind: "state"`).
 - Add foundational pass as the first ~3-4 steps before any shape-discriminant work.
 - Update wall-time estimate to ~35-55h.
 - Strengthen test invariants per §5.4.

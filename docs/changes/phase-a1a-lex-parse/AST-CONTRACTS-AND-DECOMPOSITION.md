@@ -17,7 +17,9 @@
 
 ### §1.1 `kind: "state-decl"` — RENAMED from `reactive-decl` + EXTENDED
 
-**Rename premise:** the AST kind currently called `reactive-decl` represents a state-cell declaration (currently `@NAME = init` form, soon to extend with `<NAME> = init` form). The "reactive-decl" name is pre-V5-strict; under v0.2.0 the canonical concept is "state declaration" — both `<NAME>` and `@NAME` produce the same AST kind, distinguished by a `structuralForm` flag.
+**Status:** rename landed in Step 3 (branch `phase-a1a-step-3-rename-state-decl`, parent commit `7aad93a`). All source-code references to the literal `"reactive-decl"` string have been mass-renamed to `"state-decl"`. Historical name preserved in this section for rationale context only.
+
+**Rename premise:** the AST kind formerly called `reactive-decl` represents a state-cell declaration (currently `@NAME = init` form, extended in Steps 4-7 with `<NAME> = init` form). The "reactive-decl" name was pre-V5-strict; under v0.2.0 the canonical concept is "state declaration" — both `<NAME>` and `@NAME` produce the same AST kind, distinguished by a `structuralForm` flag.
 
 **Existing fields preserved** (from `reactive-decl`): `name`, `init` (string form), `initExpr` (ExprNode), `span`, optional `isShared`, `isServer`, type-annotation fields, sql-init flags, etc. (full list per current `ast-builder.js` ~11 construction sites at lines 3001-3160 + 4735+).
 

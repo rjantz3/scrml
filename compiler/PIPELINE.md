@@ -385,7 +385,7 @@ evaluation of attribute values or content expressions occurs.
                      fnKind: "function" | "fn", isServer: boolean, span: Span }
     | BareExpr     { kind: "bare-expr", expr: string, span: Span }
     | LiftExpr     { kind: "lift-expr", expr: LiftTarget, span: Span }
-    | ReactiveDecl { kind: "reactive-decl", name: string, init: string, span: Span }
+    | ReactiveDecl { kind: "state-decl", name: string, init: string, span: Span }
     | LetDecl      { kind: "let-decl", name: string, init: string, span: Span }
     | PureDecl     { kind: "pure-decl", name: string, params: string[], body: LogicNode[], span: Span }
     | ImportDecl   { kind: "import-decl", ... }
@@ -408,7 +408,7 @@ evaluation of attribute values or content expressions occurs.
   | Type name      | `kind` string value  |
   |----------------|---------------------|
   | FunctionDecl   | `"function-decl"`   |
-  | ReactiveDecl   | `"reactive-decl"`   |
+  | ReactiveDecl   | `"state-decl"`   |
   | PureDecl       | `"pure-decl"`       |
   | BareExpr       | `"bare-expr"`       |
   | LiftExpr       | `"lift-expr"`       |
@@ -581,7 +581,7 @@ V5-strict introduces three RHS shapes for state-cell declarations. TAB classifie
 
 ```
 ReactiveDecl = {
-  kind: "reactive-decl",
+  kind: "state-decl",
   name: string,
   modifier: "plain" | "const" | "pinned" | "server" | ...,
   rhsShape: "literal" | "render-spec" | "derived-expr",   // NEW v0.next

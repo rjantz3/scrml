@@ -59,7 +59,7 @@ Repo frontmatter `published:` field tracks dev.to staging state, NOT public post
 
 **Reality check:**
 - `<channel>` opener is recognized today (`kind: "state" stateType="channel"` via existing markup-tag-style state opener path, similar to schema).
-- `@shared messages = []` modifier is **REMOVED** in v0.next per L4 — but it's a current scrml form (works today via `reactive-decl` w/ `@shared` flag, presumably).
+- `@shared messages = []` modifier is **REMOVED** in v0.next per L4 — but it's a current scrml form (works today via `state-decl` w/ `@shared` flag, presumably).
 - The article CURRENTLY USES `@shared` which works today but is being deprecated.
 
 **The honest framing:** `@shared` works in v0.1.0. v0.next removes it (cells in channel body auto-sync by being there). The article should either (a) keep `@shared` and add a "as of v0.2.0 you can drop the `@shared` modifier; channel-body cells auto-sync" footnote, or (b) preview the v0.next form and note it's coming.
