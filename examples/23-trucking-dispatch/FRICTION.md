@@ -1654,7 +1654,7 @@ would have required leaving them per-page (per the SPEC §38.12 worked-example
 scoping caveat documented in the kickstarter). The dispatch app uses the
 default `topic=name` semantics throughout, which is the safe path.
 
-**Branch:** `changes/p3.a-follow`. Artifacts under `docs/changes/p3.a-follow/`.
+**Branch:** `changes/p3.a-follow`. Artifacts archived at `scrml-support/archive/changes/p3.a-follow/` (moved from `docs/changes/p3.a-follow/` in S61 curation pass).
 
 **See also:** P3 deep-dive (`scrml-support/docs/deep-dives/p3-cross-file-inline-expansion-2026-05-02.md`),
 SPEC §38.12, PIPELINE.md Stage 3.2 Phase 2, `compiler/src/state-type-routing.ts`.
