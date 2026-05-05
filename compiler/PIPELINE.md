@@ -1969,6 +1969,66 @@ lift checker is linear in the number of nodes with `hasLift: true` per logic blo
   Per-file subgraphs can be built in parallel and then merged.
 **Dependencies:** META (Stage 6.5) must complete for all files.
 
+### Stage 7 v0.next addendum (Pipeline 0.7.0 — SPEC §31.4 / §31.5 / §51 / §55 engineering target)
+
+**New DGNode kinds:**
+
+```
+DGNode (v0.next additions)
+  | { kind: 'engine-decl',    nodeId, forType, varName, derived: boolean,         hasLift, span }
+  | { kind: 'engine-variant', nodeId, engineNodeId, variant, ...,                 hasLift, span }
+  | { kind: 'validity',       nodeId, cellNodeId, surfaceProp: 'isValid'|'errors'|'touched'|'submitted', hasLift, span }
+  | { kind: 'derived-cell',   nodeId, cellNodeId, expression: ASTNode,            hasLift, span }
+  | { kind: 'validator-pred', nodeId, ownerCellNodeId, predicate: string, args: ASTNode[], hasLift, span }
+```
+
+**New DGEdge kinds:**
+
+```
+DGEdge.kind (v0.next additions)
+  | 'derives-from'        // const <derived> cell depends on RHS expression cells
+  | 'engine-derives'      // <engine derived=expr> depends on cells in expr
+  | 'validator-arg'       // validator predicate's expression-arg references a cell (cross-field)
+  | 'rule-source'         // engine state-child rule="event -> Variant" — source of event/predicate
+  | 'transition-effect'   // <onTransition> / effect= attaches to transition edges
+```
+
+**Validator predicate-arg dependency tracking (per SPEC §31.4):**
+
+For every validator on every cell that takes an expression argument, DG SHALL:
+
+1. Walk the predicate's argument expression tree and collect all reactive cell references.
+2. Add a `'validator-arg'` edge from the referenced cell's reactive node to the synthesised validity-surface node for the cell carrying the validator.
+3. After Phase 1 (per-file subgraph construction), check the global graph for cycles in `'validator-arg'` edges. A cycle is `E-VALIDATOR-CIRCULAR-DEP` (§55.11.2 / §34) — fail the run.
+
+**Derived-state expression dependency tracking (per SPEC §31.5):**
+
+For every `const <derived>` cell and every `<engine derived=expr>`:
+
+1. Walk the RHS expression tree.
+2. Add a `'derives-from'` edge (for derived cells) or `'engine-derives'` edge (for derived engines) from each referenced cell's reactive node to the derived cell's / engine's node.
+3. Cycle detection (DAG check on the union of `'derives-from'` and `'engine-derives'` edges):
+   - Cycle through derived cells only → `E-DERIVED-CIRCULAR-DEP`.
+   - Cycle through derived engines only → `E-DERIVED-ENGINE-CIRCULAR`.
+   - Mixed-kind cycle → `E-DERIVED-CIRCULAR-DEP` (the derived-cell error is the more general code).
+
+**Engine state-child rule edges (per SPEC §51.0.F):**
+
+For every `rule="event -> Variant"` attribute on a state-child:
+
+1. The event-name (the LHS of `->`) is registered as a transition trigger at the engine node. If the rule is event-driven, the event SHOULD have a corresponding `.advance(.event)` call site or compiler-derived call site (e.g., a button's `onclick` synthesised event).
+2. The target variant (the RHS of `->`) is added as a transition edge from the source variant to the target.
+3. The full `rule=` set forms the engine's transition graph. Direct writes to the engine variable that don't follow the transition graph are detected at TS (cross-ref Stage 6 v0.next addendum) and emit `E-ENGINE-INVALID-TRANSITION`.
+
+**`<onTransition>` and `effect=` edges:**
+
+For every `<onTransition to=X from=Y>` element and every `effect=` attribute on a state-child rule:
+
+1. Add a `'transition-effect'` edge from the relevant transition edge to the effect's body node. The effect fires when the transition fires (cross-ref §51.0.H).
+2. Multi-target rule (one rule with multiple `->` targets) with `effect=` attribute → `E-ENGINE-EFFECT-AMBIGUOUS` — `effect=` requires a single-target rule. Use `<onTransition>` for multi-target.
+
+**Performance budget:** <= 30 ms for the full project (existing 20 ms + 10 ms for v0.next-specific dependency tracking and cycle detection).
+
 ---
 
 ## Stage 7.5: Batch Planner (BP)
@@ -2166,6 +2226,78 @@ in parallel with code emission.
 **Performance budget:** <= 25 ms per file.
 **Parallelism opportunity:** Yes — per-file, once DG is complete.
 **Dependencies:** Dependency Graph Builder (DG) must complete for the project.
+
+### Stage 8 v0.next addendum (Pipeline 0.7.0 — SPEC §5.4.1 / §6 / §51 / §55 engineering target)
+
+**`<x/>` render-by-tag expansion (cross-ref SPEC §6.4, §5.4.1):**
+
+For each markup-position node with `resolvedCategory: "render-by-tag"` (NR-resolved cell name in markup), CG SHALL expand the node based on the cell's `rhsShape`:
+
+| `rhsShape` | Expansion |
+|---|---|
+| `"literal"` | Plain interpolation: emit `${@x}` text (the cell has no render-spec; non-display use is `E-CELL-NO-RENDER-SPEC`). |
+| `"render-spec"` | Emit the render-spec's underlying element with `bind:value`/`bind:checked`/`bind:files`/`bind:group` injected per the dispatch table in §5.4.1. The element's other attributes (e.g., `type`, `placeholder`) flow through; the bind attribute is added. |
+| `"derived-expr"` (markup-typed) | Inline the derived markup value at the position. |
+| `"derived-expr"` (non-markup-typed) | `E-CELL-NO-RENDER-SPEC` if used as `<x/>` render-by-tag; valid via `${@x}` interpolation. |
+
+**Engine state-child rendering (cross-ref SPEC §51.0):**
+
+For each `<engine for=T initial=.X>` declaration, CG emits:
+
+1. The auto-declared (or `var=`-overridden) reactive cell holding the current variant.
+2. A render-time conditional dispatcher that selects the active state-child body based on the current variant value.
+3. The transition contract enforcement: a runtime `_scrml_advance(engineVar, evt)` helper validates the transition against the compile-time-known rule set; invalid transitions throw at runtime (`E-ENGINE-INVALID-TRANSITION`), unless the from-state is statically knowable in which case TS rejects at compile time.
+4. `<onTransition>` and `effect=` handlers as transition-edge effects: registered on the engine's variant-change observer, fire in the same reactive flush as the transition.
+5. Derived engines (`derived=expr`): emit a reactive subscription on the cells referenced by `derived=expr`; the engine variable updates reactively as a `'derives-from'` consumer. Direct writes are rejected at TS (`E-DERIVED-ENGINE-NO-WRITE`).
+
+**Auto-synthesised validity property emission (cross-ref SPEC §55.5–§55.7):**
+
+For each cell with validators, CG emits computed-property accessors:
+
+```js
+// Pseudocode for emitted code
+Object.defineProperty(_signup, "isValid", { get: () => _signup_isValid_compute() })
+Object.defineProperty(_signup, "errors",  { get: () => _signup_errors_compute() })
+Object.defineProperty(_signup, "touched", { get: () => _signup_touched_state })
+Object.defineProperty(_signup, "submitted", { get: () => _signup_submitted_state })
+```
+
+The compute-fns are reactive — they re-evaluate when their dependency edges fire. The synthesised property writes are rejected at TS (`E-SYNTHESIZED-WRITE`); CG emits no setters.
+
+**`<errors of=expr/>` rendering (cross-ref SPEC §55.8):**
+
+For each `<errors of=cellExpr [all] [body...]/>` element:
+
+1. Resolve `cellExpr` to a reactive cell with a synthesised validity surface.
+2. Read `@cellExpr.errors` (the array of `ValidationError` enum values).
+3. If a body override is present, render the body with the per-error binding (`err` parameter to the body's arrow-function-shaped expression).
+4. Otherwise, render the default form using `messageFor(err, fieldName, ...payload)` (cross-ref §55.10's 4-level resolution chain).
+5. If `all` attribute is present, iterate all errors and render each; otherwise render only the first error (default).
+
+**`reset(@cell)` keyword expansion (cross-ref SPEC §6.8):**
+
+For each `reset(@cell)` call, CG emits:
+- If `@cell` is plain (Shape 1): `@cell = <default-expr>` where `<default-expr>` is the `default=` attribute's value if present, else the original initialiser expression.
+- If `@cell` is Shape 2 with render-spec: same as above; the rendered input element re-mounts via the reactive flush.
+- If `@cell` is a compound: `reset(@compound.field)` resets a single field; `reset(@compound)` resets all fields.
+
+The `default=` attribute's value is captured at TAB time and re-evaluated at reset time. This is the γ-semantics path (cross-ref SPEC §55.13).
+
+**Auto-name encoding for v0.next surfaces (cross-ref SPEC §47.4):**
+
+CG SHALL emit encoded names per §47 for:
+- Auto-declared engine variables (kind `t` — state).
+- Synthesised validity properties (kind `p` for booleans, kind `a` for the errors array). The name-builder uses the cell's encoded name + a deterministic suffix (e.g., `_t1234abcd` cell → `_t1234abcd_isValid` / `_t1234abcd_errors`).
+- Transition-handler bodies (kind `f` — function).
+
+`reflect()` (§47.2) SHALL decode the suffix-form back to its developer-visible dotted form (e.g., `@signup.isValid`).
+
+**New CG error codes (v0.next):**
+
+- `E-CG-VALIDITY-WRITE` (sibling of E-SYNTHESIZED-WRITE; defense-in-depth at CG time if a synthesised-property write reaches CG without TS catching it).
+- `E-CG-ENGINE-RULE-VIOLATION` (codegen-detected static rule violation; fires in addition to TS's `E-ENGINE-INVALID-TRANSITION`).
+
+**Performance budget:** <= 35 ms per file (existing 25 ms + 10 ms for v0.next render-by-tag dispatch + engine state-child rendering + validity-surface emission).
 
 ---
 
