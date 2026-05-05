@@ -1785,3 +1785,201 @@ describe("A1a Step 11.0c — typed-decl recognizer (`>` followed by `:`)", () =>
     assertNoHtmlFragmentMatching(ast, /<\s*name\s*>/);
   });
 });
+
+// =============================================================================
+// §S11E — Phase A1a Step 11.0e: `<x> = not\n<y>` newline-as-separator boundary
+// =============================================================================
+//
+// P-FUP-2 surfaced by Step 12 dispatch. Pre-fix, `<x> = not\n<y> = 0` collapsed
+// into ONE state-decl whose `init` ate the sibling decl (`init = "not\n< y > = 0"`)
+// because Step 11.0b's ASI-NEWLINE branch in `collectExpr` (L1959-2021) gated
+// on `lastEndsValue`, but the `not` KEYWORD token was NOT in the
+// `VALUE_KEYWORDS` set — so `lastEndsValue=false` and the sibling-decl
+// boundary never fired. SPEC §42.1 declares `not` "both a value and a type"
+// (the absence-value primitive), and §42.6 E-TYPE-045 forbids prefix-position
+// usage — `not` is unambiguously value-producing. Adding `"not"` to
+// `VALUE_KEYWORDS` is the universal fix; no `not`-specific branch.
+//
+// Spec authority: §42.1 (`not` is a value), §42.2.1 (`@name = not` /
+// `let x = not` canonical assignments), §42.6 E-TYPE-045 (no prefix `not`).
+// =============================================================================
+
+describe("A1a Step 11.0e — `<x> = not` newline-as-separator boundary", () => {
+  // §S11E.1 — Two V5-strict structural decls separated only by a newline,
+  // first init = `not`. Pre-11.0e this collapsed into ONE state-decl whose
+  // init ate `<y>=0`. Post-11.0e: TWO state-decls with init x="not", y="0".
+  test("§S11E.1: `<x> = not\\n<y> = 0` produces TWO state-decls", () => {
+    const src = `<program>\${
+      <x> = not
+      <y> = 0
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(2);
+    const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
+    expect(byName.x.shape).toBe("plain");
+    expect(byName.x.init).toBe("not");
+    expect(byName.x.structuralForm).toBe(true);
+    expect(byName.y.shape).toBe("plain");
+    expect(byName.y.init).toBe("0");
+    expect(byName.y.structuralForm).toBe(true);
+    assertNoHtmlFragmentMatching(ast, /<\s*x\s*>|<\s*y\s*>/);
+  });
+
+  // §S11E.2 — V5-strict + legacy mix: `<x> = not\n@y = 0` produces
+  // TWO state-decls (x with structuralForm=true, y with structuralForm=false).
+  // The legacy `@y` form would have separated even before 11.0e, but the
+  // V5-strict `<x>` decl now correctly terminates at the newline rather
+  // than swallowing the `@y` line into its init.
+  test("§S11E.2: `<x> = not\\n@y = 0` (V5-strict + legacy mix) produces TWO state-decls", () => {
+    const src = `<program>\${
+      <x> = not
+      @y = 0
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(2);
+    const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
+    expect(byName.x.init).toBe("not");
+    expect(byName.x.structuralForm).toBe(true);
+    expect(byName.y.init).toBe("0");
+    expect(byName.y.structuralForm).toBe(false);
+    assertNoHtmlFragmentMatching(ast, /<\s*x\s*>/);
+  });
+
+  // §S11E.3 — Cascading siblings: three V5-strict decls where the first two
+  // have init = `not`. Pre-11.0e this cascaded — the first decl ate ALL
+  // siblings. Post-11.0e all three separate cleanly.
+  test("§S11E.3: three siblings with `<a> = not\\n<b> = not\\n<c> = 0` all parse", () => {
+    const src = `<program>\${
+      <a> = not
+      <b> = not
+      <c> = 0
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(3);
+    const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
+    expect(byName.a.init).toBe("not");
+    expect(byName.b.init).toBe("not");
+    expect(byName.c.init).toBe("0");
+    assertNoHtmlFragmentMatching(ast, /<\s*a\s*>|<\s*b\s*>|<\s*c\s*>/);
+  });
+
+  // §S11E.4 — `<x> = not` followed by a const-derived sibling. The Step 11.0b
+  // ASI-NEWLINE infrastructure handles state-decl shape detection
+  // independent of plain vs derived; the `not` value-producing fix
+  // generalises across both.
+  test("§S11E.4: `<x> = not\\nconst <y> = expr` (plain + derived sibling)", () => {
+    const src = `<program>\${
+      <count> = 5
+      <maybeAbsent> = not
+      const <doubled> = @count * 2
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(3);
+    const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
+    expect(byName.count.shape).toBe("plain");
+    expect(byName.count.init).toBe("5");
+    expect(byName.maybeAbsent.shape).toBe("plain");
+    expect(byName.maybeAbsent.init).toBe("not");
+    expect(byName.doubled.shape).toBe("derived");
+    expect(byName.doubled.isConst).toBe(true);
+    expect(byName.doubled.init).toBe("@count * 2");
+    assertNoHtmlFragmentMatching(ast, /<\s*count\s*>|<\s*maybeAbsent\s*>|<\s*doubled\s*>/);
+  });
+
+  // §S11E.5 — Variant C compound child = `not`. Step 11.0a's compoundBody
+  // flag handles the same-line `<` IDENT boundary inside compound bodies;
+  // 11.0e's `not`-as-value fix is orthogonal but still benefits via the
+  // same ASI-NEWLINE infrastructure when collapse happens across newlines.
+  test("§S11E.5: Variant C compound `<formRes>{ <a> = not\\n<b> = 0 }` parses correctly", () => {
+    const src = `<program>\${
+      <formRes>
+        <a> = not
+        <b> = 0
+      </>
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(3);
+    const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
+    expect(byName.formRes).toBeDefined();
+    expect(byName.a.init).toBe("not");
+    expect(byName.b.init).toBe("0");
+    assertNoHtmlFragmentMatching(ast, /<\s*formRes\s*>|<\s*a\s*>|<\s*b\s*>/);
+  });
+
+  // §S11E.6 — `is not` operator's trailing `not` correctly triggers ASI for
+  // the next-line state-decl. Universality regression guard: `not` ending
+  // an `is not` boolean is value-producing in the operator's result.
+  test("§S11E.6: `const <isAbsent> = @count is not\\n<sib> = 0` separates correctly", () => {
+    const src = `<program>\${
+      <count> = 5
+      const <isAbsent> = @count is not
+      <sib> = 0
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(3);
+    const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
+    expect(byName.count.init).toBe("5");
+    expect(byName.isAbsent.shape).toBe("derived");
+    expect(byName.isAbsent.init).toBe("@count is not");
+    expect(byName.sib.init).toBe("0");
+    assertNoHtmlFragmentMatching(ast, /<\s*count\s*>|<\s*isAbsent\s*>|<\s*sib\s*>/);
+  });
+
+  // §S11E.7 — REGRESSION GUARD: legacy `@x = not\n@y = 0` form must STILL
+  // parse correctly. Pre-11.0e this already worked (legacy decl-recognizer
+  // path differs from V5-strict structural form). Post-11.0e the change
+  // sits in `collectExpr` (the RHS-collection helper) which is shared by
+  // both paths; this regression test enforces the legacy path remains
+  // unbroken. (BRIEF §6 risk surface: legacy path preservation.)
+  test("§S11E.7: REGRESSION — legacy `@x = not\\n@y = 0` form continues to parse", () => {
+    const src = `<program>\${
+      @x = not
+      @y = 0
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(2);
+    const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
+    expect(byName.x.init).toBe("not");
+    expect(byName.x.structuralForm).toBe(false);
+    expect(byName.y.init).toBe("0");
+    expect(byName.y.structuralForm).toBe(false);
+    assertNoHtmlFragmentMatching(ast, /<\s*x\s*>|<\s*y\s*>/);
+  });
+
+  // §S11E.8 — `let x = not\n<y> = 0` (broader ASI-fix benefit). The fix
+  // sits in `collectExpr`, which is shared by let-decl and state-decl
+  // RHS collection. `not` as a value-producing terminator works for
+  // BOTH let-decl and state-decl callers — this test pins that
+  // universality.
+  test("§S11E.8: `let x = not\\n<y> = 0` separates let-decl from state-decl", () => {
+    const src = `<program>\${
+      let x = not
+      <y> = 0
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const stateDecls = findKind(ast, "state-decl");
+    const letDecls = findKind(ast, "let-decl");
+    expect(letDecls.length).toBe(1);
+    expect(letDecls[0].name).toBe("x");
+    expect(letDecls[0].init).toBe("not");
+    expect(stateDecls.length).toBe(1);
+    expect(stateDecls[0].name).toBe("y");
+    expect(stateDecls[0].init).toBe("0");
+    assertNoHtmlFragmentMatching(ast, /<\s*y\s*>/);
+  });
+});
