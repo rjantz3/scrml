@@ -3147,10 +3147,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             expectingExpr = true;
           } else if (vt.kind === "OPERATOR") {
             expectingExpr = true;
-          } else if (vt.kind === "IDENT" || vt.kind === "KEYWORD" || vt.kind === "NUMBER" || vt.kind === "STRING") {
+          } else if (vt.kind === "IDENT" || vt.kind === "KEYWORD" || vt.kind === "NUMBER" || vt.kind === "STRING" || vt.kind === "AT_IDENT") {
             expectingExpr = false;
           }
-          valTexts.push(vt.text);
+          // STRING tokens have their quotes stripped by the tokenizer; restore
+          // them via JSON.stringify so the raw text is parseable as JS.
+          valTexts.push(vt.kind === "STRING" ? JSON.stringify(vt.text) : vt.text);
           valLastTok = vt;
           valIdx++;
         }

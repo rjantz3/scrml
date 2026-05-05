@@ -790,3 +790,185 @@ describe("A1a Step 5 — Shape 2 (decl-with-spec) renderSpec + validators", () =
     expect(renderSpecs[0].span).toBeDefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase A1a Step 6 — `default=<expr>` attribute + `pinned` bareword modifier
+// ---------------------------------------------------------------------------
+
+describe("A1a Step 6 — `default=` attr + `pinned` bareword on state-decl", () => {
+  // §S6.1 — Shape 1 + default=null
+  test("§S6.1: <startTime default=null> = Date.now() → defaultExpr ExprNode, pinned:false", () => {
+    const src = `<program>\${ <startTime default=null> = Date.now() }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.name).toBe("startTime");
+    expect(d.shape).toBe("plain");
+    expect(d.structuralForm).toBe(true);
+    expect(d.pinned).toBe(false);
+    expect(d.defaultExpr).not.toBeNull();
+    expect(typeof d.defaultExpr).toBe("object");
+    // Literal `null` per scrml ExprNode shape: { kind: "lit", value: null, ... }
+    expect(d.defaultExpr.value).toBeNull();
+    // Anti-fragment guard
+    assertNoHtmlFragmentMatching(ast, /< startTime/);
+  });
+
+  // §S6.2 — Shape 2 + req validator + default=""
+  test("§S6.2: <email req default=\"\"> = <input/> → validators:[req], defaultExpr literal '', pinned:false", () => {
+    const src = `<program>\${ <email req default=""> = <input type="text"/> }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.shape).toBe("decl-with-spec");
+    expect(d.pinned).toBe(false);
+    expect(d.validators).toBeDefined();
+    expect(d.validators.length).toBe(1);
+    expect(d.validators[0].name).toBe("req");
+    expect(d.defaultExpr).not.toBeNull();
+    expect(d.defaultExpr.value).toBe("");
+    assertNoHtmlFragmentMatching(ast, /< email/);
+  });
+
+  // §S6.3 — Shape 3 + pinned (no default)
+  test("§S6.3: const <doubled pinned> = @count * 2 → shape:derived, pinned:true, defaultExpr:null", () => {
+    const src = `<program>\${ const <doubled pinned> = @count * 2 }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.name).toBe("doubled");
+    expect(d.shape).toBe("derived");
+    expect(d.isConst).toBe(true);
+    expect(d.pinned).toBe(true);
+    expect(d.defaultExpr).toBeNull();
+    assertNoHtmlFragmentMatching(ast, /< doubled/);
+  });
+
+  // §S6.4 — Both default= and pinned (Shape 1)
+  test("§S6.4: <x pinned default=0> = @upstream → defaultExpr=0, pinned:true", () => {
+    const src = `<program>\${ <x pinned default=0> = @upstream }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.shape).toBe("plain");
+    expect(d.pinned).toBe(true);
+    expect(d.defaultExpr).not.toBeNull();
+    expect(d.defaultExpr.value).toBe(0);
+    assertNoHtmlFragmentMatching(ast, /< x /);
+  });
+
+  // §S6.5 — Multi-validator + default + pinned (Shape 2). Critical: default
+  // and pinned MUST NOT appear in validators[].
+  test("§S6.5: <name req length(>=2) default=\"\" pinned> = <input/> → validators only [req,length]", () => {
+    const src = `<program>\${ <name req length(>=2) default="" pinned> = <input type="text"/> }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.shape).toBe("decl-with-spec");
+    expect(d.pinned).toBe(true);
+    expect(d.defaultExpr).not.toBeNull();
+    expect(d.defaultExpr.value).toBe("");
+    expect(d.validators).toBeDefined();
+    expect(d.validators.length).toBe(2);
+    const names = d.validators.map(v => v.name);
+    expect(names).toEqual(["req", "length"]);
+    // Critical: neither `default` nor `pinned` leaked into validators[]
+    expect(names.includes("default")).toBe(false);
+    expect(names.includes("pinned")).toBe(false);
+    assertNoHtmlFragmentMatching(ast, /< name /);
+  });
+
+  // §S6.6 — Regression: no default=, no pinned (baseline shape unchanged)
+  test("§S6.6: <count> = 0 → defaultExpr:null, pinned:false (baseline regression)", () => {
+    const src = `<program>\${ <count> = 0 }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.shape).toBe("plain");
+    expect(d.pinned).toBe(false);
+    expect(d.defaultExpr).toBeNull();
+  });
+
+  // §S6.7 — pinned-only on Shape 1 (no validators, no default)
+  test("§S6.7: <flag pinned> = false → pinned:true, validators absent or empty", () => {
+    const src = `<program>\${ <flag pinned> = false }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.name).toBe("flag");
+    expect(d.shape).toBe("plain");
+    expect(d.pinned).toBe(true);
+    expect(d.defaultExpr).toBeNull();
+    // Validators not populated (or empty) since `pinned` does not leak there.
+    if (d.validators) {
+      const names = d.validators.map(v => v.name);
+      expect(names.includes("pinned")).toBe(false);
+    }
+  });
+
+  // §S6.8 — default= with @-cell reference RHS on Shape 2
+  test("§S6.8: <fee default=@taxRate> = <input/> → defaultExpr non-null", () => {
+    const src = `<program>\${ <fee default=@taxRate> = <input type="text"/> }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.shape).toBe("decl-with-spec");
+    expect(d.defaultExpr).not.toBeNull();
+    // Expected: defaultExpr contains an identifier-like ExprNode for `@taxRate`
+    expect(typeof d.defaultExpr).toBe("object");
+  });
+
+  // §S6.9 — Discriminant invariant extension (Step 6 fields).
+  test("§S6.9: discriminant invariant — every state-decl has typeof pinned === 'boolean' AND defaultExpr is null|object", () => {
+    const fixtures = [
+      `<program>\${ <a> = 0 }</program>`,
+      `<program>\${ <b pinned> = 1 }</program>`,
+      `<program>\${ <c default=0> = 2 }</program>`,
+      `<program>\${ <d pinned default=null> = e() }</program>`,
+      `<program>\${ const <f pinned> = @a + 1 }</program>`,
+      `<program>\${ <g req default=""> = <input/> }</program>`,
+      `<program>\${ <h req length(>=2) default="" pinned> = <input/> }</program>`,
+      // Legacy @-form: pinned/defaultExpr should be undefined or absent there
+      `<program>\${ @x = 0 }</program>`,
+      `<program>\${ @shared theme = "dark" }</program>`,
+    ];
+    let totalDecls = 0;
+    let structuralDecls = 0;
+    for (const src of fixtures) {
+      const { ast } = parse(src);
+      const decls = findKind(ast, "state-decl");
+      for (const d of decls) {
+        totalDecls++;
+        // For Step-6-extended structural state-decls, both fields must be set.
+        if (d.structuralForm === true) {
+          structuralDecls++;
+          expect(typeof d.pinned).toBe("boolean");
+          // defaultExpr may be null or an ExprNode (object). Never undefined.
+          const defaultOk = d.defaultExpr === null || (d.defaultExpr && typeof d.defaultExpr === "object");
+          expect(defaultOk).toBe(true);
+        }
+      }
+    }
+    expect(totalDecls).toBeGreaterThan(0);
+    expect(structuralDecls).toBeGreaterThan(0);
+  });
+
+  // §S6.10 — Negative: `<x default>` (default with no `=` and no value) does
+  // not parse as a structural decl (decline → fall through).
+  test("§S6.10: `<x default> = 0` (default without =) declines structural-decl", () => {
+    const src = `<program>\${ <x default> = 0 }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    // The scan declines because `default` KEYWORD is followed by `>` not `=`.
+    // Decl falls through to other handlers (markup-tag, html-fragment, etc.).
+    expect(decls.length).toBe(0);
+  });
+});
