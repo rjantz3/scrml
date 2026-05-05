@@ -339,7 +339,7 @@ describe("S24 §2a slice 2 — if / return / match-subject coverage", () => {
     expect(scope001.some(e => /undeclaredTildeInit/.test(e.message))).toBe(true);
   });
 
-  test("undeclared ident in reactive-derived-decl init → E-SCOPE-001", () => {
+  test("undeclared ident in derived state-decl init (const @x) → E-SCOPE-001", () => {
     const src = `<program>
 \${
   const @derived = undeclaredDerivedInit + 1

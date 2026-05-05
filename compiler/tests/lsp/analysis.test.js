@@ -33,7 +33,7 @@ describe("LSP L1 — extractAnalysisInfo (regression: canonical AST kinds)", () 
     expect(analysis.reactiveVars.find(v => v.name === "count").reactiveKind).toBe("reactive");
   });
 
-  it("populates analysis.reactiveVars for `reactive-derived-decl`", () => {
+  it("populates analysis.reactiveVars for derived state-decl (const @x; post-Step-11.5 fold)", () => {
     const src = "<program>\n${\n  @x = 1\n  const @y = @x * 2\n}\n</program>\n";
     const { analysis } = analyzeText("/t.scrml", src);
     const y = analysis.reactiveVars.find(v => v.name === "y");

@@ -97,6 +97,146 @@ Reverted my 3 attempted edits. Files restored to legacy form.
 - **Phase 4 (anti-html-fragment guard):** Still in scope on Phase 3 rewrites.
 - **Effort delta:** Phase 2 abandoned saves time; Phase 3 dynamic classify still needed.
 
+---
 
-</content>
-</invoke>
+## Phase 3 — inside-`${...}` REWRITES
+
+### Tooling built (commit history)
+
+1. `scripts/step12-classify.mjs` — per-file classifier.
+2. `scripts/step12-batch-classify.mjs` — recursive batch classifier with category buckets.
+3. `scripts/step12-rewrite.mjs` — applies the rewrite mechanically using the classifier.
+4. `scripts/step12-compile-snapshot.mjs` — pre/post parse-snapshot.
+5. `scripts/step12-validate-batch.mjs` — detects batch-induced AST decl loss (parser-bug regression detector).
+
+### Classifier categories
+
+| Category | Disposition |
+|---|---|
+| DECL-CANDIDATE | REWRITE — first-appearance/decl `@x = init` inside `${...}` |
+| TOPLEVEL-BLOCKED | LEAVE — Phase 2 parser gap (P-FUP-1) |
+| LEGACY-COMPLEX | LEAVE — `server`/`shared`/`const` modifier; out of Step 12 scope |
+| HAIRY-SELF-REF | LEAVE — degenerate `@x = @x + 1` first-appearance pattern |
+| WRITE | LEAVE — post-decl write per SPEC §6.1.2 canonical write form |
+
+Across `samples/compilation-tests/` (786 files): **383 DECL-CANDIDATE sites** in 182 distinct files.
+
+### Batch 1 — pretest samples (commit `f5601e7`)
+
+Rewrote 30 sites in 10 files (the 12 pretest samples from `scripts/compile-test-samples.sh` minus 2 with no DECL-CANDIDATE):
+- combined-001-counter (1)
+- combined-002-todo (2)
+- combined-003-form-validation (4)
+- combined-021-component-basic (4)
+- control-011-if-reactive (1)
+- reactive-014-form-state (4)
+- reactive-016-bind-value (6)
+- reactive-017-arrays (3)
+- reactive-018-class-binding (4)
+- transition-001-basic (1)
+
+Pretest: All 12 samples compile cleanly post-rewrite.
+Test: 8878 pass / 44 skip / 0 fail (0 regressions).
+
+### Batch 2 — bulk rewrite (commit `42ac133`)
+
+Rewrote 353 sites in 170 files — all of `samples/compilation-tests/` containing DECL-CANDIDATE sites.
+
+Classifier fix landed in this batch: structural-form decls (`<x> = init`) now correctly register as "name decl'd" so subsequent legacy `@x = newval` writes are NOT misclassified as new decls. Critical for files mixing structural decl + legacy writes.
+
+Test: 8878 pass / 44 skip / 0 fail (0 regressions).
+
+### Batch 3 — revert 5 files (commit `e96888a`)
+
+**SECOND CRITICAL FINDING — parser bug P-FUP-2.** 
+
+Discovered batch-2 rewrites in 5 files dropped state-decl AST counts. Root cause: the parser bug `<x> = not\n<y>` boundary in V5-strict structural form loses subsequent siblings (parser stops scanning at `not`). Pre-batch-2 (with legacy `@x = not`), the parser correctly continued across the newline.
+
+Files reverted to legacy `@-form` decls (decl count delta):
+- `combined-007-crud.scrml` (-6)
+- `gauntlet-r10-go-contacts.scrml` (-8)
+- `gauntlet-r10-odin-filebrowser.scrml` (-32)
+- `gauntlet-r10-rails-blog.scrml` (-12)
+- `integration-001-stripe-mini.scrml` (-11)
+
+These files keep their legacy `@x = init` decl form pending parser fix (separate follow-up: **P-FUP-2** — `<x> = not` newline-as-separator gap in BS or TAB).
+
+`scripts/step12-validate-batch.mjs` formalizes the regression detection mechanism.
+
+Test: 8878 pass / 44 skip / 0 fail (still 0 regressions).
+
+### Batch 4 — cosmetic Phase 1 cleanup
+
+Two cosmetic test description string updates (using legacy `reactive-derived-decl` kind name):
+- `compiler/tests/lsp/analysis.test.js:36` — `it("populates analysis.reactiveVars for derived state-decl (const @x; post-Step-11.5 fold)")`.
+- `compiler/tests/unit/gauntlet-s24/scope-001-logic-expr.test.js:342` — `test("undeclared ident in derived state-decl init (const @x) → E-SCOPE-001")`.
+
+Tests still pass after edit.
+
+---
+
+## Out-of-scope decisions
+
+### Broader `samples/` directory NOT extended
+
+Initial classifier sweep showed 624 sites in 858 files across the broader `samples/` directory (not just `samples/compilation-tests/`). Attempted broader rewrite encountered the same `<x> = not` parser bug + lacks test coverage to validate correctness. SURVEY §5 also explicitly scoped to `samples/compilation-tests/`.
+
+Decision: **broader `samples/` left in legacy `@-form`.** Step 12 deliberately stops at the SURVEY-scoped boundary. Future migration after P-FUP-2 lands.
+
+### Phase 4 (anti-html-fragment guard sweep) — not separately needed
+
+Per BRIEF §4 / §6.3, anti-html-fragment guards are required on rewritten POSITIVE PARSE TESTS. The Step 12 rewrites land in SAMPLE FILES, not parse tests — sample files don't carry their own assertions. The 12 pretest samples ARE compiled by browser tests, but those tests verify behavior, not AST shape. The structural rewrite IS the V5-strict canon upgrade — there's no AST shape to "upgrade" on the parse-test side. Phase 4 is therefore a NO-OP for Step 12 (no positive parse tests rewritten as part of Step 12).
+
+If future work involves rewriting positive parse tests (e.g., in `compiler/tests/integration/parse-shapes-v0next.test.js`), the BRIEF guidance applies — but no such rewrites were needed for Step 12.
+
+### Transition-decl tests (5 files) — Q1 ratified OUT-OF-SCOPE
+
+Per SURVEY Q1, the 5 unit test files in `compiler/tests/unit/transition-decl-*.test.js` are owned by P3 (deprecation) + A2 (engine impl). Step 12 did NOT touch them.
+
+### Stdlib + self-host — out of scope per SURVEY §2.7
+
+`stdlib/` (42 files) and `compiler/self-host/` are parity-lagged per Step 4-7 policy. Step 12 did NOT touch them.
+
+---
+
+## Final stats
+
+`git diff --stat 1e1ac10..HEAD -- samples/compilation-tests/`:
+
+```
+175 files changed, 330 insertions(+), 330 deletions(-)
+```
+
+(Each Step 12 rewrite is a 1-line swap `@<name> = init` ↔ `<<name>> = init`. Insert/delete count of 330 each = 330 rewrite sites.)
+
+Plus 2 cosmetic test description edits in `compiler/tests/lsp/analysis.test.js` and `compiler/tests/unit/gauntlet-s24/scope-001-logic-expr.test.js`.
+
+| Metric | Count |
+|---|---|
+| Files rewritten (samples) | **175** in `samples/compilation-tests/` |
+| Sites rewritten | **330** |
+| Files reverted (P-FUP-2 parser bug) | 5 (kept legacy `@-form`) |
+| Cosmetic test edits | 2 (description strings) |
+| Files modified outside samples/compilation-tests/ | 0 (broader `samples/` left in legacy form) |
+| Tests added | 0 |
+| Tests dropped | 0 |
+
+---
+
+## Test counts
+
+- Baseline: 8,878 pass / 44 skip / 0 fail / 8,922 tests across 439 files.
+- Post-Step-12: **8,878 pass / 44 skip / 0 fail / 8,922 tests across 439 files** — IDENTICAL.
+
+Zero regressions. Zero new tests (Step 12 mission was sample/test migration; no behavior changes).
+
+---
+
+## Follow-up tasks surfaced
+
+| ID | Description | Owner |
+|---|---|---|
+| P-FUP-1 | Top-level structural Shape 1 `<NAME> = init` recognition in BS | Future A1a or A1b |
+| P-FUP-2 | `<x> = not\n<y>` newline-as-separator boundary fix in BS or TAB | Future A1a (likely Step 11.0e or follow-on) |
+
+Both are PARSER bugs — not test-delta concerns. They surface real gaps in Step 11's V5-strict structural decl support that this Step 12 work uncovered.
