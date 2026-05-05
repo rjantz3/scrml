@@ -24,7 +24,10 @@ This is the fourth of six features the browser-language overview promised to unp
 Here is a screen anyone has written. A button that loads data, a spinner while it loads, an error message if it fails, a result when it succeeds.
 
 ```scrml
-<program>
+<program title="Counter"
+         description="A counter app demonstrating Tier 0 → Tier 1 → Tier 2 promotion."
+         version="0.1.0"
+         license="MIT">
 
 type LoadError:enum = {
     Network(msg: string)
@@ -71,6 +74,8 @@ function load() {
 
 </program>
 ```
+
+scrml's `<program>` element is the file's inline config. Middleware (cors, csrf, log, ratelimit, headers, auth, db) declared as attributes. The application's HTML head metadata (title, description, version, author, license) declared as attributes. Execution-context boundary for nested programs (workers via `<program name=...>`). The documentary attributes compile straight to standard HTML head tags; the rest are compile-time directives. Same wrapper, multiple roles.
 
 This compiles. This runs. This is also where most apps stop.
 
