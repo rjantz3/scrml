@@ -1804,20 +1804,20 @@ Validators (e.g., `req`, `length(>=2)`, `pattern(...)`) are bare attributes on t
 The RHS is an expression marked with `const`. The cell recomputes whenever its dependencies change. It is read-only.
 
 ```scrml
-const @doubled    = @count * 2
-const @greeting   = "Hello, " + @userName
-const @badge      = <span class="badge">${@userName}</span>    // markup-typed derived
+const <doubled>   = @count * 2
+const <greeting>  = "Hello, " + @userName
+const <badge>     = <span class="badge">${@userName}</span>    // markup-typed derived
 ```
 
 - `@doubled`, `@greeting`, `@badge` read the current derived value.
 - Writes to a derived cell (`@doubled = 5`) are **E-DERIVED-WRITE** (compile error). See §34.
 - `<doubled/>` in markup is **E-CELL-NO-RENDER-SPEC** for numeric/string derived cells — use `${@doubled}`.
-- For markup-typed derived cells (`const @badge = <span>...`), `${@badge}` expands the markup value at read time. This is the markup-as-value pillar (§1.4) applied to derived cells.
+- For markup-typed derived cells (`const <badge> = <span>...`), `${@badge}` expands the markup value at read time. This is the markup-as-value pillar (§1.4) applied to derived cells.
 
 **Cross-references:**
 - §6.1 — The two access forms
 - §6.4 — Render-by-tag semantics (full rules for when `<varname/>` is legal)
-- §6.6 — Derived values: `const @x` and `const <x>` (in-compound form)
+- §6.6 — Derived values: `const <x>` (top-level and in-compound form)
 - §6.8 — The `default=` attribute and `reset(@cell)` keyword (optional attribute on any shape)
 - §6.11 — Auto-synthesized validity surface (from Shape 2 validators)
 - §34 — E-CELL-NO-RENDER-SPEC, E-CELL-RENDER-SPEC-NOT-BINDABLE, E-DERIVED-WRITE
@@ -1923,7 +1923,7 @@ The developer cannot override the render-spec at a particular use site. If alter
 
 For Shape 3 cells with markup RHS:
 ```scrml
-const @badge = <span class="badge">${@userName}</span>
+const <badge> = <span class="badge">${@userName}</span>
 ```
 
 `${@badge}` in markup interpolates the markup value at read time. The markup recomputes reactively when `@userName` changes. `<badge/>` as a tag in markup is NOT supported (use interpolation).
@@ -2039,10 +2039,10 @@ ${ let active = @items.filter(i => i.done === false) }
 ```
 
 This does not trigger reactive updates. If the derived value must be reactive, declare it
-with `const @` (§6.6):
+with `const <name>` (§6.6):
 
 ```scrml
-const @active = @items.filter(i => i.done === false)
+const <active> = @items.filter(i => i.done === false)
 ```
 
 `@active` is a derived reactive value that re-evaluates whenever `@items` changes, per
@@ -2211,7 +2211,7 @@ array, pushes the new item, and writes back via `_scrml_reactive_set("todos", ..
 ```scrml
 <program>
     @items = []
-    const @doneCount = @items.filter(i => i.done).length
+    const <doneCount> = @items.filter(i => i.done).length
 
     <p>Done: ${@doneCount} of ${@items.length}</>
 </>
@@ -2291,7 +2291,7 @@ performs reconciliation. For unkeyed lists, the runtime rebuilds the list from s
 
 - **§6.3 (Reactive Semantics):** All normative statements in §6.3 apply to reactive arrays.
   A reactive array is a reactive value like any other.
-- **§6.6 (Derived Reactive Values):** `const @derived = @arr.filter(...)` creates a derived
+- **§6.6 (Derived Reactive Values):** `const <derived> = @arr.filter(...)` creates a derived
   reactive value that subscribes to `@arr`. Per §6.6, the derived value is re-evaluated lazily
   on the next read after `@arr` changes. The `.filter()` call is a plain JS expression in the
   derived body.
