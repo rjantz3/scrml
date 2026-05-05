@@ -117,14 +117,9 @@ All 11 dirs → `scrml-support/archive/changes/<name>/`.
 
 **Cross-ref fixed:** 1 in `docs/changelog.md` line 395 (F-COMPONENT-001 diagnosis writeup pointer updated to scrml-support archive location).
 
-### §3.5 Batch E: GITI bug fixes (2 dirs) — S29-era adopter bug fixes
+### §3.5 Batch E: GITI bug fixes (2 dirs) — ✅ RATIFIED + EXECUTED S61 (2026-05-05, combined with Batch G)
 
-| Dir | What |
-|---|---|
-| `giti-009-import-fix/` | GITI-009 |
-| `giti-011-css-at-rules-fix/` | GITI-011 |
-
-**Disposition:** both → `scrml-support/archive/dispatches/giti-bugs/<name>/`.
+Both dirs → `scrml-support/archive/changes/<name>/`. No cross-refs.
 
 ### §3.6 Batch F: BUG-letter series (2 dirs) — ✅ RATIFIED + EXECUTED S61 (2026-05-05)
 
@@ -135,14 +130,9 @@ All 11 dirs → `scrml-support/archive/changes/<name>/`.
 
 **Cross-refs:** none.
 
-### §3.7 Batch G: bun-sql phases (2 dirs) — S40-era SQL work
+### §3.7 Batch G: bun-sql phases (2 dirs) — ✅ RATIFIED + EXECUTED S61 (2026-05-05, combined with Batch E)
 
-| Dir | What |
-|---|---|
-| `bun-sql-phase-1/` | Bun SQL phase 1 |
-| `bun-sql-phase-2/` | Bun SQL phase 2 |
-
-**Disposition:** both → `scrml-support/archive/dispatches/bun-sql/<name>/`.
+Both dirs → `scrml-support/archive/changes/<name>/`. No cross-refs.
 
 ### §3.8 Batch H: LSP series (5 dirs) — S51-era LSP rework
 
@@ -246,9 +236,9 @@ Suggested ratification cadence: 1-2 batches per session to avoid overload. PA ha
 4. ✅ **Batch F (BUG-letters, 2 dirs)** — RATIFIED + EXECUTED S61 (2026-05-05). 2 dirs → `scrml-support/archive/changes/`; no cross-refs.
 5. ✅ **Batch D (F-series, 11 dirs)** — RATIFIED + EXECUTED S61 (2026-05-05). 11 dirs → `scrml-support/archive/changes/`; 1 changelog cross-ref fixed.
 6. ✅ **Batch I (fix-*, 20 dirs)** — RATIFIED + EXECUTED S61 (2026-05-05). 20 dirs → `scrml-support/archive/changes/`; 6 cross-refs fixed (changelog ×2, scope-c-findings-tracker ×2, 2 test files, 2 source files); 1 dangling pre-existing ref left as-is.
-7. **Batch H (LSP L1-L4, 5 dirs)** — recent (S51) but completed.
-8. **Batch J (misc, 12 dirs)** — heterogeneous; review-per-dir.
-9. **Batches E (GITI, 2), G (bun-sql, 2)** — remaining small clusters.
+7. ✅ **Batches E (GITI, 2) + G (bun-sql, 2) combined** — RATIFIED + EXECUTED S61 (2026-05-05). 4 dirs → `scrml-support/archive/changes/`; no cross-refs.
+8. **Batch H (LSP L1-L4, 5 dirs)** — recent (S51) but completed.
+9. **Batch J (misc, 12 dirs)** — heterogeneous; review-per-dir.
 
 ---
 
