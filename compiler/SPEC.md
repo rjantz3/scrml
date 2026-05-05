@@ -5008,6 +5008,20 @@ ${ function makeItem(name) {
 } }
 ```
 
+#### 7.4.1 Markup-as-expression under the markup-as-value pillar (Stage 0b D4 — L1)
+
+**Added:** 2026-05-04 — reframes §7.4 under the §1.4 markup-as-value pillar.
+
+The L1 pillar (§1.4) raises markup to a first-class value type in scrml. `let aDiv = <div>...</>` is not a special-case escape hatch — it is one instance of the universal rule: **markup elements may sit anywhere expressions sit.** Pass-as-arg, store-in-cell, return-from-fn, RHS-of-`=`, RHS-of-`const <derived>` (§6.6), inside `lift` (§10), inside slot fills (§16), inside refinement-type predicates that return markup (rare but legal), inside `match` arm RHS (§18), inside `^{}` meta contexts that emit markup (§22) — every one of these loci is a manifestation of the same pillar.
+
+**Normative reframe:**
+
+- §7.4's "markup as expression in logic context" is one specific surface where the pillar applies. The pillar applies in every expression position; §7.4 does not exhaust the rule.
+- A markup-typed value is structurally a `Markup` value at the type level (cross-ref §14 type system). It can be inspected, stored, passed, returned, and rendered.
+- The render trigger is positional: a markup-typed expression in a markup parent context is rendered as DOM at that position. A markup-typed expression in a logic parent context is just a value (no rendering happens until it reaches a markup context, e.g., via `lift` or via being the RHS of a `const <markup-typed-cell>` that is then rendered by tag).
+
+**Why this matters:** under the pillar, scrml has ONE expression language with markup as a first-class participant. Under any other framing, markup-as-expression looks like a special template construct. The pillar makes markup uniform with strings, numbers, and objects — which is the design intent.
+
 ### 7.5 Type Annotation Grammar
 
 Type annotations appear on variable declarations, function parameters, and function return types throughout scrml logic contexts. The grammar below formalizes what is used informally in spec examples.
@@ -5078,6 +5092,58 @@ ${ let loud = greeting.toUpperCase() }
 - Reactive variables (`@var`) declared at file level (outside any `${}`) are in scope for all `${}` blocks and markup throughout the file (§6.1).
 - Variables declared inside a function body within a `${}` block are scoped to that function. Only top-level declarations within the `${}` block participate in file scope.
 - Re-declaring a name with `let` in a later file-level `${}` block when that name was already declared at file scope SHALL be a compile error (E-SCOPE-010: duplicate binding in file scope).
+
+#### 7.6.1 File-level scope under V5-strict + hoisting + `pinned` (Stage 0b D4 — M11)
+
+**Added:** 2026-05-04 — composes §7.6's file-scope sharing with the V5-strict access model (§6.1) and the v0.next hoisting + `pinned` rules (§6.9, §6.10).
+
+**Composition rules:**
+
+- File-level `<x> = init` declarations (V5-strict structural form) participate in file scope identically to file-level `let`/`const`. The cell is reachable as `@x` from every subsequent `${}` block, every markup interpolation, and every state-child body in the same file (cross-ref §6.1).
+- File-level `<x> = init` declarations are hoisted per §6.9. The hoisting model: every reactive cell declared at file level is registered before any `${}` block executes; the evaluation order of initialisers respects source order, but cell IDENTITY is stable across the file. Forward-references to a cell from earlier `${}` blocks resolve to the cell's identity (the read returns its current value at read time).
+- `pinned` declarations (§6.10) honour the same forward-reference detection. A `pinned` cell whose initialiser depends on a cell that has not yet been declared in source order is `E-STATE-PINNED-FORWARD-REF` (§34) — `pinned` makes the cell's identity-stability into a hard contract, and the compiler refuses to evaluate forward-references through `pinned` cells.
+- Local `let`/`const` declarations inside a `${}` block participate in file scope per §7.6 only if they are at the TOP level of the block. Function-body locals remain function-scoped.
+- A V5-strict structural cell `<x>` and a local `let x` cannot coexist in the same file scope. `E-NAME-COLLIDES-STATE` (§34) — bare names in expressions are LOCALS only (§6.1), so a local `x` would shadow access to the cell's name in expression positions, which the compiler refuses.
+
+**Cross-references:**
+- §6.1 — V5-strict access (`<x>` decl, `@x` access).
+- §6.9 — hoisting model.
+- §6.10 — `pinned` keyword.
+
+### 7.7 Logic-markup interleaving (Stage 0b D4 — M8)
+
+**Added:** 2026-05-04 — formalises the canonical idiom for colocating logic with markup in a `<program>` body. v0.next does NOT prescribe a "logic at top, markup at bottom" file order; the canonical form is interleaved.
+
+**The canonical form:**
+
+```scrml
+<program>
+    ${ <count> = 0 }
+    ${ function increment() { @count = @count + 1 } }
+
+    <h1>Counter</h1>
+    <p>Count: ${@count}</p>
+
+    ${ const <doubled> = @count * 2 }
+
+    <p>Doubled: ${@doubled}</p>
+    <button onclick=increment()>+</button>
+</>
+```
+
+**Normative statements:**
+
+- A `<program>` body MAY interleave `${}` logic blocks, markup elements, text, and state declarations in any source order. There is no required prefix-vs-suffix ordering of logic and markup.
+- Cells declared in any `${}` block participate in file-scope per §7.6.1 — later markup may reference them via `@x` interpolation or `<x/>` render-by-tag.
+- The compiler's hoisting model (§6.9) ensures cell identities are stable across the file regardless of the writer's chosen interleaving order. Initialiser evaluation order respects source order; cell registration is hoisted.
+- Interleaving is the canonical form because it matches the way developers think about UI — declare a piece of state next to where it is rendered, declare a derived value next to its consumers, declare an event handler next to the button that calls it.
+
+**What is NOT canonical:** "all logic at top, all markup at bottom" file structure (the React/SFC pattern). v0.next's interleaving idiom is more flexible — declare state where you use it. Files that bunch all logic at the top remain valid; they are simply not the canonical shape.
+
+**Cross-references:**
+- §1.4 — markup-as-value pillar (the foundation of "logic and markup are the same expression language").
+- §6.9 — hoisting (makes interleaving safe).
+- §43 — nested `<program>` (composition unit).
 
 ---
 
