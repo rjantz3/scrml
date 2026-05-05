@@ -4906,25 +4906,47 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           }
           return s;
         };
+        // A1a Step 7: detect trailing `pinned` bareword on each import-list item.
+        // Per SPEC §21.8.1, `pinned` modifies the imported binding to enforce
+        // the §6.10 identity-stability contract in the importing file's scope.
+        // The modifier appears AFTER the imported name (and any optional `as <alias>`),
+        // separated by whitespace. Disambiguation rule: `pinned` is the modifier
+        // ONLY when it is the LAST whitespace-separated token AND the immediately
+        // preceding token is NOT `as` (otherwise `foo as pinned` would be ambiguously
+        // interpreted as either "alias to name `pinned`" or "modifier on foo with no alias";
+        // we choose the former — `pinned` is NOT in global KEYWORDS per AST-CONTRACTS §2.1).
+        // A1b will enforce semantic validity (`E-IMPORT-PINNED-INVALID` for non-cell-typed targets).
+        const _splitPinned = (entry) => {
+          const parts = entry.split(/\s+/).filter(Boolean);
+          if (parts.length >= 2 &&
+              parts[parts.length - 1] === "pinned" &&
+              parts[parts.length - 2] !== "as") {
+            return { core: parts.slice(0, -1).join(" "), pinned: true };
+          }
+          return { core: entry, pinned: false };
+        };
         const _entries = namedMatch[1]
           .split(",")
           .map(s => s.trim())
           .filter(Boolean);
         importNode.names = _entries.map(entry => {
-          const asMatch = entry.match(/^(\S+)\s+as\s+(\S+)$/);
-          const importedRaw = asMatch ? asMatch[1] : entry;
+          const { core } = _splitPinned(entry);
+          const asMatch = core.match(/^(\S+)\s+as\s+(\S+)$/);
+          const importedRaw = asMatch ? asMatch[1] : core;
           return _stripQuotes(importedRaw);
         });
         // P3.A: also record full {imported, local} specifiers so consumers
         // (CHX, future cross-file passes) can map an alias back to the
         // original imported name.
+        // A1a Step 7: per-specifier `pinned: boolean` flag; default false.
         importNode.specifiers = _entries.map(entry => {
-          const asMatch = entry.match(/^(\S+)\s+as\s+(\S+)$/);
+          const { core, pinned } = _splitPinned(entry);
+          const asMatch = core.match(/^(\S+)\s+as\s+(\S+)$/);
           if (asMatch) {
-            return { imported: _stripQuotes(asMatch[1]), local: asMatch[2] };
+            return { imported: _stripQuotes(asMatch[1]), local: asMatch[2], pinned };
           }
-          const bare = _stripQuotes(entry);
-          return { imported: bare, local: bare };
+          const bare = _stripQuotes(core);
+          return { imported: bare, local: bare, pinned };
         });
         importNode.source = namedMatch[2];
       } else {
