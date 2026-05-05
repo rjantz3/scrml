@@ -63,7 +63,11 @@ const KEYWORDS = new Set([
   // scrml error system
   "fail", "transaction",
   // scrml built-in functions / modifiers
-  "cleanup", "upload", "debounce", "throttle",
+  // `reset` — §6.8.2 state-cell reset builtin: `reset(@cell)` restores
+  // a state cell to its declared default. Reserved at lex time so the
+  // expression-parser (Step 6) can produce a `reset-expr` AST node and
+  // the parser (Step 8) can emit E-RESERVED-IDENTIFIER for shadowing.
+  "cleanup", "upload", "debounce", "throttle", "reset",
   // scrml env access modifier
   "env", "public",
   // scrml reactive effects (§6.7.4)
