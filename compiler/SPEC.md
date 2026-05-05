@@ -13190,6 +13190,33 @@ The compiler has full awareness of the HTML specification. Every HTML element is
 - `const card = <div>` means `card` is valid anywhere `<div>` is valid.
 - `div` and `span` are distinct shapes. The compiler SHALL enforce shape constraints at component use sites.
 
+### 24.4 Scrml-defined structural elements (Stage 0b D4 — registry distinction)
+
+**Added:** 2026-05-04 — registers the four v0.next scrml-defined structural elements alongside the HTML element registry. These are NOT HTML elements; the registry distinguishes them.
+
+**Registered scrml structural elements:**
+
+| Element | Owning section | Notes |
+|---|---|---|
+| `<engine>` | §51.0 | State-machine declaration; renders nothing as DOM directly |
+| `<match>` | §18.0.1 | Block-form match declaration; emits one selected arm body |
+| `<errors>` | §55.8 | Auto-renders validator errors per cell or rollup |
+| `<onTransition>` | §51.0.H | Cross-state effect handler; child of `<engine>` only |
+
+**Normative statements:**
+
+- The HTML element registry (§24.1) SHALL NOT include these names. They are scrml-defined structural elements with their own owning-section semantics (cross-ref §4.15).
+- The compiler SHALL NOT apply HTML attribute validation (§24.2) to these elements. Each scrml structural element has its own attribute slot catalog defined in its owning section (§51.0 for `<engine>`, §18.0.1 for `<match>`, §55.8 for `<errors>`, §51.0.H for `<onTransition>`).
+- These element names SHALL NOT be valid component names. Defining `const engine = <article>` (lowercase) or `const Engine = <div>` is `E-NAME-COLLIDES-RESERVED` — the names are reserved scrml structural-element identifiers.
+- The unified state-type registry (§15.15) routes these names per their NR `resolvedCategory`: `<engine>` → `engine`, `<match>` → a dedicated category, `<errors>` → a dedicated category, `<onTransition>` → resolved relative to its parent `<engine>`.
+- Validation pass VP-1 (§3.3 attribute allowlist) registers the per-element attribute catalogs for these structural elements in `compiler/src/attribute-registry.js` (cross-ref Stage 3.3 contract).
+
+**Cross-references:**
+- §4.15 — block-grammar registration (the structural elements' grammar surface).
+- §51.0 — engine semantics.
+- §18.0.1 — match block-form semantics.
+- §55.8 — `<errors>` element semantics.
+
 ---
 
 ## 25. CSS Variable Syntax
