@@ -87,10 +87,16 @@ describe("collectExpr newline boundary — symmetric single-token RHS decls", ()
     expect(stmts[1].kind).toBe("bare-expr");
   });
 
-  test("reactive-derived-decl (const @name) with single STRING RHS breaks at newline", () => {
+  test("derived state-decl (const @name) with single STRING RHS breaks at newline", () => {
+    // Phase A1a Step 11.5 — fold: legacy `const @name = expr` produces
+    // state-decl with shape:"derived", isConst:true, structuralForm:false
+    // (was reactive-derived-decl pre-fold).
     const stmts = parseLogic(`const @d = "v"\nconsole.log(@d)`);
     expect(stmts).toHaveLength(2);
-    expect(stmts[0].kind).toBe("reactive-derived-decl");
+    expect(stmts[0].kind).toBe("state-decl");
+    expect(stmts[0].shape).toBe("derived");
+    expect(stmts[0].isConst).toBe(true);
+    expect(stmts[0].structuralForm).toBe(false);
     expect(stmts[0].name).toBe("d");
     expect(stmts[0].init).toBe(`"v"`);
     expect(stmts[1].kind).toBe("bare-expr");

@@ -245,7 +245,13 @@ describe("AST Builder — self-host parity", () => {
     assertParity("<program>${@count = 0}</program>");
   });
 
-  test("reactive derived const @name", () => {
+  // Phase A1a Step 11.5 — fold of `reactive-derived-decl` into state-decl
+  // (ADR Option A FOLD ratified S60). The JS parser now produces
+  // `state-decl{shape:"derived",isConst:true,structuralForm:false}` for
+  // `const @x = expr`. Self-host parity is deferred per BRIEF §3.6 and
+  // Steps 4-7 policy — self-host bootstrap regen is on a separate cadence.
+  // Re-enable this test after self-host catches up to the post-fold AST.
+  test.skip("reactive derived const @name [DEFERRED — self-host fold parity]", () => {
     assertParity("<program>${const @doubled = @count * 2}</program>");
   });
 

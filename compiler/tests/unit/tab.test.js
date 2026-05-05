@@ -1730,79 +1730,105 @@ describe("§5.4 — bind: directives", () => {
 
 // ---------------------------------------------------------------------------
 // §6.6 — Derived reactive values (const @name = expr)
+// Phase A1a Step 11.5 fold: legacy `const @x = expr` produces unified
+// state-decl with shape:"derived", isConst:true, structuralForm:false.
+// ADR Option A FOLD ratified S60. The retired `reactive-derived-decl` kind
+// is asserted ABSENT post-fold.
 // ---------------------------------------------------------------------------
 
-describe("§6.6 ��� derived reactive values", () => {
+// Helper: find a folded-derived state-decl by name in a body array.
+function findDerivedDecl(body, name) {
+  return body.find(
+    (n) =>
+      n.kind === "state-decl" &&
+      n.shape === "derived" &&
+      n.structuralForm === false &&
+      n.name === name,
+  );
+}
 
-  test("const @total = @price * @quantity produces reactive-derived-decl", () => {
+describe("§6.6 — derived reactive values (post-Step-11.5 fold to state-decl)", () => {
+
+  test("const @total = @price * @quantity produces state-decl{shape:\"derived\",structuralForm:false}", () => {
     const src = "${ const @total = @price * @quantity; }";
     const ast = parseAST(src);
     const logic = ast.nodes.find(n => n.kind === "logic");
     expect(logic).toBeDefined();
-    const derived = logic.body.find(n => n.kind === "reactive-derived-decl");
+    const derived = findDerivedDecl(logic.body, "total");
     expect(derived).toBeDefined();
+    expect(derived.kind).toBe("state-decl");
+    expect(derived.shape).toBe("derived");
+    expect(derived.isConst).toBe(true);
+    expect(derived.structuralForm).toBe(false);
     expect(derived.name).toBe("total");
     expect(derived.init).toContain("@price");
     expect(derived.init).toContain("@quantity");
+    // The retired kind must be absent.
+    const retired = logic.body.find(n => n.kind === "reactive-derived-decl");
+    expect(retired).toBeUndefined();
   });
 
-  test("const @x = 5 + 3 (no reactive deps) produces reactive-derived-decl", () => {
+  test("const @x = 5 + 3 (no reactive deps) produces state-decl{shape:\"derived\"}", () => {
     const src = "${ const @x = 5 + 3; }";
     const ast = parseAST(src);
     const logic = ast.nodes.find(n => n.kind === "logic");
-    const derived = logic.body.find(n => n.kind === "reactive-derived-decl");
+    const derived = findDerivedDecl(logic.body, "x");
     expect(derived).toBeDefined();
     expect(derived.name).toBe("x");
     expect(derived.init).toContain("5");
     expect(derived.init).toContain("3");
   });
 
-  test("const total = @price * @quantity (no @ on binding) produces const-decl", () => {
+  test("const total = @price * @quantity (no @ on binding) produces const-decl, NOT derived state-decl", () => {
     const src = "${ const total = @price * @quantity; }";
     const ast = parseAST(src);
     const logic = ast.nodes.find(n => n.kind === "logic");
     const constDecl = logic.body.find(n => n.kind === "const-decl" && n.name === "total");
     expect(constDecl).toBeDefined();
     expect(constDecl.init).toContain("@price");
-    // NOT a reactive-derived-decl
-    const derived = logic.body.find(n => n.kind === "reactive-derived-decl");
+    // NOT a derived state-decl; the retired kind is also absent.
+    const derived = findDerivedDecl(logic.body, "total");
     expect(derived).toBeUndefined();
+    const retired = logic.body.find(n => n.kind === "reactive-derived-decl");
+    expect(retired).toBeUndefined();
   });
 
-  test("reactive-derived-decl carries a valid span", () => {
+  test("derived state-decl carries a valid span", () => {
     const src = "${ const @total = @price * @quantity; }";
     const ast = parseAST(src);
     const logic = ast.nodes.find(n => n.kind === "logic");
-    const derived = logic.body.find(n => n.kind === "reactive-derived-decl");
+    const derived = findDerivedDecl(logic.body, "total");
     expect(derived).toBeDefined();
     assertSpans(derived);
   });
 
-  test("reactive-derived-decl has id field", () => {
+  test("derived state-decl has id field", () => {
     const src = "${ const @count = @items . length; }";
     const ast = parseAST(src);
     const logic = ast.nodes.find(n => n.kind === "logic");
-    const derived = logic.body.find(n => n.kind === "reactive-derived-decl");
+    const derived = findDerivedDecl(logic.body, "count");
     expect(derived).toBeDefined();
     expect(typeof derived.id).toBe("number");
   });
 
-  test("const @name inside nested function body produces reactive-derived-decl", () => {
+  test("const @name inside nested function body produces folded-derived state-decl", () => {
     const src = "${ function foo() { const @x = @a + @b; } }";
     const ast = parseAST(src);
     const logic = ast.nodes.find(n => n.kind === "logic");
     const fn = logic.body.find(n => n.kind === "function-decl");
     expect(fn).toBeDefined();
-    const derived = fn.body.find(n => n.kind === "reactive-derived-decl");
+    const derived = findDerivedDecl(fn.body, "x");
     expect(derived).toBeDefined();
     expect(derived.name).toBe("x");
+    expect(derived.shape).toBe("derived");
+    expect(derived.structuralForm).toBe(false);
   });
 
-  test("const @empty with no init produces reactive-derived-decl with empty init", () => {
+  test("const @empty with no init produces folded-derived state-decl with empty init", () => {
     const src = "${ const @empty; }";
     const ast = parseAST(src);
     const logic = ast.nodes.find(n => n.kind === "logic");
-    const derived = logic.body.find(n => n.kind === "reactive-derived-decl");
+    const derived = findDerivedDecl(logic.body, "empty");
     expect(derived).toBeDefined();
     expect(derived.name).toBe("empty");
     expect(derived.init).toBe("");

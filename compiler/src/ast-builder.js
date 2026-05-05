@@ -3659,11 +3659,17 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       }
     }
 
-    // CONST — may be `const @name = expr` (reactive-derived-decl) or `const name = expr`
-    // or `const <name> = expr` (Shape 3 derived state-decl, A1a Step 2).
+    // CONST — may be `const @name = expr` (legacy expression-form derived,
+    // post-Step-11.5 produces state-decl with shape:"derived", isConst:true,
+    // structuralForm:false) or `const name = expr` or `const <name> = expr`
+    // (Shape 3 V5-strict derived state-decl, A1a Step 2).
     if (tok.kind === "KEYWORD" && tok.text === "const") {
       const startTok = consume();
-      // Check for `const @name = expr` or `const @name: T = expr` — derived reactive value.
+      // Check for `const @name = expr` or `const @name: T = expr` — legacy
+      // expression-form derived reactive value (post-Step-11.5: state-decl,
+      // shape:"derived", isConst:true, structuralForm:false). ADR Option A
+      // FOLD ratified S60. Per AST-CONTRACTS-AND-DECOMPOSITION §1.1 invariant:
+      // shape:"derived" ⇒ isConst === true AND initExpr !== null.
       // S26 bug B: the original branch ignored the optional `:type` annotation;
       // with the type present, the `=` check failed, the parser returned
       // init:"", and emit-logic produced `const name = ;` (invalid JS).
@@ -3675,9 +3681,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (peek().text === "=" && peek(1)?.text !== "=") {
           consume();
           const { expr, span } = collectExpr();
-          return { id: ++counter.next, kind: "reactive-derived-decl", name: derivedName, init: expr, initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0), ...(typeAnnotation ? { typeAnnotation } : {}), span: spanOf(startTok, peek()) };
+          return { id: ++counter.next, kind: "state-decl", name: derivedName, init: expr, initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0), shape: "derived", isConst: true, structuralForm: false, ...(typeAnnotation ? { typeAnnotation } : {}), span: spanOf(startTok, peek()) };
         } else {
-          return { id: ++counter.next, kind: "reactive-derived-decl", name: derivedName, init: "", ...(typeAnnotation ? { typeAnnotation } : {}), span: spanOf(startTok, peek()) };
+          return { id: ++counter.next, kind: "state-decl", name: derivedName, init: "", shape: "derived", isConst: true, structuralForm: false, ...(typeAnnotation ? { typeAnnotation } : {}), span: spanOf(startTok, peek()) };
         }
       }
       // Phase A1a Step 2 — Shape 3 derived: `const <derived> = expr` (V5-strict).
@@ -5869,13 +5875,20 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       continue;
     }
 
-    // CONST DECLARATION: `const @name = expr` (reactive derived) or
-    //                     `const Name = <element ...>` (component def) or
-    //                     `const name = expr`
+    // CONST DECLARATION: `const @name = expr` (legacy expression-form
+    // derived, post-Step-11.5 produces state-decl with shape:"derived",
+    // isConst:true, structuralForm:false) or `const Name = <element ...>`
+    // (component def) or `const name = expr`.
     if (tok.kind === "KEYWORD" && tok.text === "const") {
       const startTok = consume();
 
-      // Check for `const @name = expr` or `const @name: T = expr` — derived reactive value.
+      // Check for `const @name = expr` or `const @name: T = expr` — legacy
+      // expression-form derived reactive value. Phase A1a Step 11.5: ADR
+      // Option A FOLD ratified S60. The legacy `reactive-derived-decl` kind
+      // is retired; this path now produces the unified `state-decl` with
+      // discriminants (shape:"derived", isConst:true, structuralForm:false).
+      // Per AST-CONTRACTS-AND-DECOMPOSITION §1.1 invariant: shape:"derived"
+      // ⇒ isConst === true AND initExpr !== null.
       // S26 bug B (top-level branch): parallel to the nested-statement branch
       // above — type annotation must be collected so that `const @x: boolean = true`
       // doesn't silently lose its initializer.
@@ -5888,19 +5901,25 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           const { expr, span } = collectExpr();
           nodes.push({
             id: ++counter.next,
-            kind: "reactive-derived-decl",
+            kind: "state-decl",
             name: derivedName,
             init: expr,
             initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0),
+            shape: "derived",
+            isConst: true,
+            structuralForm: false,
             ...(typeAnnotation ? { typeAnnotation } : {}),
             span: spanOf(startTok, peek()),
           });
         } else {
           nodes.push({
             id: ++counter.next,
-            kind: "reactive-derived-decl",
+            kind: "state-decl",
             name: derivedName,
             init: "",
+            shape: "derived",
+            isConst: true,
+            structuralForm: false,
             ...(typeAnnotation ? { typeAnnotation } : {}),
             span: spanOf(startTok, peek()),
           });

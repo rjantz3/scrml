@@ -378,24 +378,36 @@ describe("A1a Step 4 — shape discriminant on state-decl", () => {
     assertNoHtmlFragmentMatching(ast, /<\s*count\s*>/);
   });
 
-  // §S4.5 — Legacy @-form Shape 3 derived: produces kind:"reactive-derived-decl",
-  // NOT kind:"state-decl". This documents the intentional kind-divergence per
-  // Step 4 progress.md §[04:02]. shape discriminant lives on state-decl;
-  // reactive-derived-decl is its own kind (semantically equivalent to
-  // shape:"derived" state-decl, but kind-fold is deferred to a later step).
-  test("§S4.5: legacy `const @doubled = @count * 2` produces reactive-derived-decl (NOT state-decl)", () => {
+  // §S4.5 — Legacy @-form Shape 3 derived: post-Step-11.5 produces unified
+  // kind:"state-decl" with shape:"derived", isConst:true, structuralForm:false.
+  // ADR Option A FOLD ratified S60 (`docs/changes/reactive-derived-decl-divergence/ADR.md`).
+  // Pre-Step-11.5 this divergence was documented here — `reactive-derived-decl`
+  // was its own kind. Post-fold, both legacy `const @x = expr` and structural
+  // `const <x> = expr` produce state-decl{shape:"derived"}; the only
+  // discriminator is `structuralForm`.
+  test("§S4.5: legacy `const @doubled = @count * 2` produces state-decl with shape:\"derived\", structuralForm:false (post-Step-11.5 fold)", () => {
     const src = `<program>\${ @count = 0; const @doubled = @count * 2 }</program>`;
     const { ast } = parse(src);
     const stateDecls = findKind(ast, "state-decl");
     const derivedDecls = findKind(ast, "reactive-derived-decl");
-    // Only the @count cell is a state-decl; @doubled is reactive-derived-decl.
-    expect(stateDecls.length).toBe(1);
-    expect(stateDecls[0].name).toBe("count");
-    expect(derivedDecls.length).toBe(1);
-    expect(derivedDecls[0].name).toBe("doubled");
-    // The state-decl carries the discriminant; the legacy derived kind does NOT.
-    expect(stateDecls[0].shape).toBe("plain");
-    expect(derivedDecls[0].shape).toBeUndefined();
+    // Both @count and @doubled are now state-decl. Reactive-derived-decl is retired.
+    expect(stateDecls.length).toBe(2);
+    expect(derivedDecls.length).toBe(0);
+    const count = stateDecls.find((d) => d.name === "count");
+    const doubled = stateDecls.find((d) => d.name === "doubled");
+    expect(count).toBeDefined();
+    expect(doubled).toBeDefined();
+    // @count: legacy plain
+    expect(count.shape).toBe("plain");
+    expect(count.structuralForm).toBe(false);
+    expect(count.isConst).toBe(false);
+    // @doubled: legacy expression-form derived (post-fold unified kind)
+    expect(doubled.shape).toBe("derived");
+    expect(doubled.structuralForm).toBe(false);
+    expect(doubled.isConst).toBe(true);
+    expect(doubled.initExpr).toBeDefined();
+    // Anti-fragment guard
+    assertNoHtmlFragmentMatching(ast, /<\s*doubled\s*>/);
   });
 
   // §S4.6 — Structural Shape 3

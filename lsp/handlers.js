@@ -427,11 +427,17 @@ export function extractAnalysisInfo(ast, analysis) {
           break;
         }
         case "state-decl": {
+          // Phase A1a Step 11.5 — fold of `reactive-derived-decl`. State-decl
+          // with shape:"derived" + structuralForm:false is the post-fold
+          // representation of legacy `const @x = expr`. Surface it via the
+          // existing "derived" reactiveKind label so hover/symbol/analysis
+          // outputs are unchanged.
+          const isFoldedDerived = node.shape === "derived" && node.structuralForm === false;
           analysis.reactiveVars.push({
             name: node.name?.startsWith("@") ? node.name.slice(1) : node.name,
             span: node.span,
             type: node.typeAnnotation || null,
-            reactiveKind: "reactive",
+            reactiveKind: isFoldedDerived ? "derived" : "reactive",
             isShared: !!node.isShared,
           });
           break;
@@ -708,8 +714,18 @@ export function buildDocumentSymbols(ast, text) {
       case "reactive-derived-decl":
       case "reactive-debounced-decl": {
         const baseName = stmt.name?.startsWith("@") ? stmt.name.slice(1) : stmt.name;
+        // Phase A1a Step 11.5 — fold: state-decl with shape:"derived" +
+        // structuralForm:false is the post-fold representation of the legacy
+        // `const @x = expr` form (formerly reactive-derived-decl). Surface
+        // the `@derived` label for it so hover/symbol output is unchanged.
+        const isFoldedDerived =
+          stmt.kind === "state-decl" &&
+          stmt.shape === "derived" &&
+          stmt.structuralForm === false;
         const detailMap = {
-          "state-decl": "@reactive" + (stmt.isShared ? " (shared)" : ""),
+          "state-decl": isFoldedDerived
+            ? "@derived"
+            : "@reactive" + (stmt.isShared ? " (shared)" : ""),
           "reactive-derived-decl": "@derived",
           "reactive-debounced-decl": `@debounced(${stmt.delay ?? 300})`,
         };
