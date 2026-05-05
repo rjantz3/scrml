@@ -20,47 +20,59 @@ D2's lone real commit (§17 Tier 0 framing) is already cherry-picked to main as 
 
 ---
 
-## §1 ABSOLUTELY NON-NEGOTIABLE — TOOL-USE MANDATE (REVISED FOR D2.6)
+## §1 ABSOLUTELY NON-NEGOTIABLE — TOOL-USE MANDATE (REVISED FOR D2.7)
 
-This dispatch is `scrml-dev-pipeline` whose tool set is `Read / Write / Glob / Bash / Agent`. **`Edit` is NOT available.** A previous attempt halted on this realization (correctly, given the prior brief's wording). This revision specifies the brief-compliant pattern using the tools you actually have.
+`scrml-dev-pipeline`'s tool set was updated between D2.6 and D2.7. The agent file at `~/.claude/agents/scrml-dev-pipeline.md` now exposes: `Agent / Read / Write / Edit / Glob / Grep / Bash`. **`Edit` is now available.** This is the unblock that the D2.6 halt diagnosed.
 
-### What you MUST do — the Read+Write pattern
+The Read+Write full-file-overwrite pattern is no longer needed. Use `Edit` instead — its diff-form payload is small (anchor lines + new content), so it scales to a 22k-line spec without the size wall D2.6 hit.
+
+### What you MUST do — the Edit pattern
 
 To modify `compiler/SPEC.md`:
 
-1. **Read the full current SPEC.md** at the start of the dispatch. You may Read in chunks (it is ~22k lines) but you must Read every chunk that bounds your edits before making any changes.
-2. **Plan one atomic change at a time** (one subsection insertion, one error-code row added, one cross-ref fix).
-3. **Construct the new full-file content** in your working memory by mentally substituting the change into the file you read. Do NOT write a patch file; do NOT generate a diff; just plan the new full content.
-4. **Use the `Write` tool ONCE per atomic change** to write the entire updated SPEC.md back. Yes, full-file overwrite — that is the supported pattern when Edit is unavailable.
-5. **Immediately after each Write, verify by grep:** run `grep -n '<your new section header>' compiler/SPEC.md` to confirm the change persisted. If grep fails, re-Read the file and try again.
-6. **Commit immediately after the verified Write.** Don't batch.
-7. **Re-Read the file before the NEXT change.** Don't trust your in-memory copy across multiple Writes — Read fresh each time. This is critical: small in-memory drift on a 22k-line file becomes an invisible regression.
+1. **Read the relevant section first** — typically a 50-200 line slice around where you want to insert or change content. Use the `offset` + `limit` parameters on Read so you don't load the whole 22k-line file unnecessarily.
+2. **Plan ONE atomic change at a time** (one subsection insertion, one error-code row added, one cross-ref fix).
+3. **For each new subsection insertion,** the `old_string` is a stable anchor — typically the next-sibling subsection header you're inserting before, plus a few lines of surrounding context for uniqueness. The `new_string` is your new content followed by that same anchor.
+4. **For modifications to existing subsection text,** the `old_string` is the exact existing text (with whitespace preserved) and `new_string` is the replacement.
+5. **If `old_string` is not unique,** add more surrounding context until it is. Do NOT pivot to scripts.
+6. **Immediately after each Edit, verify by grep:** run `grep -n '<your new section header>' compiler/SPEC.md` to confirm the change persisted. If grep fails, the Edit didn't actually land — investigate.
+7. **Commit immediately after the verified Edit.** Don't batch.
 
-This is exactly how D1.5 successfully landed §6 / §11 fold / §34 / INDEX regen. It works. It is brief-compliant.
+This is the pattern Edit was designed for. One Edit per subsection insertion, one per error-code row, one per cross-ref fix.
 
 ### What you MUST NOT do
 
-- **DO NOT write patch files.** No `*.patch`, no `*.diff`, no temporary files intended to be applied later. The original D2 attempt wasted hours on malformed patches.
+- **DO NOT write patch files.** No `*.patch`, no `*.diff`, no temporary files intended to be applied later. The original D2 (Sonnet) attempt wasted hours on malformed patches.
 - **DO NOT use `git apply`** in any form. Gated.
 - **DO NOT use `python3`, `sed`, `awk`, `node -e`, `perl -e`, heredoc shell scripts**, or any other tool that invokes a script to modify files. Gated.
 - **DO NOT use `>>` or `>` redirects** in Bash to modify SPEC.md.
-- **DO NOT skip the post-Write grep verification.** It catches in-memory drift before it accumulates.
-- **DO NOT batch multiple subsection insertions into a single Write** (write one logical change, commit, re-Read, then write the next). Each Write must correspond to ONE atomic logical change so commits are reviewable.
+- **DO NOT use `Write` to overwrite SPEC.md.** Write is for NEW files only (e.g., `progress-dispatch-2.7.md`). The full-file-overwrite pattern (D1.5's approach) is no longer needed now that Edit is available — and it has the size-wall risk D2.6 documented.
+- **DO NOT skip the post-Edit grep verification.** It catches Edits that silently failed to apply.
+- **DO NOT batch multiple subsection insertions into a single Edit.** Each Edit corresponds to ONE atomic logical change so commits are reviewable. If you find yourself constructing an `old_string` longer than ~100 lines, you're doing it wrong — split.
 
 ### What Bash IS for
 
 Bash is for: `git` (status/log/show/diff/commit/checkout/cherry-pick), `grep`, `head`, `tail`, `wc`, `cat`, `find` (read-only), `bun test`, `bun run`, and `bash scripts/update-spec-index.sh` (SPEC-INDEX regeneration script).
 
-Bash is NOT a substitute for Read+Write. Anytime you find yourself thinking "I'll just do this with sed / python / a patch file," STOP.
+Bash is NOT a substitute for Edit. Anytime you find yourself thinking "I'll just do this with sed / python / a patch file," STOP. Use Edit.
 
-### If Write loses content (in-memory drift)
+### If Edit fails
 
-If the post-Write grep finds an EXISTING section was lost (e.g., §6 is now missing because you forgot a chunk when constructing the in-memory copy):
-1. Run `git diff HEAD compiler/SPEC.md | head -200` to see what changed.
-2. If the change is unintended, run `git checkout -- compiler/SPEC.md` to revert the working tree.
-3. Re-Read the file in full or in larger chunks.
-4. Try again with more careful chunk handling.
-5. Do NOT commit a Write that lost content. The pre-commit hook may not catch silent deletions in a markdown spec file.
+If an Edit call fails because `old_string` is not unique:
+1. Read more of the surrounding context (use Read with offset+limit).
+2. Construct a NEW `old_string` with more context lines on either side.
+3. Retry the Edit.
+4. Do NOT pivot to a script-based approach. EVER. Multiple previous attempts failed precisely because the agent pivoted away from Edit when it got hard.
+
+If Edit fails because `old_string` doesn't match (whitespace difference, BOM, line endings, etc.):
+1. Read the target file at the correct line range to see the EXACT text.
+2. Construct `old_string` with the exact whitespace.
+3. Retry.
+
+If Edit accidentally replaces in the wrong place (because the `old_string` matched a different occurrence than you intended):
+1. `git diff HEAD compiler/SPEC.md` to see what changed.
+2. `git checkout -- compiler/SPEC.md` to revert if needed.
+3. Use a more specific `old_string` with more context, then retry.
 
 ---
 
