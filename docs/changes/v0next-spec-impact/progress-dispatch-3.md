@@ -27,4 +27,15 @@ Post-D2 line ranges (verified via grep):
 - Started — branch `changes/dispatch-3-channels-schema-predicates` created from main HEAD `9cb123c`.
 - §38.1-§38.4 rewritten: file-level placement, V5-strict body, drop @shared. Commit `fecb5f0`.
 - §38 sweep + §34 +2 codes (E-CHANNEL-INSIDE-PROGRAM, E-CHANNEL-SHARED-MODIFIER) — examples updated for V5-strict, migration note added, E-CHANNEL-002 retired in §38.9 + §34. Commit `fdfc75e`.
-- Next: §39 schema additive shared-core vocabulary subsections.
+- §39.5.7-§39.5.9 — additive shared-core validator vocabulary, SQL DDL lowering rules, when-to-use guidance. SQL-mirror remains canonical. Commit `820ad02`.
+- §53.6.1-§53.6.2 — shared-core in refinement-type position (cross-ref §55), composition with state-cell validators. Commit `0c7416b`.
+- §42.2.5 — `is some` vs `req` distinct predicates (L5 clarification), three loci of exists/required semantic. Commit `dcefcf8`.
+- SPEC-INDEX.md regen + Quick Lookup additions; cross-ref sweep (channel inside program wording fixed). Commit `363a514`.
+
+## Open questions for PA
+
+- §7.10 brief flagged `onserver:message=handler(msg)` composition with V5-strict. After the rewrite: handler `msg` parameter is a function-local LOCAL (bare access in handler body — `msg.foo` etc.), which is exactly the V5-strict locals semantic for parameters (§3, §7). No contradiction. Recorded for completeness; nothing surfaces as a concrete blocker.
+- Schema lowering portability — the §39.5.8 lowering table notes DBMS-specific behavior for `pattern` and references §44 (multi-database adaptation) for driver resolution. If §44 needs a complementary cross-ref subsection added to point at §39.5.8, that's a follow-on (not blocking D3 success criteria).
+
+## STATUS: COMPLETE
+
