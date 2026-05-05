@@ -138,14 +138,14 @@ Grouped into sub-batches for easier user review/ratification. Each sub-batch is 
 
 **Disposition:** both → `scrml-support/archive/dispatches/giti-bugs/<name>/`.
 
-### §3.6 Batch F: BUG-letter series (2 dirs) — S38-era anomaly fixes
+### §3.6 Batch F: BUG-letter series (2 dirs) — ✅ RATIFIED + EXECUTED S61 (2026-05-05)
 
-| Dir | What |
+| Dir | Final location |
 |---|---|
-| `bug-h-rettype-fix/` | BUG-H rettype |
-| `boundary-security-fix/` | Boundary security |
+| `bug-h-rettype-fix/` | `scrml-support/archive/changes/bug-h-rettype-fix/` |
+| `boundary-security-fix/` | `scrml-support/archive/changes/boundary-security-fix/` |
 
-**Disposition:** both → `scrml-support/archive/dispatches/bug-letters/<name>/`.
+**Cross-refs:** none.
 
 ### §3.7 Batch G: bun-sql phases (2 dirs) — S40-era SQL work
 
@@ -249,7 +249,8 @@ Suggested ratification cadence: 1-2 batches per session to avoid overload. PA ha
 1. ✅ **Batch A (P-series, 12 dirs)** — RATIFIED + EXECUTED S61 (2026-05-05). 12 dirs → `scrml-support/archive/changes/`; cross-ref in FRICTION.md fixed.
 2. ✅ **Batch C (dispatch-app, 7 dirs)** — RATIFIED + EXECUTED S61 (2026-05-05). 7 dirs → `scrml-support/archive/changes/`; 2 cross-refs in 23-trucking-dispatch/README.md fixed.
 3. ✅ **Batch B (expr-ast-phase-4d, 4 dirs)** — RATIFIED + EXECUTED S61 (2026-05-05). 4 dirs → `scrml-support/archive/changes/`; no cross-refs (internal-only).
-4. **Batch I (fix-*, 20 dirs)** — large but uniform; deref-friendly.
+4. ✅ **Batch F (BUG-letters, 2 dirs)** — RATIFIED + EXECUTED S61 (2026-05-05). 2 dirs → `scrml-support/archive/changes/`; no cross-refs.
+5. **Batch I (fix-*, 20 dirs)** — large but uniform; deref-friendly.
 5. **Batch D (f-* feature/fix, 11 dirs)** — hotfix-level work.
 6. **Batch H (LSP L1-L4, 5 dirs)** — recent (S51) but completed.
 7. **Batch J (misc, 12 dirs)** — heterogeneous; review-per-dir.
