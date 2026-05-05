@@ -36,7 +36,7 @@
    - [5.5 Dynamic Class Binding](#55-dynamic-class-binding)
 6. [Reactivity — The `@` Sigil](#6-reactivity--the--sigil)
    - [6.5 Reactive Array Mutation](#65-reactive-array-mutation)
-   - [6.6 Derived Reactive Values — `const @name`](#66-derived-reactive-values--const-name)
+   - [6.6 Derived Reactive Values — `const <name>`](#66-derived-reactive-values--const-name)
    - [6.7 Lifecycle and Timing Model](#67-lifecycle-and-timing-model)
 7. [Logic Contexts](#7-logic-contexts)
 8. [SQL Contexts](#8-sql-contexts)
@@ -3282,11 +3282,11 @@ when @page changes {
 #### Reactive Scheduler Flush Ordering
 
 Before any `when` effect body executes, the reactive scheduler SHALL flush all dirty
-derived values (`const @name` expressions declared per §6.6) in the same microtask. This
+derived values (`const <name>` expressions declared per §6.6) in the same microtask. This
 means a `when` effect body always reads up-to-date derived values, not stale cached
 values.
 
-Specifically: if `@price` changes, and `const @total = @price * @qty` is a derived value,
+Specifically: if `@price` changes, and `const <total> = @price * @qty` is a derived value,
 and `when @price changes { ... }` reads `@total` inside the body, then `@total` SHALL
 reflect the post-change `@price` value when the `when` body executes.
 
@@ -3339,14 +3339,14 @@ handled inside the `when` body or re-thrown explicitly.
 
 #### Interaction with `@derived` (§6.6)
 
-A `when` block and a `const @name` derived value are distinct constructs:
+A `when` block and a `const <name>` derived value are distinct constructs:
 
 | Construct | Trigger | Executes on mount? | Can write `@variables`? |
 |-----------|---------|-------------------|------------------------|
-| `const @total = @price * @qty` | Any read of `@total` while dirty (lazy pull) | n/a — computed on demand | No — cannot assign inside |
+| `const <total> = @price * @qty` | Any read of `@total` while dirty (lazy pull) | n/a — computed on demand | No — cannot assign inside |
 | `when @price changes { ... }` | `@price` changes (push) | No | Yes |
 
-Use `const @name` when you are computing a derived value to be read. Use `when` when you
+Use `const <name>` when you are computing a derived value to be read. Use `when` when you
 need a side effect (navigation, resetting unrelated state, calling a server function) in
 response to a state change.
 
@@ -3356,21 +3356,21 @@ The compiler SHALL emit W-LIFECYCLE-006 if both of the following conditions are 
 2. The right-hand side of that assignment is a pure expression of `@variables` (whether or
    not all referenced `@variables` are in the `dep-list`).
 
-When both conditions hold, the pattern is strictly inferior to `const @name = expr`: the
+When both conditions hold, the pattern is strictly inferior to `const <name> = expr`: the
 derived form is reactive, executes on initial mount, requires no explicit dep-list, and
 cannot fall out of sync. W-LIFECYCLE-006 is a Warning (not an error) and includes a
 suggested replacement.
 
 > Rationale: `when @price changes { @total = @price * @qty }` is semantically inferior to
-> `const @total = @price * @qty`. The `when` form is push-based and does not execute on
+> `const <total> = @price * @qty`. The `when` form is push-based and does not execute on
 > mount; the derived form is lazy-pull and self-consistent. W-LIFECYCLE-006 guides
 > developers toward the correct construct. It is a warning rather than an error because
 > there are rare cases (e.g., intentional deferred initialization) where the `when` form is
 > chosen deliberately.
 
-#### Edge Case EC-1: `when` dep-list with a `const @derived` variable
+#### Edge Case EC-1: `when` dep-list with a `const <derived>` variable
 
-If a `dep-list` entry names a `const @name` derived variable (§6.6), the compiler SHALL
+If a `dep-list` entry names a `const <name>` derived variable (§6.6), the compiler SHALL
 emit E-LIFECYCLE-007. Derived variables are not `@variables` in the sense of mutable
 state; they have no "change event" independent of the underlying `@variables` they depend
 on. To react to a derived value change, list the underlying `@variables` in the `dep-list`
@@ -3382,7 +3382,7 @@ and read the derived value inside the body.
 - The `dep-list` SHALL contain at least one entry. An empty `dep-list` is a syntax error.
 - The compiler SHALL emit E-LIFECYCLE-007 if any `dep-list` entry is not a declared
   mutable `@variable` in the enclosing scope.
-- The compiler SHALL emit E-LIFECYCLE-007 if any `dep-list` entry names a `const @name`
+- The compiler SHALL emit E-LIFECYCLE-007 if any `dep-list` entry names a `const <name>`
   derived variable.
 - The compiler SHALL emit E-LIFECYCLE-006 if the body writes to any variable in the
   `dep-list`.
@@ -3408,7 +3408,7 @@ and read the derived value inside the body.
 
 | Use case | Correct construct |
 |---|---|
-| Derive a value from reactive state | `const @name = expr` (§6.6) |
+| Derive a value from reactive state | `const <name> = expr` (§6.6) |
 | Run a side effect when state changes | `when @var changes { body }` |
 | Sync to localStorage on change | `when @var changes { localStorage.setItem(key, @var) }` |
 | Auto-save form fields | `when (@field1, @field2) changes { saveForm(@field1, @field2) }` |
@@ -4207,7 +4207,7 @@ reads inside an `animationFrame` callback body.
 | E-LIFECYCLE-004 | `cleanup()` first argument is not function-typed | Error |
 | E-LIFECYCLE-005 | `cleanup()` inside a function EXPLICITLY annotated as server-side (§12) | Error |
 | E-LIFECYCLE-006 | `when` body writes to a variable in the `dep-list` | Error |
-| E-LIFECYCLE-007 | `dep-list` entry is not a declared mutable `@variable` in scope, OR is a `const @name` derived variable | Error |
+| E-LIFECYCLE-007 | `dep-list` entry is not a declared mutable `@variable` in scope, OR is a `const <name>` derived variable | Error |
 | E-LIFECYCLE-009 | `<timer>` or `<poll>` missing `interval` attribute | Error |
 | E-LIFECYCLE-010 | `interval` attribute is zero or negative | Error |
 | E-LIFECYCLE-011 | `running` attribute references an undeclared or non-`@` variable | Error |
@@ -4431,7 +4431,7 @@ Expected compiler warning:
 ```
 W-LIFECYCLE-006: `when` body computes a derived value that can be expressed as a derived
 reactive binding. Replace with:
-  const @total = @price * @qty
+  const <total> = @price * @qty
 This form is reactive, executes on initial mount, and requires no explicit dep-list.
   at line 6: when @price changes { @total = @price * @qty }
 ```
@@ -4543,8 +4543,8 @@ of this example but is a valid pattern.
   timer body triggers the same downstream reactive updates as a write from a user event
   handler.
 
-- **§6.6 (Derived Reactive Values):** `const @name` derived values and `when` blocks are
-  complementary, not competing. `const @name` is for value derivation (lazy pull, no side
+- **§6.6 (Derived Reactive Values):** `const <name>` derived values and `when` blocks are
+  complementary, not competing. `const <name>` is for value derivation (lazy pull, no side
   effects). `when` is for side effects triggered by state change (push, explicit triggers).
   W-LIFECYCLE-006 enforces this boundary at compile time. Cross-reference §6.6.5 for
   derived value invalidation and the flush ordering guarantee described in §6.7.4.
