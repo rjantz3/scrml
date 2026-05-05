@@ -741,22 +741,24 @@ These are the questions every LLM silently guesses wrong on. The right answers:
 
 ## 9. Stdlib catalog — DO NOT npm install these
 
-scrml ships a focused stdlib. Import from `scrml:<module>` (value imports) or as a capability via `use scrml:<module>`. Do not try to npm install equivalents.
+scrml ships a focused stdlib that covers ~80% of typical-app npm needs. Import from `scrml:<module>` (value imports) or as a capability via `use scrml:<module>`. Do not try to npm install equivalents for things in the table.
 
-| stdlib module | What it is | Replaces (npm) |
+> **Catalog snapshot:** 2026-05-04, verified against stdlib at compiler SHA `f983198`. Each row lists *selected* exports; for the full export list of a module, read `stdlib/<module>/index.scrml` directly. If a function isn't in this row but is exported from the module, it's still part of the stdlib — don't reach for npm.
+
+| stdlib module | Selected exports | Replaces (npm) |
 |---|---|---|
-| `scrml:data` | `validate(data, schema)`, rule builders + `pick`, `omit`, `groupBy`, `sortBy`, `unique`, `flatten` | zod, yup, joi, lodash |
-| `scrml:auth` | `hashPassword`, `verifyPassword`, `signJwt(payload, secret, expiresIn)`, `verifyJwt(token, secret)`, `createRateLimiter`, TOTP | bcrypt, jsonwebtoken, speakeasy, express-rate-limit |
-| `scrml:crypto` | `hash(algo, input)`, `generateUUID`, `generateToken` | crypto-js, bcryptjs, uuid |
-| `scrml:http` | Typed `fetch` wrapper with timeout + retry | axios, got, node-fetch |
-| `scrml:time` | `formatDate`, `formatRelative`, `debounce(fn, ms)`, `throttle(fn, ms)` | date-fns, dayjs, lodash.debounce |
-| `scrml:format` | `formatCurrency`, `formatNumber`, `slug`, `pluralize`, `titleCase` | slugify, change-case, pluralize |
-| `scrml:store` | KV store, session store, counter | connect-sqlite3, basic redis use |
-| `scrml:router` | `match`, `parseQuery`, `buildUrl`, `navigate` | path-to-regexp, qs |
-| `scrml:test` | `assertEqual`, `assertThrows`, etc. | chai, parts of jest/expect |
-| `scrml:fs`, `scrml:path`, `scrml:process` | Node compat layer | (Node built-ins) |
+| `scrml:data` | `validate(data, schema)`, `isValid`, `firstError`; predicate builders `required`, `email`, `minLength/maxLength/exactLength`, `pattern`, `min/max`, `numeric`, `integer`, `oneOf`, `url`, `custom`; transforms `pick`, `omit`, `groupBy`, `indexBy`, `sortBy`, `unique`, `flatten/flattenDeep`, `chunk`, `deepMerge`, `clamp`, `paginate` | zod, yup, joi, lodash |
+| `scrml:auth` | `hashPassword`, `verifyPassword`, `generatePassword`; `signJwt(payload, secret, expiresIn)`, `verifyJwt(token, secret)`, `decodeJwt`; `createRateLimiter`; `generateTotpSecret`, `verifyTotp` (RFC 6238) | bcrypt, jsonwebtoken, speakeasy, express-rate-limit |
+| `scrml:crypto` | `hash(algo, input)`, `verifyHash`, `hmac(secret, payload)`, `safeCompare`, `generateUUID`, `generateToken` | crypto-js, bcryptjs, uuid |
+| `scrml:http` | REST helpers: `get(url, opts)`, `post(url, body, opts)`, `put`, `del`, `patch` (each returns a typed response with timeout + retry support); plus `withBaseUrl(baseUrl)`, `isOk(response)`, `isError(response)` | axios, got, node-fetch |
+| `scrml:time` | `formatDate`, `formatTime`, `formatDateTime`, `formatRelative`, `formatDuration`; `parseDate`, `isValidDate`; `startOf(ts, unit)`, `addTime`, `diffTime`; `debounce(fn, ms)`, `throttle(fn, ms)`, `sleep(ms)` | date-fns, dayjs, lodash.debounce |
+| `scrml:format` | `formatCurrency`, `formatNumber`, `formatPercent`, `formatBytes`; `slug`, `pluralize`, `titleCase`, `capitalize`, `toWords`; `truncate`, `padLeft`, `padRight` | slugify, change-case, pluralize |
+| `scrml:store` | `createStore`, `createSessionStore`, `createCounter` (KV / session / counter via SQLite + memory) | connect-sqlite3, basic redis use |
+| `scrml:router` | `match(pattern, path)`, `parseQuery`, `buildUrl(pattern, params, query)`, `navigate(url, opts)`, `currentPath`, `onNavigate(pattern, handler)` | path-to-regexp, qs |
+| `scrml:test` | Assertion family: `assertEqual`, `assertNotEqual`, `assertTruthy`, `assertFalsy`, `assertNull`, `assertDefined`, `assertThrows`, `assertNoThrow`, `assertInRange`, `assertContains`; `group(label, fn)` | chai, parts of jest/expect |
+| `scrml:fs`, `scrml:path`, `scrml:process` | Node compat layer — file ops, path manipulation, env/argv/cwd/exit | (Node built-ins) |
 
-If you reach for `import X from 'some-npm-package'` while writing scrml, stop. Check this table first.
+If you reach for `import X from 'some-npm-package'` while writing scrml, stop. Check this table first; if you don't see what you need, read the module's `index.scrml` before npm-installing.
 
 > Note on debouncing: `scrml:time` exports `debounce(fn, ms)` as a **function** decorator. For a **debounced reactive variable**, use the language-level modifier `@debounced(N) <name> = expr` instead. Different tools.
 
@@ -1014,6 +1016,7 @@ Declare what the database SHOULD look like. The compiler diffs against the live 
 Notes:
 - `< schema>` requires `<program db="...">` — the database path comes from the `<program>` attribute.
 - Column types: `text`, `integer`, `real`, `blob`, `boolean`, `timestamp`. Constraints: `primary key`, `not null`, `unique`, `default(literal)`, `references table(col)`.
+- **Backend:** scrml's database layer is **Bun.SQL-backed** (Bun ≥1.3). The `db=` URI selects the driver: `:memory:` / `./path.db` / `sqlite:...` → SQLite; `postgres://...` / `postgresql://...` → PostgreSQL. MySQL (`mysql://...`) is queued for a later phase. Same scrml schema + `?{}` queries run against any supported backend without source changes.
 - `< schema>` and `< db src=>` are sibling blocks that both reference the same DB path.
 
 ### 11.7 Multi-page routing
