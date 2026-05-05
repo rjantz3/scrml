@@ -499,6 +499,28 @@ export interface ReactiveDeclNode extends BaseNode {
    * Undefined on non-compound state-decls.
    */
   children?: ReactiveDeclNode[];
+  /**
+   * Phase A1a Step 11.0c — typed state-decl annotation (SPEC §6.2 + §53).
+   * Raw type-expression text from the `:T` annotation; matches the same
+   * STRING-form representation used for typed `let`/`const`/function-param
+   * annotations elsewhere in the AST (LambdaParam.typeAnnotation, etc.).
+   *
+   * Populated on:
+   *   - structural form: `<count>: number = 0` (typed Shape 1)
+   *   - structural form: `<userInfo>: UserInfo = (a, b, c)` (Tier 3 positional, §14.11)
+   *   - structural form: `<phase>: Phase = .Idle` (bare-variant inference, §14.10)
+   *   - structural form: `const <doubled>: number = expr` (typed Shape 3 derived)
+   *   - structural form: `<email>: string(pattern(/.../)) = <input/>` (refinement-typed Shape 2)
+   *   - legacy `@`-form: `@count: number = 0` (already supported pre-11.0c)
+   *
+   * Refinement-type predicate forms (`string(pattern(...))`) are stored
+   * verbatim — A1b owns parse-into-predicate-AST and runtime predicate
+   * synthesis; A1c (or A1c follow-up) emits validator-equivalent runtime
+   * checks where appropriate.
+   *
+   * Undefined when the decl has no `:T` annotation.
+   */
+  typeAnnotation?: string;
 }
 
 /**

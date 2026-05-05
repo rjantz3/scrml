@@ -227,3 +227,40 @@ should land closer to 11.0b — ~25-30 LOC source + types + tests.**
 
 ## Implementation log
 
+[step-11-0c impl-recognizer] Edit `scanStructuralDeclLookahead` at L3261:
+add `>:` branch returning `{typedDecl:true}` flag with consumeUntil set
+to past `>` only (caller handles `:` + type-expr + `=`). Branch placed
+BETWEEN compound `>+<` branch and the existing `>+=` Shape-1/2/3 branch.
+Validators are forwarded normally — typed-decl is compatible with
+validators-before-`>`.
+
+Edit `tryParseStructuralDecl` at L3115: insert typed-decl branch AFTER
+compound (L3014-3114), BEFORE existing markup-RHS detection. Branch:
+  1. Confirm peek is `:` (defensive — scanLookahead asserted).
+  2. Call `collectTypeAnnotation()` (REUSED from L2671). Decline if null.
+  3. Expect `=`. Decline if not present.
+  4. Consume `=`. Fall through to standard markup-RHS / expression-RHS
+     dispatch.
+The local `typeAnnotation` var is propagated to BOTH return paths
+(markup-RHS path L3174 → renderSpec node; expression-RHS path L3232+).
+
+Net change so far: ~50 LOC source edits in ast-builder.js (no other
+files yet). NO call-site mods needed — fix is universal.
+
+[step-11-0c impl-probe-pass] Probe (`_probe_step11_0c.mjs`) confirms 12
+of 12 cases produce expected AST shape:
+  - 5 brief examples (typed Shape 1/2/3, Tier 3 positional, refinement-type)
+  - Bare-variant `.Idle` collected as init=".Idle" (escape-hatch ExprNode)
+  - 4 regression baselines preserved (untyped, legacy @-form, etc.)
+  - Newline-separator interaction (Step 11.0b) — 2 typed decls coexist
+  - Validators-before-colon (`<email req>: string = <input/>`)
+  - Validator-after-type — collectTypeAnnotation absorbs trailing IDENT
+    into typeAnnotation string (A1b decomposes)
+  - Nested compound + typed children — children inherit typed-decl
+    recognition from parent's recursive parse
+
+[step-11-0c impl-test-status] After source change, full bun test:
+**8,862 pass / 43 skip / 2 fail / 8,907 across 439 files**. The 2 fails
+are EXACTLY the 2 anti-test memorials (`§K11.X-D3a`, `§K11.X-D3b`) that
+predicted typed-decl falls through to html-fragment. Now the recognizer
+fires; assertions become invalid. Memorial flip ready.

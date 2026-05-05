@@ -36,9 +36,15 @@
  *     previously marked TODO[step-11.0b] is flipped to positive assertion in
  *     §K11.2A.
  *
- *   §K11.X-DIVERGENCE-3 — Typed-decl `<x>: T = expr` and Tier 3 positional
- *     `<userInfo>: UserInfo = (...)` are STILL NOT recognized. Falls through
- *     to html-fragment. **TODO[step-11.0c]** — typed-decl recognizer.
+ *   §K11.3A — Typed-decl `<x>: T = expr` and Tier 3 positional
+ *     `<userInfo>: UserInfo = (...)` RECOGNIZED (resolved by Step 11.0c).
+ *     `scanStructuralDeclLookahead` was extended to fire on `>` followed
+ *     by `:`; `tryParseStructuralDecl` consumes the type expression via
+ *     the existing `collectTypeAnnotation` helper, then proceeds with
+ *     standard markup-RHS / expression-RHS dispatch. The resulting
+ *     state-decl carries `typeAnnotation: string`. The 2 anti-test
+ *     memorials previously marked TODO[step-11.0c] are flipped to
+ *     positive assertions in §K11.3A + §K11.3A-b.
  *
  * **Render-by-tag (BRIEF §1.2) WORKS today.** Parser produces a markup AST
  * node tagged with the cell name. The actual render-spec EXPANSION (rewriting
@@ -583,39 +589,60 @@ describe("Kickstarter v2 §3 K11.2A — multi-decl newline separator (Step 11.0b
 });
 
 // =============================================================================
-// §K11.X-DIVERGENCE-3 — Tier 3 typed compound positional NOT recognized
+// §K11.3A — Typed compound + typed Shape 1 RECOGNIZED (Step 11.0c)
 // =============================================================================
 //
-// `<userInfo>: UserInfo = ("alice", 30, true)` (kickstarter v2 §3 line 191) is
-// a Tier 3 predefined-shape compound with positional sugar. Today's parser
-// does NOT recognize the `>:` typed form — falls through to html-fragment.
-// Even simpler `<count>: number = 0` falls through.
+// `<count>: number = 0` (typed Shape 1) and `<userInfo>: UserInfo = (...)`
+// (Tier 3 positional sugar per §14.11) are now recognized. Step 11.0c
+// extended `scanStructuralDeclLookahead` to fire on `>` followed by `:`
+// and `tryParseStructuralDecl` to consume the type expression via the
+// existing `collectTypeAnnotation` helper.
 //
-// **TODO[step-11.0c]:** introduce typed-decl recognizer (`>` followed by `:`).
+// Per AST-CONTRACTS-AND-DECOMPOSITION §1.1, the resulting state-decl
+// carries `typeAnnotation: string` (raw type text). A1b owns
+// type-checking + bare-variant resolution + Tier 3 positional binding;
+// A1c emits runtime predicates from refinement-type forms.
+//
+// **§K11.X-DIVERGENCE-3 RESOLVED.** Anti-test memorials §K11.X-D3a +
+// §K11.X-D3b flipped to positive assertions §K11.3A + §K11.3A-b.
 // =============================================================================
 
-describe("Kickstarter v2 §3 K11.X-DIVERGENCE-3 — typed compound + typed Shape 1 (DEFERRED)", () => {
-  test("§K11.X-D3a: TODO[step-11.0c] — `<count>: number = 0` (typed Shape 1) → html-fragment today", () => {
+describe("Kickstarter v2 §3 K11.3A — typed compound + typed Shape 1 (RECOGNIZED)", () => {
+  test("§K11.3A: `<count>: number = 0` (typed Shape 1) → state-decl with typeAnnotation", () => {
     const src = `<program>\${ <count>: number = 0 }</program>`;
     const { ast, errors } = parse(src);
     expect(errors.length).toBe(0);
     const decls = findKind(ast, "state-decl");
-    expect(decls.length).toBe(0);
-    const fragments = findKind(ast, "html-fragment");
-    expect(fragments.length).toBeGreaterThanOrEqual(1);
-    const tyFragment = fragments.find((f) =>
-      (f.content || "").includes(": number")
-    );
-    expect(tyFragment).toBeDefined();
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.name).toBe("count");
+    expect(d.init).toBe("0");
+    expect(d.typeAnnotation).toBe("number");
+    expect(d.shape).toBe("plain");
+    expect(d.structuralForm).toBe(true);
+    expect(d.isConst).toBe(false);
+    assertNoHtmlFragmentMatching(ast, /<\s*count\s*>/);
+    assertNoHtmlFragmentMatching(ast, /:\s*number/);
   });
 
-  test("§K11.X-D3b: TODO[step-11.0c] — `<userInfo>: UserInfo = (...)` (Tier 3 positional) → html-fragment", () => {
+  test("§K11.3A-b: `<userInfo>: UserInfo = (\"alice\", 30, true)` (Tier 3 positional) → state-decl with typeAnnotation + tuple init", () => {
     const src = `<program>\${ <userInfo>: UserInfo = ("alice", 30, true) }</program>`;
     const { ast, errors } = parse(src);
     expect(errors.length).toBe(0);
     const decls = findKind(ast, "state-decl");
-    expect(decls.length).toBe(0);
-    const fragments = findKind(ast, "html-fragment");
-    expect(fragments.length).toBeGreaterThanOrEqual(1);
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.name).toBe("userInfo");
+    // Tuple-form init — acorn parses as SequenceExpression (cross-ref §14.11
+    // worked example). A1b's typed-compound resolver interprets positionally.
+    expect(d.init).toContain("alice");
+    expect(d.init).toContain("30");
+    expect(d.init).toContain("true");
+    expect(d.typeAnnotation).toBe("UserInfo");
+    expect(d.shape).toBe("plain");
+    expect(d.structuralForm).toBe(true);
+    expect(d.isConst).toBe(false);
+    assertNoHtmlFragmentMatching(ast, /<\s*userInfo\s*>/);
+    assertNoHtmlFragmentMatching(ast, /:\s*UserInfo/);
   });
 });

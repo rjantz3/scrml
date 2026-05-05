@@ -3113,6 +3113,66 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       };
     }
 
+    // ─── Phase A1a Step 11.0c — typed state-decl ───
+    //
+    // SPEC §6.2 explicitly permits typed annotations on the three RHS shapes:
+    //
+    //   <count>: number = 0                              // typed Shape 1
+    //   <userInfo>: UserInfo = ("alice", 30, true)       // Tier 3 positional sugar (§14.11)
+    //   <phase>: Phase = .Idle                           // bare-variant inference (§14.10 / M9)
+    //   const <doubled>: number = @count * 2             // typed Shape 3 derived
+    //   <email>: string(pattern(/.../)) req = <input/>   // refinement-typed Shape 2
+    //
+    // The shape is `<NAME>` + `:` + type-expression + `=` + RHS. The lookahead
+    // (`scanStructuralDeclLookahead`) recognises the `>:` prefix and returns
+    // `typedDecl: true` with `consumeUntil` set to past `>` only — caller
+    // consumes the `:`, the balanced type expression, then the `=`, and
+    // proceeds with the standard markup-RHS / expression-RHS dispatch.
+    //
+    // Type-expression collection delegates to the existing
+    // `collectTypeAnnotation()` helper (used by typed `let`, `const`,
+    // `@NAME : T = init`, function-param annotations, etc.). The helper
+    // tracks paren depth, so refinement-type predicate forms
+    // (`string(pattern(/^[^@]+@[^@]+$/))`) are accepted without further
+    // extension. Output is a STRING (raw type text) — A1b owns
+    // type-checking and bare-variant resolution; A1c emits runtime
+    // predicates from refinement-type forms.
+    //
+    // Tier 3 positional sugar `("alice", 30, true)` parses via acorn as a
+    // `SequenceExpression` ExprNode — acceptable here. A1b's typed-compound
+    // resolver interprets the sequence positionally per §14.11.
+    //
+    // Bare-variant `.Idle` parses via acorn as an error → safeParseExprToNode
+    // produces an `escape-hatch` ExprNode with `raw: ".Idle"`. Acceptable for
+    // 11.0c — A1b's bare-variant inference (M9) handles the resolution.
+    let typeAnnotation = null;
+    if (scan.typedDecl) {
+      // peek() should now be `:`. Defensive: confirm.
+      if (peek().kind !== "PUNCT" || peek().text !== ":") {
+        // Should never happen: scanLookahead asserted this. Restore and decline.
+        i = cursorBeforeConsume;
+        return null;
+      }
+      // collectTypeAnnotation consumes `:` + balanced type expression up to
+      // (but not including) the next top-level `=`.
+      typeAnnotation = collectTypeAnnotation();
+      if (!typeAnnotation) {
+        // Empty/malformed type — restore cursor and decline so the existing
+        // dispatch falls through to html-fragment.
+        i = cursorBeforeConsume;
+        return null;
+      }
+      // Now expect `=`. If not present, decline (don't silently parse a
+      // typed-decl with no RHS — that's not in scope).
+      if (peek().kind !== "PUNCT" || peek().text !== "=") {
+        i = cursorBeforeConsume;
+        return null;
+      }
+      consume(); // consume `=`
+      // Fall through to the standard markup-RHS / expression-RHS dispatch
+      // below. The `typeAnnotation` local is attached to the returned node.
+    }
+
     // ─── Step 5 — RHS branch: markup-RHS (Shape 2) or expression-RHS (Shapes 1/3) ───
     //
     // If next token is `<` PUNCT followed by IDENT/KEYWORD, attempt markup-RHS.
@@ -3163,6 +3223,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           structuralForm: true,
           isConst: !!isConst,
           shape: "decl-with-spec",
+          // Phase A1a Step 11.0c — typed Shape 2 (`<email>: string = <input/>`).
+          // typeAnnotation is non-null iff the decl carried a `:T` annotation.
+          ...(typeAnnotation ? { typeAnnotation } : {}),
           span: spanOf(startTok, peek()),
         };
       }
@@ -3195,6 +3258,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // Phase A1a Step 4 — `shape` discriminant per AST-CONTRACTS-AND-DECOMPOSITION
     // §1.1. Step 5 adds `validators` field when present (Shape 1/3 with validators
     // is technically out of brief scope but defensively preserved).
+    // Phase A1a Step 11.0c — `typeAnnotation` field added for typed Shape 1/3.
     const node = {
       id: ++counter.next,
       kind: "state-decl",
@@ -3210,6 +3274,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     };
     if (scan.validators.length > 0) {
       node.validators = scan.validators;
+    }
+    if (typeAnnotation) {
+      node.typeAnnotation = typeAnnotation;
     }
     return node;
   }
@@ -3288,6 +3355,36 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
               compoundBody: true,
             };
           }
+        }
+        // ─── Phase A1a Step 11.0c — typed state-decl ───
+        // SPEC §6.2 explicitly permits typed annotations on the three RHS
+        // shapes; SPEC §5/§14.11 (M10) defines Tier 3 typed compound positional
+        // sugar `<userInfo>: UserInfo = ("alice", 30, true)`. The shape is
+        // `<NAME>` + `:` + type-expression + `=` + RHS.
+        //
+        // Lookahead detects only the `>` followed by `:` prefix here. The
+        // caller (`tryParseStructuralDecl`) then consumes the `:` and balanced
+        // type expression via the existing `collectTypeAnnotation()` helper,
+        // followed by the standard `=` and RHS dispatch (Shape 1/2/3).
+        //
+        // Validators-before-`>` are compatible (e.g. `<email req>: string =
+        // <input/>`). The validators array is forwarded normally on the
+        // returned scan record; the typed branch does NOT zero them.
+        //
+        // Refinement-type predicate forms (`string(pattern(/.../))`) are
+        // accepted: collectTypeAnnotation tracks paren depth, so the
+        // parenthesized predicate-list is consumed as part of the type
+        // expression.
+        if (next1 && next1.kind === "PUNCT" && next1.text === ":") {
+          return {
+            consumeUntil: i + scanIdx + 1, // past `>` only — caller handles `:` + type-expr + `=`
+            validators,
+            defaultExprRaw,
+            defaultExprSpan,
+            pinned,
+            fusedGtEq: false,
+            typedDecl: true,
+          };
         }
         if (!next1 || next1.kind !== "PUNCT" || next1.text !== "=") return null;
         // Tighten: reject `>==` (would mean compound `==`) — eqTok.text === "="
