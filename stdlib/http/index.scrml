@@ -161,6 +161,155 @@ ${
         return response && response.status >= 400
     }
 
+    // -- Middleware composition (S57 Tier 3) ---------------------------------
+    // The factory pattern from withBaseUrl, generalized: each `with...`
+    // returns a {get, post, put, del, patch} client. They compose by
+    // wrapping each other.
+
+    /**
+     * Create a client that automatically adds an Authorization header
+     * to every request.
+     *
+     * Examples:
+     *   const api = withAuth("my-jwt-token")              // → "Bearer my-jwt-token"
+     *   const api = withAuth("creds", "Basic")            // → "Basic creds"
+     *   const api = withAuth("xyz", "Bearer", baseClient) // wrap an existing client
+     *
+     * @param token   — token string (will be prefixed with the scheme)
+     * @param scheme  — auth scheme ("Bearer" default; "Basic", "Token", etc.)
+     * @param wrapped — optional existing client to wrap (default: top-level get/post/...)
+     */
+    export function withAuth(token, scheme, wrapped) {
+        const sch = scheme || "Bearer"
+        const inner = wrapped || { get, post, put, del, patch }
+        function mergeOpts(opts) {
+            const o = opts || {}
+            const headers = Object.assign({}, o.headers || {}, { Authorization: `${sch} ${token}` })
+            return Object.assign({}, o, { headers })
+        }
+        return {
+            get:   (url, opts)       => inner.get(url, mergeOpts(opts)),
+            post:  (url, body, opts) => inner.post(url, body, mergeOpts(opts)),
+            put:   (url, body, opts) => inner.put(url, body, mergeOpts(opts)),
+            del:   (url, opts)       => inner.del(url, mergeOpts(opts)),
+            patch: (url, body, opts) => inner.patch(url, body, mergeOpts(opts)),
+        }
+    }
+
+    /**
+     * Create a client that injects default options (headers, timeout, retry,
+     * retryDelay) into every request. Per-call options override the defaults.
+     *
+     * Example:
+     *   const api = withDefaults({ timeout: 30000, retry: 3, retryDelay: 500 })
+     *   await api.get("/slow-endpoint")  // gets the 30s timeout + 3 retries
+     *
+     * @param defaults — option object merged into every call's opts
+     * @param wrapped  — optional existing client to wrap
+     */
+    export function withDefaults(defaults, wrapped) {
+        const d = defaults || {}
+        const inner = wrapped || { get, post, put, del, patch }
+        function mergeOpts(opts) {
+            const o = opts || {}
+            const merged = Object.assign({}, d, o)
+            // Headers should merge by key, not replace wholesale
+            if (d.headers || o.headers) {
+                merged.headers = Object.assign({}, d.headers || {}, o.headers || {})
+            }
+            return merged
+        }
+        return {
+            get:   (url, opts)       => inner.get(url, mergeOpts(opts)),
+            post:  (url, body, opts) => inner.post(url, body, mergeOpts(opts)),
+            put:   (url, body, opts) => inner.put(url, body, mergeOpts(opts)),
+            del:   (url, opts)       => inner.del(url, mergeOpts(opts)),
+            patch: (url, body, opts) => inner.patch(url, body, mergeOpts(opts)),
+        }
+    }
+
+    /**
+     * Generic retry-with-exponential-backoff-and-jitter for any async function.
+     *
+     * Useful when the operation is NOT a single HTTP call (use the built-in
+     * `retry` option for that) — e.g., a multi-step transaction, a chain of
+     * dependent fetches, or a non-HTTP async operation.
+     *
+     * Backoff: delay = baseDelay * (factor ^ attempt) ± jitter%.
+     *
+     * @param fn   — async function to execute (called with no args)
+     * @param opts — { maxRetries: 3, baseDelay: 200, factor: 2, jitter: 0.2,
+     *                shouldRetry: (err) => boolean }
+     * @returns the resolved value of fn, or rethrows the last error after exhaustion
+     */
+    export async function retry(fn, opts) {
+        const o = opts || {}
+        const maxRetries = o.maxRetries !== undefined ? o.maxRetries : 3
+        const baseDelay  = o.baseDelay  !== undefined ? o.baseDelay  : 200
+        const factor     = o.factor     !== undefined ? o.factor     : 2
+        const jitter     = o.jitter     !== undefined ? o.jitter     : 0.2
+        const shouldRetry = o.shouldRetry || (() => true)
+
+        let lastErr = null
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                return await fn()
+            } catch (err) {
+                lastErr = err
+                if (attempt === maxRetries) break
+                if (!shouldRetry(err)) break
+                const base = baseDelay * Math.pow(factor, attempt)
+                const jitterAmt = base * jitter * (Math.random() * 2 - 1)
+                const delay = Math.max(0, base + jitterAmt)
+                await new Promise(r => setTimeout(r, delay))
+            }
+        }
+        throw lastErr
+    }
+
+    /**
+     * Build a multipart/form-data body suitable for `fetch()`.
+     *
+     * Returns a FormData object — the fetch() Content-Type header will be
+     * set automatically (with the correct boundary) when FormData is the body.
+     *
+     * Examples:
+     *   const body = multipart({ name: "alice", file: fileBlob })
+     *   await post("/upload", body, { headers: { /* don't set Content-Type */ } })
+     *
+     * @param fields — object { fieldName: value }; values can be strings,
+     *                 numbers, Blobs, or Files
+     */
+    export function multipart(fields) {
+        const fd = new FormData()
+        for (const [k, v] of Object.entries(fields || {})) {
+            if (v === undefined || v === null) continue
+            if (v instanceof Blob || v instanceof File) {
+                fd.append(k, v)
+            } else {
+                fd.append(k, String(v))
+            }
+        }
+        return fd
+    }
+
+    /**
+     * Upload a file via multipart/form-data POST. Convenience wrapper.
+     *
+     * @param url     — destination URL
+     * @param file    — Blob or File
+     * @param opts    — { fieldName: "file", extraFields: {...}, ...request opts }
+     */
+    export async function uploadFile(url, file, opts) {
+        const o = opts || {}
+        const fieldName = o.fieldName || "file"
+        const extras = o.extraFields || {}
+        const fields = Object.assign({}, extras, { [fieldName]: file })
+        const body = multipart(fields)
+        const requestOpts = Object.assign({}, o, { body, fieldName: undefined, extraFields: undefined })
+        return await _request(url, Object.assign({ method: "POST" }, requestOpts))
+    }
+
     ~{
         import { assertTruthy, assertFalsy } from 'scrml:test'
 
@@ -177,6 +326,21 @@ ${
         assertTruthy(typeof client.put === "function")
         assertTruthy(typeof client.del === "function")
         assertTruthy(typeof client.patch === "function")
+
+        // -- S57 Tier 3 middleware --------------------------------------------
+
+        // withAuth — exposes the same client surface
+        const auth = withAuth("token-xyz")
+        assertTruthy(typeof auth.get === "function")
+        assertTruthy(typeof auth.post === "function")
+
+        // withDefaults — exposes the same client surface
+        const defaults = withDefaults({ timeout: 5000 })
+        assertTruthy(typeof defaults.get === "function")
+
+        // multipart returns a FormData
+        const fd = multipart({ name: "alice", count: 3 })
+        assertTruthy(fd instanceof FormData)
     }
 }
 </program>

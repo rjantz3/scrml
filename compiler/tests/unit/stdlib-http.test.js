@@ -177,3 +177,180 @@ describe("scrml:http — request logic (mock fetch)", () => {
         expect(attempts).toBe(3)
     })
 })
+
+// --- S57 Tier 3 middleware extensions ----------------------------------------
+
+const restClient = {
+    get:   (url, opts) => Promise.resolve({ url, opts: opts || {}, method: "GET" }),
+    post:  (url, body, opts) => Promise.resolve({ url, body, opts: opts || {}, method: "POST" }),
+    put:   (url, body, opts) => Promise.resolve({ url, body, opts: opts || {}, method: "PUT" }),
+    del:   (url, opts) => Promise.resolve({ url, opts: opts || {}, method: "DELETE" }),
+    patch: (url, body, opts) => Promise.resolve({ url, body, opts: opts || {}, method: "PATCH" }),
+};
+
+function withAuth(token, scheme, wrapped) {
+    const sch = scheme || "Bearer"
+    const inner = wrapped || restClient
+    function mergeOpts(opts) {
+        const o = opts || {}
+        const headers = Object.assign({}, o.headers || {}, { Authorization: `${sch} ${token}` })
+        return Object.assign({}, o, { headers })
+    }
+    return {
+        get:   (url, opts)       => inner.get(url, mergeOpts(opts)),
+        post:  (url, body, opts) => inner.post(url, body, mergeOpts(opts)),
+        put:   (url, body, opts) => inner.put(url, body, mergeOpts(opts)),
+        del:   (url, opts)       => inner.del(url, mergeOpts(opts)),
+        patch: (url, body, opts) => inner.patch(url, body, mergeOpts(opts)),
+    }
+}
+
+function withDefaults(defaults, wrapped) {
+    const d = defaults || {}
+    const inner = wrapped || restClient
+    function mergeOpts(opts) {
+        const o = opts || {}
+        const merged = Object.assign({}, d, o)
+        if (d.headers || o.headers) {
+            merged.headers = Object.assign({}, d.headers || {}, o.headers || {})
+        }
+        return merged
+    }
+    return {
+        get:   (url, opts)       => inner.get(url, mergeOpts(opts)),
+        post:  (url, body, opts) => inner.post(url, body, mergeOpts(opts)),
+        put:   (url, body, opts) => inner.put(url, body, mergeOpts(opts)),
+        del:   (url, opts)       => inner.del(url, mergeOpts(opts)),
+        patch: (url, body, opts) => inner.patch(url, body, mergeOpts(opts)),
+    }
+}
+
+async function retry(fn, opts) {
+    const o = opts || {}
+    const maxRetries = o.maxRetries !== undefined ? o.maxRetries : 3
+    const baseDelay  = o.baseDelay  !== undefined ? o.baseDelay  : 200
+    const factor     = o.factor     !== undefined ? o.factor     : 2
+    const jitter     = o.jitter     !== undefined ? o.jitter     : 0.2
+    const shouldRetry = o.shouldRetry || (() => true)
+    let lastErr = null
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try { return await fn(); } catch (err) {
+            lastErr = err
+            if (attempt === maxRetries) break
+            if (!shouldRetry(err)) break
+            const base = baseDelay * Math.pow(factor, attempt)
+            const jitterAmt = base * jitter * (Math.random() * 2 - 1)
+            const delay = Math.max(0, base + jitterAmt)
+            await new Promise(r => setTimeout(r, delay))
+        }
+    }
+    throw lastErr
+}
+
+function multipart(fields) {
+    const fd = new FormData()
+    for (const [k, v] of Object.entries(fields || {})) {
+        if (v === undefined || v === null) continue
+        if (v instanceof Blob || v instanceof File) {
+            fd.append(k, v)
+        } else {
+            fd.append(k, String(v))
+        }
+    }
+    return fd
+}
+
+describe("scrml:http — withAuth (Tier 3)", () => {
+    test("HM1: adds Bearer auth header by default", async () => {
+        const c = withAuth("token-xyz")
+        const res = await c.get("/x")
+        expect(res.opts.headers.Authorization).toBe("Bearer token-xyz")
+    })
+    test("HM2: custom scheme", async () => {
+        const c = withAuth("creds", "Basic")
+        const res = await c.get("/x")
+        expect(res.opts.headers.Authorization).toBe("Basic creds")
+    })
+    test("HM3: preserves user-set headers", async () => {
+        const c = withAuth("t")
+        const res = await c.get("/x", { headers: { "X-Trace": "abc" } })
+        expect(res.opts.headers["X-Trace"]).toBe("abc")
+        expect(res.opts.headers.Authorization).toBe("Bearer t")
+    })
+    test("HM4: composes with another wrapped client", async () => {
+        const inner = withDefaults({ timeout: 5000 })
+        const auth = withAuth("t", "Bearer", inner)
+        const res = await auth.get("/x")
+        expect(res.opts.headers.Authorization).toBe("Bearer t")
+        expect(res.opts.timeout).toBe(5000)
+    })
+})
+
+describe("scrml:http — withDefaults (Tier 3)", () => {
+    test("HM5: injects timeout default", async () => {
+        const c = withDefaults({ timeout: 30000 })
+        const res = await c.get("/x")
+        expect(res.opts.timeout).toBe(30000)
+    })
+    test("HM6: per-call options override defaults", async () => {
+        const c = withDefaults({ timeout: 30000 })
+        const res = await c.get("/x", { timeout: 1000 })
+        expect(res.opts.timeout).toBe(1000)
+    })
+    test("HM7: headers merge by key", async () => {
+        const c = withDefaults({ headers: { "X-A": "1", "X-B": "2" } })
+        const res = await c.get("/x", { headers: { "X-B": "override", "X-C": "3" } })
+        expect(res.opts.headers["X-A"]).toBe("1")
+        expect(res.opts.headers["X-B"]).toBe("override")
+        expect(res.opts.headers["X-C"]).toBe("3")
+    })
+})
+
+describe("scrml:http — retry (Tier 3)", () => {
+    test("HM8: returns first-call result on success", async () => {
+        const r = await retry(async () => 42, { maxRetries: 2, baseDelay: 1, jitter: 0 })
+        expect(r).toBe(42)
+    })
+    test("HM9: retries on failure up to maxRetries", async () => {
+        let calls = 0
+        try {
+            await retry(async () => { calls++; throw new Error("fail") }, { maxRetries: 2, baseDelay: 1, jitter: 0 })
+        } catch(e) {}
+        expect(calls).toBe(3)  // 1 initial + 2 retries
+    })
+    test("HM10: shouldRetry stops retrying when false", async () => {
+        let calls = 0
+        try {
+            await retry(
+                async () => { calls++; throw new Error("nope") },
+                { maxRetries: 5, baseDelay: 1, jitter: 0, shouldRetry: () => false }
+            )
+        } catch(e) {}
+        expect(calls).toBe(1)
+    })
+})
+
+describe("scrml:http — multipart (Tier 3)", () => {
+    test("HM11: returns FormData", () => {
+        const fd = multipart({ name: "alice" })
+        expect(fd).toBeInstanceOf(FormData)
+        expect(fd.get("name")).toBe("alice")
+    })
+    test("HM12: stringifies non-blob values", () => {
+        const fd = multipart({ count: 3, ratio: 0.5, flag: true })
+        expect(fd.get("count")).toBe("3")
+        expect(fd.get("ratio")).toBe("0.5")
+        expect(fd.get("flag")).toBe("true")
+    })
+    test("HM13: skips null/undefined", () => {
+        const fd = multipart({ name: "a", missing: null, nope: undefined })
+        expect(fd.get("name")).toBe("a")
+        expect(fd.get("missing")).toBeNull()
+    })
+    test("HM14: preserves Blob values as files", () => {
+        const blob = new Blob(["hello"], { type: "text/plain" })
+        const fd = multipart({ file: blob })
+        const got = fd.get("file")
+        expect(got).toBeInstanceOf(Blob)
+    })
+})

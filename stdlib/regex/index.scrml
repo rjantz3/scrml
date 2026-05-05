@@ -1,0 +1,231 @@
+<program>
+${
+    // ---------------------------------------------------------------------------
+    // scrml:regex — Common patterns + ergonomic helpers (RegExp wrapper)
+    //
+    // The scrml language treats inline regex literals as first-class. This
+    // module provides a vetted catalog of common patterns + named-group helpers
+    // for cases where you want a known-correct pattern (email, URL, UUID, etc.)
+    // rather than rolling your own.
+    //
+    // Usage:
+    //   ${ import { patterns, test, match, extract, escape } from 'scrml:regex' }
+    //
+    //   if (test(patterns.email, userInput)) { ... }
+    //   const groups = match(patterns.semver, "1.2.3-beta")
+    //   const allUrls = extract(patterns.url, document)
+    //
+    // Pattern philosophy: the patterns here are PRACTICAL not RFC-strict.
+    // Real RFC-strict email/URL regexes are absurdly long; these match what
+    // 99% of apps actually need to validate. If you need RFC-strict, write
+    // your own or call out to a dedicated library.
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Catalog of common, vetted patterns. Each entry is a RegExp.
+     *
+     * email       — RFC-practical, not RFC-5321-strict. Matches "user@host.tld".
+     * url         — http(s) URLs, optionally with port, path, query, fragment.
+     * ipv4        — dotted-quad IPv4 (0-255 per octet).
+     * ipv6        — IPv6 in any standard form including ::-compression.
+     * uuid        — UUID v1-v5 (canonical 8-4-4-4-12 hex with hyphens).
+     * slug        — lowercase letters, digits, hyphens; no leading/trailing hyphen.
+     * hexColor    — #RGB or #RRGGBB (case-insensitive).
+     * semver      — semantic-version-like: major.minor.patch(-prerelease)?(+build)?
+     * isoDate     — ISO 8601 date (YYYY-MM-DD) or full date-time (with T...Z).
+     * phoneE164   — E.164 international phone format (+ followed by digits).
+     * usZip       — US ZIP / ZIP+4.
+     * creditCard  — 13-19 digit credit card number (no Luhn check; structural only).
+     * username    — alphanumeric + underscore, 3-32 chars.
+     * password    — at least 8 chars including upper, lower, digit. Practical, not strict.
+     */
+    export const patterns = {
+        email:      /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+        url:        /^https?:\/\/[^\s/$.?#].[^\s]*$/i,
+        ipv4:       /^(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)$/,
+        ipv6:       /^(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$|^(?:[0-9a-fA-F]{1,4}:){1,7}:$|^::(?:[0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4}$|^(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}$|^(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}$|^(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}$|^(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}$|^(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}$|^[0-9a-fA-F]{1,4}:(?::[0-9a-fA-F]{1,4}){1,6}$|^::$/,
+        uuid:       /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/,
+        slug:       /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+        hexColor:   /^#(?:[0-9a-fA-F]{3}){1,2}$/,
+        semver:     /^(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)(?:-(?<prerelease>[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?(?:\+(?<build>[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/,
+        isoDate:    /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/,
+        phoneE164:  /^\+[1-9]\d{1,14}$/,
+        usZip:      /^\d{5}(?:-\d{4})?$/,
+        creditCard: /^\d{13,19}$/,
+        username:   /^[a-zA-Z0-9_]{3,32}$/,
+        password:   /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/,
+    }
+
+    /**
+     * Test whether a string matches a pattern. Returns boolean.
+     * Convenience for `pattern.test(str)` with null-safety.
+     */
+    export function test(pattern, str) {
+        if (typeof str !== "string") return false
+        return pattern.test(str)
+    }
+
+    /**
+     * Match a string against a pattern. Returns the named-group dict
+     * if the pattern has named groups, OR the array of all groups, OR
+     * null if no match.
+     *
+     * Example:
+     *   match(patterns.semver, "1.2.3-beta")
+     *     → { major: "1", minor: "2", patch: "3", prerelease: "beta", build: undefined }
+     *   match(/^(\w+)@(\w+)$/, "alice@host")
+     *     → ["alice@host", "alice", "host"]
+     *   match(patterns.email, "not-an-email")  → null
+     */
+    export function match(pattern, str) {
+        if (typeof str !== "string") return null
+        const m = pattern.exec(str)
+        if (!m) return null
+        if (m.groups) return m.groups
+        return m
+    }
+
+    /**
+     * Find ALL non-overlapping matches in a string. Returns an array.
+     *
+     * If the pattern has named groups, each entry is the named-group dict.
+     * Otherwise, each entry is the matched string.
+     *
+     * The pattern is automatically converted to global if it isn't already.
+     *
+     * Example:
+     *   extract(/\b\w+@\w+\.\w+\b/g, "Email a@b.c or x@y.z")
+     *     → ["a@b.c", "x@y.z"]
+     */
+    export function extract(pattern, str) {
+        if (typeof str !== "string") return []
+        const flags = pattern.flags.includes("g") ? pattern.flags : pattern.flags + "g"
+        const p = new RegExp(pattern.source, flags)
+        const out = []
+        let m
+        while ((m = p.exec(str)) !== null) {
+            if (m.groups) {
+                out.push(m.groups)
+            } else if (m.length > 1) {
+                // Has capturing groups — push the first capture if there's one,
+                // else the full match.
+                out.push(m[1] !== undefined ? m[1] : m[0])
+            } else {
+                out.push(m[0])
+            }
+            // Guard against zero-length matches infinite loop
+            if (m.index === p.lastIndex) p.lastIndex++
+        }
+        return out
+    }
+
+    /**
+     * Replace matches with a replacement string or function.
+     * Convenience wrapper over String.prototype.replace.
+     */
+    export function replace(pattern, str, replacement) {
+        if (typeof str !== "string") return str
+        return str.replace(pattern, replacement)
+    }
+
+    /**
+     * Escape regex metacharacters in a user-supplied string so it can be
+     * used as a literal substring in a RegExp constructor.
+     *
+     * Example:
+     *   const userInput = "1.2.3"
+     *   const re = new RegExp(escape(userInput))
+     *   re.test("v1.2.3")  // → true (the dots are literal, not "any char")
+     */
+    export function escape(str) {
+        if (typeof str !== "string") return ""
+        return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    }
+
+    /**
+     * Compose a case-insensitive RegExp from a string source.
+     * Convenience over `new RegExp(source, "i")`.
+     */
+    export function caseInsensitive(source, additionalFlags) {
+        const flags = "i" + (additionalFlags || "")
+        return new RegExp(source, flags)
+    }
+
+    /**
+     * Validate a string against a named pattern from the catalog.
+     * Returns boolean. Returns false if the pattern name is unknown.
+     *
+     * Example:
+     *   isValid("email", "alice@example.com")  → true
+     *   isValid("uuid", "not-a-uuid")          → false
+     */
+    export function isValid(patternName, str) {
+        const p = patterns[patternName]
+        if (!p) return false
+        return test(p, str)
+    }
+
+    ~{
+        import { assertEqual, assertTruthy, assertFalsy } from 'scrml:test'
+
+        // patterns catalog
+        assertTruthy(test(patterns.email, "alice@example.com"))
+        assertFalsy(test(patterns.email, "no-at-sign"))
+        assertTruthy(test(patterns.url, "https://example.com/path?q=1"))
+        assertFalsy(test(patterns.url, "not a url"))
+        assertTruthy(test(patterns.ipv4, "192.168.1.1"))
+        assertFalsy(test(patterns.ipv4, "999.0.0.1"))
+        assertTruthy(test(patterns.uuid, "550e8400-e29b-41d4-a716-446655440000"))
+        assertFalsy(test(patterns.uuid, "not-a-uuid"))
+        assertTruthy(test(patterns.slug, "my-post-slug"))
+        assertFalsy(test(patterns.slug, "Has Spaces"))
+        assertTruthy(test(patterns.hexColor, "#fff"))
+        assertTruthy(test(patterns.hexColor, "#FFAABB"))
+        assertFalsy(test(patterns.hexColor, "#abcd"))
+        assertTruthy(test(patterns.semver, "1.2.3"))
+        assertTruthy(test(patterns.semver, "1.2.3-beta.1"))
+        assertFalsy(test(patterns.semver, "1.2"))
+        assertTruthy(test(patterns.isoDate, "2026-04-01"))
+        assertTruthy(test(patterns.isoDate, "2026-04-01T14:00:00Z"))
+        assertFalsy(test(patterns.isoDate, "April 1 2026"))
+        assertTruthy(test(patterns.phoneE164, "+14155551234"))
+        assertFalsy(test(patterns.phoneE164, "415-555-1234"))
+        assertTruthy(test(patterns.usZip, "94103"))
+        assertTruthy(test(patterns.usZip, "94103-1234"))
+        assertFalsy(test(patterns.usZip, "abc"))
+
+        // match — named groups for semver
+        const sv = match(patterns.semver, "1.2.3-beta+build")
+        assertEqual(sv.major, "1")
+        assertEqual(sv.minor, "2")
+        assertEqual(sv.patch, "3")
+        assertEqual(sv.prerelease, "beta")
+        assertEqual(sv.build, "build")
+
+        // match — null on no match
+        assertEqual(match(patterns.email, "no-email"), null)
+
+        // extract — multiple matches
+        const emails = extract(/\b[\w.]+@[\w.]+\.\w+\b/g, "From a@b.com to x@y.org")
+        assertEqual(emails.length, 2)
+        assertEqual(emails[0], "a@b.com")
+        assertEqual(emails[1], "x@y.org")
+
+        // replace
+        assertEqual(replace(/foo/g, "foo bar foo", "BAZ"), "BAZ bar BAZ")
+
+        // escape
+        assertEqual(escape("1.2.3"), "1\\.2\\.3")
+        assertTruthy(test(new RegExp(escape("a.b")), "xa.by"))
+        assertFalsy(test(new RegExp(escape("a.b")), "axxb"))  // dot is literal, not "any char"
+
+        // caseInsensitive
+        assertTruthy(test(caseInsensitive("hello"), "HELLO"))
+
+        // isValid
+        assertTruthy(isValid("email", "x@y.z"))
+        assertFalsy(isValid("email", "no"))
+        assertFalsy(isValid("nonexistent-pattern", "anything"))
+    }
+}
+</program>
