@@ -212,4 +212,128 @@ classification escalates from T1 (verify-only) to **T2** (existing-tests-only,
 plus anti-test memorialization of the divergence) — but **without source
 changes**. The actual fix lands in a follow-up step PA owns.
 
+## Implementation log
+
+[step-11 tests-added] `compiler/tests/integration/kickstarter-v2-smoke.test.js`
+created with **23 cases** in 8 describe-blocks. All 23 pass first try after
+one fix (whitespace-normalized init comparison for §K11.2i-b).
+
+Cases summary:
+
+  **Working-today positive cases (16 cases):**
+  - §K11.1: V5-strict cluster — `<count>=0` + 3 functions (semicolon-separated).
+  - §K11.2a-c: Shape 1 plain numeric/string/array.
+  - §K11.2d-e: Shape 2 with bareword + call-form validators (input + checkbox).
+  - §K11.2f-g: Shape 3 numeric and string derived.
+  - §K11.2h: Shape 3 markup-typed derived.
+  - §K11.2i-a/b: plain JS const vs reactive derived (kickstarter §3 lines 234-237).
+  - §K11.3a/b: `default=` attribute (kickstarter §3 lines 242-244 + Step 6).
+  - §K11.4a/b: render-by-tag use site — `<userName/>` produces markup node with
+    tag matching the cell name (BRIEF §1.2 confirmed).
+  - §K11.5: compound field-write inside fn — `@formRes.error = msg` lowers to
+    `reactive-nested-assign` per Step 10 contract.
+
+  **Deferred-divergence anti-tests (7 cases) — TODO[step-11.0a/b/c] markers:**
+  - §K11.X-D1a/b: Variant C compound `<formRes><name>="" </>` parses as
+    html-fragment today (TODO[step-11.0a] — invert when recognizer extension
+    lands).
+  - §K11.X-D2a: multi-decl newline-separator eats sibling decls into init
+    (TODO[step-11.0b] — invert when newline-as-statement-separator lands).
+  - §K11.X-D2b: working baseline — semicolons DO work.
+  - §K11.X-D2c: working baseline — newline DOES separate decl-from-fn (legacy).
+  - §K11.X-D3a/b: typed Shape 1 + Tier 3 typed positional fall through to
+    html-fragment (TODO[step-11.0c] — invert when typed-decl recognizer lands).
+
+Every positive test fires `assertNoHtmlFragmentMatching` per BRIEF §5 DoD §5.
+
+[step-11 final-test-run] `bun run test` after smoke battery added:
+**8,845 pass / 43 skip / 0 fail / 8,888 across 439 files.** Delta from
+baseline 8,822 → 8,845 = **+23 pass** (slightly above BRIEF target of +10
+to +15 due to memorial anti-tests). **0 regressions**. Test file count: +1
+(`kickstarter-v2-smoke.test.js`).
+
+## Final summary
+
+**Files modified (0):** Step 11 is verification-only.
+
+**Files added (1):**
+  - `compiler/tests/integration/kickstarter-v2-smoke.test.js` (+604 LOC,
+    23 tests, 139 expect() calls).
+
+**Branch:** `phase-a1a-step-11-smoke`.
+
+**Test delta:** 8,822 → 8,845 (+23) pass; 43 skip stable; 0 fail; 0 regressions.
+
+**Self-host parity:** N/A — Step 11 is parser verification only; no source
+change, no codegen change.
+
+**Survey conclusion (per BRIEF §3):**
+  - **NOT depth-of-survey discount #9.** Survey revealed three substantive
+    divergences from BRIEF assumptions, all rooted in the fact that Step 2
+    explicitly DEFERRED Variant C / typed-decl / compound-block recognizers
+    to Step 11 (per Step 2 progress.md lines 93-98 + 223-228 + 321), but the
+    Step 11 BRIEF (drafted before Step 2 landed) assumed all that work was
+    already done.
+  - **Render-by-tag (BRIEF §1.2) WORKS at parse level.** `<userName/>` produces
+    a markup AST node tagged with the cell name. The actual render-spec
+    EXPANSION is A1c work, out of scope.
+  - **Working-today positive corpus is broad enough** to ground 16 positive
+    smoke tests covering Shape 1 + 2 + 3 + default + plain JS const + render-by-tag
+    + compound field-write — every kickstarter v2 §3 example line that DOES
+    parse correctly today.
+  - **The three divergences are explicit and tracked:**
+    1. **TODO[step-11.0a]** — Variant C compound `<x><y>="" </>` recognizer
+       extension. Lives in `tryParseStructuralDecl` (`compiler/src/ast-builder.js`
+       lines ~3528-3580 area, identifier-after-`>` branch). Current matcher
+       only handles `>` followed by `=`; needs `>` followed by `<sib>` or `</>`
+       branch for compound-block body.
+    2. **TODO[step-11.0b]** — Multi-decl with newline-only separator. Currently
+       only `;` is recognized as a statement separator inside `parseLogicBody`
+       when the previous statement was a state-decl. Needs newline-after-RHS
+       to terminate the init-collection.
+    3. **TODO[step-11.0c]** — Typed-decl recognizer. `<x>: T = expr` form.
+       Live in `tryParseStructuralDecl` next to the `=`-after-`>` branch.
+
+**Deferred to follow-up sub-steps PA owns:**
+  - Step 11.0a (Variant C compound recognizer) — recommend dispatch.
+  - Step 11.0b (newline-as-statement-separator) — recommend dispatch.
+  - Step 11.0c (typed-decl recognizer) — recommend dispatch.
+  - When each lands, the corresponding §K11.X anti-test in
+    `kickstarter-v2-smoke.test.js` MUST be inverted to assert positive shape
+    per AST-CONTRACTS-AND-DECOMPOSITION §1.1.
+
+**Anomaly check:** Test delta exceeds plan by +8 (23 vs 15 target), all
+explained by memorial anti-tests for the three divergences. No unexpected
+behavioral changes. Anti-tests are clearly marked with `TODO[step-11.0X]`
+markers so they don't drift into permanent assertions.
+
+**Path-discipline near-misses:** None. All Reads/Writes used absolute paths
+under WORKTREE_ROOT (`/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a3be37db7f736aa60/...`).
+Verified pwd at startup; confirmed git toplevel matches. Probe scripts
+written as `_probe*.mjs` files in worktree root, then deleted before
+committing — never reached the index.
+
+## Tier classification
+
+**T2** (test-only, no source changes; survey surfaced three divergences
+worth memorializing as anti-tests; recognizer extensions deferred to
+follow-up sub-steps).
+
+## Tags
+
+#phase-a1a #step-11 #kickstarter-v2-smoke #variant-c #render-by-tag
+#deferred-divergence #anti-test-memorialization #ast-shape-verification
+#zero-source-changes #not-discount-9 #step-11.0a-deferred
+#step-11.0b-deferred #step-11.0c-deferred
+
+## Links
+
+- Brief: `docs/changes/phase-a1a-step-11-compound-render-smoke/BRIEF.md`
+- AST contract §1.1, §1.2: `docs/changes/phase-a1a-lex-parse/AST-CONTRACTS-AND-DECOMPOSITION.md`
+- Kickstarter v2 §3: `docs/articles/llm-kickstarter-v2-2026-05-04.md` lines 132-249
+- SPEC §6.3 Variant C compound: `compiler/SPEC.md` lines 1828-1894
+- SPEC §6.4 Render-by-tag: `compiler/SPEC.md` lines 1896-1944
+- Step 2 deferral notes: `docs/changes/phase-a1a-step-2-foundational-decl-recognition/progress.md` lines 93-98 + 223-228 + 321
+- Step 10 predecessor: commit `226a2dd`
+- Tests added: `compiler/tests/integration/kickstarter-v2-smoke.test.js`
 
