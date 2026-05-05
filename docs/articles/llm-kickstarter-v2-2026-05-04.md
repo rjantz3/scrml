@@ -113,7 +113,7 @@ Note the parts:
 | `${ ... }` | **Logic block.** All declarations and functions live here, not in a separate `<script>` tag. |
 | `<varname> = expr` | **Reactive state DECLARATION** (V5-strict structural form). Bare `let var` is non-reactive. |
 | `@varname` | **Reactive state EXPRESSION ACCESS** (V5-strict canonical form). Reads, writes, and compound assignments use the `@` sigil. Bare names in expressions are LOCALS only. |
-| `const @name = expr` | **Derived reactive.** Re-evaluates when inputs change. |
+| `const <name> = expr` | **Derived reactive** (structural-decl form, V5-strict). Re-evaluates when inputs change. Read at `@name`. |
 | `server function name() { ... }` | A function that runs on the server. Boundary security is compiler-enforced. |
 | `function name() { ... }` | Client function. Owns reactive-state writes. |
 | `?{` ... `}` | **SQL block.** Backticks inside hold the SQL string. `${param}` interpolations become bound parameters. |
@@ -215,9 +215,9 @@ ${
   // Shape 3 — derived (read-only). RHS is an expression that recomputes.
   // No render-spec; <derivedName/> in markup is E-CELL-NO-RENDER-SPEC.
   // Markup-typed derived cells ARE legal under the markup-as-value pillar.
-  const @doubled    = @count * 2
-  const @greeting   = "Hello, " + @userName
-  const @badge      = <span class="badge">${@userName}</span>     // markup-typed derived
+  const <doubled>   = @count * 2
+  const <greeting>  = "Hello, " + @userName
+  const <badge>     = <span class="badge">${@userName}</span>     // markup-typed derived
 }
 ```
 
@@ -465,7 +465,7 @@ ${
 - `<onTransition>` and `effect=` DO fire on derived state changes. The transitions are real (the value changed) — just initiated by the source, not by user code.
 - Initial value computed from source at engine-init time. Compile-error if the derived expression is undefined for the source's `initial=` state.
 - Chained derivation legal (`A → B → C`). Cycles caught at compile time.
-- For plain (non-engine) derived state, use `const @derived = expr` from §3.1 — `derived=` is engine-only.
+- For plain (non-engine) derived state, use `const <derived> = expr` from §3.1 — `derived=` is engine-only.
 
 ---
 
@@ -663,7 +663,7 @@ If your instinct from another framework fires, stop and use the scrml form. Thes
 | `$state(0)` rune | Svelte 5 | `<var> = 0` to declare; `@var` to read; `@var = X` to write |
 | `let var = 0` (intending reactive) | (any) | `<var> = 0` — V5-strict structural form. Bare `let` is NON-reactive. |
 | `@var = 0` to declare | (older scrml v1) | **`<var> = 0`** — declaration is structural. Use `@var` only for expression access. |
-| `computed(() => …)`, `$:` | Vue, Svelte | `const @derived = expr` |
+| `computed(() => …)`, `$:` | Vue, Svelte | `const <derived> = expr` (read at `@derived`) |
 | `useEffect(() => …)` | React | Reactive expressions update automatically; effects are usually unnecessary |
 | `await x()` | JS/TS | bare `x()` — compiler auto-awaits server fns (§5 above) |
 | State machine via `if @phase === 'loading'` chains | (any) | **An engine.** `<engine for=PhaseEnum initial=.Loading>...</>` — read §4 |
@@ -900,9 +900,9 @@ Notes:
 - Channel attributes: `name=` (required), `topic=`, `protect=`, `reconnect=`, `onserver:open/close/message=`, `onclient:open/close/error=`.
 - Do NOT invent a `room { state {} on join() }` DSL.
 
-### 11.4 Reactive recipe — `const @name` + `@debounced(N)` modifier
+### 11.4 Reactive recipe — `const <name>` + `@debounced(N)` modifier
 
-Derived reactive values use `const @name = expr`. For debouncing, `@debounced(N)` is a **declaration modifier**.
+Derived reactive values use `const <name> = expr` (structural-decl form, V5-strict — same shape as plain reactive cells, just with `const` modifier). Read them at `@name`. For debouncing, `@debounced(N)` is a **declaration modifier**.
 
 ```scrml
 <program>
@@ -921,10 +921,10 @@ ${
   ]
 
   // Derived reactives — recompute when inputs change.
-  const @filteredItems = items.filter(it =>
+  const <filteredItems> = items.filter(it =>
     it.name.includes(@debouncedQuery.toLowerCase())
   )
-  const @total = @filteredItems.reduce((s, it) => s + it.price, 0)
+  const <total> = @filteredItems.reduce((s, it) => s + it.price, 0)
 
   function inc() { @count = @count + 1 }
   function dec() { @count = @count - 1 }
@@ -947,7 +947,7 @@ ${
 
 Notes:
 - `<var> = ...` declares; `@var` reads.
-- `const @name = expr` derives. Auto-recomputes when inputs change.
+- `const <name> = expr` derives (structural-decl + const modifier). Auto-recomputes when inputs change. Read as `@name`.
 - `@debounced(N) <name> = expr` — modifier on the declaration. Read as `@name` (with the sigil) elsewhere.
 - No `computed()`, no `useEffect`, no `$:`.
 
@@ -1158,7 +1158,7 @@ If you find yourself writing `{#if}` or `{#each}` or `<if test=>` or `<for each=
 
 If you find yourself writing `await` in front of a server-fn call, stop.
 
-If you find yourself writing `~name = expr` for derived reactive, stop. Use `const @name = expr`.
+If you find yourself writing `~name = expr` for derived reactive, stop. Use `const <name> = expr` (read at `@name`).
 
 If you find yourself writing `import Database from 'better-sqlite3'`, stop. Use `< db src="...">`.
 
