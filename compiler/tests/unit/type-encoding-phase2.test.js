@@ -166,13 +166,17 @@ describe("emitLogicNode with EncodingContext", () => {
     expect(output).toContain('"count"');
   });
 
-  test("reactive-derived-decl uses encoded names for decl and deps", () => {
+  test("derived state-decl uses encoded names for decl and deps", () => {
+    // Phase A1a Step 11.5 — `reactive-derived-decl` folded into state-decl.
     const ctx = new EncodingContext({ enabled: true });
     const encodedTotal = ctx.register("total", NUMBER_TYPE);
     const encodedPrice = ctx.register("price", NUMBER_TYPE);
 
     const node = {
-      kind: "reactive-derived-decl",
+      kind: "state-decl",
+      shape: "derived",
+      isConst: true,
+      structuralForm: false,
       name: "total",
       init: "@price * 2",
     };

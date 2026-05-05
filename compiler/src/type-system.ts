@@ -4508,7 +4508,8 @@ function annotateNodes(
           checkLogicExprIdents(dbInitExpr, dbSpan, scopeChain, typeRegistry, errors, n.name as string | undefined, fnAllDeclared);
         }
         if (n.name) {
-          // Same double-bind as state-decl / reactive-derived-decl.
+          // Same double-bind as state-decl (formerly also reactive-derived-decl;
+          // folded into state-decl per Phase A1a Step 11.5).
           scopeChain.bind(`@${n.name as string}`, { kind: "reactive", resolvedType: tAsIs() });
           scopeChain.bind(n.name as string, { kind: "reactive", resolvedType: tAsIs() });
         }
@@ -4748,21 +4749,11 @@ function annotateNodes(
         break;
       }
 
-      case "reactive-derived-decl": {
-        const drvSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
-        const drvInitExpr = (n as Record<string, unknown>).initExpr;
-        if (drvInitExpr) {
-          checkLogicExprIdents(drvInitExpr, drvSpan, scopeChain, typeRegistry, errors, n.name as string | undefined, fnAllDeclared);
-        }
-        if (n.name) {
-          // `const @x = expr` creates both a @-form reference (`@x`) and
-          // a bare-name reference (`x`), same as state-decl above.
-          scopeChain.bind(`@${n.name as string}`, { kind: "reactive", resolvedType: tAsIs() });
-          scopeChain.bind(n.name as string, { kind: "reactive", resolvedType: tAsIs() });
-        }
-        resolvedType = tAsIs();
-        break;
-      }
+      // Phase A1a Step 11.5 — fold of `reactive-derived-decl` into state-decl.
+      // The legacy `const @x = expr` form now produces a state-decl with
+      // shape:"derived" + structuralForm:false + isConst:true; that node
+      // flows through `case "state-decl":` above (which carries the full
+      // predicate/machine/scope handling). The dedicated branch is retired.
 
       // ------------------------------------------------------------------
       // §2a — assignment RHS coverage. Two structured assignment kinds
@@ -7748,7 +7739,7 @@ function processFile(
       for (const n of nodes) {
         if (!n || typeof n !== "object") continue;
         if (
-          (n.kind === "state-decl" || n.kind === "reactive-derived-decl" || n.kind === "reactive-debounced-decl") &&
+          (n.kind === "state-decl" || n.kind === "reactive-debounced-decl") &&
           typeof n.name === "string"
         ) {
           declaredReactives.add(n.name);

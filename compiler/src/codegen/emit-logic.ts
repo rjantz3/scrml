@@ -574,8 +574,9 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         (node as any).isConst === true &&
         (node as any).structuralForm === false
       ) {
-        // Mirrors the legacy `case "reactive-derived-decl":` body that
-        // remains below for compat (sweep deferred to WIP 5).
+        // Implements the post-fold derived-cell emitter (§6.6 derived).
+        // Pre-Step-11.5 this was a separate `case "reactive-derived-decl":`;
+        // now it's gated inline on the shape discriminant.
         const derivedInit: string = node.init ?? "";
         const reactiveDepsFound = node.initExpr
           ? extractReactiveDepsFromExprNode(node.initExpr)
@@ -694,32 +695,9 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       return _emitReactiveSet(encodedName, wrappedInit, opts, node.name, isInit);
     }
 
-    case "reactive-derived-decl": {
-      // const @name = expr → derived reactive value (§6.6)
-      // Phase 4d: ExprNode-first reactive dep extraction, string fallback
-      const derivedInit: string = node.init ?? "";
-      const reactiveDepsFound = node.initExpr
-        ? extractReactiveDepsFromExprNode(node.initExpr)
-        : extractReactiveDeps(derivedInit);
-      const hasReactiveDeps = reactiveDepsFound.size > 0;
-
-      if (!hasReactiveDeps) {
-        const derivedRhs = emitExprField(node.initExpr, derivedInit, _makeExprCtx(opts));
-        return `/* W-DERIVED-001: const @${node.name} has no reactive dependencies — treating as const */ const ${node.name} = ${derivedRhs};`;
-      }
-
-      const rewrittenBody = emitExprField(node.initExpr, derivedInit, { ..._makeExprCtx(opts), derivedNames });
-      const ctx = opts.encodingCtx;
-      const encodedDeclName = ctx ? ctx.encode(node.name) : node.name;
-
-      const lines: string[] = [];
-      lines.push(`_scrml_derived_declare(${JSON.stringify(encodedDeclName)}, () => ${rewrittenBody});`);
-      for (const dep of reactiveDepsFound) {
-        const encodedDep = ctx ? ctx.encode(dep) : dep;
-        lines.push(`_scrml_derived_subscribe(${JSON.stringify(encodedDeclName)}, ${JSON.stringify(encodedDep)});`);
-      }
-      return lines.join("\n");
-    }
+    // Phase A1a Step 11.5 — the legacy `case "reactive-derived-decl":` was
+    // retired here. Folded into `case "state-decl":` above with the
+    // shape:"derived" + structuralForm:false early-route.
 
     case "return-stmt": {
       // fix-cg-sql-ref-placeholder (S40 follow-up): `return ?{...}.method()` —

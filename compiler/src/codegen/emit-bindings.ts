@@ -93,7 +93,8 @@ function walkForReactiveDecls(
     if (node.kind === "logic" && Array.isArray(node.body)) {
       for (const stmt of node.body) {
         if (!stmt || typeof stmt !== "object") continue;
-        if (stmt.kind === "state-decl" || stmt.kind === "reactive-derived-decl") {
+        // Phase A1a Step 11.5 — `reactive-derived-decl` folded into state-decl.
+        if (stmt.kind === "state-decl") {
           const varName: string = stmt.name ?? "";
           // Phase 4d: ExprNode-first, string fallback
           const init: string = (stmt as any).initExpr ? emitStringFromTree((stmt as any).initExpr).trim() : (typeof stmt.init === "string" ? stmt.init.trim() : "");

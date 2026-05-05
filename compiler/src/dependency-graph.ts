@@ -42,7 +42,6 @@ import type {
   MarkupNode,
   ImportDeclNode,
   LogicNode,
-  ReactiveDerivedDeclNode,
   ExprNode,
 } from "./types/ast.ts";
 import { forEachIdentInExprNode, emitStringFromTree } from "./expression-parser.ts";
@@ -438,20 +437,36 @@ function collectAllFunctions(fileAST: FileAST): FunctionDeclNode[] {
 }
 
 /**
- * Collect all state-decl nodes from a file AST.
+ * Collect all PLAIN state-decl nodes from a file AST.
+ *
+ * Phase A1a Step 11.5 — `reactive-derived-decl` folded into state-decl. To
+ * avoid duplicate DG nodes when the dedicated derived collector also picks
+ * up the same state-decl, this function EXCLUDES nodes that are the legacy
+ * folded-derived form (shape:"derived" + structuralForm:false). Those flow
+ * through `collectAllReactiveDerivedDecls` exclusively and get
+ * `_pendingDerivedReads` populated for read-edge resolution.
+ *
+ * Shape 3 V5-strict (`const <x> = expr`, structuralForm:true) is INCLUDED
+ * here — its codegen path (latent gap) treats it as a plain state-decl.
  */
 function collectAllReactiveDecls(fileAST: FileAST): ReactiveDeclNode[] {
   const nodeList = fileAST.nodes;
   const result: ReactiveDeclNode[] = [];
 
+  function isFoldedDerived(n: ASTNode): boolean {
+    if (n.kind !== "state-decl") return false;
+    const sd = n as Record<string, unknown>;
+    return sd.shape === "derived" && sd.structuralForm === false;
+  }
+
   function visit(list: ASTNode[]): void {
     for (const node of list) {
       if (node.kind === "logic" && Array.isArray(node.body)) {
         for (const child of node.body) {
-          if (child.kind === "state-decl") result.push(child);
+          if (child.kind === "state-decl" && !isFoldedDerived(child)) result.push(child);
         }
       }
-      if (node.kind === "state-decl") result.push(node);
+      if (node.kind === "state-decl" && !isFoldedDerived(node)) result.push(node);
       if ("children" in node && Array.isArray((node as MarkupNode).children)) {
         visit((node as MarkupNode).children as ASTNode[]);
       }
@@ -466,21 +481,19 @@ function collectAllReactiveDecls(fileAST: FileAST): ReactiveDeclNode[] {
  * Collect all derived-shape state-decl nodes from a file AST.
  * These are `const @var = expr` declarations (legacy expression-form).
  *
- * Phase A1a Step 11.5 — fold of `reactive-derived-decl` into `state-decl`.
- * Pre-fold this collected `kind: "reactive-derived-decl"` nodes; post-fold
- * it collects `kind: "state-decl"` with `shape === "derived"` AND
- * `structuralForm === false` (the legacy `@`-form). The function name is
- * preserved for blame-traceability; semantically it now collects the
- * post-fold representation. Pre-fold `reactive-derived-decl` nodes are
- * still recognized for transitional compat (will be cleaned in WIP 5).
+ * Phase A1a Step 11.5 — `reactive-derived-decl` retired and folded into
+ * state-decl. Post-fold this collects `kind: "state-decl"` with
+ * `shape === "derived"` AND `structuralForm === false` (the legacy
+ * `@`-form). The function name is preserved for blame-traceability across
+ * the rename.
  *
  * Note: Shape 3 V5-strict (`const <x> = expr`, structuralForm:true) is
  * NOT collected — its codegen path (latent gap) is left untouched per
  * BRIEF §2.2. The plain state-decl loop in `nodes.set` covers it.
  */
-function collectAllReactiveDerivedDecls(fileAST: FileAST): ReactiveDerivedDeclNode[] {
+function collectAllReactiveDerivedDecls(fileAST: FileAST): ReactiveDeclNode[] {
   const nodeList = fileAST.nodes;
-  const result: ReactiveDerivedDeclNode[] = [];
+  const result: ReactiveDeclNode[] = [];
 
   function isLegacyDerivedFold(n: ASTNode): boolean {
     if (n.kind !== "state-decl") return false;
@@ -492,12 +505,10 @@ function collectAllReactiveDerivedDecls(fileAST: FileAST): ReactiveDerivedDeclNo
     for (const node of list) {
       if (node.kind === "logic" && Array.isArray(node.body)) {
         for (const child of node.body) {
-          if (child.kind === "reactive-derived-decl") result.push(child as ReactiveDerivedDeclNode);
-          else if (isLegacyDerivedFold(child)) result.push(child as unknown as ReactiveDerivedDeclNode);
+          if (isLegacyDerivedFold(child)) result.push(child as ReactiveDeclNode);
         }
       }
-      if (node.kind === "reactive-derived-decl") result.push(node as ReactiveDerivedDeclNode);
-      else if (isLegacyDerivedFold(node)) result.push(node as unknown as ReactiveDerivedDeclNode);
+      if (isLegacyDerivedFold(node)) result.push(node as ReactiveDeclNode);
       if ("children" in node && Array.isArray((node as MarkupNode).children)) {
         visit((node as MarkupNode).children as ASTNode[]);
       }
@@ -680,8 +691,9 @@ function hasLiftAfter(
     // A function-decl or sql block also acts as a server-call boundary
     if (stmt.kind === "sql") return false;
 
-    // Another operation node (function-decl, state-decl, reactive-derived-decl) stops the scan
-    if (stmt.kind === "function-decl" || stmt.kind === "state-decl" || stmt.kind === "reactive-derived-decl") {
+    // Another operation node (function-decl, state-decl) stops the scan.
+    // Phase A1a Step 11.5 — `reactive-derived-decl` folded into state-decl.
+    if (stmt.kind === "function-decl" || stmt.kind === "state-decl") {
       return false;
     }
   }
@@ -895,9 +907,10 @@ export function runDG(input: DGInput): DGOutput {
       nodes.set(nodeId, dgNode);
     }
 
-    // Collect reactive-derived-decl nodes (const @var = expr)
-    // Also collect tilde-decl nodes whose init references @vars — these compile
-    // to _scrml_derived_declare and are semantically equivalent to reactive-derived-decl.
+    // Collect derived-shape state-decl nodes (post-Step-11.5 representation
+    // of legacy `const @var = expr`). Also collect tilde-decl nodes whose
+    // init references @vars — these compile to _scrml_derived_declare and
+    // are semantically equivalent to a derived state-decl.
     const derivedDecls = collectAllReactiveDerivedDecls(fileAST);
     const tildeDecls = collectAllTildeDecls(fileAST);
     for (const td of tildeDecls) {
@@ -906,7 +919,7 @@ export function runDG(input: DGInput): DGOutput {
         ? _exprNodeHasAtIdent((td as any).initExpr)
         : /@/.test(td.init ?? "");
       if (hasReactiveRef) {
-        derivedDecls.push(td as unknown as ReactiveDerivedDeclNode);
+        derivedDecls.push(td as unknown as ReactiveDeclNode);
       }
     }
     for (const dNode of derivedDecls) {
@@ -1096,7 +1109,8 @@ export function runDG(input: DGInput): DGOutput {
     }
   }
 
-  // Resolve pending derived reads and callees for reactive-derived-decl nodes
+  // Resolve pending derived reads and callees for derived state-decl nodes
+  // (post-Step-11.5 representation of legacy reactive-derived-decl).
   for (const [nodeId, dgNode] of nodes) {
     if (dgNode.kind !== "reactive") continue;
     const anyNode = dgNode as any;
@@ -1144,16 +1158,17 @@ export function runDG(input: DGInput): DGOutput {
         for (const bodyNode of nodes) {
           if (!bodyNode || typeof bodyNode !== "object") continue;
 
-          // bare-expr / reactive-derived-decl: check for @varName references
+          // bare-expr / derived state-decl: check for @varName references.
           // Prefer ExprNode walk; fall back to string regex.
-          // Phase A1a Step 11.5 — fold: also treat state-decl with
-          // shape:"derived" + structuralForm:false as a read (legacy
-          // const @x = expr in a function body).
+          // Phase A1a Step 11.5 — `reactive-derived-decl` folded into
+          // state-decl with shape:"derived" + structuralForm:false. The
+          // derived form in a function body is a READ (deps from RHS),
+          // unlike a plain state-decl which is a WRITE.
           const _isFoldedDerived =
             bodyNode.kind === "state-decl" &&
             bodyNode.shape === "derived" &&
             bodyNode.structuralForm === false;
-          if (bodyNode.kind === "bare-expr" || bodyNode.kind === "reactive-derived-decl" || _isFoldedDerived) {
+          if (bodyNode.kind === "bare-expr" || _isFoldedDerived) {
             const exprRefs = collectReactiveRefsFromExprNode(bodyNode as Record<string, unknown>);
             const refs = exprRefs.length > 0 ? exprRefs : (() => {
               const field = bodyNode.exprNode

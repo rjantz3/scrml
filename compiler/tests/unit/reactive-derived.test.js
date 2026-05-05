@@ -2,7 +2,7 @@
  * reactive-derived.test.js — Unit Tests for §6.6 Derived Reactive Values
  *
  * Tests for:
- *   §1  emitLogicNode reactive-derived-decl — codegen output shape
+ *   §1  emitLogicNode derived state-decl — codegen output shape
  *   §2  rewriteExprWithDerived — derived-aware expression rewriting
  *   §3  collectDerivedVarNames — AST collection of derived names
  *   §4  Runtime runtime behavior (using Function() to execute runtime snippets in Bun)
@@ -18,13 +18,17 @@ import { rewriteReactiveRefs, rewriteExprWithDerived } from "../../src/codegen/r
 import { collectDerivedVarNames } from "../../src/codegen/reactive-deps.ts";
 
 // ---------------------------------------------------------------------------
-// §1  emitLogicNode reactive-derived-decl — codegen output shape
+// §1  emitLogicNode derived state-decl — codegen output shape
+// (Phase A1a Step 11.5 fold: legacy `kind: "reactive-derived-decl"` retired)
 // ---------------------------------------------------------------------------
 
-describe("emitLogicNode — reactive-derived-decl", () => {
+describe("emitLogicNode — derived state-decl (post-Step-11.5 fold)", () => {
   test("emits _scrml_derived_declare + _scrml_derived_subscribe for single dep", () => {
     const node = {
-      kind: "reactive-derived-decl",
+      kind: "state-decl",
+      shape: "derived",
+      isConst: true,
+      structuralForm: false,
       name: "total",
       init: "@price * @quantity",
     };
@@ -37,7 +41,10 @@ describe("emitLogicNode — reactive-derived-decl", () => {
 
   test("emits correct arrow function body with reactive refs rewritten", () => {
     const node = {
-      kind: "reactive-derived-decl",
+      kind: "state-decl",
+      shape: "derived",
+      isConst: true,
+      structuralForm: false,
       name: "total",
       init: "@price * @quantity",
     };
@@ -49,7 +56,10 @@ describe("emitLogicNode — reactive-derived-decl", () => {
 
   test("uses _scrml_derived_get for derived deps when derivedNames provided", () => {
     const node = {
-      kind: "reactive-derived-decl",
+      kind: "state-decl",
+      shape: "derived",
+      isConst: true,
+      structuralForm: false,
       name: "display",
       init: "@total > 0 ? @total : 0",
     };
@@ -63,7 +73,10 @@ describe("emitLogicNode — reactive-derived-decl", () => {
 
   test("uses _scrml_reactive_get for non-derived deps even when derivedNames provided", () => {
     const node = {
-      kind: "reactive-derived-decl",
+      kind: "state-decl",
+      shape: "derived",
+      isConst: true,
+      structuralForm: false,
       name: "taxed",
       init: "@total * 1.08 + @shipping",
     };
@@ -76,7 +89,10 @@ describe("emitLogicNode — reactive-derived-decl", () => {
 
   test("emits one declare + one subscribe per unique dep", () => {
     const node = {
-      kind: "reactive-derived-decl",
+      kind: "state-decl",
+      shape: "derived",
+      isConst: true,
+      structuralForm: false,
       name: "doubled",
       init: "@count + @count",  // @count appears twice
     };
@@ -89,7 +105,10 @@ describe("emitLogicNode — reactive-derived-decl", () => {
 
   test("W-DERIVED-001: emits const for no-dep derived", () => {
     const node = {
-      kind: "reactive-derived-decl",
+      kind: "state-decl",
+      shape: "derived",
+      isConst: true,
+      structuralForm: false,
       name: "pi",
       init: "3.14159",
     };
@@ -102,7 +121,10 @@ describe("emitLogicNode — reactive-derived-decl", () => {
 
   test("W-DERIVED-001: derived with string literal containing @var is no-dep", () => {
     const node = {
-      kind: "reactive-derived-decl",
+      kind: "state-decl",
+      shape: "derived",
+      isConst: true,
+      structuralForm: false,
       name: "label",
       init: '"user @count"',  // @count inside string — not a reactive dep
     };
@@ -113,12 +135,18 @@ describe("emitLogicNode — reactive-derived-decl", () => {
 
   test("emits correct shape for derived-of-derived chain", () => {
     const nodeA = {
-      kind: "reactive-derived-decl",
+      kind: "state-decl",
+      shape: "derived",
+      isConst: true,
+      structuralForm: false,
       name: "subtotal",
       init: "@price * @qty",
     };
     const nodeB = {
-      kind: "reactive-derived-decl",
+      kind: "state-decl",
+      shape: "derived",
+      isConst: true,
+      structuralForm: false,
       name: "total",
       init: "@subtotal * 1.1",
     };
@@ -179,14 +207,14 @@ describe("rewriteExprWithDerived", () => {
 // ---------------------------------------------------------------------------
 
 describe("collectDerivedVarNames", () => {
-  test("collects reactive-derived-decl names from top-level logic", () => {
+  test("collects derived state-decl names from top-level logic", () => {
     const fileAST = {
       nodes: [
         {
           kind: "logic",
           body: [
-            { kind: "reactive-derived-decl", name: "total" },
-            { kind: "reactive-derived-decl", name: "display" },
+            { kind: "state-decl", shape: "derived", isConst: true, structuralForm: false, name: "total" },
+            { kind: "state-decl", shape: "derived", isConst: true, structuralForm: false, name: "display" },
             { kind: "state-decl", name: "count" },  // not derived
           ],
         },
@@ -218,7 +246,7 @@ describe("collectDerivedVarNames", () => {
           body: [
             {
               kind: "logic",
-              body: [{ kind: "reactive-derived-decl", name: "nested" }],
+              body: [{ kind: "state-decl", shape: "derived", isConst: true, structuralForm: false, name: "nested" }],
             },
           ],
         },
@@ -233,7 +261,7 @@ describe("collectDerivedVarNames", () => {
         nodes: [
           {
             kind: "logic",
-            body: [{ kind: "reactive-derived-decl", name: "alt" }],
+            body: [{ kind: "state-decl", shape: "derived", isConst: true, structuralForm: false, name: "alt" }],
           },
         ],
       },

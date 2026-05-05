@@ -1250,17 +1250,21 @@ describe("§17 — bind: directive code generation", () => {
 });
 
 // ---------------------------------------------------------------------------
-// §18 — reactive-derived-decl code generation
+// §18 — derived state-decl code generation
+// (Phase A1a Step 11.5 fold: legacy reactive-derived-decl retired)
 // ---------------------------------------------------------------------------
 
-describe("§18 — reactive-derived-decl code generation", () => {
+describe("§18 — derived state-decl code generation", () => {
 
   test("const @total = @price * @quantity emits _scrml_derived_declare + _scrml_derived_subscribe (§6.6)", () => {
     const logicNode = {
       kind: "logic",
       body: [
         {
-          kind: "reactive-derived-decl",
+          kind: "state-decl",
+          shape: "derived",
+          isConst: true,
+          structuralForm: false,
           name: "total",
           init: "@price * @quantity",
           span: span(0),
@@ -1293,7 +1297,10 @@ describe("§18 — reactive-derived-decl code generation", () => {
       kind: "logic",
       body: [
         {
-          kind: "reactive-derived-decl",
+          kind: "state-decl",
+          shape: "derived",
+          isConst: true,
+          structuralForm: false,
           name: "x",
           init: "5 + 3",
           span: span(0),
@@ -1326,7 +1333,10 @@ describe("§18 — reactive-derived-decl code generation", () => {
       kind: "logic",
       body: [
         {
-          kind: "reactive-derived-decl",
+          kind: "state-decl",
+          shape: "derived",
+          isConst: true,
+          structuralForm: false,
           name: "doubled",
           init: "@count * 2",
           span: span(0),
@@ -1357,7 +1367,10 @@ describe("§18 — reactive-derived-decl code generation", () => {
       kind: "logic",
       body: [
         {
-          kind: "reactive-derived-decl",
+          kind: "state-decl",
+          shape: "derived",
+          isConst: true,
+          structuralForm: false,
           name: "total",
           init: "@a + @b",
           span: span(0),

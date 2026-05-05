@@ -1063,8 +1063,8 @@ function collectLocalNames(body: LogicStatement[]): Set<string> {
         if ((node as any).name) names.add((node as any).name);
         break;
       case "state-decl":
-      case "reactive-derived-decl":
       case "reactive-debounced-decl":
+        // Phase A1a Step 11.5 — `reactive-derived-decl` folded into state-decl.
         if ((node as any).name) names.add((node as any).name);
         break;
       case "function-decl":
@@ -1217,12 +1217,12 @@ function collectReferencedNames(body: LogicStatement[]): Set<string> {
         return;
 
       // ---- Decls that carry an init in `initExpr` (or `init` legacy string) ----
+      // Phase A1a Step 11.5 — `reactive-derived-decl` folded into state-decl.
       case "let-decl":
       case "const-decl":
       case "tilde-decl":
       case "lin-decl":
       case "state-decl":
-      case "reactive-derived-decl":
       case "reactive-debounced-decl":
         walkExprOrString(n.initExpr, n.init);
         return;

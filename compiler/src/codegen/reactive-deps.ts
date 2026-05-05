@@ -137,7 +137,8 @@ export function collectReactiveVarNames(fileAST: Record<string, unknown>): Set<s
       if (n.kind === "state-decl" && n.name) {
         names.add(n.name as string);
       }
-      // Bug 4 fix: derived reactive decls (`const @name = expr`) must be
+      // Bug 4 fix: derived reactive decls (`const @name = expr`, post-Step-
+      // 11.5 represented as state-decl with shape:"derived") must be
       // recognized by the markup display-wiring pass. Without them in this
       // set, `extractReactiveDeps` filters `${@isInsert}` out of binding
       // reactive refs, emit-event-wiring sees empty varRefs, no effect wrap
@@ -147,11 +148,7 @@ export function collectReactiveVarNames(fileAST: Record<string, unknown>): Set<s
       // its upstream @roots via _scrml_reactive_get, and the outer effect
       // picks up those deps. Subsequent mutations propagate dirty-flags and
       // re-fire the effect normally.
-      if (n.kind === "reactive-derived-decl" && n.name) {
-        names.add(n.name as string);
-      }
-      // Phase A1a Step 11.5 — fold: state-decl with shape:"derived" is the
-      // post-fold representation of legacy `const @x = expr`. Same handling.
+      // Phase A1a Step 11.5 — `reactive-derived-decl` folded into state-decl.
       if (n.kind === "state-decl" && (n as any).shape === "derived" && n.name) {
         names.add(n.name as string);
       }
@@ -202,13 +199,15 @@ export function collectReactiveVarNames(fileAST: Record<string, unknown>): Set<s
 /**
  * Collect all derived reactive variable names declared in a fileAST.
  *
- * Walks logic blocks for reactive-derived-decl nodes and returns their names.
+ * Walks logic blocks for derived state-decl nodes and returns their names.
  * This set is used by rewriteReactiveRefs to route reads of derived names through
  * _scrml_derived_get() instead of _scrml_reactive_get().
  *
- * Per §6.6: `const @name = expr` declarations produce `reactive-derived-decl` nodes.
- * Their values live in the derived cache, not the reactive state map. Reads must use
- * _scrml_derived_get to benefit from lazy pull + dirty flag semantics.
+ * Per §6.6: `const @name = expr` declarations produce state-decl nodes with
+ * shape:"derived" + structuralForm:false (post Phase A1a Step 11.5 fold of the
+ * retired `reactive-derived-decl` kind). Their values live in the derived
+ * cache, not the reactive state map. Reads must use _scrml_derived_get to
+ * benefit from lazy pull + dirty flag semantics.
  *
  * @param fileAST
  * @returns set of derived variable names (without @ prefix)
@@ -222,11 +221,7 @@ export function collectDerivedVarNames(fileAST: Record<string, unknown>): Set<st
     for (const node of nodeList) {
       if (!node || typeof node !== "object") continue;
       const n = node as ASTNode;
-      if (n.kind === "reactive-derived-decl" && n.name) {
-        names.add(n.name as string);
-      }
-      // Phase A1a Step 11.5 — fold: state-decl with shape:"derived" is the
-      // post-fold representation of legacy `const @x = expr`. Same handling.
+      // Phase A1a Step 11.5 — `reactive-derived-decl` folded into state-decl.
       if (n.kind === "state-decl" && (n as any).shape === "derived" && n.name) {
         names.add(n.name as string);
       }
@@ -391,11 +386,11 @@ function extractReactiveDepsFromBody(
         ? emitStringFromTreeSafe((n as any).exprNode)
         : ((n.expr as string) ?? "");
     } else if (
+      // Phase A1a Step 11.5 — `reactive-derived-decl` folded into state-decl.
       n.kind === "let-decl" ||
       n.kind === "const-decl" ||
       n.kind === "tilde-decl" ||
-      n.kind === "state-decl" ||
-      n.kind === "reactive-derived-decl"
+      n.kind === "state-decl"
     ) {
       exprStr = (n as any).initExpr
         ? emitStringFromTreeSafe((n as any).initExpr)

@@ -69,7 +69,8 @@ function hasRuntimeMetaBlocks(fileAST: any): boolean {
 // (chunk omitted but needed) causes a runtime crash.
 //
 // Chunk → triggering AST node kinds / features:
-//   derived       reactive-derived-decl
+//   derived       state-decl with shape:"derived" + structuralForm:false
+//                 (formerly reactive-derived-decl; folded in Phase A1a Step 11.5)
 //   lift          lift-expr, or markup children containing lift bodies
 //   timers        markup tag "timer", "poll", or "timeout"
 //   animation     markup tag with animationFrame body, or direct animationFrame call
@@ -143,10 +144,9 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
     }
 
     switch (kind) {
-      // derived — reactive derived values (const @x = expr)
-      case "reactive-derived-decl":
-        chunks.add("derived");
-        break;
+      // Phase A1a Step 11.5 — `reactive-derived-decl` folded into state-decl
+      // (the `case "state-decl"` below handles the post-fold representation
+      // and gates the `derived` chunk on shape:"derived").
 
       // lift — DOM lift expressions
       case "lift-expr":

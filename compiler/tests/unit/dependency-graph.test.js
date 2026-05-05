@@ -1130,9 +1130,13 @@ describe("T14 — DG deep traversal: regression guards", () => {
 // ---------------------------------------------------------------------------
 
 describe("T15 — derived value (const @var = expr) dependency tracking", () => {
+  // Phase A1a Step 11.5 — `reactive-derived-decl` folded into state-decl.
   function makeDerivedDecl(name, init, spanStart = 0, file = "/test/app.scrml") {
     return {
-      kind: "reactive-derived-decl",
+      kind: "state-decl",
+      shape: "derived",
+      isConst: true,
+      structuralForm: false,
       name,
       init,
       span: span(spanStart, file),
