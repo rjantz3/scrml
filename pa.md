@@ -230,6 +230,11 @@ Your worktree path is: <ABSOLUTE-WORKTREE-PATH>
 2. Run `git rev-parse --show-toplevel` via Bash. Output MUST equal WORKTREE_ROOT.
 3. Run `git status --short` via Bash. Confirm tree is clean (or matches the
    expected pre-snapshot).
+4. Run `bun install` via Bash. Worktrees do NOT inherit `node_modules` from
+   main. The pre-commit hook's `bun test` will fail with "cannot find package
+   'acorn'" otherwise. Hit by every dispatch that triggers the hook (D2.8,
+   D3, oauth, D4, §6-sweep). Doing this proactively at startup avoids
+   burning cycles diagnosing the failure mid-flight.
 
 If ANY check fails: DO NOT proceed. Report the mismatch and exit.
 
@@ -252,6 +257,7 @@ root, STOP. Re-derive the path from WORKTREE_ROOT.
 **PA-side mitigations:**
 - Before any cherry-pick from a worktree branch, run `git status --short` in main and reconcile any unexpected uncommitted files — they may be in-flight agent leaks.
 - When dispatching, paste the absolute worktree path into the prompt as a literal value. Don't expect the agent to derive it on its own.
+- Always include `bun install` as startup verification step #4 in the dispatch brief. Worktrees don't inherit `node_modules`; pre-commit hook will fail without it. Logged S58 after recurring across D2.8, D3, scrml:oauth, D4. Documented as the canonical workaround until a worktree-setup hook is in place.
 
 **Platform-level fix (deferred):** a `PreToolUse` hook in settings.json that rejects sub-dispatched-agent Write/Edit calls whose absolute path is in main but not the active worktree subtree. Closes the leak entirely; needs context-aware "is this the PA or a subagent?" signal. Filed as F4 follow-up; not yet scoped.
 
