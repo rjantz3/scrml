@@ -1860,7 +1860,7 @@ export function deepEqualExprNode(a: ExprNode, b: ExprNode): boolean {
 // each interpolation back to an ExprNode so the walker can recurse. Results
 // are memoized per-LitExpr so repeated walks don't re-parse.
 //
-// Reference: docs/changes/fix-lin-template-literal-interpolation-walk/intake.md
+// Reference: scrml-support/archive/changes/fix-lin-template-literal-interpolation-walk/intake.md
 // Reference: SPEC §35.3 rule 1 — any read of a `lin` value as an expression
 //            is a consumption (interpolations are expression-position reads).
 // ---------------------------------------------------------------------------

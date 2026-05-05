@@ -645,7 +645,7 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
     // BARE_DECL_RE from promoting markup-text content (e.g. prose inside
     // <p>function adds.</p>) into a synthetic logic block, while preserving
     // the bare-decl auto-lift inside <program>.
-    // (Fix for Scope C finding A5 — see docs/changes/fix-bare-decl-markup-text-lift/.)
+    // (Fix for Scope C finding A5 — see scrml-support/archive/changes/fix-bare-decl-markup-text-lift/.)
     if (block.type === "markup") {
       // Top-level <program> remains a declaration site for its direct text
       // children. Any other markup tag is prose context — its text children

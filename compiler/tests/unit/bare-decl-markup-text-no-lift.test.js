@@ -21,7 +21,7 @@
  *
  * State-context recursion is preserved (server fns inside <db> still lift).
  *
- * Intake: docs/changes/fix-bare-decl-markup-text-lift/intake.md
+ * Intake: scrml-support/archive/changes/fix-bare-decl-markup-text-lift/intake.md
  */
 
 import { describe, test, expect } from "bun:test";

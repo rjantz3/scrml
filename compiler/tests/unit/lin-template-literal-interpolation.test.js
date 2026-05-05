@@ -12,7 +12,7 @@
  * parse each interpolation back to an ExprNode, and recurse. Other lit kinds
  * remain leaves.
  *
- * @see docs/changes/fix-lin-template-literal-interpolation-walk/intake.md
+ * @see scrml-support/archive/changes/fix-lin-template-literal-interpolation-walk/intake.md
  * @see compiler/src/expression-parser.ts forEachIdentInExprNode (lit case)
  * @see SPEC.md §35.3 rule 1 — any read of a lin value as an expression is a consumption
  */

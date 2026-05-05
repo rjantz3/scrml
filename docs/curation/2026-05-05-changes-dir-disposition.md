@@ -156,7 +156,13 @@ All 11 dirs → `scrml-support/archive/changes/<name>/`.
 
 **Disposition:** all 5 → `scrml-support/archive/dispatches/lsp-l1-l4/<name>/`.
 
-### §3.9 Batch I: fix-* series (~20 dirs) — S38-S52 hotfixes
+### §3.9 Batch I: fix-* series (20 dirs) — ✅ RATIFIED + EXECUTED S61 (2026-05-05)
+
+All 20 dirs → `scrml-support/archive/changes/<name>/`.
+
+**Cross-refs fixed:** 6 in scrmlTS (`docs/changelog.md` ×2, `docs/audits/scope-c-findings-tracker.md` ×2, `compiler/tests/unit/lin-template-literal-interpolation.test.js`, `compiler/tests/unit/bare-decl-markup-text-no-lift.test.js`, `compiler/src/expression-parser.ts`, `compiler/src/ast-builder.js`). Note: 1 dangling reference to non-existent `docs/changes/fix-bs-machine-closer/` in `samples/compilation-tests/machine-002-traffic-light.scrml` was pre-existing (not our fix-* dir); left as-is.
+
+**Original dispositions (sub-tabled below for reference):**
 
 | Dir |
 |---|
@@ -239,7 +245,7 @@ Suggested ratification cadence: 1-2 batches per session to avoid overload. PA ha
 3. ✅ **Batch B (expr-ast-phase-4d, 4 dirs)** — RATIFIED + EXECUTED S61 (2026-05-05). 4 dirs → `scrml-support/archive/changes/`; no cross-refs (internal-only).
 4. ✅ **Batch F (BUG-letters, 2 dirs)** — RATIFIED + EXECUTED S61 (2026-05-05). 2 dirs → `scrml-support/archive/changes/`; no cross-refs.
 5. ✅ **Batch D (F-series, 11 dirs)** — RATIFIED + EXECUTED S61 (2026-05-05). 11 dirs → `scrml-support/archive/changes/`; 1 changelog cross-ref fixed.
-6. **Batch I (fix-*, 20 dirs)** — large but uniform; deref-friendly.
+6. ✅ **Batch I (fix-*, 20 dirs)** — RATIFIED + EXECUTED S61 (2026-05-05). 20 dirs → `scrml-support/archive/changes/`; 6 cross-refs fixed (changelog ×2, scope-c-findings-tracker ×2, 2 test files, 2 source files); 1 dangling pre-existing ref left as-is.
 7. **Batch H (LSP L1-L4, 5 dirs)** — recent (S51) but completed.
 8. **Batch J (misc, 12 dirs)** — heterogeneous; review-per-dir.
 9. **Batches E (GITI, 2), G (bun-sql, 2)** — remaining small clusters.

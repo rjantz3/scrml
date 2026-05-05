@@ -611,7 +611,7 @@ held per user direction; pillar commitment standing.
   SEPARATE BS-stage bug — HTML `<!-- ... -->` comments aren't opaque to the block splitter,
   so `^{}` text inside a comment parses as a real meta block. After O's fix the phantom
   emission has clean capture (no crash); severity dropped to "phantom side-effect on
-  module load." Filed as standalone intake at `docs/changes/fix-bs-html-comment-opacity/intake.md`.
+  module load." Filed as standalone intake at `scrml-support/archive/changes/fix-bs-html-comment-opacity/intake.md` (moved from `docs/changes/` in S61 curation Batch I).
 
 - **A7 + A8 — HTML void elements leak `angleDepth` in component-def body.** `150c553`.
   Resolves both Scope C tracker findings A7 and A8 with a single fix. The original A7
@@ -627,7 +627,7 @@ held per user direction; pillar commitment standing.
   and updated `collectExpr` / `collectLiftExpr` / `parseLiftTag` to NOT increment
   `angleDepth` for void elements. **+15 regression tests.** `examples/05-multi-step-form`
   now compiles clean — all three components register. **A8 closure note** filed at
-  `docs/changes/fix-component-def-select-option-children/closure-note.md`. **New finding
+  `scrml-support/archive/changes/fix-component-def-select-option-children/closure-note.md` (moved from `docs/changes/` in S61 curation Batch I). **New finding
   A9 surfaced:** components inside if-chain branches are not expanded by component-expander;
   distinct downstream concern, tracker entry filed (intake pending next session).
 

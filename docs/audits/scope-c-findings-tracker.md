@@ -174,7 +174,7 @@ Real compiler defects: input is valid scrml, output is wrong (false-positive lin
 - **Adjacent anomaly surfaced:** A9 (if-chain branches not expanded by component-expander) — distinct downstream concern; filed as separate finding below.
 
 ### A8. Component-def with `<select><option>` children fails to register
-- **Status:** **FIXED-AS-SIDE-EFFECT-OF-A7** — closure verified by A7 dispatch (2026-04-26, S44). Closure note at `docs/changes/fix-component-def-select-option-children/closure-note.md`. Same root cause as A7 (HTML void elements, not `<select><option>` nesting). The original hypothesis pointed at `<select><option>`; the actual trigger was the adjacent `<input type="checkbox" bind:value=@newsletter>` void element in `PreferencesStep`. A regression test for the A8 PreferencesStep shape is included in the A7 test suite (`component-def-void-elements.test.js`).
+- **Status:** **FIXED-AS-SIDE-EFFECT-OF-A7** — closure verified by A7 dispatch (2026-04-26, S44). Closure note at `scrml-support/archive/changes/fix-component-def-select-option-children/closure-note.md` (moved from `docs/changes/` in S61 curation Batch I). Same root cause as A7 (HTML void elements, not `<select><option>` nesting). The original hypothesis pointed at `<select><option>`; the actual trigger was the adjacent `<input type="checkbox" bind:value=@newsletter>` void element in `PreferencesStep`. A regression test for the A8 PreferencesStep shape is included in the A7 test suite (`component-def-void-elements.test.js`).
 - **Severity:** medium (now resolved — was: blocks form-shaped components).
 - **Tier:** **T2** — resolved without separate dispatch.
 - **Examples affected:** ex 05 PreferencesStep (now registers post-A7 fix).
@@ -469,7 +469,7 @@ The diagnostic agent's recommendation: a settings.json **PreToolUse hook** that 
 `a1ce9f7446b09c058` ran a 6-step forensic matrix and reported the verdict above. Logs preserved in the dispatch's notification record (read-only — no production code touched, all 3 marker files cleaned up).
 
 #### Cross-references
-- A5 progress notes: `docs/changes/fix-bare-decl-markup-text-lift/progress.md` ("Initial Read/Write tool calls accidentally landed in the main checkout...").
+- A5 progress notes: `scrml-support/archive/changes/fix-bare-decl-markup-text-lift/progress.md` (moved from `docs/changes/` in S61 curation Batch I) ("Initial Read/Write tool calls accidentally landed in the main checkout...").
 - A6 leak commit: `9ca9c3f` (committed directly to main; commit message documents the salvage).
 - A4 leak observed during cherry-pick of A3 (PA's session log entry).
 
