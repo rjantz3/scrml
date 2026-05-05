@@ -5743,6 +5743,21 @@ In both modes, a `lift` call initializes `~` to the lifted value (§32.2).
 
 `lift` was chosen over `yield` to avoid collision with JavaScript generator function semantics. JavaScript `yield` works only inside generator functions; scrml logic contexts accept real JS generators. Having two different `yield` behaviors in the same `${ }` block would be a footgun. `lift` is unambiguous.
 
+#### 10.1.1 `lift` under the markup-as-value pillar (Stage 0b D4 — L1)
+
+**Added:** 2026-05-04 — reframes `lift` semantics in light of the §1.4 markup-as-value pillar.
+
+Pre-S55 framing of `lift` cast it as "the special form for accumulating markup-as-value." Under the L1 pillar (§1.4), markup is a first-class value type — markup may sit anywhere expressions sit, and that includes the RHS of `let`, `const`, `<x> =`, function returns, function arguments, slot fills, etc. There is nothing special about a markup value compared to a string or number value.
+
+**The reframe:** `lift` is the operator that explicitly emits a value (markup OR any other type) into the surrounding accumulator or designated result. It is NOT the only path by which markup becomes a value — markup-typed cells (`const <markup-typed>`, §6.6.17), markup-typed function returns, markup-typed slot fills, and inline markup-as-expression all produce markup values without `lift`. `lift` is the path used when the surrounding context is an anonymous `${}` block whose parent expects an array-shaped accumulation (markup or CSS), or when an if-as-expression arm needs to designate a scalar result.
+
+**Existing semantics preserved.** §10.1, §10.2, §10.3, §10.4, §10.5, §10.6, §10.7, §10.8 are unchanged. This subsection is a framing note; the rules below remain authoritative.
+
+**Cross-references:**
+- §1.4 — markup-as-value pillar.
+- §6.6.17 — markup-typed derived cells (a markup value via `const <derived>`, no `lift` involved).
+- §15 — components return markup as values from their bodies.
+
 ### 10.2 Context-Coercion Rules for `lift`
 
 | Parent context | Expected type | Coercion action |
