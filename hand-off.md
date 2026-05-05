@@ -35,7 +35,7 @@
 
 ---
 
-## Phase A1a — 8/14 done; Step 9 in flight
+## Phase A1a — 11/17 done; Steps 11.0a/b/c + 11.5 + 12 + 13 remain
 
 | # | Step | Status |
 |---|---|---|
@@ -47,14 +47,21 @@
 | 6 | Parser: `default=` + `pinned` on state-decl | ✅ S60 (`2754940`, +10 tests) |
 | 7 | Parser: `pinned` on import items | ✅ S60 (`556de93`, +10 tests) |
 | 8 | E-RESERVED-IDENTIFIER trigger | ✅ S59 (`af4a0da`) |
-| 9 | Expression parser: `reset(@cell)` keyword + E-RESET-NO-ARG | 🟡 IN FLIGHT (S60) |
-| 10 | Expression parser: MemberCall/MemberAssignment/UnaryDelete shape verification | ⏸ |
-| 11 | Variant C compound + render-by-tag verification + kickstarter v2 §3 smoke | ⏸ |
-| **11.5** | **Fold `reactive-derived-decl` into `state-decl{shape:"derived",isConst:true}`** (ADR Option A, S60) | ⏸ INSERTED S60 |
-| 12 | Existing-test deltas: rewrite + drop | ⏸ |
-| 13 | Final commit + CHANGELOG draft | ⏸ |
+| 9 | Expression parser: `reset(@cell)` keyword + E-RESET-NO-ARG | ✅ S60 (`fded36a`, +8 tests) |
+| 10 | Expression parser: mutation shape verification | ✅ S60 (`226a2dd`, +10 tests; ZERO source — discount #8) |
+| 11 | Kickstarter v2 §3 smoke + Variant C + render-by-tag | ✅ S60 (`bcca1e6`, +23 tests; surfaced 11.0a/b/c gaps) |
+| **11.0a** | **Variant C compound recognizer** (Step 11 escalation) | ⏸ NEXT (BRIEF drafted; ~2-3h) |
+| **11.0b** | **Newline-as-statement-separator** in `parseLogicBody` (Step 11 escalation) | ⏸ (~1-2h) |
+| **11.0c** | **Typed-decl recognizer** `<count>: number = 0` (Step 11 escalation) | ⏸ (~2-3h) |
+| **11.5** | **Fold `reactive-derived-decl` into `state-decl{shape:"derived",isConst:true}`** (ADR Option A) | ⏸ (~3-5h) |
+| 12 | Existing-test deltas: rewrite + drop | ⏸ (~4-8h) |
+| 13 | Final commit + CHANGELOG draft | ⏸ (~0.5h) |
 
-**Tests at S60-mid: 8,804 / 43 / 0 / 8,847 / 436. Remaining ~14-25h focused work** across Steps 9 (in flight), 10, 11, 11.5, 12, 13.
+**Tests at S60-mid: 8,845 / 43 / 0 / 8,888 / 439. Remaining ~13-22h focused work** across 11.0a/b/c + 11.5 + 12 + 13.
+
+**A1b SCOPE-AND-DECOMPOSITION drafted** at `docs/changes/phase-a1b-resolve-type/SCOPE-AND-DECOMPOSITION.md` (22 steps B1-B22, ~85-120h, 5 waves, 7 ranked open Qs).
+
+**A1c SCOPE-AND-DECOMPOSITION drafted** at `docs/changes/phase-a1c-codegen/SCOPE-AND-DECOMPOSITION.md` (23 steps C1-C23, ~93-131h, 6 waves, 8 ranked open Qs).
 
 ---
 

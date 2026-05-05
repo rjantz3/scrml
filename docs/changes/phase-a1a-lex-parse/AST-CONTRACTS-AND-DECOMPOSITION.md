@@ -109,14 +109,17 @@ Each step is a focused sub-agent on its own per-step branch with PA cherry-pick 
 | 6 | Parser: `default=` attribute + `pinned` bareword on state-decl | `ast-builder.js` only — extend attr scan to extract `default=expr` → `defaultExpr`, and `pinned` bareword → `pinned: true` | 1-1.5 h | ✅ DONE S60 (`2754940`) |
 | 7 | Parser: `pinned` on import items | `ast-builder.js` only — extend import-decl parser to recognize `pinned` bareword inside `{ name pinned, ... }` import lists | 0.5-1 h | ✅ DONE S60 (`556de93`) |
 | 8 | E-RESERVED-IDENTIFIER trigger | `ast-builder.js` + `init.js` rename | 0.5 h | ✅ DONE S59 (`af4a0da`) |
-| **9** | **Expression parser: `reset(@cell)` keyword + `E-RESET-NO-ARG`** | `expression-parser.ts` only — recognize `keyword(reset)` `(` `expr?` `)` → `kind: "reset-expr"`; emit `E-RESET-NO-ARG` on zero-arg form | 1-2 h | 🟡 IN FLIGHT (S60) |
-| 10 | Expression parser: shape verification for `MemberCall` / `MemberAssignment` (incl. compound-assign ops) / `UnaryDelete` | `expression-parser.ts` only — verify these node kinds exist; if collapsed, split them; add `op` field to `MemberAssignment` carrying the operator text | 1-2 h | ⏸ |
-| 11 | Compound (Variant C) verification + render-by-tag verification + kickstarter v2 §3 smoke tests | new test file additions only — likely no source changes | 1-1.5 h | ⏸ |
+| 9 | Expression parser: `reset(@cell)` keyword + `E-RESET-NO-ARG` | `expression-parser.ts` — recognize `keyword(reset)` `(` `expr?` `)` → `kind: "reset-expr"`; emit `E-RESET-NO-ARG` on zero-arg form | 1-2 h | ✅ DONE S60 (`fded36a`, +8 tests; full tree-walk surfacing) |
+| 10 | Expression parser: shape verification for `MemberCall` / `MemberAssignment` (incl. compound-assign ops) / `UnaryDelete` | `expression-parser.ts` — verify; `op` field already present (esTreeToExprNode boundary) | 1-2 h | ✅ DONE S60 (`226a2dd`, +10 tests; ZERO source changes — depth-of-survey discount #8) |
+| 11 | Compound (Variant C) verification + render-by-tag verification + kickstarter v2 §3 smoke tests | new test file additions only — likely no source changes | 1-1.5 h | ✅ DONE S60 (`bcca1e6`, +23 tests; 3 deferred divergences surfaced) |
+| **11.0a** | **Variant C compound recognizer** — `tryParseStructuralDecl` recognizes `<formRes><name>=""</></>` form (token-after-`>` → `<sib>`/`</>`); compound parent gets children-of-state-decl shape per AST contract §1.1 | `ast-builder.js` (`tryParseStructuralDecl` ~3528-3580 area) | **2-3 h** | ⏸ INSERTED S60 (Step 11 escalation) |
+| **11.0b** | **Newline-as-statement-separator** inside `parseLogicBody` for state-decl RHS — multi-decl with newline-only separator stops eating sibling decls into the first decl's init string | `ast-builder.js` (parseLogicBody) | **1-2 h** | ⏸ INSERTED S60 (Step 11 escalation) |
+| **11.0c** | **Typed-decl recognizer** — `<count>: number = 0`, `<userInfo>: UserInfo = (...)` — `>` followed by `:` falls through to html-fragment today | `ast-builder.js` (tryParseStructuralDecl) | **2-3 h** | ⏸ INSERTED S60 (Step 11 escalation) |
 | **11.5** | **Fold `reactive-derived-decl` into `state-decl{shape:"derived",isConst:true}`** (ADR Option A) | `ast-builder.js` (legacy `const @x = expr` parser path) + ~20 consumer sites (resolver/typer/codegen) + tests asserting old kind get updated | **3-5 h** | ⏸ INSERTED S60 (ADR) |
 | 12 | Existing-test deltas: rewrite + drop | enumerate in `progress.md`; per S59 pre-authorization freely rewrite tests baking in pre-v0.next access patterns | 4-8 h | ⏸ |
 | 13 | Final commit + CHANGELOG draft | aggregate; final commit per brief §7.4 template | 0.5 h | ⏸ |
 
-**Total: 30-45 h focused work** + 3-5h Step 11.5 (ADR S60). With Steps 1, 2, 3, 4, 5, 6, 7, 8 landed (S59 + S60) and Step 9 in flight, remaining is ~14-25 h across Steps 9 (in flight), 10, 11, 11.5, 12, 13.
+**Total: 30-45 h focused work** + 3-5h Step 11.5 (ADR S60) + 5-8h Steps 11.0a/b/c (Step 11 escalation S60). With Steps 1-11 landed (S59 + S60), remaining is **~14-25 h** across Steps 11.0a/b/c, 11.5, 12, 13.
 
 **Sequencing rationale:**
 - **Step 2 (the original bottleneck) finished in ~21min via depth-of-survey discount** — block-splitter already preserved raw `<` content correctly; intervention was one helper in ast-builder.js, not multi-subsystem rework. The audit's 10-15h estimate was 28-43× over actual.
