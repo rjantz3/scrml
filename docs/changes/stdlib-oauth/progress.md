@@ -25,4 +25,8 @@ Append-only timestamped log.
 - [T7] Committed all 5 module files (dc6f0c6).
 - [T8] stdlib-oauth.test.js — 38 tests, all pass first run, including RFC 7636 Appendix B vector (verifier `dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk` -> challenge `E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM`).
 - [T9] stdlib-oauth-presets.test.js — 20 tests, all pass first run.
-- [T10] Committing tests next.
+- [T10] Tests committed (61d05c5).
+- [T11] Kickstarter v2 §9 catalog — added `scrml:oauth` row.
+- [T12] Kickstarter v2 §11.2.1 — added OAuth recipe with sign-in-with-Google example using scrml:redis storage adapter; documented typed error names; documented refresh-token rotation note.
+- [T13] Final commit (kickstarter update + final summary).
+- STATUS: COMPLETE pending final commit.

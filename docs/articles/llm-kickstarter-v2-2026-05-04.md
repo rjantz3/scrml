@@ -760,6 +760,7 @@ scrml ships a focused stdlib that covers ~80% of typical-app npm needs. Import f
 | `scrml:redis` | Wraps `Bun.redis` (Bun ≥1.3). `get(key)`, `set(key, value)`, `setex(key, value, seconds)`, `del`, `exists`, `expire`, `ttl`, `incr`, `decr`, `getBuffer`; sets: `sadd/srem/sismember/smembers`; pub/sub: `publish(channel, msg)`, `subscribe(channel, fn)`, `unsubscribe`; custom URL: `createClient(url, opts)`; raw: `send(cmd, args)`; `close()`. All ops are async. Server-side only. | ioredis, redis (npm) |
 | `scrml:cron` | Wraps `Bun.cron` (Bun ≥1.3.12). `schedule(pattern, handler)` — returns CronJob handle with `.stop()/.ref()/.unref()`. `nextOccurrence(pattern, [relativeDate])` (Bun ≥1.3.12 only) — preview next fire as Date. `stop(job)` — convenience. Standard 5-field cron + `@daily/@weekly/@monthly/@yearly`. Server-side only; in-process. | node-cron, croner (npm) |
 | `scrml:regex` | Vetted `patterns` catalog (email, url, ipv4, ipv6, uuid, slug, hexColor, semver, isoDate, phoneE164, usZip, creditCard, username, password); helpers `test(pat, str)`, `match(pat, str)` (named-groups dict), `extract(pat, str)` (all matches), `replace`, `escape(str)` (regex metachar escape), `caseInsensitive(source)`, `isValid(name, str)` | validator.js, common-pattern snippets |
+| `scrml:oauth` | OAuth 2.0 / OpenID Connect client. Auth-code grant with PKCE (RFC 7636), `refreshToken`, `getUserInfo`, `revoke` (RFC 7009). Storage-adapter injection (`{put, get, del}`) for state + verifier — pair with `scrml:redis`, `scrml:store`, or use `memoryAdapter()` for dev. Provider presets: `googleConfig` (+ `parseGoogleIdToken`), `githubConfig` (classic OAuth Apps), `microsoftConfig` (tenant-scoped Entra), `discordConfig`. Server-side only. | passport, simple-oauth2, next-auth (server primitives), googleapis (auth) |
 
 If you reach for `import X from 'some-npm-package'` while writing scrml, stop. Check this table first; if you don't see what you need, read the module's `index.scrml` before npm-installing.
 
@@ -872,6 +873,58 @@ Notes:
 - No `connect-sqlite3`, no `express-session`, no `passport`. The session token from `signJwt` is the session.
 - For multi-field protection, use **comma-separated** values: `protect="password_hash, session_token"`.
 - For auth-as-engine (login → loggedIn → tokenRefresh → expired), use the engine recipe (§11.1) with an `AuthPhase` enum. This is the post-S55 idiom.
+
+#### 11.2.1 OAuth recipe — sign in with Google (or GitHub, Microsoft, Discord)
+
+For third-party identity, reach for `scrml:oauth`. The flow is two server functions: one starts the redirect, one handles the callback. The compiler has no knowledge of OAuth; the module ships with provider presets so callers don't write endpoint URLs.
+
+```scrml
+<program>
+
+${
+  import { startFlow, exchangeCode, getUserInfo } from 'scrml:oauth'
+  import { googleConfig } from 'scrml:oauth'
+  import { setex, get as redisGet, del as redisDel } from 'scrml:redis'
+
+  // Storage adapter for state + PKCE verifier — wire your own backend.
+  // The shape is { put, get, del }. Redis is one option; scrml:store works too.
+  const oauthStorage = {
+    put: (k, v, ttl) => setex(k, v, ttl),
+    get: (k)         => redisGet(k),
+    del: (k)         => redisDel(k),
+  }
+
+  const cfg = googleConfig({
+    clientId:     process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    redirectUri:  "https://app.example.com/auth/google/callback",
+    storage:      oauthStorage,
+  })
+
+  // Step 1 — user clicks "Sign in with Google" → server returns the redirect URL.
+  server function googleSigninStart(sessionId) {
+    return startFlow(cfg, sessionId)
+  }
+
+  // Step 2 — Google redirects back with ?code=...&state=...
+  server function googleSigninCallback(sessionId, code, state) {
+    const tokens = exchangeCode(cfg, sessionId, code, state)
+    const profile = getUserInfo(cfg, tokens.accessToken)
+    // Persist (profile.sub, profile.email) → user row; mint your own session JWT.
+    return signJwt({ sub: profile.sub, email: profile.email },
+                   process.env.JWT_SECRET, 3600)
+  }
+}
+
+</program>
+```
+
+Notes:
+- **PKCE is on by default** — public clients (no `clientSecret`) MUST use it. The module enforces this at config-validation time.
+- **Storage is single-use, time-boxed.** State + verifier entries get a 10-minute TTL and are deleted by `exchangeCode` regardless of success or failure.
+- **State mismatch is a typed error** — `OAuthStateMismatch` (CSRF). Catch by `name`. Same for `OAuthVerifierMissing`, `OAuthTokenError`, `OAuthUserInfoError`, `OAuthRevocationError`.
+- **Refresh tokens:** call `refreshToken(cfg, savedRefreshToken)` to renew. Some providers rotate the refresh token — re-persist `tokens.refreshToken` if non-null in the response.
+- **No npm `passport`, `simple-oauth2`, `next-auth`, or `googleapis`.** The four presets cover the most common cases; for an unlisted provider, build the config object inline (every preset is just an `authorizeUrl`/`tokenUrl`/`userInfoUrl`/`scopes` bag).
 
 ### 11.3 Real-time recipe — file-level `<channel>`
 
