@@ -52,3 +52,56 @@
   - No self-host change.
 
 - [12:09 step-7 implementation in progress] Beginning code edits.
+
+- [12:10 step-7 implementation — parser extension] Modified `compiler/src/ast-builder.js` import-decl branch (lines ~4883-4942). Added `_splitPinned(entry)` helper that whitespace-tokenizes each entry, then strips a trailing `pinned` token IFF length>=2 AND the predecessor is NOT `as`. Disambiguation rule encoded literally in the comment and the helper. Pre-step inserted BEFORE the existing asMatch logic so the asMatch regex sees a clean `name [as alias]` core string. Specifiers now carry `pinned: <bool>` per-item; default false on every emitted specifier (never undefined).
+
+- [12:11 step-7 probe — sanity check] Wrote a 10-case probe (worktree-local, deleted before commit). All 10 cases produce expected output:
+  - `{ foo pinned }` → 1 spec with pinned:true
+  - `{ foo pinned, bar, baz pinned }` → 3 specs, mixed flags
+  - `{ foo as bar pinned }` → spec {imported:foo, local:bar, pinned:true}
+  - `{ foo as bar }` regression → pinned:false
+  - `{ foo, bar }` regression → both pinned:false
+  - default `import foo from '...'` regression → specifiers:[]
+  - `{ pinned }` (name = pinned) → imports name `pinned`, pinned:false (length<2)
+  - `{ foo as pinned }` → alias to `pinned`, pinned:false (predecessor is `as`)
+  - `{ pinned pinned }` → imports name `pinned` with modifier (predecessor not `as`)
+  - `{ foo as pinned pinned }` → alias to `pinned` with modifier
+  All disambiguations correct. No false-positive modifier strips.
+
+- [12:12 step-7 types/ast.ts] Extended types/ast.ts: introduced new `ImportSpecifier` interface declaring `{imported: string, local: string, pinned: boolean}`. Added `specifiers?: ImportSpecifier[]` field to `ImportDeclNode` (optional because default-import path leaves it as []). Note: prior to Step 7, `specifiers` was emitted at runtime by S40 P3.A but NEVER declared in TS — Step 7 fills the gap. Optional marker keeps assignability for default-import path.
+
+- [12:13 step-7 self-host parity check] `compiler/self-host/ast.scrml` import branch (lines 1342-1364) is regex-driven mirror but produces ONLY `names[]` (no `specifiers[]` ever). Per established A1a Step 4/5/6 policy (zero `tryParseStructuralDecl`/`pinned`/`defaultExpr` references in self-host), self-host is NOT being kept in sync with per-step parser work. **Step 7 follows the same policy: NO self-host change.** Mirroring `pinned` cleanly would require adding `specifiers[]` to self-host first — out of Step 7 scope.
+
+- [12:14 step-7 tests added] Added new test file `compiler/tests/integration/parse-import-pinned.test.js` with **10 cases (§I7.1-§I7.10)**:
+  - §I7.1: single pinned `{ foo pinned }` → pinned:true.
+  - §I7.2: bare regression `{ foo, bar }` → both pinned:false.
+  - §I7.3: multi-item with mixed flags `{ foo pinned, bar, baz pinned }` → 3 specs with [true, false, true].
+  - §I7.4: alias + pinned `{ foo as bar pinned }` → {imported:foo, local:bar, pinned:true}.
+  - §I7.5: alias regression `{ foo as bar }` → pinned:false, alias preserved.
+  - §I7.6: default-import regression `import foo from '...'` → no specifiers, isDefault:true.
+  - §I7.7: `{ pinned }` disambiguation → imports name `pinned`, pinned:false.
+  - §I7.8: `{ foo as pinned }` disambiguation → alias to name `pinned`, pinned:false.
+  - §I7.9: quoted import + pinned `{ "dispatch-board" as dispatchBoard pinned }` → quote-strip composes with pinned-strip; spec {imported:"dispatch-board", local:"dispatchBoard", pinned:true}.
+  - §I7.10: invariant battery — 7 fixtures all assert `typeof spec.pinned === "boolean"` AND imported/local are strings (catches default-undefined regression).
+
+- [12:15 step-7 isolated test] `bun test compiler/tests/integration/parse-import-pinned.test.js`: **10 pass / 0 fail / 84 expect calls / 45ms**. All cases green first run.
+
+- [12:16 step-7 full suite] `bun run test`: **8,804 pass / 43 skip / 0 fail / 8,847 across 436 files**. Run-1 had 1 ECONNREFUSED flake (same shape as baseline); rerun was clean. Delta from baseline 8,794 → 8,804 = exactly +10. 0 regressions on existing 8,794. Pre-commit hook green throughout. File count 435 → 436 (new test file).
+
+- [12:17 step-7 path-discipline] No near-misses. All Read/Write/Edit calls used absolute paths under WORKTREE_ROOT (`/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-adb099ab63b8598d3/...`). Probe file (`probe-step7.mjs`) was created in worktree root, used, and deleted before commit. No writes to main's working tree.
+
+- [12:18 step-7 done] All DoD gates green:
+  1. ✅ ast-builder.js import-decl branch extended — `_splitPinned` helper + integrated into `_entries` loop. 28 insertions / 6 deletions.
+  2. ✅ types/ast.ts extended — new `ImportSpecifier` interface + `specifiers?` field on `ImportDeclNode`. 22 insertions / 1 deletion.
+  3. ✅ Self-host parity: NOT changed (per A1a Step 4/5/6 policy — self-host is out-of-sync by design at this phase).
+  4. ✅ parse-import-pinned.test.js created with 10 new cases (§I7.1-§I7.10). 198 insertions.
+  5. ✅ Pre-commit hook green; full `bun run test` 8,804/43/0/8,847.
+  6. ✅ Delta: +10 tests, 0 regressions on existing 8,794.
+  7. ✅ Branch clean. No `--no-verify`.
+
+- [12:19 step-7 hand-off for A1b] Step 7 establishes the `pinned` flag on `ImportSpecifier`. A1b will add semantic enforcement:
+  - `E-IMPORT-PINNED-INVALID` (§34) — `pinned` on a non-cell-typed non-engine-typed import is invalid.
+  - `E-STATE-PINNED-FORWARD-REF` (§34) — forward-ref through a pinned import.
+  - Cycle detection — the import-graph traversal in module-resolver uses `pinned` as a topological constraint.
+  Consumers of `specifiers[].pinned`: NR (registers pinned bindings as identity-stable), TS (forward-ref check on all uses of pinned-imported names), CG (A1c hoisting).
+
