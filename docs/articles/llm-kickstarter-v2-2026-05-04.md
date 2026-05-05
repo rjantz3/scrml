@@ -972,19 +972,31 @@ Notes:
 - `@debounced(N) <name> = expr` — modifier on the declaration. Read as `@name` (with the sigil) elsewhere.
 - No `computed()`, no `useEffect`, no `$:`.
 
-### 11.5 Loading state — prefer the engine recipe
+### 11.5 Loading state — the canonical async-lifecycle shape
 
-What v1 called "RemoteData enum" is now **the engine recipe** (§11.1). The pattern is the same; the language now gives you state-children + transition rules + `<onTransition>` for free.
-
-If you are writing what looks like:
+Every data-fetch screen, form submission, and API call resolves to the same five-variant shape. Name it **per-screen with domain-relevant variant data** (don't import a generic `AsyncPhase<T>` — scrml does not need generics here, and naming the variants in app context produces better match blocks, error messages, and engine transition rules):
 
 ```scrml
-type ContactsState:enum = { NotAsked, Loading, Ready(rows), Failed(msg) }
-${ <state>: ContactsState = .NotAsked }
-${ match @state { ... } }
+type ContactsPhase:enum = {
+    Idle                            // not asked yet
+    Loading                         // request in flight
+    Error(msg: ContactsError)       // domain-specific error type, not just string
+    Empty                           // request succeeded, zero results
+    Loaded(rows: Contact[])         // domain-specific success payload
+}
 ```
 
-…rewrite it as an engine (§11.1). The match form still works mechanically, but the engine form is the v0.next idiom and unlocks compile-time exhaustiveness on transitions.
+Five variants, each with the domain naming this screen actually needs. Customer-list `Empty` says "No customers yet — add one"; search-result `Empty` says "No matches"; the variant names are the same shape, the markup beneath each is screen-specific.
+
+**At Tier 1 you wrap with `<match for=ContactsPhase>`** — structural exhaustiveness, no transition enforcement.
+
+**At Tier 2 you wrap with `<engine for=ContactsPhase initial=.Idle>`** with `rule="..."` attributes on the variants and `<onTransition>` blocks for cross-state effects (analytics, retry, cleanup). State-children migrate verbatim — only the wrapper changes (§11.1, §51).
+
+**Errors are states.** A failable `fetchContacts() ! ContactsError { ... }` server function's `!{}` handler at the call site does only one thing: route each error variant into the right Phase variant. The match block / engine then patterns each variant into the right markup. No `<isError>` + `<errorMsg>` cells; the failure modes live in the type.
+
+Why per-screen, not stdlib generic: a generic `AsyncPhase<T>` strips the domain — `Loaded(T)` is less informative than `Cached(rows: Contact[])` or `Refreshed(at: timestamp, rows: Contact[])`. The five-variant boilerplate is five lines of useful domain spec, not friction.
+
+If a v1 codebase uses `RemoteData<T>` or similar imported generic shape, port it screen-by-screen to a per-screen `<Name>Phase` enum.
 
 ### 11.6 Schema recipe — `< schema>` declarative DDL
 

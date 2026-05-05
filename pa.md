@@ -132,7 +132,12 @@ User's flow when verifying:
 - All compiler changes go through the pipeline (T1/T2/T3 tier system)
 - Never bypass the pre-commit test hook without explicit user authorization
 - **Commits to main are allowed only after explicit user authorization in the current session.** Confirm with the user before the first commit of a session, and before any push. Authorization stands for the scope specified, not beyond — "push S35" does not authorize a surprise commit to main in S36. Updated 2026-04-22 (master PA directive) — supersedes prior "never directly to main" rule.
-- **All agents run on Opus 4.6** (PA and subagents alike). Updated S4 2026-04-11 — supersedes the earlier "background agents use Sonnet" rule. Pass `model: "opus"` on every `Agent` dispatch.
+- **All agents run on Opus** (PA and subagents alike). Updated S4 2026-04-11 — supersedes the earlier "background agents use Sonnet" rule. Pass `model: "opus"` on every `Agent` dispatch.
+- **`scrml-dev-pipeline` agent file** at `~/.claude/agents/scrml-dev-pipeline.md` was updated S57 (2026-05-04) to:
+  - `model: opus` (was `sonnet` — silent default-down bug that caused D2 to land on Sonnet despite the explicit Opus rule)
+  - Tools: `["Agent", "Read", "Write", "Edit", "Glob", "Grep", "Bash"]` (added Edit + Grep — D2.5/D2.7 halted because Edit was missing)
+  - **Important:** agent-file edits propagate at the NEXT PA session start, not mid-session. The harness caches agent definitions at session start. Plan dispatch strategy accordingly.
+- **Dispatching for spec-rewrite work:** if `scrml-dev-pipeline` lacks a needed tool (e.g., the agent-file edit hasn't propagated yet), dispatch via `general-purpose` (Tools: *) with the same brief — that's the unblock D2.8 used after D2.7 halted. The pipeline persona's T1/T2/T3 tier classification is load-bearing for compiler source changes; for SPEC-text-only rewrites, general-purpose is fine.
 
 ## Link + tag conventions
 
@@ -187,13 +192,14 @@ increment, recording design insights. Truth flow into storage must not be inhibi
 
 ### Session-start checklist (this repo only)
 1. Read `pa.md` (this file)
-2. Read `hand-off.md`
-3. Read the last ~10 **contentful** entries from `../scrml-support/user-voice-scrmlTS.md` — skip non-contentful messages (acks, "keep going", "continue", "yes", "ok"); if any of the last 10 are non-contentful, read that many more so you end up with ~10 substantive entries
-4. Rotate `hand-off.md` → `handOffs/hand-off-<N>.md`
-5. Create fresh `hand-off.md`
-6. **FIRST SESSION ONLY:** run `project-mapper` cold to produce `.claude/maps/` + non-compliance report
-7. Prompt user about incremental map refresh on subsequent sessions
-8. Report: caught up + next priority
+2. **Read `docs/PA-SCRML-PRIMER.md` IN FULL.** This is the canon snapshot of scrml's syntax, mindset, error model, V5-strict access, three RHS shapes, engine recipe + Tier ladder, validator surface, stdlib catalog, anti-patterns. Costs ~5-7k tokens at session open; saves the 300k-token-relearn-as-you-go cost the S57 PA paid (per S57 user verbatim: *"PA needs to be the second formost expert on scrml, after me, of course"*). Mandatory.
+3. Read `hand-off.md`
+4. Read the last ~10 **contentful** entries from `../scrml-support/user-voice-scrmlTS.md` — skip non-contentful messages (acks, "keep going", "continue", "yes", "ok"); if any of the last 10 are non-contentful, read that many more so you end up with ~10 substantive entries
+5. Rotate `hand-off.md` → `handOffs/hand-off-<N>.md`
+6. Create fresh `hand-off.md`
+7. **FIRST SESSION ONLY:** run `project-mapper` cold to produce `.claude/maps/` + non-compliance report
+8. Prompt user about incremental map refresh on subsequent sessions
+9. Report: caught up + next priority
 
 ### PA's agent orchestration responsibilities
 - Dispatch **dev agents** (pipeline, gauntlet devs, scrml writers) with project-mapper output + task-scoped resources
