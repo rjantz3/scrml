@@ -8232,6 +8232,8 @@ For VP-2 (post-CE invariant, residual-component detection), the predicate also i
 
 **Revised:** S39, 2026-04-03 — complete rewrite. The provisional whitespace-rule slot syntax (`< slotname>:(<shape>)/`) is **retired**. It created unresolvable parsing ambiguities (SPEC-ISSUE-007) and conflated slots with state object syntax. The new system treats named slots as snippet-typed props with syntactic call-site desugaring. SPEC-ISSUE-007 and SPEC-ISSUE-008 are closed by this revision.
 
+**Stage 0b D4 (2026-05-04) — markup-as-value pillar (L1) reaffirmation.** Slots take markup. Markup is a first-class value (§1.4). The slot system is consistent with the L1 pillar: a snippet-typed prop is a deferred markup-producing value, and the call-site fills it with markup (either bare `<element slot="name">...</>` children that desugar to a snippet, or an explicit snippet assignment). There is nothing special about a slot beyond "markup-typed prop with deferred evaluation" — which is exactly what the pillar makes uniform.
+
 ### 16.1 Overview
 
 Named content regions in a component are declared as `snippet`-typed props in the component's `props` block (§15.10). The `snippet` type kind is defined in §14.9. The component body renders snippet props with `${render propName()}`. At the call site, callers fill named slots using `slot="name"` on child elements — the compiler desugars this to snippet prop assignment.
