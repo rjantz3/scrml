@@ -16680,6 +16680,49 @@ This section (§41) extends §21 without removing it. Specifically:
 | W-USE-001 | Two `use` declarations bring the same name into markup scope (later wins) | Warning |
 | W-IMPORT-001 | Two `import` statements import the same name into logic scope (later wins) | Warning |
 
+### 41.12 `scrml:data` `registerMessages` — project-level error message registration (Stage 0b D4 — L12)
+
+**Added:** 2026-05-04 — formalises Lock 12's project-registered messages — the second tier of the 4-level error message resolution chain (§55.10).
+
+**The API:**
+
+```scrml
+${
+  import { registerMessages } from 'scrml:data'
+
+  registerMessages({
+    .Required:        (field) => `${field} is required.`,
+    .TooShort:        (field, n) => `${field} must be at least ${n} characters.`,
+    .EmailInvalid:    (field) => `Please enter a valid email for ${field}.`,
+    .Custom:          (field, tag) => /* fall through to inline / defaults */,
+  })
+}
+```
+
+**Normative statements:**
+
+- `registerMessages(map)` is exported by `scrml:data`. The argument is an enum-keyed object whose keys are `ValidationError` variants (cross-ref §55.9) and whose values are functions returning the user-facing string for that error tag.
+- Each function receives `(fieldName, ...args)` — the first positional argument is the field display name (cross-ref §55.10's field-name resolution), and the remaining positional arguments are the variant's payload values (e.g., `.TooShort(2)` passes `2` as the second argument).
+- `registerMessages` is project-wide. It SHOULD be called exactly once at app boot, typically inside the root `<program>` body or a top-level `${}` block. Multiple calls compose by last-write-wins per variant key.
+- Calling `registerMessages` from a non-top-level context (inside a function body, inside a worker `<program>`) is `E-USE-INVALID-CTX` — registration must happen at app initialisation, not per-call.
+- A variant key not registered in any `registerMessages` call falls through to the next layer of the resolution chain (`scrml:data` shipped English defaults, then the `<match for=ValidationError>` escape hatch). See §55.10 for the full 4-level chain.
+
+**The 4-level resolution chain (cross-ref §55.10):**
+
+1. **Inline override on field declaration** — `<name req:"Please enter your name">` (highest priority; static-string only).
+2. **Project-registered messages** — this section's `registerMessages` API. Project-wide; brand-voice + i18n hook.
+3. **`scrml:data` shipped English defaults** — fallback for unregistered variants.
+4. **Match escape hatch** — `<match for=ValidationError>` for full programmatic control (lowest precedence; used when the writer needs to render markup, not just a string).
+
+**`messageFor(errorTag, fieldName, ...args)` helper:**
+
+The `scrml:data` module exports a sibling helper `messageFor` that performs the full 4-level resolution and returns the user-facing string. The `<errors of=expr/>` element (§55.8) calls `messageFor` internally for default rendering.
+
+**Cross-references:**
+- §55.9 — `ValidationError` enum (the variant catalog).
+- §55.10 — full 4-level message resolution chain.
+- §55.8 — `<errors of=expr/>` element (default rendering uses `messageFor`).
+
 ---
 
 ## 42. `not` — The Unified Absence Value
