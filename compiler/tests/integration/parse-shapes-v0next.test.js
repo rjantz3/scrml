@@ -1409,3 +1409,249 @@ describe("A1a Step 11.0b — newline-as-statement-separator for state-decls", ()
     assertNoHtmlFragmentMatching(ast, /<\s*y\s*>/);
   });
 });
+
+// =============================================================================
+// A1a Step 11.0c — typed-decl recognizer (`>` followed by `:`)
+// =============================================================================
+//
+// Step 11.0c extends `tryParseStructuralDecl` to recognise typed state-decl
+// shapes per SPEC §6.2 (typed Shape 1/2/3) + §14.10 (bare-variant inference,
+// M9) + §14.11 (Tier 3 typed compound positional sugar, M10) + §53
+// (refinement-type predicates).
+//
+// Lookahead extension: `scanStructuralDeclLookahead` returns `typedDecl: true`
+// when post-`>` is `:`. Caller consumes the type expression via the existing
+// `collectTypeAnnotation` helper, then proceeds with standard markup-RHS /
+// expression-RHS dispatch.
+//
+// AST shape: state-decl carries `typeAnnotation: string` (raw type text).
+// Mutually inclusive with all 3 RHS shapes — typed Shape 1 / 2 / 3.
+//
+// A1b owns:
+//   - type-checking (typed Shape 1/3 init type vs declared type)
+//   - bare-variant inference (`.Idle` → `Phase.Idle` resolution)
+//   - Tier 3 positional binding (SequenceExpression → struct field-order map)
+//   - refinement-type predicate decomposition into runtime checks
+//
+// Step 11.0c just collects the typed form. Anti-html-fragment guard on every
+// positive case (the deceptive-success pattern from PARSER-AUDIT §C.1).
+// =============================================================================
+
+describe("A1a Step 11.0c — typed-decl recognizer (`>` followed by `:`)", () => {
+  // §S11C.1 — Number-typed Shape 1 plain reactive cell.
+  test("§S11C.1: `<count>: number = 0` (typed Shape 1) → state-decl with typeAnnotation:\"number\"", () => {
+    const src = `<program>\${ <count>: number = 0 }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.name).toBe("count");
+    expect(d.init).toBe("0");
+    expect(d.typeAnnotation).toBe("number");
+    expect(d.shape).toBe("plain");
+    expect(d.structuralForm).toBe(true);
+    expect(d.isConst).toBe(false);
+    assertNoHtmlFragmentMatching(ast, /<\s*count\s*>/);
+    assertNoHtmlFragmentMatching(ast, /:\s*number/);
+  });
+
+  // §S11C.2 — String-typed Shape 1.
+  test("§S11C.2: `<name>: string = \"\"` (typed Shape 1 string) → state-decl with typeAnnotation:\"string\"", () => {
+    const src = `<program>\${ <name>: string = "" }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.name).toBe("name");
+    expect(d.init).toBe(`""`);
+    expect(d.typeAnnotation).toBe("string");
+    expect(d.shape).toBe("plain");
+    expect(d.structuralForm).toBe(true);
+    expect(d.isConst).toBe(false);
+    assertNoHtmlFragmentMatching(ast, /<\s*name\s*>/);
+    assertNoHtmlFragmentMatching(ast, /:\s*string/);
+  });
+
+  // §S11C.3 — Bare-variant inference (M9 / SPEC §14.10).
+  // `<phase>: Phase = .Idle` — the `.Idle` is a bare-variant access (acorn
+  // rejects standalone `.Idle`); A1a collects init=".Idle" + typeAnnotation
+  // and lets A1b resolve to Phase.Idle.
+  test("§S11C.3: `<phase>: Phase = .Idle` (bare-variant inference, §14.10) → state-decl with init=\".Idle\"", () => {
+    const src = `<program>\${ <phase>: Phase = .Idle }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.name).toBe("phase");
+    expect(d.typeAnnotation).toBe("Phase");
+    // Init contains the bare-variant token `.Idle`. Whitespace between `.`
+    // and IDENT is normalized by collectExpr's join logic; we assert
+    // membership rather than exact string.
+    expect(d.init).toContain(".");
+    expect(d.init).toContain("Idle");
+    expect(d.shape).toBe("plain");
+    expect(d.structuralForm).toBe(true);
+    expect(d.isConst).toBe(false);
+    assertNoHtmlFragmentMatching(ast, /<\s*phase\s*>/);
+    assertNoHtmlFragmentMatching(ast, /:\s*Phase/);
+  });
+
+  // §S11C.4 — Tier 3 typed compound positional sugar (M10 / SPEC §14.11).
+  // `<userInfo>: UserInfo = ("alice", 30, true)` — acorn parses tuple as
+  // SequenceExpression; A1b's typed-compound resolver interprets positionally
+  // against the struct's declared field order.
+  test("§S11C.4: `<userInfo>: UserInfo = (\"alice\", 30, true)` (Tier 3 positional, §14.11) → state-decl with tuple init", () => {
+    const src = `<program>\${ <userInfo>: UserInfo = ("alice", 30, true) }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.name).toBe("userInfo");
+    expect(d.init).toContain("alice");
+    expect(d.init).toContain("30");
+    expect(d.init).toContain("true");
+    expect(d.typeAnnotation).toBe("UserInfo");
+    expect(d.shape).toBe("plain");
+    expect(d.structuralForm).toBe(true);
+    expect(d.isConst).toBe(false);
+    assertNoHtmlFragmentMatching(ast, /<\s*userInfo\s*>/);
+    assertNoHtmlFragmentMatching(ast, /:\s*UserInfo/);
+  });
+
+  // §S11C.5 — Typed Shape 3 derived (`const <doubled>: number = @count * 2`).
+  test("§S11C.5: `const <doubled>: number = @count * 2` (typed Shape 3 derived) → state-decl with shape:\"derived\", isConst:true, typeAnnotation:\"number\"", () => {
+    const src = `<program>\${ const <doubled>: number = @count * 2 }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.name).toBe("doubled");
+    expect(d.init).toBe("@count * 2");
+    expect(d.typeAnnotation).toBe("number");
+    expect(d.shape).toBe("derived");
+    expect(d.structuralForm).toBe(true);
+    expect(d.isConst).toBe(true);
+    assertNoHtmlFragmentMatching(ast, /<\s*doubled\s*>/);
+    assertNoHtmlFragmentMatching(ast, /:\s*number/);
+  });
+
+  // §S11C.6 — Refinement-typed Shape 2 with markup-RHS.
+  // `<email>: string(pattern(/^[^@]+@[^@]+$/)) = <input type="email"/>` —
+  // collectTypeAnnotation accepts the parenthesized predicate-list verbatim
+  // (paren-depth tracking). The render-spec contains the bound input.
+  // A1b/A1c interpret the refinement predicates.
+  test("§S11C.6: `<email>: string(pattern(/.../)) = <input/>` (refinement-typed Shape 2) → state-decl with renderSpec + refinement typeAnnotation", () => {
+    const src = `<program>\${ <email>: string(pattern(/^[^@]+@[^@]+$/)) = <input type="email"/> }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.name).toBe("email");
+    // typeAnnotation: refinement-type form retained verbatim (no spaces in
+    // the joined output — collectTypeAnnotation joins parts with no
+    // separator, matching its existing behaviour at all other call sites).
+    expect(d.typeAnnotation).toContain("string");
+    expect(d.typeAnnotation).toContain("pattern");
+    expect(d.shape).toBe("decl-with-spec");
+    expect(d.structuralForm).toBe(true);
+    expect(d.isConst).toBe(false);
+    expect(d.renderSpec).toBeDefined();
+    expect(d.renderSpec.kind).toBe("render-spec");
+    assertNoHtmlFragmentMatching(ast, /<\s*email\s*>/);
+    assertNoHtmlFragmentMatching(ast, /pattern\(/);
+  });
+
+  // §S11C.7 — REGRESSION: untyped Shape 1 still works (typeAnnotation absent).
+  test("§S11C.7: REGRESSION — untyped `<count> = 0` produces state-decl with NO typeAnnotation", () => {
+    const src = `<program>\${ <count> = 0 }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.name).toBe("count");
+    expect(d.init).toBe("0");
+    expect(d.shape).toBe("plain");
+    expect(d.structuralForm).toBe(true);
+    expect(d.isConst).toBe(false);
+    expect(d.typeAnnotation).toBeUndefined();
+    assertNoHtmlFragmentMatching(ast, /<\s*count\s*>/);
+  });
+
+  // §S11C.8 — Validators-before-`>` + typed-decl form.
+  // `<email req>: string = <input/>` — validators in the standard pre-`>`
+  // position, type annotation after `>`. This is the spec-canonical
+  // placement (per §5/§6.2 examples).
+  test("§S11C.8: `<email req>: string = <input/>` (validators-before-typed) → Shape 2 with validators + typeAnnotation", () => {
+    const src = `<program>\${ <email req>: string = <input type="email"/> }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.name).toBe("email");
+    expect(d.typeAnnotation).toBe("string");
+    expect(d.shape).toBe("decl-with-spec");
+    expect(d.validators).toBeDefined();
+    expect(d.validators.length).toBe(1);
+    expect(d.validators[0].name).toBe("req");
+    expect(d.renderSpec).toBeDefined();
+    assertNoHtmlFragmentMatching(ast, /<\s*email\s*>/);
+  });
+
+  // §S11C.9 — Newline-separator interaction (Step 11.0b free-generalization).
+  // ASI-NEWLINE delegates to scanStructuralDeclLookahead, which now recognises
+  // typed-decl shape — so multi-line typed decls separate correctly.
+  test("§S11C.9: multiple typed decls newline-separated produce N state-decls (Step 11.0b interaction)", () => {
+    const src = `<program>\${
+      <count>: number = 0
+      <name>: string = ""
+      const <doubled>: number = @count * 2
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(3);
+    expect(decls[0].name).toBe("count");
+    expect(decls[0].typeAnnotation).toBe("number");
+    expect(decls[0].shape).toBe("plain");
+    expect(decls[1].name).toBe("name");
+    expect(decls[1].typeAnnotation).toBe("string");
+    expect(decls[1].shape).toBe("plain");
+    expect(decls[2].name).toBe("doubled");
+    expect(decls[2].typeAnnotation).toBe("number");
+    expect(decls[2].shape).toBe("derived");
+    expect(decls[2].isConst).toBe(true);
+    assertNoHtmlFragmentMatching(ast, /<\s*count\s*>/);
+    assertNoHtmlFragmentMatching(ast, /<\s*doubled\s*>/);
+  });
+
+  // §S11C.10 — Compound parent + typed children (recursion via Step 11.0a).
+  // Each child decl recurses through tryParseStructuralDecl, so children
+  // benefit from typed-decl recognition automatically.
+  test("§S11C.10: compound parent with typed children — children carry typeAnnotation", () => {
+    const src = `<program>\${ <formRes><name>: string = ""<email>: string = ""</> }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    // 1 compound parent + 2 typed children
+    expect(decls.length).toBe(3);
+    const parent = decls.find((d) => d.name === "formRes");
+    expect(parent).toBeDefined();
+    expect(parent.shape).toBe("plain");
+    expect(parent.children).toBeDefined();
+    expect(parent.children.length).toBe(2);
+    expect(parent.children[0].name).toBe("name");
+    expect(parent.children[0].typeAnnotation).toBe("string");
+    expect(parent.children[1].name).toBe("email");
+    expect(parent.children[1].typeAnnotation).toBe("string");
+    assertNoHtmlFragmentMatching(ast, /<\s*formRes\s*>/);
+    assertNoHtmlFragmentMatching(ast, /<\s*name\s*>/);
+  });
+});

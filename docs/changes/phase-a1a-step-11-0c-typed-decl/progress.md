@@ -264,3 +264,184 @@ of 12 cases produce expected AST shape:
 are EXACTLY the 2 anti-test memorials (`§K11.X-D3a`, `§K11.X-D3b`) that
 predicted typed-decl falls through to html-fragment. Now the recognizer
 fires; assertions become invalid. Memorial flip ready.
+
+[step-11-0c impl-flip-memorials] Flipped both anti-test memorials in
+`kickstarter-v2-smoke.test.js`:
+  - `§K11.X-D3a` → renamed to `§K11.3A`. Old: assert `decls.length === 0`
+    + fragment includes ": number". New: assert 1 state-decl with
+    name="count", init="0", typeAnnotation="number", shape="plain",
+    structuralForm:true, isConst:false. Anti-html-fragment guards on
+    `<count>` and `: number`.
+  - `§K11.X-D3b` → renamed to `§K11.3A-b`. Old: assert decls.length === 0.
+    New: assert 1 state-decl with name="userInfo", init contains "alice"
+    + "30" + "true" (tuple form), typeAnnotation="UserInfo".
+    Anti-html-fragment guards on `<userInfo>` and `: UserInfo`.
+  - Top-of-file divergence comment block: §K11.X-DIVERGENCE-3 marked
+    RESOLVED with full description; section-header comment renamed
+    K11.X-DIVERGENCE-3 → K11.3A.
+
+After flip: kickstarter smoke 23/23 pass; full bun test 8864/8907 pass
+(no delta because flipped tests stay 1:1).
+
+[step-11-0c impl-types-update] Edit `compiler/src/types/ast.ts`
+`ReactiveDeclNode` interface: added `typeAnnotation?: string` field with
+~20-line doc comment listing all 6 populating decl forms (typed Shape
+1/2/3 + Tier 3 positional + bare-variant + legacy `@`-form). String-form
+representation matches LambdaParam.typeAnnotation and the legacy
+`@NAME : T = init` runtime usage at L3786/3789. **No mutation of
+runtime behaviour** — purely declares the field that the runtime parser
+already populates.
+
+[step-11-0c impl-new-positive-cases] Added 10 new typed-decl-specific
+tests at the end of `parse-shapes-v0next.test.js` in a new
+`A1a Step 11.0c — typed-decl recognizer` describe block:
+  - §S11C.1: number-typed Shape 1 (`<count>: number = 0`)
+  - §S11C.2: string-typed Shape 1 (`<name>: string = ""`)
+  - §S11C.3: bare-variant inference (`<phase>: Phase = .Idle`) per §14.10
+  - §S11C.4: Tier 3 positional sugar
+    (`<userInfo>: UserInfo = ("alice", 30, true)`) per §14.11
+  - §S11C.5: typed Shape 3 derived
+    (`const <doubled>: number = @count * 2`)
+  - §S11C.6: refinement-typed Shape 2
+    (`<email>: string(pattern(/.../)) = <input/>`) per §53
+  - §S11C.7: REGRESSION — untyped `<count> = 0` produces NO typeAnnotation
+  - §S11C.8: validators-before-`>` + typed
+    (`<email req>: string = <input/>`)
+  - §S11C.9: newline-separator + typed-decls (Step 11.0b free
+    generalization — 3 typed decls separate cleanly)
+  - §S11C.10: compound parent + typed children — children carry
+    typeAnnotation via Step 11.0a recursion
+
+Every positive case fires `assertNoHtmlFragmentMatching` per BRIEF §5
+DoD §6.
+
+[step-11-0c impl-full-test-run] `bun run test` after all changes:
+**8,874 pass / 43 skip / 0 fail / 8,917 across 439 files**. Delta
+from baseline 8,864 → 8,874 = **+10 pass**. Composition:
+  - 2 anti-test memorials FLIPPED (count stayed at 23 in kickstarter
+    smoke — in-place edit, not new). The flipped tests now have 5-7
+    additional positive assertions (typeAnnotation, shape, init,
+    structuralForm, anti-html-fragment guards × 2).
+  - 10 NEW positive cases added (S11C.1-S11C.10 in parse-shapes).
+  - 0 regressions, 0 fails, 43 skip stable.
+
+Within BRIEF target of +7-10 pass + memorial flips (at the high end).
+
+## Final summary
+
+**Files modified (1 source + 1 types + 2 tests):**
+  - `compiler/src/ast-builder.js` — `scanStructuralDeclLookahead` `>:`
+    branch (~13 LOC), `tryParseStructuralDecl` typed-decl handling
+    (~30 LOC), typeAnnotation propagation in 2 return paths (~5 LOC).
+    Net: ~48 LOC source change.
+  - `compiler/src/types/ast.ts` — `ReactiveDeclNode.typeAnnotation`
+    field added (~22 LOC with doc comment).
+  - `compiler/tests/integration/kickstarter-v2-smoke.test.js` — 2
+    anti-test memorials flipped to positive assertions (renamed
+    §K11.X-D3a/D3b → §K11.3A/3A-b); top-of-file divergence comment
+    block updated; section header renamed.
+  - `compiler/tests/integration/parse-shapes-v0next.test.js` — 10 new
+    positive cases (S11C.1-S11C.10) in a new §S11C describe block.
+  - `docs/changes/phase-a1a-step-11-0c-typed-decl/progress.md` —
+    survey + implementation log + final summary.
+
+**Tier classification:** T2 (single-subsystem, parser-internal, behavior
+change tied to AST shape — adds `typeAnnotation` field on structural-
+form state-decls).
+
+**Survey verdict — depth-of-survey discount #9 status:** **NOT a
+Discount #9.** Survey confirmed the recognizer extension genuinely
+needed source code; the existing parser had ZERO `>:` handling for the
+structural form. HOWEVER, the depth of REUSE was unusually high:
+`collectTypeAnnotation()` (existing helper at L2671) handles
+refinement-type forms via paren-depth tracking — no extension needed.
+The `typeAnnotation` field was already a recognized state-decl runtime
+property (set by the legacy `@NAME : T = init` path at L3789), so types
+update was purely declarative. Net: ~48 LOC source change vs Step
+11.0a's ~127 LOC — **substantially leaner due to the reuse**.
+
+**Refinement-type form decision (BRIEF §3 question 4):** Option (a)
+full collection in 11.0c. The existing `collectTypeAnnotation` helper
+already handles `string(pattern(/.../))` via paren-depth. Refinement
+predicates land in the typeAnnotation string verbatim;
+A1b/A1c decompose. **Reuse 100%, zero new collection logic.**
+
+**Tier 3 positional sugar (BRIEF §3 question 5):** Acorn parses
+`("alice", 30, true)` as `SequenceExpression` — verified via probe.
+Acceptable as ExprNode; A1b's typed-compound resolver interprets
+positionally per §14.11.
+
+**Bare-variant inference (BRIEF §3 question 6):** Acorn rejects
+standalone `.Idle` — `safeParseExprToNode` produces an `escape-hatch`
+ExprNode with `raw: ".Idle"` per the existing fallback at L1759-1762.
+A1b's bare-variant inference (M9) handles the resolution.
+
+**Step 11 anti-test flipping:** All 2 `TODO[step-11.0c]` anti-test
+memorials flipped cleanly. Renaming followed: `§K11.X-D3a` →
+`§K11.3A`, `§K11.X-D3b` → `§K11.3A-b`. Sectioning updated from
+"DEFERRED" to "RECOGNIZED". TODO[step-11.0c] markers in the file are
+now ZERO. **All 4 dispatch-listed `TODO[step-11.0c]` mentions resolved**
+(2 anti-test memorials + 1 head-comment + 1 section-header comment).
+
+**Self-host parity:** N/A for this step — no codegen change. The
+typeAnnotation field is collected only; A1b/A1c phases consume.
+Existing samples that don't use typed structural decls compile
+identically.
+
+**Path-discipline near-misses:** None. All Reads/Writes/Edits used
+absolute paths under
+`/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a04a8f96af0741df1/...`.
+Two `_probe_*.mjs` files were created in worktree root for AST shape
+verification, then deleted before any commit included them.
+
+## Branch + commit hygiene
+
+WIP commits on `phase-a1a-step-11-0c-typed-decl`:
+  - `2664297` — WIP: survey notes
+  - `f176b70` — WIP: typed-decl recognizer + types + flip K11.X-D3 memorials
+  - (next) — WIP: §S11C positive + regression cases (10 tests)
+  - (next) — final: compile(a1a-step-11-0c) — typed-decl recognizer
+
+## Tags
+
+#phase-a1a #step-11-0c #typed-decl #M9-bare-variant-inference
+#tier-3-positional #parser-only #t2 #not-discount-9 #flipped-anti-tests
+#step-11-escalation #kickstarter-v2-§3 #spec-§6.2 #spec-§14.10
+#spec-§14.11 #spec-§53 #refinement-type
+
+## Links
+
+- Brief: `docs/changes/phase-a1a-step-11-0c-typed-decl/BRIEF.md`
+- Step 11 escalation context:
+  `docs/changes/phase-a1a-step-11-compound-render-smoke/progress.md`
+  lines 105-213
+- Step 11.0a predecessor:
+  `docs/changes/phase-a1a-step-11-0a-compound-recognizer/progress.md`
+- Step 11.0b predecessor:
+  `docs/changes/phase-a1a-step-11-0b-newline-separator/progress.md`
+- AST contract §1.1:
+  `docs/changes/phase-a1a-lex-parse/AST-CONTRACTS-AND-DECOMPOSITION.md`
+  lines 18-46
+- SPEC §6.2 (three RHS shapes):
+  `compiler/SPEC.md` lines 1764-1825
+- SPEC §6.3.3 Tier 3 typed compound positional sugar:
+  `compiler/SPEC.md` lines 1865-1891
+- SPEC §14.10 bare-variant inference:
+  `compiler/SPEC.md` (M9 §14.10)
+- SPEC §14.11 positional binding:
+  `compiler/SPEC.md` lines 7173-7208
+- SPEC §53 refinement-type predicates:
+  `compiler/SPEC.md` lines 22622-23295
+- Touchpoint — recognizer extension:
+  `compiler/src/ast-builder.js` `tryParseStructuralDecl` typed-decl
+  branch at L3115; `scanStructuralDeclLookahead` `>:` branch at L3293.
+- Touchpoint — type-expr collector REUSE:
+  `compiler/src/ast-builder.js` `collectTypeAnnotation` at L2671.
+- Touchpoint — types:
+  `compiler/src/types/ast.ts` `ReactiveDeclNode.typeAnnotation`
+- Tests flipped:
+  `compiler/tests/integration/kickstarter-v2-smoke.test.js`
+  §K11.3A + §K11.3A-b
+- Tests added:
+  `compiler/tests/integration/parse-shapes-v0next.test.js`
+  §S11C.1-§S11C.10
