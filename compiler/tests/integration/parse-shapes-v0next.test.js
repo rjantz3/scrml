@@ -1166,3 +1166,246 @@ describe("A1a Step 11.0a — Variant C compound state-decl recognizer", () => {
     expect(compoundParents.length).toBeGreaterThanOrEqual(0); // either path acceptable
   });
 });
+
+// =============================================================================
+// §S11B — Phase A1a Step 11.0b: newline-as-statement-separator for state-decls
+// =============================================================================
+//
+// Per BRIEF, multi-line legitimate expressions and Shape 2 markup-RHS spanning
+// newlines must NOT regress; only newline-followed-by-state-decl-shape-opener
+// terminates RHS collection. Implementation: extended `collectExpr`'s
+// ASI-NEWLINE branch to detect `<` PUNCT + IDENT + state-decl lookahead at the
+// start of a new line as a statement boundary (when `lastEndsValue`).
+//
+// Spec authority: §6.1 / §6.2 / §6.3 (RHS shapes); kickstarter v2 §3.1 (canonical
+// multi-decl form using newline-only separators).
+// =============================================================================
+
+describe("A1a Step 11.0b — newline-as-statement-separator for state-decls", () => {
+  // §S11B.1 — Two Shape 1 plain decls separated by a newline only.
+  // The kickstarter v2 §3 canonical form. Pre-11.0b this collapsed into ONE
+  // state-decl whose `init` ate the second decl as raw text.
+  test("§S11B.1: two Shape 1 plain decls newline-separated produce TWO state-decls", () => {
+    const src = `<program>\${
+      <count> = 0
+      <name>  = ""
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(2);
+    const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
+    expect(byName.count.shape).toBe("plain");
+    expect(byName.count.init).toBe("0");
+    expect(byName.name.shape).toBe("plain");
+    expect(byName.name.init).toBe('""');
+    assertNoHtmlFragmentMatching(ast, /<\s*count\s*>|<\s*name\s*>/);
+  });
+
+  // §S11B.2 — Four-decl block with newline separators, mixed Shape 1 / 3.
+  // Confirms the boundary fires for both Shape 1 plain AND Shape 3 derived
+  // (`const <name> = …`) sequencing.
+  test("§S11B.2: 4-decl block (Shape 1 + Shape 3) newline-separated all parse cleanly", () => {
+    const src = `<program>\${
+      <count> = 0
+      <name>  = ""
+      const <doubled> = @count * 2
+      const <greeting> = "Hello, " + @name
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(4);
+    const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
+    expect(byName.count.shape).toBe("plain");
+    expect(byName.count.isConst).toBe(false);
+    expect(byName.name.shape).toBe("plain");
+    expect(byName.doubled.shape).toBe("derived");
+    expect(byName.doubled.isConst).toBe(true);
+    expect(byName.doubled.init).toBe("@count * 2");
+    expect(byName.greeting.shape).toBe("derived");
+    expect(byName.greeting.isConst).toBe(true);
+    expect(byName.greeting.init).toBe('"Hello, " + @name');
+    assertNoHtmlFragmentMatching(ast, /<\s*count\s*>|<\s*name\s*>|<\s*doubled\s*>|<\s*greeting\s*>/);
+  });
+
+  // §S11B.3 — Mixed `;` + newline separators in the same block.
+  // Both separator forms work and don't double-count.
+  test("§S11B.3: mixed `;` + newline separators in same block all parse correctly", () => {
+    const src = `<program>\${
+      <a> = 0
+      <b> = 1; <c> = 2
+      <d> = 3
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(4);
+    const names = decls.map((d) => d.name).sort();
+    expect(names).toEqual(["a", "b", "c", "d"]);
+    for (const d of decls) {
+      expect(d.shape).toBe("plain");
+      expect(d.init).toBe(String("0123"["abcd".indexOf(d.name)]));
+    }
+    assertNoHtmlFragmentMatching(ast, /<\s*a\s*>|<\s*b\s*>|<\s*c\s*>|<\s*d\s*>/);
+  });
+
+  // §S11B.4 — REGRESSION GUARD: Shape 2 markup-RHS spanning multiple lines.
+  // The angleDepth tracking in `collectExpr` (added in Step 5) plus
+  // `parseLiftTag` for markup-RHS together preserve multi-line markup. The
+  // newline-as-separator rule does NOT fire inside markup because `angleDepth
+  // > 0` and parseLiftTag handles the markup boundary via `/>`.
+  test("§S11B.4: REGRESSION — Shape 2 markup-RHS spanning newlines remains ONE decl", () => {
+    const src = `<program>\${
+      <userName> = <input
+        type="text"
+      />
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    expect(decls[0].name).toBe("userName");
+    expect(decls[0].shape).toBe("decl-with-spec");
+    expect(decls[0].renderSpec).toBeDefined();
+    expect(decls[0].renderSpec.kind).toBe("render-spec");
+    assertNoHtmlFragmentMatching(ast, /<\s*userName\s*>|<\s*input\s*/);
+  });
+
+  // §S11B.5 — REGRESSION GUARD: multi-line legitimate expression. The newline
+  // INSIDE a continuing expression must NOT terminate RHS prematurely. `+`
+  // does not end a value (lastEndsValue=false), so the ASI-NEWLINE rule (and
+  // our new state-decl-shape extension) does not fire.
+  test("§S11B.5: REGRESSION — multi-line legit expression `@a +\\n@b` remains ONE decl", () => {
+    const src = `<program>\${
+      <x> = @a +
+            @b
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    expect(decls[0].name).toBe("x");
+    expect(decls[0].init).toBe("@a +\n@b");
+    assertNoHtmlFragmentMatching(ast, /<\s*x\s*>/);
+  });
+
+  // §S11B.6 — REGRESSION GUARD: same-line `a < b` comparison inside RHS must
+  // NOT trip the state-decl-shape boundary. The newline gate (`tok.span.line
+  // > lastTok.span.line`) suppresses the boundary check entirely on same-line
+  // tokens. `a < b ? 1 : 2` parses cleanly as ONE expression.
+  test("§S11B.6: REGRESSION — same-line `a < b` comparison inside RHS not broken", () => {
+    const src = `<program>\${
+      <x> = a < b ? 1 : 2
+      <y> = 0
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(2);
+    const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
+    expect(byName.x.init).toBe("a < b ? 1 : 2");
+    expect(byName.y.init).toBe("0");
+    assertNoHtmlFragmentMatching(ast, /<\s*x\s*>|<\s*y\s*>/);
+  });
+
+  // §S11B.7 — Shape 1 with array literal init followed by sibling decl on
+  // newline. Closing `]` ends a value, so the boundary fires correctly.
+  test("§S11B.7: Shape 1 with array-literal init + newline + sibling decl", () => {
+    const src = `<program>\${
+      <items> = [1, 2, 3]
+      <count> = 0
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(2);
+    const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
+    expect(byName.items.init).toBe("[ 1 , 2 , 3 ]");
+    expect(byName.count.init).toBe("0");
+    assertNoHtmlFragmentMatching(ast, /<\s*items\s*>|<\s*count\s*>/);
+  });
+
+  // §S11B.8 — Shape 1 with multiline call init followed by sibling decl.
+  // Closing `)` ends a value, so the boundary fires after the close-paren
+  // crosses to a new line.
+  test("§S11B.8: Shape 1 with multiline call init + newline + sibling decl", () => {
+    const src = `<program>\${
+      <result> = compute(
+        a,
+        b
+      )
+      <count> = 0
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(2);
+    const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
+    // The init contains the multiline call, but the sibling `<count>` is NOT
+    // eaten into it.
+    expect(byName.result.init).toContain("compute (");
+    expect(byName.result.init).not.toContain("count");
+    expect(byName.count.init).toBe("0");
+    assertNoHtmlFragmentMatching(ast, /<\s*result\s*>|<\s*count\s*>/);
+  });
+
+  // §S11B.9 — Shape 1 single-decl baseline (regression: untouched cases work).
+  test("§S11B.9: REGRESSION — single Shape 1 plain decl unchanged", () => {
+    const src = `<program>\${ <count> = 0 }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    expect(decls[0].name).toBe("count");
+    expect(decls[0].shape).toBe("plain");
+    expect(decls[0].init).toBe("0");
+    assertNoHtmlFragmentMatching(ast, /<\s*count\s*>/);
+  });
+
+  // §S11B.10 — Shape 2 with validators followed by newline + sibling decl.
+  // Confirms that the Shape 2 + sibling-decl handoff works (Shape 2 uses
+  // parseLiftTag which terminates on `/>`, then the next `<count>` decl is
+  // recognized by the structural-decl path).
+  test("§S11B.10: Shape 2 (`<name req> = <input/>`) + newline + Shape 1 sibling", () => {
+    const src = `<program>\${
+      <userName req> = <input type="text"/>
+      <count> = 0
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(2);
+    const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
+    expect(byName.userName.shape).toBe("decl-with-spec");
+    expect(byName.userName.renderSpec).toBeDefined();
+    expect(byName.userName.validators).toBeDefined();
+    expect(byName.userName.validators.length).toBe(1);
+    expect(byName.userName.validators[0].name).toBe("req");
+    expect(byName.count.shape).toBe("plain");
+    expect(byName.count.init).toBe("0");
+    assertNoHtmlFragmentMatching(ast, /<\s*userName\s*>|<\s*count\s*>/);
+  });
+
+  // §S11B.11 — Broader benefit: let-decl + state-decl on newline now also
+  // separates correctly. The fix lives in `collectExpr` so all callers
+  // benefit. Previously `let x = 1\n<y> = 0` ate the state-decl into the
+  // let-decl init.
+  test("§S11B.11: let-decl + newline + state-decl separates correctly", () => {
+    const src = `<program>\${
+      let x = 1
+      <y> = 0
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const stateDecls = findKind(ast, "state-decl");
+    const letDecls = findKind(ast, "let-decl");
+    expect(letDecls.length).toBe(1);
+    expect(letDecls[0].name).toBe("x");
+    expect(letDecls[0].init).toBe("1");
+    expect(stateDecls.length).toBe(1);
+    expect(stateDecls[0].name).toBe("y");
+    expect(stateDecls[0].init).toBe("0");
+    assertNoHtmlFragmentMatching(ast, /<\s*y\s*>/);
+  });
+});
