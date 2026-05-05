@@ -1975,6 +1975,8 @@ The following mutating methods are valid on reactive array variables:
 @arr.sort(compareFn)
 ```
 
+**Applies to mutable reactive arrays only.** The mutating-method rewrite described below applies when the receiver is a mutable reactive array cell (`<items> = []` form). On a `const`-derived cell (`const <filteredItems> = @items.filter(...)`), the same call is **E-DERIVED-VALUE-MUTATE** (§6.6.18) — derived cells are read-only from the developer's perspective, including in-place mutation. Mutate the upstream dependency instead.
+
 **Canonical update pattern (DQ-2):** Array mutation methods (`.push()`, `.splice()`, `.pop()`, etc.) do NOT trigger reactivity on their own. To update a reactive array, reassign it:
 
 ```scrml
@@ -2623,7 +2625,7 @@ behavior (evaluate once, never re-evaluate) is superseded and non-conformant.
 
 ---
 
-#### 6.6.8 Assignment to a Derived Value — E-REACTIVE-002
+#### 6.6.8 Assignment to a Derived Value — E-DERIVED-WRITE
 
 A `const <name>` binding is immutable. The compiler SHALL reject any attempt to assign a
 new value to a derived reactive variable after its declaration.
@@ -2632,7 +2634,7 @@ new value to a derived reactive variable after its declaration.
 const <total> = @price * @quantity
 
 ${ function reset() {
-    @total = 0    // Error E-REACTIVE-002
+    @total = 0    // Error E-DERIVED-WRITE
 } }
 ```
 
@@ -2641,11 +2643,13 @@ ${ function reset() {
 - The compiler SHALL reject any assignment to a `const <name>` identifier after its
   declaration site. This applies regardless of the enclosing context (top-level, function
   body, logic block, or event handler).
-- E-REACTIVE-002 SHALL be: "Assignment to derived reactive value `@total`. `const <name>`
+- E-DERIVED-WRITE SHALL be: "Assignment to derived reactive value `@total`. `const <name>`
   bindings are immutable. To reset the value, modify one of its upstream dependencies
   (`@price`, `@quantity`)."
 - The error message SHALL list the upstream dependencies of the target derived value, to
   guide the developer toward the correct fix.
+
+> **Note on rename (S59).** Earlier drafts of this subsection used the placeholder code `E-REACTIVE-002`. The canonical name is `E-DERIVED-WRITE` (matching §34, §6.2 cross-refs, the `E-DERIVED-*` family, and the sibling `E-DERIVED-VALUE-MUTATE` introduced in §6.6.18). All references to `E-REACTIVE-002` for the derived-cell-reassignment case SHALL be read as `E-DERIVED-WRITE`.
 
 ---
 
@@ -3029,6 +3033,100 @@ const <badge>  = <span class="badge">${@signup.name}</span>
 - §6.2 — Shape 3 (derived cells); Shape 2 (render-spec cells, distinct from markup-typed derived)
 - §6.4 — Render-by-tag semantics: why `<varname/>` is not valid for markup-typed derived
 - §34 — E-DERIVED-WRITE, E-CELL-NO-RENDER-SPEC
+
+---
+
+#### 6.6.18 Value-Mutation of a Derived Cell — E-DERIVED-VALUE-MUTATE
+
+**Added 2026-05-05 (S59 lock L21).** A `const <name>` declaration is **reference-immutable** (§6.6.8 — reassignment via `@name = newval` is **E-DERIVED-WRITE**) **and value-immutable from the developer's perspective**. The compiler SHALL also reject in-place mutation of the value held by a derived cell.
+
+The motivating case is in-place mutation through a method call or property write that would otherwise lower (per §6.5.1) to the clone-mutate-replace pattern — i.e., a hidden `_scrml_reactive_set("name", ...)` write. That write is logically the same write the developer was already forbidden from making explicitly via `@name = newval`. Allowing the implicit form is incoherent: it bypasses §6.6.8 syntactically while producing the same semantic write, and the mutation is then silently clobbered the next time the upstream dependencies of the derivation fire.
+
+```scrml
+const <filteredItems> = @items.filter(i => i.active)
+
+${ function addItem(x) {
+    @filteredItems.push(x)        // Error E-DERIVED-VALUE-MUTATE
+} }
+```
+
+**Forms covered (forbidden on derived cells):**
+
+1. **Array mutating methods** — the methods listed in §6.5.1: `push`, `pop`, `shift`, `unshift`, `splice`, `reverse`, `sort`, `fill`, `copyWithin`. Calling any of these with a derived cell as the receiver SHALL be `E-DERIVED-VALUE-MUTATE`.
+2. **Object property writes** — `@derivedObj.foo = x`, `@derivedObj.foo += 1`, `delete @derivedObj.foo`, and other compound-assignment / property-mutation forms on a derived object cell SHALL be `E-DERIVED-VALUE-MUTATE`.
+3. **In-compound derived sub-cell** — when a compound's child is `const`-derived (`<form><name req> = …<:/><form>`-shaped declaration with `const <derivedField> = …` inside), the derived sub-cell follows the same rule: `@form.derivedField.push(x)` and `@form.derivedField.foo = x` SHALL be `E-DERIVED-VALUE-MUTATE`.
+
+**Forms NOT covered (legal):**
+
+- **Non-mutating array methods** (`filter`, `map`, `slice`, `concat`, `find`, `some`, `every`, `reduce`, etc.) on a derived array — they return new values without writing back. See §6.5.2.
+- **Reads** of any kind: `@derivedArr.length`, `@derivedArr[0]`, `@derivedObj.foo`, destructuring (`const [first] = @derivedArr`).
+- **Method calls that don't mutate** (`@derivedArr.join(",")`, `@derivedObj.toString()`).
+- **Local copies** are mutable: `${ let local = [...@filteredItems]; local.push(x) }` is fine; `local` is a plain non-reactive `let`.
+
+**Distinction from sibling errors:**
+
+- **E-DERIVED-WRITE** (§6.6.8, §34) — REASSIGNMENT to a derived cell: `@derived = newval`. Same motivation, different syntactic form.
+- **E-SYNTHESIZED-WRITE** (§55.5, §34) — write to an auto-synthesized validity-surface property (`@signup.isValid = false`). Synthesized properties are derived-shaped but their fix-advice differs (the user should change the input cells, not the surface).
+- **E-DERIVED-WITH-VALIDATORS** (§55.14, §34) — applying validators to a derived cell. Different validity-vs-mutation concern.
+
+**Normative statements:**
+
+- The compiler SHALL reject any call of the form `@derivedName.method(...)` where `derivedName` resolves to a `const <name>` declaration and `method` is one of the array mutating methods listed in §6.5.1 (`push`, `pop`, `shift`, `unshift`, `splice`, `reverse`, `sort`, `fill`, `copyWithin`).
+- The compiler SHALL reject any property assignment of the form `@derivedName.path = expr` (or compound-assignment form `@derivedName.path += expr`, `-=`, `*=`, `/=`, `%=`, `**=`, `&=`, `|=`, `^=`, `<<=`, `>>=`, `>>>=`, `??=`, `||=`, `&&=`) where `derivedName` resolves to a `const <name>` declaration.
+- The compiler SHALL reject `delete @derivedName.path` where `derivedName` resolves to a `const <name>` declaration.
+- For an in-compound derived sub-cell `const <derivedField>` inside `<compound>`, the same rules apply with receiver `@compound.derivedField`.
+- The error code SHALL be `E-DERIVED-VALUE-MUTATE`. The error message SHALL identify the derived cell, the upstream dependencies that produce its value, and recommend either (a) replacing the call with a non-mutating equivalent that flows through the upstream cell instead (e.g., `@items = [...@items, x]` to add an item that will then appear in `@filteredItems` at next derivation), or (b) introducing a separate mutable cell if the developer wants independent storage.
+- The check SHALL run during the same pass that checks E-DERIVED-WRITE (§6.6.8). The AST nodes that participate are `MemberCall` (for case 1) and `MemberAssignment` / `UnaryDelete` (for cases 2-3) whose receiver chain begins at a `const <name>` cell reference.
+- Markup-typed derived cells (§6.6.17) carry markup values whose API surface contains no mutating methods; in practice this rule is non-firing on markup-typed derived cells, but the rule applies if a future markup API exposes a mutator.
+
+**Worked example — invalid (array mutating method):**
+
+```scrml
+<items> = []
+const <activeItems> = @items.filter(i => i.active)
+
+${ function tryAdd(item) {
+    @activeItems.push(item)   // Error E-DERIVED-VALUE-MUTATE
+} }
+```
+
+Expected compiler output:
+```
+Error E-DERIVED-VALUE-MUTATE: In-place mutation of derived cell `@activeItems` via `.push(...)`.
+  @activeItems is `const`-derived (line 2: const <activeItems> = @items.filter(...))
+  Upstream dependencies: @items
+  Mutating a derived cell is forbidden (§6.6.18). The mutation would be silently clobbered the next time `@items` changes.
+  Fix: mutate the upstream instead — `@items = [...@items, item]` — or declare a separate mutable cell if you want independent storage.
+```
+
+**Worked example — invalid (object property write on derived):**
+
+```scrml
+<formData> = { firstName: "", lastName: "" }
+const <formCopy> = { ...@formData, full: @formData.firstName + " " + @formData.lastName }
+
+${ function setFull(s) {
+    @formCopy.full = s   // Error E-DERIVED-VALUE-MUTATE
+} }
+```
+
+**Worked example — valid (mutate upstream, derived re-fires):**
+
+```scrml
+<items> = []
+const <activeItems> = @items.filter(i => i.active)
+
+${ function add(item) {
+    @items = [...@items, item]   // OK — upstream write; @activeItems recomputes
+} }
+```
+
+**Cross-references:**
+- §6.5.1 — Array mutating methods on mutable reactive cells (the form this rule disallows on derived).
+- §6.5.2 — Non-mutating array methods (always legal).
+- §6.6.8 — E-DERIVED-WRITE (the reassignment form, sibling rule).
+- §6.6.16 — In-compound derived cells (where the rule extends to sub-cells).
+- §34 — E-DERIVED-VALUE-MUTATE, E-DERIVED-WRITE, E-SYNTHESIZED-WRITE, E-DERIVED-WITH-VALIDATORS.
 
 ---
 
@@ -14089,7 +14187,8 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-TYPE-080 | §19.7 | Non-exhaustive error handler: not all error variants covered | Error |
 | E-TAILWIND-001 | §26.4.1 | Invalid arbitrary value in Tailwind utility class (empty brackets, whitespace, malformed hex/unit/function, injection vector, unbalanced parens, malformed `var()` or `url()`) | Error |
 | E-NAME-COLLIDES-STATE | §6.1 | Local identifier declaration uses the same name as a registered state cell in scope. Local names cannot shadow state names. Example: `<count> = 0; ... let count = 5`. | Error |
-| E-DERIVED-WRITE | §6.6 | Write to a `const`-derived reactive cell. Derived cells are read-only; assignment is not permitted. Example: `const <displayName> = @name.toUpperCase(); @displayName = "x"`. | Error |
+| E-DERIVED-WRITE | §6.6, §6.6.8 | Reassignment to a `const`-derived reactive cell. Derived cells are read-only; assignment is not permitted. Example: `const <displayName> = @name.toUpperCase(); @displayName = "x"`. Sibling: in-place mutation is `E-DERIVED-VALUE-MUTATE` (§6.6.18). (Renamed from `E-REACTIVE-002` in S59 lock L21.) | Error |
+| E-DERIVED-VALUE-MUTATE | §6.6.18 | In-place value-mutation of a `const`-derived reactive cell — array mutating methods on a derived array (`@filtered.push(x)`), property assignment / compound-assignment / `delete` on a derived object (`@formCopy.full = "x"`), or the same on an in-compound derived sub-cell. Derived cells are value-immutable from the developer's perspective; mutating one would be silently clobbered when the upstream dependencies next fire. Mutate the upstream cell instead. (S59 lock L21.) | Error |
 | E-STATE-PINNED-FORWARD-REF | §6.10 | Read of a `pinned` state declaration before its declaration site in source order. `pinned` opts the declaration out of hoisting; forward reads are therefore unsafe. | Error |
 | E-CELL-NO-RENDER-SPEC | §6.4 | `<varname/>` used as render-by-tag in markup, but the cell has no render-spec (Shape 1 plain cell or Shape 3 non-markup derived). Use `${@varname}` interpolation to display the value. | Error |
 | E-CELL-RENDER-SPEC-NOT-BINDABLE | §6.2 | Shape 2 declaration (`<name req> = <markup>`) where the RHS markup element is not bindable (e.g., `<div>`, `<span>`). Shape 2 requires a bindable form element. Use `const <name>` (Shape 3) for display-only markup cells. | Error |
