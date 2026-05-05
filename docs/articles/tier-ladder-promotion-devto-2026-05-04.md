@@ -13,7 +13,7 @@ canonical_url:
 
 Every framework I have looked at picks a side in the same fight. The state-machine evangelists insist you specify your machine before you write a feature. The rapid-prototyping evangelists hand you `useState` and let you stack booleans until you have a runtime invariant problem you cannot debug. Both camps are right about something and wrong about something else.
 
-I have hobbled through React when I had to. I have shipped enough boolean-lifecycle code to know exactly the bug class state machines are supposed to prevent. I have also tried to write XState early in a project and bounced off because I did not know the states yet. The point of the prototype is to find out.
+I have hobbled through React when I had to. I have written enough boolean-lifecycle code in my own experiments to recognize exactly the bug class state machines are supposed to prevent. The state-machine-first response to that bug class is fine in theory, but the prototype is the place where you find out what the states actually are. Asking the developer to name the machine before the feature exists is asking them to commit before they know.
 
 scrml takes the position that this is a tooling failure, not a developer failure. If a language wants you to ship a state machine, it should let you start with booleans and a few `if`s, then make promotion mechanical when the boolean count earns it.
 
@@ -26,23 +26,41 @@ Here is a screen anyone has written. A button that loads data, a spinner while i
 ```scrml
 <program>
 
+type LoadError:enum = {
+    Network(msg: string)
+    Empty
+}
+
 <isLoading> = false
 <isError>   = false
 <errorMsg>  = ""
 <data>      = null
 
-server function load() {
+server function fetchItems()! -> LoadError {
+    const result = ?{ select * from items }
+    if (result.length == 0) fail LoadError::Empty
+    return result
+}
+
+function load() {
     @isLoading = true
     @isError = false
-    try {
-        const result = ?{ select * from items }
-        @data = result
-        @isLoading = false
-    } catch (e) {
-        @isError = true
-        @errorMsg = e.message
-        @isLoading = false
+    const rows = fetchItems() !{
+        | ::Network msg -> {
+            @isError = true
+            @errorMsg = msg
+            @isLoading = false
+            return
+        }
+        | ::Empty -> {
+            @isError = true
+            @errorMsg = "no rows"
+            @isLoading = false
+            return
+        }
     }
+    @data = rows
+    @isLoading = false
 }
 
 <button if=(@isLoading == false && @isError == false) onclick=load()>Load</button>
@@ -79,17 +97,28 @@ The promotion looks like this. You name the type, write each variant once, give 
 ```scrml
 <program>
 
-type Phase = .Idle | .Loading | .Error(string) | .Success(int)
+type Phase:enum = {
+    Idle
+    Loading
+    Error(msg: string)
+    Empty
+    Success(count: int)
+}
 <phase>: Phase = .Idle
 
-server function load() {
+server function fetchItems()! -> LoadError {
+    const result = ?{ select * from items }
+    if (result.length == 0) fail LoadError::Empty
+    return result
+}
+
+function load() {
     @phase = .Loading
-    try {
-        const result = ?{ select * from items }
-        @phase = .Success(result.length)
-    } catch (e) {
-        @phase = .Error(e.message)
+    const rows = fetchItems() !{
+        | ::Network msg -> { @phase = .Error(msg); return }
+        | ::Empty       -> { @phase = .Empty;       return }
     }
+    @phase = .Success(rows.length)
 }
 
 <match for=Phase>
@@ -102,6 +131,9 @@ server function load() {
     <Error msg>
         <div>${msg}</div>
     </>
+    <Empty>
+        <div>No rows yet.</div>
+    </>
     <Success count>
         <div>Got it: ${count} rows</div>
     </>
@@ -112,9 +144,10 @@ server function load() {
 
 What you got from the wrapper:
 
-- **Structural exhaustiveness.** If you forget to handle `.Success`, the compiler errors. If a future version of `Phase` adds `.Empty`, every `<match for=Phase>` site fails compilation until you handle it.
+- **Structural exhaustiveness.** If you forget to handle `.Success`, the compiler errors. If a future version of `Phase` adds another variant, every `<match for=Phase>` site fails compilation until you handle it.
 - **No more boolean math.** "Is the spinner showing AND the result showing?" is now a question the type system answers. You are in exactly one variant at a time.
 - **Variant data is local.** `<Error msg>` binds the string payload to `msg` inside the variant body. No more `@errorMsg` scoped to the whole file.
+- **Errors are states.** `LoadError::Network` and `LoadError::Empty` map onto `.Error(msg)` and `.Empty` Phase variants the moment they fail. The two extra `<isError>` and `<errorMsg>` cells from Tier 0 are gone — the failure modes live in the type. The `!{}` handler still exists at the call site, but it does only one thing: route each error variant into the right Phase variant.
 
 The state-children are the same blocks of markup you would have written in Tier 0, just gathered under their variant. Promotion is mostly cut-and-paste, plus the `type` decl.
 
@@ -147,7 +180,13 @@ Here is where most languages would ask you to rewrite. scrml does not. The state
 ```scrml
 <program>
 
-type Phase = .Idle | .Loading | .Error(string) | .Success(int)
+type Phase:enum = {
+    Idle
+    Loading
+    Error(msg: string)
+    Empty
+    Success(count: int)
+}
 
 <engine for=Phase initial=.Idle>
 
@@ -155,13 +194,19 @@ type Phase = .Idle | .Loading | .Error(string) | .Success(int)
         <button rule="load -> Loading">Load</button>
     </>
 
-    <Loading rule="onResult.ok(n) -> Success(n)"
-             rule="onResult.err(m) -> Error(m)">
+    <Loading rule="onResult.ok(n)    -> Success(n)"
+             rule="onResult.empty    -> Empty"
+             rule="onResult.err(m)   -> Error(m)">
         Loading...
     </>
 
     <Error msg>
         <div>${msg}</div>
+        <button rule="retry -> Loading">Retry</button>
+    </>
+
+    <Empty>
+        <div>No rows yet.</div>
         <button rule="retry -> Loading">Retry</button>
     </>
 
@@ -175,24 +220,29 @@ type Phase = .Idle | .Loading | .Error(string) | .Success(int)
 
 </>
 
-server function load() {
-    @phase.advance(.load)
-    try {
-        const result = ?{ select * from items }
-        @phase.advance(.onResult.ok(result.length))
-    } catch (e) {
-        @phase.advance(.onResult.err(e.message))
+server function fetchItems()! -> LoadError {
+    const result = ?{ select * from items }
+    if (result.length == 0) fail LoadError::Empty
+    return result
+}
+
+function load() {
+    const rows = fetchItems() !{
+        | ::Network msg -> { @phase.advance(.onResult.err(msg)); return }
+        | ::Empty       -> { @phase.advance(.onResult.empty);     return }
     }
+    @phase.advance(.onResult.ok(rows.length))
 }
 
 </program>
 ```
 
-Compare against the Tier 1 version. The four state-child blocks are byte-for-byte the same markup. The diff is:
+Compare against the Tier 1 version. The five state-child blocks are byte-for-byte the same markup. The diff is:
 
 - `<match for=Phase>` → `<engine for=Phase initial=.Idle>`
 - `rule="..."` attributes inside the variants
 - A new `<onTransition>` element
+- The `load()` function's `!{}` handler now calls `@phase.advance(.onResult.err(...))` instead of writing to `@phase` directly
 
 Everything you got at Tier 1 you keep. What you gained at Tier 2:
 
@@ -200,6 +250,7 @@ Everything you got at Tier 1 you keep. What you gained at Tier 2:
 - **Exhaustive transition validation.** If you wrote `rule="onResult.ok -> Sucess(n)"` (typo on `Success`), the compiler errors. If `Phase` gains a `.Cancelled` variant and your engine has no rule that produces it, the compiler tells you the variant is unreachable.
 - **`<onTransition>` blocks.** The analytics event lives in one place, declared structurally, attached to a specific edge in the graph. It cannot accidentally fire on the wrong path.
 - **No more direct mutation.** `@phase = .Loading` bypasses the rules. The engine variable exposes `.advance(event)` instead, and the rules pick the next variant. The compiler stops you if your `.advance` call doesn't match any rule from the current variant.
+- **The error handler is now a router.** The `!{}` block in `load()` does no UI work, no logging, no fallback values. Each error variant gets routed to the corresponding engine event (`.onResult.err`, `.onResult.empty`) and the engine's rules pick the next Phase. The error path and the success path are the same shape: one `.advance(...)` call each.
 
 The app is now what we wanted from the start. Every reachable state has UI. Every transition is intentional. Every effect is wired to a specific edge in the graph. The whole thing is structurally checkable at compile time.
 
