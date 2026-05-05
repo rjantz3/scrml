@@ -1,9 +1,6 @@
 # scrml Language Specification
 
-> **Amendments applied:** 2026-04-02 — see `docs/spec-issues/SPEC-AMENDMENTS-2026-04-02.md` for full rationale.
-> **Amendments applied:** 2026-04-03 — see `docs/changes/spec-s37-amendments/spec-amendments.md` for full rationale. S37-AM-001 through S37-AM-008.
-> **Amendments applied:** 2026-04-05 — see `docs/spec-issues/SPEC-AMENDMENTS-2026-04-05.md` for full rationale. RH-001 through RH-006 (reflect(variable) hybrid API).
-> **Amendments applied:** 2026-04-06 — see `docs/spec-issues/SPEC-AMENDMENTS-2026-04-06.md` for full rationale. R21-AM-001 through R21-AM-007 (<timeout> state type, partial match).
+> **Historical amendment archive (2026-04-02 → 2026-04-06):** the early SPEC amendment docs (S37-AM-001..008, RH-001..006, R21-AM-001..007, plus the 2026-04-02 baseline) are archived at `scrml-support/archive/spec-issues/SPEC-AMENDMENTS-*.md`. Their content is integrated into the SPEC body below; references to `docs/spec-issues/` and `docs/changes/spec-s37-amendments/` were removed when those paths were dereffed to scrml-support per the "current truth only" scope principle. (Cleanup S61 2026-05-05.)
 > **Amendments applied:** 2026-04-07 — §48 added: `fn` redefined as constrained state factory (E-FN-001..E-FN-009, W-FN-001). §7.3 updated to reflect `fn`/`function` distinction.
 > **Amendments applied:** 2026-04-08 — Self-hosting gauntlet R1 findings: §48 relaxed `fn` from "state factory" to "pure function, any return type." §7.3.1 nested function declarations. §7.3.2 default parameter values. §14.3.1 optional struct fields (`= not`). Appendix D: JS standard library access in logic contexts.
 > **Amendments applied:** 2026-04-07 — §49 added: `while`, `do...while`, `break`, `continue` with labeled control flow (E-LOOP-001..E-LOOP-007).
