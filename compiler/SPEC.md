@@ -22244,6 +22244,49 @@ time — there is no runtime shape lookup.
 
 ---
 
+## §53.6.1 Shared-core vocabulary in refinement-type position (L4 cross-ref)
+
+**Added 2026-05-04 (S57 Stage 0b D3, L4).** The shared validator core vocabulary defined in
+§55.1 (`req`, `length(predicate)`, `pattern(regex)`, `min(n)`, `max(n)`, `gt(expr)`,
+`lt(expr)`, `gte(expr)`, `lte(expr)`, `eq(expr)`, `neq(expr)`, `oneOf([...])`,
+`notIn([...])`) MAY appear in refinement-type position alongside the inline-predicate
+expressions defined in §53.2. The same predicate name fires with the same logical meaning
+in all three loci (state-cell validator, refinement type, schema column); the difference
+is the enforcement context.
+
+```scrml
+let name: string.req.length(>=2) = "Bryan"
+fn process(amount: number.min(0).max(10000)) { ... }
+type Email:struct = { addr: string.pattern(/^[^@]+@[^@]+$/) }
+```
+
+**Firing semantics in refinement-type position (this section's locus):**
+
+- **Compile-time + runtime boundary check** (§53.4 SPARK three-zone enforcement). A value that doesn't satisfy the predicate cannot inhabit the type. Compile-time provable violations emit `E-CONTRACT-001`; non-provable violations emit `E-CONTRACT-001-RT` at runtime.
+- **Stronger than state-cell validators** (which gate form-validity reactively but allow the underlying cell to hold the invalid value while the user types) and stronger than schema constraints (which enforce only at INSERT/UPDATE).
+- **Cross-field via predicate args.** As with state-cell validators, predicate args MAY reference other cells: `gte(@startDate)` in the type of an `endDate` field is a reactive-aware refinement-type predicate. Same circular-dep rules apply (E-VALIDATOR-CIRCULAR-DEP — §55.11, §34).
+
+**Cross-ref §55.1** for the universal-core predicate listing and the cross-locus consistency table.
+**Cross-ref §55.3** for the §55-side description of refinement-type validator firing.
+
+## §53.6.2 Composition with state-cell validators
+
+A refinement-type predicate and a state-cell validator MAY compose on the same cell. The two
+enforcement layers stack:
+
+```scrml
+<email>: string.pattern(/^[^@]+@[^@]+$/) req = <input type="email"/>
+```
+
+- The **type predicate** (`pattern(...)`) is a compile-time + runtime boundary on every assignment — a value that doesn't match the regex cannot be assigned to `@email`.
+- The **state-cell validator** (`req`) is a reactive form-validity gate — `@signup.isValid` is `false` until `@email.req` passes, even when the value satisfies the type predicate.
+
+The two layers compose cleanly: the type predicate guards the cell's contents; the state-cell validator gates the form's submission. Cross-ref §55.2 for state-cell validator semantics and §55.5 for the auto-synthesized validity surface.
+
+**Inviolable property:** the type predicate fires at every assignment regardless of whether the cell is form-coupled. State-cell validators fire only on cells declared with bare-attribute validators inside a compound state element. The two are independent enforcement mechanisms with independent firing rules.
+
+---
+
 ## §53.7 `bind:value` Interaction
 
 ### §53.7.1 HTML Attribute Generation
