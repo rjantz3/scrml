@@ -6330,6 +6330,8 @@ server handler. No separate HTTP route is generated for `validateUser` in this p
 
 **Added:** 2026-04-10 — DQ-9 resolution. Ratified via structured debate (Rust 45.0, Svelte 45.5, React 40.5, HTMX 36.0).
 
+**Stage 0b D4 (2026-05-04) — v0.next cross-ref to engines (§51).** The v0.next idiom for state-driven loading flows is the **engine recipe** (§51.0 — Tier 2 commitment). An `<engine for=PhaseEnum initial=.Idle>` with state-children carrying transition rules covers the same shape as the RemoteData pattern below, with two material gains: (a) compile-time exhaustiveness over states (every state has UI; missing a `<Failed>` arm is `E-MATCH-NOT-EXHAUSTIVE`), and (b) `rule="event -> Variant"` declared on the state-children directly, with the compiler rejecting writes that bypass the contract (`E-ENGINE-INVALID-TRANSITION`). Match-based RemoteData (the pattern documented below in §13.5.3) remains valid for **value-return contexts** — server logic that derives a value, derivations whose result is the variant, anywhere the state-machine commitment isn't useful. The engine form is the canonical idiom for the UI side; the match form is the canonical idiom for value-shaped derivations. See §51 for the engine recipe and §18.0 for the match Tier 1 form.
+
 #### 13.5.1 The Problem
 
 When client code calls a server function, there is a period where the call is in flight. The UI must represent this: loading indicators, error messages, success states. Without a canonical pattern, developers resort to manual boolean flags (`@isLoading = true/false`), which allow impossible states (loading AND error simultaneously) and scale poorly (3 variables per server call).
