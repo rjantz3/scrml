@@ -170,6 +170,7 @@ Total lines: 24,382 | Total sections: 55 + appendices
 - WebSocket / channel → §38 (15189-15898)
 - schema / migrations → §39 (15899-16268)
 - middleware / handle() → §40 (16269-16492)
+- `<program>` documentary attributes / HTML head metadata → §40.7 (Phase A1a, 2026-05-05)
 - use / import system → §41 (16493-16742)
 - registerMessages / scrml:data → §41.12 (16698+) (L12, D4)
 - not keyword / absence → §42 (16743-17033)

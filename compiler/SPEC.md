@@ -865,6 +865,7 @@ mechanism depends on the execution context type:
 |------|---------|---------|
 | E-PROGRAM-001 | Circular `<program>` nesting (a `<program>` is a descendant of itself) | Error |
 | W-PROGRAM-001 | Nested `<program>` has no `name=` attribute | Warning |
+| W-PROGRAM-TITLE-NESTED | Documentary attribute (`title=`, `description=`, `version=`, `author=`, `license=`) appears on a nested `<program>` (see §40.7) | Warning |
 
 ### 4.13 Rule: `angleDepth` Tracking in Expression Attribute Value Scanning (PA-005)
 
@@ -14002,6 +14003,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-FOREIGN-003 | §23.2 | `_{}` block has no `lang=` declaration in any ancestor `<program>` | Error |
 | E-FOREIGN-004 | §23.2 | `_{}` block appears in an invalid context (not a direct child of `<program>`) | Error |
 | E-PROGRAM-001 | §4.12 | Circular `<program>` nesting detected | Error |
+| W-PROGRAM-TITLE-NESTED | §40.7 | A documentary attribute (`title=`, `description=`, `version=`, `author=`, `license=`) appears on a nested `<program>`. Documentary attributes are meaningful only at the top level (HTML `<head>` semantics); workers have no DOM `<head>`. Move the attribute to the top-level `<program>` or remove it. (Phase A1a) | Warning |
 | E-SQL-004 | §8.1.1 | `?{}` block has no `db=` declaration in any ancestor `<program>` | Error |
 | E-SQL-005 | §8.1.1 | Unrecognized database connection string prefix in `db=` attribute | Error |
 | E-WASM-001 | §23.3 | Call char not in default registry and no `callchar=` declaration | Error |
@@ -16588,6 +16590,91 @@ A scrml application with one custom concern adds one `handle()`. The common 80% 
 | E-MW-004 | `handle()` returns a non-`Response` value | Error |
 | E-MW-005 | More than one `handle()` definition in the same file | Error |
 | E-MW-006 | `handle()` defined outside file top-level `${ }` | Error |
+
+### 40.7 Documentary Attributes — `<program>` HTML head metadata
+
+**Added:** 2026-05-05 — Phase A1a documentary head metadata.
+
+A `<program>` element MAY carry the following documentary attributes. Each attribute, when present, generates a standard HTML head tag in the emitted output. All attributes are optional; a `<program>` element with none of them generates no documentary head-metadata tags (the compiler may still inject default head elements such as `<meta charset>`, `<meta name="viewport">`, and a basename-derived `<title>` independently).
+
+| Attribute | HTML compilation target | Semantic role |
+|---|---|---|
+| `title="..."` | `<title>${title}</title>` | Application display name |
+| `description="..."` | `<meta name="description" content="...">` | Short app description; SEO + LSP hover docs |
+| `version="..."` | `<meta name="application-version" content="...">` | Tooling-readable version string |
+| `author="..."` | `<meta name="author" content="...">` | Authorship credit |
+| `license="..."` | `<meta name="license" content="...">` | SPDX license identifier |
+
+**Normative statements:**
+
+- The five documentary attributes (`title=`, `description=`, `version=`, `author=`, `license=`) SHALL be string-literal values. A non-string-literal value (e.g., a `${...}` expression, an `@variable` reference) is silently ignored — these are static document metadata, not reactive content.
+- An empty-string value (e.g., `title=""`) SHALL be treated as if the attribute were absent — no head tag is emitted.
+- `title=` SHALL emit a `<title>` element in the document `<head>` if and only if the source markup does not already contain an explicit `<title>` element. An author-written `<title>` (any `<title>` markup element appearing inside the top-level `<program>`) takes precedence over the documentary `title=` attribute. When an author-written `<title>` is present, neither the documentary `title=` nor the compiler's default basename-derived `<title>` is emitted.
+- `description=`, `version=`, `author=`, `license=` SHALL emit `<meta>` tags unconditionally — these stack with author-written `<meta>` tags rather than overriding.
+- Documentary attribute values SHALL be HTML-escaped on emission (the same escape that applies to the `<title>` content emitted from the file basename today).
+- Documentary attributes are top-level `<program>` semantics. On a **nested `<program>`** (e.g., `<program name="worker">` per §43), the five documentary attributes MAY be present syntactically but SHALL NOT emit any HTML — workers have no DOM `<head>`. The compiler SHALL emit `W-PROGRAM-TITLE-NESTED` (warning) when any of the five documentary attributes appears on a nested `<program>`.
+- The fixed emission order in the generated `<head>`, when multiple documentary attributes are present on the top-level `<program>`, SHALL be: `<title>`, then the four `<meta>` tags in the order `description`, `application-version`, `author`, `license`. This deterministic order makes generated output stable across compiles.
+
+**Disambiguation: `name=` vs `title=`.** `name=` (per §43) identifies a nested `<program>` as a worker for cross-program messaging. It is NOT the application display name. `title=` is the application display name and is meaningful only on top-level `<program>`. The two attributes are orthogonal in scope (top-level vs nested) and role (display name vs worker identity).
+
+**Worked example (top-level):**
+
+```scrml
+<program title="Counter"
+         description="A counter app demonstrating reactive state."
+         version="0.1.0"
+         author="Bryan MacLee"
+         license="MIT">
+
+${ <count> = 0 }
+
+<button onclick=${@count = @count + 1}>+</button>
+<span>${@count}</span>
+
+</program>
+```
+
+Emitted HTML head (excerpt):
+```html
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Counter</title>
+  <meta name="description" content="A counter app demonstrating reactive state.">
+  <meta name="application-version" content="0.1.0">
+  <meta name="author" content="Bryan MacLee">
+  <meta name="license" content="MIT">
+  ...
+</head>
+```
+
+**Worked example (author-written `<title>` overrides documentary `title=`):**
+
+```scrml
+<program title="Documentary">
+  <title>AuthorWritten</title>
+  ...
+</program>
+```
+
+Emitted: `<title>AuthorWritten</title>` (the documentary `title=` is silent in this case; the basename-derived default is also suppressed). Documentary `description=` / `version=` / `author=` / `license=` continue to emit as `<meta>` tags regardless.
+
+**Worked example (W-PROGRAM-TITLE-NESTED):**
+
+```scrml
+<program title="Outer">
+  <program name="worker" title="InnerOops">
+    ...
+  </program>
+</program>
+```
+
+The nested `<program>` carries `title="InnerOops"`. The compiler emits `W-PROGRAM-TITLE-NESTED` for the nested attribute and emits no head-metadata HTML for it. Only `<title>Outer</title>` from the top-level `<program>` reaches the emitted document.
+
+**Cross-references:**
+- §40.2 — Compiler-Auto Middleware attributes (sibling section; orthogonal role: middleware vs head metadata)
+- §43 — Nested `<program>` execution-context boundary (where `name=` is the worker identity)
+- §34 — W-PROGRAM-TITLE-NESTED warning code
 
 ---
 
