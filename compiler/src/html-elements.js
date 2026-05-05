@@ -528,6 +528,12 @@ REGISTRY.set("program", {
     ["loginRedirect", attr("string")],    // redirect path when auth fails (default: "/login")
     ["csrf",          attr("string")],    // "auto" | "off" (default: "off")
     ["sessionExpiry", attr("string")],    // session TTL (default: "1h")
+    // §40.7 documentary attributes (HTML head metadata, Phase A1a 2026-05-05)
+    // `title` is already in GLOBAL_ATTRIBUTES; the rest are program-specific.
+    ["description",   attr("string")],    // <meta name="description">
+    ["version",       attr("string")],    // <meta name="application-version">
+    ["author",        attr("string")],    // <meta name="author">
+    ["license",       attr("string")],    // <meta name="license">
   ]),
   isVoid: false,
   rendersToDom: false,

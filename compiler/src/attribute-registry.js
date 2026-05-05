@@ -98,6 +98,12 @@ ELEMENT_ATTR_REGISTRY.set("program", {
       allowedValues: ["auto", "off"],
     })],
     ["sessionExpiry", attrSpec({ supportsInterpolation: false })],
+    // §40.7 — documentary attributes (HTML head metadata, Phase A1a 2026-05-05)
+    ["title",         attrSpec({ supportsInterpolation: false })],
+    ["description",   attrSpec({ supportsInterpolation: false })],
+    ["version",       attrSpec({ supportsInterpolation: false })],
+    ["author",        attrSpec({ supportsInterpolation: false })],
+    ["license",       attrSpec({ supportsInterpolation: false })],
   ]),
 });
 
