@@ -316,3 +316,218 @@ describe("A1a Step 2 — Negative guards", () => {
     expect(decls[0].structuralForm).toBeFalsy();
   });
 });
+
+/**
+ * Phase A1a Step 4 — `shape` discriminant + `structuralForm` + `isConst`
+ * populated unconditionally on every `state-decl` AST node. Per AST-CONTRACTS-
+ * AND-DECOMPOSITION.md §1.1 the shape discriminant rule for Step 4's scope:
+ *   - shape:"plain"   ↔ isConst:false AND has initExpr (Shape 1)
+ *   - shape:"derived" ↔ isConst:true  AND has initExpr (Shape 3)
+ *   - shape:"decl-with-spec" — deferred to Step 5 (renderSpec lands then)
+ */
+describe("A1a Step 4 — shape discriminant on state-decl", () => {
+  // §S4.1 — Legacy @-form Shape 1 (int)
+  test("§S4.1: legacy @count=0 produces shape:\"plain\", structuralForm:false, isConst:false", () => {
+    const src = `<program>\${ @count = 0 }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    expect(decls[0].name).toBe("count");
+    expect(decls[0].shape).toBe("plain");
+    expect(decls[0].structuralForm).toBe(false);
+    expect(decls[0].isConst).toBe(false);
+  });
+
+  // §S4.2 — Legacy @-form Shape 1 (string)
+  test("§S4.2: legacy @name=\"\" produces shape:\"plain\"", () => {
+    const src = `<program>\${ @name = "" }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    expect(decls[0].name).toBe("name");
+    expect(decls[0].shape).toBe("plain");
+    expect(decls[0].structuralForm).toBe(false);
+    expect(decls[0].isConst).toBe(false);
+  });
+
+  // §S4.3 — Legacy @-form Shape 1 (array)
+  test("§S4.3: legacy @items=[] produces shape:\"plain\"", () => {
+    const src = `<program>\${ @items = [] }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    expect(decls[0].name).toBe("items");
+    expect(decls[0].shape).toBe("plain");
+    expect(decls[0].structuralForm).toBe(false);
+    expect(decls[0].isConst).toBe(false);
+  });
+
+  // §S4.4 — Structural Shape 1 (assert shape field specifically — Step 2
+  // tests assert structuralForm but were silent on shape because Step 4 hadn't
+  // landed yet).
+  test("§S4.4: structural <count>=0 produces shape:\"plain\", structuralForm:true, isConst:false", () => {
+    const src = `<program>\${ <count> = 0 }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    expect(decls[0].name).toBe("count");
+    expect(decls[0].shape).toBe("plain");
+    expect(decls[0].structuralForm).toBe(true);
+    expect(decls[0].isConst).toBe(false);
+    // Anti-fragment guard preserved on every positive case.
+    assertNoHtmlFragmentMatching(ast, /<\s*count\s*>/);
+  });
+
+  // §S4.5 — Legacy @-form Shape 3 derived: produces kind:"reactive-derived-decl",
+  // NOT kind:"state-decl". This documents the intentional kind-divergence per
+  // Step 4 progress.md §[04:02]. shape discriminant lives on state-decl;
+  // reactive-derived-decl is its own kind (semantically equivalent to
+  // shape:"derived" state-decl, but kind-fold is deferred to a later step).
+  test("§S4.5: legacy `const @doubled = @count * 2` produces reactive-derived-decl (NOT state-decl)", () => {
+    const src = `<program>\${ @count = 0; const @doubled = @count * 2 }</program>`;
+    const { ast } = parse(src);
+    const stateDecls = findKind(ast, "state-decl");
+    const derivedDecls = findKind(ast, "reactive-derived-decl");
+    // Only the @count cell is a state-decl; @doubled is reactive-derived-decl.
+    expect(stateDecls.length).toBe(1);
+    expect(stateDecls[0].name).toBe("count");
+    expect(derivedDecls.length).toBe(1);
+    expect(derivedDecls[0].name).toBe("doubled");
+    // The state-decl carries the discriminant; the legacy derived kind does NOT.
+    expect(stateDecls[0].shape).toBe("plain");
+    expect(derivedDecls[0].shape).toBeUndefined();
+  });
+
+  // §S4.6 — Structural Shape 3
+  test("§S4.6: structural `const <doubled> = @count * 2` produces shape:\"derived\", structuralForm:true, isConst:true", () => {
+    const src = `<program>\${ <count> = 0; const <doubled> = @count * 2 }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(2);
+    const doubled = decls.find((d) => d.name === "doubled");
+    expect(doubled).toBeDefined();
+    expect(doubled.shape).toBe("derived");
+    expect(doubled.structuralForm).toBe(true);
+    expect(doubled.isConst).toBe(true);
+    assertNoHtmlFragmentMatching(ast, /<\s*doubled\s*>/);
+  });
+
+  // §S4.7 — Multi-decl mix: legacy + structural Shape 1 + structural Shape 3
+  test("§S4.7: multi-decl mix — `@x=0; <y>=1; const <z>=@x+1` carries correct discriminants", () => {
+    const src = `<program>\${ @x = 0; <y> = 1; const <z> = @x + 1 }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(3);
+    const x = decls.find((d) => d.name === "x");
+    const y = decls.find((d) => d.name === "y");
+    const z = decls.find((d) => d.name === "z");
+    expect(x).toBeDefined();
+    expect(y).toBeDefined();
+    expect(z).toBeDefined();
+    // Legacy @-form Shape 1
+    expect(x.shape).toBe("plain");
+    expect(x.structuralForm).toBe(false);
+    expect(x.isConst).toBe(false);
+    // Structural Shape 1
+    expect(y.shape).toBe("plain");
+    expect(y.structuralForm).toBe(true);
+    expect(y.isConst).toBe(false);
+    // Structural Shape 3
+    expect(z.shape).toBe("derived");
+    expect(z.structuralForm).toBe(true);
+    expect(z.isConst).toBe(true);
+  });
+
+  // §S4.8 — Negative: `let count = 5` is NOT a state-decl
+  test("§S4.8: `let count = 5` produces let-decl, not state-decl (no shape field)", () => {
+    const src = `<program>\${ let count = 5 }</program>`;
+    const { ast } = parse(src);
+    const stateDecls = findKind(ast, "state-decl");
+    const letDecls = findKind(ast, "let-decl");
+    expect(stateDecls.length).toBe(0);
+    expect(letDecls.length).toBe(1);
+    expect(letDecls[0].name).toBe("count");
+    // let-decl does NOT carry a shape field
+    expect(letDecls[0].shape).toBeUndefined();
+  });
+
+  // §S4.9 — Negative: plain JS `const x = 1` is NOT a state-decl
+  test("§S4.9: `const x = 1` produces const-decl, not state-decl (no shape field)", () => {
+    const src = `<program>\${ const x = 1 }</program>`;
+    const { ast } = parse(src);
+    const stateDecls = findKind(ast, "state-decl");
+    const constDecls = findKind(ast, "const-decl");
+    expect(stateDecls.length).toBe(0);
+    expect(constDecls.length).toBe(1);
+    expect(constDecls[0].name).toBe("x");
+    expect(constDecls[0].shape).toBeUndefined();
+  });
+
+  // §S4.10 — Discriminant invariant: every state-decl has a shape value drawn
+  // from {"plain","derived"} (Step 4 scope) AND "decl-with-spec" never appears
+  // (deferred to Step 5).
+  test("§S4.10: discriminant invariant — every state-decl shape ∈ {\"plain\",\"derived\"}", () => {
+    // Battery of fixtures: legacy + structural × Shape 1 + Shape 3
+    const fixtures = [
+      `<program>\${ @a = 0 }</program>`,
+      `<program>\${ @b = "" }</program>`,
+      `<program>\${ @c = [] }</program>`,
+      `<program>\${ <d> = 0 }</program>`,
+      `<program>\${ <e> = "" }</program>`,
+      `<program>\${ <f> = 0; const <g> = @f + 1 }</program>`,
+      `<program>\${ @h = 0; <i> = 1; const <j> = @h * @i }</program>`,
+    ];
+    const VALID_SHAPES = new Set(["plain", "derived"]);
+    let totalDecls = 0;
+    for (const src of fixtures) {
+      const { ast } = parse(src);
+      const decls = findKind(ast, "state-decl");
+      for (const d of decls) {
+        totalDecls++;
+        // shape must be set (no undefined)
+        expect(d.shape).toBeDefined();
+        // shape must be in the Step-4 valid set
+        expect(VALID_SHAPES.has(d.shape)).toBe(true);
+        // shape:"decl-with-spec" must NOT appear in Step 4 outputs
+        expect(d.shape).not.toBe("decl-with-spec");
+        // structuralForm must be set (boolean, not undefined)
+        expect(typeof d.structuralForm).toBe("boolean");
+        // isConst must be set (boolean, not undefined)
+        expect(typeof d.isConst).toBe("boolean");
+        // shape↔isConst consistency (Step 4 rule):
+        //   shape:"plain"   → isConst:false
+        //   shape:"derived" → isConst:true
+        if (d.shape === "plain") expect(d.isConst).toBe(false);
+        if (d.shape === "derived") expect(d.isConst).toBe(true);
+      }
+    }
+    // Sanity: the battery should produce >0 state-decl nodes.
+    expect(totalDecls).toBeGreaterThan(0);
+  });
+
+  // §S4.11 — Server modifier: `server @x = expr` is shape:"plain" + structuralForm:false.
+  test("§S4.11: legacy `server @cfg = {a:1}` produces shape:\"plain\", isServer:true", () => {
+    const src = `<program>\${ server @cfg = {a:1} }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    expect(decls[0].name).toBe("cfg");
+    expect(decls[0].shape).toBe("plain");
+    expect(decls[0].structuralForm).toBe(false);
+    expect(decls[0].isConst).toBe(false);
+    expect(decls[0].isServer).toBe(true);
+  });
+
+  // §S4.12 — @shared modifier: `@shared theme = "..."` is shape:"plain" + structuralForm:false.
+  test("§S4.12: legacy `@shared theme = \"dark\"` produces shape:\"plain\", isShared:true", () => {
+    const src = `<program>\${ @shared theme = "dark" }</program>`;
+    const { ast } = parse(src);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    expect(decls[0].name).toBe("theme");
+    expect(decls[0].shape).toBe("plain");
+    expect(decls[0].structuralForm).toBe(false);
+    expect(decls[0].isConst).toBe(false);
+    expect(decls[0].isShared).toBe(true);
+  });
+});
