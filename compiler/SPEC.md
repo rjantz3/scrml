@@ -1124,6 +1124,69 @@ All valid event handler binding forms:
 - `onclick=handler` (no parentheses) SHALL wire `handler` directly as the event listener without wrapping.
 - Use `onclick=${() => fn(item.id)}` (expression form) when inside a loop and closure capture is needed — `onclick=fn(item.id)` does not capture `item.id` per-iteration.
 
+#### 5.2.3 Event handler bare-form rule (Stage 0b D4 — L19, M11)
+
+**Added:** 2026-05-04 — formalises the v0.next "single-expression in markup; multi-statement forces a named function" rule for inline event handlers.
+
+The bare-form (no `${}` wrapper) accepts exactly three single-expression shapes:
+
+| Shape | Example | Notes |
+|---|---|---|
+| Bare call | `onclick=fn()` or `onclick=fn(literal)` | Most common; auto-wraps as `function(event){ fn(...) }` (cross-ref §5.2.1) |
+| Bare assignment | `onclick=@phase = .Loading` | Assignment-as-expression (§50); the assignment IS the single expression |
+| Bare single-expression | `onclick=@count++` or `onclick=@items.push(item)` | One expression — calls, assignments, compound updates, method invocations |
+
+**Normative statements (L19):**
+
+- A bare-form event handler SHALL contain exactly one scrml expression. The same single-expression discipline that governs `:`-shorthand bodies (§4.14) governs bare-form event handlers.
+- Multi-statement intent (two or more semicolon-separated expressions, or a block) SHALL force a named function. The compiler emits `E-MULTI-STATEMENT-HANDLER` when a bare-form handler attribute value contains a `;` outside of expression-internal contexts (e.g., string literals, nested function bodies).
+- Compound logic for an event handler MUST be lifted to a named `function name() { ... }` declaration in a logic block, then wired by name: `onclick=startOver()`. This is the canonical multi-statement form.
+- The `${...}` arrow form (`onclick=${() => { stmt1; stmt2 }}`) remains valid for cases where a closure must capture loop variables (cross-ref §5.2.1) but is NOT the recommended form for general multi-statement work — name the function.
+- Assignment-as-expression (§50) composes cleanly with bare-form handlers: `onclick=@phase = .Loading` is a single expression (the assignment-expression evaluates to the assigned value or void per §50). Cross-ref to §50 for assignment-expression semantics.
+
+**Why this rule:** an inline multi-statement handler is the single most common stress point where event-handler bodies grow beyond a glance — accumulating effects, branching, awaits. Forcing names for multi-statement handlers gives every non-trivial handler a stable address and a stack-frame label, which downstream lints, devtools, and reviewers all benefit from.
+
+**Worked example — valid bare-call:**
+
+```scrml
+${ function startOver() {
+    @count = 0;
+    @phase = .Idle;
+    track("reset");
+} }
+
+<button onclick=startOver()>Start over</>
+```
+
+**Worked example — valid bare-assignment:**
+
+```scrml
+<engine for=Phase initial=.Idle>
+    <Idle>
+        <button onclick=@phase = .Loading>Begin</>
+    </>
+    <Loading : <p>...</>>
+</>
+```
+
+The `@phase = .Loading` is a single assignment-expression (§50) — bare-form is legal.
+
+**Worked example — invalid (multi-statement inline):**
+
+```scrml
+<button onclick=startGame(); track("start")>Begin</>
+```
+
+`E-MULTI-STATEMENT-HANDLER` — the semicolon-separated pair forces a named function. Use the named-function pattern shown above.
+
+**Cross-references:**
+- §4.14 (`:`-shorthand body) — same single-expression discipline applies to engine state-children and match arms.
+- §5.2.1 (event handler argument passing) — call-ref vs expression-form forms.
+- §50 (assignment as expression) — bare-assignment shape and semantics.
+- §6.7 (function declarations and lifecycle) — named-function declarations live in logic blocks.
+
+**Error code:** `E-MULTI-STATEMENT-HANDLER` (§34) — bare-form event handler attribute value contains multiple statements.
+
 ### 5.3 Boolean HTML Attributes
 
 The compiler has full knowledge of which HTML attributes are boolean attributes (e.g., `disabled`, `checked`, `readonly`, `required`, `selected`, `multiple`, `open`, `hidden`).
@@ -1251,6 +1314,74 @@ Use `@name` or change `bind:value` to `value=name`.
 | E-ATTR-010 | `bind:` target is not an `@` reactive variable | Error |
 | E-ATTR-011 | `bind:` used on an unsupported attribute name | Error |
 | E-ATTR-012 | `bind:` and an explicit event handler for the same event on the same element | Error |
+
+#### 5.4.1 The bind-dispatch table — by render-spec shape (Stage 0b D4 — L17)
+
+**Added:** 2026-05-04 — formalises the L17 lock: under the v0.next decl-coupled-with-render-spec form (§6.2 Shape 2), the compiler dispatches the correct `bind:*` flavour from the render-spec's underlying element + attribute shape. Writers do not pick `bind:value` vs `bind:checked` vs `bind:files` themselves on `<x/>` render-by-tag — the compiler picks based on the decl's render-spec.
+
+**The dispatch.** When a state cell is declared with a render-spec (`<varname validators...> = <input ... />`) and rendered by tag (`<varname/>` in markup), the compiler expands `<varname/>` to the bound element form by inspecting the render-spec:
+
+| Render-spec shape | Expanded `<x/>` form | Underlying `bind:` |
+|---|---|---|
+| `<input type="text"/>`, `<input type="email"/>`, `<input type="number"/>`, `<input type="url"/>`, `<input type="search"/>`, `<input type="tel"/>`, `<input type="password"/>`, `<input type="date"/>`, `<input type="time"/>`, `<input type="datetime-local"/>`, `<input type="color"/>`, `<input type="range"/>`, `<input type="hidden"/>` | `<input type=... bind:value=@x .../>` | `bind:value` |
+| `<textarea/>` | `<textarea bind:value=@x ...></textarea>` | `bind:value` |
+| `<select>...</>` | `<select bind:value=@x ...>...</select>` | `bind:value` (or `bind:selected` per §5.4 form table) |
+| `<input type="checkbox"/>` | `<input type="checkbox" bind:checked=@x .../>` | `bind:checked` |
+| `<input type="radio"/>` | `<input type="radio" bind:group=@x .../>` | `bind:group` |
+| `<input type="file"/>` | `<input type="file" bind:files=@x .../>` | `bind:files` |
+| Component reference (PascalCase tag with bindable prop slot — §15) | `<MyInput bind:value=@x .../>` (or the component's own bindable prop) | The component's declared bindable prop (cross-ref §15) |
+
+**Normative statements:**
+
+- The compiler SHALL inspect the render-spec's element and attributes at declaration time to determine the bind flavour. The decl-coupled rule binds the writer's `<varname/>` use-site to the correct two-way wiring without the writer naming `value`, `checked`, `files`, or `group` explicitly.
+- `bind:value` is the default for input types whose value is a string, number, or coerced primitive (the standard text-shaped inputs above).
+- `bind:checked` is dispatched ONLY when the render-spec is `<input type="checkbox"/>`. Any other type with `bind:checked` on the source-level bind form is `E-ATTR-011`.
+- `bind:files` is dispatched ONLY when the render-spec is `<input type="file"/>`. The bound `@var` is typed `FileList` (read-only at render-time; programmatic write is `E-ATTR-010` if the cell is non-bindable).
+- `bind:group` is dispatched ONLY when the render-spec is `<input type="radio"/>`. The bound `@var` holds the `value` attribute of the currently selected radio.
+- A render-spec that is NOT bindable (a `<div>` element, a non-input HTML element with no recognised bindable shape) yields `E-CELL-RENDER-SPEC-NOT-BINDABLE` when the cell is used in markup with `<x/>` render-by-tag — the cell can be displayed via `${@x}` interpolation (the markup-as-value path, §1.4) but cannot be used as an input.
+- A cell with no render-spec at all yields `E-CELL-NO-RENDER-SPEC` when used in markup with `<x/>` render-by-tag.
+- For component render-specs (PascalCase tag): the component's prop catalog identifies the bindable prop. If a component declares no bindable prop, `<x/>` render-by-tag is `E-CELL-RENDER-SPEC-NOT-BINDABLE`.
+
+**Worked example — text input dispatch:**
+
+```scrml
+<userName req length(>=2)> = <input type="text"/>
+
+<form>
+    <userName/>     // expands to <input type="text" bind:value=@userName .../>
+</>
+```
+
+**Worked example — checkbox dispatch:**
+
+```scrml
+<agreed req> = <input type="checkbox"/>
+
+<form>
+    <agreed/>       // expands to <input type="checkbox" bind:checked=@agreed/>
+</>
+```
+
+**Worked example — file dispatch:**
+
+```scrml
+<photo req> = <input type="file"/>
+
+<form>
+    <photo/>        // expands to <input type="file" bind:files=@photo/>
+</>
+```
+
+**Why dispatch by render-spec:** the render-spec is the cell's authoritative declaration of its concrete UI form. Once the writer has committed to "this cell renders as `<input type="checkbox"/>`" the bind flavour is determined — asking the writer to also write `bind:checked` is redundant. The compiler reads the render-spec once and emits the right wiring everywhere.
+
+**Cross-references:**
+- §6.2 Shape 2 — decl-coupled-with-render-spec.
+- §6.4 — render-by-tag semantics.
+- §15 — component prop catalog and bindable-prop declarations.
+
+**Error codes (cross-ref §34):**
+- `E-CELL-NO-RENDER-SPEC` — `<x/>` render-by-tag for a cell declared without a render-spec.
+- `E-CELL-RENDER-SPEC-NOT-BINDABLE` — `<x/>` render-by-tag for a cell whose render-spec is not a bindable shape.
 
 ### 5.5 Dynamic Class Binding
 
