@@ -16231,6 +16231,44 @@ if ((getUser(id)) is some) { renderUser() }
 
 **Implementation note (DQ-12 Phase A):** The current compiler implements parenthesized compound operands — `(expr) is not`, `(expr) is some`, `(expr) is not not` — by rewriting them to a temp-var form that guarantees single evaluation. Bare compound expressions without parentheses (e.g., `regex.exec(str) is not`) are not yet supported and are tracked as DQ-12 Phase B; using bare compound expressions without parens will produce incorrect JS output until Phase B is complete.
 
+#### 42.2.5 `is some` vs `req` — distinct predicates (L5 clarification)
+
+**Added 2026-05-04 (S57 Stage 0b D3, L5).** `is some` and `req` are NOT synonyms. Both predicates exist in the validator vocabulary; both are needed; they enforce different things.
+
+| Predicate | Meaning | Empty string `""` | null / undefined |
+|---|---|---|---|
+| `is some` (§42.2.2a) | Value EXISTS — null/undefined fail | TRUE (`""` IS some — the cell holds a value) | FALSE |
+| `req` (§55.1) | Value is NON-EMPTY / MEANINGFUL | FALSE (`""` fails req) | FALSE |
+
+**Worked example — the difference matters:**
+
+```scrml
+<signup>
+  <name> = ""                     // user hasn't typed yet
+</>
+
+${
+  if (@signup.name is some) { ... }       // TRUE — @signup.name holds the string ""
+  if (@signup.name req)     { ... }       // FALSE — "" fails the req predicate
+}
+```
+
+For state cells with declared defaults, `is some` is always TRUE — the cell holds its default value, which IS some value (even if it's the empty string). `req` rejects the empty string regardless of whether a default was declared.
+
+**Three native forms of "exists / required" semantic across loci** (the user's reframe):
+
+| Locus | Native form | Enforcement |
+|---|---|---|
+| Schema column (§39.5.7) | `not null` (SQL-mirror) or `req` (shared-core, lowers to `NOT NULL` + `CHECK (col != '')`) | DBMS at INSERT/UPDATE |
+| State-cell validator (§55.2) | `req` (form-required, rejects empty) and/or `is some` (existence — uncommon, mostly for `T \| not` cells) | Reactive form-validity gating |
+| Refinement type (§53) | `string.length(>0)` or similar predicate form on the type | Compile-time + runtime boundary |
+
+These are NOT synonyms in 2-way redundancy. They are **native vocabularies in three loci**, each enforcing in its layer's context. A field MAY have all three — schema `not null` + form-validator `req` + refinement-type `string.length(>0)` — and each fires independently in its locus.
+
+**Cross-ref §55.1** for the universal-core predicate listing (where `req` and `is some` appear side-by-side).
+**Cross-ref §39.5.7** for schema-column shared-core lowering.
+**Cross-ref §53.6.1** for refinement-type firing semantics.
+
 ### 42.3 Type Rules
 
 #### 42.3.1 Optional Type Union
