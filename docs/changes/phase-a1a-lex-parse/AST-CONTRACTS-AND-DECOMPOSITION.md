@@ -102,26 +102,28 @@ Each step is a focused sub-agent on its own per-step branch with PA cherry-pick 
 | # | Step | Files | Est | Status |
 |---|---|---|---|---|
 | 1 | Lexer: reserve `reset` | `tokenizer.ts:55-85` + `tokenizer-reset-keyword.test.js` (4-6 tests) | 1 h | ✅ DONE S59 (`9cd7779`) |
-| **2** | **Foundational: `<NAME>` decl-site recognition in block-splitter + body-pre-parser** | `block-splitter.js` + `body-pre-parser.ts` — emit a new pre-AST signal when `<IDENT>` appears at expression-statement-start position followed by `>` (or attrs `>`) followed by `=` or `:` (typed) or `{` (compound block); body-pre-parser extracts the decl form before acorn sees it | **10-15 h** | 🟡 NEXT |
-| 3 | AST kind rename: `reactive-decl` → `state-decl` | `ast-builder.js` (~11 construction sites) + all consumer sites (~100+ across resolver, typer, codegen) — mechanical rename | 3-5 h | ⏸ |
-| 4 | Parser: state-decl `shape` discriminant + `isConst` + `initExpr` for Shapes 1 + 3 + `structuralForm` | `ast-builder.js` only — extend `state-decl` builder to set new fields based on Foundation Step 2's pre-AST signal | 3-4 h | ⏸ |
-| 5 | Parser: Shape 2 `renderSpec` + bareword validators + `req` | `ast-builder.js` only — when RHS is markup, wrap in `kind: "render-spec"`; attr scan collects bareword validators (incl. `length(>=2)`-style call-form) into `validators[]` | 3-4 h | ⏸ |
-| 6 | Parser: `default=` attribute + `pinned` bareword on state-decl | `ast-builder.js` only — extend attr scan to extract `default=expr` → `defaultExpr`, and `pinned` bareword → `pinned: true` | 1-1.5 h | ⏸ |
-| 7 | Parser: `pinned` on import items | `ast-builder.js` only — extend import-decl parser to recognize `pinned` bareword inside `{ name pinned, ... }` import lists | 0.5-1 h | ⏸ |
+| 2 | Foundational: `<NAME>` decl-site recognition in block-splitter + body-pre-parser | `block-splitter.js` + `body-pre-parser.ts` — emit a new pre-AST signal when `<IDENT>` appears at expression-statement-start position followed by `>` (or attrs `>`) followed by `=` or `:` (typed) or `{` (compound block); body-pre-parser extracts the decl form before acorn sees it | 10-15 h (actual: ~21min — depth-of-survey discount) | ✅ DONE S59 (`d28f6f7`) |
+| 3 | AST kind rename: `reactive-decl` → `state-decl` | `ast-builder.js` (~11 construction sites) + all consumer sites (~100+ across resolver, typer, codegen) — mechanical rename | 3-5 h | ✅ DONE S59 (`8fa26e1`) |
+| 4 | Parser: state-decl `shape` discriminant + `isConst` + `initExpr` for Shapes 1 + 3 + `structuralForm` | `ast-builder.js` only — extend `state-decl` builder to set new fields based on Foundation Step 2's pre-AST signal | 3-4 h | ✅ DONE S59 (`96dbe92`) |
+| 5 | Parser: Shape 2 `renderSpec` + bareword validators + `req` | `ast-builder.js` only — when RHS is markup, wrap in `kind: "render-spec"`; attr scan collects bareword validators (incl. `length(>=2)`-style call-form) into `validators[]` | 3-4 h | ✅ DONE S59 (`505531f`) |
+| 6 | Parser: `default=` attribute + `pinned` bareword on state-decl | `ast-builder.js` only — extend attr scan to extract `default=expr` → `defaultExpr`, and `pinned` bareword → `pinned: true` | 1-1.5 h | ✅ DONE S60 (`2754940`) |
+| 7 | Parser: `pinned` on import items | `ast-builder.js` only — extend import-decl parser to recognize `pinned` bareword inside `{ name pinned, ... }` import lists | 0.5-1 h | ✅ DONE S60 (`556de93`) |
 | 8 | E-RESERVED-IDENTIFIER trigger | `ast-builder.js` + `init.js` rename | 0.5 h | ✅ DONE S59 (`af4a0da`) |
-| 9 | Expression parser: `reset(@cell)` keyword + `E-RESET-NO-ARG` | `expression-parser.ts` only — recognize `keyword(reset)` `(` `expr?` `)` → `kind: "reset-expr"`; emit `E-RESET-NO-ARG` on zero-arg form | 1-2 h | ⏸ |
+| **9** | **Expression parser: `reset(@cell)` keyword + `E-RESET-NO-ARG`** | `expression-parser.ts` only — recognize `keyword(reset)` `(` `expr?` `)` → `kind: "reset-expr"`; emit `E-RESET-NO-ARG` on zero-arg form | 1-2 h | 🟡 IN FLIGHT (S60) |
 | 10 | Expression parser: shape verification for `MemberCall` / `MemberAssignment` (incl. compound-assign ops) / `UnaryDelete` | `expression-parser.ts` only — verify these node kinds exist; if collapsed, split them; add `op` field to `MemberAssignment` carrying the operator text | 1-2 h | ⏸ |
 | 11 | Compound (Variant C) verification + render-by-tag verification + kickstarter v2 §3 smoke tests | new test file additions only — likely no source changes | 1-1.5 h | ⏸ |
+| **11.5** | **Fold `reactive-derived-decl` into `state-decl{shape:"derived",isConst:true}`** (ADR Option A) | `ast-builder.js` (legacy `const @x = expr` parser path) + ~20 consumer sites (resolver/typer/codegen) + tests asserting old kind get updated | **3-5 h** | ⏸ INSERTED S60 (ADR) |
 | 12 | Existing-test deltas: rewrite + drop | enumerate in `progress.md`; per S59 pre-authorization freely rewrite tests baking in pre-v0.next access patterns | 4-8 h | ⏸ |
 | 13 | Final commit + CHANGELOG draft | aggregate; final commit per brief §7.4 template | 0.5 h | ⏸ |
 
-**Total: 30-45 h focused work** (Step 2 is the largest single step). With ~1h already landed via Steps 1 + 8, remaining is ~29-44 h.
+**Total: 30-45 h focused work** + 3-5h Step 11.5 (ADR S60). With Steps 1, 2, 3, 4, 5, 6, 7, 8 landed (S59 + S60) and Step 9 in flight, remaining is ~14-25 h across Steps 9 (in flight), 10, 11, 11.5, 12, 13.
 
 **Sequencing rationale:**
-- **Step 2 is the bottleneck.** It's the foundational lex/parse work that unblocks Steps 4-7.
-- **Step 3 (rename) MUST land before Steps 4-7** so they extend the renamed `state-decl` kind.
-- **Steps 9, 10, 11** are independent of Steps 4-7 (touch different files); could run in parallel if dispatch coordination permits, but PA leans serial for cleaner integration.
-- **Step 12** is the long-tail cleanup.
+- **Step 2 (the original bottleneck) finished in ~21min via depth-of-survey discount** — block-splitter already preserved raw `<` content correctly; intervention was one helper in ast-builder.js, not multi-subsystem rework. The audit's 10-15h estimate was 28-43× over actual.
+- **Step 3 (rename)** landed before Steps 4-7 so they extend the renamed `state-decl` kind.
+- **Steps 9, 10, 11** are independent of Steps 4-7 (touch different files); PA leans serial for cleaner integration.
+- **Step 11.5 (ADR Option A FOLD)** sequenced AFTER Step 11 BEFORE Step 12 — Step 11's smoke verifies use-site behavior with two AST kinds; then fold; then Step 12 cleans tests under unified AST. Spec coherence: §6.6 models derived as a state-decl shape, not a separate kind. L21 enforcement substrate: one walker on a unified kind, not two.
+- **Step 12** is the long-tail cleanup, simpler under unified AST post-11.5.
 - **Step 13** is wrap.
 
 ---

@@ -1,6 +1,6 @@
 # ADR — `reactive-derived-decl` divergence: fold into `state-decl` or keep separate
 
-**Status:** DRAFT — awaiting user ratification.
+**Status:** RATIFIED 2026-05-05 (S60). User ratified Option A, sequenced AFTER Step 11 BEFORE Step 12 — PA lean accepted. Verbatim: "ratify the ADR — Option A".
 **Surfaced:** S59 Step 4 (parser shape discriminant). When Step 4 added the `shape` field to state-decl construction, it discovered that the legacy `const @doubled = @count * 2` form produces a SEPARATE AST kind (`reactive-derived-decl`), not a `state-decl`. The Step 4 dispatch documented this as a kind-divergence finding (§S4.5 in `parse-shapes-v0next.test.js`).
 **Date drafted:** S60 (2026-05-05).
 
@@ -110,13 +110,17 @@ PA leans **Option A, run AFTER Step 11, BEFORE Step 12** — let Step 11's smoke
 
 ## §5 Decision
 
-(awaiting user ratification)
+**RATIFIED 2026-05-05 (S60).**
 
-- [ ] Option A (FOLD, standalone), sequenced AFTER Step 11, BEFORE Step 12 — PA lean.
+- [x] **Option A (FOLD, standalone), sequenced AFTER Step 11, BEFORE Step 12 — PA lean accepted.**
 - [ ] Option A (FOLD, standalone), sequenced AFTER Step 12 — alternate.
 - [ ] Option B (keep separate; accept duplication permanently).
 - [ ] Option C (fold into A1b's resolver setup).
-- [ ] Other — user's call.
+- [ ] Other.
+
+**Operationalization:** inserted as **Step 11.5** in the A1a 13-step decomposition (`docs/changes/phase-a1a-lex-parse/AST-CONTRACTS-AND-DECOMPOSITION.md` §3 table). Brief drafted at `docs/changes/phase-a1a-step-11-5-fold-derived/BRIEF.md`. Dispatched after Step 11 lands.
+
+**Renumbering note:** the existing 13-step ladder (Steps 1-13) is preserved. Step 11.5 is the inserted fold step, NOT renumbered. Decomposition is now 14 steps (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.5, 12, 13).
 
 ---
 
