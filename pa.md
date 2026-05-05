@@ -235,6 +235,20 @@ Your worktree path is: <ABSOLUTE-WORKTREE-PATH>
    'acorn'" otherwise. Hit by every dispatch that triggers the hook (D2.8,
    D3, oauth, D4, §6-sweep). Doing this proactively at startup avoids
    burning cycles diagnosing the failure mid-flight.
+5. Run `bun run pretest` via Bash. This invokes
+   `scripts/compile-test-samples.sh`, which populates
+   `samples/compilation-tests/dist/` with ~12 compiled samples that the
+   browser-test suite (`compiler/tests/browser/*`) loads. `dist/` is
+   gitignored — fresh worktrees have it empty, and the full `bun test`
+   suite produces ~130 ECONNREFUSED-shaped failures without it (happy-dom
+   fetch hits an empty filesystem). Hit S59 in the A1a dispatch's first
+   launch (agent halted at startup-verification baseline mismatch; root
+   cause + brief amendment + re-dispatch). For baseline checks use
+   `bun run test` (which chains pretest) NOT `bun test` directly. The
+   pre-commit hook EXCLUDES browser tests so this only affects full-suite
+   gates, but full-suite is the right baseline for compiler-source
+   dispatches that need to confirm 0-regression invariant including
+   browser behavior.
 
 If ANY check fails: DO NOT proceed. Report the mismatch and exit.
 

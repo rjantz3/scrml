@@ -243,6 +243,19 @@ Your worktree path is: <ABSOLUTE-WORKTREE-PATH>
 2. Run `git rev-parse --show-toplevel` via Bash. Output MUST equal WORKTREE_ROOT.
 3. Run `git status --short` via Bash. Confirm tree is clean.
 4. Run `bun install` via Bash. Worktrees do NOT inherit `node_modules` from main.
+5. Run `bun run pretest` via Bash. This invokes
+   `scripts/compile-test-samples.sh`, which populates
+   `samples/compilation-tests/dist/` with ~12 compiled samples that
+   `compiler/tests/browser/*` test files load via filesystem-style URLs.
+   `dist/` is gitignored — fresh worktrees have it empty, and the full
+   `bun test` suite produces ~130 ECONNREFUSED-shaped failures without
+   it. Hit S59 in this dispatch's first launch (recovery: brief amendment
+   + re-dispatch). For baseline checks use `bun run test` (which chains
+   pretest) NOT `bun test` directly.
+6. Run `bun run test 2>&1 | tail -5` to confirm baseline. Expected:
+   pre-commit subset 7,995 / 33 / 0 within full run that totals 8,720
+   pass / 43 skip / 0 fail across 432 files. The full `bun test` (without
+   pretest) is NOT a valid baseline gate — must use `bun run test`.
 
 If ANY check fails: DO NOT proceed. Report the mismatch and exit.
 
