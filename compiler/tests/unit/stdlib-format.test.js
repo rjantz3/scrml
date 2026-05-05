@@ -262,3 +262,78 @@ describe("scrml:format — formatPercent", () => {
         expect(formatPercent(0.1234, 2)).toBe("12.34%")
     })
 })
+
+// --- S57 Tier 2 additions: locale-aware Intl extensions ----------------------
+
+function compactNumber(n, locale) {
+    return new Intl.NumberFormat(locale || "en-US", { notation: "compact" }).format(n)
+}
+
+function formatList(items, type, locale) {
+    const t = type || "conjunction"
+    return new Intl.ListFormat(locale || "en-US", { style: "long", type: t }).format(items)
+}
+
+function formatRange(start, end, currency, locale) {
+    const opts = currency ? { style: "currency", currency: currency } : {}
+    return new Intl.NumberFormat(locale || "en-US", opts).formatRange(start, end)
+}
+
+function formatNumberAdvanced(n, options, locale) {
+    return new Intl.NumberFormat(locale || "en-US", options || {}).format(n)
+}
+
+describe("scrml:format — compactNumber (Tier 2)", () => {
+    test("F45: small thousands", () => {
+        const out = compactNumber(1234)
+        expect(out.indexOf("K") >= 0 || out.indexOf("k") >= 0).toBe(true)
+    })
+    test("F46: millions", () => {
+        expect(compactNumber(1500000).indexOf("M") >= 0).toBe(true)
+    })
+    test("F47: small numbers under 1000 — passthrough", () => {
+        expect(compactNumber(42)).toBe("42")
+    })
+})
+
+describe("scrml:format — formatList (Tier 2)", () => {
+    test("F48: conjunction default", () => {
+        const out = formatList(["a", "b", "c"])
+        expect(out.indexOf("a") >= 0 && out.indexOf("b") >= 0 && out.indexOf("c") >= 0).toBe(true)
+        expect(out.indexOf("and") >= 0).toBe(true)
+    })
+    test("F49: disjunction", () => {
+        const out = formatList(["x", "y"], "disjunction")
+        expect(out.indexOf("or") >= 0).toBe(true)
+    })
+    test("F50: empty list", () => {
+        expect(formatList([])).toBe("")
+    })
+    test("F51: single item", () => {
+        expect(formatList(["only"])).toBe("only")
+    })
+})
+
+describe("scrml:format — formatRange (Tier 2)", () => {
+    test("F52: plain numeric range", () => {
+        const out = formatRange(1, 10)
+        expect(out.indexOf("1") >= 0 && out.indexOf("10") >= 0).toBe(true)
+    })
+    test("F53: currency range", () => {
+        const out = formatRange(100, 1000, "USD")
+        expect(out.indexOf("$") >= 0).toBe(true)
+    })
+})
+
+describe("scrml:format — formatNumberAdvanced (Tier 2)", () => {
+    test("F54: minimumFractionDigits", () => {
+        expect(formatNumberAdvanced(1234.5, { style: "decimal", minimumFractionDigits: 2 })).toBe("1,234.50")
+    })
+    test("F55: signDisplay always", () => {
+        expect(formatNumberAdvanced(123, { signDisplay: "always" }).indexOf("+") >= 0).toBe(true)
+    })
+    test("F56: notation compact", () => {
+        const out = formatNumberAdvanced(1500000, { notation: "compact" })
+        expect(out.indexOf("M") >= 0).toBe(true)
+    })
+})

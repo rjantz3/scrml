@@ -170,6 +170,82 @@ ${
         return `${(value * 100).toFixed(dm)}%`
     }
 
+    // -- Locale-aware Intl.NumberFormat / ListFormat extensions ---------------
+    // S57 Tier 2 additions. The functions above remain unchanged; these add
+    // capability without breaking existing call sites.
+
+    /**
+     * Format a number in compact notation. Locale-aware.
+     *
+     * Examples:
+     *   compactNumber(1234)       → "1.2K"     (en-US default)
+     *   compactNumber(1500000)    → "1.5M"
+     *   compactNumber(1234, "de") → "1234"     (German default is fewer digits)
+     *
+     * @param n      — number to format
+     * @param locale — BCP 47 language tag (default "en-US")
+     */
+    export function compactNumber(n, locale) {
+        return new Intl.NumberFormat(locale || "en-US", { notation: "compact" }).format(n)
+    }
+
+    /**
+     * Format a list of strings into a locale-aware human list.
+     *
+     * Examples:
+     *   formatList(["a", "b", "c"])                          → "a, b, and c"
+     *   formatList(["a", "b", "c"], "disjunction")           → "a, b, or c"
+     *   formatList(["a", "b"], "conjunction", "es")          → "a y b"
+     *
+     * @param items  — array of strings
+     * @param type   — "conjunction" (default), "disjunction", or "unit"
+     * @param locale — BCP 47 language tag (default "en-US")
+     */
+    export function formatList(items, type, locale) {
+        const t = type || "conjunction"
+        return new Intl.ListFormat(locale || "en-US", { style: "long", type: t }).format(items)
+    }
+
+    /**
+     * Format a numeric range using Intl.NumberFormat.formatRange.
+     *
+     * Examples:
+     *   formatRange(1, 10)               → "1–10"
+     *   formatRange(100, 1000, "USD")    → "$100.00 – $1,000.00"  (when currency given)
+     *
+     * @param start    — range start
+     * @param end      — range end
+     * @param currency — optional ISO 4217 currency code; if provided, formats
+     *                   as currency, otherwise as plain numbers
+     * @param locale   — BCP 47 language tag (default "en-US")
+     */
+    export function formatRange(start, end, currency, locale) {
+        const opts = currency ? { style: "currency", currency: currency } : {}
+        return new Intl.NumberFormat(locale || "en-US", opts).formatRange(start, end)
+    }
+
+    /**
+     * Full-featured number formatter — pass any Intl.NumberFormat options.
+     * Use this when the simpler formatNumber/formatCurrency/formatPercent
+     * shapes are insufficient (e.g., custom currencyDisplay, signDisplay,
+     * notation, useGrouping).
+     *
+     * Examples:
+     *   formatNumberAdvanced(1234.5, { style: "decimal", minimumFractionDigits: 2 })
+     *     → "1,234.50"
+     *   formatNumberAdvanced(0.5, { style: "unit", unit: "kilometer" }, "fr")
+     *     → "0,5 km"
+     *   formatNumberAdvanced(123, { signDisplay: "always" })
+     *     → "+123"
+     *
+     * @param n       — number to format
+     * @param options — Intl.NumberFormat options object
+     * @param locale  — BCP 47 language tag (default "en-US")
+     */
+    export function formatNumberAdvanced(n, options, locale) {
+        return new Intl.NumberFormat(locale || "en-US", options || {}).format(n)
+    }
+
     ~{
         import { assertEqual, assertTruthy, assertFalsy } from 'scrml:test'
 
@@ -196,6 +272,31 @@ ${
         assertEqual(formatBytes(1073741824), "1 GB")
         assertEqual(formatPercent(0.42), "42%")
         assertEqual(formatPercent(0.4256, 1), "42.6%")
+
+        // -- S57 Tier 2 additions ---------------------------------------------
+
+        // compactNumber — 1234 → "1.2K" (en-US) ; output content can vary by ICU
+        // version, so we assert characteristic substrings rather than exact output.
+        assertTruthy(compactNumber(1234).indexOf("K") >= 0 || compactNumber(1234).indexOf("k") >= 0)
+        assertTruthy(compactNumber(1500000).indexOf("M") >= 0)
+
+        // formatList — locale-aware. en-US default = conjunction = "a, b, and c"
+        const conjunctionList = formatList(["a", "b", "c"])
+        assertTruthy(conjunctionList.indexOf("a") >= 0 && conjunctionList.indexOf("b") >= 0 && conjunctionList.indexOf("c") >= 0)
+        assertTruthy(conjunctionList.indexOf("and") >= 0)
+        const disjunctionList = formatList(["x", "y"], "disjunction")
+        assertTruthy(disjunctionList.indexOf("or") >= 0)
+
+        // formatRange — without currency, plain numeric range
+        const plainRange = formatRange(1, 10)
+        assertTruthy(plainRange.indexOf("1") >= 0 && plainRange.indexOf("10") >= 0)
+        // formatRange — with currency, formats as currency
+        const usdRange = formatRange(100, 1000, "USD")
+        assertTruthy(usdRange.indexOf("$") >= 0)
+
+        // formatNumberAdvanced — pass-through to Intl.NumberFormat
+        assertEqual(formatNumberAdvanced(1234.5, { style: "decimal", minimumFractionDigits: 2 }), "1,234.50")
+        assertTruthy(formatNumberAdvanced(123, { signDisplay: "always" }).indexOf("+") >= 0)
     }
 }
 </program>

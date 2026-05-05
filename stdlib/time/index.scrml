@@ -299,6 +299,140 @@ ${
         return new Promise(resolve => setTimeout(resolve, ms))
     }
 
+    // -- Timezone-aware formatting + ISO 8601 helpers (S57 Tier 2) ------------
+    // The functions above format using the runtime's local timezone (or
+    // implicit UTC for some computations). These add explicit timezone
+    // control without changing existing call sites.
+
+    /**
+     * Format a timestamp displayed in a specific IANA timezone.
+     *
+     * Examples:
+     *   formatInTimezone(ts, "America/New_York")
+     *     → "Apr 1, 2026, 10:34 AM"   (formatted in EST/EDT)
+     *   formatInTimezone(ts, "Asia/Tokyo", { dateStyle: "full" })
+     *     → "Wednesday, April 2, 2026"
+     *
+     * @param timestamp — Date | number (unix ms)
+     * @param tz        — IANA timezone (e.g. "America/New_York", "Asia/Tokyo", "UTC")
+     * @param options   — optional Intl.DateTimeFormat options
+     * @param locale    — optional BCP 47 language tag (default "en-US")
+     */
+    export function formatInTimezone(timestamp, tz, options, locale) {
+        const date = typeof timestamp === "number" ? new Date(timestamp) : timestamp
+        // Intl rejects mixing dateStyle/timeStyle with explicit field-level
+        // options. Skip the field-level defaults if the caller passed either.
+        const usingStyles = options && (options.dateStyle !== undefined || options.timeStyle !== undefined)
+        const defaults = usingStyles
+            ? {}
+            : { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }
+        const opts = Object.assign(defaults, options || {}, { timeZone: tz })
+        return new Intl.DateTimeFormat(locale || "en-US", opts).format(date)
+    }
+
+    /**
+     * Format the current time displayed in a specific IANA timezone.
+     * Convenience wrapper over formatInTimezone(Date.now(), tz, ...).
+     */
+    export function nowInTimezone(tz, options, locale) {
+        return formatInTimezone(Date.now(), tz, options, locale)
+    }
+
+    /**
+     * Decompose a timestamp into its parts as displayed in a given timezone.
+     * Returns { year, month, day, hour, minute, second, weekday } as numbers
+     * and strings (year/month/day/hour/minute/second numeric; weekday string).
+     *
+     * Useful for custom formatting where Intl options aren't enough.
+     *
+     * Example:
+     *   toTimezoneParts(ts, "America/New_York")
+     *     → { year: 2026, month: 4, day: 1, hour: 10, minute: 34, second: 7, weekday: "Wed" }
+     */
+    export function toTimezoneParts(timestamp, tz) {
+        const date = typeof timestamp === "number" ? new Date(timestamp) : timestamp
+        const fmt = new Intl.DateTimeFormat("en-US", {
+            year: "numeric", month: "2-digit", day: "2-digit",
+            hour: "2-digit", minute: "2-digit", second: "2-digit",
+            weekday: "short", hour12: false,
+            timeZone: tz
+        })
+        const parts = {}
+        for (const p of fmt.formatToParts(date)) {
+            if (p.type !== "literal") parts[p.type] = p.value
+        }
+        return {
+            year:    parseInt(parts.year, 10),
+            month:   parseInt(parts.month, 10),
+            day:     parseInt(parts.day, 10),
+            hour:    parseInt(parts.hour, 10) % 24,  // Intl emits "24" for midnight in some locales
+            minute:  parseInt(parts.minute, 10),
+            second: parts.second ? parseInt(parts.second, 10) : 0,
+            weekday: parts.weekday
+        }
+    }
+
+    /**
+     * Get the offset of a timezone from UTC, in minutes, at a given timestamp.
+     * Positive values mean ahead of UTC; negative means behind.
+     *
+     * Examples:
+     *   tzOffset("America/New_York", winterTs) → -300   (UTC-5, EST)
+     *   tzOffset("America/New_York", summerTs) → -240   (UTC-4, EDT)
+     *   tzOffset("Asia/Tokyo", anyTs)          → 540    (UTC+9, JST)
+     *
+     * @param tz        — IANA timezone
+     * @param timestamp — Date | number (defaults to now)
+     */
+    export function tzOffset(tz, timestamp) {
+        const ts = timestamp === undefined ? Date.now() : (typeof timestamp === "number" ? timestamp : timestamp.getTime())
+        const fmt = new Intl.DateTimeFormat("en-US", {
+            timeZone: tz, timeZoneName: "shortOffset"
+        })
+        const parts = fmt.formatToParts(new Date(ts))
+        const tzPart = parts.find(p => p.type === "timeZoneName")
+        if (!tzPart) return 0
+        // Format like "GMT+9", "GMT-5", "GMT+5:30", "GMT" (= UTC)
+        const m = /GMT(?:([+-])(\d{1,2})(?::(\d{2}))?)?/.exec(tzPart.value)
+        if (!m || !m[1]) return 0
+        const sign = m[1] === "+" ? 1 : -1
+        const hours = parseInt(m[2], 10)
+        const mins  = m[3] ? parseInt(m[3], 10) : 0
+        return sign * (hours * 60 + mins)
+    }
+
+    /**
+     * Format a timestamp as ISO 8601 (always UTC). Convenience wrapper —
+     * effectively `new Date(ts).toISOString()` but with input flexibility.
+     *
+     * Example:
+     *   formatISO(Date.now()) → "2026-04-01T14:34:07.000Z"
+     */
+    export function formatISO(timestamp) {
+        const date = typeof timestamp === "number" ? new Date(timestamp) : timestamp
+        return date.toISOString()
+    }
+
+    /**
+     * Parse an ISO 8601 string strictly — returns a Date or undefined if
+     * the input is not a valid ISO timestamp. Distinct from parseDate which
+     * is permissive.
+     *
+     * Examples:
+     *   parseISO("2026-04-01T14:34:07Z")     → Date
+     *   parseISO("2026-04-01")               → Date (date-only ISO is valid)
+     *   parseISO("April 1 2026")             → undefined (not ISO)
+     */
+    export function parseISO(str) {
+        if (typeof str !== "string") return undefined
+        // Reject obviously non-ISO formats early
+        if (!/^\d{4}-\d{2}(-\d{2})?(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/.test(str)) {
+            return undefined
+        }
+        const d = new Date(str)
+        return isNaN(d.getTime()) ? undefined : d
+    }
+
     ~{
         import { assertEqual, assertTruthy, assertFalsy, assertInRange } from 'scrml:test'
 
@@ -356,6 +490,47 @@ ${
         // sleep returns a Promise
         const p = sleep(0)
         assertTruthy(typeof p.then === "function")
+
+        // -- S57 Tier 2 additions ---------------------------------------------
+
+        // formatISO — round-trip with a known UTC instant
+        const isoTs = new Date("2026-04-01T14:34:07.000Z").getTime()
+        assertEqual(formatISO(isoTs), "2026-04-01T14:34:07.000Z")
+        assertEqual(formatISO(new Date(isoTs)), "2026-04-01T14:34:07.000Z")
+
+        // parseISO — accepts valid ISO, rejects non-ISO
+        assertTruthy(parseISO("2026-04-01T14:34:07Z") instanceof Date)
+        assertTruthy(parseISO("2026-04-01") instanceof Date)
+        assertEqual(parseISO("April 1 2026"), undefined)
+        assertEqual(parseISO("not-a-date"), undefined)
+        assertEqual(parseISO(null), undefined)
+
+        // formatInTimezone — output content varies by ICU version; assert
+        // structural characteristics: contains the year and a recognizable
+        // numeric for the displayed-in-tz date.
+        const fixedTs = new Date("2026-04-01T14:34:07Z").getTime()
+        const nyFmt = formatInTimezone(fixedTs, "America/New_York")
+        assertTruthy(nyFmt.indexOf("2026") >= 0)
+        const utcFmt = formatInTimezone(fixedTs, "UTC")
+        assertTruthy(utcFmt.indexOf("2026") >= 0 && utcFmt.indexOf("Apr") >= 0)
+
+        // toTimezoneParts — UTC parts must match the underlying Date methods
+        const utcParts = toTimezoneParts(fixedTs, "UTC")
+        assertEqual(utcParts.year, 2026)
+        assertEqual(utcParts.month, 4)
+        assertEqual(utcParts.day, 1)
+        assertEqual(utcParts.hour, 14)
+        assertEqual(utcParts.minute, 34)
+
+        // tzOffset — UTC is 0; Tokyo is +540 always; New York is -300 (EST) or -240 (EDT)
+        assertEqual(tzOffset("UTC", fixedTs), 0)
+        assertEqual(tzOffset("Asia/Tokyo", fixedTs), 540)
+        const nyOffset = tzOffset("America/New_York", fixedTs)
+        assertTruthy(nyOffset === -300 || nyOffset === -240)
+
+        // nowInTimezone — just check it returns a non-empty string
+        const nowTokyo = nowInTimezone("Asia/Tokyo")
+        assertTruthy(typeof nowTokyo === "string" && nowTokyo.length > 0)
     }
 }
 </program>
