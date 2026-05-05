@@ -86,16 +86,16 @@ Grouped into sub-batches for easier user review/ratification. Each sub-batch is 
 
 **Cross-ref fixed:** `examples/23-trucking-dispatch/FRICTION.md` referenced `docs/changes/p3.a-follow/`; updated to point to scrml-support archive.
 
-### §3.2 Batch B: Phase 4d expr-AST series (4 dirs) — long-completed expression-AST work
+### §3.2 Batch B: Phase 4d expr-AST series (4 dirs) — ✅ RATIFIED + EXECUTED S61 (2026-05-05)
 
-| Dir | Era / What |
+| Dir | Final location |
 |---|---|
-| `expr-ast-phase-4d/` | S38-39 |
-| `expr-ast-phase-4d-step-8/` | S38-39 |
-| `expr-ast-phase-4d-step-8-strict/` | S38-39 |
-| `expr-ast-self-host-bs-bug-l-parity/` | S38-39 |
+| `expr-ast-phase-4d/` | `scrml-support/archive/changes/expr-ast-phase-4d/` |
+| `expr-ast-phase-4d-step-8/` | `scrml-support/archive/changes/expr-ast-phase-4d-step-8/` |
+| `expr-ast-phase-4d-step-8-strict/` | `scrml-support/archive/changes/expr-ast-phase-4d-step-8-strict/` |
+| `expr-ast-self-host-bs-bug-l-parity/` | `scrml-support/archive/changes/expr-ast-self-host-bs-bug-l-parity/` |
 
-**Disposition:** all 4 → `scrml-support/archive/dispatches/expr-ast-phase-4d/<name>/`.
+**Cross-refs:** internal-only (within the dirs that moved); no external scrmlTS-side cross-refs needed fixing.
 
 ### §3.3 Batch C: dispatch-app M-series (7 dirs) — ✅ RATIFIED + EXECUTED S61 (2026-05-05)
 
@@ -248,7 +248,7 @@ Suggested ratification cadence: 1-2 batches per session to avoid overload. PA ha
 
 1. ✅ **Batch A (P-series, 12 dirs)** — RATIFIED + EXECUTED S61 (2026-05-05). 12 dirs → `scrml-support/archive/changes/`; cross-ref in FRICTION.md fixed.
 2. ✅ **Batch C (dispatch-app, 7 dirs)** — RATIFIED + EXECUTED S61 (2026-05-05). 7 dirs → `scrml-support/archive/changes/`; 2 cross-refs in 23-trucking-dispatch/README.md fixed.
-3. **Batch B (expr-ast-phase-4d, 4 dirs)** — single subsystem cluster.
+3. ✅ **Batch B (expr-ast-phase-4d, 4 dirs)** — RATIFIED + EXECUTED S61 (2026-05-05). 4 dirs → `scrml-support/archive/changes/`; no cross-refs (internal-only).
 4. **Batch I (fix-*, 20 dirs)** — large but uniform; deref-friendly.
 5. **Batch D (f-* feature/fix, 11 dirs)** — hotfix-level work.
 6. **Batch H (LSP L1-L4, 5 dirs)** — recent (S51) but completed.
