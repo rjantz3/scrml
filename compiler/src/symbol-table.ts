@@ -1,0 +1,500 @@
+/**
+ * Symbol Table — Stage 3.06 of the scrml compiler pipeline (SYM).
+ *
+ * Phase A1b Step B1 — V5-strict symbol-table extension. This module
+ * constructs a per-scope state-cell registry over the FileAST produced by
+ * TAB and decorated by NR. It is FOUNDATIONAL infrastructure that
+ * subsequent A1b steps (B2 onward) build on:
+ *
+ *   B2 — V5-strict bare-name resolution + E-NAME-COLLIDES-STATE
+ *   B3 — `@name` resolution → record back-pointer on each ExprNode
+ *   B4 — Import binding + `pinned` forward-ref cycle detection
+ *   B5 — Cell classifier (bindable, markup-typed, derived-with-validators)
+ *   B6 — Render-by-tag E-CELL-NO-RENDER-SPEC + E-CELL-RENDER-SPEC-NOT-BINDABLE
+ *   B7 — Derived-cell dep DAG + E-DERIVED-CIRCULAR-DEP
+ *   B8 — L21 walker (E-DERIVED-VALUE-MUTATE + E-SYNTHESIZED-WRITE)
+ *   B11/B12 — Validity-surface synthesized cells (re-entrancy invariant)
+ *
+ * What B1 lands:
+ *   - A `Scope` data structure (per-file root, child scopes for function /
+ *     engine / component / compound state-decl bodies) with a `stateCells`
+ *     `Map<string, StateCellRecord>`.
+ *   - A registration walker that visits every `state-decl` node (both
+ *     `structuralForm:true` `<x> = init` and `structuralForm:false` legacy
+ *     `@x = init`) and registers its name in the containing scope.
+ *   - Variant C compound (§6.3) recursive registration: parent name in the
+ *     enclosing scope; children registered in the parent's compound sub-scope
+ *     under qualified-path keys (e.g., `signup.name`).
+ *   - Annotated AST: each `state-decl` gains a `_record: StateCellRecord`
+ *     back-pointer; each scope-introducing node gains a `_scope: Scope`
+ *     back-pointer; FileAST gains a top-level `_scope: Scope`.
+ *   - Public lookup API: `lookupStateCell` (parent-chain walk),
+ *     `lookupQualifiedStateCell` (multi-segment paths), `getScopeForNode`
+ *     (reverse lookup).
+ *
+ * What B1 does NOT do (handled by later B-steps):
+ *   - Fire ANY diagnostics. B1 is infrastructure; B2 fires the first
+ *     diagnostic (E-NAME-COLLIDES-STATE).
+ *   - Resolve `@name` reads. B3 walks ExprNode trees and records the
+ *     resolution back-pointer.
+ *   - Synthesize validity-surface cells (`@compound.isValid` etc.). B11/B12
+ *     synthesize and add records to existing scopes via the `_scope`
+ *     back-pointer (re-entrancy invariant per BRIEF §6).
+ *   - Walk engine state-children or component bodies. Today's AST stores
+ *     `engine-decl.rulesRaw: string` and `component-def.raw: string` (no
+ *     walkable children), so engine + component scope construction defers
+ *     to B14+/B17+. The `ScopeKind` enum reserves `"engine"` and
+ *     `"component"` for those steps; B1's walker fills `"file"`,
+ *     `"function"`, and `"compound"` only.
+ *
+ * Performance budget: <= 5 ms per file (single AST traversal + Map inserts).
+ */
+
+import type {
+  ASTNode,
+  FileAST,
+  ReactiveDeclNode,
+  FunctionDeclNode,
+  Span,
+} from "./types/ast.ts";
+
+// ---------------------------------------------------------------------------
+// Public types
+// ---------------------------------------------------------------------------
+
+/**
+ * The kind of scope a `Scope` represents.
+ *
+ * - `"file"` — file-level (per-FileAST) root scope.
+ * - `"function"` — body of a `function-decl` node.
+ * - `"engine"` — body of an engine declaration. RESERVED for B14+ (today's
+ *   AST stores engine bodies as raw text under `engine-decl.rulesRaw`; the
+ *   walker does not construct engine scopes yet).
+ * - `"component"` — body of a `component-def` node. RESERVED for B17+
+ *   (today's AST stores component bodies as raw text under `component-def.raw`).
+ * - `"compound"` — body of a Variant C compound state-decl
+ *   (`state-decl.children`).
+ */
+export type ScopeKind = "file" | "function" | "engine" | "component" | "compound";
+
+/**
+ * A single state-cell symbol-table entry. Created at registration; mutated
+ * by no later B-step (records are append-only). Cross-references the AST
+ * decl node (`declNode`) and its containing scope (`scope`).
+ */
+export interface StateCellRecord {
+  /** Bare cell name (no `@` prefix). For compound children, the LEAF name
+   *  (e.g., `"name"` for `signup.name`); use `qualifiedPath` for the full
+   *  dotted path. */
+  name: string;
+  /** Fully-qualified dotted path, scope-relative.  For top-level cells,
+   *  equals `name`. For compound children, parent path + `.` + leaf
+   *  (e.g., `"signup.name"`, `"outer.inner.leaf"`). */
+  qualifiedPath: string;
+  /** Back-pointer to the AST decl node. Pre-existing AST shape from TAB. */
+  declNode: ReactiveDeclNode;
+  /** Back-pointer to the scope this record was registered into. */
+  scope: Scope;
+  /** True iff the decl used the structural `<x> = init` form (V5-strict
+   *  canonical). False iff the legacy `@x = init` form (still legal but
+   *  emits no W-DEPRECATED at this phase). Mirrors
+   *  `ReactiveDeclNode.structuralForm`. */
+  structuralForm: boolean;
+  /** RHS-shape discriminant per AST-CONTRACTS-AND-DECOMPOSITION §1.1.
+   *  Mirrors `ReactiveDeclNode.shape`. */
+  shape: "plain" | "decl-with-spec" | "derived" | undefined;
+  /** True iff `const <x> = expr` derived form. Mirrors
+   *  `ReactiveDeclNode.isConst`. */
+  isConst: boolean;
+  /** True iff `pinned` bareword modifier present on the decl. Mirrors
+   *  `ReactiveDeclNode.pinned`. Used by B4 for forward-ref legality
+   *  (E-STATE-PINNED-FORWARD-REF). */
+  isPinned: boolean;
+  /** True iff this record is a compound parent (Variant C, has non-empty
+   *  `children`). The parent record is registered in the enclosing scope;
+   *  child records are registered in the parent's compound sub-scope. */
+  isCompoundParent: boolean;
+  /** True iff this record is a compound child (registered inside a
+   *  `kind:"compound"` scope). The leaf name lives at `name`; the full
+   *  dotted path lives at `qualifiedPath`. */
+  isCompoundChild: boolean;
+  /** True iff `validators[]` is non-empty on the decl node. Used by B5
+   *  cell classifier and B11/B12 validity-surface synthesis. Cheap boolean
+   *  shorthand; consumers needing the array walk `declNode.validators`. */
+  hasValidators: boolean;
+  /** True iff `defaultExpr` is non-null on the decl node. Used by B22 for
+   *  `reset(@cell)` target validation. */
+  hasDefaultExpr: boolean;
+  /** True iff `typeAnnotation` is set on the decl node. Used by B20 for
+   *  bare-variant inference (M9, §14.10). */
+  hasTypeAnnotation: boolean;
+}
+
+/**
+ * A single lexical scope. Forms a tree via `parent` back-pointers.
+ *
+ * Scopes are constructed top-down by the SYM walker:
+ *   1. File-level root scope (kind `"file"`, parent `null`, qualifiedPath `""`).
+ *   2. Function-body scope (kind `"function"`, parent = enclosing scope).
+ *   3. Compound-decl sub-scope (kind `"compound"`, parent = enclosing scope,
+ *      qualifiedPath = parent's path + parent name + `"."`).
+ *   4. Engine / component sub-scopes RESERVED for B14+/B17+.
+ *
+ * Re-entrancy invariant (per BRIEF §6): scopes are NOT frozen after
+ * construction. B11/B12 will add validity-surface synthesized records to
+ * existing scopes; the symbol-table API supports `stateCells.set()` calls
+ * post-B1.
+ */
+export interface Scope {
+  /** Discriminant — see `ScopeKind`. */
+  kind: ScopeKind;
+  /** Parent scope, or `null` for the file-level root. */
+  parent: Scope | null;
+  /** Per-scope state-cell registry. Key is the scope-LOCAL name (the
+   *  `StateCellRecord.name` value). For compound sub-scopes, this is the
+   *  child's leaf name; the qualified path is recoverable via the
+   *  `record.qualifiedPath` field. */
+  stateCells: Map<string, StateCellRecord>;
+  /** Path prefix used to compute child `qualifiedPath` values. For the
+   *  file root, `""`. For a function scope, the enclosing scope's prefix
+   *  (functions don't extend the dotted path). For a compound scope, the
+   *  parent record's `qualifiedPath` followed by `.` (e.g., `"signup."`). */
+  qualifiedPath: string;
+}
+
+/**
+ * Per-file SYM result. Mirrors `NRResult`'s shape (filePath + diagnostic
+ * count + summary stats). B1 emits NO diagnostics, so `errors` is always
+ * empty; the field is preserved for ABI alignment with NR (B2 will start
+ * populating it).
+ */
+export interface SYMResult {
+  filePath: string;
+  /** Errors and warnings emitted by SYM. Empty at B1; B2+ populates. */
+  errors: SYMDiagnostic[];
+  /** The file-level root scope. Cross-referenced from `FileAST._scope`. */
+  fileScope: Scope;
+  /** Summary stats (debugging aid). */
+  stats: SYMStats;
+}
+
+export interface SYMDiagnostic {
+  code: string;
+  message: string;
+  span: Span;
+  severity: "error" | "warning";
+}
+
+export interface SYMStats {
+  /** Total number of state-cell records registered (top-level + nested). */
+  totalRecords: number;
+  /** Number of compound parent records. */
+  compoundParents: number;
+  /** Number of compound child records. */
+  compoundChildren: number;
+  /** Number of scopes constructed (file + function + compound at B1). */
+  totalScopes: number;
+}
+
+export interface SYMInput {
+  filePath: string;
+  ast: FileAST;
+}
+
+// ---------------------------------------------------------------------------
+// Internal: AST node decoration shape
+// ---------------------------------------------------------------------------
+//
+// SYM mutates the AST in place by adding two annotation fields:
+//
+//   - `state-decl._record: StateCellRecord`
+//     Back-pointer attached to each `state-decl` node after registration.
+//     Consumers (B2-B22) recover the record without re-walking the tree.
+//
+//   - `<scope-introducing-node>._scope: Scope`
+//     Attached to each scope-creating AST node (currently `function-decl`
+//     and compound `state-decl`). FileAST also gains `_scope: Scope`
+//     (the file-level root).
+//
+// These fields are typed loosely as `any` at the site of mutation (matching
+// existing convention in NR's walker — see `name-resolver.ts:305-378` where
+// `anyN.resolvedKind = ...`). Reverse lookup via `getScopeForNode` reads
+// the field with a typed cast.
+
+interface ScopeAnnotated {
+  _scope?: Scope;
+}
+
+interface RecordAnnotated {
+  _record?: StateCellRecord;
+}
+
+// ---------------------------------------------------------------------------
+// Scope construction primitives
+// ---------------------------------------------------------------------------
+
+function createScope(
+  kind: ScopeKind,
+  parent: Scope | null,
+  qualifiedPath: string,
+): Scope {
+  return {
+    kind,
+    parent,
+    stateCells: new Map(),
+    qualifiedPath,
+  };
+}
+
+function createRecord(
+  declNode: ReactiveDeclNode,
+  scope: Scope,
+  qualifiedPath: string,
+  isCompoundChild: boolean,
+): StateCellRecord {
+  const isCompoundParent = Array.isArray(declNode.children);
+  const validators = (declNode as any).validators;
+  return {
+    name: declNode.name,
+    qualifiedPath,
+    declNode,
+    scope,
+    structuralForm: declNode.structuralForm === true,
+    shape: declNode.shape,
+    isConst: declNode.isConst === true,
+    isPinned: declNode.pinned === true,
+    isCompoundParent,
+    isCompoundChild,
+    hasValidators: Array.isArray(validators) && validators.length > 0,
+    hasDefaultExpr: declNode.defaultExpr != null,
+    hasTypeAnnotation: typeof declNode.typeAnnotation === "string"
+      && declNode.typeAnnotation.length > 0,
+  };
+}
+
+/**
+ * Register a single `state-decl` into the given scope. Compound parents
+ * (Variant C) recursively register their children in a sub-scope.
+ *
+ * Returns the created record (the parent record for compound parents).
+ */
+function registerStateDecl(
+  declNode: ReactiveDeclNode,
+  parentScope: Scope,
+  stats: SYMStats,
+): StateCellRecord {
+  const isCompoundChild = parentScope.kind === "compound";
+  const qualifiedPath = parentScope.qualifiedPath + declNode.name;
+
+  const record = createRecord(declNode, parentScope, qualifiedPath, isCompoundChild);
+  parentScope.stateCells.set(declNode.name, record);
+  (declNode as ReactiveDeclNode & RecordAnnotated)._record = record;
+
+  stats.totalRecords++;
+  if (record.isCompoundParent) stats.compoundParents++;
+  if (isCompoundChild) stats.compoundChildren++;
+
+  // Variant C compound: recurse into children in a fresh compound sub-scope.
+  if (record.isCompoundParent && Array.isArray(declNode.children)) {
+    const compoundScope = createScope(
+      "compound",
+      parentScope,
+      qualifiedPath + ".",
+    );
+    (declNode as ReactiveDeclNode & ScopeAnnotated)._scope = compoundScope;
+    stats.totalScopes++;
+
+    for (const child of declNode.children) {
+      if (child && child.kind === "state-decl") {
+        registerStateDecl(child, compoundScope, stats);
+      }
+    }
+  }
+
+  return record;
+}
+
+// ---------------------------------------------------------------------------
+// AST walker — discovers state-decls and scope-introducing nodes
+// ---------------------------------------------------------------------------
+//
+// Walks an arbitrary list of AST nodes within the given scope. State-decls
+// register into `currentScope`. Function-decls open a child scope before
+// recursing into the body. Compound state-decls handle their own sub-scope
+// (in `registerStateDecl`).
+//
+// Mirrors NR's walker recursion (name-resolver.ts:301-378): visits
+// `children`, `body`, `consequent`, `alternate`, `arms[].body`,
+// `lift-expr.expr.node`. Engine + component bodies are NOT walked here —
+// today's AST stores them as strings (see ScopeKind doc).
+
+function walk(nodes: ASTNode[] | undefined, currentScope: Scope, stats: SYMStats): void {
+  if (!nodes) return;
+  for (const n of nodes) {
+    if (!n) continue;
+    const anyN = n as any;
+    const kind = anyN.kind as string;
+
+    if (kind === "state-decl") {
+      // The state-decl itself registers + (if compound) opens a sub-scope.
+      registerStateDecl(n as ReactiveDeclNode, currentScope, stats);
+      // No further recursion: children are handled by registerStateDecl;
+      // initExpr / renderSpec are EXPRESSION trees walked by B3 (not B1).
+      continue;
+    }
+
+    if (kind === "function-decl") {
+      // Function body opens a new function-scoped child scope.
+      // qualifiedPath unchanged: functions don't introduce a dotted prefix.
+      const fnScope = createScope("function", currentScope, currentScope.qualifiedPath);
+      (anyN as FunctionDeclNode & ScopeAnnotated)._scope = fnScope;
+      stats.totalScopes++;
+      walk(anyN.body, fnScope, stats);
+      continue;
+    }
+
+    // Recurse into common AST containers. Mirrors NR's recursion shape.
+    if (Array.isArray(anyN.children)) walk(anyN.children, currentScope, stats);
+    if (Array.isArray(anyN.body)) walk(anyN.body, currentScope, stats);
+    if (Array.isArray(anyN.consequent)) walk(anyN.consequent, currentScope, stats);
+    if (Array.isArray(anyN.alternate)) walk(anyN.alternate, currentScope, stats);
+    if (Array.isArray(anyN.arms)) {
+      for (const arm of anyN.arms) {
+        if (arm && Array.isArray(arm.body)) walk(arm.body, currentScope, stats);
+      }
+    }
+    // P3-FOLLOW alignment: lift-expr carries a markup tree under expr.node.
+    // B1 doesn't have state-cell concerns inside lift-exprs (markup is the
+    // value, not a decl-site), but mirroring NR's recursion shape avoids
+    // surprises if a downstream B-step extends the walker.
+    if (kind === "lift-expr" && anyN.expr && anyN.expr.kind === "markup" && anyN.expr.node) {
+      walk([anyN.expr.node], currentScope, stats);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
+ * Run SYM over a single file's AST. Mutates `ast` in place by adding
+ * `_scope` to scope-introducing nodes and `_record` to each state-decl;
+ * also attaches `_scope` to the FileAST itself.
+ *
+ * Stage 3.06 of the compiler pipeline (between NR and CE).
+ */
+export function runSYM(input: SYMInput): SYMResult {
+  const { filePath, ast } = input;
+
+  const fileScope = createScope("file", null, "");
+  (ast as FileAST & ScopeAnnotated)._scope = fileScope;
+
+  const stats: SYMStats = {
+    totalRecords: 0,
+    compoundParents: 0,
+    compoundChildren: 0,
+    totalScopes: 1, // the file-level root counts
+  };
+
+  walk(ast.nodes, fileScope, stats);
+
+  return {
+    filePath,
+    errors: [],
+    fileScope,
+    stats,
+  };
+}
+
+/**
+ * Run SYM over a batch of TAB results (mirrors `runNRBatch` shape).
+ * Each AST is mutated in place. Returns per-file results in input order.
+ */
+export function runSYMBatch(
+  tabResults: Array<{ filePath: string; ast: FileAST }>,
+): SYMResult[] {
+  const out: SYMResult[] = [];
+  for (const r of tabResults) {
+    if (!r || !r.ast) continue;
+    out.push(runSYM({ filePath: r.filePath, ast: r.ast }));
+  }
+  return out;
+}
+
+/**
+ * Look up a state-cell by leaf name, walking the scope's parent chain.
+ * Returns the closest enclosing record, or `null` if not found.
+ *
+ * V5-strict semantic: this is the lookup B2 will use for the
+ * E-NAME-COLLIDES-STATE check (a local `let`/`const` redeclaring a name
+ * registered in this scope or any parent fires the error). B3 will use it
+ * for `@name` resolution.
+ */
+export function lookupStateCell(
+  scope: Scope | null | undefined,
+  name: string,
+): StateCellRecord | null {
+  let s: Scope | null | undefined = scope;
+  while (s) {
+    const rec = s.stateCells.get(name);
+    if (rec) return rec;
+    s = s.parent;
+  }
+  return null;
+}
+
+/**
+ * Look up a multi-segment qualified state-cell path.  Used for
+ * `@signup.name` / `@outer.inner.leaf` resolution.
+ *
+ * Algorithm: resolve the FIRST segment via the parent-chain walk
+ * (`lookupStateCell`); then for each subsequent segment, resolve into the
+ * current record's compound sub-scope (the `_scope` annotation on the
+ * compound parent's decl node).
+ *
+ * Returns the LEAF record on success, `null` if any segment fails.
+ *
+ * Edge cases:
+ *   - Empty path → `null`.
+ *   - Single-segment path → equivalent to `lookupStateCell`.
+ *   - Intermediate segment isn't a compound parent → `null` (cannot descend).
+ */
+export function lookupQualifiedStateCell(
+  scope: Scope | null | undefined,
+  path: string[],
+): StateCellRecord | null {
+  if (!Array.isArray(path) || path.length === 0) return null;
+  let current = lookupStateCell(scope, path[0]);
+  if (!current) return null;
+  for (let i = 1; i < path.length; i++) {
+    if (!current.isCompoundParent) return null;
+    const subScope = (current.declNode as ReactiveDeclNode & ScopeAnnotated)._scope;
+    if (!subScope) return null;
+    const next = subScope.stateCells.get(path[i]);
+    if (!next) return null;
+    current = next;
+  }
+  return current;
+}
+
+/**
+ * Reverse lookup: given an AST node, return the scope it lives in (the
+ * scope created AT this node for scope-introducing nodes; otherwise the
+ * scope of its declared/registered state-cell).
+ *
+ * Returns:
+ *   - For a scope-introducing node (`function-decl`, FileAST, compound
+ *     `state-decl`): the scope that node OPENS (its body's scope).
+ *   - For a state-decl that is NOT a compound parent: the scope it's
+ *     REGISTERED in (i.e., `_record.scope`).
+ *   - For all other nodes: `null` (B1 does not annotate non-scope, non-decl
+ *     nodes; future B-steps may extend this).
+ */
+export function getScopeForNode(node: ASTNode | FileAST | null | undefined): Scope | null {
+  if (!node) return null;
+  const annotated = node as (ASTNode | FileAST) & ScopeAnnotated & RecordAnnotated;
+  if (annotated._scope) return annotated._scope;
+  if (annotated._record) return annotated._record.scope;
+  return null;
+}
