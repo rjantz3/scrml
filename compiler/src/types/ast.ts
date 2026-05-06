@@ -548,24 +548,12 @@ export interface RenderSpecNode extends BaseNode {
   element: MarkupNode;
 }
 
-/**
- * A derived reactive declaration: `const @name = expr`.
- *
- * @deprecated Phase A1a Step 11.5 — RETIRED. The legacy `kind:"reactive-
- * derived-decl"` AST kind has been folded into `state-decl` with
- * shape:"derived" + isConst:true + structuralForm:false. ADR Option A
- * FOLD ratified S60. This interface is left as a structural artifact for
- * any external consumers still importing the symbol; the parser no
- * longer constructs nodes of this kind. New code should use
- * `ReactiveDeclNode` (kind:"state-decl") with the discriminants above.
- */
-export interface ReactiveDerivedDeclNode extends BaseNode {
-  kind: "reactive-derived-decl";
-  /** Derived variable name (without `@`). */
-  name: string;
-  /** Structured ExprNode form of the initializer. */
-  initExpr?: ExprNode;
-}
+// ReactiveDerivedDeclNode (kind:"reactive-derived-decl") was retired at
+// Phase A1a Step 11.5 — folded into state-decl with shape:"derived" +
+// isConst:true + structuralForm:false. ADR Option A FOLD ratified S60.
+// The interface declaration was dropped at S64 Phase 4d completion sweep.
+// New code uses `ReactiveDeclNode` (kind:"state-decl") with the
+// discriminants above.
 
 /** A debounced reactive declaration: `@debounced(N) name = expr`. */
 export interface ReactiveDebouncedDeclNode extends BaseNode {
