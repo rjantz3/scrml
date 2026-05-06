@@ -166,4 +166,18 @@ For ExprNode `ident.name`: per A1a Step 10, `ident.name` preserves `@` verbatim 
 
 ## Implementation phase
 
-(starts after this commit)
+- Module `compiler/src/symbol-table.ts` (500 lines): types, Scope construction, walker, public API (`runSYM`, `runSYMBatch`, `lookupStateCell`, `lookupQualifiedStateCell`, `getScopeForNode`). Committed `717dbb7`.
+- Pipeline wiring: `compiler/src/api.js` — `runSYMBatch` inserted as Stage 3.06 between NR (3.05) and CE (3.2). Consumes `tabResultsForNR` (post-NR per-file ASTs); diagnostics collected via `collectErrors("SYM", ...)`; verbose log shows `[SYM] N file(s), R record(s) across S scope(s)`.
+- Test file `compiler/tests/integration/symbol-table.test.js` (512 lines, 31 tests): full §B1.1-§B1.15 invariant coverage + general invariants (no errors, FileAST `_scope` back-pointer, stats counts, `lookupQualifiedStateCell` edge cases).
+
+## Salvage notes (S63 PA-direct, post-S62 dispatch interruption)
+
+S62 B1 dispatch landed three WIP commits (scaffolding → survey → module) then was interrupted before pipeline wiring + tests committed. S63 PA salvaged the uncommitted work directly. Two issues surfaced and were fixed during salvage:
+
+1. **Walker recursion needed cycle guard.** The initial walker did NOT skip already-visited nodes; the test helper's `findKind` uses a WeakSet but the walker mirrored NR's recursion which doesn't. Added `visited: WeakSet<object>` parameter threaded through `walk` + `registerStateDecl`. Mirrors test-helper convention.
+
+2. **AST annotations needed `enumerable: false`.** Initial implementation used direct property assignment (`anyN._scope = ...`). Downstream stages (BP/CG) hung in an infinite loop on the cycle introduced via `state-decl._record → record.scope → scope.stateCells.get(name) → record`. Switched to `Object.defineProperty(node, "_record", { value, enumerable: false, configurable: true, writable: true })` so generic structural walkers (using `Object.keys` / `for...in`) skip the back-pointers. `getScopeForNode` and direct property reads still work. Documented in symbol-table.ts inline comment.
+
+Test result post-salvage: **31/31 SYM tests pass; full suite 8933 / 44 / 1 / 0 / 8978 / 440 (+31 tests, +1 file vs S62 baseline 8902 / 44 / 1 / 0 / 8947 / 439) — zero regressions.**
+
+Sample compile verification: `combined-001-counter.scrml` compiles in 63ms (verified post-fix).

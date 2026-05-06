@@ -282,13 +282,22 @@ function registerStateDecl(
   declNode: ReactiveDeclNode,
   parentScope: Scope,
   stats: SYMStats,
+  visited: WeakSet<object>,
 ): StateCellRecord {
   const isCompoundChild = parentScope.kind === "compound";
   const qualifiedPath = parentScope.qualifiedPath + declNode.name;
 
   const record = createRecord(declNode, parentScope, qualifiedPath, isCompoundChild);
   parentScope.stateCells.set(declNode.name, record);
-  (declNode as ReactiveDeclNode & RecordAnnotated)._record = record;
+  // Non-enumerable so generic structural AST walkers (BP/CG/codegen) don't
+  // descend through `_record → record.scope → scope.stateCells → record`
+  // cycle. Recovered via `getScopeForNode` or direct property access.
+  Object.defineProperty(declNode, "_record", {
+    value: record,
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
 
   stats.totalRecords++;
   if (record.isCompoundParent) stats.compoundParents++;
@@ -301,12 +310,18 @@ function registerStateDecl(
       parentScope,
       qualifiedPath + ".",
     );
-    (declNode as ReactiveDeclNode & ScopeAnnotated)._scope = compoundScope;
+    Object.defineProperty(declNode, "_scope", {
+      value: compoundScope,
+      enumerable: false,
+      configurable: true,
+      writable: true,
+    });
     stats.totalScopes++;
 
     for (const child of declNode.children) {
-      if (child && child.kind === "state-decl") {
-        registerStateDecl(child, compoundScope, stats);
+      if (child && child.kind === "state-decl" && !visited.has(child)) {
+        visited.add(child);
+        registerStateDecl(child, compoundScope, stats, visited);
       }
     }
   }
@@ -328,16 +343,23 @@ function registerStateDecl(
 // `lift-expr.expr.node`. Engine + component bodies are NOT walked here —
 // today's AST stores them as strings (see ScopeKind doc).
 
-function walk(nodes: ASTNode[] | undefined, currentScope: Scope, stats: SYMStats): void {
+function walk(
+  nodes: ASTNode[] | undefined,
+  currentScope: Scope,
+  stats: SYMStats,
+  visited: WeakSet<object>,
+): void {
   if (!nodes) return;
   for (const n of nodes) {
-    if (!n) continue;
+    if (!n || typeof n !== "object") continue;
+    if (visited.has(n)) continue;
+    visited.add(n);
     const anyN = n as any;
     const kind = anyN.kind as string;
 
     if (kind === "state-decl") {
       // The state-decl itself registers + (if compound) opens a sub-scope.
-      registerStateDecl(n as ReactiveDeclNode, currentScope, stats);
+      registerStateDecl(n as ReactiveDeclNode, currentScope, stats, visited);
       // No further recursion: children are handled by registerStateDecl;
       // initExpr / renderSpec are EXPRESSION trees walked by B3 (not B1).
       continue;
@@ -347,20 +369,27 @@ function walk(nodes: ASTNode[] | undefined, currentScope: Scope, stats: SYMStats
       // Function body opens a new function-scoped child scope.
       // qualifiedPath unchanged: functions don't introduce a dotted prefix.
       const fnScope = createScope("function", currentScope, currentScope.qualifiedPath);
-      (anyN as FunctionDeclNode & ScopeAnnotated)._scope = fnScope;
+      Object.defineProperty(anyN, "_scope", {
+        value: fnScope,
+        enumerable: false,
+        configurable: true,
+        writable: true,
+      });
       stats.totalScopes++;
-      walk(anyN.body, fnScope, stats);
+      walk(anyN.body, fnScope, stats, visited);
       continue;
     }
 
     // Recurse into common AST containers. Mirrors NR's recursion shape.
-    if (Array.isArray(anyN.children)) walk(anyN.children, currentScope, stats);
-    if (Array.isArray(anyN.body)) walk(anyN.body, currentScope, stats);
-    if (Array.isArray(anyN.consequent)) walk(anyN.consequent, currentScope, stats);
-    if (Array.isArray(anyN.alternate)) walk(anyN.alternate, currentScope, stats);
+    // The `visited` WeakSet guards against `block`/`parent` back-refs that
+    // some BS-derived nodes carry (mirroring the test helper's findKind walk).
+    if (Array.isArray(anyN.children)) walk(anyN.children, currentScope, stats, visited);
+    if (Array.isArray(anyN.body)) walk(anyN.body, currentScope, stats, visited);
+    if (Array.isArray(anyN.consequent)) walk(anyN.consequent, currentScope, stats, visited);
+    if (Array.isArray(anyN.alternate)) walk(anyN.alternate, currentScope, stats, visited);
     if (Array.isArray(anyN.arms)) {
       for (const arm of anyN.arms) {
-        if (arm && Array.isArray(arm.body)) walk(arm.body, currentScope, stats);
+        if (arm && Array.isArray(arm.body)) walk(arm.body, currentScope, stats, visited);
       }
     }
     // P3-FOLLOW alignment: lift-expr carries a markup tree under expr.node.
@@ -368,7 +397,7 @@ function walk(nodes: ASTNode[] | undefined, currentScope: Scope, stats: SYMStats
     // value, not a decl-site), but mirroring NR's recursion shape avoids
     // surprises if a downstream B-step extends the walker.
     if (kind === "lift-expr" && anyN.expr && anyN.expr.kind === "markup" && anyN.expr.node) {
-      walk([anyN.expr.node], currentScope, stats);
+      walk([anyN.expr.node], currentScope, stats, visited);
     }
   }
 }
@@ -388,7 +417,12 @@ export function runSYM(input: SYMInput): SYMResult {
   const { filePath, ast } = input;
 
   const fileScope = createScope("file", null, "");
-  (ast as FileAST & ScopeAnnotated)._scope = fileScope;
+  Object.defineProperty(ast, "_scope", {
+    value: fileScope,
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
 
   const stats: SYMStats = {
     totalRecords: 0,
@@ -397,7 +431,8 @@ export function runSYM(input: SYMInput): SYMResult {
     totalScopes: 1, // the file-level root counts
   };
 
-  walk(ast.nodes, fileScope, stats);
+  const visited = new WeakSet<object>();
+  walk(ast.nodes, fileScope, stats, visited);
 
   return {
     filePath,

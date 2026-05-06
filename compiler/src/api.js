@@ -27,6 +27,7 @@ import { runCG } from "./code-generator.js";
 import { runMetaEval } from "./meta-eval.ts";
 import { resolveModules, resolveModulePath } from "./module-resolver.js";
 import { runNRBatch } from "./name-resolver.ts";
+import { runSYMBatch } from "./symbol-table.ts";
 import { setBPPOverrides } from "./codegen/compat/parser-workarounds.js";
 import { lintGhostPatterns } from "./lint-ghost-patterns.js";
 import { findUnsupportedTailwindShapes } from "./tailwind-classes.js";
@@ -666,6 +667,36 @@ export function compileScrml(options = {}) {
     let totalDiag = 0;
     for (const nr of nrResults) totalDiag += nr.errors.length;
     log(`  [NR] ${nrResults.length} file(s), ${totalDiag} diagnostic(s) (shadow mode)`);
+  }
+
+  // Stage 3.06 (SYM): Symbol Table — Phase A1b Step B1 foundational pass.
+  // Walks every state-decl AST node and registers it into a per-scope state-cell
+  // table. Constructs the scope tree (file / function / compound at B1; engine
+  // and component scopes RESERVED for B14+/B17+). Mutates ASTs in place by
+  // attaching `_record` to each state-decl and `_scope` to each scope-introducing
+  // node + the FileAST root.
+  //
+  // B1 fires NO diagnostics — this is foundational infrastructure consumed by
+  // B2-B22 (E-NAME-COLLIDES-STATE, @name resolution, validity-surface synthesis,
+  // L21 walker, etc.). B2 onward populates SYMResult.errors[].
+  //
+  // Why post-NR rather than NR-extension: NR's responsibility is tag-bearing-
+  // node classification (resolvedKind / resolvedCategory). State-cell scope
+  // registration is a separate concern; folding into NR would muddle
+  // separation. SYM consumes the same per-file AST NR produced; no MOD output
+  // dependency at B1 (cross-file state-cell resolution lands in B4).
+  const symResults = stage("SYM", () => runSYMBatch(tabResultsForNR));
+  for (const sym of symResults) {
+    collectErrors("SYM", sym.errors);
+  }
+  if (verbose) {
+    let totalRecords = 0;
+    let totalScopes = 0;
+    for (const sym of symResults) {
+      totalRecords += sym.stats.totalRecords;
+      totalScopes += sym.stats.totalScopes;
+    }
+    log(`  [SYM] ${symResults.length} file(s), ${totalRecords} state-cell record(s) across ${totalScopes} scope(s)`);
   }
 
   // Stage 3.2: CE — Component Expander (per-file)
