@@ -151,3 +151,48 @@ Tests + sample restoration carry the lift.
 6. Add §S11F test block to `parse-shapes-v0next.test.js` (~7 cases per
    BRIEF §4.2 including legacy regression test §S11F.7).
 7. Final commit.
+
+## Implementation log
+
+[step-11-0f path-discipline-near-miss] **Path discipline violation
+caught + corrected before any commit landed.** First edit attempt
+modified `/home/bryan-maclee/scrmlMaster/scrmlTS/compiler/src/ast-builder.js`
+(MAIN repo path) instead of
+`/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a2fda5fa64c5a861b/compiler/src/ast-builder.js`
+(WORKTREE path). Probe runs against the worktree (because cwd is the
+worktree and bun resolves imports via cwd-relative paths), so the fix
+appeared not to fire. Diagnosed by `find ... ast-builder*` showing two
+distinct files with different mtimes. Reverted main repo's
+`compiler/src/ast-builder.js` via `git checkout -- compiler/src/ast-builder.js`
+in the main worktree. Re-applied the SAME edit (now clean — no debug
+prints) to the worktree's `compiler/src/ast-builder.js`. This is the
+exact pitfall flagged in the BRIEF startup-verification protocol:
+"NEVER use absolute paths starting with the main repo root directly.
+ALWAYS use ABSOLUTE paths under WORKTREE_ROOT." Surfaced explicitly
+here for future agents.
+
+[step-11-0f impl-patch] Edited
+`compiler/src/ast-builder.js` L1980-1988: added `lastKind === "BLOCK_REF" ||`
+disjunct to `lastEndsValue` predicate inside `collectExpr`'s ASI-NEWLINE
+branch. 1-character semantic correction with universal applicability.
+21 LOC of explanation comments + 1 LOC change to the disjunct chain.
+
+Probe re-run confirms:
+
+| Probe | Pre-fix | Post-fix | Status |
+|---|---|---|---|
+| T1 (V5-strict + sibling) | 1 decl | 2 decls ✓ | **Fixed** |
+| T2 (V5-strict + legacy mix) | 2 ✓ | 2 ✓ | Unchanged (regression preserved) |
+| T3 (legacy regression `@x = ?{}`) | 2 ✓ | 2 ✓ | **Preserved** |
+| T4 (3 V5-strict siblings) | 1 decl | 3 decls ✓ | **Fixed** (cascading restored) |
+| T5 (V5-strict + const derived) | 2 ✓ | 2 ✓ | Unchanged (`const` STMT_KEYWORD breaks earlier) |
+| T6 (V5-strict + typed-decl) | 1 decl | 2 decls ✓ | **Fixed** (Step 11.0c interaction) |
+| T7 (V5-strict + Variant C compound) | 1 decl | 3 decls ✓ | **Fixed** (Step 11.0a interaction) |
+| T9 (semicolon explicit) | 2 ✓ | 2 ✓ | Unchanged |
+
+Coverage probe re-run (C1-C5, G1, G3) — all unchanged, all still
+correct. No regression in template literal / member access / call /
+index / object literal / markup-attr-RHS / lift-expr paths.
+
+Full test: **8,886 pass / 44 skip / 0 fail / 8,930 across 439 files**
+— identical to baseline. **0 regressions.**

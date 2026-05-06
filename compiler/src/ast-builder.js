@@ -1976,12 +1976,33 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // ASI-NEWLINE (`lastEndsValue=false`), and Step 11.0b's universal
           // `<` IDENT boundary (below) never fired — sibling `<y>` got
           // greedily consumed into the init string. (P-FUP-2 from Step 12.)
+          //
+          // Phase A1a Step 11.0f — BLOCK_REF tokens (e.g., `?{SQL}`,
+          // `${expr}` consumed as embedded child placeholders per
+          // tokenizer.ts L796) are value-producing terminals. SPEC §6
+          // establishes `?{SQL}` as a SQL passthrough block expression;
+          // these placeholders represent the in-place result of an
+          // embedded child block (sql/error-effect/meta) and are
+          // semantically symmetric with closing-bracket terminals (`)`,
+          // `]`, `}`) — they end an expression with a value. Without
+          // this entry, `<x> = ?{SQL}\n<y> = 0` failed ASI-NEWLINE
+          // (`lastEndsValue=false`); Step 11.0b's universal `<` IDENT
+          // boundary (below) never fired — sibling `<y>` got greedily
+          // consumed into the init string. (P-FUP-3 from Step 11.0e.)
+          //
+          // Note: L1817 (above) already breaks at depth 0 when a NEW
+          // BLOCK_REF arrives after `parts.length > 0`, so adjacent
+          // `?{A}\n?{B}` pairs are governed by that earlier guard, NOT
+          // by this disjunct. This disjunct only fires when the next
+          // token is something OTHER than BLOCK_REF (e.g., `<NAME>`
+          // sibling decl opener) on a later line.
           const VALUE_KEYWORDS = new Set(["true", "false", "null", "undefined", "this", "not"]);
           const lastEndsValue = (
             lastKind === "IDENT" ||
             lastKind === "NUMBER" ||
             lastKind === "STRING" ||
             lastKind === "AT_IDENT" ||
+            lastKind === "BLOCK_REF" ||
             (lastKind === "KEYWORD" && VALUE_KEYWORDS.has(lastText)) ||
             (lastKind === "PUNCT" && (lastText === ")" || lastText === "]" || lastText === "}"))
           );
