@@ -91,3 +91,56 @@ Adjusted plan based on survey findings:
 - **Chunk 5 (drop the retired AST kind interface):** narrowed to `ReactiveDerivedDeclNode`.
 - **Chunk 6 (docs/cleanup):** primer §12 update.
 
+## Chunk 2 — DONE
+
+- 2026-05-06T00:30 — Dropped 19 `@deprecated Phase 4d` field declarations from `compiler/src/types/ast.ts`. Tests: 8204 pass, 33 skip, 1 todo, 0 fail (pre-commit subset; matches baseline minus browser tests). Post-commit gauntlet checks all PASS. Commit: `578f6f5`.
+
+## Chunk 3 — SKIPPED
+
+- 2026-05-06T00:35 — Audit-referenced `dual-shape fallback at type-system.ts:7909` was already removed in Stage 0c.A (`buildOverloadRegistry` deleted). Current `dual-shape` references at lines 4990, 7583, 7606, 7859 are unrelated (CE output `fileAST.nodes` vs `fileAST.ast.nodes`). Nothing to drop.
+
+## Chunk 4 — SKIPPED
+
+- 2026-05-06T00:36 — No live walker arms remain for `reactive-derived-decl`. Surveyed all `compiler/src/` for `case "reactive-derived-decl":` and `kind === "reactive-derived-decl"`: only 2 historical/explanatory comments in `emit-logic.ts` (no live arms). Walker arm pruning was completed in S60. The other 4 reactive-* kinds in the audit's list are still LIVE (constructed by ast-builder.js); their walker arms remain.
+
+## Chunk 5 — DONE
+
+- 2026-05-06T00:40 — Dropped `ReactiveDerivedDeclNode` interface from `compiler/src/types/ast.ts` (replaced with explanatory comment). The kind is fully retired post-S60 fold; interface was an orphan structural artifact. Tests: 8204 pass, 33 skip, 1 todo, 0 fail. Post-commit checks all PASS. Commit: `cfe3988`.
+
+## Chunk 6 — DONE
+
+- 2026-05-06T00:45 — Updated `docs/PA-SCRML-PRIMER.md` §12 retired-AST-kinds paragraph: corrected the "5 retired kinds, walker arms still present" framing to reflect the survey-corrected reality (only 1 of 5 truly retired; interface dropped at S64; 19 deprecated string field declarations dropped). Also updated `Last updated` timestamp on the primer.
+
+## Final state
+
+- 2026-05-06T00:50 — Working tree clean except primer + progress changes (chunk 6 in progress).
+
+### Summary
+
+- **Fields dropped:** 19 (from ast.ts).
+- **AST kinds retired:** 1 (ReactiveDerivedDeclNode).
+- **Walker source files touched:** 0 (no live arms remained — S60 already cleaned them).
+- **Files edited:** 3 (`compiler/src/types/ast.ts`, `docs/PA-SCRML-PRIMER.md`, `docs/changes/phase-4d-completion-sweep/progress.md`).
+- **Commits:** 3 (chunk 2 `578f6f5`, chunk 5 `cfe3988`, chunk 6 to follow).
+- **Test counts:** baseline 8204 pass / 33 skip / 1 todo / 0 fail (pre-commit subset; full suite 8928 pass post-commit) — UNCHANGED throughout, zero regressions on non-deleted tests, zero tests deleted.
+
+### Audit deviations
+
+1. **Audit said ~32 `@deprecated Phase 4d` markers**; actually 19 in current ast.ts. The Phase 4d sweep had partially landed across earlier sessions (e.g. `BareExprNode.expr?: string` was dropped at S40, with documenting note in source). The remaining 19 were the right number to drop.
+2. **Audit said "5 retired reactive-* AST kinds"**; actually only 1 (`reactive-derived-decl`) is truly retired. The other 4 (`reactive-debounced-decl`, `reactive-array-mutation`, `reactive-explicit-set`, `reactive-nested-assign`) are STILL ACTIVELY CONSTRUCTED by `ast-builder.js` lines 3799/3900/3979/3915 and 5567/5685/5819/5701. Survey confirmed this via grep + read of the construction sites. Audit appears to have over-extrapolated from the single `@deprecated Phase A1a Step 11.5 — RETIRED` JSDoc tag on `ReactiveDerivedDeclNode` to all 5 nodes; only that tag exists.
+3. **Audit said dual-shape fallback at type-system.ts:7909**; actually that line is innocuous post-Stage-0c.A (`buildOverloadRegistry` was deleted along with the comment).
+4. **Audit's ~10 walker files claim**: confirmed for the *other 4* reactive-* kinds (still actively dispatched in walkers). For `reactive-derived-decl` specifically, the walker arms were already removed in S60 — only historical comments remain.
+
+### Read-site classification table (Phase 1 step 4 summary)
+
+| Field | (a) walker fallback (defensive) | (b) active typed read | (c) test fixture | Verdict |
+|---|---|---|---|---|
+| `init?: string` (let/const/tilde/lin/state-decl/derived/debounced) | emit-logic, scheduling, collect, dependency-graph, type-system, reactive-deps, meta-eval | meta-checker:737, 1189 | various | TS-drop safe (runtime field still written by ast-builder) |
+| `value?: string` (reactive-nested-assign) | emit-logic | none direct typed | none | TS-drop safe |
+| `condition?: string` (if/if-expr/while) | emit-control-flow, emit-logic, type-system, dependency-graph, route-inference, meta-eval | (some via ASTNodeLike) | various | TS-drop safe |
+| `iterable?: string` (for-expr/for-stmt) | emit-control-flow, emit-logic, route-inference | none direct typed | none | TS-drop safe |
+| `header?: string` (match-expr/switch/match-stmt) | emit-control-flow | (some via ASTNodeLike) | none | TS-drop safe |
+| `expr?: string` (return/throw/propagate) | emit-control-flow, emit-logic, dependency-graph | (some via ASTNodeLike) | none | TS-drop safe |
+
+All field reads either (a) cast through `ASTNodeLike` (Record-shape escape hatch — unaffected by TS field drops), or (b) read `node.init` directly on a typed discriminant (safe at runtime since bun runs TS with type erasure; pre-commit hook is `bun test` not `tsc --noEmit`). No test fixture asserted `node.init === ...` against the dropped field declarations specifically; tests assert behavior (compiled output / AST kind discriminants) which is unchanged.
+
