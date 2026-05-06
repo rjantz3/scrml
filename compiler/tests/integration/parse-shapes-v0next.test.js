@@ -2177,3 +2177,307 @@ describe("A1a Step 11.0f — `<x> = ?{SQL}` BLOCK_REF newline-as-separator bound
     expect(byName.y.structuralForm).toBe(false);
   });
 });
+
+// =============================================================================
+// §S11D — Phase A1a Step 11.0d: top-level structural Shape 1 recognition
+// =============================================================================
+//
+// SPEC §6.2 — `<count> = 0` (Shape 1 plain), `<count>: number = 0` (Shape 1
+// + typed-decl), `const <doubled> = expr` (Shape 3 derived) at FILE TOP
+// LEVEL — outside any `${...}` block — must parse to state-decl just like
+// the inside-`${...}` form does (Step 2 + 11.0c).
+//
+// Pre-fix (Step 12 dispatch survey, S61): top-level `<count> = 0` triggered
+// the BS `<letter` markup branch and pushed a markup context for `count`.
+// Either E-CTX-003 fired at EOF (unclosed) or `</>` popped and an
+// html-fragment was emitted with the source text — the deceptive-success
+// pattern. P-FUP-1.
+//
+// Fix (commit 998d0d0): BS adds `peekTopLevelStateDeclSignal()` — at true
+// top-level (`stack.length === 0`), look past `<NAME [attrs]>` to the
+// post-`>` next non-whitespace char; if it is bare `=` (rejecting `==` and
+// `=>`) or `:`, fall through as TEXT instead of pushing a markup context.
+// liftBareDeclarations matches the text against TOPLEVEL_STATE_DECL_RE and
+// wraps it in a synthetic `${...}` logic block; parseLogicBody's existing
+// tryParseStructuralDecl recognizer (Steps 2/11.0a/11.0c) parses it as
+// state-decl with structuralForm:true.
+//
+// Spec authority: §6.2 (Three RHS Shapes for State Declarations); §4.6
+// (PA-001 brace-suppression, which does NOT apply at top-level — top-level
+// is OUTSIDE braces); §6.3 (decl-spec discriminant); §14.10 (typed-decl).
+//
+// Scope of this Step:
+//   - Shape 1 plain (`<count> = 0`)                              ✓ supported.
+//   - Shape 1 with complex init (`<items> = [1,2,3]`)            ✓ supported.
+//   - Shape 3 derived (`const <doubled> = @count * 2`)           ✓ supported.
+//   - typed-decl Shape 1 (`<count>: number = 0`)                 ✓ supported.
+//   - Multi-decl newline-separated at top-level                  ✓ supported.
+//   - Discrimination vs `<div>...</>` markup                     ✓ supported.
+//   - Discrimination vs `< userBadge name(string)>`              ✓ supported
+//     (component-defs use the BS state-opener / leading-space branch and
+//     produce `state-constructor-def`, not state-decl).
+//   - Shape 2 with markup-RHS (`<email req> = <input/>`)         partial.
+//     The BS peek triggers on `=`, but the markup-RHS becomes a separate
+//     sibling markup node (BS pushes a new markup frame for `<input/>`
+//     at the next char). The state-decl emits validators correctly, but
+//     no renderSpec is attached. Full top-level Shape 2 markup-RHS
+//     accumulation is deferred — see §S11D.3 below.
+//   - Variant C compound (`<formRes><name>=""<email>=""</>`)     deferred.
+//     BS pushes a markup context for `<formRes>` and consumes the body
+//     (post-`>` next non-whitespace is `<name>` — peek currently only
+//     matches `=` and `:`, not `<`). Compound at top-level is deferred to
+//     a follow-up; see §S11D.5.
+// =============================================================================
+
+describe("A1a Step 11.0d — top-level structural Shape 1 recognition", () => {
+  // Helper: filter out W-PROGRAM-001 (top-level samples in this block
+  // intentionally omit the `<program>` wrapper to test the BS top-level
+  // path; the warning is benign).
+  function nonWarningErrors(errors) {
+    return (errors || []).filter((e) => e?.severity !== "warning");
+  }
+
+  // §S11D.1 — Top-level Shape 1 plain. The flagship case.
+  // Pre-11.0d this either errored E-CTX-003 (unclosed `count` markup
+  // frame at EOF) or emitted a deceptive html-fragment.
+  // Post-11.0d the BS peek detects post-`>` `=`, falls through as text,
+  // and lift+parse produces state-decl{shape:"plain", structuralForm:true}.
+  test("§S11D.1: `<count> = 0` at TOP LEVEL produces state-decl{shape:plain, structuralForm:true}", () => {
+    const src = `<count> = 0`;
+    const { ast, errors } = parse(src);
+    expect(nonWarningErrors(errors).length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.name).toBe("count");
+    expect(d.init).toBe("0");
+    expect(d.shape).toBe("plain");
+    expect(d.structuralForm).toBe(true);
+    expect(d.isConst).toBe(false);
+    // Anti-deceptive-success guard.
+    assertNoHtmlFragmentMatching(ast, /<\s*count\s*>/);
+  });
+
+  // §S11D.2 — Top-level Shape 1 with array init. Confirms the trigger
+  // robustness across complex init expressions (paren-bracket-balance
+  // tracked by collectExpr inside the synthetic `${...}` wrap).
+  test("§S11D.2: `<items> = [1, 2, 3]` at TOP LEVEL produces state-decl with array init", () => {
+    const src = `<items> = [1, 2, 3]`;
+    const { ast, errors } = parse(src);
+    expect(nonWarningErrors(errors).length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.name).toBe("items");
+    expect(d.init).toContain("1");
+    expect(d.init).toContain("2");
+    expect(d.init).toContain("3");
+    expect(d.shape).toBe("plain");
+    expect(d.structuralForm).toBe(true);
+    expect(d.isConst).toBe(false);
+    assertNoHtmlFragmentMatching(ast, /<\s*items\s*>/);
+  });
+
+  // §S11D.3 — Top-level Shape 2 (decl-with-spec) with markup-RHS.
+  // PARTIAL SUPPORT — see scope notes above. The state-decl is produced
+  // with validators populated correctly, but the markup-RHS (`<input/>`)
+  // becomes a separate sibling markup node rather than a renderSpec child.
+  // Full top-level Shape 2 markup-RHS accumulation requires extending the
+  // BS peek to consume markup-RHS as text continuation (deferred — likely
+  // a follow-up Step 11.0g or similar). The `${ <email req email> = <input/> }`
+  // form (inside-`${...}`) IS fully supported — see §S5.
+  //
+  // This test asserts the CURRENT partial behaviour: state-decl with
+  // validators, markup-RHS as sibling. It will need updating when full
+  // Shape 2 top-level support lands.
+  test("§S11D.3: `<email req email> = <input/>` at TOP LEVEL — state-decl + validators (markup-RHS sibling, partial support)", () => {
+    const src = `<email req email> = <input type="email"/>`;
+    const { ast, errors } = parse(src);
+    expect(nonWarningErrors(errors).length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.name).toBe("email");
+    expect(d.structuralForm).toBe(true);
+    expect(d.validators).toBeDefined();
+    expect(d.validators.map((v) => v.name).sort()).toEqual(["email", "req"]);
+    // The decl's structural form is preserved. Anti-html-fragment guard
+    // applies — the `<email...>` opener never produced an html-fragment.
+    assertNoHtmlFragmentMatching(ast, /<\s*email\s*>/);
+  });
+
+  // §S11D.4 — Top-level Shape 3 derived. `const <doubled> = expr` is
+  // canonical Shape 3. The `const` keyword precedes the `<` and is
+  // accumulated as text by BS before the trigger fires; lift's regex
+  // matches `^\s*(?:const\s+)?<...>` so the wrap captures it. Inside
+  // the synthetic logic, parseLogicBody's `const <ident>` path runs
+  // tryParseStructuralDecl(t, isConst=true), producing shape:"derived"
+  // + isConst:true.
+  test("§S11D.4: `const <doubled> = @count * 2` at TOP LEVEL produces state-decl{shape:derived, isConst:true}", () => {
+    const src = `const <doubled> = @count * 2`;
+    const { ast, errors } = parse(src);
+    expect(nonWarningErrors(errors).length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.name).toBe("doubled");
+    expect(d.init).toBe("@count * 2");
+    expect(d.shape).toBe("derived");
+    expect(d.structuralForm).toBe(true);
+    expect(d.isConst).toBe(true);
+    assertNoHtmlFragmentMatching(ast, /<\s*doubled\s*>/);
+  });
+
+  // §S11D.5 — Top-level Variant C compound — DEFERRED.
+  // Pre-11.0d AND post-11.0d, the form `<formRes>\n  <name> = ""\n</>` at
+  // TRUE TOP LEVEL produces 0 BS blocks: the BS `<letter` markup branch
+  // pushes a context for `<formRes>` (the peek rejects because post-`>`
+  // is whitespace then `<`, not `=` or `:`); the body and `</>` close
+  // the frame, BUT the markup leaf is not emitted at top-level state in
+  // the absence of a parent context-pump. Full compound at top-level
+  // requires extending BS to recognize the `<NAME>` + body-of-state-decls
+  // + `</>` shape and emit it as text (or as a structured compound block).
+  //
+  // Inside-`${...}` compound IS fully supported (see §S11A). Top-level
+  // compound is deferred to a follow-up. Test marked as `.todo` to
+  // document the gap and keep the catalog complete.
+  test.todo("§S11D.5: top-level Variant C compound `<formRes>\\n  <name> = \"\"\\n</>` — DEFERRED (BS produces 0 blocks)");
+
+  // §S11D.6 — Top-level typed-decl. `<count>: number = 0` per §14.10 +
+  // Step 11.0c. The BS peek detects `:` (not just `=`); lift's regex
+  // `>\s*[=:]` matches both terminators. parseLogicBody's typed-decl
+  // recognizer (Step 11.0c, ast-builder.js around tryParseStructuralDecl
+  // typed-branch) produces typeAnnotation:"number".
+  test("§S11D.6: `<count>: number = 0` at TOP LEVEL produces state-decl with typeAnnotation:\"number\"", () => {
+    const src = `<count>: number = 0`;
+    const { ast, errors } = parse(src);
+    expect(nonWarningErrors(errors).length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    const d = decls[0];
+    expect(d.name).toBe("count");
+    expect(d.init).toBe("0");
+    expect(d.typeAnnotation).toBe("number");
+    expect(d.shape).toBe("plain");
+    expect(d.structuralForm).toBe(true);
+    expect(d.isConst).toBe(false);
+    assertNoHtmlFragmentMatching(ast, /<\s*count\s*>/);
+    assertNoHtmlFragmentMatching(ast, /:\s*number/);
+  });
+
+  // §S11D.7 — Anti-html-fragment guard ACROSS the supported positive
+  // cases. Per AST-CONTRACTS §7 the deceptive-success pattern (compile
+  // clean but parse-as-text) must be ruled out for every Shape. This
+  // test exercises the full set in one source and asserts NO
+  // html-fragment node carries any of the names.
+  test("§S11D.7: anti-html-fragment guard — top-level Shapes 1+3+typed-decl produce no html-fragment", () => {
+    const src = `<count> = 0
+<items> = [1, 2, 3]
+const <doubled> = @count * 2
+<typed>: number = 0
+`;
+    const { ast, errors } = parse(src);
+    expect(nonWarningErrors(errors).length).toBe(0);
+    const fragments = findKind(ast, "html-fragment");
+    // Per the helper's assertion semantics, no fragment may carry the
+    // decl-name source text. Also globally there should be no fragments
+    // for any of the names.
+    for (const name of ["count", "items", "doubled", "typed"]) {
+      const re = new RegExp(`<\\s*${name}\\s*>`);
+      assertNoHtmlFragmentMatching(ast, re);
+    }
+    // Also positive: 4 state-decls produced.
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(4);
+    expect(decls.map((d) => d.name).sort()).toEqual(["count", "doubled", "items", "typed"]);
+  });
+
+  // §S11D.8 — Discrimination: top-level state-decl vs top-level markup
+  // expression. `<count> = 0` and `<div>hello</>` co-exist at top-level
+  // and parse to DIFFERENT kinds. The BS peek discriminates by post-`>`
+  // next non-whitespace: `=` → state-decl trigger; content → markup tag.
+  test("§S11D.8: discrimination — top-level `<count> = 0` is state-decl, `<div>hello</>` is markup", () => {
+    const src = `<count> = 0
+<div>hello</>
+`;
+    const { ast, errors } = parse(src);
+    expect(nonWarningErrors(errors).length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(1);
+    expect(decls[0].name).toBe("count");
+    const markups = findKind(ast, "markup");
+    const div = markups.find((m) => m.tag === "div");
+    expect(div).toBeDefined();
+    // div is NOT a state-decl
+    const divAsDecl = decls.find((d) => d.name === "div");
+    expect(divAsDecl).toBeUndefined();
+    // Anti-fragment for both
+    assertNoHtmlFragmentMatching(ast, /<\s*count\s*>/);
+  });
+
+  // §S11D.9 — Discrimination: top-level state-decl vs top-level
+  // component-def. `< userBadge name(string)>` (leading-space) takes the
+  // BS state-opener branch (line ~1088) — NOT the `<letter` markup
+  // branch where our peek lives — and produces a `state-constructor-def`
+  // (typed attributes detected). Our peek does NOT fire on the
+  // leading-space form; component-defs are untouched by Step 11.0d.
+  test("§S11D.9: discrimination — `< userBadge name(string)>...</>` produces state-constructor-def, NOT state-decl", () => {
+    const src = `< userBadge name(string)>
+  <span class="badge"></span>
+</>`;
+    const { ast, errors } = parse(src);
+    // W-WHITESPACE-001 may fire for the leading-space form (deprecated
+    // but still compiling); accept it as a non-hard error.
+    const hardErrors = nonWarningErrors(errors);
+    expect(hardErrors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    // No state-decl named "userBadge" — that's a constructor-def, not a decl.
+    const userBadgeDecl = decls.find((d) => d.name === "userBadge");
+    expect(userBadgeDecl).toBeUndefined();
+    const constructors = findKind(ast, "state-constructor-def");
+    expect(constructors.length).toBe(1);
+    expect(constructors[0].stateType).toBe("userBadge");
+  });
+
+  // §S11D.10 — Invariant: top-level state-decl satisfies the same
+  // shape↔isConst rules as inside-`${...}` (per §S4 / §S5 / §S11.5).
+  // shape:"plain" → isConst:false; shape:"derived" → isConst:true;
+  // shape ∈ {"plain","derived","decl-with-spec"} always; structuralForm:true
+  // for V5-strict structural-form decls. This test exercises the
+  // top-level path and asserts the invariant holds.
+  test("§S11D.10: invariant — top-level state-decl satisfies shape↔isConst rules (matches inside-`${...}`)", () => {
+    const src = `<a> = 0
+<b> = ""
+const <c> = @a + 1
+<d>: number = 0
+`;
+    const { ast, errors } = parse(src);
+    expect(nonWarningErrors(errors).length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(4);
+    for (const d of decls) {
+      // shape ∈ {"plain","derived","decl-with-spec"} always
+      expect(["plain", "derived", "decl-with-spec"]).toContain(d.shape);
+      // structuralForm:true for V5-strict structural form
+      expect(d.structuralForm).toBe(true);
+      // shape↔isConst contract
+      if (d.shape === "derived") {
+        expect(d.isConst).toBe(true);
+      } else {
+        // "plain" or "decl-with-spec" → isConst:false (P1)
+        expect(d.isConst).toBe(false);
+      }
+    }
+    // Specific assertions
+    const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
+    expect(byName.a.shape).toBe("plain");
+    expect(byName.a.isConst).toBe(false);
+    expect(byName.b.shape).toBe("plain");
+    expect(byName.b.isConst).toBe(false);
+    expect(byName.c.shape).toBe("derived");
+    expect(byName.c.isConst).toBe(true);
+    expect(byName.d.shape).toBe("plain");
+    expect(byName.d.typeAnnotation).toBe("number");
+    expect(byName.d.isConst).toBe(false);
+  });
+});

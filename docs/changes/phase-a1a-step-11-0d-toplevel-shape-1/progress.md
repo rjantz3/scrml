@@ -182,3 +182,13 @@ Phase order:
 - [survey-4] ast-builder surveyed — `liftBareDeclarations` (L627) + `tryParseStructuralDecl` (L2980) wiring confirmed.
 - [survey-5] SPEC §6.2 + §4.6 read — design path validated.
 - [survey-6] Decision: BS peek + lift extension. Defer compound at top-level (BRIEF §S11D.5) to a follow-up if time tight.
+
+## Finisher dispatch (resumed, 2026-05-05)
+
+Original 11-0d agent stalled (stream idle timeout) after committing the parser fix. Finisher branch: `phase-a1a-step-11-0d-finisher` parented from `97bc50b` (current main HEAD). Original BS extension is at commit `998d0d0`.
+
+- [finisher-1] Worktree pwd `/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-aadc417dd622e6e02` verified, branch `phase-a1a-step-11-0d-finisher` created from worktree-agent-aadc417dd622e6e02 (HEAD = `97bc50b`).
+- [finisher-2] `bun install` OK; `bun run pretest` OK; baseline `bun run test`: 8893 / 44 / 0 / 8937 across 439 files. (Note: first run had 2 transient failures in serve.test.js — ECONNREFUSED race; second run clean.)
+- [finisher-3] Verified parser changes from `998d0d0`:
+  - `compiler/src/block-splitter.js` L444 `peekTopLevelStateDeclSignal` + L1129 trigger in `<letter` branch — present.
+  - `compiler/src/ast-builder.js` L328 `TOPLEVEL_STATE_DECL_RE` + L952 lift-branch in `liftBareDeclarations` — present.
