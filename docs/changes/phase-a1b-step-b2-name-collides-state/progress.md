@@ -135,5 +135,40 @@ For now, **B2 only fires within file/function/compound scopes** — which is exa
 
 - Pre-commit clean. Post-commit gauntlet (TodoMVC) clean.
 
+### Chunk 3 — landed `112358d`
+
+- Added §B2 integration tests to `compiler/tests/integration/symbol-table.test.js`. 13 new tests covering:
+  - §B2.1 — let-decl positive (file-scope state cell)
+  - §B2.2 — const-decl positive
+  - §B2.3 — negatives (no fire on non-collision; no fire when no state cell)
+  - §B2.4 — multi-collision (two locals each shadowing a different state cell)
+  - §B2.5 — tilde-decl positive (bare-name `name = expr`)
+  - §B2.6 — lin-decl positive
+  - §B2.7 — forward-reference (state-decl appears AFTER local-decl in source order — hoisting)
+  - §B2.8 — nested function inherits collision check via parent-chain walk
+  - §B2.9 — compound parent collision
+  - §B2.10 — compound-CHILD does NOT register at file scope (negative — confirms the qualified-path semantics)
+  - §B2.11 — span correctness + qualified-path display in message
+
+- Anti-folklore guard satisfied: every positive test asserts BOTH `errors.length` AND message content (cell name + V5-strict reference).
+
+- **Test counts:** 8941 / 44 / 1 / 0 / 8986 / 440 — net +13 tests from baseline (chunk 1 baseline 8928 → 8941 here). Zero regressions.
+
+- Note on commit: the user's machine had pending unstaged SPEC.md edits (4 missing error code additions from S64 audit) that got auto-committed alongside Chunk 3. The combined commit is labeled "docs(s64): add 4 missing error codes to SPEC §34 catalog" but actually contains both the SPEC additions AND the §B2 test additions. File content is correct; commit message is cosmetically misleading. Not worth reverting since the SPEC additions are independently valid and B2 work is in the same commit.
+
+### Chunk 4 — §S11D.5 .todo verification
+
+Probed current BS behavior for top-level Variant C compound:
+```
+src = `<formRes>\n  <name> = ""\n</>`;
+bs.blocks = []     // still 0 blocks
+ast.nodes = []     // no top-level state-decl
+```
+
+The §S11D.5 .todo is a PARSER-level bug (BS produces 0 blocks at TRUE top-level for Variant C compound). It is unrelated to B2 (which fires on local-decl shadowing). The brief noted "Verify B1 actually handles the case at TAB-output time (likely yes per the absorption note)" — the absorption note in the B1 BRIEF §2.1.3 states: "B1's compound-aware registration handles top-level Variant C compound automatically — when the parser eventually emits the AST shape (currently held as .todo at A1a), B1's symbol-table walker is already prepared. No B1 work blocks on the parser fix; the .todo lifts to a parser-only follow-up if/when prioritized."
+
+The parser fix has NOT landed (BS still produces 0 blocks for this shape), so the .todo correctly remains as `.todo`. **Promotion is NOT warranted at B2.** This will flip when the BS parser is extended to recognize the top-level Variant C shape (a follow-up parser dispatch — Step 11.0g or similar).
+
+
 
 
