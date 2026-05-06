@@ -659,8 +659,6 @@ export interface FunctionDeclNode extends BaseNode {
    * Recognized by: isServer && !isGenerator && name === "handle".
    */
   isHandleEscapeHatch?: boolean;
-  /** State type scope for functions inside state constructor defs. */
-  stateTypeScope?: string;
 }
 
 // -- Component Definition --

@@ -1344,34 +1344,6 @@ function parseAttributes(tokens, filePath, errors, isComponent = false) {
  * }
  */
 /**
- * Walk an AST node tree and tag all function-decl nodes with a stateTypeScope.
- * Used to mark functions inside state constructors for state-type dispatch overloading.
- *
- * @param {object[]} nodes  — ASTNode[] (children of a state-constructor-def)
- * @param {string} stateTypeName  — the state type name (e.g., "card", "badge")
- */
-function tagFunctionsWithStateType(nodes, stateTypeName) {
-  for (const node of nodes) {
-    if (!node || typeof node !== "object") continue;
-    if (node.kind === "function-decl") {
-      node.stateTypeScope = stateTypeName;
-    }
-    // Recurse into logic blocks to find functions declared inside ${} inside the constructor
-    if (node.kind === "logic" && Array.isArray(node.body)) {
-      for (const stmt of node.body) {
-        if (stmt && (stmt.kind === "function-decl")) {
-          stmt.stateTypeScope = stateTypeName;
-        }
-      }
-    }
-    // Recurse into children
-    if (Array.isArray(node.children)) {
-      tagFunctionsWithStateType(node.children, stateTypeName);
-    }
-  }
-}
-
-/**
  * §54.3 Phase 4b — parse the trailing transition-decl signature from a text
  * block's content. Returns null if the text does not end with a signature.
  *
@@ -8342,10 +8314,6 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
 
       if (hasTypedDecls) {
         // State constructor definition — `< name attrib(type)>` with typed declarations
-        // Tag all function-decl nodes inside the constructor with stateTypeScope
-        // so the type system can build an overload registry for state-type dispatch.
-        tagFunctionsWithStateType(children, block.name);
-
         return {
           id: ++counter.next,
           kind: "state-constructor-def",
