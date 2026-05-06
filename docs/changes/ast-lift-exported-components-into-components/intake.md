@@ -23,7 +23,7 @@ OR: in CE, where the export-decl is parsed for component refs anyway, push the p
 
 ## Reference
 
-- L3 anomaly report: `docs/changes/lsp-l3-scrml-unique-completions/anomaly-report.md`
+- L3 anomaly report: `scrml-support/archive/changes/lsp-l3-scrml-unique-completions/anomaly-report.md` (moved from `docs/changes/` in S61 curation Batch H)
 - L3 LSP-side workaround: `lsp/handlers.js::findComponentDefInAST` (walks `ast.exports`)
 
 ## Tags

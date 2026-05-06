@@ -134,7 +134,13 @@ Both dirs → `scrml-support/archive/changes/<name>/`. No cross-refs.
 
 Both dirs → `scrml-support/archive/changes/<name>/`. No cross-refs.
 
-### §3.8 Batch H: LSP series (5 dirs) — S51-era LSP rework
+### §3.8 Batch H: LSP series (5 dirs) — ✅ RATIFIED + EXECUTED S61 (2026-05-05)
+
+All 5 dirs → `scrml-support/archive/changes/<name>/`.
+
+**Cross-refs fixed:** 2 in scrmlTS Batch J dirs (pa-shadow-db-from-any-context/intake.md + ast-lift-exported-components-into-components/intake.md — both reference lsp-l3 anomaly-report; now point to scrml-support archive). When Batch J moves later, those refs land in archive correctly.
+
+**Original sub-table:**
 
 | Dir | What |
 |---|---|
@@ -237,7 +243,7 @@ Suggested ratification cadence: 1-2 batches per session to avoid overload. PA ha
 5. ✅ **Batch D (F-series, 11 dirs)** — RATIFIED + EXECUTED S61 (2026-05-05). 11 dirs → `scrml-support/archive/changes/`; 1 changelog cross-ref fixed.
 6. ✅ **Batch I (fix-*, 20 dirs)** — RATIFIED + EXECUTED S61 (2026-05-05). 20 dirs → `scrml-support/archive/changes/`; 6 cross-refs fixed (changelog ×2, scope-c-findings-tracker ×2, 2 test files, 2 source files); 1 dangling pre-existing ref left as-is.
 7. ✅ **Batches E (GITI, 2) + G (bun-sql, 2) combined** — RATIFIED + EXECUTED S61 (2026-05-05). 4 dirs → `scrml-support/archive/changes/`; no cross-refs.
-8. **Batch H (LSP L1-L4, 5 dirs)** — recent (S51) but completed.
+8. ✅ **Batch H (LSP L1-L4, 5 dirs)** — RATIFIED + EXECUTED S61 (2026-05-05). 5 dirs → `scrml-support/archive/changes/`; 2 cross-refs in J-pile dirs pre-fixed (will travel correctly when J moves).
 9. **Batch J (misc, 12 dirs)** — heterogeneous; review-per-dir.
 
 ---

@@ -22,7 +22,7 @@ Extend PA's CREATE TABLE collection to walk into expression contexts:
 
 ## Reference
 
-- L3 anomaly report: `docs/changes/lsp-l3-scrml-unique-completions/anomaly-report.md`
+- L3 anomaly report: `scrml-support/archive/changes/lsp-l3-scrml-unique-completions/anomaly-report.md` (moved from `docs/changes/` in S61 curation Batch H)
 - PA: `compiler/src/protect-analyzer.ts::extractCreateTableStatements`
 
 ## Tags
