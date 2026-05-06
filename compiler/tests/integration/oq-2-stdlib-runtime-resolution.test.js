@@ -2,7 +2,7 @@
  * OQ-2: Stdlib runtime resolution — `scrml:NAME` import bridge.
  *
  * Coverage for the Shape B fix from
- *   docs/changes/oq-2-dev-server-bootstrap/diagnosis.md
+ *   scrml-support/archive/changes/oq-2-dev-server-bootstrap/diagnosis.md
  *
  * Pre-fix behavior (the bug):
  *   Codegen emitted literal `import { ... } from "scrml:auth"` into output JS.

@@ -185,7 +185,13 @@ All 20 dirs → `scrml-support/archive/changes/<name>/`.
 
 **Disposition:** all 20 → `scrml-support/archive/dispatches/hotfixes/<name>/`.
 
-### §3.10 Batch J: Other (12 dirs) — miscellaneous
+### §3.10 Batch J: Other (11 dirs) — ✅ RATIFIED + EXECUTED S61 (2026-05-05) — final batch
+
+All 11 dirs landed. **Two partial-duplicate merges:** `dq7-css-scope/` (pre-existing in archive with progress.md, spec-patch.md, anomaly-report.md; scrmlTS had only `apply-spec-patch.js` — merged into existing archive entry) + `lin-batch-a/` (pre-existing in archive with progress.md; scrmlTS had `apply-patch.js`, `apply-patch.mjs`, `test-additions.js` — all 3 merged into existing archive entry).
+
+**Cross-refs fixed:** 2 in scrmlTS source (`compiler/tests/integration/oq-2-stdlib-runtime-resolution.test.js` L5 + `compiler/src/api.js` L46 — both reference oq-2-dev-server-bootstrap diagnosis pointer; now scrml-support archive paths).
+
+**F4 leak detected + recovered:** Step 11.0f agent (in flight) leaked an ast-builder.js edit to main's working tree. Restored via `git restore`. Worktree's ast-builder.js does NOT yet have the change committed; agent will re-apply in its worktree. Logged in hand-off for next-session awareness.
 
 | Dir | What |
 |---|---|
@@ -244,7 +250,7 @@ Suggested ratification cadence: 1-2 batches per session to avoid overload. PA ha
 6. ✅ **Batch I (fix-*, 20 dirs)** — RATIFIED + EXECUTED S61 (2026-05-05). 20 dirs → `scrml-support/archive/changes/`; 6 cross-refs fixed (changelog ×2, scope-c-findings-tracker ×2, 2 test files, 2 source files); 1 dangling pre-existing ref left as-is.
 7. ✅ **Batches E (GITI, 2) + G (bun-sql, 2) combined** — RATIFIED + EXECUTED S61 (2026-05-05). 4 dirs → `scrml-support/archive/changes/`; no cross-refs.
 8. ✅ **Batch H (LSP L1-L4, 5 dirs)** — RATIFIED + EXECUTED S61 (2026-05-05). 5 dirs → `scrml-support/archive/changes/`; 2 cross-refs in J-pile dirs pre-fixed (will travel correctly when J moves).
-9. **Batch J (misc, 12 dirs)** — heterogeneous; review-per-dir.
+9. ✅ **Batch J (misc, 11 dirs)** — RATIFIED + EXECUTED S61 (2026-05-05). FINAL BATCH. 11 dirs → `scrml-support/archive/changes/` (with 2 partial-duplicate merges); 2 cross-refs fixed in source code; F4 leak detected + recovered. **All 10 batches complete; 76 dirs total dereffed.**
 
 ---
 

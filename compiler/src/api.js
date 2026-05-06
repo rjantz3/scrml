@@ -43,7 +43,7 @@ import { runGauntletPhase3EqChecks } from "./gauntlet-phase3-eq-checks.js";
 // `import { ... } from "./_scrml/<name>.js"` (rewritten from "scrml:<name>").
 //
 // This is the runtime-resolution bridge the compiler had been missing —
-// see docs/changes/oq-2-dev-server-bootstrap/diagnosis.md.
+// see scrml-support/archive/changes/oq-2-dev-server-bootstrap/diagnosis.md.
 //
 // Why hand-written shims (vs. compiling stdlib/<name>/*.scrml on the fly):
 // stdlib/.scrml sources contain `server {}` blocks the standard pipeline does
