@@ -2,7 +2,24 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-05 S61 close): **8,902 pass / 44 skip / 1 todo / 0 fail / 8,947 across 439 files**. **Phase A1a (lex+parse) is COMPLETE** as of S61 close — 20 sub-steps done (Steps 1-13 + 11.0a/b/c/d/e/f + 11.5). Net A1a delta: from S58 close baseline 8,720/43/0/8,763 to A1a-close 8,902/44/1/8,947 — **+182 pass / +1 skip / +1 todo / +184 total tests**. Curation pass: 76 dirs dereffed across 10 batches (`docs/changes/` 103 → 30). Next: A1b (resolve+type, 22 steps, RATIFIED) → A1c (codegen+runtime, 24 steps, RATIFIED).
+Current baseline (2026-05-06 S63): **8,933 pass / 44 skip / 1 todo / 0 fail / 8,978 across 440 files**. **Phase A1b Step B1 (symbol-table) LANDED** — Stage 3.06 SYM module wired between NR (3.05) and CE (3.2); per-scope state-cell registry; foundational for B2-B22. Net B1 delta: +31 pass / +1 test file. **Phase A1a (lex+parse) COMPLETE** at S61 close — 20 sub-steps. Next: B2 (E-NAME-COLLIDES-STATE).
+
+### 2026-05-06 (S63 — A1b Step B1 LANDED: symbol-table extension)
+
+S62 dispatched B1 in a worktree and landed three WIP commits (scaffolding → survey → module: types + Scope + walker, ~500 LOC) before being interrupted. S63 PA salvaged directly: confirmed pipeline wiring + tests + two follow-up fixes, then committed and cherry-picked all 4 commits onto main.
+
+- **B1 — symbol-table extension (`9d2fa45`)** — Stage 3.06 SYM module at `compiler/src/symbol-table.ts` inserted between NR (3.05) and CE (3.2) in `compiler/src/api.js`. Public API: `runSYM`, `runSYMBatch`, `lookupStateCell`, `lookupQualifiedStateCell`, `getScopeForNode`. Walks every `state-decl` (both structural and legacy `@`-form) and registers it in the appropriate scope (`file` / `function` / `compound`; `engine` and `component` ScopeKinds reserved for B14+/B17+). Variant C compounds register parent in enclosing scope + recurse children into a fresh compound sub-scope with qualified-path keys (`signup.name`, `outer.inner.leaf`). Records carry pre-classified booleans (`isCompoundParent`, `isCompoundChild`, `hasValidators`, `hasDefaultExpr`, `hasTypeAnnotation`, `isPinned`, `isConst`, `structuralForm`) for cheap downstream lookup. Test file `compiler/tests/integration/symbol-table.test.js` — 31 tests covering §B1.1-§B1.15 invariants + general-invariant suite (no errors at B1, FileAST `_scope` back-pointer, stats correctness, qualified-path edge cases). +31 pass / +1 file (8,902/44/1/8,947/439 → 8,933/44/1/8,978/440). Zero regressions.
+
+  **§S11D.5 absorption confirmed.** Top-level Variant C compound (deferred from S61 Step 11.0d) is correctly handled by B1's compound-aware `state-decl.children` walk — no separate Step 11.0g needed.
+
+  **Two salvage-time fixes documented in `docs/changes/phase-a1b-step-b1-symbol-table-extension/progress.md` § "Salvage notes":**
+
+  1. **Walker cycle-guard.** Initial walker recursed through `children`/`body`/`consequent`/`alternate`/`arms[].body` without a visited-set guard (NR's walker doesn't have one because `block`/`parent` back-refs aren't an issue at NR's nodeset). Test helper `findKind` already used a WeakSet — discrepancy. Threaded `visited: WeakSet<object>` through `walk` + `registerStateDecl`. Cheap; matches test-helper convention.
+  2. **Annotations made non-enumerable.** Initial implementation set `_record` / `_scope` via direct property assignment. Downstream stages (BP / CG) hung in an infinite loop on the cycle `state-decl._record → record.scope → scope.stateCells.get(name) → record` (verified by hang on `samples/compilation-tests/combined-001-counter.scrml`). Switched to `Object.defineProperty(node, "_record"|"_scope", { value, enumerable: false, configurable: true, writable: true })` so generic structural walkers using `Object.keys` / `for...in` skip the back-pointers. `getScopeForNode` and direct property reads still work. **Load-bearing for B2-B22:** consumers must read these annotations via the public API or direct property access — never via enumeration.
+
+  **Survey-first decision (committed in `d6a8fc9` before any source edits):** SYM lands as a NEW Stage 3.06 module (peer to NR), not as an NR-extension. Rationale captured in worktree's `progress.md` Q6: NR's responsibility is tag-bearing-node classification (`resolvedKind` / `resolvedCategory`); state-cell scope construction is a separate concern; folding into NR would muddle separation-of-concerns and create budget creep against NR's <5ms/file bound. B2-B22 consume SYM as a peer stage cleanly.
+
+  Commits cherry-picked to main: `61afdec` (scaffolding) → `d6a8fc9` (survey + insertion-point) → `df870f4` (module) → `9d2fa45` (wiring + tests + cycle-guard fixes).
 
 ### 2026-05-05 (S61 close — Phase A1a (lex+parse) COMPLETE)
 
