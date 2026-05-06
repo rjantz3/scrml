@@ -194,5 +194,146 @@ Coverage probe re-run (C1-C5, G1, G3) — all unchanged, all still
 correct. No regression in template literal / member access / call /
 index / object literal / markup-attr-RHS / lift-expr paths.
 
-Full test: **8,886 pass / 44 skip / 0 fail / 8,930 across 439 files**
-— identical to baseline. **0 regressions.**
+Full test (after patch alone): **8,886 pass / 44 skip / 0 fail / 8,930
+across 439 files** — identical to baseline. **0 regressions.**
+
+[step-11-0f impl-sample-restoration] Restored
+`samples/compilation-tests/combined-007-crud.scrml` to V5-strict canon
+via `git checkout d93690d -- samples/compilation-tests/combined-007-crud.scrml`.
+
+The restored file uses BOTH Step 11.0e-fixed `<x> = not` patterns AND
+the Step 11.0f-fixed `<x> = ?{SQL}\n<y> = ...` patterns:
+```
+<users> = ?{`SELECT id, name, email FROM users`}
+<editingId> = not
+<newName> = ""
+<newEmail> = ""
+```
+
+Decl-count parity (vs reverted-legacy form at HEAD~1):
+
+| Form | state-decl count | function-decl count | errors |
+|---|---|---|---|
+| Legacy `@`-form (HEAD before restoration) | 7 | 3 | 1 (W-PROGRAM-001 only) |
+| V5-strict (post-restoration) | 7 | 3 | 1 (W-PROGRAM-001 only) |
+
+**PARITY OK** (Step 11.0e diagnosed pre-fix V5-strict form gave only 1
+state-decl due to BLOCK_REF eating siblings — 6 sibs lost. Now post-
+11.0f, full 7 V5-strict decls restored).
+
+`bun run pretest` confirms 12 test samples (including
+combined-007-crud) compile cleanly post-restoration. No new errors.
+
+[step-11-0f impl-tests] Added 7 cases in
+`compiler/tests/integration/parse-shapes-v0next.test.js` in a new
+§S11F describe block (§S11F.1-§S11F.7):
+
+- §S11F.1 — `<x> = ?{SQL}\n<y> = 0` (V5-strict structural, two siblings)
+- §S11F.2 — `<x> = ?{SQL}\n@y = 0` (V5-strict + legacy mix)
+- §S11F.3 — `<x> = ?{SQL}\nconst <y>` (BLOCK_REF + derived sibling)
+- §S11F.4 — `<x> = ?{SQL}\n<y>: T = init` (BLOCK_REF + typed-decl, Step 11.0c)
+- §S11F.5 — `<x> = ?{SQL}\n<formRes>...</>` (BLOCK_REF + Variant C compound, Step 11.0a)
+- §S11F.6 — anti-html-fragment guard (cascade prevention)
+- §S11F.7 — REGRESSION: legacy `@x = ?{SQL}\n@y = 0` STILL parses
+
+Every positive case fires `assertNoHtmlFragmentMatching` per BRIEF
+§5 DoD pattern.
+
+[step-11-0f impl-test-final] `bun run test` after all changes:
+**8,893 pass / 44 skip / 0 fail / 8,937 across 439 files**.
+Delta from baseline 8,886 → 8,893 = **+7 pass** (the 7 §S11F cases).
+**0 regressions. 0 fails. 44 skip stable.**
+
+## Final summary
+
+**Files modified:**
+- `compiler/src/ast-builder.js` — 1-line `lastEndsValue` extension
+  (`lastKind === "BLOCK_REF" ||` at L1985) + 21 LOC of explanation
+  comments.
+- `compiler/tests/integration/parse-shapes-v0next.test.js` — 7 new
+  positive + regression cases (§S11F.1-§S11F.7) in a new §S11F
+  describe block. 194 LOC added.
+- `samples/compilation-tests/combined-007-crud.scrml` — restored to
+  V5-strict canon (V5-strict decl form for `<x> = ?{SQL}` patterns).
+
+**Tier classification:** T2 (single-subsystem, parser-internal,
+1-character correction to Step 11.0b's universal-fix infrastructure;
+sample restoration + test additions ride alongside).
+
+**Survey verdict — depth-of-survey discount status:** **NOT a
+discount.** Fix is genuine source change (1-char addition to a
+disjunct list), but survey confirmed Step 11.0e's diagnosis precisely:
+no other expression-shape gap surfaced (template literals, member
+access, call, index, object literals, markup-attr-RHS, lift-expr all
+already work). **No P-FUP-4 surfaced** — coverage of value-producing
+trailing tokens at this locus is now exhaustive.
+
+**Step 11.0b/11.0e interaction:** `BLOCK_REF` as `lastEndsValue`
+member preserves Step 11.0b's universal-fix property. By adding
+`BLOCK_REF` to the disjunct list, we correctly classify BLOCK_REF as
+a value-producing trailing token — which it semantically is per
+SPEC §6 (and the symmetry with closing-bracket terminals `)`, `]`,
+`}` already in the list). Step 11.0b's `<` IDENT lookahead
+(L2020-2030) and ASI break (L1993) now also fire correctly because
+`lastEndsValue=true`.
+
+**Universality:** preserved. No `BLOCK_REF`-specific branch added.
+Mirrors Step 11.0e's pattern.
+
+**P-FUP-3 closure:** combined-007-crud now compiles in full V5-strict
+canon. Step 11.0e's status table for combined-007-crud (7 legacy / 1
+V5-strict / STILL BROKEN) becomes (7 legacy / 7 V5-strict / **PARITY
+OK**) post-Step-11.0f.
+
+**Self-host parity:** N/A — no codegen change. The state-decl AST
+shape is unchanged (init still strings, all existing fields preserved).
+
+**Path-discipline near-misses:** **TWO** — both caught + corrected
+before any commit landed.
+
+1. First Edit attempt on `compiler/src/ast-builder.js` modified the
+   MAIN repo path (`/home/bryan-maclee/scrmlMaster/scrmlTS/...`) instead
+   of the worktree path. Diagnosed by debug-print that never fired,
+   then by `find ... ast-builder*` showing two distinct files with
+   different mtimes/sizes. Reverted main repo via `git -C ... checkout`
+   and re-applied to worktree.
+2. Same issue with `compiler/tests/integration/parse-shapes-v0next.test.js`
+   — Edit went to main repo path, file size/test count check caught it
+   before commit. Reverted + re-applied to worktree.
+
+Both surface the **path-discipline pitfall** flagged in the BRIEF
+startup-verification protocol. Future agents working in worktrees
+must explicitly use the absolute worktree-prefixed path for ALL
+Edit operations — not just `compiler/src/...`. This is documented in
+the brief but easy to miss when the apparent absolute path looks
+correct.
+
+The probe files (`_probe_step11_0f*.mjs` in worktree root) remained
+untracked + uncommitted; they are scratch debug aids and were used
+only to reproduce + verify the fix.
+
+## Branch + commit hygiene
+
+WIP commits on `phase-a1a-step-11-0f-blockref-newline-boundary`:
+- `f672d58` — WIP: survey notes — locus = lastEndsValue missing BLOCK_REF
+- `207366f` — WIP: blockref boundary patch — BLOCK_REF is value-producing
+- (next) — final: compile(a1a-step-11-0f): `<x> = ?{SQL}` BLOCK_REF
+  newline-as-separator boundary fix (sample restoration + §S11F tests)
+
+## Tags
+
+#phase-a1a #step-11-0f #p-fup-3 #blockref #newline-as-separator
+#step-11-0b-extension #step-11-0e-extension #v5-strict #parser-only
+#t2 #not-discount-9 #sample-restoration #combined-007-crud
+#path-discipline-near-miss
+
+## Links
+
+- Brief: `docs/changes/phase-a1a-step-11-0f-blockref-newline-boundary/BRIEF.md`
+- Step 11.0e predecessor: `docs/changes/phase-a1a-step-11-0e-not-newline-boundary/progress.md`
+- Step 11.0b predecessor: `docs/changes/phase-a1a-step-11-0b-newline-separator/progress.md`
+- Step 12 surfacing: `docs/changes/phase-a1a-step-12-existing-test-deltas/progress.md`
+- SPEC §6 (`?{SQL}` passthrough): `compiler/SPEC.md`
+- Touchpoint — boundary patch: `compiler/src/ast-builder.js` L1980-2008
+- Tests added: `compiler/tests/integration/parse-shapes-v0next.test.js`
+  §S11F.1-§S11F.7

@@ -1983,3 +1983,197 @@ describe("A1a Step 11.0e — `<x> = not` newline-as-separator boundary", () => {
     assertNoHtmlFragmentMatching(ast, /<\s*y\s*>/);
   });
 });
+
+// =============================================================================
+// §S11F — Phase A1a Step 11.0f: `<x> = ?{SQL}\n<y>` BLOCK_REF newline-as-separator
+// =============================================================================
+//
+// P-FUP-3 surfaced by Step 11.0e dispatch. Pre-fix, `<x> = ?{SQL}\n<y> = 0`
+// collapsed into ONE state-decl whose `init` ate the sibling decl
+// (`init = "?{SQL}\n< y > = 0"`) because Step 11.0b's ASI-NEWLINE branch
+// in `collectExpr` (L1959-2030) gated on `lastEndsValue`, and the
+// BLOCK_REF token kind was NOT in any disjunct of `lastEndsValue` — so
+// trailing `?{SQL}` failed the gate, the ASI break never fired, and
+// Step 11.0b's universal `<` IDENT lookahead also never fired (it gates
+// on `lastEndsValue` too).
+//
+// SPEC §6 establishes `?{SQL}` as a SQL passthrough block expression;
+// BLOCK_REF tokens (per tokenizer.ts L796) are placeholders for embedded
+// child blocks (sql/error-effect/meta) that produce the in-place value
+// of the embedded block — semantically symmetric with closing-bracket
+// terminals. Adding `lastKind === "BLOCK_REF"` to the disjunct list is
+// the universal fix; no BLOCK_REF-specific branch.
+//
+// Spec authority: §6 (`?{SQL}` passthrough), tokenizer.ts L796 (BLOCK_REF
+// placeholder semantics).
+// =============================================================================
+
+describe("A1a Step 11.0f — `<x> = ?{SQL}` BLOCK_REF newline-as-separator boundary", () => {
+  // §S11F.1 — Two V5-strict structural decls separated only by a newline,
+  // first init = `?{SQL}` BLOCK_REF. Pre-11.0f this collapsed into ONE
+  // state-decl whose init ate `<y>=0`. Post-11.0f: TWO state-decls.
+  test("§S11F.1: `<x> = ?{SELECT 1}\\n<y> = 0` produces TWO state-decls", () => {
+    const src = `<program>\${
+      <x> = ?{\`SELECT 1\`}
+      <y> = 0
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(2);
+    const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
+    expect(byName.x.shape).toBe("plain");
+    expect(byName.x.init).toBe("?{`SELECT 1`}");
+    expect(byName.x.structuralForm).toBe(true);
+    expect(byName.y.shape).toBe("plain");
+    expect(byName.y.init).toBe("0");
+    expect(byName.y.structuralForm).toBe(true);
+    assertNoHtmlFragmentMatching(ast, /<\s*x\s*>|<\s*y\s*>/);
+  });
+
+  // §S11F.2 — V5-strict + legacy mix: `<x> = ?{SQL}\n@y = 0` produces
+  // TWO state-decls (x with structuralForm=true, y with structuralForm=false).
+  // The legacy `@y` form would have separated even pre-11.0f via the
+  // BUG-R14 `AT_IDENT =` boundary (L1936) which doesn't gate on
+  // lastEndsValue — but post-11.0f the V5-strict `<x>` decl now also
+  // correctly terminates at the newline.
+  test("§S11F.2: `<x> = ?{SQL}\\n@y = 0` (V5-strict + legacy mix) produces TWO state-decls", () => {
+    const src = `<program>\${
+      <x> = ?{\`SELECT 1\`}
+      @y = 0
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(2);
+    const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
+    expect(byName.x.init).toBe("?{`SELECT 1`}");
+    expect(byName.x.structuralForm).toBe(true);
+    expect(byName.y.init).toBe("0");
+    expect(byName.y.structuralForm).toBe(false);
+    assertNoHtmlFragmentMatching(ast, /<\s*x\s*>/);
+  });
+
+  // §S11F.3 — `<x> = ?{SQL}` followed by a const-derived sibling.
+  // The Step 11.0b ASI-NEWLINE infrastructure handles state-decl shape
+  // detection independent of plain vs derived; the BLOCK_REF
+  // value-producing fix generalises across both. Note: pre-11.0f this
+  // T5 case actually worked because `const` is a STMT_KEYWORD that
+  // breaks via L1902 — independent of lastEndsValue. Test pins both
+  // paths.
+  test("§S11F.3: `<x> = ?{SQL}\\nconst <y> = expr` (plain BLOCK_REF + derived sibling)", () => {
+    const src = `<program>\${
+      <users> = ?{\`SELECT id FROM users\`}
+      const <count> = 0
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(2);
+    const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
+    expect(byName.users.shape).toBe("plain");
+    expect(byName.users.init).toBe("?{`SELECT id FROM users`}");
+    expect(byName.count.shape).toBe("derived");
+    expect(byName.count.isConst).toBe(true);
+    expect(byName.count.init).toBe("0");
+    assertNoHtmlFragmentMatching(ast, /<\s*users\s*>|<\s*count\s*>/);
+  });
+
+  // §S11F.4 — BLOCK_REF + typed-decl sibling (Step 11.0c interaction).
+  // `<x> = ?{SQL}\n<y>: T = init`. The typed-decl Shape 1 sibling is
+  // recognised via Step 11.0b's universal `<` IDENT lookahead +
+  // scanStructuralDeclLookahead's typedDecl branch (which handles `>:`).
+  // Pre-11.0f the BLOCK_REF terminal failed the lastEndsValue gate so
+  // the typed-decl sibling was silently swallowed.
+  test("§S11F.4: `<x> = ?{SQL}\\n<y>: number = 0` (BLOCK_REF + typed-decl sibling)", () => {
+    const src = `<program>\${
+      <x> = ?{\`SELECT 1\`}
+      <y>: number = 0
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(2);
+    const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
+    expect(byName.x.init).toBe("?{`SELECT 1`}");
+    expect(byName.y.init).toBe("0");
+    expect(byName.y.typeAnnotation).toBe("number");
+    assertNoHtmlFragmentMatching(ast, /<\s*x\s*>|<\s*y\s*>/);
+  });
+
+  // §S11F.5 — BLOCK_REF + Variant C compound sibling (Step 11.0a interaction).
+  // Tests that the BLOCK_REF value-producing fix also enables the
+  // V5-strict `<formRes>` compound opener to be detected as a sibling
+  // boundary (rather than being swallowed into the prior state-decl's
+  // init). Step 11.0a's compoundBody flag handles same-line boundaries
+  // INSIDE the compound body — orthogonal to this newline-boundary fix
+  // for the parent's RHS.
+  test("§S11F.5: `<x> = ?{SQL}\\n<formRes>{ <a> = 0 }</>` (BLOCK_REF + Variant C compound sibling)", () => {
+    const src = `<program>\${
+      <x> = ?{\`SELECT 1\`}
+      <formRes>
+        <a> = 0
+      </>
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    // Three: x, formRes (compound parent), a (compound child)
+    expect(decls.length).toBe(3);
+    const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
+    expect(byName.x.init).toBe("?{`SELECT 1`}");
+    expect(byName.formRes).toBeDefined();
+    expect(byName.a.init).toBe("0");
+    assertNoHtmlFragmentMatching(ast, /<\s*x\s*>|<\s*formRes\s*>|<\s*a\s*>/);
+  });
+
+  // §S11F.6 — Anti-html-fragment guard. Pre-11.0f the failed parse left
+  // the trailing `<y>=0` as raw HTML-fragment content inside the init
+  // string. Post-11.0f no html-fragment node should match `< y >` for
+  // these cases. Mirrors the Step 11.0b/11.0e anti-deception pattern.
+  test("§S11F.6: anti-html-fragment guard — three siblings, all BLOCK_REF", () => {
+    const src = `<program>\${
+      <a> = ?{\`SELECT 1\`}
+      <b> = ?{\`SELECT 2\`}
+      <c> = ?{\`SELECT 3\`}
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(3);
+    const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
+    expect(byName.a.init).toBe("?{`SELECT 1`}");
+    expect(byName.b.init).toBe("?{`SELECT 2`}");
+    expect(byName.c.init).toBe("?{`SELECT 3`}");
+    assertNoHtmlFragmentMatching(ast, /<\s*a\s*>|<\s*b\s*>|<\s*c\s*>/);
+  });
+
+  // §S11F.7 — REGRESSION GUARD: legacy `@x = ?{SQL}\n@y = 0` form must
+  // STILL parse correctly. Pre-11.0f this already worked (legacy
+  // decl-recognizer path differs from V5-strict structural form — it
+  // hits BUG-R14 `AT_IDENT =` boundary at L1936 which doesn't gate on
+  // lastEndsValue). Post-11.0f the change sits in `lastEndsValue` (an
+  // expansion of the disjunct list) which is shared — this regression
+  // test enforces the legacy path remains unbroken. (BRIEF §6 risk
+  // surface: legacy path preservation.)
+  test("§S11F.7: REGRESSION — legacy `@x = ?{SQL}\\n@y = 0` form continues to parse", () => {
+    const src = `<program>\${
+      @x = ?{\`SELECT 1\`}
+      @y = 0
+    }</program>`;
+    const { ast, errors } = parse(src);
+    expect(errors.length).toBe(0);
+    const decls = findKind(ast, "state-decl");
+    expect(decls.length).toBe(2);
+    const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
+    // Note: @x = ?{SQL} legacy form — init is consumed by SQL-passthrough
+    // dedicated handling (see ast-builder.js L2915+ tryParseSqlPassthroughForReactiveDecl).
+    // The state-decl has structuralForm=false. We assert structural form
+    // is preserved for both decls and that y's init is exactly "0" (no
+    // sibling-eating).
+    expect(byName.x).toBeDefined();
+    expect(byName.x.structuralForm).toBe(false);
+    expect(byName.y.init).toBe("0");
+    expect(byName.y.structuralForm).toBe(false);
+  });
+});
