@@ -189,6 +189,115 @@ A* = compiler tracks (sequential). B* = parallel tracks (run alongside A*). C* =
 
 ---
 
+### §2.5 Phase A5 — S67 ratified engine + temporal extensions (Insight 23 + Item C + Item G)
+
+**Added 2026-05-07 (S67).** Spec target extension via `scrml-support/design-insights.md` Insight 23 (DD-Harel) + Item C audit (`docs/audits/item-c-temporal-engine-rule-migration-rule4-audit-2026-05-07.md`) + master-PA capability-gap audit Item G (S67-1327 inbox). Master-PA debate verdict ratified; user verbatim S67: *"pick engine, that feels right"* (OQ-Harel-8 resolved); *"we shoud start planning out and adding these features"* (scope expansion authorized).
+
+**Total est: ~50-80h.** Class A throughout (compile-time desugar; tree-shakeable runtime cost per S67 user-direction signal #2). Sub-step decomposition:
+
+**A5-1 — SPEC §51 amendments (~3-5h, no compiler work):**
+- Add §51.0.M for `<onTimeout>` structural element (per Item C audit Candidate C — recommended scrml-way fit; Pillar-5-compliant; symmetric with §51.0.H `<onTransition>`).
+- Add §51.0.N (or sub-section) for `history` attribute on composite state-children (per Insight 23 grammar decision #2). Synthesized reactive cell `@_<parent>History` semantics; tree-shakeable.
+- Add §51.0.O for `internal:rule` prefix (per Insight 23 grammar decision #4). Internal vs external transition distinction.
+- Add §51.0.P for `parallel` attribute on file-scope `<engine>` (per Insight 23 grammar decision #5). Naming sugar over §51.4 multi-engine; no joint lifecycle semantics.
+- Footnote on §51.0.K (Machine Cohesion) per S67 sharpening — singleton invariant explicit; nested `<engine>` permitted inside outer engine state-child body. Format parallel to §6.6.8/§6.6.10 footnote precedents.
+- Cross-ref §51.12 (legacy `<machine>` temporal) → §51.0.M (`<engine>` temporal via `<onTimeout>`).
+
+**A5-2 — Parser support (~6-9h):**
+- Nested `<engine for=SubType initial=.X>` inside composite state-child body (per OQ-Harel-8 resolution).
+- `history` attribute on composite state-children.
+- `internal:rule="..."` attribute prefix (alongside canonical `rule=`).
+- `parallel` attribute on file-scope `<engine>`.
+- `<onTimeout after=N{ms,s,m,h} to=.Variant/>` element. Optional `${expr}` form for computed delay.
+
+**A5-3 — Type-system + symbol-table walker (~5-8h):**
+- Nested-engine variant-validation across hierarchy (each composite state-child's child-engine `for=` enum binding type-checks).
+- History-attribute legality (only on composite state-children with non-self-closing body containing inner engine).
+- `internal:rule` legality (composite state-children only; same variant-target validation as canonical `rule=`).
+- `<onTimeout to=.Variant/>` `to=` variant validation against engine's variant set + legal-target check vs surrounding state-child's `rule=`.
+- `<onTimeout>` placement validation: engine state-child only (not match arms; not component bodies; reuse E-STRUCTURAL-ELEMENT-MISPLACED).
+- Computed-delay expression-typing: must produce non-negative number.
+
+**A5-4 — Codegen extension (~10-15h):**
+- Hierarchy desugar: composite state-child with inner engine generates outer-dispatch function checking inner-rules-first → outer-cascade → outer-other-variant; if/else chain at compile time, ~0 bytes net runtime.
+- History-cell synthesis: per-composite synthesized reactive cell `@_<parent>History`; written on outer-exit, read on outer-re-entry. Tree-shakeable (only emitted when ≥1 engine declares `history`). ~30-80 bytes per history-bearing parent.
+- `internal:rule` codegen: skip outer-state-child re-entry + inner-engine re-init on internal transitions.
+- `parallel` attribute: lowering identical to §51.4 multi-engine; the attribute is naming-only.
+- `<onTimeout>` lowering: rides existing `_scrml_machine_arm_timer`/`_scrml_machine_clear_timer` runtime (already in `compiler/src/runtime-template.js:66-146`; per Item C audit §1.3 reuse story). Computed-delay form emits per-arm runtime computation.
+
+**A5-5 — Computed-delay relaxation (~1.5-2.5h):**
+- Lift literal-only constraint on `after Ns` durations. Static literal cases retain constant-folded path; non-constant `${expr}` cases emit runtime computation feeding the existing runtime API.
+
+**A5-6 — Item G B-shakeable timer extensions (~5-10h, optional follow-on):**
+- Event-timeout watchdog (no-event-for-N-ms) — per-machine last-event-timestamp tracker; only loads when an engine declares an event-timeout.
+- Named multi-timer-per-state (gen_statem-style) — `Map<Name, Handle>` only loads when an engine declares named multi-timers.
+- Both ride alongside the §51.12 codegen + runtime per Item G inbox classification (B-shakeable, OK per S67 user-direction signal #2).
+
+**A5-7 — Tests + samples (~12-18h):**
+- ~80-120 new unit tests covering: nested engine declaration + dispatch priority + lifecycle coupling; history attribute synth-cell + tree-shake invariant; internal vs external transition variants; parallel attribute as §51.4 sugar; `<onTimeout>` per literal/computed/multiple-per-state/reset-on-reentry forms; Item G timer extensions.
+- New samples in `samples/compilation-tests/` exercising hierarchy + temporal.
+- Update at least one example (e.g., loading-with-timeout demo) using `<onTimeout>`.
+
+**OQ-Harel-1 through OQ-Harel-7 spec authoring** (per Insight 23) interleaved across A5-1 / A5-3 / A5-4 as the questions become live.
+
+**Validation gates:**
+1. All four DD-Harel grammar decisions parse + type-check + codegen on representative samples.
+2. History tree-shake confirmed: when no engine declares `history`, the synth-cell infrastructure is absent from emitted output.
+3. `<onTimeout>` reset-on-reentry semantics match XState `after` (already true for `<machine>` form via §51.12.4; verify same for `<engine>` form).
+4. Machine Cohesion sharpening landed in spec; no regression on `E-COMPONENT-ENGINE-SCOPE` (engines still forbidden in component bodies).
+5. `bun test` green; no regressions; ~+80-120 tests added.
+
+**Suggested dispatch shape:** 3 dispatches typical, possibly 4. A5-1 (spec amendments) is PA-direct or single agent. A5-2/A5-3/A5-4 (parser+typer+codegen) is the bulk; could split parser→typer→codegen across 2-3 dispatches. A5-7 (tests+samples) bundles. A5-5 (computed-delay) and A5-6 (Item G) are small follow-ons.
+
+---
+
+### §2.6 Phase A6 — test-bind (Insight 22, effects-as-data middle path)
+
+**Added 2026-05-07 (S67).** Spec target extension via `scrml-support/design-insights.md` Insight 22 (`test-bind`). Master-PA debate verdict ratified; closes OQ-8 partially (server-function mockability); re-files OQ-8b (`<onTransition>` body effects beyond server-fn calls).
+
+**Total est: ~6-12h.** Class A (compile-time conditional + dead-code elimination; 0 production runtime cost).
+
+**Sub-step decomposition:**
+
+**A6-1 — SPEC amendment (~30-60min, no compiler work):**
+- New §54.X (or §47.X — wherever `~{}` test-block grammar lives) introducing `test-bind <serverFnName> = <handler>` declaration.
+- L12 Edge F equivalent: static-string-only enforcement on the literal-handler form? (Phase-0 survey verifies; if computed handlers are legal, no edge-case constraint needed.)
+- Cross-ref §47 (server-function call site) for the dispatch hook.
+- Note Position B (effect-record schemas) NOT ADOPTED at this time; structurally extensible later (no flip-condition gating per S67 methodology rule).
+
+**A6-2 — Parser (~1-2h):**
+- `test-bind <name> = <handler>` declaration form inside `~{}` blocks.
+- Multiple declarations per block legal.
+
+**A6-3 — Type-system (~1-2h):**
+- Scope-local table of bindings within the `~{}` block.
+- Key validation: each `<name>` must be a §47-encoded server-function name resolvable in scope.
+- Handler-typing matches the server-function's signature (or a structural-subset for partial mocks).
+
+**A6-4 — Codegen (~2-3h):**
+- Compile-time conditional dispatch at server-function call sites in test mode.
+- Dispatch table consulted at call site; if active binding for the encoded name, call the handler instead of the server fn; if no active binding in test mode and engine context expects bound, fail-fast.
+- Production binary unchanged: dead-code-eliminated via the test-mode flag.
+
+**A6-5 — Tests (~1.5-2.5h):**
+- ~30-40 unit tests covering: simple bind + handler invocation; multiple binds in one block; unbound-server-fn-in-active-test-bind-context fail-fast; test-mode vs release-mode dispatch divergence; OQ-test-bind-concurrency invariant if implemented.
+- Integration test exercising "test engine reaches `.Success` given synthetic HTTP" (the canonical OQ-8 use case).
+
+**A6-6 — `scrml:test` API alignment (~30-60min, optional):**
+- Surface convenience helpers if the bare-syntax form is awkward for common patterns.
+
+**Validation gates:**
+1. Server-fn mockability test from Insight 22 passes (`test engine reaches .Success given synthetic HTTP, no real network`).
+2. E-TEST-004 unchanged (no outer-scope ref; `test-bind` is scope-local declaration).
+3. E-FN-004 unchanged (denial-via-`fn` for coeffects stands).
+4. Insight 21 unchanged (no effect rows on `fn` types).
+5. Production binary byte-identical to release with NO `test-bind` (verifying dead-code elimination).
+6. `bun test` green; ~+30-40 tests added.
+
+**Suggested dispatch shape:** 1-2 dispatches. Could be a single agent dispatch given the small scope; or split spec-amendment from impl if Phase-0 survey reveals integration concerns.
+
+---
+
 ## §3 Phase B — Parallel tracks (run alongside A1-A4)
 
 ### §3.1 B1 — Examples rewrite (21 examples + trucking-dispatch)
