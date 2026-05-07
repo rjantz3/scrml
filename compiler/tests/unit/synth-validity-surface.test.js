@@ -329,22 +329,28 @@ describe("§B11.10 runtime-hook annotations per §55.7 update-timing table", () 
 // ===========================================================================
 
 describe("§B11.11 submitted is compound-level ONLY (per §55.7 line 24468)", () => {
-  test("compound's _scope holds compound-level synth cells; per-field synth NOT registered by B11", () => {
+  test("compound's _scope holds compound-level synth cells; field's _scope holds per-field synth (no submitted) — B12 boundary", () => {
     const src = `<program>\${ <form><name req> = <input type="text"/> </> }</program>`;
     const { sym } = buildAndRun(src);
     const formScope = sym.fileScope.stateCells.get("form").declNode._scope;
 
-    // The four compound-level synth cells registered.
+    // The four compound-level synth cells registered (B11).
     expect(formScope.stateCells.size).toBe(5); // 4 synth + name (dev field)
     expect(formScope.stateCells.has("submitted")).toBe(true);
 
-    // The per-field synth namespace (`@form.name.submitted` etc.) is NOT
-    // registered by B11. The `name` cell is a regular state-decl (not a
-    // compound) so it has no `_scope` for B12 to register into anyway.
+    // B12: the field's _scope holds the THREE per-field synth cells (NOT
+    // `submitted` — that property is COMPOUND-LEVEL ONLY per §55.7 line
+    // 24468 / audit §1.6 boundary clarification).
     const nameRec = formScope.stateCells.get("name");
     expect(nameRec).toBeDefined();
     expect(nameRec.isCompoundParent).toBe(false);
-    expect(nameRec.declNode._scope).toBeUndefined();
+    expect(nameRec.declNode._scope).toBeDefined();
+    expect(nameRec.declNode._scope.kind).toBe("field");
+    expect(nameRec.declNode._scope.stateCells.size).toBe(3);
+    expect(nameRec.declNode._scope.stateCells.has("isValid")).toBe(true);
+    expect(nameRec.declNode._scope.stateCells.has("errors")).toBe(true);
+    expect(nameRec.declNode._scope.stateCells.has("touched")).toBe(true);
+    expect(nameRec.declNode._scope.stateCells.has("submitted")).toBe(false);
   });
 });
 
