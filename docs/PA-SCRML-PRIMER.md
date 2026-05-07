@@ -510,12 +510,20 @@ A1b decorates the A1a AST with resolution metadata that downstream passes (B5+, 
 | **B2** | (no new field — fires `E-NAME-COLLIDES-STATE` diagnostic) | local-decl nodes shadowing state names | — | — |
 | **B3** | `_resolvedStateCell` | every `@`-prefixed `IdentExpr` reachable via SYM PASS-3 | `StateCellRecord` (resolved), `null` (unresolved — no error fired at B3), `undefined` (not walked) | `getResolvedStateCell(ident)` exported from `compiler/src/symbol-table.ts` |
 | **B5** | `_cellKind` (+ `_isBindable`) | every registered `state-decl` | `"plain" \| "bindable" \| "markup-typed" \| "compound-parent"` (+ boolean convenience) | `getCellKind(decl)`, `isCellBindable(decl)` exported from `compiler/src/symbol-table.ts` |
+| **B4** | `Scope.importBindings` (per-scope **registry**, not per-node) | file-level scope | `Map<localName, ImportBindingRecord>` (`{localName, exportedName, sourcePath, pinned, declNode}`) | `lookupImportBinding(scope, localName)` exported from `compiler/src/symbol-table.ts` |
 
 **B3 specifics (load-bearing for B5/B7/B10/B22 + promotion ergonomics + A1c C0):**
 
 - `_resolvedStateCell: null` is an EXPLICIT "B3 ran, found nothing" marker — not the same as `undefined`. Downstream passes can detect failed resolution and decide whether to fire (a future tightening dispatch will convert null markers into fired E-SCOPE-001 at the type-check pass; today the `@`-prefix path in `type-system.ts:2870-2999` skips diagnostics).
 - **Compound nav** (`@form.name`): B3 resolves the BASE cell on the `@form` IdentExpr. The `.name` part is a static property string (MemberExpr), NOT an IdentExpr — `forEachIdentInExprNode` walks `member.object` only. Consumers needing leaf-level resolution (e.g., B22 `reset(@form.name)`) must re-resolve via `lookupQualifiedStateCell`.
 - **No collision with parseVariant Phase 2's `parseVariantEnum`** — different node kinds (CallExpr vs IdentExpr), different stages (type-check pass vs SYM PASS-3).
+
+**B4 specifics (load-bearing for cross-file pinning + B14 engine import):**
+
+- `Scope.importBindings` is per-scope (file-level today; future per-function or per-component scoping is forward-compatible via the same shape — `lookupImportBinding` already walks the parent chain). Default imports register a single binding under `imp.names[0]` with `pinned:false`; named imports walk `imp.specifiers[]` for full `{imported, local, pinned}` data. Aliased imports register under the LOCAL name (`bar` in `import { foo as bar }`) with `exportedName: "foo"`.
+- **E-STATE-PINNED-FORWARD-REF source-position rule.** A read of a pinned cell (or pinned import) before the cell's decl-span end fires the error. Self-init (`<x pinned> = @x + 1`) fires (the cell is not "fully declared" until decl-span closes). Non-pinned cells permit hoisted forward-refs (no fire).
+- **Read-position approximation.** IdentExpr `span.start` is NOT a reliable absolute file offset — when expression-parser parses isolated substrings (function bodies, interpolations) with `baseOffset:0`, the IdentExpr's `span.start` is substring-relative. B4 substitutes the **enclosing AST node's `span.start`** as the read-position. The approximation is exact for every spec-normative case because pinned decls live only at file/program/compound scope (never inside function bodies); a future B-step that propagates absolute baseOffsets through expression-parser will let us upgrade to source-exact spans.
+- **E-IMPORT-PINNED-INVALID best-effort fire (Option A).** Fires on `pinned` imports of definitively-not-cell-not-engine kinds: `function`, `fn`, `type`, `channel`. Accepts `const`/`let` imports (Form 1 `export <engine var=…>` desugars to `export const`, indistinguishable from arbitrary const today; B14 / M18 cross-file engine import lands engine-aware export-registry annotation). Re-export / rename / local / unknown kinds are accepted (no chasing in B4). The check requires MOD's `exportRegistry`; when absent (test-harness path), the check is skipped silently — the registration + forward-ref check still runs.
 
 ---
 
