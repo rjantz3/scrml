@@ -8133,6 +8133,11 @@ function processFile(
     scopeChain,
     stateTypeRegistry,
     machineRegistry,
+    // S66: expose user-defined type registry on the typed-AST so post-TS
+    // passes (e.g., I-MATCH-PROMOTABLE lint, SPEC §56) can resolve enum
+    // type names from cell typeAnnotations. typeRegistry holds enum/struct
+    // declarations from `type X:enum = { ... }` etc.
+    typeRegistry,
   });
 
   return { typedAst, errors, stateTypeRegistry };

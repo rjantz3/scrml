@@ -50,14 +50,26 @@
  * @param {Map<string, object>} stateTypeRegistry — type-name → ResolvedType
  * @returns {Array<LintDiagnostic & { filePath: string }>}
  */
-export function runIMatchPromotable(files, stateTypeRegistry) {
+export function runIMatchPromotable(files, _crossFileStateRegistry) {
   const diagnostics = [];
-  if (!files || !Array.isArray(files) || !stateTypeRegistry) return diagnostics;
+  if (!files || !Array.isArray(files)) return diagnostics;
 
   for (const file of files) {
     const filePath = file.filePath || "";
+    // Prefer the per-file user-defined typeRegistry (S66: type-system.ts now
+    // exposes it on the typed-AST). The cross-file `stateTypeRegistry` arg
+    // is the per-cell type registry, which is NOT what we want — we need
+    // the registry of user-declared types like `type Phase:enum = {...}`.
+    const typeRegistry = file.typeRegistry;
+    if (!typeRegistry) continue;
+
+    // Build a name→typeAnnotation map for cells in this file. Walks all
+    // state-decls (top-level and inside logic blocks) and records their
+    // type-annotation strings. Used as a fallback when B3's
+    // `_resolvedStateCell` isn't stamped on a condExpr ident.
+    const cellTypeByName = collectCellTypeAnnotations(file);
     walkFileForIfChains(file, (chainHead, chainBranches) => {
-      const diag = analyseChain(chainHead, chainBranches, stateTypeRegistry);
+      const diag = analyseChain(chainHead, chainBranches, typeRegistry, cellTypeByName);
       if (diag) {
         diagnostics.push({ ...diag, filePath });
       }
@@ -65,6 +77,51 @@ export function runIMatchPromotable(files, stateTypeRegistry) {
   }
 
   return diagnostics;
+}
+
+/**
+ * Walk a file's nodes looking for state-decls (top-level and nested in
+ * logic blocks). Returns a Map<cellName, typeAnnotation> for cells with
+ * a `:T` type annotation. The cell key is the bare name (no `@` prefix).
+ *
+ * @param {object} file — typed FileAST
+ * @returns {Map<string, string>}
+ */
+function collectCellTypeAnnotations(file) {
+  const map = new Map();
+  const seen = new WeakSet();
+
+  function visit(node) {
+    if (!node || typeof node !== "object") return;
+    if (seen.has(node)) return;
+    seen.add(node);
+
+    if (node.kind === "state-decl" && typeof node.name === "string" && typeof node.typeAnnotation === "string") {
+      map.set(node.name, node.typeAnnotation);
+      // Recurse into compound children (each is itself a state-decl with own typeAnnotation)
+      if (Array.isArray(node.children)) {
+        for (const c of node.children) visit(c);
+      }
+      return;
+    }
+
+    for (const key of ["nodes", "body", "consequent", "alternate", "children",
+      "components", "stateDecls", "typeDecls", "imports", "exports", "items", "arms"]) {
+      const v = node[key];
+      if (Array.isArray(v)) {
+        for (const child of v) visit(child);
+      }
+    }
+  }
+
+  const root = file.ast ?? file;
+  if (Array.isArray(root.nodes)) for (const n of root.nodes) visit(n);
+  if (Array.isArray(root.components)) for (const c of root.components) visit(c);
+  // Also try direct stateDecls if present
+  if (Array.isArray(file.stateDecls)) for (const s of file.stateDecls) visit(s);
+  if (Array.isArray(root.stateDecls)) for (const s of root.stateDecls) visit(s);
+
+  return map;
 }
 
 /**
@@ -83,9 +140,13 @@ function walkFileForIfChains(file, visitor) {
     if (seen.has(node)) return;
     seen.add(node);
 
-    if (node.kind === "if-stmt" && !seen.has(node)) {
-      // Gather the chain
+    if (node.kind === "if-stmt") {
+      // Gather the chain. Mark the inner else-if-stmt nodes as seen so the
+      // generic recursion below does not re-visit them as their own chains.
       const branches = collectChainBranches(node);
+      for (const b of branches) {
+        if (b.ifNode !== node) seen.add(b.ifNode);
+      }
       visitor(node, branches);
       // Walk INTO each branch body for nested chains
       for (const b of branches) {
@@ -115,11 +176,15 @@ function walkFileForIfChains(file, visitor) {
     }
   }
 
-  if (Array.isArray(file.nodes)) {
-    for (const n of file.nodes) visitNode(n);
+  // The typed-AST file shape exposes `ast` (the FileAST) at top-level.
+  // ast.nodes is the canonical entry to walk. Older code paths may also
+  // expose `nodes`/`components` directly; check both.
+  const root = file.ast ?? file;
+  if (root && Array.isArray(root.nodes)) {
+    for (const n of root.nodes) visitNode(n);
   }
-  if (Array.isArray(file.components)) {
-    for (const c of file.components) visitNode(c);
+  if (root && Array.isArray(root.components)) {
+    for (const c of root.components) visitNode(c);
   }
 }
 
@@ -173,7 +238,7 @@ function collectChainBranches(head) {
  * @param {Map<string, object>} stateTypeRegistry
  * @returns {LintDiagnostic | null}
  */
-function analyseChain(chainHead, branches, stateTypeRegistry) {
+function analyseChain(chainHead, branches, typeRegistry, cellTypeByName) {
   if (branches.length < 2) return null;  // 1-branch chains aren't worth promoting
 
   // Phase 1: identify the leading-cell ident. Must be a uniform `binary op=is`
@@ -197,20 +262,19 @@ function analyseChain(chainHead, branches, stateTypeRegistry) {
       continue;
     }
 
-    if (!isBareIsVariant(ce)) {
+    const match = matchIsVariantPredicate(ce);
+    if (!match) {
       hasNonIsForm = true;
       continue;
     }
 
-    const branchCellName = identName(ce.left);
     if (cellName == null) {
-      cellName = branchCellName;
-      cellIdent = ce.left;
-    } else if (cellName !== branchCellName) {
+      cellName = match.cellName;
+      cellIdent = match.idLeft;  // may be null for escape-hatch path
+    } else if (cellName !== match.cellName) {
       hasMixedDiscriminator = true;
     }
-    const tag = stripDotPrefix(identName(ce.right));
-    if (tag) variantTags.push(tag);
+    if (match.variantTag) variantTags.push(match.variantTag);
   }
 
   // No structured `is` predicates found in the entire chain → not our concern.
@@ -230,8 +294,9 @@ function analyseChain(chainHead, branches, stateTypeRegistry) {
   // promotable site. Don't fire.
   if (hasNonIsForm) return null;
 
-  // Resolve cell type via B3 stamp + typeAnnotation lookup.
-  const enumType = resolveEnumTypeForCell(cellIdent, stateTypeRegistry);
+  // Resolve cell type. Try B3's `_resolvedStateCell` stamp first; fall back
+  // to the file-scoped cell-name → typeAnnotation map.
+  const enumType = resolveEnumTypeForCell(cellIdent, cellName, typeRegistry, cellTypeByName);
   if (!enumType) return null;  // cell is not enum-typed; not our concern
 
   // Compute coverage.
@@ -253,17 +318,50 @@ function analyseChain(chainHead, branches, stateTypeRegistry) {
   }
 }
 
-/** True if expr is a binary `is`-op on a cell ident with a `.Variant` right. */
+/**
+ * True if expr is a `@cell is .Variant` predicate.
+ *
+ * Handles two AST shapes:
+ *   1. Structured `binary op=is` (when the parser produced it cleanly)
+ *   2. `escape-hatch` with `raw` text matching the canonical pattern (the
+ *      block-form parser may emit escape-hatch where parseExprToNode would
+ *      emit binary; we pattern-match on the raw text in that case)
+ *
+ * Returns null if not a match; otherwise `{ cellName, variantTag }`
+ * (cellName includes the `@` prefix; variantTag has no leading `.`).
+ */
+function matchIsVariantPredicate(expr) {
+  if (!expr) return null;
+
+  // Path 1: structured binary node
+  if (expr.kind === "binary" && expr.op === "is" &&
+      expr.left && expr.left.kind === "ident" &&
+      expr.right && expr.right.kind === "ident" &&
+      typeof expr.right.name === "string" && expr.right.name.startsWith(".")) {
+    return { cellName: expr.left.name, variantTag: expr.right.name.slice(1), idLeft: expr.left };
+  }
+
+  // Path 2: escape-hatch with raw text
+  if (expr.kind === "escape-hatch" && typeof expr.raw === "string") {
+    // Normalize spacing — parser may emit "( @phase is . Idle )"
+    const normalized = expr.raw.replace(/\s+/g, " ").replace(/\.\s+/g, ".").trim();
+    // Strip outer parens (one level) for matching
+    const inner = normalized.startsWith("(") && normalized.endsWith(")")
+      ? normalized.slice(1, -1).trim()
+      : normalized;
+    // Pattern: `@cell is .Variant` (also accept bare `cell` without @ for
+    // expression contexts; the cell-type lookup will fail if unsupported).
+    const m = /^(@?[A-Za-z_$][A-Za-z0-9_$.]*)\s+is\s+\.([A-Z][A-Za-z0-9_]*)$/.exec(inner);
+    if (m) {
+      return { cellName: m[1], variantTag: m[2], idLeft: null };
+    }
+  }
+
+  return null;
+}
+
 function isBareIsVariant(expr) {
-  return (
-    expr &&
-    expr.kind === "binary" &&
-    expr.op === "is" &&
-    expr.left && (expr.left.kind === "ident") &&
-    expr.right && (expr.right.kind === "ident") &&
-    typeof expr.right.name === "string" &&
-    expr.right.name.startsWith(".")
-  );
+  return matchIsVariantPredicate(expr) !== null;
 }
 
 /** True if expr involves a logical operator, negation, or compound shape. */
@@ -274,6 +372,16 @@ function isCompoundCondition(expr) {
   // a binary `&&` / `||` could be encoded as `binary` with logical op
   if (expr.kind === "binary" && (expr.op === "&&" || expr.op === "||")) return true;
   if (expr.kind === "ternary") return true;
+  // escape-hatch with raw text: detect `||` / `&&` / leading `!` outside
+  // string literals. Quick approximation — false positives for these tokens
+  // inside strings are vanishingly rare in if-condition position.
+  if (expr.kind === "escape-hatch" && typeof expr.raw === "string") {
+    const r = expr.raw;
+    // Quick token-bounded check (the parser inserts spaces around operators).
+    if (/(?<![\w])(\|\||&&)(?![\w])/.test(r)) return true;
+    // Leading `!` (unary not). Match `!(` or `! ` or `!@` at start (after optional paren).
+    if (/^\s*\(?\s*!\s*[\w@(]/.test(r)) return true;
+  }
   return false;
 }
 
@@ -288,18 +396,36 @@ function stripDotPrefix(name) {
 
 /**
  * Resolve a cell-ident expression to its declared EnumType (if any).
- * Uses B3's `_resolvedStateCell` annotation + the cell's typeAnnotation field.
+ *
+ * Tries two paths in order:
+ *   1. B3's `_resolvedStateCell` annotation stamped on the IdentExpr →
+ *      record.declNode.typeAnnotation → typeRegistry lookup.
+ *   2. Fall back to the file-scoped cell-name → typeAnnotation map
+ *      (collected by `collectCellTypeAnnotations`). The cell's `@`-prefix
+ *      is stripped before lookup; bare cell names key the map.
  */
-function resolveEnumTypeForCell(cellIdent, stateTypeRegistry) {
-  if (!cellIdent) return null;
-  const record = cellIdent._resolvedStateCell;
-  if (!record || !record.declNode) return null;
-  const typeName = record.declNode.typeAnnotation;
-  if (!typeName || typeof typeName !== "string") return null;
-  // Strip generic params if present (e.g., "Maybe<T>" → "Maybe"). Not relevant
-  // for plain enums but defensive.
+function resolveEnumTypeForCell(cellIdent, cellName, typeRegistry, cellTypeByName) {
+  let typeName = null;
+
+  // Path 1: B3 stamp
+  if (cellIdent) {
+    const record = cellIdent._resolvedStateCell;
+    if (record && record.declNode && typeof record.declNode.typeAnnotation === "string") {
+      typeName = record.declNode.typeAnnotation;
+    }
+  }
+
+  // Path 2: file-scoped fallback
+  if (!typeName && cellTypeByName && typeof cellName === "string") {
+    const bare = cellName.startsWith("@") ? cellName.slice(1) : cellName;
+    const fromMap = cellTypeByName.get(bare);
+    if (typeof fromMap === "string") typeName = fromMap;
+  }
+
+  if (!typeName) return null;
+  // Strip generic params if present (e.g., "Maybe<T>" → "Maybe").
   const baseName = typeName.split(/[<\s(]/)[0].trim();
-  const t = stateTypeRegistry.get(baseName);
+  const t = typeRegistry.get(baseName);
   if (!t || t.kind !== "enum") return null;
   return t;
 }
