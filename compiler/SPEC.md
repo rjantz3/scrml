@@ -24773,18 +24773,14 @@ attribute chain (markup form) when ALL of:
    whose declared type resolves (via type-system) to an `EnumType`. Compound-cell sub-paths
    (e.g., `@form.phase` over an enum-typed sub-cell) qualify identically.
 
-2. **Conditions are clean variant predicates.** Each branch's condition is the operator
-   form: `@cell is .Variant`. This is the only fully-structured variant-predicate
-   expression in the AST today.
+2. **Conditions are clean variant predicates.** Each branch's condition is one of:
+   - `@cell.is(.Variant)` — method-call form
+   - `@cell is .Variant` — operator form
+   - `@cell is .Variant msg` — single-field bind syntax (operator form with bind)
 
-   Other syntactic shapes that look promotable but are NOT in the matrix:
-   - `@cell == .Variant` — does not parse (preprocessor gap; see status note above).
-   - `@cell.is(.Variant)` — parses to an `escape-hatch` AST node, not a structured
-     binary-is expression. The lint can't distinguish a clean `.is(.X)` site from other
-     escape-hatch shapes without further work.
-   - `@cell is .Variant msg` (bind-on-is) — Acorn consumes the trailing `msg` but the
-     parser silently drops it; the resulting AST is identical to bare `is .Variant`.
-     The bind-on-is form is a separate language gap (out of scope; future).
+   The `@cell == .Variant` form is NOT parseable today (preprocessor gap, see status note
+   above) and is out of scope for the lint and CLI rewrite. Future preprocessor work may
+   extend the matrix.
 
 3. **All branches reference the same discriminator.** Mixed-discriminator chains do NOT
    fire `I-MATCH-PROMOTABLE`.
@@ -24856,15 +24852,16 @@ form to a valid Tier-(N+1) form (both forms remain valid after the lift).
 
 | Source branch condition | Target arm |
 |---|---|
+| `if (@cell.is(.X)) { body }` | `<X>{body}</>` |
 | `if (@cell is .X) { body }` | `<X>{body}</>` |
+| `if (@cell is .X msg) { body }` | `<X msg>{body}</>` |
 | Trailing bare `else { body }` with exhaustive coverage | dropped (unreachable) |
 | Trailing bare `else { body }` with non-exhaustive coverage | the lint fires near-miss; CLI skips the site |
 
-Only the operator-form `is .Variant` is currently in the rewrite table. Per the §56 status
-note, the `==`-with-dot-prefix-variant shapes (`@cell == .X`, `@cell == .X(payload)`,
-`@cell == .X msg`), the method-call form (`@cell.is(.X)`), and the bind-on-is form
-(`@cell is .X msg`) are out of scope until their respective parser/preprocessor gaps are
-resolved. Adding them is future work and will be additive to this rewrite table.
+The `==`-with-dot-prefix-variant rewrite shapes (`@cell == .X`, `@cell == .X(payload)`,
+`@cell == .X msg`) are NOT in the current rewrite table — see the §56 status note. Adding
+them requires extending `preprocessForAcorn` to register `==`-with-dot-variant placeholders
+symmetric to the existing `is .Variant` rule.
 
 #### 56.5.3 Idempotency + skip-and-report
 
