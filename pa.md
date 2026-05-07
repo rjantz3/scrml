@@ -54,12 +54,35 @@ The S66 narrowing was the precedent: easy answer was "drop `==` from spec becaus
 
 Operational rule: when PA is tempted to take a shortcut, **surface it explicitly so Bryan can veto.** Do NOT silently default to the small-scope answer. Do NOT volunteer narrowing / dropping / deferring as design moves. Those require a real load-bearing reason — not corpus-as-evidence, not "we can ship faster," not "smaller surface to maintain."
 
+### Rule 4 — Spec is normative; derived planning docs are NOT
+
+When PA encodes a claim into a dispatch brief, an implementation plan, or a design recommendation, the **authoritative source is `compiler/SPEC.md`** (and to a lesser extent `compiler/PIPELINE.md` and the primer). Planning artifacts — `docs/changes/**/SCOPE-AND-DECOMPOSITION.md`, `IMPLEMENTATION-ROADMAP.md`, prior dispatch briefs, audit docs — are DERIVED. They drift. They were written from a different point in time. They were sometimes wrong when written.
+
+**PA must verify every spec-derivative claim against the spec text directly before encoding it.** If a SCOPE doc says "B4 fires on cycles" but every spec quote about that error code talks about source-position forward references, the spec wins. If an audit doc says "drop `==` from the predicate matrix" but the spec section never said that, the spec wins. The derived doc is suspect; the spec is authoritative.
+
+**Two precedents this session (S66) where PA failed this rule:**
+
+1. **S66 narrowing reversal.** PA wrote brief saying "drop `==` rows from SPEC §56 predicate matrix" based on SCOPE-AND-DECOMPOSITION wording + corpus-shows-zero-`==` heuristic. The spec said no such thing. Bryan caught it; full reversal required (4 reverts + parser fix + lint extension + docs touch-up + commits across the session).
+
+2. **B4 cycle-detection framing.** PA wrote brief saying "build dep graph, run Tarjan SCC cycle detection" based on SCOPE-AND-DECOMPOSITION's "for `pinned`-flagged imports, builds + walks dep graph; fires E-STATE-PINNED-FORWARD-REF on cycles" wording. Spec §6.9.3 / §6.10 / §7.6.1 / §21.8.1 / §34 unanimously describe a source-position forward-reference rule, not cycles. Predecessor agent caught it via Phase-0 STOP report; PA re-scoped.
+
+Both were the same shape of mistake: PA trusted a derivative doc over the normative spec. The cost of re-work is high. The fix is cheap: read the spec section before writing the brief.
+
+**Operational rule for every dispatch brief PA writes:**
+- Identify every spec-derivative claim in the brief (e.g., "fires E-X on Y," "the rule is Z," "the algorithm should W").
+- For each, locate the corresponding spec section (use `compiler/SPEC-INDEX.md` to navigate).
+- Read the spec text. Confirm the claim matches the spec language. If it doesn't: the spec wins, the brief gets rewritten.
+- If the spec is silent or ambiguous on the claim, surface that to Bryan as a deliberation point — don't paper over it with a derived-doc interpretation.
+
+This rule is in service of Rule 3 (right answer beats easy answer): spec-faithful is the right answer; derived-doc-shorthand is the easy answer.
+
 ### When in doubt
 
 - "Is this marketing-shaped?" → drop unless Bryan raises it.
 - "Is the easy path different from the right path?" → propose the right path; surface the easy path only as a veto-check.
 - "Is the corpus empty because of past parser limits?" → fix the parser limit, don't drop the form.
 - "Is this a corner case that won't matter to early users?" → it matters; the language is being designed for full-production fidelity.
+- "Did this claim come from a SCOPE doc / audit / prior brief?" → verify against `compiler/SPEC.md` before encoding it. The spec wins.
 
 ## Repo layout
 
