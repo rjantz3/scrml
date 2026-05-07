@@ -98,10 +98,20 @@ export type CellTypeRequirement =
 export interface PredicateSignature {
   /** Source-level name, exactly as it appears in `<name predicate(args)>`. */
   name: string;
-  /** Documented arity. `0` means bareword form (no parens at all); `1` means
-   *  exactly one required arg; `1+inline` means one required arg plus an
-   *  optional trailing inline-message-override (per §55.10). */
-  arity: 0 | 1 | "1+inline";
+  /** Documented arity:
+   *
+   *  - `0` — strictly bareword (no parens at all). Currently unused — every
+   *    universal-core predicate accepts the optional trailing inline-override
+   *    per §55.10, so this slot exists only for future predicates that should
+   *    forbid inline overrides.
+   *  - `"0+inline"` — bareword OR one optional trailing inline-message-override
+   *    (string literal). Used by `req` and `is some`. The §55.10 worked
+   *    example `<name req("Please enter your name")>` is the canonical form
+   *    for this arity.
+   *  - `1` — strictly one required arg, no inline override. Currently unused.
+   *  - `"1+inline"` — one required arg plus an optional trailing
+   *    inline-message-override. Used by all the call-form predicates. */
+  arity: 0 | "0+inline" | 1 | "1+inline";
   /** Per-positional arg-kind list. `null` for arity-0 bareword predicates.
    *  When `arity === "1+inline"`, the trailing inline-override slot is
    *  expressed as the last entry (`{ kind: "inline-message-override" }`).
@@ -129,19 +139,19 @@ export interface PredicateSignature {
 export const UNIVERSAL_CORE_PREDICATES: readonly PredicateSignature[] = [
   {
     name: "req",
-    arity: 0,
-    args: null,
+    arity: "0+inline",
+    args: [{ kind: "inline-message-override" }],
     cellTypeRequirement: "any",
     errorTag: "Required",
-    specRef: "§55.1 — non-empty value (`\"\"` fails; null/undefined fail)",
+    specRef: "§55.1 — non-empty value (`\"\"` fails; null/undefined fail). Inline override per §55.10.",
   },
   {
     name: "is some",
-    arity: 0,
-    args: null,
+    arity: "0+inline",
+    args: [{ kind: "inline-message-override" }],
     cellTypeRequirement: "any",
     errorTag: "NotSome",
-    specRef: "§55.1, §42.2.5 — value EXISTS (null/undefined fail). `\"\"` IS some.",
+    specRef: "§55.1, §42.2.5 — value EXISTS (null/undefined fail). `\"\"` IS some. Inline override per §55.10.",
   },
   {
     name: "length",

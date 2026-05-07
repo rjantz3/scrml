@@ -2051,6 +2051,432 @@ function walkDerivedValueMutate(
 }
 
 // ---------------------------------------------------------------------------
+// B10: Validator type-check walker (PASS 7)
+// ---------------------------------------------------------------------------
+//
+// Per SPEC §55.1 (universal-core vocabulary, L4) + §55.10 (4-level error
+// message resolution chain, L12 Edge F). For every state-decl with
+// validators, B10 looks up each validator against the
+// `validator-catalog.ts` module's predicate signature catalog and verifies:
+//
+//   1. Predicate name is in the universal-core (14 predicates per §55.1).
+//      Library-surface predicates (`email`/`url`/`numeric`/`integer` from
+//      `scrml:data`) are NOT in the universal-core catalog; B10 silently
+//      passes through unknown names — a future tightening will register
+//      stdlib predicates and convert this to a strict reject.
+//
+//   2. Arity matches:
+//      - bareword (args: null) → must be `arity: 0` or `"0+inline"` predicate
+//      - call-form with 1 arg → leading slot must match required-shape
+//      - call-form with 2 args → leading slot + trailing inline-message-override
+//      - call-form with > 2 args → reject (no spec predicate takes more)
+//
+//   3. Per-positional-arg shape matches the catalog signature:
+//      - `relational-predicate` slot ↔ RelationalPredicateNode (B9 sibling kind)
+//      - `regex` slot ↔ ESTree-`Literal`-via-escape-hatch with raw=`/.../`
+//                       OR a string literal (alternative-form acceptance)
+//      - `numeric` slot ↔ NumLit ExprNode (or numeric-typed expression —
+//                          for now any non-string literal accepted; deeper
+//                          type-inference deferred)
+//      - `comparable-with-cell` / `any-equatable-with-cell` slots ↔ any
+//                          ExprNode (full cell-type compatibility deferred
+//                          per audit §1.3 cost-control)
+//      - `array-of-cell-type` slot ↔ ArrayLit ExprNode
+//      - `inline-message-override` slot ↔ string literal (StringLit). Dynamic
+//                          override (anything else) is fired as a separate
+//                          diagnostic — though B13 ultimately owns the formal
+//                          extraction + inline-override-record.
+//
+// Failures fire `E-TYPE-031` (the existing umbrella per §55.1 line 24295)
+// with a per-violation descriptive message.
+//
+// **DEFERRED to follow-up steps:**
+//   - Cell-type compatibility check (`pattern(re)` on a `number` cell): needs
+//     type-system.ts type inference. Audit §1.3 budgets this for a later
+//     tightening.
+//   - B13 owns formal Level-1 inline-override extraction onto the validator
+//     record + explicit dynamic-override rejection error code.
+//   - Cycle detection (E-VALIDATOR-CIRCULAR-DEP) is Phase 3 of B10 and lives
+//     in dependency-graph.ts (Stage 7) per audit §1.4.
+//   - B3 cross-field `@cell` resolution is read by Phase 3 (cycle detection);
+//     B10 Phase 2 (this walker) does shape checks only.
+//
+// **WHY HERE (not type-system.ts):** B10's check is symbol-table-shaped —
+// iterates state-decls, reads decl.validators, dispatches per-arg. Doesn't
+// need full type inference. Follows the B6/B8 walker pattern (PASS 5 / PASS 6).
+
+import {
+  lookupPredicate,
+  type PredicateSignature,
+  type PredicateArgKind,
+} from "./validator-catalog.js";
+import type { ValidatorEntry, ValidatorArg } from "./types/ast.js";
+
+/**
+ * Walker over the AST tree. For every `state-decl` node with `hasValidators`
+ * set on its `_record` annotation, type-checks each validator entry against
+ * the universal-core catalog. Mirrors the structural-recursion pattern used
+ * by PASS 4 (walkClassifyCells) and PASS 5 (walkRenderByTagUses).
+ *
+ * Scope is parent-pointer-only (no `children` enumeration), so iteration is
+ * AST-driven; the state-decl's `_record` back-pointer (set by PASS 1) is the
+ * source of truth for "has validators?" without re-scanning the array.
+ */
+function walkValidatorTypeCheck(
+  nodes: any,
+  errors: SYMDiagnostic[],
+  filePath: string,
+  visited: WeakSet<object>,
+): void {
+  if (!nodes) return;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) walkValidatorTypeCheck(n, errors, filePath, visited);
+    return;
+  }
+  if (typeof nodes !== "object") return;
+  if (visited.has(nodes)) return;
+  visited.add(nodes);
+
+  const node = nodes;
+  const kind = node.kind;
+
+  if (kind === "state-decl") {
+    const record: StateCellRecord | undefined = (node as any)._record;
+    if (record && record.hasValidators) {
+      const validators: ValidatorEntry[] = (node as any).validators ?? [];
+      for (const validator of validators) {
+        checkValidator(validator, record, errors, filePath);
+      }
+    }
+    // Recurse into compound children (each is a state-decl too).
+    if (Array.isArray(node.children)) {
+      walkValidatorTypeCheck(node.children, errors, filePath, visited);
+    }
+    // Don't descend into renderSpec / initExpr — validator AST is on the
+    // decl node itself, not nested in init expressions.
+    return;
+  }
+
+  // Generic recursion. Mirror the PASS 5 / PASS 6 structural walk.
+  for (const k of [
+    "body", "consequent", "alternate", "expr", "node", "renderSpec",
+    "children", "value", "argument",
+  ]) {
+    if ((node as any)[k]) {
+      walkValidatorTypeCheck((node as any)[k], errors, filePath, visited);
+    }
+  }
+  if (Array.isArray((node as any).arms)) {
+    for (const arm of (node as any).arms) {
+      if (arm && Array.isArray(arm.body)) {
+        walkValidatorTypeCheck(arm.body, errors, filePath, visited);
+      }
+    }
+  }
+}
+
+/**
+ * Check a single validator entry against its catalog signature.
+ *
+ * Fires E-TYPE-031 with a descriptive message per failure mode.
+ */
+function checkValidator(
+  validator: ValidatorEntry,
+  cellRecord: StateCellRecord,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  const signature = lookupPredicate(validator.name);
+  if (!signature) {
+    // Unknown predicate name. May be a library-surface predicate
+    // (`email`, `url`, `numeric`, `integer` from scrml:data) which has a
+    // separate registration path. Silent pass-through; a future tightening
+    // can convert this to a strict reject once stdlib predicates register.
+    return;
+  }
+
+  const cellName = cellRecord.qualifiedPath || cellRecord.name;
+  const span = (validator as any).span ?? cellRecord.declNode.span ?? {
+    file: filePath, start: 0, end: 0, line: 1, col: 1,
+  };
+
+  const args = validator.args;
+
+  // Arity check.
+  if (signature.arity === 0) {
+    // Strictly bareword. Currently no predicate uses this arity.
+    if (args !== null) {
+      errors.push({
+        code: "E-TYPE-031",
+        message:
+          `E-TYPE-031: validator \`${validator.name}\` on \`${cellName}\` is bareword-only; `
+          + `it does not accept arguments. Remove the parentheses (SPEC §55.1).`,
+        span,
+        severity: "error",
+      });
+    }
+    return;
+  }
+
+  if (signature.arity === "0+inline") {
+    // Bareword OR one optional trailing string-literal inline-override.
+    if (args === null) return; // bareword form — legal.
+    if (args.length === 0) return; // empty-paren call — legal but uncommon.
+    if (args.length > 1) {
+      errors.push({
+        code: "E-TYPE-031",
+        message:
+          `E-TYPE-031: validator \`${validator.name}\` on \`${cellName}\` accepts at most `
+          + `one argument (the optional inline message override per SPEC §55.10). `
+          + `Got ${args.length} arguments.`,
+        span,
+        severity: "error",
+      });
+      return;
+    }
+    // Single arg present — must be string-literal (inline-message-override).
+    if (!isInlineMessageOverride(args[0])) {
+      errors.push({
+        code: "E-TYPE-031",
+        message:
+          `E-TYPE-031: validator \`${validator.name}\` on \`${cellName}\` accepts only a `
+          + `static string literal as the inline message override (SPEC §55.10 / L12 Edge F). `
+          + `Dynamic expressions defeat i18n tooling extraction.`,
+        span,
+        severity: "error",
+      });
+    }
+    return;
+  }
+
+  if (signature.arity === 1) {
+    // Strictly one required arg, no inline override. Currently no predicate
+    // uses this arity.
+    if (args === null || args.length !== 1) {
+      errors.push({
+        code: "E-TYPE-031",
+        message:
+          `E-TYPE-031: validator \`${validator.name}\` on \`${cellName}\` requires exactly `
+          + `one argument (SPEC §55.1). Got ${args === null ? "bareword" : args.length}.`,
+        span,
+        severity: "error",
+      });
+      return;
+    }
+    checkArgShape(args[0], signature.args![0]!, validator, cellName, errors, span);
+    return;
+  }
+
+  // arity === "1+inline"
+  if (args === null) {
+    errors.push({
+      code: "E-TYPE-031",
+      message:
+        `E-TYPE-031: validator \`${validator.name}\` on \`${cellName}\` requires at least `
+        + `one argument (SPEC §55.1). Did you mean \`${validator.name}(...)\`? `
+        + `Bareword form is not legal for this predicate.`,
+      span,
+      severity: "error",
+    });
+    return;
+  }
+  if (args.length === 0) {
+    errors.push({
+      code: "E-TYPE-031",
+      message:
+        `E-TYPE-031: validator \`${validator.name}\` on \`${cellName}\` requires at least `
+        + `one argument (SPEC §55.1). Got empty parentheses.`,
+      span,
+      severity: "error",
+    });
+    return;
+  }
+  if (args.length > 2) {
+    errors.push({
+      code: "E-TYPE-031",
+      message:
+        `E-TYPE-031: validator \`${validator.name}\` on \`${cellName}\` accepts at most `
+        + `two arguments (the required arg per SPEC §55.1, plus an optional inline `
+        + `message override per §55.10). Got ${args.length} arguments.`,
+      span,
+      severity: "error",
+    });
+    return;
+  }
+
+  // Required leading arg.
+  checkArgShape(args[0], signature.args![0]!, validator, cellName, errors, span);
+
+  // Optional trailing inline-message-override.
+  if (args.length === 2) {
+    if (!isInlineMessageOverride(args[1])) {
+      errors.push({
+        code: "E-TYPE-031",
+        message:
+          `E-TYPE-031: validator \`${validator.name}\` on \`${cellName}\`: the trailing `
+          + `argument must be a static string literal (the inline message override per `
+          + `SPEC §55.10 / L12 Edge F). Dynamic expressions defeat i18n tooling extraction.`,
+        span,
+        severity: "error",
+      });
+    }
+  }
+}
+
+/**
+ * Check a single arg's shape against the expected slot kind.
+ *
+ * NOTE: cell-type compatibility (e.g., `pattern(re)` on a `number` cell)
+ * is DEFERRED per audit §1.3 — needs type-system inference. This check
+ * verifies AST shape only.
+ */
+function checkArgShape(
+  arg: ValidatorArg,
+  expected: PredicateArgKind,
+  validator: ValidatorEntry,
+  cellName: string,
+  errors: SYMDiagnostic[],
+  span: SYMDiagnostic["span"],
+): void {
+  switch (expected.kind) {
+    case "relational-predicate": {
+      if (!arg || (arg as any).kind !== "relational-predicate") {
+        errors.push({
+          code: "E-TYPE-031",
+          message:
+            `E-TYPE-031: validator \`${validator.name}\` on \`${cellName}\` expects a `
+            + `relational predicate (e.g., \`>=2\`, \`<=10\`, \`<5\`) per SPEC §55.1.`,
+          span,
+          severity: "error",
+        });
+      }
+      return;
+    }
+    case "regex": {
+      // Regex literals fall to the escape-hatch path with raw="/.../" per
+      // B9 specifics (esTreeToExprNode routes RegExp through BigInt/exotic).
+      // String literals are accepted as an alternative form.
+      if (!isRegexLikeArg(arg) && !isStringLit(arg)) {
+        errors.push({
+          code: "E-TYPE-031",
+          message:
+            `E-TYPE-031: validator \`${validator.name}\` on \`${cellName}\` expects a `
+            + `regex literal (e.g., \`/^[a-z]+$/\`) or string-literal regex per SPEC §55.1.`,
+          span,
+          severity: "error",
+        });
+      }
+      return;
+    }
+    case "numeric": {
+      // Numeric literal OR an expression of numeric type (typing deferred).
+      // For now: reject obviously-non-numeric forms (string literals, regex,
+      // array literals, RelationalPredicateNode).
+      if (isStringLit(arg) || isRegexLikeArg(arg) || isArrayLikeArg(arg)
+          || (arg as any)?.kind === "relational-predicate") {
+        errors.push({
+          code: "E-TYPE-031",
+          message:
+            `E-TYPE-031: validator \`${validator.name}\` on \`${cellName}\` expects a `
+            + `numeric value per SPEC §55.1.`,
+          span,
+          severity: "error",
+        });
+      }
+      return;
+    }
+    case "comparable-with-cell":
+    case "any-equatable-with-cell": {
+      // Any ExprNode is acceptable at the shape level. Full cell-type
+      // compatibility check deferred per audit §1.3.
+      return;
+    }
+    case "array-of-cell-type": {
+      if (!isArrayLikeArg(arg)) {
+        errors.push({
+          code: "E-TYPE-031",
+          message:
+            `E-TYPE-031: validator \`${validator.name}\` on \`${cellName}\` expects an `
+            + `array literal (e.g., \`[.Admin, .Editor]\`) per SPEC §55.1.`,
+          span,
+          severity: "error",
+        });
+      }
+      return;
+    }
+    case "inline-message-override": {
+      // The inline-override slot when it appears as a leading required arg —
+      // catalog never declares this for slot 0 of any predicate today, but
+      // exhaustive switch defensiveness.
+      if (!isStringLit(arg)) {
+        errors.push({
+          code: "E-TYPE-031",
+          message:
+            `E-TYPE-031: validator \`${validator.name}\` on \`${cellName}\` expects a `
+            + `static string literal per SPEC §55.10 / L12 Edge F.`,
+          span,
+          severity: "error",
+        });
+      }
+      return;
+    }
+  }
+}
+
+function isStringLit(arg: ValidatorArg): boolean {
+  if (!arg || typeof arg !== "object") return false;
+  const a = arg as any;
+  // Canonical scrml ExprNode for literals: kind:"lit", litType:"string".
+  if (a.kind === "lit" && a.litType === "string") return true;
+  // ESTree-flavored escape-hatch fallback (Literal with string value).
+  if (a.kind === "escape-hatch" && a.estreeType === "Literal"
+      && typeof a.value === "string") return true;
+  return false;
+}
+
+function isInlineMessageOverride(arg: ValidatorArg): boolean {
+  return isStringLit(arg);
+}
+
+/**
+ * Is the arg a regex-shaped value? Per B9 specifics, regex literals fall
+ * through to the escape-hatch path because `esTreeToExprNode` routes RegExp
+ * values through the BigInt/exotic branch — they arrive as
+ * `{kind: "escape-hatch", estreeType: "Literal", raw: "/.../"}`.
+ */
+function isRegexLikeArg(arg: ValidatorArg): boolean {
+  if (!arg || typeof arg !== "object") return false;
+  const a = arg as any;
+  if (a.kind === "regex") return true;
+  if (a.kind === "escape-hatch" && a.estreeType === "Literal"
+      && typeof a.raw === "string" && a.raw.startsWith("/")) return true;
+  return false;
+}
+
+/**
+ * Is the arg an array-literal-shaped value? Two paths:
+ *  - Canonical scrml ExprNode: `kind: "array-lit"` (or future `kind: "lit"`
+ *    with `litType: "array"` if grammar evolves).
+ *  - Escape-hatch fallbacks: `estreeType: "ArrayExpression"` for clean
+ *    array literals; OR `estreeType: "ParseError"` with `raw` starting with
+ *    `[` — covers `[.Admin, .Editor]` bare-variant arrays which fail
+ *    standalone JS parse but ARE valid scrml array literals.
+ */
+function isArrayLikeArg(arg: ValidatorArg): boolean {
+  if (!arg || typeof arg !== "object") return false;
+  const a = arg as any;
+  if (a.kind === "array-lit") return true;
+  if (a.kind === "lit" && a.litType === "array") return true;
+  if (a.kind === "escape-hatch") {
+    if (a.estreeType === "ArrayExpression") return true;
+    // Bare-variant arrays: ParseError with raw starting "[".
+    if (a.estreeType === "ParseError" && typeof a.raw === "string"
+        && a.raw.trimStart().startsWith("[")) return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -2152,6 +2578,17 @@ export function runSYM(input: SYMInput): SYMResult {
   // E-SYNTHESIZED-WRITE (§55.7) is deferred to B11.
   const visited6 = new WeakSet<object>();
   walkDerivedValueMutate(ast.nodes, fileScope, visited6, errors, filePath);
+
+  // PASS 7 (B10 Phase 2): Validator type-check — for every state-decl with
+  // `hasValidators: true`, look up each validator against the universal-core
+  // catalog (`validator-catalog.ts`) and verify arity + per-arg shape per
+  // SPEC §55.1 + §55.10. Fires E-TYPE-031 family on signature mismatch.
+  // Cell-type compatibility check (e.g., `pattern(re)` on a `number` cell)
+  // is DEFERRED per audit §1.3 — needs type-system inference. Cycle
+  // detection (E-VALIDATOR-CIRCULAR-DEP) is Phase 3 and lives in
+  // dependency-graph.ts.
+  const visited7 = new WeakSet<object>();
+  walkValidatorTypeCheck(ast.nodes, errors, filePath, visited7);
 
   return {
     filePath,

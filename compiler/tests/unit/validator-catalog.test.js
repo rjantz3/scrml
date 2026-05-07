@@ -59,7 +59,7 @@ describe("validator-catalog: lookup API", () => {
     const sig = lookupPredicate("req");
     expect(sig).toBeDefined();
     expect(sig?.name).toBe("req");
-    expect(sig?.arity).toBe(0);
+    expect(sig?.arity).toBe("0+inline");
     expect(sig?.errorTag).toBe("Required");
   });
 
@@ -82,14 +82,17 @@ describe("validator-catalog: lookup API", () => {
 });
 
 describe("validator-catalog: arity classification", () => {
-  test("bareword predicates are arity 0 with null args", () => {
+  test("bareword-or-inline predicates are arity '0+inline' with inline-message-override slot", () => {
+    // req and is-some are bareword predicates with an optional inline-
+    // message-override slot per §55.10 (`<name req("custom message")>`).
+    // arity is '0+inline' — bareword OR one optional trailing string-literal.
     const req = lookupPredicate("req");
-    expect(req.arity).toBe(0);
-    expect(req.args).toBeNull();
+    expect(req.arity).toBe("0+inline");
+    expect(req.args).toEqual([{ kind: "inline-message-override" }]);
 
     const isSome = lookupPredicate("is some");
-    expect(isSome.arity).toBe(0);
-    expect(isSome.args).toBeNull();
+    expect(isSome.arity).toBe("0+inline");
+    expect(isSome.args).toEqual([{ kind: "inline-message-override" }]);
   });
 
   test("call-form predicates have '1+inline' arity (one required arg + optional inline override)", () => {
