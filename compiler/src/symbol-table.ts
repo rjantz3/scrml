@@ -9,7 +9,7 @@
  *   B2 — V5-strict bare-name resolution + E-NAME-COLLIDES-STATE  [LANDED]
  *   B3 — `@name` resolution → record back-pointer on each ExprNode  [LANDED]
  *   B4 — Import binding + `pinned` forward-ref cycle detection
- *   B5 — Cell classifier (bindable, markup-typed, derived-with-validators)
+ *   B5 — Cell classifier (bindable, markup-typed, derived-with-validators)  [LANDED]
  *   B6 — Render-by-tag E-CELL-NO-RENDER-SPEC + E-CELL-RENDER-SPEC-NOT-BINDABLE
  *   B7 — Derived-cell dep DAG + E-DERIVED-CIRCULAR-DEP
  *   B8 — L21 walker (E-DERIVED-VALUE-MUTATE + E-SYNTHESIZED-WRITE)
@@ -22,6 +22,29 @@
  * a registered state-cell record is found at any enclosing scope, fires
  * `E-NAME-COLLIDES-STATE` per SPEC §6.1.3 + §34. Local names cannot shadow
  * registered state-cell names — the V5-strict invariant.
+ *
+ * Phase A1b Step B5 — Cell classifier. PASS 4 walks every registered
+ * `state-decl` (via the per-scope `stateCells` map populated in PASS 1) and
+ * stamps a `_cellKind` discriminant + `_isBindable` boolean on the AST decl
+ * node. Four kinds:
+ *
+ *   - `"plain"`        — Shape 1 mutable cell (`<count> = 0`) OR Shape 3
+ *                        derived with non-markup RHS (`const <doubled> = @count * 2`).
+ *   - `"bindable"`     — Shape 2 with `renderSpec.element.tag` in
+ *                        {input, textarea, select} (canonical bindable set,
+ *                        per `codegen/emit-html.ts` BIND_DIRECTIVE_TAGS).
+ *   - `"markup-typed"` — Shape 3 derived with markup RHS (e.g.,
+ *                        `const <badge> = <span>...</span>`) OR a non-bindable
+ *                        Shape 2 markup-RHS (defensively classified; A1b/B6
+ *                        may later reject as illegal Shape-2).
+ *   - `"compound-parent"` — Variant C compound (`<formRes> { <name> = ""; ... }`).
+ *                           Children classify recursively as standalone state-decls
+ *                           in the compound's sub-scope.
+ *
+ * Per A1b plan §4.6 line 230, B5 RECORDS classification (annotates AST only);
+ * B6 will FIRE `E-CELL-NO-RENDER-SPEC` + `E-CELL-RENDER-SPEC-NOT-BINDABLE`
+ * based on the `_cellKind` annotation. B7 will filter to plain/markup-typed
+ * + isConst when building the derived-cell dep DAG.
  *
  * Phase A1b Step B3 — `@name` resolution. PASS 3 walks every ExprNode payload
  * on every AST node and, for each `@`-prefixed `IdentExpr`, calls
@@ -102,6 +125,19 @@ import { forEachIdentInExprNode } from "./expression-parser.ts";
  *   (`state-decl.children`).
  */
 export type ScopeKind = "file" | "function" | "engine" | "component" | "compound";
+
+/**
+ * Phase A1b Step B5 — cell-kind discriminant set on each `state-decl` AST node
+ * via the non-enumerable `_cellKind` property. Read via `getCellKind`.
+ *
+ * - `"plain"`           — Shape 1 mutable cell or Shape 3 non-markup derived.
+ * - `"bindable"`        — Shape 2 with bindable HTML root (input/textarea/select).
+ * - `"markup-typed"`    — Shape 3 markup-RHS derived (display markup), or a
+ *                         Shape-2-shaped decl whose render-spec is NOT one of
+ *                         the canonical bindable tags.
+ * - `"compound-parent"` — Variant C compound parent (has `children[]`).
+ */
+export type CellKind = "plain" | "bindable" | "markup-typed" | "compound-parent";
 
 /**
  * A single state-cell symbol-table entry. Created at registration; mutated
@@ -268,6 +304,22 @@ interface RecordAnnotated {
  */
 interface ResolvedAtNameAnnotated {
   _resolvedStateCell?: StateCellRecord | null;
+}
+
+/**
+ * B5 annotation shape — back-pointers stamped on every `state-decl` AST node.
+ *
+ * - `_cellKind`: discriminant per `CellKind` doc.
+ * - `_isBindable`: convenience accessor (`_cellKind === "bindable"`); used by
+ *   B6's render-by-tag check at `<varname/>` use-sites without a re-switch.
+ *
+ * Both fields are non-enumerable (Object.defineProperty), mirroring B1's
+ * `_record` and B3's `_resolvedStateCell` cycle-safety convention. Generic
+ * structural walkers (BP/CG/codegen) skip them.
+ */
+interface CellKindAnnotated {
+  _cellKind?: CellKind;
+  _isBindable?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -701,6 +753,137 @@ function walkResolveAtNames(
 }
 
 // ---------------------------------------------------------------------------
+// B5: Cell classifier (PASS 4)
+// ---------------------------------------------------------------------------
+//
+// Walks every registered state-cell record (recovered via the scope tree) and
+// classifies its decl node into one of four `CellKind` values. Stamps both
+// `_cellKind` and `_isBindable` on the AST decl as non-enumerable properties.
+//
+// Why iterate the scope tree (not the raw AST)? Every state-decl was
+// registered into a scope's `stateCells` map by PASS 1 — that's the canonical
+// inventory. Walking it directly:
+//   1. Skips ALL non-state-decl nodes (no shape predicates needed).
+//   2. Naturally descends into compound sub-scopes (each child's `_record` is
+//      already in the compound scope's map).
+//   3. Avoids touching engine/component bodies (they're raw text today; their
+//      future scopes will simply be empty maps until B14+/B17+ register).
+//
+// No diagnostics fired. B6 reads `_cellKind` to decide render-vs-error; B7
+// reads `_cellKind === "plain" | "markup-typed"` + `record.isConst` to filter
+// derived-cell dep-DAG inputs.
+
+/**
+ * The canonical bindable HTML element set. Mirrors
+ * `codegen/emit-html.ts:19-20` BIND_DIRECTIVE_TAGS["bind:value"]. If this
+ * set drifts, both sites must update — a single-line change in each.
+ */
+const B5_BINDABLE_TAGS: ReadonlySet<string> = new Set(["input", "textarea", "select"]);
+
+/**
+ * Classify a single state-decl node. Pure switch over A1a Step 4-6 fields:
+ * `children` (Variant C parent), `isConst` (Shape 3 derived), `renderSpec`
+ * (markup RHS), `renderSpec.element.tag` (bindable set).
+ *
+ * Algorithm (in priority order):
+ *   1. `children` is an array (incl. empty `[]`)            → "compound-parent"
+ *   2. `isConst === true` AND `renderSpec` present          → "markup-typed"
+ *   3. `isConst === true` (non-markup derived)              → "plain"
+ *   4. `renderSpec.element.tag` ∈ {input, textarea, select} → "bindable"
+ *   5. `renderSpec` present (non-bindable tag, non-const)   → "markup-typed"
+ *   6. Otherwise (Shape 1)                                  → "plain"
+ *
+ * Notes:
+ *   - Step 2 captures Shape 3 markup-typed derived (`const <badge> = <span>...`).
+ *     ast-builder routes the markup into `renderSpec` today — see
+ *     `tests/integration/kickstarter-v2-smoke.test.js:278-296`.
+ *   - Step 5 is defensive: a structural decl with markup RHS that ISN'T
+ *     bindable AND isn't `const` is currently classified as markup-typed so
+ *     B6's `<varname/>` use-site can render the markup. A1b/B6 may later
+ *     tighten and reject this form.
+ */
+function classifyStateDecl(decl: ReactiveDeclNode): CellKind {
+  if (Array.isArray(decl.children)) return "compound-parent";
+  const renderSpec = decl.renderSpec;
+  const renderTag = renderSpec && renderSpec.element ? renderSpec.element.tag : undefined;
+  if (decl.isConst === true) {
+    return renderSpec ? "markup-typed" : "plain";
+  }
+  if (renderTag && B5_BINDABLE_TAGS.has(renderTag)) return "bindable";
+  if (renderSpec) return "markup-typed";
+  return "plain";
+}
+
+/**
+ * Stamp `_cellKind` + `_isBindable` on a single decl. Non-enumerable to keep
+ * structural-walker invariants intact (mirrors B1's `_record` choice).
+ */
+function annotateCellKind(decl: ReactiveDeclNode, kind: CellKind): void {
+  Object.defineProperty(decl, "_cellKind", {
+    value: kind,
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
+  Object.defineProperty(decl, "_isBindable", {
+    value: kind === "bindable",
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
+}
+
+/**
+ * Walk the AST classifying every `state-decl` node. Mirrors PASS 1's recursion
+ * shape (children/body/consequent/alternate/arms/lift-expr) so any state-decl
+ * that PASS 1 registered is also reached here. Variant C compound children are
+ * naturally covered: a compound parent's `children[]` contains nested
+ * state-decl nodes which the recursion descends into.
+ */
+function walkClassifyCells(
+  nodes: ASTNode[] | undefined,
+  visited: WeakSet<object>,
+): void {
+  if (!nodes) return;
+  for (const n of nodes) {
+    if (!n || typeof n !== "object") continue;
+    if (visited.has(n)) continue;
+    visited.add(n);
+    const anyN = n as any;
+    const kind = anyN.kind as string;
+
+    if (kind === "state-decl") {
+      const decl = n as ReactiveDeclNode;
+      const cellKind = classifyStateDecl(decl);
+      annotateCellKind(decl, cellKind);
+      // Descend into compound children (each child is itself a state-decl).
+      if (Array.isArray(decl.children)) {
+        walkClassifyCells(decl.children as ASTNode[], visited);
+      }
+      continue;
+    }
+
+    if (kind === "function-decl") {
+      walkClassifyCells(anyN.body, visited);
+      continue;
+    }
+
+    if (Array.isArray(anyN.children)) walkClassifyCells(anyN.children, visited);
+    if (Array.isArray(anyN.body)) walkClassifyCells(anyN.body, visited);
+    if (Array.isArray(anyN.consequent)) walkClassifyCells(anyN.consequent, visited);
+    if (Array.isArray(anyN.alternate)) walkClassifyCells(anyN.alternate, visited);
+    if (Array.isArray(anyN.arms)) {
+      for (const arm of anyN.arms) {
+        if (arm && Array.isArray(arm.body)) walkClassifyCells(arm.body, visited);
+      }
+    }
+    if (kind === "lift-expr" && anyN.expr && anyN.expr.kind === "markup" && anyN.expr.node) {
+      walkClassifyCells([anyN.expr.node], visited);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -755,6 +938,13 @@ export function runSYM(input: SYMInput): SYMResult {
   // surface.
   const visited3 = new WeakSet<object>();
   walkResolveAtNames(ast.nodes, fileScope, visited3);
+
+  // PASS 4 (B5): Classify each state-decl into a CellKind discriminant.
+  // Stamps `_cellKind` and `_isBindable` non-enumerable properties on the
+  // decl node. No diagnostics — B6 will fire render-by-tag errors based on
+  // the annotation; B7 will filter derived-cell DAG inputs.
+  const visited4 = new WeakSet<object>();
+  walkClassifyCells(ast.nodes, visited4);
 
   return {
     filePath,
@@ -878,4 +1068,39 @@ export function getResolvedStateCell(
   if (!ident) return undefined;
   const annotated = ident as IdentExpr & ResolvedAtNameAnnotated;
   return annotated._resolvedStateCell;
+}
+
+/**
+ * B5 read API — return the `CellKind` stamped onto a state-decl node by
+ * PASS 4.
+ *
+ * Return shape:
+ *   - `CellKind` — one of `"plain" | "bindable" | "markup-typed" | "compound-parent"`.
+ *   - `undefined` — the node was either not a state-decl, not walked by SYM
+ *     (e.g., raw test-helper construction), or `null`. Consumers should treat
+ *     `undefined` as "not classified" and either treat as plain (B6 fires
+ *     `E-CELL-NO-RENDER-SPEC` on plain) or fall back to a fresh classifier
+ *     call.
+ */
+export function getCellKind(
+  decl: ReactiveDeclNode | null | undefined,
+): CellKind | undefined {
+  if (!decl) return undefined;
+  const annotated = decl as ReactiveDeclNode & CellKindAnnotated;
+  return annotated._cellKind;
+}
+
+/**
+ * B5 read API — return the `_isBindable` boolean stamped onto a state-decl
+ * node by PASS 4. Equivalent to `getCellKind(decl) === "bindable"` but
+ * convenient for B6's hot-path render-by-tag check.
+ *
+ * Returns `undefined` when the node was not classified (treat as `false`).
+ */
+export function isCellBindable(
+  decl: ReactiveDeclNode | null | undefined,
+): boolean | undefined {
+  if (!decl) return undefined;
+  const annotated = decl as ReactiveDeclNode & CellKindAnnotated;
+  return annotated._isBindable;
 }
