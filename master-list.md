@@ -36,7 +36,7 @@
 | B1 — Examples rewrite | 32 examples + trucking-dispatch | 20-30h | ⏸️ parallel w/ A* | |
 | B2 — Samples curate | 277 .scrml | 15-25h | ⏸️ parallel w/ A* | classify keep/rewrite/drop |
 | B3 — Stdlib audit + γ rewrite | 16 modules; data/validate vocab unification | 10-20h | ⏸️ parallel w/ A2-A4 | |
-| B4 — Self-host bootstrap | ~12k LOC scrml in `../scrml/` | 40-80h | ⏸️ parallel w/ A2-A4 | **biggest risk** — fixed-point regressions |
+| ~~B4 — Self-host bootstrap~~ | ~~~12k LOC scrml in `../scrml/`~~ | — | **❌ DEFERRED to post-v1.0.0 (S66 user decision)** | **REMOVED from v0.2.0 plan.** Self-hosting is post-v1.0.0; when it lands, bootstrap will be HUMAN-written (adoption-symbolism, not quality). TS implementation is the engineering target through v1.0.0. See user-voice S66 entry "Self-host bootstrap deferred to post-v1.0.0; human-written, not compiler-emitted." |
 | B5 — Editor support | LSP + VSCode + neovim grammars | 8-15h | ⏸️ parallel w/ A3-A4 | |
 | C1 — Tutorial rewrite | zero-to-running on v0.2.0 | 8-15h | ⏸️ pending A2 | |
 | C2 — Articles triage | 15 articles | 4-8h | 🟡 audit done | `ARTICLE-TRUTHFULNESS-AUDIT-2026-05-05.md` |
