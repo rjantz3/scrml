@@ -726,6 +726,32 @@ function preprocessForAcorn(raw: string, opts?: { tildeActive?: boolean }): stri
   s = s.replace(/([A-Za-z_$@][A-Za-z0-9_$.]*)\s+is\s+([A-Z][A-Za-z0-9_]*\.[A-Z][A-Za-z0-9_]*)/g,
     '__scrml_is_variant__($1, "$2")');
 
+  // Bare-dot variants (.Variant) as primary expressions (S66 — principled fix per Bryan)
+  //
+  // Acorn cannot parse `.Idle` as a primary expression — it expects an object
+  // before the dot. But scrml admits `.Variant` everywhere a primary expression
+  // can appear (per §14.10 / M9 bare-variant inference): `<x>: T = .V`,
+  // `@phase == .Idle`, `fn(.Idle)`, `[.A, .B]`, `cond ? .A : .B`, etc.
+  //
+  // Strategy: replace `.Variant` with placeholder identifier `__scrml_bare_variant_Variant__`
+  // when it appears OUTSIDE of an identifier-chain (i.e., not preceded by an
+  // identifier char, closing paren, or closing bracket — those mean member
+  // access on a value, which is acorn-parseable).
+  //
+  // Prior `is .Variant` / `is TypeName.Variant` rules above run FIRST, so those
+  // structural variant-tag-check forms are already consumed. The general rule
+  // below catches everything else: `==`, `!=`, comparison ops, argument
+  // positions, array elements, ternary branches, return values, object-literal
+  // values, anywhere a primary expression is expected.
+  //
+  // The placeholder is unmasked back to `IdentExpr { name: ".Variant" }` in
+  // `esTreeToExprNode` so downstream consumers see a structured AST node
+  // (instead of falling into the escape-hatch path on the whole expression).
+  s = s.replace(
+    /(?<![A-Za-z0-9_$\)\]"'`])\.([A-Z][A-Za-z0-9_]*)/g,
+    '__scrml_bare_variant_$1__'
+  );
+
   // Replace `not (expr)` prefix negation → `!(expr)`
   s = s.replace(/(?<![A-Za-z0-9_$@])not\s*\(/g, "!(");
 
@@ -866,6 +892,17 @@ export function esTreeToExprNode(
       if (name.startsWith("__scrml_worker_") && name.endsWith("__")) {
         // Worker refs are handled at a higher level; emit as ident for now
         return { kind: "ident", span, name } satisfies IdentExpr;
+      }
+      // S66: bare-variant `.Variant` placeholder unmasking. The preprocessor
+      // replaces `.Variant` → `__scrml_bare_variant_Variant__` so acorn can
+      // parse the surrounding expression. Here we restore the leading-dot
+      // form on the IdentExpr, matching the convention used by the
+      // `__scrml_is_variant__` consumer (which also produces IdentExpr with
+      // name `.Variant`). Downstream M9 bare-variant inference resolves the
+      // type from context (LHS annotation, parameter type, match for=, etc.).
+      if (name.startsWith("__scrml_bare_variant_") && name.endsWith("__")) {
+        const variantName = "." + name.slice("__scrml_bare_variant_".length, -2);
+        return { kind: "ident", span, name: variantName } satisfies IdentExpr;
       }
       // §32 tilde accumulator: convert placeholder back to ~ ident
       if (name === "__scrml_tilde__") {
