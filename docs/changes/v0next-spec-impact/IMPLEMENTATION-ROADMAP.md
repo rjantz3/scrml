@@ -2,7 +2,7 @@
 
 **Status:** DRAFT (S57, 2026-05-04) — **SUPERSEDED by `master-list.md` §0 live dashboard + `docs/changes/v0next-inventory/SCOPE-MAP-2026-05-05.md`. Read for historical context only.**
 
-> **S66 amendment:** Whatever is below about self-host migration / B4 self-host bootstrap / fixed-point regression / "self-host catches up at next bootstrap regen" — IGNORE. Self-hosting is DEFERRED to post-v1.0.0 (Bryan S66 user-decision). Bootstrap will be HUMAN-written, not compiler-emitted, when it eventually happens. The TS implementation is the engineering target through v1.0.0 ship. See user-voice-scrmlTS.md S66 entry "Self-host bootstrap deferred to post-v1.0.0; human-written, not compiler-emitted."
+> **S66 amendment:** Whatever is below about self-host migration / B4 self-host bootstrap / fixed-point regression / "self-host catches up at next bootstrap regen" — IGNORE. Self-hosting is DEFERRED to post-v1.0.0 (Bryan S66 user-decision). When it eventually happens, the **entire self-host scrml compiler** (NOT just bootstrap) is **human-authored scrml source**, processed through scrmlTS. NOT compiler-emitted-from-TS. The TS implementation is the engineering target through v1.0.0 ship. See user-voice-scrmlTS.md S66 entries (initial + clarification).
 
 **Scope:** Post-Stage-0b roadmap. What happens AFTER the SPEC.md rewrite finishes. Brings the compiler, examples, samples, ~~self-host,~~ stdlib, editors, and tutorial into compliance with the new spec. (Self-host crossed-out per S66 deferral.)
 **Companions:**

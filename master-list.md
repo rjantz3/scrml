@@ -36,7 +36,7 @@
 | B1 — Examples rewrite | 32 examples + trucking-dispatch | 20-30h | ⏸️ parallel w/ A* | |
 | B2 — Samples curate | 277 .scrml | 15-25h | ⏸️ parallel w/ A* | classify keep/rewrite/drop |
 | B3 — Stdlib audit + γ rewrite | 16 modules; data/validate vocab unification | 10-20h | ⏸️ parallel w/ A2-A4 | |
-| ~~B4 — Self-host bootstrap~~ | ~~~12k LOC scrml in `../scrml/`~~ | — | **❌ DEFERRED to post-v1.0.0 (S66 user decision)** | **REMOVED from v0.2.0 plan.** Self-hosting is post-v1.0.0; when it lands, bootstrap will be HUMAN-written (adoption-symbolism, not quality). TS implementation is the engineering target through v1.0.0. See user-voice S66 entry "Self-host bootstrap deferred to post-v1.0.0; human-written, not compiler-emitted." |
+| ~~B4 — Self-host~~ | ~~~12k LOC scrml in `../scrml/`~~ | — | **❌ DEFERRED to post-v1.0.0 (S66 user decision)** | **REMOVED from v0.2.0 plan.** Self-hosting is post-v1.0.0. The ENTIRE self-host scrml compiler (every module: bs/tab/ast/bpp/pa/ri/ts/dg/cg/module-resolver/meta-checker + others) is **human-authored scrml source** (not compiler-emitted-from-TS) — processed by scrmlTS to produce its runtime. Adoption-symbolism: humans embracing the language. TS implementation is the engineering target through v1.0.0. See user-voice S66 entries for the verbatim + clarification. |
 | B5 — Editor support | LSP + VSCode + neovim grammars | 8-15h | ⏸️ parallel w/ A3-A4 | |
 | C1 — Tutorial rewrite | zero-to-running on v0.2.0 | 8-15h | ⏸️ pending A2 | |
 | C2 — Articles triage | 15 articles | 4-8h | 🟡 audit done | `ARTICLE-TRUTHFULNESS-AUDIT-2026-05-05.md` |
