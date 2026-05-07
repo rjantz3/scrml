@@ -160,6 +160,34 @@ export function buildImportGraph(fileASTs) {
       });
     }
 
+    // ENGINE EXPORTS (Phase A1b B14, M18 / §51.0.D + §21.8) — engines that
+    // were parsed with `isExported: true` (set by ast-builder Form 1 detection;
+    // not yet wired) flow into the export registry as `{kind: "engine"}` so
+    // SYM PASS 10.B can validate cross-file `<EngineName/>` mounts. The
+    // primer §13.7 B4 deferral note ("export <engine var=…> desugars to
+    // export const, indistinguishable today") is closed for the engine surface
+    // here — engines are now visible in MOD's exportRegistry as engine-kind.
+    //
+    // Today's parser leaves `isExported: false` on every engine-decl; the
+    // hookup point lands ahead of parser support so a future ast-builder
+    // change that detects `export <engine ...>` (Form 1) or
+    // `export const X = <engine ...>` (Form 2) only needs to set the flag.
+    const machineDecls = file.ast?.machineDecls || [];
+    for (const eng of machineDecls) {
+      if (!eng || eng.isExported !== true) continue;
+      const engineVarName = typeof eng.varName === "string" && eng.varName.length > 0
+        ? eng.varName
+        : (typeof eng.engineName === "string" ? eng.engineName : "");
+      if (engineVarName.length === 0) continue;
+      exports.push({
+        name: engineVarName,
+        localName: engineVarName,
+        kind: "engine",
+        reExportSource: null,
+        span: eng.span || null,
+      });
+    }
+
     // Collect exports from AST
     const astExports = file.ast?.exports || [];
     for (const exp of astExports) {
@@ -346,7 +374,14 @@ export function buildExportRegistry(graph) {
       // is gone (was used only here and in doc comments — no other
       // consumers per `grep -rn "category === \"component\""`).
       let category;
-      if (kind === "channel") {
+      if (kind === "engine") {
+        // Phase A1b B14 (M18) — engine exports per §51.0.D + §21.8. Assigned
+        // `category: "engine"` so SYM PASS 10.B's cross-file mount validator
+        // distinguishes engine mounts from component instantiations + other
+        // imports. The legacy `isComponent` boolean is `false` for engines
+        // (engines are NOT components, per §51.0.K Components-vs-Engines).
+        category = "engine";
+      } else if (kind === "channel") {
         category = "channel";
       } else if (isComponent) {
         category = "user-component";

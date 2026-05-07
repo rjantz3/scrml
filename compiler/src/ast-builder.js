@@ -918,6 +918,46 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
         i += 1; // skip the channel markup block we just consumed
         continue;
       }
+      // ---------------------------------------------------------------
+      // Phase A1b B14: `export <engine ...>` Form 1 (SPEC §51.0.D + §21.8 / M18)
+      //
+      // Engines parse as `block.type === "state"` (state-form lifecycle —
+      // see _STATE_FORM_LIFECYCLE) with `block.name === "engine"` or
+      // (deprecated) `"machine"`. The detection here mirrors the channel-
+      // export pattern above:
+      //   (a) emit the pre-export text prefix (preserved verbatim)
+      //   (b) emit the engine state block, tagged `_b14IsExport: true`
+      //
+      // The engine's body is RAW TEXT (engine-decl.rulesRaw is built from
+      // children at AST-build time); there is no need for a synthetic
+      // export-decl logic block here — the engine itself is the AST node,
+      // and the `isExported` flag flows through to MOD's exportRegistry
+      // via `file.ast.machineDecls` (B14 MOD enhancement reads the flag).
+      // Per SPEC §51.0.D + §21.8, an exported engine's auto-declared
+      // variable name (or `var=` override) is the cross-file mount tag.
+      // ---------------------------------------------------------------
+      if (next && (next.type === "state" || next.type === "markup")
+          && (next.name === "engine" || next.name === "machine")) {
+        const m = block.raw.match(/^([\s\S]*?)((?:^|\s)export\s*)$/);
+        const preExportRaw = m ? m[1] : "";
+        if (preExportRaw.length > 0) {
+          result.push({
+            ...block,
+            raw: preExportRaw,
+            span: { ...block.span, end: block.span.start + preExportRaw.length },
+          });
+        }
+        // Push the engine state block, tagged with isExport flag.
+        // The flag survives buildBlock and lands on the engine-decl AST
+        // node as `isExported: true` (see the engine-decl construction
+        // in buildBlock; the flag is read off block._b14IsExport).
+        result.push({
+          ...next,
+          _b14IsExport: true,
+        });
+        i += 1; // skip the engine state block we just consumed
+        continue;
+      }
     }
 
     // Convert text blocks that start with a bare declaration keyword.
@@ -8395,6 +8435,14 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         const nameMatch = header.match(new RegExp(`\\bname\\s*=\\s*(${IDENT.source})\\b`));
         const forMatch = header.match(new RegExp(`\\bfor\\s*=\\s*(${IDENT.source})\\b`));
         const derivedMatch = header.match(new RegExp(`\\bderived\\s*=\\s*@(${IDENT.source})\\b`));
+        // §51.0.B (S67/S68 — A1b B14): canonical engine syntax extensions
+        //   var=NAME       — override auto-derived variable name (§51.0.C)
+        //   initial=.X     — starting variant (§51.0.E; B14 RECORDS, B15 validates)
+        //   pinned         — bareword modifier (§51.0.B + §6.10)
+        const varMatch = header.match(new RegExp(`\\bvar\\s*=\\s*(${IDENT.source})\\b`));
+        const initialMatch = header.match(new RegExp(`\\binitial\\s*=\\s*\\.(${IDENT.source})\\b`));
+        // `pinned` as a bareword (not `pinned=`).
+        const pinnedMatch = /\bpinned\b(?!\s*=)/.test(header);
 
         let engineName = "";
         let governedType = "";
@@ -8404,6 +8452,24 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           engineName = nameMatch[1];
           if (forMatch) governedType = forMatch[1];
           if (derivedMatch) sourceVar = derivedMatch[1];
+        } else if (forMatch) {
+          // §51.0 canonical form: `<engine for=Type ...>` (no `name=`).
+          // The auto-declared variable name is derived from the type per §51.0.C
+          // (lowercase-first-character). The `engineName` field on the AST node
+          // is back-filled with the auto-derived name so legacy consumers
+          // (codegen, NR) continue to work transparently. Per audit Phase-0,
+          // the `var=` override (if present) supersedes the auto-derived name.
+          governedType = forMatch[1];
+          if (derivedMatch) sourceVar = derivedMatch[1];
+          // Backfill engineName via §51.0.C auto-derive rule (literal lowercase-first).
+          // The actual var-name resolution (override + auto-derive) lives in the
+          // `varName` field below; engineName mirrors it for backcompat with
+          // legacy engineName-consumers in codegen / NR.
+          if (varMatch) {
+            engineName = varMatch[1];
+          } else if (governedType.length > 0) {
+            engineName = governedType[0].toLowerCase() + governedType.slice(1);
+          }
         } else {
           // Pre-S25 sentence form — detect and report. Accept a best-effort
           // extraction so downstream passes don't crash on garbage, but push
@@ -8429,6 +8495,33 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           ));
         }
 
+        // §51.0.C — compute the auto-declared variable name. Resolution order:
+        //   1. `var=NAME` override → use NAME verbatim
+        //   2. `name=NAME` legacy form → use NAME verbatim (back-compat)
+        //   3. Auto-derive from `for=Type` per §51.0.C lowercase-first-character rule
+        //   4. Empty string (parse failed; downstream surfaces a clearer error)
+        let varName = "";
+        let varNameOverride = null;
+        if (varMatch) {
+          varName = varMatch[1];
+          varNameOverride = varMatch[1];
+        } else if (nameMatch) {
+          varName = nameMatch[1]; // legacy `name=` IS the variable name
+        } else if (governedType.length > 0) {
+          // §51.0.C literal rule: lowercase the first character only.
+          // Edge cases (all-uppercase types like URL → uRL): per audit §1.2,
+          // implement literal rule per spec; surface as small spec amendment if
+          // current behavior diverges. See SURVEY.md for deferral notes.
+          varName = governedType[0].toLowerCase() + governedType.slice(1);
+        }
+
+        // §51.0.E — record initial=.Variant. B14 records; B15 validates against
+        // the type's variant set + emits W-ENGINE-INITIAL-MISSING if absent.
+        const initialVariant = initialMatch ? initialMatch[1] : null;
+
+        // §51.0.B + §6.10 — `pinned` bareword modifier.
+        const pinned = pinnedMatch === true;
+
         // Extract rules from children (text nodes containing the rule lines)
         let rulesRaw = "";
         if (block.children && block.children.length > 0) {
@@ -8451,6 +8544,25 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           governedType,
           rulesRaw,
           sourceVar, // §51.9: name of the source reactive var (no `@` prefix), or null
+          // §51.0 canonical fields (S67/S68 — A1b B14):
+          //   varName            — the resolved auto-declared variable name (§51.0.C).
+          //                        Always set when parse succeeds; equals
+          //                        varNameOverride if present, else the
+          //                        auto-derived form, else legacy `name=` value.
+          //   varNameOverride    — non-null iff `var=` was present.
+          //   initialVariant     — non-null iff `initial=.X` was present.
+          //   pinned             — true iff `pinned` bareword was present.
+          //   isExported         — set later by export Form 1 detection (or
+          //                        false if the engine was not exported).
+          varName,
+          varNameOverride,
+          initialVariant,
+          pinned,
+          // B14 Form 1 detection (`export <engine ...>`) — set by
+          // liftBareDeclarations when the immediately preceding text block
+          // contains a trailing `export` keyword. Surfaces to MOD's
+          // exportRegistry as `kind: "engine"` per §51.0.D + §21.8.
+          isExported: block._b14IsExport === true,
           openerHadSpaceAfterLt: block.openerHadSpaceAfterLt === true,
           legacyMachineKeyword: isLegacyMachineKeyword,
           span,

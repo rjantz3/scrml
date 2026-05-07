@@ -182,8 +182,94 @@ export type ScopeKind = "file" | "function" | "engine" | "component" | "compound
  *                         Shape-2-shaped decl whose render-spec is NOT one of
  *                         the canonical bindable tags.
  * - `"compound-parent"` — Variant C compound parent (has `children[]`).
+ * - `"engine"`          — Phase A1b B14 — auto-declared variable of an
+ *                         `<engine for=Type>` declaration (§51.0.A-C). Reuses
+ *                         B1's StateCellRecord registration path; engine-
+ *                         specific data lives on the `_engineMeta` field.
+ *                         Per audit Option C (hybrid): single registration
+ *                         mechanism for ALL reactive cells; downstream passes
+ *                         dispatch on `_cellKind === "engine"` for engine-
+ *                         specific behavior.
  */
-export type CellKind = "plain" | "bindable" | "markup-typed" | "compound-parent";
+export type CellKind = "plain" | "bindable" | "markup-typed" | "compound-parent" | "engine";
+
+/**
+ * Phase A1b Step B14 — engine-specific metadata attached to a StateCellRecord
+ * whose `_cellKind === "engine"`. Captures the engine declaration's surface
+ * properties for downstream consumers (B15-B17, A1c codegen, A7 hierarchy).
+ *
+ * **Forward-compatibility shape (audit §2 brief #1):** the BASIC fields are
+ * populated by B14 today. The A7 fields (`parentEngine`, `innerEngines`,
+ * `historyAttr`, `internalRules`, `parallelAttr`, `onTimeoutElements`) are
+ * declared in the type so downstream passes can reference them without
+ * type-system churn when A5-2/A5-3 dispatches land — they remain `undefined`
+ * or `null` at this stage to mark "not yet meaningful in this dispatch."
+ *
+ * SPEC cross-references:
+ *   §51.0.A — singleton overview
+ *   §51.0.B — declaration syntax
+ *   §51.0.C — auto-declared variable + var=
+ *   §51.0.D — mount position rules
+ *   §51.0.E — initial= attribute (RECORD only; B15 validates)
+ *   §51.0.J — derived engines (B16 consumes derivedExpr)
+ *   §51.0.K — components-vs-engines (E-COMPONENT-ENGINE-SCOPE owner)
+ *   §51.0.M-Q — A7 hierarchy + temporal-rule fields (declared, deferred)
+ */
+export interface EngineMetadata {
+  // ---- BASIC fields populated by B14 ----
+
+  /** The enum type the engine is over (`for=Type`). Mirrors
+   *  `engine-decl.governedType`. */
+  forType: string;
+  /** Variant names from the type registry, when known at SYM time.
+   *  May be empty if the type is not yet resolved (B14 leaves it empty;
+   *  B15 consults the type-system pass to populate the variant set). */
+  variants: string[];
+  /** Value of `initial=.X` if present; `null` otherwise. B15 validates
+   *  against `variants` and emits W-ENGINE-INITIAL-MISSING when null. */
+  initialVariant: string | null;
+  /** Reactive expression string from `derived=expr`, when present.
+   *  Stored as the raw AST shape for B16 to consume in cycle detection.
+   *  Today's parser stores `engine-decl.sourceVar` (legacy single-var form)
+   *  — B16 will widen this to the §51.0.J expression-tree form. Set to
+   *  `null` when absent. */
+  derivedExpr: unknown | null;
+  /** The auto-declared variable name (§51.0.C). Equals `varNameOverride`
+   *  when present, else the literal lowercase-first-character of `forType`,
+   *  else (legacy fallback) the value of `name=`. Mirrors the resolution
+   *  done in `ast-builder.js`. */
+  varName: string;
+  /** True iff the engine declaration is exported (`export <engine ...>`).
+   *  Set when MOD's exportRegistry annotation lands in B14's MOD extension;
+   *  defaults `false` when the engine is same-file-only. */
+  isExported: boolean;
+  /** True iff the `pinned` bareword modifier was present on the engine
+   *  declaration. Per §51.0.B + §6.10. Covers both the engine identifier
+   *  AND the auto-declared variable. */
+  isPinned: boolean;
+
+  // ---- A7 forward-compat fields (DECLARED but not populated by B14) ----
+
+  /** §51.0.Q — for nested engines (engine declared inside another engine's
+   *  state-child body), back-pointer to the parent engine's record. `null`
+   *  for file-scope engines. POPULATED by future A5-2 hierarchy dispatch. */
+  parentEngine?: StateCellRecord | null;
+  /** §51.0.Q — for file-scope engines that host nested engines, the list of
+   *  inner engine records. POPULATED by future A5-2 hierarchy dispatch. */
+  innerEngines?: StateCellRecord[];
+  /** §51.0.N — `history` attribute on a state-child (composite). POPULATED
+   *  by future A5-2 hierarchy dispatch. */
+  historyAttr?: boolean;
+  /** §51.0.O — list of internal-rule entries (`internal:rule=`) per state-
+   *  child. POPULATED by future A5-2 hierarchy dispatch. */
+  internalRules?: unknown[];
+  /** §51.0.P — `parallel` attribute on file-scope engines. POPULATED by
+   *  future A5-2 hierarchy dispatch. */
+  parallelAttr?: boolean;
+  /** §51.0.M — `<onTimeout>` element entries on state-children. POPULATED
+   *  by future A5-2 hierarchy dispatch. */
+  onTimeoutElements?: unknown[];
+}
 
 /**
  * A single state-cell symbol-table entry. Created at registration; mutated
@@ -267,6 +353,12 @@ export interface StateCellRecord {
    *  emits the actual hooks (`bind:value` change / focus-out for touch; form
    *  submit for submit). NOT set on non-synth records. */
   runtimeHookKind?: "touch" | "submit" | null;
+  /** B14 — engine-specific metadata. Set ONLY when this record represents an
+   *  auto-declared engine variable (§51.0.A-C); `_cellKind` will be `"engine"`.
+   *  Forward-compatible shape per audit §2 brief #1; A7 hierarchy fields
+   *  remain undefined until A5-2/A5-3 dispatches populate them. See
+   *  `EngineMetadata` above. */
+  engineMeta?: EngineMetadata;
 }
 
 /**
@@ -640,18 +732,23 @@ function registerImportBindings(
 //
 // The MOD exportRegistry's per-name shape is `{kind, category, isComponent}`.
 // `kind` is the canonical export kind: one of
-// `{type, function, fn, const, let, channel, rename, local, re-export,
-// re-export-all, unknown}`. There is NO `"engine"` kind today (engine
-// exports desugar to `const`); there is no `"state-cell"` kind.
+// `{type, function, fn, const, let, channel, engine (B14), rename, local,
+// re-export, re-export-all, unknown}`. The `"engine"` kind landed at B14
+// (cross-file engine import via §51.0.D + §21.8 / M18); engines that flow
+// through MOD's exportRegistry as `kind: "engine"` are LEGAL pinning
+// targets (engines satisfy "engine-typed" per §21.8.1).
 //
-// Best-effort scope (Option A, S66 dispatch):
+// Pinning policy:
 //
 // | Source export kind     | pinned import → action            |
 // | ---------------------- | --------------------------------- |
 // | function, fn           | FIRE E-IMPORT-PINNED-INVALID      |
 // | type                   | FIRE                              |
 // | channel                | FIRE (channels aren't cells)      |
-// | const, let             | ACCEPT (defer to B14)             |
+// | engine                 | ACCEPT (engine-typed per §21.8.1) |
+// | const, let             | ACCEPT (best-effort — engine-form |
+// |                        | const exports indistinguishable   |
+// |                        | from arbitrary const today)       |
 // | re-export(-all),       | ACCEPT if not chasable            |
 // |   rename, local,       |                                   |
 // |   unknown              |                                   |
@@ -661,13 +758,14 @@ function registerImportBindings(
 // IS the binding; "identity-stability" doesn't apply). The spec's definition
 // of "cell-typed and engine-typed" excludes channels by enumeration.
 //
-// Why ACCEPT const/let: Form 1 `export <engine var=appPhase>` desugars to
-// `export const appPhase = ...` — an engine binding is a `const` export.
-// Until B14 / M18 cross-file engine import lands and the registry
-// distinguishes engine-shape const exports from arbitrary const exports,
-// firing on `pinned` const imports would false-positive on legitimate
-// engine pinning. Trade: false negatives (some `pinned` const-imports of
-// non-engines slip through at B4 — the gap closes in B14).
+// Why ACCEPT const/let: even with B14's engine-kind annotation, parser
+// support for `export <engine ...>` (Form 1) is incremental — Form 2
+// `export const X = <engine ...>` desugars to `export const`. The B14 MOD
+// hookup point reads `file.ast.machineDecls` for engine-shaped exports, so
+// any engine-decl carrying `isExported: true` (set by future ast-builder
+// work on `export <engine ...>` Form 1) becomes a `kind: "engine"` export
+// regardless of its surface syntax. Until both forms are wired, const/let
+// imports remain best-effort accepts.
 
 const B4_IMPORT_PINNED_FIRE_KINDS: ReadonlySet<string> = new Set([
   "function",
@@ -3394,6 +3492,457 @@ function stringLiteralValueOf(arg: any): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// PASS 10 (B14) — Engine cell registration + cross-file mount validation
+// ---------------------------------------------------------------------------
+//
+// Per Phase A1b Step B14 (audit §2 ten-point brief; SPEC §51.0.A-K, §21.8, §34):
+//
+// PASS 10.A — REGISTER ENGINE CELLS:
+//   Walks every `engine-decl` AST node in the file. For each:
+//     1. Compute the auto-declared variable name per §51.0.C — derived from
+//        the engine's `for=Type` (lowercase-first-character of the type name)
+//        UNLESS `var=NAME` is present (override). Legacy `name=` is preserved
+//        as a back-compat path.
+//     2. Validate the chosen var name against existing same-scope state cells:
+//        if a non-engine state-cell already exists with this name, fire
+//        `E-ENGINE-VAR-DUPLICATE` (§51.0.C, §34) — the engine OWNS its
+//        variable.
+//     3. Register a `StateCellRecord` with `_cellKind: "engine"` + an
+//        `engineMeta` annotation carrying §51.0.B-C surface data (varName,
+//        forType, initialVariant (record only — B15 validates), pinned,
+//        derivedExpr (record only — B16 consumes)).
+//     4. Stamp the engine-decl AST node with `_record` + `_cellKind: "engine"`.
+//
+// PASS 10.B — CROSS-FILE ENGINE MOUNT VALIDATION (§51.0.D + §21.8 / M18):
+//   Walks markup for self-closing tags whose tagName matches an import-
+//   binding in the file scope. For each such tag, looks up the source
+//   export's category via the MOD exportRegistry:
+//     - If `category === "engine"`: legitimate cross-file mount; no record
+//       registration required (the imported singleton is the cell).
+//     - Else: fire `E-ENGINE-MOUNT-NOT-ENGINE` (added to §34 by this dispatch
+//       — see audit §1.3) with the offending category and a remediation hint.
+//
+//   Engine awareness in MOD's exportRegistry is a precondition: today's
+//   exportRegistry maps `kind: "const" | "type" | "function" | "channel"
+//   | ...` and `category: "user-component" | "channel" | "type" |
+//   "function" | "const" | "other"`. B14 extends MOD to recognize
+//   `kind: "engine"` + `category: "engine"` for `export <engine ...>` Form 1
+//   and for explicit `export const NAME = <engine ...>` Form 2. See
+//   `module-resolver.js:buildExportRegistry`.
+//
+// PASS 10.C — E-COMPONENT-ENGINE-SCOPE (§51.0.K, deferred):
+//   Today's AST stores component-def bodies as raw text (`component-def.raw:
+//   string`); engine-decls inside component bodies are not present as
+//   walkable children. B14 thus cannot reliably detect the violation in the
+//   walker tree. The check is OWNED by B17 ("residual components-vs-engines
+//   distinction") with a structural component-body parse precondition. The
+//   audit §1.5 fire-site recommendation is acknowledged here; once
+//   component bodies become walkable, the same B14 walker can fire it.
+
+/**
+ * §51.0.C — auto-derive a variable name from a type name. Literal rule:
+ * lowercase the first character, leave the rest unchanged.
+ *
+ * Examples (per spec §51.0.C table):
+ *   `MarioState`  → `marioState`
+ *   `LoadPhase`   → `loadPhase`
+ *   `Health`      → `health`
+ *
+ * Edge cases (audit §1.2 — surfaced as spec-amendment follow-up):
+ *   `URL`         → `uRL`   (literal first-char rule; per spec)
+ *   `T`           → `t`     (single-letter)
+ *   `myType`      → `myType` (lowercase-leading; identity)
+ *   `_Internal`   → `_Internal` (leading non-letter; identity)
+ *
+ * The function is an idempotent character-level transformation. If
+ * downstream behavior diverges, the spec amendment for §51.0.C should
+ * enumerate the contiguous-uppercase-run rule explicitly.
+ */
+export function autoDeriveEngineVarName(typeName: string): string {
+  if (typeof typeName !== "string" || typeName.length === 0) return "";
+  const first = typeName.charCodeAt(0);
+  // ASCII A-Z = 65-90; lowercase by adding 32. Non-letter first chars (like
+  // `_` or digits — the latter is illegal in scrml ident grammar but we
+  // defensively pass through) → identity.
+  if (first >= 65 && first <= 90) {
+    return typeName[0]!.toLowerCase() + typeName.slice(1);
+  }
+  return typeName;
+}
+
+/**
+ * Construct a `StateCellRecord` for an engine's auto-declared variable.
+ * The record's `declNode` field references the `engine-decl` AST node;
+ * downstream consumers reading engine-specific data (§51.0.B opener attrs,
+ * state-children rules) reach them via the engine-decl, not through the
+ * record's standard fields (which are state-decl-shaped).
+ *
+ * `_cellKind` is "engine"; `engineMeta` carries §51.0.B-C surface data.
+ */
+function makeEngineRecord(
+  engineDecl: any,
+  parentScope: Scope,
+  varName: string,
+): StateCellRecord {
+  const forType: string = typeof engineDecl.governedType === "string"
+    ? engineDecl.governedType
+    : "";
+  const initialVariant: string | null =
+    typeof engineDecl.initialVariant === "string" && engineDecl.initialVariant.length > 0
+      ? engineDecl.initialVariant
+      : null;
+  const isPinned: boolean = engineDecl.pinned === true;
+  const isExported: boolean = engineDecl.isExported === true;
+  // Derived expression — current parser provides `sourceVar` (legacy
+  // `derived=@varname`). B16 will widen this to the §51.0.J expression-tree
+  // form. Until then, sourceVar is the only signal.
+  const derivedExpr: unknown | null = engineDecl.sourceVar != null
+    ? { kind: "legacy-source-var", varName: engineDecl.sourceVar }
+    : null;
+
+  const engineMeta: EngineMetadata = {
+    forType,
+    variants: [], // B14 leaves empty; B15 populates from the type system.
+    initialVariant,
+    derivedExpr,
+    varName,
+    isExported,
+    isPinned,
+    // A7 forward-compat fields (declared, undefined at B14):
+    parentEngine: null,
+    innerEngines: [],
+    historyAttr: undefined,
+    internalRules: undefined,
+    parallelAttr: undefined,
+    onTimeoutElements: undefined,
+  };
+
+  // The record's `declNode` is the engine-decl. We type it via `any` here
+  // (matching the `declNode: ReactiveDeclNode` type signature using a cast)
+  // so downstream consumers reading engine-specific data go through
+  // `record.engineMeta` (the canonical surface for engine consumers).
+  const record: StateCellRecord = {
+    name: varName,
+    qualifiedPath: parentScope.qualifiedPath + varName,
+    declNode: engineDecl as any, // engine-decl-shaped, not state-decl-shaped.
+    scope: parentScope,
+    structuralForm: true,        // engine decls are spec-canonical.
+    shape: "derived",            // engines auto-declare via the engine surface;
+                                 // shape is "derived" to mark "not user-authored RHS".
+    isConst: derivedExpr !== null, // derived engines are read-only (§51.0.J).
+    isPinned,
+    isCompoundParent: false,
+    isCompoundChild: false,
+    hasValidators: false,
+    hasDefaultExpr: initialVariant !== null,
+    hasTypeAnnotation: forType.length > 0,
+    engineMeta,
+  };
+  return record;
+}
+
+/**
+ * PASS 10.A — register engine cells. Walks the AST tree, finds every
+ * `engine-decl` node, computes the auto-declared variable name per §51.0.C,
+ * validates against same-scope name collisions, and registers a
+ * StateCellRecord with `_cellKind: "engine"` + `engineMeta`.
+ *
+ * Same-scope determination is currently file-scope only (engines today are
+ * file-scope per §51.0.K Machine Cohesion footnote — nested engines per
+ * §51.0.Q are A7 territory and the parser doesn't yet construct walkable
+ * inner bodies). Future: when nested engines land, the walker descends into
+ * outer engine state-child bodies and registers nested engine records in
+ * the outer engine's scope.
+ */
+function walkRegisterEngines(
+  nodes: any,
+  fileScope: Scope,
+  errors: SYMDiagnostic[],
+  filePath: string,
+  visited: WeakSet<object>,
+): void {
+  if (!nodes) return;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) {
+      walkRegisterEngines(n, fileScope, errors, filePath, visited);
+    }
+    return;
+  }
+  if (typeof nodes !== "object") return;
+  if (visited.has(nodes)) return;
+  visited.add(nodes);
+
+  const node = nodes as any;
+  const kind = node.kind;
+
+  if (kind === "engine-decl") {
+    registerEngineDecl(node, fileScope, errors, filePath);
+    // Engine bodies are RAW TEXT (engine-decl.rulesRaw) — no walkable
+    // children today. When state-children become walkable AST nodes, this
+    // is where nested-engine recursion would attach.
+    return;
+  }
+
+  // Recurse into common AST containers. Mirror the existing walker shape so
+  // engines declared inside <program>, <page>, etc. are reachable. We do not
+  // descend into `function-decl` bodies (§51.0.K Machine Cohesion: engines
+  // may NOT live inside function bodies); however, B14's deferred fire site
+  // for that violation lives elsewhere.
+  if (Array.isArray(node.children)) {
+    walkRegisterEngines(node.children, fileScope, errors, filePath, visited);
+  }
+  if (Array.isArray(node.body)) {
+    walkRegisterEngines(node.body, fileScope, errors, filePath, visited);
+  }
+  if (Array.isArray(node.consequent)) {
+    walkRegisterEngines(node.consequent, fileScope, errors, filePath, visited);
+  }
+  if (Array.isArray(node.alternate)) {
+    walkRegisterEngines(node.alternate, fileScope, errors, filePath, visited);
+  }
+  if (Array.isArray(node.arms)) {
+    for (const arm of node.arms) {
+      if (arm && Array.isArray(arm.body)) {
+        walkRegisterEngines(arm.body, fileScope, errors, filePath, visited);
+      }
+    }
+  }
+}
+
+/**
+ * Register a single engine-decl into the file scope. Validates the chosen
+ * variable name against same-scope state cells; fires
+ * `E-ENGINE-VAR-DUPLICATE` on collision with a non-engine state-cell.
+ */
+function registerEngineDecl(
+  engineDecl: any,
+  fileScope: Scope,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  // Resolve the variable name. The ast-builder already populates
+  // `engineDecl.varName` per §51.0.C resolution order (var= override →
+  // name= legacy → auto-derive from for=Type). Defensively re-derive when
+  // varName is empty (defensive fallback for AST-shape drift).
+  let varName: string = typeof engineDecl.varName === "string" && engineDecl.varName.length > 0
+    ? engineDecl.varName
+    : "";
+  if (varName.length === 0) {
+    if (typeof engineDecl.varNameOverride === "string" && engineDecl.varNameOverride.length > 0) {
+      varName = engineDecl.varNameOverride;
+    } else if (typeof engineDecl.engineName === "string" && engineDecl.engineName.length > 0) {
+      varName = engineDecl.engineName;
+    } else if (typeof engineDecl.governedType === "string" && engineDecl.governedType.length > 0) {
+      varName = autoDeriveEngineVarName(engineDecl.governedType);
+    }
+  }
+  // If we still have no name, the engine declaration is malformed at parse
+  // level (no for= and no name= and no var=). Skip silently — the parser
+  // already surfaces a diagnostic.
+  if (varName.length === 0) return;
+
+  // Collision check — does a state-cell ALREADY live at this name in the
+  // file scope? Per §51.0.C: "You SHALL NOT separately declare the engine's
+  // variable." If a `<varName> = init` exists in scope, fire
+  // E-ENGINE-VAR-DUPLICATE. We check the file scope only — same-scope
+  // semantics per §51.0.C. (Cross-scope name shadowing is captured by B2's
+  // E-NAME-COLLIDES-STATE infrastructure on the OTHER side, not here.)
+  const existing = fileScope.stateCells.get(varName);
+  if (existing != null && existing.engineMeta == null) {
+    // Existing record is a NON-engine state-cell — duplicate.
+    fireEngineVarDuplicate(engineDecl, existing, varName, errors, filePath);
+    return;
+  }
+  if (existing != null && existing.engineMeta != null) {
+    // Two engines auto-declaring the same variable — also a duplicate.
+    // Per §51.0.C, the engine OWNS its variable; two engines fighting for
+    // the same name violates singleton-ness.
+    fireEngineVarDuplicate(engineDecl, existing, varName, errors, filePath);
+    return;
+  }
+
+  // Register.
+  const record = makeEngineRecord(engineDecl, fileScope, varName);
+  fileScope.stateCells.set(varName, record);
+
+  // Stamp the engine-decl with `_record` and `_cellKind` annotations,
+  // mirroring B1's state-decl convention. Non-enumerable so generic AST
+  // walkers don't traverse the back-references.
+  Object.defineProperty(engineDecl, "_record", {
+    value: record,
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
+  Object.defineProperty(engineDecl, "_cellKind", {
+    value: "engine",
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
+}
+
+/**
+ * Fire `E-ENGINE-VAR-DUPLICATE` per §51.0.C + §34. Triggered when an
+ * engine's auto-declared variable name collides with an existing state
+ * cell (or another engine) in the same scope.
+ */
+function fireEngineVarDuplicate(
+  engineDecl: any,
+  existing: StateCellRecord,
+  varName: string,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  const span: SYMDiagnostic["span"] = engineDecl.span ?? {
+    file: filePath, start: 0, end: 0, line: 1, col: 1,
+  };
+  const conflictKind = existing.engineMeta != null
+    ? "another `<engine>` declaration"
+    : "a separately-declared state cell `<" + existing.qualifiedPath + ">`";
+  const remediation = existing.engineMeta != null
+    ? `Engines are singletons — only ONE engine may auto-declare \`${varName}\` in a scope. ` +
+      `Use \`var=\` on one of the engines to disambiguate.`
+    : `The engine OWNS its auto-declared variable. ` +
+      `Either remove the separate \`<${varName}>\` declaration or use \`var=\` ` +
+      `on the engine to override the auto-derived name.`;
+  errors.push({
+    code: "E-ENGINE-VAR-DUPLICATE",
+    message:
+      `E-ENGINE-VAR-DUPLICATE: engine variable \`${varName}\` collides with ${conflictKind}. ` +
+      remediation +
+      ` (SPEC §51.0.C + §34.)`,
+    span,
+    severity: "error",
+  });
+}
+
+/**
+ * PASS 10.B — cross-file engine mount validator. Walks markup for self-
+ * closing tags whose tagName matches a registered import-binding. For each:
+ *
+ *   - Look up the source file's exportRegistry entry via `lookupImportBinding`.
+ *   - If the exported entry's `category === "engine"`: legitimate cross-file
+ *     mount; the imported singleton is the cell. No new record registered.
+ *   - Else: fire `E-ENGINE-MOUNT-NOT-ENGINE` with the offending category
+ *     and a remediation hint.
+ *
+ * Self-closing PascalCase tags are component instantiations OR same-file
+ * components OR cross-file engine mounts. The discriminator is the import-
+ * binding's source-export category — engine vs user-component vs other.
+ *
+ * Today's exportRegistry vocabulary (post-B14 MOD enhancement):
+ *   "engine"          — engine-shaped exports (this dispatch's MOD update)
+ *   "user-component"  — uppercase const exports
+ *   "channel" | "type" | "function" | "const" | "other"
+ *
+ * Same-file engines: declaration position IS mount position per §51.0.D.
+ * Use-site `<EngineName/>` tags at the SAME file scope are NOT engine
+ * mounts — they would be parse errors (engines have no separate use-site
+ * tag for same-file). B14's walker only fires on import-bound tags.
+ */
+function walkValidateCrossFileEngineMounts(
+  nodes: any,
+  fileScope: Scope,
+  exportRegistry: Map<string, Map<string, { kind: string; category: string; isComponent: boolean }>> | undefined,
+  errors: SYMDiagnostic[],
+  filePath: string,
+  visited: WeakSet<object>,
+): void {
+  if (!exportRegistry) return; // No registry → cross-file check skipped.
+  if (!nodes) return;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) {
+      walkValidateCrossFileEngineMounts(n, fileScope, exportRegistry, errors, filePath, visited);
+    }
+    return;
+  }
+  if (typeof nodes !== "object") return;
+  if (visited.has(nodes)) return;
+  visited.add(nodes);
+
+  const node = nodes as any;
+  if (node.kind === "markup" && node.selfClosing === true && typeof node.tag === "string") {
+    const tag = node.tag;
+    // The tag must be a non-built-in (lowercase HTML tags pass through).
+    // Look it up in the file's importBindings; if found, the user is
+    // mounting an imported name. Validate the source export category.
+    const binding = fileScope.importBindings.get(tag);
+    if (binding) {
+      const sourceMap = exportRegistry.get(binding.sourcePath);
+      if (sourceMap) {
+        const exportInfo = sourceMap.get(binding.exportedName);
+        if (exportInfo && exportInfo.category && exportInfo.category !== "engine") {
+          // Not an engine — fire E-ENGINE-MOUNT-NOT-ENGINE.
+          //
+          // Suppression: if the export is a `user-component`, the use-site
+          // `<ComponentName/>` is a legitimate component instantiation —
+          // NOT an engine mount. We only fire when the user CLEARLY
+          // intended an engine mount; today's heuristic is too loose to
+          // distinguish, so we suppress for `user-component` to avoid
+          // false positives. The audit §6 of B14's intended scope is
+          // cross-file ENGINE mount specifically; component mounts are
+          // CE/NR-resolved.
+          if (exportInfo.category !== "user-component") {
+            fireEngineMountNotEngine(node, tag, exportInfo.category, errors, filePath);
+          }
+        }
+      }
+    }
+  }
+
+  if (Array.isArray(node.children)) {
+    walkValidateCrossFileEngineMounts(node.children, fileScope, exportRegistry, errors, filePath, visited);
+  }
+  if (Array.isArray(node.body)) {
+    walkValidateCrossFileEngineMounts(node.body, fileScope, exportRegistry, errors, filePath, visited);
+  }
+  if (Array.isArray(node.consequent)) {
+    walkValidateCrossFileEngineMounts(node.consequent, fileScope, exportRegistry, errors, filePath, visited);
+  }
+  if (Array.isArray(node.alternate)) {
+    walkValidateCrossFileEngineMounts(node.alternate, fileScope, exportRegistry, errors, filePath, visited);
+  }
+  if (Array.isArray(node.arms)) {
+    for (const arm of node.arms) {
+      if (arm && Array.isArray(arm.body)) {
+        walkValidateCrossFileEngineMounts(arm.body, fileScope, exportRegistry, errors, filePath, visited);
+      }
+    }
+  }
+}
+
+/**
+ * Fire `E-ENGINE-MOUNT-NOT-ENGINE` per §34 (catalog row added by B14).
+ * Triggered when a self-closing tag in markup matches an imported binding
+ * whose source export is NOT an engine.
+ */
+function fireEngineMountNotEngine(
+  markupNode: any,
+  tag: string,
+  actualCategory: string,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  const span: SYMDiagnostic["span"] = markupNode.span ?? {
+    file: filePath, start: 0, end: 0, line: 1, col: 1,
+  };
+  errors.push({
+    code: "E-ENGINE-MOUNT-NOT-ENGINE",
+    message:
+      `E-ENGINE-MOUNT-NOT-ENGINE: self-closing tag \`<${tag}/>\` mounts an imported name ` +
+      `whose source export is a \`${actualCategory}\`, not an engine. ` +
+      `Cross-file engine mount via \`<EngineName/>\` (§51.0.D + §21.8) requires the imported ` +
+      `name to be the variable of an exported \`<engine>\` declaration. ` +
+      `Either import an engine binding from the source file, or use the appropriate ` +
+      `mount form for the imported \`${actualCategory}\` (e.g., component instantiation ` +
+      `for components, expression read for const values).`,
+    span,
+    severity: "error",
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -3441,12 +3990,21 @@ export function runSYM(input: SYMInput): SYMResult {
   const visited = new WeakSet<object>();
   walk(ast.nodes, fileScope, stats, visited);
 
+  // PASS 1.c (B14): Register engine cells. Walks engine-decl nodes; for each,
+  // computes the auto-declared variable name per §51.0.C, validates against
+  // existing same-scope cells, and registers a StateCellRecord with
+  // `_cellKind: "engine"` + `engineMeta`. Runs AFTER PASS 1 so non-engine
+  // state-decls are already in the table — the duplicate-name check sees
+  // them. Fires E-ENGINE-VAR-DUPLICATE on collision (§51.0.C, §34).
+  const errors: SYMDiagnostic[] = [];
+  const visitedB14 = new WeakSet<object>();
+  walkRegisterEngines(ast.nodes, fileScope, errors, filePath, visitedB14);
+
   // PASS 2 (B2): Walk local-decl nodes (let/const/tilde/lin); look up each
   // by name in the current-scope parent chain; fire E-NAME-COLLIDES-STATE
   // if a state-cell record is found. Re-uses the `_scope` annotations PASS 1
   // attached to function-decls (so we can set the correct currentScope as
   // we descend without re-creating scopes).
-  const errors: SYMDiagnostic[] = [];
   const visited2 = new WeakSet<object>();
   walkLocalDeclsForCollisions(ast.nodes, fileScope, visited2, errors);
 
@@ -3542,6 +4100,17 @@ export function runSYM(input: SYMInput): SYMResult {
   const visited9 = new WeakSet<object>();
   walkRejectDerivedWithValidatorsAndExtractOverride(
     ast.nodes, errors, filePath, visited9,
+  );
+
+  // PASS 10.B (B14): Cross-file engine mount validation per §51.0.D + §21.8.
+  // Walks markup for self-closing tags whose name matches an import-binding;
+  // for each, looks up the source export's category in MOD's exportRegistry.
+  // Engine-category exports → legitimate cross-file mount (no record reg).
+  // Non-engine, non-component exports → fire E-ENGINE-MOUNT-NOT-ENGINE.
+  // Skipped silently when exportRegistry is unavailable (test-harness path).
+  const visitedB14B = new WeakSet<object>();
+  walkValidateCrossFileEngineMounts(
+    ast.nodes, fileScope, exportRegistry, errors, filePath, visitedB14B,
   );
 
   return {
