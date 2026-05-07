@@ -342,7 +342,7 @@ D4 (S58 close) threaded the locks/moves across the smaller spec sections. Highli
 **App-building primitives:**
 - `scrml:auth` — `hashPassword`, `verifyPassword`, `signJwt`, `verifyJwt`, `decodeJwt`, `createRateLimiter`, TOTP (generate/verify)
 - `scrml:oauth` (NEW S58) — OAuth 2.0 + PKCE (RFC 7636). Core: `startFlow`, `exchangeCode`, `refreshToken`, `getUserInfo`, `revoke`. PKCE: `generateVerifier`, `deriveChallenge`. Storage: `memoryAdapter()` (dev only); caller injects production adapter. Provider presets: `googleConfig` + `parseGoogleIdToken` (decode-only, no JWKS verify yet — v0.3.0), `githubConfig`, `microsoftConfig`, `discordConfig`. Typed errors caught by `err.name`: `OAuthStateMismatch`, `OAuthVerifierMissing`, `OAuthTokenError`, `OAuthUserInfoError`, `OAuthRevocationError`. **Deferred:** JWKS sig verification, OIDC discovery (RFC 8414).
-- `scrml:data` — `validate(data, schema)`, `isValid`, `firstError`; predicate builders; transforms (`pick`, `omit`, `groupBy`, `sortBy`, `unique`, `flatten`, etc.) — vocabulary alignment task pending B3
+- `scrml:data` — `validate(data, schema)`, `isValid`, `firstError`; predicate builders; transforms (`pick`, `omit`, `groupBy`, `sortBy`, `unique`, `flatten`, etc.) — vocabulary alignment task pending B3. **Plus (S65)** `parseVariant(json, EnumType)` — boundary-parsing primitive for tagged-variant JSON; FIRST general-position member of the type-as-argument feature family (cross-ref §13.6 + SPEC §41.13 + §53.14). Failure type `ParseError:enum` with variants `MissingDiscriminator`, `UnknownVariant(tag: string)`, `InvalidPayload(field: string, reason: string)`, `Malformed(reason: string)` — first stdlib-declared enum.
 - `scrml:router` — `match(pattern, path)`, `parseQuery`, `buildUrl`, `navigate`, `currentPath`, `onNavigate`
 - `scrml:store` — `createStore`, `createSessionStore`, `createCounter` (KV / session via SQLite)
 
@@ -443,6 +443,7 @@ Captured in full at `scrml-support/docs/deep-dives/v0next-s56-deliberation-outco
 | L19 | Multi-statement event handlers force named function |
 | L20 | `derived=expr` engine attribute (any reactive expression of engine's type) |
 | L21 | `E-DERIVED-VALUE-MUTATE` — in-place mutation of a `const`-derived cell forbidden (array mutating methods, object property writes / compound-assignment / `delete`, in-compound derived sub-cells). Sibling rename: §6.6.8 reassignment code E-REACTIVE-002 → E-DERIVED-WRITE. Spec at §6.6.18 + §34. (S59 small-deliberation lock, 2026-05-05.) |
+| L22 | **Type-as-argument is a first-class scrml language primitive**, introduced by `parseVariant`. Foundation for the type-as-argument family (`serialize`, `formFor`, `schemaFor`, `tableFor`, reflective metadata). Each future family member must independently pass per-shape sliver test + synonym-detection precondition + asymmetric-forfeit-cost decomposition. (S65; debate-05 verdict + judge ratification + Path-A architectural commit; SPEC §41.13 + §53.14; family-precedent doc at `scrml-support/docs/type-as-argument-family-2026-05-06.md`.) |
 
 ---
 
@@ -461,6 +462,37 @@ The spec is ahead of adoption for several feature surfaces. Knowing which surfac
 | `<machine>` keyword | **deprecated** (W-DEPRECATED-001) | `bun scrml migrate` rewrites to `<engine>`. Hard-removal at v0.3.0 |
 
 **General principle:** when planning work touching one of these surfaces, check the row first. PA should not dispatch implementation work against a doc-only surface, and should not assume a sliver-empty surface has consumers.
+
+Updated row for parseVariant (S65):
+
+| Surface | Status | Note |
+|---|---|---|
+| `parseVariant(json, EnumType)` (§41.13 + §53.14, type-as-argument family) | **active** (S65; first general-position type-as-argument primitive) | Path-A architectural commit ratified. SPEC + stdlib + 4 error codes landed. Compiler-side TS-pass + codegen tracked under S65 dispatch (Phase 2). Family-precedent doc at `scrml-support/docs/type-as-argument-family-2026-05-06.md` |
+
+---
+
+## §13.6 Type-as-argument family (S65 — short reference)
+
+**One-paragraph summary:** scrml admits scrml-native types (`:enum`, `:struct`) as positional arguments to a small, disciplined family of compile-time-special functions OUTSIDE `^{}` meta-blocks. The family is OPEN with bounded discipline; each member must independently pass per-shape sliver test + synonym-detection precondition + asymmetric-forfeit-cost decomposition before entering spec or implementation. `reflect(TypeName)` in §22 meta-blocks is the existing precedent INSIDE meta; `parseVariant` (S65, ratified) is the FIRST general-position member.
+
+**Family members (shipped + planned):**
+
+| Member | Status | Sliver |
+|---|---|---|
+| `parseVariant(json, EnumType)` | **shipped** S65 (SPEC §41.13) | type-establishment for sum types — constructor selection from discriminator |
+| `serialize(value, EnumType)` | planned (~6-12mo) | symmetric to parseVariant; round-trip law |
+| `formFor(StructType)` | planned (FLAGSHIP — `scrml.dev` demo) | compile-time struct-walk → emits `<form>` markup tree |
+| `schemaFor(StructType)` | planned | emits `<schema>` SQL DDL from struct field predicates (§39+L4 vocabulary unification) |
+| `tableFor(StructType, rows)` | planned | auto-`<table>` from struct + rows; admin-UI lift |
+| `variantNames(EnumType)` / reflective metadata | planned | exposes variant lists as runtime values |
+
+**Authority chain for any new `Type.foo` request:**
+1. SPEC §53.14 — type-as-argument primitives subsection (family framing + discipline)
+2. SPEC §41.13 — parseVariant API entry (worked example)
+3. `scrml-support/docs/type-as-argument-family-2026-05-06.md` — gate-keeping reference + future-PA checklist
+4. L22 — the architectural lock
+
+**What was rejected (CLOSED by debate-05 verdict; do not re-propose without new corpus signal):** `parseShape` (synonym for §53.4 boundary refinement), `parseArray` (synonym for `[].map(parseVariant)`), `parseRecord`, `parseTuple`, `parsePartial` (Gap #20 closes via `formFor(..., partial=true)`, not via parse primitive).
 
 ---
 

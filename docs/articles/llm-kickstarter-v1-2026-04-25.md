@@ -189,8 +189,37 @@ If your instinct from another framework fires, stop and use the scrml form. Thes
 | `bcrypt`, `jsonwebtoken`, custom session table | npm | `import { hashPassword, signJwt } from 'scrml:auth'` — built in |
 | `pg`, `mysql2`, `better-sqlite3` packages | npm | Bun.SQL via `?{}` — driver picked from `< db src="...">` URL scheme |
 | `match @x { .V => { lift <Comp> } }` to render component per state | (looks like the obvious pattern) | Use the `if=` / `else-if=` / `else` chain on component instances (§17.1.1). The match-with-lift form currently hits E-COMPONENT-020 — see `examples/05-multi-step-form.scrml` for the canonical chain pattern. |
+| `JSON.parse(raw) as MyEnum` / unsafe type assertion at API boundary | TypeScript / hand-rolled | **Discriminated-union JSON:** `import { parseVariant } from 'scrml:data'` then `parseVariant(raw, MyEnum) !{ \| ::ParseError msg -> ... }` (S65; SPEC §41.13). Compile-time enum-only enforcement closes the string-discriminator trap. **Struct-shape JSON:** server-fn normalization step OR §53.4 SPARK boundary refinement on assignment to a typed parameter — `parseShape` does NOT exist (closed as synonym; see §3a below) |
+| Hand-rolled `if (raw.tag === "Foo") return { tag: "Foo", ...}` JSON-to-enum builder | (TypeScript reflex) | `parseVariant(raw, Foo)` — variant set + discriminator are walked at compile time; per-variant payload validation is auto-emitted (S65, SPEC §41.13) |
 
 **If you don't see your case in the table, default to the canonical shape from §1.** Do not invent syntax.
+
+### §3a Type-as-argument primitives (S65)
+
+scrml admits scrml-native types as positional arguments to a small, disciplined family of compile-time-special functions. **`parseVariant(json, EnumType)`** is the worked example shipped at S65; it lifts untyped JSON into a typed enum value via type-driven dispatch. The compiler walks the enum's variant set at compile time, emits a monomorphized parser per call site, and rejects (compile-error `E-PARSEVARIANT-TYPE-NOT-ENUM`) any second argument that is not a bare scrml-native `:enum` type identifier.
+
+```scrml
+import { parseVariant } from 'scrml:data'
+
+type LoadResult:enum = { Success(rows: int), Empty, Failed(reason: string) }
+type LoadError:enum  = { Malformed(reason: string), Network(msg: string) }
+
+server function loadResult()! -> LoadError {
+    const raw = fetch("https://api.example.com/results")
+    const result = parseVariant(raw, LoadResult) !{
+        | ::ParseError msg -> { fail LoadError::Malformed(msg) }
+    }
+    return result    // typed as LoadResult; <match> exhaustive
+}
+```
+
+**The family roadmap (planned, ~6-12mo horizon):** `serialize(value, EnumType)` (symmetric to parseVariant), `formFor(StructType)` (FLAGSHIP — emits `<form>` markup tree from struct + auto-synth validity surface), `schemaFor(StructType)` (emits SQL DDL from struct field predicates), `tableFor(StructType, rows)` (auto-`<table>`), `variantNames(EnumType)` (reflective metadata).
+
+**Discipline (the family is OPEN but bounded):** every future addition must independently pass per-shape sliver test + synonym-detection precondition + asymmetric-forfeit-cost decomposition. Without this discipline, this surface becomes generic stdlib bloat. With it, it is load-bearing infrastructure for the "define type once → schema, form, validator, parser all derive" lift.
+
+**What does NOT exist** (closed by debate-05 verdict): `parseShape` (synonym for §53.4 boundary refinement on assignment), `parseArray` (synonym for `[].map(parseVariant)`), `parseRecord`/`parseTuple`/`parsePartial` (closed; for partial-validator-set transforms, future `formFor(StructType, partial=true)` is the answer, not a parse primitive).
+
+See SPEC §41.13 (parseVariant API) + §53.14 (family framing + discipline) for details.
 
 ---
 
@@ -215,7 +244,7 @@ scrml ships a focused stdlib. Import from `scrml:<module>` (§41.3 value imports
 
 | stdlib module | What it is | Replaces (npm) |
 |---|---|---|
-| `scrml:data` | `validate(data, schema)`, rule builders (`required`, `email`, `minLength`, `pattern`, etc.) + `pick`, `omit`, `groupBy`, `sortBy`, `unique`, `flatten` | zod, yup, joi, lodash |
+| `scrml:data` | `validate(data, schema)`, rule builders (`required`, `email`, `minLength`, `pattern`, etc.) + `pick`, `omit`, `groupBy`, `sortBy`, `unique`, `flatten`. **Plus (S65) `parseVariant(json, EnumType)`** — boundary-parsing primitive for tagged-variant JSON with compile-time enum-only enforcement. Failure type `ParseError:enum` (variants `MissingDiscriminator`, `UnknownVariant(tag)`, `InvalidPayload(field, reason)`, `Malformed(reason)`). FIRST general-position member of the type-as-argument family — see SPEC §41.13 + §53.14. | zod, yup, joi, lodash |
 | `scrml:auth` | `hashPassword`, `verifyPassword`, `signJwt(payload, secret, expiresIn)`, `verifyJwt(token, secret)`, `createRateLimiter`, TOTP | bcrypt, jsonwebtoken, speakeasy, express-rate-limit |
 | `scrml:crypto` | `hash(algo, input)`, `generateUUID`, `generateToken` | crypto-js, bcryptjs, uuid |
 | `scrml:http` | Typed `fetch` wrapper with timeout + retry | axios, got, node-fetch |
