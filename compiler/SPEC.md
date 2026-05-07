@@ -2744,6 +2744,8 @@ A derived value cannot depend on itself. Did you mean a mutable `@counter = @cou
 inside a function body?
 ```
 
+> **Note on rename (S66, parallel to §6.6.8 S59 rename).** Earlier drafts of this subsection used the placeholder code `E-REACTIVE-005`. The canonical name is `E-DERIVED-CIRCULAR-DEP` (matching §34 catalog row, §31.5 dep-tracker prose, the `E-DERIVED-*` family naming, and the sibling `E-DERIVED-ENGINE-CIRCULAR` for derived engines per §51.0.J). All references to `E-REACTIVE-005` for the derived-cell-cycle case SHALL be read as `E-DERIVED-CIRCULAR-DEP`. Surfaced by S66 A1b B7 Rule-4 audit (`docs/audits/a1b-b7-rule4-audit-2026-05-07.md`).
+
 ---
 
 #### 6.6.11 No-Dependency Derived Value — W-DERIVED-001
