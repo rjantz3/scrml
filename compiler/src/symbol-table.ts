@@ -2907,6 +2907,276 @@ function checkSynthNestedAssignFire(
 }
 
 // ---------------------------------------------------------------------------
+// B13: E-DERIVED-WITH-VALIDATORS + Level-1 inline-override extraction (PASS 9)
+// ---------------------------------------------------------------------------
+//
+// Per SPEC §55.14 (validators on derived cells: REJECTED) + §55.10 (4-level
+// error message resolution chain). Two responsibilities, one walker pass:
+//
+//   1. **E-DERIVED-WITH-VALIDATORS rejection** — every state-decl with
+//      `isConst === true` AND non-empty validators fires the diagnostic.
+//      Per audit §1.7 + §55.14 line 24692, the message recommends the
+//      refinement-type alternative (`const <x>: number(>=0) = ...`).
+//
+//      Per audit §1.5: engine auto-declared variables are NOT `isConst`, so
+//      they pass through silently — engine-cell validators are LEGAL but
+//      typically REDUNDANT per §55.14. Engine-derived (`<engine derived=>`)
+//      with validators is REJECTED per §55.14 line 24689 but requires
+//      engine-decl annotations not yet present (B14 sequencing). The walker's
+//      `state-decl` filter skips engine-decls; the engine-derived case is
+//      deferred to a B13.5/B14 follow-up.
+//
+//   2. **Level-1 inline-override extraction** — for non-derived cells with
+//      validators, walk each `ValidatorEntry` and extract the trailing
+//      string-literal arg as `inlineOverride: string` on the entry, when the
+//      catalog declares an `inline-message-override` slot for that predicate
+//      and the runtime arg-list has the slot populated. When the trailing
+//      slot is present but the arg is NOT a static string literal, fire
+//      `E-VALIDATOR-INLINE-DYNAMIC` (per L12 Edge F static-string rule).
+//
+// **Walker type:** AST-driven structural recursion, mirrors PASS 5 / PASS 6 /
+// PASS 7 / PASS 8. Runs FOR FREE on top of B5 (cellKind), B9 (ExprNode args),
+// B10 (catalog) — no new infrastructure.
+//
+// **Per audit §1.6 + §1.5 + §1.7 — design decisions:**
+// - Trigger predicate: `node.kind === "state-decl" && node.isConst === true
+//   && Array.isArray(node.validators) && node.validators.length > 0`.
+// - On match: fire ONE E-DERIVED-WITH-VALIDATORS per derived cell (NOT per
+//   validator) — the diagnostic is about the cell-shape mismatch, not the
+//   individual validator. Message names the cell + lists the offending
+//   validators + suggests refinement-type alternative.
+// - Inline-override extraction runs only when the cell is non-derived
+//   (otherwise the validators are rejected wholesale).
+// - PASS 7 (B10) catches argument shape errors that B13 also depends on
+//   (e.g., a non-string-literal trailing arg on `req`). To avoid duplicate
+//   firing of the same condition under two error codes, B13's
+//   E-VALIDATOR-INLINE-DYNAMIC is the more-specific (and canonical-per-§55.10)
+//   code; codegen prefers it. Tests tolerate both firings.
+
+/**
+ * PASS 9 walker — for every `state-decl` node:
+ *
+ *   - If `isConst:true` AND validators non-empty → fire
+ *     E-DERIVED-WITH-VALIDATORS (one per cell, listing the offending
+ *     validator names) and skip per-validator processing on this cell.
+ *   - Else (non-derived) → for each validator, extract Level-1 inline
+ *     override (if present) onto `validator.inlineOverride`; fire
+ *     E-VALIDATOR-INLINE-DYNAMIC if the inline-override slot is populated
+ *     by a non-string-literal expression.
+ *
+ * Per audit guidance, mirrors the structural-recursion pattern used by
+ * PASS 5 (walkRenderByTagUses) / PASS 6 (walkDerivedValueMutate) / PASS 7
+ * (walkValidatorTypeCheck) / PASS 8 (walkRegisterSynthSurface).
+ */
+function walkRejectDerivedWithValidatorsAndExtractOverride(
+  nodes: any,
+  errors: SYMDiagnostic[],
+  filePath: string,
+  visited: WeakSet<object>,
+): void {
+  if (!nodes) return;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) {
+      walkRejectDerivedWithValidatorsAndExtractOverride(n, errors, filePath, visited);
+    }
+    return;
+  }
+  if (typeof nodes !== "object") return;
+  if (visited.has(nodes)) return;
+  visited.add(nodes);
+
+  const node = nodes;
+  const kind = node.kind;
+
+  if (kind === "state-decl") {
+    const validators: ValidatorEntry[] | undefined = (node as any).validators;
+    if (Array.isArray(validators) && validators.length > 0) {
+      const isConst = (node as any).isConst === true;
+      if (isConst) {
+        fireDerivedWithValidators(node, validators, errors, filePath);
+        // Do NOT extract inline overrides on a derived-with-validators cell:
+        // the validators are wholesale rejected per §55.14. Per audit §1.7
+        // the dev should use a refinement type instead, so per-validator
+        // metadata is moot.
+      } else {
+        for (const validator of validators) {
+          extractInlineOverride(validator, node, errors, filePath);
+        }
+      }
+    }
+    // Recurse into compound children (each is a state-decl too).
+    if (Array.isArray(node.children)) {
+      walkRejectDerivedWithValidatorsAndExtractOverride(
+        node.children, errors, filePath, visited,
+      );
+    }
+    return;
+  }
+
+  // Generic recursion. Mirror the PASS 5 / PASS 6 / PASS 7 structural walk.
+  for (const k of [
+    "body", "consequent", "alternate", "expr", "node", "renderSpec",
+    "children", "value", "argument",
+  ]) {
+    if ((node as any)[k]) {
+      walkRejectDerivedWithValidatorsAndExtractOverride(
+        (node as any)[k], errors, filePath, visited,
+      );
+    }
+  }
+  if (Array.isArray((node as any).arms)) {
+    for (const arm of (node as any).arms) {
+      if (arm && Array.isArray(arm.body)) {
+        walkRejectDerivedWithValidatorsAndExtractOverride(
+          arm.body, errors, filePath, visited,
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Fire E-DERIVED-WITH-VALIDATORS per SPEC §55.14 + §34. One diagnostic per
+ * derived cell that has validators. The message names the cell + lists the
+ * offending validators by name + recommends the refinement-type alternative
+ * per §55.14 line 24692.
+ */
+function fireDerivedWithValidators(
+  declNode: any,
+  validators: ValidatorEntry[],
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  const cellName = declNode.name ?? "<anonymous>";
+  const offendingNames = validators.map((v) => v.name).join(", ");
+  const span: SYMDiagnostic["span"] = declNode.span ?? validators[0]?.span ?? {
+    file: filePath, start: 0, end: 0, line: 1, col: 1,
+  };
+  errors.push({
+    code: "E-DERIVED-WITH-VALIDATORS",
+    message:
+      `E-DERIVED-WITH-VALIDATORS: derived cell \`${cellName}\` cannot carry validators `
+      + `(found: ${offendingNames}). Derived cells (\`const <x ...> = expr\`) are read-only `
+      + `(SPEC §55.14); validators imply gating which is incoherent on a computed value. `
+      + `Did you mean a refinement type? \`const <${cellName}>: number(>=0) = ...\` — `
+      + `refinement-type predicates are the type-level invariant for derived values.`,
+    span,
+    severity: "error",
+  });
+}
+
+/**
+ * Extract Level-1 inline override (per §55.10) onto `validator.inlineOverride`
+ * for a non-derived cell. Behavior:
+ *
+ *   - bareword (`args === null`): no inline override possible. Set `null`.
+ *   - empty call (`args === []`): no inline override possible. Set `null`.
+ *   - call-form with args:
+ *     - Look up the predicate signature via `lookupPredicate`. If unknown
+ *       (library-surface or unrecognized), skip extraction silently — B10's
+ *       walker likewise silently passes unknown names; the inline-override
+ *       feature is universal-core only at this stage.
+ *     - If the LAST signature slot is `inline-message-override` AND the
+ *       runtime args have a populated final slot matching the override
+ *       position (i.e., args.length === signature.args.length): treat that
+ *       last arg as the override candidate.
+ *     - If the candidate is a string literal: set `inlineOverride` to its
+ *       string value.
+ *     - If the candidate is anything else: fire `E-VALIDATOR-INLINE-DYNAMIC`
+ *       and set `inlineOverride: null` (so codegen has a definite sentinel).
+ *     - Otherwise: set `inlineOverride: null`.
+ *
+ * Sets the field via direct property assignment on the validator entry.
+ */
+function extractInlineOverride(
+  validator: ValidatorEntry,
+  declNode: any,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  // bareword / empty: no override possible.
+  const args = validator.args;
+  if (args === null || (Array.isArray(args) && args.length === 0)) {
+    (validator as any).inlineOverride = null;
+    return;
+  }
+
+  // Look up the predicate signature.
+  const signature = lookupPredicate(validator.name);
+  if (!signature || !Array.isArray(signature.args) || signature.args.length === 0) {
+    // Unknown / no-slot predicate. Nothing to extract.
+    (validator as any).inlineOverride = null;
+    return;
+  }
+
+  // Identify whether the last signature slot is the inline-override slot.
+  const lastSigIdx = signature.args.length - 1;
+  const lastSlot = signature.args[lastSigIdx];
+  if (!lastSlot || lastSlot.kind !== "inline-message-override") {
+    (validator as any).inlineOverride = null;
+    return;
+  }
+
+  // The override slot is the LAST positional. We extract iff the args list
+  // has reached that position (i.e., args.length === signature.args.length).
+  // Shorter arg lists (e.g., `min(18)` with no override) leave override null.
+  if (args.length < signature.args.length) {
+    (validator as any).inlineOverride = null;
+    return;
+  }
+
+  // Pull the candidate.
+  const candidate = args[lastSigIdx]!;
+
+  // String-literal? Extract value.
+  const literal = stringLiteralValueOf(candidate);
+  if (literal !== null) {
+    (validator as any).inlineOverride = literal;
+    return;
+  }
+
+  // Anything else — dynamic override; fire E-VALIDATOR-INLINE-DYNAMIC per
+  // L12 Edge F + §55.10 static-string rule.
+  const cellName = declNode.name ?? "<anonymous>";
+  const span: SYMDiagnostic["span"] = (validator as any).span
+    ?? declNode.span
+    ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+  errors.push({
+    code: "E-VALIDATOR-INLINE-DYNAMIC",
+    message:
+      `E-VALIDATOR-INLINE-DYNAMIC: the inline message override on `
+      + `\`${validator.name}\` for cell \`${cellName}\` must be a static `
+      + `string literal (SPEC §55.10 / L12 Edge F — no expression `
+      + `interpolation; messages are statically extractable for i18n tooling).`,
+    span,
+    severity: "error",
+  });
+  (validator as any).inlineOverride = null;
+}
+
+/**
+ * If `arg` is a string-literal ValidatorArg, return its decoded string value;
+ * otherwise return null.
+ *
+ * Recognised forms (mirroring B10's `isStringLit` helper):
+ *   - Canonical scrml ExprNode: `{kind:"lit", litType:"string", value:<str>}`.
+ *   - ESTree-flavored escape-hatch: `{kind:"escape-hatch",
+ *     estreeType:"Literal", value:<str>}` (string-typed literal value).
+ */
+function stringLiteralValueOf(arg: any): string | null {
+  if (!arg || typeof arg !== "object") return null;
+  if (arg.kind === "lit" && arg.litType === "string"
+      && typeof arg.value === "string") {
+    return arg.value;
+  }
+  if (arg.kind === "escape-hatch" && arg.estreeType === "Literal"
+      && typeof arg.value === "string") {
+    return arg.value;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -3031,6 +3301,29 @@ export function runSYM(input: SYMInput): SYMResult {
   // dependency-graph.ts.
   const visited7 = new WeakSet<object>();
   walkValidatorTypeCheck(ast.nodes, errors, filePath, visited7);
+
+  // PASS 9 (B13): E-DERIVED-WITH-VALIDATORS rejection + Level-1 inline-
+  // override extraction (per SPEC §55.14 + §55.10). For every state-decl
+  // with non-empty validators:
+  //   - If `isConst:true` (derived cell): fire E-DERIVED-WITH-VALIDATORS
+  //     (one per cell, listing the offending validators + recommending the
+  //     refinement-type alternative per §55.14 line 24692).
+  //   - Else (non-derived): for each validator, extract Level-1 inline
+  //     override (trailing string-literal arg) onto `validator.inlineOverride`
+  //     for A1c codegen consumption. Fire E-VALIDATOR-INLINE-DYNAMIC if the
+  //     trailing override slot is populated by a non-string-literal
+  //     expression (L12 Edge F static-string rule).
+  // Engine auto-declared cells are NOT `isConst`; they pass through silently
+  // per §55.14 ("legal but typically redundant"). Engine-derived
+  // (`<engine derived=>`) with validators is REJECTED by §55.14 but requires
+  // engine-decl annotations not yet present (B14 sequencing) — deferred.
+  // Numbered PASS 9 because main's PASS 8 (B11 walkRegisterSynthSurface) was
+  // landed in parallel with B13 dispatch (S68 file-delta merge — agent's
+  // worktree branched from S67 close; PA renumbered B13's call site here).
+  const visited9 = new WeakSet<object>();
+  walkRejectDerivedWithValidatorsAndExtractOverride(
+    ast.nodes, errors, filePath, visited9,
+  );
 
   return {
     filePath,

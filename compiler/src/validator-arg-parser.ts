@@ -62,17 +62,30 @@ type RelOp = (typeof REL_OPS_BY_LENGTH)[number];
 /**
  * Parse a single raw-text validator argument into a structured node.
  *
- * Dispatches on `predicateName` to select between relational-predicate parsing
- * (for `length(...)`) and standard expression parsing (everything else). Never
- * throws; on parse failure the standard expression parser returns an
+ * Dispatches on `predicateName` + `slotIndex` to select between
+ * relational-predicate parsing (for the FIRST arg of `length(...)`) and
+ * standard expression parsing (everything else, including subsequent
+ * inline-override slots on `length(...)`).
+ *
+ * Never throws; on parse failure the standard expression parser returns an
  * escape-hatch ExprNode and the relational-form failure path returns an
- * escape-hatch ExprNode (so B10 can surface a structured error if it cares).
+ * escape-hatch ExprNode (so B10/B13 can surface a structured error if they
+ * care).
+ *
+ * Phase A1b Step B13 — `slotIndex` parameter added so multi-arg call-form
+ * validators (`length(>=2, "too short")` per §55.10 inline-override) parse
+ * each slot under its correct sub-grammar. Pre-B13 a single joined arg was
+ * always passed as slot 0 — B13 splits on top-level commas in the
+ * ast-builder collector and dispatches per-slot here.
  *
  * @param predicateName  The validator name (e.g. `"length"`, `"eq"`, `"min"`).
  * @param rawArg         The raw arg-text (joined with single spaces by Step 5).
  * @param argSpan        Source span of the arg region (Step 5 emits one).
  * @param filePath       File path for error reporting.
  * @param argOffset      Byte offset of the arg within the source file.
+ * @param slotIndex      Zero-based positional index of this arg in the
+ *                       call-form arg list. Defaults to 0 for back-compat
+ *                       with pre-B13 single-arg callers.
  *
  * @returns A `ValidatorArg` (ExprNode or RelationalPredicateNode).
  */
@@ -82,6 +95,7 @@ export function parseValidatorArg(
   argSpan: Span,
   filePath: string,
   argOffset: number,
+  slotIndex: number = 0,
 ): ValidatorArg {
   const trimmed = (rawArg ?? "").trim();
   const span = spanOfArg(argSpan, filePath);
@@ -92,7 +106,10 @@ export function parseValidatorArg(
     return makeEscapeHatch(span, "EmptyValidatorArg", "");
   }
 
-  if (RELATIONAL_PREDICATE_HOSTS.has(predicateName)) {
+  // Relational form is ONLY the leading slot of `length(...)`. Subsequent
+  // slots (slotIndex > 0) are inline-overrides per §55.10 — parsed as
+  // standard expressions (string literals expected).
+  if (RELATIONAL_PREDICATE_HOSTS.has(predicateName) && slotIndex === 0) {
     return parseRelationalPredicate(trimmed, span, filePath, argOffset);
   }
 
@@ -254,13 +271,22 @@ export function decorateValidatorsWithExprNodes(
     // Idempotency: skip if already structured.
     const first = v.args[0] as unknown;
     if (first && typeof first === "object" && (first as { kind?: string }).kind) continue;
-    // Convert each raw-text element into a parsed ValidatorArg. Step 5's
-    // current behaviour produces a single-element array; this loop is
-    // forward-compatible with future per-arg-split parsers.
+    // Convert each raw-text element into a parsed ValidatorArg.
+    //
+    // Pre-B13: Step 5 produced single-element joined-raw arrays, so slotIndex
+    // was always 0. Post-B13: ast-builder splits on top-level commas, so this
+    // loop iterates one raw-text element per source-level arg slot.
+    // `slotIndex` is forwarded so the relational-predicate sub-grammar fires
+    // ONLY on slot 0 of `length(...)` — trailing inline-overrides
+    // (per §55.10) parse as standard expressions.
     const parsed: ValidatorArg[] = [];
-    for (const raw of v.args as unknown as string[]) {
+    const rawArgs = v.args as unknown as string[];
+    for (let slotIndex = 0; slotIndex < rawArgs.length; slotIndex++) {
+      const raw = rawArgs[slotIndex]!;
       const argOffset = v.span?.start ?? 0;
-      parsed.push(parseValidatorArg(v.name, raw, v.span, filePath, argOffset));
+      parsed.push(
+        parseValidatorArg(v.name, raw, v.span, filePath, argOffset, slotIndex),
+      );
     }
     v.args = parsed;
   }

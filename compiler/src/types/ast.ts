@@ -583,6 +583,26 @@ export interface ValidatorEntry {
   args: ValidatorArg[] | null;
   /** Source span covering the validator (name + args region). */
   span: Span;
+  /**
+   * Phase A1b Step B13 — Level-1 inline override on this validator
+   * (per SPEC §55.10 4-level error message resolution chain). The trailing
+   * string-literal arg, when present and matching the catalog's
+   * `inline-message-override` slot, is extracted onto this field by the B13
+   * walker for A1c codegen consumption.
+   *
+   *   `<name req("Please enter your name")>` → `inlineOverride: "Please enter your name"`
+   *   `<name length(>=2, "Must be at least 2 chars")>` → `inlineOverride: "Must be at least 2 chars"`
+   *   `<name req>` (no override) → `inlineOverride: null`
+   *
+   * Static-string only per L12 Edge F — non-string-literal trailing args fire
+   * `E-VALIDATOR-INLINE-DYNAMIC` (§34, added at S68 audit). The annotation is
+   * set by the B13 walker (`walkRejectDerivedWithValidatorsAndExtractOverride`
+   * in `compiler/src/symbol-table.ts`).
+   *
+   * `undefined` until the B13 walker runs; `null` after it has run with no
+   * override present; a string when extracted.
+   */
+  inlineOverride?: string | null;
 }
 
 /**

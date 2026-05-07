@@ -3578,9 +3578,32 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const next = tokens[i + scanIdx + 1];
         if (next && next.kind === "PUNCT" && next.text === "(") {
           // Call-form: collect args by walking paren-matched tokens.
+          //
+          // Phase A1b Step B13 — top-level comma split.
+          // SPEC §55.10 (4-level error message resolution chain) — Level-1
+          // inline-override is a trailing string-literal arg on a predicate
+          // call: `length(>=2, "Name must be at least 2 chars")`. To extract
+          // the override, the collector splits args at commas that appear at
+          // THIS call's top level (i.e., outside any nested paren/bracket/
+          // brace). Pre-B13 produced one joined string; B13 emits one raw
+          // string per top-level arg. B9's `decorateValidatorsWithExprNodes`
+          // already iterates `args as string[]` and produces one structured
+          // ValidatorArg per element.
+          //
+          // Backward-compat: for single-arg cases (no top-level commas),
+          // the resulting array has length 1 — same shape as before.
+          //
+          // The relational form `length(>=2)` has its inner `>=` as an
+          // OPERATOR token, not a paren-shaped construct, so it doesn't
+          // confuse this splitter; it travels in the first arg as the only
+          // arg, intact, for B9's relational-predicate sub-grammar parser.
           let parenDepth = 1;
+          let bracketDepth = 0;
+          let braceDepth = 0;
           let argIdx = scanIdx + 2;
-          let argTexts = []; // raw token texts joined back into arg string
+          // Per-arg accumulator + array of all collected args.
+          let curArgTexts = [];
+          const allArgs = [];
           let lastTok = next;
           while (true) {
             const at = tokens[i + argIdx];
@@ -3589,10 +3612,40 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             if (at.kind === "PUNCT" && at.text === ")") {
               parenDepth--;
               if (parenDepth === 0) {
+                // Closing paren of the outer call. Flush the current arg
+                // (if any) and stop.
+                if (curArgTexts.length > 0) {
+                  allArgs.push(curArgTexts.join(" ").trim());
+                }
                 lastTok = at;
                 argIdx++;
                 break;
               }
+            }
+            if (at.kind === "PUNCT" && at.text === "[") bracketDepth++;
+            else if (at.kind === "PUNCT" && at.text === "]") {
+              if (bracketDepth === 0) return null; // malformed — decline
+              bracketDepth--;
+            }
+            else if (at.kind === "PUNCT" && at.text === "{") braceDepth++;
+            else if (at.kind === "PUNCT" && at.text === "}") {
+              if (braceDepth === 0) return null; // malformed — decline
+              braceDepth--;
+            }
+            // Top-level comma: split arg boundary. parenDepth === 1 means
+            // we are inside the outer call's arg list; bracketDepth/
+            // braceDepth === 0 means we are not inside a nested array/
+            // object literal. (`oneOf([.A, .B])` keeps `.A, .B` together
+            // because bracketDepth becomes 1 inside `[`.)
+            if (
+              at.kind === "PUNCT" && at.text === "," &&
+              parenDepth === 1 && bracketDepth === 0 && braceDepth === 0
+            ) {
+              allArgs.push(curArgTexts.join(" ").trim());
+              curArgTexts = [];
+              lastTok = at;
+              argIdx++;
+              continue;
             }
             // STRING tokens have their surrounding quotes stripped by the
             // tokenizer; restore them via JSON.stringify so the joined raw
@@ -3600,18 +3653,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             // default-expr collector treatment above (line ~3533). Without
             // this, `pattern("[a-z]+")` would store `[a-z]+` and B9's
             // expression-parser would fail to recognise it as a string lit.
-            argTexts.push(at.kind === "STRING" ? JSON.stringify(at.text) : at.text);
+            curArgTexts.push(at.kind === "STRING" ? JSON.stringify(at.text) : at.text);
             lastTok = at;
             argIdx++;
           }
-          // Args are stored as a single raw string (joined by space). A1b will
-          // sub-grammar-parse this into ExprNode[]. Per Step 5 design choice:
-          // relational-form args (`>=2`, `<100`) and cross-field args (`@cell`)
-          // are out of scope for parser-level ExprNode-ification.
-          const argRaw = argTexts.join(" ").trim();
+          // Filter out any empty args produced by trailing-comma or
+          // adjacent-comma artifacts. Empty paren `f()` already produced
+          // an empty `allArgs` (the curArgTexts.length === 0 flush guard
+          // skipped). `f(,)` would push two empties — drop them.
+          const args = allArgs.filter((s) => s.length > 0);
           validators.push({
             name: validatorName,
-            args: argRaw.length > 0 ? [argRaw] : [],
+            args,
             span: { ...validatorStart, end: lastTok.span.end },
           });
           scanIdx = argIdx;

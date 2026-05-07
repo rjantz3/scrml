@@ -169,12 +169,10 @@ describe("B10 Phase 2 — `eq`/`neq` (any-equatable-with-cell slot)", () => {
 });
 
 describe("B10 Phase 2 — arity violations", () => {
-  test.skip("more than 2 args on a `1+inline` predicate — fires E-TYPE-031 (deferred — needs per-arg-split)", () => {
-    // No spec predicate accepts > 2 args. The walker has the args.length > 2
-    // branch wired, but B9 audit §1.5 documents that Step 5 produces single-
-    // element joined-raw arrays today (no predicate takes >2 args in spec
-    // worked examples, so per-arg-split was deferred). The walker check is
-    // forward-compatible — activates when per-arg-split lands.
+  test("more than 2 args on a `1+inline` predicate — fires E-TYPE-031 (B13 per-arg-split active)", () => {
+    // Activated by B13's per-arg-split in ast-builder.js. `min(0, "msg",
+    // "extra")` now arrives as 3 distinct ValidatorArg entries; PASS-7's
+    // `args.length > 2` branch fires E-TYPE-031.
     const sym = runUpToSYM(
       `<program>\${ <age min(0, "msg", "extra")> = <input type="number"/> }</program>`,
     );
@@ -193,13 +191,13 @@ describe("B10 Phase 2 — inline-override (Level-1, §55.10) trailing-arg checks
     expect(getTypeErrors(sym)).toEqual([]);
   });
 
-  test.skip("non-string-literal trailing arg on `min` — fires E-TYPE-031 (deferred — needs per-arg-split)", () => {
-    // The walker has the trailing-arg-shape check wired, but B9 audit §1.5
-    // documents that Step 5 produces single-element joined-raw arrays today.
-    // `min(18, @minAge)` arrives as one ESTree-SequenceExpression escape-hatch
-    // arg (raw=`"18 , @minAge"`), not as a 2-element ValidatorArg array.
-    // Activates when per-arg-split lands (or is taken over by B13 which
-    // formally owns inline-override extraction + dynamic rejection).
+  test("non-string-literal trailing arg on `min` — fires E-TYPE-031 (B13 per-arg-split active)", () => {
+    // Activated by B13's per-arg-split. `min(18, @minAge)` now arrives as
+    // 2 distinct ValidatorArg entries; PASS-7 fires E-TYPE-031 on the
+    // non-string-literal trailing arg. B13 ALSO fires the more-specific
+    // E-VALIDATOR-INLINE-DYNAMIC for the same condition; both error codes
+    // are tolerated. See `derived-with-validators.test.js` §B13.E-DYNAMIC
+    // for the more-specific code's tests.
     const sym = runUpToSYM(
       `<program>\${
         <minAge> = 18

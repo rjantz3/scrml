@@ -14241,6 +14241,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-INTERNAL-RULE-NOT-COMPOSITE | §51.0.O, §51.0.Q | The `internal:rule=` prefix appears on a state-child that is not composite (no nested `<engine>` body). The internal-vs-external distinction is meaningful only when there is an inner engine whose lifecycle would be preserved on internal transitions. Use canonical `rule=` on non-composite state-children. (Catalog addition S67 — DD-Harel Approach C Hybrid, Insight 23 grammar decision #4.) | Error |
 | E-VALIDATOR-CIRCULAR-DEP | §55.11 | Two or more validators reference each other via cross-field predicate args (e.g., `<a eq(@b)>` and `<b eq(@a)>`). The validator dependency graph is a DAG; cycles are forbidden. | Error |
 | E-DERIVED-WITH-VALIDATORS | §55.14 | Validators applied to a derived cell (`const <x ...>`). Derived cells are read-only; validators imply gating which is incoherent on a computed value. Use a refinement type instead (`const <x>: number(>=0) = ...`). | Error |
+| E-VALIDATOR-INLINE-DYNAMIC | §55.10 | The Level-1 inline message override on a validator (`<name req("…msg…")>`, `<name length(>=2, "…msg…")>`) must be a static string literal. Per L12 Edge F, dynamic expressions / interpolations defeat i18n tooling extraction (messages must be statically discoverable). Use a static literal here, OR define a project-registered message via `data.registerMessages` (Level 2), OR use the `<match for=ValidationError>` escape hatch (Level 4). (Catalog addition S68 — A1b B13.) | Error |
 | E-CHANNEL-INSIDE-PROGRAM | §38.1 | A `<channel>` element appears as a descendant of `<program>` rather than at file top level. v0.next channels are file-level (M19); migrate the declaration to be a sibling of `<program>`. | Error |
 | E-CHANNEL-SHARED-MODIFIER | §38.4 | The `@shared` modifier is used in the source. The modifier is removed in v0.next (M19); reactive cells declared inside a channel body auto-sync by virtue of being declared in the channel body. Remove the `@shared` keyword and use `<name> = init` (V5-strict). | Error |
 | E-CLOSER-001 | §4.14 | A tag uses `:`-shorthand body but ALSO has an explicit closer (`</>`, `/`, `/>`). Choose one form: `:`-shorthand has no closer; bare-body uses a closer; self-closing has no body. (Stage 0b D4) | Error |
@@ -25253,9 +25254,16 @@ valid only if both agree.
 **Validators on derived cells (`const <x ...>` or `<engine derived=>`):** REJECTED. Per
 open-Q §7.9 resolution: derived cells are READ-ONLY; validators imply gating which is
 incoherent on a read-only computed value. The compiler emits `E-DERIVED-WITH-VALIDATORS`
-(§34) at parse-time. If the developer wants validation on a derived value, they should
-add a refinement type (`const <x>: number(>=0) = ...`) — that is the type-level
-invariant equivalent.
+(§34) at parse-time.[^55-14-parse-time] If the developer wants validation on a derived
+value, they should add a refinement type (`const <x>: number(>=0) = ...`) — that is the
+type-level invariant equivalent.
+
+[^55-14-parse-time]: "Parse-time" is operational shorthand. The compiler enforces this
+    via the A1b resolve-type stage (the validator-walking pass after shape-discrimination
+    has set `decl.isConst`); the precise stage is A1b. The semantic intent — "compile-time,
+    before code generation, on a static AST shape" — is preserved by either timing.
+    Parallel to the §6.6.8 / §6.6.10 footnote convention. (S68 audit clarification —
+    A1b B13.)
 
 ### 55.15 Cross-references summary and error-code listing
 
@@ -25281,6 +25289,7 @@ of the original D2 brief for the canonical listing):
 | `E-SYNTHESIZED-WRITE` | Error | Assignment to auto-synthesized property (already in §34 from D1). |
 | `E-VALIDATOR-CIRCULAR-DEP` | Error | Circular dependency via cross-field predicate args (§55.11). |
 | `E-DERIVED-WITH-VALIDATORS` | Error | Validators applied to a derived cell (§55.14). |
+| `E-VALIDATOR-INLINE-DYNAMIC` | Error | Level-1 inline message override is not a static string literal (§55.10 / L12 Edge F). |
 | `W-MATCH-RULE-INERT` | Warning | rule= legal but inert inside a match-block (§18.0.2). |
 | `E-MATCH-EFFECT-FORBIDDEN` | Error | effect= forbidden inside match-block (§18.0.2). |
 | `E-MATCH-ONTRANSITION-FORBIDDEN` | Error | <onTransition> forbidden inside match-block (§18.0.2). |
