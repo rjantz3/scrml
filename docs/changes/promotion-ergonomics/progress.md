@@ -142,3 +142,41 @@ authorized yet — PA may commit these two doc artefacts as a Phase-0 landing.
 - Re-scoped dispatch authority: Bryan-authorized Path A — `is` is canonical; drop `==` rows from §56
 - Phase 3 (`--engine` impl) deferred to Tier C
 - This dispatch ships: `--match` only + I-MATCH-PROMOTABLE lint + spec amendments + docs
+
+## 2026-05-06 — S66 sub-survey: parseability probe results
+
+Per S66 brief instruction "Verify in Phase 0 of your work whether `if (@cell.is(.Error(payload)))`
+parses…", ran a parseability probe via `parseExprToNode` (the entry point that applies
+`preprocessForAcorn`). Findings:
+
+| Predicate form | Parseable? | Resulting AST shape |
+|---|---|---|
+| `@phase is .Idle` | YES | `binary op=is, left=@phase, right=ident(".Idle")` |
+| `@phase is .Idle msg` | YES — but `msg` SILENTLY DROPPED | same as `is .Idle`; right.name is `.Idle`; the trailing `msg` is consumed in span but not captured |
+| `@phase.is(.Idle)` | NO (escape-hatch) | parser kind = `escape-hatch` (fallback path); not a structured AST |
+| `@phase.is(.Error(payload))` | NO (escape-hatch) | same fallback |
+
+**Implications for Tier B:**
+
+1. The lint and `bun scrml promote --match` operate on EXACTLY ONE parseable form:
+   `if (@cell is .Variant)`. This narrows the predicate matrix further than the brief
+   anticipated.
+2. The bind-on-is syntax (`is .X msg`) is **not actually a structured construct today** —
+   the trailing identifier is silently dropped at parse. This is a separate language gap
+   that would need its own fix; out of scope for Tier B.
+3. The method-call form (`@cell.is(.X)`) gets dropped to escape-hatch — also not a
+   first-class construct. Out of scope.
+
+**Updated rewrite table for SPEC §56.5.2:**
+
+| Source branch condition | Target arm |
+|---|---|
+| `if (@cell is .X) { body }` | `<X>{body}</>` |
+
+Single rewrite shape. Clean.
+
+This is a sharper scope than even the re-scoped Tier B brief. Will amend §56 to reflect
+reality before implementation, and proceed.
+
+Probe file: `_probe-is-method.test.js` was created under tests/unit/ and removed after
+findings recorded. Probe was a 30-second informational test; no commits.
