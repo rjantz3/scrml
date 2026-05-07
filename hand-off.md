@@ -21,7 +21,9 @@
 | parseVariant implementation SCOPE | ✅ LANDED — Path A LOCKED (S65 second tranche) | `docs/changes/parsevariant-impl/SCOPE.md` |
 | Type-as-argument family roadmap recorded | ✅ LANDED in SCOPE doc + master-list L22 | parseVariant → serialize → formFor → schemaFor → tableFor → reflective |
 | L22 added to master-list locks list | ✅ LANDED | `master-list.md §0.2` |
-| Survey-first dispatch (parseVariant Path A) | 🟡 IN FLIGHT (background) | output target: `docs/changes/parsevariant-impl/SURVEY-REPORT.md` |
+| Survey-first dispatch (parseVariant Path A) | ✅ LANDED | `docs/changes/parsevariant-impl/SURVEY-REPORT.md` (depth-of-survey-discount #7; 2 SCOPE drifts caught + corrected) |
+| SCOPE doc updated with survey findings | ✅ LANDED | DRIFT-1 (§10.4 → §41.13) + DRIFT-2 (parser-level no-op) corrected; cost re-estimated 16-23h |
+| Primer §12 depth-of-survey-discount counter | ✅ updated | 4 occurrences → 7 (added S64 Stage 0c.A, S64 B2, S65 parseVariant survey) |
 | master-list.md + changelog + hand-off updates | ✅ LANDED (initial wrap + second-tranche update) | all three |
 
 **Commit count after second tranche:** scrmlTS 5 commits; scrml-support 4 commits; total 9 commits across 2 repos. First tranche pushed mid-session (`4595b2c` + `c9c2182`); second tranche commits `9c02e8b` + (master-list/hand-off update commit) **push pending**.
@@ -179,7 +181,7 @@ Standing list 1-47 from S64 hand-off carries forward verbatim. New S65 additions
 | Inbox | empty |
 | Active agents (post-S65) | 45 (unchanged from S64) |
 | Permissions whitelist | unchanged |
-| Depth-of-survey-discount counter | 6 (unchanged — no new audit-vs-survey events this session) |
+| Depth-of-survey-discount counter | **7** (was 6; S65 parseVariant Path A survey landed ~15-25% discount + caught 2 SCOPE drifts) |
 | Design insights count (since 2026-03-22) | 30+ entries; 1 new in S65 (#4 boundary-parsing) |
 
 ### File-modification inventory (S65 — for cherry-pick / forensic review)

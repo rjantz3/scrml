@@ -2,12 +2,30 @@
 title: parseVariant implementation — scope + decomposition
 date: 2026-05-06
 session: S65
-authority: debate-05 verdict (5/5 unanimous, judge-ratified) + S65 Path-A architectural commit
-status: SCOPE LOCKED — Path A · awaiting dispatch authorization
-path: A (compile-time special form — type-as-argument as language primitive)
-family: parseVariant is FIRST member of type-as-argument feature family
+authority: debate-05 verdict (5/5 unanimous, judge-ratified) + S65 Path-A architectural commit + S65 survey findings
+status: SCOPE LOCKED — Path A · survey-revised cost estimate · awaiting dispatch authorization
+path: A (compile-time special form — type-as-argument as language primitive, OUTSIDE meta-blocks)
+family: parseVariant is FIRST general-position member of type-as-argument feature family
 roadmap: parseVariant → serialize → formFor → schemaFor → tableFor → variantNames + reflective metadata
+survey: docs/changes/parsevariant-impl/SURVEY-REPORT.md (depth-of-survey-discount #7; ~15-25% cost reduction; 2 SCOPE drifts caught)
+revised_estimate: ~16-23h (vs original ~20-30h); ~14-19h achievable with engine-validation helper co-location
 ---
+
+## Survey findings (S65 diagnostic dispatch — see SURVEY-REPORT.md for full detail)
+
+**The depth-of-survey discount is real and large for this dispatch.** Most of Path A's compiler scope is already shipped:
+
+- **`reflect(TypeName)`** in `^{}` meta blocks (`meta-checker.ts:144-153, 174, 258-274`) is a working type-as-argument primitive TODAY. parseVariant rides the same recognition pattern — moves it OUTSIDE meta-blocks. This narrows the architectural-precedent claim: type-as-argument was always going to escape `^{}` eventually; parseVariant is the first ratified case.
+- **`<engine for=Type>` validation** at `type-system.ts:1998-2018` (E-ENGINE-004) is the structural template for E-PARSEVARIANT-TYPE-NOT-ENUM. One helper extraction away.
+- **Engine codegen** (`emit-machines.ts`) is the shape model for compile-time-walks-variants emission. **NOT** match-stmt — match dispatches via runtime `_scrml_structural_eq`, which is the wrong pattern.
+- **`!{}` handler integration** is fully supported; parseVariant just marks itself failable returning `ParseError` and existing codegen does its job.
+
+**Two SCOPE drifts caught (corrected in this revision):**
+
+- ~~§10.4~~ → **§41.13** for `scrml:data` API entry. §10 is `lift`; stdlib API surface lives in §41. §41.12 (`registerMessages`) is the precedent entry.
+- ~~Parser-level recognition of `parseVariant(json, TypeRef)` as special call form~~ → **No-op**. Already parses cleanly as regular CallExpression with Identifier argument. Recognition is type-system + codegen only.
+
+**Survey-revised total: ~16-23h** (vs original ~20-30h), or **~14-19h** with engine-validation helper co-location.
 
 # parseVariant implementation — scope + decomposition
 
@@ -133,9 +151,9 @@ This is **T2** (compiler change with new SPEC surface). T1 (stdlib only) won't w
 
 1. **Lock L22 record** — append to `scrml-support/docs/deep-dives/v0next-s56-deliberation-outcomes-2026-05-04.md` (or wherever L21 was recorded). L22 phrasing: *"Type-as-argument is a first-class scrml language primitive, introduced by `parseVariant`. Foundation for the type-as-argument family (`serialize`, `formFor`, `schemaFor`, `tableFor`, reflective metadata). Each future family member must independently pass per-shape sliver test + synonym-detection precondition + asymmetric-forfeit-cost decomposition."* Cite debate-05 verdict + judge ratification + S65 family-roadmap commit.
 
-2. **SPEC §10.4 (`scrml:data`)** — add `parseVariant` API entry with full call signature, second-arg type-constraint (enum-only), `::ParseError` failure type, exhaustive failure-variant list. Cite §53 SPARK boundary semantics for type-establishment-vs-predicate-enforcement sequencing. ~40-60 lines.
+2. **SPEC §41.13 (`scrml:data parseVariant`)** [DRIFT-1 corrected — was §10.4 in pre-survey draft] — add `parseVariant` API entry as a sibling to existing §41.12 `registerMessages`. Full call signature, second-arg type-constraint (enum-only), `::ParseError` failure type, exhaustive failure-variant list. Cite §53.10 (new — see step 3) for type-as-argument family framing; §22 (reflect) for sibling-precedent inside meta-blocks; §53 SPARK boundary semantics for type-establishment-vs-predicate-enforcement sequencing. ~40-60 lines.
 
-3. **SPEC §53.x (new subsection — "Type-as-argument primitives")** — formalize type-as-argument as a language concept per design insight #4. Distinguishes type-establishment step (constructor selection from discriminator) from predicate-enforcement step (SPARK boundary refinement). Documents the discipline that bounds the family (sliver test mandatory; synonym detection mandatory; per-feature deep-dive). ~80-120 lines (load-bearing for the family; first member specification carries the architectural framing).
+3. **SPEC §53.10 (new subsection — "Type-as-argument primitives")** [survey-confirmed insert point: after §53.9.4, before §53 SPEC-ISSUE list] — formalize type-as-argument as a language concept per design insight #4. Distinguishes type-establishment step (constructor selection from discriminator) from predicate-enforcement step (SPARK boundary refinement). Documents the family roadmap. Documents the discipline that bounds the family (sliver test mandatory; synonym detection mandatory; per-feature deep-dive). Cross-refs §22 (reflect — meta-block precedent) + §41.13 (parseVariant — first general-position member) + §53.6 named-shape registry as structural model. ~80-120 lines (load-bearing for the family; first member specification carries the architectural framing).
 
 4. **SPEC §34 catalog** — add error codes:
    - `E-PARSEVARIANT-TYPE-NOT-ENUM` — compile-time; second arg is not a scrml-native enum
@@ -143,12 +161,12 @@ This is **T2** (compiler change with new SPEC surface). T1 (stdlib only) won't w
    - `E-PARSEVARIANT-UNKNOWN-VARIANT` — runtime, via `::ParseError::UnknownVariant(tag)`
    - `E-PARSEVARIANT-INVALID-PAYLOAD` — runtime, via `::ParseError::InvalidPayload(field, reason)`
 
-5. **Compiler change (Path A scope):**
-   - **Parser:** recognize `parseVariant(expr, TypeRef)` as a call form where the second positional arg is a TypeRef AST node, not an Expr. Same kind of recognition the compiler already does for type annotations after `:`.
-   - **Type-system:** at the call site, resolve TypeRef → enum metadata; reject struct/named-shape/literal types with `E-PARSEVARIANT-TYPE-NOT-ENUM`; thread the enum's variant set into codegen.
-   - **Codegen:** emit monomorphized parser per call site, walking the resolved enum's variant declarations to generate the discriminator dispatch + per-variant payload-shape verification + ParseError construction.
-   - **Self-host shim:** if self-host pipeline depends on this surface, add to `parser-workarounds.js` setBPPOverrides hook.
-   - **Survey first** — before committing implementation specifics, run a 1-2h survey of existing type-resolution machinery (`type-system.ts`, `ast-builder.js` for type annotations, `codegen/` for any existing per-type specialization). Depth-of-survey discount likely applies; existing infrastructure may carry more than the brief assumes.
+5. **Compiler change (Path A scope — survey-revised):**
+   - ~~**Parser:** recognize `parseVariant(expr, TypeRef)` as a call form~~ — **NO-OP per DRIFT-2 survey finding.** `parseVariant(raw, LoadResult)` already produces a valid `CallExpression { callee: IdentExpr("parseVariant"), arguments: [IdentExpr("raw"), IdentExpr("LoadResult")] }`. No tokenizer / block-splitter / ast-builder / expression-parser change required. ~3-5h removed from scope.
+   - **Type-system pass (~2-3h):** locate at `compiler/src/type-system.ts` (8724 lines). New check inspects call-expressions; when callee resolves through MOD's import registry to imported `parseVariant`, inspects `args[1]`. If `args[1].kind !== "ident"`, emit `E-PARSEVARIANT-TYPE-NOT-ENUM` ("must be a bare type name"). Otherwise `typeRegistry.get(args[1].name)`; if missing or `kind !== "enum"`, emit `E-PARSEVARIANT-TYPE-NOT-ENUM` ("is a struct, not an enum" — wording mirrors E-ENGINE-004 at line 2010-2018). Annotate the call-expr node with back-reference to resolved EnumType (parallel to how meta-checker sets `node.typeRegistrySnapshot`). **Strong leverage:** ride E-ENGINE-004 helper extraction; ~80-150 LOC.
+   - **Codegen (~3-5h):** new `compiler/src/codegen/emit-parse-variant.ts` (~200-400 LOC) modeled on `emit-machines.ts` (the canonical compile-time-walks-variants emission shape; **NOT** match-stmt, which dispatches via runtime `_scrml_structural_eq`). For each parseVariant call: emit a monomorphized IIFE that JSON-parses-or-passes-through, validates discriminator presence, switches on tag, builds the matching variant constructor with payload validation per variant. Reads EnumType directly off the annotated call-node (per Risk #3 — skips `serializeTypeEntry` payload-extension). `!{}` handler integration is FREE: TS pass sets the call's failure-type to `ParseError`, existing failable-call codegen takes over.
+   - ~~**Self-host shim**~~ — **NO-OP.** parseVariant is recognized at TS+codegen stages directly; doesn't flow through BPP. Self-host parity is a separate follow-up when self-host catches up.
+   - **Survey COMPLETE.** See `SURVEY-REPORT.md` for full per-area findings. ~~Survey first~~ done.
 
 6. **Stdlib `stdlib/data/parse.scrml` (new file)** — declares `ParseError:enum` with the four variants. Provides any per-call-site runtime helpers the compiler-emitted code needs (e.g., common type-coercion routines for primitive payloads). Most parsing logic is monomorphized at the call site; this file is mostly the error-type declaration + helpers. Smaller than expected.
 
@@ -173,18 +191,33 @@ This is **T2** (compiler change with new SPEC surface). T1 (stdlib only) won't w
 
 12. **Family-precedent doc (NEW)** — `scrml-support/docs/type-as-argument-family-2026-05-06.md` records: (a) the 5-7 family members with sliver-test status per member, (b) the discipline that bounds future additions, (c) the design insight #4 reasoning that grounds the family (type-establishment vs predicate-enforcement sequencing). This is the doc future PA's read when a new `Type.foo` request lands and they need to apply the discipline.
 
-### Estimated effort (Path A)
+### Estimated effort (Path A — SURVEY-REVISED)
 
-**~20-30h focused** for parseVariant alone. Breakdown:
-- Spec writing (§10.4 + §53.x + §34 + family-precedent doc): ~6-8h
-- Compiler change (parser + type-system + codegen): ~10-15h (depth-of-survey discount may apply)
-- Stdlib runtime + tests: ~3-5h
-- Primer + kickstarter + inventory updates: ~1-2h
-- Lock L22 record + family doc: ~1-2h
+**~16-23h focused** (vs original ~20-30h; ~14-19h achievable with engine-validation helper co-location). Survey-revised breakdown:
 
-**Survey-first phase mandatory.** Existing type-resolution machinery may carry significant fraction of the compiler change. Audit recommends 1-2h dedicated survey before per-step decomposition (per S64 depth-of-survey-discount methodology).
+| Bucket | Original | Survey-revised | Notes |
+|---|---|---|---|
+| Lock L22 record + family doc | ~1-2h | ~1.5h | mechanical |
+| SPEC §41.13 entry [DRIFT-1 fix] | (was §10.4) | ~2-3h | §41.12 is the model |
+| SPEC §53.10 type-as-argument family | ~3-4h | ~2-3h | §53.6 named-shape registry is structural model |
+| SPEC §34 catalog (4 codes) | ~0.5-1h | ~0.5h | mechanical pattern |
+| Compiler — parser [DRIFT-2 fix] | ~3-5h | **0h (no-op)** | already parses correctly |
+| Compiler — type-system pass | ~3-5h | **2-3h** | rides E-ENGINE-004 helper + reflect() precedent |
+| Compiler — codegen monomorphization | ~3-5h | **3-5h** | new emit-parse-variant.ts modeled on emit-machines.ts |
+| Compiler — self-host shim | ~0.5-1h | **0h (no-op)** | not in BPP path |
+| Stdlib parse.scrml + index re-export | ~1-2h | ~0.5-1h | ~50-80 line file |
+| Tests (unit + integration + compile-error) | ~2-3h | ~2-3h | unchanged |
+| Primer + kickstarter + inventory updates | ~1-2h | ~1-2h | unchanged |
+| **Optional ghost-patterns lint add** | not in original | ~0.5h | new "did you mean parseVariant?" diagnostic |
 
-**Family economics:** the 20-30h here pays for `serialize` (~10-15h riding precedent), `formFor` (~25-40h flagship), `schemaFor` (~15-25h), `tableFor` (~15-25h), reflective metadata (~5-10h). **~85-145h total family**, of which ~20-30h is the architectural commit here. The remaining ~65-115h is harvest across the next 6-12 months.
+**Family economics:** the ~16-23h here still pays for `serialize` (~10-15h riding precedent), `formFor` (~25-40h flagship), `schemaFor` (~15-25h), `tableFor` (~15-25h), reflective metadata (~5-10h). **~85-145h total family**, of which ~16-23h is the architectural commit here. The remaining ~65-125h is harvest across the next 6-12 months. **Discount widens family-economic ratio from ~3-5x to ~4-6x.**
+
+### Survey-recommended dispatch order (4 phases)
+
+1. **Phase 1 (~2h):** L22 record + new `stdlib/data/parse.scrml` (ParseError enum + parseVariant marker export) + cross-file-import sniff test (write a one-file scrml that does `import { ParseError } from 'scrml:data'; <state>: ParseError = .Malformed("test")` — does the type resolve?). **Risk #1 verification gate.**
+2. **Phase 2 (~5-8h):** TS pass (E-PARSEVARIANT-TYPE-NOT-ENUM, ride E-ENGINE-004 helper) + codegen (`emit-parse-variant.ts` modeled on `emit-machines.ts`). Verify `!{}` handler integration via existing failable-call codegen.
+3. **Phase 3 (~5-7h, parallelizable):** SPEC §41.13 + §53.10 + §34 catalog adds + family-precedent doc + primer/kickstarter/inventory updates. Independent of compiler dispatch.
+4. **Phase 4 (~1-2h, optional):** ghost-patterns lint add ("JSON.parse against typed boundary → consider parseVariant"); final inventory updates.
 
 ## Risks
 
@@ -196,18 +229,25 @@ This is **T2** (compiler change with new SPEC surface). T1 (stdlib only) won't w
 
 4. **Type-as-argument precedent floodgate.** Path A's value comes from the family — but the family discipline (sliver test + synonym detection + per-feature deep-dive) MUST be applied with full force on every future addition. Without that discipline, every `Type.foo` request becomes a credible feature ask. The family-precedent doc (Step 12) records the discipline so future PA's apply it automatically.
 
-5. **Survey-first phase under-scoped.** The 1-2h survey before per-step decomposition is mandatory, not advisory. Existing type-resolution + codegen specialization machinery may make Path A's compiler scope significantly smaller than estimated. If the survey reveals a 4-6x discount (per depth-of-survey pattern), update the dispatch brief BEFORE firing implementation.
+5. ~~**Survey-first phase under-scoped.**~~ — **SURVEY COMPLETE.** Discount confirmed at ~15-25% (~14-19h with co-location); see SURVEY-REPORT.md.
+
+6. **Stdlib-declared enum cross-file resolution (NEW from survey).** `ParseError:enum` will be the FIRST stdlib-declared enum type. The importing file's typeRegistry must include it for `!{| ::ParseError msg -> ...}` exhaustiveness checking to work. D4 §21.8 cross-file engine-import is the relevant precedent. **Phase 1 of dispatch is the verification gate** — write a one-file sniff test BEFORE proceeding to Phase 2. If the type doesn't resolve, additional MOD work is needed and dispatch must fork to handle it.
+
+7. **`emitTypeRegistryLiteral` payload-field gap (NEW from survey).** Currently emits enum variant NAMES only — no payload field info. parseVariant codegen needs payload field names + types. Survey-recommended fix: read EnumType directly off the annotated call-node at codegen time (skips disturbing existing meta consumers of `serializeTypeEntry`). Documented in dispatch brief.
 
 ## Dispatch readiness
 
 When Bryan authorizes:
 - **Path A LOCKED** — no further architectural review needed
-- Survey-first phase: ~1-2h dedicated diagnostic dispatch BEFORE implementation per-step decomposition
+- ~~Survey-first phase~~ — **SURVEY COMPLETE.** See `SURVEY-REPORT.md`. Implementation dispatch can proceed directly.
+- Use Phase 1/2/3/4 ordering from Survey-recommended dispatch order section above
+- Phase 1 (cross-file-import sniff test) is the **gating verification** — if it fails, fork to MOD work before continuing
 - Write tier-classified brief per S64 worktree-isolation discipline (paste absolute worktree path; bun install + bun run pretest in startup verification)
 - Use `general-purpose` no-isolation per S64 hand-off note 43 (worktree-routing harness bug)
 - Strong incremental-commit instructions per pa.md §"Background Agents"
 - Brief MUST include: `docs/articles/llm-kickstarter-v1-2026-04-25.md` + `scrml-support/docs/gauntlets/BRIEFING-ANTI-PATTERNS.md` (per S64 PA-orchestration discipline)
-- Dispatch brief MUST cite: this SCOPE doc + debate-05 transcript + judgment + design insight #4
+- Dispatch brief MUST cite: this SCOPE doc (DRIFT-corrected) + SURVEY-REPORT.md + debate-05 transcript + judgment + design insight #4
+- **Critical for the dispatching agent:** the SURVEY-REPORT.md is load-bearing — it documents file paths + line numbers + helper-extraction targets that the brief refers to. Any agent following the SCOPE without reading SURVEY-REPORT.md will redo work the survey already mapped.
 
 ## Tags
 
