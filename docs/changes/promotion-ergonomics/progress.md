@@ -75,3 +75,54 @@ tree clean. SCOPE/SURVEY-NOTE document the implementation path concretely.
 Verdict: YELLOW — Tier A docs/CLI-stub work is complete and high-quality, but
 not committed due to concurrency hazard with four in-flight dispatches. Once
 they land and tree is clean, a single mechanical commit ships everything.
+
+---
+
+## 2026-05-06 — Tier B dispatch (S66) starts (worktree agent-a614fc1bd4ee6f318)
+
+- Worktree pwd verified: /home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a614fc1bd4ee6f318
+- HEAD: 7334fb0 — Tier A landed (commits bc42547 + 50b6af3)
+- Working tree clean
+- bun install: ok (113 packages installed)
+- bun run pretest: ok (12 test samples compiled to dist/)
+- Tier A files confirmed present in HEAD: commands/promote.js, cli.js promote dispatch,
+  SPEC §56 (lines 24729-24911), SCOPE.md, SURVEY-NOTE.md, progress.md.
+
+## 2026-05-06 — Tier B Phase 0 (survey-phase-b) — STOP recommended
+
+Per primer §12 mandate + Tier B brief instruction "If Phase 0 reveals new information
+that materially changes scope: STOP after Phase 0, report findings, exit. PA + Bryan
+will re-scope." — Phase 0 surfaced three material findings that warrant re-scope.
+
+See SURVEY-PHASE-B.md for full findings. Headline:
+
+- **Finding A (BLOCKER):** SPEC §56.2 #2 + §56.5.2 enumerate four predicate shapes
+  including `@cell == .Variant`. The `==` shape is NOT parseable today —
+  `preprocessForAcorn` (expression-parser.ts:686+) only handles `is .Variant`, not
+  `== .Variant`. Searched whole repo; zero examples or tests use the `==` form. Tier B
+  per current SCOPE would either ship dead-code rewrite paths or get blocked at the
+  test-fixture stage.
+- **Finding B:** W-MATCH-TRANSITIONS-ACCRUING (Phase 3's pairing lint) doesn't exist
+  anywhere — not in §34 catalog, not in source, not in §28 suppression configs. Phase 3
+  scope would silently expand by 3-5h to add the missing §34 row + lint impl.
+- **Finding C:** type-system already provides `stateTypeRegistry` from `runTS` and
+  `getResolvedStateCell` from B3. Lint plumbing is straightforward IF Findings A+B
+  resolved. Confirmed Phase 1 cost (4-6h) unchanged.
+- **Finding D:** Tier A progress.md claimed §34 catalog row for I-MATCH-PROMOTABLE
+  landed; commit bc42547 actually landed §56 only. No I-MATCH-PROMOTABLE row in §34.
+  Tier B Phase 4 should catch this up.
+
+## 2026-05-06 — Tier B Phase 0 verdict: STOP, await re-scope
+
+Per Tier B brief explicit authorization: STOPPING after Phase 0 with material findings.
+Implementation NOT started. Recommendation in SURVEY-PHASE-B.md §6:
+- Re-scope Tier B to two predicate forms (`.is(.Variant)` + `is .Variant`); defer the
+  `==` shapes to a Tier C dispatch OR amend SPEC §56 to drop them.
+- Defer `--engine` (Phase 3) entirely to a Tier C dispatch (with proper W-MATCH-
+  TRANSITIONS-ACCRUING groundwork).
+- Add §34 catalog row catch-up for I-MATCH-PROMOTABLE.
+- Re-scoped estimate: 16-26h (down from 25-41h).
+
+Tier B implementation deferred to a re-scoped Tier B dispatch. Working tree state at
+exit: SURVEY-PHASE-B.md NEW + progress.md updated. No source code changes. No commits
+authorized yet — PA may commit these two doc artefacts as a Phase-0 landing.
