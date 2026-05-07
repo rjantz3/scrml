@@ -229,11 +229,13 @@ Compound state with validators auto-synthesizes a reactive validity surface at T
 //   @signup.email.isValid ...
 ```
 
-**Universal-core predicate vocabulary** (§55.1) — same word at compile site and runtime:
+**Universal-core predicate vocabulary** (§55.1) — 14 predicates; same word at compile site and runtime:
 
-`req`, `is some` (existence-check, scrml's null+undefined unification), `length(<rel-arg>)`, `pattern`, `min`, `max`, `gte`, `lte`, `eq`, `oneOf`, `email`, `url`, `numeric`, `integer`, `custom`.
+`req`, `is some` (existence-check, scrml's null+undefined unification), `length(<rel-arg>)`, `pattern`, `min`, `max`, `gt`, `lt`, `gte`, `lte`, `eq`, `neq`, `oneOf`, `notIn`.
 
-**Errors are enum tags, not strings.** `@signup.name.errors[0]` is `.Required` or `.TooShort(2)` — consumers pattern-match on the tag.
+**(S66 correction):** earlier primer drafts listed `email`, `url`, `numeric`, `integer`, `custom` here. **Those are NOT universal-core predicates.** `email`/`url`/`numeric`/`integer` are stdlib `scrml:data` library predicate-builders (separate surface; see §10). `custom` is the ValidationError tag at SPEC §55.9 line 24532 ("for developer-defined custom validators (Edge G)") — a tag-level escape hatch for application-defined predicates, NOT a universal-core predicate. The 14 above are the SPEC §55.1 catalog verbatim. Audit at `docs/audits/a1c-roadmap-rule4-audit-2026-05-07.md` §1.1 documents the drift + correction. Per pa.md Rule 4: spec wins.
+
+**Errors are enum tags, not strings.** `@signup.name.errors[0]` is `.Required` or `.LengthFailed(predicate)` — consumers pattern-match on the tag. The `ValidationError` enum at SPEC §55.9 has tag-per-predicate (`Required`, `NotSome`, `LengthFailed(predicate)`, `PatternMismatch(re)`, `MinFailed(threshold)`, `MaxFailed(threshold)`, `GtFailed(expected)`, `LtFailed(expected)`, `GteFailed(expected)`, `LteFailed(expected)`, `EqFailed(expected)`, `NeqFailed(forbidden)`, `OneOfFailed(set)`, `NotInFailed(set)`, `Custom(tag: string)`).
 
 **4-level error message resolution chain** (§55.5, L12):
 1. Inline on decl (`<name req:"Please enter your name">`)
