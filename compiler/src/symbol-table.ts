@@ -1226,6 +1226,286 @@ function walkClassifyCells(
 }
 
 // ---------------------------------------------------------------------------
+// B6: Render-by-tag classifier (PASS 5)
+// ---------------------------------------------------------------------------
+//
+// Walks every MarkupNode in the AST. For each lowercase self-closed tag
+// (`<x/>`) that resolves to a registered state cell, fires one of:
+//
+//   E-CELL-NO-RENDER-SPEC          — cell has no render-spec (Shape 1, Shape 3
+//                                    derived plain, Shape 3 markup-typed
+//                                    derived, or Variant C compound parent).
+//   E-CELL-RENDER-SPEC-NOT-BINDABLE — Shape 2 with non-bindable RHS markup
+//                                    (e.g., `<msg> = <div>...</div>`). Use
+//                                    Shape 3 (`const`) for display-only markup.
+//
+// The walker reads B5's `_cellKind` annotation + `decl.isConst` to disambiguate
+// the spec-distinct cases collapsed into B5's `"markup-typed"` bucket:
+//
+//   markup-typed && isConst === true  → Shape 3 markup-typed derived
+//                                       → E-CELL-NO-RENDER-SPEC (SPEC §6.6.17 line 3027)
+//   markup-typed && isConst === false → Shape 2 non-bindable RHS
+//                                       → E-CELL-RENDER-SPEC-NOT-BINDABLE
+//
+// **Phase 0 dispositions (Bryan-ratified):**
+//
+//   §3.1 — Compound-parent self-tag (`<formRes/>`) fires E-CELL-NO-RENDER-SPEC.
+//          Spec is silent on this exact form; the spec-faithful extension
+//          treats compound parents as "cell has no render-spec" (compound
+//          parents structurally have `children[]`, mutually exclusive with
+//          `renderSpec`). Error message tightens to mention the wrapping form
+//          (`<formRes><field/></>`) and `${@formRes.field}` interpolation as
+//          spec-canonical alternatives.
+//
+//   §3.2 — Component RHS render-specs (PascalCase tag in the decl's renderSpec,
+//          e.g., `<x> = <MyComp/>`) are DEFERRED. SPEC line 1341 requires
+//          component-prop-catalog inspection (B14/M18/M20 territory); B6 v1
+//          accepts these silently rather than mis-firing. PascalCase USE-sites
+//          (`<MyComponent/>` in markup) are also accepted — the lowercase-tag
+//          predicate filters them out before lookup.
+//
+// **Use-site detection.** A render-by-tag use is:
+//   1. `node.kind === "markup"`
+//   2. `node.selfClosing === true`
+//   3. `node.tag` starts with a lowercase letter (`/^[a-z]/`)
+//   4. `lookupStateCell(fileScope, node.tag)` returns non-null
+//
+// Step 3 is the deferral filter (Phase 0 §3.2). Step 4 is the decisive filter
+// — HTML built-ins (`<br/>`, `<input/>`, `<img/>`, ...) are also self-closed
+// lowercase markup, but they don't resolve to a state cell, so the walker
+// no-ops on them.
+//
+// **Scope handling.** B6 uses file-scope lookup (`lookupStateCell(fileScope,
+// tag)`). Compound sub-scope cells are not addressable as bare `<childName/>`
+// from outside the compound — they're addressed as `<parent><childName/></>`
+// (the wrapping form, SPEC line 1882). File-scope lookup matches the spec's
+// documented use-cases. A compound-internal sibling render-by-tag (rare; only
+// possible inside a Shape 3 markup-typed RHS that contains a sibling tag) is
+// a known scope-limitation noted in Phase 0 §2.4.
+
+const B6_NO_RENDER_SPEC = "E-CELL-NO-RENDER-SPEC";
+const B6_NOT_BINDABLE = "E-CELL-RENDER-SPEC-NOT-BINDABLE";
+
+/** Minimal MarkupNode shape we read here. Avoids importing the full type. */
+interface MinimalMarkupNode {
+  kind: "markup";
+  tag: string;
+  selfClosing: boolean;
+  span: Span;
+  children?: ASTNode[];
+}
+
+/**
+ * Build the diagnostic for E-CELL-NO-RENDER-SPEC at a `<tag/>` use-site.
+ * Message text mirrors §34 line 14205 + tightens for compound parents.
+ */
+function makeNoRenderSpecDiagnostic(
+  use: MinimalMarkupNode,
+  decl: ReactiveDeclNode,
+  cellKind: CellKind,
+): SYMDiagnostic {
+  const cellName = decl.name;
+  let alternatives: string;
+  if (cellKind === "compound-parent") {
+    // Phase 0 §3.1 — compound-parent message tightening.
+    alternatives =
+      `Compound parents have no individual render-spec. Use the wrapping form `
+      + `\`<${cellName}><field/></>\` to render a child cell, or \`\${@${cellName}.field}\` `
+      + `interpolation to display a field's value.`;
+  } else {
+    alternatives = `Use \`\${@${cellName}}\` interpolation to display the value.`;
+  }
+  return {
+    code: B6_NO_RENDER_SPEC,
+    message:
+      `${B6_NO_RENDER_SPEC}: \`<${cellName}/>\` used as render-by-tag in markup, but `
+      + `the cell has no render-spec (${describeShape(cellKind, decl)}). ${alternatives} `
+      + `(SPEC §6.4 + §34.)`,
+    span: use.span,
+    severity: "error",
+  };
+}
+
+/**
+ * Build the diagnostic for E-CELL-RENDER-SPEC-NOT-BINDABLE at a `<tag/>`
+ * use-site. The decl is Shape 2 with a non-bindable HTML element as the RHS
+ * markup (e.g., `<msg> = <div>...</div>`). Spec mandates Shape 3 (`const`)
+ * for display-only markup cells.
+ */
+function makeNotBindableDiagnostic(
+  use: MinimalMarkupNode,
+  decl: ReactiveDeclNode,
+): SYMDiagnostic {
+  const cellName = decl.name;
+  const renderTag = decl.renderSpec?.element?.tag ?? "(non-bindable)";
+  return {
+    code: B6_NOT_BINDABLE,
+    message:
+      `${B6_NOT_BINDABLE}: \`<${cellName}/>\` render-by-tag use is illegal — `
+      + `the cell's render-spec root is \`<${renderTag}>\`, which is not a bindable `
+      + `form element. Shape 2 (\`<${cellName}> = <markup>\`) requires a bindable `
+      + `element (input, textarea, select). For display-only markup, use Shape 3: `
+      + `\`const <${cellName}> = <${renderTag}>...</${renderTag}>\` and reference via `
+      + `\`\${@${cellName}}\` interpolation. (SPEC §6.2 + §34.)`,
+    span: use.span,
+    severity: "error",
+  };
+}
+
+/**
+ * Brief shape descriptor for the diagnostic message.  Spec-faithful enumeration
+ * matching §34 row text + Phase 0 §3.1 extension for compound-parent.
+ */
+function describeShape(cellKind: CellKind, decl: ReactiveDeclNode): string {
+  switch (cellKind) {
+    case "plain":
+      return decl.isConst === true
+        ? "Shape 3 non-markup derived"
+        : "Shape 1 plain cell";
+    case "markup-typed":
+      // Only reached via the isConst === true branch (markup-typed derived).
+      return "Shape 3 markup-typed derived — derived cells do not have render-specs (SPEC §6.6.17)";
+    case "compound-parent":
+      return "Variant C compound parent";
+    case "bindable":
+      // Defensive — bindable should not reach this fn.
+      return "Shape 2 bindable";
+  }
+}
+
+/**
+ * Check a single MarkupNode for render-by-tag use. If it qualifies as a
+ * use-site (lowercase self-closed tag matching a registered cell), apply the
+ * cell-kind switch and push the appropriate diagnostic. Returns silently for
+ * non-use-site nodes.
+ */
+function checkRenderByTag(
+  node: MinimalMarkupNode,
+  fileScope: Scope,
+  errors: SYMDiagnostic[],
+): void {
+  if (!node.selfClosing) return;
+  if (typeof node.tag !== "string" || node.tag.length === 0) return;
+  // Phase 0 §3.2 — PascalCase use-sites are deferred (component territory).
+  const first = node.tag.charCodeAt(0);
+  // Lowercase letter range: 'a'-'z' = 97-122. Anything outside (uppercase,
+  // digits, special) is not a state-cell render-by-tag use.
+  if (first < 97 || first > 122) return;
+  const decl = lookupStateCell(fileScope, node.tag);
+  if (!decl) return; // HTML built-in, unresolved tag, or compound child — out of scope.
+  const declNode = decl.declNode;
+  const cellKind = getCellKind(declNode);
+  if (cellKind === undefined) return; // not classified — defensive (shouldn't happen post-PASS-4).
+  switch (cellKind) {
+    case "bindable":
+      // Shape 2 with bindable HTML root — accept.
+      return;
+    case "plain":
+      // Shape 1 plain OR Shape 3 non-markup derived — both fire.
+      errors.push(makeNoRenderSpecDiagnostic(node, declNode, cellKind));
+      return;
+    case "compound-parent":
+      // Phase 0 §3.1 — spec-silent extension; fire E-CELL-NO-RENDER-SPEC.
+      errors.push(makeNoRenderSpecDiagnostic(node, declNode, cellKind));
+      return;
+    case "markup-typed": {
+      const isConst = declNode.isConst === true;
+      if (isConst) {
+        // Shape 3 markup-typed derived (SPEC §6.6.17 line 3027). Fires
+        // E-CELL-NO-RENDER-SPEC regardless of whether the RHS markup looks
+        // bindable — derived cells do not have render-specs.
+        errors.push(makeNoRenderSpecDiagnostic(node, declNode, cellKind));
+        return;
+      }
+      // Shape 2 non-bindable RHS — but defer if PascalCase RHS (component).
+      // Phase 0 §3.2 — deferred to B14/M18/M20 component-prop-catalog work.
+      const renderTag = declNode.renderSpec?.element?.tag;
+      if (typeof renderTag === "string" && renderTag.length > 0) {
+        const rFirst = renderTag.charCodeAt(0);
+        if (rFirst >= 65 && rFirst <= 90) {
+          // PascalCase RHS — component render-spec; needs prop-catalog.
+          // B6 v1 accepts silently; B14/M18/M20 will extend with the
+          // bindable-prop check.
+          return;
+        }
+      }
+      errors.push(makeNotBindableDiagnostic(node, declNode));
+      return;
+    }
+  }
+}
+
+/**
+ * Walk the AST checking every MarkupNode for render-by-tag use. Mirrors
+ * PASS-1's recursion shape (children/body/consequent/alternate/arms/lift-expr)
+ * with the added discrimination that `kind === "markup"` triggers the
+ * use-site check before recursing into the markup's own `children`.
+ *
+ * State-decl nodes are recursed-into for compound children but their own
+ * `renderSpec` markup is NOT walked — the renderSpec markup is the cell's
+ * VALUE, not a render-by-tag use surface. Walking it would mis-fire on
+ * legitimate markup like the `<input/>` inside a Shape 2 RHS.
+ */
+function walkRenderByTagUses(
+  nodes: ASTNode[] | undefined,
+  fileScope: Scope,
+  visited: WeakSet<object>,
+  errors: SYMDiagnostic[],
+): void {
+  if (!nodes) return;
+  for (const n of nodes) {
+    if (!n || typeof n !== "object") continue;
+    if (visited.has(n)) continue;
+    visited.add(n);
+    const anyN = n as any;
+    const kind = anyN.kind as string;
+
+    if (kind === "markup") {
+      // Use-site check on this markup node BEFORE recursion. Recursion is
+      // unconditional — even if this node is a self-closed render-by-tag
+      // that fires, descendants (none, by selfClosing definition) are still
+      // walked for consistency. For non-self-closed markup, children are
+      // walked normally.
+      checkRenderByTag(n as MinimalMarkupNode, fileScope, errors);
+      if (Array.isArray(anyN.children)) {
+        walkRenderByTagUses(anyN.children, fileScope, visited, errors);
+      }
+      continue;
+    }
+
+    if (kind === "state-decl") {
+      // Don't walk renderSpec markup (the cell's value, not a use-site).
+      // DO descend into compound children, but render-by-tag inside a
+      // compound's nested context is rare and uses the file-scope lookup
+      // (matching Phase 0 §2.4 limitation note).
+      if (Array.isArray(anyN.children)) {
+        walkRenderByTagUses(anyN.children, fileScope, visited, errors);
+      }
+      continue;
+    }
+
+    if (kind === "function-decl") {
+      walkRenderByTagUses(anyN.body, fileScope, visited, errors);
+      continue;
+    }
+
+    // Generic recursion (mirrors PASS-1 shape).
+    if (Array.isArray(anyN.children)) walkRenderByTagUses(anyN.children, fileScope, visited, errors);
+    if (Array.isArray(anyN.body)) walkRenderByTagUses(anyN.body, fileScope, visited, errors);
+    if (Array.isArray(anyN.consequent)) walkRenderByTagUses(anyN.consequent, fileScope, visited, errors);
+    if (Array.isArray(anyN.alternate)) walkRenderByTagUses(anyN.alternate, fileScope, visited, errors);
+    if (Array.isArray(anyN.arms)) {
+      for (const arm of anyN.arms) {
+        if (arm && Array.isArray(arm.body)) walkRenderByTagUses(arm.body, fileScope, visited, errors);
+      }
+    }
+    if (kind === "lift-expr" && anyN.expr && anyN.expr.kind === "markup" && anyN.expr.node) {
+      walkRenderByTagUses([anyN.expr.node], fileScope, visited, errors);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -1309,6 +1589,14 @@ export function runSYM(input: SYMInput): SYMResult {
   // the annotation; B7 will filter derived-cell DAG inputs.
   const visited4 = new WeakSet<object>();
   walkClassifyCells(ast.nodes, visited4);
+
+  // PASS 5 (B6): Walk every MarkupNode in the AST. For lowercase self-closed
+  // tags resolving to a registered state cell, fire E-CELL-NO-RENDER-SPEC or
+  // E-CELL-RENDER-SPEC-NOT-BINDABLE based on B5's `_cellKind` annotation +
+  // `decl.isConst`. Phase 0 dispositions: compound-parent fires
+  // E-CELL-NO-RENDER-SPEC (§3.1); PascalCase RHS deferred (§3.2).
+  const visited5 = new WeakSet<object>();
+  walkRenderByTagUses(ast.nodes, fileScope, visited5, errors);
 
   return {
     filePath,
