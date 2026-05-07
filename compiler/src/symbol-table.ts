@@ -114,6 +114,11 @@ import {
   ARRAY_MUTATING_METHODS,
   isDerivedMutatingAssignOp,
 } from "./derived-mutation-ops.ts";
+// B15 — engine state-child structural parser.
+import {
+  parseEngineStateChildren,
+  isLegacyArrowRulesBody,
+} from "./engine-statechild-parser.ts";
 
 // ---------------------------------------------------------------------------
 // B4 — Import binding registry
@@ -269,6 +274,49 @@ export interface EngineMetadata {
   /** §51.0.M — `<onTimeout>` element entries on state-children. POPULATED
    *  by future A5-2 hierarchy dispatch. */
   onTimeoutElements?: unknown[];
+
+  // ---- B15 fields (PASS 11 — engine state-child exhaustiveness + rule= typer) ----
+
+  /** §51.0.B + §51.0.F — list of state-child entries parsed out of
+   *  `engine-decl.rulesRaw` (the engine body raw text). Each entry records
+   *  the variant tag, the parsed rule= form (single / multi / wildcard /
+   *  absent / legacy-arrow / parse-error), and the body text (raw, not
+   *  walkable today — the parser limitation noted in §13.7 B14 specifics).
+   *  POPULATED by SYM PASS 11 (B15). Empty array when the body has no
+   *  state-children (legacy `<machine>` arrow rules in `rulesRaw` are NOT
+   *  state-children — they remain unparsed by B15 because the legacy form
+   *  is handled by the type-system's `parseMachineRules`).
+   *  Future B17 will add walkable body content; until then `bodyRaw` is
+   *  raw text. */
+  stateChildren?: EngineStateChildEntry[];
+}
+
+/** §51.0.F three target-only forms — the `rule=` shape recognized by B15. */
+export type EngineRuleForm =
+  | { kind: "absent" }                                  // no `rule=` attribute (terminal state)
+  | { kind: "single"; target: string }                  // `rule=.NextVariant`
+  | { kind: "multi"; targets: string[] }                // `rule=(.A | .B | .C)`
+  | { kind: "wildcard" }                                // `rule=*`
+  | { kind: "legacy-arrow"; raw: string }               // `rule="event -> Variant"` (rejected)
+  | { kind: "parse-error"; raw: string; reason: string }; // unparseable rule=
+
+/** §51.0.B + §51.0.F — a state-child entry parsed out of `engine-decl.rulesRaw`. */
+export interface EngineStateChildEntry {
+  /** PascalCase tag name, e.g., `"Small"` for `<Small ...>...</>`. */
+  tag: string;
+  /** Parsed form of the `rule=` attribute. */
+  rule: EngineRuleForm;
+  /** Raw body text between the opener and closer. Today's AST stores
+   *  engine bodies as raw text (parser limitation per §13.7 B14 specifics);
+   *  walkable bodies become available in a future dispatch. */
+  bodyRaw: string;
+  /** Substring offset (relative to `rulesRaw`) of the state-child's opener.
+   *  Useful for span-based diagnostics; absolute file offset can be
+   *  reconstructed by adding the engine-decl's `span.start` + the offset
+   *  from header-line end to `rulesRaw` start (recorded per ast-builder).
+   *  For simplicity, B15 reports span-of-engine-decl on diagnostics; future
+   *  span tightening is forward-compatible. */
+  rawOffset: number;
 }
 
 /**
@@ -3943,6 +3991,440 @@ function fireEngineMountNotEngine(
 }
 
 // ---------------------------------------------------------------------------
+// PASS 11 (B15) — Engine state-child exhaustiveness + rule= typer +
+// initial= validation
+// ---------------------------------------------------------------------------
+//
+// Per Phase A1b Step B15 (audit §2 seven-point brief; SPEC §51.0.B/E/F/G,
+// §34 catalog rows added by this dispatch):
+//
+// PASS 11 — VALIDATE ENGINE STATE-CHILDREN + RULE= + INITIAL=:
+//   Walks every `engine-decl` AST node in the file. For each:
+//
+//     1. Populate `engineMeta.variants` from the file's typeRegistry (read
+//        from `ast.typeDecls[]` — `parseEnumVariantsFromRaw` extracts
+//        variant names). B14 left this empty; B15 populates here so
+//        downstream consumers (B16, A1c) can read variants directly.
+//
+//     2. Validate `initial=` per §51.0.E. For NON-derived engines:
+//          - absent → fire `W-ENGINE-INITIAL-MISSING` (lint; defaults to
+//            first variant for codegen).
+//          - present-but-not-a-valid-variant → fire
+//            `E-ENGINE-INITIAL-INVALID-VARIANT`.
+//        Derived engines (`derivedExpr !== null`) are SKIPPED — B16 owns
+//        derived-specific rejections (E-DERIVED-ENGINE-NO-INITIAL).
+//
+//     3. Parse `engine-decl.rulesRaw` into state-children via
+//        `parseEngineStateChildren` (engine-statechild-parser.ts). Skips
+//        legacy `<machine>` arrow-rule bodies (the type-system handles
+//        those via parseMachineRules).
+//
+//     4. Validate state-child exhaustiveness per §51.0.B + §51.0.F:
+//          - For each variant of `engineMeta.variants`: confirm a state-
+//            child with matching PascalCase tag exists. Missing → fire
+//            `E-ENGINE-STATE-CHILD-MISSING`.
+//          - For each state-child: confirm its tag is a variant. Unknown
+//            → fire `E-ENGINE-STATE-CHILD-INVALID-VARIANT`.
+//        Applied uniformly across non-derived AND derived engines (per
+//        audit §1.3 — derived engines also list variants).
+//
+//     5. Validate `rule=` forms per §51.0.F three target-only forms:
+//          - single-target / multi-target: every `.Variant` referenced
+//            must be in `engineMeta.variants`. Mismatch → fire
+//            `E-ENGINE-RULE-INVALID-VARIANT`.
+//          - wildcard `*`: legal; no fire.
+//          - legacy event-arrow form (`event -> Variant`): fire
+//            `E-ENGINE-RULE-LEGACY-SYNTAX`.
+//          - parse-error: fire `E-ENGINE-RULE-INVALID-VARIANT` (carries
+//            the parser's diagnostic reason).
+//
+//     6. Records the parsed state-child entries onto
+//        `engineMeta.stateChildren` for downstream B16 / B17 / A1c
+//        consumption.
+//
+// **DEFERRED (per audit §1.4 + B15 brief #4 — body parser limitation):**
+// Compile-time E-ENGINE-INVALID-TRANSITION for direct writes inside
+// state-child bodies (`<Small>{@marioState = .Cape}` when `.Cape ∉
+// .Small.rule`) requires the body to be walkable AST. Today the body is
+// raw text. Once the parser elevates state-child bodies to walkable
+// nodes, the same PASS 11 walker can dispatch on the engine variable's
+// `_resolvedStateCell` annotation inside each body. See progress.md
+// "DEFERRED ITEMS".
+//
+// Reusability: B15 READS B14's `engineMeta` to perform validation. B15
+// does extend `engineMeta.variants` + `engineMeta.stateChildren` (the
+// only annotations B15 owns); does NOT mutate B14's other fields.
+
+/**
+ * Parse enum variant names from a raw type body string. Splits on both
+ * `,` and `\n` (and `|` for back-compat with the parseEnumVariantsFromRaw
+ * shape) at depth 0 (parens-aware so payload field lists stay grouped).
+ *
+ * This mirrors the canonical type-system parser (`parseEnumBody` in
+ * `type-system.ts`) but extracts ONLY variant names — payload + transition
+ * info are not needed by B15. Done inline here to avoid pulling the full
+ * `parseEnumBody` dependency chain into SYM.
+ *
+ * Per SPEC §14.4 — variants are declared one per line OR comma-separated
+ * on one line (`{ Pending, Success(n:number), Failed }`). Payload-variant
+ * fields like `(field:type, field:type)` keep their commas because the
+ * parser tracks paren depth.
+ */
+function parseEnumVariantNamesFromRaw(raw: string): string[] {
+  const out: string[] = [];
+  let body = (raw || "").trim();
+  if (body.startsWith("{")) body = body.slice(1);
+  if (body.endsWith("}")) body = body.slice(0, -1);
+  body = body.trim();
+  if (!body) return out;
+
+  // Strip transitions { ... } block if present (B15 only needs variants).
+  // Find `transitions` keyword at depth 0.
+  let variantsSection = body;
+  {
+    let depth = 0;
+    for (let i = 0; i < body.length; i++) {
+      const ch = body[i]!;
+      if (ch === "(" || ch === "[" || ch === "{") { depth++; continue; }
+      if (ch === ")" || ch === "]" || ch === "}") { depth--; continue; }
+      if (depth === 0 && body.slice(i).startsWith("transitions")) {
+        const after = body.slice(i + "transitions".length).trimStart();
+        if (after.startsWith("{")) {
+          variantsSection = body.slice(0, i).trim();
+          break;
+        }
+      }
+    }
+  }
+
+  // Split on `\n`, `,`, and `|` at depth 0 (paren depth tracked).
+  const segments: string[] = [];
+  let depth = 0;
+  let buf = "";
+  for (let i = 0; i < variantsSection.length; i++) {
+    const ch = variantsSection[i]!;
+    if (ch === "(" || ch === "[" || ch === "{") { depth++; buf += ch; continue; }
+    if (ch === ")" || ch === "]" || ch === "}") { depth--; buf += ch; continue; }
+    if (depth === 0 && (ch === "\n" || ch === "," || ch === "|")) {
+      if (buf.trim()) segments.push(buf.trim());
+      buf = "";
+      continue;
+    }
+    buf += ch;
+  }
+  if (buf.trim()) segments.push(buf.trim());
+
+  for (const seg of segments) {
+    let text = seg;
+    // Strip payload list `(...)`.
+    const paren = text.indexOf("(");
+    if (paren >= 0) text = text.slice(0, paren).trim();
+    // Strip `renders ...` suffix.
+    const rendersIdx = text.indexOf(" renders ");
+    if (rendersIdx >= 0) text = text.slice(0, rendersIdx).trim();
+    if (!text) continue;
+    if (!/^[A-Z][A-Za-z0-9_]*$/.test(text)) continue;
+    out.push(text);
+  }
+  return out;
+}
+
+/**
+ * Look up the variants of an enum type by name in the file's `typeDecls`.
+ * Returns the parsed variant-name list, or `null` when the type was not
+ * found OR is not an enum (B15 doesn't validate against struct types
+ * directly; the type-system pass already errors on non-enum/struct
+ * `for=` via E-ENGINE-004).
+ *
+ * The lookup is done over `ast.typeDecls[]` rather than the type-system's
+ * resolved `typeRegistry` because the type-system pass runs LATER than
+ * SYM in today's pipeline (per `compiler/PIPELINE.md`).
+ */
+function getEnumVariantsFromTypeDecls(
+  typeDecls: any[] | undefined,
+  typeName: string,
+): string[] | null {
+  if (!Array.isArray(typeDecls)) return null;
+  for (const decl of typeDecls) {
+    if (!decl || typeof decl !== "object") continue;
+    if (decl.kind !== "type-decl") continue;
+    if (decl.name !== typeName) continue;
+    if (decl.typeKind !== "enum") return null;
+    return parseEnumVariantNamesFromRaw(decl.raw || "");
+  }
+  return null;
+}
+
+/**
+ * Fire a SYM diagnostic with a fallback span (engine-decl's span) when
+ * the offending sub-element doesn't have its own span. Today's parser
+ * doesn't produce per-state-child spans (rulesRaw is text); B15 uses the
+ * engine-decl's span as a coarse anchor. Future parser tightening will
+ * produce per-state-child spans automatically.
+ */
+function fireB15Diagnostic(
+  errors: SYMDiagnostic[],
+  code: string,
+  message: string,
+  engineDecl: any,
+  filePath: string,
+  severity: "error" | "warning" = "error",
+): void {
+  const span: SYMDiagnostic["span"] = engineDecl?.span ?? {
+    file: filePath, start: 0, end: 0, line: 1, col: 1,
+  };
+  errors.push({ code, message, span, severity });
+}
+
+/**
+ * PASS 11 — per-engine validation. For each `engine-decl` carrying a
+ * `_record` (set by PASS 10.A), populate `engineMeta.variants`, validate
+ * `initial=`, parse state-children from `rulesRaw`, validate exhaustiveness
+ * and `rule=` forms.
+ */
+function validateEngineStateChildrenAndRules(
+  engineDecl: any,
+  fileAst: any,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  // engineDecl._record is set by PASS 10.A; if absent (parse failure case),
+  // skip silently — the upstream pass would have surfaced the underlying
+  // problem.
+  const record: StateCellRecord | undefined = engineDecl._record;
+  if (!record || !record.engineMeta) return;
+  const meta = record.engineMeta;
+
+  // Step 1 — populate variants from the file's typeDecls (B14 left empty).
+  const forType: string = meta.forType;
+  let variants: string[] = [];
+  if (forType.length > 0) {
+    const lookup = getEnumVariantsFromTypeDecls(fileAst.typeDecls, forType);
+    if (Array.isArray(lookup)) variants = lookup;
+  }
+  meta.variants = variants;
+
+  // If we have no variants (unknown type, struct type, or import), we
+  // can't validate against the variant set. Skip steps 2 + 4 + 5 (which
+  // depend on knowing the variants). Still parse state-children for
+  // structural validation in step 3 + 5 (rule= form check is variant-
+  // independent for the legacy-arrow case).
+  const variantSet = new Set(variants);
+
+  const isDerived = meta.derivedExpr !== null && meta.derivedExpr !== undefined;
+
+  // Step 2 — initial= validation (§51.0.E). Skip for derived engines
+  // (B16 owns derived-specific rejections per audit §1.4 boundary).
+  if (!isDerived) {
+    if (meta.initialVariant === null) {
+      fireB15Diagnostic(
+        errors,
+        "W-ENGINE-INITIAL-MISSING",
+        `W-ENGINE-INITIAL-MISSING: \`<engine for=${forType}>\` is missing the required ` +
+        `\`initial=.Variant\` attribute. Per SPEC §51.0.E, non-derived engines must specify ` +
+        `their starting state. The compiler will default to the first state-child's variant ` +
+        `for codegen, but adding \`initial=.Variant\` makes the choice explicit.`,
+        engineDecl,
+        filePath,
+        "warning",
+      );
+    } else if (variants.length > 0 && !variantSet.has(meta.initialVariant)) {
+      const variantList = variants.map((v) => `.${v}`).join(", ");
+      fireB15Diagnostic(
+        errors,
+        "E-ENGINE-INITIAL-INVALID-VARIANT",
+        `E-ENGINE-INITIAL-INVALID-VARIANT: \`initial=.${meta.initialVariant}\` is not a variant of ` +
+        `\`${forType}\`. Valid variants are: ${variantList}. Either correct the variant reference ` +
+        `or add \`.${meta.initialVariant}\` to the type.`,
+        engineDecl,
+        filePath,
+        "error",
+      );
+    }
+  }
+
+  // Step 3 — parse state-children from rulesRaw.
+  const rulesRaw: string = typeof engineDecl.rulesRaw === "string" ? engineDecl.rulesRaw : "";
+  const stateChildren = parseEngineStateChildren(rulesRaw);
+  meta.stateChildren = stateChildren;
+
+  // For legacy arrow-rule bodies, the parser returns []. In that case,
+  // we DO NOT fire E-ENGINE-STATE-CHILD-MISSING — the legacy form is
+  // type-system territory, not B15 territory.
+  if (stateChildren.length === 0 && isLegacyArrowRulesBody(rulesRaw)) {
+    return;
+  }
+
+  // Step 4 — exhaustiveness + invalid state-child tag validation. Only
+  // run when we have a known variant set (variants resolved from
+  // typeDecls).
+  if (variants.length > 0) {
+    // 4.a — every variant must have a state-child.
+    const seenTags = new Set(stateChildren.map((sc) => sc.tag));
+    for (const variant of variants) {
+      if (!seenTags.has(variant)) {
+        fireB15Diagnostic(
+          errors,
+          "E-ENGINE-STATE-CHILD-MISSING",
+          `E-ENGINE-STATE-CHILD-MISSING: \`<engine for=${forType}>\` body is missing a ` +
+          `state-child for variant \`.${variant}\`. Per SPEC §51.0.B + §51.0.F, every variant ` +
+          `of the engine type must have a corresponding state-child (\`<${variant}>...</>\`). ` +
+          `Add the missing state-child, or remove \`.${variant}\` from \`${forType}\` if it ` +
+          `is unreachable.`,
+          engineDecl,
+          filePath,
+          "error",
+        );
+      }
+    }
+    // 4.b — every state-child tag must be a known variant.
+    for (const sc of stateChildren) {
+      if (!variantSet.has(sc.tag)) {
+        const variantList = variants.map((v) => `.${v}`).join(", ");
+        fireB15Diagnostic(
+          errors,
+          "E-ENGINE-STATE-CHILD-INVALID-VARIANT",
+          `E-ENGINE-STATE-CHILD-INVALID-VARIANT: state-child tag \`<${sc.tag}>\` in ` +
+          `\`<engine for=${forType}>\` does not match any variant of \`${forType}\`. ` +
+          `Valid variants are: ${variantList}. Either rename the tag to a valid variant or ` +
+          `add \`${sc.tag}\` to \`${forType}\`.`,
+          engineDecl,
+          filePath,
+          "error",
+        );
+      }
+    }
+  }
+
+  // Step 5 — rule= form + rule= variant validation per §51.0.F.
+  for (const sc of stateChildren) {
+    const r = sc.rule;
+    switch (r.kind) {
+      case "absent":
+      case "wildcard":
+        // Legal. `absent` = terminal state; `wildcard` = escape hatch.
+        break;
+
+      case "legacy-arrow":
+        fireB15Diagnostic(
+          errors,
+          "E-ENGINE-RULE-LEGACY-SYNTAX",
+          `E-ENGINE-RULE-LEGACY-SYNTAX: state-child \`<${sc.tag} rule=${r.raw}>\` uses the ` +
+          `legacy event-arrow form. On \`<engine>\`, \`rule=\` must be one of the three §51.0.F ` +
+          `target-only forms: single-target (\`rule=.NextVariant\`), multi-target (\`rule=(.A | .B)\`), ` +
+          `or wildcard (\`rule=*\`). Event-arrow rules belong to the deprecated \`<machine>\` syntax (§51.3).`,
+          engineDecl,
+          filePath,
+          "error",
+        );
+        break;
+
+      case "single":
+        if (variants.length > 0 && !variantSet.has(r.target)) {
+          const variantList = variants.map((v) => `.${v}`).join(", ");
+          fireB15Diagnostic(
+            errors,
+            "E-ENGINE-RULE-INVALID-VARIANT",
+            `E-ENGINE-RULE-INVALID-VARIANT: \`<${sc.tag} rule=.${r.target}>\` references variant ` +
+            `\`.${r.target}\` which is not in \`${forType}\`. Valid variants are: ${variantList}.`,
+            engineDecl,
+            filePath,
+            "error",
+          );
+        }
+        break;
+
+      case "multi":
+        if (variants.length > 0) {
+          for (const t of r.targets) {
+            if (!variantSet.has(t)) {
+              const variantList = variants.map((v) => `.${v}`).join(", ");
+              fireB15Diagnostic(
+                errors,
+                "E-ENGINE-RULE-INVALID-VARIANT",
+                `E-ENGINE-RULE-INVALID-VARIANT: \`<${sc.tag}>\` rule= multi-target list contains ` +
+                `\`.${t}\` which is not in \`${forType}\`. Valid variants are: ${variantList}.`,
+                engineDecl,
+                filePath,
+                "error",
+              );
+            }
+          }
+        }
+        break;
+
+      case "parse-error":
+        fireB15Diagnostic(
+          errors,
+          "E-ENGINE-RULE-INVALID-VARIANT",
+          `E-ENGINE-RULE-INVALID-VARIANT: \`<${sc.tag}>\` has an unparseable \`rule=\` value ` +
+          `\`${r.raw}\` — ${r.reason}. Use one of the §51.0.F forms: single-target ` +
+          `(\`rule=.NextVariant\`), multi-target (\`rule=(.A | .B)\`), or wildcard (\`rule=*\`).`,
+          engineDecl,
+          filePath,
+          "error",
+        );
+        break;
+    }
+  }
+}
+
+/**
+ * PASS 11 walker — visits every engine-decl in the AST and runs B15
+ * validation. Mirrors the structural-recursion pattern of PASS 10.A
+ * (walkRegisterEngines).
+ */
+function walkValidateEngineStateChildrenAndRules(
+  nodes: any,
+  fileAst: any,
+  errors: SYMDiagnostic[],
+  filePath: string,
+  visited: WeakSet<object>,
+): void {
+  if (!nodes) return;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) {
+      walkValidateEngineStateChildrenAndRules(n, fileAst, errors, filePath, visited);
+    }
+    return;
+  }
+  if (typeof nodes !== "object") return;
+  if (visited.has(nodes)) return;
+  visited.add(nodes);
+
+  const node = nodes as any;
+  if (node.kind === "engine-decl") {
+    validateEngineStateChildrenAndRules(node, fileAst, errors, filePath);
+    // Engine bodies are RAW TEXT — no walkable children today (parser
+    // limitation per primer §13.7 B14 specifics). When state-child
+    // bodies become walkable, this is where we'd recurse to fire
+    // compile-time E-ENGINE-INVALID-TRANSITION on direct writes inside
+    // them. Today's body parser yields `bodyRaw: string` only.
+    return;
+  }
+
+  if (Array.isArray(node.children)) {
+    walkValidateEngineStateChildrenAndRules(node.children, fileAst, errors, filePath, visited);
+  }
+  if (Array.isArray(node.body)) {
+    walkValidateEngineStateChildrenAndRules(node.body, fileAst, errors, filePath, visited);
+  }
+  if (Array.isArray(node.consequent)) {
+    walkValidateEngineStateChildrenAndRules(node.consequent, fileAst, errors, filePath, visited);
+  }
+  if (Array.isArray(node.alternate)) {
+    walkValidateEngineStateChildrenAndRules(node.alternate, fileAst, errors, filePath, visited);
+  }
+  if (Array.isArray(node.arms)) {
+    for (const arm of node.arms) {
+      if (arm && Array.isArray(arm.body)) {
+        walkValidateEngineStateChildrenAndRules(arm.body, fileAst, errors, filePath, visited);
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -4111,6 +4593,26 @@ export function runSYM(input: SYMInput): SYMResult {
   const visitedB14B = new WeakSet<object>();
   walkValidateCrossFileEngineMounts(
     ast.nodes, fileScope, exportRegistry, errors, filePath, visitedB14B,
+  );
+
+  // PASS 11 (B15): Engine state-child exhaustiveness + rule= typer +
+  // initial= validation. For every engine-decl carrying a `_record`
+  // (set by PASS 10.A), populates `engineMeta.variants` from the file's
+  // typeDecls, parses state-children out of `rulesRaw`, and validates:
+  //   - initial= (W-ENGINE-INITIAL-MISSING / E-ENGINE-INITIAL-INVALID-VARIANT)
+  //   - state-child exhaustiveness (E-ENGINE-STATE-CHILD-MISSING /
+  //     E-ENGINE-STATE-CHILD-INVALID-VARIANT)
+  //   - rule= forms per §51.0.F three target-only forms
+  //     (E-ENGINE-RULE-INVALID-VARIANT / E-ENGINE-RULE-LEGACY-SYNTAX)
+  //
+  // Compile-time E-ENGINE-INVALID-TRANSITION for direct writes inside
+  // state-child bodies is DEFERRED — bodies are raw text today (parser
+  // limitation per primer §13.7 B14 specifics). Once bodies become
+  // walkable AST nodes, the same PASS 11 walker dispatches on the
+  // `_resolvedStateCell` annotation.
+  const visitedB15 = new WeakSet<object>();
+  walkValidateEngineStateChildrenAndRules(
+    ast.nodes, ast, errors, filePath, visitedB15,
   );
 
   return {
