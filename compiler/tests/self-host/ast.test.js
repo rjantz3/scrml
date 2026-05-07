@@ -149,6 +149,8 @@ function stripIds(obj) {
     if (key === "specifiers") continue; // P3.A: JS ast-builder records {imported, local} specifiers for cross-file alias resolution; self-host doesn't yet
     if (["exprNode", "initExpr", "condExpr", "iterExpr", "headerExpr", "valueExpr", "argsExpr", "callbackExpr", "fnExpr", "handlerExpr", "fileExpr", "urlExpr", "bodyExpr", "cStyleParts"].includes(key)) continue; // Phase 3/4: JS ast-builder populates ExprNode fields; self-host doesn't yet
     if (["isPure", "isServer"].includes(key)) continue; // F-AUTH-002: JS ast-builder records pure/server modifier flags on export-decl; self-host doesn't yet
+    if (["isReExportAll", "renames"].includes(key)) continue; // ast-builder-grammar-fixes: JS ast-builder records re-export-all flag + rename map on export-decl; self-host doesn't yet
+    if (["exported", "fromExport"].includes(key)) continue; // ast-builder-grammar-fixes: JS ast-builder synthesizes function-decl shadow nodes for `export function`; self-host doesn't yet
     if (["openerHadSpaceAfterLt", "legacyMachineKeyword"].includes(key)) continue; // P1.E (uniform opener / NR scaffolding): JS ast-builder records the opener whitespace flag and `<machine>` legacy keyword for NR's W-WHITESPACE-001 / W-DEPRECATED-001 emission; self-host doesn't yet
     out[key] = stripIds(obj[key]);
   }

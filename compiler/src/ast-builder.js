@@ -4389,6 +4389,20 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           tokenSpan(startTok, filePath),
         ));
       }
+      // S64 debate-04 verdict A+ #1: switch-stmt stays HARD-ERROR (3-of-3 unanimous).
+      if (keyword === "switch") {
+        errors.push(new TABError(
+          "E-SWITCH-FORBIDDEN",
+          "E-SWITCH-FORBIDDEN: `switch` is not a scrml keyword. " +
+          "Did you mean: " +
+          "`<match for=Type> ... </match>` for structural exhaustive case-analysis " +
+          "(Tier 1 block form; produces markup or executes statements per arm), " +
+          "or `match expr { .Variant -> ... }` for value-return case-analysis " +
+          "(Tier 1 JS-style form; produces a value in expression position)? " +
+          "See SPEC §18 for match block-form, primer §1 for the tier ladder.",
+          tokenSpan(startTok, filePath),
+        ));
+      }
       const { expr: header } = collectExpr("{");
       let body = [];
       if (peek().text === "{") {
@@ -5420,16 +5434,59 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         exportedName: null,
         exportKind: null,
         reExportSource: null,
+        // F2/F3 grammar fixes (ast-builder-grammar-fixes dispatch):
+        //   isReExportAll  — true for `export * from './x'`
+        //   renames        — array of { exported, local } pairs for any
+        //                    braced export form (re-export, rename, local).
+        isReExportAll: false,
+        renames: null,
         isPure,
         isServer,
       };
 
-      // Re-export: { names } from 'source'
+      // Helper: parse one name-spec like `A` or `A as B`.
+      // Returns { exported, local } where `local` is the source-file name
+      // (input) and `exported` is the outward-facing name (output).
+      function parseNameSpec(s) {
+        const trimmed = s.trim();
+        const asMatch = trimmed.match(/^(\w+)\s+as\s+(\w+)$/);
+        if (asMatch) return { exported: asMatch[2], local: asMatch[1] };
+        return { exported: trimmed, local: trimmed };
+      }
+
+      // F2: `export * from './source'` (re-export-all).
+      const reExportAllMatch = expr.match(/^\s*\*\s*from\s+["']([^"']+)["']/);
+      // F3: re-export with potential renames: `{ A as B, C } from './x'`.
       const reExportMatch = expr.match(/^\s*\{\s*([^}]*)\}\s*from\s+["']([^"']+)["']/);
-      if (reExportMatch) {
-        exportNode.exportedName = reExportMatch[1].split(",").map(s => s.trim()).filter(Boolean).join(", ");
+      // F3: local rename `export { A as B }` (no `from` clause).
+      const localBracedMatch = expr.match(/^\s*\{\s*([^}]*)\}\s*$/);
+
+      if (reExportAllMatch) {
+        exportNode.exportKind = "re-export-all";
+        exportNode.exportedName = "*";
+        exportNode.reExportSource = reExportAllMatch[1];
+        exportNode.isReExportAll = true;
+      } else if (reExportMatch) {
+        const specs = reExportMatch[1]
+          .split(",")
+          .map(s => s.trim())
+          .filter(Boolean)
+          .map(parseNameSpec);
+        exportNode.renames = specs;
+        exportNode.exportedName = specs.map(s => s.exported).join(", ");
         exportNode.exportKind = "re-export";
         exportNode.reExportSource = reExportMatch[2];
+      } else if (localBracedMatch) {
+        // Local braced export — may include renames (`{ A as B }`) OR plain
+        // re-statements of locally-declared names (`{ foo, bar }`).
+        const specs = localBracedMatch[1]
+          .split(",")
+          .map(s => s.trim())
+          .filter(Boolean)
+          .map(parseNameSpec);
+        exportNode.renames = specs;
+        exportNode.exportedName = specs.map(s => s.exported).join(", ");
+        exportNode.exportKind = specs.some(s => s.local !== s.exported) ? "rename" : "local";
       } else {
         // export type Name... | export function Name... | export fn Name... | export const Name... | export let Name...
         // F-AUTH-002: `pure`/`server` modifier(s) have already been consumed above; isPure/isServer flags carry that intent.
@@ -5458,6 +5515,39 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           raw: parsed.raw,
           span,
           // Mark synthesized-from-export for downstream awareness.
+          fromExport: true,
+        });
+      }
+
+      // F1 (ast-builder-grammar-fixes dispatch): when exporting a function or
+      // fn, ALSO synthesize a function-decl AST node so AST walkers can see
+      // it. Mirrors the `export type` synthesis above.
+      //
+      // Shape: kind:"function-decl", name, raw (full `function foo() {...}`
+      // source), exported:true, fromExport:true, isPure, isServer.
+      // The `fromExport: true` flag tells codegen emitters (emit-library.ts,
+      // emit-logic.ts case "function-decl") to skip — the paired export-decl
+      // raw text already emits the full source verbatim, so without the
+      // skip the function would be emitted twice.
+      //
+      // params/body are intentionally NOT pre-parsed here — the synthetic
+      // node exists for *discoverability* in walkers; consumers that need
+      // parameter detail can re-tokenize `raw` or read the export-decl raw.
+      if ((exportNode.exportKind === "function" || exportNode.exportKind === "fn") && exportNode.exportedName) {
+        nodes.push({
+          id: ++counter.next,
+          kind: "function-decl",
+          name: exportNode.exportedName,
+          params: [],
+          body: [],
+          fnKind: exportNode.exportKind,
+          isServer,
+          ...(isPure ? { isPure: true } : {}),
+          isGenerator: false,
+          canFail: false,
+          raw: rawStr,
+          span,
+          exported: true,
           fromExport: true,
         });
       }
@@ -6759,6 +6849,20 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           "E-ERROR-007: `try` is not a scrml keyword — §19 has no try/catch/finally. " +
           "Handle failable calls with `!{ ::Variant(e) -> ... }`, the `?` propagation " +
           "operator, or by matching the result enum.",
+          tokenSpan(startTok, filePath),
+        ));
+      }
+      // S64 debate-04 verdict A+ #1: switch-stmt stays HARD-ERROR (3-of-3 unanimous).
+      if (keyword === "switch") {
+        errors.push(new TABError(
+          "E-SWITCH-FORBIDDEN",
+          "E-SWITCH-FORBIDDEN: `switch` is not a scrml keyword. " +
+          "Did you mean: " +
+          "`<match for=Type> ... </match>` for structural exhaustive case-analysis " +
+          "(Tier 1 block form; produces markup or executes statements per arm), " +
+          "or `match expr { .Variant -> ... }` for value-return case-analysis " +
+          "(Tier 1 JS-style form; produces a value in expression position)? " +
+          "See SPEC §18 for match block-form, primer §1 for the tier ladder.",
           tokenSpan(startTok, filePath),
         ));
       }

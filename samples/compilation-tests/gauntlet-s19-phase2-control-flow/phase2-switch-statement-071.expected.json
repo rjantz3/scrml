@@ -1,1 +1,1 @@
-{"feature":"switch","shape":"js-switch-case","expectedOutcome":"error","expectedCodes":["UNKNOWN"],"notes":"Spec defines no `switch`. scrml uses `match`. JS reflex — expect syntax error. UNKNOWN code."}
+{"feature":"switch","shape":"js-switch-case","expectedOutcome":"error","expectedCodes":["E-SWITCH-FORBIDDEN"],"notes":"Spec defines no `switch`. scrml uses `match`. S64 debate-04 verdict A+ #1 wired E-SWITCH-FORBIDDEN with did-you-mean: match enrichment."}

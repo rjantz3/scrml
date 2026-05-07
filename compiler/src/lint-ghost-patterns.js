@@ -439,6 +439,26 @@ const PATTERNS = [
     code: "W-LINT-015",
     skipIf: (offset, logicRanges) => inRange(offset, logicRanges),
   },
+
+  // Pattern 16: W-LIFECYCLE-CANDIDATE — string-discriminator trap.
+  //
+  // S64 debate-04 verdict A+ #2 (string-switch trap, gingerbill design insight):
+  // detect a state-cell decl `<NAME>[: Type] = "VALUE"` whose RHS is a string
+  // literal whose value lexically resembles an enum variant tag — single-word,
+  // initial-uppercase, alphanumeric only (e.g. "Loading", "Idle", "Pending").
+  // Predicate: ^[A-Z][A-Za-z0-9]*$. Lowercase-initial strings do NOT fire (high
+  // false-positive cost — see docs/changes/a-plus-verdict-execution/SURVEY-NOTE.md).
+  {
+    regex: /<([a-zA-Z_][a-zA-Z0-9_]*)>\s*(?::\s*[A-Za-z_][\w.]*\s*)?=\s*(?:"([A-Z][A-Za-z0-9]*)"|'([A-Z][A-Za-z0-9]*)')/g,
+    ghost: "<state> = \"PascalCaseValue\" (string-discriminator trap)",
+    correction: "lift to an enum: `type Phase:enum = { Idle, Loading, Error, Success }; <phase>: Phase = .Idle`. Unlocks <match for=Phase> structural exhaustiveness (Tier 1) and <engine for=Phase> transition-validation (Tier 2). See primer §1 (tier ladder); debate-04 string-switch-trap design insight.",
+    see: "§6 (W-LIFECYCLE-CANDIDATE)",
+    code: "W-LIFECYCLE-CANDIDATE",
+    skipIf: (offset, logicRanges, _cssRanges, commentRanges, tildeRanges) =>
+      inRange(offset, logicRanges) ||
+      inRange(offset, commentRanges) ||
+      inRange(offset, tildeRanges),
+  },
 ];
 
 // ---------------------------------------------------------------------------

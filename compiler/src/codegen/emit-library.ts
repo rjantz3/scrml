@@ -404,6 +404,14 @@ export function generateLibraryJs(
       }
 
       if (stmt.kind === "function-decl") {
+        // F1 (ast-builder-grammar-fixes): synthetic function-decls produced
+        // by the EXPORT branch carry `fromExport: true`. The paired
+        // export-decl already emits the full `export function foo() {...}`
+        // source via its raw text, so emitting the function-decl too would
+        // double-emit. Skip these synthetic nodes here.
+        if ((stmt as Record<string, unknown>).fromExport === true) {
+          continue;
+        }
         const name = (stmt.name ?? "anon") as string;
         const params = (stmt.params ?? []) as Array<string | Record<string, unknown>>;
         const paramNames = params.map((p, i) =>

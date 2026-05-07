@@ -433,24 +433,16 @@ ${
     fn typeToString(type) {
         if (!type || typeof type != "object") return "unknown"
 
-        switch (type.kind) {
-            case "primitive":
-                return type.name
-            case "struct":
-                return type.name || "struct"
-            case "enum":
-                return type.name || "enum"
-            case "array":
-                return `${typeToString(type.element)}[]`
-            case "union":
-                return (type.members || []).map(m => typeToString(m)).join(" | ")
-            case "asIs":
-                return "asIs"
-            case "unknown":
-                return "unknown"
-            default:
-                return type.kind || "unknown"
-        }
+        // S64 debate-04 verdict A+: switch is hard-error. Use if-else chain over kind string.
+        const k = type.kind
+        if (k == "primitive") return type.name
+        if (k == "struct") return type.name || "struct"
+        if (k == "enum") return type.name || "enum"
+        if (k == "array") return `${typeToString(type.element)}[]`
+        if (k == "union") return (type.members || []).map(m => typeToString(m)).join(" | ")
+        if (k == "asIs") return "asIs"
+        if (k == "unknown") return "unknown"
+        return type.kind || "unknown"
     }
 
     // ---------------------------------------------------------------------------
@@ -471,92 +463,86 @@ ${
                     `The type must be declared before the ^{} block that calls reflect().`)
             }
 
-            switch (type.kind) {
-                case "enum": {
-                    const variants = Array.isArray(type.variants)
-                        ? type.variants.map(v => typeof v == "string" ? v : v.name)
-                        : []
-                    return {
-                        kind: "enum",
-                        name: typeName,
-                        variants,
+            // S64 debate-04 verdict A+: switch is hard-error. Use if-else over kind string.
+            const tk = type.kind
+            if (tk == "enum") {
+                const variants = Array.isArray(type.variants)
+                    ? type.variants.map(v => typeof v == "string" ? v : v.name)
+                    : []
+                return {
+                    kind: "enum",
+                    name: typeName,
+                    variants,
+                }
+            }
+            if (tk == "struct") {
+                const fields = []
+                if (type.fields instanceof Map) {
+                    for (const [fieldName, fieldType] of type.fields) {
+                        fields.push({
+                            name: fieldName,
+                            type: typeToString(fieldType),
+                        })
+                    }
+                } else if (type.fields && typeof type.fields == "object") {
+                    for (const [fieldName, fieldType] of Object.entries(type.fields)) {
+                        fields.push({
+                            name: fieldName,
+                            type: typeToString(fieldType),
+                        })
                     }
                 }
-
-                case "struct": {
-                    const fields = []
-                    if (type.fields instanceof Map) {
-                        for (const [fieldName, fieldType] of type.fields) {
-                            fields.push({
-                                name: fieldName,
-                                type: typeToString(fieldType),
-                            })
+                return {
+                    kind: "struct",
+                    name: typeName,
+                    fields,
+                }
+            }
+            if (tk == "function") {
+                const params = (type.params || []).map(p => {
+                    if (typeof p == "string") {
+                        const colonIdx = p.indexOf(":")
+                        if (colonIdx >= 0) {
+                            return { name: p.slice(0, colonIdx).trim(), type: p.slice(colonIdx + 1).trim() }
                         }
-                    } else if (type.fields && typeof type.fields == "object") {
-                        for (const [fieldName, fieldType] of Object.entries(type.fields)) {
-                            fields.push({
-                                name: fieldName,
-                                type: typeToString(fieldType),
-                            })
-                        }
+                        return { name: p.trim(), type: "unknown" }
                     }
-                    return {
-                        kind: "struct",
-                        name: typeName,
-                        fields,
-                    }
+                    return { name: p.name || "?", type: p.type || "unknown" }
+                })
+                return {
+                    kind: "function",
+                    name: typeName,
+                    params,
+                    returnType: type.returnType || "unknown",
                 }
-
-                case "function": {
-                    const params = (type.params || []).map(p => {
-                        if (typeof p == "string") {
-                            const colonIdx = p.indexOf(":")
-                            if (colonIdx >= 0) {
-                                return { name: p.slice(0, colonIdx).trim(), type: p.slice(colonIdx + 1).trim() }
-                            }
-                            return { name: p.trim(), type: "unknown" }
-                        }
-                        return { name: p.name || "?", type: p.type || "unknown" }
-                    })
-                    return {
-                        kind: "function",
-                        name: typeName,
-                        params,
-                        returnType: type.returnType || "unknown",
-                    }
+            }
+            if (tk == "state") {
+                const attributes = (type.attributes || []).map(a => ({
+                    name: a.name,
+                    type: a.type || "unknown",
+                }))
+                return {
+                    kind: "state",
+                    name: typeName,
+                    attributes,
                 }
-
-                case "state": {
-                    const attributes = (type.attributes || []).map(a => ({
-                        name: a.name,
-                        type: a.type || "unknown",
-                    }))
-                    return {
-                        kind: "state",
-                        name: typeName,
-                        attributes,
-                    }
+            }
+            if (tk == "component") {
+                const props = (type.props || []).map(p => ({
+                    name: p.name,
+                    type: p.type || "unknown",
+                    optional: p.optional ?? false,
+                    bindable: p.bindable ?? false,
+                }))
+                return {
+                    kind: "component",
+                    name: typeName,
+                    props,
                 }
-
-                case "component": {
-                    const props = (type.props || []).map(p => ({
-                        name: p.name,
-                        type: p.type || "unknown",
-                        optional: p.optional ?? false,
-                        bindable: p.bindable ?? false,
-                    }))
-                    return {
-                        kind: "component",
-                        name: typeName,
-                        props,
-                    }
-                }
-
-                default:
-                    return {
-                        kind: type.kind || "unknown",
-                        name: typeName,
-                    }
+            }
+            return {
+                kind: type.kind || "unknown",
+                name: typeName,
             }
         }
     }

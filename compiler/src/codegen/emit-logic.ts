@@ -1272,6 +1272,11 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
     }
 
     case "function-decl": {
+      // F1 (ast-builder-grammar-fixes): synthetic function-decls produced by
+      // the EXPORT branch carry `fromExport: true` and have empty params/body
+      // (they exist for AST walker discoverability only). Skip emission here;
+      // the paired export-decl handles output in emit-library.
+      if (node.fromExport === true) return "";
       const fnName: string = node.name ?? "anon";
       const params: any[] = node.params ?? [];
       // Bug fix: strip :Type annotations from string params (e.g. "mario:Mario" → "mario")

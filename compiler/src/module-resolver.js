@@ -163,12 +163,36 @@ export function buildImportGraph(fileASTs) {
     // Collect exports from AST
     const astExports = file.ast?.exports || [];
     for (const exp of astExports) {
+      // F2 (ast-builder-grammar-fixes): `export * from './x'` — emit a
+      // single `re-export-all` entry. The seeder/resolver chase via
+      // `isReExportAll` rather than name matching.
+      if (exp.isReExportAll) {
+        exports.push({
+          name: "*",
+          kind: "re-export-all",
+          isReExportAll: true,
+          reExportSource: exp.reExportSource ? resolveModulePath(exp.reExportSource, filePath) : null,
+          span: exp.span || null,
+        });
+        continue;
+      }
       if (exp.exportedName) {
         // Handle comma-separated re-export names
         const names = exp.exportedName.split(",").map(s => s.trim()).filter(Boolean);
+        // F3 (ast-builder-grammar-fixes): `renames` carries the
+        // local→exported mapping for braced exports. Build a lookup so
+        // each per-name entry can carry its source-side `localName`.
+        const renames = Array.isArray(exp.renames) ? exp.renames : null;
+        const localFor = renames
+          ? new Map(renames.map(r => [r.exported, r.local]))
+          : null;
         for (const name of names) {
           exports.push({
             name,
+            // F3: localName is the source-side name in the dep file, used by
+            // the api.js seeder when chasing `export { A as B } from '...'`.
+            // For non-rename forms, localName === name.
+            localName: localFor && localFor.has(name) ? localFor.get(name) : name,
             kind: exp.exportKind || "unknown",
             reExportSource: exp.reExportSource ? resolveModulePath(exp.reExportSource, filePath) : null,
             span: exp.span || null,
