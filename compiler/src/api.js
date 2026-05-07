@@ -464,10 +464,13 @@ export function compileScrml(options = {}) {
         // unreadable — BS will report; skip gather for this file
         continue;
       }
-      // Lightweight regex scan for `import ... from '<path>'` /
-      // `from "<path>"`. The real graph is built by buildImportGraph after
-      // the canonical TAB pass; this pass only needs the file SET.
-      const importRe = /import\s+[\s\S]*?from\s+(["'])([^"']+)\1/g;
+      // Lightweight regex scan for `import ... from '<path>'` AND
+      // `export { ... } from '<path>'`. The real graph is built by
+      // buildImportGraph after the canonical TAB pass; this pass only needs
+      // the file SET. Re-export sources MUST be gathered too — otherwise the
+      // type-registry seeder in api.js can't chase a re-exported name back to
+      // its origin file (the chain hits a file that isn't in the compile set).
+      const importRe = /(?:import|export)\s+[\s\S]*?from\s+(["'])([^"']+)\1/g;
       let m;
       while ((m = importRe.exec(fileSrc)) !== null) {
         const spec = m[2];
@@ -788,35 +791,102 @@ export function compileScrml(options = {}) {
   }
 
   const importedTypesByFile = new Map();
+
+  // Memoize per-file typeRegistry builds — buildTypeRegistry is pure given
+  // typeDecls, so caching by file path is safe and avoids repeated work when
+  // many importers reach the same dep.
+  const depRegistryCache = new Map(); // absSource → Map<name, ResolvedType>
+  function getDepRegistry(absSource) {
+    if (depRegistryCache.has(absSource)) return depRegistryCache.get(absSource);
+    const depFile = ceFileMap.get(absSource);
+    if (!depFile) {
+      depRegistryCache.set(absSource, null);
+      return null;
+    }
+    const depTypeDecls = depFile.typeDecls ?? depFile.ast?.typeDecls ?? [];
+    if (depTypeDecls.length === 0) {
+      depRegistryCache.set(absSource, new Map());
+      return depRegistryCache.get(absSource);
+    }
+    const reg = buildTypeRegistry(depTypeDecls, [], { file: absSource, start: 0, end: 0, line: 1, col: 1 });
+    depRegistryCache.set(absSource, reg);
+    return reg;
+  }
+
+  /**
+   * Resolve a type name through a dep's re-export chain.
+   *
+   * If `absSource` directly declares `typeName` (it appears in that file's
+   * typeRegistry), return the resolved type.
+   *
+   * Otherwise, look at `absSource`'s graph-entry exports[] for a re-export
+   * entry matching `typeName` and recurse into its `reExportSource`. Cycle-
+   * break via `visited` (set of `${absSource}::${typeName}` keys).
+   *
+   * Returns null if no resolution found.
+   */
+  function resolveTypeThroughReExport(absSource, typeName, visited) {
+    const key = `${absSource}::${typeName}`;
+    if (visited.has(key)) return null;
+    visited.add(key);
+
+    // First, check this file's own type registry.
+    const reg = getDepRegistry(absSource);
+    if (reg && reg.has(typeName)) {
+      const t = reg.get(typeName);
+      if (t && t.kind !== 'unknown') return t;
+    }
+
+    // Otherwise, check this file's exports[] for a matching re-export entry.
+    const depGraphEntry = moduleResult.importGraph.get(absSource);
+    if (!depGraphEntry || !depGraphEntry.exports) return null;
+
+    for (const exp of depGraphEntry.exports) {
+      if (exp.name !== typeName) continue;
+      if (!exp.reExportSource) continue;
+      // Recurse: chase the chain.
+      const found = resolveTypeThroughReExport(exp.reExportSource, typeName, visited);
+      if (found) return found;
+    }
+
+    return null;
+  }
+
   for (const [filePath, graphEntry] of moduleResult.importGraph) {
     if (!graphEntry.imports || graphEntry.imports.length === 0) continue;
 
     const importedTypes = new Map();
     for (const imp of graphEntry.imports) {
-      const depFile = ceFileMap.get(imp.absSource);
-      if (!depFile) continue; // dependency not in compile set — skip
-
-      // Get the resolved types from the dependency's typeDecls
-      const depTypeDecls = depFile.typeDecls ?? depFile.ast?.typeDecls ?? [];
-      if (depTypeDecls.length === 0) continue;
-
-      // Build the dependency's type registry
-      const depRegistry = buildTypeRegistry(depTypeDecls, [], { file: imp.absSource, start: 0, end: 0, line: 1, col: 1 });
-
-      // Get exported names from exportRegistry — only seed exported types
       const depExports = moduleResult.exportRegistry.get(imp.absSource);
+      if (!depExports) continue; // dep not in compile set
       const importedNames = imp.names ?? [];
 
-      for (const [typeName, resolvedType] of depRegistry) {
-        // Skip builtins and unknown types
-        if (resolvedType.kind === 'unknown') continue;
-        // Only include types that are both:
-        //   a. Actually exported by the dependency
-        //   b. Actually imported by the importing file (or import * style)
-        const isExported = depExports && depExports.has(typeName);
-        const isImported = importedNames.length === 0 || importedNames.includes(typeName);
-        if (isExported && isImported) {
-          importedTypes.set(typeName, resolvedType);
+      // Direct path: dep declares the type itself in its typeDecls.
+      const depRegistry = getDepRegistry(imp.absSource);
+      if (depRegistry) {
+        for (const [typeName, resolvedType] of depRegistry) {
+          if (resolvedType.kind === 'unknown') continue;
+          const isExported = depExports.has(typeName);
+          const isImported = importedNames.length === 0 || importedNames.includes(typeName);
+          if (isExported && isImported) {
+            importedTypes.set(typeName, resolvedType);
+          }
+        }
+      }
+
+      // Re-export chase: for each requested name not yet seeded, walk the dep's
+      // exports[] re-export chain. This makes `import { X } from 'scrml:pkg'`
+      // resolve when pkg/index.scrml does `export { X } from './nested.scrml'`.
+      // Handles multi-hop chains (a → b → c) via recursion. Renamed re-exports
+      // (`export { X as Y }`) and `export *` are out of scope — the TAB regex
+      // does not currently parse them; add when grammar grows.
+      for (const name of importedNames) {
+        if (importedTypes.has(name)) continue;
+        if (!depExports.has(name)) continue;
+        const visited = new Set();
+        const resolved = resolveTypeThroughReExport(imp.absSource, name, visited);
+        if (resolved) {
+          importedTypes.set(name, resolved);
         }
       }
     }
