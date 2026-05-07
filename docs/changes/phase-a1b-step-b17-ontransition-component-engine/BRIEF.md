@@ -43,10 +43,10 @@ Commit after each meaningful change. Update `docs/changes/phase-a1b-step-b17-ont
 
 ## CONTEXT — current main state (S68, post-B14)
 
-- **Main HEAD:** [TO BE UPDATED — current main tip post-B14 land]
+- **Main HEAD:** `934100e` (feat(a1b-b14): SHIP — engine binding + auto-declared variable + cross-file mount + MOD engine-aware exportRegistry)
 - **Phase A1b status:**
   - B1-B13 ✅ all shipped
-  - **B14** ✅ shipped at [TO BE UPDATED] — engine cell registered; `_engineMeta` annotation; cross-file mount validation; engine-decl-inside-component-body fires E-COMPONENT-ENGINE-SCOPE.
+  - **B14** ✅ shipped at `934100e` — engine cell registered; `engineMeta` (camelCase, NOT underscored) annotation; cross-file mount validation. **Important boundary update:** B14's report DEFERRED the engine-decl-inside-component-body E-COMPONENT-ENGINE-SCOPE fire-site to B17 (was originally B14's per audit §1.5; deferred per B14 progress.md — blocked on component-def body becoming walkable). **B17 NOW OWNS THE FULL E-COMPONENT-ENGINE-SCOPE FIRE SET**, not just residuals. Re-survey the canonical fire site during Phase 0.
   - B15 dispatched in parallel (state-child exhaustiveness + non-derived rule= typer)
   - B16 dispatched in parallel (derived engines)
   - **B17 — THIS STEP — Wave 4 CLOSER**

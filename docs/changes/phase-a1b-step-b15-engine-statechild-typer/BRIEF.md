@@ -44,10 +44,10 @@ Commit after each meaningful change. Update `docs/changes/phase-a1b-step-b15-eng
 
 ## CONTEXT — current main state (S68, post-B14)
 
-- **Main HEAD:** [TO BE UPDATED — current main tip post-B14 land]
+- **Main HEAD:** `934100e` (feat(a1b-b14): SHIP — engine binding + auto-declared variable + cross-file mount + MOD engine-aware exportRegistry)
 - **Phase A1b status:**
   - B1-B13 ✅ all shipped
-  - **B14** ✅ shipped at [TO BE UPDATED] — engine cell registered as `StateCellRecord` with `_cellKind: "engine"` + `_engineMeta` annotation; auto-declared variable; cross-file mount via `<EngineName/>`; MOD exportRegistry engine-aware; E-COMPONENT-ENGINE-SCOPE fired at engine-decl-inside-component-body site. See primer §13.7 B14 specifics block for `_engineMeta` shape.
+  - **B14** ✅ shipped at `934100e` — engine cell registered as `StateCellRecord` with `_cellKind: "engine"` + `engineMeta` (camelCase, NOT underscored) annotation; auto-declared variable via `autoDeriveEngineVarName(typeName)` exported helper; cross-file mount via `<EngineName/>` validated against MOD's engine-aware exportRegistry; SYM PASS 10.A registers + 10.B validates mounts; E-ENGINE-MOUNT-NOT-ENGINE added to §34. E-COMPONENT-ENGINE-SCOPE fire-site for engine-decl-inside-component-body DEFERRED to B17 (per progress.md — blocked on component-def body becoming walkable). See primer §13.7 B14 specifics block for full `engineMeta` shape.
   - **B15 — THIS STEP**
   - B16 + B17 dispatched in parallel (different walker territories)
 

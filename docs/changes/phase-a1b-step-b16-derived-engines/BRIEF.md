@@ -43,10 +43,10 @@ Commit after each meaningful change. Update `docs/changes/phase-a1b-step-b16-der
 
 ## CONTEXT — current main state (S68, post-B14)
 
-- **Main HEAD:** [TO BE UPDATED — current main tip post-B14 land]
+- **Main HEAD:** `934100e` (feat(a1b-b14): SHIP — engine binding + auto-declared variable + cross-file mount + MOD engine-aware exportRegistry)
 - **Phase A1b status:**
   - B1-B13 ✅ all shipped
-  - **B14** ✅ shipped at [TO BE UPDATED] — engine cell registered; `_engineMeta.derivedExpr` carries the `derived=expr` ExprNode for derived engines (per B14 audit Option C hybrid).
+  - **B14** ✅ shipped at `934100e` — engine cell registered; `engineMeta.derivedExpr` (camelCase) carries the `derived=expr` ExprNode for derived engines (per B14 audit Option C hybrid). Note: rich `derived=expr` parsing is DEFERRED to B16 per B14 progress.md (B14 records the raw ExprNode; B16 walks it for cycle detection + reactive cell reads).
   - B15 dispatched in parallel (state-child exhaustiveness + non-derived rule= typer + initial= validation)
   - **B16 — THIS STEP**
   - B17 dispatched in parallel (`<onTransition>` + residual component-vs-engine cases)
