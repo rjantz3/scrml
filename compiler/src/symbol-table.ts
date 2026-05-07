@@ -8,7 +8,9 @@
  *
  *   B2 — V5-strict bare-name resolution + E-NAME-COLLIDES-STATE  [LANDED]
  *   B3 — `@name` resolution → record back-pointer on each ExprNode  [LANDED]
- *   B4 — Import binding + `pinned` forward-ref cycle detection
+ *   B4 — Import binding registration + source-position `pinned` forward-ref
+ *        check (E-STATE-PINNED-FORWARD-REF) + best-effort
+ *        E-IMPORT-PINNED-INVALID  [LANDED]
  *   B5 — Cell classifier (bindable, markup-typed, derived-with-validators)  [LANDED]
  *   B6 — Render-by-tag E-CELL-NO-RENDER-SPEC + E-CELL-RENDER-SPEC-NOT-BINDABLE
  *   B7 — Derived-cell dep DAG + E-DERIVED-CIRCULAR-DEP
@@ -104,8 +106,43 @@ import type {
   LinDeclNode,
   Span,
   IdentExpr,
+  ImportDeclNode,
+  ImportSpecifier,
 } from "./types/ast.ts";
 import { forEachIdentInExprNode } from "./expression-parser.ts";
+
+// ---------------------------------------------------------------------------
+// B4 — Import binding registry
+// ---------------------------------------------------------------------------
+//
+// Per A1b Step B4, every import specifier that lands in the file's lexical
+// scope is registered into the file scope's `importBindings` map. The record
+// captures the local binding name, the originally-imported name, the source
+// module, the `pinned` flag, and a back-pointer to the ImportDeclNode (for
+// span access during the source-position forward-ref check).
+//
+// Why on `Scope`, not on a separate structure: imports are scope-introducing
+// just like state-decls. A future B-step that supports per-function or
+// per-component import scoping rides on the same registry shape.
+
+/**
+ * A single import-binding entry. Created at registration in SYM PASS-1.
+ */
+export interface ImportBindingRecord {
+  /** Local binding name in the importing file's scope. */
+  localName: string;
+  /** Original name as exported by the source module (pre-alias). */
+  exportedName: string;
+  /** Resolved source module path (verbatim from `ImportDeclNode.source`).
+   *  May be a relative path (e.g., `"./engines.scrml"`) or a stdlib alias
+   *  (e.g., `"scrml:auth"`). Same string the rest of the pipeline carries. */
+  sourcePath: string;
+  /** True iff the `pinned` bareword modifier was present on this specifier. */
+  pinned: boolean;
+  /** Back-pointer to the ImportDeclNode for span access. The decl's
+   *  `span.start` is the source-position used for forward-ref checks. */
+  declNode: ImportDeclNode;
+}
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -217,6 +254,13 @@ export interface Scope {
    *  child's leaf name; the qualified path is recoverable via the
    *  `record.qualifiedPath` field. */
   stateCells: Map<string, StateCellRecord>;
+  /** B4 — per-scope import-binding registry. Key is the LOCAL binding name
+   *  in the importing scope. Populated only on file-level scopes today
+   *  (imports hoist to file scope per existing AST shape — `FileAST.imports`).
+   *  Reserved as a `Scope`-level field so a future per-function or
+   *  per-component import surface rides the same shape without a schema
+   *  change. Empty `Map` on non-file scopes. */
+  importBindings: Map<string, ImportBindingRecord>;
   /** Path prefix used to compute child `qualifiedPath` values. For the
    *  file root, `""`. For a function scope, the enclosing scope's prefix
    *  (functions don't extend the dotted path). For a compound scope, the
@@ -256,6 +300,8 @@ export interface SYMStats {
   compoundChildren: number;
   /** Number of scopes constructed (file + function + compound at B1). */
   totalScopes: number;
+  /** B4 — number of import-binding records registered at file scope. */
+  totalImportBindings: number;
 }
 
 export interface SYMInput {
@@ -335,6 +381,7 @@ function createScope(
     kind,
     parent,
     stateCells: new Map(),
+    importBindings: new Map(),
     qualifiedPath,
   };
 }
@@ -420,6 +467,63 @@ function registerStateDecl(
   }
 
   return record;
+}
+
+// ---------------------------------------------------------------------------
+// B4 — Import-binding registration (PASS 1 sub-step)
+// ---------------------------------------------------------------------------
+//
+// Imports are hoisted onto `FileAST.imports[]` by TAB. Walking that array
+// (rather than re-discovering imports inside the AST tree) is the canonical
+// path. Default imports (`import X from '...'`) bind a single LOCAL name
+// equal to `imp.names[0]` with `pinned:false`; named imports populate
+// `imp.specifiers[]` with full `{imported, local, pinned}` data.
+//
+// Collision policy: if the local name is ALREADY registered in the file
+// scope's importBindings (duplicate-import-of-same-local-name), the second
+// registration wins last-write. This mirrors how `Map.set` behaves and is
+// consistent with the existing E-IMPORT-001/003/004 surface; no new
+// diagnostic is fired here at B4.
+
+function registerImportBindings(
+  imports: ImportDeclNode[] | undefined,
+  fileScope: Scope,
+): void {
+  if (!Array.isArray(imports)) return;
+  for (const imp of imports) {
+    if (!imp || imp.kind !== "import-decl") continue;
+    if (imp.source == null) continue; // parse-failed import; skip silently.
+    const sourcePath = imp.source;
+
+    if (imp.isDefault) {
+      // Default imports: single binding, no specifier shape, no pinned modifier.
+      const localName = imp.names && imp.names.length > 0 ? imp.names[0] : null;
+      if (!localName) continue;
+      fileScope.importBindings.set(localName, {
+        localName,
+        exportedName: localName, // default exports have no separate exported name
+        sourcePath,
+        pinned: false,
+        declNode: imp,
+      });
+      continue;
+    }
+
+    // Named imports: walk specifiers[]. The parser populates specifiers for
+    // the braced form (`import { a, b as c pinned } from '...'`); the
+    // bare names array is the parallel imported-name list.
+    const specs: ImportSpecifier[] = Array.isArray(imp.specifiers) ? imp.specifiers : [];
+    for (const spec of specs) {
+      if (!spec || typeof spec.local !== "string") continue;
+      fileScope.importBindings.set(spec.local, {
+        localName: spec.local,
+        exportedName: typeof spec.imported === "string" ? spec.imported : spec.local,
+        sourcePath,
+        pinned: spec.pinned === true,
+        declNode: imp,
+      });
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -910,7 +1014,18 @@ export function runSYM(input: SYMInput): SYMResult {
     compoundParents: 0,
     compoundChildren: 0,
     totalScopes: 1, // the file-level root counts
+    totalImportBindings: 0,
   };
+
+  // PASS 1.b (B4): Register every import specifier into the file-level
+  // scope's importBindings map. Imports are hoisted onto `FileAST.imports[]`
+  // by TAB, so walking that array is the canonical path; this avoids
+  // re-discovering import nodes inside the AST tree (which would require
+  // tagging logic-block contents). Runs BEFORE state-decl registration so
+  // PASS 3's pinned-forward-ref check (which reads importBindings) sees a
+  // populated table from the first walk step.
+  registerImportBindings(ast.imports, fileScope);
+  stats.totalImportBindings = fileScope.importBindings.size;
 
   // PASS 1 (B1): Construct scopes + register state-decls. The state-cell
   // table is fully populated when this returns, so PASS 2 can do a clean
@@ -1023,6 +1138,26 @@ export function lookupQualifiedStateCell(
     current = next;
   }
   return current;
+}
+
+/**
+ * B4 — Look up an import binding by local name. Walks the parent chain (so a
+ * future per-function or per-component import-binding scope is forward-
+ * compatible); today's importBindings live only on the file-level root.
+ *
+ * Returns the closest enclosing record, or `null` if not found.
+ */
+export function lookupImportBinding(
+  scope: Scope | null | undefined,
+  localName: string,
+): ImportBindingRecord | null {
+  let s: Scope | null | undefined = scope;
+  while (s) {
+    const rec = s.importBindings.get(localName);
+    if (rec) return rec;
+    s = s.parent;
+  }
+  return null;
 }
 
 /**
