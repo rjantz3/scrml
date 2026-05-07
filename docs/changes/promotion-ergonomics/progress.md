@@ -126,3 +126,19 @@ Implementation NOT started. Recommendation in SURVEY-PHASE-B.md §6:
 Tier B implementation deferred to a re-scoped Tier B dispatch. Working tree state at
 exit: SURVEY-PHASE-B.md NEW + progress.md updated. No source code changes. No commits
 authorized yet — PA may commit these two doc artefacts as a Phase-0 landing.
+
+---
+
+## 2026-05-06 — Tier B re-scoped dispatch (S66) starts (worktree agent-a35e9695d1b010931)
+
+- Worktree pwd verified: `/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a35e9695d1b010931`
+- HEAD before cherry-pick: `7334fb0`
+- Cherry-picked predecessor commit `4a410c4` → new commit `7db337b` in worktree (SURVEY-PHASE-B.md + Phase 0 progress entries)
+- `bun install`: ok (113 packages)
+- `bun run pretest`: ok
+- Baseline `bun test`: **9019 pass / 44 skip / 1 todo / 0 fail** — matches brief expectation exactly
+- Baseline `bun run test` showed 2 transient sample-compile fails (unrelated to changes) — not regressions
+- ECONNREFUSED markers in test output are caught test-internal errors (network mock noise), not failures
+- Re-scoped dispatch authority: Bryan-authorized Path A — `is` is canonical; drop `==` rows from §56
+- Phase 3 (`--engine` impl) deferred to Tier C
+- This dispatch ships: `--match` only + I-MATCH-PROMOTABLE lint + spec amendments + docs
