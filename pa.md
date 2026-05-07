@@ -18,6 +18,49 @@ This repo contains **only content that exactly matches what the spec and the cod
 
 **Why:** dev agents writing scrml must only see current truth. If a dev agent reading the repo couldn't distinguish "this describes what exists" from "this describes what was planned but never built," the doc doesn't belong here.
 
+## Design discipline — v0.2.0 in-flight rules (PERMANENT until v0.2.0 fully ships)
+
+Three rules govern PA behavior while v0.2.0 is in flight. These are LOAD-BEARING — every session, every dispatch, every design call. Violation is a methodology error.
+
+User-voice authority: S66 (2026-05-07) verbatim, after PA executed an architectural-narrowing error in promotion-ergonomics Tier B (anchored on corpus-shows-zero-`==` as evidence to drop the form, when actually the corpus was empty BECAUSE the parser couldn't handle leading-dot variants outside `is`-form). See `../scrml-support/user-voice-scrmlTS.md` Session 66.
+
+### Rule 1 — No marketing/article/tweet work unless Bryan brings it up
+
+Article truthfulness audits, X-snippet selection, dev.to drafts, kickstarter copy edits, scrml.dev announce refresh, marketing-flagship-shaped framing — **NOT substantive work while v0.2.0 is in flight.** PA must not volunteer these as next-thread proposals, must not work them in the background, must not include them in dispatch briefs as load-bearing.
+
+The substantive bar is "the compiler working as planned." Everything else waits.
+
+If Bryan raises a marketing thread explicitly, work it. Otherwise: silent off-list.
+
+### Rule 2 — scrml is not a toy or hobby language
+
+The project is "creating language that will be the future of how programming is done for the browser" (S66 verbatim). No actual users yet other than Bryan, but the design bar is full-production-language fidelity.
+
+PA must NOT invoke any of these as load-bearing reasoning:
+- "users won't notice"
+- "ship the smaller surface"
+- "corpus shows zero so drop it"
+- "this corner case won't matter"
+- "we can simplify by removing X"
+- any framing that treats v0.2.0 as a constrained-goal MVP
+
+The bar is **what the language is structurally correct to express**, not what existing artifacts have used. The corpus is the artifact of past parser limits, not evidence of design intent.
+
+### Rule 3 — Right answer beats easy answer 99.999% of the time
+
+When PA sees an easy path (small scope, less work) and a right path (structural fix, more work) diverge, **default hard to the right path.** The right answer is correct 99.999% of the time.
+
+The S66 narrowing was the precedent: easy answer was "drop `==` from spec because corpus-zero" (~2-4h). Right answer was "extend the parser to make `.Variant` parseable as a primary expression everywhere" (~4-8h). The right answer cost more by ~4h and was correct.
+
+Operational rule: when PA is tempted to take a shortcut, **surface it explicitly so Bryan can veto.** Do NOT silently default to the small-scope answer. Do NOT volunteer narrowing / dropping / deferring as design moves. Those require a real load-bearing reason — not corpus-as-evidence, not "we can ship faster," not "smaller surface to maintain."
+
+### When in doubt
+
+- "Is this marketing-shaped?" → drop unless Bryan raises it.
+- "Is the easy path different from the right path?" → propose the right path; surface the easy path only as a veto-check.
+- "Is the corpus empty because of past parser limits?" → fix the parser limit, don't drop the form.
+- "Is this a corner case that won't matter to early users?" → it matters; the language is being designed for full-production fidelity.
+
 ## Repo layout
 
 ```
