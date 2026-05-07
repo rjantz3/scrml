@@ -307,6 +307,24 @@ export interface SYMStats {
 export interface SYMInput {
   filePath: string;
   ast: FileAST;
+  /**
+   * B4 — optional MOD exportRegistry (the `moduleResult.exportRegistry` map
+   * of `Map<sourcePath, Map<exportName, {kind, category, isComponent}>>`).
+   * When provided, SYM emits `E-IMPORT-PINNED-INVALID` for `pinned` imports
+   * of definitively-not-cell-not-engine kinds (function/fn/type/channel).
+   * When absent, the check is skipped — back-compat for pre-MOD callers
+   * (test harnesses, self-host shim) which only rely on registration +
+   * forward-ref check.
+   *
+   * **Best-effort scope (Option A, S66 dispatch):** const/let imports are
+   * ACCEPTED without firing because they may be engine-shaped (Form 1
+   * `export <engine var=appPhase>` desugars to `export const appPhase`
+   * which is indistinguishable today). B14 (cross-file engine binding,
+   * M18) lands engine-aware export-registry annotation; until then, the
+   * check trades false negatives for zero false positives. See in-code
+   * comment near the const/let accept-branch.
+   */
+  exportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean }>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -523,6 +541,90 @@ function registerImportBindings(
         declNode: imp,
       });
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// B4 — E-IMPORT-PINNED-INVALID best-effort fire (Option A)
+// ---------------------------------------------------------------------------
+//
+// SPEC §21.8.1: "`pinned` on a non-engine non-state-cell import (e.g.,
+// `pinned` on a regular function) is E-IMPORT-PINNED-INVALID — `pinned` is
+// only meaningful for cell-typed and engine-typed names."
+//
+// The MOD exportRegistry's per-name shape is `{kind, category, isComponent}`.
+// `kind` is the canonical export kind: one of
+// `{type, function, fn, const, let, channel, rename, local, re-export,
+// re-export-all, unknown}`. There is NO `"engine"` kind today (engine
+// exports desugar to `const`); there is no `"state-cell"` kind.
+//
+// Best-effort scope (Option A, S66 dispatch):
+//
+// | Source export kind     | pinned import → action            |
+// | ---------------------- | --------------------------------- |
+// | function, fn           | FIRE E-IMPORT-PINNED-INVALID      |
+// | type                   | FIRE                              |
+// | channel                | FIRE (channels aren't cells)      |
+// | const, let             | ACCEPT (defer to B14)             |
+// | re-export(-all),       | ACCEPT if not chasable            |
+// |   rename, local,       |                                   |
+// |   unknown              |                                   |
+//
+// Why fire on channel: channels are file-level synchronization primitives,
+// not cells. A `pinned` import of a channel name is meaningless (the channel
+// IS the binding; "identity-stability" doesn't apply). The spec's definition
+// of "cell-typed and engine-typed" excludes channels by enumeration.
+//
+// Why ACCEPT const/let: Form 1 `export <engine var=appPhase>` desugars to
+// `export const appPhase = ...` — an engine binding is a `const` export.
+// Until B14 / M18 cross-file engine import lands and the registry
+// distinguishes engine-shape const exports from arbitrary const exports,
+// firing on `pinned` const imports would false-positive on legitimate
+// engine pinning. Trade: false negatives (some `pinned` const-imports of
+// non-engines slip through at B4 — the gap closes in B14).
+
+const B4_IMPORT_PINNED_FIRE_KINDS: ReadonlySet<string> = new Set([
+  "function",
+  "fn",
+  "type",
+  "channel",
+]);
+
+function fireImportPinnedInvalid(
+  fileScope: Scope,
+  exportRegistry: Map<string, Map<string, { kind: string; category: string; isComponent: boolean }>> | undefined,
+  errors: SYMDiagnostic[],
+): void {
+  if (!exportRegistry) return;
+  for (const rec of fileScope.importBindings.values()) {
+    if (!rec.pinned) continue;
+    const sourceMap = exportRegistry.get(rec.sourcePath);
+    if (!sourceMap) continue; // unknown source (resolveModulePath mismatch); skip.
+    const exportInfo = sourceMap.get(rec.exportedName);
+    if (!exportInfo) continue; // E-IMPORT-004 (unknown name) handled by MOD.
+    const exportKind = exportInfo.kind;
+    if (!B4_IMPORT_PINNED_FIRE_KINDS.has(exportKind)) {
+      // ACCEPT branch — const/let/re-export/rename/local/unknown.
+      //
+      // B14 follow-up: const/let exports include both engine-shaped (Form 1
+      // `export <engine var=appPhase>` desugars to `export const appPhase = ...`)
+      // and arbitrary-value exports. B4 cannot distinguish today; B14 lands
+      // engine-aware export-registry annotation. Until then, pinned on
+      // const/let imports is accepted (false negatives possible).
+      continue;
+    }
+    const declSpan = rec.declNode.span;
+    errors.push({
+      code: "E-IMPORT-PINNED-INVALID",
+      message:
+        `E-IMPORT-PINNED-INVALID: \`pinned\` modifier on imported \`${rec.localName}\``
+        + (rec.localName !== rec.exportedName ? ` (originally \`${rec.exportedName}\`)` : "")
+        + ` from \`${rec.sourcePath}\`. The exported name is a \`${exportKind}\`; `
+        + `\`pinned\` is meaningful only for cell-typed and engine-typed names. `
+        + `Remove the \`pinned\` modifier (SPEC §21.8.1 + §34).`,
+      span: declSpan ?? { file: "", start: 0, end: 0, line: 1, col: 1 },
+      severity: "error",
+    });
   }
 }
 
@@ -1135,7 +1237,7 @@ function walkClassifyCells(
  * Stage 3.06 of the compiler pipeline (between NR and CE).
  */
 export function runSYM(input: SYMInput): SYMResult {
-  const { filePath, ast } = input;
+  const { filePath, ast, exportRegistry } = input;
 
   const fileScope = createScope("file", null, "");
   Object.defineProperty(ast, "_scope", {
@@ -1180,6 +1282,15 @@ export function runSYM(input: SYMInput): SYMResult {
   const visited2 = new WeakSet<object>();
   walkLocalDeclsForCollisions(ast.nodes, fileScope, visited2, errors);
 
+  // PASS 2.b (B4): E-IMPORT-PINNED-INVALID best-effort fire. For every
+  // pinned import-binding registered at file scope, look up the source
+  // file's exportRegistry entry; if the export kind is definitively-not-
+  // cell-not-engine (function/fn/type/channel), fire the diagnostic.
+  // const/let imports are accepted with a documented B14 deferral. When
+  // no exportRegistry is supplied (test-harness path), the check is
+  // skipped silently.
+  fireImportPinnedInvalid(fileScope, exportRegistry, errors);
+
   // PASS 3 (B3): Walk every ExprNode payload on every AST node; for each
   // `@`-prefixed IdentExpr, stamp `_resolvedStateCell` (record or null) via
   // a parent-chain lookup. Re-uses the `_scope` annotations PASS 1 attached
@@ -1210,14 +1321,18 @@ export function runSYM(input: SYMInput): SYMResult {
 /**
  * Run SYM over a batch of TAB results (mirrors `runNRBatch` shape).
  * Each AST is mutated in place. Returns per-file results in input order.
+ *
+ * B4: optional `exportRegistry` (from MOD) enables `E-IMPORT-PINNED-INVALID`
+ * firing. When omitted (test-harness path), the registry check is skipped.
  */
 export function runSYMBatch(
   tabResults: Array<{ filePath: string; ast: FileAST }>,
+  exportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean }>>,
 ): SYMResult[] {
   const out: SYMResult[] = [];
   for (const r of tabResults) {
     if (!r || !r.ast) continue;
-    out.push(runSYM({ filePath: r.filePath, ast: r.ast }));
+    out.push(runSYM({ filePath: r.filePath, ast: r.ast, exportRegistry }));
   }
   return out;
 }

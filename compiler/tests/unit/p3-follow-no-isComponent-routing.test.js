@@ -91,6 +91,10 @@ const ALLOWED = {
   "types/ast.ts": 5,               // field declaration + deprecation note
   "validators/post-ce-invariant.ts": 7, // doc comments only — no code reads
   "type-system.ts": 2,             // single doc-comment line
+  "symbol-table.ts": 6,            // type-signature mentions only — registry value
+                                   // shape `{kind, category, isComponent}` from MOD's
+                                   // exportRegistry; B4 imports the type but never
+                                   // reads `.isComponent` for routing decisions.
   // (state-type-routing.ts deleted by P3-FOLLOW.)
 };
 

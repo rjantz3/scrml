@@ -689,7 +689,12 @@ export function compileScrml(options = {}) {
   // registration is a separate concern; folding into NR would muddle
   // separation. SYM consumes the same per-file AST NR produced; no MOD output
   // dependency at B1 (cross-file state-cell resolution lands in B4).
-  const symResults = stage("SYM", () => runSYMBatch(tabResultsForNR));
+  // B4: passes moduleResult.exportRegistry so SYM can fire
+  // E-IMPORT-PINNED-INVALID best-effort (Option A) on pinned imports of
+  // function/fn/type/channel exports. const/let imports are accepted with
+  // a documented B14 deferral (engine vs. arbitrary-const distinction is
+  // not knowable today).
+  const symResults = stage("SYM", () => runSYMBatch(tabResultsForNR, moduleResult.exportRegistry));
   for (const sym of symResults) {
     collectErrors("SYM", sym.errors);
   }

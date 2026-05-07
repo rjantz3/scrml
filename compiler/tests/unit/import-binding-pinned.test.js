@@ -295,6 +295,151 @@ describe("§B4.2.11 NON-pinned import — read BEFORE import line — no fire", 
   });
 });
 
+// ===========================================================================
+// §B4.3 — Phase 3: E-IMPORT-PINNED-INVALID best-effort fire (Option A)
+// ===========================================================================
+//
+// The check requires a MOD exportRegistry. Tests here build a minimal
+// registry inline and pass it to runSYM. Integration via the full pipeline
+// is exercised by api.js → runSYMBatch passing moduleResult.exportRegistry.
+
+function buildSymWithRegistry(source, registry) {
+  const { ast, errors } = parse(source);
+  const sym = runSYM({ filePath: "test.scrml", ast, exportRegistry: registry });
+  return { ast, errors, sym };
+}
+
+function makeRegistry(sourcePath, entries) {
+  // entries: { name: kind, ... }
+  const inner = new Map();
+  for (const [name, kind] of Object.entries(entries)) {
+    inner.set(name, { kind, category: kind, isComponent: false });
+  }
+  const reg = new Map();
+  reg.set(sourcePath, inner);
+  return reg;
+}
+
+describe("§B4.3.1 pinned import of function FIRES", () => {
+  test("import { foo pinned } where foo is exported as `function` → E-IMPORT-PINNED-INVALID", () => {
+    const src = `<program>\${ import { foo pinned } from './m.scrml' }</program>`;
+    const reg = makeRegistry("./m.scrml", { foo: "function" });
+    const { sym } = buildSymWithRegistry(src, reg);
+    const errs = symErrorsByCode(sym, "E-IMPORT-PINNED-INVALID");
+    expect(errs.length).toBe(1);
+    expect(errs[0].severity).toBe("error");
+    expect(errs[0].message).toContain("foo");
+    expect(errs[0].message).toContain("function");
+  });
+});
+
+describe("§B4.3.2 pinned import of fn FIRES", () => {
+  test("kind:'fn' fires", () => {
+    const src = `<program>\${ import { bar pinned } from './m.scrml' }</program>`;
+    const reg = makeRegistry("./m.scrml", { bar: "fn" });
+    const { sym } = buildSymWithRegistry(src, reg);
+    expect(symErrorsByCode(sym, "E-IMPORT-PINNED-INVALID")).toHaveLength(1);
+  });
+});
+
+describe("§B4.3.3 pinned import of type FIRES", () => {
+  test("kind:'type' fires", () => {
+    const src = `<program>\${ import { Phase pinned } from './m.scrml' }</program>`;
+    const reg = makeRegistry("./m.scrml", { Phase: "type" });
+    const { sym } = buildSymWithRegistry(src, reg);
+    expect(symErrorsByCode(sym, "E-IMPORT-PINNED-INVALID")).toHaveLength(1);
+  });
+});
+
+describe("§B4.3.4 pinned import of channel FIRES", () => {
+  test("kind:'channel' fires (channels are file-level sync primitives, not cells)", () => {
+    const src = `<program>\${ import { chat pinned } from './m.scrml' }</program>`;
+    const reg = makeRegistry("./m.scrml", { chat: "channel" });
+    const { sym } = buildSymWithRegistry(src, reg);
+    expect(symErrorsByCode(sym, "E-IMPORT-PINNED-INVALID")).toHaveLength(1);
+  });
+});
+
+describe("§B4.3.5 pinned import of const ACCEPTED (B14 deferral)", () => {
+  test("kind:'const' does NOT fire — engine exports desugar to const today", () => {
+    const src = `<program>\${ import { engineRef pinned } from './m.scrml' }</program>`;
+    const reg = makeRegistry("./m.scrml", { engineRef: "const" });
+    const { sym } = buildSymWithRegistry(src, reg);
+    expect(symErrorsByCode(sym, "E-IMPORT-PINNED-INVALID")).toHaveLength(0);
+  });
+});
+
+describe("§B4.3.6 pinned import of let ACCEPTED", () => {
+  test("kind:'let' does NOT fire (best-effort skip)", () => {
+    const src = `<program>\${ import { val pinned } from './m.scrml' }</program>`;
+    const reg = makeRegistry("./m.scrml", { val: "let" });
+    const { sym } = buildSymWithRegistry(src, reg);
+    expect(symErrorsByCode(sym, "E-IMPORT-PINNED-INVALID")).toHaveLength(0);
+  });
+});
+
+describe("§B4.3.7 NON-pinned import of function — control, no fire", () => {
+  test("non-pinned import of function does NOT fire E-IMPORT-PINNED-INVALID", () => {
+    const src = `<program>\${ import { foo } from './m.scrml' }</program>`;
+    const reg = makeRegistry("./m.scrml", { foo: "function" });
+    const { sym } = buildSymWithRegistry(src, reg);
+    expect(symErrorsByCode(sym, "E-IMPORT-PINNED-INVALID")).toHaveLength(0);
+  });
+});
+
+describe("§B4.3.8 mixed specifiers — only pinned non-cell-non-engine fires", () => {
+  test("pinned function fires, pinned const accepted, plain function no fire", () => {
+    const src = `<program>\${ import { fn1 pinned, c1 pinned, fn2 } from './m.scrml' }</program>`;
+    const reg = makeRegistry("./m.scrml", {
+      fn1: "function",
+      c1: "const",
+      fn2: "function",
+    });
+    const { sym } = buildSymWithRegistry(src, reg);
+    const errs = symErrorsByCode(sym, "E-IMPORT-PINNED-INVALID");
+    expect(errs.length).toBe(1);
+    expect(errs[0].message).toContain("fn1");
+  });
+});
+
+describe("§B4.3.9 alias preserves diagnostic clarity", () => {
+  test("`import { foo as bar pinned }` where foo is function — message names both", () => {
+    const src = `<program>\${ import { foo as bar pinned } from './m.scrml' }</program>`;
+    const reg = makeRegistry("./m.scrml", { foo: "function" });
+    const { sym } = buildSymWithRegistry(src, reg);
+    const errs = symErrorsByCode(sym, "E-IMPORT-PINNED-INVALID");
+    expect(errs.length).toBe(1);
+    expect(errs[0].message).toContain("bar");
+    expect(errs[0].message).toContain("foo");
+  });
+});
+
+describe("§B4.3.10 no-registry path — check skipped silently", () => {
+  test("when exportRegistry is undefined, no E-IMPORT-PINNED-INVALID fires", () => {
+    const src = `<program>\${ import { foo pinned } from './m.scrml' }</program>`;
+    const { sym } = buildSym(src);
+    expect(symErrorsByCode(sym, "E-IMPORT-PINNED-INVALID")).toHaveLength(0);
+  });
+});
+
+describe("§B4.3.11 unknown source path — check skipped", () => {
+  test("when sourcePath has no registry entry, no fire (defensive)", () => {
+    const src = `<program>\${ import { foo pinned } from './unknown.scrml' }</program>`;
+    const reg = makeRegistry("./other.scrml", { foo: "function" });
+    const { sym } = buildSymWithRegistry(src, reg);
+    expect(symErrorsByCode(sym, "E-IMPORT-PINNED-INVALID")).toHaveLength(0);
+  });
+});
+
+describe("§B4.3.12 re-export kind ACCEPTED (best-effort)", () => {
+  test("kind:'re-export' does NOT fire — chasing not implemented; conservative accept", () => {
+    const src = `<program>\${ import { thing pinned } from './m.scrml' }</program>`;
+    const reg = makeRegistry("./m.scrml", { thing: "re-export" });
+    const { sym } = buildSymWithRegistry(src, reg);
+    expect(symErrorsByCode(sym, "E-IMPORT-PINNED-INVALID")).toHaveLength(0);
+  });
+});
+
 describe("§B4.2.12 diagnostic carries file + severity + names the cell", () => {
   test("err has correct file, severity:error, and message names the cell", () => {
     const src = `<program>\${
