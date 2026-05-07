@@ -1,126 +1,120 @@
 # non-compliance.report.md
 # project: scrmlTS
-# generated: 2026-04-20T22:05:00Z
-# scan mode: INCREMENTAL_UPDATE (S34 close refresh from S29 baseline)
+# generated: 2026-05-07T00:05:00Z
+# scan mode: FULL_COLD_START (S66 PA-driven map-staleness diagnosis refresh from S40 baseline)
 
 ## Summary
 
-Total docs scanned: 24 (excluding handOffs/, node_modules/, .claude/, .git/, samples/compilation-tests/**, benchmarks/todomvc-*/README.md, benchmarks/fullstack-react/*.md)
-Compliant: 18
-Non-compliant (carry from S29-S33): 3
-Uncertain (carry from S29): 2
-New this session (S34): 1 (GITI-006 follow-up — emission-shape, code-level flag)
+Total docs scanned: ~75 (top-3-depth `*.md` excluding ignored paths)
+Compliant:          ~62
+Non-compliant:      8
+Uncertain:          5
 
----
+This refresh focuses on S40 → S65 drift. The largest cleanup candidate, `docs/changes/`, is already explicitly tracked in `docs/curation/2026-05-05-changes-dir-disposition.md` (PA-curated 36 directories pending disposition); items there are listed below as a single batch entry rather than enumerated.
 
 ## Non-compliant docs
 
-### master-list.md
-**Reason:** content-heuristic (stale header) + grep-mismatch — CARRY (12 sessions stale; per invocation, "will be refreshed this session separately")
-**Detail:** Header still reads "Last updated: 2026-04-17 (S23 — ... 6,889 pass / 10 skip / 2 fail across 278 files)". Actual baseline at S34 close is **7,373 pass / 40 skip / 2 fail across 338 files** (26,808 expects). Delta since header: +484 pass / +30 skip / +60 files / +1,260 expects. Between S23 (header date) and S34 close we've shipped S24-S34 content — 11 full sessions of compiler + codegen work — and the inventory file does not reflect any of it. Explicitly stale items:
-- Line 13 baseline numbers (see above).
-- Line 26: "CG (Code Generator): compiler/src/codegen/ (37 files, ~14,912 LOC)" — LOC drifted substantially with S27-S28 emit-machines (+800 combined) and S34 emit-client (+180), emit-event-wiring (+82), emit-reactive-wiring (+18), emit-control-flow (+31), rewrite (+29).
-- Line 35: "Total compiler src: ~24,739 LOC" — type-system.ts alone has grown +786 LOC to 8,712 since the S29 snapshot; total drift likely >1,500 LOC.
-- Line 59: "bpp.scrml | 230" — actual is 232 (commit 74303d3 edit, S29).
-- Line 74: "compiler/SPEC.md — 18,753 lines, 53 sections" — actual is **20,439 lines** (+1,686 lines since line in file; covers §51.3.2, §51.5.2, §51.11, §51.12, §51.13, §51.14, §54.6 purity).
-- Line 76: "compiler/PIPELINE.md — 1,569 lines" — actual is **1,630 lines**.
-- No inventory entries for gauntlet-s24/s25/s26/s27/s28/s32 test trees, the 8 new S34 adopter-bug test files, `compiler/tests/helpers/extract-user-fns.js` (S28), `SCRML_NO_ELIDE` env var (S28), S28 elision feature, S27 replay feature, S27 audit completeness, S29 self-host bpp.scrml parity, S32 Phase 4a-4g purity enforcement, S34 codegen adopter-bug fixes.
-**Suggested disposition:** refresh in place this session (invocation flags this as separate scope); once refreshed, this line drops out of the report.
+### docs/articles/lsp-and-giti-advantages-draft-2026-04-25.md
+**Reason:** name-heuristic (`-draft-` in filename) + superseded
+**Detail:** A published version exists at `docs/articles/lsp-and-giti-advantages-devto-2026-04-28.md` (3 days later). The draft is dev artefact, not current truth. Article also references `BPP` as a live pipeline stage; PIPELINE.md v0.6.0 (2026-04-02) removed BPP — content is stale.
+**Suggested disposition:** deref to `scrml-support/archive/articles/` or delete.
 
-### compiler/SPEC.md.pre-request-patch
-**Reason:** name-heuristic (`-patch` suffix) + content-heuristic + location — CARRY (flagged S29, not yet moved)
-**Detail:** 12,414-line pre-amendment SPEC snapshot sitting next to the authoritative 20,439-line SPEC.md. Front-matter references paths that no longer exist in-repo (`docs/spec-issues/SPEC-AMENDMENTS-2026-04-02.md`, `docs/changes/spec-s37-amendments/spec-amendments.md`). Pre-dates §51.3.2 migration, §51.5 elision, §51.11 audit, §51.12 temporal, §51.13 projection, §51.14 replay, §54.6 purity. Leaving it next to SPEC.md is a grep trap.
-**Suggested disposition:** move to scrml-support/archive/spec-drafts/ (preserve original filename) OR delete outright (git history preserves).
+### docs/articles/npm-myth-draft-2026-04-25.md
+**Reason:** name-heuristic (`-draft-` in filename) + superseded
+**Detail:** A published version exists at `docs/articles/npm-myth-devto-2026-04-28.md`.
+**Suggested disposition:** deref to `scrml-support/archive/articles/` or delete.
+
+### docs/changes/ (36 subdirectories — batch entry per docs/curation/2026-05-05-changes-dir-disposition.md)
+**Reason:** location + completed-work-as-current
+**Detail:** Per the curation report itself: "Dirs that describe completed-and-merged work belong in `scrml-support/archive/dispatches/`." 36 subdirs present at S65 close; explicit examples of completed-and-merged work include `phase-4d-completion-sweep/`, `phase-a1a-step-*` (subdirectories for each of the 20 A1a sub-steps that all landed at S61), `stage-0c.a-overload-deletion/` (LANDED S64), `parsevariant-impl/` (SHIPPED S65), `a-plus-verdict-execution/` (CLOSED S65), `ast-builder-grammar-fixes/` (LANDED S65), `api-js-stdlib-enum-reexport/` (LANDED S65), `phase-a1b-step-b1-symbol-table-extension/` (LANDED S63), `phase-a1b-step-b2-name-collides-state/` (LANDED S64), `phase-a1b-step-b3-name-resolution/` (LANDED S65), `phase-a1b-step-b5-cell-classifier/` (LANDED S65). Active dispatches (e.g. `promotion-ergonomics/` for Tier B in flight) are compliant and should remain.
+**Suggested disposition:** Run the PA's pending disposition (per curation matrix). Move LANDED/SHIPPED/CLOSED dirs to `scrml-support/archive/dispatches/`; keep only active in-flight dirs in-tree.
+
+### docs/deep-dives/boundary-security-indirect-refs-2026-04-24.md
+**Reason:** location (deep-dive belongs in scrml-support per global rules)
+**Detail:** Per `~/.claude/CLAUDE.md`: "Completed deep-dives: `docs/deep-dives/`" — but project-mapper rules in this prompt say "Deep-dives, debates, ADRs (they belong in scrml-support)". Cross-reference: scrml-support is the home for completed deep-dives per the project-mapper scope contract. Three files present.
+**Suggested disposition:** deref to `scrml-support/docs/deep-dives/`.
+
+### docs/deep-dives/boundary-security-progress.md
+**Reason:** location (same as above)
+**Detail:** Progress-tracker for the boundary-security deep-dive.
+**Suggested disposition:** deref to `scrml-support/docs/deep-dives/` alongside the parent file.
+
+### docs/deep-dives/lsp-enhancement-scoping-2026-04-24.md
+**Reason:** location (same as above)
+**Detail:** Deep-dive scoping doc for LSP enhancement work; LSP L1-L4 has since landed (S40-era). Even if still relevant as research, it belongs in scrml-support.
+**Suggested disposition:** deref to `scrml-support/docs/deep-dives/`.
 
 ### docs/changelog.md
-**Reason:** grep-mismatch (minor) — CARRY updated
-**Detail:** Baseline line reads "2026-04-19 after S28 ... 7,183 tests passing / 10 skipped / 2 failing" — matches S29 open reality, not S34 close. No entries for S29 (self-host bpp.scrml), S30 (public pivot), S31 (design-insights), S32 (purity enforcement Phase 4a-4d), S33 (Phase 4e-4g + gauntlet-s32 un-skip), or S34 (11 adopter bugs, 10 commits). "In Flight" section still not present.
-**Suggested disposition:** append S29-S34 entries in the same block; routine session-boundary drift.
+**Reason:** uncertain — may be stale
+**Detail:** Not opened during this scan; master-list.md notes "Historical session-by-session detail lives in `docs/changelog.md`". If it's been updated through S65 it's compliant; if it stops at S40 or earlier it's drift.
+**Suggested disposition:** human spot-check; bring forward to S65 close if behind, otherwise mark current.
 
----
+### benchmarks/fullstack-react/CLAUDE.md
+**Reason:** name-heuristic + location
+**Detail:** Already flagged in S40-era primary.map.md as "out of place". A `CLAUDE.md` inside a benchmark subdir is anomalous — `CLAUDE.md` files are agent-instruction files; this directory should not require its own. Content is "Default to using Bun instead of Node.js." — boilerplate.
+**Suggested disposition:** delete (or move to repo root if intentional, but the existing pattern is `~/.claude/CLAUDE.md` for global rules).
 
 ## Uncertain docs (needs human review)
 
-### docs/SEO-LAUNCH.md
-**Reason:** uncertain — working doc uncommitted 12 sessions running — CARRY (was 5 sessions at S29; now 12)
-**Detail:** 178 lines, uncommitted on main (`git status M`). Per the original flag this was "the same untouched edit, 5 sessions running"; now it's **12 sessions running**. The doc is a working checklist for ranking `scrml` on Google — planning/ops, not a code-reality claim, so it does not violate the "current truth" principle directly. But a doc uncommitted-and-untouched for 12 sessions is signaling "this work is not happening" and the file is taking up working-tree space on every `git status`.
-**What to check:** user decision — either (a) commit the current state as the S35 opener and resume the SEO work, (b) move the doc into scrml-support/ until it's ready to restart, or (c) delete it and carry the idea forward in a follow-up note.
+### docs/audits/scope-c-stage-1-2026-04-25.md
+**Reason:** age — dated 2026-04-25 (≥30 days older than current SPEC.md mtime 2026-05-06)
+**What to check:** Confirm whether scope-c stage-1 is still the active audit baseline or whether stage-2/3 has superseded it. If superseded, deref to scrml-support/archive/.
 
-### benchmarks/fullstack-react/CLAUDE.md
-**Reason:** uncertain — framework-comparison dir, but claude-code-specific instructions dropped into it — CARRY (unchanged since S29)
-**Detail:** File begins `Default to using Bun instead of Node.js.` — Claude Code system-instruction-style file inside a framework-comparison directory. Not a scrml feature claim; it is agent-tooling configuration for that sub-benchmark. Framework comparison dirs are nominally out-of-scope.
-**What to check:** user decision — intended tooling configuration or leftover artifact? If intentional, add a one-line "why this is here" comment at the top. If leftover, remove.
+### docs/audits/scope-c-stage-1-sample-classification.md
+**Reason:** age — companion to above
+**What to check:** Same as above.
 
----
+### docs/audits/kickstarter-v0-verification-matrix.md
+**Reason:** age — references kickstarter-v0; v2 article exists at `docs/articles/llm-kickstarter-v2-2026-05-04.md`
+**What to check:** Has v0 been retired? If so, deref. If matrix still drives a verification gate, mark current and update header.
 
-## New this session (S34)
+### docs/recon/* (8 files, all dated 2026-04-29)
+**Reason:** age + location — recon notes typically belong in scrml-support after the work they recon for completes
+**What to check:** Each file: was the recon target completed? If yes, deref to scrml-support/archive/recon/. Specific files: audit-remaining-phantoms, audit-spec-only-rows, compiler-dot-api-decision, lin-approach-b-verification, phase2-completion-status, phase2c-test-impact, tailwind-arbitrary-values-and-variants, tutorial-pass2-edit-list.
 
-### GITI-006 follow-up — `${@var.path}` async-reactive emission shape
-**Reason:** code-level behavior flag (not a doc non-compliance, but surfaced via a working-tree inbound and worth tracking alongside doc drift) — NEW
-**Detail:** markup interpolation of the form `${@var.path}` (dotted-path read on a reactive) currently emits a module-top **bare** read that runs at IIFE mount time. If the reactive is populated asynchronously — e.g. by a server-fn async IIFE fixed under GITI-001 earlier in the same body — the read throws `TypeError: cannot read property 'path' of undefined` before the writer settles. Pre-existing emission shape (not a regression from any S34 commit); flagged by giti as low-priority follow-up in `handOffs/incoming/read/2026-04-20-1558-giti-to-scrmlTS-bugs-verified-all-pass.md`.
-**Suggested disposition:** scope a small codegen change to wrap module-top `${@var.path}` reads in either (a) a `_scrml_reactive_get` defer pattern that no-ops on undefined, or (b) an element-bound async reader that waits for first set. Plan in a future session; not urgent.
+### docs/experiments/* (5 files, all dated 2026-04-25)
+**Reason:** age + location
+**What to check:** clueless-agent-* runs and SYNTHESIS / VALIDATION docs are research artefacts. If the kickstarter-v0 → v2 transition closed these out, they belong in scrml-support/docs/experiments/.
 
----
+## Compliant (worth listing for confidence)
 
-## §48.9 stale (carry from S33)
-**Reason:** content-heuristic — CARRY
-**Detail:** SPEC §48.9 describes behavior that no longer matches current fn purity rules after S32 Phase 4a-4g shipped (specifically around machine-transition purity and terminal-mutation checks). S33 wrap flagged this as stale — needs a spec amendment or section rewrite to reflect §54.6 / §33.6 enforcement actually landing.
-**Suggested disposition:** spec amendment in a future session; schedule alongside any other §48 cleanup.
+- `compiler/SPEC.md` (24,911 lines, mtime 2026-05-06) — authoritative.
+- `compiler/PIPELINE.md` (2,380 lines, v0.7.0 dated 2026-05-04) — authoritative.
+- `compiler/SPEC-INDEX.md` — auto-generated index.
+- `master-list.md` (S65 timestamp) — current.
+- `pa.md`, `hand-off.md`, `README.md`, `DESIGN.md`, `scrmlFormula.md` — current.
+- `docs/tutorial.md`, `docs/lin.md`, `docs/external-js.md`, `docs/PA-SCRML-PRIMER.md` — current reference docs.
+- `docs/articles/*-devto-*.md` (publish-named articles, S58-S65 dates) — published artefacts; current.
+- `docs/articles/llm-kickstarter-v{0,1,2}-*.md` — explicit version progression; v2 (2026-05-04) is current; v0/v1 are intentional historical record.
+- `docs/articles/teej_baiting_tweet.md` — social/marketing artefact.
+- `docs/audits/compiler-forgotten-surface-2026-05-06.md` — current (S64-era audit).
+- `docs/audits/scope-c-findings-tracker.md` — open tracker.
+- `docs/curation/2026-05-05-changes-dir-disposition.md` — current curation work.
+- `docs/pinned-discussions/w-program-001-warning-scope.md` — pinned.
+- `docs/website/v0.2.0-announce-2026-05-05.md` — current website-bound copy.
+- `docs/articles/why-scrml-has-to-deprecate-function-and-component-overloading-devto-2026-05-06.md` — pairs with §17.5 amendment landed S64.
+- `docs/articles/x-snippet-zod-calibration-2026-05-06.md` — current.
+- `docs/articles/tier-ladder-promotion-devto-2026-05-04.md` — pairs with §56 promotion-ergonomics Tier A landing.
+- `examples/README.md`, `examples/VERIFIED.md`, `examples/23-trucking-dispatch/{README,FRICTION}.md` — current.
+- `editors/neovim/README.md` — current editor docs.
+- `scripts/git-hooks/README.md` — current.
+- `benchmarks/RESULTS.md`, `benchmarks/sql-batching/RESULTS.md`, `benchmarks/fullstack-react/README.md`, `benchmarks/todomvc-{react,svelte}/README.md` — bench artefacts (stable).
 
----
+## What changed since S40 baseline non-compliance report
 
-## Compliant docs (no action needed)
-
-- README.md — current; markup-RHS component definition claim correct.
-- pa.md — current agent directives.
-- hand-off.md — live S34 close hand-off.
-- docs/lin.md — current; matches §35.
-- docs/tutorial.md — current (2026-04-18); markup-RHS-only component form.
-- docs/changelog.md — S28 covered; see non-compliant note above for S29-S34 follow-up.
-- scrmlFormula.md — creative/reference, no code claims.
-- DESIGN.md — rationale doc; aligns with current contracts.
-- compiler/SPEC.md — authoritative (20,439 lines).
-- compiler/SPEC-INDEX.md — 148 lines, current.
-- compiler/PIPELINE.md — 1,630 lines.
-- compiler/src/codegen/README.md — matches current codegen/ contents.
-- examples/README.md — quick-start and sigil cheatsheet.
-- editors/neovim/README.md — editor integration, not a feature claim.
-- scripts/git-hooks/README.md — tooling doc.
-- benchmarks/RESULTS.md, benchmarks/sql-batching/RESULTS.md — empirical data.
-
-### Tutorial snippets (docs/tutorial-snippets/)
-33 .scrml files; compiled-as-tests fixtures. Match tutorial.md. Implicitly compliant.
-
----
-
-## Out-of-scope (excluded from scan per scope rules)
-
-- node_modules/**/*.md
-- .claude/**/*.md (self-referential)
-- handOffs/**/*.md (34 historical hand-offs; intentional archive)
-- archive/**/*.md (none present)
-- benchmarks/todomvc-react/README.md, benchmarks/todomvc-svelte/README.md (framework comparison dirs)
-- benchmarks/fullstack-react/*.md (except CLAUDE.md flagged above as uncertain)
-- samples/compilation-tests/**/*.md (fixture corpus)
-
----
-
-## Actionable this session (S34 close)
-
-1. **master-list.md** — refresh header + all stale numbers (baseline, SPEC/PIPELINE line counts, codegen LOC, bpp.scrml line count, missing gauntlet trees, S34 adopter-bug test files). Per invocation this refresh is happening separately from the maps refresh.
-2. **compiler/SPEC.md.pre-request-patch** — move to scrml-support/archive/spec-drafts/ or delete outright. Still a grep trap 14 days in.
-3. **docs/changelog.md** — append S29 (self-host bpp.scrml), S30 (public pivot), S31 (design-insights), S32 (Phase 4a-4d), S33 (Phase 4e-4g + un-skip), S34 (11 adopter bugs, 7,373 baseline) entries.
-4. **docs/SEO-LAUNCH.md** — 12-session decision: commit / archive / delete.
-5. **benchmarks/fullstack-react/CLAUDE.md** — confirm intent or clean up.
-6. **GITI-006** (code, not doc) — schedule a small codegen pass for `${@var.path}` async-reactive reads in a future session.
-7. **§48.9 spec refresh** — schedule amendment to align with S32 Phase 4 enforcement.
+- **Closed:** master-list.md staleness (was 12 sessions stale; now S65 current).
+- **Closed:** SEO-LAUNCH.md (now `.gitignore`d explicitly; no longer a tracked-file concern).
+- **New:** `docs/changes/` 36-subdir batch (post-S40 work accumulation).
+- **New:** `docs/articles/*-draft-*` files (drafts that should follow their published counterparts to archive).
+- **Persistent:** deep-dives still in `docs/deep-dives/` (3 files).
+- **Persistent:** `benchmarks/fullstack-react/CLAUDE.md` still out of place.
 
 ## Tags
-#non-compliance #project-mapper #cleanup #scrmlTS #s34 #adopter-bugs #giti-006 #master-list-stale #spec-drift
+#non-compliance #project-mapper #cleanup #scrmlTS #s66-refresh #docs-changes-batch
 
 ## Links
 - [primary.map.md](./primary.map.md)
-- [domain.map.md](./domain.map.md)
-- [error.map.md](./error.map.md)
+- [docs/curation/2026-05-05-changes-dir-disposition.md](../../docs/curation/2026-05-05-changes-dir-disposition.md)
 - [master-list.md](../../master-list.md)
 - [pa.md](../../pa.md)
+- [scrml-support pa.md](../../../scrml-support/pa.md)

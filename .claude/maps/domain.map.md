@@ -1,113 +1,160 @@
 # domain.map.md
 # project: scrmlTS
-# updated: 2026-04-20T22:05:00Z  commit: d6e8288
+# updated: 2026-05-06T23:50:00Z  commit: 7334fb0
 
 ## Core Concepts
 
-scrml — A compiled single-file full-stack reactive web language. Source: .scrml files containing markup, logic (${}), SQL (?{}), CSS (#{}), error (!{}), meta (^{}), and test (~{}) contexts.
+scrml                          — single-file, full-stack reactive web language. One `.scrml` file → emitted server JS + client JS + HTML + CSS.
+The compiler                  — Bun-runtime program that lowers `.scrml` → plain HTML/CSS/JS through a fixed multi-stage pipeline (PIPELINE.md is authoritative).
+Pipeline (current shipped)    — BS → TAB → MOD → CE → VP-1/W-1 → NR/SYM → PA → RI → TS → META (MC+ME) → DG → BP → CG. (PIPELINE.md v0.7.0 = engineering target for v0.next.)
+Pipeline (v0.next target)     — adds NR (3.05) routing for engines/match/errors/onTransition, validity-surface synthesis at TS, derived-cell + validator dependency edges at DG, render-by-tag expansion at CG.
+SPEC                          — `compiler/SPEC.md` (24,911 lines, 89 sections through §56). Authoritative language spec; every code lookup roots here.
+PIPELINE                      — `compiler/PIPELINE.md` (2,380 lines, v0.7.0). Authoritative stage contracts.
+Self-host                     — `compiler/self-host/*.scrml` mirrors of every pass (BS/TAB/PA/RI/TS/DG/CG/BPP/AST/MC/MOD); built into `compiler/self-host/dist/` and conformance-tested.
 
-### Compiler Pipeline (11 stages, single-pass)
-BS (Block Splitter) -> TAB (Tokenizer + AST Builder) -> MOD (Module Resolver) -> CE (Component Expander) -> BPP (Body Pre-Parser) -> PA (Protect Analyzer) -> RI (Route Inference) -> TS (Type System) -> ME (Meta Eval) -> MC (Meta Checker) -> DG (Dependency Graph) -> CG (Code Generator)
+## Stage Contracts (one-line each — full text in PIPELINE.md)
 
-### Component Definition (SPEC §15.6, PIPELINE §Stage 3.2)
-Per SPEC.md:6370: `A const Name = <element ...> declaration at file scope or inside a ${} block defines an inline component`. The RHS **must be markup** for a component-def classification. ast-builder.js:3634 maps a const/let whose name starts with an uppercase ASCII letter (outside meta context) to a `component-def` AST node regardless of whether the RHS is markup. component-expander.ts then re-parses `raw` via splitBlocks+buildAST and emits E-COMPONENT-021 if it fails.
+BS  Block Splitter           — splits `.scrml` source into top-level blocks; emits raw block list.
+TAB Tag-and-Body parser      — turns blocks into `FileAST` (~80 ASTNode kinds in `types/ast.ts`).
+MOD Module Resolver          — builds import graph, validates names against exports, produces compilation order + export registry.
+CE  Component Expander       — expands component references in markup using same-file + cross-file registries.
+VP-1 / W-1                   — validator pass 1: post-CE invariants + attribute allowlist + attribute interpolation; lint pass 1: ghost patterns.
+NR  Name Resolver            — resolves identifiers; (v0.next: also routes engine/match/errors/onTransition structural elements + auto-declares engine variables).
+SYM Symbol Table             — builds symbol tables; **S63 B1 extension** for state-decl `_scope` annotations; **S64 B2** adds collision detection (E-NAME-COLLIDES-STATE).
+PA  Protect Analyzer         — analyses `protect=` and access boundaries.
+RI  Route Inference          — infers routes from file paths + `<program>` config.
+TS  Type System              — type checks (8,969 LOC); validates render-spec shapes, refinement types, fn purity, etc.
+META = MC + ME               — Meta Checker + Meta Eval. MC validates phase separation + reflect() calls; ME evaluates compile-time `^{}` and splices results.
+DG  Dependency Graph         — reactive dependency graph; cycle detection; (v0.next: validator + derived-cell edges).
+BP  Batch Planner            — plans batched DOM updates; emits batch plan.
+CG  Code Generator           — `compiler/src/codegen/index.ts`; orchestrates 39 emit-* modules to produce server JS, client JS, HTML, CSS, and runtime chunks.
 
-### Known bug — uppercase-const classification (flagged S29, still open at S34)
-See primary.map.md Key Facts. Fix surface is narrow at ast-builder.js:3634 (require RHS to start with `<`), but tab.test.js:649-654 encodes bug as expected behavior. S30-S34 focused on other priorities (S30 public pivot, S32-S33 machine purity enforcement, S34 adopter-reported codegen bugs); this bug has not been worked.
+## Key Spec Sections (high-traffic, read these first)
 
-### Expression AST (Phase 3+ — current work)
-The compiler is migrating from string-based expression handling (rewrite.ts) to structured ExprNode trees (expression-parser.ts + emit-expr.ts). Dual-path pattern: `node.exprNode ? emitExpr(...) : rewriteExpr(...)`. Escape-hatch rate on the example corpus: 0%.
+§4 Block Grammar              — tags, states, closer forms.
+§5 Attribute Quoting          — incl. §5.4.1 render-spec / render-by-tag.
+§6 V5-Strict Reactivity       — `@x` access model.
+§10 The `lift` Keyword        — server→client value lifting.
+§13 Async Model.
+§14 Type System.
+§15-§16 Components + Slots.
+§17 Control Flow              — including S64 §17.5 deletion of function-overload (Stage 0c.A).
+§18 Pattern Matching          — match block-form (v0.next).
+§19 Error Handling.
+§22 Metaprogramming           — `^{}` blocks.
+§28 Compiler Settings.
+§30 Compile-Time `bun.eval()`.
+§32 The `~` Pipeline Accumulator.
+§33 The `pure` Keyword.
+§34 Error Codes.
+§35 Linear Types — `lin`.
+§37 SSE Generators            — `server function*`.
+§38 WebSocket Channels        — `<channel>`.
+§39 `<schema>` + Migrations.
+§41 `use` and `import` System — incl. §41.13 `parseVariant` (S65 SHIPPED stdlib enum, also §53.14).
+§44 `?{}` Multi-DB Adaptation.
+§47 Output Name Encoding.
+§48 The `fn` Keyword          — pure functions.
+§51 `<machine>` State Type    — §51.5 validation elision (S28); §51.11/§51.14 audit + replay (S27).
+§52 State Authority Decls.
+§53 Inline Type Predicates    — incl. §53.14 type-as-argument primitives (S65).
+§54 Nested Substates          — §54.6 fn purity in transitions (S33).
+§55 Validators + Auto Validity Surface.
+§56 Promotion Ergonomics      — `I-MATCH-PROMOTABLE` + `bun scrml promote` (S65 Tier A; Tier B in flight).
 
-**S34 expression-parser fix (6nz Bug C / commit 127d35a):** CallExpression case now threads `rawSource` down through its argument recursion, and the ArrowFunctionExpression/FunctionExpression case slices `rawSource.slice(node.start, node.end)` for block-body arrows so the escape-hatch carries the original text rather than "". Without this, `.map((n, i) => { if (...) return n*2; return n })` was emitting `.map()` — the arrow silently vanished.
+## Architecture Locks (v0.2.0 migration)
 
-### Reactivity Model
-@varName declares reactive state. The compiler rewrites @var references to _scrml_reactive_get("var") (client) or _scrml_body["var"] (server). Derived reactives: const @name = expr. Debounced: @debounced(N) name = expr.
+22 architectural locks (L1-L22) ratified at S58 close + extended at S65 (L22 type-as-argument). 20 moves (M1-M20, M7+M21 dropped). Migration is **piecemeal** (S59 decision) — acorn STAYS as pre-processor extension, not greenfield rewrite. AST extension target: `kind: "state-decl"` (was `"reactive-decl"` before S59 rename).
 
-**S34 reactive + server-fn interaction (GITI-001 / commit d23fd54):** `@data = serverFn()` where serverFn is a `server function` now awaits the returned Promise before calling `_scrml_reactive_set`, wrapped in an async IIFE. Previously the unawaited Promise was stored as the value, so readers saw `[object Promise]` or undefined. `<request>` tag without a `url=` attribute now skips its fetch machinery (previously fired `fetch("", ...)` on mount and silently failed).
+L21 lock                     — E-DERIVED-VALUE-MUTATE (S59 commit `1217b41`).
+L22 lock                     — type-as-argument language primitive (S65; debate-05 verdict + Path A architectural commit).
 
-**S34 markup interpolation of server fn calls (GITI-005 / commit e585dba):** `<p>${loadGreeting()}</p>` where loadGreeting is a server function now compiles to an async IIFE that awaits the call and sets textContent on the placeholder DOM node after await. Previously emitted the call at module top with result dropped and an empty reactive-display-wiring block.
+## Phase Status (master-list.md §0 is canonical — read it for live state)
 
-### Linear Types (lin)
-lin declarations enforce single-consumption semantics. The type system tracks lin variable lifetimes across control flow and closures. E-LIN-* errors fire on unconsumed, double-consumed, shadowed (E-LIN-005 S24), or request/poll-body (E-LIN-006 S25) lin variables.
+Stage 0a IMPACT-ASSESSMENT     — DONE.
+Stage 0b SPEC + PIPELINE rewrite — DONE (D1-D4).
+Stage 0b+ L21 lock              — DONE.
+Phase A1a (lex+parse)           — COMPLETE at S61.
+Phase A1b (resolve+type)        — IN FLIGHT. B1 (S63), B2 (S64), B3+B5 (S65) landed; B4, B6-B22 pending.
+Phase A1c (codegen+runtime)     — RATIFIED S60; 24 steps C0-C23 in 6 waves; not yet started.
+Stage 0c.A (function-overload deletion) — LANDED S64 commit `6507475`.
+Stage 0c.B-D                    — REMOVED (no code existed to delete; S64 forgotten-surface audit).
+Stage 0c.E (SPEC §17.5 amendment) — LANDED S64 commit `8bda55f`.
+Stage 0c.F (audit-doc updates)  — LANDED scrml-support `fec630f`.
+parseVariant (L22 family)       — SHIPPED S65 (stdlib enum + SPEC §41.13 + §53.14 + emit-parse-variant.ts).
+A+ verdict #1+#2+#3 carry-forward — CLOSED S65 (E-SWITCH-FORBIDDEN + W-LIFECYCLE-CANDIDATE).
+Promotion ergonomics Tier A     — LANDED S65 (CLI stub + spec + docs); Tier B in flight in worktree `agent-a35e9695d1b010931`.
 
-### Pattern Matching
-match expr { .Variant => body, else => fallback }. Exhaustiveness checking via the type system (E-TYPE-026). The `is` operator checks enum membership: x is .Active.
+## Codegen Surfaces (compiler/src/codegen/, ~14,135 LOC across 39 modules)
 
-### §19 Error Handling
-- `fail E.V(data)` emits a tagged return object: `return { __scrml_error: true, type, variant, data }`.
-- `?` propagation emits a value check + return; binding is optional.
-- Inline `!{}` catch is a value-based check against `result.__scrml_error`, NOT try/catch.
-- Standalone `!{}` remains a true try/catch for genuine JS throws.
-- E-ERROR-001 fires on `fail` in a non-failable function.
-- S28: GuardedExprNode arm.handlerExpr now walked by scope-checker (E-SCOPE-001 fires on undeclared identifiers; caught-error binding pushed into scope).
-- Codegen: emit-logic.ts:632-756.
+emit-client.ts    (1,112)   — client bundle entry; mangler interaction.
+emit-control-flow.ts (1,253) — if/else/for/while/match lowering.
+emit-logic.ts     (1,895)   — `<logic>` block lowering.
+emit-reactive-wiring.ts (1,002) — V5-strict reactive subscription wiring.
+emit-html.ts      (915)     — HTML rendering + render-by-tag.
+emit-server.ts    (905)     — server bundle entry.
+rewrite.ts        (1,861)   — mangler + identifier rewrite.
+emit-machines.ts  (719)     — `<machine>` lowering.
+emit-event-wiring.ts (696)  — DOM event wiring (incl. S34 GITI-005 `${serverFn()}` markup fix).
+type-encoding.ts  (670)     — type encoding for compiled output.
+emit-expr.ts      (582)     — expression lowering.
+emit-machine-property-tests.ts (579) — property-test machinery for state machines.
+emit-bindings.ts  (506)     — bind:value et al.
+emit-predicates.ts (496)    — refinement-type predicates.
+reactive-deps.ts  (492)     — reactive-dep collection.
+collect.ts        (482)     — codegen-side collector.
+emit-library.ts   (447)     — library-mode emit.
+emit-channel.ts   (421)     — `<channel>` lowering.
+scheduling.ts     (303)     — flush scheduling.
+emit-functions.ts (282)     — function emission.
+source-map.ts     (220)     — source-map generation.
+emit-parse-variant.ts (219) — parseVariant codegen (S65 SHIPPED).
+emit-css.ts       (210)     — CSS emission.
+emit-sync.ts      (197)     — sync wiring.
+ir.ts             (193)     — codegen IR.
+emit-test.ts      (185)     — test-mode emit.
+runtime-chunks.ts (177)     — runtime chunk packager.
+binding-registry.ts (167)   — binding registry.
+db-driver.ts      (151)     — Bun.SQL URI classifier (S40 Phase 2; E-SQL-005).
+analyze.ts        (124)     — codegen analyse.
+context.ts        (101)     — codegen context.
+emit-worker.ts    (74)      — `<worker>` lowering.
+errors.ts         (48)      — codegen-local error helpers.
+utils.ts          (37)      — utils.
+var-counter.ts    (25)      — fresh-var counter.
+emit-lift.js      (1,405)   — `lift` keyword lowering (incl. S40 lift+sql/return+sql/state-decl+sql triad fix).
+index.ts          (759)     — codegen orchestrator.
+README.md         —         — codegen overview.
+compat/parser-workarounds.js — BPP-replacement compat shims.
 
-### §51 State Machines
-- Grammar: `variant-ref-list ::= variant-ref ('|' variant-ref)*`. `|` alternation expands to the cross-product via `expandAlternation` (type-system.ts:1902). E-MACHINE-014 fires on duplicate `(from, to)` pairs.
-- `< machine Name attribute-form>` is the current opener (§51.3.2, S25 migration); pre-S25 `< machine Name for Type>` sentence form emits E-MACHINE-020.
-- Machines govern enums and structs (Approach C). Struct machines use `* => *` wildcard rules with `given (self.*)` guards that fire after every mutation.
-- §51.11 audit: `audit @varName` on `< machine>` captures completeness including timer transitions + freeze (S27); audit entry shape extended with `rule` + `label` fields (S27).
-- §51.12 temporal: `.From after Ns => .To` (S25).
-- §51.13 projection machines: 6 phases shipped (S26); phase 7 guarded projection property tests (S28); phase 8 (runtime parity) deferred.
-- §51.14 replay primitive: `replay(@target, @log [, index])` (S27). Compile-time validation E-REPLAY-001/002 (S27); E-REPLAY-003 rejects cross-machine replay (S28).
+## LSP
 
-### §51.5 Validation Elision (S28)
-classifyTransition returns "elidable" | "illegal" | "unknown" for each machine-bound assignment. emitElidedTransition drops validation-only codegen but preserves §51.11 audit push, §51.12 timer arm/clear, §51.3.2 effect block, §51.5.2(5) state commit. SCRML_NO_ELIDE=1 env var / setNoElide() knob gates dual-mode CI. §51.5.1 illegal detection runs BEFORE the no-elide gate.
+lsp/server.js     (235)     — entry; --stdio.
+lsp/handlers.js   (2,113)   — L1 (diagnostics/hover/definition) + L2 (workspace) + L3 (completions: component-prop, import, sql).
+lsp/workspace.js  (440)     — workspace state.
+lsp/l4.js         (~600)    — L4 code actions + signature help.
 
-### §54.6 / §33.6 Machine Purity Enforcement (S32 Phase 4a-4g, closed S33)
-- E-STATE-TRANSITION-ILLEGAL at call site (commit 72210e8, §54.6.3)
-- E-STATE-TERMINAL-MUTATION on field writes to terminal substates (commit 5de6a2d, §54.6.4)
-- Fn-level purity in transition bodies (commit 37f21f7, §33.6)
-- 9 gauntlet-s32 tests un-skipped by commit 36eadb9 as Phase 4a-4g coverage caught up
+## Stdlib (`stdlib/<name>/index.scrml` + extras; 17 modules)
 
-### Module Resolution (S21)
-E-IMPORT-006: module-resolver.js:146 — existsSync gate for relative imports outside the compile set. Synthetic paths used by unit tests are skipped.
+auth, compiler, cron, crypto, data, format, fs, http, oauth (with discord/github/google/microsoft + pkce), path, process, redis, regex, router, store (with kv), test, time.
 
-**S34 import-scope fix (GITI-002 / commit 881b411):** type-system.ts `case "import-decl"` now registers each imported local name into the current scope chain with `kind: "import"`, so checkLogicExprIdents via scopeChain.lookup() no longer emits a false E-SCOPE-001 on uses of imported names elsewhere in the logic block (including inside `server function` bodies).
+Hand-written ES module shims for the runtime live at `compiler/runtime/stdlib/{auth,crypto,store}.js` and are copied verbatim to `dist/_scrml/<name>.js` so emitted JS resolves `import "scrml:<name>"` rewrites. Note: stdlib `.scrml` sources contain `server {}` blocks the standard pipeline does not yet lower at TS time (M16 deeper bring-up).
 
-### Server/Client Split
-Functions prefixed with `server` compile to server-side route handlers. The compiler auto-splits into client JS (IIFE with reactive runtime) and server JS (fetch endpoints). `server @var` pins state to the server (compile-time enforced); `protect` hides struct fields from client-visible types.
+## Open Bugs / Carry-forwards
 
-**S34 boundary cleanup (GITI-003 + GITI-004 / commit e5f5b22):**
-- emit-client.ts now runs a post-emit prune pass that drops imports whose local names are not referenced in the client body. Scoped to non-scrml paths to preserve scrml:/vendor:/.client.js imports. Fixes server-only helper imports leaking into .client.js and 500ing page load.
-- `lift <expr>` and markup with `boundary: "server"` inside a `server function` body now lowers differently — a plain IIFE/value path — so server handlers no longer reference `document` or `_scrml_lift` (browser-only). Previously the handler returned undefined.
-
-### S34 control-flow + tilde-decl (6nz Bug B + F / commit 70190a7)
-emit-control-flow.ts and emit-logic.ts now thread `declaredNames` through IfOpts, forStmt, and whileStmt. `let x = A; if (c) x = B` correctly emits `x = B;` (reassignment) in the branch instead of `const x = B;` (shadow — Bug B) or `_scrml_derived_declare("x", ...)` (spurious reactive — Bug F). Nested branches (if-in-for-in-fn) verified.
-
-### S34 codegen hygiene fixes
-- Object.freeze emission missing commas between props — `aa92070` (emit-logic.ts)
-- Thread `event` into bare-call event handlers — `eb86d31` (emit-event-wiring.ts)
-- Scope-aware mangler with negative-lookbehind for `.` so `classList.toggle(...)` does not get rewritten to `classList._scrml_toggle_7(...)` — `27ed6fe` (emit-client.ts)
-
-### Mutability Contracts
-Opt-in, layerable: value predicates, presence lifecycle (`not`/`is some`/`is not`/`lin`), and state-machine transitions. A `fn` may mutate through any of these contracts while remaining provably pure. No runtime fee for unused contracts.
-
-## Business Invariants
-- Every ExprNode tree must round-trip: emitStringFromTree(parseExprToNode(x)) === x (Phase 1)
-- emitExpr(node) must produce identical output to rewriteExpr(stringForm) for all inputs (Phase 3)
-- Protected fields (PA stage) must never leak to client JS output
-- Lin variables consumed exactly once (E-LIN-001 if unconsumed, E-LIN-002 if double-consumed)
-- Escape-hatch rate on the example corpus must be 0% (currently met)
-- A machine body SHALL NOT be empty (E-MACHINE-005) and SHALL NOT contain duplicate `(from, to)` pairs after `|` expansion (E-MACHINE-014)
-- `fail` SHALL appear only in failable functions (E-ERROR-001)
-- Relative imports SHALL resolve to an existing file on disk unless pointing into the compile set (E-IMPORT-006)
-- Side-effect work on machine transitions (audit, timer, effect, commit) SHALL run on every successful transition — validation elision MAY drop validation-only codegen but NEVER side effects (§51.5.2)
-- After CE, no `component-def` node appears at any depth and no markup node with `isComponent: true` remains (PIPELINE §Stage 3.2)
-- **S34:** emit-client.ts MUST NOT emit imports whose local bindings are unreferenced in the client body (GITI-003)
-- **S34:** emit-client.ts mangler MUST NOT rewrite property-access call sites that happen to share a user-fn name (Bug D)
-- **S34:** `server function` bodies emitted for the server bundle MUST NOT reference `document` or `_scrml_lift` (GITI-004)
-- **S34:** `declaredNames` MUST be threaded through all nested control-flow emitters so reassignment inside branches does not shadow or spuriously declare-derived (Bugs B, F)
-
-## Domain Events
-Runtime event model uses EventEmitter pattern in runtime-template.js and runtime-chunks.ts for reactive subscriptions. Channel nodes emit via WebSocket (channel tag in SPEC section 38). §51.11 audit log entries are the domain-event surface for machine state changes (rule + label on each entry S27).
+- **ComponentDefNode classifier (S29-flagged, still present at S65):** `ast-builder.js:3634` classifies any uppercase-named `const/let` as component-def regardless of RHS. Fix surface narrow but `tab.test.js:649-654` encodes the bug as policy and self-host modules carry mirror logic. Not on critical path; deferred for v0.next.
+- **GITI-006 (low):** markup `${@var.path}` emits a module-top bare read that throws on async-initialized reactives.
+- **Two persistent self-host smoke failures** — deferred per user since pre-S40.
 
 ## Tags
-#scrmlTS #map #domain #compiler #ExprNode #reactivity #lin #pattern-matching #s27-replay #s28-elide #s32-purity #s34-adopter-bugs #server-client-boundary
+#scrmlTS #map #domain #pipeline #stdlib #codegen #lsp #spec #v0next #s65 #parseVariant #a-plus-verdict
 
 ## Links
 - [primary.map.md](./primary.map.md)
-- [error.map.md](./error.map.md)
 - [schema.map.md](./schema.map.md)
+- [error.map.md](./error.map.md)
+- [structure.map.md](./structure.map.md)
+- [SPEC.md](../../compiler/SPEC.md)
+- [PIPELINE.md](../../compiler/PIPELINE.md)
 - [master-list.md](../../master-list.md)
 - [pa.md](../../pa.md)

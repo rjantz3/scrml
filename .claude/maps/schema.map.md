@@ -1,101 +1,118 @@
 # schema.map.md
 # project: scrmlTS
-# updated: 2026-04-19T22:00:00Z  commit: 74303d3
+# updated: 2026-05-06T23:50:00Z  commit: 7334fb0
 
-## TypeScript Types & Interfaces
+## TypeScript AST — `compiler/src/types/ast.ts` (1,641 LOC)
 
-### Source Location  [compiler/src/types/ast.ts:18-30, 1074-1085]
-Span: { file, start, end, line, col }
-ExprSpan: { file, start, end, line, col }
+This is the canonical AST contract. Every pass downstream of TAB consumes/produces these nodes.
+~80 `kind` discriminators across `ASTNode` (logic + markup statements) and `ExprNode` (expressions).
 
-### Attribute Values  [compiler/src/types/ast.ts:40-99]
-AttrValue = StringLiteralAttrValue | VariableRefAttrValue | CallRefAttrValue | ExprAttrValue | PropsBlockAttrValue | AbsentAttrValue
-VariableRefAttrValue: { kind, name, exprNode?, span } — Phase 3: exprNode populated by ast-builder
-CallRefAttrValue: { kind, name, args, argExprNodes?, span } — Phase 4: argExprNodes populated
-ExprAttrValue: { kind, raw, refs, exprNode?, span } — Phase 3: exprNode populated by ast-builder
-AttrNode: { name, value:AttrValue, span }
-TypedAttrDecl: { name, typeExpr, optional, defaultValue, span }
+### Core / shared
+Span                          — { start: number; end: number; line?: number; col?: number }.
+AttrValue (union)             — StringLiteralAttrValue | VariableRefAttrValue | CallRefAttrValue | ExprAttrValue | PropsBlockAttrValue | AbsentAttrValue.
+AttrNode                      — { name; value: AttrValue; span; eqSpan?; ... }.
+TypedAttrDecl                 — typed attribute decl shape used by props-blocks + bind:value validators.
+SQLChainedCall                — { method: string; args: ExprNode[] } — used in `SQLNode.chained` for `.bind(...).all()` chains (S58 lift+sql/return+sql triad).
+LiftTarget (union)            — `state-cell` | `tilde` | `lin` etc.
 
-### CSS Types  [compiler/src/types/ast.ts:120-156]
-CSSReactiveRef: { name, expr }
-CSSDeclaration: { prop, value, span, reactiveRefs?, isExpression? }
-CSSRule = CSSPropertyRule | CSSSelectorRule
+### Markup + control
+MarkupNode                    — generic HTML element/component-instance node (`kind: "markup"`); has `tag`, `attrs`, `children`.
+TextNode                      — `kind: "text"`.
+CommentNode                   — `kind: "comment"`.
+ChannelDeclNode (extends MarkupNode) — `kind: "markup"` with `tag === "channel"`; file-level WebSocket channel decl.
+HtmlFragmentNode              — `kind: "html-fragment"`; raw HTML pass-through.
+StyleNode                     — `kind: "style"`.
+CSSInlineNode                 — `kind: "css-inline"`.
+CSSRule (union)               — CSSPropertyRule | CSSSelectorRule.
+CSSReactiveRef                — reactive ref captured inside CSS.
 
-### Error Effect Arm  [compiler/src/types/ast.ts:163-177]
-ErrorArm: { pattern, binding, handler, handlerExpr?, span } — S28: handlerExpr walked by scope-checker (E-SCOPE-001 now fires in error-arm bodies; symmetric with propagate-expr binding push)
-LiftTarget = { kind:"markup", node } | { kind:"expr", expr, exprNode? }
+### Decls
+LetDeclNode                   — `kind: "let-decl"`.
+ConstDeclNode                 — `kind: "const-decl"`.
+TildeDeclNode                 — `kind: "tilde-decl"` — pipeline accumulator (§32).
+LinDeclNode                   — `kind: "lin-decl"` — linear type (§35).
+ReactiveDeclNode              — `kind: "state-decl"` (renamed from `"reactive-decl"` in Phase A1a Step 3, S59).
+StateConstructorDefNode       — `kind: "state-constructor-def"`.
+StateNode                     — `kind: "state"`.
+ReactiveDebouncedDeclNode     — `kind: "reactive-debounced-decl"`.
+ReactiveNestedAssignNode      — `kind: "reactive-nested-assign"`.
+ReactiveArrayMutationNode     — `kind: "reactive-array-mutation"`.
+ReactiveExplicitSetNode       — `kind: "reactive-explicit-set"`.
+FunctionDeclNode              — `kind: "function-decl"`; `pure?: boolean` (§48).
+ComponentDefNode              — `kind: "component-def"`; classifier at ast-builder.js:3634 still has the open S29 bug (uppercase-named `const/let` regardless of RHS).
+TypeDeclNode                  — `kind: "type-decl"`.
+RenderSpecNode                — `kind: "render-spec"` (§5.4.1).
+ImportDeclNode + ImportSpecifier — `kind: "import-decl"`.
+UseDeclNode                   — `kind: "use-decl"`.
+ExportDeclNode                — `kind: "export-decl"`. (S65 ast-builder grammar fixes: export function decl swallow, export *, renamed re-exports.)
 
-### AST Nodes (~55 kinds)  [compiler/src/types/ast.ts:200-903]
-Discriminated by `kind` string literal. BaseNode provides { id, span }.
-Key nodes: MarkupNode, TextNode, CommentNode, StateNode, StateConstructorDefNode, LogicNode, SQLNode, CSSInlineNode, StyleNode, ErrorEffectNode, MetaNode
-Declarations: LetDeclNode, ConstDeclNode, TildeDeclNode, LinDeclNode, ReactiveDeclNode, ReactiveDerivedDeclNode, ReactiveDebouncedDeclNode
-Reactive ops: ReactiveNestedAssignNode, ReactiveArrayMutationNode, ReactiveExplicitSetNode
-Functions: FunctionDeclNode { ..., fnKind:"function"|"fn", isServer, canFail, errorType?, route? }
-Control flow statements: IfStmtNode, ForStmtNode (cStyleParts?), WhileStmtNode, ReturnStmtNode, ThrowStmtNode, SwitchStmtNode, TryStmtNode, MatchStmtNode
-Control flow expressions: IfExprNode, ForExprNode, MatchExprNode
-Expressions: BareExprNode, HtmlFragmentNode, LiftExprNode, FailExprNode, PropagateExprNode, GuardedExprNode
-Module: ImportDeclNode, UseDeclNode, ExportDeclNode, TypeDeclNode, ComponentDefNode
-Effects: TransactionBlockNode, CleanupRegistrationNode, WhenEffectNode (bodyExpr?), WhenMessageNode (bodyExpr?), UploadCallNode (fileExpr?, urlExpr?), DebounceCallNode, ThrottleCallNode
+### Effects + flow
+LogicNode                     — `kind: "logic"`.
+SQLNode                       — `kind: "sql"`; carries `chained?: SQLChainedCall[]`.
+MetaNode                      — `kind: "meta"` (§22).
+ErrorEffectNode               — `kind: "error-effect"`.
+WhenEffectNode                — `kind: "when-effect"`.
+WhenMessageNode               — `kind: "when-message"`.
+TransactionBlockNode          — `kind: "transaction-block"`.
+CleanupRegistrationNode       — `kind: "cleanup-registration"`.
+UploadCallNode                — `kind: "upload-call"`.
+DebounceCallNode              — `kind: "debounce-call"`.
+ThrottleCallNode              — `kind: "throttle-call"`.
+IfStmtNode / IfExprNode       — `kind: "if-stmt"` / `"if-expr"`.
+ForStmtNode / ForExprNode     — `kind: "for-stmt"` / `"for-expr"`.
+WhileStmtNode                 — `kind: "while-stmt"`.
+ReturnStmtNode                — `kind: "return-stmt"`.
+ThrowStmtNode                 — `kind: "throw-stmt"`.
+SwitchStmtNode                — `kind: "switch-stmt"`.
+TryStmtNode                   — `kind: "try-stmt"`.
+MatchExprNode                 — `kind: "match-expr"`.
+MatchStmtNode                 — `kind: "match-stmt"`.
+MatchArmInlineNode            — `kind: "match-arm-inline"`.
+ErrorArm                      — match-arm error variant.
 
-### §19 Error-handling nodes  [ast.ts:717-756]
-FailExprNode: { kind:"fail-expr", enumType, variant, args?, argsExpr?, span } — codegens to `return { __scrml_error: true, type, variant, data };`
-PropagateExprNode: { kind:"propagate-expr", expr, exprNode?, binding?, span } — codegens to `const tmp = expr; if (tmp.__scrml_error) return tmp;` + optional bind
-GuardedExprNode: { kind:"guarded-expr", guardedNode, arms:ErrorArm[], span } — `!{ expr } catch .V { ... }` compiles to value-based error check (NOT try/catch); S28 scope-checks arm.handlerExpr + binds caught-error
-ErrorEffectNode (standalone !{}): uses try/catch with type-name instanceof / tag check
+### Expression-level (mixed into LogicStatement)
+BareExprNode                  — `kind: "bare-expr"`. (Phase 4d Step 8 deleted `BareExprNode.expr` field — strict cleanup landed pre-S40.)
+LiftExprNode                  — `kind: "lift-expr"` (§10).
+FailExprNode                  — `kind: "fail-expr"`.
+PropagateExprNode             — `kind: "propagate-expr"`.
+GuardedExprNode               — `kind: "guarded-expr"`.
+ValidatorEntry                — single validator binding entry inside `ReactiveDeclNode.validators[]`.
 
-### Component Definition Node  [ast.ts:535-541]
-ComponentDefNode: { kind:"component-def", name:string, raw:string, span, defChildren?:ASTNode[] (attached at ast-builder.js:5708) }
-  **Documented contract (SPEC.md:6370):** `const Name = <element ...>` — RHS MUST be markup.
-  **Current impl (ast-builder.js:3634):** triggers on ANY `const/let Name = <expr>` where name[0] is uppercase, regardless of whether RHS is markup. See domain.map.md "Known bug — uppercase-const classification."
+### ExprNode kinds (used in expression-parser.ts)
+`ident`, `lit`, `string-literal`, `array`, `object`, `spread`, `call`, `member`, `index`, `binary`, `unary`, `ternary`, `cast`, `assign`, `lambda`, `new`, `call-ref`, `variable-ref`, `sql-ref`, `input-state-ref`, `expr` (parenthesized), `escape-hatch`, `reset-expr` (§55 `reset(@cell)`), `match-expr`, `if-expr`, `for-expr`, `lift-expr`, `fail-expr`, `propagate-expr`, `guarded-expr`, `props-block`, `absent`.
 
-### ExprNode Types (19 kinds)  [compiler/src/types/ast.ts:1087-1420]
-ExprNode = IdentExpr | LitExpr | ArrayExpr | ObjectExpr | SpreadExpr | UnaryExpr | BinaryExpr | AssignExpr | TernaryExpr | MemberExpr | IndexExpr | CallExpr | NewExpr | LambdaExpr | CastExpr | MatchExpr | SqlRefExpr | InputStateRefExpr | EscapeHatchExpr
+### Auth / module config
+AuthConfig                    — `<program auth>` config object.
+MiddlewareConfig              — `<program middleware>` config object.
 
-IdentExpr: { kind:"ident", name, span } — @name for reactive, "~" for pipeline
-LitExpr: { kind:"lit", raw, value, litType, span } — litType includes "not" (§42 absence)
-BinaryExpr: { kind:"binary", op, left, right, span } — scrml ops: "is", "is-not", "is-some", "is-not-not", "??"; == / != are §45 structural
-AssignExpr: { kind:"assign", op, target, value, span } — reactive assign: @var = expr
-LambdaExpr: { kind:"lambda", params, body, isAsync, fnStyle, span } — body is expr | block
-MatchExpr: { kind:"match-expr", subject, rawArms, span } — arms still raw strings (Phase 2 target)
-EscapeHatchExpr: { kind:"escape-hatch", estreeType, raw, span } — fallback for unparseable constructs
+### Top-level shapes
+FileAST                       — root output of TAB; `{ blocks: ASTNode[]; ... }`.
+TABOutput                     — TAB stage envelope.
+LogicStatement (union)        — every `kind:` allowed inside a `<logic>` body.
+ASTNode (union)               — every node kind that can appear at top level / in markup children.
+ASTNodeKind = ASTNode["kind"] — string literal union over kind discriminators.
 
-### Discriminated Unions  [compiler/src/types/ast.ts:904-973]
-LogicStatement: union of 42+ statement node kinds + block-level nodes (MarkupNode, SQLNode, CSSInlineNode, MetaNode, ErrorEffectNode)
-ASTNode: union of all top-level kinds
-ASTNodeKind = ASTNode["kind"]
+## SQL Schema (per-file `<schema>` block — §39)
 
-### File-Level Types  [compiler/src/types/ast.ts:980-1060]
-FileAST: { filePath, nodes, imports, exports, components, typeDecls, spans, hasProgramRoot, authConfig, middlewareConfig }
-TABOutput: { filePath, ast:FileAST, errors:TABErrorInfo[] }
-AuthConfig: { auth, loginRedirect, csrf, sessionExpiry }
-MiddlewareConfig: { cors, log, csrf, ratelimit, headers }
-TABErrorInfo: { code, message, tabSpan, severity? }
+scrml does not own a single global DB schema. Each `.scrml` file may declare a `<schema>` block; `compiler/src/schema-differ.js` reconciles diffs at compile time. Migrations are emitted into `dist/` per file. The schema shape is user-defined; compiler validates SQL passthrough via `<sql>` blocks against the declared schema.
 
-### Codegen Types  [compiler/src/codegen/context.ts, emit-expr.ts, emit-event-wiring.ts, index.ts, errors.ts]
-CompileContext: { filePath, fileAST, routeMap, depGraph, protectedFields, authMiddleware, middlewareConfig, csrfEnabled, encodingCtx, mode, testMode, dbVar, workerNames, errors, registry, derivedNames, analysis, usedRuntimeChunks }
-EmitExprContext: { mode:"client"|"server", derivedNames?, tildeVar?, dbVar?, errors? }
-CgInput: { files, routeMap?, depGraph?, protectAnalysis?, sourceMap?, embedRuntime?, mode?, testMode?, encoding? }
-EventBinding: { placeholderId, eventName, handlerName, handlerArgs?, handlerExpr?, handlerExprNode? }
-LogicBinding: { placeholderId, expr, reactiveRefs?, isConditionalDisplay?, varName?, condExpr?, condExprNode?, exprNode? }
-CGError: { code, message, span, severity }
-RewriteContext: { errors?, derivedNames?, dbVar? }
+## Database driver classification — `compiler/src/codegen/db-driver.ts` (151 LOC, S40 Phase 2)
 
-### Machine Codegen Types  [compiler/src/codegen/emit-machines.ts]
-RuleBinding: { localName, fieldName }
-TransitionRule: { from, to, guard, label, effectBody, payloadBindings?, afterMs? }
-classifyTransition(newValueExpr, rules): "elidable" | "illegal" | "unknown"  — S28 slice 1-3 elision classifier
-emitElidedTransition(...): emits bare _scrml_reactive_set or IIFE retaining side-effect work (audit push / timer arm / effect body / state commit)
+URI scheme classifier for `?{}` multi-database adaptation (§44):
+- `postgres://`, `postgresql://` → Bun.SQL postgres driver.
+- `sqlite:` / file path → Bun.SQL sqlite driver.
+- Mismatched URI vs declared dialect → **E-SQL-005** (URI/dialect mismatch).
 
-### Expression Parser Types  [compiler/src/expression-parser.ts:33-49]
-ESNode: { type:string, [key]:unknown } — minimal ESTree node
-ParseResult: { ast:ESNode|null, error:string|null }
-RewriteResult: { result:string, ok:boolean }
+## GraphQL / Proto
+None. (Project does not use GraphQL or protobuf.)
 
 ## Tags
-#scrmlTS #map #schema #ast #ExprNode #types #codegen #s28 #component-def-bug
+#scrmlTS #map #schema #ast #expression-parser #node-kinds #s65 #reactive-decl-rename #parseVariant
 
 ## Links
 - [primary.map.md](./primary.map.md)
 - [domain.map.md](./domain.map.md)
+- [error.map.md](./error.map.md)
+- [SPEC.md](../../compiler/SPEC.md)
+- [PIPELINE.md](../../compiler/PIPELINE.md)
 - [master-list.md](../../master-list.md)
-- [pa.md](../../pa.md)

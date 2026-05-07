@@ -1,61 +1,72 @@
 # primary.map.md
 # project: scrmlTS
-# updated: 2026-04-25T07:00:00Z  commit: c7466c8
+# updated: 2026-05-07T00:10:00Z  commit: 7334fb0
 
 ## Project Fingerprint
-Language:   JavaScript / TypeScript (mixed — .js and .ts files, Bun runtime)
-Framework:  Custom compiler (scrml language compiler)
-Runtime:    Bun (no Node.js — bun test, bun run)
-Type:       Compiler + CLI tool + LSP server
-Size:       ast-builder.js 7,150 LOC; type-system.ts 8,770 LOC; expression-parser.ts 2,035 LOC; types/ast.ts 1,452 LOC; SPEC.md 20,442 lines; PIPELINE.md 1,632 lines; codegen/ 39 modules (incl. db-driver.ts NEW S40 Phase 2; emit-client.ts 1,107 / emit-logic.ts 1,855 / rewrite.ts 1,861 / emit-control-flow.ts 1,253 / emit-server.ts 842); LSP split into 3 files (server.js 235 + handlers.js 2,113 + workspace.js 440 + l4.js ~600); 370 test files. **S40 Key Facts:** Bun.SQL Phase 1 + Phase 2 landed (codegen `_scrml_db`→`_scrml_sql` rename, tagged-template emission, `db-driver.ts` URI classification with E-SQL-005); LSP refactored into 3+1 files (L1+L2+L3+L4 all merged); Phase 4d Step 8 `BareExprNode.expr` deleted (+strict cleanup of meta-checker); render preprocessor closes the `render name()` ExprNode gap; `consumeSqlChainedCalls`/`tryConsumeSqlInit` helpers fix the lift+sql / return+sql / state-decl+sql triad. (Note: AST kind `reactive-decl` renamed to `state-decl` in Phase A1a Step 3, S59 commit `8fa26e1`.)
+Language:   JavaScript / TypeScript (mixed `.js` + `.ts`; Bun runtime).
+Framework:  Custom compiler — scrml language compiler.
+Runtime:    Bun >= 1.3.13 (no Node.js dependency for compiler core; `node --check` used only as a syntax linter for emitted output).
+Type:       Compiler + CLI tool + LSP server + 17-module stdlib.
+Size:       ~24,739 LOC compiler / ~14,135 LOC codegen across 39 modules.
+            ast-builder.js 9,306 LOC; type-system.ts 8,969 LOC; expression-parser.ts 2,722 LOC; tokenizer.ts 1,344 LOC; types/ast.ts 1,641 LOC.
+            SPEC.md 24,911 lines (89 sections through §56); PIPELINE.md 2,380 lines (v0.7.0).
+            LSP split: server.js 235 + handlers.js 2,113 + workspace.js 440 + l4.js ~600.
+            Tests: 447 files, S65 baseline 9,019 pass / 44 skip / 1 todo / 0 fail.
 
 ## Map Index
-| Map                      | Status  | Contents                                                       |
-|--------------------------|---------|----------------------------------------------------------------|
-| structure.map.md         | present | directory layout, 6 entry points, S34 codegen + test LOC bumps |
-| dependencies.map.md      | present | 5 packages, internal graph + S34 codegen fix annotations       |
-| schema.map.md            | present | ~55 AST node kinds, 19 ExprNode kinds (not refreshed S34)      |
-| config.map.md            | present | 1 env var (SCRML_NO_ELIDE), CLI flags, bunfig.toml             |
-| build.map.md             | present | 8 npm scripts, 5 CLI subcommands, dual-mode testing            |
-| error.map.md             | present | ~200+ codes; E-STATE-TRANSITION-ILLEGAL / E-STATE-TERMINAL-MUTATION (S32); import-decl scope bind (S34) |
-| test.map.md              | present | bun test, 370 files, 7,825+ pass / 40 skip / 0 fail (S40, before L4 merge) |
-| domain.map.md            | present | pipeline, §19, §51 machines, §51.5 elision, §54.6 purity, S34 codegen fixes |
-| non-compliance.report.md | present | refreshed S34 close — carries master-list 12-session staleness + GITI-006 follow-up |
-| api.map.md               | absent  | not applicable (compiler, not web API)                         |
-| state.map.md             | absent  | not detected (no frontend state management)                    |
-| events.map.md            | absent  | EventEmitter in runtime-template only                          |
-| auth.map.md              | absent  | not applicable (compiler tool)                                 |
-| style.map.md             | absent  | not detected                                                   |
-| i18n.map.md              | absent  | not detected                                                   |
-| infra.map.md             | absent  | no Docker/CI/CD found                                          |
-| migrations.map.md        | absent  | not detected                                                   |
-| jobs.map.md              | absent  | not detected                                                   |
+| Map                      | Status  | Contents                                                                                       |
+|--------------------------|---------|------------------------------------------------------------------------------------------------|
+| structure.map.md         | present | directory layout, 6 entry points, full top-level inventory                                     |
+| dependencies.map.md      | present | 2 runtime + 3 dev packages, full internal pipeline graph (BS→TAB→MOD→CE→VP-1→NR/SYM→PA→RI→TS→META→DG→BP→CG) |
+| schema.map.md            | present | ~80 AST node kinds; ExprNode kinds; SQLChainedCall; ChannelDeclNode; reactive-decl→state-decl rename note |
+| config.map.md            | present | 11 SCRML_*/PORT env vars; bunfig.toml; package.json; .gitignore; no CI/Docker                  |
+| build.map.md             | present | 8 npm scripts, 7 CLI subcommands (incl. S65 promote stub), self-host build path                |
+| error.map.md             | present | ~233 E-codes + ~42 W-codes; spec §34 anchor; recent S58-S65 additions enumerated               |
+| test.map.md              | present | bun test, 447 files, 9,019 pass, 7 categories (unit/integration/conformance/browser/lsp/self-host/commands) |
+| domain.map.md            | present | full pipeline + key spec sections + 22 architectural locks + phase status + codegen surfaces   |
+| events.map.md            | present | `<channel>` (§38) + SSE (§37); no compiler-internal EventEmitter                               |
+| non-compliance.report.md | present | 8 non-compliant + 5 uncertain; docs/changes/ batch entry; deep-dives still mis-located         |
+| api.map.md               | absent  | not applicable (compiler, not web API; user programs declare their own routes via §12 / §40)   |
+| state.map.md             | absent  | not applicable (compiler, not frontend app)                                                    |
+| auth.map.md              | absent  | not applicable (compiler tool; auth lives in stdlib/auth + user programs)                      |
+| style.map.md             | absent  | not detected                                                                                   |
+| i18n.map.md              | absent  | not detected                                                                                   |
+| infra.map.md             | absent  | no Dockerfile, no .github/workflows, no Terraform, no docker-compose                           |
+| migrations.map.md        | absent  | per-file `<schema>` blocks (§39) + `scrml migrate` CLI; no global migrations dir               |
+| jobs.map.md              | absent  | stdlib/cron exists but project itself does not run jobs                                        |
 
 ## File Routing
-types / interfaces / models           -> schema.map.md
-environment variables / config keys   -> config.map.md
-test patterns / fixtures              -> test.map.md
-build commands / CI stages            -> build.map.md
-directory layout / entry points       -> structure.map.md
-external packages                     -> dependencies.map.md
-business rules / domain models        -> domain.map.md
-error types / codes / handling        -> error.map.md
-component-def classification          -> domain.map.md (bug note) + schema.map.md
-S34 adopter-bug codegen fixes         -> domain.map.md + dependencies.map.md (per-file annotations)
+types / interfaces / AST node kinds        -> schema.map.md
+environment variables / config keys        -> config.map.md
+test patterns / fixtures / runner          -> test.map.md
+build commands / CLI subcommands           -> build.map.md
+directory layout / entry points            -> structure.map.md
+external packages / internal pipeline      -> dependencies.map.md
+business rules / pipeline / spec sections  -> domain.map.md
+error codes / warning codes / diagnostics  -> error.map.md
+`<channel>` / SSE / runtime event wiring   -> events.map.md
+docs hygiene / superseded artefacts        -> non-compliance.report.md
 
 ## Key Facts
-- Entry point is compiler/src/cli.js (bin: `scrml`); programmatic API is compiler/src/api.js running BS->TAB->MOD->CE->BPP->PA->RI->TS->MC->DG->CG.
-- **S34 close (commit d6e8288) — 11 adopter bugs fixed across 10 commits** in 7 codegen surfaces: Object.freeze comma (emit-logic aa92070), bare-call `event` threading (emit-event-wiring eb86d31), mangler negative-lookbehind (emit-client 27ed6fe), import-decl scope bind (type-system 881b411, GITI-002), declaredNames threading through if/else/for/while (emit-control-flow + emit-logic 70190a7, 6nz Bugs B+F), arrow-block-body preservation via rawSource threading (expression-parser + rewrite + emit-expr 127d35a, 6nz Bug C), `${serverFn()}` markup DOM wiring (emit-event-wiring e585dba, GITI-005), server/client boundary cleanup — unused-import prune + boundary:"server" lift lowering (emit-client + emit-server + emit-logic e5f5b22, GITI-003+GITI-004), awaited reactive-set for server-fn + skip empty-url `<request>` (emit-client + emit-reactive-wiring d23fd54, GITI-001).
-- **S34 test baseline — 7,373 pass / 40 skip / 2 fail / 338 files / 11.56s.** +51 new tests across 8 new test files (all under compiler/tests/unit/), zero regressions versus S33 close (7,322 pass), 2 persistent self-host smoke failures deferred per user.
-- S32 Phase 4a-4g closed S33 — §54.6/§33.6 machine purity enforcement landed: E-STATE-TRANSITION-ILLEGAL (72210e8), E-STATE-TERMINAL-MUTATION (5de6a2d), fn-level purity in transition bodies (37f21f7). 9 gauntlet-s32 tests un-skipped by commit 36eadb9.
-- S28 shipped §51.5 validation elision end-to-end + SCRML_NO_ELIDE=1 env gate. S27 shipped §51.14 replay primitive + §51.11 audit completeness + guarded wildcard fixes.
-- **Open component-def bug (flagged S29, still present at S34):** ast-builder.js:3634 classifies ANY uppercase-named `const/let` as component-def regardless of RHS. tab.test.js:649-654 explicitly encodes bug as policy (expects `const MyComponent = 42;` to produce kind "component-def"). S30-S34 focused on other priorities (public pivot / machine purity / adopter-reported codegen bugs). Fix surface remains narrow at the classifier — require RHS to begin with `<` — but tab.test.js:649-654 must flip sign and self-host modules (ast.scrml, ts.scrml, meta-checker.scrml, cg-parts/section-assembly.js) carry mirror logic.
-- The AST type system lives in compiler/src/types/ast.ts (1,420 lines, ~55 node kinds + 19 ExprNode kinds). ComponentDefNode at line 535-541.
-- **S34 known follow-up (GITI-006, low-priority):** markup `${@var.path}` emits a module-top bare read that throws on async-initialized reactives (pre-existing emission shape).
-- Working-tree carry-over items: master-list.md 12 sessions stale (S23-era header claiming 6,889 pass / 278 files — to be refreshed this session separately); docs/SEO-LAUNCH.md uncommitted 12 sessions; benchmarks/fullstack-react/CLAUDE.md out of place; §48.9 stale.
+
+- **Entry points:** Installed CLI is `compiler/bin/scrml.js` (`bin: scrml`); programmatic API is `compiler/src/api.js` running the canonical pipeline `BS → TAB → MOD → CE → VP-1/W-1 → NR/SYM → PA → RI → TS → META → DG → BP → CG`. LSP entry is `lsp/server.js --stdio`.
+
+- **Active migration:** scrml v0.2.0 piecemeal rewrite is in flight. Stage 0a/0b/0b+ done; Phase A1a (lex+parse) COMPLETE at S61; Phase A1b (resolve+type) IN FLIGHT — B1 (S63 `9d2fa45`), B2 (S64 `0dee2f7`, E-NAME-COLLIDES-STATE), B3+B5 (S65) landed; B4, B6-B22 pending. Phase A1c (codegen+runtime) ratified, not started. 22 architectural locks (L1-L22; L22 type-as-argument added S65) + 20 moves (M7+M21 dropped) per master-list.md §0.
+
+- **S65 wrap (commit 7334fb0):** parseVariant SHIPPED (L22 family member #1: stdlib enum + SPEC §41.13 + §53.14 + emit-parse-variant.ts 219 LOC); A+ verdict #1+#2+#3 carry-forward fully closed (E-SWITCH-FORBIDDEN + W-LIFECYCLE-CANDIDATE); ast-builder grammar fixes (export function decl swallow, export *, renamed re-exports); api.js cross-file enum chase; promotion ergonomics Tier A landed (CLI stub `commands/promote.js` + SPEC §56 + docs/articles/tier-ladder-promotion + primer); Tier B in flight in worktree `agent-a35e9695d1b010931`. Net +78 tests, 0 regressions.
+
+- **AST contract:** `compiler/src/types/ast.ts` (1,641 LOC) is the canonical AST. ~80 `kind` discriminators. Note Phase A1a Step 3 (S59) renamed `kind: "reactive-decl"` → `kind: "state-decl"` — many older docs still reference the old name.
+
+- **Codegen architecture:** `compiler/src/codegen/` has 39 modules including specialised emitters: `emit-client.ts` (1,112), `emit-control-flow.ts` (1,253), `emit-logic.ts` (1,895), `emit-reactive-wiring.ts` (1,002), `emit-html.ts` (915), `emit-server.ts` (905), `rewrite.ts` (1,861, mangler), `emit-machines.ts` (719), `emit-event-wiring.ts` (696), `emit-lift.js` (1,405), plus S40 additions `db-driver.ts` (151, Bun.SQL URI classification with E-SQL-005) and S65 additions `emit-parse-variant.ts` (219).
+
+- **Database:** Bun.SQL only (no Prisma/Drizzle/TypeORM). Schemas declared per-file via `<schema>` (§39); reconciliation by `compiler/src/schema-differ.js`; multi-DB adaptation via `?{}` (§44); URI classification by `codegen/db-driver.ts`.
+
+- **Open carry-forward bug:** ComponentDefNode classifier at `ast-builder.js:3634` still classifies any uppercase-named `const/let` as component-def regardless of RHS (S29-flagged through S65). `tab.test.js:649-654` encodes the bug as policy. Not on critical path.
+
+- **Test runner:** Bun test, root `compiler/tests/`, timeout 10s. 7 categories (unit ~307, integration ~31, conformance 81, browser 11, lsp 10, self-host 4, commands 3). 447 total files. Two persistent self-host smoke failures historically deferred per user.
 
 ## Tags
-#scrmlTS #map #primary #compiler #ExprNode #s29 #s32-purity #s33 #s34 #adopter-bugs #codegen #component-def-bug
+#scrmlTS #map #primary #compiler #s65 #s66-refresh #parseVariant #a-plus-verdict #v0next #L22 #piecemeal-migration
 
 ## Links
 - [structure.map.md](./structure.map.md)
@@ -66,6 +77,9 @@ S34 adopter-bug codegen fixes         -> domain.map.md + dependencies.map.md (pe
 - [error.map.md](./error.map.md)
 - [test.map.md](./test.map.md)
 - [domain.map.md](./domain.map.md)
+- [events.map.md](./events.map.md)
 - [non-compliance.report.md](./non-compliance.report.md)
 - [master-list.md](../../master-list.md)
 - [pa.md](../../pa.md)
+- [SPEC.md](../../compiler/SPEC.md)
+- [PIPELINE.md](../../compiler/PIPELINE.md)
