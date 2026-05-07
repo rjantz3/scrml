@@ -1,7 +1,7 @@
-# scrmlTS — Session 65 (CLOSE — predicate-Zod deep-dive · debate-05 5/5 C-narrow · npm-myth amend · parseVariant SCOPE)
+# scrmlTS — Session 65 (CONTINUING past wrap — predicate-Zod deep-dive · debate-05 5/5 C-narrow · npm-myth amend · parseVariant Path A LOCKED · type-as-argument family roadmap recorded · survey-first dispatch in flight)
 
 **Date opened:** 2026-05-06
-**Date closed:** 2026-05-06 (same calendar day; medium-length session ~80% deliberation, 20% docs)
+**Date status:** session continued past initial wrap — Bryan: "we have lots of ctx left lets go"; second tranche of work landed Path A architectural commit + family roadmap
 **Previous:** `handOffs/hand-off-64.md` (S64 close — substantial work landed across 3 debates + Stage 0c.A + B2 + Phase 4d)
 **This file:** rotates to `handOffs/hand-off-65.md` at S66 open
 
@@ -18,14 +18,47 @@
 | Design insight #4 appended | ✅ LANDED | `scrml-support/design-insights.md` (line 1387+) |
 | npm-myth article amended | ✅ LANDED | `docs/articles/npm-myth-devto-2026-04-28.md` lines 44-48 |
 | X-snippet drafted (3 variants) | ✅ DRAFT — awaits Bryan | `docs/articles/x-snippet-zod-calibration-2026-05-06.md` |
-| parseVariant implementation SCOPE | ✅ LANDED — awaits dispatch authorization | `docs/changes/parsevariant-impl/SCOPE.md` |
-| master-list.md + changelog updates | ✅ LANDED | both |
+| parseVariant implementation SCOPE | ✅ LANDED — Path A LOCKED (S65 second tranche) | `docs/changes/parsevariant-impl/SCOPE.md` |
+| Type-as-argument family roadmap recorded | ✅ LANDED in SCOPE doc + master-list L22 | parseVariant → serialize → formFor → schemaFor → tableFor → reflective |
+| L22 added to master-list locks list | ✅ LANDED | `master-list.md §0.2` |
+| Survey-first dispatch (parseVariant Path A) | 🟡 IN FLIGHT (background) | output target: `docs/changes/parsevariant-impl/SURVEY-REPORT.md` |
+| master-list.md + changelog + hand-off updates | ✅ LANDED (initial wrap + second-tranche update) | all three |
 
-**Final commit count:** scrmlTS 2 commits; scrml-support 4 commits; total 6 commits across 2 repos. **Pushes pending.**
+**Commit count after second tranche:** scrmlTS 5 commits; scrml-support 4 commits; total 9 commits across 2 repos. First tranche pushed mid-session (`4595b2c` + `c9c2182`); second tranche commits `9c02e8b` + (master-list/hand-off update commit) **push pending**.
 
 ---
 
-## BIG DECISION RATIFIED THIS SESSION
+## BIG DECISIONS RATIFIED THIS SESSION
+
+### S65 second tranche — Path A LOCKED + type-as-argument family roadmap (architectural commit)
+
+After debate-05's narrowing of Bryan's lean from full Approach A to C-narrow, Bryan asked the load-bearing question: **"what future shippable features could ride the type-as-argument precedent?"** PA enumerated a 5-7 member family (parseVariant → serialize → formFor → schemaFor → tableFor → variantNames + reflective metadata). Two members (`formFor` and `tableFor`) GENUINELY require type-as-argument as a structural language concept — they cannot be expressed as desugars because the compiler must walk struct fields structurally to emit markup trees. **Bryan locked Path A.** Subsequent members ride the precedent for free.
+
+**The deciding code sample (S65 internal — what locked the call):**
+
+```scrml
+type User:struct = {
+    name:  string req length(>=2)
+    email: string(email) req unique
+    age:   int min(13) max(120)
+}
+
+<schema>${schemaFor(User)}</>
+<users>: [User] = []
+
+<program>
+    <{formFor(User, submit=createUser)}/>
+    <{tableFor(User, rows=@users)}/>
+</>
+```
+
+One struct definition + five lines of glue → SQL schema with constraints, working form with validation/submission/errors, working table with rendered cells, full reactive lifecycle, zero npm packages. **scrml.dev flagship demo.**
+
+**L22 phrasing (locked):** "Type-as-argument is a first-class scrml language primitive, introduced by `parseVariant`. Foundation for the type-as-argument family. Each future family member must independently pass per-shape sliver test + synonym-detection precondition + asymmetric-forfeit-cost decomposition."
+
+**Discipline that bounds the family** (recorded in SCOPE doc + carried forward in family-precedent doc per Step 12): per-shape sliver test mandatory; synonym-detection mandatory; per-feature deep-dive when convener has any doubt. Without this discipline, Path A becomes the slippery slope simplicity-defender warned about. With it, Path A is load-bearing infrastructure for a 5-7 member family.
+
+**Family economics:** ~20-30h architectural commit at parseVariant pays for ~85-145h of family-feature surface across 6-12 months.
 
 ### Boundary-parsing primitive — debate-05 verdict (5/5 unanimous C-narrow)
 
@@ -79,16 +112,16 @@ Combined: ~3-5h dispatch. Could fold into B3 or parseVariant work.
 
 ---
 
-## Open questions to surface immediately at S66 open
+## Open questions to surface immediately at S66 open (UPDATED post-second-tranche)
 
-1. **parseVariant implementation path selection.** SCOPE doc analyzes Path A (compile-time-special-form, 20-30h), Path B (schema-as-value, 8-12h), Path C (hybrid-desugar, 10-15h; **PA lean**). Bryan's call before dispatch fires. The "type-as-argument" precedent decision is load-bearing.
+1. **parseVariant Path A — RESOLVED.** Path A is locked (S65 second tranche). Survey-first diagnostic dispatch is in flight; will land before any implementation work. Open question NEXT: based on survey findings, fire the implementation dispatch (~20-30h Path A scope, possibly discounted via depth-of-survey) — OR refine SCOPE based on survey before dispatching.
 
-2. **Dispatch sequencing — three options:**
-   - (a) Fire parseVariant immediately (Path C, ~10-15h focused)
+2. **Dispatch sequencing post-survey:**
+   - (a) Fire parseVariant Path A implementation (20-30h, possibly discounted)
    - (b) Fire B3 (`@name` resolution) first per S64 plan; parseVariant after
-   - (c) Stack both — parseVariant in background, B3 in foreground (no file overlap; should be safe)
+   - (c) Stack both — parseVariant Path A in background, B3 in foreground (no file overlap; should be safe)
 
-3. **X-snippet selection.** 3 variants drafted at `docs/articles/x-snippet-zod-calibration-2026-05-06.md`. PA lean: variant 3 (long-form ~180 words) for credibility. Bryan picks or skips entirely.
+3. **X-snippet selection.** 3 variants drafted at `docs/articles/x-snippet-zod-calibration-2026-05-06.md`. PA lean: variant 3 (long-form ~180 words) for credibility. Bryan to pick. Will surface again after survey lands.
 
 4. **Companion follow-up dev.to article?** Variant 3 of X snippet narrates the debate-and-revise process. Optional follow-up article (`scrml-debate-amends-zod-claim-devto-2026-05-06.md`) could expand it. PA's view: skip — the npm-myth amendment + X post is sufficient. Avoid article-tail bloat.
 
@@ -125,6 +158,12 @@ Standing list 1-47 from S64 hand-off carries forward verbatim. New S65 additions
 
 54. **The deep-dive's 17-gap predicate inventory was re-prioritized under the Zod lens.** P1 promotions: #8 (aliases), #9 (reqIf), #12 (async), #17 (transform/preprocess). Demoted to elimination: #1 (between), #2 (nonempty) — synonyms. Don't re-introduce demoted items under different names without sliver-test verification.
 
+55. **L22 type-as-argument is LOCKED at the language level (S65 second tranche).** parseVariant is the FIRST family member; do NOT let any agent treat it as a one-off when planning implementation. SCOPE doc records the family roadmap; future PA's see L22 in master-list locks list.
+
+56. **The family-bounding discipline is mandatory.** Sliver test + synonym-detection + per-feature deep-dive on every future `Type.foo` request. Without this, L22 becomes the slippery slope simplicity-defender warned about. The family-precedent doc (Step 12 of SCOPE) records this discipline; it MUST be written when parseVariant ships.
+
+57. **`formFor` is the flagship demo.** The 1-struct → schema + form + table demo is the strongest "we are not React" pitch scrml has. PA dispatching `formFor` work later: treat it as marketing-load-bearing, not just stdlib expansion.
+
 ---
 
 ## State as of S65 close (verified at wrap)
@@ -145,9 +184,11 @@ Standing list 1-47 from S64 hand-off carries forward verbatim. New S65 additions
 
 ### File-modification inventory (S65 — for cherry-pick / forensic review)
 
-**scrmlTS commits (2 from session-open `0dee2f7`):**
+**scrmlTS commits (5 from session-open `0dee2f7`):**
 1. `3bef6e6` — docs(s65): debate-05 outflows — npm-myth amend + X snippet + parseVariant scope
-2. (session-close commit) — master-list + changelog + hand-off updates
+2. `4595b2c` — docs(s65-close): wrap — master-list + changelog + hand-off (initial wrap, mid-session)
+3. `9c02e8b` — parseVariant SCOPE: Path A LOCKED + family roadmap recorded
+4. (this commit) — second-tranche update: master-list L22 + hand-off Path-A reflection
 
 **scrml-support commits (4 from session-open `9123af6`):**
 1. `d05c79a` — debate-05 brief

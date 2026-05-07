@@ -2,7 +2,7 @@
 
 **Purpose:** Live inventory of what exists in scrmlTS, plus the **v0.2.0 migration dashboard**. Current truth only. Historical session-by-session detail lives in `docs/changelog.md`; deep-dives live in `scrml-support/docs/deep-dives/`.
 
-**Last updated:** 2026-05-06 (S65 close — **predicate-system-Zod-replacement deep-dive LANDED · debate-05 judged 5/5 unanimous C-narrow · npm-myth article amended · X-snippet drafted · parseVariant impl SCOPE document landed · Gap #19 closure plan ready**)
+**Last updated:** 2026-05-06 (S65 continuing — **predicate-system-Zod-replacement deep-dive LANDED · debate-05 judged 5/5 unanimous C-narrow · npm-myth article amended · X-snippet drafted · parseVariant impl SCOPE landed + Path A LOCKED · type-as-argument family roadmap recorded · survey-first dispatch in flight · Gap #19 closure plan ready**)
 
 **Tests (current):** **8,941 pass / 44 skip / 1 todo / 0 fail / 8,986 across 440 files** (unchanged from S64 — S65 was deliberation-and-docs only, no compiler source changes). Pre-commit subset ~8,217 / 33 / 0.
 
@@ -16,7 +16,7 @@
 
 ## §0 v0.2.0 migration status — LIVE DASHBOARD
 
-**Spec target:** ratified 2026-05-04 (S58 close). 21 architectural locks (L1-L21). 20 moves (M1-M20, M7+M21 dropped). SPEC.md authoritative engineering target.
+**Spec target:** ratified 2026-05-04 (S58 close); extended at S65 (L22 type-as-argument language primitive — debate-05 verdict + Path A architectural commit; not yet recorded in v0next-s56-deliberation-outcomes.md, queued with parseVariant dispatch). 22 architectural locks (L1-L22). 20 moves (M1-M20, M7+M21 dropped). SPEC.md authoritative engineering target.
 
 **Architecture decision (S59):** PIECEMEAL migration (not greenfield rewrite). acorn STAYS — pre-processor extension absorbs new syntax. AST extension target corrected to `kind: "reactive-decl"` (not `kind: "state"`). See `docs/changes/v0next-inventory/SCOPE-MAP-2026-05-05.md` §0 for full reasoning.
 
@@ -42,9 +42,9 @@
 | C2 — Articles triage | 15 articles | 4-8h | 🟡 audit done | `ARTICLE-TRUTHFULNESS-AUDIT-2026-05-05.md` |
 | C3 — README + scrml.dev v0.2.0 | public announce | 2-4h | ⏸️ pending | drafting next |
 
-### §0.2 v0.2.0 architectural locks (L1-L21)
+### §0.2 v0.2.0 architectural locks (L1-L22)
 
-L1 markup-as-first-class-value (PILLAR — held since scrml8) · L2 Variant C compound state · L3 decl-coupled-with-render-spec · L4 partial validator vocab unification (no bilingual schema; `@shared` removed) · L5 `is some` reused · L6 match Tier 0/1/2 ladder · L7 match attrs (rules-inert + effect/onTransition engine-only) · L8 two match shapes coexist · L9 `loose` flag dropped · L10 reset() in principle (superseded by L18) · L11 auto-synth validity surface (compound + per-field, errors as enum tags) · L12 4-level error-message resolution chain · L13 `<errors of=…/>` first-class · L14 cross-field via predicate args · L15 `const <derived>` extended all-scope · L16 multi-render via existing access paths · L17 binding-by-render-spec dispatch · L18 reset(@cell) keyword + default= attribute · L19 multi-statement handlers force named function · L20 `derived=expr` engine attribute · **L21** E-DERIVED-VALUE-MUTATE (S59 — in-place mutation of `const`-derived cells forbidden + sibling rename E-REACTIVE-002 → E-DERIVED-WRITE).
+L1 markup-as-first-class-value (PILLAR — held since scrml8) · L2 Variant C compound state · L3 decl-coupled-with-render-spec · L4 partial validator vocab unification (no bilingual schema; `@shared` removed) · L5 `is some` reused · L6 match Tier 0/1/2 ladder · L7 match attrs (rules-inert + effect/onTransition engine-only) · L8 two match shapes coexist · L9 `loose` flag dropped · L10 reset() in principle (superseded by L18) · L11 auto-synth validity surface (compound + per-field, errors as enum tags) · L12 4-level error-message resolution chain · L13 `<errors of=…/>` first-class · L14 cross-field via predicate args · L15 `const <derived>` extended all-scope · L16 multi-render via existing access paths · L17 binding-by-render-spec dispatch · L18 reset(@cell) keyword + default= attribute · L19 multi-statement handlers force named function · L20 `derived=expr` engine attribute · **L21** E-DERIVED-VALUE-MUTATE (S59 — in-place mutation of `const`-derived cells forbidden + sibling rename E-REACTIVE-002 → E-DERIVED-WRITE) · **L22** type-as-argument as language primitive (S65 — debate-05 verdict + Path A architectural commit; foundation for the type-as-argument family: `parseVariant` → `serialize` → `formFor` → `schemaFor` → `tableFor` → reflective metadata; per-shape sliver test + synonym-detection precondition + per-feature deep-dive mandatory on every future addition).
 
 ### §0.3 v0.2.0 audit deliverables
 
