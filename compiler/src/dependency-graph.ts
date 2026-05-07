@@ -718,6 +718,36 @@ function buildAwaitsAdj(edges: DGEdge[]): Map<NodeId, Set<NodeId>> {
 }
 
 /**
+ * Build an adjacency map of `reads` edges restricted to reactive→reactive
+ * connections (the derived-cell dependency subgraph).
+ *
+ * Phase A1b B7 — used by E-DERIVED-CIRCULAR-DEP cycle detection (§6.6.10,
+ * §31.5). A `derived → upstream` edge in this subgraph means: when `upstream`
+ * changes, `derived` recomputes. A cycle here is a circular derived
+ * dependency that blocks code generation.
+ *
+ * Self-edges are NOT in the live `edges` array (suppressed at line ~1120 to
+ * avoid polluting the read-edge list); self-references are tracked separately
+ * via `selfReferencingDerivedNodes` and reported alongside cycle results.
+ */
+function buildDerivedReadsAdj(
+  edges: DGEdge[],
+  nodes: Map<NodeId, DGNode>,
+): Map<NodeId, Set<NodeId>> {
+  const adj = new Map<NodeId, Set<NodeId>>();
+  for (const edge of edges) {
+    if (edge.kind !== "reads") continue;
+    const fromNode = nodes.get(edge.from);
+    const toNode = nodes.get(edge.to);
+    if (!fromNode || !toNode) continue;
+    if (fromNode.kind !== "reactive" || toNode.kind !== "reactive") continue;
+    if (!adj.has(edge.from)) adj.set(edge.from, new Set());
+    adj.get(edge.from)!.add(edge.to);
+  }
+  return adj;
+}
+
+/**
  * Check if `from` can reach `to` via 'awaits' edges.
  */
 function isReachable(from: NodeId, to: NodeId, adj: Map<NodeId, Set<NodeId>>): boolean {
@@ -738,7 +768,19 @@ function isReachable(from: NodeId, to: NodeId, adj: Map<NodeId, Set<NodeId>>): b
 }
 
 // ---------------------------------------------------------------------------
-// Cycle detection for 'awaits' edges (DFS-based)
+// Generic cycle detection (DFS-based, iterative with coloring)
+//
+// Used by:
+//   - 'awaits' edge cycle detection (E-DG-001)
+//   - derived-cell 'reads' subgraph cycle detection (E-DERIVED-CIRCULAR-DEP, B7)
+//
+// A1b B7: generalized from `detectAwaitsCycle` to support derived-cell cycle
+// detection. Same algorithm; the caller supplies the adjacency map (filtered
+// from a chosen edge subset) and the node set.
+//
+// B10/B11/B12 (validator-arg deps, §31.4) and B16 (engine-derived,
+// E-DERIVED-ENGINE-CIRCULAR) will reuse this function with their own filtered
+// adjacency maps. (Audit §1.4-§1.5 reusability constraint.)
 // ---------------------------------------------------------------------------
 
 type DFSColor = 0 | 1 | 2; // WHITE | GRAY | BLACK
@@ -752,10 +794,13 @@ interface DFSFrame {
 }
 
 /**
- * Detect cycles in 'awaits' edges using iterative DFS with coloring.
+ * Detect cycles in a directed graph using iterative DFS with coloring.
  * Returns the first cycle found as an array of nodeIds, or null.
+ *
+ * Generic over edge kind — the adjacency map is supplied pre-filtered by
+ * the caller. See `buildAwaitsAdj` and `buildDerivedReadsAdj`.
  */
-function detectAwaitsCycle(
+function detectCycle(
   adj: Map<NodeId, Set<NodeId>>,
   allNodes: Set<NodeId>,
 ): NodeId[] | null {
@@ -1109,6 +1154,14 @@ export function runDG(input: DGInput): DGOutput {
     }
   }
 
+  // Phase A1b B7 — track self-referencing derived cells separately so the
+  // E-DERIVED-CIRCULAR-DEP detector can report the degenerate 1-cycle case
+  // (`const <x> = @x + 1`, SPEC §6.6.10 line 2712). Self-refs are NOT pushed
+  // into `edges` (would pollute the read-edge list and cause spurious
+  // cycle-of-length-0 issues elsewhere); they are reported alongside multi-
+  // hop cycles in the cycle-detection phase below.
+  const selfReferencingDerivedNodes = new Set<NodeId>();
+
   // Resolve pending derived reads and callees for derived state-decl nodes
   // (post-Step-11.5 representation of legacy reactive-derived-decl).
   for (const [nodeId, dgNode] of nodes) {
@@ -1117,7 +1170,12 @@ export function runDG(input: DGInput): DGOutput {
 
     if (anyNode._pendingDerivedReads) {
       for (const varName of anyNode._pendingDerivedReads) {
-        if (varName === dgNode.varName) continue; // no self-edge
+        if (varName === dgNode.varName) {
+          // Phase A1b B7 — degenerate cycle (self-reference), tracked
+          // separately for E-DERIVED-CIRCULAR-DEP reporting (SPEC §6.6.10).
+          selfReferencingDerivedNodes.add(nodeId);
+          continue;
+        }
         const targetNodeId = reactiveVarNodeIds.get(varName);
         if (targetNodeId) {
           edges.push({ from: nodeId, to: targetNodeId, kind: "reads" });
@@ -1277,6 +1335,14 @@ export function runDG(input: DGInput): DGOutput {
   // Step 1: Build functionName -> Set<varName> for direct reactive reads
   const fnDirectReactiveReads = new Map<string, Set<string>>();
   const fnCallGraphMap = new Map<string, Set<string>>();
+  // Phase A1b B7: track per-function purity for transitive-read filtering.
+  // Pure `fn` (§48) calls have NO implicit reactive deps; reactive `function`
+  // calls inherit their callees' deps (SPEC §31.5, audit §1.1). In well-formed
+  // programs pure-fn bodies cannot read reactive cells (E-FN-001..E-FN-005),
+  // so this map is mostly defensive — but it makes the design contract
+  // explicit and prevents silent staleness if upstream purity enforcement
+  // ever has a hole.
+  const fnPurityMap = new Map<string, boolean>(); // fnName -> isPure
 
   for (const rawFile of files) {
     const fileAST = resolveFileAST(rawFile);
@@ -1290,6 +1356,10 @@ export function runDG(input: DGInput): DGOutput {
       }
       if (!fnCallGraphMap.has(fnNode.name)) {
         fnCallGraphMap.set(fnNode.name, new Set());
+      }
+      // Record purity: `fn` keyword (§48) ⇒ pure; otherwise reactive.
+      if (!fnPurityMap.has(fnNode.name)) {
+        fnPurityMap.set(fnNode.name, (fnNode as { fnKind?: string }).fnKind === "fn");
       }
 
       if (!Array.isArray(fnNode.body)) continue;
@@ -1367,6 +1437,10 @@ export function runDG(input: DGInput): DGOutput {
       const myReads = fnTransitiveReads.get(fnName);
       if (!myReads) continue;
       for (const callee of callees) {
+        // Phase A1b B7 — pure-fn filter (§31.5, §48): pure `fn` calls do NOT
+        // contribute implicit reactive dependencies to the caller. Reactive
+        // `function` calls DO inherit their callees' reactive reads.
+        if (fnPurityMap.get(callee) === true) continue;
         const calleeReads = fnTransitiveReads.get(callee);
         if (!calleeReads) continue;
         for (const varName of calleeReads) {
@@ -1392,6 +1466,10 @@ export function runDG(input: DGInput): DGOutput {
   }
 
   // Propagate transitive reactive reads through function calls made by derived decls.
+  // Phase A1b B7 — pure-fn filter (§31.5, §48): pure `fn` callees do NOT
+  // contribute reactive deps to the deriving cell. `formatCount(@n)` where
+  // `formatCount` is `fn` adds NO transitive deps; `reactiveLog(@n)` where
+  // `reactiveLog` is `function` DOES inherit `reactiveLog`'s reactive reads.
   for (const [nodeId, dgNode] of nodes) {
     if (dgNode.kind !== "reactive") continue;
     const callEdges = edges.filter(e => e.from === nodeId && (e.kind === "calls" || e.kind === "awaits"));
@@ -1403,10 +1481,19 @@ export function runDG(input: DGInput): DGOutput {
         if (fnNodeId === callEdge.to) { calledFnName = fnName; break; }
       }
       if (!calledFnName) continue;
+      // Pure `fn` callees skip transitive read propagation (audit §1.1).
+      if (fnPurityMap.get(calledFnName) === true) continue;
       const transitiveReads = fnTransitiveReads.get(calledFnName);
       if (!transitiveReads) continue;
       for (const varName of transitiveReads) {
-        if (varName === dgNode.varName) continue;
+        if (varName === dgNode.varName) {
+          // Phase A1b B7 — a reactive `function` called by this derived
+          // cell transitively reads the derived's own var: self-cycle
+          // through a reactive call. Track as degenerate cycle for
+          // E-DERIVED-CIRCULAR-DEP reporting (§31.5 + §6.6.10).
+          selfReferencingDerivedNodes.add(nodeId);
+          continue;
+        }
         const reactiveNodeId = reactiveVarNodeIds.get(varName);
         if (!reactiveNodeId) continue;
         const exists = edges.some(
@@ -1642,12 +1729,77 @@ export function runDG(input: DGInput): DGOutput {
   }
 
   // ------------------------------------------------------------------
+  // Phase A1b B7 — Cycle detection in derived-cell `reads` subgraph
+  // (E-DERIVED-CIRCULAR-DEP, SPEC §6.6.10, §31.5)
+  //
+  // A derived cell whose RHS depends on itself directly (self-reference)
+  // or transitively (multi-hop cycle through other derived cells, or
+  // through reactive-`function` calls per §31.5) is an error.
+  //
+  // Pure `fn` calls do NOT contribute to dep edges (handled upstream in
+  // the propagation step), so cycles through pure functions cannot form.
+  //
+  // Reusability — the same DFS (`detectCycle`) and adjacency-builder
+  // pattern (`buildDerivedReadsAdj`) is reused by:
+  //   • B16 (engine-derived, E-DERIVED-ENGINE-CIRCULAR, §51.0.J)
+  //   • B10/B11/B12 (validator-arg deps, §31.4)
+  // ------------------------------------------------------------------
+
+  const allNodeIds = new Set<NodeId>(nodes.keys());
+
+  // Self-references: degenerate 1-cycle case (SPEC §6.6.10 line 2712).
+  for (const selfNodeId of selfReferencingDerivedNodes) {
+    const dgNode = nodes.get(selfNodeId);
+    if (!dgNode || dgNode.kind !== "reactive") continue;
+    errors.push(
+      new DGError(
+        "E-DERIVED-CIRCULAR-DEP",
+        `E-DERIVED-CIRCULAR-DEP: Derived reactive value \`@${dgNode.varName}\` ` +
+          `references itself in its initializer. A derived cell cannot depend ` +
+          `on its own value — this would form an infinite recompute loop. ` +
+          `Break the self-reference.`,
+        dgNode.span,
+      ),
+    );
+  }
+
+  // Multi-node cycles in the derived-reads subgraph.
+  const derivedReadsAdj = buildDerivedReadsAdj(edges, nodes);
+  const derivedCycle = detectCycle(derivedReadsAdj, allNodeIds);
+  if (derivedCycle) {
+    // Translate node IDs to var names for a readable diagnostic.
+    const varChain = derivedCycle
+      .map((nid) => {
+        const n = nodes.get(nid);
+        return n && n.kind === "reactive" ? `@${n.varName}` : nid;
+      })
+      .join(" -> ");
+    const firstReactive = nodes.get(derivedCycle[0]);
+    errors.push(
+      new DGError(
+        "E-DERIVED-CIRCULAR-DEP",
+        `E-DERIVED-CIRCULAR-DEP: Circular dependency detected among derived ` +
+          `reactive values: ${varChain}. Each derived cell's RHS depends on a ` +
+          `cell whose RHS eventually depends back on the first — break the cycle.`,
+        firstReactive
+          ? firstReactive.span
+          : { file: "", start: 0, end: 0, line: 1, col: 1 },
+      ),
+    );
+  }
+
+  // E-DERIVED-CIRCULAR-DEP blocks code generation (SPEC §6.6.10 line 2710).
+  // Fail-fast if any derived cycle was found, mirroring E-DG-001 behaviour.
+  if (selfReferencingDerivedNodes.size > 0 || derivedCycle) {
+    return { depGraph: { nodes, edges }, errors };
+  }
+
+  // ------------------------------------------------------------------
   // Cycle detection in 'awaits' edges (E-DG-001)
   // ------------------------------------------------------------------
 
   const awaitsAdj = buildAwaitsAdj(edges);
-  const allNodeIds = new Set<NodeId>(nodes.keys());
-  const cycle = detectAwaitsCycle(awaitsAdj, allNodeIds);
+  const cycle = detectCycle(awaitsAdj, allNodeIds);
 
   if (cycle) {
     const firstNode = nodes.get(cycle[0]);
