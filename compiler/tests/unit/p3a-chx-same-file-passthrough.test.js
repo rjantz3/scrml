@@ -36,14 +36,26 @@ function fx(rel, src) {
 }
 
 describe("P3.A CHX — same-file <channel> pass-through (regression pin)", () => {
-  test("simple per-page channel — compiles without errors", () => {
-    const src = fx("a/page.scrml", `<program>
+  // S69 / M19 / B19 migration: channels are file-level (not inside
+  // `<program>`), and channel bodies use V5-strict structural decls
+  // (`<name> = init`), not the retired `@shared` modifier. The CHX
+  // pass-through invariant being tested (per-page channel emits its
+  // own WS route, _p3aIsExport stays unset, multiple channels per file
+  // each emit) is a property of the v0.next file-level placement.
+  //
+  // The "channel inside a div" test (originally §5) is removed: that
+  // shape now fires E-CHANNEL-INSIDE-PROGRAM (any descendant of another
+  // markup is rejected per §38.1 line 15422). The CHX path it exercised
+  // (VP-2 nested-markup wrapping) is no longer reachable in v0.next.
 
-<channel name="chat" topic="lobby">
+  test("simple per-page channel — compiles without errors", () => {
+    const src = fx("a/page.scrml", `<channel name="chat" topic="lobby">
   ${"$"}{
-    @shared messages = []
+    <messages> = []
   }
 </>
+
+<program>
 
 <div>
   <ul>${"$"}{ for (let m of @messages) { lift <li>${"$"}{m}/ } }</>
@@ -64,17 +76,17 @@ describe("P3.A CHX — same-file <channel> pass-through (regression pin)", () =>
   });
 
   test("per-page channel + server function — compiles without errors", () => {
-    const src = fx("b/page.scrml", `<program>
-
-<channel name="hub" topic="room1">
+    const src = fx("b/page.scrml", `<channel name="hub" topic="room1">
   ${"$"}{
-    @shared messages = []
+    <messages> = []
     server function postMessage(author, body) {
       // V5-strict: function body neutral; this test probes WS routing only.
       return author
     }
   }
 </>
+
+<program>
 
 <button onclick=postMessage("user", "hi")>Send</button>
 <ul>${"$"}{ for (let m of @messages) { lift <li>${"$"}{m.author}: ${"$"}{m.body}/ } }</>
@@ -93,10 +105,11 @@ describe("P3.A CHX — same-file <channel> pass-through (regression pin)", () =>
   });
 
   test("per-page channel — TAB AST does NOT mark _p3aIsExport", () => {
-    const src = fx("c/page.scrml", `<program>
-<channel name="ticker">
-  ${"$"}{ @shared count:number = 0 }
+    const src = fx("c/page.scrml", `<channel name="ticker">
+  ${"$"}{ <count>: number = 0 }
 </>
+
+<program>
 </program>
 `);
     const result = compileScrml({
@@ -112,16 +125,15 @@ describe("P3.A CHX — same-file <channel> pass-through (regression pin)", () =>
   });
 
   test("multiple per-page channels in same file — both compile", () => {
-    const src = fx("d/page.scrml", `<program>
-
-<channel name="chat" topic="lobby">
-  ${"$"}{ @shared messages = [] }
+    const src = fx("d/page.scrml", `<channel name="chat" topic="lobby">
+  ${"$"}{ <messages> = [] }
 </>
 
 <channel name="updates">
-  ${"$"}{ @shared count:number = 0 }
+  ${"$"}{ <count>: number = 0 }
 </>
 
+<program>
 <div>multi</div>
 </program>
 `);
@@ -137,23 +149,9 @@ describe("P3.A CHX — same-file <channel> pass-through (regression pin)", () =>
     expect(out?.clientJs).toMatch(/updates/);
   });
 
-  test("channel inside a div — survives the wrapping (regression for VP-2 path)", () => {
-    const src = fx("e/page.scrml", `<program>
-<div class="container">
-  <channel name="nested">
-    ${"$"}{ @shared count:number = 0 }
-  </>
-</div>
-</program>
-`);
-    const result = compileScrml({
-      inputFiles: [src],
-      outputDir: join(TMP, "e-out"),
-      write: false,
-      log: () => {},
-    });
-    expect(result.errors ?? []).toEqual([]);
-    const out = result.outputs?.get(src);
-    expect(out?.clientJs).toMatch(/nested/);
-  });
+  // §5 (channel-inside-div) removed in S69/B19: per §38.1 line 15422,
+  // channels SHALL appear at file top level only. The "VP-2 wrapping"
+  // path is unreachable in v0.next; the diagnostic E-CHANNEL-INSIDE-PROGRAM
+  // is exercised by compiler/tests/unit/channel-placement-shared-b19.test.js
+  // §B19.2 and §B19.3 instead.
 });

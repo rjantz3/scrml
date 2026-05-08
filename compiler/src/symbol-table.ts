@@ -5397,6 +5397,297 @@ function walkValidateResetTargets(
 }
 
 
+// ---------------------------------------------------------------------------
+// PASS 15 (B19) — Channels file-level placement + `@shared` modifier rejection
+// ---------------------------------------------------------------------------
+//
+// Per Phase A1b Step B19 (audit §2 + spec §38.1, §38.4, §34):
+//
+//   §38.1 line 15422 (file-level placement):
+//     "A `<channel>` element SHALL appear at file top level only. A
+//      `<channel>` nested inside `<program>` (or any other element) SHALL
+//      emit `E-CHANNEL-INSIDE-PROGRAM` (§34)."
+//
+//   §38.4 line 15468 (V5-strict body — no `@shared`):
+//     "The `@shared` modifier SHALL NOT appear in any v0.next source. Use
+//      SHALL emit `E-CHANNEL-SHARED-MODIFIER`."
+//
+//   §38.9 line 15670 reaffirms `@shared` fires "inside (or outside) a
+//   channel body" — the fire-site is ANY `state-decl` carrying `isShared:
+//   true`, regardless of channel nesting context.
+//
+// **Why SYM (not parser):** TAB is intentionally permissive (parses any
+// v1 shape into the canonical AST shape, leaving validation to SYM/NR).
+// SYM is the canonical "validation after AST is fully formed" stage and
+// already houses adjacent walkers (B14-B17). Adds cleanly as PASS 14.
+//
+// **Walker shape:** two independent sub-walks in `walkValidateChannels`:
+//
+//   1. `walkChannelPlacement` — walk markup tree carrying a `markupDepth`
+//      counter. Top-level channels (in `ast.nodes` directly) have depth 0;
+//      any channel reached through a markup or component-def ancestor has
+//      depth >= 1 and fires E-CHANNEL-INSIDE-PROGRAM. The walker descends
+//      into `node.children` (markup children) and `node.body` (logic
+//      blocks; channels never appear inside logic, but recursion is cheap).
+//
+//   2. `walkSharedModifier` — generic AST walker visiting every
+//      `state-decl` (including compound `children` arrays). Fires
+//      E-CHANNEL-SHARED-MODIFIER on any `state-decl` with `isShared:
+//      true`. The check is unconditional per §38.4 line 15468 — `@shared`
+//      anywhere in source fires the diagnostic.
+//
+// **Out of scope (per audit §2.1 + brief §"OUT OF SCOPE for B19"):**
+//   - V5-strict access validation inside channel body (B3 owns `@cellName`
+//     resolution).
+//   - Cross-scope channel-cell visibility (B1 PASS 1 + B3 PASS 3 already
+//     cover this — channel-body logic-blocks register state-decls in the
+//     enclosing file scope).
+//   - Channel attribute shape errors (E-CHANNEL-001/E-CHANNEL-005/
+//     E-CHANNEL-007 — codegen-time today).
+//   - A1c codegen for channels — runtime concern.
+
+/**
+ * PASS 15 (B19) — channel-placement + `@shared`-modifier rejection.
+ * Mutates `errors[]`. Two sub-walks.
+ */
+function walkValidateChannels(
+  ast: any,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  // 1. Placement check. Top-level `<channel>` is allowed (depth === 0);
+  //    nested anywhere else fires E-CHANNEL-INSIDE-PROGRAM.
+  const visitedPlacement = new WeakSet<object>();
+  walkChannelPlacement(ast.nodes, /*markupDepth*/ 0, errors, filePath, visitedPlacement);
+
+  // 2. `@shared` modifier rejection. Fires on any state-decl with
+  //    isShared:true, regardless of containing channel context.
+  const visitedShared = new WeakSet<object>();
+  walkSharedModifier(ast.nodes, errors, filePath, visitedShared);
+}
+
+/**
+ * Walk markup tree to detect `<channel>` placement violations.
+ *
+ * `markupDepth` is the count of MARKUP ancestors (any `node.kind === "markup"`)
+ * traversed to reach the current node — when `node.kind === "markup" && node.tag
+ * === "channel"`, depth 0 means top-level (allowed); depth >= 1 means nested
+ * inside another markup element (fire E-CHANNEL-INSIDE-PROGRAM).
+ *
+ * `component-def` nodes are component declarations whose `defChildren` array
+ * holds sibling logic-body nodes (per B17 finding). A channel inside a
+ * component-def's defChildren is also nested non-top-level placement, so we
+ * count component-def as a markup-ish ancestor for placement purposes.
+ *
+ * Logic-block bodies (`node.kind === "logic"`) and other non-markup containers
+ * never legally hold `<channel>` markup nodes (the parser places channels in
+ * markup `children`); but we recurse defensively — recursion does NOT increment
+ * `markupDepth` for logic bodies (a channel inside `${ ... }` would never be
+ * top-level by depth=0 anyway because the logic block itself sits inside a
+ * markup parent at depth >= 1).
+ */
+function walkChannelPlacement(
+  nodes: any,
+  markupDepth: number,
+  errors: SYMDiagnostic[],
+  filePath: string,
+  visited: WeakSet<object>,
+): void {
+  if (!nodes) return;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) {
+      walkChannelPlacement(n, markupDepth, errors, filePath, visited);
+    }
+    return;
+  }
+  if (typeof nodes !== "object") return;
+  if (visited.has(nodes)) return;
+  visited.add(nodes);
+
+  const node = nodes as any;
+
+  // Fire E-CHANNEL-INSIDE-PROGRAM if a `<channel>` markup is reached at
+  // depth >= 1 (i.e. has at least one markup ancestor).
+  if (node.kind === "markup" && (node.tag ?? "") === "channel" && markupDepth >= 1) {
+    fireChannelInsideProgram(node, errors, filePath);
+  }
+
+  // Compute child-side depth: increment when descending through a markup
+  // node OR a component-def (which conceptually scopes its defChildren).
+  const childDepth =
+    (node.kind === "markup" || node.kind === "component-def")
+      ? markupDepth + 1
+      : markupDepth;
+
+  if (Array.isArray(node.children)) {
+    walkChannelPlacement(node.children, childDepth, errors, filePath, visited);
+  }
+  if (Array.isArray(node.body)) {
+    walkChannelPlacement(node.body, childDepth, errors, filePath, visited);
+  }
+  if (Array.isArray(node.defChildren)) {
+    walkChannelPlacement(node.defChildren, childDepth, errors, filePath, visited);
+  }
+  if (Array.isArray(node.consequent)) {
+    walkChannelPlacement(node.consequent, childDepth, errors, filePath, visited);
+  }
+  if (Array.isArray(node.alternate)) {
+    walkChannelPlacement(node.alternate, childDepth, errors, filePath, visited);
+  }
+  if (Array.isArray(node.arms)) {
+    for (const arm of node.arms) {
+      if (arm && Array.isArray(arm.body)) {
+        walkChannelPlacement(arm.body, childDepth, errors, filePath, visited);
+      }
+    }
+  }
+}
+
+/**
+ * Walk every AST node visiting state-decls; fire E-CHANNEL-SHARED-MODIFIER
+ * on any `state-decl` with `isShared: true`. Per §38.4 line 15468 the
+ * modifier is rejected ANYWHERE in v0.next source — fire is unconditional.
+ *
+ * Recursion mirrors B17's structural shape — descends into children/body/
+ * consequent/alternate/arms AND into `state-decl.children` (compound parents).
+ */
+function walkSharedModifier(
+  nodes: any,
+  errors: SYMDiagnostic[],
+  filePath: string,
+  visited: WeakSet<object>,
+): void {
+  if (!nodes) return;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) {
+      walkSharedModifier(n, errors, filePath, visited);
+    }
+    return;
+  }
+  if (typeof nodes !== "object") return;
+  if (visited.has(nodes)) return;
+  visited.add(nodes);
+
+  const node = nodes as any;
+
+  if (node.kind === "state-decl" && node.isShared === true) {
+    fireChannelSharedModifier(node, errors, filePath);
+  }
+
+  // Compound parent: state-decl carries `children: ReactiveDeclNode[]`.
+  if (Array.isArray(node.children) && node.kind === "state-decl") {
+    walkSharedModifier(node.children, errors, filePath, visited);
+  }
+  // Generic markup/logic/etc. recursion — children + body + arms.
+  if (Array.isArray(node.children) && node.kind !== "state-decl") {
+    walkSharedModifier(node.children, errors, filePath, visited);
+  }
+  if (Array.isArray(node.body)) {
+    walkSharedModifier(node.body, errors, filePath, visited);
+  }
+  if (Array.isArray(node.defChildren)) {
+    walkSharedModifier(node.defChildren, errors, filePath, visited);
+  }
+  if (Array.isArray(node.consequent)) {
+    walkSharedModifier(node.consequent, errors, filePath, visited);
+  }
+  if (Array.isArray(node.alternate)) {
+    walkSharedModifier(node.alternate, errors, filePath, visited);
+  }
+  if (Array.isArray(node.arms)) {
+    for (const arm of node.arms) {
+      if (arm && Array.isArray(arm.body)) {
+        walkSharedModifier(arm.body, errors, filePath, visited);
+      }
+    }
+  }
+}
+
+/**
+ * Fire `E-CHANNEL-INSIDE-PROGRAM` per §38.1 + §34. Triggered when a
+ * `<channel>` markup element is reached at non-zero markup depth (i.e.
+ * has at least one markup ancestor — `<program>`, another markup node,
+ * or a `component-def` body).
+ *
+ * The diagnostic message names the channel (when its `name=` attribute
+ * resolves to a static string literal) and points to the canonical
+ * v0.next shape: file-level sibling of `<program>`.
+ */
+function fireChannelInsideProgram(
+  channelNode: any,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  const span: SYMDiagnostic["span"] = channelNode.span ?? {
+    file: filePath, start: 0, end: 0, line: 1, col: 1,
+  };
+
+  // Best-effort: extract the channel name from the `name=` attribute when it
+  // is a simple static string literal. Avoids over-engineering for the
+  // common case; falls back to a generic placeholder otherwise.
+  const attrs: any[] = channelNode.attrs ?? channelNode.attributes ?? [];
+  const nameAttr = attrs.find?.((a: any) => a && a.name === "name");
+  let channelLabel = "`<channel>`";
+  if (nameAttr) {
+    const v = nameAttr.value;
+    if (typeof v === "string") {
+      channelLabel = `\`<channel name="${v}">\``;
+    } else if (v && typeof v === "object" && v.kind === "string-literal" && typeof v.value === "string") {
+      channelLabel = `\`<channel name="${v.value}">\``;
+    }
+  }
+
+  errors.push({
+    code: "E-CHANNEL-INSIDE-PROGRAM",
+    message:
+      `E-CHANNEL-INSIDE-PROGRAM: ${channelLabel} appears as a descendant of another element ` +
+      `(e.g. \`<program>\`) rather than at file top level. Channels are file-level in ` +
+      `v0.next (M19); migrate the \`<channel>\` declaration to be a sibling of ` +
+      `\`<program>\`, not a descendant. ` +
+      `(SPEC §38.1 + §34.)`,
+    span,
+    severity: "error",
+  });
+}
+
+/**
+ * Fire `E-CHANNEL-SHARED-MODIFIER` per §38.4 + §34. Triggered when a
+ * state-decl carries `isShared: true` (i.e. source contained `@shared`
+ * before the variable name).
+ *
+ * Per §38.4 line 15468, the modifier is rejected anywhere in source —
+ * the fire-site is unconditional on placement (channel body or otherwise).
+ * In v0.next, sync comes from declaring inside a channel body, not from
+ * a `@shared` marker. The diagnostic message recommends the canonical
+ * V5-strict structural form `<name> = init`.
+ */
+function fireChannelSharedModifier(
+  stateDecl: any,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  const span: SYMDiagnostic["span"] = stateDecl.span ?? {
+    file: filePath, start: 0, end: 0, line: 1, col: 1,
+  };
+  const name = typeof stateDecl.name === "string" && stateDecl.name.length > 0
+    ? stateDecl.name
+    : "<name>";
+  errors.push({
+    code: "E-CHANNEL-SHARED-MODIFIER",
+    message:
+      `E-CHANNEL-SHARED-MODIFIER: \`@shared ${name} = …\` uses the \`@shared\` modifier, ` +
+      `which is removed in v0.next (M19). Reactive cells declared inside a channel body ` +
+      `auto-sync by virtue of being declared in the channel body — no marker is required. ` +
+      `Remove the \`@shared\` keyword and use the V5-strict structural form ` +
+      `\`<${name}> = init\` (inside a \`<channel>\` body) or a plain \`<${name}> = init\` / ` +
+      `\`@${name} = init\` (outside a channel). ` +
+      `(SPEC §38.4 + §34.)`,
+    span,
+    severity: "error",
+  });
+}
+
+
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -5632,6 +5923,19 @@ export function runSYM(input: SYMInput): SYMResult {
   // Step 9's deferred validation (per ast.ts:1670-1674 docstring).
   const visitedB22 = new WeakSet<object>();
   walkValidateResetTargets(ast.nodes, fileScope, visitedB22, errors, filePath);
+
+  // PASS 15 (B19): Channel placement + `@shared` modifier rejection.
+  // Two sub-walks per SPEC §38.1, §38.4, §34:
+  //   - walkChannelPlacement: fires E-CHANNEL-INSIDE-PROGRAM on any
+  //     `<channel>` markup node reached with markupDepth >= 1.
+  //   - walkSharedModifier: fires E-CHANNEL-SHARED-MODIFIER on any
+  //     `state-decl` carrying `isShared: true` (TAB stamps this on
+  //     `@shared <name> = init` source — the legacy v1 modifier).
+  // Both walks are independent of B14-B17/B22 metadata; only consume the
+  // canonical AST shape (markup tag/children + state-decl.isShared).
+  // Renumbered from B19's PASS 14 → PASS 15 during S69 file-delta merge
+  // (B22 took PASS 14 in the parallel small-bundle dispatch).
+  walkValidateChannels(ast, errors, filePath);
 
   return {
     filePath,

@@ -36,12 +36,15 @@ function fx(rel, src) {
 
 describe("P3.A — PURE-CHANNEL-FILE pattern", () => {
   test("a file with only `export <channel>` decls + a consumer: source emits no WS route", () => {
+    // V5-strict body (M19 / S69 B19): channel-body cells use `<name> = init`,
+    // not `@shared <name> = init`. Auto-sync comes from the channel-body
+    // placement; no marker required.
     const channels = fx("a/channels.scrml", `export <channel name="ticker">
-  ${"$"}{ @shared count:number = 0 }
+  ${"$"}{ <count>: number = 0 }
 </>
 
 export <channel name="updates">
-  ${"$"}{ @shared messages = [] }
+  ${"$"}{ <messages> = [] }
 </>
 `);
     const consumer = fx("a/consumer.scrml", `<program>
@@ -79,8 +82,9 @@ ${"$"}{ import { ticker, updates } from './channels.scrml' }
     // imports them. The channel is declared but never instantiated. The
     // compiler should not crash and should not emit a WS route for the
     // unused channel.
+    // V5-strict body (M19 / S69 B19).
     const channels = fx("b/orphan.scrml", `export <channel name="unused">
-  ${"$"}{ @shared count:number = 0 }
+  ${"$"}{ <count>: number = 0 }
 </>
 `);
     const result = compileScrml({

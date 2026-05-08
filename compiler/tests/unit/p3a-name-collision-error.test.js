@@ -36,11 +36,11 @@ function fx(rel, src) {
 describe("P3.A — E-CHANNEL-008 (cross-file name= collision)", () => {
   test("two source files export channels with the same name; consumer imports both → E-CHANNEL-008", () => {
     fx("a/x.scrml", `export <channel name="chat">
-  ${"$"}{ @shared messages = [] }
+  ${"$"}{ <messages> = [] }
 </>
 `);
     fx("a/y.scrml", `export <channel name="chat">
-  ${"$"}{ @shared messages = [] }
+  ${"$"}{ <messages> = [] }
 </>
 `);
     const consumer = fx("a/consumer.scrml", `<program>
@@ -67,7 +67,7 @@ ${"$"}{
 
   test("two aliases for the SAME imported channel — NOT a collision", () => {
     fx("b/channels.scrml", `export <channel name="chat">
-  ${"$"}{ @shared messages = [] }
+  ${"$"}{ <messages> = [] }
 </>
 `);
     const consumer = fx("b/consumer.scrml", `<program>

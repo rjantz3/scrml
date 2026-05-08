@@ -35,7 +35,7 @@ function fx(rel, src) {
 describe("P3.A CHX — cross-file <channel> inline expansion", () => {
   test("basic: simple cross-file channel compiles + inlines", () => {
     fx("c1/channels.scrml", `export <channel name="ticker">
-  ${"$"}{ @shared count:number = 0 }
+  ${"$"}{ <count>: number = 0 }
 </>
 `);
     const consumer = fx("c1/consumer.scrml", `<program>
@@ -58,7 +58,7 @@ ${"$"}{ import { ticker } from './channels.scrml' }
 
   test("cross-file with attrs preserved (topic, reconnect)", () => {
     fx("c2/channels.scrml", `export <channel name="chat" topic="lobby" reconnect="5000">
-  ${"$"}{ @shared messages = [] }
+  ${"$"}{ <messages> = [] }
 </>
 `);
     const consumer = fx("c2/consumer.scrml", `<program>
@@ -86,7 +86,7 @@ ${"$"}{ import { chat } from './channels.scrml' }
 }
 
 export <channel name="hub" onserver:open=onConnect() onserver:message=onMsg(m)>
-  ${"$"}{ @shared count:number = 0 }
+  ${"$"}{ <count>: number = 0 }
 </>
 `);
     const consumer = fx("c3/consumer.scrml", `<program>
@@ -104,10 +104,10 @@ ${"$"}{ import { hub } from './channels.scrml' }
     expect(result.errors ?? []).toEqual([]);
   });
 
-  test("cross-file with server function that uses @shared", () => {
+  test("cross-file with server function that mutates a channel-body cell", () => {
     fx("c4/channels.scrml", `export <channel name="chat" topic="lobby">
   ${"$"}{
-    @shared messages = []
+    <messages> = []
     server function postMessage(author, body) {
       // V5-strict: function body neutral; this test probes WS routing only.
       return author
@@ -137,7 +137,7 @@ ${"$"}{ import { chat } from './channels.scrml' }
 
   test("cross-file with import alias", () => {
     fx("c5/channels.scrml", `export <channel name="chat" topic="lobby">
-  ${"$"}{ @shared messages = [] }
+  ${"$"}{ <messages> = [] }
 </>
 `);
     // Import as a different local name.

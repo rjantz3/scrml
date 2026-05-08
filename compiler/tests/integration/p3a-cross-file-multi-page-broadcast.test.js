@@ -7,7 +7,10 @@
  * channel, every consumer subscribes to the same WS topic by virtue of
  * shared `name=` identity. This is the wire-layer-by-name property: the
  * channel CG emits identical `_scrml_ws/<name>` routes for each consumer,
- * and `@shared` mirrors stay in sync via the shared topic.
+ * and channel-body cell mirrors stay in sync via the shared topic.
+ *
+ * Fixture syntax (S69 / M19 / B19): channel bodies use V5-strict
+ * structural decls (`<name> = init`), NOT the retired `@shared` modifier.
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
@@ -36,9 +39,13 @@ function fx(rel, src) {
 
 describe("P3.A multi-page broadcast — case 3 of dive §6.3", () => {
   test("two consumer pages share the same wire identity by `name=`", () => {
+    // V5-strict body (M19 / S69 B19): channel-body cells use `<name> = init`,
+    // NOT `@shared`. The `@shared` modifier was removed in v0.next; auto-sync
+    // comes from being declared inside a channel body. Per SPEC §38.4 line
+    // 15468 + B19, `@shared` fires E-CHANNEL-SHARED-MODIFIER.
     fx("a/channels.scrml", `export <channel name="chat" topic="lobby">
   ${"$"}{
-    @shared messages = []
+    <messages> = []
     server function postMessage(author, body) {
       // V5-strict: function body neutral. Test probes WS routing only.
       return author
@@ -84,9 +91,11 @@ ${"$"}{ import { chat } from './channels.scrml' }
   });
 
   test("3 consumer pages — all share the channel; PURE-CHANNEL-FILE doesn't emit duplicate routes", () => {
+    // V5-strict body (M19 / S69 B19): use `<count>: number = 0` instead of
+    // the retired `@shared count:number = 0`.
     fx("b/channels.scrml", `export <channel name="updates">
   ${"$"}{
-    @shared count:number = 0
+    <count>: number = 0
   }
 </>
 `);
@@ -135,16 +144,18 @@ ${"$"}{ import { updates } from './channels.scrml' }
   test("eliminates ~180 LOC duplication: per-page channels coalesce to one declaration", () => {
     // This test validates the eliminated-duplication promise from
     // FRICTION.md §F-CHANNEL-003: 5 channels × ~3 redeclarations = ~180 LOC.
+    // V5-strict body (M19 / S69 B19): three channels each declaring a
+    // single typed cell. Replaces the retired `@shared <name>:T = init` form.
     fx("c/channels.scrml", `export <channel name="ch1">
-  ${"$"}{ @shared a:number = 0 }
+  ${"$"}{ <a>: number = 0 }
 </>
 
 export <channel name="ch2">
-  ${"$"}{ @shared b:number = 0 }
+  ${"$"}{ <b>: number = 0 }
 </>
 
 export <channel name="ch3">
-  ${"$"}{ @shared c:number = 0 }
+  ${"$"}{ <c>: number = 0 }
 </>
 `);
     // 3 pages, each importing all 3 channels.

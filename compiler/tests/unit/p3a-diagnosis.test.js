@@ -35,9 +35,11 @@ function fx(rel, src) {
 
 describe("P3.A diagnosis — cross-file <channel> export/import", () => {
   test("F-CHANNEL-003 closure: cross-file channel export+import compiles cleanly", () => {
+    // V5-strict body (M19 / S69 B19): channel-body cells use `<name> = init`,
+    // not the retired `@shared <name> = init` form.
     fx("d1/channels.scrml", `export <channel name="chat" topic="lobby">
   ${"$"}{
-    @shared messages = []
+    <messages> = []
     server function postMessage(author, body) {
       // V5-strict: function body neutral; this test probes WS routing only.
       return author
