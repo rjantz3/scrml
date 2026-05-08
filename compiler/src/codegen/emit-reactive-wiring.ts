@@ -10,7 +10,7 @@ import {
   collectServerVarDecls,
   callableServerVarDecls,
 } from "./collect.ts";
-import { collectDerivedVarNames } from "./reactive-deps.ts";
+import { collectDerivedVarNames, buildFunctionBodyRegistry, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { collectChannelNodes, emitChannelClientJs } from "./emit-channel.ts";
 import { emitInitialLoad, emitOptimisticUpdate, emitServerSyncStub, emitUnifiedMountHydrate } from "./emit-sync.ts";
 import type { EncodingContext } from "./type-encoding.ts";
@@ -253,9 +253,15 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
 
   const derivedNames = collectDerivedVarNames(fileAST);
   const machineBindings = buildMachineBindingsMap(fileAST);
-  const emitOpts: { derivedNames?: Set<string>; encodingCtx?: typeof encodingCtx; machineBindings?: typeof machineBindings } = derivedNames.size > 0
-    ? { derivedNames, encodingCtx, ...(machineBindings ? { machineBindings } : {}) }
-    : { encodingCtx, ...(machineBindings ? { machineBindings } : {}) };
+  // C2: build function-body registry once per file for transitive reactive-dep
+  // extraction in derived-cell inits (closes SPEC §6.6.3 line 2470-2482
+  // normative — deps tracked through fn calls). Mirrors the
+  // `extractReactiveDepsTransitive` usage in `emit-html.ts:891` for markup
+  // interpolations. Threaded into `emit-logic` via `EmitLogicOpts.fnBodyRegistry`.
+  const fnBodyRegistry: FunctionBodyRegistry = buildFunctionBodyRegistry(fileAST as Record<string, unknown>);
+  const emitOpts: { derivedNames?: Set<string>; encodingCtx?: typeof encodingCtx; machineBindings?: typeof machineBindings; fnBodyRegistry?: FunctionBodyRegistry } = derivedNames.size > 0
+    ? { derivedNames, encodingCtx, fnBodyRegistry, ...(machineBindings ? { machineBindings } : {}) }
+    : { encodingCtx, fnBodyRegistry, ...(machineBindings ? { machineBindings } : {}) };
 
   // Step 4a: Generate transition lookup tables for enums with transitions{} and machines (§51.5).
   // These must be emitted BEFORE top-level logic statements because state-decl

@@ -172,7 +172,13 @@ describe("C1 §C1.4 — Shape 3 markup-typed derived placeholder", () => {
     expect(result).toContain("_scrml_markup_factory_badge");
   });
 
-  test("emits factory function shell as a function declaration", () => {
+  test("emits factory function as a function declaration (post-C2: real DOM-builder body)", () => {
+    // C2 SHIP: this test was authored against the C1 placeholder (`return null;`
+    // with `/* C2: ... */` comment). C2 lifts the shell to a real factory that
+    // builds the markup DOM tree via `emitCreateElementFromMarkup`. The
+    // declaration shape (function decl + _scrml_derived_declare registration)
+    // is unchanged from C1; only the factory BODY content differs (now emits
+    // createElement chain + return root).
     const node = {
       kind: "state-decl",
       name: "badge",
@@ -187,8 +193,11 @@ describe("C1 §C1.4 — Shape 3 markup-typed derived placeholder", () => {
     };
     const result = emitLogicNode(node);
     expect(result).toMatch(/function _scrml_markup_factory_badge\w*\(\)/);
-    expect(result).toContain("/* C2:");
-    expect(result).toContain("return null;");
+    // Post-C2: factory body builds the DOM tree via document.createElement.
+    expect(result).toContain('document.createElement("span")');
+    expect(result).toMatch(/return _scrml_lift_el_\d+;/);
+    // The factory still registers via _scrml_derived_declare (C1 invariant).
+    expect(result).toContain('_scrml_derived_declare("badge"');
   });
 
   test("does NOT emit _scrml_reactive_set for markup-typed derived (no longer falls through to legacy path)", () => {

@@ -476,7 +476,7 @@ function emitSetContent(elVar, parts) {
  * @param {string[]} lines — accumulator for JS lines
  * @returns {string} — the variable name of the created element
  */
-function emitCreateElementFromMarkup(node, lines) {
+export function emitCreateElementFromMarkup(node, lines) {
   const tag = node.tag ?? node.tagName ?? "div";
   const attrs = node.attributes ?? node.attrs ?? [];
   const children = node.children ?? [];

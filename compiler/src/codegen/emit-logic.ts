@@ -3,8 +3,8 @@ import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate } from "./rewrit
 import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
 import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, type MatchArm } from "./emit-control-flow.ts";
-import { emitLiftExpr } from "./emit-lift.js";
-import { extractReactiveDeps, extractReactiveDepsFromExprNode } from "./reactive-deps.ts";
+import { emitLiftExpr, emitCreateElementFromMarkup } from "./emit-lift.js";
+import { extractReactiveDeps, extractReactiveDepsFromExprNode, extractReactiveDepsTransitive, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import { emitRuntimeCheck } from "./emit-predicates.ts";
@@ -103,6 +103,24 @@ interface EmitLogicOpts {
    * recursive child walk in `case "state-decl"` (compound-parent arm).
    */
   compoundPathPrefix?: string | null;
+  /**
+   * C2 — Function body registry for transitive reactive-dep extraction
+   * through function calls in derived-cell init expressions. Closes the
+   * §6.6.3 line 2470-2482 normative gap (transitive deps recorded as if
+   * the `@var` reads occurred directly at the call site).
+   *
+   * Built once per file at the top-level entry in `emit-reactive-wiring.ts`
+   * via `buildFunctionBodyRegistry(fileAST)`. Threaded through recursive
+   * calls via `{ ...opts }` spread (compound children inherit). When
+   * absent, the derived arm falls back to direct `extractReactiveDeps*`
+   * extraction (preserves test-fixture compatibility for synthetic
+   * state-decls without a registry).
+   *
+   * Brings derived-cell extraction to parity with markup-interp extraction
+   * which already uses `extractReactiveDepsTransitive` at
+   * `emit-html.ts:891`.
+   */
+  fnBodyRegistry?: FunctionBodyRegistry | null;
 }
 
 /** An entry in the captured scope for a runtime ^{} meta block (from meta-checker.ts). */
@@ -307,6 +325,107 @@ function _emitDefaultSidecar(node: any, qualifiedName: string, opts: EmitLogicOp
   const encodedName = ctx ? ctx.encode(qualifiedName) : qualifiedName;
   const defaultBody = emitExpr(defaultExpr, _makeExprCtx(opts));
   return `_scrml_default_set(${JSON.stringify(encodedName)}, () => ${defaultBody});`;
+}
+
+/**
+ * C2 — Walk a markup tree (renderSpec.element) to collect reactive deps from
+ * any `${...}` interpolations inside it. Mirrors what extractReactiveDeps*
+ * does for plain expressions, but descends into `kind: "logic"` children.
+ *
+ * For each `bare-expr` interpolation, uses the transitive walker when a
+ * fnBodyRegistry is available (so `${upperOf(@x)}` records `x` as a dep
+ * through the fn body — same parity as plain Shape-3 derived in WIP-4).
+ * Falls back to direct extraction when registry is absent.
+ *
+ * @param markupNode — `renderSpec.element` (the root markup node)
+ * @param opts — emit options (for fnBodyRegistry)
+ * @returns set of reactive variable names (without @ prefix) — the union
+ *          of all interpolation deps in the entire markup tree
+ */
+function _collectMarkupTreeReactiveDeps(markupNode: any, opts: EmitLogicOpts): Set<string> {
+  const deps = new Set<string>();
+  if (!markupNode || typeof markupNode !== "object") return deps;
+
+  function visit(node: any): void {
+    if (!node || typeof node !== "object") return;
+
+    if (node.kind === "logic" && Array.isArray(node.body)) {
+      for (const logicChild of node.body) {
+        if (logicChild && logicChild.kind === "bare-expr" && (logicChild.exprNode || logicChild.expr)) {
+          let childDeps: Set<string>;
+          if (opts.fnBodyRegistry) {
+            const exprStr = logicChild.exprNode
+              ? (() => { try { return emitStringFromTree(logicChild.exprNode); } catch { return logicChild.expr ?? ""; } })()
+              : (logicChild.expr ?? "");
+            childDeps = extractReactiveDepsTransitive(exprStr, null, opts.fnBodyRegistry);
+          } else {
+            childDeps = logicChild.exprNode
+              ? extractReactiveDepsFromExprNode(logicChild.exprNode)
+              : extractReactiveDeps(logicChild.expr ?? "");
+          }
+          for (const d of childDeps) deps.add(d);
+        }
+      }
+    }
+
+    // Walk attribute values for variable-ref / call-ref / expr / props-block kinds.
+    // These can contain `@var` references that the runtime evaluates per-render.
+    if (Array.isArray(node.attributes)) {
+      for (const attr of node.attributes) {
+        if (!attr || !attr.value) continue;
+        const val = attr.value;
+        if (val.kind === "variable-ref") {
+          const name = (val.name || "").replace(/^@/, "");
+          if (name) deps.add(name);
+        } else if (val.kind === "expr" || val.kind === "props-block") {
+          const raw = val.raw ?? val.propsDecl ?? "";
+          let attrDeps: Set<string>;
+          if (opts.fnBodyRegistry) {
+            const exprStr = val.exprNode
+              ? (() => { try { return emitStringFromTree(val.exprNode); } catch { return raw; } })()
+              : raw;
+            attrDeps = extractReactiveDepsTransitive(exprStr, null, opts.fnBodyRegistry);
+          } else {
+            attrDeps = val.exprNode
+              ? extractReactiveDepsFromExprNode(val.exprNode)
+              : extractReactiveDeps(raw);
+          }
+          for (const d of attrDeps) deps.add(d);
+        } else if (val.kind === "call-ref") {
+          // Function call in attribute value — extract from each arg expr
+          if (Array.isArray(val.argExprNodes)) {
+            for (const argNode of val.argExprNodes) {
+              if (!argNode) continue;
+              let argDeps: Set<string>;
+              if (opts.fnBodyRegistry) {
+                const argStr = (() => { try { return emitStringFromTree(argNode); } catch { return ""; } })();
+                argDeps = extractReactiveDepsTransitive(argStr, null, opts.fnBodyRegistry);
+              } else {
+                argDeps = extractReactiveDepsFromExprNode(argNode);
+              }
+              for (const d of argDeps) deps.add(d);
+            }
+          }
+          // Also walk the callee name through the registry (transitive — the
+          // function body itself may read @vars).
+          if (opts.fnBodyRegistry && typeof val.name === "string") {
+            const calleeStr = `${val.name}()`;
+            const calleeDeps = extractReactiveDepsTransitive(calleeStr, null, opts.fnBodyRegistry);
+            for (const d of calleeDeps) deps.add(d);
+          }
+        }
+      }
+    }
+
+    if (Array.isArray(node.children)) {
+      for (const child of node.children) {
+        visit(child);
+      }
+    }
+  }
+
+  visit(markupNode);
+  return deps;
 }
 
 /**
@@ -704,19 +823,25 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // shape field is set to "decl-with-spec" by the same path that handles
       // bindable Shape 2.
       //
-      // C1 emits a placeholder declaration: `_scrml_derived_declare("badge",
-      // _scrml_markup_factory_N)` plus a top-level factory function shell.
-      // The factory body and the dep-tracking subscriptions are C2's territory
-      // (per BRIEF §1: "C1 emits the declaration; C2 wires the dep-tracking").
+      // C1 emitted a placeholder declaration with a `return null` factory
+      // shell + the `_scrml_derived_declare` registration. C2 lifts the shell
+      // to a real DOM-builder factory: walks `renderSpec.element` via the
+      // existing `emitCreateElementFromMarkup` primitive (emit-lift.js:479),
+      // returns the root element, and emits one `_scrml_derived_subscribe`
+      // edge per reactive dep collected from the markup tree's `${...}`
+      // interpolations + reactive attribute references.
+      //
+      // Closes the C1→C2 lift per A1c BRIEF §1: "C1 emits the declaration;
+      // C2 wires the dep-tracking + factory body."
+      //
       // Use-site `${@badge}` interpolation already routes correctly via the
       // runtime's `_scrml_reactive_get` → `_scrml_derived_get` shim
-      // (runtime-template.js:181) once the cell is registered as derived.
+      // (runtime-template.js:181) — when the factory now produces a real
+      // DOM tree, `${@badge}` reads return that tree.
       //
-      // SURVEY §5.2 Option (b). The factory shell returns `null` until C2
-      // wires the markup-emit + dep-tracking; reads of `@badge` before C2
-      // ships will see `null` rather than crash, but the dispatch shape is
-      // already correct and the tests assert declaration shape, not runtime
-      // value. C2 lifts this from a stub to a real markup factory.
+      // Defensive: if `renderSpec.element` is missing or malformed, fall back
+      // to the C1 `return null` shell (mirrors C1's defensive behavior; A1b
+      // should reject before codegen).
       if (
         (node as any)._cellKind === "markup-typed" &&
         (node as any).isConst === true
@@ -725,8 +850,40 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         const encodedMkName = ctxMk ? ctxMk.encode(_qualifiedName) : _qualifiedName;
         const factoryId = genVar(`markup_factory_${node.name}`);
         const lines: string[] = [];
-        lines.push(`function ${factoryId}() { /* C2: emit markup tree + register _scrml_derived_subscribe edges for upstream cells in renderSpec.element */ return null; }`);
+
+        const markupRoot = (node as any).renderSpec?.element;
+        if (!markupRoot || markupRoot.kind !== "markup") {
+          // Defensive shell — A1b should have rejected; emit explanatory marker
+          lines.push(`function ${factoryId}() { /* C2: markup-typed derived <${node.name}> has no markup tree — A1b should have rejected before codegen */ return null; }`);
+          lines.push(`_scrml_derived_declare(${JSON.stringify(encodedMkName)}, ${factoryId});`);
+          return _appendSidecar(lines.join("\n"));
+        }
+
+        // Build the factory body via the existing markup→DOM-builder primitive
+        // (emit-lift.js:479 — newly exported in WIP-2). The function emits
+        // `const _lift_el_X = document.createElement(...);` + setAttribute
+        // chains + appendChild calls into the `bodyLines` accumulator and
+        // returns the root element variable.
+        const bodyLines: string[] = [];
+        const rootVar = emitCreateElementFromMarkup(markupRoot, bodyLines);
+        const indented = bodyLines.map(l => `  ${l}`).join("\n");
+        lines.push(`function ${factoryId}() {`);
+        if (indented) lines.push(indented);
+        lines.push(`  return ${rootVar};`);
+        lines.push(`}`);
         lines.push(`_scrml_derived_declare(${JSON.stringify(encodedMkName)}, ${factoryId});`);
+
+        // Emit subscribe edges for every reactive dep the markup tree
+        // interpolates. Walk via `_collectMarkupTreeReactiveDeps` — it
+        // descends into `kind: "logic"` children (`${...}` interpolations)
+        // and into reactive attribute values, with transitive-fn-call
+        // tracking when fnBodyRegistry is available.
+        const markupDeps = _collectMarkupTreeReactiveDeps(markupRoot, opts);
+        for (const dep of markupDeps) {
+          const encodedDep = ctxMk ? ctxMk.encode(dep) : dep;
+          lines.push(`_scrml_derived_subscribe(${JSON.stringify(encodedMkName)}, ${JSON.stringify(encodedDep)});`);
+        }
+
         return _appendSidecar(lines.join("\n"));
       }
 
@@ -738,9 +895,24 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         // Pre-Step-11.5 this was a separate `case "reactive-derived-decl":`;
         // now it's gated inline on the shape discriminant.
         const derivedInit: string = node.init ?? "";
-        const reactiveDepsFound = node.initExpr
-          ? extractReactiveDepsFromExprNode(node.initExpr)
-          : extractReactiveDeps(derivedInit);
+        // C2: when fnBodyRegistry is available, use transitive extraction
+        // (closes SPEC §6.6.3 line 2470-2482 normative gap — deps tracked
+        // through fn calls). Brings derived path to parity with markup-interp
+        // path (emit-html.ts:891). Falls back to direct extraction when
+        // registry is absent (preserves test-fixture compatibility for
+        // synthetic state-decls without a registry).
+        let reactiveDepsFound: Set<string>;
+        if (opts.fnBodyRegistry) {
+          // Build the expression string for the transitive walker.
+          const exprStrForDeps = node.initExpr
+            ? (() => { try { return emitStringFromTree(node.initExpr); } catch { return derivedInit; } })()
+            : derivedInit;
+          reactiveDepsFound = extractReactiveDepsTransitive(exprStrForDeps, null, opts.fnBodyRegistry);
+        } else {
+          reactiveDepsFound = node.initExpr
+            ? extractReactiveDepsFromExprNode(node.initExpr)
+            : extractReactiveDeps(derivedInit);
+        }
         const hasReactiveDeps = reactiveDepsFound.size > 0;
 
         if (!hasReactiveDeps) {
