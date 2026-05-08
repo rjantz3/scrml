@@ -1,10 +1,47 @@
 # A1b Step B18 — L19 multi-statement event-handler validation (E-MULTI-STATEMENT-HANDLER) — DISPATCH BRIEF
 
-**Status:** PRE-DRAFTED at S69. Ready to dispatch as part of Wave 5 small-bundle parallel (B18 + B19 + B22).
+**Status:** RE-DISPATCH at S69. First dispatch (agent `a54c4e8caafc5a14e`) hit an API error mid-implementation — Phase 0 survey complete but actual implementation only partially started, no commits made. **Re-dispatch starts fresh from current main.**
 
-**Estimate:** 2-3h (per audit `docs/audits/a1b-b18-b22-wave5-rule4-audit-2026-05-07.md` §1.3).
+**Estimate:** 2-3h (per audit `docs/audits/a1b-b18-b22-wave5-rule4-audit-2026-05-07.md` §1.3). Phase 0 survey reusable from prior dispatch — see §"S69 RE-DISPATCH CONTEXT" below.
 
-**Sequencing:** PARALLEL with B19 + B22. File-disjoint (markup-attribute walker territory; B19 owns channel checker; B22 owns reset target).
+**Sequencing:** Now sequential after B22 + B19 ship (Wave 5 small-bundle 1 & 2 of 3 already landed). File-disjoint from both — different walker territories.
+
+---
+
+## S69 RE-DISPATCH CONTEXT
+
+**The first dispatch's Phase 0 survey is already complete and saved.** Read these two files BEFORE doing anything else:
+
+- `docs/changes/phase-a1b-step-b18-multi-statement-handler/SURVEY-failed-dispatch-1.md` — full Phase 0 findings (5 audit items + plan + scope clarifications).
+- `docs/changes/phase-a1b-step-b18-multi-statement-handler/progress-failed-dispatch-1.md` — first dispatch's progress log (Phase 0 baseline + strategy).
+
+**Key conclusions from the saved survey (skip Phase 0 re-discovery):**
+
+1. **Two fire-sites:** (a) markup-attribute scan at AST-builder time (in `compiler/src/ast-builder.js`, around line 8355's markup branch — scan `block.raw` opener), (b) engine state-child `:`-shorthand body extension to SYM PASS 11 (`validateEngineStateChildrenAndRules` in `compiler/src/symbol-table.ts`).
+2. **Helper module to create:** `compiler/src/multi-statement-scan.ts` exporting `scanForTopLevelSemicolon(text: string): SemicolonHit[]`. Tracks paren/brace/bracket depth, single/double/backtick string state, line/block comments, `${...}` template-literal interpolation depth.
+3. **`${...}` arrow form is EXEMPT** — when scanning, on encountering `${` skip past matching `}`.
+4. **Tokenizer behavior to fix:** today `onclick=fn(); other()` parses as `onclick=fn()` then `track` (boolean attr) then `"hi"` (orphan string). The silent-bug surface that L19 was designed to catch.
+5. **Net-new diagnostic** — zero existing E-MULTI-STATEMENT-HANDLER fire path; no test coverage to extend.
+
+**The failed worktree's partial implementation is NOT load-bearing.** Don't try to recover it. The new worktree starts fresh from current main; build the implementation per the saved survey's §2 Plan.
+
+**What the first dispatch DID NOT do:**
+- Did not create `multi-statement-scan.ts` helper file.
+- Did not add the markup-attribute scan to `ast-builder.js`.
+- Did not write any tests.
+- Drafted a partial extension to `validateEngineStateChildrenAndRules` (B15 PASS 11) but the import line referenced the missing helper file.
+
+**Re-dispatch baseline state (post-B22 + post-B19 lands, S69):**
+- Main HEAD: `7ce01e4` (feat(a1b-b19): SHIP — channel placement + @shared modifier rejection).
+- B22 ✅ shipped at `a294815`. New SYM PASS 14 = `walkValidateResetTargets`. New §34 row `E-RESET-INVALID-TARGET`.
+- B19 ✅ shipped at `7ce01e4`. New SYM PASS 15 = `walkValidateChannels` (renumbered from B19's PASS 14 due to B22 collision).
+- Test baseline: full suite **9463 / 60 / 1 / 0**; pre-commit subset **8739 / 49 / 1 / 0**.
+
+**Per pa.md S69 dispatch-landing methodology:** worktree-as-scratch / file-delta. Land all work in your worktree (incremental commits per crash-recovery rule). PA reviews file-delta and lands via `git checkout <branch> -- <files>` to main.
+
+---
+
+## Dispatch instructions for PA
 
 ---
 
