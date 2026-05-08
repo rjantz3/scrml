@@ -4938,6 +4938,176 @@ export function walkDerivedEngineWriteRejections(
   }
 }
 
+// ---------------------------------------------------------------------------
+// PASS 13 (B17) — components-vs-engines residual fire-site (M20, §51.0.K)
+// ---------------------------------------------------------------------------
+//
+// Per Phase A1b Step B17 (audit §1.2 + §2 brief #6; SPEC §51.0.K, §34):
+//
+//   §51.0.K: "A component declaration body contains an `<engine>` element"
+//   is forbidden. Engines are singletons; instantiating a component multiple
+//   times would produce multiple "singletons", violating the singleton
+//   invariant. Fire `E-COMPONENT-ENGINE-SCOPE` (§34).
+//
+//   The S67 §51.0.K Machine Cohesion footnote (line 20453-20454) reaffirms:
+//   "Engines MAY NOT be declared inside component bodies (E-COMPONENT-
+//   ENGINE-SCOPE)."
+//
+// **Fire-site ownership history (B14 audit §1.5 + B17 audit §1.2):**
+//
+//   The B14 audit recommended B14 fire E-COMPONENT-ENGINE-SCOPE at the
+//   engine-decl walk site. B14 deferred to B17 because component-def
+//   bodies (`component-def.raw: string`) are not parsed as walkable AST
+//   children today — engine-decls inside the markup body are not
+//   reachable from the AST walker. B17 inherits this deferral.
+//
+// **What B17 fires today (per Phase 0 survey):**
+//
+//   `component-def.defChildren` — an array of sibling AST nodes consumed
+//   after a component-def in the same logic-body parent (per
+//   ast-builder.js line 8647-8663). These nodes are conceptually scoped
+//   to the component (used for component-local CSS, scoped helpers,
+//   etc.) and ARE walkable AST. An `engine-decl` in defChildren violates
+//   §51.0.K Machine Cohesion: the engine would be component-scoped, but
+//   engines are file-scope-or-nested-engine-only.
+//
+//   Note: today's parser pipeline NEVER places `engine-decl` AST nodes
+//   inside a logic-body (per ast-builder.js line 9149-9151: "engine-decl
+//   nodes are children of markup (program), not logic"), so the walker
+//   does not fire end-to-end via the parser today. The walker is
+//   defensive scaffolding that fires correctly the moment a future
+//   precondition step (component-body markup parser, or relaxation of
+//   the engine placement rule) makes the shape reachable. A synthesized
+//   AST test exercises the walker today; end-to-end parser tests are
+//   `.skip`-ed pending preconditions.
+//
+// **What B17 still DEFERS (audit §2 brief items 1-5, 7):**
+//
+//   - `effect=` placement + form validation (engine state-children not parsed)
+//   - `<onTransition>` placement + direction attributes (element not tokenized)
+//   - E-COMPONENT-ENGINE-SCOPE for engine-decl inside the component-def
+//     `raw` markup body (component body markup not parsed)
+//   - Engine mount tag `<EngineName/>` inside a component body (same)
+//   - `<onTransition>` / `effect=` inside `<match>` arms (block-form match
+//     not parsed)
+//
+//   See `docs/changes/phase-a1b-step-b17-ontransition-component-engine/SURVEY.md`
+//   for the precondition catalog.
+
+/**
+ * PASS 13 (B17) — fire E-COMPONENT-ENGINE-SCOPE on `engine-decl` nodes
+ * appearing inside any `component-def.defChildren` array reachable from
+ * `ast.nodes`.
+ *
+ * Today's PASS 10.A (`walkRegisterEngines`) does NOT descend into
+ * `defChildren`, so engines that DO somehow reach a defChildren array
+ * are not registered as engines. B17 fires the diagnostic instead —
+ * surfacing the §51.0.K violation loudly rather than silently dropping
+ * the engine.
+ *
+ * The `raw` markup body of component-defs (the actual component template)
+ * remains unparsed; engines authored inside the markup string are NOT
+ * detected here. That fire-site is documented as deferred until the
+ * component-body markup parser lands (see Phase 0 survey).
+ */
+function walkRejectEnginesInComponentDefChildren(
+  nodes: any,
+  errors: SYMDiagnostic[],
+  filePath: string,
+  visited: WeakSet<object>,
+): void {
+  if (!nodes) return;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) {
+      walkRejectEnginesInComponentDefChildren(n, errors, filePath, visited);
+    }
+    return;
+  }
+  if (typeof nodes !== "object") return;
+  if (visited.has(nodes)) return;
+  visited.add(nodes);
+
+  const node = nodes as any;
+
+  // Fire on engine-decls in this component-def's defChildren. Recurse into
+  // each defChild so a component-def nested inside another component's
+  // defChildren is also inspected.
+  if (node.kind === "component-def" && Array.isArray(node.defChildren)) {
+    for (const child of node.defChildren) {
+      if (!child || typeof child !== "object") continue;
+      if (child.kind === "engine-decl") {
+        fireComponentEngineScope(child, node.name, errors, filePath);
+      }
+      // Recurse so nested constructs inside defChildren are still walked.
+      walkRejectEnginesInComponentDefChildren(child, errors, filePath, visited);
+    }
+  }
+
+  // Standard recursion mirrors PASS 10.A's shape.
+  if (Array.isArray(node.children)) {
+    walkRejectEnginesInComponentDefChildren(node.children, errors, filePath, visited);
+  }
+  if (Array.isArray(node.body)) {
+    walkRejectEnginesInComponentDefChildren(node.body, errors, filePath, visited);
+  }
+  if (Array.isArray(node.consequent)) {
+    walkRejectEnginesInComponentDefChildren(node.consequent, errors, filePath, visited);
+  }
+  if (Array.isArray(node.alternate)) {
+    walkRejectEnginesInComponentDefChildren(node.alternate, errors, filePath, visited);
+  }
+  if (Array.isArray(node.arms)) {
+    for (const arm of node.arms) {
+      if (arm && Array.isArray(arm.body)) {
+        walkRejectEnginesInComponentDefChildren(arm.body, errors, filePath, visited);
+      }
+    }
+  }
+}
+
+/**
+ * Fire `E-COMPONENT-ENGINE-SCOPE` per §51.0.K + §34. Triggered when an
+ * `engine-decl` appears inside a `component-def.defChildren` array.
+ *
+ * The diagnostic message names the offending component, the engine, and
+ * recommends the spec-canonical alternatives: declare the engine at file
+ * scope and mount via `<EngineName/>` (§51.0.D), or use plain reactive
+ * cells (`@cell`) inside the component for per-instance state.
+ */
+function fireComponentEngineScope(
+  engineDecl: any,
+  componentName: string,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  const span: SYMDiagnostic["span"] = engineDecl.span ?? {
+    file: filePath, start: 0, end: 0, line: 1, col: 1,
+  };
+  // Reach for the engine's variable name when known (B14 records it on
+  // engine-decl); fall back to the governed type or a generic placeholder.
+  const engineLabel: string =
+    (typeof engineDecl.varName === "string" && engineDecl.varName.length > 0)
+      ? `\`<engine for=${engineDecl.governedType ?? "Type"} ...>\` (var \`${engineDecl.varName}\`)`
+      : (typeof engineDecl.governedType === "string" && engineDecl.governedType.length > 0)
+        ? `\`<engine for=${engineDecl.governedType} ...>\``
+        : "`<engine ...>`";
+  errors.push({
+    code: "E-COMPONENT-ENGINE-SCOPE",
+    message:
+      `E-COMPONENT-ENGINE-SCOPE: ${engineLabel} appears inside the body of component ` +
+      `\`${componentName}\`. Engines are singletons; instantiating \`${componentName}\` ` +
+      `multiple times would produce multiple "singleton" engines, violating the ` +
+      `singleton invariant. ` +
+      `Either declare the engine at file scope and mount it inside the component ` +
+      `via \`<EngineName/>\` (§51.0.D), or use plain reactive cells (\`@cell\`) inside ` +
+      `the component for per-instance state. ` +
+      `(SPEC §51.0.K + §34.)`,
+    span,
+    severity: "error",
+  });
+}
+
+
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -5147,6 +5317,20 @@ export function runSYM(input: SYMInput): SYMResult {
   walkDerivedEngineWriteRejections(
     ast.nodes, fileScope, errors, filePath, visitedB16B,
   );
+
+  // PASS 13 (B17): components-vs-engines residual fire-site (§51.0.K, M20).
+  // Walks the AST tree; for every `component-def` with `defChildren`, fires
+  // E-COMPONENT-ENGINE-SCOPE on each `engine-decl` found. The defChildren
+  // array contains sibling AST nodes consumed after the component-def in
+  // the same logic-body parent — they are conceptually part of the
+  // component's scope, so engines authored there violate the singleton
+  // invariant. The B14-deferred fire-site for engine-decls inside the
+  // markup `raw` body of the component remains deferred (component-body
+  // markup parser not yet implemented; see Phase 0 SURVEY).
+  // Renumbered from B17's PASS 11 → PASS 13 during S68 file-delta merge
+  // (B15 took PASS 11; B16 took PASS 12).
+  const visitedB17 = new WeakSet<object>();
+  walkRejectEnginesInComponentDefChildren(ast.nodes, errors, filePath, visitedB17);
 
   return {
     filePath,
