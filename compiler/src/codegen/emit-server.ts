@@ -570,6 +570,16 @@ export function generateServerJs(
       // §44.6: transactions deferred to SPEC-ISSUE-018 — use sql.unsafe()
       // for BEGIN/COMMIT/ROLLBACK on the same Bun.SQL connection.
       const _envelope = needsImplicitEnvelope(name);
+      // A9-Ext-4 D1 (2026-05-08): always-`!`-wrap CPS server endpoints.
+      // For CPS-split functions, wrap the body in an outer try/catch that
+      // serializes any thrown exception as a tagged scrml-error variant
+      // (per §19.9.1 shape) with HTTP status 500. The CPS client wrapper
+      // (emit-functions.ts D1 site) detects this shape and propagates it.
+      const _ext4Wrap = !!route.cpsSplit;
+      if (_ext4Wrap) {
+        lines.push(`  // A9-Ext-4 D1: CPS server-side error envelope`);
+        lines.push(`  try {`);
+      }
       if (_envelope) {
         lines.push(`  // §8.9.2 implicit per-handler transaction`);
         lines.push(`  await _scrml_sql.unsafe("BEGIN DEFERRED");`);
@@ -672,6 +682,22 @@ export function generateServerJs(
         lines.push(`    throw _scrml_batch_err;`);
         lines.push(`  }`);
       }
+      // A9-Ext-4 D1 close: catch any thrown error from the CPS body and
+      // serialize as a tagged scrml-error variant (per §19.9.1).
+      if (_ext4Wrap) {
+        lines.push(`  } catch (_scrml_cps_err) {`);
+        lines.push(`    const _scrml_error_payload = (_scrml_cps_err && typeof _scrml_cps_err === 'object' && _scrml_cps_err.__scrml_error)`);
+        lines.push(`      ? _scrml_cps_err`);
+        lines.push(`      : { __scrml_error: true, type: "CpsError", variant: "ServerError", data: { message: String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err), fn: ${JSON.stringify(name)} } };`);
+        lines.push(`    return new Response(JSON.stringify(_scrml_error_payload), {`);
+        lines.push(`      status: 500,`);
+        lines.push(`      headers: {`);
+        lines.push(`        "Content-Type": "application/json",`);
+        lines.push(`        "Set-Cookie": \`scrml_csrf=\${_scrml_csrf_token}; Path=/; SameSite=Strict\`,`);
+        lines.push(`      },`);
+        lines.push(`    });`);
+        lines.push(`  }`);
+      }
     } else {
       lines.push(`  const _scrml_body = await _scrml_req.json();`);
 
@@ -695,6 +721,16 @@ export function generateServerJs(
       const body: any[] = fnNode.body ?? [];
       const cpsSplit = route.cpsSplit;
 
+      // A9-Ext-4 D1 (2026-05-08): always-`!`-wrap CPS server endpoints (non-CSRF path).
+      // Mirror of the useBaselineCsrf=true site above. For CPS-split functions,
+      // wrap the body in an outer try/catch that returns a tagged scrml-error
+      // shape on any throw (network/SQL/validation/etc).
+      const _ext4WrapNonCsrf = !!cpsSplit;
+      if (_ext4WrapNonCsrf) {
+        lines.push(`  // A9-Ext-4 D1: CPS server-side error envelope`);
+        lines.push(`  try {`);
+      }
+
       if (cpsSplit) {
         for (const idx of cpsSplit.serverStmtIndices) {
           if (idx < body.length) {
@@ -706,17 +742,17 @@ export function generateServerJs(
               if (stmt.sqlNode && stmt.sqlNode.kind === "sql") {
                 const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server" })) ?? "";
                 const sqlExpr = sqlStmt.replace(/;\s*$/, "");
-                lines.push(`  const _scrml_cps_return = ${sqlExpr};`);
+                lines.push(`    const _scrml_cps_return = ${sqlExpr};`);
                 continue;
               }
               const initExpr = emitExprField(stmt.initExpr, stmt.init ?? "undefined", { mode: "server" });
-              lines.push(`  const _scrml_cps_return = ${initExpr};`);
+              lines.push(`    const _scrml_cps_return = ${initExpr};`);
               continue;
             }
             const code = serverRewriteEmitted(emitLogicNode(stmt, { boundary: "server" }));
             if (code) {
               for (const line of code.split("\n")) {
-                lines.push(`  ${line}`);
+                lines.push(`    ${line}`);
               }
             }
           }
@@ -725,14 +761,14 @@ export function generateServerJs(
           const lastServerIdx = cpsSplit.serverStmtIndices[cpsSplit.serverStmtIndices.length - 1];
           const lastStmt = body[lastServerIdx];
           if (lastStmt && lastStmt.kind === "state-decl" && lastStmt.name === cpsSplit.returnVarName) {
-            lines.push(`  return _scrml_cps_return;`);
+            lines.push(`    return _scrml_cps_return;`);
           } else if (lastStmt && (lastStmt.kind === "let-decl" || lastStmt.kind === "const-decl")) {
-            lines.push(`  return ${lastStmt.name};`);
+            lines.push(`    return ${lastStmt.name};`);
           } else if (lastStmt && lastStmt.kind === "bare-expr") {
             const emitted = serverRewriteEmitted(emitLogicNode(lastStmt, { boundary: "server" }));
             if (emitted) {
               const returnExpr = emitted.replace(/;$/, "");
-              lines.push(`  return ${returnExpr};`);
+              lines.push(`    return ${returnExpr};`);
             }
           }
         }
@@ -745,6 +781,20 @@ export function generateServerJs(
             }
           }
         }
+      }
+
+      // A9-Ext-4 D1 close: serialize any thrown error as a tagged scrml-error
+      // shape so the client CPS wrapper observes a consistent §19.9.1 envelope.
+      if (_ext4WrapNonCsrf) {
+        lines.push(`  } catch (_scrml_cps_err) {`);
+        lines.push(`    const _scrml_error_payload = (_scrml_cps_err && typeof _scrml_cps_err === 'object' && _scrml_cps_err.__scrml_error)`);
+        lines.push(`      ? _scrml_cps_err`);
+        lines.push(`      : { __scrml_error: true, type: "CpsError", variant: "ServerError", data: { message: String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err), fn: ${JSON.stringify(name)} } };`);
+        lines.push(`    return new Response(JSON.stringify(_scrml_error_payload), {`);
+        lines.push(`      status: 500,`);
+        lines.push(`      headers: { "Content-Type": "application/json" },`);
+        lines.push(`    });`);
+        lines.push(`  }`);
       }
     }
 

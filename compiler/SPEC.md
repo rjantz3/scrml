@@ -10899,6 +10899,20 @@ When an error variant with a `renders` clause is caught by an `< errorBoundary>`
 - Nested `< errorBoundary>` elements SHALL follow inner-catches-first semantics. An error caught by an inner boundary SHALL NOT propagate to an outer boundary.
 - The compiler SHALL verify, at compile time, that every error variant reachable inside an `< errorBoundary>` either has a `renders` clause or is covered by the boundary's `fallback` attribute. Failure to satisfy this SHALL be E-ERROR-005.
 
+#### 19.6.7 Multi-Batch CPS Granularity
+
+**Added:** 2026-05-08, A9 Ext 4 (S72 body-split integration design dive Q3 verdict).
+
+When a server function is split across the client/server boundary (CPS — see §19.9.5), and the CPS implementation produces multiple server batches in execution order, the granularity at which `< errorBoundary>` catches a failure is **per-batch**, not per-function:
+
+- Batch 1 commits stand if batch 1 succeeded; batch 2's failure does NOT roll batch 1 back. (No 2PC / saga is performed; per S72 body-split soundness verdict, that path is deliberately out-of-scope.)
+- The `< errorBoundary>` catches batch K's failure as a tagged scrml-error variant. The boundary's `fallback` markup (or a variant's `renders` clause) is displayed in place of the function's expected output.
+- Recovery from a non-tail batch failure is **idempotency-key replay** of batch K (A9 Ext 5; future scope, per S72 body-split integration ratification).
+
+The pathological multi-batch case — batch N depends on batch K's durable write across the client/server boundary AND K is non-tail — is **rejected at compile time** by the S4 reorder verdict (E-CPS-MULTIBATCH-REORDER, future code; pending Ext 1 multi-batch CPS landing). For all admissible cases, the existing §19 mechanisms (`?` propagation, `!{}` handler, `< errorBoundary>` markup) catch the failure surface; no new mechanism is required.
+
+A worked example illustrating "batch 1 commits stand on batch 2 failure; the developer's `< errorBoundary>` catches the error variant" is provided in §19.9.5.
+
 ---
 
 ### 19.7 Exhaustive Matching
@@ -11051,6 +11065,102 @@ The client calling `loadUser(id)?` propagates the same `UserError` variants that
 - The HTTP status code SHALL be determined by the `httpStatus` attribute on the variant, or by the heuristic in §19.9.2, or by the default of 500.
 - The CPS client wrapper of a server `!` function SHALL itself be `!` with the same error type.
 - Client code SHALL handle server function errors identically to local function errors. The serialization boundary SHALL be transparent to the developer.
+
+#### 19.9.5 Auto-`!`-Wrap of CPS Server Stubs (Worked Example)
+
+**Added:** 2026-05-08, A9 Ext 4 (S72 body-split soundness design dive §3.4 verdict — option 6 = compose 3+4+5).
+
+A function whose body mixes a server-trigger statement with a reactive-assignment statement is split across the client/server boundary by the compiler (CPS analysis — see §12 + §19.9.3). Per the body-split soundness predicate **S4 (failure-mode preservation)**, every CPS-emitted stub carries implicit `!` semantics regardless of whether the developer wrote `!` in the function signature. Failures (network errors, SQL errors, server exceptions, etc.) are routed through the existing §19 error-handling mechanisms — no new mechanism is introduced.
+
+**Implicit `!`-typing.** A function with a CPS body-split is treated by the type-system as if it were declared `!`. The implicit error type is `CpsError` (a synthetic enum with at minimum `NetworkError(message: string, fn: string)` and `ServerError(message: string, fn: string)` variants).
+
+```scrml
+// Developer writes:
+function loadProfile(id: number) {
+    @profile = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+}
+
+// Compiler treats this AS IF it were:
+// function loadProfile(id: number)! -> CpsError { ... }
+//
+// CPS-emitted client wrapper (conceptual):
+// async function loadProfile(id) {
+//     try {
+//         const result = await __fetch_loadProfile(id);
+//         if (result.__scrml_error) return result;  // pass-through server-tagged
+//         _scrml_reactive_set("profile", result);
+//     } catch (err) {
+//         return { __scrml_error: true, type: "CpsError",
+//                  variant: "NetworkError",
+//                  data: { message: err.message, fn: "loadProfile" } };
+//     }
+// }
+```
+
+**Caller-context propagation (D2).** A function `F` calling a CPS-split function `G` from within `F`'s body satisfies the §19.4 handling requirement automatically when:
+
+1. `F` is itself `!`-typed (caller propagates the failure structurally), OR
+2. `F`'s call to `G` occurs inside a `< errorBoundary>` markup region (the boundary catches the failure).
+
+If neither condition holds, the compiler emits **W-CPS-NEEDS-FAILABLE** (warning, deprecation cycle stage 1, v0.next) at the call site. The warning is informational; existing code compiles + runs unchanged. In **v0.next+1** (= v0.3.0), the warning is promoted to **E-CPS-NEEDS-FAILABLE** (error). Per S72 user-direction (`user-voice-scrmlTS.md` 2026-05-08), the migration codemod is deferred — the two-stage cycle is sufficient given current adopter state.
+
+**Worked example — multi-batch CPS with `< errorBoundary>`.**
+
+```scrml
+// Function with two independent batches.
+// Batch 1 (server): durable log write.
+// Batch 2 (server): email send (independent of log write).
+//
+// Per §19.6.7, batch 1's commit is durable; if batch 2 fails, the developer's
+// < errorBoundary> catches the error variant; the log entry from batch 1 is
+// NOT rolled back. (No 2PC / saga; per S72 body-split soundness verdict, that
+// path is out-of-scope.)
+function notifyOrder(orderId: number) {
+    // Batch 1 — server: durable log write
+    ?{`INSERT INTO order_log (order_id, event, ts) VALUES (${orderId}, 'notified', NOW())`}.run()
+
+    // Client tail: read log to format message
+    @msg = "Order #" + orderId + " notification logged"
+
+    // Batch 2 — server: email send (would be rejected at compile time today
+    // by E-CPS-MULTIBATCH-REORDER if the batches were dependency-ordered
+    // across durable writes; this example uses independent batches per
+    // §19.6.7's admissible-case framing).
+    scrml:email.send(@msg)
+}
+
+// Caller wraps in < errorBoundary>. On batch 2 failure, the boundary catches
+// the tagged scrml-error variant; the log entry from batch 1 is durable
+// (already committed); the developer recovers via retry (Ext 5 future scope).
+< errorBoundary fallback={<div>Notification failed; logged but email pending</>}>
+    ${notifyOrder(@currentOrderId)}
+</>
+```
+
+**Three migration paths for adopters today (cycle 1, v0.next).** When a CPS-eligible call site fires W-CPS-NEEDS-FAILABLE, the developer chooses one of:
+
+1. **`< errorBoundary>` markup wrapper** (markup-context callers; canonical pattern):
+   ```scrml
+   < errorBoundary fallback={<div>Failed to load profile</>}>
+       ${loadProfile(@currentUserId)}
+   </>
+   ```
+2. **Caller `!` modifier** (logic-context propagation):
+   ```scrml
+   function reloadProfile(id)! -> CpsError {
+       loadProfile(id)?  // ? propagates CpsError up the call stack
+   }
+   ```
+3. **Explicit match on result** (most-precise control):
+   ```scrml
+   match loadProfile(id) {
+       ::Ok(p) -> @profile = p
+       ::NetworkError(detail) -> @lastError = detail.message
+       ::ServerError(detail) -> @lastError = detail.message
+   }
+   ```
+
+**S72 design-dive citations.** Body-split soundness design dive (`docs/deep-dives/body-split-soundness-design-2026-05-08.md`) §3.4 ratifies option 6 (compose 3+4+5). Body-split integration design dive (`docs/deep-dives/body-split-integration-and-residual-design-2026-05-08.md`) Q3 verdict ratifies the per-batch granularity framing; Q4 verdict ratifies the two-stage W- → E- deprecation cycle. The CpsError synthetic enum is introduced in this section; it is the only built-in enum type added by Ext 4. Future scope: A9 Ext 5 (idempotency-key replay safety) supplies the recovery path for non-tail batch failures.
 
 ---
 
@@ -11260,6 +11370,8 @@ The following error codes are introduced by this section. They SHALL be added to
 | E-ERROR-005 | §19.6.3 | Error variant in markup without `renders` clause or boundary `fallback` | Error |
 | E-ERROR-006 | §19.2.3 | `renders` clause references undefined variable | Error |
 | E-ERROR-007 | §19.10.4 | Nested `transaction` blocks | Error |
+| W-CPS-NEEDS-FAILABLE | §19.9.5 | Bare call to CPS-implicit-`!` function from non-`!` / non-boundary caller (cycle 1 of A9 Ext 4 deprecation; v0.next). | Warning |
+| E-CPS-NEEDS-FAILABLE | §19.9.5 | Same condition; cycle 2 (v0.next+1). Reserved; not yet emitted. | Error |
 
 ---
 
@@ -14161,6 +14273,8 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-ERROR-005 | §19.6.3 | Error variant in markup without `renders` clause or boundary `fallback` | Error |
 | E-ERROR-006 | §19.2.3 | `renders` clause references undefined variable | Error |
 | E-ERROR-007 | §19.10.4 | Nested `transaction` blocks | Error |
+| W-CPS-NEEDS-FAILABLE | §19.9.5 | Bare call to a CPS-eligible (implicitly-`!`) function from a non-`!`, non-`< errorBoundary>`-wrapped caller. Cycle 1 of the deprecation cycle (v0.next). Resolution: wrap call site in `< errorBoundary>`, mark caller `!`, or match on result. (Per A9 Ext 4, S72 body-split soundness verdict 2026-05-08.) | Warning |
+| E-CPS-NEEDS-FAILABLE | §19.9.5 | Same condition as W-CPS-NEEDS-FAILABLE, promoted to error in cycle 2 (v0.next+1 = v0.3.0). Reserved; not yet emitted. | Error |
 | E-SSE-001 | §37.9 | `yield` used inside a non-generator `server function` body | Error |
 | W-SSE-001 | §37.9 | `server function*` body contains no `yield` statements | Warning |
 | E-CHANNEL-001 | §38.9 | `<channel>` missing required `name=` attribute | Error |

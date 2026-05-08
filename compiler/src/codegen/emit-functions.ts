@@ -166,6 +166,20 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     fnNameMap.set(name, wrapperName);
     lines.push(`async function ${wrapperName}(${paramNames.join(", ")}) {`);
 
+    // A9-Ext-4 D1 (2026-05-08): always-`!`-wrap CPS stubs.
+    // Wrap the entire CPS body in try/catch so failures route through scrml's
+    // §19 structural error system instead of silently throwing JS exceptions.
+    // - On caught error: return a tagged scrml-error variant
+    //   ({ __scrml_error: true, type: "CpsError", variant: "NetworkError"|"ServerError", data: {...} }).
+    // - On server-side serialized error shape (server CPS handler returned a
+    //   tagged scrml-error JSON payload — see emit-server.ts D1 site): pass
+    //   through as-is so caller's `?` propagation / `!{}` handler / `<errorBoundary>`
+    //   markup wrapper observes the same shape regardless of failure mode.
+    // - Existing behavior preserved when no failure occurs.
+    // Per integration design dive Q4 (2026-05-08): this is deprecation cycle
+    // stage 1 (warn-only at compile time via W-CPS-NEEDS-FAILABLE).
+    lines.push(`  try {`);
+
     // Emit statements in original order, replacing server-trigger statements
     // with a call to the server stub.
     let serverCallEmitted = false;
@@ -180,9 +194,15 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
           if (cpsSplit.returnVarName) {
             // The reactive assignment that receives the server result will reference
             // this variable. Emit: const _result = await serverStub(args);
-            lines.push(`  const _scrml_server_result = await ${stubName}(${paramNames.join(", ")});`);
+            lines.push(`    const _scrml_server_result = await ${stubName}(${paramNames.join(", ")});`);
+            // A9-Ext-4 D1: detect server-serialized error shape (per §19.9.1)
+            // and propagate as-is. The server endpoint (emit-server.ts D1 site)
+            // wraps thrown exceptions in this tagged shape with status 500.
+            lines.push(`    if (_scrml_server_result && typeof _scrml_server_result === 'object' && _scrml_server_result.__scrml_error) {`);
+            lines.push(`      return _scrml_server_result;`);
+            lines.push(`    }`);
           } else {
-            lines.push(`  await ${stubName}(${paramNames.join(", ")});`);
+            lines.push(`    await ${stubName}(${paramNames.join(", ")});`);
           }
           serverCallEmitted = true;
         }
@@ -191,7 +211,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         // the server result. This handles `@entries = ?{SELECT...}` where the SQL
         // runs on the server and the result is passed back via the fetch response.
         if (cpsSplit.returnVarName && (stmt as ASTNode).kind === "state-decl" && (stmt as ASTNode).name === cpsSplit.returnVarName) {
-          lines.push(`  _scrml_reactive_set(${JSON.stringify((stmt as ASTNode).name)}, _scrml_server_result);`);
+          lines.push(`    _scrml_reactive_set(${JSON.stringify((stmt as ASTNode).name)}, _scrml_server_result);`);
         }
         // Skip additional server statements — they are batched into one server call.
       } else {
@@ -210,17 +230,35 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         // If this is the reactive assignment that receives the server result,
         // rewrite it to use the server result variable.
         if (cpsSplit.returnVarName && (stmt as ASTNode).kind === "state-decl" && (stmt as ASTNode).name === cpsSplit.returnVarName) {
-          lines.push(`  _scrml_reactive_set(${JSON.stringify((stmt as ASTNode).name)}, _scrml_server_result);`);
+          lines.push(`    _scrml_reactive_set(${JSON.stringify((stmt as ASTNode).name)}, _scrml_server_result);`);
         } else {
           const code = emitLogicNode(stmt, cpsOpts);
           if (code) {
             for (const line of code.split("\n")) {
-              lines.push(`  ${line}`);
+              lines.push(`    ${line}`);
             }
           }
         }
       }
     }
+
+    // A9-Ext-4 D1 catch arm: surface fetch / network failures as a tagged
+    // scrml-error variant (NetworkError variant of CpsError synthetic enum).
+    // Existing scrml `?` propagation, `!{}` handler, and `<errorBoundary>`
+    // markup all observe the same `{ __scrml_error: true, ... }` shape.
+    // If a `__scrml_error`-shaped value is thrown directly (rare but valid),
+    // pass it through unchanged so the original variant identity is preserved.
+    lines.push(`  } catch (_scrml_cps_err) {`);
+    lines.push(`    if (_scrml_cps_err && typeof _scrml_cps_err === 'object' && _scrml_cps_err.__scrml_error) {`);
+    lines.push(`      return _scrml_cps_err;`);
+    lines.push(`    }`);
+    lines.push(`    return {`);
+    lines.push(`      __scrml_error: true,`);
+    lines.push(`      type: "CpsError",`);
+    lines.push(`      variant: "NetworkError",`);
+    lines.push(`      data: { message: String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err), fn: ${JSON.stringify(name)} },`);
+    lines.push(`    };`);
+    lines.push(`  }`);
 
     lines.push(`}`);
     lines.push("");

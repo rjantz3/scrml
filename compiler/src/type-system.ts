@@ -383,7 +383,11 @@ interface ColumnDef {
 }
 
 interface RouteMap {
-  functions: Map<string, { boundary: "server" | "client" }>;
+  // A9-Ext-4 D2 (2026-05-08): cpsSplit field added so type-system can detect
+  // CPS-eligible functions and treat them as implicitly `!`-typed (failable).
+  // The full structure of cpsSplit is in route-inference.ts CPSSplit; the type
+  // here is loosely-typed because we only need to know whether it's non-null.
+  functions: Map<string, { boundary: "server" | "client"; cpsSplit?: unknown | null }>;
 }
 
 interface TypedFileAST extends FileAST {
@@ -3422,6 +3426,20 @@ function annotateNodes(
   const fnCanFail = new Set<string>();     // all functions with canFail === true
   const fnAllDeclared = new Set<string>(); // all function-decl names in this file
   const nonPureFnNames = new Set<string>(); // names declared with `function` (not `fn`) — callable-but-not-pure (§48.6.2)
+
+  // A9-Ext-4 D2 (2026-05-08): CPS-implicit-failable set — functions that have
+  // a CPS body-split in routeMap but were NOT explicitly declared `!` by the
+  // developer. Per body-split soundness design dive §3.4 verdict (option 6 =
+  // compose 3+4+5), CPS-emitted server stubs always carry implicit `!`
+  // semantics (D1 codegen wraps fetch in try/catch and produces tagged
+  // scrml-error variants). The type-system surfaces this implicit `!` here
+  // so caller's `?` propagation works (E-ERROR-004 sees them as failable).
+  // For diagnostic purposes (D3 below), the CPS-implicit-failable set is
+  // tracked separately from explicit-`!` so we can fire W-CPS-NEEDS-FAILABLE
+  // (warn) instead of E-ERROR-002 (error) for unhandled CPS calls during the
+  // deprecation cycle's stage 1 (v0.next).
+  const fnCpsImplicitFailable = new Set<string>();
+
   function collectFnErrorTypes(nodes: ASTNodeLike[]): void {
     for (const n of nodes) {
       if (n.kind === "function-decl" && n.name) {
@@ -3434,6 +3452,22 @@ function annotateNodes(
           fnCanFail.add(n.name as string);
           if (n.errorType) {
             fnErrorTypes.set(n.name as string, n.errorType as string);
+          }
+        } else {
+          // A9-Ext-4 D2: check routeMap for cpsSplit on this function. If the
+          // function is CPS-eligible, treat it as implicitly `!`-typed (per
+          // option-6 verdict: every CPS-emitted stub gets `!` semantics).
+          const fnId = `${filePath}::${(n.span as Span | undefined)?.start}`;
+          const entry = routeMap?.functions?.get(fnId);
+          if (entry && entry.cpsSplit) {
+            fnCanFail.add(n.name as string);
+            fnCpsImplicitFailable.add(n.name as string);
+            // No explicit errorType — the implicit error type is `CpsError`
+            // (the synthetic enum produced by D1 codegen). Exhaustive
+            // matching against an undeclared error type would fire E-TYPE-080;
+            // skip the errorType registration to keep the existing
+            // exhaustive-match path unchanged. Adopters who want full
+            // exhaustive matching add `!` explicitly with a custom errorType.
           }
         }
       }
@@ -3876,8 +3910,18 @@ function annotateNodes(
 
         // Walk the body.
         const fnBody = n.body as ASTNodeLike[] | undefined;
+        // A9-Ext-4 D3 (2026-05-08): mark body statements with the enclosing
+        // function's canFail status so the bare-expr top-level visitor can
+        // suppress duplicate W-CPS-NEEDS-FAILABLE warnings when the caller
+        // is `!`-typed (per body-split soundness design dive §3.4).
+        const _enclosingFnCanFail = n.canFail === true;
         if (Array.isArray(fnBody)) {
-          for (const stmt of fnBody) visitLogicNode(stmt, boundary);
+          for (const stmt of fnBody) {
+            if (stmt && typeof stmt === "object") {
+              (stmt as Record<string, unknown>).__enclosingFnCanFail = _enclosingFnCanFail;
+            }
+            visitLogicNode(stmt, boundary);
+          }
         }
 
         scopeChain.pop();
@@ -3949,17 +3993,54 @@ function annotateNodes(
               }
             }
             // E-ERROR-002: bare call to failable function with no error handling (§19.4.3)
+            // A9-Ext-4 D3 (2026-05-08): for CPS-implicit-failable callees, fire
+            // W-CPS-NEEDS-FAILABLE (warning) instead of E-ERROR-002 (error). This
+            // is deprecation cycle stage 1 (v0.next per body-split integration
+            // design dive Q4 verdict). v0.next+1 promotes to E-CPS-NEEDS-FAILABLE.
+            //
+            // Suppression: per body-split soundness design dive §3.4, if the
+            // caller `F` is itself `!`-typed (canFail === true) the structural
+            // propagation satisfies the handling requirement — no warning fires.
+            // (Markup-context callers wrapped in `<errorBoundary>` are also
+            // suppressed at runtime by the boundary; that detection is deferred
+            // for cycle 1 since markup-call-site analysis is non-trivial here.)
             if (k === "bare-expr") {
               const bareCallee = extractCalleeNameFromNode(stmt) ?? extractCalleeNameFromString(
                 stmt.exprNode ? emitStringFromTree(stmt.exprNode as import("./types/ast.ts").ExprNode) : (stmt.expr as string | undefined)
               );
               if (bareCallee && fnCanFail.has(bareCallee)) {
-                errors.push(new TSError(
-                  "E-ERROR-002",
-                  `E-ERROR-002: Result of failable function '${bareCallee}' is not handled. ` +
-                  `Either match the result, propagate with '?', catch with '!{}', or wrap in '<errorBoundary>'.`,
-                  (stmt.span ?? n.span) as Span,
-                ));
+                if (fnCpsImplicitFailable.has(bareCallee)) {
+                  // CPS-implicit-failable: warn (cycle 1 of deprecation) ONLY
+                  // when caller is NOT `!`-typed. Caller has three migration
+                  // paths: (1) wrap call site in `<errorBoundary>` markup
+                  // (covers markup-context callers); (2) mark caller `!` so
+                  // the error propagates structurally; (3) match the result
+                  // explicitly.
+                  if (!canFail) {
+                    errors.push(new TSError(
+                      "W-CPS-NEEDS-FAILABLE",
+                      `W-CPS-NEEDS-FAILABLE: function \`${bareCallee}\` is split across the client/server ` +
+                      `boundary (CPS) and may fail due to network or SQL errors. The current call ` +
+                      `site does not handle the failure case.\n` +
+                      `  Resolution options:\n` +
+                      `    1. Wrap the call site in \`<errorBoundary>\` (markup context).\n` +
+                      `    2. Mark the calling function \`!\` to propagate the error.\n` +
+                      `    3. Match on the result: \`match ${bareCallee}(...) { ::Ok(v) -> ... ::NetworkError(e) -> ... }\`.\n` +
+                      `  This warning will become an error (E-CPS-NEEDS-FAILABLE) in v0.next+1.`,
+                      (stmt.span ?? n.span) as Span,
+                      "warning",
+                    ));
+                  }
+                  // else: suppressed because caller is `!` — structural
+                  // propagation satisfies the handling requirement.
+                } else {
+                  errors.push(new TSError(
+                    "E-ERROR-002",
+                    `E-ERROR-002: Result of failable function '${bareCallee}' is not handled. ` +
+                    `Either match the result, propagate with '?', catch with '!{}', or wrap in '<errorBoundary>'.`,
+                    (stmt.span ?? n.span) as Span,
+                  ));
+                }
               }
             }
             // Recurse over known child containers.
@@ -4351,17 +4432,45 @@ function annotateNodes(
         // runs in the function-decl branch; this catches the outer case.
         // Skip when this node is the guardedNode of a parent guarded-expr — the
         // !{} arms already handle the error.
+        // A9-Ext-4 D3 (2026-05-08): for CPS-implicit-failable callees, fire
+        // W-CPS-NEEDS-FAILABLE (warning, cycle 1) instead. Mirrors the
+        // function-body site above (line ~3990).
+        // A9-Ext-4 D3 suppression: when this bare-expr is inside a `!`-typed
+        // function body (`__enclosingFnCanFail === true`, marked by the
+        // function-decl visitor above), the structural propagation satisfies
+        // the handling requirement — suppress W-CPS-NEEDS-FAILABLE per
+        // body-split soundness design dive §3.4 verdict.
         const bareCallee = extractCalleeNameFromNode(n) ?? extractCalleeNameFromString(
           n.exprNode ? emitStringFromTree(n.exprNode as import("./types/ast.ts").ExprNode) : (n.expr as string | undefined)
         );
         const inGuarded = (n as Record<string, unknown>).__inGuardedContext === true;
+        const enclosingFnCanFail = (n as Record<string, unknown>).__enclosingFnCanFail === true;
         if (bareCallee && fnCanFail.has(bareCallee) && !inGuarded) {
-          errors.push(new TSError(
-            "E-ERROR-002",
-            `E-ERROR-002: Result of failable function '${bareCallee}' is not handled. ` +
-            `Either match the result, propagate with '?', catch with '!{}', or wrap in '<errorBoundary>'.`,
-            n.span as Span,
-          ));
+          if (fnCpsImplicitFailable.has(bareCallee)) {
+            if (!enclosingFnCanFail) {
+              errors.push(new TSError(
+                "W-CPS-NEEDS-FAILABLE",
+                `W-CPS-NEEDS-FAILABLE: function \`${bareCallee}\` is split across the client/server ` +
+                `boundary (CPS) and may fail due to network or SQL errors. The current call ` +
+                `site does not handle the failure case.\n` +
+                `  Resolution options:\n` +
+                `    1. Wrap the call site in \`<errorBoundary>\` (markup context).\n` +
+                `    2. Mark the calling function \`!\` to propagate the error.\n` +
+                `    3. Match on the result: \`match ${bareCallee}(...) { ::Ok(v) -> ... ::NetworkError(e) -> ... }\`.\n` +
+                `  This warning will become an error (E-CPS-NEEDS-FAILABLE) in v0.next+1.`,
+                n.span as Span,
+                "warning",
+              ));
+            }
+            // else: suppressed — `!`-typed enclosing function propagates structurally.
+          } else {
+            errors.push(new TSError(
+              "E-ERROR-002",
+              `E-ERROR-002: Result of failable function '${bareCallee}' is not handled. ` +
+              `Either match the result, propagate with '?', catch with '!{}', or wrap in '<errorBoundary>'.`,
+              n.span as Span,
+            ));
+          }
         }
         break;
       }
