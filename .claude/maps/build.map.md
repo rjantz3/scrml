@@ -1,6 +1,6 @@
 # build.map.md
 # project: scrmlTS
-# updated: 2026-05-06T23:50:00Z  commit: 7334fb0
+# updated: 2026-05-07T20:31:48Z  commit: a4eed93
 
 ## Development Commands (root `package.json > scripts`)
 
@@ -13,7 +13,7 @@ bun run security            — compile compilation-tests + `node --check sample
 ## Test
 
 bun run pretest             — `bash scripts/compile-test-samples.sh` — pre-compiles fixture samples used by integration tests.
-bun run test                — `bun test compiler/tests/` — full suite (S65 baseline 9,019 pass / 44 skip / 1 todo / 0 fail across 447 files).
+bun run test                — `bun test compiler/tests/` — full suite (S67 close: 9,241 pass / 54 skip / 1 todo / 0 fail across 457 files; 8,470 pre-commit subset).
 bun run test:coverage       — `bun test compiler/tests/ --coverage`.
 Run a single file           — `bun test compiler/tests/path/to/file.test.js`.
 Run by name                 — `bun test --test-name-pattern "<substring>" compiler/tests/`.
@@ -28,7 +28,20 @@ scrml dev                   — `commands/dev.js` — dev server (uses `SCRML_PO
 scrml serve                 — `commands/serve.js` — production serve (compiled artefacts).
 scrml init                  — `commands/init.js` — scaffold a new scrml project.
 scrml migrate               — `commands/migrate.js` — DB migration runner (consumes `<schema>` diffs from schema-differ.js).
-scrml promote               — `commands/promote.js` — **S65 stub** for `bun scrml promote` (Tier-A promotion ergonomics, §56). Implementation in flight in worktree `agent-a35e9695d1b010931` (Tier B dispatch).
+scrml promote               — `commands/promote.js` — **S66 SHIPPED** for `bun scrml promote` (Tier-B promotion ergonomics, §56).
+                              `--match` LIVE: span-based AST→AST rewrite for if-else → `<match>` block.
+                              `--engine` DEFERRED to Tier C (registered; exits with code 2 + notice).
+                              `--dry-run` — preview unified diff without writing.
+                              `--check` — CI-friendly; exits non-zero if any file would be promoted.
+
+## Docs Build
+
+docs/build.ts               — Bun script that renders scrml.dev docs site. Reads markdown articles
+                              from `docs/articles/*-devto-*.md`, applies `docs/_template.html` +
+                              `docs/_articles-index-template.html`, writes per-article HTML and
+                              an index listing. Run with `bun run docs/build.ts`.
+                              Uses `marked` (devDependency). Interim tooling; will be replaced by
+                              scrml-compiled site at v0.2.0.
 
 ## Build & Release
 
@@ -56,10 +69,10 @@ editors/vscode/                       — separate workspace; built via the VSCo
 editors/neovim/                       — pure Lua/Vimscript; no build step.
 
 ## Self-host
-compiler/self-host/dist/              — compiled output of `compiler/self-host/*.scrml`; consumed by `compiler/tests/self-host/*.test.js` (4 files: ast, bpp, bs, tab). Two persistent self-host smoke failures historically deferred (see master-list.md / hand-off-65).
+compiler/self-host/dist/              — compiled output of `compiler/self-host/*.scrml`; consumed by `compiler/tests/self-host/*.test.js` (4 files: ast, bpp, bs, tab). Two persistent self-host smoke failures historically deferred (see master-list.md / hand-off-65). Self-host NOT updated in S66 or S67 (documented deferral; post-v1.0.0 per user decision).
 
 ## Tags
-#scrmlTS #map #build #cli #bun #self-host #pre-commit #s65 #promote-stub
+#scrmlTS #map #build #cli #bun #self-host #pre-commit #s65 #s66 #s67 #promote-shipped #docs-build
 
 ## Links
 - [primary.map.md](./primary.map.md)
