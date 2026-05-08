@@ -201,7 +201,7 @@ A1b records zone decisions per type-annotation; A1c emits the runtime predicates
 
 | # | Step | Files | Est | Notes |
 |---|---|---|---|---|
-| C1 | **Shape-aware cell emitter** — extend cell-emit to dispatch on `state-decl.shape` | `compiler/src/codegen/*` | 4-6 h | Foundational; C2-C4 depend |
+| C1 | **Shape-aware cell emitter** — extend cell-emit to dispatch on `state-decl.shape` (Shape 1 plain / Shape 2 decl-with-spec / Shape 3 derived). Also: Variant C compound parents (recursive child walk + parent-proxy via `_scrml_derived_declare`); markup-typed derived (declaration only — closure body in C2); `default=` storage sidecar (one new helper `_scrml_default_set`). Closes S61 Step 11.5 deferred Shape 3 V5-strict gap. | `compiler/src/codegen/*` + `runtime/*` (one new helper) | 4-6 h | Foundational; C2-C4 depend. Variant C + markup-typed-derived MOVED FROM C21 per S71 SURVEY. |
 | C2 | **Derived-cell reactive computation emission** — wire B7's DAG into derived computation closures; markup-typed derived included | `codegen/*` + `runtime/*` | 4-6 h | Powers C5+ |
 | C3 | **Render-spec expansion at `<x/>` use site** — markup walker expands cell-tag use sites to the cell's bindable markup | `codegen/markup-emit.ts` | 4-5 h | L16 multi-render handled here |
 | C4 | **Bind:* dispatch (L17)** — based on render-spec element type, emit the right binding glue | `codegen/markup-emit.ts` | 3-4 h | Builds on C3 |
@@ -241,7 +241,7 @@ A1b records zone decisions per type-annotation; A1c emits the runtime predicates
 | C18 | **Channel WebSocket emission + broadcast/disconnect runtime injection (§38)** — `/_scrml_ws/<name>` endpoint; auto-injected helpers in server functions | `codegen/channel-emit.ts` (NEW or ext.) + `runtime/channels.js` | 4-6 h | |
 | C19 | **`<program>` documentary attributes emission (§40.7)** — title/description/version/author/license to HTML head + W-PROGRAM-TITLE-NESTED on nested | `codegen/*` | 1-2 h | Small; closes S59 documentary-attrs work |
 | C20 | **`pinned` import hoisting** — A1b validates legality; A1c hoists imports flagged `pinned: true` to break forward-ref cycles | `codegen/*` + import lowerer | 3-4 h | Survey: existing import lowerer behavior |
-| C21 | **Variant C compound + markup-typed derived emission** — nested reactive proxy with field paths; markup-typed derived produces markup for `${@cell}` interpolation | `codegen/*` + `runtime/*` | 5-7 h | |
+| C21 | **Tier 3 predefined-shape compound (positional sugar lowering)** — `<userInfo>: UserInfo = ("alice", 30, true)` lowers SequenceExpression init → typed object literal `{name: "alice", age: 30, active: true}`. Closes the latent JS-comma-operator codegen bug (today emits `(a,b,c)` evaluating to `c`). | `codegen/*` + `ast-builder` | 2-3 h | Variant C compound + markup-typed-derived MOVED to C1 (S71 SURVEY). C21 retains Tier 3 only. |
 | C22 | **Bare-variant inference codegen (M9)** — A1b resolved qualified form; A1c emits resolved enum-variant access path | `codegen/*` | 2-3 h | Small; touches expression emitter |
 
 ### §4.6 PIPELINE prose (Step C23) — ~5-8 h
@@ -276,7 +276,7 @@ A1b records zone decisions per type-annotation; A1c emits the runtime predicates
 | C18 | §38 | — |
 | C19 | §40.7 | (W-PROGRAM-TITLE-NESTED is A1b/A1c boundary; verify) |
 | C20 | M18 | — |
-| C21 | L1, L2, §6.6.17 | — |
+| C21 | §14.11 (M10 positional binding) | runtime: type-mismatch if positional arg fails refinement (post-C16) |
 | C22 | M9 | — |
 | C23 | (docs) | — |
 

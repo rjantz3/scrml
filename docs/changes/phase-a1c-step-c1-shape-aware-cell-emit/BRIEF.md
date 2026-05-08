@@ -145,9 +145,13 @@ C1 may THEORETICALLY observe that `featureUsage.markupTypedDerived` is false and
 
 `_cellKind:"engine"` state-decls are SKIPPED by C1's shape dispatch. They're emitted by C12-C15. C1's dispatch table treats them as "not-this-pass."
 
-### §4.3 ZERO new runtime helpers
+### §4.3 ONE new runtime helper (revised post-Phase-0 SURVEY)
 
-C1 routes through EXISTING runtime APIs (`_scrml_reactive_set/get`, `_scrml_derived_declare`, etc.). NO new runtime functions in C1. If a new runtime API is needed, that's C2's territory (the closure plumbing).
+**Original BRIEF claim: "ZERO new runtime helpers."** Phase 0 SURVEY revised to **ONE new helper** — `_scrml_default_set(name, fn)` for `default=` storage (per §6.8.1; C5 reads at reset time). The compound-parent proxy re-uses `_scrml_derived_declare` (Option A-prime in SURVEY §3.3) to avoid a second new helper.
+
+C1 still routes Shape 1/2/3 through EXISTING runtime APIs (`_scrml_reactive_set/get`, `_scrml_derived_declare`, `_scrml_derived_subscribe`). The single new helper is for `default=` storage only.
+
+If C2 / C3 / C4 need additional runtime APIs (closure plumbing, render-spec expansion, bind:* dispatch), those are their territory — not C1's.
 
 ### §4.4 ZERO new error codes
 
@@ -213,9 +217,19 @@ Per primer §12 (depth-of-survey-discount frequency-8). C1 has high discount lik
 - Kickstarter v2 §3 corpus byte-output diff (same expectation)
 - Any sample with Shape 1/2/3 mix → diff documented
 
-### §6.3 Test invariant
+### §6.3 Test invariant (revised post-Phase-0 SURVEY)
 
-Baseline at HEAD `a494586` + post-C0 SHIP: 9,682 + N (where N is C0's test delta — likely +45 to +55 → expect baseline ~9,727 / 60 / 1 / 0 at C1 dispatch time). Run `bun run test` between sub-steps.
+**Original BRIEF claim: ~9,727 / 60 / 1 / 0.** Phase 0 SURVEY measured actual main HEAD baseline at `e62bb5a` (S70 wrap): **9,734 / 64 / 1 / 3** (5 reported fails because suite-block double-counts; 3 unique tests).
+
+Three pre-existing fails are self-host parity drift (per S66 user direction — self-host is post-v1.0.0, not load-bearing for v0.2.0):
+
+1. `F-BUILD-002 §3 generated entry parses without SyntaxError` (integration)
+2. `Bootstrap L3: self-hosted API compiles compiler` (integration; 5s timeout)
+3. `Self-host: tokenizer parity > compiled tab.js exists` (integration)
+
+**C1 invariant: "no NEW fails introduced," not "zero fails total."** Post-C1 fail count must equal the baseline-at-dispatch-time (3 unique tests / 5 suite-counted). Run `bun run test` between sub-steps; assert no new fail names appear.
+
+S70 hand-off recorded `9,752 / 60 / 1 / 0` — that count was incorrect; the 3 self-host fails were always present at S70 close. Cross-machine PA accuracy gap, surfaced in the S71 standing list.
 
 ---
 
