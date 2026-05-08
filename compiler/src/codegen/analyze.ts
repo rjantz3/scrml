@@ -27,6 +27,12 @@ import {
 } from "./collect.ts";
 import { collectChannelNodes } from "./emit-channel.ts";
 import { createFileIR, type FileIR, type TestGroup } from "./ir.ts";
+import {
+  analyzeUsage,
+  emptyUsage,
+  mergeUsage,
+  type FeatureUsage,
+} from "./usage-analyzer.ts";
 
 /** A loosely-typed AST node from the pipeline. */
 type ASTNode = Record<string, unknown>;
@@ -57,6 +63,16 @@ export interface FileAnalysis {
   channelNodes: object[];
   ir: FileIR;
   testGroups: TestGroup[];
+  /**
+   * Phase A1c Step C0 — per-file feature-usage bitmap.
+   *
+   * Records which v0.next features this single file's AST uses. The cross-
+   * file merged bitmap (consumed by downstream emitters) lives at
+   * `analyzeAll`'s return as `featureUsage`. Per-file is preserved here for
+   * debug introspection ("why does my app have engines? → check file X's
+   * bitmap") and forward-compat with future per-module elision / cache reuse.
+   */
+  usage: FeatureUsage;
 }
 
 /**
@@ -89,6 +105,8 @@ export function analyzeFile(fileAST: FileAST): FileAnalysis {
     channelNodes: collectChannelNodes(nodes) as object[],
     ir: createFileIR(filePath),
     testGroups,
+    // Phase A1c Step C0 — per-file feature-usage bitmap. See usage-analyzer.ts.
+    usage: analyzeUsage(fileAST as Record<string, unknown>),
   };
 }
 
@@ -107,18 +125,38 @@ export function analyzeAll(input: {
 }): {
   fileAnalyses: Map<string, FileAnalysis>;
   protectedFields: Set<string>;
+  /**
+   * Phase A1c Step C0 — cross-file (per-app) feature-usage bitmap.
+   *
+   * OR-merge of every file's per-file `usage` bitmap. Every transitively-
+   * imported module's feature use propagates to this aggregate via the
+   * `analyzeAll.input.files` array (post-CHX-inlined + MOD-resolved).
+   *
+   * Consumed by downstream A1c runtime-emission steps (C5 reset / C6
+   * validators / C8 validity-surface / C12 engines / C14 derived-engines /
+   * C16 refinement-types / C18 channels / etc.) to elide unused runtime
+   * helpers per SCOPE §11 ratified compile-time elision strategy.
+   *
+   * Soundness guarantee: every flag set `true` reflects structural feature
+   * use somewhere in the app. Conservative inclusion — false-positives
+   * bloat output, false-negatives crash apps; we err on inclusion.
+   */
+  featureUsage: FeatureUsage;
 } {
   const { files, protectAnalysis } = input;
 
   const protectedFields = collectProtectedFields(protectAnalysis as Record<string, unknown>);
   const fileAnalyses = new Map<string, FileAnalysis>();
+  let featureUsage: FeatureUsage = emptyUsage();
 
-  if (!files) return { fileAnalyses, protectedFields };
+  if (!files) return { fileAnalyses, protectedFields, featureUsage };
 
   for (const fileAST of files) {
     const analysis = analyzeFile(fileAST);
     fileAnalyses.set(fileAST.filePath, analysis);
+    // Phase A1c Step C0 — fold per-file bitmap into per-app aggregate.
+    featureUsage = mergeUsage(featureUsage, analysis.usage);
   }
 
-  return { fileAnalyses, protectedFields };
+  return { fileAnalyses, protectedFields, featureUsage };
 }
