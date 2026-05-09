@@ -269,9 +269,19 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   // `extractReactiveDepsTransitive` usage in `emit-html.ts:891` for markup
   // interpolations. Threaded into `emit-logic` via `EmitLogicOpts.fnBodyRegistry`.
   const fnBodyRegistry: FunctionBodyRegistry = buildFunctionBodyRegistry(fileAST as Record<string, unknown>);
-  const emitOpts: { derivedNames?: Set<string>; encodingCtx?: typeof encodingCtx; machineBindings?: typeof machineBindings; engineBindings?: typeof engineBindings; engineVarNames?: Set<string>; enginesWithHooks?: Set<string>; fnBodyRegistry?: FunctionBodyRegistry } = derivedNames.size > 0
-    ? { derivedNames, encodingCtx, fnBodyRegistry, ...(machineBindings ? { machineBindings } : {}), ...(engineBindings ? { engineBindings } : {}), ...(engineVarNames.size > 0 ? { engineVarNames } : {}), ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}) }
-    : { encodingCtx, fnBodyRegistry, ...(machineBindings ? { machineBindings } : {}), ...(engineBindings ? { engineBindings } : {}), ...(engineVarNames.size > 0 ? { engineVarNames } : {}), ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}) };
+  // C21 (§14.11 / M10) — Build the file-level typeRegistry once and thread
+  // through emitOpts so the state-decl arm can resolve typeAnnotation strings
+  // to StructType records for Tier 3 positional sugar lowering. Reused by the
+  // transition-table emitter below (replaces the prior local rebuild).
+  const typeDeclsForRegistry = (fileAST as any).typeDecls as any[] | undefined;
+  let typeRegistry: Map<string, any> | null = null;
+  if (typeDeclsForRegistry) {
+    const { buildTypeRegistry } = require("../type-system.ts");
+    typeRegistry = buildTypeRegistry(typeDeclsForRegistry, [], { file: fileAST.filePath ?? "", start: 0, end: 0, line: 1, col: 1 });
+  }
+  const emitOpts: { derivedNames?: Set<string>; encodingCtx?: typeof encodingCtx; machineBindings?: typeof machineBindings; engineBindings?: typeof engineBindings; engineVarNames?: Set<string>; enginesWithHooks?: Set<string>; fnBodyRegistry?: FunctionBodyRegistry; typeRegistry?: Map<string, any> | null; errors?: typeof errors } = derivedNames.size > 0
+    ? { derivedNames, encodingCtx, fnBodyRegistry, errors, ...(typeRegistry ? { typeRegistry } : {}), ...(machineBindings ? { machineBindings } : {}), ...(engineBindings ? { engineBindings } : {}), ...(engineVarNames.size > 0 ? { engineVarNames } : {}), ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}) }
+    : { encodingCtx, fnBodyRegistry, errors, ...(typeRegistry ? { typeRegistry } : {}), ...(machineBindings ? { machineBindings } : {}), ...(engineBindings ? { engineBindings } : {}), ...(engineVarNames.size > 0 ? { engineVarNames } : {}), ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}) };
 
   // Step 4a: Generate transition lookup tables for enums with transitions{} and machines (§51.5).
   // These must be emitted BEFORE top-level logic statements because state-decl
@@ -282,9 +292,8 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   if (typeDecls || machineRegistry) {
     const { emitTransitionTable } = require("./emit-machines.ts");
     // Emit tables for enums with type-level transitions
-    if (typeDecls) {
-      const { buildTypeRegistry, BUILTIN_TYPES } = require("../type-system.ts");
-      const typeRegistry = buildTypeRegistry(typeDecls, [], { file: fileAST.filePath ?? "", start: 0, end: 0, line: 1, col: 1 });
+    if (typeDecls && typeRegistry) {
+      const { BUILTIN_TYPES } = require("../type-system.ts");
       for (const [name, type] of typeRegistry) {
         if (BUILTIN_TYPES.has(name)) continue;
         if (type.kind === "enum" && type.transitionRules && type.transitionRules.length > 0) {

@@ -5,13 +5,14 @@ import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMer
 import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, type MatchArm } from "./emit-control-flow.ts";
 import { emitLiftExpr, emitCreateElementFromMarkup } from "./emit-lift.js";
 import { extractReactiveDeps, extractReactiveDepsFromExprNode, extractReactiveDepsTransitive, type FunctionBodyRegistry } from "./reactive-deps.ts";
-import { emitStringFromTree } from "../expression-parser.ts";
-import type { EncodingContext } from "./type-encoding.ts";
+import { emitStringFromTree, parseExprToNode } from "../expression-parser.ts";
+import type { EncodingContext, ResolvedType, StructType } from "./type-encoding.ts";
 import { emitRuntimeCheck } from "./emit-predicates.ts";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitValidatorRunnerSidecar } from "./emit-validators.ts";
 import { emitInlineMessageOverrides } from "./emit-messages.ts";
 import { emitCompoundSynthSurface } from "./emit-synth-surface.ts";
+import { CGError } from "./errors.ts";
 
 // ---------------------------------------------------------------------------
 // Deep reactive wrapping helper (Reactivity Phase 1)
@@ -164,6 +165,38 @@ interface EmitLogicOpts {
    * `emit-html.ts:891`.
    */
   fnBodyRegistry?: FunctionBodyRegistry | null;
+  /**
+   * C21 (§14.11 / M10) — Type-name → ResolvedType registry for Tier 3
+   * predefined-shape compound positional sugar lowering.
+   *
+   * `<userInfo>: UserInfo = ("alice", 30, true)` — when the LHS carries a
+   * type annotation that resolves to a `StructType` and the RHS init parses
+   * as a SequenceExpression, the C21 dispatch arm in `case "state-decl"`
+   * lowers the SequenceExpression to a typed object literal:
+   * `{name: "alice", age: 30, active: true}`.
+   *
+   * Built once per file in `emit-reactive-wiring.ts:emitReactiveWiring` via
+   * `buildTypeRegistry(typeDecls, ...)`. Threaded through recursive calls via
+   * `{ ...opts }` spread (compound children inherit). When absent, the C21
+   * arm is skipped and the legacy fallthrough emits the SequenceExpression
+   * raw — preserving the latent JS-comma-operator behaviour for tests that
+   * synthesize state-decls without a registry.
+   */
+  typeRegistry?: Map<string, ResolvedType> | null;
+  /**
+   * C21 (§14.11 / M10) — Diagnostic accumulator for codegen-surfaced errors.
+   *
+   * Populated by the C21 arm when positional-arity mismatches `E-TYPE-001`
+   * fire (per §14.11 line 7226). Sibling to `EmitLogicOpts.derivedNames` —
+   * threaded through opts so emitter helpers can push diagnostics without a
+   * separate context handle.
+   *
+   * Wired via `emit-reactive-wiring.ts:emitReactiveWiring` from `ctx.errors`.
+   * When absent, diagnostics are silently dropped (preserves test-fixture
+   * compatibility for synthetic state-decls without a registry); the
+   * defensive emission still produces recoverable output.
+   */
+  errors?: CGError[] | null;
 }
 
 /** An entry in the captured scope for a runtime ^{} meta block (from meta-checker.ts). */
@@ -455,6 +488,179 @@ function _emitInitThunkSidecar(node: any, qualifiedName: string, opts: EmitLogic
   // routing matches the main reactive-set arm.
   const initBody = emitExprField(node.initExpr, initStr, _makeExprCtx(opts));
   return `_scrml_init_set(${JSON.stringify(encodedName)}, () => ${initBody});`;
+}
+
+// ---------------------------------------------------------------------------
+// C21 (§14.11 / M10) — Tier 3 predefined-shape compound positional sugar
+// ---------------------------------------------------------------------------
+
+/**
+ * Split a top-level comma-separated argument list into substrings.
+ *
+ * Tracks paren / bracket / brace / template-literal depth so commas inside
+ * nested expressions are NOT treated as separators. Strings / template
+ * literals / regex literals are scanned for closing delimiters.
+ *
+ * Input: the inner text between the outer `(` and `)` of the SequenceExpression.
+ *   Example input: `"alice", 30, true`
+ *   Example input: `f(a, b), {x: 1, y: 2}, [1, 2]`
+ *
+ * Returns the list of trimmed positional argument source strings.
+ */
+function _splitTopLevelCommas(inner: string): string[] {
+  const out: string[] = [];
+  let buf = "";
+  let depth = 0;
+  let i = 0;
+  while (i < inner.length) {
+    const c = inner[i];
+    // String / template literal — scan to matching delimiter
+    if (c === '"' || c === "'" || c === "`") {
+      const quote = c;
+      buf += c;
+      i++;
+      while (i < inner.length) {
+        const cc = inner[i];
+        buf += cc;
+        if (cc === "\\" && i + 1 < inner.length) {
+          buf += inner[i + 1];
+          i += 2;
+          continue;
+        }
+        i++;
+        if (cc === quote) break;
+      }
+      continue;
+    }
+    if (c === "(" || c === "[" || c === "{") { depth++; buf += c; i++; continue; }
+    if (c === ")" || c === "]" || c === "}") { depth--; buf += c; i++; continue; }
+    if (c === "," && depth === 0) {
+      out.push(buf.trim());
+      buf = "";
+      i++;
+      continue;
+    }
+    buf += c;
+    i++;
+  }
+  const tail = buf.trim();
+  if (tail) out.push(tail);
+  return out;
+}
+
+/**
+ * C21 (§14.11 / M10) — Lower a Tier 3 predefined-shape positional sugar init
+ * to a typed object literal in struct field-declaration order.
+ *
+ * Input shape:
+ *   `<userInfo>: UserInfo = ("alice", 30, true)` — caller has already
+ *   confirmed `node.typeAnnotation` resolves to a `StructType`.
+ *
+ * Behaviour:
+ *   - Splits the SequenceExpression's `raw` text on top-level commas.
+ *   - Validates positional-arity against `structType.fields.size`.
+ *     Mismatch → push `E-TYPE-001` to `opts.errors` (per §14.11 line 7226)
+ *     and return `null` so the caller emits a defensive fallback.
+ *   - Maps each positional value to its corresponding field name using
+ *     the struct's declaration order (Map preserves insertion order).
+ *   - Re-parses each positional value via `parseExprToNode` and emits
+ *     through the same `emitExpr` pipeline as any other expression init,
+ *     so reactive references / fn calls / arithmetic resolve uniformly.
+ *
+ * Returns the full emitted statement (`_scrml_reactive_set("userInfo", {...});`)
+ * or `null` on recoverable error (caller emits a defensive fallback).
+ */
+function _emitTier3PositionalSugar(
+  node: any,
+  structType: StructType,
+  qualifiedName: string,
+  opts: EmitLogicOpts,
+): string | null {
+  const initExpr = node.initExpr;
+  // Strip the outer parens from `("alice", 30, true)` → `"alice", 30, true`.
+  // The SequenceExpression's `raw` is the full parenthesised text. Defensive
+  // fallback: if `raw` is missing or doesn't begin with `(`, decline.
+  const rawSrc: string = (initExpr && typeof initExpr.raw === "string") ? initExpr.raw : "";
+  const trimmed = rawSrc.trim();
+  if (!trimmed.startsWith("(") || !trimmed.endsWith(")")) {
+    return null;
+  }
+  const inner = trimmed.slice(1, -1);
+  const positionals = _splitTopLevelCommas(inner);
+
+  // Field order from the struct type — Map iteration preserves insertion order.
+  const fieldNames: string[] = [];
+  for (const fieldName of structType.fields.keys()) {
+    fieldNames.push(fieldName);
+  }
+
+  // §14.11 line 7226 — positional-arity mismatch is E-TYPE-001.
+  if (positionals.length !== fieldNames.length) {
+    if (opts.errors) {
+      const span = (initExpr && initExpr.span) ? initExpr.span : (node.span ?? { start: 0, end: 0 });
+      opts.errors.push(new CGError(
+        "E-TYPE-001",
+        `E-TYPE-001: Positional binding for type \`${structType.name}\` expects ` +
+        `${fieldNames.length} field${fieldNames.length === 1 ? "" : "s"} ` +
+        `(${fieldNames.map(n => `\`${n}\``).join(", ")}) but got ${positionals.length} ` +
+        `value${positionals.length === 1 ? "" : "s"}. ` +
+        `Provide values in the declared field order, or use the named-initialiser form ` +
+        `(\`{${fieldNames.map(n => `${n}: …`).join(", ")}}\`). See SPEC §14.11.`,
+        span,
+      ));
+    }
+    return null;
+  }
+
+  // Re-parse each positional and emit through the standard ExprNode pipeline.
+  // Use the parent state-decl's span as the offset baseline; per-positional
+  // span precision is best-effort (sub-positional errors are unlikely at this
+  // arm — the Acorn parse already succeeded for the whole SequenceExpression).
+  const filePath: string = (initExpr && initExpr.span && initExpr.span.file) ? initExpr.span.file : "";
+  const baseOffset: number = (initExpr && initExpr.span && typeof initExpr.span.start === "number") ? initExpr.span.start : 0;
+
+  const fieldEntries: string[] = [];
+  for (let i = 0; i < positionals.length; i++) {
+    const fieldName = fieldNames[i];
+    const valueSrc = positionals[i];
+    const valueNode = parseExprToNode(valueSrc, filePath, baseOffset);
+    const valueEmit = emitExpr(valueNode, _makeExprCtx(opts));
+    fieldEntries.push(`${fieldName}: ${valueEmit}`);
+  }
+  const objLiteral = `({ ${fieldEntries.join(", ")} })`;
+
+  // Wrap and emit as a regular reactive-set, mirroring the legacy fallthrough
+  // arm so init-thunk and default sidecars behave consistently. The lowered
+  // object literal is value-init for the cell — `isInit = true` because
+  // typeAnnotation discriminates this as a declaration site (matches the
+  // logic at line 1225 of the legacy fallthrough).
+  const ctx = opts.encodingCtx;
+  const encodedName = ctx ? ctx.encode(qualifiedName) : qualifiedName;
+  const wrapped = `_scrml_deep_reactive(${objLiteral})`;
+  const mainStmt = _emitReactiveSet(encodedName, wrapped, opts, node.name, /* isInit */ true);
+
+  // Emit a Tier-3-aware init-thunk inline so `reset(@cell)` re-evaluates the
+  // LOWERED form (not the raw SequenceExpression). The default
+  // `_emitInitThunkSidecar` would re-emit the raw via emitEscapeHatch — that
+  // would re-introduce the latent JS-comma-operator bug at reset time. The
+  // caller (case "state-decl") detects the C21 path via the marker comment
+  // below and suppresses its own _initSidecar to avoid double emission.
+  //
+  // SKIP rules mirror `_emitInitThunkSidecar` for parity (server boundary,
+  // function bodies, defaultExpr present, SQL nodes, etc.).
+  let initThunkLine = "";
+  if (
+    opts.boundary !== "server" &&
+    !opts.insideFunctionBody &&
+    !node.defaultExpr &&
+    !(node.sqlNode && node.sqlNode.kind === "sql")
+  ) {
+    initThunkLine = `\n_scrml_init_set(${JSON.stringify(encodedName)}, () => ${objLiteral});`;
+  }
+  // Marker comment so the caller can detect C21 emission and suppress its
+  // default _initSidecar. The comment is structurally meaningful (parser-level
+  // metadata for the `case "state-decl"` arm) and never appears outside C21.
+  return `/* @c21-tier3 */\n${mainStmt}${initThunkLine}`;
 }
 
 /**
@@ -1146,6 +1352,79 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           derivedLines.push(`_scrml_derived_subscribe(${JSON.stringify(encodedDerivedDeclName)}, ${JSON.stringify(encodedDep)});`);
         }
         return _appendSidecar(derivedLines.join("\n"));
+      }
+
+      // C21 dispatch arm: Tier 3 predefined-shape compound positional sugar
+      // (SPEC §14.11 / M10).
+      //
+      // Detects `<userInfo>: UserInfo = ("alice", 30, true)` — typed Shape 1
+      // state-decl whose RHS parses as a JS SequenceExpression and whose
+      // typeAnnotation resolves to a `StructType` in the type registry.
+      // Lowers the SequenceExpression to a typed object literal in struct
+      // field-declaration order: `{name: "alice", age: 30, active: true}`.
+      //
+      // Closes the latent JS-comma-operator codegen bug — without this arm,
+      // the legacy fallthrough emits `_scrml_reactive_set("userInfo",
+      // ("alice", 30, true))` which evaluates to `true` (last operand) per
+      // JS comma-operator semantics — silently wrong, no diagnostic.
+      //
+      // Detection gate (all four MUST hold):
+      //   1. `node.typeAnnotation` is a non-empty string
+      //   2. `node.initExpr` is an escape-hatch with `estreeType:
+      //      "SequenceExpression"`
+      //   3. `opts.typeRegistry` is provided (entry-point sets it; tests
+      //      that bypass the registry naturally skip this arm)
+      //   4. The annotation resolves to a `kind: "struct"` ResolvedType
+      //
+      // When any gate fails, the arm declines and the legacy fallthrough
+      // handles the node as before.
+      //
+      // Variant C ad-hoc compound (`<formRes> = (a, b, c)` — no typeAnno) is
+      // naturally excluded by gate 1 (no typeAnnotation) per §14.11 line 7229.
+      //
+      // Arity mismatch fires `E-TYPE-001` per §14.11 line 7226. Per-position
+      // type mismatch is OUT-OF-SCOPE for codegen — the lowered object
+      // literal flows through the existing type-system enforcement on
+      // record-init shapes (§14.3).
+      if (
+        (node as any).typeAnnotation &&
+        typeof (node as any).typeAnnotation === "string" &&
+        (node as any).initExpr &&
+        ((node as any).initExpr as any).kind === "escape-hatch" &&
+        ((node as any).initExpr as any).estreeType === "SequenceExpression" &&
+        opts.typeRegistry
+      ) {
+        const _annoStr = ((node as any).typeAnnotation as string).trim();
+        const _resolved = opts.typeRegistry.get(_annoStr) as ResolvedType | undefined;
+        if (_resolved && _resolved.kind === "struct") {
+          const _structType = _resolved as StructType;
+          const _lowered = _emitTier3PositionalSugar(
+            node as any,
+            _structType,
+            _qualifiedName,
+            opts,
+          );
+          if (_lowered !== null) {
+            // C21 path: helper emits its OWN init-thunk inline (using the
+            // lowered object literal, not the raw SequenceExpression) so
+            // reset() re-evaluation behaves correctly. Suppress the default
+            // `_initSidecar` to avoid double emission. Detect via the marker
+            // comment the helper prepends.
+            const parts = [_lowered];
+            if (_defaultSidecar) parts.push(_defaultSidecar);
+            if (_validatorSidecar) parts.push(_validatorSidecar);
+            if (_inlineMessagesSidecar) parts.push(_inlineMessagesSidecar);
+            return parts.join("\n");
+          }
+          // _lowered === null: the helper hit a recoverable error and
+          // already pushed a diagnostic. Emit a defensive fallback that
+          // doesn't crash the runtime: `_scrml_reactive_set(name, undefined)`.
+          const ctx21 = opts.encodingCtx;
+          const encoded21 = ctx21 ? ctx21.encode(_qualifiedName) : _qualifiedName;
+          return _appendSidecar(
+            `/* E-TYPE-001 — see diagnostic */ ${_emitReactiveSet(encoded21, "undefined", opts, node.name, true)}`
+          );
+        }
       }
 
       // fix-cg-cps-return-sql-ref-placeholder (S40 follow-up): when the
