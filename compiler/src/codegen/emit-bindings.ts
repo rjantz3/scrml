@@ -156,8 +156,10 @@ function collectEnumVariantNames(decl: any): string[] {
  * Build a map from reactive variable name → { typeAnnotation, tag } by walking
  * logic block bodies and finding state-decl nodes.
  * Used to detect predicated types for bind:value runtime validation (§53.7.2).
+ *
+ * Exported (C16) for emit-html.ts to derive HTML validation attrs (§53.7.1).
  */
-function buildReactiveTypeMap(fileAST: any): Map<string, string> {
+export function buildReactiveTypeMap(fileAST: any): Map<string, string> {
   const result = new Map<string, string>();
   const topNodes: any[] = fileAST.nodes ?? (fileAST.ast ? fileAST.ast.nodes : []);
   walkForReactiveTypes(topNodes, result);

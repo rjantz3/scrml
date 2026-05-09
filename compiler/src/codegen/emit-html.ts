@@ -12,6 +12,13 @@ import { isFlatDeclarationBlock, renderFlatDeclarationAsInlineStyle } from "./em
 // (`"bindable"` for Shape 2 with bindable RHS — the only legal use kind that survives
 // B6's diagnostic walker).
 import { lookupStateCell, getCellKind } from "../symbol-table.ts";
+// A1c C16 — §53.7.1 HTML attr generation for refinement-typed bindable cells.
+// `parsePredicateAnnotation` extracts the predicate from a typeAnnotation string;
+// `deriveHtmlAttrs` maps the predicate to native HTML validation attributes.
+import { parsePredicateAnnotation, deriveHtmlAttrs } from "./emit-predicates.ts";
+// A1c C16 — `buildReactiveTypeMap` walks the file AST for `state-decl` typeAnnotations
+// keyed by var-name (mirrors emit-bindings.ts §53.7.2 path for runtime gating).
+import { buildReactiveTypeMap } from "./emit-bindings.ts";
 
 // Supported bind: attribute names per SPEC §5.4
 const SUPPORTED_BIND_NAMES = new Set(["value", "valueAsNumber", "checked", "selected", "files", "group"]);
@@ -301,6 +308,11 @@ export function generateHtml(
   // and render-by-tag detection is skipped — the legacy raw-tag emission path keeps
   // working for tests that bypass symbol-table population.
   const fileScope: any = fileAST?._scope ?? null;
+  // A1c C16 — §53.7.1: map reactive var names to type annotations so bind:value
+  // attributes can derive HTML validation attrs from refinement-type predicates.
+  // Walk the AST top-level (mirrors emit-bindings.ts §53.7.2 path) — works whether
+  // or not SYM populated _scope, so test fixtures without scope still get attrs.
+  const reactiveTypeMap: Map<string, string> = fileAST ? buildReactiveTypeMap(fileAST) : new Map();
 
   function emitNode(node: any): void {
     if (!node || typeof node !== "object") return;
@@ -1070,6 +1082,97 @@ export function generateHtml(
         parts.push(` style="${escapeHtmlAttr(flatInlineStyle)}"`);
       }
 
+      // ---------------------------------------------------------------------
+      // A1c C16 — §53.7.1 Pre-pass: derive HTML validation attributes from
+      // refinement-type predicates on bind:value-bound cells.
+      //
+      // For each `bind:value=@var` attribute, look up @var's typeAnnotation
+      // in `reactiveTypeMap`; if it parses as a predicated type (§53.2),
+      // derive the HTML attrs (min/max/minlength/maxlength/type/required/
+      // pattern) per §53.7.1 mapping. Track them in `derivedRefinementAttrs`
+      // for emission alongside developer attrs (with conflict detection).
+      //
+      // §53.7.3 — when a developer-supplied attr conflicts with a derived
+      // attr, emit E-CONTRACT-004-WARN; the shape-derived value takes
+      // precedence in the compiled output.
+      // ---------------------------------------------------------------------
+      const derivedRefinementAttrs: Map<string, string> = new Map();
+      const refinementSourceVar: Map<string, string> = new Map(); // attr-name → var-name (for warning messages)
+      const refinementSourcePred: Map<string, string> = new Map(); // attr-name → predicate-display (for warning messages)
+      for (const _bvAttr of attrs) {
+        if (!_bvAttr || _bvAttr.name !== "bind:value") continue;
+        const _bvVal = _bvAttr.value;
+        if (!_bvVal || _bvVal.kind !== "variable-ref") continue;
+        const _bvName = (_bvVal.name ?? "").replace(/^@/, "");
+        // Resolve top-level cell name (for `@user.email` use the leaf).
+        // For root-cell references like `@username` we look up "username".
+        const _bvRootKey = _bvName.split(".")[0];
+        const _bvAnnot = reactiveTypeMap.get(_bvRootKey);
+        if (!_bvAnnot) continue;
+        const _bvParsed = parsePredicateAnnotation(_bvAnnot);
+        if (!_bvParsed) continue;
+        const _bvDerived = deriveHtmlAttrs(_bvParsed.predicate, _bvParsed.baseType);
+        for (const [k, v] of Object.entries(_bvDerived)) {
+          // First derived value wins when multiple bind:value cover the same attr
+          // (rare; bind:value is typically one-per-element).
+          if (!derivedRefinementAttrs.has(k)) {
+            derivedRefinementAttrs.set(k, v);
+            refinementSourceVar.set(k, _bvRootKey);
+            refinementSourcePred.set(k, _bvAnnot);
+          }
+        }
+      }
+
+      // §53.7.3 — Track which developer-supplied attrs conflict with derived
+      // ones so we can SKIP emitting the developer value (shape-derived
+      // precedence) AND emit E-CONTRACT-004-WARN.
+      const skipDeveloperAttrs: Set<any> = new Set();
+      if (derivedRefinementAttrs.size > 0) {
+        for (const _devAttr of attrs) {
+          if (!_devAttr) continue;
+          const _devName: string = _devAttr.name;
+          if (!derivedRefinementAttrs.has(_devName)) continue;
+          // Compare developer-supplied value against the derived value.
+          const _devVal = _devAttr.value;
+          const _devValStr = (_devVal && _devVal.kind === "string-literal") ? _devVal.value : null;
+          // If devVal is `absent` (boolean attribute like `required`), treat as "" — same
+          // as `required="" `. Conflict only when developer value differs from derived.
+          const _devEffective = _devVal && _devVal.kind === "absent" ? "" : _devValStr;
+          const _derivedVal = derivedRefinementAttrs.get(_devName);
+          if (_devEffective === null) {
+            // Developer value is reactive/expression/etc — can't statically
+            // compare. Skip the derived attr (developer takes precedence for
+            // dynamic attrs to avoid runtime confusion). No warning.
+            derivedRefinementAttrs.delete(_devName);
+            continue;
+          }
+          if (_devEffective !== _derivedVal) {
+            // Conflict — §53.11 E-CONTRACT-004-WARN. Shape-derived takes precedence.
+            const _src = refinementSourceVar.get(_devName) ?? "";
+            const _pred = refinementSourcePred.get(_devName) ?? "";
+            if (errors) {
+              errors.push(new CGError(
+                "E-CONTRACT-004-WARN",
+                `E-CONTRACT-004-WARN: bind:value attribute conflict.\n` +
+                `  Element:        <${tag}>\n` +
+                `  Declared:       ${_devName}="${_devEffective}"\n` +
+                `  Shape-derived:  ${_devName}="${_derivedVal}" (from ${_pred} on @${_src})\n\n` +
+                `  The shape-derived attribute will override the declared attribute in compiled output.\n` +
+                `  Remove the explicit ${_devName}= attribute to eliminate this warning.`,
+                _devAttr.span ?? node.span ?? { file: "", start: 0, end: 0, line: 0, col: 0 },
+                "warning",
+              ));
+            }
+            // Mark dev attr as skip so the derived value is emitted instead.
+            skipDeveloperAttrs.add(_devAttr);
+          } else {
+            // No conflict — dev value matches derived. Suppress duplicate emission
+            // (the existing dev attr will emit; remove from derived set).
+            derivedRefinementAttrs.delete(_devName);
+          }
+        }
+      }
+
       for (const attr of attrs) {
         if (!attr) continue;
         const name: string = attr.name;
@@ -1078,6 +1181,10 @@ export function generateHtml(
         if (name.startsWith("transition:") || name.startsWith("in:") || name.startsWith("out:")) {
           continue;
         }
+
+        // §53.7.3: developer attr conflicts with shape-derived → suppress dev,
+        // shape-derived is emitted in the post-loop block below.
+        if (skipDeveloperAttrs.has(attr)) continue;
 
         if (name.startsWith("bind:")) {
           const bindId = genVar(`bind_${name.replace(":", "_")}`);
@@ -1190,6 +1297,20 @@ export function generateHtml(
               });
             }
           }
+        }
+      }
+
+      // A1c C16 — §53.7.1: emit predicate-derived HTML validation attrs that
+      // were not already declared by the developer (and not removed during
+      // conflict resolution). These run AFTER the developer-attr loop so a
+      // declared `type="email"` is emitted before the shape-derived `pattern`.
+      // Conflict-overridden attrs land here too (shape-derived precedence).
+      for (const [_drName, _drVal] of derivedRefinementAttrs) {
+        if (_drVal === "") {
+          // Boolean attribute (e.g. `required`) — emit as bareword.
+          parts.push(` ${_drName}`);
+        } else {
+          parts.push(` ${_drName}="${escapeHtmlAttr(_drVal)}"`);
         }
       }
 

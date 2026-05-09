@@ -7,7 +7,7 @@ import { emitLiftExpr, emitCreateElementFromMarkup } from "./emit-lift.js";
 import { extractReactiveDeps, extractReactiveDepsFromExprNode, extractReactiveDepsTransitive, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { emitStringFromTree, parseExprToNode } from "../expression-parser.ts";
 import type { EncodingContext, ResolvedType, StructType } from "./type-encoding.ts";
-import { emitRuntimeCheck } from "./emit-predicates.ts";
+import { emitRuntimeCheck, parsePredicateAnnotation } from "./emit-predicates.ts";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitValidatorRunnerSidecar } from "./emit-validators.ts";
 import { emitInlineMessageOverrides } from "./emit-messages.ts";
@@ -197,6 +197,22 @@ interface EmitLogicOpts {
    * defensive emission still produces recoverable output.
    */
   errors?: CGError[] | null;
+  /**
+   * C16 (§53.9.3) — The enclosing function's return-type annotation string,
+   * threaded down so `return-stmt` can fire a §53.9.3 boundary check when
+   * the return type is a refinement-type predicate (e.g.,
+   * `function f(): number(>0) { return x }` — the return must satisfy `>0`).
+   *
+   * Threaded through by `case "function-decl"` in emit-functions.ts and the
+   * fn-shortcut path in emit-logic.ts (line ~2174). When absent, return-stmt
+   * emits no boundary check (correct for non-refinement-typed returns).
+   */
+  returnTypeAnnotation?: string | null;
+  /**
+   * C16 (§53.9.3) — The enclosing function's name, used in error messages
+   * for return-stmt boundary check failures. Paired with returnTypeAnnotation.
+   */
+  enclosingFnName?: string | null;
 }
 
 /** An entry in the captured scope for a runtime ^{} meta block (from meta-checker.ts). */
@@ -1536,6 +1552,31 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
     // shape:"derived" + structuralForm:false early-route.
 
     case "return-stmt": {
+      // C16 (§53.9.3) — Helper: when the enclosing function declares a
+      // refinement-typed return type, wrap the return expression in a
+      // boundary check (E-CONTRACT-001-RT) before returning.
+      const _retPredInfo = opts.returnTypeAnnotation
+        ? parsePredicateAnnotation(opts.returnTypeAnnotation)
+        : null;
+      const _wrapReturnWithCheck = (retExprStr: string): string => {
+        if (!_retPredInfo) return `return ${retExprStr};`;
+        const _tmpVar = genVar(`_scrml_chk_ret`);
+        const _label = _retPredInfo.label;
+        const _fnName = opts.enclosingFnName ?? "<anonymous>";
+        const _checkLines = emitRuntimeCheck(
+          _retPredInfo.predicate,
+          _tmpVar,
+          `<return value of ${_fnName}>`,
+          _label,
+          `fn ${_fnName}, return statement`,
+        );
+        return [
+          `const ${_tmpVar} = ${retExprStr};`,
+          ..._checkLines,
+          `return ${_tmpVar};`,
+        ].join("\n");
+      };
+
       // fix-cg-sql-ref-placeholder (S40 follow-up): `return ?{...}.method()` —
       // when the AST builder attached a structured `sqlNode` (because `return` was
       // followed directly by a SQL BLOCK_REF), recurse into `case "sql"` and
@@ -1546,15 +1587,21 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         // `case "sql"` always returns an expression form ending in `;`.
         // Strip the trailing `;` so we can wrap as `return …;`.
         const sqlExpr = sqlStmt.replace(/;\s*$/, "");
-        return `return ${sqlExpr};`;
+        return _wrapReturnWithCheck(sqlExpr);
       }
       // Phase 3 fast path: when exprNode is present, skip all string splitting
       if (node.exprNode) {
-        return `return ${emitExpr(node.exprNode, _makeExprCtx(opts))};`;
+        return _wrapReturnWithCheck(emitExpr(node.exprNode, _makeExprCtx(opts)));
       }
       // Phase 4 fallback: exprNode is missing (rare — only for unparseable expressions)
       const retExpr: string = (node.expr ?? node.value ?? "").trim();
-      return retExpr ? `return ${emitExprField(node.exprNode, retExpr, _makeExprCtx(opts))};` : "return;";
+      if (!retExpr) {
+        // Bare `return;` — no value, can't check predicate. If function has
+        // refinement-typed return and bare return is used, that's a typer-stage
+        // concern (E-RETURN-EMPTY style); codegen emits the bare return.
+        return "return;";
+      }
+      return _wrapReturnWithCheck(emitExprField(node.exprNode, retExpr, _makeExprCtx(opts)));
     }
 
     case "if-stmt":

@@ -5,7 +5,53 @@ import { CGError } from "./errors.ts";
 import { isServerOnlyNode, collectFunctions } from "./collect.ts";
 import { hasServerCallees, scheduleStatements } from "./scheduling.js";
 import { buildMachineBindingsMap } from "./emit-reactive-wiring.js";
+// A1c C16 — §53.9.1/§53.4.3 client-side function-param boundary check (Locus 3).
+import { parsePredicateAnnotation, emitRuntimeCheck } from "./emit-predicates.ts";
 import type { CompileContext } from "./context.ts";
+
+/**
+ * A1c C16 — Helper: emit per-param boundary checks for a client-side function.
+ *
+ * For each parameter whose typeAnnotation parses as a refinement-type predicate
+ * (§53.2), emit a runtime check at function entry. Mirrors the server-side
+ * §53.9.4 `emitServerParamCheck` path, but produces a client-side `throw`
+ * (E-CONTRACT-001-RT) instead of a 400 Response.
+ *
+ * Per §53.4.3 condition 1: function param is a boundary zone whenever the
+ * caller's constraint does not imply the callee's. The simplest correct
+ * strategy (correctness floor) is "always check on entry"; §53.4.2/§53.9.2
+ * caller-site elision is an OPTIMIZATION not implemented in v0.2.0 (deferred
+ * with the rest of static-zone elision optimization to v0.3.0+).
+ *
+ * Returns an array of indented JS lines.
+ */
+function emitClientParamChecks(
+  params: Param[],
+  paramNames: string[],
+  fnName: string,
+  indent: string,
+): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < params.length; i++) {
+    const p = params[i];
+    const annot = (typeof p === "object" && p !== null) ? ((p as any).typeAnnotation as string | undefined) : undefined;
+    if (!annot) continue;
+    const parsed = parsePredicateAnnotation(annot);
+    if (!parsed) continue;
+    // Use emitRuntimeCheck — same shape as boundary-zone let/state checks.
+    // Pass paramName as both valueExpr and varName so the error message
+    // identifies the parameter cleanly.
+    const checkLines = emitRuntimeCheck(
+      parsed.predicate,
+      paramNames[i],
+      paramNames[i],
+      parsed.label,
+      `fn ${fnName}, parameter '${paramNames[i]}'`,
+    );
+    for (const l of checkLines) out.push(`${indent}${l}`);
+  }
+  return out;
+}
 
 /** A loosely-typed AST node from the pipeline. */
 type ASTNode = Record<string, unknown>;
@@ -310,6 +356,12 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
 
     lines.push(`${asyncPrefix}function ${generatedName}(${paramNames.join(", ")}) {`);
 
+    // A1c C16 — §53.9.1 client-side param boundary checks (Locus 3).
+    // Mirrors emit-server.ts §53.9.4 wiring, but throws E-CONTRACT-001-RT
+    // (client-side execution halts) instead of returning a 400 Response.
+    const _paramCheckLines = emitClientParamChecks(params, paramNames, name, "  ");
+    for (const _l of _paramCheckLines) lines.push(_l);
+
     const body = (fnNode.body as ASTNode[]) ?? [];
     // §48: `fn` shorthand uses tail-expression implicit return. Bypass scheduleStatements
     // (which has no notion of implicit return); `fn` bodies can't contain server calls
@@ -318,6 +370,9 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // emitFnShortcutBody so match/switch tail expressions get implicit return.
     const fnKind = (fnNode as { fnKind?: string }).fnKind;
     const hasRetType = (fnNode as { hasReturnType?: boolean }).hasReturnType;
+    // A1c C16 — thread the function's returnTypeAnnotation so return-stmt
+    // can fire §53.9.3 boundary checks for refinement-typed returns.
+    const _returnTypeAnnotation = (fnNode as { returnTypeAnnotation?: string }).returnTypeAnnotation;
     if (fnKind === "fn" || hasRetType) {
       // C5: function-shortcut bodies are function bodies — `state-decl` nodes
       // within are reassignments, not declaration sites. Suppress
@@ -330,6 +385,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         ...(engineBindings ? { engineBindings } : {}),
         ...(engineVarNames.size > 0 ? { engineVarNames } : {}),
       ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}),
+        ...(_returnTypeAnnotation ? { returnTypeAnnotation: _returnTypeAnnotation, enclosingFnName: name } : {}),
       };
       const shortcutLines = emitFnShortcutBody(body, fnOpts, fnKind, hasRetType);
       for (const code of shortcutLines) {
@@ -338,7 +394,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         }
       }
     } else {
-      const scheduled = scheduleStatements(body, fnNode, routeMap, depGraph, filePath, errors, machineBindings, engineBindings, engineVarNames, enginesWithHooks);
+      const scheduled = scheduleStatements(body, fnNode, routeMap, depGraph, filePath, errors, machineBindings, engineBindings, engineVarNames, enginesWithHooks, _returnTypeAnnotation, name);
       for (const line of scheduled) {
         lines.push(`  ${line}`);
       }

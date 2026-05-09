@@ -4604,30 +4604,49 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         canFail = true;
       }
       // Skip return type annotation — `: TypeName` or `-> TypeName` between `)` and `{`
-      // Handles: `: Mario`, `-> string`, `: Array<Thing>`, etc.
+      // Handles: `: Mario`, `-> string`, `: Array<Thing>`, `: number(>0 && <100)`, etc.
+      // A1c C16 — capture the annotation text (returnTypeAnnotation) so the
+      // typer/codegen can fire §53.9.3 return-stmt boundary checks for
+      // refinement-typed return types.
+      // Refinement-type fix (C16): track paren-depth so `>`/`<` inside
+      // refinement predicates (e.g. `number(>0)`) don't decrement angleDepth
+      // and cause the parser to over-consume into the function body.
       let hasReturnType = false;
+      let returnTypeAnnotation = "";
       if (peek().text === ":") {
         hasReturnType = true;
         consume(); // consume `:`
         let angleDepth = 0;
+        let parenDepth = 0;
+        const _retToks = [];
         while (peek().kind !== "EOF") {
-          if (peek().text === "<") { angleDepth++; consume(); }
-          else if (peek().text === ">") { angleDepth--; consume(); }
-          else if (peek().text === "{" && angleDepth === 0) break;
-          else consume();
+          const _t = peek().text;
+          if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
+          else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
+          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
+          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(consume().text); }
+          else if (_t === "{" && angleDepth === 0 && parenDepth === 0) break;
+          else _retToks.push(consume().text);
         }
+        returnTypeAnnotation = _retToks.join(" ").trim();
       } else if (peek().text === "-" && peek(1)?.text === ">") {
         hasReturnType = true;
         consume(); // consume `-`
         consume(); // consume `>`
         // Skip the type name(s) until `{`
         let angleDepth = 0;
+        let parenDepth = 0;
+        const _retToks = [];
         while (peek().kind !== "EOF") {
-          if (peek().text === "<") { angleDepth++; consume(); }
-          else if (peek().text === ">") { angleDepth--; consume(); }
-          else if (peek().text === "{" && angleDepth === 0) break;
-          else consume();
+          const _t = peek().text;
+          if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
+          else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
+          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
+          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(consume().text); }
+          else if (_t === "{" && angleDepth === 0 && parenDepth === 0) break;
+          else _retToks.push(consume().text);
         }
+        returnTypeAnnotation = _retToks.join(" ").trim();
       }
       let body = [];
       if (peek().text === "{") {
@@ -4645,6 +4664,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         isGenerator,
         canFail,
         ...(hasReturnType ? { hasReturnType: true } : {}),
+        ...(returnTypeAnnotation ? { returnTypeAnnotation } : {}),
         span: spanOf(startTok, peek()),
       };
     }
@@ -6491,30 +6511,45 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       }
 
       // Skip return type annotation — `: TypeName` or `-> TypeName` between `)` and `{`
-      // Handles: `: Mario`, `-> string`, `: Array<Thing>`, etc.
+      // Handles: `: Mario`, `-> string`, `: Array<Thing>`, `: number(>0)`, etc.
+      // A1c C16 — capture the annotation text for §53.9.3 return-stmt checks
+      // (with paren-depth tracking so refinement predicates don't over-consume).
       let hasReturnType = false;
+      let returnTypeAnnotation = "";
       if (peek().text === ":") {
         hasReturnType = true;
         consume(); // consume `:`
         let angleDepth = 0;
+        let parenDepth = 0;
+        const _retToks = [];
         while (peek().kind !== "EOF") {
-          if (peek().text === "<") { angleDepth++; consume(); }
-          else if (peek().text === ">") { angleDepth--; consume(); }
-          else if (peek().text === "{" && angleDepth === 0) break;
-          else consume();
+          const _t = peek().text;
+          if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
+          else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
+          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
+          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(consume().text); }
+          else if (_t === "{" && angleDepth === 0 && parenDepth === 0) break;
+          else _retToks.push(consume().text);
         }
+        returnTypeAnnotation = _retToks.join(" ").trim();
       } else if (!canFail && peek().text === "-" && peek(1)?.text === ">") {
         // Non-failable `-> ReturnType` (failable `-> ErrorType` already handled above)
         hasReturnType = true;
         consume(); // consume `-`
         consume(); // consume `>`
         let angleDepth = 0;
+        let parenDepth = 0;
+        const _retToks = [];
         while (peek().kind !== "EOF") {
-          if (peek().text === "<") { angleDepth++; consume(); }
-          else if (peek().text === ">") { angleDepth--; consume(); }
-          else if (peek().text === "{" && angleDepth === 0) break;
-          else consume();
+          const _t = peek().text;
+          if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
+          else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
+          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
+          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(consume().text); }
+          else if (_t === "{" && angleDepth === 0 && parenDepth === 0) break;
+          else _retToks.push(consume().text);
         }
+        returnTypeAnnotation = _retToks.join(" ").trim();
       }
       // Parse optional route= and method= attributes after parameter list
       let route = undefined;
@@ -6556,6 +6591,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // the middleware pipeline around route handlers.
         isHandleEscapeHatch: isServer && !isGenerator && name === 'handle',
         ...(hasReturnType ? { hasReturnType: true } : {}),
+        ...(returnTypeAnnotation ? { returnTypeAnnotation } : {}),
         span: spanOf(startTok, peek()),
       });
       continue;
@@ -6654,30 +6690,45 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       }
 
       // Skip return type annotation — `: TypeName` or `-> TypeName` between `)` and `{`
-      // Handles: `: Mario`, `: HurtResult`, `-> string`, `: Array<Thing>`, etc.
+      // Handles: `: Mario`, `: HurtResult`, `-> string`, `: Array<Thing>`, `: number(>0)`, etc.
+      // A1c C16 — capture the annotation text for §53.9.3 return-stmt checks
+      // (with paren-depth tracking so refinement predicates don't over-consume).
       let hasReturnType = false;
+      let returnTypeAnnotation = "";
       if (peek().text === ":") {
         hasReturnType = true;
         consume(); // consume `:`
         let angleDepth = 0;
+        let parenDepth = 0;
+        const _retToks = [];
         while (peek().kind !== "EOF") {
-          if (peek().text === "<") { angleDepth++; consume(); }
-          else if (peek().text === ">") { angleDepth--; consume(); }
-          else if (peek().text === "{" && angleDepth === 0) break;
-          else consume();
+          const _t = peek().text;
+          if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
+          else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
+          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
+          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(consume().text); }
+          else if (_t === "{" && angleDepth === 0 && parenDepth === 0) break;
+          else _retToks.push(consume().text);
         }
+        returnTypeAnnotation = _retToks.join(" ").trim();
       } else if (!canFail && peek().text === "-" && peek(1)?.text === ">") {
         // Non-failable `-> ReturnType` (failable `-> ErrorType` already handled above)
         hasReturnType = true;
         consume(); // consume `-`
         consume(); // consume `>`
         let angleDepth = 0;
+        let parenDepth = 0;
+        const _retToks = [];
         while (peek().kind !== "EOF") {
-          if (peek().text === "<") { angleDepth++; consume(); }
-          else if (peek().text === ">") { angleDepth--; consume(); }
-          else if (peek().text === "{" && angleDepth === 0) break;
-          else consume();
+          const _t = peek().text;
+          if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
+          else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
+          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
+          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(consume().text); }
+          else if (_t === "{" && angleDepth === 0 && parenDepth === 0) break;
+          else _retToks.push(consume().text);
         }
+        returnTypeAnnotation = _retToks.join(" ").trim();
       }
       let body = [];
       if (peek().text === "{") {
@@ -6698,6 +6749,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         canFail,
         errorType,
         ...(hasReturnType ? { hasReturnType: true } : {}),
+        ...(returnTypeAnnotation ? { returnTypeAnnotation } : {}),
         span: spanOf(startTok, peek()),
       });
       continue;
