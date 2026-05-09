@@ -251,4 +251,65 @@ ${"$"}{ when message.type == "ping" { } }
     expect(html).not.toContain("InnerNo");
     expect(html).not.toContain("InnerNoDesc");
   });
+
+  test("13. non-string-literal value (variable-ref) silently ignored — no diagnostic, no head emission", () => {
+    // §40.7 bullet 1, second sentence: "A non-string-literal value (e.g., a
+    // `${...}` expression, an `@variable` reference) is silently ignored —
+    // these are static document metadata, not reactive content."
+    //
+    // The `@name` form binds a state cell as the attribute value (kind:
+    // "variable-ref"), which is the canonical "non-string-literal" case for
+    // the spec. The codegen's getDocAttr() filter requires `kind ===
+    // "string-literal"`, so the variable-ref form falls through to the
+    // default-basename <title> path.
+    const { result, file } = compile(
+      "13.scrml",
+      `${"$"}{ <name> = "Foo" }
+<program title=@name><div>x</div></program>
+`,
+    );
+    // Silently ignored = no error, no warning fires for the documentary attr.
+    expect(result.errors ?? []).toEqual([]);
+    const docWarnings = (result.warnings ?? []).filter(
+      (w) => w.code === "W-PROGRAM-TITLE-NESTED",
+    );
+    expect(docWarnings.length).toBe(0);
+    // No documentary <title> emitted from the @-bound value; default basename
+    // <title>13</title> falls back instead.
+    const html = htmlOf(result, file);
+    expect(html).toContain("<title>13</title>");
+    expect(html).not.toContain("<title>Foo</title>");
+    // Documentary <meta> tags also absent (none of the other 4 attrs given).
+    expect(html).not.toContain('name="description"');
+    expect(html).not.toContain('name="application-version"');
+  });
+
+  test("14. documentary description= stacks with author-written <meta name=\"description\">", () => {
+    // §40.7 bullet 4: "description=, version=, author=, license= SHALL emit
+    // <meta> tags unconditionally — these stack with author-written <meta>
+    // tags rather than overriding."
+    //
+    // The compiler's documentary <meta> goes into <head>; the author's raw
+    // <meta> markup survives codegen as part of the document body (browsers
+    // hoist orphan <meta> at parse time). Both must coexist in the emitted
+    // HTML; neither suppresses the other.
+    const { result, file } = compile(
+      "14.scrml",
+      `<program description="DocDesc" version="0.1.0">
+<meta name="description" content="AuthDesc">
+<div>x</div>
+</program>
+`,
+    );
+    expect(result.errors ?? []).toEqual([]);
+    const html = htmlOf(result, file);
+    // Documentary description (compiler-emitted) — present.
+    expect(html).toContain('<meta name="description" content="DocDesc">');
+    // Documentary version still emits unconditionally.
+    expect(html).toContain('<meta name="application-version" content="0.1.0">');
+    // Author's raw <meta name="description"> — also survives in output.
+    // (Match either DocDesc-then-AuthDesc or just substring presence; we
+    // just need to confirm the documentary one did NOT suppress author's.)
+    expect(html).toContain("AuthDesc");
+  });
 });
