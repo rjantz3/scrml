@@ -211,6 +211,20 @@ function emitIdent(node: IdentExpr, ctx: EmitExprContext): string {
     return ctx.tildeVar;
   }
 
+  // §14.10 / §18.0.3 bare-variant inference codegen (C22, M9):
+  // `.Variant` (leading dot, uppercase second char) lowers to its string tag,
+  // matching the runtime convention used by enum objects (emitEnumVariantObjects),
+  // match-arm conditions (emit-control-flow.ts:armCondition), and the `is .Variant`
+  // operator (emitBinary case "is"). B20 (A1b) gates this at the typer with
+  // E-VARIANT-AMBIGUOUS / E-TYPE-063 so by the time codegen sees a bare-variant
+  // IdentExpr it has been validated to belong to a known enum at the position.
+  // The variant name alone is sufficient — the runtime stores unit variants as
+  // their bare string tag (`Phase.Idle === "Idle"`), so no enum-namespace lookup
+  // is needed at codegen.
+  if (name.length >= 2 && name.charCodeAt(0) === 46 /* . */ && name.charCodeAt(1) >= 65 && name.charCodeAt(1) <= 90 /* A-Z */) {
+    return JSON.stringify(name.slice(1));
+  }
+
   // Plain identifier — pass through
   return name;
 }
