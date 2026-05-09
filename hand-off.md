@@ -1,122 +1,188 @@
-# scrmlTS — Session 72 (CLOSE — Position B server-keyword DEPRECATION ratified · A9 phase opened · 8 commits · cross-machine switch)
+# scrmlTS — Session 73 (CLOSE — A1c Waves 1+2+3 ALL SHIPPED · 9 commits · +437 tests · 0 regressions · 0 path-discipline leaks)
 
 **Date opened:** 2026-05-08
 **Date closed:** 2026-05-08
-**Previous:** `handOffs/hand-off-71.md` (S71 close — C1 Phase 0 SURVEY landed, cross-machine reconciliation)
-**This file:** rotates to `handOffs/hand-off-72.md` at S73 open
-**Tests at S72 close:** **9,854 pass / 64 skip / 1 todo / 3 fail** (full suite, 478 files, 34,235 expect calls). Net delta vs S71 baseline: **+120 pass.** 3 pre-existing self-host parity fails preserved (out of v0.2.0 scope per S66).
-
-**Cross-machine switch IN PROGRESS at close.** User moving to other computer. Per pa.md cross-machine-sync-hygiene protocol: both repos clean at origin, all work pushed, machine-switch handoff complete.
+**Previous:** `handOffs/hand-off-72.md` (S72 close — Position B server-keyword DEPRECATION ratified · A9 phase opened · A9 Ext 4 SHIPPED · cross-machine switch in progress)
+**This file:** rotates to `handOffs/hand-off-73.md` at S74 open
+**Tests at S73 close:** **10,308 pass / 60 skip / 1 todo / 0 fail / 35,353 expects** (487 files, ~11s)
 
 ---
 
-## TL;DR — what S72 did
+## TL;DR — what S73 did
 
-**Substantial design + implementation session.** Eight commits on scrmlTS main (3 ship-cycles + 4 deep-dive landings + 2 ratifying-debate insights + master-list amendments). Four deep-dives + two ratifying debates in scrml-support. Two methodology-grade verdict reversals (Insight 25 HYBRID → Insight 26 DEPRECATE; parallel-attribute KEEP → CLOSE). One protocol retirement (master-only-push). Six PA-predicted leans flipped under anti-sycophancy convener-stance.
+**Massive implementation session — 9 ships across 3 A1c waves, all parallel-disposition friction-free.**
 
-| Commit | Topic |
-|---|---|
-| `0d5a144` | feat(c1): SHIP — shape-aware cell emitter (A1c Wave 1, step 1 of 4) |
-| `f5b620a` | feat(parallel-close): SHIP — strike §51.0.P parallel attribute |
-| `33ac96e` | feat(c2): SHIP — derived-cell reactive computation emission (A1c Wave 1, step 2 of 4) |
-| `ea0ee5b` | feat(server-deprecate-1): SHIP — Batch 1 preconditions for Position B |
-| `479ec1a` | docs(s72): ratify A9 phase + integration constraints + §0.4 deferral records |
-| `3996d57` | feat(server-deprecate-2): SHIP — Batch 2 spec amendments + stdlib cleanup + §8.4 paragraph |
-| `dc98313` | feat(a9-ext4): SHIP — S4 failure-mode preservation wiring |
-| (this wrap) | wrap(s72): close — comprehensive |
+| # | Step | Commit | Δ | Wave |
+|---|---|---|---|---|
+| 1 | C3 — render-spec expansion at `<x/>` | `26ce40b` | +23 | 1 |
+| 2 | C4 — bind:* dispatch | `bb317ea` | +54 | **1 ✓** |
+| 3 | C5 — reset(@cell) + default= | `67b9e96` | +34 | 2 |
+| 4 | C6 — validator runtime catalog (14 universal-core) | `50d35b9` | +79 | 2 |
+| 5 | C7 — per-cell validator runner (§55.12 short-circuit) | `f935822` | +61 | **2 ✓** |
+| 6 | C8 — validity surface synthesis | `cf37440` | +54 | 3 |
+| 7 | C9 — cross-field deps precision | `6a311c7` | +35 | 3 |
+| 8 | C10 — 4-level error message resolution | (in `ff0a5dd` push) | +61 | 3 |
+| 9 | C11 — `<errors of=expr/>` first-class element | `ff0a5dd` | +36 | **3 ✓** |
 
-**scrml-support pushes:** `c275b31` (S48 voice rebase) → `5a114a6` (5 deep-dives + Insight 26 + voice) → `c2bddbf` (body-split residual+integration design dive) → `ff166bf` (Insight 27 SQL composition).
+Plus archive housekeeping: scrml-support `6206192` (S66 SKIPPED zod-amends article landed in `archive/articles-skipped/`).
+
+**Cross-machine pickup at S73 open:** scrml-support pulled 4 commits behind from S72 push. scrmlTS already in sync. No cross-machine drift after that.
+
+**Pattern observations:**
+- **Parallel-dispatch maturity:** S72 had 3 F4 path-discipline leaks across parallel dispatches; S73 had ZERO across 11 dispatches (counting C5+C6 + C9+C10+C11 as parallel batches). Brief-encoded sibling-territory awareness held.
+- **Depth-of-survey discount (now frequency-9):** every dispatch's survey returned actionable findings before implementation — file-locus corrections (C3 → emit-html.ts, C5 → runtime-template.js path), substantial existing-substrate discoveries (C5: half already shipped via C1; C6: compile-time catalog mirrors 1:1; C8: zero C5 extension needed), scope-shape verdict surfacing (C9: REFINEMENT not silent-bug — runtime probe disproved hypothesis).
+- **Spec-Rule-4 enforcement:** C6 explicitly REJECTED SCOPE-doc drift listing `email/url/numeric/integer/custom` as universal-core predicates (those are stdlib library / enum-tag escape hatch, NOT predicates per primer §8 audit). Regression-guard test asserts the exclusion.
+- **`scrml-dev-pipeline` agent NOT staged this machine** (carryover from S71 master-PA notice — still pending). All 9+ dispatches went via `general-purpose` substitution per pa.md authorized pattern. Worked fine for T2-shaped extensions.
 
 ---
 
-## State as of S72 close
+## State as of S73 close
 
 | Field | Value |
 |---|---|
 | scrmlTS HEAD | (this wrap commit) |
 | scrmlTS origin sync | TBD post-wrap-push |
-| scrml-support HEAD | `ff166bf` |
+| scrml-support HEAD | `6206192` (post-archive landing earlier this session) |
 | scrml-support origin sync | 0/0 ✓ |
-| Tests at close | **9,854 / 64 / 1 / 3** (full); pre-commit subset uses pretest chain |
-| Inbox | empty (`handOffs/incoming/` clean; prior S71 needs-push moved to read/ + S72 needs-push renamed SUPERSEDED per push-protocol-retirement) |
+| Tests at close | **10,308 / 60 / 1 / 0** ✓ via `bun run test` (~11s) |
+| Inbox | empty (`handOffs/incoming/` clean) |
 | Outbox-pending | none |
-| Active dispatches | none (Ext 4 SHIPPED; Ext 5 queued pending A1c C17 spec edit) |
-| Worktree branches retained | `worktree-agent-acba92b63c3e3950a` (C1) / `worktree-agent-a789e3894f0fa1b2d` (parallel-close) / `worktree-agent-a78ec5d0aa429cf8c` (C2 SURVEY) / `worktree-agent-a630ed616115e0f3c` (C2 impl) / `worktree-agent-a130438a3e4fefa63` (server-deprecate-1) / `worktree-agent-aed4eeafff5ce2a94` (server-deprecate-2) / `worktree-agent-a7d0d371cdfdaf640` (A9 Ext 4) — all retained for forensic per S67 protocol |
+| Active dispatches | none (Wave 3 all landed) |
+| Worktree branches retained | 9 from S73 — all forensic per S67 protocol |
+
+**Cumulative tests since S71 baseline:** 9,734 (S71) → **10,308 (S73 close)** = **+574 pass tests across S72 + S73, 0 regressions, 0 net new fails**.
+
+**S73 alone:** 9,872 (S73 open via this machine's `bun run test` chain) → 10,308 = **+436 / +437 arithmetic** (±1 floating drift) across 9 ships.
 
 ---
 
-## Open questions to surface immediately at S73 open
+## Open questions to surface immediately at S74 open
 
-1. **Cross-machine pickup.** S73 PA is likely on the other machine. **MANDATORY at S-open:** `git fetch origin && git pull --rebase origin main` for BOTH scrmlTS and scrml-support. Verify at HEAD: scrmlTS = (this wrap commit) + scrml-support = `ff166bf`. Do NOT trust prior session counts uncritically; re-run `bun run test` and confirm `9,854 / 64 / 1 / 3`.
+1. **Cross-machine pickup IF S74 opens on the other machine.** MANDATORY: `git fetch origin && git pull --rebase origin main` on BOTH repos. Verify scrmlTS at this wrap commit + scrml-support at `6206192`. Re-run `bun run test`; expect 10,308 / 60 / 1 / 0 (or self-host-parity-inclusive count if running with self-host scope).
 
-2. **A9 Ext 5 dispatch — pending A1c C17 spec-edit ordering.** Per master-list integration constraint: A9 Ext 5's `<program>` attribute additions (`scrmlconfig`-composable idempotency-key storage backend per §4.12 + §17.6 db= driver resolution shape) MUST land AFTER A1c C17's spec edit to avoid `<program>` attribute surface collision. So sequencing is: **A1c C3+C4 → C5/C6/... → C17 → A9 Ext 5**.
+2. **A1c Wave 4 (engines, ~18-25h, SEQUENTIAL) — next priority.** C12 (engine state-machine runtime, 5-7h) is foundational; C13 (.advance + onTransition hook firing, 4-5h), C14 (derived engines, 4-6h), C15 (cross-file engine mount + auto-declared engine variable, 5-7h) follow sequentially. Per SCOPE: "C12 → C13 → C14 → C15 sequential."
 
-3. **A1c next steps.** C3 (render-spec expansion at `<x/>` use site) is the canonical next codegen step per A1c SCOPE row. Builds on C2's markup-typed factory body emission. ~4-5h cycle.
+3. **A1c Wave 5 (cross-cutting C16-C22, ~25-35h, MOSTLY PARALLELIZABLE)** — biggest parallel-dispatch window. After Wave 4 lands, can fan out C16/C17/C18/C19/C20/C21/C22 with file-disjoint planning.
 
-4. **A8 (test-bind, Insight 22) — pending A9 Ext 4 (just SHIPPED).** Per master-list integration constraint: A8 dispatches AFTER A9 Ext 4 so test-bound stubs inherit auto-`!` semantics. **Now unblocked.**
+4. **A1c Wave 6 (C23 PIPELINE prose pass, ~5-8h, INDEPENDENT)** — can run in parallel with any other wave.
 
-5. **Cycle-2 prereqs for E-CPS-NEEDS-FAILABLE promotion** (currently W- only):
-   - **Markup-context `<errorBoundary>` suppression** — Ext 4 cycle-1 fires W-CPS-NEEDS-FAILABLE on calls inside `<errorBoundary>` markup wrappers (TS stage doesn't have call-site provenance threading to detect markup context). Adopters resolve via warning resolution-message #1. Cycle-2 MUST add markup-context detection before promoting W → E.
-   - **Strict caller-context propagation refinement.** Cycle-1 D2 over-escalates conservatively (every CPS-eligible function implicitly `!`-typed). Cycle-2 can refine to design-dive's strict "called only from `!`-typed callers" rule.
+5. **A8 (test-bind, Insight 22, ~6-12h) — UNBLOCKED since S72 (A9 Ext 4 shipped).** Parallel track candidate.
 
-6. **F4 path-discipline failure-mode — 3rd recurrence this session.** C2 + Batch 2 + Ext 4 all had agents leak Edit calls to main during dispatch; PA caught + reverted each time. Worth elevating to PreToolUse hook mitigation per pa.md F4 follow-up. **Backlog priority.**
+6. **A9 Ext 5 (S5 replay safety / idempotency-key storage)** — STILL gated on A1c C17 spec-edit ordering (per S72 integration constraint). Becomes dispatchable after C17 lands.
 
-7. **Cross-machine drift potential.** scrml-support is at `ff166bf` post-S72 push. scrmlTS at (wrap commit). If S73 picks up on the other machine without fetching first, work may be lost. **Sync-check protocol mandatory at S-open.**
+7. **`scrml-dev-pipeline` agent staging gap** — STILL not staged on this machine since S71 master-PA notice. Pipeline-substitution to general-purpose has worked clean across 9 dispatches; staging is no longer urgent. Filed.
 
----
-
-## Things S73 PA must NOT screw up (S70+S71+S72 cumulative)
-
-S70+S71 standing list (items 113-137) carries forward verbatim. S72 NEW additions:
-
-138. **Position B server-keyword DEPRECATION fully ratified + spec-formalized + stdlib-cleaned + Ext 4 wiring shipped.** Insight 26 (design-insights.md tail) overturned Insight 25 HYBRID via 6-0 unanimous re-vote under E1 (stdlib audit) + E2 (vacuum-vs-call-graph reframe) + E3 (do-we-already-have-it) + E4 (Insight-21 mirror under new evidence). Three substantial structural arguments held HYBRID up; all three weakened or invalidated under new evidence. S73 PA must NOT re-litigate the keyword question without genuinely-new evidence.
-
-139. **§51.0.P parallel attribute STRUCK 2026-05-08.** Spec section retired with intentional gap §51.0.O → §51.0.Q. Methodology-driven retroactive correction of S68 bundled ratification. Synonym-test failure conceded by spec text + SCXML semantic audit found scrml ALREADY HAS the structural semantics. S73 PA must NOT reintroduce as "naming sugar"; if SCXML-style parallel-region semantics ever wanted, they're an UPGRADE (Position C) per the parallel-disposition deep-dive — and per S72 user direction "scxml would be a dsl here. unacceptable" they're a Pillar-5 violation barring extraordinary load-bearing reason.
-
-140. **A9 phase = body-split min-viable (Ext 4 ✓ + Ext 5 pending).** v0.2.0 deliverable (~76h total). Min-viable is backwards-compatible (auto-`!`-wrap on every CPS stub; CALM/Stripe replay safety). Full body-split (Ext 1 multi-batch + Ext 3 conditional-tier + Ext 2 loop-aware, ~94h additional) DEFERRED to v0.next+1 separate cycle. Cross-function body-split (~200-400h, Links territory) DEFERRED to v0.3.0+. S73 PA must NOT casually expand A9 scope; per S72 ratification + integration analysis.
-
-141. **scrml is ALREADY a body-splitting language at function granularity** (per soundness deep-dive 2026-05-08). `analyzeCPSEligibility` + `cpsSplit` in production. 6 of 8 soundness predicates (S1-S8) already MET. The remaining gaps are S4 (just shipped via Ext 4) + S5 (Ext 5 next). Reactive-cell model is structurally CALM-monotonic. **This is load-bearing project identity — S73 PA must internalize: the user's "compiler is already mostly ready" intuition is rigorous, not aspirational.**
-
-142. **scrmlconfig per-app idempotency-key storage = existing `<program>` attribute mechanism** per §4.12 + §17.6 db= driver resolution shape. Q1 RESOLVED at S72 (user verbatim: "scrmlconfig"). Zero new infrastructure for A9 Ext 5; reuses existing pattern. S73 PA must NOT design new config-file system.
-
-143. **SQL composition Insight 27 status quo (A holds 5/5 unanimous).** No new SQL surface added in v0.2.0. Fragment-reuse uses call-graph extraction (server function returning result, not fragment-as-value). If gauntlet ≥3 adopters report fragment-reuse pain, re-trigger D-narrow deep-dive scoped only to fragment-reuse, not bundled with conditional-WHERE. The 2026-03-30 friction-data trigger genuinely has not fired; debate ratified that honestly under convener-stance permission for "no change."
-
-144. **Master-only-push protocol RETIRED 2026-05-08.** PA pushes directly to origin when authorized (per-session or per-action). `feedback_push_protocol.md` rewritten; MEMORY.md index updated. needs:push inbox messages reserved for genuine cross-repo coordination only (rare). Cross-machine sync hygiene from pa.md still applies.
-
-145. **F4 path-discipline failure-mode — 3 incidents this session, all PA-recovered.** PreToolUse hook mitigation overdue. Worth elevating from "deferred follow-up" to scheduled work in next planning cycle.
-
-146. **Anti-sycophancy convener stance is operational.** Six PA-predicted leans flipped this session under methodology-stack discipline (parallel-attribute, Insight 25→26 keyword, Ext 4 missed-option-4 reorder, SQL composition lean B, plus parallel + the multi-batch CPS reflex). Pattern: when PA's confidence is high, the structurally correct answer is often the SIMPLER one (compose existing mechanisms). **Apply the discipline going forward — PA's reflex toward complexity is itself a signal of training-corpus pattern-matching, NOT structural impossibility.**
-
-147. **§47 in SPEC.md is "Output Name Encoding"**, NOT server functions. The actually-correct locus for server-function-related amendments is §19.9 Server Function Errors. Multiple S72 dispatches cited "§47" out of habit; agents correctly rerouted. S73 PA must use the right section reference.
-
-148. **W-CPS-NEEDS-FAILABLE fires today on `<errorBoundary>` markup-wrapped CPS calls** because cycle-1 doesn't yet detect markup-context provenance. Adopters resolve via warning resolution-message #1 ("Wrap the call site in `<errorBoundary>`"). Cycle-2 prereq before E-CPS-NEEDS-FAILABLE can ship.
-
-149. **Six worktree branches retained in `.claude/worktrees/`** for forensic per S67. NOT cleanup priority; the branches are crash-recovery anchors. Disposition can wait.
-
-150. **scrml-support has 7 numbered Insights** (21 — fn() MINIMIZE; 22 — server-mount; 23 — DD-Harel S67 hierarchy; 24 — NPM escape hatch; 25 — server-keyword HYBRID OVERTURNED by 26; 26 — Position B DEPRECATE; 27 — SQL composition status quo). Pro-X-voting-against-X frequency now at 6+ (debate-03 roc, debate-04 crystal, debate-05 simplicity-defender, debate-25 roc/haskell/react, debate-26 roc-RE-flip, debate-27 cs-phd/elixir/typescript triple-flip + rails self-reject). Methodology-grade settled signal.
+8. **F4 PreToolUse hook mitigation** — S72 had 3 leaks; S73 had 0. The brief-encoded path-discipline block + sibling-territory-awareness blocks have been effective without the hook. May be deprioritizable; surface to user for re-tier decision.
 
 ---
 
-## File modification inventory (S72)
+## Things S74 PA must NOT screw up (S70+S71+S72+S73 cumulative)
 
-**scrmlTS commits (8):**
+S72-close standing list (items 113-150) carries forward verbatim. **S73 NEW additions:**
 
-| Commit | Files |
-|---|---|
-| `0d5a144` (C1) | compiler/src/codegen/{emit-logic.ts, runtime-template.js}, compiler/tests/unit/c1-shape-aware-cell-emit.test.js (NEW), bun.lock, docs/changes/phase-a1c-step-c1.../progress.md |
-| `f5b620a` (parallel-close) | compiler/SPEC.md, compiler/SPEC-INDEX.md, compiler/src/ast-builder.js, compiler/src/symbol-table.ts, compiler/src/codegen/usage-analyzer.ts, compiler/tests/unit/{a5-2-parser-support, a5-3-typer-walker, engine-binding-b14, usage-analyzer, parallel-close-regression}.test.js, docs/PA-SCRML-PRIMER.md, master-list.md, docs/changes/parallel-close-2026-05-08/* |
-| `33ac96e` (C2) | compiler/src/codegen/{emit-lift.js, emit-logic.ts, emit-reactive-wiring.ts}, compiler/tests/unit/{c1-shape-aware-cell-emit, c2-derived-reactive-computation}.test.js, docs/changes/phase-a1c-step-c2.../* |
-| `ea0ee5b` (server Batch 1) | compiler/src/route-inference.ts, compiler/tests/lsp/{completions, document-symbols}.test.js, compiler/tests/unit/route-inference.test.js, docs/changes/server-keyword-deprecation-batch-1-2026-05-08/* |
-| `479ec1a` (master-list amend) | master-list.md (A9 row + sequencing constraints + §0.4 entries) |
-| `3996d57` (server Batch 2) | compiler/SPEC.md, compiler/tests/unit/{spec-server-deprecate-batch-2, stdlib-server-block-cleanup}.test.js, 11 stdlib/* files (decorative `server { }` strip + safeCompare → fn), docs/changes/server-keyword-deprecation-batch-2-2026-05-08/* |
-| `dc98313` (A9 Ext 4) | compiler/SPEC.md, compiler/src/codegen/{emit-functions.ts, emit-server.ts}, compiler/src/type-system.ts, compiler/tests/unit/a9-ext4-cps-failable-wiring.test.js, docs/changes/a9-ext4-s4-wiring-2026-05-08/* |
-| (this wrap) | hand-off.md, master-list.md, docs/changelog.md, handOffs/hand-off-71.md (rotated from S71-close) |
+151. **A1c Waves 1+2+3 fully shipped.** C0-C11 all on main + pushed. The codegen surface for state-decl emission, validators, and the validity surface is functionally complete. Don't dispatch sub-step regressions; if a runtime-behavior bug is found, it's a Wave 4+ regression or an integration gap, not a Wave 1/2/3 do-over.
 
-**scrml-support commits (4 net pushes):**
+152. **`<errors of=expr/>` is now a first-class structural element.** Don't propose adding it again or re-debating the design. The element is registered at `attribute-registry.js` + `html-elements.js` (rendersToDom: false) + emitted via `emit-html.ts` dispatch arm. Body-override via arrow-function-shaped logic-node body is the canonical custom-render path per §55.8.
 
-- design-insights.md: Insight 26 + Insight 27 appended (tail; was 1534 lines, now 1729)
-- user-voice-scrmlTS.md: 13 S72 entries appended (server-keyword reframe iterations + SCXML-as-DSL + track-record + LLM-bound + body-split re-tier + S4 verdict + migration-deferral + push-protocol-retirement + scrmlconfig + SQL debate auth)
-- docs/deep-dives/{parallel-attribute-disposition, server-keyword-inference-disposition, stdlib-empty-body-audit, soundness-analysis-for-body-split, body-split-soundness-design, body-split-integration-and-residual-design}-2026-05-08.md (6 NEW deep-dives)
+153. **`messageFor` runtime helper is `_scrml_message_for(error, fieldName, cellName?)`.** Globally available in any `.client.js` whose source triggers the `messages` chunk (chunk #17). C11 emits a `typeof`-guarded fallback for backward-compat; the real helper resolves automatically when present. Pass `cellName` as the qualified storage key (e.g., `"signup.email"`) to enable Level-1 inline-override lookup.
+
+154. **`runtime-validators.js` is the C6 runtime catalog (14 fire functions + dispatch helpers + frozen catalog).** It is NOT a stdlib module shim; it lives at `compiler/src/runtime-validators.js` (sibling of `runtime-template.js`). The `validators` chunk (chunk #16) loads it via `fs.readFileSync` at module-load time — keeps `runtime-validators.js` as single source of truth (no duplication into runtime-template.js).
+
+155. **C9 verdict was REFINEMENT, not silent-bug fix.** Pre-C9 cross-field reactivity already worked via transitive dirty propagation through the compound parent. C9 added PRECISION (qualified-path subscriptions + direct qualified-path reads). The hypothesis-disproof-via-runtime-probe pattern is reusable: when a refinement step's brief assumes "fix a bug," the survey's runtime probe may reveal "no bug, just imprecision." That's a refinement verdict, not a no-op.
+
+156. **`<errors>` placeholder anchor span persists in DOM with empty innerHTML when errors are empty.** Pragmatic interpretation of §55.8 line 25193-25195 ("literally nothing rendered") — the anchor is required for re-render hookup. A future C-step could refine to true zero-DOM via `<template>` + marker comment (mirrors Phase 2c clean-if pattern). Documented in C11 SURVEY as deferred refinement.
+
+157. **§55.12 short-circuit rule is C7's responsibility, NOT C6's.** C6 fire functions are pure pass/fail; they don't know about siblings. C7's runner walks `validators[]` in declaration order, calls `fire`, accumulates, and BREAKS the loop when `req` or `is some` returns non-null. §C7.14 demonstrates this with the canonical `<name req length(>=2) pattern(...)>` example on `""`.
+
+158. **Compound-level synth-surface predictability rule (§55.5):** even compounds with NO validators get the four synth properties with trivial defaults (`isValid` true, `errors` `{}`, `touched` `{}`, `submitted` false). C8 emits unconditionally per compound parent. Don't propose conditional emission — predictability over namespace savings is the spec's load-bearing position.
+
+159. **Top-level (non-compound) cells with validators DO NOT get synth surface** per §55.5 L11 Edge A. C7 emits no runner for them. Their validator failures are tracked via the type-system (refinement type) when that path lands. Single-cell forms should use a one-field compound (`<form><name req/></>`) per spec convention.
+
+160. **Form-detection for `submitted` is document-level submit listener** (one `addEventListener` per compound with `submitted` synth, idempotency-guarded). Multi-form discrimination NOT implemented — predictability over selectivity per §55.7. If multiple forms become a real adopter friction, refine; documented in C8.
+
+161. **A1c Wave 4 sequencing is HARD per SCOPE:** C12 → C13 → C14 → C15. C12 emits the engine state-machine runtime (current variant cell + transition table + initial state); C13/C14/C15 build on top. Don't dispatch in parallel — C13 depends on C12's transition-table shape, C14 depends on C12's variant-cell shape, C15 depends on C12's auto-declared variable.
+
+162. **C9's qualified-path walker (`forEachQualifiedCellRef*` in `validator-arg-parser.ts`)** is the new sibling to `forEachIdentInExprNode`. Future B-steps or codegen needing to walk MemberExpr chains rooted at `@` should use the qualified-path family — the base-ident walker will under-collect.
+
+163. **9 worktree branches retained in `.claude/worktrees/`** for forensic per S67. NOT cleanup priority — branches are crash-recovery anchors and forensic-review anchors.
+
+---
+
+## File modification inventory (S73)
+
+**scrmlTS commits (9 ship + 1 archive + 1 wrap = 11 total):**
+
+| Commit | Files | Topic |
+|---|---|---|
+| `26ce40b` | binding-registry.ts, emit-html.ts, c3 test, c3 docs (BRIEF/SURVEY/progress) | C3 render-spec expansion |
+| `bb317ea` | emit-bindings.ts, c4 test, c4 docs | C4 bind:* dispatch |
+| `67b9e96` | runtime-template.js, runtime-chunks.ts, emit-client.ts, emit-logic.ts, emit-expr.ts, emit-functions.ts, emit-control-flow.ts, scheduling.ts, c5 test, runtime-tree-shaking test, browser-todomvc test, c5 docs | C5 reset + default |
+| `50d35b9` | runtime-validators.js (NEW), c6 test, c6 docs | C6 validator runtime catalog |
+| `f935822` | emit-validators.ts (NEW), runtime-template.js, runtime-chunks.ts, emit-client.ts, emit-logic.ts, runtime-tree-shaking test, c7 test, c7 docs | C7 per-cell runner |
+| `cf37440` | emit-synth-surface.ts (NEW), emit-bindings.ts, emit-client.ts, emit-logic.ts, c7 test (1 stale assertion tightened), c8 test, c8 docs | C8 synth surface |
+| `6a311c7` | emit-validators.ts, validator-arg-parser.ts (forEachQualifiedCellRef* NEW), c9 test, c9 docs | C9 cross-field precision |
+| `(in ff0a5dd push)` (`bb64238` worktree) | runtime-template.js, runtime-chunks.ts (16→17), emit-client.ts, emit-logic.ts, emit-messages.ts (NEW), runtime-tree-shaking test, c7 test (1 stale assertion narrowed), c10 test, stdlib/data/{index.scrml, messages.scrml NEW}, c10 docs | C10 4-level message resolution |
+| `ff0a5dd` | attribute-registry.js, binding-registry.ts, emit-event-wiring.ts, emit-html.ts, html-elements.js, html-elements.test.js, type-system.test.js, c11 test, c11 docs | C11 `<errors of=>` element |
+| `(this wrap)` | hand-off.md, master-list.md, docs/changelog.md, handOffs/hand-off-72.md (rotated from S72-close) | S73 wrap |
+
+**scrml-support commits (1 — early-session):**
+- `6206192` (S66 SKIPPED zod-amends article landed in `archive/articles-skipped/scrml-debate-amends-zod-claim-devto-2026-05-06.md`).
+
+---
+
+## Wave-by-wave summary
+
+### Wave 1 (foundational state-decl emission) — CLOSED
+
+| Step | Topic | Δ tests |
+|---|---|---|
+| C0 (S70) | usage-analyzer pass | +67 |
+| C1 (S72) | shape-aware cell emitter | +25 |
+| C2 (S72) | derived-cell reactive computation | +31 |
+| C3 (S73) | render-spec expansion at `<x/>` | +23 |
+| C4 (S73) | bind:* dispatch | +54 |
+
+After C4: state-decl shape emission complete. Render-by-tag use sites expand to bound input elements; bind: dispatch by render-spec type wires reactive flow.
+
+### Wave 2 (reset + validators) — CLOSED
+
+| Step | Topic | Δ tests |
+|---|---|---|
+| C5 (S73) | reset(@cell) runtime + default= | +34 |
+| C6 (S73) | validator runtime catalog (14 universal-core) | +79 |
+| C7 (S73) | per-cell validator runner (§55.12 short-circuit) | +61 |
+
+After C7: reset semantics fire correctly across compound + multi-level compound nav; validators run + fire `ValidationError` enum tags into per-field synth cells.
+
+### Wave 3 (validity surface) — CLOSED
+
+| Step | Topic | Δ tests |
+|---|---|---|
+| C8 (S73) | validity surface synthesis (compound rollup + touched + submitted) | +54 |
+| C9 (S73) | cross-field deps precision (qualified-path subscriptions) | +35 |
+| C10 (S73) | 4-level error message resolution | +61 |
+| C11 (S73) | `<errors of=expr/>` first-class element | +36 |
+
+After C11: end-to-end validity surface works. Validators fire → errors populate per-field cells → compound rollup aggregates → `<errors of=>` renders user-facing messages with 4-level resolution.
+
+### Wave 4 (engines) — NOT YET DISPATCHED
+
+| Step | Topic | Est |
+|---|---|---|
+| C12 | engine state-machine runtime | 5-7h |
+| C13 | .advance(.event) + `<onTransition>` hook firing | 4-5h |
+| C14 | derived=expr engine emission (L20) | 4-6h |
+| C15 | cross-file engine mount + auto-declared variable (M16, M18) | 5-7h |
+
+**Sequential per SCOPE.** ~18-25h total.
+
+### Wave 5 (cross-cutting C16-C22) — NOT YET DISPATCHED
+
+7 steps, ~25-35h, mostly file-disjoint and parallelizable. **Note: C17 spec-edit ordering blocks A9 Ext 5 (per S72 integration constraint).**
+
+### Wave 6 (C23 PIPELINE prose pass) — INDEPENDENT
+
+~5-8h, can run in parallel with any other wave. Documents v0.next pipeline state.
 
 ---
 
@@ -124,13 +190,21 @@ S70+S71 standing list (items 113-137) carries forward verbatim. S72 NEW addition
 
 `/home/bryan/scrmlMaster/handOffs/incoming/`:
 - `2026-04-22-scrmlTS-to-master-insight-25-multi-meta.md` — UNREAD legacy from S30s era
-- `2026-05-08-S72-scrmlTS-to-master-needs-push-SUPERSEDED.md` — RENAMED at master-push-protocol-retirement
-- `read/` — contains historical processed messages including the S71 needs-push superseded by retirement
+- `2026-05-08-S72-scrmlTS-to-master-needs-push-SUPERSEDED.md` — RENAMED at master-push-protocol-retirement (S72)
+- `2026-05-08-S71-scrmlTS-to-master-stage-scrml-dev-pipeline.md` — UNREAD (master-PA agent staging request from S71; still not addressed; pipeline-substitution to general-purpose has been working clean so deprioritized but filed)
 
-No active pending master notices. Master-PA push-protocol obsolete; PA-direct push is the standing pattern.
+No active pending master notices from S73.
+
+---
+
+## Push state
+
+scrmlTS: 9 commits pushed throughout session (C3/C4 batched, C5/C6 batched, C7 alone, C8 alone, C9/C10/C11 batched). Plus this wrap commit pending push. **Wrap-push pending.**
+
+scrml-support: 1 commit pushed at session open (`6206192` archive landing). 0/0 since.
 
 ---
 
 ## Tags
 
-#session-72 #position-b-ratified #insight-26 #insight-27 #a9-phase-opened #a9-ext4-shipped #parallel-close #c1-c2-shipped #server-keyword-deprecation #sql-composition-status-quo #body-split-soundness-design #4-deep-dives-landed #2-ratifying-debates #master-only-push-retired #f4-recurrent #cross-machine-switch
+#session-73 #a1c-waves-1-2-3-CLOSED #9-ships #+437-tests #zero-regressions #zero-path-discipline-leaks #parallel-dispatch-mature #depth-of-survey-frequency-9 #spec-rule-4-enforced-at-c6 #cross-machine-pickup-clean #wave-4-engines-next
