@@ -1,3 +1,31 @@
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+
+/**
+ * Phase A1c Step C7 — pull the validator predicate runtime catalog into
+ * SCRML_RUNTIME at module-load time. The validator runtime is authored as a
+ * standalone ESM module (compiler/src/runtime-validators.js) so C6's tests can
+ * import its functions directly. The compiled client runtime (the SCRML_RUNTIME
+ * string emitted alongside every .client.js) needs the SAME functions inlined
+ * as plain JavaScript so the runner emitted by C7 codegen can call them.
+ *
+ * Strategy: read the validator-runtime source verbatim and strip the leading
+ * `export ` keyword from each top-level declaration. The result is plain JS
+ * suitable for inlining inside the runtime template literal. This keeps
+ * `runtime-validators.js` as the single source-of-truth — there is no
+ * duplication; the chunk content is the live module's source bytes (sans
+ * `export `).
+ *
+ * The `^export ` regex strip is safe — every `export` in `runtime-validators.js`
+ * appears at column 0 (verified by grep at S73 land).
+ */
+const __runtime_template_dir = dirname(fileURLToPath(import.meta.url));
+const _VALIDATOR_RUNTIME_SOURCE = readFileSync(
+  join(__runtime_template_dir, "runtime-validators.js"),
+  "utf8",
+).replace(/^export /gm, "");
+
 /**
  * scrml reactive runtime — shared runtime library.
  *
@@ -356,6 +384,26 @@ function _scrml_reset(name) {
     _scrml_reset(k);
   }
   // No children + no thunk -> silent no-op (defensive).
+}
+
+// ---------------------------------------------------------------------------
+// §55.1 Validator predicate runtime catalog (chunk: 'validators')
+// ---------------------------------------------------------------------------
+// The 14 universal-core validator predicates per SPEC §55.1 — same fire
+// functions exported by compiler/src/runtime-validators.js (C6 land), inlined
+// here verbatim (sans \`export\` keywords) for the compiled client runtime.
+// C7's per-cell validator runner emits calls into _scrml_validator_fire below.
+//
+// Chunk-detection trigger: any state-decl whose validators[] array is
+// non-empty (see emit-client.ts:detectRuntimeChunks). When no validators are
+// declared in the source file, this chunk is tree-shaken out entirely.
+${_VALIDATOR_RUNTIME_SOURCE}
+// _scrml_validator_fire — thin alias matching the C7 codegen call shape.
+// Distinct name from \`fireValidator\` so the runtime export surface is clearly
+// scoped to the runtime (and so the C7 emitted code isn't tightly coupled to
+// the C6 module's internal naming).
+function _scrml_validator_fire(name, value, ...args) {
+  return fireValidator(name, value, ...args);
 }
 
 // ---------------------------------------------------------------------------

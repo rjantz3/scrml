@@ -9,6 +9,7 @@ import { emitStringFromTree } from "../expression-parser.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import { emitRuntimeCheck } from "./emit-predicates.ts";
 import { emitTransitionGuard } from "./emit-machines.ts";
+import { emitValidatorRunnerSidecar } from "./emit-validators.ts";
 
 // ---------------------------------------------------------------------------
 // Deep reactive wrapping helper (Reactivity Phase 1)
@@ -857,10 +858,26 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       const _qualifiedName = (opts.compoundPathPrefix ? `${opts.compoundPathPrefix}.${node.name}` : node.name);
       const _defaultSidecar = _emitDefaultSidecar(node, _qualifiedName, opts);
       const _initSidecar = _emitInitThunkSidecar(node, _qualifiedName, opts);
+      // C7: per-cell validator runner sidecar. For state-decls with non-empty
+      // validators[] AND living inside a compound (compoundPathPrefix set),
+      // emit a derived computation that walks the validators in declaration
+      // order, applies §55.12 short-circuit, and writes per-field
+      // `<qualifiedField>.errors` + `<qualifiedField>.isValid` to the synth
+      // surfaces B12 registered. Returns null for top-level non-compound cells
+      // (no synth surface per §55.5 L11 Edge A) and for derived/markup-typed/
+      // compound-parent/server-boundary/insideFunctionBody cases.
+      const _validatorSidecar = emitValidatorRunnerSidecar(node, _qualifiedName, {
+        boundary: opts.boundary,
+        insideFunctionBody: opts.insideFunctionBody,
+        compoundPathPrefix: opts.compoundPathPrefix ?? null,
+        encodingCtx: opts.encodingCtx ?? null,
+        derivedNames: opts.derivedNames ?? null,
+      });
       const _appendSidecar = (mainStmt: string): string => {
         const parts = [mainStmt];
         if (_initSidecar) parts.push(_initSidecar);
         if (_defaultSidecar) parts.push(_defaultSidecar);
+        if (_validatorSidecar) parts.push(_validatorSidecar);
         return parts.join("\n");
       };
 

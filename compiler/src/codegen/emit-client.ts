@@ -192,6 +192,21 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
         if ((node as any).defaultExpr) {
           chunks.add("reset");
         }
+        // C7 (§55.2 + §55.6): a state-decl with non-empty validators[] triggers
+        // the `validators` runtime chunk (14 fire functions + VALIDATOR_RUNTIME
+        // map + _scrml_validator_fire dispatch). C7 codegen emits the per-cell
+        // runner as a derived computation, so the `derived` chunk is also
+        // required. Top-level non-compound cells with validators technically
+        // hit this trigger too — they include the chunk even though C7 emits
+        // no runner (no per-field synth surface to write to per §55.5 L11
+        // Edge A). Conservative tree-shaking — a few KB cost over correctness.
+        if (
+          Array.isArray((node as any).validators) &&
+          (node as any).validators.length > 0
+        ) {
+          chunks.add("validators");
+          chunks.add("derived");
+        }
         break;
 
       // timers — <timer> and <poll> markup elements

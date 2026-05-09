@@ -17,6 +17,9 @@
  * Chunk → runtime functions:
  *   core          _scrml_state, _scrml_subscribers, _scrml_reactive_get/set/subscribe/propagate_dirty
  *   reset         _scrml_default_set/_fns, _scrml_init_set/_fns, _scrml_reset (§6.8)
+ *   validators    14 universal-core fire functions, VALIDATOR_RUNTIME map,
+ *                 _scrml_validator_fire (§55.1, C7) — inlined verbatim from
+ *                 compiler/src/runtime-validators.js
  *   derived       _scrml_derived_declare/subscribe/get, flush
  *   lift          _scrml_lift
  *   scope         _scrml_cleanup_registry, _scrml_register_cleanup, _scrml_destroy_scope
@@ -44,6 +47,7 @@ import { SCRML_RUNTIME } from "../runtime-template.js";
 export const RUNTIME_CHUNK_ORDER = [
   'core',
   'reset',
+  'validators',
   'derived',
   'lift',
   'scope',
@@ -93,6 +97,7 @@ const CHUNK_MARKERS: Record<NonCoreChunkName, string> = {
   // §X.X section header comments — each appears exactly once, in a // comment line.
   // Split position is mid-comment-line (after '// '). Both sides are valid JS.
   reset:          "§6.8 reset+default runtime (chunk: 'reset')",
+  validators:     "§55.1 Validator predicate runtime catalog (chunk: 'validators')",
   derived:        '§6.6 Derived reactive runtime',
   scope:          '§6.7.3 Scope-aware cleanup registry',
   timers:         '§6.7.5 / §6.7.6 Timer and Poll runtime',

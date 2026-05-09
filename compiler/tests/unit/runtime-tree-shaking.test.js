@@ -237,8 +237,11 @@ describe("runtime size", () => {
     expect(minimal.length).toBeLessThan(SCRML_RUNTIME.length * 0.30);
   });
 
-  test("RUNTIME_CHUNK_ORDER has 15 chunks", () => {
-    // 15 chunks post-C5: 'reset' chunk added for §6.8 reset(@cell) + default= helpers.
-    expect(RUNTIME_CHUNK_ORDER.length).toBe(15);
+  test("RUNTIME_CHUNK_ORDER has 16 chunks", () => {
+    // 16 chunks post-C7: 'validators' chunk added for SPEC §55.1 universal-core
+    // predicate runtime (14 fire functions + VALIDATOR_RUNTIME map +
+    // _scrml_validator_fire dispatch). Chunk-detection trigger:
+    // any state-decl with non-empty validators[] (emit-client.ts).
+    expect(RUNTIME_CHUNK_ORDER.length).toBe(16);
   });
 });
