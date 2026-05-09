@@ -1,11 +1,33 @@
 # scrml Compiler Pipeline — Stage Contracts
 
-**Version:** 0.7.0
-**Date:** 2026-05-04
+**Version:** 0.7.1
+**Date:** 2026-05-09
 **Owner:** scrml Integration Pipeline Reviewer
 **Status:** Authoritative — no stage integration proceeds without a reviewed contract here.
 
 **Change log:**
+- **0.7.1 (2026-05-09, A1c step C23 — prose pass):** PIPELINE.md prose pass per
+  IMPLEMENTATION-ROADMAP §8.6 #2. No new normative content; no contract changes.
+  Re-flow only — engineering substance is unchanged from 0.7.0.
+  - All seven `### Stage N v0.next addendum` sections (TAB / NR / MOD / UVB / TS / DG / CG)
+    re-flowed into their parent stage's narrative. Reading any stage now yields a single
+    coherent contract description rather than a v0 prose + v0.next bolt-on.
+  - **NEW Lock Enforcement Map** — top-level table after Stage Index. Maps locks L1-L22
+    (S55-S65 deliberation outcomes) to firing stage(s) for each lock. Per-stage callouts
+    were rejected in favor of a single discoverable table.
+  - **NEW Stage 6.7: Validity Surface Synthesis (VSS)** — sub-stage between META and DG.
+    Consolidates the auto-synthesized validity surface narrative (SPEC §55 + L11) which
+    was previously fragmented across Stage 6 TS addendum (typing), Stage 7 DG addendum
+    (validator-arg edges), and Stage 8 CG addendum (accessor emission). Implementation
+    sub-passes (B11 synth-cell registry, B12 per-field walker, B17 onTransition walker)
+    remain TS sub-passes; the Stage 6.7 narrative is the composite reader-facing view.
+    DG and CG input contracts updated to require `synthCellRegistry`.
+  - **IFMC** reordered by detection-stage (TAB → NR → MOD → UVB → TS → DG → CG →
+    cross-cutting); 6 new failure-mode rows added (E-DERIVED-VALUE-MUTATE / L21,
+    E-PARSEVARIANT-001 / L22, B14 path-shape mismatch surfaced S74, etc.).
+  - **Stage Dependency Summary** updated: META → VSS → DG (was META → DG).
+  - **Overview:** "eleven ordered stages" → "twelve ordered stages" (with Stage 6.7).
+  - Test impact: zero — markdown only. Pre-commit hook ran 0 regressions.
 - **0.7.0 (2026-05-04, Stage 0b D4):** v0.next pipeline updates — engineering target for Phase A1+ implementation. Per SPEC.md §1.4–§1.6 (markup-as-value pillar, north-star Tier ladder, V5-strict access), §6 (V5-strict reactivity), §18.0 (match block-form), §38 (file-level channels), §51.0 (engines as Tier 2), §55 (validators + auto-synthesized validity surface), and §4.14–§4.16 (`:`-shorthand, structural-elements registry, M7 negative-space). Affected stages get a v0.next addendum at each stage's end documenting the new contract surface; existing contract content remains authoritative for v1 features.
   - **Stage 3 TAB:** new tokens (`pinned`, `is some`, `is not`), recognition of `<engine>`/`<match>`/`<errors>`/`<onTransition>` as scrml-defined structural elements, `:`-shorthand body recognition, V5-strict `<x>` decl AST shape, render-spec-RHS classification, `default=` attribute capture.
   - **Stage 3.05 NR:** auto-declared engine variable resolution; auto-derived variable name (lowercase first run, strip trailing "Machine"); category routing for new structural elements; `pinned` forward-reference detection.
@@ -111,7 +133,7 @@
 
 ## Overview
 
-The scrml compiler transforms `.scrml` source files into HTML, CSS, and JavaScript through eleven
+The scrml compiler transforms `.scrml` source files into HTML, CSS, and JavaScript through twelve
 ordered stages. Each stage receives a well-typed input, performs a bounded transformation, and
 hands off a well-typed output to the next stage. This document defines the binding contracts for
 every stage boundary.
@@ -150,8 +172,48 @@ maps to the per-file budgets below when running with full worker parallelism.
 | 5 | Route Inferrer | RI | project-wide |
 | 6 | Type System | TS | per-file (after PA+RI complete) |
 | 6.5 | Meta Check + Eval | META | project-wide |
+| 6.7 | Validity Surface Synthesis | VSS | per-file (after META) |
 | 7 | Dependency Graph Builder | DG | project-wide |
 | 8 | Code Generator | CG | per-file (after DG complete) |
+
+---
+
+## Lock Enforcement Map
+
+The locks L1-L22 originate from S55-S65 deliberation
+(`scrml-support/docs/deep-dives/v0next-s56-deliberation-outcomes-2026-05-04.md` for L1-L20;
+S59 for L21; S65 debate-05 for L22). Each lock describes a design decision that the v0.next
+pipeline encodes into one or more stages. Use this table to locate the firing stage(s) for
+any given lock without reading the full stage prose.
+
+| Lock | One-line statement | Firing stage(s) |
+|---|---|---|
+| L1 | Markup-as-first-class-value (pillar) | cross-cutting — Stage 3 (TAB render-spec parsing) + Stage 6 (TS render-spec validity classification) + Stage 8 (CG render-by-tag expansion) |
+| L2 | Compound state — Variant C with canonical `@compound.field` access | Stage 3 (TAB compound-rollup AST shape) + Stage 6 (TS field-type resolution) |
+| L3 | Decl-coupled-with-render-spec (`<name req> = <input/>`) | Stage 3 (TAB `rhsShape` classification) + Stage 6 (TS bindable / non-bindable classification) |
+| L4 | Declarative validators with partial vocabulary unification | Stage 3.3 (VP-1 attribute allowlist) + Stage 6 (TS validator-vocabulary check) |
+| L5 | `is some` reused from existing existence primitive | Stage 3 (TAB token recognition) + Stage 6 (TS optional-typing semantics) |
+| L6 | Match unification — Tier 0/1/2 ladder | Stage 3 (TAB `match-block-decl` AST shape) + Stage 6 (TS exhaustiveness) + Stage 8 (CG conditional dispatch) |
+| L7 | Match attribute semantics (rules legal-but-inert; `effect=` / `<onTransition>` engine-only) | Stage 3.3 (VP-2 `E-STRUCTURAL-ELEMENT-MISPLACED` for `<onTransition>` outside engine) + Stage 6 (TS attribute semantics) |
+| L8 | Two match shapes coexist (block-form vs JS-style) | Stage 3 (TAB classifies by parent context) |
+| L9 | `loose` flag dropped | negative-space lock — no firing site (absence) |
+| L10 | `reset()` as primitive | superseded by L18 |
+| L11 | Auto-derived validity surface per compound | **Stage 6.7 (Validity Surface Synthesis)** — fires across TS sub-passes (B11/B12/B17), DG `'validator-arg'` edges, CG accessor emission |
+| L12 | Validator error-message origin (4-level hybrid + `.Custom(tag)`) | Stage 6 (TS message-resolution chain) + Stage 8 (CG `messageFor(...)` emission) |
+| L13 | Per-field error UI rendering (`<errors of=expr/>`) | Stage 3 (TAB `errors-elem` AST shape) + Stage 3.3 (VP-2 `of=` required) + Stage 8 (CG `<errors>` rendering) |
+| L14 | Cross-field validation via predicate args (no separate category) | Stage 7 (DG `'validator-arg'` edges + cycle detection → `E-VALIDATOR-CIRCULAR-DEP`) |
+| L15 | `const <derived> = expr` in-compound derived form | Stage 3 (TAB `rhsShape: "derived-expr"`) + Stage 6 (TS derived-cell typing) + Stage 7 (DG `'derives-from'` edges + cycle detection) + Stage 8 (CG reactive computed emission) |
+| L16 | Multi-render via existing access paths (no override syntax) | negative-space lock |
+| L17 | Bind-attribute dispatch by render-spec shape | Stage 6 (TS bindable / non-bindable classification) + Stage 8 (CG bind-flavor dispatch table) |
+| L18 | `reset(@cell)` keyword (γ-semantics with `default=` fallback to β init re-eval) | Stage 3 (TAB `default=` capture; `reset` keyword) + Stage 8 (CG `reset(@cell)` expansion) |
+| L19 | Multi-statement event-handler restriction | Stage 3 (TAB `E-MULTI-STATEMENT-HANDLER` at parse time) |
+| L20 | `derived=expr` on engines | Stage 3 (TAB `derived=` attribute) + Stage 6 (TS engine-type compatibility) + Stage 7 (DG `'engine-derives'` edges + `E-DERIVED-ENGINE-CIRCULAR`) + Stage 8 (CG derived-engine reactive subscription) |
+| L21 | Derived-cell value-mutation forbidden | Stage 6 (TS `E-DERIVED-VALUE-MUTATE`) |
+| L22 | Type-as-argument as first-class primitive (`parseVariant` first member) | Stage 3 (TAB type-token recognition in expression position) + Stage 6 (TS type-as-argument resolution; `E-PARSEVARIANT-001`) + Stage 8 (CG `parseVariant` runtime emission) |
+
+**Multi-stage locks are the rule, not the exception.** Most locks fire across 2-4 stages.
+L1, L9, L10, L16 are exceptions: L1 is cross-cutting (a pillar); L9 / L16 are negative-space
+(an absence enforced by silence); L10 was superseded by L18.
 
 ---
 
@@ -385,19 +447,40 @@ evaluation of attribute values or content expressions occurs.
                      fnKind: "function" | "fn", isServer: boolean, span: Span }
     | BareExpr     { kind: "bare-expr", expr: string, span: Span }
     | LiftExpr     { kind: "lift-expr", expr: LiftTarget, span: Span }
-    | ReactiveDecl { kind: "state-decl", name: string, init: string, span: Span }
+    | ReactiveDecl { kind: "state-decl", name: string,
+                     modifier: "plain" | "const" | "pinned" | "server" | ...,
+                     rhsShape: "literal" | "render-spec" | "derived-expr",
+                     rhsRaw: string, rhsAst: ASTNode | LiftTarget,
+                     validators: AttrNode[],     // bare attribute list (req, length, pattern, ...)
+                     defaultExpr: string | null, // from default= attribute
+                     span: Span }
     | LetDecl      { kind: "let-decl", name: string, init: string, span: Span }
     | PureDecl     { kind: "pure-decl", name: string, params: string[], body: LogicNode[], span: Span }
     | ImportDecl   { kind: "import-decl", ... }
     | ExportDecl   { kind: "export-decl", ... }
     | TypeDecl     { kind: "type-decl", ... }
     | ComponentDef { kind: "component-def", ... }
+    | EnumVariantRef { kind: "enum-variant-ref",
+                       qualifier: string | null,  // null on bare-variant `.X` (resolved at TS)
+                       variantName: string, span: Span }
     // + standard JS constructs: IfStmt, ForStmt, ReturnStmt, etc.
 
   LiftTarget =
     | { kind: 'markup', node: ASTNode }
     | { kind: 'expr',   expr: string }
   ```
+
+  **`ReactiveDecl.rhsShape` (V5-strict, SPEC §6.1, §6.2):**
+  - `"literal"` — RHS is a literal or expression value. `rhsAst` is a `LogicNode`.
+  - `"render-spec"` — RHS is a markup element (Shape 2; e.g., `<input type="email"/>`).
+    `rhsAst` is a `MarkupElement`; CG uses the render-spec at codegen time for `<x/>`
+    render-by-tag expansion (cross-ref Stage 8 transformation).
+  - `"derived-expr"` — declaration uses `const` modifier; RHS is a reactive expression.
+    `rhsAst` is a `LogicNode`. Markup-typed derived cells are legal under L1.
+
+  Bindable-vs-non-bindable classification of a `"render-spec"` RHS is performed at TS
+  (Stage 6) using the per-element shape table — TAB records the shape; TS validates against
+  the use-site form.
 
   **LogicNode `kind` wire-value table (Amendment 2, 2026-03-26):**
 
@@ -417,6 +500,7 @@ evaluation of attribute values or content expressions occurs.
   | ExportDecl     | `"export-decl"`     |
   | TypeDecl       | `"type-decl"`       |
   | ComponentDef   | `"component-def"`   |
+  | EnumVariantRef | `"enum-variant-ref"`|
 
   **FunctionDecl shape (Amendment 3, 2026-03-26):**
 
@@ -471,6 +555,38 @@ evaluation of attribute values or content expressions occurs.
     to resolve `ImportedType` across files. Per SPEC §21.2 normative addition
     and §51.16. Predicate behaviour for the `export-decl` node is unchanged;
     the change is purely additive.
+  - **Structural-element classification (v0.next, SPEC §4.15 / §24.4):** the four
+    scrml-defined structural elements are recognized at TAB time as distinct AST
+    node kinds (per the table below). The block-splitter recognizes them as
+    ordinary `<` openers (canonical no-space convention); TAB classifies them
+    by name lookup against the structural-element registry. NR (Stage 3.05)
+    is the authoritative routing source — TAB just stamps the kind.
+
+    | Element | New AST node kind | Required attributes (TAB-validated) | Body recognition |
+    |---|---|---|---|
+    | `<engine>` | `engine-decl` (renamed from `machine-decl` per S53) | `for=Type` | bare-body OR `:`-shorthand state-children |
+    | `<match>` | `match-block-decl` (NEW; distinct from JS-style `match` expr) | `for=Type` | bare-body of variant arms |
+    | `<errors>` | `errors-elem` (NEW) | `of=expr` | optional bare-body (override template); `all` boolean attribute |
+    | `<onTransition>` | `on-transition-elem` (NEW) | none required | bare-body or `:`-shorthand; `to=Variant`, `from=Variant`, `once`, `if=expr` attributes |
+
+  - **`:`-shorthand body recognition (v0.next, SPEC §4.14):** a tag opener may
+    end with ` : <single-expression>>` (whitespace before the colon, then a
+    single scrml expression, then the closing `>` of the opener). TAB recognizes
+    this form on `<engine>`, `<match>` arm state-children, `<onTransition>`, and
+    any other element that admits the form per its owning section. The expression
+    following `:` is parsed using the same grammar TAB uses for bare-call
+    attribute values + `${...}` interpolation contents. A closer present on a
+    `:`-shorthand body is `E-CLOSER-001`. Multi-statement intent (`;` outside
+    expression-internal contexts) is `E-MULTI-STATEMENT-HANDLER`.
+  - **Bare-variant inference parsing (v0.next, SPEC §14.10 / §18.0.3):**
+    `.VariantName` (no preceding qualifier) is legal in expression positions
+    where the type is fixed. TAB parses bare-variant references as
+    `EnumVariantRef { kind: "enum-variant-ref", qualifier: null, variantName: string, span }`.
+    TS resolves the qualifier from context.
+  - **Positional binding parsing (v0.next, SPEC §14.11):** a struct-typed cell
+    with a positional initialiser `<x>: T = (a, b, c)` is parsed as a
+    `TupleLiteral` RHS. TS validates the tuple's arity and per-position types
+    against the struct's field declaration order.
   - `MetaBlock` nodes record the `parentContext` from which the `^{ }` was entered. This is
     the discriminant the type system uses to determine the splicing coercion rules (spec
     Section 22.4): markup parent requires markup-coercible result, CSS parent requires CSS
@@ -497,6 +613,15 @@ evaluation of attribute values or content expressions occurs.
   - `E-ATTR-002`: Boolean attribute assigned a quoted string literal instead of a boolean expression.
   - `E-META-002`: `^{ }` block contains a token sequence that is not valid as compile-time code
     (e.g., a bare HTML tag without a `lift` wrapper inside a meta block).
+  - `E-CLOSER-001` (v0.next): `:`-shorthand body with a closer present (SPEC §4.14).
+  - `E-MULTI-STATEMENT-HANDLER` (v0.next): bare-form event-handler attribute value or
+    `:`-shorthand body contains multiple statements (`;` outside expression-internal
+    contexts). Per SPEC §5.2.3, §4.14.
+  - `E-NAME-COLLIDES-RESERVED` (v0.next): user component or state-type name collides with
+    a reserved structural-element name (`engine`, `match`, `errors`, `onTransition`). Per
+    SPEC §4.15, §24.4.
+  - `E-IMPORT-PINNED-INVALID` (v0.next): `pinned` modifier on a non-cell, non-engine import
+    (TAB detects at attribute-position parse time; full resolution at MOD). Per SPEC §21.8.1.
 - Error codes removed from this stage (reassigned to Stage 6 TS — these require identifier
   resolution which TAB does not perform):
   - ~~`E-MARKUP-001`~~: Moved to TS. Tag name validation requires the component registry.
@@ -519,9 +644,20 @@ scrml extensions); the resulting AST nodes are wrapped in a `MetaBlock` node tha
 `parentContext` from the enclosing block's `type`. Nested `^{ }` within a meta block produces a
 child `MetaBlock` with `parentContext: 'meta'`. For each block type, the corresponding grammar
 produces typed AST nodes with spans. Attribute values are classified into their quoting form.
-`lift`, `fn`, `@`, `pure`, and `~` constructs are recognized and represented as first-class AST
-nodes, not raw strings. Function, pure, and fn shorthand bodies may be stored as opaque `BareExpr`
-wrappers; downstream stages handle these as documented in their own contracts. The output AST is a
+`lift`, `fn`, `@`, `pure`, `~`, and the v0.next tokens (`pinned`, `is some`, `is not`,
+`default=`) are recognized and represented as first-class AST nodes / attribute classifications,
+not raw strings. The four scrml-defined structural elements (`<engine>`, `<match>`, `<errors>`,
+`<onTransition>`) are classified at TAB time by name lookup against the structural-element
+registry — TAB stamps the node kind; NR (Stage 3.05) decides routing.
+
+For `ReactiveDecl` nodes, TAB classifies the RHS into one of three `rhsShape` values
+(`"literal"` / `"render-spec"` / `"derived-expr"`) per V5-strict SPEC §6.1-§6.2. A `<x/>`
+markup-position tag where `x` is a same-file or imported reactive-cell name is NOT
+disambiguated at TAB; TAB produces a markup AST node and NR (Stage 3.05) decides
+render-by-tag-vs-engine-statechild-vs-other via the unified state-type registry (§15.15).
+
+Function, pure, and fn shorthand bodies may be stored as opaque `BareExpr` wrappers;
+downstream stages handle these as documented in their own contracts. The output AST is a
 discriminated union tree.
 
 **What is NOT done by this stage:**
@@ -541,91 +677,10 @@ discriminated union tree.
   (these checks are performed by TS using error codes `E-MARKUP-001`, `E-STATE-001`,
   `E-REACTIVE-001`, and `E-SCOPE-001`).
 
-**Performance budget:** <= 20 ms per file.
+**Performance budget:** <= 25 ms per file (20 ms baseline + 5 ms for v0.next structural-element
+recognition, render-spec classification, and bare-variant + positional inference parsing).
 **Parallelism opportunity:** Yes — fully per-file.
 **Dependencies:** Block Splitter (BS) must complete for the file.
-
-### Stage 3 v0.next addendum (Pipeline 0.7.0 — SPEC §6 / §18 / §51 / §55 engineering target)
-
-**Status:** ENGINEERING TARGET. Implementation lands in Phase A1+. Existing v1 TAB behaviour above remains authoritative until A1 lands.
-
-**New tokens (lexer-level):**
-
-- `pinned` — keyword. Recognised on declaration sites (`<x pinned> = init`, `pinned import { ... } from '...'`), in import specifiers (`import { name pinned } from './x.scrml'`), and in cell modifier positions. Per SPEC §6.10, §21.8.1.
-- `is some` — composite operator (two tokens lexed as a phrase). Recognised in expression position. Cross-ref §42.2.5.
-- `is not` — composite operator. Existing in v1 (§42.2.4); v0.next preserves the form.
-- `default=` — attribute name on cell declarations. Per SPEC §6.8.
-
-**Structural-element recognition (additive to existing markup grammar):**
-
-The following four tag names are scrml-defined structural elements (cross-ref SPEC §4.15, §24.4) and SHALL be classified at TAB time as a distinct AST node kind from generic markup. The block-splitter recognises them as ordinary `<` openers (no whitespace before identifier — they follow the canonical no-space convention); TAB classifies them by name lookup against the structural-element registry.
-
-| Element | New AST node kind | Required attributes (TAB-validated) | Body recognition |
-|---|---|---|---|
-| `<engine>` | `engine-decl` (existing v1 path renamed from `machine-decl` per S53; v0.next adds the new attribute slots) | `for=Type` | bare-body OR `:`-shorthand state-children |
-| `<match>` | `match-block-decl` (NEW for v0.next — distinct from JS-style `match` expr) | `for=Type` | bare-body of variant arms |
-| `<errors>` | `errors-elem` (NEW) | `of=expr` | optional bare-body (override template); `all` boolean attribute |
-| `<onTransition>` | `on-transition-elem` (NEW) | none required | bare-body or `:`-shorthand; `to=Variant`, `from=Variant`, `once`, `if=expr` attributes |
-
-**`:`-shorthand body recognition:**
-
-Per SPEC §4.14, a tag opener may end with ` : <single-expression>>` (whitespace before the colon, then a single scrml expression, then the closing `>` of the opener). TAB SHALL recognise this form on `<engine>`, `<match>` arm state-children, `<onTransition>`, and any other element that admits the form per its owning section.
-
-- The expression following `:` is parsed using the same expression grammar TAB uses for bare-call attribute values + `${...}` interpolation contents.
-- Multi-statement intent (`;` outside expression-internal contexts) is `E-MULTI-STATEMENT-HANDLER`. TAB enforces this at parse time.
-- A closer present on a `:`-shorthand body is `E-CLOSER-001`.
-
-**V5-strict declaration AST shape (cross-ref SPEC §6.1, §6.2):**
-
-V5-strict introduces three RHS shapes for state-cell declarations. TAB classifies the RHS at parse time and records the shape on the AST node:
-
-```
-ReactiveDecl = {
-  kind: "state-decl",
-  name: string,
-  modifier: "plain" | "const" | "pinned" | "server" | ...,
-  rhsShape: "literal" | "render-spec" | "derived-expr",   // NEW v0.next
-  rhsRaw: string,                                          // verbatim source slice
-  rhsAst: ASTNode | LiftTarget,                            // shape-dependent typed payload
-  validators: AttrNode[],                                  // bare attribute list (req, length, pattern, ...)
-  defaultExpr: string | null,                              // from default= attribute
-  span: Span,
-}
-```
-
-- `rhsShape: "literal"` — RHS is a literal or expression value. `rhsAst` is a `LogicNode`.
-- `rhsShape: "render-spec"` — RHS is a markup element (Shape 2). `rhsAst` is a `MarkupElement`. The compiler uses the render-spec at codegen for `<x/>` render-by-tag expansion (cross-ref CG addendum below).
-- `rhsShape: "derived-expr"` — declaration uses `const` modifier; RHS is a reactive expression. `rhsAst` is a `LogicNode`.
-
-**Render-spec validation (parse-time):**
-
-A Shape 2 declaration's RHS markup element SHALL be classified as bindable or non-bindable at parse time. Non-bindable RHS markup (e.g., `<div>`) on a non-`const` declaration produces `E-CELL-RENDER-SPEC-NOT-BINDABLE` from TS (Stage 6) — TAB records the shape; TS validates against the use-site form.
-
-**Bare-variant inference parsing:**
-
-Per SPEC §14.10 / §18.0.3, `.VariantName` (no preceding qualifier) is legal in expression positions where the type is fixed. TAB parses bare-variant references as `EnumVariantRef { kind: "enum-variant-ref", qualifier: null, variantName: string, span }`. TS resolves the qualifier from context.
-
-**Positional binding parsing:**
-
-Per SPEC §14.11, a struct-typed cell with a positional initialiser `<x>: T = (a, b, c)` is parsed as a `TupleLiteral` RHS. TS validates the tuple's arity and per-position types against the struct's field declaration order.
-
-**Multi-statement-handler restriction:**
-
-Per SPEC §5.2.3, bare-form event-handler attribute values containing multiple statements emit `E-MULTI-STATEMENT-HANDLER`. TAB enforces this at attribute-value parse time. The check is: a bare-form (non-`${...}`) handler attribute value may not contain `;` outside expression-internal contexts (string literals, nested function bodies). The same rule applies to `:`-shorthand bodies.
-
-**`<x/>` render-by-tag disambiguation (TAB → NR handoff):**
-
-A markup-position tag `<x/>` (or `<x ...>...</>`) where `x` is a same-file or imported reactive-cell name resolves to render-by-tag at NR (Stage 3.05) using the unified state-type registry (§15.15). TAB does NOT itself disambiguate decl-vs-render-by-tag-vs-engine-statechild — it produces a markup AST node, and NR's category routing decides the kind. TAB's job is structural; the routing is NR's authoritative output.
-
-**New error codes emitted by TAB (v0.next additions):**
-
-- `E-CLOSER-001` — `:`-shorthand body with closer present (§4.14).
-- `E-MULTI-STATEMENT-HANDLER` — bare-form handler with multiple statements (§5.2.3, §4.14).
-- `E-NAME-COLLIDES-RESERVED` — user component or state-type name collides with a reserved structural-element name (§4.15, §24.4).
-- `E-IMPORT-PINNED-INVALID` — `pinned` modifier on a non-cell, non-engine import (§21.8.1; TAB detects at attribute-position parse time when the import resolves at MOD).
-- `E-VARIANT-AMBIGUOUS` (escalated from a TAB warning to TS error per ambiguity-resolution time; bare-variant references are accepted by TAB regardless and resolved at TS).
-
-**Performance budget:** <= 25 ms per file (existing 20 ms budget + 5 ms for v0.next additional structural-element recognition + render-spec classification). Verify in A1 implementation.
 
 ---
 
@@ -688,7 +743,8 @@ emitted from NR. `W-DEPRECATED-001` continues to be emitted from TAB (the
     `StateConstructorDefNode`, `MachineDeclNode`) SHALL receive
     `resolvedKind: 'html-builtin' | 'scrml-lifecycle' | 'user-state-type' | 'user-component' | 'unknown'`
     and
-    `resolvedCategory: 'html' | 'channel' | 'engine' | 'timer' | 'poll' | 'db' | 'schema' | 'request' | 'errorBoundary' | 'machine' | 'user-component' | 'user-state-type' | 'unknown'`.
+    `resolvedCategory: 'html' | 'channel' | 'engine' | 'timer' | 'poll' | 'db' | 'schema' | 'request' | 'errorBoundary' | 'machine' | 'user-component' | 'user-state-type' | 'engine-state-child' | 'match-block' | 'match-arm' | 'errors-elem' | 'on-transition-elem' | 'render-by-tag' | 'unknown'`
+    (the trailing six are v0.next additions).
   - NR SHALL NOT mutate any pre-existing AST field (additive only).
   - NR SHALL NOT block compilation on `unknown` resolutions; downstream
     stages (CE, MOD, TS) own the hard errors (`E-COMPONENT-020`,
@@ -702,78 +758,85 @@ emitted from NR. `W-DEPRECATED-001` continues to be emitted from TAB (the
     both resolve to `resolvedCategory: 'engine'`. The internal AST shape
     is `kind: "engine-decl"` with field `engineName` (renamed from the
     P1 `kind: "machine-decl"` / `machineName` in S53 by `ast-shape-rename`).
+  - **Auto-declared engine variable (v0.next, SPEC §51.0.C):** for every
+    `<engine for=Type>` declaration, NR registers a reactive cell named by
+    `deriveEngineVarName(Type, varAttr)` in the same-file state-type registry
+    with `resolvedKind: "scrml-lifecycle"`, `resolvedCategory: "engine"`,
+    and a synthetic cell type of `EnumType` (the engine's `for=Type`).
+    Conflict with a pre-existing same-file or imported declaration is
+    `E-ENGINE-VAR-DUPLICATE`; the fix is to add `var=` to the engine.
+  - **v0.next category routing (SPEC §15.15, §51, §55):** the additional
+    `resolvedCategory` values are populated by NR per parent-context lookup,
+    letting downstream stages route without re-walking parent chains:
+
+    | Node | resolvedKind | resolvedCategory |
+    |---|---|---|
+    | `<engine>` decl | `"scrml-lifecycle"` | `"engine"` |
+    | `<match>` block | `"scrml-lifecycle"` | `"match-block"` |
+    | `<errors>` element | `"scrml-lifecycle"` | `"errors-elem"` |
+    | `<onTransition>` element | `"scrml-lifecycle"` | `"on-transition-elem"` |
+    | Engine state-child (`<Variant>` inside an `<engine>`) | `"scrml-lifecycle"` | `"engine-state-child"` |
+    | Match arm (`<Variant>` inside a `<match>`) | `"scrml-lifecycle"` | `"match-arm"` |
+    | `<x/>` render-by-tag (cell name in markup position) | `"user-state-type"` | `"render-by-tag"` |
 
 **Error contract:**
-- Error type: `NRError { code: string, message: string, span: Span, severity: 'warning' }`
+- Error type: `NRError { code: string, message: string, span: Span, severity: 'warning' | 'error' }`
 - Error codes:
   - `W-CASE-001`: lowercase user-declared state-type or component shadows a
     built-in HTML element (SPEC §15.15.4).
   - `W-WHITESPACE-001`: `< identifier>` opener uses whitespace; canonical form
     is no-space (SPEC §15.15.5).
-- Partial output: warnings only; never blocks compilation in P1-P2.
+  - `E-ENGINE-VAR-DUPLICATE` (v0.next): the engine's auto-derived (or
+    `var=`-overridden) variable name collides with a same-file or imported
+    declaration (SPEC §51.0.C). Severity: error.
+  - `E-STATE-PINNED-FORWARD-REF` (v0.next): a `pinned` cell's initialiser
+    depends on a cell declared LATER in source order (SPEC §6.10). Severity: error.
+- Partial output: warnings only do not block; `error`-severity diagnostics
+  block downstream stages.
 
 **Transformation:**
 NR walks the AST visiting every `MarkupElement` / `StateBlock`. For each opener,
 it performs a registry lookup per SPEC §15.15.2 (same-file → imported → scrml
-lifecycle → HTML built-in → unknown). The result populates the new
-`resolvedKind` / `resolvedCategory` AST fields. Diagnostics for case
-shadowing and whitespace-opener emission fire as side effects of the walk.
+lifecycle → HTML built-in → unknown). The result populates the
+`resolvedKind` / `resolvedCategory` AST fields. v0.next adds three side-channels
+to the same walk:
 
-**Performance budget:** <= 5 ms per file (verified P1.E: ~0-1ms per file in practice; pure AST traversal).
+1. **Engine auto-declared variable derivation (SPEC §51.0.C).** For each
+   `<engine for=Type [var=X]>` node, NR derives the variable name and registers
+   it in the same-file registry. The deterministic derivation is:
+
+   ```
+   deriveEngineVarName(typeName: string, varAttr: string | null) -> string:
+     if varAttr is non-null:
+       return varAttr   # explicit override
+     let stripped = typeName.endsWith("Machine") ? typeName.slice(0, -7) : typeName
+     return stripped[0].toLowerCase() + stripped.slice(1)
+   ```
+
+   Examples: `<engine for=PhaseState>` declares `phaseState`; `<engine for=MarioMachine>`
+   declares `mario` (suffix stripped); `<engine for=AppMachine var=app>` declares `app`.
+
+2. **`pinned` forward-reference detection (SPEC §6.10).** NR walks pinned-cell
+   initialiser expressions and collects all referenced cell names; if any
+   referenced cell has `decl.span.start > pinned.span.start`, NR emits
+   `E-STATE-PINNED-FORWARD-REF`.
+
+3. **Cross-cell expression dependency tracking.** NR records each reactive cell's
+   initialiser-expression dependencies as a side table for Stage 7 (DG). NR does
+   NOT construct the dependency graph; it provides the symbol-table-level
+   information (which cells reference which other cells in their initialisers)
+   that DG consumes.
+
+Diagnostics for case shadowing and whitespace-opener emission fire as side
+effects of the walk.
+
+**Performance budget:** <= 8 ms per file (5 ms baseline + 3 ms for engine-variable
+derivation + pinned forward-ref detection; verified P1.E: ~0-1 ms baseline in
+practice — pure AST traversal).
 **Parallelism opportunity:** Yes — fully per-file (same-file lookups have
 no MOD dependency). Cross-file lookups defer to MOD's `exportRegistry`.
 **Dependencies:** TAB must complete; MOD optional (only required for cross-file
 lookups; same-file + lifecycle + HTML lookups run pre-MOD).
-
-### Stage 3.05 v0.next addendum (Pipeline 0.7.0 — SPEC §51 / §15.15 engineering target)
-
-**Auto-declared engine variable resolution (M6):**
-
-Per SPEC §51.0.C, an `<engine for=Type>` declaration auto-declares a reactive variable named by the lowercase first letter of the type name with the trailing `Machine` suffix stripped. For example:
-
-- `<engine for=PhaseState>` auto-declares `<phaseState>` cell.
-- `<engine for=MarioMachine>` auto-declares `<mario>` cell (suffix stripped).
-- `<engine for=AppMachine var=app>` declares `<app>` (explicit `var=` override).
-
-NR SHALL register the auto-declared (or `var=`-overridden) name in the same-file state-type registry with `resolvedKind: "scrml-lifecycle"` and `resolvedCategory: "engine"`. The engine's auto-declared variable name is also registered as a reactive cell of type `EnumType` (the engine's `for=Type`).
-
-**Auto-derive algorithm (deterministic):**
-
-```
-deriveEngineVarName(typeName: string, varAttr: string | null) -> string:
-  if varAttr is non-null:
-    return varAttr   # explicit override
-  let stripped = typeName.endsWith("Machine") ? typeName.slice(0, -7) : typeName
-  return stripped[0].toLowerCase() + stripped.slice(1)
-```
-
-**Conflict detection:** if a same-file or imported declaration ALREADY uses the auto-derived name (for any reason — a separate `<x>` declaration, a function name collision, etc.), NR emits `E-ENGINE-VAR-DUPLICATE` (§51.0.C). The fix is to add `var=` to the engine to choose a non-conflicting name.
-
-**Category routing for v0.next structural elements:**
-
-NR's `resolvedCategory` enum extends to include engine and the four structural-element categories. Per AST node shape:
-
-| Node | resolvedKind | resolvedCategory |
-|---|---|---|
-| `<engine>` decl | `"scrml-lifecycle"` | `"engine"` |
-| `<match>` block | `"scrml-lifecycle"` | `"match-block"` (NEW) |
-| `<errors>` element | `"scrml-lifecycle"` | `"errors-elem"` (NEW) |
-| `<onTransition>` element | `"scrml-lifecycle"` | `"on-transition-elem"` (NEW) |
-| Engine state-child (`<Variant>` inside an `<engine>`) | `"scrml-lifecycle"` | `"engine-state-child"` (NEW) |
-| Match arm (`<Variant>` inside a `<match>`) | `"scrml-lifecycle"` | `"match-arm"` (NEW) |
-| `<x/>` render-by-tag (cell name in markup position) | `"user-state-type"` | `"render-by-tag"` (NEW) |
-
-The category set above lets downstream stages route on `resolvedCategory` without re-walking the AST to detect parent-context.
-
-**`pinned` forward-reference detection:**
-
-Per SPEC §6.10, a `pinned` cell whose initialiser depends on a cell declared LATER in source order is `E-STATE-PINNED-FORWARD-REF`. NR walks pinned-cell initialiser expressions and collects all referenced cell names; if any referenced cell has a `decl.span.start > pinned.span.start`, NR emits the error.
-
-**Cross-cell expression dependency tracking (sketch — full edges built by DG):**
-
-NR records each reactive cell's initialiser-expression dependencies as a side table for use by Stage 7 (DG). NR does NOT itself construct the dependency graph; it provides the symbol-table-level information (which cells reference which other cells in their initialisers) that DG consumes.
-
-**Performance budget:** <= 8 ms per file (existing 5 ms + 3 ms for engine-variable derivation + pinned-forward-ref detection). Verify in A1 implementation.
 
 ---
 
@@ -794,7 +857,7 @@ NR records each reactive cell's initialiser-expression dependencies as a side ta
   ```
   {
     compilationOrder: string[],
-    exportRegistry: Map<string, Map<string, { kind: string, isComponent: boolean }>>,
+    exportRegistry: Map<string, Map<string, { kind: string, isComponent: boolean, category: string }>>,
     importGraph: Map<string, { imports: ImportEntry[], exports: ExportEntry[] }>,
     errors: ModuleError[],
   }
@@ -818,9 +881,22 @@ NR records each reactive cell's initialiser-expression dependencies as a side ta
 - Invariants:
   - `compilationOrder` is a topological sort of all file paths: dependencies come before
     dependents. Files with no imports appear first.
-  - `exportRegistry` maps each file path to a `Map<name, {kind, isComponent}>`. `isComponent`
-    is `true` for `const` exports with PascalCase names (first letter uppercase). Named exports
-    only — default exports are not supported in this version.
+  - `exportRegistry` maps each file path to a `Map<name, {kind, isComponent, category}>`.
+    `isComponent` is `true` for `const` exports with PascalCase names (first letter uppercase)
+    and is retained as a derived backcompat field. `category` is the NR-aligned authoritative
+    routing value (P3-FOLLOW). Named exports only — default exports are not supported in this
+    version.
+
+    | `category` | Trigger |
+    |---|---|
+    | `"user-component"` | `const Name = <markup ...>...</>` (PascalCase const export) |
+    | `"channel"` | `export <channel name="..." topic="...">...</>` (P3.A) |
+    | `"engine"` (v0.next) | `export <engine for=Type ...>...</>` (SPEC §21.8) |
+    | `"user-state-type"` (v0.next) | non-engine, non-component user state-type export (rare; reserved for future use) |
+
+    For `category: "engine"` exports, the registered NAME is the `var=`-overridden or
+    auto-derived variable name (NOT the `for=Type` name) — importing files reference this
+    exact name as `<engineVarName/>` at use-sites.
   - `importGraph` maps each file path to its parsed import and export entries. Relative paths
     in import statements are resolved to absolute paths in `absSource`.
   - No AST mutation. MOD is a pure analysis pass.
@@ -837,6 +913,9 @@ NR records each reactive cell's initialiser-expression dependencies as a side ta
   - `E-IMPORT-003`: Import inside a function body (detected at AST builder level; re-reported
     by MOD for clarity).
   - `E-IMPORT-004`: Imported name not found in the target file's exports.
+  - `E-IMPORT-PINNED-INVALID` (v0.next, SPEC §21.8.1): a `pinned` import resolves to an
+    export whose `category` is neither `"engine"` nor a reactive cell. The fix is to drop
+    the `pinned` modifier or import a different name.
 - Partial output: All errors accumulated and returned. Circular imports (E-IMPORT-002) do not
   prevent the rest of the graph from being analyzed. The compilation order is best-effort when
   cycles exist. Downstream stages MUST NOT proceed if `errors` contains any `severity: 'error'`
@@ -847,11 +926,16 @@ MOD performs five steps in sequence:
 1. Build import graph: for each file, extract `FileAST.imports` and resolve relative paths to
    absolute paths. Build a `Map<filePath, {imports, exports}>` covering all files.
 2. Detect circular imports: DFS over the import graph; report E-IMPORT-002 for each cycle.
-3. Build export registry: for each file, map exported names to their `{kind, isComponent}`.
+3. Build export registry: for each file, map exported names to their `{kind, isComponent, category}`.
    A name is an `isComponent` candidate if its `kind` is `"const"` and the name starts with
-   an uppercase ASCII letter.
+   an uppercase ASCII letter. `category` is derived from the underlying export shape per
+   the table in the Output contract (NR-aligned vocabulary post-P3-FOLLOW). For
+   `category: "engine"`, the registered name is the engine's auto-derived (or `var=`-overridden)
+   variable name.
 4. Validate imports: for each import entry, verify every named import exists in the target
-   file's export registry. Emit E-IMPORT-004 for each missing name.
+   file's export registry. Emit E-IMPORT-004 for each missing name. For each `pinned` import
+   specifier, verify the resolved export's `category` is `"engine"` or that the export is a
+   reactive cell — else emit `E-IMPORT-PINNED-INVALID` (SPEC §21.8.1).
 5. Topological sort: produce `compilationOrder` — a valid build order for all files.
 
 **What is NOT done by this stage:**
@@ -860,34 +944,10 @@ MOD performs five steps in sequence:
 - No scope analysis.
 - No AST mutation.
 
-**Performance budget:** <= 5 ms for the full project (graph traversal; linear in file count).
+**Performance budget:** <= 5 ms for the full project (graph traversal; linear in file count;
+v0.next category-derivation and pinned-import validation are constant-time per import).
 **Parallelism opportunity:** None — this is a project-wide synchronization point.
 **Dependencies:** TAB (Stage 3) must complete for ALL files.
-
-### Stage 3.1 v0.next addendum (Pipeline 0.7.0 — SPEC §21.8 / §38 engineering target)
-
-**Export registry category extension:**
-
-The `exportRegistry` value type SHALL include `category: string` alongside the existing fields. v0.next adds two category values to the existing `"user-component"` and `"channel"`:
-
-| Category value | Trigger |
-|---|---|
-| `"user-component"` | `const Name = <markup ...>...</>` (PascalCase const export) |
-| `"channel"` | `export <channel name="..." topic="...">...</>` (P3.A) |
-| `"engine"` (NEW) | `export <engine for=Type ...>...</>` — per SPEC §21.8 |
-| `"user-state-type"` (NEW) | a non-engine, non-component user state-type export (rare; reserved for future use) |
-
-**Engine export validation:**
-
-An exported `<engine>` SHALL declare an explicit `var=` attribute or an unambiguous auto-derived name (cross-ref Stage 3.05 NR addendum). The exported name in the `exportRegistry` is the `var=`-overridden or auto-derived variable name (NOT the `for=Type` name). Importing files reference this exact name as `<engineVarName/>` at use-sites.
-
-**`pinned` import validation:**
-
-When MOD validates an import (E-IMPORT-004 — name not found in target file's exports), it SHALL also validate the `pinned` modifier per SPEC §21.8.1:
-
-- A `pinned` import name MUST resolve to an export with `category === "engine"` OR an export of a reactive cell. Other categories with `pinned` produce `E-IMPORT-PINNED-INVALID` (§34, NEW).
-
-**Performance budget:** <= 5 ms for the full project (unchanged from v1).
 
 ---
 
@@ -1105,12 +1165,31 @@ identified in `docs/deep-dives/systemic-silent-failure-sweep-2026-04-30.md`.
     scrml-special elements (those registered in
     `compiler/src/attribute-registry.js`).
   - W-ATTR-001: unrecognized attribute name on `<page>`, `<channel>`,
-    `<machine>`, `<errorBoundary>`, or `<program>`.
+    `<machine>`, `<errorBoundary>`, `<program>`, or any v0.next structural
+    element (`<engine>`, `<match>`, `<errors>`, `<onTransition>`).
   - W-ATTR-002: recognized attribute name with unrecognized value-shape
     (e.g. `auth="role:dispatcher"` — see SPEC §52.13).
   - Plain HTML elements (`<div>`, `<input>`, etc.) are NOT policed. Open-prefix
     forms (`bind:*`, `on:*`, `data-*`, `aria-*`, `onserver:*`, `onclient:*`,
     `class:*`, `style:*`) are accepted on every element.
+  - **v0.next structural-element attribute catalogue** (registered in
+    `attribute-registry.js`; SPEC §4.15 / §24.4 / §51 / §55):
+
+    | Element | Attribute | Value-shape | Required |
+    |---|---|---|---|
+    | `<engine>` | `for` | type-name (PascalCase identifier resolving to an enum type) | yes |
+    | `<engine>` | `initial` | bare-variant `.X` or qualified `Type.X` (omitted when `derived=` is present) | conditional |
+    | `<engine>` | `var` | identifier (override for auto-declared variable name) | no |
+    | `<engine>` | `derived` | reactive expression of the engine's `for=Type` | no (mutually exclusive with `initial=` per E-DERIVED-ENGINE-NO-INITIAL) |
+    | `<match>` | `for` | type-name (PascalCase identifier resolving to an enum type) | yes |
+    | `<match>` | `on` | reactive expression of the match's `for=Type` | no (defaults to the auto-declared engine variable for `for=Type` if one exists) |
+    | `<errors>` | `of` | reactive expression resolving to a cell with synthesised validity surface | yes |
+    | `<errors>` | `all` | boolean attribute | no |
+    | `<onTransition>` | `to` | bare-variant `.X` of the parent engine's `for=Type` | no |
+    | `<onTransition>` | `from` | bare-variant `.X` of the parent engine's `for=Type` | no |
+    | `<onTransition>` | `once` | boolean attribute | no |
+    | `<onTransition>` | `if` | reactive expression returning a boolean | no |
+
   - Severity: warning. Compilation continues; the warning surfaces
     silent-acceptance gaps without breaking forward-compat HTML attribute
     behaviour.
@@ -1121,6 +1200,15 @@ identified in `docs/deep-dives/systemic-silent-failure-sweep-2026-04-30.md`.
     survived CE without being expanded or rejected at CE time.
   - E-COMPONENT-035: residual `isComponent: true` markup node — closes the
     silent phantom DOM emission window (see SPEC §15.14).
+  - **v0.next structural-shape invariants:**
+    - `E-STRUCTURAL-ELEMENT-MISPLACED`: `<onTransition>` element outside an
+      `<engine>` parent (SPEC §51.0.H).
+    - `E-ERRORS-OF-MISSING`: `<errors>` element with absent or non-resolvable
+      `of=` attribute (SPEC §55.8).
+    - `E-COMPONENT-ENGINE-SCOPE`: `<engine>` declaration inside a component
+      body (SPEC §51.0.K).
+    - `E-CHANNEL-INSIDE-PROGRAM`: residual `<channel>` markup inside `<program>`
+      body (SPEC §38.1; existing UVB W1/D3 invariant — listed here for completeness).
   - Severity: error. Compilation fails.
 
 - **VP-3 — Attribute Interpolation Validation** (`compiler/src/validators/attribute-interpolation.ts`)
@@ -1129,6 +1217,13 @@ identified in `docs/deep-dives/systemic-silent-failure-sweep-2026-04-30.md`.
     `supportsInterpolation: false`.
   - E-CHANNEL-007: `${...}` in `<channel name=>` or `<channel topic=>`
     (see SPEC §38.11).
+  - **v0.next interpolation rules:**
+    - `<engine for=...>` — `for=` SHALL NOT contain `${...}` (type names are
+      static; SPEC §51.0.B).
+    - `<match for=...>` — same.
+    - `<errors of=...>` — `of=` MAY be a reactive expression including indirect
+      `${...}` via member access, but the attribute itself accepts a bare
+      expression; no `${...}` template wrapping is allowed.
   - Severity: error. Compilation fails.
 
 **Error contract:**
@@ -1139,47 +1234,10 @@ identified in `docs/deep-dives/systemic-silent-failure-sweep-2026-04-30.md`.
   `validators/ast-walk.ts` helper. Any new validation pass added at this
   stage MUST use the shared walker to ensure consistent traversal.
 
-**Performance budget:** <= 1 ms per file (combined for all three passes).
+**Performance budget:** <= 2 ms per file (1 ms baseline + 1 ms for v0.next attribute
+allowlist + structural-element checks).
 **Parallelism opportunity:** Yes — per-file after CE completes.
 **Dependencies:** CE (Stage 3.2) must complete for the file.
-
-### Stage 3.3 v0.next addendum (Pipeline 0.7.0 — SPEC §4.15 / §51 / §55 engineering target)
-
-**VP-1 attribute-allowlist additions for v0.next structural elements.**
-
-`compiler/src/attribute-registry.js` SHALL register attribute catalogues for the four scrml-defined structural elements (per SPEC §4.15 / §24.4):
-
-| Element | Attribute name | Value-shape | Required |
-|---|---|---|---|
-| `<engine>` | `for` | type-name (PascalCase identifier resolving to an enum type) | yes |
-| `<engine>` | `initial` | bare-variant `.X` or qualified `Type.X` (omitted when `derived=` is present) | conditional |
-| `<engine>` | `var` | identifier (override for auto-declared variable name) | no |
-| `<engine>` | `derived` | reactive expression of the engine's `for=Type` | no (mutually exclusive with `initial=` per E-DERIVED-ENGINE-NO-INITIAL) |
-| `<match>` | `for` | type-name (PascalCase identifier resolving to an enum type) | yes |
-| `<match>` | `on` | reactive expression of the match's `for=Type` | no (defaults to the auto-declared engine variable for `for=Type` if one exists) |
-| `<errors>` | `of` | reactive expression resolving to a cell with synthesised validity surface | yes |
-| `<errors>` | `all` | boolean attribute | no |
-| `<onTransition>` | `to` | bare-variant `.X` of the parent engine's `for=Type` | no |
-| `<onTransition>` | `from` | bare-variant `.X` of the parent engine's `for=Type` | no |
-| `<onTransition>` | `once` | boolean attribute | no |
-| `<onTransition>` | `if` | reactive expression returning a boolean | no |
-
-Unknown attributes on these elements emit `W-ATTR-001` (existing). `<onTransition>` outside `<engine>` emits `E-STRUCTURAL-ELEMENT-MISPLACED` from VP-2 (Post-CE invariant) — extending VP-2's invariant set.
-
-**VP-2 v0.next invariants (additions):**
-
-1. No `<onTransition>` element outside an `<engine>` parent. Cross-ref §51.0.H.
-2. No `<errors>` element with absent or non-resolvable `of=` attribute. Cross-ref §55.8.
-3. No `<engine>` declaration inside a component body. Cross-ref §51.0.K. Emits `E-COMPONENT-ENGINE-SCOPE`.
-4. No residual `<channel>` markup inside `<program>` body. Cross-ref §38.1. Emits `E-CHANNEL-INSIDE-PROGRAM` (already covered by D3; called out here for completeness).
-
-**VP-3 v0.next interpolation rules:**
-
-- `<engine for=...>`: `for=` attribute SHALL NOT contain `${...}` interpolation. Type names are static. Cross-ref §51.0.B.
-- `<match for=...>`: same.
-- `<errors of=...>`: `of=` MAY be a reactive expression including `${...}` indirectly via member access, but the attribute itself accepts a bare expression (no `${...}` template wrapping). The attribute-value parser produces an expression AST.
-
-**Performance budget:** <= 2 ms per file (existing 1 ms + 1 ms for v0.next attribute allowlist + structural-element checks).
 
 ---
 
@@ -1519,6 +1577,11 @@ using a visited-set to detect and break cycles:
     | { kind: 'asIs',         constraint: ResolvedType | null }
     | { kind: 'cssClass' }
     | { kind: 'meta-splice',  resultType: ResolvedType, parentContext: ParentContextKind }
+    // v0.next additions:
+    | { kind: 'engine',             forType: ResolvedType /* enum */, varName: string, derived: boolean }
+    | { kind: 'engine-state-child', engine: ResolvedType /* engine */, variant: VariantDef }
+    | { kind: 'match-block',        forType: ResolvedType /* enum */, arms: MatchArmType[] }
+    | { kind: 'validity-surface',   cell: ResolvedType, level: 'compound' | 'field' }   // synthesised — see Stage 6.7
     | { kind: 'unknown' }      // unresolvable — always an error if reached in codegen
 
   ComponentShape = {
@@ -1556,7 +1619,59 @@ using a visited-set to detect and break cycles:
   - Meta-layer state (variables declared at the meta level) persists across `^{ }` blocks within
     the same compilation unit in source order (spec Section 22.5). TS tracks meta-layer scope
     separately from runtime scope.
+  - **Render-spec validity classification (v0.next, SPEC §6.4 / §5.4.1).** A `ReactiveDecl` with
+    `rhsShape: "render-spec"` (Shape 2 declaration) has its render-spec markup classified as:
+    - **bindable** — `<input type="text|email|number|...">`, `<textarea>`, `<select>`, `<input type="checkbox|radio|file">`, or a component declaring a bindable prop (`bind:value` etc.).
+    - **non-bindable** — any other markup element.
+
+    `<x/>` render-by-tag use-sites of a non-bindable Shape 2 cell emit
+    `E-CELL-RENDER-SPEC-NOT-BINDABLE`. Non-`const` declarations carrying a non-bindable
+    render-spec are also rejected. Bindable cells require bindable render-specs (L17 lock); use
+    `const <derived>` for display-only.
+  - **Engine `derived=expr` type compatibility (v0.next, SPEC §51.0.J).** A derived engine's
+    `derived=expr` SHALL be type-compatible with the engine's `for=Type`. TS validates this at
+    the engine declaration and at each cell-reference inside `derived=expr`. Type incompatibility
+    is `E-TYPE-001` with a clarifying message about derived-engine type compatibility. Direct
+    writes to a derived engine variable are `E-DERIVED-ENGINE-NO-WRITE`.
+  - **Bare-variant inference type completion (v0.next, SPEC §14.10).** TS resolves the qualifier
+    on `EnumVariantRef { qualifier: null, variantName }` from the position's expected type, in
+    priority order:
+
+    1. LHS type annotation (`<x>: T = .V` — fix to `T`).
+    2. Cell's already-resolved type (`@cell = .V` where `@cell: T` — fix to `T`).
+    3. Function parameter type (`f(.V)` where the parameter is typed `T`).
+    4. Function return type (`return .V` where the function's return is `T`).
+    5. Match on-expression type (`<match for=T>` — fix arm-pattern variants to `T`).
+    6. Engine `for=` qualifier (`<engine for=T initial=.V>`).
+    7. Other position with a fixed type.
+
+    Ambiguity (multiple union members declare the same variant name, OR no type context) emits
+    `E-VARIANT-AMBIGUOUS`.
+  - **Positional binding for predefined-shape (v0.next, SPEC §14.11).** A struct-typed cell with
+    a positional initialiser `<x>: T = (a, b, c)` is validated against the predefined struct's
+    field order. Field count mismatch and per-position type mismatch are `E-TYPE-001`.
+  - **Validators on derived cells rejected (v0.next, SPEC §55.14).** Validators on
+    `const <derived>` cells are forbidden. TS emits `E-DERIVED-WITH-VALIDATORS` at the declaration.
+    Use a refinement type (`const <x>: number(>=0) = ...`) for compile-time predicate enforcement.
+  - **Derived-cell value-mutation forbidden (v0.next, SPEC §6.11 — L21 S59 lock).** Any mutation
+    of a `const`-derived cell's value (mutating array methods, object property writes,
+    compound-assignment, `delete`, in-compound derived sub-cells) is `E-DERIVED-VALUE-MUTATE`.
+  - **`ValidationError` enum + `.Custom(tag)` (v0.next, SPEC §55.9).** `ValidationError` is a
+    built-in enum (registered in `compiler/src/builtin-types.ts`) with the variants:
+    `Required`, `TooShort(min: int)`, `TooLong(max: int)`, `PatternMismatch(pattern: string)`,
+    `BelowMin(min: number)`, `AboveMax(max: number)`, `BelowGte(bound: number)`,
+    `AboveLte(bound: number)`, `NotEqual(expected: any)`, `NotEqualTo(other: any)`,
+    `NotIn(allowed: any[])`, `EmailInvalid`, `UrlInvalid`, `NotNumeric`, `NotInteger`,
+    `Custom(tag: string)`. `.Custom(tag)` is the user-extension variant. Validity-surface
+    `errors` arrays carry these enum tags (NOT strings).
   - The AST structure from CE is not mutated. `nodeTypes` is a side table.
+
+  **Validity surface synthesis is its own sub-stage.** The auto-synthesized
+  `isValid` / `errors` / `touched` / `submitted` properties on validator-carrying cells
+  (and rollups for compounds with validator-carrying fields) are constructed in **Stage 6.7
+  (Validity Surface Synthesis)** — a TS sub-pass surfaced as a distinct narrative section
+  immediately following Stage 6.5 (META). See Stage 6.7 for the synth-cell registry,
+  per-field walker, and `E-SYNTHESIZED-WRITE`.
 - Consumer: META (Stage 6.5), Dependency Graph Builder (DG), Code Generator (CG)
 
 **Error contract:**
@@ -1598,6 +1713,18 @@ using a visited-set to detect and break cycles:
     (Reassigned from TAB, Amendment 5, 2026-03-26.)
   - `E-SCOPE-001`: Unquoted identifier attribute value cannot be resolved in current scope.
     (Reassigned from TAB, Amendment 5, 2026-03-26.)
+  - `E-CELL-RENDER-SPEC-NOT-BINDABLE` (v0.next, SPEC §6.4): non-bindable render-spec on a
+    non-`const` cell, or a `<x/>` render-by-tag use-site where the cell's render-spec is
+    not bindable.
+  - `E-VARIANT-AMBIGUOUS` (v0.next, SPEC §14.10): bare-variant `.X` cannot be uniquely
+    resolved (multiple union members declare the same variant name, or no type context).
+  - `E-DERIVED-WITH-VALIDATORS` (v0.next, SPEC §55.14): validator(s) on a `const <derived>` cell.
+  - `E-DERIVED-VALUE-MUTATE` (v0.next, SPEC §6.11 — L21): value-mutation of a `const`-derived
+    cell.
+  - `E-DERIVED-ENGINE-NO-WRITE` (v0.next, SPEC §51.0.J): direct write to a derived engine
+    variable.
+  - `E-PARSEVARIANT-001` (v0.next, SPEC §14.10 — L22): `parseVariant(json, T)` called with a
+    non-enum type argument.
 - Partial output: TS collects all errors before failing (non-fail-fast within a file). Output
   is not emitted if any error of severity `error` is present. Warnings do not block output.
 
@@ -1611,8 +1738,22 @@ for exhaustiveness. `lin` variables (including `~`) are tracked for exactly-once
 content model rules are applied. Attribute types are validated. `MetaBlock` nodes are
 type-checked by resolving the body as compile-time code, then verifying that the result type is
 compatible with the splicing coercion rules for the recorded `parentContext`. Meta-layer scope is
-tracked per-file in source order. The output is the original AST enriched with a `nodeTypes` side
-table and a `scopeChain` for downstream use.
+tracked per-file in source order.
+
+For v0.next, the same pass:
+- classifies `ReactiveDecl` render-specs as bindable / non-bindable per the input shape table;
+- resolves bare-variant `EnumVariantRef` qualifiers from the seven priority sources above;
+- validates positional struct initialisers against the predefined field order;
+- validates derived-engine `derived=expr` type-compatibility against the engine's `for=Type`;
+- rejects validators on `const <derived>` cells (`E-DERIVED-WITH-VALIDATORS`);
+- rejects value-mutation of `const`-derived cells (`E-DERIVED-VALUE-MUTATE`);
+- registers `parseVariant(json, T)` call sites and verifies `T` is an enum type
+  (`E-PARSEVARIANT-001` if not — type-as-argument primitive per L22).
+
+The output is the original AST enriched with a `nodeTypes` side table (carrying every v0.next
+ResolvedType variant when applicable) and a `scopeChain` for downstream use. Validity-surface
+synthesis runs as the **Stage 6.7** sub-pass after Stage 6.5 (META); see that section for the
+synth-cell registry construction.
 
 **What is NOT done by this stage:**
 - No code generation.
@@ -1621,100 +1762,15 @@ table and a `scopeChain` for downstream use.
 - No route assignment (consumed from RouteMap, not produced here).
 - No compile-time execution of meta block bodies (TS resolves types and validates coercion;
   META stage performs execution).
+- No validity-surface synthesis emission — that is Stage 6.7's responsibility (see below).
+  Stage 6 records the *typing* of synthesised properties; the surface itself is registered in
+  the synth-cell registry constructed in Stage 6.7.
 
-**Performance budget:** <= 20 ms per file (runs per-file once PA and RI are complete).
+**Performance budget:** <= 25 ms per file (20 ms baseline + 5 ms for v0.next bare-variant
+inference, render-spec classification, derived-engine type-compat, and parseVariant validation).
+The validity-surface synthesis budget is accounted in Stage 6.7.
 **Parallelism opportunity:** Yes — per-file, once PA and RI are complete.
 **Dependencies:** CE (Stage 3.2), PA, and RI must all be complete.
-
-### Stage 6 v0.next addendum (Pipeline 0.7.0 — SPEC §6 / §14 / §18 / §51 / §55 engineering target)
-
-**ResolvedType extensions:**
-
-The `ResolvedType` discriminated union extends with v0.next-specific kinds:
-
-```
-ResolvedType (v0.next additions)
-  | { kind: 'engine',           forType: ResolvedType (enum), varName: string, derived: boolean }
-  | { kind: 'engine-state-child', engine: ResolvedType (engine), variant: VariantDef }
-  | { kind: 'match-block',      forType: ResolvedType (enum), arms: MatchArmType[] }
-  | { kind: 'validity-surface', cell: ResolvedType, level: 'compound' | 'field' }   // synthesised
-```
-
-**Auto-synthesised validity surface type-checking:**
-
-For every cell with at least one validator (per SPEC §55.2), TS synthesises four read-only properties on the cell's type:
-
-| Property | Type | Notes |
-|---|---|---|
-| `isValid` | `boolean` | Compound rollup or per-field check |
-| `errors`  | `ValidationError[]` | Enum tags, NOT strings (cross-ref §55.9) |
-| `touched` | `boolean` | First interaction flag |
-| `submitted` | `boolean` | First-submit-attempted flag |
-
-For compound state with fields carrying validators, TS synthesises the same four properties on the compound itself (rollup) AND on each validator-carrying field. Reads against the synthesised properties resolve at TS time; writes against any synthesised property are `E-SYNTHESIZED-WRITE`.
-
-**`ValidationError` enum + `.Custom(tag)` extension:**
-
-`ValidationError` is a built-in enum (registered in `compiler/src/builtin-types.ts`). Variants:
-
-```
-type ValidationError:enum = {
-    Required,
-    TooShort(min: int),
-    TooLong(max: int),
-    PatternMismatch(pattern: string),
-    BelowMin(min: number),
-    AboveMax(max: number),
-    BelowGte(bound: number),
-    AboveLte(bound: number),
-    NotEqual(expected: any),
-    NotEqualTo(other: any),
-    NotIn(allowed: any[]),
-    EmailInvalid,
-    UrlInvalid,
-    NotNumeric,
-    NotInteger,
-    Custom(tag: string),
-}
-```
-
-`.Custom(tag: string)` is the user-extension variant. Per SPEC §55.9.
-
-**Render-spec validity classification:**
-
-A Shape 2 declaration's RHS markup element is classified by TS as:
-- **bindable** — `<input type="text|email|...">`, `<textarea>`, `<select>`, `<input type="checkbox|radio|file">`, or a component with a `bind:value` (or alternative bindable prop) declared.
-- **non-bindable** — any other markup element.
-
-`<x/>` render-by-tag use-sites of a non-bindable Shape 2 cell emit `E-CELL-RENDER-SPEC-NOT-BINDABLE`.
-
-**Engine `derived=expr` type compatibility:**
-
-Per SPEC §51.0.J, a derived engine's `derived=expr` SHALL be type-compatible with the engine's `for=Type`. TS validates this at the engine declaration and at each cell-reference inside `derived=expr`. Type incompatibility is `E-TYPE-001` with a clarifying message about derived-engine type compatibility.
-
-**Bare-variant inference type completion:**
-
-Per SPEC §14.10, TS resolves the qualifier on `EnumVariantRef { qualifier: null, variantName }` AST nodes from the position's expected type. The position's expected type is determined by:
-
-1. LHS type annotation (`<x>: T = .V` — fix to `T`).
-2. Cell's already-resolved type (`@cell = .V` where `@cell: T` — fix to `T`).
-3. Function parameter type (`f(.V)` where the parameter is typed `T`).
-4. Function return type (`return .V` where the function's return is `T`).
-5. Match on-expression type (`<match for=T>` — fix arm-pattern variants to `T`).
-6. Engine `for=` qualifier (`<engine for=T initial=.V>`).
-7. Other position with a fixed type.
-
-Ambiguity (multiple union members declare the same variant name, OR no type context) emits `E-VARIANT-AMBIGUOUS`.
-
-**Positional binding for predefined-shape:**
-
-Per SPEC §14.11, TS validates a positional initialiser against the predefined struct's field order at the declaration site. Field count mismatch and per-position type mismatch are `E-TYPE-001`.
-
-**Validators on derived cells (rejected):**
-
-Per SPEC §55.14, validators on `const <derived>` cells are forbidden. TS emits `E-DERIVED-WITH-VALIDATORS` at the declaration. Use a refinement type (`const <x>: number(>=0) = ...`) for compile-time predicate enforcement.
-
-**Performance budget:** <= 30 ms per file (existing 20 ms + 10 ms for synthesised validity surface + bare-variant inference + render-spec classification).
 
 ---
 
@@ -1810,6 +1866,109 @@ per file to respect meta-layer state persistence (spec Section 22.5).
 
 ---
 
+## Stage 6.7: Validity Surface Synthesis (VSS)
+
+**Added:** 2026-05-09 (C23 prose pass). Surfaces the auto-synthesized validity surface
+(SPEC §55 + L11) as a reader-discoverable distinct stage.
+
+**Implementation note:** in the compiler, validity-surface synthesis runs as TS sub-passes
+(B11 — synth-cell registry; B12 — per-field synth-surface walker; B17 — `<onTransition>`
+walker integration) inside `compiler/src/type-system.ts`. The Stage 6.7 narrative is the
+composite reader-facing view; the sub-passes are not re-orderable runtime stages. VSS is
+positioned in the pipeline narrative AFTER Stage 6.5 (META) because DG (Stage 7) and CG
+(Stage 8) consume the synth-cells and the surface must be complete before they run.
+
+**Input contract:**
+- Type: `{ files: TypedFileAST[] }` — the post-META TS-typed ASTs.
+- Invariants:
+  - All `TypedFileAST` entries have completed Stage 6 type resolution and Stage 6.5 META
+    splicing without errors.
+  - Every cell with at least one validator has its declaration node + validator attribute
+    list resolved (TS invariant).
+  - Every compound state-cell with at least one validator-carrying field is identified.
+- Source: META (Stage 6.5).
+
+**Output contract:**
+- Type: `{ files: TypedFileAST[], synthCellRegistry: Map<NodeId, SynthCellEntry>, errors: VSSError[] }`
+
+  ```
+  SynthCellEntry = {
+    cellNodeId: NodeId,                     // cell that carries the surface
+    level: 'compound' | 'field',
+    parentCompoundId: NodeId | null,        // non-null when level === 'field'
+    isValidNodeId: NodeId,                  // synthesised computed-cell node
+    errorsNodeId: NodeId,                   // synthesised computed-cell node (ValidationError[])
+    touchedNodeId: NodeId,                  // synthesised state-cell node (boolean)
+    submittedNodeId: NodeId,                // synthesised state-cell node (boolean)
+    transitionEffectNodeIds: NodeId[],      // <onTransition> + effect= bodies that fire on this cell
+  }
+  ```
+
+- Invariants:
+  - For every cell with one or more validators: a `SynthCellEntry` is created with
+    `level: 'field'` (when the cell is a field of a compound) or `level: 'compound'`.
+  - For every compound carrying validator-bearing fields: a rollup `SynthCellEntry` is created
+    with `level: 'compound'` and `parentCompoundId: null`. The compound's `isValid` is the
+    AND of its fields' `isValid`; its `errors` is the concatenated array of field errors;
+    `touched` and `submitted` are derived from any-field-touched / any-field-submitted.
+  - Reads against `@cell.isValid` / `@cell.errors` / `@cell.touched` / `@cell.submitted`
+    resolve at TS to the synth-cell node; the resolved type is taken from the `SynthCellEntry`
+    (ResolvedType variants `validity-surface` `level: 'compound' | 'field'`).
+  - Writes against any synthesised property emit `E-SYNTHESIZED-WRITE`.
+  - The synth-cell registry is consumed by Stage 7 (DG) for `validator-arg` edge construction
+    and by Stage 8 (CG) for accessor emission.
+- Consumer: Dependency Graph Builder (DG, Stage 7); Code Generator (CG, Stage 8).
+
+**Error contract:**
+- Error type: `VSSError { code: string, message: string, span: Span }`.
+- Error codes:
+  - `E-SYNTHESIZED-WRITE` (SPEC §55.5–§55.7): a write expression targets a synthesised
+    validity-surface property (`@x.isValid`, `@x.errors`, `@x.touched`, `@x.submitted`).
+- Defense-in-depth: CG also catches this as `E-CG-VALIDITY-WRITE`.
+
+**Transformation:**
+
+VSS runs in three sub-passes (per SPEC §55 + steps B11 / B12 / B17 in the implementation):
+
+1. **Synth-cell registry construction (B11).** Walk every cell declaration. For each cell
+   with one or more validators, create a `SynthCellEntry` with synthesised node IDs for the
+   four surface properties (`isValid`, `errors`, `touched`, `submitted`). Per SPEC §55.2, the
+   surface is created if and only if the cell carries at least one validator (no auto-synthesis
+   on validator-free cells).
+
+2. **Per-field synth-surface walker (B12).** Walk every compound state declaration. For each
+   compound carrying validator-bearing fields, create a rollup `SynthCellEntry` whose surface
+   composes the field surfaces:
+   - `compound.isValid` = AND over field `isValid`s.
+   - `compound.errors` = concatenation of field `errors` arrays (preserving source order).
+   - `compound.touched` = OR over field `touched`s (any-field-touched).
+   - `compound.submitted` = OR over field `submitted`s (any-field-submitted; flips on first
+     `<form onsubmit>` attempt or explicit `submit(@compound)` call).
+
+3. **`<onTransition>` walker integration (B17).** For each `<onTransition>` element and each
+   `effect=` attribute on a state-child rule, walk the effect body and identify every
+   side-effect site that touches a synthesised cell. Register these in
+   `transitionEffectNodeIds` so DG can wire `transition-effect` edges and CG can emit the
+   handler at the correct flush point.
+
+After the three sub-passes, every reader of `@cell.<surface-property>` in the AST has a
+`SynthCellEntry` entry available; downstream stages (DG, CG) consume the registry by node-id
+lookup.
+
+**What is NOT done by this stage:**
+- No DGNode / DGEdge construction — DG (Stage 7) builds those using the synth-cell registry.
+- No CG accessor emission — CG (Stage 8) emits `Object.defineProperty` accessors.
+- No validator predicate evaluation — predicates are declarative; their RUNTIME evaluation
+  is performed by codegen-emitted reactive computed cells.
+
+**Performance budget:** <= 5 ms per file (the synth-cell registry is linear in cell count;
+per-field walker is linear in compound depth × field count; both are typically small).
+**Parallelism opportunity:** Yes — fully per-file (synth-cell registry is per-file-local).
+**Dependencies:** Stage 6.5 (META) must complete; Stage 6 (TS) must have resolved all cell
+types and validator vocabularies.
+
+---
+
 ## Stage 7: Dependency Graph Builder (DG)
 
 **Input contract:**
@@ -1818,6 +1977,7 @@ per file to respect meta-layer state persistence (spec Section 22.5).
   {
     files: TypedFileAST[],
     routeMap: RouteMap,
+    synthCellRegistry: Map<NodeId, SynthCellEntry>,   // v0.next — from VSS (Stage 6.7)
   }
   ```
 - Invariants:
@@ -1828,7 +1988,10 @@ per file to respect meta-layer state persistence (spec Section 22.5).
   - No unresolved compile-time `MetaBlock` nodes remain in any AST (META invariant). All
     compile-time `^{}` blocks have been evaluated and spliced by META (Stage 6.5). DG
     receives the post-META-expansion AST.
-- Source: META (Stage 6.5)
+  - `synthCellRegistry` is complete (VSS / Stage 6.7 invariant) — every cell with a
+    validity surface has a `SynthCellEntry`; v0.next `validator-arg` edges target the
+    synth-cell nodes.
+- Source: VSS (Stage 6.7)
 
 **Output contract:**
 - Type: `{ depGraph: DependencyGraph }`
@@ -1846,11 +2009,24 @@ per file to respect meta-layer state persistence (spec Section 22.5).
     | { kind: 'sql-query', nodeId: NodeId, query: string,                 hasLift: boolean, span: Span }
     | { kind: 'import',    nodeId: NodeId, source: string,                hasLift: boolean, span: Span }
     | { kind: 'meta',      nodeId: NodeId, deterministic: boolean,        hasLift: boolean, span: Span }
+    // v0.next additions:
+    | { kind: 'engine-decl',    nodeId: NodeId, forType: ResolvedType, varName: string, derived: boolean,  hasLift: boolean, span: Span }
+    | { kind: 'engine-variant', nodeId: NodeId, engineNodeId: NodeId, variant: VariantDef,                 hasLift: boolean, span: Span }
+    | { kind: 'validity',       nodeId: NodeId, cellNodeId: NodeId,
+                                surfaceProp: 'isValid' | 'errors' | 'touched' | 'submitted',               hasLift: boolean, span: Span }
+    | { kind: 'derived-cell',   nodeId: NodeId, cellNodeId: NodeId, expression: ASTNode,                   hasLift: boolean, span: Span }
+    | { kind: 'validator-pred', nodeId: NodeId, ownerCellNodeId: NodeId, predicate: string, args: ASTNode[], hasLift: boolean, span: Span }
 
   DGEdge = {
     from: NodeId,
     to: NodeId,
-    kind: 'calls' | 'reads' | 'writes' | 'renders' | 'awaits' | 'invalidates',
+    kind: 'calls' | 'reads' | 'writes' | 'renders' | 'awaits' | 'invalidates'
+        // v0.next additions:
+        | 'derives-from'        // const <derived> cell depends on RHS expression cells
+        | 'engine-derives'      // <engine derived=expr> depends on cells in expr
+        | 'validator-arg'       // validator predicate's expression-arg references a cell (cross-field)
+        | 'rule-source'         // engine state-child rule="event -> Variant" — source of event/predicate
+        | 'transition-effect',  // <onTransition> / effect= attaches to transition edges
   }
   ```
 
@@ -1878,6 +2054,25 @@ per file to respect meta-layer state persistence (spec Section 22.5).
     `LiftExpr` exists or if the node does not appear in the direct body of an anonymous logic
     block. The annotation is computed during Phase 1 (per-file subgraph construction) and is
     immutable in the merged graph.
+  - **v0.next derived-state and validator dependency invariants (SPEC §31.4 / §31.5):**
+    - Every `const <derived>` cell has a `DGNode` of `kind: 'derived-cell'` with a
+      `'derives-from'` edge from each cell referenced in its RHS expression.
+    - Every `<engine derived=expr>` has its `engine-decl` node connected by `'engine-derives'`
+      edges from each cell referenced in `expr`.
+    - The union of `'derives-from'` and `'engine-derives'` edges is a DAG; cycle detection
+      runs project-wide before DG output is emitted.
+    - Every validator on every cell that takes an expression argument has a
+      `validator-pred` node with `'validator-arg'` edges from each referenced cell to the
+      synth-cell node for the cell carrying the validator. The `'validator-arg'` graph is
+      a DAG; cycle detection runs project-wide.
+  - **Engine transition-graph invariants (SPEC §51.0.F / §51.0.H):**
+    - Every state-child `rule="event -> Variant"` registers the event at the engine node
+      and adds a transition edge from source variant to target.
+    - Every `<onTransition to=X from=Y>` element and every `effect=` attribute on a state-child
+      rule has a `'transition-effect'` edge from the relevant transition edge to the effect's
+      body node.
+    - Multi-target rules with `effect=` attribute are `E-ENGINE-EFFECT-AMBIGUOUS` —
+      `effect=` requires a single-target rule.
 - Consumer: Code Generator (CG)
 
 **Error contract:**
@@ -1894,6 +2089,16 @@ per file to respect meta-layer state persistence (spec Section 22.5).
     compile error (spec §10.5.2). The error message SHALL identify all parallel nodes with
     `hasLift: true`, the `lift` call spans in each branch, and the logic block span. Severity:
     error (blocks codegen).
+  - `E-VALIDATOR-CIRCULAR-DEP` (v0.next, SPEC §31.4 / §55.11.2 / §34): cycle in
+    `'validator-arg'` edges (cross-field validators reference each other in a cycle).
+  - `E-DERIVED-CIRCULAR-DEP` (v0.next, SPEC §31.5): cycle through `'derives-from'` edges (a
+    `const <derived>` cell expression depends on itself directly or transitively); also fires
+    on any `'derives-from'` ↔ `'engine-derives'` mixed-kind cycle.
+  - `E-DERIVED-ENGINE-CIRCULAR` (v0.next, SPEC §51.0.J / §31.5): cycle through
+    `'engine-derives'` edges only (a `<engine derived=expr>` chain forms a cycle).
+  - `E-ENGINE-EFFECT-AMBIGUOUS` (v0.next, SPEC §51.0.H): `effect=` attribute on a multi-target
+    rule (`rule="evt -> .A | .B"` with `effect=`). The fix is to use `<onTransition>` for
+    multi-target.
 - Partial output: Fail-fast on `E-DG-001` and `E-LIFT-001`. Warnings (`E-DG-002`) do not block
   output.
 
@@ -1912,6 +2117,21 @@ nodes (those producing runtime macro stubs per spec Section 22.6) are added as `
 with `kind: 'meta'`. DG operates on the post-META-expansion AST — compile-time meta blocks have
 already been replaced by their spliced outputs by META (Stage 6.5).
 
+For v0.next, Phase 1 also constructs:
+- A `derived-cell` node per `const <derived>` cell, with `'derives-from'` edges from each
+  cell referenced in the RHS expression (SPEC §31.5).
+- An `engine-decl` node per `<engine>` declaration; for derived engines, with
+  `'engine-derives'` edges from each cell referenced in `derived=expr`.
+- An `engine-variant` node per state-child of an engine; `rule=` attributes register
+  transition edges and event triggers via `'rule-source'` edges.
+- A `validator-pred` node per validator on each cell. For validators that take an expression
+  argument, walk the predicate's argument tree and add `'validator-arg'` edges from every
+  referenced cell's reactive node to the synth-cell node (`SynthCellEntry.isValidNodeId` /
+  `errorsNodeId`) for the cell carrying the validator. Per SPEC §31.4.
+- For each `<onTransition>` element and each `effect=` attribute on a state-child rule, add
+  a `'transition-effect'` edge from the transition edge to the effect's body node. Multi-target
+  rule with `effect=` is `E-ENGINE-EFFECT-AMBIGUOUS`.
+
 During Phase 1, for each `DGNode` N created for a node that appears in the direct body of an
 anonymous `${ }` logic block, DG inspects the `LogicNode[]` sequence of that block. It scans
 the statements following N's corresponding AST position for `LiftExpr` nodes at the direct body
@@ -1922,10 +2142,21 @@ server-call statement or the end of the block, N's `hasLift` field is set to `tr
 Per-file subgraphs can be constructed in parallel across Bun workers and then merged into the
 project-wide graph.
 
-**Phase 2 — Lift concurrent detection (lift-checker sub-pass):**
+**Phase 2 — Lift concurrent detection + v0.next cycle detection (project-wide sub-pass):**
 After the full project-wide graph is merged and `'awaits'` edges are complete, the lift checker
-runs as a sub-pass within this stage. It does not produce a separate output — E-LIFT-001 errors
-are emitted into the DG error list and block the DG output if any are found.
+runs as a sub-pass within this stage. The same Phase-2 sub-pass also performs three v0.next
+cycle checks on the merged graph:
+
+1. **Validator-arg cycles.** A cycle in `'validator-arg'` edges is `E-VALIDATOR-CIRCULAR-DEP`
+   (SPEC §55.11.2). Cross-field validators that reference each other in a cycle cannot be
+   evaluated.
+2. **Derived-cell cycles.** A cycle in `'derives-from'` edges is `E-DERIVED-CIRCULAR-DEP`
+   (SPEC §31.5). A cycle that includes both `'derives-from'` and `'engine-derives'` edges
+   uses the same code (the derived-cell error is the more general code).
+3. **Derived-engine cycles.** A cycle in `'engine-derives'` edges only is
+   `E-DERIVED-ENGINE-CIRCULAR` (SPEC §51.0.J).
+
+Any of these errors fail the DG output. The lift-checker runs the algorithm below.
 
 **Algorithm (inputs and detection decision):**
 
@@ -1963,71 +2194,13 @@ rejected; nodes connected by any `'awaits'` path are never flagged.
 - No type resolution (consumed from TS output).
 - No route assignment (consumed from RI output).
 
-**Performance budget:** <= 20 ms for the full project (graph construction is linear in AST size;
-lift checker is linear in the number of nodes with `hasLift: true` per logic block).
+**Performance budget:** <= 30 ms for the full project (20 ms baseline for graph construction +
+lift-checker + 10 ms for v0.next derived-state, validator-arg, and transition-effect tracking +
+three additional cycle checks; all checks linear in graph size).
 **Parallelism opportunity:** Limited — edges cross file boundaries, so this is project-wide.
   Per-file subgraphs can be built in parallel and then merged.
-**Dependencies:** META (Stage 6.5) must complete for all files.
-
-### Stage 7 v0.next addendum (Pipeline 0.7.0 — SPEC §31.4 / §31.5 / §51 / §55 engineering target)
-
-**New DGNode kinds:**
-
-```
-DGNode (v0.next additions)
-  | { kind: 'engine-decl',    nodeId, forType, varName, derived: boolean,         hasLift, span }
-  | { kind: 'engine-variant', nodeId, engineNodeId, variant, ...,                 hasLift, span }
-  | { kind: 'validity',       nodeId, cellNodeId, surfaceProp: 'isValid'|'errors'|'touched'|'submitted', hasLift, span }
-  | { kind: 'derived-cell',   nodeId, cellNodeId, expression: ASTNode,            hasLift, span }
-  | { kind: 'validator-pred', nodeId, ownerCellNodeId, predicate: string, args: ASTNode[], hasLift, span }
-```
-
-**New DGEdge kinds:**
-
-```
-DGEdge.kind (v0.next additions)
-  | 'derives-from'        // const <derived> cell depends on RHS expression cells
-  | 'engine-derives'      // <engine derived=expr> depends on cells in expr
-  | 'validator-arg'       // validator predicate's expression-arg references a cell (cross-field)
-  | 'rule-source'         // engine state-child rule="event -> Variant" — source of event/predicate
-  | 'transition-effect'   // <onTransition> / effect= attaches to transition edges
-```
-
-**Validator predicate-arg dependency tracking (per SPEC §31.4):**
-
-For every validator on every cell that takes an expression argument, DG SHALL:
-
-1. Walk the predicate's argument expression tree and collect all reactive cell references.
-2. Add a `'validator-arg'` edge from the referenced cell's reactive node to the synthesised validity-surface node for the cell carrying the validator.
-3. After Phase 1 (per-file subgraph construction), check the global graph for cycles in `'validator-arg'` edges. A cycle is `E-VALIDATOR-CIRCULAR-DEP` (§55.11.2 / §34) — fail the run.
-
-**Derived-state expression dependency tracking (per SPEC §31.5):**
-
-For every `const <derived>` cell and every `<engine derived=expr>`:
-
-1. Walk the RHS expression tree.
-2. Add a `'derives-from'` edge (for derived cells) or `'engine-derives'` edge (for derived engines) from each referenced cell's reactive node to the derived cell's / engine's node.
-3. Cycle detection (DAG check on the union of `'derives-from'` and `'engine-derives'` edges):
-   - Cycle through derived cells only → `E-DERIVED-CIRCULAR-DEP`.
-   - Cycle through derived engines only → `E-DERIVED-ENGINE-CIRCULAR`.
-   - Mixed-kind cycle → `E-DERIVED-CIRCULAR-DEP` (the derived-cell error is the more general code).
-
-**Engine state-child rule edges (per SPEC §51.0.F):**
-
-For every `rule="event -> Variant"` attribute on a state-child:
-
-1. The event-name (the LHS of `->`) is registered as a transition trigger at the engine node. If the rule is event-driven, the event SHOULD have a corresponding `.advance(.event)` call site or compiler-derived call site (e.g., a button's `onclick` synthesised event).
-2. The target variant (the RHS of `->`) is added as a transition edge from the source variant to the target.
-3. The full `rule=` set forms the engine's transition graph. Direct writes to the engine variable that don't follow the transition graph are detected at TS (cross-ref Stage 6 v0.next addendum) and emit `E-ENGINE-INVALID-TRANSITION`.
-
-**`<onTransition>` and `effect=` edges:**
-
-For every `<onTransition to=X from=Y>` element and every `effect=` attribute on a state-child rule:
-
-1. Add a `'transition-effect'` edge from the relevant transition edge to the effect's body node. The effect fires when the transition fires (cross-ref §51.0.H).
-2. Multi-target rule (one rule with multiple `->` targets) with `effect=` attribute → `E-ENGINE-EFFECT-AMBIGUOUS` — `effect=` requires a single-target rule. Use `<onTransition>` for multi-target.
-
-**Performance budget:** <= 30 ms for the full project (existing 20 ms + 10 ms for v0.next-specific dependency tracking and cycle detection).
+**Dependencies:** VSS (Stage 6.7) must complete (synth-cell registry must exist before
+`'validator-arg'` edges can target it). META (Stage 6.5) must complete for all files.
 
 ---
 
@@ -2102,6 +2275,7 @@ interface LoopHoist {
     routeMap: RouteMap,
     depGraph: DependencyGraph,
     protectAnalysis: ProtectAnalysis,
+    synthCellRegistry: Map<NodeId, SynthCellEntry>,   // v0.next — from VSS (Stage 6.7)
   }
   ```
 - Invariants:
@@ -2112,6 +2286,9 @@ interface LoopHoist {
   - All spans are intact.
   - No `{ kind: 'unknown' }` types in any `nodeTypes` map.
   - No unresolved compile-time `MetaBlock` nodes remain (META invariant).
+  - `synthCellRegistry` is complete (VSS / Stage 6.7 invariant) — every synth-cell node
+    referenced by a `'validator-arg'` or `'transition-effect'` edge in `depGraph` has a
+    `SynthCellEntry`. CG uses these entries to emit accessors.
 - Source: Dependency Graph Builder (DG)
 
 **Output contract:**
@@ -2169,6 +2346,27 @@ interface LoopHoist {
     begins with an auth check (`_scrml_auth_check`) that redirects unauthenticated requests.
   - When `csrf="auto"` is configured and a POST handler is generated, the handler body validates
     the `X-CSRF-Token` header via `_scrml_validate_csrf` and returns 403 on failure.
+  - **v0.next render-by-tag, engine state-child, validity-surface, errors-elem, and
+    reset(@cell) emission rules** are described in the Transformation section as numbered
+    sub-blocks. The corresponding output invariants:
+    - Every markup-position node with `resolvedCategory: "render-by-tag"` is replaced by the
+      cell's render-spec (or interpolation, for literal cells) per the dispatch table; no
+      `<x/>` cell-name tags survive into output HTML.
+    - Every cell with at least one validator (per `synthCellRegistry`) has read-only
+      computed-property accessors emitted (`isValid`, `errors`, `touched`, `submitted`); no
+      setters are emitted (writes blocked at TS via `E-SYNTHESIZED-WRITE`; defense-in-depth
+      at CG via `E-CG-VALIDITY-WRITE`).
+    - Every `<errors of=expr/>` element produces a reactive renderer that reads the synth-cell
+      `errors` array and dispatches to body override or `messageFor(...)` per SPEC §55.10.
+    - Every `<engine>` declaration produces a render-time conditional dispatcher over the
+      auto-declared (or `var=`-overridden) cell, plus a `_scrml_advance` runtime helper for
+      transition validation.
+    - Every `reset(@cell)` call expands to a γ-semantics rewrite using `default=`-captured
+      expression when present, else re-evaluating the initialiser.
+  - **Auto-name encoding for v0.next surfaces (SPEC §47.4):** auto-declared engine variables,
+    synthesised validity properties, and transition-handler bodies use the encoded-name scheme
+    of §47 (kind `t` for state cells, `p` for boolean computed cells, `a` for arrays, `f` for
+    functions). `reflect()` decodes back to developer-visible dotted form.
 - Consumer: Compiler output writer (writes files to disk)
 
 **Error contract:**
@@ -2195,6 +2393,15 @@ interface LoopHoist {
     logic block body (outside any function). These constructs are server-only and cannot execute
     in client context. The node is suppressed from client output. The developer should move SQL
     operations inside a server-boundary function.
+  - `E-CG-VALIDITY-WRITE` (v0.next, defense-in-depth): a write to a synthesised
+    validity-surface property reached CG without TS catching it as `E-SYNTHESIZED-WRITE`.
+    Indicates a TS invariant violation.
+  - `E-CG-ENGINE-RULE-VIOLATION` (v0.next, defense-in-depth): codegen-detected static rule
+    violation; fires in addition to TS's `E-ENGINE-INVALID-TRANSITION`.
+  - `E-CELL-NO-RENDER-SPEC` (v0.next, SPEC §6.4): `<x/>` render-by-tag use of a cell whose
+    `rhsShape` is `"literal"` (no render-spec) or `"derived-expr"` with a non-markup-typed
+    RHS. The fix is to use `${@x}` interpolation, or to declare the cell with a render-spec
+    (Shape 2). Severity: error.
 - Partial output: Fail-fast on any `E-CG-*` error (severity `'error'`). Warnings (`W-CG-001`,
   `E-DG-002` propagated from DG) do not block output. CG errors indicate upstream invariant
   violations and should not occur in a correctly functioning pipeline. If reached, they are
@@ -2213,6 +2420,78 @@ already been spliced by META (Stage 6.5); CG emits their results as inline conte
 Non-deterministic `MetaBlock` nodes emit runtime macro stubs in client JS. Source maps are built
 in parallel with code emission.
 
+The walk performs five v0.next emission sub-blocks per file:
+
+1. **`<x/>` render-by-tag expansion (SPEC §6.4 / §5.4.1).** For each markup-position node with
+   `resolvedCategory: "render-by-tag"` (NR-resolved cell name in markup), CG expands per the
+   cell's `rhsShape`:
+
+   | `rhsShape` | Expansion |
+   |---|---|
+   | `"literal"` | Plain interpolation: emit `${@x}` text. Non-display use of a literal cell as `<x/>` is `E-CELL-NO-RENDER-SPEC`. |
+   | `"render-spec"` | Emit the render-spec's underlying element with `bind:value` / `bind:checked` / `bind:files` / `bind:group` injected per the dispatch table in SPEC §5.4.1. The element's other attributes flow through; the bind attribute is added. |
+   | `"derived-expr"` (markup-typed) | Inline the derived markup value at the position. |
+   | `"derived-expr"` (non-markup-typed) | `E-CELL-NO-RENDER-SPEC` if used as `<x/>` render-by-tag; valid via `${@x}` interpolation. |
+
+2. **Engine state-child rendering (SPEC §51.0).** For each `<engine for=T initial=.X>`
+   declaration, CG emits:
+   - The auto-declared (or `var=`-overridden) reactive cell holding the current variant.
+   - A render-time conditional dispatcher that selects the active state-child body based on
+     the current variant value.
+   - The transition contract enforcement: a runtime `_scrml_advance(engineVar, evt)` helper
+     validates the transition against the compile-time-known rule set; invalid transitions
+     throw at runtime (`E-ENGINE-INVALID-TRANSITION`). Where the from-state is statically
+     knowable, TS rejects at compile time.
+   - `<onTransition>` and `effect=` handlers as transition-edge effects: registered on the
+     engine's variant-change observer, fire in the same reactive flush as the transition.
+   - Derived engines (`derived=expr`): emit a reactive subscription on the cells referenced
+     by `derived=expr`; the engine variable updates reactively as a `'derives-from'` consumer.
+     Direct writes are rejected at TS (`E-DERIVED-ENGINE-NO-WRITE`).
+
+3. **Auto-synthesized validity property emission (SPEC §55.5–§55.7).** For each cell with a
+   `SynthCellEntry` in `synthCellRegistry`, CG emits computed-property accessors over the
+   underlying cell object:
+
+   ```js
+   // Pseudocode for emitted code
+   Object.defineProperty(_signup, "isValid",   { get: () => _signup_isValid_compute() })
+   Object.defineProperty(_signup, "errors",    { get: () => _signup_errors_compute() })
+   Object.defineProperty(_signup, "touched",   { get: () => _signup_touched_state })
+   Object.defineProperty(_signup, "submitted", { get: () => _signup_submitted_state })
+   ```
+
+   The compute-fns are reactive — they re-evaluate when their `'validator-arg'` /
+   `'derives-from'` dependency edges fire. CG emits no setters; writes are blocked at TS.
+
+4. **`<errors of=expr/>` rendering (SPEC §55.8).** For each `<errors of=cellExpr [all] [body...]/>`
+   element:
+   - Resolve `cellExpr` to a reactive cell with a synthesised validity surface.
+   - Read `@cellExpr.errors` (the array of `ValidationError` enum values).
+   - If a body override is present, render the body with the per-error binding (`err`
+     parameter to the body's arrow-function-shaped expression).
+   - Otherwise, render the default form using `messageFor(err, fieldName, ...payload)`
+     (cross-ref SPEC §55.10's 4-level resolution chain).
+   - If `all` attribute is present, iterate all errors and render each; otherwise render only
+     the first error (default).
+
+5. **`reset(@cell)` keyword expansion (SPEC §6.8 — L18 lock).** For each `reset(@cell)` call:
+   - If `@cell` is plain (Shape 1): emit `@cell = <default-expr>` where `<default-expr>` is the
+     `default=` attribute's value if present, else the original initialiser expression
+     (γ-semantics with β fallback per SPEC §55.13).
+   - If `@cell` is Shape 2 with render-spec: same as above; the rendered input element
+     re-mounts via the reactive flush.
+   - If `@cell` is a compound: `reset(@compound.field)` resets a single field;
+     `reset(@compound)` resets all fields.
+
+   The `default=` attribute's value is captured at TAB time and re-evaluated at reset time.
+
+Auto-name encoding (SPEC §47.4) runs alongside the five sub-blocks: auto-declared engine
+variables use kind `t` (state); synthesised validity properties use kind `p` (boolean)
+or `a` (array); transition-handler bodies use kind `f` (function). The name-builder uses the
+cell's encoded name + a deterministic suffix (e.g., `_t1234abcd` cell →
+`_t1234abcd_isValid` / `_t1234abcd_errors`). `reflect()` (SPEC §47.2) decodes the suffix-form
+back to the developer-visible dotted form.
+
 **What is NOT done by this stage:**
 - No type resolution (all types consumed from TS output).
 - No route inference (all boundaries consumed from RouteMap).
@@ -2223,81 +2502,12 @@ in parallel with code emission.
   downstream tooling if desired).
 - No compile-time meta evaluation (completed by META, Stage 6.5).
 
-**Performance budget:** <= 25 ms per file.
+**Performance budget:** <= 35 ms per file (25 ms baseline + 10 ms for v0.next render-by-tag
+dispatch, engine state-child rendering, validity-surface accessor emission, `<errors>`
+renderer, and `reset(@cell)` expansion).
 **Parallelism opportunity:** Yes — per-file, once DG is complete.
-**Dependencies:** Dependency Graph Builder (DG) must complete for the project.
-
-### Stage 8 v0.next addendum (Pipeline 0.7.0 — SPEC §5.4.1 / §6 / §51 / §55 engineering target)
-
-**`<x/>` render-by-tag expansion (cross-ref SPEC §6.4, §5.4.1):**
-
-For each markup-position node with `resolvedCategory: "render-by-tag"` (NR-resolved cell name in markup), CG SHALL expand the node based on the cell's `rhsShape`:
-
-| `rhsShape` | Expansion |
-|---|---|
-| `"literal"` | Plain interpolation: emit `${@x}` text (the cell has no render-spec; non-display use is `E-CELL-NO-RENDER-SPEC`). |
-| `"render-spec"` | Emit the render-spec's underlying element with `bind:value`/`bind:checked`/`bind:files`/`bind:group` injected per the dispatch table in §5.4.1. The element's other attributes (e.g., `type`, `placeholder`) flow through; the bind attribute is added. |
-| `"derived-expr"` (markup-typed) | Inline the derived markup value at the position. |
-| `"derived-expr"` (non-markup-typed) | `E-CELL-NO-RENDER-SPEC` if used as `<x/>` render-by-tag; valid via `${@x}` interpolation. |
-
-**Engine state-child rendering (cross-ref SPEC §51.0):**
-
-For each `<engine for=T initial=.X>` declaration, CG emits:
-
-1. The auto-declared (or `var=`-overridden) reactive cell holding the current variant.
-2. A render-time conditional dispatcher that selects the active state-child body based on the current variant value.
-3. The transition contract enforcement: a runtime `_scrml_advance(engineVar, evt)` helper validates the transition against the compile-time-known rule set; invalid transitions throw at runtime (`E-ENGINE-INVALID-TRANSITION`), unless the from-state is statically knowable in which case TS rejects at compile time.
-4. `<onTransition>` and `effect=` handlers as transition-edge effects: registered on the engine's variant-change observer, fire in the same reactive flush as the transition.
-5. Derived engines (`derived=expr`): emit a reactive subscription on the cells referenced by `derived=expr`; the engine variable updates reactively as a `'derives-from'` consumer. Direct writes are rejected at TS (`E-DERIVED-ENGINE-NO-WRITE`).
-
-**Auto-synthesised validity property emission (cross-ref SPEC §55.5–§55.7):**
-
-For each cell with validators, CG emits computed-property accessors:
-
-```js
-// Pseudocode for emitted code
-Object.defineProperty(_signup, "isValid", { get: () => _signup_isValid_compute() })
-Object.defineProperty(_signup, "errors",  { get: () => _signup_errors_compute() })
-Object.defineProperty(_signup, "touched", { get: () => _signup_touched_state })
-Object.defineProperty(_signup, "submitted", { get: () => _signup_submitted_state })
-```
-
-The compute-fns are reactive — they re-evaluate when their dependency edges fire. The synthesised property writes are rejected at TS (`E-SYNTHESIZED-WRITE`); CG emits no setters.
-
-**`<errors of=expr/>` rendering (cross-ref SPEC §55.8):**
-
-For each `<errors of=cellExpr [all] [body...]/>` element:
-
-1. Resolve `cellExpr` to a reactive cell with a synthesised validity surface.
-2. Read `@cellExpr.errors` (the array of `ValidationError` enum values).
-3. If a body override is present, render the body with the per-error binding (`err` parameter to the body's arrow-function-shaped expression).
-4. Otherwise, render the default form using `messageFor(err, fieldName, ...payload)` (cross-ref §55.10's 4-level resolution chain).
-5. If `all` attribute is present, iterate all errors and render each; otherwise render only the first error (default).
-
-**`reset(@cell)` keyword expansion (cross-ref SPEC §6.8):**
-
-For each `reset(@cell)` call, CG emits:
-- If `@cell` is plain (Shape 1): `@cell = <default-expr>` where `<default-expr>` is the `default=` attribute's value if present, else the original initialiser expression.
-- If `@cell` is Shape 2 with render-spec: same as above; the rendered input element re-mounts via the reactive flush.
-- If `@cell` is a compound: `reset(@compound.field)` resets a single field; `reset(@compound)` resets all fields.
-
-The `default=` attribute's value is captured at TAB time and re-evaluated at reset time. This is the γ-semantics path (cross-ref SPEC §55.13).
-
-**Auto-name encoding for v0.next surfaces (cross-ref SPEC §47.4):**
-
-CG SHALL emit encoded names per §47 for:
-- Auto-declared engine variables (kind `t` — state).
-- Synthesised validity properties (kind `p` for booleans, kind `a` for the errors array). The name-builder uses the cell's encoded name + a deterministic suffix (e.g., `_t1234abcd` cell → `_t1234abcd_isValid` / `_t1234abcd_errors`).
-- Transition-handler bodies (kind `f` — function).
-
-`reflect()` (§47.2) SHALL decode the suffix-form back to its developer-visible dotted form (e.g., `@signup.isValid`).
-
-**New CG error codes (v0.next):**
-
-- `E-CG-VALIDITY-WRITE` (sibling of E-SYNTHESIZED-WRITE; defense-in-depth at CG time if a synthesised-property write reaches CG without TS catching it).
-- `E-CG-ENGINE-RULE-VIOLATION` (codegen-detected static rule violation; fires in addition to TS's `E-ENGINE-INVALID-TRANSITION`).
-
-**Performance budget:** <= 35 ms per file (existing 25 ms + 10 ms for v0.next render-by-tag dispatch + engine state-child rendering + validity-surface emission).
+**Dependencies:** Dependency Graph Builder (DG) must complete for the project. VSS (Stage 6.7)
+must complete (CG consumes the synth-cell registry).
 
 ---
 
@@ -2323,8 +2533,11 @@ Per-file, parallel (after PA + RI):
 Project-wide sync point (all TS complete):
   TS[] -> META
 
-Project-wide sync point (META complete):
-  META + RI -> DG
+Per-file, parallel (after META complete):
+  META -> VSS
+
+Project-wide sync point (VSS complete + RI):
+  VSS + RI -> DG
 
 Per-file, parallel (after DG):
   TS + RI + DG + PA -> CG
@@ -2335,36 +2548,51 @@ Per-file, parallel (after DG):
 ## Integration Failure Mode Catalog
 
 The following failure modes are tracked per the pipeline reviewer's mandate. Any new stage
-boundary must be audited against this list before integration.
+boundary must be audited against this list before integration. Entries are ordered by
+detection stage (TAB → NR → MOD → UVB → TS → DG → CG → cross-cutting); v0.next entries are
+tagged inline.
 
 | Failure Mode | Description | Detection Point |
 |---|---|---|
+| Multi-statement bare-form handler (v0.next) | A bare-form event-handler attribute value or `:`-shorthand body contains multiple statements | TAB `E-MULTI-STATEMENT-HANDLER` (parse-time; SPEC §5.2.3, §4.14) |
+| Pinned import not engine/cell (v0.next) | A `pinned` import resolves to an export with `category` neither `"engine"` nor a reactive cell | TAB `E-IMPORT-PINNED-INVALID` (parse-time hint) → MOD authoritative (SPEC §21.8.1) |
+| Reserved-name collision (v0.next) | A user component or state-type name collides with a reserved structural-element name (`engine`, `match`, `errors`, `onTransition`) | TAB `E-NAME-COLLIDES-RESERVED` (SPEC §4.15, §24.4) |
+| `:`-shorthand with closer (v0.next) | A `:`-shorthand body has a closer present (`<engine for=T : .X></engine>`) | TAB `E-CLOSER-001` (SPEC §4.14) |
+| B14 path-shape mismatch (v0.next) | An engine binding `path` advances to a state-child whose shape doesn't match the path's expected target shape (surfaced in S74 wrap; B14 PASS 10.B) | TAB / TS path-shape consistency check; track as `E-ENGINE-PATH-SHAPE-MISMATCH` (SPEC §51 / B14 spec) |
+| Engine variable shadow (v0.next) | A non-engine declaration uses the same name as an engine's auto-declared variable | NR `E-ENGINE-VAR-DUPLICATE`; resolved by `var=` override on the engine (SPEC §51.0.C) |
+| Pinned forward-reference (v0.next) | A `pinned` cell's initialiser depends on a cell declared LATER in source order | NR `E-STATE-PINNED-FORWARD-REF` (SPEC §6.10) |
+| Engine state-child outside engine (v0.next) | A `<Variant>` state-child markup node appears outside an `<engine>` parent | NR routes via `resolvedCategory`; downstream stages reject mis-placed state-children |
+| `<onTransition>` outside engine (v0.next) | A `<onTransition>` element appears outside an `<engine>` parent | VP-2 (Stage 3.3) `E-STRUCTURAL-ELEMENT-MISPLACED` (SPEC §51.0.H) |
+| Engine in component body (v0.next) | A `<engine>` declaration appears inside a `const Card = <article>...</>` component definition | VP-2 (Stage 3.3) `E-COMPONENT-ENGINE-SCOPE` (SPEC §51.0.K) |
+| `<errors>` of= missing (v0.next) | A `<errors>` element has absent or non-resolvable `of=` attribute | VP-2 (Stage 3.3) `E-ERRORS-OF-MISSING` (SPEC §55.8) |
+| Field name drift | Upstream contract uses a different field name than the implementation (e.g., `kind` vs `type`) | Pipeline reviewer audits implementation against contract at each stage boundary review |
 | Span loss | Source spans dropped at a stage boundary, making error reporting impossible downstream | Any stage that transforms AST nodes must preserve all spans |
 | Type information loss | AST does not carry sufficient type information for codegen | TS output must have 100% node coverage in `nodeTypes` |
+| Protected field leak | A client-boundary function accesses server-only data | Caught by TS `E-TYPE-005`; codegen must re-verify as defense-in-depth |
+| Meta splice type mismatch | `MetaBlock` result type incompatible with parent context's expected type | TS `E-META-001` — meta block body produces wrong type for splice site |
+| Bare-variant ambiguity (v0.next) | `.VariantName` appears in a position whose type cannot be uniquely resolved (multiple union members declare the same variant name, or no type context) | TS `E-VARIANT-AMBIGUOUS` (SPEC §14.10) |
+| Render-spec non-bindable use (v0.next) | A Shape 2 declaration (`<x req> = <markup>`) is used as `<x/>` render-by-tag but the render-spec markup is not a bindable form element | TS `E-CELL-RENDER-SPEC-NOT-BINDABLE`; CG defense-in-depth before bind injection (SPEC §6.4 / §5.4.1) |
+| Validators on derived cell (v0.next) | A `const <derived>` cell carries one or more validators | TS `E-DERIVED-WITH-VALIDATORS` (SPEC §55.14) |
+| Derived-cell value mutation (v0.next) | Any mutation of a `const`-derived cell's value (mutating array methods, property writes, compound-assignment, `delete`, in-compound derived sub-cells) | TS `E-DERIVED-VALUE-MUTATE` (SPEC §6.11; L21 lock S59) |
+| Derived-engine direct write (v0.next) | A direct write targets a `<engine derived=expr>` variable | TS `E-DERIVED-ENGINE-NO-WRITE` (SPEC §51.0.J) |
+| `parseVariant` non-enum arg (v0.next) | `parseVariant(json, T)` is called with a non-enum `T` | TS `E-PARSEVARIANT-001` (SPEC §14.10 — L22 type-as-argument primitive, S65) |
+| Synthesised property write (v0.next) | An assignment targets an auto-synthesised validity-surface property (`@x.isValid`, `@x.errors`, `@x.touched`, `@x.submitted`) | VSS (Stage 6.7) `E-SYNTHESIZED-WRITE`; CG `E-CG-VALIDITY-WRITE` as defense-in-depth |
+| Async cycle | `'awaits'` cycle in dependency graph produces unschedulable code | DG `E-DG-001` |
+| Concurrent lift misordering | Two independent DG nodes in the same logic block both have `hasLift: true`; codegen would wrap them in `Promise.all`, producing non-deterministic accumulator order | DG `E-LIFT-001` (lift-checker Phase 2 sub-pass); blocks codegen |
+| Validator circular dependency (v0.next) | Two or more validators reference each other via cross-field predicate args; the validator dependency graph is cyclic | DG `E-VALIDATOR-CIRCULAR-DEP` (SPEC §31.4 / §55.11.2) |
+| Derived-cell circular dependency (v0.next) | A `const <derived>` cell expression depends on itself directly or transitively | DG `E-DERIVED-CIRCULAR-DEP` (SPEC §31.5) |
+| Derived-engine circular dependency (v0.next) | A `<engine derived=expr>` chain forms a cycle | DG `E-DERIVED-ENGINE-CIRCULAR` (SPEC §51.0.J / §31.5) |
+| Engine multi-target with effect= (v0.next) | A multi-target rule (`rule="evt -> .A | .B"`) carries an `effect=` attribute | DG `E-ENGINE-EFFECT-AMBIGUOUS` (SPEC §51.0.H) |
+| Pre-META AST consumed by DG | DG receives AST before META has applied compile-time splice results, causing DG to build a dependency graph over unevaluated meta blocks | META must complete before DG runs; DG input contract requires post-META AST |
+| Pre-VSS DG (v0.next) | DG receives input before VSS has constructed the synth-cell registry, leaving `'validator-arg'` edges with no valid target | VSS (Stage 6.7) must complete before DG; DG input contract requires `synthCellRegistry` |
+| Route name skew | Server function in CG has no route name from RI | CG `E-CG-002` — indicates RI → DG → CG handoff gap |
+| Meta determinism misclassification | A meta block classified as deterministic actually depends on runtime values, or vice versa | TS validates at type level; CG `E-CG-005` as defense-in-depth |
+| SQL/server-context leak to client JS | SQL blocks, transaction blocks, or server-context meta blocks (those referencing `process.env`, `Bun.env`, `bun.eval()`, fs APIs) are emitted into `.client.js` output, exposing DB schema and server infrastructure to the browser | RI escalates containing functions to `'server'`; CG `E-CG-006` as defense-in-depth for nodes not caught by RI; `W-CG-001` for top-level SQL outside any function |
+| Cell with no render-spec used as `<x/>` (v0.next) | `<x/>` render-by-tag use of a cell whose `rhsShape` is `"literal"` (no render-spec) or `"derived-expr"` with non-markup-typed RHS | CG `E-CELL-NO-RENDER-SPEC` (SPEC §6.4) |
 | Implicit coupling | Two stages share a mutable data structure instead of passing by value | All stage outputs are pure values; mutation of upstream output is a contract violation |
 | Undocumented field | Downstream stage uses a field not defined in the upstream contract | All consumed fields must appear in this document |
-| Protected field leak | A client-boundary function accesses server-only data | Caught by TS `E-TYPE-005`; codegen must re-verify as defense-in-depth |
-| Async cycle | `'awaits'` cycle in dependency graph produces unschedulable code | DG `E-DG-001` |
-| Route name skew | Server function in CG has no route name from RI | CG `E-CG-002` -- indicates RI->DG->CG handoff gap |
-| Meta splice type mismatch | `MetaBlock` result type incompatible with parent context's expected type | TS `E-META-001` -- meta block body produces wrong type for splice site |
-| Meta determinism misclassification | A meta block classified as deterministic actually depends on runtime values, or vice versa | TS validates at type level; CG `E-CG-005` as defense-in-depth |
-| Field name drift | Upstream contract uses a different field name than the implementation (e.g., `kind` vs `type`) | Pipeline reviewer audits implementation against contract at each stage boundary review |
 | Deferred parsing gap | A downstream stage receives opaque string wrappers where it expects recursively parsed AST nodes | TAB may produce `BareExpr` wrappers in function body positions; each stage documents its handling. BPP (Stage 3.5) was removed — downstream stages receive ASTs as-produced by CE. |
 | Error code misassignment | An error code is assigned to a stage that lacks the information to detect the condition | Error codes must be assigned to the earliest stage with sufficient context (e.g., identifier resolution codes belong to TS, not TAB) |
-| Concurrent lift misordering | Two independent DG nodes in the same logic block both have `hasLift: true`; codegen would wrap them in `Promise.all`, producing non-deterministic accumulator order | DG `E-LIFT-001` (lift-checker Phase 2 sub-pass); blocks codegen |
-| SQL/server-context leak to client JS | SQL blocks, transaction blocks, or server-context meta blocks (those referencing `process.env`, `Bun.env`, `bun.eval()`, fs APIs) are emitted into `.client.js` output, exposing DB schema and server infrastructure to the browser | RI escalates containing functions to `'server'`; CG `E-CG-006` as defense-in-depth for nodes not caught by RI; `W-CG-001` for top-level SQL outside any function |
-| Pre-META AST consumed by DG | DG receives AST before META has applied compile-time splice results, causing DG to build a dependency graph over unevaluated meta blocks | META must complete before DG runs; DG input contract requires post-META AST |
-| Validator circular dependency (v0.next) | Two or more validators reference each other via cross-field predicate args; the validator dependency graph is cyclic | DG `E-VALIDATOR-CIRCULAR-DEP` (per SPEC §31.4 / §55.11.2) |
-| Derived-cell circular dependency (v0.next) | A `const <derived>` cell expression depends on itself directly or transitively | DG `E-DERIVED-CIRCULAR-DEP` (per SPEC §31.5) |
-| Derived-engine circular dependency (v0.next) | A `<engine derived=expr>` chain forms a cycle | DG `E-DERIVED-ENGINE-CIRCULAR` (per SPEC §51.0.J / §31.5) |
-| Engine state-child outside engine (v0.next) | A `<Variant>` state-child markup node appears outside an `<engine>` parent | NR routes via `resolvedCategory`; downstream stages reject mis-placed state-children |
-| `<onTransition>` outside engine (v0.next) | A `<onTransition>` element appears outside an `<engine>` parent | VP-2 (Stage 3.3) `E-STRUCTURAL-ELEMENT-MISPLACED` |
-| Synthesised property write (v0.next) | An assignment targets an auto-synthesised validity-surface property (`@x.isValid`, `@x.errors`, `@x.touched`, `@x.submitted`) | TS `E-SYNTHESIZED-WRITE`; CG `E-CG-VALIDITY-WRITE` as defense-in-depth |
-| Engine variable shadow (v0.next) | A non-engine declaration uses the same name as an engine's auto-declared variable | NR `E-ENGINE-VAR-DUPLICATE`; resolved by `var=` override on the engine |
-| Bare-variant ambiguity (v0.next) | `.VariantName` appears in a position whose type cannot be uniquely resolved (multiple union members declare the same variant name, or no type context) | TS `E-VARIANT-AMBIGUOUS` |
-| Render-spec non-bindable use (v0.next) | A Shape 2 declaration (`<x req> = <markup>`) is used as `<x/>` render-by-tag but the render-spec markup is not a bindable form element | TS `E-CELL-RENDER-SPEC-NOT-BINDABLE`; CG defense-in-depth before bind injection |
-| Multi-statement bare-form handler (v0.next) | A bare-form event handler attribute value or `:`-shorthand body contains multiple statements | TAB `E-MULTI-STATEMENT-HANDLER` (parse-time) |
-| Engine in component body (v0.next) | A `<engine>` declaration appears inside a `const Card = <article>...</>` component definition | VP-2 (Stage 3.3) `E-COMPONENT-ENGINE-SCOPE` |
 
 ---
 

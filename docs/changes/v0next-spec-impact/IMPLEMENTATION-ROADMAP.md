@@ -599,17 +599,20 @@ D1 landed §6 with 99 instances of the older `const @x = ...` form for derived c
 
 **Side-finding:** the Phase 2 worktree dispatch surfaced a subtle F4 path-discipline gap — relative paths in dispatched-agent Edit calls can resolve against the harness's `Additional working directories` list rather than worktree cwd, leaking writes to main. Documented in `pa.md` F4 addendum (S58).
 
-### Follow-up #2 — PIPELINE.md prose pass
+### Follow-up #2 — PIPELINE.md prose pass — ✅ DONE (S75 / C23, 2026-05-09)
 
 **Source:** D4 final finding #2.
 
-D4's PIPELINE.md rewrite landed at 22.6% (1,941 → 2,380 lines), under the brief's 30-40% target. Agent chose addendum-style additions to each affected stage rather than rewriting unchanged-stage prose. Engineering content is complete (every v0.next-affected stage has its addendum), but the prose is stitched-on rather than re-flowed.
+D4's PIPELINE.md rewrite landed at 22.6% (1,941 → 2,380 lines), under the brief's 30-40% target. Agent chose addendum-style additions to each affected stage rather than rewriting unchanged-stage prose. Engineering content was complete (every v0.next-affected stage had its addendum), but the prose was stitched-on rather than re-flowed.
 
-**Status:** Engineering substance ✅ complete. Prose cohesion: stitched, not re-flowed.
+**Original status:** Engineering substance complete. Prose cohesion: stitched, not re-flowed.
 
-**Disposition:** **Follow-up prose pass** — read-through of PIPELINE.md, smooth the addenda into the surrounding stage descriptions, eliminate "v0.next addendum" framing in favor of integrated prose where natural, refresh the per-stage opening paragraphs to reflect post-v0.next responsibilities. Estimated 4-8 hours.
+**Resolution (S75 / A1c step C23):** Worktree dispatch `agent-a2402592dfd975619`. All seven `### Stage N v0.next addendum` sections (TAB / NR / MOD / UVB / TS / DG / CG) re-flowed into their parent stage's narrative. Three companion deliveries:
+- **Lock Enforcement Map** added as a top-level table after the Stage Index — maps L1-L22 to firing stage(s).
+- **Stage 6.7 (Validity Surface Synthesis)** surfaced as a new sub-stage between META and DG, consolidating the B11/B12/B17/C8 validity-surface narrative previously fragmented across Stage 6 / 7 / 8 addenda.
+- **IFMC** reordered by detection-stage; 6 new failure modes added (E-DERIVED-VALUE-MUTATE, E-PARSEVARIANT-001, B14 path-shape, etc.).
 
-**Trigger:** Defer until natural — when next major PIPELINE.md edit happens (Phase A1 implementation will modify pipeline anyway), fold this prose pass in. Standalone if it becomes a felt readability problem.
+Final PIPELINE.md size: 2,608 lines (after prose pass; up from 2,380; +228 / +9.6%). Engineering content unchanged; readability substantially improved.
 
 ---
 
