@@ -248,7 +248,7 @@ A1b records zone decisions per type-annotation; A1c emits the runtime predicates
 
 | # | Step | Files | Est | Notes |
 |---|---|---|---|---|
-| C23 | **PIPELINE.md prose pass** — stage descriptions per v0.next; lock-firing locus per stage; validity-surface synthesis as new (sub-)stage; Integration Failure Mode Catalog extended | `compiler/PIPELINE.md` | 5-8 h | Independent of code changes; can run in parallel with any later wave |
+| C23 | ✅ **SHIPPED S75** (`b1714a1`) — PIPELINE.md prose pass — all 7 v0.next addenda re-flowed into parent stages; NEW Stage 6.7 (Validity Surface Synthesis) sub-stage between META and DG; NEW Lock Enforcement Map (top-level table after Stage Index); IFMC reordered by detection-stage + 6 new rows. PIPELINE.md grew 2,380 → 2,608 (+228 / +9.6%); version 0.7.0 → 0.7.1; zero test impact. Closes Phase D4 follow-up #2 from IMPLEMENTATION-ROADMAP §8.6. See `docs/changes/phase-a1c-step-c23-pipeline-prose/{SURVEY.md, progress.md}`. | `compiler/PIPELINE.md` | 5-8 h | **CLOSED.** |
 
 **Total: ~96-136 h** focused work across **24 steps** (C0 + C1-C23). C0 added by Q3 ratification.
 
