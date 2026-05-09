@@ -47,9 +47,13 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   // C13 (§51.0.F + §51.0.G): mirror machineBindings wiring for new <engine>
   // form. Function bodies that write to engine variables or call .advance()
   // need both maps threaded through the same emit path.
-  const { buildEngineBindingsMap, collectEngineVarNames } = require("./emit-engine.ts");
+  const { buildEngineBindingsMap, collectEngineVarNames, collectEnginesWithHooks } = require("./emit-engine.ts");
   const engineBindings = buildEngineBindingsMap(ctx.fileAST);
   const engineVarNames: Set<string> = collectEngineVarNames(ctx.fileAST);
+  // B17.4 (§51.0.H): the subset of engines that have at least one effect=/
+  // <onTransition> arm. Threaded through scheduling/CPS opts to enable hook-
+  // firing wraps on `.advance()` calls inside function bodies.
+  const enginesWithHooks: Set<string> = collectEnginesWithHooks(ctx.fileAST);
   const lines: string[] = [];
 
   // Map from original function name → generated var name.
@@ -199,6 +203,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       ...(machineBindings ? { machineBindings } : {}),
       ...(engineBindings ? { engineBindings } : {}),
       ...(engineVarNames.size > 0 ? { engineVarNames } : {}),
+      ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}),
     };
     for (let i = 0; i < body.length; i++) {
       const stmt = body[i];
@@ -324,6 +329,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         ...(machineBindings ? { machineBindings } : {}),
         ...(engineBindings ? { engineBindings } : {}),
         ...(engineVarNames.size > 0 ? { engineVarNames } : {}),
+      ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}),
       };
       const shortcutLines = emitFnShortcutBody(body, fnOpts, fnKind, hasRetType);
       for (const code of shortcutLines) {
@@ -332,7 +338,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         }
       }
     } else {
-      const scheduled = scheduleStatements(body, fnNode, routeMap, depGraph, filePath, errors, machineBindings, engineBindings, engineVarNames);
+      const scheduled = scheduleStatements(body, fnNode, routeMap, depGraph, filePath, errors, machineBindings, engineBindings, engineVarNames, enginesWithHooks);
       for (const line of scheduled) {
         lines.push(`  ${line}`);
       }

@@ -7,7 +7,7 @@ import { emitFunctions } from "./emit-functions.ts";
 import { emitBindings } from "./emit-bindings.ts";
 import { emitReactiveWiring } from "./emit-reactive-wiring.ts";
 import { emitEventWiring } from "./emit-event-wiring.ts";
-import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEngineMountsForFile } from "./emit-engine.ts";
+import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEngineMountsForFile, emitEngineHookFiringFunctionsForFile } from "./emit-engine.ts";
 import { setVariantFieldsForFile } from "./emit-control-flow.ts";
 import { EncodingContext, emitDecodeTable, emitRuntimeReflect } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
@@ -547,6 +547,26 @@ export function generateClientJs(ctx: CompileContext): string {
   if (engineLines.length > 0) {
     lines.push("// --- engine substrate (compiler-generated, §51.0) ---");
     for (const line of engineLines) lines.push(line);
+    lines.push("");
+  }
+
+  // B17.4 (§51.0.H) — per-engine hook-firing functions + once-flag declarations
+  // for `effect=` + `<onTransition>` arms. Emitted AFTER C12's variant cell
+  // init (so the cell exists when the function is called) and BEFORE
+  // reactive wiring (so write sites can reference the function via JS function
+  // hoisting at module-init time). Also covers derived engines (per §51.0.J
+  // line 20640 — `<onTransition>` and `effect=` are LEGAL on derived state-
+  // children and fire on derived state changes).
+  //
+  // Tree-shake: when no engine in the file has hooks, this returns an empty
+  // array and no section header is emitted. When some engines have hooks and
+  // others don't, hookless engines emit no hook-firing function (the wrap
+  // emitters at the write-site call sites gate on `enginesWithHooks` /
+  // `EngineBindingInfo.hasHooks`).
+  const engineHookLines = emitEngineHookFiringFunctionsForFile(fileAST);
+  if (engineHookLines.length > 0) {
+    lines.push("// --- engine hook-firing functions (compiler-generated, §51.0.H) ---");
+    for (const line of engineHookLines) lines.push(line);
     lines.push("");
   }
 

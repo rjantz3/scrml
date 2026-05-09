@@ -146,7 +146,7 @@ export function extractInitExpr(stmt: ASTNode): string {
  * @param {CGError[]} [errors]
  * @returns {string[]}
  */
-export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: RouteMap, depGraph: DepGraph, filePath: string, errors: CGError[] = [], machineBindings?: Map<string, { engineName: string; tableName: string; rules: any[]; auditTarget?: string | null }> | null, engineBindings?: Map<string, { varName: string; forType: string; tableName: string }> | null, engineVarNames?: Set<string> | null): string[] {
+export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: RouteMap, depGraph: DepGraph, filePath: string, errors: CGError[] = [], machineBindings?: Map<string, { engineName: string; tableName: string; rules: any[]; auditTarget?: string | null }> | null, engineBindings?: Map<string, { varName: string; forType: string; tableName: string }> | null, engineVarNames?: Set<string> | null, enginesWithHooks?: Set<string> | null): string[] {
   const lines: string[] = [];
   // Track declared names so tilde-decl can detect reassignment vs first declaration
   const declaredNames = new Set<string>();
@@ -156,12 +156,15 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
   // declaration-time init expression.
   // C13: thread engineBindings + engineVarNames so engine direct writes and
   // .advance() calls inside fn bodies dispatch to the runtime hooks.
+  // B17.4: thread enginesWithHooks so .advance() / direct-write call sites
+  // wrap with the per-engine hook-firing function call.
   const emitOpts: any = {
     declaredNames,
     insideFunctionBody: true,
     ...(machineBindings ? { machineBindings } : {}),
     ...(engineBindings ? { engineBindings } : {}),
     ...(engineVarNames && engineVarNames.size > 0 ? { engineVarNames } : {}),
+    ...(enginesWithHooks && enginesWithHooks.size > 0 ? { enginesWithHooks } : {}),
   };
 
   // Only use complex scheduling (Promise.all) for functions with actual server calls.

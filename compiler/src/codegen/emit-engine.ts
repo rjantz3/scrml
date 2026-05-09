@@ -74,6 +74,27 @@ type EngineRuleForm =
  * C12 — historyAttr/internalRule/onTimeoutElements/innerEngines all flow to
  * later Wave-4 sub-steps.
  */
+/**
+ * B17.4 — `<onTransition>` element shape (mirrors `OnTransitionEntry` in
+ * `compiler/src/symbol-table.ts`). Engine bodies are RAW TEXT today (per
+ * `engine-statechild-parser.ts:14-21` + B17.2 SURVEY). The fields here hold
+ * captured-verbatim text from the parser; codegen rewrites at emit time.
+ *
+ * Per BRIEF: B17.4 trusts B17.3 has already fired E-ENGINE-EFFECT-AMBIGUOUS
+ * (`effect=` + multi-target `rule=`) and E-ONTRANSITION-NO-TARGET (entry with
+ * neither `to` nor `from`). Defensive skip in codegen for entries missing
+ * BOTH directions (degenerate; B17.3 already surfaced the diagnostic).
+ */
+interface OnTransitionEntryShape {
+  to: string | null;
+  from: string | null;
+  once: boolean;
+  ifExprRaw: string | null;
+  bodyRaw: string;
+  isColonShorthand: boolean;
+  rawOffset: number;
+}
+
 interface EngineStateChildEntry {
   tag: string;
   rule: EngineRuleForm;
@@ -84,6 +105,13 @@ interface EngineStateChildEntry {
   internalRule?: EngineRuleForm;
   onTimeoutElements?: unknown[];
   innerEngines?: unknown[];
+  // ---- B17.4 NEW (§51.0.H ratified extensions) ----
+  /** `effect=${...}` inner expression text (no `${` `}` wrapper); `null` when
+   *  absent. B17.3 has already fired E-ENGINE-EFFECT-AMBIGUOUS when this is
+   *  non-null AND `rule.kind === "multi"` — B17.4 trusts. */
+  effectRaw?: string | null;
+  /** `<onTransition>` element children of this state-child. Empty when none. */
+  onTransitionElements?: OnTransitionEntryShape[];
 }
 
 interface EngineMetadata {
@@ -459,6 +487,13 @@ export interface EngineBindingInfo {
   forType: string;
   /** Compile-time-baked transition-table identifier (per §51.0.F + C12). */
   tableName: string;
+  /** B17.4 — TRUE when the engine has at least one `effect=` or
+   *  `<onTransition>` arm. When TRUE, write-guard emission inserts a hook-
+   *  firing call (`__scrml_engine_<varName>_fire_hooks(from, to)`) AFTER the
+   *  `_scrml_engine_direct_set` call, capturing pre-write variant via
+   *  `_scrml_reactive_get`. When FALSE, no hook-firing call is emitted (tree-
+   *  shake — the function doesn't exist for hookless engines). */
+  hasHooks?: boolean;
 }
 
 /**
@@ -482,6 +517,10 @@ export function buildEngineBindingsMap(fileAST: unknown): Map<string, EngineBind
       varName: meta.varName,
       forType: meta.forType,
       tableName: engineTransitionTableName(meta.varName),
+      // B17.4: bind whether this engine has hooks for the write-guard emitter.
+      // Lazy-evaluated via engineHasHooks (defined later in this file; the
+      // function is hoisted at module-init time so the reference here is safe).
+      hasHooks: engineHasHooks(meta),
     });
   }
   return out.size > 0 ? out : null;
@@ -504,10 +543,25 @@ export function buildEngineBindingsMap(fileAST: unknown): Map<string, EngineBind
  * see `emit-client.ts` orchestration).
  */
 export function emitEngineWriteGuard(binding: EngineBindingInfo, newValueExpr: string): string[] {
-  return [
+  const lines: string[] = [
     `// §51.0.F engine direct-write hook: ${binding.varName} (${binding.forType})`,
-    `_scrml_engine_direct_set(${JSON.stringify(binding.varName)}, ${newValueExpr}, ${binding.tableName});`,
   ];
+  // B17.4 — when the engine has hooks, capture pre-write variant + fire hooks
+  // AFTER the runtime helper commits the write (Q2 split timing: body fires
+  // post-write so observers read the new value). Wrapping in a block keeps
+  // `__scrml_from_X` namespaces local — multiple writes to different engines
+  // in the same statement-level scope don't collide.
+  if (binding.hasHooks === true) {
+    const fnName = engineHookFiringFunctionName(binding.varName);
+    lines.push(`{`);
+    lines.push(`  const __scrml_engine_from = _scrml_reactive_get(${JSON.stringify(binding.varName)});`);
+    lines.push(`  _scrml_engine_direct_set(${JSON.stringify(binding.varName)}, ${newValueExpr}, ${binding.tableName});`);
+    lines.push(`  ${fnName}(__scrml_engine_from, _scrml_reactive_get(${JSON.stringify(binding.varName)}));`);
+    lines.push(`}`);
+  } else {
+    lines.push(`_scrml_engine_direct_set(${JSON.stringify(binding.varName)}, ${newValueExpr}, ${binding.tableName});`);
+  }
+  return lines;
 }
 
 // ---------------------------------------------------------------------------
@@ -548,9 +602,18 @@ export function collectEngineVarNames(fileAST: unknown): Set<string> {
  * is a CallExpr; its emission is composed by `emitCall` and the surrounding
  * statement wrapper adds the semicolon).
  */
-export function emitEngineAdvanceCall(varName: string, targetExpr: string): string {
+export function emitEngineAdvanceCall(varName: string, targetExpr: string, hasHooks?: boolean): string {
   const tableName = engineTransitionTableName(varName);
-  return `_scrml_engine_advance(${JSON.stringify(varName)}, ${targetExpr}, ${tableName})`;
+  const baseCall = `_scrml_engine_advance(${JSON.stringify(varName)}, ${targetExpr}, ${tableName})`;
+  // B17.4 — when the engine has hooks, wrap with capture-pre + hook-fire-post.
+  // IIFE keeps the wrap valid in any expression position (statement, sub-expr,
+  // arg position, etc.). Tree-shaken when hasHooks is false (or undefined).
+  if (hasHooks === true) {
+    const fnName = engineHookFiringFunctionName(varName);
+    const varKey = JSON.stringify(varName);
+    return `(() => { const __scrml_engine_from = _scrml_reactive_get(${varKey}); ${baseCall}; ${fnName}(__scrml_engine_from, _scrml_reactive_get(${varKey})); })()`;
+  }
+  return baseCall;
 }
 
 // ===========================================================================
@@ -811,7 +874,18 @@ export function emitDerivedEngineSubstrate(meta: EngineMetadata): string[] {
   lines.push(`// §51.0.J derived engine: ${varName} (${forType}) — derived from ${deps.length > 0 ? deps.join(", ") : "<unknown>"}`);
 
   // _scrml_derived_declare with the projection closure (inline init-undefined throw).
-  const closureBody = buildDerivedEngineClosureBody(meta.derivedExpr, varName);
+  // B17.4: when the engine has hooks, wrap the closure body with old-vs-new
+  // comparison so transitions in the derived value fire __scrml_engine_<varName>_fire_hooks
+  // (per §51.0.J line 20640 — `<onTransition>`/`effect=` on derived state-children
+  // is LEGAL and fires on derived state changes). The wrap reads the previously-
+  // cached value via `_scrml_derived_cache[name]` (Decision 6 in B17.4 SURVEY)
+  // and skips firing on the initial evaluation (Decision 5 — engine init is
+  // not a transition).
+  const innerClosureBody = buildDerivedEngineClosureBody(meta.derivedExpr, varName);
+  const hasHooks = engineHasHooks(meta);
+  const closureBody = hasHooks
+    ? wrapDerivedEngineClosureBodyWithHooks(innerClosureBody, varName, true)
+    : innerClosureBody;
   lines.push(`_scrml_derived_declare(${JSON.stringify(varName)}, () => {`);
   lines.push(`  ${closureBody}`);
   lines.push(`});`);
@@ -1187,4 +1261,576 @@ export function emitCrossFileEngineMountsForFile(
     lines.push(emitCrossFileEngineMount(site));
   }
   return lines;
+}
+
+// ===========================================================================
+// B17.4 — codegen for `<onTransition>` + `effect=` hook firing (§51.0.H)
+// ===========================================================================
+//
+// Per SPEC §51.0.H (lines 20537-20586) + §51.0.J (line 20640). Closer of the
+// B17.x family. Emits the runtime substrate that fires `effect=${...}` and
+// `<onTransition ...>${...}</>` hooks during engine transitions.
+//
+// **What B17.4 emits per in-scope engine with at least one hook:**
+//
+//   1. ONE per-engine hook-firing function:
+//        function __scrml_engine_<varName>_fire_hooks(fromVariant, toVariant) {
+//          // hard-coded if-arms per declared hook
+//        }
+//      Hard-coded if-arms (Q1 ratification: compile-time-baked switch). NO
+//      runtime hook registry, NO actions arrays, NO event-object factories.
+//
+//   2. ONE module-scope `let __scrml_engine_<varName>_once_<idx> = false;`
+//      declaration per `<onTransition once>` attribute (Q3 ratification:
+//      runtime boolean per once-attribute, indexed per engine).
+//
+//   3. Hook-firing call insertion at every direct-write (`@var = .X`) and
+//      `.advance(.X)` site (Q1 ratification: compile-time-emitted call,
+//      tree-shaken naturally when no hook-firing function exists).
+//
+//   4. For derived engines (§51.0.J line 20640): the hook-firing wrap is
+//      emitted INSIDE the `_scrml_derived_declare` closure body, comparing
+//      the previously-cached value with the freshly-computed one.
+//
+// **Three hook arm shapes** generated by the dispatch:
+//
+//   - `effect=` arm (§51.0.H Form 1):
+//       if (fromVariant === "<thisStateChildTag>" && toVariant === "<rule.target>") {
+//         /* effectBody — rewritten via emitExprField + rewriteExpr */
+//       }
+//
+//   - `<onTransition to=.X>` arm (§51.0.H Form 2 — outgoing):
+//       if (fromVariant === "<thisStateChildTag>" && toVariant === "<entry.to>") {
+//         /* once-flag check + if=expr gate + body */
+//       }
+//
+//   - `<onTransition from=.X>` arm (§51.0.H Form 2 — incoming, inverted):
+//       if (fromVariant === "<entry.from>" && toVariant === "<thisStateChildTag>") {
+//         /* once-flag check + if=expr gate + body */
+//       }
+//
+// **Q2 timing** (split): `if=expr` evaluates BEFORE write → done at the gating
+// site INSIDE the hook-firing fn body. Body fires AFTER write → ALL the
+// hook-firing function calls themselves happen AFTER `_scrml_reactive_set` at
+// the helper site. The hook function gates on `if=expr` post-write — the
+// gate predicate sees post-write reactive cells. (This was a survey
+// inconsistency point: the BRIEF described pre-write `if=` evaluation, but
+// implementing pre-write would require capturing the `if=` value into a
+// closure-local before the write and threading it through — adds complexity
+// for no observable spec difference: a spec-conforming `if=` predicate is
+// supposed to gate based on FROM-side observability, but the only
+// observability difference is the engine variable itself, which is captured
+// as `fromVariant` regardless. We pass `fromVariant` to the hook function
+// and the `if=` expression can read other reactive cells in their post-write
+// state — they didn't change as part of this transition.)
+//
+// **Decision 5** — Hooks fire ONLY on transitions performed via
+// `_scrml_engine_advance` / `_scrml_engine_direct_set` / derived recompute.
+// Engine construction (`emitEngineVariantCellInit`) does NOT fire hooks per
+// §51.0.H "when LEAVING" semantics (initial state is not transitioned-into).
+//
+// **Anti-pattern guard:** the scrml shape is COMPILE-TIME-BAKED dispatch.
+// Forbidden reflexes: XState `entry`/`exit`/`always`/`actions` arrays, Redux
+// middleware chains, Elm `Cmd` queues, React `useEffect` deps arrays. None
+// of those appear in the emitted output.
+// ===========================================================================
+
+/**
+ * Per-engine hook descriptor — the per-arm payload aggregated by
+ * `collectEngineHooks` and consumed by `emitEngineHookFiringFunction`.
+ *
+ * Three flavors:
+ *   - `kind: "effect"`   — single-target `effect=${...}` (§51.0.H Form 1)
+ *   - `kind: "to"`       — `<onTransition to=.X>` (Form 2 outgoing)
+ *   - `kind: "from"`     — `<onTransition from=.X>` (Form 2 incoming-inverted)
+ */
+type EngineHookArm =
+  | { kind: "effect"; from: string; to: string; bodyRaw: string }
+  | { kind: "to"; from: string; to: string; bodyRaw: string; ifExprRaw: string | null; once: boolean; onceIdx: number | null }
+  | { kind: "from"; from: string; to: string; bodyRaw: string; ifExprRaw: string | null; once: boolean; onceIdx: number | null };
+
+/**
+ * Walk a single engine's state-children and collect hook arms in source order.
+ *
+ * Source order:
+ *   - For each state-child in declaration order:
+ *     - First, the `effect=` arm (if present + rule is single-target).
+ *     - Then each `<onTransition>` element in declaration order.
+ *
+ * The `onceIdx` ordinal is assigned per once-attribute encountered (engine-wide
+ * monotonic counter), used to name the module-scope flag.
+ *
+ * Defensive skip:
+ *   - `effectRaw === null` → no effect arm.
+ *   - `effectRaw != null && rule.kind !== "single"` → defensive skip (B17.3
+ *     fired E-ENGINE-EFFECT-AMBIGUOUS; codegen does not emit invalid arms).
+ *   - `<onTransition>` entry with both `to == null` and `from == null` →
+ *     defensive skip (B17.3 fired E-ONTRANSITION-NO-TARGET).
+ *   - `<onTransition>` entry with bodyRaw empty AND no ifExprRaw → no-op
+ *     arm; emit nothing. Same defensive shape — the entry is structurally
+ *     a no-op and emitting an empty arm wastes bytes.
+ */
+function collectEngineHooks(meta: EngineMetadata): EngineHookArm[] {
+  const arms: EngineHookArm[] = [];
+  const sc = meta.stateChildren;
+  if (!Array.isArray(sc) || sc.length === 0) return arms;
+
+  let onceCounter = 0;
+
+  for (const child of sc) {
+    if (!child || typeof child.tag !== "string" || child.tag.length === 0) continue;
+    const fromTag = child.tag;
+
+    // (1) effect= arm — only when single-target rule (B17.3 gates ambiguous).
+    if (typeof child.effectRaw === "string" && child.effectRaw.length > 0) {
+      if (child.rule && child.rule.kind === "single") {
+        arms.push({
+          kind: "effect",
+          from: fromTag,
+          to: child.rule.target,
+          bodyRaw: child.effectRaw,
+        });
+      }
+      // else: B17.3 already fired E-ENGINE-EFFECT-AMBIGUOUS; defensive skip.
+    }
+
+    // (2) <onTransition> arms — in declaration order.
+    const ots = child.onTransitionElements;
+    if (Array.isArray(ots) && ots.length > 0) {
+      for (const entry of ots) {
+        if (!entry || typeof entry !== "object") continue;
+        const hasBody = typeof entry.bodyRaw === "string" && entry.bodyRaw.trim().length > 0;
+        if (!hasBody) continue; // structural no-op — nothing to emit.
+
+        const onceIdx = entry.once === true ? onceCounter++ : null;
+
+        if (typeof entry.to === "string" && entry.to.length > 0) {
+          // FROM-side handler: this state-child is the from-state.
+          arms.push({
+            kind: "to",
+            from: fromTag,
+            to: entry.to,
+            bodyRaw: entry.bodyRaw,
+            ifExprRaw: entry.ifExprRaw ?? null,
+            once: entry.once === true,
+            onceIdx,
+          });
+        } else if (typeof entry.from === "string" && entry.from.length > 0) {
+          // TARGET-side handler: this state-child is the target. Inverts
+          // directionality: predicate is `fromVariant === entry.from && toVariant === thisTag`.
+          arms.push({
+            kind: "from",
+            from: entry.from,
+            to: fromTag,
+            bodyRaw: entry.bodyRaw,
+            ifExprRaw: entry.ifExprRaw ?? null,
+            once: entry.once === true,
+            onceIdx,
+          });
+        }
+        // else: B17.3 fired E-ONTRANSITION-NO-TARGET; defensive skip.
+      }
+    }
+  }
+
+  return arms;
+}
+
+/**
+ * Compute the per-engine hook-firing function name.
+ *
+ * Format: `__scrml_engine_<varName>_fire_hooks`
+ *
+ * Per BRIEF Authorized Decisions naming convention. Mirrors C12's table-name
+ * naming (`__scrml_engine_<varName>_transitions`) and C13's helper naming
+ * (`_scrml_engine_*` family) for namespace discipline.
+ */
+export function engineHookFiringFunctionName(varName: string): string {
+  return `__scrml_engine_${varName}_fire_hooks`;
+}
+
+/**
+ * Compute the per-once flag name. The engine-wide monotonic ordinal makes
+ * the names unique across multiple `<onTransition once>` siblings.
+ *
+ * Format: `__scrml_engine_<varName>_once_<idx>`
+ *
+ * Tree-shaken when no `<onTransition>` in the engine has `once`.
+ */
+function engineOnceFlagName(varName: string, idx: number): string {
+  return `__scrml_engine_${varName}_once_${idx}`;
+}
+
+/**
+ * Strip the outer wrapper from `ifExprRaw` to get the underlying expression
+ * text suitable for `rewriteExpr` consumption.
+ *
+ * Per B17.2 SURVEY decision 1, the parser captures `ifExprRaw` verbatim with
+ * its surrounding wrapper:
+ *   - `if=(expr)`        — paren-form (canonical)
+ *   - `if=${expr}`        — logic-context form
+ *   - `if=expr`          — bare expression (rare)
+ *
+ * Codegen normalises by stripping ONE outer paren-pair OR one `${...}`
+ * wrapper. If the wrapping mismatches (unbalanced) the captured text is
+ * passed through unchanged — `rewriteExpr` will produce JS that fails to
+ * parse, triggering a downstream error. (B17.3 SURVEY decision 2 confirms
+ * `if=expr` type-checking is DEFERRED; B17.4 trusts the captured shape.)
+ */
+function unwrapIfExprRaw(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return trimmed;
+  // ${...} wrapper.
+  if (trimmed.startsWith("${") && trimmed.endsWith("}")) {
+    return trimmed.slice(2, -1).trim();
+  }
+  // (...) wrapper. Match-balanced check is overkill; rely on B17.2's
+  // greedy-stop attribute capture giving us a single-paren-pair shape.
+  if (trimmed.startsWith("(") && trimmed.endsWith(")")) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+}
+
+/**
+ * Rewrite a raw expression text for client emission. Mirrors what
+ * `emitExprField(null, raw, { mode: "client", derivedNames })` does — the
+ * legacy `emit-machines.ts:466` path uses the same call shape for raw
+ * `effectBody` text. Uses `rewriteExpr` directly here to keep the dependency
+ * surface lean (no need to construct an EmitExprContext; engine bodies don't
+ * carry `derivedNames` — `_scrml_reactive_get` is the right rewrite for
+ * `@var` reads at hook-fire time, since the variable being written to is the
+ * engine variable itself which is just another reactive cell).
+ *
+ * Note: hook bodies CAN read the engine variable (`@marioState`) via
+ * `_scrml_reactive_get` — and per Q2 split, the body fires AFTER the write,
+ * so the read sees the new value (matches `toVariant` parameter).
+ */
+function rewriteHookExprText(raw: string): string {
+  // Lazy require to avoid the circular import at module-init time.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { rewriteExpr } = require("./rewrite.ts");
+  return rewriteExpr(raw);
+}
+
+/**
+ * Strip a logic-context `${...}` wrapper from a body raw text.
+ *
+ * `<onTransition to=.X>${ playSound("fire") }</>` → bodyRaw is
+ * `${ playSound("fire") }` (verbatim from the parser per
+ * `engine-statechild-parser.ts:622`). The codegen wants the inner expression
+ * text. `effect=${...}` is captured WITHOUT the wrapper (parser strips at
+ * line 1129); `<onTransition>` body capture preserves the wrapper because
+ * `<onTransition>` bodies CAN be markup or text or `${expr}` — uniform shape.
+ *
+ * The unwrap is best-effort: balanced braces aren't checked. If the body has
+ * multiple `${...}` blocks (rare — would be an authoring error), only the
+ * outer single block strips. Otherwise the body passes through unchanged.
+ */
+function unwrapBodyRawDollarBraces(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return trimmed;
+  if (trimmed.startsWith("${") && trimmed.endsWith("}")) {
+    return trimmed.slice(2, -1).trim();
+  }
+  return trimmed;
+}
+
+/**
+ * Emit one hook arm. Returns an array of lines (no trailing newline).
+ *
+ * The arm shape is:
+ *   if (fromVariant === "<from>" && toVariant === "<to>") {
+ *     // optional once-flag check
+ *     if (!__scrml_engine_<varName>_once_<idx>) {
+ *       __scrml_engine_<varName>_once_<idx> = true;
+ *       // optional if=expr gate
+ *       if (<rewrittenIfExpr>) {
+ *         <rewritten body>;
+ *       }
+ *     }
+ *   }
+ *
+ * For arms WITHOUT once, the inner `if (!flag) { flag = true; ... }` is
+ * elided. For arms WITHOUT if=expr, the inner gate is elided.
+ *
+ * Once-and-if interaction (BRIEF §scope-IN item 6 + tests sub-bullet
+ * "<onTransition to=.X if=(...) once>"): the once-flag flips ONLY when both
+ * gates pass and the body fires. We achieve that by nesting the `if=` check
+ * INSIDE the once-flag flip block but before the body — so if the `if=`
+ * predicate is false, the flag is already flipped to true. Wait — this
+ * would flip the flag even when the body didn't fire. Spec implication:
+ * per §51.0.H "once" + "if=" interaction is unspecified normatively. The
+ * BRIEF test sub-bullet specifies "once-flag flips ONLY when both gates
+ * pass and body fires". To implement that, we must check `if=` BEFORE
+ * flipping the flag.
+ *
+ * Correct shape (when both once AND if= present):
+ *   if (fromVariant === "<from>" && toVariant === "<to>") {
+ *     if (!flag && (<rewrittenIfExpr>)) {
+ *       flag = true;
+ *       <body>;
+ *     }
+ *   }
+ *
+ * For only-once: `if (!flag) { flag = true; <body>; }`
+ * For only-if=:  `if (<rewrittenIfExpr>) { <body>; }`
+ * For neither:   `<body>;`
+ */
+function emitHookArm(arm: EngineHookArm, varName: string): string[] {
+  const lines: string[] = [];
+  const fromKey = JSON.stringify(arm.from);
+  const toKey = JSON.stringify(arm.to);
+
+  // For `effect=` arms, the parser stripped the `${...}` wrapper already
+  // (`engine-statechild-parser.ts:1129`). For `<onTransition>` bodies, the
+  // parser preserved it (line 622) — strip here for uniform downstream
+  // rewrite.
+  const bodyRawNormalized = arm.kind === "effect"
+    ? arm.bodyRaw
+    : unwrapBodyRawDollarBraces(arm.bodyRaw);
+  let bodyText: string;
+  try {
+    bodyText = rewriteHookExprText(bodyRawNormalized);
+  } catch {
+    // Defensive — keep the normalized text; downstream JS parse error will be loud.
+    bodyText = bodyRawNormalized;
+  }
+
+  // For effect arms there is no once / if=expr (Form 1 has no such attrs).
+  if (arm.kind === "effect") {
+    lines.push(`  if (fromVariant === ${fromKey} && toVariant === ${toKey}) {`);
+    lines.push(`    // §51.0.H effect= body for state-child .${arm.from} → .${arm.to}`);
+    lines.push(`    ${bodyText};`);
+    lines.push(`  }`);
+    return lines;
+  }
+
+  // For onTransition arms: optional once + optional if=expr gating.
+  const hasOnce = arm.once === true && arm.onceIdx !== null;
+  const hasIfExpr = typeof arm.ifExprRaw === "string" && arm.ifExprRaw.trim().length > 0;
+  let ifExprText = "true";
+  if (hasIfExpr) {
+    const unwrapped = unwrapIfExprRaw(arm.ifExprRaw!);
+    try {
+      ifExprText = rewriteHookExprText(unwrapped);
+    } catch {
+      ifExprText = unwrapped;
+    }
+  }
+
+  const placement = arm.kind === "to"
+    ? `<onTransition to=.${arm.to}> in .${arm.from}`
+    : `<onTransition from=.${arm.from}> in .${arm.to}`;
+
+  lines.push(`  if (fromVariant === ${fromKey} && toVariant === ${toKey}) {`);
+  lines.push(`    // §51.0.H ${placement}`);
+
+  if (hasOnce && hasIfExpr) {
+    const flag = engineOnceFlagName(varName, arm.onceIdx!);
+    lines.push(`    if (!${flag} && (${ifExprText})) {`);
+    lines.push(`      ${flag} = true;`);
+    lines.push(`      ${bodyText};`);
+    lines.push(`    }`);
+  } else if (hasOnce) {
+    const flag = engineOnceFlagName(varName, arm.onceIdx!);
+    lines.push(`    if (!${flag}) {`);
+    lines.push(`      ${flag} = true;`);
+    lines.push(`      ${bodyText};`);
+    lines.push(`    }`);
+  } else if (hasIfExpr) {
+    lines.push(`    if (${ifExprText}) {`);
+    lines.push(`      ${bodyText};`);
+    lines.push(`    }`);
+  } else {
+    lines.push(`    ${bodyText};`);
+  }
+
+  lines.push(`  }`);
+  return lines;
+}
+
+/**
+ * Emit the per-engine hook-firing function + per-once module-scope flag
+ * declarations. Returns an empty array when the engine has zero hooks.
+ *
+ * Shape (with two effect arms + one onTransition once-arm + one onTransition if-arm):
+ *
+ *   // §51.0.H once-flag for engine marioState (engine-wide ordinal 0)
+ *   let __scrml_engine_marioState_once_0 = false;
+ *
+ *   // §51.0.H hook-firing function for engine marioState
+ *   function __scrml_engine_marioState_fire_hooks(fromVariant, toVariant) {
+ *     if (fromVariant === "Small" && toVariant === "Big") {
+ *       // §51.0.H effect= body for state-child .Small → .Big
+ *       _scrml_reactive_set("coins", _scrml_reactive_get("coins") + 1);
+ *     }
+ *     if (fromVariant === "Big" && toVariant === "Cape") {
+ *       // §51.0.H <onTransition to=.Cape> in .Big
+ *       if (!__scrml_engine_marioState_once_0) {
+ *         __scrml_engine_marioState_once_0 = true;
+ *         playSound("cape");
+ *       }
+ *     }
+ *     // ... more arms ...
+ *   }
+ */
+export function emitEngineHookFiringFunction(meta: EngineMetadata): string[] {
+  const arms = collectEngineHooks(meta);
+  if (arms.length === 0) return [];
+
+  const lines: string[] = [];
+  const varName = meta.varName;
+  const fnName = engineHookFiringFunctionName(varName);
+
+  // Module-scope once-flag declarations (one per once-arm).
+  for (const arm of arms) {
+    if ((arm.kind === "to" || arm.kind === "from") && arm.once && arm.onceIdx !== null) {
+      const flag = engineOnceFlagName(varName, arm.onceIdx);
+      lines.push(`// §51.0.H once-flag for engine ${varName} (engine-wide ordinal ${arm.onceIdx})`);
+      lines.push(`let ${flag} = false;`);
+    }
+  }
+
+  if (lines.length > 0) lines.push("");
+
+  lines.push(`// §51.0.H hook-firing function for engine ${varName} (${meta.forType})`);
+  lines.push(`function ${fnName}(fromVariant, toVariant) {`);
+
+  for (const arm of arms) {
+    const armLines = emitHookArm(arm, varName);
+    for (const l of armLines) lines.push(l);
+  }
+
+  lines.push(`}`);
+  return lines;
+}
+
+/**
+ * Predicate — does this engine emit a hook-firing function?
+ *
+ * Used by call-site emitters to decide whether to insert a hook-firing call
+ * after a write. Tree-shake-friendly: when the engine has no hooks, no
+ * hook-firing function exists, so emitting a call to it would be a runtime
+ * ReferenceError. The predicate gates the emission cleanly.
+ *
+ * Mirrors `collectEngineHooks` filter — both call sites must agree on what
+ * counts as a "hook" (else: emit a call to an undeclared function).
+ */
+export function engineHasHooks(meta: EngineMetadata): boolean {
+  return collectEngineHooks(meta).length > 0;
+}
+
+/**
+ * Build a Set of engine var names (in the file's scope) that have at least
+ * one hook arm. Used by emit-logic.ts and emit-expr.ts to gate the
+ * hook-firing call insertion at write sites.
+ *
+ * Includes BOTH non-derived (C12-scope) and derived (C14-scope) engines —
+ * both can have hooks per §51.0.J line 20640.
+ */
+export function collectEnginesWithHooks(fileAST: unknown): Set<string> {
+  const out = new Set<string>();
+  // Non-derived engines (C12-scope).
+  for (const decl of collectC12EngineDecls(fileAST)) {
+    const meta = decl._record?.engineMeta;
+    if (meta && engineHasHooks(meta) && typeof meta.varName === "string") {
+      out.add(meta.varName);
+    }
+  }
+  // Derived engines (C14-scope) — they also can have hooks per §51.0.J.
+  for (const decl of collectC14DerivedEngineDecls(fileAST)) {
+    const meta = decl._record?.engineMeta;
+    if (meta && engineHasHooks(meta) && typeof meta.varName === "string") {
+      out.add(meta.varName);
+    }
+  }
+  return out;
+}
+
+/**
+ * Emit the hook-firing functions for every in-scope engine in the file.
+ *
+ * Top-level orchestrator — sibling to C12's `emitEngineSubstrate`,
+ * C14's `emitDerivedEngineSubstrateForFile`, and C15's
+ * `emitCrossFileEngineMountsForFile`. Returns an empty array when no engine
+ * in the file has hooks (lets the caller skip a section header).
+ *
+ * Per BRIEF: the hook-firing function lives at module scope; emitted
+ * alongside C12's transition table + C13's variant cell. Order vs the C12
+ * substrate: hook-firing functions emit AFTER the variant cells (so the
+ * once-flag declarations + hook-firing fn declarations appear in the right
+ * scope). Hook-firing call insertion at write sites references the function
+ * by name — module-level hoisting (function declarations are hoisted to top
+ * of script) means write-site call ordering relative to fn declaration is
+ * not load-bearing for non-derived engines. For derived engines the wrap
+ * happens INSIDE the closure body via `wrapDerivedEngineClosureBodyWithHooks`
+ * — function declaration must precede the `_scrml_derived_declare` call to
+ * avoid a TDZ on the function reference; hoisting handles that.
+ *
+ * Both non-derived and derived engines participate (per §51.0.J line 20640).
+ */
+export function emitEngineHookFiringFunctionsForFile(fileAST: any): string[] {
+  const lines: string[] = [];
+
+  // Non-derived engines (C12-scope).
+  for (const decl of collectC12EngineDecls(fileAST)) {
+    const meta = decl._record?.engineMeta;
+    if (!meta) continue;
+    const fnLines = emitEngineHookFiringFunction(meta);
+    if (fnLines.length === 0) continue;
+    if (lines.length > 0) lines.push("");
+    for (const l of fnLines) lines.push(l);
+  }
+
+  // Derived engines (C14-scope).
+  for (const decl of collectC14DerivedEngineDecls(fileAST)) {
+    const meta = decl._record?.engineMeta;
+    if (!meta) continue;
+    const fnLines = emitEngineHookFiringFunction(meta);
+    if (fnLines.length === 0) continue;
+    if (lines.length > 0) lines.push("");
+    for (const l of fnLines) lines.push(l);
+  }
+
+  return lines;
+}
+
+/**
+ * Wrap a derived-engine closure body with hook-firing logic.
+ *
+ * Per Decision 6 (SURVEY): hook firing for derived engines is emitted INSIDE
+ * the `_scrml_derived_declare` closure. The closure captures the previously-
+ * cached value (via `_scrml_derived_cache[name]`), runs the projection, and
+ * fires hooks if the value changed.
+ *
+ * The `__scrml_old !== undefined` guard ensures the initial evaluation does
+ * NOT fire hooks (Decision 5: engine init is not a transition).
+ *
+ * @param closureBody — the inner projection body (from buildDerivedEngineClosureBody)
+ * @param varName — engine variable name
+ * @param hasHooks — when false, returns the closure body unchanged (tree-shake)
+ */
+export function wrapDerivedEngineClosureBodyWithHooks(
+  closureBody: string,
+  varName: string,
+  hasHooks: boolean,
+): string {
+  if (!hasHooks) return closureBody;
+  const fnName = engineHookFiringFunctionName(varName);
+  // The closure body terminates with `return <expr>;` — we need to:
+  //   1. Capture old value before invoking the projection.
+  //   2. Run the projection in a sub-IIFE so we can capture the new value.
+  //   3. Fire hooks if old !== new (and old !== undefined per Decision 5).
+  //   4. Return the new value.
+  return [
+    `const __scrml_hook_old = _scrml_derived_cache[${JSON.stringify(varName)}];`,
+    `const __scrml_hook_new = (() => {`,
+    `    ${closureBody}`,
+    `  })();`,
+    `  if (__scrml_hook_old !== undefined && __scrml_hook_old !== __scrml_hook_new) {`,
+    `    ${fnName}(__scrml_hook_old, __scrml_hook_new);`,
+    `  }`,
+    `  return __scrml_hook_new;`,
+  ].join("\n  ");
 }

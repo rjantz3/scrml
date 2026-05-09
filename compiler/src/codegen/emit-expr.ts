@@ -63,6 +63,16 @@ export interface EmitExprContext {
    * cell value is a bare variant string with no `.advance` method).
    */
   engineVarNames?: Set<string> | null;
+  /**
+   * B17.4 (§51.0.H) — engine variable names in the file's scope that have at
+   * least one `effect=` or `<onTransition>` arm. When the engine var is in
+   * this set, `emitEngineAdvanceCall` wraps the helper call with hook-firing
+   * (capture pre-write variant + fire `__scrml_engine_<varName>_fire_hooks`
+   * after the helper). Tree-shaken: when an engine has no hooks, the wrap is
+   * elided and no hook-firing function reference is emitted (the function
+   * doesn't exist for hookless engines).
+   */
+  enginesWithHooks?: Set<string> | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -489,7 +499,11 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     if (ctx.engineVarNames.has(bareName)) {
       const { emitEngineAdvanceCall } = require("./emit-engine.ts");
       const targetExpr = emitExpr(node.args[0], ctx);
-      return emitEngineAdvanceCall(bareName, targetExpr);
+      // B17.4 — pass hasHooks so the wrap (capture pre-write + fire-hooks-post)
+      // is emitted only when this engine has at least one effect=/<onTransition>
+      // arm. Tree-shake: hookless engines emit the bare runtime helper call.
+      const hasHooks = ctx.enginesWithHooks ? ctx.enginesWithHooks.has(bareName) : false;
+      return emitEngineAdvanceCall(bareName, targetExpr, hasHooks);
     }
   }
 

@@ -102,6 +102,14 @@ interface EmitLogicOpts {
    */
   engineVarNames?: Set<string> | null;
   /**
+   * B17.4 (§51.0.H): Engine variable names that have at least one
+   * `effect=` or `<onTransition>` arm. Used by `emit-expr.ts:emitCall` to
+   * decide whether to wrap the `.advance()` call with hook-firing
+   * (`__scrml_engine_<varName>_fire_hooks(from, to)`). Computed once per
+   * file via `collectEnginesWithHooks` in `emit-engine.ts`.
+   */
+  enginesWithHooks?: Set<string> | null;
+  /**
    * Emission boundary. "server" swaps DOM-oriented lowerings for their
    * server-context equivalents (e.g. `lift <expr>` in a server-fn body
    * becomes `return <expr>;` instead of a `_scrml_lift(() =>
@@ -328,6 +336,9 @@ function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
     // C13 (§51.0.G) — engine variable name set so emit-expr can detect
     // `.advance` calls on engine-bound `@vars`.
     engineVarNames: opts.engineVarNames ?? null,
+    // B17.4 (§51.0.H) — engines that have effect=/<onTransition> arms;
+    // gates the hook-firing wrap on `.advance()` emissions.
+    enginesWithHooks: opts.enginesWithHooks ?? null,
   };
 }
 
