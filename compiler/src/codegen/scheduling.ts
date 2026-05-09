@@ -146,7 +146,7 @@ export function extractInitExpr(stmt: ASTNode): string {
  * @param {CGError[]} [errors]
  * @returns {string[]}
  */
-export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: RouteMap, depGraph: DepGraph, filePath: string, errors: CGError[] = [], machineBindings?: Map<string, { engineName: string; tableName: string; rules: any[]; auditTarget?: string | null }> | null): string[] {
+export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: RouteMap, depGraph: DepGraph, filePath: string, errors: CGError[] = [], machineBindings?: Map<string, { engineName: string; tableName: string; rules: any[]; auditTarget?: string | null }> | null, engineBindings?: Map<string, { varName: string; forType: string; tableName: string }> | null, engineVarNames?: Set<string> | null): string[] {
   const lines: string[] = [];
   // Track declared names so tilde-decl can detect reassignment vs first declaration
   const declaredNames = new Set<string>();
@@ -154,7 +154,15 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
   // inside are reassignments, not declarations — suppress _scrml_init_set
   // sidecar emission so the reset-to-init thunk preserves the canonical
   // declaration-time init expression.
-  const emitOpts: any = { declaredNames, insideFunctionBody: true, ...(machineBindings ? { machineBindings } : {}) };
+  // C13: thread engineBindings + engineVarNames so engine direct writes and
+  // .advance() calls inside fn bodies dispatch to the runtime hooks.
+  const emitOpts: any = {
+    declaredNames,
+    insideFunctionBody: true,
+    ...(machineBindings ? { machineBindings } : {}),
+    ...(engineBindings ? { engineBindings } : {}),
+    ...(engineVarNames && engineVarNames.size > 0 ? { engineVarNames } : {}),
+  };
 
   // Only use complex scheduling (Promise.all) for functions with actual server calls.
   // For purely client-side functions, emit sequentially — wrapping non-async statements

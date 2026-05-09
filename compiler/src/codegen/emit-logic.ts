@@ -85,6 +85,23 @@ interface EmitLogicOpts {
   /** §51.5: Machine binding map for transition guard emission. Keyed by reactive var name. */
   machineBindings?: Map<string, { engineName: string; tableName: string; rules: any[]; auditTarget?: string | null }> | null;
   /**
+   * C13 (§51.0.F): Engine binding map for `<engine>`-form direct-write hook
+   * dispatch. Sibling to `machineBindings` (FORKED per C13 SURVEY q1 — the
+   * legacy `TransitionRule[]` shape and the new C12 table format do not merge
+   * cleanly). Keyed by engine variable name (e.g., "marioState"). When set
+   * and the assignment LHS matches a key, `_emitReactiveSet` dispatches to
+   * `_scrml_engine_direct_set` instead of bare `_scrml_reactive_set`.
+   */
+  engineBindings?: Map<string, import("./emit-engine.ts").EngineBindingInfo> | null;
+  /**
+   * C13 (§51.0.G): Engine variable names in the file's scope. Used by
+   * `emit-expr.ts:emitCall` to detect `.advance` calls on engine variables
+   * (e.g., `@marioState.advance(.Big)`) and dispatch to the runtime hook.
+   * NULL or empty → no detection. Computed once per file in
+   * `emit-reactive-wiring.ts`.
+   */
+  engineVarNames?: Set<string> | null;
+  /**
    * Emission boundary. "server" swaps DOM-oriented lowerings for their
    * server-context equivalents (e.g. `lift <expr>` in a server-fn body
    * becomes `return <expr>;` instead of a `_scrml_lift(() =>
@@ -308,6 +325,9 @@ function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
     derivedNames: opts.derivedNames ?? null,
     tildeVar: opts.tildeContext?.var ?? null,
     dbVar: opts.dbVar,
+    // C13 (§51.0.G) — engine variable name set so emit-expr can detect
+    // `.advance` calls on engine-bound `@vars`.
+    engineVarNames: opts.engineVarNames ?? null,
   };
 }
 
@@ -539,6 +559,17 @@ function _emitReactiveSet(encodedName: string, valueExpr: string, opts: EmitLogi
     if (binding) {
       return emitTransitionGuard(encodedName, valueExpr, binding.tableName, binding.engineName, binding.rules, (binding as any).auditTarget ?? null).join("\n");
     }
+    // C13 (§51.0.F Move 12) — engine direct-write hook. When the LHS is the
+    // auto-declared engine variable (`@marioState = .X`), dispatch to the
+    // runtime helper instead of bare `_scrml_reactive_set`. The helper reads
+    // the current variant, validates against the from-state's `rule=` entry
+    // in the compile-time-baked table, and either commits the write or
+    // throws E-ENGINE-INVALID-TRANSITION (runtime severity per §34).
+    const engineBinding = opts.engineBindings?.get(lookupName) ?? null;
+    if (engineBinding) {
+      const { emitEngineWriteGuard } = require("./emit-engine.ts");
+      return emitEngineWriteGuard(engineBinding, valueExpr).join("\n");
+    }
   }
   // §51.12 — on init of a machine-bound var whose machine has temporal
   // rules, arm the initial-state timer after the reactive is set. The
@@ -652,6 +683,20 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           if (target && target.kind === "ident" && typeof target.name === "string" && target.name.startsWith("@") && assignNode.op === "=") {
             const bareName = target.name.slice(1);
             if (opts.machineBindings.get(bareName)) {
+              const rhsStr = emitExpr(assignNode.value as any, _makeExprCtx(opts));
+              return _emitReactiveSet(bareName, rhsStr, opts, bareName) + ";";
+            }
+          }
+        }
+        // C13 (§51.0.F): mirror interception for the new `<engine>` form. The
+        // legacy `<machine>` interception above goes through `emitTransitionGuard`;
+        // this arm dispatches `<engine>`-form writes through the C13 hook.
+        if (opts.engineBindings && node.exprNode.kind === "assign") {
+          const assignNode = node.exprNode as { kind: "assign"; op: string; target?: { kind?: string; name?: string }; value: unknown };
+          const target = assignNode.target;
+          if (target && target.kind === "ident" && typeof target.name === "string" && target.name.startsWith("@") && assignNode.op === "=") {
+            const bareName = target.name.slice(1);
+            if (opts.engineBindings.get(bareName)) {
               const rhsStr = emitExpr(assignNode.value as any, _makeExprCtx(opts));
               return _emitReactiveSet(bareName, rhsStr, opts, bareName) + ";";
             }
@@ -1116,7 +1161,10 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         // reassignments of SQL-init vars route through the transition guard.
         const hasTypeAnnotation2 = !!(node as any).typeAnnotation;
         const hasMachineBinding2 = !!(node as any).machineBinding;
-        const isInit2 = hasTypeAnnotation2 || hasMachineBinding2 || !(opts.machineBindings?.has(node.name));
+        // C13: include engineBindings in the discriminator (see isInit at
+        // ~line 1205 — same reasoning).
+        const isInit2 = hasTypeAnnotation2 || hasMachineBinding2 ||
+          !(opts.machineBindings?.has(node.name) || opts.engineBindings?.has(node.name));
         return _appendSidecar(_emitReactiveSet(encodedName2, sqlExpr, opts, node.name, isInit2));
       }
       // fix-cg-mounthydrate-sql-ref-placeholder (S40 follow-up): on the CLIENT
@@ -1157,7 +1205,14 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // guard and §51.11 audit clause.
       const hasTypeAnnotation = !!(node as any).typeAnnotation;
       const hasMachineBinding = !!(node as any).machineBinding;
-      const isInit = hasTypeAnnotation || hasMachineBinding || !(opts.machineBindings?.has(node.name));
+      // C13: also discriminate against engineBindings — an engine variable
+      // reassignment inside a fn body must NOT be treated as init (which would
+      // skip the engine direct-write hook). Engine variables are auto-declared
+      // by C12 substrate emission and never have a user-source state-decl
+      // declaration site, so any state-decl whose name matches an engine
+      // binding IS a reassignment.
+      const isInit = hasTypeAnnotation || hasMachineBinding ||
+        !(opts.machineBindings?.has(node.name) || opts.engineBindings?.has(node.name));
       // Phase 3 fast path: when initExpr is present, skip all string splitting/merging
       if (node.initExpr) {
         const rewrittenInit = emitExpr(node.initExpr, _makeExprCtx(opts));

@@ -311,6 +311,16 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
         chunks.add("utilities"); // _scrml_reactive_explicit_set
         break;
 
+      // C13 (§51.0.F + §51.0.G): engine-decl in scope → enable the `engine`
+      // runtime chunk for C13 hooks (_scrml_engine_check_transition / advance /
+      // direct_set). Conservative trigger: any engine-decl AST node — even
+      // derived ones (C14 surface) currently have no helper hookups, but a
+      // future direct-write hook on derived projection results would reuse
+      // this same chunk. Tree-shaken when no engines appear in the file.
+      case "engine-decl":
+        chunks.add("engine");
+        break;
+
       // match-stmt with enum arms — uses _scrml_structural_eq for enum comparison
       case "match-stmt": {
         const arms: any[] = node.arms ?? [];

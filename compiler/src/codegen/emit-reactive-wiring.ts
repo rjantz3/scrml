@@ -253,15 +253,21 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
 
   const derivedNames = collectDerivedVarNames(fileAST);
   const machineBindings = buildMachineBindingsMap(fileAST);
+  // C13 (§51.0.F + §51.0.G) — sibling map for new `<engine>`-form direct-write
+  // hook + `.advance()` dispatch. Forked from `machineBindings` per C13 SURVEY
+  // q1 (the new C12 table format and legacy TransitionRule[] do not merge cleanly).
+  const { buildEngineBindingsMap, collectEngineVarNames } = require("./emit-engine.ts");
+  const engineBindings = buildEngineBindingsMap(fileAST);
+  const engineVarNames: Set<string> = collectEngineVarNames(fileAST);
   // C2: build function-body registry once per file for transitive reactive-dep
   // extraction in derived-cell inits (closes SPEC §6.6.3 line 2470-2482
   // normative — deps tracked through fn calls). Mirrors the
   // `extractReactiveDepsTransitive` usage in `emit-html.ts:891` for markup
   // interpolations. Threaded into `emit-logic` via `EmitLogicOpts.fnBodyRegistry`.
   const fnBodyRegistry: FunctionBodyRegistry = buildFunctionBodyRegistry(fileAST as Record<string, unknown>);
-  const emitOpts: { derivedNames?: Set<string>; encodingCtx?: typeof encodingCtx; machineBindings?: typeof machineBindings; fnBodyRegistry?: FunctionBodyRegistry } = derivedNames.size > 0
-    ? { derivedNames, encodingCtx, fnBodyRegistry, ...(machineBindings ? { machineBindings } : {}) }
-    : { encodingCtx, fnBodyRegistry, ...(machineBindings ? { machineBindings } : {}) };
+  const emitOpts: { derivedNames?: Set<string>; encodingCtx?: typeof encodingCtx; machineBindings?: typeof machineBindings; engineBindings?: typeof engineBindings; engineVarNames?: Set<string>; fnBodyRegistry?: FunctionBodyRegistry } = derivedNames.size > 0
+    ? { derivedNames, encodingCtx, fnBodyRegistry, ...(machineBindings ? { machineBindings } : {}), ...(engineBindings ? { engineBindings } : {}), ...(engineVarNames.size > 0 ? { engineVarNames } : {}) }
+    : { encodingCtx, fnBodyRegistry, ...(machineBindings ? { machineBindings } : {}), ...(engineBindings ? { engineBindings } : {}), ...(engineVarNames.size > 0 ? { engineVarNames } : {}) };
 
   // Step 4a: Generate transition lookup tables for enums with transitions{} and machines (§51.5).
   // These must be emitted BEFORE top-level logic statements because state-decl

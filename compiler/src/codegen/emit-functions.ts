@@ -44,6 +44,12 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   const { filePath, routeMap, depGraph, errors, csrfEnabled } = ctx;
   const fnNodes: ASTNode[] = (ctx.analysis?.fnNodes ?? collectFunctions(ctx.fileAST)) as ASTNode[];
   const machineBindings = buildMachineBindingsMap(ctx.fileAST);
+  // C13 (§51.0.F + §51.0.G): mirror machineBindings wiring for new <engine>
+  // form. Function bodies that write to engine variables or call .advance()
+  // need both maps threaded through the same emit path.
+  const { buildEngineBindingsMap, collectEngineVarNames } = require("./emit-engine.ts");
+  const engineBindings = buildEngineBindingsMap(ctx.fileAST);
+  const engineVarNames: Set<string> = collectEngineVarNames(ctx.fileAST);
   const lines: string[] = [];
 
   // Map from original function name → generated var name.
@@ -187,7 +193,13 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // are reassignments (the cell's true declaration site lives at module
     // top-level). Suppress _scrml_init_set emission so the reset-to-init
     // thunk preserves the canonical declaration-time init expression.
-    const cpsOpts: any = { declaredNames: new Set<string>(), insideFunctionBody: true, ...(machineBindings ? { machineBindings } : {}) };
+    const cpsOpts: any = {
+      declaredNames: new Set<string>(),
+      insideFunctionBody: true,
+      ...(machineBindings ? { machineBindings } : {}),
+      ...(engineBindings ? { engineBindings } : {}),
+      ...(engineVarNames.size > 0 ? { engineVarNames } : {}),
+    };
     for (let i = 0; i < body.length; i++) {
       const stmt = body[i];
       if (!stmt) continue;
@@ -305,7 +317,14 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       // C5: function-shortcut bodies are function bodies — `state-decl` nodes
       // within are reassignments, not declaration sites. Suppress
       // _scrml_init_set sidecar emission via insideFunctionBody:true.
-      const fnOpts = { boundary: "client" as const, declaredNames: new Set<string>(), insideFunctionBody: true, ...(machineBindings ? { machineBindings } : {}) };
+      const fnOpts = {
+        boundary: "client" as const,
+        declaredNames: new Set<string>(),
+        insideFunctionBody: true,
+        ...(machineBindings ? { machineBindings } : {}),
+        ...(engineBindings ? { engineBindings } : {}),
+        ...(engineVarNames.size > 0 ? { engineVarNames } : {}),
+      };
       const shortcutLines = emitFnShortcutBody(body, fnOpts, fnKind, hasRetType);
       for (const code of shortcutLines) {
         for (const line of code.split("\n")) {
@@ -313,7 +332,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         }
       }
     } else {
-      const scheduled = scheduleStatements(body, fnNode, routeMap, depGraph, filePath, errors, machineBindings);
+      const scheduled = scheduleStatements(body, fnNode, routeMap, depGraph, filePath, errors, machineBindings, engineBindings, engineVarNames);
       for (const line of scheduled) {
         lines.push(`  ${line}`);
       }

@@ -38,6 +38,9 @@
  *   messages      _scrml_messages_inline/_registered, _scrml_messages_register,
  *                 _scrml_messages_register_inline, _scrml_message_for,
  *                 _SCRML_DEFAULT_MESSAGES, _SCRML_TAG_TO_VALIDATOR (§55.10, C10)
+ *   engine        _scrml_engine_check_transition, _scrml_engine_advance,
+ *                 _scrml_engine_direct_set (§51.0.F + §51.0.G, C13).
+ *                 Tree-shaken when usage.engines is false.
  */
 
 import { SCRML_RUNTIME } from "../runtime-template.js";
@@ -65,6 +68,7 @@ export const RUNTIME_CHUNK_ORDER = [
   'equality',
   'deep_reactive',
   'messages',
+  'engine',
 ] as const;
 
 export type RuntimeChunkName = (typeof RUNTIME_CHUNK_ORDER)[number];
@@ -113,6 +117,7 @@ const CHUNK_MARKERS: Record<NonCoreChunkName, string> = {
   equality:       '§45 Structural equality',
   deep_reactive:  'Fine-grained reactivity primitives (Reactivity Phase 1)',
   messages:       "§55.10 Error message resolution runtime (chunk: 'messages')",
+  engine:         "§51.0.F + §51.0.G Engine state-machine runtime hooks (chunk: 'engine')",
 
   // Function definition markers — 'function _name' starts at a line boundary.
   // Previous chunk ends after the preceding function/IIFE closing brace.

@@ -55,6 +55,14 @@ export interface EmitExprContext {
   dbVar?: string;
   /** Error accumulator for diagnostics. */
   errors?: any[];
+  /**
+   * C13 (§51.0.G) — engine variable names in the file's scope. When set and
+   * the call shape is `@<name>.advance(<arg>)` with `<name>` in this set,
+   * `emitCall` dispatches to the C13 runtime hook (`_scrml_engine_advance`)
+   * instead of emitting a property-access call (which would fail because the
+   * cell value is a bare variant string with no `.advance` method).
+   */
+  engineVarNames?: Set<string> | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -448,6 +456,41 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   // Dispatch to the monomorphized parser emitter (emit-parse-variant.ts).
   if (isParseVariantCall(node)) {
     return emitParseVariantCall(node, ctx);
+  }
+
+  // C13 §51.0.G — `.advance(.X)` interception for engine variables.
+  //
+  // Detect the AST shape:
+  //   CallExpr {
+  //     callee: MemberExpr { object: IdentExpr("@<varName>"), property: "advance" },
+  //     args: [ <targetExpr> ]
+  //   }
+  // where `<varName>` is a known engine variable (per
+  // ctx.engineVarNames, populated from collectEngineVarNames in
+  // emit-reactive-wiring). Emit a runtime-helper call that reads the cell,
+  // validates against the from-state's rule= entry in the compile-time-baked
+  // table, and either commits or throws E-ENGINE-INVALID-TRANSITION.
+  //
+  // CRITICAL: this dispatch fires BEFORE the standard MemberExpr path —
+  // emitting `_scrml_reactive_get("marioState").advance(...)` would fail at
+  // runtime because the cell value is a bare variant string with no method.
+  if (
+    ctx.mode === "client" &&
+    ctx.engineVarNames && ctx.engineVarNames.size > 0 &&
+    node.callee.kind === "member" &&
+    !node.callee.optional &&
+    node.callee.property === "advance" &&
+    node.callee.object.kind === "ident" &&
+    typeof (node.callee.object as IdentExpr).name === "string" &&
+    (node.callee.object as IdentExpr).name.startsWith("@") &&
+    node.args.length === 1
+  ) {
+    const bareName = (node.callee.object as IdentExpr).name.slice(1);
+    if (ctx.engineVarNames.has(bareName)) {
+      const { emitEngineAdvanceCall } = require("./emit-engine.ts");
+      const targetExpr = emitExpr(node.args[0], ctx);
+      return emitEngineAdvanceCall(bareName, targetExpr);
+    }
   }
 
   // §51.14 replay(@target, @log[, index]) → _scrml_replay("target", _scrml_reactive_get("log"), index?)

@@ -428,3 +428,119 @@ export function emitEngineSubstrate(fileAST: any): string[] {
 
   return lines;
 }
+
+// ---------------------------------------------------------------------------
+// C13 — engine-bindings map (write-hook seam) + write-guard emitter
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-engine binding info consumed by `_emitReactiveSet` to dispatch a
+ * `<engine>`-form write to the C13 runtime hook (`_scrml_engine_direct_set`).
+ *
+ * Sibling to legacy `<machine>` bindings (built by
+ * `emit-reactive-wiring.ts:buildMachineBindingsMap`). Per C13 SURVEY q1, the
+ * two surfaces are FORKED — the legacy `TransitionRule[]` shape is too
+ * entangled with machine-only features (guards, effects, labels, audit,
+ * temporal, payload bindings) for a clean merge with the new C12 table
+ * format (`["X"]` / `"*"` / `[]` per from-variant).
+ */
+export interface EngineBindingInfo {
+  /** Engine variable name (e.g., `"marioState"`). */
+  varName: string;
+  /** Governed enum type name (e.g., `"MarioState"`). */
+  forType: string;
+  /** Compile-time-baked transition-table identifier (per §51.0.F + C12). */
+  tableName: string;
+}
+
+/**
+ * Walk the file AST and collect a map from engine-variable name → binding info.
+ * Returns null when no in-scope C12 engines exist (caller skips the wiring
+ * cost).
+ *
+ * Mirrors C12's discovery walker (`collectC12EngineDecls`) for consistency.
+ * The map is consumed by `_emitReactiveSet` in `emit-logic.ts` to dispatch a
+ * direct-write `@engineVar = .X` to the C13 runtime hook instead of the bare
+ * `_scrml_reactive_set`.
+ */
+export function buildEngineBindingsMap(fileAST: unknown): Map<string, EngineBindingInfo> | null {
+  const decls = collectC12EngineDecls(fileAST);
+  if (decls.length === 0) return null;
+  const out = new Map<string, EngineBindingInfo>();
+  for (const decl of decls) {
+    const meta = decl._record?.engineMeta;
+    if (!meta || typeof meta.varName !== "string" || meta.varName.length === 0) continue;
+    out.set(meta.varName, {
+      varName: meta.varName,
+      forType: meta.forType,
+      tableName: engineTransitionTableName(meta.varName),
+    });
+  }
+  return out.size > 0 ? out : null;
+}
+
+/**
+ * Emit the runtime helper-call for a direct write to an engine variable.
+ *
+ * Per §51.0.F (Move 12) — `@engineVar = .X` is intercepted; the C13 runtime
+ * hook (`_scrml_engine_direct_set`) reads the current variant, looks up the
+ * from-state's `rule=` entry in the compile-time-baked table, and either
+ * commits the write or throws `E-ENGINE-INVALID-TRANSITION`.
+ *
+ * Shape:
+ *   _scrml_engine_direct_set("marioState", <newValueExpr>, __scrml_engine_marioState_transitions);
+ *
+ * The table-name is emitted as a BARE IDENTIFIER (not a string) so the
+ * runtime does NOT have to look it up — the const is in scope at the use
+ * site (table emission precedes any code that writes the engine variable;
+ * see `emit-client.ts` orchestration).
+ */
+export function emitEngineWriteGuard(binding: EngineBindingInfo, newValueExpr: string): string[] {
+  return [
+    `// §51.0.F engine direct-write hook: ${binding.varName} (${binding.forType})`,
+    `_scrml_engine_direct_set(${JSON.stringify(binding.varName)}, ${newValueExpr}, ${binding.tableName});`,
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// C13 — `.advance()` codegen helpers (consumed by emit-expr.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the set of engine variable names in the file's scope. Used by
+ * `emit-expr.ts:emitCall` to detect `.advance` calls on engine variables.
+ *
+ * Returns an empty Set when there are no in-scope engines (caller's
+ * detection arm short-circuits).
+ */
+export function collectEngineVarNames(fileAST: unknown): Set<string> {
+  const out = new Set<string>();
+  for (const decl of collectC12EngineDecls(fileAST)) {
+    const meta = decl._record?.engineMeta;
+    if (meta && typeof meta.varName === "string" && meta.varName.length > 0) {
+      out.add(meta.varName);
+    }
+  }
+  return out;
+}
+
+/**
+ * Emit the `.advance(.X)` runtime helper call for a known engine variable.
+ *
+ * Per §51.0.G (Move 13) — `@engineVar.advance(.X)` is intercepted; the C13
+ * runtime hook (`_scrml_engine_advance`) reads the current variant, looks
+ * up the from-state's `rule=` entry, and either commits the transition or
+ * throws E-ENGINE-INVALID-TRANSITION with the "asserted advance failed"
+ * framing per §51.0.G's loud-failure semantics.
+ *
+ * Shape:
+ *   _scrml_engine_advance("marioState", <targetExpr>, __scrml_engine_marioState_transitions)
+ *
+ * Returns a single expression string (no trailing semicolon — `.advance()`
+ * is a CallExpr; its emission is composed by `emitCall` and the surrounding
+ * statement wrapper adds the semicolon).
+ */
+export function emitEngineAdvanceCall(varName: string, targetExpr: string): string {
+  const tableName = engineTransitionTableName(varName);
+  return `_scrml_engine_advance(${JSON.stringify(varName)}, ${targetExpr}, ${tableName})`;
+}

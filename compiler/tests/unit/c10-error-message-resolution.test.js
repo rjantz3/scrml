@@ -146,8 +146,8 @@ describe("C10 §C10.0 — Chunk wiring", () => {
     expect(RUNTIME_CHUNKS.messages).toContain("_SCRML_TAG_TO_VALIDATOR");
   });
 
-  test("RUNTIME_CHUNK_ORDER has 17 chunks total (16 + 'messages')", () => {
-    expect(RUNTIME_CHUNK_ORDER.length).toBe(17);
+  test("RUNTIME_CHUNK_ORDER has 18 chunks total (17 + 'engine' added by C13)", () => {
+    expect(RUNTIME_CHUNK_ORDER.length).toBe(18);
   });
 });
 

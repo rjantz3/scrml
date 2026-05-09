@@ -237,14 +237,13 @@ describe("runtime size", () => {
     expect(minimal.length).toBeLessThan(SCRML_RUNTIME.length * 0.30);
   });
 
-  test("RUNTIME_CHUNK_ORDER has 17 chunks", () => {
-    // 17 chunks post-C10: 'messages' chunk added for SPEC §55.10 4-level error
-    // message resolution chain (L12). Helpers: _scrml_message_for,
-    // _scrml_messages_register, _scrml_messages_register_inline + 14+1 default
-    // catalog. Chunk-detection trigger: any validator with a non-null
-    // inlineOverride (emit-client.ts), OR future <errors of=> element (C11).
+  test("RUNTIME_CHUNK_ORDER has 18 chunks", () => {
+    // 18 chunks post-C13: 'engine' chunk added for SPEC §51.0.F + §51.0.G
+    // engine state-machine runtime hooks. Helpers: _scrml_engine_check_transition,
+    // _scrml_engine_advance, _scrml_engine_direct_set. Chunk-detection trigger:
+    // any engine-decl AST node (emit-client.ts:detectFromNode).
     //
-    // Prior milestone: 16 chunks post-C7 (validators chunk).
-    expect(RUNTIME_CHUNK_ORDER.length).toBe(17);
+    // Prior milestone: 17 chunks post-C10 ('messages' chunk for §55.10).
+    expect(RUNTIME_CHUNK_ORDER.length).toBe(18);
   });
 });

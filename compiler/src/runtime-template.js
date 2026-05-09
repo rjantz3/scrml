@@ -2120,6 +2120,68 @@ function _scrml_message_for(error, fieldName, cellName) {
   return _scrml_messages_fallback(fieldName);
 }
 
+// ---------------------------------------------------------------------------
+// §51.0.F + §51.0.G Engine state-machine runtime hooks (chunk: 'engine')
+// ---------------------------------------------------------------------------
+// C13: rule= contract enforcement on the auto-declared engine variable.
+//
+// Substrate from C12 (per-engine, compile-time-baked):
+//   - __scrml_engine_<varName>_transitions — Object.freeze({...}) keyed by
+//     from-variant. Entries: ["X"] (single), ["A","B"] (multi), "*" (wildcard
+//     escape hatch), [] (terminal — no transitions).
+//   - The variant cell uses standard reactive substrate; current variant via
+//     _scrml_reactive_get(varName) (returns bare-string variant tag), write
+//     via _scrml_reactive_set(varName, value).
+//
+// This chunk adds three helpers:
+//   - _scrml_engine_check_transition(currentVariant, target, table)
+//       Pure boolean predicate. Looks up the from-variant entry; legal iff
+//       the entry is "*" OR includes the target. No side effects.
+//   - _scrml_engine_advance(varName, target, table)
+//       For \`@var.advance(.X)\`. Reads current variant, checks, throws with
+//       "asserted advance failed" framing on failure, else sets the cell.
+//       Per §51.0.G "loud failure" semantics.
+//   - _scrml_engine_direct_set(varName, target, table)
+//       For \`@var = .X\`. Reads current variant, checks, throws plain
+//       E-ENGINE-INVALID-TRANSITION on failure, else sets the cell.
+//       Per §51.0.F direct-write enforcement (Move 12).
+//
+// Both throwing helpers funnel through _scrml_engine_check_transition so
+// the lookup logic exists in exactly one place. Codegen emits ONE call per
+// write site — no per-call message construction.
+
+function _scrml_engine_check_transition(currentVariant, target, table) {
+  if (table == null) return false;
+  const entry = table[currentVariant];
+  if (entry === "*") return true;
+  if (Array.isArray(entry) && entry.indexOf(target) !== -1) return true;
+  return false;
+}
+
+function _scrml_engine_advance(varName, target, table) {
+  const current = _scrml_reactive_get(varName);
+  if (!_scrml_engine_check_transition(current, target, table)) {
+    throw new Error(
+      "E-ENGINE-INVALID-TRANSITION: asserted advance failed. " +
+      "Variable: " + varName + ". Move: ." + String(current) + " => ." + String(target) +
+      ". The from-state's rule= contract does not permit this target."
+    );
+  }
+  _scrml_reactive_set(varName, target);
+}
+
+function _scrml_engine_direct_set(varName, target, table) {
+  const current = _scrml_reactive_get(varName);
+  if (!_scrml_engine_check_transition(current, target, table)) {
+    throw new Error(
+      "E-ENGINE-INVALID-TRANSITION: illegal direct write to engine variable. " +
+      "Variable: " + varName + ". Move: ." + String(current) + " => ." + String(target) +
+      ". The from-state's rule= contract does not permit this target."
+    );
+  }
+  _scrml_reactive_set(varName, target);
+}
+
 `;
 
 /**
