@@ -737,7 +737,7 @@ describe("C15 §C15.10 — same-file engine substrate NOT regressed by C15", () 
 // `<onTransition>`/`effect=` parser-extension work).
 // ---------------------------------------------------------------------------
 
-describe.skip("C15 §C15.11 — full pipeline: importer's compiled client.js has the marker (DEFERRED — upstream pipeline gaps)", () => {
+describe.skip("C15 §C15.11 — full pipeline: importer's compiled client.js has the marker (DEFERRED — codegen-side FileAST-shape divergence, surfaced S75)", () => {
   test("compileScrml: importer + exporter pair produces marker in importer's client.js", () => {
     const ROOT = join(TMP, "c15-11");
     mkdirSync(ROOT, { recursive: true });
@@ -828,7 +828,7 @@ export
 // §C15.12 — End-to-end: multiple importers see the same singleton substrate
 // ---------------------------------------------------------------------------
 
-describe.skip("C15 §C15.12 — multiple importers share the same exporter substrate (DEFERRED — upstream pipeline gaps)", () => {
+describe.skip("C15 §C15.12 — multiple importers share the same exporter substrate (DEFERRED — same codegen-side FileAST-shape gap as §C15.11, surfaced S75)", () => {
   test("two importer files of the same engine: both have markers; ONE substrate in exporter", () => {
     const ROOT = join(TMP, "c15-12");
     mkdirSync(ROOT, { recursive: true });
@@ -891,7 +891,7 @@ export
 // §C15.13 — Re-export of imported engine is legal (§21.4); no duplicate substrate
 // ---------------------------------------------------------------------------
 
-describe.skip("C15 §C15.13 — re-export of imported engine: no duplicate substrate (DEFERRED — upstream pipeline gaps)", () => {
+describe.skip("C15 §C15.13 — re-export of imported engine: no duplicate substrate (DEFERRED — MOD re-export engine-category falls to 'other'; surfaced S75)", () => {
   test("re-exporter file does NOT duplicate the engine substrate", () => {
     const ROOT = join(TMP, "c15-13");
     mkdirSync(ROOT, { recursive: true });
@@ -955,7 +955,7 @@ export
 // §C15.14 — Regression-guard: B14 PASS 10.B's E-ENGINE-MOUNT-NOT-ENGINE
 // ---------------------------------------------------------------------------
 
-describe.skip("C15 §C15.14 — B14 PASS 10.B's E-ENGINE-MOUNT-NOT-ENGINE still fires (DEFERRED — PASS 10.B path-shape bug)", () => {
+describe("C15 §C15.14 — B14 PASS 10.B's E-ENGINE-MOUNT-NOT-ENGINE still fires (UNBLOCKED S75 — B14 PASS 10.B path-shape fix)", () => {
   test("compileScrml: importing a function and mounting via <X/> fires E-ENGINE-MOUNT-NOT-ENGINE", () => {
     const ROOT = join(TMP, "c15-14");
     mkdirSync(ROOT, { recursive: true });
