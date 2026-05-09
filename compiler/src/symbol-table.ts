@@ -6732,6 +6732,253 @@ function walkValidateEngineB17Diagnostics(
   }
 }
 
+// ---------------------------------------------------------------------------
+// PASS 18 (A6-3) — `test-bind` typer support per SPEC §19.12.6 / §19.12.7
+// ---------------------------------------------------------------------------
+//
+// For every `~{}` test block (AST node `kind === "test"`) found in the file
+// AST, iterate `node.testGroup.testBinds[]` (populated by A6-2 parser at
+// `ast-builder.js:8175`) and:
+//
+//   1. **LHS resolution.** Look up `bind.identifier` against the set of
+//      same-file `function-decl` nodes. If no match OR the matched fn has
+//      `isServer !== true`, fire E-TEST-005 ("invalid test structure")
+//      with a discriminator message per SPEC §19.12.6.
+//   2. **RHS-shape discrimination.** Apply the syntactic + scope-lookup
+//      heuristic to `bind.expression` (raw RHS source). Stamp
+//      `bind.bindKind = "handler" | "return-stub"` on the AST node.
+//      Codegen (A6-4) reads this annotation to pick the dispatch shape
+//      per §19.12.7.
+//
+// **Cross-file imported server-fn LHS:** silently defers (export registry
+// lacks an `isServer` discriminator at this revision; see SURVEY §2.3).
+// The annotation defaults to `"return-stub"` so codegen is robust.
+//
+// **Strict signature-assignability:** out of scope (see SURVEY §2.4).
+// FunctionType in TS is opaque; A6-3 ships syntactic discrimination as the
+// practical interpretation.
+//
+// **Walker shape:** mirrors PASS 17 (`walkValidateEngineB17Diagnostics`)
+// recursion contract — descend into `children`/`body`/`consequent`/
+// `alternate`/`arms[].body`. Stops descending at engine-decl (raw text
+// bodies) and skips no other node kind. The fileAst's `function-decl`
+// collection is built once before the walk for O(1) name lookups.
+
+/**
+ * Match an arrow function literal: `(...) => ...` with optional parens.
+ * Permissive — any leading whitespace, optional outer parens around the
+ * param list, and a non-greedy `=>` arrow. Doesn't validate body shape.
+ *
+ * Examples that match: `() => 1`, `(x) => x`, `x => x`, `(a, b) => a+b`,
+ * `(id) => { return id; }`, `async () => 1`.
+ */
+const TEST_BIND_RHS_ARROW_RE =
+  /^\s*(?:async\s+)?(?:[A-Za-z_$][\w$]*\s*=>|\([^)]*\)\s*=>)/;
+
+/**
+ * Match a function expression: `function name?(...)`. Permissive — handles
+ * named/anonymous and the `function*` generator form.
+ */
+const TEST_BIND_RHS_FUNCTION_RE =
+  /^\s*(?:async\s+)?function\s*\*?\s*[A-Za-z_$]?[\w$]*\s*\(/;
+
+/**
+ * Match a single bare identifier (no operators, no calls, no member access).
+ * Used to detect "RHS is a plain identifier" — eligible for scope-lookup
+ * to discriminate function-bound vs value-bound.
+ */
+const TEST_BIND_RHS_IDENT_RE = /^\s*([A-Za-z_$][\w$]*)\s*$/;
+
+/**
+ * Discriminate a `test-bind` RHS expression source string into the dispatch
+ * shape per SPEC §19.12.6. Pure function — no diagnostic firing here.
+ *
+ * @param rhsSource    — raw RHS source text from `bind.expression`
+ * @param sameFileFns  — same-file function-decl names (any kind, server or not)
+ * @param fileScope    — file scope for import-binding lookup
+ * @returns "handler" | "return-stub"
+ */
+function discriminateTestBindRhs(
+  rhsSource: string,
+  sameFileFns: Set<string>,
+  fileScope: Scope,
+): "handler" | "return-stub" {
+  if (!rhsSource || typeof rhsSource !== "string") return "return-stub";
+
+  // Rule 1: function-literal patterns → handler.
+  if (TEST_BIND_RHS_ARROW_RE.test(rhsSource)) return "handler";
+  if (TEST_BIND_RHS_FUNCTION_RE.test(rhsSource)) return "handler";
+
+  // Rule 2: plain-identifier RHS resolving to a function-decl or import.
+  const identMatch = rhsSource.match(TEST_BIND_RHS_IDENT_RE);
+  if (identMatch) {
+    const ident = identMatch[1];
+    if (sameFileFns.has(ident)) return "handler";
+    if (fileScope.importBindings.has(ident)) return "handler";
+  }
+
+  // Rule 3: otherwise → return-stub.
+  return "return-stub";
+}
+
+/**
+ * Collect all same-file `function-decl` nodes into a name → node map.
+ * Walks the AST top-down; nested functions are included (per S74 hand-off
+ * item 178's "the typer makes this call at compile time" — server-fn
+ * nesting is exotic but not banned by the spec).
+ */
+function collectSameFileFunctionDecls(
+  nodes: any,
+  out: Map<string, any>,
+  visited: WeakSet<object>,
+): void {
+  if (!nodes) return;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) collectSameFileFunctionDecls(n, out, visited);
+    return;
+  }
+  if (typeof nodes !== "object") return;
+  if (visited.has(nodes)) return;
+  visited.add(nodes);
+  const node = nodes as any;
+  if (node.kind === "function-decl" && typeof node.name === "string") {
+    if (!out.has(node.name)) out.set(node.name, node);
+  }
+  if (Array.isArray(node.children)) collectSameFileFunctionDecls(node.children, out, visited);
+  if (Array.isArray(node.body)) collectSameFileFunctionDecls(node.body, out, visited);
+  if (Array.isArray(node.consequent)) collectSameFileFunctionDecls(node.consequent, out, visited);
+  if (Array.isArray(node.alternate)) collectSameFileFunctionDecls(node.alternate, out, visited);
+  if (Array.isArray(node.arms)) {
+    for (const arm of node.arms) {
+      if (arm && Array.isArray(arm.body)) collectSameFileFunctionDecls(arm.body, out, visited);
+    }
+  }
+}
+
+/**
+ * PASS 18 (A6-3) — annotate every `test-bind` declaration in a single
+ * `kind: "test"` AST node with `bindKind` and fire E-TEST-005 on LHS-
+ * resolution failure.
+ *
+ * Exported for direct test use (mirrors PASS 17's `validateEngineB17Diagnostics`
+ * pattern). Synthesized AST tests bypass full-pipeline run.
+ */
+export function annotateTestBindsInBlock(
+  testNode: any,
+  fnDecls: Map<string, any>,
+  fileScope: Scope,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  if (!testNode || typeof testNode !== "object") return;
+  if (testNode.kind !== "test") return;
+  const tg = testNode.testGroup;
+  if (!tg || !Array.isArray(tg.testBinds)) return;
+
+  for (const bind of tg.testBinds) {
+    if (!bind || typeof bind !== "object") continue;
+    const ident = typeof bind.identifier === "string" ? bind.identifier : "";
+    const rhs = typeof bind.expression === "string" ? bind.expression : "";
+
+    // ----- LHS resolution -----
+    const fn = fnDecls.get(ident);
+    const isImportBinding = fileScope.importBindings.has(ident);
+    if (!fn && !isImportBinding) {
+      // Identifier resolves to nothing in the file's declaration or import scope.
+      const span: SYMDiagnostic["span"] = testNode.span ?? {
+        file: filePath, start: 0, end: 0, line: 1, col: 1,
+      };
+      errors.push({
+        code: "E-TEST-005",
+        message:
+          `E-TEST-005: \`test-bind ${ident}\` does not resolve to a server function ` +
+          `in scope. Per SPEC §19.12.6, the LHS must name a \`server fn\` ` +
+          `declaration in this file's declaration or import scope. ` +
+          `Declare \`server fn ${ident}(...)\` (or import it from another file) ` +
+          `before this \`~{}\` block.`,
+          span,
+        severity: "error",
+      });
+    } else if (fn && fn.isServer !== true) {
+      // Identifier resolves to a same-file function but it's not server-prefixed.
+      const span: SYMDiagnostic["span"] = testNode.span ?? {
+        file: filePath, start: 0, end: 0, line: 1, col: 1,
+      };
+      errors.push({
+        code: "E-TEST-005",
+        message:
+          `E-TEST-005: \`test-bind ${ident}\` resolves to function \`${ident}\` ` +
+          `declared without the \`server\` modifier. Only \`server fn\`/\`server ` +
+          `function\` declarations are valid \`test-bind\` targets per SPEC §19.12.6. ` +
+          `Add the \`server\` modifier to \`${ident}\` or remove this \`test-bind\`.`,
+          span,
+        severity: "error",
+      });
+    }
+    // (When `isImportBinding` is true and `fn` is null, we silently accept —
+    //  cross-file server-fn imports are deferred per A6-3 SURVEY §2.3.)
+
+    // ----- RHS-shape discrimination -----
+    const sameFileFnNames = new Set(fnDecls.keys());
+    bind.bindKind = discriminateTestBindRhs(rhs, sameFileFnNames, fileScope);
+  }
+}
+
+/**
+ * PASS 18 walker — visits every `kind: "test"` AST node and runs the A6-3
+ * annotation + diagnostic pass. Mirrors PASS 17 walker shape: same recursion
+ * contract, no special-case stops (test blocks live at top-level or under
+ * meta-context wrappers; nested test blocks are forbidden by E-TEST-001 —
+ * the walker is robust to that constraint regardless).
+ */
+function walkAnnotateTestBindKinds(
+  nodes: any,
+  fnDecls: Map<string, any>,
+  fileScope: Scope,
+  errors: SYMDiagnostic[],
+  filePath: string,
+  visited: WeakSet<object>,
+): void {
+  if (!nodes) return;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) {
+      walkAnnotateTestBindKinds(n, fnDecls, fileScope, errors, filePath, visited);
+    }
+    return;
+  }
+  if (typeof nodes !== "object") return;
+  if (visited.has(nodes)) return;
+  visited.add(nodes);
+
+  const node = nodes as any;
+  if (node.kind === "test") {
+    annotateTestBindsInBlock(node, fnDecls, fileScope, errors, filePath);
+    // Don't descend further from a test block — the testGroup isn't a normal
+    // AST container, and A6-2 already handled inner structure.
+    return;
+  }
+
+  if (Array.isArray(node.children)) {
+    walkAnnotateTestBindKinds(node.children, fnDecls, fileScope, errors, filePath, visited);
+  }
+  if (Array.isArray(node.body)) {
+    walkAnnotateTestBindKinds(node.body, fnDecls, fileScope, errors, filePath, visited);
+  }
+  if (Array.isArray(node.consequent)) {
+    walkAnnotateTestBindKinds(node.consequent, fnDecls, fileScope, errors, filePath, visited);
+  }
+  if (Array.isArray(node.alternate)) {
+    walkAnnotateTestBindKinds(node.alternate, fnDecls, fileScope, errors, filePath, visited);
+  }
+  if (Array.isArray(node.arms)) {
+    for (const arm of node.arms) {
+      if (arm && Array.isArray(arm.body)) {
+        walkAnnotateTestBindKinds(arm.body, fnDecls, fileScope, errors, filePath, visited);
+      }
+    }
+  }
+}
+
 
 
 // ---------------------------------------------------------------------------
@@ -7041,6 +7288,28 @@ export function runSYM(input: SYMInput): SYMResult {
   // #5/#6; cross-state-child `from=` consistency check (codegen territory).
   const visitedB173 = new WeakSet<object>();
   walkValidateEngineB17Diagnostics(ast.nodes, ast, errors, filePath, visitedB173);
+
+  // PASS 18 (A6-3): `test-bind` typer support per SPEC §19.12.6 / §19.12.7.
+  // For every `~{}` test-block AST node, walk `testGroup.testBinds[]` and:
+  //   - Resolve LHS against same-file `function-decl` / file-scope import
+  //     bindings; fire E-TEST-005 on miss or non-server local resolution.
+  //   - Discriminate RHS shape (function-literal pattern OR identifier-bound
+  //     to function → handler; otherwise → return-stub) and stamp
+  //     `bindKind` on the TestBindDecl AST node.
+  //
+  // Cross-file imported server-fn LHS resolution is DEFERRED — the
+  // export-registry shape lacks an `isServer` discriminator at this revision
+  // (see SURVEY §2.3). Strict structural-signature assignability is also
+  // deferred — the type-system's FunctionType is opaque (see SURVEY §2.4).
+  //
+  // Ordering: runs LAST. Engine-orthogonal — order doesn't matter relative to
+  // PASSes 10–17 beyond the prerequisite that `test-bind` parsing (A6-2) ran
+  // in TAB before `runSYM` (always true).
+  const fnDecls = new Map<string, any>();
+  const visitedFnCollect = new WeakSet<object>();
+  collectSameFileFunctionDecls(ast.nodes, fnDecls, visitedFnCollect);
+  const visitedA63 = new WeakSet<object>();
+  walkAnnotateTestBindKinds(ast.nodes, fnDecls, fileScope, errors, filePath, visitedA63);
 
   return {
     filePath,

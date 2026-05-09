@@ -175,6 +175,34 @@ export interface TestBindDecl {
   expression: string;
   /** Source line of the `test-bind` declaration. */
   line: number;
+  /**
+   * Discrimination annotation populated by SYM PASS 18 (Phase A6-3) per
+   * SPEC §19.12.6 RHS-shape discrimination contract:
+   *   - `"handler"`     — RHS is a function value (literal or
+   *                       resolved identifier-bound function); test-mode
+   *                       dispatch (§19.12.7) invokes the binding with
+   *                       the call-site arguments.
+   *   - `"return-stub"` — RHS is a non-function value; test-mode dispatch
+   *                       ignores arguments and returns the value verbatim.
+   *
+   * Absent until SYM PASS 18 runs. Codegen (A6-4) reads this to choose the
+   * dispatch shape per §19.12.7. When the field is undefined (e.g., SYM
+   * was bypassed), codegen defaults to `"return-stub"` defensively so the
+   * dispatch hook still emits.
+   *
+   * **Discrimination rule (A6-3 syntactic + scope-lookup heuristic):**
+   *   1. RHS source matches a function-literal pattern
+   *      (arrow `=>` or `function` expression) → `"handler"`.
+   *   2. RHS source is a single identifier resolving to a function-decl in
+   *      this file or an import binding → `"handler"`.
+   *   3. Otherwise → `"return-stub"`.
+   *
+   * Strict structural-signature assignability (per §19.12.6 verbatim) is
+   * deferred — the type-system's FunctionType is opaque at this revision.
+   * SPEC §19.12.7 imposes no compile-time arity/type constraint on the
+   * dispatch; mismatch is runtime-observable.
+   */
+  bindKind?: "handler" | "return-stub";
 }
 
 /**
