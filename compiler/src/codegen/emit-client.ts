@@ -207,6 +207,26 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
           chunks.add("validators");
           chunks.add("derived");
         }
+        // C8 (§55.5/§55.6/§55.7): every compound-parent state-decl triggers
+        // the validity-surface synth emission (compound-level rollup +
+        // per-field touched + compound submitted + per-field trivial defaults).
+        // The emission uses:
+        //   - `derived` chunk — _scrml_derived_declare/get/subscribe for the
+        //     compound errors/isValid/touched derivations + per-field trivial
+        //     defaults.
+        //   - `reset` chunk — _scrml_init_set registrations for per-field
+        //     touched + compound submitted (so reset(@compound) clears them
+        //     per §55.13).
+        // Predictability rule (§55.5): unconditional for every compound
+        // parent — even compounds with no validator-bearing fields get the
+        // surface with trivially-true isValid + empty errors.
+        if (
+          (node as any)._cellKind === "compound-parent" ||
+          Array.isArray((node as any).children)
+        ) {
+          chunks.add("derived");
+          chunks.add("reset");
+        }
         break;
 
       // timers — <timer> and <poll> markup elements

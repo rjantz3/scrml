@@ -537,10 +537,24 @@ describe("C7 §C7.8 — Skip rules", () => {
     const child = compoundChild("name", "", [bareValidator("req")]);
     const parent = compoundParent("signup", [child]);
     const out = emitLogicNode(parent, clientOpts());
-    // Child's runner should appear; parent should NOT have its own runner.
+    // Child's runner should appear; parent should NOT call _scrml_validator_fire
+    // for itself (validators only fire on per-field cells).
+    //
+    // C8 NOTE (post-S73 land): the compound parent DOES now emit synth-surface
+    // derived cells `"signup.errors"` and `"signup.isValid"` per SPEC §55.5
+    // (compound-level rollup). Those are NOT validator runners — they're
+    // reductions over the per-field errors. The contract here is "no
+    // validator-fire for the parent itself" — checked by counting
+    // _scrml_validator_fire calls (one per child validator, not per parent).
     expect(out).toContain('"signup.name.errors"');
-    expect(out).not.toContain('"signup.errors"');
-    expect(out).not.toContain('"signup.isValid"');
+    // Parent's compound-level errors/isValid are emitted by C8 — they're
+    // present in `out`. What MUST NOT appear is a validator-fire call
+    // inside a `signup.errors` declaration body (parent itself running a
+    // validator).
+    const validatorFireCount = (out.match(/_scrml_validator_fire/g) ?? []).length;
+    // One fire per validator on the child (req) — exactly one. Parent
+    // contributes zero.
+    expect(validatorFireCount).toBe(1);
   });
 
   test("server boundary — no runner emitted", () => {

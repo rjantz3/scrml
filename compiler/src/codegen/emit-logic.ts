@@ -10,6 +10,7 @@ import type { EncodingContext } from "./type-encoding.ts";
 import { emitRuntimeCheck } from "./emit-predicates.ts";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitValidatorRunnerSidecar } from "./emit-validators.ts";
+import { emitCompoundSynthSurface } from "./emit-synth-surface.ts";
 
 // ---------------------------------------------------------------------------
 // Deep reactive wrapping helper (Reactivity Phase 1)
@@ -937,12 +938,27 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           parentLines.push(`_scrml_derived_subscribe(${JSON.stringify(encodedParentName)}, ${JSON.stringify(encodedChild)});`);
         }
 
+        // C8: validity-surface synthesis emission (compound-level rollup +
+        // per-field touched + compound submitted + per-field trivial defaults).
+        // Per SPEC §55.5/§55.6/§55.7 — emitted unconditionally for every
+        // compound parent (predictability rule). Returns null when boundary is
+        // server or insideFunctionBody.
+        const _synthSurfaceEmit = emitCompoundSynthSurface(node, _qualifiedName, {
+          boundary: opts.boundary,
+          insideFunctionBody: opts.insideFunctionBody,
+          encodingCtx: opts.encodingCtx ?? null,
+        });
+        if (_synthSurfaceEmit) parentLines.push(_synthSurfaceEmit);
+
         // Order: child declarations FIRST (so children exist before the parent
         // proxy reads them on its first lazy pull), then the parent declare +
-        // subscribe edges. The `default=` sidecar applies to the parent cell
-        // itself only if the parent decl carries `defaultExpr` (rare; per
-        // SPEC §6.8.2 reset() recurses into children — but a parent-level
-        // `default=` is allowed structurally).
+        // subscribe edges, then C8's compound-level synth (which reads the
+        // per-field synth derivations via _scrml_derived_get — those exist
+        // because childLines includes C7's per-field validator runner +
+        // C8's per-field trivial defaults). The `default=` sidecar applies
+        // to the parent cell itself only if the parent decl carries
+        // `defaultExpr` (rare; per SPEC §6.8.2 reset() recurses into children
+        // — but a parent-level `default=` is allowed structurally).
         const all = [...childLines, ...parentLines];
         return _appendSidecar(all.join("\n"));
       }

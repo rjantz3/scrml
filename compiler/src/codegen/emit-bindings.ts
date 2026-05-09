@@ -195,6 +195,73 @@ interface BindDispatch {
   isNumeric: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// A1c C8 — per-field `touched` synth event-listener wiring (§55.7).
+//
+// When a bind:* directive points at a COMPOUND CHILD (dotted path like
+// `signup.email`), the corresponding per-field `touched` cell — registered by
+// emit-synth-surface.ts at compound-emit time — should be set to `true` on the
+// FIRST user interaction with the element. Per §55.7 lines 25148-25152, the
+// most-permissive trigger is chosen so the surface "feels right":
+//   - `bind:value` change (input event for text/textarea, change for select)
+//   - `bind:checked` change (change event for checkbox)
+//   - first focus-out (focusout event, fires regardless of value change)
+//
+// Once `touched=true`, never reverts (until `reset(@compound)`).
+//
+// **Trigger predicate:** the bound path has a dot (compound.field). Top-level
+// cells (no dot) have NO per-field synth surface per §55.5 L11 Edge A —
+// `touched` is meaningless there.
+//
+// **Idempotency:** the listener is wired once per use site; multiple use
+// sites for the same field each get their own listener (and each fires on
+// its own element's interaction). Internal guard avoids redundant
+// reactive-set when already true.
+//
+// Cross-references:
+//   - SPEC §55.6 (per-field `touched` is one of the three per-field synths)
+//   - SPEC §55.7 (event timing — input/change OR first focus-out)
+//   - emit-synth-surface.ts (registers the `<compound>.<field>.touched` cell
+//     with init `false` and `_scrml_init_set` for reset support)
+// ---------------------------------------------------------------------------
+
+/**
+ * Append per-field `touched` event-listener emission to `lines` for a single
+ * bound element. The emission is wrapped in an idempotency guard so repeated
+ * input/change events don't trigger redundant reactive-sets.
+ *
+ * Skips entirely when the path has no dot (top-level cell — no per-field
+ * surface per §55.5 L11 Edge A).
+ *
+ * @param lines — accumulator the caller is writing into; emission appends
+ * @param bVarRaw — the bound path string (e.g. "form.email", "outer.inner.leaf")
+ * @param elemVar — the JS variable name holding the DOM element (caller's local)
+ * @param inputEvent — the bind dispatch's input/change event
+ * @param encodingCtx — encoding context for storage-key encoding (mirrors C5/C7)
+ */
+function _emitTouchedListenerLines(
+  lines: string[],
+  bVarRaw: string,
+  elemVar: string,
+  inputEvent: "input" | "change",
+  encodingCtx: EncodingContext | null | undefined,
+): void {
+  // Skip top-level cells (no per-field synth surface).
+  if (bVarRaw.indexOf(".") === -1) return;
+  const touchedKey = encodingCtx ? encodingCtx.encode(`${bVarRaw}.touched`) : `${bVarRaw}.touched`;
+  lines.push(`    // C8: per-field touched event wiring (§55.7)`);
+  lines.push(`    ${elemVar}.addEventListener(${JSON.stringify(inputEvent)}, () => {`);
+  lines.push(`      if (_scrml_reactive_get(${JSON.stringify(touchedKey)}) !== true) {`);
+  lines.push(`        _scrml_reactive_set(${JSON.stringify(touchedKey)}, true);`);
+  lines.push(`      }`);
+  lines.push(`    });`);
+  lines.push(`    ${elemVar}.addEventListener("focusout", () => {`);
+  lines.push(`      if (_scrml_reactive_get(${JSON.stringify(touchedKey)}) !== true) {`);
+  lines.push(`        _scrml_reactive_set(${JSON.stringify(touchedKey)}, true);`);
+  lines.push(`      }`);
+  lines.push(`    });`);
+}
+
 /**
  * Map a render-spec (tag + attributes) to the bind:* flavour per SPEC §5.4.1.
  *
@@ -355,6 +422,7 @@ export function emitBindings(ctx: CompileContext): string[] {
             lines.push(`    ${bElemId}.addEventListener(${JSON.stringify(inputEvent)}, (event) => ${writeExpr(writeValue)});`);
           }
           lines.push(`    _scrml_effect(() => { ${bElemId}.value = ${readExpr}; });`);
+          _emitTouchedListenerLines(lines, bVarRaw, bElemId, inputEvent, encodingCtx);
           lines.push(`  }`);
           lines.push(`}`);
         } else if (bAttr.name === "bind:valueAsNumber") {
@@ -368,6 +436,7 @@ export function emitBindings(ctx: CompileContext): string[] {
           lines.push(`    ${bElemId}.value = ${readExpr};`);
           lines.push(`    ${bElemId}.addEventListener(${JSON.stringify(inputEvent)}, (event) => ${writeExpr("Number(event.target.value)")});`);
           lines.push(`    _scrml_effect(() => { ${bElemId}.value = ${readExpr}; });`);
+          _emitTouchedListenerLines(lines, bVarRaw, bElemId, inputEvent, encodingCtx);
           lines.push(`  }`);
           lines.push(`}`);
         } else if (bAttr.name === "bind:checked") {
@@ -378,6 +447,7 @@ export function emitBindings(ctx: CompileContext): string[] {
           lines.push(`    ${bElemId}.checked = ${readExpr};`);
           lines.push(`    ${bElemId}.addEventListener("change", (event) => ${writeExpr("event.target.checked")});`);
           lines.push(`    _scrml_effect(() => { ${bElemId}.checked = ${readExpr}; });`);
+          _emitTouchedListenerLines(lines, bVarRaw, bElemId, "change", encodingCtx);
           lines.push(`  }`);
           lines.push(`}`);
         } else if (bAttr.name === "bind:selected") {
@@ -388,6 +458,7 @@ export function emitBindings(ctx: CompileContext): string[] {
           lines.push(`    ${bElemId}.value = ${readExpr};`);
           lines.push(`    ${bElemId}.addEventListener("change", (event) => ${writeExpr("event.target.value")});`);
           lines.push(`    _scrml_effect(() => { ${bElemId}.value = ${readExpr}; });`);
+          _emitTouchedListenerLines(lines, bVarRaw, bElemId, "change", encodingCtx);
           lines.push(`  }`);
           lines.push(`}`);
         } else if (bAttr.name === "bind:files") {
@@ -397,6 +468,7 @@ export function emitBindings(ctx: CompileContext): string[] {
           lines.push(`  if (${bElemId}) {`);
           lines.push(`    ${bElemId}.addEventListener("change", (event) => ${writeExpr("event.target.files")});`);
           lines.push(`    _scrml_effect(() => { /* files are read-only from DOM — effect tracks @${bVarRaw} */ ${readExpr}; });`);
+          _emitTouchedListenerLines(lines, bVarRaw, bElemId, "change", encodingCtx);
           lines.push(`  }`);
           lines.push(`}`);
         } else if (bAttr.name === "bind:group") {
@@ -407,6 +479,7 @@ export function emitBindings(ctx: CompileContext): string[] {
           lines.push(`    ${bElemId}.checked = (${readExpr} === ${bElemId}.value);`);
           lines.push(`    ${bElemId}.addEventListener("change", (event) => ${writeExpr("event.target.value")});`);
           lines.push(`    _scrml_effect(() => { ${bElemId}.checked = (${readExpr} === ${bElemId}.value); });`);
+          _emitTouchedListenerLines(lines, bVarRaw, bElemId, "change", encodingCtx);
           lines.push(`  }`);
           lines.push(`}`);
         }
@@ -673,6 +746,11 @@ export function emitBindings(ctx: CompileContext): string[] {
         `    _scrml_effect(() => { /* files are read-only from DOM — effect tracks @${cellName} */ ${readExpr}; });`,
       );
     }
+
+    // C8: per-field touched event wiring (§55.7). Only fires for compound-
+    // child paths (cellName contains a dot). Top-level cells have no
+    // per-field surface per §55.5 L11 Edge A.
+    _emitTouchedListenerLines(lines, cellName, elemId, dispatch.inputEvent, encodingCtx);
 
     lines.push(`  }`);
     lines.push(`}`);
