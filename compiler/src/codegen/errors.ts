@@ -28,21 +28,23 @@ export class CGError {
 }
 
 // ---------------------------------------------------------------------------
-// E-TEST-* — Test context error codes
+// E-TEST-* — Test context error codes (SPEC §34, severity: Test)
 // ---------------------------------------------------------------------------
 //
-// E-TEST-001  Nested ~{} block — `~{}` cannot nest inside another `~{}` context.
-//             Use separate `~{}` blocks or `test` sub-blocks within a single group.
+// Authoritative source: compiler/SPEC.md §34 catalog (lines ~14420-14425) +
+// §19.13 (line ~11435+). This comment block is documentation; SPEC.md is
+// normative per pa.md Rule 4.
 //
-// E-TEST-002  `~{}` in invalid position — test context is not valid inside `?{}`
-//             SQL or `#{}` CSS contexts.
-//
-// E-TEST-003  `assert.type` with unknown type name — the type name following `:` is
-//             not in the type registry for this file.
-//
-// E-TEST-004  `assert.throws` with non-callable expression — the expression passed
-//             to `assert.throws` must be a function call or function literal.
-//
-// E-TEST-005  Empty test block — a `~{}` block with no test cases or assertions
-//             produces no test output. This is a warning, not an error.
-//             (severity: 'warning')
+// E-TEST-001  `~{}` test block: assertion failed.
+// E-TEST-002  `~{}` test block: unexpected error during execution.
+// E-TEST-003  `~{}` test block: timeout exceeded.
+// E-TEST-004  `~{}` test block: references variable from outer scope (§19.12).
+// E-TEST-005  `~{}` test block: invalid test structure (umbrella code; A6-2
+//             reuses for parser-level violations including `test-bind`
+//             duplicate identifier, context violation, missing identifier,
+//             missing `=`, missing RHS — verified verbatim fit per Rule 4).
+// E-TEST-006  `~{}` test block: server-function call inside an active
+//             `test-bind` context references a server function with no
+//             `test-bind` declaration in scope (§19.12.6 / §19.12.7,
+//             design-insight 22, S74). Fail-fast over silent passthrough.
+//             Test-mode-only; dead-code-eliminated from release builds.
