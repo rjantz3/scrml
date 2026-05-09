@@ -712,8 +712,28 @@ export function runCG(input: CgInput): CgOutput {
     }
 
     // Generate test JS when testMode is enabled
+    //
+    // Phase A6-4 (SPEC §19.12.7) — collect same-file server-fn names so
+    // emit-test.ts can emit E-TEST-006 thrower stubs for unbound server-fns
+    // called inside `~{}` test blocks. Walk the file's fn nodes and pick out
+    // those whose route entry has `boundary === "server"`.
+    const sameFileServerFnNames: string[] = [];
+    if (testMode) {
+      const fnNodes: any[] = (analysis as any)?.fnNodes ?? [];
+      for (const fnNode of fnNodes) {
+        const span = fnNode?.span;
+        if (!span || typeof span.start !== "number") continue;
+        const fnNodeId = `${filePath}::${span.start}`;
+        const route = safeRouteMap.functions.get(fnNodeId);
+        if (!route || route.boundary !== "server") continue;
+        const fnName = fnNode.name;
+        if (typeof fnName === "string" && fnName !== "anon" && fnName !== "") {
+          sameFileServerFnNames.push(fnName);
+        }
+      }
+    }
     const testJs: string | null = testMode
-      ? generateTestJs(filePath, (analysis as any)?.testGroups ?? [], []) ?? null
+      ? generateTestJs(filePath, (analysis as any)?.testGroups ?? [], [], sameFileServerFnNames) ?? null
       : null;
 
     // §51.13 — auto-generated machine property tests.
