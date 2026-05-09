@@ -7,7 +7,7 @@ import { emitFunctions } from "./emit-functions.ts";
 import { emitBindings } from "./emit-bindings.ts";
 import { emitReactiveWiring } from "./emit-reactive-wiring.ts";
 import { emitEventWiring } from "./emit-event-wiring.ts";
-import { emitEngineSubstrate } from "./emit-engine.ts";
+import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile } from "./emit-engine.ts";
 import { setVariantFieldsForFile } from "./emit-control-flow.ts";
 import { EncodingContext, emitDecodeTable, emitRuntimeReflect } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
@@ -317,9 +317,26 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
       // derived ones (C14 surface) currently have no helper hookups, but a
       // future direct-write hook on derived projection results would reuse
       // this same chunk. Tree-shaken when no engines appear in the file.
-      case "engine-decl":
+      //
+      // C14 (§51.0.J): derived engine-decl ALSO needs the `derived` chunk
+      // (`_scrml_derived_declare`/`_scrml_derived_subscribe`/`_scrml_derived_get`)
+      // — emit-engine.ts:emitDerivedEngineSubstrateForFile uses these helpers
+      // to register the engine variant cell as a read-only derived cell. The
+      // tightest gate is `engineMeta.derivedExpr != null` which mirrors C14's
+      // emission gate exactly.
+      case "engine-decl": {
         chunks.add("engine");
+        // C14: derived engine (non-legacy `<machine>` keyword) needs the
+        // `derived` chunk. Mirror the gate used by
+        // `isC14DerivedEngineDecl` (`derivedExpr != null` AND
+        // `legacyMachineKeyword !== true`).
+        const engineMeta = (node as any)._record?.engineMeta;
+        const isLegacyMachine = (node as any).legacyMachineKeyword === true;
+        if (!isLegacyMachine && engineMeta && engineMeta.derivedExpr != null) {
+          chunks.add("derived");
+        }
         break;
+      }
 
       // match-stmt with enum arms — uses _scrml_structural_eq for enum comparison
       case "match-stmt": {
@@ -530,6 +547,29 @@ export function generateClientJs(ctx: CompileContext): string {
   if (engineLines.length > 0) {
     lines.push("// --- engine substrate (compiler-generated, §51.0) ---");
     for (const line of engineLines) lines.push(line);
+    lines.push("");
+  }
+
+  // C14 derived engine substrate — per `<engine for=Type derived=expr>` decl:
+  // (1) `_scrml_derived_declare` registering a read-only variant cell with
+  // a projection closure, (2) one `_scrml_derived_subscribe` per upstream
+  // dependency, (3) forced initial `_scrml_derived_get` so init-time
+  // E-DERIVED-ENGINE-INITIAL-UNDEFINED throws fire loudly per §51.0.J line
+  // 20640 + §34 line 14460.
+  //
+  // SPEC §51.0.J. Emitted AFTER the C12 (non-derived) engine substrate so
+  // any derived engine projecting from a non-derived engine variant cell
+  // sees the upstream's initial value during init-time forced eval. NO
+  // transition table (rule= rejected at A1b/B16); NO direct-write hook
+  // (writes rejected at A1b/B16); NO `.advance()` (derived engines are
+  // read-only per §51.0.J). `<onTransition>`/`effect=` firing on derived
+  // state-children remains DEFERRED — same parser blocker as C13. See
+  // `compiler/src/codegen/emit-engine.ts` C14 section + the C14 SURVEY
+  // (`docs/changes/phase-a1c-step-c14-derived-engines/SURVEY.md`).
+  const derivedEngineLines = emitDerivedEngineSubstrateForFile(fileAST);
+  if (derivedEngineLines.length > 0) {
+    lines.push("// --- derived engine substrate (compiler-generated, §51.0.J) ---");
+    for (const line of derivedEngineLines) lines.push(line);
     lines.push("");
   }
 

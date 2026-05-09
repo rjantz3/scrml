@@ -106,6 +106,14 @@ interface EngineDeclLike {
   initialVariant?: string | null;
   rulesRaw?: string;
   sourceVar?: string | null;
+  /**
+   * Set by ast-builder to `true` when this engine-decl was authored with the
+   * legacy `<machine>` keyword (§51.3, deprecated). The legacy projection
+   * surface is handled by `emit-machines.ts` and triggers W-DEPRECATED-001.
+   * C14's emission MUST EXCLUDE legacy-machine decls — they have their own
+   * runtime path and including them would double-emit the projection.
+   */
+  legacyMachineKeyword?: boolean;
   _record?: { engineMeta?: EngineMetadata };
   _cellKind?: string;
 }
@@ -543,4 +551,311 @@ export function collectEngineVarNames(fileAST: unknown): Set<string> {
 export function emitEngineAdvanceCall(varName: string, targetExpr: string): string {
   const tableName = engineTransitionTableName(varName);
   return `_scrml_engine_advance(${JSON.stringify(varName)}, ${targetExpr}, ${tableName})`;
+}
+
+// ===========================================================================
+// C14 — Derived engines (`derived=expr` emission, L20)
+// ===========================================================================
+//
+// Per SPEC §51.0.J (lines 20607-20642). A derived engine computes its current
+// value from an upstream reactive expression instead of being driven by direct
+// writes. The engine variant cell becomes a READ-ONLY derived cell at the
+// runtime layer (registered via C2's `_scrml_derived_declare` substrate, not
+// the plain `_scrml_reactive_set` path used by non-derived engines in C12).
+//
+// **What C14 emits per derived engine:**
+//
+//   1. ONE auto-declared READ-ONLY reactive variant cell registered with
+//      `_scrml_derived_declare(<varName>, () => <projection-closure>)`. The
+//      closure body computes the engine's current variant from the upstream
+//      cell(s) the `derived=expr` reads.
+//
+//   2. ONE `_scrml_derived_subscribe(<varName>, <upstream>)` call per upstream
+//      cell the `derived=expr` reads — registers the dirty-propagation edge so
+//      the closure re-evaluates when an upstream cell changes.
+//
+//   3. INLINE `E-DERIVED-ENGINE-INITIAL-UNDEFINED` throw inside the closure:
+//      if the projection yields `undefined`, throw at runtime per §34 line
+//      14460. Fires both at engine-init time (forced read via
+//      `_scrml_derived_get`) AND on every subsequent re-evaluation when the
+//      upstream cell takes a value with no matching arm — same error code per
+//      the catalog row (no separate "transition undefined" code exists).
+//
+//   4. Mount-position marker comment per C12's pattern.
+//
+// **What C14 does NOT emit (deferred):**
+//
+//   - `<onTransition>` / `effect=` firing on derived state-children — same
+//     parser blocker as C13. Per §51.0.J line 20639, these ARE legal on
+//     derived engines (they fire on derived state changes). Deferred to the
+//     parser-extension follow-on step that lands `<onTransition>`/`effect=`
+//     parsing.
+//   - Transition table — per §51.0.J line 20636, `rule=` on derived
+//     state-children is REJECTED (E-DERIVED-ENGINE-NO-RULES, A1b/B16
+//     enforces). NO transition table needed.
+//   - Direct-write hook — per §51.0.J line 20638, direct writes to derived
+//     engine variables are REJECTED at compile time
+//     (E-DERIVED-ENGINE-NO-WRITE, A1b/B16 enforces). NO runtime hook needed.
+//   - `.advance()` — derived engines have no `.advance` API per §51.0.G
+//     (covered by E-DERIVED-ENGINE-NO-WRITE family).
+//   - Body rendering — same C12 deferral; mount-position marker mirrors C12's.
+//
+// **Today's parser-and-B14 limitation:**
+//   `engineMeta.derivedExpr` ONLY carries the legacy single-source-var form
+//   `{ kind: "legacy-source-var", varName: <upstream> }` — produced when
+//   `ast-builder.js` line 8593 matches `derived=@varname`. The §51.0.J
+//   rich form `derived=match @x { ... }` is NOT YET STRUCTURALLY PARSED.
+//   When the rich form lands (parser-extension step), this emitter's shell
+//   stays the same — only the closure body and the dependency-set inputs
+//   change (the body becomes the rewritten match-expression; the deps come
+//   from `forEachIdentInExprNode` over the parsed ExprNode).
+//
+// For the legacy single-source-var form, the projection IS the identity
+// projection — engine variant equals upstream cell value, coerced into the
+// engine's variant set. When the upstream cell's value is not in the engine's
+// variant set, the projection is `undefined` → E-DERIVED-ENGINE-INITIAL-
+// UNDEFINED.
+// ===========================================================================
+
+/**
+ * Determine whether a given engine-decl AST node is in C14's emission scope.
+ *
+ * In scope:
+ *   - `_record.engineMeta` exists (PASS 10.A registered the engine cell).
+ *   - `engineMeta.derivedExpr` is non-null (DERIVED engines only — non-derived
+ *     engines are C12 territory).
+ *   - `legacyMachineKeyword !== true` (LEGACY `<machine>` derived projections
+ *     are handled by `emit-machines.ts` — including them here would double-
+ *     emit and break legacy `<machine derived=@x>` runtime semantics).
+ *
+ * **Sibling to `isC12EngineDecl`** — the inverse polarity on `derivedExpr`.
+ * Per C14 SURVEY q1, kept as a sibling predicate (not a parameterized fn) so
+ * call sites read self-documenting names.
+ *
+ * Out of scope (returns false):
+ *   - Non-derived engines (`derivedExpr === null` — C12 territory).
+ *   - Engine-decls without B14 registration (parse-failure case; SYM
+ *     diagnostic already fired).
+ *   - Legacy `<machine>` keyword decls (their derived-projection path is
+ *     `emit-machines.ts` + `_scrml_derived_fns` registration via the legacy
+ *     surface; W-DEPRECATED-001 fires for the keyword separately).
+ */
+export function isC14DerivedEngineDecl(node: EngineDeclLike): boolean {
+  if (!node || node.kind !== "engine-decl") return false;
+  if (node.legacyMachineKeyword === true) return false;
+  const meta = node._record?.engineMeta;
+  if (!meta) return false;
+  if (meta.derivedExpr == null) return false;
+  return true;
+}
+
+/**
+ * Walk a file AST and collect all engine-decl nodes that are in C14's
+ * emission scope. Mirrors `collectC12EngineDecls` shell exactly — only the
+ * predicate filter changes (`isC14DerivedEngineDecl` instead of
+ * `isC12EngineDecl`).
+ *
+ * Prefers `fileAST.machineDecls` (pre-collected by ast-builder's
+ * `collectHoisted`); falls back to a manual walk for safety.
+ */
+export function collectC14DerivedEngineDecls(fileAST: any): EngineDeclLike[] {
+  const out: EngineDeclLike[] = [];
+  if (!fileAST) return out;
+
+  const preCollected = (fileAST.machineDecls as EngineDeclLike[] | undefined)
+    ?? (fileAST.ast?.machineDecls as EngineDeclLike[] | undefined);
+  if (Array.isArray(preCollected) && preCollected.length > 0) {
+    for (const node of preCollected) {
+      if (isC14DerivedEngineDecl(node)) out.push(node);
+    }
+    return out;
+  }
+
+  const nodes: any[] = (fileAST.nodes as any[] | undefined)
+    ?? (fileAST.ast?.nodes as any[] | undefined)
+    ?? [];
+  function visit(list: any[]): void {
+    for (const node of list) {
+      if (!node || typeof node !== "object") continue;
+      if (node.kind === "engine-decl" && isC14DerivedEngineDecl(node)) {
+        out.push(node);
+      }
+      if (Array.isArray(node.children)) visit(node.children);
+    }
+  }
+  visit(nodes);
+  return out;
+}
+
+/**
+ * Extract the upstream-cell dependencies the `derived=expr` reads.
+ *
+ * Today's parser-and-B14 produces ONLY the legacy single-source-var form:
+ *   derivedExpr = { kind: "legacy-source-var", varName: <upstream> }
+ *
+ * This helper returns the upstream as a single-element list. When the
+ * §51.0.J rich form lands (`derived=match @x { ... }`), `derivedExpr` will
+ * carry a parsed ExprNode and this helper will walk it via
+ * `forEachIdentInExprNode` to enumerate ALL `@cell` reads.
+ *
+ * Returns an empty list when the expression shape is unrecognized
+ * (defensive — caller emits no `_scrml_derived_subscribe` calls in that case,
+ * so the closure runs at init time but does not re-evaluate on upstream
+ * changes; B16 should have rejected unrecognized shapes earlier).
+ */
+function collectDerivedEngineDeps(derivedExpr: unknown): string[] {
+  if (!derivedExpr || typeof derivedExpr !== "object") return [];
+  const obj = derivedExpr as Record<string, unknown>;
+  if (obj.kind === "legacy-source-var" && typeof obj.varName === "string" && obj.varName.length > 0) {
+    return [obj.varName];
+  }
+  // Future: rich-expr shape — walk parsed ExprNode via forEachIdentInExprNode.
+  return [];
+}
+
+/**
+ * Build the JS expression that is the closure BODY for a derived-engine's
+ * projection.
+ *
+ * **For the legacy single-source-var form** (`derived=@upstream`):
+ *   The projection IS the identity projection — engine variant equals upstream
+ *   cell value. The body reads the upstream via `_scrml_reactive_get` and
+ *   returns it directly. The runtime variant-set check is implicit:
+ *   downstream consumers (the variant-cell readers) treat the value as the
+ *   engine's variant; if it's not in the variant set, downstream variant
+ *   matching naturally returns no-match.
+ *
+ *   For the initial-value-undefined check (§51.0.J line 20640), we wrap the
+ *   read with an `undefined`-detector: if the upstream value is `undefined`,
+ *   throw `E-DERIVED-ENGINE-INITIAL-UNDEFINED` per §34 line 14460. This fires
+ *   at init time AND on every subsequent re-evaluation if the upstream
+ *   becomes undefined.
+ *
+ * **When the rich form lands** (`derived=match @x { ... }`):
+ *   The body becomes the rewritten match-expression; an `undefined` result
+ *   (no match-arm fired) triggers the same throw.
+ *
+ * @param derivedExpr — `engineMeta.derivedExpr` value
+ * @param varName — engine variable name (for diagnostic in the throw message)
+ * @returns the closure body — a JS expression block ready to be wrapped in `() => { ... }`
+ */
+function buildDerivedEngineClosureBody(derivedExpr: unknown, varName: string): string {
+  if (derivedExpr && typeof derivedExpr === "object") {
+    const obj = derivedExpr as Record<string, unknown>;
+    if (obj.kind === "legacy-source-var" && typeof obj.varName === "string" && obj.varName.length > 0) {
+      const upstream = obj.varName;
+      // Identity projection: engine variant === upstream cell value.
+      // Inline E-DERIVED-ENGINE-INITIAL-UNDEFINED throw per §51.0.J line 20640
+      // + §34 line 14460. Fires at init time (forced eval) AND on every
+      // re-evaluation when upstream becomes undefined.
+      return [
+        `const __scrml_derived_v = _scrml_reactive_get(${JSON.stringify(upstream)});`,
+        `if (__scrml_derived_v === undefined) {`,
+        `  throw new Error("E-DERIVED-ENGINE-INITIAL-UNDEFINED-RT: derived engine '${varName}' yielded no value " +`,
+        `    "(upstream '${upstream}' is undefined). " +`,
+        `    "Per §51.0.J + §34: derived=expr must produce a defined variant for the source's initial state. " +`,
+        `    "Add a default arm or a wildcard arm in the derivation.");`,
+        `}`,
+        `return __scrml_derived_v;`,
+      ].join("\n  ");
+    }
+  }
+  // Defensive: unrecognized shape — emit a closure that always throws so the
+  // failure is loud at engine-init time. B16 should have rejected
+  // unrecognized shapes earlier.
+  return [
+    `throw new Error("E-DERIVED-ENGINE-INITIAL-UNDEFINED-RT: derived engine '${varName}' has an unrecognized derivedExpr shape. " +`,
+    `  "This is a compiler internal error — B16 should have rejected this earlier.");`,
+  ].join("\n  ");
+}
+
+/**
+ * Emit the C14 substrate for one derived engine.
+ *
+ * Shape:
+ *   // §51.0.J derived engine: marioState (MarioState) — derived from upstream(s)
+ *   _scrml_derived_declare("marioState", () => {
+ *     const __scrml_derived_v = _scrml_reactive_get("upstream");
+ *     if (__scrml_derived_v === undefined) {
+ *       throw new Error("E-DERIVED-ENGINE-INITIAL-UNDEFINED-RT: ...");
+ *     }
+ *     return __scrml_derived_v;
+ *   });
+ *   _scrml_derived_subscribe("marioState", "upstream");
+ *   // Force initial evaluation so init-time E-DERIVED-ENGINE-INITIAL-UNDEFINED fires loudly.
+ *   _scrml_derived_get("marioState");
+ *
+ * The forced initial `_scrml_derived_get` call is critical: derived cells are
+ * lazy by default (`_scrml_derived_dirty[name] = true` after declare). Without
+ * a forced read at init time, the throw would not fire until something
+ * downstream attempted to read the engine variable — that's the wrong
+ * semantics per §51.0.J line 20640 (the spec says "Initial-value undefined"
+ * is checked at engine-init time, not at first-use).
+ *
+ * @param meta — the engine's `engineMeta`
+ * @returns lines of JS code; empty array when the meta is invalid
+ */
+export function emitDerivedEngineSubstrate(meta: EngineMetadata): string[] {
+  if (!meta || typeof meta.varName !== "string" || meta.varName.length === 0) {
+    return [];
+  }
+  if (meta.derivedExpr == null) {
+    return [];
+  }
+
+  const lines: string[] = [];
+  const varName = meta.varName;
+  const forType = meta.forType ?? "";
+  const deps = collectDerivedEngineDeps(meta.derivedExpr);
+
+  lines.push(`// §51.0.J derived engine: ${varName} (${forType}) — derived from ${deps.length > 0 ? deps.join(", ") : "<unknown>"}`);
+
+  // _scrml_derived_declare with the projection closure (inline init-undefined throw).
+  const closureBody = buildDerivedEngineClosureBody(meta.derivedExpr, varName);
+  lines.push(`_scrml_derived_declare(${JSON.stringify(varName)}, () => {`);
+  lines.push(`  ${closureBody}`);
+  lines.push(`});`);
+
+  // One _scrml_derived_subscribe per upstream dependency.
+  for (const dep of deps) {
+    lines.push(`_scrml_derived_subscribe(${JSON.stringify(varName)}, ${JSON.stringify(dep)});`);
+  }
+
+  // Force initial evaluation so init-time E-DERIVED-ENGINE-INITIAL-UNDEFINED
+  // fires loudly per §51.0.J line 20640. Without this read, the lazy-pull
+  // semantics of `_scrml_derived_get` would defer the throw to first-use.
+  lines.push(`_scrml_derived_get(${JSON.stringify(varName)});`);
+
+  return lines;
+}
+
+/**
+ * Emit the C14 substrate for every in-scope DERIVED engine in the file.
+ *
+ * Sibling to C12's `emitEngineSubstrate` (non-derived engines). Both run per
+ * compile; their outputs go into the same client-output section, derived
+ * engines AFTER non-derived (so any derived engine projecting from a
+ * non-derived engine variant cell sees the upstream's initial value).
+ *
+ * Returns an empty array when there are no in-scope derived engines (lets
+ * the caller skip a section header without checking length).
+ */
+export function emitDerivedEngineSubstrateForFile(fileAST: any): string[] {
+  const decls = collectC14DerivedEngineDecls(fileAST);
+  if (decls.length === 0) return [];
+
+  const lines: string[] = [];
+  for (const decl of decls) {
+    const meta = decl._record!.engineMeta!;
+    const declLines = emitDerivedEngineSubstrate(meta);
+    if (declLines.length === 0) continue;
+    if (lines.length > 0) lines.push("");
+    for (const l of declLines) lines.push(l);
+    // §51.0.D mount-position marker. Same pattern as C12's non-derived path —
+    // C14 deliberately does NOT emit body markup (state-child bodies are RAW
+    // TEXT today; body-render is a follow-on).
+    lines.push(`// §51.0.D engine mount position: ${meta.varName} (${meta.forType}) — DERIVED — body rendering deferred to follow-on`);
+  }
+
+  return lines;
 }
