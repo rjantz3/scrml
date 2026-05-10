@@ -186,6 +186,73 @@ describe("test-body §6: brace depth respected", () => {
 });
 
 // ---------------------------------------------------------------------------
+// §6.5 — String-literal preservation across all 4 token-joiners (S77 fix)
+//
+// The tokenizer strips outer quotes from STRING tokens (their `.text` field
+// holds unquoted content). Pre-fix, the test-block parsers' raw token-joins
+// dropped the quotes, producing `expect(getGreeting ( alice )).toEqual(
+// stubbed-greeting)` instead of `expect(getGreeting("alice")).toEqual(
+// "stubbed-greeting")`. Same root cause as the consecutive-`let` bug —
+// raw token-text reuse at join time. Fix: `tokenToSourceText` helper
+// re-wraps STRING tokens (JSON.stringify for plain, backticks for template)
+// before joining. Applied to all 4 collectors: collectBody,
+// collectAssertTokens, parseTestBindDecl RHS, non-assert test body.
+// ---------------------------------------------------------------------------
+
+describe("test-body §6.5: string literals preserved across all token-joiners", () => {
+  test("test-bind RHS string literal keeps its quotes", () => {
+    const node = parseTestBlock(
+      `~{ test-bind getGreeting = "stubbed-greeting"\n` +
+      `   test "x" { assert true } }`,
+    );
+    const bind = node?.testGroup?.testBinds?.[0];
+    expect(bind).toBeTruthy();
+    expect(bind.expression).toBe('"stubbed-greeting"');
+  });
+
+  test("assert LHS+RHS preserve string literals (collectAssertTokens)", () => {
+    const node = parseTestBlock(
+      `~{ test "x" { assert "alice" == "alice" } }`,
+    );
+    const stmt = node?.testGroup?.tests?.[0]?.body?.[0];
+    expect(stmt).toBe('assert "alice" == "alice"');
+    const a = node.testGroup.tests[0].asserts[0];
+    expect(a.lhs).toBe('"alice"');
+    expect(a.rhs).toBe('"alice"');
+  });
+
+  test("non-assert body string-literal preserved (let with string)", () => {
+    const body = firstCaseBody(
+      `~{ test "x" { let s = "hello"\n  assert s == "hello" } }`,
+    );
+    expect(body[0]).toMatch(/^let s =/);
+    expect(body[0]).toContain('"hello"');
+    // Defensive: ensure the unquoted form is NOT present anywhere
+    expect(body[0]).not.toMatch(/= hello\b/);
+  });
+
+  test("before-block string-literal preserved (collectBody)", () => {
+    const node = parseTestBlock(
+      `~{ before { let prefix = "Hello, " }\n` +
+      `   test "x" { assert true } }`,
+    );
+    const before = node?.testGroup?.before;
+    expect(Array.isArray(before)).toBe(true);
+    expect(before.join(" ")).toContain('"Hello, "');
+  });
+
+  test("backtick template literal re-wrapped with backticks (preserves ${})", () => {
+    const node = parseTestBlock(
+      `~{ test-bind greet = \`Hello, \${name}\`\n` +
+      `   test "x" { assert true } }`,
+    );
+    const bind = node?.testGroup?.testBinds?.[0];
+    expect(bind.expression).toContain("`");
+    expect(bind.expression).toContain("${name}");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // §7 — End-to-end: emitted JS loads + runs under bun:test
 // ---------------------------------------------------------------------------
 

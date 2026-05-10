@@ -8007,19 +8007,19 @@ function parseTestBody(tokens, filePath, span, errors) {
       const tok = tokens[i];
       if (tok.kind === "PUNCT" && tok.text === "{") {
         depth++;
-        parts.push(tok.text);
+        parts.push(tokenToSourceText(tok));
         i++;
       } else if (tok.kind === "PUNCT" && tok.text === "}") {
         if (depth === 0) break; // end of this body — do not consume
         depth--;
-        parts.push(tok.text);
+        parts.push(tokenToSourceText(tok));
         i++;
         if (depth === 0 && parts.length > 0) {
           stmts.push(parts.join(" ").trim());
           parts = [];
         }
       } else {
-        parts.push(tok.text);
+        parts.push(tokenToSourceText(tok));
         i++;
       }
     }
@@ -8069,10 +8069,30 @@ function parseTestBody(tokens, filePath, span, errors) {
       if (depth === 0 && isTestBindSeq(i)) break;
       if (tok.kind === "PUNCT" && tok.text === "{") depth++;
       else if (tok.kind === "PUNCT" && tok.text === "}") depth--;
-      parts.push(tok.text);
+      parts.push(tokenToSourceText(tok));
       i++;
     }
     return parts.join(" ").trim();
+  }
+
+  /**
+   * Reconstruct the source-text shape for a single token when joining tokens
+   * back into raw source-text expressions. The tokenizer strips outer quotes
+   * from STRING tokens (their `text` field holds unquoted content); naive
+   * `tok.text` reuse loses those quotes, producing invalid JS such as
+   * `expect(getGreeting ( alice )).toEqual(stubbed-greeting)` instead of
+   * `expect(getGreeting("alice")).toEqual("stubbed-greeting")`. Backtick-
+   * derived STRING tokens (`isTemplate`) are re-wrapped with backticks so
+   * `${...}` substitutions remain live.
+   */
+  function tokenToSourceText(tok) {
+    if (tok.kind === "STRING") {
+      if (tok.isTemplate) {
+        return "`" + tok.text + "`";
+      }
+      return JSON.stringify(tok.text);
+    }
+    return tok.text;
   }
 
   /**
@@ -8180,14 +8200,14 @@ function parseTestBody(tokens, filePath, span, errors) {
       const t = tokens[i];
       if (t.kind === "PUNCT" && t.text === "{") {
         depth++;
-        rhsParts.push(t.text);
+        rhsParts.push(tokenToSourceText(t));
         i++;
         continue;
       }
       if (t.kind === "PUNCT" && t.text === "}") {
         if (depth === 0) break; // end of enclosing ~{} body
         depth--;
-        rhsParts.push(t.text);
+        rhsParts.push(tokenToSourceText(t));
         i++;
         continue;
       }
@@ -8201,7 +8221,7 @@ function parseTestBody(tokens, filePath, span, errors) {
         if (t.text === "test" || t.text === "assert" ||
             t.text === "before" || t.text === "after") break;
       }
-      rhsParts.push(t.text);
+      rhsParts.push(tokenToSourceText(t));
       i++;
     }
     const expression = rhsParts.join(" ").trim();
@@ -8412,7 +8432,7 @@ function parseTestBody(tokens, filePath, span, errors) {
             }
             if (t.kind === "PUNCT" && t.text === "{") depth++;
             else if (t.kind === "PUNCT" && t.text === "}") depth--;
-            stmtParts.push(t.text);
+            stmtParts.push(tokenToSourceText(t));
             if (t.span && typeof t.span.line === "number") lastLine = t.span.line;
             i++;
           }
