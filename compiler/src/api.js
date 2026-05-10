@@ -459,7 +459,12 @@ export function compileScrml(options = {}) {
   //     the user accepts the broken-artifact / E-IMPORT-006 risk.
   // ---------------------------------------------------------------------------
   const gatherEnabled = options.gather !== false;
-  const GATHER_LIMIT = 5000;
+  // S78 audit fix: GATHER_LIMIT injectable via options.gatherLimit.
+  // Default 5000 preserves prior behavior. Test fixtures pass small values
+  // (e.g. gatherLimit: 5) to trigger E-IMPORT-007 cleanly without
+  // synthesizing 5000+ .scrml files on disk. Adopter override path: a
+  // future scrmlconfig setting can plumb through the same option.
+  const GATHER_LIMIT = options.gatherLimit ?? 5000;
   let resolvedInputFiles = inputFiles.map(f => resolve(f));
   if (gatherEnabled && resolvedInputFiles.length > 0) {
     const seen = new Set(resolvedInputFiles);
