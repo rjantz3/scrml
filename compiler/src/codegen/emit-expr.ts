@@ -73,6 +73,16 @@ export interface EmitExprContext {
    * doesn't exist for hookless engines).
    */
   enginesWithHooks?: Set<string> | null;
+  /**
+   * A5-4 (§51.0.M) — engine variable names in the file's scope that have at
+   * least one `<onTimeout>` element. When the engine var is in this set,
+   * `emitEngineAdvanceCall` passes the per-engine timer-config table
+   * identifier as the 4th argument to `_scrml_engine_advance` so the runtime
+   * clears outgoing timers + arms incoming ones around the cell write. Tree-
+   * shaken: engines without `<onTimeout>` omit the arg (runtime treats
+   * undefined as null and short-circuits).
+   */
+  enginesWithOnTimeout?: Set<string> | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -517,7 +527,11 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
       // is emitted only when this engine has at least one effect=/<onTransition>
       // arm. Tree-shake: hookless engines emit the bare runtime helper call.
       const hasHooks = ctx.enginesWithHooks ? ctx.enginesWithHooks.has(bareName) : false;
-      return emitEngineAdvanceCall(bareName, targetExpr, hasHooks);
+      // A5-4 (§51.0.M) — pass hasOnTimeoutElements so the helper threads the
+      // per-engine timers-table identifier through. Engines without any
+      // <onTimeout> emit the 3-arg form (no timer arg).
+      const hasOnTimeout = ctx.enginesWithOnTimeout ? ctx.enginesWithOnTimeout.has(bareName) : false;
+      return emitEngineAdvanceCall(bareName, targetExpr, hasHooks, hasOnTimeout);
     }
   }
 

@@ -63,6 +63,40 @@ export function isNoElide(): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// §51.12.3 + §51.12.3.1 (S67) — Duration emission helper (A5-5)
+// ---------------------------------------------------------------------------
+//
+// Emit the JS expression for a temporal rule's `after` duration. Two shapes:
+//
+//   1. Literal (constant-folded at compile time):  `30000` (bare number).
+//   2. Computed (per-arm runtime computation):     IIFE-wrapped expression
+//      that clamps negative/NaN to 0 and rounds to integer ms.
+//
+// Caller embeds the returned string at the `_scrml_machine_arm_timer` call
+// site (the 2nd argument). Both shapes are valid inside any expression
+// position.
+//
+// **Reactive read rewrite:** the computed-form text is passed through
+// `rewriteExpr` so `@var` reads become `_scrml_reactive_get(<encodedName>)`.
+// The full expression (including the unit multiplier `(@x) * 1000`) is then
+// evaluated inside the IIFE; the final number is clamped + rounded.
+//
+// Per SCOPE §3 decision #3: clamp shape is
+// `(typeof v === "number" && isFinite(v) && v >= 0) ? Math.round(v) : 0`
+// — equivalent to `Math.max(0, v)` but more defensive against NaN.
+function emitDurationLiteral(rule: TransitionRule): string {
+  if (rule.afterMs != null) return String(rule.afterMs);
+  if (rule.afterExpr != null) {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { rewriteExpr } = require("./rewrite.ts");
+    const rewritten = rewriteExpr(rule.afterExpr);
+    return `(function(){ var v = ${rewritten}; return (typeof v === "number" && isFinite(v) && v >= 0) ? Math.round(v) : 0; })()`;
+  }
+  // Defensive — non-temporal rules are filtered before reaching this helper.
+  return "0";
+}
+
+// ---------------------------------------------------------------------------
 // §51.5.2 — Transition Lookup Table
 // ---------------------------------------------------------------------------
 
@@ -84,6 +118,14 @@ interface TransitionRule {
   // §51.12 (S25) — temporal transition delay in milliseconds. null/undefined
   // for non-temporal rules.
   afterMs?: number | null;
+  // §51.12.3.1 (S67 amendment, A5-5) — computed-delay form. When non-null,
+  // the rule fires after a runtime-computed duration; codegen wraps the
+  // expression in an IIFE that clamps negative/NaN to 0. Mutually exclusive
+  // with afterMs — exactly ONE is non-null for a temporal rule. The text
+  // is the FULL computed-form JS expression INCLUDING the unit multiplier
+  // (e.g. for `${@x}s` the stored text is `(@x) * 1000`); codegen calls
+  // rewriteExpr on it at emit time so `_scrml_reactive_get` wires correctly.
+  afterExpr?: string | null;
 }
 
 /**
@@ -436,7 +478,9 @@ function emitElidedTransition(
   auditTarget: string | null,
 ): string[] {
   const targetVariant = matchedRule.to === "*" ? null : matchedRule.to;
-  const temporalRules = rules.filter(r => r.afterMs != null);
+  // §51.12 + §51.12.3.1 — temporal rules include BOTH literal-form (afterMs)
+  // and computed-form (afterExpr). Either non-null marks a rule as temporal.
+  const temporalRules = rules.filter(r => r.afterMs != null || r.afterExpr != null);
   const relevantTemporals = targetVariant
     ? temporalRules.filter(r => r.from === targetVariant)
     : [];
@@ -477,18 +521,29 @@ function emitElidedTransition(
     lines.push(`  // §51.12 temporal timer management`);
     lines.push(`  _scrml_machine_clear_timer("${encodedVarName}");`);
     if (relevantTemporals.length > 0) {
+      // Chained re-arm payload: ONLY literal-form rules participate in the
+      // serializable rulesJson (computed-form afterExpr cannot round-trip
+      // through JSON.parse since it's a runtime expression). The chained
+      // re-arm path inside _scrml_machine_arm_initial inspects this list to
+      // continue the chain on expiry. Computed rules opt out of auto-chain;
+      // the user can use a write to drive transitions if chaining-after-
+      // computed is needed. Documented as A5-5 behavior — not a regression
+      // because pre-S67 had no computed support at all.
       const rulesPayload = JSON.stringify(
-        temporalRules.map(r => ({
-          from: r.from,
-          afterMs: r.afterMs,
-          to: r.to,
-          label: r.label ?? null,
-        }))
+        temporalRules
+          .filter(r => r.afterMs != null)
+          .map(r => ({
+            from: r.from,
+            afterMs: r.afterMs,
+            to: r.to,
+            label: r.label ?? null,
+          }))
       );
       const auditTargetLit = auditTarget ? JSON.stringify(auditTarget) : "null";
       for (const r of relevantTemporals) {
         const labelLit = r.label ? JSON.stringify(r.label) : "null";
-        lines.push(`  _scrml_machine_arm_timer("${encodedVarName}", ${r.afterMs}, "${r.to}", { fromVariant: "${r.from}", label: ${labelLit}, auditTarget: ${auditTargetLit}, rulesJson: ${JSON.stringify(rulesPayload)} });`);
+        const durationExpr = emitDurationLiteral(r);
+        lines.push(`  _scrml_machine_arm_timer("${encodedVarName}", ${durationExpr}, "${r.to}", { fromVariant: "${r.from}", label: ${labelLit}, auditTarget: ${auditTargetLit}, rulesJson: ${JSON.stringify(rulesPayload)} });`);
       }
     }
   }
@@ -681,7 +736,10 @@ export function emitTransitionGuard(
   // variant has outgoing temporal rules, arm a fresh one. Re-entering the
   // same variant clears and re-arms (reset-on-reentry default per the
   // deep-dive).
-  const temporalRules = rules.filter(r => r.afterMs != null);
+  // §51.12 + §51.12.3.1 — include both literal-form (afterMs) and computed-
+  // form (afterExpr) temporal rules. emitDurationLiteral handles the shape
+  // discrimination at emit time.
+  const temporalRules = rules.filter(r => r.afterMs != null || r.afterExpr != null);
   if (temporalRules.length > 0) {
     lines.push(`  // §51.12 temporal transitions`);
     lines.push(`  _scrml_machine_clear_timer("${encodedVarName}");`);
@@ -693,13 +751,19 @@ export function emitTransitionGuard(
     // S27 (§51.11): pass a meta payload carrying auditTarget + rulesJson so
     // the timer's expiry path can push an audit entry and re-arm any
     // downstream temporal rule.
+    //
+    // A5-5 (§51.12.3.1): chained re-arm rulesJson includes ONLY literal-form
+    // rules (computed-form afterExpr cannot serialize through JSON). Computed
+    // rules opt out of auto-chain — see emitElidedTransition for rationale.
     const rulesPayload = JSON.stringify(
-      temporalRules.map(r => ({
-        from: r.from,
-        afterMs: r.afterMs,
-        to: r.to,
-        label: r.label ?? null,
-      }))
+      temporalRules
+        .filter(r => r.afterMs != null)
+        .map(r => ({
+          from: r.from,
+          afterMs: r.afterMs,
+          to: r.to,
+          label: r.label ?? null,
+        }))
     );
     const auditTargetLit = auditTarget ? JSON.stringify(auditTarget) : "null";
     for (const rule of temporalRules) {
@@ -707,8 +771,9 @@ export function emitTransitionGuard(
       // reach here. Each temporal rule fires from exactly its declared
       // `from` variant.
       const labelLit = rule.label ? JSON.stringify(rule.label) : "null";
+      const durationExpr = emitDurationLiteral(rule);
       lines.push(`  if (__nextVariant === "${rule.from}") {`);
-      lines.push(`    _scrml_machine_arm_timer("${encodedVarName}", ${rule.afterMs}, "${rule.to}", { fromVariant: "${rule.from}", label: ${labelLit}, auditTarget: ${auditTargetLit}, rulesJson: ${JSON.stringify(rulesPayload)} });`);
+      lines.push(`    _scrml_machine_arm_timer("${encodedVarName}", ${durationExpr}, "${rule.to}", { fromVariant: "${rule.from}", label: ${labelLit}, auditTarget: ${auditTargetLit}, rulesJson: ${JSON.stringify(rulesPayload)} });`);
       lines.push(`  }`);
     }
   }

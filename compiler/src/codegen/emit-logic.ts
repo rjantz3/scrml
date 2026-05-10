@@ -811,15 +811,23 @@ function _emitReactiveSet(encodedName: string, valueExpr: string, opts: EmitLogi
   if (isInit) {
     const lookupName = rawName ?? encodedName;
     const binding = opts.machineBindings?.get(lookupName) ?? null;
-    const temporalRules = binding?.rules?.filter((r: any) => r.afterMs != null) ?? [];
+    // §51.12 + §51.12.3.1 — temporal rules include BOTH literal-form (afterMs)
+    // and computed-form (afterExpr). The chained re-arm path (rulesJson) sees
+    // only literals; computed-form rules participate in the initial arm via
+    // an inline guarded `_scrml_machine_arm_timer` call below, so they DO arm
+    // at module-init when the initial variant matches their `from`.
+    const temporalRules = binding?.rules?.filter((r: any) => r.afterMs != null || r.afterExpr != null) ?? [];
     if (temporalRules.length > 0) {
+      const literalTemporalRules = temporalRules.filter((r: any) => r.afterMs != null);
+      const computedTemporalRules = temporalRules.filter((r: any) => r.afterExpr != null);
       // S27 (§51.11): include `label` in the payload and pass the
       // machine's audit target so the runtime can push audit entries
       // on timer expiry. Re-arming of chained temporal rules cascades
       // through `_scrml_machine_arm_initial` which consumes this same
-      // payload.
+      // payload. A5-5: only LITERAL rules can chain through the JSON
+      // payload (computed expressions can't round-trip through JSON).
       const rulesPayload = JSON.stringify(
-        temporalRules.map((r: any) => ({
+        literalTemporalRules.map((r: any) => ({
           from: r.from,
           afterMs: r.afterMs,
           to: r.to,
@@ -828,10 +836,38 @@ function _emitReactiveSet(encodedName: string, valueExpr: string, opts: EmitLogi
       );
       const auditTarget = (binding as any).auditTarget ?? null;
       const auditArg = auditTarget ? `, ${JSON.stringify(auditTarget)}` : "";
-      return [
+      const out: string[] = [
         `_scrml_reactive_set(${JSON.stringify(encodedName)}, ${valueExpr});`,
-        `_scrml_machine_arm_initial(${JSON.stringify(encodedName)}, ${JSON.stringify(rulesPayload)}${auditArg});`,
-      ].join("\n");
+      ];
+      // Always call _scrml_machine_arm_initial — it scans rulesPayload for
+      // literal-form rules matching the just-set variant. When rulesPayload
+      // is "[]" (only computed rules exist), the call is a no-op.
+      out.push(`_scrml_machine_arm_initial(${JSON.stringify(encodedName)}, ${JSON.stringify(rulesPayload)}${auditArg});`);
+      // A5-5 (§51.12.3.1): per-rule inline arm for COMPUTED-FORM temporal
+      // rules. Same shape as the post-write site #2 — guard on the just-set
+      // variant string and call _scrml_machine_arm_timer with the IIFE-
+      // wrapped duration. The guard match the legacy machine's variant-
+      // string convention (bare string for unit variants, `.variant` field
+      // on payload variants — extracted via the same shape as __nextVariant
+      // at the post-write sites).
+      if (computedTemporalRules.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { rewriteExpr } = require("./rewrite.ts");
+        const auditTargetLit = auditTarget ? JSON.stringify(auditTarget) : "null";
+        out.push(`{`);
+        out.push(`  var __scrml_init_v = _scrml_reactive_get(${JSON.stringify(encodedName)});`);
+        out.push(`  var __scrml_init_variant = (__scrml_init_v != null && typeof __scrml_init_v === "object" && __scrml_init_v.variant != null) ? __scrml_init_v.variant : __scrml_init_v;`);
+        for (const r of computedTemporalRules) {
+          const labelLit = (r as any).label ? JSON.stringify((r as any).label) : "null";
+          const rewritten = rewriteExpr((r as any).afterExpr);
+          const durationExpr = `(function(){ var v = ${rewritten}; return (typeof v === "number" && isFinite(v) && v >= 0) ? Math.round(v) : 0; })()`;
+          out.push(`  if (__scrml_init_variant === ${JSON.stringify((r as any).from)}) {`);
+          out.push(`    _scrml_machine_arm_timer(${JSON.stringify(encodedName)}, ${durationExpr}, ${JSON.stringify((r as any).to)}, { fromVariant: ${JSON.stringify((r as any).from)}, label: ${labelLit}, auditTarget: ${auditTargetLit}, rulesJson: ${JSON.stringify(rulesPayload)} });`);
+          out.push(`  }`);
+        }
+        out.push(`}`);
+      }
+      return out.join("\n");
     }
   }
   return `_scrml_reactive_set(${JSON.stringify(encodedName)}, ${valueExpr});`;

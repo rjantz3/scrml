@@ -138,7 +138,7 @@ function _scrml_machine_clear_timer(name) {
   }
 }
 function _scrml_machine_arm_timer(name, ms, target, meta) {
-  // meta (optional): { fromVariant, label, auditTarget, rulesJson }
+  // meta (optional): { fromVariant, label, auditTarget, rulesJson, setterFn, getterName }
   //   fromVariant — the .From of the temporal rule being armed (used to
   //     build the audit 'rule' key on expiry: fromVariant + ":" + target).
   //   label — the rule's guard label if any, else null. Temporal rules
@@ -151,6 +151,16 @@ function _scrml_machine_arm_timer(name, ms, target, meta) {
   //     re-arm on the downstream variant. Chained temporal rules
   //     (A after 1s => B, B after 1s => C) must continue automatically
   //     without the user driving transitions.
+  //   setterFn  — A5-4 (§51.0.M onTimeout): an optional callback invoked
+  //     INSTEAD of the bare _scrml_reactive_set(name, target) at expiry.
+  //     Engine onTimeout codegen passes a function that routes the write
+  //     through the engine's rule= contract guard (the engine helper in
+  //     the 'engine' chunk; see §51.0.F + §51.0.G). When absent (the
+  //     legacy machine path), the original _scrml_reactive_set write is
+  //     used.
+  //   getterName — A5-4: the encoded reactive-var name to read for the
+  //     __prev audit entry. Defaults to name. Currently unused — reserved
+  //     so a future shape (e.g., audit-target read) can opt out.
   //
   // S27 (§51.11): timer-fired transitions now push audit entries and
   // re-arm downstream temporal rules. Previously the timer invoked a
@@ -161,7 +171,16 @@ function _scrml_machine_arm_timer(name, ms, target, meta) {
   _scrml_machine_timers[name] = setTimeout(function () {
     delete _scrml_machine_timers[name];
     const __prev = _scrml_reactive_get(name);
-    _scrml_reactive_set(name, target);
+    if (meta && typeof meta.setterFn === "function") {
+      // A5-4: engine-aware setter (routes through the engine's contract
+      // guard so the rule= contract check fires; throws
+      // E-ENGINE-INVALID-TRANSITION if the timer target violates the
+      // contract — defensive, the compile-time check in A5-3 should already
+      // have caught this).
+      meta.setterFn(target);
+    } else {
+      _scrml_reactive_set(name, target);
+    }
     if (meta && meta.auditTarget) {
       const entry = Object.freeze({
         from: __prev,
@@ -2158,7 +2177,11 @@ function _scrml_engine_check_transition(currentVariant, target, table) {
   return false;
 }
 
-function _scrml_engine_advance(varName, target, table) {
+function _scrml_engine_advance(varName, target, table, timersTable) {
+  // timersTable (optional, A5-4): per-state-tag timer-config map for engines
+  // with at least one <onTimeout>. When provided, clear-on-exit fires before
+  // the cell write and arm-on-entry fires after. When null/undefined (engines
+  // with zero <onTimeout>), the timer paths short-circuit (no-op).
   const current = _scrml_reactive_get(varName);
   if (!_scrml_engine_check_transition(current, target, table)) {
     throw new Error(
@@ -2167,10 +2190,18 @@ function _scrml_engine_advance(varName, target, table) {
       ". The from-state's rule= contract does not permit this target."
     );
   }
+  // Clear timers attached to the OUTGOING state-child first (timers belong
+  // to the from-state — the spec semantics are "armed on entry, cleared on
+  // exit"). Re-entering the same state-child clears + re-arms below.
+  if (timersTable != null) _scrml_engine_clear_state_timers(varName, current, timersTable);
   _scrml_reactive_set(varName, target);
+  // Arm timers for the INCOMING state-child. Re-entering the same state-child
+  // (current === target) re-arms a fresh timer per §51.12.4 reset semantics.
+  if (timersTable != null) _scrml_engine_arm_state_timers(varName, target, timersTable, table);
 }
 
-function _scrml_engine_direct_set(varName, target, table) {
+function _scrml_engine_direct_set(varName, target, table, timersTable) {
+  // timersTable: see _scrml_engine_advance above.
   const current = _scrml_reactive_get(varName);
   if (!_scrml_engine_check_transition(current, target, table)) {
     throw new Error(
@@ -2179,7 +2210,93 @@ function _scrml_engine_direct_set(varName, target, table) {
       ". The from-state's rule= contract does not permit this target."
     );
   }
+  if (timersTable != null) _scrml_engine_clear_state_timers(varName, current, timersTable);
   _scrml_reactive_set(varName, target);
+  if (timersTable != null) _scrml_engine_arm_state_timers(varName, target, timersTable, table);
+}
+
+// ---------------------------------------------------------------------------
+// §51.0.M onTimeout runtime — A5-4 engine state-child timer arm/clear
+// ---------------------------------------------------------------------------
+// Runtime support for the <onTimeout after=DURATION to=.Variant/> element.
+// Backbone is shared with §51.12 (_scrml_machine_arm_timer /
+// _scrml_machine_clear_timer); these two helpers provide the per-state-entry
+// arm + per-state-exit clear bookkeeping for engine state-children.
+//
+// timersTable shape (compile-time-baked per engine, see emit-engine.ts):
+//   const __scrml_engine_<varName>_timers = Object.freeze({
+//     "Loading": [
+//       { ms: 30000, target: "TimedOut" },
+//       // OR for computed-delay (§51.12.3.1, A5-5):
+//       { msExpr: function(){ return Math.min(1000 * 2 ** _scrml_reactive_get("attempt"), 30000) * 1; },
+//         target: "Retry" },
+//     ],
+//     "Idle": [],
+//     // ...
+//   });
+// (Tree-shake: emitted ONLY when the engine has at least one <onTimeout>; for
+//  engines with zero timers, codegen passes null for the timersTable arg and
+//  these helpers no-op.)
+//
+// Timer-key encoding (per SCOPE §3 decision #5): varName + "::" + stateName + "::" + index.
+// The flat _scrml_machine_timers map is shared with legacy <machine> rules;
+// composite keys avoid collision when an app mixes both surfaces or uses the
+// same state name across multiple engines.
+
+function _scrml_engine_arm_state_timers(varName, stateName, timersTable, table) {
+  // Arm every <onTimeout> entry attached to stateName on engine varName.
+  // table is the engine's transition table — needed so the timer's setterFn
+  // can route through _scrml_engine_direct_set and enforce the rule= contract
+  // at fire time (defensive — A5-3 typer already validated to= compile-time,
+  // so a legitimate <onTimeout> never throws here).
+  if (timersTable == null) return;
+  var list = timersTable[stateName];
+  if (!Array.isArray(list) || list.length === 0) return;
+  for (var i = 0; i < list.length; i++) {
+    var ent = list[i];
+    var ms;
+    if (typeof ent.ms === "number") {
+      // Literal-form duration (constant-folded at compile time).
+      ms = ent.ms;
+    } else if (typeof ent.msExpr === "function") {
+      // Computed-form duration (§51.12.3.1 — S67 amendment, A5-5).
+      // The arrow-fn returns the runtime ms value; clamp negative/NaN to 0
+      // per spec (equivalent to firing on the next tick per setTimeout).
+      var v;
+      try { v = ent.msExpr(); } catch (e) { v = 0; }
+      ms = (typeof v === "number" && isFinite(v) && v >= 0) ? Math.round(v) : 0;
+    } else {
+      continue; // malformed entry — defensive skip
+    }
+    var timerKey = varName + "::" + stateName + "::" + i;
+    var target = ent.target;
+    // setterFn: route the timer-fire write through the engine's transition
+    // table (A5-4 §51.0.M Semantics — a timer-induced transition is a legal
+    // transition event that obeys the rule= contract).
+    var setterFn = (function (vn, tbl) {
+      return function (tg) { _scrml_engine_direct_set(vn, tg, tbl); };
+    })(varName, table);
+    _scrml_machine_arm_timer(timerKey, ms, target, {
+      fromVariant: stateName,
+      label: null,
+      auditTarget: null,
+      rulesJson: null,
+      setterFn: setterFn,
+    });
+  }
+}
+
+function _scrml_engine_clear_state_timers(varName, stateName, timersTable) {
+  // Clear every timer armed for stateName on engine varName. Called on
+  // exit (any rule= transition or external write). No-ops when the state had
+  // no <onTimeout> entries OR when the table is null (tree-shake path).
+  if (timersTable == null) return;
+  var list = timersTable[stateName];
+  if (!Array.isArray(list) || list.length === 0) return;
+  for (var i = 0; i < list.length; i++) {
+    var timerKey = varName + "::" + stateName + "::" + i;
+    _scrml_machine_clear_timer(timerKey);
+  }
 }
 
 `;

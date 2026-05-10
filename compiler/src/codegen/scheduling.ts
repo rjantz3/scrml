@@ -146,7 +146,7 @@ export function extractInitExpr(stmt: ASTNode): string {
  * @param {CGError[]} [errors]
  * @returns {string[]}
  */
-export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: RouteMap, depGraph: DepGraph, filePath: string, errors: CGError[] = [], machineBindings?: Map<string, { engineName: string; tableName: string; rules: any[]; auditTarget?: string | null }> | null, engineBindings?: Map<string, { varName: string; forType: string; tableName: string }> | null, engineVarNames?: Set<string> | null, enginesWithHooks?: Set<string> | null, returnTypeAnnotation?: string | null, enclosingFnName?: string | null): string[] {
+export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: RouteMap, depGraph: DepGraph, filePath: string, errors: CGError[] = [], machineBindings?: Map<string, { engineName: string; tableName: string; rules: any[]; auditTarget?: string | null }> | null, engineBindings?: Map<string, { varName: string; forType: string; tableName: string }> | null, engineVarNames?: Set<string> | null, enginesWithHooks?: Set<string> | null, returnTypeAnnotation?: string | null, enclosingFnName?: string | null, enginesWithOnTimeout?: Set<string> | null): string[] {
   const lines: string[] = [];
   // Track declared names so tilde-decl can detect reassignment vs first declaration
   const declaredNames = new Set<string>();
@@ -158,6 +158,9 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
   // .advance() calls inside fn bodies dispatch to the runtime hooks.
   // B17.4: thread enginesWithHooks so .advance() / direct-write call sites
   // wrap with the per-engine hook-firing function call.
+  // A5-4 (§51.0.M): thread enginesWithOnTimeout so .advance() / direct-write
+  // call sites pass the per-engine timer-config table identifier as the 4th
+  // arg. Tree-shake at call site (omitted when the engine has no <onTimeout>).
   // C16: thread returnTypeAnnotation + enclosingFnName so return-stmt fires
   // §53.9.3 boundary checks for refinement-typed return types.
   const emitOpts: any = {
@@ -167,6 +170,7 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
     ...(engineBindings ? { engineBindings } : {}),
     ...(engineVarNames && engineVarNames.size > 0 ? { engineVarNames } : {}),
     ...(enginesWithHooks && enginesWithHooks.size > 0 ? { enginesWithHooks } : {}),
+    ...(enginesWithOnTimeout && enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}),
     ...(returnTypeAnnotation ? { returnTypeAnnotation, enclosingFnName: enclosingFnName ?? null } : {}),
   };
 

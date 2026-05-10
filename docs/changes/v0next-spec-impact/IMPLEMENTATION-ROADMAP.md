@@ -223,10 +223,10 @@ A* = compiler tracks (sequential). B* = parallel tracks (run alongside A*). C* =
 - History-cell synthesis: per-composite synthesized reactive cell `@_<parent>History`; written on outer-exit, read on outer-re-entry. Tree-shakeable (only emitted when ≥1 engine declares `history`). ~30-80 bytes per history-bearing parent.
 - `internal:rule` codegen: skip outer-state-child re-entry + inner-engine re-init on internal transitions.
 - `parallel` attribute: lowering identical to §51.4 multi-engine; the attribute is naming-only.
-- `<onTimeout>` lowering: rides existing `_scrml_machine_arm_timer`/`_scrml_machine_clear_timer` runtime (already in `compiler/src/runtime-template.js:66-146`; per Item C audit §1.3 reuse story). Computed-delay form emits per-arm runtime computation.
+- `<onTimeout>` lowering: rides existing `_scrml_machine_arm_timer`/`_scrml_machine_clear_timer` runtime (already in `compiler/src/runtime-template.js:66-146`; per Item C audit §1.3 reuse story). Computed-delay form emits per-arm runtime computation. **<onTimeout> codegen SHIPPED at S77 2026-05-10** (engine state-child timer-config table + arm/clear wiring + initial-arm + tree-shake; ~9h actual). Hierarchy desugar / history-cell / internal:rule / parallel STILL DEFERRED as separate sub-steps.
 
 **A5-5 — Computed-delay relaxation (~1.5-2.5h):**
-- Lift literal-only constraint on `after Ns` durations. Static literal cases retain constant-folded path; non-constant `${expr}` cases emit runtime computation feeding the existing runtime API.
+- Lift literal-only constraint on `after Ns` durations. Static literal cases retain constant-folded path; non-constant `${expr}` cases emit runtime computation feeding the existing runtime API. **A5-5 codegen SHIPPED at S77 2026-05-10** for the engine `<onTimeout>` surface (msExpr arrow-fn in timer-config table; runtime applies clamp + Math.round). Helper-level codegen (parseAfterDuration + parseMachineRules afterExpr branch + emitDurationLiteral + emit-logic.ts inline arm) IS ALSO in place for the legacy `<machine>` surface. KNOWN LIMITATION: legacy `<machine>` body parser splits `${...}` into separate children at the BS layer, gating the computed-delay on a follow-on body-parser fix. Engine `<onTimeout>` is the S67-recommended surface; legacy fix tracked as a small separate dispatch.
 
 **A5-6 — Item G B-shakeable timer extensions (~5-10h, optional follow-on):**
 - Event-timeout watchdog (no-event-for-N-ms) — per-machine last-event-timestamp tracker; only loads when an engine declares an event-timeout.

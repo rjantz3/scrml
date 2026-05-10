@@ -312,6 +312,17 @@ interface TransitionRule {
   // resets the timer (XState parity, per deep-dive default). Cancelled
   // when the variable leaves `from` via any other transition.
   afterMs: number | null;
+  // §51.12.3.1 (S67) — computed-delay form. When non-null, the rule fires
+  // after a runtime-computed duration; codegen wraps the expression in an
+  // IIFE that clamps negative/NaN to 0 (per spec). Mutually exclusive with
+  // afterMs — exactly ONE of {afterMs, afterExpr} is non-null for a temporal
+  // rule, both are null for non-temporal rules. The afterExpr text is the
+  // FULL computed-form JS expression INCLUDING the unit multiplier
+  // (e.g. for `${@x}s` the stored text is `(@x) * 1000`); codegen emits it
+  // as-is inside the IIFE. Reactive reads (@var) are LEFT UNREWRITTEN here
+  // — codegen calls rewriteExpr on it at emit time so `_scrml_reactive_get`
+  // wires correctly.
+  afterExpr: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1269,6 +1280,7 @@ function parseEnumBody(
       fromBindings: null,
       toBindings: null,
       afterMs: null, // type-level: temporal transitions are machine-only (E-ENGINE-021)
+      afterExpr: null, // §51.12.3.1 (S67): same — type-level transitions are not temporal
     });
   }
 
@@ -2594,27 +2606,52 @@ function parseMachineRules(
     if (rawLine.startsWith("//")) continue;
 
     // §51.12 (S25) — Temporal transitions.
-    // Extract `after <duration>` between the from-spec and `=>`, strip it
-    // from the line, and parse the duration to ms. The existing rule regex
-    // below runs against the stripped line. Non-temporal rules have
-    // afterMs === null and are unaffected.
+    // §51.12.3.1 (S67 amendment) — Computed-delay form `after ${expr}<unit>`.
+    //
+    // Extract the `after <duration>` fragment between the from-spec and `=>`,
+    // strip it from the line, and parse via the shared `parseAfterDuration`
+    // helper (which handles BOTH literal and computed forms). The remaining
+    // rule regex below runs against the stripped line. Non-temporal rules
+    // have both afterMs and afterExpr === null.
+    //
+    // Match shape covers both:
+    //   .X after 30s => .Y                   (literal — afterMs populated)
+    //   .X after ${@delay}ms => .Y           (computed — afterExpr populated)
+    //   .X after ${Math.min(a,b)}ms => .Y    (computed with parens inside expr)
+    //
+    // The capturing group permits `${...}` (single-level brace match per
+    // §51.12.3.1 — spec examples use parens, not nested braces) OR a literal
+    // numeric form. Both followed by a unit suffix.
     let afterMs: number | null = null;
+    let afterExpr: string | null = null;
     let line = rawLine;
-    const afterMatch = line.match(/\s+after\s+(\d+(?:\.\d+)?)\s*(ms|s|m|h)\s+(?==>)/i);
+    const afterMatch = line.match(
+      /\s+after\s+(\$\{[^}]*\}|\d+(?:\.\d+)?)\s*(ms|s|m|h)\s+(?==>)/i
+    );
     if (afterMatch) {
-      const n = parseFloat(afterMatch[1]);
-      const unit = afterMatch[2].toLowerCase();
-      const multiplier = unit === "ms" ? 1 : unit === "s" ? 1000 : unit === "m" ? 60000 : 3600000;
-      const computed = Math.round(n * multiplier);
-      if (!Number.isFinite(computed) || computed < 0) {
+      const rawDuration = `${afterMatch[1]}${afterMatch[2]}`;
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { parseAfterDuration } = require("./codegen/parse-after-duration.ts");
+      const parsed = parseAfterDuration(rawDuration);
+      if (parsed.kind === "literal") {
+        afterMs = parsed.ms;
+      } else if (parsed.kind === "computed") {
+        // Store the FULL expression text including the unit multiplier so
+        // codegen can emit `(${exprText}) * <multiplier>` directly. Reactive
+        // reads (@var) are LEFT UNREWRITTEN here — codegen's emit-machines.ts
+        // path passes the text through rewriteExpr at emit time so
+        // `_scrml_reactive_get` wires correctly.
+        afterExpr = `(${parsed.exprText}) * ${parsed.unitMultiplier}`;
+      } else {
+        // kind === "invalid"
         errors.push(new TSError(
           "E-ENGINE-021",
-          `E-ENGINE-021: Machine '${engineName}' temporal transition has an invalid duration \`${afterMatch[1]}${afterMatch[2]}\`. ` +
-          `Duration must be a finite non-negative number with a unit (ms/s/m/h). Example: \`.Loading after 30s => .TimedOut\`.`,
+          `E-ENGINE-021: Machine '${engineName}' temporal transition has an invalid duration \`${rawDuration}\`. ` +
+          `Duration must be a finite non-negative number with a unit (ms/s/m/h), or a computed expression \`\${expr}<unit>\`. ` +
+          `Example: \`.Loading after 30s => .TimedOut\` or \`.Connecting after \${@backoffDelay}ms => .Open\`. ` +
+          `(${parsed.reason})`,
           span,
         ));
-      } else {
-        afterMs = computed;
       }
       // Strip the `after X` fragment so the existing regex doesn't see it.
       line = line.replace(afterMatch[0], " ");
@@ -2646,6 +2683,7 @@ function parseMachineRules(
           fromBindings: null,
           toBindings: null,
           afterMs,
+          afterExpr,
         });
         continue;
       }
@@ -2659,6 +2697,7 @@ function parseMachineRules(
           fromBindings: null,
           toBindings: null,
           afterMs,
+          afterExpr,
         });
         continue;
       }
@@ -2676,6 +2715,7 @@ function parseMachineRules(
           fromBindings: null,
           toBindings: null,
           afterMs,
+          afterExpr,
         });
         continue;
       }
@@ -2750,7 +2790,7 @@ function parseMachineRules(
     // Temporal rule with a wildcard `from` (`* after Xs => .Y`) is rejected:
     // without a specific source variant, there's no entry edge to start the
     // timer from.
-    if (afterMs !== null && from === "*") {
+    if ((afterMs !== null || afterExpr !== null) && from === "*") {
       errors.push(new TSError(
         "E-ENGINE-021",
         `E-ENGINE-021: Machine '${engineName}' temporal transition uses a wildcard \`from\`. ` +
@@ -2761,7 +2801,7 @@ function parseMachineRules(
       ));
     }
 
-    rules.push({ from, to, guard, label, effectBody, fromBindings, toBindings, afterMs });
+    rules.push({ from, to, guard, label, effectBody, fromBindings, toBindings, afterMs, afterExpr });
   }
 
   return rules;

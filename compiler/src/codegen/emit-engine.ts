@@ -51,6 +51,8 @@
  *     (`_scrml_state` + `_scrml_reactive_get/set`) — NO new cell kind.
  */
 
+import { parseAfterDuration } from "./parse-after-duration.ts";
+
 // ---------------------------------------------------------------------------
 // Types — canonical engine-decl + engineMeta shapes consumed
 // ---------------------------------------------------------------------------
@@ -95,6 +97,23 @@ interface OnTransitionEntryShape {
   rawOffset: number;
 }
 
+/**
+ * A5-2 OnTimeoutEntry shape (mirrored locally — see EngineRuleForm above for
+ * the rationale). Matches `compiler/src/symbol-table.ts` `OnTimeoutEntry`.
+ */
+interface OnTimeoutEntryShape {
+  /** Raw `after=` text — literal `Nms`/`Ns`/etc. OR computed `${expr}<unit>`.
+   *  Parsed at codegen time via `parseAfterDuration` into literal-ms or
+   *  computed-expression-text. */
+  after: string;
+  /** `to=.Variant` target (variant name without leading dot). Empty string
+   *  when malformed (parse-error shape — A5-3 surfaces). */
+  to: string;
+  /** Substring offset (relative to enclosing state-child's bodyRaw) of the
+   *  `<onTimeout` opener. Unused by codegen; preserved for parity. */
+  rawOffset: number;
+}
+
 interface EngineStateChildEntry {
   tag: string;
   rule: EngineRuleForm;
@@ -103,7 +122,7 @@ interface EngineStateChildEntry {
   rawOffset?: number;
   historyAttr?: boolean;
   internalRule?: EngineRuleForm;
-  onTimeoutElements?: unknown[];
+  onTimeoutElements?: OnTimeoutEntryShape[];
   innerEngines?: unknown[];
   // ---- B17.4 NEW (§51.0.H ratified extensions) ----
   /** `effect=${...}` inner expression text (no `${` `}` wrapper); `null` when
@@ -123,6 +142,12 @@ interface EngineMetadata {
   isExported: boolean;
   isPinned: boolean;
   stateChildren?: EngineStateChildEntry[];
+  /** A5-2 §51.0.M — file-scope flat list of `<onTimeout>` element entries
+   *  across all state-children, each annotated with the owning state-child
+   *  tag for codegen clarity. POPULATED by SYM PASS 16 (A5-3). Empty/absent
+   *  when no `<onTimeout>` elements exist. Used by C12 (A5-4) to decide
+   *  whether to emit the per-engine timer-config table (tree-shake). */
+  onTimeoutElements?: Array<{ stateChildTag: string; entry: OnTimeoutEntryShape }>;
   // ... Wave-4 follow-on fields ignored here.
 }
 
@@ -240,6 +265,134 @@ export function collectC12EngineDecls(fileAST: any): EngineDeclLike[] {
  */
 export function engineTransitionTableName(varName: string): string {
   return `__scrml_engine_${varName}_transitions`;
+}
+
+/**
+ * A5-4 (§51.0.M) — Compute the per-engine `<onTimeout>` timer-config table
+ * const name. Format: `__scrml_engine_<varName>_timers`. Sibling to the
+ * transition table; emitted ONLY when the engine has at least one
+ * `<onTimeout>` element (tree-shake — engines with zero timers emit no
+ * table, and the runtime helpers (`_scrml_engine_arm_state_timers` /
+ * `_scrml_engine_clear_state_timers`) no-op when the timersTable arg is null.
+ */
+export function engineTimersTableName(varName: string): string {
+  return `__scrml_engine_${varName}_timers`;
+}
+
+/**
+ * A5-4 (§51.0.M) — Does this engine have at least one `<onTimeout>` element?
+ *
+ * The check inspects `engineMeta.onTimeoutElements` (the file-scope flat list
+ * populated by SYM PASS 16 / A5-3) and falls back to walking
+ * `engineMeta.stateChildren[].onTimeoutElements` when the aggregate isn't
+ * populated. Tree-shake control: emit-substrate skips the timers table AND
+ * passes `null` for the timersTable arg at every write-guard site when this
+ * returns false.
+ */
+export function engineHasOnTimeoutElements(meta: EngineMetadata): boolean {
+  const agg = meta.onTimeoutElements;
+  if (Array.isArray(agg) && agg.length > 0) return true;
+  const sc = meta.stateChildren;
+  if (Array.isArray(sc)) {
+    for (const child of sc) {
+      if (Array.isArray(child?.onTimeoutElements) && child.onTimeoutElements.length > 0) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * A5-4 (§51.0.M) + A5-5 (§51.12.3.1) — Emit the per-engine timer-config
+ * table.
+ *
+ * Shape:
+ *   const __scrml_engine_loadPhase_timers = Object.freeze({
+ *     "Loading": [
+ *       { ms: 30000, target: "TimedOut" },
+ *       { msExpr: function(){ return Math.min(1000 * 2 ** _scrml_reactive_get("attempt"), 30000) * 1; }, target: "Retry" },
+ *     ],
+ *     "Idle": [],
+ *     // ... one entry per state-child, even when its onTimeoutElements is empty
+ *   });
+ *
+ * - Literal `after=Nms`/`Ns`/etc.: emitted as `{ ms: <constant-folded>, target: "<Variant>" }`.
+ * - Computed `after=${expr}<unit>`: emitted as
+ *   `{ msExpr: function(){ return (<rewrittenExpr>) * <multiplier>; }, target: "<Variant>" }`.
+ *   The `<rewrittenExpr>` flows through `rewriteExpr` so reactive reads
+ *   (`@var` → `_scrml_reactive_get(<encodedName>)`) wire correctly. The
+ *   runtime evaluates `msExpr()` at arm time and clamps negative/NaN to 0
+ *   per SPEC §51.12.3.1.
+ * - Invalid `after=` text: defensively skipped (A5-3 typer fired
+ *   E-ENGINE-021; codegen emits no entry so a malformed timer never arms).
+ * - Empty / wildcard / parse-error rule shapes for the surrounding state-child:
+ *   irrelevant here — the table records timers per state-tag, not per rule.
+ *
+ * Returns an empty array when the engine has zero `<onTimeout>` elements
+ * (caller skips the emission entirely — tree-shake).
+ */
+export function emitEngineTimersTable(meta: EngineMetadata): string[] {
+  if (!engineHasOnTimeoutElements(meta)) return [];
+
+  const sc = meta.stateChildren;
+  if (!Array.isArray(sc) || sc.length === 0) return [];
+
+  // Lazy import (mirrors rewriteHookExprText below — avoids the circular at
+  // module-init).
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { rewriteExpr } = require("./rewrite.ts");
+
+  const tableName = engineTimersTableName(meta.varName);
+  const lines: string[] = [];
+
+  lines.push(`// §51.0.M onTimeout timer-config table for engine ${meta.varName}: ${meta.forType}`);
+  lines.push(`const ${tableName} = Object.freeze({`);
+
+  const stateEntryLines: string[] = [];
+  for (const child of sc) {
+    if (!child || typeof child.tag !== "string" || child.tag.length === 0) {
+      continue;
+    }
+    const stateKey = JSON.stringify(child.tag);
+    const onTimeouts = Array.isArray(child.onTimeoutElements) ? child.onTimeoutElements : [];
+    if (onTimeouts.length === 0) {
+      stateEntryLines.push(`  ${stateKey}: []`);
+      continue;
+    }
+    const arrayParts: string[] = [];
+    for (const ot of onTimeouts) {
+      // Defensive: skip malformed entries (A5-3 already surfaced diagnostics).
+      if (!ot || typeof ot.after !== "string" || typeof ot.to !== "string" || ot.to.length === 0) {
+        continue;
+      }
+      const parsed = parseAfterDuration(ot.after);
+      const targetLit = JSON.stringify(ot.to);
+      if (parsed.kind === "literal") {
+        arrayParts.push(`{ ms: ${parsed.ms}, target: ${targetLit} }`);
+      } else if (parsed.kind === "computed") {
+        // Rewrite the expression so reactive reads (@var → _scrml_reactive_get) wire.
+        const rewritten = rewriteExpr(parsed.exprText);
+        // Multiply by unit multiplier inside the IIFE so the runtime clamp is
+        // applied to the FINAL ms value (after the unit conversion).
+        // Function-expression form (not arrow) for ES5-friendly emission +
+        // parity with the surrounding runtime template.
+        arrayParts.push(
+          `{ msExpr: function(){ return (${rewritten}) * ${parsed.unitMultiplier}; }, target: ${targetLit} }`
+        );
+      }
+      // parsed.kind === "invalid" — silently drop (typer already reported).
+    }
+    if (arrayParts.length === 0) {
+      stateEntryLines.push(`  ${stateKey}: []`);
+    } else {
+      stateEntryLines.push(`  ${stateKey}: [\n    ${arrayParts.join(",\n    ")}\n  ]`);
+    }
+  }
+  lines.push(stateEntryLines.join(",\n"));
+  lines.push(`});`);
+
+  return lines;
 }
 
 // ---------------------------------------------------------------------------
@@ -423,6 +576,54 @@ export function emitEngineVariantCellInit(meta: EngineMetadata): string[] {
   return lines;
 }
 
+/**
+ * A5-4 (§51.0.M Semantics) — Emit the initial-arm call for an engine that
+ * has at least one `<onTimeout>` element. Sibling to
+ * `emitEngineVariantCellInit` but emitted SEPARATELY at the END of the file
+ * (after all user reactive cells are initialized) — the computed-form
+ * `<onTimeout after=${@var}<unit>/>` reads `@var` at arm time, so the arm
+ * must run AFTER the cell-init for `@var` (which lives in user logic).
+ *
+ * Returns an empty array when the engine has no `<onTimeout>` (tree-shake).
+ *
+ * Per SCOPE §3 decision #6: module-init is the FIRST entry into the initial
+ * state-child; the timers arm at this point. The runtime helper
+ * `_scrml_engine_arm_state_timers` looks up the initial state's row in the
+ * timer-config table and is a no-op when the row is empty.
+ */
+export function emitEngineInitialArm(meta: EngineMetadata): string[] {
+  if (!engineHasOnTimeoutElements(meta)) return [];
+  const initial = resolveEngineInitialVariant(meta);
+  if (!initial) return [];
+  const tableName = engineTransitionTableName(meta.varName);
+  const timersTableName = engineTimersTableName(meta.varName);
+  return [
+    `// §51.0.M onTimeout initial-arm: ${meta.varName} (${meta.forType}) entering ${initial}`,
+    `_scrml_engine_arm_state_timers(${JSON.stringify(meta.varName)}, ${JSON.stringify(initial)}, ${timersTableName}, ${tableName});`,
+  ];
+}
+
+/**
+ * A5-4 (§51.0.M) — Emit the initial-arm calls for every in-scope engine in
+ * the file. Sibling to `emitEngineSubstrate`. Empty when no engine has
+ * `<onTimeout>` elements (tree-shake).
+ *
+ * Called by `emit-client.ts` AFTER `emitReactiveWiring` so that user
+ * reactive cells (which the computed-form `<onTimeout>` may read at arm
+ * time) are initialized first.
+ */
+export function emitEngineInitialArmsForFile(fileAST: any): string[] {
+  const decls = collectC12EngineDecls(fileAST);
+  if (decls.length === 0) return [];
+  const lines: string[] = [];
+  for (const decl of decls) {
+    const meta = decl._record!.engineMeta!;
+    const armLines = emitEngineInitialArm(meta);
+    for (const l of armLines) lines.push(l);
+  }
+  return lines;
+}
+
 // ---------------------------------------------------------------------------
 // Top-level emission — orchestrates all engines in a file
 // ---------------------------------------------------------------------------
@@ -448,10 +649,16 @@ export function emitEngineSubstrate(fileAST: any): string[] {
   for (const decl of decls) {
     const meta = decl._record!.engineMeta!;
     const tableLines = emitEngineTransitionTable(meta);
+    // A5-4 §51.0.M — per-engine `<onTimeout>` timer-config table. Emitted
+    // BEFORE the cell init so the initial-arm call inside cellLines can
+    // reference the table identifier. Empty when the engine has no
+    // `<onTimeout>` elements (tree-shake).
+    const timersLines = emitEngineTimersTable(meta);
     const cellLines = emitEngineVariantCellInit(meta);
-    if (tableLines.length === 0 && cellLines.length === 0) continue;
+    if (tableLines.length === 0 && timersLines.length === 0 && cellLines.length === 0) continue;
     if (lines.length > 0) lines.push("");
     for (const l of tableLines) lines.push(l);
+    for (const l of timersLines) lines.push(l);
     for (const l of cellLines) lines.push(l);
     // §51.0.D mount-position marker. The engine renders at its declaration
     // position. C12 deliberately does NOT emit body markup — state-child
@@ -494,6 +701,16 @@ export interface EngineBindingInfo {
    *  `_scrml_reactive_get`. When FALSE, no hook-firing call is emitted (tree-
    *  shake — the function doesn't exist for hookless engines). */
   hasHooks?: boolean;
+  /** A5-4 (§51.0.M) — TRUE when the engine has at least one `<onTimeout>`
+   *  element. When TRUE, write-guard + advance emission pass the per-engine
+   *  timer-config table identifier as the 4th argument to
+   *  `_scrml_engine_direct_set` / `_scrml_engine_advance` so the runtime
+   *  clears outgoing timers + arms incoming ones. When FALSE, the 4th arg is
+   *  omitted (the runtime treats undefined as null and short-circuits). */
+  hasOnTimeoutElements?: boolean;
+  /** A5-4 — Compile-time-baked per-engine timer-config table identifier
+   *  (per §51.0.M). Always populated when `hasOnTimeoutElements === true`. */
+  timersTableName?: string;
 }
 
 /**
@@ -513,6 +730,7 @@ export function buildEngineBindingsMap(fileAST: unknown): Map<string, EngineBind
   for (const decl of decls) {
     const meta = decl._record?.engineMeta;
     if (!meta || typeof meta.varName !== "string" || meta.varName.length === 0) continue;
+    const hasOT = engineHasOnTimeoutElements(meta);
     out.set(meta.varName, {
       varName: meta.varName,
       forType: meta.forType,
@@ -521,6 +739,11 @@ export function buildEngineBindingsMap(fileAST: unknown): Map<string, EngineBind
       // Lazy-evaluated via engineHasHooks (defined later in this file; the
       // function is hoisted at module-init time so the reference here is safe).
       hasHooks: engineHasHooks(meta),
+      // A5-4 (§51.0.M): bind whether this engine has <onTimeout> elements
+      // for the write-guard + advance emitters. When true, both paths thread
+      // the timers-table identifier so arm-on-entry + clear-on-exit fire.
+      hasOnTimeoutElements: hasOT,
+      timersTableName: hasOT ? engineTimersTableName(meta.varName) : undefined,
     });
   }
   return out.size > 0 ? out : null;
@@ -546,6 +769,14 @@ export function emitEngineWriteGuard(binding: EngineBindingInfo, newValueExpr: s
   const lines: string[] = [
     `// §51.0.F engine direct-write hook: ${binding.varName} (${binding.forType})`,
   ];
+  // A5-4 (§51.0.M): when the engine has at least one <onTimeout>, pass the
+  // timers-table identifier as the 4th argument so the runtime clears
+  // outgoing timers + arms incoming ones around the cell write. When the
+  // engine has zero <onTimeout> elements, omit the arg (the runtime treats
+  // undefined as null and short-circuits — tree-shake).
+  const timersArg = (binding.hasOnTimeoutElements && binding.timersTableName)
+    ? `, ${binding.timersTableName}`
+    : ``;
   // B17.4 — when the engine has hooks, capture pre-write variant + fire hooks
   // AFTER the runtime helper commits the write (Q2 split timing: body fires
   // post-write so observers read the new value). Wrapping in a block keeps
@@ -555,11 +786,11 @@ export function emitEngineWriteGuard(binding: EngineBindingInfo, newValueExpr: s
     const fnName = engineHookFiringFunctionName(binding.varName);
     lines.push(`{`);
     lines.push(`  const __scrml_engine_from = _scrml_reactive_get(${JSON.stringify(binding.varName)});`);
-    lines.push(`  _scrml_engine_direct_set(${JSON.stringify(binding.varName)}, ${newValueExpr}, ${binding.tableName});`);
+    lines.push(`  _scrml_engine_direct_set(${JSON.stringify(binding.varName)}, ${newValueExpr}, ${binding.tableName}${timersArg});`);
     lines.push(`  ${fnName}(__scrml_engine_from, _scrml_reactive_get(${JSON.stringify(binding.varName)}));`);
     lines.push(`}`);
   } else {
-    lines.push(`_scrml_engine_direct_set(${JSON.stringify(binding.varName)}, ${newValueExpr}, ${binding.tableName});`);
+    lines.push(`_scrml_engine_direct_set(${JSON.stringify(binding.varName)}, ${newValueExpr}, ${binding.tableName}${timersArg});`);
   }
   return lines;
 }
@@ -602,9 +833,23 @@ export function collectEngineVarNames(fileAST: unknown): Set<string> {
  * is a CallExpr; its emission is composed by `emitCall` and the surrounding
  * statement wrapper adds the semicolon).
  */
-export function emitEngineAdvanceCall(varName: string, targetExpr: string, hasHooks?: boolean): string {
+export function emitEngineAdvanceCall(
+  varName: string,
+  targetExpr: string,
+  hasHooks?: boolean,
+  hasOnTimeout?: boolean,
+): string {
   const tableName = engineTransitionTableName(varName);
-  const baseCall = `_scrml_engine_advance(${JSON.stringify(varName)}, ${targetExpr}, ${tableName})`;
+  // A5-4 (§51.0.M): when this engine has at least one `<onTimeout>` element,
+  // pass the per-engine timer-config table identifier as the 4th argument so
+  // the runtime threads through arm-on-entry + clear-on-exit. Tree-shake:
+  // when no `<onTimeout>` exists, omit the arg (runtime treats undefined
+  // as null and short-circuits — the timers table identifier doesn't exist
+  // in the emitted JS for these engines).
+  const timersArg = hasOnTimeout === true
+    ? `, ${engineTimersTableName(varName)}`
+    : ``;
+  const baseCall = `_scrml_engine_advance(${JSON.stringify(varName)}, ${targetExpr}, ${tableName}${timersArg})`;
   // B17.4 — when the engine has hooks, wrap with capture-pre + hook-fire-post.
   // IIFE keeps the wrap valid in any expression position (statement, sub-expr,
   // arg position, etc.). Tree-shaken when hasHooks is false (or undefined).
@@ -1755,6 +2000,38 @@ export function collectEnginesWithHooks(fileAST: unknown): Set<string> {
   for (const decl of collectC14DerivedEngineDecls(fileAST)) {
     const meta = decl._record?.engineMeta;
     if (meta && engineHasHooks(meta) && typeof meta.varName === "string") {
+      out.add(meta.varName);
+    }
+  }
+  return out;
+}
+
+/**
+ * A5-4 (§51.0.M) — Build a Set of engine var names (in the file's scope) that
+ * have at least one `<onTimeout>` element. Used by emit-logic.ts and
+ * emit-expr.ts to gate the timers-table arg insertion at `.advance()` and
+ * direct-write sites. Mirrors `collectEnginesWithHooks` shape exactly so the
+ * plumbing layer can treat both flags as parallel sets.
+ *
+ * Includes BOTH non-derived (C12-scope) and derived (C14-scope) engines.
+ * Per SPEC §51.0.M Placement: `<onTimeout>` is legal inside derived engine
+ * state-children (the timer can fire when the source expression's value
+ * reaches `to=`'s variant — rare but legal). C14 doesn't currently fire
+ * timers from derived engines (write-path is read-only), but the runtime
+ * arm-on-init flow is harmless when no direct writes occur. Out-of-scope
+ * for follow-on lint.
+ */
+export function collectEnginesWithOnTimeout(fileAST: unknown): Set<string> {
+  const out = new Set<string>();
+  for (const decl of collectC12EngineDecls(fileAST)) {
+    const meta = decl._record?.engineMeta;
+    if (meta && engineHasOnTimeoutElements(meta) && typeof meta.varName === "string") {
+      out.add(meta.varName);
+    }
+  }
+  for (const decl of collectC14DerivedEngineDecls(fileAST)) {
+    const meta = decl._record?.engineMeta;
+    if (meta && engineHasOnTimeoutElements(meta) && typeof meta.varName === "string") {
       out.add(meta.varName);
     }
   }

@@ -104,6 +104,9 @@ interface TransitionRule {
   fromBindings?: RuleBinding[] | null;
   toBindings?: RuleBinding[] | null;
   afterMs?: number | null;
+  // §51.12.3.1 (S67) — computed-delay form (mirrored from emit-machines.ts /
+  // type-system.ts). Mutually exclusive with afterMs.
+  afterExpr?: string | null;
 }
 
 interface MachineLike {
@@ -136,7 +139,7 @@ function rulesAreInScope(rules: TransitionRule[]): { ok: boolean; reason?: strin
 // Phase 5: if any rule carries a temporal clause, the machine should
 // emit a suite-header note about the timer-lifecycle scope limit.
 function hasTemporalRule(rules: TransitionRule[]): boolean {
-  for (const r of rules) if (r.afterMs != null) return true;
+  for (const r of rules) if (r.afterMs != null || r.afterExpr != null) return true;
   return false;
 }
 
@@ -175,6 +178,7 @@ function collectSourceVariants(rules: TransitionRule[]): string[] {
 // which pairs come from temporal rules in the emitted suite.
 function temporalSuffix(rule: TransitionRule | null): string {
   if (rule && rule.afterMs != null) return ` (after ${rule.afterMs}ms)`;
+  if (rule && rule.afterExpr != null) return ` (after computed delay)`;
   return "";
 }
 

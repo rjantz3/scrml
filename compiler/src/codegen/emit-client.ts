@@ -7,7 +7,7 @@ import { emitFunctions } from "./emit-functions.ts";
 import { emitBindings } from "./emit-bindings.ts";
 import { emitReactiveWiring } from "./emit-reactive-wiring.ts";
 import { emitEventWiring } from "./emit-event-wiring.ts";
-import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEngineMountsForFile, emitEngineHookFiringFunctionsForFile } from "./emit-engine.ts";
+import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEngineMountsForFile, emitEngineHookFiringFunctionsForFile, emitEngineInitialArmsForFile } from "./emit-engine.ts";
 import { setVariantFieldsForFile } from "./emit-control-flow.ts";
 import { EncodingContext, emitDecodeTable, emitRuntimeReflect } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
@@ -725,6 +725,17 @@ export function generateClientJs(ctx: CompileContext): string {
   // Emit top-level logic statements and CSS variable bridge
   const reactiveLines = emitReactiveWiring(ctx);
   for (const line of reactiveLines) lines.push(line);
+
+  // A5-4 (§51.0.M) — Initial-arm for engines with <onTimeout>. Emitted AFTER
+  // emitReactiveWiring so the user reactive cells (which a computed-form
+  // <onTimeout after=${@var}<unit>/> may read at arm time) are initialized
+  // first. Tree-shake: empty when no engine in the file has <onTimeout>.
+  const engineInitArmLines = emitEngineInitialArmsForFile(fileAST);
+  if (engineInitArmLines.length > 0) {
+    lines.push("");
+    lines.push("// --- engine onTimeout initial-arms (compiler-generated, §51.0.M) ---");
+    for (const line of engineInitArmLines) lines.push(line);
+  }
 
   // Emit ref= and bind:/class: directive wiring
   const bindingLines = emitBindings(ctx);
