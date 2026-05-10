@@ -728,6 +728,78 @@ export interface ComponentDefNode extends BaseNode {
   raw: string;
 }
 
+/**
+ * An engine declaration: `<engine for=Type ...>{state-children}</>`.
+ *
+ * The TypeScript AST has historically declared engine-decl shapes inline in
+ * consumer files (see `EngineDeclLike` in `codegen/emit-engine.ts`); this
+ * interface centralizes the surface used by Phase A10 body-render and is
+ * intentionally NOT part of the `ASTNode` union below — adding it would force
+ * exhaustive-switch updates across many consumer sites for no payoff. Local
+ * inline interfaces in consumer files remain the dominant pattern; this
+ * interface gives walker authors a typed shape to import when they want one.
+ *
+ * Fields below mirror the runtime shape produced by `ast-builder.js` engine
+ * construction (see line ~9112).
+ */
+export interface EngineDeclNode extends BaseNode {
+  kind: "engine-decl";
+  /** §51.0.A — back-compat with legacy `name=` form. Mirrors `varName`. */
+  engineName: string;
+  /** §51.0.A — `for=Type` (the governed enum/type). */
+  governedType: string;
+  /**
+   * Raw concatenated body text — substring of the engine's source between
+   * the opener `>` and the closing `</>`. Consumed by the secondary structural
+   * parser `engine-statechild-parser.ts` (state-children + `<onTimeout>` +
+   * `<onTransition>` + `<onIdle>` + nested `<engine>` extraction) and by the
+   * legacy-machine arrow-rule type-system path. Phase A10 retains this verbatim.
+   */
+  rulesRaw: string;
+  /**
+   * Phase A10 (S78, 2026-05-10) — walkable body children, additive.
+   *
+   * The block-splitter produces typed walkable children for the engine body
+   * (markup, state, logic, text, comment, structural elements). Pre-A10
+   * those children were discarded after concatenating into `rulesRaw`.
+   * A10 preserves them as `bodyChildren` so:
+   *   - A1b walker PASSes (1, 2, 3, 5, 6, 13, 14, possibly 11) can descend
+   *     into engine state-child bodies for `@cell` resolution, derived-mutate
+   *     checks, render-by-tag, B17 component-engine-scope, B22 reset-target.
+   *   - Future body-render codegen (Phase A10 Phase 3+4) walks `bodyChildren`
+   *     to emit per-state-child render functions guarded on the engine
+   *     variable's variant.
+   *
+   * Field is OPTIONAL for backward compatibility — tests / harnesses that
+   * synthesize engine-decl AST nodes directly without going through
+   * ast-builder will leave it `undefined`; consumers must guard with
+   * `Array.isArray(node.bodyChildren)` before descending.
+   *
+   * The array contains ALL children in their source order (markup nodes for
+   * state-children + structural element markup + interpolations + text +
+   * comments + nested engine-decls). Codegen emission filters structural
+   * elements (`<onTimeout>`, `<onTransition>`, `<onIdle>`, nested `<engine>`)
+   * out at the body-render boundary; A1b walkers walk every child uniformly.
+   */
+  bodyChildren?: ASTNode[];
+  /** §51.9 — name of the source reactive var (no `@` prefix), or null. */
+  sourceVar: string | null;
+  /** §51.0.C — resolved auto-declared variable name (or override). */
+  varName: string;
+  /** §51.0.B — non-null iff `var=NAME` was present. */
+  varNameOverride: string | null;
+  /** §51.0.E — non-null iff `initial=.X` was present. */
+  initialVariant: string | null;
+  /** §51.0.B + §6.10 — true iff `pinned` bareword was present. */
+  pinned: boolean;
+  /** Set later by export Form 1 detection in `liftBareDeclarations`. */
+  isExported: boolean;
+  /** True iff opener was `< engine` (with a space) rather than `<engine`. */
+  openerHadSpaceAfterLt: boolean;
+  /** True iff this engine-decl was authored with the legacy `<machine>` keyword. */
+  legacyMachineKeyword: boolean;
+}
+
 // -- Control Flow --
 
 /** An if/else-if/else chain: `if condition { consequent } else { alternate }`. */

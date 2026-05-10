@@ -5294,6 +5294,37 @@ function annotateNodes(
       }
 
       // ------------------------------------------------------------------
+      // Engine declaration — Phase A10 boundary.
+      //
+      // Pre-A10, engine state-child bodies were stored only as `rulesRaw:
+      // string` and engine-decl fell through to the `default` case which
+      // happily iterated ALL array fields (recursing into nothing because
+      // there were none). Phase A10 (S78, 2026-05-10) added a walkable
+      // `bodyChildren: ASTNode[]` field to engine-decl. The default-case
+      // recursion would walk that field too — but engine state-child body
+      // content includes structural elements (`<onTimeout after=10s/>`,
+      // `<onTransition to=.X/>`, `<onIdle .../>`) whose attribute values
+      // are non-standard for general markup parsing (`after=10s` reads as
+      // an unquoted identifier in standard attribute resolution and fires
+      // E-SCOPE-001).
+      //
+      // Until Phase A10 Phase 3+4 lands body-render codegen + the
+      // structural-element filter at the emission boundary, TS should NOT
+      // descend into engine state-child body content. A1b walker passes
+      // (PASS 3, PASS 6, PASS 13, PASS 14) handle body-content scope/cell
+      // validation in their own targeted descents — TS is intentionally
+      // out of scope. This mirrors the deferral pattern for `component-def`
+      // bodies (which are also raw text + invisible to TS) per the B17
+      // deferral comment in symbol-table.ts.
+      //
+      // Engine-decl produces no ResolvedType-bearing computation today;
+      // returning tAsIs() matches what the default case did pre-A10.
+      case "engine-decl": {
+        resolvedType = tAsIs();
+        break;
+      }
+
+      // ------------------------------------------------------------------
       // Unknown node kinds — conservatively asIs, no error here.
       // ------------------------------------------------------------------
       default: {

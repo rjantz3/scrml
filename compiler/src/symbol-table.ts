@@ -1230,6 +1230,17 @@ function walk(
         if (arm && Array.isArray(arm.body)) walk(arm.body, currentScope, stats, visited);
       }
     }
+    // Phase A10 (S78) — descend into engine-decl.bodyChildren so any state-
+    // decls / nested scope-introducing constructs inside engine state-child
+    // bodies are registered. Pre-A10, engine bodies were stored only as
+    // raw text (rulesRaw); B14 PASS 10.A still registers the engine cell
+    // itself (independent of body walking). This branch covers the rare
+    // case where body content introduces a decl that PASS 1 should record.
+    // Most engine bodies introduce no decls; this is mostly for completeness
+    // + scope-chain extension consistency with PASSes 2/3/5/6/13/14.
+    if (kind === "engine-decl" && Array.isArray(anyN.bodyChildren)) {
+      walk(anyN.bodyChildren, currentScope, stats, visited);
+    }
     // P3-FOLLOW alignment: lift-expr carries a markup tree under expr.node.
     // B1 doesn't have state-cell concerns inside lift-exprs (markup is the
     // value, not a decl-site), but mirroring NR's recursion shape avoids
@@ -1311,6 +1322,12 @@ function walkLocalDeclsForCollisions(
       for (const arm of anyN.arms) {
         if (arm && Array.isArray(arm.body)) walkLocalDeclsForCollisions(arm.body, currentScope, visited, errors);
       }
+    }
+    // Phase A10 (S78) — descend into engine-decl.bodyChildren so locals
+    // declared inside engine state-child bodies (e.g., let-decl in event
+    // handlers) get B2 collision-checked against the surrounding state cells.
+    if (kind === "engine-decl" && Array.isArray(anyN.bodyChildren)) {
+      walkLocalDeclsForCollisions(anyN.bodyChildren, currentScope, visited, errors);
     }
     if (kind === "lift-expr" && anyN.expr && anyN.expr.kind === "markup" && anyN.expr.node) {
       walkLocalDeclsForCollisions([anyN.expr.node], currentScope, visited, errors);
@@ -1580,6 +1597,23 @@ function walkResolveAtNames(
       for (const arm of anyN.arms) {
         if (arm && Array.isArray(arm.body)) walkResolveAtNames(arm.body, currentScope, visited, errors, readPos);
       }
+    }
+    // Phase A10 (S78) — load-bearing branch. Every `@cell` reference inside
+    // an engine state-child body (event handlers, ${...} interpolation,
+    // attribute expressions, transition writes) MUST resolve. Without this
+    // recursion, `<button onclick=${@phase = .Loading}>Retry</button>` inside
+    // an Error state-child body would leave `@phase` unresolved (no
+    // _resolvedStateCell stamp) — downstream B22 reset-target / B8 derived-
+    // mutate / TS-stage scope checks all rely on the stamp. Body content
+    // inherits the surrounding scope (file scope at engine-decl site +
+    // engine var registered by PASS 10.A).
+    //
+    // Per Phase 0 SURVEY §3, payload-binding scope injection (e.g., `<Error
+    // msg>` introducing `msg` as a local) is DEFERRED to a follow-up — body
+    // content can resolve top-level + engine cells today; payload bindings
+    // would surface as B3 unresolveds, which is a known follow-on.
+    if (kind === "engine-decl" && Array.isArray(anyN.bodyChildren)) {
+      walkResolveAtNames(anyN.bodyChildren, currentScope, visited, errors, readPos);
     }
     if (kind === "lift-expr" && anyN.expr && anyN.expr.kind === "markup" && anyN.expr.node) {
       walkResolveAtNames([anyN.expr.node], currentScope, visited, errors, readPos);
@@ -1991,6 +2025,12 @@ function walkRenderByTagUses(
       for (const arm of anyN.arms) {
         if (arm && Array.isArray(arm.body)) walkRenderByTagUses(arm.body, fileScope, visited, errors);
       }
+    }
+    // Phase A10 (S78) — descend into engine-decl.bodyChildren so render-by-tag
+    // use-sites (e.g., `<derivedName/>` inside an engine state-child body)
+    // are validated. Walks with file-scope (B6 lookups are file-scoped).
+    if (kind === "engine-decl" && Array.isArray(anyN.bodyChildren)) {
+      walkRenderByTagUses(anyN.bodyChildren, fileScope, visited, errors);
     }
     if (kind === "lift-expr" && anyN.expr && anyN.expr.kind === "markup" && anyN.expr.node) {
       walkRenderByTagUses([anyN.expr.node], fileScope, visited, errors);
@@ -2550,6 +2590,12 @@ function walkDerivedValueMutate(
       for (const arm of anyN.arms) {
         if (arm && Array.isArray(arm.body)) walkDerivedValueMutate(arm.body, currentScope, visited, errors, fileFromScope);
       }
+    }
+    // Phase A10 (S78) — descend into engine-decl.bodyChildren so mutation
+    // of a const-derived cell inside an engine state-child body fires
+    // E-DERIVED-VALUE-MUTATE per L21. Body inherits the surrounding scope.
+    if (kind === "engine-decl" && Array.isArray(anyN.bodyChildren)) {
+      walkDerivedValueMutate(anyN.bodyChildren, currentScope, visited, errors, fileFromScope);
     }
     if (kind === "lift-expr" && anyN.expr && anyN.expr.kind === "markup" && anyN.expr.node) {
       walkDerivedValueMutate([anyN.expr.node], currentScope, visited, errors, fileFromScope);
@@ -5490,6 +5536,17 @@ function walkRejectEnginesInComponentDefChildren(
       }
     }
   }
+  // Phase A10 (S78) — descend into engine-decl.bodyChildren so a nested
+  // engine-decl reachable inside an OUTER engine state-child body of an
+  // engine that itself lives in a component-def fires E-COMPONENT-ENGINE-
+  // SCOPE. Outer-engine-in-component-def fire-site already runs above
+  // (defChildren scan); this branch covers the inner-engine recursive case.
+  // Engines INSIDE engines (NOT inside components) are PERMITTED per §51.0.Q
+  // hierarchy/nesting rules; the fire-condition checks above (component-def
+  // -> engine-decl direct child) are unchanged.
+  if (node.kind === "engine-decl" && Array.isArray(node.bodyChildren)) {
+    walkRejectEnginesInComponentDefChildren(node.bodyChildren, errors, filePath, visited);
+  }
 }
 
 /**
@@ -5809,6 +5866,12 @@ function walkValidateResetTargets(
       for (const arm of anyN.arms) {
         if (arm && Array.isArray(arm.body)) walkValidateResetTargets(arm.body, currentScope, visited, errors, filePath);
       }
+    }
+    // Phase A10 (S78) — descend into engine-decl.bodyChildren so reset(@x)
+    // calls inside an engine state-child body fire E-RESET-INVALID-TARGET
+    // when @x is not a valid reset target. Body inherits surrounding scope.
+    if (kind === "engine-decl" && Array.isArray(anyN.bodyChildren)) {
+      walkValidateResetTargets(anyN.bodyChildren, currentScope, visited, errors, filePath);
     }
     if (kind === "lift-expr" && anyN.expr && anyN.expr.kind === "markup" && anyN.expr.node) {
       walkValidateResetTargets([anyN.expr.node], currentScope, visited, errors, filePath);
