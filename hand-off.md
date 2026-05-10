@@ -43,13 +43,17 @@
 
 1. **Map refresh.** `.claude/maps/` may be stale post-S75 (75 files changed; A1c codegen surface fully closed; A8 family advanced through A6-4; B14 PASS 10.B + TS state-child fixes touched symbol-table). Run `/map incremental` against the S75-touched file set or full `/map` cold? Or defer until first dev-agent dispatch needs it?
 
-2. **Next priority — choose ONE (per hand-off-75 §"Open questions to surface immediately"):**
-   - **A9 Ext 5 (idempotency-key storage) implementation.** SURVEY ready at `docs/changes/phase-a9-ext5-idempotency-storage/SURVEY.md` (599 lines). ~50h budget single-dispatch sequential, ~13-21h depth-of-survey-discount available. All prerequisites cleared (C17 ✅, C18 ✅, C19 ✅, Ext 4 shipped, Trigger 5 wired). 1 high OQ resolved (§19.9 not §47 anchor).
+2. **Next priority — pick ONE (substantive S76 progress already CLOSED several from S75 menu):**
+   - ~~**A9 Ext 5 (idempotency-key storage) implementation.**~~ **SHIPPED S76 at `41b0764`** (`feat(a9-ext5): SHIP`). Body-split min-viable v0.2.0 closure complete. Single-agent dispatch D0-D8; 18 files changed (+2,540 LOC); 5 new test files (+81 tests); 5 new §34 catalog rows; new Stage 5.5 (Monotonicity Classifier); `idempotency-store=` `<program>` attr; `.idempotent()` modifier. All 8 OQ resolutions honored. 3 in-scope-but-thin deferrals (D1 export-synth modifier propagation, D3 pure-fn-call detection, D5 Redis backend). Tests at HEAD: 10,874 / 60 / 1 / 0.
    - **A8 A6-5 integration tests + A6-6 optional API alignment.** A6-5 = end-to-end compile-and-run sample with `test-bind` under `bun:test`. A6-6 = LSP/CG API design dive (TBD).
-   - **C15 follow-up dispatches.**
-     - Codegen-side FileAST-shape divergence (§C15.11/§C15.12) — `collectCrossFileEngineMounts` walker returns empty for real-pipeline FileAST. ~30min-1h fast fix once pinpointed. **Still pending.**
-     - ~~MOD re-export engine-category fall-through (§C15.13)~~ — **SHIPPED S76 at `22b6806`** (`feat(c15.13): SHIP — MOD re-export resolution in buildExportRegistry`). Two-pass `buildExportRegistry`: pass 1 stamps + carries internal `_reExportSource`/`_localName`; pass 2 inherits source kind/category/isComponent to fixed-point with cycle-bounded iteration cap; pass 3 strips internal fields. +8 unit tests + §C15.13 unskipped. p3-follow isComponent budget bumped 8→11 with explanatory comment. `re-export-all` (`export * from './x'`) NOT enumerated — future B-step if needed. Tests at HEAD: 10,790 / 63 / 1 / 0.
+   - ~~**C15 follow-up dispatches.**~~ **ALL SHIPPED S76.**
+     - ~~Codegen-side FileAST-shape divergence (§C15.11/§C15.12)~~ — **SHIPPED S76 at `2867beb`** (`feat(c15.11-12): SHIP — wrapper-vs-inner _scope fallback`). One-line root-cause fix: walker reads `fileAST._scope` but SYM attaches to inner `fileAST.ast._scope`; fallback chain mirrors existing `nodes` pattern. C15 suite 37/37 / 0 skip.
+     - ~~MOD re-export engine-category fall-through (§C15.13)~~ — **SHIPPED S76 at `22b6806`** (`feat(c15.13): SHIP — MOD re-export resolution in buildExportRegistry`). Two-pass `buildExportRegistry`: pass 1 stamps + carries internal `_reExportSource`/`_localName`; pass 2 inherits source kind/category/isComponent to fixed-point with cycle-bounded iteration cap; pass 3 strips internal fields. +8 unit tests + §C15.13 unskipped. p3-follow isComponent budget bumped 8→11.
    - **A5 family follow-on (S67-ratified engine extensions, deferred A5-5/A5-6/A5-7):** A5-5 computed-delay impl (~1.5-2.5h); A5-6 Item G B-shakeable timer extensions (~5-10h optional); A5-7 tests + samples (~12-18h).
+   - **A9 Ext 5 follow-ups (3 in-scope-but-thin, deferred to follow-up):**
+     - D1 export-synth modifier propagation — `export function foo().idempotent()` synthesized shadow node doesn't carry `idempotentModifier` flag through; modifier text preserved in raw export emission so no production breakage today; surface if friction.
+     - D3 pure-fn-call detection in classifier — over-emits keys (sound but wasteful); needs threading `functionIndex` through analyzer.
+     - D5 Redis backend inlining — stubbed in `runtime/idempotency.js`; SQL backend covers default-resolution; add when adopter explicitly uses `idempotency-store="redis"`.
    - **Insight 28 follow-up OQs (3 standing post-S76 audit):** OQ-bridge-3 (§53.2.1 grammar list audit — currently COLLIDES with A9 Ext 5 agent's SPEC.md edits; defer until agent lands), OQ-bridge-5 (compile-time WARNING when bridged validator on schema-column field — defer to compiler-diagnostics audit), OQ-bridge-2 (re-debate trigger on ≥3 adopter friction reports — passive). **OQ-bridge-4 RESOLVED clean S76 (2026-05-09):** `validate.scrml` audit found zero `server { }` blocks; wider `grep -rn "server {" stdlib/` returned only the documentary comment at `stdlib/crypto/index.scrml:140` recording the historical safeCompare fix. No follow-up code change. Recorded in `scrml-support/design-insights.md` Insight 28 OQ-bridge-4 line.
 
 3. **Articles thread (4 untracked → 5 with run-anywhere/run-forever S75).** Per pa.md Rule 1, no PA-volunteered marketing work; await user-raised threads. (5 in-flight drafts at `scrml-support/voice/articles/`.)
@@ -59,7 +63,7 @@
    - `2026-05-08-S72-scrmlTS-to-master-needs-push-SUPERSEDED.md` (renamed, master-push retired)
    - `2026-05-08-S71-scrmlTS-to-master-stage-scrml-dev-pipeline.md` (UNREAD, deprioritized; pipeline-substitution clean across 25+ dispatches)
 
-5. **9 worktree branches retained from S75 in `.claude/worktrees/`** — forensic per S67 protocol; not cleanup priority.
+5. **9 worktree branches retained from S75 in `.claude/worktrees/`** plus 1 new from S76 (`worktree-agent-aa1100371152a25fb` for A9 Ext 5 dispatch) — forensic per S67 protocol; not cleanup priority.
 
 ---
 
