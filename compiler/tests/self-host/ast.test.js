@@ -152,6 +152,7 @@ function stripIds(obj) {
     if (["isReExportAll", "renames"].includes(key)) continue; // ast-builder-grammar-fixes: JS ast-builder records re-export-all flag + rename map on export-decl; self-host doesn't yet
     if (["exported", "fromExport"].includes(key)) continue; // ast-builder-grammar-fixes: JS ast-builder synthesizes function-decl shadow nodes for `export function`; self-host doesn't yet
     if (["openerHadSpaceAfterLt", "legacyMachineKeyword"].includes(key)) continue; // P1.E (uniform opener / NR scaffolding): JS ast-builder records the opener whitespace flag and `<machine>` legacy keyword for NR's W-WHITESPACE-001 / W-DEPRECATED-001 emission; self-host doesn't yet
+    if (key === "idempotencyStore") continue; // A9 Ext 5 (S76): JS ast-builder records the §39.2.6 `<program idempotency-store=>` middleware attribute on middlewareConfig; self-host doesn't yet
     out[key] = stripIds(obj[key]);
   }
   return out;

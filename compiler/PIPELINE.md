@@ -170,6 +170,7 @@ maps to the per-file budgets below when running with full worker parallelism.
 | 3.3 | Unified Validation Bundle (VP-1, VP-2, VP-3) | UVB | per-file (after CE) |
 | 4 | protect= Analyzer | PA | project-wide (needs schema I/O) |
 | 5 | Route Inferrer | RI | project-wide |
+| 5.5 | Monotonicity Classifier (A9 Ext 5) | MC | project-wide (after RI) |
 | 6 | Type System | TS | per-file (after PA+RI complete) |
 | 6.5 | Meta Check + Eval | META | project-wide |
 | 6.7 | Validity Surface Synthesis | VSS | per-file (after META) |
@@ -1532,6 +1533,67 @@ using a visited-set to detect and break cycles:
   complete ProtectAnalysis. Functions within a single file can be analyzed in parallel once PA
   is complete.
 **Dependencies:** protect= Analyzer (PA) must complete. All files must have CE output.
+
+---
+
+## Stage 5.5: Monotonicity Classifier (MC)
+
+**Added:** 2026-05-09. Implements SPEC §19.9.6 static monotonicity classification (A9 Ext 5,
+S5 replay safety). Mirrors the Stage 7.5 BP separation pattern.
+
+**Input contract:**
+- `RouteMap` (from RI Stage 5)
+- `FileAST[]` (so the classifier can walk the body of each CPS-eligible function)
+
+**Output contract:**
+- Side-table extension: each `RouteMap.functions[fnId].cpsSplit` (when non-null) gains a
+  `monotonicity` field of type `"monotone" | "non-monotone" | "machine-intrinsic"`.
+
+**Responsibilities:**
+1. For every `FunctionRoute` with a non-null `cpsSplit`, walk the statements indexed by
+   `cpsSplit.serverStmtIndices`.
+2. Apply the §19.9.6 (a)-(f) classification rules:
+   (a) `?{}` SELECT-only batch → monotone.
+   (b) `?{}` INSERT batch with no auto-increment column read-back → monotone.
+   (c) `?{}` UPDATE batch where the assignment expression is independent of the prior column
+       value (e.g., `SET status = 'approved'` is monotone; `SET counter = counter + 1` is
+       non-monotone).
+   (d) `?{}` DELETE-only → monotone.
+   (e) Pure-function calls (per §48 `fn`) → monotone.
+   (f) `<machine>` `.advance()` transitions whose §51 allowed-from-states guards make the
+       transition idempotent → `machine-intrinsic`.
+   Any other shape (channel broadcast, stdlib server-side I/O, non-deterministic RHS like
+   `NOW()` / `random()`) → non-monotone.
+3. Conservative default: any unrecognized statement shape returns `"non-monotone"`.
+4. The `.idempotent()` modifier on the function declaration (§19.9.7) overrides the verdict
+   to `"monotone"` (developer assertion).
+5. Channel server-functions (`route.kind === "channel"` or analogous detection) skip
+   classification entirely — no key emission, no rejection.
+
+**Diagnostics emitted (consumed by TS Stage 6 + downstream codegen):**
+- `D-CPS-MONOTONE` — verbose-only info diagnostic on monotone batches.
+- `D-CPS-MACHINE-INTRINSIC-MONOTONE` — info diagnostic on machine-intrinsic batches.
+- `D-CPS-IDEMPOTENT-OVERRIDE` — info diagnostic when `.idempotent()` overrides a non-monotone
+  classifier verdict (fires from TS or here, depending on dispatch implementation).
+
+**Static-rejection diagnostics** (`E-CPS-NONIDEM-NO-STORAGE`,
+`E-CPS-IDEMPOTENCY-STORE-DRIVER-MISMATCH`, `E-CPS-IDEMPOTENCY-STORE-MISSING-IMPORT`) fire from
+TS Stage 6 because they require resolved `<program>` ancestry context that is most
+ergonomically threaded through the type-system pass.
+
+**Invariants:**
+- **Determinism:** same `RouteMap` + `FileAST[]` produces identical monotonicity verdicts.
+- **No AST mutation:** verdicts attach to `RouteMap.functions[fnId].cpsSplit.monotonicity`
+  only.
+- **Conservative default:** ambiguous shapes map to `"non-monotone"`. Under-classification is
+  the safe direction (extra keys emitted; no soundness violation).
+
+**Performance budget:** <= 5 ms for the full project (per-function statement walk).
+
+**Dependencies:** RI Stage 5 must complete (cpsSplit shape populated).
+
+**Consumer:** TS Stage 6 (static-rejection diagnostics), CG Stage 8 (key-envelope emission
+in emit-functions.ts + dedup middleware in emit-server.ts).
 
 ---
 

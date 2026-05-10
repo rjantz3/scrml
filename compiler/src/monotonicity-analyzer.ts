@@ -1,0 +1,463 @@
+/**
+ * Monotonicity Analyzer — Stage 5.5 (A9 Ext 5).
+ *
+ * Implements SPEC §19.9.6 static monotonicity classification + idempotency-key
+ * replay safety (S5 of the body-split soundness predicate set).
+ *
+ * Classifies each CPS-eligible function's server-stmt batch as
+ * `"monotone"`, `"non-monotone"`, or `"machine-intrinsic"`. Operates per
+ * `RouteMap.functions[fnId].cpsSplit.serverStmtIndices`. Verdict is attached
+ * to `cpsSplit.monotonicity`; downstream codegen consults it to decide
+ * whether to emit the `Idempotency-Key` envelope (client wrapper) and the
+ * dedup middleware (server stub).
+ *
+ * Conservative classification (per SPEC §19.9.6 paragraph 1): in cases of
+ * static ambiguity, the verdict SHALL be `"non-monotone"`. False positives
+ * (extra keys emitted) are the safe direction; false negatives (key elided
+ * when needed) would violate S5.
+ *
+ * Cross-references:
+ *   - SPEC §19.9.6 — primary normative spec (rules a-f).
+ *   - SPEC §19.9.7 — `.idempotent()` modifier override (developer assertion).
+ *   - SPEC §51.0.G — `<machine>` `.advance()` intrinsic-monotone leg.
+ *   - PIPELINE.md Stage 5.5 — input/output contract.
+ *   - compiler/src/route-inference.ts — CPSSplit shape this analyzer extends.
+ *   - compiler/src/idempotency-store-resolver.ts — backend resolution helper.
+ */
+
+import type { CPSSplit, FunctionRoute, RouteMap } from "./route-inference.ts";
+
+// ---------------------------------------------------------------------------
+// Public types
+// ---------------------------------------------------------------------------
+
+/**
+ * A monotonicity verdict for a single CPS-eligible server-stmt batch.
+ *
+ * - `"monotone"` — every statement falls in the §19.9.6 (a)-(e) whitelist:
+ *   read-only SELECT, INSERT-without-readback, monotone UPDATE
+ *   (assignment-only-of-literals), DELETE, or pure-fn call.
+ * - `"non-monotone"` — at least one statement falls outside (a)-(f), OR is
+ *   conservatively unrecognized (the safe default).
+ * - `"machine-intrinsic"` — the entire batch is bounded by a single
+ *   `<machine>` `.advance(.X)` call whose §51 allowed-from-states guard
+ *   makes the transition idempotent under repeated application.
+ */
+export type MonotonicityVerdict =
+  | "monotone"
+  | "non-monotone"
+  | "machine-intrinsic";
+
+/**
+ * Diagnostic emitted by the analyzer (info-level only; static-rejection
+ * diagnostics are emitted by TS Stage 6 because they need resolved
+ * `<program>` ancestry context).
+ */
+export interface MonotonicityDiagnostic {
+  /** §34 catalog code: D-CPS-MONOTONE / D-CPS-MACHINE-INTRINSIC-MONOTONE / D-CPS-IDEMPOTENT-OVERRIDE. */
+  code: string;
+  message: string;
+  /** Function-node id whose batch produced the diagnostic. */
+  functionNodeId: string;
+}
+
+/** Output of `analyzeMonotonicity`. */
+export interface MonotonicityAnalysis {
+  /** Per-function monotonicity verdict (only entries for functions with non-null cpsSplit). */
+  verdicts: Map<string /* functionNodeId */, MonotonicityVerdict>;
+  /** Info-level diagnostics; `--verbose`-only for D-CPS-MONOTONE. */
+  diagnostics: MonotonicityDiagnostic[];
+}
+
+// ---------------------------------------------------------------------------
+// Statement-shape predicates (§19.9.6 (a)-(f))
+// ---------------------------------------------------------------------------
+
+/**
+ * Loose AST node alias for the statement walker. We only read a small set of
+ * structural fields; everything else is opaque.
+ */
+type ASTNode = Record<string, unknown>;
+
+/** SQL command verbs we recognize at the start of a `?{}` query string. */
+const SQL_READ_ONLY_VERBS = new Set(["select", "with"]);
+
+/** Mutating SQL verbs we have specific monotone-or-not analysis for. */
+const SQL_MUTATING_VERBS = new Set(["insert", "update", "delete", "replace"]);
+
+/**
+ * Tokenize a SQL query string's leading verb. Lowercased; whitespace-/comment-
+ * stripped. Returns null when the query is empty or unparseable.
+ */
+function leadingSqlVerb(query: string): string | null {
+  if (typeof query !== "string") return null;
+  // Strip leading whitespace + line/block comments.
+  let s = query.replace(/^\s+/, "");
+  while (true) {
+    if (s.startsWith("--")) {
+      const nl = s.indexOf("\n");
+      s = nl === -1 ? "" : s.slice(nl + 1).replace(/^\s+/, "");
+      continue;
+    }
+    if (s.startsWith("/*")) {
+      const close = s.indexOf("*/");
+      s = close === -1 ? "" : s.slice(close + 2).replace(/^\s+/, "");
+      continue;
+    }
+    break;
+  }
+  const m = s.match(/^([a-z_]+)/i);
+  return m ? m[1].toLowerCase() : null;
+}
+
+/**
+ * Heuristic non-determinism detector. Scans a SQL query string for known
+ * non-deterministic functions whose presence makes a batch non-monotone.
+ *
+ * Conservative: any match → non-deterministic. False-positive matches inside
+ * string literals (e.g., `'NOW()'` literal) are tolerated — they bias toward
+ * non-monotone, the safe direction.
+ */
+function sqlMentionsNonDeterminism(query: string): boolean {
+  if (typeof query !== "string") return false;
+  // Case-insensitive scan for canonical non-deterministic functions.
+  const re = /\b(now|current_timestamp|current_date|current_time|random|gen_random_uuid|uuid_generate_v4|sysdate|getdate|nextval|currval|lastval|lastval_seq)\s*\(/i;
+  return re.test(query);
+}
+
+/**
+ * UPDATE-statement monotonicity detector. A `SET col = expr` clause is
+ * monotone iff `expr` does NOT reference the column being assigned (or any
+ * other column from the same row in a self-referencing way).
+ *
+ * Heuristic: parse the SET clause, extract column-name = expression pairs,
+ * and check whether each expression mentions the column on the left.
+ *
+ * Conservative: ambiguous parses (subqueries, complex expressions) return
+ * `false` (non-monotone).
+ */
+function updateIsMonotone(query: string): boolean {
+  if (typeof query !== "string") return false;
+  // Locate the SET clause.
+  const setMatch = query.match(/\bset\b\s+(.*?)(?:\bwhere\b|\breturning\b|\bfrom\b|;|$)/is);
+  if (!setMatch) return false;
+  const setClause = setMatch[1];
+
+  // Split into top-level comma-delimited assignments.
+  // Naive split — does NOT handle nested parens. Conservative: complex
+  // multi-paren clauses fall through to non-monotone.
+  if (setClause.includes("(")) {
+    // Bail on subqueries / function calls — too ambiguous to classify
+    // safely. Caller defaults to non-monotone.
+    return false;
+  }
+  const parts = setClause.split(/\s*,\s*/);
+  for (const part of parts) {
+    const m = part.match(/^\s*([a-z_][\w]*)\s*=\s*(.+?)\s*$/i);
+    if (!m) return false; // unparseable
+    const col = m[1].toLowerCase();
+    const expr = m[2];
+    // Self-reference: `col = col + 1`, `col = col`, etc.
+    const refRe = new RegExp(`\\b${col}\\b`, "i");
+    if (refRe.test(expr)) return false;
+    // RHS-of-other-column-from-same-row: e.g., `a = b + 1` where b is also
+    // a column in the same row. Conservative: we can't always know without
+    // schema; treat any bareword RHS that isn't a literal/parameter as
+    // potentially non-monotone. Heuristic: if RHS contains an unquoted
+    // identifier that isn't a SQL keyword or numeric/string literal, treat
+    // as non-monotone.
+    const exprNorm = expr.replace(/'[^']*'/g, "''").replace(/"[^"]*"/g, "\"\"");
+    // Pull out bareword identifiers (not preceded by $ for parameter, not
+    // a number).
+    const idents = exprNorm.match(/\b[a-z_][\w]*\b/gi) ?? [];
+    const KEYWORDS = new Set(["null", "true", "false", "and", "or", "not", "is", "in", "like", "between", "case", "when", "then", "else", "end"]);
+    for (const id of idents) {
+      if (KEYWORDS.has(id.toLowerCase())) continue;
+      // An identifier that survives normalization is likely a column ref;
+      // treat as potentially-self-referencing → non-monotone.
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * INSERT-statement monotonicity detector. INSERT is monotone iff:
+ *   - There is no `RETURNING` clause that reads back an auto-increment col.
+ *   - The VALUES expressions don't mention non-deterministic functions.
+ *
+ * Conservative: when in doubt, return false.
+ */
+function insertIsMonotone(query: string): boolean {
+  if (typeof query !== "string") return false;
+  // RETURNING clause — likely reads back auto-increment id; treat as non-monotone.
+  if (/\breturning\b/i.test(query)) return false;
+  // Non-determinism scan.
+  if (sqlMentionsNonDeterminism(query)) return false;
+  // ON CONFLICT DO UPDATE — semantics depend on the update expression. The
+  // conservative classifier flags this; .idempotent() is the developer's
+  // escape hatch.
+  if (/\bon\s+conflict\b/i.test(query)) return false;
+  return true;
+}
+
+/**
+ * DELETE-statement monotonicity detector. DELETE is monotone iff it has no
+ * non-deterministic predicates.
+ */
+function deleteIsMonotone(query: string): boolean {
+  if (typeof query !== "string") return false;
+  if (sqlMentionsNonDeterminism(query)) return false;
+  return true;
+}
+
+/**
+ * SELECT-statement monotonicity detector. SELECT is read-only — always
+ * monotone (unless it triggers side effects via, e.g., `SELECT pg_sleep(...)`,
+ * which we conservatively flag via non-determinism scan).
+ */
+function selectIsMonotone(query: string): boolean {
+  if (typeof query !== "string") return false;
+  if (sqlMentionsNonDeterminism(query)) return false;
+  return true;
+}
+
+/**
+ * Classify a single SQL block. Returns `"monotone"` or `"non-monotone"`.
+ * No `"machine-intrinsic"` here — that's a function-decl-level concept.
+ */
+function classifySqlNode(sqlNode: ASTNode): MonotonicityVerdict {
+  const query = sqlNode.query as string | undefined;
+  if (!query) return "non-monotone";
+  const verb = leadingSqlVerb(query);
+  if (verb === null) return "non-monotone";
+  if (SQL_READ_ONLY_VERBS.has(verb)) {
+    return selectIsMonotone(query) ? "monotone" : "non-monotone";
+  }
+  if (verb === "insert") return insertIsMonotone(query) ? "monotone" : "non-monotone";
+  if (verb === "update") return updateIsMonotone(query) ? "monotone" : "non-monotone";
+  if (verb === "delete") return deleteIsMonotone(query) ? "monotone" : "non-monotone";
+  // Other verbs (TRUNCATE, MERGE, REPLACE, CREATE, etc.) — conservative.
+  return "non-monotone";
+}
+
+/**
+ * Walk an arbitrary AST sub-tree looking for the first SQL node, if any.
+ * Used to find the SQL inside a state-decl init or a bare-expr.
+ */
+function findSqlNode(node: unknown): ASTNode | null {
+  if (!node || typeof node !== "object") return null;
+  const n = node as ASTNode;
+  if (n.kind === "sql") return n;
+  // The ast-builder attaches `sqlNode` as a sibling field on state-decls
+  // whose init is an SQL expression.
+  if (n.sqlNode && typeof n.sqlNode === "object") return n.sqlNode as ASTNode;
+  // Search well-known descendant fields.
+  for (const key of ["init", "exprNode", "value", "expression"] as const) {
+    const child = n[key];
+    if (child && typeof child === "object") {
+      const found = findSqlNode(child);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+/**
+ * Detect a bare `<machine>` `.advance(...)` call shape in a statement node.
+ * Returns true iff the statement is JUST an `.advance` call (no other
+ * effects in the same statement).
+ *
+ * Heuristic: the statement is a `bare-expr` whose `exprNode` is a `call`
+ * whose callee is a `member` whose property name is `advance`. Conservative:
+ * any deviation → false (caller continues other classification).
+ */
+function isMachineAdvanceCall(stmt: ASTNode): boolean {
+  if (!stmt || typeof stmt !== "object") return false;
+  if (stmt.kind !== "bare-expr") return false;
+  const exprNode = stmt.exprNode as ASTNode | undefined;
+  if (!exprNode || exprNode.kind !== "call") return false;
+  const callee = exprNode.callee as ASTNode | undefined;
+  if (!callee || callee.kind !== "member") return false;
+  const prop = callee.property as ASTNode | undefined;
+  if (!prop) return false;
+  const propName = (prop.name as string | undefined) ?? (prop as ASTNode).text as string | undefined;
+  return propName === "advance";
+}
+
+// ---------------------------------------------------------------------------
+// Per-function classification
+// ---------------------------------------------------------------------------
+
+/**
+ * Classify a CPS-eligible function's server-stmt batch.
+ *
+ * Algorithm (per SPEC §19.9.6):
+ *   1. If the function-decl carries `.idempotent()` modifier (§19.9.7),
+ *      verdict = "monotone" (developer assertion override).
+ *   2. If the entire batch is bounded by a single `<machine>` `.advance(.X)`
+ *      call → verdict = "machine-intrinsic".
+ *   3. Walk every server-stmt index; classify each per (a)-(e):
+ *        - SELECT-only / read-only → monotone
+ *        - INSERT without auto-readback / non-deterministic RHS → monotone
+ *        - UPDATE assignment-only-of-literals → monotone
+ *        - DELETE without non-deterministic predicates → monotone
+ *        - pure-fn call (todo: requires functionIndex; conservative for now)
+ *      Any non-monotone → batch verdict = "non-monotone".
+ *   4. All-monotone → verdict = "monotone".
+ */
+function classifyFunctionMonotonicity(
+  fnNode: ASTNode,
+  cpsSplit: CPSSplit,
+): MonotonicityVerdict {
+  // Step 1: .idempotent() override.
+  if (fnNode.idempotentModifier === true) {
+    return "monotone";
+  }
+
+  const body = (fnNode.body as ASTNode[] | undefined) ?? [];
+  const serverStmts = cpsSplit.serverStmtIndices
+    .map((i) => body[i])
+    .filter((s) => s !== undefined && s !== null);
+
+  if (serverStmts.length === 0) {
+    // No server statements? Treat as monotone (vacuous; no replay risk).
+    return "monotone";
+  }
+
+  // Step 2: machine-intrinsic? Single-statement batch that is just .advance().
+  if (serverStmts.length === 1 && isMachineAdvanceCall(serverStmts[0])) {
+    return "machine-intrinsic";
+  }
+
+  // Step 3: classify each statement.
+  for (const stmt of serverStmts) {
+    const verdict = classifyStatement(stmt);
+    if (verdict !== "monotone") {
+      return "non-monotone";
+    }
+  }
+
+  // Step 4: all monotone.
+  return "monotone";
+}
+
+/**
+ * Classify a single server-side statement. Returns "monotone" or
+ * "non-monotone" (machine-intrinsic is function-batch-scoped, not per-stmt).
+ */
+function classifyStatement(stmt: ASTNode): MonotonicityVerdict {
+  if (!stmt || typeof stmt !== "object") return "non-monotone";
+
+  // SQL node directly OR wrapped in state-decl init / bare-expr.
+  const sqlNode = findSqlNode(stmt);
+  if (sqlNode) {
+    return classifySqlNode(sqlNode);
+  }
+
+  // Pure-function call detection requires the functionIndex + analysisMap;
+  // for v0.2.0 Ext 5 baseline, a bare-expr containing only a function call
+  // is conservatively classified non-monotone unless the callee is a
+  // recognized stdlib pure helper. Future work: thread the functionIndex
+  // through and recognize fn-kind callees as monotone.
+  //
+  // CONSERVATIVE: any unrecognized statement shape → non-monotone.
+  return "non-monotone";
+}
+
+// ---------------------------------------------------------------------------
+// Public entry point — analyzeMonotonicity (Stage 5.5)
+// ---------------------------------------------------------------------------
+
+/**
+ * Run Stage 5.5 monotonicity classification over an entire RouteMap.
+ *
+ * Side-effect: mutates `route.cpsSplit.monotonicity` in-place on every
+ * `FunctionRoute` whose `cpsSplit` is non-null. (`cpsSplit` is the natural
+ * attachment surface; Stage 8 codegen reads it directly.)
+ *
+ * Pure with respect to the AST + function nodes — no AST mutation. The only
+ * mutation is to `cpsSplit.monotonicity` (a previously-undefined field).
+ *
+ * @param routeMap   the RouteMap from Stage 5 RI.
+ * @param fnNodes    map from functionNodeId to the function-decl AST node.
+ *                   The classifier reads `body[]`, `idempotentModifier`,
+ *                   and field-presence checks. Channel-tagged routes (per
+ *                   `route.kind === "channel"` if present, OR via caller
+ *                   filtering) should NOT appear in fnNodes — see SPEC
+ *                   §19.9.6 channel-skip note.
+ */
+export function analyzeMonotonicity(
+  routeMap: RouteMap,
+  fnNodes: Map<string, ASTNode>,
+): MonotonicityAnalysis {
+  const verdicts = new Map<string, MonotonicityVerdict>();
+  const diagnostics: MonotonicityDiagnostic[] = [];
+
+  for (const [fnNodeId, route] of routeMap.functions) {
+    if (!route.cpsSplit) continue;
+    const fnNode = fnNodes.get(fnNodeId);
+    if (!fnNode) continue;
+
+    // Channel server-fns are out of scope (SPEC §19.9.6 channel-skip).
+    // Detection heuristic: function-decl carrying a `channelOwner` annotation
+    // (set elsewhere) OR functionRoute marked as channel. For v0.2.0
+    // Ext 5 baseline, callers filter channel routes BEFORE calling
+    // analyzeMonotonicity; the classifier itself does no channel detection.
+    // Future: add an explicit `route.kind === "channel"` check when that
+    // field exists on FunctionRoute.
+
+    const verdict = classifyFunctionMonotonicity(fnNode, route.cpsSplit);
+    verdicts.set(fnNodeId, verdict);
+
+    // Attach to cpsSplit for downstream codegen consumption.
+    (route.cpsSplit as CPSSplit & { monotonicity?: MonotonicityVerdict }).monotonicity = verdict;
+
+    // Emit info-level diagnostics. D-CPS-MONOTONE is verbose-only (caller
+    // filters); we always emit so the consumer can decide.
+    if (verdict === "machine-intrinsic") {
+      diagnostics.push({
+        code: "D-CPS-MACHINE-INTRINSIC-MONOTONE",
+        message: "CPS batch bounded by a `<machine>` `.advance(.X)` transition; intrinsic-monotone by §51 allowed-from-states guard.",
+        functionNodeId: fnNodeId,
+      });
+    } else if (verdict === "monotone") {
+      // .idempotent() override case → fire D-CPS-IDEMPOTENT-OVERRIDE
+      // instead of D-CPS-MONOTONE. The override is an information
+      // diagnostic the developer reads to confirm what classifier verdict
+      // they're overriding. Naming the would-be verdict requires
+      // re-running the classifier WITHOUT the override; for v0.2.0 we
+      // emit the diagnostic without that detail.
+      if (fnNode.idempotentModifier === true) {
+        diagnostics.push({
+          code: "D-CPS-IDEMPOTENT-OVERRIDE",
+          message: "`.idempotent()` modifier is in effect at this function declaration; idempotency-key envelope is elided regardless of classifier verdict.",
+          functionNodeId: fnNodeId,
+        });
+      } else {
+        diagnostics.push({
+          code: "D-CPS-MONOTONE",
+          message: "CPS batch is monotone-by-classification; idempotency-key envelope elided.",
+          functionNodeId: fnNodeId,
+        });
+      }
+    }
+    // Non-monotone batches don't fire info diagnostics; they may trigger
+    // E-CPS-NONIDEM-NO-STORAGE downstream (TS Stage 6) when the resolved
+    // backend is "none".
+  }
+
+  return { verdicts, diagnostics };
+}
+
+/**
+ * Convenience: classify a single function in isolation. Used by tests and by
+ * downstream passes that need the verdict without running the full Stage 5.5
+ * over the whole RouteMap.
+ */
+export function classifyFunctionMonotonicityForTest(
+  fnNode: ASTNode,
+  cpsSplit: CPSSplit,
+): MonotonicityVerdict {
+  return classifyFunctionMonotonicity(fnNode, cpsSplit);
+}

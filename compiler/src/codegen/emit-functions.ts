@@ -171,6 +171,18 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
 
     lines.push(`async function ${stubName}(${paramNames.join(", ")}) {`);
     const usesCsrfRetry = csrfEnabled && httpMethod !== "GET" && httpMethod !== "HEAD";
+    // A9 Ext 5 (§19.9.6): non-monotone CPS batches receive a per-invocation
+    // UUIDv4 idempotency key transmitted via the `Idempotency-Key` header
+    // (IETF-draft standard). Server stub (emit-server.ts) consults the
+    // configured store before executing the batch, returning the stored
+    // result on key-hit. Monotone / machine-intrinsic batches and non-CPS
+    // server functions skip key emission.
+    const cpsMonotonicity = route.cpsSplit?.monotonicity;
+    const emitIdempotencyKey = cpsMonotonicity === "non-monotone";
+    if (emitIdempotencyKey) {
+      lines.push(`  // A9 Ext 5: idempotency key (non-monotone CPS batch)`);
+      lines.push(`  const _scrml_idempotency_key = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2) + '-' + Date.now();`);
+    }
     if (usesCsrfRetry) {
       // GITI-010: route through _scrml_fetch_with_csrf_retry so a cookie-less
       // first POST receives a Set-Cookie 403, then automatically retries with
@@ -180,11 +192,42 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         lines.push(`    ${JSON.stringify(p)}: ${p},`);
       }
       lines.push(`  });`);
-      lines.push(`  const _scrml_resp = await _scrml_fetch_with_csrf_retry(${JSON.stringify(path)}, ${JSON.stringify(httpMethod)}, _scrml_body);`);
+      if (emitIdempotencyKey) {
+        // _scrml_fetch_with_csrf_retry's signature is (path, method, body);
+        // it does not currently accept extra headers. Fall back to direct
+        // fetch with manual CSRF retry inlined when the idempotency key is
+        // required, so the header rides along with the body. Mirrors the
+        // !usesCsrfRetry branch with manual CSRF retry semantics.
+        lines.push(`  // A9 Ext 5: bypass _scrml_fetch_with_csrf_retry to add Idempotency-Key header`);
+        lines.push(`  const _scrml_csrf_token = (typeof document !== 'undefined' && document.querySelector) ? (document.querySelector('meta[name=\"csrf-token\"]')?.getAttribute('content') ?? '') : '';`);
+        lines.push(`  const _scrml_resp_initial = await fetch(${JSON.stringify(path)}, {`);
+        lines.push(`    method: ${JSON.stringify(httpMethod)},`);
+        lines.push(`    headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_csrf_token, "Idempotency-Key": _scrml_idempotency_key },`);
+        lines.push(`    body: _scrml_body,`);
+        lines.push(`  });`);
+        lines.push(`  let _scrml_resp;`);
+        lines.push(`  if (_scrml_resp_initial.status === 403) {`);
+        lines.push(`    // CSRF token may have been minted on the 403; retry with the freshly-planted token.`);
+        lines.push(`    const _scrml_csrf_retry_token = (typeof document !== 'undefined' && document.querySelector) ? (document.querySelector('meta[name=\"csrf-token\"]')?.getAttribute('content') ?? '') : '';`);
+        lines.push(`    _scrml_resp = await fetch(${JSON.stringify(path)}, {`);
+        lines.push(`      method: ${JSON.stringify(httpMethod)},`);
+        lines.push(`      headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_csrf_retry_token, "Idempotency-Key": _scrml_idempotency_key },`);
+        lines.push(`      body: _scrml_body,`);
+        lines.push(`    });`);
+        lines.push(`  } else {`);
+        lines.push(`    _scrml_resp = _scrml_resp_initial;`);
+        lines.push(`  }`);
+      } else {
+        lines.push(`  const _scrml_resp = await _scrml_fetch_with_csrf_retry(${JSON.stringify(path)}, ${JSON.stringify(httpMethod)}, _scrml_body);`);
+      }
     } else {
       lines.push(`  const _scrml_resp = await fetch(${JSON.stringify(path)}, {`);
       lines.push(`    method: ${JSON.stringify(httpMethod)},`);
-      lines.push(`    headers: { "Content-Type": "application/json" },`);
+      if (emitIdempotencyKey) {
+        lines.push(`    headers: { "Content-Type": "application/json", "Idempotency-Key": _scrml_idempotency_key },`);
+      } else {
+        lines.push(`    headers: { "Content-Type": "application/json" },`);
+      }
       lines.push(`    body: JSON.stringify({`);
       for (const p of paramNames) {
         lines.push(`      ${JSON.stringify(p)}: ${p},`);

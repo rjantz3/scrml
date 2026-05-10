@@ -633,6 +633,25 @@ export function generateServerJs(
       // (per §19.9.1 shape) with HTTP status 500. The CPS client wrapper
       // (emit-functions.ts D1 site) detects this shape and propagates it.
       const _ext4Wrap = !!route.cpsSplit;
+      // A9 Ext 5 (§19.9.6): non-monotone CPS batches read the Idempotency-Key
+      // header and consult the configured storage backend. On key-hit: return
+      // the stored response without re-executing the body. On key-miss:
+      // execute the body, store key+result, return. Monotone /
+      // machine-intrinsic batches and non-CPS functions skip this layer.
+      const _ext5Dedup = !!route.cpsSplit && route.cpsSplit.monotonicity === "non-monotone";
+      if (_ext5Dedup) {
+        lines.push(`  // A9 Ext 5: idempotency-key dedup middleware (non-monotone CPS batch)`);
+        lines.push(`  const _scrml_idem_key = _scrml_req.headers.get('Idempotency-Key');`);
+        lines.push(`  if (_scrml_idem_key) {`);
+        lines.push(`    const _scrml_idem_hit = await _scrml_idempotency_lookup(_scrml_idem_key);`);
+        lines.push(`    if (_scrml_idem_hit) {`);
+        lines.push(`      return new Response(_scrml_idem_hit.response_body, {`);
+        lines.push(`        status: _scrml_idem_hit.response_status,`);
+        lines.push(`        headers: { "Content-Type": "application/json", "Set-Cookie": \`scrml_csrf=\${_scrml_csrf_token}; Path=/; SameSite=Strict\` },`);
+        lines.push(`      });`);
+        lines.push(`    }`);
+        lines.push(`  }`);
+      }
       if (_ext4Wrap) {
         lines.push(`  // A9-Ext-4 D1: CPS server-side error envelope`);
         lines.push(`  try {`);
@@ -736,7 +755,18 @@ export function generateServerJs(
       if (_envelope) {
         lines.push(`  await _scrml_sql.unsafe("COMMIT");`);
       }
-      lines.push(`  return new Response(JSON.stringify(_scrml_result ?? null), {`);
+      // A9 Ext 5: store the success result under the idempotency key so a
+      // retry returns the same payload without re-executing the body.
+      if (_ext5Dedup) {
+        lines.push(`  // A9 Ext 5: store success response under idempotency key`);
+        lines.push(`  const _scrml_resp_body = JSON.stringify(_scrml_result ?? null);`);
+        lines.push(`  if (_scrml_idem_key) {`);
+        lines.push(`    await _scrml_idempotency_store(_scrml_idem_key, _scrml_resp_body, 200);`);
+        lines.push(`  }`);
+        lines.push(`  return new Response(_scrml_resp_body, {`);
+      } else {
+        lines.push(`  return new Response(JSON.stringify(_scrml_result ?? null), {`);
+      }
       lines.push(`    status: 200,`);
       lines.push(`    headers: {`);
       lines.push(`      "Content-Type": "application/json",`);
@@ -801,9 +831,33 @@ export function generateServerJs(
       // wrap the body in an outer try/catch that returns a tagged scrml-error
       // shape on any throw (network/SQL/validation/etc).
       const _ext4WrapNonCsrf = !!cpsSplit;
+      // A9 Ext 5 (§19.9.6): non-monotone CPS batches read the Idempotency-Key
+      // header and consult the configured storage backend (mirror of CSRF
+      // path above).
+      const _ext5DedupNonCsrf = !!cpsSplit && cpsSplit.monotonicity === "non-monotone";
+      if (_ext5DedupNonCsrf) {
+        lines.push(`  // A9 Ext 5: idempotency-key dedup middleware (non-monotone CPS batch)`);
+        lines.push(`  const _scrml_idem_key = _scrml_req.headers.get('Idempotency-Key');`);
+        lines.push(`  if (_scrml_idem_key) {`);
+        lines.push(`    const _scrml_idem_hit = await _scrml_idempotency_lookup(_scrml_idem_key);`);
+        lines.push(`    if (_scrml_idem_hit) {`);
+        lines.push(`      return new Response(_scrml_idem_hit.response_body, {`);
+        lines.push(`        status: _scrml_idem_hit.response_status,`);
+        lines.push(`        headers: { "Content-Type": "application/json" },`);
+        lines.push(`      });`);
+        lines.push(`    }`);
+        lines.push(`  }`);
+      }
       if (_ext4WrapNonCsrf) {
         lines.push(`  // A9-Ext-4 D1: CPS server-side error envelope`);
         lines.push(`  try {`);
+      }
+
+      // A9 Ext 5: when dedup is active, wrap body in an inner async IIFE so we
+      // can capture the return value and store it under the idempotency key
+      // before sending the response.
+      if (_ext5DedupNonCsrf) {
+        lines.push(`  const _scrml_result = await (async () => {`);
       }
 
       if (cpsSplit) {
@@ -856,6 +910,20 @@ export function generateServerJs(
             }
           }
         }
+      }
+
+      // A9 Ext 5: close the inner IIFE, store the result, return as Response.
+      if (_ext5DedupNonCsrf) {
+        lines.push(`  })();`);
+        lines.push(`  // A9 Ext 5: store success response under idempotency key`);
+        lines.push(`  const _scrml_resp_body = JSON.stringify(_scrml_result ?? null);`);
+        lines.push(`  if (_scrml_idem_key) {`);
+        lines.push(`    await _scrml_idempotency_store(_scrml_idem_key, _scrml_resp_body, 200);`);
+        lines.push(`  }`);
+        lines.push(`  return new Response(_scrml_resp_body, {`);
+        lines.push(`    status: 200,`);
+        lines.push(`    headers: { "Content-Type": "application/json" },`);
+        lines.push(`  });`);
       }
 
       // A9-Ext-4 D1 close: serialize any thrown error as a tagged scrml-error
@@ -971,13 +1039,65 @@ export function generateServerJs(
     lines.push("");
   }
 
+  // A9 Ext 5 (§19.9.6): idempotency-key storage helper inlining. When
+  // `_scrml_idempotency_lookup(` / `_scrml_idempotency_store(` callsites
+  // survive in the server output (they appear iff a CPS-eligible function
+  // was classified non-monotone by Stage 5.5), inline the runtime helpers
+  // at the top of the server module. SQL backend default; Bun.SQL via
+  // _scrml_sql tag. Mirror of structural-equality inliner below; runs
+  // FIRST so it's hoisted above the structural-equality block (no
+  // ordering dependency, but cleaner).
+  let finalEmitted = lines.join("\n");
+  if (finalEmitted.includes("_scrml_idempotency_lookup(") || finalEmitted.includes("_scrml_idempotency_store(")) {
+    const helper = [
+      "",
+      "// --- A9 Ext 5: idempotency-key storage helpers (SPEC §19.9.6) ---",
+      "// Backend: SQL shadow table _scrml_idempotency_keys via Bun.SQL (_scrml_sql).",
+      "// TTL 24h (Stripe convention). Lazy eviction on read.",
+      "const _SCRML_IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;",
+      "let _scrml_idempotency_table_ready = false;",
+      "async function _scrml_idempotency_ensure_table() {",
+      "  if (_scrml_idempotency_table_ready) return;",
+      "  await _scrml_sql.unsafe(`CREATE TABLE IF NOT EXISTS _scrml_idempotency_keys (key TEXT PRIMARY KEY, response_body TEXT NOT NULL, response_status INTEGER NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)`);",
+      "  _scrml_idempotency_table_ready = true;",
+      "}",
+      "async function _scrml_idempotency_lookup(key) {",
+      "  if (!key) return null;",
+      "  await _scrml_idempotency_ensure_table();",
+      "  const now = Date.now();",
+      "  const rows = await _scrml_sql`SELECT response_body, response_status, expires_at FROM _scrml_idempotency_keys WHERE key = ${key} LIMIT 1`;",
+      "  if (!rows || rows.length === 0) return null;",
+      "  const row = rows[0];",
+      "  if (row.expires_at <= now) return null;",
+      "  return { response_body: row.response_body, response_status: row.response_status };",
+      "}",
+      "async function _scrml_idempotency_store(key, body, status) {",
+      "  if (!key) return;",
+      "  await _scrml_idempotency_ensure_table();",
+      "  const now = Date.now();",
+      "  const expires = now + _SCRML_IDEMPOTENCY_TTL_MS;",
+      "  try {",
+      "    await _scrml_sql`INSERT INTO _scrml_idempotency_keys (key, response_body, response_status, created_at, expires_at) VALUES (${key}, ${body}, ${status}, ${now}, ${expires})`;",
+      "  } catch (_e) {",
+      "    await _scrml_sql`UPDATE _scrml_idempotency_keys SET response_body = ${body}, response_status = ${status}, created_at = ${now}, expires_at = ${expires} WHERE key = ${key}`;",
+      "  }",
+      "}",
+      "",
+    ].join("\n");
+    const headerEndIdx = finalEmitted.indexOf("\n\n");
+    if (headerEndIdx === -1) {
+      finalEmitted = helper + finalEmitted;
+    } else {
+      finalEmitted = finalEmitted.slice(0, headerEndIdx) + helper + finalEmitted.slice(headerEndIdx);
+    }
+  }
+
   // GITI-012 / fix-server-eq-helper-import: structural-equality helper inlining.
   // SPEC §45 emits \`_scrml_structural_eq(a, b)\` for any \`==\`/\`!=\` whose operands
   // aren't statically primitive (see emit-expr.ts). The helper lives in the
   // client runtime; .server.js never imports it. If any callsite survived the
   // primitive shortcut, inline the helper at the top of the server module so
   // the reference resolves at runtime.
-  const finalEmitted = lines.join("\n");
   if (finalEmitted.includes("_scrml_structural_eq(")) {
     const helper = [
       "",

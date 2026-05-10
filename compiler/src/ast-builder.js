@@ -6510,6 +6510,20 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         }
       }
 
+      // §19.9.7 (A9 Ext 5): `.idempotent()` modifier — developer-asserted escape
+      // hatch from the §19.9.6 static monotonicity classifier. Positions: between
+      // the `!` modifier (if present) and the return-type / route / body. The
+      // modifier is a function-decl-level suffix; takes no arguments.
+      let idempotentModifier = false;
+      if (peek().text === "." && peek(1)?.text === "idempotent" &&
+          peek(2)?.text === "(" && peek(3)?.text === ")") {
+        consume(); // consume `.`
+        consume(); // consume `idempotent`
+        consume(); // consume `(`
+        consume(); // consume `)`
+        idempotentModifier = true;
+      }
+
       // Skip return type annotation — `: TypeName` or `-> TypeName` between `)` and `{`
       // Handles: `: Mario`, `-> string`, `: Array<Thing>`, `: number(>0)`, etc.
       // A1c C16 — capture the annotation text for §53.9.3 return-stmt checks
@@ -6592,6 +6606,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         isHandleEscapeHatch: isServer && !isGenerator && name === 'handle',
         ...(hasReturnType ? { hasReturnType: true } : {}),
         ...(returnTypeAnnotation ? { returnTypeAnnotation } : {}),
+        // §19.9.7 (A9 Ext 5): `.idempotent()` modifier flag.
+        ...(idempotentModifier ? { idempotentModifier: true } : {}),
         span: spanOf(startTok, peek()),
       });
       continue;
@@ -6689,6 +6705,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         }
       }
 
+      // §19.9.7 (A9 Ext 5): `.idempotent()` modifier — see also `function`-decl
+      // site above. Same shape; recognized at the `fn` shorthand site for parity.
+      let idempotentModifier = false;
+      if (peek().text === "." && peek(1)?.text === "idempotent" &&
+          peek(2)?.text === "(" && peek(3)?.text === ")") {
+        consume(); // consume `.`
+        consume(); // consume `idempotent`
+        consume(); // consume `(`
+        consume(); // consume `)`
+        idempotentModifier = true;
+      }
+
       // Skip return type annotation — `: TypeName` or `-> TypeName` between `)` and `{`
       // Handles: `: Mario`, `: HurtResult`, `-> string`, `: Array<Thing>`, `: number(>0)`, etc.
       // A1c C16 — capture the annotation text for §53.9.3 return-stmt checks
@@ -6750,6 +6778,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         errorType,
         ...(hasReturnType ? { hasReturnType: true } : {}),
         ...(returnTypeAnnotation ? { returnTypeAnnotation } : {}),
+        // §19.9.7 (A9 Ext 5): `.idempotent()` modifier flag.
+        ...(idempotentModifier ? { idempotentModifier: true } : {}),
         span: spanOf(startTok, peek()),
       });
       continue;
@@ -9778,9 +9808,14 @@ export function buildAST(bsOutput, tokenizerOverrides) {
     const mwCsrf = getMWAttr('csrf');
     const mwRatelimit = getMWAttr('ratelimit');
     const mwHeaders = getMWAttr('headers');
+    // §39.2.6 (A9 Ext 5): idempotency-store= attribute. Values:
+    // "auto" (default) | "sqlite" | "postgres" | "mysql" | "redis" | "none".
+    // Resolved per §19.9.6 paragraph 3 default-resolution algorithm in
+    // monotonicity-analyzer.ts (Stage 5.5).
+    const mwIdempotencyStore = getMWAttr('idempotency-store');
 
-    if (mwCors !== null || mwLog !== null || mwCsrf !== null || mwRatelimit !== null || mwHeaders !== null) {
-      middlewareConfig = { cors: mwCors, log: mwLog, csrf: mwCsrf, ratelimit: mwRatelimit, headers: mwHeaders };
+    if (mwCors !== null || mwLog !== null || mwCsrf !== null || mwRatelimit !== null || mwHeaders !== null || mwIdempotencyStore !== null) {
+      middlewareConfig = { cors: mwCors, log: mwLog, csrf: mwCsrf, ratelimit: mwRatelimit, headers: mwHeaders, idempotencyStore: mwIdempotencyStore };
     }
 
     // E-MW-001: csrf="on" requires session infrastructure (auth= on <program>).

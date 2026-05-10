@@ -11162,6 +11162,75 @@ function notifyOrder(orderId: number) {
 
 **S72 design-dive citations.** Body-split soundness design dive (`docs/deep-dives/body-split-soundness-design-2026-05-08.md`) §3.4 ratifies option 6 (compose 3+4+5). Body-split integration design dive (`docs/deep-dives/body-split-integration-and-residual-design-2026-05-08.md`) Q3 verdict ratifies the per-batch granularity framing; Q4 verdict ratifies the two-stage W- → E- deprecation cycle. The CpsError synthetic enum is introduced in this section; it is the only built-in enum type added by Ext 4. Future scope: A9 Ext 5 (idempotency-key replay safety) supplies the recovery path for non-tail batch failures.
 
+#### 19.9.6 Static Monotonicity Classification + Idempotency-Key Replay
+
+**Added:** 2026-05-09, A9 Ext 5 (S76 dispatch overlay; S75 SURVEY §1.1).
+
+**Static monotonicity classification.** Per the body-split soundness predicate **S5 (replay safety)**, every CPS-emitted server batch SHALL be statically classified as either *monotone* (idempotent under repeated application) or *non-monotone* (potentially observable under repeated application). The classifier is conservative: in cases of static ambiguity, the batch SHALL be classified non-monotone. A batch SHALL be classified monotone if and only if it contains exclusively: (a) `?{}` SELECT statements (read-only); (b) `?{}` INSERT statements with no auto-increment column read-back; (c) `?{}` UPDATE statements where the assignment expression is independent of the prior column value (e.g., `SET status = 'approved'` is monotone; `SET counter = counter + 1` is non-monotone); (d) `?{}` DELETE statements; (e) pure-function calls (per §48 `fn`); (f) `<machine>` `.advance()` transitions whose §51 allowed-from-states guards make the transition idempotent under repeated application. A batch matching none of (a)-(f) — for example a batch containing a `<channel>` broadcast emit, a stdlib server-side I/O call (`scrml:fs`, `scrml:email`, `scrml:redis`-write), or any expression with non-deterministic right-hand side (e.g., `NOW()`, `random()`, auto-increment read-back) — SHALL be classified non-monotone.
+
+**Idempotency-key emission.** Server batches classified non-monotone SHALL receive an idempotency-key envelope: the CPS client wrapper SHALL generate a UUIDv4 per call-site invocation, transmit it via the HTTP request header `Idempotency-Key`, and the CPS server stub SHALL consult a per-app idempotency-key store before executing the batch. On a key-hit, the stub SHALL return the stored result without re-executing the batch. On a key-miss, the stub SHALL execute the batch, store the key + result tuple under the configured TTL (default: 24 hours per Stripe convention), and return the result. Batches classified monotone SHALL NOT emit an idempotency-key envelope; the CPS wrapper invokes them without the header. The `Idempotency-Key` header name is the IETF-draft standard name; scrml SHALL emit per the draft, NOT a scrml-specific header name.
+
+**Storage-backend resolution.** The idempotency-key store backend SHALL be declared on the enclosing `<program>` element via the new attribute `idempotency-store=` (see §39.2.6). When the attribute is absent, the compiler SHALL apply the default resolution in this order: (1) if the app's `<program db=>` driver supports a SHADOW-TABLE (SQLite, Postgres, MySQL — i.e., the §8.1.1 driver matrix), use a compiler-emitted `_scrml_idempotency_keys` table on that database; (2) otherwise, if the app imports `scrml:redis` anywhere in its module graph (per §41.4 stdlib resolution), prefer Redis (faster); (3) otherwise, no storage backend is available — non-monotone batches SHALL produce a static compile-time error E-CPS-NONIDEM-NO-STORAGE. When a non-monotone batch is bounded by a `<machine>` `.advance()` transition (clause (f) above), the §51 allowed-from-states guards provide intrinsic idempotency by construction; no idempotency-key emission is required for this case (informational diagnostic D-CPS-MACHINE-INTRINSIC-MONOTONE).
+
+**Shadow-table schema.** The compiler-emitted shadow table for SQL backends has the following schema (INTEGER timestamps for cross-driver portability):
+
+```sql
+_scrml_idempotency_keys (
+  key             TEXT    PRIMARY KEY,
+  response_body   TEXT    NOT NULL,
+  response_status INTEGER NOT NULL,
+  created_at      INTEGER NOT NULL,
+  expires_at      INTEGER NOT NULL
+)
+```
+
+TTL eviction is lazy on read: an expired entry is treated as a miss and re-executed; the runtime helpers MAY opportunistically delete expired rows.
+
+**`<channel>` server-functions are out of scope for Ext 5.** Channel-tagged routes use a persistent WebSocket connection where HTTP retry semantics do not apply. The classifier SHALL early-return on channel-tagged routes — no key emission, no rejection. WS frame-level replay safety is a separate post-v0.2.0 concern.
+
+**Diagnostics.** This section introduces three new error codes (`E-CPS-NONIDEM-NO-STORAGE`, `E-CPS-IDEMPOTENCY-STORE-DRIVER-MISMATCH`, `E-CPS-IDEMPOTENCY-STORE-MISSING-IMPORT`) and two informational diagnostics (`D-CPS-MACHINE-INTRINSIC-MONOTONE`, `D-CPS-MONOTONE`). The third diagnostic, `D-CPS-IDEMPOTENT-OVERRIDE`, lives in §19.9.7. `D-CPS-MONOTONE` is verbose-only (fires only with `--verbose`) to avoid noise on monotone batches. See §34 catalog.
+
+**Worked example.**
+
+```scrml
+<program db="postgres://app:pass@localhost/app" idempotency-store="auto">
+  <!-- "auto" resolves to: postgres shadow table _scrml_idempotency_keys -->
+
+  ${ function approveOrder(id: number) {
+      ?{`UPDATE orders SET status = 'approved' WHERE id = ${id}`}.run()
+      // Monotone (assignment is independent of prior value) → no key emitted.
+  } }
+
+  ${ function incrementView(id: number) {
+      ?{`UPDATE counters SET val = val + 1 WHERE id = ${id}`}.run()
+      // Non-monotone (val + 1 reads prior value) → idempotency-key emitted;
+      // server stores key+result in _scrml_idempotency_keys (postgres).
+  } }
+</program>
+```
+
+**Cross-references.** §8.1.1 (db driver resolution — precedent for default-resolution shape); §8.9.5 (`.nobatch()` modifier — shape precedent for `.idempotent()` in §19.9.7); §19.6.7 (multi-batch CPS granularity — Ext 5 is the recovery path for non-tail batch failures); §19.9.5 (Ext 4 auto-`!`-wrap — Ext 5 layers replay-safety on top); §39.2.6 (`idempotency-store=` attribute); §41.4 (stdlib resolution for `scrml:redis` detection); §43 (nested `<program>` for override semantics); §51.0.G (`.advance(.X)` — intrinsic-monotone leg).
+
+#### 19.9.7 The `.idempotent()` Function Modifier
+
+**Added:** 2026-05-09, A9 Ext 5 (S76 dispatch overlay; S75 SURVEY §1.3).
+
+A function declaration MAY carry the `.idempotent()` modifier as a developer-asserted escape hatch from the static monotonicity classifier (§19.9.6). When present, the compiler SHALL NOT emit an idempotency-key envelope for the function's CPS-emitted server batches, regardless of the classifier's verdict. The modifier is semantically a developer assertion that the function's batches are idempotent under repeated application by construction (e.g., SQL `INSERT ... ON CONFLICT DO NOTHING`, idempotent UPSERT patterns the conservative classifier cannot prove). The compiler SHALL emit informational diagnostic `D-CPS-IDEMPOTENT-OVERRIDE` at the modifier site naming the classifier's would-be verdict (so the developer sees what they overrode). When the developer assertion is wrong, retries may double-write; this consequence is bounded (same-shape as ordinary application bugs) but documented.
+
+**Worked example.**
+
+```scrml
+function upsertProfile(userId: number, email: string).idempotent() {
+  ?{`INSERT INTO profiles (user_id, email) VALUES (${userId}, ${email})
+     ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email`}.run()
+  // Classifier flags non-monotone (ON CONFLICT not in monotone whitelist);
+  // .idempotent() asserts the SQL is monotone-by-construction at this site;
+  // no idempotency key emitted; D-CPS-IDEMPOTENT-OVERRIDE fires (informational).
+}
+```
+
+**Cross-references.** §8.9.5 (`.nobatch()` — direct precedent shape); §19.9.6 (the static classifier this modifier overrides); §51.0.G (`<machine>`-bounded batches — the structural alternative; no `.idempotent()` needed when present).
+
 ---
 
 ### 19.10 SQL Transactions
@@ -11448,6 +11517,12 @@ The following error codes are introduced by this section. They SHALL be added to
 | E-TEST-006 | §19.12.7 | `~{}` test block: server-function call inside an active `test-bind` context references a server function with no `test-bind` declaration in scope (fail-fast over silent passthrough; design-insight 22, S74). | Test |
 | W-CPS-NEEDS-FAILABLE | §19.9.5 | Bare call to CPS-implicit-`!` function from non-`!` / non-boundary caller (cycle 1 of A9 Ext 4 deprecation; v0.next). | Warning |
 | E-CPS-NEEDS-FAILABLE | §19.9.5 | Same condition; cycle 2 (v0.next+1). Reserved; not yet emitted. | Error |
+| E-CPS-NONIDEM-NO-STORAGE | §19.9.6 | Non-monotone CPS batch in scope of `<program>` with `idempotency-store="none"` OR no resolvable backend (default-resolution falls through). (A9 Ext 5; S76.) | Error |
+| E-CPS-IDEMPOTENCY-STORE-DRIVER-MISMATCH | §39.2.6 | `idempotency-store="postgres" \| "sqlite" \| "mysql"` does not match the closest-ancestor `<program db=>` driver. (A9 Ext 5; S76.) | Error |
+| E-CPS-IDEMPOTENCY-STORE-MISSING-IMPORT | §39.2.6 | `idempotency-store="redis"` set but `scrml:redis` not in module graph. (A9 Ext 5; S76.) | Error |
+| D-CPS-MACHINE-INTRINSIC-MONOTONE | §19.9.6 | CPS batch bounded by a `<machine>` `.advance()` transition with allowed-from-states guards; classifier elides idempotency-key emission and notes structural reason. (A9 Ext 5; S76.) | Diag (info) |
+| D-CPS-IDEMPOTENT-OVERRIDE | §19.9.7 | `.idempotent()` modifier applied to a function whose batches the static classifier would have flagged non-monotone. (A9 Ext 5; S76.) | Diag (info) |
+| D-CPS-MONOTONE | §19.9.6 | Batch is monotone-by-classification — emitted at `--verbose` only to avoid noise. (A9 Ext 5; S76.) | Diag (info) |
 
 ---
 
@@ -14344,6 +14419,12 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-ERROR-007 | §19.10.4 | Nested `transaction` blocks | Error |
 | W-CPS-NEEDS-FAILABLE | §19.9.5 | Bare call to a CPS-eligible (implicitly-`!`) function from a non-`!`, non-`< errorBoundary>`-wrapped caller. Cycle 1 of the deprecation cycle (v0.next). Resolution: wrap call site in `< errorBoundary>`, mark caller `!`, or match on result. (Per A9 Ext 4, S72 body-split soundness verdict 2026-05-08.) | Warning |
 | E-CPS-NEEDS-FAILABLE | §19.9.5 | Same condition as W-CPS-NEEDS-FAILABLE, promoted to error in cycle 2 (v0.next+1 = v0.3.0). Reserved; not yet emitted. | Error |
+| E-CPS-NONIDEM-NO-STORAGE | §19.9.6 | Non-monotone CPS batch in scope of `<program>` with `idempotency-store="none"` OR no resolvable backend (default-resolution falls through). Resolution: declare `idempotency-store=` on the closest-ancestor `<program>` (matching the `db=` driver), import `scrml:redis`, or annotate the function with `.idempotent()` if the batch is monotone-by-construction. (Per A9 Ext 5, S76 dispatch overlay 2026-05-09.) | Error |
+| E-CPS-IDEMPOTENCY-STORE-DRIVER-MISMATCH | §39.2.6 | `idempotency-store="postgres" \| "sqlite" \| "mysql"` does not match the closest-ancestor `<program db=>` driver. Resolution: change `idempotency-store=` to match `db=`, or use `"auto"` for compiler-default resolution. (Per A9 Ext 5, S76 dispatch overlay 2026-05-09.) | Error |
+| E-CPS-IDEMPOTENCY-STORE-MISSING-IMPORT | §39.2.6 | `idempotency-store="redis"` set but `scrml:redis` not in module graph. Resolution: `import { ... } from 'scrml:redis'` somewhere in the module graph, or change `idempotency-store=` to a SQL backend matching `db=`. (Per A9 Ext 5, S76 dispatch overlay 2026-05-09.) | Error |
+| D-CPS-MACHINE-INTRINSIC-MONOTONE | §19.9.6 | CPS batch bounded by a `<machine>` `.advance()` transition with allowed-from-states guards; classifier elides idempotency-key emission and notes structural reason. (Per A9 Ext 5, S76 dispatch overlay 2026-05-09.) | Diag (info) |
+| D-CPS-IDEMPOTENT-OVERRIDE | §19.9.7 | `.idempotent()` modifier applied to a function whose batches the static classifier would have flagged non-monotone. Names the classifier's would-be verdict so the developer sees what they overrode. (Per A9 Ext 5, S76 dispatch overlay 2026-05-09.) | Diag (info) |
+| D-CPS-MONOTONE | §19.9.6 | Batch is monotone-by-classification — emitted at `--verbose` only to avoid noise. (Per A9 Ext 5, S76 dispatch overlay 2026-05-09.) | Diag (info) |
 | E-SSE-001 | §37.9 | `yield` used inside a non-generator `server function` body | Error |
 | W-SSE-001 | §37.9 | `server function*` body contains no `yield` statements | Warning |
 | E-CHANNEL-001 | §38.9 | `<channel>` missing required `name=` attribute | Error |
@@ -16651,6 +16732,7 @@ The following attributes on `<program>` enable automatic middleware generation:
 | `csrf=` | `"on"` \| `"off"` | CSRF token generation, cookie injection, and validation on state-mutating requests |
 | `ratelimit=` | `"100/min"` \| `"N/unit"` | In-memory sliding window rate limiter per IP; 429 response when exceeded |
 | `headers=` | `"strict"` | Injects `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and `Content-Security-Policy: default-src 'self'` on all responses |
+| `idempotency-store=` | `"auto"` (default) \| `"sqlite"` \| `"postgres"` \| `"mysql"` \| `"redis"` \| `"none"` | Per-app idempotency-key store backend used by §19.9.6 replay-safety machinery. See §39.2.6. |
 
 **Normative statements:**
 
@@ -16730,6 +16812,54 @@ The compiler generates an in-memory sliding window rate limiter keyed by client 
 **Normative statement:**
 
 - `headers="strict"` is intended as a secure-by-default baseline. If the developer's application loads scripts or styles from external origins, the CSP will block them. In that case the developer MUST override the `Content-Security-Policy` via `handle()`.
+
+#### 39.2.6 `idempotency-store=`
+
+**Added:** 2026-05-09, A9 Ext 5 (S76 dispatch overlay).
+
+`idempotency-store="auto"` (default) | `"sqlite"` | `"postgres"` | `"mysql"` | `"redis"` | `"none"` declares the per-app idempotency-key storage backend used by §19.9.6 replay-safety machinery.
+
+The compiler SHALL resolve the attribute as follows:
+
+- **`"auto"`** triggers the default-resolution rules of §19.9.6 paragraph 3:
+  1. If the closest-ancestor `<program db=>` is `sqlite`, `postgres`, or `mysql` (per §8.1.1 driver matrix), use a compiler-emitted `_scrml_idempotency_keys` shadow table on that database.
+  2. Otherwise, if `scrml:redis` is importable in the module graph (per §41.4 stdlib resolution), use Redis.
+  3. Otherwise, no storage backend — non-monotone CPS batches in scope SHALL produce `E-CPS-NONIDEM-NO-STORAGE` at compile time.
+- **`"sqlite"` / `"postgres"` / `"mysql"`** SHALL each emit a compiler-generated `_scrml_idempotency_keys` shadow table on the closest-ancestor `<program db=>` of matching driver. The driver in `<program db=>` MUST match the `idempotency-store=` value or compile-time error `E-CPS-IDEMPOTENCY-STORE-DRIVER-MISMATCH` fires.
+- **`"redis"`** SHALL require `scrml:redis` to be importable in the module graph; absence is `E-CPS-IDEMPOTENCY-STORE-MISSING-IMPORT`.
+- **`"none"`** explicitly disables the store; any non-monotone CPS batch in the app SHALL produce `E-CPS-NONIDEM-NO-STORAGE`.
+
+**Closest-ancestor resolution.** Like `db=` (§8.1.1), `idempotency-store=` resolves by walking up the `<program>` ancestor tree from each CPS-eligible function's emission site to the closest `<program>` carrying the attribute. Nested `<program>` (§4.12) MAY override the parent's `idempotency-store=` to scope the storage backend to a sub-tree.
+
+**Shadow-table schema (SQL backends).** Per §19.9.6:
+
+```sql
+_scrml_idempotency_keys (
+  key             TEXT    PRIMARY KEY,
+  response_body   TEXT    NOT NULL,
+  response_status INTEGER NOT NULL,
+  created_at      INTEGER NOT NULL,
+  expires_at      INTEGER NOT NULL
+)
+```
+
+INTEGER timestamps for cross-driver portability. TTL eviction is lazy on read; compiler-internal default TTL is 24 hours (Stripe convention).
+
+**Worked example.**
+
+```scrml
+<program db="sqlite:./app.db" idempotency-store="auto">
+  <!-- "auto" + db=sqlite resolves to: SQLite shadow table. -->
+  ${ function transferFunds(from: number, to: number, amount: number) {
+      ?{`UPDATE accounts SET balance = balance - ${amount} WHERE id = ${from}`}.run()
+      ?{`UPDATE accounts SET balance = balance + ${amount} WHERE id = ${to}`}.run()
+      // Non-monotone (balance ± amount reads prior value) → idempotency-key
+      // emitted; server stores key+result in _scrml_idempotency_keys (sqlite).
+  } }
+</program>
+```
+
+**Cross-references.** §8.1.1 (db driver resolution — precedent shape); §19.9.6 (the replay-safety machinery this attribute backs); §41.4 (stdlib resolution for `scrml:redis`); §43 (nested `<program>` for override semantics).
 
 ### 40.3 The `handle()` Escape Hatch
 

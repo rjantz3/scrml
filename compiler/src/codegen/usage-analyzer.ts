@@ -139,6 +139,27 @@ export interface FeatureUsage {
   // -------- <program> documentary attrs (§40.7 / C19) --------
   /** Any `<program>` markup with title/description/version/author/license attrs. */
   programDocAttrs: boolean;
+
+  // -------- Idempotency-key storage (§19.9.6 + §39.2.6 / A9 Ext 5) --------
+  /**
+   * String-typed: the developer-declared `<program idempotency-store=>` value
+   * (or `undefined` if absent). Resolution to the actual backend
+   * (`"sqlite" | "postgres" | "mysql" | "redis" | "none"`) happens in the
+   * monotonicity-analyzer.ts (Stage 5.5) — this flag captures only what the
+   * developer wrote.
+   *
+   * Distinct from `idempotencyStoreUsed` (below) which captures whether the
+   * runtime helper chunk needs to be included.
+   */
+  idempotencyStore: "auto" | "sqlite" | "postgres" | "mysql" | "redis" | "none" | undefined;
+
+  /**
+   * Whether the runtime `idempotency` chunk needs to be included in the
+   * client/server runtime emission. True when there is at least one
+   * non-monotone CPS batch in the app whose resolved storage backend is not
+   * `"none"`. Set by the monotonicity-analyzer.ts (Stage 5.5).
+   */
+  idempotencyStoreUsed: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -189,6 +210,8 @@ export function emptyUsage(): FeatureUsage {
     bareVariantInference: false,
     typeAsArgument: false,
     programDocAttrs: false,
+    idempotencyStore: undefined,
+    idempotencyStoreUsed: false,
   };
 }
 
@@ -236,6 +259,8 @@ export function fullUsage(): FeatureUsage {
     bareVariantInference: true,
     typeAsArgument: true,
     programDocAttrs: true,
+    idempotencyStore: "auto",
+    idempotencyStoreUsed: true,
   };
 }
 
@@ -285,6 +310,13 @@ export function mergeUsage(a: FeatureUsage, b: FeatureUsage): FeatureUsage {
     bareVariantInference: a.bareVariantInference || b.bareVariantInference,
     typeAsArgument: a.typeAsArgument || b.typeAsArgument,
     programDocAttrs: a.programDocAttrs || b.programDocAttrs,
+    // String-typed: prefer b's non-undefined value (last-file-wins on
+    // conflict — typical scrml has one <program idempotency-store=> per
+    // app; cross-file collision is a developer-side error surfaced
+    // elsewhere).
+    idempotencyStore: b.idempotencyStore !== undefined ? b.idempotencyStore : a.idempotencyStore,
+    // Boolean OR: any file flagging the runtime as needed propagates.
+    idempotencyStoreUsed: a.idempotencyStoreUsed || b.idempotencyStoreUsed,
   };
 }
 
@@ -405,19 +437,35 @@ function walkUsage(nodeList: unknown, usage: FeatureUsage): void {
       }
 
       // <program> documentary attrs (§40.7)
+      // and §39.2.6 idempotency-store= attribute (A9 Ext 5).
       if (tag === "program" && Array.isArray(node.attrs)) {
+        let docAttrSeen = false;
         for (const attr of node.attrs as ASTNode[]) {
           if (!attr || typeof attr !== "object") continue;
           const attrName = attr.name as string | undefined;
           if (
-            attrName === "title" ||
-            attrName === "description" ||
-            attrName === "version" ||
-            attrName === "author" ||
-            attrName === "license"
+            !docAttrSeen && (
+              attrName === "title" ||
+              attrName === "description" ||
+              attrName === "version" ||
+              attrName === "author" ||
+              attrName === "license"
+            )
           ) {
             usage.programDocAttrs = true;
-            break;
+            docAttrSeen = true;
+          }
+          if (attrName === "idempotency-store") {
+            const av = (attr as ASTNode).value as ASTNode | undefined;
+            if (av && typeof av === "object" && (av.kind as string) === "string-literal") {
+              const v = av.value as string | undefined;
+              if (
+                v === "auto" || v === "sqlite" || v === "postgres" ||
+                v === "mysql" || v === "redis" || v === "none"
+              ) {
+                usage.idempotencyStore = v;
+              }
+            }
           }
         }
       }

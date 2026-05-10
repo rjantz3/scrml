@@ -19,6 +19,8 @@ import { runAttributeAllowlist } from "./validators/attribute-allowlist.ts";
 
 import { runPA } from "./protect-analyzer.ts";
 import { runRI } from "./route-inference.ts";
+import { analyzeMonotonicity } from "./monotonicity-analyzer.ts";
+import { resolveIdempotencyStore, extractDbDriverFromValue } from "./idempotency-store-resolver.ts";
 import { runTS, buildTypeRegistry } from "./type-system.ts";
 import { runMetaChecker } from "./meta-checker.ts";
 import { runDG } from "./dependency-graph.ts";
@@ -777,6 +779,185 @@ export function compileScrml(options = {}) {
     const authCount = riResult.routeMap?.authMiddleware?.size ?? 0;
     log(`  [RI] ${routeCount} function(s) routed, ${authCount} auth guard(s)`);
   }
+
+  // Stage 5.5: MC — Monotonicity Classifier (A9 Ext 5; SPEC §19.9.6).
+  // Per S76 dispatch overlay: classify every CPS-eligible server batch as
+  // monotone | non-monotone | machine-intrinsic. Verdict attaches to
+  // route.cpsSplit.monotonicity (in-place mutation, the only side effect).
+  // Channel-server-fns are SKIPPED per §19.9.6 channel-skip note — built into
+  // fnNodes filter below by excluding any function-decl reachable inside a
+  // <channel> markup body.
+  stage("MC", () => {
+    // Build fnNodes map: functionNodeId → function-decl AST node.
+    // FunctionNodeId shape per route-inference.ts:521 — `${filePath}::${span.start}`.
+    const fnNodes = new Map();
+    // Track function names declared inside <channel> bodies so we can skip them.
+    const channelFnNames = new Set();
+    const collectFnsAndChannels = (nodeList, filePath, insideChannel) => {
+      if (!Array.isArray(nodeList)) return;
+      for (const n of nodeList) {
+        if (!n || typeof n !== "object") continue;
+        if (n.kind === "function-decl" && n.span && typeof n.span.start === "number") {
+          const id = `${filePath}::${n.span.start}`;
+          if (insideChannel) {
+            if (typeof n.name === "string" && n.name.length > 0) channelFnNames.add(n.name);
+          } else {
+            fnNodes.set(id, n);
+          }
+        }
+        const enteringChannel = insideChannel || (n.kind === "markup" && (n.tag ?? "") === "channel" && n._p3aIsExport !== true);
+        if (Array.isArray(n.children)) collectFnsAndChannels(n.children, filePath, enteringChannel);
+        if (n.kind === "logic" && Array.isArray(n.body)) collectFnsAndChannels(n.body, filePath, insideChannel);
+      }
+    };
+    for (const f of ceResults) {
+      const filePath = f.filePath ?? "<anon>";
+      const fileNodes = f.nodes ?? f.ast?.nodes ?? [];
+      collectFnsAndChannels(fileNodes, filePath, false);
+    }
+    // Second pass: drop any fnNode whose name was found inside a channel body
+    // (handles edge cases where the same function name appears at file-scope
+    // AND inside a channel; the channel-scope copy is collected during
+    // emit-channel.ts handling and shouldn't be classified here).
+    if (channelFnNames.size > 0) {
+      for (const [id, fnNode] of fnNodes) {
+        if (typeof fnNode.name === "string" && channelFnNames.has(fnNode.name)) {
+          fnNodes.delete(id);
+        }
+      }
+    }
+
+    const mcResult = analyzeMonotonicity(riResult.routeMap, fnNodes);
+
+    if (verbose) {
+      let mono = 0, nonMono = 0, machineIntrinsic = 0;
+      for (const v of mcResult.verdicts.values()) {
+        if (v === "monotone") mono++;
+        else if (v === "non-monotone") nonMono++;
+        else if (v === "machine-intrinsic") machineIntrinsic++;
+      }
+      log(`  [MC] ${mcResult.verdicts.size} CPS function(s) classified — ${mono} monotone, ${nonMono} non-monotone, ${machineIntrinsic} machine-intrinsic`);
+      // D-CPS-MONOTONE is verbose-only per OQ-Ext5-4 resolution.
+      for (const d of mcResult.diagnostics) {
+        if (d.code === "D-CPS-MONOTONE" || d.code === "D-CPS-MACHINE-INTRINSIC-MONOTONE" || d.code === "D-CPS-IDEMPOTENT-OVERRIDE") {
+          log(`  [MC] ${d.code}: ${d.message} (fn: ${d.functionNodeId})`);
+        }
+      }
+    }
+
+    // A9 Ext 5 D6: static-rejection diagnostics for non-monotone batches.
+    // Per SPEC §19.9.6 + §39.2.6:
+    //   - E-CPS-NONIDEM-NO-STORAGE — non-monotone CPS batch in scope of
+    //     <program idempotency-store="none"> OR no resolvable backend.
+    //   - E-CPS-IDEMPOTENCY-STORE-DRIVER-MISMATCH —
+    //     idempotency-store="postgres"/"sqlite"/"mysql" doesn't match db= driver.
+    //   - E-CPS-IDEMPOTENCY-STORE-MISSING-IMPORT — idempotency-store="redis"
+    //     set but `scrml:redis` not in module graph.
+    // These are GLOBAL diagnostics (per-app, not per-file) — the resolution
+    // depends on the closest-ancestor <program db=> driver + module-graph
+    // scrml:redis import detection. We fire them here at Stage 5.5 close
+    // because the resolution is inherently cross-file. Per SCOPE §C the
+    // landing site says "type-system.ts"; surfacing here instead so the
+    // resolution reads the unified module graph + middlewareConfig before
+    // TS runs per-file. Documented as SCOPE deviation; spec semantics
+    // unchanged.
+    const _ext5Errors = [];
+    // Find the developer-declared idempotency-store= attribute and the db=
+    // driver. We use file-level scoping: each file's middlewareConfig +
+    // its own <program db=> attribute. For nested <program> override (§43),
+    // we'd need ancestor-walk per-function — for v0.2.0 baseline, we do
+    // file-grain (single <program> per file is the dominant pattern).
+    for (const f of ceResults) {
+      const filePath = f.filePath ?? "<anon>";
+      const middleware = f.middlewareConfig ?? f.ast?.middlewareConfig ?? null;
+      const idemAttr = middleware?.idempotencyStore;
+      // db= driver from the file's <program db=> attribute.
+      let dbDriver = null;
+      const dbConfig = f.dbConfig ?? f.ast?.dbConfig ?? null;
+      if (dbConfig && typeof dbConfig.driver === "string" && dbConfig.driver.length > 0) {
+        // Existing dbConfig already has a driver token — trust it.
+        dbDriver = dbConfig.driver === "sqlite" || dbConfig.driver === "postgres" || dbConfig.driver === "mysql"
+          ? dbConfig.driver
+          : null;
+      } else {
+        // Fallback: parse from raw db= attribute value via the helper.
+        const programNode = (f.nodes ?? f.ast?.nodes ?? []).find(n => n?.kind === "markup" && (n.tag ?? "") === "program");
+        const dbAttr = programNode?.attrs?.find(a => a.name === "db");
+        const dbVal = dbAttr?.value?.kind === "string-literal" ? dbAttr.value.value : null;
+        dbDriver = extractDbDriverFromValue(dbVal);
+      }
+      // Detect scrml:redis import in module graph (file-grain scan).
+      let hasScrmlRedisImport = false;
+      const fileImports = f.imports ?? f.ast?.imports ?? [];
+      for (const imp of fileImports) {
+        if (imp && typeof imp === "object") {
+          const src = imp.source ?? imp.from;
+          if (typeof src === "string" && src === "scrml:redis") {
+            hasScrmlRedisImport = true;
+            break;
+          }
+        }
+      }
+      // Resolve the backend for THIS file's scope.
+      const resolution = resolveIdempotencyStore(idemAttr, dbDriver, hasScrmlRedisImport);
+
+      // Find non-monotone CPS verdicts for functions declared in THIS file.
+      // FunctionNodeId shape: `${filePath}::${span.start}` — so we filter
+      // by prefix.
+      const filePathPrefix = `${filePath}::`;
+      for (const [fnId, verdict] of mcResult.verdicts) {
+        if (!fnId.startsWith(filePathPrefix)) continue;
+        if (verdict !== "non-monotone") continue;
+
+        const fnNode = fnNodes.get(fnId);
+        const fnSpan = fnNode?.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+        const fnName = (typeof fnNode?.name === "string" && fnNode.name.length > 0) ? fnNode.name : "<anonymous>";
+
+        // E-CPS-IDEMPOTENCY-STORE-DRIVER-MISMATCH (highest priority — explicit-attr error).
+        if (resolution.mismatch) {
+          _ext5Errors.push({
+            code: "E-CPS-IDEMPOTENCY-STORE-DRIVER-MISMATCH",
+            severity: "error",
+            message: `E-CPS-IDEMPOTENCY-STORE-DRIVER-MISMATCH: \`<program idempotency-store="${idemAttr}">\` does not match the closest-ancestor \`<program db=>\` driver (${dbDriver ?? "unset"}) in scope of CPS-eligible function \`${fnName}\`. Either change \`idempotency-store=\` to match \`db=\`, or use \`"auto"\` for compiler-default resolution.`,
+            span: fnSpan,
+          });
+          continue;
+        }
+        // E-CPS-IDEMPOTENCY-STORE-MISSING-IMPORT.
+        if (resolution.missingRedisImport) {
+          _ext5Errors.push({
+            code: "E-CPS-IDEMPOTENCY-STORE-MISSING-IMPORT",
+            severity: "error",
+            message: `E-CPS-IDEMPOTENCY-STORE-MISSING-IMPORT: \`<program idempotency-store="redis">\` requires \`scrml:redis\` to be imported in the module graph, but no such import was found, in scope of CPS-eligible function \`${fnName}\`. Add \`import { ... } from 'scrml:redis'\` somewhere in the module graph, or change \`idempotency-store=\` to a SQL backend matching \`db=\`.`,
+            span: fnSpan,
+          });
+          continue;
+        }
+        // E-CPS-NONIDEM-NO-STORAGE — backend resolved to "none" AND batch is non-monotone.
+        if (resolution.backend === "none") {
+          _ext5Errors.push({
+            code: "E-CPS-NONIDEM-NO-STORAGE",
+            severity: "error",
+            message: `E-CPS-NONIDEM-NO-STORAGE: CPS-eligible function \`${fnName}\` has a non-monotone server batch (per SPEC §19.9.6 classifier), but no idempotency-key storage backend is configured. Resolution: declare \`<program idempotency-store=>\` matching the \`db=\` driver, import \`scrml:redis\`, or annotate the function with \`.idempotent()\` (§19.9.7) if the batch is monotone-by-construction.`,
+            span: fnSpan,
+          });
+          continue;
+        }
+        // Otherwise: backend is sqlite/postgres/mysql/redis (resolved successfully).
+        // Set the FeatureUsage flag so codegen knows the runtime chunk is needed.
+        // (file-level FeatureUsage isn't easily accessible here; emission-time
+        // string-presence-detect handles this — see emit-server.ts inliner.)
+      }
+    }
+
+    // Push diagnostics into the standard error/warning collectors for the
+    // pipeline's normal surfacing path.
+    if (_ext5Errors.length > 0) {
+      collectErrors("MC", _ext5Errors);
+    }
+
+    return mcResult;
+  });
 
   // Stage 6: TS (all files)
   // When selfHostModules.runTS is provided, use it instead of the JS original.

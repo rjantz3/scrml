@@ -93,6 +93,19 @@ export interface CPSSplit {
   clientStmtIndices: number[];
   /** The reactive variable name that receives the server result, or null. */
   returnVarName: string | null;
+  /**
+   * Static monotonicity verdict for the server-stmt batch (SPEC §19.9.6,
+   * A9 Ext 5). Populated by Stage 5.5 (monotonicity-analyzer.ts) AFTER RI
+   * has built the cpsSplit. Undefined when Stage 5.5 has not run, OR when
+   * the function is a channel server-fn (channel-skip per §19.9.6 note).
+   *
+   * Consumed by: emit-functions.ts (client wrapper — emit Idempotency-Key
+   * header iff "non-monotone"), emit-server.ts (server stub — emit dedup
+   * middleware iff "non-monotone"), type-system.ts (fire
+   * E-CPS-NONIDEM-NO-STORAGE iff "non-monotone" + resolved backend is
+   * "none").
+   */
+  monotonicity?: "monotone" | "non-monotone" | "machine-intrinsic";
 }
 
 /** A resolved route entry for a single function. */
