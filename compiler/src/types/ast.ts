@@ -1328,6 +1328,19 @@ export interface MiddlewareConfig {
   ratelimit: string | null;
   /** Security headers mode (e.g. "strict"). */
   headers: string | null;
+  /** A9 Ext 5 (§39.2.6) — idempotency backend selector ("auto" / "sqlite" /
+   *  "postgres" / "mysql" / "redis" / "none"). */
+  idempotencyStore?: string | null;
+  /** S79 audit fix C.1 (§19.9.6, §39.2.6 extension) — idempotency-key TTL
+   *  override. Raw attr value (parsed at codegen time into millis). Accepted
+   *  forms: bare millis ("3600000"), duration string ("1h", "7d", "24h",
+   *  "300s", "30m"). When null/absent, defaults to 24h (Stripe convention). */
+  idempotencyTTL?: string | null;
+  /** S79 audit fix C.2 (§8.10.6) — batched IN-list size ceiling for hoisted
+   *  loops. Default 32766 (SQLite 3.32+ `SQLITE_MAX_VARIABLE_NUMBER`).
+   *  Adopters targeting Postgres (~65535) or older SQLite (999) can override.
+   *  Raw attr value (decimal integer string); null/absent → 32766. */
+  batchInListCap?: string | null;
 }
 
 // ---------------------------------------------------------------------------

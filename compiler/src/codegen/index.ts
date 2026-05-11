@@ -26,7 +26,7 @@ import { escapeHtmlAttr } from "./utils.ts";
 import { generateHtml } from "./emit-html.ts";
 import { generateCss } from "./emit-css.ts";
 import { generateServerJs } from "./emit-server.ts";
-import { setBatchLoopHoists } from "./emit-control-flow.ts";
+import { setBatchLoopHoists, setBatchInListCap } from "./emit-control-flow.ts";
 import { drainMachineCodegenErrors, clearMachineCodegenErrors } from "./emit-machines.ts";
 import { generateClientJs } from "./emit-client.js";
 import { generateLibraryJs } from "./emit-library.ts";
@@ -414,6 +414,23 @@ export function runCG(input: CgInput): CgOutput {
     // Resolve §39 middleware config from AST (compiler-auto tier)
     const middlewareCfg = (fileAST as any).middlewareConfig ?? null;
 
+    // S79 audit fix C.2 — apply per-file <program batch-in-list-cap=> override
+    // to the emit-control-flow module-level cap. Reset to null after the file
+    // is emitted (mirrors setBatchLoopHoists lifecycle).
+    {
+      const rawCap = middlewareCfg?.batchInListCap;
+      if (typeof rawCap === "string" && /^\d+$/.test(rawCap.trim())) {
+        const n = parseInt(rawCap.trim(), 10);
+        if (Number.isFinite(n) && n > 0) {
+          setBatchInListCap(n);
+        } else {
+          setBatchInListCap(null);
+        }
+      } else {
+        setBatchInListCap(null);
+      }
+    }
+
     // ---------------------------------------------------------------------------
     // Generate server JS — emitted in both browser and library mode.
     // ---------------------------------------------------------------------------
@@ -800,6 +817,8 @@ export function runCG(input: CgInput): CgOutput {
   // Reset the Tier 2 hoist singleton so a subsequent compile in the same
   // process (persistent server, test harness) starts clean.
   setBatchLoopHoists(null);
+  // S79 C.2 — same lifecycle for the batch-in-list cap override.
+  setBatchInListCap(null);
 
   return { outputs, errors, runtimeJs, runtimeFilename: RUNTIME_FILENAME };
 }

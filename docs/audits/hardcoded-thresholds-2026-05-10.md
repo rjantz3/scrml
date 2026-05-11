@@ -140,11 +140,11 @@ Files audited:
 
 1. ✅ **A.1 — `MAX_RUNS` injection** SHIPPED S79 2026-05-10. Replaced literal with `globalThis.__scrml_max_meta_runs ?? 100` lookup at the top of `_scrml_meta_effect`. Tests can `globalThis.__scrml_max_meta_runs = 5` to exercise bail path with a 6-cycle fixture; adopters can set higher (e.g. 1000) before scrml runtime loads. Fallback default unchanged (100).
 2. ✅ **A.2 — `seq` cap test-injection** SHIPPED S79 2026-05-10. Added `seqCap` field on `EncodingContext` + constructor opt `__testOnly_typeEncodingSeqCap` (default 1331). Plumbed through codegen/index.ts via the existing `encoding` option object. Test fixture exercises E-CG-014 with `seqCap: 2` + 4 same-type bindings instead of synthesizing 1,332.
-3. **C.1 — Idempotency TTL via scrmlconfig** (~1h). Highest adopter-value Bucket C. Pillar-5 honest pattern matches the S72 idempotency-store precedent — adopters who use idempotency at all will want to tune TTL.
-4. **B.1 — serve-client timeout injection** (~20 min). Cheap; unblocks slow-CI scenarios + persistent-server unit tests.
-5. **C.2 — Batch IN-list cap via scrmlconfig** (~1h). Lower priority because `.nobatch()` opt-out exists, but adopter-relevant for non-SQLite backends.
+3. ✅ **C.1 — Idempotency TTL via `<program>` middleware attribute** SHIPPED S79 2026-05-10. Implemented as `<program idempotency-ttl="...">` (NOT a separate scrmlconfig file — adopted the S72 idempotency-store middleware-attribute precedent). New `parseIdempotencyTtl` helper accepts bare millis OR duration string with `ms`/`s`/`m`/`h`/`d` suffix. `MiddlewareConfig.idempotencyTTL` field added to TS interface. SPEC §19.9.6 amended with the override paragraph. Silent-fallback to 24h on null/malformed (no diagnostic v1; `W-MIDDLEWARE-TTL-INVALID` queued for v2).
+4. ✅ **B.1 — serve-client timeout injection** SHIPPED S79 2026-05-10. New `DEFAULT_TIMEOUTS` table + `resolveTimeouts(override)` helper. All four `AbortSignal.timeout(...)` sites now call `t.<key>` instead of literal numbers. Override via `__testOnly_serverTimeouts` second-arg per function OR `globalThis.__scrml_test_server_timeouts` global hook. Defaults preserved (health=500ms, info=1000ms, compile=30000ms, shutdown=2000ms).
+5. ✅ **C.2 — Batch IN-list cap via `<program>` middleware attribute** SHIPPED S79 2026-05-10. Implemented as `<program batch-in-list-cap=N>` (same shape as C.1; not a separate scrmlconfig file). Module-level `setBatchInListCap()` lifecycle mirrors `setBatchLoopHoists`; reset on compile-end. Cap value substituted into BOTH the runtime check AND the diagnostic message text. SPEC §8.10.6 amended with the cap-override paragraph. Silent-fallback to 32766 on null/non-positive-integer (no diagnostic v1).
 
-Estimated total effort for items 1-5: ~4 hours.
+**All 5 items shipped. Total actual cost: ~3.5 hours across S79 (vs ~4h estimate).**
 
 ## §7 Caveats
 

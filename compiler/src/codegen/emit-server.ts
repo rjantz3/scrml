@@ -11,6 +11,55 @@ import type { CompileContext } from "./context.ts";
 import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicates.ts";
 
 /**
+ * S79 audit fix C.1 — parse `<program idempotency-ttl="...">` raw value into
+ * a millisecond integer, or `null` for fall-back-to-default-24h.
+ *
+ * Accepted shapes:
+ *   - bare integer ("3600000")  → that many millis
+ *   - duration string with unit suffix:
+ *       "Nms" / "Ns" / "Nm" / "Nh" / "Nd"
+ *     where N is a non-negative decimal integer (no float, no leading sign).
+ *   - whitespace + quoting tolerated by the caller's getMWAttr (already
+ *     stripped). This helper trims defensively.
+ *
+ * Returns the resolved millisecond value, OR `null` when the value is null/
+ * empty/malformed (caller falls back to 24h default). Silent fallback
+ * matches the audit's documented v1 scope; future v2 may add a
+ * W-MIDDLEWARE-TTL-INVALID lint.
+ *
+ * Distinct from `parseAfterDuration` (engine-side `<onTimeout after=>`),
+ * which uses a different unit set (no `d`) and handles a `${expr}<unit>`
+ * computed form. idempotency-ttl is a plain attribute — no computed-form.
+ */
+function parseIdempotencyTtl(raw: string | null | undefined): number | null {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+
+  // Bare integer (millis).
+  if (/^\d+$/.test(trimmed)) {
+    const n = parseInt(trimmed, 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+
+  // Duration with unit suffix.
+  const m = trimmed.match(/^(\d+)\s*(ms|s|m|h|d)$/i);
+  if (!m) return null;
+  const n = parseInt(m[1]!, 10);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const unit = m[2]!.toLowerCase();
+  const multipliers: Record<string, number> = {
+    ms: 1,
+    s: 1000,
+    m: 60 * 1000,
+    h: 60 * 60 * 1000,
+    d: 24 * 60 * 60 * 1000,
+  };
+  const mult = multipliers[unit];
+  return mult !== undefined ? n * mult : null;
+}
+
+/**
  * Generate server-side route handler code for all server-boundary functions
  * in a file.
  */
@@ -1049,12 +1098,28 @@ export function generateServerJs(
   // ordering dependency, but cleaner).
   let finalEmitted = lines.join("\n");
   if (finalEmitted.includes("_scrml_idempotency_lookup(") || finalEmitted.includes("_scrml_idempotency_store(")) {
+    // S79 audit fix C.1: idempotency TTL is overridable via
+    // <program idempotency-ttl="..."> attribute. Default 24h (Stripe
+    // convention; pre-S79 hardcoded value, preserved as default).
+    // Accepted shapes: bare millis ("3600000"), or duration string with
+    // ms/s/m/h/d unit suffix ("1h", "7d", "300s"). Invalid → fall back
+    // to default with no diagnostic (current scope: silent fallback;
+    // future v2 may add a W-MIDDLEWARE-TTL-INVALID lint).
+    const ttlRaw = (middlewareConfig as { idempotencyTTL?: string | null } | null)
+      ?.idempotencyTTL ?? null;
+    const ttlMs = parseIdempotencyTtl(ttlRaw);
+    const ttlComment = ttlRaw && ttlMs !== null
+      ? `// TTL ${ttlMs}ms (overridden via <program idempotency-ttl=${JSON.stringify(ttlRaw)}>). Lazy eviction on read.`
+      : "// TTL 24h (Stripe convention). Lazy eviction on read.";
+    const ttlLine = ttlMs !== null
+      ? `const _SCRML_IDEMPOTENCY_TTL_MS = ${ttlMs};`
+      : "const _SCRML_IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;";
     const helper = [
       "",
       "// --- A9 Ext 5: idempotency-key storage helpers (SPEC §19.9.6) ---",
       "// Backend: SQL shadow table _scrml_idempotency_keys via Bun.SQL (_scrml_sql).",
-      "// TTL 24h (Stripe convention). Lazy eviction on read.",
-      "const _SCRML_IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;",
+      ttlComment,
+      ttlLine,
       "let _scrml_idempotency_table_ready = false;",
       "async function _scrml_idempotency_ensure_table() {",
       "  if (_scrml_idempotency_table_ready) return;",

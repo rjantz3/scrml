@@ -22,6 +22,27 @@ export function setBatchLoopHoists(m: Map<string | number, any> | null): void {
 }
 
 // ---------------------------------------------------------------------------
+// S79 audit fix C.2 — batched IN-list cap (`<program batch-in-list-cap=>`)
+// ---------------------------------------------------------------------------
+//
+// Per-file override of the SQLITE_MAX_VARIABLE_NUMBER ceiling enforced in
+// emitted hoisted-loop code. Default 32766 (SQLite 3.32+); adopters with
+// Postgres (~65535) or older SQLite (999) override here. Module-level cache
+// mirrors `_hoistMap` lifecycle: set per file before generateClientJs /
+// generateServerJs, cleared after compile.
+
+let _batchInListCap: number | null = null;
+
+/** Called by runCG before emission. Pass null to reset to default 32766. */
+export function setBatchInListCap(cap: number | null): void {
+  _batchInListCap = (typeof cap === "number" && cap > 0) ? cap : null;
+}
+
+function getBatchInListCap(): number {
+  return _batchInListCap ?? 32766;
+}
+
+// ---------------------------------------------------------------------------
 // Module-level variant payload fields registry (S22 §1a slice 2)
 //
 // Maps enum variant name → ordered list of declared payload field names. Used
@@ -365,12 +386,15 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string): string {
   const lines: string[] = [];
   lines.push(`// §8.10 Tier 2 loop hoist (key: ${keyColumn})`);
   lines.push(`const ${keysVar} = (${iterable}).map(${loopVar} => ${loopVar}.${keyField});`);
-  // §8.10.6: reject key counts above SQLITE_MAX_VARIABLE_NUMBER at runtime.
-  // SQLite 3.32+ defaults to 32766; older builds default to 999. Using 32766
-  // matches the bun:sqlite bundled version. Users can .nobatch() the site to
-  // opt out if they hit this ceiling.
+  // §8.10.6: reject key counts above the configured cap at runtime.
+  // Default 32766 matches SQLite 3.32+ SQLITE_MAX_VARIABLE_NUMBER (the
+  // bun:sqlite bundled version). S79 audit fix C.2 — adopter override via
+  // <program batch-in-list-cap="65535"> for Postgres or
+  // <program batch-in-list-cap="999"> for older SQLite.
+  // Users can .nobatch() the site to opt out if they hit this ceiling.
+  const batchCap = getBatchInListCap();
   lines.push(
-    `if (${keysVar}.length > 32766) { const _e = new Error("E-BATCH-002: batched IN-list exceeds SQLITE_MAX_VARIABLE_NUMBER (32766) for hoisted loop"); _e.code = "E-BATCH-002"; throw _e; }`,
+    `if (${keysVar}.length > ${batchCap}) { const _e = new Error("E-BATCH-002: batched IN-list exceeds SQLITE_MAX_VARIABLE_NUMBER (${batchCap}) for hoisted loop"); _e.code = "E-BATCH-002"; throw _e; }`,
   );
   // Build placeholder list `?1, ?2, ...` so Bun.SQL gets positional bound
   // params. Bun.SQL's SQLite branch does NOT support array binding in tagged

@@ -9972,9 +9972,28 @@ export function buildAST(bsOutput, tokenizerOverrides) {
     // Resolved per §19.9.6 paragraph 3 default-resolution algorithm in
     // monotonicity-analyzer.ts (Stage 5.5).
     const mwIdempotencyStore = getMWAttr('idempotency-store');
+    // S79 audit fix C.1 (§19.9.6, §39.2.6 extension): idempotency-ttl=
+    // attribute override. Raw value (parsed at codegen time). Accepted shape:
+    // bare millis ("3600000") OR duration string ("1h"/"7d"/"24h"/"300s"/"30m").
+    // Default (null): 24h (Stripe convention).
+    const mwIdempotencyTTL = getMWAttr('idempotency-ttl');
+    // S79 audit fix C.2 (§8.10.6 extension): batch-in-list-cap= attribute
+    // override. Raw value (decimal integer string). Default (null): 32766
+    // (SQLite 3.32+ SQLITE_MAX_VARIABLE_NUMBER). Adopters with Postgres
+    // (~65535) or older SQLite (999) override here.
+    const mwBatchInListCap = getMWAttr('batch-in-list-cap');
 
-    if (mwCors !== null || mwLog !== null || mwCsrf !== null || mwRatelimit !== null || mwHeaders !== null || mwIdempotencyStore !== null) {
-      middlewareConfig = { cors: mwCors, log: mwLog, csrf: mwCsrf, ratelimit: mwRatelimit, headers: mwHeaders, idempotencyStore: mwIdempotencyStore };
+    if (
+      mwCors !== null || mwLog !== null || mwCsrf !== null || mwRatelimit !== null
+      || mwHeaders !== null || mwIdempotencyStore !== null
+      || mwIdempotencyTTL !== null || mwBatchInListCap !== null
+    ) {
+      middlewareConfig = {
+        cors: mwCors, log: mwLog, csrf: mwCsrf, ratelimit: mwRatelimit, headers: mwHeaders,
+        idempotencyStore: mwIdempotencyStore,
+        idempotencyTTL: mwIdempotencyTTL,
+        batchInListCap: mwBatchInListCap,
+      };
     }
 
     // E-MW-001: csrf="on" requires session infrastructure (auth= on <program>).

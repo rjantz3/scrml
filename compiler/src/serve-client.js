@@ -15,6 +15,41 @@ import { compileScrml } from "./api.js";
 const DEFAULT_PORT = 3100;
 
 /**
+ * S79 audit fix (hardcoded-thresholds B.1): default AbortSignal.timeout values
+ * for the four serve-client RPC sites. Tests can inject smaller values to
+ * exercise the timeout-fallback path without needing an actually-hung server.
+ *
+ * Override via `__testOnly_serverTimeouts` second-arg to each function (or via
+ * the global `globalThis.__scrml_test_server_timeouts` hook for cases where
+ * the call site cannot pass an option, e.g. Bun child-process spawn that
+ * dials a parent compile server). Adopter-facing env vars NOT exposed —
+ * persistent-server is internal compiler infra, not authoring surface.
+ *
+ * Defaults: health=500ms, info=1000ms, compile=30000ms, shutdown=2000ms
+ * (pre-S79 hardcoded values, preserved as defaults).
+ */
+const DEFAULT_TIMEOUTS = {
+  health: 500,
+  info: 1000,
+  compile: 30000,
+  shutdown: 2000,
+};
+
+function resolveTimeouts(override) {
+  const globalHook = (typeof globalThis !== "undefined"
+    && globalThis.__scrml_test_server_timeouts
+    && typeof globalThis.__scrml_test_server_timeouts === "object")
+    ? globalThis.__scrml_test_server_timeouts
+    : null;
+  return {
+    health: (override?.health ?? globalHook?.health ?? DEFAULT_TIMEOUTS.health),
+    info: (override?.info ?? globalHook?.info ?? DEFAULT_TIMEOUTS.info),
+    compile: (override?.compile ?? globalHook?.compile ?? DEFAULT_TIMEOUTS.compile),
+    shutdown: (override?.shutdown ?? globalHook?.shutdown ?? DEFAULT_TIMEOUTS.shutdown),
+  };
+}
+
+/**
  * Get the server URL from environment or default.
  * @returns {string}
  */
@@ -27,12 +62,14 @@ function getServerUrl() {
  * Check if the compiler server is running.
  *
  * @param {string} [serverUrl] — override server URL
+ * @param {object} [options] — optional `{ __testOnly_serverTimeouts: { health, ...} }` (S79 B.1)
  * @returns {Promise<boolean>}
  */
-export async function isServerRunning(serverUrl) {
+export async function isServerRunning(serverUrl, options) {
   const url = serverUrl || getServerUrl();
+  const t = resolveTimeouts(options?.__testOnly_serverTimeouts);
   try {
-    const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(500) });
+    const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(t.health) });
     if (res.ok) {
       const data = await res.json();
       return data.status === "ok";
@@ -47,12 +84,14 @@ export async function isServerRunning(serverUrl) {
  * Get server health info.
  *
  * @param {string} [serverUrl] — override server URL
+ * @param {object} [options] — optional `{ __testOnly_serverTimeouts: { info, ...} }` (S79 B.1)
  * @returns {Promise<{ status: string, uptime: number, compilations: number, memoryMB: number } | null>}
  */
-export async function getServerHealth(serverUrl) {
+export async function getServerHealth(serverUrl, options) {
   const url = serverUrl || getServerUrl();
+  const t = resolveTimeouts(options?.__testOnly_serverTimeouts);
   try {
-    const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(1000) });
+    const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(t.info) });
     if (res.ok) return await res.json();
     return null;
   } catch {
@@ -92,12 +131,15 @@ export async function compileViaServer(options = {}) {
     embedRuntime = false,
     write = true,
     serverUrl,
+    // S79 audit fix B.1 — opt-in test injection of timeouts.
+    __testOnly_serverTimeouts: timeoutsOverride,
   } = options;
 
   const url = serverUrl || getServerUrl();
+  const t = resolveTimeouts(timeoutsOverride);
 
-  // Try the server first
-  const running = await isServerRunning(url);
+  // Try the server first (propagate timeouts override into the health probe).
+  const running = await isServerRunning(url, { __testOnly_serverTimeouts: timeoutsOverride });
 
   if (running) {
     try {
@@ -109,7 +151,7 @@ export async function compileViaServer(options = {}) {
           outputDir,
           options: { verbose, convertLegacyCss, embedRuntime, write },
         }),
-        signal: AbortSignal.timeout(30000), // 30s timeout for compilation
+        signal: AbortSignal.timeout(t.compile), // S79 B.1 — was hardcoded 30000
       });
 
       if (res.ok) {
@@ -163,14 +205,16 @@ export async function compileViaServer(options = {}) {
  * Shut down the compiler server.
  *
  * @param {string} [serverUrl] — override server URL
+ * @param {object} [options] — optional `{ __testOnly_serverTimeouts: { shutdown, ...} }` (S79 B.1)
  * @returns {Promise<boolean>} — true if shutdown was acknowledged
  */
-export async function shutdownServer(serverUrl) {
+export async function shutdownServer(serverUrl, options) {
   const url = serverUrl || getServerUrl();
+  const t = resolveTimeouts(options?.__testOnly_serverTimeouts);
   try {
     const res = await fetch(`${url}/shutdown`, {
       method: "POST",
-      signal: AbortSignal.timeout(2000),
+      signal: AbortSignal.timeout(t.shutdown),
     });
     return res.ok;
   } catch {
