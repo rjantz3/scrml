@@ -67,7 +67,7 @@ After ratifying the 3-wave plan to close out v0.2.0-remaining, Wave 1 fired in p
   - **Bucket 3 DEFERRED** — realistic example app under `examples/` not started; context preserved for follow-on if a third tier is wanted.
   - **5 COMPILER BUGS SURFACED (NOT fixed per A5-7 scope rule)** — known deferrals from the A5-1+A5-2+A5-3 era now made test-visible. See master-list §0.6 "A7 codegen deferrals" for full citations + repros. Classification (v0.2.0-blocking or v0.3.0-deferred) is a pending USER DECISION at S83 close.
 
-- **v0.2.0 remaining (post-S83 Wave 1 complete):** Materials track: B1 examples rewrite (~20-30h), B2 samples curate (~15-25h). Docs/announce: C1 tutorial rewrite (~8-15h), C2 articles rewrites (~4-8h), C3 README + scrml.dev v0.2.0 announce (~2-4h). **Open question:** the 5 A7 codegen deferrals — counted as v0.2.0-bar or v0.3.0+? See master-list §0.6 row.
+- **v0.2.0 remaining (post-S83 Wave 1 complete):** Materials track: B1 examples rewrite (~20-30h), B2 samples curate (~15-25h). Docs/announce: C1 tutorial rewrite (~8-15h), C2 articles rewrites (~4-8h), C3 README + scrml.dev v0.2.0 announce (~2-4h). **5 A7 codegen deferrals: USER RATIFIED v0.2.0-BAR at S83** (per Rule 2 + S81 "compiler all the way to v0.2.0 state"). Wave 2 (B1+B2) BLOCKED until all 5 land. Estimated ~26-47h compiler-source work — see master-list §0.6 row for per-bug citations + repros.
 
 - **S82 maps-discipline protocol — third end-to-end test PASSED.** All three of Wave 1's dispatched agents (A5-7 first attempt, B3, B5) reported maps-load-bearing explicitly. Pattern holding.
 
