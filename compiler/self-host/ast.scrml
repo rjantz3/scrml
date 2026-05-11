@@ -3657,9 +3657,15 @@ ${
             const mwIdempotencyStore = getMWAttr("idempotency-store")
             const mwIdempotencyTTL = getMWAttr("idempotency-ttl")
             const mwBatchInListCap = getMWAttr("batch-in-list-cap")
+            // S81 audit fix F.1 (§39.2.1 extension): cors-max-age= override for
+            // the Access-Control-Max-Age preflight cache lifetime. Default 86400.
+            const mwCorsMaxAge = getMWAttr("cors-max-age")
+            // S81 audit fix F.2 (§38.3.1): channel-reconnect= project-level default
+            // for WS reconnect cadence (per-channel reconnect= still wins). Default 2000ms.
+            const mwChannelReconnect = getMWAttr("channel-reconnect")
 
-            if (mwCors != null || mwLog != null || mwRatelimit != null || mwHeaders != null || mwIdempotencyStore != null || mwIdempotencyTTL != null || mwBatchInListCap != null) {
-                middlewareConfig = { cors: mwCors, log: mwLog, ratelimit: mwRatelimit, headers: mwHeaders, idempotencyStore: mwIdempotencyStore, idempotencyTTL: mwIdempotencyTTL, batchInListCap: mwBatchInListCap }
+            if (mwCors != null || mwLog != null || mwRatelimit != null || mwHeaders != null || mwIdempotencyStore != null || mwIdempotencyTTL != null || mwBatchInListCap != null || mwCorsMaxAge != null || mwChannelReconnect != null) {
+                middlewareConfig = { cors: mwCors, log: mwLog, ratelimit: mwRatelimit, headers: mwHeaders, idempotencyStore: mwIdempotencyStore, idempotencyTTL: mwIdempotencyTTL, batchInListCap: mwBatchInListCap, corsMaxAge: mwCorsMaxAge, channelReconnect: mwChannelReconnect }
             }
 
             // S80 (2026-05-11): E-MW-001 retired alongside csrf="on" value collapse.

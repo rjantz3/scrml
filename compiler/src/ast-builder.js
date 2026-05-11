@@ -10076,17 +10076,34 @@ export function buildAST(bsOutput, tokenizerOverrides) {
     // (SQLite 3.32+ SQLITE_MAX_VARIABLE_NUMBER). Adopters with Postgres
     // (~65535) or older SQLite (999) override here.
     const mwBatchInListCap = getMWAttr('batch-in-list-cap');
+    // S81 audit fix F.1 (§39.2.1 extension): cors-max-age= attribute override
+    // for the Access-Control-Max-Age header value the compiler emits on the
+    // OPTIONS preflight response. Raw value (parsed at codegen time into a
+    // positive integer seconds value). Default (null): 86400 (Firefox effective
+    // cap). The override is silently ignored when cors= is absent (CORS as a
+    // whole is opt-in).
+    const mwCorsMaxAge = getMWAttr('cors-max-age');
+    // S81 audit fix F.2 (§38.3.1): channel-reconnect= attribute override for
+    // the default WS onclose setTimeout cadence applied to channels that lack
+    // an explicit per-channel reconnect= attribute. Raw value (parsed at
+    // codegen time into millis; accepts bare integer ms or "Nms"/"Ns"/"Nm"/"Nh"
+    // duration strings — same shape as idempotency-ttl minus "d"). Default
+    // (null): 2000 ms. Per-channel reconnect= still wins when both present.
+    const mwChannelReconnect = getMWAttr('channel-reconnect');
 
     if (
       mwCors !== null || mwLog !== null || mwRatelimit !== null
       || mwHeaders !== null || mwIdempotencyStore !== null
       || mwIdempotencyTTL !== null || mwBatchInListCap !== null
+      || mwCorsMaxAge !== null || mwChannelReconnect !== null
     ) {
       middlewareConfig = {
         cors: mwCors, log: mwLog, ratelimit: mwRatelimit, headers: mwHeaders,
         idempotencyStore: mwIdempotencyStore,
         idempotencyTTL: mwIdempotencyTTL,
         batchInListCap: mwBatchInListCap,
+        corsMaxAge: mwCorsMaxAge,
+        channelReconnect: mwChannelReconnect,
       };
     }
 

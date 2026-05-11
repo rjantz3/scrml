@@ -60,6 +60,32 @@ function parseIdempotencyTtl(raw: string | null | undefined): number | null {
 }
 
 /**
+ * S81 audit fix F.1 — parse `<program cors-max-age="...">` raw value into a
+ * positive integer (seconds), or `null` for fall-back-to-default-86400.
+ *
+ * Accepted shape:
+ *   - bare integer ("3600", "600", "604800") interpreted as seconds.
+ *
+ * Distinct from parseIdempotencyTtl (which accepts duration-string suffixes)
+ * because Access-Control-Max-Age is conventionally expressed in seconds in
+ * HTTP/spec docs and adopters reading MDN will copy the seconds value
+ * directly. A future amendment may add the `"Nh"` / `"Nm"` suffix grammar if
+ * adopter feedback shows the bare-seconds form to be a footgun.
+ *
+ * Returns null when raw is null/empty/non-integer/zero/negative — caller
+ * falls back to the 86400 default with no diagnostic (silent fallback per
+ * §39.2.1 amendment v1 scope).
+ */
+function parseCorsMaxAge(raw: string | null | undefined): number | null {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  if (!/^\d+$/.test(trimmed)) return null;
+  const n = parseInt(trimmed, 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
  * Generate server-side route handler code for all server-boundary functions
  * in a file.
  */
@@ -330,13 +356,19 @@ export function generateServerJs(
 
     if (_scrml_hasCors) {
       const corsOrigin = JSON.stringify(middlewareConfig.cors);
+      // S81 audit fix F.1 (§39.2.1 amendment): Max-Age is overridable via
+      // <program cors-max-age=N>. Default 86400 (Firefox effective cap).
+      // Silent fallback on null/malformed per v1 scope.
+      const corsMaxAgeRaw = (middlewareConfig as { corsMaxAge?: string | null }).corsMaxAge ?? null;
+      const corsMaxAgeSec = parseCorsMaxAge(corsMaxAgeRaw);
+      const corsMaxAgeValue = corsMaxAgeSec !== null ? String(corsMaxAgeSec) : "86400";
       lines.push("// §39.2.1 CORS helpers");
       lines.push("function _scrml_cors_headers() {");
       lines.push("  return {");
       lines.push(`    'Access-Control-Allow-Origin': ${corsOrigin},`);
       lines.push("    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',");
       lines.push("    'Access-Control-Allow-Headers': 'Content-Type, X-CSRF-Token, Authorization',");
-      lines.push("    'Access-Control-Max-Age': '86400',");
+      lines.push(`    'Access-Control-Max-Age': '${corsMaxAgeValue}',`);
       lines.push("  };");
       lines.push("}");
       lines.push("export const _scrml_cors_options_route = {");

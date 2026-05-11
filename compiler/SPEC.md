@@ -15949,14 +15949,30 @@ A `<channel>` element accepts the following attributes. All apply identically wh
 |---|---|---|---|
 | `name` | **Yes** | string | Unique channel identifier. Sets WS URL: `/_scrml_ws/<name>`. Static literal only — no `${...}` interpolation (§38.11). |
 | `topic` | No | string or `@var` | Pub/sub topic. Defaults to `name`. When the value is `not`, the channel connects but subscribes to no topic (see §38.6.2). |
-| `protect` | No | string | Auth check on upgrade request. |
-| `reconnect` | No | integer (ms) | Auto-reconnect delay. Default: 2000ms. 0 = disabled. |
+| `auth` | No | `"required" \| "optional" \| "none"` | WS-upgrade gate (S80, replaces the legacy `protect=` channel attribute; canonical value set per §52.13). When `auth="required"`, the compiler injects `_scrml_auth_check(req)` before `server.upgrade()`. See §38.5. |
+| `reconnect` | No | integer (ms) | Auto-reconnect delay. Default: `2000` ms when neither `<channel reconnect=>` nor `<program channel-reconnect=>` is set. `0` = disabled. Per-channel `reconnect=` overrides project-level `<program channel-reconnect=>` (see §38.3.1). |
 | `onserver:open` | No | function call | Invoked server-side when a client connects. |
 | `onserver:message` | No | function call | Invoked server-side when a message is received. The parameter name in the call expression is bound to the parsed message payload (see §38.6.1). |
 | `onserver:close` | No | function call | Invoked server-side when a client disconnects. |
 | `onclient:open` | No | function call | Invoked client-side when the WS connection opens. Does not involve the server (see §38.10). |
 | `onclient:close` | No | function call | Invoked client-side when the WS connection closes. Does not involve the server (see §38.10). |
 | `onclient:error` | No | function call | Invoked client-side when the WS encounters an error. The parameter name in the call expression is bound to the error object (see §38.10). |
+
+### 38.3.1 Reconnect default override — `<program channel-reconnect=>` (S81)
+
+The auto-reconnect delay emitted into every channel's client-side `onclose` setTimeout is `2000` ms by default. Per-channel override via `<channel reconnect=N>` is documented in §38.3. Project-level default override via `<program channel-reconnect=>` is the additive (S81) surface for projects with multiple channels that want a single cadence without repeating the attribute on every channel declaration.
+
+**Accepted form.** Bare integer milliseconds (e.g. `"500"` for fast dev cadence, `"5000"` for production), or duration string with unit suffix `"Nms"` / `"Ns"` / `"Nm"` / `"Nh"` (same form set accepted by `<program idempotency-ttl=>` minus `d` — channel reconnect at day-scale is structurally suspicious).
+
+**Precedence.** When both `<program channel-reconnect=N>` and `<channel reconnect=M>` are present on a channel, the per-channel `reconnect=` wins. When only `<program channel-reconnect=N>` is present, every channel without an explicit `reconnect=` inherits `N`. When neither is present, `2000` ms is used.
+
+**Normative statements:**
+
+- The compiler SHALL emit the per-channel `reconnect=` value into the WS `onclose` `setTimeout` cadence when present.
+- When `<channel reconnect=>` is absent, the compiler SHALL emit the `<program channel-reconnect=>` value if present.
+- When both attributes are absent, the compiler SHALL emit `2000` ms.
+- When the `<program channel-reconnect=>` value is malformed (non-positive integer, NaN, or unparseable), the compiler SHALL fall back to `2000` ms with no diagnostic (silent fallback; future v2 may add `W-MIDDLEWARE-CHANNEL-RECONNECT-INVALID`). The per-channel `reconnect=` already has stricter parsing per §38.3 + `extractChannelAttrs` (`isNaN(parsed) || parsed < 0` rejected silently); that behavior is unchanged.
+- This attribute SHALL only affect channel reconnect cadence; it has no effect on any other `<program>` middleware surface.
 
 ### 38.4 Reactive Sync — V5-strict channel body (auto-sync from placement)
 
@@ -16972,6 +16988,8 @@ The compiler generates:
 
 - `cors="*"` SHALL NOT be the default. CORS is opt-in.
 - The compiler SHALL NOT generate the CORS headers if `cors=` is absent.
+
+**Max-Age override (S81 amendment).** The `Access-Control-Max-Age` value the compiler emits on the OPTIONS response controls how long the browser caches the preflight result. The default is `86400` seconds (24 hours, the Firefox effective cap). Adopters MAY override per-app via the `<program cors-max-age=>` attribute. Accepted forms: bare integer seconds (e.g. `"3600"` for 1 hour, `"600"` for the Safari effective cap, `"604800"` for 7 days). When the attribute is absent OR malformed (non-integer, zero, or negative), the compiler SHALL fall back to the `86400` default with no diagnostic (silent fallback; future v2 may add `W-MIDDLEWARE-CORS-MAX-AGE-INVALID`). The override applies only when `cors=` is also present (CORS infrastructure as a whole is opt-in per the normative statement above); a `cors-max-age=` without `cors=` is silently ignored. Browser-cap reality: Chromium caps at 7200s regardless of the emitted value; Safari caps at 600s; Firefox honors up to 86400s. The emitted value is the upper bound the browser MAY respect — adopters tuning for Safari-heavy traffic gain nothing from values above 600.
 
 #### 39.2.2 `log=`
 

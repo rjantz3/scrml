@@ -231,6 +231,145 @@ describe("MW-CORS-003: no cors= generates no CORS infrastructure", () => {
 });
 
 // ---------------------------------------------------------------------------
+// MW-CORS-MAXAGE-001 (S81 F.1): default Max-Age is 86400 when cors-max-age= absent
+// ---------------------------------------------------------------------------
+
+describe("MW-CORS-MAXAGE-001: default Access-Control-Max-Age is 86400 when override absent", () => {
+  test("cors='*' alone emits Max-Age: '86400'", () => {
+    const { fnNode, routeMap } = makePostHandler("getData", [
+      makeReturnStmt('"ok"', span(110)),
+    ], [], { explicitMethod: "GET" });
+
+    const serverJs = getServerJs(
+      [makeLogicBlock([fnNode], span(90))],
+      routeMap,
+      { cors: "*", log: null, ratelimit: null, headers: null },
+    );
+
+    expect(serverJs).toContain("'Access-Control-Max-Age': '86400'");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MW-CORS-MAXAGE-002 (S81 F.1): cors-max-age override emits the supplied value
+// ---------------------------------------------------------------------------
+
+describe("MW-CORS-MAXAGE-002: cors-max-age='3600' emits override value", () => {
+  test("override seconds-value lands in compiled output", () => {
+    const { fnNode, routeMap } = makePostHandler("getData", [
+      makeReturnStmt('"ok"', span(110)),
+    ], [], { explicitMethod: "GET" });
+
+    const serverJs = getServerJs(
+      [makeLogicBlock([fnNode], span(90))],
+      routeMap,
+      { cors: "*", log: null, ratelimit: null, headers: null, corsMaxAge: "3600" },
+    );
+
+    expect(serverJs).toContain("'Access-Control-Max-Age': '3600'");
+    expect(serverJs).not.toContain("'Access-Control-Max-Age': '86400'");
+  });
+
+  test("Safari-friendly override 600", () => {
+    const { fnNode, routeMap } = makePostHandler("getData", [
+      makeReturnStmt('"ok"', span(110)),
+    ], [], { explicitMethod: "GET" });
+
+    const serverJs = getServerJs(
+      [makeLogicBlock([fnNode], span(90))],
+      routeMap,
+      { cors: "*", log: null, ratelimit: null, headers: null, corsMaxAge: "600" },
+    );
+
+    expect(serverJs).toContain("'Access-Control-Max-Age': '600'");
+  });
+
+  test("week-long override 604800", () => {
+    const { fnNode, routeMap } = makePostHandler("getData", [
+      makeReturnStmt('"ok"', span(110)),
+    ], [], { explicitMethod: "GET" });
+
+    const serverJs = getServerJs(
+      [makeLogicBlock([fnNode], span(90))],
+      routeMap,
+      { cors: "*", log: null, ratelimit: null, headers: null, corsMaxAge: "604800" },
+    );
+
+    expect(serverJs).toContain("'Access-Control-Max-Age': '604800'");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MW-CORS-MAXAGE-003 (S81 F.1): malformed cors-max-age silently falls back to 86400
+// ---------------------------------------------------------------------------
+
+describe("MW-CORS-MAXAGE-003: malformed cors-max-age silently falls back to 86400", () => {
+  test("non-integer value falls back", () => {
+    const { fnNode, routeMap } = makePostHandler("getData", [
+      makeReturnStmt('"ok"', span(110)),
+    ], [], { explicitMethod: "GET" });
+
+    const serverJs = getServerJs(
+      [makeLogicBlock([fnNode], span(90))],
+      routeMap,
+      { cors: "*", log: null, ratelimit: null, headers: null, corsMaxAge: "not-a-number" },
+    );
+
+    expect(serverJs).toContain("'Access-Control-Max-Age': '86400'");
+  });
+
+  test("zero falls back (positive required per spec)", () => {
+    const { fnNode, routeMap } = makePostHandler("getData", [
+      makeReturnStmt('"ok"', span(110)),
+    ], [], { explicitMethod: "GET" });
+
+    const serverJs = getServerJs(
+      [makeLogicBlock([fnNode], span(90))],
+      routeMap,
+      { cors: "*", log: null, ratelimit: null, headers: null, corsMaxAge: "0" },
+    );
+
+    expect(serverJs).toContain("'Access-Control-Max-Age': '86400'");
+  });
+
+  test("empty string falls back", () => {
+    const { fnNode, routeMap } = makePostHandler("getData", [
+      makeReturnStmt('"ok"', span(110)),
+    ], [], { explicitMethod: "GET" });
+
+    const serverJs = getServerJs(
+      [makeLogicBlock([fnNode], span(90))],
+      routeMap,
+      { cors: "*", log: null, ratelimit: null, headers: null, corsMaxAge: "" },
+    );
+
+    expect(serverJs).toContain("'Access-Control-Max-Age': '86400'");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MW-CORS-MAXAGE-004 (S81 F.1): cors-max-age without cors= is silently ignored
+// ---------------------------------------------------------------------------
+
+describe("MW-CORS-MAXAGE-004: cors-max-age without cors= produces no CORS infrastructure", () => {
+  test("setting cors-max-age alone doesn't emit any CORS code", () => {
+    const { fnNode, routeMap } = makePostHandler("getData", [
+      makeReturnStmt('"ok"', span(110)),
+    ], [], { explicitMethod: "GET" });
+
+    const serverJs = getServerJs(
+      [makeLogicBlock([fnNode], span(90))],
+      routeMap,
+      { cors: null, log: null, ratelimit: null, headers: null, corsMaxAge: "3600" },
+    );
+
+    // CORS as a whole is opt-in — without cors= the Max-Age value is never emitted.
+    expect(serverJs).not.toContain("Access-Control-Max-Age");
+    expect(serverJs).not.toContain("_scrml_cors_headers");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // MW-LOG-001: log="structured" generates JSON log emission
 // ---------------------------------------------------------------------------
 
@@ -1022,5 +1161,40 @@ describe("§39 AST: middlewareConfig extracted from <program> attributes", () =>
     expect(ast.middlewareConfig.log).toBe("structured");
     expect(ast.middlewareConfig.headers).toBe("strict");
     expect(ast.middlewareConfig.ratelimit).toBe("100/min");
+  });
+
+  test("S81 F.1: cors-max-age= attribute extracted into middlewareConfig.corsMaxAge", () => {
+    const source = `<program cors="*" cors-max-age="3600">
+\${ server function getData() { return "ok" } }
+</program>`;
+
+    const { ast } = parseSource(source);
+    expect(ast.middlewareConfig).not.toBeNull();
+    expect(ast.middlewareConfig.cors).toBe("*");
+    expect(ast.middlewareConfig.corsMaxAge).toBe("3600");
+  });
+
+  test("S81 F.2: channel-reconnect= attribute extracted into middlewareConfig.channelReconnect", () => {
+    const source = `<program channel-reconnect="500">
+\${ server function getData() { return "ok" } }
+</program>`;
+
+    const { ast } = parseSource(source);
+    expect(ast.middlewareConfig).not.toBeNull();
+    expect(ast.middlewareConfig.channelReconnect).toBe("500");
+  });
+
+  test("S81: both new attributes coexist with existing middleware attrs", () => {
+    const source = `<program cors="*" cors-max-age="600" channel-reconnect="1s" idempotency-ttl="7d" batch-in-list-cap="65535">
+\${ server function getData() { return "ok" } }
+</program>`;
+
+    const { ast } = parseSource(source);
+    expect(ast.middlewareConfig).not.toBeNull();
+    expect(ast.middlewareConfig.cors).toBe("*");
+    expect(ast.middlewareConfig.corsMaxAge).toBe("600");
+    expect(ast.middlewareConfig.channelReconnect).toBe("1s");
+    expect(ast.middlewareConfig.idempotencyTTL).toBe("7d");
+    expect(ast.middlewareConfig.batchInListCap).toBe("65535");
   });
 });

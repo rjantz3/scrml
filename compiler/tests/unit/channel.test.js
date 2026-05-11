@@ -40,6 +40,7 @@ import {
   emitChannelClientJs,
   emitChannelServerJs,
   emitChannelWsHandlers,
+  parseChannelReconnect,
 } from "../../src/codegen/emit-channel.js";
 import { CGError } from "../../src/codegen/errors.ts";
 import { tokenizeBlock } from "../../src/tokenizer.js";
@@ -458,6 +459,95 @@ describe("§12: onclose handler emits auto-reconnect", () => {
     const code = lines.join("\n");
     // reconnectMs=0 → no setTimeout reconnect
     expect(code).not.toContain("setTimeout");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §12.1 (S81 F.2): <program channel-reconnect=> project-level default override
+// ---------------------------------------------------------------------------
+
+describe("§12.1: channel-reconnect project default (S81 F.2)", () => {
+  test("default 2000ms emitted when neither per-channel nor project override set", () => {
+    const node = makeChannelNode([makeStringAttr("name", "chat")]);
+    const lines = emitChannelClientJs(node, [], "/test/app.scrml");
+    const code = lines.join("\n");
+    expect(code).toMatch(/setTimeout\([^,]+,\s*2000\)/);
+  });
+
+  test("project default applied when per-channel reconnect= absent", () => {
+    const node = makeChannelNode([makeStringAttr("name", "chat")]);
+    // projectReconnectDefault = 500 → emitted into onclose setTimeout
+    const lines = emitChannelClientJs(node, [], "/test/app.scrml", 500);
+    const code = lines.join("\n");
+    expect(code).toMatch(/setTimeout\([^,]+,\s*500\)/);
+    expect(code).not.toMatch(/setTimeout\([^,]+,\s*2000\)/);
+  });
+
+  test("per-channel reconnect= wins over project default", () => {
+    const node = makeChannelNode([
+      makeStringAttr("name", "chat"),
+      makeIdentAttr("reconnect", "200"),
+    ]);
+    // Project default 5000 vs per-channel 200 — per-channel wins.
+    const lines = emitChannelClientJs(node, [], "/test/app.scrml", 5000);
+    const code = lines.join("\n");
+    expect(code).toMatch(/setTimeout\([^,]+,\s*200\)/);
+    expect(code).not.toMatch(/setTimeout\([^,]+,\s*5000\)/);
+  });
+
+  test("per-channel reconnect=0 wins over project default (channel opts out)", () => {
+    const node = makeChannelNode([
+      makeStringAttr("name", "chat"),
+      makeIdentAttr("reconnect", "0"),
+    ]);
+    const lines = emitChannelClientJs(node, [], "/test/app.scrml", 5000);
+    const code = lines.join("\n");
+    expect(code).not.toContain("setTimeout");
+  });
+
+  test("null projectReconnectDefault behaves as no override (2000ms default)", () => {
+    const node = makeChannelNode([makeStringAttr("name", "chat")]);
+    const lines = emitChannelClientJs(node, [], "/test/app.scrml", null);
+    const code = lines.join("\n");
+    expect(code).toMatch(/setTimeout\([^,]+,\s*2000\)/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §12.2 (S81 F.2): parseChannelReconnect raw value parsing
+// ---------------------------------------------------------------------------
+
+describe("§12.2: parseChannelReconnect helper (S81 F.2)", () => {
+  test("bare integer parsed as millis", () => {
+    expect(parseChannelReconnect("500")).toBe(500);
+    expect(parseChannelReconnect("5000")).toBe(5000);
+  });
+
+  test("Nms / Ns / Nm / Nh suffix forms accepted", () => {
+    expect(parseChannelReconnect("500ms")).toBe(500);
+    expect(parseChannelReconnect("2s")).toBe(2000);
+    expect(parseChannelReconnect("1m")).toBe(60000);
+    expect(parseChannelReconnect("1h")).toBe(3600000);
+  });
+
+  test("Nd suffix is rejected (day-scale reconnect is suspicious)", () => {
+    expect(parseChannelReconnect("1d")).toBeNull();
+  });
+
+  test("null / empty / non-positive / malformed → null fallback", () => {
+    expect(parseChannelReconnect(null)).toBeNull();
+    expect(parseChannelReconnect(undefined)).toBeNull();
+    expect(parseChannelReconnect("")).toBeNull();
+    expect(parseChannelReconnect("0")).toBeNull();
+    expect(parseChannelReconnect("-100")).toBeNull();
+    expect(parseChannelReconnect("not-a-number")).toBeNull();
+    expect(parseChannelReconnect("100xyz")).toBeNull();
+  });
+
+  test("case-insensitive unit suffix", () => {
+    expect(parseChannelReconnect("500MS")).toBe(500);
+    expect(parseChannelReconnect("2S")).toBe(2000);
+    expect(parseChannelReconnect("1H")).toBe(3600000);
   });
 });
 

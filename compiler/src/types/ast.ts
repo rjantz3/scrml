@@ -1366,6 +1366,17 @@ export interface MiddlewareConfig {
    *  Adopters targeting Postgres (~65535) or older SQLite (999) can override.
    *  Raw attr value (decimal integer string); null/absent → 32766. */
   batchInListCap?: string | null;
+  /** S81 audit fix F.1 (§39.2.1 extension) — `Access-Control-Max-Age` header
+   *  override for the OPTIONS preflight response. Raw attr value (decimal
+   *  integer string of seconds); null/absent → 86400 (Firefox effective cap).
+   *  Silently ignored when `cors` is null (CORS as a whole is opt-in). */
+  corsMaxAge?: string | null;
+  /** S81 audit fix F.2 (§38.3.1) — project-level default for the WS onclose
+   *  setTimeout reconnect cadence applied to channels without an explicit
+   *  per-channel `reconnect=` attribute. Raw attr value (bare millis decimal
+   *  integer OR duration string `"Nms"`/`"Ns"`/`"Nm"`/`"Nh"`); null/absent → 2000ms.
+   *  Per-channel `<channel reconnect=>` still wins when both present. */
+  channelReconnect?: string | null;
 }
 
 // ---------------------------------------------------------------------------

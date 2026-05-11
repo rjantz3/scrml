@@ -11,7 +11,7 @@ import {
   callableServerVarDecls,
 } from "./collect.ts";
 import { collectDerivedVarNames, buildFunctionBodyRegistry, type FunctionBodyRegistry } from "./reactive-deps.ts";
-import { collectChannelNodes, emitChannelClientJs } from "./emit-channel.ts";
+import { collectChannelNodes, emitChannelClientJs, parseChannelReconnect } from "./emit-channel.ts";
 import { emitInitialLoad, emitOptimisticUpdate, emitServerSyncStub, emitUnifiedMountHydrate } from "./emit-sync.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
@@ -530,10 +530,16 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   // Step 5.5: Generate <channel> client-side WebSocket initialization (§35)
   const channelNodes = ctx.analysis?.channelNodes ?? collectChannelNodes(getNodes(fileAST));
   if (channelNodes.length > 0) {
+    // S81 audit fix F.2 (§38.3.1): parse project-level <program channel-reconnect=>
+    // default once and thread to every channel's client-side emitter. Per-channel
+    // <channel reconnect=> wins over the project default; both absent → 2000ms.
+    const mwConfig = (fileAST as any)?.middlewareConfig ?? null;
+    const channelReconnectRaw = mwConfig?.channelReconnect ?? null;
+    const projectReconnectDefault = parseChannelReconnect(channelReconnectRaw);
     lines.push("");
     lines.push("// --- channel WebSocket client initialization (§35, compiler-generated) ---");
     for (const chNode of channelNodes) {
-      const chLines = emitChannelClientJs(chNode, errors, fileAST.filePath ?? "");
+      const chLines = emitChannelClientJs(chNode, errors, fileAST.filePath ?? "", projectReconnectDefault);
       for (const l of chLines) lines.push(l);
     }
   }

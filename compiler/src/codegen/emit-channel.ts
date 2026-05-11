@@ -94,9 +94,53 @@ export function collectChannelNodes(nodes: any[]): any[] {
 // ---------------------------------------------------------------------------
 
 /**
- * Extract channel attributes from a `<channel>` markup node.
+ * S81 audit fix F.2 — parse `<program channel-reconnect="...">` raw value
+ * into a millisecond integer, or `null` for fall-back-to-default-2000.
+ *
+ * Accepted shapes (same as parseIdempotencyTtl in emit-server.ts MINUS `d`
+ * suffix — channel reconnect at day-scale is structurally suspicious; if a
+ * real use case emerges the suffix grammar can be extended):
+ *   - bare integer ("500", "5000") → that many millis
+ *   - duration string with unit suffix "Nms" / "Ns" / "Nm" / "Nh"
+ *
+ * Returns null when raw is null/empty/malformed — caller falls back to the
+ * 2000ms default with no diagnostic per §38.3.1 amendment v1 scope.
  */
-function extractChannelAttrs(node: any): ChannelAttrs {
+export function parseChannelReconnect(raw: string | null | undefined): number | null {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+
+  if (/^\d+$/.test(trimmed)) {
+    const n = parseInt(trimmed, 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+
+  const m = trimmed.match(/^(\d+)\s*(ms|s|m|h)$/i);
+  if (!m) return null;
+  const n = parseInt(m[1]!, 10);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const unit = m[2]!.toLowerCase();
+  const multipliers: Record<string, number> = {
+    ms: 1,
+    s: 1000,
+    m: 60 * 1000,
+    h: 60 * 60 * 1000,
+  };
+  const mult = multipliers[unit];
+  return mult !== undefined ? n * mult : null;
+}
+
+/**
+ * Extract channel attributes from a `<channel>` markup node.
+ *
+ * Accepts an optional `projectReconnectDefault` (millis) — when the per-channel
+ * `reconnect=` attribute is absent, the project-level default from
+ * `<program channel-reconnect=>` (§38.3.1) is used. When BOTH are absent the
+ * hardcoded `2000` ms default applies. Per-channel `reconnect=` always wins
+ * when present (per §38.3.1 normative).
+ */
+function extractChannelAttrs(node: any, projectReconnectDefault: number | null = null): ChannelAttrs {
   const attrs: any[] = node.attrs ?? node.attributes ?? [];
   const attrMap = new Map<string, any>(attrs.map((a: any) => [a.name, a]));
 
@@ -120,8 +164,12 @@ function extractChannelAttrs(node: any): ChannelAttrs {
     else if (typeof v === "string") topic = v;
   }
 
+  // S81 audit fix F.2 (§38.3.1) precedence chain:
+  //   1. per-channel <channel reconnect=N>  (winner when present + parseable)
+  //   2. project-level <program channel-reconnect=N>  (when per-channel absent)
+  //   3. hardcoded 2000 ms  (when both absent)
   const reconnAttr = attrMap.get("reconnect");
-  let reconnectMs = 2000;
+  let reconnectMs = projectReconnectDefault !== null ? projectReconnectDefault : 2000;
   if (reconnAttr) {
     const v = reconnAttr.value;
     const raw = v?.kind === "string-literal" ? v.value : (v?.name ?? "").replace(/^@/, "");
@@ -329,9 +377,9 @@ export function collectChannelCellMap(nodes: any[]): Map<string, Set<string>> {
 /**
  * Emit client-side JavaScript for a single `<channel>` node.
  */
-export function emitChannelClientJs(node: any, errors: CGError[], filePath: string): string[] {
+export function emitChannelClientJs(node: any, errors: CGError[], filePath: string, projectReconnectDefault: number | null = null): string[] {
   const lines: string[] = [];
-  const { name, safeName, topic, reconnectMs } = extractChannelAttrs(node);
+  const { name, safeName, topic, reconnectMs } = extractChannelAttrs(node, projectReconnectDefault);
   // Bug 4 fix: use onclient:* handlers for client-side browser WebSocket events.
   const { open: clientOpenHandler, close: clientCloseHandler, error: clientErrorHandler } = extractClientHandlers(node);
   const sharedVars = extractSharedVars(node);
