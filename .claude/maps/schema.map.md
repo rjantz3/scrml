@@ -1,178 +1,195 @@
 # schema.map.md
-# project: scrmlTS
-# updated: 2026-05-08T00:00:00Z  commit: f59bbcc
+# project: scrmlts
+# updated: 2026-05-10T19:30:00Z  commit: f182f44
 
-## TypeScript AST — `compiler/src/types/ast.ts` (1,722 LOC)
+## TypeScript AST — `compiler/src/types/ast.ts` (1,793 LOC)
 
-This is the canonical AST contract. Every pass downstream of TAB consumes/produces these nodes.
-~80 `kind` discriminators across `ASTNode` (logic + markup statements) and `ExprNode` (expressions).
+Single source of truth for all AST node shapes. All nodes carry `id: number` and `span: Span`.
 
-### Core / shared
-Span                          — { file: string; start: number; end: number; line: number; col: number }.
-ExprSpan                      — structurally identical to Span; used by ExprNode subtree.
-AttrValue (union)             — StringLiteralAttrValue | VariableRefAttrValue | CallRefAttrValue | ExprAttrValue | PropsBlockAttrValue | AbsentAttrValue.
-AttrNode                      — { name: string; value: AttrValue; span: Span }.
-TypedAttrDecl                 — typed attribute decl inside state constructor defs (name, typeExpr, optional, defaultValue, span).
-SQLChainedCall                — { method: string; args: string } — chained `.run()`, `.all()`, `.get()` on SQL blocks.
-LiftTarget (union)            — `{ kind: "markup"; node: ASTNode }` | `{ kind: "expr"; expr: string; exprNode?: ExprNode }`.
+### Span  [ast.ts:19]
+file: string, start: number, end: number, line: number, col: number
 
-### Markup + control
-MarkupNode                    — generic HTML element/component-instance node (`kind: "markup"`); has `tag`, `attrs`, `children`, `isComponent`, `resolvedKind?`, `resolvedCategory?`.
-TextNode                      — `kind: "text"`.
-CommentNode                   — `kind: "comment"`.
-ChannelDeclNode (extends MarkupNode) — `kind: "markup"` with `tag === "channel"`; carries `isExport?`, `_p3aInlinedFrom?`, `_p3aSourceSpan?`.
-HtmlFragmentNode              — `kind: "html-fragment"`; raw HTML pass-through inside logic contexts.
-StyleNode                     — `kind: "style"`; contains CSS rules + child nodes.
-CSSInlineNode                 — `kind: "css-inline"`; inline CSS `#{ ... }` block.
-CSSRule (union)               — CSSPropertyRule | CSSSelectorRule.
-CSSReactiveRef                — { name: string; expr: string | null } — reactive ref captured inside CSS values.
-CSSDeclaration                — { prop; value; span; reactiveRefs?; isExpression? }.
-RenderSpecNode                — `kind: "render-spec"`; wraps a MarkupNode as the bindable render-spec for Shape 2 state-decl.
+### AttrValue (union)  [ast.ts:40]
+StringLiteralAttrValue | VariableRefAttrValue | CallRefAttrValue | ExprAttrValue | PropsBlockAttrValue | AbsentAttrValue
 
-### Decls
-LetDeclNode                   — `kind: "let-decl"`; `{ name; ifExpr?; forExpr?; matchExpr?; initExpr? }`.
-ConstDeclNode                 — `kind: "const-decl"`; same shape as LetDeclNode.
-TildeDeclNode                 — `kind: "tilde-decl"`; `{ name; initExpr? }` (must-use `~` variable).
-LinDeclNode                   — `kind: "lin-decl"`; `{ name; initExpr? }` (§35.2 linear type).
-ReactiveDeclNode              — `kind: "state-decl"`; the central reactive cell AST node.
-  shape?:          "plain" | "decl-with-spec" | "derived"
-  structuralForm?: boolean   — true = `<NAME>` form; false = legacy `@name` form
-  isConst?:        boolean   — true = const-derived cell
-  renderSpec?:     RenderSpecNode | null  — Shape 2 only
-  validators?:     ValidatorEntry[]       — Shape 2 predicate list (B9 structured)
-  defaultExpr?:    ExprNode | null        — from `default=<expr>` attr (§6.8, L18)
-  pinned?:         boolean                — from `pinned` bareword attr (§6.10)
-  children?:       ReactiveDeclNode[]     — Variant C compound children (§6.3.2)
-  typeAnnotation?: string                 — `:T` typed annotation (§6.2, §53)
-  isShared?:       boolean                — `@shared` modifier (§37.4)
-  initExpr?:       ExprNode              — Shape 1/3 RHS
-ReactiveDebouncedDeclNode     — `kind: "reactive-debounced-decl"`; `{ name; delay: number; initExpr? }`.
-ReactiveNestedAssignNode      — `kind: "reactive-nested-assign"`; `{ target; path: string[]; valueExpr? }`.
-ReactiveArrayMutationNode     — `kind: "reactive-array-mutation"`; `{ target; method; args: string }`.
-ReactiveExplicitSetNode       — `kind: "reactive-explicit-set"`; `{ args: string }` escape hatch.
-StateNode                     — `kind: "state"`; state instantiation (`< statetype attrs>children</>`)
-StateConstructorDefNode       — `kind: "state-constructor-def"`; typed attr declarations.
-FunctionDeclNode              — `kind: "function-decl"`; `{ name; params; body; fnKind; isServer; isGenerator?; canFail; errorType?; route?; method?; isHandleEscapeHatch? }`.
-ComponentDefNode              — `kind: "component-def"`; `{ name; raw }`.
+### AttrNode  [ast.ts:95]
+name: string, value: AttrValue, span: Span
 
-### Logic structure
-LogicNode                     — `kind: "logic"`; contains `body`, `imports`, `exports`, `typeDecls`, `components`.
-ImportDeclNode                — `kind: "import-decl"`; `{ raw; names; specifiers?; source; isDefault }`.
-ImportSpecifier               — `{ imported; local; pinned: boolean }` — per-item specifier (B4 pinned modifier).
-UseDeclNode                   — `kind: "use-decl"`; `{ raw; names; source }`.
-ExportDeclNode                — `kind: "export-decl"`; `{ raw; exportedName; exportKind; reExportSource; isPure?; isServer? }`.
-TypeDeclNode                  — `kind: "type-decl"`; `{ name; typeKind; raw }`.
+### TypedAttrDecl  [ast.ts:106]
+name: string, typeExpr: string, optional: boolean, defaultValue: string | null, span: Span
 
-### Control flow
-IfStmtNode                    — `kind: "if-stmt"`; `{ condExpr?; consequent; alternate }`.
-IfExprNode                    — `kind: "if-expr"`; same shape (if-as-expression).
-ForExprNode                   — `kind: "for-expr"`; `{ variable; iterExpr?; body }`.
-MatchExprNode                 — `kind: "match-expr"`; `{ headerExpr?; body }`.
-ForStmtNode                   — `kind: "for-stmt"`; `{ variable; iterExpr?; body; cStyleParts? }`.
-WhileStmtNode                 — `kind: "while-stmt"`; `{ condExpr?; body }`.
-ReturnStmtNode                — `kind: "return-stmt"`; `{ exprNode? }`.
-ThrowStmtNode                 — `kind: "throw-stmt"`; `{ exprNode? }`.
-SwitchStmtNode                — `kind: "switch-stmt"`; `{ headerExpr?; body }`.
-TryStmtNode                   — `kind: "try-stmt"`; `{ header; body; catchNode?; finallyNode? }`.
-MatchStmtNode                 — `kind: "match-stmt"`; `{ headerExpr?; body }`.
-MatchArmInlineNode            — `kind: "match-arm-inline"`; `{ test; binding?; result; resultExpr? }` — Form 1b (B20 payload-binding parser added S69).
+### CSS Types  [ast.ts:120-156]
+CSSReactiveRef: { name: string, expr: string | null }
+CSSDeclaration: { prop, value, span, reactiveRefs?, isExpression? }
+CSSRule = CSSPropertyRule | CSSSelectorRule
 
-### Effects + expressions
-BareExprNode                  — `kind: "bare-expr"`; `{ exprNode? }` (deprecated `expr?` removed from TS surface S40).
-HtmlFragmentNode              — `kind: "html-fragment"`; `{ content: string }`.
-LiftExprNode                  — `kind: "lift-expr"`; `{ expr: LiftTarget }`.
-FailExprNode                  — `kind: "fail-expr"`; `{ enumType; variant; args }`.
-PropagateExprNode             — `kind: "propagate-expr"`; `{ binding: string | null; exprNode? }`.
-GuardedExprNode               — `kind: "guarded-expr"`; `{ guardedNode; arms: ErrorArm[] }`.
-ErrorEffectNode               — `kind: "error-effect"`; `{ arms: ErrorArm[] }`.
-ErrorArm                      — `{ pattern; binding; handler; handlerExpr?; span }`.
-MetaNode                      — `kind: "meta"`; `{ body; parentContext }`.
-SQLNode                       — `kind: "sql"`; `{ query; chainedCalls; nobatch? }`.
-TransactionBlockNode          — `kind: "transaction-block"`; `{ body }`.
-CleanupRegistrationNode       — `kind: "cleanup-registration"`; `{ callback; callbackExpr? }`.
-WhenEffectNode                — `kind: "when-effect"`; `{ dependencies; bodyRaw; bodyExpr? }`.
-WhenMessageNode               — `kind: "when-message"`; `{ binding; bodyRaw; bodyExpr? }` (§4.12.4 worker).
-UploadCallNode                — `kind: "upload-call"`; `{ file; fileExpr?; url; urlExpr? }`.
-DebounceCallNode              — `kind: "debounce-call"`; `{ fn; fnExpr?; delay }`.
-ThrottleCallNode              — `kind: "throttle-call"`; `{ fn; fnExpr?; delay }`.
+### ErrorArm  [ast.ts:163]
+pattern: string, binding: string, handler: string, handlerExpr?: ExprNode, span: Span
 
-### Validator types (Phase A1b B9-B10)
-ValidatorEntry                — `{ name: string; args: ValidatorArg[] | null; span: Span; inlineOverride?: string | null }`.
-  args null     = bareword form (`<x req>`).
-  args []       = zero-arg call (`<x req()>`).
-  args [...]    = parsed args; element is ExprNode or RelationalPredicateNode.
-  inlineOverride: set by B13 walker (`walkRejectDerivedWithValidatorsAndExtractOverride` in symbol-table.ts).
-ValidatorArg (union)          — `ExprNode | RelationalPredicateNode`.
-RelationalPredicateNode       — NOT in ExprNode union; `kind: "relational-predicate"`; `{ span: ExprSpan; op: ">=" | "<=" | "<" | ">" | "=" | "!="; value: ExprNode }`.
-  Used only for `length(>=N)` form per §55.1.
-  dep-graph walker `forEachIdentInExprNode` special-cases this kind.
+### SQLChainedCall  [ast.ts:180]
+method: string, args: string
 
-### ExprNode union (`compiler/src/types/ast.ts` lines ~1700+)
-IdentExpr            — `kind: "ident"`; `{ name }` (includes `@name` for reactive refs, `"~"` for pipeline).
-LitExpr              — `kind: "lit"`; `{ raw; value; litType }` (litType: number|string|template|bool|null|undefined|not).
-ArrayExpr            — `kind: "array"`; `{ elements: (ExprNode | SpreadExpr)[] }`.
-ObjectExpr           — `kind: "object"`; `{ props: ObjectProp[] }`.
-SpreadExpr           — `kind: "spread"`; `{ argument: ExprNode }`.
-UnaryExpr            — `kind: "unary"`; `{ op; argument; prefix }`.
-BinaryExpr           — `kind: "binary"`; `{ op; left; right }` — includes scrml-specific `is`, `is-not`, `is-some`, `is-not-not`.
-AssignExpr           — `kind: "assign"`; `{ op; target; value }`.
-TernaryExpr          — `kind: "ternary"`; `{ condition; consequent; alternate }`.
-MemberExpr           — `kind: "member"`; `{ object; property: string; optional }`.
-IndexExpr            — `kind: "index"`; `{ object; index; optional }`.
-CallExpr             — `kind: "call"`; `{ callee; args; optional }`.
-NewExpr              — `kind: "new"`; `{ callee; args }`.
-LambdaExpr           — `kind: "lambda"`; `{ params: LambdaParam[]; body; isAsync; fnStyle }`.
-CastExpr             — `kind: "cast"`; `{ expression; targetType: string }`.
-MatchExpr            — `kind: "match-expr"`; `{ subject; rawArms: string[] }` (inline match value-return form).
-SqlRefExpr           — `kind: "sql-ref"`; `{ nodeId: number }`.
-InputStateRefExpr    — `kind: "input-state-ref"`; `{ name }`.
-EscapeHatchExpr      — `kind: "escape-hatch"`; `{ estreeType; raw }` (fallback for unmapped ESTree nodes).
-ResetExpr            — `kind: "reset-expr"`; `{ target: ExprNode; diagnostic? }` — language-level `reset(@cell)` keyword (§6.8.2, L18, A1a Step 9).
+### LiftTarget (union)  [ast.ts:193]
+{ kind: "markup", node: ASTNode } | { kind: "expr", expr: string, exprNode?: ExprNode }
 
-### File-level types
-FileAST               — `{ filePath; nodes; imports; exports; components; typeDecls; channelDecls?; spans; hasProgramRoot; authConfig; middlewareConfig }`.
-TABOutput             — `{ filePath; ast: FileAST; errors: TABErrorInfo[] }`.
-TABErrorInfo          — `{ code; message; tabSpan: Span; severity? }`.
-AuthConfig            — `{ auth; loginRedirect; csrf; sessionExpiry }`.
-MiddlewareConfig      — `{ cors; log; csrf; ratelimit; headers }`.
+### MarkupNode  [ast.ts:212]
+kind: "markup", tag: string, attrs: AttrNode[], children: ASTNode[], selfClosing: boolean,
+closerForm: string, isComponent: boolean,
+resolvedKind?: 'html-builtin'|'scrml-lifecycle'|'user-state-type'|'user-component'|'unknown',
+resolvedCategory?: 'html'|'channel'|'engine'|'timer'|'poll'|'db'|'schema'|'request'|'errorBoundary'|'machine'|'user-component'|'user-state-type'|'unknown',
+auth?: string, loginRedirect?: string, csrf?: string, sessionExpiry?: string
 
-### Symbol Table types — `compiler/src/symbol-table.ts`
-Scope                 — per-scope registry; `{ kind: ScopeKind; stateCells: Map<string, StateCellRecord>; importBindings: Map<string, ImportBindingRecord>; parent? }`.
-ScopeKind             — `"file" | "function" | "compound" | "engine" | "component" | "field"` (B12 adds "field").
-StateCellRecord       — back-pointer on each registered `state-decl` node.
-ImportBindingRecord   — `{ localName; exportedName; sourcePath; pinned: boolean; ... }`.
+### TextNode  [ast.ts:247]
+kind: "text", value: string
 
-### validator-catalog types — `compiler/src/validator-catalog.ts`
-PredicateArgKind      — union: `relational-predicate | numeric | regex | comparable-with-cell | any-equatable-with-cell | array-of-cell-type | inline-message-override`.
-CellTypeRequirement   — `"any" | "string" | "number" | "array" | ...`.
-PredicateSignature    — `{ name; arity; argKinds: PredicateArgKind[] | null; applicableTo: CellTypeRequirement }`.
-UNIVERSAL_CORE_PREDICATES — readonly array of 14 PredicateSignature entries per §55.1: req, is some, length, min, max, gt, lt, gte, lte, pattern, oneOf, notIn, eq, neq.
+### CommentNode  [ast.ts:254]
+kind: "comment", value: string
 
-### multi-statement-scan types — `compiler/src/multi-statement-scan.ts`
-SemicolonHit          — `{ offset: number }` — top-level semicolon position result.
+### StateNode  [ast.ts:263]
+kind: "state", stateType: string, attrs: AttrNode[], children: ASTNode[]
 
-### derived-mutation-ops exports — `compiler/src/derived-mutation-ops.ts`
-ARRAY_MUTATING_METHODS    — ReadonlySet of 9 method names (push/pop/shift/unshift/splice/reverse/sort/fill/copyWithin).
-COMPOUND_ASSIGNMENT_OPS   — ReadonlySet of 14 compound-assignment operators.
-isDerivedMutatingAssignOp(op) → boolean.
-isArrayMutatingMethod(name)   → boolean.
+### StateConstructorDefNode  [ast.ts:277]
+kind: "state-constructor-def", stateType: string, typedAttrs: TypedAttrDecl[], attrs: AttrNode[], children: ASTNode[]
 
-### engine-statechild-parser types — `compiler/src/engine-statechild-parser.ts`
-EngineStateChildEntry — state-child entry extracted from `engine-decl.rulesRaw`; carries `tag`, `ruleForm?`, `bodyRaw`, `isLegacy`, `span`.
-EngineRuleForm        — union of §51.0.F target-only forms: single variant, multi-variant `(A | B)`, etc.
+### LogicNode  [ast.ts:292]
+kind: "logic", body: LogicStatement[], imports: ImportDeclNode[], exports: ExportDeclNode[], typeDecls: TypeDeclNode[], components: ComponentDefNode[]
 
-## Non-mapped runtime annotations (non-enumerable, stamped by SYM passes)
-`_scope`             — Scope back-pointer on scope-introducing AST nodes and FileAST (B1).
-`_record`            — StateCellRecord back-pointer on each registered `state-decl` (B1).
-`_resolvedStateCell` — StateCellRecord | null on IdentExpr nodes for `@name` reads (B3).
-`_cellKind`          — "plain" | "bindable" | "markup-typed" | "compound-parent" (B5).
-`_isBindable`        — boolean (B5).
+### SQLNode  [ast.ts:309]
+kind: "sql", query: string, chainedCalls: SQLChainedCall[], nobatch?: boolean
+
+### CSSInlineNode  [ast.ts:328]
+kind: "css-inline", rules: CSSRule[]
+
+### StyleNode  [ast.ts:337]
+kind: "style", rules: CSSRule[], children: ASTNode[]
+
+### ErrorEffectNode  [ast.ts:348]
+kind: "error-effect", arms: ErrorArm[]
+
+### MetaNode  [ast.ts:357]
+kind: "meta", body: LogicStatement[], parentContext: string
+
+### LetDeclNode  [ast.ts:368]
+kind: "let-decl", name: string, ifExpr?, forExpr?, matchExpr?, initExpr?: ExprNode
+
+### ConstDeclNode  [ast.ts:383]
+kind: "const-decl", name: string, ifExpr?, forExpr?, matchExpr?, initExpr?: ExprNode
+
+### TildeDeclNode  [ast.ts:401]
+kind: "tilde-decl", name: string, initExpr?: ExprNode
+
+### LinDeclNode  [ast.ts:413]
+kind: "lin-decl", name: string, initExpr?: ExprNode
+
+### ReactiveDeclNode  [ast.ts:424]
+kind: "state-decl", name: string,
+shape?: "plain"|"decl-with-spec"|"derived", structuralForm?: boolean, isConst?: boolean,
+renderSpec?: RenderSpecNode | null, validators?: ValidatorEntry[], defaultExpr?: ExprNode | null,
+pinned?: boolean, children?: ReactiveDeclNode[], typeAnnotation?: string, isShared?: boolean
+
+### ValidatorEntry  [ast.ts:574]
+name: string, args: ValidatorArg[] | null, span: Span, inlineOverride?: string | null
+
+### ValidatorArg (union)  [ast.ts:614]
+ExprNode | RelationalPredicateNode
+
+### RelationalPredicateNode  [ast.ts:541]
+kind: "relational-predicate", op: ">=" | "<=" | "<" | ">" | "=" | "!=", value: ExprNode, span: ExprSpan
+
+### RenderSpecNode  [ast.ts:625]
+kind: "render-spec", element: MarkupNode
+
+### ReactiveDeclNode (derived/debounced/nested)  [ast.ts:639-682]
+ReactiveDebouncedDeclNode: kind "reactive-debounced-decl", name, delay: number, initExpr?
+ReactiveNestedAssignNode: kind "reactive-nested-assign", target, path: string[], valueExpr?
+ReactiveArrayMutationNode: kind "reactive-array-mutation", target, method, args: string
+ReactiveExplicitSetNode: kind "reactive-explicit-set", args: string
+
+### FunctionDeclNode  [ast.ts:687]
+kind: "function-decl", name, params: string[], body: LogicStatement[], fnKind: "function"|"fn",
+isServer, canFail, errorType?, route?, method?, isHandleEscapeHatch?
+
+### EngineDeclNode  [ast.ts:745]
+kind: "engine-decl"; ... (engine declaration with state-child body; see file for full shape)
+
+### Control Flow  [ast.ts:806+]
+IfStmtNode, IfExprNode, ForExprNode, MatchExprNode — standard control flow shapes
+
+### WhenEffectNode  [ast.ts:1165]
+kind: "when-effect"; reactive side-effect trigger
+
+### ASTNode (discriminated union)  [ast.ts:1283]
+... 30+ node kinds — see `export type ASTNode` for full list
+
+### LogicStatement (union)  [ast.ts:1232]
+All statement kinds usable inside logic/meta blocks
+
+### FileAST  [ast.ts:1341]
+filePath: string, nodes: ASTNode[], ... additional pipeline-stamped fields
+
+### TABOutput  [ast.ts:1374]
+filePath, ast: FileAST, errors: TABErrorInfo[]
+
+### AuthConfig / MiddlewareConfig  [ast.ts:1308-1333]
+Auth and middleware configuration shapes stamped on program-tag MarkupNodes
+
+## ExprNode Types — `compiler/src/types/ast.ts` (ExprSpan section, ~1,407+)
+
+ExprSpan: { start, end, line?, col? }
+ExprNode (union): IdentExpr | LitExpr | ArrayExpr | ObjectExpr | SpreadExpr | UnaryExpr |
+  BinaryExpr | AssignExpr | TernaryExpr | MemberExpr | IndexExpr | CallExpr | NewExpr |
+  LambdaExpr | CastExpr | MatchExpr | SqlRefExpr | InputStateRefExpr | EscapeHatchExpr | ResetExpr
+
+## Codegen IR — `compiler/src/codegen/ir.ts`
+
+### HtmlIR  [ir.ts:22]
+parts: string[]
+
+### CssIR  [ir.ts:27]
+userCss: string, tailwindCss: string
+
+### ServerIR  [ir.ts:33]
+lines: string[]
+
+### ClientIR  [ir.ts:38]
+lines: string[]
+
+### FileIR  [ir.ts:43]
+filePath: string, html: HtmlIR, css: CssIR, server: ServerIR, client: ClientIR
+
+## Codegen Key Interfaces — `compiler/src/codegen/*.ts`
+
+### CompileContext  [context.ts:23]
+filePath, fileAST, routeMap, depGraph, protectedFields: Set<string>, authMiddleware, middlewareConfig,
+csrfEnabled: boolean, encodingCtx: EncodingContext | null, mode: "browser"|"library", testMode: boolean,
+dbVar: string, workerNames: string[], errors: CGError[], registry: BindingRegistry,
+derivedNames: Set<string>, analysis: FileAnalysis | null, usedRuntimeChunks: Set<string>,
+exportRegistry?: Map<string, Map<string, { kind, category, isComponent }>> | null
+
+### BindingRegistry  [binding-registry.ts:53+]
+EventBinding: { placeholderId, eventName, handlerName, handlerArgs, handlerExpr?, engineArm? }
+LogicBinding: { placeholderId?, expr?, reactiveRefs?, isConditionalDisplay?, varName?, condExpr?, refs?, kind?, chainId?, ... }
+
+### CGError  [errors.ts:11]
+code: string, message: string, span: CGSpan | object, severity: 'error' | 'warning'
+
+### VariantArm  [emit-variant-guard.ts:106]
+tag: string, payloadBindings: string[], body: any[]
+
+### VariantGuardOutput  [emit-variant-guard.ts:135]
+mountElementHtml: string, renderFunctionsJs: string, dispatcherJs: string
+
+### VariantGuardOptions  [emit-variant-guard.ts:163]
+idPrefix: string, mountAttr?: string, renderFnPrefix?: string, variantSubscribeName?: string | null
+
+### FileAnalysis  [analyze.ts:55]
+filePath, nodes, fnNodes, markupNodes, topLevelLogic, ... (pre-computed AST analysis slices for CG)
 
 ## Tags
-#scrmlTS #map #schema #ast #types #exprnode #validator-arg #relational-predicate #synth-surface #reset-expr #engine-statechild #multi-statement-scan #derived-mutation-ops #s67 #s68 #s69 #a1b-complete
+#scrmlts #map #schema #ast #types #codegen #ir
 
 ## Links
 - [primary.map.md](./primary.map.md)
-- [domain.map.md](./domain.map.md)
 - [master-list.md](../../master-list.md)
 - [pa.md](../../pa.md)
+- [domain.map.md](./domain.map.md)

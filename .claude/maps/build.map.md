@@ -1,82 +1,78 @@
 # build.map.md
-# project: scrmlTS
-# updated: 2026-05-07T20:31:48Z  commit: a4eed93
+# project: scrmlts
+# updated: 2026-05-10T19:30:00Z  commit: f182f44
 
-## Development Commands (root `package.json > scripts`)
+## Development Commands (root package.json > scripts)
 
-bun run compile             — `bun run compiler/src/cli.js compile` — one-shot compile.
-bun run watch               — `bun --watch compiler/src/cli.js compile` — file-watch recompile.
-bun run lsp                 — `bun run lsp/server.js --stdio` — start LSP over stdio.
-bun run bench               — `bun run compiler/src/cli.js compile samples/compilation-tests/ --timing` — perf benchmark.
-bun run security            — compile compilation-tests + `node --check samples/compilation-tests/*/dist/*.client.js` — emitted-JS syntax / boundary verification.
-
-## Test
-
-bun run pretest             — `bash scripts/compile-test-samples.sh` — pre-compiles fixture samples used by integration tests.
-bun run test                — `bun test compiler/tests/` — full suite (S67 close: 9,241 pass / 54 skip / 1 todo / 0 fail across 457 files; 8,470 pre-commit subset).
-bun run test:coverage       — `bun test compiler/tests/ --coverage`.
-Run a single file           — `bun test compiler/tests/path/to/file.test.js`.
-Run by name                 — `bun test --test-name-pattern "<substring>" compiler/tests/`.
-
-`bunfig.toml` sets: `[test] root = "compiler/tests/"`, `timeout = 10000` ms.
-
-## CLI Subcommands (from `compiler/src/commands/`)
-
-scrml compile <file|dir>    — `commands/compile.js` — single-shot compile via api.js.
-scrml build                 — `commands/build.js` — production-style build (multi-output / library mode).
-scrml dev                   — `commands/dev.js` — dev server (uses `SCRML_PORT` or `PORT`).
-scrml serve                 — `commands/serve.js` — production serve (compiled artefacts).
-scrml init                  — `commands/init.js` — scaffold a new scrml project.
-scrml migrate               — `commands/migrate.js` — DB migration runner (consumes `<schema>` diffs from schema-differ.js).
-scrml promote               — `commands/promote.js` — **S66 SHIPPED** for `bun scrml promote` (Tier-B promotion ergonomics, §56).
-                              `--match` LIVE: span-based AST→AST rewrite for if-else → `<match>` block.
-                              `--engine` DEFERRED to Tier C (registered; exits with code 2 + notice).
-                              `--dry-run` — preview unified diff without writing.
-                              `--check` — CI-friendly; exits non-zero if any file would be promoted.
-
-## Docs Build
-
-docs/build.ts               — Bun script that renders scrml.dev docs site. Reads markdown articles
-                              from `docs/articles/*-devto-*.md`, applies `docs/_template.html` +
-                              `docs/_articles-index-template.html`, writes per-article HTML and
-                              an index listing. Run with `bun run docs/build.ts`.
-                              Uses `marked` (devDependency). Interim tooling; will be replaced by
-                              scrml-compiled site at v0.2.0.
+| Command | What it does |
+|---------|--------------|
+| `bun run compile` | Compile a .scrml file or directory using CLI |
+| `bun run watch` | Compile + watch mode via `--watch` flag |
+| `bun run test` | Run full test suite; pretest runs scripts/compile-test-samples.sh first |
+| `bun run test:coverage` | Test suite with coverage reporting |
+| `bun run pretest` | (auto) Compile all samples/compilation-tests/ fixtures to dist/ before tests |
+| `bun run bench` | Compile samples/compilation-tests/ with --timing flag for performance measurement |
+| `bun run security` | Compile test samples, then run `node --check` on all client JS output |
+| `bun run lsp` | Start the LSP server |
+| `bun run docs:build` | Build the documentation site |
 
 ## Build & Release
 
-bun run scripts/assemble-spec.sh   — assemble SPEC.md from per-section sources (legacy; SPEC.md is currently authored monolithically).
-bun run scripts/update-spec-index.sh — regenerate SPEC-INDEX.md from SPEC.md headers.
-bun run scripts/rebuild-bs-dist.ts  — rebuild the BS (block splitter) self-host distribution into `compiler/self-host/dist/`.
-bun run compiler/scripts/build-self-host.js — build the rest of the self-host dist artefacts.
+| Command | What it does |
+|---------|--------------|
+| `bun run compiler/src/cli.js build <dir>` | Build production server bundle |
+| `bun run scripts/rebuild-tab-dist.ts` | Regenerate all TAB dist artifacts [NEW S78] |
+| `bun run scripts/rebuild-self-host-dist.ts` | Regenerate all self-host dist files [NEW S78] |
+| `bun run scripts/rebuild-bs-dist.ts` | Regenerate block-splitter dist artifacts |
+| `scripts/assemble-spec.sh` | Assemble SPEC.md from section files |
+| `scripts/update-spec-index.sh` | Regenerate SPEC-INDEX.md |
+| `scripts/compile-test-samples.sh` | Batch compile all samples/compilation-tests/ |
 
-No public release tag automation — releases are tagged manually.
+## Pre-commit Hook (scripts/git-hooks/pre-commit)
 
-## Pre-commit Hooks
+Activated per-machine via: `git config core.hooksPath scripts/git-hooks`
 
-scripts/git-hooks/pre-commit        — installed via `scripts/git-hooks/install.sh`.
-scripts/verify-js.js                — runs `node --check` on emitted client JS to catch boundary regressions.
-**NEVER bypass the pre-commit hook with `--no-verify` without explicit user authorization** (per global rules in `~/.claude/CLAUDE.md`).
+Steps:
+1. Warn if committing directly to `main` branch
+2. Run: `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail`
+3. Exit 1 on test failure
 
-## CI/CD Pipeline
-NONE. There is no `.github/workflows/`, no `.gitlab-ci.yml`, no `Jenkinsfile`. All test execution is local (developer + agents running `bun test`).
+## Bun Test Config (bunfig.toml)
+
+```toml
+[test]
+root = "compiler/tests/"
+timeout = 10000
+```
+
+Run subsets:
+- `bun test compiler/tests/unit`           — unit tests only
+- `bun test compiler/tests/integration`    — integration tests only
+- `bun test compiler/tests/conformance`    — conformance tests only
+- `bun test compiler/tests/unit/<name>.test.js`  — single test file
+
+## No CI/CD Pipeline
+
+No `.github/workflows/`, `.gitlab-ci.yml`, or `Jenkinsfile` detected. CI is via local pre-commit hook.
 
 ## Docker
-NONE. No `Dockerfile`, no `docker-compose.yml`.
 
-## Editor Build
-editors/vscode/                       — separate workspace; built via the VSCode extension's own `package.json` (out-of-scope for the main compiler build).
-editors/neovim/                       — pure Lua/Vimscript; no build step.
+No Dockerfile or docker-compose.yml detected. The dev server (`scrml dev`) runs via Bun directly.
 
-## Self-host
-compiler/self-host/dist/              — compiled output of `compiler/self-host/*.scrml`; consumed by `compiler/tests/self-host/*.test.js` (4 files: ast, bpp, bs, tab). Two persistent self-host smoke failures historically deferred (see master-list.md / hand-off-65). Self-host NOT updated in S66 or S67 (documented deferral; post-v1.0.0 per user decision).
+## Self-Host Dist Artifacts
+
+Gitignored; must be built locally on each machine:
+- `compiler/dist/self-host/*.js`
+- `compiler/self-host/dist/tab.js`
+
+Rebuild: `bun run scripts/rebuild-self-host-dist.ts` and `bun run scripts/rebuild-tab-dist.ts`
 
 ## Tags
-#scrmlTS #map #build #cli #bun #self-host #pre-commit #s65 #s66 #s67 #promote-shipped #docs-build
+#scrmlts #map #build #scripts #bun #pre-commit #self-host
 
 ## Links
 - [primary.map.md](./primary.map.md)
-- [structure.map.md](./structure.map.md)
-- [test.map.md](./test.map.md)
-- [config.map.md](./config.map.md)
 - [master-list.md](../../master-list.md)
+- [pa.md](../../pa.md)
+- [config.map.md](./config.map.md)
+- [test.map.md](./test.map.md)

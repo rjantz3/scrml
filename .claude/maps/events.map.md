@@ -1,38 +1,44 @@
 # events.map.md
-# project: scrmlTS
-# updated: 2026-05-06T23:50:00Z  commit: 7334fb0
+# project: scrmlts
+# updated: 2026-05-10T19:30:00Z  commit: f182f44
 
 ## Status
-The compiler itself does not use a pub/sub event bus. EventEmitter-style emission appears only in two places:
 
-## Compiler-emitted runtime patterns (in user output, not in the compiler)
+No external event bus, EventEmitter, Kafka, RabbitMQ, or pubsub infrastructure detected in the compiler source. The compiler is a pure transformation tool (scrml → HTML/JS/CSS) without runtime event brokering in the compiler process itself.
 
-`<channel>` block (§38)         — declared in `.scrml` files. Lowered by `compiler/src/codegen/emit-channel.ts` (421 LOC) into a WebSocket-based bidirectional channel between server and client. Channels are typed (TypedAttrDecl) and route messages.
+## Runtime Pub/Sub (in compiled output)
 
-`server function*` SSE (§37)    — declared in `.scrml` files. Lowered to Server-Sent-Events generators that stream from server to client.
+The compiler EMITS WebSocket pub/sub code into compiled server output. This is output of the compiler, not the compiler's own architecture.
 
-`when message` (§38)            — listener inside a `<channel>` body. AST `WhenMessageNode` (`kind: "when-message"`).
+### WebSocket Topics (compiler/src/codegen/emit-channel.ts, emit-server.ts)
 
-`when` effect                    — AST `WhenEffectNode` (`kind: "when-effect"`); generic effect listener.
+| Mechanism | Where emitted | Pattern |
+|-----------|---------------|---------|
+| ws.subscribe(ws.data.__topic) | emit-channel.ts:476 | Server subscribes the WebSocket to a topic on connect |
+| ws.publish(ws.data.__topic, raw) | emit-channel.ts:501 | Server broadcasts to all subscribers of a topic |
+| _scrml_srv.publish(topicExpr, msg) | emit-server.ts:141 | Server function publishes data to a channel topic |
 
-`reactive-explicit-set`          — explicit reactive store mutation; AST `kind: "reactive-explicit-set"`.
+### meta.emit() Runtime Placement (compiler/src/runtime-template.js:1029)
 
-## Compiler-internal pattern
+The runtime has a `meta.emit()` mechanism for compile-time-controlled DOM injection at ^{} block positions. This is a one-way compiler-to-DOM event, not pub/sub.
 
-The compiler is a synchronous pipeline with diagnostics returned as data. There is no `EventEmitter` in `compiler/src/`. The runtime template (`compiler/src/runtime-template.js`) contains client-side reactive scheduling and DOM event wiring, but does not expose a user-facing event bus.
+### _scrml_effect / _scrml_reactive_subscribe (runtime-template.js)
 
-## Bus type
-- WebSocket channels:    `<channel>` blocks (per-file, §38).
-- SSE streams:           `server function*` (§37).
-- DOM events:            wired by `compiler/src/codegen/emit-event-wiring.ts` (696 LOC; incl. S34 fix for `${serverFn()}` markup DOM wiring).
+The compiled client runtime has reactive subscriptions via:
+- `_scrml_reactive_subscribe(name, fn)` — subscribe to a named reactive cell; fires on set
+- `_scrml_effect(fn)` — run fn reactively; subscribes to all cells accessed during execution
 
-There is no Kafka, RabbitMQ, Redis pub/sub, or in-process EventEmitter integration in the compiler or its standard runtime.
+These are the reactive wiring primitives used by event-wiring emitters. They are in compiled output, not in the compiler itself.
+
+## Bus Type
+
+None in the compiler process. Compiled outputs use Bun's WebSocket pub/sub API (topic-based) for channel features.
 
 ## Tags
-#scrmlTS #map #events #channel #sse #spec-section-37 #spec-section-38 #s65
+#scrmlts #map #events #websocket #pubsub #reactive #channels
 
 ## Links
 - [primary.map.md](./primary.map.md)
-- [domain.map.md](./domain.map.md)
-- [SPEC.md §37 §38](../../compiler/SPEC.md)
 - [master-list.md](../../master-list.md)
+- [pa.md](../../pa.md)
+- [domain.map.md](./domain.map.md)

@@ -252,8 +252,23 @@ Suggested ratification cadence: 1-2 batches per session to avoid overload. PA ha
 8. ✅ **Batch H (LSP L1-L4, 5 dirs)** — RATIFIED + EXECUTED S61 (2026-05-05). 5 dirs → `scrml-support/archive/changes/`; 2 cross-refs in J-pile dirs pre-fixed (will travel correctly when J moves).
 9. ✅ **Batch J (misc, 11 dirs)** — RATIFIED + EXECUTED S61 (2026-05-05). FINAL BATCH. 11 dirs → `scrml-support/archive/changes/` (with 2 partial-duplicate merges); 2 cross-refs fixed in source code; F4 leak detected + recovered. **All 10 batches complete; 76 dirs total dereffed.**
 
+10. ✅ **Batch K (S62-S78 SHIPPED dispatches, 93 dirs + 19 audits + 8 recon + 5 experiments + 3 deep-dives + 2 article drafts + 1 stray CLAUDE.md)** — RATIFIED + EXECUTED S79 (2026-05-10). Triggered by S79 maps-refresh non-compliance scan + user "full sweep now" authorization. Combined sweep:
+    - **93 dispatch dirs** → `scrml-support/archive/changes/` (flat, per S61 precedent). Includes A1a steps (~20), A1b steps B1-B22 (~26), A1c steps C0-C23 (~25), A7 steps A5-2..A5-6 (5), A8 steps A6-1..A6-4 (4), A9 ext5, Phase A10 (NEWLY shipped), server-keyword-deprecation batches 1+2, parallel-close, a-plus-verdict-execution, ast-builder-grammar-fixes, api-js-stdlib-enum-reexport, parsevariant-impl, phase-4d-completion-sweep, reactive-derived-decl-divergence, stage-0c.a-overload-deletion, v0next-spec-impact, phase-b14-pass10b, phase-ts-state-child-rule-recognition.
+    - **19 historical audits** → `scrml-support/archive/audits/` (NEW destination dir created). Includes a1b-b7..b22 audits (12), a1c-roadmap, item-c-temporal-engine-rule-migration, kickstarter-v0-verification-matrix, scope-c-stage-1 (+ sample-classification), spec-conformance-2026-05-10, test-conformance-2026-05-10.
+    - **8 recon docs** → `scrml-support/archive/recon/` (NEW destination dir created). All from 2026-04-29.
+    - **5 experiments docs** → `scrml-support/docs/experiments/` (NEW destination dir created). All from 2026-04-25 clueless-agent runs + SYNTHESIS + VALIDATION.
+    - **3 deep-dives docs** → `scrml-support/docs/deep-dives/` (location-correction; deep-dives belong in scrml-support per project-mapper rules). boundary-security-indirect-refs, boundary-security-progress, lsp-enhancement-scoping.
+    - **2 article drafts** → `scrml-support/archive/articles-skipped/`. Both have published `-devto-` siblings; drafts no longer canonical.
+    - **1 stray CLAUDE.md** at `benchmarks/fullstack-react/CLAUDE.md` deleted (anomalous agent-instruction file inside a benchmark subdir; no archive value).
+    - **KEEP-LIVE in scrmlTS:** `docs/changes/{predicate-gaps-deep-dive-prep, promotion-ergonomics, v0next-audit, v0next-inventory}/`; `docs/audits/{scope-c-findings-tracker, compiler-forgotten-surface-2026-05-06, hardcoded-thresholds-2026-05-10}.md`. (hardcoded-thresholds drives 5 next-priority refactors per next-priority menu; compiler-forgotten-surface is project-mapper-listed compliant; scope-c-findings-tracker is active.)
+    - **Cross-refs fixed (load-bearing live docs):** pa.md (1 line, 2 audit refs); PA-SCRML-PRIMER.md (7 refs across 6 lines); master-list.md (bulk perl substitution: ~10 dispatch + audit + recon + deep-dive refs); v0next-inventory/SCOPE-MAP-2026-05-05.md + SCOPE-SUPPLEMENT-2026-05-07.md + ARTICLE-TRUTHFULNESS-AUDIT-2026-05-05.md (bulk perl); v0next-audit/PARSER-AUDIT-2026-05-05.md (bulk perl); promotion-ergonomics/{progress,SURVEY-NOTE}.md (bulk perl).
+    - **Cross-refs left as-is (historical record):** `docs/changelog.md` cites moved dirs at-time-of-landing — these are session snapshots and remain valid as historical pointers (the dirs are now in `scrml-support/archive/changes/<same-name>/`); source/test-file comments cite dispatch dirs that originated them — informational, not load-bearing for runtime correctness.
+    - **Total combined dereffed:** **131 individual files/dirs** (93 + 19 + 8 + 5 + 3 + 2 + 1).
+    - **Total cumulative S61 + S79:** 76 + 131 = **207 individual deref operations**.
+    - **`docs/changes/` count:** 99 → 4 (KEEP-LIVE only). **`docs/audits/` count:** 22 → 3 (KEEP-LIVE only). **`docs/recon/` and `docs/experiments/` and `docs/deep-dives/` dirs removed from scrmlTS entirely** (no remaining files; dir scaffolding removed).
+
 ---
 
 ## §7 Tags
 
-#curation #docs-changes #non-compliance-item-2 #pa-survey #scope-principle #current-truth-only #deref-to-scrml-support
+#curation #docs-changes #non-compliance-item-2 #pa-survey #scope-principle #current-truth-only #deref-to-scrml-support #s79-batch-k

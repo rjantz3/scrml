@@ -1,59 +1,100 @@
 # dependencies.map.md
-# project: scrmlTS
-# updated: 2026-05-06T23:50:00Z  commit: 7334fb0
+# project: scrmlts
+# updated: 2026-05-10T19:30:00Z  commit: f182f44
 
-## Runtime Dependencies (root + compiler workspace)
-vscode-languageserver@^9.0.1                 — LSP protocol implementation; consumed by `lsp/server.js` + `handlers.js`.
-vscode-languageserver-textdocument@^1.0.11   — LSP TextDocument abstraction; used by `lsp/workspace.js`.
+## Runtime Dependencies (root package.json)
+vscode-languageserver@^9.0.1                — LSP protocol server framework (for lsp/ server)
+vscode-languageserver-textdocument@^1.0.11  — text document utilities for LSP
 
-(Note: the entire compiler is intentionally near-zero-dep — Bun stdlib + acorn-as-pre-processor pattern. acorn is bundled by Bun runtime, not declared.)
+## Runtime Dependencies (compiler/package.json)
+acorn@^8.16.0   — JavaScript parser used by ast-builder and expression-parser for ExprNode production
+astring@^1.9.0  — JavaScript AST-to-string code generator (used in codegen rewrite paths)
 
-## Dev / Build Dependencies
-@happy-dom/global-registrator@^20.8.9   — DOM polyfill registrator for `compiler/tests/browser/*.test.js`.
-happy-dom@^20.8.9                       — Browser-test DOM implementation.
-puppeteer@^24.40.0                      — Headless browser for `browser-todomvc.test.js`, `todomvc-e2e.test.js`.
+## Dev Dependencies (root package.json)
+@happy-dom/global-registrator@^20.8.9  — DOM environment registration for browser-environment tests
+happy-dom@^20.8.9                      — lightweight DOM implementation for test environment
+marked@^14.1.3                         — markdown renderer (used by docs/build.ts)
+puppeteer@^24.40.0                     — headless browser for browser integration tests
 
-## Engines / Runtime
-bun >= 1.3.13                            — declared in `package.json > engines`. Project does NOT support Node.
+## Dev Dependencies (compiler/package.json)
+@happy-dom/global-registrator@^20.8.9  — DOM environment for compiler browser tests
 
-## Internal Module Graph (high-level — read api.js for canonical chain)
+## Runtime (engine)
+bun >=1.3.13  — required runtime; used for bun:test, Bun.file, Bun.serve, Bun.build
 
-cli.js → commands/{compile,build,dev,serve,init,migrate,promote}.js
-commands/compile.js → api.js
-api.js → block-splitter.js (BS) → ast-builder.js (TAB) → module-resolver.js (MOD) → component-expander.ts (CE)
-       → validators/{post-ce-invariant.ts, attribute-interpolation.ts, attribute-allowlist.ts} (VP-1)
-       → name-resolver.ts (NR) + symbol-table.ts (SYM)
-       → protect-analyzer.ts (PA) → route-inference.ts (RI)
-       → type-system.ts (TS) → meta-checker.ts (MC) → meta-eval.ts (ME)
-       → dependency-graph.ts (DG) → batch-planner.ts (BP) → code-generator.js (CG)
-       → codegen/index.ts → emit-{client,server,logic,html,css,bindings,event-wiring,reactive-wiring,
-                                 control-flow,expr,functions,channel,machines,machine-property-tests,
-                                 parse-variant,predicates,sync,test,worker,library,lift}.{ts,js}
-       → rewrite.ts (mangler) + analyze.ts + collect.ts + reactive-deps.ts + scheduling.ts + ir.ts
-       → runtime-template.js + runtime-chunks.ts + db-driver.ts + type-encoding.ts + source-map.ts
+## Internal Module Graph
 
-ast-builder.js → expression-parser.ts → tokenizer.ts → types/ast.ts (Span, *Node, ASTNode, ExprNode kinds)
-ast-builder.js → block-splitter.js → body-pre-parser.ts → tokenizer.ts
-ast-builder.js → html-elements.js + tailwind-classes.js + attribute-registry.js
+```
+cli.js
+  → commands/compile.js, commands/dev.js, commands/build.js,
+    commands/serve.js, commands/migrate.js, commands/init.js, commands/promote.js
 
-api.js → lint-ghost-patterns.js + gauntlet-phase1-checks.js + gauntlet-phase3-eq-checks.js (lint passes)
-api.js → schema-differ.js (SQL schema reconciliation) + chart-utils.js (charting helpers)
+api.js  (programmatic API entry — orchestrates pipeline)
+  → block-splitter.js (Stage 2 BS)
+  → ast-builder.js (Stage 3 TAB)
+  → name-resolver.ts (Stage 3.05 NR)
+  → module-resolver.js (Stage 3.1 MOD)
+  → component-expander.ts (Stage 3.2 CE)
+  → validators/post-ce-invariant.ts, validators/attribute-interpolation.ts,
+    validators/attribute-allowlist.ts (Stage 3.3 UVB)
+  → protect-analyzer.ts (Stage 4 PA)
+  → route-inference.ts (Stage 5 RI)
+  → monotonicity-analyzer.ts
+  → idempotency-store-resolver.ts
+  → type-system.ts (Stage 6 TS)
+  → meta-checker.ts, meta-eval.ts (Stage 6.5 META)
+  → dependency-graph.ts (Stage 7 DG)
+  → batch-planner.ts (Stage 7.5)
+  → code-generator.js → codegen/index.ts (Stage 8 CG)
+  → lint-ghost-patterns.js, lint-i-match-promotable.js (pre-Stage-2 lint)
+  → gauntlet-phase1-checks.js, gauntlet-phase3-eq-checks.js (post-TAB diagnostics)
+  → codegen/compat/parser-workarounds.js (setBPPOverrides — BPP shim)
 
-LSP: lsp/server.js → lsp/handlers.js (L1+L2+L3) → lsp/workspace.js + lsp/l4.js (L4 code actions + signature help)
-LSP shares: api.js (compile-on-hover) + tokenizer.ts + ast-builder.js + type-system.ts
+codegen/index.ts  (runCG)
+  → codegen/analyze.ts → codegen/collect.ts, codegen/usage-analyzer.ts
+  → codegen/emit-html.ts → codegen/binding-registry.ts
+  → codegen/emit-css.ts
+  → codegen/emit-server.ts
+  → codegen/emit-client.ts (or emit-client.js — hybrid JS/TS)
+  → codegen/emit-library.ts
+  → codegen/emit-machines.ts
+  → codegen/emit-variant-guard.ts  [NEW S78]
+  → codegen/emit-engine.ts
+  → codegen/emit-channel.ts
+  → codegen/emit-event-wiring.ts
+  → codegen/emit-reactive-wiring.ts
+  → codegen/emit-expressions.ts (emit-expr.ts)
+  → codegen/emit-control-flow.ts
+  → codegen/emit-functions.ts
+  → codegen/emit-predicates.ts
+  → codegen/emit-bindings.ts
+  → codegen/emit-sync.ts
+  → codegen/emit-test.ts
+  → codegen/emit-machine-property-tests.ts
+  → codegen/emit-worker.ts
+  → codegen/emit-synth-surface.ts
+  → codegen/emit-validators.ts
+  → codegen/emit-parse-variant.ts
+  → codegen/emit-logic.ts
+  → codegen/emit-messages.ts
+  → codegen/emit-lift.js
+  → codegen/ir.ts, codegen/errors.ts, codegen/context.ts
+  → codegen/source-map.ts, codegen/type-encoding.ts
+  → codegen/var-counter.ts, codegen/utils.ts
+  → codegen/reactive-deps.ts, codegen/scheduling.ts
+  → codegen/rewrite.ts
+  → codegen/runtime-chunks.ts
+  → codegen/db-driver.ts
+  → codegen/parse-after-duration.ts
 
-stdlib runtime bridge: api.js → STDLIB_RUNTIME_DIR (compiler/runtime/stdlib/{auth,crypto,store}.js) — copied verbatim into `dist/_scrml/<name>.js` so emitted JS resolves `import "scrml:<name>"` rewrites.
-
-## Self-host
-compiler/self-host/{ast,bpp,bs,cg,dg,meta-checker,module-resolver,pa,ri,tab,ts}.scrml → mirror passes; built by compiler/scripts/build-self-host.js → compiler/self-host/dist/.
-compiler/self-host/cg-parts/ → split codegen pieces (section-assembly.js etc.).
+lsp/server.js → lsp/handlers.js, lsp/workspace.js, lsp/l4.js
+```
 
 ## Tags
-#scrmlTS #map #dependencies #compiler #internal-graph #lsp #self-host #s65
+#scrmlts #map #dependencies #pipeline #bun #acorn
 
 ## Links
 - [primary.map.md](./primary.map.md)
-- [structure.map.md](./structure.map.md)
-- [domain.map.md](./domain.map.md)
 - [master-list.md](../../master-list.md)
 - [pa.md](../../pa.md)
+- [structure.map.md](./structure.map.md)

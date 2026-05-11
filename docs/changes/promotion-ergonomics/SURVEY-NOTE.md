@@ -76,10 +76,10 @@ export interface IfStmtNode extends BaseNode {
 
 Working tree at survey time:
 - `M compiler/src/ast-builder.js` — ast-builder grammar fixes dispatch (B5 cell classifier territory may also touch)
-- `A docs/changes/phase-a1b-step-b5-cell-classifier/` — B5 dispatch staged
+- `A scrml-support/archive/changes/phase-a1b-step-b5-cell-classifier/` — B5 dispatch staged
 - `A docs/changes/predicate-gaps-deep-dive-prep/SCOPE.md` — orthogonal
 - `?? compiler/tests/unit/_probe-export.test.js` — probe file (likely A+ dispatch artifact, NOT MINE)
-- `?? docs/changes/ast-builder-grammar-fixes/` — ast-builder grammar fixes
+- `?? scrml-support/archive/changes/ast-builder-grammar-fixes/` — ast-builder grammar fixes
 
 **A+ dispatch (#1+#2) HAS NOT LANDED YET** — none of the recent commits (`432b13e`, `8479e6d`, `814983d`, `747abc6`, `066033c`) are titled "A+ verdict #1+#2" or "did-you-mean: match" or "W-LIFECYCLE-CANDIDATE tightening." The latest commit on `lint-ghost-patterns.js` Pattern 16 was a survey-stage scaffold (`432b13e1` WIP A+ verdict).
 

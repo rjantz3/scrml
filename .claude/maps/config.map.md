@@ -1,69 +1,53 @@
 # config.map.md
-# project: scrmlTS
-# updated: 2026-05-06T23:50:00Z  commit: 7334fb0
+# project: scrmlts
+# updated: 2026-05-10T19:30:00Z  commit: f182f44
 
 ## Environment Variables
 
-(Read from `process.env.*`, `Bun.env.*`, and `env?.<X>` references in compiler/src + lsp + scripts. No `.env.example` exists in this repo; values are provided ad-hoc by user / dispatch shells.)
+| Key | Required | Source | Description |
+|-----|----------|--------|-------------|
+| SCRML_PORT | optional | compiler/src/serve-client.js, compiler/src/commands/serve.js | Dev/compiler server port (default: 3100 for serve command, configured per invocation) |
+| PORT | optional | compiler/src/commands/build.js | Production server port injected into build output (default: 3000) |
 
-PORT                       — optional — dev server port (alternative to SCRML_PORT).
-SCRML_PORT                 — optional — preferred dev server port (overrides PORT).
-SCRML_DEBUG                — optional — debug-mode toggle inside compiler passes; truthy enables extra logging in TS / DG / CG diagnostics.
-SCRML_NO_ELIDE             — optional — when set to `1`, disables §51.5 validation elision (S28 env gate). Used in tests to force unelided output paths.
-SCRML_STRICT_BOUNDARY      — optional — strict server/client boundary enforcement gate (used by emit-client / emit-server boundary tests).
-SCRML_RUNTIME              — optional — opt-in runtime variant selector (read inside runtime-template emission).
-SCRML_KEYWORDS             — optional — overrides the keyword set (test-only hook).
-SCRML_MODULES              — optional — overrides registered modules (test-only hook).
-SCRML_ATTRIBUTES           — optional — overrides attribute-registry contents (test-only hook).
-SCRML_BATCH_IN__           — optional — internal toggle inside batch-planner.ts (double-underscore suffix indicates internal/test).
-SCRML_PLACEHOLDER_PREFIX   — optional — overrides the placeholder prefix used by the rewriter / mangler.
-
-## User-program env (only referenced syntactically inside compiled `.scrml` examples — NOT compiler config)
-
-Bun.env.API_KEY, Bun.env.SECRET, Bun.env.X — appear only in test fixtures / examples. Not consumed by the compiler itself.
+No `.env.example` or `.env.template` present. The compiler is a CLI tool — no application secrets are handled by the compiler process itself. User scrml programs may reference database URLs and secrets, but those are in compiled output, not in compiler source.
 
 ## Feature Flags
-The compiler does not implement runtime feature flags. All gating is via env vars (above) or compiler settings (§28 `<program>` blocks inside .scrml files).
+
+No compile-time feature flags detected in source. Compiler behavior is controlled via CLI arguments (see build.map.md).
 
 ## Config Files
 
-### `bunfig.toml` (repo root)
+### bunfig.toml  [project root]
+```
 [test]
-  root: "compiler/tests/"
-  timeout: 10000
+root = "compiler/tests/"
+timeout = 10000
+```
 
-### `package.json` (repo root)
-- `type: "module"` — ESM throughout.
-- `workspaces: ["compiler"]`.
-- `engines.bun: ">=1.3.13"`.
-- `bin.scrml: "compiler/bin/scrml.js"` — installed CLI entry.
-- `scripts.{compile,pretest,test,test:coverage,watch,bench,security,lsp}` — see build.map.md.
+### compiler/package.json  [workspace]
+name: "compiler", version: "0.1.0", dependencies: acorn@^8.16.0, astring@^1.9.0
 
-### `compiler/package.json`
-Workspace child for the compiler itself (programmatic API, codegen, validators).
+### Root package.json  [project root]
+name: "scrmlts", version: "0.2.0", engines: { bun: ">=1.3.13" }, workspaces: ["compiler"]
 
-### `editors/vscode/package.json`
-VSCode extension manifest (separate from compiler).
+## Runtime Compile Options (CLI flags — not environment-based)
 
-### `.gitignore`
-Excludes: node_modules/, dist/, .claude/, *.log, .env, .env.local, editors/vscode/out/, editors/vscode/bun.lock, docs/SEO-LAUNCH.md (uncommitted local SEO draft), .tmp/ (per-dispatch agent scratchpad).
-
-### CI / Deployment
-NONE — no `.github/workflows/`, no `.gitlab-ci.yml`, no `Dockerfile`, no Terraform.
-
-## Per-program scrml-level config (in-file, NOT environment)
-
-`<program>` blocks inside `.scrml` files declare per-file compiler settings (§28 / §43); these are AST-level, not OS env. They flow through TAB → CG and configure routing, auth, middleware, title, etc.
-
-## Security Note
-NEVER commit `.env` / `.env.local`. `.gitignore` enforces this. The compiler does not load `.env` files itself; user programs use `Bun.env.*` directly which Bun reads from the process environment.
+| Flag | Type | Description |
+|------|------|-------------|
+| --output-dir, -o | string | Output directory (default: dist/ next to input) |
+| --verbose, -v | boolean | Per-stage timing and counts |
+| --convert-legacy-css | boolean | Convert `<style>` blocks to `#{...}` |
+| --embed-runtime | boolean | Embed runtime inline instead of separate file |
+| --emit-batch-plan | boolean | Print Stage 7.5 BatchPlan as JSON |
+| --emit-machine-tests | boolean | Emit .machine.test.js per source (§51.13) |
+| --watch, -w | boolean | Watch for changes (compile command only) |
+| --port | number | HTTP port for dev server (default: 3000) |
 
 ## Tags
-#scrmlTS #map #config #env-vars #bun #s65
+#scrmlts #map #config #environment
 
 ## Links
 - [primary.map.md](./primary.map.md)
-- [build.map.md](./build.map.md)
-- [structure.map.md](./structure.map.md)
 - [master-list.md](../../master-list.md)
 - [pa.md](../../pa.md)
+- [build.map.md](./build.map.md)

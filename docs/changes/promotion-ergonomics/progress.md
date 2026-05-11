@@ -8,7 +8,7 @@ Append-only timestamped log per global agent rules.
 
 - pwd verified: /home/bryan-maclee/scrmlMaster/scrmlTS
 - HEAD: 432b13e1 — at-or-after 8479e6d ✓
-- Working tree NOT clean: M ast-builder.js (other dispatch); A docs/changes/phase-a1b-step-b5-cell-classifier; A docs/changes/predicate-gaps-deep-dive-prep; ?? compiler/tests/unit/_probe-export.test.js; ?? docs/changes/ast-builder-grammar-fixes — these belong to other concurrent dispatches; will not touch.
+- Working tree NOT clean: M ast-builder.js (other dispatch); A scrml-support/archive/changes/phase-a1b-step-b5-cell-classifier; A docs/changes/predicate-gaps-deep-dive-prep; ?? compiler/tests/unit/_probe-export.test.js; ?? scrml-support/archive/changes/ast-builder-grammar-fixes — these belong to other concurrent dispatches; will not touch.
 
 ## 2026-05-06 — survey done
 

@@ -1,99 +1,131 @@
 # test.map.md
-# project: scrmlTS
-# updated: 2026-05-08T00:00:00Z  commit: f59bbcc
+# project: scrmlts
+# updated: 2026-05-10T19:30:00Z  commit: f182f44
 
 ## Test Framework
-Runner:        Bun's built-in test runner (`bun test`).
-Config:        `bunfig.toml` → `[test] root = "compiler/tests/"`, `timeout = 10000`.
-Browser DOM:   `@happy-dom/global-registrator@^20.8.9` + `happy-dom@^20.8.9` (registered globally for browser tests).
-E2E browser:   `puppeteer@^24.40.0` (used by `browser-todomvc.test.js`, `todomvc-e2e.test.js`).
 
-Run all:           `bun test compiler/tests/`
-Run single file:   `bun test compiler/tests/unit/<file>.test.js`
-Run by name:       `bun test --test-name-pattern "<substring>" compiler/tests/`
-Coverage:          `bun test compiler/tests/ --coverage`
-Pre-test compile:  `bash scripts/compile-test-samples.sh` (auto-runs as `pretest` hook).
+| Field | Value |
+|-------|-------|
+| Runner | bun:test (built-in) |
+| Config | bunfig.toml (`root = "compiler/tests/"`, `timeout = 10000`) |
+| Pretest | `bash scripts/compile-test-samples.sh` — compiles ~788 sample fixtures |
+| Run all | `bun test compiler/tests/` |
+| Run subset | `bun test compiler/tests/unit` / `compiler/tests/integration` / `compiler/tests/conformance` |
+| Run single | `bun test compiler/tests/unit/<file>.test.js` |
+| With bail | `bun test ... --bail` (used by pre-commit hook) |
+| Coverage | `bun test compiler/tests/ --coverage` |
 
-## Baseline (S69 close, commit f59bbcc)
-**9,626 pass / 60 skip / 1 todo / 0 fail (full suite) across 469 files.**
-**~8,870 pass (pre-commit subset).**
-Net +385 from S67 close (a4eed93): S68 +184 (B11+B13+B12+B14+B15+B16+B17 landed), S69 +201 (B18+B19+B20+B21+B22 landed). 0 regressions cumulative.
-S69 per-step delta: B18 +55 / B19 +13 / B20 +81 (includes match-arm payload-binding Form 1b bonus) / B21 +27 / B22 +25.
+## Test Counts (S78 close, 2026-05-10)
+11,051 pass / 77 skip / 1 todo / 0 fail
 
 ## Test Categories
 
-### compiler/tests/unit/  (329 files)
-Per-module unit tests. Largest bucket.
-S68 new test files:
-- `synth-validity-surface.test.js` (544 LOC) — B11 compound synth-cell registry (§6.11 + §55 surface).
-- `derived-with-validators.test.js` — B13 E-DERIVED-WITH-VALIDATORS + Level-1 inline-override extraction.
-- `per-field-synth-surface.test.js` (652 LOC) — B12 per-field synth cells + ScopeKind `"field"`.
-- `engine-binding-b14.test.js` (547 LOC) — B14 engine binding + auto-declared variable + MOD engine-aware exportRegistry.
-- `engine-statechild-b15.test.js` (524 LOC) — B15 state-child exhaustiveness + rule= typer + initial= validation.
-- `derived-engine-rejections.test.js` — B16 E-DERIVED-ENGINE-* family + cycle detection.
-- `engine-component-scope-b17.test.js` (324 LOC) — B17 E-COMPONENT-ENGINE-SCOPE.
+| Category | Path | Approx Count |
+|----------|------|--------------|
+| Unit | compiler/tests/unit/ | ~420 files |
+| Integration | compiler/tests/integration/ | ~75 files |
+| Conformance | compiler/tests/conformance/ | ~35 files |
 
-S69 new test files:
-- `multi-statement-handler-b18.test.js` (646 LOC) — B18 L19 E-MULTI-STATEMENT-HANDLER (markup-attr + engine state-child :-shorthand).
-- `channel-placement-shared-b19.test.js` (342 LOC) — B19 E-CHANNEL-INSIDE-PROGRAM + E-CHANNEL-SHARED-MODIFIER.
-- `bare-variant-inference-b20.test.js` (369 LOC) — B20 E-VARIANT-AMBIGUOUS + E-TYPE-063 (§14.10 bare-variant inference).
-- `refinement-three-zone-b21.test.js` (448 LOC) — B21 refinement-type three-zone §53 (boundary-zone hook + trusted-zone scope upgrade).
-- `reset-target-shape-b22.test.js` (451 LOC) — B22 E-RESET-INVALID-TARGET (reset(@cell) target-shape validation, multi-level compound nav).
+## Unit Test Coverage Highlights
 
-S67 new test files (still present):
-- `derived-circular-dep.test.js` (450 LOC) — E-DERIVED-CIRCULAR-DEP.
-- `derived-value-mutate.test.js` (474 LOC) — E-DERIVED-VALUE-MUTATE, three mutation forms.
-- `validator-arg-parsing.test.js` (385 LOC) — B9 ValidatorArg parsing.
-- `validator-catalog.test.js` (227 LOC) — UNIVERSAL_CORE_PREDICATES catalog.
-- `validator-circular-dep.test.js` (242 LOC) — E-VALIDATOR-CIRCULAR-DEP.
-- `validator-type-check.test.js` (251 LOC) — E-TYPE-031 four shapes.
+Key test files grouped by domain:
 
-### compiler/tests/integration/  (31 files + per-test scratch dirs `_tmp_*`)
-Cross-module integration. S68-S69 updates:
-- `parse-shapes-v0next.test.js` — updated to assert structured ExprNodes (not raw strings) for validator args.
-- `symbol-table.test.js` — updated for B11/B12/B13/B14+ pass additions.
-Examples: `self-compilation.test.js`, `self-host-smoke.test.js`, `cross-file-components.test.js`, `expr-parity.test.js`, `expr-node-corpus-invariant.test.js`, `kickstarter-v2-smoke.test.js`, `oq-2-stdlib-runtime-resolution.test.js`, `parse-variant-runtime.test.js`, `parse-import-pinned.test.js`, `parse-mutation-shapes.test.js`, `parse-reset-keyword.test.js`, `lin-decl-emission.test.js`, `lin-enforcement-e2e.test.js`, `program-documentary-attrs.test.js`, `sql-001-bracket-matched.test.js`, `uvb-w1-pipeline.test.js`.
+**AST / Tokenizer / Parser**
+ast-builder-*.test.js, tokenizer-*.test.js, expression-parser.test.js, block-splitter.test.js,
+body-pre-parser (implicit), regex-tokenize.test.js
 
-### compiler/tests/conformance/  (81 files)
-- `block-grammar/` — block grammar conformance (largest sub-bucket).
-- `s32-fn-state-machine/` — §54.6 / §33.6 fn purity inside state-machine transitions.
-- `tab/` — TAB conformance fixtures.
+**Pipeline Stages**
+code-generator.test.js, type-system.test.js, dependency-graph.test.js, protect-analyzer.test.js,
+route-inference.test.js, batch-planner.test.js, symbol-table.test.js, binding-registry.test.js,
+name-resolver (p1e-name-resolver.test.js), module-resolver.test.js
 
-### compiler/tests/browser/  (11 files)
-happy-dom + puppeteer tests: `browser-bind-value`, `browser-class-binding`, `browser-components`, `browser-conditionals`, `browser-forms`, `browser-reactive-arrays`, `browser-todomvc`, `browser-todo`, `browser-transitions`, `runtime-behavior`, `todomvc-e2e`.
+**Codegen Emitters**
+emit-html.test.js (implicit), emit-match.test.js, emit-test.test.js, emit-library.test.js,
+emit-lift.test.js, emit-logic.test.js, emit-logic-nested-fn.test.js,
+engine-body-render.test.js, engine-body-children.test.js [Phase A10 S78],
+engine-ontimeout-codegen.test.js, engine-onIdle-watchdog.test.js [S77]
 
-### compiler/tests/lsp/  (10 files)
-LSP coverage L1+L2+L3+L4: `analysis`, `completions`, `document-symbols`, `hover`, `l3-component-prop-completions`, `l3-import-completions`, `l3-sql-completions`, `l4-code-actions`, `l4-signature-help`, `workspace-l2`.
+**Engine / State Machines**
+machine-codegen.test.js, machine-parsing.test.js, machine-guards-integration.test.js,
+machine-types.test.js, engine-*.test.js (8 files), computed-delay.test.js, timeout.test.js,
+engine-ontimeout-end-to-end.test.js [integration, S77]
 
-### compiler/tests/self-host/  (4 files)
-Self-host conformance tests that compile + run `compiler/self-host/*.scrml` mirrors: `ast.test.js`, `bpp.test.js`, `bs.test.js`, `tab.test.js`.
+**Validators / Type System**
+validator-catalog.test.js, validator-arg-parsing.test.js, validator-type-check.test.js,
+type-encoding.test.js (4 files), type-system.test.js
 
-### compiler/tests/commands/  (3 files)
-CLI subcommand tests: `build-adapters`, `init`, `library-mode-types`.
+**SQL / Database**
+db-driver.test.js, sql-batching-*.test.js, sql-batch-*.test.js, sql-params.test.js,
+sql-write-ops.test.js, reactive-decl-sql-chained-call.test.js
 
-### compiler/tests/helpers/  (2 files)
-Shared helpers: `expr.ts` (expression-fixture helper), `extract-user-fns.js` (test-input scrubber).
+**Auth / CSRF**
+csrf-baseline.test.js, csrf-bootstrap.test.js, session-auth.test.js, stdlib-auth.test.js, stdlib-oauth.test.js
+
+**Channels / SSE / WebSockets**
+channel.test.js, server-function-sse.test.js, p3a-*.test.js (channel cross-file, 6 files)
+
+**Stdlib**
+stdlib-cron.test.js, stdlib-format.test.js, stdlib-fs.test.js, stdlib-http.test.js,
+stdlib-path.test.js, stdlib-process.test.js, stdlib-redis.test.js, stdlib-regex.test.js,
+stdlib-router.test.js, stdlib-store.test.js, stdlib-time.test.js
+
+**Reactivity**
+reactive-arrays.test.js, reactive-deps.test.js, reactive-derived.test.js, runtime-reactivity.test.js
+
+**Components**
+component-expander.test.js, component-tags.test.js, cross-file-components.test.js, snippet-slot.test.js
+
+**Lint**
+lint-ghost-patterns.test.js, lint-i-match-promotable.test.js, lint-w-lint-013-*.test.js
+
+**CSS**
+css-at-rules.test.js, css-scope.test.js, css-variable-bridge.test.js, css-brace-stripping.test.js
+
+**Meta**
+meta-checker.test.js, meta-eval.test.js, meta-effect.test.js, meta-integration.test.js
+
+## Conformance Tests
+
+Located in `compiler/tests/conformance/`. Test SPEC §34 error codes:
+
+conf-AUTH-003.test.js, conf-AUTH-004.test.js, conf-AUTH-005.test.js,
+conf-CG-001-warn.test.js, conf-CG-010.test.js, conf-CG-014.test.js,
+conf-CTRL-011.test.js, conf-ERROR-008.test.js, conf-IMPORT-007.test.js,
+conf-LIFECYCLE-015.test.js, conf-LOOP-005.test.js, conf-LOOP-006.test.js, conf-LOOP-007.test.js,
+conf-META-EVAL-002.test.js
+
+Subdir conformance: `s32-fn-state-machine/` (with REGISTRY.md), `tab/`, `block-grammar/`
 
 ## Fixtures & Factories
 
-samples/                          — `.scrml` programs used by integration + bench compiles.
-samples/compilation-tests/        — large bucket of compile-only fixtures (counted only, not enumerated).
-samples/gauntlet-r{11,13,14,15,18,19}/, samples/gauntlet-s19-phase4/  — gauntlet sample sets.
-benchmarks/                       — perf-bench inputs.
-compiler/tests/integration/_tmp_*/ — per-test scratch dirs (auto-created; not committed if .gitignored).
+| Path | Contents |
+|------|----------|
+| compiler/tests/fixtures/ | promote-match-canonical.scrml, expr.ts (ExprNode builders), extract-user-fns.js |
+| compiler/tests/helpers/ | expr.ts — structured ExprNode test construction utilities |
+| compiler/tests/unit/__fixtures__/ | per-test scrml/JS snippet fixtures |
+| compiler/tests/unit/_tmp_*/ | temporary snapshot directories (bug regression fixtures) |
+| samples/compilation-tests/ | ~788 .scrml fixtures compiled by pretest; dist/ output gitignored |
 
 ## Pattern
 
-Tests use Bun's `test()` / `describe()` / `expect()` API. A typical compile-then-assert test imports `compileSource` (or similar) from `compiler/src/api.js`, runs the full pipeline against an inline `.scrml` source string or a `samples/` fixture, then asserts on the returned diagnostics, AST shape, or emitted JS/HTML/CSS strings. Browser tests register happy-dom globally via `@happy-dom/global-registrator` and exercise the runtime template against the emitted client bundle. Self-host tests build `compiler/self-host/dist/*` first, then assert that scrml-source-of-the-compiler produces the same outputs as the JS-source compiler against fixtures.
+Tests use `bun:test` (`describe`, `it`, `expect`). Unit tests for pipeline passes typically:
+1. Construct a minimal scrml source string or AST fragment
+2. Run the target stage function directly (e.g. `splitBlocks(src)`, `buildAST(blocks)`, `runTS(ast, ...)`)
+3. Assert on the returned structure using `expect().toEqual()`, `expect().toContain()`, `expect().toMatchObject()`
 
-Two persistent self-host smoke failures (historical, deferred per user) — see master-list.md.
+Integration tests run the full `compile()` API from `api.js` on a .scrml source string and assert on:
+- The output HTML string (structure, data attributes)
+- The output client JS string (reactive wiring, event delegation)
+- The output server JS string (route handlers, SQL)
+
+Conformance tests assert that a given scrml input produces a specific error code (`E-AUTH-003`, etc.) from the pipeline error array.
 
 ## Tags
-#scrmlTS #map #test #bun-test #happy-dom #puppeteer #self-host #s67 #s68 #s69 #9626-pass #a1b-complete #b11 #b12 #b13 #b14 #b15 #b16 #b17 #b18 #b19 #b20 #b21 #b22 #synth-surface #engine-statechild #bare-variant #refinement-three-zone #reset-target
+#scrmlts #map #test #bun #conformance #unit #integration
 
 ## Links
 - [primary.map.md](./primary.map.md)
-- [build.map.md](./build.map.md)
-- [structure.map.md](./structure.map.md)
 - [master-list.md](../../master-list.md)
 - [pa.md](../../pa.md)
+- [build.map.md](./build.map.md)
+- [error.map.md](./error.map.md)

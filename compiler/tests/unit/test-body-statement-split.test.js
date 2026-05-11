@@ -291,7 +291,7 @@ describe("test-body §7: emitted JS loads + passes under bun:test", () => {
 
     // Spawn `bun test` on the emitted JS — must load + pass cleanly.
     const child = spawnSync("bun", ["test", testJsPath], {
-      cwd: "/home/bryan/scrmlMaster/scrmlTS",
+      cwd: process.cwd(),
       encoding: "utf8",
       timeout: 30_000,
     });

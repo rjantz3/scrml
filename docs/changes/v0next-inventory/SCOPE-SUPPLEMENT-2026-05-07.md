@@ -54,7 +54,7 @@ The 2026-05-05 SCOPE-MAP estimate was ~280-440h (post-S58 spec freeze; pre-S66 s
 
 | Phase | Description | Est | Source |
 |---|---|---|---|
-| **A7** (master-list) / **A5** (IMPLEMENTATION-ROADMAP §2.5) | S67 ratified engine + temporal extensions: DD-Harel hierarchy + history + internal/external + parallel sugar (Insight 23) + Item C temporal surface migration (`<onTimeout>` element) + computed-delay relaxation + Item G B-shakeable timeouts | ~50-80h | Insight 23 + Item C audit (`docs/audits/item-c-temporal-engine-rule-migration-rule4-audit-2026-05-07.md`) + master-PA inbox 2026-05-07-1327 + 1347 |
+| **A7** (master-list) / **A5** (IMPLEMENTATION-ROADMAP §2.5) | S67 ratified engine + temporal extensions: DD-Harel hierarchy + history + internal/external + parallel sugar (Insight 23) + Item C temporal surface migration (`<onTimeout>` element) + computed-delay relaxation + Item G B-shakeable timeouts | ~50-80h | Insight 23 + Item C audit (`scrml-support/archive/audits/item-c-temporal-engine-rule-migration-rule4-audit-2026-05-07.md`) + master-PA inbox 2026-05-07-1327 + 1347 |
 | **A8** (master-list) / **A6** (IMPLEMENTATION-ROADMAP §2.6) | test-bind (effects-as-data middle path): `test-bind <serverFnName> = <handler>` declaration in `~{}` blocks; compile-time conditional + dead-code elimination | ~6-12h | Insight 22 |
 
 **Net add to v0.2.0: ~57-94h** (~24-30% of the post-S66 baseline).
@@ -107,9 +107,9 @@ User cost-acceptance confirmed S67 (verbatim, indirect via master PA): *"for the
 ## §5 Cross-references
 
 - **Original SCOPE-MAP** (canonical for 2026-05-05): `docs/changes/v0next-inventory/SCOPE-MAP-2026-05-05.md`
-- **IMPLEMENTATION-ROADMAP** (extended at S67): `docs/changes/v0next-spec-impact/IMPLEMENTATION-ROADMAP.md` §2.5 + §2.6
+- **IMPLEMENTATION-ROADMAP** (extended at S67): `scrml-support/archive/changes/v0next-spec-impact/IMPLEMENTATION-ROADMAP.md` §2.5 + §2.6
 - **Master-list dashboard**: `master-list.md` §0 (live)
-- **Item C audit**: `docs/audits/item-c-temporal-engine-rule-migration-rule4-audit-2026-05-07.md`
+- **Item C audit**: `scrml-support/archive/audits/item-c-temporal-engine-rule-migration-rule4-audit-2026-05-07.md`
 - **Insight 22 (test-bind)**: `scrml-support/design-insights.md` 2026-05-07 entry
 - **Insight 23 (DD-Harel)**: `scrml-support/design-insights.md` 2026-05-07 entry
 - **User-voice S67 entries**: `scrml-support/user-voice-scrmlTS.md` (multiple S67 entries)
