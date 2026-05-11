@@ -2,7 +2,34 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-11 S80 close, PA-verified at pre-commit hook on `55d41f7`): **10,416 pass / 62 skip / 1 todo / 0 FAIL** (506 files; pre-commit subset). **Full suite** (`bun run test` — includes browser/lsp/commands/self-host): **11,139 pass / 73 skip / 1 todo / 0 FAIL** (534 files). +4 new canonical engine-temporal samples (engine-005 through engine-008) covering A5 features F1, F1a, F1b, F2, F3. Zero regressions; self-host parity restored.
+Current baseline (2026-05-11 S81 close, PA-verified at pre-commit hook on `dd29e3b`): **10,433 pass / 66 skip / 1 todo / 0 FAIL** (507 files; pre-commit subset). **Full suite** (`bun run test` — includes browser/lsp/commands/self-host): **11,181 pass / 77 skip / 1 todo / 0 FAIL** (535 files). 7 commits across S81: F.1/F.2 adopter-override surface, strict self-host rebuild gate, Phase A10 deferred-items closure, SPEC-INDEX regen, D3 pure-fn monotonicity detection, D1 export-synth modifier propagation, OQ-2 debounce/throttle imperative-form retirement. +42 net new tests vs S80 close; zero regressions across all 7 ships.
+
+### 2026-05-11 (S81 close — wrap)
+
+S81 (single-day session, 2026-05-11). **7 commits + 1 push pair per ship** under explicit user authorization, chaining smaller items into a larger retirement. All 7 ships pre-commit-hook-verified; full-suite re-run at session close confirmed zero regressions.
+
+- **Ships (in commit order):**
+  - `ab980c0` — F.1 `<program cors-max-age=N>` (Access-Control-Max-Age override; default 86400s per §39.2.1 amendment) + F.2 `<program channel-reconnect=N>` (project-level WS reconnect cadence; default 2000ms per §38.3.1 NEW subsection). Closes Bucket C candidates from S78 §7 caveat per-file deep-read follow-up. +21 tests.
+  - `7189bd9` — strict self-host rebuild gate at `scripts/rebuild-self-host-dist.ts` (exits 1 on host-compiler non-warning errors; closes pre-S81 silent leak). Spec-conformance audit doc filed at `docs/audits/self-host-spec-conformance-2026-05-11.md`: 362 null/undefined violations across 13 self-host files inventoried + 4 adjacent violation categories (E-EQ-004 / E-ERROR-007 / E-FN-003 / E-MU-001 / E-SCOPE-001) breakdown documented; sweep DEFERRED to v0.3.0+ per "self-hosting is orthogonal to v0.2.0" user direction. Honors the "null/undefined never compile, library mode inclusive" directive (user-voice S81).
+  - `f50f313` — Phase A10 deferred items closed: TS body-walk re-enablement on engine-decl + payload-binding scope injection. Closes the "Pre-A10 type-system early-returned `tAsIs()`" gate that left engine state-child bodies untyped. Now typos `${mssg}` inside `<Error msg>` fire E-SCOPE-001 at compile time. +7 tests.
+  - `b6c8e1c` — SPEC-INDEX line-range regen + persistent `scripts/regen-spec-index.ts` (TS, idempotent, preserves summaries; handles §49's single-`#` heading). 62 Sections-table rows refreshed; "Total lines" updated 25,508 → 26,286.
+  - `7173bfe` — D3 pure-fn call detection in monotonicity classifier (A9 Ext 5 carry-forward). Threads `FunctionPurityLookup` through `analyzeMonotonicity` → `classifyStatement`; bare-expr calls whose callee resolves to fn-kind per §48 classify monotone per §19.9.6 rule (e). Reduces over-emission of `Idempotency-Key` envelopes (HTTP bandwidth + dedup-table rows) for CPS batches whose only side effect is a pure-fn call. +13 tests. Project-mapper incremental refresh bundled in same commit.
+  - `acfd20c` — D1 export-synth idempotent modifier propagation (A9 Ext 5 carry-forward). The synth function-decl from `export function foo().idempotent()` now carries `idempotentModifier: true` so downstream walkers (monotonicity classifier, codegen) read the flag correctly. Tokenization-tolerant regex (`/\)\s*\.\s*idempotent\s*\(\s*\)/`) on the export raw. +5 tests.
+  - `dd29e3b` — **OQ-2 SHIPPED**: imperative `debounce(fn, ms)` / `throttle(fn, ms)` keyword-call form RETIRED. Removed `debounce`/`throttle` from tokenizer KEYWORDS; deleted DEBOUNCE/THROTTLE built-in parse blocks (~90 LOC) in ast-builder.js; deleted `DebounceCallNode`/`ThrottleCallNode` interfaces + union members in types/ast.ts; deleted case arms in emit-logic.ts + emit-client.ts chunk detector + component-expander.ts; deleted `_scrml_debounce`/`_scrml_throttle` runtime helpers in runtime-template.js. Adopters use stdlib `scrml:time.debounce`/`throttle` (regular function calls, shipped at stdlib/time/index.scrml) or the §6.13 attribute form `<x debounced=Nms>`. Side benefit: `let debounce = ...` / `function throttle()` no longer fires E-RESERVED-IDENTIFIER. Zero adopter footprint (grep across samples/examples returned only the stdlib's own implementation). Net -87 LOC.
+
+- **Audit docs filed S81:**
+  - `docs/audits/hardcoded-thresholds-followup-2026-05-11.md` — drove F.1/F.2 ship; closes S78 §7 caveat with exactly 2 of the predicted 2-4 Bucket C items (lower-bound of estimate). Also documents S78 §1 misclassification of `Access-Control-Max-Age=86400` as "passes through middleware config" (it doesn't).
+  - `docs/audits/self-host-spec-conformance-2026-05-11.md` — full 362-occurrence null/undefined inventory + sweep plan + non-null violation breakdown + GCP3 walker-gap finding (bpp/bs/tab have null source but 0 detector firings — separate sub-project). DEFERRED to v0.3.0+ per user direction; closes the strict-gate's reason-to-be in the meantime.
+
+- **SPEC amendments:** §39.2.1 cors-max-age override paragraph; §38.3.1 NEW subsection (channel-reconnect project-level default); §38.3 attribute table cleanup (S80 stale `protect` row replaced with `auth` + reconnect row clarified with precedence note). SPEC-INDEX line-range refresh on every Sections-table row.
+
+- **User-voice S81 (`16e201f` in scrml-support):** three durable verbatim entries — "not" directive remains in play library-mode inclusive (the rebuild-script bypass was itself a rule violation; closed at 7189bd9); self-host parity orthogonal to v0.2.0 (source-side sweep filed for v0.3.0+); CLI auto-fix design thought registered as v0.3 roadmap (`bun scrml fix` would mechanically convert null/undefined → not / is some / is not + ===/!== → ==/!=).
+
+- **Test surface delta vs S80 close:** S80 = 11,139 pass / 73 skip / 0 fail (534 files). S81 = 11,181 pass / 77 skip / 0 fail (535 files). **+42 pass / +4 skip / +1 file / 0 regressions.**
+
+- **Push state at close:** scrmlTS pushed per-ship throughout the session; 0/0 origin/main at wrap. scrml-support pushed at `16e201f` (user-voice S81); 0/0 origin/main at wrap.
+
+Next-priority menu carried to S82 (smaller items remaining: A6-6 optional API alignment design dive (TBD scope), A9 Ext 5 D5 Redis backend inlining (adopter-signal-gated; no current signal); larger items: W-LEAK-010 follow-up (hold for v0.3.0+), Versioning-discipline discussion (own session); self-host parity sweep remains v0.3.0+ orthogonal track). See `hand-off.md` for the full list.
 
 ### 2026-05-11 (S80 close — wrap)
 

@@ -1,240 +1,284 @@
-# scrmlTS — Session 80 (CLOSE — auth/protect/csrf codification · D3 csrf= drift resolved · E-MW-001 retired · Bootstrap L3 strip-bug FIXED · A5-7 canonical-sample family landed · 6 commits · 0 regressions · pushed)
+# scrmlTS — Session 81 (CLOSE — 7 commits · F.1/F.2 adopter overrides + strict self-host gate + A10 deferred closure + SPEC-INDEX regen + D3/D1 A9-Ext-5 follow-ups + OQ-2 debounce/throttle keyword-form RETIRED · +42 tests · 0 regressions · pushed)
 
 **Date opened:** 2026-05-11
 **Date closed:** 2026-05-11 (single-day session)
-**Previous:** `handOffs/hand-off-79.md` (S79 close — 4 SHIPs + Batch K deref + 88 new tests + 0 regressions + pushed)
-**This file:** rotates to `handOffs/hand-off-80.md` at S81 open
+**Previous:** `handOffs/hand-off-80.md` (S80 close — auth/protect/csrf codification + D3 csrf= drift resolved + Bootstrap L3 strip-bug fix + A5-7 canonical samples + 6 commits / 0 regressions)
+**This file:** rotates to `handOffs/hand-off-81.md` at S82 open
 
-**Tests at open (S79 close baseline):** 10,413 pass / 62 skip / 1 todo / 0 fail (506 files, pre-commit subset).
-**Tests at S80 close (pre-commit subset, `55d41f7`):** **10,416 pass / 62 skip / 1 todo / 0 fail** (506 files; +3 from baseline — net of 4 new sample files picked up by pretest, -1 from MW-CSRF-001 deletion).
-**Tests at S80 close (FULL suite, `bun run test`):** **11,139 pass / 73 skip / 1 todo / 0 fail** (534 files).
+**Tests at open (S80 close baseline):**
+- pre-commit subset: 10,416 pass / 62 skip / 1 todo / 0 fail (506 files)
+- full suite: 11,139 pass / 73 skip / 1 todo / 0 fail (534 files)
+
+**Tests at S81 close (pre-commit subset, `dd29e3b`):** **10,433 pass / 66 skip / 1 todo / 0 fail** (507 files; +17 from baseline)
+**Tests at S81 close (FULL suite, `bun run test`):** **11,181 pass / 77 skip / 1 todo / 0 fail** (535 files; +42 pass / +4 skip / +1 file / 0 regressions vs S80)
 
 ---
 
-## S80 close — summary
+## S81 close — summary
 
-Substantive session. **Two non-trivial design landings + one Bootstrap-L3 compiler-bug fix + the full A5-7 canonical-sample family + one wrap-time parity catch-up.** 6 commits, 2 push pairs. Zero regressions across full suite.
+Substantive session. **Seven distinct ships landing across one day**, chaining smaller items into a larger keyword-retirement. Pre-commit hook fired clean on every commit; full-suite re-run at session close confirmed zero regressions across all 11,139 pre-existing S80 tests.
 
-### S80 commit chain (in order — 6 commits on scrmlTS + 1 on scrml-support)
+### S81 commit chain (in order — 7 commits on scrmlTS + 1 on scrml-support)
 
-**scrmlTS commits (6):**
-1. `ef70daa` refactor(s80): codify auth/protect/csrf attribute hosts; retire E-MW-001 + channel protect=
-2. `d7f9609` fix(s80): library-mode meta-block strip — paren-aware import-arg regex
-3. `a5dea6e` feat(s80-a5-7a): canonical <onTimeout> samples — static + computed-delay
-4. `48e0005` feat(s80-a5-7b): named <onTimeout> + cancelTimer() sample (engine-007)
-5. `2fbb4ac` feat(s80-a5-7c+d): <onIdle> watchdog sample + A5-7d audit closure
-6. `55d41f7` fix(s80-self-host-parity): sync ast.scrml — drop mwCsrf + E-MW-001 (mirrors ef70daa)
-7. (this wrap commit)
+**scrmlTS commits (7):**
+
+1. `ab980c0` feat(s81-f1-f2): F.1 `<program cors-max-age=N>` + F.2 `<program channel-reconnect=N>` adopter overrides; SPEC §39.2.1 amendment + §38.3.1 NEW subsection + §38.3 attribute table cleanup; +21 tests
+2. `7189bd9` chore(s81): strict self-host rebuild gate at scripts/rebuild-self-host-dist.ts (exit-1 on host-compiler errors); spec-conformance audit doc at docs/audits/self-host-spec-conformance-2026-05-11.md (filed, source-side sweep DEFERRED to v0.3.0+)
+3. `f50f313` feat(s81-a10-followon): Phase A10 deferred items closed — TS body-walk re-enablement on engine-decl + payload-binding scope injection; engine-arm typos now fire E-SCOPE-001 at compile time; +7 tests
+4. `b6c8e1c` chore(s81): SPEC-INDEX regen — `scripts/regen-spec-index.ts` (TS, idempotent, preserves summaries, handles §49 single-`#`); 62 Sections-table rows refreshed
+5. `7173bfe` feat(s81-d3): pure-fn call detection in monotonicity classifier (A9 Ext 5); FunctionPurityLookup threaded through `analyzeMonotonicity` → `classifyStatement`; +13 tests. Project-mapper incremental refresh bundled.
+6. `acfd20c` feat(s81-d1): export-synth `.idempotent()` modifier propagation (A9 Ext 5); tokenization-tolerant regex on synth raw; +5 tests
+7. `dd29e3b` feat(s81-oq2): imperative `debounce(fn,ms)`/`throttle(fn,ms)` keyword-call form RETIRED — removed KEYWORD reservation, deleted parse blocks + AST kinds + codegen + runtime helpers; adopters use stdlib `scrml:time` or §6.13 attribute form; net -87 LOC
 
 **scrml-support commits (1):**
-- `7279e6e` deep-dive: protect-auth-csrf-terminology-2026-05-11.md (the dive that surfaced D3 csrf= drift + the Approach A vs B vs C decomposition for E-MW-001 retirement)
+
+- `16e201f` user-voice: S81 — "not" directive (library-mode inclusive) + self-host orthogonal to v0.2.0 + CLI auto-fix (`bun scrml fix`) registered as v0.3 roadmap idea
 
 ---
 
-## S80 thread-by-thread
+## S81 thread-by-thread
 
-### Thread 1 — Hook install + session bootstrap
+### Thread 1 — Session bootstrap + cross-machine sync
 
-Per pa.md §"Per-machine setup — pre-commit hook installation (S78)": session-start check found `core.hooksPath` returning `.git/hooks` (not `scripts/git-hooks`). Likely cross-machine state — S79 closed on a different machine where the hook was installed. PA ran `git config core.hooksPath scripts/git-hooks` to install. Hook fired clean on every subsequent commit.
+Per pa.md "Per-machine setup": session-start checks found `core.hooksPath = scripts/git-hooks` already set (persisted from S80 install). scrmlTS clean at session start; scrml-support 2 commits behind origin (S80 deep-dive doc + Batch K archive landings on the OTHER machine). `git pull --rebase` clean. No surprises.
 
-### Thread 2 — Phantom-code middleware family → became D3 csrf= drift resolution (`ef70daa`)
+### Thread 2 — Priority #4 (multi-token threshold deep-read) → S81 F.1+F.2 ship (`ab980c0`)
 
-User picked "Phantom-code middleware family" from the S79 carry-forward menu. PA verification per Rule 4 surfaced that the "phantom" framing was wrong: all 4 codes (E-MW-001/002/005/006) HAD emit-sites in `ast-builder.js:10043-10163` and tests passed 46/46 in `middleware-handle.test.js`. The §34 catalog rows existed (added at S78 audit follow-up) but carried stale **"Un-fireable note: no current src emit-site located"** annotations.
+User picked priority #4 from carry-forward menu. Per S78 audit §7 caveat predicted "2-4 more Bucket C items lurking in `codegen/emit-*.ts` related to rate-limit/CSRF/CORS Max-Age." Per-file deep-read across all 25 emit-* files surfaced **exactly 2** Bucket C candidates (matches lower bound):
 
-Deeper investigation found a **real spec↔src terminology mismatch on E-MW-001**: SPEC §40 line 17005 said `csrf="on"` requires "either `<program protect="...">` or equivalent session handling," but source `ast-builder.js:10093` checked `!authConfig` (built from `<program auth=>`). Source + tests aligned on `auth=`; SPEC §40 was the outlier.
+- **F.1**: `Access-Control-Max-Age='86400'` hardcoded at emit-server.ts:339 with no override path. S78 §1 dropped-set misclassified this as "passes through middleware config" — it doesn't (only the origin URL does).
+- **F.2**: `reconnectMs = 2000` hardcoded in `extractChannelAttrs` at emit-channel.ts:124. Per-channel `<channel reconnect=>` exists, but no project-level default.
 
-PA dispatched `scrml-deep-dive` (a0ec3cde67614fdc4) for terminology analysis. Output: `scrml-support/docs/deep-dives/protect-auth-csrf-terminology-2026-05-11.md` (664 lines, `7279e6e`).
+Both ship same-shape as S79 C.1/C.2: `<program ATTR=VALUE>` attribute with parsed-at-codegen-time helpers (`parseCorsMaxAge`, `parseChannelReconnect`); silent fallback on null/malformed per v1 scope. F.1 + F.2 + S79 C.1 + S79 C.2 establishes the 4-precedent pattern that `<program>` attributes are the canonical configurability locus for compiler-emitted middleware defaults.
 
-**Bryan-driven design call (rejecting deep-dive's Approach A):** Bryan caught that the deep-dive's "ghost form" conclusion missed `<program protect=>` at SPEC line 16590 (worked example). The terminology issue was BROADER — `protect=` has 4+ valid hosts (`<db>`, `<Type>`, `<channel>`, `<program>`-as-shorthand) with related-but-different semantics. PA pulled back, Bryan said "no deep dive for now. lets just look at this practically and discuss where these attributes SHOULD live." → led to the canonical design verdict:
+Side fix at SPEC §38.3 attribute table: S80 rename of `<channel protect=>` → `<channel auth=>` had been missed at table-level cleanup; row updated.
 
-| Surface | Attribute |
-|---|---|
-| Routing surfaces (`<program>`, `<page>`, `<channel>`) | `auth=`, `csrf=` |
-| Data-declaration surfaces (`<db>`, `<Type>`) | `protect=` |
-| Type declarations (`<Type>`) | `authority=` |
+Audit doc landed at `docs/audits/hardcoded-thresholds-followup-2026-05-11.md` (246 lines).
 
-Two retirements: `<channel protect=>` → `<channel auth=>` (WS upgrade gate is auth-shaped); `<program protect=>` shorthand retired (zero consumers in source).
+### Thread 3 — Self-host null/undefined surfacing → strict gate + audit doc (`7189bd9`)
 
-**Secondary finding while implementing:** D3 csrf= drift (§40.2 said `"on"|"off"`; §52.13 said `"auto"|"off"`). Bryan asked PA to also resolve. PA initially recommended `csrf="on"|"off"` with compiler-picks-mechanism (Approach B), but on audit found `csrf="auto"` is the canonical value already used in src + tests + route-inference.ts + session-auth.test.js + sql-client-leak.test.js + attribute-registry.js + PIPELINE.md. Bryan picked Approach A: collapse to `csrf="auto"|"off"`, drop middleware-mode `csrf="on"` codepath, retire E-MW-001 entirely (the design pairing requirement was enforcing design-opinion not technical-correctness; OWASP confirms baseline double-submit cookie is independently valid).
+User noticed `!= null` patterns in the S81 F.1+F.2 ast.scrml mirror edit. PA verification per Rule 4: SPEC §42 + E-SYNTAX-042 (§34 line 14779) make `null`/`undefined` unconditional violations in scrml source. The 3 new lines I added were stylistically consistent with the surrounding 200+-occurrence violation chain — but the CHAIN ITSELF was the violation. Drilling in surfaced a much bigger structural finding:
 
-**Landed:** SPEC.md edits + ast-builder.js + emit-server.ts (~50 LOC deleted: `_scrml_hasCsrfMW` + two inline mw-wrap CSRF check blocks) + section-assembly.js mirror + attribute-registry.js (protect= removed from program + channel sets) + types/ast.ts (`MiddlewareConfig.csrf` removed) + 7 test files (18 fixtures cleaned of dead `csrf:` field; MW-CSRF-001 deleted; MW-CSRF-002 inverted to regression assertion; `<channel protect=>` and `<program protect=>` test fixtures migrated). 14 files / +82 / -194. 10,412 pass / 0 fail at commit.
+1. **362 null/undefined occurrences across 13 self-host files** (per grep): ast.scrml 62+10, ts.scrml 140+2, ri.scrml 50, pa.scrml 20+6, dg.scrml 17, bs.scrml 13, meta-checker ×2 = 22, module-resolver ×2 = 10, bpp.scrml 5, tab.scrml 3+2, cg.scrml 0.
+2. **The rebuild script silently emitted dist files even when the host compiler reported violations.** `scripts/rebuild-self-host-dist.ts` used a truthy `entry?.libraryJs` check that ignored the errors array. Pre-S81 this leak let drift accumulate undetected for an unknown period.
+3. **The GCP3 detector has a walker gap.** Strict-rebuild baseline: 5 files surface 312 total errors (140 E-SYNTAX-042 + 15 E-EQ-004 + 2 E-ERROR-007 + 30 E-FN-003 + 3 other fn-codes + 2 E-MU-001 + 120 E-SCOPE-001). 6 files compile clean despite having grep-detected null source — the walker doesn't descend into let-decl inits in pure-logic-rooted modules. Filed as a separate sub-project (~1-2h).
 
-### Thread 3 — Bootstrap L3 host-compiler library-mode meta-block strip bug (`d7f9609`)
+**User directives over two clarifications:**
+- "self hosting is entirely orthogonal. And at the moment I would prefer to spend the tokens getting the compiler all the way [to v0.2.0]." → source-side sweep DEFERRED to v0.3.0+
+- "TBC. I am saying that the 'not' directive that I stated is still in play. null/undefined should not compile." → strict gate ACTIVE; the bypass was itself a rule violation
 
-User picked "1. Bootstrap L3 host-compiler library-mode meta-block strip bug" from S80 next-priority menu after Thread 2 landed.
+**Landed:** scripts/rebuild-self-host-dist.ts strict-gate change (exit 1 on any non-warning error from host compiler). Audit doc at `docs/audits/self-host-spec-conformance-2026-05-11.md` (190 lines) captures full inventory + sweep plan (~8-12h estimate when taken up) + detector-gap finding + non-null violations breakdown (E-EQ-004 mechanical / E-ERROR-007 needs design / E-FN-003 case-by-case / E-MU-001 small / E-SCOPE-001 triage). User-voice S81 (`16e201f`) appends the three durable directives.
 
-**Bug shape (per primer §13.5 depth-of-survey discipline):** PA read the skipped test at `compiler/tests/integration/self-compilation.test.js:531`, examined `compiler/dist/self-host/ast.js`, and found that `compiler/self-host/ast.scrml` line 33's `const _ep = await import(new URL("../src/expression-parser.ts", import.meta.url).href)` emitted as just `.href)` in the dist. The strip pass at `compiler/src/codegen/emit-library.ts:180-188` used `[^)]+` (not paren-aware) in its strip regex, which greedy-truncated `await import(complex-arg)` calls at the first `)`. The companion emit-side regexes (importRe + nsImportRe at 167+173) only match string-literal-arg `await import("X")` patterns — so the strip regex should mirror that constraint to avoid stripping complex args.
+**Operational consequence:** 5/11 self-host files fail the rebuild gate today. Their `compiler/dist/self-host/{ast,ts,ri,pa,dg}.js` are stale relative to current source until either (a) the source is swept or (b) someone re-runs rebuild with gate disabled (NOT recommended). compiler/tests/self-host/ is excluded from pre-commit so this doesn't block compiler-side work.
 
-**Fix:** narrowed both strip regexes to `\(\s*["'][^"']+["']\s*\)`. Mirror fix in `compiler/self-host/cg-parts/section-assembly.js:937-944`. Regenerated dist via `scripts/rebuild-self-host-dist.ts`.
+### Thread 4 — Priority #1 (Phase A10 deferred items) → A10-followon ship (`f50f313`)
 
-**Unblocked the L3 test partially** — `ast.js` now structurally valid; `api.js` imports cleanly. BUT exposed a broader self-host parity gap: 21 of 23 parity assertions fail when L3 runs. **Root cause of the un-skipping-side-effect:** `compiler/self-host/cg.scrml` is **structurally malformed** — its `export const runCG = ...` statements live INSIDE the `^{}` meta block, producing an empty 104-byte `cg.js`. With `cg.runCG` undefined, the L2 "Bootstrap: compiler compiles compiler" describe block had been soft-falling-back to the standard runCG. PA attempted to restructure cg.scrml (move exports outside `^{}` per the `pa.scrml` / `bs.scrml` pattern) but found it required path adjustment (`./cg-parts/` → `../../self-host/cg-parts/` because dist lands at `compiler/dist/self-host/`) AND when fixed, the actual self-host runCG produced DIFFERENT output than standard (real parity gap, not just the cg.runCG-undefined artifact).
+User picked priority #1. The two A10 deferrals had been preserved from S78/S79/S80 hand-offs:
 
-**Disposition:** PA reverted the cg.scrml restructure attempt; re-skipped the L3 describe block with an updated reason that documents what's fixed (strip bug) and what remains (self-host parity gap is a separate, much larger project).
+- **Payload-binding scope injection** — `<Error msg>` introducing `msg` as local in arm body sub-scope (per match-arm-block B20 pattern)
+- **Type-system body-walk re-enablement** — gated on emission-boundary structural-element filter
 
-### Thread 4 — A5-7 canonical-sample family (`a5dea6e`, `48e0005`, `2fbb4ac`)
+The gate condition (codegen `STATE_CHILD_STRUCTURAL_TAGS` filter in `emit-variant-guard.ts`) had landed at S78 Phase A10 ship. So both deferrals were structurally enable-able at S81.
 
-User picked "A5-7" from menu. Per primer §13.5 depth-of-survey discipline, PA dispatched a 1-hour inventory survey first. **Result: the 12-18h original estimate was 10x too large** — A5 features F4-F8 (hierarchy, history, internal:rule=, parallel) are SPEC-ONLY (no codegen), and existing unit/integration coverage (~249 tests) already covers compile/typer/codegen paths for the shipped surface (F1, F1a, F1b, F2, F3, F3a, F9). Sample-writing is the ONLY actual gap.
+Investigation surfaced the REAL value-add: with TS body-walk disabled, **typos inside engine state-child bodies** (e.g., `${mssg}` instead of `${msg}` inside `<Error msg>`) passed silently to runtime. Re-enabling closes a real safety net.
 
-**Sub-phases (4) — all landed:**
+Implementation at `compiler/src/type-system.ts:5435` engine-decl case:
+- Replaced `tAsIs()` early-return with proper body-walk
+- For each state-child markup node: push `engine-arm:<tag>:<nodeKey>` scope, extract payload bindings via local helper (TS-side duplicate of codegen's `extractPayloadBindingsFromAttrs` — TS is upstream of codegen so can't import), bind each name with `tAsIs()` resolved type, descend into renderable children (filtering structural tags at every level), pop scope.
+- Pattern mirrors B20's match-arm-block payload-destructure injection at line 5102-5125.
 
-- **A5-7a (`a5dea6e`):** `engine-005-ontimeout-basic.scrml` (literal `after=2s` form) + `engine-006-ontimeout-computed.scrml` (computed-delay `after=${@var}ms`). Both compile clean, emit canonical codegen verified via grep (`{ ms: 2000, target: "Loading" }` literal form vs `{ msExpr: function(){...}, target: "..." }` computed form).
-- **A5-7b (`48e0005`):** `engine-007-cancel-timer.scrml`. Named `<onTimeout name=autoConfirm>` + `cancelTimer("autoConfirm")` via onclick call-ref. Header explicitly documents v1 limitations (call-ref form only; no expression-form or function-body calls). Codegen verified: emits `{ ms: 5000, target: "Confirmed", name: "autoConfirm" }` + `_scrml_engine_clear_named_timer("confirmPhase", "Confirming", "autoConfirm")` for the cancel call.
-- **A5-7c (`2fbb4ac`):** `engine-008-onidle-watchdog.scrml`. `<onIdle after=30s to=.Locked/>` at engine-root scope; each non-Locked state's `rule=` includes `.Locked` for rule=-honoring fire. Codegen: `__scrml_engine_sessionState_idle = Object.freeze({ ms: 30000, target: "Locked" })` + `_scrml_engine_arm_idle_watchdog(...)` at module-init.
-- **A5-7d (`2fbb4ac` — audit closure):** confirmed `combined-018-timer.scrml` is NOT an A5 sample (plain reactive state); `machine-002-traffic-light.scrml` uses legacy `<machine>` with immediate `.From => .To` rules (no temporal). Negative Machine Cohesion sample DROPPED — parser pipeline doesn't admit engine-inside-component shape end-to-end (existing B17 tests use synthesized AST); legacy temporal `<machine>` sample SKIPPED to avoid adding deprecated-keyword reference.
+Symbol-table comment at PASS 3 (`type-system.ts:1619`) updated to reflect S81 closure of the gap.
 
-**Inventory doc:** `docs/changes/a5-7-tests-samples/INVENTORY.md` (218 lines). Captures full feature surface map (F1-F9), existing-coverage audit, gap matrix, decomposition + actual landing times (~1.5h total vs 12-18h original estimate → ~10x depth-of-survey discount).
++7 unit tests at `compiler/tests/unit/engine-body-typecheck-a10-followon.test.js` covering positive (`${msg}` resolves) + negative (typos fire E-SCOPE-001) + arm-locality + multi-binding + structural-element skip + outer-scope-preservation.
 
-### Thread 5 — Self-host parity catch-up (`55d41f7`) — wrap-time
+### Thread 5 — Priority #11 (SPEC-INDEX regen) → mechanical line-range refresh (`b6c8e1c`)
 
-Full-suite measurement during wrap (`bun run test`) surfaced 4 failures all in `compiler/tests/self-host/ast.test.js`: auth config extraction, middleware config extraction, csrf="on" parity, E-MW-002 invalid ratelimit. Root cause: `ef70daa` updated `compiler/src/ast-builder.js` to drop `mwCsrf` extraction + E-MW-001 fire-site, but the self-host scrml port `compiler/self-host/ast.scrml` was missed.
+Auto-generated SPEC-INDEX line numbers stale across S64-S80 amendments. Legacy `scripts/update-spec-index.sh` is print-only; the actual table-row updates were always manual. PA wrote `scripts/regen-spec-index.ts` (TS, idempotent, preserves summaries, handles §49's single-`#` `# §49.` heading correctly). 62 of 63 Sections-table rows refreshed (TOC row also handled). "Total lines" updated 25,508 → 26,286. New entry in build.map.md catalogue.
 
-**Fix:** mirrored the TS-side delta verbatim — dropped `mwCsrf` extraction (line 3655), dropped `csrf: mwCsrf` from middlewareConfig object literal (line 3663), deleted the E-MW-001 fire-site block (lines 3666-3674). Replaced with a comment marker referencing `ef70daa`. Regenerated `compiler/dist/self-host/ast.js` (now 160974 bytes, vs prior 161245 bytes — the 271-byte delta is the deletion). Full suite went from 11,135 pass / 4 fail → 11,139 pass / 0 fail.
+### Thread 6 — Priority #8 (Insight 28 OQ-bridge-2) → verified passive
+
+Quick verification: OQ-bridge-2 is correctly filed in `scrml-support/design-insights.md` Insight 28 with the friction-trigger condition ("≥3 adopter reports of `custom(fn)` zod-wrapper as friction → re-debate"). No current action needed. Closed-as-verified.
+
+### Thread 7 — Priority #12 (Project-mapper refresh) → bundled with D3 commit
+
+Project-mapper agent dispatched in background; hit a system-reminder vs user-prompt conflict on Write. Agent surfaced refresh content inline; PA persisted maps directly. Refreshed 7 of 14 maps; 4 left unchanged (config/dependencies/events/error — no detected drift). New non-compliance.report.md entries for 4 candidate archival items (a5-7 INVENTORY, debounce-throttle dispatch dir, both hardcoded-thresholds audits) + 1 known-drift register (published dev.to article with stale `<channel protect=>` line — DO NOT TOUCH per Rule 1) + 1 uncertain (self-host-spec-conformance audit). Maps committed alongside D3 (`.claude/maps/` is tracked in git despite the gitignore rule — predates the rule).
+
+### Thread 8 — Priority #6 A9 Ext 5 D3 (pure-fn detection) → D3 ship (`7173bfe`)
+
+User picked D3 over D5/D1 ordering rationale: D3 has measurable correctness improvement TODAY (over-emission of idempotency keys = wasteful HTTP-header bandwidth + dedup-table rows). D5 is adopter-signal-gated; D1 is structurally sound today.
+
+Implementation at `compiler/src/monotonicity-analyzer.ts`: new exported type `FunctionPurityLookup` (minimal structural shape — TS-only); threaded as optional 3rd param through `analyzeMonotonicity` → `classifyFunctionMonotonicity` → `classifyStatement`. New helper `isPureFnCallStatement` returns true iff bare-expr with call exprNode + bare IdentExpr callee + every functionIndex entry has `fnKind === "fn"` + no arg contains nested call OR SQL sub-tree. `null` functionIndex preserves pre-D3 conservative-non-monotone behavior (backward compat).
+
+`api.js` wiring: `buildFunctionIndex(ceResults)` called between RI + MC stages; passed to `analyzeMonotonicity`.
+
++13 unit tests covering positive (fn-kind callee → monotone), negative (function-kind → non-monotone, unknown → non-monotone, member-access callee → non-monotone, mixed-kind overload → conservative non-monotone, nested call in arg → non-monotone, SQL arg → non-monotone via SQL classification precedence), mixed batches (SELECT + pure-fn → monotone), backward compat (null index → non-monotone).
+
+### Thread 9 — Priority #6 A9 Ext 5 D1 (export-synth modifier propagation) → D1 ship (`acfd20c`)
+
+The synthetic function-decl created from `export function foo() {...}` at ast-builder.js:~5871-5887 (export-decl path) didn't propagate `.idempotent()` modifier per §19.9.7. Downstream walkers reading `fnNode.idempotentModifier === true` on the synth node saw `undefined`. No production breakage (raw export emission preserved the modifier text verbatim) — but the monotonicity classifier missed the override.
+
+Fix: tokenization-tolerant regex (`/\)\s*\.\s*idempotent\s*\(\s*\)/`) tested against the export raw. First-attempt regex didn't account for the space-padded post-tokenization rejoin — quick iteration corrected to allow whitespace between every token.
+
++5 unit tests covering positive (export function + .idempotent() → flag set), negative (plain export → flag absent), fn-kind synth (export fn + .idempotent()), server combo, comment-only `.idempotent()` mention documented as a known false-positive surface (test accepts either outcome as a forward-compat awareness anchor).
+
+### Thread 10 — Priority #4 redux (Debounce/throttle imperative keyword retirement, OQ-2) → big ship (`dd29e3b`)
+
+Investigation surfaced ZERO adopter footprint: grep across samples/examples/stdlib returned only the stdlib's OWN implementation of `debounce`/`throttle` in `stdlib/time/index.scrml:238+272`. The imperative `debounce(fn, ms)` / `throttle(fn, ms)` form was a special-form keyword call with custom AST kinds + runtime helpers, but the stdlib alternative is fully shipped + the §6.13 attribute form is canonical. Clean-cut retirement is the right precedent (mirrors S79 Approach B for `reactive-debounced-decl`).
+
+**Retirement scope (12 files touched):**
+
+- `tokenizer.ts:70` — removed `debounce`, `throttle` from KEYWORDS (now tokenize as IDENT; side benefit: `let debounce = ...` no longer fires E-RESERVED-IDENTIFIER)
+- `ast-builder.js:~7579-7669` — deleted DEBOUNCE + THROTTLE built-in parse blocks (~90 LOC)
+- `types/ast.ts:~1229-1249` — deleted `DebounceCallNode` + `ThrottleCallNode` interfaces + union members
+- `codegen/emit-logic.ts:~2166-2176` — deleted case arms
+- `codegen/emit-client.ts:~310-317` — deleted chunk-detector case arms
+- `component-expander.ts:~104-106, ~1274-1281` — deleted type imports + substitution case arms
+- `runtime-template.js:~1044-1062` — deleted `_scrml_debounce` + `_scrml_throttle` runtime helpers
+- `codegen/runtime-chunks.ts:~29-31` — updated utilities-chunk doc comment
+- 4 test files migrated/updated to reflect retirement
+
+**Test migration:**
+
+- `compiler/tests/unit/tab.test.js:~2049-2065` — pre-S81 tests verified `debounce(fn, ms)` produces `debounce-call` AST kind; post-S81 verify the AST kind no longer appears + form parses as `bare-expr`/`expression-statement`. New +1 test: `let debounce = 42` works (formerly E-RESERVED-IDENTIFIER).
+- `compiler/tests/unit/code-generator.test.js:~1720-1759` — pre-S81 asserted `_scrml_debounce` emission; post-S81 verify retired helpers don't appear in default output.
+- `compiler/tests/self-host/tab.test.js:158` — "scrml keywords" parity fixture updated to drop `debounce throttle`.
+- `compiler/tests/helpers/extract-user-fns.js:~78-79` — removed `debounce(?!_\d)|throttle(?!_\d)|` alternations from internal-helper filter regex.
+
+**Migration story (zero adopter footprint = trivial):**
+- Before: `debounce(handleSearch, 250)`
+- After: `import { debounce } from "scrml:time"` then `debounce(handleSearch, 250)` (regular CallExpr through stdlib import)
+
+The S81 user-voice (`16e201f`) entry on `bun scrml fix` registers this kind of mechanical migration as a v0.3 roadmap idea — the CLI sub-command would auto-rewrite null→not, ===→==, and this debounce/throttle import-insertion shape.
+
+Net: -87 LOC.
+
+**Quirk encountered + fixed**: the first runtime-template.js retirement-note comment used backticks inside `//` line comments (`` `_scrml_debounce` ``) and Bun's JS parser flagged a syntax error at the backtick. Tokenization is parser-version-dependent — simplified to plain text + no-backtick prose.
 
 ---
 
-## S80 audit-thread outcomes
+## S81 audit-thread outcomes
 
-### D3 csrf= drift — RESOLVED
+### Hardcoded-thresholds follow-up (priority #4) — FULLY CLOSED
 
-Spec section reconciliation: `csrf=` accepts `"auto" | "off"` per §52.13 (single canonical value set). §40.2 attribute table updated to match. §39.2.3 normative rewritten. §34 catalog row for E-MW-001 deleted; retirement note added to §40.6 error table.
+S78 §7 caveat predicted "2-4 more Bucket C items lurking." S81 audit found exactly 2 (lower bound):
+- F.1 CORS Max-Age (S78 misclassified as middleware-routed)
+- F.2 channel-reconnect default
 
-### Un-fireable note radius — VERIFIED CLEAN
+Both shipped at `ab980c0`. Audit doc filed; can be archived after S81 wrap dispatch sequence completes per project-mapper non-compliance report.
 
-Per the deep-dive's D4 callout, PA swept §34 for the "Un-fireable note" pattern after the E-MW commit. Zero remaining instances of `"Un-fireable"` / `"no current src emit-site"` / `"audit follow-up"` / `"emit-site located"` patterns. The four E-MW rows were the entire footprint; S80 commit closed it entirely.
+### Self-host spec-conformance — STRICT GATE ACTIVE; SOURCE SWEEP DEFERRED
 
-### Bootstrap L3 strip bug — PARTIAL FIX
+362-occurrence null/undefined inventory across 13 files + 4 adjacent violation categories captured in `docs/audits/self-host-spec-conformance-2026-05-11.md`. Strict rebuild gate honors the "null/undefined never compile" directive; source-side cleanup is v0.3.0+ orthogonal work per user direction.
 
-Real compiler bug fixed (paren-aware regex narrowing). L3 test still skipped, reason updated to reflect remaining self-host parity gap.
+### Phase A10 deferred items — FULLY CLOSED
 
----
+Both deferrals (TS body-walk re-enable + payload-binding scope injection) shipped together at `f50f313`. The pre-S81 hand-off menu's priority #1 now reads CLOSED.
 
-## S80 user-voice — no new durable directives
+### A9 Ext 5 D3 + D1 — FULLY CLOSED
 
-S80 produced no new durable methodology directives that need recording in user-voice. The session was design-and-implementation-heavy under pre-ratified S77/S79 verdicts + the new S80-internal design calls (attribute-host codification). User decisions in this session were tactical:
+Two of the three S76 carry-forwards shipped. D5 (Redis backend inlining) remains adopter-signal-gated — no current signal.
 
-- `install the hook` (per-machine setup)
-- `1` (Phantom-code MW family pick from menu)
-- `deep dive (terminology is tangled)` after PA surfaced spec↔src mismatch
-- `no deep dive for now. lets just look at this practically and discuss where these attributes SHOULD live` (after Bryan caught the deep-dive's incomplete drift map)
-- `codify these. I want to see them in action` → led to the worked example + recommendation
-- `A` (Approach A pick: collapse `csrf=` to `"auto"|"off"` matching src reality)
-- `proceed` (authorize edits + commit)
-- `push it` (authorize push)
-- `check on the D4 un-fireable note radius` (verification)
-- `whats next on the priorities?` → `1` (Bootstrap L3 pick)
-- `A5-7` (next priority pick)
-- `1h inventory survey first` (A5-7 scoping)
-- `2. samples, examples are for larger more integrated examples; 3. smoke too` (clarifying samples/examples target + verification level)
-- `push it, then A5-7b`, `batch and go` (cadence directives)
-- `wrap this session`
+### OQ-2 imperative debounce/throttle retirement — FULLY CLOSED
 
-None are durable design directives. All tactical execution choices.
+Last S79 OQ deferral closed at `dd29e3b`.
 
 ---
 
-## Cross-machine sync state at S80 close
+## S81 user-voice (recorded in scrml-support `16e201f`)
 
-- **scrmlTS:** 6 commits ahead of origin/main pre-wrap-commit (ef70daa, d7f9609, a5dea6e, 48e0005, 2fbb4ac, 55d41f7, +wrap). PUSHED at wrap close.
-- **scrml-support:** 1 commit ahead pre-wrap (7279e6e deep-dive doc landed mid-session). VERIFY at wrap close.
+Three durable verbatim entries:
 
-Per pa.md "wrap" §7 default (push included unless user says "wrap, no push").
+1. **"not" directive remains in play (library-mode inclusive).** The rebuild-script bypass was itself a rule violation. Closed at scrmlTS `7189bd9`.
+2. **Self-host parity is orthogonal to v0.2.0.** Source-side cleanup deferred to v0.3.0+. Audit doc + sweep plan filed.
+3. **CLI auto-fix idea registered as v0.3 roadmap.** `bun scrml fix` would mechanically convert null→not, ===→==, etc. Out-of-scope categories explicitly documented (try/catch / fn-purity / mutation-decls / E-SCOPE-001 are NOT mechanical).
 
 ---
 
-## Next priority — menu (S80 close — carry-forward)
+## Cross-machine sync state at S81 close
 
-Awaiting user direction at S81 open. Reduced from S79's 13-item menu after S80's landings closed:
-- D3 csrf= drift (CLOSED via ef70daa)
-- Phantom-code middleware family / E-MW-001 (CLOSED — E-MW-001 retired; E-MW-002/005/006 had stale notes stripped)
-- Bootstrap L3 strip bug (PARTIAL FIX — strip-bug closed at d7f9609; broader self-host parity gap is a separate priority)
-- A5-7 tests + samples (FULLY CLOSED — 4 samples landed, audit closure on sub-phase d)
+- **scrmlTS:** all 7 ships pushed per-commit through session. 0/0 origin/main at wrap.
+- **scrml-support:** 1 commit ahead at session-start (rebased clean to S80 deep-dive doc); 1 new commit pushed mid-session at `16e201f` (user-voice S81). 0/0 origin/main at wrap.
+
+Per pa.md "wrap" §7 default (push included) — already pushed per-commit.
+
+---
+
+## Next priority — menu (S81 close — carry-forward)
+
+Awaiting user direction at S82 open. Three items SHIPPED at S81:
+- ~~#1 Phase A10 deferred items~~ (CLOSED via `f50f313`)
+- ~~#4 Multi-token threshold deep-read~~ (CLOSED via `ab980c0` F.1+F.2)
+- ~~#11 SPEC-INDEX regeneration~~ (CLOSED via `b6c8e1c`)
+
+Three D-items from A9 Ext 5: D3 + D1 SHIPPED (`7173bfe`, `acfd20c`); D5 remains adopter-signal-gated.
+
+OQ-2 debounce/throttle imperative-keyword retirement SHIPPED at `dd29e3b`.
 
 ### Active remaining priorities
 
-1. **Phase A10 deferred items** (preserved from S78/S79):
-   - Payload-binding scope injection (`<Error msg>` introducing `msg` as local in body sub-scope)
-   - Type-system body-walk re-enablement (gated on emission-boundary structural-element filter)
+1. **A6-6 optional API alignment** — LSP/CG API design dive (TBD scope; would need investigation + proposal before implementing).
 
-2. **Self-host parity work** — `cg.scrml` structural restructure (exports inside `^{}` meta-block produces empty dist; the L2 tests soft-pass only because `cg.runCG` is undefined) + the deeper self-host divergence (21 parity assertions fail when L2/L3 properly wired). Substantial project; pre-condition for un-skipping Bootstrap L3 cleanly.
+2. **A9 Ext 5 D5 — Redis backend inlining.** Stubbed in `compiler/runtime/idempotency.js`; not yet inlined into emit-server.ts; SQL backend covers default-resolution target. **Adopter-signal-gated** — only ship when an adopter explicitly uses `idempotency-store="redis"`.
 
-3. **Multi-token threshold deep-read** (~1-2h) — per S78 audit caveat. Per-file deep-read of `codegen/emit-*.ts` to catch 2-4 more Bucket C threshold items (rate-limit, CSRF, CORS Max-Age) that grep can't catch (`5 * 1000`-shape arithmetic).
-
-4. **Debounce/throttle imperative keyword-call retirement** (OQ-2, deferred from S79 dispatch). Retire `debounce(fn, ms)` / `throttle(fn, ms)` AST kinds in favor of `scrml:time.debounce` / `scrml:time.throttle` stdlib imports. ~3-5h. Should solidify the stdlib alternative first.
-
-5. **A6-6 optional API alignment** — LSP/CG API design dive (TBD).
-
-6. **A9 Ext 5 follow-ups** (D1/D3/D5 from S76):
-   - D1 export-synth modifier propagation
-   - D3 pure-fn-call detection in classifier (over-emits keys)
-   - D5 Redis backend inlining
-
-7. **Insight 28 OQ-bridge-5** — compile-time WARNING when bridged validator on schema-column field — defer to compiler-diagnostics audit pass.
-
-8. **Insight 28 OQ-bridge-2** — passive (re-debate trigger on ≥3 adopter friction reports).
-
-9. **W-LEAK-010 follow-up** (per memory-leak deep-dive refresh §7.2):
+3. **W-LEAK-010 follow-up** (per memory-leak deep-dive refresh §7.2):
    - Step 2: `<program idempotency-store=>` background sweeper (CG/runtime dispatch)
    - Step 3: LC pass implementation (Stage 7.6, SCOPE-AND-DECOMPOSITION dispatch)
    - Hold for v0.3.0+ unless W-LEAK-010 spec-amendment is fast-tracked
 
-10. **Versioning-discipline discussion** (deferred from S78) — patch-version-as-lifecycle-stage thread. Adjacent question: should `0.2.0` be re-scoped tighter? Hold for a session of its own.
+4. **Insight 28 OQ-bridge-5** — compile-time WARNING when bridged validator on schema-column field — defer to compiler-diagnostics audit pass.
 
-11. **SPEC-INDEX.md regeneration** — per S64 audit + S78/S79/S80 amendments: SPEC-INDEX.md is stale. Generated via `bash scripts/update-spec-index.sh`. Mechanical.
+5. **Insight 28 OQ-bridge-2** — passive (re-debate trigger on ≥3 adopter friction reports). **VERIFIED FILED at S81** in `scrml-support/design-insights.md` Insight 28.
 
-12. **D3-secondary csrf= follow-ups (from S80 deep-dive)** — Open Q4 surfaced but resolved by Approach A choice. **No remaining action.**
+6. **Versioning-discipline discussion** (deferred from S78) — patch-version-as-lifecycle-stage thread. Adjacent question: should `0.2.0` be re-scoped tighter? Hold for a session of its own.
 
-**Articles thread (5 in-flight drafts at scrml-support/voice/articles/):** Per pa.md Rule 1, no PA-volunteered marketing work; await user-raised threads.
+### Future direction (v0.3.0+ orthogonal track)
 
----
+7. **Self-host parity work** — `cg.scrml` structural restructure (exports inside `^{}` meta-block produces empty dist) + the deeper 21-of-23 parity assertions + the 362-occurrence null/undefined sweep + adjacent E-EQ-004/E-ERROR-007/E-FN-003/E-MU-001/E-SCOPE-001 cleanups. ~8-12h total estimate per `docs/audits/self-host-spec-conformance-2026-05-11.md` §5. **DEFERRED to v0.3.0+** per S81 user direction.
 
-## Open questions to surface immediately at S81 open
+8. **GCP3 walker gap** — `gauntlet-phase3-eq-checks.js:walkAst` doesn't descend into let-decl inits in pure-logic-rooted modules. Real bug in detector. ~1-2h diagnose + extend + tests. Filed alongside #7.
 
-1. **Push state — CLEAN at S80 close** (wrap push completed both repos). scrmlTS 0/0 origin; scrml-support 0/0 origin assumed at wrap. VERIFY scrml-support push state at S81 open.
+9. **`bun scrml fix` CLI auto-fix sub-command** — v0.3 roadmap per S81 user-voice. Mechanical rewrites for null→not / ===→== / and similar deterministic spec-evolution conversions. Same surface precedent as `bun scrml migrate <file>` for `<machine>` → `<engine>`.
 
-2. **Hook installed on THIS machine** — verified S80 open. The OTHER machine still needs the same setup if not already done (per pa.md "Per-machine setup — pre-commit hook installation (S78)").
-
-3. **Bootstrap L3 fix is partial** — the strip-bug is FIXED, but the L3 test stays `.skip` because the broader self-host parity gap (21 of 23 parity assertions fail when L2/L3 properly wired) is a separate, much larger project. Documented in the `describe.skip` reason at `compiler/tests/integration/self-compilation.test.js:513-538`.
-
-4. **cg.scrml is structurally malformed** — `export const` statements inside a `^{}` meta block produce an empty dist file. The L2 self-host parity tests "pass" today only because the soft-fallback path activates when `cg.runCG` is undefined. Fixing cg.scrml structure is a precondition for un-skipping the L3 test cleanly.
-
-5. **`<program protect=>` shorthand retired (S80) but `<db protect=>` remains canonical.** The §39 worked example was updated to drop `protect="password_hash"` from `<program>`; the per-block `<db protect=>` form is the canonical surface. Any adopter docs / examples that used the program-level shorthand need a manual fix (`bun scrml migrate` doesn't currently handle this — manual cleanup if it surfaces).
-
-6. **`<channel protect=>` → `<channel auth=>` rename (S80).** The S80 rename is a hard break in the `<channel>` attribute set (the `protect=` attribute is dropped from `attribute-registry.js`). Any existing `<channel protect="..">` usage will now emit `W-ATTR-001` (unknown attribute) per `attribute-registry.js` closed-set semantics. PA updated 2 test sites (`channel.test.js`, `p3a-tab-channel-export-recognition.test.js`); no further adopter migration needed (zero current adopters).
-
-7. **E-MW-001 is RETIRED** (not deprecated — gone). Any docs / articles / tests citing E-MW-001 as live should be reviewed and updated. PA scrubbed all in-tree refs at S80; cross-repo refs (scrml-support, giti, 6nz) NOT scrubbed.
-
-8. **MW-CSRF-002 was DELETED** (not just inverted) from `middleware-handle.test.js`. A regression-assertion `MW-CSRF-RETIRED` replaces it asserting E-MW-001 no longer fires.
-
-9. **A5-7 fully closed** for the implemented surface. F4-F8 (hierarchy, history, internal:rule=, parallel — spec-only, no codegen) are out of scope for sample coverage until A5-2/A5-3 codegen ships. Inventory at `docs/changes/a5-7-tests-samples/INVENTORY.md` documents this.
-
-10. **Worktree branches retained from S79** (forensic per S67): `worktree-agent-ab656f3dcdd0f1638` (S79 debounce/throttle dispatch, 6 WIP commits). S80 had no dispatches (PA-direct throughout). Cleanup not priority.
-
-11. **scrml-dev-pipeline agent not staged on THIS machine.** Per pa.md fallback, S80's deep-dive used `scrml-deep-dive` (which IS staged globally at `~/.claude/agents/`). Future compiler-source dispatches will still need to either request master to stage `scrml-dev-pipeline` (and switch machines after) OR continue using `general-purpose`.
-
-12. **3 legacy master inbox carry-overs** (S78+S79 carry-forward, still safe-to-ignore unless sweep requested):
-    - `2026-04-22-scrmlTS-to-master-insight-25-multi-meta.md` (UNREAD legacy)
-    - `2026-05-08-S72-scrmlTS-to-master-needs-push-SUPERSEDED.md`
-    - `2026-05-08-S71-scrmlTS-to-master-stage-scrml-dev-pipeline.md`
-
-13. **Project-mapper refresh state** — last full cold-start at S79 open. S80 did not touch the project-map. At S81 open, run incremental refresh against the S80 touched files (~20 files across SPEC + src + tests + samples + dist) OR full cold-start if Phase A10 / cg.scrml-restructure surface needs to be re-inventoried.
+10. **Articles thread (5 in-flight drafts at scrml-support/voice/articles/):** Per pa.md Rule 1, no PA-volunteered marketing work; await user-raised threads.
 
 ---
 
-## Things S81 PA must NOT screw up (S77/S78/S79 standing list + S80 additions)
+## Open questions to surface immediately at S82 open
 
-S77/S78/S79 standing lists (items 1-220+) carry forward verbatim. **S80 additions:**
+1. **Push state — CLEAN at S81 close.** scrmlTS 0/0 origin; scrml-support 0/0 origin. No outstanding push.
 
-- **DON'T cite E-MW-001 as live.** Retired at S80. Any new doc/code referencing it should be flagged as historical-record.
-- **DON'T accept `csrf="on"` in new test fixtures or samples.** Canonical value set is `"auto"|"off"` per §52.13. The attribute-registry already enforces this (emits `W-ATTR-002` on invalid values).
-- **DON'T accept `<channel protect=>` in new code.** Renamed to `<channel auth=>` at S80. attribute-registry drops `protect=` from the channel allowed-set; any usage now emits `W-ATTR-001`.
-- **DON'T add `<program protect=>` in new examples.** The shorthand is retired; per-block `<db protect=>` is canonical.
-- **DON'T un-skip Bootstrap L3 without first fixing cg.scrml structural issue + self-host parity gap.** The strip-bug fix at S80 is necessary-but-not-sufficient. The L3 describe block stays `.skip` with the updated reason documenting both.
-- **DON'T forget to mirror TS-side ast-builder.js changes into compiler/self-host/ast.scrml.** S80 missed this in the initial ef70daa commit; caught at wrap-time full-suite measurement. **Standing rule: any change touching ast-builder.js's parse / extract / fire-site logic MUST check `compiler/self-host/ast.scrml` for the parallel mirror site.** Same applies for emit-server.ts → self-host section-assembly.js (already mirrored at d7f9609 + ef70daa).
-- **DO use the `bun run scripts/rebuild-self-host-dist.ts` script after editing any self-host scrml source.** dist files are gitignored but tests load from them.
-- **DON'T treat the A5-7 INVENTORY's "Adjusted estimate" column as authoritative for future estimates.** The actual S80 landing was ~1.5h for the implemented-surface samples — the depth-of-survey discount kept getting LARGER as the work progressed. Real estimates should always include the audit-first phase.
+2. **Project-mapper refresh state** — refreshed at S81 (bundled with `7173bfe` D3 ship). Next session pickup is current. Map non-compliance findings (4 archival candidates + 1 known-drift + 1 uncertain) NOT yet acted on; could be addressed at any future session via single-pass deref.
+
+3. **scrml-dev-pipeline agent not staged on THIS machine** (carry-forward). All S81 ships were PA-direct; no compiler-source dispatches needed. Future compiler-source dispatches still need either (a) master-PA to stage the agent (and switch machines after) OR (b) continue using `general-purpose` for SPEC-text-only / `scrml-deep-dive` for diagnostics. Worktree-isolation friction continues to favor PA-direct for small-scope ships.
+
+4. **Self-host strict rebuild gate is ACTIVE.** Any new self-host dispatch must address the 5/11 failing files (ast/ts/ri/pa/dg) before re-running. Pre-commit hook excludes self-host tests so this doesn't block compiler-side work. Source-side null/undefined sweep is v0.3.0+ orthogonal — NOT a v0.2.0 blocker.
+
+5. **GCP3 walker gap is filed** but not in the immediate priority menu. Sub-project ~1-2h. Should be paired with the self-host source sweep when that lands (cleaner together than separately).
+
+6. **Worktree branches retained from S79+S80** (forensic per S67): `worktree-agent-ab656f3dcdd0f1638` (S79 debounce/throttle dispatch, 6 WIP commits). S81 had no isolation:"worktree" dispatches. Cleanup not priority.
+
+7. **3 legacy master inbox carry-overs** (S78+S79+S80+S81 carry-forward, still safe-to-ignore unless sweep requested):
+   - `2026-04-22-scrmlTS-to-master-insight-25-multi-meta.md` (UNREAD legacy)
+   - `2026-05-08-S72-scrmlTS-to-master-needs-push-SUPERSEDED.md`
+   - `2026-05-08-S71-scrmlTS-to-master-stage-scrml-dev-pipeline.md`
+
+---
+
+## Things S82 PA must NOT screw up (S77/S78/S79/S80 standing list + S81 additions)
+
+S77/S78/S79/S80 lists carry forward verbatim. **S81 additions:**
+
+- **DON'T disable the strict self-host rebuild gate** (`scripts/rebuild-self-host-dist.ts` exit-1 on host-compiler errors). The bypass that the gate closed was itself a "null/undefined never compile" violation per S81 user-voice. Self-host source-side cleanup is the right next step IF that work is taken up; DO NOT revert the gate to silently emit dist again.
+- **DON'T attempt the self-host source-side sweep without explicit user authorization.** S81 deferral was explicit and direction-bound. The audit doc + sweep plan are ready; the work is ready when prioritized.
+- **DON'T touch the channel-protect-stale line in `docs/articles/realtime-and-workers-as-syntax-devto-2026-04-29.md:200`.** Per pa.md Rule 1 (no marketing-shaped work) AND because published dev.to articles are immutable historical records. Project-mapper non-compliance report flagged as known-drift.
+- **DON'T regenerate SPEC-INDEX via `scripts/update-spec-index.sh`** (legacy; print-only). Use `bun run scripts/regen-spec-index.ts` instead. Comment in the legacy script documents the new path.
+- **DON'T introduce new `debounce(fn, ms)` / `throttle(fn, ms)` imperative calls** without first `import { debounce, throttle } from "scrml:time"`. The KEYWORD reservation is gone; bare names now resolve as IDENT and need stdlib import. AST kinds `debounce-call`/`throttle-call` no longer exist.
+- **DO use the `<x debounced=Nms>` / `<x throttled=Nms>` attribute form** for state-cell timing (canonical per §6.13). The retired imperative form was for ad-hoc function debouncing; that's now a stdlib concern.
+- **DON'T forget the §38.3 attribute-table update from S81** — `<channel auth=>` is now properly documented; `<channel protect=>` is no longer in the table (S80 retirement caught at S81). Any new channel-attribute docs should reference §38.3 + §38.3.1 (NEW S81).
+- **DON'T duplicate the engine-state-child grammar helpers** in type-system.ts when SYM PASS 11 populates `EngineStateChildEntry.payloadBindings` (filed as future cleanup). Today the local helpers in `type-system.ts:~85-115` are an intentional duplicate of `emit-variant-guard.ts` constants because TS is upstream of codegen and can't import from `./codegen/*`. When PASS 11 populates `entry.payloadBindings`, BOTH consumers can be retired in favor of reading `entry.payloadBindings`.
 
 ---
 
 ## Tags
 
-#session-80 #close #auth-protect-csrf-codification #e-mw-001-retired #d3-csrf-drift-resolved #bootstrap-l3-strip-bug-fixed #a5-7-samples-landed #engine-005-through-008 #self-host-parity-catchup #6-commits #0-regressions #depth-of-survey-discount-10x #pushed
+#session-81 #close #7-commits #adopter-overrides-shipped #strict-self-host-gate #phase-a10-closed #spec-index-regen #d3-pure-fn-detection #d1-export-synth-modifier #oq-2-imperative-debounce-retired #42-net-tests #0-regressions #pushed #v0.2.0-substantive-progress
