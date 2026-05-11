@@ -146,6 +146,7 @@ When the user says "wrap" (or PA proposes wrap), execute ALL of:
 4. **Inbox/outbox:** process `handOffs/incoming/*.md` (move read to `read/`); send any outbound notices that are due (giti, 6nz, scrml-support, master).
 5. **Test suite:** run `bun test`, record final pass/skip/fail counts in hand-off + CHANGELOG.
 6. **Working tree:** verify clean, OR commit pending work (with appropriate authorization). No silent uncommitted state at session close.
+6b. **Worktree cleanup (S83 addendum):** run `git worktree list` — for every worktree under `.claude/worktrees/` whose work has landed in main this session (file-delta protocol per S67 standing rule), execute `git worktree unlock <path> && git worktree remove --force <path> && git branch -D <branch>`. Then `git worktree prune`. Final state: `git worktree list` shows ONLY the main checkout. Rationale: agent branches retain only per-step granularity already integrated into main; cross-session retention is dead weight that consumes disk + blocks new worktree allocation (precedent: S83 hit 30 stale locked worktrees, ~1.1 GB, harness fell back to allocating in sibling repo, causing A5-7 dispatch failure). If a worktree's work has NOT landed (PA decision to defer or unwind), surface explicitly in hand-off and retain that one worktree only — do not retain everything by default.
 7. **Push:** push to origin OR surface push-pending state explicitly in hand-off §"Open questions to surface immediately."
 8. **Meta-docs:** update findings tracker, pinned discussions, intakes-with-status-changes, user-voice (if any new durable directives), and any other meta-doc that has a state to record.
 
@@ -418,7 +419,7 @@ root, STOP. Re-derive the path from WORKTREE_ROOT.
 
 6. **PA single PA-authored commit** with descriptive message + agent-branch reference. Pre-commit hook runs `bun test`; full suite via post-commit hook.
 
-7. **Worktree branch retained** for forensic / crash-recovery. Not merged into main's history.
+7. **Worktree branch retained for the rest of the SAME session only** for forensic / crash-recovery. Not merged into main's history. Cleaned up at the wrap of the session in which the work landed (see "wrap" §6 amendment below). Cross-session retention is the wrong-shape default — work content is already in main via the PA-authored landing commit; agent per-step granularity has zero practical forensic use cases 1+ sessions later. **Retention rule revised S83 (2026-05-11):** prior unbounded retention led to 30 stale locked worktrees / 1.1 GB / harness unable to allocate new worktrees, blocking the A5-7 dispatch. Bounded retention is the right policy.
 
 **Crash-recovery preserved.** Agent commits to its branch incrementally per the global "Crash Recovery: Incremental Commits + Progress Reports" directive. Branch + progress.md still serve as recovery anchor.
 
