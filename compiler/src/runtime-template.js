@@ -2274,7 +2274,18 @@ function _scrml_engine_arm_state_timers(varName, stateName, timersTable, table) 
     } else {
       continue; // malformed entry — defensive skip
     }
-    var timerKey = varName + "::" + stateName + "::" + i;
+    // A5-6 Feature 1 (S79) -- named-timer key. When the entry has 'name',
+    // the key uses 'n:NAME' instead of the index, so cancelTimer("NAME")
+    // can reconstruct the same key from the same (varName, stateName).
+    // Identifier-shape validation at compile time (E-TIMER-NAME-INVALID)
+    // guarantees 'name' is never digits-only and so cannot collide with
+    // an index-keyed sibling. Defensive runtime: still namespace named
+    // entries with the 'n:' prefix to make collisions structurally
+    // impossible.
+    var keySuffix = (typeof ent.name === "string" && ent.name.length > 0)
+      ? "n:" + ent.name
+      : String(i);
+    var timerKey = varName + "::" + stateName + "::" + keySuffix;
     var target = ent.target;
     // setterFn: route the timer-fire write through the engine's transition
     // table (A5-4 §51.0.M Semantics — a timer-induced transition is a legal
@@ -2300,9 +2311,34 @@ function _scrml_engine_clear_state_timers(varName, stateName, timersTable) {
   var list = timersTable[stateName];
   if (!Array.isArray(list) || list.length === 0) return;
   for (var i = 0; i < list.length; i++) {
-    var timerKey = varName + "::" + stateName + "::" + i;
+    var ent = list[i];
+    // A5-6 Feature 1 (S79) -- mirror the keying scheme used at arm time.
+    var keySuffix = (ent && typeof ent.name === "string" && ent.name.length > 0)
+      ? "n:" + ent.name
+      : String(i);
+    var timerKey = varName + "::" + stateName + "::" + keySuffix;
     _scrml_machine_clear_timer(timerKey);
   }
+}
+
+// A5-6 Feature 1 (SPEC sec 51.0.M name= extension, S79).
+// cancelTimer("NAME") -- invoked from within an engine state-child arm body
+// (event handler / interpolation expression) -- lowers to a call to this
+// helper with the surrounding (varName, stateName) baked in by codegen.
+// The helper reconstructs the same composite key the arm-on-entry path used
+// and clears just that one timer via the shared _scrml_machine_clear_timer.
+//
+// Per SPEC sec 51.0.M S79 amendment + SCOPE sec 3.2 Option A:
+//   - Names are scope-local to the state-child; cancelTimer can only address
+//     timers declared in the SAME state-child. Codegen guarantees this by
+//     using the static (varName, stateName) of the enclosing arm.
+//   - Unknown names are a runtime no-op (matches clearTimeout(undefined)
+//     browser semantics; SCOPE sec 3.3 explicit decision).
+//   - Already-fired and not-yet-armed timers are no-ops.
+function _scrml_engine_clear_named_timer(varName, stateName, name) {
+  if (typeof name !== "string" || name.length === 0) return;
+  var timerKey = varName + "::" + stateName + "::n:" + name;
+  _scrml_machine_clear_timer(timerKey);
 }
 
 // ---------------------------------------------------------------------------

@@ -293,7 +293,23 @@ export function scanForOnTimeoutEntries(
       toVal = v;
     }
 
-    out.push({ after: afterVal, to: toVal, rawOffset: startIdx });
+    // A5-6 Feature 1 (§51.0.M name= extension, S79) — extract optional
+    // `name=` value. Accepts: name=ident / name="ident" / name='ident'.
+    // Identifier-shape validation deferred to A5-3 typer (E-TIMER-NAME-INVALID).
+    const nameMatch = attrs.match(/\bname\s*=\s*(.+?)(?=\s+\w+\s*=|\s*\/?\s*$)/s);
+    let nameVal: string | undefined;
+    if (nameMatch) {
+      let v = nameMatch[1]!.trim();
+      if ((v.startsWith('"') && v.endsWith('"')) ||
+          (v.startsWith("'") && v.endsWith("'"))) {
+        v = v.slice(1, -1).trim();
+      }
+      if (v.length > 0) nameVal = v;
+    }
+
+    const entry: OnTimeoutEntry = { after: afterVal, to: toVal, rawOffset: startIdx };
+    if (nameVal !== undefined) entry.name = nameVal;
+    out.push(entry);
   }
 
   return out;

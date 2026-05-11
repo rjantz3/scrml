@@ -291,6 +291,18 @@ export class BindingRegistry {
     this._armContextStack.pop();
   }
 
+  /**
+   * A5-6 Feature 1 (S79) — read the topmost arm context, or null if not
+   * inside an engine state-child arm. Used by `emit-expr.ts:emitCall` to
+   * recognize `cancelTimer("X")` calls and lower them to
+   * `_scrml_engine_clear_named_timer("<varName>", "<armTag>", "X")`.
+   * Format: `"<engineVarName>:<armTag>"` (matches `pushArmContext`).
+   */
+  get currentArmContext(): string | null {
+    if (this._armContextStack.length === 0) return null;
+    return this._armContextStack[this._armContextStack.length - 1] ?? null;
+  }
+
   /** All event bindings. Read-only during emission. */
   get eventBindings(): EventBinding[] {
     return this._eventBindings;

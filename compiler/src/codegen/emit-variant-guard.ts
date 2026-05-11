@@ -459,6 +459,25 @@ function emitArmWireFunction(
     const callArgs = args.length === 0 ? "event" : args;
     const domEvent = String(binding.eventName || "").replace(/^on/, "");
     const preventLine = domEvent === "submit" ? "event.preventDefault(); " : "";
+    // A5-6 Feature 1 (§51.0.M name= extension, S79). Mirror the
+    // emit-event-wiring.ts call-ref recognition for non-delegable events
+    // (e.g. `<input onfocus=cancelTimer("X")>` inside an arm body). Same
+    // semantics: cancelTimer + arm context + string-literal first arg →
+    // lower to `_scrml_engine_clear_named_timer(...)`.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { maybeLowerCancelTimerCallRef } = require("./emit-engine.ts") as {
+      maybeLowerCancelTimerCallRef: (
+        handlerName: string,
+        handlerArgs: ReadonlyArray<unknown>,
+        engineArm: string | null | undefined,
+      ) => string | null;
+    };
+    const lowered = maybeLowerCancelTimerCallRef(
+      handlerName, binding.handlerArgs || [], binding.engineArm as string | undefined,
+    );
+    if (lowered !== null) {
+      return `function(event) { ${preventLine}${lowered}; }`;
+    }
     return `function(event) { ${preventLine}${handlerName}(${callArgs}); }`;
   }
 

@@ -1,6 +1,7 @@
 import { rewriteReactiveRefs } from "./rewrite.js";
 import { rewriteBlockBody } from "./emit-control-flow.ts";
 import { emitExprField } from "./emit-expr.ts";
+import { maybeLowerCancelTimerCallRef } from "./emit-engine.ts";
 import type { ExprNode } from "../types/ast.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
@@ -370,13 +371,29 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
 
       // For submit events on forms, auto-inject event.preventDefault()
       const preventLine = domEvent === "submit" ? "event.preventDefault(); " : "";
-      // Per tutorial §1.5: `onkeydown=handleKey()` passes the native event
-      // implicitly. When the user wrote no args, thread `event` into the call
-      // so handlers declared as `fn(e)` receive it as the first arg. Handlers
-      // that ignore the arg are unaffected (extra positional args are silent
-      // in JS). Non-empty args are left alone — user was explicit.
-      const callArgs = argsStr.length === 0 ? "event" : argsStr;
-      handlerExpr = `function(event) { ${preventLine}${resolvedHandler}(${callArgs}); }`;
+      // A5-6 Feature 1 (§51.0.M name= extension, S79). When the call-ref is
+      // `cancelTimer("X")` AND this binding is arm-tagged (`engineArm` set
+      // by Phase A10's `pushArmContext` during arm-body codegen), lower it
+      // to `_scrml_engine_clear_named_timer("<varName>", "<armTag>", "X")`.
+      // The (varName, armTag) is extracted from `binding.engineArm` (format:
+      // `"<varName>:<armTag>"`). Outside an arm context the call-ref falls
+      // through to the ordinary path (which runtime-fails with `cancelTimer
+      // is not defined` — v1 doesn't promote that to a compile-time
+      // diagnostic; v2 follow-up may add `E-CANCEL-TIMER-MISPLACED`).
+      const cancelTimerLowered = maybeLowerCancelTimerCallRef(
+        handlerName, handlerArgs ?? [], binding.engineArm,
+      );
+      if (cancelTimerLowered !== null) {
+        handlerExpr = `function(event) { ${preventLine}${cancelTimerLowered}; }`;
+      } else {
+        // Per tutorial §1.5: `onkeydown=handleKey()` passes the native event
+        // implicitly. When the user wrote no args, thread `event` into the call
+        // so handlers declared as `fn(e)` receive it as the first arg. Handlers
+        // that ignore the arg are unaffected (extra positional args are silent
+        // in JS). Non-empty args are left alone — user was explicit.
+        const callArgs = argsStr.length === 0 ? "event" : argsStr;
+        handlerExpr = `function(event) { ${preventLine}${resolvedHandler}(${callArgs}); }`;
+      }
     }
 
     if (!byEventType.has(eventName)) {

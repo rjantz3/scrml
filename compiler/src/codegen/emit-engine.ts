@@ -398,8 +398,16 @@ export function emitEngineTimersTable(meta: EngineMetadata): string[] {
       }
       const parsed = parseAfterDuration(ot.after);
       const targetLit = JSON.stringify(ot.to);
+      // A5-6 Feature 1 (§51.0.M name= extension, S79). When the entry has
+      // a name, emit a `name: "<name>"` field so the runtime arm/clear path
+      // can derive a name-keyed timerKey (`varName::stateName::n:NAME`)
+      // instead of an index-keyed one. Enables `cancelTimer("<name>")`
+      // from the same state-child body to address this timer specifically.
+      const nameField = (typeof ot.name === "string" && ot.name.length > 0)
+        ? `, name: ${JSON.stringify(ot.name)}`
+        : "";
       if (parsed.kind === "literal") {
-        arrayParts.push(`{ ms: ${parsed.ms}, target: ${targetLit} }`);
+        arrayParts.push(`{ ms: ${parsed.ms}, target: ${targetLit}${nameField} }`);
       } else if (parsed.kind === "computed") {
         // Rewrite the expression so reactive reads (@var → _scrml_reactive_get) wire.
         const rewritten = rewriteExpr(parsed.exprText);
@@ -408,7 +416,7 @@ export function emitEngineTimersTable(meta: EngineMetadata): string[] {
         // Function-expression form (not arrow) for ES5-friendly emission +
         // parity with the surrounding runtime template.
         arrayParts.push(
-          `{ msExpr: function(){ return (${rewritten}) * ${parsed.unitMultiplier}; }, target: ${targetLit} }`
+          `{ msExpr: function(){ return (${rewritten}) * ${parsed.unitMultiplier}; }, target: ${targetLit}${nameField} }`
         );
       }
       // parsed.kind === "invalid" — silently drop (typer already reported).
@@ -2434,6 +2442,68 @@ export function collectEnginesWithIdleWatchdog(fileAST: unknown): Set<string> {
     }
   }
   return out;
+}
+
+/**
+ * A5-6 Feature 1 (§51.0.M name= extension, S79).
+ *
+ * Recognize `cancelTimer("X")` call-ref-form event-handler attributes inside
+ * an engine state-child arm body, and lower to the runtime helper call
+ * `_scrml_engine_clear_named_timer("<varName>", "<armTag>", "<X>")`.
+ *
+ * Returns the lowered runtime-call expression string (without the wrapping
+ * `function(event) { ... }` — the caller wraps), or `null` when the call is
+ * NOT cancelTimer-shaped or when there's no arm context (the caller falls
+ * through to the ordinary handler-emission path).
+ *
+ * v1 scope (S79): only the call-ref form is recognized. Other shapes
+ * (`onclick=${cancelTimer("X")}` expression form, function-body calls,
+ * non-string-literal args) fall through to ordinary emission and surface
+ * `cancelTimer is not defined` at runtime. v2 follow-up may extend by
+ * threading arm context into emit-expr's CallExpr emission.
+ *
+ * @param handlerName  The call-ref handler name (e.g. `"cancelTimer"`).
+ * @param handlerArgs  The call-ref args (raw expression strings or
+ *                     pre-parsed nodes). For cancelTimer recognition the
+ *                     first arg MUST be a string-literal shape (one of
+ *                     `'"X"'` / `"'X'"` / `{kind:"string-literal", value:"X"}`).
+ * @param engineArm    The arm-context tag from the binding's `engineArm`
+ *                     field (set by Phase A10's `pushArmContext`). Format:
+ *                     `"<varName>:<armTag>"`. `undefined`/`null`/empty →
+ *                     not in an arm context.
+ * @returns Lowered runtime-call expression string OR `null`.
+ */
+export function maybeLowerCancelTimerCallRef(
+  handlerName: string,
+  handlerArgs: ReadonlyArray<unknown>,
+  engineArm: string | null | undefined,
+): string | null {
+  if (handlerName !== "cancelTimer") return null;
+  if (typeof engineArm !== "string" || engineArm.length === 0) return null;
+  const colonIdx = engineArm.indexOf(":");
+  if (colonIdx < 0) return null;
+  const varName = engineArm.slice(0, colonIdx);
+  const armTag = engineArm.slice(colonIdx + 1);
+  if (varName.length === 0 || armTag.length === 0) return null;
+
+  if (handlerArgs.length < 1) return null;
+  const a0 = handlerArgs[0];
+  let nameLit: string | null = null;
+  if (typeof a0 === "string") {
+    const s = a0.trim();
+    if ((s.startsWith('"') && s.endsWith('"') && s.length >= 2) ||
+        (s.startsWith("'") && s.endsWith("'") && s.length >= 2)) {
+      nameLit = s.slice(1, -1);
+    }
+  } else if (a0 && typeof a0 === "object") {
+    const node = a0 as Record<string, unknown>;
+    if (node.kind === "string-literal" && typeof node.value === "string") {
+      nameLit = node.value as string;
+    }
+  }
+  if (nameLit === null || nameLit.length === 0) return null;
+
+  return `_scrml_engine_clear_named_timer(${JSON.stringify(varName)}, ${JSON.stringify(armTag)}, ${JSON.stringify(nameLit)})`;
 }
 
 /**

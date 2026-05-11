@@ -993,7 +993,7 @@ TAB receives the entire lambda as a single `ExprAttrValue`.
 | `<match>` | §18.0.1 | `for=Type` (required), `on=expr` | bare-body (variant arms) |
 | `<errors>` | §55.8 | `of=expr` (required), `all` (boolean) | optional bare-body (override template) |
 | `<onTransition>` | §51.0.H | `to=Variant`, `from=Variant`, `once` (boolean), `if=expr` | bare-body (effect statements) or `:`-shorthand |
-| `<onTimeout>` (S67) | §51.0.M | `after=DURATION` (required), `to=.Variant` (required) | self-closing only |
+| `<onTimeout>` (S67; `name=` S79) | §51.0.M | `after=DURATION` (required), `to=.Variant` (required), `name=IDENT` (optional, S79 — addressable for `cancelTimer`) | self-closing only |
 | `<onIdle>` (S77) | §51.0.R | `after=DURATION` (required), `to=.Variant` (required) | self-closing only |
 
 **Normative statements:**
@@ -11529,6 +11529,8 @@ The following error codes are introduced by this section. They SHALL be added to
 | E-IDLE-DUPLICATE | §51.0.R | An `<engine>` declares more than one `<onIdle>` element. Per §51.0.R, an engine has at most one event-timeout watchdog. (A5-6; S77.) | Error |
 | E-IDLE-INVALID-VARIANT | §51.0.R | `<onIdle to=.X/>` references a variant `X` not in the engine's `for=` enum, or `to=` is missing/malformed. (A5-6; S77.) | Error |
 | E-IDLE-MISPLACED | §51.0.R | `<onIdle>` appears inside a state-child body. Per §51.0.R, `<onIdle>` is engine-wide and must sit at engine root. For per-state timer-fire-on-state-entry semantics use `<onTimeout>` (§51.0.M) instead. (A5-6; S77.) | Error |
+| E-TIMER-NAME-DUPLICATE | §51.0.M.1 | An engine state-child declares two `<onTimeout>` elements with the same `name=` value. Per §51.0.M.1 (S79), `name=` values are scope-local to the state-child body and MUST be unique within it — `cancelTimer("X")` would otherwise be ambiguous. (A5-6 Feature 1; S79.) | Error |
+| E-TIMER-NAME-INVALID | §51.0.M.1 | An `<onTimeout name=...>` value is not a valid identifier (PascalCase or camelCase; ASCII letters, digits, and underscores; first character non-digit). Per §51.0.M.1 (S79), the `name=` attribute MUST be identifier-shaped to match the `cancelTimer("X")` argument convention. (A5-6 Feature 1; S79.) | Error |
 
 ---
 
@@ -14437,6 +14439,8 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-IDLE-DUPLICATE | §51.0.R | An `<engine>` declares more than one `<onIdle>` element. Per §51.0.R, an engine has at most one event-timeout watchdog. Resolution: remove the duplicate or merge into one. (A5-6, S77.) | Error |
 | E-IDLE-INVALID-VARIANT | §51.0.R | `<onIdle to=.X/>` references a variant `X` not in the engine's `for=` enum, OR the `to=` attribute is missing or malformed. Resolution: correct the variant reference or add `.X` to the enum. (A5-6, S77.) | Error |
 | E-IDLE-MISPLACED | §51.0.R | `<onIdle>` appears inside a state-child body. Per §51.0.R, `<onIdle>` is engine-wide and must sit at engine-root scope (sibling of state-children). For per-state timer-fire-on-state-entry semantics use `<onTimeout>` (§51.0.M) instead. (A5-6, S77.) | Error |
+| E-TIMER-NAME-DUPLICATE | §51.0.M.1 | An engine state-child declares two `<onTimeout>` elements with the same `name=` value. Per §51.0.M.1 (S79), `name=` values are scope-local to the state-child body and MUST be unique within it — `cancelTimer("X")` would otherwise be ambiguous. Resolution: rename one of the conflicting `name=` attributes. (A5-6 Feature 1, S79.) | Error |
+| E-TIMER-NAME-INVALID | §51.0.M.1 | An `<onTimeout name=...>` value is not a valid identifier — must match `/^[A-Za-z_][A-Za-z0-9_]*$/` (ASCII letters, digits, and underscores; first character non-digit; no whitespace or punctuation). Per §51.0.M.1 (S79), the `name=` attribute MUST be identifier-shaped to match the `cancelTimer("X")` argument convention. Resolution: rename to a valid identifier or drop the `name=` attribute (the timer becomes index-keyed and uncancellable). (A5-6 Feature 1, S79.) | Error |
 | E-SSE-001 | §37.9 | `yield` used inside a non-generator `server function` body | Error |
 | W-SSE-001 | §37.9 | `server function*` body contains no `yield` statements | Warning |
 | E-CHANNEL-001 | §38.9 | `<channel>` missing required `name=` attribute | Error |
@@ -21074,6 +21078,116 @@ All three coexist:
 - §51.0.H — `<onTransition>` (sibling structural element).
 - §4.15, §24 — structural element registry.
 - §34 — `E-ENGINE-INVALID-TRANSITION`, `E-STRUCTURAL-ELEMENT-MISPLACED`.
+
+##### 51.0.M.1 `name=` attribute and `cancelTimer("name")` builtin (S79, 2026-05-10 — A5-6 Feature 1)
+
+**Added 2026-05-10 (S79).** Item G B-shakeable named-timer surface per master-PA capability-gap audit
+(`scrml-support/archive/changes/phase-a7-step-a5-6-item-g-timer-extensions/SCOPE-AND-DECOMPOSITION.md` §3,
+RATIFIED Option A). Phase A10 (engine state-child body render) unblocks this feature by making
+state-child body event handlers walkable AST that codegen can recognize the `cancelTimer` call inside.
+
+**Added attribute:**
+
+| Attribute | Required? | Meaning |
+|---|---|---|
+| `name=IDENT` | OPTIONAL | Addressable identifier for this timer. When present, `cancelTimer("IDENT")` callable from any event-handler attribute inside the SAME state-child body cancels just this timer. Absent (default) keeps the pre-S79 index-keyed behavior — the timer is uncancellable from elsewhere in the body. |
+
+**Form:**
+
+```scrml
+<onTimeout name=IDENT after=DURATION to=.Variant/>
+```
+
+**`name=` shape:**
+
+- MUST be a valid identifier — ASCII letters/digits/underscore, first character non-digit
+  (`/^[A-Za-z_][A-Za-z0-9_]*$/`). Quoted (`name="ident"`) and unquoted (`name=ident`) forms
+  are both accepted by the parser and equivalent.
+- Names are SCOPE-LOCAL to the state-child body — two `<onTimeout>` siblings in the same
+  body MUST have distinct names (or at most one of the two MAY carry a `name=`).
+- Names are NOT shared across state-children, NOR across engines — the runtime composite
+  key (`<varName>::<stateName>::n:<name>`) namespaces them by both engine and state.
+- An invalid `name=` value (whitespace, punctuation, leading digit, empty) fires
+  `E-TIMER-NAME-INVALID`. A duplicate name within the same state-child fires
+  `E-TIMER-NAME-DUPLICATE`. See §34 catalog.
+
+**The `cancelTimer("name")` builtin:**
+
+`cancelTimer("name")` is a runtime builtin that cancels the named `<onTimeout>` from elsewhere
+in the same state-child body. Use case: "auto-dismiss banner after 30s, OR cancel
+auto-dismiss when user clicks dismiss" — mid-state cancellation without re-entering the state
+to clear-on-exit.
+
+**Worked example — auto-dismiss banner with cancellation:**
+
+```scrml
+type Banner:enum = { Visible, Hidden }
+
+<engine for=Banner initial=.Visible>
+  <Visible rule=.Hidden>
+    <onTimeout name=autoDismiss after=30s to=.Hidden/>
+    <p>New message — auto-dismiss in 30s.</p>
+    <button onclick=cancelTimer("autoDismiss")>Keep visible</button>
+    <button onclick=${@banner = .Hidden}>Dismiss now</button>
+  </>
+
+  <Hidden></>
+</>
+```
+
+In `.Visible`, the timer is armed on entry. The "Keep visible" button cancels it via
+`cancelTimer("autoDismiss")` — the engine stays in `.Visible`, no transition fires. The
+"Dismiss now" button transitions out, which clears all timers attached to the state on exit
+per existing §51.0.M semantics.
+
+**Recognition rules (v1, S79):**
+
+- `cancelTimer("name")` is recognized as a builtin ONLY when used as an event-handler
+  attribute call-ref inside an engine state-child body — i.e., the form
+  `oneventname=cancelTimer("name")` (e.g. `onclick=cancelTimer("autoDismiss")`).
+- The compiler lowers the call to
+  `_scrml_engine_clear_named_timer("<varName>", "<stateName>", "name")`
+  where `varName` and `stateName` are statically known at codegen time from the surrounding
+  arm context (Phase A10).
+- Other call shapes — `oneventname=${cancelTimer("name")}` (expression-form), bare-statement
+  inside a `${}` logic block, and function-body calls — are NOT recognized as the builtin
+  in v1; they emit ordinary `cancelTimer(...)` JavaScript calls and fail at runtime as
+  `cancelTimer is not defined`. v2 follow-up may extend recognition by threading arm context
+  through the expression emitter.
+
+**Unknown-name semantics:**
+
+`cancelTimer("missing-name")` is a runtime no-op (matches `clearTimeout(undefined)` browser
+semantics). The compiler does NOT validate that the name argument matches a declared
+`<onTimeout name=>` in the same state-child — typos fail silently. This is a deliberate
+choice paralleling DOM API conventions; promote to a lint in v2 if friction emerges.
+
+**Tree-shake:**
+
+Named timers do NOT cost any extra runtime — they ride the same `_scrml_engine_arm_state_timers`
+/ `_scrml_engine_clear_state_timers` / `_scrml_machine_clear_timer` helpers as anonymous
+timers. The only delta is the composite key uses `n:NAME` instead of an index. The
+`_scrml_engine_clear_named_timer` helper is emitted unconditionally (small) but only called
+from compiled `cancelTimer(...)` lowerings — engines without any `cancelTimer` call sites
+emit zero references to it.
+
+**Composition with existing semantics:**
+
+- Multiple named + multiple anonymous `<onTimeout>` siblings in the same body coexist; named
+  and anonymous timers fire independently.
+- Clear-on-exit (any `rule=` transition or external write to the engine variable) clears
+  ALL timers attached to the state — both named and anonymous.
+- Reset-on-reentry semantics from §51.0.M base text apply unchanged.
+- `name=` on a derived-engine `<onTimeout>` is parsed and validated identically; cancellation
+  semantics are well-defined but rarely useful (derived engines reject direct writes —
+  cancellation only matters until the derived expression's value reaches `to=`'s variant).
+
+**Cross-refs:**
+
+- §51.0.M base text (S67) — `<onTimeout>` overall semantics this extends.
+- §34 — `E-TIMER-NAME-DUPLICATE`, `E-TIMER-NAME-INVALID`.
+- `compiler/src/runtime-template.js` — `_scrml_engine_clear_named_timer` helper.
+- `compiler/src/codegen/emit-engine.ts` — `maybeLowerCancelTimerCallRef` codegen entry.
 
 #### 51.0.N `history` attribute on composite state-children (S67, 2026-05-07)
 

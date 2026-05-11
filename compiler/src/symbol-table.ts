@@ -359,6 +359,14 @@ export interface OnTimeoutEntry {
   /** `to=.Variant` target. Captured as the variant name (no leading dot).
    *  Empty string when malformed (parse-error shape — A5-3 surfaces). */
   to: string;
+  /** A5-6 Feature 1 (§51.0.M name= extension, S79). Optional addressable
+   *  identifier for the timer. When present, `cancelTimer("<name>")` callable
+   *  from the same state-child body cancels JUST this timer. Names are
+   *  scope-local to the state-child; two `<onTimeout>` in the same body
+   *  with the same `name=` is `E-TIMER-NAME-DUPLICATE`. Non-identifier
+   *  shapes are `E-TIMER-NAME-INVALID`. Absent (undefined) for unnamed
+   *  timers (current pre-S79 behavior; index-keyed). */
+  name?: string;
   /** Substring offset (relative to the enclosing state-child's `bodyRaw`)
    *  of the `<onTimeout` opener. */
   rawOffset: number;
@@ -6430,10 +6438,58 @@ export function validateEngineA5Extensions(
       }
     }
 
-    // ----- Fire-sites #3 + #4: <onTimeout to=> legality + variant validation (§51.0.M) -----
+    // ----- Fire-sites #3 + #4 + #5: <onTimeout to=> legality + variant
+    //       validation (§51.0.M) + name= shape/duplicate (§51.0.M S79) -----
     if (Array.isArray(sc.onTimeoutElements) && sc.onTimeoutElements.length > 0) {
+      // A5-6 Feature 1 (S79) — track name= seen-set per state-child for
+      // duplicate detection. Fires E-TIMER-NAME-DUPLICATE on the SECOND
+      // (and any subsequent) appearance of a given name. Names are scope-
+      // local to the state-child per SPEC §51.0.M (S79 amendment).
+      const seenNames = new Set<string>();
       for (const ot of sc.onTimeoutElements) {
         if (!ot || typeof ot !== "object") continue;
+
+        // Fire-site #5a: E-TIMER-NAME-INVALID (§51.0.M S79). Identifier
+        // shape: PascalCase or camelCase, no leading digit, ASCII letters
+        // + digits + underscore. Rejects whitespace, punctuation, empty
+        // post-strip strings.
+        if (typeof ot.name === "string") {
+          const nm = ot.name;
+          if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(nm)) {
+            fireA5Diagnostic(
+              errors,
+              "E-TIMER-NAME-INVALID",
+              `E-TIMER-NAME-INVALID: \`<onTimeout name=${JSON.stringify(nm)} ...>\` ` +
+              `inside state-child \`<${sc.tag}>\` carries an invalid timer name. Per ` +
+              `SPEC §51.0.M, \`name=\` MUST be a valid identifier (PascalCase or ` +
+              `camelCase; ASCII letters, digits, and underscores; first character ` +
+              `must NOT be a digit). Drop the \`name=\` attribute (the timer becomes ` +
+              `index-keyed and uncancellable) or rename to a valid identifier.`,
+              engineDecl,
+              filePath,
+              "error",
+            );
+          } else {
+            // Fire-site #5b: E-TIMER-NAME-DUPLICATE (§51.0.M S79).
+            if (seenNames.has(nm)) {
+              fireA5Diagnostic(
+                errors,
+                "E-TIMER-NAME-DUPLICATE",
+                `E-TIMER-NAME-DUPLICATE: state-child \`<${sc.tag}>\` declares two ` +
+                `\`<onTimeout>\` elements with the same \`name=${JSON.stringify(nm)}\`. ` +
+                `Per SPEC §51.0.M, \`name=\` values are scope-local to the state-child ` +
+                `body and MUST be unique within that body — \`cancelTimer(${JSON.stringify(nm)})\` ` +
+                `would otherwise be ambiguous. Rename one of the \`name=\` attributes.`,
+                engineDecl,
+                filePath,
+                "error",
+              );
+            } else {
+              seenNames.add(nm);
+            }
+          }
+        }
+
         const toTarget: string = typeof ot.to === "string" ? ot.to : "";
         if (toTarget.length === 0) {
           // Empty `to=` is a parse-error shape captured by A5-2; surface
