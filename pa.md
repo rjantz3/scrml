@@ -274,6 +274,46 @@ increment, recording design insights. Truth flow into storage must not be inhibi
 - Feed project-mapper (for this repo) on session start or when files change significantly
 - Feed resource-mapper (scrml-support corpus) when a diagnostic agent needs broad context
 - Process non-compliance reports from project-mapper — propose dispositions to user, deref approved items to scrml-support/archive/
+
+### Maps-discipline protocol (S82 — `.claude/maps/` as load-bearing input, not catalog)
+
+**Maps work when they're consumed by agents. They are silent when PA's dispatch brief doesn't name them.** S82 audit found map content cited in only 2 of last 12 hand-offs; root cause was operational discipline at dispatch time, not map design. This protocol closes that gap.
+
+**1. Dispatch-brief template — every dev / scrml-writer / pipeline / gauntlet dispatch MUST include this block verbatim near the top of the prompt:**
+
+```
+# MAPS — REQUIRED FIRST READ
+
+Before consuming any other context (kickstarter / anti-patterns / SPEC sections / source files),
+read `.claude/maps/primary.map.md` in full. It is ~100 lines.
+
+The §"Task-Shape Routing" section in that file tells you which additional maps to consult based
+on your task shape (compiler-source bug fix / new feature / refactor / test authoring / spec
+amendment / audit / unclassified). Follow the routing for the task you've been given.
+
+Map currency: maps reflect HEAD <PASTE-COMMIT-SHA-HERE> as of <PASTE-DATE>. If your work touches
+files modified after that point, treat the map content as a starting hypothesis to verify via
+grep / Read against current source — not as ground truth.
+
+Feedback: in your final report, include either:
+- "Maps consulted: [list]; load-bearing finding: <one sentence on what the map content told you>"
+- "Maps consulted but not load-bearing — [optional: which map you expected to help but didn't]"
+
+The second answer is fine and valuable. It's signal PA needs.
+```
+
+PA fills `<PASTE-COMMIT-SHA-HERE>` + `<PASTE-DATE>` from `primary.map.md` line 3 (`updated: ... commit: ...`) at dispatch time.
+
+**2. Currency check — PA's responsibility before every dispatch.** Compare:
+- `git rev-parse HEAD` vs `primary.map.md` line 3 commit SHA.
+- If HEAD is N commits ahead of map AND those commits touched files relevant to the dispatch, run incremental `project-mapper` refresh OR explicitly tell the agent which post-map-commit landings to factor in.
+- A stale map is worse than no map (an agent following stale guidance can land in a wrong-shape fix).
+
+**3. Map-selection ownership.** PA chooses which task-shape applies to the dispatch and names the relevant maps in the brief. Don't blanket-include all 10 maps — name the 2-4 that primary.map.md's Task-Shape Routing identifies for this task. If the task spans multiple shapes (e.g., a refactor that touches AST shapes), name them all and explain why.
+
+**4. Feedback-loop disposition.** When 3-5 consecutive dispatches on the same task shape report "maps not load-bearing," that's structural signal — either the task-shape routing is wrong OR the map content is at the wrong granularity OR PA is naming the wrong maps. Surface to user; don't quietly accept the pattern as background noise.
+
+**5. Losing-battle threshold.** If after 6-8 weeks of disciplined dispatch with this protocol in place the empirical record shows < 30% of dispatches report any load-bearing map finding, the map content design is wrong. Re-evaluate at that point. Do NOT default-retire the maps before the discipline has run — the S82 PA's reflex toward "tool unread, retire it" was Rule-3 violation (easy answer beats right answer); the right answer was always to fix the discipline first.
 - **Every gauntlet dev dispatch MUST include `scrml-support/docs/gauntlets/BRIEFING-ANTI-PATTERNS.md` in the briefing** — this is the Ghost-Pattern mitigation (Solution #1 of `scrml-support/docs/ghost-error-mitigation-plan.md`). Dev agents reflexively reach for React/Vue/JSX syntax under load; the anti-pattern table counteracts training-data bias. The brief must say: "Read `scrml-support/docs/gauntlets/BRIEFING-ANTI-PATTERNS.md` before writing any code, and reread it before each feature." Skipping this costs overseer time and pollutes bug reports.
 - **Every dev dispatch that writes scrml — gauntlet OR scrml-writer OR pipeline-doing-self-host — MUST include `docs/articles/llm-kickstarter-v1-2026-04-25.md` in the briefing.** Same reason as the anti-patterns brief but broader: the kickstarter gives the agent the canonical scrml shape, the stdlib catalog (kills npm reach), the inline anti-pattern table (every "if you'd reach for X in framework Y, use Z in scrml" mapping), and the recipes for auth/real-time/reactive/loading/schema/lin/middleware/navigation/multi-file. Derived from 5 clueless-agent experiments S41 + Scope C verification S42 (`scrml-support/archive/audits/kickstarter-v0-verification-matrix.md` + `scrml-support/archive/audits/scope-c-stage-1-2026-04-25.md`). v1 supersedes v0 — v0 had structural errors in the real-time recipe, reactive recipe, anti-pattern table, and `protect=` separator. **Use v1.** The brief must say: "Read `docs/articles/llm-kickstarter-v1-2026-04-25.md` in full before generating any scrml code."
 

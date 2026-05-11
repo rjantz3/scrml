@@ -66,6 +66,53 @@ error codes / warning codes / diagnostics     → error.map.md
 channel / SSE / runtime event wiring          → events.map.md
 docs hygiene / superseded artifacts           → non-compliance.report.md
 
+## Task-Shape Routing (agents — read this section first)
+
+**Compiler-source bug fix** (parser / typer / codegen / runtime emit / boundary inference):
+1. `domain.map.md` — locate the pipeline stage that owns the symptom (12-stage pipeline + Phase A10 surface)
+2. `structure.map.md` — confirm the file path under `compiler/src/`
+3. `error.map.md` — if symptom is a diagnostic, locate the fire-site
+4. `schema.map.md` — if the bug touches AST shape
+
+**New language feature implementation** (new AST kind / new error code / new SPEC section):
+1. `domain.map.md` — confirm the feature lives in an existing pipeline stage OR identify the boundary
+2. `schema.map.md` — register the new AST node kind shape (canonical home: `compiler/src/types/ast.ts`)
+3. `error.map.md` — register the new error code if any
+4. `test.map.md` — locate the right test directory and conformance hooks
+
+**Refactor / cleanup / rename** (mechanical or semi-mechanical sweep):
+1. `structure.map.md` — full file inventory
+2. `dependencies.map.md` — internal pipeline graph (catches cross-stage callers)
+3. `schema.map.md` — if a node kind is being renamed (e.g., the `reactive-decl` → `state-decl` rename at S59 Step 3 touched ~514 sites)
+
+**Test authoring** (unit / integration / conformance / browser):
+1. `test.map.md` — runner, fixtures, current test counts, per-directory conventions
+2. `error.map.md` — if writing conformance tests for an error code
+
+**Spec amendment** (SPEC.md edit / new normative statement / SPEC-INDEX refresh):
+1. `domain.map.md` — confirm spec text matches the code reality being amended
+2. `error.map.md` — if the amendment adds / renames / deletes an error code
+3. `non-compliance.report.md` — check if the amendment closes any flagged drift
+
+**Audit / diagnostic** (read-only — no code change; observation only):
+1. `non-compliance.report.md` — first stop for hygiene findings PA can act on
+2. `domain.map.md` — for behavioral / pipeline-stage analysis
+3. `dependencies.map.md` — for cross-cutting impact analysis
+
+**Don't know which** (e.g., open-ended task brief from user):
+1. Read `primary.map.md` (this file) in full
+2. Read the **Task-Shape Routing** section above and self-classify
+3. If the classification is genuinely unclear, surface to PA before consuming further context
+
+## Use feedback loop
+
+When this map's content was load-bearing for a dispatch outcome, the agent's final report should
+note **"map content consulted: [list of map files]; load-bearing finding: [one sentence]"**. When
+the map content was NOT useful, report **"maps consulted but not load-bearing"** so PA can
+diagnose whether the wrong maps were named in the brief OR the map content is at the wrong
+granularity (PA-side fix). 3-5 consecutive "not load-bearing" reports on the same task shape
+trigger a map-design review.
+
 ## Key Facts
 
 - **Entry points:** CLI is `compiler/bin/scrml.js`; programmatic API is `compiler/src/api.js`; LSP server is `lsp/server.js --stdio`. Pipeline: BS → TAB → NR → MOD → CE → UVB → PA → RI → TS → META → DG → BP → CG (12+ stages per PIPELINE.md v0.7.1).
