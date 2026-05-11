@@ -2092,6 +2092,11 @@ function collectDerivedEngineDeps(derivedExpr: unknown): string[] {
   if (obj.kind === "legacy-source-var" && typeof obj.varName === "string" && obj.varName.length > 0) {
     return [obj.varName];
   }
+  // S83 B3 — Move-14 inline-expression `match @VAR { ... }` form. The single
+  // upstream is `upstream`. (Multi-upstream inline forms are future work.)
+  if (obj.kind === "inline-match" && typeof obj.upstream === "string" && obj.upstream.length > 0) {
+    return [obj.upstream];
+  }
   // Future: rich-expr shape — walk parsed ExprNode via forEachIdentInExprNode.
   return [];
 }
@@ -2136,6 +2141,37 @@ function buildDerivedEngineClosureBody(derivedExpr: unknown, varName: string): s
         `if (__scrml_derived_v === undefined) {`,
         `  throw new Error("E-DERIVED-ENGINE-INITIAL-UNDEFINED-RT: derived engine '${varName}' yielded no value " +`,
         `    "(upstream '${upstream}' is undefined). " +`,
+        `    "Per §51.0.J + §34: derived=expr must produce a defined variant for the source's initial state. " +`,
+        `    "Add a default arm or a wildcard arm in the derivation.");`,
+        `}`,
+        `return __scrml_derived_v;`,
+      ].join("\n  ");
+    }
+    // S83 B3 — Move-14 inline-expression `match @VAR { BODY }` form. Lower
+    // the match body through the standard `rewriteExpr` pipeline (which runs
+    // Pass 13 rewriteMatchExpr + Pass 14 rewriteEnumVariantAccess), then wrap
+    // the resulting JS expression in the standard E-DERIVED-ENGINE-INITIAL-
+    // UNDEFINED-RT guard.
+    //
+    // The pipeline produces an IIFE returning the matched variant string.
+    // We assign to `__scrml_derived_v` and check for `undefined` per §51.0.J.
+    if (obj.kind === "inline-match"
+        && typeof obj.upstream === "string" && obj.upstream.length > 0
+        && typeof obj.matchBody === "string" && obj.matchBody.length > 0) {
+      const upstream = obj.upstream;
+      const matchBody = obj.matchBody;
+      const { rewriteExpr } = require("./rewrite.ts");
+      // Reconstruct the full match expression so rewriteMatchExpr's regex
+      // (matches `match SUBJECT { ARMS }`) fires. The subject is `@VAR` —
+      // rewriteExpr's Pass 7 (rewriteReactiveRefs) lowers `@VAR` to
+      // `_scrml_reactive_get("VAR")`.
+      const matchSrc = `match @${upstream} {${matchBody}}`;
+      const lowered = rewriteExpr(matchSrc);
+      return [
+        `const __scrml_derived_v = ${lowered};`,
+        `if (__scrml_derived_v === undefined) {`,
+        `  throw new Error("E-DERIVED-ENGINE-INITIAL-UNDEFINED-RT: derived engine '${varName}' yielded no value " +`,
+        `    "(no match arm fired for upstream '${upstream}'). " +`,
         `    "Per §51.0.J + §34: derived=expr must produce a defined variant for the source's initial state. " +`,
         `    "Add a default arm or a wildcard arm in the derivation.");`,
         `}`,

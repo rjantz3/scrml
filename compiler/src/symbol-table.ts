@@ -3965,8 +3965,17 @@ function makeEngineRecord(
   // Derived expression — current parser provides `sourceVar` (legacy
   // `derived=@varname`). B16 will widen this to the §51.0.J expression-tree
   // form. Until then, sourceVar is the only signal.
+  //
+  // S83 B3 — Move-14 inline-expression body. When `inlineMatchBody` is
+  // present, store the rich shape so codegen can emit a match-style
+  // projection closure (lowering the match body via `rewriteExpr`).
+  // The `upstream` field carries the same single-source data as legacy
+  // shape, so DG cycle-detection and `_scrml_derived_subscribe` emission
+  // continue to work identically (the closure body just differs).
   const derivedExpr: unknown | null = engineDecl.sourceVar != null
-    ? { kind: "legacy-source-var", varName: engineDecl.sourceVar }
+    ? (typeof engineDecl.inlineMatchBody === "string" && engineDecl.inlineMatchBody.length > 0
+      ? { kind: "inline-match", upstream: engineDecl.sourceVar, matchBody: engineDecl.inlineMatchBody }
+      : { kind: "legacy-source-var", varName: engineDecl.sourceVar })
     : null;
 
   const engineMeta: EngineMetadata = {

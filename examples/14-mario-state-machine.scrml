@@ -74,11 +74,11 @@ ${
             }
             .Flower(n) => {
                 @coins = @coins + n
-                @marioState = MarioState::Fire
+                @marioState = .Fire
             }
             .Feather(n) => {
                 @coins = @coins + n
-                @marioState = MarioState::Cape
+                @marioState = .Cape
             }
         }
     }
@@ -86,7 +86,7 @@ ${
     function getHurt() {
         if (@gameOver) { return }
         let wasSmall = @marioState == MarioState::Small
-        @marioState = MarioState::Small
+        @marioState = .Small
         if (wasSmall) {
             @lives = @lives - 1
             if (@lives == 0) {
@@ -96,7 +96,7 @@ ${
     }
 
     function restart() {
-        @marioState = MarioState::Small
+        @marioState = .Small
         reset(@coins)
         @lives    = 3
         @gameOver = false

@@ -1166,6 +1166,16 @@ export function runDG(input: DGInput): DGOutput {
             (dgNode as any)._pendingEngineDerivedReads = [upstream];
           }
         }
+        // S83 B3 — Move-14 inline-expression `match @VAR { ... }` form. Single
+        // upstream (the match subject) suffices for cycle detection. Multi-
+        // upstream inline forms (e.g. `derived=if @a then @b else @c`) are
+        // future work.
+        if (derivedKind === "inline-match") {
+          const upstream = (derivedExpr as Record<string, unknown>).upstream;
+          if (typeof upstream === "string" && upstream.length > 0) {
+            (dgNode as any)._pendingEngineDerivedReads = [upstream];
+          }
+        }
         // Future: when `derivedExpr` becomes a parsed ExprNode, walk it
         // here with `forEachIdentInExprNode` to collect upstream `@cell`
         // reads.

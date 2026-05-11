@@ -1435,3 +1435,123 @@ describe("§26 (C18): broadcast/disconnect injection in channel-scoped server fn
   });
 });
 
+// ---------------------------------------------------------------------------
+// §27 (S83 B4): V5-strict structural decls at channel body top level
+//
+// SPEC §38.4: A state declaration inside a channel body SHALL use the
+// V5-strict structural form `<name> = init`. Pre-S83 the BS scanner counted
+// `<messages>` as a tag opener (because the closing `>` is followed by `=`,
+// not a special-cased state-decl signal inside markup-body contexts), and
+// either:
+//   (a) produced E-CTX-003 "Unclosed channel" when `<messages>` "wrapped"
+//       the body, or
+//   (b) survived only when the decl was wrapped in `${ <messages> = [] }`
+//       (the workaround applied by examples/15-channel-chat.scrml).
+//
+// Fix: BS markup-body tag-opener detection now peeks for the state-decl
+// signal (= or :) inside `<channel>` parent context, identical to the
+// top-level path. liftBareDeclarations propagates state-context through
+// channel markup so the text child is synthesized as `${...}` logic.
+// ---------------------------------------------------------------------------
+
+describe("§27 (S83 B4): V5-strict structural decls at channel body top level", () => {
+  test("`<messages> = []` directly inside <channel> body parses (no E-CTX-003)", () => {
+    const src = `<channel name="chat" topic="lobby">
+    <messages> = []
+</>
+
+<program>
+<p>\${@messages.length}</p>
+</program>
+`;
+    const { result } = _compileFixture(src);
+    const codes = (result.errors ?? []).map(e => e.code);
+    expect(codes).not.toContain("E-CTX-003");
+    expect(codes).not.toContain("E-CHANNEL-001");
+  });
+
+  test("multiple V5-strict decls + server fn (canonical SPEC §38.4 pattern)", () => {
+    const src = `<channel name="chat" topic="lobby">
+    <messages> = []
+    <count> = 0
+
+    server function postMessage(body) {
+        @messages = [...@messages, { body, ts: Date.now() }]
+        @count = @count + 1
+    }
+</>
+
+<program>
+<ul>
+    \${ for (let m of @messages) {
+        lift <li>\${m.body}</li>
+    } }
+</ul>
+<p>Total: \${@count}</p>
+</program>
+`;
+    const { result } = _compileFixture(src);
+    const codes = (result.errors ?? []).map(e => e.code);
+    expect(codes).not.toContain("E-CTX-003");
+    // No fatal errors — the file compiles.
+    const fatalErrors = (result.errors ?? []).filter(e => e.code && e.code.startsWith("E-"));
+    expect(fatalErrors.length).toBe(0);
+  });
+
+  test("AST: V5-strict decl inside <channel> produces state-decl node (Shape 1)", () => {
+    const src = `<channel name="chat">
+    <messages> = []
+</>
+
+<program>
+<p>\${@messages.length}</p>
+</program>
+`;
+    const { ast } = parseSource(src);
+    // Find the channel node.
+    const chans = findMarkupNodes(ast.nodes, "channel");
+    expect(chans.length).toBe(1);
+    const chan = chans[0];
+    // The synthesized state-decl is inside a logic child of the channel.
+    const findStateDecl = (nodes) => {
+      for (const n of nodes ?? []) {
+        if (!n) continue;
+        if (n.kind === "state-decl" && n.name === "messages") return n;
+        if (Array.isArray(n.children)) {
+          const r = findStateDecl(n.children);
+          if (r) return r;
+        }
+        if (n.kind === "logic" && Array.isArray(n.body)) {
+          const r = findStateDecl(n.body);
+          if (r) return r;
+        }
+      }
+      return null;
+    };
+    const sd = findStateDecl(chan.children);
+    expect(sd).toBeDefined();
+    expect(sd).not.toBeNull();
+    expect(sd.name).toBe("messages");
+    expect(sd.structuralForm).toBe(true);
+  });
+
+  test("regression: workaround pattern (`${ <messages> = [] }`) still works", () => {
+    // The pre-S83 workaround MUST continue to parse as the same shape.
+    // Both forms produce a Shape 1 state-decl named `messages` reachable
+    // via @messages.
+    const src = `<channel name="chat">
+\${
+    <messages> = []
+}
+</>
+
+<program>
+<p>\${@messages.length}</p>
+</program>
+`;
+    const { result } = _compileFixture(src);
+    const codes = (result.errors ?? []).map(e => e.code);
+    expect(codes).not.toContain("E-CTX-003");
+  });
+});
+

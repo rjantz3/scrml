@@ -930,7 +930,32 @@ export function splitBlocks(filePath, source) {
               }
               look++;
             }
+            // S83 B8/B4 — Don't count V5-strict structural state-decls as
+            // tag openers. The `<NAME [attrs]> = init` shape is a state-decl
+            // (§6.1, §6.2). Mirrors the top-level `peekTopLevelStateDeclSignal`
+            // (L444) — at brace-context tag-nesting bookkeeping, peek past
+            // the closing `>` and detect the same `=` or `:` decl signal.
+            // Without this, `<sending> = false` inside a `${}` body
+            // incremented frame.tagNesting, leaking into subsequent BLOCK_REFs
+            // (e.g., `!{...}` failable handler) which then bypassed the L1888
+            // statement-boundary break and were absorbed into preceding bare
+            // exprs. (P-FUP-1 RESOLVED at top-level; this is the brace-context
+            // sibling.)
+            let isStructuralDeclSignal = false;
             if (foundClose && !selfClose) {
+              let p = look + 1; // past '>'
+              while (p < len && (source[p] === " " || source[p] === "\t")) p++;
+              if (p < len) {
+                const nc = source[p];
+                if (nc === "=") {
+                  const nxt = p + 1 < len ? source[p + 1] : "";
+                  if (nxt !== "=" && nxt !== ">") isStructuralDeclSignal = true;
+                } else if (nc === ":") {
+                  isStructuralDeclSignal = true;
+                }
+              }
+            }
+            if (foundClose && !selfClose && !isStructuralDeclSignal) {
               frame.tagNesting++;
             }
             // Self-closing tags do not increment tagNesting.
@@ -1126,7 +1151,14 @@ export function splitBlocks(filePath, source) {
         //
         // Component-defs (`< userBadge name(string) role(Role)>`) take the
         // whitespace-state branch (line below) — untouched.
-        if (stack.length === 0 && peekTopLevelStateDeclSignal()) {
+        //
+        // S83 B4 — Channel body is also a V5-strict declaration site
+        // (SPEC §38.4): `<messages> = []` declares an auto-synced reactive
+        // cell at channel scope. Apply the same peek as top-level when
+        // immediately inside a `<channel>` markup context.
+        const tf = topFrame();
+        const isChannelBody = tf && tf.type === "markup" && tf.name === "channel";
+        if ((stack.length === 0 || isChannelBody) && peekTopLevelStateDeclSignal()) {
           // Don't flush text; don't step. Let the default raw-content path
           // accumulate the entire `<NAME [attrs]> = expr` line as text.
           beginText();

@@ -681,8 +681,15 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
       // Top-level <program> remains a declaration site for its direct text
       // children. Any other markup tag is prose context — its text children
       // must be passed through unchanged.
+      //
+      // S83 B4 — File-level `<channel>` body is also a declaration site
+      // (SPEC §38.4 V5-strict channel body): `<messages> = []` declares an
+      // auto-synced reactive cell at the channel scope. Treat channel-direct
+      // text children as state-context so TOPLEVEL_STATE_DECL_RE lifts them
+      // into synthetic `${...}` blocks (same path as <program> direct text).
       const isProgramRoot = parentType !== "markup" && block.name === "program";
-      const childContext = isProgramRoot ? "state" : "markup";
+      const isChannelRoot = parentType !== "markup" && block.name === "channel";
+      const childContext = (isProgramRoot || isChannelRoot) ? "state" : "markup";
       const newChildren = liftBareDeclarations(block.children || [], errors, filePath, childContext, _p3aSynthCounter);
       result.push({ ...block, children: newChildren });
       continue;
@@ -3299,6 +3306,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       ? safeParseExprToNode(scan.defaultExprRaw, scan.defaultExprSpan?.start ?? 0)
       : null;
     const pinnedFlag = !!scan.pinned;
+    // S83 Bug 1 — bareword `server` modifier on V5-strict structural decl.
+    // When set, the state-decl is server-authoritative — same semantics as
+    // the legacy `server @x = init` keyword-prefix path (ast-builder.js:4079),
+    // which sets `isServer: true`. Type-system reads `isServer` to bind
+    // scope-chain entries with isServer:true and to fire E-AUTH-005 /
+    // W-AUTH-001 / E-AUTH-002 (type-system.ts:4578+).
+    const serverFlag = !!scan.server;
 
     // S79 Phase 2 — parse debounced= / throttled= raw text via parseAfterDuration.
     // The reactivity field rides forward when at least one duration was captured;
@@ -3344,6 +3358,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           validators: scan.validators,
           defaultExpr,
           pinned: pinnedFlag,
+          // S83 Bug 1 — `isServer` mirrors the legacy `server @x = init` path
+          // (ast-builder.js:4079). Only emitted when the bareword `server`
+          // appeared on the V5-strict structural decl.
+          ...(serverFlag ? { isServer: true } : {}),
           structuralForm: true,
           isConst: !!isConst,
           shape: "decl-with-spec",
@@ -3397,6 +3415,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       shape: isConst ? "derived" : "plain",
       defaultExpr,
       pinned: pinnedFlag,
+      // S83 Bug 1 — `isServer` mirrors the legacy `server @x = init` path
+      // (ast-builder.js:4079). Only emitted when the bareword `server`
+      // appeared on the V5-strict structural decl. Type-system at line
+      // 4578+ reads `isServer` to fire E-AUTH-005 / W-AUTH-001 / E-AUTH-002.
+      ...(serverFlag ? { isServer: true } : {}),
       // S79 Phase 2 — reactivity attribute (debounced= / throttled=).
       ...(reactivity ? { reactivity } : {}),
       span: spanOf(startTok, peek()),
@@ -3447,6 +3470,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     let defaultExprSpan = null;
     // Phase A1a Step 6 — `pinned` bareword modifier flag.
     let pinned = false;
+    // S83 Bug 1 — `server` bareword modifier flag (V5-strict canonical form
+    // `<x server> = init` per SPEC §6.13 + §52 + primer §4). Parallels the
+    // legacy `server @x = init` keyword-prefix form (ast-builder.js:4062),
+    // which produces a state-decl with `isServer: true`. The bareword path
+    // here records the flag; the caller maps `scan.server → node.isServer`.
+    let server = false;
     // S79 Phase 2 — `debounced=DURATION` / `throttled=DURATION` raw text + span
     // per SPEC §6.13. Both attributes share the duration grammar reused from
     // `<onTimeout after=>` (parsed via parseAfterDuration in the caller).
@@ -3482,7 +3511,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // is non-empty, the compound branch is closed off.
         if (
           next1 && next1.kind === "PUNCT" && next1.text === "<" &&
-          validators.length === 0 && defaultExprRaw === null && !pinned
+          validators.length === 0 && defaultExprRaw === null && !pinned && !server
         ) {
           const next2 = tokens[i + scanIdx + 2];
           const isSiblingDecl = next2 && next2.kind === "IDENT";
@@ -3494,6 +3523,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
               defaultExprRaw,
               defaultExprSpan,
               pinned,
+              server,
               debouncedRaw,
               debouncedSpan,
               throttledRaw,
@@ -3529,6 +3559,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             defaultExprRaw,
             defaultExprSpan,
             pinned,
+            server,
             debouncedRaw,
             debouncedSpan,
             throttledRaw,
@@ -3546,6 +3577,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           defaultExprRaw,
           defaultExprSpan,
           pinned,
+          server,
           debouncedRaw,
           debouncedSpan,
           throttledRaw,
@@ -3564,6 +3596,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           defaultExprRaw,
           defaultExprSpan,
           pinned,
+          server,
           debouncedRaw,
           debouncedSpan,
           throttledRaw,
@@ -3769,6 +3802,32 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         }
         // `pinned(...)` falls through to the call-form validator branch (defensive,
         // though no spec-sanctioned `pinned(args)` form exists).
+      }
+
+      // ─── S83 Bug 1 — `server` bareword modifier ───
+      // KEYWORD with text "server" NOT followed by `(`. Sets `server: true`
+      // and does NOT add to validators[]. Must be checked BEFORE the generic
+      // KEYWORD-falls-through path; `server` tokenises as KEYWORD (see
+      // tokenizer.ts KEYWORDS), not IDENT, so it cannot ride the `pinned`
+      // (IDENT) branch above. The bareword on a state-decl is the V5-strict
+      // canonical form of `server @x = init` (SPEC §52.4.1 legacy keyword-
+      // prefix form maps to `<x server> = init` per SPEC §6.13 + §34 row
+      // E-DEBOUNCED-WITH-SERVER which already uses the `<x server>` notation,
+      // plus primer §4 line 100 + the example 18 V5-strict comment). The
+      // caller maps `scan.server → node.isServer` identically to how the
+      // legacy `server @x` path sets `isServer: true` (ast-builder.js:4079).
+      if (t.kind === "KEYWORD" && t.text === "server") {
+        const lookNext = tokens[i + scanIdx + 1];
+        if (!lookNext || lookNext.kind !== "PUNCT" || lookNext.text !== "(") {
+          if (server) return null; // duplicate `server` — decline
+          server = true;
+          scanIdx++;
+          continue;
+        }
+        // `server(...)` is not a spec-sanctioned form. Fall through to the
+        // KEYWORD-decline path below (line ~3893) which returns null. The
+        // caller restores the cursor and the existing markup-tag dispatch
+        // surfaces the original text.
       }
 
       // Validator: IDENT bareword or call-form.
@@ -8547,7 +8606,7 @@ function parseErrorTokens(tokens, filePath) {
       const armStart = tok;
       i++;
 
-      // Pattern: `::TypeName` or `_ `
+      // Pattern: `::TypeName`, `.Variant` (bare-dot per §14.10 / M9), or `_`
       let pattern = "_";
       let binding = "";
 
@@ -8557,6 +8616,23 @@ function parseErrorTokens(tokens, filePath) {
           pattern = "::" + tokens[i].text;
           i++;
         }
+      } else if (
+        // S83 B8 follow-on — bare-dot variant pattern `.Variant` (canonical
+        // §14.10 / M9 bare-variant inference; used heavily by examples since
+        // S83 B1 v0.2.0 rewrite). Pre-S83 the parser only handled `::Type`
+        // and `_` here, leaving `.Variant(reason) =>` to be absorbed into
+        // the handler body — which then produced E-SCOPE-001 on the binding
+        // identifier ("reason") because the binding never reached the arm.
+        // Equivalent canonical handling: dot-pattern stores ".Variant" so
+        // emit-logic.ts L2229 (which already strips both `::` and `.`)
+        // produces correct guarded-expr dispatch.
+        i < tokens.length && tokens[i].kind === "PUNCT" && tokens[i].text === "." &&
+        i + 1 < tokens.length && (tokens[i + 1].kind === "IDENT" || tokens[i + 1].kind === "KEYWORD") &&
+        /^[A-Z]/.test(tokens[i + 1].text ?? "")
+      ) {
+        i++; // consume `.`
+        pattern = "." + tokens[i].text;
+        i++; // consume IDENT
       } else if (i < tokens.length && tokens[i].text === "_") {
         pattern = "_";
         i++;
@@ -8995,8 +9071,29 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         }
         const keyword = block.name; // "machine" or "engine"
         const machineRaw = (block.raw || "").trim();
-        // Extract header: "< {keyword} name=X for=Y [derived=@Z]>"
-        const firstLineEnd = machineRaw.indexOf(">");
+        // Extract header: "< {keyword} name=X for=Y [derived=@Z | derived=match @Z {...}]>"
+        // S83 B3 — brace-aware opener-end finder. Pre-fix used `indexOf(">")`
+        // which returned the `>` inside `=>` for inline-expression bodies on
+        // `derived=match @x { .V1 => .V2 }`. The brace-aware scan skips over
+        // `{...}` content (and over `=>` arrows, which are inside the brace
+        // region) to find the actual closing `>` of the opener.
+        function _findOpenerEnd(s) {
+          let depth = 0;
+          let inDQ = false;
+          let inSQ = false;
+          for (let i = 0; i < s.length; i++) {
+            const c = s[i];
+            if (inDQ) { if (c === '"') inDQ = false; else if (c === "\\") i++; continue; }
+            if (inSQ) { if (c === "'") inSQ = false; else if (c === "\\") i++; continue; }
+            if (c === '"') { inDQ = true; continue; }
+            if (c === "'") { inSQ = true; continue; }
+            if (c === "{") { depth++; continue; }
+            if (c === "}") { if (depth > 0) depth--; continue; }
+            if (c === ">" && depth === 0) return i;
+          }
+          return -1;
+        }
+        const firstLineEnd = _findOpenerEnd(machineRaw);
         const headerLine = firstLineEnd >= 0
           ? machineRaw.slice(0, firstLineEnd)
           : machineRaw.split("\n")[0];
@@ -9012,6 +9109,18 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         const nameMatch = header.match(new RegExp(`\\bname\\s*=\\s*(${IDENT.source})\\b`));
         const forMatch = header.match(new RegExp(`\\bfor\\s*=\\s*(${IDENT.source})\\b`));
         const derivedMatch = header.match(new RegExp(`\\bderived\\s*=\\s*@(${IDENT.source})\\b`));
+        // S83 B3 — Move-14 inline-expression body: `derived=match @VAR { ... }`.
+        // SPEC §51.0.J: the rich form lets the derived projection be an arbitrary
+        // expression. Today's scope: detect the `match @VAR { BODY }` shape,
+        // capture VAR (as the single upstream) and BODY (raw text), and store
+        // both for codegen. Codegen (emit-engine.ts) re-uses the existing
+        // `rewriteExpr` pipeline to lower the match body to a JS IIFE. Other
+        // inline-expression forms (`derived=fn(@x)`, `derived=if ... else ...`,
+        // etc.) are NOT covered in this slice — see B3 follow-on.
+        const inlineMatchRe = new RegExp(
+          `\\bderived\\s*=\\s*match\\s+@(${IDENT.source})\\s*\\{([\\s\\S]*)\\}\\s*$`,
+        );
+        const inlineMatchMatch = derivedMatch ? null : header.match(inlineMatchRe);
         // §51.0.B (S67/S68 — A1b B14): canonical engine syntax extensions
         //   var=NAME       — override auto-derived variable name (§51.0.C)
         //   initial=.X     — starting variant (§51.0.E; B14 RECORDS, B15 validates)
@@ -9036,11 +9145,22 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         let engineName = "";
         let governedType = "";
         let sourceVar = null;
+        // S83 B3 — Move-14 inline-expression body. When present, codegen
+        // emits a richer projection (lower the match body through `rewriteExpr`).
+        // `sourceVar` still carries the (single) upstream — same data DG and
+        // cycle-detection need — but `inlineMatchBody` is the load-bearing
+        // signal for codegen to emit a match-style projection closure instead
+        // of the identity projection.
+        let inlineMatchBody = null;
 
         if (nameMatch) {
           engineName = nameMatch[1];
           if (forMatch) governedType = forMatch[1];
           if (derivedMatch) sourceVar = derivedMatch[1];
+          else if (inlineMatchMatch) {
+            sourceVar = inlineMatchMatch[1];
+            inlineMatchBody = inlineMatchMatch[2].trim();
+          }
         } else if (forMatch) {
           // §51.0 canonical form: `<engine for=Type ...>` (no `name=`).
           // The auto-declared variable name is derived from the type per §51.0.C
@@ -9050,6 +9170,10 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           // the `var=` override (if present) supersedes the auto-derived name.
           governedType = forMatch[1];
           if (derivedMatch) sourceVar = derivedMatch[1];
+          else if (inlineMatchMatch) {
+            sourceVar = inlineMatchMatch[1];
+            inlineMatchBody = inlineMatchMatch[2].trim();
+          }
           // Backfill engineName via §51.0.C auto-derive rule (literal lowercase-first).
           // The actual var-name resolution (override + auto-derive) lives in the
           // `varName` field below; engineName mirrors it for backcompat with
@@ -9208,6 +9332,13 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           // body-shake, engine-statechild-parser secondary pass) ignore it.
           bodyChildren,
           sourceVar, // §51.9: name of the source reactive var (no `@` prefix), or null
+          // S83 B3 — Move-14 inline-expression body. When non-null, codegen
+          // emits a richer projection closure (lowering `match @x { ... }` via
+          // `rewriteExpr`) instead of the identity projection. The string is
+          // the body of the inline `match` block (the contents between `{`
+          // and `}`). `null` for the legacy `derived=@x` form and for non-
+          // derived engines.
+          inlineMatchBody,
           // §51.0 canonical fields (S67/S68 — A1b B14):
           //   varName            — the resolved auto-declared variable name (§51.0.C).
           //                        Always set when parse succeeds; equals

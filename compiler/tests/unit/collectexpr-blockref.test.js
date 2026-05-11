@@ -294,3 +294,167 @@ describe("collectExpr BLOCK_REF statement boundary", () => {
     expect(logicNode.body[1].kind).toBe("sql");
   });
 });
+
+// ---------------------------------------------------------------------------
+// S3  B8 — error-effect BLOCK_REF after value bypasses tagNesting (S83)
+//
+// Regression: when a `${...}` body contains a structural state-decl
+// (`<sending> = false`), BS counts the `<sending>` opener as a tag opener
+// (incrementing frame.tagNesting because the closing `>` is followed by `=`).
+// Subsequent error-effect BLOCK_REFs inside the same `${...}` then carry
+// tagNesting > 0, suppressing the L1888 BLOCK_REF break. The let-decl RHS
+// then greedily absorbs the `!{...}` block content as raw text, producing
+// E-CTX warnings via expression-parser's trailing-content guard.
+//
+// Fix: the L1888 BLOCK_REF break extends — when the BLOCK_REF is
+// type === "error-effect" and the previous token is value-producing, it is
+// unambiguously a failable handler suffix and must terminate the expression
+// regardless of tagNesting. The outer parseRecursiveBody loop (L2848) then
+// wraps the previous statement as a guarded-expr.
+// ---------------------------------------------------------------------------
+
+describe("collectExpr error-effect BLOCK_REF — B8 (let x = call() !{...})", () => {
+  test("let x = call() !{ | .A => { return } } parses cleanly with prior state-decl", () => {
+    // The state-decl `<sending> = false` causes tagNesting bookkeeping to
+    // mark subsequent BLOCK_REFs with tagNesting=1. Pre-fix: this absorbed
+    // !{...} into the let-decl RHS. Post-fix: !{...} breaks → guarded-expr.
+    const source = [
+      '${',
+      '  <sending> = false',
+      '  type E:enum = { A, B }',
+      '  function validate() ! E { fail .A }',
+      '  function handle() {',
+      '    let validated = validate() !{',
+      '      | .A => { @sending = false; return }',
+      '      | .B => { return }',
+      '    }',
+      '  }',
+      '}',
+    ].join('\n');
+    const ast = parseAST(source);
+    const logicNode = ast.nodes[0];
+    expect(logicNode.kind).toBe("logic");
+    // Find the `handle` function-decl
+    const handleFn = logicNode.body.find(n => n.kind === "function-decl" && n.name === "handle");
+    expect(handleFn).toBeDefined();
+    // The body should contain a guarded-expr wrapping the let-decl, NOT a
+    // single let-decl with the whole `!{...}` swallowed into init.
+    const ge = handleFn.body.find(n => n.kind === "guarded-expr");
+    expect(ge).toBeDefined();
+    expect(ge.guardedNode).toBeDefined();
+    expect(ge.guardedNode.kind).toBe("let-decl");
+    expect(ge.guardedNode.name).toBe("validated");
+    // The let-decl init must be just `validate ( )` — no `!{...}` content.
+    expect(ge.guardedNode.init.includes("!{")).toBe(false);
+    // The arms must be parsed from the !{} block.
+    expect(ge.arms).toBeDefined();
+    expect(Array.isArray(ge.arms)).toBe(true);
+  });
+
+  test("let x = call() !{} with no prior state-decl (tagNesting=0) still works", () => {
+    // Regression guard: the pre-fix path (tagNesting=0) already worked. Make
+    // sure the fix doesn't break it.
+    const source = [
+      '${',
+      '  type E:enum = { A, B }',
+      '  function validate() ! E { fail .A }',
+      '  function handle() {',
+      '    let validated = validate() !{',
+      '      | .A => { return }',
+      '      | .B => { return }',
+      '    }',
+      '  }',
+      '}',
+    ].join('\n');
+    const ast = parseAST(source);
+    const logicNode = ast.nodes[0];
+    const handleFn = logicNode.body.find(n => n.kind === "function-decl" && n.name === "handle");
+    expect(handleFn).toBeDefined();
+    const ge = handleFn.body.find(n => n.kind === "guarded-expr");
+    expect(ge).toBeDefined();
+    expect(ge.guardedNode.kind).toBe("let-decl");
+    expect(ge.guardedNode.init.includes("!{")).toBe(false);
+  });
+
+  test("let x = expr; let y = expr (no error-effect) regression — sibling decls preserved", () => {
+    // Mirror P-FUP-2/P-FUP-3 regression-guard: ASI-NEWLINE-derived sibling
+    // decl boundaries still fire when there is no `!{}` involved.
+    const source = [
+      '${',
+      '  function handle() {',
+      '    let a = 1',
+      '    let b = 2',
+      '    let c = 3',
+      '  }',
+      '}',
+    ].join('\n');
+    const ast = parseAST(source);
+    const logicNode = ast.nodes[0];
+    const handleFn = logicNode.body.find(n => n.kind === "function-decl" && n.name === "handle");
+    expect(handleFn).toBeDefined();
+    const lets = handleFn.body.filter(n => n.kind === "let-decl");
+    expect(lets.length).toBe(3);
+    expect(lets[0].name).toBe("a");
+    expect(lets[1].name).toBe("b");
+    expect(lets[2].name).toBe("c");
+  });
+
+  test("parseErrorTokens handles `.Variant` bare-dot arm pattern (B8 follow-on)", () => {
+    // Pre-S83 parseErrorTokens only matched `::Type` and `_` after `|`.
+    // The canonical §14.10 / M9 bare-dot form `.Variant(binding) =>` fell
+    // through to the handler body, surfacing as E-SCOPE-001 on the binding.
+    // After B8 fix, pattern stores ".Variant" — emit-logic.ts strips both
+    // `::` and `.` prefixes per its existing L2229 logic.
+    const source = [
+      '${',
+      '  <sending> = false',
+      '  type E:enum = { Ready, Failed(reason: string) }',
+      '  function validate() ! E { fail .Ready }',
+      '  function handle() {',
+      '    let v = validate() !{',
+      '      | .Ready          => { @sending = false }',
+      '      | .Failed(reason) => { @sending = false }',
+      '    }',
+      '  }',
+      '}',
+    ].join('\n');
+    const ast = parseAST(source);
+    const logicNode = ast.nodes[0];
+    const handleFn = logicNode.body.find(n => n.kind === "function-decl" && n.name === "handle");
+    expect(handleFn).toBeDefined();
+    const ge = handleFn.body.find(n => n.kind === "guarded-expr");
+    expect(ge).toBeDefined();
+    expect(ge.arms.length).toBe(2);
+    // Both arms have populated patterns.
+    expect(ge.arms[0].pattern).toBe(".Ready");
+    expect(ge.arms[1].pattern).toBe(".Failed");
+    // The payload binding is captured for `.Failed(reason)`.
+    expect(ge.arms[1].binding).toBe("reason");
+  });
+
+  test("statement-level call() !{} (not in let-decl) wraps as guarded-expr", () => {
+    // Bare-expr `call() !{...}` as a statement (not let-bound) still works.
+    const source = [
+      '${',
+      '  <sending> = false',
+      '  type E:enum = { A }',
+      '  function validate() ! E { fail .A }',
+      '  function handle() {',
+      '    validate() !{',
+      '      | .A => { @sending = false }',
+      '    }',
+      '  }',
+      '}',
+    ].join('\n');
+    const ast = parseAST(source);
+    const logicNode = ast.nodes[0];
+    const handleFn = logicNode.body.find(n => n.kind === "function-decl" && n.name === "handle");
+    expect(handleFn).toBeDefined();
+    const ge = handleFn.body.find(n => n.kind === "guarded-expr");
+    expect(ge).toBeDefined();
+    // The guarded node is a bare-expr (call), not a let-decl.
+    expect(ge.guardedNode).toBeDefined();
+    expect(ge.arms).toBeDefined();
+    expect(ge.arms.length).toBeGreaterThanOrEqual(1);
+  });
+});

@@ -5653,6 +5653,56 @@ function annotateNodes(
   }
   preBindExportedNames(topNodes);
 
+  // Bug 9 (M9, §51.0.C) — Pre-bind engine auto-declared variables into the
+  // scopeChain BEFORE function bodies are visited.
+  //
+  // Per §51.0.C (Move 16): `<engine for=Type ...>` auto-declares a reactive
+  // cell named (a) `var=`-override if present, (b) else lowercase-first of
+  // the type name (`MarioState` → `marioState`). The cell's resolvedType is
+  // the engine's governed type.
+  //
+  // Without this pre-pass, function bodies declared above the engine in
+  // source order can't resolve `@marioState`:
+  //   - `scopeChain.lookup("@marioState")` returns null
+  //   - Bug 7's `inferReactiveSiteBareVariants` falls back to null contextType
+  //   - `inferBareVariantsInExpr` fires false E-VARIANT-AMBIGUOUS on `.Big`
+  //
+  // The `machineRegistry` was built at type-system.ts line 8715 (BEFORE
+  // annotateNodes was invoked) and already contains every well-formed engine
+  // with its resolved governedType. Walking the registry rather than the AST
+  // gives us:
+  //   - Skip-malformed-engines for free (E-ENGINE-003/E-ENGINE-004 already
+  //     rejected the decl; no bind, no masking)
+  //   - Resolved governedType in hand (no second type-registry lookup)
+  //   - `MachineType.name` IS the auto-decl variable name (set from
+  //     `decl.engineName` at buildMachineRegistry line 2083, which is the
+  //     ast-builder-resolved `var=` override → engineName → auto-derived)
+  //
+  // Bind shape mirrors state-decl's reactive-bind (line 4579-4580):
+  //   `{ kind: "reactive", resolvedType, isServer: false }`
+  //
+  // Engine auto-decls are client-side by default (the cell exists in the
+  // client runtime). Cross-boundary engines (rare; channel-bound) would
+  // need separate accounting, but this v1 fix follows the existing
+  // canonical-form §51.0.C semantics.
+  //
+  // SHALL-NOT-overwrite guard: if a name already lives in scope (e.g.,
+  // because a separate `<marioState>` decl exists — itself E-ENGINE-VAR-
+  // DUPLICATE territory at SYM PASS 10.A), we skip rather than overwrite.
+  // This matches `preBindExportedNames`' `if (!scopeChain.lookup(name))`
+  // guard pattern and lets the SYM-layer diagnostic surface uncontested.
+  for (const [_engineName, machine] of machineRegistry) {
+    const varName = machine.name;
+    if (typeof varName !== "string" || varName.length === 0) continue;
+    const rt = machine.governedType;
+    if (!rt) continue;
+    // Skip if either form is already bound (collision will be flagged at
+    // SYM PASS 10.A as E-ENGINE-VAR-DUPLICATE).
+    if (scopeChain.lookup(`@${varName}`) || scopeChain.lookup(varName)) continue;
+    scopeChain.bind(`@${varName}`, { kind: "reactive", resolvedType: rt, isServer: false });
+    scopeChain.bind(varName, { kind: "reactive", resolvedType: rt, isServer: false });
+  }
+
   for (const node of topNodes) {
     visitNode(node);
   }

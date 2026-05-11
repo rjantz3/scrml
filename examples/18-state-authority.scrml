@@ -26,13 +26,12 @@
     //   1. On mount, call loadTasks() and seed @tasks
     //   2. On assignment, optimistically update + persist + rollback on error
     //
-    // **Implementation note:** the canonical V5-strict form is `<tasks server> = []`
-    // (the `server` modifier as a bare attribute on the decl per §52.4 V5 path).
-    // That form errors today (E-SCOPE-001 propagates from how the parser
-    // tags the decl); the legacy `server @tasks = []` keyword-form remains
-    // accepted by the parser and is what current samples use. PA follow-up:
-    // §6.1.2 V5-strict + §52 server-authoritative interaction.
-    server @tasks = []
+    // Canonical V5-strict form: `<tasks server> = []` — the `server` modifier
+    // rides as a bare attribute on the structural decl, parallel to the
+    // `<x pinned>` precedent and to other state-decl modifiers (§6.10).
+    // The legacy `server @tasks = []` keyword-prefix path (§52.4.1 EBNF)
+    // remains accepted but is not the canonical form.
+    <tasks server> = []
 
     // Local UI state — no server modifier, defaults to client-local.
     // No sync infrastructure for these (§52.5 row 1).
