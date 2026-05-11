@@ -1,0 +1,49 @@
+// engine-008-onidle-watchdog — engine-wide <onIdle> watchdog (§51.0.R).
+//
+// Demonstrates A5-6 codegen (S77, 2026-05-10) — `<onIdle after=D to=.V/>` is
+// an engine-WIDE event-timeout watchdog (distinct from <onTimeout> which is
+// per-state). Properties:
+//
+//   - Engine-root scope ONLY (E-IDLE-MISPLACED inside a state-child body).
+//     The element sits as a sibling of state-children, not nested.
+//
+//   - `to=` is strict-validated against the engine's `for=` enum
+//     (E-IDLE-INVALID-VARIANT on unknown variant).
+//
+//   - One per engine maximum (E-IDLE-DUPLICATE on a second <onIdle>).
+//
+//   - Armed at module-init; reset on every successful transition (any
+//     _scrml_engine_direct_set / _scrml_engine_advance commit). Fires after
+//     N ms of silence with no transitions.
+//
+//   - Rule=-honoring fire: the watchdog write goes through the same write
+//     path as a direct write, subject to the CURRENT state's `rule=`. For the
+//     watchdog to always reach `to=.Locked` from any state, each state-child's
+//     `rule=` must permit .Locked (this sample uses multi-target `rule=`).
+//
+// Tree-shake invariant: engines with no <onIdle> emit zero watchdog
+// machinery. Computed-delay `${expr}<unit>` is supported (rides parseAfterDuration).
+
+<program>
+${
+    type SessionState:enum = { Active, Editing, Reviewing, Locked }
+}
+
+<engine for=SessionState initial=.Active>
+    <onIdle after=30s to=.Locked/>
+
+    <Active rule=(.Editing | .Reviewing | .Locked)></>
+    <Editing rule=(.Active | .Reviewing | .Locked)></>
+    <Reviewing rule=(.Active | .Editing | .Locked)></>
+    <Locked rule=.Active></>
+</>
+
+<div class="session">
+    <h1>State: ${@sessionState.variant}</>
+    <p>Auto-locks after 30s of no transitions. Any state-change resets the watchdog.</>
+    <button onclick=${@sessionState = SessionState.Editing}>Edit</>
+    <button onclick=${@sessionState = SessionState.Reviewing}>Review</>
+    <button onclick=${@sessionState = SessionState.Active}>Active</>
+    <button onclick=${@sessionState = SessionState.Active}>Unlock</>
+</div>
+</program>

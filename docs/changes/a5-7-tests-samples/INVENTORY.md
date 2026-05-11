@@ -90,10 +90,13 @@
 - Sample 4: `engine-008-onidle-watchdog.scrml` — engine with `<onIdle after="30s" to=.SessionExpired/>` + state-child writes that reset the watchdog. Demonstrates idle-detection canonical pattern.
 - **Est: 1h**.
 
-### Sub-phase A5-7d — Legacy machine surface (F3a verification + Machine Cohesion negative)
-- Audit: read `combined-018-timer.scrml` + `machine-002-traffic-light.scrml`. Confirm they use current spec semantics for `.From after Ns => .To`. If they use pre-S77 form, migrate.
-- Negative sample: `machine-component-engine-scope-error.scrml` — engine declared inside a component body, expected to emit E-COMPONENT-ENGINE-SCOPE at compile time. Verify negative-path coverage.
-- **Est: 0.5-1h**.
+### Sub-phase A5-7d — Legacy machine surface (audit-only at S80)
+- **Audit complete (S80):**
+  - `combined-018-timer.scrml` — NOT an A5 sample. Uses plain reactive state (`<seconds> = 0`, `function start/stop/clearTimer`); no `<engine>`, no `<machine>`, no `.From after Ns => .To`. Nothing to migrate.
+  - `machine-002-traffic-light.scrml` — uses legacy `<machine>` keyword with immediate `.From => .To` rules. **No temporal form** (no `after Ns =>`). Already W-DEPRECATED-001 surface; no migration required (will be auto-migrated by `bun scrml migrate` when adopters touch the file).
+- **Negative-sample dropped:** A canonical "engine inside component body" sample asserting `E-COMPONENT-ENGINE-SCOPE` is structurally blocked. Per `compiler/tests/unit/engine-component-scope-b17.test.js` header: "the parser pipeline currently CANNOT produce engines inside component bodies" — engine-decls live only as children of markup containers (`<program>`, top-level), not in logic-block bodies / component bodies. Existing B17 tests use synthesized AST construction to exercise the PASS 11 walker; an end-to-end sample is unwriteable until parser admits the shape. Documented for the next A5 phase that touches parser placement rules.
+- **Legacy temporal `<machine>` sample skipped:** F3a (legacy `<machine>` `.From after Ns => .To` with computed-delay, A5-5b S77) is uncovered by samples, but adding a new sample for this surface would introduce a deprecated-keyword reference — not adopter-useful. Existing unit + integration coverage (`computed-delay.test.js`) suffices for the surface.
+- **Est: 30 min (audit only).**
 
 ### NOT IN A5-7 — features without codegen (F4 / F5 / F6 / F7 / F8)
 These are spec-only; cannot have end-to-end samples until codegen ships. Surface separately as **A5-2/A5-3 codegen** dispatch (separate priority).
@@ -102,15 +105,18 @@ These are spec-only; cannot have end-to-end samples until codegen ships. Surface
 
 ## 5. Estimated total effort (depth-of-survey adjusted)
 
-| Sub-phase | Original estimate | Adjusted (post-survey) | Decomposition note |
-|-----------|-------------------|------------------------|--------------------|
-| A5-7a | (rolled into 12-18h) | **1-2h** | Two samples |
-| A5-7b | (rolled into 12-18h) | **1h** | One sample |
-| A5-7c | (rolled into 12-18h) | **1h** | One sample |
-| A5-7d | (rolled into 12-18h) | **0.5-1h** | Audit + 1 negative sample |
-| **Total A5-7 (implemented surface)** | **12-18h** | **3.5-5h** | **3-5x discount** |
+| Sub-phase | Original estimate | Adjusted (post-survey) | Actual (S80 landed) | Note |
+|-----------|-------------------|------------------------|---------------------|------|
+| A5-7a | (rolled into 12-18h) | **1-2h** | ~30 min | engine-005 + engine-006 (literal + computed-delay) |
+| A5-7b | (rolled into 12-18h) | **1h** | ~20 min | engine-007 (named timer + cancelTimer call-ref) |
+| A5-7c | (rolled into 12-18h) | **1h** | ~15 min | engine-008 (engine-wide watchdog) |
+| A5-7d | (rolled into 12-18h) | **0.5-1h** | ~15 min | Audit only — no samples writeable (negative blocked by parser; legacy temporal would add deprecated-surface ref) |
+| **Total A5-7 (implemented surface)** | **12-18h** | **3.5-5h** | **~1.5h** | **~10x discount** |
 
-**Depth-of-survey discount applies:** the 12-18h estimate assumed full coverage including F4-F8, which are not implemented. Adjusted estimate covers ONLY the implemented surface (F1, F1a, F1b, F2, F3, F3a, F9).
+**Depth-of-survey discount applies BIG.** The 12-18h estimate assumed full coverage including F4-F8 (not implemented in scrmlTS yet). Adjusted to 3.5-5h after accounting for already-shipped coverage. Actual S80 landing was ~1.5h because:
+1. Existing engine-surface unit/integration coverage (~249 tests) already covers compile/typer/codegen paths — samples are pure end-to-end fixtures, not deep test coverage
+2. A5-7d turned out to be audit-only — the negative-sample plan was structurally blocked (parser doesn't admit engine-inside-component shape end-to-end yet)
+3. Sample-writing per feature is straightforward when canonical patterns are already in the integration test fixtures (engine-ontimeout-end-to-end.test.js)
 
 ---
 
