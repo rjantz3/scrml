@@ -437,11 +437,12 @@ scrml wins 6 of 10 benchmarks. Partial update is 8x faster than React; swap-rows
 
 ### State and Reactivity
 
-- **Reactive state (`@var`)** — prefix any variable with `@` to make it reactive. Changes re-render dependent elements automatically. No wrappers, no hooks, no signals library.
-- **Derived values (`~var`)** — tilde-prefixed variables recompute when their dependencies change. The compiler tracks the dependency graph.
-- **Two-way binding (`bind:value`)** — keep form inputs and reactive variables in sync without boilerplate.
-- **Absence value (`not`)** — a unified null/undefined replacement. `@result = not` means "no value yet." Check presence with `is some`, absence with `is not`. The compiler catches `== not` misuse at compile time (use `is not` instead).
-- **Server/client state** — `server @var` pins state server-side so it never reaches the browser. `protect` hides fields from the client on struct types. Both are enforced at compile time.
+- **Reactive state — V5-strict.** `<count> = 0` declares a reactive cell; `@count` reads or writes it. The decl form is structural; the access form is canonical. The two forms are visually distinguishable, so a reader can scan a function body and count "how many state cells does this read or mutate." Bare names in expressions are LOCAL identifiers only — they do NOT resolve to reactive state (locals cannot shadow registered state names; `E-NAME-COLLIDES-STATE`).
+- **Three RHS shapes for state decls.** Shape 1 plain (`<count> = 0`), Shape 2 decl-coupled-with-render-spec (`<userName req length(>=2)> = <input/>` — `<userName/>` in markup expands to the bound input with `bind:value` wired), Shape 3 derived (`const <doubled> = @count * 2` — read-only; recomputes on dep change; markup-typed derived cells legal per L1).
+- **Compound state (Variant C).** `<formRes> <name> = "" <email> = "" </>` — ad-hoc compound via structural children. Read `@formRes.name`; write `@formRes.email = "alice"`. Tier 3 predefined-shape compound supports positional sugar against a known type.
+- **Two-way binding (`bind:value`)** — compiler dispatches binding by render-spec (`<input type="checkbox">` → `bind:checked`; `<select>` → `bind:value`; etc.). Per L17.
+- **Absence value (`not`)** — a unified null/undefined replacement. `<result> = not` means "no value yet." Check with `is some` / `is not`. `== not` misuse is `E-SYNTAX-042` at compile time. null and undefined never appear in scrml — library mode inclusive.
+- **Server-pinned + protected state.** `<users server>` pins state server-side so it never reaches the browser. `protect=` on struct fields hides them from the client schema view. Both enforced at compile time.
 
 ### Linear Types
 
@@ -458,9 +459,9 @@ scrml wins 6 of 10 benchmarks. Partial update is 8x faster than React; swap-rows
 scrml has built-in runtime type validation. The type annotation IS the validation schema — no separate schema library, no `z.object()` wrappers, no `z.infer<typeof>` indirection.
 
 ```scrml
-@price: number(>0 && <10000) = userInput
-@email: string(email) = formValue
-@password: string(.length > 7 && .length < 255) = rawInput
+<price: number(>0 && <10000)>      = userInput
+<email: string(email)>             = formValue
+<password: string(.length > 7 && .length < 255)> = rawInput
 
 type Invoice:struct = {
     amount: number(>0 && <10000)
@@ -498,11 +499,11 @@ This isn't bundler-style single-letter renaming — the names are longer than `a
 
 ### Server/Client
 
-- **Auto-split** — the compiler analyzes your code and decides what runs where. Protected fields and `server` functions force server-side execution.
+- **Auto-split via whole-program inference.** The compiler walks the call graph and infers what runs where. Functions that touch SQL, `protect=` fields, `Bun.*` APIs, `process.*`, `scrml:auth`/`scrml:crypto`/`scrml:fs`/`scrml:store`/`scrml:redis`/`scrml:cron`/`scrml:oauth` (server-only stdlib modules) are classified server-side automatically. Caller-context propagates the classification through transitive call chains (Insight 26 Trigger 5). The `server` keyword still parses but is redundant when inference can prove server-classification — `W-DEPRECATED-SERVER-MODIFIER` fires at redundant uses; `W → E → parser-strip` deprecation cycle follows `<machine>` precedent and lands in v0.3.0. **Dead, never-called functions are warned (`W-DEAD-FUNCTION`) and tree-shaken.**
 - **SQL passthrough (`?{}`)** — query SQLite directly inside logic blocks. The compiler generates parameterized queries and handles serialization.
 - **Automatic N+1 elimination (Tier 2).** A `for` loop whose body does `?{...WHERE id = ${x.id}}.get()` is rewritten to one pre-loop `WHERE id IN (?,?,?,...)` fetch plus a keyed `Map` lookup. No DataLoader, no manual batching. Measured ~2×/3×/4× at N=10/100/1000 on on-disk WAL `bun:sqlite` — see [benchmarks/sql-batching/RESULTS.md](benchmarks/sql-batching/RESULTS.md).
 - **Implicit transaction envelopes (Tier 1).** Independent reads in a `!` handler share one `BEGIN DEFERRED`..`COMMIT` for snapshot consistency under concurrent writers. Explicit `transaction { }` blocks are left alone; a `W-BATCH-001` warning fires if the two would conflict.
-- **Mount-hydration coalescing.** Multiple on-mount `server @var` loads on the same page are folded into a single `__mountHydrate` round-trip (§8.11) instead of one request per variable.
+- **Mount-hydration coalescing.** Multiple on-mount `<x server>` loads on the same page are folded into a single `__mountHydrate` round-trip (§8.11) instead of one request per variable.
 - **Opt-out per call site.** `?{...}.nobatch()` disables rewriting when you need an exact query shape — useful for `EXPLAIN`, stored-procedure calls, or measured hot paths.
 - **Diagnostics, not silent magic.** `D-BATCH-001` flags near-miss loops that *almost* batch but don't (mutation in body, non-`.get()` chain, etc.), with the exact disqualifier. `E-BATCH-001` rejects `.nobatch()` composition with batched siblings; `E-BATCH-002` guards against the 32 766 `SQLITE_MAX_VARIABLE_NUMBER` ceiling at runtime.
 - **No API boilerplate** — server functions are called like local functions. The compiler generates routes, fetch calls, CSRF tokens, and serialization.
@@ -510,7 +511,7 @@ This isn't bundler-style single-letter renaming — the names are longer than `a
 ### Realtime and Workers
 
 - **WebSocket channels (`<channel>`)** — a lifecycle element that declares a WebSocket endpoint. The compiler emits the Bun upgrade route, a client-side connection manager with exponential-backoff reconnect, and pub/sub topic routing. `onserver:open`, `onserver:message`, `onserver:close` run server-side; `onclient:open`, `onclient:close`, `onclient:error` run in the browser. `protect=` gates the upgrade with a session cookie check. No WebSocket or Bun-specific API appears in your source.
-- **Shared reactive state (`@shared`)** — variables marked `@shared` inside a `<channel>` synchronize across every connected client automatically. Writing to `@shared count` in one browser tab updates it in every other tab subscribed to the same topic. The sync wire format is generated; you just write assignments.
+- **Shared reactive state — V5-strict inside channels.** State declared inside a `<channel>` block (`<messages> = []`) auto-syncs across every connected client. The `@shared` modifier was retired in v0.2.0 — auto-sync comes from being inside the channel body, not from a modifier. Writing in one browser tab updates every other tab subscribed to the same topic; sync wire format is compiler-generated.
 - **`broadcast()` and `disconnect()`** — available inside any server handler declared in a channel's lexical scope. `broadcast(data)` fans out to every client on the active topic; `disconnect()` closes the connection. Dynamic topics via `topic=@room` — when `@room` changes, the channel re-subscribes; when `@room` is `not`, the connection stays open but subscribes to nothing.
 - **Nested `<program>` = Web Worker.** Put a `<program name="compute">` inside your main program and the compiler spawns a Web Worker. Shared-nothing by construction — no accidental scope leaks. Call worker exports as typed RPC: `const result = await <#compute>.add(1, 2)`. The compiler enforces that cross-program calls are awaited.
 - **Message passing with `when`.** `<#worker>.send(data)` posts to the worker; inside, `when message(data) { ... }` handles it and `send(data)` replies. The parent observes lifecycle with `when message from <#worker> (data)`, `when error from <#worker> (e)`, and `when terminate from <#worker>`. No manual `addEventListener('message', ...)` scaffolding.
@@ -521,12 +522,12 @@ This isn't bundler-style single-letter renaming — the names are longer than `a
 
 - **Components with props and slots** — `const Card = <div>` defines a component. Props are attributes; slots are named placeholders.
 - **Enums and pattern matching** — Rust-style enums with exhaustive `match`. The compiler enforces that every variant is handled.
-- **State machines** — declare `< machine>` with transition rules. The compiler prevents illegal state transitions.
+- **State machines as engines (Tier 2).** `<engine for=Type initial=.Variant>` declares an exhaustive state machine over an enum. `rule=` declares legal transitions per state; `<onTransition from= to=>` runs cross-state effects; `<onTimeout after=Ns to=.Variant>` schedules per-state timeouts (with named timers + `cancelTimer("name")` builtin); `<onIdle after=Ns to=.Variant>` watches for engine-wide event-timeout; composite state-children may nest sub-engines with shallow `history` restore; `internal:rule=` for transitions that don't exit/re-enter the composite. Illegal transitions are compile errors. The legacy `<machine>` keyword is a deprecated alias (`W-DEPRECATED-001`; `bun scrml migrate` rewrites it).
 
 ### Metaprogramming
 
 - **Compile-time meta (`^{}`)** — code that runs at compile time. Use `reflect()` to inspect types, `emit()` to generate markup, `compiler.*` to register macros. Meta blocks execute during compilation and produce source that's spliced into the AST.
-- **Runtime meta** — meta blocks that reference `@var` reactive state run at runtime instead of compile time. The compiler classifies each block automatically based on what it references.
+- **Runtime meta** — meta blocks that reference `@x` reactive state run at runtime instead of compile time. The compiler classifies each block automatically based on what it references.
 
 ### Pure Functions
 
@@ -554,14 +555,13 @@ scrml uses sigil-delimited contexts to separate concerns within a single file:
 | Context | Sigil | Purpose |
 |---------|-------|---------|
 | Program | `<program>` | App root — database, protection, config |
-| Markup  | `<tag>` | HTML elements and components |
-| State   | `< name>` | Server-persisted state blocks (note the space) |
+| Markup  | `<tag>` | HTML elements + scrml structural elements (`<engine>`, `<match>`, `<channel>`, `<schema>`, `<errors>`, `<onTransition>`, `<onTimeout>`, `<onIdle>`) + state decls (`<name> = init`) — all live in the markup tree |
 | Logic   | `${}` | JavaScript expressions and functions |
 | SQL     | `?{}` | Database queries (Bun.SQL tagged-template; SQLite shipping, Postgres in progress); auto-batched N+1 + envelope |
 | CSS     | `#{}` | Scoped styles |
-| Error   | `!{}` | Typed error handling |
+| Error   | `!{}` | Typed error handling (failable `!{ \| ::V -> ... }` arms) |
 | Meta    | `^{}` | Compile-time (or runtime) code generation |
-| Test    | `~{}` | Inline tests (stripped from production) |
+| Test    | `~{}` | Inline tests + `test-bind` server-fn mocks (stripped from production) |
 | Foreign | `_{}` | Inline foreign code *(specced, not yet implemented)* |
 
 ## Specced but Not Yet Implemented
@@ -628,13 +628,21 @@ The [`examples/`](examples/) directory contains curated examples that show what 
 | [11-meta-programming](examples/11-meta-programming.scrml) | `^{}` meta blocks, `emit()`, `reflect()` |
 | [12-snippets-slots](examples/12-snippets-slots.scrml) | Named content slots in components |
 | [13-worker](examples/13-worker.scrml) | Web workers as nested programs with typed messaging |
-| [14-mario-state-machine](examples/14-mario-state-machine.scrml) | User-defined enum states + `<machine>` transition enforcement |
+| [14-mario-state-machine](examples/14-mario-state-machine.scrml) | Enum states + `<engine>` Tier 2 transition enforcement |
+| [15-channel-chat](examples/15-channel-chat.scrml) | `<channel>` realtime, V5-strict channel state, auto-sync |
+| [16-remote-data](examples/16-remote-data.scrml) | Enum loading-state, server boundary, async classification |
+| [17-schema-migrations](examples/17-schema-migrations.scrml) | `<schema>` declarative migrations, diff-on-reload |
+| [18-state-authority](examples/18-state-authority.scrml) | `<x server>` Tier 2 cell authority (§52) |
+| [19-lin-token](examples/19-lin-token.scrml) | `lin` exact-once consumption, site-agnostic threading |
+| [20-middleware](examples/20-middleware.scrml) | `<program>` attrs + `handle()` HTTP middleware |
+| [21-navigation](examples/21-navigation.scrml) | `navigate()` + `route` history-aware routing |
+| [22-multifile](examples/22-multifile/) | Cross-file `import`/`export`, pure-type files, component canonical-key |
 
 ## Documentation
 
 - [Tutorial](docs/tutorial.md) — step-by-step introduction, zero to full-stack
 - [Design Notes](DESIGN.md) — rationale and philosophy — why scrml is what it is
-- [Language Specification](compiler/SPEC.md) — full formal spec (~18,000 lines)
+- [Language Specification](compiler/SPEC.md) — full formal spec (~26,000 lines)
 - [Spec Quick-Lookup](compiler/SPEC-INDEX.md) — find any section fast
 - [Pipeline Contracts](compiler/PIPELINE.md) — stage-by-stage compiler pipeline
 
