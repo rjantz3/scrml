@@ -2,7 +2,21 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-10 S79 — debounce/throttle Approach B SHIPPED — worktree-internal): **10,353 pass / 62 skip / 1 todo / 0 FAIL** (full PA-verified count comes after PA's land step). 28 NEW unit tests in `compiler/tests/unit/debounce-throttle-attribute.test.js`. Net unit-suite delta: -6 retired pre-v0.next assertions + 28 new = +22 net. 0 regressions across all suites.
+Current baseline (2026-05-11 S79 close, PA-verified at pre-commit hook on `d860e37`): **10,476 pass / 62 skip / 1 todo / 0 FAIL** (506 files; pre-commit subset = unit + integration + conformance with --bail). +88 new unit tests across the four S79 SHIPs (A5-6 Feature 1 / hardcoded-thresholds Bucket A / Bucket B+C / debounce/throttle) - 6 retired pre-v0.next assertions = **+82 net unit tests**. 0 regressions across all suites.
+
+### 2026-05-11 (S79 close — wrap)
+
+Session-close summary of S79 (opened 2026-05-10, closed 2026-05-11 — single-day spanning midnight). **4 SHIPs + 1 deref sweep + 1 agent dispatch landing + 1 hook-install** under explicit user authorization across the session. Zero regressions; pre-commit hook fired clean on every commit.
+
+- **Ships (in commit order):** `130b7d0` Batch K combined deref (131 file/dir moves to scrml-support archive) · `1547e78` A5-6 Feature 1 (`<onTimeout name=IDENT>` + `cancelTimer("X")` builtin) · `fcb45df` hardcoded-thresholds Bucket A (MAX_RUNS + EncodingContext.seqCap) · `5ac54de` hardcoded-thresholds Bucket B+C (serve-client timeouts + `<program idempotency-ttl=>` + `<program batch-in-list-cap=>`) · `3446989` debounce/throttle Approach B (clean-cut · agent dispatch landed via squash-merge per S67) · `d860e37` chore gitignore runtime fixture scratchpads.
+- **SPEC amendments:** §51.0.M.1 NEW (A5-6 Feature 1) + §6.13 NEW (Reactivity Attributes) + §6.8 amend (reset-cancel pending timed writes) + §19.9.6 amend (idempotency TTL override) + §8.10.6 amend (batch-IN-list cap override) + 6 new §34 catalog codes (E-TIMER-NAME-DUPLICATE, E-TIMER-NAME-INVALID, E-DEBOUNCED-WITH-DERIVED, E-DEBOUNCED-WITH-SERVER, E-REACTIVITY-ATTR-CONFLICT, +E-SYNTAX-DURATION fall-through).
+- **Per-machine setup:** pre-commit hook installed on this machine at session open (`git config core.hooksPath scripts/git-hooks` per pa.md S78 directive — was silently uninstalled).
+- **Curation deltas:** `docs/changes/` 99 → 5 (4 KEEP-LIVE + new `debounce-throttle-approach-b/`) · `docs/audits/` 22 → 3 · `docs/{recon,experiments,deep-dives}/` removed entirely.
+- **Audit closures:** hardcoded-thresholds audit §6 — **All 5 items shipped** (actual ~3.5h vs ~4h estimate). The S78 SPEC conformance audit's "src-ahead-of-spec" debounce/throttle finding RESOLVED at S79 via §6.13 NEW + clean-cut deletion of `reactive-debounced-decl` AST kind.
+- **Push state at close:** scrmlTS + scrml-support both pushed to origin per "wrap" default; both 0/0 origin at session close.
+- **Agent dispatch (S79-D1):** `worktree-agent-ab656f3dcdd0f1638` (6 WIP commits) landed via `git merge --squash` per S67 worktree-as-scratch / file-delta protocol. 2 expected merge conflicts (primer + master-list section-overlap with my prior S79 main edits) resolved manually keeping agent's authoritative text + bridging cross-refs. Final delta = exactly 29 files matching agent's reported FILES_TOUCHED; zero agent-side-stale-view files leaked into main.
+
+Next-priority menu carried forward to S80 (top items: phantom-code middleware family, Bootstrap L3 host-compiler meta-block strip bug, Phase A10 deferred items, A5-7 tests + samples, OQ-2 imperative debounce-call/throttle-call retirement). See `hand-off.md` "Next priority — menu" for the full list.
 
 ### 2026-05-10 (S79 — debounce/throttle Approach B clean-cut SHIPPED)
 
