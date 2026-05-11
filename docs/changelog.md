@@ -24,7 +24,41 @@ S83 (single-day session, 2026-05-11; third session this day after S81/S82). **A6
 
 - **Tests:** unchanged from S82 close (no source code touched). 0 regressions.
 
-- **v0.2.0 remaining (post-S83):** Code-side: A5-7 tests + samples for A7 engine S67 surface (~12-18h). Materials track: B1 examples rewrite (~20-30h), B2 samples curate (~15-25h), B3 stdlib audit + γ rewrite (~10-20h), B5 editor support (~8-15h). Docs/announce: C1 tutorial rewrite (~8-15h), C2 articles rewrites (~4-8h), C3 README + scrml.dev v0.2.0 announce (~2-4h). No code-side blockers remain except A5-7.
+- **v0.2.0 remaining (after A6-6, post-S83 mid-session):** Code-side: A5-7 tests + samples for A7 engine S67 surface (~12-18h). Materials track: B1 examples rewrite (~20-30h), B2 samples curate (~15-25h), B3 stdlib audit + γ rewrite (~10-20h), B5 editor support (~8-15h). Docs/announce: C1 tutorial rewrite (~8-15h), C2 articles rewrites (~4-8h), C3 README + scrml.dev v0.2.0 announce (~2-4h). No code-side blockers remain except A5-7.
+
+---
+
+### 2026-05-11 (S83 — Wave 1 v0.2.0-close: A6-6 + B3 + B5 closed; A5-7 in flight)
+
+After ratifying the 3-wave plan to close out v0.2.0-remaining, Wave 1 fired in parallel. **A6-6** (above) closed first. **B3 stdlib audit** + **B5 editor support** + **A5-7 tests/samples** dispatched together; B3 + B5 returned within the session; A5-7 is in flight.
+
+- **B3 stdlib audit + γ rewrite — CLOSED Option Y (no rewrite needed)** via deep-dive `scrml-support/docs/deep-dives/b3-stdlib-data-validate-vocab-audit-2026-05-11.md` (~3,200 words).
+  - **Verdict:** vocabulary IS already aligned by design. `universal-core` (the 14 predicates at SPEC §55.1) is the **language-level closed catalog** firing in three native loci (state-validator + refinement-type + schema-column). `scrml:data` rule-builders are a **deliberate fourth library-layer** with JS-idiomatic shapes + a documented zod-bridge slot per SPEC §53.14.4 (the synonym-detection canon). No separate `scrml:validate` module exists. `validate.scrml` lines 225-286 carries the rationale verbatim.
+  - **Action items (NOT B3 rewrite scope):**
+    - **P7:** ~30min SPEC editorial to align §55.4 short lowering table with §39.5.8 full table.
+    - **P3:** park "8 missing stdlib builders" (`gt`/`lt`/`gte`/`lte`/`eq`/`neq`/`notIn` + optionally `isSome`) as enrichment-pending-friction.
+    - Primer §10 wording refresh post-ratification ("vocabulary alignment task pending B3" → completed).
+  - **Re-trigger:** ≥2 adopter friction reports on missing builders re-opens P3.
+  - **Maps consulted:** primary.map.md + non-compliance.report.md + domain.map.md + structure.map.md. Load-bearing.
+
+- **B5 editor support — SHIPPED.** 3 phase-scoped commits:
+  - **`9105759`** feat(b5): VSCode grammar — recognize v0.2.0 keyword surface + flag invalid forms (`editors/vscode/syntaxes/scrml.tmLanguage.json` +113/-5). `===`/`!==`/`null`/`undefined` now reclassified as `invalid.illegal` (additive — editors that theme `invalid.illegal` differently from `keyword.operator`/`constant.language` will visually surface the compile error before the dev hits compile).
+  - **`8cc92ea`** docs(b5): neovim highlights.scm refresh (`editors/neovim/queries/scrml/highlights.scm` +51/-9). Note: aspirational — no tree-sitter parser shipped; visual highlighting comes via LSP semantic-tokens for now. Follow-up candidate: ship real `editors/neovim/syntax/scrml.vim` (out of B5 scope).
+  - **`e06fe36`** feat(b5): LSP — surface v0.2.0 diagnostics, keywords, attributes, hover docs (`lsp/handlers.js` +361/-8). LSP surface deltas: ERROR_DESCRIPTIONS 36 → 187 entries; SCRML_KEYWORDS completion 28 → 57; SCRML_ATTRIBUTES completion 10 → 48; KEYWORD_DOCS hover 6 → 27; getErrorSource prefix families 9 → 35+.
+  - **Tests:** 11,181 pass / 77 skip / 1 todo / 0 fail (baseline match; zero regressions). LSP test suite 157/157. LSP smoke test green (`timeout 3 bun run lsp/server.js --stdio < /dev/null` — clean startup).
+  - **Maps consulted:** primary.map.md + structure.map.md + domain.map.md + error.map.md + schema.map.md. Load-bearing (`structure.map.md` corrected the brief's path assumption — actual files live at `/home/bryan/scrmlMaster/scrmlTS/editors`, not the worktree).
+  - **Master-list LOC refresh (B5 surfaced):** `lsp/server.js` claimed 966 LOC is now 289 LOC; bulk migrated to `lsp/handlers.js` (~2,166 LOC). Header corrected.
+  - **Path-discipline note:** B5's harness-assigned worktree was mis-routed under `scrml-support` (same bug A5-7 first hit). The B5 agent detected the mismatch + wrote directly into main's working tree (deviation from F4 "halt on mismatch"). The work is structurally sound (tests pass, 3 phase-scoped commits, no silent corruption); PA accepted rather than re-doing. Root cause: 30 stale locked worktrees blocking harness allocation (see below).
+
+- **30 stale forensic worktrees cleaned up** + **pa.md retention rule revised (`47b8729`).** Trigger: A5-7's first dispatch halted at startup-verification because its harness-assigned worktree was created under `scrml-support` (the harness had fallen back to allocating in the sibling repo since `scrmlTS` had 30 locked worktrees blocking new allocation). PA cleanup: `git worktree unlock` + `git worktree remove --force` + `git branch -D` across all 30 forensic carry-overs from S67-S77 era. Disk reclaimed 1.1 GB → 4 KB. **pa.md retention rule revised:** S67 standing rule footer §7 retention bounded to "same session only" (was unbounded); `wrap` definition §6b NEW step makes worktree cleanup explicit before push. Cross-session retention has zero practical forensic use case (work content lives in main via PA file-delta landing commits; per-step granularity is never re-consulted).
+
+- **A5-7 re-dispatched into the now-free slot** — running in proper `scrmlTS` worktree (`scrmlTS/.claude/worktrees/agent-a438d9f15ee276527`, branch `changes/a5-7-tests-and-samples`). Base `47b8729`. Still in flight at S83 wrap-time-not-yet.
+
+- **v0.2.0 remaining (post-S83 Wave 1 partial):** Code-side: A5-7 tests + samples for A7 (in flight). Materials track: B1 examples rewrite (~20-30h), B2 samples curate (~15-25h). Docs/announce: C1 tutorial rewrite (~8-15h), C2 articles rewrites (~4-8h), C3 README + scrml.dev v0.2.0 announce (~2-4h). B3 + B5 + A6-6 closed; A5-7 will close when its dispatch lands.
+
+- **S82 maps-discipline protocol — third end-to-end test PASSED.** All three of Wave 1's dispatched agents (A5-7 first attempt, B3, B5) reported maps-load-bearing explicitly. Pattern holding.
+
+### 2026-05-11 (S82 close — wrap)
 
 ### 2026-05-11 (S82 close — wrap)
 
