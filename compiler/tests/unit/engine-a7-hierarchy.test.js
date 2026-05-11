@@ -15,15 +15,21 @@
  *   §5. Machine Cohesion §51.0.K — engines inside function bodies are absorbed (parser cohesion)
  *   §6. Singleton invariant — multiple sibling top-level engines stay distinct
  *
- * KNOWN DEFERRALS (Wave 4 — out of A5-7 source-no-change scope):
- *   - Inner-engine variant restore on outer re-entry.
+ * KNOWN DEFERRALS (Wave 4 — A7 codegen surface still pending):
  *   - Inner engine's own dispatcher emission inside composite arm body
- *     (Bug #2 — Wave 4 codegen follow-on).
- *   - Parent-rule cascade compile-time validation (cascade-miss diagnostic
- *     message extension per §51.0.Q.3 — Bug #3, typer follow-on).
- *   Inner-engine state-child non-empty body parsing was Bug #1 — FIXED at
- *   changes/fix-nested-engine-body-parser-lowercase-html (2026-05-11);
- *   §7 below now exercises the canonical fixtures.
+ *     (Bug #2 — Wave 4 codegen follow-on, per emit-engine.ts:76).
+ *   - Inner-engine variant restore on outer re-entry (history synth-cell —
+ *     Bug #3 — codegen follow-on per emit-engine.ts:532).
+ *   - internal:rule= distinct write path (Bug #4 — codegen follow-on).
+ *
+ * CLOSED DEFERRALS (S83, 2026-05-11):
+ *   - Bug #1 — Inner-engine state-child non-empty body parsing (FIXED via
+ *     separate lowercase-depth counter across all three closer-finders in
+ *     engine-statechild-parser.ts). §7.1+§7.2 below exercise canonical
+ *     SPEC §51.0.Q.1 fixtures with lowercase HTML inside composite bodies.
+ *   - Bug #5 — Parent-rule cascade compile-time validation (cascade-miss
+ *     diagnostic per §51.0.Q.3 — closed via SYM PASS 16 fire-site #9 in
+ *     symbol-table.ts). See §7.3 below for the regression tests.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -420,15 +426,220 @@ describe("engine-a7-hierarchy §7 — non-empty inner state-child bodies (Bug #1
     // Verification: search clientJs for `__scrml_engine_playMode_transitions`
     // — today this is absent even when the source declares the inner engine.
   });
+});
 
-  test.skip("DEFERRED (typer follow-on): cascade-miss diagnostic message extension (§51.0.Q.3)", () => {
-    // Per §51.0.Q.3: when a write inside a composite is rejected by the outer
-    // composite's `rule=`, the diagnostic message should extend to name BOTH
-    // engines for clarity (no new error code — extension of
-    // E-ENGINE-INVALID-TRANSITION message form).
-    //
-    // Per a5-3 §A5-3.8 deferral: direct-write fire-site inside engine
-    // state-child bodies is absent (engine bodies are RAW TEXT). Cascade-miss
-    // diagnostic surface is a typer follow-on (Bug #3, Wave 4 typer follow-on).
+// ===========================================================================
+// §7.3 (S83 LANDED, 2026-05-11) — cascade-miss diagnostic per §51.0.Q.3
+// ===========================================================================
+//
+// Closes the deferred §7.3 test from this file's prior version AND the
+// A5-3 §A5-3.8 deferral noted in `a5-3-typer-walker.test.js`.
+//
+// SECOND compile-time E-ENGINE-INVALID-TRANSITION fire-site (fire-site #9
+// in SYM PASS 16 — `validateEngineA5Extensions`). Direct-write enforcement
+// inside engine state-child bodies via regex over `bodyRaw` (engine bodies
+// are RAW TEXT per parser limitation primer §13.7 B14 specifics).
+//
+// Two canonical forms:
+//   - `@varName = .Variant`         (assign per §51.0.F line 20847)
+//   - `@varName.advance(.Variant)`  (advance per §51.0.G)
+//
+// Composite-aware message framing per §51.0.Q.3 OQ-Harel-6 verdict: when
+// the surrounding state-child is composite (`innerEngines.length > 0`),
+// the diagnostic message names both the composite AND the engine variable
+// + type. No new error code — extends E-ENGINE-INVALID-TRANSITION message
+// form per spec §51.0.Q.3 line 21617-21619.
+
+describe("engine-a7-hierarchy §7.3 — cascade-miss diagnostic (§51.0.Q.3)", () => {
+  test("composite cascade-miss — inner <engine> BEFORE write produces composite framing", () => {
+    // Canonical §51.0.Q.3 worked example shape: write inside <Playing> body
+    // targeting .Inventory is rejected by the composite's rule=(.Title|.Paused).
+    // The inner <engine> must appear BEFORE the offending write in source
+    // order so the body-parser surfaces innerEngines.length > 0 for <Playing>
+    // (current parser limitation — see §7 deferred bug surface above).
+    const src = `\${
+      type AppMode:enum  = { Title, Playing, Paused, Inventory }
+      type PlayMode:enum = { Exploring, Battle }
+    }
+<engine for=AppMode initial=.Title>
+  <Title rule=.Playing></>
+  <Playing rule=(.Title | .Paused)>
+    <engine for=PlayMode initial=.Exploring>
+      <Exploring rule=.Battle></>
+      <Battle rule=.Exploring></>
+    </>
+    <button onclick=\${ @appMode = .Inventory }>Wrong</button>
+  </>
+  <Paused rule=.Playing></>
+  <Inventory rule=.Playing></>
+</>`;
+    const { sym } = runUpToSYM(src);
+    const errs = sym.errors.filter((e) => e.code === "E-ENGINE-INVALID-TRANSITION");
+    expect(errs.length).toBe(1);
+    const msg = errs[0].message;
+    // Composite framing per spec §51.0.Q.3 line 21610-21613:
+    expect(msg).toContain("composite");
+    expect(msg).toContain("<Playing>");
+    expect(msg).toContain("appMode");
+    expect(msg).toContain("AppMode");
+    expect(msg).toContain("@appMode = .Inventory");
+    expect(msg).toContain(".Title");
+    expect(msg).toContain(".Paused");
+  });
+
+  test("flat (non-composite) state-child fires E-ENGINE-INVALID-TRANSITION with canonical framing", () => {
+    // Same diagnostic code (no new error per spec §51.0.Q.3 line 21617-21619),
+    // but message uses the canonical "<tag>'s rule=" framing — composite
+    // framing is reserved for state-children with inner <engine>.
+    const src = `\${ type Phase:enum = { Idle, Active, Done } }
+<engine for=Phase initial=.Idle>
+  <Idle rule=.Active>
+    <button onclick=\${ @phase = .Done }>Wrong</button>
+  </>
+  <Active rule=.Done></>
+  <Done></>
+</>`;
+    const { sym } = runUpToSYM(src);
+    const errs = sym.errors.filter((e) => e.code === "E-ENGINE-INVALID-TRANSITION");
+    expect(errs.length).toBe(1);
+    const msg = errs[0].message;
+    expect(msg).toContain("@phase = .Done");
+    expect(msg).toContain("<Idle>");
+    expect(msg).toContain(".Active");
+    // Flat case does NOT use composite framing:
+    expect(msg).not.toContain("composite");
+  });
+
+  test("legal direct write inside state-child body — NO error", () => {
+    // .Active is the single legal target per rule=.Active.
+    const src = `\${ type Phase:enum = { Idle, Active, Done } }
+<engine for=Phase initial=.Idle>
+  <Idle rule=.Active>
+    <button onclick=\${ @phase = .Active }>OK</button>
+  </>
+  <Active rule=.Done></>
+  <Done></>
+</>`;
+    const { sym } = runUpToSYM(src);
+    const errs = sym.errors.filter((e) => e.code === "E-ENGINE-INVALID-TRANSITION");
+    expect(errs.length).toBe(0);
+  });
+
+  test(".advance(.Variant) form: illegal advance fires E-ENGINE-INVALID-TRANSITION", () => {
+    const src = `\${ type Phase:enum = { Idle, Active, Done } }
+<engine for=Phase initial=.Idle>
+  <Idle rule=.Active>
+    <button onclick=\${ @phase.advance(.Done) }>Wrong</button>
+  </>
+  <Active rule=.Done></>
+  <Done></>
+</>`;
+    const { sym } = runUpToSYM(src);
+    const errs = sym.errors.filter((e) => e.code === "E-ENGINE-INVALID-TRANSITION");
+    expect(errs.length).toBe(1);
+    expect(errs[0].message).toContain("@phase.advance(.Done)");
+    expect(errs[0].message).toContain(".Active");
+  });
+
+  test("multi-target rule= with illegal target: fires with multi-target framing", () => {
+    const src = `\${ type Phase:enum = { Idle, Active, Done } }
+<engine for=Phase initial=.Active>
+  <Idle rule=.Active></>
+  <Active rule=(.Idle | .Done)>
+    <button onclick=\${ @phase = .Active }>Wrong</button>
+  </>
+  <Done></>
+</>`;
+    const { sym } = runUpToSYM(src);
+    const errs = sym.errors.filter((e) => e.code === "E-ENGINE-INVALID-TRANSITION");
+    expect(errs.length).toBe(1);
+    const msg = errs[0].message;
+    expect(msg).toContain("@phase = .Active");
+    expect(msg).toMatch(/multi-target|\.Idle.*\.Done|\.Done.*\.Idle/);
+  });
+
+  test("wildcard rule=* — no error on any direct-write target", () => {
+    // §51.0.F documented escape hatch: rule=* accepts any variant.
+    const src = `\${ type Phase:enum = { Idle, Active, Done } }
+<engine for=Phase initial=.Idle>
+  <Idle rule=*>
+    <button onclick=\${ @phase = .Done }>OK</button>
+  </>
+  <Active rule=.Done></>
+  <Done></>
+</>`;
+    const { sym } = runUpToSYM(src);
+    const errs = sym.errors.filter((e) => e.code === "E-ENGINE-INVALID-TRANSITION");
+    expect(errs.length).toBe(0);
+  });
+
+  test("terminal state (rule= absent): ANY direct write fires", () => {
+    const src = `\${ type Phase:enum = { Idle, Done } }
+<engine for=Phase initial=.Idle>
+  <Idle rule=.Done></>
+  <Done>
+    <button onclick=\${ @phase = .Idle }>Wrong</button>
+  </>
+</>`;
+    const { sym } = runUpToSYM(src);
+    const errs = sym.errors.filter((e) => e.code === "E-ENGINE-INVALID-TRANSITION");
+    expect(errs.length).toBe(1);
+    const msg = errs[0].message;
+    expect(msg).toContain("<Done>");
+    expect(msg).toMatch(/terminal|no.*rule=/i);
+  });
+
+  test("qualified-name form (Type.Variant) — silently NOT scanned (out of scope)", () => {
+    // Only bare-dot .Variant form is scanned by the raw-text walker.
+    // Qualified Type.Variant writes need identifier resolution beyond raw
+    // text; adopters needing precision can use rule=* escape hatch.
+    const src = `\${ type Phase:enum = { Idle, Active, Done } }
+<engine for=Phase initial=.Idle>
+  <Idle rule=.Active>
+    <button onclick=\${ @phase = Phase.Done }>Skipped</button>
+  </>
+  <Active rule=.Done></>
+  <Done></>
+</>`;
+    const { sym } = runUpToSYM(src);
+    const errs = sym.errors.filter((e) => e.code === "E-ENGINE-INVALID-TRANSITION");
+    expect(errs.length).toBe(0);
+  });
+
+  test("unrelated cell with shared prefix — identifier-bounded match (no false-positive)", () => {
+    // The walker's regex uses (?!\\w) after varName so `phaseX` does NOT
+    // match when scanning for `@phase`.
+    const src = `\${
+      type Phase:enum = { Idle, Active, Done }
+      let phaseX = 0
+    }
+<engine for=Phase initial=.Idle>
+  <Idle rule=.Active>
+    <button onclick=\${ phaseX = 1 }>OK</button>
+  </>
+  <Active rule=.Done></>
+  <Done></>
+</>`;
+    const { sym } = runUpToSYM(src);
+    const errs = sym.errors.filter((e) => e.code === "E-ENGINE-INVALID-TRANSITION");
+    expect(errs.length).toBe(0);
+  });
+
+  test("target not in engine for=Type variants: silent (other diagnostic owns the case)", () => {
+    // When the write targets `.Banana` which is not a variant of `Phase`,
+    // the cascade-miss walker skips silently — a different error fires
+    // elsewhere (type-system / B20). Mirrors fire-site #3's gating pattern.
+    const src = `\${ type Phase:enum = { Idle, Active } }
+<engine for=Phase initial=.Idle>
+  <Idle rule=.Active>
+    <button onclick=\${ @phase = .Banana }>Type error elsewhere</button>
+  </>
+  <Active rule=.Idle></>
+</>`;
+    const { sym } = runUpToSYM(src);
+    // The cascade-miss walker does NOT fire E-ENGINE-INVALID-TRANSITION for
+    // a non-variant target — different diagnostic owns it.
+    const errs = sym.errors.filter((e) => e.code === "E-ENGINE-INVALID-TRANSITION");
+    expect(errs.length).toBe(0);
   });
 });

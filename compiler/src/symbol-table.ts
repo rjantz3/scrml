@@ -6285,6 +6285,92 @@ function formatVariantList(variants: string[]): string {
 }
 
 /**
+ * A5-3 §A5-3.8 — direct-write match parsed out of a state-child's `bodyRaw`.
+ *
+ * Engine state-child bodies are RAW TEXT today (parser limitation per
+ * primer §13.7 B14 specifics). The cascade-miss diagnostic (§51.0.Q.3)
+ * therefore regex-scans `bodyRaw` for the two canonical direct-write
+ * forms the spec governs:
+ *
+ *   - `@varName = .Variant`                — direct assignment (§51.0.F line 20847)
+ *   - `@varName.advance(.Variant)`         — assertion-style transition (§51.0.G)
+ *
+ * Only the BARE-DOT `.Variant` form is matched. The qualified-name form
+ * `Type.Variant` (also legal at runtime) is NOT matched — qualified writes
+ * require identifier resolution that this raw-text scan cannot perform
+ * safely. Adopters needing precision on qualified writes can use `rule=*`
+ * as the documented escape hatch (§51.0.F).
+ *
+ * Returns one DirectWriteMatch per direct-write found in the body.
+ */
+interface DirectWriteMatch {
+  /** `"assign"` for `@x = .V`; `"advance"` for `@x.advance(.V)`. */
+  shape: "assign" | "advance";
+  /** Target variant name (no leading dot). */
+  target: string;
+  /** Byte offset of the match start within `bodyRaw` (preserved for future
+   *  span tightening; today's diagnostics use engine-decl span as a coarse
+   *  anchor, mirroring fire-site #3). */
+  rawOffset: number;
+}
+
+/**
+ * Scan a state-child body for direct-write expressions targeting `varName`.
+ *
+ * Approach **A — regex over raw text** (per A5-3 §A5-3.8 follow-on dispatch
+ * design). Two patterns:
+ *
+ *   - assign  : `@<name>\s*=\s*\.<Variant>`     captures `Variant`
+ *   - advance : `@<name>\s*\.\s*advance\s*\(\s*\.<Variant>\s*\)`
+ *
+ * `<name>` is exact-match on `varName` (identifier-bounded — `@phaseX` does
+ * NOT match when scanning for `@phase`); `<Variant>` is a PascalCase
+ * identifier captured by the regex. The two patterns are scanned
+ * independently and the union returned (one DirectWriteMatch per match).
+ *
+ * NOTE on truncation: today's body-parser truncates `bodyRaw` at the first
+ * markup-tag boundary inside the state-child (see /tmp probe). This means
+ * at most one direct-write per state-child body is reachable in current
+ * pipeline. The cascade-miss fire-site catches what is reachable; broader
+ * coverage waits on the body-parser widening tracked in engine-a7-
+ * hierarchy.test.js §7 (deferred bug surface).
+ */
+function scanDirectWritesInStateChildBody(
+  bodyRaw: string,
+  varName: string,
+): DirectWriteMatch[] {
+  const out: DirectWriteMatch[] = [];
+  if (!bodyRaw || !varName) return out;
+  // Validate varName as an identifier before injecting into RegExp to
+  // avoid metacharacter-injection. `meta.varName` is parser-derived from
+  // a PascalCase type name (lowercase-first), so this is defense-in-depth.
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(varName)) return out;
+
+  // `@varName = .Variant`  (with optional whitespace around `=`).
+  // `(?!\w)` after `varName` enforces identifier boundary so `@phaseX`
+  // does NOT match the scanner for `@phase`.
+  const assignRe = new RegExp(
+    `@${varName}(?!\\w)\\s*=\\s*\\.([A-Za-z_][A-Za-z0-9_]*)`,
+    "g",
+  );
+  let m: RegExpExecArray | null;
+  while ((m = assignRe.exec(bodyRaw)) !== null) {
+    out.push({ shape: "assign", target: m[1], rawOffset: m.index });
+  }
+
+  // `@varName.advance(.Variant)`.
+  const advanceRe = new RegExp(
+    `@${varName}(?!\\w)\\s*\\.\\s*advance\\s*\\(\\s*\\.([A-Za-z_][A-Za-z0-9_]*)\\s*\\)`,
+    "g",
+  );
+  while ((m = advanceRe.exec(bodyRaw)) !== null) {
+    out.push({ shape: "advance", target: m[1], rawOffset: m.index });
+  }
+
+  return out;
+}
+
+/**
  * PASS 16 (A5-3) — per-engine A7 hierarchy + temporal extension validation
  * + EngineMetadata file-scope aggregation. For each `engine-decl` carrying
  * a `_record` (set by PASS 10.A) AND `engineMeta.stateChildren` (populated
@@ -6589,6 +6675,141 @@ export function validateEngineA5Extensions(
             // structurally exist. Skip silently — the developer fixes the
             // rule= shape first; on next compile, the legality check fires
             // cleanly against the now-valid rule.
+            break;
+        }
+      }
+    }
+
+    // ----- Fire-site #9 (A5-3 §A5-3.8 follow-on, S83) — direct-write
+    //       cascade-miss diagnostic per §51.0.Q.3 + §51.0.F -----
+    //
+    // SECOND compile-time E-ENGINE-INVALID-TRANSITION fire-site (fire-site #3
+    // above is the FIRST — `<onTimeout to=>` legality). Closes A5-3 §A5-3.8
+    // deferral noted in `a5-3-typer-walker.test.js`.
+    //
+    // Scans `sc.bodyRaw` (RAW TEXT) for the two canonical direct-write forms
+    // the spec governs:
+    //
+    //   - `@varName = .Variant`        — direct assignment per §51.0.F line 20847
+    //   - `@varName.advance(.Variant)` — assertion-style transition per §51.0.G
+    //
+    // Validation mirrors fire-site #3's switch on `sc.rule.kind`:
+    //   - `wildcard` → always legal; never fires.
+    //   - `absent`   → terminal; ANY direct write fires.
+    //   - `single`   → must equal `r.target`.
+    //   - `multi`    → must be in `r.targets`.
+    //   - `legacy-arrow` / `parse-error` → skip (B15 already fired).
+    //
+    // SKIPS:
+    //   1. When `variants` is empty (unknown for=Type — same gate as fire-site
+    //      #3 / fire-site #4).
+    //   2. When the captured target is NOT a known variant of the engine's
+    //      `for=Type` (type-check error already fires from B20 or downstream;
+    //      A5-3 does NOT double-fire a misleading legality diagnostic against
+    //      a non-variant — mirrors fire-site #3's gating).
+    //
+    // CASCADE-MISS framing (§51.0.Q.3 OQ-Harel-6 verdict): when `sc` is a
+    // composite state-child (`innerEngines.length > 0`), the diagnostic
+    // message extends to name BOTH engines (composite + outer engine) for
+    // clarity. The §34 catalog row remains the same — no new error code.
+    // Flat-engine (non-composite) violations fire the same code with the
+    // canonical message form (no composite framing).
+    //
+    // BODY-PARSER LIMITATION (Wave 4 surface): `bodyRaw` is truncated at the
+    // first markup-tag boundary inside the state-child. The cascade-miss
+    // fire-site catches at most one direct-write per state-child body in
+    // current pipeline. Broader coverage waits on body-parser widening
+    // tracked in `engine-a7-hierarchy.test.js §7`.
+    const varName = typeof meta.varName === "string" ? meta.varName : "";
+    if (
+      varName.length > 0 &&
+      variants.length > 0 &&
+      typeof sc.bodyRaw === "string" &&
+      sc.bodyRaw.length > 0
+    ) {
+      const directWrites = scanDirectWritesInStateChildBody(sc.bodyRaw, varName);
+      for (const dw of directWrites) {
+        // Skip targets not in this engine's variants — different error
+        // already fires (or will fire) for that case; mirrors fire-site #3.
+        if (!variantSet.has(dw.target)) continue;
+
+        const r = sc.rule;
+        if (!r) continue;
+        const isComposite = Array.isArray(sc.innerEngines) && sc.innerEngines.length > 0;
+        const writeRepr = dw.shape === "advance"
+          ? `@${varName}.advance(.${dw.target})`
+          : `@${varName} = .${dw.target}`;
+        // Composite-aware framing prefix per §51.0.Q.3 — names both the
+        // outer composite state-child AND the engine variable + type for
+        // clarity. Non-composite uses the canonical framing.
+        const ctxPrefix = isComposite
+          ? `inside composite \`<${sc.tag}>\` (engine \`${varName}: ${forType}\`), ` +
+            `direct write \`${writeRepr}\``
+          : `\`${writeRepr}\` inside state-child \`<${sc.tag}>\``;
+
+        switch (r.kind) {
+          case "absent":
+            // Terminal state — no transitions; direct write cannot fire.
+            fireA5Diagnostic(
+              errors,
+              "E-ENGINE-INVALID-TRANSITION",
+              `E-ENGINE-INVALID-TRANSITION: ${ctxPrefix} is not a legal transition ` +
+              `target — \`<${sc.tag}>\` has no \`rule=\` attribute (terminal state per ` +
+              `§51.0.F). Either add \`rule=.${dw.target}\` (or a wider rule covering ` +
+              `\`.${dw.target}\`) to \`<${sc.tag}>\`, or remove the direct write.`,
+              engineDecl,
+              filePath,
+              "error",
+            );
+            break;
+          case "wildcard":
+            // `rule=*` — any target legal; never fires.
+            break;
+          case "single":
+            if (r.target !== dw.target) {
+              const composite = isComposite
+                ? `${sc.tag}.rule=` // §51.0.Q.3-shaped: name the composite explicitly
+                : `\`<${sc.tag}>\`'s \`rule=`;
+              fireA5Diagnostic(
+                errors,
+                "E-ENGINE-INVALID-TRANSITION",
+                `E-ENGINE-INVALID-TRANSITION: ${ctxPrefix} is invalid. ` +
+                (isComposite
+                  ? `Composite \`${composite}\` permits: .${r.target}. `
+                  : `${composite}.${r.target}\` (single-target form per §51.0.F — only ` +
+                    `\`.${r.target}\` is reachable). `) +
+                `Either change the target to \`.${r.target}\`, widen \`rule=\` to ` +
+                `\`(.${r.target} | .${dw.target})\` or \`*\`, or remove the write.`,
+                engineDecl,
+                filePath,
+                "error",
+              );
+            }
+            break;
+          case "multi":
+            if (!r.targets.includes(dw.target)) {
+              const targetsList = r.targets.map((t) => `.${t}`).join(", ");
+              const targetsPipe = r.targets.map((t) => `.${t}`).join(" | ");
+              fireA5Diagnostic(
+                errors,
+                "E-ENGINE-INVALID-TRANSITION",
+                `E-ENGINE-INVALID-TRANSITION: ${ctxPrefix} is invalid. ` +
+                (isComposite
+                  ? `Composite \`${sc.tag}.rule=\` permits: ${targetsList}. `
+                  : `\`<${sc.tag}>\`'s multi-target \`rule=(${targetsPipe})\` (per ` +
+                    `§51.0.F — only the listed targets are reachable). `) +
+                `Either pick one of the listed targets, add \`.${dw.target}\` to the ` +
+                `rule list, or widen to \`*\`.`,
+                engineDecl,
+                filePath,
+                "error",
+              );
+            }
+            break;
+          case "legacy-arrow":
+          case "parse-error":
+            // B15 already fired on the malformed rule=; do NOT double-fire a
+            // misleading legality diagnostic. Mirrors fire-site #3 behavior.
             break;
         }
       }
@@ -7522,12 +7743,16 @@ export function runSYM(input: SYMInput): SYMResult {
   //     state-child / inside `<match>` block-form arm — gated on a
   //     markup walker (same precondition that defers `<onTransition>`
   //     placement enforcement).
-  //   - Cascade-miss diagnostic (message extension on E-ENGINE-INVALID-
-  //     TRANSITION direct-write) — gated on direct-write compile-time
-  //     enforcement inside engine state-child bodies; that fire-site
-  //     does not exist today (engine bodies are RAW TEXT).
   //   - Inner-engine structural recursion — DEFERRED to A1c per SURVEY
   //     §3.3.
+  //
+  // Closed (S83 follow-on dispatch, 2026-05-11):
+  //   - Cascade-miss diagnostic (§51.0.Q.3 OQ-Harel-6) — SECOND compile-time
+  //     E-ENGINE-INVALID-TRANSITION fire-site added inside
+  //     `validateEngineA5Extensions` (fire-site #9). Approach A (regex over
+  //     bodyRaw) catches `@varName = .Variant` and `@varName.advance(.Variant)`
+  //     direct-write forms. Composite-aware framing per §51.0.Q.3 when the
+  //     surrounding state-child is composite (`innerEngines.length > 0`).
   const visitedA53 = new WeakSet<object>();
   walkValidateEngineA5Extensions(ast.nodes, ast, errors, filePath, visitedA53);
 

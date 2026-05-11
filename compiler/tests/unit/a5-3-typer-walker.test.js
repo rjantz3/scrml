@@ -14,7 +14,9 @@
  *   §A5-3.5  <onTimeout> placement — DEFERRED (markup walker not present)
  *   §A5-3.6  internal:rule= variant validation (§51.0.O)
  *   §A5-3.7  .Variant.history target — TRANSPARENT via B15 (anchor tests)
- *   §A5-3.8  Cascade-miss message — DEFERRED (direct-write fire-site absent)
+ *   §A5-3.8  Cascade-miss message (§51.0.Q.3) — CLOSED S83 (fire-site #9 in
+ *            validateEngineA5Extensions). Regression tests live in
+ *            `engine-a7-hierarchy.test.js §7.3`.
  *   §A5-3.9  Engine cohesion — function/snippet body (sub-step 6)
  *   §A5-3.10 parallel silent-ignore — derived/nested
  *   §A5-3.11 EngineMetadata file-scope aggregation (annotated records)
@@ -25,13 +27,15 @@
  *   - §A5-3.5 markup walker that tokenizes <onTimeout> outside engine
  *     state-children doesn't exist (same precondition as <onTransition>
  *     placement enforcement, B17 deferral).
- *   - §A5-3.8 direct-write E-ENGINE-INVALID-TRANSITION compile-time
- *     enforcement inside engine state-child bodies doesn't exist
- *     (engine bodies are RAW TEXT — symbol-table.ts:4150,4544).
  *   - §A5-3.13 inner-engine structural recursion deferred to A1c
  *     codegen — A5-3's primary fire-sites read OUTER engine's
  *     state-children only; innerEngines.length > 0 is the composite
  *     marker, no recursion needed.
+ *
+ * Closed deferrals:
+ *   - §A5-3.8 cascade-miss diagnostic (§51.0.Q.3) — CLOSED S83 via Approach A
+ *     (regex over bodyRaw RAW TEXT). Fire-site #9 inside
+ *     validateEngineA5Extensions. Tests in engine-a7-hierarchy.test.js §7.3.
  *
  * Source-of-truth: SPEC §51.0.M-§51.0.Q (lines 20503-20988) + §34
  * catalog rows 14234, 14248, 14250, 14251.
