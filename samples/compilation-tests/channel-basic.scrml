@@ -1,26 +1,22 @@
-<program>
 // §38 channel-basic.scrml — minimal WebSocket channel sample.
 // See gauntlet-s20-channels/channel-basic-001.scrml for the gauntlet variant.
-${
-  <messages> = []
-  <status> = "disconnected"
-}
+//
+// Per §38.1, channels are file-scope SIBLINGS of <program> — `<channel>` inside
+// `<program>` body fires E-CHANNEL-INSIDE-PROGRAM. Channel-declared cells use
+// V5-strict (<x> = init) and are auto-synced across subscribed clients; they
+// remain reachable from <program> via canonical `@cellName` access.
 
+<channel name="chat" topic="general">
+  ${
+    <messages> = []
+    <status>   = "disconnected"
+  }
+</>
+
+<program>
 <div>
   <h1>Chat</>
   <p class="status">Status: ${@status}</>
-
-  <channel name="chat"
-           topic="general"
-           onclient:open=onOpen()
-           onclient:close=onClose()
-           onserver:message=handleMsg(msg)>
-  </>
-
-  <ul>
-    for (const msg of @messages) {
-      <li>${msg}</>
-    }
-  </ul>
+  <p>Total messages: ${@messages.length}</>
 </>
 </program>

@@ -7,7 +7,7 @@
     }
     <div class="tooltip-wrapper">
         <button>Hover me</>
-        <div class="tooltip" if=showTip>
+        <div class="tooltip" if=@showTip>
             <p>This is helpful tooltip text.</>
         </div>
     </div>

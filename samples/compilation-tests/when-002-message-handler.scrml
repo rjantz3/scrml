@@ -14,11 +14,11 @@
 </>
 
 ${
-    <input>  = 21
+    <value>  = 21
     <result> = not
 
     function runDoubler() {
-        <#doubler>.send({ value: @input })
+        <#doubler>.send({ value: @value })
     }
 
     when message from <#doubler> (data) {
@@ -27,9 +27,9 @@ ${
 }
 
 <div>
-    <input type="number" bind:value=@input>
+    <input type="number" bind:value=@value>
     <button onclick=runDoubler()>Double it</>
-    <p if=(@result != not)>Result: ${@result}</>
+    <p if=(@result is not not)>Result: ${@result}</>
 </>
 
 </program>

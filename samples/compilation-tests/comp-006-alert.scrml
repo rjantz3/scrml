@@ -8,7 +8,7 @@
             @showAlert = false
         }
     }
-    <div class="alert alert-info" if=showAlert>
+    <div class="alert alert-info" if=@showAlert>
         <span>This is an informational alert.</>
         <button onclick=dismiss()>Dismiss</>
     </div>

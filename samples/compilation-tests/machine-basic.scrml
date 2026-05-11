@@ -1,33 +1,27 @@
-// machine-basic — a reactive engine-governed enum, declared via external
-// `< engine>` form (§51.5; canonical keyword as of P1, 2026-04-30 — DD1
-// state-as-primary unification). Writes to the engine-bound reactive are
-// gated by the declared transitions at runtime.
+// machine-basic — canonical modern <engine> form (§51.0.B + §51.0.F).
+// State-children carry `rule=` attributes that declare the transition contract.
+// The legacy `< engine name=X for=Y>` + arrow-rule body form is retired in
+// v0.2.0 (see engine-modern-001-basic.scrml for the reference shape).
+//
+// The engine auto-declares its reactive variable from `for=` (§51.0.C):
+// OrderStatus → @orderStatus.
+
 ${
     type OrderStatus:enum = { Pending, Processing, Shipped, Delivered, Cancelled }
-
-    <status>: AdminFlow = OrderStatus.Pending
-
-    function advance() {
-        @status = OrderStatus.Processing
-    }
-
-    function ship() {
-        @status = OrderStatus.Shipped
-    }
 }
 
-< engine name=AdminFlow for=OrderStatus>
-    .Pending    => .Processing | .Cancelled
-    .Processing => .Shipped | .Cancelled
-    .Shipped    => .Delivered
-    .Delivered  => .Pending
-    .Cancelled  => .Pending
+<engine for=OrderStatus initial=.Pending>
+    <Pending    rule=(.Processing | .Cancelled)></>
+    <Processing rule=(.Shipped    | .Cancelled)></>
+    <Shipped    rule=.Delivered></>
+    <Delivered  rule=.Pending></>
+    <Cancelled  rule=.Pending></>
 </>
 
 <program>
 <div>
-    <h1>Order Status: ${@status}</>
-    <button onclick=${advance()}>Advance</>
-    <button onclick=${ship()}>Ship</>
+    <h1>Order Status: ${@orderStatus.variant}</>
+    <button onclick=${@orderStatus = .Processing}>Advance</>
+    <button onclick=${@orderStatus = .Shipped}>Ship</>
 </>
 </program>

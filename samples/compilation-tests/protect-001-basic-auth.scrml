@@ -1,20 +1,26 @@
 // protect-001-basic-auth.scrml
-// protect= on < db> state block. Password hash is hidden from client code (§11.3).
+// protect= on <db> state block. Password hash is hidden from client code (§11.3).
 // Functions that touch protected fields auto-escalate to server routes.
 // Note: requires auth.db to exist. Will produce E-PA-001 without it.
 
 <program>
 
-< db src="auth.db" protect="password_hash" tables="users">
+${
+    import { verifyHash } from 'scrml:auth'
+    import { navigate } from 'scrml:router'
+}
+
+<db src="auth.db" protect="password_hash" tables="users">
     ${
         <email>    = ""
         <password> = ""
         <error>    = ""
 
-        // authenticate touches password_hash — compiler escalates to server.
-        // Approach D: server function returns error message or null (not assigns @error).
-        // Client wrapper handleSubmit calls authenticate and assigns @error.
-        server function authenticate(email: string, password: string) {
+        // authenticate touches password_hash — body-content inference escalates
+        // to server automatically per §12.2 T1 (no `server` keyword needed
+        // post-Insight-26; W-DEPRECATED-SERVER-MODIFIER documents the cycle).
+        // Approach D: function returns error message or "" (not assigns @error).
+        function authenticate(email: string, password: string) {
             let user = ?{`
                 SELECT id, email, password_hash
                 FROM users

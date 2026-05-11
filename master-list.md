@@ -224,8 +224,9 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 
 ## F. Samples
 
-- [x][x] `samples/compilation-tests/` — **275 top-level `.scrml` test files** (S41 close 2026-04-25 audit: 27 clean / 24 fail / 224 warning-only). Plus ~509 fixture files in subdirs (recursive total: 784). Top-level failure mode mostly E-SCOPE-001 in gauntlet/meta samples; warning bucket contents being classified under Scope C Stage 1.4. S20 gauntlet fixtures in 7 subdirs:
+- [x][x] `samples/compilation-tests/` — **286 top-level `.scrml` test files** (S83 B2 curate 2026-05-11: **37 clean / 236 warning-only / 13 fail**). Improvement from S41 baseline (27 / 224 / 24 over 275 files): +10 clean, +12 warning-only, -11 fail, +11 net new samples (largely engine-005..012 + engine-modern + S79 batch). The 13 remaining failures are KEEP-as-friction-corpus fixtures (8× gauntlet-r10-* + 2× gauntlet-s79-* + 1× lin-002 intentional E-LIN-002 demo + 3× meta-004/005/010 compiler-bug fixtures documenting the ^{} → runtime scope bridge gap). Plus ~509 fixture files in subdirs (recursive total: 795 — 1 file dropped to scrml-support/archive/samples-dropped/ in S83 B2). S20 gauntlet fixtures in 7 subdirs:
   - `gauntlet-s20-channels/`, `gauntlet-s20-error-test/`, `gauntlet-s20-error-ux/`, `gauntlet-s20-meta/`, `gauntlet-s20-sql/`, `gauntlet-s20-styles/`, `gauntlet-s20-validation/` (S20/S21 regression corpus).
+  - Plus 4 gauntlet-s19-* subdirs (phase1-decls / phase2-control-flow / phase3-operators / phase4-markup; ~427 files combined) — DEFERRED from S83 B2 top-level scope.
 
 ---
 

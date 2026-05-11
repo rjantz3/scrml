@@ -12,7 +12,7 @@
         }
     }
     <button onclick=openModal()>Open Modal</>
-    <div class="modal-overlay" if=isOpen>
+    <div class="modal-overlay" if=@isOpen>
         <div class="modal">
             <div class="modal-header">
                 <h2>Modal Title</>

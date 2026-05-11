@@ -1,79 +1,56 @@
-// traffic-light.scrml — §51 State Engine gauntlet
-// Tests: enum + transitions{}, < engine> declaration, match for state cycling,
-// reactive @light variable, class:name= conditional classes, #{} CSS.
+// traffic-light.scrml — §51 modern <engine> gauntlet (state-as-primary).
 //
-// P1 (2026-04-30, state-as-primary unification): canonical keyword is now
-// `engine`. The legacy `<machine>` keyword still compiles in P1 but emits
-// W-DEPRECATED-001; dedicated regression coverage lives in
-// compiler/tests/unit/p1e-engine-keyword-regression.test.js.
+// v0.2.0 canonical: `<engine for=TrafficLight initial=.Red>` with state-children
+// carrying `rule=` attributes per §51.0.B + §51.0.F. The pre-v0.2.0
+// `< engine name=X for=Y>` arrow-rule body is retired; see engine-modern-001-basic
+// for the reference shape and machine-basic.scrml for a simpler analog.
 //
-// NOTE: Previously ran without a <program> wrapper due to a BS bug that caused
-// close-tag mismatch when < engine> appeared inside <program>. That bug has been
-// fixed (see docs/changes/fix-bs-machine-closer). The < engine> state block now
-// correctly uses its `/` closer without consuming the outer `</program>` tag.
-// This file intentionally stays at top-level (no <program>) to test that path;
-// machine-basic.scrml is the reference for engine-in-program behavior.
+// Engine auto-declares `@trafficLight` from `for=TrafficLight` (§51.0.C).
+// `class:active=(@x == .Variant)` toggles per-state styling.
 
 ${
     type TrafficLight:enum = { Red, Yellow, Green }
 
-    <light>: TrafficController = TrafficLight.Red
-
     // cycle() advances through Red → Green → Yellow → Red
     // match arms use => (canonical per §51, not :>)
     function cycle() {
-        @light = match @light {
-            .Red    => TrafficLight.Green
-            .Green  => TrafficLight.Yellow
-            .Yellow => TrafficLight.Red
+        @trafficLight = match @trafficLight {
+            .Red    => .Green
+            .Green  => .Yellow
+            .Yellow => .Red
         }
     }
 }
 
-< engine name=TrafficController for=TrafficLight>
-    .Red    => .Green
-    .Green  => .Yellow
-    .Yellow => .Red
+<engine for=TrafficLight initial=.Red>
+    <Red    rule=.Green></>
+    <Green  rule=.Yellow></>
+    <Yellow rule=.Red></>
 </>
-
-// ASSUMPTION: < engine> at top level (not nested inside markup element) is the
-// correct placement per machine-basic.scrml sample. Placing it inside a <div>
-// might rebind the engine scope — spec is silent on this.
 
 <div class="traffic-app">
 
     <h1>Traffic Light Simulator</>
 
     <div class="light-housing">
-
-        // Red light circle — active when @light is Red
-        // ASSUMPTION: class:name= takes a parenthesized bool expression.
-        // Confirmed by todo-list.scrml: class:active=(@filter == FilterMode.All)
-        // Using == not === per task brief.
         <div
             class="light red-light"
-            class:active=(@light == TrafficLight.Red)
+            class:active=(@trafficLight == .Red)
         ></>
 
         <div
             class="light yellow-light"
-            class:active=(@light == TrafficLight.Yellow)
+            class:active=(@trafficLight == .Yellow)
         ></>
 
         <div
             class="light green-light"
-            class:active=(@light == TrafficLight.Green)
+            class:active=(@trafficLight == .Green)
         ></>
-
     </>
 
-    // Display current state as text. @light.variant gives the enum variant string.
-    // Confirmed by machine-basic.html: el.textContent = _scrml_reactive_get("status").variant
-    <p class="state-label">Current: ${@light.variant}</>
+    <p class="state-label">Current: ${@trafficLight.variant}</>
 
-    // onclick= takes functionName() — confirmed by func-003-onclick.scrml pattern
-    // and machine-basic.scrml (advance, ship use bare function refs but onclick=advance
-    // without parens seems to not fire — using cycle() with parens to be safe)
     <button class="cycle-btn" onclick=cycle()>Advance Signal</>
 
 </>
@@ -115,16 +92,9 @@ ${
         height: 64px;
         border-radius: 50%;
         border: 2px solid #333;
-        // dim by default — active class lights them up
         opacity: 0.15;
         transition: opacity 0.2s ease, box-shadow 0.2s ease;
     }
-
-    // ASSUMPTION: .light.active targeting a class:active= element compiles to
-    // a class="light active" style toggle on the DOM node. If the compiler emits
-    // data-scrml-bind-class="active" instead of toggling .active directly, this
-    // CSS selector won't work. Spec §51 is silent on what DOM mutation class:name=
-    // actually produces. Using standard `.light.active` hoping for toggled classList.
 
     .red-light {
         background: #e53e3e;
