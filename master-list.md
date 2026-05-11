@@ -84,35 +84,9 @@ L1 markup-as-first-class-value (PILLAR — held since scrml8) · L2 Variant C co
 - **`scrmlconfig` per-app idempotency-key storage** (S72 NEW) — RESOLVED via existing `<program>` attribute mechanism (§4.12 + §17.6 `db=` driver resolution shape). Zero new infrastructure. Each app declares its key-store backend via project config; A9 Ext 5's runtime middleware reads + uses configured backend. Per Q1 ratification 2026-05-08 + integration design dive.
 - **Pro-X-voting-against-X frequency now at 6+** (S72 update) — debate-03 roc, debate-04 crystal, debate-05 simplicity-defender, debate-25 (Insight 25) roc/haskell/react, debate-26 (Insight 26) roc-RE-flip, debate-27 (Insight 27) cs-phd + elixir + typescript triple-flip + rails self-reject. Methodology-grade settled signal sustained at frequency-six. Continue applying.
 
-### §0.5 A1a 20-step status (rev 6 decomposition — ALL 20 SUB-STEPS DONE; A1a COMPLETE)
+### §0.5 A1a 20-step status — CLOSED at S61
 
-| # | Step | Status |
-|---|---|---|
-| 1 | Lexer: reserve `reset` | ✅ S59 `9cd7779` |
-| **2** | **Foundational: `<NAME>` decl-site recognition** | ✅ S59 `d28f6f7` (depth-of-survey discount #5) |
-| **3** | **AST kind rename `reactive-decl` → `state-decl`** | ✅ S59 `8fa26e1` |
-| 4 | Parser: state-decl `shape` discriminant for Shapes 1 + 3 | ✅ S59 `96dbe92` (surfaced `reactive-derived-decl` divergence → ADR / Step 11.5) |
-| 5 | Parser: Shape 2 `renderSpec` + bareword validators + `req` | ✅ S59 `505531f` (validator args `string[]` deferred to A1b B9) |
-| 6 | Parser: `default=` + `pinned` on state-decl | ✅ S60 `2754940` |
-| 7 | Parser: `pinned` on import items | ✅ S60 `556de93` |
-| 8 | E-RESERVED-IDENTIFIER trigger | ✅ S59 `af4a0da` |
-| 9 | Expression parser: `reset(@cell)` keyword + E-RESET-NO-ARG | ✅ S60 `fded36a` |
-| 10 | Expression parser: MemberCall/MemberAssignment/UnaryDelete shape | ✅ S60 `226a2dd` (Discount #8 — zero source) |
-| 11 | Variant C compound + render-by-tag + kickstarter v2 §3 smoke | ✅ S60 `bcca1e6` (escalation surfaced 11.0a/b/c) |
-| 11.0a | Variant C compound recognizer | ✅ S60 `6d51d00` |
-| 11.0b | Newline-as-statement-separator | ✅ S60 `a7dd96a` |
-| 11.0c | Typed-decl recognizer | ✅ S60 `92af2ca` |
-| **11.5** | **FOLD `reactive-derived-decl` → `state-decl{shape:"derived",isConst:true}`** | ✅ **S61 `a020ea1`** (T2 tier; +4 pass / +1 skip; byte-output preserved; 1 hidden coupling resolved at emit-logic.ts; 1 dep-graph dedup resolved with `isFoldedDerived` filter; pre-existing Shape 3 V5-strict codegen gap deferred to A1c; self-host parity test marked `test.skip` per Steps 4-7 policy — catches up at next bootstrap regen) |
-| 12 | Existing-test deltas: rewrite + drop | ✅ **S61 `7be23aa`** (T2 tier; **ZERO net delta** — same baseline 8,878/44/0/8,922; 175 sample files in `samples/compilation-tests/` migrated to V5-strict canon; 2 NEW parser-gap follow-ups surfaced — see 11.0d / 11.0e below; 624 sites in broader `samples/` deliberately left in legacy form per SURVEY scope) |
-| **11.0d** | **Top-level structural Shape 1 recognition** (P-FUP-1 from Step 12) | ✅ **S61 `0f92077`** (T2 tier; +9 pass / +1 todo; BS top-level scan extension via `peekTopLevelStateDeclSignal` in ast-builder.js + block-splitter.js; 3 reverted Step 12 samples restored; component-def discrimination preserved; Variant C compound at top-level deferred via §S11D.5 .todo; ORIGINAL agent + finisher both stalled with stream timeouts — PA salvaged committed work via cherry-pick of partials + finisher re-dispatch + final marker commit) |
-| **11.0e** | **`<x> = not\n<y>` newline-as-separator boundary fix** (P-FUP-2 from Step 12) | ✅ **S61 `916de65`** (T2 tier; +8 tests §S11E.1-§S11E.8; 4 of 5 reverted Step 12 samples restored; UNIVERSAL fix — `"not"` added to `VALUE_KEYWORDS` Set; preserves Step 11.0b universality; 1 LOC source change + 10 LOC explanation comment; surfaced P-FUP-3 → Step 11.0f) |
-| **11.0f** | **`<x> = ?{SQL}\n<y>` BLOCK_REF newline-as-separator boundary fix** (P-FUP-3 from Step 11.0e) | ✅ **S61 `fe93d40`** (T2 tier; BLOCK_REF added to `lastEndsValue` value-classifier in `collectExpr` ASI-NEWLINE branch; restored `combined-007-crud.scrml`; preserves Step 11.0b/e universality) |
-| 13 | Final commit + CHANGELOG aggregate + cleanup `scripts/step12-*.mjs` helpers | ✅ **S61** (T1 tier; 5 step12 helpers deleted; A1a-COMPLETE CHANGELOG entry by PA-direct integration; final `compile(a1a-COMPLETE)` commit by PA. Original Step 13 agent stalled with stream timeout after WIP commits; PA salvaged via cherry-pick of partials + PA-direct CHANGELOG aggregate.) |
-
-**ALL 20 sub-steps done at S61 close. A1a (lex+parse) is COMPLETE.** Each step landed via focused worktree dispatch + PA cherry-pick to main between steps.
-
-**Side landings during A1a (parallel work):**
-- Documentary `<program>` attributes (`title=`, `description=`, `version=`, `author=`, `license=`) — SPEC §40.7 + emit-html.ts head injection + tier-ladder article update. Commit `4620290`.
+All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-f, 11.5, 12, 13) ✅ shipped S59-S61. Per-step commit IDs + landing details preserved in `docs/changelog.md` (S59-S61 entries). A1a (lex+parse) is COMPLETE. Side landing during A1a: documentary `<program>` attributes (`title=`/`description=`/`version=`/`author=`/`license=`) — SPEC §40.7 + emit-html.ts head injection (`4620290`).
 
 ### §0.6 Surfaced divergences / queued follow-ups
 
