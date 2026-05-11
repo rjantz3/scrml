@@ -384,7 +384,22 @@ Five things the compiler does that you don't write:
 
 ## Benchmarks
 
-Measured against React 19, Svelte 5, and Vue 3 on an identical TodoMVC implementation (2026-04-13).
+> **⚠️ Stale (measured 2026-04-13; not yet re-measured against v0.2.0).** The
+> numbers below were captured during the v0.1.0 → v0.2.0 transition window,
+> before the A1c codegen waves (C0–C23), the A5 computed-delay + `<onTimeout>` +
+> `<onIdle>` family, Phase A10 engine-state-child body render, the A7
+> hierarchy / history / `internal:rule=` codegen, A8 test-bind, A9 body-split
+> min-viable, and Wave 2's five A7 codegen deferral fixes (S83). The compiled
+> output shape has changed materially since these were captured. **Numbers may
+> move in either direction.**
+>
+> Refresh is queued — running TodoMVC + the comparison frameworks against the
+> current compiler will also serve as a shallow bug-hunt across the full v0.2.0
+> codegen surface (the most thorough exercise a single demo app gives).
+> Re-published numbers + delta commentary will land alongside the v0.2.0 semver
+> tag.
+
+Measured against React 19, Svelte 5, and Vue 3 on an identical TodoMVC implementation (2026-04-13, v0.1.0-era).
 
 **Bundle size (gzip):**
 
