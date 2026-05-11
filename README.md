@@ -23,9 +23,13 @@ no state management library.
 > implicit declaration, `< machine>` for state machines, `~var` for derived
 > values) will not compile against v0.2.0.** No production adopters exist, so
 > there is no v0.compat / migration-tool path — v0.2.0 is the next stable, not
-> a parallel track. A semver tag for v0.2.0 lands when the materials track
-> (examples rewrite, samples curation, tutorial rewrite, scrml.dev announce)
-> closes.
+> a parallel track.
+>
+> **Semver cadence:** v0.2.0 is the current tag. Bug fixes against the v0.2.0
+> surface ship as **v0.2.x patches** (e.g., v0.2.1 lands the first batch of
+> known-deferred codegen gaps from the post-tag adoption pass). Backward-
+> compatible new features land as **v0.3.0** minors. Backward-breaking changes
+> are reserved for a future major.
 >
 > If you find articles or LLM-generated scrml that uses pre-v0.2.0 syntax,
 > they describe the prior language. Live phase status:
@@ -396,8 +400,8 @@ Five things the compiler does that you don't write:
 > Refresh is queued — running TodoMVC + the comparison frameworks against the
 > current compiler will also serve as a shallow bug-hunt across the full v0.2.0
 > codegen surface (the most thorough exercise a single demo app gives).
-> Re-published numbers + delta commentary will land alongside the v0.2.0 semver
-> tag.
+> Re-published numbers + delta commentary will land in a forthcoming v0.2.x
+> patch alongside the refresh.
 
 Measured against React 19, Svelte 5, and Vue 3 on an identical TodoMVC implementation (2026-04-13, v0.1.0-era).
 
