@@ -275,3 +275,178 @@ describe("Mixed batches + conservative defaults", () => {
     expect(classifyFunctionMonotonicityForTest(fn, cps)).toBe("non-monotone");
   });
 });
+
+// ---------------------------------------------------------------------------
+// §19.9.6 (e) — pure-fn calls (S81 D3, 2026-05-11)
+// ---------------------------------------------------------------------------
+//
+// Pre-D3, bare-expr calls always classified as non-monotone (conservative
+// default). D3 threads a function-index lookup through the classifier; bare-
+// expr calls whose callee resolves to ALL `fn`-kind entries (per §48) are
+// now classified monotone. Effect: fewer Idempotency-Key envelopes emitted
+// for CPS batches whose only side effect is a pure-fn call. Sound — `fn`
+// bodies are statically pure (no SQL, no broadcast, no non-fn calls, no
+// async per §48 body restrictions).
+
+/** Build a bare-expr that's a plain call to `name(args...)`. */
+function makeFnCall(name, args = []) {
+  return {
+    kind: "bare-expr",
+    exprNode: {
+      kind: "call",
+      callee: { kind: "ident", name },
+      args,
+    },
+    span: span(0),
+  };
+}
+
+/** Build a tiny function-index Map<string, [{fnNode:{fnKind}}]>. */
+function makeFnIndex(entries) {
+  const map = new Map();
+  for (const [name, kind] of entries) {
+    if (!map.has(name)) map.set(name, []);
+    map.get(name).push({ fnNode: { fnKind: kind } });
+  }
+  return map;
+}
+
+describe("§19.9.6 (e) S81 D3 — pure-fn calls in bare-expr position", () => {
+  test("bare `pureFn()` call where callee is fn-kind → monotone", () => {
+    const fn = makeFn([makeFnCall("formatLog", [{ kind: "lit", value: "hello" }])]);
+    const cps = makeCpsSplit(1);
+    const idx = makeFnIndex([["formatLog", "fn"]]);
+    expect(classifyFunctionMonotonicityForTest(fn, cps, idx)).toBe("monotone");
+  });
+
+  test("bare `impureFn()` call where callee is function-kind → non-monotone", () => {
+    const fn = makeFn([makeFnCall("sendEmail", [])]);
+    const cps = makeCpsSplit(1);
+    const idx = makeFnIndex([["sendEmail", "function"]]);
+    expect(classifyFunctionMonotonicityForTest(fn, cps, idx)).toBe("non-monotone");
+  });
+
+  test("callee not in function-index → non-monotone (unknown / external)", () => {
+    const fn = makeFn([makeFnCall("scrmlEmail", [])]);
+    const cps = makeCpsSplit(1);
+    const idx = makeFnIndex([]); // empty index → no entries for `scrmlEmail`
+    expect(classifyFunctionMonotonicityForTest(fn, cps, idx)).toBe("non-monotone");
+  });
+
+  test("ANY function-kind entry under the name → non-monotone (conservative on overload)", () => {
+    // One name resolving to BOTH fn and function in different files (e.g.
+    // duplicate definition across imports). Classifier picks safety.
+    const fn = makeFn([makeFnCall("doIt", [])]);
+    const cps = makeCpsSplit(1);
+    const idx = makeFnIndex([["doIt", "fn"], ["doIt", "function"]]);
+    expect(classifyFunctionMonotonicityForTest(fn, cps, idx)).toBe("non-monotone");
+  });
+
+  test("member-access callee (`obj.method()`) → non-monotone (method-purity unknown)", () => {
+    const fn = makeFn([
+      {
+        kind: "bare-expr",
+        exprNode: {
+          kind: "call",
+          callee: {
+            kind: "member",
+            object: { kind: "ident", name: "obj" },
+            property: { name: "method" },
+          },
+          args: [],
+        },
+        span: span(0),
+      },
+    ]);
+    const cps = makeCpsSplit(1);
+    const idx = makeFnIndex([["method", "fn"]]); // fn-kind exists, but callee is member-access
+    expect(classifyFunctionMonotonicityForTest(fn, cps, idx)).toBe("non-monotone");
+  });
+
+  test("pure-fn call with literal args → monotone", () => {
+    const fn = makeFn([
+      makeFnCall("hash", [
+        { kind: "lit", value: "abc" },
+        { kind: "lit", value: 42 },
+      ]),
+    ]);
+    const cps = makeCpsSplit(1);
+    const idx = makeFnIndex([["hash", "fn"]]);
+    expect(classifyFunctionMonotonicityForTest(fn, cps, idx)).toBe("monotone");
+  });
+
+  test("pure-fn call with `@cell` read arg → monotone", () => {
+    const fn = makeFn([
+      makeFnCall("formatStatus", [{ kind: "ident", name: "@status" }]),
+    ]);
+    const cps = makeCpsSplit(1);
+    const idx = makeFnIndex([["formatStatus", "fn"]]);
+    expect(classifyFunctionMonotonicityForTest(fn, cps, idx)).toBe("monotone");
+  });
+
+  test("pure-fn call with NESTED CALL in arg → non-monotone (nested-call conservative)", () => {
+    // `pureFn(maybeImpureCall())` — nested call could resolve to anything;
+    // recursive arg-purity analysis is out of D3 scope.
+    const fn = makeFn([
+      makeFnCall("outer", [
+        { kind: "call", callee: { kind: "ident", name: "inner" }, args: [] },
+      ]),
+    ]);
+    const cps = makeCpsSplit(1);
+    const idx = makeFnIndex([["outer", "fn"], ["inner", "fn"]]);
+    expect(classifyFunctionMonotonicityForTest(fn, cps, idx)).toBe("non-monotone");
+  });
+
+  test("pure-fn call with SQL arg → non-monotone (SQL classification wins)", () => {
+    // findSqlNode walks the call tree and finds the SQL — SQL classification
+    // path takes precedence over fn-call detection.
+    const fn = makeFn([
+      makeFnCall("upper", [
+        { kind: "sql", query: "INSERT INTO log (e) VALUES ('x') RETURNING id", chainedCalls: [] },
+      ]),
+    ]);
+    const cps = makeCpsSplit(1);
+    const idx = makeFnIndex([["upper", "fn"]]);
+    expect(classifyFunctionMonotonicityForTest(fn, cps, idx)).toBe("non-monotone");
+  });
+
+  test("two pure-fn calls in a batch → monotone (each monotone)", () => {
+    const fn = makeFn([
+      makeFnCall("logA", [{ kind: "lit", value: 1 }]),
+      makeFnCall("logB", [{ kind: "lit", value: 2 }]),
+    ]);
+    const cps = makeCpsSplit(2);
+    const idx = makeFnIndex([["logA", "fn"], ["logB", "fn"]]);
+    expect(classifyFunctionMonotonicityForTest(fn, cps, idx)).toBe("monotone");
+  });
+
+  test("monotone SELECT + pure-fn call → monotone (mixed-monotone batch)", () => {
+    const fn = makeFn([
+      makeBareSql("SELECT * FROM users WHERE id = 1"),
+      makeFnCall("logAccess", [{ kind: "lit", value: 1 }]),
+    ]);
+    const cps = makeCpsSplit(2);
+    const idx = makeFnIndex([["logAccess", "fn"]]);
+    expect(classifyFunctionMonotonicityForTest(fn, cps, idx)).toBe("monotone");
+  });
+
+  test("monotone SELECT + impure-fn call → non-monotone (mixed)", () => {
+    const fn = makeFn([
+      makeBareSql("SELECT * FROM users WHERE id = 1"),
+      makeFnCall("sendEmail", [{ kind: "lit", value: "u@x" }]),
+    ]);
+    const cps = makeCpsSplit(2);
+    const idx = makeFnIndex([["sendEmail", "function"]]);
+    expect(classifyFunctionMonotonicityForTest(fn, cps, idx)).toBe("non-monotone");
+  });
+
+  test("backward-compat: null function-index → bare fn-call stays non-monotone (pre-D3 behavior)", () => {
+    // When functionIndex is not provided (e.g., legacy test harness paths),
+    // isPureFnCallStatement returns false; bare-expr classifies non-monotone
+    // as before. Closes the pre-D3 conservative default.
+    const fn = makeFn([makeFnCall("anyFn", [])]);
+    const cps = makeCpsSplit(1);
+    expect(classifyFunctionMonotonicityForTest(fn, cps)).toBe("non-monotone");
+    expect(classifyFunctionMonotonicityForTest(fn, cps, null)).toBe("non-monotone");
+  });
+});

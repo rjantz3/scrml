@@ -1,15 +1,35 @@
 # primary.map.md
 # project: scrmlts
-# updated: 2026-05-10T19:30:00Z  commit: f182f44
+# updated: 2026-05-11T17:00:00Z  commit: b6c8e1c
 
 ## Project Fingerprint
 Language:   JavaScript / TypeScript (mixed .js + .ts); Bun runtime
 Framework:  Custom compiler — scrml language compiler + LSP server
 Runtime:    Bun >= 1.3.13
 Type:       Compiler + CLI tool + LSP server + 17-module stdlib
-Size:       ~1,708 source files total; compiler/src: ~60k LOC across ~60 modules;
-            SPEC.md ~24,382 lines; PIPELINE.md v0.7.1 (2026-05-09);
-            Tests: 530 files, S78 close: 11,051 pass / 77 skip / 1 todo / 0 fail
+Size:       ~1,710 source files total; compiler/src: ~60k LOC across ~60 modules;
+            SPEC.md 26,286 lines; SPEC-INDEX.md 306 lines;
+            PIPELINE.md v0.7.1 (2026-05-09);
+            Tests: 535 files, S81 close: 11,163 pass / 77 skip / 1 todo / 0 fail
+
+## Key Facts (S81 close — adopter-override surface + Phase A10 closure)
+
+**S81 SHIPPED (2026-05-11):**
+- F.1 `<program cors-max-age=N>` — Access-Control-Max-Age override (default 86400s) per §39.2.1 amendment. `parseCorsMaxAge` helper in `emit-server.ts`.
+- F.2 `<program channel-reconnect=N>` — project-level WS reconnect cadence (default 2000ms) per §38.3.1 NEW subsection. `parseChannelReconnect` helper in `emit-channel.ts`. Per-channel `<channel reconnect=>` still wins.
+- A10-followon: TS body-walk re-enabled on engine-decl + payload-binding scope injection. Engine-arm bodies now type-checked; typos like `${mssg}` inside `<Error msg>` fire E-SCOPE-001.
+- Strict self-host rebuild gate: `scripts/rebuild-self-host-dist.ts` now exits 1 on host-compiler errors (closes pre-S81 silent leak). Source-side null/undefined sweep DEFERRED per `docs/audits/self-host-spec-conformance-2026-05-11.md`.
+- SPEC-INDEX regen: new `scripts/regen-spec-index.ts` (TS, idempotent, line-range refresh preserving summaries). 62 rows refreshed.
+
+**S80 SHIPPED (2026-05-11):**
+- Auth/protect/csrf attribute-host codification. **E-MW-001 RETIRED**. `<channel protect=>` → `<channel auth=>`. `<program protect=>` shorthand retired. csrf= collapsed to `"auto"|"off"` per §52.13 (W-ATTR-002 on invalid literals).
+- Library-mode meta-block strip FIX (paren-aware regex in `emit-library.ts`).
+- A5-7 canonical samples engine-005…engine-008 landed.
+
+**S79 SHIPPED:**
+- 5 hardcoded-threshold injection points: `MAX_RUNS`, `EncodingContext.seqCap`, serve-client timeouts, `<program idempotency-ttl=>`, `<program batch-in-list-cap=>`.
+- A5-6 Feature 1: named `<onTimeout name=>` + `cancelTimer()` builtin.
+- Debounce/throttle Approach B: clean-cut deletion of `reactive-debounced-decl` AST kind in favor of canonical `<x debounced=Nms>` attribute per §6.13.
 
 ## Map Index
 

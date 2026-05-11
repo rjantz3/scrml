@@ -1,6 +1,23 @@
 # structure.map.md
 # project: scrmlts
-# updated: 2026-05-10T19:30:00Z  commit: f182f44
+# updated: 2026-05-11T17:00:00Z  commit: b6c8e1c
+
+## Notable New Files (S79 / S80 / S81)
+scripts/regen-spec-index.ts                                             — TS rewrite of SPEC-INDEX regen (S81; idempotent; preserves summaries)
+scripts/git-hooks/pre-commit                                            — per-machine pre-commit test gate (S78 install, S79+ firing)
+docs/audits/hardcoded-thresholds-2026-05-10.md                          — Bucket A/B/C threshold inventory (S78→S79 ship sequence)
+docs/audits/hardcoded-thresholds-followup-2026-05-11.md                 — F.1/F.2 follow-up (S81 ship driver)
+docs/audits/self-host-spec-conformance-2026-05-11.md                    — null/undefined violation audit (S81 filed; source-side sweep deferred to v0.3.0+)
+compiler/tests/unit/engine-body-typecheck-a10-followon.test.js          — TS body-walk + payload-binding scope injection (S81 A10-followon, +7 tests)
+compiler/tests/unit/hardcoded-thresholds-bucket-a-injection.test.js     — MAX_RUNS / seqCap injection coverage (S79)
+compiler/tests/unit/hardcoded-thresholds-bucket-bc-injection.test.js    — serve-client timeouts / TTL / batch cap injection coverage (S79)
+compiler/tests/unit/a5-6-feature-1-named-timer.test.js                  — named timer + cancelTimer builtin (S79)
+compiler/tests/unit/debounce-throttle-attribute.test.js                 — Approach B clean-cut (S79)
+compiler/tests/unit/a9-ext5-program-attr.test.js                        — idempotency-store= attribute (S79)
+samples/compilation-tests/engine-005-ontimeout-basic.scrml              — A5-7a (S80)
+samples/compilation-tests/engine-006-ontimeout-computed.scrml           — A5-7a (S80)
+samples/compilation-tests/engine-007-cancel-timer.scrml                 — A5-7b (S80)
+samples/compilation-tests/engine-008-onidle-watchdog.scrml              — A5-7c (S80)
 
 ## Entry Points
 compiler/src/cli.js            — CLI entry; routes compile/dev/build/serve/migrate/promote/init subcommands

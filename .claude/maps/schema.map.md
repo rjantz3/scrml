@@ -130,8 +130,23 @@ filePath: string, nodes: ASTNode[], ... additional pipeline-stamped fields
 ### TABOutput  [ast.ts:1374]
 filePath, ast: FileAST, errors: TABErrorInfo[]
 
-### AuthConfig / MiddlewareConfig  [ast.ts:1308-1333]
-Auth and middleware configuration shapes stamped on program-tag MarkupNodes
+### AuthConfig / MiddlewareConfig  [ast.ts:1347+]
+Auth and middleware configuration shapes stamped on program-tag MarkupNodes.
+
+**AuthConfig.csrf** (S80 narrowing): value-set narrowed to `"auto" | "off"` per §52.13. Invalid literals fire W-ATTR-002. The legacy `csrf="on"` value was retired alongside E-MW-001 at S80 commit `ef70daa`.
+
+**MiddlewareConfig fields** (current shape, ast.ts:1347):
+- `cors: string | null` — CORS origin pattern (e.g. "*")
+- `log: string | null` — Logging mode (e.g. "structured")
+- `ratelimit: string | null` — Rate-limit pattern (e.g. "100/min")
+- `headers: string | null` — Security headers mode (e.g. "strict")
+- `idempotencyStore?: string | null` — A9 Ext 5 (§39.2.6) backend selector ("auto"/"sqlite"/"postgres"/"mysql"/"redis"/"none")
+- `idempotencyTTL?: string | null` — S79 audit fix C.1 (§19.9.6); default 24h Stripe convention
+- `batchInListCap?: string | null` — S79 audit fix C.2 (§8.10.6); default 32766 (SQLite 3.32+ SQLITE_MAX_VARIABLE_NUMBER)
+- `corsMaxAge?: string | null` — S81 audit fix F.1 (§39.2.1 ext); default 86400s (Firefox effective cap)
+- `channelReconnect?: string | null` — S81 audit fix F.2 (§38.3.1); default 2000ms; per-channel `<channel reconnect=>` overrides
+
+All adopter-override fields are raw strings on the AST; parsed at codegen time by per-field helpers (`parseIdempotencyTtl` / `parseCorsMaxAge` / `parseChannelReconnect`). Silent fallback to default on null/malformed values per v1 scope.
 
 ## ExprNode Types — `compiler/src/types/ast.ts` (ExprSpan section, ~1,407+)
 

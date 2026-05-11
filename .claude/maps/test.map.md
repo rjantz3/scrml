@@ -1,6 +1,6 @@
 # test.map.md
 # project: scrmlts
-# updated: 2026-05-10T19:30:00Z  commit: f182f44
+# updated: 2026-05-11T17:00:00Z  commit: b6c8e1c
 
 ## Test Framework
 
@@ -15,14 +15,19 @@
 | With bail | `bun test ... --bail` (used by pre-commit hook) |
 | Coverage | `bun test compiler/tests/ --coverage` |
 
-## Test Counts (S78 close, 2026-05-10)
-11,051 pass / 77 skip / 1 todo / 0 fail
+## Test Counts (S81 close, 2026-05-11)
+535 files; 11,163 pass / 77 skip / 1 todo / 0 fail
+
+## New tests since S78 baseline
+- S79: a5-6-feature-1-named-timer (~28); hardcoded-thresholds-bucket-a-injection; hardcoded-thresholds-bucket-bc-injection; debounce-throttle-attribute; a9-ext5-program-attr (~+88 net)
+- S80: 4 A5-7 sample fixtures (engine-005 through engine-008) loaded via pretest
+- S81: engine-body-typecheck-a10-followon (+7); F.1+F.2 program-attribute coverage (+21 across middleware-handle.test.js + channel.test.js)
 
 ## Test Categories
 
 | Category | Path | Approx Count |
 |----------|------|--------------|
-| Unit | compiler/tests/unit/ | ~420 files |
+| Unit | compiler/tests/unit/ | ~430 files |
 | Integration | compiler/tests/integration/ | ~75 files |
 | Conformance | compiler/tests/conformance/ | ~35 files |
 

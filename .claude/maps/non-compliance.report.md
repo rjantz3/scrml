@@ -1,16 +1,53 @@
 # non-compliance.report.md
 # project: scrmlts
-# generated: 2026-05-10T19:30:00Z
-# scan mode: FULL_COLD_START (S78 close — commit f182f44)
+# generated: 2026-05-11T17:00:00Z
+# scan mode: INCREMENTAL_UPDATE (S81 close — commit b6c8e1c)
+# prior baseline: 2026-05-10T19:30:00Z @ f182f44 (S78 FULL_COLD_START)
 
 ## Summary
 
-Total docs scanned: ~327 (all *.md excluding .git/, node_modules/, archive/, handOffs/, .claude/, dist/, build/, target/)
-Compliant: ~275
-Non-compliant: 14 (items or batches)
-Uncertain: 7
+Total docs scanned: ~330 (incremental delta from S78 baseline; ~3 new docs in docs/audits/)
+Carry-forward non-compliant items: 14 (unchanged disposition from S78 baseline)
+NEW non-compliant since S78: 4 items + 1 known-drift register + 1 uncertain
+Uncertain (S78 carry-forwards): 7, plus 1 NEW
 
-## Non-compliant docs
+## NEW non-compliant items (S79-S81)
+
+### docs/changes/a5-7-tests-samples/INVENTORY.md
+**Reason:** content-heuristic — A5-7 sub-phase fully SHIPPED S80 (engine-005…engine-008 landed). Doc explicitly marks F1/F1a/F1b/F2/F3/F3a as "Codegen landed S77/S79" and ships sample family at S80. Now post-hoc inventory.
+**Suggested disposition:** archive parent dir `docs/changes/a5-7-tests-samples/` to `scrml-support/archive/dispatches/`.
+
+### docs/changes/debounce-throttle-approach-b/progress.md
+**Reason:** content-heuristic — Approach B SHIPPED S79 (clean-cut deletion of `reactive-debounced-decl` AST kind + canonical `<x debounced=Nms>` per §6.13). All 4 OQs closed in-dispatch. Dispatch dir is historical.
+**Suggested disposition:** archive to `scrml-support/archive/dispatches/`.
+
+### docs/audits/hardcoded-thresholds-2026-05-10.md
+**Reason:** content-heuristic — S78 audit; Buckets A+B+C all SHIPPED S79; §7 caveat addressed by 2026-05-11 follow-up which drove S81 F.1/F.2 ship. No remaining open work.
+**Suggested disposition:** move to `scrml-support/archive/audits/` once master-list.md confirms zero open follow-on items.
+
+### docs/audits/hardcoded-thresholds-followup-2026-05-11.md
+**Reason:** content-heuristic — drove S81 F.1/F.2; both SHIPPED at `ab980c0`. Now post-hoc.
+**Suggested disposition:** move to `scrml-support/archive/audits/` after S81 wrap dispatch sequence completes.
+
+### Known-drift register (do NOT touch per pa.md Rule 1)
+
+**`docs/articles/realtime-and-workers-as-syntax-devto-2026-04-29.md:200`** — line reads `<channel protect=>` which was renamed to `<channel auth=>` at S80. Per pa.md Rule 1 (no marketing-shaped work unless Bryan brings it up) AND because published dev.to articles are immutable historical records, **this is flagged as known-drift, NOT a violation to fix.** If a future re-publish happens (separate Bryan-raised thread), update at that time.
+
+Other `protect=` references in articles/tutorial verified to be on the persisting hosts (`<db protect=>` / `<Type protect=>`) — STILL CURRENT, not stale.
+
+## Uncertain (NEW since S78)
+
+### docs/audits/self-host-spec-conformance-2026-05-11.md
+**Reason:** explicitly self-declares "filed for future scope; NOT current-cycle work" with S81 user direction quoted. By the project-mapper rule this is the "aspirational / planning" class that should live in scrml-support. BUT: the rebuild script HAS been gated (S81 ship), so the audit-as-driver function is complete; only the source-side sweep is deferred.
+**Suggested disposition:** keep in `docs/audits/` until the source-side sweep is either scheduled or formally declined; if declined → archive to `scrml-support/archive/audits/`. Lower priority than dispatch-dir archival.
+
+## Carry-forwards from S78 baseline (UNCHANGED)
+
+All 14 items + 7 uncertain in the prior FULL_COLD_START report remain as flagged. No movement detected since S78 close. Original findings preserved below for reference.
+
+---
+
+## Non-compliant docs (S78 cold-start baseline — preserved verbatim)
 
 ### docs/articles/lsp-and-giti-advantages-draft-2026-04-25.md
 **Reason:** name-heuristic (`-draft-` in filename); superseded (CARRY-FORWARD)

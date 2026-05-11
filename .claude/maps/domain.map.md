@@ -1,6 +1,6 @@
 # domain.map.md
 # project: scrmlts
-# updated: 2026-05-10T19:30:00Z  commit: f182f44
+# updated: 2026-05-11T17:00:00Z  commit: b6c8e1c
 
 ## Core Concepts
 
@@ -42,6 +42,9 @@
 | Self-host | Compiler compiled with itself; dist artifacts in compiler/dist/self-host/ (gitignored); rebuilt locally |
 | Tier system | Tier 1 (basic reactive): if/for/match; Tier 2 (engines): state machines; Tier 3 (positional sugar): compound state shorthand |
 | §51 backbone | Runtime §51.12 backbone — the scheduler/dispatcher underpinning engine temporal surface (onTimeout, onIdle) |
+| Adopter override surface | `<program>` attributes that override compiler-emitted defaults: `idempotency-store` / `idempotency-ttl` (S79); `batch-in-list-cap` (S79); `cors-max-age` (S81 F.1); `channel-reconnect` (S81 F.2). All raw strings on MiddlewareConfig; parsed at codegen time by per-field helpers; silent fallback to default on null/malformed. Same shape pattern across all five — establishes the canonical "compiler-emitted middleware default" override locus. |
+| Strict self-host rebuild gate | `scripts/rebuild-self-host-dist.ts` exits 1 on any host-compiler non-warning error (S81 ship). Prior behavior silently wrote `libraryJs` even with errors, letting SPEC §42 violations (null/undefined → not), E-EQ-004 (===/!==), E-ERROR-007 (try/catch) accumulate undetected. Source-side null/undefined sweep deferred to v0.3.0+ per `docs/audits/self-host-spec-conformance-2026-05-11.md`. |
+| Channel auth gate | `<channel auth=>` attribute (S80 rename from `<channel protect=>`). Accepts `"required"`/`"optional"`/`"none"` per §52.13. WS upgrade gate; injects `_scrml_auth_check(req)` before `server.upgrade()` when `auth="required"`. Field-level `protect=` remains on `<db>` and `<Type>` declarations. |
 
 ## Business Invariants
 
@@ -52,6 +55,8 @@
 - Tilde-declared variables must be used; E-TILDE-001 on drop
 - Batch Planner excludes .nobatch() SQL nodes from all coalescing candidate sets (§8.9.1)
 - Arm-tagged event bindings (engineArm set) are excluded from global DOMContentLoaded emission; wired per-arm by emit-variant-guard.ts
+- `csrf=` accepts the canonical value-set `"auto" | "off"` only per §52.13 (S80 narrowing). Invalid literals fire W-ATTR-002. The legacy `csrf="on"` value was retired alongside E-MW-001 at S80.
+- `null` / `undefined` are NOT valid scrml tokens in any context (SPEC §42, E-SYNTAX-042). Library mode inclusive (S81 user-voice directive). The only non-presence value is `not`; the only absence checks are `is not` / `is some`.
 
 ## Domain Events (Compiler Pipeline)
 

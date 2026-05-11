@@ -1,6 +1,6 @@
 # build.map.md
 # project: scrmlts
-# updated: 2026-05-10T19:30:00Z  commit: f182f44
+# updated: 2026-05-11T17:00:00Z  commit: b6c8e1c
 
 ## Development Commands (root package.json > scripts)
 
@@ -22,10 +22,11 @@
 |---------|--------------|
 | `bun run compiler/src/cli.js build <dir>` | Build production server bundle |
 | `bun run scripts/rebuild-tab-dist.ts` | Regenerate all TAB dist artifacts [NEW S78] |
-| `bun run scripts/rebuild-self-host-dist.ts` | Regenerate all self-host dist files [NEW S78] |
+| `bun run scripts/rebuild-self-host-dist.ts` | Regenerate all self-host dist files [S78; STRICT GATE since S81 — exits 1 on host-compiler errors] |
 | `bun run scripts/rebuild-bs-dist.ts` | Regenerate block-splitter dist artifacts |
 | `scripts/assemble-spec.sh` | Assemble SPEC.md from section files |
-| `scripts/update-spec-index.sh` | Regenerate SPEC-INDEX.md |
+| `scripts/update-spec-index.sh` | Print SPEC.md heading line numbers (legacy; print-only) |
+| `bun run scripts/regen-spec-index.ts` | Regenerate SPEC-INDEX.md line ranges + sizes in-place [NEW S81; idempotent; preserves summaries] |
 | `scripts/compile-test-samples.sh` | Batch compile all samples/compilation-tests/ |
 
 ## Pre-commit Hook (scripts/git-hooks/pre-commit)

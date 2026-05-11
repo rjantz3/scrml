@@ -18,7 +18,7 @@ import { runAttributeInterpolation } from "./validators/attribute-interpolation.
 import { runAttributeAllowlist } from "./validators/attribute-allowlist.ts";
 
 import { runPA } from "./protect-analyzer.ts";
-import { runRI } from "./route-inference.ts";
+import { runRI, buildFunctionIndex } from "./route-inference.ts";
 import { analyzeMonotonicity } from "./monotonicity-analyzer.ts";
 import { resolveIdempotencyStore, extractDbDriverFromValue } from "./idempotency-store-resolver.ts";
 import { runTS, buildTypeRegistry } from "./type-system.ts";
@@ -841,7 +841,17 @@ export function compileScrml(options = {}) {
       }
     }
 
-    const mcResult = analyzeMonotonicity(riResult.routeMap, fnNodes);
+    // S81 D3 (2026-05-11): build a global function index so the classifier
+    // can recognize bare-expr calls to `fn`-kind callees as monotone per
+    // §19.9.6 rule (e). Pre-D3 the classifier returned conservative
+    // non-monotone for any bare-expr call → over-emitted idempotency-key
+    // envelopes (HTTP-header bandwidth + server-side storage). The index
+    // is keyed by function name → array of FunctionIndexEntry (multi-file
+    // resolution). Channel-tagged fnNodes have already been filtered out
+    // of `fnNodes` above; channel callees in the index are still allowed
+    // (the classifier checks fnKind on the CALLEE, not the caller).
+    const functionIndex = buildFunctionIndex(ceResults);
+    const mcResult = analyzeMonotonicity(riResult.routeMap, fnNodes, functionIndex);
 
     if (verbose) {
       let mono = 0, nonMono = 0, machineIntrinsic = 0;

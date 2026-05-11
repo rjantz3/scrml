@@ -26,6 +26,22 @@
  */
 
 import type { CPSSplit, FunctionRoute, RouteMap } from "./route-inference.ts";
+import { exprNodeContainsCall } from "./expression-parser.ts";
+
+// ---------------------------------------------------------------------------
+// Pure-fn lookup surface (D3, S81)
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimal shape needed for fn-purity lookup. Mirrors `FunctionIndexEntry` from
+ * `route-inference.ts` but typed structurally here so the analyzer doesn't
+ * pull in RI's full module. Caller builds via `buildFunctionIndex(files)` in
+ * route-inference.ts and passes the Map to `analyzeMonotonicity`.
+ */
+export interface FunctionPurityLookup {
+  /** Function name → array of declaration entries (multi-file resolution). */
+  get(name: string): Array<{ fnNode: { fnKind?: string } }> | undefined;
+}
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -302,13 +318,14 @@ function isMachineAdvanceCall(stmt: ASTNode): boolean {
  *        - INSERT without auto-readback / non-deterministic RHS → monotone
  *        - UPDATE assignment-only-of-literals → monotone
  *        - DELETE without non-deterministic predicates → monotone
- *        - pure-fn call (todo: requires functionIndex; conservative for now)
+ *        - pure-fn call (S81 D3) — bare-expr whose callee resolves to fn-kind
  *      Any non-monotone → batch verdict = "non-monotone".
  *   4. All-monotone → verdict = "monotone".
  */
 function classifyFunctionMonotonicity(
   fnNode: ASTNode,
   cpsSplit: CPSSplit,
+  functionIndex: FunctionPurityLookup | null,
 ): MonotonicityVerdict {
   // Step 1: .idempotent() override.
   if (fnNode.idempotentModifier === true) {
@@ -332,7 +349,7 @@ function classifyFunctionMonotonicity(
 
   // Step 3: classify each statement.
   for (const stmt of serverStmts) {
-    const verdict = classifyStatement(stmt);
+    const verdict = classifyStatement(stmt, functionIndex);
     if (verdict !== "monotone") {
       return "non-monotone";
     }
@@ -343,24 +360,84 @@ function classifyFunctionMonotonicity(
 }
 
 /**
+ * S81 D3 (2026-05-11) — pure-fn-call detection (SPEC §19.9.6 rule e).
+ *
+ * Returns true when `stmt` is a `bare-expr` whose `exprNode` is a `call`
+ * where:
+ *   - the callee is a bare `IdentExpr` (no member-access — conservative;
+ *     method-purity tracking is not available today).
+ *   - all `FunctionIndexEntry`s for the callee's name have `fnKind === "fn"`
+ *     (per §48: `fn` body is statically pure — no SQL, no broadcast, no
+ *     non-fn calls, no async). If ANY entry is `function`-kind, the call may
+ *     resolve to a non-pure variant at runtime; classify conservatively.
+ *   - no argument expression contains any nested `call` (a nested call could
+ *     resolve to a non-pure callee — recursive analysis is a future
+ *     refinement). Args that are literals / `@cell` reads / bare idents /
+ *     binary / unary / ternary / array / object are accepted.
+ *
+ * When the lookup map is unavailable (null), returns false (conservative;
+ * preserves the pre-D3 behavior for test paths that don't supply the index).
+ */
+function isPureFnCallStatement(
+  stmt: ASTNode,
+  functionIndex: FunctionPurityLookup | null,
+): boolean {
+  if (!functionIndex) return false;
+  if (!stmt || typeof stmt !== "object") return false;
+  if (stmt.kind !== "bare-expr") return false;
+  const exprNode = stmt.exprNode as ASTNode | undefined;
+  if (!exprNode || exprNode.kind !== "call") return false;
+  const callee = exprNode.callee as ASTNode | undefined;
+  if (!callee || callee.kind !== "ident") return false;
+  const calleeName = callee.name as string | undefined;
+  if (typeof calleeName !== "string" || calleeName.length === 0) return false;
+  const entries = functionIndex.get(calleeName);
+  if (!entries || entries.length === 0) return false;
+  // Every matching entry must be fn-kind (per §48).
+  for (const entry of entries) {
+    if (entry.fnNode.fnKind !== "fn") return false;
+  }
+  // Args must contain no nested calls AND no SQL sub-trees.
+  //   - `exprNodeContainsCall` rejects nested calls (could resolve to
+  //     non-pure callees — recursive analysis is a future refinement).
+  //   - `findSqlNode` walks well-known descendant fields looking for SQL
+  //     AST nodes. A bare-expr like `pureFn(?{INSERT ... RETURNING id})`
+  //     must NOT be classified monotone — the SQL arg is the replay hazard,
+  //     not the pureFn call wrapper. `findSqlNode` only descends through
+  //     init/exprNode/value/expression by default; call args don't match
+  //     those keys, so we call it explicitly on each arg here.
+  const args = (exprNode.args as unknown[] | undefined) ?? [];
+  for (const arg of args) {
+    if (!arg || typeof arg !== "object") continue;
+    if (exprNodeContainsCall(arg as never)) return false;
+    if (findSqlNode(arg)) return false;
+  }
+  return true;
+}
+
+/**
  * Classify a single server-side statement. Returns "monotone" or
  * "non-monotone" (machine-intrinsic is function-batch-scoped, not per-stmt).
  */
-function classifyStatement(stmt: ASTNode): MonotonicityVerdict {
+function classifyStatement(
+  stmt: ASTNode,
+  functionIndex: FunctionPurityLookup | null,
+): MonotonicityVerdict {
   if (!stmt || typeof stmt !== "object") return "non-monotone";
 
   // SQL node directly OR wrapped in state-decl init / bare-expr.
+  // SQL classification takes precedence — a bare-expr that wraps `pureFn(?{...})`
+  // is caught by findSqlNode descending into the call's args.
   const sqlNode = findSqlNode(stmt);
   if (sqlNode) {
     return classifySqlNode(sqlNode);
   }
 
-  // Pure-function call detection requires the functionIndex + analysisMap;
-  // for v0.2.0 Ext 5 baseline, a bare-expr containing only a function call
-  // is conservatively classified non-monotone unless the callee is a
-  // recognized stdlib pure helper. Future work: thread the functionIndex
-  // through and recognize fn-kind callees as monotone.
-  //
+  // S81 D3 — pure-fn call (rule e per SPEC §19.9.6).
+  if (isPureFnCallStatement(stmt, functionIndex)) {
+    return "monotone";
+  }
+
   // CONSERVATIVE: any unrecognized statement shape → non-monotone.
   return "non-monotone";
 }
@@ -390,6 +467,7 @@ function classifyStatement(stmt: ASTNode): MonotonicityVerdict {
 export function analyzeMonotonicity(
   routeMap: RouteMap,
   fnNodes: Map<string, ASTNode>,
+  functionIndex: FunctionPurityLookup | null = null,
 ): MonotonicityAnalysis {
   const verdicts = new Map<string, MonotonicityVerdict>();
   const diagnostics: MonotonicityDiagnostic[] = [];
@@ -407,7 +485,7 @@ export function analyzeMonotonicity(
     // Future: add an explicit `route.kind === "channel"` check when that
     // field exists on FunctionRoute.
 
-    const verdict = classifyFunctionMonotonicity(fnNode, route.cpsSplit);
+    const verdict = classifyFunctionMonotonicity(fnNode, route.cpsSplit, functionIndex);
     verdicts.set(fnNodeId, verdict);
 
     // Attach to cpsSplit for downstream codegen consumption.
@@ -458,6 +536,7 @@ export function analyzeMonotonicity(
 export function classifyFunctionMonotonicityForTest(
   fnNode: ASTNode,
   cpsSplit: CPSSplit,
+  functionIndex: FunctionPurityLookup | null = null,
 ): MonotonicityVerdict {
-  return classifyFunctionMonotonicity(fnNode, cpsSplit);
+  return classifyFunctionMonotonicity(fnNode, cpsSplit, functionIndex);
 }
