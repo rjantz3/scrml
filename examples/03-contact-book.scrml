@@ -1,32 +1,36 @@
 // Example 03: Contact Book — full-stack in one file.
-// Demonstrates < > state blocks with protect=, ?{} SQL, server functions,
+// Demonstrates <db> declaration, server functions, V5-strict state decls,
 // form binding, for/lift list rendering. This is a real app.
 
 // State block — protect= forces password_hash to server-only. The compiler
 // generates a server route automatically; we never touch routing code.
 <program auth="required">
 
-< db src="contacts.db" protect="password_hash" tables="contacts">
+<db src="contacts.db" protect="password_hash" tables="contacts">
 
   ${
-    @name  = ""
-    @email = ""
-    @phone = ""
+    <name>  = ""
+    <email> = ""
+    <phone> = ""
 
     // Server functions return data or run mutations — they never assign @vars.
-    // Client functions own @state transitions (E-RI-002).
-    server function persistContact(name, email, phone) {
+    // Client functions own @state transitions (E-RI-002). Body-content inference
+    // promotes these functions to server-side automatically — no `server`
+    // keyword required (deprecated per Insight 26, 2026-05-08). `loadContacts`
+    // is called from a render-site ${for (let c of ...)} so RI gates its
+    // promotion via caller-context propagation.
+    function persistContact(name, email, phone) {
       ?{`INSERT INTO contacts (name, email, phone) VALUES (${name}, ${email}, ${phone})`}.run()
     }
 
     function addContact() {
       persistContact(@name, @email, @phone)
-      @name  = ""
-      @email = ""
-      @phone = ""
+      reset(@name)
+      reset(@email)
+      reset(@phone)
     }
 
-    server function deleteContact(id) {
+    function deleteContact(id) {
       ?{`DELETE FROM contacts WHERE id = ${id}`}.run()
     }
 

@@ -16,11 +16,11 @@ ${
   }
 }
 
-< db src="admin.db" protect="password_hash" tables="users, audit_log">
+<db src="admin.db" protect="password_hash" tables="users, audit_log">
 
 ${
-  @search  = ""
-  @roleFilter = "all"
+  <search>     = ""
+  <roleFilter> = "all"
 
   server function fetchUsers() {
     lift ?{`
@@ -34,7 +34,7 @@ ${
     `}.all()
   }
 
-  server function deleteUser(id) {
+  function deleteUser(id) {
     ?{`DELETE FROM users WHERE id = ${id}`}.run()
   }
 }

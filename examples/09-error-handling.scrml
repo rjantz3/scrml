@@ -1,6 +1,6 @@
 // Example 09: Error handling — failable functions, fail keyword, !{} inline handler.
 // A contact form that can fail at validation or submission. Error types are enums
-// with renders clauses so they display themselves inside < errorBoundary>.
+// with renders clauses so they display themselves inside `<errorBoundary>`.
 // Styled with Tailwind utility classes — no #{} block needed for layout.
 
 <program>
@@ -18,42 +18,45 @@ ${
             renders <div class="bg-red-50 border border-red-500 rounded p-3 text-red-600">Submission failed: ${reason}</>
     }
 
-    @name  = ""
-    @email = ""
-    @body  = ""
+    <name>  = ""
+    <email> = ""
+    <body>  = ""
 
-    @submitted = false
-    @sending   = false
+    <submitted> = false
+    <sending>   = false
 
     // validate() is pure and failable. Returns nothing on success.
-    function validate()! -> ContactError {
-        if (@name == "")  fail ContactError::EmptyName
-        if (@email == "") fail ContactError::EmptyEmail
+    function validate() ! ContactError {
+        if (@name == "")  fail .EmptyName
+        if (@email == "") fail .EmptyEmail
         // Minimal email check — just needs an @.
-        if (!@email.includes("@")) fail ContactError::InvalidEmail(@email)
+        if (not @email.includes("@")) fail .InvalidEmail(@email)
     }
 
     // submit() is server-side and failable. The compiler escalates to a server route
     // because it touches external I/O. We treat a hypothetical server call here.
-    server function submit(name: string, email: string, body: string)! -> ContactError {
+    server function submit(name: string, email: string, body: string) ! ContactError {
         // In real code this would call an email API. Returning success for demonstration.
     }
 
     function handleSubmit() {
         @sending = true
 
-        // validate() is failable — must handle the result.
-        let validationResult = validate() !{
-            | ::EmptyName      -> { @sending = false }
-            | ::EmptyEmail     -> { @sending = false }
-            | ::InvalidEmail e -> { @sending = false }
-            | _                -> { @sending = false }
+        // validate() is failable — handle each variant. Each arm returns
+        // (early-exit on validation failure). Success continues to submit.
+        let validated = validate() !{
+            | .EmptyName        => { @sending = false; return }
+            | .EmptyEmail       => { @sending = false; return }
+            | .InvalidEmail(e)  => { @sending = false; return }
+            | .SubmitFailed(_)  => { @sending = false; return }
         }
 
-        // submit() is also failable. Propagate its errors to the caller's error boundary.
-        submit(@name, @email, @body) !{
-            | ::SubmitFailed e -> { @sending = false }
-            | _                -> { @sending = false }
+        // submit() is also failable. Each error arm early-exits with status.
+        let result = submit(@name, @email, @body) !{
+            | .SubmitFailed(e)  => { @sending = false; return }
+            | .EmptyName        => { @sending = false; return }
+            | .EmptyEmail       => { @sending = false; return }
+            | .InvalidEmail(_)  => { @sending = false; return }
         }
 
         @sending   = false
@@ -61,7 +64,7 @@ ${
     }
 }
 
-< errorBoundary>
+<errorBoundary>
     <div class="max-w-lg mx-auto mt-8 flex flex-col gap-4">
         <h1 class="text-2xl font-bold text-gray-800">Contact Us</>
 
@@ -69,7 +72,7 @@ ${
             <p class="text-green-600 font-bold">Thanks! We'll be in touch.</>
         </div>
 
-        <form if=(!@submitted) onsubmit=handleSubmit()>
+        <form if=(not @submitted) onsubmit=handleSubmit()>
             <label class="flex flex-col gap-1 text-sm mb-3">
                 Name
                 <input type="text" class="p-2 border border-gray-300 rounded text-base" bind:value=@name placeholder="Your name">

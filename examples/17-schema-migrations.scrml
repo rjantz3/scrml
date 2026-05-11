@@ -1,17 +1,17 @@
-// Example 17: Schema declaration — `< schema>` block (§39).
+// Example 17: Schema declaration — `<schema>` block (§39).
 // Demonstrates declarative DB schema. The developer states what the database
 // SHOULD look like; the compiler reads the live schema, computes the diff,
 // and generates migration SQL. `scrml migrate` applies it. No hand-written
 // `ALTER TABLE`.
 //
-// Note: `< schema>` requires `<program db="...">` (NOT `< db src=...>`). The
+// Note: `<schema>` requires `<program db="...">` (NOT `<db src=...>`). The
 // `db=` attribute on <program> tells the compiler which file to migrate; the
-// `< db>` sibling block (also pointing at the same path) establishes the SQL
+// `<db>` sibling block (also pointing at the same path) establishes the SQL
 // context for ?{} blocks. Both can coexist.
 
 <program db="./notes.db">
 
-< schema>
+<schema>
     users {
         id:            integer primary key
         email:         text not null unique
@@ -29,20 +29,23 @@
     }
 </>
 
-< db src="./notes.db" tables="users, notes">
+<db src="./notes.db" tables="users, notes">
 
   ${
-    @authorEmail = ""
-    @noteTitle   = ""
-    @noteBody    = ""
+    <authorEmail> = ""
+    <noteTitle>   = ""
+    <noteBody>    = ""
 
     server function lookupUser(email) {
       return ?{`SELECT id, display_name FROM users WHERE email = ${email}`}.get()
     }
 
-    server function postNote(authorEmail, title, body) {
+    // postNote is server-side (writes to DB). Returns nothing — client handles
+    // the reactive-state reset via the publish() client function below.
+    // 'server' modifier is omitted (body-content inference promotes via ?{}).
+    function postNote(authorEmail, title, body) {
       const user = ?{`SELECT id FROM users WHERE email = ${authorEmail}`}.get()
-      if (!user) return
+      if (not user) return
       ?{`
         INSERT INTO notes (user_id, title, body, published)
         VALUES (${user.id}, ${title}, ${body}, 1)
@@ -59,11 +62,13 @@
       `}.all()
     }
 
+    // publish() is the CLIENT function — it triggers the server-fn write
+    // and then owns the reactive-state reset locally (E-RI-002 separation).
     function publish() {
       if (@authorEmail == "" || @noteTitle == "" || @noteBody == "") return
       postNote(@authorEmail, @noteTitle, @noteBody)
-      @noteTitle = ""
-      @noteBody  = ""
+      reset(@noteTitle)
+      reset(@noteBody)
     }
   }
 

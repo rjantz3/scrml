@@ -16,7 +16,7 @@
 ${
   // Tab/page identifier — drives which sub-view renders.
   type View:enum = { Home, Profile, Settings }
-  @currentView: View = View.Home
+  <currentView>: View = .Home
 
   // Read query string at mount — `route` is a compiler-provided binding (§20.4).
   // route.query.view (if present) overrides the default starting view.
@@ -36,9 +36,9 @@ ${
 
 <div class="app">
   <nav class="nav">
-    <button class:active=(@currentView == View.Home)     onclick=go(View.Home)>Home</button>
-    <button class:active=(@currentView == View.Profile)  onclick=go(View.Profile)>Profile</button>
-    <button class:active=(@currentView == View.Settings) onclick=go(View.Settings)>Settings</button>
+    <button class:active=(@currentView == .Home)     onclick=go(.Home)>Home</button>
+    <button class:active=(@currentView == .Profile)  onclick=go(.Profile)>Profile</button>
+    <button class:active=(@currentView == .Settings) onclick=go(.Settings)>Settings</button>
   </nav>
 
   <main class="view">

@@ -8,13 +8,18 @@
 // (auth tokens, transaction handles, payment intents, single-use redirect
 // IDs, idempotency keys). The compiler refuses to let you accidentally
 // re-use them or silently drop them.
+//
+// The login() function is marked .idempotent() because the demo mintTicket
+// uses Date.now() (non-monotone per the static classifier); real apps would
+// either persist via INSERT ... ON CONFLICT DO NOTHING (intrinsic monotone)
+// or rely on the default shadow-table backend that `<program db=>` provides.
 
 <program>
 
 ${
-  @username = ""
-  @password = ""
-  @result   = ""
+  <username> = ""
+  <password> = ""
+  <result>   = ""
 
   // Server function takes a `lin`-annotated parameter (§35.2.1). The
   // function body MUST consume `ticket` exactly once on every execution
@@ -22,7 +27,11 @@ ${
   // E-LIN-002 (used twice), or E-LIN-003 (used in some branches not all).
   // Template-literal interpolation `${ticket}` counts as a consumption
   // event per §35.3 rule 1 (post-A4 fix, commit 330fd28).
-  server function redeem(lin ticket: string, username: string) {
+  //
+  // Body-content inference + caller-context propagation auto-escalate this
+  // to server-side (no 'server' modifier needed); the `lin` parameter alone
+  // marks it as boundary-relevant.
+  function redeem(lin ticket: string, username: string) {
     return `Redeemed ticket=${ticket} for user=${username}`
   }
 
@@ -31,7 +40,12 @@ ${
     return `tk_${username}_${Date.now()}`
   }
 
-  function login() {
+  // `.idempotent()` asserts the function's CPS batches are monotone-by-construction
+  // (§19.9.7) — necessary here because mintTicket() uses Date.now() which the
+  // static classifier flags non-monotone (non-deterministic RHS); a real auth
+  // workflow would persist tickets server-side with INSERT ... ON CONFLICT DO
+  // NOTHING (idempotent upsert).
+  function login().idempotent() {
     // `lin` declaration — exactly-once consumption rule (§35.3).
     // The compiler tracks `ticket` from declaration to consumption and
     // refuses to let it be referenced twice or dropped on any branch.

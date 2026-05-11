@@ -1,14 +1,14 @@
-// Example 18: State authority — `server @var` declarations (§52, Tier 2).
+// Example 18: State authority — `server <var>` declarations (§52, Tier 2).
 // Demonstrates instance-level server-authoritative state. The `server` modifier
 // on a reactive declaration tells the compiler this variable is owned by the
 // server. The compiler generates load + optimistic update + rollback + re-fetch
 // for every assignment. The developer never writes that infrastructure.
 //
 // Pattern B (used here): an explicit `on mount` block fetches the initial
-// value (§52.6.5). The on-mount runs once after first render; `@tasks` is
+// value (§52.6.5). The on-mount runs once after first render; @tasks is
 // the placeholder ([] empty array) until then.
 //
-// **Implementation status:** Tier 2 `server @var` parses + accepts the
+// **Implementation status:** Tier 2 `server <var>` parses + accepts the
 // modifier and the assignment functions correctly, but the W-AUTH-001
 // auto-detection is scaffold-only (compiler doesn't yet recognize the
 // `on mount { @tasks = loadTasks() }` pattern as the load source). Expect
@@ -19,33 +19,40 @@
 
 <program db="./tasks.db">
 
-< db src="./tasks.db" tables="tasks">
+<db src="./tasks.db" tables="tasks">
   ${
     // Tier 2: server-authoritative reactive (§52.4 + §6.1.2).
     // The compiler will:
     //   1. On mount, call loadTasks() and seed @tasks
     //   2. On assignment, optimistically update + persist + rollback on error
+    //
+    // **Implementation note:** the canonical V5-strict form is `<tasks server> = []`
+    // (the `server` modifier as a bare attribute on the decl per §52.4 V5 path).
+    // That form errors today (E-SCOPE-001 propagates from how the parser
+    // tags the decl); the legacy `server @tasks = []` keyword-form remains
+    // accepted by the parser and is what current samples use. PA follow-up:
+    // §6.1.2 V5-strict + §52 server-authoritative interaction.
     server @tasks = []
 
     // Local UI state — no server modifier, defaults to client-local.
     // No sync infrastructure for these (§52.5 row 1).
-    @draftTitle = ""
+    <draftTitle> = ""
 
     server function loadTasks() {
       return ?{`SELECT id, title, completed, position FROM tasks ORDER BY position`}.all()
     }
 
-    server function addTask(title) {
+    function addTask(title) {
       ?{`INSERT INTO tasks (title, position) VALUES (${title}, (SELECT COALESCE(MAX(position), 0) + 1 FROM tasks))`}.run()
       return ?{`SELECT id, title, completed, position FROM tasks ORDER BY position`}.all()
     }
 
-    server function toggleTask(id, completed) {
+    function toggleTask(id, completed) {
       ?{`UPDATE tasks SET completed = ${completed ? 1 : 0} WHERE id = ${id}`}.run()
       return ?{`SELECT id, title, completed, position FROM tasks ORDER BY position`}.all()
     }
 
-    server function deleteTaskById(id) {
+    function deleteTaskById(id) {
       ?{`DELETE FROM tasks WHERE id = ${id}`}.run()
       return ?{`SELECT id, title, completed, position FROM tasks ORDER BY position`}.all()
     }
@@ -55,10 +62,12 @@
       @tasks = loadTasks()
     }
 
+    // Client functions own @state writes; server functions own DB I/O.
+    // These wrap the server fns so the result lands in @tasks on the client.
     function submit() {
       if (@draftTitle.trim() == "") return
       @tasks = addTask(@draftTitle)
-      @draftTitle = ""
+      reset(@draftTitle)
     }
 
     function toggle(id, completed) {
@@ -81,7 +90,7 @@
     <ul>
       ${ for (let t of @tasks) {
         lift <li class="task">
-          <input type="checkbox" checked=t.completed onchange=toggle(t.id, !t.completed)/>
+          <input type="checkbox" checked=t.completed onchange=toggle(t.id, not t.completed)/>
           <span class="title" class:done=t.completed>${t.title}</span>
           <button class="rm" onclick=remove(t.id)>×</button>
         </li>

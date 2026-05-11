@@ -1,13 +1,13 @@
 // Example 16: RemoteData — async loading state via enum + match (§13.5).
 // Demonstrates the canonical scrml pattern for "fetch + show loading + show
-// error + show data" UX. Instead of three booleans (`@loading`, `@error`,
-// `@data`) that can drift into impossible combinations, a single enum carries
+// error + show data" UX. Instead of three booleans (`<loading>`, `<error>`,
+// `<data>`) that can drift into impossible combinations, a single enum carries
 // the state. The compiler enforces exhaustive match — every variant must be
 // rendered, and adding a new variant forces every render site to update.
 
 <program>
 
-< db src="contacts.db" tables="contacts">
+<db src="contacts.db" tables="contacts">
 
 ${
   // The four phases of any remote-data fetch (§13.5.2):
@@ -22,7 +22,7 @@ ${
     Failed(message: string)
   }
 
-  @state: ContactsState = ContactsState.NotAsked
+  <state>: ContactsState = .NotAsked
 
   server function fetchContacts() {
     return ?{`SELECT id, name, email FROM contacts ORDER BY name`}.all()
@@ -31,11 +31,11 @@ ${
   // Note: no `try/catch` — server functions handle errors via `!{}` /
   // failable-fn syntax (see example 09). For brevity here, the demo path
   // assumes success; production code would wire the .Failed branch via
-  // a failable server function returning `! -> ContactsError`.
+  // a failable server function returning `! ContactsError`.
   function load() {
-    @state = ContactsState.Loading
+    @state = ContactsState::Loading
     const rows = fetchContacts()
-    @state = ContactsState.Ready(rows)
+    @state = ContactsState::Ready(rows)
   }
 }
 

@@ -4,17 +4,17 @@
 // Adding a message updates @messages instantly then persists to SQLite.
 //
 // This is NOT real-time chat — two browsers will not see each other's messages.
-// For real-time multi-client sync, see the channel example (§38 `<channel>` +
-// `@shared`) which adds WebSocket pub/sub on top of this persistence layer.
+// For real-time multi-client sync, see the channel example (§38 `<channel>`)
+// which adds WebSocket pub/sub on top of this persistence layer.
 
 <program>
 
-< db src="chat.db" tables="messages">
+<db src="chat.db" tables="messages">
 
 ${
-  @messages  = []
-  @draft     = ""
-  @authorId  = "user-1"   // In a real app: session/auth. Hardcoded for clarity.
+  <messages>  = []
+  <draft>     = ""
+  <authorId>  = "user-1"   // In a real app: session/auth. Hardcoded for clarity.
 
   // Local time formatter — pure function, runs in any context.
   function formatTime(iso) {
@@ -34,7 +34,8 @@ ${
   }
 
   // Server function only persists — no @state assignments (E-RI-002).
-  server function persistMessage(id, authorId, body, sentAt) {
+  // Body-content inference promotes via ?{}.
+  function persistMessage(id, authorId, body, sentAt) {
     ?{`
       INSERT INTO messages (id, author_id, body, sent_at)
       VALUES (${id}, ${authorId}, ${body}, ${sentAt})
@@ -52,14 +53,14 @@ ${
       sent_at:   new Date().toISOString(),
     }
     @messages = [...@messages, msg]
-    @draft = ""
+    reset(@draft)
 
     // Persist to DB — server owns the write, client owns the state.
     persistMessage(msg.id, msg.author_id, msg.body, msg.sent_at)
   }
 
   function handleKey(e) {
-    if (e.key == "Enter" && !e.shiftKey) {
+    if (e.key == "Enter" && not e.shiftKey) {
       e.preventDefault()
       sendMessage()
     }

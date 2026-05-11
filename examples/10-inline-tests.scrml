@@ -6,12 +6,14 @@
 <program>
 
 ${
-    @count = 0
-    @step  = 1
+    <count> = 0
+    <step>  = 1
 
     function increment() { @count = @count + @step }
     function decrement() { @count = @count - @step }
-    function reset()     { @count = 0 }
+    // `reset` is a reserved keyword (§6.8); use a distinct local name.
+    // reset(@cell) is the canonical reset keyword form.
+    function clearCount() { reset(@count) }
     function setStep(n)  { @step = n }
 }
 
@@ -21,7 +23,7 @@ ${
 
     <div class="flex gap-2">
         <button class="px-5 py-2 text-lg cursor-pointer border border-gray-300 rounded bg-white hover:bg-gray-100" onclick=decrement()>−</button>
-        <button class="px-5 py-2 text-lg cursor-pointer border border-gray-300 rounded bg-white hover:bg-gray-100" onclick=reset()>Reset</button>
+        <button class="px-5 py-2 text-lg cursor-pointer border border-gray-300 rounded bg-white hover:bg-gray-100" onclick=clearCount()>Reset</button>
         <button class="px-5 py-2 text-lg cursor-pointer border border-gray-300 rounded bg-white hover:bg-gray-100" onclick=increment()>+</button>
     </div>
 
@@ -52,9 +54,9 @@ ${
         assert @count == 3
     }
 
-    test "reset returns to 0 regardless of count" {
+    test "clearCount returns to 0 regardless of count" {
         @count = 99
-        reset()
+        clearCount()
         assert @count == 0
     }
 

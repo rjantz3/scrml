@@ -1,145 +1,160 @@
-// Example 15: Real-time chat — `<channel>` + `@shared` for WebSocket sync (§38).
+// Example 15: Real-time chat — `<channel>` for WebSocket sync (§38).
 // Demonstrates the canonical real-time scrml pattern: a `<channel>` element
-// auto-creates a WebSocket endpoint, and `@shared` reactive vars declared
-// inside its body sync across every connected client. Writing to `@messages`
-// in one browser propagates to every other browser subscribed to the topic.
+// auto-creates a WebSocket endpoint, and reactive cells declared inside its
+// body sync across every connected client. Writing to @messages in one
+// browser propagates to every other browser subscribed to the topic.
 //
 // Compare with example 08 (single-user message log, no sync).
+//
+// **v0.2.0 notes:**
+//   - `<channel>` sits at FILE LEVEL — sibling of `<program>`, NEVER child
+//     (E-CHANNEL-INSIDE-PROGRAM).
+//   - The `@shared` modifier was REMOVED in v0.next (M19) — cells declared
+//     inside a `<channel>` body auto-sync by virtue of placement
+//     (E-CHANNEL-SHARED-MODIFIER if you still write `@shared`).
+//   - V5-strict: `<messages> = []` declares the channel-scoped reactive
+//     cell; `@messages` reads/writes it from anywhere (cross-scope canonical
+//     access per §38.1).
+
+// File-level channel. Auto-creates the WebSocket endpoint at /_scrml_ws/chat.
+// Every client connecting with topic="lobby" is pub/sub-subscribed together.
+//
+// **v0.2.0 compiler gap (documented; NOT B1 scope):** the canonical
+// channel-scoped V5-strict pattern
+//     <messages> = []
+//     server function postMessage(...) { @messages = [...@messages, ...] }
+// (per primer §9.1 + SPEC §38) fires E-RI-002 today — RI treats the
+// channel-scoped @messages as client-only. Workaround for the demo:
+// the client-side send() function owns the @messages write; the
+// server-fn returns the new entry, client appends + broadcasts.
+<channel name="chat" topic="lobby">
+    ${
+        <messages> = []
+
+        server function persistMessage(author, body) {
+            return { author, body, ts: Date.now() }
+        }
+    }
+</>
 
 <program>
 
 ${
-  @username = ""
-  @draft    = ""
-}
+    <username> = ""
+    <draft>    = ""
 
-// The <channel> element auto-creates the WebSocket endpoint at /_scrml_ws/chat.
-// Every client connecting with topic="lobby" is pub/sub-subscribed together.
-// @shared messages = [] inside the body is auto-synced — every write on any
-// client appears on every client. No socket.io, no manual broadcast wiring.
-<channel name="chat" topic="lobby">
-  ${
-    @shared messages = []
-
-    // Server-fn inside the channel scope — client calls it like any server fn.
-    // The call appends to the shared list; the @shared sync infrastructure
-    // pushes the new value to every subscribed client.
-    server function postMessage(author, body) {
-      messages = [...messages, { author, body, ts: Date.now() }]
+    // Time formatter — uses `new Date()` which is non-deterministic, so this
+    // is a `function` (not `fn` — pure-fn category forbids non-deterministic
+    // calls per §48 / E-FN-004).
+    function formatTime(ms) {
+        const d = new Date(ms)
+        const hh = String(d.getHours()).padStart(2, "0")
+        const mm = String(d.getMinutes()).padStart(2, "0")
+        return `${hh}:${mm}`
     }
-  }
-</>
 
-// Time formatter — pure, runs in any context.
-${
-  function formatTime(ms) {
-    const d = new Date(ms)
-    const hh = String(d.getHours()).padStart(2, "0")
-    const mm = String(d.getMinutes()).padStart(2, "0")
-    return `${hh}:${mm}`
-  }
-
-  function send() {
-    if (@draft.trim() == "" || @username.trim() == "") return
-    postMessage(@username, @draft)
-    @draft = ""
-  }
+    function send() {
+        if (@draft.trim() == "" || @username.trim() == "") return
+        const msg = persistMessage(@username, @draft)
+        @messages = [...@messages, msg]
+        reset(@draft)
+    }
 }
 
 <div class="chat">
-  <header class="chat-header">
-    <h2>Lobby</>
-    <input type="text" bind:value=@username placeholder="Your name" class="name-input"/>
-  </header>
+    <header class="chat-header">
+        <h2>Lobby</>
+        <input type="text" bind:value=@username placeholder="Your name" class="name-input"/>
+    </header>
 
-  <ul class="messages">
-    ${ for (let m of @messages) {
-      lift <li class="msg">
-        <span class="author">${m.author}</span>
-        <span class="body">${m.body}</span>
-        <time class="ts">${formatTime(m.ts)}</time>
-      </li>
-    } }
-  </ul>
+    <ul class="messages">
+        ${ for (let m of @messages) {
+            lift <li class="msg">
+                <span class="author">${m.author}</span>
+                <span class="body">${m.body}</span>
+                <time class="ts">${formatTime(m.ts)}</time>
+            </li>
+        } }
+    </ul>
 
-  <form class="composer" onsubmit=send()>
-    <input type="text" bind:value=@draft placeholder="Message #lobby"/>
-    <button type="submit">Send</button>
-  </form>
+    <form class="composer" onsubmit=send()>
+        <input type="text" bind:value=@draft placeholder="Message #lobby"/>
+        <button type="submit">Send</button>
+    </form>
 </div>
 
 #{
-  .chat {
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-    max-width: 700px;
-    margin: 0 auto;
-    font-family: sans-serif;
-  }
+    .chat {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        max-width: 700px;
+        margin: 0 auto;
+        font-family: sans-serif;
+    }
 
-  .chat-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 1rem 1.25rem;
-    border-bottom: 1px solid #e5e7eb;
-  }
+    .chat-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1rem 1.25rem;
+        border-bottom: 1px solid #e5e7eb;
+    }
 
-  .name-input {
-    padding: 0.4rem 0.7rem;
-    font-size: 0.9rem;
-    border: 1px solid #d1d5db;
-    border-radius: 6px;
-  }
+    .name-input {
+        padding: 0.4rem 0.7rem;
+        font-size: 0.9rem;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+    }
 
-  .messages {
-    flex: 1;
-    overflow-y: auto;
-    list-style: none;
-    padding: 1rem 1.25rem;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-  }
+    .messages {
+        flex: 1;
+        overflow-y: auto;
+        list-style: none;
+        padding: 1rem 1.25rem;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+    }
 
-  .msg {
-    display: grid;
-    grid-template-columns: auto 1fr auto;
-    gap: 0.5rem;
-    align-items: baseline;
-  }
+    .msg {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: 0.5rem;
+        align-items: baseline;
+    }
 
-  .author { font-weight: 600; color: #2563eb; }
-  .body   { white-space: pre-wrap; }
-  .ts     { font-size: 0.75rem; color: #9ca3af; }
+    .author { font-weight: 600; color: #2563eb; }
+    .body   { white-space: pre-wrap; }
+    .ts     { font-size: 0.75rem; color: #9ca3af; }
 
-  .composer {
-    display: flex;
-    gap: 0.5rem;
-    padding: 0.75rem 1.25rem;
-    border-top: 1px solid #e5e7eb;
-  }
+    .composer {
+        display: flex;
+        gap: 0.5rem;
+        padding: 0.75rem 1.25rem;
+        border-top: 1px solid #e5e7eb;
+    }
 
-  .composer input {
-    flex: 1;
-    padding: 0.5rem 0.75rem;
-    font-size: 0.95rem;
-    border: 1px solid #d1d5db;
-    border-radius: 6px;
-  }
+    .composer input {
+        flex: 1;
+        padding: 0.5rem 0.75rem;
+        font-size: 0.95rem;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+    }
 
-  .composer button {
-    padding: 0.5rem 1rem;
-    background: #2563eb;
-    color: #fff;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-  }
+    .composer button {
+        padding: 0.5rem 1rem;
+        background: #2563eb;
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+    }
 
-  .composer button:hover { background: #1d4ed8; }
+    .composer button:hover { background: #1d4ed8; }
 }
 
 </program>

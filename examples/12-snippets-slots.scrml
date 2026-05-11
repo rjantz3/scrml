@@ -36,7 +36,7 @@ ${
         avatar: string,
     }
 
-    @users = [
+    <users> = [
         { name: "Ada Lovelace",  role: "Engineer",   email: "ada@example.com",  avatar: "🧑‍💻" },
         { name: "Grace Hopper",  role: "Admiral",     email: "grace@example.com", avatar: "👩‍✈️" },
         { name: "Alan Turing",   role: "Mathematician", email: "alan@example.com", avatar: "🧠" },

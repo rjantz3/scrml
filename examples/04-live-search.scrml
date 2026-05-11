@@ -5,7 +5,7 @@
 <program>
 
 ${
-  @query = ""
+  <query> = ""
 
   // Static data — in production this could come from a ?{} query.
   const people = [

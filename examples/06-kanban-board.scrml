@@ -9,16 +9,17 @@ ${
   type Status:enum = .Todo | .InProgress | .Done
 
   // Each card is a plain object — status is the enum variant.
-  @cards = [
-    { id: 1, title: "Design system tokens",  status: Status.Todo },
-    { id: 2, title: "Auth flow",              status: Status.InProgress },
-    { id: 3, title: "Landing page",           status: Status.Done },
-    { id: 4, title: "Email templates",        status: Status.Todo },
-    { id: 5, title: "API rate limiting",      status: Status.InProgress },
-    { id: 6, title: "Accessibility audit",    status: Status.Todo },
+  // The `status` field type is inferred from the LHS-typed cell below.
+  <cards>: { id: number, title: string, status: Status }[] = [
+    { id: 1, title: "Design system tokens",  status: .Todo },
+    { id: 2, title: "Auth flow",              status: .InProgress },
+    { id: 3, title: "Landing page",           status: .Done },
+    { id: 4, title: "Email templates",        status: .Todo },
+    { id: 5, title: "API rate limiting",      status: .InProgress },
+    { id: 6, title: "Accessibility audit",    status: .Todo },
   ]
 
-  function moveTo(id, newStatus) {
+  function moveTo(id: number, newStatus: Status) {
     @cards = @cards.map(c => c.id == id ? { ...c, status: newStatus } : c)
   }
 }
@@ -32,11 +33,11 @@ ${
       <div class="column-cards">
         ${
           for (let card of @cards) {
-            if (card.status != Status.Todo) continue
+            if (card.status != .Todo) continue
             lift <div class="card">
               <p class="card-title">${card.title}</p>
               <div class="card-actions">
-                <button onclick=moveTo(card.id, Status.InProgress)>Start</button>
+                <button onclick=moveTo(card.id, .InProgress)>Start</button>
               </div>
             </div>
           }
@@ -49,12 +50,12 @@ ${
       <div class="column-cards">
         ${
           for (let card of @cards) {
-            if (card.status != Status.InProgress) continue
+            if (card.status != .InProgress) continue
             lift <div class="card">
               <p class="card-title">${card.title}</p>
               <div class="card-actions">
-                <button onclick=moveTo(card.id, Status.Todo)>Back</button>
-                <button onclick=moveTo(card.id, Status.Done)>Done</button>
+                <button onclick=moveTo(card.id, .Todo)>Back</button>
+                <button onclick=moveTo(card.id, .Done)>Done</button>
               </div>
             </div>
           }
@@ -67,11 +68,11 @@ ${
       <div class="column-cards">
         ${
           for (let card of @cards) {
-            if (card.status != Status.Done) continue
+            if (card.status != .Done) continue
             lift <div class="card">
               <p class="card-title">${card.title}</p>
               <div class="card-actions">
-                <button onclick=moveTo(card.id, Status.InProgress)>Reopen</button>
+                <button onclick=moveTo(card.id, .InProgress)>Reopen</button>
               </div>
             </div>
           }

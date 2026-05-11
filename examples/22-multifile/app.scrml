@@ -18,12 +18,15 @@ ${
   import { UserBadge } from './components.scrml'
 
   // Static seed data — in production this would come from a server fn.
+  // The variant qualifier `UserRole::Admin` is the canonical fully-qualified
+  // form here (LHS isn't statically narrowed by the const inference path —
+  // bare `.Admin` would resolve only when the field's type is known).
   const team = [
-    { name: "Ada Lovelace",    role: UserRole.Admin },
-    { name: "Grace Hopper",    role: UserRole.Moderator },
-    { name: "Alan Turing",     role: UserRole.Member },
-    { name: "Linus Torvalds",  role: UserRole.Member },
-    { name: "Anonymous",       role: UserRole.Guest },
+    { name: "Ada Lovelace",    role: UserRole::Admin },
+    { name: "Grace Hopper",    role: UserRole::Moderator },
+    { name: "Alan Turing",     role: UserRole::Member },
+    { name: "Linus Torvalds",  role: UserRole::Member },
+    { name: "Anonymous",       role: UserRole::Guest },
   ]
 }
 

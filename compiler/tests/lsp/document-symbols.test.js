@@ -175,12 +175,14 @@ describe("LSP L1 — buildDocumentSymbols", () => {
       d.code !== "W-DEPRECATED-SERVER-MODIFIER"
     );
     expect(errs.length).toBe(0);
-    // Should at minimum surface the three enum types and the two machines.
+    // Should at minimum surface the three enum types. Post-v0.2.0 rewrite
+    // (B1, 2026-05-11), the engine declarations no longer carry name= —
+    // they auto-derive their variable name from for= per §51.0.C. The
+    // legacy "MarioMachine"/"HealthMachine" names are gone; assert only
+    // the enum types which the LSP outline still surfaces structurally.
     const names = symbols.map(s => s.name);
     expect(names).toContain("PowerUp");
     expect(names).toContain("MarioState");
     expect(names).toContain("HealthRisk");
-    expect(names).toContain("MarioMachine");
-    expect(names).toContain("HealthMachine");
   });
 });
