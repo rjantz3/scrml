@@ -235,6 +235,28 @@ interface EmitLogicOpts {
    * for return-stmt boundary check failures. Paired with returnTypeAnnotation.
    */
   enclosingFnName?: string | null;
+  /**
+   * Bug-5 follow-on to C18 (§38.4, S83 Wave 4A): the set of V5-strict
+   * channel-cell names visible to the enclosing channel-owned server
+   * function. When `boundary === "server"` AND this set is non-null AND
+   * a bare-expr is an assignment `@<cell> = <value>` where `<cell>` is in
+   * this set, the bare-expr lowers to a broadcast wire frame:
+   *
+   *   broadcast({ __type: "__sync", __key: "<cell>", __val: (<value>) });
+   *
+   * `broadcast()` is auto-injected as a local in channel-owned server fns
+   * by `emit-server.ts:emitBroadcastInjection`. Per SPEC §38.4 line 15998:
+   * "The compiler SHALL emit sync wire-format messages on every write to
+   * a channel-declared cell. The wire-format SHALL be `{ __type: "__sync",
+   * __key: <name>, __val: <value> }`."
+   *
+   * The set is empty / `null` for non-channel server fns; the dispatch
+   * arm only fires when a cell name is present AND `boundary === "server"`.
+   * Compound assignment (`+=`, etc.) is NOT intercepted — those forms
+   * would still require a server-side replica of the channel cell to
+   * compute the new value, which is out of scope.
+   */
+  channelOwnedCells?: Set<string> | null;
 }
 
 /** An entry in the captured scope for a runtime ^{} meta block (from meta-checker.ts). */
@@ -1107,6 +1129,54 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
             }
           }
         }
+        // Bug-5 follow-on to C18 (§38.4, S83 Wave 4A): channel-scoped server-
+        // function write to a channel-owned cell. Lower `@cell = expr` to the
+        // canonical `broadcast({__type:"__sync",__key,__val})` wire frame per
+        // SPEC §38.4 line 15998. `broadcast()` is auto-injected by
+        // `emit-server.ts:emitBroadcastInjection` as a local in channel-owned
+        // server-fn bodies. Restricted to:
+        //   - `boundary === "server"` (client-side writes go through the
+        //     normal `_scrml_reactive_set` + auto-sync effect pair in
+        //     emit-reactive-wiring + emit-channel client IIFE).
+        //   - `opts.channelOwnedCells` non-null & contains the LHS bare name
+        //     (Set populated by emit-server.ts for functions in `channelFnMap`).
+        //   - `op === "="` (compound assignment `+=` would need a server-side
+        //     replica of the channel cell to compute the new value, which is
+        //     out of scope — those still flow through the generic path and
+        //     RI's E-RI-002 gate keeps them unreachable).
+        //
+        // The RHS emits in server mode so `@otherCell` references inside the
+        // value expression resolve to `_scrml_body["otherCell"]` (the existing
+        // server-side semantics; non-channel-cell reads still have the deep
+        // pre-existing limitation that the server doesn't replicate channel
+        // state — adopters should use the §38.6 `broadcast()` pattern when
+        // they need to construct a fully synthetic frame from args alone).
+        if (
+          opts.boundary === "server" &&
+          opts.channelOwnedCells &&
+          opts.channelOwnedCells.size > 0 &&
+          node.exprNode.kind === "assign"
+        ) {
+          const assignNode = node.exprNode as { kind: "assign"; op: string; target?: { kind?: string; name?: string }; value: unknown };
+          const target = assignNode.target;
+          if (
+            target && target.kind === "ident" &&
+            typeof target.name === "string" && target.name.startsWith("@") &&
+            assignNode.op === "="
+          ) {
+            const bareName = target.name.slice(1);
+            if (opts.channelOwnedCells.has(bareName)) {
+              // Build a server-mode expr ctx so `@otherCell` inside the RHS
+              // resolves to `_scrml_body["otherCell"]` rather than the client
+              // `_scrml_reactive_get(...)` form. This is the same single-site
+              // override pattern used by the `liftE` server emission at the
+              // bottom of this file (search for `mode: "server"` in this file).
+              const serverCtx: EmitExprContext = { ..._makeExprCtx(opts), mode: "server" };
+              const rhsStr = emitExpr(assignNode.value as any, serverCtx);
+              return `broadcast({ __type: "__sync", __key: ${JSON.stringify(bareName)}, __val: (${rhsStr}) });`;
+            }
+          }
+        }
         return `${emitExpr(node.exprNode, _makeExprCtx(opts))};`;
       }
       let bareExpr: string = node.expr ?? "";
@@ -1708,6 +1778,31 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       const _isEngineReassign = !isInit && !!opts.engineBindings?.has(node.name);
       const _histDet = _isEngineReassign ? detectHistoryForm(node.initExpr) : { isHistoryForm: false, strippedNode: null };
       const _effectiveInitExpr = _histDet.isHistoryForm ? _histDet.strippedNode : node.initExpr;
+      // Bug-5 follow-on to C18 (§38.4, S83 Wave 4A): channel-scoped server-
+      // function REASSIGNMENT to a channel-owned cell. The AST builder emits
+      // a `state-decl` (not a bare-expr) for `@name = expr` inside a function
+      // body. When `boundary === "server"` AND `channelOwnedCells` is non-
+      // empty AND the LHS cell is in that set, this state-decl is necessarily
+      // a reassignment inside a channel-owned server fn body — the channel-
+      // cell DECLARATION lives at the channel-body top level, not in any
+      // function. Lower the write to the canonical `broadcast({__type:
+      // "__sync",__key,__val})` wire frame per SPEC §38.4 line 15998.
+      //
+      // Mirrors the bare-expr arm above; required because the canonical TAB
+      // shape for in-fn `@cell = expr` is a state-decl, not a bare-expr.
+      // Compound assignment (`+=` etc.) does not produce a state-decl —
+      // those flow through the bare-expr arm and are not intercepted here.
+      if (
+        opts.boundary === "server" &&
+        opts.channelOwnedCells &&
+        opts.channelOwnedCells.size > 0 &&
+        opts.channelOwnedCells.has(node.name) &&
+        node.initExpr
+      ) {
+        const serverCtx: EmitExprContext = { ..._makeExprCtx(opts), mode: "server" };
+        const rhsStr = emitExpr(_effectiveInitExpr, serverCtx);
+        return `broadcast({ __type: "__sync", __key: ${JSON.stringify(node.name)}, __val: (${rhsStr}) });`;
+      }
       // Phase 3 fast path: when initExpr is present, skip all string splitting/merging
       if (node.initExpr) {
         const rewrittenInit = emitExpr(_effectiveInitExpr, _makeExprCtx(opts));

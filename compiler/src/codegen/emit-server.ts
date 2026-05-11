@@ -4,7 +4,7 @@ import { routePath } from "./utils.ts";
 import { collectFunctions, collectServerVarDecls, callableServerVarDecls } from "./collect.ts";
 import { emitLogicNode } from "./emit-logic.ts";
 import { getNodes } from "./collect.ts";
-import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, collectChannelFunctionMap } from "./emit-channel.ts";
+import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, collectChannelFunctionMap, collectChannelCellMap } from "./emit-channel.ts";
 import { serverRewriteEmitted } from "./rewrite.ts";
 import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
 import type { CompileContext } from "./context.ts";
@@ -166,6 +166,13 @@ export function generateServerJs(
   // declared inside a `<channel>` body get `broadcast(data)` / `disconnect()`
   // auto-injected as locals; functions outside the map don't.
   const channelFnMap: Map<string, string> = collectChannelFunctionMap(getNodes(fileAST));
+  // Bug-5 follow-on to C18 (§38.4, S83 Wave 4A): per-channel V5-strict cell
+  // set, used to thread `channelOwnedCells` into emit-logic opts for each
+  // channel-owned server-fn body emit. The bare-expr server arm lowers
+  // `@cell = expr` (cell ∈ channelOwnedCells) to the broadcast wire frame
+  // per SPEC §38.4 line 15998. Paired with the RI-side suppression of
+  // E-RI-002 for channel-owned writes to channel cells.
+  const channelCellMap: Map<string, Set<string>> = collectChannelCellMap(getNodes(fileAST));
   // C18 (§38.6): per-channel topic resolution map. Keyed by channel name; the
   // value is a JS expression-string evaluating to the topic at runtime. For
   // string-literal topics this is `JSON.stringify(value)`; for `topic=@var`
@@ -720,6 +727,12 @@ export function generateServerJs(
       if (_ownerChannel) {
         for (const l of emitBroadcastInjection(_ownerChannel, "    ")) lines.push(l);
       }
+      // Bug-5 follow-on to C18 (§38.4, S83 Wave 4A): the V5-strict channel-
+      // cell set visible to this function. Empty/`null` when the function
+      // is not channel-owned; the emit-logic bare-expr server arm only
+      // fires the broadcast-wire interception when this is non-null AND
+      // contains the LHS cell name.
+      const _channelOwnedCells = _ownerChannel ? channelCellMap.get(_ownerChannel) ?? null : null;
 
       const body: any[] = fnNode.body ?? [];
       const cpsSplit = route.cpsSplit;
@@ -736,7 +749,7 @@ export function generateServerJs(
               // would otherwise produce `/_* sql-ref:N *_/` from the SQL-placeholder
               // ExprNode that safeParseExprToNode preprocesses `?{}` into.
               if (stmt.sqlNode && stmt.sqlNode.kind === "sql") {
-                const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server" })) ?? "";
+                const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server", channelOwnedCells: _channelOwnedCells })) ?? "";
                 const sqlExpr = sqlStmt.replace(/;\s*$/, "");
                 lines.push(`    const _scrml_cps_return = ${sqlExpr};`);
                 continue;
@@ -745,7 +758,7 @@ export function generateServerJs(
               lines.push(`    const _scrml_cps_return = ${initExpr};`);
               continue;
             }
-            const code = serverRewriteEmitted(emitLogicNode(stmt, { boundary: "server" }));
+            const code = serverRewriteEmitted(emitLogicNode(stmt, { boundary: "server", channelOwnedCells: _channelOwnedCells }));
             if (code) {
               for (const line of code.split("\n")) {
                 lines.push(`    ${line}`);
@@ -761,7 +774,7 @@ export function generateServerJs(
           } else if (lastStmt && (lastStmt.kind === "let-decl" || lastStmt.kind === "const-decl")) {
             lines.push(`    return ${lastStmt.name};`);
           } else if (lastStmt && lastStmt.kind === "bare-expr") {
-            const emitted = serverRewriteEmitted(emitLogicNode(lastStmt, { boundary: "server" }));
+            const emitted = serverRewriteEmitted(emitLogicNode(lastStmt, { boundary: "server", channelOwnedCells: _channelOwnedCells }));
             if (emitted) {
               const returnExpr = emitted.replace(/;$/, "");
               lines.push(`    return ${returnExpr};`);
@@ -770,7 +783,7 @@ export function generateServerJs(
         }
       } else {
         for (const stmt of body) {
-          const code = serverRewriteEmitted(emitLogicNode(stmt, { boundary: "server" }));
+          const code = serverRewriteEmitted(emitLogicNode(stmt, { boundary: "server", channelOwnedCells: _channelOwnedCells }));
           if (code) {
             for (const line of code.split("\n")) {
               lines.push(`    ${line}`);
@@ -850,6 +863,10 @@ export function generateServerJs(
       if (_ownerChannelNonCsrf) {
         for (const l of emitBroadcastInjection(_ownerChannelNonCsrf, "  ")) lines.push(l);
       }
+      // Bug-5 follow-on to C18 (§38.4): mirror of the CSRF-path cell-set
+      // computation above. Threaded into emit-logic opts so the bare-expr
+      // server arm lowers channel-cell writes to broadcast frames.
+      const _channelOwnedCellsNonCsrf = _ownerChannelNonCsrf ? channelCellMap.get(_ownerChannelNonCsrf) ?? null : null;
 
       const body: any[] = fnNode.body ?? [];
       const cpsSplit = route.cpsSplit;
@@ -897,7 +914,7 @@ export function generateServerJs(
               // the useBaselineCsrf=true CPS site above. Route SQL-init reactive
               // decls through emit-logic case "sql" via the structured sqlNode.
               if (stmt.sqlNode && stmt.sqlNode.kind === "sql") {
-                const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server" })) ?? "";
+                const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server", channelOwnedCells: _channelOwnedCellsNonCsrf })) ?? "";
                 const sqlExpr = sqlStmt.replace(/;\s*$/, "");
                 lines.push(`    const _scrml_cps_return = ${sqlExpr};`);
                 continue;
@@ -906,7 +923,7 @@ export function generateServerJs(
               lines.push(`    const _scrml_cps_return = ${initExpr};`);
               continue;
             }
-            const code = serverRewriteEmitted(emitLogicNode(stmt, { boundary: "server" }));
+            const code = serverRewriteEmitted(emitLogicNode(stmt, { boundary: "server", channelOwnedCells: _channelOwnedCellsNonCsrf }));
             if (code) {
               for (const line of code.split("\n")) {
                 lines.push(`    ${line}`);
@@ -922,7 +939,7 @@ export function generateServerJs(
           } else if (lastStmt && (lastStmt.kind === "let-decl" || lastStmt.kind === "const-decl")) {
             lines.push(`    return ${lastStmt.name};`);
           } else if (lastStmt && lastStmt.kind === "bare-expr") {
-            const emitted = serverRewriteEmitted(emitLogicNode(lastStmt, { boundary: "server" }));
+            const emitted = serverRewriteEmitted(emitLogicNode(lastStmt, { boundary: "server", channelOwnedCells: _channelOwnedCellsNonCsrf }));
             if (emitted) {
               const returnExpr = emitted.replace(/;$/, "");
               lines.push(`    return ${returnExpr};`);
@@ -931,7 +948,7 @@ export function generateServerJs(
         }
       } else {
         for (const stmt of body) {
-          const code = serverRewriteEmitted(emitLogicNode(stmt, { boundary: "server" }));
+          const code = serverRewriteEmitted(emitLogicNode(stmt, { boundary: "server", channelOwnedCells: _channelOwnedCellsNonCsrf }));
           if (code) {
             for (const line of code.split("\n")) {
               lines.push(`  ${line}`);

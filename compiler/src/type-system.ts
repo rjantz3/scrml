@@ -4543,14 +4543,35 @@ function annotateNodes(
             // B20 §14.10 / M9 — bare-variant inference at LHS state-decl
             // annotation. The annotation type drives bare-variant resolution.
             // The structural form `<x>: T = .V` is the canonical M9 locus.
-            // When NO annotation is present, the writer chose `<x> = .V`
-            // with no type context — per §14.10 line 7174, fire
-            // E-VARIANT-AMBIGUOUS.
+            //
+            // Bug 7 (M9) — reassignment position. The AST builder collapses a
+            // reactive-write inside a function body (`@phase = .Loading`) into
+            // a fresh `state-decl` node with no typeAnnotation. Without scope
+            // consultation, this branch always fires E-VARIANT-AMBIGUOUS even
+            // though §14.10 normative position #2 (`@cell = .V where @cell: T`)
+            // says the LHS cell's type IS the context. Look up the prior bind
+            // of `@${n.name}` and, if it's a reactive with an enum or union
+            // resolvedType, use that as contextType. Fall back to null only
+            // when the lookup misses (fresh untyped decl — preserves §14.10
+            // line 7174 behavior for that case).
+            let bvCtxType: ResolvedType | null = null;
             if (reactAnnot) {
-              inferBareVariantsInExpr(reactInitExprNode, resolvedType, reactSpan, errors);
-            } else {
-              inferBareVariantsInExpr(reactInitExprNode, null, reactSpan, errors);
+              bvCtxType = resolvedType;
+            } else if (typeof n.name === "string" && n.name.length > 0) {
+              const prior = scopeChain.lookup(`@${n.name}`) as
+                | { kind?: string; resolvedType?: ResolvedType }
+                | undefined;
+              if (
+                prior &&
+                prior.kind === "reactive" &&
+                prior.resolvedType &&
+                (prior.resolvedType.kind === "enum" ||
+                  prior.resolvedType.kind === "union")
+              ) {
+                bvCtxType = prior.resolvedType;
+              }
             }
+            inferBareVariantsInExpr(reactInitExprNode, bvCtxType, reactSpan, errors);
           }
         }
         if (n.name) {
@@ -4647,6 +4668,11 @@ function annotateNodes(
             checkTransitionCallsInExpr(beExprNode, beSpan, scopeChain, stateTypeRegistry, errors);
             // §54.6.4 Phase 4f: terminal-substate mutation check
             checkTerminalMutationsInExpr(beExprNode, beSpan, scopeChain, stateTypeRegistry, errors);
+            // Bug 7 (M9) — bare-variant inference at reactive-site bare-expr
+            // shapes: `@cell = .V` (AssignExpr root) or `@cell.advance(.V)`
+            // (CallExpr root with member callee). The cell's enum/union type
+            // supplies the contextType per §14.10 normative position #2.
+            inferReactiveSiteBareVariants(beExprNode, scopeChain, beSpan, errors);
           }
         }
         // E-ERROR-002 (§19.4.3): a bare call to a failable function at top-level
@@ -6019,6 +6045,97 @@ function inferBareVariantsInExpr(
       span,
     ));
   });
+}
+
+/**
+ * Bug 7 (M9) — bare-variant inference at reactive-site bare-expr shapes.
+ *
+ * Companion to `inferBareVariantsInExpr` for bare-expr statements whose root
+ * is a reactive write or an engine-transition call. §14.10 normative position
+ * #2 (`@cell = .V where @cell: T`) and the engine-transition shorthand
+ * `@cell.advance(.V)` both fix the variant context from the LHS cell's type.
+ *
+ * Two narrow shapes are recognized at the bare-expr root:
+ *
+ *   - AssignExpr { target: IdentExpr(@cell), value: <expr containing .V> }
+ *     The cell name (post-`@`) is looked up in scope; if its resolvedType is
+ *     enum or union, the value subtree is walked with that contextType.
+ *
+ *   - CallExpr { callee: MemberExpr(IdentExpr(@cell), "advance" | ...), args }
+ *     The cell name is looked up in scope; if its resolvedType is enum or
+ *     union, every arg subtree is walked with that contextType. We do NOT
+ *     constrain this to a fixed allowlist of method names — any engine
+ *     transition method (`advance`, `set`, ...) follows the same rule.
+ *     The transition-call legality check (`checkTransitionCallsInExpr`)
+ *     already gates which method names are valid; this helper rides on top.
+ *
+ * Silent fall-through for any shape that does not match (including CallExprs
+ * whose callee object is NOT a reactive ident, and AssignExprs whose target
+ * is not a bare `@cell` ident). The existing diagnostic pipeline owns the
+ * non-matching shapes.
+ */
+function inferReactiveSiteBareVariants(
+  exprNode: unknown,
+  scopeChain: ScopeChain,
+  span: Span,
+  errors: TSError[],
+): void {
+  if (!exprNode || typeof exprNode !== "object") return;
+  const root = exprNode as { kind?: string } & Record<string, unknown>;
+
+  /** Resolve `@name` → enum/union ResolvedType from scopeChain, or null. */
+  const resolveReactiveCellType = (cellRef: string): ResolvedType | null => {
+    const entry = scopeChain.lookup(cellRef) as
+      | { kind?: string; resolvedType?: ResolvedType }
+      | undefined;
+    if (!entry || entry.kind !== "reactive" || !entry.resolvedType) return null;
+    const rt = entry.resolvedType;
+    if (rt.kind === "enum" || rt.kind === "union") return rt;
+    return null;
+  };
+
+  // Shape 1: AssignExpr at the bare-expr root.
+  if (root.kind === "assign") {
+    const target = root.target as { kind?: string; name?: string } | undefined;
+    const value = root.value;
+    if (
+      target &&
+      target.kind === "ident" &&
+      typeof target.name === "string" &&
+      target.name.startsWith("@")
+    ) {
+      const ctx = resolveReactiveCellType(target.name);
+      if (ctx) inferBareVariantsInExpr(value, ctx, span, errors);
+    }
+    return;
+  }
+
+  // Shape 2: CallExpr at the bare-expr root with MemberExpr callee whose
+  // object is a reactive `@cell` ident.
+  if (root.kind === "call") {
+    const callee = root.callee as
+      | { kind?: string; object?: { kind?: string; name?: string } }
+      | undefined;
+    if (
+      callee &&
+      callee.kind === "member" &&
+      callee.object &&
+      callee.object.kind === "ident" &&
+      typeof callee.object.name === "string" &&
+      callee.object.name.startsWith("@")
+    ) {
+      const ctx = resolveReactiveCellType(callee.object.name);
+      if (ctx) {
+        const args = Array.isArray(root.args) ? (root.args as unknown[]) : [];
+        for (const arg of args) {
+          inferBareVariantsInExpr(arg, ctx, span, errors);
+        }
+      }
+    }
+    return;
+  }
+
+  // No matching shape — silent fall-through.
 }
 
 // ---------------------------------------------------------------------------

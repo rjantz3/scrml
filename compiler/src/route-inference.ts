@@ -71,6 +71,7 @@ import type {
 import type { ProtectAnalysis } from "./protect-analyzer.ts";
 import { exprNodeCollectCallees, emitStringFromTree, forEachIdentInExprNode } from "./expression-parser.ts";
 import type { ExprNode } from "./types/ast.ts";
+import { collectChannelFunctionMap, collectChannelCellMap } from "./codegen/emit-channel.ts";
 
 // ---------------------------------------------------------------------------
 // RI-internal types
@@ -834,6 +835,45 @@ function findReactiveAssignment(body: LogicStatement[]): LogicStatement | null {
   for (const node of body) {
     const found = visitNode(node);
     if (found !== null) return found;
+  }
+
+  return null;
+}
+
+/**
+ * Extract the @-cell name from a LogicStatement returned by
+ * {@link findReactiveAssignment}. Returns `null` if the LHS is not a
+ * canonical `@<ident> = <expr>` shape (compound assignment `+=`, dotted
+ * member targets, etc.).
+ *
+ * Used by the channel-scoped server-fn E-RI-002 skip path (Bug 5 / §38.4):
+ * the skip applies only to writes whose LHS is exactly one of the channel-
+ * owned cells declared in the function's channel body.
+ */
+function extractReactiveAssignmentCellName(node: LogicStatement): string | null {
+  if (!node || typeof node !== "object") return null;
+
+  // state-decl: LHS name lives on the node directly.
+  if (node.kind === "state-decl") {
+    const name = (node as any).name;
+    return typeof name === "string" && name.length > 0 ? name : null;
+  }
+
+  // bare-expr: prefer the structured exprNode (assign with @ident target,
+  // op === "=") and fall back to a string-shape match for the legacy /
+  // string-only path.
+  if (node.kind === "bare-expr") {
+    const exprNode = (node as any).exprNode;
+    if (exprNode && exprNode.kind === "assign" && exprNode.op === "=" && exprNode.target) {
+      const target = exprNode.target;
+      if (target.kind === "ident" && typeof target.name === "string" && target.name.startsWith("@")) {
+        return target.name.slice(1);
+      }
+    }
+    const expr: string = exprNode ? emitStringFromTree(exprNode) : ((node as any).expr ?? "");
+    // Match `@name =` (but not `@name ==`, `@name +=`, etc.) at any position.
+    const m = expr.match(/\B@([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)(?![+\-*/%&|^])/);
+    return m ? m[1] : null;
   }
 
   return null;
@@ -1621,6 +1661,27 @@ export function runRI(input: RIInput): RIOutput {
   const perFileImportedServerNamespaces = buildPerFileImportedServerNamespaces(files);
 
   // ------------------------------------------------------------------
+  // Step 2d: Bug-5 follow-on to C18 (§38.4) — per-file channel-cell
+  // ownership maps. Used in Step 6 (E-RI-002 fire arm) to skip the
+  // diagnostic on channel-owned server functions writing to channel-
+  // owned cells. Per SPEC §38.4 line 15998, every write to a channel-
+  // declared cell SHALL emit a `__sync` wire frame; codegen lowers
+  // these writes to `broadcast({__type:"__sync",...})` so the
+  // `_scrml_reactive_set` reference that previously made the server
+  // module crash at request time is no longer emitted on this path.
+  // ------------------------------------------------------------------
+  /** filePath → (functionName → channelName) */
+  const perFileChannelFnMap = new Map<string, Map<string, string>>();
+  /** filePath → (channelName → Set<cellName>) */
+  const perFileChannelCellMap = new Map<string, Map<string, Set<string>>>();
+  for (const fileAST of files) {
+    const nodes: any[] = (fileAST as any).nodes ?? ((fileAST as any).ast ? (fileAST as any).ast.nodes : []);
+    if (!Array.isArray(nodes)) continue;
+    perFileChannelFnMap.set(fileAST.filePath, collectChannelFunctionMap(nodes));
+    perFileChannelCellMap.set(fileAST.filePath, collectChannelCellMap(nodes));
+  }
+
+  // ------------------------------------------------------------------
   // Step 3: First pass — collect all function nodes and compute DIRECT
   // escalation (no transitive resolution yet).
   // ------------------------------------------------------------------
@@ -2223,27 +2284,52 @@ export function runRI(input: RIInput): RIOutput {
               returnVarName: cpsResult.returnVarName,
             };
           } else {
-            // CPS not applicable: fire E-RI-002 for ANY server-escalated function.
+            // Bug-5 follow-on to C18 (§38.4, S83 Wave 4A): channel-scoped
+            // server functions writing to a channel-owned cell are spec-
+            // permitted — SPEC §38.4 line 15998 mandates that the compiler
+            // SHALL emit `{__type:"__sync",__key,__val}` wire frames on
+            // every write to a channel-declared cell. Codegen (emit-logic
+            // bare-expr server arm) now lowers `@cell = expr` for the
+            // canonical channel-cell case to a `broadcast(...)` call (which
+            // is auto-injected by `emit-server.ts:emitBroadcastInjection`
+            // for channel-owned server functions). The previous E-RI-002
+            // suppression was held back because the server module would
+            // reference the client-only `_scrml_reactive_set` helper and
+            // crash at request time; the broadcast-wire emit removes that
+            // reference and aligns with the §38.4 canonical pattern.
             //
-            // C18 (§38.4): channel-scoped server functions that write to a
-            // channel-cell are spec-permitted per §38.4 line 15677 (writes
-            // emit `__sync` wire frames). However, the server-side codegen
-            // for `@cell = expr` currently emits `_scrml_reactive_set(...)`
-            // which is a client-side runtime symbol — the emitted server
-            // module would crash at request time. Rather than claim a
-            // feature that breaks at runtime, retain E-RI-002 here and
-            // surface the gap explicitly: server-side channel-cell read/
-            // write semantics are deferred to a follow-up step. Adopters
-            // can still use channel-scoped server functions that take args
-            // + call `broadcast()` — the most common Phoenix-style pattern.
-            errors.push(new RIError(
-              "E-RI-002",
-              `E-RI-002: Server-escalated function \`${record.fnNode.name ?? "<anonymous>"}\` ` +
-              `assigns to a \`@\` reactive variable. Reactive state is client-side; server ` +
-              `functions cannot mutate it directly. Move the reactive assignment to a client-side ` +
-              `callback, or restructure the function so the reactive mutation occurs on the client.`,
-              (reactiveAssignment as any).span ?? record.fnNode.span,
-            ));
+            // The skip is narrow: it applies only when (a) the function is
+            // declared inside a `<channel>` body AND (b) the LHS cell of
+            // the reactive assignment is one of the V5-strict state cells
+            // declared in that channel's body. Writes to non-channel cells
+            // (e.g. `<program>`-scoped cells) from a channel server-fn
+            // still fire E-RI-002 — those writes have no broadcast path.
+            // Writes from non-channel server functions are unaffected.
+            const _ownerChannel = perFileChannelFnMap.get(record.filePath)?.get(record.fnNode.name ?? "");
+            const _assignedCellName = extractReactiveAssignmentCellName(reactiveAssignment);
+            const _channelCells = _ownerChannel
+              ? perFileChannelCellMap.get(record.filePath)?.get(_ownerChannel)
+              : null;
+            const _isChannelCellWrite =
+              _ownerChannel != null &&
+              _assignedCellName != null &&
+              _channelCells != null &&
+              _channelCells.has(_assignedCellName);
+            if (_isChannelCellWrite) {
+              // Spec-permitted broadcast write — no diagnostic, no CPS.
+              // cpsSplit remains null; the server-fn body is emitted whole
+              // and the channel-cell assignment lowers to the broadcast
+              // wire (see emit-logic.ts case "bare-expr" server arm).
+            } else {
+              errors.push(new RIError(
+                "E-RI-002",
+                `E-RI-002: Server-escalated function \`${record.fnNode.name ?? "<anonymous>"}\` ` +
+                `assigns to a \`@\` reactive variable. Reactive state is client-side; server ` +
+                `functions cannot mutate it directly. Move the reactive assignment to a client-side ` +
+                `callback, or restructure the function so the reactive mutation occurs on the client.`,
+                (reactiveAssignment as any).span ?? record.fnNode.span,
+              ));
+            }
           }
         }
       }

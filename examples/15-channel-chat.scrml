@@ -19,20 +19,19 @@
 // File-level channel. Auto-creates the WebSocket endpoint at /_scrml_ws/chat.
 // Every client connecting with topic="lobby" is pub/sub-subscribed together.
 //
-// **v0.2.0 compiler gap (documented; NOT B1 scope):** the canonical
-// channel-scoped V5-strict pattern
-//     <messages> = []
-//     server function postMessage(...) { @messages = [...@messages, ...] }
-// (per primer §9.1 + SPEC §38) fires E-RI-002 today — RI treats the
-// channel-scoped @messages as client-only. Workaround for the demo:
-// the client-side send() function owns the @messages write; the
-// server-fn returns the new entry, client appends + broadcasts.
+// **Canonical channel-scoped V5-strict pattern (SPEC §38.4):** the
+// `postMessage` server function declared inside the channel body writes
+// directly to the channel cell `@messages`. The compiler lowers each
+// channel-cell write to a `broadcast({__type:"__sync",__key,__val})` wire
+// frame per SPEC §38.4 line 15998 (S83 Wave 4A — Bug 5 follow-on to C18).
+// The client's auto-sync IIFE receives the frame and updates its local
+// reactive store, so every subscribed browser sees the new message.
 <channel name="chat" topic="lobby">
     ${
         <messages> = []
 
-        server function persistMessage(author, body) {
-            return { author, body, ts: Date.now() }
+        server function postMessage(author, body) {
+            @messages = [...@messages, { author, body, ts: Date.now() }]
         }
     }
 </>
@@ -55,8 +54,7 @@ ${
 
     function send() {
         if (@draft.trim() == "" || @username.trim() == "") return
-        const msg = persistMessage(@username, @draft)
-        @messages = [...@messages, msg]
+        postMessage(@username, @draft)
         reset(@draft)
     }
 }

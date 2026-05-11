@@ -103,6 +103,43 @@ ELEMENT_ATTR_REGISTRY.set("program", {
     ["version",       attrSpec({ supportsInterpolation: false })],
     ["author",        attrSpec({ supportsInterpolation: false })],
     ["license",       attrSpec({ supportsInterpolation: false })],
+    // §40.2 / §39.2 — compiler-auto middleware attrs (B6, 2026-05-11)
+    ["cors",          attrSpec({ supportsInterpolation: false })],
+    ["log",           attrSpec({
+      supportsInterpolation: false,
+      allowedValues: ["structured", "minimal", "off"],
+    })],
+    ["headers",       attrSpec({
+      supportsInterpolation: false,
+      allowedValues: ["strict"],
+    })],
+    ["ratelimit",     attrSpec({ supportsInterpolation: false })],
+    // §39.2.6 — idempotency storage backend (A9 Ext 5, S76)
+    ["idempotency-store", attrSpec({
+      supportsInterpolation: false,
+      allowedValues: ["auto", "sqlite", "postgres", "mysql", "redis", "none"],
+    })],
+    // §19.9.6 / §8.9.5 — S79 adopter-override knobs (duration / integer; malformed
+    // is silently re-defaulted per spec — value not enforced here).
+    ["idempotency-ttl",   attrSpec({ supportsInterpolation: false })],
+    ["batch-in-list-cap", attrSpec({ supportsInterpolation: false })],
+    // §39.2.1 / §38.3.1 — S81 adopter-override knobs (numeric; malformed silently
+    // re-defaulted — value not enforced here).
+    ["cors-max-age",      attrSpec({ supportsInterpolation: false })],
+    ["channel-reconnect", attrSpec({ supportsInterpolation: false })],
+    // §43 — nested-<program> worker/sidecar attributes
+    ["lang",          attrSpec({ supportsInterpolation: false })],
+    ["mode",          attrSpec({ supportsInterpolation: false })],
+    ["callchar",      attrSpec({ supportsInterpolation: false })],
+    ["build",         attrSpec({ supportsInterpolation: false })],
+    ["autostart",     attrSpec({ supportsInterpolation: false })],
+    // §43.4 — supervision strategy
+    ["restart",       attrSpec({
+      supportsInterpolation: false,
+      allowedValues: ["always", "never", "on-error"],
+    })],
+    ["max-restarts",  attrSpec({ supportsInterpolation: false })],
+    ["within",        attrSpec({ supportsInterpolation: false })],
   ]),
 });
 

@@ -367,3 +367,155 @@ describe("§B20.12 regression — engine `initial=.V` (B15 territory) unchanged"
     expect(errsByCode(errors, "E-VARIANT-AMBIGUOUS").length).toBe(0);
   });
 });
+
+// ===========================================================================
+// §B20.13 — Bug 7 (M9): reassignment position uses scope-chain type context
+//
+// `<phase>: Phase = .Idle` declares the cell with enum type. A subsequent
+// `@phase = .Loading` inside a function body parses as a fresh `state-decl`
+// node with NO typeAnnotation, but §14.10 normative position #2 says the
+// LHS cell's already-known type IS the context. The state-decl visitor must
+// look up `@phase` in the scope chain and use the prior reactive entry's
+// resolvedType as contextType — falling back to null only on lookup miss.
+// ===========================================================================
+
+describe("§B20.13 Bug 7 — reassignment `@cell = .V` infers from prior decl type", () => {
+  test("§B20.13.1 reassignment with enum-typed cell — bare variant resolves cleanly", () => {
+    const src = `<program>\${
+      type Phase:enum = { Idle, Loading, Loaded }
+      <phase>: Phase = .Idle
+      function go() {
+        @phase = .Loading
+      }
+    }</program>`;
+    const { errors } = compile(src);
+    expect(errsByCode(errors, "E-VARIANT-AMBIGUOUS").length).toBe(0);
+    expect(errsByCode(errors, "E-TYPE-063").length).toBe(0);
+  });
+
+  test("§B20.13.2 qualified-form reassignment continues to pass (backward compat)", () => {
+    const src = `<program>\${
+      type Phase:enum = { Idle, Loading, Loaded }
+      <phase>: Phase = .Idle
+      function go() {
+        @phase = Phase.Loading
+      }
+    }</program>`;
+    const { errors } = compile(src);
+    expect(errsByCode(errors, "E-VARIANT-AMBIGUOUS").length).toBe(0);
+  });
+
+  test("§B20.13.3 unknown variant on reassignment fires E-TYPE-063 (not E-VARIANT-AMBIGUOUS)", () => {
+    const src = `<program>\${
+      type Phase:enum = { Idle, Loading }
+      <phase>: Phase = .Idle
+      function go() {
+        @phase = .Loaded
+      }
+    }</program>`;
+    const { errors } = compile(src);
+    const e063 = errsByCode(errors, "E-TYPE-063");
+    expect(e063.length).toBeGreaterThanOrEqual(1);
+    expect(e063[0].message).toMatch(/\.Loaded/);
+    expect(e063[0].message).toMatch(/Phase/);
+  });
+
+  test("§B20.13.4 ambiguous union reassignment fires E-VARIANT-AMBIGUOUS", () => {
+    const src = `<program>\${
+      type MarioState:enum = { Small, Big, Fire }
+      type HealthRisk:enum = { Small, Critical }
+      <picker>: MarioState | HealthRisk = MarioState.Big
+      function go() {
+        @picker = .Small
+      }
+    }</program>`;
+    const { errors } = compile(src);
+    const e = errsByCode(errors, "E-VARIANT-AMBIGUOUS");
+    expect(e.length).toBeGreaterThanOrEqual(1);
+    expect(e[0].message).toMatch(/\.Small/);
+  });
+
+  test("§B20.13.5 reassignment of non-enum cell still fires E-VARIANT-AMBIGUOUS (scope-miss kind)", () => {
+    // A `let x = .Small` style top-level decl would itself fire on declare.
+    // Here a cell typed `number` is reassigned to a bare variant — the prior
+    // entry exists but its resolvedType is not enum/union, so the lookup
+    // does not supply a context, and the helper's non-enum fallback fires.
+    const src = `<program>\${
+      <count>: number = 0
+      function bump() {
+        @count = .Small
+      }
+    }</program>`;
+    const { errors } = compile(src);
+    // We accept either E-VARIANT-AMBIGUOUS (helper's no-context fallback)
+    // OR another upstream diagnostic; the contract is "not a silent pass".
+    const ambiguous = errsByCode(errors, "E-VARIANT-AMBIGUOUS");
+    expect(ambiguous.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ===========================================================================
+// §B20.14 — Bug 7 (M9): engine-transition call `@cell.advance(.V)`
+//
+// Companion fire-site to §B20.13: a bare-expr whose root is a CallExpr with
+// a member callee on a reactive ident. `inferReactiveSiteBareVariants` looks
+// up the cell, and if its resolvedType is enum or union, walks the args with
+// that contextType. Method name is not constrained — the engine transition
+// legality check (`checkTransitionCallsInExpr`) gates which methods are valid.
+// ===========================================================================
+
+describe("§B20.14 Bug 7 — `@cell.advance(.V)` infers from cell type", () => {
+  test("§B20.14.1 valid bare variant on reactive method call — no fire", () => {
+    const src = `<program>\${
+      type Phase:enum = { Idle, Loading, Loaded }
+      <phase>: Phase = .Idle
+      function go() {
+        @phase.advance(.Loading)
+      }
+    }</program>`;
+    const { errors } = compile(src);
+    expect(errsByCode(errors, "E-VARIANT-AMBIGUOUS").length).toBe(0);
+    expect(errsByCode(errors, "E-TYPE-063").length).toBe(0);
+  });
+
+  test("§B20.14.2 unknown bare variant on reactive method call fires E-TYPE-063", () => {
+    const src = `<program>\${
+      type Phase:enum = { Idle, Loading }
+      <phase>: Phase = .Idle
+      function go() {
+        @phase.advance(.Loaded)
+      }
+    }</program>`;
+    const { errors } = compile(src);
+    const e063 = errsByCode(errors, "E-TYPE-063");
+    expect(e063.length).toBeGreaterThanOrEqual(1);
+    expect(e063[0].message).toMatch(/\.Loaded/);
+    expect(e063[0].message).toMatch(/Phase/);
+  });
+
+  test("§B20.14.3 method call on non-enum cell — silent fall-through (existing diagnostic owns it)", () => {
+    // A cell typed `number` calls a method with a bare variant arg. The
+    // reactive-site helper finds no enum/union context and silently falls
+    // through. Upstream diagnostics (transition legality, type checks) are
+    // responsible — `inferReactiveSiteBareVariants` itself does not fire.
+    const src = `<program>\${
+      <count>: number = 0
+      function bump() {
+        @count.advance(.Small)
+      }
+    }</program>`;
+    const { errors } = compile(src);
+    // Whatever upstream fires, this helper itself must not synthesize a
+    // duplicate E-VARIANT-AMBIGUOUS or E-TYPE-063 — the test asserts the
+    // helper's silent-fallthrough contract by allowing zero variant-resolved
+    // diagnostics if the upstream path doesn't surface one. We do not assert
+    // a specific upstream code; this is a no-spurious-fire regression test.
+    const variantFires = (errors ?? []).filter(
+      (e) => e?.code === "E-VARIANT-AMBIGUOUS" || e?.code === "E-TYPE-063",
+    );
+    // Helper must not invent diagnostics on non-enum cell. Some upstream
+    // checks (e.g. transition legality) may still flag separately; those
+    // surface under different codes. Accept 0 variant-codes.
+    expect(variantFires.length).toBe(0);
+  });
+});
