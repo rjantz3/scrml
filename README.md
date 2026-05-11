@@ -8,29 +8,29 @@ scrml lets you write a complete app in one file: markup, reactive state, scoped 
 SQL, server functions, and inline tests — no build config, no separate server file,
 no state management library.
 
-> ## ⚠️ v0.1.0 → v0.2.0 — major breaking change in flight
+> ## scrml v0.2.0 — this README describes v0.2.0
 >
-> **Current shipped baseline: scrml v0.1.0.** Everything in this README and
-> the shipped compiler / examples / stdlib reflects v0.1.0.
+> This README describes scrml **v0.2.0**, the current language as the compiler
+> implements it. The compiler ships v0.2.0 codegen + runtime semantics:
+> **V5-strict** declaration (`<x> = init` decl form + `@x` expression access),
+> the **Tier 0/1/2 ladder** for case analysis (booleans → `<match>` → `<engine>`),
+> auto-synthesized validity surface for forms, file-level `<channel>` blocks for
+> realtime, schema shared-core vocabulary, refinement-type predicates, hierarchical
+> engines with `history` + `<onTimeout>` + `<onIdle>` + `internal:rule=`, and
+> 22 architectural locks (L1–L22).
 >
-> **In flight: scrml v0.2.0.** A multi-month migration is in progress. Headline
-> changes: **V5-strict access** (`<x> = init` declaration form + `@x`
-> expression access), Tier 0/1/2 ladder for case analysis (booleans →
-> `<match>` → `<engine>`), auto-synthesized validity surface for forms,
-> file-level `<channel>` blocks, schema shared-core vocabulary, refinement-type
-> predicates, plus ~20 more architectural locks (L1-L21). Compiler does not
-> yet implement these; spec describes them as the engineering target.
-> **Code written for v0.1.0 will require migration when v0.2.0 ships.** No
-> production adopters exist, so there is no v0.compat / migration-tool path;
-> we are landing v0.2.0 as the next stable, not as a parallel track.
+> v0.1.0 was the previous shipped baseline. **v0.1.0-syntax code (using `@var = 0`
+> implicit declaration, `< machine>` for state machines, `~var` for derived
+> values) will not compile against v0.2.0.** No production adopters exist, so
+> there is no v0.compat / migration-tool path — v0.2.0 is the next stable, not
+> a parallel track. A semver tag for v0.2.0 lands when the materials track
+> (examples rewrite, samples curation, tutorial rewrite, scrml.dev announce)
+> closes.
 >
-> If you are reading articles, blog posts, or LLM-generated scrml that
-> shows `<count> = 0`-style decls, `<engine for=Phase>` blocks, or
-> `@form.isValid` validity-surface reads — **those describe v0.2.0 design
-> and will not compile against the current v0.1.0 compiler.** Full scope and
-> live progress in
-> [`docs/changes/v0next-inventory/SCOPE-MAP-2026-05-05.md`](./docs/changes/v0next-inventory/SCOPE-MAP-2026-05-05.md)
-> + `master-list.md` §0 dashboard.
+> If you find articles or LLM-generated scrml that uses pre-v0.2.0 syntax,
+> they describe the prior language. Live phase status:
+> [`master-list.md` §0](./master-list.md) (the load-bearing dashboard);
+> recent landings: [`docs/changelog.md`](./docs/changelog.md).
 
 ## Quick start
 
@@ -57,9 +57,9 @@ bun test compiler/tests/
 
 ## What's in here
 
-- `compiler/` — compiler source, the authoritative `SPEC.md` / `SPEC-INDEX.md` / `PIPELINE.md`, **8,700+ tests**, and reference self-host modules
-- `examples/` — **32 runnable single-file scrml apps + the trucking-dispatch multi-page app**
-- `samples/compilation-tests/` — **277 compilation tests** covering every accepted construct
+- `compiler/` — compiler source, the authoritative `SPEC.md` (~26,000 lines) / `SPEC-INDEX.md` / `PIPELINE.md`, **11,200+ tests**, and reference self-host modules
+- `examples/` — **22 runnable single-file scrml apps + the trucking-dispatch multi-page app**
+- `samples/compilation-tests/` — **279 compilation tests** covering every accepted construct
 - `stdlib/` — **16 user-facing stdlib modules** (`auth`, `crypto`, `data`, `format`, `fs`, `http`, `path`, `process`, `router`, `store`, `test`, `time`, `redis`, `cron`, `regex`, `oauth`)
 - `benchmarks/` — runtime, build, and full-stack benchmarks vs React / Svelte / Vue
 - `editors/vscode/`, `editors/neovim/` — editor integrations
@@ -72,37 +72,107 @@ For recent fixes and work currently in flight, see [`docs/changelog.md`](./docs/
 
 # scrml
 
-**Stop wiring. Start building.**
+**An app should be an exhaustive state machine.**
 
-scrml is a compiled language that replaces your frontend framework, your backend glue, and most of your build toolchain with a single file type. Write markup, logic, styles, and SQL together in `.scrml`. The compiler handles everything else — server/client splitting, reactivity, routing, async scheduling, type safety — and outputs plain HTML, CSS, and JavaScript.
+scrml is a compiled language built around one organizing principle: the structural
+shape of a shipped UI is the structural shape of its state. Every reachable state
+has UI. Every transition is intentional. Every effect runs at the right moment.
+**Provability falls out of the language's natural shape — not from separate proof
+ceremony.**
 
-No virtual DOM. No JSX. No separate route files. No node_modules.
+The compiler does the wiring: server/client splitting, reactivity, routing,
+async scheduling, SQL batching, channel sync, validity-surface synthesis. You
+declare the shape; the compiler emits plain HTML, CSS, and JavaScript. No virtual
+DOM, no JSX, no `node_modules`.
 
 ```bash
 scrml compile hello.scrml -o dist/
 ```
 
+## The Tier 0 / 1 / 2 ladder
+
+Apps don't start at the north star; they evolve toward it. The Tier ladder lets
+you start as a prototype and add structure as the design hardens — without
+rewriting the markup tree. State-children carry forward verbatim between tiers;
+the wrapper swap is the commitment moment.
+
+| Tier  | Form                                       | What you get                                                           |
+|-------|--------------------------------------------|------------------------------------------------------------------------|
+| **0** | `if=` chains / `${ if (...) lift ... }`    | prototype; no exhaustiveness check                                     |
+| **1** | `<match for=Type [on=expr]>`               | structural exhaustiveness check at compile time                        |
+| **2** | `<engine for=Type initial=.Variant>`       | full deal — exhaustiveness + active transition rules (`rule=`) + per-state effect handlers (`<onTransition>`, `<onTimeout>`, `<onIdle>`) + composite hierarchy + `history` restore |
+
+Adding a sixth variant later forces the compiler to remind you where every
+transition into it should fire from. The state machine evolves; the compiler
+enforces.
+
 ## Why scrml
 
-**State is first-class.** State in scrml is named, typed, and instantiable. A `< Card>` declares a state type; `<Card>` instantiates one. HTML elements like `<input>` and `<program>` are pre-defined state types — the language has no conceptual gap between user-defined state and built-in state. Because state lives in the type system, it flows through `match`, `fn` signatures, the server/client boundary, and the database schema — all statically checked.
+**State is the declaration primitive.** `<count> = 0` declares a reactive cell;
+`@count` reads or writes it. Compound state, derived (`const <total> = expr`),
+server-pinned (`<users server>`), linear (exact-once) values, refinement-typed
+cells — all sit on the same primitive with different attributes. The compiler
+tracks the dependency graph and re-renders on change.
 
-**Mutability contracts.** Any mutable variable can carry a compile-time contract about what it's allowed to be. Value predicates (`@price: number(>0 && <10000)`) constrain every write. Presence lifecycle (`not`, `is some`, `is not`, `lin`) gates reads until a value exists and ensures exact-once consumption. State transitions (`< machine>`) declare an enum's legal moves — `.Locked => .Unlocked` — and reject assignments that skip a step. Layer these as you need them; leave them off where you don't. When you do declare a contract, a `fn` can mutate through it while remaining provably pure.
+**Engines are the centerpiece.** When state goes from "a few booleans" to "this
+app has phases," promote from booleans to a `<match>` block, then to `<engine>`.
+The engine declares legal transitions per state via `rule=`, runs effect
+handlers via `<onTransition>`, schedules timeouts via `<onTimeout>` (with
+`cancelTimer("X")` builtin), watches for engine-wide idle via `<onIdle>`,
+nests via composite state-children for sub-machines, and restores prior inner
+state on re-entry via the `history` attribute. Five behaviorally-distinct UI
+states authored once, exhaustively, with cross-state effects intentional and
+co-located.
 
-**Full-stack in one file.** Markup, logic, styles, SQL, server functions, error handling, tests — everything lives in `.scrml`. The compiler analyzes your code and splits it across server and client automatically. No API layer to maintain, no route files to keep in sync.
+**Full-stack in one file.** Markup, logic, styles, SQL, server functions, error
+handling, channels for realtime, inline tests — everything lives in `.scrml`.
+The compiler analyzes your code and splits it across server and client
+automatically. No API layer to maintain, no route files to keep in sync, no
+API/UI drift.
 
-**Realtime and workers are first-class.** A `<channel>` element declares a WebSocket endpoint — the compiler generates the upgrade route, the client connection manager, auto-reconnect, and pub/sub topic routing. `@shared` variables inside a channel sync across every connected client automatically. Heavy work goes in a nested `<program>` that compiles to a Web Worker, WASM module, or foreign-language sidecar — with typed RPC, supervised restarts, and `when message from <#name>` event hooks on the parent side. No `new WebSocket()`, no `postMessage` plumbing, no worker-loader config.
+**Errors are states, not booleans.** `try`/`catch` is not in scrml's vocabulary.
+Failable functions surface errors as enum variants (`fn fetchItems()! -> LoadError`);
+the `!{}` handler at the call site routes each variant into the right Phase
+state. Missing-handler is a compile-time error; the failure modes live in the
+type, not in `<isError>` + `<errorMsg>` boolean rubble.
 
-**The compiler eliminates N+1 automatically.** Because scrml owns both the query context and the loop context, a `for (let x of xs) { ?{... WHERE id = ${x.id}}.get() }` pattern is rewritten to one pre-loop `WHERE id IN (...)` fetch plus a keyed `Map` lookup — no DataLoader, no manual batching, no architectural pressure. Independent reads in a `!` handler share one `BEGIN DEFERRED`..`COMMIT` envelope for snapshot consistency. On-mount `server @var` loads across a page coalesce into a single `__mountHydrate` round-trip. Near-miss loops surface as `D-BATCH-001` diagnostics with the exact disqualifier; `?{...}.nobatch()` is the per-site escape hatch. [Measured Tier 2 wins](benchmarks/sql-batching/RESULTS.md): ~2× at N=10, ~3× at N=100, ~4× at N=1000 on on-disk WAL `bun:sqlite`.
+**Validators auto-synthesize a validity surface.** Compound state with `req`
+or `length` or other predicates produces `@form.isValid`, `@form.errors`,
+`@form.touched`, `@form.submitted` rollups AND per-field `@form.name.isValid`,
+`@form.name.errors` cells — all reactive, read-only. `<errors of=@form/>`
+renders the active errors at the right time. Same word fires three places:
+state validator (reactive), refinement type (compile-time + boundary), schema
+column (DB-enforced). No bilingual schema; no Zod; no separate validation
+library.
 
-## Quick Example
+**The compiler eliminates N+1 automatically.** Because scrml owns both the
+query context and the loop context, a `for (let x of xs) { ?{...where id =
+${x.id}}.get() }` pattern is rewritten to one pre-loop `WHERE id IN (...)`
+fetch plus a keyed `Map` lookup — no DataLoader, no manual batching.
+Independent reads in a `!` handler share one `BEGIN DEFERRED`..`COMMIT`
+envelope for snapshot consistency. [Measured Tier 2 wins](benchmarks/sql-batching/RESULTS.md):
+~2× at N=10, ~3× at N=100, ~4× at N=1000 on on-disk WAL `bun:sqlite`.
 
-A reactive counter with increment, decrement, and a step picker — in one file:
+**Realtime and workers as language primitives.** A `<channel>` block declares
+a WebSocket endpoint — the compiler emits the upgrade route, client connection
+manager, auto-reconnect, and pub/sub topic routing. State declared inside the
+channel auto-syncs across every connected client. A nested `<program>` is a
+Web Worker (or WASM module, or sidecar process) with typed RPC and supervised
+restarts. No `new WebSocket()`, no `postMessage` plumbing, no worker-loader
+config.
+
+**No npm.** scrml ships its own stdlib: `auth`, `crypto`, `data`, `format`,
+`fs`, `http`, `path`, `process`, `router`, `store`, `test`, `time`, `redis`,
+`cron`, `regex`, `oauth`. Sixteen modules cover the surface a typical app
+reaches for. No package manager, no dependency trees, no `node_modules`.
+
+## Quick Example — a Counter (Tier 0)
 
 ```scrml
 <program>
 
-@count = 0
-@step = 1
+<count> = 0
+<step>  = 1
 
 <div class="counter">
     <span class="value">${@count}</>
@@ -114,7 +184,7 @@ A reactive counter with increment, decrement, and a step picker — in one file:
     </select>
 
     <button onclick=decrement() disabled=atMinimum()>-</>
-    <button onclick=reset()>Reset</>
+    <button onclick=${reset(@count)}>Reset</>
     <button onclick=increment()>+</>
 </div>
 
@@ -123,56 +193,194 @@ ${
     function decrement() {
         if (@count - @step >= 0) { @count = @count - @step }
     }
-    function reset() { @count = 0 }
-    function atMinimum() { return @count - @step < 0 }
+    fn atMinimum() { return @count - @step < 0 }
 }
 
 #{
     .counter { text-align: center; font-family: system-ui; }
-    .value { font-size: 4rem; font-weight: 700; }
+    .value   { font-size: 4rem; font-weight: 700; }
 }
 
 </>
 ```
 
-Markup, logic, and styles live together. `@count` is reactive — changing it re-renders every element that reads it. `bind:value` keeps the select and `@step` in sync. The compiler generates direct DOM manipulation code with no runtime framework.
+State is declared with `<name> = init` (V5-strict). Access is `@name`. `<count>`
+and `<step>` are plain reactive cells. `bind:value=@step` keeps the select and
+the cell in sync. `fn atMinimum` is a pure predicate — the compiler verifies it
+has no side effects (no SQL, no DOM mutation, no reactive writes, no `fetch`,
+no `<request>` boundary). `reset(@count)` returns the cell to its declared
+initial value. The compiler generates direct DOM manipulation; no virtual DOM,
+no signals library.
 
-## Full-Stack in One File
+This is **Tier 0** — booleans-as-lifecycle, no exhaustiveness check. Fine for
+prototyping. The compiler nudges via lints (`W-LIFECYCLE-CANDIDATE`,
+`W-MATCH-TRANSITIONS-ACCRUING`) when the shape suggests promotion.
 
-A contact book with a database, server functions, and a reactive UI — no API layer, no ORM, no route files:
+## Engine Example — a Loader as a State Machine (Tier 2)
+
+The same loader pattern that almost every UI needs — expressed as an exhaustive
+state machine instead of boolean flags:
 
 ```scrml
-<program db="contacts.db">
+<program db="items.db">
 
-    @name = ""
-    @email = ""
+type LoadError:enum = {
+    Network(msg: string)
+    Empty
+}
 
-    <form onsubmit=addContact()>
-        <input bind:value=@name placeholder="Name"/>
-        <input bind:value=@email placeholder="Email"/>
-        <button type="submit">Add Contact</>
-    </form>
+type Phase:enum = {
+    Idle
+    Loading
+    Error(msg: string)
+    Empty
+    Success(count: int)
+}
 
-    <ul>
-        ${
-            for (let c of ?{`SELECT name, email FROM contacts`}.all()) {
-                lift <li>${c.name} — ${c.email}</>
-            }
-        }
-    </ul>
+server function fetchItems()! -> LoadError {
+    const result = ?{select * from items}
+    if (result.length == 0) fail LoadError::Empty
+    return result
+}
 
-    ${
-        server function addContact() {
-            ?{`INSERT INTO contacts (name, email) VALUES (${@name}, ${@email})`}.run()
-            @name = ""
-            @email = ""
-        }
+function load() {
+    @phase = .Loading
+    const result = fetchItems() !{
+        | ::Network msg -> { @phase = .Error(msg); return }
+        | ::Empty       -> { @phase = .Empty;       return }
     }
+    @phase = .Success(result.length)
+}
+
+<engine for=Phase initial=.Idle>
+
+    <Idle rule=.Loading>
+        <button onclick=load()>Load</button>
+    </>
+
+    <Loading rule=(.Success | .Error | .Empty)>
+        Loading…
+    </>
+
+    <Error msg rule=.Loading>
+        <div class="err">${msg}</div>
+        <button onclick=${@phase = .Loading}>Retry</button>
+    </>
+
+    <Empty>
+        No rows yet.
+    </>
+
+    <Success count>
+        Got it: ${count} rows
+    </>
+
+    <onTransition from=.Loading to=.Success>
+        ${ analytics.track("load.success") }
+    </>
+
+</>
 
 </>
 ```
 
-`<program db="contacts.db">` declares the app root with a database connection. `protect` on fields excludes them from client-visible types. The `server` keyword ensures the function runs server-side. The compiler generates the route, the fetch call, and the serialization. You never see any of it.
+Five behaviorally-distinct UI states — Idle / Loading / Error / Empty / Success —
+declared as variants of one enum. **Every variant has a UI block; the compiler
+enforces this exhaustively.** Cross-state effects live next to the engine they
+describe.
+
+- **`rule=`** declares legal transitions FROM each state. `<Idle rule=.Loading>`
+  means: from `Idle`, the only legal transition is to `Loading`. A typo like
+  `@phase = .Loaded` is a compile-time error (variant doesn't exist). Writing
+  `@phase = .Success(0)` from `Idle`'s body fires `E-ENGINE-INVALID-TRANSITION`
+  — Idle's `rule=` doesn't include `.Success`. Use `rule=*` as the explicit
+  wildcard escape hatch.
+- **`<onTransition from= to=>`** runs effects on specific transitions —
+  analytics, cleanup, side effects — co-located with the engine they describe,
+  not scattered across `useEffect` hooks.
+- **Errors are states, not booleans.** Instead of `<isError>` + `<errorMsg>`
+  cells, the failure mode is a variant of `Phase`. The `!{}` handler at the
+  call site routes each error variant into the right Phase variant. Missing
+  handler arm: compile-time error.
+- **Adding a sixth variant** later forces the compiler to remind you where
+  every transition into it should fire from. State machine evolves; compiler
+  enforces.
+
+For the surface beyond the basic shape — composite state-children with nested
+engines (sub-machines), the `history` attribute that restores prior inner state
+on re-entry, `<onTimeout after=2s to=.Variant>` for per-state timeouts (with
+named timers and `cancelTimer("name")` builtin), `<onIdle>` for engine-wide
+event-timeout watchdogs, `internal:rule=` for transitions that don't exit /
+re-enter the composite — see SPEC.md §51 and example
+[`examples/14-mario-state-machine.scrml`](examples/14-mario-state-machine.scrml).
+
+## Full-Stack in One File
+
+A contact book with a database, server functions, and an auto-validated reactive
+form — no API layer, no ORM, no route files, no separate validation schema:
+
+```scrml
+<program db="contacts.db">
+
+<schema>
+    contacts {
+        name:  text req length(>=2)
+        email: text req email
+    }
+</>
+
+<entry>
+    <name  req length(>=2)> = <input placeholder="Name"/>
+    <email req email>       = <input type="email" placeholder="Email"/>
+</>
+
+<form onsubmit=addContact()>
+    <entry.name/>
+    <entry.email/>
+    <errors of=@entry/>
+    <button type="submit" disabled=${not @entry.isValid}>Add Contact</>
+</form>
+
+<ul>
+    ${
+        for (let c of ?{select name, email from contacts}.all()) {
+            lift <li>${c.name} — ${c.email}</>
+        }
+    }
+</ul>
+
+${
+    server function addContact() {
+        ?{insert into contacts (name, email) values (${@entry.name}, ${@entry.email})}.run()
+        reset(@entry)
+    }
+}
+
+</>
+```
+
+Five things the compiler does that you don't write:
+
+- **`<schema>` is the source of truth for the data shape.** The `contacts` block
+  doubles as the database migration AND the source-level shared vocabulary.
+  `req length(>=2)` lowers to `NOT NULL` + `CHECK (length(name) >= 2)` at the
+  DB layer. The same `req length(>=2)` on the `<name>` cell above fires at the
+  state-validator layer. Same word, same semantics, two enforcement loci. Add
+  a third (refinement type on the function parameter) and it composes.
+- **`<entry>` is compound state with bindable markup (Shape 2).** Each field
+  declares a reactive cell *with* its render-spec. `<entry.name/>` in markup
+  expands to the bound input element with `bind:value` wired automatically.
+  Validators (`req`, `length(>=2)`, `email`) fire on input.
+- **`@entry.isValid`** is auto-synthesized — a compound rollup over every
+  field's validity. **`@entry.name.isValid`** is per-field. **`@entry.errors`**
+  is a list of enum-tagged errors (`.Required`, `.LengthFailed(predicate)`),
+  not strings — consumers pattern-match on the tag.
+- **`<errors of=@entry/>`** renders the active errors at the right time
+  (touched + submitted lifecycle managed automatically).
+- **`addContact()` runs server-side** because it does SQL. The compiler infers
+  the boundary, generates the route, the fetch call, CSRF tokens, parameterized
+  queries, and serialization. `reset(@entry)` returns every field to its
+  declared initial value. You never write any of this.
 
 ## Benchmarks
 
