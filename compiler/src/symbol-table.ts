@@ -5920,25 +5920,36 @@ function walkValidateResetTargets(
 //
 // Per Phase A1b Step B19 (audit §2 + spec §38.1, §38.4, §34).
 //
-// **v0.3 DIRECTION REVERSAL (Wave 1, 2026-05-12):** The original v0.next /
-// pre-v0.3 contract said "channels are file-level siblings of `<program>`"
-// and fired `E-CHANNEL-INSIDE-PROGRAM` on a channel descended from another
-// markup element. Under the v0.3 program-shape direction (one-program-per-
+// **v0.3 DIRECTION REVERSAL (Wave 1, 2026-05-12) + S87 Insight 30
+// dispensation (2026-05-12):** The original v0.next / pre-v0.3 contract
+// said "channels are file-level siblings of `<program>`" and fired
+// `E-CHANNEL-INSIDE-PROGRAM` on a channel descended from another markup
+// element. Under the v0.3 program-shape direction (one-program-per-
 // application; multi-page apps live as `<page>` siblings inside `<program>`),
 // channels move BACK INSIDE `<program>` — channels are app-scope shared-state
 // vehicles and the `<program>` body is their home. The walker fires the new
-// code `E-CHANNEL-OUTSIDE-PROGRAM` when a `<channel>` sits at file top level
-// (sibling of `<program>`, in a module file with no `<program>`, etc.). The
-// `<channel>` inside `<page>` fire-site (`E-CHANNEL-INSIDE-PAGE`) is filed
+// code `E-CHANNEL-OUTSIDE-PROGRAM` when a `<channel>` sits outside `<program>`
+// IN A FILE THAT ALSO CONTAINS `<program>` (the "your-file-has-a-`<program>`-
+// but-this-`<channel>`-isn't-inside-it" canonical-violation shape).
+// **Module-file dispensation (Insight 30, S87 ratified 47/44/44):** a
+// `<channel>` at file top in a MODULE FILE (no `<program>` element anywhere
+// in the file — the PURE-CHANNEL-FILE shape per §38.12.6) is canonical
+// placement and DOES NOT fire `E-CHANNEL-OUTSIDE-PROGRAM`. Engine-parity
+// rationale per §21.8 / B14 (cross-file `<engine>` import from module file).
+// The `<channel>` inside `<page>` fire-site (`E-CHANNEL-INSIDE-PAGE`) is filed
 // for the wave that adds `<page>` parser support — `<page>` is not
 // tokenized as a structural element in Wave 1 so it cannot be checked here.
 //
-//   §38.1 (v0.3, post-Wave 1) — channels live INSIDE `<program>`:
-//     "A `<channel>` element SHALL appear inside `<program>` only. A
-//      `<channel>` at file top level (sibling of `<program>` or in a
-//      module file with no `<program>`) SHALL emit `E-CHANNEL-OUTSIDE-
-//      PROGRAM`. A `<channel>` inside `<page>` SHALL emit `E-CHANNEL-
-//      INSIDE-PAGE` (channels are app-scope, not per-route)."
+//   §38.1 (v0.3, post-Wave 1; S87 Insight 30 refinement) — channels live
+//   INSIDE `<program>` when the file has a `<program>`; module-file
+//   PURE-CHANNEL-FILE shape is admitted:
+//     "A `<channel>` outside `<program>` IN A FILE THAT ALSO CONTAINS
+//      `<program>` SHALL emit `E-CHANNEL-OUTSIDE-PROGRAM`. Dispensation:
+//      a `<channel>` at file top in a file with no `<program>` element
+//      anywhere (the PURE-CHANNEL-FILE shape per §38.12.6) is canonical
+//      and SHALL NOT fire. Engine-parity per §21.8 / B14. A `<channel>`
+//      inside `<page>` SHALL emit `E-CHANNEL-INSIDE-PAGE` (channels are
+//      app-scope, not per-route)."
 //
 //   §38.4 line 15468 (V5-strict body — no `@shared`):
 //     "The `@shared` modifier SHALL NOT appear in any v0.next source. Use
@@ -5953,15 +5964,26 @@ function walkValidateResetTargets(
 // SYM is the canonical "validation after AST is fully formed" stage and
 // already houses adjacent walkers (B14-B17). Adds cleanly as PASS 14.
 //
-// **Walker shape:** two independent sub-walks in `walkValidateChannels`:
+// **Walker shape:** two independent sub-walks in `walkValidateChannels`,
+// preceded by a `hasProgramElement` pre-scan (S87 Insight 30):
+//
+//   0. `hasProgramElement(ast.nodes)` pre-scan — quick AST walk that
+//      returns `true` iff any `kind: "markup", tag: "program"` node is
+//      present in the file. Result threaded into walkChannelPlacement
+//      as `fileHasProgram`.
 //
 //   1. `walkChannelPlacement` — walk markup tree carrying a
-//      `programDepth` counter (count of `<program>` ancestors). A
-//      `<channel>` at programDepth === 0 fires `E-CHANNEL-OUTSIDE-PROGRAM`;
-//      a `<channel>` at programDepth >= 1 is allowed. (v0.3 reversal —
-//      see Wave 1 dispatch + §38.1 v0.3.) The walker descends into
-//      `node.children` (markup children) and `node.body` (logic blocks;
-//      channels never appear inside logic, but recursion is cheap).
+//      `programDepth` counter (count of `<program>` ancestors) AND the
+//      `fileHasProgram` boolean. A `<channel>` at programDepth === 0
+//      fires `E-CHANNEL-OUTSIDE-PROGRAM` IFF `fileHasProgram === true`
+//      (genuine canonical-violation shape). When `fileHasProgram ===
+//      false` (module-file / PURE-CHANNEL-FILE shape), file-top
+//      `<channel>` is canonical and the walker is silent. A `<channel>`
+//      at programDepth >= 1 is always allowed. (v0.3 reversal + S87
+//      Insight 30 — see Wave 1 dispatch + §38.1 v0.3.) The walker
+//      descends into `node.children` (markup children) and `node.body`
+//      (logic blocks; channels never appear inside logic, but recursion
+//      is cheap).
 //
 //   2. `walkSharedModifier` — generic AST walker visiting every
 //      `state-decl` (including compound `children` arrays). Fires
@@ -5981,12 +6003,17 @@ function walkValidateResetTargets(
 
 /**
  * PASS 15 (B19) — channel-placement + `@shared`-modifier rejection.
- * Mutates `errors[]`. Two sub-walks.
+ * Mutates `errors[]`. Two sub-walks + one pre-scan.
  *
- * **v0.3 direction reversal (Wave 1):** Placement-check direction inverted.
- * Channels must now live INSIDE `<program>`. A `<channel>` at file top level
- * (programDepth === 0) fires `E-CHANNEL-OUTSIDE-PROGRAM`. Channels inside
- * `<program>` are the canonical placement. `<channel>` inside `<page>` will
+ * **v0.3 direction reversal (Wave 1) + S87 Insight 30 dispensation:**
+ * Placement-check direction inverted from v0.next. Channels live INSIDE
+ * `<program>` IN ANY FILE THAT CONTAINS `<program>`. A `<channel>` at
+ * file top in such a file (programDepth === 0) fires
+ * `E-CHANNEL-OUTSIDE-PROGRAM`. **Dispensation:** a `<channel>` at file
+ * top in a MODULE FILE (no `<program>` element anywhere — PURE-CHANNEL-FILE
+ * per §38.12.6) is canonical and DOES NOT fire. Engine-parity per §21.8 /
+ * B14. The pre-scan `hasProgramElement(ast.nodes)` computes this signal
+ * once and threads it through the walker. `<channel>` inside `<page>` will
  * fire `E-CHANNEL-INSIDE-PAGE` once `<page>` parser support lands in a
  * later wave; the error code is registered in §34 now but no walker fires
  * it yet (Wave 1 has no `<page>` parsing).
@@ -5998,14 +6025,83 @@ function walkValidateChannels(
 ): void {
   // 1. Placement check. Channels inside `<program>` are allowed
   //    (programDepth >= 1); channels at file top level fire
-  //    E-CHANNEL-OUTSIDE-PROGRAM.
+  //    E-CHANNEL-OUTSIDE-PROGRAM — BUT only when the file contains a
+  //    `<program>` element somewhere (Insight 30 S87 dispensation:
+  //    module-file PURE-CHANNEL-FILE shape is canonical and silent;
+  //    see §38.1 + §38.12.6, engine-parity per §21.8 / B14).
+  const fileHasProgram = hasProgramElement(ast.nodes);
   const visitedPlacement = new WeakSet<object>();
-  walkChannelPlacement(ast.nodes, /*programDepth*/ 0, errors, filePath, visitedPlacement);
+  walkChannelPlacement(
+    ast.nodes,
+    /*programDepth*/ 0,
+    fileHasProgram,
+    errors,
+    filePath,
+    visitedPlacement,
+  );
 
   // 2. `@shared` modifier rejection. Fires on any state-decl with
   //    isShared:true, regardless of containing channel context.
   const visitedShared = new WeakSet<object>();
   walkSharedModifier(ast.nodes, errors, filePath, visitedShared);
+}
+
+/**
+ * Pre-scan helper: does the file contain any `<program>` markup element?
+ *
+ * Per Insight 30 (S87, ratified 47/44/44) closing §38.1 OQ:
+ *   - File contains `<program>` => `<channel>` outside `<program>` is the
+ *     canonical-violation shape (fires E-CHANNEL-OUTSIDE-PROGRAM).
+ *   - File contains NO `<program>` (module file / PURE-CHANNEL-FILE shape
+ *     per §38.12.6) => file-top `<channel>` is canonical and SILENT.
+ *
+ * Engine-parity rationale: §21.8 / B14 already admits cross-file `<engine>`
+ * declarations at file top in module files (Form 1 `export <engine>`).
+ * Channels reuse that precedent rather than introducing a structural
+ * asymmetry between two singleton-state-primitives that share the same
+ * scope discipline (app-wide singleton, single declaration site, cross-file
+ * mount-via-tag).
+ *
+ * Implementation: identical traversal shape to walkChannelPlacement —
+ * descends into `children`, `body`, `defChildren`, `consequent`, `alternate`,
+ * `arms[].body`. Returns `true` as soon as the first `kind: "markup",
+ * tag: "program"` node is reached. WeakSet cycle guard mirrors the existing
+ * walker convention.
+ */
+function hasProgramElement(nodes: any): boolean {
+  const visited = new WeakSet<object>();
+  return _hasProgramElementInner(nodes, visited);
+}
+
+function _hasProgramElementInner(nodes: any, visited: WeakSet<object>): boolean {
+  if (!nodes) return false;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) {
+      if (_hasProgramElementInner(n, visited)) return true;
+    }
+    return false;
+  }
+  if (typeof nodes !== "object") return false;
+  if (visited.has(nodes)) return false;
+  visited.add(nodes);
+
+  const node = nodes as any;
+
+  if (node.kind === "markup" && (node.tag ?? "") === "program") {
+    return true;
+  }
+
+  if (Array.isArray(node.children) && _hasProgramElementInner(node.children, visited)) return true;
+  if (Array.isArray(node.body) && _hasProgramElementInner(node.body, visited)) return true;
+  if (Array.isArray(node.defChildren) && _hasProgramElementInner(node.defChildren, visited)) return true;
+  if (Array.isArray(node.consequent) && _hasProgramElementInner(node.consequent, visited)) return true;
+  if (Array.isArray(node.alternate) && _hasProgramElementInner(node.alternate, visited)) return true;
+  if (Array.isArray(node.arms)) {
+    for (const arm of node.arms) {
+      if (arm && Array.isArray(arm.body) && _hasProgramElementInner(arm.body, visited)) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -6017,6 +6113,17 @@ function walkValidateChannels(
  * `E-CHANNEL-OUTSIDE-PROGRAM` — channels must live inside `<program>` in
  * v0.3. A `<channel>` at `programDepth >= 1` is the canonical placement
  * (inside the entry-file `<program>` body).
+ *
+ * **S87 Insight 30 — module-file dispensation (PURE-CHANNEL-FILE).**
+ * When `fileHasProgram === false` (the file contains no `<program>`
+ * element anywhere — i.e. a module file / PURE-CHANNEL-FILE shape per
+ * §38.12.6), file-top `<channel>` declarations are CANONICAL and the
+ * walker does NOT fire `E-CHANNEL-OUTSIDE-PROGRAM`. The diagnostic
+ * fires only on the genuine canonical-violation shape: a `<channel>`
+ * outside `<program>` in a file that ALSO contains `<program>` (the
+ * "your-file-has-a-`<program>`-but-this-`<channel>`-isn't-inside-it"
+ * shape). Engine-parity rationale per §21.8 / B14 — `<engine>` already
+ * accepts module-file top-level placement; channels reuse that precedent.
  *
  * **`<page>` inside-fire deferred.** A `<channel>` inside `<page>` would
  * fire `E-CHANNEL-INSIDE-PAGE`. The error code is registered in §34 now
@@ -6032,8 +6139,8 @@ function walkValidateChannels(
  * out of scope for Wave 1 (channel-in-component-def is an unusual shape
  * that pre-existed the v0.3 reversal). For Wave 1, component-def acts
  * neutral: it does not increment `programDepth` (so a channel inside
- * component-def's defChildren, outside `<program>`, still fires
- * `E-CHANNEL-OUTSIDE-PROGRAM`).
+ * component-def's defChildren, outside `<program>` IN A FILE THAT HAS
+ * a `<program>` somewhere, still fires `E-CHANNEL-OUTSIDE-PROGRAM`).
  *
  * Logic-block bodies (`node.kind === "logic"`) and other non-markup
  * containers never legally hold `<channel>` markup nodes (the parser
@@ -6042,6 +6149,7 @@ function walkValidateChannels(
 function walkChannelPlacement(
   nodes: any,
   programDepth: number,
+  fileHasProgram: boolean,
   errors: SYMDiagnostic[],
   filePath: string,
   visited: WeakSet<object>,
@@ -6049,7 +6157,7 @@ function walkChannelPlacement(
   if (!nodes) return;
   if (Array.isArray(nodes)) {
     for (const n of nodes) {
-      walkChannelPlacement(n, programDepth, errors, filePath, visited);
+      walkChannelPlacement(n, programDepth, fileHasProgram, errors, filePath, visited);
     }
     return;
   }
@@ -6060,10 +6168,17 @@ function walkChannelPlacement(
   const node = nodes as any;
 
   // Fire E-CHANNEL-OUTSIDE-PROGRAM if a `<channel>` markup is reached at
-  // programDepth === 0 (i.e. no `<program>` ancestor). v0.3 places
-  // channels INSIDE `<program>`; file-top-level channels are the new
-  // violation direction.
-  if (node.kind === "markup" && (node.tag ?? "") === "channel" && programDepth === 0) {
+  // programDepth === 0 (i.e. no `<program>` ancestor) AND the file has a
+  // `<program>` element somewhere else (canonical-violation shape).
+  // Insight 30 (S87) dispensation: when the file has NO `<program>`
+  // anywhere, file-top `<channel>` is canonical (PURE-CHANNEL-FILE per
+  // §38.12.6) — silent. Engine-parity per §21.8 / B14.
+  if (
+    node.kind === "markup" &&
+    (node.tag ?? "") === "channel" &&
+    programDepth === 0 &&
+    fileHasProgram
+  ) {
     fireChannelOutsideProgram(node, errors, filePath);
   }
 
@@ -6076,24 +6191,24 @@ function walkChannelPlacement(
   const childDepth = isProgramMarkup ? programDepth + 1 : programDepth;
 
   if (Array.isArray(node.children)) {
-    walkChannelPlacement(node.children, childDepth, errors, filePath, visited);
+    walkChannelPlacement(node.children, childDepth, fileHasProgram, errors, filePath, visited);
   }
   if (Array.isArray(node.body)) {
-    walkChannelPlacement(node.body, childDepth, errors, filePath, visited);
+    walkChannelPlacement(node.body, childDepth, fileHasProgram, errors, filePath, visited);
   }
   if (Array.isArray(node.defChildren)) {
-    walkChannelPlacement(node.defChildren, childDepth, errors, filePath, visited);
+    walkChannelPlacement(node.defChildren, childDepth, fileHasProgram, errors, filePath, visited);
   }
   if (Array.isArray(node.consequent)) {
-    walkChannelPlacement(node.consequent, childDepth, errors, filePath, visited);
+    walkChannelPlacement(node.consequent, childDepth, fileHasProgram, errors, filePath, visited);
   }
   if (Array.isArray(node.alternate)) {
-    walkChannelPlacement(node.alternate, childDepth, errors, filePath, visited);
+    walkChannelPlacement(node.alternate, childDepth, fileHasProgram, errors, filePath, visited);
   }
   if (Array.isArray(node.arms)) {
     for (const arm of node.arms) {
       if (arm && Array.isArray(arm.body)) {
-        walkChannelPlacement(arm.body, childDepth, errors, filePath, visited);
+        walkChannelPlacement(arm.body, childDepth, fileHasProgram, errors, filePath, visited);
       }
     }
   }
@@ -7786,9 +7901,14 @@ export function runSYM(input: SYMInput): SYMResult {
   // PASS 15 (B19): Channel placement + `@shared` modifier rejection.
   // Two sub-walks per SPEC §38.1, §38.4, §34:
   //   - walkChannelPlacement: fires E-CHANNEL-OUTSIDE-PROGRAM on any
-  //     `<channel>` markup node at programDepth === 0 (v0.3 direction:
-  //     channels live INSIDE `<program>`). v0.3 reversal Wave 1; see
-  //     pre-v0.3 `E-CHANNEL-INSIDE-PROGRAM` for the prior direction.
+  //     `<channel>` markup node at programDepth === 0 when the file
+  //     contains a `<program>` element somewhere (v0.3 direction:
+  //     channels live INSIDE `<program>` when one exists). Per S87
+  //     Insight 30 dispensation, file-top `<channel>` in a module file
+  //     with no `<program>` (PURE-CHANNEL-FILE shape, §38.12.6) is
+  //     canonical and silent — engine-parity per §21.8 / B14. v0.3
+  //     reversal Wave 1; see pre-v0.3 `E-CHANNEL-INSIDE-PROGRAM` for the
+  //     prior direction.
   //   - walkSharedModifier: fires E-CHANNEL-SHARED-MODIFIER on any
   //     `state-decl` carrying `isShared: true` (TAB stamps this on
   //     `@shared <name> = init` source — the legacy v1 modifier).

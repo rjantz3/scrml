@@ -18,6 +18,13 @@
  *   2. E-CHANNEL-SHARED-MODIFIER — any `state-decl` with `isShared: true`
  *      (i.e. source contains `@shared <name> = …`).
  *
+ * **S87 Insight 30 dispensation (ratified 47/44/44):** Module-file
+ * `<channel>` shape — a `<channel>` at file top in a file with no
+ * `<program>` element anywhere (the PURE-CHANNEL-FILE shape per §38.12.6)
+ * is canonical placement and DOES NOT fire `E-CHANNEL-OUTSIDE-PROGRAM`.
+ * Engine-parity rationale per §21.8 / B14 (cross-file `<engine>` admits
+ * the same module-file file-top placement). Coverage in §B19.11.
+ *
  * **Out of scope (deferred to later waves):**
  *   - E-CHANNEL-INSIDE-PAGE — `<channel>` inside `<page>` fire-site. Wave 1
  *     does not tokenize `<page>` as a structural element; that fire-site is
@@ -26,16 +33,13 @@
  *   - V5-strict access validation inside channel body (B3 owns `@cellName`).
  *   - Cross-scope channel-cell visibility (B1 PASS 1 + B3 PASS 3 cover).
  *   - Channel attribute shape errors (E-CHANNEL-001/-005/-007 — codegen).
- *   - Cross-file `export <channel>` from module files (A8 / route-dedup).
- *     The brief notes A8 is in v0.3 scope but implementation is deferred —
- *     module-file channels will need their own dispensation (likely an
- *     export-only marker that exempts the file from the placement rule).
+ *   - A8 exporter-as-route-SoT contract (deferred per §38.1; CHX continues
+ *     to satisfy cross-file channel access under the Insight 30 dispensation).
  *
  * Coverage areas:
  *   §B19.1 — `<channel>` inside `<program>` does NOT fire E-CHANNEL-OUTSIDE-PROGRAM
- *   §B19.2 — `<channel>` at file top level (no <program> ancestor) fires
- *   §B19.3 — `<channel>` inside a non-program markup at file top fires
- *            (no `<program>` ancestor — still violates v0.3)
+ *   §B19.2 — `<channel>` at file top level in a file WITH `<program>` fires
+ *   §B19.3 — `<channel>` inside a non-program markup (program-sibling) fires
  *   §B19.4 — V5-strict channel body (`<x> = init`) does NOT fire E-CHANNEL-SHARED-MODIFIER
  *   §B19.5 — `@shared` inside channel body fires E-CHANNEL-SHARED-MODIFIER
  *   §B19.6 — `@shared` inside `<program>` (no channel) still fires (§38.4 line 15468)
@@ -43,6 +47,7 @@
  *   §B19.8 — diagnostic message shape (code + spec ref + canonical fix wording)
  *   §B19.9 — span attached on the offending node
  *   §B19.10 — channel inside `<program>` + cross-scope `@cellName` access (B3 intact)
+ *   §B19.11 — S87 Insight 30: module-file `<channel>` dispensation (PURE-CHANNEL-FILE)
  */
 
 import { describe, test, expect } from "bun:test";
@@ -117,18 +122,9 @@ describe("§B19.2 <channel> at file top level fires E-CHANNEL-OUTSIDE-PROGRAM", 
     expect(fires[0].message).toContain("chat");
   });
 
-  test("file-top `<channel>` in module file (no `<program>` anywhere) fires", () => {
-    // Module-style file: channel only, no <program>. v0.3 Wave 1 fires
-    // the diagnostic uniformly — module-file channel exports are an
-    // A8 / cross-file-route-dedup follow-on that needs its own dispensation
-    // and is deferred to a later wave. For Wave 1, this fires.
-    const source = `<channel name="only">
-\${ <m> = [] }
-</>`;
-    const { sym } = compileSym(source);
-    const fires = errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM");
-    expect(fires.length).toBeGreaterThanOrEqual(1);
-  });
+  // S87 Insight 30 dispensation: file-top `<channel>` in a MODULE FILE
+  // (no `<program>` element anywhere — PURE-CHANNEL-FILE shape per §38.12.6)
+  // is canonical and DOES NOT fire. The case below now lives in §B19.11.
 });
 
 // ---------------------------------------------------------------------------
@@ -363,5 +359,118 @@ describe("§B19.10 channel inside <program> keeps cross-scope @cellName access (
     // logic block does not introduce a new scope), so the symbol table
     // contains a record for `messages`.
     expect(sym.fileScope.stateCells.has("messages")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §B19.11 — S87 Insight 30: module-file `<channel>` dispensation
+// (PURE-CHANNEL-FILE per §38.12.6 — file-top channel in a file with no
+//  `<program>` element anywhere is canonical and DOES NOT fire).
+//
+// Engine-parity rationale per §21.8 / B14 — cross-file `<engine>` already
+// admits the same module-file top-level placement; channels reuse the
+// precedent rather than introducing a structural asymmetry.
+// ---------------------------------------------------------------------------
+
+describe("§B19.11 module-file `<channel>` dispensation (PURE-CHANNEL-FILE, S87 Insight 30)", () => {
+  test("file-top `<channel>` in module file (no `<program>` anywhere) — no fire", () => {
+    // PURE-CHANNEL-FILE shape: only a `<channel>` decl, no `<program>` at all.
+    // Per Insight 30 (ratified S87 47/44/44 closing §38.1 OQ), this is the
+    // canonical module-file shape — silent.
+    const source = `<channel name="only">
+\${ <m> = [] }
+</>`;
+    const { sym } = compileSym(source);
+    expect(errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(0);
+  });
+
+  test("`export <channel>` at file top in module file — no fire", () => {
+    // PURE-CHANNEL-FILE shape via `export <channel>` form (per §38.12 cross-file
+    // inline-expansion CHX). This is the canonical trucking-dispatch consumer
+    // shape — channels/dispatch-board.scrml exports the channel; consumer pages
+    // mount it via `<dispatchBoard/>` and CHX inlines the body.
+    const source = `export <channel name="dispatch-board">
+\${
+  <boardEvents> = []
+  server function publishBoardEvent(eventType, loadId, status) {
+    @boardEvents = [...@boardEvents, { type: eventType }]
+  }
+}
+</>`;
+    const { sym } = compileSym(source);
+    expect(errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(0);
+  });
+
+  test("multiple `<channel>` decls at file top in module file — no fire", () => {
+    // Module file with two PURE-CHANNEL-FILE-style channels. Both admitted.
+    const source = `<channel name="c1">
+\${ <a> = 0 }
+</>
+<channel name="c2">
+\${ <b> = 0 }
+</>`;
+    const { sym } = compileSym(source);
+    expect(errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(0);
+  });
+
+  test("file with `<program>` + file-top `<channel>` sibling — STILL fires (regression guard)", () => {
+    // The genuine canonical-violation shape: file has `<program>` BUT the
+    // channel is positioned outside it. The dispensation does NOT apply
+    // (fileHasProgram === true).
+    const source = `<channel name="chat">
+\${ <messages> = [] }
+</>
+<program>
+\${ <draft> = "" }
+</program>`;
+    const { sym } = compileSym(source);
+    const fires = errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM");
+    expect(fires.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("file with `<program>` + `<channel>` INSIDE it — no fire (canonical, regression guard)", () => {
+    // Pre-existing v0.3 canonical: channel descends from <program>. Unchanged
+    // by the dispensation. Regression guard.
+    const source = `<program>
+<channel name="chat">
+\${ <messages> = [] }
+</>
+</program>`;
+    const { sym } = compileSym(source);
+    expect(errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(0);
+  });
+
+  test("engine-parity check: file-top `<engine>` and file-top `<channel>` in module file both silent", () => {
+    // Engine-parity rationale anchor (§21.8 / B14). Both surfaces admit the
+    // same module-file top-level placement under Insight 30. The walker's
+    // dispensation brings `<channel>` to parity with `<engine>`.
+    //
+    // Engines have their own walkers (B14) and do not fire E-CHANNEL-*. We
+    // verify here only that the channel-placement walker does not fire on
+    // EITHER markup at file top in a module file (no `<program>` anywhere).
+    const engineOnly = `<engine for="Mood" var=N>
+\${ <state> = .idle }
+</>`;
+    const channelOnly = `<channel name="presence">
+\${ <users> = [] }
+</>`;
+    const engineSym = compileSym(engineOnly).sym;
+    const channelSym = compileSym(channelOnly).sym;
+    // Engine surface: walkChannelPlacement does not fire on engines (no
+    // <channel> markup). Channel surface: dispensation silences the fire.
+    expect(errorsByCode(engineSym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(0);
+    expect(errorsByCode(channelSym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(0);
+  });
+
+  test("module-file `<channel>` retains `@shared` rejection (orthogonal walker)", () => {
+    // `walkSharedModifier` is independent of placement — `@shared` anywhere
+    // still fires E-CHANNEL-SHARED-MODIFIER per §38.4 line 15468. The
+    // Insight 30 dispensation does NOT relax this.
+    const source = `<channel name="legacy">
+\${ @shared count = 0 }
+</>`;
+    const { sym } = compileSym(source);
+    expect(errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(0);
+    expect(errorsByCode(sym, "E-CHANNEL-SHARED-MODIFIER").length).toBeGreaterThanOrEqual(1);
   });
 });
