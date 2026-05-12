@@ -150,15 +150,17 @@ describe("§51.9 derived-engine projected var — E-DG-002 reader credit", () =>
     expect(edg002For(errors, "marioState")).toBeUndefined();
   });
 
-  test("NEGATIVE (regression): projected var with ZERO readers DOES fire E-DG-002", () => {
-    // No reference to @healthRisk anywhere. The substantive E-DG-002 case
-    // must still work — the fix must NOT mask truly-unused projected vars.
-    // We DO reference @marioState in markup so the source var is consumed
-    // (we want to isolate the fire to @healthRisk).
+  test("NEGATIVE (regression): NON-engine projected target with ZERO readers DOES fire E-DG-002", () => {
+    // The substantive E-DG-002 case must still work — the fix must NOT mask
+    // truly-unused projected vars. With S85 engine-self-credit (an engine
+    // block is the structural reader of its own auto-declared cell per
+    // §51.0.D), a derived ENGINE cell with no other readers no longer fires
+    // E-DG-002. Switch the substantive case to a NON-engine cell to keep
+    // testing the underlying "zero readers anywhere" path.
     const source = [
       "${",
       "  type MarioState:enum = { Small, Big, Fire, Cape }",
-      "  type HealthRisk:enum = { AtRisk, Safe }",
+      "  <unusedCell> = \"nothing reads this\"",
       "}",
       "",
       "<engine for=MarioState initial=.Small>",
@@ -168,11 +170,6 @@ describe("§51.9 derived-engine projected var — E-DG-002 reader credit", () =>
       "  <Cape  rule=.Small></>",
       "</>",
       "",
-      "<engine for=HealthRisk derived=@marioState>",
-      "  .Small               => .AtRisk",
-      "  .Big | .Fire | .Cape => .Safe",
-      "</>",
-      "",
       "<program>",
       "  <p>State: ${@marioState}</>",
       "</>",
@@ -180,9 +177,9 @@ describe("§51.9 derived-engine projected var — E-DG-002 reader credit", () =>
     ].join("\n");
     const { fatalErrors, errors } = compileSource(source, "projected-no-readers.scrml");
     expect(fatalErrors).toEqual([]);
-    // Substantive case: projected var has zero readers — warning MUST fire.
-    expect(edg002For(errors, "healthRisk")).toBeDefined();
-    // Source var has a reader (the ${@marioState} interpolation) — no false-fire.
+    // Substantive case: non-engine cell with zero readers — warning MUST fire.
+    expect(edg002For(errors, "unusedCell")).toBeDefined();
+    // Engine cell has a structural reader (the engine block per §51.0.D) — no false-fire.
     expect(edg002For(errors, "marioState")).toBeUndefined();
   });
 

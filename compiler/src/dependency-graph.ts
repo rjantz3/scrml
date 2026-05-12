@@ -1848,6 +1848,27 @@ export function runDG(input: DGInput): DGOutput {
           }
         }
       }
+      // §51.0.D — an `<engine>` block's declaration position IS its rendered
+      // output position; the block renders its variant arms based on the
+      // engine's auto-declared cell (§51.0.C). The engine block is therefore
+      // the structural reader of its own cell. Without this credit, an engine
+      // whose cell is never explicitly referenced anywhere else
+      // (e.g. `${@driverStatus}`, `@driverStatus.advance(...)`) false-fires
+      // E-DG-002 — even though the cell IS consumed by the engine's own body
+      // render (cf. Bug 3 — derived-engine projected vars; analogous case for
+      // the bare engine-cell consumption pattern). Per `dependency-graph.ts`
+      // engine-cell registration at line 1147-1154, the cell is registered as
+      // a generic `reactive` DG node from `engineMeta.varName`; the engine's
+      // structural read is invisible to the rest of the markup-sweep machinery.
+      if (node.kind === "engine-decl") {
+        const eAny = node as Record<string, unknown>;
+        const record = eAny._record as Record<string, unknown> | undefined;
+        const engineMeta = record?.engineMeta as Record<string, unknown> | undefined;
+        const varName = engineMeta?.varName;
+        if (typeof varName === "string" && varName.length > 0) {
+          creditReader(varName);
+        }
+      }
       // Explicitly walk meta block bodies — ^{} blocks can contain @var reads
       // in their logic statements. Meta nodes have no children/consequent/alternate.
       if (node.kind === "meta") {
