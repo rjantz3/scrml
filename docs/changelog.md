@@ -2,7 +2,44 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-12 S85 CLOSE, all seven semver tags live on origin — **v0.2.0 `022ee02` + v0.2.1 `d72c074` + v0.2.2 `98e872d` + v0.2.3 `d512266` + v0.2.4 `28cd2ac` + v0.2.5 `2c687b5` + v0.2.6 `efbd1e8`**): **11,507 pass / 100 skip / 1 todo / 0 FAIL** (557 files). v0.2.6 is the current shipped baseline (F-COMPONENT-001 family closed; trucking-dispatch reference app error-free); v0.3 Wave 1 spec anchor + walker inversion land at HEAD `a574353` (NOT tagged — v0.3.0 waits for Wave 2+ implementation completion).
+Current baseline (2026-05-12 S86 IN-FLIGHT, all seven semver tags live on origin — **v0.2.0 `022ee02` + v0.2.1 `d72c074` + v0.2.2 `98e872d` + v0.2.3 `d512266` + v0.2.4 `28cd2ac` + v0.2.5 `2c687b5` + v0.2.6 `efbd1e8`**): **11,577 pass / 114 skip / 1 todo / 0 FAIL** (561 files). v0.2.6 is the current shipped baseline. v0.3 Wave 2 compiler implementation LANDED S86 — migrate `--program-shape` + TAB extension + BS-layer extension; HEAD `2314c8c` (NOT tagged — v0.3.0 waits for Wave 3 fixture sweep + Wave 4 adopter content).
+
+### 2026-05-12 (S86 IN-FLIGHT — v0.3 Wave 2 compiler implementation LANDED · BS-layer SPEC §40.8 gap CLOSED · co-location-of-behavior + corpus-ouroboros standing rules ratified)
+
+**Session-defining outcome:** v0.3 Wave 2 — the compiler implementation following S85's spec anchor — landed across two parallel agent dispatches + one follow-up. `bun scrml migrate --program-shape` rewrites legacy v0.2 source into v0.3 shape (5-bucket classification: entry / route / module / schema-anchor / ambiguous). TAB stage recognizes `<page>` symmetric to `<program>` for default-logic body + 7 new top-level decl shapes auto-lift + W-PROGRAM-REDUNDANT-LOGIC + E-PAGE-INVALID-ATTR + E-PAGE-ROUTE-ATTR-FORBIDDEN diagnostics. BS-layer extended to recognize V5-strict state-decl shape inside `<program>` AND `<page>` body — closing the SPEC §40.8 normative-vs-implementation gap that item (b) surfaced. Plus durable PA standing rule ratified S86: idiomatic examples NEVER promote file-top `#{}` styles + the corpus-ouroboros warning sharpening pa.md Rule 4 to the example/fixture corpus.
+
+**Commits landed S86 (so far):**
+
+- **`885eaa9`** — Wave 2 item (a): `bun scrml migrate --program-shape` extension. +1108 LOC migrate.js (608 → ~1716); new --program-shape + --report flags; `classifyFile` helper extracted + unit-tested in isolation; 5-bucket classification + per-bucket rewrite ops; safety harness reuse via compileScrml roundtrip parse-check; --dry-run --report mode for structured advisory output. +33 tests / 5 fixtures (one per bucket). **Known limitation surfaced:** existing `sanityCheckParse` stages rewritten source into `/tmp` without relative-path context, so files with cross-file imports fail the safety gate even when the rewrite is semantically correct. Multi-file route files classified correctly in `--report` but NOT auto-rewritten until Wave 3 sweep handles them with proper path context (per brief §3.3.4 "Do not weaken this gate"). Plus PA-side dispatch infrastructure: `docs/changes/v0.3-wave-2/DISPATCH-BRIEF.md` (~530 lines) + `DIRECTIVE-AMENDMENT-001-fixture-styling.md`.
+
+- **`41a4706`** — Wave 2 item (b): TAB extension. compiler/src/ast-builder.js extended in 4 orthogonal ways: (1) `<page>` recognized as default-logic body container (mirrors `<program>` via `isPageRoot` OR-included in childContext); (2) top-level decl regex family extended for function/fn/server-function/type-enum/type-struct/let/const + export-prefix support on TOPLEVEL_STATE_DECL_RE; (3) W-PROGRAM-REDUNDANT-LOGIC emission when `<program>`/`<page>` body wraps top-level decls in redundant `${...}` block (only fires when content is all-decls; mixed-content does NOT fire); (4) `<page>` per-route attr validation (E-PAGE-INVALID-ATTR for outside-`{db,auth,csrf,ratelimit}`; E-PAGE-ROUTE-ATTR-FORBIDDEN for route= specifically). +14 tests. **18 self-host parity tests `.skip`'d** pending self-host regen (deferred per pa.md S81 self-host-orthogonality). **Cascade-fix:** 4 existing test files' `parse()` helpers tightened to filter warnings (only assert on fatal-error absence, not warning absence) — mechanical alignment for the new warning emission.
+
+- **`4585b45`** — PA-side cleanup: SPEC-INDEX.md regen post-Wave-1 (58 row line-range refreshes auto-generated via `bun run scripts/regen-spec-index.ts` reflecting v0.3 Wave 1 SPEC growth) + route-inference.ts docstring clarification (`buildPageRouteTree` is AUTH-MIDDLEWARE path map, NOT canonical URL inference; canonical URL inference is §47.9.2 path-preserve; v0.4 follow-up to harmonize `routes/`-keying with `pages/` corpus convention). No behavior change.
+
+- **`2314c8c`** — Wave 2 follow-up: BS-layer extension closing the SPEC §40.8 normative-vs-implementation gap. compiler/src/block-splitter.js ~line 1161: three new locals (`isChannelBody` / `isProgramBody` / `isPageBody`) OR'd into the existing peek guard; when any fires AND `peekTopLevelStateDeclSignal()` returns true, the `<NAME [attrs]>` slice flows through as TEXT instead of pushing a markup context. TAB-layer's existing `liftBareDeclarations` path then synthetic-`${...}`-wraps it. +19 tests covering 4 shapes × 2 contexts + markup-opener disambiguation + regression on existing `<channel>`-body + SPEC §40.8 worked-example dual-form (bare + wrapped both compile cleanly; wrapped fires W-PROGRAM-REDUNDANT-LOGIC per item (b)).
+
+**S86 user-voice ratifications (saved to user-voice-scrmlTS.md):**
+
+- **Idiomatic-examples styling rule (S86):** *"while styles might be allowed outside `<program>`, it should be discouraged and never promoted in what should be idiomatic examples. the fact is I dont see 1 single reason to actully declare css there, css centralization always leads to untennable css."* — file-top `#{}` blocks SHALL NOT appear in idiomatic examples (kickstarter, primer worked examples, articles, fixture demos, dive worked examples). Use inline `class="..."` Tailwind-style. `#{}` reserved for non-inline-expressible shapes (CSS vars, keyframes, complex selectors).
+
+- **Corpus-ouroboros warning (S86 sharpening pa.md Rule 4):** *"agents that have no prior art on this language other than the examples of other agents (with no prior art) wrote. it becomes ouroborous if I dont constantly try to rangle the design in to conformance with my goals."* — corpus state is ARTIFACT, not EVIDENCE of design intent. SPEC + user-voice + pa.md are normative; pre-existing example/fixture content is NOT — even when it reads as canonical. Memory file saved: `~/.claude/projects/-home-bryan-maclee-scrmlMaster-scrmlTS/memory/feedback_idiomatic_examples_styling.md`.
+
+- **BS-layer extension picked over SPEC retreat (S86):** *"A. and we still have lots of work to do this session."* — Option A (extend BS-layer to honor SPEC §40.8 normative text) picked over Option B (amend SPEC to back down). When SPEC + impl diverge AND SPEC is design-intent shape, the right answer is impl work, not spec retreat. Operational rule sharpening: PA defaults to lean IMPL-extension over SPEC-retreat unless impl cost is structurally larger.
+
+**v0.3 walker behavior under new fixtures:** trucking-dispatch `bun scrml migrate --program-shape --dry-run --report` classifies all 36 files correctly — `app.scrml` → schema-anchor (per §39.12.0 v0.3 workaround); pages/* → route REWRITE (`<program>` → `<page>`); components/* + channels/* + models/* + schema.scrml + seeds.scrml → module (leave-as-is or advisory). The 20 trucking pages with mixed cross-file imports surface the safety-harness limitation noted above — Wave 3 will close.
+
+**Cumulative S85→S86 delta:** +70 pass / +14 skip / +4 files / 0 regressions. **Tests at HEAD `2314c8c`:** 11,577 pass / 114 skip / 1 todo / 0 fail / 561 files.
+
+**Open at session-in-flight close:**
+- `scrml dev` server-side codegen divergence (Task #17) — dispatch IN FLIGHT
+- Perf-feel empirical study (S83-queued; user-lean A+B) — dispatch IN FLIGHT
+- WebKit e2e still blocked on `libavif16` (NOT `libavif13` as S85 hand-off said — package-name correction)
+- `<program spa>` boolean OQ — debate not yet planned; deferred per "juggling consequences"
+- Self-host regen to re-enable 18 deferred parity tests (deferred per pa.md S81 self-host-orthogonality)
+- Wave 3 of v0.3 (fixture migration sweep across ~933 files) — gated on Wave 3 dispatch revision + cross-file-import safety-harness fix
+- Wave 4 of v0.3 (adopter content + tutorials)
+
+
 
 ### 2026-05-12 (S85 CLOSE — v0.2.5 + v0.2.6 tagged · v0.3 Wave 1 spec anchor · F-COMPONENT-001 family CLOSED · Wave 3 Playwright e2e infra live · scrml.dev substantive refresh)
 
