@@ -526,6 +526,20 @@ function _scrml_derived_subscribe(derived, upstream) {
  * @returns {*} the (possibly freshly evaluated) value
  */
 function _scrml_derived_get(name) {
+  // Bug 1 fix-D (S88 dispatch — 14-mario): track the derived name itself as
+  // a dependency on the current effect. Without this, if the derived was
+  // already evaluated (dirty=false) before the effect's first run, the body
+  // path below short-circuits and the inner fn() never runs — meaning the
+  // derived's upstream @-refs are never tracked AND the derived name itself
+  // is never tracked. Result: an effect like
+  //   _scrml_effect(() => el.textContent = _scrml_derived_get("marioName"));
+  // ends up with EMPTY deps and never re-runs when marioState writes fire.
+  //
+  // _scrml_propagate_dirty already fires _scrml_trigger(_scrml_state, derived)
+  // for each dirtied derived; tracking the derived name here completes the
+  // contract so trigger has effects to wake. (Reactive cells already track
+  // via _scrml_reactive_get; this closes the parity gap for derived cells.)
+  if (typeof _scrml_track === "function") _scrml_track(_scrml_state, name);
   if (_scrml_derived_dirty[name]) {
     // §6.6.4: clear dirty flag BEFORE evaluating to prevent re-entrant re-evaluation
     _scrml_derived_dirty[name] = false;

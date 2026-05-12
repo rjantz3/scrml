@@ -2457,7 +2457,14 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
 
     case "match-stmt":
     case "match-expr":
-      return emitMatchExpr(node);
+      // Bug 1 fix-C (S88 dispatch — 14-mario): thread `opts` so match-arm-block
+      // bodies inherit engineBindings/machineBindings/declaredNames/boundary.
+      // Without this, an `@engineCell = .X` write inside a block-form arm
+      // emits bare `_scrml_reactive_set`, bypassing the engine rule= contract
+      // guard + timer/history bookkeeping. The runtime symptom is that the
+      // engine cell DOES update but cell-aware downstream wiring (timer arm,
+      // history capture, etc.) is silently skipped.
+      return emitMatchExpr(node, opts);
 
     case "switch-stmt":
       return emitSwitchStmt(node);

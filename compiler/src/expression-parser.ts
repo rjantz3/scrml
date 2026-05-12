@@ -686,6 +686,29 @@ const SCRML_PLACEHOLDER_PREFIX = "__scrml_";
 function preprocessForAcorn(raw: string, opts?: { tildeActive?: boolean }): string {
   let s = raw.trim();
 
+  // Bug 1 fix-B (S88 dispatch — 14-mario): the `::` enum-variant access alias
+  // is normalized to `.` here so acorn parses it as a standard MemberExpression.
+  //
+  // SPEC §14 (line 6976) declares `EnumType::Variant` and `::Variant` as
+  // syntactic aliases for `EnumType.Variant` and `.Variant`. Without this
+  // rewrite, the scrmlEnumPlugin (defined below) emits a STRING token for
+  // `::Variant` AFTER the IDENT for the enum-type prefix has already been
+  // emitted — acorn's parseExpressionAt then stops at the IDENT and silently
+  // drops the trailing STRING (no operator between them), producing wrong
+  // codegen for comparisons like `@marioState == MarioState::Small`
+  // (`_scrml_structural_eq(<cell>, MarioState)` — compares against whole
+  // enum object instead of the `"Small"` discriminant).
+  //
+  // Rewriting `::` → `.` before acorn lets the standard member-access path
+  // handle both bare `MarioState::Small` (read) and constructor calls like
+  // `PowerUp::Mushroom(1)` (call). The runtime enum object frozen by
+  // emitEnumVariantObjects exposes both shapes — see emit-client.ts.
+  //
+  // Standalone `::Variant` (shorthand, no enum-type prefix) also normalizes
+  // to `.Variant`, which then falls into the existing bare-dot variant
+  // placeholder path below.
+  s = s.replace(/::(?=\s*[A-Z])/g, ".");
+
   // Replace `match expr { arms }` with placeholder
   // This is processed first because match may contain `is` operators inside arms.
   s = preprocessMatchExprs(s);
