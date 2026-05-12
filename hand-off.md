@@ -1,110 +1,132 @@
-# scrmlTS — Session 83 (CLOSE — TRIPLE-SEMVER-TAG release session · v0.2.0 + v0.2.1 + v0.2.2 ALL CUT · 35+ commits · 11,457 / 0 fail · pushed)
+# scrmlTS — Session 84 (CLOSE — v0.2.4 tagged + Wave 2 landed + v0.3 program-shape dive ratified)
 
-**Date:** 2026-05-11 (single-day session, third in the 2026-05-11 cluster after S81/S82)
-**Previous:** `handOffs/hand-off-82.md` (S82 doc-system audit + maps-discipline protocol)
-**This file:** rotates to `handOffs/hand-off-83.md` at S84 open
+**Date:** 2026-05-11 (S84 single-day session; 5th session of the 2026-05-11 cluster after S80/S81/S82/S83)
+**Previous:** `handOffs/hand-off-83.md` (S83 close — triple-semver-tag release)
+**This file:** rotates to `handOffs/hand-off-84.md` at S85 open
 
-**Tests at open (S82 close baseline):** 11,259 / 77 / 1 / 0 (535 files)
-**Tests at S83 CLOSE:** **11,457 pass / 77 skip / 1 todo / 0 FAIL** (545 files)
-**Cumulative delta:** +198 pass / +10 files / 0 regressions across the entire session
+**Tests at S84 CLOSE:** **11,512 pass / 77 skip / 1 todo / 0 fail / 554 files** (`bun run test` final at HEAD `1d2f1cf`)
+**Cumulative S83→S84 delta:** **+55 pass / +9 files / 0 regressions / 0 silent failures** since v0.2.3 baseline `d512266`
 
-**Semver state at close:**
-- v0.2.0 tag `022ee02` — baseline (the language as the compiler implements it)
-- v0.2.1 tag `d72c074` — Wave 4A patch (Bug 5 + Bug 6 + Bug 7)
-- v0.2.2 tag `98e872d` — Wave 4B.1 patch (Bug 9 + Bug 1 + Bug 3 + Bug 4 + Bug 8)
-- HEAD `(post-wrap commit)`
-- All tags pushed to origin
+**Semver state at S84 close:**
+- v0.2.0 `022ee02` — baseline
+- v0.2.1 `d72c074` — Wave 4A (Bug 5+6+7)
+- v0.2.2 `98e872d` — Wave 4B.1 (Bug 9+1+3+4+8)
+- v0.2.3 `d512266` — Bug 2 (derived-engine over auto-declared)
+- **v0.2.4 `28cd2ac` ← CUT THIS SESSION** — Wave 1 + Wave 1.5 robust-v0.2 bundle (12 PA-authored commits since v0.2.3)
+- HEAD `1d2f1cf` (post-Wave-2; **not yet tagged v0.2.5** — pending user authorization)
+- All v0.2.x tags pushed to origin
 
-**Cross-machine sync at close:** scrmlTS 0/0 vs origin/main; scrml-support 0/0 vs origin/main. Both clean.
+**Cross-machine sync at S84 close:**
+- scrmlTS: 0/0 vs origin/main at v0.2.4 push moment; Wave 2 commits + this-session-close commits pending push (see §"Pending push" below).
+- scrml-support: 0/0 vs origin/main at empirical-study + Insight 29 push moment; v0.3 plan + dive doc + user-voice S84 append pending push.
 
 ---
 
-## S83 — what happened (summary by phase)
+## S84 — what happened (summary by phase)
 
-S83 opened with "let's only look at what is left to get to v0.2.0." It closed with three semver tags + Wave 2 + Wave 3.1 + Wave 4A + Wave 4B.1 all shipped. The session is the largest single session in the project's history; one of the cleanest closes per regression count (zero).
+S84 opened with "let's only look at what is left to get to v0.2 robustness." It closed with v0.2.4 cut + pushed + Wave 2 adopter content/spec polish landed + the v0.3 program-shape architectural dive complete + ratified for next-session spec-amendment kickoff. **Largest single session of the project to date.**
 
-### Phase 1 — A6-6 / B3 / B5 / A5-7 (pre-v0.2.0-tag, the "remaining v0.2.0-bar" pass)
+### Phase 1 — Bug 2 close + perf-feel Phase 0 empirical study (Wave 0 / parallel)
 
-- **A6-6 scrml:test API alignment** — closed Option Y via design dive at `scrml-support/docs/deep-dives/a6-6-scrml-test-api-alignment-2026-05-11.md`. Bare `assert <expr>` + `assert.fails[.with]` + closure-recorder pattern + E-TEST-006 cover the surface; runtime introspection helpers would violate 0-byte production cost guarantee. Re-trigger R1: ≥2 adopter friction reports on call-history. A8 family fully closed.
-- **B3 stdlib data/validate vocab unification** — closed Option Y via design dive at `scrml-support/docs/deep-dives/b3-stdlib-data-validate-vocab-audit-2026-05-11.md`. universal-core (14 predicates at §55.1) is the language-level closed catalog firing in 3 native loci; `scrml:data` rule-builders are a deliberate fourth library-layer with zod-bridge slot per §53.14.4. No separate `scrml:validate` exists.
-- **B5 editor support** — 3 commits: VSCode TextMate grammar + neovim highlights.scm + LSP handlers.js. LSP surface 5x richer: ERROR_DESCRIPTIONS 36→187, SCRML_KEYWORDS 28→57, SCRML_ATTRIBUTES 10→48, KEYWORD_DOCS 6→27.
-- **A5-7 tests + samples for A7 engine S67 surface** — 4 test files + 4 sample fixtures; +48 pass / +10 skip; surfaced 5 A7 codegen deferrals.
-- **30-worktree cleanup** — accumulated forensic worktrees blocked harness allocation (failed A5-7 first dispatch); cleaned + pa.md retention rule revised (bounded to same-session only).
+User: *"study and bug 2 same time."*
 
-### Phase 2 — Wave 2 (5 A7 codegen deferral fixes + Bug #6)
+- **Bug 2** (derived-engine over auto-declared engine var) — closed via parallel dispatch. `compiler/src/type-system.ts` extension of `reactiveBindings` to include non-derived auto-declared engine variables via the same pattern as Bug 9's scopeChain pre-bind. §51.9.7 transitive-projection rejection preserved. 14-mario reverted to canonical `<engine for=HealthRisk derived=@marioState>` form. **+9 tests / 0 regressions.** Tagged **v0.2.3** at `d512266`.
+- **Perf-feel Phase 0 empirical study** (scrml-deep-dive dispatch) — measured reactive-graph static-resolvability across 33 files / 501 reactive-graph reads/writes. **Verdict: 99-100% statically resolvable** (gate threshold was 70%). Runtime-only catalog functionally empty. Two side findings: (a) DG doesn't emit `reads` edges for markup-context reactive reads (v0.3.0 Stage-7 extension), (b) `examples/06-kanban-board.scrml` SYM PASS 1 typed-decl registration gap (5 unresolved `@cards` reads). Output at `scrml-support/docs/diagnostics/reactive-graph-static-resolvability-S84.md`.
 
-User ratified: all 5 A7 codegen deferrals are v0.2.0-bar per Rule 2 + S81 "compiler all the way to v0.2.0 state." Plus Bug #6 surfaced mid-Wave-2 and was user-added to v0.2.0-bar.
+### Phase 2 — Perf-feel debate (Insight 29 ratified)
 
-- **Wave 2.1 parallel:** Bug #1 (body-parser nested-engine depth-counter asymmetry; +3 pass / -2 skip) + Bug #5 (cascade-miss diagnostic; SYM PASS 16 fire-site #9; +10 pass / -1 skip).
-- **Wave 2.2:** Bug #4 (internal:rule= distinct write path; 7-source-file threading; +3 pass / -2 skip).
-- **Wave 2.3:** Bug #3 (history synth-cell + outer-exit capture; per-engine history-map const; INTERNAL branch skips by construction; +4 pass / -3 skip).
-- **Wave 2.4 (keystone):** Bug #2 (inner-engine dispatcher emission + folded restore-form expression lowering; widened 7 SYM walkers for nested-engine discovery; Phase A10 postMountJs hook; Approach B 8th positional `isHistoryRestore` arg; +8 pass / -2 skip).
-- **Wave 2.5:** Bug #6 (event-handler engine write threading through `_scrml_engine_direct_set`; `rewriteBlockBody` engineBindings threading across 5 source files; +13 new tests).
+User authorization triggered debate-curator. Synthesis-mode dispatch (debate-curator's toolset lacks Agent — same pattern as Insights 21/25/26/27/28). Verdict:
 
-**Wave 2 cumulative:** +41 explicit pass, 0 regressions. Full A7 hierarchy + history + internal:rule= + cascade-miss + body-parser surface end-to-end functional.
+- **M1 → Approach A ratifies.** Whole-stack reactive-graph closure analysis is the **v0.3.0 spec-amendment target** (later shifted to v0.4 per the program-shape dive sequencing reframing — see Phase 6).
+- **M2 → Approach B deferred to v2.** Telemetry-augmented PGO; llvm-pgo-expert flipped from A+B to A-alone-for-v1 (strongest flip-vote signal in the debate).
+- **Approach D rejected as v1 default;** documented as "eject button."
+- Scores A 119 / A+B 107 / D 103 of 168. Pro-X-voting-against-X frequency now at **8+**.
+- Insight 29 persisted at `scrml-support/design-insights.md` line 1825+.
 
-### Phase 3 — README v0.2.0 rewrite
+### Phase 3 — v0.2 robustness punch-list framing + Wave 1
 
-User directive: "we need to make sure the readme is FULLY representative of the V 0.2.0 state of the language. I would like and engine example. as well as the goal of the output app being an exhaustive state machine."
+User: *"I want to make sure that we are done with v0.2 before we get too far ahead of ourselves... whats left for getting v0.2 to a state of robustness?"*
 
-Three coordinated moves + secondary sweep:
-1. New opening framing — *"An app should be an exhaustive state machine"* + provability-falls-out-of-shape framing per primer §1.
-2. Tier 0/1/2 ladder as top-level section.
-3. Three examples: Counter (Tier 0) converted to V5-strict; **NEW Engine Example (Tier 2)** — canonical Idle/Loading/Error/Empty/Success state machine; Full-stack one-file converted to v0.2.0 (Shape 2 compound `<entry>` + auto-synth `@entry.isValid` + `<errors of=@entry/>`).
-4. Warning box reframed (v0.2.0 IS the language; v0.1.0 was previous baseline).
-5. Features sweep (10 v0.1.0-flavored references converted: `~var` → `const <var>`, `<machine>` → `<engine>`, sigil-table State row dropped, etc.).
-6. Auto-split bullet expanded with full **server keyword deprecation state** (Batches 1+2 SHIPPED S72; W→E→strip targets v0.3.0; migration tool deferred).
-7. Examples table extended to include 15-22.
-8. Benchmarks flagged as **v0.1.0-era stale** with refresh queued as v0.2.x patch + shallow-bug-hunt framing.
-9. Stats refreshed: 11,200+ tests, 22 examples, 279 samples, SPEC ~26k lines.
+PA produced tiered punch list (Tier 1 compiler-correctness / Tier 2 adopter content + spec polish / Tier 3 deferred). User authorized "everything, smartly, parallel where safe" + later "and the skip-surface audit."
 
-### Phase 4 — B1 + B2 (Wave 3.1)
+**Wave 1 — 7 parallel compiler-correctness dispatches** (all landed; cumulative +75 tests / 0 regressions):
 
-- **B1 examples rewrite (Wave 3.1.A)** — 22 examples + 1 LSP test. 2 GREEN no-rewrite; 15 YELLOW syntactic refresh; 3 RED substantial rewrite (14-mario, 15-channel-chat, 18-state-authority). **Trucking-dispatch DEFERRED** (~10-15h follow-on). **Surfaced 8 codegen / spec-correctness gaps** which became Wave 4A + Wave 4B.1.
-- **B2 samples curate (Wave 3.1.B)** — 286 top-level files: 271 KEEP-no-action / 9 REWRITE across 5 batches / 2 DROP (cross-repo archived to `scrml-support/archive/samples-dropped/`). **Subdirs (509 files in 12 dirs) DEFERRED** — largely intentionally-failing regression corpus. Compiler bug surfaced (not fixed): meta-block `let X = bun.eval(...)` runtime-scope bridge gap — user confirmed compile-time-only by design; documented in user-voice; KEEP as friction-corpus.
+| # | Surface | Commit |
+|---|---|---|
+| 1 | `not <expr>` codegen → `!` (§45.7 operator form) | `16e88a6` |
+| 2 | Match pipe-alternation in `rewriteMatchExpr` + `emit-control-flow.ts` + `preprocessForAcorn` lookbehind | `3c727bc` |
+| 3 | E-DG-002 false-fire on derived-engine projected vars (`creditReader` credit) | `b6d6711` |
+| 4 | SYM/TAB typed-decl registration (`collectTypeAnnotation` depth tracking — depth-of-survey #8) | `917a576` |
+| 5 | Bare-variant inference at binary-expr positions (==, !=, is, is-not) | `2c5a23a` |
+| 6 | `.advance(.X.history)` test-hardening (codegen was correct since S83 W2.4 Bug #2 keystone) | `e27d4c8` |
+| 13 | Skip-surface audit | no commits (77/77 valid deferrals; A+ test hygiene) |
 
-### Phase 5 — v0.2.0 tag + Wave 4A (v0.2.1)
+### Phase 4 — Wave 1.5 (6 follow-ons surfaced by Wave 1)
 
-User directive: **"we need to land these as bug fix sub-versions. as per semver"** — operationalized as **per-wave-bundle semver cadence**:
+User: *"wave 1.5 before wave 2"* + later additions *"add the test-channel-audit and the map refresh"* + *"actually, hold the map refresh until pre wave 2."*
 
-- **v0.2.0 tag cut** at `022ee02` with compiler/package.json 0.1.0 → 0.2.0 sync + README "semver cadence" subsection (v0.2.x patches; v0.3.0 minor; future major).
-- **Wave 4A parallel (3 dispatches)** with hardened commit-discipline brief:
-  - **Bug 5** channel @cell server-fn writes broadcast per SPEC §38.4 (route-inference + emit-logic + emit-server; reverts 15-channel-chat B1 workaround back to canonical pattern). +3 tests.
-  - **Bug 6** 17 `<program>` attributes added to attribute-registry. +61 tests.
-  - **Bug 7** bare-variant inference at reassignment positions per M9 §14.10. +8 tests.
-- **Bug 7 FIRST DISPATCH WORK-LOST INCIDENT** — agent reported "HEAD unchanged — work in worktree, no commits" + tests-passing. PA misread, file-delta pulled baseline (no diffs), worktree-remove destroyed the working-tree content. Re-dispatch required with full diagnosis preserved. User verbatim: *"That was an upsetting mistake."* → memory rule + pa.md addendum.
-- **v0.2.1 tag cut** at `d72c074`. +72 cumulative tests / 0 regressions.
+| # | Surface | Commit |
+|---|---|---|
+| W1.5-1 | Bug 6.5 — `_makeExprCtx` `enginesWithHistory` forward (function-body `.advance(.X.history)` history-map slot) | `b0055ac` |
+| W1.5-2 | Bug 4.5 + Bug 5 follow-on — bare-variant inference: nested struct + control-flow positions | `6af9fba` |
+| W1.5-3 | Bug 1 anomaly #1 — tokenizer/lift attr-value whitespace (`_joinPreservingWordBoundary`) | `c18800d` |
+| W1.5-4 | Bug 1 anomaly #2 — SQL-ref placeholder + const/let SQL init (7 source files threaded) | `28cd2ac` |
+| W1.5-5 | Bug 1 anomaly #3 — Lift+async malformed syntax (GITI-001 IIFE wrap context-aware) | `ea7ed70` |
+| W1.5-6 | test-channel-audit — silent non-assertion sweep | `e7ff91d` |
 
-### Phase 6 — Wave 4B.1 (v0.2.2) + debate-panel forge
+**v0.2.4 cut at `28cd2ac`** with comprehensive tag message + push (both repos 0/0 at moment of tag).
 
-User directive: "fire one more wave — Wave 4B parallel-where-safe." Plus forge debate-panel agents while context is hot.
+### Phase 5 — Pre-Wave-2 map refresh (project-mapper)
 
-- **Wave 4B.1 parallel (3 dev dispatches):**
-  - **Bug 9 (NEW from Bug 7)** engine auto-declared variables not pre-pass-registered into TS scope chain. Option A picked (TS pre-pass mirroring preBindExportedNames). 4 sites in 14-mario reverted from MarioState::Variant workaround to canonical `.Variant`. +5 tests. **Bug 2 STILL FAILS** — derived-machine validator at `type-system.ts:2349` uses different code path; queued for v0.2.3.
-  - **Bug 1** `<x server>` bare-attribute V5-strict — KEYWORD `server` bareword recognition parallel to IDENT `pinned` in `scanStructuralDeclLookahead`. 18-state-authority reverted to canonical form. +17 tests.
-  - **Bug 3+4+8 bundled** — all ast-builder.js / block-splitter.js parser-level fixes:
-    - B3: `<engine derived=match @x {...}>` Move-14 inline body parses.
-    - B4: `<channel> <messages> = []` top-level V5-strict body decl.
-    - B8: `let x = call() !{...}` statement boundary + bonus `parseErrorTokens` `.Variant` arm pattern (prevented 09-error-handling silent-broken → loud-broken regression after B8).
-    - +13 tests.
-- **5 agent-forge dispatches in parallel** (4 forge + 1 cp from agentStore):
-  - `qwik-resumability-expert.md` (A camp; Qwik resumability + handler-boundary compiler-driven splitting).
-  - `solid-js-signals-expert.md` (cp'd; reactive-graph A camp).
-  - `llvm-pgo-expert.md` (B camp; LLVM PGO + AutoFDO + BOLT prior art).
-  - `nextjs-rsc-app-router-expert.md` (D camp; RSC + per-route + streaming).
-  - `scrml-compiler-architect.md` (engineering-realism neutral).
-- **Commit discipline rule held end-to-end across all 4 subsequent dispatches.** Zero work-lost recurrence. PA-side pre-cleanup gate (`git status --short` empty before worktree-remove) caught no issues.
-- **3-way merge ast-builder.js** between Bug 1 (+52 LOC region 3301) and Bug 3+4+8 (+79 LOC region 683 + parseErrorTokens) — 0 conflict markers; clean merge.
-- **v0.2.2 tag cut** at `98e872d`. +113 cumulative tests (35 explicit + ~78 conformance fluctuation) / 0 regressions.
+`project-mapper` agent dispatched. Sandbox-blocked Write tool for `.claude/maps/*` — same pattern as Insight 29 + the empirical study. Agent gathered findings inline; **PA-side patched `primary.map.md`** with v0.2.4 fingerprint + Wave 1+1.5 file:line landmarks + Bug 4's flagged SYM PASS 1 / symbol-table.ts / ast-builder.js / type-system.ts landmark gap closed + Insight 29 forward signal. Map currently at HEAD `28cd2ac` + Wave 2 landings. **`.claude/maps/` is gitignored** — local-only artifact; refresh per machine.
 
-### Phase 7 — wrap
+Non-compliance items flagged for wrap (see §"Non-compliance carry-forward" below).
 
-- pa.md commit-discipline rule **folded** under §"Dispatch landing — worktree-as-scratch / file-delta (S67 standing rule)" as `### Commit discipline — two-sided rule (S83 addendum)`. Memory file at `~/.claude/projects/-home-bryan-scrmlMaster-scrmlTS/memory/feedback_agent_commit_discipline.md` is now indexed in MEMORY.md.
-- pa.md retention rule revised (worktree branches bounded to same-session-only) + wrap §6b worktree cleanup step added.
-- master-list refresh (this session's deltas; phase-table status; §0.6 B1-surfaced gaps table).
-- changelog S83 CLOSE entry above the partial in-flight entries.
-- `scrml-js-codegen-engineer.md` moved back to agentStore (with date-suffix to preserve agents/ trimmed version alongside canonical full version).
-- 5 worktrees cleaned (3 Wave 4B.1 + 1 v0.2.1 stragglers).
+### Phase 6 — Wave 2 (5 parallel; 4 landings + 1 no-op)
+
+User: *"auth."*
+
+| # | Surface | Commit |
+|---|---|---|
+| W2-1 | Trucking-dispatch app v0.2.4 canonical rewrite (24 files in `examples/23-trucking-dispatch/`) | `1d2f1cf` |
+| W2-2 | C1 tutorial rewrite (zero-to-running on v0.2.4) — 48 files / 1060-line tutorial + 11 snippets + counter.db + verify-tutorial.sh | `15336b9` |
+| W2-3 | C2 articles triage + rewrites — 10 articles + per-article triage tables (5 articles now publishable per user-decision queue) | `2646cdd` |
+| W2-4 | PIPELINE.md prose-pass | ✅ **no-op** (already shipped at S75/C23 per IMPLEMENTATION-ROADMAP §8.6 #2 closure — scope-blindness-is-structural rule operating correctly) |
+| W2-5 | SPEC §34 catalog drift cleanup (388 → 484 unique codes; 93 new rows + 2 NEW drift findings D-BATCH-001 + E-SYNTAX-DURATION not in S78 audit) | `d72cbb3` |
+
+**Plus an article fix-up follow-on** for `why-scrml-has-to-deprecate-function-and-component-overloading-devto-2026-05-06.md` (not in W2-3's audit-15 scope):
+- Sweep commit `eaf718f` (4× `< Type>` spacing fixes + `===` → `==` + `enum` → `type:enum` + `initial=.Idle` + `!check` → `not check` + `throw new Error` → `fail .Variant`)
+- Option-1 engine-block rewrite `32ecf1c` (replaced legacy `<machine>` pipe-grammar pseudo-engine with v0.2.4-canonical `Actor:enum` + match-arm dispatch function; prose around example aligned)
+
+### Phase 7 — v0.3 program-shape dive (the big architectural surface)
+
+User direction across multiple turns. Key verbatims captured in user-voice S84 entry.
+
+**Direction ratified:**
+- **(a) `<program>` is the program-scoped container.** Everything semantically program-scoped lives inside `<program>`.
+- **(b) Inside `<program>`, default mode is logic.** Direct text children of `<program>` parse as logic-block content. `${}` block-form RETIRED inside `<program>` body (interpolation `${expr}` survives).
+
+**Plan written at `scrml-support/docs/deep-dives/program-as-container-and-logic-default-shape-2026-05-11.md`** with Phase 0 sweep + Phase 1 dive + Phase 2 disposition + 6 Q-verdicts framework.
+
+**Dive fired + completed** (scrml-deep-dive dispatch; Write-blocked, PA-side persisted). **Result at `scrml-support/docs/deep-dives/program-as-container-shape-DIVE-2026-05-11.md`.**
+
+**Dive verdict highlights:**
+- **Empirical compiler-pipeline impact: 40-110h LOW BAND.** Compiler `ast-builder.js:690` (`isProgramRoot`) + `TOPLEVEL_STATE_DECL_RE` ALREADY half-implements the proposal — V5-strict `<x> = init` declarations are already lifted as direct text children of `<program>`. The change extends the lift to cover `function`/`fn`/`type`/etc.
+- **Sequencing: v0.3.0 = program-shape standalone; Insight 29 Approach A slides to v0.4.0.** Per user's Q8.1 sequencing reframing ("if impl ends up simple enough, we may make that 0.3 and push other advances up the numbers").
+- **Surprise: the corpus is already internally inconsistent.** 6 of 22 examples (02, 05, 06, 08, 13, 17) have logic INSIDE `<program>`; 14-mario + 15-channel-chat have it OUTSIDE.
+- **Migration scope mostly mechanical** via extended `bun scrml migrate --program-shape`.
+
+**6 Q-verdicts pending S85 ratification:**
+1. Q1-channels-inside (reverse E-CHANNEL-INSIDE-PROGRAM) — PA-lean YES
+2. Q1-styles-outside (`#{}` stays file-top) — PA-lean YES
+3. Q2-one-program-per-file canonical — PA-lean YES
+4. Q3-let/const bare locals at program-top lift — PA-lean YES
+5. Q3-declaration-shape list (full enumeration in dive) — PA-lean YES
+6. Q5-deprecation cycle (W-PROGRAM-REDUNDANT-LOGIC v0.3 → E-* v0.4) — PA-lean YES
+
+### Phase 8 — Wrap (this turn)
+
+This file + master-list + changelog + user-voice + final commits + push. See §"Operational state" below.
 
 ---
 
@@ -114,93 +136,148 @@ User directive: "fire one more wave — Wave 4B parallel-where-safe." Plus forge
 
 | Tag | Commit | Scope |
 |---|---|---|
-| v0.2.0 | 022ee02 | First semver baseline. The language as the compiler implements it. README + compiler/package.json sync. |
-| v0.2.1 | d72c074 | Wave 4A bundle. Bug 5 + Bug 6 + Bug 7. +72 tests. |
-| v0.2.2 | 98e872d | Wave 4B.1 bundle. Bug 9 + Bug 1 + Bug 3 + Bug 4 + Bug 8. +113 cumulative. |
+| v0.2.0 | `022ee02` | First semver baseline (S83) |
+| v0.2.1 | `d72c074` | Wave 4A bundle (S83 — Bug 5 + 6 + 7) |
+| v0.2.2 | `98e872d` | Wave 4B.1 bundle (S83 — Bug 9 + 1 + 3 + 4 + 8) |
+| v0.2.3 | `d512266` | Bug 2 (S84 — derived-engine over auto-declared) |
+| **v0.2.4** | **`28cd2ac`** | **Wave 1 + Wave 1.5 robust-v0.2 bundle (S84 — 12 commits since v0.2.3)** |
+| (untagged) | `1d2f1cf` | Wave 2 commits land HERE; v0.2.5 tag candidate pending user authorization |
 
-### v0.2.3 trajectory (open for S84+)
+### v0.2.5 trajectory (Wave 3 + remaining items)
 
 | Item | Est | Source |
 |---|---|---|
-| **Bug 2** `<engine derived=@var>` E-ENGINE-004 | ~4-8h | B1 surfacing; Bug 7 confirmed it's different code path from Bug 9 |
-| **Trucking-dispatch app rewrite** | ~10-15h | B1 Phase 3 DEFERRED |
-| **C1 tutorial rewrite** | ~8-15h | master-list §0.1 |
-| **C2 articles rewrites** | ~4-8h | master-list §0.1 |
-| **B2 subdirs curate** (509 files in 12 gauntlet-s* dirs) | ~10-20h | B2 Phase 5 DEFERRED — mostly intentionally-failing regression corpus |
-| **Feel-of-performance Phase 0 empirical study** (FIRST priority per S83 user directive) | ~1-2 sessions | `scrml-support/docs/deep-dives/perf-feel-debate-plan-2026-05-11.md` |
-| **Pipe-alternation arms in rewriteMatchExpr** | ~4-6h | B3 follow-on |
-| **`.advance(.Variant.history)` write-site lowering parity** | ~1-2h | Bug 2's history surface follow-up |
-| **Bare-variant comparison-position `@cell == .V`** | ~3-6h | Bug 7 follow-on (binary-expr position) |
-| **Benchmarks refresh** (TodoMVC vs React/Svelte/Vue at v0.2.x) | ~4-8h | README's benchmarks-stale flag; doubles as shallow bug-hunt |
+| **Wave 3: Playwright e2e infra** (5 critical-path tests: TodoMVC + 02 + 03 + 05 + 14-mario) | ~10-15h | Ratified S84 |
+| **Wave 3: Benchmarks refresh** (TodoMVC vs React/Svelte/Vue at v0.2.x) — paired with Playwright dev-server-bootstrap | ~5-10h | Ratified S84 |
+| **W2-1 anomaly A1** — `<expr.member> is some/is not` parser issue in ternary-cond inside `${}` markup interpolation (10+ sites) | ~3-5h | W2-1 finding |
+| **W2-1 anomaly A2** — Cross-file channel mount E-RI-002 skip-path doesn't propagate (`perFileChannelCellMap` file-local; cross-file `<Channel/>` mount fires false) | ~4-8h | W2-1 finding |
+| **W2-1 anomaly A3** — `server function` modifier vs E-CG-006 inconsistency (caller-context-propagation doesn't escalate cross-file-imported server fns) | ~2-4h | W2-1 finding |
+| **W2-1 anomaly A4** — F-COMPONENT-001 cross-file component-with-nested-PascalCase E-COMPONENT-035 (kickstarter §3 known limitation) | ~4-8h | W2-1 finding |
+| **B2 subdirs curate** (509 files in 12 gauntlet-s* dirs — mostly intentionally-failing regression corpus) | ~10-20h | S83 deferral |
 
-### Feel-of-performance debate panel — pre-staged for S84
+### v0.3.0 spec-amendment cluster (post-S85 ratification)
 
-All 6 voices in `~/.claude/agents/`:
-- `qwik-resumability-expert.md` (A camp; Qwik resumability)
-- `solid-js-signals-expert.md` (A camp; reactive-graph)
-- `llvm-pgo-expert.md` (B camp; PGO/AutoFDO/BOLT)
-- `nextjs-rsc-app-router-expert.md` (D camp; RSC + per-route + streaming)
-- `scrml-compiler-architect.md` (engineering-realism neutral)
-- `debate-judge.md` (scoring; pre-existing)
-
-Debate plan ratified at `scrml-support/docs/deep-dives/perf-feel-debate-plan-2026-05-11.md`. Phase 0 empirical study (OQ #1: how much of a real scrml app's reactive graph is statically resolvable?) MUST land BEFORE the debate fires.
-
-User lean (verbatim S83): *"I strongly lean A + B."*
-
-### `.claude/agents/` final state — 16 files
-
-11 project agents + 5 debate panelists. No specialist/dev agents remaining (all moved to agentStore).
+| Item | Est | Source |
+|---|---|---|
+| **a. `bun scrml migrate --program-shape` extension** (~50-80h subset of impact) | ~50-80h | Dive verdict |
+| **b. TAB extension** for new declaration shapes inside `<program>` body | ~30-50h | Dive verdict |
+| **c. SPEC.md amendments** per §Q7 (~390 lines added across 14 sections) | included in compiler impact | Dive verdict |
+| **d. E-CHANNEL-* reversal + W-PROGRAM-REDUNDANT-LOGIC addition** (~40 LOC + tests) | included | Dive verdict |
+| **e. Mechanical fixture migration sweep** (~800 file edits via migrate command) | included | Dive verdict |
+| **TOTAL v0.3.0 band:** ~40-110h calibrated | | |
 
 ### Tests at close (full suite via `bun run test`)
 
-- **11,457 pass / 77 skip / 1 todo / 0 fail across 545 files**
-- Bug 7 first-dispatch failure didn't impact test count (recovered cleanly via re-dispatch)
-- Cumulative session delta: +198 pass / +10 files / 0 regressions
+- **11,512 pass / 77 skip / 1 todo / 0 fail across 554 files** (5,432 LOC compiler / 30,891 LOC codegen / 99,603 LOC scrml total)
+- Wave 1 + 1.5: +75 tests cumulative (Bug 1 +26, Bug 2 +18, Bug 3 +5, Bug 4 +9, Bug 5 +16, Bug 6 +1; Bug 6.5 +3, Bug 4.5/5fo +17, Bug 1.1 +2, Bug 1.2 +13, Bug 1.3 +5)
+- Wave 2: 0 test deltas (docs/content-only changes)
+- Article fix-ups: 0 test deltas
+
+### Cumulative S83→S84 file deltas
+
+- 6 new compiler-test files (Wave 1 + 1.5): not-operator-lowering, match-pipe-alternation-codegen, dg-projected-var-reader-credit, sym-typed-state-decl-registration, bare-variant-binary-expr-inference, bare-variant-nested-context-inference, tokenizer-event-handler-attr-whitespace, const-let-sql-init
+- 1 new sample (Wave 1): match-pipe-alternation.scrml
+- 48 files in tutorial rewrite (W2-2 — tutorial.md + snippets)
+- 10 articles edited (W2-3) + 2 article follow-ons (`why-scrml-has-to-deprecate`)
+- 24 trucking-dispatch files (W2-1)
+- 1 SPEC.md edit (W2-5 §34)
+- 2 new scrml-support docs (v0.3 plan + dive)
+- 1 new memory file (`project_self_host_orthogonal.md`)
+- `primary.map.md` updated locally (gitignored)
+
+### `.claude/agents/` state at close
+
+11 project agents + 5 debate panelists (carried from S83). No staging changes this session.
 
 ---
 
-## Open questions to surface immediately at S84 open
+## Operational state at close
 
-1. **Perf-feel Phase 0 empirical study** — FIRST priority per S83 user directive. Plan ratified at `scrml-support/docs/deep-dives/perf-feel-debate-plan-2026-05-11.md`. S84 PA dispatches `scrml-deep-dive` per the brief shape in the plan; result feeds the gate decision (≥70% static → fire debate; <70% → escalate to user).
-2. **Bug 2** ready to dispatch — derived-machine validator at `type-system.ts:2349` uses different code path from Bug 9; needs own dispatch (~4-8h estimate). Would unlock the 14-mario `<engine for=HealthRisk derived=match @marioState {...}>` pattern. Becomes v0.2.3.
-3. **Push state CLEAN.** Both repos 0/0 vs origin.
-4. **Inbox.** `handOffs/incoming/` only contains `read/` subdir — no unread.
-5. **3 legacy master-inbox carry-overs** (S78+ standing list; safe to ignore):
-   - `2026-04-22-scrmlTS-to-master-insight-25-multi-meta.md`
-   - `2026-05-08-S72-scrmlTS-to-master-needs-push-SUPERSEDED.md`
-   - `2026-05-08-S71-scrmlTS-to-master-stage-scrml-dev-pipeline.md`
+### Working tree at S84 close — what's pending commit
 
----
+scrmlTS:
+- `M hand-off.md` (this file — to commit)
+- `?? handOffs/hand-off-83.md` (S83-close rotation — to commit; created at S84 open)
+- `M .claude/maps/primary.map.md` (gitignored but tracked-anomaly — see Non-compliance below)
+- `M master-list.md` (will be touched in wrap)
+- `M docs/changelog.md` (will be touched in wrap)
 
-## Things S84 PA must NOT screw up (carry-forward from prior sessions + S83 additions)
+scrml-support:
+- `?? docs/deep-dives/program-as-container-and-logic-default-shape-2026-05-11.md` (v0.3 plan — to commit)
+- `?? docs/deep-dives/program-as-container-shape-DIVE-2026-05-11.md` (v0.3 dive — to commit)
+- `M user-voice-scrmlTS.md` (S84 entry appended — to commit)
+- 5 private article drafts (DON'T TOUCH per pa.md Rule 1)
+- `?? tools/`, `?? .claude/worktrees/` (operational; leave)
 
-S77-S82 lists carry forward verbatim. **S83 additions:**
+### Pending push (BOTH repos)
 
-- **DO read the new pa.md commit-discipline rule** (under §"Dispatch landing — worktree-as-scratch / file-delta (S67 standing rule)" subsection `### Commit discipline — two-sided rule (S83 addendum)`). Paste the agent-side block verbatim into every isolation:worktree dispatch brief. Run the PA-side pre-cleanup gate (`git status --short` empty + non-empty `git diff main..<branch>`) before any `git worktree remove --force`.
+User authorized: tag v0.2.4 + push (done at `28cd2ac`); commit + push scrml-support (Insight 29 + empirical study landed earlier). NOT explicitly authorized: push the post-v0.2.4 Wave 2 + program-shape + S84 wrap commits. Surface for explicit ratification at S85 open if not pushed during this wrap.
 
-- **DO read master-list.md §0.6 "B1-surfaced v0.2.x gaps" table** — 8 of 9 bugs CLOSED v0.2.1+v0.2.2; Bug 2 is the lone open item. Don't re-classify; don't re-investigate — go straight to dispatch.
+### Worktree state at close — CLEAN
 
-- **DO run the perf-feel empirical study FIRST** at S84 open (per S83 user directive). The 5 debate panel agents are pre-staged; debate-curator can run the multi-agent debate end-to-end ONCE the empirical study gates open.
-
-- **DON'T fire the perf-feel debate before the empirical study lands.** OQ #1 is the load-bearing gate per the dive — debate verdict shifts materially if static-resolvability is < 70%.
-
-- **DON'T expect Bug 9's pre-pass fix to close Bug 2.** Bug 7 RE-DISPATCH and Bug 9 dispatch both confirmed: Bug 2 uses a different code path (derived-machine validator's machineDecls + reactiveBindings map, NOT scopeChain). Fresh dispatch required.
-
-- **DO note `parallel` regex removal** — when reading post-S68 code, `parallel`-attribute recognition was stripped 2026-05-08 alongside the §51.0.P spec strike. Some old comments may still reference it.
-
-- **DO use the v0.2.x semver cadence** for future bugs. Bug 2 patch → v0.2.3 alongside any other ready items. Don't accumulate without tagging.
-
-- **DON'T touch the 5 untracked private article drafts in scrml-support working tree** (per pa.md Rule 1 — no PA-volunteered marketing work; these are Bryan's private drafts).
+`git worktree list` shows ONLY the main checkouts for both repos. All 13 scrmlTS worktrees + 1 scrml-support worktree from this session cleaned per pa.md wrap §6b.
 
 ---
 
-## Cross-machine sync state at S83 close
+## Open questions to surface immediately at S85 open
 
-- scrmlTS: 0/0 vs origin/main; clean. v0.2.0 + v0.2.1 + v0.2.2 tags all pushed.
-- scrml-support: 0/0 vs origin/main; clean. New deep-dive `perf-feel-debate-plan-2026-05-11.md` pushed. Untracked working-tree state (private article drafts + tools/) carried forward unchanged.
+1. **6 Q-verdicts from v0.3 program-shape dive need user ratification** (Q1-channels-inside, Q1-styles-outside, Q2-one-program-per-file, Q3-let/const lift, Q3-declaration-shape list, Q5-deprecation cycle). PA-lean YES on all 6. Once ratified → dispatch v0.3.0 spec-amendment cluster (the 5-item plan in dive doc §"Recommended PA next action").
+2. **v0.2.5 tag decision** at `1d2f1cf`. Wave 2 closed but tag-or-not-tag is user's call. Semver cadence per S83 was per-wave-bundle; Wave 2 = v0.2.5 candidate. Wave 3 (Playwright + benchmarks) would be its own bundle = v0.2.6 or v0.3.0 depending on dive-ratification timing.
+3. **W2-1 anomaly fixes (A1-A4)** queued for v0.2.x followon — Wave 2.5 dispatch candidates. Real adopter-blocker bugs:
+   - A1 (10+ sites): `<expr.member> is some/is not` in ternary-cond inside `${}` interpolation fires E-SCOPE-001
+   - A2 (12 sites, 10 files): cross-file channel mount E-RI-002 skip-path doesn't propagate
+   - A3 (1 site, app.scrml): `server function` modifier vs E-CG-006 caller-context inconsistency
+   - A4 (1 site, board.scrml): F-COMPONENT-001 cross-file component-with-nested-PascalCase
+4. **Wave 3 ready for dispatch** (Playwright e2e + benchmarks paired; ~30-50h band). Sequenced AFTER any Wave 2.5 anomaly fixes so benchmarks/e2e run against a fixed compiler.
+5. **5 articles publishable** per W2-3 triage (user-decision queue per pa.md Rule 1 — no PA-volunteered publication):
+   - tier-ladder-promotion (with status banner)
+   - realtime-and-workers (ACCURATE)
+   - mutability-contracts (with status banner)
+   - server-boundary-disappears (ACCURATE)
+   - components-are-states (with status banner)
+6. **Non-compliance items for PA wrap action** (filed for this wrap; revisit at S85 open if not closed):
+   - master-list §0 last-updated line; Bug 2 status carry-forward (now closed at v0.2.3)
+   - docs/changelog.md S84 entry
+   - PA-SCRML-PRIMER.md §12 stale references: test count `~7,800-8,800` → ~11,512; SPEC/PIPELINE size figures
+   - "Follow-up prose pass deferred" line in primer §12 (PIPELINE prose pass already shipped at S75/C23 — drop the bullet)
+   - `docs/changes/fix-lift-async-iife-paren/` possible archival candidate (W1.5-5 dispatch dir)
+   - `.claude/maps/primary.map.md` gitignored-but-tracked anomaly (file is in git index despite being in .gitignore)
+   - Stale primer references touched at S82+S84 — verify all caught
+7. **Memory files updated this session**: `project_self_host_orthogonal.md` (NEW). Cross-link in MEMORY.md index. No deletions.
+8. **Cross-machine sync state**:
+   - scrmlTS: 0/0 vs origin at v0.2.4 cut moment; Wave 2 + wrap commits pending push (this wrap).
+   - scrml-support: 0/0 vs origin at Insight 29 + empirical study push moment; v0.3 plan/dive + user-voice S84 pending push (this wrap).
+
+---
+
+## Things S85 PA must NOT screw up (carry-forward from prior sessions + S84 additions)
+
+S77-S83 lists carry forward verbatim. **S84 additions:**
+
+- **DO NOT re-debate v0.3 program-shape direction.** User ratified (a)+(b) at S84. Dive Phase 1 already worked out implications. S85's job is Q-verdict ratification + spec-amendment kickoff, NOT re-deliberation.
+- **DO read the v0.3 dive result FIRST** at S85 open before any v0.3 work. `scrml-support/docs/deep-dives/program-as-container-shape-DIVE-2026-05-11.md`. The 6 Q-verdicts + impact band + sequencing decision live there.
+- **DO read `project_self_host_orthogonal.md` memory** before any v0.4 or self-host-shaped discussion. Self-host is post-v1.0; does NOT gate any v0.3/v0.4 work. PA has stumbled on this multiple times historically.
+- **DO note `.claude/maps/primary.map.md` reflects v0.2.4 + Wave 2 close locally** (gitignored). Per-machine refresh required on each clone via `project-mapper`.
+- **DO surface the W2-1 anomalies A1-A4 explicitly** if user asks "what's left in v0.2.x." They're queued; small but real adopter-blockers.
+- **DON'T fire Wave 3 (Playwright + benchmarks) before Wave 2.5 anomaly fixes land**, OR before user authorization. The benchmark numbers should run against a fixed compiler.
+- **DON'T touch the 5 untracked private article drafts in scrml-support working tree** (per pa.md Rule 1).
+- **DON'T treat W2-4's no-op finding (PIPELINE prose pass already shipped) as a one-off.** Same `feedback_scope_blindness.md` pattern as Bug 6 Option B's Phase-0 finding earlier in this session. When dispatch-brief mentions deferred-work-from-roadmap, agent MUST verify against current state — not implement on derived-doc citations.
+- **DON'T forget v0.2.5 tag decision** is pending at S85. Wave 2 has cumulative content/spec polish worth a tag if user authorizes.
+- **DON'T let agent-worktree-isolation violations slide silently** — pa.md F4 path-discipline hardening candidate filed; this session had 4 distinct violation patterns (W1.5-1 CWD drift, W1.5-5 direct-commit-to-main, W1.5-2 debug-WIP-in-main, W2-1 WIP-in-main). PA-side commit-discipline gate caught them all but the friction adds up.
+- **DON'T re-derive the Q8.1 sequencing decision.** Empirical band landed LOW (40-110h); v0.3.0 = program-shape standalone is settled per the dive's verdict.
+
+---
+
+## Cross-machine sync state at S84 close (will update after wrap commits + push)
+
+Pending wrap commits + push:
+- **scrmlTS**: hand-off.md + handOffs/hand-off-83.md (rotation) + master-list.md + docs/changelog.md + .claude/maps/primary.map.md (forced if untrack-and-readd dance not done)
+- **scrml-support**: 2 v0.3 docs + user-voice-scrmlTS.md
+
+After push: both repos 0/0 vs origin at S84 close.
 
 ---
 
 ## Tags
 
-#session-83 #close #v0.2.0-tag #v0.2.1-tag #v0.2.2-tag #wave-2-closed #wave-3-1-closed #wave-4a-closed #wave-4b-1-closed #readme-v0.2.0-rewrite #commit-discipline-rule-folded #worktree-retention-rule-revised #5-debate-agents-pre-staged #perf-feel-debate-plan-ratified #user-lean-A-plus-B #zero-regressions #pushed
+#session-84 #close #v0.2.4-tag #wave-1-closed #wave-1-5-closed #wave-2-closed #wave-3-ratified #v0.3-program-shape-dive-complete #insight-29-ratified #insight-29-approach-a-slides-to-v0.4 #q8.1-low-band-standalone-v0.3 #self-host-orthogonal-memory #depth-of-survey-discount-10-occurrences #pro-x-voting-against-x-frequency-8 #scope-blindness-pattern-correctly-applied #pa-md-f4-hardening-candidates #zero-regressions #empirical-impact-40-110h #six-q-verdicts-pending-s85

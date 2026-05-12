@@ -2,7 +2,41 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-11 S83 CLOSE, all three semver tags live on origin — **v0.2.0 `022ee02` + v0.2.1 `d72c074` + v0.2.2 `98e872d`**): **11,457 pass / 77 skip / 1 todo / 0 FAIL** (545 files; `bun run test` full suite incl. browser/lsp/commands/self-host). v0.2.2 is the current shipped baseline; v0.2.3 patch trajectory queued (Bug 2 + trucking-dispatch + C1/C2 docs + perf-feel debate post-empirical-study).
+Current baseline (2026-05-11 S84 CLOSE, all five semver tags live on origin — **v0.2.0 `022ee02` + v0.2.1 `d72c074` + v0.2.2 `98e872d` + v0.2.3 `d512266` + v0.2.4 `28cd2ac`**): **11,512 pass / 77 skip / 1 todo / 0 FAIL** (554 files). v0.2.4 is the current shipped baseline; Wave 2 commits land at HEAD `1d2f1cf` (v0.2.5 tag candidate pending authorization); v0.3.0 program-shape spec-amendment cluster ratified for S85 dispatch.
+
+### 2026-05-11 (S84 CLOSE — v0.2.3 + v0.2.4 cut · Wave 1/1.5/2 landed · v0.3 program-shape dive ratified)
+
+**Session-defining outcome:** v0.2 robust state reached. 5 v0.2.x tags live (v0.2.3 closes Bug 2; v0.2.4 closes Wave 1 + Wave 1.5 — 6 compiler-correctness bugs + 6 secondary-surface follow-ons + skip-surface audit). Wave 2 adopter-content/spec-polish landed on top (untagged at close; v0.2.5 candidate). Plus the v0.3 architectural dive — program-as-container + logic-default-inside-program — completed with empirical-impact 40-110h LOW band → standalone v0.3.0 sequencing (Insight 29 Approach A slides to v0.4.0).
+
+**Tags cut this session:**
+
+- **v0.2.3 `d512266`** — Bug 2 (derived-engine over auto-declared engine var). §51.9 validator extension to thread auto-declared engine vars into `reactiveBindings`. §51.9.7 transitive-projection rejection preserved. 14-mario reverted to canonical `<engine for=HealthRisk derived=@marioState>` form. +9 tests / 0 regressions.
+
+- **v0.2.4 `28cd2ac`** — Wave 1 + Wave 1.5 robust-v0.2 bundle. 12 PA-authored commits. **Wave 1 (compiler-correctness):** Bug 1 `not <expr>` codegen (§45.7); Bug 2 match pipe-alternation in `rewriteMatchExpr` + `emit-control-flow` + preprocessForAcorn lookbehind; Bug 3 E-DG-002 false-fire on derived-engine projected vars; Bug 4 SYM/TAB typed-decl registration (`collectTypeAnnotation` depth tracking); Bug 5 bare-variant inference at binary-expr positions; Bug 6 `.advance(.X.history)` test-hardening (codegen was correct since S83 Wave 2.4 Bug #2 keystone); skip-surface audit (77/77 valid; A+ test hygiene). **Wave 1.5 (secondary-surface follow-ons):** Bug 6.5 `_makeExprCtx` `enginesWithHistory` forward; Bug 4.5 + Bug 5 follow-on bare-variant nested struct + control-flow positions; Bug 1.1 lift attr-value whitespace; Bug 1.2 SQL-ref placeholder + const/let SQL init (7 source files threaded); Bug 1.3 GITI-001 IIFE wrap context-aware; test-channel-audit. +75 tests / 0 regressions cumulative.
+
+**Wave 2 (post-v0.2.4 adopter content + spec polish; HEAD `1d2f1cf`):**
+
+- **W2-1** Trucking-dispatch app v0.2.4 canonical rewrite (24 files in `examples/23-trucking-dispatch/`; commit `1d2f1cf`). Surfaced 4 real compiler anomalies (A1 `<expr.member> is some/is not` parser issue in ternary-cond + 10 sites; A2 cross-file channel mount E-RI-002 skip-path doesn't propagate + 12 sites; A3 `server function` modifier vs E-CG-006 inconsistency; A4 F-COMPONENT-001 nested-PascalCase) — queued for Wave 2.5 v0.2.5 patch.
+- **W2-2** C1 tutorial rewrite (zero-to-running on v0.2.4; commit `15336b9`). 48 files including 1060-line tutorial.md + 11 canonical snippets + counter.db + verify-tutorial.sh. All snippets compile clean.
+- **W2-3** C2 articles triage + rewrites (commit `2646cdd`). 10 articles + per-article triage tables. **5 articles now publishable** per user-decision queue: tier-ladder-promotion (with status banner), realtime-and-workers, mutability-contracts (with status banner), server-boundary-disappears, components-are-states (with status banner). Plus 2 follow-on commits (`eaf718f` sweep + `32ecf1c` Option-1 rewrite) for the `why-scrml-has-to-deprecate` article (outside W2-3's audit-15 scope).
+- **W2-4** PIPELINE.md prose-pass: ✅ **NO-OP** — work was already shipped at S75/C23 per IMPLEMENTATION-ROADMAP §8.6 #2 closure. `feedback_scope_blindness.md` rule operating correctly.
+- **W2-5** SPEC §34 catalog drift cleanup (commit `d72cbb3`). 388 → 484 unique codes; 93 new rows + 2 NEW drift findings (D-BATCH-001 + E-SYNTAX-DURATION) not in S78 audit. Cross-reference correctness restored.
+
+**v0.3 program-shape dive (the BIG architectural surface for next session):**
+
+User direction: *"<program> is not just a replacement for <html> and <meta>. it is the primary configurator for 'the program' in mario it reads like all of the logic is OUTSIDE of your program. which is fundamentally wrong."* + sequencing reframing *"if impl ends up simple enough, we may make that 0.3 and push other advances up the numbers."*
+
+Plan at `scrml-support/docs/deep-dives/program-as-container-and-logic-default-shape-2026-05-11.md`; dive result at `scrml-support/docs/deep-dives/program-as-container-shape-DIVE-2026-05-11.md`.
+
+**Dive verdict:** empirical compiler-pipeline impact 40-110h LOW BAND. Compiler `ast-builder.js:690` (`isProgramRoot`) + `TOPLEVEL_STATE_DECL_RE` already half-implements the proposal. Recommended sequencing: **v0.3.0 = program-shape standalone; Insight 29 Approach A slides to v0.4.0.** 6 Q-verdicts pending S85 ratification → spec-amendment kickoff dispatch.
+
+**Insight 29 ratified (perf-feel debate, this session):** Approach A whole-stack closure analysis was THE v0.3.0 target (now sliding to v0.4 per the program-shape sequencing reframing). Approach B telemetry-PGO deferred to v2 (llvm-pgo-expert flip — strongest signal). Approach D rejected as v1 default. At `scrml-support/design-insights.md`.
+
+**Memory file added:** `~/.claude/projects/-home-bryan-scrmlMaster-scrmlTS/memory/project_self_host_orthogonal.md` — self-host = pure-scrml compiler (adopter-written, post-v1.0); does NOT gate any TS-implementation work.
+
+**Pro-X-voting-against-X frequency now at 8+.** Depth-of-survey-discount occurrences this session: Bug 4 (#8 — brief named symbol-table.ts; fix was in ast-builder.js), W1.5-3 tokenizer-space-loss (#9 — brief named tokenizer.ts; fix was in `_parseLiftAttrValue`), v0.3 dive's `ast-builder.js:690` finding (#10 — compiler already half-implements). Pattern frequency now 10+.
+
+**Operational anomalies (pa.md F4 path-discipline hardening candidates):** 4 worktree-isolation violations this session (W1.5-1 CWD drift, W1.5-5 direct-commit-to-main, W1.5-2 debug-WIP-in-main, W2-1 WIP-in-main). PA-side commit-discipline gate caught all; zero work-lost.
 
 ### 2026-05-11 (S83 CLOSE — TRIPLE-TAG release session: v0.2.0 + v0.2.1 + v0.2.2)
 

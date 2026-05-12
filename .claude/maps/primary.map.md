@@ -1,35 +1,56 @@
 # primary.map.md
 # project: scrmlts
-# updated: 2026-05-11T17:00:00Z  commit: b6c8e1c
+# updated: 2026-05-11T20:35:00Z  commit: 28cd2ac (v0.2.4 — Wave 1 + Wave 1.5 robust-v0.2 bundle)
 
 ## Project Fingerprint
 Language:   JavaScript / TypeScript (mixed .js + .ts); Bun runtime
 Framework:  Custom compiler — scrml language compiler + LSP server
 Runtime:    Bun >= 1.3.13
 Type:       Compiler + CLI tool + LSP server + 17-module stdlib
-Size:       ~1,710 source files total; compiler/src: ~60k LOC across ~60 modules;
+Size:       ~1,710 source files total; compiler/src ≈ 99,603 LOC; codegen subdir ≈ 30,891 LOC;
             SPEC.md 26,286 lines; SPEC-INDEX.md 306 lines;
             PIPELINE.md v0.7.1 (2026-05-09);
-            Tests: 535 files, S81 close: 11,163 pass / 77 skip / 1 todo / 0 fail
+            samples/compilation-tests: 795 .scrml total (287 top-level);
+            Tests: 554 files, v0.2.4 close: ~11,500 pass / 77 skip / 1 todo / 0 fail
 
-## Key Facts (S81 close — adopter-override surface + Phase A10 closure)
+## Key Facts (S84 close — v0.2.4 robust-v0.2 bundle)
 
-**S81 SHIPPED (2026-05-11):**
-- F.1 `<program cors-max-age=N>` — Access-Control-Max-Age override (default 86400s) per §39.2.1 amendment. `parseCorsMaxAge` helper in `emit-server.ts`.
-- F.2 `<program channel-reconnect=N>` — project-level WS reconnect cadence (default 2000ms) per §38.3.1 NEW subsection. `parseChannelReconnect` helper in `emit-channel.ts`. Per-channel `<channel reconnect=>` still wins.
-- A10-followon: TS body-walk re-enabled on engine-decl + payload-binding scope injection. Engine-arm bodies now type-checked; typos like `${mssg}` inside `<Error msg>` fire E-SCOPE-001.
-- Strict self-host rebuild gate: `scripts/rebuild-self-host-dist.ts` now exits 1 on host-compiler errors (closes pre-S81 silent leak). Source-side null/undefined sweep DEFERRED per `docs/audits/self-host-spec-conformance-2026-05-11.md`.
-- SPEC-INDEX regen: new `scripts/regen-spec-index.ts` (TS, idempotent, line-range refresh preserving summaries). 62 rows refreshed.
+**v0.2.4 SHIPPED (2026-05-11 — Wave 1 + Wave 1.5, 12 commits since v0.2.3):**
 
-**S80 SHIPPED (2026-05-11):**
-- Auth/protect/csrf attribute-host codification. **E-MW-001 RETIRED**. `<channel protect=>` → `<channel auth=>`. `<program protect=>` shorthand retired. csrf= collapsed to `"auto"|"off"` per §52.13 (W-ATTR-002 on invalid literals).
-- Library-mode meta-block strip FIX (paren-aware regex in `emit-library.ts`).
-- A5-7 canonical samples engine-005…engine-008 landed.
+Wave 1 (compiler-correctness, B1-surfaced gaps):
+- **Bug 1** `not <expr>` operator-form lowers to `!<expr>` (§45.7). Disambiguates from §42 value-form. New `not <operand>` rewrites in `compiler/src/codegen/rewrite.ts:715-737` (_rewriteNotSegment) + `compiler/src/expression-parser.ts:768-792` (preprocessForAcorn).
+- **Bug 2** Match pipe-alternation in `rewriteMatchExpr` + `emit-control-flow.ts` + `preprocessForAcorn` lookbehind. `InlineMatchArm.tests?: string[]`; `MatchArm.tests[]` mirror in block-form match; `parseInlineMatchArm` / `parseMatchArm` alternation regex tried BEFORE single-variant.
+- **Bug 3** E-DG-002 false-fire on derived-engine projected vars. `compiler/src/dependency-graph.ts:1743-1761` `creditReader` credits BOTH original AND redirect target.
+- **Bug 4** Typed state-decl registration. `compiler/src/ast-builder.js:2846` `collectTypeAnnotation` tracks paren + brace + bracket depths cohesively (was: paren-only). NOTE: bug brief incorrectly named `symbol-table.ts` — actual fix landed in `ast-builder.js`; depth-of-survey-discount #8.
+- **Bug 5** Bare-variant inference at binary-expression positions (==, !=, is, is-not). `compiler/src/type-system.ts:6613` new helper `inferBareVariantsAtComparisonSites`.
+- **Bug 6** `.advance(.Variant.history)` test-hardening. `engine-a7-history.test.js` + `engine-event-handler-writes.test.js`. Codegen was already correct since S83 Wave 2.4 Bug #2 keystone ("Approach B 8th positional `isHistoryRestore` arg"); test-coverage gap closed.
 
-**S79 SHIPPED:**
-- 5 hardcoded-threshold injection points: `MAX_RUNS`, `EncodingContext.seqCap`, serve-client timeouts, `<program idempotency-ttl=>`, `<program batch-in-list-cap=>`.
-- A5-6 Feature 1: named `<onTimeout name=>` + `cancelTimer()` builtin.
-- Debounce/throttle Approach B: clean-cut deletion of `reactive-debounced-decl` AST kind in favor of canonical `<x debounced=Nms>` attribute per §6.13.
+Wave 1.5 (secondary-surface follow-ons surfaced by Wave 1):
+- **Bug 6.5** `_makeExprCtx` missing `enginesWithHistory` forward → function-body `.advance(.X.history)` null-padded history-map. Fix at `compiler/src/codegen/emit-logic.ts:134` (interface) + `:460-468` (forward).
+- **Bug 4.5 + Bug 5 follow-on** Bare-variant inference extensions: (a) thread LHS enum through nested struct literals in array-typed initializers; (b) wire inference into if/while cond, return-stmt, call-arg. New helpers `inferBareVariantsWithStructNav` (`type-system.ts:6382`), `inferBareVariantsAtCallArgs` (`:6859`), `fnSignatures` map (`:3682`), `enclosingFnReturnTypeStack` (`:3666`). +bar-form enum parser parity in `meta-checker.ts`.
+- **Bug 1.1** Lift attr-value join preserves word-boundary whitespace (was: `not t.completed` → `nott.completed`). New helper `_joinPreservingWordBoundary` at `compiler/src/ast-builder.js:1675` + call-site swap in `_parseLiftAttrValue` (~line 2783).
+- **Bug 1.2** SQL-ref placeholder + const/let SQL init. `tryConsumeSqlInit` hooks at 9 call-sites in `ast-builder.js:3100` (4 new for let/const-decl: lines 4120, 4209, 4239, 4265, 4358, 4377, 6172, 6201, 6302). Emitter guard for `sql-ref:-1` in `emit-expr.ts`. 5 downstream consumer updates (emit-logic.ts, emit-control-flow.ts, route-inference.ts, meta-checker.ts, type-system.ts).
+- **Bug 1.3** GITI-001 IIFE wrap context-aware (statement vs expression context). `compiler/src/codegen/emit-client.ts:892-905`. No more `(async () => ...)();)` malformed-syntax shape.
+- **Bug 14** test-channel-audit. 1 Class B fix at `compiler/tests/unit/gauntlet-s19/phase3-wrapup.test.js` (`compileWholeScrml` now surfaces `result.warnings`). 77 skipped tests audit (all valid deferrals; test-hygiene grade A+).
+
+**Forward signal — Insight 29 ratified (perf-feel debate, 2026-05-11):**
+- Approach A (whole-stack closure analysis) = **v0.3.0 spec-amendment target**.
+- Approach B (telemetry-augmented PGO) = **deferred to v2** extension (per llvm-pgo-expert flip).
+- Approach D (RSC + per-route + streaming + bridges) = rejected as v1 default.
+- Insight 29 at `scrml-support/design-insights.md`.
+
+**Reference function-level landmarks (Bug 4 gap closure):**
+- `compiler/src/symbol-table.ts` — `walk` at `:1192`, `registerStateDecl` at `:882`, B1-B22 doc-header at lines 1-100. SYM passes: PASS 10.A/10.B B14, PASS 11 B15, PASS 12 B16, PASS 13 B17, PASS 14 B22, PASS 15 B19, PASS 16 A5-3.
+- `compiler/src/ast-builder.js` — `collectTypeAnnotation` at `:2846`, `_joinPreservingWordBoundary` at `:1675`, `tryConsumeSqlInit` at `:3100` (9 call sites).
+- `compiler/src/type-system.ts` — `inferBareVariantsAtComparisonSites` at `:6613`, `inferBareVariantsWithStructNav` at `:6382`, `inferBareVariantsAtCallArgs` at `:6859`, `fnSignatures` map at `:3682`, `enclosingFnReturnTypeStack` at `:3666`.
+- `compiler/src/codegen/emit-logic.ts` — `_makeExprCtx` at `:460` (forwards `enginesWithHistory` post-Bug-6.5).
+
+**Carry-forward — pre-v0.2.4 historical milestones (S77-S81):**
+- **Phase A10 SHIPPED S78** — Engine state-child body render. `emit-variant-guard.ts` (830 LOC).
+- **S77 codegen** — `<onTimeout>` (A5-4), computed-delay (A5-5/A5-5b), `<onIdle>` (A5-6 Feature 2).
+- **S79** — A5-6 Feature 1 (named `<onTimeout name=>`); debounce/throttle Approach B (`reactive-debounced-decl` retired).
+- **S80** — Auth attribute-host codification (E-MW-001 RETIRED); `<channel auth=>` replaces `protect=`.
+- **S81** — `<program cors-max-age=>`, `<program channel-reconnect=>`; SPEC-INDEX regen script.
 
 ## Map Index
 
@@ -132,7 +153,7 @@ trigger a map-design review.
 - **Pre-commit hook (installed S78):** `scripts/git-hooks/pre-commit` — runs `bun test unit + integration + conformance --bail`. Activated per machine: `git config core.hooksPath scripts/git-hooks`.
 
 ## Tags
-#scrmlts #map #primary #compiler #s77 #s78 #phase-a10 #emit-variant-guard #engine-statechild #bun #pipeline #v0next
+#scrmlts #map #primary #compiler #s84 #v0.2.4 #wave-1 #wave-1.5 #robust-v0.2 #insight-29-ratified #bun #pipeline #v0next #symbol-table-landmarks-added #depth-of-survey-discount-8
 
 ## Links
 - [structure.map.md](./structure.map.md)
