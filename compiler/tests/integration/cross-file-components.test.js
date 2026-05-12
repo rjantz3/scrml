@@ -511,11 +511,148 @@ ${"$"}{
     // Sanity: ParentCard expansion occurred — the consumer's emitted output
     // must reference the parent's class. (We assert on the markup-level
     // expansion only; transitive NestedBadge resolution from the parent's
-    // own imports is tracked as a separate follow-on, NOT this T1's scope.)
+    // own imports is now covered by §C11 below — A6 closure.)
     const clientJsPath = join(outDir, "app.client.js");
     if (existsSync(clientJsPath)) {
       const clientJs = readFileSync(clientJsPath, "utf8");
       expect(clientJs).not.toContain('createElement("ParentCard")');
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §C11 — A6 / F-COMPONENT-001 F4: transitive cross-file component registry
+//        enrichment.
+//
+// Pre-fix (post-A4 / 2c687b5): when consumer imports component X from file F
+// and F imports component Y referenced inside X's body, CE expanded X but
+// then fired E-COMPONENT-020 on the inner <Y/> markup — Y was in F's own CE
+// registry but not the consumer's. §C10 closed the parsing residual (no
+// E-COMPONENT-035 / E-COMPONENT-021 on the parent); this §C11 closes the
+// REGISTRY residual on the nested child.
+//
+// Canonical production repro: examples/23-trucking-dispatch/pages/dispatch/
+// board.scrml imports LoadCard; LoadCard imports LoadStatusBadge; pre-A6
+// the consumer fired 3 E-COMPONENT-020 on LoadStatusBadge (one per kanban
+// column). Post-A6: zero E-COMPONENT-020, badge markup inline in client.js.
+//
+// Fix: eager worklist enrichment of the CE registry — for each direct
+// user-component import, enqueue the target file's own user-component
+// imports recursively. (sourceKey, localName) Set guards cycles.
+// ---------------------------------------------------------------------------
+
+describe("§C11 transitive cross-file component registry (A6 / F4)", () => {
+  test("consumer registry includes Y even when only X is imported directly", () => {
+    const ROOT = join(TMP, "c11");
+    mkdirSync(ROOT, { recursive: true });
+
+    // Leaf: NestedBadge — referenced from Wrapper's body via WRAPPER's import.
+    fx("c11/badge.scrml", `${"$"}{
+  export const NestedBadge = <span class="c11-leaf-badge"/>
+}
+`);
+
+    // Middle: Wrapper imports NestedBadge and uses it in its own body.
+    // The CONSUMER does not import NestedBadge directly.
+    fx("c11/wrapper.scrml", `${"$"}{
+  import { NestedBadge } from './badge.scrml'
+
+  export const Wrapper = <div class="c11-wrapper">
+    <NestedBadge/>
+    <span class="c11-wrapper-text">hi</>
+  </>
+}
+`);
+
+    // Consumer imports ONLY Wrapper.
+    const consumer = fx("c11/app.scrml", `<program>
+${"$"}{
+  import { Wrapper } from './wrapper.scrml'
+}
+<ul>
+  ${"$"}{ for (let i of [1, 2]) {
+    lift <li><Wrapper/></li>
+  } }
+</ul>
+</program>
+`);
+
+    const outDir = join(ROOT, "dist");
+    const result = compileScrml({
+      inputFiles: [consumer],
+      outputDir: outDir,
+      write: true,
+      log: () => {},
+    });
+
+    // A6 closure: zero E-COMPONENT-020 on NestedBadge (transitively pulled in).
+    const m020 = result.errors.filter(e => e.code === "E-COMPONENT-020");
+    expect(m020).toEqual([]);
+
+    // No residual user-component markup post-CE either.
+    const m035 = result.errors.filter(e => e.code === "E-COMPONENT-035");
+    expect(m035).toEqual([]);
+
+    // Expanded badge markup must appear in the consumer's emitted output —
+    // not a phantom createElement("NestedBadge").
+    const clientJsPath = join(outDir, "app.client.js");
+    if (existsSync(clientJsPath)) {
+      const clientJs = readFileSync(clientJsPath, "utf8");
+      expect(clientJs).not.toContain('createElement("NestedBadge")');
+      expect(clientJs).not.toContain('createElement("Wrapper")');
+      expect(clientJs).toContain("c11-leaf-badge");
+    }
+  });
+
+  test("cycles (A imports B imports A) terminate without overflow", () => {
+    const ROOT = join(TMP, "c11-cycle");
+    mkdirSync(ROOT, { recursive: true });
+
+    // A and B mutually import each other's components. The CE registry-
+    // enrichment worklist must not loop. (Whether the cycle compiles to
+    // a coherent expansion is a separate concern; this test asserts only
+    // that the enrichment phase TERMINATES — no stack/heap explosion.)
+    fx("c11-cycle/a.scrml", `${"$"}{
+  import { CompB } from './b.scrml'
+
+  export const CompA = <div class="c11-cycle-a"><CompB/></>
+}
+`);
+
+    fx("c11-cycle/b.scrml", `${"$"}{
+  import { CompA } from './a.scrml'
+
+  export const CompB = <span class="c11-cycle-b"/>
+}
+`);
+
+    const consumer = fx("c11-cycle/app.scrml", `<program>
+${"$"}{
+  import { CompA } from './a.scrml'
+}
+<div>
+  ${"$"}{ for (let i of [1]) {
+    lift <div><CompA/></div>
+  } }
+</div>
+</program>
+`);
+
+    const outDir = join(ROOT, "dist");
+    const result = compileScrml({
+      inputFiles: [consumer],
+      outputDir: outDir,
+      write: true,
+      log: () => {},
+    });
+
+    // Cycle did not cause infinite recursion / stack overflow — compileScrml
+    // returned. The enrichment Set guards on (sourceKey, localName).
+    expect(result).toBeDefined();
+    expect(Array.isArray(result.errors)).toBe(true);
+
+    // CompB transitively pulled in via CompA — no E-COMPONENT-020 on CompB.
+    const m020 = result.errors.filter(e => e.code === "E-COMPONENT-020");
+    expect(m020).toEqual([]);
   });
 });

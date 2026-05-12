@@ -2530,13 +2530,49 @@ export function runCEFile(
   // For path-b matches, synthesize an ExtendedComponentDefNode by stripping
   // the `export const NAME =` prefix from the export-decl raw to recover the
   // markup body.
+  //
+  // A6 fix (F4-residual from W2 commit 6536f7a): TRANSITIVE enrichment. When
+  // a consumer imports component X from file F, X's body may reference
+  // component Y imported by F. After W2 landed F-COMPONENT-001 internal-
+  // PascalCase parsing (commit 2c687b5), X's body now expands correctly — but
+  // the inner `<Y/>` markup then misses the consumer's CE registry, firing
+  // E-COMPONENT-020. Fix: walk the import closure eagerly via a worklist,
+  // seeded with the consumer's direct component imports, expanding to include
+  // each imported file's own user-component imports. Each (sourceKey, name)
+  // is visited at most once; over-inclusion is harmless (registry lookups
+  // are by-name).
   if (exportRegistry && fileASTMap) {
+    type WorkItem = { sourceKey: string; importedName: string; localName: string; rawSource: string };
+    const seen = new Set<string>();
+    const work: WorkItem[] = [];
+
+    // Seed worklist from the consumer file's direct imports.
     for (const imp of (ast.imports ?? [])) {
       const importExt = imp as ImportWithSpecifiers;
       const key = lookupKey(filePath, imp, importGraph);
       const targetExports = exportRegistry.get(key);
       if (!targetExports) continue;
-      const targetTab = fileASTMap.get(key);
+      const pairs = importExt.specifiers
+        ? importExt.specifiers.map((s) => ({ imported: s.imported, local: s.local || s.imported }))
+        : (imp.names ?? []).map((n: string) => ({ imported: n, local: n }));
+      for (const { imported, local } of pairs) {
+        const info = targetExports.get(imported);
+        if (!info) continue;
+        const isUserComponent =
+          info.category === "user-component" ||
+          (info.category == null && info.isComponent === true);
+        if (!isUserComponent) continue;
+        work.push({ sourceKey: key, importedName: imported, localName: local, rawSource: imp.source as string });
+      }
+    }
+
+    while (work.length > 0) {
+      const { sourceKey, importedName, localName, rawSource } = work.shift()!;
+      const seenKey = `${sourceKey}::${localName}`;
+      if (seen.has(seenKey)) continue;
+      seen.add(seenKey);
+
+      const targetTab = fileASTMap.get(sourceKey);
       if (!targetTab || !targetTab.ast) continue;
       const targetComponents = (targetTab.ast.components ?? []) as ExtendedComponentDefNode[];
       const targetExportDecls = (targetTab.ast.exports ?? []) as Array<{
@@ -2547,68 +2583,89 @@ export function runCEFile(
         span: Span;
       }>;
 
-      // Normalize: AST imports use imp.names (string[]), but some paths may use
-      // imp.specifiers ({imported, local}[]). Handle both shapes.
-      const importedNames = importExt.specifiers ? importExt.specifiers.map((s) => s.imported) : (imp.names ?? []);
-      for (const importedName of importedNames) {
-        const info = targetExports.get(importedName);
-        // P3-FOLLOW: prefer info.category (NR-authoritative); fall back to
-        // info.isComponent for older registry entries.
-        if (!info) continue;
-        const isUserComponent =
-          info.category === "user-component" ||
-          (info.category == null && info.isComponent === true);
-        if (!isUserComponent) continue;
+      // Path (a): direct component-def in target's ast.components
+      let compDef: ExtendedComponentDefNode | undefined =
+        targetComponents.find((c: ExtendedComponentDefNode) => c.name === importedName);
 
-        // Path (a): direct component-def in target's ast.components
-        let compDef: ExtendedComponentDefNode | undefined =
-          targetComponents.find((c: ExtendedComponentDefNode) => c.name === importedName);
-
-        // Path (b): export-decl with markup body — synthesize a component-def
-        if (!compDef) {
-          const expDecl = targetExportDecls.find(
-            (e) => e && e.exportedName === importedName && e.exportKind === "const"
-          );
-          if (expDecl && typeof expDecl.raw === "string") {
-            // Strip `export const NAME =` prefix; tokenized form spaces around
-            // tokens so the prefix shape is consistent: `export const NAME =`.
-            const prefix = `export const ${importedName} =`;
-            const idx = expDecl.raw.indexOf(prefix);
-            if (idx !== -1) {
-              const body = expDecl.raw.slice(idx + prefix.length).trimStart();
-              compDef = {
-                kind: "component-def",
-                name: importedName,
-                raw: body,
-                span: expDecl.span,
-                defChildren: [],
-              } as ExtendedComponentDefNode;
-            }
+      // Path (b): export-decl with markup body — synthesize a component-def
+      if (!compDef) {
+        const expDecl = targetExportDecls.find(
+          (e) => e && e.exportedName === importedName && e.exportKind === "const"
+        );
+        if (expDecl && typeof expDecl.raw === "string") {
+          // Strip `export const NAME =` prefix; tokenized form spaces around
+          // tokens so the prefix shape is consistent: `export const NAME =`.
+          const prefix = `export const ${importedName} =`;
+          const idx = expDecl.raw.indexOf(prefix);
+          if (idx !== -1) {
+            const body = expDecl.raw.slice(idx + prefix.length).trimStart();
+            compDef = {
+              kind: "component-def",
+              name: importedName,
+              raw: body,
+              span: expDecl.span,
+              defChildren: [],
+            } as ExtendedComponentDefNode;
           }
         }
+      }
 
-        if (!compDef) continue;
+      if (!compDef) continue;
 
-        // Only add if not already in the same-file registry (same-file takes precedence)
-        if (!registry.has(importedName)) {
-          // Build the component entry the same way as buildComponentRegistry
-          const defNode = parseComponentDef(compDef, imp.source as string, ceErrors);
-          if (defNode) {
-            // §14.9: derive snippetProps for cross-file components
-            const xSnippetProps = new Map<string, PropDecl>();
-            if (defNode.propsDecl) {
-              for (const decl of defNode.propsDecl) {
-                if (decl.isSnippet) xSnippetProps.set(decl.name, decl);
-              }
+      // Only add if not already in the same-file registry (same-file takes
+      // precedence; for transitively-enriched components, first-write-wins
+      // since seen tracks (sourceKey, localName) which forbids re-add).
+      // The consumer file uses `localName` (the import-aliased name) when
+      // looking up the registry; for transitive entries the localName always
+      // equals importedName (we don't see aliases through the import graph).
+      if (!registry.has(localName)) {
+        // Build the component entry the same way as buildComponentRegistry
+        const defNode = parseComponentDef(compDef, rawSource, ceErrors);
+        if (defNode) {
+          // §14.9: derive snippetProps for cross-file components
+          const xSnippetProps = new Map<string, PropDecl>();
+          if (defNode.propsDecl) {
+            for (const decl of defNode.propsDecl) {
+              if (decl.isSnippet) xSnippetProps.set(decl.name, decl);
             }
-            registry.set(importedName, {
-              nodes: defNode.nodes,
-              defSpan: compDef.span,
-              propsDecl: defNode.propsDecl ?? null,
-              defChildren: defNode.defChildren ?? [],
-              snippetProps: xSnippetProps,
-            });
           }
+          registry.set(localName, {
+            nodes: defNode.nodes,
+            defSpan: compDef.span,
+            propsDecl: defNode.propsDecl ?? null,
+            defChildren: defNode.defChildren ?? [],
+            snippetProps: xSnippetProps,
+          });
+        }
+      }
+
+      // A6 transitive enrichment: enqueue user-component imports of the
+      // target file. The target's own `ast.imports` resolves via
+      // `importGraph.get(sourceKey)`. Component refs inside the target's
+      // body may name any of these — register them so the consumer's CE
+      // walk finds them when expanding the imported component's children.
+      const targetImports = (targetTab.ast.imports ?? []) as ImportDeclNode[];
+      for (const tImp of targetImports) {
+        const tImpExt = tImp as ImportWithSpecifiers;
+        const tKey = lookupKey(sourceKey, tImp, importGraph);
+        const tTargetExports = exportRegistry.get(tKey);
+        if (!tTargetExports) continue;
+        const tPairs = tImpExt.specifiers
+          ? tImpExt.specifiers.map((s) => ({ imported: s.imported, local: s.local || s.imported }))
+          : (tImp.names ?? []).map((n: string) => ({ imported: n, local: n }));
+        for (const { imported: tImported, local: tLocal } of tPairs) {
+          const tInfo = tTargetExports.get(tImported);
+          if (!tInfo) continue;
+          const tIsUserComponent =
+            tInfo.category === "user-component" ||
+            (tInfo.category == null && tInfo.isComponent === true);
+          if (!tIsUserComponent) continue;
+          work.push({
+            sourceKey: tKey,
+            importedName: tImported,
+            localName: tLocal,
+            rawSource: tImp.source as string,
+          });
         }
       }
     }
