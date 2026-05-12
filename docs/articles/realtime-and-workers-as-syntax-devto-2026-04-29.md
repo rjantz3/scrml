@@ -96,16 +96,15 @@ This is the seam. Two seams, actually. The wire between client and server, and t
 ## The same feature in scrml
 
 ```scrml
-<channel name="chat" topic=@room reconnect=2000>
-  ${
-    @shared messages = []
+<channel name="chat" topic="lobby" reconnect="2000">
+  <messages> = []
 
-    server function postMessage(author, body) {
-      messages = [...messages, { author, body, ts: Date.now() }]
-    }
+  server function postMessage(author, body) {
+    @messages = [...@messages, { author, body, ts: Date.now() }]
   }
 </>
 
+<program>
 <ul>
   ${ for (let m of @messages) {
     lift <li>
@@ -114,6 +113,7 @@ This is the seam. Two seams, actually. The wire between client and server, and t
     </li>
   } }
 </ul>
+</program>
 ```
 
 That is the entire feature. Both halves of the wire.
@@ -122,11 +122,13 @@ What the compiler did with `<channel>`:
 
 1. Generated a server-side WebSocket upgrade route at `/_scrml_ws/chat` (§38.8).
 2. Generated a client-side connection IIFE that opens the WebSocket, dispatches messages, registers cleanup, and reconnects on close after 2000ms (§38.7). The `reconnect=` attribute is a number, not a library import.
-3. Took every variable declared `@shared` inside the channel body and wired it to a sync protocol. On every local write, the compiler emits a sync message; on every receive, it applies the inverse. The wire format is fixed by the spec (§38.4): `{ __type: "__sync", __key: "<varName>", __val: <value> }`.
-4. Routed the pub/sub through the channel's `topic=`, defaulting to the channel name. Two clients with `topic=@room` set to `"room-42"` see each other's writes; clients with different room values do not (§38.3, §38.6.2).
+3. Took every reactive cell declared inside the channel body (`<messages> = []`) and wired it to a sync protocol. On every local write, the compiler emits a sync message; on every receive, it applies the inverse. The wire format is fixed by the spec (§38.4): `{ __type: "__sync", __key: "<varName>", __val: <value> }`. **The `@shared` modifier from older scrml drafts is gone in v0.2.0** (L4 lock + E-CHANNEL-SHARED-MODIFIER) — auto-sync follows from being declared inside the channel body, not from a marker.
+4. Routed the pub/sub through the channel's `topic=`, defaulting to the channel name. Two clients with the same `topic="room-42"` see each other's writes; clients with different topics do not (§38.3, §38.6.2).
 5. Made `broadcast(data)` and `disconnect()` available inside any `server function` declared in the channel's lexical scope (§38.6). Outside that scope, calling them is a compile error, E-CHANNEL-004.
 
 That's it. No `new WebSocket()`. No reconnect timer. No `JSON.stringify`/`JSON.parse` for the sync protocol. No room-to-socket-set map on the server. No "Socket.IO vs ws" choice to make.
+
+The `<channel>` declaration lives **at file level** (sibling of `<program>`, never inside it) — `E-CHANNEL-INSIDE-PROGRAM` if you try to nest it. From `<program>` and other file-level scopes, the channel's cells are reachable by their canonical `@cellName` access (so the `${ for (let m of @messages) ... }` loop above just reads `@messages` directly).
 
 For workers, the shape is the same. The thing-that-runs-elsewhere is declared right next to the thing-that-uses-it.
 
@@ -135,14 +137,21 @@ For workers, the shape is the same. The thing-that-runs-elsewhere is declared ri
   ${
     function sieve(limit) {
       const flags = Array(limit + 1).fill(true)
-      flags[0] = false; flags[1] = false
+      flags[0] = false
+      flags[1] = false
       for (let i = 2; i * i <= limit; i++) {
         if (flags[i]) {
-          for (let j = i * i; j <= limit; j += i) flags[j] = false
+          for (let j = i * i; j <= limit; j += i) {
+            flags[j] = false
+          }
         }
       }
       const primes = []
-      for (let i = 2; i <= limit; i++) if (flags[i]) primes.push(i)
+      for (let i = 2; i <= limit; i++) {
+        if (flags[i]) {
+          primes.push(i)
+        }
+      }
       return primes
     }
 
@@ -153,7 +162,7 @@ For workers, the shape is the same. The thing-that-runs-elsewhere is declared ri
 </>
 
 ${
-  @result = not
+  <result> = not
 
   function findPrimes() {
     <#primes>.send({ limit: @limit })
@@ -186,7 +195,7 @@ That is what colocation of behavior means in practice. Realtime and off-thread c
 
 - **`new WebSocket()` boilerplate.** Connection lifecycle, reconnect, message dispatch, topic routing. All compiler-emitted.
 - **Socket.IO and ws on the dependency list.** Both sides of the wire are owned by one compiler.
-- **Pub/sub libraries.** The `topic=` attribute is the routing primitive. `@shared` is the sync primitive.
+- **Pub/sub libraries.** The `topic=` attribute is the routing primitive. Declaration inside the channel body IS the sync primitive — no marker required (v0.2.0+).
 - **`new Worker()` plus `postMessage` plus `onmessage` plumbing.** Worker lifecycle is `<program name="...">`. Communication is `<#name>.send()` and `when message from <#name>`.
 - **Worker-loader plugins and bundler config for worker entry points.** The compiler extracts each nested `<program>` as its own compilation unit (§43.3) and emits its own bundle. The build system does not need to know workers exist.
 - **Type drift across the wire.** Shapes used in the channel body, on either side of the post, are the same shapes. They do not get redeclared.

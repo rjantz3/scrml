@@ -49,7 +49,7 @@ This is the seam. It is the same shape as the server-boundary seam. Multiple too
 ## The same feature in scrml
 
 ```scrml
-< schema>
+<schema>
     users {
         id:       integer primary key
         username: text not null unique
@@ -63,30 +63,34 @@ This is the seam. It is the same shape as the server-boundary seam. Multiple too
     }
 </>
 
-< db src="./app.db" tables="users, posts">
+<program>
 
-server fn getUserPosts(userId: number) {
-    return ?{`
-        SELECT p.title, p.body, u.username
-        FROM posts p
-        JOIN users u ON u.id = p.author_id
-        WHERE p.author_id = ${userId}
-        ORDER BY p.id DESC
-    `}.all()
+<db src="./app.db" tables="users, posts"/>
+
+${
+    server function getUserPosts(userId) {
+        return ?{`
+            SELECT p.title, p.body, u.username
+            FROM posts p
+            JOIN users u ON u.id = p.author_id
+            WHERE p.author_id = ${userId}
+            ORDER BY p.id DESC
+        `}.all()
+    }
 }
 
-</>
+</program>
 ```
 
 That's the entire feature. One file. One AST.
 
 What the compiler did:
 
-1. Parsed the `< schema>` block (§39) and held the column list for `users` and `posts` in memory.
-2. Parsed the `< db>` block (§11) and resolved the driver from the connection string (§44).
+1. Parsed the `<schema>` block (§39) and held the column list for `users` and `posts` in memory.
+2. Parsed the `<db>` block (§11) and resolved the driver from the connection string (§44).
 3. Parsed the `?{}` SQL template (§8). The `${userId}` interpolation compiled to a bound parameter, not string concatenation. There is no `sql.raw()` in scrml.
 4. Validated the SQL template syntactically against the database. A malformed template is E-SQL-002 at compile time, not a runtime exception.
-5. Computed the migration diff between `< schema>` and the live database. `scrml migrate` applies it. The developer never writes `ALTER TABLE` by hand.
+5. Computed the migration diff between `<schema>` and the live database. `scrml migrate` applies it. The developer never writes `ALTER TABLE` by hand.
 
 There is no `prisma generate` step. There is no generated client. There is no separate query DSL to learn. The query is SQL. The compiler reads SQL. The schema is in the same file the compiler is already parsing.
 
@@ -97,8 +101,8 @@ The schema introspection runs as a compiler pass. The data structure is `paResul
 That fact unlocks features that are not reasonable to build in a piecewise stack:
 
 - **Column completion against the live schema.** Cursor inside a `?{}` block, type `SELECT u.`, the LSP suggests every column on `users` with its SQL type.
-- **`protect=` field validation with quick-fix.** A `< db protect="passwrd">` (typo) becomes E-PA-007 at compile time. The LSP's L4 quick-fix runs Levenshtein over the column list and offers `passwordHash` (or whichever column you actually meant).
-- **Schema-driven migration diff.** The compiler reads what `< schema>` says, reads what the live database says, computes the SQL needed to walk one to the other, and emits it as a migration.
+- **`protect=` field validation with quick-fix.** A `<db protect="passwrd">` (typo) becomes E-PA-007 at compile time. The LSP's L4 quick-fix runs Levenshtein over the column list and offers `passwordHash` (or whichever column you actually meant).
+- **Schema-driven migration diff.** The compiler reads what `<schema>` says, reads what the live database says, computes the SQL needed to walk one to the other, and emits it as a migration.
 - **Bound-parameter enforcement is normative.** `${expr}` inside `?{}` SHALL compile to a bound parameter. There is no opt-out. There is no `.raw()`. The grammar refuses.
 - **Direct Bun.SQL codegen.** A `?{}` block emits a Bun.SQL tagged-template call. No runtime ORM layer. No prepared-statement cache to manage; Bun.SQL caches internally and `.prepare()` is removed (E-SQL-006).
 
@@ -108,9 +112,9 @@ The N+1 batching story (the intro article walks the numbers) is a separate piece
 
 Six refusals worth naming, each a real diagnostic with an E-code:
 
-**E-PA-001 / E-PA-006.** `< db src="./missing.db">` where the file does not exist, or the `src=` attribute is missing entirely. The build fails before any query runs.
+**E-PA-001 / E-PA-006.** `<db src="./missing.db">` where the file does not exist, or the `src=` attribute is missing entirely. The build fails before any query runs.
 
-**E-PA-004.** `< db tables="usrs">` where the table is misspelled or does not exist. The build prints the actual table list.
+**E-PA-004.** `<db tables="usrs">` where the table is misspelled or does not exist. The build prints the actual table list.
 
 **E-PA-007.** `protect="passwrd"` against a table whose actual protected column is `password_hash`. Compile error with a Levenshtein-ranked "did you mean `password_hash`?" quick-fix from the LSP.
 
@@ -124,10 +128,10 @@ That last one is the structural point: the database is not a runtime concern tha
 
 ## What this kills
 
-- **`schema.prisma` and equivalents.** The schema is in `< schema>`. There is no second file. There is no second source of truth.
+- **`schema.prisma` and equivalents.** The schema is in `<schema>`. There is no second file. There is no second source of truth.
 - **`prisma generate` and equivalents.** There is no generated client. The compiler reads the schema directly.
 - **Query DSL learning curves.** No `db.users.findMany({ where: {...}, include: {...}, orderBy: {...} })`. SQL is the syntax. The whole-stack compiler reads it.
-- **Type definitions that drift from the database.** There is no hand-written interface to fall behind. The `< schema>` block is the type, the migration source, and the introspection source, in one declaration.
+- **Type definitions that drift from the database.** There is no hand-written interface to fall behind. The `<schema>` block is the type, the migration source, and the introspection source, in one declaration.
 - **`sql.raw()`-style escape hatches that silently lose type safety.** Bound parameters are mandatory. Raw construction is E-SQL-003 at compile time.
 - **Most of the "I'd reach for an ORM here" instinct.** The instinct exists because raw SQL strings in a JavaScript file are unanchored. In scrml they are not unanchored. The schema is right there.
 
@@ -137,7 +141,7 @@ This is not "ORMs are wrong." Honest list of what they earn:
 
 **Cross-database portability.** Drizzle and Kysely both target multiple engines. If the same TypeScript codebase has to ship against Postgres in production and SQLite in tests, the DSL abstracts the dialect differences. scrml's `?{}` adapts driver based on `<program db="...">`, so Bun.SQL handles SQLite, Postgres, and MySQL. MongoDB is explicitly out of `?{}` (use `^{}` meta context). So the portability story is real but bounded by Bun.SQL's coverage.
 
-**Migrations exist.** scrml has them. They are computed by diffing `< schema>` against the live database, but they exist as their own artifact and `scrml migrate` is a separate command. The schema-first ORMs got this part right. The difference is who owns the source-of-truth declaration.
+**Migrations exist.** scrml has them. They are computed by diffing `<schema>` against the live database, but they exist as their own artifact and `scrml migrate` is a separate command. The schema-first ORMs got this part right. The difference is who owns the source-of-truth declaration.
 
 **Transactions are deferred.** Current spec workaround is `^{}` meta with direct Bun.SQL `sql.begin()` (§44.6). A native scrml syntax for transactions is in the roadmap; until it ships, this is a real gap and worth naming honestly.
 
@@ -185,8 +189,8 @@ This block is an HTML comment so it does not render on dev.to.
 **Spec validation summary:**
 
 - ✅ `?{}` SQL block syntax current (§8 line 4361+; §44 line 14636+).
-- ✅ `< db src tables>` block syntax (§11.5; §44.2 driver resolution).
-- ✅ `< schema>` block syntax with worked example (§39.1 line 13620; §39.2 lines 13640-13670).
+- ✅ `<db src tables>` block syntax (§11.5; §44.2 driver resolution).
+- ✅ `<schema>` block syntax with worked example (§39.1 line 13620; §39.2 lines 13640-13670).
 - ✅ Schema introspection field path verified against compiler source (`protect-analyzer.ts:81, 795-800`).
 - ✅ E-PA-007 LSP L4 Levenshtein quick-fix shipped (`lsp/l4.js:21-30`).
 - ✅ E-SQL-002/003/004/006 codes accurate against §8 error table (lines 4722-4728) and §44.7 (lines 14685-14688).

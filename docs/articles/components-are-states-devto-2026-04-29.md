@@ -11,6 +11,8 @@ canonical_url:
 
 **TL;DR: `<input>` is already a state. `<Card>` should be too. One concept replaces useState, hooks rules, dependency arrays, Zustand, Pinia, Redux, context, and most prop drilling.**
 
+> **Status (v0.2.x):** the conceptual frame (state-as-type, primitive `<x> = 0` reactive cells, compound state with structural-children, validators on cells, server-side authority via `<schema>` + `protect=` + `<db>` + `<channel>`) is the v0.2.4 working baseline. The single scrml example below is a 2026-04 design preview of the user-defined `<Card authority="server" table="cards">` "state object" surface — that exact declaration shape is still landing through v0.2.x and the example may use older draft attribute names. The point of the example is structural (one declaration covers shape + sync + boundary); the canonical v0.2.4 spelling lives in the kickstarter v2 §11.3 (channel recipe) + §3 (compound state) + §11.1 (engine recipe). See `docs/articles/llm-kickstarter-v2-2026-05-04.md` for the up-to-date code.
+
 Every framework I have looked at picks one of `useState`, `ref`, `createSignal`, or `signal`, and then bolts on a stack of secondary mechanisms to plug the gaps that one primitive cannot fill on its own. Hooks rules. Dependency arrays. A store library. A context API. Prop drilling for everything in between. I have hobbled through React when I had to. I have written enough TypeScript to be annoyed by it. I have spent eighteen months and about twenty compiler attempts circling one question: what would happen if state were a type, and a component were a state?
 
 It turns out the same thing happens that happened with the server boundary. A whole shelf of libraries falls off the shelf.

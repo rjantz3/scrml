@@ -84,17 +84,30 @@ This is the seam. It is the most expensive seam in the application. It is also t
 ## The same feature in scrml
 
 ```scrml
-< db src="./app.db" tables="orders,order_items">
+<program>
 
-server fn submitOrder(items: List<Item>(@length > 0 && @length < 100)) -> OrderResult {
-    let total = items.sum(it => it.price * it.qty)
-    let orderId = ?{`INSERT INTO orders (total) VALUES (${total}) RETURNING id`}.get().id
-    items.forEach(it => {
-        ?{`INSERT INTO order_items (order_id, product_id, qty) VALUES (${orderId}, ${it.productId}, ${it.qty})`}.run()
-    })
-    return OrderResult { orderId: orderId, total: total }
+<db src="./app.db" tables="orders,order_items"/>
+
+${
+    type SubmitError:enum = {
+        ItemCountOutOfRange
+    }
+
+    server function submitOrder(items)! -> SubmitError {
+        if (items.length == 0 || items.length > 100) {
+            fail SubmitError::ItemCountOutOfRange
+        }
+        const total = items.reduce((acc, it) => acc + it.price * it.qty, 0)
+        const orderId = ?{`INSERT INTO orders (total) VALUES (${total}) RETURNING id`}.get().id
+        for (let it of items) {
+            ?{`INSERT INTO order_items (order_id, product_id, qty)
+               VALUES (${orderId}, ${it.productId}, ${it.qty})`}.run()
+        }
+        return { orderId: orderId, total: total }
+    }
 }
-</>
+
+</program>
 ```
 
 And the call site, anywhere in the same file or another `.scrml` file in the project:
@@ -105,13 +118,13 @@ let result = submitOrder(@cart.items)
 
 That's the entire feature. Both halves.
 
-What the compiler did with `server fn`:
+What the compiler did with `server function`:
 
 1. Generated a server-side route handler. Route name is compiler-internal; you don't reference it.
-2. Generated the client-side `fetch` call that invokes the route, with arg serialization, response deserialization, and `await` insertion. The developer SHALL NOT write `JSON.stringify`, `JSON.parse`, or `fetch` to consume server function return values (§12.5).
+2. Generated the client-side `fetch` call that invokes the route, with arg serialization, response deserialization, and auto-`await` insertion. The developer SHALL NOT write `JSON.stringify`, `JSON.parse`, `await`, or `fetch` to consume server function return values (§12.5 + §13.1 — scrml is auto-await throughout the source surface).
 3. Type-checked the call site. `submitOrder(@cart.items)` checks the argument shape against the server fn signature in the same compile pass. There is no client-side `type SubmitOrderInput` declaration to drift.
 4. Emitted the function body to the server output only. The client gets a fetch stub.
-5. Enforced the predicate at the server boundary. `(@length > 0 && @length < 100)` is checked at function entry, on the server, before any database write. The check runs even if the client already validated (§53.9.4).
+5. Enforced the failable contract at the server boundary. The `fail SubmitError::ItemCountOutOfRange` lands on the server, before any database write. (Refinement-type predicate arguments on parameters — `items: List<Item>(@length > 0 && @length < 100)` style — are part of the §53 design surface still landing through v0.2.x; today the bounds check rides as the failable-function entry guard above.)
 
 ## What the compiler refuses
 

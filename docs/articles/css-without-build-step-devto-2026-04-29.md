@@ -48,18 +48,24 @@ The block applies inside any element with `data-card`, and stops at any nested e
 
 ## The scrml way (AFTER)
 
-scrml's CSS sigil is `#{}`. Inside a state-type constructor, it scopes. At program scope, it goes global. There is no third mode.
+scrml's CSS sigil is `#{}`. Inside a component declaration, it scopes. At program scope, it goes global. There is no third mode.
 
 ```scrml
-< card title(string)>
-    #{
-        .card { padding: 16px; border: 1px solid #e5e7eb; border-radius: 8px; }
-        .title { font-size: 1.25rem; font-weight: 600; }
-    }
-    <div class="card" data-scrml="card">
-        <h2 class="title">${title}/
-    </div>
-/
+<program>
+
+${
+    const Card = <article props={ title: string }>
+        #{
+            .card { padding: 16px; border: 1px solid #e5e7eb; border-radius: 8px; }
+            .title { font-size: 1.25rem; font-weight: 600; }
+        }
+        <div class="card" data-scrml="card">
+            <h2 class="title">${title}</h2>
+        </div>
+    </>
+}
+
+</program>
 ```
 
 The compiler emits this CSS:
@@ -76,10 +82,14 @@ That is the entire pipeline. The selectors in the source are the selectors in th
 There is one more sub-mode. A `#{}` block with no selectors, just bare `property: value;` pairs, compiles to an inline `style=""` attribute on the containing element. It does not appear in the `.css` file at all.
 
 ```scrml
-<div data-scrml="card">
-    #{ padding: 16px; }
-    <h2>${title}/
-</div>
+${
+    <title> = "Hello"
+
+    lift <div data-scrml="card">
+        #{ padding: 16px; }
+        <h2>${@title}</h2>
+    </div>
+}
 ```
 
 becomes a `<div style="padding: 16px;">` directly. The most common case (one or two declarations on one element) gets the lightest possible compilation.
@@ -105,9 +115,13 @@ Tailwind's *system* is genuinely useful. The utility-first vocabulary, the desig
 scrml has a built-in Tailwind engine. It scans the source for used utility classes and emits only the CSS rules for what the source actually uses. No `tailwind.config.js`. No `content` array. No PostCSS. The engine is in the compiler.
 
 ```scrml
-<div data-scrml="badge" class="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800">
-    ${label}
-</div>
+${
+    const Badge = <span props={ label: string }
+                         data-scrml="badge"
+                         class="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800">
+        ${label}
+    </>
+}
 ```
 
 That works out of the box. Mixed with `#{}` for things utilities don't reach, in the same component.

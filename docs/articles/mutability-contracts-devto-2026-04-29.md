@@ -11,6 +11,8 @@ canonical_url:
 
 **TL;DR: Three things your code already keeps track of, in three different places, with three different libraries. The type system can own all three.**
 
+> **Status (v0.2.x):** the value-predicate layer (`<amount> req gt(0) lt(10000)` on state cells; named-shape predicates `email` / `url` / `uuid` / `pattern(...)`; cross-field args like `eq(@signup.password)`) ships at v0.2.4 — see SPEC §53 + §55. The **lifecycle / typestate** layer (`(null -> string)` field-transition annotations) and the **`lin` linear-type** layer described later in this piece are SPEC-ratified design surfaces that are not yet implemented in the v0.2.4 compiler. Treat those sections as preview of where the contract-as-type idea is going; the value-predicate sections are working today.
+
 I am not an experienced framework developer. I can hobble through React if I HAVE TO. But across about twenty compiler attempts I kept noticing that the same data, on its way through a single feature, gets validated by three independent mechanisms. Zod at the network edge. A custom hook for the loading lifecycle. XState, or a hand-rolled `switch`, for what state can become what state next. Each one a separate library. None of them talking to each other.
 
 Shape narrowing, life-cycles, state machines. These are the three faces of one thing. Scrml fuses them into one type-system mechanic, enforced on every write. Six features the browser-language overview piece promised to unpack later. This is the third.
@@ -95,11 +97,11 @@ One check, at the boundary, where the data crosses from "untrusted" to "in-langu
 The same predicate also drives the bound HTML input:
 
 ```scrml
-<input type="number" bind:value=@amount>
-// Compiles to: <input type="number" min="1" max="9999">
+${ <amount min(1) max(9999)> = <input type="number"/> }
+// Compiles to: <input type="number" min="1" max="9999"/>
 ```
 
-The browser enforces the same constraint at the keystroke level. The type generated the attribute.
+This is the Shape-2 (decl-coupled-with-render-spec) form from SPEC §6.2 — validators ride as bare attributes on the declaration; `<amount/>` in markup expands to the bound input element. The browser enforces the same constraint at the keystroke level. The type generated the attribute.
 
 The named-shape registry covers the common cases:
 

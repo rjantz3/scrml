@@ -11,6 +11,8 @@ canonical_url:
 
 **TL;DR: The goal is a shipped app that is essentially bullet-proof — every reachable state has UI, every transition is intentional, every effect runs at the right moment. Getting there should not require rewriting the prototype. scrml has a three-tier ladder — `if=` → `<match>` → `<engine>` — where the state-children migrate verbatim. The compiler tells you when to promote. The wrapper swap is the commitment moment.**
 
+> **Status (v0.2.x):** Tier 0 (lifecycle booleans + `if=` chains) and Tier 2 (`<engine>` with target-only `rule=.Variant` forms) are shipped in v0.2.4 and the code blocks below compile against the current compiler. **Tier 1 block-form `<match for=Type>` is spec-ratified but the parser does not yet recognize it in v0.2.4** (the JS-style value-return `match expr {}` shape from §"Aside" below DOES work today). When the Tier 1 block-form lands, the promotion path is literally the wrapper swap shown in this article. Until then, treat the Tier 1 example as a design preview of where the language is going; if you want the exhaustiveness check today, skip directly from Tier 0 to Tier 2.
+
 This piece and its companion arrived together. This one shows the ladder. The companion piece, *Why scrml has to deprecate function and component overloading*, explains two features the language is deleting in v0.2.0 because the ladder you are about to read already does their job better.
 
 Every framework I have looked at picks a side in the same fight. The state-machine evangelists insist you specify your machine before you write a feature. The rapid-prototyping evangelists hand you `useState` and let you stack booleans until you have a runtime invariant problem you cannot debug. Both camps are right about something and wrong about something else.
@@ -31,48 +33,50 @@ Here is a screen anyone has written. A button that loads data, a spinner while i
          version="0.1.0"
          license="MIT">
 
-type LoadError:enum = {
-    Network(msg: string)
-    Empty
-}
-
-<isLoading> = false
-<isError>   = false
-<errorMsg>  = ""
-<data>      = null
-
-server function fetchItems()! -> LoadError {
-    const result = ?{ select * from items }
-    if (result.length == 0) fail LoadError::Empty
-    return result
-}
-
-function load() {
-    @isLoading = true
-    @isError = false
-    const rows = fetchItems() !{
-        | ::Network msg -> {
-            @isError = true
-            @errorMsg = msg
-            @isLoading = false
-            return
-        }
-        | ::Empty -> {
-            @isError = true
-            @errorMsg = "no rows"
-            @isLoading = false
-            return
-        }
+${
+    type LoadError:enum = {
+        Network(msg: string)
+        Empty
     }
-    @data = rows
-    @isLoading = false
+
+    <isLoading> = false
+    <isError>   = false
+    <errorMsg>  = ""
+    <data>      = not
+
+    server function fetchItems()! -> LoadError {
+        const result = ?{`SELECT * FROM items`}.all()
+        if (result.length == 0) fail LoadError::Empty
+        return result
+    }
+
+    function load() {
+        @isLoading = true
+        @isError = false
+        const rows = fetchItems() !{
+            | ::Network msg -> {
+                @isError = true
+                @errorMsg = msg
+                @isLoading = false
+                return
+            }
+            | ::Empty -> {
+                @isError = true
+                @errorMsg = "no rows"
+                @isLoading = false
+                return
+            }
+        }
+        @data = rows
+        @isLoading = false
+    }
 }
 
 <button if=(@isLoading == false && @isError == false) onclick=load()>Load</button>
 
 <div if=@isLoading>Loading...</div>
 <div if=@isError>${@errorMsg}</div>
-<div if=(@data != null)>Got it: ${@data.length} rows</div>
+<div if=(@data is some)>Got it: ${@data.length} rows</div>
 
 </program>
 ```
@@ -104,28 +108,35 @@ The promotion looks like this. You name the type, write each variant once, give 
 ```scrml
 <program>
 
-type Phase:enum = {
-    Idle
-    Loading
-    Error(msg: string)
-    Empty
-    Success(count: int)
-}
-<phase>: Phase = .Idle
-
-server function fetchItems()! -> LoadError {
-    const result = ?{ select * from items }
-    if (result.length == 0) fail LoadError::Empty
-    return result
-}
-
-function load() {
-    @phase = .Loading
-    const rows = fetchItems() !{
-        | ::Network msg -> { @phase = .Error(msg); return }
-        | ::Empty       -> { @phase = .Empty;       return }
+${
+    type LoadError:enum = {
+        Network(msg: string)
+        Empty
     }
-    @phase = .Success(rows.length)
+
+    type Phase:enum = {
+        Idle
+        Loading
+        Error(msg: string)
+        Empty
+        Success(count: int)
+    }
+    <phase>: Phase = .Idle
+
+    server function fetchItems()! -> LoadError {
+        const result = ?{`SELECT * FROM items`}.all()
+        if (result.length == 0) fail LoadError::Empty
+        return result
+    }
+
+    function load() {
+        @phase = .Loading
+        const rows = fetchItems() !{
+            | ::Network msg -> { @phase = .Error(msg); return }
+            | ::Empty       -> { @phase = .Empty;     return }
+        }
+        @phase = .Success(rows.length)
+    }
 }
 
 <match for=Phase>
@@ -135,13 +146,13 @@ function load() {
     <Loading>
         Loading...
     </>
-    <Error msg>
+    <Error(msg)>
         <div>${msg}</div>
     </>
     <Empty>
         <div>No rows yet.</div>
     </>
-    <Success count>
+    <Success(count)>
         <div>Got it: ${count} rows</div>
     </>
 </>
@@ -209,59 +220,64 @@ Here is where most languages would ask you to rewrite. scrml does not. The state
 ```scrml
 <program>
 
-type Phase:enum = {
-    Idle
-    Loading
-    Error(msg: string)
-    Empty
-    Success(count: int)
+${
+    type LoadError:enum = {
+        Network(msg: string)
+        Empty
+    }
+
+    type Phase:enum = {
+        Idle
+        Loading
+        Error(msg: string)
+        Empty
+        Success(count: int)
+    }
+
+    server function fetchItems()! -> LoadError {
+        const result = ?{`SELECT * FROM items`}.all()
+        if (result.length == 0) fail LoadError::Empty
+        return result
+    }
+
+    function load() {
+        @phase = .Loading
+        const rows = fetchItems() !{
+            | ::Network msg -> { @phase = .Error(msg); return }
+            | ::Empty       -> { @phase = .Empty;     return }
+        }
+        @phase = Phase.Success(rows.length)
+    }
 }
 
 <engine for=Phase initial=.Idle>
 
-    <Idle>
-        <button rule="load -> Loading">Load</button>
+    <Idle rule=.Loading>
+        <button onclick=load()>Load</button>
     </>
 
-    <Loading rule="onResult.ok(n)    -> Success(n)"
-             rule="onResult.empty    -> Empty"
-             rule="onResult.err(m)   -> Error(m)">
+    <Loading rule=(.Success | .Error | .Empty)>
         Loading...
     </>
 
-    <Error msg>
+    <Error msg rule=.Loading>
         <div>${msg}</div>
-        <button rule="retry -> Loading">Retry</button>
+        <button onclick=@phase = .Loading>Retry</button>
     </>
 
-    <Empty>
+    <Empty rule=.Loading>
         <div>No rows yet.</div>
-        <button rule="retry -> Loading">Retry</button>
+        <button onclick=@phase = .Loading>Retry</button>
     </>
 
     <Success count>
         <div>Got it: ${count} rows</div>
-    </>
-
-    <onTransition from=Loading to=Success>
-        ${ analytics.track("load.success") }
+        <onTransition from=.Loading>
+            ${ analytics.track("load.success") }
+        </>
     </>
 
 </>
-
-server function fetchItems()! -> LoadError {
-    const result = ?{ select * from items }
-    if (result.length == 0) fail LoadError::Empty
-    return result
-}
-
-function load() {
-    const rows = fetchItems() !{
-        | ::Network msg -> { @phase.advance(.onResult.err(msg)); return }
-        | ::Empty       -> { @phase.advance(.onResult.empty);     return }
-    }
-    @phase.advance(.onResult.ok(rows.length))
-}
 
 </program>
 ```
@@ -269,17 +285,17 @@ function load() {
 Compare against the Tier 1 version. The five state-child blocks are byte-for-byte the same markup. The diff is:
 
 - `<match for=Phase>` → `<engine for=Phase initial=.Idle>`
-- `rule="..."` attributes inside the variants
-- A new `<onTransition>` element
-- The `load()` function's `!{}` handler now calls `@phase.advance(.onResult.err(...))` instead of writing to `@phase` directly
+- `rule=.Variant` attributes on each state-child (target-only forms — single `rule=.Loading`, multi `rule=(.A | .B | .C)`, or wildcard `rule=*`).
+- A new `<onTransition>` element on the destination state-child
+- The `load()` function still writes to `@phase` directly — `@phase = .Loading` — but now the write is validated against the current state's `rule=` set at compile time when the from-state is statically known, and at runtime otherwise.
 
 Everything you got at Tier 1 you keep. What you gained at Tier 2:
 
-- **Active transition rules.** The `rule="load -> Loading"` declaration is the spec for what happens when the `load` event fires from `.Idle`. The compiler now knows the transition graph.
-- **Exhaustive transition validation.** If you wrote `rule="onResult.ok -> Sucess(n)"` (typo on `Success`), the compiler errors. If `Phase` gains a `.Cancelled` variant and your engine has no rule that produces it, the compiler tells you the variant is unreachable.
-- **`<onTransition>` blocks.** The analytics event lives in one place, declared structurally, attached to a specific edge in the graph. It cannot accidentally fire on the wrong path.
-- **No more direct mutation.** `@phase = .Loading` bypasses the rules. The engine variable exposes `.advance(event)` instead, and the rules pick the next variant. The compiler stops you if your `.advance` call doesn't match any rule from the current variant.
-- **The error handler is now a router.** The `!{}` block in `load()` does no UI work, no logging, no fallback values. Each error variant gets routed to the corresponding engine event (`.onResult.err`, `.onResult.empty`) and the engine's rules pick the next Phase. The error path and the success path are the same shape: one `.advance(...)` call each.
+- **Active transition rules.** `rule=.Loading` on `<Idle>` is the spec for what `@phase` is allowed to become when it's `.Idle`. The compiler now knows the transition graph.
+- **Exhaustive transition validation.** If you wrote `@phase = .Sucess(rows.length)` (typo on `Success`), the compiler errors. If `Phase` gains a `.Cancelled` variant and no `rule=` lists it as a target, the compiler tells you the variant is unreachable.
+- **`<onTransition>` blocks.** The analytics event lives in one place, declared structurally, attached to a specific edge in the graph. `<onTransition from=.Loading>` inside `<Success>` fires when entering Success from Loading. It cannot accidentally fire on the wrong path.
+- **Direct writes are still the canonical path.** `@phase = .Loading` is the quiet form — invalid transitions fail compile (when from-state is known) or fail at runtime with `E-ENGINE-INVALID-TRANSITION` (when not known). `@phase.advance(.Loading)` is the loud form — same validation but the developer is asserting "this MUST work" so failure throws an asserted-advance error. There is no `.tryAdvance` silent no-op; silent failure hides bugs (S55 verdict).
+- **The error handler routes into the Phase enum directly.** The `!{}` block in `load()` does no UI work, no logging, no fallback values. Each error variant just writes the corresponding Phase variant — `@phase = .Error(msg)` or `@phase = .Empty`. The error path and the success path are the same shape: one write each.
 
 The app is now what we wanted from the start. Every reachable state has UI. Every transition is intentional. Every effect is wired to a specific edge in the graph. The whole thing is structurally checkable at compile time.
 
@@ -293,10 +309,10 @@ The only thing that changes between tiers is the wrapper.
 Tier 0:  if= chains scattered across markup           (no wrapper)
 Tier 1:  <match for=Phase> { state-children }         (structural exhaustiveness;
                                                        rule= allowed but inert)
-Tier 2:  <engine for=Phase initial=...> {             (transition validation +
+Tier 2:  <engine for=Phase initial=.Variant> {        (transition validation +
             state-children                              transition handlers;
-            + rule= attributes (now active)             rule= now load-bearing)
-            + <onTransition> blocks
+            + rule=.Target attributes (now active)      rule= now load-bearing)
+            + <onTransition from= / to= > blocks
          }
 ```
 

@@ -34,14 +34,18 @@ scrml's compiler owns every context in one AST. A `.scrml` file's markup, logic,
 So when you type:
 
 ```scrml
-< db src="./app.db" tables="users,posts">
+<db src="./app.db" tables="users,posts"/>
 
-server fn list_recent() {
-    return ?{`
-        SELECT u.|     -- cursor here
-        FROM users u
-    `}.all()
+<program>
+${
+    server function list_recent() {
+        return ?{`
+            SELECT u.|     -- cursor here
+            FROM users u
+        `}.all()
+    }
 }
+</program>
 ```
 
 the LSP can:
@@ -59,11 +63,11 @@ The same structural argument extends to:
 
 ```scrml
 // components/card.scrml
-export const Card = <article props={ title: string, body: string, publishedAt: Date }>
-    <h2>${title}</>
-    <p>${body}</>
-    <span class=date>${publishedAt}</>
-</article>
+export const Card = <article props={ title: string, body: string, publishedAt: string }>
+    <h2>${title}</h2>
+    <p>${body}</p>
+    <span class="date">${publishedAt}</span>
+</>
 
 // pages/index.scrml
 import { Card } from "../components/card.scrml"

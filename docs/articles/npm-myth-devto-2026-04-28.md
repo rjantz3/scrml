@@ -68,15 +68,19 @@ This is what I mean when I say "roll your own": Bun's authors did. Now nobody ha
 
 ### Already in scrml's stdlib
 
-The 13-module stdlib already covers most of the "I'd npm install a small utility" reflex. I built it intentionally small but not so small that you have to leave the language for the basics:
+The 16-module stdlib already covers most of the "I'd npm install a small utility" reflex. I built it intentionally small but not so small that you have to leave the language for the basics:
 
 | stdlib module | replaces |
 |---|---|
-| `data/validate` (+ §53) | zod, yup, joi |
+| `data/validate` + `data/parseVariant` (+ §53) | zod, yup, joi |
 | `data/transform` | lodash (`pick`, `omit`, `groupBy`, `sortBy`, `unique`, `flatten`, ...) |
 | `auth` | bcrypt, jsonwebtoken, speakeasy (TOTP), express-rate-limit |
+| `oauth` | passport, simple-oauth2, next-auth (Google / GitHub / Microsoft / Discord presets + PKCE) |
 | `crypto` | crypto-js, bcryptjs, hashing helpers |
 | `http` | axios, got, node-fetch (typed wrapper with timeout + retry) |
+| `redis` | ioredis, redis (Bun.redis-backed get/set/sets/pubsub) |
+| `cron` | node-cron / node-schedule (Bun.cron-backed) |
+| `regex` | a vetted patterns catalog + helpers (email, url, ipv4, uuid, slug, semver, …) |
 | `time` | date-fns / dayjs (basic format), lodash.debounce/throttle |
 | `format` | slugify, change-case, pluralize, currency/number formatting |
 | `store` | KV store, session store, counter (replaces `connect-sqlite3` and basic redis use) |
@@ -84,7 +88,7 @@ The 13-module stdlib already covers most of the "I'd npm install a small utility
 | `test` | chai, parts of jest/expect |
 | `fs`, `path`, `process` | Node compat layer |
 
-<!-- cite: stdlib/ directory listing — auth, crypto, data/{validate,transform}, format, fs, http, path, process, router, store, test, time, compiler. All 13 modules verified present 2026-04-28. -->
+<!-- cite: stdlib/ directory listing — auth, crypto, cron, data/{validate,transform,parseVariant}, format, fs, http, oauth, path, process, redis, regex, router, store, test, time. 16 user-facing modules verified present 2026-05-11 (v0.2.4); `compiler` module is the internal meta module, not user-facing. -->
 
 The stdlib isn't trying to be everything. It covers the high-frequency reaches. Specialty libraries get vendored. That's the deal.
 
