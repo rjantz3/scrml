@@ -1,0 +1,11 @@
+// migrate-program-shape fixture — module file (bucket = "module", action = NOOP).
+//
+// Pure module shape under `components/`. No `<program>` wrapper, no markup
+// opener at file top — just an export declaration. The migrate command
+// should leave this file alone (NOOP).
+
+${
+  export fn greet(name: string) -> string {
+    return "hello, " + name
+  }
+}

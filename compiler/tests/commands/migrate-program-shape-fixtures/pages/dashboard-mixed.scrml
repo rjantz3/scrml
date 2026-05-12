@@ -1,0 +1,10 @@
+// migrate-program-shape fixture — route file (bucket = "route", action = SKIP).
+//
+// Located under `pages/`, file-top opener is `<program ...>` carrying a MIX
+// of per-route attrs (`auth=`, `db=`) AND app-wide attrs (`title=`, `cors=`).
+// The migrate command cannot auto-split — it should SKIP this file and emit
+// an advisory recommending manual cleanup.
+
+<program title="Mixed" auth="required" db="./local.db" cors="*">
+  <h1>Dashboard with mixed attrs</h1>
+</program>

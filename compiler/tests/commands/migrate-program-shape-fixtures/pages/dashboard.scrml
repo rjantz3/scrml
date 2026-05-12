@@ -1,0 +1,10 @@
+// migrate-program-shape fixture — route file (bucket = "route", action = REWRITE).
+//
+// Located under `pages/`, file-top opener is `<program ...>` carrying ONLY
+// per-route attrs (`auth=`, `db=`). The migrate command should rewrite
+// `<program ...>` → `<page ...>` at the opener AND the matching close tag.
+
+<program auth="required" db="./local.db">
+  <h1>Dashboard</h1>
+  <p>Per-route attrs only.</p>
+</program>

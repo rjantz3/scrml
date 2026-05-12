@@ -1,0 +1,12 @@
+// migrate-program-shape fixture — schema-anchor file (bucket = "schema-anchor").
+//
+// Has a `<schema>` block AND a `<program db=>` wrapper. Per SPEC §39.12.0
+// v0.3 workaround, this shape is TOLERATED — the `<program db=>` functions
+// as a shape-only host for the `db=` attribute. The migrate command should
+// leave this file alone (ADVISORY only).
+
+<program db="./demo.db">
+  <schema>
+    users: { id: int, name: string }
+  </schema>
+</program>

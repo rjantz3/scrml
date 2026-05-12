@@ -1,0 +1,13 @@
+// migrate-program-shape fixture — entry file (bucket = "entry").
+//
+// Has a `<program>` opener with app-wide attrs (`title=`); body contains a
+// `${...}` block wrapping ONLY top-level declarations — these should be
+// unwrapped into the §40.8 default-logic body shape.
+
+<program title="Demo App">
+  ${
+    <count> = 0
+    <message> = "hello"
+  }
+  <div>${@message}</>
+</program>
