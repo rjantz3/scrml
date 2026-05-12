@@ -51,10 +51,10 @@ Claude wrote three drafts. None of them were good.
     return recent.n < 10;
   }
 
-  < UserFlow userId(string) email(string) name(string)>
+  <UserFlow userId(string) email(string) name(string)>
     ${
       function sendNotification(message: string) -> string {
-        if (!checkRateLimit(this.userId, "user")) {
+        if (not checkRateLimit(this.userId, "user")) {
           return "rate-limited";
         }
         const subject = "Notification for " + this.name;
@@ -69,10 +69,10 @@ Claude wrote three drafts. None of them were good.
     }
   </>
 
-  < AdminFlow adminId(string) pagerToken(string) role(string)>
+  <AdminFlow adminId(string) pagerToken(string) role(string)>
     ${
       function sendNotification(message: string) -> string {
-        if (!checkRateLimit(this.adminId, "admin")) {
+        if (not checkRateLimit(this.adminId, "admin")) {
           return "rate-limited";
         }
         const payload = "[ALERT][" + this.role + "] " + message;
@@ -100,12 +100,12 @@ This draft fragments the **bodies**.
 
 ```scrml
 function sendUserNotification(user: UserFlow, message: string) -> string {
-  if (!checkRateLimit(user.userId, "user")) { return "rate-limited"; }
+  if (not checkRateLimit(user.userId, "user")) { return "rate-limited"; }
   // ... user body, same as above ...
 }
 
 function sendAdminNotification(admin: AdminFlow, message: string) -> string {
-  if (!checkRateLimit(admin.adminId, "admin")) { return "rate-limited"; }
+  if (not checkRateLimit(admin.adminId, "admin")) { return "rate-limited"; }
   // ... admin body, same as above ...
 }
 ```
@@ -113,7 +113,7 @@ function sendAdminNotification(admin: AdminFlow, message: string) -> string {
 Bodies are centralized; the contract is at least visible. But every call site replaces the dispatch the compiler used to do:
 
 ```scrml
-if (currentActor.__scrml_state_type === "UserFlow") {
+if (currentActor.__scrml_state_type == "UserFlow") {
   result = sendUserNotification(currentActor, msg);
 } else {
   result = sendAdminNotification(currentActor, msg);
@@ -129,16 +129,16 @@ This draft fragments the **call sites**.
 ```scrml
 function sendNotification(target, message: string) -> string {
   const tag = target.__scrml_state_type;
-  if (tag === "UserFlow") {
-    if (!checkRateLimit(target.userId, "user")) { return "rate-limited"; }
+  if (tag == "UserFlow") {
+    if (not checkRateLimit(target.userId, "user")) { return "rate-limited"; }
     // ... user body ...
     return "queued:" + id;
-  } else if (tag === "AdminFlow") {
-    if (!checkRateLimit(target.adminId, "admin")) { return "rate-limited"; }
+  } else if (tag == "AdminFlow") {
+    if (not checkRateLimit(target.adminId, "admin")) { return "rate-limited"; }
     // ... admin body ...
     return "paged:" + id;
   } else {
-    throw new Error("sendNotification: unknown actor type " + tag);
+    fail .UnknownActor("sendNotification: unknown actor type " + tag);
   }
 }
 ```
@@ -164,14 +164,14 @@ Claude rewrote the example. The new version had no `sendNotification` function a
 ```scrml
 <program>${
 
-  enum SendOutcome {
+  type SendOutcome:enum = {
     RateLimited,
     Queued(id: string),
     Paged(id: string),
     Failed(reason: string)
   }
 
-  < UserFlow userId(string) email(string) name(string)>
+  <UserFlow userId(string) email(string) name(string)>
     ${
       const <recentSendCount> = ?{
         SELECT COUNT(*) AS n FROM notifications_log
@@ -183,7 +183,7 @@ Claude rewrote the example. The new version had no `sendNotification` function a
     }
   </>
 
-  < AdminFlow adminId(string) pagerToken(string) role(string)>
+  <AdminFlow adminId(string) pagerToken(string) role(string)>
     ${
       const <recentSendCount> = ?{
         SELECT COUNT(*) AS n FROM notifications_log
@@ -195,7 +195,7 @@ Claude rewrote the example. The new version had no `sendNotification` function a
     }
   </>
 
-  <engine for=SendNotification initial=Idle>
+  <engine for=SendNotification initial=.Idle>
     | Idle    ! send(target: UserFlow,  msg: string) -> Limited        if @target.isRateLimited
     | Idle    ! send(target: UserFlow,  msg: string) -> SendingUser(target, msg)
     | Idle    ! send(target: AdminFlow, msg: string) -> Limited        if @target.isRateLimited
