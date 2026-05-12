@@ -75,11 +75,16 @@ export default defineConfig({
   // ---------------------------------------------------------------------
   webServer: [
     {
-      command: "bun run compiler/src/cli.js dev examples/02-counter.scrml --port 3100 -o examples/dist",
+      // Wave 3 Dispatch 2: compile the WHOLE `examples/` directory so that
+      // 03-contact-book, 05-multi-step-form, and 14-mario-state-machine
+      // produce `examples/dist/*.html` files alongside 02-counter. D1 served
+      // only 02-counter; D2 needs the rest. Compilation takes ~6-10 s for
+      // the full examples set on a cold compiler.
+      command: "bun run compiler/src/cli.js dev examples/ --port 3100 -o examples/dist",
       url: "http://localhost:3100/02-counter.html",
       cwd: "..",
       reuseExistingServer: !process.env.CI,
-      timeout: 60_000,
+      timeout: 120_000,
       stdout: "pipe",
       stderr: "pipe",
     },
