@@ -41,9 +41,12 @@
  *
  * Safety model:
  *   - For each file: read source, apply text-substitution migrations, then
- *     parse the rewritten source via `compileScrml({ write: false })`. If the
- *     rewritten source fails to parse, the file is left untouched and the
- *     failure is reported.
+ *     verify the rewritten source via `compileScrml({ write: false })` using
+ *     a transactional in-place stage (write rewrite to original path, run
+ *     compile, restore original) so cross-file imports resolve correctly.
+ *     See `sanityCheckParse` for the full option-β rationale. If the
+ *     rewritten source fails to compile, the file is restored from the
+ *     in-memory backup and the failure is reported.
  *   - `samples/compilation-tests/` and `compiler/tests/` directories are
  *     excluded by default — those exercise deprecation paths intentionally.
  *   - Default operation is in-place rewriting. Use `--dry-run` for preview.
@@ -55,10 +58,8 @@ import {
   statSync,
   readdirSync,
   existsSync,
-  mkdtempSync,
 } from "fs";
 import { resolve, join, relative, sep } from "path";
-import { tmpdir } from "os";
 import { compileScrml } from "../api.js";
 
 // ---------------------------------------------------------------------------
@@ -1116,34 +1117,116 @@ function splitTopLevelStatements(src) {
 
 /**
  * Parse the rewritten source via the existing pipeline to verify it's still
- * valid scrml. Stages the rewritten source under a unique temp directory so
- * `compileScrml` can read it from disk.
+ * valid scrml.
+ *
+ * Strategy — option β (transactional in-place rewrite + verify + restore):
+ *
+ *   The earlier implementation staged the rewritten source under a unique
+ *   tmp directory and invoked `compileScrml` on that staged path. That broke
+ *   for any file with cross-file imports — `module-resolver.js#resolveModulePath`
+ *   resolves relative imports against `dirname(importerPath)`, so an importer
+ *   staged under `/tmp/scrml-migrate-check-XXX/` resolves `./foo.scrml` to
+ *   `/tmp/scrml-migrate-check-XXX/foo.scrml` which doesn't exist, MOD fires
+ *   E-IMPORT-006, and the gate fails on every multi-file route file.
+ *
+ *   Option β writes the rewritten content to the file's ORIGINAL path,
+ *   invokes `compileScrml` with `gather: true` so the existing auto-gather
+ *   pre-pass walks the real import graph, and then ALWAYS restores the
+ *   original content from an in-memory backup before returning. The caller
+ *   (`migrateFile`) decides separately whether to write the rewrite
+ *   permanently — this function never leaves the file mutated.
+ *
+ *   Trade-off: there is a microseconds-wide window during the compile call
+ *   where the on-disk content is the rewrite candidate. A SIGKILL or crash
+ *   during that window leaves the file at the rewrite candidate's content.
+ *   The try/finally always restores the backup on normal control flow,
+ *   including compiler crashes. For dry-run mode this is essential — the
+ *   user expects no on-disk change. For in-place mode, `migrateFile` writes
+ *   the rewrite immediately after this returns ok, so the brief window does
+ *   not change net behavior.
+ *
+ *   Constraint: "Do not weaken the gate" (S86 standing rule) is preserved
+ *   end-to-end — the compile invocation is identical to the pre-existing one
+ *   except for `gather: true` (which is what `compileScrml` defaults to and
+ *   what the real `compile` / `dev` / `build` paths use). Cross-file
+ *   E-IMPORT-006 and downstream MOD/NR/SYM/TS/DG/CE/CG diagnostics still
+ *   fire on real breakage.
  *
  * @param {string} rewrittenSource
- * @param {string} originalPath — original file path (basename preserved for error spans)
+ * @param {string} originalPath — absolute path of the file under migration.
+ *                                 The rewritten source is written here for
+ *                                 the duration of the compile call, then
+ *                                 restored from the in-memory backup.
  * @returns {{ ok: boolean, errors: object[] }}
  */
 function sanityCheckParse(rewrittenSource, originalPath) {
-  // Stage the rewritten source in a temp file so compileScrml can read it.
-  // We preserve the original basename so error messages reference a similar
-  // path. The tmp dir is unique per call.
-  const stagingDir = mkdtempSync(join(tmpdir(), "scrml-migrate-check-"));
-  const baseName = originalPath.split(sep).pop() || "staged.scrml";
-  const stagedPath = join(stagingDir, baseName);
-  writeFileSync(stagedPath, rewrittenSource, "utf8");
-
-  let result;
+  // Step 1: capture the on-disk original so we can always restore.
+  //
+  // If readFileSync throws here, the file isn't readable — there's nothing
+  // sane we can stage or check. Report a synthetic error so the gate fails
+  // closed; do NOT attempt the in-place rewrite (we'd be writing to a path
+  // we couldn't read, which is recoverable but indicates an unusual state).
+  let originalContent;
   try {
-    result = compileScrml({
-      inputFiles: [stagedPath],
-      write: false,
-      gather: false,
-      log: () => {},
-    });
+    originalContent = readFileSync(originalPath, "utf8");
   } catch (err) {
     return {
       ok: false,
-      errors: [{ message: `compiler crashed: ${err.message}` }],
+      errors: [{ message: `safety-harness: cannot read original file for backup: ${err.message}` }],
+    };
+  }
+
+  // Step 2: stage the rewrite in place. Use try/finally so a crash during
+  // either the write or the compile call still restores the original.
+  let result;
+  let stagingError = null;
+  try {
+    try {
+      writeFileSync(originalPath, rewrittenSource, "utf8");
+    } catch (err) {
+      stagingError = err;
+    }
+
+    if (!stagingError) {
+      try {
+        result = compileScrml({
+          inputFiles: [originalPath],
+          write: false,
+          // Enable auto-gather so the real import graph is walked from the
+          // file's real on-disk position — see option-β rationale above.
+          gather: true,
+          log: () => {},
+        });
+      } catch (err) {
+        return {
+          ok: false,
+          errors: [{ message: `compiler crashed: ${err.message}` }],
+        };
+      }
+    }
+  } finally {
+    // Step 3: ALWAYS restore the original content. Even on a thrown error
+    // from compileScrml (the outer return above does its own short-circuit,
+    // but `finally` runs on the way out regardless). If the restore itself
+    // fails, surface that — it indicates a serious environmental issue
+    // (filesystem suddenly read-only, etc.) and the user needs to know.
+    try {
+      writeFileSync(originalPath, originalContent, "utf8");
+    } catch (restoreErr) {
+      // Restoration failed; data loss is possible. This is a rare edge.
+      // Throw rather than silently leave a broken state — the migrate
+      // command should surface this as a hard failure.
+      throw new Error(
+        `safety-harness: failed to restore original content at ${originalPath} ` +
+        `(file may be left in rewritten state): ${restoreErr.message}`,
+      );
+    }
+  }
+
+  if (stagingError) {
+    return {
+      ok: false,
+      errors: [{ message: `safety-harness: staging write failed: ${stagingError.message}` }],
     };
   }
 

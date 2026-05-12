@@ -1,0 +1,15 @@
+// multi-file-app fixture — pure-fn module file (§21.5).
+//
+// Imported by ../pages/dashboard.scrml. The safety-harness fix (option β)
+// must let the importer's compile call resolve `../models/auth.scrml` from
+// the importer's REAL on-disk path. Pre-fix, the staged-tmp implementation
+// resolved `../models/auth.scrml` to a tmp directory where this file did
+// not exist, MOD fired E-IMPORT-006, and the gate failed.
+
+${
+  export fn requireAuth(token: string) -> bool {
+    return token != ""
+  }
+
+  export const AUTH_HEADER = "X-Auth"
+}

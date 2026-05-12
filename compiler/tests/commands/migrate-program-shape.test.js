@@ -354,12 +354,13 @@ describe("§5 safety harness", () => {
   beforeEach(setupTmp);
   afterEach(teardownTmp);
 
-  test("if rewritten source fails to parse, file on disk is untouched", () => {
-    // Use a file whose rewrite produces broken source. The simplest way to
-    // engineer this is a route file whose `<program>` opener references an
-    // import that won't resolve from the staged temp path. The W-* migrations
-    // alone don't change this file, but `--program-shape` rewrites to <page>
-    // and the temp-staging parse will fail on the import.
+  test("if rewritten source fails to compile, file on disk is untouched", () => {
+    // Engineer a rewrite that the safety-harness must reject: a route file
+    // whose body imports `./nonexistent.scrml`. The import target literally
+    // does not exist on disk, so MOD fires E-IMPORT-006 regardless of how
+    // the harness stages the rewrite. The migrate command must restore the
+    // original content (option-β: writeFileSync the original from the
+    // in-memory backup) and report `failed`.
     const route = join(tmpDir, "pages", "broken.scrml");
     mkdirSync(dirname(route), { recursive: true });
     const original = `<program auth="required">\n  \${ import { x } from "./nonexistent.scrml" }\n  <div/>\n</program>`;
@@ -375,6 +376,140 @@ describe("§5 safety harness", () => {
     expect(r.reason).toContain("failed to parse");
     // Original file untouched on disk.
     expect(readFileSync(route, "utf8")).toBe(original);
+  });
+
+  // -------------------------------------------------------------------------
+  // §5b — Option-β cross-file-import safety-harness coverage
+  //
+  // Pre-fix (per-call tmp staging): every route file with any relative
+  // `.scrml` import failed the safety harness because the staged tmp dir
+  // did not contain the import target. This sweep blocked v0.3 fixture
+  // migration on 20 of 36 trucking-dispatch files.
+  //
+  // Post-fix (transactional in-place rewrite + restore): the rewrite is
+  // staged at the file's real on-disk path, `compileScrml({ gather: true })`
+  // walks the real import graph, and the original content is restored from
+  // an in-memory backup before this function returns. The gate fires only
+  // on real breakage — not on environmental mismatch.
+  //
+  // Coverage:
+  //   (i)   positive — single-file (no imports) — regression of pre-fix happy path
+  //   (ii)  positive — multi-file (cross-file imports) — THE FIX
+  //   (iii) negative — broken rewrite (covered by §5 above)
+  //   (iv)  edge — module file with no rewrite — gate not invoked
+  //   (v)   on-disk invariant — dry-run leaves the file untouched even when
+  //         the harness writes the rewrite mid-check (option-β restore path)
+  // -------------------------------------------------------------------------
+  describe("§5b option-β harness — cross-file imports + restore semantics", () => {
+    test("(i) positive — self-contained route file: gate passes (regression)", () => {
+      // Single-file route under pages/ with NO imports. Pre-fix and post-fix
+      // both pass — this verifies the fix didn't break the happy path.
+      const route = join(tmpDir, "pages", "self-contained.scrml");
+      mkdirSync(dirname(route), { recursive: true });
+      const original = `<program auth="required">\n  <div>hi</div>\n</program>`;
+      writeFileSync(route, original, "utf8");
+
+      const r = migrateFile(
+        route,
+        { dryRun: false, check: false, programShape: true, projectRoot: tmpDir },
+        tmpDir,
+      );
+
+      expect(r.status).toBe("changed");
+      expect(r.action).toBe("REWRITE");
+      // Post-rewrite, the file on disk now has `<page>` (in-place mode).
+      const onDisk = readFileSync(route, "utf8");
+      expect(onDisk).toContain(`<page auth="required">`);
+      expect(onDisk).toContain(`</page>`);
+    });
+
+    test("(ii) positive — multi-file route with cross-file imports: gate passes (THE FIX)", () => {
+      // The case the option-β fix is for: a route file imports a helper from
+      // a sibling `models/` file. Pre-fix this hit E-IMPORT-006 in the staged
+      // tmp dir and the rewrite was rejected. Post-fix the gate passes.
+      // Use the checked-in multi-file-app fixture, copied to a tmp tree so
+      // we can rewrite in place without mutating the source tree.
+      copyFixturesTo(tmpDir);
+      const route = join(tmpDir, "multi-file-app", "pages", "dashboard.scrml");
+      const original = readFileSync(route, "utf8");
+      expect(original).toContain(`<program auth="required">`);
+      expect(original).toContain(`import { requireAuth, AUTH_HEADER } from '../models/auth.scrml'`);
+
+      const r = migrateFile(
+        route,
+        {
+          dryRun: false,
+          check: false,
+          programShape: true,
+          projectRoot: join(tmpDir, "multi-file-app"),
+        },
+        tmpDir,
+      );
+
+      expect(r.status).toBe("changed");
+      expect(r.action).toBe("REWRITE");
+      // On-disk: opener rewritten, imports preserved verbatim.
+      const onDisk = readFileSync(route, "utf8");
+      expect(onDisk).toContain(`<page auth="required">`);
+      expect(onDisk).toContain(`</page>`);
+      expect(onDisk).toContain(
+        `import { requireAuth, AUTH_HEADER } from '../models/auth.scrml'`,
+      );
+    });
+
+    test("(iv) edge — module file with no rewrite: gate is never invoked", () => {
+      // Pure-fn module file. `applyProgramShapeRewrite` returns `changed:false`
+      // and `migrateFile` short-circuits before calling sanityCheckParse.
+      // We verify this by giving the file a body whose imports would FAIL
+      // the harness if it ran — yet the file remains untouched (status
+      // 'unchanged', not 'failed').
+      const mod = join(tmpDir, "models", "lib.scrml");
+      mkdirSync(dirname(mod), { recursive: true });
+      const original = `\${\n  import { gone } from "./nonexistent.scrml"\n  export fn x() { gone() }\n}`;
+      writeFileSync(mod, original, "utf8");
+
+      const r = migrateFile(
+        mod,
+        { dryRun: false, check: false, programShape: true, projectRoot: tmpDir },
+        tmpDir,
+      );
+
+      // Module bucket: NOOP/ADVISORY, not 'failed' (harness not run because
+      // changed === false).
+      expect(r.status).toBe("unchanged");
+      expect(r.classification?.bucket).toBe("module");
+      // File on disk is unchanged.
+      expect(readFileSync(mod, "utf8")).toBe(original);
+    });
+
+    test("(v) on-disk invariant — dry-run never leaves the file rewritten", () => {
+      // Option-β's transactional flow writes the rewrite to the file mid-check
+      // and then restores from the in-memory backup. Verify the restore path
+      // runs in dry-run mode (where the caller explicitly does not want any
+      // on-disk change).
+      copyFixturesTo(tmpDir);
+      const route = join(tmpDir, "multi-file-app", "pages", "dashboard.scrml");
+      const before = readFileSync(route, "utf8");
+
+      const r = migrateFile(
+        route,
+        {
+          dryRun: true,
+          check: false,
+          programShape: true,
+          report: true,
+          projectRoot: join(tmpDir, "multi-file-app"),
+        },
+        tmpDir,
+      );
+
+      expect(r.status).toBe("changed");
+      expect(r.action).toBe("REWRITE");
+      // Dry-run: file on disk MUST be byte-identical to the pre-call content.
+      // This is the option-β restore-from-backup invariant.
+      const after = readFileSync(route, "utf8");
+      expect(after).toBe(before);
+    });
   });
 });
 

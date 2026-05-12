@@ -1,0 +1,24 @@
+// multi-file-app fixture — v0.2-style route file under `pages/`.
+//
+// Bucket: route. Per-route attrs only (`auth=`). Body imports a helper from
+// `../models/auth.scrml`. The migrate command should rewrite `<program ...>`
+// → `<page ...>` and the rewritten source must pass the safety harness
+// (the import resolves to a real on-disk file under multi-file-app/).
+//
+// Pre-fix: this case fired E-IMPORT-006 because the staged tmp directory had
+// no `models/` subtree. Post-fix (option β), the harness writes the rewrite
+// to this file's real path, runs compileScrml with `gather: true` so the
+// real import is gathered, then restores the original. Import resolves; gate
+// passes.
+
+<program auth="required">
+
+  ${
+    import { requireAuth, AUTH_HEADER } from '../models/auth.scrml'
+  }
+
+  <div>
+    <h1>Dashboard</h1>
+    <p>Auth header is ${AUTH_HEADER}.</p>
+  </div>
+</program>
