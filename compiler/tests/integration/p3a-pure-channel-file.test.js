@@ -34,7 +34,15 @@ function fx(rel, src) {
   return abs;
 }
 
-describe("P3.A — PURE-CHANNEL-FILE pattern", () => {
+// v0.3 Wave 1 (2026-05-12) — `.skip`'d. PURE-CHANNEL-FILE is a file
+// with only `export <channel>` declarations and no `<program>`. Under
+// v0.3, channels must live INSIDE `<program>` and the new walker fires
+// `E-CHANNEL-OUTSIDE-PROGRAM` on these file-top channel declarations.
+// The PURE-CHANNEL-FILE pattern's v0.3 disposition (e.g. a dispensation
+// for `export <channel>` files; or its retirement in favor of in-program
+// channel-with-export) is deferred to the v0.3 A8 wave that lands the
+// cross-file route-emission contract.
+describe.skip("P3.A — PURE-CHANNEL-FILE pattern (deferred to v0.3 A8 wave)", () => {
   test("a file with only `export <channel>` decls + a consumer: source emits no WS route", () => {
     // V5-strict body (M19 / S69 B19): channel-body cells use `<name> = init`,
     // not `@shared <name> = init`. Auto-sync comes from the channel-body

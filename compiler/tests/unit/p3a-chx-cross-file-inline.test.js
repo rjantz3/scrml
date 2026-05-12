@@ -32,7 +32,15 @@ function fx(rel, src) {
   return abs;
 }
 
-describe("P3.A CHX — cross-file <channel> inline expansion", () => {
+// v0.3 Wave 1 (2026-05-12) — `.skip`'d. Cross-file `<channel>` inline
+// expansion uses the pre-v0.3 file-top channel pattern in module files.
+// Under v0.3, channels live INSIDE `<program>` and the new walker fires
+// `E-CHANNEL-OUTSIDE-PROGRAM` on module-file `<channel>` declarations.
+// The A8 cross-file route-emission contract is in v0.3 scope but the
+// implementation is deferred — including any dispensation for module-file
+// channel exports. These tests will be rewritten against the v0.3
+// canonical cross-file shape when A8 lands.
+describe.skip("P3.A CHX — cross-file <channel> inline expansion (deferred to v0.3 A8 wave)", () => {
   test("basic: simple cross-file channel compiles + inlines", () => {
     fx("c1/channels.scrml", `export <channel name="ticker">
   ${"$"}{ <count>: number = 0 }

@@ -983,7 +983,7 @@ TAB receives the entire lambda as a single `ExprAttrValue`.
 
 ### 4.15 Scrml-defined structural elements (registered at the block-grammar layer)
 
-**Added:** 2026-05-04 — registers the v0.next scrml-defined elements that the block splitter and tokenizer recognise alongside HTML elements. These are NOT HTML elements; the element registry (§24) distinguishes them and routes them to their owning sections for behavioural semantics. Updated 2026-05-10 (S77 + S78) for `<onTimeout>` (§51.0.M), `<onIdle>` (§51.0.R).
+**Added:** 2026-05-04 — registers the v0.next scrml-defined elements that the block splitter and tokenizer recognise alongside HTML elements. These are NOT HTML elements; the element registry (§24) distinguishes them and routes them to their owning sections for behavioural semantics. Updated 2026-05-10 (S77 + S78) for `<onTimeout>` (§51.0.M), `<onIdle>` (§51.0.R). Updated 2026-05-12 (v0.3 Wave 1) for `<page>` (§40).
 
 **The registered structural elements:**
 
@@ -995,14 +995,16 @@ TAB receives the entire lambda as a single `ExprAttrValue`.
 | `<onTransition>` | §51.0.H | `to=Variant`, `from=Variant`, `once` (boolean), `if=expr` | bare-body (effect statements) or `:`-shorthand |
 | `<onTimeout>` (S67; `name=` S79) | §51.0.M | `after=DURATION` (required), `to=.Variant` (required), `name=IDENT` (optional, S79 — addressable for `cancelTimer`) | self-closing only |
 | `<onIdle>` (S77) | §51.0.R | `after=DURATION` (required), `to=.Variant` (required) | self-closing only |
+| `<page>` (v0.3 Wave 1) | §40 | `db=`, `auth=`, `csrf=`, `ratelimit=` (per-route only; see §40 for canonical value sets) | default-logic body (mode-equivalent to `<program>` body in v0.3) |
 
 **Normative statements:**
 
-- The block splitter SHALL classify openers `<engine`, `<match>`, `<errors`, `<onTransition`, `<onTimeout`, and `<onIdle` (no whitespace between `<` and the identifier — they follow the canonical no-space convention; the convention precedes NR-authoritative routing per §4.3) as scrml-defined structural elements.
+- The block splitter SHALL classify openers `<engine`, `<match>`, `<errors`, `<onTransition`, `<onTimeout`, `<onIdle`, and `<page` (no whitespace between `<` and the identifier — they follow the canonical no-space convention; the convention precedes NR-authoritative routing per §4.3) as scrml-defined structural elements.
 - These element names SHALL NOT be treated as HTML elements. The HTML element registry (§24) excludes them; the scrml structural-element registry includes them.
 - Attribute slots listed above are recognised at parse time. Unknown attributes on these elements emit `W-ATTR-001` (attribute allowlist warning, §3.3 / VP-1) and may escalate to error in stricter modes.
-- Component names (PascalCase user types) and these scrml-defined element names are disjoint — registering a user component named `engine`, `match`, `errors`, `onTransition`, `onTimeout`, or `onIdle` is `E-NAME-COLLIDES-RESERVED` (the names are reserved structural-element identifiers).
-- These element names are ONLY recognised in their owning loci; e.g., `<onTransition>` is grammatical only as a child of `<engine>`; `<onTimeout>` is grammatical only as a child of an engine state-child; `<onIdle>` is grammatical only at engine root (sibling of state-children). Use outside the owning locus is `E-STRUCTURAL-ELEMENT-MISPLACED` or the element's specific misplacement code (e.g. `E-IDLE-MISPLACED` per §51.0.R).
+- Component names (PascalCase user types) and these scrml-defined element names are disjoint — registering a user component named `engine`, `match`, `errors`, `onTransition`, `onTimeout`, `onIdle`, or `page` is `E-NAME-COLLIDES-RESERVED` (the names are reserved structural-element identifiers).
+- These element names are ONLY recognised in their owning loci; e.g., `<onTransition>` is grammatical only as a child of `<engine>`; `<onTimeout>` is grammatical only as a child of an engine state-child; `<onIdle>` is grammatical only at engine root (sibling of state-children); `<page>` is grammatical only as a child of `<program>` in multi-page apps. Use outside the owning locus is `E-STRUCTURAL-ELEMENT-MISPLACED` or the element's specific misplacement code (e.g. `E-IDLE-MISPLACED` per §51.0.R).
+- `<page>` SHALL NOT carry a `route=` attribute. Routing in scrml is filesystem-inferred (per Pillar 3 — compiler owns the wiring; cross-ref §47.9.2 path-preserve emission); a `route=` attr on `<page>` is `E-PAGE-ROUTE-ATTR-FORBIDDEN` (doubly forbidden: it both regresses against filesystem inference AND collides with the existing nested-program `route=` per §4.12.2). The allowed attribute set on `<page>` is exactly the four PER-ROUTE concerns — `db=`, `auth=`, `csrf=`, `ratelimit=` — and any other attribute fires `E-PAGE-INVALID-ATTR` with guidance toward the markup-element alternative or moving the attribute to `<program>` (app-wide concerns).
 
 **Cross-references:**
 
@@ -1012,6 +1014,7 @@ TAB receives the entire lambda as a single `ExprAttrValue`.
 - `<onTransition>` shape, attribute legality, firing rules: §51.0.H.
 - `<onTimeout>` shape, attribute legality, firing rules: §51.0.M (S67 amendment).
 - `<onIdle>` shape, attribute legality, firing rules: §51.0.R (S77 amendment).
+- `<page>` shape, per-route attribute semantics, multi-page-app placement: §40 (v0.3 Wave 1).
 
 ### 4.16 M7 — multi-close shorthand `<///>` is NOT a part of scrml (negative-space)
 
@@ -13710,7 +13713,7 @@ The compiler has full awareness of the HTML specification. Every HTML element is
 
 ### 24.4 Scrml-defined structural elements (Stage 0b D4 — registry distinction)
 
-**Added:** 2026-05-04 — registers the v0.next scrml-defined structural elements alongside the HTML element registry. These are NOT HTML elements; the registry distinguishes them. Updated 2026-05-10 (S77 + S78) for `<onTimeout>` (§51.0.M), `<onIdle>` (§51.0.R).
+**Added:** 2026-05-04 — registers the v0.next scrml-defined structural elements alongside the HTML element registry. These are NOT HTML elements; the registry distinguishes them. Updated 2026-05-10 (S77 + S78) for `<onTimeout>` (§51.0.M), `<onIdle>` (§51.0.R). Updated 2026-05-12 (v0.3 Wave 1) for `<page>` (§40).
 
 **Registered scrml structural elements:**
 
@@ -13722,13 +13725,14 @@ The compiler has full awareness of the HTML specification. Every HTML element is
 | `<onTransition>` | §51.0.H | Cross-state effect handler; child of `<engine>` only |
 | `<onTimeout>` (S67) | §51.0.M | Per-state-child time-driven transition declaration; child of an engine state-child only |
 | `<onIdle>` (S77) | §51.0.R | Engine-wide event-timeout watchdog; child of `<engine>` only (sibling of state-children); one per engine maximum |
+| `<page>` (v0.3 Wave 1) | §40 | Per-route attribute container in multi-page apps; child of `<program>` only; route URL is filesystem-inferred (no `route=` attr); accepts exactly the four per-route concerns `db=`, `auth=`, `csrf=`, `ratelimit=` |
 
 **Normative statements:**
 
 - The HTML element registry (§24.1) SHALL NOT include these names. They are scrml-defined structural elements with their own owning-section semantics (cross-ref §4.15).
-- The compiler SHALL NOT apply HTML attribute validation (§24.2) to these elements. Each scrml structural element has its own attribute slot catalog defined in its owning section (§51.0 for `<engine>`, §18.0.1 for `<match>`, §55.8 for `<errors>`, §51.0.H for `<onTransition>`, §51.0.M for `<onTimeout>`, §51.0.R for `<onIdle>`).
-- These element names SHALL NOT be valid component names. Defining `const engine = <article>` (lowercase) or `const Engine = <div>` is `E-NAME-COLLIDES-RESERVED` — the names are reserved scrml structural-element identifiers.
-- The unified state-type registry (§15.15) routes these names per their NR `resolvedCategory`: `<engine>` → `engine`, `<match>` → a dedicated category, `<errors>` → a dedicated category, `<onTransition>` → resolved relative to its parent `<engine>`, `<onTimeout>` → resolved relative to its parent engine state-child, `<onIdle>` → resolved relative to its parent `<engine>`.
+- The compiler SHALL NOT apply HTML attribute validation (§24.2) to these elements. Each scrml structural element has its own attribute slot catalog defined in its owning section (§51.0 for `<engine>`, §18.0.1 for `<match>`, §55.8 for `<errors>`, §51.0.H for `<onTransition>`, §51.0.M for `<onTimeout>`, §51.0.R for `<onIdle>`, §40 for `<page>`).
+- These element names SHALL NOT be valid component names. Defining `const engine = <article>` (lowercase) or `const Engine = <div>` is `E-NAME-COLLIDES-RESERVED` — the names are reserved scrml structural-element identifiers. The same applies to `page` / `Page`.
+- The unified state-type registry (§15.15) routes these names per their NR `resolvedCategory`: `<engine>` → `engine`, `<match>` → a dedicated category, `<errors>` → a dedicated category, `<onTransition>` → resolved relative to its parent `<engine>`, `<onTimeout>` → resolved relative to its parent engine state-child, `<onIdle>` → resolved relative to its parent `<engine>`, `<page>` → resolved relative to its parent `<program>`.
 - Validation pass VP-1 (§3.3 attribute allowlist) registers the per-element attribute catalogs for these structural elements in `compiler/src/attribute-registry.js` (cross-ref Stage 3.3 contract).
 
 **Cross-references:**
@@ -13738,6 +13742,7 @@ The compiler has full awareness of the HTML specification. Every HTML element is
 - §55.8 — `<errors>` element semantics.
 - §51.0.M — `<onTimeout>` semantics (S67 amendment).
 - §51.0.R — `<onIdle>` semantics (S77 amendment).
+- §40 — `<page>` semantics; per-route attribute set; one-program-per-application rule (v0.3 Wave 1).
 
 ---
 
@@ -14659,8 +14664,13 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-DEBOUNCED-WITH-SERVER | §6.13, §52 | A `debounced=` (or `throttled=`) reactivity attribute is applied to a `<x server>` server-authoritative cell. Server-authoritative writes go through the §52 server-write path, not the client-side debounce/throttle wrapper; the two surfaces don't compose. Server-side timing semantics are out of scope for this revision. Resolution: remove the reactivity attribute, or restructure so the client-side cell carries the timing and the server-authoritative cell receives the resolved value. (Catalog addition S79 — debounce/throttle Approach B clean-cut.) | Error |
 | E-REACTIVITY-ATTR-CONFLICT | §6.13 | Both `debounced=DURATION` and `throttled=DURATION` appear on the same state-cell declaration. The two attributes describe competing timing rules (debounce coalesces writes; throttle leading+trailing-fires). Pick one. (Catalog addition S79 — debounce/throttle Approach B clean-cut.) | Error |
 | E-VALIDATOR-INLINE-DYNAMIC | §55.10 | The Level-1 inline message override on a validator (`<name req("…msg…")>`, `<name length(>=2, "…msg…")>`) must be a static string literal. Per L12 Edge F, dynamic expressions / interpolations defeat i18n tooling extraction (messages must be statically discoverable). Use a static literal here, OR define a project-registered message via `data.registerMessages` (Level 2), OR use the `<match for=ValidationError>` escape hatch (Level 4). (Catalog addition S68 — A1b B13.) | Error |
-| E-CHANNEL-INSIDE-PROGRAM | §38.1 | A `<channel>` element appears as a descendant of `<program>` rather than at file top level. v0.next channels are file-level (M19); migrate the declaration to be a sibling of `<program>`. | Error |
+| E-CHANNEL-INSIDE-PROGRAM | §38.1 | **Retired 2026-05-12 (v0.3 Wave 1 direction reversal).** Pre-v0.3 fired on a `<channel>` descended from `<program>` — this is now the canonical v0.3 placement (channels live inside `<program>`). The pre-v0.3 trigger shape is no longer a violation. New v0.3 placement-direction code: `E-CHANNEL-OUTSIDE-PROGRAM`. | Error (retired) |
+| E-CHANNEL-OUTSIDE-PROGRAM | §38.1 | (v0.3 Wave 1) A `<channel>` element appears at file top level (no `<program>` ancestor — sibling of `<program>` or in a module file with no `<program>`). Under v0.3, channels live INSIDE `<program>` — they are app-scope shared-state vehicles and the entry-file `<program>` body is their canonical home. Move the `<channel>` declaration to be a child of `<program>`. (Direction REVERSED from pre-v0.3 `E-CHANNEL-INSIDE-PROGRAM`.) | Error |
+| E-CHANNEL-INSIDE-PAGE | §38.1, §4.15 | (v0.3 Wave 1) A `<channel>` element appears inside `<page>`. Channels are app-scope shared-state vehicles; they live as siblings of `<page>` declarations inside `<program>`, not nested inside any individual `<page>`. Move the `<channel>` declaration up one level (into `<program>` directly). | Error |
+| E-PAGE-ROUTE-ATTR-FORBIDDEN | §4.15, §40 | (v0.3 Wave 1) A `<page>` element carries a `route=` attribute. This is DOUBLY forbidden: (a) it regresses against scrml's filesystem-inferred routing principle (Pillar 3 — the compiler owns the wiring; cross-ref §47.9.2 path-preserve emission), and (b) it collides with the existing nested-program `route=` attribute defined per §4.12.2. Remove the `route=` attribute; the route URL is inferred from the file's filesystem path. | Error |
+| E-PAGE-INVALID-ATTR | §4.15, §40 | (v0.3 Wave 1) A `<page>` element carries an attribute that is not in the per-route attribute set `{ db=, auth=, csrf=, ratelimit= }`. App-wide attributes like `title=`, `description=`, `version=`, `cors=`, `log=`, `headers=` belong on `<program>` (the application-host scope), not on a per-route container. For per-element documentary metadata, use the appropriate markup element (e.g. `<title>` inside the page body). | Error |
 | E-CHANNEL-SHARED-MODIFIER | §38.4 | The `@shared` modifier is used in the source. The modifier is removed in v0.next (M19); reactive cells declared inside a channel body auto-sync by virtue of being declared in the channel body. Remove the `@shared` keyword and use `<name> = init` (V5-strict). | Error |
+| W-PROGRAM-REDUNDANT-LOGIC | §40.8 | (v0.3 Wave 1, info-level) A `<program>` body wraps top-level declarations in a redundant `${...}` logic block. Under v0.3, `<program>` body parses in default-logic mode — bare top-level declarations (`<x> = 0`, `function f() { ... }`) auto-lift to the logic context without explicit `${...}` wrapping. Remove the redundant `${...}` for cleaner source. **Deprecation cycle:** warning in v0.3; v0.4 escalates to error per Q5. | Warning |
 | E-CLOSER-001 | §4.14 | A tag uses `:`-shorthand body but ALSO has an explicit closer (`</>`, `/`, `/>`). Choose one form: `:`-shorthand has no closer; bare-body uses a closer; self-closing has no body. (Stage 0b D4) | Error |
 | E-NAME-COLLIDES-RESERVED | §4.15, §24.4 | A user-declared component or state-type name collides with a reserved scrml structural-element identifier (`engine`, `match`, `errors`, `onTransition` — case-sensitive at registry level). (Stage 0b D4) | Error |
 | E-STRUCTURAL-ELEMENT-MISPLACED | §4.15, §51.0.H, §51.0.M, §55.8 | A scrml-defined structural element is used outside its owning locus. Specific cases: `<onTransition>` outside `<engine>`; `<onTimeout>` outside an engine state-child (S67 — §51.0.M); `<errors>` without a parent context that supports it; etc. The owning section's error subsection documents the precise condition. (Stage 0b D4; S67 amendment.) | Error |
@@ -15946,24 +15956,26 @@ Each item sends a named `activity` event with an ID. On reconnect, the browser s
 
 ## 38. WebSocket Channels — `<channel>`
 
-**Major rewrite 2026-05-04 (S57 Stage 0b D3, M19).** Channels are now a **file-level structural element** — siblings of `<program>`, never children. The `@shared` modifier is REMOVED in v0.next; reactive variables declared inside a channel body are auto-synchronized across every connected client by virtue of being declared inside the channel body. The channel body is parsed under the V5-strict access model (cross-ref §6) — `<x> = init` declares; `@x` reads/writes; bare names are LOCALS only.
+**Major rewrite 2026-05-04 (S57 Stage 0b D3, M19).** Channels were file-level structural elements — siblings of `<program>`, never children. The `@shared` modifier is REMOVED in v0.next; reactive variables declared inside a channel body are auto-synchronized across every connected client by virtue of being declared inside the channel body. The channel body is parsed under the V5-strict access model (cross-ref §6) — `<x> = init` declares; `@x` reads/writes; bare names are LOCALS only.
 
-### 38.1 Overview — file-level placement
+**v0.3 Wave 1 direction REVERSAL (2026-05-12).** The placement direction has been REVERSED. Under v0.3 channels live INSIDE `<program>` (entry file), not at file top level. This brings channel placement into alignment with the v0.3 one-program-per-application shape (§40) — channels are app-scope shared-state vehicles and the entry-file `<program>` body is their canonical home. Channels SHALL NOT live inside `<page>` (channels are app-scope, not per-route). The `@shared` modifier rejection and V5-strict body remain unchanged from v0.next; only the placement contract reverses.
 
-A `<channel>` is a **file-level structural element** that provides persistent bidirectional communication between client and server. The compiler generates the full WebSocket infrastructure: a client-side connection manager and a server-side upgrade route at `/_scrml_ws/<name>`. Channels emit no HTML.
+### 38.1 Overview — inside-`<program>` placement (v0.3 direction)
 
-**Design principle:** the channel is a peer of `<program>`, not a child. A `.scrml` file MAY contain zero or more file-level `<channel>` declarations alongside its `<program>` element. Channel state lives at file scope and is reachable from inside `<program>` via canonical `@` access.
+A `<channel>` is a **scrml-defined structural element** that provides persistent bidirectional communication between client and server. The compiler generates the full WebSocket infrastructure: a client-side connection manager and a server-side upgrade route at `/_scrml_ws/<name>`. Channels emit no HTML.
+
+**v0.3 design principle:** the channel is a CHILD of `<program>`, not a peer. Under v0.3's one-program-per-application rule (§40), the entry file's `<program>` element is the application's host scope and channels — being app-scope shared-state vehicles — live inside it. A `.scrml` file's `<program>` element MAY contain zero or more `<channel>` declarations alongside its `<page>` declarations and other body content. Channel state lives at the file scope established by `<program>` and is reachable from inside any `<page>` via canonical `@` access.
 
 ```scrml
-<channel name="chat" topic="lobby">
-  <messages> = []                            // V5-strict declaration; auto-syncs across clients
-
-  server function postMessage(author, body) {
-    @messages = [...@messages, { author, body, ts: Date.now() }]
-  }
-</>
-
 <program>
+  <channel name="chat" topic="lobby">
+    <messages> = []                            // V5-strict declaration; auto-syncs across clients
+
+    server function postMessage(author, body) {
+      @messages = [...@messages, { author, body, ts: Date.now() }]
+    }
+  </>
+
   ${
     <username> = ""
     <draft>    = ""
@@ -15986,37 +15998,37 @@ A `<channel>` is a **file-level structural element** that provides persistent bi
 </program>
 ```
 
-**Key invariants of the v0.next channel:**
+**Key invariants of the v0.3 channel:**
 
-1. **File-level placement.** A `<channel>` declaration appears at file top-level only, alongside (not inside) `<program>`. A `<channel>` element nested inside `<program>` SHALL emit `E-CHANNEL-INSIDE-PROGRAM`.
-2. **Auto-sync from body placement, not from a modifier.** Reactive cells declared inside a channel body are auto-synchronized across every connected client. The synchronization comes from being declared inside the channel body — there is no `@shared` modifier in v0.next. Use of `@shared` SHALL emit `E-CHANNEL-SHARED-MODIFIER`.
+1. **Inside-`<program>` placement.** A `<channel>` declaration appears inside the entry file's `<program>` only. A `<channel>` at file top level (sibling of `<program>`, or in a module file with no `<program>`) SHALL emit `E-CHANNEL-OUTSIDE-PROGRAM` (direction REVERSED from pre-v0.3 `E-CHANNEL-INSIDE-PROGRAM`). A `<channel>` inside `<page>` SHALL emit `E-CHANNEL-INSIDE-PAGE` — channels are app-scope shared-state vehicles, not per-route declarations.
+2. **Auto-sync from body placement, not from a modifier.** Reactive cells declared inside a channel body are auto-synchronized across every connected client. The synchronization comes from being declared inside the channel body — there is no `@shared` modifier. Use of `@shared` SHALL emit `E-CHANNEL-SHARED-MODIFIER`.
 3. **V5-strict body.** The channel body parses under the V5-strict access model (§6). State declarations use `<name> = init`; reads/writes use `@name`; bare identifiers are LOCALS only.
-4. **Cross-scope read.** Channel-declared state is reachable from within `<program>` via canonical `@` access. The same machinery that makes engine-auto-declared variables visible across the file applies (§51.0.D, §6.9 hoisting model).
-5. **Auto-injected scope.** Server functions and `onserver:*` handlers declared inside the channel body see `broadcast(data)` and `disconnect()` auto-injected — same as v1 (§38.6 below).
+4. **Cross-scope read.** Channel-declared state is reachable from any `<page>` body and any logic context in the same `<program>` via canonical `@` access. The same machinery that makes engine-auto-declared variables visible across the file applies (§51.0.D, §6.9 hoisting model).
+5. **Auto-injected scope.** Server functions and `onserver:*` handlers declared inside the channel body see `broadcast(data)` and `disconnect()` auto-injected (§38.6 below).
 
-### 38.2 Syntax — file-level structural form
+### 38.2 Syntax — inside-`<program>` structural form (v0.3)
 
 ```scrml
-<channel name="chat"
-         topic=@room
-         auth="required"
-         reconnect=2000
-         onserver:open=handleOpen()
-         onserver:message=handleMessage(msg)
-         onserver:close=handleClose()
-         onclient:open=onConnected()
-         onclient:close=onDisconnected()
-         onclient:error=onError(err)>
-
-  <count> = 0                              // V5-strict declaration; auto-syncs across clients
-  <messages> = []
-
-  server function postMessage(body) {
-    @messages = [...@messages, { body, ts: Date.now() }]
-  }
-</>
-
 <program>
+  <channel name="chat"
+           topic=@room
+           auth="required"
+           reconnect=2000
+           onserver:open=handleOpen()
+           onserver:message=handleMessage(msg)
+           onserver:close=handleClose()
+           onclient:open=onConnected()
+           onclient:close=onDisconnected()
+           onclient:error=onError(err)>
+
+    <count> = 0                              // V5-strict declaration; auto-syncs across clients
+    <messages> = []
+
+    server function postMessage(body) {
+      @messages = [...@messages, { body, ts: Date.now() }]
+    }
+  </>
+
   <!-- ... uses @count, @messages, postMessage -->
 </program>
 ```
@@ -16024,7 +16036,7 @@ A `<channel>` is a **file-level structural element** that provides persistent bi
 **Grammar (informal):**
 
 ```
-file-element       ::= channel-decl | program-decl | other-top-level
+program-body       ::= ( channel-decl | page-decl | markup | logic-block | ... )*
 channel-decl       ::= '<channel' attribute* '>' channel-body '</>'
 channel-body       ::= ( state-decl | logic-block | server-fn-decl | <onTransition> ... )*
 ```
@@ -16033,10 +16045,17 @@ A channel body MAY contain V5-strict state declarations (`<x> = init`), `${ }` l
 
 **Normative statements:**
 
-- A `<channel>` element SHALL appear at file top level only. A `<channel>` nested inside `<program>` (or any other element) SHALL emit `E-CHANNEL-INSIDE-PROGRAM` (§34).
+- A `<channel>` element SHALL appear as a descendant of the entry file's `<program>` only (v0.3 direction). A `<channel>` at file top level (sibling of `<program>` or in a module file with no `<program>`) SHALL emit `E-CHANNEL-OUTSIDE-PROGRAM` (§34) — direction REVERSED from pre-v0.3.
+- A `<channel>` inside `<page>` SHALL emit `E-CHANNEL-INSIDE-PAGE` (§34). Channels are app-scope shared-state vehicles, not per-route declarations.
 - A channel body SHALL be parsed under the V5-strict access model (§6). State declarations use `<name> = init`; reads/writes use `@name`; bare identifiers are LOCALS only.
-- The `@shared` modifier SHALL NOT appear inside any channel body in v0.next. Any occurrence SHALL emit `E-CHANNEL-SHARED-MODIFIER` (§34). The auto-sync behavior is BUILT-IN to the channel body and requires no modifier.
-- Channel-declared state cells SHALL be reachable from within `<program>` and from any logic context in the same file via canonical `@name` access.
+- The `@shared` modifier SHALL NOT appear inside any channel body in v0.next or v0.3. Any occurrence SHALL emit `E-CHANNEL-SHARED-MODIFIER` (§34). The auto-sync behavior is BUILT-IN to the channel body and requires no modifier.
+- Channel-declared state cells SHALL be reachable from within `<program>` (and from any `<page>` within `<program>`) and from any logic context in the same file via canonical `@name` access.
+
+**A8 route-emission canonical contract (v0.3).** Cross-file channel reuse via `export <channel name="X">` + `import { X }` is in v0.3 scope but the IMPLEMENTATION (route-handler-SoT and client-stub-emission split) is deferred to a later wave. The canonical v0.3 contract — established here as a target for the implementation — is:
+
+- When channel `X` is **exported** from file `A`, file `A`'s compiled `.server.js` SHALL be the single source of truth for `X`'s WebSocket route handler (`/_scrml_ws/<X>`). The compiler emits the upgrade route, the per-channel state synchronisation infrastructure, and the `onserver:*` / `server function` body bindings from `A`'s output only.
+- When file `B` **mounts** `X` via `<X/>` (consumer-site mount under §38.12 cross-file inline expansion), `B`'s compiled output SHALL emit the **client-side stub only** — the WebSocket connection manager, the cell-mirror wiring, the local `@`-sigil bindings — without duplicating the server-route handler. This prevents the route-conflict shape that the §34 row `E-CHANNEL-008` (cross-file duplicate-name) was added to surface; under the v0.3 contract, the duplicate-name case becomes structurally impossible when emission is correctly gated on exporter-only.
+- The exporter-as-route-SoT contract restores cross-file route-dedup at the compiler level. v0.3 module-file `export <channel>` shape (channel-only files with no `<program>`) is an open question — a dispensation that exempts the module file from the `E-CHANNEL-OUTSIDE-PROGRAM` rule, or alternatively a migration to "channels live in the entry file's `<program>` and `import { channelBody } from './app.scrml'` from peer modules". This dispensation question is part of the deferred A8 implementation; until then, module-file `<channel>` declarations fire `E-CHANNEL-OUTSIDE-PROGRAM` uniformly.
 
 ### 38.3 Attributes
 
@@ -16099,14 +16118,14 @@ On every local write to a channel-declared cell, the compiler emits a sync messa
 
 **Cross-ref §6.1** for the V5-strict two-form access model. **Cross-ref §6.2** for the three RHS shapes for state declarations (Shape 1 plain cell, Shape 2 form-coupled, Shape 3 derived). All three shapes are legal inside a channel body; Shape-2 form-coupled cells inside a channel body are legal (the form input lives in `<program>`, the state cell lives in the channel — the auto-sync continues to apply).
 
-**Worked example — channel state read from `<program>`:**
+**Worked example — channel state read from `<program>` body (v0.3 placement):**
 
 ```scrml
-<channel name="chat">
-  <messages> = []
-</>
-
 <program>
+  <channel name="chat">
+    <messages> = []
+  </>
+
   ${
     function send() {
       const count = @messages.length             // canonical @ read across scopes
@@ -16116,21 +16135,29 @@ On every local write to a channel-declared cell, the compiler emits a sync messa
 </program>
 ```
 
-The cell `@messages` is declared inside the channel body and read from inside the `<program>` body via canonical `@` access. No import is required; channel declarations are visible at file scope.
+The cell `@messages` is declared inside the channel body (which is inside `<program>` per the v0.3 placement rule) and read from the `<program>` body's logic via canonical `@` access. No import is required; channel declarations are visible at the `<program>`-host file scope.
 
-### 38.4.1 Migration note — v1 → v0.next
+### 38.4.1 Migration note — v1 → v0.next → v0.3
 
-For readers familiar with v1 channels: v1 channels lived inside `<program>` and used the `@shared` modifier on reactive variables. Both shapes change in v0.next:
+Channel placement and body shape have moved twice. The full trajectory:
 
-| v1 (pre-S57) | v0.next (canonical) |
-|---|---|
-| `<channel>` nested inside `<program>` | `<channel>` at file top level, sibling of `<program>` |
-| `${ @shared count = 0 }` inside channel body | `<count> = 0` inside channel body (V5-strict) |
-| `@count = ...` reads/writes (after `@shared` decl) | `@count = ...` reads/writes (canonical V5-strict) |
+| Era | Placement | Body declaration shape |
+|---|---|---|
+| **v1 (pre-S57, pre-v0.next)** | `<channel>` inside `<program>` | `${ @shared count = 0 }` (V4-loose access) |
+| **v0.next (S57+, pre-v0.3)** | `<channel>` at file top level, sibling of `<program>` | `<count> = 0` inside channel body (V5-strict) |
+| **v0.3 (2026-05-12+) — canonical now** | `<channel>` inside `<program>` (REVERSED back) | `<count> = 0` inside channel body (V5-strict, unchanged) |
 
-The wire layer (WebSocket route, sync wire format, broadcast/disconnect built-ins, server function escalation, `auth=` cookie check) is UNCHANGED. Only the source-level shape of declarations and placement moved. There is no backward compatibility shim — v0.next is scrml; v1 is a prior iteration.
+The v0.3 reversal returns channel placement to its v1 location (inside `<program>`) while preserving the v0.next body-shape (V5-strict, no `@shared`). The motivation: under v0.3's one-program-per-application rule (§40), the entry-file `<program>` is the application's host scope, and channels — being app-scope shared-state vehicles — belong inside it. The v0.next "channel as peer of `<program>`" framing was useful for the M19 declarative-multi-file model, but the v0.3 program-shape unification supersedes it.
 
-The compiler emits `E-CHANNEL-INSIDE-PROGRAM` on a channel descended from `<program>` and `E-CHANNEL-SHARED-MODIFIER` on any `@shared` occurrence — these errors guide adopters of pre-S57 source to the v0.next shape.
+The wire layer (WebSocket route, sync wire format, broadcast/disconnect built-ins, server function escalation, `auth=` cookie check) is UNCHANGED across all three eras. Only the source-level placement of `<channel>` (twice) and the body decl shape (once at v0.next, unchanged since) have moved.
+
+The compiler emits two reversed-direction error codes to guide migration:
+
+- `E-CHANNEL-OUTSIDE-PROGRAM` — v0.3 direction; fires on a `<channel>` at file top level (no `<program>` ancestor). Direction REVERSED from pre-v0.3 `E-CHANNEL-INSIDE-PROGRAM`.
+- `E-CHANNEL-INSIDE-PAGE` — v0.3 new code; fires on a `<channel>` inside `<page>` (channels are app-scope, not per-route).
+- `E-CHANNEL-SHARED-MODIFIER` — unchanged across v0.next + v0.3.
+
+There is no backward compatibility shim; v0.3 is scrml as of 2026-05-12; v0.next is a prior iteration. The pre-v0.3 `E-CHANNEL-INSIDE-PROGRAM` error code is retired (its trigger shape is now canonical, not violating).
 
 ### 38.5 auth= Integration
 
@@ -17021,6 +17048,34 @@ The `< schema>` block is the authoritative source for table type generation. Whe
 - If the database file is absent, the compiler uses `< schema>` alone to generate types (no introspection fallback needed).
 - If the database file exists and the schema is out of sync with `< schema>`, the compiler generates types from the `< schema>` declaration (desired state), not the actual database. The compiler SHALL emit W-SCHEMA-003 when types are generated from `< schema>` and the database is out of sync: "Schema and database differ. Types reflect desired schema. Run `scrml migrate` to sync."
 
+### 39.12.0 v0.3 `<program db=>` "db-anchor" workaround note
+
+**Added:** 2026-05-12 (v0.3 Wave 1).
+
+Under v0.3 (one-program-per-application), `<schema>` files and seed files
+that are NOT routes (i.e. not the entry file's `<program>` and not a route
+file's `<page>`) need somewhere to anchor a `db=` target. The v0.3
+TOLERATED workaround is a "db-anchor `<program db="...">`" wrapper at file
+top level in these non-route files — the `<program>` here functions as a
+shape-only host for the `db=` attribute and does NOT declare a new
+application. This shape is permitted in v0.3 but is explicitly known
+temporary.
+
+**Normative statement (v0.3 only):** A `.scrml` file containing only a
+`<schema>` declaration or seed declarations MAY wrap the declarations in
+a `<program db="...">` opener at file top level as a v0.3 workaround for
+the `<schema>`-without-host-`<program>` shape. The compiler SHALL accept
+this shape in v0.3 without diagnostic. **This workaround is being
+fixed:** v0.4 will promote `<schema db="...">` direct (the `db=`
+attribute moves to `<schema>` itself), eliminating the need for the
+`<program>` wrapper. Production code SHOULD use the workaround in v0.3
+but should expect it to migrate cleanly to the direct `<schema db=>`
+shape in v0.4. The `scrml migrate` tooling will provide an automatic
+rewrite when v0.4 lands.
+
+**Cross-references:** §40 (program shape — one-program-per-application
+rule); §39.1 (`<schema>` opener forms).
+
 ### 39.12 Error Codes
 
 | Code | Trigger | Severity |
@@ -17399,6 +17454,94 @@ The nested `<program>` carries `title="InnerOops"`. The compiler emits `W-PROGRA
 - §40.2 — Compiler-Auto Middleware attributes (sibling section; orthogonal role: middleware vs head metadata)
 - §43 — Nested `<program>` execution-context boundary (where `name=` is the worker identity)
 - §34 — W-PROGRAM-TITLE-NESTED warning code
+
+### 40.8 v0.3 Program Shape — one-program-per-application
+
+**Added:** 2026-05-12 (v0.3 Wave 1). Direction RATIFIED via the v0.3 program-shape deep-dive (`scrml-support/docs/deep-dives/program-as-container-shape-DIVE-2026-05-11.md`) + S84+S85+S86 PA reviews. R2 verdict: one-program-per-application (NOT one-per-file).
+
+**Normative statements:**
+
+- A scrml **application** SHALL declare its top-level `<program>` element exactly ONCE, in the application's **entry file**. The entry file is the file resolved by the build root (e.g. `app.scrml` in a single-file app, or the source root of the compilation).
+- The `<program>` declaration SHALL NOT appear in any non-entry file of the same application. A second top-level `<program>` in any other file of the same compilation is `E-PROGRAM-002` (TBD — separate diagnostic; not part of Wave 1).
+- **Application-wide attributes** continue to live on `<program>`. These attributes are app-scope (not per-route): `title=`, `description=`, `version=`, `author=`, `license=` (documentary, §40.7); `cors=`, `cors-max-age=`, `log=`, `headers=`, `idempotency-store=`, `idempotency-ttl=`, `channel-reconnect=` (app-scope middleware, §40.2 + §38.3.1). The `<program>` is the canonical host scope for these concerns.
+- Inside `<program>`, the body parses in **default-logic mode** under v0.3. Bare top-level declarations (`<x> = 0`, `function f() { ... }`) auto-lift to the logic context without explicit `${...}` wrapping. The author MAY still write `${...}` explicitly for clarity, but redundant `${...}` at the top level of `<program>` fires `W-PROGRAM-REDUNDANT-LOGIC` (info-level lint; warning in v0.3, error in v0.4 per Q5 deprecation cycle).
+- **Multi-page apps.** A `<program>` MAY contain zero or more `<page>` declarations (§4.15) as direct children. Each `<page>` is a per-route attribute container — its URL is inferred from filesystem location (no `route=` attr; per Pillar 3 compiler-owns-the-wiring, and cross-ref §47.9.2 path-preserve emission). The four per-route attributes are `db=`, `auth=`, `csrf=`, `ratelimit=`; any other attribute on `<page>` fires `E-PAGE-INVALID-ATTR`.
+- **Single-page apps.** A single-page (SPA) app's entry file contains only the `<program>` element with no `<page>` siblings inside. The absence of `<page>` declarations is the filesystem-level signal for SPA shape — the compiler does not require a separate marker.
+- **Channels.** `<channel>` declarations live inside `<program>` (§38.1, v0.3 direction). They are siblings of `<page>` declarations (when both are present) within the `<program>` body. Channels SHALL NOT live inside `<page>` (channels are app-scope shared-state vehicles, not per-route declarations; see `E-CHANNEL-INSIDE-PAGE`).
+
+**Worked example — multi-page app (entry file):**
+
+```scrml
+<program title="My App" db="./app.db" cors="*" log="structured">
+  <!-- App-wide channel (inside <program>, not inside <page>) -->
+  <channel name="presence">
+    <online> = []
+  </>
+
+  <!-- Per-route attribute containers -->
+  <page auth="required">
+    <!-- Routes living in entry file's <page> body -->
+    ${ <home> = "Welcome" }
+    <h1>${@home}</h1>
+  </page>
+</program>
+```
+
+Adjacent route files (e.g. `pages/customer/loads.scrml`) declare their `<page>` openers without re-declaring `<program>`:
+
+```scrml
+<page auth="required" ratelimit="100/min">
+  ${ <q> = "" }
+  <!-- ... route content ... -->
+</page>
+```
+
+The compiler infers the route URL `/customer/loads` from the filesystem path `pages/customer/loads.scrml` (§47.9.2 path-preserve emission); no `route=` attribute is permitted (E-PAGE-ROUTE-ATTR-FORBIDDEN).
+
+**Worked example — single-page app (entry file only):**
+
+```scrml
+<program title="Counter">
+  ${ <count> = 0 }
+  <button onclick=${@count = @count + 1}>+</button>
+  <span>${@count}</span>
+</program>
+```
+
+No `<page>` sibling is present; the application has a single route inferred from the entry file (typically `/`).
+
+**Cross-references:**
+- §4.15 — `<page>` structural-element registration (block-grammar surface).
+- §24.4 — `<page>` HTML-spec-awareness mirror (registry distinction).
+- §38.1 — channel inside-`<program>` placement (v0.3 direction).
+- §39.12.0 — db-anchor `<program db=>` workaround for schema/seeds files (v0.3 only; v0.4 promotes `<schema db=>` direct).
+- §43 — nested `<program>` (worker / sidecar execution-context boundary; distinct from the one-program-per-application rule which governs TOP-LEVEL `<program>`).
+- §47.9.2 — output path / route URL inference from source filesystem layout.
+- §34 — `E-PAGE-ROUTE-ATTR-FORBIDDEN`, `E-PAGE-INVALID-ATTR`, `E-CHANNEL-OUTSIDE-PROGRAM`, `E-CHANNEL-INSIDE-PAGE`, `W-PROGRAM-REDUNDANT-LOGIC`.
+
+### 40.8.1 OPEN QUESTION — `<program spa>` boolean marker
+
+**Status:** OPEN QUESTION (v0.3 Wave 1, surfaced 2026-05-12; decision deferred).
+
+The question: should `<program>` carry a boolean `spa` attribute that explicitly marks a single-page application, or should SPA-vs-multi-page-app be inferred entirely from filesystem layout (the absence of `<page>` declarations)?
+
+**Arguments for `<program spa>` (explicit marker):**
+
+- **Readability.** A reader scanning the entry file sees `spa` and immediately knows the application is single-page; no need to inspect the filesystem layout.
+- **Toolchain affordance.** LSP hovers and `scrml inspect` can present SPA-vs-multi-page status as a first-class attribute, rather than as derived from absence-of-`<page>`.
+- **Symmetry with other modal attributes.** `<program>` already carries explicit-mode attributes (`title=`, `description=`, `db=`); `spa` would fit the same shape.
+- **Build-step disambiguation.** When the build root contains exactly one file and no `pages/` directory, an explicit `spa` removes ambiguity about whether the developer INTENDED a SPA or has simply not yet added `<page>` siblings.
+
+**Arguments against `<program spa>` (filesystem-only inference):**
+
+- **Filesystem is already authoritative.** Routing is filesystem-inferred (per Pillar 3); SPA-vs-multi-page is a routing-shape question. Adding a redundant marker that must stay synced with the filesystem layout is a future-stale-comments risk.
+- **Pillar 3 cleanliness.** "The compiler owns the wiring" — the filesystem layout dictates routes; adopters never write routes. Adding a marker that overrides or duplicates filesystem-inferred routing is a regression vs the Pillar.
+- **Implementation simplicity.** No marker means no validation logic for "marker disagrees with filesystem" cases — the filesystem is the only source.
+- **Out-of-vocabulary risk.** Adding a single boolean attribute for SPA-vs-multi-page makes other shape questions ("is this a worker app?", "is this a server-only app?") candidates for similar markers, growing the `<program>` attribute surface.
+
+**PA recommendation (deferred):** PA leans toward "do NOT require it" (filesystem already signals SPA via absence of `<page>` files). User S86 directive: "I'm trying to juggle the consequences in my mind." — the question is surfaced here as a deliberate OPEN QUESTION; the decision is deferred to a later Wave or v0.3.x revision.
+
+**Disposition:** Wave 1 does NOT introduce `<program spa>`. The filesystem-only inference is in effect. This OQ remains open; downstream waves MAY revisit.
 
 ---
 
@@ -18702,6 +18845,20 @@ where `outputDir` is the user-specified `--output-dir` (or its default), and `su
 - Otherwise, the artifact is written into `join(outputDir, relativeDir)`, with intermediate directories created as needed.
 
 This rule reduces to the legacy flat layout for single-file invocations and for input directories whose `.scrml` files all reside at the directory root. It produces a tree-preserving layout for input directories with nested subdirectories.
+
+**v0.3 — `<page>` route URL inference (Wave 1).** The same path-preserve rule also determines the **route URL** of each non-entry-file `<page>` element under the v0.3 multi-page-app shape (§40.8). Given a route source file at `<outputBase>/<relativeDir>/<basename>.scrml` containing a `<page>` opener, the inferred route URL is `/<relativeDir>/<basename>` (with the basename `index` mapping to the trailing-slash form). Examples:
+
+| Source path | `<page>` declaration | Inferred route URL |
+|---|---|---|
+| `proj/app.scrml` | (entry file, no `<page>` sibling) | `/` (SPA route) |
+| `proj/app.scrml` (multi-page) | `<page>` inside `<program>` (root route) | `/` |
+| `proj/pages/customer/loads.scrml` | `<page>` opener | `/customer/loads` |
+| `proj/pages/customer/index.scrml` | `<page>` opener | `/customer/` |
+| `proj/pages/driver/home.scrml` | `<page>` opener | `/driver/home` |
+
+The `<page>` element SHALL NOT carry a `route=` attribute — the route URL comes from filesystem path inference exclusively (cross-ref §4.15 `<page>` structural-element registration; `E-PAGE-ROUTE-ATTR-FORBIDDEN` per §34). This is the Pillar 3 invariant ("the compiler owns the wiring"): adopters arrange `.scrml` files under a `pages/` (or equivalent) directory and the compiler computes routes deterministically.
+
+The compiler's internal route-inference pass (`compiler/src/route-inference.ts`) is the implementation locus for this rule; consistency between the `pages/` directory convention and any historical `routes/` directory references is a compiler-internal cleanup target tracked alongside the A8 cross-file route-emission work.
 
 #### 47.9.3 Output Path Collision
 

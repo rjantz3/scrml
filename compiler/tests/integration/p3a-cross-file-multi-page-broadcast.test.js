@@ -37,7 +37,22 @@ function fx(rel, src) {
   return abs;
 }
 
-describe("P3.A multi-page broadcast — case 3 of dive §6.3", () => {
+// v0.3 Wave 1 (2026-05-12) — `.skip`'d. These tests exercise the
+// pre-v0.3 "channel-only module file" pattern (a `.scrml` module file
+// containing `export <channel>` declarations at file top level with no
+// `<program>`). Under v0.3, channels live INSIDE `<program>` and a
+// file-top channel fires `E-CHANNEL-OUTSIDE-PROGRAM`. The v0.3
+// cross-file route-emission contract (A8 — exporter is route-handler
+// SoT, consumers emit client stub only; route-dedup across consumer
+// pages) is in v0.3 scope but the implementation is DEFERRED to a later
+// wave (compiler-source codegen change). The "module-file channel
+// dispensation" question — whether a channel-only file is permitted, or
+// whether every channel must live inside a `<program>` in the entry file
+// — is also deferred. When the implementation lands, these tests will
+// be rewritten against the canonical v0.3 cross-file shape (which may
+// require entry-file `<program>` channel declarations and
+// re-exports rather than per-module channel declarations).
+describe.skip("P3.A multi-page broadcast — case 3 of dive §6.3 (deferred to v0.3 A8 wave)", () => {
   test("two consumer pages share the same wire identity by `name=`", () => {
     // V5-strict body (M19 / S69 B19): channel-body cells use `<name> = init`,
     // NOT `@shared`. The `@shared` modifier was removed in v0.next; auto-sync

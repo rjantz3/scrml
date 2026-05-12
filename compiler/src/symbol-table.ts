@@ -5915,15 +5915,30 @@ function walkValidateResetTargets(
 
 
 // ---------------------------------------------------------------------------
-// PASS 15 (B19) — Channels file-level placement + `@shared` modifier rejection
+// PASS 15 (B19) — Channels placement + `@shared` modifier rejection
 // ---------------------------------------------------------------------------
 //
-// Per Phase A1b Step B19 (audit §2 + spec §38.1, §38.4, §34):
+// Per Phase A1b Step B19 (audit §2 + spec §38.1, §38.4, §34).
 //
-//   §38.1 line 15422 (file-level placement):
-//     "A `<channel>` element SHALL appear at file top level only. A
-//      `<channel>` nested inside `<program>` (or any other element) SHALL
-//      emit `E-CHANNEL-INSIDE-PROGRAM` (§34)."
+// **v0.3 DIRECTION REVERSAL (Wave 1, 2026-05-12):** The original v0.next /
+// pre-v0.3 contract said "channels are file-level siblings of `<program>`"
+// and fired `E-CHANNEL-INSIDE-PROGRAM` on a channel descended from another
+// markup element. Under the v0.3 program-shape direction (one-program-per-
+// application; multi-page apps live as `<page>` siblings inside `<program>`),
+// channels move BACK INSIDE `<program>` — channels are app-scope shared-state
+// vehicles and the `<program>` body is their home. The walker fires the new
+// code `E-CHANNEL-OUTSIDE-PROGRAM` when a `<channel>` sits at file top level
+// (sibling of `<program>`, in a module file with no `<program>`, etc.). The
+// `<channel>` inside `<page>` fire-site (`E-CHANNEL-INSIDE-PAGE`) is filed
+// for the wave that adds `<page>` parser support — `<page>` is not
+// tokenized as a structural element in Wave 1 so it cannot be checked here.
+//
+//   §38.1 (v0.3, post-Wave 1) — channels live INSIDE `<program>`:
+//     "A `<channel>` element SHALL appear inside `<program>` only. A
+//      `<channel>` at file top level (sibling of `<program>` or in a
+//      module file with no `<program>`) SHALL emit `E-CHANNEL-OUTSIDE-
+//      PROGRAM`. A `<channel>` inside `<page>` SHALL emit `E-CHANNEL-
+//      INSIDE-PAGE` (channels are app-scope, not per-route)."
 //
 //   §38.4 line 15468 (V5-strict body — no `@shared`):
 //     "The `@shared` modifier SHALL NOT appear in any v0.next source. Use
@@ -5940,12 +5955,13 @@ function walkValidateResetTargets(
 //
 // **Walker shape:** two independent sub-walks in `walkValidateChannels`:
 //
-//   1. `walkChannelPlacement` — walk markup tree carrying a `markupDepth`
-//      counter. Top-level channels (in `ast.nodes` directly) have depth 0;
-//      any channel reached through a markup or component-def ancestor has
-//      depth >= 1 and fires E-CHANNEL-INSIDE-PROGRAM. The walker descends
-//      into `node.children` (markup children) and `node.body` (logic
-//      blocks; channels never appear inside logic, but recursion is cheap).
+//   1. `walkChannelPlacement` — walk markup tree carrying a
+//      `programDepth` counter (count of `<program>` ancestors). A
+//      `<channel>` at programDepth === 0 fires `E-CHANNEL-OUTSIDE-PROGRAM`;
+//      a `<channel>` at programDepth >= 1 is allowed. (v0.3 reversal —
+//      see Wave 1 dispatch + §38.1 v0.3.) The walker descends into
+//      `node.children` (markup children) and `node.body` (logic blocks;
+//      channels never appear inside logic, but recursion is cheap).
 //
 //   2. `walkSharedModifier` — generic AST walker visiting every
 //      `state-decl` (including compound `children` arrays). Fires
@@ -5966,16 +5982,25 @@ function walkValidateResetTargets(
 /**
  * PASS 15 (B19) — channel-placement + `@shared`-modifier rejection.
  * Mutates `errors[]`. Two sub-walks.
+ *
+ * **v0.3 direction reversal (Wave 1):** Placement-check direction inverted.
+ * Channels must now live INSIDE `<program>`. A `<channel>` at file top level
+ * (programDepth === 0) fires `E-CHANNEL-OUTSIDE-PROGRAM`. Channels inside
+ * `<program>` are the canonical placement. `<channel>` inside `<page>` will
+ * fire `E-CHANNEL-INSIDE-PAGE` once `<page>` parser support lands in a
+ * later wave; the error code is registered in §34 now but no walker fires
+ * it yet (Wave 1 has no `<page>` parsing).
  */
 function walkValidateChannels(
   ast: any,
   errors: SYMDiagnostic[],
   filePath: string,
 ): void {
-  // 1. Placement check. Top-level `<channel>` is allowed (depth === 0);
-  //    nested anywhere else fires E-CHANNEL-INSIDE-PROGRAM.
+  // 1. Placement check. Channels inside `<program>` are allowed
+  //    (programDepth >= 1); channels at file top level fire
+  //    E-CHANNEL-OUTSIDE-PROGRAM.
   const visitedPlacement = new WeakSet<object>();
-  walkChannelPlacement(ast.nodes, /*markupDepth*/ 0, errors, filePath, visitedPlacement);
+  walkChannelPlacement(ast.nodes, /*programDepth*/ 0, errors, filePath, visitedPlacement);
 
   // 2. `@shared` modifier rejection. Fires on any state-decl with
   //    isShared:true, regardless of containing channel context.
@@ -5986,26 +6011,37 @@ function walkValidateChannels(
 /**
  * Walk markup tree to detect `<channel>` placement violations.
  *
- * `markupDepth` is the count of MARKUP ancestors (any `node.kind === "markup"`)
- * traversed to reach the current node — when `node.kind === "markup" && node.tag
- * === "channel"`, depth 0 means top-level (allowed); depth >= 1 means nested
- * inside another markup element (fire E-CHANNEL-INSIDE-PROGRAM).
+ * **v0.3 direction reversal (Wave 1).** `programDepth` is the count of
+ * `<program>` ancestors traversed to reach the current node. A
+ * `<channel>` node at `programDepth === 0` fires
+ * `E-CHANNEL-OUTSIDE-PROGRAM` — channels must live inside `<program>` in
+ * v0.3. A `<channel>` at `programDepth >= 1` is the canonical placement
+ * (inside the entry-file `<program>` body).
  *
- * `component-def` nodes are component declarations whose `defChildren` array
- * holds sibling logic-body nodes (per B17 finding). A channel inside a
- * component-def's defChildren is also nested non-top-level placement, so we
- * count component-def as a markup-ish ancestor for placement purposes.
+ * **`<page>` inside-fire deferred.** A `<channel>` inside `<page>` would
+ * fire `E-CHANNEL-INSIDE-PAGE`. The error code is registered in §34 now
+ * (Wave 1) but `<page>` is not yet tokenized as a structural element —
+ * the walker for that fire-site is filed for the wave that adds `<page>`
+ * parser support.
  *
- * Logic-block bodies (`node.kind === "logic"`) and other non-markup containers
- * never legally hold `<channel>` markup nodes (the parser places channels in
- * markup `children`); but we recurse defensively — recursion does NOT increment
- * `markupDepth` for logic bodies (a channel inside `${ ... }` would never be
- * top-level by depth=0 anyway because the logic block itself sits inside a
- * markup parent at depth >= 1).
+ * `component-def` nodes are component declarations whose `defChildren`
+ * array holds sibling logic-body nodes (per B17 finding). Channel
+ * placement inside a component-def's defChildren is non-canonical — a
+ * `<channel>` declaration inside a component definition has no `<program>`
+ * ancestor in the conventional sense; the v0.3 contract for that is
+ * out of scope for Wave 1 (channel-in-component-def is an unusual shape
+ * that pre-existed the v0.3 reversal). For Wave 1, component-def acts
+ * neutral: it does not increment `programDepth` (so a channel inside
+ * component-def's defChildren, outside `<program>`, still fires
+ * `E-CHANNEL-OUTSIDE-PROGRAM`).
+ *
+ * Logic-block bodies (`node.kind === "logic"`) and other non-markup
+ * containers never legally hold `<channel>` markup nodes (the parser
+ * places channels in markup `children`); but we recurse defensively.
  */
 function walkChannelPlacement(
   nodes: any,
-  markupDepth: number,
+  programDepth: number,
   errors: SYMDiagnostic[],
   filePath: string,
   visited: WeakSet<object>,
@@ -6013,7 +6049,7 @@ function walkChannelPlacement(
   if (!nodes) return;
   if (Array.isArray(nodes)) {
     for (const n of nodes) {
-      walkChannelPlacement(n, markupDepth, errors, filePath, visited);
+      walkChannelPlacement(n, programDepth, errors, filePath, visited);
     }
     return;
   }
@@ -6023,18 +6059,21 @@ function walkChannelPlacement(
 
   const node = nodes as any;
 
-  // Fire E-CHANNEL-INSIDE-PROGRAM if a `<channel>` markup is reached at
-  // depth >= 1 (i.e. has at least one markup ancestor).
-  if (node.kind === "markup" && (node.tag ?? "") === "channel" && markupDepth >= 1) {
-    fireChannelInsideProgram(node, errors, filePath);
+  // Fire E-CHANNEL-OUTSIDE-PROGRAM if a `<channel>` markup is reached at
+  // programDepth === 0 (i.e. no `<program>` ancestor). v0.3 places
+  // channels INSIDE `<program>`; file-top-level channels are the new
+  // violation direction.
+  if (node.kind === "markup" && (node.tag ?? "") === "channel" && programDepth === 0) {
+    fireChannelOutsideProgram(node, errors, filePath);
   }
 
-  // Compute child-side depth: increment when descending through a markup
-  // node OR a component-def (which conceptually scopes its defChildren).
-  const childDepth =
-    (node.kind === "markup" || node.kind === "component-def")
-      ? markupDepth + 1
-      : markupDepth;
+  // Compute child-side depth: increment ONLY when descending through a
+  // `<program>` markup node. Non-program markup, component-def, etc. do
+  // not change `programDepth` — only the `<program>` ancestor signal
+  // matters for v0.3 placement.
+  const isProgramMarkup =
+    node.kind === "markup" && (node.tag ?? "") === "program";
+  const childDepth = isProgramMarkup ? programDepth + 1 : programDepth;
 
   if (Array.isArray(node.children)) {
     walkChannelPlacement(node.children, childDepth, errors, filePath, visited);
@@ -6121,16 +6160,20 @@ function walkSharedModifier(
 }
 
 /**
- * Fire `E-CHANNEL-INSIDE-PROGRAM` per §38.1 + §34. Triggered when a
- * `<channel>` markup element is reached at non-zero markup depth (i.e.
- * has at least one markup ancestor — `<program>`, another markup node,
- * or a `component-def` body).
+ * Fire `E-CHANNEL-OUTSIDE-PROGRAM` per §38.1 + §34 (v0.3 direction).
+ *
+ * Triggered when a `<channel>` markup element is reached at programDepth
+ * === 0 — i.e. the channel has no `<program>` ancestor in the markup tree.
+ * Under v0.3 the canonical placement is INSIDE `<program>` (channels are
+ * app-scope shared-state vehicles, not file-top-level decorations).
  *
  * The diagnostic message names the channel (when its `name=` attribute
- * resolves to a static string literal) and points to the canonical
- * v0.next shape: file-level sibling of `<program>`.
+ * resolves to a static string literal) and points to the canonical v0.3
+ * shape: child of `<program>`. The diagnostic also notes the direction
+ * REVERSAL from pre-v0.3 (which fired `E-CHANNEL-INSIDE-PROGRAM` for the
+ * opposite arrangement).
  */
-function fireChannelInsideProgram(
+function fireChannelOutsideProgram(
   channelNode: any,
   errors: SYMDiagnostic[],
   filePath: string,
@@ -6155,12 +6198,14 @@ function fireChannelInsideProgram(
   }
 
   errors.push({
-    code: "E-CHANNEL-INSIDE-PROGRAM",
+    code: "E-CHANNEL-OUTSIDE-PROGRAM",
     message:
-      `E-CHANNEL-INSIDE-PROGRAM: ${channelLabel} appears as a descendant of another element ` +
-      `(e.g. \`<program>\`) rather than at file top level. Channels are file-level in ` +
-      `v0.next (M19); migrate the \`<channel>\` declaration to be a sibling of ` +
-      `\`<program>\`, not a descendant. ` +
+      `E-CHANNEL-OUTSIDE-PROGRAM: ${channelLabel} appears at file top level ` +
+      `(no \`<program>\` ancestor). Under v0.3, channels live INSIDE ` +
+      `\`<program>\` — they are app-scope shared-state vehicles and the ` +
+      `entry-file \`<program>\` body is their home. Move the ` +
+      `\`<channel>\` declaration to be a child of \`<program>\`. ` +
+      `(Direction REVERSED from pre-v0.3 \`E-CHANNEL-INSIDE-PROGRAM\`.) ` +
       `(SPEC §38.1 + §34.)`,
     span,
     severity: "error",
@@ -7740,8 +7785,10 @@ export function runSYM(input: SYMInput): SYMResult {
 
   // PASS 15 (B19): Channel placement + `@shared` modifier rejection.
   // Two sub-walks per SPEC §38.1, §38.4, §34:
-  //   - walkChannelPlacement: fires E-CHANNEL-INSIDE-PROGRAM on any
-  //     `<channel>` markup node reached with markupDepth >= 1.
+  //   - walkChannelPlacement: fires E-CHANNEL-OUTSIDE-PROGRAM on any
+  //     `<channel>` markup node at programDepth === 0 (v0.3 direction:
+  //     channels live INSIDE `<program>`). v0.3 reversal Wave 1; see
+  //     pre-v0.3 `E-CHANNEL-INSIDE-PROGRAM` for the prior direction.
   //   - walkSharedModifier: fires E-CHANNEL-SHARED-MODIFIER on any
   //     `state-decl` carrying `isShared: true` (TAB stamps this on
   //     `@shared <name> = init` source — the legacy v1 modifier).

@@ -33,7 +33,14 @@ function fx(rel, src) {
   return abs;
 }
 
-describe("P3.A diagnosis — cross-file <channel> export/import", () => {
+// v0.3 Wave 1 (2026-05-12) — `.skip`'d. F-CHANNEL-003 cross-file
+// channel export/import uses the file-top `export <channel>` pattern in
+// a module file. Under v0.3, channels live INSIDE `<program>` and the
+// new walker fires `E-CHANNEL-OUTSIDE-PROGRAM` on module-file `<channel>`
+// declarations. The A8 cross-file route-emission contract (and any
+// dispensation for module-file channels) is deferred to a later v0.3
+// wave; this test will be rewritten then.
+describe.skip("P3.A diagnosis — cross-file <channel> export/import (deferred to v0.3 A8 wave)", () => {
   test("F-CHANNEL-003 closure: cross-file channel export+import compiles cleanly", () => {
     // V5-strict body (M19 / S69 B19): channel-body cells use `<name> = init`,
     // not the retired `@shared <name> = init` form.
