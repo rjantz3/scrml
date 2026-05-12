@@ -169,10 +169,13 @@ describe("LSP L1 — buildDocumentSymbols", () => {
     const { symbols, diagnostics } = symbolize(text, fixture);
     // Filter out advisory warnings introduced by Insight 26 Batch 1
     // (W-DEAD-FUNCTION, W-DEPRECATED-SERVER-MODIFIER) — this test asserts
-    // on structural diagnostics only.
+    // on structural diagnostics only. Also filter the v0.3 info-level
+    // W-PROGRAM-SPA-INFERRED lint (SPEC §40.8.1) which fires for SPA-
+    // shaped examples like the Mario fixture (no <page>, no pages/).
     const errs = diagnostics.filter(d =>
       d.code !== "W-DEAD-FUNCTION" &&
-      d.code !== "W-DEPRECATED-SERVER-MODIFIER"
+      d.code !== "W-DEPRECATED-SERVER-MODIFIER" &&
+      d.code !== "W-PROGRAM-SPA-INFERRED"
     );
     expect(errs.length).toBe(0);
     // Should at minimum surface the three enum types. Post-v0.2.0 rewrite

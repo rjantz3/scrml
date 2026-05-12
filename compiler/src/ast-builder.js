@@ -51,6 +51,9 @@ import { splitBlocks as _splitBlocksForP2Form1 } from "./block-splitter.js";
 import { scanForTopLevelSemicolon, isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { parseAfterDuration } from "./codegen/parse-after-duration.ts";
 
+import { existsSync, statSync } from "fs";
+import { dirname as _pathDirname, join as _pathJoin, isAbsolute as _pathIsAbsolute } from "path";
+
 /**
  * Bug 1 fix: re-emit a string literal's raw inner text as a valid JS string
  * literal. The scrml tokenizer stores the source-as-written inner text for
@@ -10593,6 +10596,104 @@ export function buildAST(bsOutput, tokenizerOverrides) {
 
     for (const topNode of nodes) {
       visitForRedundantLogic(topNode);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // v0.3 §40.8.1 — W-PROGRAM-SPA-INFERRED (info-level lint)
+  //
+  // SPEC §40.8.1 RESOLVED (Option C, ratified S86 2026-05-12) + §34 row.
+  //
+  // Fires when ALL three normative conditions hold:
+  //   1. The entry file declares a top-level `<program>` element.
+  //      (Per v0.3 "one-program-per-application" §40, ANY file with a
+  //      top-level <program> IS the entry file — so this maps to the
+  //      existing `programNode` resolution at the top of buildAST.)
+  //   2. The `<program>` body contains zero `<page>` siblings.
+  //   3. No `pages/` directory exists at the project root.
+  //      (Project root = `path.dirname(filePath)` per §41.2.3 "the project
+  //      root is the directory containing the <program> file".)
+  //
+  // Suppression: presence of a `pages/` directory at the project root —
+  // even EMPTY — suppresses the lint. This is the adopter's deterministic
+  // opt-out per §40.8.1 "Lint suppression mechanism".
+  //
+  // Emission site: the entry-file <program> opener span.
+  // ---------------------------------------------------------------------------
+  {
+    // Condition (1): top-level <program> present.
+    const entryProgramNode = nodes.find(
+      n => n && n.kind === "markup" && n.tag === "program"
+    );
+
+    if (entryProgramNode) {
+      // Condition (2): zero <page> siblings in the <program> body.
+      // <page> siblings live in entryProgramNode.children as markup nodes.
+      const programChildren = Array.isArray(entryProgramNode.children)
+        ? entryProgramNode.children
+        : [];
+      const hasPageSibling = programChildren.some(
+        c => c && c.kind === "markup" && c.tag === "page"
+      );
+
+      // Guard: the lint requires filesystem context. In production
+      // (`compileScrml`/CLI) filePath is resolved to an absolute path
+      // before BS/TAB run AND points at a real file on disk. In
+      // synthetic test contexts the filePath is often a stub
+      // (`"test.scrml"`, `"/test/app.scrml"`, etc.) that does NOT exist
+      // on disk — so there is no meaningful "project root" to check
+      // for `pages/`. Skip the lint when filePath is not absolute OR
+      // the file does not exist. Tests that want to exercise the lint
+      // construct an absolute path under a tmpdir with a real file.
+      let filePathIsRealFile = false;
+      if (typeof filePath === "string" && _pathIsAbsolute(filePath)) {
+        try {
+          filePathIsRealFile = existsSync(filePath);
+        } catch {
+          filePathIsRealFile = false;
+        }
+      }
+
+      if (!hasPageSibling && filePathIsRealFile) {
+        // Condition (3): no `pages/` directory at the project root.
+        // Project root = dirname of the file containing <program>.
+        // Suppression: if `pages/` EXISTS as a directory (even empty),
+        // do not emit.
+        let pagesDirPresent = false;
+        try {
+          const projectRoot = _pathDirname(filePath);
+          const pagesPath = _pathJoin(projectRoot, "pages");
+          if (existsSync(pagesPath)) {
+            // Confirm it is a directory (a stray `pages` FILE does not
+            // suppress the lint — the SPEC mechanism is specifically a
+            // directory).
+            pagesDirPresent = statSync(pagesPath).isDirectory();
+          }
+        } catch {
+          // fs lookup failed (permissions, broken symlink, etc.) —
+          // treat as "no pages/ dir" (i.e. lint may fire). This is
+          // conservative: the adopter sees the inference signal rather
+          // than having it silently suppressed by a transient fs error.
+          pagesDirPresent = false;
+        }
+
+        if (!pagesDirPresent) {
+          const span =
+            entryProgramNode.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+          errors.push(new TABError(
+            "W-PROGRAM-SPA-INFERRED",
+            `W-PROGRAM-SPA-INFERRED: The compiler has inferred SPA (single-page application) shape from the filesystem: ` +
+            `the entry file declares a top-level \`<program>\` element, the \`<program>\` body contains zero \`<page>\` siblings, ` +
+            `and no \`pages/\` directory exists at the project root. ` +
+            `If SPA is your intent, this lint is informational only — no action required. ` +
+            `If you intended a multi-page app, add \`<page>\` declarations to the entry-file \`<program>\` body or create a \`pages/\` directory at the project root. ` +
+            `To suppress this lint, create an empty \`pages/\` directory at the project root (signals adopter awareness of the multi-page option). ` +
+            `Per SPEC §40.8.1 the SPA-vs-multi-page-app shape is filesystem-inferred exclusively; no \`<program spa>\` boolean attribute exists.`,
+            span,
+          ));
+          errors[errors.length - 1].severity = "info";
+        }
+      }
     }
   }
 
