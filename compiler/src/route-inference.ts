@@ -2454,15 +2454,30 @@ export function runRI(input: RIInput): RIOutput {
 // ---------------------------------------------------------------------------
 
 /**
- * Build a page route tree from file paths.
+ * Build a page route tree from file paths — AUTH-MIDDLEWARE PATH MAP.
  *
- * Convention:
+ * IMPORTANT: This function is NOT the canonical URL-inference site.
+ * Canonical URL inference uses §47.9.2 path-preserve emission (dirname + basename
+ * minus .scrml → route URL); see `compiler/src/codegen/emit-route.ts` and SPEC
+ * §47.9.2 / §40.8. This function exists specifically to build the per-page
+ * auth-middleware map (which routes require `auth=`, layout inheritance, etc.).
+ *
+ * The corpus convention is `pages/**` (e.g. `examples/23-trucking-dispatch/pages/`)
+ * — but this function keys on `routes/` for historical reasons and applies only when
+ * the auth-middleware tree is being computed. The v0.3 `<page>` element (SPEC §4.15
+ * + §40.8) does NOT carry a `route=` attribute; route URL comes from filesystem
+ * path inference exclusively (§47.9.2), not from this function.
+ *
+ * Convention (auth-middleware tree only):
  *   - Files under a `routes/` directory are page routes.
  *   - `index.scrml` maps to the directory's path (e.g., routes/index.scrml → /).
  *   - `[param].scrml` maps to a dynamic segment (e.g., routes/users/[id].scrml → /users/:id).
  *   - `_layout.scrml` provides a shared layout wrapper for sibling routes.
  *   - `[...slug].scrml` is a catch-all route.
  *   - Files NOT under a `routes/` directory are treated as single-page apps (route = /).
+ *
+ * v0.4 follow-up: harmonize this function's `routes/` keying with the v0.3 corpus
+ * convention `pages/**` — either rename or accept both as equivalent prefixes.
  */
 export function buildPageRouteTree(files: FileAST[]): Map<string, PageRoute> {
   const pages = new Map<string, PageRoute>();
