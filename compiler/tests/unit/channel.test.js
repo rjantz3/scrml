@@ -1177,7 +1177,16 @@ describe("§25 (C18): collectChannelFunctionMap + collectChannelCellMap", () => 
     expect(map.get("fnUpdates")).toBe("updates");
   });
 
-  test("collectChannelFunctionMap skips P3.A exporter copies (_p3aIsExport)", () => {
+  test("collectChannelFunctionMap INCLUDES P3.A exporter copies (cross-file channel mount fix, 2026-05-11)", () => {
+    // T1 (cross-file channel mount E-RI-002 fix): channel-function ownership
+    // is lexical — it must NOT depend on whether the channel is the WS-emit
+    // site. The exporter file (PURE-CHANNEL-FILE) marks its `<channel>` node
+    // with `_p3aIsExport: true` to suppress duplicate WS-route emission
+    // (collectChannelNodes filters on this). But the function-decl inside
+    // the channel body is still a real channel-owned server function — RI's
+    // E-RI-002 skip-path and emit-server's broadcast injection both need to
+    // recognize this. Previously this filter caused false E-RI-002 fires
+    // in every channels/*.scrml file in cross-file mount projects.
     const ast = {
       nodes: [
         {
@@ -1186,13 +1195,13 @@ describe("§25 (C18): collectChannelFunctionMap + collectChannelCellMap", () => 
           _p3aIsExport: true,
           attrs: [{ name: "name", value: { kind: "string-literal", value: "exporter" } }],
           children: [
-            { kind: "logic", body: [{ kind: "function-decl", name: "shouldNotMap", body: [] }] },
+            { kind: "logic", body: [{ kind: "function-decl", name: "shouldMapEvenWhenExported", body: [] }] },
           ],
         },
       ],
     };
     const map = collectChannelFunctionMap(ast.nodes);
-    expect(map.has("shouldNotMap")).toBe(false);
+    expect(map.get("shouldMapEvenWhenExported")).toBe("exporter");
   });
 
   test("collectChannelCellMap returns channel-name → cell-set map", () => {

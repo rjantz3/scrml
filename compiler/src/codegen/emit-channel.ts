@@ -325,8 +325,15 @@ export function collectChannelFunctionMap(nodes: any[]): Map<string, string> {
     for (const n of nodeList) {
       if (!n || typeof n !== "object") continue;
       if (n.kind === "markup" && (n.tag ?? "") === "channel") {
-        // Skip P3.A exporter copies (per collectChannelNodes filter).
-        if (n._p3aIsExport === true) continue;
+        // T1 (cross-file channel mount E-RI-002 fix, 2026-05-11):
+        // Do NOT skip `_p3aIsExport === true` channels here. Channel-function
+        // ownership is a property of where the function-decl LEXICALLY lives
+        // (per §38.6) and is independent of whether this file is the WS-emit
+        // site (`collectChannelNodes` decides that). The PURE-CHANNEL-FILE
+        // (exporter) still emits the channel-owned server functions via
+        // `collectFunctions`; without this map, emit-server would not inject
+        // the `broadcast(...)` helper and RI's E-RI-002 skip-path would
+        // false-fire on the exporter's own `publish*` writes to channel cells.
         const { name } = extractChannelAttrs(n);
         if (Array.isArray(n.children)) visitInsideChannel(n.children, name);
         continue;
@@ -355,7 +362,11 @@ export function collectChannelCellMap(nodes: any[]): Map<string, Set<string>> {
     for (const n of nodeList) {
       if (!n || typeof n !== "object") continue;
       if (n.kind === "markup" && (n.tag ?? "") === "channel") {
-        if (n._p3aIsExport === true) continue;
+        // T1 (cross-file channel mount E-RI-002 fix, 2026-05-11):
+        // Mirror collectChannelFunctionMap — channel-cell ownership is
+        // lexical (where the state-decl appears), not tied to WS-emit
+        // site. The RI skip-path needs the exporter file's own channel
+        // cells to suppress E-RI-002 on the exporter's `publish*` writes.
         const { name } = extractChannelAttrs(n);
         const cells = new Set<string>(extractSharedVars(n));
         result.set(name, cells);
