@@ -2,7 +2,67 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-11 S84 CLOSE, all five semver tags live on origin — **v0.2.0 `022ee02` + v0.2.1 `d72c074` + v0.2.2 `98e872d` + v0.2.3 `d512266` + v0.2.4 `28cd2ac`**): **11,512 pass / 77 skip / 1 todo / 0 FAIL** (554 files). v0.2.4 is the current shipped baseline; Wave 2 commits land at HEAD `1d2f1cf` (v0.2.5 tag candidate pending authorization); v0.3.0 program-shape spec-amendment cluster ratified for S85 dispatch.
+Current baseline (2026-05-12 S85 CLOSE, all seven semver tags live on origin — **v0.2.0 `022ee02` + v0.2.1 `d72c074` + v0.2.2 `98e872d` + v0.2.3 `d512266` + v0.2.4 `28cd2ac` + v0.2.5 `2c687b5` + v0.2.6 `efbd1e8`**): **11,507 pass / 100 skip / 1 todo / 0 FAIL** (557 files). v0.2.6 is the current shipped baseline (F-COMPONENT-001 family closed; trucking-dispatch reference app error-free); v0.3 Wave 1 spec anchor + walker inversion land at HEAD `a574353` (NOT tagged — v0.3.0 waits for Wave 2+ implementation completion).
+
+### 2026-05-12 (S85 CLOSE — v0.2.5 + v0.2.6 tagged · v0.3 Wave 1 spec anchor · F-COMPONENT-001 family CLOSED · Wave 3 Playwright e2e infra live · scrml.dev substantive refresh)
+
+**Session-defining outcome:** Two semver tags + the v0.3 spec anchor landed in one session. Trucking-dispatch reference app went from 11 errors to 0 errors at v0.2.6 close. v0.3 program-shape ratified end-to-end: R2 (one-program-per-app) + `<page>` helper element (route-free per user's "scrml has been designed to not force the dev to think about routing") + channel-placement reversal + co-location-of-behavior recorded as #1 design principle. Wave 3 e2e infrastructure (Playwright across Chromium + Firefox + WebKit) landed; 02-counter canary validates green on 2 of 3 browsers (WebKit blocked on libavif13 host-deps).
+
+**Tags cut this session:**
+
+- **v0.2.5 `2c687b5`** — Wave 2.5 robust-v0.2 bundle. 4 dispatches (A1-A4 in parallel). 2 real compiler fixes + 2 depth-of-survey returns with regression coverage. A2 closed the cross-file channel E-RI-002 publisher pattern (emit-channel.ts `_p3aIsExport` filter conflation; 4 lines removed); A4 closed F-COMPONENT-001 internal-PascalCase `/>` collapse gap (component-expander.ts +13/-1). +10 tests cumulative.
+
+- **v0.2.6 `efbd1e8`** — F-COMPONENT-001 family closure + trucking-dispatch error-free. A6 transitive cross-file component registry enrichment via eager worklist + `lookupKey(filePath, imp, importGraph)` (component-expander.ts +115/-58, closes W2 commit `6536f7a`'s F4-deferred residual). A7 23-site server-modifier sweep across 18 trucking-dispatch pages (−32 W-DEPRECATED-SERVER-MODIFIER warnings). loadRows local-rename (closes E-NAME-COLLIDES-STATE in board.scrml). E-DG-002 false-fire fix (dependency-graph.ts +21 lines; engine-decl arm in sweepNodeForAtRefs per §51.0.D "declaration position IS its rendered output position"). Trucking-dispatch reference app: **11 errors → 0 errors / 100 warnings → 41 warnings**.
+
+**v0.3 Wave 1 SPEC ANCHOR landed (`2b7c4df`):**
+
+- **§40.8 + §40.8.1:** `<program>` is ONCE-PER-APPLICATION. `<page>` siblings inside `<program>` for multi-page apps. SPA = absence of `<page>` siblings. Channels inside `<program>` as siblings of `<page>`. Default-logic body mode. `<program spa>` boolean as deliberate OPEN QUESTION with 4 args-for + 4 args-against + decision DEFERRED per user S86 directive ("juggling the consequences").
+- **§4.15 + §24.4:** `<page>` registered as new scrml structural element. 4 attrs `{db, auth, csrf, ratelimit}`. `route=` DOUBLY forbidden (regression vs filesystem inference per user S85 directive "scrml has been designed to not force the dev to think about routing" + attribute-name collision per §4.12.2).
+- **§38.1/2/4 + §38.4.1:** Channel placement REVERSED. v0.next had channels at file-top (E-CHANNEL-INSIDE-PROGRAM); v0.3 reverses (E-CHANNEL-OUTSIDE-PROGRAM). §38.4.1 NEW A8 canonical contract: exporter is server-route SoT; consumers emit client stubs only.
+- **§39.12.0 NEW:** schema/seeds `<program db=>` workaround tolerated v0.3 + EXPLICIT v0.4-fix note per user directive ("should be explicit in doc that this is getting fixed"); v0.4 promotes `<schema db=>` direct.
+- **§47.9.2:** cross-reference to `<page>` registration.
+- **§34 +5 rows:** E-CHANNEL-INSIDE-PROGRAM (RETIRED) + E-CHANNEL-OUTSIDE-PROGRAM + E-CHANNEL-INSIDE-PAGE + E-PAGE-ROUTE-ATTR-FORBIDDEN + E-PAGE-INVALID-ATTR + W-PROGRAM-REDUNDANT-LOGIC.
+- **Walker:** symbol-table.ts:6006 `walkChannelPlacement` inverted; ast-builder.js:690-692 already handles both `<program>` AND `<channel>` (S83 B4 precedent).
+- 5 test files `.skip`'d with documented A8-wave deferral; channel-placement-shared-b19.test.js rewritten (15 pass) for v0.3 direction.
+- −22 pass / +23 skip (test-rewrite consolidation + deferred-A8-wave .skips).
+
+**Wave 3 Playwright Dispatch 1 (`f69ff6a`):** top-level `e2e/` workspace with `playwright.config.ts` (3-browser projects + 2-webServer config) + `fixtures/dev-server-fixture.ts` + `tests/02-counter.spec.ts` (5 ACs) + `README.md`. `@playwright/test ^1.49.0` devDep + 3 npm scripts. Live PA-side validation: **Chromium 5/5 PASS (3.9s), Firefox 5/5 PASS (19.7s), WebKit 5/5 fail at browser launch — host system missing libavif13 (needs sudo)**. WebKit + scrml runtime compatibility remains UNTESTED.
+
+**scrml.dev landing-page refreshes (3 commits):** `28c075b` surgical staleness fixes (V5-strict counter example + `<machine>`→`<engine>` + `@shared` retirement + "22 examples" count + `bun link` quick-start) → user feedback *"I wanted a legit update and I am not seeing that"* → `fd3edf9` substantive mental-model refresh (replaced `< Card>` framing with state-cells-are-primitive + UI-is-state-machine + validators-auto-synthesize + errors-as-states sections; dropped `use` keyword reference) → `a574353` "No npm escape hatch" section per user directive (stdlib catalog + supply-chain properties + language-level wins eliminating zod/redux/react-hook-form/xstate + ~88-90% coverage framing + "missing by design").
+
+**4 new dive docs in scrml-support (`26aad28` + `745adde`):**
+- `program-as-container-shape-DIVE-2026-05-11.md` (S85 amendment to S84 dive — Q2 corrected to one-per-app)
+- `program-as-container-implementation-plan-2026-05-12.md` (R1-vs-R2 recalibration; 4-wave plan; ~75-135h R2 with `<page>`)
+- `page-helper-element-design-2026-05-12.md` (`<page>` design dive — route-free, 4 attrs, R2-compatible)
+- `wave-3-playwright-benchmarks-scoping-2026-05-12.md` (3-stage Wave 3 plan; 25-40h band)
+
+**Methodology signals sustained:**
+- Depth-of-survey-discount frequency now at **#13** (A1 #11 + A3 #12 + E-DG-002 #13). Pattern: PA hint-about-LOCUS reliable (5/5 dispatches found locus at-or-near PA's guess); PA hint-about-MECHANISM unreliable (3/5 misdiagnoses). Future briefs should name locus but NOT mechanism.
+- Pro-X-voting-against-X frequency unchanged at 8+.
+- Co-location-of-behavior principle captured (NOT formalized as lock per user directive).
+
+**Operational anomalies (recovered, filed for pa.md F4 hardening):**
+- PA-side worktree-removal-while-CWD-inside mishap mid-Wave-3-D1 landing. Recovery via dangling-commit checkout. Durable rule: ALWAYS `cd /home/bryan/scrmlMaster/scrmlTS` BEFORE `git worktree remove`.
+- Agent-side path-discipline incident (Wave 1 agent edits going to MAIN before self-detection + recovery via WORKTREE_ROOT-absolute path re-application). Pa.md F4 rule load-bearing.
+- Pre-commit hook config: confirmed worktrees don't inherit `core.hooksPath`. Brief addendum (per-worktree enable) works. Filed as task #9 (completed-with-workaround).
+- Mid-session `core.hooksPath` revert on main; re-applied. Possible `git worktree prune`/`remove --force` side-effect.
+
+**State at S85 close:**
+- scrmlTS 0/0 vs origin; scrml-support 0/0 vs origin
+- 14 scrmlTS commits this session + 2 scrml-support commits
+- Worktree clean (main only)
+- Pre-commit hook verified `scripts/git-hooks`
+- 0 regressions across all S85 landings
+
+**Open at S85 close (carry-forward to S86):**
+- `<program spa>` boolean OQ deferred (user juggling)
+- v0.3 Wave 2+ dispatch (TAB+AST+migrate+codegen+fixture-sweep, ~75-135h R2 band)
+- Wave 3 Dispatch 2 (4 more specs) + Dispatch 3 (Phase B benchmarks)
+- WebKit + scrml runtime validation (blocked on libavif13)
+- Trucking-dispatch `scrml dev` server-side codegen divergence
+- A8 codegen (folded into v0.3 scope)
+- SPEC-INDEX.md regeneration (~286 line shift)
+- `route-inference.ts:2467` routes/-vs-pages/ cleanup
 
 ### 2026-05-11 (S84 CLOSE — v0.2.3 + v0.2.4 cut · Wave 1/1.5/2 landed · v0.3 program-shape dive ratified)
 

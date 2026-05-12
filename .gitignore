@@ -26,3 +26,9 @@ e2e/playwright-report/
 e2e/blob-report/
 e2e/.playwright/
 playwright/.cache/
+
+# docs/build.ts output — generated per-article HTML pages.
+# Source: docs/articles/*.md. Build: `bun run docs/build.ts`.
+# Tracked nowhere; rebuilt on demand. Landing page (docs/index.html) IS tracked.
+docs/articles/*/
+docs/articles/index.html
