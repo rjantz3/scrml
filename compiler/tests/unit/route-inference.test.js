@@ -1322,6 +1322,122 @@ describe("§17 — cross-file direct-only escalation", () => {
     const { routeMap } = runRIClean([fileA, fileB]);
     expect(routeMap.functions.size).toBe(2);
   });
+
+  // ------------------------------------------------------------------
+  // Cross-file caller-context propagation (T1 A3, 2026-05-11).
+  //
+  // The trucking-dispatch example's stale workaround comment (lines
+  // 26-31, 183-184 in examples/23-trucking-dispatch/app.scrml) claimed
+  // that dropping the `server` modifier on a function defined for
+  // cross-file import would trigger E-CG-006 because caller-context-
+  // propagation didn't cross file boundaries. That premise was already
+  // false at the time the comment was written: the analysisMap built in
+  // route-inference.ts Step 3 collects functions from ALL files via
+  // `for (const fileAST of files)`, and the inverseCallerMap built in
+  // Step 5c (lines 1933-1945) walks ALL callers across files. Caller-
+  // context propagation has been cross-file from the day Insight 26 D3
+  // landed (2026-05-08).
+  //
+  // This test pins that invariant so the workaround comment can be
+  // removed and the auth fns in app.scrml can drop their explicit
+  // `server` modifier without regression.
+  // ------------------------------------------------------------------
+
+  test("cross-file caller-context: helper in fileA called only from server fn in fileB escalates to server", () => {
+    // fileA.helper has NO body trigger (no SQL, no protect-access, no Bun.*).
+    // fileB.caller has SQL body trigger → server-classified.
+    // fileB.caller calls helper. caller-context-propagation MUST cross
+    // the file boundary and promote helper to server.
+    const helperFn = makeFunctionDecl({
+      name: "helper",
+      body: [makeBareExpr("return x.toUpperCase()")],
+      spanStart: 10,
+      file: "/test/fileA.scrml",
+    });
+    const fileA = makeFileAST("/test/fileA.scrml", [helperFn]);
+    fileA.exports = [{
+      id: 5, kind: "export-decl", raw: "", exportedName: "helper", exportKind: "function", span: span(5, "/test/fileA.scrml"),
+    }];
+
+    const callerFn = makeFunctionDecl({
+      name: "caller",
+      body: [
+        makeLetDecl("u", "?{`SELECT * FROM users`}.get()", 60, "/test/fileB.scrml"),
+        makeBareExpr("return helper(u.name)", 80, "/test/fileB.scrml"),
+      ],
+      spanStart: 50,
+      file: "/test/fileB.scrml",
+    });
+    const fileB = makeFileAST("/test/fileB.scrml", [callerFn]);
+    fileB.imports = [{
+      id: 2, kind: "import-decl", source: "./fileA.scrml",
+      specifiers: [{ kind: "named", local: "helper", imported: "helper" }],
+    }];
+
+    const { routeMap } = runRIClean([fileA, fileB]);
+
+    const helperRoute = routeMap.functions.get("/test/fileA.scrml::10");
+    const callerRoute = routeMap.functions.get("/test/fileB.scrml::50");
+
+    expect(helperRoute).toBeDefined();
+    expect(callerRoute).toBeDefined();
+
+    // caller is server (SQL body trigger).
+    expect(callerRoute.boundary).toBe("server");
+    // helper escalated cross-file via caller-context-propagation.
+    expect(helperRoute.boundary).toBe("server");
+    const helperReasons = helperRoute.escalationReasons.map(r => r.resourceType).filter(Boolean);
+    expect(helperReasons).toContain("caller-context-propagation");
+  });
+
+  test("cross-file caller-context: mixed callers (one server, one client) keep helper client", () => {
+    // helper in fileA is called by serverFn in fileB AND clientFn in fileC.
+    // Mixed-context call graph → helper stays client (ambient).
+    const helperFn = makeFunctionDecl({
+      name: "shared",
+      body: [makeBareExpr("return x.trim()")],
+      spanStart: 10,
+      file: "/test/fileA.scrml",
+    });
+    const fileA = makeFileAST("/test/fileA.scrml", [helperFn]);
+    fileA.exports = [{
+      id: 5, kind: "export-decl", raw: "", exportedName: "shared", exportKind: "function", span: span(5, "/test/fileA.scrml"),
+    }];
+
+    const serverFn = makeFunctionDecl({
+      name: "serverCaller",
+      body: [
+        makeLetDecl("u", "?{`SELECT * FROM users`}.get()", 60, "/test/fileB.scrml"),
+        makeBareExpr("return shared(u.name)", 80, "/test/fileB.scrml"),
+      ],
+      spanStart: 50,
+      file: "/test/fileB.scrml",
+    });
+    const fileB = makeFileAST("/test/fileB.scrml", [serverFn]);
+    fileB.imports = [{
+      id: 2, kind: "import-decl", source: "./fileA.scrml",
+      specifiers: [{ kind: "named", local: "shared", imported: "shared" }],
+    }];
+
+    const clientFn = makeFunctionDecl({
+      name: "clientCaller",
+      body: [makeBareExpr("return shared('hello')")],
+      spanStart: 100,
+      file: "/test/fileC.scrml",
+    });
+    const fileC = makeFileAST("/test/fileC.scrml", [clientFn]);
+    fileC.imports = [{
+      id: 2, kind: "import-decl", source: "./fileA.scrml",
+      specifiers: [{ kind: "named", local: "shared", imported: "shared" }],
+    }];
+
+    const { routeMap } = runRIClean([fileA, fileB, fileC]);
+
+    const helperRoute = routeMap.functions.get("/test/fileA.scrml::10");
+    expect(helperRoute).toBeDefined();
+    // Mixed callers — stays client (ambient).
+    expect(helperRoute.boundary).toBe("client");
+  });
 });
 
 // ---------------------------------------------------------------------------
