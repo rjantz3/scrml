@@ -92,9 +92,14 @@ ${
 
   <h2>Why scrml</h2>
 
-  <h3>State is first-class</h3>
+  <h3>State is the declaration primitive</h3>
   <p>
-    State is named, typed, and instantiable. A <code>&lt; Card&gt;</code> declares a state type; <code>&lt;Card&gt;</code> instantiates one. HTML elements like <code>&lt;input&gt;</code> and <code>&lt;program&gt;</code> are pre-defined state types — the language has no conceptual gap between user-defined state and built-in state. Because state lives in the type system, it flows through <code>match</code>, <code>fn</code> signatures, the server/client boundary, and the database schema — all statically checked.
+    State cells are the atomic unit of a scrml program. Every <code>&lt;name&gt; = value</code> declares a reactive cell; every <code>@name</code> reads or writes one. Validators ride on the decl (<code>&lt;email req length(&gt;=3)&gt; = &lt;input/&gt;</code>); types ride on the decl (<code>&lt;phase&gt;: Phase = .Idle</code>); render-spec markup rides on the decl (<code>&lt;userName&gt; = &lt;input type="text"/&gt;</code>). Reads in markup and logic look the same — <code>${@count}</code> — and the compiler builds the reactive dependency graph from those reads.
+  </p>
+
+  <h3>The UI is the state machine</h3>
+  <p>
+    The structural shape of the UI tree IS the structural shape of the app's state. A <code>&lt;match for=Phase on=@phase&gt;</code> block requires every variant of <code>Phase</code> to have UI. An <code>&lt;engine for=Phase initial=.Idle&gt;</code> takes it further — every state-child declares the variants it may legally transition to via <code>rule=</code>, and the compiler rejects writes that skip a step. Boolean lifecycle flags (<code>@isLoading</code>, <code>@hasError</code>) become an enum; the enum becomes exhaustive UI; the exhaustive UI becomes provably-complete behavior. The compiler nudges via lints (<code>W-LIFECYCLE-CANDIDATE</code>, <code>W-MATCH-TRANSITIONS-ACCRUING</code>) but lets you prototype with booleans first.
   </p>
 
   <h3>Mutability contracts</h3>
@@ -117,9 +122,19 @@ ${
     Because scrml owns both the query context and the loop context, a <code>for (let x of xs) { ?{... WHERE id = ${x.id}}.get() }</code> pattern is rewritten to one pre-loop <code>WHERE id IN (...)</code> fetch plus a keyed <code>Map</code> lookup. Independent reads in a <code>!</code> handler share one <code>BEGIN DEFERRED</code>..<code>COMMIT</code> envelope. On-mount <code>server @var</code> loads coalesce into a single <code>__mountHydrate</code> round-trip. <a href="https://github.com/bryanmaclee/scrmlTS/tree/main/benchmarks/sql-batching">Measured wins</a>: ~2× at N=10, ~3× at N=100, ~4× at N=1000 on on-disk WAL SQLite.
   </p>
 
+  <h3>Validators auto-synthesize a validity surface</h3>
+  <p>
+    Bare-word validators on a state decl (<code>&lt;email req length(&gt;=3) pattern(emailRegex)&gt; = &lt;input/&gt;</code>) generate the per-field and compound rollup automatically: <code>@signup.email.isValid</code> / <code>@signup.email.errors</code> / <code>@signup.email.touched</code> at the field level and <code>@signup.isValid</code> / <code>@signup.errors</code> at the form level — all reactive, all read-only. Errors are enum tags (<code>.Required</code>, <code>.LengthFailed(predicate)</code>), not strings, so consumers <code>match</code> on the variant. The same predicate vocabulary fires in three places — state validators (reactive), refinement types (compile + boundary), schema columns (DBMS-enforced) — and the rules compose cleanly because they're the same words.
+  </p>
+
+  <h3>Errors-as-states is the canonical lifting</h3>
+  <p>
+    scrml has no <code>try</code>/<code>catch</code>. Failable functions declare what they fail with (<code>fn load() !LoadError</code>); call-sites handle each variant exhaustively (<code>let rows = load() !{ \| ::Network msg -&gt; @phase = .Error(msg) \| ::Empty -&gt; @phase = .Empty }</code>). The natural shape is to lift errors into a <code>Phase</code> enum — every failure mode becomes a state with its own UI. <code>&lt;isError&gt;</code> and <code>&lt;errorMsg&gt;</code> cells are anti-patterns; the failure modes live in the type.
+  </p>
+
   <h3>This page is the highlights</h3>
   <p>
-    The full language surface — macros, inline-test blocks, error boundaries, lifecycle hooks (<code>on mount</code> / <code>when message from</code>), the <code>not</code> / <code>is some</code> / <code>given</code> presence model, server authority declarations, the meta layer (<code>^{}</code>), the <code>use</code> / <code>import</code> system, channels, scoped CSS — is documented in the <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/docs/tutorial.md">tutorial</a> and the <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md">spec</a>. What's on this page is the headline. What's in the spec is the language.
+    The full language surface — refinement types (<code>&lt;price&gt;: number(&gt;0 &amp;&amp; &lt;10000)</code>), the <code>not</code> / <code>is some</code> / <code>given</code> presence model, linear types (<code>lin</code> for exact-once consumption), inline-test blocks, the <code>!{}</code> error handler, lifecycle effects via <code>&lt;onTransition&gt;</code>, the meta layer (<code>^{}</code> blocks that run at compile time), nested <code>&lt;program&gt;</code> for workers, the <code>import</code> system with <code>pinned</code> for forward-references, scoped CSS via <code>#{}</code>, and the <code>bun scrml promote --match</code> CLI that mechanically lifts <code>if</code>-chains into exhaustive <code>match</code> blocks — is documented in the <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/docs/tutorial.md">tutorial</a> and the <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md">spec</a>. What's on this page is the headline. What's in the spec is the language.
   </p>
 
   <h2>Quick start</h2>
