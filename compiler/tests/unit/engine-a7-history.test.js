@@ -718,3 +718,118 @@ describe("engine-a7-history §8 — restore-form write-site lowering (Wave 2.4)"
     expect(callSlice).toMatch(/,\s*true\)/);
   });
 });
+
+// ===========================================================================
+// §9. Function-body .advance(.X.history) threads history_map (Bug 6.5)
+//
+// Per SPEC §51.0.G + §51.0.N: `.advance(.X.history)` is a valid history-
+// restore call shape that mirrors direct-write `@var = .X.history`. The
+// runtime helper signature for `_scrml_engine_advance` ends with:
+//   (..., timersArg, idleArg, internalArg, historyMapArg, isHistoryRestore)
+//
+// Bug 6.5 — pre-fix the function-body emission path computed
+// `hasHistory = ctx.enginesWithHistory ? ... : false`, but
+// `_makeExprCtx` in `emit-logic.ts` did NOT forward `enginesWithHistory`
+// from `EmitLogicOpts` to `EmitExprContext`. Net: `hasHistory = false`,
+// and `emitEngineAdvanceCall` null-padded the 7th positional slot.
+// Result on disk: `_scrml_engine_advance(..., null, null, null, null, true)`
+// instead of `..., null, null, null, __scrml_engine_<v>_history_map, true)`.
+// Runtime history-restore then silently fails (helper has no map to
+// look up the restored variant from).
+//
+// Onclick context was unaffected because `emit-event-wiring.ts:333`
+// explicitly includes `enginesWithHistory` in `exprCtxExtras` (spread
+// directly into EmitExprContext, bypassing the EmitLogicOpts gap).
+// Direct-write `@var = .X.history` was also unaffected because it
+// routes through `_emitReactiveSet` → `emit-engine.ts:emitEngineRewrittenSet`,
+// which sources `binding.historyMapName` from the engine binding map.
+// ===========================================================================
+
+describe("engine-a7-history §9 — function-body .advance(.X.history) history-map threading (Bug 6.5)", () => {
+  test("function-body `.advance(.X.history)` threads __scrml_engine_<v>_history_map as 7th positional", () => {
+    const src = `\${
+      type AppMode:enum  = { Title, Playing, Paused }
+      type PlayMode:enum = { Exploring, Battle }
+    }
+<engine for=AppMode initial=.Title>
+  <Title rule=.Playing></>
+  <Playing history rule=(.Title | .Paused)>
+    <engine for=PlayMode initial=.Exploring>
+      <Exploring rule=.Battle></>
+      <Battle rule=.Exploring></>
+    </>
+  </>
+  <Paused rule=.Playing.history></>
+</>
+
+\${ function resume() { @appMode.advance(AppMode.Playing.history) } }
+
+<button onclick=resume()>Resume</>`;
+    const { errors, clientJs } = compileToClientJs(src, "bug-6.5-advance-fnbody");
+    expect(errors.filter((e) => e.severity === "error")).toEqual([]);
+
+    expect(clientJs).toMatch(
+      /_scrml_engine_advance\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*__scrml_engine_appMode_history_map,\s*true\)/,
+    );
+    expect(clientJs).not.toContain("AppMode.Playing.history");
+    expect(clientJs).not.toMatch(
+      /_scrml_engine_advance\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*null,\s*true\)/,
+    );
+  });
+
+  test("function-body `.advance(.X)` (no `.history` suffix) on history-bearing engine still threads history_map", () => {
+    const src = `\${
+      type AppMode:enum  = { Title, Playing }
+      type PlayMode:enum = { Exploring, Battle }
+    }
+<engine for=AppMode initial=.Title>
+  <Title rule=.Playing></>
+  <Playing history rule=.Title>
+    <engine for=PlayMode initial=.Exploring>
+      <Exploring rule=.Battle></>
+      <Battle rule=.Exploring></>
+    </>
+  </>
+</>
+
+\${ function quit() { @appMode.advance(AppMode.Title) } }
+
+<button onclick=quit()>Quit</>`;
+    const { errors, clientJs } = compileToClientJs(src, "bug-6.5-advance-bare-fnbody");
+    expect(errors.filter((e) => e.severity === "error")).toEqual([]);
+
+    expect(clientJs).toMatch(
+      /_scrml_engine_advance\("appMode",\s*AppMode\.Title,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*__scrml_engine_appMode_history_map\)/,
+    );
+    expect(clientJs).not.toMatch(
+      /_scrml_engine_advance\("appMode"[^)]*__scrml_engine_appMode_history_map,\s*true\)/,
+    );
+  });
+
+  test("function-body `@var = .X.history` direct-write threads history_map (parity, was never affected)", () => {
+    const src = `\${
+      type AppMode:enum  = { Title, Playing, Paused }
+      type PlayMode:enum = { Exploring, Battle }
+    }
+<engine for=AppMode initial=.Title>
+  <Title rule=.Playing></>
+  <Playing history rule=(.Title | .Paused)>
+    <engine for=PlayMode initial=.Exploring>
+      <Exploring rule=.Battle></>
+      <Battle rule=.Exploring></>
+    </>
+  </>
+  <Paused rule=.Playing.history></>
+</>
+
+\${ function resumeWrite() { @appMode = AppMode.Playing.history } }
+
+<button onclick=resumeWrite()>Resume</>`;
+    const { errors, clientJs } = compileToClientJs(src, "bug-6.5-write-fnbody");
+    expect(errors.filter((e) => e.severity === "error")).toEqual([]);
+
+    expect(clientJs).toMatch(
+      /_scrml_engine_direct_set\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*__scrml_engine_appMode_history_map,\s*true\)/,
+    );
+  });
+});

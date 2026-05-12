@@ -133,6 +133,23 @@ interface EmitLogicOpts {
    */
   enginesWithInternalRules?: Set<string> | null;
   /**
+   * A5-7 Wave 2.3 (§51.0.N, Bug #3) + v0.2.4 Bug 6.5 fix: Engine variable
+   * names with at least one composite state-child carrying `history`.
+   * Threaded to EmitExprContext so `.advance(.X.history)` call sites in
+   * function bodies / reactive-assignment RHS / logic statement emission
+   * pass the per-engine history-map identifier as the 7th positional arg
+   * to `_scrml_engine_advance`.
+   *
+   * Without this forward, function-body `.advance(.X.history)` would
+   * null-pad the history-map slot, breaking runtime history-restore (per
+   * direct-compile evidence: `_scrml_engine_advance(..., null, null, null,
+   * null, true)` instead of `..., null, null, null, __scrml_engine_<v>_history_map, true)`).
+   * Direct-write `@var = .X.history` is unaffected — it routes through
+   * `_emitReactiveSet` → `emit-engine.ts:emitEngineRewrittenSet`, which
+   * reads `binding.historyMapName` from the engine binding map.
+   */
+  enginesWithHistory?: Set<string> | null;
+  /**
    * Emission boundary. "server" swaps DOM-oriented lowerings for their
    * server-context equivalents (e.g. `lift <expr>` in a server-fn body
    * becomes `return <expr>;` instead of a `_scrml_lift(() =>
@@ -439,6 +456,13 @@ function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
     enginesWithOnTimeout: opts.enginesWithOnTimeout ?? null,
     enginesWithIdleWatchdog: opts.enginesWithIdleWatchdog ?? null,
     enginesWithInternalRules: opts.enginesWithInternalRules ?? null,
+    // v0.2.4 Bug 6.5 — A5-7 Wave 2.3 (§51.0.N, Bug #3) parity for the
+    // function-body / reactive-assignment / logic-statement `.advance()`
+    // call sites. Without this forward `hasHistory` evaluates `false` and
+    // emitEngineAdvanceCall null-pads the 7th positional slot, breaking
+    // runtime history-restore. Onclick context goes through
+    // emit-event-wiring.ts:exprCtxExtras which already includes this.
+    enginesWithHistory: opts.enginesWithHistory ?? null,
   };
 }
 

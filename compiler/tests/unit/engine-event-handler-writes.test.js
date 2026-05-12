@@ -343,6 +343,22 @@ describe("engine-event-handler-writes §6 — .Variant.history restore-form", ()
     expect(callSlice).not.toMatch(/AppMode\.Playing\.history/);
     // isHistoryRestore=true is threaded as the trailing positional arg.
     expect(callSlice).toMatch(/,\s*true\)/);
+    // v0.2.4 Bug 6.5 — the 7th positional MUST be the history_map
+    // identifier (mirrors the function-body assertion in §9 and the
+    // direct-write assertion in engine-a7-history.test.js §8).
+    // Engine has history + no timers/idle/internal, so the full call
+    // shape is:
+    //   _scrml_engine_advance("appMode", AppMode.Playing,
+    //     __scrml_engine_appMode_transitions, null, null, null,
+    //     __scrml_engine_appMode_history_map, true)
+    expect(callSlice).toMatch(
+      /_scrml_engine_advance\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*__scrml_engine_appMode_history_map,\s*true\)/,
+    );
+    // Anti-regression: the pre-Bug-6.5-equivalent symmetric bug would
+    // emit `null` in the 7th slot. Pin against that shape.
+    expect(callSlice).not.toMatch(
+      /_scrml_engine_advance\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*null,\s*true\)/,
+    );
   });
 
   test("`@engineVar = .X.history` in onclick threads isHistoryRestore=true", () => {
@@ -380,6 +396,15 @@ describe("engine-event-handler-writes §6 — .Variant.history restore-form", ()
     expect(callSlice).not.toMatch(/AppMode\.Playing\.history/);
     // isHistoryRestore=true threaded as the trailing positional arg.
     expect(callSlice).toMatch(/,\s*true\)/);
+    // v0.2.4 Bug 6.5 parity — the 7th positional MUST be the history_map
+    // identifier. Direct-write was NOT affected by Bug 6.5 (it sources
+    // `binding.historyMapName` from the engine binding map, not from
+    // ctx.enginesWithHistory), but pin the shape so a future refactor
+    // that funnels direct-write through `_makeExprCtx` wouldn't silently
+    // regress.
+    expect(callSlice).toMatch(
+      /_scrml_engine_direct_set\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*__scrml_engine_appMode_history_map,\s*true\)/,
+    );
   });
 });
 
