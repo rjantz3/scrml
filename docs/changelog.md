@@ -2,7 +2,34 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-13 S88 CLOSE — landmark 17-commit session; 5-of-5 LIFT family CLOSED; Approach A wave A-1 edge emission COMPLETE): **11,912 pass / 117 skip / 1 todo / 0 FAIL** (560 files). v0.2.6 `efbd1e8` is still the shipped baseline. HEAD `55f5f20` (NOT tagged — v0.3.0 cut path significantly advanced; awaiting A-1.6/.7/.8 wrap + Phase 3a async remaining + §36 impl + Wave 4 adopter content + small spec polish). **Approach A v0.4 deferral REVERSED — full A in v0.3.0 cut per user S88 ratification.**
+Current baseline (2026-05-13 S89 — A-1 wave CLOSED via close-out trio A-1.6 / A-1.7 / A-1.8): **11,912 pass / 117 skip / 1 todo / 0 FAIL** (560 files, unchanged from S88 — close-out is docs-only). v0.2.6 `efbd1e8` is still the shipped baseline. A-1 wave 100% closed (8 of 8 sub-phases SHIPPED).
+
+### 2026-05-13 (S89 — A-1 wave close-out — A-1.6 consumer audit + A-1.7 S84 ceiling re-measurement + A-1.8 docs landed)
+
+A-1 wave (Approach A markup-context edge emission) closed end-to-end with the docs-only close-out trio. The 5 code-shipping sub-phases (A-1.2 through A-1.5) landed at S88; S89 wraps the audit + measurement + docs deliverables that were carved out of the S88 dispatch window.
+
+**A-1.6 consumer audit (`docs/changes/a1-closeout/A1-6-consumer-audit.md`):**
+- 5 DG-node consumers identified in `compiler/src/`: `codegen/scheduling.ts`, `batch-planner.ts`, `codegen/index.ts`, `meta-eval.ts`, `codegen/emit-functions.ts`.
+- All 5 handle `MarkupReadDGNode` (kind: `"markup-read"`) safely via implicit-skip or passthrough. 0 flagged.
+- Property: kind-discriminator switches default-skip new DG node kinds without per-consumer updates — this is design intent, not coincidence. No follow-on remediation required.
+
+**A-1.7 S84 ceiling re-measurement (`docs/changes/a1-closeout/A1-7-ceiling-remeasurement.md`):**
+- 523 markup-read DG nodes + 523 `reads` edges (markup-read → reactive) across 61-file corpus.
+- 2.04x the historical S84 256-edge ceiling (`scrml-support/docs/diagnostics/reactive-graph-static-resolvability-S84.md` L122).
+- Status: AT/OVER ceiling — closed ahead of schedule. The S84 finding "scrml's reactive graph is structurally half-shaped because markup reads were excluded from the DG" is now fully closed at the producer level.
+- 1-to-1 node:edge correspondence holds (Option Y per-interpolation design ratified at A-1.1).
+- Measurement reproducibility: `scripts/measure-markup-read-edges.ts`.
+
+**A-1.8 docs:**
+- `docs/changes/v0.3-approach-a-impl/SCOPING.md` updated with A-1-wave-CLOSED status header citing per-sub-phase landing commits (`1f516e1` / `da78609` / `55f5f20` / `b512db9` / `24b582d` for A-1.2 through A-1.5; `2b2eeca` for A-1.6).
+- This changelog entry.
+
+**A-5.5 closed ahead of schedule:** A-1.7 measurement satisfies A-5.5 (S84 ceiling re-validation) per SCOPING §0.5 sequencing — no separate dispatch needed in the A-5 wave.
+
+**Commits S89:**
+- `2b2eeca` — docs(s89-a1-6): consumer audit
+- (S89 a-1-7 commit) — docs(s89-a1-7): S84 ceiling re-measurement + measurement script
+- (S89 a-1-8 commit) — docs(s89-a1-8): SCOPING + changelog update
 
 ### 2026-05-13 (S88 CLOSE — landmark 17 commits · LIFT family 5-of-5 CLOSED · A-1 edge emission COMPLETE · Approach A v0.4-deferral REVERSED · safeCall + safeCallAsync stdlib primitives shipped · Insight 31 §36 retention DESIGN-AND-SHIP · 3 SPEC amendments · Bug 3a §1 flake CLOSED · 2 memory rules + 1 process lesson)
 

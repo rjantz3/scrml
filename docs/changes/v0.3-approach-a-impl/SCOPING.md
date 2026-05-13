@@ -1,6 +1,30 @@
 # v0.3 Approach A — Implementation Scoping (master plan + A-1 sub-phases)
 
-**Status:** DRAFT — awaits PA + user OQ ratification before A-1.1 dispatches.
+**Status (S89 update):** **A-1 wave CLOSED.** All 8 sub-phases shipped S88
+(A-1.1 through A-1.5 code; A-1.6/.7/.8 close-out S89). Downstream waves
+(A-2/A-3/A-4/A-5) remain DRAFT.
+
+**A-1 wave landing references** (commits on `main`):
+| Sub-phase | Commit | Scope |
+|-----------|--------|-------|
+| A-1.1 design ratification (Option Y) | (S88 dispatch — see hand-off-88) | OQ #2 closed: per-interpolation source nodes |
+| A-1.2 scaffolding | `1f516e1` | `MarkupReadDGNode` + `createMarkupReadNode` factory + `markupContextEmitEdges` flag (off) |
+| A-1.3 interp / variable-ref-attr / bind / if= | `1f516e1` | flag activated; 4 high-frequency shapes emit edges |
+| A-1.4 call-ref + for-iterable + lift-template-body | `da78609`, `55f5f20` | 3 additional shapes emit edges |
+| A-1.5 engine state-child + onTransition/onTimeout/onIdle | `b512db9`, `24b582d` | engine-related markup-read edges |
+| A-1.6 consumer audit | `2b2eeca` (S89) | 5 consumers / 0 flagged — `docs/changes/a1-closeout/A1-6-consumer-audit.md` |
+| A-1.7 S84 ceiling re-measurement | (S89) | 523 edges / 256 ceiling — 2.04x — `docs/changes/a1-closeout/A1-7-ceiling-remeasurement.md` |
+| A-1.8 SCOPING + changelog update | (S89) | this section + `docs/changelog.md` S89 entry |
+
+**Note on Option X→Y revision:** Original SCOPING recommended Option X
+(coarse per-markup-block source). At A-1.1 dispatch the user ratified
+**Option Y** (per-interpolation source nodes) for better A-2 precision.
+The implementation tracked Option Y; SCOPING below preserves the original
+analysis for record but DOES NOT reflect the as-shipped design choice.
+
+---
+
+**Status (original, pre-S88):** DRAFT — awaits PA + user OQ ratification before A-1.1 dispatches.
 **Authority:** Insight 29 (`scrml-support/design-insights.md` ~line 1827; 5-voice debate verdict 2026-05-11) ratifies Approach A as v0.3.0 spec-amendment-AND-implementation target. SPEC anchor LANDED at `d3deed2` (S86): SPEC.md §40.9 (Closure Analysis / Minimal Playable Surface) + §40.1.1 + §47.5 / §52 / §41.9 cross-refs + PIPELINE.md Stage 7.6. User at S88 reversed the v0.4 deferral: *"I know we talked about deferring A to 0.4, but I am not seeing the reason now, start on those tasks as they are unblocked."* Design = settled; schedule = now.
 **Underwriting empirical study:** S84 diagnostic (`scrml-support/docs/diagnostics/reactive-graph-static-resolvability-S84.md`) — 99-100% static-resolvability gate PASS across 501 reactive-graph reads/writes / 33 files; runtime-only catalog functionally empty.
 **Total band per Insight 29 compiler-architect:** 300-640h calibrated; 600-1280h under rustc-borrow-checker-trap risk.
