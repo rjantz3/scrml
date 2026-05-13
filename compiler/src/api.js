@@ -36,6 +36,7 @@ import { runIMatchPromotable } from "./lint-i-match-promotable.js";
 import { findUnsupportedTailwindShapes } from "./tailwind-classes.js";
 import { runGauntletPhase1Checks } from "./gauntlet-phase1-checks.js";
 import { runGauntletPhase3EqChecks } from "./gauntlet-phase3-eq-checks.js";
+import { runTryCatchLint } from "./validators/lint-try-catch.ts";
 
 // ---------------------------------------------------------------------------
 // Stdlib runtime directory
@@ -646,6 +647,17 @@ export function compileScrml(options = {}) {
   for (const tabResult of tabResults) {
     const checkErrors = stage("GCP3", () => runGauntletPhase3EqChecks(tabResult));
     collectErrors("GCP3", checkErrors);
+  }
+
+  // Stage 3.007 (LINT-TRY-CATCH): W-TRY-CATCH-IN-SCRML-SOURCE — Phase 3a
+  // regression guard. scrml's error model (§19.1) is values-not-exceptions:
+  // there is NO try/catch and there are NO exceptions. Fires a warning on
+  // every `try-stmt` AST node in scrml source so the safeCall / safeCallAsync
+  // migration cannot silently regress. Runs post-TAB / post-Gauntlet so no
+  // type-system or scope dependency is needed.
+  for (const tabResult of tabResults) {
+    const tryCatchDiags = stage("LINT-TRY-CATCH", () => runTryCatchLint(tabResult.ast));
+    collectErrors("LINT-TRY-CATCH", tryCatchDiags);
   }
 
   // Stage 3.1: Module Resolution
