@@ -4829,9 +4829,9 @@ when @connected changes {
 Any state-cell declaration (Shape 1, Shape 2, or Shape 3 derived) MAY carry an optional `default=` attribute. This attribute specifies the value the cell should revert to when `reset(@cell)` is called.
 
 ```scrml
-<startTime default=null>   = Date.now()
+<startTime default=not>    = Date.now()
 <retries   default=0>      = nextRetryCount()
-<token     default=null>   = generateUUID()
+<token     default=not>    = generateUUID()
 <query     default="">     = ""
 ```
 
@@ -4844,6 +4844,7 @@ When `default=` is present, calling `reset(@cell)` evaluates the `default=` expr
 **Normative statements:**
 
 - `default=` SHALL be an optional attribute on any state-cell declaration (`<name ...> = init`).
+- `default=` is an attribute-value-bearing form (`default=<expr>`); the attribute REQUIRES a value. The canonical scrml form for "reset to absence" is `default=not` (§42 Optional bare-sentinel form). The token `null` is NOT a valid value for `default=` — it is rejected via `E-SYNTAX-042` and surfaced informationally via `W-NULL-IN-SCRML-SOURCE` (§34).
 - The `default=` expression SHALL be evaluated AT RESET TIME, not at declaration time. The attribute stores the expression, not a snapshot.
 - If `default=` is absent, `reset(@cell)` SHALL re-evaluate the init expression at reset time and write the result to the cell.
 - `default=` on a `const` derived declaration is **E-DERIVED-WRITE** (assigning to a derived cell is always a write error; reset on derived cells is also an error for the same reason).
@@ -5566,17 +5567,17 @@ tagged-template, auto-`await`), see §44.
 
 ### 8.4 Conditional WHERE — Null-Coalescing Pattern
 
-The canonical scrml pattern for optional filter parameters in a WHERE clause is the SQLite null-coalescing idiom: `($param IS NULL OR column = $param)`.
+The canonical scrml pattern for optional filter parameters in a WHERE clause is the SQLite null-coalescing idiom: `($param IS NULL OR column = $param)`. The SQL keyword `IS NULL` is SQL vocabulary (a SQLite token, not a scrml token); the scrml-level value bound into the placeholder is `not` (§42), which the `?{}` SQL binding layer maps to SQL NULL at the wire level.
 
 ```scrml
 ${ server function getPosts(category) {
-    // category may be null — pass null to retrieve all posts regardless of category
+    // category may be not — pass not to retrieve all posts regardless of category
     let posts = ?{`SELECT * FROM posts WHERE (${category} IS NULL OR category = ${category})`}.all();
     return posts;
 } }
 ```
 
-When `category` is `null`, the condition `(NULL IS NULL OR category = NULL)` short-circuits to true on the first clause for every row, returning all posts. When `category` is a string value, the first clause is false and the second clause filters normally.
+When the scrml-level `category` is `not`, the bound SQL value is NULL, and the condition `(NULL IS NULL OR category = NULL)` short-circuits to true on the first clause for every row, returning all posts. When `category` is a string value, the first clause is false and the second clause filters normally.
 
 This is standard SQLite behavior. The pattern is verbose but correct, teachable, and requires no special compiler support beyond the bound parameter semantics of §8.2.
 
@@ -6484,10 +6485,6 @@ The compiler inserts `await` automatically per §13.
 
 The developer SHALL NOT write `async`, `await`, `Promise`, `Promise.all`, or any other explicit asynchrony construct in scrml source code.
 
-**Stdlib carve-out (S89, Q5 ratified).** The keyword restrictions in this section apply to **user source** — `.scrml` files in the project root and `vendor:` directories outside `vendor/scrml/`. Stdlib modules (the `scrml:*` namespace, per §41.4) occupy a special status: stdlib `.scrml` source files MAY declare `export async function name(...)` in their export surfaces. The `async` modifier on a stdlib declaration is **informational**: it surfaces the `Promise<T>` return shape to the type system, which uses it to populate the auto-await classifier per §13.2.1. The stdlib carve-out applies only to declarations (function-signature `async` modifier); explicit `await` in stdlib bodies follows the same auto-await regime as user source (the compiler auto-awaits statically-known `Promise<T>` callees per §13.2.1).
-
-**Compiler-bundled stdlib precedent.** This carve-out is the same pattern as the S88 `bun:` / `node:` protocol prefix amendment (§41.4 amendment note): stdlib authors require constructs that user source does not. The carve-out preserves §13.1's user-facing strict rule while making explicit the stdlib's elevated authoring surface. Vendor overrides (a `vendor/scrml/<module>/` shadow of a stdlib module per §41.5) inherit the stdlib carve-out for the duration of the override — the vendor copy is treated as stdlib for §13.1 purposes.
-
 ### 13.2 Compiler-Managed Asynchrony
 
 The compiler SHALL:
@@ -6504,39 +6501,6 @@ The compiler SHALL:
 - The compiler SHALL wrap any function containing at least one server call in an `async` function in generated code.
 - The developer SHALL write flat, synchronous-looking code. The compiler SHALL produce optimal async execution patterns from this code.
 - Independent server calls in the same function body SHALL be parallelized in generated code unless there is a data dependency between them.
-
-#### 13.2.1 Auto-await for statically-known `Promise<T>` callees
-
-**Added:** 2026-05-13 (S89 — §13.2 Sub-Phase A). Source: `docs/changes/§13.2-auto-await-stdlib-scoping/SCOPING.md` §2.1 + §7 (Q1 BROAD ratification). Origin: S88 close — `compiler/runtime/stdlib/host.js:117-143` `safeCallAsync` docstring identified the await-discipline gap (the two-step explicit-`await` pattern at `stdlib/auth/password.scrml:60-69`).
-
-The compiler SHALL extend its auto-await behavior (per §13.2) to apply to ANY call site whose statically-resolved callee returns `Promise<T>`. This includes — but is not limited to:
-
-1. **Server functions** — the existing surface; covered by §13.2 normative bullets 1–2.
-2. **Stdlib `Promise<T>`-returning functions** — any function exported by a `scrml:*` stdlib module (per §41.4) whose typed signature declares `Promise<T>` return. The canonical inventory at S89 is ~40 surfaces across `scrml:host`, `scrml:auth`, `scrml:oauth`, `scrml:redis`, `scrml:http`, and `scrml:crypto` (see SCOPING.md §3 for the per-module breakdown).
-3. **Cross-program function calls** (`<#name>.foo(...)` per §43.5.1) — see §13.2.2 below for the E-PROG-004 interaction.
-
-**Normative statements:**
-
-- A "statically-known callee" is a `CallExpr` whose callee resolves at compile time to a `FunctionDeclNode` (or stdlib export) for which the type system can decide `Promise<T>` return. The decision SHALL be made before code generation (Stage 6 TS) and recorded as an AST annotation consumed at Stage 8 CG.
-- The compiler SHALL NOT auto-await calls whose callee is dynamic (function reference, higher-order argument, indexed lookup). Such cases require the callee to be wrapped in a named statically-resolvable thunk (e.g., `safeCallAsync(() => dynamicFn())`) for auto-await to apply.
-- When auto-await fires at a call site, the result of the call site SHALL be the **unwrapped** value `T`, not `Promise<T>`. Downstream operations on that result (assignment, propagation `?`, failable handler `!{}` per §19.4) operate on the unwrapped value.
-- The failable `!{}` handler (§19.4) SHALL receive the unwrapped value. The S88 two-step pattern (`const raw = await safeCallAsync(thunk); raw !{ ... }`) collapses under §13.2.1 to a single line (`const ok = safeCallAsync(thunk) !{ ... }`); the compiler emits the `await` between the call site and the `!{}` guard automatically. This closes the host.js `safeCallAsync` await-discipline finding (S88).
-- Independent stdlib `Promise<T>` calls in the same function body SHALL be parallelized via `Promise.all` per §13.2 bullet 3 unless there is a data dependency between them.
-
-#### 13.2.2 Cross-program calls and E-PROG-004
-
-**Added:** 2026-05-13 (S89 — §13.2 Sub-Phase A). Disposition: Q2 Position C AMEND (ratified S89).
-
-Cross-program calls (`<#name>.foo(...)` per §43.5.1) return `Promise<T>` and are statically-known callees per §13.2.1. The compiler SHALL auto-await cross-program call sites.
-
-**Normative statements:**
-
-- Auto-await SHALL fire at cross-program call sites (§43.5.1).
-- An explicit `await` written at a cross-program call site SHALL be permitted and SHALL be idempotent — the compiler SHALL NOT emit `await await` in compiled output. The detection of an existing explicit `await` is a Stage 8 CG concern; the emit transform is a single-pass de-duplication.
-- E-PROG-004 SHALL no longer fire as an Error when an explicit `await` is absent at a cross-program call site. Per Q2 Position C ratification (S89), E-PROG-004 is downgraded to an **Info-level lint** indicating "auto-await is firing here; explicit `await` is permitted but redundant". The error code is **not** retired (catalog stability per S88 BS-layer-over-SPEC-retreat precedent); only its severity is amended.
-- The boundary-visibility affordance for adopters who prefer explicit `await` at process boundaries (the load-bearing argument for Position B in SCOPING.md §5) is preserved: writing `await <#worker>.foo()` remains legal and idiomatic; the compiler's auto-await is a no-op on call sites already carrying `await`.
-
-**Precedent.** This amendment mirrors `W-ENGINE-SELF-WRITE-DETECTED` (Option d synthesis, S87, §51.0.F.1): a previously-error condition becomes a permitted operation with an informational lint surfacing the affordance. The pattern is the synthesis-pattern methodology — when a binary OQ has real costs both sides, surface a synthesis option preserving both load-bearing benefits.
 
 ### 13.3 Worked Example
 
@@ -6808,8 +6772,8 @@ type name:kind = { ... }
 type user:struct = {
     id: number,
     email: string,
-    passwordHash: (null -> string),
-    metadata: (!null && !number)
+    passwordHash: (not -> string),
+    metadata: (!not && !number)
 }
 ```
 
@@ -7294,18 +7258,18 @@ A `snippet` is a deferred, parameterisable markup fragment. It is callable — i
 |---|---|
 | `snippet` | A zero-parameter deferred markup fragment. |
 | `snippet(param: Type)` | A parametric deferred markup fragment. Produces markup given one argument. |
-| `snippet?` (or `propName?: snippet`) | An optional snippet prop. Evaluates to `null` when the caller provides no value. |
+| `snippet?` (or `propName?: snippet`) | An optional snippet prop. Evaluates to `not` (§42) when the caller provides no value. |
 
 `snippet` is distinct from all other type kinds. A `snippet`-typed value is NOT assignable to `string`, `number`, a struct type, an enum type, or `asIs` (E-TYPE-070).
 
-A `snippet`-typed value is invoked with the `render` keyword. `render` is valid only inside a markup-producing context (E-TYPE-071). `render propName()` invokes a zero-parameter snippet. `render propName(expr)` invokes a parametric snippet. Arity mismatches are E-TYPE-072. Invoking an optional snippet without a null guard is E-TYPE-073.
+A `snippet`-typed value is invoked with the `render` keyword. `render` is valid only inside a markup-producing context (E-TYPE-071). `render propName()` invokes a zero-parameter snippet. `render propName(expr)` invokes a parametric snippet. Arity mismatches are E-TYPE-072. Invoking an optional snippet without an absence-check (`is not` / `given` / `??`) is E-TYPE-073.
 
 | Code | Trigger | Severity |
 |---|---|---|
-| E-TYPE-070 | `snippet`-typed value used in non-render, non-null-check position | Error |
+| E-TYPE-070 | `snippet`-typed value used in non-render, non-absence-check position | Error |
 | E-TYPE-071 | `render` invocation outside a markup-producing context | Error |
 | E-TYPE-072 | `render` invocation arity mismatch | Error |
-| E-TYPE-073 | Optional snippet invoked without null guard | Error |
+| E-TYPE-073 | Optional snippet invoked without absence-check (`is not` / `given` / `??`) | Error |
 
 ### 14.10 Bare-variant inference (Stage 0b D4 — M9)
 
@@ -7533,7 +7497,7 @@ const UserCard = <div props={ name: string, avatar: string, role: UserRole }>
 - Props declared in the `props` block are required by default. A required prop that
   is absent at the call site SHALL be a compile error (E-COMPONENT-010).
 - A prop marked optional with `?` (e.g., `label?: string`) MAY be omitted at the
-  call site. An optional prop without a default has value `null` when omitted.
+  call site. An optional prop without a default has value `not` (§42) when omitted.
 - A prop with a default value (e.g., `size: string = "medium"`) MAY be omitted at
   the call site; the default value is used.
 - Extra props provided at the call site that are not declared in the `props` block
@@ -7573,7 +7537,7 @@ const UserCard = <div class="card" props={ name: string, role: UserRole, size?: 
 <UserCard name="Alice" role=::Admin>
 ```
 
-`size` is omitted; inside the body it is `null`.
+`size` is omitted; inside the body it is `not` (§42).
 
 **Worked example — invalid (missing required prop):**
 
@@ -7621,7 +7585,7 @@ matches a declared prop name with the caller-side value at expansion time
 - A prop with a declared default value SHALL be substituted as the parsed
   expression form of the default (parsed once at expansion time).
 - An optional prop omitted at the call site with no default SHALL be substituted
-  as the null-literal expression (`null`).
+  as the `not` literal expression (§42).
 
 **Walked positions:**
 
@@ -8067,7 +8031,7 @@ W-COMPONENT-001 message:
   `props` block. The warning is emitted once per declaration, not once per call site.
 - W-COMPONENT-001 is a Warning, not an error. Compilation proceeds normally.
 
-**Worked example — valid (optional callback with null guard):**
+**Worked example — valid (optional callback with absence-check):**
 
 ```scrml
 export const Tabs = <div class="tabs"
@@ -8615,10 +8579,10 @@ const TabStrip = <div class="tabs" props={
 | E-COMPONENT-022 | `slot=` on element not a direct child of a component call, OR inside a `lift` block | CE | Error |
 | E-COMPONENT-023 | `slot="name"` or `render name` targets a prop not declared as `snippet`-typed | CE | Error |
 | E-COMPONENT-024 | `slot="name"` used to fill a parametric snippet prop | CE | Error |
-| E-TYPE-070 | `snippet`-typed value used in non-render, non-null-check position | TS | Error |
+| E-TYPE-070 | `snippet`-typed value used in non-render, non-absence-check position | TS | Error |
 | E-TYPE-071 | `render` invocation outside a component body context | CE (primary), TS (fallback) | Error |
 | E-TYPE-072 | `render` arity mismatch — structural (CE) or type-level (TS) | CE / TS | Error |
-| E-TYPE-073 | Optional snippet invoked without null guard | TS | Error |
+| E-TYPE-073 | Optional snippet invoked without absence-check (`is not` / `given` / `??`) | TS | Error |
 
 Note: E-COMPONENT-010 (missing required prop) and E-COMPONENT-011 (extra undeclared prop) from §15.10 apply to snippet props exactly as they apply to value props.
 
@@ -8688,7 +8652,7 @@ const Card = <div class="card" props={
 </>
 ```
 
-**Worked example — invalid optional without null guard (E-TYPE-073):**
+**Worked example — invalid optional without absence-check (E-TYPE-073):**
 
 ```scrml
 const Panel = <div props={ actions?: snippet }>
@@ -11950,7 +11914,7 @@ In this example:
 | `renders` clause | Optional markup on enum variants; auto-displays in boundary |
 | `< errorBoundary>` | Catches errors in markup; uses `renders` or `fallback` |
 | `match` (§18) | Exhaustive over success + error variants in logic context |
-| `?{}` SQL (§8) | Produces `SqlError` in `!` functions; null/empty outside |
+| `?{}` SQL (§8) | Produces `SqlError` in `!` functions; `not`/empty outside |
 | `@reactive` (§6) | Reactive variables can hold error variants; trigger updates |
 | `~{}` tests | `assert.fails` / `assert.fails.with` for failable functions |
 | `server` functions (§12) | CPS preserves `!`; errors serialize as tagged JSON |
@@ -14738,8 +14702,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-CHANNEL-SHARED-MODIFIER | §38.4 | The `@shared` modifier is used in the source. The modifier is removed in v0.next (M19); reactive cells declared inside a channel body auto-sync by virtue of being declared in the channel body. Remove the `@shared` keyword and use `<name> = init` (V5-strict). | Error |
 | W-PROGRAM-REDUNDANT-LOGIC | §40.8 | (v0.3 Wave 1, info-level) A `<program>` body wraps top-level declarations in a redundant `${...}` logic block. Under v0.3, `<program>` body parses in default-logic mode — bare top-level declarations (`<x> = 0`, `function f() { ... }`) auto-lift to the logic context without explicit `${...}` wrapping. Remove the redundant `${...}` for cleaner source. **Deprecation cycle:** warning in v0.3; v0.4 escalates to error per Q5. | Warning |
 | W-PROGRAM-SPA-INFERRED | §40.8.1 | (v0.3, info-level) The compiler has inferred SPA (single-page application) shape from the filesystem: the entry file declares a top-level `<program>` element, the `<program>` body contains zero `<page>` siblings, and no `pages/` directory exists at the project root. If SPA is your intent, this lint is informational only — no action required. If you intended a multi-page app, add `<page>` declarations to the entry-file `<program>` body or create a `pages/` directory at the project root. To suppress this lint, create an empty `pages/` directory at the project root (signals adopter awareness of the multi-page option). Per §40.8.1 the SPA-vs-multi-page-app shape is filesystem-inferred exclusively; no `<program spa>` boolean attribute exists. | Info |
-| W-TRY-CATCH-IN-SCRML-SOURCE | §19.1 | (v0.3 Phase 3a regression guard) A `try { ... } catch (e) { ... }` (or `try ... finally`) statement appears in scrml source. Per §19.1, scrml's error model is values-not-exceptions: there is NO try/catch and there are NO exceptions; errors are values that flow through the type system and are checked at compile time. To contain a JS-host throw at the boundary, use `safeCall` (sync) or `safeCallAsync` (async) from `scrml:host` and pattern-match the failable result with `!{ ... }` arms: `let result = safeCall(() => thrower()) !{ \| ::Thrown(message, name) -> ... }`. For domain errors, use the `!` failable-function signature modifier (§19.4), the `fail` keyword (§19.3) to produce error variants, and the `?` propagation operator (§19.5) or `<errorBoundary>` state type (§19.6) to surface them. The lint surfaces both adopter source-side try/catch (forbidden by the error model) AND known-pending stdlib migration sites (Phase 3a partial — stdlib/http remaining sites are tracked as a regression-guard hit until Phase 3c closes). Suppression: refactor the site to safeCall / safeCallAsync, OR to a failable function with `fail` + `?`. Joins the small `W-PROGRAM-SPA-INFERRED` / `I-MATCH-PROMOTABLE` / `W-ENGINE-SELF-WRITE-DETECTED` family of info / warning lints surfacing a model-mismatch the adopter can mechanically resolve. (Catalog addition S89 Phase 3a regression guard 2026-05-13; emitted at `compiler/src/validators/lint-try-catch.ts` invoked from `compiler/src/api.js` Stage 3.007 post-Gauntlet.) | Warning |
-| I-ASYNC-USER-SOURCE | §13.1, §13.2.1 | (v0.3, info-level — S89 Q5 stdlib carve-out) A `function-decl` AST node carries `isAsync: true` (an `async function name(...)` declaration) and the enclosing file path is NOT under `<repo>/stdlib/`. Per §13.1 (S89 stdlib carve-out, Q5 ratified), scrml USER SOURCE SHALL NOT use the `async` keyword — the compiler auto-awaits statically-known `Promise<T>` callees per §13.2.1 so adopter code reads flat and synchronous. The `async` modifier is reserved for stdlib (`scrml:*` namespace) declarations as an informational signal to the auto-await classifier. Suppression: remove the `async` keyword from the function declaration (the compiler will continue to auto-await call sites where the callee's return shape is statically known). For stdlib-style `Promise<T>` boundary wrapping, use `safeCallAsync` from `scrml:host` and a failable `!{ ... }` arm. Joins the small `W-PROGRAM-SPA-INFERRED` / `I-MATCH-PROMOTABLE` / `W-ENGINE-SELF-WRITE-DETECTED` / `W-TRY-CATCH-IN-SCRML-SOURCE` family of info / warning lints surfacing a model-mismatch the adopter can mechanically resolve. (Catalog addition S89 §13.2 Sub-Phase B 2026-05-13; emitted at `compiler/src/validators/lint-async-user-source.ts` invoked from `compiler/src/api.js` Stage 3.008 post-LINT-TRY-CATCH.) | Info |
+| W-NULL-IN-SCRML-SOURCE | §42.1, §6.8, §34 | (v0.3, info-level — S89 regression-guard) The compiler detected the token `null` (or `undefined`) in a scrml source position. Per §42.1, `null` and `undefined` are NOT valid scrml identifiers, value-position literals, type-position tokens, or attribute values — the canonical scrml absence sentinel is `not` (§42 Optional bare-sentinel form). The hard-error counterpart is `E-SYNTAX-042` (rejected at compile time per §42.7). This info-level lint surfaces the appearance at code-review and IDE-hover positions for cases the hard-error path may not yet catch (cross-file partials, foreign-code fragments, partial-paste regions, generated fixtures). Resolution: replace the offending `null` / `undefined` with `not`; for the attribute-default form see §6.8 (`default=not` is the canonical absence form); for the JS-interop boundary see §42.9 (foreign `null` / `undefined` is normalised to `not` on assignment to a scrml variable, no source edit required). Suppression: there is no suppression — the lint mirrors §42's canonical rule. JS-host interop contexts (`^{}` meta blocks bodies, `_{}` foreign-code blocks, codegen-emitted JavaScript fragments, SQL DDL `not null`, wire-format JSON literal descriptions) are NOT scrml source positions and SHALL NOT trigger this lint. Cross-ref §42.1 for the canonical rule, §42.7 for the hard-error rejection list, §6.8.1 for the attribute-default pattern, §42.9 for the JS interop normalisation, and `E-SYNTAX-042` (above) for the corresponding hard error. (Catalog addition S89 — null-eradication 2026-05-13.) | Info |
 | E-CLOSER-001 | §4.14 | A tag uses `:`-shorthand body but ALSO has an explicit closer (`</>`, `/`, `/>`). Choose one form: `:`-shorthand has no closer; bare-body uses a closer; self-closing has no body. (Stage 0b D4) | Error |
 | E-NAME-COLLIDES-RESERVED | §4.15, §24.4 | A user-declared component or state-type name collides with a reserved scrml structural-element identifier (`engine`, `match`, `errors`, `onTransition` — case-sensitive at registry level). (Stage 0b D4) | Error |
 | E-STRUCTURAL-ELEMENT-MISPLACED | §4.15, §51.0.H, §51.0.M, §55.8 | A scrml-defined structural element is used outside its owning locus. Specific cases: `<onTransition>` outside `<engine>`; `<onTimeout>` outside an engine state-child (S67 — §51.0.M); `<errors>` without a parent context that supports it; etc. The owning section's error subsection documents the precise condition. (Stage 0b D4; S67 amendment.) | Error |
@@ -14908,7 +14871,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-PROG-001 | §40 | A `<program>` element has an ambiguous attribute combination — the compiler cannot decide the execution context (e.g., a worker-shaped attribute combined with a route-shaped attribute). (Catalog addition S84 Wave 2 #5; full prose at §40 line 18036.) | Error |
 | E-PROG-002 | §40 | A `<program>` element is missing a required attribute for its detected execution context (e.g., a route-context program with no `name=`, a worker-context program with no entry point). (Catalog addition S84 Wave 2 #5; full prose at §40 line 18037.) | Error |
 | E-PROG-003 | §40.4 | A reference inside a nested `<program>` reaches a parent-scope binding. Nested programs are fully isolated — no bindings, types, `use`, or `import` declarations propagate across the `<program>` boundary. Resolution: declare the binding inside the nested program, or import it via a `use foreign:` declaration. (Catalog addition S84 Wave 2 #5; full prose at §40 line 17980.) | Error |
-| E-PROG-004 | §13.2.2, §43.5.1 | A cross-program function call site at which the compiler's auto-await fires. **S89 amendment (Q2 Position C):** auto-await per §13.2.2 fires at all cross-program call sites; explicit `await` is permitted and idempotent. This code now surfaces as an **Info-level lint** indicating "auto-await is firing here; explicit `await` is permitted but redundant". Severity downgraded from Error to Info; the code is **not** retired (catalog stability per S88 BS-layer-over-SPEC-retreat precedent). Prose at §13.2.2 + §43.5.1. | Info |
+| E-PROG-004 | §40.4 | A cross-program function call is not `await`-ed. Cross-program calls return `Promise<T>`; the result must be awaited. (Catalog addition S84 Wave 2 #5; full prose at §40 line 18009.) | Error |
 | E-PROG-005 | §40.4 | Circular nested-program dependency detected. Program A nests/uses program B, B nests/uses A. (Catalog addition S84 Wave 2 #5; full prose at §40 line 18040.) | Error |
 | E-SCHEMA-001 | §39.12 | A `< schema>` block appears in a file whose `<program>` root has no `db=` attribute. The schema block declares table shapes for the program's database driver; without a driver the schema has no target. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16683.) | Error |
 | E-SCHEMA-002 | §39.12 | A file contains more than one `< schema>` block. Each file declares at most one schema. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16684.) | Error |
@@ -14930,14 +14893,13 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-USE-003 | §41.5 | A `use` declaration names an export that does not exist in the target module. (Catalog addition S84 Wave 2 #5; full prose at §41.5 line 17413.) | Error |
 | E-USE-004 | §41.5 | A `vendor:` (or `scrml:`) specifier in a `use` declaration does not resolve to any module on disk. (Catalog addition S84 Wave 2 #5; full prose at §41.5 lines 17422, 17548.) | Error |
 | E-USE-006 | §41.5 | A `use` declaration brings a name into scope that collides with a built-in HTML element name (e.g., `use scrml:ui { button }`). User-defined names that shadow HTML elements are never valid. Distinct from `E-NAME-001` (component-decl form). (Catalog addition S84 Wave 2 #5; full prose at §41.5 line 17510.) | Error |
-| E-TYPE-070 | §15.13 | A `snippet`-typed value is used in a non-`render`, non-null-check position. Snippets are invocable-as-markup only; they are not assignable to `string`, `number`, struct, enum, or `asIs`. (Catalog addition S84 Wave 2 #5; full prose at §15.13 line 7263.) | Error |
+| E-TYPE-070 | §15.13 | A `snippet`-typed value is used in a non-`render`, non-absence-check position. Snippets are invocable-as-markup only; they are not assignable to `string`, `number`, struct, enum, or `asIs`. (Catalog addition S84 Wave 2 #5; full prose at §15.13 line 7263.) | Error |
 | E-TYPE-072 | §15.13, §16.8 | A `render propName(...)` invocation has the wrong arity — calling a zero-parameter snippet with an argument, or a parametric snippet with zero or two-plus arguments, or with an argument whose type is not assignable to the snippet's parameter type. (Catalog addition S84 Wave 2 #5; full prose at §15.13 lines 7265, 8615.) | Error |
-| E-TYPE-073 | §15.13, §16.8 | An optional snippet prop (`prop: snippet?`) is invoked without a null guard. Optional snippets may be `not` at runtime; bare `render prop()` without a guard would error. Resolution: wrap in `if (prop is not) { ... } else { render prop() }`, or in a `match` over the absence. (Catalog addition S84 Wave 2 #5; full prose at §15.13 lines 7266, 8625.) | Error |
+| E-TYPE-073 | §15.13, §16.8 | An optional snippet prop (`prop: snippet?`) is invoked without an absence-check (`is not` / `given` / `??`). Optional snippets may be `not` at runtime; bare `render prop()` without a guard would error. Resolution: wrap in `if (prop is not) { ... } else { render prop() }`, or in a `match` over the absence. (Catalog addition S84 Wave 2 #5; full prose at §15.13 lines 7266, 8625.) | Error |
 | E-COMPONENT-022 | §16.5 | A `slot=` attribute appears on an element that is not a direct child of a component call, OR appears inside a `lift` block. Slot fills must be lexically immediate children of the parent component call. (Catalog addition S84 Wave 2 #5; full prose at §16.5 lines 8538, 8541, 8672.) | Error |
 | E-COMPONENT-023 | §16.5 | A `slot="name"` fill (or `render name`) targets a prop that is not declared as `snippet`-typed in the target component. (Catalog addition S84 Wave 2 #5; full prose at §16.5 lines 8539, 8574.) | Error |
 | E-COMPONENT-024 | §16.5 | A `slot="name"` fill is used to fill a parametric snippet prop. Parametric snippets are invoked with `render name(arg)`; slot-fill is the zero-argument form only. (Catalog addition S84 Wave 2 #5; full prose at §16.5 lines 8564, 8575.) | Error |
 | E-INPUT-005 | §36 | Two input-state-type elements (`<keyboard id=>`, `<mouse id=>`, `<gamepad id=>`) in the same scope use the same `id` value. Input state ids must be unique within their scope. (Catalog addition S84 Wave 2 #5; full prose at §36 lines 15628-15644.) | Error |
-| W-INPUT-001 | §36.7.1 | (v0.3, info-level) The `target=` expression on `<mouse>` (or any future input-state element that gains a `target=` attribute) reads a single ref variable that is statically proven to have NO assignment site anywhere in the file (no `ref=@var`, no direct `@var = ...`, no `bind:` write, no other write form). At mount time the runtime will silently fall back to `document` scope per §36.7.1 normative behavior (matches `compiler/src/runtime-template.js:1590`), so the program is well-formed; W-INPUT-001 surfaces the smell that the adopter likely intended an element-scoped target but the ref is dead. Suppression: bind the ref to the intended element (`<canvas ref=@canvasEl/>`), or remove the `target=` attribute to make the document-scope intent explicit. The S89 OQ-A ratification (Option γ) explicitly chooses this lint over a mount-time `E-INPUT-006` error so canvas / ref-binding flows where the ref attaches on the second effect tick are not gratuitously broken. Joins the small `W-PROGRAM-SPA-INFERRED` / `I-MATCH-PROMOTABLE` / `W-ENGINE-SELF-WRITE-DETECTED` / `W-TRY-CATCH-IN-SCRML-SOURCE` family of synthesis-pattern info / warning lints. (Catalog addition S89 §36 impl Phase 1 sub-phase 1.B 2026-05-13; emission site TBD in Phase 2 — likely `compiler/src/codegen/emit-html.ts` near the `INPUT_STATE_TAGS` branch or a dedicated validator pass.) | Info |
 | E-DEPRECATED-001 | §51.3.2 | The `<machine>` keyword is rejected. Deprecation cycle endpoint — activates after the W-DEPRECATED-001 deprecation window when the parser stops accepting `<machine>` and adopters MUST migrate to `<engine>`. Mirrors the `server function` → plain `function` deprecation cycle (W-DEPRECATED-SERVER-MODIFIER → E-DEPRECATED-SERVER-MODIFIER). (Catalog addition S84 Wave 2 #5; spec body at §51.3.2 line 22018, W-DEPRECATED-001 row at line 14432.) | Error |
 | E-WHITESPACE-001 | §15.15.5 | A `< identifier>` opener with whitespace between `<` and the identifier. Deprecation cycle endpoint — activates after the W-WHITESPACE-001 deprecation window (P3 of state-as-primary unification, 2026-04-30) when the parser stops accepting the space-after-`<` form. (Catalog addition S84 Wave 2 #5; spec body at §15.15.5 lines 372, 8418, W-WHITESPACE-001 row at line 14431.) | Error |
 | E-ENGINE-006 | §51.5 | Machine rebinding: an attempt to shadow a machine-bound variable with a different machine. A given `@variable` may be bound by at most one machine in a file scope. (Catalog addition S84 Wave 2 #5; full prose at §51.5 line 22245.) | Error |
@@ -15682,64 +15644,6 @@ guarantee holds even if the scope is destroyed during an active animation frame.
 every `<keyboard>`, `<mouse>`, and `<gamepad>` element. Failure to emit this call is a
 compiler bug, not a user error.
 
-#### 36.5.1 Nested-scope cleanup boundary (S89 OQ-B ratification — Option α)
-
-When a `<keyboard>`, `<mouse>`, or `<gamepad>` element is declared inside a nested
-`<program>` (or any other nested scope that owns its own mount/unmount lifecycle),
-cleanup SHALL fire at the **immediately enclosing scope's unmount** — not at the
-top-level program unmount.
-
-```scrml
-<program>
-    <keyboard id="outer"/>      <!-- cleanup at top-level unmount -->
-
-    <program name="sub">
-        <keyboard id="inner"/>  <!-- cleanup when <program name="sub"> unmounts -->
-    </>
-</>
-```
-
-**Normative statement:** The compiler SHALL register each input state type's
-`_scrml_register_cleanup` call against the **immediately enclosing element scope** as
-defined by §6.7.2 (canonical teardown sequence). The cleanup fires when that enclosing
-scope unmounts, regardless of whether parent scopes remain mounted. This matches the
-lifecycle parity of `<timer>` and `<poll>` (§6.7.5 / §6.7.6 — "When the enclosing scope
-destroys, all `<timer>` instances in that scope are stopped") and the engine-state
-mount-position semantics of §51.0.D ("decl=mount; cross-file singleton").
-
-**Rationale:** the per-call `scopeVar` uniqueness pattern used by
-`compiler/src/codegen/emit-reactive-wiring.ts:841` (`scopeVar = JSON.stringify(genVar("scope"))`)
-already produces a fresh scope id per emitted `_scrml_input_*_create` call. Routing
-cleanup through the **immediately enclosing** scope is the canonical sub-mount point —
-no divergence from existing lifecycle elements.
-
-#### 36.5.2 SSR / server-side emission — client-only (S89 OQ-input-3 ratification)
-
-Input state types are client-only. They depend on `document`, browser event APIs,
-`requestAnimationFrame`, and `navigator.getGamepads()` — none of which exist in a
-server JS environment.
-
-**Normative statement:** The compiler SHALL NOT emit input-state runtime setup —
-`_scrml_input_keyboard_create`, `_scrml_input_mouse_create`,
-`_scrml_input_gamepad_create`, or their `_destroy` counterparts — into server JS
-output. The runtime helpers themselves SHALL NOT appear in any server-targeted
-bundle. The `_scrml_input_state_registry` Map (used by `<#id>` lookup) is similarly
-client-only.
-
-The compiler SHALL emit the input-state setup only into the client IR / client JS
-output. Compiled scrml programs that reference `<#id>` on an input state type
-SHALL guard those references behind the `animationFrame` / event-driven client-only
-execution path implied by §36.6.
-
-This mirrors the `<timer>` server-side posture: timers are scheduled into client
-runtime only; SSR HTML emission produces inert markup until hydration. Input state
-types follow the same discipline.
-
-**Conformance hook:** a regression-guard test (`compiler/tests/unit/
-input-state-types.test.js` §17, scheduled by SCOPING §3 sub-phase 3.A) SHALL assert
-that the compiled server output for any `<keyboard>` / `<mouse>` / `<gamepad>`
-fixture contains no `_scrml_input_*` substrings.
-
 ---
 
 ### 36.6 Interaction with `animationFrame`
@@ -15778,39 +15682,6 @@ Input state is read at the moment of the `animationFrame` callback — no reacti
 subscriptions are set up. This is intentional: input drives imperative game logic, not
 reactive state updates. If you need to trigger a reactive update from input, assign to an
 `@variable` inside the loop.
-
-#### `_clearFrameState()` discipline (S89 OQ-E ratification — SHOULD-level normative)
-
-Frame-loop consumers of `<#id>.justPressed(...)` / `<#id>.justReleased(...)` SHOULD
-call `<#id>._clearFrameState()` at the top of each animation frame to obtain
-frame-accurate edge detection. Without the per-frame clear, `justPressed("Space")`
-returns `true` for every frame between the keydown event and the next event that
-mutates the just-set (typically the corresponding keyup) — which collapses the
-frame-accurate edge into a multi-frame plateau.
-
-```scrml
-function gameLoop() {
-    <#keys>._clearFrameState()         // SHOULD call at top of each frame
-    <#cursor>._clearFrameState()
-
-    if (<#keys>.justPressed("Space"))  // true for exactly one frame post-keydown
-        jump()
-    animationFrame(gameLoop)
-}
-```
-
-**Normative statement (SHOULD):** Animation-frame-driven consumers of input state
-SHOULD call `_clearFrameState()` once at the top of each frame. Event-driven
-consumers (callbacks attached via `on*=` handlers that read input state inside the
-handler) MAY skip this call — the `justPressed` / `justReleased` semantics are
-event-local in that path. The SHOULD-level discipline is advisory: the compiler
-does NOT emit a lint when `_clearFrameState()` is absent, because the call-site
-discipline is context-dependent (frame loop vs. event handler) and not statically
-inferable in general.
-
-The S89 OQ-E ratification (Option α) chooses SHOULD over SHALL because non-animation
-consumers are a legitimate (if rare) use-case; mandating the call would penalize
-event-driven game-input shapes.
 
 ---
 
@@ -15871,64 +15742,6 @@ event-driven game-input shapes.
 - The compiler SHALL emit E-INPUT-005 when two input state type elements in the same scope
   share the same `id`.
 - All E-INPUT-* errors are CG stage errors (Stage 8). They do not block earlier stages.
-
-#### 36.7.1 `<mouse target=@el>` null-at-mount — silent fallback + W-INPUT-001 (S89 OQ-A ratification — Option γ)
-
-When `<mouse id="cursor" target=@canvasEl/>` (or any `<mouse target=…/>` form) mounts
-and the `target=` expression evaluates to `not` at mount time, the runtime SHALL
-silently fall back to `document` as the event-listener scope. No error is raised.
-
-**Normative runtime behavior:** The runtime `_scrml_input_mouse_create` SHALL resolve
-the target via `(targetFn ? targetFn() : null) || (typeof document !== "undefined" ? document : null)`.
-The fallback to `document` is canonical when the target expression evaluates to `not`,
-to a value coerced to falsy, or when the target binding has not yet attached (typical
-during the first effect on a `ref=@el` binding before the element is in the DOM).
-Implementations SHALL match `compiler/src/runtime-template.js:1590` semantics: if
-neither the target callback nor `document` is available, no listeners are attached
-(SSR / non-DOM contexts).
-
-**Compile-time lint W-INPUT-001 (info-level):** When the compiler can statically prove
-that the variable bound to the `target=` expression is **never assigned anywhere in
-the file**, it SHALL emit `W-INPUT-001`. The lint surfaces the smell that the
-adopter likely intended a specific element target but the ref binding is dead. The
-runtime still falls back silently — W-INPUT-001 is purely advisory.
-
-**Suppression:** assign the ref binding (`ref=@canvasEl` on the intended element), or
-remove the `target=@canvasEl` attribute to make the document-scope intent explicit.
-
-```scrml
-<!-- W-INPUT-001 fires: @canvasEl is never assigned in this file -->
-<mouse id="cursor" target=@canvasEl/>
-
-<!-- W-INPUT-001 suppressed: @canvasEl is bound via ref= below -->
-<canvas ref=@canvasEl/>
-<mouse id="cursor" target=@canvasEl/>
-
-<!-- W-INPUT-001 suppressed: no target= attribute means document scope -->
-<mouse id="cursor"/>
-```
-
-**Rationale and synthesis-pattern lineage:** the synthesis lineage is the same Option-d
-engine-self-write methodology recorded in §51.0.F.1 — "do the safe thing at runtime,
-surface the smell at compile time." W-INPUT-001 joins the small `W-PROGRAM-SPA-INFERRED`
-/ `I-MATCH-PROMOTABLE` / `W-ENGINE-SELF-WRITE-DETECTED` / `W-TRY-CATCH-IN-SCRML-SOURCE`
-family of synthesis-pattern info / warning lints.
-
-**Note on E-INPUT-006:** debate-04 surfaced an alternative — a mount-time
-`E-INPUT-006` error firing when `target=` resolves to `not`. The S89 OQ-A ratification
-(Option γ) **does not create E-INPUT-006**. W-INPUT-001 replaces the proposed error
-because the silent fallback ergonomic is required for canvas / ref-binding flows
-where the ref attaches on the second effect tick.
-
-**Normative statements (W-INPUT-001):**
-
-- The compiler SHALL emit W-INPUT-001 when a `target=` expression on `<mouse>` (or
-  any future input-state type that gains a `target=` attribute) reads a single ref
-  variable AND that ref variable is statically proven to have no assignment site in
-  the same file.
-- The compiler SHALL NOT emit W-INPUT-001 when the file contains at least one
-  assignment, `ref=`, `bind:`, or expression-based write to the target ref variable.
-- W-INPUT-001 is an info-level lint (CG stage). It does not block compilation.
 
 
 ---
@@ -18194,20 +18007,6 @@ scrml defines five protocol prefixes for non-relative module specifiers (S88 ame
 
 **S88 amendment note (2026-05-13):** `bun:` and `node:` were added because stdlib hand-authored JS shims (e.g., `compiler/runtime/stdlib/host.js` and `stdlib/auth/*`) already use these specifiers via `import { SQL } from "bun"`, `import { Database } from "bun:sqlite"`, etc. Per S86 BS-layer-over-SPEC-retreat ratification, when implementation needs a surface that SPEC did not authorize, the right answer is SPEC catches up. The runtime built-in import surface is a real engineering need; restricting scrml source to only `scrml:` + `vendor:` + relative forced stdlib module authors to use circuitous JS-shim files instead of inline `bun:sqlite` imports. The two new prefixes restore parity with what stdlib authors actually need. The server-context-only restriction (E-IMPORT-007) preserves the security invariant that no Bun-/Node-specific code reaches client.scrml output.
 
-#### 41.4.1 Stdlib API authoring rule — Promise<T> returns
-
-**Added:** 2026-05-13 (S89, Q6 ratified — §13.2 Sub-Phase A). Cross-ref: §13.1 stdlib carve-out, §13.2.1 auto-await classifier.
-
-Stdlib modules (`scrml:*` namespace) MAY export `async function` declarations whose typed return is `Promise<T>` (per §13.1 stdlib carve-out). The auto-await classifier (§13.2.1) decides at compile time whether a call site receives `await` based on a **static** classification of the callee's return shape. To keep this classification decidable, stdlib API authoring SHALL observe the following rule:
-
-**Normative statement:**
-
-- A stdlib exported function whose return shape is `Promise<T>` SHALL **always** return `Promise<T>` across all execution paths. Conditional return shapes — for example, "returns `Promise<T>` when calling a remote service, returns the bare value `T` when a cached result is available" — SHALL NOT be permitted in stdlib exports. The author SHALL wrap the synchronous branch in `Promise.resolve(value)` (or equivalent) so the call always yields a `Promise<T>`.
-- The rationale is that conditional return shapes cannot be classified statically; the auto-await classifier would have to inspect runtime state to decide whether `await` is required. Forcing a uniform `Promise<T>` return preserves the static classification surface and prevents the "Promise sometimes, bare value other times" footgun that breaks `!{}` failable handling (§19.4) when the bare-value path is taken (the failable handler expects an unwrapped value with `__scrml_error` sentinel; a Promise on that path silently misses error arms).
-- This rule is **stdlib-only**. User-source functions cannot return `Promise<T>` anyway (user `async` is forbidden per §13.1); the rule applies to the stdlib authoring surface and to vendor stdlib overrides (`vendor/scrml/<module>/`).
-
-This rule formalizes the convention that `safeCallAsync` (and every other stdlib `Promise<T>`-returning function inventoried at S89 SCOPING §3) already follows — always wrapping the result in `Promise<T>` even when the underlying operation is synchronous. The rule promotes that convention to a normative requirement so the auto-await classifier (§13.2.1) has a clean static signal.
-
 ### 41.5 Resolution Hierarchy
 
 For `scrml:` prefixed specifiers, the compiler resolves in this order:
@@ -18423,9 +18222,27 @@ Variant semantics:
 
 **Added:** S39, 2026-04-03. User voice: "instead of nothing i like not" / "a meant not = null || undefined. x is not"
 
+**S89 sharpened (2026-05-13).** User voice (strongest terms): "null does NOT EXIST IN SCRML! and never will!" — this section is the canonical home of that rule.
+
 ### 42.1 Overview
 
-scrml defines a single canonical value for the absence of a meaningful value: `not`. The keywords `null` and `undefined` are NOT valid scrml identifiers. `not` replaces both concepts uniformly.
+scrml defines a single canonical value for the absence of a meaningful value: `not`. `not` replaces the JavaScript concepts of `null` and `undefined` uniformly.
+
+**Canonical rule (S89 — strongest form):** The token `null` is NOT a valid scrml expression, attribute value, type token, or identifier. The token `undefined` is NOT a valid scrml expression, attribute value, type token, or identifier. The canonical scrml absence sentinel is `not` (Optional bare-sentinel form — see §42.2.1 for assignment, §42.2.2 for absence-check, §42.3.1 for the `T | not` optional union type, §42.4 for `if=` falsy semantics, §6.8.1 for the `default=not` attribute form).
+
+**Compilers MUST emit `W-NULL-IN-SCRML-SOURCE` info-level lint (§34) on any `null` or `undefined` token in user scrml source.** This is the regression-guard companion to the hard-error path `E-SYNTAX-042` (§42.7). The lint surfaces the appearance at code-review and IDE-hover positions for cases the hard-error walker may not yet catch (cross-file partials, foreign-code fragments, partial-paste regions, generated fixtures).
+
+**Exclusions (NOT scrml source positions — these do NOT trigger the lint or the hard error):**
+
+- `^{}` meta-block bodies (§22 — bodies execute as JavaScript; `null` / `undefined` are legal JS values).
+- `_{}` foreign-code blocks (§23 — opaque-passthrough JS / WASM / sidecar code).
+- Codegen-emitted JavaScript fragments (`runtime-template.js`, `emit-*.ts` outputs, runtime helpers — these compile FROM scrml TO JavaScript and legitimately use JS `null`).
+- SQL DDL `not null` constraint vocabulary (§38, §39 — SQL is a distinct language; `NOT NULL` is a SQL keyword pair).
+- Wire-format JSON literal descriptions (§41.13 `parseVariant`, §12.5 server function return — JSON has a literal `null`; spec prose describing wire values uses `null` to describe JSON).
+- JS-host runtime ABI descriptions (e.g., "`_scrml_machine_try(...)` returns `null` on success" — runtime helpers ARE JavaScript).
+- §42 itself (this section explicitly names `null` / `undefined` to articulate the canonical reject rule).
+
+**JS-host interop boundary (§42.9):** When a JavaScript `null` or `undefined` value crosses the boundary into a scrml variable (via `^{}`, `_{}`, `?{}` SQL, server-function return, or a `use foreign:` import), it is normalised to `not` on assignment. The scrml-side variable holds `not`, NOT the JS literal. No source edit is required at the assignment site.
 
 `not` is both a value and a type. As a type, it is a singleton bottom type whose only member is the value `not`.
 
@@ -18625,6 +18442,7 @@ A function that may return no value SHALL declare its return type as `T | not`. 
 | Code | Trigger | Severity |
 |---|---|---|
 | E-SYNTAX-042 | `null` or `undefined` appears in scrml value position | Error |
+| W-NULL-IN-SCRML-SOURCE | `null` or `undefined` token detected in scrml source (regression-guard info lint companion to E-SYNTAX-042 — see §34 row for the full reject grammar and exclusion list) | Info |
 | E-SYNTAX-043 | `(x) =>` presence guard syntax used — replaced by `given x =>` | Error |
 | E-SYNTAX-044 | Property path in `given` position (reserved; not yet supported) | Error |
 | E-TYPE-041 | `not` assigned to a variable of non-optional type `T` | Error |
@@ -18638,6 +18456,8 @@ A function that may return no value SHALL declare its return type as `T | not`. 
 
 - `not` SHALL be the only value representing absence in scrml source.
 - `null` and `undefined` SHALL NOT be valid scrml source tokens in value position.
+- The canonical attribute-default form for "reset to absence" is `default=not` (§6.8.1). The token `null` in attribute-value position is rejected via `E-SYNTAX-042` and surfaced informationally via `W-NULL-IN-SCRML-SOURCE` (§34).
+- Compilers SHALL emit `W-NULL-IN-SCRML-SOURCE` (Info, §34) on any `null` or `undefined` token detected in scrml source, EXCLUDING the JS-host-interop / SQL-DDL / wire-format positions enumerated in §42.1 and in the §34 row text. The lint and `E-SYNTAX-042` are companion paths — the lint surfaces the appearance; the hard error rejects it. Adopters are expected to migrate flagged sites to `not`.
 - The rejection of `null` / `undefined` (E-SYNTAX-042) SHALL apply uniformly across **every** scrml source position. Two source-shape categories are rejected:
 
   **(1) As a comparison operand** of `==` / `!=` / `===` / `!==`. (Closed by W3 — F-NULL-001 / F-NULL-002 walker-asymmetry fix, 2026-04-30.) Positions:
@@ -18755,12 +18575,10 @@ By default, a nested program starts when its enclosing scope mounts and stops wh
 <program name="compute">
     ${ export function add(a: number, b: number) -> number { return a + b } }
 </>
-${ const result = <#compute>.add(1, 2) }
+${ const result = await <#compute>.add(1, 2) }
 ```
 
-Cross-program calls return `Promise<T>`. Per §13.2.2 (added S89), the compiler SHALL auto-await cross-program call sites; the developer SHALL NOT need to write `await` explicitly. An explicit `await` is permitted and idempotent (the compiler de-duplicates at codegen — no `await await` is emitted). E-PROG-004 (formerly Error) is amended to an **Info-level lint** at S89 (Q2 Position C ratification) indicating that auto-await is firing at the call site.
-
-**Pre-S89 behavior (preserved for context):** the developer was required to write `await <#compute>.add(1, 2)` explicitly; missing `await` was compile error E-PROG-004 (Error). The S89 amendment retains the legal idiom (explicit `await` still works and remains the visually-explicit form for boundary-visibility-conscious adopters) while bringing cross-program semantics in line with §13.1 (developer SHALL NOT write `async`/`await`) and §13.2.1 (auto-await for all statically-known `Promise<T>` callees).
+Cross-program calls return `Promise<T>`. Unawaited cross-program calls SHALL be compile error E-PROG-004.
 
 #### 43.5.2 Message Passing
 
@@ -18790,7 +18608,7 @@ A nested `<program db="...">` creates its own database driver scope. `?{}` block
 | E-PROG-001 | Ambiguous `<program>` attribute combination | Error |
 | E-PROG-002 | Missing required attribute for detected execution context | Error |
 | E-PROG-003 | Reference to parent-scope name from inside nested `<program>` | Error |
-| E-PROG-004 | Cross-program call site at which auto-await fires (informational; see §13.2.2). **S89 amendment:** severity downgraded from Error to Info per Q2 Position C; not retired. | Info |
+| E-PROG-004 | Cross-program function call not awaited | Error |
 | E-PROG-005 | Circular nested program dependency | Error |
 
 ---
@@ -20918,7 +20736,9 @@ any other logic context: they target the nearest enclosing loop and obey the fun
 boundary rule.
 ## 50. Assignment as Expression
 
-**Added:** 2026-04-07. Motivated by self-hosting the compiler's `ast-builder.js`, which uses the `while ((m = re.exec(str)) !== null)` regex iteration pattern throughout. Without assignment-as-expression, these patterns require a rewrite into a less natural two-statement form that diverges from idiomatic algorithmic code.
+**Added:** 2026-04-07. Motivated by self-hosting the compiler's `ast-builder.js`, which uses the `while ((m = re.exec(str)) is some)` regex iteration pattern throughout (scrml form; the underlying JS API returns `null`/match-array and the JS-interop boundary per §42.9 surfaces the `null` outcome as `not`). Without assignment-as-expression, these patterns require a rewrite into a less natural two-statement form that diverges from idiomatic algorithmic code.
+
+**S89 normative refresh (2026-05-13):** The original §50 (2026-04-07) presented this pattern using `!== null` literals. Per the §42 canonical rule (`null` is NOT a valid scrml token in any source position), the canonical scrml form is `is some` (presence check) — both forms compile to equivalent JavaScript after the §42.9 interop boundary normalises `null` ⇒ `not`.
 
 ### 50.1 Overview
 
@@ -20927,7 +20747,7 @@ In scrml, a bare assignment (`x = value`) MAY appear in any expression position.
 The primary motivating use case is the regex iteration idiom:
 
 ```scrml
-while ((m = re.exec(str)) !== null) {
+while ((m = re.exec(str)) is some) {
     // process match m
 }
 ```
@@ -20997,7 +20817,7 @@ The compiler distinguishes intentional assignment-in-condition from accidental a
 
 - **`if (x = expr)`** — triggers W-ASSIGN-001.
 
-The double-parens requirement applies only when assignment appears as the **outermost** expression inside the condition. Assignment nested inside a larger expression (e.g., `while ((m = re.exec(str)) !== null)`) is NOT subject to the double-parens requirement because the assignment is not the outermost expression — the `!== null` comparison is outermost.
+The double-parens requirement applies only when assignment appears as the **outermost** expression inside the condition. Assignment nested inside a larger expression (e.g., `while ((m = re.exec(str)) is some)`) is NOT subject to the double-parens requirement because the assignment is not the outermost expression — the `is some` operator is outermost.
 
 Formally: W-ASSIGN-001 is triggered when the direct child of the while/if condition's parens is an `assign-expr` node (i.e., the root of the condition expression tree is `=`). When the assign-expr appears at any non-root position in the condition expression tree, no warning is triggered.
 
@@ -21068,7 +20888,7 @@ Assignment expressions are typed values and MAY appear wherever a value of their
 - As an element of an array literal: `[a = 1, b = 2]` — initializes `a` and `b` and collects the values.
 - As the condition of a ternary: `(flag = computeFlag()) ? onTrue : onFalse`.
 - As the right-hand side of another assignment (chaining, §50.3.2).
-- As the operand of any comparison: `(m = re.exec(str)) !== null`.
+- As the operand of any comparison or absence-check: `(m = re.exec(str)) is some`.
 
 #### 50.4.3 Declaration Forms Are Not Typed Expressions
 
@@ -21084,7 +20904,7 @@ Assignment to variables declared inside a `fn` body is valid as an expression. T
 fn scanMatches(str, re) {
     let results = []
     let m = not
-    while ((m = re.exec(str)) !== null) {
+    while ((m = re.exec(str)) is some) {
         results.push(m[0])
     }
     let out = < ScanResult>
@@ -21132,7 +20952,7 @@ Assignment-as-expression is a direct passthrough to JavaScript. JavaScript has n
 | `x = value` (in expression position) | `x = value` |
 | `a = b = value` | `a = b = value` |
 | `@x = value` (in expression position) | `__set_x(value)` (reactive setter call, returns assigned value) |
-| `while ((m = re.exec(str)) !== null)` | `while ((m = re.exec(str)) !== null)` |
+| `while ((m = re.exec(str)) is some)` | `while ((m = re.exec(str)), m !== null && m !== undefined)` (single-evaluation temp form per §42.2.4) |
 
 The double-parentheses form in conditions compiles identically to single-parentheses in JavaScript output. The outer parens are the while/if condition's required syntax; the inner parens are the assignment expression. The compiled output is `while ((x = expr))` which is standard JavaScript.
 
@@ -21243,7 +21063,7 @@ ${
         const re = new RegExp(pattern, "g")
         let results = []
         let m = not
-        while ((m = re.exec(str)) !== null) {
+        while ((m = re.exec(str)) is some) {
             results.push(m[0])
         }
         return results
@@ -21251,11 +21071,11 @@ ${
 }
 ```
 
-Expected: Compiles without error or warning. `m = re.exec(str)` is not the root expression of the while condition — `!== null` is — so W-ASSIGN-001 is not triggered. `m` is declared with `let` before the loop. The double-parens form around the assignment `(m = re.exec(str))` is the expression form; the outer condition parens are the while's required syntax.
+Expected: Compiles without error or warning. `m = re.exec(str)` is not the root expression of the while condition — `is some` is — so W-ASSIGN-001 is not triggered. `m` is declared with `let` before the loop. The double-parens form around the assignment `(m = re.exec(str))` is the expression form; the outer condition parens are the while's required syntax.
 
-Compiled JavaScript output (abbreviated):
+Compiled JavaScript output (abbreviated; `is some` lowers per §42.5 with single-evaluation temp form per §42.2.4):
 ```javascript
-while ((m = re.exec(str)) !== null) {
+while ((m = re.exec(str), m !== null && m !== undefined)) {
     results.push(m[0]);
 }
 ```
@@ -21328,7 +21148,7 @@ fn parseTokens(input) {
     const tokenRe = /\w+/g
     let tokens = []
     let m = not
-    while ((m = tokenRe.exec(input)) !== null) {
+    while ((m = tokenRe.exec(input)) is some) {
         let t   = < Token>
         t.value = m[0]
         t.start = m.index
@@ -21374,7 +21194,7 @@ E-ASSIGN-001: `let` declaration at line 3 appears in an expression position.
 - **§45 (Equality Semantics)** — `==` is the structural equality operator. `=` is assignment. W-ASSIGN-001 exists specifically because `=` and `==` are visually similar and `=` in a condition is usually a defect. The warning bridges the two sections.
 - **§48 (The `fn` Keyword — Pure Functions)** — E-FN-003 (outer-scope mutation) applies to assignment-as-expression identically to statement-form assignment. The expression form does not weaken `fn`'s constraints. §50.5 specifies the interaction in full.
 - **§35 (Linear Types — `lin`)** — `lin` variables cannot be reassigned in any form. Assignment-as-expression to a `lin` variable is E-LIN-004. Separate from `lin`'s consumption rules: expression-form assignment is a re-assignment, not a consumption read. §50.6 specifies the interaction in full.
-- **§49 (`while`, `break`, `continue`)** — The primary real-world motivation for this feature is the `while ((m = re.exec(str)) !== null)` pattern. §49 specifies `while` statement semantics; §50 extends the condition position to permit assignment expressions. The two sections compose: a valid `while` condition is either a non-assignment expression or a double-parenthesized assignment expression.
+- **§49 (`while`, `break`, `continue`)** — The primary real-world motivation for this feature is the `while ((m = re.exec(str)) is some)` pattern (presence check after assignment; the underlying JS regex API's `null` outcome is normalised to `not` at the §42.9 interop boundary). §49 specifies `while` statement semantics; §50 extends the condition position to permit assignment expressions. The two sections compose: a valid `while` condition is either a non-assignment expression or a double-parenthesized assignment expression.
 - **§6 (Reactivity — The `@` Sigil)** — Assignment-as-expression to `@variables` triggers reactive update as a side effect. The reactive update is synchronous within the assignment; the expression produces the plain value. The reactive scheduler then propagates the change to dependent computations per §6.7.
 - **§7 (Logic Contexts)** — Assignment-as-expression is valid inside any `${}` logic context, `fn` body (subject to §48 constraints), and `function` body. It is not valid in `?{}` SQL contexts or `_{}` foreign code contexts (which are governed by their own syntactic rules).
 
@@ -22273,8 +22093,8 @@ transitions to the variant and starts the inner engine at its `initial=` even wh
 | `@appMode = .Playing` | enters `.Playing` | inner starts at its `initial=` (history cell ignored) |
 | `@appMode = .Playing.history` | enters `.Playing` | inner restores from history cell (or `initial=` if cell empty / first entry) |
 
-**Empty-history fallback.** If the composite has never been entered (history cell is
-empty / null), `.Variant.history` is equivalent to `.Variant` — inner starts at
+**Empty-history fallback.** If the composite has never been entered (history cell holds
+`not` per §42), `.Variant.history` is equivalent to `.Variant` — inner starts at
 `initial=`. No error fires. This is the natural first-entry case.
 
 **Legality:**
@@ -23710,7 +23530,7 @@ ${
 
 // After `advance()` runs, @auditLog contains:
 //   [{ from: "Pending", to: "Processing", at: 1713456789012,
-//      rule: "Pending:Processing", label: null }]
+//      rule: "Pending:Processing", label: not }]
 ```
 
 #### 51.11.3 Semantics
@@ -23747,8 +23567,8 @@ Each audit entry is an object with five fields:
   to:    <new value>,
   at:    <timestamp, Number — Date.now() at transition site>,
   rule:  <string — the declared transition-table key that matched>,
-  label: <string | null — the guard label when the matched rule has one,
-           else null>
+  label: <string | not — the guard label when the matched rule has one,
+           else not (§42)>
 }
 ```
 
@@ -23772,7 +23592,7 @@ was exercised, not just what the source and target variants were.
 
 **`label`** is the identifier from a labeled guard (§51.3.2 `given (expr)
 [labelName]`) attached to the matched rule. When the matched rule has no
-guard, or the guard is unlabeled, `label` is `null`. Labels are not unique
+guard, or the guard is unlabeled, `label` is `not` (§42). Labels are not unique
 across a machine, and a wildcard rule MAY carry a label — in both cases
 the recorded `label` reflects whatever the matched rule declared.
 
@@ -23815,7 +23635,7 @@ existing fields SHALL NOT be renamed or retyped.
 - `rule` SHALL be the canonical transition-table key the runtime resolved
   to after wildcard fallback (exact → `*:To` → `From:*` → `*:*`).
 - `label` SHALL be the identifier from a labeled guard on the matched rule,
-  or `null` when no such label exists.
+  or `not` (§42) when no such label exists.
 - Future additions to the shape SHALL be additive and SHALL NOT break
   consumers of existing fields.
 
@@ -24651,7 +24471,7 @@ ${
     // Tier 1: EditState is client-local (no authority= — default).
     // Compiler generates no sync for <EditState> instances.
     < EditState>
-        editingId: number | null
+        editingId: number | not
         draftTitle: string
         draftDescription: string
         addingToColumn: Column
@@ -24689,7 +24509,7 @@ ${
 
     function commitEdit() {
         updateCard(@ui.editingId, @ui.draftTitle, @ui.draftDescription)
-        @ui.editingId = null
+        @ui.editingId = not
     }
 }
 
@@ -24813,7 +24633,7 @@ ${
     server @cards = []
 
     // Client-local vars: no sync, no server interaction.
-    @editingId = null
+    @editingId = not
     @draftTitle = ""
     @draftDescription = ""
     @addingToColumn = "Todo"
@@ -24850,7 +24670,7 @@ Expected compiler output: no errors. `@cards` is server-authoritative (instance-
 <program db="sqlite:./kanban.db">
 
 ${
-    @editingId = null    // client-local
+    @editingId = not    // client-local
 
     // ERROR: @editingId is client-local. It cannot appear as a bound
     // parameter in a ?{} block outside of a server function.
@@ -25100,7 +24920,7 @@ exactly three literal values:
   unauthenticated requests are redirected to `loginRedirect=` (default
   `/login`).
 - `auth="optional"` — authentication is checked but not required; the
-  request proceeds either way and `getCurrentUser()` returns null when
+  request proceeds either way and `getCurrentUser()` returns `not` (§42) when
   no session is present.
 - `auth="none"` — no authentication check is performed (suitable for
   public landing, login, register).
@@ -26533,8 +26353,8 @@ vs runtime, blocking vs reporting), not the validator name.
 
 | Predicate | Meaning | Example use | Error tag on failure |
 |---|---|---|---|
-| `req` | Non-empty value (`""` fails; null/undefined fail) | `<name req>` | `.Required` |
-| `is some` | Value exists (null/undefined fail). `""` IS some — coexists with `req`. | `<x is some>` | `.NotSome` |
+| `req` | Non-empty value (`""` fails; absence value `not` fails — §42) | `<name req>` | `.Required` |
+| `is some` | Value exists (absence value `not` fails — §42). `""` IS some — coexists with `req`. | `<x is some>` | `.NotSome` |
 | `length(predicate)` | String/array length matches the inner predicate | `<name length(>=2)>` | `.LengthFailed(predicate)` |
 | `pattern(regex)` | String matches the regex | `<email pattern(/^[^@]+@[^@]+$/)>` | `.PatternMismatch(regex)` |
 | `min(n)` | Numeric minimum | `<age min(18)>` | `.MinFailed(n)` |
@@ -26896,8 +26716,9 @@ Validators on a single cell COMPOSE — a non-empty value can fail both `length`
 `pattern` simultaneously, producing TWO error tags in `errors`. Default
 `<errors of=...>` shows only the first; `<errors of=... all/>` shows all.
 
-**Short-circuit rule:** when `req` (or `is some`) FAILS on an empty / null cell, the
-remaining validators are SKIPPED. Only `.Required` (or `.NotSome`) is reported.
+**Short-circuit rule:** when `req` (or `is some`) FAILS on an empty cell or a cell
+holding `not` (§42), the remaining validators are SKIPPED. Only `.Required` (or
+`.NotSome`) is reported.
 Reasoning: the other validators on an empty value are vacuous noise.
 
 **Order of error tags in the array.** When multiple validators fail, the order matches
