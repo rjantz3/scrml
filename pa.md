@@ -649,13 +649,45 @@ The full S43 reconciliation lives in `scrml-support/user-voice-scrmlTS.md` §"Ma
 
 ---
 
-## Per-machine setup — pre-commit hook installation (S78)
+## Per-machine setup — git hooks (S78 baseline + S88 amendment)
+
+**S88 amendment (2026-05-12, user-authorized).** S78's original picture (below) assumed `scripts/git-hooks/pre-commit` is the only hook in play. That is the **source-controlled baseline** — what every clone is guaranteed to have. But individual machines MAY install richer local hooks under `.git/hooks/` that are NOT source-controlled. This machine does: it carries a `post-commit` (full-suite re-run on compiler changes; informational) and a `pre-push` (full test suite + TodoMVC gauntlet quick check; BLOCKING) alongside `pre-commit`. The user has chosen to keep this richer setup.
+
+**Operational consequences of the richer setup:**
+
+- **`git push`** triggers a ~5-minute full-suite gate before code reaches GitHub. This is intentional. PA must NOT short-circuit it.
+- **`git commit`** on compiler changes triggers an informational full-suite re-run via `post-commit` AFTER the commit lands. The pre-commit gate has already passed; post-commit is for awareness.
+- **The pre-commit subset gate** is still the load-bearing safety net at commit time.
+
+**Standing rule — `--no-verify` on push:** the S87/pa.md "never bypass pre-commit hook without explicit user authorization" rule **extends to pre-push** under the richer setup. PA must NOT use `--no-verify` on `git push` to skip the pre-push gate without explicit user authorization, exactly as it must not skip pre-commit. If a pre-push attempt fails or stalls, investigate the actual cause; do not reflexively re-attempt with `--no-verify`. (S88 process violation precedent: PA used `--no-verify` to push the S88 deref commit when the first push attempt appeared to fail mid-pre-push; the pre-commit gate had passed, so substantive safety wasn't compromised, but the rule was violated. Surface to user when bypassing under any pretense.)
+
+**Session-start check (S88 revision):** verify the *commit gate* is installed and which path it lives on. Two valid configurations:
+
+- **(A) Lightweight, source-controlled only** — `core.hooksPath = scripts/git-hooks`. Only pre-commit runs. No post-commit / pre-push coverage.
+- **(B) Local-rich** — `core.hooksPath = .git/hooks` (or an equivalent absolute path) AND `.git/hooks/` contains at minimum `pre-commit`, optionally `post-commit` and `pre-push`. This machine's current config.
+
+To determine which configuration is active:
+
+```bash
+git config --get core.hooksPath
+ls "$(git rev-parse --git-path hooks)"  # what's actually installed
+```
+
+If `core.hooksPath` is unset OR points to a directory that lacks `pre-commit` entirely, the commit gate is missing — re-install per the S78 baseline below (then surface to user that the richer hooks were lost if applicable).
+
+If `core.hooksPath` points to `.git/hooks` AND the dir contains pre-commit + post-commit + pre-push, this is configuration B — leave it.
+
+**Do NOT auto-reset** `core.hooksPath` from `.git/hooks` to `scripts/git-hooks` just because S78's literal directive said so — that would silently DROP the post-commit + pre-push coverage. Match the configuration to the user's actual choice (currently B on this machine).
+
+---
+
+## (S78 baseline — source-controlled pre-commit only — still valid when configuration A is desired)
 
 **Added 2026-05-10 (S78 audit fold-in, user-authorized).** The pre-commit hook at `scripts/git-hooks/pre-commit` is source-controlled but does NOT install itself. Each machine is a separate clone with its own `.git/` directory; `core.hooksPath` defaults to `.git/hooks/` which doesn't contain the hook.
 
 **The S78 finding:** on this machine the hook had been silently uninstalled for an unknown duration. Every commit passed without automated test gating; only PA-manual `bun run test` provided a quality gate. Discovered during the test conformance audit fold-in.
 
-### One-time setup per machine (run once after clone)
+### One-time setup per machine (run once after clone) — configuration A only
 
 ```bash
 git config core.hooksPath scripts/git-hooks
@@ -669,15 +701,15 @@ git config --get core.hooksPath  # should print: scripts/git-hooks
 
 Subsequent `git commit` invocations run `scripts/git-hooks/pre-commit` automatically. The hook runs `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail` and refuses the commit on any failure.
 
-### When PA arrives on a "new" machine (or a machine with the hook missing)
+### When PA arrives on a "new" machine (or a machine with NO commit-gating hook at all)
 
-**Session-start addendum** — after the cross-machine sync check (above), verify the hook is installed:
+If the session-start check (S88 revision above) shows the commit gate is missing entirely, install the source-controlled baseline:
 
 ```bash
-git config --get core.hooksPath
+git config core.hooksPath scripts/git-hooks
 ```
 
-If output is empty, `.git/hooks`, or anything other than `scripts/git-hooks`, run the one-time setup above before doing any commit-bearing work. Surface to user as "hook not installed on this machine; running setup."
+Surface to user as "no commit gate installed on this machine; installed scripts/git-hooks/pre-commit baseline. If you previously had a richer setup with post-commit + pre-push, those are lost and need separate restoration."
 
 ### When the hook fails on a clean checkout
 

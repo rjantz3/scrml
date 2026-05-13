@@ -1,78 +1,81 @@
 # primary.map.md
 # project: scrmlts
-# updated: 2026-05-11T20:35:00Z  commit: 28cd2ac (v0.2.4 — Wave 1 + Wave 1.5 robust-v0.2 bundle)
+# updated: 2026-05-12T21:42:04Z  commit: f1555b4
 
 ## Project Fingerprint
 Language:   JavaScript / TypeScript (mixed .js + .ts); Bun runtime
 Framework:  Custom compiler — scrml language compiler + LSP server
 Runtime:    Bun >= 1.3.13
-Type:       Compiler + CLI tool + LSP server + 17-module stdlib
-Size:       ~1,710 source files total; compiler/src ≈ 99,603 LOC; codegen subdir ≈ 30,891 LOC;
-            SPEC.md 26,286 lines; SPEC-INDEX.md 306 lines;
-            PIPELINE.md v0.7.1 (2026-05-09);
-            samples/compilation-tests: 795 .scrml total (287 top-level);
-            Tests: 554 files, v0.2.4 close: ~11,500 pass / 77 skip / 1 todo / 0 fail
+Type:       Compiler + CLI tool + LSP server + 20-module stdlib
+Size:       ~1,800+ source files total; compiler/src ≈ 110,000+ LOC; codegen subdir ≈ 32,000+ LOC;
+            SPEC.md 26,942 lines; SPEC-INDEX.md 308 lines;
+            PIPELINE.md 2,758 lines;
+            samples/compilation-tests: ~795 .scrml total;
+            Tests: 554 files — **11,153 pass / 85 skip / 1 todo / 0 FAIL** (S87 close)
 
-## Key Facts (S84 close — v0.2.4 robust-v0.2 bundle)
+## Key Facts (S87 CLOSE — 2026-05-12 — HISTORIC 37-commit session)
 
-**v0.2.4 SHIPPED (2026-05-11 — Wave 1 + Wave 1.5, 12 commits since v0.2.3):**
+**Current shipped version: v0.2.6 (`efbd1e8`)**
+All seven semver tags live on origin: v0.2.0 `022ee02` + v0.2.1 `d72c074` + v0.2.2 `98e872d` + v0.2.3 `d512266` + v0.2.4 `28cd2ac` + v0.2.5 `2c687b5` + v0.2.6 `efbd1e8`.
+HEAD `15850d0` is NOT tagged — v0.3.0 cut path well-cleared; awaiting LIFT-template bug fixes + Wave 4 adopter content.
 
-Wave 1 (compiler-correctness, B1-surfaced gaps):
-- **Bug 1** `not <expr>` operator-form lowers to `!<expr>` (§45.7). Disambiguates from §42 value-form. New `not <operand>` rewrites in `compiler/src/codegen/rewrite.ts:715-737` (_rewriteNotSegment) + `compiler/src/expression-parser.ts:768-792` (preprocessForAcorn).
-- **Bug 2** Match pipe-alternation in `rewriteMatchExpr` + `emit-control-flow.ts` + `preprocessForAcorn` lookbehind. `InlineMatchArm.tests?: string[]`; `MatchArm.tests[]` mirror in block-form match; `parseInlineMatchArm` / `parseMatchArm` alternation regex tried BEFORE single-variant.
-- **Bug 3** E-DG-002 false-fire on derived-engine projected vars. `compiler/src/dependency-graph.ts:1743-1761` `creditReader` credits BOTH original AND redirect target.
-- **Bug 4** Typed state-decl registration. `compiler/src/ast-builder.js:2846` `collectTypeAnnotation` tracks paren + brace + bracket depths cohesively (was: paren-only). NOTE: bug brief incorrectly named `symbol-table.ts` — actual fix landed in `ast-builder.js`; depth-of-survey-discount #8.
-- **Bug 5** Bare-variant inference at binary-expression positions (==, !=, is, is-not). `compiler/src/type-system.ts:6613` new helper `inferBareVariantsAtComparisonSites`.
-- **Bug 6** `.advance(.Variant.history)` test-hardening. `engine-a7-history.test.js` + `engine-event-handler-writes.test.js`. Codegen was already correct since S83 Wave 2.4 Bug #2 keystone ("Approach B 8th positional `isHistoryRestore` arg"); test-coverage gap closed.
+**2 v0.3.0 BLOCKERS CLOSED in S87:**
+- **Insight 30 (channel-architecture)** — PURE-CHANNEL-FILE dispensation (Option b ratified 47/44/44); `<channel>` at file-top in module files is canonical. SPEC §38.1 + walker pre-check in `validators/ast-walk.ts`. E-CHANNEL-INSIDE-PROGRAM RETIRED; E-CHANNEL-OUTSIDE-PROGRAM is the new enforcement code.
+- **Bug 3a (SQL emission)** — `emit-server.ts` now hoists `import { SQL } from "bun"; const _scrml_sql = new SQL(...)` declarations. Closes latent `ReferenceError: _scrml_sql is not defined` in all server outputs using SQL.
 
-Wave 1.5 (secondary-surface follow-ons surfaced by Wave 1):
-- **Bug 6.5** `_makeExprCtx` missing `enginesWithHistory` forward → function-body `.advance(.X.history)` null-padded history-map. Fix at `compiler/src/codegen/emit-logic.ts:134` (interface) + `:460-468` (forward).
-- **Bug 4.5 + Bug 5 follow-on** Bare-variant inference extensions: (a) thread LHS enum through nested struct literals in array-typed initializers; (b) wire inference into if/while cond, return-stmt, call-arg. New helpers `inferBareVariantsWithStructNav` (`type-system.ts:6382`), `inferBareVariantsAtCallArgs` (`:6859`), `fnSignatures` map (`:3682`), `enclosingFnReturnTypeStack` (`:3666`). +bar-form enum parser parity in `meta-checker.ts`.
-- **Bug 1.1** Lift attr-value join preserves word-boundary whitespace (was: `not t.completed` → `nott.completed`). New helper `_joinPreservingWordBoundary` at `compiler/src/ast-builder.js:1675` + call-site swap in `_parseLiftAttrValue` (~line 2783).
-- **Bug 1.2** SQL-ref placeholder + const/let SQL init. `tryConsumeSqlInit` hooks at 9 call-sites in `ast-builder.js:3100` (4 new for let/const-decl: lines 4120, 4209, 4239, 4265, 4358, 4377, 6172, 6201, 6302). Emitter guard for `sql-ref:-1` in `emit-expr.ts`. 5 downstream consumer updates (emit-logic.ts, emit-control-flow.ts, route-inference.ts, meta-checker.ts, type-system.ts).
-- **Bug 1.3** GITI-001 IIFE wrap context-aware (statement vs expression context). `compiler/src/codegen/emit-client.ts:892-905`. No more `(async () => ...)();)` malformed-syntax shape.
-- **Bug 14** test-channel-audit. 1 Class B fix at `compiler/tests/unit/gauntlet-s19/phase3-wrapup.test.js` (`compileWholeScrml` now surfaces `result.warnings`). 77 skipped tests audit (all valid deferrals; test-hygiene grade A+).
+**Major compiler bugs CLOSED in S87 (37 commits, zero regressions):**
+- Bug 1: 14-mario codegen+runtime (4 sub-fixes: payload binding / `::` rewrite / engine-routing / derived_get tracks)
+- Bug 2a: component-expander if-chain branches + VP-2 ast-walk backstop
+- Bug 2c: bind:value mangle in expanded component bodies (normalizeTokenizedRaw regex 1-line fix)
+- Bug 3a: SQL `_scrml_sql` declaration emission (v0.3.0 blocker closed)
+- Bug 4: walkMarkupContext extension (1 actual false-fire, not 4 as briefed)
+- Bug 4.5: dependency-graph call-ref args tracking
+- Bug 1.5: reactive-deps engine-var markup-binding
+- Bug 1.6+1.7: match-arm bundle (1.6 already fixed; 1.7 inline-arm engine-write routing was the gap)
+- Bug 5: method-chain callback preservation (`.filter(cb)` no longer strips callback)
+- Bug 6: lift codegen silent data-loss (`<li>` for-loop bodies inside `<ul>` lift contexts were DROPPED)
+- Bug 6.5: match-arm inline-markup arm payload
+- Bug 6.5.1: named-binding parser (`.V(field: local)` now correctly binds `local`)
+- BS comment-skip: block-splitter now suppresses `<!-- -->` HTML comments
 
-**Forward signal — Insight 29 ratified (perf-feel debate, 2026-05-11):**
-- Approach A (whole-stack closure analysis) = **v0.3.0 spec-amendment target**.
-- Approach B (telemetry-augmented PGO) = **deferred to v2** extension (per llvm-pgo-expert flip).
-- Approach D (RSC + per-route + streaming + bridges) = rejected as v1 default.
-- Insight 29 at `scrml-support/design-insights.md`.
+**Design outcomes S87:**
+- **Option (d) engine self-write synthesis** — runtime NO-OP + W-ENGINE-SELF-WRITE-DETECTED info lint + SPEC §51.0.F.1. 14-mario AC delta 1/8→8/8.
+- **Insight 30 ratified** — channel-architecture OQ closed via dispensation (same synthesis-pattern as §40.8.1 Option C + Option d).
+- **Synthesis-pattern as design-methodology signal** — frequency-3 in S86-S87.
 
-**Reference function-level landmarks (Bug 4 gap closure):**
-- `compiler/src/symbol-table.ts` — `walk` at `:1192`, `registerStateDecl` at `:882`, B1-B22 doc-header at lines 1-100. SYM passes: PASS 10.A/10.B B14, PASS 11 B15, PASS 12 B16, PASS 13 B17, PASS 14 B22, PASS 15 B19, PASS 16 A5-3.
-- `compiler/src/ast-builder.js` — `collectTypeAnnotation` at `:2846`, `_joinPreservingWordBoundary` at `:1675`, `tryConsumeSqlInit` at `:3100` (9 call sites).
-- `compiler/src/type-system.ts` — `inferBareVariantsAtComparisonSites` at `:6613`, `inferBareVariantsWithStructNav` at `:6382`, `inferBareVariantsAtCallArgs` at `:6859`, `fnSignatures` map at `:3682`, `enclosingFnReturnTypeStack` at `:3666`.
-- `compiler/src/codegen/emit-logic.ts` — `_makeExprCtx` at `:460` (forwards `enginesWithHistory` post-Bug-6.5).
+**stdlib Phase 1 SHIPPED:** 173× `===`/`!==` → `==`/`!=` sweep across 20 modules. +28 guard tests.
+**emit-expr Option A SHIPPED:** comprehensive engine-routing all expression contexts.
+**Wave 3 fixture-sweep COMPLETE:** trucking-dispatch 24/36 pages migrated; 12 remaining are genuine spec violations awaiting LIFT fixes.
+**migrate.js Wave 3.5 BUNDLE:** 4 unwrap-path bug families closed (container-aware + scope-safe + comment-safe).
 
-**Carry-forward — pre-v0.2.4 historical milestones (S77-S81):**
-- **Phase A10 SHIPPED S78** — Engine state-child body render. `emit-variant-guard.ts` (830 LOC).
-- **S77 codegen** — `<onTimeout>` (A5-4), computed-delay (A5-5/A5-5b), `<onIdle>` (A5-6 Feature 2).
-- **S79** — A5-6 Feature 1 (named `<onTimeout name=>`); debounce/throttle Approach B (`reactive-debounced-decl` retired).
-- **S80** — Auth attribute-host codification (E-MW-001 RETIRED); `<channel auth=>` replaces `protect=`.
-- **S81** — `<program cors-max-age=>`, `<program channel-reconnect=>`; SPEC-INDEX regen script.
+**5 LIFT-template codegen bug families SURFACED (HIGH-PRIORITY for v0.3.0 cut):**
+- LIFT-1 (CATASTROPHIC): parens-attr in lift template elides parent element + duplicates inner text
+- LIFT-2/3/4 BUNDLE: bind:/if=/onkeydown inside lift template fall back to literal `setAttribute`
+- LIFT-5 (probable runtime breakage): if-inside-for reconciler-factory `_scrml_lift_target` ambient gap
+Anchor tests in: `lift-li-text-template.test.js` (§B.*) + `todomvc-fixture-edit-mode.test.js` (§B.1-4)
+Root module: `compiler/src/codegen/emit-lift.js`. Recommended: 3-dispatch decomposition for S88.
 
 ## Map Index
 
 | Map                      | Status  | Contents                                                                |
 |--------------------------|---------|-------------------------------------------------------------------------|
-| structure.map.md         | present | directory layout, 4 entry points, Phase A10 new files noted (63 lines)  |
-| dependencies.map.md      | present | 2 root runtime + 2 compiler runtime + 4 dev packages; internal pipeline graph (100 lines) |
-| schema.map.md            | present | ~80 AST node kinds (ast.ts); IR, CompileContext, BindingRegistry, VariantGuardOutput (195 lines) |
-| config.map.md            | present | 2 env vars (SCRML_PORT, PORT); bunfig.toml; CLI flags (53 lines)        |
-| build.map.md             | present | 8 npm scripts; pre-commit hook; no CI/CD; no Docker (78 lines)          |
-| error.map.md             | present | CGError + 9 runtime error classes; ~35 E-code families; diagnostic walkers (111 lines) |
-| test.map.md              | present | bun:test, 530 files, 11,051 pass; unit/integration/conformance breakdown (131 lines) |
-| domain.map.md            | present | 36 domain concepts; 12-stage pipeline; Phase A10 engine/variant-guard (83 lines) |
-| events.map.md            | present | no compiler-internal EventEmitter; WebSocket pub/sub in compiled output (44 lines) |
-| api.map.md               | absent  | not applicable — compiler tool, not web API                              |
-| state.map.md             | absent  | not applicable — compiler, not a frontend app                            |
-| auth.map.md              | absent  | not applicable — auth lives in stdlib/auth and user .scrml programs      |
-| style.map.md             | absent  | not detected                                                             |
-| i18n.map.md              | absent  | not detected                                                             |
-| infra.map.md             | absent  | no Dockerfile, no .github/workflows, no Terraform, no docker-compose     |
+| structure.map.md         | present | directory layout, entry points, S87 new files (100 lines)              |
+| dependencies.map.md      | present | 5 root+compiler runtime + 5 dev packages; internal pipeline graph (107 lines) |
+| schema.map.md            | present | ~80 AST node kinds; ChannelDeclNode [S87]; DB scope collection; IR; CompileContext (226 lines) |
+| config.map.md            | present | 2 env vars (SCRML_PORT, PORT); bunfig.toml; CLI flags (53 lines)       |
+| build.map.md             | present | 11 npm scripts + e2e scripts [S85]; pre-commit hook; CLI subcommands (95 lines) |
+| error.map.md             | present | CGError + 9 runtime error classes; W-ENGINE-SELF-WRITE-DETECTED [S87]; LIFT-1..5 open families; channel codes (136 lines) |
+| test.map.md              | present | bun:test, 554 files, 11,153 pass; S87 new test files; LIFT anchor tests; e2e Playwright (193 lines) |
+| domain.map.md            | present | 38+ domain concepts; v0.3.0 blocker status; LIFT open families; Insight 30; Option (d) (116 lines) |
+| events.map.md            | present | no compiler EventEmitter; channel placement rules [S87]; WebSocket pub/sub in compiled output (55 lines) |
+| api.map.md               | absent  | not applicable — compiler tool, not web API                             |
+| state.map.md             | absent  | not applicable — compiler, not a frontend app                           |
+| auth.map.md              | absent  | not applicable — auth lives in stdlib/auth and user .scrml programs     |
+| style.map.md             | absent  | not detected                                                            |
+| i18n.map.md              | absent  | not detected                                                            |
+| infra.map.md             | absent  | no Dockerfile, no .github/workflows, no Terraform, no docker-compose    |
 | migrations.map.md        | absent  | per-file `<schema>` blocks (§39) + `scrml migrate` CLI; no migrations dir |
-| jobs.map.md              | absent  | stdlib/cron exists but compiler itself does not run jobs                  |
+| jobs.map.md              | absent  | stdlib/cron exists but compiler itself does not run jobs                 |
 
 ## File Routing
 
@@ -95,6 +98,11 @@ docs hygiene / superseded artifacts           → non-compliance.report.md
 3. `error.map.md` — if symptom is a diagnostic, locate the fire-site
 4. `schema.map.md` — if the bug touches AST shape
 
+**LIFT-template bug fix** (LIFT-1..5 — highest priority S88 target):
+1. `error.map.md` — read the LIFT bug family table; confirm which LIFT-N is in scope
+2. `structure.map.md` — root module is `compiler/src/codegen/emit-lift.js`
+3. `test.map.md` — broken-output anchor tests in `lift-li-text-template.test.js` §B.* and `todomvc-fixture-edit-mode.test.js` §B.*; these tests assert CURRENT BROKEN OUTPUT and MUST be upgraded when the bug is fixed
+
 **New language feature implementation** (new AST kind / new error code / new SPEC section):
 1. `domain.map.md` — confirm the feature lives in an existing pipeline stage OR identify the boundary
 2. `schema.map.md` — register the new AST node kind shape (canonical home: `compiler/src/types/ast.ts`)
@@ -104,7 +112,7 @@ docs hygiene / superseded artifacts           → non-compliance.report.md
 **Refactor / cleanup / rename** (mechanical or semi-mechanical sweep):
 1. `structure.map.md` — full file inventory
 2. `dependencies.map.md` — internal pipeline graph (catches cross-stage callers)
-3. `schema.map.md` — if a node kind is being renamed (e.g., the `reactive-decl` → `state-decl` rename at S59 Step 3 touched ~514 sites)
+3. `schema.map.md` — if a node kind is being renamed
 
 **Test authoring** (unit / integration / conformance / browser):
 1. `test.map.md` — runner, fixtures, current test counts, per-directory conventions
@@ -115,45 +123,55 @@ docs hygiene / superseded artifacts           → non-compliance.report.md
 2. `error.map.md` — if the amendment adds / renames / deletes an error code
 3. `non-compliance.report.md` — check if the amendment closes any flagged drift
 
-**Audit / diagnostic** (read-only — no code change; observation only):
+**Migrate / promote command work:**
+1. `structure.map.md` — confirm file path: `compiler/src/commands/migrate.js` (~1,940 LOC post-S87)
+2. `domain.map.md` — read "migrate --program-shape" and "BS comment-skip" concept entries
+3. `test.map.md` — migrate test files: `scrml-migrate.test.js`, `migrate-program-shape.test.js`, `migrate-program-shape-wave-3.5-bundle.test.js`
+
+**Channel architecture work:**
+1. `domain.map.md` — read "Channel placement (v0.3)" + "PURE-CHANNEL-FILE" concept entries
+2. `events.map.md` — Channel Placement Rules section
+3. `error.map.md` — E-CHANNEL-OUTSIDE-PROGRAM + E-CHANNEL-INSIDE-PAGE entries
+
+**Audit / diagnostic** (read-only — no code change):
 1. `non-compliance.report.md` — first stop for hygiene findings PA can act on
 2. `domain.map.md` — for behavioral / pipeline-stage analysis
 3. `dependencies.map.md` — for cross-cutting impact analysis
 
-**Don't know which** (e.g., open-ended task brief from user):
+**Don't know which** (e.g., open-ended task brief):
 1. Read `primary.map.md` (this file) in full
 2. Read the **Task-Shape Routing** section above and self-classify
-3. If the classification is genuinely unclear, surface to PA before consuming further context
+3. If classification is genuinely unclear, surface to PA before consuming further context
 
 ## Use feedback loop
 
 When this map's content was load-bearing for a dispatch outcome, the agent's final report should
 note **"map content consulted: [list of map files]; load-bearing finding: [one sentence]"**. When
-the map content was NOT useful, report **"maps consulted but not load-bearing"** so PA can
-diagnose whether the wrong maps were named in the brief OR the map content is at the wrong
-granularity (PA-side fix). 3-5 consecutive "not load-bearing" reports on the same task shape
-trigger a map-design review.
+the map content was NOT useful, report **"maps consulted but not load-bearing"** so PA can diagnose.
+3-5 consecutive "not load-bearing" reports on the same task shape trigger a map-design review.
 
 ## Key Facts
 
-- **Entry points:** CLI is `compiler/bin/scrml.js`; programmatic API is `compiler/src/api.js`; LSP server is `lsp/server.js --stdio`. Pipeline: BS → TAB → NR → MOD → CE → UVB → PA → RI → TS → META → DG → BP → CG (12+ stages per PIPELINE.md v0.7.1).
+- **Entry points:** CLI is `compiler/bin/scrml.js`; programmatic API is `compiler/src/api.js`; LSP server is `lsp/server.js --stdio`. Pipeline: BS → TAB → NR → MOD → CE → UVB → PA → RI → TS → META → DG → BP → CG (12+ stages per PIPELINE.md).
 
-- **Phase A10 SHIPPED (S78, 2026-05-10):** Engine state-child body render. New `compiler/src/codegen/emit-variant-guard.ts` (830 LOC) — variant-source-agnostic API `emitVariantGuardedRender(variantExprAccessor, arms, ctx, opts)`. Dispatcher swaps innerHTML on variant change; arm wire functions re-attach reactive wiring (`${@cell}` + non-delegable events) via per-arm dispose handles. Arm-tagged EventBindings (engineArm field) excluded from global DOMContentLoaded emission.
+- **Phase A10 SHIPPED (S78):** Engine state-child body render. `compiler/src/codegen/emit-variant-guard.ts` (830 LOC). Dispatcher swaps innerHTML on variant change; arm wire functions re-attach reactive wiring.
 
-- **S77 codegen SHIPPED (2026-05-10):** `<onTimeout>` engine temporal surface (SPEC §51.12 A5-4), computed-delay form (A5-5/A5-5b), `<onIdle>` engine-wide watchdog (A5-6 Feature 2). All ride the §51.12 runtime backbone.
+- **v0.3.0 BLOCKERS (as of S87 close):** LIFT-1 (catastrophic) + LIFT-2/3/4 bundle + LIFT-5 (ambient state gap) — all in `compiler/src/codegen/emit-lift.js`. Plus Wave 4 adopter content. Two major blockers CLOSED S87 (Insight 30 channel-architecture + Bug 3a SQL emission).
 
-- **Test surface S78 close:** 11,051 pass / 77 skip / 1 todo / 0 fail. +7 binding-registry §7 unit tests (Phase A10); +30 conformance tests (13 codes backfill); ~12 sample compilation fixtures in compilation-tests/dist/ (via pretest).
+- **AST authority:** `compiler/src/types/ast.ts` (1,828 LOC). All nodes carry `id: number` and `span: Span`. `kind: "state-decl"` (was "reactive-decl" pre-S59). `ChannelDeclNode` interface added S86/S87 for P3.A annotations.
 
-- **AST authority:** `compiler/src/types/ast.ts` (1,793 LOC) — canonical. All node kinds carry `id: number` and `span: Span`. `kind: "state-decl"` (was "reactive-decl" pre-S59). `ValidatorArg = ExprNode | RelationalPredicateNode`. `ReactiveDeclNode.shape: "plain"|"decl-with-spec"|"derived"`.
+- **Database:** Bun.SQL only. Schemas declared per-file via `<schema>` (§39); `_scrml_sql` declarations now hoisted by emit-server.ts (Bug 3a fix, S87). Schema diffing via `compiler/src/schema-differ.js`.
 
-- **Database:** Bun.SQL only. Schemas declared per-file via `<schema>` (§39); schema diffing via `compiler/src/schema-differ.js`; DB driver resolution via `codegen/db-driver.ts`.
+- **Self-host:** `compiler/dist/self-host/*.js` and `compiler/self-host/dist/tab.js` are gitignored. Rebuild gate: `scripts/rebuild-self-host-dist.ts` exits 1 on any non-warning error (S81). Source-side null/undefined sweep deferred to v0.3.0+.
 
-- **Self-host:** `compiler/dist/self-host/*.js` and `compiler/self-host/dist/tab.js` are gitignored. Each machine builds locally via `scripts/rebuild-self-host-dist.ts` and `scripts/rebuild-tab-dist.ts`.
+- **Pre-commit hook:** `scripts/git-hooks/pre-commit` — runs `bun test unit + integration + conformance --bail`. Fired on every S87 commit (37 commits, zero regressions).
 
-- **Pre-commit hook (installed S78):** `scripts/git-hooks/pre-commit` — runs `bun test unit + integration + conformance --bail`. Activated per machine: `git config core.hooksPath scripts/git-hooks`.
+- **E2E (Playwright):** `e2e/` suite with `playwright.config.ts` (3-browser). 5 spec files: 02-counter, 03-contact-book, 05-multi-step-form, 14-mario (AC delta 1/8→8/8 post-Bug-1+1.6+1.7 fixes), todomvc. Added S85; WebKit needs `libavif13` on host for full launch.
+
+- **Stdlib Phase 1 SHIPPED S87:** 173× `===`/`!==` → `==`/`!=` across 20 modules. Phase 3 (throw migration / try-catch / bun:/node: imports) deferred.
 
 ## Tags
-#scrmlts #map #primary #compiler #s84 #v0.2.4 #wave-1 #wave-1.5 #robust-v0.2 #insight-29-ratified #bun #pipeline #v0next #symbol-table-landmarks-added #depth-of-survey-discount-8
+#scrmlts #map #primary #compiler #s87 #v0.3 #lift-bugs-open #insight-30-ratified #option-d-synthesis #wave-3-complete #bug-3a-closed #bug-5-closed #bun #pipeline #stdlib-phase1 #37-commits
 
 ## Links
 - [structure.map.md](./structure.map.md)

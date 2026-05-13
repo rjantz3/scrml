@@ -1,6 +1,6 @@
 # events.map.md
 # project: scrmlts
-# updated: 2026-05-10T19:30:00Z  commit: f182f44
+# updated: 2026-05-12T21:42:04Z  commit: f1555b4
 
 ## Status
 
@@ -14,9 +14,20 @@ The compiler EMITS WebSocket pub/sub code into compiled server output. This is o
 
 | Mechanism | Where emitted | Pattern |
 |-----------|---------------|---------|
-| ws.subscribe(ws.data.__topic) | emit-channel.ts:476 | Server subscribes the WebSocket to a topic on connect |
-| ws.publish(ws.data.__topic, raw) | emit-channel.ts:501 | Server broadcasts to all subscribers of a topic |
-| _scrml_srv.publish(topicExpr, msg) | emit-server.ts:141 | Server function publishes data to a channel topic |
+| ws.subscribe(ws.data.__topic) | emit-channel.ts | Server subscribes the WebSocket to a topic on connect |
+| ws.publish(ws.data.__topic, raw) | emit-channel.ts | Server broadcasts to all subscribers of a topic |
+| _scrml_srv.publish(topicExpr, msg) | emit-server.ts | Server function publishes data to a channel topic |
+
+### Channel Placement Rules (v0.3, S87 Insight 30)
+
+Two canonical placements for `<channel>`:
+1. **Inside `<program>`** — standard v0.3 placement. Cross-page shared state.
+2. **PURE-CHANNEL-FILE** (NEW S87) — file-top `<channel>` in a file with NO `<program>`. Module-file dispensation per §38.1 + engine-parity precedent (§21.8/B14). Does NOT fire `E-CHANNEL-OUTSIDE-PROGRAM`.
+
+Violation shape that fires `E-CHANNEL-OUTSIDE-PROGRAM`: `<channel>` at file-top in a file that ALSO contains `<program>` as a sibling.
+Violation shape that fires `E-CHANNEL-INSIDE-PAGE`: `<channel>` inside `<page>`.
+
+Channel placement pre-check is enforced by the shared AST walker in `compiler/src/validators/ast-walk.ts` (NEW S87).
 
 ### meta.emit() Runtime Placement (compiler/src/runtime-template.js:1029)
 
@@ -35,7 +46,7 @@ These are the reactive wiring primitives used by event-wiring emitters. They are
 None in the compiler process. Compiled outputs use Bun's WebSocket pub/sub API (topic-based) for channel features.
 
 ## Tags
-#scrmlts #map #events #websocket #pubsub #reactive #channels
+#scrmlts #map #events #websocket #pubsub #reactive #channels #s87 #insight-30 #pure-channel-file
 
 ## Links
 - [primary.map.md](./primary.map.md)

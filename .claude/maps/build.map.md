@@ -1,6 +1,6 @@
 # build.map.md
 # project: scrmlts
-# updated: 2026-05-11T17:00:00Z  commit: b6c8e1c
+# updated: 2026-05-12T21:42:04Z  commit: f1555b4
 
 ## Development Commands (root package.json > scripts)
 
@@ -15,6 +15,9 @@
 | `bun run security` | Compile test samples, then run `node --check` on all client JS output |
 | `bun run lsp` | Start the LSP server |
 | `bun run docs:build` | Build the documentation site |
+| `bun run e2e` | Run Playwright e2e suite (3-browser: Chromium/Firefox/WebKit) [NEW S85] |
+| `bun run e2e:ui` | Run Playwright e2e suite with UI mode [NEW S85] |
+| `bun run e2e:install` | Install Playwright browsers (chromium, firefox, webkit) [NEW S85] |
 
 ## Build & Release
 
@@ -28,6 +31,19 @@
 | `scripts/update-spec-index.sh` | Print SPEC.md heading line numbers (legacy; print-only) |
 | `bun run scripts/regen-spec-index.ts` | Regenerate SPEC-INDEX.md line ranges + sizes in-place [NEW S81; idempotent; preserves summaries] |
 | `scripts/compile-test-samples.sh` | Batch compile all samples/compilation-tests/ |
+
+## CLI Subcommands
+
+| Subcommand | What it does |
+|------------|--------------|
+| `scrml compile <file\|dir>` | Compile .scrml to HTML + client JS + server JS |
+| `scrml dev <file\|dir>` | Dev server with hot-reload |
+| `scrml build <dir>` | Production build |
+| `scrml serve <dir>` | Serve compiled output |
+| `scrml migrate <file\|dir>` | Migrate pre-v0.3 .scrml structure; `--program-shape` flag for v0.3 container migration [S85] |
+| `scrml promote <file\|dir>` | Promote patterns (e.g. `i-match` → `match`); `--match` flag |
+| `scrml init` | Scaffold a new scrml project |
+| `scrml lsp --stdio` | Start LSP server |
 
 ## Pre-commit Hook (scripts/git-hooks/pre-commit)
 
@@ -69,7 +85,7 @@ Gitignored; must be built locally on each machine:
 Rebuild: `bun run scripts/rebuild-self-host-dist.ts` and `bun run scripts/rebuild-tab-dist.ts`
 
 ## Tags
-#scrmlts #map #build #scripts #bun #pre-commit #self-host
+#scrmlts #map #build #scripts #bun #pre-commit #self-host #playwright #e2e #s85
 
 ## Links
 - [primary.map.md](./primary.map.md)
