@@ -1,0 +1,40 @@
+// input-canvas-demo.scrml
+// §36 DESIGN-AND-SHIP gate sample (S89 Phase 4.C).
+// Canvas sprite movement via WASD + Space-fire + mouse drawing.
+// Pattern reference: SPEC §36.6 canonical animationFrame loop.
+
+<keyboard id="keys"/>
+<mouse id="cursor"/>
+
+<div class="canvas-wrap">
+    ${
+        <x> = 100
+        <y> = 100
+        <bullets> = []
+        <dots> = []
+
+        function tick() {
+            <#keys>._clearFrameState()
+
+            if (<#keys>.pressed("KeyA")) @x = @x - 3
+            if (<#keys>.pressed("KeyD")) @x = @x + 3
+            if (<#keys>.pressed("KeyW")) @y = @y - 3
+            if (<#keys>.pressed("KeyS")) @y = @y + 3
+
+            if (<#keys>.justPressed("Space")) @bullets = [...@bullets, { x: @x, y: @y }]
+        }
+
+        function drawDot() {
+            let mx = <#cursor>.x
+            let my = <#cursor>.y
+            @dots = [...@dots, { x: mx, y: my }]
+        }
+    }
+    <canvas id="game" width="800" height="600" onclick=drawDot()></>
+    <div class="hud">
+        <span>X: ${@x}</>
+        <span>Y: ${@y}</>
+        <span>Bullets: ${@bullets.length}</>
+        <span>Dots: ${@dots.length}</>
+    </div>
+</div>
