@@ -2834,6 +2834,46 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         span: valSpan,
       };
     }
+    // LIFT-1 fix: paren-wrapped expression attribute value — e.g. class:editing=(@x == item.id)
+    //
+    // When an attribute value starts with `(`, it is a parenthesized expression. The
+    // IDENT/KEYWORD branch above does not handle this case — returning null here causes
+    // parseLiftTag to abandon the entire tag parse after consuming `<`, the tag name,
+    // and the attribute name, leaving the cursor desynchronised. The string-fallback
+    // path then begins from the `(` token, losing the tag name (which defaults to
+    // "div") and treating the parenthesized expression as text content (causing the
+    // duplicate-text symptom: LIFT-1).
+    //
+    // Fix: collect the entire balanced parenthesized expression (tracking nested
+    // parens) and return it as an `expr` attribute value — the same shape the
+    // IDENT/KEYWORD fallback uses.
+    if (t.kind === "PUNCT" && t.text === "(") {
+      const parts = [];
+      let depth = 0;
+      while (true) {
+        const ct = peek();
+        if (ct.kind === "EOF") break;
+        if (ct.kind === "PUNCT" && ct.text === "(") {
+          depth++;
+        } else if (ct.kind === "PUNCT" && ct.text === ")") {
+          parts.push(ct.text);
+          consume();
+          depth--;
+          if (depth === 0) break;
+          continue;
+        }
+        parts.push(ct.text);
+        consume();
+      }
+      const raw = _joinPreservingWordBoundary(parts);
+      return {
+        kind: "expr",
+        raw,
+        refs: [],
+        exprNode: safeParseExprToNode(raw, attrSpan?.start ?? 0),
+        span: attrSpan,
+      };
+    }
     return null;
   }
 
@@ -4461,11 +4501,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       }
       // Lift Approach C: inline markup → structured MarkupNode
       if (peek().text === "<" && peek().kind === "PUNCT" && peek(1) && (peek(1).kind === "IDENT" || peek(1).kind === "KEYWORD")) {
+        const markupCursor = i;
         const markupNode = parseLiftTag();
         if (markupNode) {
           return { id: ++counter.next, kind: "lift-expr", expr: { kind: "markup", node: markupNode }, span: spanOf(startTok, peek()) };
         }
-        // parseLiftTag returned null — fall through to string path
+        // parseLiftTag returned null — reset cursor and fall through to string path
+        i = markupCursor;
       }
       // Non-markup lift (identifier, call, etc.) or malformed markup
       const { expr, span } = collectLiftExpr();
@@ -6795,6 +6837,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         }
       } else if (peek().text === "<" && peek().kind === "PUNCT" && peek(1) && (peek(1).kind === "IDENT" || peek(1).kind === "KEYWORD")) {
         // Lift Approach C: inline markup → structured MarkupNode
+        const markupCursor = i;
         const markupNode = parseLiftTag();
         if (markupNode) {
           nodes.push({
@@ -6804,7 +6847,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             span: spanOf(startTok, peek()),
           });
         } else {
-          // parseLiftTag failed — fall back to string path
+          // parseLiftTag failed — reset cursor and fall back to string path
+          i = markupCursor;
           const { expr, span } = collectLiftExpr();
           nodes.push({
             id: ++counter.next,

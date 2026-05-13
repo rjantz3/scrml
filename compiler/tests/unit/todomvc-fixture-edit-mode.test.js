@@ -203,14 +203,20 @@ describe("§A: TodoMVC fixture (benchmarks/todomvc/app.scrml) — post Bug 5 fix
 // ---------------------------------------------------------------------------
 
 describe("§B: lift-template attribute parser — current-broken-output repros", () => {
-  test("§B.1 parens class:NAME=(expr) elides parent element (BROKEN; should preserve <li>)", () => {
+  test("§B.1 parens class:NAME=(expr) preserves parent element <li> (FIXED by LIFT-1 patch)", () => {
     const result = compile(liftParensClassFx);
     expect(result.errors).toEqual([]);
     const js = result.outputs.get(liftParensClassFx).clientJs;
-    // CURRENT BROKEN: parent element is elided; createElement("div") is emitted instead.
-    // When fixed: this assertion should be flipped to require createElement("li").
-    expect(js).toMatch(/document\.createElement\("div"\)/);
-    expect(js).not.toMatch(/document\.createElement\("li"\)/);
+    // LIFT-1 FIX verified: the lift element (_scrml_lift_el_N) is now "li", not the
+    // broken "div" fallback that occurred when parseLiftTag returned null and the
+    // rootTag default was used.
+    expect(js).toMatch(/_scrml_lift_el_\d+\s*=\s*document\.createElement\("li"\)/);
+    expect(js).not.toMatch(/_scrml_lift_el_\d+\s*=\s*document\.createElement\("div"\)/);
+    // Single text node for \${item.id} — no duplicate from the broken string-fallback path.
+    // (The list wrapper createElement("div") is a separate variable and not a regression.)
+    const textNodeMatches = js.match(/createTextNode/g);
+    expect(textNodeMatches).not.toBeNull();
+    expect(textNodeMatches.length).toBe(1);
   });
 
   test("§B.2 bind:value=@var inside lift emits literal setAttribute (BROKEN; should emit two-way wiring)", () => {
