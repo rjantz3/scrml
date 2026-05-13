@@ -2,7 +2,68 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-12 S87 CLOSE — HISTORIC 37-commit session, all seven semver tags live on origin — **v0.2.0 `022ee02` + v0.2.1 `d72c074` + v0.2.2 `98e872d` + v0.2.3 `d512266` + v0.2.4 `28cd2ac` + v0.2.5 `2c687b5` + v0.2.6 `efbd1e8`**): **11,153 pass / 85 skip / 1 todo / 0 FAIL** (554 files). v0.2.6 is the current shipped baseline. HEAD `15850d0` (NOT tagged — v0.3.0 cut path well-cleared; awaiting LIFT-template bug fixes + Wave 4 adopter content). **2 v0.3.0 BLOCKERS CLOSED in S87:** channel-architecture OQ (Insight 30 Option b) + SQL emission gap (Bug 3a).
+Current baseline (2026-05-13 S88 CLOSE — landmark 17-commit session; 5-of-5 LIFT family CLOSED; Approach A wave A-1 edge emission COMPLETE): **11,912 pass / 117 skip / 1 todo / 0 FAIL** (560 files). v0.2.6 `efbd1e8` is still the shipped baseline. HEAD `55f5f20` (NOT tagged — v0.3.0 cut path significantly advanced; awaiting A-1.6/.7/.8 wrap + Phase 3a async remaining + §36 impl + Wave 4 adopter content + small spec polish). **Approach A v0.4 deferral REVERSED — full A in v0.3.0 cut per user S88 ratification.**
+
+### 2026-05-13 (S88 CLOSE — landmark 17 commits · LIFT family 5-of-5 CLOSED · A-1 edge emission COMPLETE · Approach A v0.4-deferral REVERSED · safeCall + safeCallAsync stdlib primitives shipped · Insight 31 §36 retention DESIGN-AND-SHIP · 3 SPEC amendments · Bug 3a §1 flake CLOSED · 2 memory rules + 1 process lesson)
+
+**Session-defining outcomes:**
+- All 5 LIFT-template codegen bug families CLOSED (LIFT-1 catastrophic parens-attr + LIFT-2/3/4 emitter-parity bundle + LIFT-5 reconciler ambient). Canonical "per-item interactive markup inside for/lift" pattern (TodoMVC edit-mode shape) unblocked end-to-end.
+- Approach A wave A-1 edge emission COMPLETE (5 of 5 sub-phases: A-1.2 scaffold / A-1.3 high-freq / A-1.4 call-ref+for+lift / A-1.5 engine). Option Y per-interpolation source nodes ratified by user (against PA's Option X recommendation).
+- Approach A v0.4 deferral REVERSED (Insight 29). User verbatim S88: *"I know we talked about deferring A to 0.4, but I am not seeing the reason now, start on those tasks as they are unblocked."* Full Approach A + Wave 4 adopter content as v0.3.0 cut blockers.
+- stdlib host primitive family shipped: safeCall + safeCallAsync. Phase 3a sync migration 4-of-4 complete; async migration 1-of-4 (verifyPassword) with 3 deferred (http needs scrml-faithful failable refactor; Phase 3c concern).
+- Insight 31 ratified (§36 live-input retention DESIGN-AND-SHIP). 4-expert synthesis-mode debate; verdict 49.5/40.0/29.0. Empirical gate (justPressed boilerplate) + symmetry gate (Pillar 5 reverse).
+- 3 SPEC amendments landed PA-hands-on (§4.7 BS-comment-skip softening + §18.7 mixed-binding forbidden + §41.4 bun:/node: protocol prefixes — with brief-overclaim correction from §40.4 to §41.4).
+- Bug 3a §1 SQL round-trip flake hardened (happy-dom Headers pollution; pre-mint + conditional skip). Operational pre-push gate unblocked.
+
+**Major commits landed S88 (chronological):**
+
+- **`30743c4`** 25 shipped dispatch dirs deref → scrml-support/archive/changes/. Companion commit `dde7e5b` on scrml-support.
+
+- **`3d90286`** pa.md hook-policy amendment + S87→S88 hand-off rotation + maps refresh. Two valid `core.hooksPath` configurations documented (A=source-controlled-only / B=local-rich); user-ratified B at S88.
+
+- **`0b7ea8b`** pa.md isolation-parameter dispatch rule (S88 amendment: PA Agent() calls for dev-agents MUST set `isolation: "worktree"` explicitly) + primer §13.5 staleness fix correcting debate-03 entry from "pinned for queued" to "CLOSED S64; do not revisit."
+
+- **`be7b261`** LIFT-1 fix — CATASTROPHIC parens-attr in `_parseLiftAttrValue` (ast-builder.js) elided parent element + duplicated inner text. Root cause: no handler for PUNCT `(` tokens; cursor desync at `parseLiftTag` call sites. Fix: paren-balancing branch + cursor save/restore at both call sites. (Agent direct-to-main — PA dispatch error; pa.md S88 amendment adds the prevention rule.)
+
+- **`14e21de`** LIFT-2/3/4 PA-authored after 2 prompt-too-long dispatch failures. `bind:value=` two-way wiring (initial sync + addEventListener + reactive subscribe) + `if=` display-toggle (updater function + reactive subscriptions) + event auto-injection for bare-call empty-args. Touched BOTH paths in emit-lift.js (string-attribute `emitSetAttrs` line 396-437 + structured-AST `emitCreateElementFromMarkup` line 555-610). 3 broken-output anchors at `compiler/tests/unit/todomvc-fixture-edit-mode.test.js` §B.2-4 flipped to verify-fix.
+
+- **`20bb16c`** (scrml-support) debate-04 record + Insight 31 §36 retention DESIGN-AND-SHIP. 4-expert panel: simplicity-defender CLOSE / phaser-input DESIGN-AND-SHIP / react-dom-events CLOSE/soft-DEFER / scrml-structural-primitives DESIGN-AND-SHIP. Synthesis-mode caveat: 3 of 4 experts synthesized (only simplicity-defender was a real agent file; she voted CLOSE). User ratified verdict in full with caveat carried forward. 3 forged-expert files dropped — fresh-forge in future debates instead.
+
+- **`6461f21`** v0.3 Approach A implementation SCOPING at `docs/changes/v0.3-approach-a-impl/SCOPING.md` (~310 lines). Plan-agent-authored. Decomposes 300-640h surface into 5 sub-waves with A-1 further decomposed into 8 sub-phases. Two blocker OQs surfaced; user picked Option Y per-interpolation (against PA recommendation) for source-node granularity and Option b (defer A-1.4 until LIFT closes) for sub-phase sequencing.
+
+- **`1f516e1`** A-1.2 markup-read DG node kind + walker scaffold (Option Y per-interpolation). `MarkupReadDGNode` defined; `findOwningRenderDGNode` + `createMarkupReadNode` helpers added; scaffold flag `markupContextEmitEdges = false` in place. +11 tests. Behavioral invariant: zero edges emitted (A-1.3 activates).
+
+- **`05379f9`** safeCall stdlib primitive (`scrml:host`). Approach α — stdlib `.scrml` declares + hand-authored JS shim at `compiler/runtime/stdlib/host.js` carries the try/catch. Try/catch lives ONLY in compiled JS, never in scrml source. `HostError:enum { Thrown(message: string, name: string) }`. Non-Error throws (string/null/undefined/object) normalize to {message, name: "UnknownThrow"}. +24 tests (SC-1..SC-24).
+
+- **`da78609`** A-1.3 high-frequency markup-read edge emission — 4 shapes activated: `${@x}` text interpolation + `attr=@x` variable-ref + `bind:value=@x` + `if=@x`/`if=(expr)` condition. Edge count delta ~150-200 of the 256 S84 ceiling (~60%). MARKUP_READER_SENTINEL credit kept ADDITIVE (A-1.6 audit decides removal safety). +13 tests.
+
+- **`c838e19`** Phase 3a stdlib sync try/catch migration — 4 of 8 sync sites migrated (verifyHash + decodeJwt + kv.get + parseIdToken). 4 async-gap sites documented for safeCallAsync follow-on. 4 new module error types (CryptoError + JwtError + KvError + OAuthError). Per-module error enums NOT a shared stdlib-error (per pa.md Rule 2 + "errors-as-states" pattern).
+
+- **`7491a98`** safeCallAsync — async sibling of safeCall. Wraps `await thunk()` in try/catch. **Non-trivial design discovery:** failable-await interaction. `const x = safeCallAsync(thunk) !{...}` does NOT work without explicit `await` because compiler auto-await applies ONLY to server functions (§13.2), not stdlib imports. Two-step pattern documented in stdlib/host/index.scrml + SCA-19 test: `const rawResult = await safeCallAsync(...) ; const ok = rawResult !{ | ::Thrown(msg, name) -> ... }`. Future v0.3+ candidate: extend compiler auto-await to stdlib imports returning Promise. +20 tests (SCA-1..SCA-20). Internal refactor: normalizeThrown + buildErrorSentinel extracted as shared helpers.
+
+- **`b512db9` + `24b582d`** A-1.5 engine state-child + onTransition/Timeout/Idle body edges + engine-cell self-read. Per OQ #1 disposition: markup-context (parity with engine-cell-self-read pattern). engine-decl handler in dependency-graph.ts:2098-2194 (old 9 lines → ~97 lines). Regex-scans bodyRaw / onTransitionElements / onTimeoutElements after= / idleWatchdog. +14 tests.
+
+- **`88a7d57`** LIFT-5 reconciler ambient fix — last LIFT family. Root cause: emitForStmt's reactive fallback body loop dispatched if-stmt and for-stmt children through `emitLogicNode` without containerVar; when an if-stmt contained a lift-expr, the emitter called `_scrml_lift(() => ...)` against globally-set ambient `_scrml_lift_target` which was null inside `_scrml_create_item_N`. Fix: export `emitIfStmtWithContainer` + `emitForStmtWithContainer` from emit-lift.js; use them in emit-control-flow.ts fallback body loop with `{ continueBehavior: "return" }`. Cherry-pick land (not file-delta — would have stomped LIFT-2/3/4 since agent base predated it). +7 tests + repro fixture.
+
+- **`ccf2e99`** Bug 3a §1 SQL round-trip test flake HARDENED. Root cause: happy-dom GlobalRegistrator from compiler/tests/browser/* replaces Request/Response/Headers with browser-spec polyfills that filter Set-Cookie/Cookie/X-CSRF-Token per CORS forbidden-header rules. Once registered, persists for process lifetime. Integration test ran AFTER browser tests alphabetically and inherited polluted globals. Fix: pre-mint CSRF cookie + X-CSRF-Token via fixed TEST_CSRF_TOKEN constant + conditional skip when happy-dom detected. csrf-baseline.test.js + csrf-bootstrap.test.js + emit-server-sql-emission.test.js cover orthogonal claims. **Operational pre-push gate unblocked.**
+
+- **`ad9f1f8`** 3 SPEC amendments — §4.7 BS-comment-skip normative softening (BS MAY skip `<!-- -->` matching shipped S87 BS-comment-skip behavior; `/* */` still forbidden at BS) + §18.7 mixed positional+named binding forbidden + E-TYPE-021 extended (rationale: AST `payloadBindings: string[]` is strictly positional; mixed-form support would require AST extension without expressive gain) + §41.4 bun:/node: protocol prefixes ADDED (5 prefixes legal now; new E-IMPORT-007 for bun:/node: in client context; stdlib JS-shim authors no longer forced to detour through circuitous shim files; server-context-only restriction preserves the no-runtime-builtin-in-client.scrml security invariant). Brief-overclaim surfaced: S87 hand-off said §40.4; that's the handle()/middleware section, not imports — correct section is §41.4 Protocol Prefixes. Per pa.md Rule 4.
+
+- **`5cb177b`** Phase 3a async migration partial — verifyPassword migrated to safeCallAsync (1 of 4). Agent stalled on permission-ask (Sonnet pattern); PA-hands-on landed it. New PasswordError:enum { VerifyFailed(reason: string) }. 3 remaining async sites (jwt verifyJwt + http _request + http retry) deferred — http needs scrml-faithful failable refactor (current `throw new Error` is also forbidden → Phase 3c concern).
+
+- **`55f5f20`** A-1.4 call-ref + for-iterable + lift-template-body-expr markup-read edges. Was DEFERRED in A-1.3 dispatch (OQ #3) until LIFT codegen closed; unblocked post-LIFT-5. 5 new emitMarkupReadEdge call sites (total walker now 15). +16 tests. **A-1 edge emission COMPLETE** (5 of 5 sub-phases activated).
+
+**Memory rules saved S88:**
+- `feedback_stated_intent_vs_corpus_migration.md` — when user has stated normative intent verbatim multiple times, corpus contradicting it is migration backlog, NOT deliberation trigger. The ouroboros is a 5-step cycle (training-data bias → agent default → corpus → next agent → PA framing → cycle); mitigations on agent/PA/sweep sides.
+- `feedback_file_delta_vs_cherry_pick.md` — when agent's worktree base predates sibling parallel landings on the same files, wholesale file-delta silently overwrites sibling work; cherry-pick (with auto-merge) preserves both. S88 LIFT-5 precedent — pre-commit gate caught it; reverted + cherry-picked.
+
+**Agent infrastructure fix S88:** `~/.claude/agents/scrml-js-codegen-engineer.md` rewritten (~200 lines from ~54). Fixes silent Sonnet default-down (`model: sonnet` → `opus`); fixes project path (scrml8 frozen → scrmlMaster/scrmlTS); adds Edit tool; adds comprehensive F4/S67/S83/S88 discipline blocks; adds S88 "DO NOT ask permission" directive. **Propagates at S89 open.** Throughout S88, agent commits carried "Co-Authored-By: Claude Sonnet 4.6" footer despite pa.md S57 Opus rule.
+
+**Tests at S88 close (full suite, all directories):** 11,912 pass / 117 skip / 1 todo / 0 fail / 560 files. Pre-commit subset (unit + integration + conformance): 11,259 / 88 skip / 1 todo / 0 fail. Cumulative S87→S88: +759 pass / +32 skip / 0 regressions across 17 PA-authored commits.
+
+**Push state at S88 close:** 17 commits ahead of origin/main. User authorized "wrap and push" — push executes during wrap close.
+
+---
 
 ### 2026-05-12 (S87 CLOSE — HISTORIC 37 commits · 17+ dispatches · 2 v0.3.0 blockers CLEARED · Wave 3 COMPLETE · Insight 30 ratified · Option (d) engine self-write synthesis shipped · 14-mario AC delta 1/8→8/8 · stdlib Phase 1 173-occurrence sweep · 5 LIFT-template bug families surfaced · PA worktree-sweep mistake recovered ZERO loss)
 
