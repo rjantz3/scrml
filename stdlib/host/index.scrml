@@ -3,20 +3,20 @@ ${
     // ---------------------------------------------------------------------------
     // scrml:host — JS-host-throw containment primitive
     //
-    // Provides safeCall, the single primitive for wrapping JS-host APIs that
-    // natively throw. scrml's error model (§19) does not use try/catch; errors
-    // are values. safeCall is the bridge between JS-host throw semantics and the
-    // scrml failable-function error model.
+    // Provides safeCall and safeCallAsync, the primitives for wrapping JS-host
+    // APIs that natively throw. scrml's error model (§19) does not use try/catch;
+    // errors are values. safeCall / safeCallAsync are the bridge between JS-host
+    // throw semantics and the scrml failable-function error model.
     //
     // Design: approach (α) — hand-authored JS shim in compiler/runtime/stdlib/host.js
     //
     // The try/catch lives ONLY in the runtime shim (host.js), never in scrml
     // source. This file declares the public types and the failable function
-    // signature so that the compiler's type-checker and module-resolution
-    // machinery recognize safeCall correctly.
+    // signatures so that the compiler's type-checker and module-resolution
+    // machinery recognize safeCall / safeCallAsync correctly.
     //
     // Usage:
-    //   ${ import { safeCall, HostError } from 'scrml:host' }
+    //   ${ import { safeCall, safeCallAsync, HostError } from 'scrml:host' }
     //
     //   server function readFile(path) ! -> HostError {
     //       const content = safeCall(() => Bun.file(path).text()) !{
@@ -26,16 +26,27 @@ ${
     //       }
     //       return content
     //   }
+    //
+    //   server async function verifyHash(password, hash) ! -> HostError {
+    //       const rawResult = await safeCallAsync(() => Bun.password.verify(password, hash))
+    //       const ok = rawResult !{
+    //           | ::Thrown(message, name) -> {
+    //               fail HostError::Thrown(message, name)
+    //           }
+    //       }
+    //       return ok
+    //   }
     // ---------------------------------------------------------------------------
 
     /**
-     * HostError — error type produced by safeCall when a JS-host API throws.
+     * HostError — error type produced by safeCall / safeCallAsync when a
+     * JS-host API throws.
      *
-     * HostError::Thrown is produced when a thunk passed to safeCall throws.
-     * The fields mirror the thrown Error's properties when the thrown value is
-     * an Error instance. For non-Error throws (strings, numbers, null,
-     * undefined), message is a canonical string representation and name is
-     * "UnknownThrow".
+     * HostError::Thrown is produced when a thunk passed to safeCall or
+     * safeCallAsync throws. The fields mirror the thrown Error's properties
+     * when the thrown value is an Error instance. For non-Error throws
+     * (strings, numbers, null, undefined), message is a canonical string
+     * representation and name is "UnknownThrow".
      */
     export type HostError:enum = {
         Thrown(message: string, name: string)
@@ -56,9 +67,9 @@ ${
     //
     // The shim's safeCall:
     //   - Calls thunk() inside a try/catch
-    //   - On success: returns { _scrml_ok: true, value: <return value> }
-    //   - On any throw: returns { _scrml_ok: false, error: { tag: "Thrown",
-    //                              message: <string>, name: <string> } }
+    //   - On success: returns the thunk's return value directly
+    //   - On any throw: returns { __scrml_error: true, type: "HostError",
+    //                              variant: "Thrown", data: { message, name } }
     //
     // Callers use !{} or match to handle the failable result.
     // ---------------------------------------------------------------------------
@@ -69,6 +80,9 @@ ${
      * Returns the thunk's return value on success.
      * Returns HostError::Thrown on any thrown value (Error, string, null, etc.).
      *
+     * Use safeCall for synchronous thunks. For async thunks that may reject,
+     * use safeCallAsync instead.
+     *
      * @param thunk — a zero-argument function () => T
      */
     export function safeCall(thunk) ! -> HostError {
@@ -76,6 +90,48 @@ ${
         // This body is never executed directly; the bundler replaces it with the
         // hand-authored shim that contains the actual try/catch.
         return thunk()
+    }
+
+    // ---------------------------------------------------------------------------
+    // safeCallAsync — async sibling of safeCall
+    //
+    // The body below is a source-level stub. The actual implementation lives in
+    // compiler/runtime/stdlib/host.js alongside safeCall.
+    //
+    // The shim's safeCallAsync:
+    //   - Calls await thunk() inside a try/catch
+    //   - On success: returns the resolved value directly (Promise unwrapped)
+    //   - On any throw/rejection: returns { __scrml_error: true, type: "HostError",
+    //                                        variant: "Thrown", data: { message, name } }
+    //
+    // IMPORTANT — await at call site:
+    //   safeCallAsync returns a Promise. The caller must await the result before
+    //   applying !{} error handling. In a scrml server function body (which is
+    //   async), use:
+    //
+    //       const rawResult = await safeCallAsync(() => asyncHostCall())
+    //       const value = rawResult !{ | ::Thrown(message, name) -> ... }
+    //
+    //   If the Promise is not awaited, the !{} guard sees a Promise object (not
+    //   an error sentinel) and the error arm is never entered.
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Call a zero-argument async thunk, catching any Promise rejection.
+     *
+     * Returns the resolved value of the thunk's Promise on success.
+     * Returns HostError::Thrown on any thrown value or rejected Promise.
+     *
+     * The return type is a Promise wrapping the failable result. The caller
+     * must await safeCallAsync(...) before applying !{} error unwrapping.
+     *
+     * @param thunk — a zero-argument async function () => Promise<T>
+     */
+    export async function safeCallAsync(thunk) ! -> HostError {
+        // Stub body — runtime is provided by compiler/runtime/stdlib/host.js.
+        // This body is never executed directly; the bundler replaces it with the
+        // hand-authored shim that contains the actual try/catch around await thunk().
+        return await thunk()
     }
 }
 </program>
