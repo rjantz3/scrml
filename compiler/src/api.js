@@ -38,6 +38,7 @@ import { findUnsupportedTailwindShapes } from "./tailwind-classes.js";
 import { runGauntletPhase1Checks } from "./gauntlet-phase1-checks.js";
 import { runGauntletPhase3EqChecks } from "./gauntlet-phase3-eq-checks.js";
 import { runTryCatchLint } from "./validators/lint-try-catch.ts";
+import { runAsyncUserSourceLint } from "./validators/lint-async-user-source.ts";
 
 // ---------------------------------------------------------------------------
 // Stdlib runtime directory
@@ -661,6 +662,20 @@ export function compileScrml(options = {}) {
     collectErrors("LINT-TRY-CATCH", tryCatchDiags);
   }
 
+  // Stage 3.008 (LINT-ASYNC-USER-SOURCE): I-ASYNC-USER-SOURCE — Q5 stdlib
+  // carve-out info lint (S89 §13.2 Sub-Phase B). Per SPEC §13.1, scrml USER
+  // SOURCE SHALL NOT use the `async` keyword on function declarations; stdlib
+  // (`scrml:*` namespace, files under `<repo>/stdlib/`) MAY declare
+  // `async function` to surface the `Promise<T>` return shape to the auto-await
+  // classifier (§13.2.1). Walker fires one info diagnostic per
+  // `function-decl` with `isAsync: true` whose enclosing file path is NOT
+  // under the stdlib root. Runs post-LINT-TRY-CATCH so the two lint walkers
+  // share the same post-Gauntlet shelf.
+  for (const tabResult of tabResults) {
+    const asyncDiags = stage("LINT-ASYNC-USER-SOURCE", () => runAsyncUserSourceLint(tabResult.ast));
+    collectErrors("LINT-ASYNC-USER-SOURCE", asyncDiags);
+  }
+
   // Stage 3.1: Module Resolution
   // When selfHostModules.resolveModules is provided, use it instead of the JS original.
   const _resolveModules = selfHostModules?.resolveModules ?? resolveModules;
@@ -671,6 +686,94 @@ export function compileScrml(options = {}) {
     const exportCount = [...moduleResult.exportRegistry.values()].reduce((n, e) => n + e.size, 0);
     log(`  [MOD] ${importCount} import(s), ${exportCount} export(s), order: ${moduleResult.compilationOrder.map(p => basename(p)).join(" -> ")}`);
   }
+
+  // ---------------------------------------------------------------------------
+  // Stage 3.105 (STDLIB-EXPORT-SEED): augment exportRegistry with stdlib metadata
+  //
+  // S89 §13.2 Sub-Phase B Step 3 (2026-05-13). The auto-await classifier
+  // (§13.2.1) needs to know whether `safeCallAsync` (and other stdlib exports)
+  // declare `async function` to decide whether to emit `await` at call sites.
+  // The stdlib `.scrml` source files declare the API surface canonically; the
+  // runtime is the hand-written JS shim at `compiler/runtime/stdlib/<name>.js`
+  // (bundled separately, not compiled). Auto-gathering stdlib `.scrml` files
+  // through the FULL pipeline triggers SYM/TS host-global errors (TextEncoder,
+  // Bun, etc.) because the stubs reference Bun built-ins.
+  //
+  // This pass parses each stdlib module's `.scrml` source TAB-only, extracts
+  // the export-decl shape, and seeds `moduleResult.exportRegistry` for the
+  // absolute stdlib file path. Downstream codegen (scheduling.ts /
+  // emit-functions.ts) consults the registry via `isPromiseReturningStdlibFn`
+  // to drive the auto-await classifier. SYM / TS / CG see no stdlib AST.
+  //
+  // Cost: O(N stdlib modules referenced) TAB passes per compile; only runs
+  // for modules that the user actually imports (no eager full-stdlib scan).
+  // Cached: each stdlib module is parsed at most once per `compileScrml` call.
+  // ---------------------------------------------------------------------------
+  stage("STDLIB-EXPORT-SEED", () => {
+    // Collect unique stdlib import absolute paths from the import graph.
+    const stdlibPaths = new Set();
+    for (const [, entry] of moduleResult.importGraph) {
+      for (const imp of entry.imports) {
+        if (imp.source && imp.source.startsWith("scrml:") && imp.absSource && imp.absSource.endsWith(".scrml")) {
+          stdlibPaths.add(imp.absSource);
+        }
+      }
+    }
+    if (stdlibPaths.size === 0) return null;
+    for (const absPath of stdlibPaths) {
+      if (moduleResult.exportRegistry.has(absPath)) continue; // already seeded (re-export inheritance)
+      if (!existsSync(absPath)) continue;
+      let src;
+      try {
+        src = readFileSync(absPath, "utf8");
+      } catch {
+        continue;
+      }
+      // TAB pass: BS + buildAST. Errors swallowed — this is a registry-seed pass.
+      let bsOut;
+      try {
+        bsOut = splitBlocks(absPath, src);
+      } catch {
+        continue;
+      }
+      let tabResult;
+      try {
+        tabResult = buildAST(bsOut);
+      } catch {
+        continue;
+      }
+      if (!tabResult || !tabResult.ast) continue;
+      // Build the per-name value map from the stdlib file's exports.
+      const names = new Map();
+      const astExports = tabResult.ast.exports || [];
+      for (const exp of astExports) {
+        if (!exp.exportedName) continue;
+        // Handle comma-separated names per the buildImportGraph convention.
+        const namesList = exp.exportedName.split(",").map(s => s.trim()).filter(Boolean);
+        for (const name of namesList) {
+          const kind = exp.exportKind || "unknown";
+          let category;
+          if (kind === "channel") category = "channel";
+          else if (kind === "type") category = "type";
+          else if (kind === "function" || kind === "fn") category = "function";
+          else if (kind === "const") category = "const";
+          else category = "other";
+          const isComponent = kind === "const" && name.length > 0 &&
+            name[0] >= "A" && name[0] <= "Z";
+          names.set(name, {
+            kind,
+            category,
+            isComponent,
+            ...(exp.isAsync ? { isAsync: true } : {}),
+          });
+        }
+      }
+      if (names.size > 0) {
+        moduleResult.exportRegistry.set(absPath, names);
+      }
+    }
+    return null;
+  });
 
   // Stage 3.05 (NR): Name Resolution — SHADOW MODE in P1 per SPEC §15.15.6.
   // Walks every tag-bearing AST node and stamps resolvedKind/resolvedCategory.

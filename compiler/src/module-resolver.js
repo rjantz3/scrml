@@ -224,6 +224,12 @@ export function buildImportGraph(fileASTs) {
             kind: exp.exportKind || "unknown",
             reExportSource: exp.reExportSource ? resolveModulePath(exp.reExportSource, filePath) : null,
             span: exp.span || null,
+            // S89 §13.2 Sub-Phase B Step 2 — surface the `async` modifier so
+            // buildExportRegistry can populate the per-name `isAsync` field
+            // used by the auto-await classifier (§13.2.1). Set only when the
+            // AST export-decl carries `isAsync:true` (set by the ast-builder
+            // `export async function|fn` peek-ahead path).
+            ...(exp.isAsync ? { isAsync: true } : {}),
           });
         }
       }
@@ -363,8 +369,17 @@ export function topologicalSort(graph) {
  * this pass to enumerate `*` against the source's full export set if
  * cross-file mount validation through star-re-exports becomes necessary.
  *
+ * **S89 §13.2 Sub-Phase B Step 2 (2026-05-13).** The per-name value shape is
+ * extended with an optional `isAsync: boolean` field. Set when the export's
+ * AST source declared `async function|fn` (Q5 stdlib carve-out per §13.1).
+ * The auto-await classifier (§13.2.1) reads this field via
+ * `isPromiseReturningStdlibExport(name, sourceFilePath, exportRegistry)` to
+ * decide whether to emit `await` at a call site whose callee resolves to a
+ * `Promise<T>`-returning stdlib export. Non-async exports omit the field
+ * entirely (no `isAsync: false` litter on the value-map).
+ *
  * @param {Map<string, object>} graph
- * @returns {Map<string, Map<string, {kind: string, category: string, isComponent: boolean}>>}
+ * @returns {Map<string, Map<string, {kind: string, category: string, isComponent: boolean, isAsync?: boolean}>>}
  */
 export function buildExportRegistry(graph) {
   const registry = new Map();
@@ -417,6 +432,10 @@ export function buildExportRegistry(graph) {
         kind,
         category,
         isComponent,
+        // S89 §13.2 Sub-Phase B Step 2 — propagate `async function|fn` modifier.
+        // Set only when the export declared `async`; absent otherwise so the
+        // value-map doesn't grow `isAsync: false` boilerplate.
+        ...(exp.isAsync ? { isAsync: true } : {}),
         _reExportSource: exp.reExportSource ?? null,
         _localName: exp.localName ?? name,
       });
@@ -444,6 +463,9 @@ export function buildExportRegistry(graph) {
         entry.kind = sourceEntry.kind;
         entry.category = sourceEntry.category;
         entry.isComponent = sourceEntry.isComponent;
+        // S89 §13.2 Sub-Phase B Step 2 — re-exports inherit `isAsync` so a
+        // re-exporter file's auto-await classification matches the source.
+        if (sourceEntry.isAsync) entry.isAsync = true;
         changed = true;
       }
     }
@@ -616,4 +638,61 @@ export function resolveModulePath(source, importerPath) {
  */
 export function isStdlibImport(source) {
   return source.startsWith("scrml:");
+}
+
+/**
+ * Check if an absolute file path resolves under the stdlib root.
+ *
+ * Mirrors the §13.1 stdlib carve-out region used by
+ * `lint-async-user-source.ts`. Files under `<repo>/stdlib/` are the only
+ * authoring surface permitted to declare `async function` (Q5 ratified S89).
+ *
+ * @param {string} absPath — absolute file path
+ * @returns {boolean}
+ */
+export function isStdlibFilePath(absPath) {
+  if (typeof absPath !== "string" || absPath.length === 0) return false;
+  if (absPath === STDLIB_ROOT) return true;
+  const prefix = STDLIB_ROOT.endsWith("/") ? STDLIB_ROOT : STDLIB_ROOT + "/";
+  return absPath.startsWith(prefix);
+}
+
+/**
+ * Decide whether a callee name resolves to a stdlib `Promise<T>`-returning
+ * function export. The auto-await classifier (§13.2.1) consults this helper
+ * before emitting `await` at a call site.
+ *
+ * **Q1 BROAD ratification (S89):** ALL stdlib `Promise<T>` surfaces classify;
+ * the source of truth is the `isAsync: true` flag on the exportRegistry value
+ * (set when the stdlib `.scrml` file declared `async function`). The stdlib
+ * authoring rule (§41.4.1 amendment, Q6 ratified) requires Promise-always
+ * return shapes on these surfaces, so `isAsync` is a static proxy for
+ * "returns Promise<T>".
+ *
+ * **Q5 stdlib carve-out:** the check confirms the source module's file path
+ * is under `<repo>/stdlib/` so a user-source `async function` (which would
+ * also carry `isAsync:true` on its export-decl per Step 2 plumbing) does NOT
+ * leak into the classifier. User-source async is gated by I-ASYNC-USER-SOURCE
+ * (info lint) at the validator layer; this helper enforces the boundary at
+ * the classifier layer as a second-line guard.
+ *
+ * @param {string} functionName — bare callee name (no module prefix)
+ * @param {string} sourceModule — absolute file path of the module that
+ *   exports the function (resolved via importerSide importGraph or
+ *   exportRegistry key)
+ * @param {Map<string, Map<string, object>>} exportRegistry — output of
+ *   buildExportRegistry; keys are absolute file paths
+ * @returns {boolean}
+ */
+export function isPromiseReturningStdlibFn(functionName, sourceModule, exportRegistry) {
+  if (!functionName || !sourceModule || !exportRegistry) return false;
+  // Q5 carve-out: source module must be under <repo>/stdlib/.
+  if (!isStdlibFilePath(sourceModule)) return false;
+  const fileExports = exportRegistry.get(sourceModule);
+  if (!fileExports) return false;
+  const entry = fileExports.get(functionName);
+  if (!entry) return false;
+  // The function must be exported as `function` or `fn` AND carry isAsync.
+  if (entry.kind !== "function" && entry.kind !== "fn") return false;
+  return entry.isAsync === true;
 }

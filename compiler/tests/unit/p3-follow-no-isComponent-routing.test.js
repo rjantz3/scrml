@@ -116,6 +116,21 @@ const ALLOWED = {
   // declaration); the routing read uses `category === "channel"`, never
   // `.isComponent`.
   "codegen/emit-channel.ts": 2,    // type-signature mentions only
+  // S89 §13.2 Sub-Phase B Step 3 — auto-await classifier extension. The
+  // exportRegistry param threads through `hasServerCallees` +
+  // `isPromiseReturningCallExpr` + `scheduleStatements` purely as a type
+  // shape; the routing reads are on `kind === "function"|"fn"` and
+  // `isAsync === true`, NEVER on `isComponent`. The `isComponent` field
+  // appears in the TYPE ANNOTATION only.
+  "codegen/scheduling.ts": 3,      // type-signature mentions only — 3 occurrences
+                                   // across hasServerCallees + isPromiseReturning
+                                   // CallExpr + scheduleStatements param annotations.
+  // S89 §13.2 Sub-Phase B Step 3 — guarded-expr auto-await wiring. The
+  // EmitLogicOpts.asyncExportRegistry field type-annotation carries the same
+  // value-shape {kind, category, isComponent} as MOD's registry. The
+  // `isComponent` field appears in the TYPE ANNOTATION only; routing reads
+  // here are on `kind === "function"|"fn"` and `isAsync === true`.
+  "codegen/emit-logic.ts": 1,      // type-signature mention only (asyncExportRegistry)
   // (state-type-routing.ts deleted by P3-FOLLOW.)
 };
 

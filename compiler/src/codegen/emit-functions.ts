@@ -3,7 +3,7 @@ import { routePath } from "./utils.ts";
 import { emitLogicNode, emitLogicBody, emitFnShortcutBody } from "./emit-logic.js";
 import { CGError } from "./errors.ts";
 import { isServerOnlyNode, collectFunctions } from "./collect.ts";
-import { hasServerCallees, scheduleStatements } from "./scheduling.js";
+import { hasServerCallees, scheduleStatements, buildCalleeImportMap } from "./scheduling.js";
 import { buildMachineBindingsMap } from "./emit-reactive-wiring.js";
 // A1c C16 — §53.9.1/§53.4.3 client-side function-param boundary check (Locus 3).
 import { parsePredicateAnnotation, emitRuntimeCheck } from "./emit-predicates.ts";
@@ -88,6 +88,18 @@ type Param = string | { name?: string; [key: string]: unknown };
  */
 export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap: Map<string, string> } {
   const { filePath, routeMap, depGraph, errors, csrfEnabled } = ctx;
+  // S89 §13.2 Sub-Phase B Step 3 — pre-compute per-file `callee → sourceModule`
+  // resolver map ONCE for the file. The auto-await classifier consults this
+  // map per call site to decide whether the callee is a stdlib `Promise<T>`-
+  // returning export (per §13.2.1 Q1 BROAD ratification). Empty when the file
+  // has no imports — classifier short-circuits cheaply.
+  //
+  // Note: `ctx.fileAST` is the TABResult wrapper; the actual FileAST (with
+  // hoisted `imports` array) lives at `ctx.fileAST.ast`. Fall back to the
+  // wrapper itself for test harnesses that pass the FileAST directly.
+  const _fileAstForImports = ((ctx.fileAST as any)?.ast?.imports) ? (ctx.fileAST as any).ast : ctx.fileAST;
+  const _calleeMap = buildCalleeImportMap(_fileAstForImports);
+  const _exportRegistry = ctx.exportRegistry ?? null;
   const fnNodes: ASTNode[] = (ctx.analysis?.fnNodes ?? collectFunctions(ctx.fileAST)) as ASTNode[];
   const machineBindings = buildMachineBindingsMap(ctx.fileAST);
   // C13 (§51.0.F + §51.0.G): mirror machineBindings wiring for new <engine>
@@ -412,8 +424,11 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       typeof p === "string" ? p.split(":")[0].trim() : ((p as { name?: string }).name ?? `_scrml_arg_${i}`)
     );
 
-    // Check if this function has any server-call callees that need async
-    const hasServerCalls = hasServerCallees(fnNode, routeMap, filePath);
+    // Check if this function has any server-call callees that need async.
+    // S89 §13.2 Sub-Phase B Step 3 — also classifies stdlib Promise<T>
+    // callees as async-boundary so the function emits `async function` prefix
+    // when it contains a `safeCallAsync(...)` (or similar) initializer.
+    const hasServerCalls = hasServerCallees(fnNode, routeMap, filePath, _calleeMap, _exportRegistry);
     const asyncPrefix = hasServerCalls ? "async " : "";
 
     const generatedName = genVar(name);
@@ -463,7 +478,10 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         }
       }
     } else {
-      const scheduled = scheduleStatements(body, fnNode, routeMap, depGraph, filePath, errors, machineBindings, engineBindings, engineVarNames, enginesWithHooks, _returnTypeAnnotation, name, enginesWithOnTimeout, enginesWithIdleWatchdog, enginesWithInternalRules, enginesWithHistory);
+      // S89 §13.2 Sub-Phase B Step 3 — thread calleeMap + exportRegistry so
+      // the auto-await classifier inside scheduleStatements covers stdlib
+      // Promise<T> callees alongside server functions.
+      const scheduled = scheduleStatements(body, fnNode, routeMap, depGraph, filePath, errors, machineBindings, engineBindings, engineVarNames, enginesWithHooks, _returnTypeAnnotation, name, enginesWithOnTimeout, enginesWithIdleWatchdog, enginesWithInternalRules, enginesWithHistory, _calleeMap, _exportRegistry);
       for (const line of scheduled) {
         lines.push(`  ${line}`);
       }

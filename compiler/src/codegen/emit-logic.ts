@@ -274,6 +274,27 @@ interface EmitLogicOpts {
    * compute the new value, which is out of scope.
    */
   channelOwnedCells?: Set<string> | null;
+  /**
+   * S89 §13.2 Sub-Phase B Step 3 — auto-await classifier inputs.
+   *
+   * When all three are set AND non-empty, the `case "guarded-expr"` arm
+   * (`<initExpr> !{ ... }` failable handler) auto-awaits an init expression
+   * whose callee is a statically-known `Promise<T>`-returning function (server
+   * fn OR stdlib `async` export per §13.2.1 Q1 BROAD). The S88 two-step
+   * pattern (`const raw = await safeCallAsync(thunk); raw !{ ... }`) collapses
+   * to a single line — the compiler emits the `await` between the call and
+   * the guard automatically per §13.2.1 normative bullet 3.
+   *
+   * Threading: `scheduleStatements` populates these from its own
+   * `calleeMap` / `exportRegistry` / `routeMap` / `filePath` args; bypass
+   * paths (`emitFnShortcutBody`, direct top-level `emitLogicNode` callers in
+   * `emit-reactive-wiring.ts`) omit them — those contexts don't sit on the
+   * Promise<T> hot path, so omission preserves pre-S89 emission.
+   */
+  asyncRouteMap?: { functions: Map<string, { boundary?: string; functionName?: string; [k: string]: unknown }> } | null;
+  asyncCalleeMap?: Map<string, string> | null;
+  asyncExportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>> | null;
+  asyncFilePath?: string | null;
 }
 
 /** An entry in the captured scope for a runtime ^{} meta block (from meta-checker.ts). */
@@ -2256,6 +2277,12 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
 
       let bindingName: string | null = null;
       let initExpr: string | null = null;
+      // S89 §13.2 Sub-Phase B Step 3 — auto-await detection. When the guarded
+      // node's init expression is a statically-known `Promise<T>`-returning
+      // call (server fn OR stdlib `async` export per §13.2.1 Q1 BROAD), the
+      // emitter inserts `await` between the call and the `__scrml_error`
+      // guard check below. The S88 two-step pattern collapses to one line.
+      let _autoAwait = false;
       if (guardedNode) {
         if (guardedNode.kind === "let-decl" && guardedNode.name) {
           bindingName = guardedNode.name;
@@ -2269,11 +2296,35 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
             initExpr = bodyCode.replace(/;\s*$/, "").replace(/^\s*return\s+/, "");
           }
         }
+        // Auto-await classification, gated on classifier inputs being threaded.
+        if (
+          opts.asyncRouteMap &&
+          opts.asyncCalleeMap &&
+          opts.asyncExportRegistry &&
+          opts.asyncFilePath &&
+          guardedNode
+        ) {
+          try {
+            // Delegate to scheduling.ts predicate (single source of truth).
+            const sched = require("./scheduling.js");
+            const isPromise = sched.isPromiseReturningCallExpr(
+              guardedNode,
+              opts.asyncRouteMap,
+              opts.asyncFilePath,
+              opts.asyncCalleeMap,
+              opts.asyncExportRegistry,
+            );
+            _autoAwait = !!isPromise;
+          } catch (_e) {
+            // Classifier failure is non-fatal — fall back to no-auto-await.
+            _autoAwait = false;
+          }
+        }
       }
 
       if (initExpr == null) return "";
 
-      lines.push(`let ${resultVar} = ${initExpr};`);
+      lines.push(`let ${resultVar} = ${_autoAwait ? "await " : ""}${initExpr};`);
       lines.push(`if (${resultVar} && ${resultVar}.__scrml_error) {`);
 
       const emitArmAssign = (armBody: string): string[] => {

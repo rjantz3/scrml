@@ -4,6 +4,7 @@ import { exprNodeCollectCallees } from "../expression-parser.ts";
 import { emitLogicNode } from "./emit-logic.js";
 import { CGError } from "./errors.ts";
 import { isServerOnlyNode } from "./collect.ts";
+import { resolveModulePath, isPromiseReturningStdlibFn } from "../module-resolver.js";
 
 /** A loosely-typed AST node from the pipeline. */
 type ASTNode = Record<string, unknown>;
@@ -17,6 +18,55 @@ interface RouteMap {
 interface DepGraph {
   nodes?: Map<string, { span?: { start?: number; file?: string }; [key: string]: unknown }>;
   edges?: Array<{ kind?: string; from?: string; to?: string; [key: string]: unknown }>;
+}
+
+/**
+ * S89 §13.2 Sub-Phase B Step 3 — per-file resolver from a bare callee name to
+ * the absolute file path of the module that exports it. Built from the
+ * importing file's `imports: ImportDeclNode[]` plus `resolveModulePath`.
+ *
+ * Used by `isPromiseReturningCallExpr` to ask `isPromiseReturningStdlibFn`
+ * whether a callee resolves to a stdlib `Promise<T>` export. A callee not
+ * present in this map is either:
+ *   - a same-file function-decl (handled by routeMap.functions for server fns),
+ *   - a host-JS global (Math, fetch, etc.),
+ *   - a higher-order parameter (not statically resolvable per §13.2.1).
+ */
+export type CalleeImportMap = Map<string, string>;
+
+/**
+ * Build a per-file `name → sourceModuleAbsPath` map from the importing
+ * FileAST's imports array. Each named-import specifier produces one entry
+ * keyed by the LOCAL binding name (after `as` rename) so call-site lookups
+ * use the symbol actually visible at the use-site.
+ *
+ * Exported for unit testing.
+ */
+export function buildCalleeImportMap(fileAST: ASTNode | null | undefined): CalleeImportMap {
+  const out: CalleeImportMap = new Map();
+  if (!fileAST) return out;
+  const imports = (fileAST as { imports?: unknown[] }).imports;
+  if (!Array.isArray(imports)) return out;
+  const importerFilePath = ((fileAST as { filePath?: string }).filePath) ?? "";
+  for (const imp of imports) {
+    if (!imp || typeof imp !== "object") continue;
+    const node = imp as { source?: string | null; names?: string[]; specifiers?: Array<{ local?: string; imported?: string }> };
+    if (typeof node.source !== "string" || node.source.length === 0) continue;
+    const absSource = resolveModulePath(node.source, importerFilePath);
+    // Prefer per-item specifiers (LOCAL alias survives `as` rename); fall
+    // back to `names` which is the parallel imported-name array.
+    if (Array.isArray(node.specifiers) && node.specifiers.length > 0) {
+      for (const s of node.specifiers) {
+        const local = typeof s.local === "string" ? s.local : (typeof s.imported === "string" ? s.imported : null);
+        if (local) out.set(local, absSource);
+      }
+    } else if (Array.isArray(node.names)) {
+      for (const n of node.names) {
+        if (typeof n === "string" && n.length > 0) out.set(n, absSource);
+      }
+    }
+  }
+  return out;
 }
 
 /**
@@ -35,13 +85,30 @@ export function extractCalleeNames(expr: string): string[] {
 }
 
 /**
- * Check if a function node has any callees that are server-boundary.
+ * Check if a function node has any callees that are server-boundary, OR (S89
+ * §13.2 Sub-Phase B Step 3) any callees that resolve to a stdlib
+ * `Promise<T>`-returning export. The result drives `async function` emission
+ * and the Promise.all-vs-sequential scheduling decision downstream.
+ *
+ * The classifier branch is BACKWARDS-COMPATIBLE: when `calleeMap` or
+ * `exportRegistry` is null/empty (test harness, single-file unit, no imports),
+ * the function falls back to the pre-S89 server-only behavior. Threading these
+ * params is opt-in.
+ *
  * @param {ASTNode} fnNode
  * @param {RouteMap} routeMap
  * @param {string} filePath
+ * @param {CalleeImportMap | null} [calleeMap] — per-file name→absSource map
+ * @param {Map | null} [exportRegistry] — MOD exportRegistry
  * @returns {boolean}
  */
-export function hasServerCallees(fnNode: ASTNode, routeMap: RouteMap, filePath: string): boolean {
+export function hasServerCallees(
+  fnNode: ASTNode,
+  routeMap: RouteMap,
+  filePath: string,
+  calleeMap: CalleeImportMap | null = null,
+  exportRegistry: Map<string, Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>> | null = null,
+): boolean {
   // Build a set of server function names from routeMap
   const serverFnNames = new Set<string>();
   for (const [, route] of routeMap.functions) {
@@ -49,19 +116,56 @@ export function hasServerCallees(fnNode: ASTNode, routeMap: RouteMap, filePath: 
       serverFnNames.add(route.functionName as string);
     }
   }
-  if (serverFnNames.size === 0) return false;
+
+  // S89 §13.2.1 — also include stdlib Promise<T> classification when the
+  // classifier inputs are available.
+  const hasStdlibClassifier = !!(calleeMap && exportRegistry && calleeMap.size > 0 && exportRegistry.size > 0);
+  if (serverFnNames.size === 0 && !hasStdlibClassifier) return false;
+
+  // Helper — extract callees from a stmt's exprNode/initExpr (with string
+  // fallback). Used by the body-walker below.
+  const _extractCalleesFromStmt = (stmt: ASTNode): string[] => {
+    const exprNodeField = (stmt as any).exprNode ?? (stmt as any).initExpr;
+    return exprNodeField
+      ? exprNodeCollectCallees(exprNodeField)
+      : extractCalleeNames(
+        typeof ((stmt as ASTNode).expr ?? (stmt as ASTNode).init ?? "") === "string"
+          ? ((stmt as ASTNode).expr ?? (stmt as ASTNode).init ?? "") as string
+          : "",
+      );
+  };
+
+  // Helper — does any of the extracted callees classify as Promise<T>-returning?
+  const _matchesPromiseCallee = (callees: string[]): boolean => {
+    for (const callee of callees) {
+      if (serverFnNames.has(callee)) return true;
+      if (hasStdlibClassifier) {
+        const sourceModule = calleeMap!.get(callee);
+        if (sourceModule && isPromiseReturningStdlibFn(callee, sourceModule, exportRegistry!)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
 
   const body = (fnNode.body as ASTNode[]) ?? [];
   for (const stmt of body) {
     if (!stmt) continue;
-    if ((stmt as ASTNode).kind === "bare-expr") {
-      // Phase 4d: ExprNode-first callee extraction, string fallback
-      const callees = (stmt as any).exprNode
-        ? exprNodeCollectCallees((stmt as any).exprNode)
-        : extractCalleeNames(((stmt as ASTNode).expr as string) ?? "");
-      for (const callee of callees) {
-        if (serverFnNames.has(callee)) return true;
-      }
+    const kind = (stmt as ASTNode).kind;
+    // S89 §13.2 Sub-Phase B Step 3 — extract callees from bare-expr AND from
+    // let/const initializers AND from guarded-expr's inner guardedNode. Pre-
+    // S89 walked only bare-expr (server function calls there were the only
+    // way to introduce an async boundary). With stdlib auto-await, a
+    // `const x = safeCallAsync(thunk)` initializer or a
+    // `let x = safeCallAsync(thunk) !{ ... }` failable-handler must
+    // propagate "function has async boundaries" up so the outer function
+    // emits `async function` prefix.
+    if (kind === "bare-expr" || kind === "let-decl" || kind === "const-decl") {
+      if (_matchesPromiseCallee(_extractCalleesFromStmt(stmt as ASTNode))) return true;
+    } else if (kind === "guarded-expr") {
+      const guarded = (stmt as any).guardedNode;
+      if (guarded && _matchesPromiseCallee(_extractCalleesFromStmt(guarded))) return true;
     }
   }
   return false;
@@ -88,6 +192,7 @@ export function findDGNodeForStmt(stmt: ASTNode, depGraph: DepGraph, filePath: s
 
 /**
  * Check if a statement is a server call expression.
+ *
  * @param {ASTNode} stmt
  * @param {RouteMap} routeMap
  * @param {string} filePath
@@ -110,6 +215,74 @@ export function isServerCallExpr(stmt: ASTNode, routeMap: RouteMap, filePath: st
   }
   for (const callee of callees) {
     if (serverFnNames.has(callee)) return true;
+  }
+  return false;
+}
+
+/**
+ * S89 §13.2 Sub-Phase B Step 3 — extended auto-await classifier.
+ *
+ * Returns true if a statement's call expression has at least one statically-
+ * known `Promise<T>`-returning callee per §13.2.1 Q1 BROAD ratification:
+ *
+ *   1. **Server functions** — existing surface (delegated to `isServerCallExpr`).
+ *   2. **Stdlib Promise<T> functions** — exported from `scrml:*` modules with
+ *      `isAsync: true` on the exportRegistry entry (Q5 stdlib carve-out per
+ *      §13.1; per-export classification via `isPromiseReturningStdlibFn` in
+ *      module-resolver.js).
+ *
+ * Cross-program function calls (§13.2.2 / E-PROG-004) are NOT classified here
+ * — they live behind the cross-program emission boundary which already wraps
+ * call sites in `await` per §43.5.1. The classifier only owns the §13.2.1
+ * statically-resolvable-callee surface.
+ *
+ * Dynamic callees (higher-order args, indexed lookups, member dispatch) are
+ * NOT classified — §13.2.1 normative bullet 2 requires the callee to be
+ * statically-known. Such cases must be wrapped in a named thunk
+ * (e.g. `safeCallAsync(() => dynamicFn())`) for auto-await to apply.
+ *
+ * @param stmt       — statement under inspection (may carry `exprNode` /
+ *                     `initExpr` / `expr` / `init` field)
+ * @param routeMap   — server function route map
+ * @param filePath   — current file path
+ * @param calleeMap  — per-file name→absSource map (built once via
+ *                     `buildCalleeImportMap`; null for tests/server-only path)
+ * @param exportRegistry — MOD exportRegistry; null when not threaded
+ */
+export function isPromiseReturningCallExpr(
+  stmt: ASTNode,
+  routeMap: RouteMap,
+  filePath: string,
+  calleeMap: CalleeImportMap | null,
+  exportRegistry: Map<string, Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>> | null,
+): boolean {
+  // Server-function path (existing surface).
+  if (isServerCallExpr(stmt, routeMap, filePath)) return true;
+
+  // Stdlib Promise<T> path — requires both calleeMap (per-file import
+  // resolution) AND exportRegistry (per-module isAsync flag). When either is
+  // absent (test harness, isolated unit), short-circuit to false — matches
+  // the current pre-S89 behavior.
+  if (!calleeMap || !exportRegistry) return false;
+  if (calleeMap.size === 0 || exportRegistry.size === 0) return false;
+
+  // Re-extract callees (same shape as isServerCallExpr).
+  const exprNodeField = (stmt as any).exprNode ?? (stmt as any).initExpr;
+  const callees = exprNodeField
+    ? exprNodeCollectCallees(exprNodeField)
+    : extractCalleeNames(
+      typeof ((stmt as ASTNode).expr ?? (stmt as ASTNode).init ?? "") === "string"
+        ? ((stmt as ASTNode).expr ?? (stmt as ASTNode).init ?? "") as string
+        : "",
+    );
+  if (callees.length === 0) return false;
+
+  for (const callee of callees) {
+    const sourceModule = calleeMap.get(callee);
+    if (!sourceModule) continue;
+    if (isPromiseReturningStdlibFn(callee, sourceModule, exportRegistry)) {
+      return true;
+    }
   }
   return false;
 }
@@ -146,7 +319,7 @@ export function extractInitExpr(stmt: ASTNode): string {
  * @param {CGError[]} [errors]
  * @returns {string[]}
  */
-export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: RouteMap, depGraph: DepGraph, filePath: string, errors: CGError[] = [], machineBindings?: Map<string, { engineName: string; tableName: string; rules: any[]; auditTarget?: string | null }> | null, engineBindings?: Map<string, { varName: string; forType: string; tableName: string }> | null, engineVarNames?: Set<string> | null, enginesWithHooks?: Set<string> | null, returnTypeAnnotation?: string | null, enclosingFnName?: string | null, enginesWithOnTimeout?: Set<string> | null, enginesWithIdleWatchdog?: Set<string> | null, enginesWithInternalRules?: Set<string> | null, enginesWithHistory?: Set<string> | null): string[] {
+export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: RouteMap, depGraph: DepGraph, filePath: string, errors: CGError[] = [], machineBindings?: Map<string, { engineName: string; tableName: string; rules: any[]; auditTarget?: string | null }> | null, engineBindings?: Map<string, { varName: string; forType: string; tableName: string }> | null, engineVarNames?: Set<string> | null, enginesWithHooks?: Set<string> | null, returnTypeAnnotation?: string | null, enclosingFnName?: string | null, enginesWithOnTimeout?: Set<string> | null, enginesWithIdleWatchdog?: Set<string> | null, enginesWithInternalRules?: Set<string> | null, enginesWithHistory?: Set<string> | null, calleeMap?: CalleeImportMap | null, exportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>> | null): string[] {
   const lines: string[] = [];
   // Track declared names so tilde-decl can detect reassignment vs first declaration
   const declaredNames = new Set<string>();
@@ -175,12 +348,27 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
     ...(enginesWithInternalRules && enginesWithInternalRules.size > 0 ? { enginesWithInternalRules } : {}),
     ...(enginesWithHistory && enginesWithHistory.size > 0 ? { enginesWithHistory } : {}),
     ...(returnTypeAnnotation ? { returnTypeAnnotation, enclosingFnName: enclosingFnName ?? null } : {}),
+    // S89 §13.2 Sub-Phase B Step 3 — auto-await classifier inputs threaded
+    // through opts so `case "guarded-expr"` in emit-logic.ts can auto-await
+    // a `Promise<T>` initExpr per §13.2.1 (collapses the S88 two-step
+    // safeCallAsync pattern to a single line).
+    ...(routeMap ? { asyncRouteMap: routeMap } : {}),
+    ...(calleeMap ? { asyncCalleeMap: calleeMap } : {}),
+    ...(exportRegistry ? { asyncExportRegistry: exportRegistry } : {}),
+    asyncFilePath: filePath,
   };
 
   // Only use complex scheduling (Promise.all) for functions with actual server calls.
   // For purely client-side functions, emit sequentially — wrapping non-async statements
   // in Promise.all produces invalid JavaScript.
-  const fnHasServerCalls = hasServerCallees(fnNode, routeMap, filePath);
+  // S89 §13.2 Sub-Phase B Step 3 — gate the Promise.all dependency-graph path
+  // on the NARROW (server-only) classification. The broader Promise<T> stdlib
+  // classification drives `async function` emission and per-statement
+  // `await` emission, but it should NOT activate the Promise.all grouping
+  // logic (which assumes the depGraph has dependency edges between server-fn
+  // call sites). Pre-S89 behavior preserved exactly: only actual server-fn
+  // fetch call sites trigger Promise.all coalescing.
+  const fnHasServerCalls = hasServerCallees(fnNode, routeMap, filePath, null, null);
   if (!fnHasServerCalls || !depGraph || !depGraph.nodes || depGraph.nodes.size === 0) {
     // No server calls or no dependency graph info — emit sequentially
     for (const stmt of body) {
@@ -308,7 +496,9 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
       }
       const code = emitLogicNode(stmt, emitOpts);
       if (code) {
-        if (isServerCallExpr(stmt as ASTNode, routeMap, filePath)) {
+        // S89 §13.2 Sub-Phase B Step 3 — extended classifier covers both
+        // server functions AND stdlib Promise<T> functions per Q1 BROAD.
+        if (isPromiseReturningCallExpr(stmt as ASTNode, routeMap, filePath, calleeMap ?? null, exportRegistry ?? null)) {
           if ((stmt as ASTNode).kind === "let-decl" || (stmt as ASTNode).kind === "const-decl") {
             const name = (stmt as ASTNode).name as string || genVar("tmp");
             lines.push(`const ${name} = await ${extractInitExpr(stmt as ASTNode)};`);

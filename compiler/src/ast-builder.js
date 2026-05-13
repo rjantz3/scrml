@@ -6111,13 +6111,53 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         ? "export " + prefixParts.join(" ") + " " + expr
         : "export " + expr;
 
+      // S89 §13.2 Sub-Phase B Step 2 — `export async function|fn name` shape.
+      // When collectExpr breaks at `async` (per the decl-shape boundary guard
+      // at line ~1965), the export-decl receives `expr: ""` / `raw: "export "`.
+      // The function-decl handler downstream picks up the real declaration with
+      // isAsync:true, but the export-decl is left with exportedName:null which
+      // means buildExportRegistry doesn't see the export by name — silencing
+      // the auto-await classifier for stdlib Promise<T> functions. Peek ahead:
+      // if the next tokens are `async [server] function|fn IDENT`, harvest the
+      // name + kind + isAsync flag onto the export-decl. The function-decl is
+      // produced by the main loop (not synthesized here) so the body is parsed
+      // exactly once.
+      let _asyncExportName = null;
+      let _asyncExportKind = null;
+      let _asyncExportIsAsync = false;
+      let _asyncExportIsServer = isServer;
+      // Only peek-ahead when collectExpr returned empty — that signals it broke
+      // at the `async` decl-shape boundary guard (line ~1965). Without this
+      // guard, a normal `export function foo() { ... } async function bar()`
+      // sequence would mis-harvest `bar` onto the `foo` export-decl.
+      if (expr === "" && peek().kind === "KEYWORD" && peek().text === "async") {
+        let _lookOff = 1;
+        // optional `server` between `async` and `function|fn`
+        if (peek(_lookOff)?.kind === "KEYWORD" && peek(_lookOff)?.text === "server") {
+          _asyncExportIsServer = true;
+          _lookOff++;
+        }
+        const _kwTok = peek(_lookOff);
+        if (_kwTok?.kind === "KEYWORD" && (_kwTok.text === "function" || _kwTok.text === "fn")) {
+          _asyncExportKind = _kwTok.text;
+          _lookOff++;
+          // optional `*` (generator marker — rejected by §36 but parse it)
+          if (peek(_lookOff)?.text === "*") _lookOff++;
+          const _nameTok = peek(_lookOff);
+          if (_nameTok && (_nameTok.kind === "IDENT" || _nameTok.kind === "KEYWORD")) {
+            _asyncExportName = _nameTok.text;
+            _asyncExportIsAsync = true;
+          }
+        }
+      }
+
       const exportNode = {
         id: ++counter.next,
         kind: "export-decl",
         raw: rawStr,
         span,
-        exportedName: null,
-        exportKind: null,
+        exportedName: _asyncExportName,
+        exportKind: _asyncExportKind,
         reExportSource: null,
         // F2/F3 grammar fixes (ast-builder-grammar-fixes dispatch):
         //   isReExportAll  — true for `export * from './x'`
@@ -6126,7 +6166,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         isReExportAll: false,
         renames: null,
         isPure,
-        isServer,
+        // S89: `export async function` may have set isServer above; honor either form.
+        isServer: _asyncExportIsServer,
+        // S89 §13.2 Sub-Phase B Step 2 — propagate async modifier so
+        // buildExportRegistry can populate exportRegistry[file].get(name).isAsync
+        // for the auto-await classifier (§13.2.1).
+        ...(_asyncExportIsAsync ? { isAsync: true } : {}),
       };
 
       // Helper: parse one name-spec like `A` or `A as B`.
@@ -6218,7 +6263,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // params/body are intentionally NOT pre-parsed here — the synthetic
       // node exists for *discoverability* in walkers; consumers that need
       // parameter detail can re-tokenize `raw` or read the export-decl raw.
-      if ((exportNode.exportKind === "function" || exportNode.exportKind === "fn") && exportNode.exportedName) {
+      // S89 §13.2 Sub-Phase B Step 2 — skip F1 synthesis for the
+      // `export async function|fn` shape. The export-decl harvested the name
+      // via peek-ahead but the body lives entirely with the function-decl
+      // produced by the main loop downstream (collectExpr broke at `async`,
+      // so `rawStr` here is just "export " with no body). Synthesizing a
+      // stub here would (a) duplicate the function-decl walker visibility and
+      // (b) leak an empty-body raw into emit-library.ts. The main-loop
+      // function-decl already carries isAsync:true and is reachable through
+      // logic.body walkers without a synthetic stub.
+      if (_asyncExportIsAsync) {
+        // intentional no-op: real function-decl comes from the main loop.
+      } else if ((exportNode.exportKind === "function" || exportNode.exportKind === "fn") && exportNode.exportedName) {
         // S81 D1 (2026-05-11): propagate `.idempotent()` modifier per §19.9.7.
         // The inline function-decl parser detects this token-by-token at the
         // post-`)` cursor position (ast-builder.js ~6610 for `function`, ~6803
