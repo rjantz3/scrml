@@ -47,7 +47,7 @@ ${
             const seg = segments[i]
             if (i > 0) regexStr += "/"
 
-            if (seg === "*") {
+            if (seg == "*") {
                 keys.push("*")
                 regexStr += "(.*)"
             } else if (seg.startsWith(":")) {
@@ -73,7 +73,7 @@ ${
 
         const params = {}
         keys.forEach((key, idx) => {
-            if (m[idx + 1] !== undefined) {
+            if (m[idx + 1] != undefined) {
                 params[key] = m[idx + 1]
             }
         })
@@ -99,7 +99,7 @@ ${
         const result = {}
         for (const pair of qs.split("&")) {
             const eqIdx = pair.indexOf("=")
-            if (eqIdx === -1) {
+            if (eqIdx == -1) {
                 result[decodeURIComponent(pair)] = ""
             } else {
                 const key = decodeURIComponent(pair.slice(0, eqIdx))
@@ -132,7 +132,7 @@ ${
 
         if (query && Object.keys(query).length > 0) {
             const qs = Object.entries(query)
-                .filter(([, v]) => v !== undefined && v !== null)
+                .filter(([, v]) => v != undefined && v != null)
                 .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
                 .join("&")
             if (qs) url += "?" + qs
@@ -210,17 +210,17 @@ ${
         assertTruthy(urlWithQuery.includes("tab=profile"))
 
         const m1 = match("/users/:id", "/users/42")
-        assertTruthy(m1 !== null)
+        assertTruthy(m1 != null)
         assertEqual(m1.params.id, "42")
 
-        assertFalsy(match("/users/:id", "/posts/1") !== null)
+        assertFalsy(match("/users/:id", "/posts/1") != null)
 
         const m2 = match("/files/*", "/files/a/b/c")
-        assertTruthy(m2 !== null)
+        assertTruthy(m2 != null)
         assertEqual(m2.params["*"], "a/b/c")
 
         const m3 = match("/users/:id", "/users/99?tab=settings")
-        assertTruthy(m3 !== null)
+        assertTruthy(m3 != null)
         assertEqual(m3.params.id, "99")
         assertEqual(m3.query.tab, "settings")
     }

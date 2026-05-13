@@ -39,9 +39,9 @@ ${
      *   env("NONEXISTENT") → undefined
      */
     export function env(key) {
-        if (key === undefined || key === null) return undefined
+        if (key == undefined || key == null) return undefined
         const val = process.env[String(key)]
-        return val !== undefined ? val : undefined
+        return val != undefined ? val : undefined
     }
 
     /**
@@ -77,7 +77,7 @@ ${
      *   exit(1) — exits with code 1 (error)
      */
     export function exit(code) {
-        process.exit(code !== undefined ? code : 0)
+        process.exit(code != undefined ? code : 0)
     }
 
     /**

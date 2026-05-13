@@ -92,7 +92,7 @@ ${
     export function memoryAdapter() {
         const store = new Map()
         function expired(entry) {
-            return entry.expiresAt !== null && entry.expiresAt <= Date.now()
+            return entry.expiresAt != null && entry.expiresAt <= Date.now()
         }
         return {
             put(key, value, ttlSeconds) {
@@ -123,9 +123,9 @@ ${
      */
     function _assertStorage(storage) {
         if (!storage
-            || typeof storage.put !== "function"
-            || typeof storage.get !== "function"
-            || typeof storage.del !== "function") {
+            || typeof storage.put != "function"
+            || typeof storage.get != "function"
+            || typeof storage.del != "function") {
             throw new Error(
                 "[scrml:oauth] config.storage must be an object with put/get/del methods. "
                 + "Use memoryAdapter() for dev or wire scrml:redis / scrml:store for prod."
@@ -143,7 +143,7 @@ ${
         if (!config.authorizeUrl) throw new Error("[scrml:oauth] config.authorizeUrl required")
         if (!config.tokenUrl)     throw new Error("[scrml:oauth] config.tokenUrl required")
         // Public-client safety: a client without a secret MUST use PKCE.
-        const usePKCE = config.usePKCE !== false
+        const usePKCE = config.usePKCE != false
         if (!config.clientSecret && !usePKCE) {
             throw new Error(
                 "[scrml:oauth] public client (no clientSecret) MUST use PKCE. "
@@ -178,12 +178,12 @@ ${
      */
     export async function startFlow(config, sessionKey) {
         _assertConfig(config)
-        if (!sessionKey || typeof sessionKey !== "string") {
+        if (!sessionKey || typeof sessionKey != "string") {
             throw new Error("[scrml:oauth] startFlow: sessionKey must be a non-empty string")
         }
 
         const state = generateToken(16)
-        const usePKCE = config.usePKCE !== false
+        const usePKCE = config.usePKCE != false
 
         const params = {
             response_type: "code",
@@ -204,7 +204,7 @@ ${
         // Provider-specific extras (e.g. Google's access_type/prompt for refresh).
         if (config.extraAuthParams) {
             for (const [k, v] of Object.entries(config.extraAuthParams)) {
-                if (v !== undefined && v !== null) params[k] = String(v)
+                if (v != undefined && v != null) params[k] = String(v)
             }
         }
 
@@ -247,7 +247,7 @@ ${
         // Always clear state regardless of match/mismatch (single-use).
         await config.storage.del(_stateKey(sessionKey))
 
-        if (!expectedState || expectedState !== state) {
+        if (!expectedState || expectedState != state) {
             const verifierKey = _verifierKey(sessionKey)
             await config.storage.del(verifierKey)
             const err = new Error(
@@ -257,7 +257,7 @@ ${
             throw err
         }
 
-        const usePKCE = config.usePKCE !== false
+        const usePKCE = config.usePKCE != false
         let verifier = null
         if (usePKCE) {
             verifier = await config.storage.get(_verifierKey(sessionKey))
@@ -419,9 +419,9 @@ ${
 
         const data = res.data || {}
         // OAuth-standard fields are snake_case; emit camelCase + keep raw.
-        const expiresIn = typeof data.expires_in === "number"
+        const expiresIn = typeof data.expires_in == "number"
             ? data.expires_in
-            : (typeof data.expires_in === "string" ? parseInt(data.expires_in, 10) : null)
+            : (typeof data.expires_in == "string" ? parseInt(data.expires_in, 10) : null)
         const expiresAt = expiresIn ? Date.now() + expiresIn * 1000 : null
 
         return {
@@ -437,7 +437,7 @@ ${
     }
 
     function _describeTokenError(data, status) {
-        if (data && typeof data === "object") {
+        if (data && typeof data == "object") {
             const code = data.error             || "unknown_error"
             const desc = data.error_description || ""
             return `[scrml:oauth] token request failed (${status}): ${code}${desc ? " — " + desc : ""}`
@@ -452,7 +452,7 @@ ${
     function _buildUrl(base, params) {
         const pairs = []
         for (const [k, v] of Object.entries(params)) {
-            if (v === undefined || v === null || v === "") continue
+            if (v == undefined || v == null || v == "") continue
             pairs.push(encodeURIComponent(k) + "=" + encodeURIComponent(v))
         }
         const query = pairs.join("&")
@@ -467,7 +467,7 @@ ${
     function _formEncode(obj) {
         const pairs = []
         for (const [k, v] of Object.entries(obj || {})) {
-            if (v === undefined || v === null) continue
+            if (v == undefined || v == null) continue
             pairs.push(encodeURIComponent(k) + "=" + encodeURIComponent(v))
         }
         return pairs.join("&")

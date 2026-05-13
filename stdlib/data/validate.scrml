@@ -44,7 +44,7 @@ ${
      * Useful as a guard before form submission.
      */
     export function isValid(result) {
-        return Object.keys(result).length === 0
+        return Object.keys(result).length == 0
     }
 
     /**
@@ -69,7 +69,7 @@ ${
      */
     export function required(message) {
         return makeRule((value) => {
-            const valid = value !== null && value !== undefined && value !== ""
+            const valid = value != null && value != undefined && value != ""
             return { valid, message: message || "This field is required" }
         })
     }
@@ -113,7 +113,7 @@ ${
     export function exactLength(len, message) {
         return makeRule((value) => {
             if (!value) return { valid: true, message: "" }
-            const valid = String(value).length === len
+            const valid = String(value).length == len
             return { valid, message: message || `Must be exactly ${len} characters` }
         })
     }
@@ -156,8 +156,8 @@ ${
      */
     export function numeric(message) {
         return makeRule((value) => {
-            if (value === "" || value === null || value === undefined) return { valid: true, message: "" }
-            const valid = !isNaN(Number(value)) && value !== ""
+            if (value == "" || value == null || value == undefined) return { valid: true, message: "" }
+            const valid = !isNaN(Number(value)) && value != ""
             return { valid, message: message || "Must be a number" }
         })
     }
@@ -167,7 +167,7 @@ ${
      */
     export function integer(message) {
         return makeRule((value) => {
-            if (value === "" || value === null || value === undefined) return { valid: true, message: "" }
+            if (value == "" || value == null || value == undefined) return { valid: true, message: "" }
             const valid = Number.isInteger(Number(value))
             return { valid, message: message || "Must be a whole number" }
         })
@@ -179,7 +179,7 @@ ${
      */
     export function matches(fieldName, message) {
         return makeRule((value, data) => {
-            const valid = value === data[fieldName]
+            const valid = value == data[fieldName]
             return { valid, message: message || `Must match ${fieldName}` }
         })
     }
@@ -216,8 +216,8 @@ ${
     export function custom(fn) {
         return makeRule((value, data) => {
             const result = fn(value, data)
-            if (result === true) return { valid: true, message: "" }
-            return { valid: false, message: typeof result === "string" ? result : "Invalid value" }
+            if (result == true) return { valid: true, message: "" }
+            return { valid: false, message: typeof result == "string" ? result : "Invalid value" }
         })
     }
 

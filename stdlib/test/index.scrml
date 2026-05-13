@@ -20,7 +20,7 @@ ${
     export function assertEqual(actual, expected, message) {
         const a = JSON.stringify(actual)
         const e = JSON.stringify(expected)
-        if (a !== e) {
+        if (a != e) {
             const msg = message ? `${message}: expected ${e}, got ${a}` : `Expected ${e}, got ${a}`
             throw new Error(`[scrml:test] assertEqual failed — ${msg}`)
         }
@@ -32,7 +32,7 @@ ${
     export function assertNotEqual(actual, expected, message) {
         const a = JSON.stringify(actual)
         const e = JSON.stringify(expected)
-        if (a === e) {
+        if (a == e) {
             const msg = message ? `${message}: expected values to differ, both are ${a}` : `Expected values to differ, both are ${a}`
             throw new Error(`[scrml:test] assertNotEqual failed — ${msg}`)
         }
@@ -62,7 +62,7 @@ ${
      * Assert a value is null or undefined.
      */
     export function assertNull(value, message) {
-        if (value !== null && value !== undefined) {
+        if (value != null && value != undefined) {
             const msg = message || `Expected null or undefined, got ${JSON.stringify(value)}`
             throw new Error(`[scrml:test] assertNull failed — ${msg}`)
         }
@@ -72,7 +72,7 @@ ${
      * Assert a value is NOT null or undefined.
      */
     export function assertDefined(value, message) {
-        if (value === null || value === undefined) {
+        if (value == null || value == undefined) {
             const msg = message || `Expected a defined value, got ${JSON.stringify(value)}`
             throw new Error(`[scrml:test] assertDefined failed — ${msg}`)
         }
@@ -117,7 +117,7 @@ ${
      * Assert a number is within an inclusive range.
      */
     export function assertInRange(value, min, max, message) {
-        if (typeof value !== "number" || value < min || value > max) {
+        if (typeof value != "number" || value < min || value > max) {
             const msg = message || `Expected ${value} to be between ${min} and ${max}`
             throw new Error(`[scrml:test] assertInRange failed — ${msg}`)
         }
@@ -128,8 +128,8 @@ ${
      */
     export function assertContains(container, item, message) {
         const has = Array.isArray(container)
-            ? container.some(x => JSON.stringify(x) === JSON.stringify(item))
-            : typeof container === "string" && container.includes(item)
+            ? container.some(x => JSON.stringify(x) == JSON.stringify(item))
+            : typeof container == "string" && container.includes(item)
         if (!has) {
             const msg = message || `Expected ${JSON.stringify(container)} to contain ${JSON.stringify(item)}`
             throw new Error(`[scrml:test] assertContains failed — ${msg}`)

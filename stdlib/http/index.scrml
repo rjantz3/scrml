@@ -28,9 +28,9 @@ ${
 
     async function _request(url, options) {
         const opts = options || {}
-        const timeout = opts.timeout !== undefined ? opts.timeout : 10000
+        const timeout = opts.timeout != undefined ? opts.timeout : 10000
         const retryCount = opts.retry || 0
-        const retryDelay = opts.retryDelay !== undefined ? opts.retryDelay : 1000
+        const retryDelay = opts.retryDelay != undefined ? opts.retryDelay : 1000
         const extraHeaders = opts.headers || {}
 
         const fetchOptions = {
@@ -40,8 +40,8 @@ ${
         for (const [k, v] of Object.entries(extraHeaders)) {
             fetchOptions.headers[k] = v
         }
-        if (opts.body !== undefined) {
-            if (typeof opts.body === "string") {
+        if (opts.body != undefined) {
+            if (typeof opts.body == "string") {
                 fetchOptions.body = opts.body
             } else {
                 fetchOptions.body = JSON.stringify(opts.body)
@@ -75,11 +75,11 @@ ${
                 return { ok: raw.ok, status: raw.status, data, headers: raw.headers, raw }
             } catch(err) {
                 if (timeoutId) clearTimeout(timeoutId)
-                if (err.name === "AbortError") {
+                if (err.name == "AbortError") {
                     throw new Error(`[scrml:http] Request timed out after ${timeout}ms: ${url}`)
                 }
                 lastError = err
-                if (attempt === retryCount) throw lastError
+                if (attempt == retryCount) throw lastError
             }
         }
         throw lastError
@@ -151,7 +151,7 @@ ${
      * Check if a response indicates success (2xx status).
      */
     export function isOk(response) {
-        return response && response.ok === true
+        return response && response.ok == true
     }
 
     /**
@@ -244,10 +244,10 @@ ${
      */
     export async function retry(fn, opts) {
         const o = opts || {}
-        const maxRetries = o.maxRetries !== undefined ? o.maxRetries : 3
-        const baseDelay  = o.baseDelay  !== undefined ? o.baseDelay  : 200
-        const factor     = o.factor     !== undefined ? o.factor     : 2
-        const jitter     = o.jitter     !== undefined ? o.jitter     : 0.2
+        const maxRetries = o.maxRetries != undefined ? o.maxRetries : 3
+        const baseDelay  = o.baseDelay  != undefined ? o.baseDelay  : 200
+        const factor     = o.factor     != undefined ? o.factor     : 2
+        const jitter     = o.jitter     != undefined ? o.jitter     : 0.2
         const shouldRetry = o.shouldRetry || (() => true)
 
         let lastErr = null
@@ -256,7 +256,7 @@ ${
                 return await fn()
             } catch (err) {
                 lastErr = err
-                if (attempt === maxRetries) break
+                if (attempt == maxRetries) break
                 if (!shouldRetry(err)) break
                 const base = baseDelay * Math.pow(factor, attempt)
                 const jitterAmt = base * jitter * (Math.random() * 2 - 1)
@@ -283,7 +283,7 @@ ${
     export function multipart(fields) {
         const fd = new FormData()
         for (const [k, v] of Object.entries(fields || {})) {
-            if (v === undefined || v === null) continue
+            if (v == undefined || v == null) continue
             if (v instanceof Blob || v instanceof File) {
                 fd.append(k, v)
             } else {
@@ -321,22 +321,22 @@ ${
         assertFalsy(isError({ ok: true, status: 200 }))
 
         const client = withBaseUrl("https://api.example.com")
-        assertTruthy(typeof client.get === "function")
-        assertTruthy(typeof client.post === "function")
-        assertTruthy(typeof client.put === "function")
-        assertTruthy(typeof client.del === "function")
-        assertTruthy(typeof client.patch === "function")
+        assertTruthy(typeof client.get == "function")
+        assertTruthy(typeof client.post == "function")
+        assertTruthy(typeof client.put == "function")
+        assertTruthy(typeof client.del == "function")
+        assertTruthy(typeof client.patch == "function")
 
         // -- S57 Tier 3 middleware --------------------------------------------
 
         // withAuth — exposes the same client surface
         const auth = withAuth("token-xyz")
-        assertTruthy(typeof auth.get === "function")
-        assertTruthy(typeof auth.post === "function")
+        assertTruthy(typeof auth.get == "function")
+        assertTruthy(typeof auth.post == "function")
 
         // withDefaults — exposes the same client surface
         const defaults = withDefaults({ timeout: 5000 })
-        assertTruthy(typeof defaults.get === "function")
+        assertTruthy(typeof defaults.get == "function")
 
         // multipart returns a FormData
         const fd = multipart({ name: "alice", count: 3 })

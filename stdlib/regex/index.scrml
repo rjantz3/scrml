@@ -61,7 +61,7 @@ ${
      * Convenience for `pattern.test(str)` with null-safety.
      */
     export function test(pattern, str) {
-        if (typeof str !== "string") return false
+        if (typeof str != "string") return false
         return pattern.test(str)
     }
 
@@ -78,7 +78,7 @@ ${
      *   match(patterns.email, "not-an-email")  → null
      */
     export function match(pattern, str) {
-        if (typeof str !== "string") return null
+        if (typeof str != "string") return null
         const m = pattern.exec(str)
         if (!m) return null
         if (m.groups) return m.groups
@@ -98,23 +98,23 @@ ${
      *     → ["a@b.c", "x@y.z"]
      */
     export function extract(pattern, str) {
-        if (typeof str !== "string") return []
+        if (typeof str != "string") return []
         const flags = pattern.flags.includes("g") ? pattern.flags : pattern.flags + "g"
         const p = new RegExp(pattern.source, flags)
         const out = []
         let m
-        while ((m = p.exec(str)) !== null) {
+        while ((m = p.exec(str)) != null) {
             if (m.groups) {
                 out.push(m.groups)
             } else if (m.length > 1) {
                 // Has capturing groups — push the first capture if there's one,
                 // else the full match.
-                out.push(m[1] !== undefined ? m[1] : m[0])
+                out.push(m[1] != undefined ? m[1] : m[0])
             } else {
                 out.push(m[0])
             }
             // Guard against zero-length matches infinite loop
-            if (m.index === p.lastIndex) p.lastIndex++
+            if (m.index == p.lastIndex) p.lastIndex++
         }
         return out
     }
@@ -124,7 +124,7 @@ ${
      * Convenience wrapper over String.prototype.replace.
      */
     export function replace(pattern, str, replacement) {
-        if (typeof str !== "string") return str
+        if (typeof str != "string") return str
         return str.replace(pattern, replacement)
     }
 
@@ -138,7 +138,7 @@ ${
      *   re.test("v1.2.3")  // → true (the dots are literal, not "any char")
      */
     export function escape(str) {
-        if (typeof str !== "string") return ""
+        if (typeof str != "string") return ""
         return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
     }
 

@@ -91,7 +91,7 @@ ${
                 const now = Date.now()
                 const row = stmtGet.get(ns, key)
                 if (!row) return null
-                if (row.expires_at !== null && row.expires_at <= now) {
+                if (row.expires_at != null && row.expires_at <= now) {
                     stmtDelete.run(ns, key)
                     return null
                 }
@@ -125,7 +125,7 @@ ${
                 const now = Date.now()
                 const row = stmtGet.get(ns, key)
                 if (!row) return false
-                if (row.expires_at !== null && row.expires_at <= now) {
+                if (row.expires_at != null && row.expires_at <= now) {
                     stmtDelete.run(ns, key)
                     return false
                 }
@@ -204,7 +204,7 @@ ${
              */
             increment(key, by) {
                 const current = store.get(key) || 0
-                const next = current + (by !== undefined ? by : 1)
+                const next = current + (by != undefined ? by : 1)
                 store.set(key, next)
                 return next
             },
@@ -214,7 +214,7 @@ ${
              */
             decrement(key, by) {
                 const current = store.get(key) || 0
-                const next = current - (by !== undefined ? by : 1)
+                const next = current - (by != undefined ? by : 1)
                 store.set(key, next)
                 return next
             },
@@ -265,7 +265,7 @@ ${
         // delete
         store.delete("hello")
         assertFalsy(store.has("hello"))
-        assertFalsy(store.get("hello") !== null)
+        assertFalsy(store.get("hello") != null)
 
         // keys
         store.set("a", 1)

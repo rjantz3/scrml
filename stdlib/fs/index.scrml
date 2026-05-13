@@ -149,13 +149,13 @@ ${
         import { assertTruthy } from 'scrml:test'
 
         // Verify all exports are functions
-        assertTruthy(typeof readFileSync === "function")
-        assertTruthy(typeof writeFileSync === "function")
-        assertTruthy(typeof existsSync === "function")
-        assertTruthy(typeof mkdirSync === "function")
-        assertTruthy(typeof readdirSync === "function")
-        assertTruthy(typeof statSync === "function")
-        assertTruthy(typeof rmSync === "function")
+        assertTruthy(typeof readFileSync == "function")
+        assertTruthy(typeof writeFileSync == "function")
+        assertTruthy(typeof existsSync == "function")
+        assertTruthy(typeof mkdirSync == "function")
+        assertTruthy(typeof readdirSync == "function")
+        assertTruthy(typeof statSync == "function")
+        assertTruthy(typeof rmSync == "function")
     }
 }
 </program>

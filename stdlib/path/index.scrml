@@ -32,7 +32,7 @@ ${
     export function join(...segments) {
         const path = require("node:path")
         const filtered = segments.filter(s => s != null)
-        if (filtered.length === 0) return "."
+        if (filtered.length == 0) return "."
         return path.join(...filtered)
     }
 
@@ -49,7 +49,7 @@ ${
     export function resolve(...segments) {
         const path = require("node:path")
         const filtered = segments.filter(s => s != null)
-        if (filtered.length === 0) return path.resolve()
+        if (filtered.length == 0) return path.resolve()
         return path.resolve(...filtered)
     }
 

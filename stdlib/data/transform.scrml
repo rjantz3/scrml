@@ -77,7 +77,7 @@ ${
      *          → { admin: [{...}, {...}], user: [{...}] }
      */
     export function groupBy(array, keyOrFn) {
-        const fn = typeof keyOrFn === "function" ? keyOrFn : (item) => item[keyOrFn]
+        const fn = typeof keyOrFn == "function" ? keyOrFn : (item) => item[keyOrFn]
         const result = {}
         for (const item of array) {
             const key = String(fn(item))
@@ -94,7 +94,7 @@ ${
      * Example: indexBy(users, "id") → Map { 1 => {...}, 2 => {...} }
      */
     export function indexBy(array, keyOrFn) {
-        const fn = typeof keyOrFn === "function" ? keyOrFn : (item) => item[keyOrFn]
+        const fn = typeof keyOrFn == "function" ? keyOrFn : (item) => item[keyOrFn]
         const result = new Map()
         for (const item of array) {
             result.set(fn(item), item)
@@ -109,8 +109,8 @@ ${
      *          sortBy(users, u => u.score, "desc") → sorted high-to-low
      */
     export function sortBy(array, keyOrFn, direction) {
-        const fn = typeof keyOrFn === "function" ? keyOrFn : (item) => item[keyOrFn]
-        const dir = direction === "desc" ? -1 : 1
+        const fn = typeof keyOrFn == "function" ? keyOrFn : (item) => item[keyOrFn]
+        const dir = direction == "desc" ? -1 : 1
         return [...array].sort((a, b) => {
             const va = fn(a)
             const vb = fn(b)
@@ -131,7 +131,7 @@ ${
         if (!keyOrFn) {
             return [...new Set(array)]
         }
-        const fn = typeof keyOrFn === "function" ? keyOrFn : (item) => item[keyOrFn]
+        const fn = typeof keyOrFn == "function" ? keyOrFn : (item) => item[keyOrFn]
         const seen = new Set()
         const result = []
         for (const item of array) {
@@ -208,7 +208,7 @@ ${
         if (Array.isArray(obj)) {
             return obj.map(camelizeKeys)
         }
-        if (obj !== null && typeof obj === "object") {
+        if (obj != null && typeof obj == "object") {
             const result = {}
             for (const [key, value] of Object.entries(obj)) {
                 result[toCamelCase(key)] = camelizeKeys(value)
@@ -228,7 +228,7 @@ ${
         if (Array.isArray(obj)) {
             return obj.map(snakifyKeys)
         }
-        if (obj !== null && typeof obj === "object") {
+        if (obj != null && typeof obj == "object") {
             const result = {}
             for (const [key, value] of Object.entries(obj)) {
                 result[toSnakeCase(key)] = snakifyKeys(value)
@@ -245,12 +245,12 @@ ${
      *          → { a: { b: 1, c: 2 } }
      */
     export function deepMerge(target, source) {
-        if (typeof target !== "object" || typeof source !== "object") return source
+        if (typeof target != "object" || typeof source != "object") return source
         if (Array.isArray(source)) return source
         const result = { ...target }
         for (const [key, value] of Object.entries(source)) {
-            if (typeof value === "object" && value !== null && !Array.isArray(value) &&
-                typeof result[key] === "object" && result[key] !== null) {
+            if (typeof value == "object" && value != null && !Array.isArray(value) &&
+                typeof result[key] == "object" && result[key] != null) {
                 result[key] = deepMerge(result[key], value)
             } else {
                 result[key] = value

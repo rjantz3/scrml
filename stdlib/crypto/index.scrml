@@ -35,10 +35,10 @@ ${
      * Returns an argon2 hash string (readable by verifyHash) for argon2.
      */
     export function hash(algorithm, input) {
-        if (typeof input !== "string") {
+        if (typeof input != "string") {
             input = String(input)
         }
-        if (algorithm === "argon2") {
+        if (algorithm == "argon2") {
             return Bun.password.hashSync(input, { algorithm: "argon2id" })
         }
         const algMap = {
@@ -66,15 +66,15 @@ ${
      * NEVER throws on mismatch — returns false.
      */
     export function verifyHash(algorithm, input, storedHash) {
-        if (typeof input !== "string") {
+        if (typeof input != "string") {
             input = String(input)
         }
         try {
-            if (algorithm === "argon2") {
+            if (algorithm == "argon2") {
                 return Bun.password.verifySync(input, storedHash)
             }
             const computed = hash(algorithm, input)
-            return computed === storedHash
+            return computed == storedHash
         } catch(e) {
             return false
         }
@@ -112,12 +112,12 @@ ${
      * Use for: signed cookies, webhook verification, API signature validation.
      *
      * Example: const sig = hmac(secret, payload)
-     *          const valid = hmac(secret, payload) === incomingSig
+     *          const valid = hmac(secret, payload) == incomingSig
      */
     export function hmac(secret, payload) {
         const encoder = new TextEncoder()
         const keyData = encoder.encode(secret)
-        const msgData = encoder.encode(typeof payload === "string" ? payload : JSON.stringify(payload))
+        const msgData = encoder.encode(typeof payload == "string" ? payload : JSON.stringify(payload))
 
         // Bun supports Web Crypto API
         const cryptoKey = await crypto.subtle.importKey(
@@ -143,13 +143,13 @@ ${
      * Use whenever comparing security tokens (CSRF, session, API keys).
      */
     export fn safeCompare(a, b) {
-        if (typeof a !== "string" || typeof b !== "string") return false
-        if (a.length !== b.length) return false
+        if (typeof a != "string" || typeof b != "string") return false
+        if (a.length != b.length) return false
         let result = 0
         for (let i = 0; i < a.length; i++) {
             result |= a.charCodeAt(i) ^ b.charCodeAt(i)
         }
-        return result === 0
+        return result == 0
     }
 
     ~{

@@ -60,7 +60,7 @@ ${
      * @returns Promise<string> — URL-safe base64 challenge, no padding
      */
     export async function deriveChallenge(verifier) {
-        if (typeof verifier !== "string" || verifier.length < 43) {
+        if (typeof verifier != "string" || verifier.length < 43) {
             throw new Error(`[scrml:oauth/pkce] verifier must be a string of length >= 43`)
         }
         const enc = new TextEncoder()
