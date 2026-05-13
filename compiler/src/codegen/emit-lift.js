@@ -999,7 +999,7 @@ export function hasFragmentedLiftBody(body) {
  *   append to (e.g. the <li> being built by the outer lift)
  * @returns {string}
  */
-function emitForStmtWithContainer(forNode, containerElVar) {
+export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
   const lines = [];
   let varName = forNode.variable ?? forNode.name ?? 'item';
   let iterable = forNode.iterable ?? forNode.collection ?? '[]';
@@ -1008,7 +1008,7 @@ function emitForStmtWithContainer(forNode, containerElVar) {
     // C-style for loop: pass through to emitLogicNode (containerVar not needed for C-style)
     const cStyleMatch = iterable.match(/^\(\s*(.*?)\s*;\s*(.*?)\s*;\s*(.*?)\s*\)$/s);
     if (cStyleMatch) {
-      return emitLogicNode(forNode, {});
+      return emitLogicNode(forNode, opts.continueBehavior ? { continueBehavior: opts.continueBehavior } : {});
     }
     // Match "( [let|const|var] VAR of EXPR )" or "( VAR of EXPR )"
     const forOfMatch = iterable.match(/^\(\s*(?:(?:let|const|var)\s+)?(\w+)\s+of\s+(.*)\s*\)$/s);
@@ -1034,17 +1034,17 @@ function emitForStmtWithContainer(forNode, containerElVar) {
       }
     } else if (child.kind === 'for-stmt') {
       // Doubly-nested for-of with inner lift — route to same container
-      const code = emitForStmtWithContainer(child, containerElVar);
+      const code = emitForStmtWithContainer(child, containerElVar, opts);
       if (code) {
         for (const line of code.split('\n')) lines.push('  ' + line);
       }
     } else if (child.kind === 'if-stmt') {
-      const code = emitIfStmtWithContainer(child, containerElVar);
+      const code = emitIfStmtWithContainer(child, containerElVar, opts);
       if (code) {
         for (const line of code.split('\n')) lines.push('  ' + line);
       }
     } else {
-      const code = emitLogicNode(child, {});
+      const code = emitLogicNode(child, opts.continueBehavior ? { continueBehavior: opts.continueBehavior } : {});
       if (code) lines.push('  ' + code);
     }
   }
@@ -1071,7 +1071,7 @@ function emitForStmtWithContainer(forNode, containerElVar) {
  *   append to
  * @returns {string}
  */
-function emitIfStmtWithContainer(ifNode, containerElVar) {
+export function emitIfStmtWithContainer(ifNode, containerElVar, opts = {}) {
   const lines = [];
   const cond = ifNode.condition ?? ifNode.test ?? "true";
   const rewrittenCond = emitExprField(ifNode.condExpr, cond, { mode: "client" });
@@ -1085,13 +1085,13 @@ function emitIfStmtWithContainer(ifNode, containerElVar) {
         const code = emitLiftExpr(child, { containerVar: containerElVar });
         if (code) for (const line of code.split('\n')) out.push('  ' + line);
       } else if (child.kind === 'for-stmt') {
-        const code = emitForStmtWithContainer(child, containerElVar);
+        const code = emitForStmtWithContainer(child, containerElVar, opts);
         if (code) for (const line of code.split('\n')) out.push('  ' + line);
       } else if (child.kind === 'if-stmt') {
-        const code = emitIfStmtWithContainer(child, containerElVar);
+        const code = emitIfStmtWithContainer(child, containerElVar, opts);
         if (code) for (const line of code.split('\n')) out.push('  ' + line);
       } else {
-        const code = emitLogicNode(child, {});
+        const code = emitLogicNode(child, opts.continueBehavior ? { continueBehavior: opts.continueBehavior } : {});
         if (code) out.push('  ' + code);
       }
     }

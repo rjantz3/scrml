@@ -1,7 +1,7 @@
 import { genVar } from "./var-counter.ts";
 import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
 import { emitLogicNode, emitLogicBody } from "./emit-logic.js";
-import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr } from "./emit-lift.js";
+import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer } from "./emit-lift.js";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
 
@@ -331,6 +331,24 @@ export function emitForStmt(
       for (const child of body) {
         if (child && child.kind === "lift-expr") {
           const code = emitLiftExpr(child, { containerVar: tmpContainerVar });
+          if (code) {
+            for (const line of code.split("\n")) {
+              lines.push(`  ${line}`);
+            }
+          }
+        } else if (child && child.kind === "if-stmt") {
+          // LIFT-5 fix: if-stmt that may contain lift-expr children must route
+          // those inner lifts to tmpContainerVar instead of the global ambient
+          // _scrml_lift_target (which is null when the reconciler calls this factory).
+          const code = emitIfStmtWithContainer(child, tmpContainerVar, { continueBehavior: "return" });
+          if (code) {
+            for (const line of code.split("\n")) {
+              lines.push(`  ${line}`);
+            }
+          }
+        } else if (child && child.kind === "for-stmt") {
+          // LIFT-5 fix: nested for-stmt that may contain lift-expr children.
+          const code = emitForStmtWithContainer(child, tmpContainerVar, { continueBehavior: "return" });
           if (code) {
             for (const line of code.split("\n")) {
               lines.push(`  ${line}`);
