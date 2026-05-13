@@ -9,6 +9,6 @@ ${
 }
 <div>
   <button onclick=getPosts("tech")>Tech Posts</>
-  <button onclick=getPosts(null)>All Posts</>
+  <button onclick=getPosts(not)>All Posts</>
 </div>
 </>

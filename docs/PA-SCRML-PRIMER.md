@@ -87,7 +87,7 @@ const <badge>       = <span class="badge">${@userName}</span>   // markup-typed
 
 `<derivedName/>` in markup with a non-markup-typed derived cell is `E-CELL-NO-RENDER-SPEC`.
 
-**Optional `default=` attribute** — any cell may declare an explicit reset target: `<startTime default=null> = Date.now()`.
+**Optional `default=` attribute** — any cell may declare an explicit reset target: `<startTime default=not> = Date.now()`.
 
 **Optional `debounced=DURATION` / `throttled=DURATION` attributes (S79; SPEC §6.13)** — any Shape 1 or Shape 2 cell may carry one of two reactivity attributes that wrap the cell's write path with timing semantics:
 

@@ -1,7 +1,5 @@
 # scrml LLM Kickstarter — v1
 
-**Status: DO-NOT-PUBLISH-INTERNAL** — this document is an LLM agent-brief, NEVER for external (dev.to / scrml.dev / social) publication. Per pa.md line 319, every scrml-writing dev dispatch MUST include this file in the briefing; per S57 + S89 Wave 4.A D-1 audit, it remains internal-only.
-
 **One-paste context for any LLM about to write scrml.** Read this in full before generating any scrml code. If you've been pasted this document, do not skim.
 
 > v1 supersedes v0 (2026-04-25). Every claim in this document is verified against `compiler/SPEC.md` and the runnable `examples/` directory at scrmlTS commit `b1ce432`. Recipes in §7 each have a corresponding `examples/<n>-*.scrml` you can read end-to-end.
@@ -299,19 +297,18 @@ If the user's prompt mentions auth, real-time, reactive state, schema, or multi-
   ${
     import { hashPassword, verifyPassword, signJwt } from 'scrml:auth'
 
-    type LoginError:enum = { UnknownUser, InvalidPassword }
-
     server function signup(email, password) {
       const hash = hashPassword(password)
       ?{`INSERT INTO users (email, password_hash) VALUES (${email}, ${hash})`}.run()
       return signJwt({ email }, process.env.JWT_SECRET, 3600)
     }
 
-    server function login(email, password)! -> LoginError {
+    server function login(email, password) {
       const user = ?{`SELECT password_hash FROM users WHERE email = ${email}`}.get()
-      if (user is not) fail LoginError::UnknownUser
-      if (not verifyPassword(password, user.password_hash)) fail LoginError::InvalidPassword
-      return signJwt({ email }, process.env.JWT_SECRET, 3600)
+      if (!user) return not
+      return verifyPassword(password, user.password_hash)
+        ? signJwt({ email }, process.env.JWT_SECRET, 3600)
+        : not
     }
   }
 
@@ -328,7 +325,6 @@ Notes:
 - No `connect-sqlite3`, no `express-session`, no `passport`. The session token from `signJwt` is the session.
 - `verifyPassword` uses Argon2id (Bun.password defaults).
 - For multi-field protection, use **comma-separated** values: `protect="password_hash, session_token"`.
-- `login()` is a **failable function** (the `!` after the parameter list, `-> LoginError` declares the failure type). `fail LoginError::Variant` is the canonical error signal — never `return null`, never `throw new Error`, never `try/catch`. Callers handle the failure via the `!{}` arm: `const token = login(email, pw) !{ | ::UnknownUser -> ... | ::InvalidPassword -> ... }`. See §6 below.
 
 ### Real-time recipe (`<channel>` + `@shared`)
 

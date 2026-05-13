@@ -45,10 +45,10 @@ ${
 
     /**
      * Parse a cookie header for a single named cookie value.
-     * Returns the value string, or `not` if not found.
+     * Returns the value string, or null if not found.
      */
     export function readCookieValue(cookieHeader, name) {
-        if (cookieHeader is not) return not
+        if (!cookieHeader) return not
         const parts = cookieHeader.split(";")
         for (let i = 0; i < parts.length; i = i + 1) {
             const piece = parts[i].trim()
@@ -69,10 +69,10 @@ ${
 
     /**
      * Build a Set-Cookie header value for the session.
-     * `token` may be empty or `not` to clear the cookie (logout flow).
+     * `token` may be empty/null to clear the cookie (logout flow).
      */
     export function buildSessionSetCookie(token) {
-        if (token is not || token == "") {
+        if (!token) {
             return `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`
         }
         return `${SESSION_COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}`
