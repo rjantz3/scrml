@@ -6,7 +6,7 @@ This tutorial walks you from an empty directory to a small but complete scrml ap
 
 **What scrml is, in one paragraph.** scrml is a single-file language for full-stack web apps. One `.scrml` file compiles to the HTML, JavaScript, CSS, and server routes the app needs. Markup, reactive state, server functions, SQL, real-time channels, and tests all live in the same file; the compiler decides which half runs in the browser and which half runs on the server. The unit of organization is the program, not the tier.
 
-**What this tutorial covers.** The v0.2.4 canonical surface — the syntax and idioms ratified through the S52-S84 deliberation arc. If you find older material online that disagrees with this document (especially anything from before April 2026 — `< machine>` instead of `<engine>`, `@var = 0` for declaration instead of `<var> = 0`, `null`/`undefined`/`===`/`!==` JavaScript literals instead of `is some` / `is not` / `==` / `!=`), trust this document. scrml is post-training-cutoff for every LLM, and the language has shifted since.
+**What this tutorial covers.** The canonical surface of scrml as of v0.3 (the syntax and idioms ratified through the S52-S89 deliberation arc; current shipped binary is v0.2.6, with v0.3.0 cut pending the LIFT-template fixes and the Wave 4 adopter-content sweep that introduced this paragraph). If you find older material online that disagrees with this document (especially anything from before April 2026 — `< machine>` instead of `<engine>`, `@var = 0` for declaration instead of `<var> = 0`, `null`/`undefined`/`===`/`!==` JavaScript literals instead of `is some` / `is not` / `==` / `!=`, `<channel>` as a sibling of `<program>` rather than a child), trust this document. scrml is post-training-cutoff for every LLM, and the language has shifted since.
 
 **Prerequisites.** Working knowledge of JavaScript syntax (`const`/`let`, arrow functions, template strings) and the DOM event model. A passing acquaintance with SQL helps for §2 onward but is not required — every SQL example uses only `SELECT` and `INSERT`.
 
@@ -61,7 +61,7 @@ Every scrml program is one `<program>` element. Inside it, a `${ ... }` logic bl
 </program>
 ```
 
-There is no `<html>`, no `<head>`, no `<body>` — the compiler wraps what you write in a proper document shell. Anything outside `<program>` is reserved for sibling top-level elements you will meet later (`<channel>`, `<schema>`). Comments use `// ...` and `/* ... */` and are allowed anywhere.
+There is no `<html>`, no `<head>`, no `<body>` — the compiler wraps what you write in a proper document shell. A few elements may appear at file top level alongside `<program>` (notably `<schema>`, §2.2), but `<channel>` lives inside `<program>` (§8). Comments use `// ...` and `/* ... */` and are allowed anywhere.
 
 A `<program>` body holds three kinds of content:
 
@@ -481,7 +481,7 @@ Three things are new:
 
 ### 4.3 Tier 2 — `<engine for=Type initial=...>` with `rule=` transitions
 
-The full engine surface adds three additive concepts to the Tier-1 shape: an `initial=` state, a `rule=` attribute on each state-child declaring legal transitions out, and `<onTransition>` blocks for cross-state effects. The engine is declared at **file level** (a sibling of `<program>`, not a child) and its state-children are empty in the current parser — markup uses a `match` block inside `<program>` to render based on the auto-declared variable.
+The full engine surface adds three additive concepts to the Tier-1 shape: an `initial=` state, a `rule=` attribute on each state-child declaring legal transitions out, and `<onTransition>` blocks for cross-state effects. The engine is declared at **file level** (a sibling of `<program>`, not a child). State-child bodies MAY hold markup directly (Phase A10, shipped S78 — the dispatcher swaps the variant body's innerHTML when the engine variable changes); for the introductory shape below we render the variants via a `match` block inside `<program>` since that pattern carries forward verbatim from Tier 1.
 
 ```scrml
 // 04b-tier2-engine.scrml — Tier 2: <engine> with rule= contracts.
@@ -532,13 +532,13 @@ Things to notice:
 - **`<engine for=LoadPhase initial=.Idle>`** at file level declares the engine. The engine's variable is **auto-declared** by the compiler — its name is the lowercase first run of the type (`loadPhase` here). You do NOT also write `<loadPhase> = .Idle`; that would be a duplicate declaration.
 - **`initial=.Idle`** sets the starting state. Required on non-derived engines.
 - **`rule=` declares legal transitions OUT** of this state-child. `rule=.Loading` means "from `.Idle` you may transition to `.Loading`." Multi-target uses parens with `|`: `rule=(.Loaded | .Failed)`.
-- **State-child bodies are empty (`</>`)** in the current parser. The shape of "what to render in each state" lives in the `<program>`'s `match` block, which reads `@loadPhase` and dispatches accordingly. A future spec amendment will let state-child bodies hold markup directly (per primer §13.7 + Phase A10 work); the current shape splits the two cleanly.
+- **State-child bodies are empty (`</>`)** in the snippet above. They MAY hold markup directly (Phase A10, shipped S78 — the variant-guard dispatcher swaps the body's `innerHTML` on transition and re-wires the reactive bindings inside). The empty-body shape with a sibling `match` block is the introductory idiom because it keeps "where the markup lives" obvious; the body-rendering shape is the canonical idiom once you are comfortable with engines.
 - **Transitions are direct writes.** `@loadPhase = .Loading` triggers the engine's validation: if the destination is not in the current state-child's `rule=` set, you get `E-ENGINE-INVALID-TRANSITION` (compile-time when the from-state is statically known, runtime otherwise).
 - **`<onTransition from=A to=B>`** declares a cross-state effect — code that runs when the engine moves from A to B. Use it for analytics, animations, cleanup, anything that should happen on the transition itself.
 
 The migration story from Tier 1 to Tier 2 is mechanical: the `match` block carries forward verbatim; you add a file-level `<engine for=Type initial=...>` declaration with `rule=` contracts; the type annotation `<phase>: LoadPhase` becomes the engine's auto-declared variable (`@loadPhase`).
 
-> **Engines render at their declaration position** (for the future state-child-body shape). Until that parser lands, the rendering happens at the `match` block inside `<program>`. Cross-file engines (imported from another `.scrml` file) use a `<EngineName/>` use-site mount tag, but you only meet that when you split a program across files.
+> **Engines render at their declaration position** when state-child bodies hold markup (Phase A10, shipped S78). When the bodies are empty (this snippet), rendering happens at the `match` block inside `<program>`. Cross-file engines (imported from another `.scrml` file) use a `<EngineName/>` use-site mount tag, but you only meet that when you split a program across files.
 
 ### 4.4 Why the ladder
 
@@ -637,7 +637,7 @@ ${
 </program>
 ```
 
-This program puts most of the v0.2.4 surface in one place. Let's walk it.
+This program puts most of the v0.3 surface in one place. Let's walk it.
 
 ### 5.1 Compound state — `<signup> ... </>`
 
@@ -791,7 +791,7 @@ The shape:
 
 Notice what is NOT in this code: no `try` / `catch`, no `throw`, no `Promise.reject`. Failures are values; they flow through ordinary control flow. The signature of every failable function tells you exactly which errors can come out — there are no hidden exceptions.
 
-> **No `async`, no `await`, no `Promise` in source.** The compiler auto-awaits every server-function call. You write `const user = persistUser(...)` and the boundary is invisible at the syntax level. Writing `await` is forbidden (`E-AWAIT-FORBIDDEN`). Failable calls flow through the same machinery — `persistUser(...) !{ ... }` is the canonical shape on both client and server.
+> **No `async`, no `await`, no `Promise` in user source.** The compiler auto-awaits every statically-known `Promise<T>` callee — server functions, stdlib `scrml:*` `Promise<T>` exports, and cross-program calls (`<#name>.foo(...)`). You write `const user = persistUser(...)` and the boundary is invisible at the syntax level. Per §13.1, the developer SHALL NOT write `async`, `await`, `Promise`, or `Promise.all` in scrml source. (The narrow exception is cross-program call sites, where an explicit `await` is permitted and idempotent — the compiler de-duplicates at codegen, and the call site emits an Info-level lint `E-PROG-004` rather than an error per the S89 §13.2.2 amendment.) Failable calls flow through the same machinery — `persistUser(...) !{ ... }` is the canonical shape on both client and server.
 
 ### 6.1 Errors are states — the engine shape composes
 
@@ -811,11 +811,11 @@ A small but load-bearing detail. scrml uses three operators where JavaScript use
 | `x is some` | `x !== null && x !== undefined` | Presence check — value exists. |
 | `x is not` | `x === null \|\| x === undefined` | Absence check — value missing. |
 
-The `not` keyword is the canonical operator-form (per §45.7); the `!x` JavaScript spelling also compiles but `not x` is preferred for readability.
+The `not` keyword is the canonical operator-form (per §42 — Absence Semantics, and §45.7 for equality interactions); the `!x` JavaScript spelling also compiles but `not x` is preferred for readability.
 
 ```scrml
 ${
-  <user>: User? = null              // optional — may be missing
+  <user>: User? = not              // optional — initial value is `not` (absent)
 
   function welcome() {
     if (@user is some) {
@@ -831,16 +831,20 @@ ${
 }
 ```
 
+`not` is the absence sentinel — `<user>: User? = not` reads "user is an optional User, initialized to absent." Writing `null` or `undefined` here is `E-SYNTAX-042` (per §7, scrml has no `null`/`undefined` keywords). Assigning `not` to a non-optional cell is `E-TYPE-041`.
+
 Equality uses `==` and `!=`. There is no `===` or `!==` — the comparison is always strict at the value level (the compiler enforces type compatibility statically), so the second `=` adds no information.
 
 ---
 
 ## 8. Channels — real-time state, one tag
 
-Real-time sync over a WebSocket connection is built into the language as a `<channel>` element. The channel lives at file level (sibling of `<program>`, never inside it). State declared inside the channel body is auto-synced to every connected client:
+Real-time sync over a WebSocket connection is built into the language as a `<channel>` element. In an entry file (a file that declares `<program>`), the channel lives **inside** `<program>` as a sibling of `<page>` and the rest of the program body. State declared inside the channel body is auto-synced to every connected client:
 
 ```scrml
 // 07-channel-chat.scrml — chat room with shared state.
+
+<program>
 
 <channel name="chat" topic="lobby">
   <messages> = []
@@ -849,8 +853,6 @@ Real-time sync over a WebSocket connection is built into the language as a `<cha
     @messages = [...@messages, { author, body, ts: Date.now() }]
   }
 </>
-
-<program>
 
 ${
   <username> = ""
@@ -883,9 +885,9 @@ ${
 
 Three things to notice:
 
-1. **`<channel>` is a sibling of `<program>`, not a child.** Putting a channel inside `<program>` is `E-CHANNEL-INSIDE-PROGRAM`.
+1. **`<channel>` lives inside `<program>`.** Under v0.3, channels are descendants of the entry-file `<program>` — app-scope shared-state vehicles, siblings of `<page>` declarations. Putting a channel at file top level in a file that already declares `<program>` fires `E-CHANNEL-OUTSIDE-PROGRAM`; putting one inside an individual `<page>` fires `E-CHANNEL-INSIDE-PAGE`. (A separate module file that contains no `<program>` may declare a `<channel>` at file top — the "pure channel file" shape, §38.12.6 — but that is a sharing pattern beyond this tutorial.)
 2. **`<messages> = []`** declared inside the channel body is auto-synced. Every connected client sees the same `@messages`; a write from any client propagates to all the others. There is no `@shared` modifier — synchronization comes from being inside the channel body.
-3. **`@messages` is reachable from inside `<program>`** via canonical `@messages` access. The channel-declared cells are file-scope visible.
+3. **`@messages` is reachable from inside the rest of `<program>`** via canonical `@messages` access. The channel-declared cells are program-scope visible.
 
 The compiler emits the WebSocket endpoint (`/_scrml_ws/chat` by default), the message-broadcast plumbing, and the reconnection logic. You declare what state is shared; the compiler handles the transport.
 
@@ -903,10 +905,6 @@ By now you have seen every primitive you need to build a working scrml app. Let'
   table_two { ... }
 </>
 
-<channel name="...">      <!-- (optional, file level) -->
-  <synced_state> = ...
-</>
-
 ${
   // Types — structs and enums
   type Foo:struct = { ... }
@@ -922,6 +920,10 @@ ${
 </>
 
 <program>
+
+<channel name="...">      <!-- (optional, inside <program>) -->
+  <synced_state> = ...
+</>
 
 <db src="..." tables="..." protect="...">
 
@@ -998,7 +1000,7 @@ You now know enough scrml to write working programs. From here:
 
 ---
 
-## Glossary — the v0.2.4 primitives
+## Glossary — the v0.3 primitives
 
 A fast reference for the keywords and sigils in this tutorial. Each line links back to the section that explains it.
 
@@ -1033,7 +1035,7 @@ A fast reference for the keywords and sigils in this tutorial. Each line links b
 - **`is some` / `is not` / `not`** — presence and negation operators. §7.
 - **`==` / `!=`** — equality operators (no `===`/`!==`). §7.
 - **`reset(@cell)`** — language-keyword for resetting state to its default. §5.7.
-- **`<channel name="..." topic="...">`** — real-time shared state, file-level. §8.
+- **`<channel name="..." topic="...">`** — real-time shared state; lives inside `<program>` (or at file top in a pure-channel module file). §8.
 - **`#{ ... }`** — scoped CSS block. §2.3.
 
 ---
@@ -1073,4 +1075,4 @@ If you don't see your case in the table, default to the shape from §9. Don't in
 
 ---
 
-*Last updated: 2026-05-11 — v0.2.4 canonical (post-S84 Wave 1 + Wave 1.5 robust-v0.2 bundle).*
+*Last updated: 2026-05-13 — v0.3 canonical (post-S87 Insight 30 channel-placement reversal, post-S89 §13.2 auto-await extension; verified against 11/11 tutorial snippets compiling under the current binary).*

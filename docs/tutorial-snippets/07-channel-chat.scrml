@@ -1,5 +1,7 @@
 // 07-channel-chat.scrml — chat room with shared state.
 
+<program>
+
 <channel name="chat" topic="lobby">
   <messages> = []
 
@@ -7,8 +9,6 @@
     @messages = [...@messages, { author, body, ts: Date.now() }]
   }
 </>
-
-<program>
 
 ${
   <username> = ""

@@ -2,7 +2,7 @@
 //
 // The engine is declared at file level (NOT inside <program>). State-children
 // carry rule= attributes that declare the legal transitions out. Bodies are
-// empty (</>) in v0.2.4 — markup is driven by a `match` block inside <program>
+// empty (</>) in v0.3 — markup is driven by a `match` block inside <program>
 // that reads the engine's auto-declared variable.
 
 ${
