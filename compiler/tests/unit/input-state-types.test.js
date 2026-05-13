@@ -19,6 +19,8 @@
  * §14 gamepad index= attribute is reflected in emitted code
  * §15 all three input state types can coexist in a single program
  * §16 rewriteInputStateRefs: <#id> expressions compile to runtime registry lookups (BUG-1 fix)
+ * §17 Type-system regression: <#id> member access flows through TS clean (S89 §36 Phase 2.A)
+ * §18 E-INPUT-005: duplicate input-state id within same scope (S89 §36 Phase 2.B)
  */
 
 import { describe, test, expect } from "bun:test";
@@ -28,6 +30,7 @@ import { generateHtml } from "../../src/codegen/emit-html.js";
 import { emitReactiveWiring } from "../../src/codegen/emit-reactive-wiring.js";
 import { makeCompileContext } from "../../src/codegen/context.ts";
 import { rewriteInputStateRefs, rewriteExpr } from "../../src/codegen/rewrite.js";
+import { runTS } from "../../src/type-system.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -581,5 +584,217 @@ describe("§16: rewriteInputStateRefs compiles <#id> to runtime registry lookup"
     expect(result).toContain('_scrml_reactive_get("active")');
     expect(result).not.toContain("<#keys>");
     expect(result).not.toContain("@active");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §17: Type-system regression — <#id> member access typing is clean
+// ---------------------------------------------------------------------------
+//
+// S89 §36 Phase 2.A. Input-state-ref is a leaf ExprNode kind (expression-parser.ts
+// :2313-2317): forEachIdentInExprNode does not recurse into it. type-system.ts
+// has no `input-state-ref` arm — by design, because input-state objects resolve
+// at runtime through `_scrml_input_state_registry.get("X")` and expose a
+// property bag whose shape depends on which input tag (`<keyboard>` /
+// `<mouse>` / `<gamepad>`) registered the id. The leaf-as-opaque approach
+// means member access on `<#X>` flows through the type-checker without firing
+// E-SCOPE-001 (unknown ident) or E-TYPE-* (type mismatch) — the member chain
+// has no base identifier to credit against the scope chain.
+//
+// These tests pin that contract so that a future TS refactor cannot silently
+// regress to firing E-SCOPE-001 on `<#keys>.pressed("Space")` member chains.
+// ---------------------------------------------------------------------------
+
+describe("§17: <#id> member access — type-system regression (Phase 2.A)", () => {
+  function runFullPipelineTS(source) {
+    const { ast, errors: tabErrors } = parseSource(source);
+    const tsRes = runTS({ files: [ast] });
+    return [...(tabErrors || []), ...(tsRes.errors || [])];
+  }
+
+  test("<#keys>.pressed(\"Space\") in logic block does not fire E-SCOPE-001", () => {
+    const source = `<program>
+<keyboard id="keys"/>
+<div>\${
+    @jumping = <#keys>.pressed("Space")
+}</>
+</>`;
+    const errors = runFullPipelineTS(source);
+    const scopeErrors = errors.filter(e => e.code === "E-SCOPE-001");
+    expect(scopeErrors).toHaveLength(0);
+  });
+
+  test("<#keys>.modifiers.ctrl deep member access does not fire any E-SCOPE / E-TYPE", () => {
+    const source = `<program>
+<keyboard id="keys"/>
+<div>\${
+    @ctrl = <#keys>.modifiers.ctrl
+}</>
+</>`;
+    const errors = runFullPipelineTS(source);
+    const typeOrScope = errors.filter(e =>
+      e.code === "E-SCOPE-001" ||
+      (typeof e.code === "string" && e.code.startsWith("E-TYPE-"))
+    );
+    expect(typeOrScope).toHaveLength(0);
+  });
+
+  test("<#cursor>.x / <#cursor>.y / <#cursor>.buttons all flow through clean", () => {
+    const source = `<program>
+<mouse id="cursor"/>
+<div>\${
+    @mx = <#cursor>.x
+    @my = <#cursor>.y
+    @btns = <#cursor>.buttons
+    @wheel = <#cursor>.wheel
+}</>
+</>`;
+    const errors = runFullPipelineTS(source);
+    const blocking = errors.filter(e =>
+      e.code === "E-SCOPE-001" ||
+      (typeof e.code === "string" && e.code.startsWith("E-TYPE-"))
+    );
+    expect(blocking).toHaveLength(0);
+  });
+
+  test("<#pad>.buttons[0].pressed (call+index+member chain) flows through clean", () => {
+    const source = `<program>
+<gamepad id="pad"/>
+<div>\${
+    @b0 = <#pad>.buttons[0].pressed
+    @ax0 = <#pad>.axes[0]
+    @c = <#pad>.connected
+    @btnPressed = <#pad>.pressed(0)
+}</>
+</>`;
+    const errors = runFullPipelineTS(source);
+    const blocking = errors.filter(e =>
+      e.code === "E-SCOPE-001" ||
+      (typeof e.code === "string" && e.code.startsWith("E-TYPE-"))
+    );
+    expect(blocking).toHaveLength(0);
+  });
+
+  test("<#keys>.pressed combined with @reactive refs does not flag the input-state-ref", () => {
+    const source = `<program>
+<keyboard id="keys"/>
+<state count: int=0/>
+<div>\${
+    @jumping = <#keys>.pressed("Space") && @count > 0
+}</>
+</>`;
+    const errors = runFullPipelineTS(source);
+    // E-SCOPE-001 specifically on "keys" or "_scrml_input_state_registry" would
+    // indicate the leaf-as-opaque contract regressed.
+    const inputRefScope = errors.filter(e =>
+      e.code === "E-SCOPE-001" &&
+      (String(e.message ?? "").includes("keys") ||
+       String(e.message ?? "").includes("_scrml_input_state_registry"))
+    );
+    expect(inputRefScope).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §18: E-INPUT-005 — duplicate input-state id within same scope (Phase 2.B)
+// ---------------------------------------------------------------------------
+//
+// S89 §36 Phase 2.B. SPEC §36.7 lines 15854-15871 + §34 catalog line 14938.
+// Scope semantics per SPEC §36.5.1 (S89 OQ-B Option α): the IMMEDIATELY
+// ENCLOSING scope owns the input-state lifecycle, where scope boundary is
+// `<program>` (root permanent scope per §6.7.2) or any element conditionally
+// rendered (`if=`). The three input-state tags share a single id namespace
+// per §34 line 14938 — `<keyboard id="x"/>` + `<mouse id="x"/>` in the same
+// scope is a cross-tag duplicate.
+// ---------------------------------------------------------------------------
+
+describe("§18: E-INPUT-005 — duplicate input-state id within scope (Phase 2.B)", () => {
+  test("two <keyboard id=\"k\"> in same program scope fires E-INPUT-005", () => {
+    const source = `<program>
+<keyboard id="k"/>
+<keyboard id="k"/>
+</>`;
+    const { errors } = compileSource(source);
+    const dup = errors.filter(e => e.code === "E-INPUT-005");
+    expect(dup).toHaveLength(1);
+    expect(dup[0].message).toContain("k");
+    expect(dup[0].message).toContain("keyboard");
+  });
+
+  test("cross-tag duplicate: <keyboard id=\"x\"> + <mouse id=\"x\"> fires E-INPUT-005", () => {
+    const source = `<program>
+<keyboard id="x"/>
+<mouse id="x"/>
+</>`;
+    const { errors } = compileSource(source);
+    const dup = errors.filter(e => e.code === "E-INPUT-005");
+    expect(dup).toHaveLength(1);
+    expect(dup[0].message).toContain("x");
+    // First decl was <keyboard>, second is <mouse> — message should reference
+    // both tag kinds to make the cross-tag namespace explicit.
+    expect(dup[0].message).toContain("keyboard");
+    expect(dup[0].message).toContain("mouse");
+  });
+
+  test("cross-tag duplicate: <gamepad id=\"p\"> + <mouse id=\"p\"> fires E-INPUT-005", () => {
+    const source = `<program>
+<gamepad id="p"/>
+<mouse id="p"/>
+</>`;
+    const { errors } = compileSource(source);
+    const dup = errors.filter(e => e.code === "E-INPUT-005");
+    expect(dup).toHaveLength(1);
+  });
+
+  test("distinct ids in same scope: NO E-INPUT-005", () => {
+    const source = `<program>
+<keyboard id="keys"/>
+<mouse id="cursor"/>
+<gamepad id="pad"/>
+</>`;
+    const { errors } = compileSource(source);
+    const dup = errors.filter(e => e.code === "E-INPUT-005");
+    expect(dup).toHaveLength(0);
+  });
+
+  test("same id in different program scopes (nested): NO E-INPUT-005", () => {
+    const source = `<program>
+<keyboard id="k"/>
+<program name="sub">
+<keyboard id="k"/>
+</>
+</>`;
+    const { errors } = compileSource(source);
+    const dup = errors.filter(e => e.code === "E-INPUT-005");
+    expect(dup).toHaveLength(0);
+  });
+
+  test("three identical ids: fires on 2nd AND 3rd occurrence (per-decl emission)", () => {
+    const source = `<program>
+<keyboard id="k"/>
+<keyboard id="k"/>
+<keyboard id="k"/>
+</>`;
+    const { errors } = compileSource(source);
+    const dup = errors.filter(e => e.code === "E-INPUT-005");
+    // Mirrors E-INPUT-001..004 per-occurrence emission: 2nd and 3rd both fire.
+    expect(dup).toHaveLength(2);
+  });
+
+  test("same id under nested if= scopes: NO E-INPUT-005 (disjoint mount windows)", () => {
+    // §6.7.2 + §36.5.1: if=-rendered elements create independent lifecycle
+    // scopes. Two `<keyboard id="k">` declarations in disjoint if= scopes do
+    // not overlap in mount/unmount and so are not flagged.
+    const source = `<program>
+<div if=@a>
+<keyboard id="k"/>
+</>
+<div if=@b>
+<keyboard id="k"/>
+</>
+</>`;
+    const { errors } = compileSource(source);
+    const dup = errors.filter(e => e.code === "E-INPUT-005");
+    expect(dup).toHaveLength(0);
   });
 });

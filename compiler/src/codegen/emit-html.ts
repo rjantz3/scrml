@@ -157,6 +157,132 @@ const INPUT_STATE_TAGS = new Set(["keyboard", "mouse", "gamepad"]);
 // §6.7.7 <request> — single-shot async fetch state type, emits no HTML
 const REQUEST_TAGS = new Set(["request"]);
 
+/**
+ * §36 E-INPUT-005 — duplicate input-state-type id within the same scope.
+ *
+ * Walks the AST collecting (id, tag, scope) tuples across the three input
+ * state tags (`<keyboard>`, `<mouse>`, `<gamepad>`). The three tags share a
+ * single id namespace per SPEC §34 catalog line 14900 + §36.7 lines 15854-15871:
+ * `<keyboard id="x"/>` + `<mouse id="x"/>` in the same scope is a duplicate.
+ *
+ * Scope semantics — per SPEC §36.5.1 (S89 OQ-B ratification): the
+ * IMMEDIATELY ENCLOSING SCOPE owns the input-state lifecycle. Scope boundaries
+ * are determined by §6.7.2: `<program>` (root permanent scope) plus any
+ * element conditionally rendered (`if=`). Nested-scope declarations with the
+ * same id are NOT duplicates — they live in disjoint mount/unmount windows.
+ *
+ * One-pass walker; per-scope `Map<id, …>` accumulator pushed/popped on
+ * scope-boundary enter/exit. Fires E-INPUT-005 on the 2nd (and any subsequent)
+ * occurrence of the same id within a single scope frame — mirrors the
+ * per-occurrence emission pattern of E-INPUT-001..004 (one error per offending
+ * declaration site).
+ *
+ * Independent of the main `emitNode` HTML emitter to keep concerns separated;
+ * runs once at generateHtml entry over the same top-level nodes array.
+ */
+function checkInputStateDuplicateIds(nodes: any[], errors: CGError[]): void {
+  // Stack of scope frames. Top frame is the "immediately enclosing scope".
+  // Each frame maps `id` -> { tag, span } of the FIRST decl seen in that scope.
+  const scopeStack: Map<string, { tag: string }>[] = [new Map()];
+
+  function currentScope(): Map<string, { tag: string }> {
+    return scopeStack[scopeStack.length - 1];
+  }
+
+  function extractIdAttr(attrs: any[]): string | null {
+    const idAttr = (attrs ?? []).find((a: any) => a?.name === "id");
+    if (!idAttr) return null;
+    const v = idAttr.value;
+    if (v?.kind === "string-literal") return typeof v.value === "string" ? v.value : null;
+    if (v?.kind === "variable-ref") {
+      const raw: string = (v.name ?? "").toString();
+      return raw.replace(/^@/, "");
+    }
+    return null;
+  }
+
+  function walk(node: any): void {
+    if (!node || typeof node !== "object") return;
+
+    // Containers that hold children but are not themselves markup scope boundaries.
+    if (node.kind === "logic" && Array.isArray(node.body)) {
+      for (const c of node.body) walk(c);
+      return;
+    }
+    if (node.kind === "state" && Array.isArray(node.children)) {
+      for (const c of node.children) walk(c);
+      return;
+    }
+    if (node.kind === "if-chain" && Array.isArray(node.branches)) {
+      // Each branch element is its own scope (§17.1.1 + §6.7.2: if=/else-if=/else
+      // are conditional renders, each creating an independent lifecycle scope).
+      for (const br of node.branches) {
+        scopeStack.push(new Map());
+        walk(br?.element);
+        scopeStack.pop();
+      }
+      return;
+    }
+    if (node.kind === "engine-decl" && Array.isArray(node.arms)) {
+      // Each engine variant arm is its own mount-lifecycle scope (Phase A10).
+      for (const arm of node.arms) {
+        if (arm && Array.isArray(arm.body)) {
+          scopeStack.push(new Map());
+          for (const c of arm.body) walk(c);
+          scopeStack.pop();
+        }
+      }
+      return;
+    }
+
+    if (node.kind !== "markup") return;
+
+    const tag: string = node.tag;
+    const attrs: any[] = Array.isArray(node.attrs) ? node.attrs : (Array.isArray(node.attributes) ? node.attributes : []);
+    const children: any[] = Array.isArray(node.children) ? node.children : [];
+
+    // Per §6.7.2 + §36.5.1: scope boundaries are <program> (permanent root
+    // scope) and any element with an if= attribute (conditional-render scope).
+    const hasIfAttr = attrs.some((a: any) => a?.name === "if");
+    const isScopeBoundary = tag === "program" || hasIfAttr;
+
+    if (isScopeBoundary) scopeStack.push(new Map());
+
+    // Duplicate-id check for input-state tags only.
+    if (INPUT_STATE_TAGS.has(tag)) {
+      const id = extractIdAttr(attrs);
+      if (id) {
+        const scope = currentScope();
+        const existing = scope.get(id);
+        if (existing) {
+          const span = node.span ?? { file: "", start: 0, end: 0, line: 1, col: 1 };
+          errors.push(new CGError(
+            "E-INPUT-005",
+            `E-INPUT-005: Duplicate input state id \`"${id}"\`. Each input state type ` +
+            `(\`<keyboard>\`, \`<mouse>\`, \`<gamepad>\`) must have a unique id within its ` +
+            `scope (first declared as \`<${existing.tag}>\`, this declaration is ` +
+            `\`<${tag}>\`). Choose a different id for the second \`<${tag}>\`.`,
+            span,
+          ));
+        } else {
+          scope.set(id, { tag });
+        }
+      }
+    }
+
+    // Always recurse — including into <program name="..."> (worker bundle
+    // bodies) because their input-state declarations still participate in
+    // the runtime registry and warrant the same uniqueness guarantee within
+    // their own scope. The emit-html walker short-circuits named programs
+    // for HTML emission; that does not apply to this static check.
+    for (const child of children) walk(child);
+
+    if (isScopeBoundary) scopeStack.pop();
+  }
+
+  for (const n of nodes) walk(n);
+}
+
 // §6.7.8 <timeout> — single-shot timer state type, emits no HTML
 const TIMEOUT_TAGS = new Set(["timeout"]);
 
@@ -1425,6 +1551,15 @@ export function generateHtml(
       }
       return;
     }
+  }
+
+  // §36 Phase 2.B (S89): E-INPUT-005 duplicate input-state-id-within-scope check.
+  // Runs as a separate pre-walk so its scope tracking is decoupled from the
+  // main HTML emitter's traversal concerns (templates, if-chains, engine
+  // dispatchers, render-by-tag expansion, etc.). See `checkInputStateDuplicateIds`
+  // for scope semantics and SPEC §36.5.1 (S89 OQ-B Option α).
+  if (errors) {
+    checkInputStateDuplicateIds(nodes, errors);
   }
 
   for (const node of nodes) {
