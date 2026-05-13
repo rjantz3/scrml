@@ -391,6 +391,25 @@ root, STOP. Re-derive the path from WORKTREE_ROOT.
 
 **Platform-level fix (deferred):** a `PreToolUse` hook in settings.json that rejects sub-dispatched-agent Write/Edit calls whose absolute path is in main but not the active worktree subtree. Closes the leak entirely; needs context-aware "is this the PA or a subagent?" signal. Filed as F4 follow-up; not yet scoped.
 
+### S88 addendum — `isolation: "worktree"` parameter MUST be explicit on every dev-agent Agent() call
+
+**Added 2026-05-12 (S88, user-authorized via process-precedent).** The F4 block above is shaped as if `isolation: "worktree"` were always set on dev-agent dispatches. **It isn't automatic.** PA must explicitly pass `isolation: "worktree"` in the Agent tool call parameters. If omitted, the agent works directly in the main checkout — bypassing every protection F4 + S67 (file-delta protocol) + S83 (commit discipline two-sided rule) are built around.
+
+**S88 precedent.** PA dispatched LIFT-1 + LIFT-2/3/4 in parallel via the Agent tool, set `subagent_type` + `run_in_background` + `prompt`, but **omitted the `isolation` parameter on both calls**. LIFT-1 returned reporting `WORKTREE_PATH: /home/bryan-maclee/scrmlMaster/scrmlTS` and `BRANCH: main` — i.e. it worked in main and committed directly to main (commit `be7b261`). The pre-commit hook gated it cleanly, no substantive damage; the procedural file-delta review-gate was silently bypassed. LIFT-2/3/4 (still in flight when this precedent was logged) was at the same risk.
+
+**Mandatory dispatch checklist — every dev-agent / scrml-writer / gauntlet / codegen Agent call MUST set ALL of:**
+
+- `subagent_type: <agent>`
+- `prompt: <brief>` (containing the F4 startup-verification block per the spec above)
+- `isolation: "worktree"` ← **NEW S88 — easy to forget; do not omit**
+- `run_in_background: true` (if applicable)
+
+If you find yourself about to call `Agent({...})` for a dev-agent task without `isolation: "worktree"`, STOP. Add it. The only legitimate omission cases are pure-research agents (Explore, scrml-deep-dive, debate-curator, agent-registry) that don't write to the project tree.
+
+**Detection — when a dispatch lands without isolation:** the agent's final report's WORKTREE_PATH will be the main checkout (not `.claude/worktrees/agent-<id>/`). If you see that, surface to user as a process violation and check whether main moved without PA-side review.
+
+**Recovery — if a dispatch landed without isolation:** the work is in main with the pre-commit hook as the only gate. PA must `git log -p <agent-SHA>` to retro-review the diff as if it were a file-delta review (the gate that was bypassed). If anything looks wrong, revert + re-dispatch with isolation set correctly. If clean, accept the landing and note the process violation.
+
 ### Dispatch landing — worktree-as-scratch / file-delta (S67 standing rule)
 
 **This supersedes the prior cherry-pick-from-worktree pattern AND the brief S67 fast-forward-dispatch experiment.** Validated S67 on B7 + B8 parallel dispatches: zero PA redo, single PA-authored commit per dispatch, no branch-name fight with the harness.
