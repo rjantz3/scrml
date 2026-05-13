@@ -5074,35 +5074,100 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const variantNameTok = consume(); // IDENT (PascalCase variant name)
         consume(); // '('
         // Collect binding names by walking tokens until matching `)`.
+        // Per SPEC §18.7 there are two payload-binding forms:
+        //   - Positional: `.V(localName)` — the FIRST ident is the binding name.
+        //   - Named:      `.V(fieldName: localName)` — the binding name is
+        //                  the ident AFTER the `:` (the LOCAL), not the
+        //                  field name BEFORE the `:`. SPEC §18.7 worked
+        //                  example: `.Rectangle(height: h, width: w) => w * h`
+        //                  binds `h` and `w` (locals), not `height`/`width`.
+        // The strategy: per top-level comma-separated segment, look at the
+        // first two non-whitespace tokens; if pattern is `IDENT :`, the
+        // binding name is the IDENT following the `:`. Otherwise, the
+        // FIRST IDENT in the segment is the binding name. Type annotations
+        // (`localName: type`) are out of scope here — the typer infers
+        // payload field types from the variant declaration.
         const payloadBindings = [];
         let bdepth = 1;
+        // Buffer of tokens for the current comma-separated segment, plus
+        // a flat list of all paren-interior tokens (used to reconstruct
+        // the raw `binding` text for codegen via parseBindingList).
+        let segmentTokens = [];
+        const allBindingTokens = [];
+        const finalizeSegment = () => {
+          if (segmentTokens.length === 0) return;
+          // Detect named form `IDENT : ...` — the binding name comes AFTER
+          // the colon. Otherwise the FIRST IDENT is the binding name.
+          if (
+            segmentTokens.length >= 3 &&
+            segmentTokens[0].kind === 'IDENT' &&
+            segmentTokens[1].kind === 'PUNCT' && segmentTokens[1].text === ':'
+          ) {
+            // Named binding — find the first IDENT after the `:`.
+            for (let k = 2; k < segmentTokens.length; k++) {
+              const tk = segmentTokens[k];
+              if (tk.kind === 'IDENT' && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(tk.text)) {
+                payloadBindings.push(tk.text);
+                break;
+              }
+            }
+          } else if (segmentTokens.length === 1 && segmentTokens[0].kind === 'IDENT' &&
+                     segmentTokens[0].text === '_') {
+            // Positional discard — `_`. Preserved as a binding so codegen
+            // emits no `const` line (parseBindingList treats `_` as discard).
+            payloadBindings.push('_');
+          } else {
+            // Positional — first IDENT in the segment is the binding name.
+            // Type annotations (`local: type`) take only the leading ident.
+            for (const tk of segmentTokens) {
+              if (tk.kind === 'IDENT' && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(tk.text)) {
+                payloadBindings.push(tk.text);
+                break;
+              }
+            }
+          }
+          segmentTokens = [];
+        };
         while (peek() && bdepth > 0) {
           const t = peek();
-          if (t.kind === 'PUNCT' && t.text === '(') bdepth++;
-          else if (t.kind === 'PUNCT' && t.text === ')') {
+          if (t.kind === 'PUNCT' && t.text === '(') {
+            bdepth++;
+            segmentTokens.push(t);
+            allBindingTokens.push(t);
+          } else if (t.kind === 'PUNCT' && t.text === ')') {
             bdepth--;
             if (bdepth === 0) break;
-          }
-          if (bdepth === 1 && t.kind === 'IDENT' && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(t.text)) {
-            // Only the FIRST identifier per comma-segment is the binding —
-            // subsequent idents (e.g., type annotations `n: number`) are
-            // out of B20's scope. We use a simple "ident immediately after
-            // `(` or `,`" heuristic.
-            const prev = peek(-1);
-            const isStart = !prev || (prev.kind === 'PUNCT' && (prev.text === '(' || prev.text === ','));
-            if (isStart) payloadBindings.push(t.text);
+            segmentTokens.push(t);
+            allBindingTokens.push(t);
+          } else if (bdepth === 1 && t.kind === 'PUNCT' && t.text === ',') {
+            // Top-level comma — end the current segment.
+            finalizeSegment();
+            allBindingTokens.push(t);
+          } else {
+            segmentTokens.push(t);
+            allBindingTokens.push(t);
           }
           consume();
         }
+        // Flush the last segment (no trailing comma).
+        finalizeSegment();
         consume(); // ')'
         consume(); // '=>'
         consume(); // '{'
+        // Reconstruct the raw paren-interior text so codegen's
+        // `parseBindingList` (in emit-control-flow.ts) can resolve named
+        // bindings (`field: local` → `const local = subject.data.field`).
+        const bindingText = allBindingTokens.map(t => t.text).join(' ').replace(/\s+/g, ' ').trim();
         const blockBody = parseRecursiveBody();
         return {
           id: ++counter.next,
           kind: 'match-arm-block',
           variant: variantNameTok.text,
           payloadBindings,
+          // `binding`: raw paren contents in the same shape as the inline
+          // form's `binding` field — consumed by codegen's parseBindingList
+          // to emit `const localName = subject.data.fieldName;` preludes.
+          binding: bindingText.length > 0 ? bindingText : null,
           isWildcard: false,
           body: blockBody,
           span: spanOf(startTok, peek()),

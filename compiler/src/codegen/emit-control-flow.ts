@@ -1240,15 +1240,8 @@ export function rewriteBlockBody(
 
 /**
  * Emit a match expression compiled to a JS if/else IIFE.
- *
- * `opts` is an opaque pass-through used by emitLogicBody for the structured
- * (match-arm-block) path. Thread it from the caller so engineBindings /
- * machineBindings / declaredNames / boundary survive INTO arm bodies — without
- * it, an `@engineCell = .X` write inside `match v { .V => { @engineCell = ... } }`
- * routes to bare `_scrml_reactive_set` instead of `_scrml_engine_direct_set`,
- * silently bypassing the rule= contract guard. (Bug 1 follow-on, S88.)
  */
-export function emitMatchExpr(node: any, opts?: any): string {
+export function emitMatchExpr(node: any): string {
   const _matchCtx: EmitExprContext = { mode: "client" };
   const header = emitExprField(node.headerExpr, (node.header ?? "").trim(), _matchCtx);
   const body: any[] = node.body ?? [];
@@ -1260,21 +1253,19 @@ export function emitMatchExpr(node: any, opts?: any): string {
     if (!child) continue;
     // Handle structured match-arm-block nodes (from AST builder block body parsing).
     // These come from `. VariantName => { ... }` arms where the body was parsed as AST.
-    //
-    // Bug 1 fix (S88 dispatch — 14-mario): block-form payload-binding arms
-    // (`. Variant(n) => { ... }`) carry `payloadBindings: string[]` from
-    // ast-builder.js (Form 1b). Project them into MatchArm.binding so
-    // emitVariantBindingPrelude can produce the `const n = tmp.data.field;`
-    // statements before the arm body. Without this, references like `n` inside
-    // the body emit as unbound JS identifiers → ReferenceError at runtime.
-    // (B20 fixed parse + typer for this shape at S69; this closes the CG gap.)
     if (child.kind === "match-arm-block") {
-      const payloadBindings = Array.isArray(child.payloadBindings) ? child.payloadBindings : [];
-      const binding = payloadBindings.length > 0 ? payloadBindings.join(", ") : null;
+      // `child.binding` is the raw paren-contents text captured by the
+      // ast-builder Form 1b parser (e.g., "name : who, count : n" or
+      // "w, h"). When present, emitVariantBindingPrelude will emit the
+      // `const <local> = subject.data.<field>;` lines for the arm body.
+      // Wildcard / not arms have no payload binding by construction.
+      const armBinding = (!child.isWildcard && !child.isNotArm && typeof child.binding === "string" && child.binding.length > 0)
+        ? child.binding
+        : null;
       const arm: MatchArm = {
         kind: child.isWildcard ? "wildcard" : child.isNotArm ? "not" : "variant",
         test: child.variant ?? null,
-        binding,
+        binding: armBinding,
         result: "",
         structuredBody: Array.isArray(child.body) ? child.body : null,
       };
@@ -1335,13 +1326,8 @@ export function emitMatchExpr(node: any, opts?: any): string {
 
     // Structured body: emit each statement via emitLogicNode (handles lift-expr, etc.)
     // This path is taken for match-arm-block nodes parsed by the AST builder.
-    // Bug 1 fix-C (S88 dispatch — 14-mario engine writes): thread `opts` so
-    // engine/machine bindings + declaredNames + boundary reach _emitReactiveSet
-    // in the arm body. Without this, `@engineCell = .X` inside an arm emits
-    // bare `_scrml_reactive_set` and bypasses the rule= contract guard +
-    // engine timer/history bookkeeping.
     if (arm.structuredBody) {
-      const bodyLines = emitLogicBody(arm.structuredBody, opts).filter(Boolean);
+      const bodyLines = emitLogicBody(arm.structuredBody).filter(Boolean);
       const structuredInner = bodyLines.join("; ");
       const structuredEmit = structuredInner
         ? `{ ${bindingPrelude}${structuredInner} }`
