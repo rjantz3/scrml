@@ -12,7 +12,7 @@ ${
     // is required. decodeJwt is pure and safe in any context.
     // ---------------------------------------------------------------------------
 
-    import { safeCall, HostError } from 'scrml:host'
+    import { safeCall, safeCallAsync, HostError } from 'scrml:host'
 
     /**
      * JwtError — error type for scrml:auth/jwt failable operations.
@@ -108,11 +108,11 @@ ${
      *   const result = await verifyJwt(token, process.env.JWT_SECRET)
      *   if (result.valid) { @currentUser = result.payload }
      *
-     * NOTE(safeCallAsync-gap): The inner `await crypto.subtle.importKey/sign`
-     * calls are async and throw asynchronously. synchronous safeCall cannot
-     * catch async throws. Until safeCallAsync is available, this function
-     * retains its original error-swallowing try/catch for the async crypto
-     * operations. This case is intentionally deferred — see Phase 3a notes.
+     * NOTE: crypto.subtle.importKey/sign are async-throwing JS-host APIs. The
+     * inner work is wrapped in safeCallAsync (Phase 3a async migration, S89).
+     * Any thrown / rejected value from the crypto chain is normalized to
+     * {valid: false, reason: "invalid"} by the !{} handler, preserving the
+     * result-shape API for callers.
      */
     export async function verifyJwt(token, secret) {
         const decoded = decodeJwt(token) !{
@@ -130,41 +130,39 @@ ${
             return { valid: false, reason: "expired" }
         }
 
-        // Verify signature
-        // safeCallAsync-gap: crypto.subtle.importKey/sign are async-throwing.
-        // synchronous safeCall wraps a thunk that returns a Promise — it does
-        // not catch rejections. This block retains try/catch until safeCallAsync
-        // is available. Tracked as a Phase 3a partial for async cases.
-        try {
-            const parts = token.split(".")
-            if (parts.length != 3) return { valid: false, reason: "malformed" }
+        const parts = token.split(".")
+        if (parts.length != 3) return { valid: false, reason: "malformed" }
 
-            const signingInput = `${parts[0]}.${parts[1]}`
-            const expectedSig = parts[2]
+        const signingInput = `${parts[0]}.${parts[1]}`
+        const expectedSig = parts[2]
 
+        // Verify signature — crypto.subtle.importKey/sign are async-throwing
+        // JS-host APIs. Two-step: await safeCallAsync FIRST, then !{} on the result.
+        const rawSig = await safeCallAsync(() => {
             const keyData = new TextEncoder().encode(secret)
-            const cryptoKey = await crypto.subtle.importKey(
+            return crypto.subtle.importKey(
                 "raw",
                 keyData,
                 { name: "HMAC", hash: "SHA-256" },
                 false,
                 ["sign"]
-            )
-            const signatureBuffer = await crypto.subtle.sign(
+            ).then(cryptoKey => crypto.subtle.sign(
                 "HMAC",
                 cryptoKey,
                 new TextEncoder().encode(signingInput)
-            )
-            const actualSig = base64urlEncode(signatureBuffer)
-
-            if (actualSig != expectedSig) {
+            ))
+        })
+        const actualSig = rawSig !{
+            | ::Thrown(msg, name) -> {
                 return { valid: false, reason: "invalid" }
             }
+        }
 
-            return { valid: true, payload: decoded }
-        } catch(e) {
+        if (base64urlEncode(actualSig) != expectedSig) {
             return { valid: false, reason: "invalid" }
         }
+
+        return { valid: true, payload: decoded }
     }
 
     /**

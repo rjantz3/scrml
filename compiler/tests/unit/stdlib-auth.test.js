@@ -28,9 +28,12 @@
  *   A17  signJwt + verifyJwt — expired token returns valid:false reason:expired
  *   A18  verifyJwt — tampered token returns valid:false reason:invalid
  *   A19  verifyJwt — malformed token returns valid:false reason:malformed
+ *   A20  verifyJwt — safeCallAsync catches async crypto reject (Phase 3a, S89)
+ *   A21  verifyJwt — safeCallAsync catches sync throw inside crypto thunk (S89)
  */
 
 import { describe, test, expect } from "bun:test";
+import { safeCallAsync } from "../../runtime/stdlib/host.js";
 
 // ---------------------------------------------------------------------------
 // Extracted pure implementations
@@ -81,26 +84,33 @@ async function signJwt(payload, secret, expiresIn) {
     return `${signingInput}.${base64urlEncode(signatureBuffer)}`
 }
 
+// Extracted verifyJwt — mirrors stdlib/auth/jwt.scrml post-S89 Phase 3a async
+// migration. Uses safeCallAsync (imported from the same runtime shim the
+// scrml compiler bundles) to contain async crypto throws, then unwraps with
+// the !{} sentinel-check pattern that the compiler emits.
 async function verifyJwt(token, secret) {
     const decoded = decodeJwt(token)
     if (!decoded) return { valid: false, reason: "malformed" }
     const now = Math.floor(Date.now() / 1000)
     if (decoded.exp && decoded.exp < now) return { valid: false, reason: "expired" }
-    try {
-        const parts = token.split(".")
-        if (parts.length !== 3) return { valid: false, reason: "malformed" }
-        const signingInput = `${parts[0]}.${parts[1]}`
+    const parts = token.split(".")
+    if (parts.length !== 3) return { valid: false, reason: "malformed" }
+    const signingInput = `${parts[0]}.${parts[1]}`
+    const expectedSig = parts[2]
+    const rawSig = await safeCallAsync(() => {
         const keyData = new TextEncoder().encode(secret)
-        const cryptoKey = await crypto.subtle.importKey(
+        return crypto.subtle.importKey(
             "raw", keyData, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
-        )
-        const signatureBuffer = await crypto.subtle.sign("HMAC", cryptoKey, new TextEncoder().encode(signingInput))
-        const actualSig = base64urlEncode(signatureBuffer)
-        if (actualSig !== parts[2]) return { valid: false, reason: "invalid" }
-        return { valid: true, payload: decoded }
-    } catch(e) {
+        ).then(cryptoKey => crypto.subtle.sign(
+            "HMAC", cryptoKey, new TextEncoder().encode(signingInput)
+        ))
+    })
+    // Simulate scrml's !{} sentinel check (what the compiler emits for guarded-expr).
+    if (rawSig && rawSig.__scrml_error) {
         return { valid: false, reason: "invalid" }
     }
+    if (base64urlEncode(rawSig) !== expectedSig) return { valid: false, reason: "invalid" }
+    return { valid: true, payload: decoded }
 }
 
 function createRateLimiter(options) {
@@ -301,5 +311,53 @@ describe("scrml:auth — signJwt + verifyJwt (via extracted crypto logic)", () =
         const result = await verifyJwt("not.a.valid.jwt.at.all", secret)
         expect(result.valid).toBe(false)
         expect(result.reason).toBe("malformed")
+    })
+
+    // -----------------------------------------------------------------------
+    // S89 Phase 3a async migration — exercise the safeCallAsync failure path
+    // -----------------------------------------------------------------------
+    //
+    // Pre-migration: verifyJwt wrapped its async crypto.subtle calls in
+    // try/catch and returned { valid:false, reason:"invalid" } on throw.
+    // Post-migration (S89 commit 2 of 4): the try/catch is replaced with
+    // safeCallAsync + !{} unwrap. This test confirms the new path returns the
+    // same result-shape on async crypto throw — the migration is API-stable.
+    //
+    // A20: directly probe the safeCallAsync wrapping by stubbing
+    // crypto.subtle.importKey to reject. The stubbed reject path simulates
+    // an async host-throw exactly the way safeCallAsync would catch it in
+    // production (e.g., a corrupted runtime crypto provider).
+
+    test("A20: safeCallAsync path contains async crypto throw → valid:false reason:invalid", async () => {
+        // Build a well-formed token so we reach the signature-verification step
+        // (the failure must come from crypto.subtle, not from earlier guards).
+        const token = await signJwt({ userId: 7 }, secret, 3600)
+
+        // Stub crypto.subtle.importKey to reject. The original verifyJwt try/catch
+        // would have caught this; the new safeCallAsync wrapping must do the same.
+        const originalImportKey = crypto.subtle.importKey
+        crypto.subtle.importKey = () => Promise.reject(new Error("simulated host crypto failure"))
+        try {
+            const result = await verifyJwt(token, secret)
+            expect(result.valid).toBe(false)
+            expect(result.reason).toBe("invalid")
+        } finally {
+            crypto.subtle.importKey = originalImportKey
+        }
+    })
+
+    test("A21: safeCallAsync path contains sync-throw inside crypto thunk → valid:false reason:invalid", async () => {
+        // Synchronous throw inside the safeCallAsync thunk must also be caught
+        // (the shim's try/catch wraps the thunk invocation, not only the await).
+        const token = await signJwt({ userId: 8 }, secret, 3600)
+        const originalImportKey = crypto.subtle.importKey
+        crypto.subtle.importKey = () => { throw new TypeError("sync throw before promise return") }
+        try {
+            const result = await verifyJwt(token, secret)
+            expect(result.valid).toBe(false)
+            expect(result.reason).toBe("invalid")
+        } finally {
+            crypto.subtle.importKey = originalImportKey
+        }
     })
 })
