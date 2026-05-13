@@ -725,6 +725,22 @@ export interface FunctionDeclNode extends BaseNode {
   isServer: boolean;
   /** True if declared as a generator function (`function*`). */
   isGenerator?: boolean;
+  /**
+   * True if prefixed with `async` keyword.
+   *
+   * S89 §13.2 Sub-Phase B (2026-05-13):
+   * - `async function name()` and `async fn name {...}` set this flag.
+   * - Surfaces the `Promise<T>` return shape to the auto-await classifier
+   *   (`compiler/src/codegen/scheduling.ts`), which broadens its predicate from
+   *   "server function" to "any statically-known `Promise<T>`-returning callee"
+   *   per SPEC §13.2.1.
+   * - **Stdlib carve-out (Q5 ratified S89, SPEC §13.1 amendment).** Permitted
+   *   ONLY in stdlib `scrml:*` modules (files under `<repo>/stdlib/`). User
+   *   source declaring `async function` fires `I-ASYNC-USER-SOURCE` (info-
+   *   level lint per §13.1). The lint fires post-parse; the flag is still
+   *   recorded on the AST for downstream observability.
+   */
+  isAsync?: boolean;
   /** True if the function can fail (`!` suffix). */
   canFail: boolean;
   /** Error type name when `! -> ErrorType` is specified. */

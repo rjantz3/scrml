@@ -1949,6 +1949,26 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // Exception: when the BLOCK_REF is inside a tag body (tagNesting > 0), the
       // block is part of the enclosing component expression, not a separate statement.
       if (tok.kind === "BLOCK_REF" && depth === 0 && parts.length > 0 && (tok.block?.tagNesting ?? 0) === 0) break;
+      // S89 §13.2 Sub-Phase B — `async function` / `async fn` decl-shape boundary.
+      // When collectExpr sees `async` immediately followed by `function`/`fn` at
+      // depth 0 (with optional `server` between), this is the start of an
+      // `async function|fn` declaration — break BEFORE consuming `async` so
+      // both tokens remain for the function-decl handler (which now recognizes
+      // the `async function` form). Without this guard, `async` gets consumed
+      // into parts at the first iteration; on the second iteration `function`
+      // hits the STMT_KEYWORD boundary (with parts.length > 0) and breaks,
+      // leaving `function name() {body}` for the function-decl handler but
+      // losing the `async` modifier signal. The downstream effect is that
+      // `export async function name() { body }` parses to a function-decl
+      // with NO isAsync flag, which silences the auto-await classifier
+      // (§13.2.1) for stdlib Promise<T> functions.
+      if (depth === 0 && tok.kind === "KEYWORD" && tok.text === "async") {
+        const _next = peek(1);
+        const _nextIsFnKw = _next && _next.kind === "KEYWORD" && (_next.text === "function" || _next.text === "fn");
+        const _nextIsServerFn = _next && _next.kind === "KEYWORD" && _next.text === "server" &&
+          peek(2)?.kind === "KEYWORD" && (peek(2)?.text === "function" || peek(2)?.text === "fn");
+        if (_nextIsFnKw || _nextIsServerFn) break;
+      }
       // Statement boundary at depth 0
       if (depth === 0) {
         if (tok.kind === "PUNCT" && tok.text === ";") {
@@ -4937,8 +4957,21 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // parseRecursiveBody() calls parseOneStatement() -- which must also handle
     // the `function` keyword so that nested functions are parsed recursively
     // rather than falling through to the bare-expr default.
-    if (tok.kind === "KEYWORD" && tok.text === "function") {
-      const startTok = consume(); // consume `function`
+    //
+    // S89 §13.2 Sub-Phase B — also accepts `async function` inside function
+    // bodies (parity with the top-level shape; same isAsync recording).
+    const _nestedAsyncFunctionLookahead = tok.kind === "KEYWORD" && tok.text === "async" &&
+      peek(1)?.kind === "KEYWORD" && peek(1)?.text === "function";
+    if ((tok.kind === "KEYWORD" && tok.text === "function") || _nestedAsyncFunctionLookahead) {
+      let isAsync = false;
+      let startTok;
+      if (_nestedAsyncFunctionLookahead) {
+        isAsync = true;
+        startTok = consume(); // consume `async`
+        consume(); // consume `function`
+      } else {
+        startTok = consume(); // consume `function`
+      }
       let isGenerator = false;
       if (peek().text === "*") {
         isGenerator = true;
@@ -5022,6 +5055,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         body,
         fnKind: "function",
         isServer: false,
+        // S89 §13.2 Sub-Phase B — async modifier on nested function decls.
+        ...(isAsync ? { isAsync: true } : {}),
         isGenerator,
         canFail,
         ...(hasReturnType ? { hasReturnType: true } : {}),
@@ -6026,6 +6061,29 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // export-decl with raw="export server" and exportedName=null,
       // followed by an unmarked function-decl whose name was lost from
       // the export registry. See docs/changes/f-auth-002/diagnosis.md.
+      //
+      // S89 §13.2 Sub-Phase B note: `async` is intentionally NOT consumed
+      // here. Reason — if `async` is consumed as a prefix and the export
+      // handler then calls collectExpr, the entire `function name(...) { body }`
+      // gets swallowed by collectExpr as one expression (because `function`
+      // is the FIRST token after the prefix → parts.length === 0 → the
+      // STMT_KEYWORD boundary check doesn't fire). The synthesized function-
+      // decl then has params:[], body:[], which breaks lint walkers that
+      // recurse into function bodies (W-TRY-CATCH-IN-SCRML-SOURCE in
+      // particular). By leaving `async` in the stream, the export handler
+      // produces a broken export-decl (raw="export async",
+      // exportedName:null) and the main loop's function-decl handler (which
+      // now recognizes `async function` per the S89 §13.2 Sub-Phase B
+      // extension at line ~6900) picks up the actual function declaration
+      // with full body parsing AND records isAsync:true on the resulting
+      // function-decl. The auto-await classifier (Stage 8 CG scheduling.ts)
+      // reads isAsync from the function-decl, NOT from the export-decl, so
+      // the broken export registration has no effect on auto-await.
+      // Practical note: stdlib runtime is hand-written JS shims
+      // (compiler/runtime/stdlib/*.js), not compiled from these .scrml
+      // sources, so the missing export name registration on `export async`
+      // forms does not affect stdlib consumers at S89. Fixing the export
+      // registration without breaking lint walkers is a separate concern.
       let isPure = false;
       let isServer = false;
       const prefixParts = [];
@@ -6877,9 +6935,16 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       continue;
     }
 
-    // FUNCTION DECLARATION: `[pure] [server] function name(params) [route="path"] [method="METHOD"] { body }`
+    // FUNCTION DECLARATION: `[pure | async] [server] function name(params) [route="path"] [method="METHOD"] { body }`
     // `pure` tokenizes as IDENT; accepted only immediately before `function` or `server function`.
+    // `async` tokenizes as KEYWORD; accepted only immediately before `function` or `server function`
+    //   (S89 §13.2 Sub-Phase B — extends auto-await classification per §13.2.1).
     const _pureFnLookahead = tok.text === "pure" && (
+      (peek(1)?.kind === "KEYWORD" && peek(1)?.text === "function") ||
+      (peek(1)?.kind === "KEYWORD" && peek(1)?.text === "server" &&
+       peek(2)?.kind === "KEYWORD" && peek(2)?.text === "function")
+    );
+    const _asyncFunctionLookahead = tok.kind === "KEYWORD" && tok.text === "async" && (
       (peek(1)?.kind === "KEYWORD" && peek(1)?.text === "function") ||
       (peek(1)?.kind === "KEYWORD" && peek(1)?.text === "server" &&
        peek(2)?.kind === "KEYWORD" && peek(2)?.text === "function")
@@ -6887,15 +6952,29 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     if (
       tok.kind === "KEYWORD" && tok.text === "function" ||
       (tok.kind === "KEYWORD" && tok.text === "server" && peek(1).kind === "KEYWORD" && peek(1).text === "function") ||
-      _pureFnLookahead
+      _pureFnLookahead ||
+      _asyncFunctionLookahead
     ) {
       let isServer = false;
       let isPure = false;
+      let isAsync = false;
       let startTok = tok;
 
       if (tok.text === "pure") {
         isPure = true;
         startTok = consume(); // consume `pure`
+        if (peek().kind === "KEYWORD" && peek().text === "server") {
+          isServer = true;
+          consume(); // consume `server`
+        }
+      } else if (tok.kind === "KEYWORD" && tok.text === "async") {
+        // S89 §13.2 Sub-Phase B — `async function` (stdlib carve-out per §13.1).
+        // The flag is recorded unconditionally here; the user-source rejection
+        // (I-ASYNC-USER-SOURCE per §13.1) is a separate post-parse lint, not
+        // a TAB-time error (the lint needs filePath context to decide whether
+        // the file is inside the stdlib).
+        isAsync = true;
+        startTok = consume(); // consume `async`
         if (peek().kind === "KEYWORD" && peek().text === "server") {
           isServer = true;
           consume(); // consume `server`
@@ -7031,6 +7110,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         fnKind: "function",
         isServer,
         ...(isPure ? { isPure: true } : {}),
+        // S89 §13.2 Sub-Phase B — async modifier surfaces Promise<T> return.
+        ...(isAsync ? { isAsync: true } : {}),
         isGenerator,
         canFail,
         errorType,
