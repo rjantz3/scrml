@@ -39,12 +39,37 @@
  */
 
 import {
+  type ChunkContents,
+  type ChunkPlan,
+  type EntryPointId,
+  type NodeId,
   type ReachabilityRecord,
+  type RolePlayableSurface,
+  type RoleVariant,
   type RSInput,
   type RSOutput,
   type RSError,
   emptyReachabilityRecord,
 } from "./types/reachability.ts";
+import type { FileAST } from "./types/ast.ts";
+import { enumerateEntryPoints } from "./reachability/entry-points.ts";
+import { computeInitiallyRenderedComponents } from "./reachability/component-1.ts";
+import type { ConstFoldEnv } from "./codegen/constant-folder.ts";
+
+// ---------------------------------------------------------------------------
+// Anonymous-viewer role
+// ---------------------------------------------------------------------------
+
+/**
+ * Canonical role variant emitted when no role enum is present.
+ *
+ * PIPELINE Stage 7.6 line 2380 — when an application has no role enum
+ * declared and no auth gates, the solver synthesizes a single
+ * anonymous viewer variant under this name. Component 4 (A-2.5) will
+ * replace this with proper per-role classification once AuthGraph
+ * lands.
+ */
+const ANONYMOUS_ROLE: RoleVariant = "_anonymous";
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -53,31 +78,94 @@ import {
 /**
  * Run the Stage 7.6 Reachability Solver.
  *
- * **A-2.1 SCAFFOLD:** returns `{ record: emptyReachabilityRecord(), errors: [] }`
- * for every input. Pipeline behavior is unchanged — downstream consumers
- * (A-4 codegen wave) treat the empty record as "no per-route closure
- * available" and fall back to the v0.2 whole-app emission.
+ * **A-2.2 (S89):** Component 1 (`initially_rendered_components`) lands.
+ * Subsequent waves (A-2.3..A-2.7) extend the body — Component 2
+ * reactive-dep closure, Component 3 server-fn reachability, Component 4
+ * auth-gated boundaries, Component 5 vendor units, then the outer
+ * fixpoint operator.
  *
- * **Determinism:** identical output for identical input (trivially —
- * no input is examined). PIPELINE Stage 7.6 line 2391.
+ * Current scope:
+ *   1. Enumerate entry points from `input.files` per §40.8 shapes.
+ *   2. For each entry point, compute `initially_rendered_components`
+ *      per §40.9.2 (Component 1) — populates `ChunkContents.componentNodeIds`.
+ *   3. Emit a single-role ChunkPlan keyed `_anonymous` (PIPELINE
+ *      Stage 7.6 line 2380 placeholder).
+ *   4. `reactiveCellNodeIds` + `serverFnNodeIds` + `vendorUnitNames`
+ *      remain empty Sets at this wave (A-2.3..A-2.6 land them).
  *
- * **No mutation:** does not mutate any field of `input`. PIPELINE
- * Stage 7.6 line 2393.
+ * **Determinism:** entry points + walked nodes are emitted in source
+ * order (PIPELINE Stage 7.6 line 2391).
  *
- * **Termination:** O(1). No iteration. PIPELINE Stage 7.6 line 2394.
+ * **No mutation:** does not mutate `input`. PIPELINE Stage 7.6 line 2393.
  *
- * Subsequent waves replace the body in-place; the signature is
- * stable across A-2.x.
+ * **Termination:** O(N) where N = total markup nodes across files.
+ * No fixed-point iteration at this wave; that lands at A-2.7.
  */
 export function runReachabilitySolver(input: RSInput): RSOutput {
-  // Touch the input to suppress unused-parameter warnings at the
-  // type-surface level. The scaffold does not read any field.
-  void input;
-
   const record: ReachabilityRecord = emptyReachabilityRecord();
   const errors: RSError[] = [];
 
+  // `files` is the list of typed file ASTs from META. When the field
+  // is missing (e.g. unit tests bypassing the pipeline) we degrade
+  // gracefully to the empty record — matches A-2.1 scaffold behavior.
+  const files = (input.files as FileAST[] | undefined) ?? [];
+  if (files.length === 0) {
+    return { record, errors };
+  }
+
+  // Component 1 — entry-point enumeration + initially-rendered set.
+  const entryPoints = enumerateEntryPoints(files);
+  const env: ConstFoldEnv = { constBindings: new Map() };
+  const irc = computeInitiallyRenderedComponents(entryPoints, files, env);
+
+  // Materialize per-entry-point per-role ChunkPlans.
+  for (const ep of entryPoints) {
+    const componentIds: Set<NodeId> = irc.get(ep.id) ?? new Set();
+    const plan = makeChunkPlan(componentIds);
+    const rps: RolePlayableSurface = { byRole: new Map() };
+    rps.byRole.set(ANONYMOUS_ROLE, plan);
+    record.closures.set(ep.id satisfies EntryPointId, rps);
+  }
+
   return { record, errors };
+}
+
+// ---------------------------------------------------------------------------
+// ChunkPlan construction
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the per-tier ChunkPlan for a single (entry-point, role) pair.
+ *
+ * At A-2.2 (Component 1 only), all components are admitted to the
+ * `initialChunk` (N=0). prefetchTier1 / prefetchTier2 are empty —
+ * those tiers consume Component 3's interaction-graph projection
+ * (A-2.4) which is not yet wired.
+ *
+ * Monotonicity (PIPELINE Stage 7.6 line 2392): trivially satisfied —
+ * `initialChunk ⊆ initialChunk ∪ ∅ ∪ ∅ ∪ ...`.
+ */
+function makeChunkPlan(componentNodeIds: Set<NodeId>): ChunkPlan {
+  return {
+    initialChunk: {
+      componentNodeIds: new Set(componentNodeIds),
+      reactiveCellNodeIds: new Set(),
+      serverFnNodeIds: new Set(),
+      vendorUnitNames: new Set(),
+    },
+    prefetchTier1: emptyChunkContents(),
+    prefetchTier2: emptyChunkContents(),
+    prefetchTierN: [],
+  };
+}
+
+function emptyChunkContents(): ChunkContents {
+  return {
+    componentNodeIds: new Set(),
+    reactiveCellNodeIds: new Set(),
+    serverFnNodeIds: new Set(),
+    vendorUnitNames: new Set(),
+  };
 }
 
 // ---------------------------------------------------------------------------

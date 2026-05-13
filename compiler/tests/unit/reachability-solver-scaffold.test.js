@@ -85,7 +85,11 @@ describe("§3 Deterministic across runs", () => {
 // ---------------------------------------------------------------------------
 
 describe("§4 compileScrml exposes reachabilityRecord + reachabilityRecordJson", () => {
-  test("trivial scrml file → result carries empty reachabilityRecord", () => {
+  test("trivial scrml file → result carries reachabilityRecord with one SPA entry (post-A-2.2)", () => {
+    // A-2.2 update: Component 1 now enumerates entry points + initial-render set.
+    // A trivial `<program><body>hello</body></program>` file becomes a single
+    // SPA entry under the synthesized `_anonymous` role with the <body> child
+    // admitted to the initialChunk's componentNodeIds set.
     const dir = mkdtempSync(join(tmpdir(), "rs-scaffold-"));
     try {
       const src = join(dir, "trivial.scrml");
@@ -98,10 +102,24 @@ describe("§4 compileScrml exposes reachabilityRecord + reachabilityRecordJson",
       });
       expect(result.reachabilityRecord).toBeDefined();
       expect(result.reachabilityRecord.closures).toBeInstanceOf(Map);
-      expect(result.reachabilityRecord.closures.size).toBe(0);
+      // One SPA entry per the §40.8 program-shape rule.
+      expect(result.reachabilityRecord.closures.size).toBe(1);
+      const [entryId, rps] = result.reachabilityRecord.closures.entries().next().value;
+      expect(entryId).toContain("#program");
+      const plan = rps.byRole.get("_anonymous");
+      expect(plan).toBeDefined();
+      // The <body> child is admitted to the initial chunk.
+      expect(plan.initialChunk.componentNodeIds.size).toBeGreaterThan(0);
+      // Other component slots remain empty at this wave.
+      expect(plan.initialChunk.reactiveCellNodeIds.size).toBe(0);
+      expect(plan.initialChunk.serverFnNodeIds.size).toBe(0);
+      expect(plan.initialChunk.vendorUnitNames.size).toBe(0);
+      // Serializer remains stable + deterministic.
       expect(typeof result.reachabilityRecordJson).toBe("function");
       const json = result.reachabilityRecordJson();
-      expect(JSON.parse(json)).toEqual({ closures: {}, diagnostics: [] });
+      const parsed = JSON.parse(json);
+      expect(Object.keys(parsed.closures)).toHaveLength(1);
+      expect(parsed.diagnostics).toEqual([]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
