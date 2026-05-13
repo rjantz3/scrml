@@ -800,74 +800,434 @@ function unwrapRedundantLogicBlocks(body) {
   let changed = false;
   let result = "";
   let i = 0;
+
+  // v0.3 Wave 3.5 (S87) — container-depth tracking.
+  //
+  // Bug A (Cat B in RECON-S87): the original heuristic looked backward for the
+  // most recent `>` and considered `${...}` "top-level" if only whitespace
+  // followed. False-fired inside nested containers (`<db>`, `<ul>`, `<channel>`,
+  // etc) — `>` could close an OPENER tag, leaving the `${...}` inside the
+  // container body, not at program-body top level. Result: E-CTX-001 / E-CTX-003
+  // on parse because BS auto-lift only fires inside `<program>` / `<page>` /
+  // `<channel>` bodies, not arbitrary structural containers.
+  //
+  // Fix: walk the body as a mini-parser, tracking markup-container depth
+  // (incremented on `<X ...>`, decremented on `</X>` or `</>`). Only consider
+  // `${...}` for unwrap when at depth 0 (immediate program-body level).
+  //
+  // The walker also skips contents of `${...}`, `?{...}`, `#{...}`, quoted
+  // strings, and comments so they don't perturb depth tracking.
+  let markupDepth = 0;
+
   while (i < body.length) {
-    // Find the next `${` at the top level (we don't track markup nesting; the
-    // brace-matching catches naked top-level `${...}`).
-    const dollarIdx = body.indexOf("${", i);
-    if (dollarIdx === -1) {
-      result += body.slice(i);
-      break;
+    const ch = body[i];
+
+    // Skip line comments (in markup-text position, BS treats `//` as comment
+    // block-separators, but in attribute-value position they're string content).
+    // Conservative: skip in both cases — we only need to recognize `${` and
+    // markup container open/close.
+    if (ch === "/" && body[i + 1] === "/") {
+      const nl = body.indexOf("\n", i);
+      const end = nl === -1 ? body.length : nl + 1;
+      result += body.slice(i, end);
+      i = end;
+      continue;
     }
-
-    // Verify it's at the "top level" — between markup siblings, NOT inside
-    // an attribute or markup body. Heuristic: look backward for the closest
-    // `>` or start-of-body — only unwrap if the `${...}` is at the top level
-    // of the body (not e.g. inside an event handler or attribute value).
-    // We treat anything in the body that's bare (whitespace-only between the
-    // previous markup `>` and `${`) as top-level.
-    const before = body.slice(i, dollarIdx);
-    const trailingBeforeDollar = before.slice(
-      before.lastIndexOf(">") + 1
-    );
-    const isTopLevel = /^[\s\n\r]*$/.test(trailingBeforeDollar);
-
-    if (!isTopLevel) {
-      // Not a top-level `${...}` — leave alone, advance past `${` and continue.
-      const closeIdx = findMatchingDollarClose(body, dollarIdx);
-      if (closeIdx === -1) {
-        result += body.slice(i);
-        break;
-      }
-      result += body.slice(i, closeIdx + 1);
-      i = closeIdx + 1;
+    if (ch === "/" && body[i + 1] === "*") {
+      const end = body.indexOf("*/", i + 2);
+      const stop = end === -1 ? body.length : end + 2;
+      result += body.slice(i, stop);
+      i = stop;
       continue;
     }
 
-    // Find matching `}` for this `${...}` block.
-    const closeIdx = findMatchingDollarClose(body, dollarIdx);
-    if (closeIdx === -1) {
-      // Unmatched — bail.
-      result += body.slice(i);
-      break;
+    // Skip nested logic / SQL / CSS blocks (don't recurse — preserve them
+    // verbatim and continue walking after). Note: nested `${...}` blocks at
+    // markup-depth > 0 are SKIPPED (no unwrap consideration); nested at
+    // markup-depth = 0 might be eligible but only the OUTERMOST `${...}` at a
+    // given site is processed (we continue past the close).
+    if (ch === "?" && body[i + 1] === "{") {
+      const closeIdx = findMatchingDollarClose(body, i - 0); // ?{ has same brace shape as ${
+      // Actually `?{...}` uses same brace-matching as `${...}` from `findMatchingDollarClose`
+      // which expects the brace-opener at `dollarIdx + 2`. Adapt: pass i-1 as if `$?{` started 1 earlier.
+      // Simpler: write a local skip.
+      const close = skipBracedBlock(body, i + 1);
+      if (close === -1) {
+        result += body.slice(i);
+        break;
+      }
+      result += body.slice(i, close + 1);
+      i = close + 1;
+      continue;
+    }
+    if (ch === "#" && body[i + 1] === "{") {
+      const close = skipBracedBlock(body, i + 1);
+      if (close === -1) {
+        result += body.slice(i);
+        break;
+      }
+      result += body.slice(i, close + 1);
+      i = close + 1;
+      continue;
     }
 
-    const innerStart = dollarIdx + 2;
-    const innerEnd = closeIdx;
-    const inner = body.slice(innerStart, innerEnd);
-
-    if (isTopLevelDeclOnly(inner)) {
-      // Unwrap: emit body before `${`, then the inner contents directly.
-      result += body.slice(i, dollarIdx);
-      result += inner;
-      changed = true;
-      advisories.push({
-        level: "info",
-        message:
-          "unwrapped a `${...}` block whose contents are all top-level declarations (v0.3 default-logic body — SPEC §40.8).",
-      });
-      i = closeIdx + 1;
-    } else {
-      // Mixed / imperative content — leave wrapped.
-      advisories.push({
-        level: "info",
-        message:
-          "a `${...}` block was left wrapped (contains non-declaration content).",
-      });
-      result += body.slice(i, closeIdx + 1);
-      i = closeIdx + 1;
+    // Quoted strings — skip contents.
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const q = ch;
+      const start = i;
+      i++;
+      while (i < body.length && body[i] !== q) {
+        if (body[i] === "\\") i++;
+        i++;
+      }
+      i = Math.min(i + 1, body.length);
+      result += body.slice(start, i);
+      continue;
     }
+
+    // `${...}` logic block — the only thing we may unwrap.
+    if (ch === "$" && body[i + 1] === "{") {
+      const dollarIdx = i;
+      const closeIdx = findMatchingDollarClose(body, dollarIdx);
+      if (closeIdx === -1) {
+        // Unmatched — emit rest and bail.
+        result += body.slice(i);
+        break;
+      }
+
+      // Container-aware gate (Bug A): only consider unwrap at markup-depth 0.
+      if (markupDepth > 0) {
+        // Inside a nested markup container — preserve the `${...}` verbatim.
+        result += body.slice(dollarIdx, closeIdx + 1);
+        i = closeIdx + 1;
+        continue;
+      }
+
+      // At program-body top level — apply the existing safety gates.
+      const inner = body.slice(dollarIdx + 2, closeIdx);
+      if (isTopLevelDeclOnly(inner) && isUnwrapSafe(inner)) {
+        result += inner;
+        changed = true;
+        advisories.push({
+          level: "info",
+          message:
+            "unwrapped a `${...}` block whose contents are all top-level declarations (v0.3 default-logic body — SPEC §40.8).",
+        });
+        i = closeIdx + 1;
+      } else {
+        // Mixed / imperative content OR scope-unsafe — leave wrapped.
+        advisories.push({
+          level: "info",
+          message:
+            "a `${...}` block was left wrapped (contains non-declaration content or scope-sensitive locals).",
+        });
+        result += body.slice(dollarIdx, closeIdx + 1);
+        i = closeIdx + 1;
+      }
+      continue;
+    }
+
+    // Markup tag boundary — increment / decrement container depth.
+    if (ch === "<") {
+      const close = body.indexOf(">", i);
+      if (close === -1) {
+        // Malformed — emit rest and bail.
+        result += body.slice(i);
+        break;
+      }
+      const tagSlice = body.slice(i, close + 1);
+      const isCloser = tagSlice.startsWith("</");
+      // `</>` is close-elision — pops a container.
+      // `</NAME>` is explicit close — pops a container.
+      // `<NAME ... />` is self-closing — no depth change.
+      // `<NAME ...>` is opener — pushes a container.
+      const isSelfClosing = !isCloser && tagSlice.endsWith("/>");
+      // V5-strict state-decl shape (`<x> = ...` / `<x>: T = ...`) is a
+      // declaration, NOT a markup container. The literal `>` is followed by
+      // whitespace then `=` or `:` (after attrs). Don't change depth on these.
+      // Detect: tag opener (not closer, not self-closing) immediately followed
+      // by `=` or `:` (with optional whitespace). Check the chars after `>`.
+      let isStateDecl = false;
+      if (!isCloser && !isSelfClosing) {
+        // Peek past the `>` for `=` / `:` (whitespace-tolerant). If found,
+        // this is a state-decl, not a container-opener.
+        let j = close + 1;
+        while (j < body.length && (body[j] === " " || body[j] === "\t")) j++;
+        if (j < body.length && (body[j] === "=" || body[j] === ":")) {
+          isStateDecl = true;
+        }
+      }
+
+      result += tagSlice;
+      i = close + 1;
+
+      if (isStateDecl) continue;
+      if (isCloser) {
+        markupDepth = Math.max(0, markupDepth - 1);
+      } else if (!isSelfClosing) {
+        markupDepth++;
+      }
+      continue;
+    }
+
+    result += ch;
+    i++;
   }
   return { rewritten: result, changed, advisories };
+}
+
+/**
+ * Skip a `{...}` braced block starting at `openBraceIdx` (the `{` itself).
+ * Tracks brace nesting + string/comment state. Returns the absolute index of
+ * the matching `}`, or -1 if unmatched. Used by `unwrapRedundantLogicBlocks`
+ * to skip past `?{...}` and `#{...}` blocks without misinterpreting their
+ * contents as markup.
+ *
+ * @param {string} src
+ * @param {number} openBraceIdx — index of the `{` to match
+ * @returns {number}
+ */
+function skipBracedBlock(src, openBraceIdx) {
+  let i = openBraceIdx + 1;
+  let depth = 1;
+  while (i < src.length) {
+    const ch = src[i];
+    if (ch === "/" && src[i + 1] === "/") {
+      const nl = src.indexOf("\n", i);
+      i = nl === -1 ? src.length : nl + 1;
+      continue;
+    }
+    if (ch === "/" && src[i + 1] === "*") {
+      const end = src.indexOf("*/", i + 2);
+      i = end === -1 ? src.length : end + 2;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const q = ch;
+      i++;
+      while (i < src.length && src[i] !== q) {
+        if (src[i] === "\\") i++;
+        i++;
+      }
+      i++;
+      continue;
+    }
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return i;
+    }
+    i++;
+  }
+  return -1;
+}
+
+/**
+ * Stricter unwrap-safety check (v0.3 Wave 3.5 S87, Bugs B + C).
+ *
+ * Even when every statement parsed by `splitTopLevelStatements` looks like a
+ * recognized top-level decl, unwrapping can still break the rewritten file if
+ * the inner content has structural features that don't survive the
+ * `${...}` → bare-text transition. Specifically:
+ *
+ * - **Comments inside the block (Bug C).** BS-layer's block-splitter
+ *   recognizes `//` line comments and `/* … *\/` block comments as comment
+ *   block-separators OUTSIDE logic context. A function body with a `// …`
+ *   comment inside (e.g. `function f() { // note\n  match @x { … }\n }`)
+ *   becomes ONE text block inside `${...}` (where the comment is just a JS
+ *   comment in the function body). After unwrap, BS sees the `//` as a
+ *   block-separator, splitting the text into pre-comment + comment + post-
+ *   comment pieces; the post-comment piece (`}\n}\n\nfunction other() { match … }`)
+ *   may not start with a recognized declaration keyword — it ends up at
+ *   markup level and the inner `match` fires E-TYPE-026.
+ *
+ * - **`lift` keyword inside the block (Bug B / mixed-content).** `lift` is
+ *   only valid in markup-emit positions (function bodies / template scopes).
+ *   Its presence at the unwrap-candidate level signals the block is mixed-
+ *   content (the splitter mis-detected because of embedded markup template
+ *   literals) — preserve the wrap.
+ *
+ * - **`lin` declaration inside the block (Bug B).** Linear-type scope must
+ *   be preserved end-to-end; the `lin` rules track the variable across all
+ *   execution paths. A `lin` decl at the unwrap level is fine in itself,
+ *   but if the block also contains markup-emit positions referencing it via
+ *   a function-body-internal `lin ticket = …` decl, unwrap can sever the
+ *   scope. Conservative: any `lin` declaration → preserve wrap.
+ *
+ * - **Bare control-flow keywords (`match`, `for`, `while`, `if`, `try`, `do`)
+ *   at the immediate inner level.** `splitTopLevelStatements` may falsely
+ *   collapse mixed content into one statement (e.g. `for { … lift <li>${x}</li> }`)
+ *   and only check the FIRST keyword. The first keyword (`const q = …`)
+ *   matches but the rest is non-decl. Detect any of these keywords appearing
+ *   at the (apparent) top level of the inner block via a non-anchored scan.
+ *
+ * @param {string} inner — the contents between `${` and matching `}`.
+ * @returns {boolean} true iff unwrap is safe; false to preserve the wrap.
+ */
+function isUnwrapSafe(inner) {
+  // Quick scan for `//` line comments (anywhere outside string content) — this
+  // is the most common Bug-C trigger.
+  if (containsBareToken(inner, "//")) return false;
+  // `/* */` block comments — same hazard.
+  if (containsBareToken(inner, "/*")) return false;
+  // `lift` keyword — markup-emit construct, signals mixed content.
+  if (containsBareKeyword(inner, "lift")) return false;
+  // `lin` declaration — linear-type scope must be preserved (Bug B family).
+  if (containsBareKeyword(inner, "lin")) return false;
+  // Bare control-flow keywords at top-level of the inner block — non-decl
+  // statements that signal the splitter mis-collapsed mixed content.
+  // Note: these keywords are FINE inside function/type bodies (which the
+  // brace-tracker correctly nests through). We scan only at depth 0.
+  if (containsTopLevelKeyword(inner, ["match", "for", "while", "if", "try", "do"])) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * True iff `token` appears in `src` outside of:
+ *   - quoted strings (`"..."`, `'...'`, `` `...` ``)
+ *   - line comments (`// ...` to EOL) — comments themselves are the trigger
+ *     for `containsBareToken("//", ...)`; we don't recurse on those
+ *   - block comments — same caveat as line comments
+ *
+ * Used to detect `//` / `/(asterisk)` outside string content. The function is
+ * intentionally lenient on its own token (e.g. `//` inside a block-comment
+ * is fine because the comment swallows it).
+ *
+ * @param {string} src
+ * @param {string} token  — the literal substring to find
+ * @returns {boolean}
+ */
+function containsBareToken(src, token) {
+  let i = 0;
+  while (i < src.length) {
+    if (src.startsWith(token, i)) return true;
+    const ch = src[i];
+    // Skip strings (quoted contents may contain `//` legitimately, e.g. URL strings).
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const q = ch;
+      i++;
+      while (i < src.length && src[i] !== q) {
+        if (src[i] === "\\") i++;
+        i++;
+      }
+      i++;
+      continue;
+    }
+    i++;
+  }
+  return false;
+}
+
+/**
+ * True iff `keyword` appears in `src` as a standalone identifier-bounded
+ * token outside of quoted strings / comments. Word-boundary matched on both
+ * sides.
+ *
+ * @param {string} src
+ * @param {string} keyword
+ * @returns {boolean}
+ */
+function containsBareKeyword(src, keyword) {
+  const re = new RegExp(`(^|[^A-Za-z0-9_$])${keyword}(?![A-Za-z0-9_$])`);
+  // Strip strings and comments first, then test.
+  const stripped = stripStringsAndComments(src);
+  return re.test(stripped);
+}
+
+/**
+ * True iff any of `keywords` appears at the TOP-LEVEL of `src` — outside any
+ * `{...}` / `(...)` / `[...]` nesting. Strings + comments stripped.
+ *
+ * @param {string} src
+ * @param {string[]} keywords
+ * @returns {boolean}
+ */
+function containsTopLevelKeyword(src, keywords) {
+  let i = 0;
+  let depth = 0;
+  const stripped = stripStringsAndComments(src);
+  while (i < stripped.length) {
+    const ch = stripped[i];
+    if (ch === "{" || ch === "(" || ch === "[") {
+      depth++;
+      i++;
+      continue;
+    }
+    if (ch === "}" || ch === ")" || ch === "]") {
+      depth = Math.max(0, depth - 1);
+      i++;
+      continue;
+    }
+    if (depth === 0 && /[A-Za-z_]/.test(ch)) {
+      // Read identifier.
+      let j = i;
+      while (j < stripped.length && /[A-Za-z0-9_$]/.test(stripped[j])) j++;
+      const ident = stripped.slice(i, j);
+      if (keywords.includes(ident)) return true;
+      i = j;
+      continue;
+    }
+    i++;
+  }
+  return false;
+}
+
+/**
+ * Replace string contents and comments in `src` with whitespace of equal
+ * length so positions are preserved but the contents don't false-match
+ * keyword scans.
+ *
+ * @param {string} src
+ * @returns {string}
+ */
+function stripStringsAndComments(src) {
+  const buf = src.split("");
+  let i = 0;
+  while (i < buf.length) {
+    const ch = buf[i];
+    if (ch === "/" && buf[i + 1] === "/") {
+      while (i < buf.length && buf[i] !== "\n") {
+        buf[i] = " ";
+        i++;
+      }
+      continue;
+    }
+    if (ch === "/" && buf[i + 1] === "*") {
+      let j = i;
+      while (j < buf.length && !(buf[j] === "*" && buf[j + 1] === "/")) {
+        if (buf[j] !== "\n") buf[j] = " ";
+        j++;
+      }
+      if (j < buf.length) {
+        buf[j] = " ";
+        buf[j + 1] = " ";
+        j += 2;
+      }
+      i = j;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const q = ch;
+      i++;
+      while (i < buf.length && buf[i] !== q) {
+        if (buf[i] === "\\") {
+          buf[i] = " ";
+          i++;
+        }
+        if (buf[i] !== "\n") buf[i] = " ";
+        i++;
+      }
+      if (i < buf.length) {
+        buf[i] = " ";
+        i++;
+      }
+      continue;
+    }
+    i++;
+  }
+  return buf.join("");
 }
 
 /**
