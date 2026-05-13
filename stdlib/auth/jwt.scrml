@@ -109,7 +109,8 @@ ${
      *   if (result.valid) { @currentUser = result.payload }
      *
      * NOTE: crypto.subtle.importKey/sign are async-throwing JS-host APIs. The
-     * inner work is wrapped in safeCallAsync (Phase 3a async migration, S89).
+     * inner work is wrapped in safeCallAsync (Phase 3a async migration, S89;
+     * collapsed to one-line via §13.2.1 auto-await in §13.2 Sub-Phase E).
      * Any thrown / rejected value from the crypto chain is normalized to
      * {valid: false, reason: "invalid"} by the !{} handler, preserving the
      * result-shape API for callers.
@@ -137,8 +138,9 @@ ${
         const expectedSig = parts[2]
 
         // Verify signature — crypto.subtle.importKey/sign are async-throwing
-        // JS-host APIs. Two-step: await safeCallAsync FIRST, then !{} on the result.
-        const rawSig = await safeCallAsync(() => {
+        // JS-host APIs. One-line: compiler auto-inserts `await` before
+        // safeCallAsync per §13.2.1 auto-await classifier.
+        const actualSig = safeCallAsync(() => {
             const keyData = new TextEncoder().encode(secret)
             return crypto.subtle.importKey(
                 "raw",
@@ -151,8 +153,7 @@ ${
                 cryptoKey,
                 new TextEncoder().encode(signingInput)
             ))
-        })
-        const actualSig = rawSig !{
+        }) !{
             | ::Thrown(msg, name) -> {
                 return { valid: false, reason: "invalid" }
             }
