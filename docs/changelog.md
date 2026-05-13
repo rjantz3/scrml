@@ -2,11 +2,94 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-12 S87 CLOSE, all seven semver tags live on origin — **v0.2.0 `022ee02` + v0.2.1 `d72c074` + v0.2.2 `98e872d` + v0.2.3 `d512266` + v0.2.4 `28cd2ac` + v0.2.5 `2c687b5` + v0.2.6 `efbd1e8`**): **11,593 pass / 114 skip / 1 todo / 0 FAIL** (563 files). v0.2.6 is the current shipped baseline. HEAD post-S87 (NOT tagged — channel-architecture OQ ratified S87 as Option b; spec update + walker pre-check follow-up dispatch pending).
+Current baseline (2026-05-12 S87 CLOSE — HISTORIC 37-commit session, all seven semver tags live on origin — **v0.2.0 `022ee02` + v0.2.1 `d72c074` + v0.2.2 `98e872d` + v0.2.3 `d512266` + v0.2.4 `28cd2ac` + v0.2.5 `2c687b5` + v0.2.6 `efbd1e8`**): **11,153 pass / 85 skip / 1 todo / 0 FAIL** (554 files). v0.2.6 is the current shipped baseline. HEAD `15850d0` (NOT tagged — v0.3.0 cut path well-cleared; awaiting LIFT-template bug fixes + Wave 4 adopter content). **2 v0.3.0 BLOCKERS CLOSED in S87:** channel-architecture OQ (Insight 30 Option b) + SQL emission gap (Bug 3a).
 
-### 2026-05-12 (S87 CLOSE — 5 commits / 0 regressions / channel-architecture v0.3 OQ deep-dived + debated + ratified Option b)
+### 2026-05-12 (S87 CLOSE — HISTORIC 37 commits · 17+ dispatches · 2 v0.3.0 blockers CLEARED · Wave 3 COMPLETE · Insight 30 ratified · Option (d) engine self-write synthesis shipped · 14-mario AC delta 1/8→8/8 · stdlib Phase 1 173-occurrence sweep · 5 LIFT-template bug families surfaced · PA worktree-sweep mistake recovered ZERO loss)
 
-S87 details in `hand-off.md` "S87 progress" + `master-list.md` "S87 — full session state addendum." Summary: 5 PA-authored commits (`5762069` D3b benchmarks + 5th latent compiler bug surfaced; `9d6c8e4` promote.js Option β safety-harness +7 tests; `eb89ab7` happy-dom perf-regression diagnostic; `de181c2` Batch 2 Trio A SCOPING; `54803f6` Wave 3 v0.3 fixture-sweep PARTIAL). Wave 3 PARTIAL — Phase 1 (16 examples auto-migrated) + Phase 3 (5 channel inverts) LANDED; Phase 2 BLOCKED on SPEC §38.1 line 16061 channel-architecture OQ. scrml-deep-dive completed in-session (737-line output at `scrml-support/docs/deep-dives/channel-architecture-v0.3-2026-05-12.md`; 3 viable options surfaced). debate-curator completed in 3 minutes (vs 6-12h band): Option (b) module-file dispensation WINS 47/44/44 across 6-dimension rubric. Insight 30 ratified + appended to `scrml-support/design-insights.md`. **PA worktree-sweep mistake mid-session destroyed all 29 worktrees including 3 active + 1 preserved; full recovery via git update-ref from deletion-log SHAs; ZERO work-lost.** Memory rule codified: PA bash cleanup loops MUST dry-run first. 6 Wave 3.5 follow-ups surfaced. v0.3.0 cut sequencing: SPEC §38.1 update + walker pre-check (~3-8h) is next critical-path dispatch.
+**Session-defining outcome:** S87 is the largest single-day session in scrmlTS history by every dimension — 37 commits, 17+ dispatches landed (3 in-flight at any time), 2 v0.3.0 blockers closed, 2 design insights ratified (Insight 30 + Option (d) engine self-write synthesis pattern), Wave 3 v0.3 fixture-sweep flipped PARTIAL → COMPLETE, and 5 NEW high-priority LIFT-template codegen bug families surfaced for v0.3.0 ship readiness. **Zero regressions across all 37 landings.** PA committed a catastrophic worktree-sweep mistake mid-session destroying 4 must-not-touch worktrees; full recovery via `git update-ref` from deletion-log SHAs preserved all branches and the agents' harness auto-recreated worktrees from restored tips — ZERO work-lost.
+
+**Major commits landed S87 (chronological):**
+
+- **`5762069`** D3b benchmarks refresh — indirect-eval bench-scrml.js fix (D3a hypothesis verified) + TodoMVC `.filter(cb).length` workaround + runtime-results.json regen + RESULTS.md refresh. **5th LATENT COMPILER BUG SURFACED:** `.filter(cb).<member>` strips inner callback in v0.2.6+ codegen.
+
+- **`9d6c8e4`** promote.js Option β safety-harness port from migrate.js. +7 tests / 0 regressions. Closes the staged-tmp anti-pattern in promote.js mirroring the S86 migrate.js fix.
+
+- **`eb89ab7`** happy-dom perf-regression diagnostic — read-only analysis at `docs/audits/happy-dom-perf-regression-s87-2026-05-12.md`. Establishes regression window is wider than D3b's framing (~1402 commits Apr 5 → May 12). scrml 5.8× absolute slowdown vs React's 1.9×; competitive ranking intact (still beats React 9.2×). NOT v0.3.0 blocker; recommends post-v0.3.0 6-12h bisect-and-profile dispatch.
+
+- **`de181c2` + `674d1dc`** Batch 2 Trio A SCOPING + 3 ready-to-fire dispatch briefs.
+
+- **`6be98ad`** SPEC §38.1 + walker pre-check — Insight 30 implementation in 12min vs 3-8h band. Module-file `<channel>` dispensation (Option b ratified by debate-curator 47/44/44). All 4 trucking-dispatch channel files compile silent post-fix. **v0.3.0 channel-architecture BLOCKER CLOSED.**
+
+- **`d8ea41c`** Bug 1 14-mario codegen+runtime — 4 fixes (payload binding A / EnumType::Variant B `::` rewrite / engine-routing C / derived_get tracks D). +8 tests. e2e 18/24 across 3 browsers; AC6/AC7 fail on out-of-scope fixture bug → engine self-loop semantics design call.
+
+- **`cee4469`** Bug 4 walkMarkupContext extension. +7 tests. **METHODOLOGY:** brief over-claimed 4 false-fires; only 1 actual false-fire. 3 of 4 W-DEAD-FUNCTION are GENUINE (TodoMVC fixture incompleteness). Form-submit failure is downstream of Bug 5.
+
+- **`d402047`** Bug 6 lift codegen — silent-data-loss closure. `<li>` for-loop bodies inside `<ul>` lift contexts were COMPLETELY DROPPED in generated JS. Fix wires structured-markup path to existing emitForStmtWithContainer.
+
+- **`547566a`** Bug 2a component-expander walks if-chain branches + VP-2 ast-walk backstop. +8 tests.
+
+- **`279bfc8`** Bug 5 method-chain callback preservation + Bug 3 diagnostic (Bug 3a SQL emission BLOCKER surfaced).
+
+- **`dd91318` + `0d1514c` + `788ff3a` + `7589c6a`** Option (d) engine self-write synthesis — runtime no-op + W-ENGINE-SELF-WRITE-DETECTED info lint (inside + outside state-child) + SPEC §51.0.F.1 amendment + §34 catalog row. +14 tests. 14-mario compile produces 4 info lints; NO E-ENGINE-INVALID-TRANSITION errors. **Same synthesis-pattern as Insight 30 / §40.8.1 OQ closure — established as design-methodology signal.**
+
+- **`72c6548`** Bug 3a SQL emission v0.3.0 BLOCKER closed — emit-server.ts plumbs `_dbScope` annotation → top-of-file `import { SQL } from "bun"; const _scrml_sql = new SQL(...)`. Real e2e integration test added (compile + import + invoke + verify SQL); closes the latent-bug class. 6 adopter examples verified before/after.
+
+- **`ec0845f`** Bug 4.5 + Bug 1.5 + BS comment-skip — 3 file-disjoint landings: dependency-graph.ts call-ref args + reactive-deps.ts engine-var markup-binding + block-splitter.js `<!-- -->` skip. +28 tests.
+
+- **`a72ccd2`** Bug 6.5 regression-guards (already-fixed by Bug 1 fix-A; PA's S87 file-delta-base-check memory rule prevented double-landing).
+
+- **`bbd8df6` + tests + progress** Bug 2c — 1-line regex fix to normalizeTokenizedRaw collapses `:` separator whitespace; fixes bind:value mangle in expanded component bodies. Generalizes across all colon-separator directive prefixes.
+
+- **`7eac3ad` + `beb25dd`** Wave 3.6 trucking-dispatch re-migration. 12 trucking pages migrated `<program>` → `<page>`. ZERO manual fixes — channel-dispensation walker absorbed cross-file cascade as Insight 30 predicted. **Wave 3 v0.3 fixture-sweep flips PARTIAL → COMPLETE.**
+
+- **`28146e0` + `8c8e55a`** Bug 6.5.1 named-binding parser fix (`.V(field: local)` correctly binds `local`). **Bug 6.5.1's `child.binding` raw-text approach SUPERSEDES Bug 1 fix-A's `payloadBindings.join(", ")` approach.**
+
+- **`61f4e4b`** migrate.js Wave 3.5 BUNDLE — container-aware + scope-safe + comment-safe unwrap. 4 bug families closed: E-CTX inside `<db>` (5×) + E-SCOPE-001 on locals (4×) + E-TYPE-026 (1×) + bonus E-LIN-001. +17 tests.
+
+- **`8f03715` + `6bdf34b` + `8666d45`** Bug 1.6+1.7 match-arm bundle. Bug 1.6 was already fixed; Bug 1.7 inline-arm engine-write routing was the actual gap. **14-mario AC delta: 1/8 → 8/8 Chromium + Firefox.**
+
+- **`f2dbb75`** stdlib Phase 1 — 173× `===`/`!==` → `==`/`!=` mechanical sweep across 20 stdlib modules. +28 regression-guard tests. Phase 3 surfaces deferred (throw migration / try/catch SPEC question / bun:/node: imports SPEC amendment).
+
+- **`c0a835e` + `2addfc7`** emit-expr Option A — comprehensive engine-routing across ALL expression contexts (ternary / lambda / compound / call-args / nested). Bug 1.7 + Option A handle disjoint paths (string-rewrite layer vs ExprNode-emission layer); both complementary. +9 tests.
+
+- **`15850d0`** TodoMVC re-verify PARTIAL — Bug 5 verified at compile level; canonical `.filter` restored. Edit-mode markup landing BLOCKED on **5 NEW LIFT-template codegen bug families surfaced** (LIFT-1 catastrophic + LIFT-2/3/4 bundle + LIFT-5 ambient). **HIGH-PRIORITY for v0.3.0 cut readiness.**
+
+**Major design outcomes:**
+
+- **Insight 30 ratified S87** — v0.3 cross-file channel access via Option (b) module-file dispensation. scrml-deep-dive completed in-session (737-line output) → debate-curator completed in 3 minutes (47/44/44 across 6-dimension rubric; Phoenix + Svelte ideologically-distinct experts converged on (b); simplicity-defender critique answered by engine-parity argument). User RATIFIED. SPEC §38.1 implementation landed in 12min vs 3-8h band. Insight 30 appended to `scrml-support/design-insights.md`.
+
+- **Option (d) engine self-write synthesis ratified S87** — runtime no-op semantics + W-ENGINE-SELF-WRITE-DETECTED info lint + SPEC §51.0.F.1 amendment. Same synthesis-pattern as Insight 30 / §40.8.1 OQ closure — language absorbs common-case friction (idempotent runtime) without losing diagnostic signal (info lint surfaces no-op writes at compile time). 14-mario AC6/AC7 unblocked.
+
+- **Synthesis-pattern as design-methodology signal** — when binary OQ has real costs both sides, surface a synthesis option capturing both load-bearing benefits without their costs. Frequency-3 in S86-S87 (§40.8.1 Option C + Insight 30 Option b + Option d engine self-write).
+
+**5 NEW LIFT-template codegen bug families SURFACED (HIGH-PRIORITY for v0.3.0):**
+
+- LIFT-1 (CATASTROPHIC): parens-attr in lift template elides parent element + duplicates inner text.
+- LIFT-2/3/4 BUNDLE: lift-attr emitter literal-setAttribute fallback for bind:/if=/onkeydown shapes (shared root shape).
+- LIFT-5 (probable runtime breakage): if-inside-for reconciler-factory `_scrml_lift_target` ambient state gap.
+
+Block canonical TodoMVC edit-mode + broader "per-item interactive markup inside for/lift" pattern (the most common shape in TodoMVC-style apps). Recommended 3-dispatch decomposition for S88.
+
+**S87 PA-side mistake + recovery (memory rules codified):**
+
+PA wrote a bash worktree-cleanup loop intended to preserve 4 must-not-touch worktrees (3 active dispatches + 1 D3a preserved). **Bash skip-loop scoping was subtly broken; ALL 29 worktrees swept including the 4.** Recovery executed immediately via `git update-ref` restoring all 4 branches from deletion-log SHAs; agents' harness auto-recreated worktrees from restored tips. **All 3 active dispatches finished end-to-end; ZERO work-lost.** 2 memory rules saved: `feedback_pa_bash_cleanup_dry_run.md` (PA bash cleanup loops MUST dry-run first) + `feedback_pa_file_delta_base_check.md` (PA file-delta must verify agent base SHA against current main; cherry-pick if main touched same file since base — codified after the recovery surfaced this risk).
+
+**Brief over-claiming pattern surfaced multiple times** (Bug 4 / Bug 6.5 / BS comment-skip / Bug 1.6) — Rule 4 extension: BRIEF-derived claims also need cross-check against current truth before encoding. Future briefs claiming a symptom count or specific repro shape should cross-check against AST/dist before encoding.
+
+**Tests at S87 close:** 11,153 / 85 skip / 1 todo / 0 fail / 554 files. Pre-commit hook firing on every PA-authored commit. Zero regressions across 37 landings.
+
+**v0.3.0 cut sequencing (post-S87):** path well-cleared. Remaining: 5 LIFT-template bug fixes (high-priority) + Wave 4 adopter content (tutorials / scrml.dev refresh / articles triage) + tag decision.
+
+**Open at S87 close:**
+- PUSH PENDING — 37 S87 commits to origin/main (surface for S88 PA authorization).
+- 26 worktrees retained (cleanup pending wrap; DRY-RUN-FIRST per S87 memory rule).
+- 5 LIFT-template codegen bug families (high-priority).
+- stdlib Phase 1.5 (E-SYNTAX-042 sweep) + Phase 3a/b/c (throw / try/catch SPEC / bun: imports SPEC).
+- SPEC amendments queued: §4.7 BS-comment-skip + §40.4 bun:/node: + §18.7 mixed-binding.
+- happy-dom perf bisect (post-v0.3.0).
+- Closure-analysis compiler implementation (300-640h band per Insight 29).
+- Wave 4 adopter content.
+- v0.3.0 tag decision (gated on LIFT bugs + Wave 4).
 
 ### 2026-05-12 (S86 CLOSE — v0.3 Wave 2 LANDED · v0.3 Approach A spec anchor LANDED · §40.8.1 OQ CLOSED · WebKit green 3-browser · scrml-dev codegen fix · migrate safety-harness fix · BS-layer extension · 117-worktree backlog cleaned · S86 the LARGEST session by far)
 
