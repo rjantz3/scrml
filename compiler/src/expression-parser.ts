@@ -1050,7 +1050,11 @@ export function esTreeToExprNode(
     // ---- Unary ----
     case "UnaryExpression": {
       const op = node.operator as string;
-      const argument = esTreeToExprNode(node.argument as ESNode, filePath, baseOffset);
+      // Bug 5 (s87 trio-b, 2026-05-12): thread rawSource so a function-with-
+      // block-body nested in unary position (e.g., `!arr.filter(function(t){...})`)
+      // can slice its own raw text in the FunctionExpression branch. Without
+      // this, the inner callback's escape-hatch raw="" and the emitter drops it.
+      const argument = esTreeToExprNode(node.argument as ESNode, filePath, baseOffset, rawSource);
       const validOps = ["!", "-", "+", "~", "typeof", "void", "delete", "await"];
       if (!validOps.includes(op)) return makeEscapeHatch(node, span, rawSource ?? "");
       return {
@@ -1064,7 +1068,8 @@ export function esTreeToExprNode(
     // ---- Update (prefix/postfix ++ / --) ----
     case "UpdateExpression": {
       const op = node.operator as string; // "++" or "--"
-      const argument = esTreeToExprNode(node.argument as ESNode, filePath, baseOffset);
+      // Bug 5 (s87 trio-b): thread rawSource (same shape as UnaryExpression).
+      const argument = esTreeToExprNode(node.argument as ESNode, filePath, baseOffset, rawSource);
       return {
         kind: "unary", span,
         op: op as "++" | "--",
@@ -1075,7 +1080,8 @@ export function esTreeToExprNode(
 
     // ---- Await ----
     case "AwaitExpression": {
-      const argument = esTreeToExprNode(node.argument as ESNode, filePath, baseOffset);
+      // Bug 5 (s87 trio-b): thread rawSource (same shape as UnaryExpression).
+      const argument = esTreeToExprNode(node.argument as ESNode, filePath, baseOffset, rawSource);
       return {
         kind: "unary", span,
         op: "await",
@@ -1087,8 +1093,11 @@ export function esTreeToExprNode(
     // ---- Binary ----
     case "BinaryExpression": {
       const op = node.operator as string;
-      const left = esTreeToExprNode(node.left as ESNode, filePath, baseOffset);
-      const right = esTreeToExprNode(node.right as ESNode, filePath, baseOffset);
+      // Bug 5 (s87 trio-b): thread rawSource so function-with-block-body nested
+      // in either operand can slice its own raw text. Real-world shape:
+      // `cond && arr.filter(function(t){...}).length > 0`.
+      const left = esTreeToExprNode(node.left as ESNode, filePath, baseOffset, rawSource);
+      const right = esTreeToExprNode(node.right as ESNode, filePath, baseOffset, rawSource);
       // All JS binary ops are valid in the BinaryExpr union
       return { kind: "binary", span, op: op as BinaryExpr["op"], left, right } satisfies BinaryExpr;
     }
@@ -1096,8 +1105,9 @@ export function esTreeToExprNode(
     // ---- Logical (&&, ||, ??) ----
     case "LogicalExpression": {
       const op = node.operator as string;
-      const left = esTreeToExprNode(node.left as ESNode, filePath, baseOffset);
-      const right = esTreeToExprNode(node.right as ESNode, filePath, baseOffset);
+      // Bug 5 (s87 trio-b): thread rawSource (same shape as BinaryExpression).
+      const left = esTreeToExprNode(node.left as ESNode, filePath, baseOffset, rawSource);
+      const right = esTreeToExprNode(node.right as ESNode, filePath, baseOffset, rawSource);
       return { kind: "binary", span, op: op as BinaryExpr["op"], left, right } satisfies BinaryExpr;
     }
 
@@ -1118,21 +1128,31 @@ export function esTreeToExprNode(
 
     // ---- Ternary ----
     case "ConditionalExpression": {
-      const condition = esTreeToExprNode(node.test as ESNode, filePath, baseOffset);
-      const consequent = esTreeToExprNode(node.consequent as ESNode, filePath, baseOffset);
-      const alternate = esTreeToExprNode(node.alternate as ESNode, filePath, baseOffset);
+      // Bug 5 (s87 trio-b): thread rawSource through all three branches so a
+      // function-with-block-body in any branch can slice its raw text.
+      const condition = esTreeToExprNode(node.test as ESNode, filePath, baseOffset, rawSource);
+      const consequent = esTreeToExprNode(node.consequent as ESNode, filePath, baseOffset, rawSource);
+      const alternate = esTreeToExprNode(node.alternate as ESNode, filePath, baseOffset, rawSource);
       return { kind: "ternary", span, condition, consequent, alternate } satisfies TernaryExpr;
     }
 
     // ---- Member Access ----
     case "MemberExpression": {
-      const object = esTreeToExprNode(node.object as ESNode, filePath, baseOffset);
+      // Bug 5 (s87 trio-b — load-bearing site): thread rawSource into the
+      // object recursion. Without this, `arr.filter(function(t){...}).length`
+      // (i.e. a method call with a block-body callback chained to a member
+      // access) loses the inner callback — the FunctionExpression branch tries
+      // to slice rawSource.slice(start, end) and falls back to "" when
+      // rawSource is undefined, producing `arr.filter().length`.
+      const object = esTreeToExprNode(node.object as ESNode, filePath, baseOffset, rawSource);
       const computed = node.computed as boolean;
       const optional = node.optional as boolean ?? false;
 
       if (computed) {
         // Computed access: expr[index]
-        const index = esTreeToExprNode(node.property as ESNode, filePath, baseOffset);
+        // Bug 5 follow-on: thread rawSource into the index recursion as well so
+        // shapes like `arr[fn(function(){...})]` survive.
+        const index = esTreeToExprNode(node.property as ESNode, filePath, baseOffset, rawSource);
         return { kind: "index", span, object, index, optional } satisfies IndexExpr;
       } else {
         // Static access: expr.prop
@@ -1159,23 +1179,26 @@ export function esTreeToExprNode(
       if (callee.type === "Identifier") {
         const calleeName = callee.name as string;
 
+        // Bug 5 (s87 trio-b) — thread rawSource into the LHS recursion of
+        // every scrml placeholder call so `(arr.filter(function(t){...}).length is not)`
+        // and similar absence/variant-check shapes preserve nested callbacks.
         if (calleeName === "__scrml_is_not_not__") {
-          const left = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset);
+          const left = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset, rawSource);
           const nullNode: LitExpr = { kind: "lit", span, raw: "null", value: null, litType: "null" };
           return { kind: "binary", span, op: "is-not-not", left, right: nullNode } satisfies BinaryExpr;
         }
         if (calleeName === "__scrml_is_not__") {
-          const left = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset);
+          const left = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset, rawSource);
           const nullNode: LitExpr = { kind: "lit", span, raw: "null", value: null, litType: "null" };
           return { kind: "binary", span, op: "is-not", left, right: nullNode } satisfies BinaryExpr;
         }
         if (calleeName === "__scrml_is_some__") {
-          const left = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset);
+          const left = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset, rawSource);
           const nullNode: LitExpr = { kind: "lit", span, raw: "null", value: null, litType: "null" };
           return { kind: "binary", span, op: "is-some", left, right: nullNode } satisfies BinaryExpr;
         }
         if (calleeName === "__scrml_is_variant__") {
-          const left = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset);
+          const left = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset, rawSource);
           const variantLit = rawArgs[1] as ESNode;
           const variantName = variantLit.value as string ?? "";
           const right: IdentExpr = { kind: "ident", span, name: variantName };
@@ -1183,7 +1206,7 @@ export function esTreeToExprNode(
         }
         if (calleeName === "__scrml_match__") {
           // First arg is subject, rest are arm strings
-          const subject = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset);
+          const subject = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset, rawSource);
           const rawArmNodes = rawArgs.slice(1) as ESNode[];
           const rawArmsArr = rawArmNodes.map(a => a.value as string ?? "");
           return { kind: "match-expr", span, subject, rawArms: rawArmsArr } satisfies MatchExpr;
@@ -1271,37 +1294,43 @@ export function esTreeToExprNode(
 
     // ---- New ----
     case "NewExpression": {
-      const calleeExpr = esTreeToExprNode(node.callee as ESNode, filePath, baseOffset);
+      // Bug 5 (s87 trio-b): thread rawSource through callee and args so a
+      // function-with-block-body inside `new Cls(function(){...})` survives.
+      const calleeExpr = esTreeToExprNode(node.callee as ESNode, filePath, baseOffset, rawSource);
       const rawArgs = (node.arguments as ESNode[]) ?? [];
       const args = rawArgs.map(a => {
         if (a.type === "SpreadElement") {
-          const arg = esTreeToExprNode((a as { argument: ESNode }).argument, filePath, baseOffset);
+          const arg = esTreeToExprNode((a as { argument: ESNode }).argument, filePath, baseOffset, rawSource);
           return { kind: "spread" as const, span: spanFromEstree(a, filePath, baseOffset), argument: arg } satisfies SpreadExpr;
         }
-        return esTreeToExprNode(a, filePath, baseOffset);
+        return esTreeToExprNode(a, filePath, baseOffset, rawSource);
       });
       return { kind: "new", span, callee: calleeExpr, args } satisfies NewExpr;
     }
 
     // ---- Array ----
     case "ArrayExpression": {
+      // Bug 5 (s87 trio-b): thread rawSource through every element so a
+      // function-with-block-body inside an array literal survives.
       const elements = ((node.elements as (ESNode | null)[]) ?? []).map(el => {
         if (!el) return { kind: "lit" as const, span, raw: "undefined", value: undefined as unknown as null, litType: "undefined" as const } satisfies LitExpr;
         if (el.type === "SpreadElement") {
-          const arg = esTreeToExprNode((el as { argument: ESNode }).argument, filePath, baseOffset);
+          const arg = esTreeToExprNode((el as { argument: ESNode }).argument, filePath, baseOffset, rawSource);
           return { kind: "spread" as const, span: spanFromEstree(el, filePath, baseOffset), argument: arg } satisfies SpreadExpr;
         }
-        return esTreeToExprNode(el, filePath, baseOffset);
+        return esTreeToExprNode(el, filePath, baseOffset, rawSource);
       });
       return { kind: "array", span, elements } satisfies ArrayExpr;
     }
 
     // ---- Object ----
     case "ObjectExpression": {
+      // Bug 5 (s87 trio-b): thread rawSource through computed-key / value so a
+      // function-with-block-body inside an object literal survives.
       const props: ObjectProp[] = ((node.properties as ESNode[]) ?? []).map(p => {
         const propSpan = spanFromEstree(p, filePath, baseOffset);
         if (p.type === "SpreadElement") {
-          const arg = esTreeToExprNode((p as { argument: ESNode }).argument, filePath, baseOffset);
+          const arg = esTreeToExprNode((p as { argument: ESNode }).argument, filePath, baseOffset, rawSource);
           return { kind: "spread" as const, argument: arg, span: propSpan } satisfies Extract<ObjectProp, { kind: "spread" }>;
         }
         // Property
@@ -1315,9 +1344,9 @@ export function esTreeToExprNode(
         }
 
         const key: string | ExprNode = computed
-          ? esTreeToExprNode(keyNode, filePath, baseOffset)
+          ? esTreeToExprNode(keyNode, filePath, baseOffset, rawSource)
           : (keyNode.name as string ?? keyNode.value as string ?? "");
-        const value = esTreeToExprNode(valueNode, filePath, baseOffset);
+        const value = esTreeToExprNode(valueNode, filePath, baseOffset, rawSource);
         return { kind: "prop" as const, key, value, computed, span: propSpan } satisfies Extract<ObjectProp, { kind: "prop" }>;
       });
       return { kind: "object", span, props } satisfies ObjectExpr;
