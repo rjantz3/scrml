@@ -1771,7 +1771,11 @@ export function buildFileTypeRegistry(fileAST: MetaFileAST): Map<string, Resolve
   const registry = new Map<string, ResolvedType>();
 
   // Seed with built-in type names
-  for (const name of ["number", "string", "boolean", "bool", "null", "asIs"]) {
+  // S89 user ruling: scrml has no `null` type. The legacy `"null"` seed here
+  // predated the canonical `not` sentinel — removed because scrml source can
+  // no longer reference a type named `null` (E-SYNTAX-042 fires on `null` as
+  // a token per §42).
+  for (const name of ["number", "string", "boolean", "bool", "asIs"]) {
     registry.set(name, { kind: "primitive", name });
   }
 
@@ -2016,8 +2020,9 @@ export function buildCapturedScope(vars: Map<string, "reactive" | "let" | "const
  * The serialized entries are consumed by emitTypeRegistryLiteral in emit-logic.ts.
  */
 export function serializeTypeRegistry(typeRegistry: Map<string, ResolvedType>): TypeRegistryEntry[] {
-  // Built-in primitive type names — excluded from the runtime type registry
-  const BUILTINS = new Set(["number", "string", "boolean", "bool", "null", "asIs"]);
+  // Built-in primitive type names — excluded from the runtime type registry.
+  // S89 user ruling: scrml has no `null` type (see buildFileTypeRegistry note).
+  const BUILTINS = new Set(["number", "string", "boolean", "bool", "asIs"]);
   const entries: TypeRegistryEntry[] = [];
 
   for (const [typeName, type] of typeRegistry) {

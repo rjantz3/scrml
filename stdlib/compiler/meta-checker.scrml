@@ -243,34 +243,34 @@ ${
         // for-of / for-in iterator variables
         const forOfRe = /\bfor\s*\(\s*(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s+(?:of|in)\b/g
         let m
-        while ((m = forOfRe.exec(cleaned)) != null) {
+        while ((m = forOfRe.exec(cleaned)) is some) {
             inlineLocals.add(m[1])
         }
 
         // Named or anonymous function parameters
         const fnParamRe = /\bfunction\s*(?:[A-Za-z_$][A-Za-z0-9_$]*)?\s*\(([^)]*)\)/g
-        while ((m = fnParamRe.exec(cleaned)) != null) {
+        while ((m = fnParamRe.exec(cleaned)) is some) {
             const paramList = m[1]
             const paramRe = /[A-Za-z_$][A-Za-z0-9_$]*/g
             let p
-            while ((p = paramRe.exec(paramList)) != null) {
+            while ((p = paramRe.exec(paramList)) is some) {
                 inlineLocals.add(p[0])
             }
         }
 
         // Arrow function — single unparenthesized parameter
         const arrowSingleRe = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*=>/g
-        while ((m = arrowSingleRe.exec(cleaned)) != null) {
+        while ((m = arrowSingleRe.exec(cleaned)) is some) {
             inlineLocals.add(m[1])
         }
 
         // Arrow function — parenthesized parameter list
         const arrowMultiRe = /\(([^)]*)\)\s*=>/g
-        while ((m = arrowMultiRe.exec(cleaned)) != null) {
+        while ((m = arrowMultiRe.exec(cleaned)) is some) {
             const paramList = m[1]
             const paramRe = /[A-Za-z_$][A-Za-z0-9_$]*/g
             let p
-            while ((p = paramRe.exec(paramList)) != null) {
+            while ((p = paramRe.exec(paramList)) is some) {
                 inlineLocals.add(p[0])
             }
         }
@@ -278,7 +278,7 @@ ${
         // Step 3: Extract all identifiers not preceded by `.`, filtering out inline locals.
         const ids = []
         const re = /(?<![.\w$])([A-Za-z_$][A-Za-z0-9_$]*)/g
-        while ((m = re.exec(cleaned)) != null) {
+        while ((m = re.exec(cleaned)) is some) {
             if (!inlineLocals.has(m[1])) {
                 ids.push(m[1])
             }
@@ -621,7 +621,11 @@ ${
         const registry = new Map()
 
         // Seed with built-in type names
-        for (const name of ["number", "string", "boolean", "bool", "null", "asIs"]) {
+        // S89 user ruling: scrml has no `null` type. The legacy `"null"` seed
+        // here was a JS-host artifact predating the canonical `not` sentinel —
+        // removed because scrml source can no longer reference a type named
+        // `null` (E-SYNTAX-042 fires on `null` as a token per §42).
+        for (const name of ["number", "string", "boolean", "bool", "asIs"]) {
             registry.set(name, { kind: "primitive", name })
         }
 
@@ -819,7 +823,7 @@ ${
         // Match reflect(Identifier) calls
         const re = /\breflect\s*\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\)/g
         let m
-        while ((m = re.exec(expr)) != null) {
+        while ((m = re.exec(expr)) is some) {
             const typeName = m[1]
             if (!typeRegistry.has(typeName)) {
                 errors.push(new MetaError(

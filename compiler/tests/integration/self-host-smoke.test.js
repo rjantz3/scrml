@@ -49,9 +49,32 @@ function findMainProjectRoot() {
   ).trim();
 }
 
+// S89: a worktree may have edited the self-host scrml source ahead of the main
+// branch. Resolve self-host scrml + TS-reference paths from the LOCAL worktree
+// when both exist locally — otherwise fall back to main root. Build-output
+// artifacts (compiler/self-host/dist/*.js) always read from main root because
+// they are gitignored and only built in main.
+function findSelfHostRoot() {
+  const localRoot = execSync(
+    "git -C " + testDir + " rev-parse --show-toplevel",
+    { encoding: "utf-8" },
+  ).trim();
+  if (
+    existsSync(resolve(localRoot, "compiler/src/module-resolver.js")) &&
+    existsSync(resolve(localRoot, "stdlib/compiler/module-resolver.scrml"))
+  ) {
+    return localRoot;
+  }
+  return findMainProjectRoot();
+}
+
 const projectRoot = findMainProjectRoot();
-const jsModulePath = resolve(projectRoot, "compiler/src/module-resolver.js");
-const scrmlFilePath = resolve(projectRoot, "stdlib/compiler/module-resolver.scrml");
+// Self-host root may differ from projectRoot when an agent worktree is editing
+// the scrml self-host source ahead of main. Build artifacts (dist/) still come
+// from projectRoot.
+const selfHostRoot = findSelfHostRoot();
+const jsModulePath = resolve(selfHostRoot, "compiler/src/module-resolver.js");
+const scrmlFilePath = resolve(selfHostRoot, "stdlib/compiler/module-resolver.scrml");
 
 // ---------------------------------------------------------------------------
 // Import the JS original
@@ -129,6 +152,126 @@ function extractScrmlLogic() {
     );
   }
 
+  // S89 null-eradication self-host: rewrite scrml `not`-syntax to the JS-runtime
+  // equivalent emitted by emit-expr.ts. scrml `not` keyword compiles to JS `null`;
+  // `is not` compiles to `(x === null || x === undefined)`; `is some` compiles
+  // to `(x !== null && x !== undefined)`. This rewriter mirrors that codegen so
+  // the eval-extraction harness can validate scrml source that uses the canonical
+  // absence-as-`not` form (per S89 user ruling: `null does NOT EXIST IN SCRML`).
+  // The transformations are token-boundary aware to avoid mangling identifiers,
+  // string literals, or template-literal content.
+  function rewriteNotSyntax(code) {
+    // Strategy: scan character-by-character, tracking whether we are inside a
+    // string/template/comment so we only transform code-level tokens.
+    let out = "";
+    let i = 0;
+    const len = code.length;
+    const isIdentChar = (ch) => /[A-Za-z0-9_$]/.test(ch);
+    while (i < len) {
+      const ch = code[i];
+      // Line comment
+      if (ch === "/" && code[i + 1] === "/") {
+        const nl = code.indexOf("\n", i);
+        const end = nl === -1 ? len : nl + 1;
+        out += code.substring(i, end);
+        i = end;
+        continue;
+      }
+      // Block comment
+      if (ch === "/" && code[i + 1] === "*") {
+        const e = code.indexOf("*/", i + 2);
+        const end = e === -1 ? len : e + 2;
+        out += code.substring(i, end);
+        i = end;
+        continue;
+      }
+      // String literal (single, double, or backtick)
+      if (ch === "\"" || ch === "'" || ch === "`") {
+        const quote = ch;
+        out += ch;
+        i++;
+        while (i < len) {
+          const c = code[i];
+          if (c === "\\") {
+            out += c + (code[i + 1] || "");
+            i += 2;
+            continue;
+          }
+          if (c === quote) {
+            out += c;
+            i++;
+            break;
+          }
+          // Template-literal ${...} — recurse trivially: just pass through;
+          // the rewriter doesn't need to descend (would only be wrong if user
+          // had `not`/`is not`/`is some` inside template interpolation, which
+          // scrml's compile-output handles identically per codegen).
+          out += c;
+          i++;
+        }
+        continue;
+      }
+      // Look-ahead for `is not`, `is some`, or bare `not` at a token boundary.
+      // Token boundary: previous char is not an identifier char (or start).
+      const prevCh = i === 0 ? "" : code[i - 1];
+      if (!isIdentChar(prevCh)) {
+        // `is some` and `is not not` and `is not` — check in order of length
+        // (longest first to avoid `is not` swallowing `is not not`).
+        if (code.substr(i, 10) === "is not not" && !isIdentChar(code[i + 10] || "")) {
+          // `x is not not` → `(x !== null && x !== undefined)`. We need to
+          // restructure with the left operand. Use a regex-replace at the
+          // statement level via deferred token: emit a sentinel that the
+          // surrounding `LEFT is not not` consumer will recognize. The
+          // simplest path: rewrite `(LEFT) is not not` post-hoc with a
+          // capturing regex in a separate pass below.
+          out += "is not not";
+          i += 10;
+          continue;
+        }
+        if (code.substr(i, 7) === "is some" && !isIdentChar(code[i + 7] || "")) {
+          out += "is some";
+          i += 7;
+          continue;
+        }
+        if (code.substr(i, 6) === "is not" && !isIdentChar(code[i + 6] || "")) {
+          out += "is not";
+          i += 6;
+          continue;
+        }
+        if (code.substr(i, 3) === "not" && !isIdentChar(code[i + 3] || "")) {
+          // Bare `not` → JS `null`. (scrml emit-expr.ts: LitExpr `not` → "null")
+          out += "null";
+          i += 3;
+          continue;
+        }
+      }
+      out += ch;
+      i++;
+    }
+    // Second pass: rewrite `LEFT is some` / `LEFT is not` / `LEFT is not not`
+    // into the JS-runtime equivalent. Per emit-expr.ts:
+    //   is-not        → (LEFT === null || LEFT === undefined)
+    //   is-some       → (LEFT !== null && LEFT !== undefined)
+    //   is-not-not    → (LEFT !== null && LEFT !== undefined)
+    // LEFT here is the operand on the left — a simple identifier, member
+    // access, or parenthesized expression. We restrict to a conservative
+    // grammar (identifier with optional `.name` chain or `[idx]` access).
+    const operandPat = /([\w$]+(?:\??\.[\w$]+|\[[^\]]+\])*)/.source;
+    out = out.replace(
+      new RegExp(operandPat + "\\s+is not not\\b", "g"),
+      "($1 !== null && $1 !== undefined)",
+    );
+    out = out.replace(
+      new RegExp(operandPat + "\\s+is some\\b", "g"),
+      "($1 !== null && $1 !== undefined)",
+    );
+    out = out.replace(
+      new RegExp(operandPat + "\\s+is not\\b", "g"),
+      "($1 === null || $1 === undefined)",
+    );
+    return out;
+  }
+
   // Determine source format. Legacy format has ${ immediately after <program>.
   // Idiomatic format has top-level declarations with no ${ wrapper.
   const logicStart = source.indexOf("${");
@@ -151,6 +294,11 @@ function extractScrmlLogic() {
 
   // Strip ^{} meta blocks (async imports we provide manually below)
   logicBody = removeMetaBlocks(logicBody);
+
+  // S89: rewrite scrml `not`/`is not`/`is some` absence-syntax to the JS-runtime
+  // equivalent emitted by emit-expr.ts. Done BEFORE `fn` keyword rewrite so
+  // any `fn` bodies that use `not` get the substitution.
+  logicBody = rewriteNotSyntax(logicBody);
 
   // Rewrite scrml `fn` keyword to JS `function` with explicit return
   logicBody = rewriteFnKeyword(logicBody);

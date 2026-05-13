@@ -415,7 +415,8 @@ describe("self-host parity: buildFileTypeRegistry", () => {
     expect(registry.has("string")).toBe(true);
     expect(registry.has("boolean")).toBe(true);
     expect(registry.has("bool")).toBe(true);
-    expect(registry.has("null")).toBe(true);
+    // S89: scrml has no `null` type — see buildFileTypeRegistry comment.
+    expect(registry.has("null")).toBe(false);
     expect(registry.has("asIs")).toBe(true);
   });
 
