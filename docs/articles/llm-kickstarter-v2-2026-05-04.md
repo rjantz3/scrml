@@ -479,7 +479,7 @@ ${
 - `derived=expr` accepts any reactive expression of the engine's type. JS-style `match` block is the typical shape; function calls and conditionals also work.
 - `rule=`, `initial=`, and direct writes are FORBIDDEN. `E-DERIVED-ENGINE-NO-RULES`, `E-DERIVED-ENGINE-NO-INITIAL`, `E-DERIVED-ENGINE-NO-WRITE`.
 - `<onTransition>` and `effect=` DO fire on derived state changes. The transitions are real (the value changed) — just initiated by the source, not by user code.
-- Initial value computed from source at engine-init time. Compile-error if the derived expression is undefined for the source's `initial=` state.
+- Initial value computed from source at engine-init time. Compile-error if the derived expression has no defined value for the source's `initial=` state.
 - Chained derivation legal (`A → B → C`). Cycles caught at compile time.
 - For plain (non-engine) derived state, use `const <derived> = expr` from §3.1 — `derived=` is engine-only.
 
@@ -523,8 +523,8 @@ These predicates work in three loci with different enforcement contexts: state-c
 
 | Predicate | Meaning | Example |
 |---|---|---|
-| `req` | Non-empty value (string `""` fails; null/undefined fail) | `<name req>` |
-| `is some` | Value exists at all (null/undefined fail). Coexists with `req` because `""` IS some. | `<x is some>` |
+| `req` | Non-empty value (string `""` fails; `not` fails) | `<name req>` |
+| `is some` | Value exists at all (`not` fails). Coexists with `req` because `""` IS some. | `<x is some>` |
 | `length(predicate)` | String/array length matches the predicate | `<name length(>=2)>` |
 | `pattern(regex)` | String matches the regex | `<email pattern(/^[^@]+@[^@]+$/)>` |
 | `min(n)`, `max(n)` | Numeric range | `<age min(18) max(120)>` |

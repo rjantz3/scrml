@@ -273,7 +273,7 @@ Compound state with validators auto-synthesizes a reactive validity surface at T
 
 **Universal-core predicate vocabulary** (§55.1) — 14 predicates; same word at compile site and runtime:
 
-`req`, `is some` (existence-check, scrml's null+undefined unification), `length(<rel-arg>)`, `pattern`, `min`, `max`, `gt`, `lt`, `gte`, `lte`, `eq`, `neq`, `oneOf`, `notIn`.
+`req`, `is some` (existence-check; `not` is scrml's sole absence value), `length(<rel-arg>)`, `pattern`, `min`, `max`, `gt`, `lt`, `gte`, `lte`, `eq`, `neq`, `oneOf`, `notIn`.
 
 **(S66 correction):** earlier primer drafts listed `email`, `url`, `numeric`, `integer`, `custom` here. **Those are NOT universal-core predicates.** `email`/`url`/`numeric`/`integer` are stdlib `scrml:data` library predicate-builders (separate surface; see §10). `custom` is the ValidationError tag at SPEC §55.9 line 24532 ("for developer-defined custom validators (Edge G)") — a tag-level escape hatch for application-defined predicates, NOT a universal-core predicate. The 14 above are the SPEC §55.1 catalog verbatim. Audit at `scrml-support/archive/audits/a1c-roadmap-rule4-audit-2026-05-07.md` §1.1 documents the drift + correction. Per pa.md Rule 4: spec wins.
 
@@ -357,7 +357,7 @@ D3 landed S58 — `compiler/SPEC.md` §38 / §39 / §42 / §53 / §34 are now au
 
 | Predicate | Semantics | `""` (empty string) |
 |---|---|---|
-| `is some` | value EXISTS (null/undefined fail) | TRUE — empty string IS some value |
+| `is some` | value EXISTS (`not` fails) | TRUE — empty string IS some value |
 | `req` | value is NON-EMPTY / MEANINGFUL | FALSE — empty string fails req |
 
 Both predicates exist; both are needed; they coexist in the validator vocabulary. **Three native loci** of "exists/required" semantic across scrml: schema SQL-mirror (`not null`), state validator (`req` and/or `is some`), refinement type (predicate form). Each fires in its layer's enforcement context — not redundancy.

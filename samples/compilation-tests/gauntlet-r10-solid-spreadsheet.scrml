@@ -233,7 +233,7 @@ ${
 
     function getDisplayValue(idx) {
         let v = @values[idx]
-        if (v == undefined || v is not) {
+        if (v is not) {
             return ""
         }
         return v
