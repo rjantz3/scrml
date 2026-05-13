@@ -14639,7 +14639,8 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-MATCH-ONTRANSITION-FORBIDDEN | §18.0.2 | `<onTransition>` element used inside a `<match>` block. Transition handlers are engine-only. Use `<engine>` (Tier 2). | Error |
 | E-MATCH-NOT-EXHAUSTIVE | §18.0.1 | Block-form `<match for=Type>` is missing variants of `Type` and has no wildcard `<_>` catch-all. Add the missing variants or add `<_>`. | Error |
 | E-VARIANT-AMBIGUOUS | §14.10, §18.0.3 | Bare variant reference (e.g., `let x = .Small` or `<Small>` arm pattern) is ambiguous because the position's type is a union with multiple members declaring the variant, OR the position has no statically-known enum type context. §14.10 covers general expression positions (LHS state-decl / let / const annotations, fn params, fn return); §18.0.3 covers match-arm patterns. Qualify the variant: `TypeName.Small` / `<TypeName.Small>`. | Error |
-| E-ENGINE-INVALID-TRANSITION | §51.0.F, §51.0.G | Direct write to engine variable or `.advance()` violates the from-state's `rule=` contract. Statically rejected when from-state is known; runtime-thrown otherwise. | Runtime |
+| E-ENGINE-INVALID-TRANSITION | §51.0.F, §51.0.G | Direct write to engine variable or `.advance()` violates the from-state's `rule=` contract. Statically rejected when from-state is known; runtime-thrown otherwise. **v0.3 Option-d carve-out:** self-writes (target equals current variant) are NO-OPS, NOT violations — see §51.0.F.1 + W-ENGINE-SELF-WRITE-DETECTED. | Runtime |
+| W-ENGINE-SELF-WRITE-DETECTED | §51.0.F.1 | (v0.3, info-level) The compiler has detected an engine self-write — `@var = .CurrentVariant` or `@var.advance(.CurrentVariant)` where `.CurrentVariant` either matches the enclosing state-child tag (STRICT — inside-state-child fire) OR is a declared variant of the engine and the write site is outside any state-child body (CONSERVATIVE — outside-state-child fire). Per §51.0.F.1, self-writes are runtime NO-OPS: no `<onTransition>` fires, no history capture (§51.0.N), no timer rearm (§51.0.M), no idle-watchdog reset (§51.0.R), no subscriber notification. If the no-op-when-already-in-state behavior is INTENTIONAL (e.g., a defensive `set(.Current)` reachable from multiple variants), the lint is informational only — no action required. If a state change was expected unconditionally, verify the write target or guard the call site. Suppression: rephrase the write target via a derived cell (avoid the literal `.Variant` form), or remove the write entirely. Joins the small `W-PROGRAM-SPA-INFERRED` / `I-MATCH-PROMOTABLE` / `D-BATCH-001` family of synthesis-pattern info lints (Insight 30 closure precedent). (Catalog addition v0.3 Option-d synthesis 2026-05-12; emitted at `compiler/src/symbol-table.ts` PASS 16 fire-site #10 + PASS 12.B `walkEngineSelfWriteOutside`.) | Info |
 | E-ENGINE-EFFECT-AMBIGUOUS | §51.0.H | `effect=` attribute used on a state-child whose `rule=` is multi-target. Use `<onTransition>` element child(ren) instead — `effect=` requires a single-target rule. | Error |
 | E-ONTRANSITION-NO-TARGET | §51.0.H | An `<onTransition>` element appears with neither `to=.Variant` nor `from=.Variant`. The handler has no trigger (per the §51.0.H attribute table, exactly one of `to=` / `from=` MUST appear — `to=` fires when leaving toward `.Variant`; `from=` fires when arriving from `.Variant`). Add `to=.Variant` (outgoing) or `from=.Variant` (incoming). (Catalog addition S74 — A1b B17.3.) | Error |
 | E-ENGINE-VAR-DUPLICATE | §51.0.C | Separate declaration of the engine's auto-declared variable (e.g., `<marioState> = .Small` while `<engine for=MarioState ...>` also exists in scope). The engine OWNS its variable; use `var=` on the engine to override the auto-derived name. | Error |
@@ -21440,6 +21441,86 @@ conditionals), the rule= is enforced at runtime — invalid transitions throw wi
 `E-ENGINE-INVALID-TRANSITION` (§34, runtime severity).
 
 The `rule=` attribute is therefore a **CONTRACT on writes**, not just metadata.
+
+##### 51.0.F.1 Idempotent self-write semantics (v0.3 Option-d synthesis, 2026-05-12)
+
+**A self-write to the current variant is a runtime NO-OP, NOT a `rule=` violation.**
+This holds REGARDLESS of whether the from-state's `rule=` lists the current variant as a
+target. Concretely:
+
+```scrml
+<Small rule=.Big>
+  <button onclick=${ @marioState = .Small }/>    <!-- runtime no-op (NOT an error) -->
+</>
+```
+
+When the runtime helper `_scrml_engine_direct_set("marioState", "Small")` is called
+while `@marioState` is already `.Small`:
+
+- The cell value is unchanged (no `_scrml_reactive_set` call → no subscriber fire).
+- No `<onTransition>` handler fires.
+- No history capture (`<Variant history>` synth cell — §51.0.N).
+- No timer rearm or clear (§51.0.M `<onTimeout>`).
+- No idle-watchdog reset (§51.0.R `<onIdle>`).
+- The helper returns `false` (the non-external-transition signal — same shape as the
+  internal-rule short-circuit per §51.0.O).
+
+The same idempotent behavior applies to `@marioState.advance(.Small)` — `.advance(...)`
+on a self-target is a no-op, NOT a "loud failure" (§51.0.G semantics apply only to
+cross-state targets that violate `rule=`).
+
+**Cross-state writes that violate `rule=` STILL throw `E-ENGINE-INVALID-TRANSITION`.**
+Only the self-write case is reclassified as a no-op; all other rule= enforcement is
+unchanged. From the canonical worked example above, `@marioState = .Fire` from `.Small`
+remains a rule= violation (`.Fire` is not in `.Small.rule = .Big` AND `.Fire ≠ .Small`).
+
+**Why idempotent semantics:** the runtime already had this intuition partially —
+`_scrml_engine_history_capture_on_exit` (§51.0.N) treats `current === target` as
+"not a real exit" and skips the history-cell write. v0.3 Option-d generalizes: the
+engine's outer write helpers share that intuition uniformly. Three reinforcing arguments:
+
+1. **Friction removal.** Adopters writing `getHurt() { @marioState = .Small }` get the
+   "reset to safe state" intent without having to gate every call site with
+   `if (@marioState != .Small)`. This is the canonical "idempotent setter" shape every
+   other reactive surface in scrml exposes (`@count = 5` is a no-op when `@count` is
+   already `5`); throwing on a self-write was the surprising shape.
+
+2. **Diagnostic preservation.** The compile-time info lint
+   `W-ENGINE-SELF-WRITE-DETECTED` (§34) surfaces self-writes when statically detectable
+   (literal `.Variant` form), preserving the "every transition is intentional" signal
+   at the diagnostic layer without making the runtime hostile.
+
+3. **Synthesis-pattern precedent.** This is the same shape as Insight 30 / §40.8.1 OQ
+   closure (`W-PROGRAM-SPA-INFERRED` — filesystem-inferred SPA shape + info lint
+   surfaces the inference). The pattern is "language absorbs common-case friction at
+   runtime; lint surfaces the case at compile time so adopter intent is verifiable."
+
+**Compile-time info lint — `W-ENGINE-SELF-WRITE-DETECTED` (§34, severity Info).**
+
+- **Inside a state-child body** (current variant statically known via the state-child
+  tag): fires when `@var = .CurrentVariant` OR `@var.advance(.CurrentVariant)` and
+  `.CurrentVariant` matches the enclosing state-child tag. STRICT — high-confidence.
+
+- **Outside any state-child body** (function bodies, top-level logic, event handlers
+  not attached to engine state-children): fires CONSERVATIVELY when `@var = .Variant`
+  OR `@var.advance(.Variant)` and `.Variant` is one of the engine's declared variants.
+  Less strict because the runtime current variant is dynamic — the lint surfaces
+  "this MAY be a no-op when you weren't expecting it; verify intent."
+
+**Suppression.** Info-level — no hard suppress mechanism. To silence the lint at a
+specific site, either:
+
+- Rephrase the write target so the literal `.Variant` form does not appear (e.g., bind
+  to a derived cell whose value is the target tag).
+- Remove the write if the intent was a no-op via convention (the lint is informational;
+  the runtime no-op is the operative semantics either way).
+
+**Cross-references.** `W-ENGINE-SELF-WRITE-DETECTED` joins the small family of compile-
+time info lints that surface filesystem-inferred or runtime-equivalent shapes adopters
+benefit from seeing at compile time without being blocked: `W-PROGRAM-SPA-INFERRED`
+(§40.8.1, Insight 30 closure pattern), `I-MATCH-PROMOTABLE` (§56), `D-BATCH-001`
+(§8.6). All four are the same synthesis-pattern shape: language absorbs the common-case
+behavior; lint surfaces the inference at compile time so adopters can verify intent.
 
 #### 51.0.G `.advance(.X)` — explicit, throws-on-failure transition (Move 13)
 
