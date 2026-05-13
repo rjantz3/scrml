@@ -653,20 +653,50 @@ describe("engine-a7-hierarchy §7.3 — cascade-miss diagnostic (§51.0.Q.3)", (
   });
 
   test("multi-target rule= with illegal target: fires with multi-target framing", () => {
-    const src = `\${ type Phase:enum = { Idle, Active, Done } }
+    // v0.3 §51.0.F Option-d update: a write whose target is OUTSIDE the
+    // multi-target rule= AND is NOT the enclosing state-child's tag still
+    // fires E-ENGINE-INVALID-TRANSITION (cross-state violation). Self-write
+    // (target equals enclosing tag) is split out into the case below — it
+    // is now NO-OP at runtime + W-ENGINE-SELF-WRITE-DETECTED info lint.
+    const src = `\${ type Phase:enum = { Idle, Active, Done, Other } }
 <engine for=Phase initial=.Active>
   <Idle rule=.Active></>
   <Active rule=(.Idle | .Done)>
-    <button onclick=\${ @phase = .Active }>Wrong</button>
+    <button onclick=\${ @phase = .Other }>Wrong</button>
   </>
   <Done></>
+  <Other></>
 </>`;
     const { sym } = runUpToSYM(src);
     const errs = sym.errors.filter((e) => e.code === "E-ENGINE-INVALID-TRANSITION");
     expect(errs.length).toBe(1);
     const msg = errs[0].message;
-    expect(msg).toContain("@phase = .Active");
+    expect(msg).toContain("@phase = .Other");
     expect(msg).toMatch(/multi-target|\.Idle.*\.Done|\.Done.*\.Idle/);
+  });
+
+  test("self-write inside state-child body — NO ERROR (v0.3 §51.0.F Option-d), fires W-ENGINE-SELF-WRITE-DETECTED info lint", () => {
+    // Self-write (target equals enclosing state-child tag) is a runtime no-op
+    // per v0.3 §51.0.F Option-d synthesis. The cascade-miss check (fire-site
+    // #9) is intentionally skipped; instead fire-site #10 surfaces the no-op
+    // as W-ENGINE-SELF-WRITE-DETECTED (info severity).
+    const src = `\${ type Phase:enum = { Idle, Active, Done } }
+<engine for=Phase initial=.Active>
+  <Idle rule=.Active></>
+  <Active rule=(.Idle | .Done)>
+    <button onclick=\${ @phase = .Active }>Self-write no-op</button>
+  </>
+  <Done></>
+</>`;
+    const { sym } = runUpToSYM(src);
+    const hardErrs = sym.errors.filter((e) => e.code === "E-ENGINE-INVALID-TRANSITION");
+    expect(hardErrs.length).toBe(0);
+    const infoLints = sym.errors.filter((e) => e.code === "W-ENGINE-SELF-WRITE-DETECTED");
+    expect(infoLints.length).toBe(1);
+    expect(infoLints[0].severity).toBe("info");
+    expect(infoLints[0].message).toContain("@phase = .Active");
+    expect(infoLints[0].message).toContain("<Active>");
+    expect(infoLints[0].message).toContain("idempotent");
   });
 
   test("wildcard rule=* — no error on any direct-write target", () => {

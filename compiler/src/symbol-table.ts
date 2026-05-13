@@ -731,7 +731,10 @@ export interface SYMDiagnostic {
   code: string;
   message: string;
   span: Span;
-  severity: "error" | "warning";
+  /** "error" — blocking; "warning" — surfaced; "info" — informational lint
+   *  surfaced through the existing diagnostic channel (mirrors SPA-INFERRED
+   *  + I-MATCH-PROMOTABLE precedent — see SPEC §34 "Info" severity rows). */
+  severity: "error" | "warning" | "info";
 }
 
 export interface SYMStats {
@@ -6454,7 +6457,7 @@ function fireA5Diagnostic(
   message: string,
   engineDecl: any,
   filePath: string,
-  severity: "error" | "warning" = "error",
+  severity: "error" | "warning" | "info" = "error",
 ): void {
   const span: SYMDiagnostic["span"] = engineDecl?.span ?? {
     file: filePath, start: 0, end: 0, line: 1, col: 1,
@@ -6917,6 +6920,49 @@ export function validateEngineA5Extensions(
         // Skip targets not in this engine's variants — different error
         // already fires (or will fire) for that case; mirrors fire-site #3.
         if (!variantSet.has(dw.target)) continue;
+
+        // ----- Fire-site #10 (v0.3 Option-d synthesis) — self-write
+        //       no-op detection: W-ENGINE-SELF-WRITE-DETECTED (info) -----
+        //
+        // When the direct-write target equals the enclosing state-child's
+        // tag (`@varName = .CurrentVariant` from inside `<CurrentVariant>`),
+        // the runtime treats the write as an idempotent no-op per
+        // §51.0.F (v0.3 amendment). NOT a rule= violation — fire-site #9's
+        // cascade-miss check is intentionally SKIPPED below.
+        //
+        // STRICT fire condition: enclosing state-child is statically known
+        // (we are walking it), and the write target literally matches the
+        // tag. Adopters writing `@x = .Same` from inside `<Same>` get this
+        // surfacing as a "your write is intentionally a no-op" signal.
+        // Suppression: rephrase the write target OR add a comment marking
+        // intent; no hard-suppress mechanism per BRIEF — v0.3 lint design.
+        if (dw.target === sc.tag) {
+          const writeRepr = dw.shape === "advance"
+            ? `@${varName}.advance(.${dw.target})`
+            : `@${varName} = .${dw.target}`;
+          fireA5Diagnostic(
+            errors,
+            "W-ENGINE-SELF-WRITE-DETECTED",
+            `W-ENGINE-SELF-WRITE-DETECTED: \`${writeRepr}\` inside state-child ` +
+            `\`<${sc.tag}>\` is a SELF-WRITE — the write target equals the enclosing ` +
+            `state-child's variant. Per SPEC §51.0.F (v0.3 Option-d synthesis), self-` +
+            `writes to the current variant are idempotent NO-OPS at runtime: no ` +
+            `\`<onTransition>\` fires, no timer rearm, no history capture, no ` +
+            `subscriber notification. If the no-op is INTENTIONAL (e.g., a defensive ` +
+            `\`set(.Current)\` in a code path that may also reach from other ` +
+            `variants), this lint is informational only — no action required. If ` +
+            `you EXPECTED a state change, verify the write target. Suppress by ` +
+            `removing the write or by phrasing the target via a derived expression ` +
+            `that is not literally \`.${dw.target}\` at this site.`,
+            engineDecl,
+            filePath,
+            "info",
+          );
+          // SKIP fire-site #9 cascade-miss check for self-writes — the
+          // runtime no-op shape means this is NOT a rule= violation under
+          // v0.3 §51.0.F semantics, even when sc.rule does not list itself.
+          continue;
+        }
 
         const r = sc.rule;
         if (!r) continue;
