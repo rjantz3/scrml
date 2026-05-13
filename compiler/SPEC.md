@@ -506,8 +506,10 @@ scrml defines `//` as the universal single-line comment syntax (§27). The block
 - This suppression applies at ALL context levels — whether the block splitter is currently at top-level markup context, inside a brace-delimited context, or in any other scanning state.
 - During suppression, the characters `<`, `${`, `?{`, `#{`, `!{`, `</>`, `}`, and `</` SHALL all be treated as raw content and SHALL NOT trigger any context-stack transition.
 - The `//` sequence itself and all characters through the end of the line SHALL be treated as raw content of the current block.
-- This suppression applies ONLY to `//`. The block splitter SHALL NOT handle `<!-- -->` (markup comments) or `/* */` (CSS/JS block comments) — those are concerns of the per-context tokenizers and SHALL NOT be processed at block-splitter level.
+- This suppression applies to `//` universally. The block splitter MAY ADDITIONALLY skip `<!-- -->` (markup comments) at block level when the BS-layer comment-skip mechanism is engaged (S87 amendment, commit `ec0845f`); the skip MUST treat the entire `<!-- -->` span as raw content and SHALL NOT trigger any context-stack transition for delimiters inside the span. The block splitter SHALL NOT handle `/* */` (CSS/JS block comments) — those remain concerns of the per-context tokenizers and SHALL NOT be processed at block-splitter level.
 - Comment suppression applies even when `//` appears inside a brace-delimited context. Both §4.6 and §4.7 rules are in effect simultaneously; they are not mutually exclusive.
+
+**S88 amendment note (2026-05-13):** the prior `SHALL NOT handle <!-- -->` wording (pre-S87) was authored before the BS-layer comment-skip mechanism shipped. Per S86 ratification ("BS-layer over SPEC retreat" — when SPEC and implementation diverge AND SPEC is design-intent, implementation catches up; conversely when implementation is the right answer, SPEC catches up), this amendment softens §4.7 to MAY-permit `<!-- -->` skip at BS-layer, matching the shipped block-splitter behavior. The skip is conservative: it treats the entire comment span as raw content; it does not interpret content inside the comment for delimiter recognition. `/* */` remains forbidden at BS-layer — those genuinely belong to per-context tokenizers (CSS, JS) and crossing the BS layer would create false context-mode transitions inside non-comment code.
 
 **Rationale:** Without this rule, a commented-out delimiter sequence such as `// < db src="db.sql">` or `// ${` would be scanned by the block splitter and would open a spurious block context, corrupting the block stream and all downstream passes.
 
@@ -9915,6 +9917,30 @@ compiler infers this type; no annotation is required on the binding.
   the named fields are bound; other fields are not accessible. The compiler SHALL NOT warn
   on partial named binding.
 
+**Mixed positional + named form is FORBIDDEN (S88 clarification):**
+
+An arm pattern SHALL use EITHER positional form (all bindings are bare identifiers) OR
+named form (all bindings use `field: local` syntax), NOT a mixture of both within the
+same arm pattern. Mixing the two forms — e.g. `.Rectangle(w, height: h)` — SHALL be a
+compile error (E-TYPE-021: payload arity mismatch, with the rationale extended to also
+cover the mixed-form case).
+
+```scrml
+// FORBIDDEN — mixed positional + named
+.Rectangle(w, height: h) => w * h
+// Error E-TYPE-021: arm pattern mixes positional (`w`) and named (`height: h`)
+// binding forms. Pick one: positional `.Rectangle(w, h)` or named
+// `.Rectangle(width: w, height: h)`.
+```
+
+**Rationale:** the compiler's payload-binding parser (per the B20 / S69 + Bug 6.5.1 / S87
+work at `ast-builder.js` match-arm-block parser) emits `payloadBindings: string[]` —
+strictly positional. Adding mixed-form support would require a tagged union shape
+(`{ kind: "positional"; name } | { kind: "named"; field; local }`) without delivering
+expressive power beyond named-form-with-elided-fields. Disambiguation cost outweighs the
+ergonomic gain. Bug 6.5.1 closure (S87) surfaced the case; this S88 amendment closes the
+spec gap with explicit forbidden-mix wording.
+
 **Normative statements:**
 
 - Positional binding SHALL assign fields left-to-right in declaration order.
@@ -9922,6 +9948,8 @@ compiler infers this type; no annotation is required on the binding.
   the enum variant definition.
 - Positional arity mismatch (too few or too many bindings) SHALL be a compile error
   (E-TYPE-021).
+- Mixing positional and named binding forms in the same arm pattern SHALL be a compile
+  error (E-TYPE-021).
 - A named binding that references a nonexistent field name SHALL be a compile error
   (E-TYPE-022).
 - Partial binding (naming fewer than all fields) is valid only in the named form.
@@ -17958,18 +17986,24 @@ ${ import { session } from 'scrml:auth' }
 
 ### 41.4 Protocol Prefixes
 
-scrml defines three protocol prefixes for non-relative module specifiers:
+scrml defines five protocol prefixes for non-relative module specifiers (S88 amendment — `bun:` + `node:` added):
 
 | Prefix | Resolves to | Example |
 |---|---|---|
-| `scrml:` | Compiler-bundled stdlib, then `vendor/scrml/` | `scrml:ui`, `scrml:auth`, `scrml:utils/string` |
+| `scrml:` | Compiler-bundled stdlib, then `vendor/scrml/` | `scrml:ui`, `scrml:auth`, `scrml:utils/string`, `scrml:host` |
 | `vendor:` | `vendor/<path>` in project root | `vendor:my-date-picker`, `vendor:my-extension` |
+| `bun:` | Bun runtime built-in module (passthrough to runtime resolver) | `bun:sqlite`, `bun:test`, `bun:ffi` |
+| `node:` | Node.js runtime built-in module (passthrough to runtime resolver) | `node:fs`, `node:path`, `node:crypto` |
 | `./` or `../` | Local file (relative path) | `./utils.scrml`, `../shared/types.scrml` |
 
 **Normative statements:**
 
-- No other protocol prefixes SHALL be recognized. A specifier that does not begin with `scrml:`, `vendor:`, `./`, or `../` SHALL be a compile error (E-USE-005 for `use` declarations, E-IMPORT-005 for `import` statements).
+- No other protocol prefixes SHALL be recognized. A specifier that does not begin with `scrml:`, `vendor:`, `bun:`, `node:`, `./`, or `../` SHALL be a compile error (E-USE-005 for `use` declarations, E-IMPORT-005 for `import` statements).
 - npm-style bare specifiers (e.g., `import { x } from 'lodash'`) SHALL be a compile error (E-IMPORT-005). scrml has no npm integration. Bare specifiers with no recognized prefix are never valid.
+- `bun:` and `node:` prefixed specifiers SHALL pass through to the runtime's built-in module resolver without compile-time resolution by scrml. The compiler SHALL emit the import statement verbatim into the compiled JS output. The runtime is responsible for resolving the import; if the host runtime does not provide the named module, a runtime error fires at first use. The scrml compiler SHALL NOT type-check or validate the contents of bun:/node: modules — they are opaque imports.
+- `bun:` and `node:` imports SHALL be permitted ONLY in server-context scrml code (server function bodies, `^{}` meta-blocks producing server output, stdlib module bodies). A `bun:` / `node:` import reaching client-emitted code is a compile error (E-IMPORT-007: runtime built-in import in client context). The compiler's import-graph traversal (§21.7) SHALL classify import sites and fire E-IMPORT-007 on cross-context leaks.
+
+**S88 amendment note (2026-05-13):** `bun:` and `node:` were added because stdlib hand-authored JS shims (e.g., `compiler/runtime/stdlib/host.js` and `stdlib/auth/*`) already use these specifiers via `import { SQL } from "bun"`, `import { Database } from "bun:sqlite"`, etc. Per S86 BS-layer-over-SPEC-retreat ratification, when implementation needs a surface that SPEC did not authorize, the right answer is SPEC catches up. The runtime built-in import surface is a real engineering need; restricting scrml source to only `scrml:` + `vendor:` + relative forced stdlib module authors to use circuitous JS-shim files instead of inline `bun:sqlite` imports. The two new prefixes restore parity with what stdlib authors actually need. The server-context-only restriction (E-IMPORT-007) preserves the security invariant that no Bun-/Node-specific code reaches client.scrml output.
 
 ### 41.5 Resolution Hierarchy
 
