@@ -89,6 +89,21 @@ const _scrml_reactivity_rules = Object.create(null);
 const _scrml_reactivity_bypass = Object.create(null);
 const _scrml_throttle_state = Object.create(null);
 
+// --- §57 Wire Format dual-decoder (M-7C-D-12 Track 2) ---
+// Accepts BOTH the canonical envelope { __scrml_absent: true } (encoder
+// always emits this) AND raw JSON null (legacy / pre-v0.3 / foreign-client).
+// Both lower to scrml \`not\` (JS null per §42.5 / §42.8). Any other value
+// passes through unchanged. Dual-decoder retires at v1.0 (OQ-4 (a)).
+//
+// Lives in the 'core' chunk so every server-fn fetch stub that compiles
+// can reference \`_scrml_wire_decode\` without needing a runtime-chunk
+// inclusion vote. The helper is small (single conditional + one type check).
+function _scrml_wire_decode(value) {
+  if (value === null) return null;
+  if (value !== null && typeof value === "object" && value.__scrml_absent === true) return null;
+  return value;
+}
+
 // --- derived reactive state (§6.6) ---
 // _scrml_derived_fns: name → () => value  (evaluation function for each derived node)
 // _scrml_derived_cache: name → cached value

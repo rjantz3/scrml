@@ -10,6 +10,7 @@ import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
 import type { CompileContext } from "./context.ts";
 import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicates.ts";
 import { resolveDbDriver } from "./db-driver.ts";
+import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
 
 /**
  * S79 audit fix C.1 — parse `<program idempotency-ttl="...">` raw value into
@@ -925,17 +926,29 @@ export function generateServerJs(
       if (_envelope) {
         lines.push(`  await _scrml_sql.unsafe("COMMIT");`);
       }
+      // M-7C-D-12 Track 2 (§57 Wire Format): when the declared return type
+      // is `T | not` (absence is a legitimate variant), wrap the success
+      // result through `_scrml_wire_encode` so scrml-absence serializes as
+      // the canonical envelope `{ __scrml_absent: true }` instead of raw
+      // JSON `null`. For pure-`T` returns, keep the legacy raw `?? null`
+      // emission — a `null` slipping through there is a bug, NOT scrml-
+      // absence, and should not be encoded as such.
+      const _retAnnotCsrf = (fnNode as { returnTypeAnnotation?: string }).returnTypeAnnotation;
+      const _wireWrapCsrf = returnTypeAllowsAbsence(_retAnnotCsrf);
+      const _resultExprCsrf = _wireWrapCsrf
+        ? "_scrml_wire_encode(_scrml_result)"
+        : "_scrml_result ?? null";
       // A9 Ext 5: store the success result under the idempotency key so a
       // retry returns the same payload without re-executing the body.
       if (_ext5Dedup) {
         lines.push(`  // A9 Ext 5: store success response under idempotency key`);
-        lines.push(`  const _scrml_resp_body = JSON.stringify(_scrml_result ?? null);`);
+        lines.push(`  const _scrml_resp_body = JSON.stringify(${_resultExprCsrf});`);
         lines.push(`  if (_scrml_idem_key) {`);
         lines.push(`    await _scrml_idempotency_store(_scrml_idem_key, _scrml_resp_body, 200);`);
         lines.push(`  }`);
         lines.push(`  return new Response(_scrml_resp_body, {`);
       } else {
-        lines.push(`  return new Response(JSON.stringify(_scrml_result ?? null), {`);
+        lines.push(`  return new Response(JSON.stringify(${_resultExprCsrf}), {`);
       }
       lines.push(`    status: 200,`);
       lines.push(`    headers: {`);
@@ -1092,9 +1105,20 @@ export function generateServerJs(
 
       // A9 Ext 5: close the inner IIFE, store the result, return as Response.
       if (_ext5DedupNonCsrf) {
+        // M-7C-D-12 Track 2 (§57 Wire Format): same `T | not` envelope-wrap
+        // rule as the CSRF path above — apply only when the return type
+        // declares absence as a variant. The encoder helper is injected
+        // post-emit via `finalEmitted.includes("_scrml_wire_encode(")` (see
+        // bottom of generateServerJs), mirroring the structural-eq helper
+        // precedent at line ~1296.
+        const _retAnnotNonCsrf = (fnNode as { returnTypeAnnotation?: string }).returnTypeAnnotation;
+        const _wireWrapNonCsrf = returnTypeAllowsAbsence(_retAnnotNonCsrf);
+        const _resultExprNonCsrf = _wireWrapNonCsrf
+          ? "_scrml_wire_encode(_scrml_result)"
+          : "_scrml_result ?? null";
         lines.push(`  })();`);
         lines.push(`  // A9 Ext 5: store success response under idempotency key`);
-        lines.push(`  const _scrml_resp_body = JSON.stringify(_scrml_result ?? null);`);
+        lines.push(`  const _scrml_resp_body = JSON.stringify(${_resultExprNonCsrf});`);
         lines.push(`  if (_scrml_idem_key) {`);
         lines.push(`    await _scrml_idempotency_store(_scrml_idem_key, _scrml_resp_body, 200);`);
         lines.push(`  }`);
@@ -1340,6 +1364,29 @@ export function generateServerJs(
       finalEmitted = helper + finalEmitted;
     } else {
       finalEmitted = finalEmitted.slice(0, headerEndIdx) + helper + finalEmitted.slice(headerEndIdx);
+    }
+  }
+
+  // M-7C-D-12 Track 2 (§57 Wire Format) — encoder helper post-emit detection.
+  //
+  // The two type-gated emit sites above (CSRF + non-CSRF idempotency response
+  // paths) call `_scrml_wire_encode(_scrml_result)` whenever the declared
+  // return type is `T | not`. The encoder function itself is defined in
+  // `compiler/src/codegen/wire-format.ts` as the inlinable `SERVER_WIRE_ENCODER_HELPER`
+  // source string.
+  //
+  // Mirrors the structural-equality helper injection precedent at line ~1320:
+  // detect the call signature in the final emitted source, then inject the
+  // helper at the post-header boundary so the function definition is hoisted
+  // above all routes that reference it. Type-gating at the emit site remains
+  // the source of truth; this post-emit detection is purely the injection
+  // trigger — if NO emit site fired the call, the helper is NOT injected.
+  if (finalEmitted.includes("_scrml_wire_encode(")) {
+    const headerEndIdx = finalEmitted.indexOf("\n\n");
+    if (headerEndIdx === -1) {
+      finalEmitted = SERVER_WIRE_ENCODER_HELPER + finalEmitted;
+    } else {
+      finalEmitted = finalEmitted.slice(0, headerEndIdx) + SERVER_WIRE_ENCODER_HELPER + finalEmitted.slice(headerEndIdx);
     }
   }
 

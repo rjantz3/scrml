@@ -7,6 +7,7 @@ import { hasServerCallees, scheduleStatements, buildCalleeImportMap } from "./sc
 import { buildMachineBindingsMap } from "./emit-reactive-wiring.js";
 // A1c C16 — §53.9.1/§53.4.3 client-side function-param boundary check (Locus 3).
 import { parsePredicateAnnotation, emitRuntimeCheck } from "./emit-predicates.ts";
+import { returnTypeAllowsAbsence } from "./wire-format.ts";
 import type { CompileContext } from "./context.ts";
 
 /**
@@ -265,7 +266,26 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       lines.push(`    }),`);
       lines.push(`  });`);
     }
-    lines.push(`  return _scrml_resp.json();`);
+    // M-7C-D-12 Track 2 (§57 Wire Format) — dual-decoder consumption.
+    //
+    // When the server fn's declared return type is `T | not` (absence is a
+    // legitimate variant), wrap the parsed JSON through `_scrml_wire_decode`
+    // so BOTH the canonical envelope `{ __scrml_absent: true }` AND raw JSON
+    // `null` (legacy / pre-v0.3 / foreign-client) normalize to scrml `not`
+    // (JS `null` per §42.5 / §42.8). For pure-`T` returns, the raw `.json()`
+    // result is returned unchanged — a `null` arriving on a pure-`T` channel
+    // is a wire-format bug, NOT scrml-absence, and should NOT be silently
+    // converted.
+    //
+    // The `_scrml_wire_decode` helper lives in the 'core' chunk of
+    // `compiler/src/runtime-template.js` — always present in compiled client
+    // output, no per-file injection needed.
+    const _retAnnot = (fnNode as { returnTypeAnnotation?: string }).returnTypeAnnotation;
+    if (returnTypeAllowsAbsence(_retAnnot)) {
+      lines.push(`  return _scrml_wire_decode(await _scrml_resp.json());`);
+    } else {
+      lines.push(`  return _scrml_resp.json();`);
+    }
     lines.push(`}`);
     lines.push("");
   }
