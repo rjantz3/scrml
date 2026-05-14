@@ -23,7 +23,7 @@ import { SCRML_RUNTIME, RUNTIME_FILENAME } from "../runtime-template.js";
 import { CGError } from "./errors.ts";
 import { resetVarCounter } from "./var-counter.ts";
 import { escapeHtmlAttr } from "./utils.ts";
-import { generateHtml } from "./emit-html.ts";
+import { generateHtml, augmentHtmlForChunks } from "./emit-html.ts";
 import { generateCss } from "./emit-css.ts";
 import { generateServerJs } from "./emit-server.ts";
 import { setBatchLoopHoists, setBatchInListCap } from "./emit-control-flow.ts";
@@ -921,6 +921,124 @@ export function runCG(input: CgInput): CgOutput {
     chunksManifest = splitterResult.manifest;
     if (splitterResult.diagnostics.length > 0) {
       errors.push(...splitterResult.diagnostics);
+    }
+
+    // -------------------------------------------------------------------------
+    // A-4.7 — Per-route HTML augmentation pass.
+    //
+    // For each per-file output that has a non-empty HTML body AND owns at
+    // least one entry-point in the ReachabilityRecord, augment the HTML
+    // with the chunk-activation scaffolding emitted by
+    // `emit-html.ts:augmentHtmlForChunks`:
+    //
+    //   - Inline `<script>window._SCRML_CHUNKS = { ... }</script>` (route-
+    //     keyed manifest for runtime `_scrml_prefetch_tier2` lookup +
+    //     bootstrap dispatch).
+    //   - `<link rel="modulepreload">` for non-empty tier-1 chunks.
+    //   - Role-detection bootstrap `<script>` (localStorage > cookie >
+    //     <meta name="scrml-role"> > "_anonymous").
+    //
+    // Per OQ-A4-E ratification (S91): ONE HTML per route + role-detection
+    // bootstrap loads the per-role initial chunk. No per-(route, role)
+    // HTML variance.
+    //
+    // The augmentation is a string-replace pass over each file's
+    // pre-composed HTML (preserves all upstream HTML emit invariants —
+    // documentary <meta>, transitions, modulepreload for runtime, etc.).
+    // -------------------------------------------------------------------------
+    if (chunks && chunks.size > 0) {
+      // Build the EpId → routePath lookup once. The lookup combines two
+      // sources:
+      //   1. `<file>#page@<route>` EpIds expose the route trailing the
+      //      `@` directly.
+      //   2. `<file>#program` and `<file>#page-<N>` EpIds resolve via
+      //      `safeRouteMap.pages` (file path → PageRoute with urlPattern).
+      const epIdToRoutePath = new Map<string, string>();
+      const pagesByFile = safeRouteMap.pages as Map<string, any> | undefined;
+      for (const [, chunk] of chunks) {
+        const epId = String(chunk.entryPointId);
+        if (epIdToRoutePath.has(epId)) continue;
+        // Case 1: explicit route after `#page@`.
+        const pageAtIdx = epId.indexOf("#page@");
+        if (pageAtIdx !== -1) {
+          const route = epId.substring(pageAtIdx + "#page@".length);
+          if (route !== "") {
+            epIdToRoutePath.set(epId, route);
+            continue;
+          }
+        }
+        // Case 2: `<file>#program` — derive from RouteMap.pages.
+        const programIdx = epId.indexOf("#program");
+        if (programIdx !== -1) {
+          const filePart = epId.substring(0, programIdx);
+          if (pagesByFile && typeof pagesByFile.get === "function") {
+            const pageEntry = pagesByFile.get(filePart);
+            const urlPattern = (pageEntry as { urlPattern?: unknown })?.urlPattern;
+            if (typeof urlPattern === "string" && urlPattern !== "") {
+              epIdToRoutePath.set(epId, urlPattern);
+              continue;
+            }
+          }
+          // Fallback: SPA root → `/`. This is the dominant case when a
+          // single `<program>` file declares the app entry without
+          // file-based routing.
+          epIdToRoutePath.set(epId, "/");
+          continue;
+        }
+        // Case 3: `<file>#page-<N>` — positional. Best-effort: use the
+        // file's first registered PageRoute as a stand-in. Test fixtures
+        // that bypass RI land here; production pipelines should use
+        // case 1 (the `<route>` form).
+        const pageIdxIdx = epId.indexOf("#page-");
+        if (pageIdxIdx !== -1) {
+          const filePart = epId.substring(0, pageIdxIdx);
+          if (pagesByFile && typeof pagesByFile.get === "function") {
+            const pageEntry = pagesByFile.get(filePart);
+            const urlPattern = (pageEntry as { urlPattern?: unknown })?.urlPattern;
+            if (typeof urlPattern === "string" && urlPattern !== "") {
+              epIdToRoutePath.set(epId, urlPattern);
+              continue;
+            }
+          }
+          // No RouteMap entry — fall through; the bootstrap warns at
+          // runtime but the HTML stays well-formed.
+        }
+      }
+
+      // Build a per-file lookup: filePath → EpIds (preserving the
+      // canonical Map iteration order from RS output).
+      const epIdsByFile = new Map<string, string[]>();
+      for (const [, chunk] of chunks) {
+        const epId = String(chunk.entryPointId);
+        const hashIdx = epId.indexOf("#");
+        if (hashIdx === -1) continue;
+        const filePath = epId.substring(0, hashIdx);
+        let list = epIdsByFile.get(filePath);
+        if (!list) {
+          list = [];
+          epIdsByFile.set(filePath, list);
+        }
+        if (!list.includes(epId)) list.push(epId);
+      }
+
+      // Augment each file's HTML in place. Files without HTML
+      // (library mode, worker bundles, fixture files with no markup)
+      // are skipped — the augmenter would have nothing to inject into.
+      for (const [filePath, output] of outputs) {
+        if (!output.html) continue;
+        const fileEpIds = epIdsByFile.get(filePath);
+        if (!fileEpIds || fileEpIds.length === 0) continue;
+        const augmented = augmentHtmlForChunks({
+          html: output.html,
+          chunks,
+          fileEntryPointIds: fileEpIds,
+          epIdToRoutePath,
+        });
+        // Avoid mutating the existing output object reference; replace
+        // the HTML field on a fresh shallow copy. (`output` is the
+        // value previously written to `outputs`; reassigning is safe.)
+        outputs.set(filePath, { ...output, html: augmented });
+      }
     }
   }
 

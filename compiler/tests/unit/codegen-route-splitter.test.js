@@ -105,7 +105,13 @@ describe("§1 trivial 1-EP 1-role corpus — chunks Map carries the expected key
       },
     ]);
     const { chunks, manifest, diagnostics } = emitPerRouteChunks({ reachabilityRecord: record });
-    expect(diagnostics).toEqual([]);
+    // A-4.7 — empty-admission entry-point fires W-CG-CHUNK-EMPTY (info-level
+    // warning). Filter out the lint for this structural test; the
+    // chunks/manifest shape is what we're verifying.
+    const nonLintDiagnostics = diagnostics.filter(
+      (d) => d.code !== "W-CG-CHUNK-EMPTY",
+    );
+    expect(nonLintDiagnostics).toEqual([]);
     expect(chunks.size).toBe(3);
     expect(chunks.has(`/abs/app.scrml::#program::${ANONYMOUS_ROLE}::initial`)).toBe(true);
     expect(chunks.has(`/abs/app.scrml::#program::${ANONYMOUS_ROLE}::tier1`)).toBe(true);

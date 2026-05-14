@@ -2758,6 +2758,40 @@ renderer, and `reset(@cell)` expansion).
 **Dependencies:** Dependency Graph Builder (DG) must complete for the project. VSS (Stage 6.7)
 must complete (CG consumes the synth-cell registry).
 
+**A-4 per-route artifact splitter (S91, A-4.1..A-4.7 — CLOSED):** When
+`--emit-per-route` is set (opt-in during the A-4 wave per OQ-A4-F;
+default-on at v0.3.0 cut), Stage 8 runs the per-route artifact splitter
+(`compiler/src/codegen/route-splitter.ts`) AFTER per-file emit completes
+but BEFORE returning CgOutput. The splitter iterates the Stage 7.6
+ReachabilityRecord and produces:
+
+  1. Per-(EntryPointId, RoleVariant, ChunkTier) chunk descriptors with
+     real FNV-1a base36 content-addressed hashes (§47.5 / §47.1.3 /
+     §40.9.8). Initial-tier and tier-1 / tier-2 chunks populated via
+     atom-emitter composition (A-4.2 + A-4.3 + A-4.4 + A-4.5). Tier-N
+     scaffolded but unpopulated in v0.3 per OQ-A2-B Option a.
+  2. A per-app `chunks.json` manifest serialized via
+     `serializeChunksManifest` (URL-style filename values for adopter
+     cache layer consumption).
+  3. Per-file HTML augmentation via `emit-html.ts:augmentHtmlForChunks`
+     (A-4.7): inline `<script>window._SCRML_CHUNKS = { ... }</script>`
+     (route-keyed manifest), `<link rel="modulepreload">` for non-empty
+     tier-1 chunks, and a role-detection bootstrap `<script>` dispatching
+     to the per-role initial chunk (per OQ-A4-E hybrid: ONE HTML per
+     route + role-bootstrap; no per-(route, role) HTML variance).
+
+The runtime helpers `_scrml_chunk_mount(id, tag)` and
+`_scrml_vendor_require(unit)` referenced by atom-emitter output live in
+the `mount` and `vendor-ref` runtime-chunk sections respectively;
+`detectRuntimeChunks` activates them when any entry-point chunk admits
+non-empty components / vendor units. Full per-app `SCRML_RUNTIME`
+(scrml-runtime.js distribution) always carries both helpers; embed-mode
+runtimes tree-shake them when no chunks emit references.
+
+W-CG-CHUNK-* lint family fires from the splitter's post-emission scan
+(W-CG-CHUNK-EMPTY / W-CG-CHUNK-LARGE / W-CG-CHUNK-NO-PREFETCH /
+W-CG-CHUNK-MISSING-ROLE; see §34 / §40.9.11 catalog rows).
+
 ---
 
 ## Stage Dependency Summary

@@ -78,6 +78,18 @@
  *                 OQ-A4-G ratification (S91): Option γ — `requestIdleCallback`
  *                 browser-side with `setTimeout(fn, 1)` Safari fallback;
  *                 Bun-runtime primitive reserved as v0.4 extension point.
+ *   mount         _scrml_chunk_mount(id, tag) + _SCRML_MOUNTS registry
+ *                 (§40.9.7, A-4.7). Chunk-side record-keeping for
+ *                 admitted markup nodes. Activated by
+ *                 detectRuntimeChunks when ANY entry-point chunk in
+ *                 the file's reachability record admits a non-empty
+ *                 markup-node set. Elided when no chunks emit
+ *                 atom-emitter mount calls.
+ *   vendor-ref    _scrml_vendor_require(unit) + _SCRML_VENDOR_REFS
+ *                 registry (§41, A-4.7). Chunk-side record-keeping
+ *                 for vendor-unit dependencies. Activated when ANY
+ *                 entry-point chunk admits a non-empty vendorUnitNames
+ *                 set. Elided when no chunks emit vendor-require calls.
  */
 
 import { SCRML_RUNTIME } from "../runtime-template.js";
@@ -99,6 +111,8 @@ export const RUNTIME_CHUNK_ORDER = [
   'reconciliation',
   'utilities',
   'prefetch',
+  'mount',
+  'vendor-ref',
   'meta',
   'transitions',
   'errors',
@@ -155,6 +169,16 @@ const CHUNK_MARKERS: Record<NonCoreChunkName, string> = {
   // that range. See chunk-catalog block above for the single-marker
   // rationale.
   prefetch:       "§40.9.7 tier-1 idle prefetch runtime (chunk: 'prefetch')",
+  // A-4.7 — chunk-side mount registry. Activated when ANY entry-point
+  // chunk in the file's reachability record admits a non-empty
+  // markup-node admission set (i.e. atom-emitter.ts:emitComponentAtom
+  // produces `_scrml_chunk_mount(...)` calls in at least one chunk).
+  mount:          "§40.9.7 chunk mount registry (chunk: 'mount')",
+  // A-4.7 — chunk-side vendor-unit reference registry. Activated when
+  // ANY entry-point chunk in the file's reachability record admits a
+  // non-empty `vendorUnitNames` set (i.e. atom-emitter.ts emits
+  // `_scrml_vendor_require(...)` calls in at least one chunk).
+  "vendor-ref":   "§41 vendor-unit reference registry (chunk: 'vendor-ref')",
   meta:           '§22.5 meta.emit() runtime',
   transitions:    'Transition CSS injection',
   errors:         '§19 Built-in error types',

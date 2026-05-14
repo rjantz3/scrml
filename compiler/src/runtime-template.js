@@ -1339,6 +1339,71 @@ function _scrml_fetch_chunk(epId, role, tier) {
 }
 
 // ---------------------------------------------------------------------------
+// §40.9.7 chunk mount registry (chunk: 'mount')
+// ---------------------------------------------------------------------------
+//
+// Called from the per-(EP, role, tier) chunk file's IIFE for every admitted
+// markup node (atom-emitter.ts:emitComponentAtom). Records the per-chunk
+// admission set on the global \`_SCRML_MOUNTS\` registry for adopter-debug
+// surfaces and downstream runtime instrumentation.
+//
+// In v0.3 the actual DOM-tree construction is performed by the per-file
+// \`.html\` payload (\`emit-html.ts\` renders the static markup tree directly).
+// This helper is the chunk-side record-keeping pair: it observes which
+// markup nodes belong to the chunk so adopter tooling (debug overlays,
+// reachability inspectors) can map chunk → admitted markup. The helper is
+// intentionally a no-op-friendly shape (assignment only; no DOM mutation,
+// no event dispatch) so adopters pay zero production overhead per §40.9.7
+// SHOULD on chunk-side instrumentation cost.
+//
+// Tree-shake (chunk: 'mount'): when no chunks are emitted for the compile
+// unit (the dominant pre-A-4 case), the atom-emitter produces no
+// \`_scrml_chunk_mount(...)\` references and \`detectRuntimeChunks\` does NOT
+// add 'mount' to \`ctx.usedRuntimeChunks\`. The helper is elided from
+// per-file embed-mode runtimes; in full-runtime mode (\`scrml-runtime.js\`)
+// it ships unconditionally.
+
+var _SCRML_MOUNTS = (typeof _SCRML_MOUNTS !== "undefined")
+  ? _SCRML_MOUNTS
+  : Object.create(null);
+
+function _scrml_chunk_mount(id, tag) {
+  _SCRML_MOUNTS[id] = tag;
+}
+
+// ---------------------------------------------------------------------------
+// §41 vendor-unit reference registry (chunk: 'vendor-ref')
+// ---------------------------------------------------------------------------
+//
+// Called from the per-chunk IIFE for every \`use vendor:NAME\` reference in
+// the chunk's admission set (atom-emitter.ts:emitVendorUnitRef + the chunk
+// composition \`_scrml_vendor_require\` call site in route-splitter.ts).
+// Records the chunk's vendor-unit dependencies on \`_SCRML_VENDOR_REFS\` so
+// adopter bundler-side tooling can introspect cross-chunk vendor sharing.
+//
+// In v0.3 this is record-keeping only — the actual vendor-unit script
+// inclusion happens via the per-route HTML's \`<script>\` ordering (the
+// per-route HTML emitter resolves vendor units to script tags before the
+// chunk \`<script>\`s load). When a future v0.4+ extension lands runtime-
+// resolved vendor-unit loading, this helper can grow a real
+// \`window["vendor:" + unit]\` lookup; until then it is the chunk-side
+// record-keeping pair.
+//
+// Tree-shake (chunk: 'vendor-ref'): same gate as 'mount' — when no chunk
+// emits any \`_scrml_vendor_require(...)\` call, this helper is elided from
+// per-file embed-mode runtimes. \`detectRuntimeChunks\` activates the chunk
+// when ANY entry-point chunk in the file's reachability record admits a
+// non-empty \`vendorUnitNames\` set.
+
+var _SCRML_VENDOR_REFS = (typeof _SCRML_VENDOR_REFS !== "undefined")
+  ? _SCRML_VENDOR_REFS
+  : Object.create(null);
+
+function _scrml_vendor_require(unit) {
+  _SCRML_VENDOR_REFS[unit] = true;
+}
+
+// ---------------------------------------------------------------------------
 // §22.5 meta.emit() runtime — insert HTML at a ^{} block's DOM position
 // ---------------------------------------------------------------------------
 

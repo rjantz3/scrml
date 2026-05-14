@@ -129,6 +129,21 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
   }
   const reach = ctx.reachabilityRecord;
   if (reach && reach.closures && ctx.filePath) {
+    // A-4.7 — `mount` + `vendor-ref` activation. The two chunk-side
+    // record-keeping helpers (`_scrml_chunk_mount`, `_scrml_vendor_require`)
+    // are referenced from atom-emitter output baked into the per-(EP,
+    // role, tier) chunk file. Activate `mount` when ANY chunk in the
+    // file's reachability record admits a non-empty markup-node set;
+    // activate `vendor-ref` similarly for vendor units. Both gates
+    // examine ALL three tiers (initial, tier-1, tier-N) because the
+    // atom-emitter is shared across tiers — any tier admitting content
+    // produces the call sites.
+    function chunkHasComponents(c: any): boolean {
+      return !!c && c.componentNodeIds && c.componentNodeIds.size > 0;
+    }
+    function chunkHasVendorUnits(c: any): boolean {
+      return !!c && c.vendorUnitNames && c.vendorUnitNames.size > 0;
+    }
     for (const [epId, rps] of reach.closures) {
       // EpId encodes the source file path as a prefix (either
       // `<filePath>::#program` or `<filePath>#page@<routePath>`).
@@ -142,7 +157,6 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
       for (const [, plan] of rps.byRole) {
         if (chunkContentsNonEmpty(plan.prefetchTier1)) {
           chunks.add("prefetch");
-          break;
         }
         // A-4.5 — tier-N admission also lights up the prefetch chunk so
         // `_scrml_fetch_chunk` is present in the emitted runtime when
@@ -151,10 +165,30 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
         const tierN = plan.prefetchTierN;
         if (Array.isArray(tierN) && tierN.some(chunkContentsNonEmpty)) {
           chunks.add("prefetch");
-          break;
+        }
+        // A-4.7 — mount activation: any tier with admitted markup
+        // components produces atom-emitter `_scrml_chunk_mount(...)`
+        // calls in the chunk file.
+        if (
+          chunkHasComponents(plan.initialChunk) ||
+          chunkHasComponents(plan.prefetchTier1) ||
+          chunkHasComponents(plan.prefetchTier2) ||
+          (Array.isArray(tierN) && tierN.some(chunkHasComponents))
+        ) {
+          chunks.add("mount");
+        }
+        // A-4.7 — vendor-ref activation: any tier with admitted vendor
+        // units produces atom-emitter `_scrml_vendor_require(...)`
+        // calls in the chunk file.
+        if (
+          chunkHasVendorUnits(plan.initialChunk) ||
+          chunkHasVendorUnits(plan.prefetchTier1) ||
+          chunkHasVendorUnits(plan.prefetchTier2) ||
+          (Array.isArray(tierN) && tierN.some(chunkHasVendorUnits))
+        ) {
+          chunks.add("vendor-ref");
         }
       }
-      if (chunks.has("prefetch")) break;
     }
   }
 

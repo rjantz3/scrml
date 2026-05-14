@@ -487,7 +487,317 @@ export function emitPerRouteChunks(
     manifest.entryPoints[epId] = roleMap;
   }
 
+  // -------------------------------------------------------------------------
+  // A-4.7 — W-CG-CHUNK-* lint family (per-entry-point post-emission scan).
+  //
+  // After all per-(EP, role, tier) chunks are produced, scan the chunks +
+  // manifest + per-file context for the four §40.9.11 lint conditions:
+  //
+  //   - W-CG-CHUNK-EMPTY        — entry-point has zero non-empty chunks.
+  //   - W-CG-CHUNK-LARGE        — initial chunk exceeds soft size budget.
+  //   - W-CG-CHUNK-NO-PREFETCH  — internal <a> links present but tier-2
+  //                                hover-prefetch wiring missing.
+  //   - W-CG-CHUNK-MISSING-ROLE — <auth role=X> references a role with no
+  //                                per-role chunk.
+  //
+  // The scan fires at most one lint of each kind per entry-point. The
+  // implementation is intentionally conservative: lints fire only when the
+  // signal is unambiguous (the goal is signal-to-noise, not catch-all).
+  // -------------------------------------------------------------------------
+  emitChunkLints(reachabilityRecord, chunks, ctxByFile, diagnostics);
+
   return { chunks, manifest, diagnostics };
+}
+
+/**
+ * Soft size budget for the W-CG-CHUNK-LARGE lint.
+ *
+ * Default 100 000 bytes (~100 KB raw, ~25-35 KB gzipped — comfortably
+ * within the §40.9.7 time-to-interactive target). Initial chunks
+ * larger than this trigger the lint; the build still completes. The
+ * threshold is intentionally exposed as a top-level constant so
+ * adopters can audit it (and so a future v0.4 `--chunk-size-budget`
+ * CLI flag has a single source-of-truth).
+ */
+export const CHUNK_LARGE_SOFT_BUDGET_BYTES = 100_000;
+
+/**
+ * Emit the W-CG-CHUNK-* lint family (A-4.7).
+ *
+ * Walks the produced chunks Map + reachability record once per entry
+ * point. Each lint fires at most once per (EP, role) so the noise
+ * floor stays low.
+ *
+ * @param reachabilityRecord The Stage 7.6 RS output (closures Map).
+ * @param chunks The chunks Map produced by the per-EP iteration.
+ * @param ctxByFile Per-file CompileContext map (for routeMap + auth
+ *   gate inspection). When undefined, the role-coverage lint is
+ *   skipped (we cannot resolve auth role refs without ctx).
+ * @param diagnostics Output array — lints are pushed here as CGError
+ *   instances with severity='warning'.
+ */
+function emitChunkLints(
+  reachabilityRecord: ReachabilityRecord,
+  chunks: Map<ChunkKey, ChunkOutput>,
+  ctxByFile: Map<string, CompileContext> | undefined,
+  diagnostics: CGError[],
+): void {
+  // Aggregate per-EP chunk shapes for the lint scans.
+  const chunksByEp = new Map<EntryPointId, ChunkOutput[]>();
+  for (const chunk of chunks.values()) {
+    let list = chunksByEp.get(chunk.entryPointId);
+    if (!list) {
+      list = [];
+      chunksByEp.set(chunk.entryPointId, list);
+    }
+    list.push(chunk);
+  }
+
+  // Defensive span — when the lint cannot pin a precise source span,
+  // use a file-scoped synthetic span anchored at offset 0. The lint
+  // surfaces the EP id in the message; adopters can locate the source
+  // site without a precise span.
+  function makeDefensiveSpan(filePath: string): CGSpanLike {
+    return { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+  }
+
+  for (const [epId, epChunks] of chunksByEp) {
+    const filePath = filePathFromEntryPointId(epId);
+    const span = makeDefensiveSpan(filePath);
+
+    // -- W-CG-CHUNK-EMPTY ----------------------------------------------
+    //
+    // Fires when ALL chunks across all roles + tiers for this EP have
+    // empty admission sets AND empty payloads (the build still emitted
+    // initial chunks with the IIFE shell, but they admit nothing — no
+    // reactive cells, no server fns, no vendor units, no markup
+    // components). Probable cause: misconfigured `<page>` or empty
+    // `<program>` body.
+    //
+    // We check the SHAPE (admission sets) rather than payload bytes
+    // because an initial chunk's payload always includes the IIFE shell
+    // + chunk header comments (~200 bytes minimum), so the empty check
+    // must be admission-set-based.
+    let totalAdmissionCount = 0;
+    for (const c of epChunks) {
+      totalAdmissionCount +=
+        c.componentNodeIds.size +
+        c.reactiveCellNodeIds.size +
+        c.serverFnNodeIds.size +
+        c.vendorUnitNames.size;
+    }
+    if (totalAdmissionCount === 0) {
+      diagnostics.push(
+        new CGError(
+          "W-CG-CHUNK-EMPTY",
+          `W-CG-CHUNK-EMPTY: Entry-point \`${epId}\` produces zero non-empty chunks ` +
+          `across all roles. The per-(role, tier) admission sets are all empty (no ` +
+          `reactive cells, server functions, vendor units, or admitted markup ` +
+          `components). Probable cause: a misconfigured \`<page>\` or empty ` +
+          `\`<program>\` body. The build still completes; the per-route HTML ships ` +
+          `the role-bootstrap which warns at runtime when the manifest lookup ` +
+          `misses. Resolution: remove the empty entry point OR add content to the ` +
+          `\`<page>\` / \`<program>\` body. (§40.9.7 / §40.9.11)`,
+          span,
+          "warning",
+        ),
+      );
+    }
+
+    // -- W-CG-CHUNK-LARGE ----------------------------------------------
+    //
+    // Fires when the per-(EP, role) INITIAL chunk's payload exceeds the
+    // soft size budget. Tier-1 / tier-2 / tier-N chunks are NOT scanned
+    // — they're prefetched, not blocking; their size budget is more
+    // forgiving. The initial chunk is the time-to-interactive critical
+    // path; large initial-chunk payloads degrade perceived performance.
+    //
+    // One lint per (EP, role) so multi-role apps surface per-role size
+    // signals without aggregating them.
+    for (const c of epChunks) {
+      if (c.tier !== "initial") continue;
+      const byteLen = utf8ByteLength(c.payloadJs);
+      if (byteLen > CHUNK_LARGE_SOFT_BUDGET_BYTES) {
+        diagnostics.push(
+          new CGError(
+            "W-CG-CHUNK-LARGE",
+            `W-CG-CHUNK-LARGE: Initial chunk for entry-point \`${epId}\` role ` +
+            `\`${c.role}\` is ${byteLen} bytes — exceeds the soft size budget ` +
+            `of ${CHUNK_LARGE_SOFT_BUDGET_BYTES} bytes (~${Math.round(
+              CHUNK_LARGE_SOFT_BUDGET_BYTES / 1000,
+            )} KB). Large initial chunks ship eagerly to first paint; they ` +
+            `degrade time-to-interactive. Probable causes: a route that should ` +
+            `be split, vendor units that should move to tier-1, or a single-page ` +
+            `bundle that should tier-split. The build still completes; the lint ` +
+            `surfaces the size-budget signal. Resolution: split the route OR ` +
+            `move heavy admissions to tier-1 / tier-2 OR accept the warning if ` +
+            `the size is unavoidable. (§40.9.7 / §40.9.11)`,
+            span,
+            "warning",
+          ),
+        );
+      }
+    }
+
+    // -- W-CG-CHUNK-NO-PREFETCH ---------------------------------------
+    //
+    // Fires when the entry-point's file HTML had internal `<a href="/...">`
+    // links to known internal routes BUT the per-file CompileContext's
+    // `hasPrefetchableLinks` flag is FALSE (i.e. no `data-scrml-prefetch`
+    // attribute was emitted, no `_scrml_prefetch_tier2` runtime call).
+    //
+    // Inverted detection: we detect the OPPOSITE shape (`hasPrefetchableLinks`
+    // TRUE while expecting NO links). This is hard to distinguish from
+    // "no links at all" without re-walking the AST. We use a
+    // conservative proxy: the lint fires only when ctx.routeMap.pages
+    // has MORE THAN ONE entry (multi-route app where cross-route hover
+    // prefetch would be valuable) AND `hasPrefetchableLinks` is FALSE
+    // for this entry-point's file. Single-route apps (only one page,
+    // typical for SPAs) get NO false positive.
+    const epCtx = ctxByFile?.get(filePath);
+    if (epCtx) {
+      const pages = epCtx.routeMap?.pages;
+      const pageCount = (pages && typeof pages.size === "number") ? pages.size : 0;
+      const hasLinks = Boolean(
+        (epCtx as { hasPrefetchableLinks?: boolean }).hasPrefetchableLinks,
+      );
+      if (pageCount > 1 && !hasLinks) {
+        diagnostics.push(
+          new CGError(
+            "W-CG-CHUNK-NO-PREFETCH",
+            `W-CG-CHUNK-NO-PREFETCH: Entry-point \`${epId}\` is in a multi-route ` +
+            `application (${pageCount} pages in RouteMap) but no \`data-scrml-prefetch\` ` +
+            `attributes were emitted on its \`<a href>\` links. Cross-route navigation ` +
+            `loses the §40.9.7 hover-warming speedup. Probable causes: \`<a href>\` ` +
+            `links use external URLs or template interpolation (skipped at A-4.4); ` +
+            `the linked routes don't appear in \`RouteMap.pages\` (typo); or the ` +
+            `entry-point has no internal links at all. The build still completes. ` +
+            `Resolution: verify internal \`<a href="/...">\` values resolve to known ` +
+            `\`RouteMap.pages\` urlPatterns, OR accept the lint if cross-route ` +
+            `prefetch is intentionally opted out. (§40.9.7 / §40.9.11)`,
+            span,
+            "warning",
+          ),
+        );
+      }
+    }
+
+    // -- W-CG-CHUNK-MISSING-ROLE --------------------------------------
+    //
+    // Fires when the per-file source contains `<auth role="X">` blocks
+    // referencing a role variant `X` that has NO per-role chunk emitted
+    // (RS Component 4 produced no `ChunkPlan` for that role). Runtime
+    // users with that role get the `_anonymous` fallback chunk.
+    //
+    // Detection: walk the file's AST for `<auth role>` attribute values
+    // (string literals only — interpolated role= is skipped); collect
+    // the set of named roles; compare against the set of role names in
+    // this EP's chunks Map (each ChunkOutput.role).
+    //
+    // Best-effort — when ctx is unavailable (test direct-invocation
+    // paths), the lint is skipped.
+    if (epCtx && epCtx.fileAST) {
+      const referencedRoles = collectAuthRoleReferences(epCtx.fileAST);
+      const emittedRoles = new Set<string>();
+      for (const c of epChunks) emittedRoles.add(c.role);
+      for (const role of referencedRoles) {
+        if (!emittedRoles.has(role)) {
+          diagnostics.push(
+            new CGError(
+              "W-CG-CHUNK-MISSING-ROLE",
+              `W-CG-CHUNK-MISSING-ROLE: An \`<auth role="${role}">\` block in ` +
+              `entry-point \`${epId}\` references a role variant that has NO ` +
+              `per-role chunk emitted (Reachability Solver Component 4 produced no ` +
+              `ChunkPlan for this role). Runtime users with role \`${role}\` will ` +
+              `get the \`_anonymous\` fallback chunk, which admits a more ` +
+              `conservative set than intended. Probable causes: the role variant ` +
+              `is named in the gate but not in the resolved app-scope role-enum ` +
+              `(would also fire \`E-AUTH-GRAPH-003\`); OR RS Component 4 ` +
+              `misclassified the role and produced an empty closure. Resolution: ` +
+              `verify role \`${role}\` exists in the role-enum; if it does, file a ` +
+              `compiler bug with the source. (§40.9.7 / §40.9.11)`,
+              span,
+              "warning",
+            ),
+          );
+        }
+      }
+    }
+  }
+}
+
+/**
+ * UTF-8 byte length of a string. Pure-ts implementation independent
+ * of `Buffer` so the function is portable to the eventual self-host
+ * scrml rewrite. Matches `Buffer.byteLength(s, "utf8")` for valid
+ * UTF-16 input.
+ */
+function utf8ByteLength(s: string): number {
+  let bytes = 0;
+  for (let i = 0; i < s.length; i++) {
+    const code = s.charCodeAt(i);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xD800 && code <= 0xDBFF) {
+      // High surrogate — count the surrogate pair as 4 bytes.
+      bytes += 4;
+      i++; // skip low surrogate
+    } else bytes += 3;
+  }
+  return bytes;
+}
+
+/**
+ * Loose CGError span shape. Matches the `CGSpan` interface in
+ * `errors.ts` but allows extra fields without import friction.
+ */
+type CGSpanLike = { file: string; start: number; end: number; line: number; col: number };
+
+/**
+ * Walk a FileAST and collect every `<auth role="X">` reference where
+ * `X` is a string-literal value (interpolated `role=${@x}` references
+ * are skipped — they can't be statically resolved at compile time).
+ *
+ * Returns the set of role-name strings.
+ *
+ * Used by the W-CG-CHUNK-MISSING-ROLE lint to compare source-cited
+ * roles against the set of roles for which the route-splitter
+ * actually emitted chunks.
+ */
+function collectAuthRoleReferences(fileAST: unknown): Set<string> {
+  const roles = new Set<string>();
+  const ast = (fileAST as { ast?: { nodes?: unknown[] } })?.ast;
+  const nodes: unknown[] = Array.isArray(ast?.nodes)
+    ? (ast!.nodes as unknown[])
+    : Array.isArray((fileAST as { nodes?: unknown[] })?.nodes)
+      ? ((fileAST as { nodes: unknown[] }).nodes)
+      : [];
+
+  function visit(list: unknown[]): void {
+    for (const raw of list) {
+      if (!raw || typeof raw !== "object") continue;
+      const n = raw as Record<string, unknown>;
+      if (n.kind === "markup" && n.tag === "auth") {
+        const attrs = (Array.isArray(n.attributes) ? n.attributes : Array.isArray(n.attrs) ? n.attrs : []) as Array<{ name?: string; value?: { kind?: string; value?: string; variant?: string } }>;
+        for (const a of attrs) {
+          if (a?.name !== "role") continue;
+          const v = a.value;
+          if (!v) continue;
+          // Accept string-literal "X" OR variant-literal `Role.X` shapes.
+          if (v.kind === "string-literal" && typeof v.value === "string" && v.value !== "") {
+            roles.add(v.value);
+          } else if ((v.kind === "variant-literal" || v.kind === "enum-variant") && typeof v.variant === "string" && v.variant !== "") {
+            roles.add(v.variant);
+          }
+        }
+      }
+      if (Array.isArray(n.children)) visit(n.children as unknown[]);
+      if (Array.isArray(n.body)) visit(n.body as unknown[]);
+    }
+  }
+
+  visit(nodes);
+  return roles;
 }
 
 // ---------------------------------------------------------------------------
@@ -1259,32 +1569,86 @@ function makeChunkFilename(
 /**
  * Extract a filesystem-safe route segment from an EntryPointId.
  *
- * EntryPointId shape (per `reachability/entry-points.ts`):
- *   - `"<absolute-file-path>::#page::<routePath>"` for `<page>` entries.
- *   - `"<absolute-file-path>::#program"` for SPA-program entries.
+ * EntryPointId shapes recognized:
  *
- * The function partitions on the `::` separator and uses the trailing
- * segment for routing. A-4.7 may refine this once the full RouteMap is
- * threaded through (the current shape suffices for filename derivation).
+ *   Real pipeline (per `reachability/entry-points.ts` `spaEntryId` /
+ *   `pageEntryId`):
+ *     - `"<filePath>#program"`           — SPA-program entry.
+ *     - `"<filePath>#page@<routePath>"`  — `<page>` entry with explicit route.
+ *     - `"<filePath>#page-<index>"`      — `<page>` entry positional.
+ *
+ *   Legacy / synthetic (A-4.1 test fixtures):
+ *     - `"<filePath>::#page::<routePath>"`  — synthetic per-`<page>`.
+ *     - `"<filePath>::#program"`            — synthetic SPA-program.
+ *
+ * The function dispatches per-shape:
+ *
+ *   - Explicit-route shapes (`#page@<route>` / `::#page::<route>`)
+ *     use `<route>` as the segment.
+ *   - Program shapes (`#program` / `::#program`) use the file's basename
+ *     (without `.scrml`) as the segment.
+ *   - Positional shapes (`#page-<N>`) use the file's basename plus
+ *     `_page<N>` as the segment so multiple positional entries in the
+ *     same file resolve to distinct directories.
+ *   - Anything else falls back to the whole id, sanitized — degenerate
+ *     path for test fixtures that don't match any known shape.
+ *
+ * A-4.7 fix: pre-A-4.7 only the synthetic `::#page::` / `::#program`
+ * shapes were recognized; real-pipeline IDs fell through to the whole-
+ * id sanitized fallback (chunk filenames landed at absurd paths like
+ * `_home_user_app_scrml_program/...`). Each of the three real-
+ * pipeline shapes is now handled explicitly.
+ *
+ * Filesystem-safety rules:
+ *   - Leading `/` is stripped (routes like `/dashboard` → `dashboard`).
+ *   - Empty / root routes (`/`) map to the literal `"_root"` segment so
+ *     the filename pattern stays well-formed.
+ *   - Any characters outside `[A-Za-z0-9/_-]` are replaced with `_`
+ *     (defense-in-depth; well-formed routes don't trigger this).
  */
 function routeSegmentFromEntryPointId(epId: EntryPointId): string {
   const idStr = String(epId);
-  // Find the LAST `::` group — typical shape ends with `::#program` or
-  // `::#page::<routePath>`.
-  const pageMarker = "::#page::";
-  const programMarker = "::#program";
 
-  let raw: string;
-  const pageIdx = idStr.lastIndexOf(pageMarker);
-  if (pageIdx !== -1) {
-    raw = idStr.substring(pageIdx + pageMarker.length);
-  } else if (idStr.endsWith(programMarker)) {
-    // SPA-program: use the file's basename (without `.scrml`) as the segment.
-    const filePart = idStr.substring(0, idStr.length - programMarker.length);
+  let raw: string | null = null;
+
+  // -- Real-pipeline shapes (per `reachability/entry-points.ts`) --
+  //
+  // Order matters: `#page@` is a strict prefix of `#page-` (NO — they
+  // share `#page` only). Check `#page@` BEFORE `#page-` since the
+  // `@<route>` form is more specific.
+  const realPageAtIdx = idStr.indexOf("#page@");
+  const realPageIdxIdx = idStr.indexOf("#page-");
+  const realProgramIdx = idStr.indexOf("#program");
+
+  // Synthetic shapes (used by A-4.1 / A-4.2 test fixtures).
+  const synthPageIdx = idStr.lastIndexOf("::#page::");
+  const synthProgramMarker = "::#program";
+
+  if (synthPageIdx !== -1) {
+    // Synthetic `<file>::#page::<route>` — preserve A-4.1 contract.
+    raw = idStr.substring(synthPageIdx + "::#page::".length);
+  } else if (idStr.endsWith(synthProgramMarker)) {
+    // Synthetic `<file>::#program` — preserve A-4.1 contract.
+    const filePart = idStr.substring(0, idStr.length - synthProgramMarker.length);
+    raw = basenameOfFile(filePart);
+  } else if (realPageAtIdx !== -1) {
+    // Real-pipeline `<file>#page@<route>` — A-4.7 fix.
+    raw = idStr.substring(realPageAtIdx + "#page@".length);
+  } else if (realPageIdxIdx !== -1) {
+    // Real-pipeline `<file>#page-<N>` — A-4.7 fix. Positional pages
+    // need a unique-per-N segment so multiple positional pages in the
+    // same file don't collide; use `<basename>_page<N>`.
+    const filePart = idStr.substring(0, realPageIdxIdx);
+    const nPart = idStr.substring(realPageIdxIdx + "#page-".length);
+    raw = `${basenameOfFile(filePart)}_page${nPart}`;
+  } else if (realProgramIdx !== -1 && idStr.endsWith("#program")) {
+    // Real-pipeline `<file>#program` — A-4.7 fix. Use file basename
+    // (matches the synthetic-program shape).
+    const filePart = idStr.substring(0, realProgramIdx);
     raw = basenameOfFile(filePart);
   } else {
     // Fallback: use the whole id, sanitized. Degenerate path — covers
-    // synthesized ids in test fixtures that don't match either marker.
+    // synthesized ids in test fixtures that don't match any known shape.
     raw = idStr;
   }
 

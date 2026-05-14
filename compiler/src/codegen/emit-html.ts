@@ -1684,3 +1684,298 @@ export function generateHtml(
 
   return parts.join("");
 }
+
+// ---------------------------------------------------------------------------
+// A-4.7 — Per-route HTML augmentation (§40.9.7 + OQ-A4-E hybrid)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-(EntryPointId, RoleVariant, ChunkTier) descriptor exposed on
+ * `_SCRML_CHUNKS` and consumed by `_scrml_prefetch_tier2` /
+ * the role-bootstrap script in the augmented HTML head.
+ *
+ * Shape matches the URL-style serialization produced by
+ * `route-splitter.ts:serializeChunksManifest` (string filename values
+ * with leading `/`, or null for missing chunks).
+ */
+interface ChunkUrlByTier {
+  initial?: string | null;
+  tier1?: string | null;
+  tier2?: string | null;
+  tierN?: Array<string | null>;
+}
+
+/**
+ * Route-keyed manifest view consumed by the runtime helpers.
+ *
+ * `_SCRML_CHUNKS[routePath][roleVariant] = ChunkUrlByTier`.
+ *
+ * `routePath` is the URL the bootstrap can match the active page on
+ * (e.g. `"/loads"`, `"/"`). Anonymous-role keys land under the literal
+ * `"_anonymous"` role string (matches the RS A-2.5 floor sentinel +
+ * `route-splitter.ts:ANONYMOUS_ROLE`).
+ */
+type RouteKeyedChunkManifest = Record<string, Record<string, ChunkUrlByTier>>;
+
+/**
+ * Minimal chunks input shape required by `augmentHtmlForChunks`.
+ *
+ * Decoupled from the full `ChunkOutput` type (which lives in
+ * `route-splitter.ts`) so this module doesn't have a hard import on
+ * route-splitter — keeps the dependency graph one-directional
+ * (route-splitter → emit-html is fine; emit-html → route-splitter is
+ * not).
+ */
+export interface HtmlAugmentChunk {
+  entryPointId: string;
+  role: string;
+  tier: string;
+  /** Output filename relative to dist root (no leading slash). */
+  filename: string;
+  /** Bytes; when zero the chunk is not written to disk. */
+  payloadJs: string;
+}
+
+export interface HtmlAugmentInput {
+  /** The already-composed HTML document (full `<!DOCTYPE>` envelope). */
+  html: string;
+  /**
+   * Chunks for the current per-file compilation, keyed by ChunkKey.
+   * Same map shape as `EmitPerRouteResult.chunks` (route-splitter.ts).
+   */
+  chunks: Map<string, HtmlAugmentChunk>;
+  /**
+   * EntryPointIds that BELONG to this file. The augmenter picks the
+   * FIRST id as the active-route anchor for the role-bootstrap script.
+   *
+   * Sourced from `reachabilityRecord.closures` filtered by file-path
+   * prefix (mirrors `emit-client.ts:detectRuntimeChunks` matching).
+   */
+  fileEntryPointIds: string[];
+  /**
+   * Map from EntryPointId → routePath (URL the bootstrap matches on).
+   *
+   * For `<file>#program` entries: derived from the file's program
+   * route (typically `"/"` for SPA entries OR the RouteMap-resolved
+   * SPA root). For `<file>#page@<route>` entries: the trailing
+   * `<route>` segment is used directly. For `<file>#page-<N>` entries:
+   * resolved via RouteMap.pages (positional index).
+   *
+   * Best-effort — when an EpId cannot be resolved (test fixtures that
+   * bypass RI), it is omitted from the inlined `_SCRML_CHUNKS`. The
+   * augmenter still emits the bootstrap script for the FIRST EpId in
+   * `fileEntryPointIds`; lookup failures degrade to the
+   * `console.warn` path in `_scrml_prefetch_tier2`.
+   */
+  epIdToRoutePath: Map<string, string>;
+}
+
+/**
+ * Augment a per-file HTML document with the A-4.7 chunk-activation
+ * scaffolding:
+ *
+ *   1. `<script>window._SCRML_CHUNKS = { ... }</script>` inline (BEFORE
+ *      the role-bootstrap), route-keyed for `_scrml_prefetch_tier2`
+ *      compatibility.
+ *   2. `<script>` role-detection bootstrap (localStorage > cookie >
+ *      <meta name="scrml-role"> > "_anonymous") dispatching to the
+ *      per-role initial chunk via dynamic `<script>` injection.
+ *   3. `<link rel="modulepreload">` for non-empty tier-1 chunks of the
+ *      active entry point (belt-and-suspenders alongside the runtime
+ *      `requestIdleCallback` prefetch).
+ *
+ * Per OQ-A4-E (S91 ratification — hybrid): ONE HTML per route +
+ * role-detection bootstrap loads the per-role initial chunk. No
+ * per-(route, role) HTML files are emitted.
+ *
+ * **Determinism (§40.9.8):** the augmented HTML output is a pure
+ * function of the input — identical chunks + identical HTML →
+ * identical augmented bytes. Map iteration uses the ChunkOutput
+ * insertion order, which is canonical per route-splitter.ts
+ * (deterministic from RS output).
+ *
+ * **Tree-shake invariant:** when `chunks` is empty (no entry points
+ * for this file), the augmenter returns the input HTML unchanged.
+ *
+ * @param input HTML + chunks descriptor map + EpId→route lookup.
+ * @returns The augmented HTML document (`html` with the
+ *   `_SCRML_CHUNKS` inline + role-bootstrap + modulepreload links
+ *   injected immediately after `</head>` is opened — or unchanged
+ *   when there's nothing to augment).
+ */
+export function augmentHtmlForChunks(input: HtmlAugmentInput): string {
+  const { html, chunks, fileEntryPointIds, epIdToRoutePath } = input;
+
+  // No entry points belong to this file → no augmentation possible.
+  // Return the input HTML unchanged for byte-identity preservation
+  // (matches the pre-A-4.7 no-op behavior for files without entries).
+  if (fileEntryPointIds.length === 0) return html;
+
+  // Build the route-keyed manifest. The runtime helpers
+  // (`_scrml_prefetch_tier2`, the bootstrap script) lookup by
+  // routePath first; the on-disk chunks.json uses EpId keys. We
+  // translate at inline-emit time.
+  const routeKeyedManifest: RouteKeyedChunkManifest = {};
+
+  for (const chunk of chunks.values()) {
+    const routePath = epIdToRoutePath.get(chunk.entryPointId);
+    if (typeof routePath !== "string" || routePath === "") continue;
+    if (!routeKeyedManifest[routePath]) routeKeyedManifest[routePath] = {};
+    if (!routeKeyedManifest[routePath][chunk.role]) {
+      routeKeyedManifest[routePath][chunk.role] = {};
+    }
+    const entry = routeKeyedManifest[routePath][chunk.role];
+    const url = `/${chunk.filename}`;
+    if (chunk.tier === "initial") {
+      entry.initial = url;
+    } else if (chunk.tier === "tier1") {
+      // Only surface tier-1 URL when the chunk has actual payload bytes
+      // (empty admission → no tier-1 file written; the URL would 404).
+      if (chunk.payloadJs !== "") entry.tier1 = url;
+    } else if (chunk.tier === "tier2") {
+      if (chunk.payloadJs !== "") entry.tier2 = url;
+    } else if (chunk.tier.startsWith("tierN")) {
+      if (chunk.payloadJs !== "") {
+        if (!Array.isArray(entry.tierN)) entry.tierN = [];
+        entry.tierN.push(url);
+      }
+    }
+  }
+
+  // Active route — bootstrap dispatches to the chunk for THIS HTML's
+  // entry point. Use the FIRST EpId in `fileEntryPointIds` (each file
+  // emits ONE HTML in the per-file-emit pipeline; the first EpId is
+  // the file's anchor).
+  const activeEpId = fileEntryPointIds[0];
+  const activeRoute = epIdToRoutePath.get(activeEpId);
+
+  // When the active route cannot be resolved (test fixtures without
+  // a RouteMap), the bootstrap still ships but uses a defensive
+  // lookup against the FIRST route key in the manifest. The
+  // bootstrap stays runnable; only the per-role chunk dispatch
+  // degrades to console-warn.
+  const activeRouteLit = typeof activeRoute === "string" && activeRoute !== ""
+    ? JSON.stringify(activeRoute)
+    : "null";
+
+  // Compose the inline `<script>` blocks.
+  const inlineParts: string[] = [];
+
+  // 1. `_SCRML_CHUNKS` inline manifest.
+  //
+  // Use `JSON.stringify(..., null, 2)` for adopter readability;
+  // adopters inspecting the HTML source can see the chunk URL table
+  // without a debugger round-trip. Deterministic across builds
+  // (object-key iteration order is insertion order; chunks.values()
+  // iteration is canonical from route-splitter).
+  const manifestJson = JSON.stringify(routeKeyedManifest, null, 2);
+  inlineParts.push(`  <script>window._SCRML_CHUNKS = ${manifestJson};</script>`);
+
+  // 2. `<link rel="modulepreload">` belt-and-suspenders prefetch for
+  // the active entry point's tier-1 chunks (one per role variant
+  // when non-empty). Browsers that honor modulepreload start
+  // fetching immediately on parse; the runtime `requestIdleCallback`
+  // call in `_scrml_prefetch_tier1` then schedules the script-side
+  // prefetch after first paint. Both surfaces compose: an early
+  // modulepreload populates the HTTP cache; the idle callback then
+  // exercises the cache hit.
+  //
+  // Per SCOPING §3.7 (2): tier-1 fetch is runtime-mediated via
+  // requestIdleCallback; modulepreload is the additional surface.
+  if (typeof activeRoute === "string" && activeRoute !== "") {
+    const activeRouteEntry = routeKeyedManifest[activeRoute];
+    if (activeRouteEntry) {
+      // Sort role keys for determinism (Object iteration order is
+      // insertion-order which is canonical, but explicit sort guards
+      // against any future Map-iteration-order changes in the
+      // splitter).
+      const roles = Object.keys(activeRouteEntry).sort();
+      for (const role of roles) {
+        const tier1Url = activeRouteEntry[role].tier1;
+        if (typeof tier1Url === "string" && tier1Url !== "") {
+          inlineParts.push(
+            `  <link rel="modulepreload" href="${escapeHtmlAttr(tier1Url)}">`,
+          );
+        }
+      }
+    }
+  }
+
+  // 3. Role-detection bootstrap script.
+  //
+  // Order of preference for the role hint: localStorage > cookie >
+  // <meta name="scrml-role"> > "_anonymous" (per OQ-A4-E hybrid +
+  // RS A-2.5 Component 4 sentinel).
+  //
+  // localStorage access is wrapped in a try/catch because Safari
+  // private-mode (and some Chrome shapes) throw on access. The
+  // try/catch is HOST-JS (the bootstrap runs in the adopter
+  // browser), NOT scrml — pa.md try/catch ban applies to scrml
+  // source only.
+  //
+  // The bootstrap dispatches by injecting a `<script defer>` for
+  // the chosen chunk URL. `defer` keeps the chunk evaluation in
+  // document-order alongside any other deferred scripts (the
+  // per-file `.client.js` etc.).
+  //
+  // When no chunk URL is found for the resolved role + active route,
+  // the bootstrap warns to the console and proceeds — the per-file
+  // `.client.js` continues to load, so the page degrades to the
+  // pre-chunk shape (full per-file runtime, no per-role
+  // optimization).
+  inlineParts.push(`  <script>
+    // scrml role-detection bootstrap (A-4.7 + OQ-A4-E hybrid).
+    // Reads role hint from localStorage > cookie > <meta> > _anonymous;
+    // dispatches to the role-appropriate initial chunk via dynamic
+    // <script> injection.
+    (function () {
+      function getRole() {
+        try {
+          var ls = localStorage.getItem("scrml_role");
+          if (ls) return ls;
+        } catch (e) {}
+        var cookieMatch = document.cookie.match(/(?:^|;\\s*)scrml_role=([^;]+)/);
+        if (cookieMatch) return decodeURIComponent(cookieMatch[1]);
+        var meta = document.querySelector('meta[name="scrml-role"]');
+        if (meta) return meta.getAttribute("content");
+        return "_anonymous";
+      }
+      var activeRoute = ${activeRouteLit};
+      if (typeof activeRoute !== "string" || activeRoute === "") {
+        if (typeof console !== "undefined" && console.warn) {
+          console.warn("scrml: no active route for chunk bootstrap; skipping");
+        }
+        return;
+      }
+      var role = getRole();
+      var byRoute = window._SCRML_CHUNKS && window._SCRML_CHUNKS[activeRoute];
+      var byRole = byRoute && byRoute[role];
+      var chunkUrl = byRole && byRole.initial;
+      if (!chunkUrl) {
+        if (typeof console !== "undefined" && console.warn) {
+          console.warn("scrml: no chunk for role '" + role + "' at route '" + activeRoute + "'");
+        }
+        return;
+      }
+      var s = document.createElement("script");
+      s.src = chunkUrl;
+      s.defer = true;
+      document.head.appendChild(s);
+    })();
+  </script>`);
+
+  const injection = inlineParts.join("\n");
+
+  // Inject BEFORE `</head>` so the manifest + modulepreload + bootstrap
+  // are in the head — same precedence as the per-file `<link rel="stylesheet">`
+  // and (when embed mode is off) the scrml-runtime.js `<script>` tag
+  // emitted by index.ts.
+  //
+  // Defensive: when the input HTML has no `</head>` (degenerate fixture
+  // path), return the HTML unchanged. The augmentation requires a
+  // well-formed head; the no-`</head>` case is a no-op.
+  const headCloseIdx = html.indexOf("</head>");
+  if (headCloseIdx === -1) return html;
+  return html.substring(0, headCloseIdx) + injection + "\n" + html.substring(headCloseIdx);
+}
+

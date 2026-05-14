@@ -237,17 +237,20 @@ describe("runtime size", () => {
     expect(minimal.length).toBeLessThan(SCRML_RUNTIME.length * 0.30);
   });
 
-  test("RUNTIME_CHUNK_ORDER has 19 chunks", () => {
-    // 19 chunks post-A-4.3: 'prefetch' chunk added for SPEC §40.9.7 tier-1
-    // idle-prefetch runtime. Helper: _scrml_prefetch_tier1.
-    // Chunk-detection trigger: detectRuntimeChunks scans the per-file
-    // ReachabilityRecord and adds 'prefetch' when any (EP, role) for this
-    // file has non-empty ChunkPlan.prefetchTier1 admission.
+  test("RUNTIME_CHUNK_ORDER has 21 chunks", () => {
+    // 21 chunks post-A-4.7: 'mount' + 'vendor-ref' chunks added for SPEC
+    // §40.9.7 chunk-side record-keeping helpers (_scrml_chunk_mount,
+    // _scrml_vendor_require). Chunk-detection trigger: detectRuntimeChunks
+    // scans the per-file ReachabilityRecord and adds 'mount' / 'vendor-ref'
+    // when ANY entry-point chunk admits a non-empty components / vendor-
+    // units set.
     //
     // Prior milestones:
-    //   18 chunks post-C13: 'engine' chunk added for SPEC §51.0.F + §51.0.G
-    //   engine state-machine runtime hooks.
+    //   19 chunks post-A-4.3: 'prefetch' chunk for §40.9.7 tier-1 idle-
+    //   prefetch (helper: _scrml_prefetch_tier1).
+    //   18 chunks post-C13: 'engine' chunk for §51.0.F + §51.0.G engine
+    //   state-machine runtime hooks.
     //   17 chunks post-C10: 'messages' chunk for §55.10.
-    expect(RUNTIME_CHUNK_ORDER.length).toBe(19);
+    expect(RUNTIME_CHUNK_ORDER.length).toBe(21);
   });
 });
