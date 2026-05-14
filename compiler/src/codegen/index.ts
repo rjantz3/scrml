@@ -138,6 +138,19 @@ export interface CgInput {
    * emission proceeds unchanged. This is the v0.2.x default behaviour.
    */
   emitPerRoute?: boolean;
+  /**
+   * Q-OPEN-5 — Soft size budget (bytes) for the `W-CG-CHUNK-LARGE`
+   * lint. When unset (or non-positive / non-finite), the route-splitter
+   * uses the v0.3 default (`CHUNK_LARGE_SOFT_BUDGET_BYTES` = 100 000)
+   * so existing behavior is preserved for callers that don't thread a
+   * value through.
+   *
+   * Surfaced via the `--chunk-size-budget=<bytes>` flag on
+   * `scrml compile`; `compileScrml` in `api.js` forwards it here, and
+   * `runCG` forwards it into `emitPerRouteChunks`'s
+   * `EmitPerRouteInput.chunkSizeBudgetBytes`.
+   */
+  chunkSizeBudgetBytes?: number;
 }
 
 export interface CgFileOutput {
@@ -203,6 +216,7 @@ export function runCG(input: CgInput): CgOutput {
     exportRegistry: exportRegistryInput = null,
     reachabilityRecord: reachabilityRecordInput = null,
     emitPerRoute = false,
+    chunkSizeBudgetBytes,
   } = input;
 
   // Resolve encoding configuration (§47)
@@ -916,6 +930,9 @@ export function runCG(input: CgInput): CgOutput {
       reachabilityRecord: reachabilityRecordInput,
       cgContextByFile,
       perFileOutputs: outputs,
+      // Q-OPEN-5 — forward the CLI-supplied `--chunk-size-budget`
+      // value (or `undefined` for "use default" / "flag absent").
+      chunkSizeBudgetBytes,
     });
     chunks = splitterResult.chunks;
     chunksManifest = splitterResult.manifest;

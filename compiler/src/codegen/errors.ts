@@ -12,13 +12,13 @@ export class CGError {
   code: string;
   message: string;
   span: CGSpan | object;
-  severity: 'error' | 'warning';
+  severity: 'error' | 'warning' | 'info';
 
   constructor(
     code: string,
     message: string,
     span: CGSpan | object,
-    severity: 'error' | 'warning' = "error",
+    severity: 'error' | 'warning' | 'info' = "error",
   ) {
     this.code = code;
     this.message = message;

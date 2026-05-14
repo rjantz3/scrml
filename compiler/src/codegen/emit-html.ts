@@ -1548,6 +1548,26 @@ export function generateHtml(
           // — that's a reactive href; the resolved value isn't known
           // at emit time.
           if (hasTemplateInterpolation(hrefRaw)) continue;
+          // Q-OPEN-6 — flip `hasInternalLinks` on the structural shape
+          // (absolute-path string-literal, no protocol) BEFORE the
+          // resolution check. This is what distinguishes case 1
+          // (`W-CG-CHUNK-NO-PREFETCH`) from case 2
+          // (`W-CG-CHUNK-PREFETCH-UNRESOLVED`) at the splitter's
+          // post-emit lint scan: case 1 is "no internal links at all";
+          // case 2 is "links exist but none resolved to RouteMap.pages".
+          //
+          // Mirror `resolveInternalRoute`'s shape checks (fragment-only
+          // / protocol-bearing / no-leading-slash all NEGATE the
+          // "internal-shaped" tag). We do NOT count those as internal
+          // because they're not even attempting to wire prefetch
+          // (`#section` is in-page anchor; `https://...` is external).
+          if (
+            !hrefRaw.startsWith("#") &&
+            !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(hrefRaw) &&
+            hrefRaw.startsWith("/")
+          ) {
+            liveCtx.hasInternalLinks = true;
+          }
           const resolved = resolveInternalRoute(hrefRaw);
           if (resolved === null) break; // not internal — skip and stop scanning this element
           parts.push(` data-scrml-prefetch="${escapeHtmlAttr(resolved)}"`);

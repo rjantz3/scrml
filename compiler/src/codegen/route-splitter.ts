@@ -237,6 +237,19 @@ export interface EmitPerRouteInput {
    * reason as `cgContextByFile`.
    */
   perFileOutputs?: Map<string, CgFileOutput>;
+  /**
+   * Q-OPEN-5 — Soft size budget (bytes) for the `W-CG-CHUNK-LARGE` lint.
+   * When unset, the splitter uses `CHUNK_LARGE_SOFT_BUDGET_BYTES`
+   * (default 100 000) — i.e. the existing v0.3 default behavior is
+   * preserved when no caller threads a value here.
+   *
+   * Surfaced via the `--chunk-size-budget=<bytes>` CLI flag on
+   * `scrml compile` (parsed in `commands/compile.js`, threaded through
+   * `compileScrml` in `api.js`, then into `runCG`'s `CgInput`).
+   *
+   * Non-positive or non-finite values are ignored (default applies).
+   */
+  chunkSizeBudgetBytes?: number;
 }
 
 /**
@@ -504,9 +517,39 @@ export function emitPerRouteChunks(
   // implementation is intentionally conservative: lints fire only when the
   // signal is unambiguous (the goal is signal-to-noise, not catch-all).
   // -------------------------------------------------------------------------
-  emitChunkLints(reachabilityRecord, chunks, ctxByFile, diagnostics);
+  emitChunkLints(
+    reachabilityRecord,
+    chunks,
+    ctxByFile,
+    diagnostics,
+    resolveChunkSizeBudget(input.chunkSizeBudgetBytes),
+  );
 
   return { chunks, manifest, diagnostics };
+}
+
+/**
+ * Q-OPEN-5 — Resolve the effective `W-CG-CHUNK-LARGE` soft size budget
+ * for a single `emitPerRouteChunks` invocation.
+ *
+ * The default `CHUNK_LARGE_SOFT_BUDGET_BYTES` (100 000) applies when:
+ *   - the caller did not pass `chunkSizeBudgetBytes`, OR
+ *   - the value is not a finite positive number (defensive — guards
+ *     against `--chunk-size-budget=foo` rotting through type-erasure
+ *     into a `NaN` here).
+ *
+ * Otherwise the floor-of-input value is used. We floor because the
+ * lint compares against a byte count (integer); fractional inputs are
+ * meaningless. A budget of `0` (or any non-positive value) reverts to
+ * the default — passing `0` is unambiguous "use default" and avoids
+ * silent disabling of the lint.
+ */
+function resolveChunkSizeBudget(input: number | undefined): number {
+  if (input === undefined) return CHUNK_LARGE_SOFT_BUDGET_BYTES;
+  if (typeof input !== "number") return CHUNK_LARGE_SOFT_BUDGET_BYTES;
+  if (!Number.isFinite(input)) return CHUNK_LARGE_SOFT_BUDGET_BYTES;
+  if (input <= 0) return CHUNK_LARGE_SOFT_BUDGET_BYTES;
+  return Math.floor(input);
 }
 
 /**
@@ -535,12 +578,17 @@ export const CHUNK_LARGE_SOFT_BUDGET_BYTES = 100_000;
  *   skipped (we cannot resolve auth role refs without ctx).
  * @param diagnostics Output array — lints are pushed here as CGError
  *   instances with severity='warning'.
+ * @param chunkSizeBudgetBytes Q-OPEN-5 — effective soft size budget
+ *   for the `W-CG-CHUNK-LARGE` lint. Defaults to
+ *   `CHUNK_LARGE_SOFT_BUDGET_BYTES` (100 000) when the caller did not
+ *   thread an override (or threaded a non-positive value).
  */
 function emitChunkLints(
   reachabilityRecord: ReachabilityRecord,
   chunks: Map<ChunkKey, ChunkOutput>,
   ctxByFile: Map<string, CompileContext> | undefined,
   diagnostics: CGError[],
+  chunkSizeBudgetBytes: number = CHUNK_LARGE_SOFT_BUDGET_BYTES,
 ): void {
   // Aggregate per-EP chunk shapes for the lint scans.
   const chunksByEp = new Map<EntryPointId, ChunkOutput[]>();
@@ -617,14 +665,14 @@ function emitChunkLints(
     for (const c of epChunks) {
       if (c.tier !== "initial") continue;
       const byteLen = utf8ByteLength(c.payloadJs);
-      if (byteLen > CHUNK_LARGE_SOFT_BUDGET_BYTES) {
+      if (byteLen > chunkSizeBudgetBytes) {
         diagnostics.push(
           new CGError(
             "W-CG-CHUNK-LARGE",
             `W-CG-CHUNK-LARGE: Initial chunk for entry-point \`${epId}\` role ` +
             `\`${c.role}\` is ${byteLen} bytes — exceeds the soft size budget ` +
-            `of ${CHUNK_LARGE_SOFT_BUDGET_BYTES} bytes (~${Math.round(
-              CHUNK_LARGE_SOFT_BUDGET_BYTES / 1000,
+            `of ${chunkSizeBudgetBytes} bytes (~${Math.round(
+              chunkSizeBudgetBytes / 1000,
             )} KB). Large initial chunks ship eagerly to first paint; they ` +
             `degrade time-to-interactive. Probable causes: a route that should ` +
             `be split, vendor units that should move to tier-1, or a single-page ` +
@@ -639,46 +687,85 @@ function emitChunkLints(
       }
     }
 
-    // -- W-CG-CHUNK-NO-PREFETCH ---------------------------------------
+    // -- W-CG-CHUNK-NO-PREFETCH / W-CG-CHUNK-PREFETCH-UNRESOLVED ------
     //
-    // Fires when the entry-point's file HTML had internal `<a href="/...">`
-    // links to known internal routes BUT the per-file CompileContext's
-    // `hasPrefetchableLinks` flag is FALSE (i.e. no `data-scrml-prefetch`
-    // attribute was emitted, no `_scrml_prefetch_tier2` runtime call).
+    // Q-OPEN-6 — split the single "no prefetch wired" signal into two
+    // codes so adopters can distinguish two structurally different
+    // situations:
     //
-    // Inverted detection: we detect the OPPOSITE shape (`hasPrefetchableLinks`
-    // TRUE while expecting NO links). This is hard to distinguish from
-    // "no links at all" without re-walking the AST. We use a
-    // conservative proxy: the lint fires only when ctx.routeMap.pages
-    // has MORE THAN ONE entry (multi-route app where cross-route hover
-    // prefetch would be valuable) AND `hasPrefetchableLinks` is FALSE
-    // for this entry-point's file. Single-route apps (only one page,
-    // typical for SPAs) get NO false positive.
+    //   - `W-CG-CHUNK-NO-PREFETCH` (INFO) — case 1: the file has NO
+    //     internal-shaped `<a href="/...">` links at all. There is
+    //     genuinely "no prefetch possible"; the build is not buggy,
+    //     this is just informational signal that hover-prefetch is
+    //     dead-code for this entry-point.
+    //
+    //   - `W-CG-CHUNK-PREFETCH-UNRESOLVED` (WARNING) — case 2: the
+    //     file has internal-shaped `<a href="/...">` links BUT none of
+    //     them resolved to a known `RouteMap.pages` urlPattern (typo,
+    //     missing page, or unimplemented route). This is the
+    //     actionable case — adopters likely expected hover-prefetch
+    //     and aren't getting it.
+    //
+    // Both lints fire only in multi-route apps (`pageCount > 1`) where
+    // cross-route hover-prefetch would be valuable. Single-route
+    // apps (SPAs) get no false positive — there are no other routes
+    // to prefetch.
+    //
+    // The two flags `hasInternalLinks` (structural-existence) and
+    // `hasPrefetchableLinks` (resolution-succeeded) are populated by
+    // `emit-html.ts` during the markup walk; see `context.ts` for
+    // their definitions.
     const epCtx = ctxByFile?.get(filePath);
     if (epCtx) {
       const pages = epCtx.routeMap?.pages;
       const pageCount = (pages && typeof pages.size === "number") ? pages.size : 0;
-      const hasLinks = Boolean(
+      const hasInternalLinks = Boolean(
+        (epCtx as { hasInternalLinks?: boolean }).hasInternalLinks,
+      );
+      const hasPrefetchableLinks = Boolean(
         (epCtx as { hasPrefetchableLinks?: boolean }).hasPrefetchableLinks,
       );
-      if (pageCount > 1 && !hasLinks) {
-        diagnostics.push(
-          new CGError(
-            "W-CG-CHUNK-NO-PREFETCH",
-            `W-CG-CHUNK-NO-PREFETCH: Entry-point \`${epId}\` is in a multi-route ` +
-            `application (${pageCount} pages in RouteMap) but no \`data-scrml-prefetch\` ` +
-            `attributes were emitted on its \`<a href>\` links. Cross-route navigation ` +
-            `loses the §40.9.7 hover-warming speedup. Probable causes: \`<a href>\` ` +
-            `links use external URLs or template interpolation (skipped at A-4.4); ` +
-            `the linked routes don't appear in \`RouteMap.pages\` (typo); or the ` +
-            `entry-point has no internal links at all. The build still completes. ` +
-            `Resolution: verify internal \`<a href="/...">\` values resolve to known ` +
-            `\`RouteMap.pages\` urlPatterns, OR accept the lint if cross-route ` +
-            `prefetch is intentionally opted out. (§40.9.7 / §40.9.11)`,
-            span,
-            "warning",
-          ),
-        );
+      if (pageCount > 1 && !hasPrefetchableLinks) {
+        if (hasInternalLinks) {
+          // Case 2 — links exist but none resolved. Warning-level.
+          diagnostics.push(
+            new CGError(
+              "W-CG-CHUNK-PREFETCH-UNRESOLVED",
+              `W-CG-CHUNK-PREFETCH-UNRESOLVED: Entry-point \`${epId}\` is in a multi-route ` +
+              `application (${pageCount} pages in RouteMap) and its HTML contains internal-shaped ` +
+              `\`<a href="/...">\` links — but NONE of them resolved to a known ` +
+              `\`RouteMap.pages\` urlPattern. Cross-route navigation loses the §40.9.7 ` +
+              `hover-warming speedup. Probable causes: a typo in the \`<a href>\` value; ` +
+              `the linked route is not yet a \`<page>\` in this compilation unit; OR the ` +
+              `link points at a sub-path of a parametric route that A-4.4 exact-match ` +
+              `does not yet recognize (deferred to A-4.7+). The build still completes. ` +
+              `Resolution: verify the \`<a href>\` paths match a \`<page>\` urlPattern ` +
+              `exactly (no trailing slash mismatch, no typo), OR confirm intentional opt-out. ` +
+              `(§40.9.7 / §40.9.11)`,
+              span,
+              "warning",
+            ),
+          );
+        } else {
+          // Case 1 — no internal links at all. Info-level.
+          diagnostics.push(
+            new CGError(
+              "W-CG-CHUNK-NO-PREFETCH",
+              `W-CG-CHUNK-NO-PREFETCH: Entry-point \`${epId}\` is in a multi-route ` +
+              `application (${pageCount} pages in RouteMap) but its HTML contains no internal ` +
+              `\`<a href="/...">\` links at all — so cross-route hover-prefetch wiring is ` +
+              `genuinely dead-code for this entry-point. The build is not buggy; this lint ` +
+              `is informational. Probable causes: navigation lives entirely in JS handlers ` +
+              `(not declarative \`<a href>\`); the entry-point is a leaf page with no ` +
+              `outbound navigation; OR all \`<a>\` elements use external URLs / template ` +
+              `interpolation / fragment-only hrefs. Resolution: if cross-route ` +
+              `hover-prefetch was expected, switch to declarative \`<a href="/route">\` ` +
+              `links; otherwise no action required. (§40.9.7 / §40.9.11)`,
+              span,
+              "info",
+            ),
+          );
+        }
       }
     }
 

@@ -48,6 +48,9 @@ Options:
   --emit-reachability     Emit <base>.reachability.json for each source (§PIPELINE Stage 7.6 / SPEC §40.9)
   --emit-per-route        Emit per-(entry-point, role, tier) JS chunks + chunks.json
                           (SPEC §40.9.7; opt-in during A-4 wave; default-on at v0.3.0 cut)
+  --chunk-size-budget=N   Soft size budget in bytes for the W-CG-CHUNK-LARGE lint
+                          (default 100000). Initial chunks larger than N fire the
+                          lint. Non-positive / non-numeric values revert to default.
   --emit-machine-tests    Emit <base>.machine.test.js for each source (§51.13)
   --watch, -w             Watch for changes and recompile
   --convert-legacy-css    Convert <style> blocks to #{...}
@@ -86,6 +89,11 @@ function parseArgs(args) {
   let emitBatchPlan = false;
   let emitReachability = false;
   let emitPerRoute = false;
+  // Q-OPEN-5 — `--chunk-size-budget=<bytes>` CLI flag value. When
+  // undefined, compileScrml / runCG / emitPerRouteChunks all fall back
+  // to the route-splitter default (CHUNK_LARGE_SOFT_BUDGET_BYTES =
+  // 100 000). Parsed below.
+  let chunkSizeBudgetBytes = undefined;
   let emitMachineTests = false;
   // W2 §21.7: auto-gather defaults ON. `--no-gather` opts out.
   let gather = true;
@@ -128,6 +136,33 @@ function parseArgs(args) {
       // Default-off during A-4 wave development per OQ-A4-F; default-on
       // at the v0.3.0 cut release once A-4.1..A-4.7 all land.
       emitPerRoute = true;
+    } else if (arg === "--chunk-size-budget" || arg.startsWith("--chunk-size-budget=")) {
+      // Q-OPEN-5 — Soft size budget (bytes) for the `W-CG-CHUNK-LARGE`
+      // lint. Both `--chunk-size-budget=N` and `--chunk-size-budget N`
+      // shapes are accepted. The value is parsed with `Number()` —
+      // numeric strings like `"150000"` work; non-numeric strings
+      // produce `NaN` which the splitter's `resolveChunkSizeBudget`
+      // reverts to the default (defensive). The flag is preserved on
+      // `runOnce` opts and forwarded into `compileScrml` even when
+      // `--emit-per-route` is NOT set — the route-splitter only runs
+      // under `emitPerRoute`, so the value is harmlessly dead-end'd
+      // there for legacy single-bundle compiles.
+      let raw;
+      if (arg === "--chunk-size-budget") {
+        raw = args[++i];
+        if (!raw) {
+          console.error(c.red("error:") + ` ${arg} requires a byte count (e.g. --chunk-size-budget 150000)`);
+          process.exit(1);
+        }
+      } else {
+        raw = arg.substring("--chunk-size-budget=".length);
+      }
+      const parsed = Number(raw);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        console.error(c.red("error:") + ` --chunk-size-budget requires a positive integer byte count (got: \`${raw}\`)`);
+        process.exit(1);
+      }
+      chunkSizeBudgetBytes = Math.floor(parsed);
     } else if (arg === "--emit-machine-tests") {
       emitMachineTests = true;
     } else if (arg === "--no-gather") {
@@ -168,7 +203,7 @@ function parseArgs(args) {
     }
   }
 
-  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, watchMode, mode, selfHost, emitBatchPlan, emitReachability, emitPerRoute, emitMachineTests, gather };
+  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, watchMode, mode, selfHost, emitBatchPlan, emitReachability, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather };
 }
 
 // ---------------------------------------------------------------------------
@@ -291,7 +326,7 @@ function formatLintDiagnostic(diag, cwd) {
  * @returns {{ success: boolean }}
  */
 function runOnce(opts, selfHostModules = null) {
-  const { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, mode, emitBatchPlan, emitReachability, emitPerRoute, emitMachineTests, gather } = opts;
+  const { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, mode, emitBatchPlan, emitReachability, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather } = opts;
   const cwd = process.cwd();
 
   if (verbose) {
@@ -315,6 +350,9 @@ function runOnce(opts, selfHostModules = null) {
       // S91 A-4.1 — opt-in per-route artifact splitter; emits chunk
       // files + chunks.json when set.
       emitPerRoute,
+      // Q-OPEN-5 — `--chunk-size-budget=<bytes>` value (undefined when
+      // flag absent; the route-splitter falls back to its default).
+      chunkSizeBudgetBytes,
       gather,
       write: true,
       log: verbose ? (msg) => console.log(c.dim(msg)) : () => {},

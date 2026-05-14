@@ -109,6 +109,34 @@ export interface CompileContext {
    * walk (per-element check on `<a href>` against `RouteMap.pages`).
    */
   hasPrefetchableLinks?: boolean;
+  /**
+   * Q-OPEN-6 — set to `true` by `emit-html.ts` when the file's markup
+   * contains at least one `<a href="/...">` with an absolute-path,
+   * non-interpolated string-literal value (i.e. a syntactically
+   * internal-shaped link), regardless of whether it resolved to a
+   * known `RouteMap.pages` urlPattern.
+   *
+   * Distinct from `hasPrefetchableLinks`: that flag fires only when the
+   * `<a href>` value resolved to a known route AND was decorated with
+   * `data-scrml-prefetch`. This flag fires on the structural existence
+   * of an internal-shaped link, independently of resolution outcome.
+   *
+   * Read by the per-route artifact splitter's `emitChunkLints` to
+   * distinguish two cases for adopter-facing diagnostics:
+   *   - `hasInternalLinks === false` → the file has NO internal links
+   *     at all (genuinely "no prefetch possible"). Info-level
+   *     `W-CG-CHUNK-NO-PREFETCH` per Q-OPEN-6.
+   *   - `hasInternalLinks === true && hasPrefetchableLinks === false`
+   *     → links EXIST but none resolved to RouteMap.pages (typo,
+   *     missing page, or unimplemented route). Warning-level
+   *     `W-CG-CHUNK-PREFETCH-UNRESOLVED` per Q-OPEN-6.
+   *
+   * Defaults to `false`. Mutated by `emit-html.ts` during the markup
+   * walk; orthogonal to `hasPrefetchableLinks` (one can be true with
+   * the other false, in either direction, depending on whether links
+   * resolve).
+   */
+  hasInternalLinks?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,5 +183,10 @@ export function makeCompileContext(partial: Partial<CompileContext> & { fileAST:
     // `emit-html.ts` flips it to true when at least one internal `<a href>`
     // resolves to a `RouteMap.pages` urlPattern.
     hasPrefetchableLinks: partial.hasPrefetchableLinks ?? false,
+    // Q-OPEN-6 — structural-existence flag for internal-shaped `<a href>`
+    // links. Defaults to false; `emit-html.ts` flips it to true on the
+    // first absolute-path string-literal `<a href>` it encounters
+    // (independent of whether it resolved to a known route).
+    hasInternalLinks: partial.hasInternalLinks ?? false,
   };
 }

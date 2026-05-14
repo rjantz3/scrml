@@ -434,6 +434,13 @@ export function compileScrml(options = {}) {
      * the v0.3.0 cut release once A-4.1..A-4.7 have all landed.
      */
     emitPerRoute = false,
+    /**
+     * Q-OPEN-5 — Soft size budget (bytes) for `W-CG-CHUNK-LARGE`.
+     * When unset (or non-positive), the route-splitter uses the
+     * default `CHUNK_LARGE_SOFT_BUDGET_BYTES` (100 000). Surfaced via
+     * the `--chunk-size-budget=<bytes>` CLI flag.
+     */
+    chunkSizeBudgetBytes,
     log = console.log,
     selfHostModules = null,
   } = options;
@@ -1398,6 +1405,10 @@ export function compileScrml(options = {}) {
     // Off by default per OQ-A4-F; enables per-(EP, role, tier) chunk
     // descriptor production + chunks.json manifest emission.
     emitPerRoute,
+    // Q-OPEN-5 — `--chunk-size-budget=<bytes>` CLI flag value. When
+    // undefined, the route-splitter falls back to its default
+    // `CHUNK_LARGE_SOFT_BUDGET_BYTES` (100 000).
+    chunkSizeBudgetBytes,
   }));
   collectErrors("CG", cgResult.errors);
 
