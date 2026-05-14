@@ -1,0 +1,70 @@
+// FX-2 (file 1 of 2) — cross-file <ComponentName> import + use-site
+// Family: F-1 (cross-wave round-trip via cross-file path — MOD + CE)
+// Tests: compiler/tests/integration/cross-file-expansion-integration.test.js
+// A-5 wave; depends on A-5.1 cornerstone shape (multipage-multirole).
+// SCOPING: scrml-support/docs/deep-dives/a-5-integration-tests-SCOPING-2026-05-14.md
+//   §3.2 row FX-2; §4.2 A-5.2 sub-phase (S92 CORRECTION callout already
+//   notes this fixture is unaffected — already multi-file by design).
+//
+// File 1/2 — App entry. Hosts the app-scope role enum, the reactive count
+// cell, and the use-site for the imported `<Header/>` component. The Header
+// component is defined in `./components/header.scrml` and imported via the
+// canonical `import { Name } from './...'` cross-file form (§21.3).
+//
+// Why a separate component? The §40.9.9 worked example shows the Header as
+// `<block Header>` — that is documentary pseudo-syntax (the `<block>`
+// element is NOT registered in §4.15 structural elements; A-3.5 collapsed
+// the `<block>`s inline in its integration test for the same reason). Real
+// cross-file factoring uses canonical Form 1/2 component exports per §21.2
+// + the `examples/22-multifile/` reference.
+//
+// Cross-cutting demonstration:
+//   - Stage 3.1 MOD resolves `./components/header.scrml` → sibling absolute path.
+//   - Stage 3.105 STDLIB-EXPORT-SEED + Stage 4 NR routes the imported
+//     `Header` symbol to the component category.
+//   - Stage 5 DG records the cross-file dependency edge (component-use).
+//   - Stage 7 / 7.6 RS Component 1 closure includes Header transitively
+//     from the entry-point (the imported component is reachable).
+//   - The `<auth role="Admin">` block lives INSIDE the imported component
+//     (in components/header.scrml) — A-3 per-gate classifier surfaces it
+//     post-CE expansion; A-2.5 Component 4 admits it for Admin only.
+//
+// Single entry-point: this file is one `.scrml` source with one `<program>`,
+// so RouteMap.pages enumerates 1 EpId at `${app.scrml}#program` per
+// `reachability/entry-points.ts spaEntryId`. That is intentional — FX-1
+// (multipage-multirole) covers the multi-EP case; FX-2 covers the
+// cross-file path under a single EP.
+//
+// Logic-context placement: per §21.3 normative ("import SHALL be valid
+// inside a `${}` logic context at the top level of a scrml file"), the
+// `import` statement lives in a `${...}` block. Sibling top-level decls
+// (the role enum + `<count>` state cell + `function`) live in default-
+// logic mode (§40.8) per the A-5.1 cornerstone convention. Mixed
+// placement is the canonical adopter shape per `examples/22-multifile/
+// app.scrml` (where the imports + the seed data live in one `${...}`
+// while markup lives bare).
+
+<program title="Cross-file demo" auth="required">
+
+${
+  import { Header } from './components/header.scrml'
+}
+
+type UserRole:enum = { Anonymous, Driver, Admin }
+
+<count> = 0
+
+function increment() {
+  @count = @count + 1
+}
+
+<Header/>
+
+<main class="p-4">
+  <button onclick=increment()
+          class="px-3 py-1 rounded bg-slate-100">
+    ${@count}
+  </button>
+</main>
+
+</program>

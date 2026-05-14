@@ -1,0 +1,52 @@
+// FX-2 (file 2 of 2) — exported Header component
+// Family: F-1 (cross-wave round-trip via cross-file path — MOD + CE)
+// Tests: compiler/tests/integration/cross-file-expansion-integration.test.js
+// A-5 wave; depends on A-5.1 cornerstone shape (multipage-multirole).
+// SCOPING: scrml-support/docs/deep-dives/a-5-integration-tests-SCOPING-2026-05-14.md
+//   §3.2 row FX-2.
+//
+// File 2/2 — Header component. Single-rooted markup body per §21.2 Form 1
+// constraint (matches Form 2 `export const X = <root>` rule trivially).
+// Carries the navigation bar plus the `<auth role="Admin">` gated panel —
+// the gated subtree that drives per-role chunk variance through the
+// cross-file path.
+//
+// Form 2 (`export const Header = <nav ...>...</>`) used per the canonical
+// adopter-shape pattern in `examples/22-multifile/components.scrml` and
+// the trucking-dispatch components corpus (`examples/23-trucking-dispatch/
+// components/*.scrml`). Form 1 (`export <Header>...</>`) would also work
+// per §21.2 P2 equivalence; Form 2 is the more widely-used adopter-shape.
+//
+// References UserRole variant `Admin`. The role enum itself is declared
+// in `app.scrml` (the importer); the auth-graph (b)-rule role-enum
+// resolver discovers the enum across the compile unit via this reference.
+//
+// The Admin-gated subtree uses non-anchor block elements (`<section>` +
+// `<h2>` + `<p>`) — NOT `<a href>` — so the fixture does not fire route-
+// resolution lints (`I-AUTH-REDIRECT-UNRESOLVED` / `W-CG-CHUNK-PREFETCH-
+// UNRESOLVED`) for routes this single-EP fixture does not declare. The
+// nested `<section><h2><p>` shape mirrors A-5.1's admin.scrml gated
+// subtree so the per-role variance surfaces at the chunk-mount level
+// (matching A-5.1's FX-1 §7 assertion shape).
+//
+// Why styled inline? The S86 idiomatic-examples styling rule + the
+// corpus-ouroboros warning (`feedback_idiomatic_examples_styling.md`):
+// fixtures use inline `class="..."` Tailwind-style canonical, NEVER a
+// file-top `#{}` annotation.
+
+${
+  export const Header = <nav class="flex items-center gap-3 p-4 border-b">
+    <h1 class="text-xl font-semibold">Cross-file demo</h1>
+    <span class="text-sm text-slate-500">imported from ./components/header.scrml</span>
+    <auth role="Admin">
+      <section class="ml-auto px-3 py-2 rounded border border-red-300 bg-red-50">
+        <h2 class="text-sm font-medium text-red-700">Admin panel</h2>
+        <p class="text-xs text-red-600">
+          Visible only to viewers whose role is Admin. Per §40.9.5
+          Component 4 closed-form classification, this subtree is admitted
+          to the Admin chunk and excluded from Driver / Anonymous chunks.
+        </p>
+      </section>
+    </auth>
+  </>
+}
