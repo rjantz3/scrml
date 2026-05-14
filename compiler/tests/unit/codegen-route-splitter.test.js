@@ -33,9 +33,19 @@ import { describe, test, expect } from "bun:test";
 import {
   emitPerRouteChunks,
   serializeChunksManifest,
+  composeInitialChunk,
   CHUNK_HASH_PLACEHOLDER,
   ANONYMOUS_ROLE,
 } from "../../src/codegen/route-splitter.ts";
+import {
+  emitReactiveCellAtom,
+  emitServerFnStubAtom,
+  emitVendorUnitRef,
+  emitComponentAtom,
+  canonicalNodeIdArray,
+  canonicalVendorUnitArray,
+  stratifiedNodeIdCompare,
+} from "../../src/codegen/atom-emitter.ts";
 import { compileScrml } from "../../src/api.js";
 import { writeFileSync, mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -356,5 +366,291 @@ describe("§8 deterministic across runs — same input → same manifest bytes",
     const a = serializeChunksManifest(emitPerRouteChunks({ reachabilityRecord: buildInput() }).manifest);
     const b = serializeChunksManifest(emitPerRouteChunks({ reachabilityRecord: buildInput() }).manifest);
     expect(a).toBe(b);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §9 — A-4.2: atom-emitter idempotency + canonical iteration
+// ---------------------------------------------------------------------------
+
+describe("§9 A-4.2 atom-emitter idempotency", () => {
+  test("emitReactiveCellAtom — same node → same output (no side effects)", () => {
+    const node = {
+      kind: "state-decl",
+      name: "count",
+      initExpr: { kind: "lit", value: 0 },
+      id: 5,
+    };
+    const fakeCtx = /** @type {any} */ ({});
+    const a = emitReactiveCellAtom(node, fakeCtx);
+    const b = emitReactiveCellAtom(node, fakeCtx);
+    expect(a).toBe(b);
+    expect(a).toBe(`_scrml_reactive_set("count", 0);\n`);
+  });
+
+  test("emitReactiveCellAtom — non-literal init lowers to `null` (no `undefined` per §42.5/§42.8)", () => {
+    const node = {
+      kind: "state-decl",
+      name: "user",
+      initExpr: { kind: "call", callee: { kind: "ident", name: "fetchUser" } },
+      id: 9,
+    };
+    const fakeCtx = /** @type {any} */ ({});
+    expect(emitReactiveCellAtom(node, fakeCtx)).toBe(`_scrml_reactive_set("user", null);\n`);
+  });
+
+  test("emitReactiveCellAtom — string + boolean literals are JSON-encoded", () => {
+    const stringNode = {
+      kind: "state-decl",
+      name: "label",
+      initExpr: { kind: "lit", value: "hello" },
+    };
+    const boolNode = {
+      kind: "state-decl",
+      name: "active",
+      initExpr: { kind: "lit", value: true },
+    };
+    const ctx = /** @type {any} */ ({});
+    expect(emitReactiveCellAtom(stringNode, ctx)).toBe(`_scrml_reactive_set("label", "hello");\n`);
+    expect(emitReactiveCellAtom(boolNode, ctx)).toBe(`_scrml_reactive_set("active", true);\n`);
+  });
+
+  test("emitReactiveCellAtom — defensive: unrelated node kinds return empty string", () => {
+    expect(emitReactiveCellAtom({ kind: "markup", tag: "div" }, /** @type {any} */ ({}))).toBe("");
+    expect(emitReactiveCellAtom({}, /** @type {any} */ ({}))).toBe("");
+    expect(emitReactiveCellAtom(null, /** @type {any} */ ({}))).toBe("");
+  });
+
+  test("emitServerFnStubAtom — idempotent for same fn + route", () => {
+    const fnNode = {
+      kind: "function-decl",
+      name: "fetchUser",
+      params: ["id:number"],
+    };
+    const route = { path: "/_scrml/fetchUser", method: "POST" };
+    const a = emitServerFnStubAtom(fnNode, route, /** @type {any} */ ({}));
+    const b = emitServerFnStubAtom(fnNode, route, /** @type {any} */ ({}));
+    expect(a).toBe(b);
+    expect(a).toContain("async function _scrml_fetch_fetchUser(id)");
+    expect(a).toContain(`await fetch("/_scrml/fetchUser"`);
+    expect(a).toContain(`_scrml_wire_decode`);
+  });
+
+  test("emitServerFnStubAtom — GET method skips body construction", () => {
+    const fnNode = {
+      kind: "function-decl",
+      name: "ping",
+      params: [],
+    };
+    const route = { path: "/_scrml/ping", method: "GET" };
+    const out = emitServerFnStubAtom(fnNode, route, /** @type {any} */ ({}));
+    expect(out).toContain(`await fetch("/_scrml/ping", { method: "GET" })`);
+    expect(out).not.toContain("Content-Type");
+    expect(out).not.toContain("_scrml_body");
+  });
+
+  test("emitVendorUnitRef — idempotent + sanitizes binding name", () => {
+    const a = emitVendorUnitRef("lodash-es");
+    const b = emitVendorUnitRef("lodash-es");
+    expect(a).toBe(b);
+    expect(a).toBe(`import * as _scrml_vendor_lodash_es from "vendor:lodash-es";\n`);
+  });
+
+  test("emitVendorUnitRef — empty / non-string → empty output", () => {
+    expect(emitVendorUnitRef("")).toBe("");
+    expect(emitVendorUnitRef(/** @type {any} */ (null))).toBe("");
+  });
+
+  test("emitComponentAtom — idempotent + records id + tag", () => {
+    const fakeFileAST = {
+      ast: { nodes: [
+        { kind: "markup", tag: "div", id: 42, children: [] },
+      ] },
+    };
+    const ctx = /** @type {any} */ ({ fileAST: fakeFileAST });
+    const a = emitComponentAtom(42, ctx);
+    const b = emitComponentAtom(42, ctx);
+    expect(a).toBe(b);
+    expect(a).toBe(`_scrml_chunk_mount(42, "div");\n`);
+  });
+
+  test("emitComponentAtom — unknown id → empty string (defensive)", () => {
+    const fakeFileAST = { ast: { nodes: [] } };
+    const ctx = /** @type {any} */ ({ fileAST: fakeFileAST });
+    expect(emitComponentAtom(999, ctx)).toBe("");
+  });
+});
+
+describe("§9 A-4.2 canonical iteration ordering (stratified comparator)", () => {
+  test("stratifiedNodeIdCompare — numbers sort before strings", () => {
+    const ids = ["zebra", 1, "apple", 2, "fn-x"];
+    const sorted = [...ids].sort(stratifiedNodeIdCompare);
+    expect(sorted).toEqual([1, 2, "apple", "fn-x", "zebra"]);
+  });
+
+  test("stratifiedNodeIdCompare — within-stratum codepoint compare", () => {
+    expect(stratifiedNodeIdCompare("ab", "ac")).toBeLessThan(0);
+    expect(stratifiedNodeIdCompare("ac", "ab")).toBeGreaterThan(0);
+    expect(stratifiedNodeIdCompare("ab", "ab")).toBe(0);
+    expect(stratifiedNodeIdCompare(5, 10)).toBeLessThan(0);
+    expect(stratifiedNodeIdCompare(10, 5)).toBeGreaterThan(0);
+  });
+
+  test("canonicalNodeIdArray — orders insertion-randomized Set deterministically", () => {
+    const s = new Set([5, "z", 2, "a", 100]);
+    expect(canonicalNodeIdArray(s)).toEqual([2, 5, 100, "a", "z"]);
+  });
+
+  test("canonicalVendorUnitArray — codepoint sort of vendor-unit names", () => {
+    const s = new Set(["zebra", "apple", "Beta", "alpha"]);
+    expect(canonicalVendorUnitArray(s)).toEqual(["Beta", "alpha", "apple", "zebra"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §10 — composeInitialChunk shape + content admission filter
+// ---------------------------------------------------------------------------
+
+describe("§10 composeInitialChunk — chunk shape + admission filter", () => {
+  // A minimal fake CompileContext suitable for composer testing.
+  function makeFakeCtx({ stateDecls = [], fnDecls = [], markupNodes = [], routeMap = null } = {}) {
+    const nodes = [...stateDecls, ...fnDecls, ...markupNodes];
+    const fileAST = {
+      filePath: "/abs/app.scrml",
+      ast: { nodes },
+    };
+    const functions = new Map();
+    if (routeMap) {
+      for (const [id, entry] of Object.entries(routeMap)) {
+        functions.set(id, entry);
+      }
+    }
+    return { fileAST, routeMap: { functions } };
+  }
+
+  test("empty admission set → IIFE shell only (no atoms)", () => {
+    const ctx = makeFakeCtx();
+    const out = composeInitialChunk(emptyContents(), /** @type {any} */ (ctx), "/abs/app.scrml::#program", ANONYMOUS_ROLE);
+    expect(out).toContain("scrml initial chunk");
+    expect(out).toContain('(function ()');
+    expect(out).toContain("})();");
+    // No atom section headers when admission set is empty.
+    expect(out).not.toContain("// --- reactive cells");
+    expect(out).not.toContain("// --- server-fn fetch stubs");
+    expect(out).not.toContain("// --- admitted components");
+    expect(out).not.toContain("// --- vendor units");
+  });
+
+  test("reactive-cell admission → registration line present", () => {
+    const countDecl = {
+      kind: "state-decl",
+      name: "count",
+      initExpr: { kind: "lit", value: 0 },
+      id: 7,
+    };
+    const ctx = makeFakeCtx({ stateDecls: [countDecl] });
+    const contents = {
+      componentNodeIds: new Set(),
+      reactiveCellNodeIds: new Set([7]),
+      serverFnNodeIds: new Set(),
+      vendorUnitNames: new Set(),
+    };
+    const out = composeInitialChunk(contents, /** @type {any} */ (ctx), "/abs/app.scrml::#program", "Driver");
+    expect(out).toContain("// --- reactive cells");
+    expect(out).toContain(`_scrml_reactive_set("count", 0);`);
+  });
+
+  test("component admission → mount markers emitted for admitted nodes only", () => {
+    const navMarkup = { kind: "markup", tag: "nav", id: 11, children: [] };
+    const linkAdmin = { kind: "markup", tag: "a", id: 22, children: [] };
+    const ctx = makeFakeCtx({ markupNodes: [navMarkup, linkAdmin] });
+
+    // Driver: only nav admitted, link omitted.
+    const driverContents = {
+      componentNodeIds: new Set([11]),
+      reactiveCellNodeIds: new Set(),
+      serverFnNodeIds: new Set(),
+      vendorUnitNames: new Set(),
+    };
+    const driverOut = composeInitialChunk(driverContents, /** @type {any} */ (ctx), "/abs/app.scrml::#program", "Driver");
+    expect(driverOut).toContain(`_scrml_chunk_mount(11, "nav");`);
+    expect(driverOut).not.toContain(`_scrml_chunk_mount(22`);
+
+    // Admin: both admitted.
+    const adminContents = {
+      componentNodeIds: new Set([11, 22]),
+      reactiveCellNodeIds: new Set(),
+      serverFnNodeIds: new Set(),
+      vendorUnitNames: new Set(),
+    };
+    const adminOut = composeInitialChunk(adminContents, /** @type {any} */ (ctx), "/abs/app.scrml::#program", "Admin");
+    expect(adminOut).toContain(`_scrml_chunk_mount(11, "nav");`);
+    expect(adminOut).toContain(`_scrml_chunk_mount(22, "a");`);
+  });
+
+  test("canonical iteration order — component ids emit in stratified order regardless of Set insertion order", () => {
+    const a = { kind: "markup", tag: "div", id: 100, children: [] };
+    const b = { kind: "markup", tag: "span", id: 5, children: [] };
+    const c = { kind: "markup", tag: "p", id: 50, children: [] };
+    const ctx = makeFakeCtx({ markupNodes: [a, b, c] });
+
+    // Insertion order: 100 → 5 → 50
+    const contents = {
+      componentNodeIds: new Set([100, 5, 50]),
+      reactiveCellNodeIds: new Set(),
+      serverFnNodeIds: new Set(),
+      vendorUnitNames: new Set(),
+    };
+    const out = composeInitialChunk(contents, /** @type {any} */ (ctx), "/abs/app.scrml::#program", ANONYMOUS_ROLE);
+    // Expected canonical order: 5, 50, 100.
+    const idx5 = out.indexOf(`_scrml_chunk_mount(5,`);
+    const idx50 = out.indexOf(`_scrml_chunk_mount(50,`);
+    const idx100 = out.indexOf(`_scrml_chunk_mount(100,`);
+    expect(idx5).toBeGreaterThan(-1);
+    expect(idx50).toBeGreaterThan(idx5);
+    expect(idx100).toBeGreaterThan(idx50);
+  });
+
+  test("vendor-unit admission → _scrml_vendor_require call emitted (alpha order)", () => {
+    const ctx = makeFakeCtx();
+    const contents = {
+      componentNodeIds: new Set(),
+      reactiveCellNodeIds: new Set(),
+      serverFnNodeIds: new Set(),
+      vendorUnitNames: new Set(["zebra", "alpha"]),
+    };
+    const out = composeInitialChunk(contents, /** @type {any} */ (ctx), "/abs/app.scrml::#program", ANONYMOUS_ROLE);
+    expect(out).toContain("// --- vendor units");
+    expect(out).toContain(`_scrml_vendor_require("vendor:alpha");`);
+    expect(out).toContain(`_scrml_vendor_require("vendor:zebra");`);
+    // Alpha order: alpha before zebra.
+    const idxAlpha = out.indexOf("vendor:alpha");
+    const idxZebra = out.indexOf("vendor:zebra");
+    expect(idxAlpha).toBeLessThan(idxZebra);
+  });
+
+  test("determinism — two composeInitialChunk calls on identical input → byte-identical output", () => {
+    const ctx = makeFakeCtx({
+      stateDecls: [{ kind: "state-decl", name: "count", initExpr: { kind: "lit", value: 0 } }],
+      markupNodes: [{ kind: "markup", tag: "button", id: 3, children: [] }],
+    });
+    const contents = {
+      componentNodeIds: new Set([3]),
+      reactiveCellNodeIds: new Set(),
+      serverFnNodeIds: new Set(),
+      vendorUnitNames: new Set(),
+    };
+    const a = composeInitialChunk(contents, /** @type {any} */ (ctx), "/abs/app.scrml::#program", "Driver");
+    const b = composeInitialChunk(contents, /** @type {any} */ (ctx), "/abs/app.scrml::#program", "Driver");
+    expect(a).toBe(b);
+  });
+
+  test("role surfaces in chunk header — Driver vs Admin chunk headers differ", () => {
+    const ctx = makeFakeCtx();
+    const contents = emptyContents();
+    const driver = composeInitialChunk(contents, /** @type {any} */ (ctx), "/abs/app.scrml::#program", "Driver");
+    const admin = composeInitialChunk(contents, /** @type {any} */ (ctx), "/abs/app.scrml::#program", "Admin");
+    expect(driver).toContain("role=Driver");
+    expect(admin).toContain("role=Admin");
   });
 });

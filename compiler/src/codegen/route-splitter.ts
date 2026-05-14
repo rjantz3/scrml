@@ -61,6 +61,16 @@ import type {
 import type { CompileContext } from "./context.ts";
 import type { CgFileOutput } from "./index.ts";
 import { CGError } from "./errors.ts";
+import {
+  emitReactiveCellAtom,
+  emitServerFnStubAtom,
+  emitVendorUnitRef,
+  emitComponentAtom,
+  canonicalNodeIdArray,
+  canonicalVendorUnitArray,
+  findNodeById,
+  type RouteInfo,
+} from "./atom-emitter.ts";
 
 // ---------------------------------------------------------------------------
 // Public types — chunk descriptor shapes (A-4.1)
@@ -306,22 +316,39 @@ export function emitPerRouteChunks(
     return { chunks, manifest, diagnostics };
   }
 
+  // A-4.2 — entry-point filePath resolution so `composeInitialChunk` can
+  // look up the right per-file `CompileContext` for atom emission. The
+  // EntryPointId encodes the source filepath as a prefix; we extract it
+  // once per epId so the composer doesn't have to re-parse the id.
+  const ctxByFile = input.cgContextByFile;
+
   for (const [epId, rps] of reachabilityRecord.closures) {
     const roleMap: Record<RoleVariant, ChunksManifestEntry> = {};
+    const epFilePath = filePathFromEntryPointId(epId);
+    const epCtx = (ctxByFile && epFilePath) ? ctxByFile.get(epFilePath) : undefined;
+
     for (const [role, plan] of rps.byRole) {
       const entry: ChunksManifestEntry = {};
 
-      // initial
+      // initial — A-4.2 populates `payloadJs` from the admission set.
+      // When the route-splitter has no CompileContext (unit-test
+      // direct invocation with `makeRecord`), the initial-chunk
+      // payload falls back to the empty string; the byte-deterministic
+      // canonical empty is `""` which composes safely with the manifest
+      // determinism contract.
       const initialChunk = makeChunkOutput(epId, role, "initial", plan.initialChunk);
+      if (epCtx) {
+        initialChunk.payloadJs = composeInitialChunk(plan.initialChunk, epCtx, epId, role);
+      }
       chunks.set(initialChunk.key, initialChunk);
       entry.initial = initialChunk.key;
 
-      // tier1
+      // tier1 — A-4.3 territory; payload remains "" at A-4.2.
       const tier1Chunk = makeChunkOutput(epId, role, "tier1", plan.prefetchTier1);
       chunks.set(tier1Chunk.key, tier1Chunk);
       entry.tier1 = tier1Chunk.key;
 
-      // tier2
+      // tier2 — A-4.4 territory; payload remains "" at A-4.2.
       const tier2Chunk = makeChunkOutput(epId, role, "tier2", plan.prefetchTier2);
       chunks.set(tier2Chunk.key, tier2Chunk);
       entry.tier2 = tier2Chunk.key;
@@ -344,6 +371,342 @@ export function emitPerRouteChunks(
   }
 
   return { chunks, manifest, diagnostics };
+}
+
+// ---------------------------------------------------------------------------
+// composeInitialChunk — A-4.2 §40.9.7 initial_chunk(E) emitter
+// ---------------------------------------------------------------------------
+
+/**
+ * Compose the `payloadJs` body for an `initial`-tier chunk from a
+ * `ChunkContents` admission set + the per-file `CompileContext`.
+ *
+ * **§40.9.7 normative shape:**
+ *
+ *   `initial_chunk(E)` SHALL contain every component, server-fn stub,
+ *   and vendor unit in `playable_surface(E, N=0)`.
+ *
+ * The composer walks the four admission sets in canonical order
+ * (stratified comparator per A-2.8) and calls the matching atom
+ * emitter for each id:
+ *
+ *   1. Vendor units (emit FIRST so subsequent atoms can reference
+ *      the bound namespace variable).
+ *   2. Server-fn fetch stubs.
+ *   3. Reactive cell init lines.
+ *   4. Component mount markers (admitted markup nodes).
+ *
+ * The result is wrapped in an IIFE so the chunk is self-contained when
+ * evaluated as a regular `<script>` (no global-scope pollution); the
+ * shared `SCRML_RUNTIME` symbols are assumed to be in scope as global
+ * declarations from the always-loaded runtime file (which the per-app
+ * dist root carries at `scrml-runtime.js` per `index.ts`).
+ *
+ * **Determinism (§40.9.8):** every set iteration uses the canonical
+ * comparator; the output is byte-identical across runs for identical
+ * input. Two builds of the same source produce identical chunk-payload
+ * bytes — a prerequisite for A-4.6 content-addressed hashing.
+ *
+ * **`null` for absence (§42.5/§42.8):** any literal absence in the
+ * emitted JS is `null`. The atoms here delegate to `atom-emitter.ts`,
+ * which enforces this internally.
+ *
+ * @param contents The `ChunkContents` admission set for `initial` tier.
+ * @param ctx The per-file CompileContext for the entry point's source
+ *   file. Used to resolve node ids → AST nodes for atom emission.
+ * @param epId Entry-point id (informational; surfaces in the chunk
+ *   header comment for adopter debugging).
+ * @param role Role variant (informational; surfaces in the chunk
+ *   header comment so per-role chunks are visually distinguishable).
+ * @returns The fully-composed `payloadJs` string.
+ */
+export function composeInitialChunk(
+  contents: ChunkContents,
+  ctx: CompileContext,
+  epId: EntryPointId,
+  role: RoleVariant,
+): string {
+  const lines: string[] = [];
+
+  // Chunk header — adopter-readable, deterministic, role-aware.
+  lines.push(`// scrml initial chunk — entryPoint=${epId} role=${role}`);
+  lines.push(`// §40.9.7 initial_chunk(E) — admitted set per playable_surface(E, N=0)`);
+  lines.push(`(function () {`);
+  lines.push(`  "use strict";`);
+
+  // -- 1. Vendor unit references (alphabetical-codepoint order). --
+  const vendorUnits = canonicalVendorUnitArray(contents.vendorUnitNames);
+  if (vendorUnits.length > 0) {
+    lines.push(``);
+    lines.push(`  // --- vendor units (§41) ---`);
+    for (const unitName of vendorUnits) {
+      // Vendor units lower to top-level `import` statements; an IIFE
+      // body cannot host them, so we surface the import as a chunk-
+      // top reference comment. Real `import` emission lives in the
+      // per-file `.client.js`; the chunk records the dependency via
+      // a runtime `_scrml_vendor_require` call so the bundler can
+      // pre-resolve the unit's module ahead of chunk evaluation.
+      const atom = emitVendorUnitRef(unitName, ctx.fileAST);
+      // Convert the `import * as ... from "vendor:NAME"` shape (which
+      // is a top-level-only statement) to a runtime-side equivalent
+      // that's IIFE-safe. The bundler handles real resolution; the
+      // chunk just records the demand.
+      const specifier = `vendor:${unitName}`;
+      lines.push(`  _scrml_vendor_require(${JSON.stringify(specifier)});`);
+      // Preserve the import-line as a comment for adopter-debug
+      // traceability of the original §41 reference. `atom` is a
+      // newline-terminated single line.
+      lines.push(`  // ${atom.replace(/\n$/, "")}`);
+    }
+  }
+
+  // -- 2. Server-fn fetch stubs (canonical node-id order). --
+  const serverFnIds = canonicalNodeIdArray(contents.serverFnNodeIds);
+  if (serverFnIds.length > 0) {
+    lines.push(``);
+    lines.push(`  // --- server-fn fetch stubs (§40.9.4 / §52.10) ---`);
+    for (const fnId of serverFnIds) {
+      const stub = composeServerFnAtom(fnId, ctx);
+      if (stub === "") continue;
+      // Indent the stub body so the IIFE shell stays well-formed.
+      const indented = stub
+        .split("\n")
+        .map((line) => (line === "" ? "" : `  ${line}`))
+        .join("\n");
+      lines.push(indented);
+    }
+  }
+
+  // -- 3. Reactive cell init lines (canonical node-id order). --
+  //
+  // Reactive cell node ids use the DG `reactive::<filePath>::<span.start>::
+  // <counter>` string shape (see `dependency-graph.ts:makeNodeId`). The
+  // route-splitter splits on `::` to recover `span.start` and then walks
+  // the AST to find the state-decl with that exact span.start.
+  const reactiveIds = canonicalNodeIdArray(contents.reactiveCellNodeIds);
+  if (reactiveIds.length > 0) {
+    lines.push(`  // --- reactive cells (§6) ---`);
+    for (const cellId of reactiveIds) {
+      const node = resolveReactiveDGNodeIdToAst(cellId, ctx.fileAST);
+      if (!node) continue;
+      const atom = emitReactiveCellAtom(node, ctx);
+      if (atom === "") continue;
+      lines.push(`  ${atom.replace(/\n$/, "")}`);
+    }
+  }
+
+  // -- 4. Component mount markers (admitted markup nodes). --
+  const componentIds = canonicalNodeIdArray(contents.componentNodeIds);
+  if (componentIds.length > 0) {
+    lines.push(`  // --- admitted components (§40.9.2) ---`);
+    for (const compId of componentIds) {
+      const atom = emitComponentAtom(compId, ctx);
+      if (atom === "") continue;
+      lines.push(`  ${atom.replace(/\n$/, "")}`);
+    }
+  }
+
+  lines.push(`})();`);
+  // Trailing newline so chunks concatenate cleanly when sequenced into
+  // a single SSR-injected `<script>` block (a v1.0 polish target).
+  lines.push("");
+
+  return lines.join("\n");
+}
+
+/**
+ * Resolve a reactive-cell DG node id to its AST `state-decl` node.
+ *
+ * DG node id shape (per `dependency-graph.ts:makeNodeId`):
+ *
+ *   `reactive::<filePath>::<span.start>::<counter>`
+ *
+ * The span.start segment is the AUTHORITATIVE link to the AST node —
+ * each state-decl in the file has a unique span.start. We parse it and
+ * walk the AST for a state-decl whose `span.start` matches.
+ *
+ * Returns null when:
+ *   - The id is not a string (defensive).
+ *   - The shape doesn't match (id from a non-reactive DG node kind).
+ *   - No state-decl AST node has the parsed span.start.
+ */
+function resolveReactiveDGNodeIdToAst(
+  cellId: NodeId,
+  fileAST: unknown,
+): Record<string, unknown> | null {
+  // Two id shapes are supported:
+  //   - Real-pipeline DG ids: `"reactive::<filePath>::<span.start>::
+  //     <counter>"` — parse out span.start and walk for a state-decl.
+  //   - Synthetic-test ids (numeric or arbitrary string): fall through
+  //     to a direct `id ===` match via `findNodeById`.
+  if (typeof cellId === "string") {
+    const segs = cellId.split("::");
+    if (segs.length >= 4 && segs[0] === "reactive") {
+      const spanStart = parseInt(segs[segs.length - 2], 10);
+      if (Number.isFinite(spanStart)) {
+        const found = findStateDeclBySpanStart(fileAST, spanStart);
+        if (found) return found;
+      }
+    }
+  }
+
+  // Synthetic id fallback: numeric id or arbitrary string that matches
+  // an AST node's `id` field directly. Returns state-decl matches only
+  // (defensive: a markup node with the same id would not produce a
+  // valid reactive-cell atom).
+  const direct = findNodeById(fileAST, cellId) as Record<string, unknown> | null;
+  if (direct && direct.kind === "state-decl") return direct;
+  return null;
+}
+
+/**
+ * Walk the AST for the FIRST state-decl whose `span.start` matches.
+ */
+function findStateDeclBySpanStart(
+  fileAST: unknown,
+  spanStart: number,
+): Record<string, unknown> | null {
+  const ast = (fileAST as { ast?: { nodes?: unknown[] } })?.ast;
+  const rootNodes: unknown[] = Array.isArray(ast?.nodes)
+    ? (ast!.nodes as unknown[])
+    : Array.isArray((fileAST as { nodes?: unknown[] })?.nodes)
+      ? ((fileAST as { nodes: unknown[] }).nodes)
+      : [];
+
+  function visit(nodeList: unknown[]): Record<string, unknown> | null {
+    for (const raw of nodeList) {
+      if (!raw || typeof raw !== "object") continue;
+      const n = raw as Record<string, unknown>;
+      if (n.kind === "state-decl") {
+        const span = n.span as { start?: number } | undefined;
+        if (span && span.start === spanStart) return n;
+      }
+      if (Array.isArray(n.children)) {
+        const sub = visit(n.children as unknown[]);
+        if (sub) return sub;
+      }
+      if (Array.isArray(n.body)) {
+        const sub = visit(n.body as unknown[]);
+        if (sub) return sub;
+      }
+    }
+    return null;
+  }
+
+  return visit(rootNodes);
+}
+
+/**
+ * Compose a single server-fn fetch stub from a server-fn node id.
+ *
+ * The id is a stable `${filePath}::${span.start}` shape per
+ * `emit-functions.ts:fnNodeId` convention. We split the id on `::` to
+ * recover the per-file fnNode (which is keyed by its `span.start`).
+ *
+ * The route metadata (path + method) lives in `ctx.routeMap.functions`,
+ * keyed by the same id. We extract `path` + `method` and hand the pair
+ * to `emitServerFnStubAtom`.
+ *
+ * Returns the empty string when the id cannot be resolved to a
+ * function-decl + route entry; the caller skips empties (defensive
+ * shape — well-formed RS output should always resolve cleanly).
+ */
+function composeServerFnAtom(fnId: NodeId, ctx: CompileContext): string {
+  const route = ctx.routeMap?.functions?.get(String(fnId));
+  if (!route || route.boundary !== "server") return "";
+
+  // The fnId encodes the function-decl's span.start in the file. Find
+  // the matching fn node by walking the AST.
+  const fnNode = findFunctionNodeByFnId(ctx.fileAST, String(fnId));
+  if (!fnNode) return "";
+
+  // Route path: explicit route override OR generated route name as
+  // path. Mirror `emit-functions.ts` lines 158-160 routing convention.
+  const path: string = (route.explicitRoute as string | undefined)
+    ?? (route.generatedRouteName ? `/_scrml/${route.generatedRouteName}` : "");
+  if (path === "") return "";
+  const method: string = (route.explicitMethod as string | undefined) ?? "POST";
+
+  const routeInfo: RouteInfo = { path, method };
+  return emitServerFnStubAtom(fnNode, routeInfo, ctx);
+}
+
+/**
+ * Walk a FileAST and find a `function-decl` node whose `${filePath}::
+ * ${span.start}` matches the target fnId.
+ *
+ * Mirrors `emit-functions.ts` line 151's fnNodeId construction
+ * convention — the RouteMap keys by this same shape.
+ */
+function findFunctionNodeByFnId(
+  fileAST: unknown,
+  targetFnId: string,
+): Record<string, unknown> | null {
+  const ast = (fileAST as { ast?: { nodes?: unknown[] }; filePath?: string });
+  const filePath = ast?.filePath ?? "";
+  if (!filePath) return null;
+  const nodes: unknown[] = Array.isArray(ast?.ast?.nodes)
+    ? (ast.ast!.nodes as unknown[])
+    : Array.isArray((fileAST as { nodes?: unknown[] })?.nodes)
+      ? ((fileAST as { nodes: unknown[] }).nodes)
+      : [];
+
+  function visit(nodeList: unknown[]): Record<string, unknown> | null {
+    for (const raw of nodeList) {
+      if (!raw || typeof raw !== "object") continue;
+      const n = raw as Record<string, unknown>;
+      if (n.kind === "function-decl") {
+        const span = n.span as { start?: number } | undefined;
+        if (span && typeof span.start === "number") {
+          if (`${filePath}::${span.start}` === targetFnId) return n;
+        }
+      }
+      if (Array.isArray(n.children)) {
+        const sub = visit(n.children as unknown[]);
+        if (sub) return sub;
+      }
+      if (Array.isArray(n.body)) {
+        const sub = visit(n.body as unknown[]);
+        if (sub) return sub;
+      }
+    }
+    return null;
+  }
+
+  return visit(nodes);
+}
+
+/**
+ * Extract the source `filePath` segment from an EntryPointId.
+ *
+ * EntryPointId encodings supported:
+ *
+ *   Real pipeline (per `reachability/entry-points.ts` `spaEntryId` /
+ *   `pageEntryId`):
+ *     - `"<filePath>#program"`         — SPA-program entry.
+ *     - `"<filePath>#page@<routePath>"` — per-`<page>` entry by route.
+ *     - `"<filePath>#page-<index>"`    — per-`<page>` entry by index.
+ *
+ *   Legacy / synthetic (A-4.1 test fixtures, route-splitter
+ *   `routeSegmentFromEntryPointId`):
+ *     - `"<filePath>::#program"`         — synthetic SPA-program.
+ *     - `"<filePath>::#page::<routePath>"` — synthetic per-`<page>`.
+ *
+ * Both formats are recognized so A-4.2 chunk emission works whether
+ * fed real-pipeline EpIds or synthetic-test EpIds.
+ *
+ * Order of attempts:
+ *   1. `"::"` separator (legacy / synthetic shape).
+ *   2. `"#"` separator (real-pipeline shape).
+ *   3. Fallback: the whole id (no separator found).
+ */
+function filePathFromEntryPointId(epId: EntryPointId): string {
+  const idStr = String(epId);
+  const dblColonIdx = idStr.indexOf("::");
+  if (dblColonIdx !== -1) return idStr.substring(0, dblColonIdx);
+  const hashIdx = idStr.indexOf("#");
+  if (hashIdx !== -1) return idStr.substring(0, hashIdx);
+  return idStr;
 }
 
 // ---------------------------------------------------------------------------

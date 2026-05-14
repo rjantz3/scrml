@@ -1578,12 +1578,24 @@ export function compileScrml(options = {}) {
         mkdirSync(dirname(chunkPath), { recursive: true });
         writeFileSync(chunkPath, chunk.payloadJs);
         fileCount++;
-        if (verbose) log(`  [CG] Wrote chunk: ${chunk.filename}`);
+        if (verbose) {
+          // S91 A-4.2 — surface chunk byte count in the verbose log so
+          // adopters can sanity-check the per-tier payload size budget.
+          // Empty chunks (tier1/tier2/tierN at A-4.2 before A-4.3+ land)
+          // log as `0 B`; the initial-tier byte count is non-zero
+          // whenever a real CompileContext was threaded to the splitter.
+          const byteLen = Buffer.byteLength(chunk.payloadJs, "utf8");
+          log(`  [CG] Wrote chunk: ${chunk.filename} (${byteLen} B)`);
+        }
       }
       const manifestPath = join(outputDir, "chunks.json");
-      writeFileSync(manifestPath, serializeChunksManifest(cgResult.chunksManifest));
+      const manifestBody = serializeChunksManifest(cgResult.chunksManifest);
+      writeFileSync(manifestPath, manifestBody);
       fileCount++;
-      if (verbose) log(`  [CG] Wrote chunks manifest: chunks.json`);
+      if (verbose) {
+        const manifestBytes = Buffer.byteLength(manifestBody, "utf8");
+        log(`  [CG] Wrote chunks manifest: chunks.json (${manifestBytes} B)`);
+      }
     }
   } else if (!write && cgResult.outputs) {
     // Still count outputs even when not writing

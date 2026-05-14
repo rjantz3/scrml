@@ -65,10 +65,18 @@
 - A-3.5 AuthGraph wired into api.js pipeline Stage 7.55 (RS Component 4 now receives real AuthGraph instead of degraded all-in floor) ✓
 - A-2.8 canonical JSON serialization for `--emit-reachability` — stratified comparator (number < string < other), codepoint string compare, diagnostic canonical ordering by (code, severity, entryPoint, role, message); 21 determinism tests including 10-run replay + CLI two-spawn diff ✓
 
+**CLOSED at S91 (A-4 wave initial-chunk dispatch):**
+- A-4.1 codegen orchestrator slot + per-(EP, role, tier) iteration scaffold + opt-in `--emit-per-route` flag (13 unit tests) ✓
+- A-4.2 initial_chunk(E, R) JS payload emission — `composeInitialChunk` in `compiler/src/codegen/route-splitter.ts` + atom emitters in `compiler/src/codegen/atom-emitter.ts` (`emitReactiveCellAtom` / `emitServerFnStubAtom` / `emitVendorUnitRef` / `emitComponentAtom`); 21 new unit tests + 16 new integration tests including §40.9.9 worked-example replay (viewer=Driver / viewer=Admin per-role variance + 2-build determinism + per-file .client.js byte-identical regression) ✓
+
 **In Progress / Pending:**
 - §34 catalog rows for I-AUTH-REDIRECT-UNRESOLVED + W-AUTH-PAGE-INFERRED deferred to A-3.5 SPEC dispatch
 - stdlib/http async migration (4 try-catch sites tracked by W-TRY-CATCH lint)
-- A-4 per-route artifact splitter (SCOPING landed S91; impl pending)
+- A-4.3 tier-1 idle-prefetch payload emission (brief staged at `docs/changes/a-4-3-tier-1-idle-prefetch/BRIEF.md`)
+- A-4.4 tier-2 hover-prefetch payload emission (brief staged at `docs/changes/a-4-4-tier-2-hover-prefetch/BRIEF.md`)
+- A-4.5 tier-N on-demand dispatch hook
+- A-4.6 content-addressed `chunkHash` (FNV-1a base36, §47.1.3) — replaces A-4.1 `"00000000"` placeholder
+- A-4.7 per-route HTML augmentation + W-CG-CHUNK-* lints + role-detection bootstrap (OQ-A4-E hybrid)
 
 ## Business Invariants
 
@@ -132,6 +140,8 @@
 | §34 catalog rows for A-3 diagnostic codes | A-3.5 SPEC dispatch (I-AUTH-REDIRECT-UNRESOLVED + W-AUTH-PAGE-INFERRED) |
 | Wire format follow-on | SPEC §57 landed; codegen integration done |
 | --emit-reachability canonical JSON | A-2.8 landed S91 — `serializeReachabilityRecord` in `compiler/src/reachability-solver.ts` enforces bit-identical output (stratified comparator + canonical diagnostic order); 21-test anchor at `compiler/tests/unit/reachability-record-determinism.test.js` |
+| A-4 per-route artifact splitter | A-4.1 + A-4.2 closed S91 — `compiler/src/codegen/route-splitter.ts` (orchestrator + composer) + `compiler/src/codegen/atom-emitter.ts` (per-id atom helpers). Opt-in via `--emit-per-route` CLI flag. A-4.3..A-4.7 pending. Test anchors: `compiler/tests/unit/codegen-route-splitter.test.js` (34 tests), `compiler/tests/integration/initial-chunk-emission.test.js` (16 tests — §40.9.9 worked-example replay) |
+| A-4.2 atom-emitter extension | New atom emitters live in `compiler/src/codegen/atom-emitter.ts`; the per-file `.client.js` path (`emit-client.ts:generateClientJs`) is NOT touched at A-4.2 — atom emitters are an ADDITIVE parallel surface that `composeInitialChunk` calls. Future polish dispatch MAY fold the two paths together |
 | null/absence migration | docs/changes/null-eradication-*, undefined-eradication-*, stdlib-phase-1-5-null-sweep |
 | stdlib/http async migration | stdlib/http/index.scrml lines 65/264 (W-TRY-CATCH fires) |
 

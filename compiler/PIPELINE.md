@@ -2525,6 +2525,21 @@ interface ChunkContents {
     placeholders; A-4.2..A-4.7 populate per SPEC §40.9.7. Default-off during the A-4 wave per
     OQ-A4-F; default-on at the v0.3.0 cut release. Cross-ref:
     `docs/changes/a-4-per-route-artifact-splitter-SCOPING/SCOPING.md`.
+  - **A-4.2 initial_chunk emission (S91):** the `initial` tier of each (entry-point, role) pair
+    now carries real admission-filtered JS payload composed by
+    `route-splitter.ts:composeInitialChunk`. The composer walks the four `ChunkContents` admission
+    sets (vendor units → server-fn stubs → reactive cells → component mount markers) in canonical
+    stratified order (numbers < strings; codepoint compare within stratum — mirrors A-2.8's
+    `reachability-solver.ts:sortedArrayFromSet`) and concatenates atom output from
+    `compiler/src/codegen/atom-emitter.ts`. Atom emitters: `emitReactiveCellAtom` (state-decl
+    runtime registration), `emitServerFnStubAtom` (fetch wrapper with §57 wire-format decode),
+    `emitVendorUnitRef` (§41 vendor-unit import), `emitComponentAtom` (per-id markup mount
+    marker). Each atom is IDEMPOTENT — byte-identical output for byte-identical input — so the
+    chunk payload is deterministic-from-source-only (§40.9.8 prerequisite for A-4.6
+    content-addressing). The per-file `.client.js` emitter at `emit-client.ts:generateClientJs`
+    is NOT modified by A-4.2 — the atom emitters are an ADDITIVE parallel emit surface that the
+    route-splitter calls; per-file output remains byte-identical to pre-A-4.2 baseline.
+    Tier 1 / Tier 2 / Tier N payloads remain empty placeholders pending A-4.3 / A-4.4 / A-4.5.
 - Consumer: Compiler output writer (writes files to disk)
 
 **Error contract:**
