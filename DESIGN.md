@@ -105,7 +105,7 @@ scrml has Rust-style enums with exhaustive pattern matching. Every `match` must 
 
 Why in a web language? Because UI state is almost always an enum. A form is `Editing | Submitting | Success | Error`. A data fetch is `Loading | Ready | Failed`. A modal is `Open | Closed`. If you model these as strings or booleans, the compiler can't help you — it doesn't know that `"loading"` and `"ready"` are the only valid states. With enums, it does.
 
-Exhaustive matching means the compiler catches the "you forgot the error state" bug at compile time. Combined with state machines (`< machine>` with transition rules), this makes illegal state transitions a compile error, not a runtime surprise.
+Exhaustive matching means the compiler catches the "you forgot the error state" bug at compile time. Combined with state machines (`<engine>` with `rule=` transition contracts), this makes illegal state transitions a compile error, not a runtime surprise.
 
 ## Error Handling
 

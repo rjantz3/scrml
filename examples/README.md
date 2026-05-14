@@ -22,7 +22,7 @@ bun compiler/src/cli.js compile examples/01-hello.scrml -o dist/
 
 | Sigil | Context | Meaning |
 |-------|---------|---------|
-| `@var` | anywhere | Reactive variable — changes trigger re-render |
+| `<var> = init` / `@var` | anywhere | Reactive state — `<var> = init` declares (V5-strict); `@var` reads/writes |
 | `${}` | markup | Logic block — JS expressions, control flow, declarations |
 | `?{}` | logic | SQL passthrough — direct database access |
 | `#{}` | markup | Scoped CSS — styles for this file only |
@@ -35,8 +35,8 @@ bun compiler/src/cli.js compile examples/01-hello.scrml -o dist/
 | File | What it shows |
 |------|---------------|
 | `01-hello.scrml` | Bare markup and the three closer forms — the syntax in ten lines |
-| `02-counter.scrml` | Reactive state with `@var`, `bind:value`, bare-call `onclick=fn()` |
-| `03-contact-book.scrml` | Full-stack in one file: `protect=` state, `?{}` SQL, `server` functions, form binding |
+| `02-counter.scrml` | Reactive state with `<count> = 0` (V5-strict decl), `@count` access, `bind:value`, bare-call `onclick=fn()` |
+| `03-contact-book.scrml` | Full-stack in one file: `protect=` state, `?{}` SQL, server-classified functions (auto-inferred via body content), form binding |
 | `04-live-search.scrml` | Reactive filtering with `for`/`lift`/`if (continue)`, no derived-state boilerplate |
 | `05-multi-step-form.scrml` | Wizard UI: enum steps, components, `if=`/`else-if=`/`else` chain on component instances |
 | `06-kanban-board.scrml` | Enum-driven columns (bar-form `\|`), array `.map()` mutation, CSS grid |
@@ -48,14 +48,15 @@ bun compiler/src/cli.js compile examples/01-hello.scrml -o dist/
 | `12-snippets-slots.scrml` | Named content slots in components — `slot=`, `${render slotName()}`, snippet props |
 | `13-worker.scrml` | `<program name="worker">` — web workers as nested programs with typed messaging |
 | `14-mario-state-machine.scrml` | Enum state machine: `type:enum`, payload destructuring, derived machines (§51.9) |
-| `15-channel-chat.scrml` | Real-time chat — `<channel>` + `@shared` for WebSocket sync (§38) |
-| `16-remote-data.scrml` | Async loading state via enum + `match` (Loading / Ready / Failed pattern, §13.5) |
-| `17-schema-migrations.scrml` | `< schema>` declarative DB schema — compiler diffs + generates migration SQL (§39) |
-| `18-state-authority.scrml` | `server @var` server-authoritative state (§52 Tier 2, scaffold) |
+| `15-channel-chat.scrml` | Real-time chat — `<channel>` inside `<program>` for WebSocket sync (Insight 30 placement; auto-sync from being inside channel body — `@shared` modifier removed v0.next) (§38) |
+| `16-remote-data.scrml` | Async loading state via enum + `match` (Loading / Ready / Failed pattern). Pattern is canonical scrml; the named `RemoteData:enum` stdlib type itself is specced-not-yet-implemented (§13.5) |
+| `17-schema-migrations.scrml` | `<schema>` declarative DB schema — compiler diffs + generates migration SQL (§39) |
+| `18-state-authority.scrml` | `<x server>` server-authoritative state (§52 Tier 2, scaffold) |
 | `19-lin-token.scrml` | `lin` linear types — exactly-once consumption guarantee (§35) |
 | `20-middleware.scrml` | `<program>` middleware attrs + `handle()` escape hatch (§40) |
 | `21-navigation.scrml` | `navigate()` + `route` — page transitions, route params (§20) |
 | `22-multifile/` | `import`/`export` across .scrml files — pure-type files + component reuse (§21) |
+| `23-trucking-dispatch/` | Multi-page reference app (logistics dispatch) — multiple `<page>` files under `routes/`, full-stack with auth + DB + per-page server functions; canonical adopter-scale shape |
 
 ---
 
