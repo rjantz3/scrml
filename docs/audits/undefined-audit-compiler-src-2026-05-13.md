@@ -1,10 +1,66 @@
 # Undefined Audit — compiler/src/ — scrml-semantic vs JS-host (S89 D, mirror of Wave 7.D)
 
+---
+
+## ⚑ S90 CLOSURE BANNER (2026-05-13) — Option ε ratified
+
+**Status:** This audit's framing of "~140 M-class sites across 16 M-8C-D-N items requiring sentinel migration" has been **superseded** by S90 disposition. PA scoping at `docs/changes/m-7c-d-12-runtime-sentinel-scoping/SCOPING.md` (commit `725e07c`) ratified **Option ε**: SPEC §42.1 / §42.5 / §42.8 normative sections + S89 §42.1 exclusions ratify runtime JS `null` (and `undefined` at the JS-host interop boundary per §42.9) as scrml absence. Most M-8C-D-N items close-as-spec-ratified.
+
+**One UNIQUE-to-undefined audit item was actually substantive drift** — M-8C-D-6 `?? "undefined"` literal-JS-keyword interpolation in compiler-emitted source. That migrated via Track 3 (T3, commit `887f420`). All paired items closed via the same T1 AST cleanup.
+
+### Item-by-item disposition (M-8C-D-N from §4)
+
+| Item | Pair | Sites | S90 disposition | Closing commit |
+|---|---|---|---|---|
+| M-8C-D-1 AST.LitExpr `litType:"undefined"` branch | M-7C-D-1 | ast.ts L1483 | **MIGRATED via T1** (consolidated to `litType:"not"` + `raw` discriminator; pre-existing `litType:"undefined"` removed) | `850a298` |
+| M-8C-D-2 Parser stop manufacturing `litType:"undefined"` | M-7C-D-2 | expression-parser.ts L1230-1236/1255-1258/1316/1596/2185 | **MIGRATED via T1** (reset() / array-hole / emitStringFromTree round-trip / keyword whitelist all migrated; array holes now JS `null` instead of `undefined` per §42.5/§42.8) | `850a298` |
+| M-8C-D-3 gauntlet-phase3 lint detector update | M-7C-D-2 cascade | gauntlet-phase3-eq-checks.js L168/351-353/378/386/413-414/437-443/509-512/604-607 | **MIGRATED via T1** (raw-aware discrimination with legacy `litType` fallback) | `850a298` |
+| M-8C-D-4 emit-expr `=== null \|\| === undefined` paired emission | M-7C-D-4 | emit-expr.ts L466/468/470/221 | **CLOSED-AS-SPEC-RATIFIED** — §42.8 normatively mandates the paired check; §42.9 interop boundary handles JS-host `undefined` correctly | (no code change required) |
+| M-8C-D-5 rewrite.ts paired keyword emissions | M-7C-D-5 | rewrite.ts L475-476/506/519/546/688/705/708/713/1148-1149 | **CLOSED-AS-SPEC-RATIFIED** — §42.5/§42.8 normatively mandate this codegen | (no code change required) |
+| **M-8C-D-6 `?? "undefined"` init-fallback (UNIQUE)** | — | emit-server.ts L882/L1047/L1139 + emit-logic.ts L591/1764/1823/1885/1900/2155/2262/2265/2281/2378 + scheduling.ts L127/128/129 | **MIGRATED via T3** — all 16 sites now interpolate `"null"` instead of `"undefined"` per OQ-5 (a). NEW lint `W-CG-UNDEFINED-INTERPOLATION` (Stage 3.007-adjacent walker `validators/lint-undefined-interpolation.ts`) added as regression guard. Corpus sanity sweep 334 files: 0 findings. | `887f420` |
+| M-8C-D-7 emit-server emitted §45 structural-equality helper | M-7C-D-4 cascade | emit-server.ts L1293/L1303 | **CLOSED-AS-SPEC-RATIFIED** — emitted runtime helper; §42.8 + §45 normative | (no code change required) |
+| **M-8C-D-8 Derived-engine init-undefined throw (UNIQUE)** | — | emit-engine.ts L2141-2145/2172-2176/2198/2211/3356-3380 | **PARTIALLY MIGRATED via T4** — SPEC error code renamed `E-DERIVED-ENGINE-INITIAL-UNDEFINED` → `E-DERIVED-ENGINE-INITIAL-ABSENT` (§34 catalog L14688 + §51.0.J rules table L21758 + §55 validators-summary L26851). Runtime-emission rename in `compiler/src/codegen/emit-engine.ts` is **DEFERRED** as compiler internal — emitted check `=== undefined` remains correct per §42.9 interop boundary (engine init coming from JS-host can be `undefined`). | T4: `8cef7f5` (SPEC rename); compiler-source rename: deferred / not required for ε |
+| M-8C-D-9 Machine-property-tests + machine-fn `return undefined` | M-7C-D-17 | emit-machines.ts L252/L296/L299 + emit-machine-property-tests.ts L416 | **CLOSED-AS-SPEC-RATIFIED** — emitted runtime/test harness; §42.1 exclusion (codegen-emitted JS) | (no code change required) |
+| M-8C-D-10 emit-control-flow match-arm + for-loop key | M-7C-D-13 | emit-control-flow.ts L1549/L373 | **CLOSED-AS-SPEC-RATIFIED** — emitted runtime; §42.5/§42.8 normative | (no code change required) |
+| M-8C-D-11 Runtime structural-equality helper | M-7C-D-14 | runtime-template.js L1711/L1723/L1840 | **CLOSED-AS-SPEC-RATIFIED** — runtime shim; §42.1 exclusion | (no code change required) |
+| M-8C-D-12 Runtime cache invalidation + array-first helpers | — | runtime-template.js L500/L2203/L2236/L2419 | **CLOSED-AS-SPEC-RATIFIED** — internal cache idiom (`delete cache[name]` would be equivalent); array-first helpers' `undefined` return is a JS-host idiom that §42.9 normalizes to scrml `not` at predicate read time | (no code change required) |
+| M-8C-D-13 runtime-validators absence preprocessing | M-7C-D-18 | runtime-validators.js L185/196/205-206/226/405-409 | **CLOSED-AS-SPEC-RATIFIED** — paired `null \|\| undefined` guards are §42.9 interop boundary semantics | (no code change required) |
+| M-8C-D-14 Type-system + parser keyword removal | M-7C-D-11 | type-system.ts L3143 + tokenizer.ts L61/724 + ast-builder.js L2133/2441/8461 + expression-parser.ts L2185 + route-inference.ts L1582 | **PARTIALLY MIGRATED via T1** — `type-system.ts` BUILTIN_TYPES `"null"` removed; `LOGIC_SCOPE_GLOBAL_ALLOWLIST` `"null"`/`"undefined"` removed; expression-parser.ts keyword whitelist migrated. **NOT migrated** (scope-noted in T1 progress): `route-inference.ts` JS_KEYWORDS (defensive filter, not a scrml-language emission), `tokenizer.ts` / `ast-builder.js` VALUE_KEYWORDS (lexer-level removal would break statement-boundary detection — out-of-scope follow-up). | `850a298` (partial) |
+| M-8C-D-15 emit-variant-guard payload-positional undefined (UNIQUE, AMBIGUOUS) | — | emit-variant-guard.ts L744-755 | **DEFERRED** — surfaced as A-class in audit §5.3; needs separate PA disposition not folded into M-7C-D-12 scope | (no code change required) |
+| M-8C-D-16 derived-cache invalidation marker (UNIQUE, AMBIGUOUS) | — | runtime-template.js L500 | **CLOSED-AS-SPEC-RATIFIED** — internal cache idiom; §42.1 exclusion | (no code change required) |
+
+### Summary disposition
+
+- **MIGRATED via Track 1 (T1):** M-8C-D-1, M-8C-D-2, M-8C-D-3, M-8C-D-14 (partial) — commit `850a298`.
+- **MIGRATED via Track 3 (T3):** M-8C-D-6 — commit `887f420` (16 sites + new lint `W-CG-UNDEFINED-INTERPOLATION`).
+- **PARTIALLY MIGRATED via Track 4 (T4):** M-8C-D-8 (SPEC error-code rename only; compiler-source rename deferred as scaffold-internal) — commit `8cef7f5`.
+- **CLOSED-AS-SPEC-RATIFIED:** M-8C-D-4, M-8C-D-5, M-8C-D-7, M-8C-D-9, M-8C-D-10, M-8C-D-11, M-8C-D-12, M-8C-D-13, M-8C-D-16.
+- **DEFERRED (out-of-scope for M-7C-D-12):** M-8C-D-15 (payload-positional ambiguity).
+
+### Summary counts — post-S90 re-grep (executed against base `0ed8e55`, pre-T2)
+
+| Metric | Pre-S90 baseline (this audit) | Post-T1+T3+T4 |
+|---|---|---|
+| Total `\bundefined\b` hits | 861 (62 files) | **933 (70 files; +72, +8 files)** |
+| **Substantive change** | — | T3 ELIMINATED all 16 `?? "undefined"` literal-JS-keyword interpolation sites (M-8C-D-6 — the audit's only UNIQUE-to-undefined drift). NEW lint `compiler/src/codegen/lint-undefined-interpolation.ts` (+29 `undefined` hits internal to lint helper — reference-strings + comments). Count grew net of T3 reduction because (a) +29 from new lint file, (b) +22 from new `constant-folder.ts` (S89 A-2.2), (c) +43 from new `usage-analyzer.ts` (S89 A-2.2), (d) T1 doc-comment annotation in `ast-builder.js`, `expression-parser.ts`, `types/ast.ts`. |
+| **NET RESIDUAL DRIFT** | — | **Zero new M-class drift.** Pre-S90 the audit flagged 71 `"undefined"` string-literal sites as HIGH-leverage — post-S90 grep of `"undefined"` quoted literals in `emit-server.ts` / `emit-logic.ts` / `scheduling.ts` (the M-8C-D-6 dispatch targets) confirms ZERO remaining interpolation patterns. All remaining `"undefined"` quoted literals are `typeof X !== "undefined"` env-guards (J-class legitimate per §42.1 exclusions) or T3-introduced explanatory comments. |
+| Classification of post-S90 sites | — | **~110 J-class** (typeof guards, DOM/Map/Bun host APIs, setInterval handles, Bun.serve contract); **~590 I-class** (TS `as X \| undefined` cast narrowings — TS scaffold internal); **~140 M-class** — all dispositions above (most CLOSED-AS-SPEC-RATIFIED per §42.5/§42.8/§42.9 interop boundary). |
+
+The substantive change post-S90 is that the M-class is no longer "migration backlog" — it's spec-ratified per Option ε with one exception (M-8C-D-6, which T3 closed). The pre-S90 framing presented these sites as drift; the SPEC-ratified framing recognizes them as the canonical interop ABI.
+
+**Empty-string `""` orthogonality preserved:** S89 ruling explicitly carves `""` as a DEFINED value; the audit's 26 `=== ""` sites remain correctly non-migration-targets. T1+T3+T4 introduced zero new `""`-related drift.
+
+**See:** `docs/changes/m-7c-d-12-runtime-sentinel-scoping/SCOPING.md` §3 Option ε + §5 OQ-5 ratification (`?? "undefined"` → `?? "null"`) + §5 OQ-6 ratification (`E-DERIVED-ENGINE-INITIAL-UNDEFINED-RT` rename).
+
+---
+
 **Date:** 2026-05-13
 **Driver ruling (S89, verbatim):** "null does NOT EXIST IN SCRML! and never will! yes this extends to undefined. `""` is still defined."
 **Scope:** `compiler/src/**` excluding `tests/`, `module-resolver.js`, and `meta-checker.{js,ts}` (Wave 8.C handles those directly). Also out of scope per brief: `compiler/runtime/` (JS shims), `compiler/tests/`.
 **Audit type:** READ-ONLY classification. No code changes.
 **Companion audit:** [null-audit-compiler-src-2026-05-13.md](./null-audit-compiler-src-2026-05-13.md) — Wave 7.D mirror; this audit cross-references it via the `Null-audit-overlap?` column.
+
+**S90 amendment:** "Undefined as first-class migration target" rescoped at S90 — `undefined` is correctly handled by the §42.9 interop boundary (JS-host `undefined` → scrml `not` at predicate-read time). The literal-JS-keyword interpolation pattern (M-8C-D-6) WAS substantive drift and migrated via T3 (`887f420`). All other M-8C-D-N items close per Option ε. See banner above.
 
 ---
 

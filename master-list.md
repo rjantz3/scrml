@@ -128,6 +128,32 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 
 ### §0.6 Surfaced divergences / queued follow-ups
 
+**M-7C-D-12 runtime absence-sentinel wave (S90 CLOSE — 2026-05-13):** Option ε ratified at S90; SPEC §42.1 / §42.5 / §42.8 + §42.1 S89 exclusions canonicalize runtime JS `null` as scrml absence. The pre-S90 audit framing of "~2,777 null + 861 undefined drift sites across 34 M-class items needing sentinel rewrite" was rescoped: actual substantive M-class work was ~95 sites across 5 tracks (33-45h aggregate vs. ~66-94h under Option β). Wave dispatch:
+
+| Track | Sub-buckets | Status | Commit |
+|---|---|---|---|
+| T1 — AST internal cleanup | D-12.1a/b/c/d/e/f (LitExpr discriminator + parser sites + detector + component-expander + type-system + 22 tests) | ✅ LANDED | `850a298` |
+| T2 — Wire envelope codegen | D-12.2a/b/c/d (envelope shape `{"__scrml_absent": true}` + emit-server encoder + dual-decoder + tests, 10-12h) | 🟡 IN FLIGHT at S90 close | (pending) |
+| T3 — `?? "undefined"` → `?? "null"` + lint | D-12.3a/b/c (16 sites migrated + NEW `W-CG-UNDEFINED-INTERPOLATION` lint at `lint-undefined-interpolation.ts` + 28 tests) | ✅ LANDED | `887f420` |
+| T4 — SPEC amendments | D-12.4a/b/c/d (§12.5.1 envelope rule + NEW §57 Wire Format normative + §51.0.J + §42.8 + §34 catalog + SPEC-INDEX refresh; +112 SPEC lines; `E-DERIVED-ENGINE-INITIAL-UNDEFINED` → `E-DERIVED-ENGINE-INITIAL-ABSENT` rename) | ✅ LANDED | `8cef7f5` |
+| T5 — Audit closure docs | D-12.5a/b (audit-doc CLOSURE banners on null-audit + undefined-audit + master-list §0.6 entry + post-S90 re-grep counts) | ✅ LANDED at S90 close | (this entry) |
+
+**Audit item dispositions:**
+- **MIGRATED via T1:** M-7C-D-1, M-7C-D-2, M-7C-D-3, M-7C-D-11 + M-8C-D-1, M-8C-D-2, M-8C-D-3, M-8C-D-14 (partial).
+- **MIGRATED via T3:** M-8C-D-6 (the only UNIQUE-to-undefined substantive drift — `?? "undefined"` literal-JS-keyword interpolation).
+- **PARTIALLY MIGRATED via T4:** M-8C-D-8 (SPEC error-code rename only; runtime-emission rename deferred as scaffold-internal).
+- **CLOSED-AS-SPEC-RATIFIED under Option ε:** M-7C-D-4, -5, -7, -8, -9, -10, -12, -13, -14, -16, -17, -18 + M-8C-D-4, -5, -7, -9, -10, -11, -12, -13, -16. (Per §42.5/§42.8 normative ABI + §42.1 S89 exclusions + §42.9 interop boundary — these sites are the canonical runtime representation, NOT drift.)
+- **DEFERRED:** M-7C-D-15 (schema-differ — OQ-8 RATIFIED S90 defer per §42.9 interop coverage); M-8C-D-15 (payload-positional undefined — A-class ambiguity, separate PA disposition).
+- **DEFERRED to T2 (in flight):** M-7C-D-6 (server-fn wire format envelope codegen).
+
+**Re-grep counts (post-T1+T3+T4, base `0ed8e55`, pre-T2):**
+- `\bnull\b` in compiler/src/: baseline 2,777 (81 files) → 2,925 (90 files; +148, +9 files). Increase entirely additive: new S89 files (`reachability/*`, `lint-async-user-source.ts`, `emit-sync.ts`, `constant-folder.ts`, `emit-lift.js`, etc.) + T1/T3 doc-comments referencing the legacy discriminator + T3's new lint file. **Zero new M-class drift.**
+- `\bundefined\b` in compiler/src/: baseline 861 (62 files) → 933 (70 files; +72, +8 files). Driver: T3's new lint file (+29), new post-audit files (`constant-folder.ts` 22, `usage-analyzer.ts` 43), T1 doc-comment growth. **The literal `?? "undefined"` interpolation pattern (M-8C-D-6, 16 sites) is FULLY ELIMINATED** — verified by `grep '"undefined"'` in `emit-server.ts` / `emit-logic.ts` / `scheduling.ts`: zero remaining interpolation sites; all remaining quoted-`"undefined"` are `typeof X !== "undefined"` env-guards (J-class) or T3 explanatory comments.
+
+**SCOPING + dispatch artifacts:** `docs/changes/m-7c-d-12-runtime-sentinel-scoping/SCOPING.md` (710L) + `progress.md`. **Audit docs with CLOSURE banners:** `docs/audits/null-audit-compiler-src-2026-05-13.md` + `docs/audits/undefined-audit-compiler-src-2026-05-13.md`. **Memory rules saved S90:** `feedback_agent_isolation_cwd_routing.md` (CWD-routing for harness `isolation: "worktree"` provisioning).
+
+---
+
 **A7 codegen deferrals — surfaced by A5-7 tests (S83, 2026-05-11):** A5-7 wrote 10 `.skip` tests + 4 sample fixtures that revealed FIVE compiler-side gaps where A7's spec+parser+typer surface is shipped but runtime codegen is incomplete. Each gap has cite + repro + remediation pointer in the `.skip` test body. Classification — v0.2.0-blocking-or-not is a USER DECISION pending; the spec ratified the surface at S68 + the parser/typer reject misuse at S70, but emitted runtime semantics for hierarchy + history + internal:rule + cascade-miss are partial. The 5 bugs:
 
 1. **Inner-engine state-child non-empty body mis-attribution.** When inner engine state-children carry non-empty markup, the body-parser leaks them into the OUTER engine's state-child registry, firing `E-ENGINE-STATE-CHILD-INVALID-VARIANT` + `E-ENGINE-RULE-INVALID-VARIANT`. Reproducible via `compiler/tests/unit/engine-a7-hierarchy.test.js §7` skip-1 + `compiler/tests/integration/engine-a7-cross-feature.test.js §4` skip-2. Workaround in `engine-012-hierarchy-cascade.scrml`: keep inner state-child bodies empty + place cascade-write controls in outer body.

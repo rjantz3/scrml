@@ -1,7 +1,62 @@
 # Null Audit — compiler/src/ — scrml-semantic vs JS-host (S89 D)
 
+---
+
+## ⚑ S90 CLOSURE BANNER (2026-05-13) — Option ε ratified
+
+**Status:** This audit's framing of "~860 sites across 18 M-class follow-on items requiring runtime sentinel rewrite" has been **superseded** by S90 disposition. PA scoping at `docs/changes/m-7c-d-12-runtime-sentinel-scoping/SCOPING.md` (commit `725e07c`) ratified **Option ε**: SPEC §42.1 / §42.5 / §42.8 + §42.1 S89 exclusions already RATIFY runtime JS `null` as the canonical scrml absence representation. The audit's "drift" framing for codegen-emitted JS, runtime ambients, wire-format raw-`null`, and internal sentinels is **closed-as-spec-ratified** — not migration backlog.
+
+**Real M-7C-D-N work was ~95 sites across 5 items** (T1 AST cleanup + T2 wire envelope + T3 init-fallback + T4 spec amendments + T5 audit closure docs = 33-45h aggregate). The other ~770 sites flagged in §3-§4 were over-counted under the audit's pre-S90 framing.
+
+### Item-by-item disposition (M-7C-D-N from §4)
+
+| Item | Sites | S90 disposition | Closing commit |
+|---|---|---|---|
+| M-7C-D-1 AST.LitExpr `litType:"null"` branch | ast.ts L1476/1482/1484/1568 | **MIGRATED via T1** | `850a298` |
+| M-7C-D-2 Parser stop manufacturing `litType:"null"`/`value:null` | expression-parser.ts L971/987/1187/1192/1197/1235/1258/1316/1483 | **MIGRATED via T1** (consolidated to `litType:"not"` + `raw` discriminator) | `850a298` |
+| M-7C-D-3 component-expander `default="null"` path | component-expander.ts L745-752 | **MIGRATED via T1** | `850a298` |
+| M-7C-D-4 emit-expr `not` → `null` + `is-not`/`is-some` emission | emit-expr.ts L296-298, L465-470 | **CLOSED-AS-SPEC-RATIFIED** — §42.8 normatively mandates `=== null \|\| === undefined`; runtime JS `null` IS scrml absence | (no code change required) |
+| M-7C-D-5 rewrite.ts mass `not → null` regex | rewrite.ts L476/562/739 | **CLOSED-AS-SPEC-RATIFIED** — §42.5/§42.8 normatively mandate this codegen | (no code change required) |
+| M-7C-D-6 Server-fn wire format `?? null` | emit-server.ts L928/934/1089 | **DEFERRED to Track 2** (wire envelope codegen, 10-12h, in flight at S90 close); SPEC §57 normative text landed `8cef7f5` | (T2 in flight) |
+| M-7C-D-7 Engine state-cell history initial `null` | emit-engine.ts L985/1338/549 | **CLOSED-AS-SPEC-RATIFIED** — internal storage; scrml-author reads via `@varName` predicates which classify correctly per §42.5/§42.8 | (no code change required) |
+| M-7C-D-8 Audit-log `label`/`auditTarget` literal `"null"` | emit-machines.ts L515/542/544/768/773 + emit-logic.ts L1044/1049 | **CLOSED-AS-SPEC-RATIFIED** — `@auditTarget.label` is read via scrml predicates (`is not` / `is some`); JS `null` IS the canonical absence per §42.5/§42.8 | (no code change required) |
+| M-7C-D-9 SQL `.get`/`.first` row-not-found `?? null` | emit-logic.ts L2117/2127/2135 | **CLOSED-AS-SPEC-RATIFIED** — §42.9 interop boundary; SQL NULL → scrml `not` is correctly modeled by predicate-level reads on JS `null` | (no code change required) |
+| M-7C-D-10 Reactive-wiring `targetExpr = "null"` | emit-reactive-wiring.ts L849 | **CLOSED-AS-SPEC-RATIFIED** — internal codegen string; §42.1 exclusion (codegen-emitted JS) | (no code change required) |
+| M-7C-D-11 type-system `["null", tPrimitive("null")]` built-in | type-system.ts L578 | **MIGRATED via T1** — `BUILTIN_TYPES["null"]` removed; `LOGIC_SCOPE_GLOBAL_ALLOWLIST` `"null"`/`"undefined"` removed | `850a298` |
+| M-7C-D-12 Runtime absence-sentinel + helper | (originally framed as new module) | **CLOSED-AS-SPEC-RATIFIED** under Option ε — no runtime sentinel module is needed; SPEC §42.5/§42.8 already canonically specify JS `null` as the runtime ABI | (this dispatch IS the closure) |
+| M-7C-D-13 Match-arm `kind:"not"` + structured binding `null` | emit-control-flow.ts L557/720/749/751/829 | **CLOSED-AS-SPEC-RATIFIED** for runtime emission; IR cleanup (PARTIAL — replace `test:null, binding:null` with `kind:"absent"` discriminator) is good hygiene but not required for ε | (no code change required) |
+| M-7C-D-14 Runtime `_scrml_lift_target` ambient + capturedBindings | runtime-template.js L588/1335 | **CLOSED-AS-SPEC-RATIFIED** — §42.1 exclusion (compiler runtime is JS-host); not scrml-author-observable | (no code change required) |
+| M-7C-D-15 Schema column-default `null` | schema-differ.js L67-69/322/377/402/406/621 | **DEFERRED (OQ-8 RATIFIED S90)** — §42.9 interop boundary covers SQL-side `NULL`; schema-differ internal `default:null` field is JS-host classification | (no code change required) |
+| M-7C-D-16 Route-record boundary fields | route-inference.ts L15-23/96/117-122/130/191 | **CLOSED-AS-SPEC-RATIFIED** — diagnostic-surface only; not scrml-author-observable | (no code change required) |
+| M-7C-D-17 machine-property-tests harness | emit-machine-property-tests.ts L259-279/265-270/279/354-367 | **CLOSED-AS-SPEC-RATIFIED** — emitted test harness; §42.1 exclusion (codegen-emitted JS) | (no code change required) |
+| M-7C-D-18 runtime-validators.js sweep | runtime-validators.js 36 sites | **CLOSED-AS-SPEC-RATIFIED** — runtime validators read JS `null` and surface `Required` / `NotSome` tags to scrml-author; the JS-null→scrml-absence interop is §42.5/§42.8 normative | (no code change required) |
+
+### Summary disposition
+
+- **MIGRATED via Track 1 (T1):** M-7C-D-1, M-7C-D-2, M-7C-D-3, M-7C-D-11 (commit `850a298`).
+- **CLOSED-AS-SPEC-RATIFIED:** M-7C-D-4, M-7C-D-5, M-7C-D-7, M-7C-D-8, M-7C-D-9, M-7C-D-10, M-7C-D-12 (per Option ε), M-7C-D-13 (runtime emission part), M-7C-D-14, M-7C-D-16, M-7C-D-17, M-7C-D-18.
+- **DEFERRED to T2 (in flight S90):** M-7C-D-6 (wire envelope codegen; SPEC §57 normative text landed T4 `8cef7f5`).
+- **DEFERRED per S90 OQ-8 ratification:** M-7C-D-15.
+
+### Summary counts — post-S90 re-grep (executed against base `0ed8e55`, pre-T2)
+
+| Metric | Pre-S90 baseline (this audit) | Post-T1+T3+T4 |
+|---|---|---|
+| Total `\bnull\b` hits | 2,777 (81 files) | **2,925 (90 files; +148, +9 files)** |
+| **Substantive change** | — | T1 added ~6 new files unrelated to absence migration (S89 scaffolding for `reachability/*`, `lint-async-user-source.ts`, `emit-sync.ts`, `constant-folder.ts`, `emit-lift.js`, etc.) + T1 doc-comment annotation in `ast-builder.js` (+~57 hits explaining the migration); T3 added `lint-undefined-interpolation.ts` (+17 internal helper comments referencing `"null"`). |
+| **NET RESIDUAL DRIFT** | — | **Zero new M-class drift.** The count increase is entirely additive context (new files for orthogonal features + explanatory comments). |
+| Classification of post-S90 sites | — | **~480 J-class JS-host** (DOM, Map.get, RegExp, setInterval, bun:sqlite, etc.) — legitimate per §42.1 exclusions; **~1500 I-class internal-impl** (lookup-miss returns, TS field-types, AST-builder sentinels) — TS scaffold internal, per self-host-is-from-scratch; **~720 M-class** — all dispositions above (most CLOSED-AS-SPEC-RATIFIED under §42.5/§42.8 + §42.1 exclusions); **~80 A-class** — most resolved by S90 OQ ratifications. |
+
+The substantive change post-S90 is that the M-class is no longer "migration backlog" — it's spec-ratified per Option ε. The pre-S90 framing presented these sites as drift; the SPEC-ratified framing recognizes them as the canonical runtime ABI.
+
+**See:** `docs/changes/m-7c-d-12-runtime-sentinel-scoping/SCOPING.md` §3 Option ε + §5 OQ ratifications + §6 cross-cutting impact + §7 recommendation.
+
+---
+
 **Date:** 2026-05-13
 **Driver ruling (S89, verbatim):** `null` does not exist in scrml. The TS reference impl in `compiler/src/` is the SCAFFOLD — TS migrates to honor scrml's stated intent, not vice versa.
+
+**S90 amendment:** "Migration to honor scrml's stated intent" was rescoped at S90 — the SPEC's pre-existing §42.1 / §42.5 / §42.8 normative sections (and S89-ratified §42.1 exclusions) already encode the canonical absence ABI. The TS scaffold honors the SPEC by treating JS `null` as the runtime carrier of scrml absence, NOT by introducing a sentinel module. See banner above.
 
 **Scope:** `compiler/src/**` excluding `tests/`, `module-resolver.js`, and `meta-checker.{js,ts}` (deferred to Wave 7.C parallel dispatch). Also out of scope per brief: `compiler/runtime/` (JS shims), `compiler/tests/`.
 
