@@ -1,6 +1,6 @@
 # schema.map.md
 # project: scrmlts
-# updated: 2026-05-14T00:37:04-06:00  commit: ff9be0e
+# updated: 2026-05-14  commit: b28f493
 
 ## TypeScript AST — `compiler/src/types/ast.ts` (~1,858 LOC)
 
@@ -77,7 +77,7 @@ IdentExpr | LitExpr | ArrayExpr | ObjectExpr | SpreadExpr | UnaryExpr | BinaryEx
 AssignExpr | TernaryExpr | MemberExpr | IndexExpr | CallExpr | NewExpr | LambdaExpr |
 CastExpr | MatchExpr | SqlRefExpr | InputStateRefExpr | EscapeHatchExpr | ResetExpr
 
-## AuthGraph Types — `compiler/src/types/auth-graph.ts` (NEW S90 A-3, ~354 LOC)
+## AuthGraph Types — `compiler/src/types/auth-graph.ts` (A-3, ~354 LOC)
 
 ### MarkupNodeId
 type alias: number — stable AST node id for gate-bearing MarkupNodes
@@ -99,7 +99,7 @@ name: string, variants: RoleVariant[], span: Span, filePath: string, isImplicitA
 
 ### AuthGraphDiagnostic  [auth-graph.ts:272]
 code: "E-AUTH-GRAPH-001" | "E-AUTH-GRAPH-002" | "E-AUTH-GRAPH-003" | "E-AUTH-GRAPH-004" |
-      "I-AUTH-REDIRECT-UNRESOLVED" | "W-AUTH-PAGE-INFERRED"
+      "I-AUTH-REDIRECT-UNRESOLVED" | "W-AUTH-PAGE-INFERRED" | "W-AUTH-LOGIN-MISSING"
 severity: "error" | "warning" | "info"
 message: string, span: Span, filePath: string
 
@@ -164,9 +164,29 @@ byRole: Map<RoleVariant, Map<NodeId, Set<NodeId>>>, errors: RSError[], gateVisib
 ### VendorUnitsUsed  [component-5.ts:113]
 Map<EntryPointId, Set<VendorUnitId>>
 
-## Wire Format Types — `compiler/src/codegen/wire-format.ts` (NEW S90, 228 LOC)
+## Per-Route Artifact Splitter Types — `compiler/src/codegen/route-splitter.ts` (NEW S91, A-4)
 
-Exports (not interface types — constants + function):
+### ChunkKey  [route-splitter.ts]
+entryPointId: EntryPointId, role: RoleVariant, tier: "initial" | "tier1" | "tier2" | `tierN${number}`
+
+### ChunkOutput  [route-splitter.ts]
+key: ChunkKey, payloadJs: string, chunkHash: string, filename: string, byteSize: number
+
+### ChunksManifest  [route-splitter.ts]
+Map<ChunkKey, ChunkOutput>
+
+### RouteInfo  [atom-emitter.ts]
+routePath: string | null, shape: "page" | "spa-program"
+
+## FNV-1a Hash Primitive — `compiler/src/codegen/fnv1a-hash.ts` (NEW S91, A-4.6)
+
+FNV_OFFSET: 2166136261 (const — SPEC §47.1.3 normative)
+FNV_PRIME: 16777619 (const — SPEC §47.1.3 normative)
+fnv1aHash(input: string): string — FNV-1a 32-bit hash, output as 8-char base36, zero-padded
+
+## Wire Format Types — `compiler/src/codegen/wire-format.ts` (228 LOC)
+
+Exports (constants + function):
 - `returnTypeAllowsAbsence(annot: string | undefined | null): boolean`
 - `SERVER_WIRE_ENCODER_HELPER: string` — inline JS encoder helper (emitted at top of .server.js)
 - `CLIENT_WIRE_DECODER_HELPER: string` — inline JS dual-decoder helper (emitted in client core chunk)
@@ -189,12 +209,23 @@ filePath, fileAST, routeMap, depGraph, protectedFields: Set<string>, authMiddlew
 csrfEnabled: boolean, encodingCtx: EncodingContext | null, mode: "browser"|"library", testMode: boolean,
 dbVar: string, workerNames: string[], errors: CGError[], registry: BindingRegistry,
 derivedNames: Set<string>, analysis: FileAnalysis | null, usedRuntimeChunks: Set<string>,
-exportRegistry?: Map<string, Map<string, { kind, category, isComponent }>> | null
+exportRegistry?: Map<string, Map<string, { kind, category, isComponent }>> | null,
+reachabilityRecord?: ReachabilityRecord | null,
+hasPrefetchableLinks: boolean  [NEW S91 A-4.4 — set by emit-html during walk]
+
+### CgInput  [codegen/index.ts:79]
+files, routeMap?, depGraph?, protectAnalysis?, sourceMap?, embedRuntime?, mode?, testMode?,
+emitMachineTests?, encoding?, batchPlan?, batchPlannerErrors?, exportRegistry?,
+reachabilityRecord?, emitPerRoute?: boolean  [NEW S91 A-4.1 — opt-in flag for route splitter]
+
+### CgFileOutput  [codegen/index.ts:143]
+sourceFile, serverJs?, clientJs?, libraryJs?, html?, css?, testJs?, machineTestJs?,
+workerBundles?: Map<string, string>, clientJsMap?, serverJsMap?
 
 ### CGError  [errors.ts:11]
 code: string, message: string, span: CGSpan | object, severity: 'error' | 'warning'
 
-Note: CGError.severity does NOT include "info" — info-level diagnostics go through separate channels (RSError, AuthGraphDiagnostic). "info" severity lives only in types/auth-graph.ts and types/reachability.ts.
+Note: CGError.severity does NOT include "info" — info-level diagnostics go through RSError/AuthGraphDiagnostic.
 
 ## scrml:host Runtime Types — `compiler/runtime/stdlib/host.js`
 
@@ -204,7 +235,7 @@ Variant constructor: `HostError.Thrown(message, name) → { variant: "Thrown", d
 ### safeCallAsync(thunk) → Promise<value | scrml-error-shape>
 
 ## Tags
-#scrmlts #map #schema #ast #types #codegen #ir #s90 #auth-graph #wire-format #reachability #approach-a2 #approach-a3
+#scrmlts #map #schema #ast #types #codegen #ir #s91 #auth-graph #wire-format #reachability #approach-a2 #approach-a3 #approach-a4 #route-splitter #fnv1a-hash #chunk-plan
 
 ## Links
 - [primary.map.md](./primary.map.md)

@@ -232,6 +232,109 @@ A-4.1's `routeSegmentFromEntryPointId` uses `::#page::` markers that don't match
 
 ---
 
+## S91 CLOSE — final state (post-A-4.7 landing)
+
+### Tests at HEAD `b28f493`
+
+**12,517 pass / 117 skip / 1 todo / 0 fail / 629 files** (full `bun test`). **Cumulative S90→S91 delta: +242 pass / +12 files / 0 fail / 0 regressions** across 30 PA-authored commits.
+
+### Major waves CLOSED end-to-end this session
+
+| Wave | Status | Detail |
+|---|---|---|
+| **A-2 Reachability Solver** | ✅ FULLY CLOSED | Components 1-5 (S89-S90) + A-2.7 outer fixed-point (`59279e7`) + A-2.8 canonical determinism (`527bae8`). Soundness-complete + bit-identical JSON output per §40.9.8. |
+| **A-3 §40 AuthGraph** | ✅ FULLY CLOSED | A-3.1..A-3.4 (S90) + A-3.5 wire-in (`bf2b098`) + §40.9.9 case-fix (`1d1ceef`). End-to-end functional in api.js Stage 7.55. |
+| **03-contact-book v0.2.x latent bug** | ✅ FULLY CLOSED | `scrml generate auth` CLI generator (`5abcf20`) + W-AUTH-LOGIN-MISSING two-tier severity + stdlib login template + adopter example/e2e cleanup. |
+| **A-4 Per-Route Artifact Splitter** | ✅ FULLY CLOSED | A-4.1..A-4.7 inclusive. Adopter chunks **ACTIVATE in actual browsers** post-A-4.7 (A-4.2 forward-looking runtime-helper gap closed). v0.3.0 critical path through A-2 + A-3 + A-4 **substantively complete**. |
+
+### S91 commit ledger (30 PA-authored scrmlTS commits + 1 scrml-support)
+
+```
+199940e docs(s91-open): hand-off rotation + FULL_COLD_START map refresh
+399fc81 docs(pa.md s91): fold S90 CWD-routing memory rule + sharpen F4 step 1
+[scrml-support 8d13012] user-voice(s90): OQ-A3-A override
+bf2b098 A-3.5: SPEC §34/§40.9.11 catalog rows + AuthGraph pipeline wiring + §40.9.9 replay
+1d1ceef spec(§40.9.9 + 5 prose sites): role="admin" → role="Admin"
+fbc8a39 docs(s91-mid-refresh-1): master-list S91 addendum + hand-off mid-refresh
+9d79f45 docs(s91): stage A-2.8 dispatch brief
+3689153 docs(s91): land 03-contact-book auth-redirect SCOPING (882 lines)
+59279e7 A-2.7: outer fixed-point operator + E-CLOSURE-001 fire-site
+470b128 docs(s91): land A-4 per-route artifact splitter SCOPING (695 lines, 7 sub-phases)
+527bae8 A-2.8: emit-reachability canonical determinism
+d7145b2 docs(s91): stage A-4.2 brief
+d6e32ed docs(s91): stage A-4.3 brief
+5abcf20 03-contact-book-auth: E (scrml generate auth CLI + template) + A (W-AUTH-LOGIN-MISSING)
+b66c5da docs(s91): stage A-4.4 brief
+ea6d9d3 A-4.1: codegen orchestrator slot + per-(EP, role, tier) iteration scaffold
+5e392cf docs(s91): stage A-4.5 brief
+d7773a4 A-4.2: initial_chunk JS payload + atom-emitter extraction — §40.9.9 replay green
+bcbb7ab docs(s91): stage A-4.6 brief
+77a24a8 docs(s91): stage A-4.7 brief (wave closer)
+d29357f docs(s91-mid-refresh-2): hand-off comprehensive state update
+7cac10c A-4.3: tier-1 idle-prefetch — _scrml_prefetch_tier1 + tree-shakeable
+e3cfabc A-4.5: tier-N on-demand dispatch hook
+d089974 A-4.6: §47 content-addressing — FNV-1a base36 chunk hashes + URL-style chunks.json
+07e9795 A-4.4: tier-2 hover-prefetch — cross-route data-scrml-prefetch wiring
+437e539 docs(s91-pre-wrap): comprehensive S91 changelog entry (DRAFT)
+b28f493 A-4.7: per-route HTML augmentation + role-bootstrap + W-CG-CHUNK-* lints — A-4 WAVE FULLY CLOSED
+<wrap-bookkeeping commit landing this hand-off + map refresh + changelog backfill>
+```
+
+### Patterns validated this session
+
+- **4 cherry-pick recoveries** per `feedback_file_delta_vs_cherry_pick.md`: L 03-contact-book + M A-4.1 + U A-4.6 + S A-4.4. Each had worktree base predating main-side sibling landings; cherry-pick auto-merged additive changes; manual conflict resolution at exact-line overlaps. **Most stress: A-4.4 with 4 TEMP commits + 4 soft-resets bundled into clean final commit** (route-splitter + runtime-template + runtime-chunks + PIPELINE + domain.map all conflicted simultaneously).
+- **4 CWD-routing trap-and-catches** validating S91 pa.md `feedback_agent_isolation_cwd_routing.md` fold-in: (1) session-open Bash batch, (2) user-voice S90 commit, (3) A-3.5 file-delta initially landing in worktree, (4) A-4.2 file-delta gate. Each caught before damage.
+- **1 F4 leak recovery**: L Sub-task A wrote to main's working tree directly; PA cleaned via `git checkout HEAD --`; subsequent sub-tasks correctly isolated.
+- **1 pre-commit-gate save**: A-4.4 test §12 placeholder assertion collided with A-4.6's real-hash replacement; pre-commit caught; updated to NOT-placeholder + base36 regex.
+- **TEMP-commit + soft-reset bundling** for cherry-pick recoveries — `--no-verify` ONLY on procedural sequencer-advance commits, always rolled back into clean final commits with pre-commit gate run. Zero substantive `--no-verify`.
+
+### Q-OPEN state at S91 close
+
+**All session-open Q-OPENs disposed:**
+- Q-OPEN-1 (A-3.5) ✅ `bf2b098` · Q-OPEN-2 (A-2.7) ✅ `59279e7` · Q-OPEN-3 A-2.8 ✅ `527bae8` (A-2.9 deferred; lower priority)
+- Q-OPEN-4 (A-4 wave) ✅ FULLY CLOSED (A-4.1 through A-4.7)
+- Q-OPEN-5 (Wave 4.A A+R adopter-content) ⏸️ Rule 1 deferred
+- Q-OPEN-6 (paired migration re-grep) ⏸️ low-value
+- Q-OPEN-7 (pa.md S91 memory fold-in) ✅ `399fc81`
+- Q-OPEN-8 (default=null audit-doc) ✅ no-edit-needed
+- Q-OPEN-9 (/map refresh) ✅ `199940e` (session-open) + post-A-4.7 refresh at wrap
+- Q-OPEN-S91-NEW (S90 user-voice) ✅ `8d13012`
+- Q-OPEN-NEW (SPEC §40.9.9 case-fix) ✅ `1d1ceef`
+- Q-OPEN-NEW (03-contact-book) ✅ `5abcf20` + SCOPING `3689153`
+
+### Q-OPEN slate for S92 (carried)
+
+| Q-OPEN | Description | Priority | Est |
+|---|---|---|---|
+| **A-5 integration tests** | Consumes A-2 + A-3 + A-4 output; depends on user disposition for scope + timing. Most logical next major effort. | HIGH (v0.3.0 cut path) | TBD per user scope decision |
+| **A-2.9 perf + memory characterization** | Corpus-wide ceiling-baseline measurement post-A-2. | LOWER | 7-12h |
+| **Wave 4.A A + R adopter-content** | scrml.dev refresh + README + currency. v0.3.0 cut path blocker per S88 user ratification. | DEFERRED (Rule 1) | 6-12h |
+| **A-4.6 deferred — `compiler` manifest version source** | `chunks.json` `compiler` field hard-coded `"scrml-0.3.0"`; pkg.json shows `0.2.0`. Reconcile when v0.3.0-alpha tag cuts. | LOW | <1h |
+| **A-4.7 deferred — `--chunk-size-budget` CLI flag** | Replace hard-coded `CHUNK_LARGE_SOFT_BUDGET_BYTES = 100000` with CLI-configurable. | LOW | 1-2h |
+| **A-4.7 deferred — W-CG-CHUNK-NO-PREFETCH polish** | Distinguish "no internal links" vs "links resolved nowhere". | LOW | <1h |
+| **A-2.9 + A-4 polish bundle candidate** | Consider single dispatch combining the three deferred polishes above. | NICE-TO-HAVE | 8-15h |
+
+### Things S92 PA must NOT screw up (carry-forward)
+
+- All S88-S91 memory rules (null/undefined ABSOLUTE · self-host from-scratch · file-delta-vs-cherry-pick · land-before-cleanup · agent-crash-partial-recovery · isolation:worktree EXPLICIT · CWD-routing). All rules validated end-to-end across stress patterns this session.
+- Rule 1 (no marketing/article work unless user raises it) — Wave 4.A A+R tracks remain deferred until user surfaces them.
+- Rule 2 (full-production fidelity) — S91 never relaxed; OQ-A3-A user-override precedent stands.
+- Rule 3 (right answer beats easy answer) — §40.9.9 case-fix was the easy answer (corpus-zero); the right answer was the SPEC fixture correction (1d1ceef).
+- Rule 4 (spec normative; derived planning docs NOT) — applied throughout (W-CG-CHUNK-* §34 + §40.9.11 verified against SPEC structure).
+
+### Cross-machine state at S91 close
+
+- scrmlTS: 30 commits ahead origin (push pending wrap step 7)
+- scrml-support: 1 commit ahead origin (push pending wrap step 7)
+- Working tree: clean
+- No agent worktrees retained
+
+### Push state — REQUIRES EXPLICIT AUTHORIZATION
+
+Per session-open authorization: "No pushes until explicit 'push' at wrap." User said "wrap" not "wrap and push". Pa.md "wrap" default: execute 1-6 + 8, leave step 7 explicit-pending. Surface for push when ready.
+
+---
+
 ## Tags
 
-#session-91 #open #post-S90-landmark-17-commits #A-3-FULLY-CLOSED-S91 #A-2-FULLY-CLOSED-S91 #03-contact-book-FULLY-CLOSED-S91 #A-4-wave-IN-PROGRESS-2-of-7-landed #A-4.3-in-flight #A-4.4-A-4.5-A-4.6-parallel-fire-registered #A-4.7-closer-staged #21-commits-pending-push #4-CWD-trap-and-catches #2-cherry-pick-recoveries #1-F4-leak-recovered
+#session-91 #CLOSE #LANDMARK-30-COMMITS #A-2-FULLY-CLOSED #A-3-FULLY-CLOSED #A-4-FULLY-CLOSED #03-contact-book-CLOSED #v0.3.0-critical-path-substantively-complete #+242-tests #4-cherry-pick-recoveries #4-CWD-trap-and-catches #1-F4-leak-recovered #1-pre-commit-gate-save #zero-substantive-no-verify #push-pending-wrap-authorization

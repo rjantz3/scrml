@@ -1,15 +1,15 @@
 # non-compliance.report.md
 # project: scrmlts
-# generated: 2026-05-14T00:37:04-06:00
-# scan mode: FULL_COLD_START (S90 close — commit ff9be0e)
-# prior baseline: 2026-05-13T23:00:00Z @ 71305fe (S89 close)
+# generated: 2026-05-14
+# scan mode: FULL_COLD_START (S91 close — commit b28f493)
+# prior baseline: 2026-05-14T00:37:04Z @ ff9be0e (S90 close)
 
 ## Summary
 
-Total docs scanned: 117 (excluding node_modules, .git, .claude, handOffs/, dist/, build/)
-Compliant: 110
-Non-compliant: 4 (same as S89; no new violations added)
-Uncertain: 3 (down from 10; 7 resolved or carried from S89 as non-actionable during S90)
+Total docs scanned: 137 (excluding node_modules, .git, .claude, handOffs/, dist/, build/)
+Compliant: 131
+Non-compliant: 4 (same 3 carried from S90 + 0 new violations added at S91)
+Uncertain: 3 (same 2 carried from S90 + 1 new: a-4-per-route-artifact-splitter-SCOPING/SCOPING.md)
 
 ---
 
@@ -32,58 +32,58 @@ Uncertain: 3 (down from 10; 7 resolved or carried from S89 as non-actionable dur
 
 ### docs/changes/promotion-ergonomics/TIER-C-SCOPE.md
 **Reason:** content-heuristic + grep-mismatch — describes future planned work not yet implemented
-**Detail:** Status "SCOPED — queued, not yet dispatched" from S66. Grep of `W-MATCH-TRANSITIONS-ACCRUING` and `--engine` flag finds no implementation in current compiler/src. Nearly a year old relative to current HEAD.
+**Detail:** Status "SCOPED — queued, not yet dispatched" from S66. `W-MATCH-TRANSITIONS-ACCRUING` found ONLY in promote.js error console message (not a fire-site). `--engine` flag not found in compiler/src. Nearly a year old relative to current HEAD.
 **Suggested disposition:** Verify if deferred indefinitely; if so, deref to scrml-support/archive/
 
 ---
 
 ## Uncertain docs (needs human review)
 
-### docs/audits/wave-3-7-corpus-ouroboros-2026-05-13.md
-**Reason:** dated audit snapshot (HEAD: `9b98118`, S88 close). Audits corpus state at S88 — may not reflect S89/S90 changes to articles and examples.
-**What to check:** Is this audit still actionable, or has S89/S90 corpus sweep addressed its findings? If superseded, deref to scrml-support/archive/.
-
 ### docs/changes/predicate-gaps-deep-dive-prep/SCOPE.md
 **Reason:** content-heuristic — status "SCOPE PREPARED — awaits convener authorization to fire deep-dive (when corpus signal warrants)"; trigger conditions may still be unmet.
 **What to check:** Has the deep-dive been authorized? If trigger conditions remain unmet, deref to scrml-support/archive/ if no active dispatch planned.
 
 ### docs/changes/v0.3-approach-a-impl/SCOPING.md
-**Reason:** parent scoping for "Approach A impl" — may be superseded now that A-1 CLOSED, A-2 Components 1-5 wired (S90), A-3 complete (S90), each with their own sub-docs.
-**What to check:** Is this SCOPING still the living authority for A-2.7+ and A-4..A-5, or has authority fully transferred to a2-reachability-solver-scoping/SCOPING.md and a3-auth-graph-scoping/SCOPING.md? If superseded, note in-file or deref.
+**Reason:** parent scoping for "Approach A impl" — may be superseded now that A-1 CLOSED (S89), A-2 FULLY CLOSED (S91), A-3 FULLY CLOSED (S91), A-4 FULLY CLOSED (S91).
+**What to check:** Is this SCOPING still the living authority for A-5, or has authority fully transferred to the sub-wave SCOPING docs? If superseded, note in-file or deref.
+
+### docs/changes/a-4-per-route-artifact-splitter-SCOPING/SCOPING.md
+**Reason:** content-heuristic — top-level status line reads "Status: DRAFT — awaits PA + user OQ disposition before any A-4.* sub-phase dispatches." A-4 is FULLY CLOSED at S91 (A-4.1..A-4.7 all committed). The SCOPING body contains historical OQ dispositions and is now a post-hoc record.
+**What to check:** Update status to CLOSED in-file header, or confirm PA has already noted it as a historical record to preserve (active dispatch docs are not required to be pruned — but the "DRAFT" status is misleading).
 
 ---
 
-## S90 Changes vs S89 Baseline
+## S91 Changes vs S90 Baseline
 
-**Resolved from S89 uncertain list (7 cleared):**
-- docs/changes/scrml-dev-codegen-divergence/progress.md — confirmed compliant (committed code on main exists)
-- docs/changes/v0.3-approach-a-spec/SCOPING.md — §40.9 contract now locked in SPEC; moved to uncertain→resolved
-- docs/changes/v0.3-todomvc-e2e-reverify/progress.md — todomvc e2e tests passing at S90; dispatch done
-- docs/audits/scope-c-findings-tracker.md — resolved by S89/S90 sweeps; compliant as historical record
-- docs/articles/llm-kickstarter-v1-2026-04-25.md — confirmed v2 supersedes v1 for distribution; v1 kept as historical
-- docs/changes/v0next-audit/PARSER-AUDIT-2026-05-05.md — compliant as dated historical audit
-- docs/changes/v0next-inventory/SCOPE-MAP-2026-05-05.md + ARTICLE-TRUTHFULNESS-AUDIT-2026-05-05.md — compliant as dated historical audits
+**New docs added S91 — all compliant:**
+- docs/changes/a-4-2-initial-chunk-emission/BRIEF.md + progress.md — A-4.2 dispatch record; implementation matches code ✓
+- docs/changes/a-4-3-tier-1-idle-prefetch/BRIEF.md + progress.md — A-4.3 dispatch record ✓
+- docs/changes/a-4-4-tier-2-hover-prefetch/BRIEF.md + progress.md — A-4.4 dispatch record ✓
+- docs/changes/a-4-5-tier-n-on-demand/BRIEF.md + progress.md — A-4.5 dispatch record ✓
+- docs/changes/a-4-6-content-addressing/BRIEF.md + progress.md — A-4.6 dispatch record ✓
+- docs/changes/a-4-7-per-route-html-augmentation/BRIEF.md + progress.md — A-4.7 dispatch record ✓
+- docs/changes/03-contact-book-auth-redirect-SCOPING/SCOPING.md + progress.md — 03-contact-book bug dispatch record ✓
+- docs/changes/a-2-8-emit-reachability-canonical/BRIEF.md + progress.md — A-2.8 dispatch record ✓
 
-**New docs added S90 — all compliant:**
-- docs/changes/m-7c-d-12-runtime-sentinel-scoping/progress.md — active dispatch record, compliant
-- docs/changes/a3-auth-graph-scoping/SCOPING.md — A-3 SCOPING + implementation record; implementations match code
-- docs/audits/wave-3-7-corpus-ouroboros-2026-05-13.md — dated audit snapshot (moved to uncertain, see above)
-- docs/audits/articles-currency-table-2026-05-13.md — currency table audit, compliant as reference
+**No new non-compliant docs at S91.** The 4 non-compliant docs carried from S90 are unchanged. One new uncertain added (a-4-per-route-artifact-splitter-SCOPING status line).
 
 ---
 
 ## Compliant (no action needed)
 
 The following categories were scanned and found compliant:
-- compiler/SPEC.md (27,145 lines), compiler/SPEC-INDEX.md, compiler/PIPELINE.md (v0.7.1, 2,758 lines) — authoritative specs, current
+- compiler/SPEC.md, compiler/SPEC-INDEX.md, compiler/PIPELINE.md — authoritative specs, current
 - docs/articles/* (15 articles) — devto content; articles-currency-table + VERIFIED.md confirm status
-- docs/audits/* (null-audit, undefined-audit, articles-currency-table, happy-dom-perf, self-host-spec-conformance, scope-c-findings-tracker) — dated audit snapshots, compliant as historical records
-- docs/changes/§13.2-*, §36-*, a1-closeout, a2-1, a2-2, a2-reachability-solver-scoping — active/closed dispatch records, compliant
-- docs/changes/a3-auth-graph-scoping/ — A-3 implementation completed S90; implementations match source
-- docs/changes/m-7c-d-12-runtime-sentinel-scoping/ — M-7C-D-12 implementation completed S90; SCOPING + progress match code
+- docs/audits/* (null-audit, undefined-audit, articles-currency-table, happy-dom-perf, self-host-spec-conformance, scope-c-findings-tracker, wave-3-7-corpus-ouroboros) — dated audit snapshots, compliant as historical records
+- docs/changes/§13.2-*, §36-*, a1-closeout, a2-1, a2-2, a2-reachability-solver-scoping, a-2-8-* — closed dispatch records
+- docs/changes/a3-auth-graph-scoping/ — A-3 all sub-phases closed S91; SCOPING + progress match code
+- docs/changes/a-4-2-* through a-4-7-* — A-4 sub-phase dispatch records (all closed S91); implementations match source
+- docs/changes/a-4-per-route-artifact-splitter-SCOPING/progress.md — progress log compliant (SCOPING.md itself flagged as uncertain above)
+- docs/changes/m-7c-d-12-runtime-sentinel-scoping/ — M-7C-D-12 implementation completed S90; closed dispatch record
+- docs/changes/03-contact-book-auth-redirect-SCOPING/ + 03-contact-book-auth-redirect/ — closed dispatch record
 - docs/changes/null-eradication-*, undefined-eradication-*, stdlib-phase-1-5-null-sweep — closed dispatch records
 - docs/changes/w-try-catch-lint, fix-lift-async-iife-paren, phase-3a-async-jwt, todomvc-edit-mode-landing — closed dispatch records
-- docs/changes/wave-4-t-track, wave-4-d-track, wave-4-adopter-content-scoping — Wave 4 execution records (distinction: wave-4-adopter-content/SCOPING.md is NON-COMPLIANT above; wave-4-adopter-content-scoping/ is separate and compliant)
+- docs/changes/wave-4-t-track, wave-4-d-track, wave-4-adopter-content-scoping — Wave 4 execution records
 - docs/changes/wave-3-7-audit, wave-3-7-backlog-migration, v0next-inventory/SCOPE-SUPPLEMENT-2026-05-07.md
 - docs/changelog.md, docs/PA-SCRML-PRIMER.md, docs/tutorial.md, docs/lin.md, docs/external-js.md — reference docs, compliant
 - docs/pinned-discussions/w-program-001-warning-scope.md — pinned decision record, compliant
@@ -94,7 +94,7 @@ The following categories were scanned and found compliant:
 - compiler/src/codegen/README.md, compiler/tests/ READMEs — test fixtures docs, compliant
 
 ## Tags
-#non-compliance #project-mapper #cleanup #scrmlts #s90
+#non-compliance #project-mapper #cleanup #scrmlts #s91
 
 ## Links
 - [project master-list](../../master-list.md)

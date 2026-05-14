@@ -1,6 +1,6 @@
 # build.map.md
 # project: scrmlts
-# updated: 2026-05-14T00:37:04-06:00  commit: ff9be0e
+# updated: 2026-05-14  commit: b28f493
 
 ## Development Commands (root package.json > scripts)
 
@@ -36,13 +36,14 @@
 
 | Subcommand | What it does |
 |------------|--------------|
-| `scrml compile <file\|dir>` | Compile .scrml to HTML + client JS + server JS; `--emit-reachability` emits Stage 7.6 JSON |
+| `scrml compile <file\|dir>` | Compile .scrml to HTML + client JS + server JS; `--emit-reachability` emits Stage 7.6 JSON; `--emit-per-route` emits per-(EP, role, tier) JS chunks + chunks.json |
 | `scrml dev <file\|dir>` | Dev server with hot-reload |
 | `scrml build <dir>` | Production build |
 | `scrml serve <dir>` | Serve compiled output |
 | `scrml migrate <file\|dir>` | Migrate pre-v0.3 .scrml structure; `--program-shape` flag for v0.3 container migration |
 | `scrml promote <file\|dir>` | Promote patterns (e.g. `i-match` → `match`); `--match` flag |
 | `scrml init` | Scaffold a new scrml project |
+| `scrml generate auth` | Scaffold adopter-owned login page (writes stdlib/auth/templates/login.scrml to project) [NEW S91] |
 | `scrml lsp --stdio` | Start LSP server |
 
 ## Pre-commit Hook (scripts/git-hooks/pre-commit)
@@ -85,7 +86,7 @@ Gitignored; must be built locally on each machine:
 Rebuild: `bun run scripts/rebuild-self-host-dist.ts` and `bun run scripts/rebuild-tab-dist.ts`
 
 ## Tags
-#scrmlts #map #build #scripts #bun #pre-commit #self-host #playwright #e2e #s90
+#scrmlts #map #build #scripts #bun #pre-commit #self-host #playwright #e2e #s91 #generate-auth #emit-per-route
 
 ## Links
 - [primary.map.md](./primary.map.md)

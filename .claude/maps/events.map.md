@@ -1,6 +1,6 @@
 # events.map.md
 # project: scrmlts
-# updated: 2026-05-14T00:37:04-06:00  commit: ff9be0e
+# updated: 2026-05-14  commit: b28f493
 
 ## Status
 
@@ -37,6 +37,19 @@ Channel placement pre-check enforced by shared AST walker in `compiler/src/valid
 
 The compiler emits sync wire-format messages on every write to a channel-declared cell. The wire format is: `{ __type: "__sync", __key: "<varName>", __val: <value> }`. Receiving end updates the corresponding cell. This is NOT the §57 wire format (which covers server-fn return types `T | not` — absence envelope).
 
+### A-4 Chunk Prefetch Signals (NEW S91 — emitted into client JS / HTML)
+
+The compiler emits client-side JS into compiled browser output that triggers chunk loading. This is output, not compiler pub/sub.
+
+| Signal | Mechanism | Where emitted |
+|--------|-----------|---------------|
+| Tier-1 idle prefetch | `_scrml_prefetch_tier1(chunkUrl)` call at IIFE tail | route-splitter.ts composeInitialChunk; uses requestIdleCallback + setTimeout(fn,1) Safari fallback |
+| Tier-2 hover prefetch | mouseenter + focus once-listeners on `[data-scrml-prefetch]` anchors | composeInitialChunk hover-handler block; `_scrml_prefetch_tier2(routePath, role)` |
+| Tier-N on-demand | `_scrml_fetch_chunk(epId, role, tier)` returns Promise<string> | structural-scaffolding only in v0.3; fires in v0.4+ |
+| Role detection bootstrap | localStorage > cookie > `<meta name="scrml-role">` > `"_anonymous"` | augmentHtmlForChunks (emit-html.ts) injects `<script>` per route HTML file |
+| Chunk manifest | `window._SCRML_CHUNKS = { ... }` | augmentHtmlForChunks injects inline `<script>` |
+| Modulepreload hints | `<link rel="modulepreload" href="...">` for non-empty tier-1 | augmentHtmlForChunks per route HTML file |
+
 ### meta.emit() Runtime Placement (compiler/src/runtime-template.js)
 
 One-way compiler-to-DOM; not pub/sub. Compile-time-controlled DOM injection at ^{} block positions.
@@ -49,10 +62,10 @@ Reactive subscriptions in compiled client runtime:
 
 ## Bus Type
 
-None in the compiler process. Compiled outputs use Bun's WebSocket pub/sub API (topic-based) for channel features.
+None in the compiler process. Compiled outputs use Bun's WebSocket pub/sub API (topic-based) for channel features. A-4 chunk-prefetch uses browser fetch() API (tier-N: `_scrml_fetch_chunk`) and requestIdleCallback (tier-1: `_scrml_prefetch_tier1`).
 
 ## Tags
-#scrmlts #map #events #websocket #pubsub #reactive #channels #s90 #pure-channel-file #wire-format #sync-messages
+#scrmlts #map #events #websocket #pubsub #reactive #channels #s91 #pure-channel-file #wire-format #sync-messages #chunk-prefetch #tier1 #tier2
 
 ## Links
 - [primary.map.md](./primary.map.md)

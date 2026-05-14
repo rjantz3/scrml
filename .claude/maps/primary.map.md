@@ -1,68 +1,61 @@
 # primary.map.md
 # project: scrmlts
-# updated: 2026-05-14T00:37:04-06:00  commit: ff9be0e
+# updated: 2026-05-14  commit: b28f493
 
 ## Project Fingerprint
 Language:   JavaScript / TypeScript (mixed .js + .ts); Bun runtime
 Framework:  Custom compiler — scrml language compiler + LSP server
 Runtime:    Bun >= 1.3.13
 Type:       Compiler + CLI tool + LSP server + 21-module stdlib
-Size:       ~1,800+ source files (excluding node_modules/dist/.git); compiler/src ~108 .ts/.js files;
-            SPEC.md 27,145 lines; SPEC-INDEX.md 320 lines; PIPELINE.md v0.7.1 (2,758 lines);
+Size:       ~1,800+ source files (excluding node_modules/dist/.git); compiler/src ~111 .ts/.js files;
+            SPEC.md ~27,200+ lines; SPEC-INDEX.md; PIPELINE.md v0.7.1 (2,758 lines);
             samples/compilation-tests: ~311 .scrml fixtures;
-            Tests: 617 files — **12,275 pass / ~117 skip / 1 todo / 0 FAIL** (S90 close)
+            Tests: 629 files — **12,517 pass / ~117 skip / 1 todo / 0 FAIL** (S91 close)
 
-## Key Facts (S90 CLOSE — 2026-05-14, commit ff9be0e)
+## Key Facts (S91 CLOSE — 2026-05-14, commit b28f493)
 
-**Current shipped version: v0.2.6 (`efbd1e8`)**
-HEAD `ff9be0e` is NOT tagged — v0.3.0 cut path active; S90 landed 17 substantive commits.
+**Current shipped version: v0.2.6** — HEAD `b28f493` is NOT tagged; v0.3.0 cut path active.
 
-**M-7C-D-12 runtime sentinel wave CLOSED S90 (5 tracks):**
-- T1: AST cleanup (ast-builder.js, runtime-template.js)
-- T2: §57 wire-format codegen — `wire-format.ts` (228 LOC): `returnTypeAllowsAbsence()` + `SERVER_WIRE_ENCODER_HELPER` + `CLIENT_WIRE_DECODER_HELPER`; `emit-server.ts` now wraps `T | not` return values with `_scrml_wire_encode()`; client decoder is dual-accept (envelope + legacy raw JSON null)
-- T3: codegen lint — `lint-undefined-interpolation.ts` (318 LOC); W-CG-UNDEFINED-INTERPOLATION fires post-emission
-- T4: SPEC §57 Wire Format added (lines 27051+, ~112 new lines); W-CG-UNDEFINED-INTERPOLATION row added to §34 catalog
-- T5: audit closure (docs/changes/m-7c-d-12-runtime-sentinel-scoping/progress.md)
+**A-2 Reachability Solver FULLY CLOSED S91 (A-2.1..A-2.8):**
+- A-2.7: outer fixed-point operator + E-CLOSURE-001 fire-site (`reachability/outer-fixpoint.ts`, ~463 LOC; 29 tests)
+- A-2.8: canonical JSON serialization for `--emit-reachability` — stratified comparator, 21 determinism tests (10-run replay + CLI two-spawn diff)
+- All 5 components (C1..C5) + outer-fixpoint + canonical JSON wired. Solver produces real per-role ChunkPlans.
 
-**A-2 Reachability Solver Components 2-5 wired S90:**
-- A-2.3 Component 2: `reactive_dep_closure` (`reachability/component-2.ts`, 537 LOC)
-- A-2.4 Component 3: `server_fn_reachable_within` + interaction-graph projection (`reachability/component-3.ts`, 1,023 LOC)
-- A-2.5 Component 4: `auth_gated_boundaries_visible_to` + per-role ChunkPlan emission + W-AUTH-RUNTIME-FALLBACK + E-CLOSURE-002 (`reachability/component-4.ts`, 558 LOC)
-- A-2.6 Component 5: `vendor_units_used_by` (`reachability/component-5.ts`, 451 LOC)
-- reachability-solver.ts orchestrator extended with per-role ChunkPlan emission
-- Combined new LOC for components 2-5: ~2,569 LOC
+**A-3 AuthGraph FULLY CLOSED S91 (A-3.1..A-3.5):**
+- A-3.5 wired runAuthGraph() into api.js pipeline (Stage 7.55); RS Component 4 now receives real AuthGraph
+- W-AUTH-LOGIN-MISSING two-tier severity added; `scrml generate auth` CLI subcommand added; `stdlib/auth/templates/login.scrml` template added (03-contact-book v0.2.x latent bug CLOSED)
+- §40.9.9 case-fix landed
 
-**A-3 AuthGraph wave CLOSED S90 (A-3.1 + A-3.2 + A-3.3 + A-3.4):**
-- `auth-graph.ts` (1,692 LOC): `runAuthGraph()` + `resolveRoleEnum()` + `classifyGates()` + `crossRefRedirects()`
-- `compiler/src/types/auth-graph.ts` (~354 LOC): AuthGraph, AuthGate, RoleEnum, AuthGraphDiagnostic, AuthSiteKind, RoleClassification, AuthGraphOutput types
-- `<auth>` element registered in html-elements.js; `<auth role=>` in attribute-registry.js with supportsInterpolation: true (S90 relaxation)
-- NOTE: `runAuthGraph()` is NOT yet wired into api.js pipeline at S90 close — function exists, is tested, and RS degrades to all-in for all roles until wiring dispatch
+**A-4 Per-Route Artifact Splitter FULLY CLOSED S91 (A-4.1..A-4.7):**
+- NEW `compiler/src/codegen/route-splitter.ts` (~1,100+ LOC): orchestrator + composeInitialChunk + composeTier1Chunk + composeTier2Chunk + computeChunkHash + finalizeChunkHash + emitChunkLints
+- NEW `compiler/src/codegen/atom-emitter.ts` (~414 LOC): per-id atom helpers (emitReactiveCellAtom / emitServerFnStubAtom / emitVendorUnitRef / emitComponentAtom)
+- NEW `compiler/src/codegen/fnv1a-hash.ts`: shared FNV-1a 32-bit base36 primitive (SPEC §47.1.3 normative; re-exported from type-encoding.ts)
+- NEW runtime helpers in `compiler/src/runtime-template.js`: `_scrml_prefetch_tier1` + `_scrml_prefetch_tier2` + `_scrml_fetch_chunk` + `_scrml_chunk_mount` + `_scrml_vendor_require` + manifest scaffolds
+- NEW `prefetch` + `mount` + `vendor-ref` runtime chunk markers in `runtime-chunks.ts`
+- NEW per-route HTML augmentation (`augmentHtmlForChunks`) in `emit-html.ts` (~295 LOC): `_SCRML_CHUNKS` inline + `<link rel="modulepreload">` + role-detection bootstrap
+- Per-route codegen orchestrator wire-in in `codegen/index.ts` (`emitPerRoute` opt-in flag per OQ-A4-F)
+- SPEC §34 + §40.9.11 catalog rows: W-CG-CHUNK-EMPTY + W-CG-CHUNK-LARGE + W-CG-CHUNK-NO-PREFETCH + W-CG-CHUNK-MISSING-ROLE + W-AUTH-LOGIN-MISSING + A-3 codes
+- NEW `compiler/src/commands/generate.js` (`scrml generate auth` CLI)
+- NEW `stdlib/auth/templates/login.scrml` (adopter-owned login template)
+- 12 new test files: 7 unit + 4 integration + 1 command tests; +242 vs S90 close
 
-**6 NEW first-fire-sites for diagnostics:**
-W-CG-UNDEFINED-INTERPOLATION (lint-undefined-interpolation.ts),
-I-AUTH-REDIRECT-UNRESOLVED (auth-graph.ts crossRefRedirects()),
-E-AUTH-GRAPH-002 (auth-graph.ts resolveRoleEnum()),
-W-AUTH-RUNTIME-FALLBACK (reachability/component-4.ts),
-E-CLOSURE-002 (reachability/component-4.ts),
-W-AUTH-PAGE-INFERRED (auth-graph.ts classifyGates())
+**Chunks ACTIVATE in adopter browsers (A-4 wave-close status).**
 
-**Severity union extended:** "info" severity now present in AuthGraphDiagnostic.severity and RSError.severity (but NOT in CGError.severity which remains 'error' | 'warning')
-
-**Test suite growth S90:** 11,912 → 12,275 (+363 passing tests across 17 commits; +13 new test files)
+**Test suite growth S91:** 12,275 → 12,517 (+242 passing tests; +12 new test files across 30 PA-authored commits)
 
 ## Map Index
 
 | Map                      | Status  | Contents |
 |--------------------------|---------|----------|
-| structure.map.md         | present | directory layout, entry points, S90 new/modified files (112 lines) |
-| dependencies.map.md      | present | 5 runtime + 5 dev packages; pipeline graph with Components 2-5 + auth-graph wiring (122 lines) |
-| schema.map.md            | present | ~80+ AST node kinds; NEW AuthGraph/AuthGate/RoleEnum types; reachability types; wire-format exports; IR; CompileContext (220 lines) |
-| config.map.md            | present | 2 env vars (SCRML_PORT, PORT); bunfig.toml; CLI flags (45 lines) |
-| build.map.md             | present | 11 npm scripts; pre-commit hook; CLI subcommands (83 lines) |
-| error.map.md             | present | CGError + 9 runtime error classes; 6 new diagnostic codes S90; full E-/W-/I- families (160 lines) |
-| test.map.md              | present | bun:test, 617 files, 12,275 pass; S90 new test files enumerated (130 lines) |
-| domain.map.md            | present | 30+ domain concepts; S90: M-7C-D-12 closed, A-2.3..A-2.6 wired, A-3.1..A-3.4 closed; Task-Shape Routing (135 lines) |
-| events.map.md            | present | no compiler EventEmitter; channel placement rules; WebSocket pub/sub in compiled output; wire format sync messages (57 lines) |
+| structure.map.md         | present | directory layout, entry points, S91 new/modified files (118 lines) |
+| dependencies.map.md      | present | 5 runtime + 5 dev packages; pipeline graph with full A-2/A-3/A-4 wiring (119 lines) |
+| schema.map.md            | present | ~80+ AST node kinds; AuthGraph/AuthGate/RoleEnum types; reachability types; NEW ChunkKey/ChunkOutput/ChunksManifest/fnv1aHash; wire-format exports; IR; CompileContext (240 lines) |
+| config.map.md            | present | 2 env vars (SCRML_PORT, PORT); bunfig.toml; CLI flags including --emit-per-route [NEW S91]; generate subcommand options [NEW S91] (55 lines) |
+| build.map.md             | present | 11 npm scripts; `scrml generate auth` subcommand [NEW S91]; pre-commit hook; CLI subcommands (86 lines) |
+| error.map.md             | present | CGError + 9 runtime error classes; 4 new W-CG-CHUNK-* codes + E-CLOSURE-001 + W-AUTH-LOGIN-MISSING [NEW S91]; full E-/W-/I- families (178 lines) |
+| test.map.md              | present | bun:test, 629 files, 12,517 pass; S91 new test files enumerated; A-4 wave test anchors (148 lines) |
+| domain.map.md            | present | 35+ domain concepts; S91: A-2 FULLY CLOSED, A-3 FULLY CLOSED, A-4 FULLY CLOSED; diagnostic fire-site table updated; Task-Shape Routing (178 lines) |
+| events.map.md            | present | no compiler EventEmitter; channel placement rules; WebSocket pub/sub; A-4 chunk prefetch signals [NEW S91] (65 lines) |
 | api.map.md               | absent  | not applicable — compiler tool, not web API |
 | state.map.md             | absent  | not applicable — compiler, not a frontend app |
 | auth.map.md              | absent  | not applicable — auth lives in stdlib/auth and user .scrml programs |
@@ -71,37 +64,42 @@ W-AUTH-PAGE-INFERRED (auth-graph.ts classifyGates())
 | infra.map.md             | absent  | no Dockerfile, no .github/workflows, no Terraform, no docker-compose |
 | migrations.map.md        | absent  | per-file `<schema>` blocks (§39) + `scrml migrate` CLI; no migrations dir |
 | jobs.map.md              | absent  | stdlib/cron exists but compiler itself does not run jobs |
-| non-compliance.report.md | present | 4 non-compliant; 3 uncertain; 110 compliant (S90 scan) |
+| non-compliance.report.md | present | 4 non-compliant (unchanged from S90); 3 uncertain (+1 new: A-4 SCOPING status line); 131 compliant (S91 scan) |
 
 ## File Routing
 
-types / interfaces / AST node kinds           → schema.map.md
-auth-graph types (AuthGraph/AuthGate/RoleEnum) → schema.map.md
-reachability types (RSInput/RSOutput/ChunkPlan) → schema.map.md
-wire-format types + helpers                   → schema.map.md
-environment variables / config keys           → config.map.md
-CLI flags                                     → config.map.md + build.map.md
-test patterns / fixtures / runner             → test.map.md
-build commands / CLI subcommands / hooks      → build.map.md
-directory layout / entry points               → structure.map.md
-external packages / internal pipeline graph   → dependencies.map.md
-business rules / pipeline stages / spec       → domain.map.md
-error codes / warning families / handlers     → error.map.md
-event bus / channel placement / input devices → events.map.md
-null/absence migration tasks                  → domain.map.md (Task-Shape Routing)
-Approach A continuation (A-2.7+, A-4, A-5)   → domain.map.md (Task-Shape Routing)
+types / interfaces / AST node kinds             → schema.map.md
+auth-graph types (AuthGraph/AuthGate/RoleEnum)   → schema.map.md
+reachability types (RSInput/RSOutput/ChunkPlan)  → schema.map.md
+per-route splitter types (ChunkKey/ChunkOutput)  → schema.map.md
+fnv1a-hash primitive (FNV_OFFSET/FNV_PRIME)      → schema.map.md
+wire-format types + helpers                      → schema.map.md
+environment variables / config keys              → config.map.md
+CLI flags (--emit-per-route, --emit-reachability) → config.map.md + build.map.md
+generate subcommand options                      → config.map.md
+test patterns / fixtures / runner                → test.map.md
+build commands / CLI subcommands / hooks         → build.map.md
+directory layout / entry points                  → structure.map.md
+external packages / internal pipeline graph      → dependencies.map.md
+business rules / pipeline stages / spec          → domain.map.md
+error codes / warning families / handlers        → error.map.md
+event bus / channel placement / chunk prefetch   → events.map.md
+null/absence migration tasks                     → domain.map.md (Task-Shape Routing)
+Approach A continuation (A-5)                    → domain.map.md (Task-Shape Routing)
+W-AUTH-LOGIN-MISSING resolution                  → domain.map.md (scrml generate auth)
 
 ## Key Facts
-- Entry point is `compiler/src/cli.js` → `compiler/src/api.js` which orchestrates 14+ pipeline stages (BS→TAB→NR→MOD→CE→UVB→PA→RI→TS→META→DG→BP→RS→CG plus Stage 3.007 LINT-TRY-CATCH + Stage 3.105 STDLIB-EXPORT-SEED)
-- SPEC.md (27,145 lines) is normative; SPEC-INDEX.md (320 lines) is the navigation index; PIPELINE.md (v0.7.1, 2,758 lines) is the implementation contract. SPEC §57 Wire Format added S90.
-- Test suite: 617 files, 12,275 pass / ~117 skip / 1 todo / 0 fail at S90 close (ff9be0e); pre-commit hook gates on unit+integration+conformance subsets
-- `null` and `undefined` do NOT exist in scrml at any level — SPEC §42 + §42.1.1 normative; `""` / `0` / `false` are DEFINED values; canonical absence is `not`; wire encoding of absence is `{"__scrml_absent": true}` (SPEC §57)
-- AuthGraph (A-3, auth-graph.ts) is COMPLETE at S90 but NOT YET WIRED into api.js — runAuthGraph() exists standalone; RS degrades to all-in until wiring dispatch
-- Reachability Solver Components 1-5 all wired at S90 (A-2.2..A-2.6); A-2.7 outer fixed-point operator is the remaining gap before the solver produces real per-role ChunkPlans
-- Six new diagnostic codes landed S90: W-CG-UNDEFINED-INTERPOLATION, I-AUTH-REDIRECT-UNRESOLVED, E-AUTH-GRAPH-002, W-AUTH-RUNTIME-FALLBACK, E-CLOSURE-002, W-AUTH-PAGE-INFERRED
+- Entry point is `compiler/src/cli.js` → `compiler/src/api.js` which orchestrates 15+ pipeline stages (BS→TAB→NR→MOD→CE→UVB→PA→RI→TS→META→DG→BP→AuthGraph→RS→CG plus Stage 3.007 LINT-TRY-CATCH + Stage 3.105 STDLIB-EXPORT-SEED)
+- SPEC.md (~27,200+ lines) is normative; PIPELINE.md (v0.7.1, 2,758 lines) is the implementation contract. §34 + §40.9.11 catalog extended S91 with W-CG-CHUNK-* + W-AUTH-LOGIN-MISSING
+- Test suite: 629 files, 12,517 pass / ~117 skip / 1 todo / 0 fail at S91 close (b28f493); pre-commit hook gates on unit+integration+conformance subsets
+- `null` and `undefined` do NOT exist in scrml at any level — SPEC §42 + §42.1.1 normative; `""` / `0` / `false` are DEFINED values; canonical absence is `not`; wire encoding is `{"__scrml_absent": true}` (SPEC §57)
+- A-2 Reachability Solver (A-2.1..A-2.8) FULLY CLOSED: all 5 components + outer fixed-point (A-2.7) + canonical JSON (A-2.8) + real-AuthGraph feed (A-3.5). Solver produces real per-role ChunkPlans.
+- A-3 AuthGraph (A-3.1..A-3.5) FULLY CLOSED: runAuthGraph() wired into api.js at Stage 7.55; W-AUTH-LOGIN-MISSING + `scrml generate auth` + login.scrml template closes 03-contact-book v0.2.x latent bug
+- A-4 Per-Route Artifact Splitter (A-4.1..A-4.7) FULLY CLOSED: chunks ACTIVATE in adopter browsers; FNV-1a content-addressing (§47.5 normative); role-detection bootstrap; W-CG-CHUNK-* lint family; --emit-per-route opt-in (default-on at v0.3.0 cut per OQ-A4-F)
+- Next priority: A-5 integration tests (end-to-end adopter scenarios); stdlib/http async migration (4 W-TRY-CATCH sites)
 
 ## Tags
-#scrmlts #map #primary #s90 #v0.3 #approach-a #approach-a2 #approach-a3 #wire-format #auth-graph #null-eradication #reachability #m-7c-d-12
+#scrmlts #map #primary #s91 #v0.3 #approach-a #approach-a2 #approach-a3 #approach-a4 #wire-format #auth-graph #null-eradication #reachability #m-7c-d-12 #route-splitter #fnv1a-hash #generate-auth #chunk-prefetch
 
 ## Links
 - [structure.map.md](./structure.map.md)

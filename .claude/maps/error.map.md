@@ -1,6 +1,6 @@
 # error.map.md
 # project: scrmlts
-# updated: 2026-05-14T00:37:04-06:00  commit: ff9be0e
+# updated: 2026-05-14  commit: b28f493
 
 ## Error Code System
 
@@ -48,8 +48,8 @@ All extend `_ScrmlError extends Error`.
 | E-CHANNEL-* | 001, 007, 008 | Channel declaration/usage |
 | E-CHANNEL-OUTSIDE-PROGRAM | §38.1 | `<channel>` at file-top in file with `<program>` sibling |
 | E-CHANNEL-INSIDE-PAGE | §38.1 | `<channel>` inside `<page>` |
-| E-CLOSURE-001 | §40.9.1, §40.9.11 | Closure analysis fails to terminate — fixed-point non-termination (defensive; should not fire on valid source) |
-| E-CLOSURE-002 | §40.9.5, §40.9.11 | App uses `<auth role=...>` variant-referencing gates with no app-scope role enum declared; fired by A-2.5 (Component 4) per OQ-A2-F ratification |
+| E-CLOSURE-001 | §40.9.1, §40.9.11 | Closure analysis fails to terminate — fixed-point non-termination; fired by outer-fixpoint.ts when iteration cap reached (A-2.7) |
+| E-CLOSURE-002 | §40.9.5, §40.9.11 | App uses `<auth role=...>` variant-referencing gates with no app-scope role enum declared; fired by A-2.5 (Component 4) |
 | E-COMPONENT-* | 010–035 | Component expansion/definition |
 | E-CONTRACT-* | 001–004 | Pipeline contract violations |
 | E-CTRL-* | 001–005, 011 | Control flow errors |
@@ -103,17 +103,32 @@ Fire-site: `compiler/src/auth-graph.ts` + `compiler/src/reachability/component-4
 | E-AUTH-GRAPH-004 | error | `<auth>` block without `role=` AND without `check=` | A-3.3 classifyGates() |
 | I-AUTH-REDIRECT-UNRESOLVED | info | gate redirect target path does not match any RouteMap.pages URL | A-3.4 crossRefRedirects() |
 | W-AUTH-PAGE-INFERRED | info | `<page>` lacks explicit `auth=` AND enclosing `<program auth=required>` present (no auto-inheritance; explicit-per-page-only per OQ-A3-C) | A-3.3 classifyGates() |
+| W-AUTH-LOGIN-MISSING | warning | auth gates present + no login page at configured loginRedirect path; two-tier (§34 §40.9.11 — structural-gap, compile-scoped, fires once per compilation) [NEW S91] | auth-graph.ts checkLoginMissing() |
 | W-AUTH-RUNTIME-FALLBACK | info | auth gate uses async-only check; static role classification impossible; gated component shipped eagerly | A-2.5 component-4.ts |
 | E-CLOSURE-002 | error | application uses auth-role-block gates but declares no app-scope role enum | A-2.5 component-4.ts |
 
-Note: §34 catalog rows for `I-AUTH-REDIRECT-UNRESOLVED` and `W-AUTH-PAGE-INFERRED` deferred to A-3.5 SPEC dispatch. `W-AUTH-RUNTIME-FALLBACK` and `E-CLOSURE-002` ARE in the §34 catalog at S90.
+## Chunk Lint Codes (A-4.7, new S91 — fired from route-splitter.ts:emitChunkLints)
+
+| Code | Severity | When fired |
+|------|----------|-----------|
+| W-CG-CHUNK-EMPTY | warning | entry-point produces zero non-empty chunks across all roles |
+| W-CG-CHUNK-LARGE | warning | initial chunk payloadJs exceeds soft size budget (~50 KB) |
+| W-CG-CHUNK-NO-PREFETCH | warning | internal `<a href>` links present but no tier-2 prefetch chunks in multi-route app |
+| W-CG-CHUNK-MISSING-ROLE | warning | `<auth role="X">` references a role with no ChunkPlan in reachability record |
+
+All four added to SPEC §34 + §40.9.11 catalog at S91.
 
 ## Warning Codes (W-*)
 
 | Code | Severity | Domain |
 |------|----------|--------|
 | W-ABSENCE-IN-SCRML-SOURCE | info | `null` or `undefined` in scrml source (S89 renamed from W-NULL-IN-SCRML-SOURCE) |
-| W-CG-UNDEFINED-INTERPOLATION | warning | Bare `undefined` JS keyword found in compiled output (M-7C-D-12 Track 3; fires from `lint-undefined-interpolation.ts`; SPEC §34 catalog row added S90) |
+| W-CG-UNDEFINED-INTERPOLATION | warning | Bare `undefined` JS keyword found in compiled output (M-7C-D-12 Track 3; fires from `lint-undefined-interpolation.ts`) |
+| W-CG-CHUNK-EMPTY | warning | entry-point produces zero non-empty chunks (A-4.7, route-splitter.ts) |
+| W-CG-CHUNK-LARGE | warning | initial chunk exceeds size budget (A-4.7, route-splitter.ts) |
+| W-CG-CHUNK-NO-PREFETCH | warning | internal links without prefetch chunks (A-4.7, route-splitter.ts) |
+| W-CG-CHUNK-MISSING-ROLE | warning | `<auth role=X>` role not in reachability record (A-4.7, route-splitter.ts) |
+| W-AUTH-LOGIN-MISSING | warning | auth gates present but no login page at loginRedirect path (A-3.5, auth-graph.ts) |
 | W-ENGINE-SELF-WRITE-DETECTED | info | Engine self-write detected; runtime NO-OP (two fire-sites: symbol-table.ts PASS 12.B + PASS 16) |
 | W-INPUT-001 | warning | §36 input device warning |
 | W-PROGRAM-REDUNDANT-LOGIC | warning | Redundant `${}` block in program/page body |
@@ -152,13 +167,16 @@ Note: §34 catalog rows for `I-AUTH-REDIRECT-UNRESOLVED` and `W-AUTH-PAGE-INFERR
 | compiler/src/validators/lint-async-user-source.ts | Async user-source lint pass |
 | compiler/src/symbol-table.ts PASS 12.B | W-ENGINE-SELF-WRITE-DETECTED outside-state-child |
 | compiler/src/symbol-table.ts PASS 16 | W-ENGINE-SELF-WRITE-DETECTED inside-state-child |
-| compiler/src/codegen/lint-undefined-interpolation.ts | W-CG-UNDEFINED-INTERPOLATION post-emission scan [NEW S90] |
-| compiler/src/auth-graph.ts classifyGates() | W-AUTH-PAGE-INFERRED + E-AUTH-GRAPH-* [NEW S90] |
-| compiler/src/auth-graph.ts crossRefRedirects() | I-AUTH-REDIRECT-UNRESOLVED [NEW S90] |
-| compiler/src/reachability/component-4.ts | W-AUTH-RUNTIME-FALLBACK + E-CLOSURE-002 [NEW S90] |
+| compiler/src/codegen/lint-undefined-interpolation.ts | W-CG-UNDEFINED-INTERPOLATION post-emission scan |
+| compiler/src/auth-graph.ts classifyGates() | W-AUTH-PAGE-INFERRED + E-AUTH-GRAPH-* |
+| compiler/src/auth-graph.ts crossRefRedirects() | I-AUTH-REDIRECT-UNRESOLVED |
+| compiler/src/auth-graph.ts checkLoginMissing() | W-AUTH-LOGIN-MISSING [NEW S91] |
+| compiler/src/reachability/component-4.ts | W-AUTH-RUNTIME-FALLBACK + E-CLOSURE-002 |
+| compiler/src/reachability/outer-fixpoint.ts | E-CLOSURE-001 [NEW S91 A-2.7] |
+| compiler/src/codegen/route-splitter.ts emitChunkLints() | W-CG-CHUNK-* family [NEW S91 A-4.7] |
 
 ## Tags
-#scrmlts #map #error #diagnostics #runtime-errors #error-codes #s90 #wire-format #auth-graph #w-cg-undefined #closure #auth-runtime-fallback
+#scrmlts #map #error #diagnostics #runtime-errors #error-codes #s91 #wire-format #auth-graph #w-cg-undefined #closure #auth-runtime-fallback #w-cg-chunk #w-auth-login-missing #route-splitter
 
 ## Links
 - [primary.map.md](./primary.map.md)
