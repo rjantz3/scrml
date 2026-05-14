@@ -165,13 +165,17 @@ export interface ChunkContents {
  *     terminate. Fired by A-2.7's `FixedPointDriver` when the
  *     iteration cap (`2 × |DG_nodes|` per OQ-A2-G disposition,
  *     scheduled A-2.7) is reached.
+ *   - `E-CLOSURE-002` — error. Application uses `<auth role=...>`
+ *     variant-referencing gates but declares no app-scope role enum
+ *     (`:enum` type per SPEC §40.1.1). Fired by A-2.5 per OQ-A2-F
+ *     ratification (S89 — author code in v0.3, fire from RS not A-3).
  *   - `W-AUTH-RUNTIME-FALLBACK` — info-level lint. Auth gate uses an
  *     async-only check; the gated component is shipped eagerly.
  *     Fired by A-2.5 per OQ-A2-I disposition (single fire-site
  *     inside RS).
  */
 export interface ReachabilityDiagnostic {
-  code: "E-CLOSURE-001" | "W-AUTH-RUNTIME-FALLBACK";
+  code: "E-CLOSURE-001" | "E-CLOSURE-002" | "W-AUTH-RUNTIME-FALLBACK";
   severity: "error" | "info";
   message: string;
   /** Optional source-location span (mirrors compiler error shape). */
@@ -269,8 +273,14 @@ export interface RSInput {
   depGraph: { nodes: Map<NodeId, unknown>; edges: unknown[] } | null | undefined;
   /** From Stage 5 RI — per-route entry-point list per §40.8. */
   routeMap?: unknown;
-  /** Derived from §40 auth-attribute classification — A-3's output (consumed by A-2.5). */
-  authGraph?: unknown;
+  /**
+   * Derived from §40 auth-attribute classification — A-3's `AuthGraph`
+   * output (consumed by A-2.5). NULL when the pipeline bypasses A-3
+   * entirely (e.g. unit tests for A-2.2..A-2.6 that don't exercise
+   * Component 4); A-2.5 degrades to the single-anonymous-role floor.
+   * Imported via the `AuthGraph` symbol from `./auth-graph.ts`.
+   */
+  authGraph?: import("./auth-graph.ts").AuthGraph | null | undefined;
   /** From RI / §52 — classified server-fn set (consumed by A-2.4). */
   serverFnBoundary?: unknown;
   /** From MOD / §41 — declared vendor units per file (consumed by A-2.6). */
@@ -305,12 +315,19 @@ export interface RSOutput {
  * Top-level error shape for the solver — mirrored on
  * `BatchPlannerError` from `batch-planner.ts`.
  *
- * `E-CLOSURE-001` is emitted as error; `W-AUTH-RUNTIME-FALLBACK` is
- * emitted as info-level lint. The api.js error filter routes by
- * `severity` and the `W-` code prefix.
+ * `E-CLOSURE-001` and `E-CLOSURE-002` are emitted as error;
+ * `W-AUTH-RUNTIME-FALLBACK` is emitted as info-level lint. The api.js
+ * error filter routes by `severity` and the `W-`/`I-` code prefix.
+ *
+ * `E-CLOSURE-002` is fired by A-2.5 Component 4 when the application
+ * uses `<auth role=...>` variant-referencing gates without declaring an
+ * app-scope role enum per SPEC §40.1.1. Per OQ-A2-F (S89 ratification)
+ * the fire-site is RS, NOT A-3 — A-3's role-enum resolver produces an
+ * `isImplicitAnonymous: true` signal and A-2.5 acts on that signal in
+ * combination with auth-role-block gate presence.
  */
 export interface RSError {
-  code: "E-CLOSURE-001" | "W-AUTH-RUNTIME-FALLBACK";
+  code: "E-CLOSURE-001" | "E-CLOSURE-002" | "W-AUTH-RUNTIME-FALLBACK";
   severity: "error" | "warning" | "info";
   message: string;
   span?: unknown;

@@ -9,8 +9,10 @@
  * RoleEnum + (informational) BatchPlan and produces a per-entry-point
  * per-role ChunkPlan tree per SPEC §40.9.7.
  *
- * **A-2.1 SCAFFOLD ONLY.** This module is the pipeline slot; the
- * algorithm lands across A-2.2 through A-2.7:
+ * **A-2.5 (S90):** Components 1 + 2 + 3 + 4 + 5 wired through the
+ * orchestrator. Remaining waves: A-2.7 (outer fixed-point operator).
+ *
+ * Wave decomposition:
  *
  *   - A-2.2 — Component 1: initially_rendered_components + entry-point
  *             enumeration (§40.9.2).
@@ -59,24 +61,24 @@ import {
   type ReadOnlyDependencyGraph,
 } from "./reachability/component-2.ts";
 import { computeServerFnReachableWithin } from "./reachability/component-3.ts";
+import {
+  ANONYMOUS_ROLE,
+  computeAuthGatedBoundariesVisibleTo,
+  isVisibleForRole,
+  type Component4Result,
+} from "./reachability/component-4.ts";
 import { computeVendorUnitsUsed } from "./reachability/component-5.ts";
 import type { VendorUnitId } from "./types/reachability.ts";
 import type { ConstFoldEnv } from "./codegen/constant-folder.ts";
 
 // ---------------------------------------------------------------------------
-// Anonymous-viewer role
+// Anonymous-viewer role — re-exported from Component 4 for backwards-compat
 // ---------------------------------------------------------------------------
-
-/**
- * Canonical role variant emitted when no role enum is present.
- *
- * PIPELINE Stage 7.6 line 2380 — when an application has no role enum
- * declared and no auth gates, the solver synthesizes a single
- * anonymous viewer variant under this name. Component 4 (A-2.5) will
- * replace this with proper per-role classification once AuthGraph
- * lands.
- */
-const ANONYMOUS_ROLE: RoleVariant = "_anonymous";
+//
+// PIPELINE Stage 7.6 line 2380 canonical name for the synthesized
+// anonymous viewer variant. Component 4 (A-2.5) owns the canonical
+// constant; the orchestrator imports it as the floor for the
+// no-AuthGraph case.
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -85,10 +87,13 @@ const ANONYMOUS_ROLE: RoleVariant = "_anonymous";
 /**
  * Run the Stage 7.6 Reachability Solver.
  *
- * **A-2.4 (S90):** Component 3 (`server_fn_reachable_within`) lands,
- * sibling to A-2.6 Component 5. Subsequent waves (A-2.5 + A-2.7)
- * extend the body — Component 4 auth-gated boundaries, then the
- * outer fixpoint operator.
+ * **A-2.5 (S90):** Component 4 (`auth_gated_boundaries_visible_to`)
+ * lands. Per-role ChunkPlan emission replaces the single-anonymous
+ * floor: each entry point's `RolePlayableSurface.byRole` carries one
+ * ChunkPlan per role variant when the application declares a role
+ * enum (§40.1.1); the single-anonymous floor is preserved for
+ * applications with no enum or `isImplicitAnonymous === true`.
+ * Subsequent wave A-2.7 wires the outer fixpoint operator.
  *
  * Current scope:
  *   1. Enumerate entry points from `input.files` per §40.8 shapes.
@@ -109,9 +114,17 @@ const ANONYMOUS_ROLE: RoleVariant = "_anonymous";
  *      §40.9.6 (Component 5) — populates `ChunkContents.vendorUnitNames`.
  *      Opacity rule: each §41 vendor unit is admitted as a whole
  *      atom (no internal graph subdivision).
- *   6. Emit a single-role ChunkPlan keyed `_anonymous` (PIPELINE
- *      Stage 7.6 line 2380 placeholder). Component 4 (A-2.5) will
- *      replace this with proper per-role classification.
+ *   6. (A-2.5) Run Component 4 — derive effective role list +
+ *      per-gate per-role visibility verdicts + gate-ancestry index
+ *      from the AuthGraph. Stream W-AUTH-RUNTIME-FALLBACK (info) and
+ *      E-CLOSURE-002 (error) diagnostics into the orchestrator's
+ *      `errors` output.
+ *   7. Emit per-role ChunkPlans: one ChunkPlan per entry-point per
+ *      effective role variant. Components inside an auth gate
+ *      classified OUT for the current role are filtered out of that
+ *      role's plan; RUNTIME-FALLBACK gates do NOT drop (eager-ship).
+ *      Single-anonymous-keyed emission preserved when the application
+ *      has no role enum or roleEnum.isImplicitAnonymous === true.
  *
  * **Determinism:** entry points + walked nodes are emitted in source
  * order (PIPELINE Stage 7.6 line 2391).
@@ -161,7 +174,42 @@ export function runReachabilitySolver(input: RSInput): RSOutput {
   // whole by VendorUnitId. Per-unit chunking is A-4's concern.
   const vendorUnits = computeVendorUnitsUsed(irc, files);
 
+  // Component 4 (A-2.5) — auth-gated boundaries visible per role. The
+  // AuthGraph is duck-typed at the boundary; when absent (unit tests
+  // bypassing A-3 or pipeline configurations where A-3 hasn't wired in
+  // yet, e.g. before A-3.5) Component 4 degrades to the
+  // single-anonymous-role floor (no gates, no role enum, no per-role
+  // filtering). The diagnostics stream from C4 — W-AUTH-RUNTIME-FALLBACK
+  // info-level lint per OQ-A2-I + E-CLOSURE-002 error per OQ-A2-F — is
+  // unioned into the orchestrator's `errors` output verbatim.
+  const c4 = computeAuthGatedBoundariesVisibleTo(input.authGraph, files);
+  for (const e of c4.errors) errors.push(e);
+
   // Materialize per-entry-point per-role ChunkPlans.
+  //
+  // Per-role emission shape (A-2.5 structural extension):
+  //   - When `c4.effectiveRoles === ["_anonymous"]` (no role enum or
+  //     implicit-anonymous) the inner loop runs once per entry point
+  //     with role = "_anonymous" — matches the pre-A-2.5 behaviour
+  //     (single-keyed ChunkPlan).
+  //   - When `c4.effectiveRoles.length > 1` the loop runs once per
+  //     role; each iteration filters the closure's componentNodeIds
+  //     by per-role gate-ancestry visibility (Component 4's
+  //     `gateAncestry` × `gateVisibility`). Markup nodes inside a gate
+  //     classified OUT for the current role are dropped from that
+  //     role's plan. RUNTIME-FALLBACK gates do NOT drop (eager-ship
+  //     per §40.9.5).
+  //
+  // Per-role filtering is currently applied to `componentNodeIds`
+  // only. Reactive cells (Component 2) carry DG node ids that have no
+  // direct markup-tree ancestry through the present pipeline; same
+  // for server-fns (Component 3). Per-cell / per-server-fn gating is
+  // out of scope for A-2.5 — admission proceeds at the entry-point
+  // closure level for these, matching the conservative ship-eagerly
+  // floor (§40.9.5 runtime-fallback semantics). The follow-up at
+  // A-2.7 (outer fixpoint) and A-4 (artifact splitter) will refine.
+  // Vendor units are per-file declarations (§40.9.6 opacity rule) and
+  // are not filtered per role for the same reason.
   for (const ep of entryPoints) {
     const componentIds: Set<NodeId> = irc.get(ep.id) ?? new Set();
     const reactiveCellIds: Set<NodeId> =
@@ -173,18 +221,54 @@ export function runReachabilitySolver(input: RSInput): RSOutput {
     };
     const vendorUnitNames: Set<VendorUnitId> =
       vendorUnits.get(ep.id) ?? new Set();
-    const plan = makeChunkPlan(
-      componentIds,
-      reactiveCellIds,
-      serverFnTiers,
-      vendorUnitNames,
-    );
+
     const rps: RolePlayableSurface = { byRole: new Map() };
-    rps.byRole.set(ANONYMOUS_ROLE, plan);
+    for (const role of c4.effectiveRoles) {
+      const roleComponents = filterComponentsByRole(componentIds, role, c4);
+      const plan = makeChunkPlan(
+        roleComponents,
+        reactiveCellIds,
+        serverFnTiers,
+        vendorUnitNames,
+      );
+      rps.byRole.set(role, plan);
+    }
     record.closures.set(ep.id satisfies EntryPointId, rps);
   }
 
   return { record, errors };
+}
+
+/**
+ * Filter a closure's componentNodeIds set by per-role gate-ancestry
+ * visibility.
+ *
+ * For each markup id in the input set, look up its ancestor gate chain
+ * (via `c4.gateAncestry`) and the per-role visibility of each ancestor
+ * (via `c4.gateVisibility`). The component is admitted to the role's
+ * plan iff `isVisibleForRole` returns true (no ancestor gate is OUT for
+ * the role; RUNTIME-FALLBACK ancestors do not drop).
+ *
+ * Short-circuits when `c4.effectiveRoles.length === 1` AND the role IS
+ * `_anonymous` AND the ancestry index is empty — preserves the
+ * pre-A-2.5 zero-filter floor for the trivial case.
+ */
+function filterComponentsByRole(
+  componentIds: Set<NodeId>,
+  role: RoleVariant,
+  c4: Component4Result,
+): Set<NodeId> {
+  // Floor: no gates at all — nothing to filter, return the input set.
+  if (c4.gateVisibility.size === 0) {
+    return new Set(componentIds);
+  }
+  const out = new Set<NodeId>();
+  for (const id of componentIds) {
+    if (isVisibleForRole(id, role, c4.gateVisibility, c4.gateAncestry)) {
+      out.add(id);
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
