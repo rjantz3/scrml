@@ -4,7 +4,7 @@
 
 **Status:** living document. Updated when SPEC changes, when locks land, when patterns emerge. Treat as the canon snapshot at the listed date.
 
-**Last updated:** 2026-05-07 (S68 — A5-1 spec amendments LANDED: §51.0.K Machine Cohesion footnote (singleton invariant articulated; nested engines permitted in composite state-children); §51.0.M `<onTimeout>` element (engine temporal surface; rides §51.12 runtime); §51.0.N `history` attribute on composite state-children + `.Variant.history` structured target form (shallow-only this revision); §51.0.O `internal:rule=` prefix; §51.0.P `parallel` attribute on file-scope `<engine>` (naming sugar); §51.0.Q hierarchy / nested `<engine>` declarations + parent-rule cascade dispatch; §51.12.3.1 computed-delay relaxation; §34 +2 codes E-HISTORY-NO-INNER-ENGINE + E-INTERNAL-RULE-NOT-COMPOSITE. Implementation pending Phase A7 dispatch. Earlier baseline: 2026-05-06 (S64; reflects forgotten-surface audit findings + Phase 4d completion sweep — pipeline bookends, retired-AST-kinds (1 of 5 truly retired, interface dropped), 19 `@deprecated Phase 4d` string field declarations dropped from ast.ts).
+**Last updated:** 2026-05-14 (S92 — Approach A close end-to-end: A-1 markup-context edges (S88) + A-2 Reachability Solver (S89-S91, 5 components + outer fixpoint + canonical JSON §40.9.8) + A-3 §40 AuthGraph (S91, `<auth role>` first-class element + 5 sub-phases) + A-4 Per-Route Artifact Splitter (S91, 7 sub-phases + §47 FNV-1a content-addressing) + A-5 Integration Tests (S92, 5 sub-phases). v0.3.0 critical path complete; cut gated only on Wave 4.A adopter content. See new §9.7 below for the full overview. Plus: Q-OPEN-4 (S92) sourced `chunks.json` `compiler` field from package.json + bumped pkg.json to 0.3.0-alpha.0; Q-OPEN-6 (S92) split W-CG-CHUNK-NO-PREFETCH into Info (case 1: no internal links) + new W-CG-CHUNK-PREFETCH-UNRESOLVED Warning (case 2: links resolve nowhere); Q-OPEN-5 (S92) added `--chunk-size-budget` CLI flag. Insight 30 (S87) ratified: channels are CHILDREN of entry-file `<program>` (sibling of `<page>`) — §9.1 below rewritten. S86 ratifications: idiomatic-examples styling rule (no file-top `#{}`), corpus-ouroboros warning, BS-layer over SPEC retreat (Option A). S89 ABSOLUTE rule: `null` and `undefined` do NOT exist in scrml source; `not` for absence; `""`/`0`/`false`/`[]`/`{}` are defined values. Earlier baselines: 2026-05-07 (S68 — A5-1 spec amendments) → 2026-05-06 (S64 — forgotten-surface audit + Phase 4d completion sweep).
 
 **Word of caution:** if this primer disagrees with `compiler/SPEC.md` or `docs/articles/llm-kickstarter-v2-2026-05-04.md`, the SPEC + kickstarter are authoritative. Surface the contradiction.
 
@@ -297,28 +297,29 @@ Compound state with validators auto-synthesizes a reactive validity surface at T
 
 D3 landed S58 — `compiler/SPEC.md` §38 / §39 / §42 / §53 / §34 are now authoritative.
 
-### §9.1 Channels (§38) — file-level, V5-strict, no `@shared`
+### §9.1 Channels (§38) — inside `<program>` (Insight 30, S87), V5-strict, no `@shared`
 
 ```scrml
-<channel name="chat" topic="lobby">
-  <messages> = []                                    // V5-strict — auto-syncs across clients
-
-  server function postMessage(author, body) {
-    @messages = [...@messages, { author, body, ts: Date.now() }]
-  }
-</>
-
 <program>
-  ${ const count = @messages.length }                // cross-scope canonical access
+
+  <channel name="chat" topic="lobby">
+    <messages> = []                                    // V5-strict — auto-syncs across clients
+    ${ server function postMessage(author, body) {
+        @messages = [...@messages, { author, body, ts: Date.now() }]
+    } }
+  </>
+
+  ${ const count = @messages.length }                  // cross-scope canonical access
 </>
 ```
 
-- Channels live at **file level** (sibling of `<program>`, never child). `E-CHANNEL-INSIDE-PROGRAM`.
+- Channels live as **CHILDREN of the entry-file `<program>`** (sibling of `<page>` declarations) — Insight 30 placement reversal ratified S87 (`scrml-support/design-insights.md`). `E-CHANNEL-OUTSIDE-PROGRAM` if at file top in a file that declares `<program>`; `E-CHANNEL-INSIDE-PAGE` if nested inside an individual `<page>`.
+- **Pure-channel module files** (no `<program>` in the file) MAY declare `<channel>` at file top — the "pure channel file" sharing pattern, §38.12.6.
 - `@shared` modifier is **REMOVED** in v0.next. `E-CHANNEL-SHARED-MODIFIER`. Auto-sync comes from being inside the channel body, not from a modifier.
 - Channel body uses **V5-strict** (§6). `<x> = init` declares a channel-scoped reactive cell auto-synced across subscribed clients.
 - Auto-creates WS endpoint `/_scrml_ws/<name>`; `topic=` defaults to `name`.
 - Auto-injected in server functions: `broadcast(data)`, `disconnect()`.
-- Channel-declared cells reachable from `<program>` via canonical `@cellName` access.
+- Channel-declared cells reachable from elsewhere in `<program>` via canonical `@cellName` access — program-scope visible.
 - Handler attribute params (`onserver:message=handler(msg)`) — `msg` is a function-local LOCAL, accessed bare. V5-strict locals semantic; not state.
 
 ### §9.2 Schema (§39) — SQL-mirror canonical + additive shared-core (L4)
@@ -372,12 +373,53 @@ D4 (S58 close) threaded the locks/moves across the smaller spec sections. Highli
 
 - **Cross-file engine import** (§21.8, M18). `import { MarioMachine } from './engines.scrml'` then mount via `<MarioMachine/>` at use-sites. Singleton semantics across all use-sites in the importer's file. `pinned` legal on imports: `import { MarioMachine pinned } from './engines.scrml'`.
 - **Components vs engines** (§15.13.5, M20). Singleton-by-design (`<engine>`) ≠ multi-instance (component). Component bodies cannot instantiate an engine — `E-COMPONENT-ENGINE-SCOPE`.
-- **Structural elements registry** (§4 + §24). `<engine>`, `<match>`, `<errors>`, `<onTransition>` are scrml-defined structural elements (NOT HTML). `E-STRUCTURAL-ELEMENT-MISPLACED` if used in unsupported contexts.
+- **Structural elements registry** (§4 + §24). `<engine>`, `<match>`, `<errors>`, `<onTransition>`, `<onTimeout>` (§51.0.M, S77), `<onIdle>` (§51.0.R, S77), `<channel>` (§38), `<page>` (§4.15, S85), `<auth>` (§40.1, S91) are scrml-defined structural elements (NOT HTML). `E-STRUCTURAL-ELEMENT-MISPLACED` if used in unsupported contexts.
 - **Bare-variant inference** (§14.10, M9). When LHS or parameter type is statically known, the variant qualifier may be omitted: `<phase>: Phase = .Idle` not `Phase.Idle`. Union-typed contexts → ambiguous → require qualification.
 - **`:`-shorthand body** (§4.14, M15). Single-expression body: `<Idle>: <button onclick=load()>Load</button>`. Whitespace mandatory after `:`.
 - **Multi-statement handler restriction** (§5.2.3, L19). Inline event handlers may be a bare call, bare assignment, or bare single expression. Multi-statement handlers force a named function. `E-MULTI-STATEMENT-HANDLER`.
 - **`scrml:data` `registerMessages`** (§41.12, L12). `data.registerMessages({.ErrorTag: (field, ...args) => string, ...})` — project-wide once-at-boot for i18n + brand-voice. The "project-registered" tier of the 4-level error message chain.
 - **+7 error codes** added in §34 (D4 Tier 9 consolidation): `E-CLOSER-001`, `E-NAME-COLLIDES-RESERVED`, `E-STRUCTURAL-ELEMENT-MISPLACED`, `E-MULTI-STATEMENT-HANDLER`, `E-IMPORT-PINNED-INVALID`, `E-DERIVED-CIRCULAR-DEP`, `E-USE-INVALID-CTX`.
+
+### §9.7 Approach A — closure analysis + per-route artifact splitter (S88-S92)
+
+The v0.3.0 critical-path investment. Five sub-waves, ALL CLOSED end-to-end:
+
+- **A-1 markup-context edges** (S88) — per-interpolation source nodes in the dependency graph (Option Y per S88 user override of PA recommendation Option X — Rule-2 fidelity); ceiling re-measurement 2.04x corpus baseline (523 nodes vs 256 ceiling)
+- **A-2 Reachability Solver** (S89-S91) — 5 reachability components: entry-point closure (Component 1) + reactive-dep-closure (Component 2) + server-fn-reachable-within (Component 3, bounded BFS N=0/1/2 per OQ-A2-B Option a) + auth-gated-boundaries (Component 4, runtime-fallback admission per OQ-A2-I) + vendor-units (Component 5, file-scoped attribution per opacity rule). Plus A-2.7 outer fixpoint operator + A-2.8 canonical JSON serialization (§40.9.8)
+- **A-3 §40 AuthGraph** (S91) — 5 sub-phases: enumerator + role-enum resolution (OQ-A3-F (b)+(c) dual rule) + per-gate classifier (OQ-A3-A user override S91: full interpolation grammar) + redirect cross-ref (OQ-A3-B (a) bare-string) + pipeline wire-in at api.js Stage 7.55. §40.9.9 worked-example 13-test integration replay
+- **A-4 Per-Route Artifact Splitter** (S91) — 7 sub-phases: orchestrator + initial_chunk JS payload + atom-emitter + tier-1 idle-prefetch + tier-2 hover-prefetch (`data-scrml-prefetch` markup attribute) + tier-N on-demand dispatch + §47 FNV-1a content-addressing + per-route HTML augmentation + role-detection bootstrap + chunk-side runtime helpers (`_scrml_chunk_mount` + `_scrml_vendor_require`)
+- **A-5 Integration Tests** (S92) — 5 sub-phases: A-5.1 multi-page multi-role cornerstone (FX-1) + A-5.2 cross-file expansion (FX-2 Form 2 export-const-component) + A-5.3 negative cascades (FX-3 + FX-4) + A-5.4 W-* lint family e2e (FX-5/6/7/8a/8b; verifies Q-OPEN-6 split + Q-OPEN-5 plumbing) + A-5.5 determinism + trucking-dispatch compile-smoke + §40.9.9 case-fix verification + A-5.1 cornerstone false-negative audit-fix bundled
+
+**`<auth role="X">` first-class element (A-3, §40.1).** Compile-time visibility constraint, NOT a runtime check. Universal value-bearing-attr shape: string literal (`role="Admin"`), variable ref (`role=@currentRole`), or `${expr}` (per OQ-A3-A user override S91 — *"the idea that user defined state has full interpolation but first class compiler supported state doesn't is confusing, counter intuitive, and hints that the language is still in a 'toy' status"*). Closed-form predicates (variant literals + literal comma-OR + const-refs to role-set values + boolean composition of statically-known operands) ship per-role bundles. Runtime-fallback predicates (reactive reads, async server-fn calls, arbitrary expressions) emit `W-AUTH-RUNTIME-FALLBACK` (info-level lint) and ship the gated component eagerly per §40.9.5.
+
+**Per-route per-role chunk variance (A-4).** Per (entry-point, role, tier) the route-splitter emits a content-addressed chunk descriptor. Anonymous visitors download a strictly smaller initial bundle than admins because the gated subtree's atoms aren't in their per-role chunk. Tiered prefetching: tier-1 idle-prefetch fires on `requestIdleCallback` via `_scrml_prefetch_tier1`; tier-2 hover-prefetch fires on hover via `data-scrml-prefetch` markup attribute (`_scrml_prefetch_tier2`); tier-N on-demand pulls when navigation actually fires.
+
+**Content-addressing (A-4.6, §47).** Every chunk filename embeds the lower-32-bit FNV-1a hash of the chunk's normalized canonical string, lowercase base36, zero-padded to 8 characters. Adopter caches stay valid across builds when source bytes don't change. The `compiler` field of `chunks.json` manifest is sourced from `package.json` `version` (Q-OPEN-4 ratification S92 — single source of truth; informational only, NOT a hash input per §40.9.8). pkg.json bumped to `0.3.0-alpha.0` (S92).
+
+**Diagnostic family (8 W-* + 3 E-* + 1 I-*).** Surface for shapes that defeat or activate the analysis:
+
+| Code | Severity | Fires when |
+|---|---|---|
+| `W-CG-CHUNK-EMPTY` | Warning | A route's initial chunk has no atoms (placeholder body) |
+| `W-CG-CHUNK-LARGE` | Warning | Initial chunk exceeds size budget (configurable via `--chunk-size-budget`, Q-OPEN-5 S92) |
+| `W-CG-CHUNK-NO-PREFETCH` | Info | Page has no internal `<a href>` links (genuine no-prefetch case; severity narrowed at Q-OPEN-6 split S92) |
+| `W-CG-CHUNK-PREFETCH-UNRESOLVED` | Warning | Page has internal links but none resolve to RouteMap.pages (typo / missing page; NEW at Q-OPEN-6 split S92) |
+| `W-CG-CHUNK-MISSING-ROLE` | Warning | Source-cited role NOT in chunk's emittedRoles (typo'd / unresolved role enum) |
+| `W-CG-UNDEFINED-INTERPOLATION` | Warning | Codegen interpolation site would emit literal `"undefined"` to wire format (post-M-7C-D-12 S90 regression-guard) |
+| `W-AUTH-RUNTIME-FALLBACK` | Info | A gate predicate isn't closed-form; gated component shipped eagerly with runtime gate |
+| `W-AUTH-PAGE-INFERRED` | Info | A `<page>` lacks explicit `auth=` under enclosing `<program auth=>`; inference applied |
+| `W-AUTH-LOGIN-MISSING` | Warning | `<program auth="required">` set without explicit loginRedirect AND no `/login` page exists |
+| `E-CLOSURE-001` | Error | RS outer fixpoint iteration-cap overflow (per §40.9.1) |
+| `E-CLOSURE-002` | Error | RS Component 4 implicit-anonymous + auth-role-block (per OQ-A2-F) |
+| `E-AUTH-GRAPH-002` | Error | AuthGraph: role enum required but ambiguous discovery (per A-3.2 OQ-A3-F) |
+| `E-AUTH-GRAPH-003` | Error | AuthGraph: role variant not found in resolved enum (typo'd role) |
+| `I-AUTH-REDIRECT-UNRESOLVED` | Info | A redirect cross-ref resolves to no known route in RouteMap |
+
+**Pipeline integration.** AuthGraph fires at api.js Stage 7.55 between BP and RS (uses BP-resolved markup; produces input for RS Component 4 auth-gated-boundaries). RS Component 4 is the runtime-fallback admission point. Route-splitter fires at Stage 8 sub-emit consuming the ReachabilityRecord.
+
+**api.js diagnostic stream partition (load-bearing for test authoring).** `result.errors` = `!code.startsWith("W-") && severity !== "warning"`. `result.warnings` = `code.startsWith("W-") || severity === "warning"`. So Info-level W-* lints (`W-AUTH-RUNTIME-FALLBACK`, `W-CG-CHUNK-NO-PREFETCH`) land in `result.warnings`. **A-5.1 cornerstone test originally used `result.errors.filter(e => e.code === "W-...")` for "does NOT fire" assertions — STRUCTURAL FALSE NEGATIVE; audit-fixed at A-5.5 (S92) via `allDiags(r) = [...r.errors, ...r.warnings]` cross-stream helper.** When authoring integration tests against W-/I- codes, USE the cross-stream helper.
+
+**Gate on v0.3.0 cut.** Approach A close end-to-end (S88-S92) was the v0.3.0 critical-path investment. v0.3.0 cut blockers remaining: Wave 4.A adopter-content refresh (this primer's update is Phase 4 of that wave) + Wave 4.R (README + currency, Phase 5).
 
 ---
 
