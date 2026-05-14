@@ -76,6 +76,9 @@ import {
   type RouteInfo,
 } from "./atom-emitter.ts";
 import { fnv1aHash } from "./fnv1a-hash.ts";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
 // ---------------------------------------------------------------------------
 // Public types — chunk descriptor shapes (A-4.1)
@@ -301,14 +304,97 @@ export const CHUNK_HASH_PLACEHOLDER = "00000000";
 const ANONYMOUS_ROLE: RoleVariant = "_anonymous";
 
 /**
- * Compiler identity string surfaced in `ChunksManifest.compiler`.
+ * Sentinel surfaced when scrmlTS `package.json` cannot be read or its
+ * `version` field is missing/non-string. The `chunks.json` manifest's
+ * `compiler` field is informational only — a fallback value is always
+ * preferable to throwing inside codegen (Q-OPEN-4 ratification, S92).
+ */
+const COMPILER_IDENTITY_FALLBACK = "scrml-unknown";
+
+/**
+ * Cached `compiler` identity string. Populated on first call to
+ * `getCompilerIdentity()`; subsequent calls reuse the cached value.
+ *
+ * `undefined` is the un-loaded sentinel; once loaded, the value is the
+ * string `"scrml-" + V` (where `V` is `package.json` `version`) on
+ * success, or `COMPILER_IDENTITY_FALLBACK` on any read/parse failure.
+ */
+let cachedCompilerIdentity: string | undefined;
+
+/**
+ * Compute the `ChunksManifest.compiler` identity string from the
+ * scrmlTS `package.json` `version` field (Q-OPEN-4, S92).
+ *
+ * Single-sourced from `package.json` so the manifest tracks the shipped
+ * compiler version without a manually-synced string constant. The value
+ * has shape `"scrml-" + V` where `V` is the literal `version` field
+ * (e.g. `"scrml-0.3.0-alpha.0"`).
  *
  * Informational only — per §40.9.8 the compiler version is NOT a
  * chunk-hash input. The field exists for adopter tooling (debug
  * inspectors, future telemetry-PGO surfaces) to identify the compiler
- * that produced the manifest.
+ * that produced the manifest. See SPEC §47.5 for the normative anchor.
+ *
+ * Defensive contract: this function NEVER throws. If `package.json`
+ * cannot be read, cannot be parsed, or has no string `version` field,
+ * the function returns `COMPILER_IDENTITY_FALLBACK` (`"scrml-unknown"`).
+ * The `chunks.json` manifest's `compiler` field MUST always carry SOME
+ * string value — adopter tooling SHOULD treat the fallback sentinel as
+ * a "version not determinable from this build" signal.
+ *
+ * Caching: the result is memoized at module scope after the first call.
+ * Tests that need to assert the fallback path SHOULD invoke this
+ * function fresh in a child process or directly stub the helper's
+ * read path; in-process cache invalidation is intentionally not
+ * exposed.
  */
-const COMPILER_IDENTITY = "scrml-0.3.0";
+export function getCompilerIdentity(): string {
+  if (cachedCompilerIdentity !== undefined) {
+    return cachedCompilerIdentity;
+  }
+  // Locate scrmlTS package.json relative to this module:
+  //   compiler/src/codegen/route-splitter.ts → ../../../package.json
+  // Use `import.meta.url` so the resolution is correct regardless of
+  // whether the module is imported from source (Bun TS loader) or from
+  // a future bundled distribution.
+  const here = dirname(fileURLToPath(import.meta.url));
+  const pkgPath = join(here, "..", "..", "..", "package.json");
+  cachedCompilerIdentity = _computeCompilerIdentityFromPath(pkgPath);
+  return cachedCompilerIdentity;
+}
+
+/**
+ * Read+parse `package.json` at the given path and compute the
+ * `compiler` identity string without caching. Internal seam for the
+ * Q-OPEN-4 fallback-contract tests at
+ * `codegen-chunk-manifest-compiler-identity.test.js §4`.
+ *
+ * Production callers SHOULD use `getCompilerIdentity()` (cached,
+ * path-resolved relative to this module). The leading underscore on
+ * the name + the `_internalDoNotUse` parameter name mark this as a
+ * test-only seam; downstream code MUST NOT depend on it.
+ *
+ * Returns `COMPILER_IDENTITY_FALLBACK` (`"scrml-unknown"`) on any
+ * read/parse failure, missing `version` field, non-string `version`
+ * field, or empty-string `version` field. NEVER throws.
+ *
+ * @internal
+ */
+export function _computeCompilerIdentityFromPath(
+  _internalDoNotUse: string,
+): string {
+  try {
+    const raw = readFileSync(_internalDoNotUse, "utf8");
+    const pkg = JSON.parse(raw) as { version?: unknown };
+    if (typeof pkg.version === "string" && pkg.version.length > 0) {
+      return `scrml-${pkg.version}`;
+    }
+  } catch {
+    // Swallow — fall through to fallback. The `compiler` field is
+    // informational; an unreadable package.json must NOT block codegen.
+  }
+  return COMPILER_IDENTITY_FALLBACK;
+}
 
 // ---------------------------------------------------------------------------
 // Public entry point
@@ -348,7 +434,7 @@ export function emitPerRouteChunks(
   const chunks = new Map<ChunkKey, ChunkOutput>();
   const manifest: ChunksManifest = {
     version: 1,
-    compiler: COMPILER_IDENTITY,
+    compiler: getCompilerIdentity(),
     entryPoints: {},
   };
   const diagnostics: CGError[] = [];
