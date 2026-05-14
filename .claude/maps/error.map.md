@@ -1,6 +1,6 @@
 # error.map.md
 # project: scrmlts
-# updated: 2026-05-14  commit: b28f493
+# updated: 2026-05-14T16:19:26-06:00  commit: 13154ba
 
 ## Error Code System
 
@@ -13,11 +13,11 @@ class CGError {
   code: string
   message: string
   span: CGSpan | object
-  severity: 'error' | 'warning'  // default: 'error'
+  severity: 'error' | 'warning' | 'info'   // updated S92: now includes 'info'
 }
 ```
 
-Note: CGError.severity is `'error' | 'warning'` only. Auth-graph and reachability diagnostics carry a three-way `"error" | "warning" | "info"` severity through their own `AuthGraphDiagnostic` and `RSError` types (see schema.map.md).
+Note: CGError.severity is `'error' | 'warning' | 'info'` (updated at S92 — prior note saying info was excluded is now stale). Auth-graph and reachability diagnostics carry the same three-way severity through their own `AuthGraphDiagnostic` and `RSError` types (see schema.map.md).
 
 ## Runtime Error Classes  [compiler/src/runtime-template.js:1423+]
 
@@ -102,21 +102,22 @@ Fire-site: `compiler/src/auth-graph.ts` + `compiler/src/reachability/component-4
 | E-AUTH-GRAPH-003 | error | `<auth role="X">` references variant not in enum | A-3.3 classifyGates() |
 | E-AUTH-GRAPH-004 | error | `<auth>` block without `role=` AND without `check=` | A-3.3 classifyGates() |
 | I-AUTH-REDIRECT-UNRESOLVED | info | gate redirect target path does not match any RouteMap.pages URL | A-3.4 crossRefRedirects() |
-| W-AUTH-PAGE-INFERRED | info | `<page>` lacks explicit `auth=` AND enclosing `<program auth=required>` present (no auto-inheritance; explicit-per-page-only per OQ-A3-C) | A-3.3 classifyGates() |
-| W-AUTH-LOGIN-MISSING | warning | auth gates present + no login page at configured loginRedirect path; two-tier (§34 §40.9.11 — structural-gap, compile-scoped, fires once per compilation) [NEW S91] | auth-graph.ts checkLoginMissing() |
+| W-AUTH-PAGE-INFERRED | info | `<page>` lacks explicit `auth=` AND enclosing `<program auth=required>` present | A-3.3 classifyGates() |
+| W-AUTH-LOGIN-MISSING | warning | auth gates present + no login page at configured loginRedirect path; two-tier severity; fires once per compilation | auth-graph.ts checkLoginMissing() |
 | W-AUTH-RUNTIME-FALLBACK | info | auth gate uses async-only check; static role classification impossible; gated component shipped eagerly | A-2.5 component-4.ts |
 | E-CLOSURE-002 | error | application uses auth-role-block gates but declares no app-scope role enum | A-2.5 component-4.ts |
 
-## Chunk Lint Codes (A-4.7, new S91 — fired from route-splitter.ts:emitChunkLints)
+## Chunk Lint Codes (A-4.7 + Q-OPEN-6 — fired from route-splitter.ts:emitChunkLints)
 
 | Code | Severity | When fired |
 |------|----------|-----------|
 | W-CG-CHUNK-EMPTY | warning | entry-point produces zero non-empty chunks across all roles |
-| W-CG-CHUNK-LARGE | warning | initial chunk payloadJs exceeds soft size budget (~50 KB) |
-| W-CG-CHUNK-NO-PREFETCH | warning | internal `<a href>` links present but no tier-2 prefetch chunks in multi-route app |
+| W-CG-CHUNK-LARGE | warning | initial chunk payloadJs exceeds soft size budget (default 100,000 bytes; configurable via `--chunk-size-budget=N`) |
+| W-CG-CHUNK-NO-PREFETCH | info | multi-route app AND entry-point has NO internal `<a href>` links at all (Q-OPEN-6 case 1) |
+| W-CG-CHUNK-PREFETCH-UNRESOLVED | warning | multi-route app AND internal-shaped `<a href>` links exist but NONE resolved to RouteMap.pages (Q-OPEN-6 case 2) [NEW S92] |
 | W-CG-CHUNK-MISSING-ROLE | warning | `<auth role="X">` references a role with no ChunkPlan in reachability record |
 
-All four added to SPEC §34 + §40.9.11 catalog at S91.
+W-CG-CHUNK-NO-PREFETCH and W-CG-CHUNK-PREFETCH-UNRESOLVED are mutually exclusive per Q-OPEN-6: `hasInternalLinks` (ctx field) discriminates case 1 (info) vs case 2 (warning). All five codes in SPEC §34 + §40.9.11 catalog.
 
 ## Warning Codes (W-*)
 
@@ -125,8 +126,9 @@ All four added to SPEC §34 + §40.9.11 catalog at S91.
 | W-ABSENCE-IN-SCRML-SOURCE | info | `null` or `undefined` in scrml source (S89 renamed from W-NULL-IN-SCRML-SOURCE) |
 | W-CG-UNDEFINED-INTERPOLATION | warning | Bare `undefined` JS keyword found in compiled output (M-7C-D-12 Track 3; fires from `lint-undefined-interpolation.ts`) |
 | W-CG-CHUNK-EMPTY | warning | entry-point produces zero non-empty chunks (A-4.7, route-splitter.ts) |
-| W-CG-CHUNK-LARGE | warning | initial chunk exceeds size budget (A-4.7, route-splitter.ts) |
-| W-CG-CHUNK-NO-PREFETCH | warning | internal links without prefetch chunks (A-4.7, route-splitter.ts) |
+| W-CG-CHUNK-LARGE | warning | initial chunk exceeds size budget (A-4.7; Q-OPEN-5 configurable threshold, route-splitter.ts) |
+| W-CG-CHUNK-NO-PREFETCH | info | multi-route app, no internal links at all (Q-OPEN-6 case 1, route-splitter.ts) |
+| W-CG-CHUNK-PREFETCH-UNRESOLVED | warning | internal-shaped links exist but none resolve to RouteMap.pages (Q-OPEN-6 case 2, route-splitter.ts) [NEW S92] |
 | W-CG-CHUNK-MISSING-ROLE | warning | `<auth role=X>` role not in reachability record (A-4.7, route-splitter.ts) |
 | W-AUTH-LOGIN-MISSING | warning | auth gates present but no login page at loginRedirect path (A-3.5, auth-graph.ts) |
 | W-ENGINE-SELF-WRITE-DETECTED | info | Engine self-write detected; runtime NO-OP (two fire-sites: symbol-table.ts PASS 12.B + PASS 16) |
@@ -170,13 +172,13 @@ All four added to SPEC §34 + §40.9.11 catalog at S91.
 | compiler/src/codegen/lint-undefined-interpolation.ts | W-CG-UNDEFINED-INTERPOLATION post-emission scan |
 | compiler/src/auth-graph.ts classifyGates() | W-AUTH-PAGE-INFERRED + E-AUTH-GRAPH-* |
 | compiler/src/auth-graph.ts crossRefRedirects() | I-AUTH-REDIRECT-UNRESOLVED |
-| compiler/src/auth-graph.ts checkLoginMissing() | W-AUTH-LOGIN-MISSING [NEW S91] |
+| compiler/src/auth-graph.ts checkLoginMissing() | W-AUTH-LOGIN-MISSING |
 | compiler/src/reachability/component-4.ts | W-AUTH-RUNTIME-FALLBACK + E-CLOSURE-002 |
-| compiler/src/reachability/outer-fixpoint.ts | E-CLOSURE-001 [NEW S91 A-2.7] |
-| compiler/src/codegen/route-splitter.ts emitChunkLints() | W-CG-CHUNK-* family [NEW S91 A-4.7] |
+| compiler/src/reachability/outer-fixpoint.ts | E-CLOSURE-001 |
+| compiler/src/codegen/route-splitter.ts emitChunkLints() | W-CG-CHUNK-* family + W-CG-CHUNK-PREFETCH-UNRESOLVED [Q-OPEN-6, NEW S92] |
 
 ## Tags
-#scrmlts #map #error #diagnostics #runtime-errors #error-codes #s91 #wire-format #auth-graph #w-cg-undefined #closure #auth-runtime-fallback #w-cg-chunk #w-auth-login-missing #route-splitter
+#scrmlts #map #error #diagnostics #runtime-errors #error-codes #s92 #v0.3.0 #wire-format #auth-graph #w-cg-undefined #closure #auth-runtime-fallback #w-cg-chunk #w-auth-login-missing #route-splitter #q-open-6
 
 ## Links
 - [primary.map.md](./primary.map.md)

@@ -1,6 +1,6 @@
 # build.map.md
 # project: scrmlts
-# updated: 2026-05-14  commit: b28f493
+# updated: 2026-05-14T16:19:26-06:00  commit: 13154ba
 
 ## Development Commands (root package.json > scripts)
 
@@ -36,15 +36,23 @@
 
 | Subcommand | What it does |
 |------------|--------------|
-| `scrml compile <file\|dir>` | Compile .scrml to HTML + client JS + server JS; `--emit-reachability` emits Stage 7.6 JSON; `--emit-per-route` emits per-(EP, role, tier) JS chunks + chunks.json |
+| `scrml compile <file\|dir>` | Compile .scrml to HTML + client JS + server JS; `--emit-reachability` emits Stage 7.6 JSON; `--emit-per-route` emits per-(EP, role, tier) JS chunks + chunks.json (default-on at v0.3.0); `--chunk-size-budget=N` sets soft byte threshold for W-CG-CHUNK-LARGE lint [NEW S92 Q-OPEN-5] |
 | `scrml dev <file\|dir>` | Dev server with hot-reload |
 | `scrml build <dir>` | Production build |
 | `scrml serve <dir>` | Serve compiled output |
 | `scrml migrate <file\|dir>` | Migrate pre-v0.3 .scrml structure; `--program-shape` flag for v0.3 container migration |
 | `scrml promote <file\|dir>` | Promote patterns (e.g. `i-match` → `match`); `--match` flag |
 | `scrml init` | Scaffold a new scrml project |
-| `scrml generate auth` | Scaffold adopter-owned login page (writes stdlib/auth/templates/login.scrml to project) [NEW S91] |
+| `scrml generate auth` | Scaffold adopter-owned login page (writes stdlib/auth/templates/login.scrml to project) |
 | `scrml lsp --stdio` | Start LSP server |
+
+## `--chunk-size-budget` Flag  [compiler/src/commands/compile.js]
+
+Q-OPEN-5. Both forms accepted:
+- `--chunk-size-budget=150000` (equals form)
+- `--chunk-size-budget 150000` (space form)
+
+Rejects non-positive / non-numeric values with non-zero exit. Default when absent: `CHUNK_LARGE_SOFT_BUDGET_BYTES` = 100,000 bytes. Propagates through `compileScrml({ chunkSizeBudgetBytes })` → `runCG` → `emitPerRouteChunks`.
 
 ## Pre-commit Hook (scripts/git-hooks/pre-commit)
 
@@ -86,7 +94,7 @@ Gitignored; must be built locally on each machine:
 Rebuild: `bun run scripts/rebuild-self-host-dist.ts` and `bun run scripts/rebuild-tab-dist.ts`
 
 ## Tags
-#scrmlts #map #build #scripts #bun #pre-commit #self-host #playwright #e2e #s91 #generate-auth #emit-per-route
+#scrmlts #map #build #scripts #bun #pre-commit #self-host #playwright #e2e #s92 #v0.3.0 #generate-auth #emit-per-route #chunk-size-budget #q-open-5
 
 ## Links
 - [primary.map.md](./primary.map.md)

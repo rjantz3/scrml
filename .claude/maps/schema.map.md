@@ -1,6 +1,6 @@
 # schema.map.md
 # project: scrmlts
-# updated: 2026-05-14  commit: b28f493
+# updated: 2026-05-14T16:19:26-06:00  commit: 13154ba
 
 ## TypeScript AST — `compiler/src/types/ast.ts` (~1,858 LOC)
 
@@ -164,7 +164,7 @@ byRole: Map<RoleVariant, Map<NodeId, Set<NodeId>>>, errors: RSError[], gateVisib
 ### VendorUnitsUsed  [component-5.ts:113]
 Map<EntryPointId, Set<VendorUnitId>>
 
-## Per-Route Artifact Splitter Types — `compiler/src/codegen/route-splitter.ts` (NEW S91, A-4)
+## Per-Route Artifact Splitter Types — `compiler/src/codegen/route-splitter.ts` (A-4)
 
 ### ChunkKey  [route-splitter.ts]
 entryPointId: EntryPointId, role: RoleVariant, tier: "initial" | "tier1" | "tier2" | `tierN${number}`
@@ -178,11 +178,16 @@ Map<ChunkKey, ChunkOutput>
 ### RouteInfo  [atom-emitter.ts]
 routePath: string | null, shape: "page" | "spa-program"
 
-## FNV-1a Hash Primitive — `compiler/src/codegen/fnv1a-hash.ts` (NEW S91, A-4.6)
+### EmitPerRouteInput  [route-splitter.ts:255]
+Includes: `chunkSizeBudgetBytes?: number` — Q-OPEN-5 soft budget override; falls back to CHUNK_LARGE_SOFT_BUDGET_BYTES (100,000) when absent/non-positive
+
+## FNV-1a Hash Primitive — `compiler/src/codegen/fnv1a-hash.ts` (A-4.6)
 
 FNV_OFFSET: 2166136261 (const — SPEC §47.1.3 normative)
 FNV_PRIME: 16777619 (const — SPEC §47.1.3 normative)
 fnv1aHash(input: string): string — FNV-1a 32-bit hash, output as 8-char base36, zero-padded
+
+getCompilerIdentity(): string — reads package.json `version`, returns `"scrml-" + V`, cached; fallback `"scrml-unknown"` on read failure (Q-OPEN-4, NEW S92)
 
 ## Wire Format Types — `compiler/src/codegen/wire-format.ts` (228 LOC)
 
@@ -204,28 +209,28 @@ Wire envelope shape (canonical, SPEC §57): `{"__scrml_absent": true}`
 
 ## Codegen Key Interfaces — `compiler/src/codegen/*.ts`
 
-### CompileContext  [context.ts:23]
+### CompileContext  [context.ts:24]
 filePath, fileAST, routeMap, depGraph, protectedFields: Set<string>, authMiddleware, middlewareConfig,
 csrfEnabled: boolean, encodingCtx: EncodingContext | null, mode: "browser"|"library", testMode: boolean,
 dbVar: string, workerNames: string[], errors: CGError[], registry: BindingRegistry,
 derivedNames: Set<string>, analysis: FileAnalysis | null, usedRuntimeChunks: Set<string>,
 exportRegistry?: Map<string, Map<string, { kind, category, isComponent }>> | null,
 reachabilityRecord?: ReachabilityRecord | null,
-hasPrefetchableLinks: boolean  [NEW S91 A-4.4 — set by emit-html during walk]
+hasPrefetchableLinks: boolean  [A-4.4 — set by emit-html when internal `<a href>` resolves to RouteMap.pages],
+hasInternalLinks: boolean      [Q-OPEN-6 NEW S92 — set by emit-html on any absolute-path string-literal `<a href>`, independent of resolution]
 
 ### CgInput  [codegen/index.ts:79]
 files, routeMap?, depGraph?, protectAnalysis?, sourceMap?, embedRuntime?, mode?, testMode?,
 emitMachineTests?, encoding?, batchPlan?, batchPlannerErrors?, exportRegistry?,
-reachabilityRecord?, emitPerRoute?: boolean  [NEW S91 A-4.1 — opt-in flag for route splitter]
+reachabilityRecord?, emitPerRoute?: boolean, chunkSizeBudgetBytes?: number  [Q-OPEN-5 NEW S92]
 
 ### CgFileOutput  [codegen/index.ts:143]
 sourceFile, serverJs?, clientJs?, libraryJs?, html?, css?, testJs?, machineTestJs?,
 workerBundles?: Map<string, string>, clientJsMap?, serverJsMap?
 
 ### CGError  [errors.ts:11]
-code: string, message: string, span: CGSpan | object, severity: 'error' | 'warning'
-
-Note: CGError.severity does NOT include "info" — info-level diagnostics go through RSError/AuthGraphDiagnostic.
+code: string, message: string, span: CGSpan | object, severity: 'error' | 'warning' | 'info'
+(severity now includes 'info' as of S92 — errors.ts line 15 updated)
 
 ## scrml:host Runtime Types — `compiler/runtime/stdlib/host.js`
 
@@ -235,7 +240,7 @@ Variant constructor: `HostError.Thrown(message, name) → { variant: "Thrown", d
 ### safeCallAsync(thunk) → Promise<value | scrml-error-shape>
 
 ## Tags
-#scrmlts #map #schema #ast #types #codegen #ir #s91 #auth-graph #wire-format #reachability #approach-a2 #approach-a3 #approach-a4 #route-splitter #fnv1a-hash #chunk-plan
+#scrmlts #map #schema #ast #types #codegen #ir #s92 #v0.3.0 #auth-graph #wire-format #reachability #approach-a2 #approach-a3 #approach-a4 #route-splitter #fnv1a-hash #chunk-plan #q-open-4 #q-open-5 #q-open-6
 
 ## Links
 - [primary.map.md](./primary.map.md)

@@ -1,6 +1,6 @@
 # dependencies.map.md
 # project: scrmlts
-# updated: 2026-05-14  commit: b28f493
+# updated: 2026-05-14T16:19:26-06:00  commit: 13154ba
 
 ## Runtime Dependencies (root package.json)
 vscode-languageserver@^9.0.1                — LSP protocol server framework (for lsp/ server)
@@ -23,13 +23,16 @@ puppeteer@^24.40.0                     — headless browser for browser integrat
 ## Runtime (engine)
 bun >=1.3.13  — required runtime; used for bun:test, Bun.file, Bun.serve, Bun.build
 
+## Package Version
+scrmlts@0.3.0  — v0.3.0 STABLE (package.json updated at v0.3.0 cut)
+
 ## Internal Module Graph
 
 ```
 cli.js
   → commands/compile.js, commands/dev.js, commands/build.js,
     commands/serve.js, commands/migrate.js, commands/init.js,
-    commands/promote.js, commands/generate.js [NEW S91]
+    commands/promote.js, commands/generate.js
 
 api.js  (programmatic API entry — orchestrates pipeline)
   → block-splitter.js (Stage 2 BS)
@@ -71,13 +74,13 @@ reachability-solver.ts (Stage 7.6 — orchestrator)     [S91 A-2.7 + A-2.8 FULLY
   → src/reachability/component-3.ts                    — A-2.4 server_fn_reachable_within
   → src/reachability/component-4.ts                    — A-2.5 auth_gated_boundaries_visible_to
   → src/reachability/component-5.ts                    — A-2.6 vendor_units_used_by
-  → src/reachability/outer-fixpoint.ts                 — A-2.7 outer fixed-point + E-CLOSURE-001 [NEW S91]
+  → src/reachability/outer-fixpoint.ts                 — A-2.7 outer fixed-point + E-CLOSURE-001
   → src/reachability/gate-classifier.ts                — A-3.3 per-gate classifier
   → src/types/auth-graph.ts (via RSInput.authGraph)
 
 codegen/index.ts  (runCG)
   → codegen/analyze.ts → codegen/collect.ts, codegen/usage-analyzer.ts
-  → codegen/emit-html.ts → codegen/binding-registry.ts [S91: augmentHtmlForChunks added]
+  → codegen/emit-html.ts → codegen/binding-registry.ts [augmentHtmlForChunks + hasInternalLinks Q-OPEN-6]
   → codegen/emit-css.ts
   → codegen/emit-server.ts                             [wire-format integration]
   → codegen/emit-client.ts
@@ -95,10 +98,10 @@ codegen/index.ts  (runCG)
   → codegen/emit-messages.ts
   → codegen/wire-format.ts                             — §57 wire format helpers
   → codegen/lint-undefined-interpolation.ts            — W-CG-UNDEFINED-INTERPOLATION
-  → codegen/route-splitter.ts                          — A-4 per-route splitter [NEW S91]
-  → codegen/atom-emitter.ts                            — A-4.2 per-id atom helpers [NEW S91]
-  → codegen/fnv1a-hash.ts                              — FNV-1a shared primitive [NEW S91]
-  → codegen/runtime-chunks.ts                          — prefetch/mount/vendor-ref chunks [S91]
+  → codegen/route-splitter.ts                          — A-4 per-route splitter [getCompilerIdentity Q-OPEN-4; chunkSizeBudgetBytes Q-OPEN-5; hasInternalLinks Q-OPEN-6 NEW S92]
+  → codegen/atom-emitter.ts                            — A-4.2 per-id atom helpers
+  → codegen/fnv1a-hash.ts                              — FNV-1a shared primitive
+  → codegen/runtime-chunks.ts                          — prefetch/mount/vendor-ref chunks
   → codegen/ir.ts, codegen/errors.ts, codegen/context.ts
   → codegen/source-map.ts, codegen/type-encoding.ts   [re-exports fnv1aHash from fnv1a-hash.ts]
   → codegen/var-counter.ts, codegen/utils.ts
@@ -116,7 +119,7 @@ lsp/server.js → lsp/handlers.js, lsp/workspace.js, lsp/l4.js
 ```
 
 ## Tags
-#scrmlts #map #dependencies #pipeline #bun #acorn #s91 #approach-a #approach-a2 #approach-a3 #approach-a4 #reachability #auth-graph #route-splitter #fnv1a-hash
+#scrmlts #map #dependencies #pipeline #bun #acorn #s92 #v0.3.0 #approach-a #approach-a2 #approach-a3 #approach-a4 #approach-a5 #reachability #auth-graph #route-splitter #fnv1a-hash #q-open-4 #q-open-5 #q-open-6
 
 ## Links
 - [primary.map.md](./primary.map.md)
