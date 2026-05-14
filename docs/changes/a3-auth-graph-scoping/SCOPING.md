@@ -431,6 +431,20 @@ A-3 sits between BP and RS. Reasoning:
 
 **Surface for user disposition:** BLOCKING — before A-3.1.c + A-3.3 dispatch.
 
+**✅ RATIFIED S90 (2026-05-13) — OPTION (d) FULL INTERPOLATION (user override of agent recommendation).** Per user-voice S90: *"the idea that user defined state has full interpolation but first class compiler supported state doesn't is confusing, counter intuitive, and hints that the language is still in a 'toy' status."* Per Rule 2 (full-production-language fidelity) — value-bearing attrs in scrml uniformly accept string-literal / variable-ref / `${expr}` shapes across all of `if=`, `bind:value=`, `class:active=`, `value=`, `href=`, etc. The role attribute must be no less expressive than user-defined-state-bearing attrs.
+
+**Disposition mechanics:**
+- Grammar: open — accepts `StringLiteralAttrValue`, `VariableRefAttrValue`, and `ExprAttrValue` (interpolation) shapes uniformly.
+- A-3.3 per-gate classifier evaluates the predicate AST and decides closed-form vs runtime-fallback:
+  - `role="admin"` → closed-form (variant literal)
+  - `role="admin,dispatcher"` → closed-form (literal comma-OR)
+  - `role=publicRoles` where `const <publicRoles>: RoleSet = "anonymous,user"` → closed-form (const-ref resolves via META constant-folder)
+  - `role=@currentRole` reactive → runtime-fallback (changes at runtime; cannot statically resolve per role)
+  - `role=${a || b}` arbitrary expression → runtime-fallback
+- Negation (`!admin`) falls out of the predicate evaluator without separate grammar — `!` is the JS NOT operator parsed by the closed-form-predicate folder.
+- A-3.1 already registered `<auth>` with `supportsInterpolation: false`; A-3.3 will need to relax this attribute-registry entry for `role=` when wiring the per-gate classifier (small follow-up edit).
+- Implementation cost: A-3.3 ~30-50% larger than under (b) because the per-gate classifier consumes META constant-folder + cell-resolvability check. Infrastructure already exists from §22 meta blocks + §53 predicate types. One-time tax for forever-correct language shape.
+
 ---
 
 ### OQ-A3-B — auth-redirect cross-ref shape (NON-BLOCKING — confirmation)
@@ -442,6 +456,8 @@ A-3 sits between BP and RS. Reasoning:
 - (b) **Resolved EntryPointId.** A-3.4 looks up the path in RouteMap.pages and emits the canonical EntryPointId.
 
 **Recommendation:** (a) — bare string. Per OQ-A2-E ratified S89: NO entry-point synthesis on auth-redirect; the redirect target's own entry-point exists independently. A-3 just records what the source-text said. Consumer resolution to EntryPointId is a lookup, not synthesis.
+
+**✅ RATIFIED S90 (2026-05-13): Option (a) bare string.** Per user disposition (ratify-on-recommendation batch). A-3.4 records `loginRedirect` path string verbatim; consumer (A-2.5) resolves via RouteMap lookup.
 
 **Surface for user disposition:** NON-BLOCKING confirmation.
 
@@ -458,6 +474,8 @@ A-3 sits between BP and RS. Reasoning:
 
 **Recommendation:** (b) — explicit per-page only, but add `W-AUTH-PAGE-INFERRED` info-lint when a `<page>` lacks explicit `auth=` AND the enclosing `<program auth=>` is `"required"`. Rationale: current route-inference.ts:2433 implements (b) — `authMiddleware` is per-file. Changing to (a) would require RI rework + per-page authMiddleware. (b) is the smaller deferred-cost path. A v0.4 amendment can promote to (a) if adopter friction emerges.
 
+**✅ RATIFIED S90 (2026-05-13): Option (b) explicit per-page only.** Per user disposition (ratify-on-recommendation batch). A-3.3 will add `W-AUTH-PAGE-INFERRED` info-lint emission. A-3.1 already implements explicit-per-page enumeration.
+
 **Surface for user disposition:** BLOCKING — affects A-3.1.c walker logic + A-3.3 per-page classification.
 
 ---
@@ -467,6 +485,8 @@ A-3 sits between BP and RS. Reasoning:
 **Question:** `<channel auth=>` only accepts `"required"/"optional"/"none"` per attribute-registry.js:191. There's no per-role grammar at the channel-auth level today. Does A-3 classify channel gates as binary (closed_form: true; gated_for_role = ALL non-anonymous when "required", ALL when "optional"/"none") or does A-3 fold channel-auth into a different surface?
 
 **Recommendation:** Channel-auth is binary per current spec; A-3 classifies as closed_form: true with gated_for_role = `{ all variants except anonymous }` when `auth="required"`, all variants when `auth="optional"`/`"none"`. Per-role channel-auth grammar is deferred per §40.9.5 line 17732 (multi-role enum deferred-wave). Per-channel role-predicate is a v0.4+ amendment item.
+
+**✅ RATIFIED S90 (2026-05-13): Binary per current spec.** Per user disposition (ratify-on-recommendation batch). A-3.3 classifies channel-auth as binary (required vs optional vs none); per-role channel-auth grammar deferred to v0.4+.
 
 **Surface for user disposition:** NON-BLOCKING confirmation.
 
@@ -481,6 +501,8 @@ A-3 sits between BP and RS. Reasoning:
 - (b) **Compile-time + emit-time.** AuthGraph is exposed on CompileContext for A-4 + CG consumption. A-4 reads AuthGraph directly for the runtime-fallback emission path (rather than going through ReachabilityRecord).
 
 **Recommendation:** (a) — compile-time only. Per A-2 SCOPING §4 lines 195-197, A-2 produces ReachabilityRecord on CompileContext; A-4 consumes it. AuthGraph is A-2.5's input; once A-2.5 has produced its per-role chunk plan, the runtime-fallback path is encoded in the chunk plan (per §40.9.5 line 17726 "treated as runtime-only ... shipped eagerly"). A-4 reads ChunkPlan and emits accordingly; it does not need AuthGraph independently.
+
+**✅ RATIFIED S90 (2026-05-13): Option (a) compile-time only.** Per user disposition (ratify-on-recommendation batch). A-3.5 pipeline wiring produces AuthGraph compile-time only; A-2.5 consumes; downstream consumers (A-4 codegen, runtime) read ChunkPlan not AuthGraph directly.
 
 **Surface for user disposition:** BLOCKING — affects A-3.5.a CompileContext extension surface.
 
@@ -497,6 +519,8 @@ A-3 sits between BP and RS. Reasoning:
 - (d) **By explicit declaration.** Adopter declares via `<program role-enum="UserRole">` attribute. New attribute surface; cleanest at the cost of new SPEC text.
 
 **Recommendation:** (b) + (c) **dual rule with reconciliation.** Discover via reference (b); if multiple enums referenced, fall back to entry-file-`<program>`-body scope (c); if still ambiguous, fire E-AUTH-GRAPH-002. Rationale: (b) is the empirical signal (what does the code USE as role); (c) is the structural signal (what does the entry file DECLARE as app-scope). Combining both catches most real shapes without requiring (d)'s new SPEC text.
+
+**✅ RATIFIED S90 (2026-05-13): Options (b)+(c) dual rule with reconciliation; E-AUTH-GRAPH-002 on ambiguity.** Per user disposition (ratify-on-recommendation batch). A-3.2 implements: (1) discover via reference — enum referenced by any `<auth role="X">` attribute value where X is a known variant; (2) if multiple enums match, fall back to entry-file `<program>`-body-scope enum; (3) if still ambiguous (zero or multiple), fire E-AUTH-GRAPH-002.
 
 **Surface for user disposition:** BLOCKING — before A-3.2.a dispatch.
 
