@@ -330,21 +330,51 @@ export function emitPerRouteChunks(
     for (const [role, plan] of rps.byRole) {
       const entry: ChunksManifestEntry = {};
 
-      // initial — A-4.2 populates `payloadJs` from the admission set.
-      // When the route-splitter has no CompileContext (unit-test
-      // direct invocation with `makeRecord`), the initial-chunk
+      // -- tier1 (A-4.3) -- compose FIRST so the initial-chunk IIFE
+      // tail can reference the tier-1 chunk URL when the admission set
+      // is non-empty. Empty admission → empty payloadJs (skipped by
+      // api.js write loop) + null IIFE-tail (no prefetch call emitted)
+      // + `_scrml_prefetch_tier1` tree-shaken from SCRML_RUNTIME.
+      //
+      // The composer is only invoked when (a) we have a CompileContext
+      // (unit-test direct invocations may not) AND (b) the admission
+      // set is non-empty. Both checks compose: any of (a)-(b) failing
+      // leaves `payloadJs = ""` and `tier1Url = null`.
+      const tier1Chunk = makeChunkOutput(epId, role, "tier1", plan.prefetchTier1);
+      const tier1NonEmpty = !isChunkContentsEmpty(plan.prefetchTier1);
+      if (epCtx && tier1NonEmpty) {
+        tier1Chunk.payloadJs = composeTier1Chunk(plan.prefetchTier1, epCtx, epId, role);
+      }
+      // The IIFE-tail prefetch URL is the tier-1 chunk's filename
+      // resolved relative to the per-app dist root. We emit it as an
+      // absolute-path URL (`/<filename>`) so the runtime fetch resolves
+      // against the same origin as the initial chunk's host page. The
+      // tier-1 URL is only passed when the admission is non-empty AND
+      // we actually composed a real chunk payload.
+      const tier1Url = (epCtx && tier1NonEmpty)
+        ? `/${tier1Chunk.filename}`
+        : null;
+
+      // -- initial (A-4.2) -- composer optionally appends an IIFE-tail
+      // `_scrml_prefetch_tier1(<tier1Url>)` call when `tier1Url` is
+      // non-null. When the route-splitter has no CompileContext (unit-
+      // test direct invocation with `makeRecord`), the initial-chunk
       // payload falls back to the empty string; the byte-deterministic
       // canonical empty is `""` which composes safely with the manifest
       // determinism contract.
       const initialChunk = makeChunkOutput(epId, role, "initial", plan.initialChunk);
       if (epCtx) {
-        initialChunk.payloadJs = composeInitialChunk(plan.initialChunk, epCtx, epId, role);
+        initialChunk.payloadJs = composeInitialChunk(
+          plan.initialChunk,
+          epCtx,
+          epId,
+          role,
+          tier1Url,
+        );
       }
       chunks.set(initialChunk.key, initialChunk);
       entry.initial = initialChunk.key;
 
-      // tier1 — A-4.3 territory; payload remains "" at A-4.2.
-      const tier1Chunk = makeChunkOutput(epId, role, "tier1", plan.prefetchTier1);
       chunks.set(tier1Chunk.key, tier1Chunk);
       entry.tier1 = tier1Chunk.key;
 
@@ -375,6 +405,7 @@ export function emitPerRouteChunks(
 
 // ---------------------------------------------------------------------------
 // composeInitialChunk — A-4.2 §40.9.7 initial_chunk(E) emitter
+// composeTier1Chunk   — A-4.3 §40.9.7 prefetch_tier_1(E) emitter
 // ---------------------------------------------------------------------------
 
 /**
@@ -411,6 +442,15 @@ export function emitPerRouteChunks(
  * emitted JS is `null`. The atoms here delegate to `atom-emitter.ts`,
  * which enforces this internally.
  *
+ * **A-4.3 IIFE-tail prefetch call.** When the corresponding (EP, role)
+ * `ChunkPlan` has a non-empty `prefetchTier1` admission set, the
+ * initial-chunk IIFE is augmented with a trailing
+ * `_scrml_prefetch_tier1("<chunk-url>")` call before the IIFE close so
+ * the browser begins fetching tier-1 after first paint. Empty tier-1
+ * admission sets produce NO prefetch call (and no tier-1 file —
+ * `_scrml_prefetch_tier1` is tree-shaken from `SCRML_RUNTIME` in that
+ * case).
+ *
  * @param contents The `ChunkContents` admission set for `initial` tier.
  * @param ctx The per-file CompileContext for the entry point's source
  *   file. Used to resolve node ids → AST nodes for atom emission.
@@ -418,6 +458,10 @@ export function emitPerRouteChunks(
  *   header comment for adopter debugging).
  * @param role Role variant (informational; surfaces in the chunk
  *   header comment so per-role chunks are visually distinguishable).
+ * @param tier1Url When non-null, a `_scrml_prefetch_tier1(<tier1Url>)`
+ *   call is appended to the IIFE tail. `null` (default) emits no
+ *   prefetch call — used when the (EP, role)'s tier-1 admission set is
+ *   empty so the prefetch runtime is tree-shaken.
  * @returns The fully-composed `payloadJs` string.
  */
 export function composeInitialChunk(
@@ -425,6 +469,7 @@ export function composeInitialChunk(
   ctx: CompileContext,
   epId: EntryPointId,
   role: RoleVariant,
+  tier1Url: string | null = null,
 ): string {
   const lines: string[] = [];
 
@@ -434,6 +479,130 @@ export function composeInitialChunk(
   lines.push(`(function () {`);
   lines.push(`  "use strict";`);
 
+  appendAtomLines(lines, contents, ctx);
+
+  // -- A-4.3 IIFE-tail tier-1 idle-prefetch call. --
+  //
+  // When the (EP, role)'s ChunkPlan.prefetchTier1 admits a non-empty
+  // set, the route-splitter passes the tier-1 chunk URL here and the
+  // initial chunk schedules an idle-callback prefetch after first
+  // paint. When the admission set is empty, `tier1Url` is null and no
+  // call is emitted — the corresponding tier-1 file is also not
+  // written, and the `_scrml_prefetch_tier1` runtime function is
+  // tree-shaken from SCRML_RUNTIME (see `runtime-chunks.ts:prefetch`
+  // marker + `emit-client.ts:detectRuntimeChunks`).
+  //
+  // Per SPEC §40.9.7: "prefetch_tier_1(E) SHALL be idle-prefetched
+  // after initial render. The implementation SHOULD use
+  // `requestIdleCallback` ...". The runtime function implements that
+  // SHOULD using `requestIdleCallback` browser-side with a
+  // `setTimeout(fn, 1)` Safari fallback (OQ-A4-G ratification S91 —
+  // Option γ).
+  if (tier1Url !== null) {
+    lines.push(``);
+    lines.push(`  // --- §40.9.7 tier-1 idle prefetch (OQ-A4-G Option γ) ---`);
+    lines.push(`  _scrml_prefetch_tier1(${JSON.stringify(tier1Url)});`);
+  }
+
+  lines.push(`})();`);
+  // Trailing newline so chunks concatenate cleanly when sequenced into
+  // a single SSR-injected `<script>` block (a v1.0 polish target).
+  lines.push("");
+
+  return lines.join("\n");
+}
+
+/**
+ * Compose the `payloadJs` body for a `tier1`-tier chunk from a
+ * `ChunkContents` admission set + the per-file `CompileContext`.
+ *
+ * **§40.9.7 normative shape:**
+ *
+ *   `prefetch_tier_1(E) := playable_surface(E, N=1) − initial_chunk(E)`
+ *
+ * The tier-1 chunk is the DELTA over the initial chunk — only the
+ * components / server-fn stubs / reactive cells / vendor units that
+ * become reachable at interaction depth N=1 but were NOT already
+ * admitted to the initial chunk. The RS solver (A-2.5 Component 4)
+ * computes this delta and surfaces it as
+ * `ChunkPlan.prefetchTier1.{componentNodeIds, reactiveCellNodeIds,
+ * serverFnNodeIds, vendorUnitNames}`. The composer here just walks
+ * those sets in canonical order and concatenates the atom outputs.
+ *
+ * **Empty tier-1 contract.** When all four admission sets are empty,
+ * the caller (`emitPerRouteChunks`) MUST skip both the prefetch call
+ * AND the tier-1 file write (so the tree-shake elides
+ * `_scrml_prefetch_tier1` from SCRML_RUNTIME). This composer is NOT
+ * called in that case — its non-empty-input contract is enforced at
+ * the call site via `isChunkContentsEmpty`.
+ *
+ * **Determinism (§40.9.8):** byte-identical input → byte-identical
+ * output. Reuses the same canonical comparator + atom emitters as
+ * `composeInitialChunk` to preserve the §40.9.8 hash-input invariant.
+ *
+ * **§40.9.9 worked example normative.** For the worked example with
+ * viewer=Driver, `prefetch_tier_1(/) = {}` (lines 17873-17874): the
+ * RS solver produces an empty tier-1 plan, the composer is not
+ * invoked, no file is written, no prefetch call is emitted, and the
+ * runtime helper is tree-shaken. The integration test asserts this
+ * end-to-end.
+ *
+ * @param contents The `ChunkContents` admission set for `tier1` tier.
+ * @param ctx The per-file CompileContext for the entry point's source
+ *   file. Used to resolve node ids → AST nodes for atom emission.
+ * @param epId Entry-point id (informational; chunk header comment).
+ * @param role Role variant (informational; chunk header comment).
+ * @returns The fully-composed `payloadJs` string.
+ */
+export function composeTier1Chunk(
+  contents: ChunkContents,
+  ctx: CompileContext,
+  epId: EntryPointId,
+  role: RoleVariant,
+): string {
+  const lines: string[] = [];
+
+  // Chunk header — distinct from initial chunk by tier label so adopters
+  // can visually verify which file they are inspecting.
+  lines.push(`// scrml tier-1 chunk — entryPoint=${epId} role=${role}`);
+  lines.push(`// §40.9.7 prefetch_tier_1(E) — playable_surface(E, N=1) − initial_chunk(E)`);
+  lines.push(`(function () {`);
+  lines.push(`  "use strict";`);
+
+  appendAtomLines(lines, contents, ctx);
+
+  lines.push(`})();`);
+  lines.push("");
+
+  return lines.join("\n");
+}
+
+/**
+ * Shared atom-section emitter used by both `composeInitialChunk` and
+ * `composeTier1Chunk`.
+ *
+ * Walks the four admission sets in canonical order (per A-2.8
+ * stratified comparator) and appends the matching atom-emitter output
+ * to `lines`. The same section-header comments + indentation are used
+ * across tiers so adopter-side visual inspection is consistent.
+ *
+ * Section ordering:
+ *
+ *   1. Vendor units (must be first — later atoms may reference the
+ *      bound namespace variable).
+ *   2. Server-fn fetch stubs.
+ *   3. Reactive cell init lines.
+ *   4. Component mount markers.
+ *
+ * Section headers are emitted ONLY when the corresponding admission
+ * set is non-empty. Empty sections produce no header (clean output
+ * for tier-1 deltas that admit only one section).
+ */
+function appendAtomLines(
+  lines: string[],
+  contents: ChunkContents,
+  ctx: CompileContext,
+): void {
   // -- 1. Vendor unit references (alphabetical-codepoint order). --
   const vendorUnits = canonicalVendorUnitArray(contents.vendorUnitNames);
   if (vendorUnits.length > 0) {
@@ -447,15 +616,10 @@ export function composeInitialChunk(
       // a runtime `_scrml_vendor_require` call so the bundler can
       // pre-resolve the unit's module ahead of chunk evaluation.
       const atom = emitVendorUnitRef(unitName, ctx.fileAST);
-      // Convert the `import * as ... from "vendor:NAME"` shape (which
-      // is a top-level-only statement) to a runtime-side equivalent
-      // that's IIFE-safe. The bundler handles real resolution; the
-      // chunk just records the demand.
       const specifier = `vendor:${unitName}`;
       lines.push(`  _scrml_vendor_require(${JSON.stringify(specifier)});`);
       // Preserve the import-line as a comment for adopter-debug
-      // traceability of the original §41 reference. `atom` is a
-      // newline-terminated single line.
+      // traceability of the original §41 reference.
       lines.push(`  // ${atom.replace(/\n$/, "")}`);
     }
   }
@@ -505,13 +669,32 @@ export function composeInitialChunk(
       lines.push(`  ${atom.replace(/\n$/, "")}`);
     }
   }
+}
 
-  lines.push(`})();`);
-  // Trailing newline so chunks concatenate cleanly when sequenced into
-  // a single SSR-injected `<script>` block (a v1.0 polish target).
-  lines.push("");
-
-  return lines.join("\n");
+/**
+ * Test the four-set admission shape for emptiness.
+ *
+ * Used by `emitPerRouteChunks` to decide whether to compose a tier-1
+ * chunk + emit the IIFE-tail prefetch call. Empty admission across all
+ * four sets means:
+ *
+ *   - NO tier-1 file is written (`payloadJs` stays `""` so api.js's
+ *     write loop skips it).
+ *   - NO `_scrml_prefetch_tier1` call is emitted in the initial-chunk
+ *     IIFE tail.
+ *   - The `prefetch` runtime chunk is tree-shaken (no chunk references
+ *     `_scrml_prefetch_tier1` so `detectRuntimeChunks` does not add
+ *     `prefetch` to the runtime chunk set).
+ *
+ * Exported so unit tests can pin the empty-detection contract.
+ */
+export function isChunkContentsEmpty(contents: ChunkContents): boolean {
+  return (
+    contents.componentNodeIds.size === 0 &&
+    contents.reactiveCellNodeIds.size === 0 &&
+    contents.serverFnNodeIds.size === 0 &&
+    contents.vendorUnitNames.size === 0
+  );
 }
 
 /**

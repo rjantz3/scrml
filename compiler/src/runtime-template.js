@@ -1202,6 +1202,49 @@ function _scrml_navigate(path) {
 }
 
 // ---------------------------------------------------------------------------
+// §40.9.7 tier-1 idle prefetch runtime (chunk: 'prefetch')
+// ---------------------------------------------------------------------------
+//
+// Per SPEC §40.9.7: "prefetch_tier_1(E) SHALL be idle-prefetched after
+// initial render. The implementation SHOULD use \`requestIdleCallback\`
+// (or the equivalent Bun-runtime primitive) to schedule the prefetch."
+//
+// OQ-A4-G ratification (S91): Option γ — \`requestIdleCallback\` browser-
+// side with a \`setTimeout(fn, 1)\` Safari fallback (Safari still lacks
+// \`requestIdleCallback\` support as of 2026). The Bun-runtime primitive
+// named in the SPEC's SHOULD clause does NOT exist in Bun 1.2.x as of
+// S91 — reserved as a v0.4 extension point.
+//
+// Called from the initial chunk's IIFE tail when the (EP, role)'s
+// ChunkPlan.prefetchTier1 admits a non-empty set. The codegen
+// route-splitter only emits the call when the tier-1 admission set is
+// non-empty AND a real CompileContext is threaded through; the empty-
+// admission case skips the call entirely (and this whole runtime
+// section is tree-shaken from SCRML_RUNTIME via the \`prefetch\` chunk
+// marker in \`runtime-chunks.ts\`).
+//
+// Implementation uses \`<link rel="prefetch">\` for browser-cache
+// friendliness — once the chunk is in the HTTP cache, the actual
+// \`<script>\` activation on traversal is a cache hit. Browsers that
+// don't honor \`rel="prefetch"\` fall back to whatever they do for
+// unknown link types (a no-op); no fetch error or runtime exception
+// propagates.
+
+function _scrml_prefetch_tier1(chunkUrl) {
+  if (typeof document === "undefined") return;
+  const schedule = typeof requestIdleCallback === "function"
+    ? requestIdleCallback
+    : function (fn) { return setTimeout(fn, 1); };
+  schedule(function () {
+    const link = document.createElement("link");
+    link.rel = "prefetch";
+    link.as = "script";
+    link.href = chunkUrl;
+    document.head.appendChild(link);
+  });
+}
+
+// ---------------------------------------------------------------------------
 // §22.5 meta.emit() runtime — insert HTML at a ^{} block's DOM position
 // ---------------------------------------------------------------------------
 

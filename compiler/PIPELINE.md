@@ -2540,6 +2540,22 @@ interface ChunkContents {
     is NOT modified by A-4.2 — the atom emitters are an ADDITIVE parallel emit surface that the
     route-splitter calls; per-file output remains byte-identical to pre-A-4.2 baseline.
     Tier 1 / Tier 2 / Tier N payloads remain empty placeholders pending A-4.3 / A-4.4 / A-4.5.
+  - **A-4.3 tier-1 idle-prefetch emission (S91):** the `tier1` tier of each (entry-point, role)
+    pair carries the §40.9.7 delta over the initial chunk
+    (`prefetch_tier_1(E) := playable_surface(E, N=1) − initial_chunk(E)`). `composeTier1Chunk`
+    reuses the same atom-emitters as `composeInitialChunk` so tier-1 byte composition follows the
+    same canonical-order + idempotency contract. The initial-chunk IIFE tail is augmented with a
+    `_scrml_prefetch_tier1(<chunk-url>)` call when (and only when) the (EP, role)'s
+    `ChunkPlan.prefetchTier1` admits a non-empty set; empty admission elides both the file write
+    AND the IIFE-tail call. The `_scrml_prefetch_tier1` runtime function lives at
+    `compiler/src/runtime-template.js` in the new `prefetch` runtime chunk (per
+    `compiler/src/codegen/runtime-chunks.ts:CHUNK_MARKERS.prefetch`). Tree-shake:
+    `emit-client.ts:detectRuntimeChunks` scans the per-file `reachabilityRecord` and adds
+    `'prefetch'` to `usedRuntimeChunks` iff some EP in this file has non-empty tier-1 admission;
+    the worked-example §40.9.9 viewer=Driver case (`prefetch_tier_1(/) = {}`) is the canonical
+    DEAD tree-shake. OQ-A4-G ratification (S91): Option γ — `requestIdleCallback` browser-side
+    + `setTimeout(fn, 1)` Safari fallback + Bun-runtime extension point reserved for v0.4.
+    Tier 2 / Tier N payloads remain empty placeholders pending A-4.4 / A-4.5.
 - Consumer: Compiler output writer (writes files to disk)
 
 **Error contract:**

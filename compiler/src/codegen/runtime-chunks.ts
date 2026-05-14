@@ -49,6 +49,13 @@
  *   engine        _scrml_engine_check_transition, _scrml_engine_advance,
  *                 _scrml_engine_direct_set (§51.0.F + §51.0.G, C13).
  *                 Tree-shaken when usage.engines is false.
+ *   prefetch      _scrml_prefetch_tier1 (§40.9.7 tier-1 idle prefetch, A-4.3).
+ *                 Tree-shaken when no chunk has non-empty tier-1 admission
+ *                 (i.e. no initial chunk emits `_scrml_prefetch_tier1(...)`
+ *                 in its IIFE tail). OQ-A4-G ratification (S91): Option γ —
+ *                 `requestIdleCallback` browser-side with `setTimeout(fn, 1)`
+ *                 Safari fallback; Bun-runtime primitive reserved as v0.4
+ *                 extension point.
  */
 
 import { SCRML_RUNTIME } from "../runtime-template.js";
@@ -69,6 +76,7 @@ export const RUNTIME_CHUNK_ORDER = [
   'animation',
   'reconciliation',
   'utilities',
+  'prefetch',
   'meta',
   'transitions',
   'errors',
@@ -118,6 +126,7 @@ const CHUNK_MARKERS: Record<NonCoreChunkName, string> = {
   scope:          '§6.7.3 Scope-aware cleanup registry',
   timers:         '§6.7.5 / §6.7.6 Timer and Poll runtime',
   animation:      '§6.7.7 animationFrame runtime',
+  prefetch:       "§40.9.7 tier-1 idle prefetch runtime (chunk: 'prefetch')",
   meta:           '§22.5 meta.emit() runtime',
   transitions:    'Transition CSS injection',
   errors:         '§19 Built-in error types',

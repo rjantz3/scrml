@@ -97,6 +97,51 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
   const chunks = ctx.usedRuntimeChunks;
   const allNodes: any[] = fileAST?.ast?.nodes ?? fileAST?.nodes ?? [];
 
+  // A-4.3 — `prefetch` chunk lights up when the Stage 7.6 RS has produced
+  // at least one non-empty tier-1 ChunkContents for an entry point in
+  // THIS file. The initial-chunk IIFE emits a tail `_scrml_prefetch_tier1`
+  // call only when admission is non-empty; the runtime function is the
+  // call target. We scan the reachabilityRecord once per file: any
+  // (EP, role) whose tier-1 admission is non-empty causes us to enable
+  // the prefetch runtime chunk.
+  //
+  // Tree-shake floor (§40.9.9 worked example): every (EP, role) has an
+  // EMPTY tier-1 admission for the worked-example fixture. The scan
+  // here returns false and `_scrml_prefetch_tier1` does NOT land in the
+  // per-file `.client.js`'s runtime slice. (The shared `scrml-runtime.js`
+  // path is full-runtime by design — `runtimeJs = SCRML_RUNTIME` in
+  // `index.ts` — and is governed by `embedRuntime: false`. Embed mode
+  // uses the per-file `usedRuntimeChunks` and IS subject to the tree-
+  // shake.)
+  const reach = ctx.reachabilityRecord;
+  if (reach && reach.closures && ctx.filePath) {
+    for (const [epId, rps] of reach.closures) {
+      // EpId encodes the source file path as a prefix (either
+      // `<filePath>::#program` or `<filePath>#page@<routePath>`).
+      // We accept either separator to match the dual EpId shapes
+      // produced by reachability/entry-points.ts.
+      const idStr = String(epId);
+      const fileMatches =
+        idStr.startsWith(ctx.filePath + "::") ||
+        idStr.startsWith(ctx.filePath + "#");
+      if (!fileMatches) continue;
+      for (const [, plan] of rps.byRole) {
+        const t1 = plan.prefetchTier1;
+        if (
+          t1 &&
+          (t1.componentNodeIds.size > 0 ||
+            t1.reactiveCellNodeIds.size > 0 ||
+            t1.serverFnNodeIds.size > 0 ||
+            t1.vendorUnitNames.size > 0)
+        ) {
+          chunks.add("prefetch");
+          break;
+        }
+      }
+      if (chunks.has("prefetch")) break;
+    }
+  }
+
   // Check if an ExprNode tree contains == or != (structural equality)
   function exprNeedsEquality(expr: any): boolean {
     if (!expr || typeof expr !== "object") return false;

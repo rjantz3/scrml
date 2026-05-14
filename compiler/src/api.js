@@ -1572,19 +1572,40 @@ export function compileScrml(options = {}) {
     // hash (§47.1.3).
     // -------------------------------------------------------------------------
     if (emitPerRoute && cgResult.chunks && cgResult.chunksManifest) {
+      // S91 A-4.3 — surface per-tier byte totals in the verbose log so
+      // adopters can sanity-check the tier-1 idle-prefetch payload
+      // budget at a glance.
+      let tier1Count = 0;
+      let tier1Bytes = 0;
       for (const chunk of cgResult.chunks.values()) {
+        // S91 A-4.3 — Skip the file write when the chunk has an empty
+        // payload AND is a non-initial tier. The initial chunk always
+        // ships even with an all-empty admission set (it carries the
+        // IIFE shell + chunk header comment); the tier-1 / tier-2 /
+        // tier-N chunks emit a file ONLY when there is admitted content
+        // to serve.
+        //
+        // Empty-tier elision is normative per SPEC §40.9.9 worked
+        // example (viewer=Driver `prefetch_tier_1(/) = {}`): no tier-1
+        // file is written, and the per-file `.client.js` runtime
+        // tree-shakes `_scrml_prefetch_tier1` (no chunk references it).
+        if (chunk.tier !== "initial" && chunk.payloadJs === "") {
+          continue;
+        }
+
         // The chunk filename is dist-relative; join with outputDir.
         const chunkPath = join(outputDir, chunk.filename);
         mkdirSync(dirname(chunkPath), { recursive: true });
         writeFileSync(chunkPath, chunk.payloadJs);
         fileCount++;
+        const byteLen = Buffer.byteLength(chunk.payloadJs, "utf8");
+        if (chunk.tier === "tier1") {
+          tier1Count++;
+          tier1Bytes += byteLen;
+        }
         if (verbose) {
           // S91 A-4.2 — surface chunk byte count in the verbose log so
           // adopters can sanity-check the per-tier payload size budget.
-          // Empty chunks (tier1/tier2/tierN at A-4.2 before A-4.3+ land)
-          // log as `0 B`; the initial-tier byte count is non-zero
-          // whenever a real CompileContext was threaded to the splitter.
-          const byteLen = Buffer.byteLength(chunk.payloadJs, "utf8");
           log(`  [CG] Wrote chunk: ${chunk.filename} (${byteLen} B)`);
         }
       }
@@ -1595,6 +1616,13 @@ export function compileScrml(options = {}) {
       if (verbose) {
         const manifestBytes = Buffer.byteLength(manifestBody, "utf8");
         log(`  [CG] Wrote chunks manifest: chunks.json (${manifestBytes} B)`);
+        // A-4.3 tier-1 summary — single-line aggregate over all (EP,
+        // role) chunks. Useful at the CLI level to confirm the idle-
+        // prefetch budget at a glance ("0 tier-1 files at 0 B" means
+        // the build's playable surfaces all admit their content at
+        // initial render — typical for small fixtures + the §40.9.9
+        // worked example).
+        log(`  [CG] Tier-1 idle-prefetch chunks: ${tier1Count} file(s), ${tier1Bytes} B total`);
       }
     }
   } else if (!write && cgResult.outputs) {

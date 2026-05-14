@@ -34,6 +34,8 @@ import {
   emitPerRouteChunks,
   serializeChunksManifest,
   composeInitialChunk,
+  composeTier1Chunk,
+  isChunkContentsEmpty,
   CHUNK_HASH_PLACEHOLDER,
   ANONYMOUS_ROLE,
 } from "../../src/codegen/route-splitter.ts";
@@ -652,5 +654,289 @@ describe("§10 composeInitialChunk — chunk shape + admission filter", () => {
     const admin = composeInitialChunk(contents, /** @type {any} */ (ctx), "/abs/app.scrml::#program", "Admin");
     expect(driver).toContain("role=Driver");
     expect(admin).toContain("role=Admin");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §11 — A-4.3: composeTier1Chunk + isChunkContentsEmpty + IIFE-tail wiring
+// ---------------------------------------------------------------------------
+
+describe("§11 A-4.3 composeTier1Chunk — chunk shape + admission filter", () => {
+  function makeFakeCtx({ stateDecls = [], fnDecls = [], markupNodes = [], routeMap = null } = {}) {
+    const nodes = [...stateDecls, ...fnDecls, ...markupNodes];
+    const fileAST = {
+      filePath: "/abs/app.scrml",
+      ast: { nodes },
+    };
+    const functions = new Map();
+    if (routeMap) {
+      for (const [id, entry] of Object.entries(routeMap)) {
+        functions.set(id, entry);
+      }
+    }
+    return { fileAST, routeMap: { functions } };
+  }
+
+  test("tier-1 chunk header carries §40.9.7 prefetch_tier_1 reference + tier label", () => {
+    const ctx = makeFakeCtx({
+      markupNodes: [{ kind: "markup", tag: "details", id: 3, children: [] }],
+    });
+    const contents = {
+      componentNodeIds: new Set([3]),
+      reactiveCellNodeIds: new Set(),
+      serverFnNodeIds: new Set(),
+      vendorUnitNames: new Set(),
+    };
+    const out = composeTier1Chunk(contents, /** @type {any} */ (ctx), "/abs/app.scrml::#program", "Driver");
+    expect(out).toContain("scrml tier-1 chunk");
+    expect(out).toContain("§40.9.7 prefetch_tier_1");
+    expect(out).toContain("role=Driver");
+    expect(out).toContain("(function ()");
+    expect(out).toContain("})();");
+  });
+
+  test("tier-1 chunk emits the delta atoms — reactive cells + components + server fns + vendor units", () => {
+    const stateDecl = {
+      kind: "state-decl",
+      name: "expanded",
+      initExpr: { kind: "lit", value: false },
+      id: 12,
+    };
+    const markupA = { kind: "markup", tag: "section", id: 30, children: [] };
+    const ctx = makeFakeCtx({
+      stateDecls: [stateDecl],
+      markupNodes: [markupA],
+    });
+    const contents = {
+      componentNodeIds: new Set([30]),
+      reactiveCellNodeIds: new Set([12]),
+      serverFnNodeIds: new Set(),
+      vendorUnitNames: new Set(["chartjs"]),
+    };
+    const out = composeTier1Chunk(contents, /** @type {any} */ (ctx), "/abs/app.scrml::#program", "Driver");
+    expect(out).toContain(`_scrml_reactive_set("expanded", false);`);
+    expect(out).toContain(`_scrml_chunk_mount(30, "section");`);
+    expect(out).toContain(`_scrml_vendor_require("vendor:chartjs");`);
+  });
+
+  test("tier-1 determinism — byte-identical output for byte-identical input", () => {
+    const ctx = makeFakeCtx({
+      stateDecls: [{ kind: "state-decl", name: "count", initExpr: { kind: "lit", value: 0 } }],
+      markupNodes: [{ kind: "markup", tag: "button", id: 3, children: [] }],
+    });
+    const contents = {
+      componentNodeIds: new Set([3]),
+      reactiveCellNodeIds: new Set(),
+      serverFnNodeIds: new Set(),
+      vendorUnitNames: new Set(),
+    };
+    const a = composeTier1Chunk(contents, /** @type {any} */ (ctx), "/abs/app.scrml::#program", "Driver");
+    const b = composeTier1Chunk(contents, /** @type {any} */ (ctx), "/abs/app.scrml::#program", "Driver");
+    expect(a).toBe(b);
+  });
+});
+
+describe("§11 isChunkContentsEmpty — four-set admission emptiness", () => {
+  test("all four sets empty → true", () => {
+    expect(isChunkContentsEmpty({
+      componentNodeIds: new Set(),
+      reactiveCellNodeIds: new Set(),
+      serverFnNodeIds: new Set(),
+      vendorUnitNames: new Set(),
+    })).toBe(true);
+  });
+
+  test("any single non-empty set → false", () => {
+    expect(isChunkContentsEmpty({
+      componentNodeIds: new Set([1]),
+      reactiveCellNodeIds: new Set(),
+      serverFnNodeIds: new Set(),
+      vendorUnitNames: new Set(),
+    })).toBe(false);
+    expect(isChunkContentsEmpty({
+      componentNodeIds: new Set(),
+      reactiveCellNodeIds: new Set([5]),
+      serverFnNodeIds: new Set(),
+      vendorUnitNames: new Set(),
+    })).toBe(false);
+    expect(isChunkContentsEmpty({
+      componentNodeIds: new Set(),
+      reactiveCellNodeIds: new Set(),
+      serverFnNodeIds: new Set(["fn-a"]),
+      vendorUnitNames: new Set(),
+    })).toBe(false);
+    expect(isChunkContentsEmpty({
+      componentNodeIds: new Set(),
+      reactiveCellNodeIds: new Set(),
+      serverFnNodeIds: new Set(),
+      vendorUnitNames: new Set(["lodash"]),
+    })).toBe(false);
+  });
+});
+
+describe("§11 IIFE-tail _scrml_prefetch_tier1 call — composeInitialChunk hook", () => {
+  function makeFakeCtx() {
+    return {
+      fileAST: { filePath: "/abs/app.scrml", ast: { nodes: [] } },
+      routeMap: { functions: new Map() },
+    };
+  }
+
+  test("composeInitialChunk WITHOUT tier1Url → no prefetch call in IIFE tail", () => {
+    const out = composeInitialChunk(
+      {
+        componentNodeIds: new Set(),
+        reactiveCellNodeIds: new Set(),
+        serverFnNodeIds: new Set(),
+        vendorUnitNames: new Set(),
+      },
+      /** @type {any} */ (makeFakeCtx()),
+      "/abs/app.scrml::#program",
+      "Driver",
+      // tier1Url omitted → defaults to null
+    );
+    expect(out).not.toContain("_scrml_prefetch_tier1");
+    expect(out).not.toContain("§40.9.7 tier-1 idle prefetch");
+  });
+
+  test("composeInitialChunk WITH tier1Url → prefetch call emitted at IIFE tail", () => {
+    const out = composeInitialChunk(
+      {
+        componentNodeIds: new Set(),
+        reactiveCellNodeIds: new Set(),
+        serverFnNodeIds: new Set(),
+        vendorUnitNames: new Set(),
+      },
+      /** @type {any} */ (makeFakeCtx()),
+      "/abs/app.scrml::#page::/dashboard",
+      "Admin",
+      "/dashboard/Admin.tier1.00000000.js",
+    );
+    expect(out).toContain(`_scrml_prefetch_tier1("/dashboard/Admin.tier1.00000000.js");`);
+    expect(out).toContain("§40.9.7 tier-1 idle prefetch");
+    // Call is BEFORE the IIFE close brace.
+    const callIdx = out.indexOf("_scrml_prefetch_tier1");
+    const closeIdx = out.indexOf("})();");
+    expect(callIdx).toBeGreaterThan(-1);
+    expect(closeIdx).toBeGreaterThan(callIdx);
+  });
+
+  test("emitPerRouteChunks wires tier1Url into initial chunk when tier-1 admission is non-empty", () => {
+    // Use a synthetic CompileContext + reachabilityRecord with a
+    // non-empty prefetchTier1 ChunkContents. The orchestrator should
+    // compose a tier-1 payload AND append the IIFE-tail call to the
+    // initial chunk.
+    const fileAST = {
+      filePath: "/abs/app.scrml",
+      ast: { nodes: [{ kind: "markup", tag: "details", id: 7, children: [] }] },
+    };
+    const ctx = /** @type {any} */ ({ fileAST, routeMap: { functions: new Map() } });
+    const ctxByFile = new Map([["/abs/app.scrml", ctx]]);
+    const record = {
+      closures: new Map([
+        [
+          "/abs/app.scrml::#program",
+          {
+            byRole: new Map([
+              [
+                "Driver",
+                {
+                  initialChunk: {
+                    componentNodeIds: new Set(),
+                    reactiveCellNodeIds: new Set(),
+                    serverFnNodeIds: new Set(),
+                    vendorUnitNames: new Set(),
+                  },
+                  prefetchTier1: {
+                    componentNodeIds: new Set([7]),
+                    reactiveCellNodeIds: new Set(),
+                    serverFnNodeIds: new Set(),
+                    vendorUnitNames: new Set(),
+                  },
+                  prefetchTier2: {
+                    componentNodeIds: new Set(),
+                    reactiveCellNodeIds: new Set(),
+                    serverFnNodeIds: new Set(),
+                    vendorUnitNames: new Set(),
+                  },
+                  prefetchTierN: [],
+                },
+              ],
+            ]),
+          },
+        ],
+      ]),
+      diagnostics: [],
+    };
+    const { chunks } = emitPerRouteChunks({
+      reachabilityRecord: record,
+      cgContextByFile: ctxByFile,
+    });
+    const initial = chunks.get(`/abs/app.scrml::#program::Driver::initial`);
+    const tier1 = chunks.get(`/abs/app.scrml::#program::Driver::tier1`);
+    expect(initial).toBeDefined();
+    expect(tier1).toBeDefined();
+    // Initial chunk IIFE tail carries the prefetch call referencing the
+    // tier-1 chunk's emitted filename (absolute URL).
+    expect(initial.payloadJs).toContain(`_scrml_prefetch_tier1("/${tier1.filename}");`);
+    // Tier-1 chunk has non-empty payload (admitted component mount marker).
+    expect(tier1.payloadJs).toContain(`_scrml_chunk_mount(7, "details");`);
+    expect(tier1.payloadJs.length).toBeGreaterThan(0);
+  });
+
+  test("emitPerRouteChunks does NOT wire tier1Url + leaves tier-1 payload empty when admission is empty", () => {
+    const fileAST = {
+      filePath: "/abs/app.scrml",
+      ast: { nodes: [] },
+    };
+    const ctx = /** @type {any} */ ({ fileAST, routeMap: { functions: new Map() } });
+    const ctxByFile = new Map([["/abs/app.scrml", ctx]]);
+    const record = {
+      closures: new Map([
+        [
+          "/abs/app.scrml::#program",
+          {
+            byRole: new Map([
+              [
+                "Driver",
+                {
+                  initialChunk: {
+                    componentNodeIds: new Set(),
+                    reactiveCellNodeIds: new Set(),
+                    serverFnNodeIds: new Set(),
+                    vendorUnitNames: new Set(),
+                  },
+                  prefetchTier1: {
+                    componentNodeIds: new Set(),
+                    reactiveCellNodeIds: new Set(),
+                    serverFnNodeIds: new Set(),
+                    vendorUnitNames: new Set(),
+                  },
+                  prefetchTier2: {
+                    componentNodeIds: new Set(),
+                    reactiveCellNodeIds: new Set(),
+                    serverFnNodeIds: new Set(),
+                    vendorUnitNames: new Set(),
+                  },
+                  prefetchTierN: [],
+                },
+              ],
+            ]),
+          },
+        ],
+      ]),
+      diagnostics: [],
+    };
+    const { chunks } = emitPerRouteChunks({
+      reachabilityRecord: record,
+      cgContextByFile: ctxByFile,
+    });
+    const initial = chunks.get(`/abs/app.scrml::#program::Driver::initial`);
+    const tier1 = chunks.get(`/abs/app.scrml::#program::Driver::tier1`);
+    // Tier-1 admission empty → tier-1 payload empty (api.js write loop
+    // skips the file write).
+    expect(tier1.payloadJs).toBe("");
+    // Initial chunk IIFE tail has NO prefetch call.
+    expect(initial.payloadJs).not.toContain("_scrml_prefetch_tier1");
   });
 });

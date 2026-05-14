@@ -68,13 +68,13 @@
 **CLOSED at S91 (A-4 wave initial-chunk dispatch):**
 - A-4.1 codegen orchestrator slot + per-(EP, role, tier) iteration scaffold + opt-in `--emit-per-route` flag (13 unit tests) ✓
 - A-4.2 initial_chunk(E, R) JS payload emission — `composeInitialChunk` in `compiler/src/codegen/route-splitter.ts` + atom emitters in `compiler/src/codegen/atom-emitter.ts` (`emitReactiveCellAtom` / `emitServerFnStubAtom` / `emitVendorUnitRef` / `emitComponentAtom`); 21 new unit tests + 16 new integration tests including §40.9.9 worked-example replay (viewer=Driver / viewer=Admin per-role variance + 2-build determinism + per-file .client.js byte-identical regression) ✓
+- A-4.3 prefetch_tier_1(E, R) emission + idle-prefetch runtime wiring — `composeTier1Chunk` in `compiler/src/codegen/route-splitter.ts` (delta over initial via shared `appendAtomLines`); `_scrml_prefetch_tier1` runtime function in `compiler/src/runtime-template.js` (`requestIdleCallback` browser-side + `setTimeout(fn, 1)` Safari fallback per OQ-A4-G Option γ); `prefetch` runtime chunk marker in `compiler/src/codegen/runtime-chunks.ts` (tree-shake live/dead per `detectRuntimeChunks` scan of `reachabilityRecord.closures[ep].byRole[role].prefetchTier1`); initial-chunk IIFE-tail prefetch call when admission non-empty (elided when empty per §40.9.9 normative `prefetch_tier_1(/) = {}`); api.js write-loop skips empty-payload non-initial chunks + surfaces tier-1 byte total in verbose log. 7 new unit tests + 9 new integration tests including §40.9.9 worked-example empty-tier-1 normative replay + tree-shake DEAD assertion under embed mode ✓
 
 **In Progress / Pending:**
 - §34 catalog rows for I-AUTH-REDIRECT-UNRESOLVED + W-AUTH-PAGE-INFERRED deferred to A-3.5 SPEC dispatch
 - stdlib/http async migration (4 try-catch sites tracked by W-TRY-CATCH lint)
-- A-4.3 tier-1 idle-prefetch payload emission (brief staged at `docs/changes/a-4-3-tier-1-idle-prefetch/BRIEF.md`)
 - A-4.4 tier-2 hover-prefetch payload emission (brief staged at `docs/changes/a-4-4-tier-2-hover-prefetch/BRIEF.md`)
-- A-4.5 tier-N on-demand dispatch hook
+- A-4.5 tier-N on-demand dispatch hook (brief staged at `docs/changes/a-4-5-tier-n-on-demand/BRIEF.md`)
 - A-4.6 content-addressed `chunkHash` (FNV-1a base36, §47.1.3) — replaces A-4.1 `"00000000"` placeholder
 - A-4.7 per-route HTML augmentation + W-CG-CHUNK-* lints + role-detection bootstrap (OQ-A4-E hybrid)
 
@@ -140,8 +140,9 @@
 | §34 catalog rows for A-3 diagnostic codes | A-3.5 SPEC dispatch (I-AUTH-REDIRECT-UNRESOLVED + W-AUTH-PAGE-INFERRED) |
 | Wire format follow-on | SPEC §57 landed; codegen integration done |
 | --emit-reachability canonical JSON | A-2.8 landed S91 — `serializeReachabilityRecord` in `compiler/src/reachability-solver.ts` enforces bit-identical output (stratified comparator + canonical diagnostic order); 21-test anchor at `compiler/tests/unit/reachability-record-determinism.test.js` |
-| A-4 per-route artifact splitter | A-4.1 + A-4.2 closed S91 — `compiler/src/codegen/route-splitter.ts` (orchestrator + composer) + `compiler/src/codegen/atom-emitter.ts` (per-id atom helpers). Opt-in via `--emit-per-route` CLI flag. A-4.3..A-4.7 pending. Test anchors: `compiler/tests/unit/codegen-route-splitter.test.js` (34 tests), `compiler/tests/integration/initial-chunk-emission.test.js` (16 tests — §40.9.9 worked-example replay) |
+| A-4 per-route artifact splitter | A-4.1 + A-4.2 + A-4.3 closed S91 — `compiler/src/codegen/route-splitter.ts` (orchestrator + initial-chunk + tier-1 composers) + `compiler/src/codegen/atom-emitter.ts` (per-id atom helpers) + `_scrml_prefetch_tier1` runtime in `compiler/src/runtime-template.js`. Opt-in via `--emit-per-route` CLI flag. A-4.4..A-4.7 pending. Test anchors: `compiler/tests/unit/codegen-route-splitter.test.js` (43 tests), `compiler/tests/integration/initial-chunk-emission.test.js` (16 tests — §40.9.9 worked-example replay), `compiler/tests/integration/tier1-idle-prefetch.test.js` (9 tests — §40.9.9 empty-tier-1 normative + tree-shake DEAD verification) |
 | A-4.2 atom-emitter extension | New atom emitters live in `compiler/src/codegen/atom-emitter.ts`; the per-file `.client.js` path (`emit-client.ts:generateClientJs`) is NOT touched at A-4.2 — atom emitters are an ADDITIVE parallel surface that `composeInitialChunk` calls. Future polish dispatch MAY fold the two paths together |
+| A-4.3 tier-1 idle-prefetch runtime | `_scrml_prefetch_tier1(chunkUrl)` lives in the new `prefetch` runtime chunk; uses `requestIdleCallback` with `setTimeout(fn, 1)` Safari fallback (OQ-A4-G Option γ); tree-shake LIVE/DEAD driven by `detectRuntimeChunks` scan of per-file `reachabilityRecord.closures[ep].byRole[role].prefetchTier1` non-emptiness; initial-chunk IIFE tail emits `_scrml_prefetch_tier1(<url>)` only when (EP, role) admits non-empty tier-1 |
 | null/absence migration | docs/changes/null-eradication-*, undefined-eradication-*, stdlib-phase-1-5-null-sweep |
 | stdlib/http async migration | stdlib/http/index.scrml lines 65/264 (W-TRY-CATCH fires) |
 
