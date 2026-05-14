@@ -121,6 +121,44 @@ All three retry agents completed cleanly. PA file-delta'd each into main, then u
 - **Track 5 — Audit closure docs (2-4h)** — document audit-item closure rationale in master-list + audit appendix; re-grep compiler/src/ post-migration; update audit counts (most M-7C-D-N + M-8C-D-N items close as spec-ratified per Option ε).
 - Then: bundled paired-migration packets per Wave 9.A audit §6 ordering can begin firing.
 
+### Phase 6 — T2 + T5 dispatch (T5 landed; T2 stalled → continuation in flight)
+
+**T5 (audit closure docs):** ✅ LANDED `956184f` + progress `e03d269`.
+- Agent `aa6ff329472c0bfbb`; 5 agent commits, FINAL_SHA `7b5fca8`.
+- D-12.5a: CLOSURE banners added to null-audit + undefined-audit docs; master-list §0.6 M-7C-D-12 closure summary added with 5-track dispatch ledger.
+- D-12.5b: Re-grep counts (`\bnull\b` 2,777 → 2,925 +9 files; `\bundefined\b` 861 → 933 +8 files). **Increases entirely additive context** — new S89/S90 files + T1 doc-comments. **Zero new M-class drift introduced.** Classification: J-class (JS-host legit) ~480/110; I-class (TS scaffold) ~1500/590; M-class ~720/140 (all closed-as-spec-ratified under Option ε except M-7C-D-6 T2-in-flight and M-8C-D-6 T3-migrated).
+- Worktree cleaned.
+
+**T2 (wire envelope codegen):** 🟡 PARTIAL → CONTINUATION DISPATCHED.
+- First agent `a4402f7f60b722082` **stalled at 600s watchdog mid-deliberation** (NOT crash). Zero commits made; high-quality scaffolding in worktree working tree:
+  - NEW `compiler/src/codegen/wire-format.ts` (~228 lines) with `returnTypeAllowsAbsence` predicate + encoder/decoder helper string constants
+  - `emit-server.ts` (+28/-3) type-gated envelope wrapping at CSRF + non-CSRF emit sites
+  - `runtime-template.js` (+15) `_scrml_wire_decode` dual-decoder helper inlined
+- **Missing:** helper-injection wiring (`_scrml_wire_encode` called but never defined in output — agent ID'd the pattern "post-emit detect via `finalEmitted.includes('_scrml_wire_encode(')`" but stalled before applying); client decoder consumption wiring (`_scrml_wire_decode` declared but unused); tests.
+- **Recovery shape ratified S90:** re-dispatch continuation agent with explicit "finish-from-WIP" brief. Continuation agent `acd2647377e9e6eca` dispatched. Brief reads partial files from retained worktree (read-only source), ports into fresh worktree, completes 3 missing pieces via 5 sequential steps with S83 commit discipline + no-`--no-verify` mandate.
+- Original T2 worktree `a4402f7f60b722082` retained as read-only source for continuation.
+
+### Phase 7 — A-2.3 dispatch (in flight, parallel with T2 continuation)
+
+User authorized continued momentum while T2 continuation runs. A-2.3 = Reachability Solver Component 2 (`reactive_dep_closure(C)` per SPEC §40.9.3). 6-10h scope.
+
+Agent `a6c8d2f1c115e02fe` dispatched. File-disjoint from T2 (reachability/ vs codegen/). Sub-tasks:
+- A-2.3.a — Forward-DFS walker over `kind === "reads"` DG edges
+- A-2.3.b — markup-read edge handling (admit edge `to`, not intermediary)
+- A-2.3.c — `validator-reads` + `engine-derived-reads` edge handling (OQ-A2-J disposition)
+- A-2.3.d — Dynamic-key recovery semantics (`@obj[runtimeKey]` → admit entire receiver)
+
+Files: NEW `compiler/src/reachability/component-2.ts` (mirroring A-2.2's split pattern under `reachability/`), extend `reachability-solver.ts` orchestrator, ~12 tests in `compiler/tests/unit/reachability-solver-component-2.test.ts`. Dependencies: A-2.2 closed (S89). Downstream: Components 3/4/5 parallelizable per SCOPING §A-2.3 dependency note.
+
+### Worktree state mid-Phase-7
+
+```
+main                                       e03d269 [main]
+.claude/worktrees/agent-a4402f7f60b722082  0ed8e55 [retained — T2 partial, read-only source]
+.claude/worktrees/agent-a6c8d2f1c115e02fe  e03d269 [A-2.3 in flight]
+.claude/worktrees/agent-acd2647377e9e6eca  72df93b [T2 continuation in flight; 1 commit ahead]
+```
+
 ---
 
 ## Session-start observations (PA work product for S90)
