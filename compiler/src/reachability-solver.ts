@@ -417,35 +417,98 @@ function differenceSet<T>(a: Set<T>, b: Set<T>): Set<T> {
 }
 
 // ---------------------------------------------------------------------------
-// JSON serialization — A-2.1 minimal scaffold + A-2.8 canonicalization target
+// JSON serialization — A-2.8 canonical bit-identical serializer
 // ---------------------------------------------------------------------------
+//
+// **SPEC anchor (§40.9.8 — Determinism preservation, lines 17794-17812):**
+//
+//   "All inputs to playable_surface(E, N) are STATIC — source files +
+//    spec semantics + the role enum declared at app scope. The analysis
+//    takes NO telemetry input in v0.3. The output is therefore
+//    deterministic-from-source-only: same source produces same closure
+//    produces same chunk assignments produces same content addresses."
+//
+//   "The analysis output SHALL be incorporated into per-route content
+//    addresses (§47) such that two builds of the same source produce
+//    identical content addresses for the same per-tier chunks."
+//
+// `serializeReachabilityRecord` enforces this normative invariant at the
+// JSON-output boundary: same `ReachabilityRecord` input MUST produce
+// byte-identical UTF-8 output across runs, JS-engine versions, and host
+// Map/Set insertion orders. This is the bit-identical invariant.
+//
+// **Canonical-ordering rules (the rules that achieve bit-identicality):**
+//
+// 1. Object keys (closures map, byRole map, ChunkPlan shape, ChunkContents
+//    shape, diagnostic objects) — emitted in a FIXED key order, NOT
+//    insertion order. `JSON.stringify` honours the property order of the
+//    plain-object literal we build, so we construct the literal with the
+//    canonical key sequence.
+//
+// 2. Map-as-object emission (closures, byRole) — outer map keys
+//    (EntryPointId strings) and inner map keys (RoleVariant strings) are
+//    string-sorted by codepoint comparison (`<` / `>`); NOT `localeCompare`
+//    (whose collation can vary by ICU version on the host).
+//
+// 3. Set members — sorted via `canonicalIdComparator`. Set members may be
+//    primitive numbers (`NodeId = number`), primitive strings (NodeId
+//    string forms + EntryPointId / RoleVariant / VendorUnitId strings),
+//    or — defensively for forward-compat — arbitrary objects (canonicalized
+//    via `canonicalStringify`). The stratification rule is:
+//
+//      class 0: numbers      — compared numerically (so "42" sorts AFTER "7"
+//                              when both are numeric NodeIds).
+//      class 1: strings      — compared by codepoint order.
+//      class 2: objects/etc  — compared by canonical-stringified form.
+//
+//    Numbers sort BEFORE strings; strings BEFORE objects. The point is
+//    bit-identical output across runs, NOT human-readable sort order.
+//    The strata are stable; within a stratum the comparator is total.
+//
+// 4. Diagnostic array — emitted in canonical sort order keyed by
+//    (code, severity, entryPoint ?? "", role ?? "", message). Insertion
+//    order varies across runs depending on the orchestrator's iteration
+//    over Maps; canonical order does not. Empty string serves as the
+//    absent-field sentinel — keeps the comparator total without branching.
+//
+// **Why not `localeCompare`?** ICU collation differs between Bun, Node,
+// and browser hosts; `localeCompare` is locale-dependent by default.
+// Codepoint comparison via `<` / `>` is deterministic across hosts.
+//
+// **Why not `Object.keys(...).sort()` on an unordered intermediate?**
+// V8 / JavaScriptCore preserve insertion order for string-keyed objects
+// per ES2015. Building the literal with canonical key sequence is
+// equivalent to (and faster than) post-sorting `Object.keys`.
 
 /**
- * Serialize a `ReachabilityRecord` to JSON for the `--emit-reachability`
- * CLI flag.
+ * Serialize a `ReachabilityRecord` to canonical JSON for the
+ * `--emit-reachability` CLI flag.
  *
- * **A-2.1 scaffold:** emits a well-formed empty-shape JSON document.
- * Maps are serialized as objects with sorted string keys; Sets as
- * sorted arrays. The shape mirrors the TypeScript surface verbatim
- * so downstream tests can assert structure without depending on the
- * algorithm.
+ * **Bit-identical invariant:** for any two `ReachabilityRecord` values
+ * that are structurally equal (same closures map, same diagnostics
+ * array contents), this function returns byte-identical UTF-8 strings —
+ * regardless of Map/Set insertion order in the inputs.
  *
- * **A-2.8 will replace this body** with the canonical-key-ordering
- * serializer per PIPELINE Stage 7.6 line 2391 determinism invariant.
- * The signature is stable.
+ * See the module-level comment block above for the full set of
+ * canonical-ordering rules and SPEC anchors.
  */
 export function serializeReachabilityRecord(record: ReachabilityRecord): string {
   const closures: Record<string, unknown> = {};
-  // Sort entry-point keys for deterministic output.
-  const epKeys = Array.from(record.closures.keys()).sort();
+  // Outer keys: EntryPointId strings — codepoint-sorted for determinism.
+  const epKeys = Array.from(record.closures.keys()).sort(compareStrings);
   for (const ep of epKeys) {
     const rps = record.closures.get(ep);
     if (!rps) continue;
     const byRole: Record<string, unknown> = {};
-    const roleKeys = Array.from(rps.byRole.keys()).sort();
+    // Inner keys: RoleVariant strings — codepoint-sorted.
+    const roleKeys = Array.from(rps.byRole.keys()).sort(compareStrings);
     for (const role of roleKeys) {
       const plan = rps.byRole.get(role);
       if (!plan) continue;
+      // ChunkPlan fixed key order: initialChunk → prefetchTier1 →
+      // prefetchTier2 → prefetchTierN. The `prefetchTierN` array preserves
+      // its source order (per SPEC §40.9.7 — N indexes the interaction
+      // depth, so array index IS the canonical key).
       byRole[role] = {
         initialChunk: serializeChunkContents(plan.initialChunk),
         prefetchTier1: serializeChunkContents(plan.prefetchTier1),
@@ -453,20 +516,42 @@ export function serializeReachabilityRecord(record: ReachabilityRecord): string 
         prefetchTierN: plan.prefetchTierN.map(serializeChunkContents),
       };
     }
+    // RolePlayableSurface fixed key order: byRole only (single field).
     closures[ep] = { byRole };
   }
 
-  const diagnostics = record.diagnostics.map((d) => ({
-    code: d.code,
-    severity: d.severity,
-    message: d.message,
-    ...(d.entryPoint !== undefined ? { entryPoint: d.entryPoint } : {}),
-    ...(d.role !== undefined ? { role: d.role } : {}),
-  }));
+  // Diagnostics — canonical sort by (code, severity, entryPoint, role,
+  // message). The map function emits a fixed key order per diagnostic
+  // (code → severity → entryPoint? → role? → message). Optional fields
+  // are emitted only when present so the JSON shape is minimal when the
+  // diagnostic carries no entry-point / role context.
+  const sortedDiagnostics = [...record.diagnostics].sort(compareDiagnostics);
+  const diagnostics = sortedDiagnostics.map((d) => {
+    const out: Record<string, unknown> = {
+      code: d.code,
+      severity: d.severity,
+    };
+    if (d.entryPoint !== undefined) out.entryPoint = d.entryPoint;
+    if (d.role !== undefined) out.role = d.role;
+    out.message = d.message;
+    return out;
+  });
 
+  // Top-level fixed key order: closures → diagnostics. `JSON.stringify`
+  // serializes object keys in insertion order (ES2015 string-key order
+  // preservation) — building the literal with this sequence produces
+  // bit-identical output.
   return JSON.stringify({ closures, diagnostics }, null, 2);
 }
 
+/**
+ * Per-`ChunkContents` canonical emission.
+ *
+ * Fixed key order: componentNodeIds → reactiveCellNodeIds →
+ * serverFnNodeIds → vendorUnitNames (mirrors the `ChunkContents`
+ * TypeScript declaration in `types/reachability.ts:145`). Each set is
+ * sorted via the structured comparator below.
+ */
 function serializeChunkContents(cc: {
   componentNodeIds: Set<unknown>;
   reactiveCellNodeIds: Set<unknown>;
@@ -481,10 +566,151 @@ function serializeChunkContents(cc: {
   };
 }
 
+/**
+ * Materialize a Set into an array sorted via `canonicalIdComparator`.
+ *
+ * Used for every Set field in the serialized output (componentNodeIds,
+ * reactiveCellNodeIds, serverFnNodeIds, vendorUnitNames). The comparator
+ * is stable and total — see `canonicalIdComparator` for the
+ * stratification rule.
+ */
 function sortedArrayFromSet(set: Set<unknown>): unknown[] {
-  return Array.from(set).sort((a, b) => {
-    const sa = String(a);
-    const sb = String(b);
-    return sa < sb ? -1 : sa > sb ? 1 : 0;
-  });
+  return Array.from(set).sort(canonicalIdComparator);
+}
+
+/**
+ * Codepoint-order string comparator.
+ *
+ * Avoids `localeCompare` (whose collation depends on host ICU version)
+ * and avoids `String.prototype.normalize` (whose default form is also
+ * host-dependent for some characters). Plain `<` / `>` compares JS
+ * strings by UTF-16 codepoint, which is stable across hosts.
+ */
+function compareStrings(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * Canonical comparator for Set members in the serialized output.
+ *
+ * Stratification (the bit-identical invariant — same logical set
+ * produces same sorted array):
+ *
+ *   class 0 (numbers)  — sorted numerically. `7` sorts BEFORE `42`,
+ *                        which would not hold under string-coercion
+ *                        ("42" < "7" lexicographically).
+ *   class 1 (strings)  — sorted by codepoint (`<` / `>`).
+ *   class 2 (other)    — sorted by `canonicalStringify` (recursive
+ *                        canonical-key JSON form). Defensive — current
+ *                        ChunkContents type doesn't carry object-typed
+ *                        ids, but the comparator handles them for
+ *                        forward-compat (e.g. structured NodeId forms
+ *                        a future wave might introduce).
+ *
+ * Cross-class ordering: numbers < strings < other. This is a documented
+ * rule — the goal is bit-identical output across runs, NOT
+ * human-readable sort order.
+ *
+ * For numeric strings (e.g. `"42"`) the comparator does NOT treat them
+ * as numbers — they're class 1 strings and string-sorted. Only actual
+ * `typeof === "number"` values land in class 0.
+ */
+function canonicalIdComparator(a: unknown, b: unknown): number {
+  const ca = canonicalClass(a);
+  const cb = canonicalClass(b);
+  if (ca !== cb) return ca - cb;
+  if (ca === 0) {
+    // Both numbers — numeric compare. NaN is not a valid NodeId; if it
+    // appears, treat it as equal to itself and after all finite numbers
+    // for stability (defensive — should not occur in practice).
+    const na = a as number;
+    const nb = b as number;
+    if (Number.isNaN(na) && Number.isNaN(nb)) return 0;
+    if (Number.isNaN(na)) return 1;
+    if (Number.isNaN(nb)) return -1;
+    return na < nb ? -1 : na > nb ? 1 : 0;
+  }
+  if (ca === 1) return compareStrings(a as string, b as string);
+  // class 2 — canonical-stringify then codepoint compare.
+  return compareStrings(canonicalStringify(a), canonicalStringify(b));
+}
+
+/**
+ * Strata classifier for `canonicalIdComparator`.
+ *
+ * Returns:
+ *   0 — `typeof === "number"` (excludes string-typed numeric forms).
+ *   1 — `typeof === "string"`.
+ *   2 — anything else (objects, arrays, booleans, bigints, symbols).
+ */
+function canonicalClass(v: unknown): number {
+  const t = typeof v;
+  if (t === "number") return 0;
+  if (t === "string") return 1;
+  return 2;
+}
+
+/**
+ * Canonical-key JSON stringification.
+ *
+ * Used by `canonicalIdComparator` to compare class-2 values (objects,
+ * arrays, etc.) by a stable canonical form. Recursive: object keys are
+ * sorted by codepoint before serialization; arrays preserve order
+ * (array index IS the canonical key).
+ *
+ * Primitives serialize via `JSON.stringify` directly. `undefined`
+ * surfaces as the string `"undefined"` (not legal JSON, but used here
+ * only for comparison-key construction — never emitted in the
+ * serializer output, since the `ChunkContents` types do not permit
+ * `undefined` members).
+ */
+function canonicalStringify(v: unknown): string {
+  if (v === undefined) return "undefined";
+  if (v === null) return "null";
+  const t = typeof v;
+  if (t === "number" || t === "boolean" || t === "string") {
+    return JSON.stringify(v);
+  }
+  if (t === "bigint") return `"${(v as bigint).toString()}n"`;
+  if (Array.isArray(v)) {
+    return "[" + v.map(canonicalStringify).join(",") + "]";
+  }
+  if (t === "object") {
+    const obj = v as Record<string, unknown>;
+    const keys = Object.keys(obj).sort(compareStrings);
+    const parts = keys.map((k) => JSON.stringify(k) + ":" + canonicalStringify(obj[k]));
+    return "{" + parts.join(",") + "}";
+  }
+  // Symbol / function — defensive; shouldn't appear in record sets.
+  return JSON.stringify(String(v));
+}
+
+/**
+ * Diagnostic-array comparator. Sort key:
+ *
+ *   (code, severity, entryPoint ?? "", role ?? "", message)
+ *
+ * Empty string serves as the "absent" sentinel for the optional
+ * `entryPoint` and `role` fields — keeps the comparator total without
+ * branching on undefined.
+ */
+function compareDiagnostics(
+  a: { code: string; severity: string; entryPoint?: unknown; role?: unknown; message: string },
+  b: { code: string; severity: string; entryPoint?: unknown; role?: unknown; message: string },
+): number {
+  const c = compareStrings(a.code, b.code);
+  if (c !== 0) return c;
+  const s = compareStrings(a.severity, b.severity);
+  if (s !== 0) return s;
+  const ep = compareStrings(
+    a.entryPoint === undefined ? "" : String(a.entryPoint),
+    b.entryPoint === undefined ? "" : String(b.entryPoint),
+  );
+  if (ep !== 0) return ep;
+  const r = compareStrings(
+    a.role === undefined ? "" : String(a.role),
+    b.role === undefined ? "" : String(b.role),
+  );
+  if (r !== 0) return r;
+  return compareStrings(a.message, b.message);
 }

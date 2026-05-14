@@ -60,12 +60,15 @@
 - A-3.3 per-gate classifier + W-AUTH-PAGE-INFERRED ✓
 - A-3.4 redirect cross-ref + I-AUTH-REDIRECT-UNRESOLVED ✓
 
+**CLOSED at S91:**
+- A-2.7 outer fixed-point operator + E-CLOSURE-001 fire-site (`compiler/src/reachability/outer-fixpoint.ts`, ~463 LOC) ✓
+- A-3.5 AuthGraph wired into api.js pipeline Stage 7.55 (RS Component 4 now receives real AuthGraph instead of degraded all-in floor) ✓
+- A-2.8 canonical JSON serialization for `--emit-reachability` — stratified comparator (number < string < other), codepoint string compare, diagnostic canonical ordering by (code, severity, entryPoint, role, message); 21 determinism tests including 10-run replay + CLI two-spawn diff ✓
+
 **In Progress / Pending:**
-- A-2.7 outer fixed-point operator + E-CLOSURE-001 (A-2.1..A-2.6 done; A-2.7 pending)
-- A-2.8 canonical JSON serialization for --emit-reachability
-- A-3 NOT yet wired into api.js pipeline (runAuthGraph() exists but api.js does not call it; RS stub degrades to all-in for all roles)
 - §34 catalog rows for I-AUTH-REDIRECT-UNRESOLVED + W-AUTH-PAGE-INFERRED deferred to A-3.5 SPEC dispatch
 - stdlib/http async migration (4 try-catch sites tracked by W-TRY-CATCH lint)
+- A-4 per-route artifact splitter (SCOPING landed S91; impl pending)
 
 ## Business Invariants
 
@@ -127,7 +130,8 @@
 | Auth graph wiring into api.js pipeline | auth-graph.ts runAuthGraph() exists but NOT yet called in api.js; next dispatch wires it into RS input |
 | A-2.7 outer fixed-point + E-CLOSURE-001 | reachability-solver.ts orchestrator; docs/changes/a2-reachability-solver-scoping/SCOPING.md §5 A-2.7 |
 | §34 catalog rows for A-3 diagnostic codes | A-3.5 SPEC dispatch (I-AUTH-REDIRECT-UNRESOLVED + W-AUTH-PAGE-INFERRED) |
-| Wire format follow-on | SPEC §57 landed; codegen integration done; --emit-reachability canonical JSON (A-2.8) |
+| Wire format follow-on | SPEC §57 landed; codegen integration done |
+| --emit-reachability canonical JSON | A-2.8 landed S91 — `serializeReachabilityRecord` in `compiler/src/reachability-solver.ts` enforces bit-identical output (stratified comparator + canonical diagnostic order); 21-test anchor at `compiler/tests/unit/reachability-record-determinism.test.js` |
 | null/absence migration | docs/changes/null-eradication-*, undefined-eradication-*, stdlib-phase-1-5-null-sweep |
 | stdlib/http async migration | stdlib/http/index.scrml lines 65/264 (W-TRY-CATCH fires) |
 

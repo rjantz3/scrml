@@ -2390,12 +2390,12 @@ interface ChunkContents {
 6. Emit `E-CLOSURE-001` (error, defensive) if the fixed-point operator fails to converge.
 
 **Invariants:**
-- **Determinism:** same input produces identical `ReachabilityRecord`. All inputs are static (no telemetry, no env, no timestamp) per SPEC.md §40.9.8.
+- **Determinism:** same input produces identical `ReachabilityRecord`. All inputs are static (no telemetry, no env, no timestamp) per SPEC.md §40.9.8. **A-2.8 (S91) hardens the JSON serializer** (`serializeReachabilityRecord` in `compiler/src/reachability-solver.ts`) to enforce bit-identical output: closures-map keys + byRole-map keys are codepoint-sorted; Set members are sorted via a stratified comparator (number stratum < string stratum < other) with numeric compare within the number stratum (so `7` sorts before `42`, not after as under naive string-coerce); diagnostics are canonical-ordered by `(code, severity, entryPoint ?? "", role ?? "", message)`; all object literals use fixed key sequences (ES2015 string-key order preservation). The `compiler/tests/unit/reachability-record-determinism.test.js` suite (21 tests) anchors the invariant including a 10-run defence-in-depth replay and a two-spawn CLI-output `diff` test.
 - **Monotonicity in N:** for any `E` and `R`, `ChunkPlan.initialChunk ⊆ initialChunk ∪ prefetchTier1 ⊆ ... ∪ prefetchTierN`.
 - **No mutation of upstream output:** RS produces a fresh `ReachabilityRecord` and does NOT mutate DG, BatchPlan, RouteMap, AuthGraph, ServerFnBoundary, or VendorUnitDeclarations.
 - **Termination:** the fixed-point operator over finite input graphs terminates by construction; `E-CLOSURE-001` is defensive against compiler-internal-invariant violations only. (Wired S91 A-2.7 — implementation at `compiler/src/reachability/outer-fixpoint.ts`; iteration cap = 16; surfaced via `runReachabilitySolver` per-(entry-point, role) loop.)
 
-**CLI exposure:** `scrml compile --emit-reachability` SHOULD emit the `ReachabilityRecord` as JSON for debugging and test visibility (analogous to `--emit-batch-plan` at §Stage 7.5). Implementation deferred to the compiler-impl wave.
+**CLI exposure:** `scrml compile --emit-reachability` emits the `ReachabilityRecord` as canonical JSON to `<base>.reachability.json` next to compiled outputs (analogous to `--emit-batch-plan` at §Stage 7.5). Wired S89 A-2.1 (CLI flag + file write) + hardened S91 A-2.8 (canonical key ordering — see Determinism invariant above).
 
 **Complexity:** Linear in the size of the union of (DG nodes × role-enum variants × per-route entry points). Per Insight 29 compiler-architect assessment, RS is whole-program at 1.5-3× SYM's total cost. Per S84 the corpus is well-bounded; RS terminates and produces a bounded output on all measured shapes.
 
