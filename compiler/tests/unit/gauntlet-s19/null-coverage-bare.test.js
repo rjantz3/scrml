@@ -11,16 +11,24 @@
  * Per SPEC §42.7 (W3 amendment): the rejection of `null` / `undefined` SHALL
  * apply uniformly across **every** scrml source position. W3.1 closes the
  * value-position path with a `forEachLitNull` walker that visits every
- * `lit{ litType: "null" | "undefined" }` (and `ident{ name: "null" |
- * "undefined" }`) reachable from any exprNode.
+ * forbidden-absence literal (and `ident{ name: "null" | "undefined" }`)
+ * reachable from any exprNode.
+ *
+ * §42 absence canon (S90 M-7C-D-12 Track 1): parser sites manufacture only
+ * `lit{ litType: "not" }`; the `raw` field discriminates user-source token
+ * provenance — `raw:"null"` / `raw:"undefined"` are user-source forbidden
+ * tokens (fire E-SYNTAX-042); `raw:"not"` is canonical or internal synthesis
+ * (no fire). Pre-S90 AST snapshots may still carry deprecated `litType:"null"`
+ * / `litType:"undefined"`; the detector recognizes those as legacy fallback.
  *
  * Suppression rules verified here:
  *   - Direct lit-null operands of binary `==` / `!=` / `===` / `!==` are
  *     handled by checkEqNode (W3) — not double-emitted.
  *   - Direct lit-null operands of binary `is-not` / `is-some` / `is-not-not`
  *     are SYNTHETIC (the expression-parser desugars `x is not` → `binary{
- *     op:"is-not", left:x, right:lit{null} }`). These are not real source
- *     tokens and must NOT trigger W3.1.
+ *     op:"is-not", left:x, right:lit{ litType:"not", raw:"not" } }`). The
+ *     synthetic operand is not a forbidden source token; the walker's
+ *     isForbiddenAbsenceLit helper returns false for it.
  *
  * Each negative test asserts E-SYNTAX-042 is emitted. Each positive control
  * asserts NO E-SYNTAX-042 is emitted.

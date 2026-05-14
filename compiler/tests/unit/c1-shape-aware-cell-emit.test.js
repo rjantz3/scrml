@@ -304,14 +304,16 @@ describe("C1 §C1.5 — Variant C compound (parent + children)", () => {
 
 describe("C1 §C1.6 — default= storage sidecar", () => {
   test("emits _scrml_default_set alongside Shape 1 plain reactive-set", () => {
+    // §42 absence canon (S90 M-7C-D-12 Track 1): defaultExpr for absence
+    // uses canonical `litType:"not"`; emit-expr lowers to JS `null`.
     const node = {
       ...shape1Plain("startTime", "Date.now()"),
-      defaultExpr: { kind: "lit", litType: "null", raw: "null", span: { start: 0, end: 0 } },
+      defaultExpr: { kind: "lit", litType: "not", raw: "not", value: null, span: { start: 0, end: 0 } },
     };
     const result = emitLogicNode(node);
     expect(result).toContain('_scrml_reactive_set("startTime"');
     expect(result).toContain('_scrml_default_set("startTime"');
-    // The closure body is the defaultExpr — for `null` literal, just `null`.
+    // The closure body is the defaultExpr — `lit{ litType:"not" }` compiles to `null`.
     expect(result).toMatch(/_scrml_default_set\("startTime", \(\) => null\)/);
   });
 
@@ -450,10 +452,11 @@ describe("C1 §C1.10 — Compound-child default= qualified-path storage", () => 
   test("default= on the parent itself stores at the parent qualified path", () => {
     // SPEC §6.8.2 says reset() recurses into children; a parent-level default=
     // is structurally allowed but unusual. Test stores correctly when present.
+    // §42 absence canon (S90 M-7C-D-12 Track 1): canonical `litType:"not"`.
     const node = compoundParent(
       "form",
       [shape1Plain("name", '""')],
-      { defaultExpr: { kind: "lit", litType: "null", raw: "null", span: { start: 0, end: 0 } } },
+      { defaultExpr: { kind: "lit", litType: "not", raw: "not", value: null, span: { start: 0, end: 0 } } },
     );
     const result = emitLogicNode(node);
     expect(result).toContain('_scrml_default_set("form"');

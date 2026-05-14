@@ -1481,6 +1481,17 @@ export interface IdentExpr {
 /**
  * A literal value.
  * `litType` discriminates the sub-type for the type system.
+ *
+ * §42 absence canon (S90 M-7C-D-12 Track 1):
+ *   - `"not"` is the SINGLE canonical absence discriminator. Parser sites
+ *     SHALL manufacture only `litType: "not"` — never `"null"` / `"undefined"`.
+ *     The `raw` field discriminates source-token provenance for the gauntlet-
+ *     phase3 lint detector: `raw: "null"` / `raw: "undefined"` signal user-
+ *     source forbidden tokens (still fires E-SYNTAX-042); `raw: "not"` is
+ *     the scrml canonical keyword or internal synthesis.
+ *   - `"null"` and `"undefined"` litType variants are RETAINED in the union
+ *     for backwards-compat (older AST snapshots, downstream defensive checks)
+ *     but are `@deprecated` — no parser site SHALL emit them.
  */
 export interface LitExpr {
   kind: "lit";
@@ -1488,14 +1499,16 @@ export interface LitExpr {
   /** Raw source text of the literal (preserves exact string content). */
   raw: string;
   /** Interpreted value — for number: parsed float; for string: unescaped content;
-   *  for bool: true/false; for null/undefined/not: the keyword string. */
+   *  for bool: true/false; for not (absence): null. */
   value: string | number | boolean | null;
   litType:
     | "number"
     | "string"      // double-quoted string
     | "template"    // back-tick string (static, no live interpolation)
     | "bool"
+    /** @deprecated S90 M-7C-D-12 Track 1 — use `"not"` with `raw: "null"` for user-source forbidden-token detection. */
     | "null"
+    /** @deprecated S90 M-7C-D-12 Track 1 — use `"not"` with `raw: "undefined"` for user-source forbidden-token detection. */
     | "undefined"
     | "not";        // §42 absence value — compiles to null
 }
@@ -1581,7 +1594,8 @@ export interface BinaryExpr {
   left: ExprNode;
   /**
    * For `is` / `is-not` / `is-some` / `is-not-not`: right holds the pattern
-   * (an `ident` for enum variant name, or a `lit { litType: "null" }` for absence).
+   * (an `ident` for enum variant name, or a `lit { litType: "not" }` for
+   * absence — synthesized by the parser at the operator's RHS position).
    * For standard binary ops: right is the right-hand expression.
    */
   right: ExprNode;

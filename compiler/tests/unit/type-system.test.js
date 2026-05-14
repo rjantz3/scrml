@@ -235,11 +235,22 @@ describe("§1 ScopeChain — global built-in types", () => {
     expect(entry.resolvedType.name).toBe("boolean");
   });
 
-  test("null is in global scope", () => {
+  // §42 absence canon (S90 M-7C-D-12 Track 1 / D-12.1e): `null` is NOT a
+  // scrml type — it is a forbidden JS token (E-SYNTAX-042 in scrml source).
+  // The canonical absence type is `not` (§42), registered below. The
+  // BUILTIN_TYPES entry for `"null"` was removed so type annotations
+  // `:null` no longer resolve to a primitive type at scope-lookup.
+  test("null is NOT in global scope (forbidden — §42)", () => {
     const sc = new ScopeChain();
     const entry = sc.lookup("null");
+    expect(entry).toBeNull();
+  });
+
+  test("not is in global scope (§42 canonical absence)", () => {
+    const sc = new ScopeChain();
+    const entry = sc.lookup("not");
     expect(entry).not.toBeNull();
-    expect(entry.resolvedType.name).toBe("null");
+    expect(entry.resolvedType.kind).toBe("not");
   });
 
   test("asIs is in global scope", () => {

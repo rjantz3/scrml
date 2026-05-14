@@ -984,7 +984,14 @@ export function esTreeToExprNode(
         return { kind: "lit", span, raw, value, litType: "bool" } satisfies LitExpr;
       }
       if (value === null) {
-        return { kind: "lit", span, raw, value: null, litType: "null" } satisfies LitExpr;
+        // §42 absence canon (S90 M-7C-D-12 Track 1): user-source `null` token
+        // gets `litType: "not"` so the AST only carries the canonical absence
+        // discriminator. The `raw: "null"` field preserves source-token
+        // provenance so the gauntlet-phase3 detector can still fire
+        // E-SYNTAX-042 on user-source `null` (raw "null" / "undefined" → user
+        // forbidden token; raw "not" → scrml canonical keyword or internal
+        // synthesis).
+        return { kind: "lit", span, raw, value: null, litType: "not" } satisfies LitExpr;
       }
       if (typeof value === "string") {
         // Template literals that survived preprocessing are string literals
@@ -1182,20 +1189,25 @@ export function esTreeToExprNode(
         // Bug 5 (s87 trio-b) — thread rawSource into the LHS recursion of
         // every scrml placeholder call so `(arr.filter(function(t){...}).length is not)`
         // and similar absence/variant-check shapes preserve nested callbacks.
+        // §42 absence canon (S90 M-7C-D-12 Track 1): RHS injection for
+        // is-not / is-some / is-not-not uses canonical `litType: "not"` with
+        // `raw: "not"`. The gauntlet-phase3 walker already suppresses direct
+        // operands of these absence operators (isAbsenceOp check), so the
+        // synthetic RHS is never inspected as a forbidden-source-token.
         if (calleeName === "__scrml_is_not_not__") {
           const left = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset, rawSource);
-          const nullNode: LitExpr = { kind: "lit", span, raw: "null", value: null, litType: "null" };
-          return { kind: "binary", span, op: "is-not-not", left, right: nullNode } satisfies BinaryExpr;
+          const absentNode: LitExpr = { kind: "lit", span, raw: "not", value: null, litType: "not" };
+          return { kind: "binary", span, op: "is-not-not", left, right: absentNode } satisfies BinaryExpr;
         }
         if (calleeName === "__scrml_is_not__") {
           const left = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset, rawSource);
-          const nullNode: LitExpr = { kind: "lit", span, raw: "null", value: null, litType: "null" };
-          return { kind: "binary", span, op: "is-not", left, right: nullNode } satisfies BinaryExpr;
+          const absentNode: LitExpr = { kind: "lit", span, raw: "not", value: null, litType: "not" };
+          return { kind: "binary", span, op: "is-not", left, right: absentNode } satisfies BinaryExpr;
         }
         if (calleeName === "__scrml_is_some__") {
           const left = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset, rawSource);
-          const nullNode: LitExpr = { kind: "lit", span, raw: "null", value: null, litType: "null" };
-          return { kind: "binary", span, op: "is-some", left, right: nullNode } satisfies BinaryExpr;
+          const absentNode: LitExpr = { kind: "lit", span, raw: "not", value: null, litType: "not" };
+          return { kind: "binary", span, op: "is-some", left, right: absentNode } satisfies BinaryExpr;
         }
         if (calleeName === "__scrml_is_variant__") {
           const left = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset, rawSource);
@@ -1227,17 +1239,19 @@ export function esTreeToExprNode(
           // Diagnose zero-arg / multi-arg / spread shapes. The single-arg
           // happy path produces a clean reset-expr without diagnostic.
           if (rawArgs.length === 0) {
-            // Zero-arg form: synthesize an undefined-literal target so the
+            // Zero-arg form: synthesize an absence-literal target so the
             // node carries a valid shape; A1b can ignore the target since
-            // the diagnostic prevents further codegen.
-            const undefTarget: LitExpr = {
+            // the E-RESET-NO-ARG diagnostic prevents further codegen.
+            // §42 absence canon (S90 M-7C-D-12 Track 1): use `litType: "not"`
+            // (canonical) instead of the deprecated `"undefined"` variant.
+            const absentTarget: LitExpr = {
               kind: "lit", span,
-              raw: "undefined", value: undefined as unknown as null,
-              litType: "undefined",
+              raw: "not", value: null,
+              litType: "not",
             };
             return {
               kind: "reset-expr", span,
-              target: undefTarget,
+              target: absentTarget,
               diagnostic: {
                 code: "E-RESET-NO-ARG",
                 message:
@@ -1253,9 +1267,12 @@ export function esTreeToExprNode(
             // E-RESET-NO-ARG with an arity-specific message (single error code
             // per Step 9 survey decision — see progress.md).
             const firstArg = rawArgs.find(a => a.type !== "SpreadElement") as ESNode | undefined;
+            // §42 absence canon (S90 M-7C-D-12 Track 1): synthetic fallback
+            // target uses canonical `litType: "not"` (deprecated "undefined"
+            // variant no longer manufactured). The diagnostic still fires.
             const target: ExprNode = firstArg
               ? esTreeToExprNode(firstArg, filePath, baseOffset, rawSource)
-              : { kind: "lit", span, raw: "undefined", value: undefined as unknown as null, litType: "undefined" } satisfies LitExpr;
+              : { kind: "lit", span, raw: "not", value: null, litType: "not" } satisfies LitExpr;
             const detail = hasSpread
               ? "spread arguments are not permitted"
               : `expected exactly one argument, got ${rawArgs.length}`;
@@ -1313,7 +1330,12 @@ export function esTreeToExprNode(
       // Bug 5 (s87 trio-b): thread rawSource through every element so a
       // function-with-block-body inside an array literal survives.
       const elements = ((node.elements as (ESNode | null)[]) ?? []).map(el => {
-        if (!el) return { kind: "lit" as const, span, raw: "undefined", value: undefined as unknown as null, litType: "undefined" as const } satisfies LitExpr;
+        // §42 absence canon (S90 M-7C-D-12 Track 1): array holes (`[1,,3]`)
+        // synthesize an absence literal at the hole position. Canonical
+        // `litType: "not"` replaces the deprecated `"undefined"` variant.
+        // Emit semantics: `litType: "not"` compiles to JS `null` per §42.5/§42.8
+        // (was previously JS `undefined`); this aligns with scrml absence ABI.
+        if (!el) return { kind: "lit" as const, span, raw: "not", value: null, litType: "not" as const } satisfies LitExpr;
         if (el.type === "SpreadElement") {
           const arg = esTreeToExprNode((el as { argument: ESNode }).argument, filePath, baseOffset, rawSource);
           return { kind: "spread" as const, span: spanFromEstree(el, filePath, baseOffset), argument: arg } satisfies SpreadExpr;
@@ -1478,9 +1500,13 @@ function convertParams(params: ESNode[], filePath: string, baseOffset: number): 
  */
 export function parseExprToNode(raw: string, filePath: string, offset: number, opts?: { tildeActive?: boolean }): ExprNode {
   if (!raw || typeof raw !== "string" || !raw.trim()) {
-    // Empty expression — return a null-literal placeholder
+    // Empty expression — return an absence-literal placeholder.
+    // §42 absence canon (S90 M-7C-D-12 Track 1): canonical `litType: "not"`
+    // with empty `raw`. The empty raw distinguishes from a user-source `null`
+    // (which would have `raw: "null"`); the gauntlet-phase3 detector only
+    // fires on `raw: "null"` / `raw: "undefined"`.
     const span: ExprSpan = { file: filePath, start: offset, end: offset, line: 1, col: 1 };
-    return { kind: "lit", span, raw: "", value: null, litType: "null" } satisfies LitExpr;
+    return { kind: "lit", span, raw: "", value: null, litType: "not" } satisfies LitExpr;
   }
 
   const trimmed = raw.trim();
@@ -1591,7 +1617,17 @@ export function emitStringFromTree(node: ExprNode): string {
       return node.name;
 
     case "lit": {
-      if (node.litType === "not") return "not";
+      // §42 absence canon (S90 M-7C-D-12 Track 1): all parser sites manufacture
+      // `litType: "not"`. Round-trip uses `raw` to preserve source-token
+      // provenance ("null" / "undefined" for user-source forbidden tokens,
+      // "not" for the scrml canonical keyword, "" for empty-expression
+      // placeholders). The deprecated `"null"` / `"undefined"` litType branches
+      // remain for older AST snapshots / defensive-coded consumers.
+      if (node.litType === "not") {
+        if (node.raw === "null") return "null";
+        if (node.raw === "undefined") return "undefined";
+        return "not";
+      }
       if (node.litType === "null") return node.raw || "null";
       if (node.litType === "undefined") return "undefined";
       return node.raw;

@@ -163,7 +163,17 @@ function litKindOf(node) {
     if (node.litType === "string") return "string";
     if (node.litType === "template") return "string";
     if (node.litType === "bool") return "bool";
-    if (node.litType === "not") return "not";
+    // §42 absence canon (S90 M-7C-D-12 Track 1): all parser sites manufacture
+    // `litType: "not"`. User-source forbidden tokens are discriminated via the
+    // `raw` field — `raw: "null"` / `raw: "undefined"` signal forbidden source
+    // tokens; everything else is canonical scrml absence.
+    if (node.litType === "not") {
+      if (node.raw === "null") return "null";
+      if (node.raw === "undefined") return "undefined";
+      return "not";
+    }
+    // Legacy: pre-S90 AST snapshots may still carry the deprecated litType
+    // variants directly. Recognize them so a stale AST still fires E-SYNTAX-042.
     if (node.litType === "null") return "null";
     if (node.litType === "undefined") return "undefined";
     return null;
@@ -348,12 +358,25 @@ function forEachEqualityBinary(node, onEq) {
 /**
  * W3.1 — bare-null-literal walker.
  *
- * Visits every `lit{ litType: "null" | "undefined" }` (and `ident{ name:
- * "null" | "undefined" }`) reachable from the given expression tree, calling
- * `onLitNull` for each. Closes F-NULL-003: bare `null` / `undefined` literals
- * in value position (declaration init, return expression, object property
- * value, array element, ternary branch, etc.) silently passed the existing
- * detector, which only inspected operands of binary `==`/`!=` comparisons.
+ * Visits every absence-literal whose source-token provenance is the forbidden
+ * scrml keyword `null` or `undefined` (and `ident{ name: "null" | "undefined" }`)
+ * reachable from the given expression tree, calling `onLitNull` for each.
+ * Closes F-NULL-003: bare `null` / `undefined` literals in value position
+ * (declaration init, return expression, object property value, array element,
+ * ternary branch, etc.) silently passed the existing detector, which only
+ * inspected operands of binary `==`/`!=` comparisons.
+ *
+ * §42 absence canon (S90 M-7C-D-12 Track 1): after Track 1 migration, all
+ * parser sites manufacture `lit{ litType: "not" }`. User-source forbidden
+ * tokens are discriminated by the `raw` field:
+ *   - `litType: "not", raw: "null"`      → user wrote `null`     → fire E-SYNTAX-042
+ *   - `litType: "not", raw: "undefined"` → user wrote `undefined`→ fire E-SYNTAX-042
+ *   - `litType: "not", raw: "not"` / `""` → canonical scrml absence or empty
+ *     placeholder; do NOT fire
+ *
+ * Legacy fall-through: pre-S90 AST snapshots / external builders may still
+ * carry `litType: "null"` / `litType: "undefined"` directly. Those are still
+ * recognized as forbidden so a stale AST does not silently bypass the lint.
  *
  * To avoid double-emit with `checkEqNode`, this walker SKIPS lit-null /
  * ident-null nodes that are direct `left` or `right` operands of a binary
@@ -372,11 +395,22 @@ function forEachEqualityBinary(node, onEq) {
  * @param {object|null|undefined} node
  * @param {(litNode: object) => void} onLitNull — called for every bare null/undef
  */
+function isForbiddenAbsenceLit(node) {
+  if (!node || node.kind !== "lit") return false;
+  // S90 canon: `litType:"not"` + raw discriminates source-token provenance.
+  if (node.litType === "not" && (node.raw === "null" || node.raw === "undefined")) {
+    return true;
+  }
+  // Legacy: pre-S90 deprecated litType variants.
+  if (node.litType === "null" || node.litType === "undefined") return true;
+  return false;
+}
+
 function forEachLitNull(node, onLitNull) {
   if (!node || typeof node !== "object") return;
 
-  // Bare `null` / `undefined` literal — fire and stop (it's a leaf).
-  if (node.kind === "lit" && (node.litType === "null" || node.litType === "undefined")) {
+  // Bare `null` / `undefined` source-token literal — fire and stop (it's a leaf).
+  if (node.kind === "lit" && isForbiddenAbsenceLit(node)) {
     onLitNull(node);
     return;
   }
@@ -390,10 +424,10 @@ function forEachLitNull(node, onLitNull) {
 
   // Detect binary equality / is-* operators at this node — their direct
   // lit-null / ident-null operands are SYNTHETIC (the expression-parser
-  // generates `right: lit{null}` for `is not` / `is some` / `is not not`)
-  // OR are handled by checkEqNode (for == / != / === / !==). Either way,
-  // they must be skipped here to avoid spurious E-SYNTAX-042 emits on
-  // perfectly valid scrml source like `if (x is not)`.
+  // generates `right: lit{ litType:"not", raw:"not" }` for `is not` /
+  // `is some` / `is not not`) OR are handled by checkEqNode (for == / != /
+  // === / !==). Either way, they must be skipped here to avoid spurious
+  // E-SYNTAX-042 emits on perfectly valid scrml source like `if (x is not)`.
   const isEq = node.kind === "binary" &&
     (node.op === "==" || node.op === "!=" || node.op === "===" || node.op === "!==");
   const isAbsenceOp = node.kind === "binary" &&
@@ -410,7 +444,7 @@ function forEachLitNull(node, onLitNull) {
     const isDirectSuppressedOperand =
       (isEq || isAbsenceOp) && (key === "left" || key === "right") &&
       child && typeof child === "object" &&
-      ((child.kind === "lit" && (child.litType === "null" || child.litType === "undefined")) ||
+      ((child.kind === "lit" && isForbiddenAbsenceLit(child)) ||
        (child.kind === "ident" && (child.name === "null" || child.name === "undefined")));
     if (isDirectSuppressedOperand) continue;
 
@@ -602,9 +636,17 @@ function checkEqNode(eqNode, bindings, structFnSet, fallbackSpan, filePath, erro
  */
 function checkBareNullLit(litNode, fallbackSpan, filePath, errors) {
   // Identify the offending token text — `null`, `undefined`, etc.
+  // §42 absence canon (S90 M-7C-D-12 Track 1): post-migration the lit node
+  // is `litType:"not"` with the user-source token preserved in `raw`. The
+  // legacy `litType:"null"`/"undefined"` paths are also recognized for
+  // pre-S90 AST snapshots.
   let tok;
   if (litNode.kind === "lit") {
-    tok = litNode.litType === "null" ? "null" : "undefined";
+    if (litNode.litType === "not") {
+      tok = litNode.raw === "undefined" ? "undefined" : "null";
+    } else {
+      tok = litNode.litType === "null" ? "null" : "undefined";
+    }
   } else {
     tok = litNode.name; // ident
   }

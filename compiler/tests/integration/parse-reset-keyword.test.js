@@ -110,13 +110,16 @@ describe("A1a Step 9 — `reset(@cell)` keyword expression parsing", () => {
     // Message variant: zero-arg form
     expect(err.message).toMatch(/called with no argument/);
     // The reset-expr node is still produced (parse continues), with a
-    // synthesized undefined target.
+    // synthesized absence-literal target. §42 absence canon (S90 M-7C-D-12
+    // Track 1): canonical `litType:"not"` (deprecated "undefined" variant
+    // no longer manufactured at parser sites).
     const resets = findKind(ast, "reset-expr");
     expect(resets.length).toBe(1);
     expect(resets[0].diagnostic).toBeTruthy();
     expect(resets[0].diagnostic.code).toBe("E-RESET-NO-ARG");
     expect(resets[0].target.kind).toBe("lit");
-    expect(resets[0].target.litType).toBe("undefined");
+    expect(resets[0].target.litType).toBe("not");
+    expect(resets[0].target.raw).toBe("not");
   });
 
   // ---------------------------------------------------------------------------

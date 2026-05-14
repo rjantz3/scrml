@@ -79,7 +79,9 @@ function compoundParent(name, children) {
 }
 
 function nullLit() {
-  return { kind: "lit", litType: "null", raw: "null", span: { start: 0, end: 0 } };
+  // §42 absence canon (S90 M-7C-D-12 Track 1): canonical `litType:"not"`
+  // for absence; emit-expr lowers to JS `null` per §42.5/§42.8.
+  return { kind: "lit", litType: "not", raw: "not", value: null, span: { start: 0, end: 0 } };
 }
 
 function clientCtx() {

@@ -575,7 +575,11 @@ const BUILTIN_TYPES: Map<string, ResolvedType> = new Map([
   ["boolean", tPrimitive("boolean")],
   ["bool",    tPrimitive("boolean")],  // alias
   ["integer", tPrimitive("integer")],   // §53 base-type (maps to number at runtime)
-  ["null",    tPrimitive("null")],
+  // S90 M-7C-D-12 Track 1 (D-12.1e): `null` removed from BUILTIN_TYPES so
+  // user type annotations cannot resolve `:null`. Canonical absence type is
+  // `not` (§42). The internal `tPrimitive("null")` is still used by the
+  // typer for JS-host-type constructions (e.g., DOM ref bindings yield
+  // `Element | null` at the JS host level — see ref= narrowing below).
   ["asIs",    tAsIs()],
   ["not",     tNot()],             // §42 absence value
   // §19 Built-in error types — always available without import
@@ -3140,7 +3144,11 @@ const LOGIC_SCOPE_GLOBAL_ALLOWLIST: ReadonlySet<string> = new Set([
   "RegExp", "Error", "TypeError", "RangeError", "SyntaxError",
   "parseInt", "parseFloat", "isNaN", "isFinite",
   "encodeURI", "encodeURIComponent", "decodeURI", "decodeURIComponent",
-  "undefined", "null", "true", "false", "NaN", "Infinity",
+  // S90 M-7C-D-12 Track 1 (D-12.1e): `"undefined"` and `"null"` removed from
+  // the logic-scope allowlist so scope-check no longer silently passes user-
+  // source `null` / `undefined` identifiers. E-SYNTAX-042 fires earlier
+  // (gauntlet-phase3) for any source-position occurrence per §42.
+  "true", "false", "NaN", "Infinity",
   // Browser / DOM / Node runtime
   "console", "document", "window", "globalThis", "navigator",
   "location", "history", "localStorage", "sessionStorage",

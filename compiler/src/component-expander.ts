@@ -674,7 +674,9 @@ function applyPropSubstitutions(text: string, props: Map<string, string>): strin
  *  - string-literal `name="Alice"` → LitExpr { litType: "string", value: "Alice", raw: "\"Alice\"" }
  *  - variable-ref `name=@user`     → IdentExpr { name: "@user" } (parsed from the raw text)
  *  - declared default (raw text)   → parseExprToNode(default)
- *  - "null" optional default       → LitExpr { litType: "null" }
+ *  - "null" optional default       → LitExpr { litType: "not", raw: "null" }
+ *    (S90 M-7C-D-12 Track 1: canonical `litType:"not"` discriminator; `raw`
+ *    preserves source-token provenance.)
  *
  * The ExprNode form is used by `substitutePropsInExprNode` to replace IdentExpr
  * references inside logic-block bodies with the typed prop value (rather than
@@ -741,14 +743,18 @@ function buildPropExprMap(
         // Fall through to parse-the-text path
       }
     }
-    // Default-value path or fallback: parse the raw text as an expression
+    // Default-value path or fallback: parse the raw text as an expression.
+    // §42 absence canon (S90 M-7C-D-12 Track 1): the `null` default text
+    // synthesizes a canonical `litType:"not"` LitExpr with `raw:"null"`
+    // to preserve source-token provenance. The deprecated `"null"` variant
+    // is no longer manufactured.
     if (value === "null") {
       out.set(name, {
         kind: "lit",
         span: exprSpan,
         raw: "null",
         value: null,
-        litType: "null",
+        litType: "not",
       } satisfies LitExpr);
       continue;
     }
