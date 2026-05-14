@@ -117,7 +117,12 @@ describe("§1 program-auth enumeration", () => {
     expect(gate!.siteKind).toBe("program-auth");
     expect(gate!.role).toBe("required");
     expect(gate!.redirect).toBe("/login");
-    expect(gate!.classification).toBeNull();
+    // A-3.3 lands classification at runAuthGraph time. For program-auth
+    // with `required` and the synthesized `_anonymous` floor (no role
+    // enum declared), the gated_for_role set is EMPTY (no authenticated
+    // roles exist → required excludes everyone). Closed-form true.
+    expect(gate!.classification).not.toBeNull();
+    expect(gate!.classification!.closed_form).toBe(true);
     expect(gate!.filePath).toBe("/abs/a.scrml");
     // cross-ref records the file path as entry-point proxy
     expect(graph.gateToEntryPoint.get(program.id)).toBe("/abs/a.scrml");
@@ -161,7 +166,12 @@ describe("§2 page-auth enumeration", () => {
     expect(gate!.siteKind).toBe("page-auth");
     expect(gate!.role).toBe("required");
     expect(gate!.redirect).toBe("/signin");
-    expect(gate!.classification).toBeNull();
+    // A-3.3 classifies page-auth `required` as closed-form. Without a
+    // declared role enum the floor is the synthesized `_anonymous`
+    // single-variant set; `required` excludes the anonymous floor, so
+    // gated_for_role is empty.
+    expect(gate!.classification).not.toBeNull();
+    expect(gate!.classification!.closed_form).toBe(true);
     expect(graph.gateToEntryPoint.get(page.id)).toBe("/abs/p.scrml");
   });
 
@@ -199,7 +209,13 @@ describe("§3 auth-role-block enumeration", () => {
     expect(gate!.role).toBe("admin");
     expect(gate!.check).toBeNull();
     expect(gate!.redirect).toBe("/login");
-    expect(gate!.classification).toBeNull();
+    // A-3.3 classifies — but `admin` is a variant-not-in-enum (no role
+    // enum is declared at all in this test). E-AUTH-GRAPH-002 fires
+    // from A-3.2 since auth-role-block gates reference variants but no
+    // enum is declared. The classification falls through to
+    // runtime-fallback per the §40.9.2 worst-case-union admission.
+    expect(gate!.classification).not.toBeNull();
+    expect(gate!.classification!.closed_form).toBe(false);
     expect(gate!.rawPredicate).toContain('role="admin"');
     // entry-point cross-ref points at the enclosing file's page
     expect(graph.gateToEntryPoint.get(authBlock.id)).toBe("/abs/admin.scrml");
@@ -233,8 +249,11 @@ describe("§3 auth-role-block enumeration", () => {
     const { graph, errors } = runAuthGraph([f], null);
 
     // A-3.1 enumerates malformed gates without emitting diagnostics —
-    // A-3.3 handles E-AUTH-GRAPH-004 during classification.
-    expect(errors).toHaveLength(0);
+    // A-3.3 (which runs in the same `runAuthGraph` call as A-3.1) handles
+    // E-AUTH-GRAPH-004 during classification.
+    expect(errors.length).toBe(1);
+    expect(errors[0]!.code).toBe("E-AUTH-GRAPH-004");
+    expect(errors[0]!.filePath).toBe("/abs/malformed.scrml");
     expect(graph.gates.size).toBe(1);
     const gate = graph.gates.get(authBlock.id);
     expect(gate).toBeDefined();
@@ -286,7 +305,12 @@ describe("§4 channel-auth enumeration", () => {
     expect(gate).toBeDefined();
     expect(gate!.siteKind).toBe("channel-auth");
     expect(gate!.role).toBe("required");
-    expect(gate!.classification).toBeNull();
+    // A-3.3 classifies channel-auth `required` as closed-form binary
+    // per OQ-A3-D ratified S90. Without a declared role enum the
+    // synthesized `_anonymous` floor is the only variant; `required`
+    // excludes the floor, so gated_for_role is empty.
+    expect(gate!.classification).not.toBeNull();
+    expect(gate!.classification!.closed_form).toBe(true);
     expect(graph.gateToEntryPoint.get(ch.id)).toBe("/abs/ws.scrml");
   });
 
@@ -356,10 +380,14 @@ describe("§5 aggregate cases", () => {
     expect(siteKinds.has("auth-role-block")).toBe(true);
     expect(siteKinds.has("channel-auth")).toBe(true);
 
-    // All gates carry the same file path
+    // All gates carry the same file path. A-3.3 now populates
+    // classification — binary gates (program/page/channel-auth) are
+    // closed-form; the auth-role-block gate falls through to
+    // runtime-fallback because A-3.2 emitted E-AUTH-GRAPH-002 (no
+    // declared enum → roleEnum is null → cannot statically classify).
     for (const gate of graph.gates.values()) {
       expect(gate.filePath).toBe("/abs/multi.scrml");
-      expect(gate.classification).toBeNull();
+      expect(gate.classification).not.toBeNull();
     }
   });
 

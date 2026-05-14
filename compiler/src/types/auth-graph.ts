@@ -253,6 +253,15 @@ export interface RoleEnum {
  *     page-author's concern, NOT a compile error. Fires from A-3.4
  *     (`crossRefRedirects`). The §34 catalog row for this code will be
  *     added in a later A-3.5 SPEC dispatch.
+ *   - `W-AUTH-PAGE-INFERRED` — info-level: a `<page>` lacks an explicit
+ *     `auth=` attribute AND the enclosing file's `<program auth=>` is
+ *     `"required"`. Per OQ-A3-C (b) S90 ratification (explicit-per-page-only
+ *     inheritance + lint nudge), the gate is NOT auto-inherited; the page
+ *     ships ungated at the closure-analysis layer (program-level auth still
+ *     enforces at the request boundary). The lint nudges adopters to add
+ *     explicit per-page `auth=` for closure-analysis correctness. Fires
+ *     from A-3.3 (`classifyGates`). The §34 catalog row will be added in
+ *     a later A-3.5 SPEC dispatch.
  *
  * A-3.1 NEVER emits diagnostics — enumeration is best-effort. Malformed
  * gates are recorded in `AuthGraph.gates` with `role: null` and surfaced
@@ -266,7 +275,8 @@ export interface AuthGraphDiagnostic {
     | "E-AUTH-GRAPH-002"
     | "E-AUTH-GRAPH-003"
     | "E-AUTH-GRAPH-004"
-    | "I-AUTH-REDIRECT-UNRESOLVED";
+    | "I-AUTH-REDIRECT-UNRESOLVED"
+    | "W-AUTH-PAGE-INFERRED";
   severity: "error" | "warning" | "info";
   message: string;
   span: Span;

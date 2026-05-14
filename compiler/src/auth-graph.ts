@@ -44,6 +44,7 @@ import type {
   AuthSiteKind,
   EntryPointId,
   MarkupNodeId,
+  RoleClassification,
   RoleEnum,
   RoleVariant,
 } from "./types/auth-graph.js";
@@ -51,14 +52,26 @@ import type {
 import type {
   ASTNode,
   AttrNode,
+  AttrValue,
   ChannelDeclNode,
+  ConstDeclNode,
+  ExprNode,
   FileAST,
+  LogicNode,
   MarkupNode,
+  ReactiveDeclNode,
   Span,
   TypeDeclNode,
 } from "./types/ast.js";
 
 import type { RouteMap } from "./route-inference.js";
+
+import {
+  type ConstFoldEnv,
+  type ConstResult,
+  type ConstValue,
+  partiallyEvaluateExpr,
+} from "./codegen/constant-folder.js";
 
 // ---------------------------------------------------------------------------
 // Public entry point
@@ -100,6 +113,14 @@ export function runAuthGraph(
   // gates reference role variants but no enum is declared / ambiguous
   // discovery) when applicable.
   const roleEnum = resolveRoleEnum(files, gates, errors);
+
+  // A-3.3 — per-gate classifier. Runs AFTER role-enum resolution so the
+  // classifier can resolve identifier-form predicates against the
+  // canonical variant set. Populates `gate.classification` in-place;
+  // emits W-AUTH-PAGE-INFERRED info-lint for pages that lack explicit
+  // `auth=` under a `<program auth="required">` enclosing scope (per
+  // OQ-A3-C (b) S90 ratification — explicit-per-page-only inheritance).
+  classifyGates(files, gates, roleEnum, errors);
 
   // A-3.4 — auth-redirect cross-ref. Projects each gate's `redirect`
   // field into the redirectTargets map verbatim (bare string per OQ-A3-B
@@ -1045,6 +1066,594 @@ function isBareIdentifier(s: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// A-3.3 — Per-gate classifier (closed-form vs runtime-fallback)
+// ---------------------------------------------------------------------------
+
+/**
+ * Classify each gate's predicate against the resolved role enum. Populates
+ * `gate.classification` in-place on the `AuthGate` records in `gates`.
+ *
+ * Dispatch by `siteKind` (per SCOPING §A-3.3.a):
+ *
+ *   - `program-auth` / `page-auth` (binary):
+ *       `"required"` → closed-form, `gated_for_role` = all variants EXCEPT
+ *                      the anonymous floor (i.e. the user-declared variants
+ *                      whose name is not `_anonymous`). If the role enum
+ *                      is the synthesized `_anonymous` floor, the gated
+ *                      set is empty (no one passes a required gate when
+ *                      no authenticated roles exist).
+ *       `"optional"` → closed-form, `gated_for_role` = all variants
+ *                      (no exclusion — `optional` admits everyone).
+ *       `"none"`     → already filtered at A-3.1 (no gate enumerated).
+ *
+ *   - `channel-auth` (binary; per OQ-A3-D ratified S90):
+ *       same shape as program-auth / page-auth.
+ *
+ *   - `auth-role-block` (`<auth role=...>`): per OQ-A3-A (d) ratified S90,
+ *     dispatch on the role attribute's AttrValue shape:
+ *       - `string-literal` ("admin" / "admin,dispatcher" / "!anonymous")
+ *           → closed-form via static role-spec parser.
+ *       - `variable-ref` (`role=publicRoles`) → look up the binding in
+ *         the file-scope const env; if it folds to a string constant,
+ *         parse as static role-spec. Reactive cells → runtime-fallback.
+ *       - `expr` (`role=${expr}`) → fold via META constant-folder; if
+ *         constant string → parse; otherwise runtime-fallback.
+ *       - `absent` / `call-ref` / `props-block` → runtime-fallback.
+ *
+ *   - `auth-role-block` with `check=` (async server-fn form per SPEC
+ *     §40.9.5 line 17724): always runtime-fallback (the check fn runs
+ *     at render time; cannot statically classify per role).
+ *
+ * Side effects:
+ *   - Mutates `gate.classification` in `gates` (sets the verdict).
+ *   - Mutates `gate.gateExpr` for ExprAttr / VariableRef forms so the
+ *     A-2.5 consumer (which reads `gate_expr` in the runtime-fallback
+ *     branch) has the structured ExprNode to forward to A-4 codegen.
+ *   - Emits `W-AUTH-PAGE-INFERRED` info-lint into `errors` for each
+ *     `<page>` that lacks explicit `auth=` AND sits inside a file whose
+ *     `<program auth=>` is `"required"`. The lint nudges adopters to
+ *     declare per-page `auth=` for closure-analysis correctness (the
+ *     program-level auth still enforces at the request boundary, but
+ *     closure analysis runs against the per-page gate surface per
+ *     OQ-A3-C (b) explicit-per-page-only ratification).
+ */
+function classifyGates(
+  files: FileAST[],
+  gates: Map<MarkupNodeId, AuthGate>,
+  roleEnum: RoleEnum | null,
+  errors: AuthGraphDiagnostic[],
+): void {
+  // Build a one-shot reverse index: MarkupNodeId → the AST node whose
+  // attributes carry the predicate. Same node ids run through both
+  // <auth>/<page>/<program> markup and <channel>; we map every gate-
+  // bearing node we walked during enumeration.
+  const nodeIndex = new Map<MarkupNodeId, MarkupNode | ChannelDeclNode>();
+
+  // Per-file const-env cache. Building the env walks the file's logic
+  // blocks once; classifiers within the file reuse the cached env.
+  const constEnvByFile = new Map<string, ConstFoldEnv>();
+
+  // Helper to look up an env lazily — first request per file builds it.
+  function envForFile(fileAST: FileAST): ConstFoldEnv {
+    const cached = constEnvByFile.get(fileAST.filePath);
+    if (cached) return cached;
+    const env = buildConstEnvForFile(fileAST);
+    constEnvByFile.set(fileAST.filePath, env);
+    return env;
+  }
+
+  // Index every gate-bearing markup node by id so the classifier can
+  // re-read the original AttrValue shape (which A-3.1 does not preserve
+  // on AuthGate — only the verbatim string is stored).
+  for (const fileAST of files) {
+    if (!fileAST) continue;
+    indexGateNodes(fileAST, gates, nodeIndex);
+    // Per OQ-A3-C (b) S90: emit W-AUTH-PAGE-INFERRED lint per file.
+    emitPageInferredLints(fileAST, errors);
+  }
+
+  // Now classify each gate.
+  for (const gate of gates.values()) {
+    const node = nodeIndex.get(gate.nodeId);
+
+    // Resolve the file that hosts this gate so we can pull the const env.
+    const fileAST = files.find((f) => f && f.filePath === gate.filePath);
+    const env = fileAST ? envForFile(fileAST) : { constBindings: new Map() };
+
+    gate.classification = classifyOneGate(gate, node ?? null, roleEnum, env, errors);
+  }
+}
+
+/**
+ * Index every gate-bearing AST node by id so the classifier can read its
+ * original `attrs`. Page-auth + auth-role-block markup nodes are walked
+ * via the same generic markup walker A-3.1 uses; channel-auth nodes are
+ * pulled from `fileAST.channelDecls`.
+ *
+ * Only nodes whose id appears in `gates` are indexed — avoids paying for
+ * unrelated markup. Program-auth nodes are included for completeness but
+ * the classifier never re-reads their attrs (the `role` field on the
+ * AuthGate is the canonical surface for the auth-mode keyword).
+ */
+function indexGateNodes(
+  fileAST: FileAST,
+  gates: Map<MarkupNodeId, AuthGate>,
+  nodeIndex: Map<MarkupNodeId, MarkupNode | ChannelDeclNode>,
+): void {
+  walkMarkupNodes(fileAST.nodes, (node) => {
+    if (gates.has(node.id)) nodeIndex.set(node.id, node);
+  });
+  const channelDecls = fileAST.channelDecls ?? [];
+  for (const channel of channelDecls) {
+    if (!channel) continue;
+    if (gates.has(channel.id)) nodeIndex.set(channel.id, channel);
+  }
+}
+
+/**
+ * Build a `ConstFoldEnv` for one file by collecting `const`-decl and
+ * `const <X>` derived-cell declarations whose initializers fold to constants.
+ *
+ * Sources scanned:
+ *   - Every `LogicNode.body` reached by walking `fileAST.nodes` (covers
+ *     top-level logic blocks AND `<program>` / `<page>` body logic blocks).
+ *   - Recognized statement kinds:
+ *       `const-decl`        — `const x = expr` (plain const).
+ *       `state-decl`        — when `isConst: true` (i.e. `const <x> = expr`
+ *                              derived-cell form). Reactive cells
+ *                              (`<x> = expr` with `isConst: false`) are
+ *                              SKIPPED — their value changes at runtime.
+ *
+ * Each candidate's `initExpr` is partially evaluated. The current env
+ * passes earlier bindings as input — so a later const can reference an
+ * earlier one (one-pass forward fold; cycles silently break to RUNTIME).
+ *
+ * Identifiers with `@`-prefix (legacy reactive form) are ignored — A-3.3
+ * reads only structural-form names. Cross-file imports are NOT followed
+ * (A-3.3's const-resolution surface is intentionally per-file; the
+ * worked example places the role-set decl alongside the gate).
+ */
+function buildConstEnvForFile(fileAST: FileAST): ConstFoldEnv {
+  const bindings = new Map<string, ConstValue>();
+  const decls = collectConstDecls(fileAST.nodes);
+
+  for (const decl of decls) {
+    if (!decl.initExpr) continue;
+    const env: ConstFoldEnv = { constBindings: bindings };
+    const r: ConstResult = partiallyEvaluateExpr(decl.initExpr, env);
+    if (r.kind === "constant") {
+      bindings.set(decl.name, r.value);
+    }
+    // RUNTIME results stay out of the env — they cannot resolve a
+    // closed-form predicate, so the classifier falls through to
+    // runtime-fallback when an identifier references a runtime-only
+    // binding (matches the §40.9.2 worst-case-union semantics).
+  }
+
+  return { constBindings: bindings };
+}
+
+/**
+ * Collect const-shaped declarations from every LogicNode reachable from
+ * the file's AST nodes. Returns name + initExpr pairs in document order.
+ *
+ * Walks both top-level and markup-nested logic blocks (`<program>` /
+ * `<page>` bodies contain LogicNodes). Visits any kind of statement and
+ * filters for `const-decl` and `state-decl{isConst:true}`.
+ */
+function collectConstDecls(
+  nodes: ASTNode[] | undefined,
+): Array<{ name: string; initExpr: ExprNode | undefined }> {
+  const out: Array<{ name: string; initExpr: ExprNode | undefined }> = [];
+
+  function visit(node: ASTNode | null | undefined): void {
+    if (!node) return;
+    if (node.kind === "logic") {
+      const logic = node as LogicNode;
+      for (const stmt of logic.body ?? []) {
+        if (!stmt) continue;
+        if (stmt.kind === "const-decl") {
+          const decl = stmt as ConstDeclNode;
+          out.push({ name: decl.name, initExpr: decl.initExpr });
+        } else if (stmt.kind === "state-decl") {
+          const decl = stmt as ReactiveDeclNode;
+          // Only `const <x> = expr` form is folded — plain reactive
+          // cells are runtime-mutable by definition.
+          if (decl.isConst === true) {
+            out.push({ name: decl.name, initExpr: decl.initExpr });
+          }
+        }
+      }
+    } else if (node.kind === "markup") {
+      const m = node as MarkupNode;
+      for (const child of m.children ?? []) visit(child);
+    }
+    // Other node kinds (sql, css-inline, etc.) cannot host decls.
+  }
+
+  for (const node of nodes ?? []) visit(node);
+  return out;
+}
+
+/**
+ * Per OQ-A3-C (b) S90 ratification — emit `W-AUTH-PAGE-INFERRED` info-lint
+ * for each `<page>` lacking explicit `auth=` when the file's
+ * `<program auth=>` is `"required"`.
+ *
+ * Per route-inference.ts:2433 the program-level `authMiddleware` enforces
+ * at the request boundary regardless. The lint is a closure-analysis
+ * nudge: without explicit per-page `auth=`, A-2.5 has no per-page gate
+ * to feed into per-role traversal — the page reads as ungated at the
+ * closure-analysis layer.
+ *
+ * The lint fires once per qualifying `<page>` element (file-scoped scan).
+ * Pages WITH explicit `auth=` (already enumerated as a `page-auth` gate
+ * by A-3.1) do NOT fire the lint — they're already correctly captured.
+ */
+function emitPageInferredLints(
+  fileAST: FileAST,
+  errors: AuthGraphDiagnostic[],
+): void {
+  if (!fileAST.authConfig) return;
+  if (fileAST.authConfig.auth !== "required") return;
+
+  walkMarkupNodes(fileAST.nodes, (node) => {
+    if (node.tag !== "page") return;
+    const authAttr = findAttr(node.attrs, "auth");
+    if (authAttr) return;  // already has explicit auth= — no lint.
+    errors.push({
+      code: "W-AUTH-PAGE-INFERRED",
+      severity: "info",
+      message:
+        `<page> has no explicit auth= attribute under a <program auth="required"> ` +
+        `enclosing scope. Per OQ-A3-C (b) ratification, page-level auth is NOT ` +
+        `inherited from <program> for closure analysis; add an explicit auth= ` +
+        `attribute to this <page> to participate in per-role chunking. The ` +
+        `<program auth="required"> still enforces at the request boundary.`,
+      span: node.span,
+      filePath: fileAST.filePath,
+    });
+  });
+}
+
+/**
+ * Classify a single gate. Stateless given inputs; returns a
+ * `RoleClassification` verdict or null when the gate is malformed and
+ * cannot be classified (e.g. an `<auth>` block without `role=` AND
+ * without `check=` — also fires E-AUTH-GRAPH-004).
+ */
+function classifyOneGate(
+  gate: AuthGate,
+  node: MarkupNode | ChannelDeclNode | null,
+  roleEnum: RoleEnum | null,
+  env: ConstFoldEnv,
+  errors: AuthGraphDiagnostic[],
+): RoleClassification | null {
+  switch (gate.siteKind) {
+    case "program-auth":
+    case "page-auth":
+    case "channel-auth":
+      return classifyBinaryAuthGate(gate, roleEnum);
+    case "auth-role-block":
+      return classifyAuthRoleBlock(gate, node, roleEnum, env, errors);
+  }
+}
+
+/**
+ * Binary auth-gate classifier (program-auth / page-auth / channel-auth).
+ *
+ * The gate's `role` field carries the auth-mode keyword verbatim:
+ *   - `"required"` → all NON-anonymous variants pass the gate.
+ *   - `"optional"` → all variants pass (no exclusion).
+ *   - anything else (including `null` for malformed) → runtime-fallback
+ *     defensively. SPEC §52 keeps this surface tight; A-3.1 already
+ *     filters `"none"` so it should not reach this branch.
+ */
+function classifyBinaryAuthGate(
+  gate: AuthGate,
+  roleEnum: RoleEnum | null,
+): RoleClassification {
+  const mode = gate.role;
+  if (mode === "optional") {
+    return { closed_form: true, gated_for_role: allVariants(roleEnum) };
+  }
+  if (mode === "required") {
+    return {
+      closed_form: true,
+      gated_for_role: nonAnonymousVariants(roleEnum),
+    };
+  }
+  // Defensive fallback — unknown auth-mode keywords (would have been
+  // rejected upstream by attribute-registry, but be paranoid).
+  return { closed_form: false, gate_expr: null };
+}
+
+/**
+ * `<auth role=...>` block classifier.
+ *
+ * Reads the original AttrValue shape from the indexed markup node to
+ * decide between static-string parsing, const-ref lookup, and
+ * constant-folder evaluation. Falls through to runtime-fallback when
+ * the predicate is non-foldable.
+ *
+ * `check=`-form gates (async server-fn check per SPEC §40.9.5 line
+ * 17724) are unconditionally runtime-fallback regardless of how
+ * `role=` looks — the check fn drives the verdict at render time.
+ */
+function classifyAuthRoleBlock(
+  gate: AuthGate,
+  node: MarkupNode | ChannelDeclNode | null,
+  roleEnum: RoleEnum | null,
+  env: ConstFoldEnv,
+  errors: AuthGraphDiagnostic[],
+): RoleClassification | null {
+  // `<auth check=...>` always runtime-fallback per SPEC §40.9.5 line 17724.
+  if (gate.check != null) {
+    return { closed_form: false, gate_expr: null };
+  }
+
+  // Re-read the role attribute's structured AttrValue to dispatch on
+  // its shape (string-literal vs variable-ref vs expr). When the
+  // original node is available, the AttrValue tells us the real shape
+  // of the predicate — `gate.role` (verbatim string) is null for
+  // variable-ref / expr forms but the gate is still well-formed.
+  const roleAttrValue = readRoleAttrValue(node);
+
+  // Malformed: no role= attr AND no check= attr → E-AUTH-GRAPH-004.
+  // We check this AFTER attempting to read the AttrValue so that
+  // variable-ref / expr forms (where gate.role is null but the attr
+  // exists with a non-string-literal value) are NOT treated as
+  // malformed.
+  if (roleAttrValue == null && gate.role == null && gate.check == null) {
+    errors.push({
+      code: "E-AUTH-GRAPH-004",
+      severity: "error",
+      message:
+        "<auth> block has no `role=` and no `check=` attribute. " +
+        "Declare a role predicate (e.g. `<auth role=\"admin\">`) or a " +
+        "server-fn check (`<auth check=\"hasPermission\">`).",
+      span: gate.span,
+      filePath: gate.filePath,
+    });
+    return null;
+  }
+
+  if (roleAttrValue != null) {
+    return classifyByAttrValue(roleAttrValue, gate, roleEnum, env, errors);
+  }
+
+  // Fallback: use the verbatim `gate.role` string (covers unit-test
+  // gates synthesized via `string-literal` AttrValue, which is the
+  // common case — and matches A-3.1's normalization path).
+  if (gate.role != null) {
+    return classifyStaticRoleString(gate.role, gate, roleEnum, errors);
+  }
+
+  return { closed_form: false, gate_expr: null };
+}
+
+/**
+ * Dispatch a `<auth role=>` classification by the AttrValue shape.
+ *
+ * Per OQ-A3-A (d) ratified S90 the four shapes are:
+ *   - `string-literal` — parse via `classifyStaticRoleString`.
+ *   - `variable-ref`   — look up in const env. Closed-form if the
+ *                        identifier resolves to a string constant;
+ *                        runtime-fallback otherwise.
+ *   - `expr`           — fold via META constant-folder; treat the
+ *                        result like a static role string when
+ *                        constant.
+ *   - `absent` / `call-ref` / `props-block` — runtime-fallback.
+ */
+function classifyByAttrValue(
+  v: AttrValue,
+  gate: AuthGate,
+  roleEnum: RoleEnum | null,
+  env: ConstFoldEnv,
+  errors: AuthGraphDiagnostic[],
+): RoleClassification {
+  if (v.kind === "string-literal") {
+    return classifyStaticRoleString(v.value, gate, roleEnum, errors);
+  }
+  if (v.kind === "variable-ref") {
+    // Reactive cells (`@cell`) are runtime by definition.
+    if (v.name.startsWith("@")) {
+      gate.gateExpr = v.exprNode ?? null;
+      return { closed_form: false, gate_expr: gate.gateExpr };
+    }
+    // Const-ref: look up in the env. If the env has it (i.e. the decl
+    // folded to a constant), use that value.
+    if (env.constBindings.has(v.name)) {
+      const value = env.constBindings.get(v.name)!;
+      if (typeof value === "string") {
+        return classifyStaticRoleString(value, gate, roleEnum, errors);
+      }
+      // Non-string const (e.g. an array of strings) — defer to runtime.
+      // Future enhancement: accept arrays as variant lists.
+    }
+    // Unknown identifier OR reactive cell (`<x> = ...`) OR const that
+    // didn't fold (depends on runtime). Runtime-fallback.
+    gate.gateExpr = v.exprNode ?? null;
+    return { closed_form: false, gate_expr: gate.gateExpr };
+  }
+  if (v.kind === "expr") {
+    if (!v.exprNode) {
+      return { closed_form: false, gate_expr: null };
+    }
+    const result = partiallyEvaluateExpr(v.exprNode, env);
+    if (result.kind === "constant" && typeof result.value === "string") {
+      return classifyStaticRoleString(result.value, gate, roleEnum, errors);
+    }
+    if (result.kind === "constant" && typeof result.value === "boolean") {
+      // Boolean predicate: true admits all variants, false admits none.
+      // Useful for `role=${flag}` patterns; rare but normatively closed-form.
+      return {
+        closed_form: true,
+        gated_for_role: result.value
+          ? allVariants(roleEnum)
+          : new Set<RoleVariant>(),
+      };
+    }
+    gate.gateExpr = v.exprNode;
+    return { closed_form: false, gate_expr: v.exprNode };
+  }
+  // `absent` / `call-ref` / `props-block` → runtime-fallback.
+  return { closed_form: false, gate_expr: null };
+}
+
+/**
+ * Parse a static role-spec string and produce a `RoleClassification`.
+ *
+ * Supported predicate grammar:
+ *   - `"Admin"`                — single variant; gated_for_role = {Admin}.
+ *   - `"Admin,Dispatcher"`     — comma-OR; union of variants.
+ *   - `" Admin , Dispatcher "` — whitespace tolerant.
+ *   - `"!Anonymous"`           — negation; all variants except Anonymous.
+ *   - `"!"` alone               — malformed → runtime-fallback.
+ *
+ * Variant-not-in-enum fires `E-AUTH-GRAPH-003` and returns
+ * runtime-fallback (over-includes vs under-includes per §40.9.2
+ * worst-case-union admission).
+ */
+function classifyStaticRoleString(
+  raw: string,
+  gate: AuthGate,
+  roleEnum: RoleEnum | null,
+  errors: AuthGraphDiagnostic[],
+): RoleClassification {
+  const trimmed = (raw ?? "").trim();
+  if (trimmed === "") {
+    return { closed_form: false, gate_expr: null };
+  }
+
+  // Without a resolved role enum, no per-role traversal is possible —
+  // the gate's variant references are unresolvable. A-3.2 will already
+  // have fired E-AUTH-GRAPH-002 in this state. Fall through to
+  // runtime-fallback per §40.9.2 worst-case-union admission.
+  if (roleEnum == null) {
+    return { closed_form: false, gate_expr: null };
+  }
+
+  // Negation: `"!X"` admits all variants except X. Multiple negations
+  // (`"!X,!Y"`) also work — we accept comma-OR of negations as the
+  // intersection of each "all-except-X" set.
+  const tokens = trimmed.split(",").map((t) => t.trim()).filter(Boolean);
+  if (tokens.length === 0) {
+    return { closed_form: false, gate_expr: null };
+  }
+
+  const variants = roleEnum ? new Set(roleEnum.variants) : null;
+  const positives = new Set<RoleVariant>();
+  const negatives = new Set<RoleVariant>();
+  let malformed = false;
+
+  for (const token of tokens) {
+    const isNeg = token.startsWith("!");
+    const name = isNeg ? token.slice(1).trim() : token;
+    if (!name || !isBareIdentifier(name)) {
+      malformed = true;
+      break;
+    }
+    // Variant-name validation against the role enum. We are permissive
+    // when no role enum was resolved — the gate's classification still
+    // runs over the verbatim variant names (A-2.5 will surface this
+    // path via worst-case-union when no enum is known).
+    if (variants && !variants.has(name)) {
+      errors.push({
+        code: "E-AUTH-GRAPH-003",
+        severity: "error",
+        message:
+          `<auth role="${name}"> references a variant that is not declared ` +
+          `in the role enum \`${roleEnum?.name}\` ` +
+          `(declared variants: ${roleEnum?.variants.join(", ") ?? ""}).`,
+        span: gate.span,
+        filePath: gate.filePath,
+      });
+      // Over-includes per §40.9.2 worst-case admission.
+      return { closed_form: false, gate_expr: null };
+    }
+    if (isNeg) negatives.add(name);
+    else positives.add(name);
+  }
+
+  if (malformed) {
+    return { closed_form: false, gate_expr: null };
+  }
+
+  // Mixed positive + negative is supported but rare. The resulting set
+  // is: (positives ∪ (allVariants \ negatives)) when both sides have
+  // members; OR plain positives; OR allVariants \ negatives.
+  if (positives.size > 0 && negatives.size === 0) {
+    return { closed_form: true, gated_for_role: positives };
+  }
+  if (negatives.size > 0 && positives.size === 0) {
+    const all = allVariants(roleEnum);
+    for (const n of negatives) all.delete(n);
+    return { closed_form: true, gated_for_role: all };
+  }
+  if (positives.size > 0 && negatives.size > 0) {
+    const all = allVariants(roleEnum);
+    for (const n of negatives) all.delete(n);
+    for (const p of positives) all.add(p);
+    return { closed_form: true, gated_for_role: all };
+  }
+
+  // Should not be reachable — covered by the malformed branch above.
+  return { closed_form: false, gate_expr: null };
+}
+
+/**
+ * Extract the role attribute's AttrValue from the indexed AST node.
+ * Returns null when the node is missing OR the node doesn't carry a
+ * `role=` attribute (e.g. `<channel auth=>` uses `auth`, not `role`).
+ */
+function readRoleAttrValue(
+  node: MarkupNode | ChannelDeclNode | null,
+): AttrValue | null {
+  if (!node) return null;
+  const attrs = node.attrs;
+  if (!Array.isArray(attrs)) return null;
+  for (const attr of attrs) {
+    if (attr?.name === "role") return attr.value;
+  }
+  return null;
+}
+
+/**
+ * Build the set of ALL variants from a role enum. Returns an empty set
+ * when no role enum was resolved — A-2.5's per-role traversal degrades
+ * to worst-case-union when the enum is unknown.
+ */
+function allVariants(roleEnum: RoleEnum | null): Set<RoleVariant> {
+  if (!roleEnum) return new Set<RoleVariant>();
+  return new Set(roleEnum.variants);
+}
+
+/**
+ * The variant set used for `auth="required"` gates: every declared
+ * variant EXCEPT the anonymous floor.
+ *
+ * Per SPEC §40.1.1 the anonymous floor is conventionally named
+ * `_anonymous` (the synthesized fallback) or `Anonymous` / `anonymous`
+ * (the adopter-declared form per worked example §40.9.9). We exclude
+ * both casings defensively.
+ *
+ * When the resolved enum is the synthesized `_anonymous` floor (i.e.
+ * the only variant is `_anonymous`), the returned set is empty — no
+ * authenticated viewers exist, so `required` gates exclude everyone.
+ */
+function nonAnonymousVariants(roleEnum: RoleEnum | null): Set<RoleVariant> {
+  if (!roleEnum) return new Set<RoleVariant>();
+  const out = new Set<RoleVariant>();
+  for (const v of roleEnum.variants) {
+    const lower = v.toLowerCase();
+    if (lower === "_anonymous" || lower === "anonymous") continue;
+    out.add(v);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Re-export the public types for convenience (some consumers will only
 // need `runAuthGraph` and the result type — keep the import surface small).
 // ---------------------------------------------------------------------------
@@ -1071,5 +1680,13 @@ export const __test_helpers = {
   collectUrlPatterns,
   parseEnumVariantsFromRaw,
   isBareIdentifier,
+  classifyGates,
+  buildConstEnvForFile,
+  collectConstDecls,
+  classifyStaticRoleString,
+  classifyByAttrValue,
+  classifyBinaryAuthGate,
+  allVariants,
+  nonAnonymousVariants,
 };
 
