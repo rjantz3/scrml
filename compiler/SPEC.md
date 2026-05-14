@@ -6450,11 +6450,18 @@ Server-escalated functions MAY return values to the client. The compiler generat
 Return values are serialized as JSON. Supported return types:
 
 - `string`, `number`, `boolean`
-- `not` (serializes as `null`)
+- `not` (see wire-format rules below)
 - Struct types (all fields must be JSON-serializable)
 - Enum types (serialize as the variant name string)
 - Arrays of any of the above
 - `T | not` union types
+
+**Wire format for scrml-absence (S90 amendment — M-7C-D-12 Track 4):**
+
+- **Non-`T | not` return types:** JSON `null` continues to serialize as a literal wire-null per existing rules. The §42.1 exclusion list (S89) already admits wire-format JSON literal descriptions as a non-source position; raw JSON `null` is the canonical encoding for fields whose declared type does not include `| not`.
+- **`T | not` return types (canonical scrml-absence wire encoding):** scrml-absence (the `not` value) is wire-encoded as the canonical envelope `{"__scrml_absent": true}` — NOT as a raw JSON `null`. This disambiguates scrml-absence from an interop-call's JS-host `null` that may appear elsewhere in the payload (a JS-host `null` arriving via `^{}` / `_{}` / `?{}` is normalised to scrml `not` per §42.9 at the boundary, but the wire format encodes a deliberate, type-known scrml-absence distinctly).
+- **Decoder contract:** The compiler-generated client-side decoder for `T | not` fields SHALL accept BOTH the canonical envelope `{"__scrml_absent": true}` AND a raw JSON `null` (legacy / pre-v0.3 / foreign clients); both lower to scrml `not` (JS `null` per §42.5/§42.8). The encoder SHALL always emit the canonical envelope. See §57 for the normative wire-format rules and the v1.0 clean-break schedule.
+- **Cross-references:** §42.1 (already covers wire-format exclusion of raw `null` from `W-ABSENCE-IN-SCRML-SOURCE`); §42.5 / §42.8 (runtime representation — unchanged: the envelope is wire-only, not a runtime ABI change); §57 (canonical normative wire format).
 
 #### 12.5.2 Client Receipt
 
@@ -14678,7 +14685,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-DERIVED-ENGINE-NO-RULES | §51.0.J | `rule=` declared on a state-child of a derived engine (`<engine derived=...>`). Transitions are determined by the source expression, not authored. Remove `rule=`. | Error |
 | E-DERIVED-ENGINE-NO-INITIAL | §51.0.J, §51.0.E | `initial=` declared on a derived engine. Initial value computed from `derived=expr` at engine-init time; remove `initial=`. | Error |
 | E-DERIVED-ENGINE-NO-WRITE | §51.0.J | Direct write to the auto-declared variable of a derived engine. Derived-engine variables are read-only. | Error |
-| E-DERIVED-ENGINE-INITIAL-UNDEFINED | §51.0.J | `derived=expr` returns no value when the source is in its initial state. Add a default arm or use a wildcard arm in the derivation. | Error |
+| E-DERIVED-ENGINE-INITIAL-ABSENT | §51.0.J | (S90 rename — M-7C-D-12 Track 4 / OQ-6) `derived=expr` returns scrml-absence (`not`) when the source is in its initial state. The derived engine has no initial variant to enter. Add a default arm or use a wildcard arm in the derivation. **Pre-S90 name:** `E-DERIVED-ENGINE-INITIAL-UNDEFINED` (renamed for §42.8 "No scrml program SHALL directly emit JavaScript `undefined`" alignment; the runtime condition is scrml-absence, not JS-`undefined`). | Error |
 | E-DERIVED-ENGINE-CIRCULAR | §51.0.J | Chained derivation (engine A → engine B → engine A) forms a cycle. Detected at compile time by the dependency-graph machinery (§31). Break the cycle. | Error |
 | E-COMPONENT-ENGINE-SCOPE | §51.0.K | A component declaration body contains an `<engine>` element. Engines are singletons; instantiating a component multiple times would produce multiple "singletons", violating the invariant. Use plain reactive cells inside components, or define the engine outside the component. | Error |
 | E-ENGINE-MOUNT-NOT-ENGINE | §51.0.D, §21.8 | A self-closing tag `<EngineName/>` mounts an imported binding whose source export is NOT an engine (e.g., a component, channel, type, function, or arbitrary const). Cross-file engine mount via `<EngineName/>` requires the imported name to be the variable of an exported `<engine>` declaration. Either import an engine binding from the source file, or use the appropriate mount form for the imported kind (e.g., component instantiation for components, expression read for const values). (Catalog addition S68 — A1b B14.) | Error |
@@ -14721,6 +14728,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-PARSEVARIANT-INVALID-PAYLOAD | §41.13 | Runtime: a variant's payload field has the wrong type or fails a payload predicate during parse. Surfaced via `::ParseError::InvalidPayload(field, reason)`. Resolution: verify the wire format matches the variant payload shape declared in the enum; type-coerce primitive payloads in a server function if the wire format is loosely typed. (Runtime; catalog addition S65) | Error |
 | I-MATCH-PROMOTABLE | §56 | Info-level lint surfaces an opportunity to promote an `if=` chain or `${ if (...) lift ... }` pattern over an enum-typed cell into a `<match for=Type on=@cell>` (Tier 1) block for structural exhaustiveness, OR into a `<engine for=Type>` (Tier 2) for full transition-validation. Run `bun scrml promote --match <file>[:line]` to mechanically lift the site. The lint is informational only; chains pre-S56 continue to compile cleanly. (Catalog addition S78 — reconciles SPEC §56 cross-ref claim. Emitted at `compiler/src/lint-promotable.ts` and consumed by `compiler/src/commands/promote.js`.) | Info |
 | W-CG-001 | §6 | A top-level `state-decl` / `let-decl` / `const-decl` / SQL block / etc. inside a logic block was suppressed from the client output (server-only emit, or unused). The lint surfaces what was filtered + why so the developer can confirm it was intentional. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-reactive-wiring.ts:366`.) | Warning |
+| W-CG-UNDEFINED-INTERPOLATION | §42.5, §42.8 | A literal `undefined` JS-keyword was detected in compiled output (CG-level regression guard). scrml absence is canonically JS `null` per §42.5 / §42.8 — `not` codegens to `null`, never to `undefined`. The lint runs post-emission across the per-file compiled JS and fires on each line containing a bare `undefined` keyword outside the canonical idiom exemptions: paired `null && undefined` absence-detection check (§42.5/§42.8 canon — both must be checked to detect scrml absence under JS-host normalisation); `typeof X !== "undefined"` env-detection (canonical JS idiom in quoted form, not a value-keyword interpolation); comments; string literals; template-literal text; embedded runtime block (hand-written JS, masked via `// --- scrml reactive runtime ---` / `// --- end ---` markers). Resolution: the codegen site emitting the bare `undefined` should be migrated to `null` (per §42.8 "null over undefined" rationale). (Catalog addition S90 — M-7C-D-12 Track 3 ratified per OQ-5 (a); emitted at `compiler/src/codegen/lint-undefined-interpolation.ts`.) | Warning |
 | E-ERRORS-001 | §55.8 | The first-class `<errors>` element is missing the required `of=` attribute. The element renders validator errors per cell or rollup; `of=` MUST be a scrml-rooted expression like `of=@form.name` or `of=@form` (compound rollup). (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts:511`.) | Error |
 | E-ERRORS-002 | §55.8 | The `<errors of=...>` element's `of=` attribute is not a `@`-rooted scrml expression. Validator errors are auto-synthesized state surfaces accessed via `@cell` / `@compound.field`; bare-identifier and arbitrary-expression `of=` values are rejected. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts:560`.) | Error |
 | E-SWITCH-FORBIDDEN | §17 | The JavaScript `switch` keyword is not part of scrml's vocabulary. scrml provides Tier-0 if-else for prototyping, Tier-1 `<match for=Type [on=expr]>` block-form for structural-exhaustiveness UI rendering, JS-style `match expr { … }` for value-return branching, and Tier-2 `<engine for=Type>` for full state-machine semantics. Use one of these per the §1 tier ladder. (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js:4514, 7121`.) | Error |
@@ -18535,6 +18543,14 @@ A function that may return no value SHALL declare its return type as `T | not`. 
 
 **Rationale for `null` over `undefined`:** `null` is an explicit, assignable value in JavaScript; `undefined` is the implicit absence of assignment. Using `null` as the scrml `not` representation makes intentional absence explicit in generated code.
 
+**Runtime introspection — DevTools / debugger experience (S90 amendment — M-7C-D-12 Track 4 / OQ-7):**
+
+- scrml-absence (`not`) is represented as JavaScript `null` at runtime per §42.5 above. This is the canonical scaffold encoding ratified by §42.1 exclusions (S89).
+- A scrml-author inspecting a variable via browser DevTools, the JavaScript Console, or any JS-host debugger SHALL see the JS bit-pattern (`null`) — NOT the scrml-language token (`not`). This is the **expected** behavior under the scaffold encoding; the JS-host debugger is unaware of scrml semantics.
+- scrml-language predicates classify correctly regardless of the bit-pattern surface: `x is some` returns `false` for the cell, `x is not` returns `true`, `given x => ...` skips the body, `match x { not => ..., given x => ... }` enters the `not` arm. The scrml-author's source-level reasoning is not affected.
+- Native scrml debugger experience (a debugger that re-presents `null` as the scrml token `not` in its UI) is a **post-v1.0 self-host concern** — the eventual from-scratch scrml self-host (per pa.md self-host-is-from-scratch rule, S89 user ruling) MAY choose any presentation idiom for the absence sentinel in its native debugger. The TypeScript scaffold compiler does not invest in DevTools instrumentation; the JS `null` bit-pattern surface is accepted as the scaffold-lifetime trade-off.
+- **Adopter guidance:** When debugging a scrml program at the JavaScript layer (sourcemaps disabled, runtime introspection, network-payload inspection), treat a JS `null` value as the canonical surface form of scrml `not`. At the scrml source layer, continue writing `is some` / `is not` / `given` / `not`-arm match — those continue to mean what they say.
+
 ### 42.9 JS Interop Boundary
 
 When scrml code receives a value from a JavaScript boundary — a `^{}` meta block, a `?{}` SQL query, a `server function` return value, or any other mechanism that crosses from JavaScript into scrml — the following interop rule applies:
@@ -21748,7 +21764,7 @@ state is FUNCTION of an upstream source rather than authored.
 | `initial=` on the engine | REJECTED — `E-DERIVED-ENGINE-NO-INITIAL` (§34). Initial value computed from `derived=expr` at engine-init time. |
 | Direct writes to the auto-declared variable | REJECTED — `E-DERIVED-ENGINE-NO-WRITE` (§34). The variable is read-only. |
 | `<onTransition>` and `effect=` on state-children | LEGAL — fire on derived state changes (the value changed; transition is real, just initiated by source-cell update, not user code). |
-| Initial-value undefined | If `derived=expr` returns no value when the source is in its `initial=` state — `E-DERIVED-ENGINE-INITIAL-UNDEFINED` (§34). |
+| Initial-value absent | If `derived=expr` returns scrml-absence (`not`) when the source is in its `initial=` state — `E-DERIVED-ENGINE-INITIAL-ABSENT` (§34). (Code renamed S90 from `E-DERIVED-ENGINE-INITIAL-UNDEFINED` per M-7C-D-12 Track 4 / OQ-6; the runtime condition is scrml-absence per §42, not JS-host `undefined`.) |
 | Chained derivation (A → B → C) | LEGAL. Cycle detection at compile time → `E-DERIVED-ENGINE-CIRCULAR` (§34). |
 | `pinned` interaction | Moot — no writes possible; hoisting opt-out applies only to the identifier, not the value. Document and continue (open-Q §7.6 resolution). |
 
@@ -26841,7 +26857,7 @@ of the original D2 brief for the canonical listing):
 | `E-DERIVED-ENGINE-NO-RULES` | Error | rule= on state-child of derived engine (§51.0.J). |
 | `E-DERIVED-ENGINE-NO-INITIAL` | Error | initial= on derived engine (§51.0.J). |
 | `E-DERIVED-ENGINE-NO-WRITE` | Error | Direct write to derived engine variable (§51.0.J). |
-| `E-DERIVED-ENGINE-INITIAL-UNDEFINED` | Error | derived=expr undefined for source's initial state (§51.0.J). |
+| `E-DERIVED-ENGINE-INITIAL-ABSENT` | Error | derived=expr returns scrml-absence (`not`) for source's initial state (§51.0.J). Renamed S90 from `E-DERIVED-ENGINE-INITIAL-UNDEFINED` per M-7C-D-12 / OQ-6. |
 | `E-DERIVED-ENGINE-CIRCULAR` | Error | Chained derivation cycle (§51.0.J). |
 | `E-COMPONENT-ENGINE-SCOPE` | Error | Component body instantiates an engine (§51.0.K). |
 | `E-HISTORY-NO-INNER-ENGINE` | Error | `history` attribute on a state-child without nested `<engine>` (§51.0.N, §51.0.Q). |
@@ -27032,6 +27048,98 @@ no concept of an initial state. The CLI may default to the first arm's variant a
 
 ---
 
+## 57. Wire Format
 
+**Added:** S90, 2026-05-13. **Source:** M-7C-D-12 Track 4 / D-12.4b. **Authority:** SCOPING `docs/changes/m-7c-d-12-runtime-sentinel-scoping/SCOPING.md` Option ε + α-style internal cleanup; OQ-2 (b) + OQ-4 (b) ratified S90 user disposition.
+
+> **Section number note.** §50 is occupied by "Assignment as Expression" since v0.next; §51–§56 are occupied by State Machines / State Authority / Inline Predicates / Nested Substates / Validators / Promotion Ergonomics respectively. The SCOPING dispatch authorised `§50.x` as a working slot label for the wire-format normative content; the canonical section number lands at **§57** to preserve the existing §50 occupant.
+
+### 57.1 Scope
+
+This section defines the canonical scrml wire format for absence-bearing values that cross the network boundary in compiled output. The wire format applies to:
+
+- Server function response payloads (§12.5).
+- WebSocket channel broadcast messages (§38).
+- Server-sent event payloads (§37).
+- Any JSON payload the compiler emits for a `T | not` field whose value is the scrml-absence sentinel `not`.
+
+The wire format does NOT apply to:
+
+- Compile-time JSON literals embedded in scrml source for static configuration (e.g., `^{}` meta-block bodies — these are JS-host literals per §22).
+- `^{}` / `_{}` foreign-code interop payloads — these traverse the §42.9 interop boundary, not a scrml-aware wire.
+- Internal in-process value-passing (function calls, reactive cell reads, SQL `.get()` results within a single program) — these use the §42.5 / §42.8 runtime ABI (JS `null`).
+
+### 57.2 Envelope shape
+
+The canonical wire encoding for scrml-absence in `T | not` fields is:
+
+```json
+{"__scrml_absent": true}
+```
+
+**Normative statements:**
+
+- The envelope SHALL be a JSON object with exactly one own property named `__scrml_absent` whose value is the boolean `true`.
+- The envelope name `__scrml_absent` is chosen to mirror the existing `__scrml_error` envelope precedent (codegen `emit-server.ts` for `safeCall` error returns); both envelopes share the `__scrml_*` namespace.
+- Alternative encodings considered and **dismissed** (OQ-2 disposition): a `:scrml`-prefixed tag form (`{":scrml": "not"}`), a side-channel schema descriptor, a raw JSON `null` (collapses scrml-absence with interop-call JS-host `null` — the load-bearing user-visibility leak the wire format must disambiguate).
+- The envelope shape is forward-compatible with a future runtime sentinel design (Option β in the SCOPING) — should the project ever migrate `not` to a distinct runtime sentinel, the wire encoding does not change.
+
+### 57.3 Encoder rules
+
+**Normative statements:**
+
+- Server-function code-generation SHALL emit the canonical envelope `{"__scrml_absent": true}` when the function's declared (or inferred) return type is `T | not` AND the runtime value is the scrml-absence sentinel.
+- WebSocket channel broadcast code-generation SHALL emit the canonical envelope for any reactive cell value whose declared type is `T | not` and whose runtime value is scrml-absence.
+- Server-sent event payload code-generation SHALL emit the canonical envelope under the same rule.
+- For the non-absent variant (`T`), the encoder SHALL emit the value through the normal JSON serializer — no envelope wrapping. A `T | not` whose value is `42` is emitted as `42`, not `{"__scrml_absent": false, "value": 42}`. The envelope appears only when encoding scrml-absence.
+- For declared return types that are NOT `T | not` (e.g., plain `T`, where a non-`T` value would be a type error), the encoder continues to use raw JSON `null` for any JS-host `null` that may slip through; the §42.1 wire-format exclusion list admits this.
+- Implementations MAY emit the envelope lazily — only the absence path materialises the envelope object; the presence path keeps the unencoded value.
+
+### 57.4 Decoder rules — dual-decoder
+
+**OQ-4 (b) ratification.** The scaffold-lifetime decoder accepts BOTH the canonical envelope AND a raw JSON `null`.
+
+**Normative statements:**
+
+- The compiler-generated client-side decoder for any `T | not` field SHALL accept `{"__scrml_absent": true}` (canonical) and lower it to scrml `not` (runtime JS `null` per §42.5 / §42.8).
+- The compiler-generated decoder SHALL ALSO accept a raw JSON `null` (legacy / pre-v0.3 / foreign-client encoding) and lower it identically to scrml `not`. This dual-decoder admits clients that pre-date the envelope or were written outside the scrml toolchain.
+- The encoder emits the canonical envelope exclusively. The dual-decoder is a **read-side** affordance only; new emit paths SHALL NOT regress to raw `null`.
+- Any envelope shape other than the two admitted forms (canonical envelope and raw `null`) SHALL be treated as a malformed payload — handled per the deserialization error path the surrounding context defines (server-function error envelope per §40 / SSE error frame per §37 / channel error per §38). The decoder SHALL NOT silently coerce arbitrary JSON object shapes into scrml-absence.
+- Implementations MAY short-circuit decode: on receiving the envelope shape, immediately produce scrml `not` without entering the type-aware deserializer for `T`.
+
+### 57.5 Clean break at v1.0 — forward deprecation
+
+**OQ-4 (a) ratification (long-horizon).** At v1.0 / self-host rewrite, the dual-decoder retires.
+
+**Normative statements:**
+
+- The dual-decoder admission of raw JSON `null` is a **scaffold-lifetime affordance** spanning v0.3 through v0.x.
+- At the v1.0 release boundary (which coincides with the from-scratch scrml self-host rewrite — see pa.md self-host-is-from-scratch rule), the decoder SHALL accept ONLY the canonical envelope. Raw JSON `null` SHALL be treated as a malformed payload from v1.0 forward.
+- v0.x clients SHALL emit the envelope for forward compatibility. v0.x adopters communicating with v1.0+ servers (or vice versa) SHALL be wire-compatible because both sides emit the canonical envelope.
+- The deprecation is **forward-only** — pre-v0.3 already-shipped payloads remain decodable by v0.3..v0.x decoders. v1.0+ decoders MAY refuse raw `null` per the canonical-only rule above.
+
+### 57.6 Forward-compatibility with potential runtime sentinel naming (Option β)
+
+The envelope key name `__scrml_absent` is deliberately chosen to be reusable should a future revision migrate the runtime ABI from JS `null` to a distinct runtime sentinel (SCOPING Option β). In that hypothetical migration:
+
+- The sentinel object name would also become `__scrml_absent` (the same identifier as the wire envelope key), preserving symmetric naming on both sides of the JSON serializer.
+- The wire envelope itself does not change — it is already canonical.
+- No additional spec amendment of this section would be required for that migration.
+
+This forward-compatibility guarantee is intentional and is part of why OQ-2 (b) was preferred over the `:scrml`-prefix alternative.
+
+### 57.7 Cross-references
+
+- §12.5.1 — server-function return value wire format (the load-bearing call site for §57 encoding).
+- §37 — server-sent event payloads.
+- §38 — WebSocket channel broadcast.
+- §41.13 — `parseVariant` (prior-art envelope shape: `MissingDiscriminator` / `UnknownVariant` / `InvalidPayload` / `Malformed` tagged variants); §57 follows the same "tagged envelope at boundary" precedent.
+- §42 — `not` as the unified absence value.
+- §42.1 — wire-format JSON literal description exclusion (raw JSON `null` admitted as a non-source position).
+- §42.5 — codegen `not` → JS `null` (the runtime ABI; §57 is wire-only).
+- §42.8 — runtime representation (JS `null`; §57.6 forward-compat with a hypothetical sentinel migration).
+- §42.9 — JS interop boundary (foreign `null` / `undefined` normalised to scrml `not` at assignment; §57 is the wire-side analogue).
+
+---
 
 
