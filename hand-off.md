@@ -100,56 +100,138 @@ Surface at next user interaction; append once user confirms the verbatim slate.
 
 ---
 
-## S91 mid-session activity log
+## S91 mid-session activity log (refreshed mid-A-4.3 flight)
 
-### Commits landed (5 in scrmlTS + 1 in scrml-support)
+### Commits landed — 21 in scrmlTS + 1 in scrml-support
 
-| # | Commit | Description |
+**Chronological PA-authored commit ledger:**
+
+| # | Commit | Category | Description |
+|---|---|---|---|
+| 1 | scrmlTS `199940e` | hygiene | s91-open — hand-off rotation + FULL_COLD_START map refresh (11 maps) |
+| 2 | scrmlTS `399fc81` | pa.md | S90 CWD-routing memory rule fold-in + F4 step 1 sharpening |
+| 3 | scrml-support `8d13012` | user-voice | S90 OQ-A3-A override verbatim backfill (methodology rule: surface narrowing recommendations on first-class compiler-state grounds) |
+| 4 | scrmlTS `bf2b098` | **A-3.5** | A-3 §40 AuthGraph wave **FULLY CLOSED** — 7 §34 catalog rows + 5 §40.9.11 rows + api.js Stage 7.55 AG wire-in + §40.9.9 13-test integration suite + normalizeFileAST helper |
+| 5 | scrmlTS `1d1ceef` | SPEC | §40.9.9 case-fix — 6 sites `role="admin"` → `role="Admin"` (closes A-3.5 deferred #1) |
+| 6 | scrmlTS `fbc8a39` | mid-bookkeeping | master-list S91 addendum + hand-off mid-session refresh (first pass) |
+| 7 | scrmlTS `9d79f45` | brief stage | A-2.8 emit-reachability canonical determinism brief |
+| 8 | scrmlTS `3689153` | scoping | 03-contact-book auth-redirect SCOPING deep-dive landing (882 lines) |
+| 9 | scrmlTS `59279e7` | **A-2.7** | A-2 wave **FULLY CLOSED** — outer fixed-point operator + E-CLOSURE-001 fire-site + 29 tests |
+| 10 | scrmlTS `470b128` | scoping | A-4 per-route artifact splitter SCOPING deep-dive landing (695 lines, 7 sub-phases) |
+| 11 | scrmlTS `527bae8` | **A-2.8** | A-2 wave polish — canonical JSON serialization for `--emit-reachability` + 21 determinism tests + F4 leak documented |
+| 12 | scrmlTS `d7145b2` | brief stage | A-4.2 initial_chunk emission brief |
+| 13 | scrmlTS `d6e32ed` | brief stage | A-4.3 tier-1 idle-prefetch brief |
+| 14 | scrmlTS `5abcf20` | **03-contact-book** | v0.2.x latent bug CLOSED — `scrml generate auth` CLI generator + W-AUTH-LOGIN-MISSING two-tier severity + stdlib login template + 22 tests (cherry-pick recovery from base-mismatch; SPEC.md §34 6+1 rows preserved) |
+| 15 | scrmlTS `b66c5da` | brief stage | A-4.4 tier-2 hover-prefetch brief |
+| 16 | scrmlTS `ea6d9d3` | **A-4.1** | A-4 wave OPEN — codegen orchestrator slot + per-(EP, role, tier) iteration scaffold + opt-in `--emit-per-route` flag + 13 tests (cherry-pick recovery; api.js conflict resolved) |
+| 17 | scrmlTS `5e392cf` | brief stage | A-4.5 tier-N on-demand dispatch hook brief |
+| 18 | scrmlTS `d7773a4` | **A-4.2** | initial_chunk JS payload + atom-emitter extraction from emit-client.ts + §40.9.9 worked-example integration replay green + 37 tests + atom-emitter.ts NEW |
+| 19 | scrmlTS `bcbb7ab` | brief stage | A-4.6 §47 content-addressing brief |
+| 20 | scrmlTS `77a24a8` | brief stage | A-4.7 per-route HTML + role-bootstrap + runtime helpers (A-4 wave closer; closes A-4.2 forward-looking gap) |
+| 21 | scrmlTS (this commit) | hand-off | mid-session refresh #2 |
+
+### Major waves CLOSED this session
+
+| Wave | Status | Detail |
 |---|---|---|
-| 1 | scrmlTS `199940e` | s91-open hygiene — hand-off rotation + FULL_COLD_START map refresh (11 maps) |
-| 2 | scrmlTS `399fc81` | pa.md amendments — F4 step 1 sharpened + new "S90 addendum" CWD-routing subsection |
-| 3 | scrml-support `8d13012` | user-voice S90 OQ-A3-A override verbatim backfill |
-| 4 | scrmlTS `bf2b098` | **A-3.5 wave-closure** — 7 §34 catalog rows + 5 §40.9.11 rows + api.js Stage 7.55 AG wire-in + §40.9.9 13-test integration suite + normalizeFileAST helper + cross-ref consistency audit |
-| 5 | scrmlTS `1d1ceef` | SPEC §40.9.9 case-fix — 6 sites `role="admin"` → `role="Admin"` (closes A-3.5 deferred #1) |
-| 6 | scrmlTS (master-list S91 mid-section addendum + this hand-off update) | Pending — PA-direct work in progress |
+| **A-3 §40 AuthGraph** | ✅ FULLY CLOSED | A-3.1..A-3.4 (S90) + A-3.5 (`bf2b098`) + §40.9.9 case-fix (`1d1ceef`). End-to-end functional in api.js Stage 7.55 with §40.9.9 13-test worked-example replay. |
+| **A-2 Reachability Solver** | ✅ FULLY CLOSED | Components 1-5 (S89-S90) + A-2.7 outer fixpoint (`59279e7`) + A-2.8 canonical determinism (`527bae8`). Soundness-complete + bit-identical JSON output. |
+| **03-contact-book v0.2.x latent bug** | ✅ FULLY CLOSED | S86 D2 LATENT family #3 — `scrml generate auth` CLI + W-AUTH-LOGIN-MISSING two-tier severity + adopter-owned login template + example/e2e cleanup. |
 
-### Q-OPEN dispositions at S91-mid
+### A-4 wave progress (the major v0.3.0 cut-path investment)
+
+| Sub-phase | Status | Commit / Brief |
+|---|---|---|
+| A-4 SCOPING | ✅ LANDED | `470b128` (695 lines, 7 sub-phases, 62-110h aggregate, Shape B ratified, 7 OQs ratified) |
+| A-4.1 — orchestrator slot + opt-in flag | ✅ LANDED | `ea6d9d3` (~410 LOC route-splitter.ts NEW + 13 tests) |
+| A-4.2 — initial_chunk payload + atom-emitter extraction | ✅ LANDED | `d7773a4` (atom-emitter.ts NEW 414 LOC + 37 tests; §40.9.9 replay green) |
+| A-4.3 — tier-1 idle-prefetch | 🟡 **IN FLIGHT** | Agent Q (10-18h walltime) |
+| A-4.4 — tier-2 hover-prefetch | 📋 Brief staged `b66c5da` | Plan: fire AFTER A-4.3 lands |
+| A-4.5 — tier-N on-demand dispatch | 📋 Brief staged `5e392cf` | Plan: fire AFTER A-4.3 lands (parallel with A-4.4 + A-4.6) |
+| A-4.6 — §47 content-addressing + FNV-1a chunk hashes | 📋 Brief staged `bcbb7ab` | Plan: fire AFTER A-4.3 lands (parallel with A-4.4 + A-4.5) |
+| A-4.7 — per-route HTML + role-bootstrap + A-4.2-gap closure (`_scrml_chunk_mount` + `_scrml_vendor_require`) + W-CG-CHUNK-* lints | 📋 Brief staged `77a24a8` | Plan: fire AFTER A-4.4 + A-4.6 land (HTML needs A-4.4's data-scrml-prefetch + A-4.6's real hashes). When A-4.7 lands, **A-4 wave FULLY CLOSED + v0.3.0 critical path substantively complete**. |
+
+### Q-OPEN dispositions at S91-mid-refresh
 
 | Q | Status | Notes |
 |---|---|---|
-| Q-OPEN-1 (A-3.5) | ✅ CLOSED `bf2b098` | A-3 wave fully wave-closed; 13-test §40.9.9 integration replay green |
-| Q-OPEN-2 (A-2.7 outer fixpoint) | 🟡 IN FLIGHT | Background agent dispatched; 8-14h walltime |
-| Q-OPEN-3 (A-2.8 + A-2.9 polish) | ⏸️ BLOCKED on A-2.7 | Queue after A-2.7 lands |
-| Q-OPEN-4 (A-4 per-route splitter) | ⏸️ BLOCKED on A-2.7 | Major 60-120h wave; sequence after A-2.7 |
-| Q-OPEN-5 (Wave 4.A A+R adopter-content) | ⏸️ Rule 1 (marketing-shaped; do not surface unless user raises) | — |
-| Q-OPEN-6 (paired migration packets re-grep) | ⏸️ unblocked but deferred | Low-value re-grep audit; defer |
-| Q-OPEN-7 (pa.md S90 memory fold-in) | ✅ CLOSED `399fc81` | Sharpened F4 step 1 + new CWD-routing subsection |
-| Q-OPEN-8 (default=null audit-doc closure) | ✅ CLOSED as no-edit-needed | Audit doc already incorporates S89 ruling at authorship; BORDERLINE article items still require user ratification per Rule 1 |
-| Q-OPEN-9 (`/map` refresh) | ✅ CLOSED `199940e` | FULL_COLD_START refresh; 11 maps reflecting S90 state |
-| Q-OPEN-S91-NEW-1 (S90 user-voice append) | ✅ CLOSED `8d13012` | OQ-A3-A verbatim landed in scrml-support |
-| Q-OPEN-NEW (SPEC §40.9.9 case-fix) | ✅ CLOSED `1d1ceef` | 6 sites mechanical |
-| Q-OPEN-NEW (03-contact-book auth-redirect SCOPING) | 🟡 IN FLIGHT | Background scrml-deep-dive scoping agent; 2-4h walltime; output at `docs/changes/03-contact-book-auth-redirect-SCOPING/SCOPING.md` |
+| Q-OPEN-1 (A-3.5) | ✅ CLOSED `bf2b098` | — |
+| Q-OPEN-2 (A-2.7 outer fixpoint) | ✅ CLOSED `59279e7` | — |
+| Q-OPEN-3 (A-2.8 + A-2.9 polish) | ✅ A-2.8 CLOSED `527bae8` · A-2.9 (perf + memory characterization) still pending; lower priority |
+| Q-OPEN-4 (A-4 per-route splitter) | 🟢 UNBLOCKED · IN PROGRESS | SCOPING `470b128` + A-4.1 `ea6d9d3` + A-4.2 `d7773a4` landed; A-4.3 in flight; A-4.4/4.5/4.6/4.7 briefs staged |
+| Q-OPEN-5 (Wave 4.A A+R adopter-content) | ⏸️ Rule 1 deferred | — |
+| Q-OPEN-6 (paired migration packets re-grep) | ⏸️ unblocked but deferred low-value | — |
+| Q-OPEN-7 (pa.md S90 memory fold-in) | ✅ CLOSED `399fc81` | — |
+| Q-OPEN-8 (default=null audit-doc closure) | ✅ CLOSED as no-edit-needed | — |
+| Q-OPEN-9 (`/map` refresh) | ✅ CLOSED `199940e` | — |
+| Q-OPEN-S91-NEW-1 (S90 user-voice append) | ✅ CLOSED `8d13012` | — |
+| Q-OPEN-NEW (SPEC §40.9.9 case-fix) | ✅ CLOSED `1d1ceef` | — |
+| Q-OPEN-NEW (03-contact-book auth-redirect) | ✅ CLOSED `5abcf20` (SCOPING `3689153` then fix landing) | — |
+| Q-OPEN-NEW (A-4.2 forward-looking gap: `_scrml_chunk_mount` + `_scrml_vendor_require` runtime helpers) | ⏸️ Tracked for A-4.7 dispatch | Brief at `docs/changes/a-4-7-per-route-html-augmentation/BRIEF.md` includes runtime helper additions in Sub-task 1 |
 
-### In-flight at S91-mid
+### In-flight at S91-mid-refresh
 
-- **A-2.7 outer fixpoint operator** — agent `a-2-7-agent-id-tracked-via-task-list`; closes A-2 wave.
-- **03-contact-book auth-redirect SCOPING** — scrml-deep-dive agent; produces fix-shape proposals + recommendation + OQs for user ratification.
+- **A-4.3 tier-1 idle-prefetch** — agent Q (`ab32eb087d35bd925`); 10-18h walltime; builds on A-4.2's atom-emitters.
+
+### Plan registered for post-A-4.3 (R task)
+
+When A-4.3 (Q) returns + lands: **fire A-4.4 + A-4.5 + A-4.6 in PARALLEL via single message with 3 Agent calls**.
+
+File-disjoint validation:
+- All three are additive on route-splitter.ts / runtime-template.js / runtime-chunks.ts (different functions / different markers).
+- PA-merge orchestrator-collision pattern documented + validated 4x this session (A-3.2+A-3.4, A-2.4+A-2.6, A-3.5+L base-mismatch, A-4.1 cherry-pick).
+- Cherry-pick auto-merges additive changes per `feedback_file_delta_vs_cherry_pick.md`.
+
+A-4.7 dispatch held until A-4.4 + A-4.6 land (needs their outputs).
 
 ### CWD-routing precedent count this session
 
-**Three trap-and-catches** validating the S91 pa.md fold-in:
+**Four trap-and-catches** validating the S91 pa.md fold-in:
 1. Session-open Bash batch leaked CWD to scrml-support (caught next batch via relative-path Read failure)
 2. User-voice S90 append CWD-leak (caught immediately; reset)
 3. A-3.5 file-delta initially landed in worktree before reset (caught via empty staged-diff + `git status` "On branch worktree-...")
+4. A-4.2 file-delta gate — task notification dropped CWD to worktree (caught via `git -C` "No such file or directory" error)
 
-### Push state at S91-mid
+### Cherry-pick recovery precedents this session (file-delta-vs-cherry-pick rule)
 
-scrmlTS: 5 commits ahead of origin (`199940e..1d1ceef`).
-scrml-support: 1 commit ahead of origin (`8d13012`).
-**Push deferred to wrap per user authorization at session-open.**
+**Two saves** validating `feedback_file_delta_vs_cherry_pick.md`:
+1. **L (03-contact-book)** at `5abcf20` — agent base `ff9be0e` predated main's A-3.5 catalog rows. Direct file-delta would have clobbered the 6 A-3.5 §34 rows. Cherry-pick preserved all 7 rows (6 from A-3.5 + 1 from L's W-AUTH-LOGIN-MISSING). TEMP-commit dance with `git reset --soft HEAD~1` rolled the intermediate into a single PA-authored final commit with pre-commit gate clean.
+2. **M (A-4.1)** at `ea6d9d3` — agent base predated A-3.5 wave. Cherry-pick auto-merged additive changes on api.js (both A-3.5 authGraph imports/returns + A-4.1 chunks imports/returns preserved); PIPELINE.md auto-merged cleanly (different sub-sections). Same TEMP-commit pattern + soft-reset bundle.
+
+### F4 leak precedent (one occurrence, recovered)
+
+- **L agent Sub-task A** wrote auth-graph.ts + types/auth-graph.ts changes to MAIN's working tree directly (in addition to its worktree branch). PA cleaned via `git checkout HEAD --`. Agent's commit chain on its own branch was correct; the leak was from a path-discipline failure on the first edit. Subsequent Sub-tasks A.2-B did NOT leak. Documented in A-2.8 commit message body for next-session F4 audit.
+
+### Test count trajectory
+
+- S91 open baseline (HEAD `ff9be0e`, S90 close): 12,275 pass / 117 skip / 1 todo / 0 fail (full `bun test`)
+- Post-A-2.7 (pre-commit subset): 11,533 → 11,562 (+29)
+- Post-A-2.8 (pre-commit subset): 11,575 → 11,596 (+21)
+- Post-A-3.5 (pre-commit subset): 11,533 → 11,546 (+13)
+- Post-L 03-contact-book: 11,533 → 11,543 (+10; plus 12 generator tests outside pre-commit subset)
+- Post-A-4.1: 11,533 → 11,546 (+13)
+- Post-A-4.2 (full pre-commit gate): 11,619 → 11,656 (+37)
+
+Cumulative test additions S91: ~+123 across pre-commit subset (full-suite count to verify at next push).
+
+Pre-commit gate clean on EVERY commit. Zero `--no-verify` on substantive code commits (one procedural `--no-verify` on cherry-pick TEMP commit was rolled back into staging + bundled into clean final commit; documented).
+
+### Push state at S91-mid-refresh
+
+scrmlTS: **21 commits ahead** of origin (`199940e..77a24a8`).
+scrml-support: **1 commit ahead** (`8d13012`).
+**Push deferred to wrap per session-open authorization.**
+
+### Forward-looking gap tracked
+
+A-4.2's atom-emitter output references `_scrml_chunk_mount(id, tag)` and `_scrml_vendor_require(unit)` runtime helpers that DO NOT YET exist in SCRML_RUNTIME. **A-4.7 brief includes adding them in Sub-task 1.** Until A-4.7 lands, the chunks are structurally correct + deterministic (§40.9.7 + §40.9.8 contracts satisfied) but cannot ACTIVATE in a running browser (ReferenceError on the missing helpers).
+
+### Routing-helper fix tracked
+
+A-4.1's `routeSegmentFromEntryPointId` uses `::#page::` markers that don't match real-pipeline entry-point IDs (`<file>#program` / `<file>#page@<route>` / `<file>#page-<N>`). Currently chunk filenames fall into a whole-id-sanitized fallback. **A-4.7 brief Sub-task 3 fixes this**; non-blocking for A-4.2 closure (chunks Map + manifest still consistent; tests pass).
 
 ---
 
 ## Tags
 
-#session-91 #open #post-S90-landmark-17-commits #A-3-FULLY-CLOSED-S91 #A-2.7-in-flight #03-contact-book-scoping-in-flight #map-refresh-DONE #user-voice-S90-DONE #pa.md-S91-amendments-DONE #§40.9.9-case-fix-DONE #5-commits-pending-push
+#session-91 #open #post-S90-landmark-17-commits #A-3-FULLY-CLOSED-S91 #A-2-FULLY-CLOSED-S91 #03-contact-book-FULLY-CLOSED-S91 #A-4-wave-IN-PROGRESS-2-of-7-landed #A-4.3-in-flight #A-4.4-A-4.5-A-4.6-parallel-fire-registered #A-4.7-closer-staged #21-commits-pending-push #4-CWD-trap-and-catches #2-cherry-pick-recoveries #1-F4-leak-recovered
