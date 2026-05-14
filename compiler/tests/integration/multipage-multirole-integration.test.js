@@ -102,6 +102,21 @@ function epIdsFrom(result) {
   return [...result.reachabilityRecord.closures.keys()];
 }
 
+/**
+ * Cross-stream helper. Combines `result.errors` and `result.warnings` into
+ * one array. Required when filtering by a `W-*` (or `I-*`) code, because
+ * api.js:1674-1675 partitions the diagnostic stream:
+ *
+ *   result.errors   = diagnostics where !code.startsWith("W-") AND severity !== "warning"
+ *   result.warnings = diagnostics where code.startsWith("W-") OR severity === "warning"
+ *
+ * `result.errors.filter(e => e.code === "W-...")` is therefore a structural
+ * false negative — always returns []. Match A-5.3/A-5.4 helper convention.
+ */
+function allDiags(result) {
+  return [...(result.errors ?? []), ...(result.warnings ?? [])];
+}
+
 // ---------------------------------------------------------------------------
 // §1 — Pipeline-level invariants
 // ---------------------------------------------------------------------------
@@ -147,8 +162,11 @@ describe("FX-1 — pipeline termination + clean compile", () => {
 
   test("no W-AUTH-PAGE-INFERRED — every <page> declares auth= explicitly", () => {
     const result = compileFx1();
+    // W-* codes flow into result.warnings per api.js:1674-1675 — use the
+    // cross-stream helper to avoid the structural false negative the
+    // single-stream `result.errors.filter(...)` would silently exhibit.
     expect(
-      result.errors.filter((e) => e.code === "W-AUTH-PAGE-INFERRED"),
+      allDiags(result).filter((e) => e.code === "W-AUTH-PAGE-INFERRED"),
     ).toEqual([]);
   });
 });
@@ -555,24 +573,29 @@ describe("FX-1 — tier-1 / tier-2 prefetch wiring", () => {
 // ---------------------------------------------------------------------------
 
 describe("FX-1 — W-CG-CHUNK-* lint baseline", () => {
+  // All four W-CG-CHUNK-* codes flow into result.warnings per
+  // api.js:1674-1675 (W- codes go to the warnings stream, not errors).
+  // Use the cross-stream helper allDiags(result) to avoid the structural
+  // false negative the single-stream `result.errors.filter(...)` would
+  // silently exhibit (always [], regardless of whether the lint fired).
   test("W-CG-CHUNK-EMPTY does NOT fire — every page has non-empty content", () => {
     const result = compileFx1();
     expect(
-      result.errors.filter((e) => e.code === "W-CG-CHUNK-EMPTY"),
+      allDiags(result).filter((e) => e.code === "W-CG-CHUNK-EMPTY"),
     ).toEqual([]);
   });
 
   test("W-CG-CHUNK-MISSING-ROLE does NOT fire — every Admin gate has a corresponding chunk", () => {
     const result = compileFx1();
     expect(
-      result.errors.filter((e) => e.code === "W-CG-CHUNK-MISSING-ROLE"),
+      allDiags(result).filter((e) => e.code === "W-CG-CHUNK-MISSING-ROLE"),
     ).toEqual([]);
   });
 
   test("W-CG-CHUNK-LARGE does NOT fire — fixture stays well under the 100 KB soft budget", () => {
     const result = compileFx1();
     expect(
-      result.errors.filter((e) => e.code === "W-CG-CHUNK-LARGE"),
+      allDiags(result).filter((e) => e.code === "W-CG-CHUNK-LARGE"),
     ).toEqual([]);
   });
 });
