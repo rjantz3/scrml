@@ -879,7 +879,11 @@ export function generateServerJs(
                 lines.push(`    const _scrml_cps_return = ${sqlExpr};`);
                 continue;
               }
-              const initExpr = emitExprField(stmt.initExpr, stmt.init ?? "undefined", { mode: "server" });
+              // M-7C-D-12 Track 3: scrml absence sentinel is JS `null` per §42.5/§42.8.
+              // The literal string "undefined" used as a fallback default would interpolate
+              // the JS `undefined` keyword into compiled output, which is forbidden in scrml-
+              // semantics output (OQ-5(a) ratified S90 → use "null" instead).
+              const initExpr = emitExprField(stmt.initExpr, stmt.init ?? "null", { mode: "server" });
               lines.push(`    const _scrml_cps_return = ${initExpr};`);
               continue;
             }
@@ -1044,7 +1048,11 @@ export function generateServerJs(
                 lines.push(`    const _scrml_cps_return = ${sqlExpr};`);
                 continue;
               }
-              const initExpr = emitExprField(stmt.initExpr, stmt.init ?? "undefined", { mode: "server" });
+              // M-7C-D-12 Track 3: scrml absence sentinel is JS `null` per §42.5/§42.8.
+              // The literal string "undefined" used as a fallback default would interpolate
+              // the JS `undefined` keyword into compiled output, which is forbidden in scrml-
+              // semantics output (OQ-5(a) ratified S90 → use "null" instead).
+              const initExpr = emitExprField(stmt.initExpr, stmt.init ?? "null", { mode: "server" });
               lines.push(`    const _scrml_cps_return = ${initExpr};`);
               continue;
             }
@@ -1136,7 +1144,8 @@ export function generateServerJs(
     const mhEntries: Array<{ name: string; expr: string }> = [];
     for (const decl of _mhCallableDecls) {
       const name = decl.name as string;
-      const expr = emitExprField((decl as any).initExpr, (decl as any).init ?? "undefined", { mode: "server" });
+      // M-7C-D-12 Track 3: fallback uses "null" not "undefined" per §42.5/§42.8.
+      const expr = emitExprField((decl as any).initExpr, (decl as any).init ?? "null", { mode: "server" });
       mhEntries.push({ name, expr });
     }
     // Parallel await via Promise.all — matches §8.11.2 intent.

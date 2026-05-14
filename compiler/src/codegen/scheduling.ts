@@ -294,12 +294,15 @@ export function isPromiseReturningCallExpr(
  */
 export function extractInitExpr(stmt: ASTNode): string {
   const _exprCtx: EmitExprContext = { mode: "client" };
-  // Phase 4d: prefer ExprNode fields, fall back to string fields via emitExprField
+  // Phase 4d: prefer ExprNode fields, fall back to string fields via emitExprField.
+  // M-7C-D-12 Track 3 (S90 OQ-5(a)): the missing-init fallback is "null" — emitting
+  // `null` in compiled JS instead of `undefined` keeps scrml absence routed through
+  // the canonical JS-null sentinel per §42.5/§42.8.
   const initStr = typeof (stmt as ASTNode).init === "string" ? (stmt as ASTNode).init as string : "";
   const exprStr = typeof (stmt as ASTNode).expr === "string" ? (stmt as ASTNode).expr as string : "";
-  if ((stmt as any).initExpr || initStr) return emitExprField((stmt as any).initExpr, initStr || "undefined", _exprCtx);
-  if ((stmt as any).exprNode || exprStr) return emitExprField((stmt as any).exprNode, exprStr || "undefined", _exprCtx);
-  return "undefined";
+  if ((stmt as any).initExpr || initStr) return emitExprField((stmt as any).initExpr, initStr || "null", _exprCtx);
+  if ((stmt as any).exprNode || exprStr) return emitExprField((stmt as any).exprNode, exprStr || "null", _exprCtx);
+  return "null";
 }
 
 /**

@@ -7,7 +7,8 @@
  *   2. `fail Type.Variant` (canonical `.` separator) was rejected — parser only
  *      accepted `::` alias.
  *   3. `fail Type.Variant` (no args) emitted `data: ` (syntax error) instead of
- *      `data: undefined`.
+ *      a defined value. S90 (M-7C-D-12 Track 3, OQ-5(a)): the canonical fallback
+ *      is `data: null` (scrml absence sentinel per §42.5/§42.8).
  *   4. `?` propagation inside nested bodies emitted literal `?;` — same parser
  *      issue as #1.
  *   5. `!{}` inline catch used try/catch, but `fail` returns a tagged object
@@ -76,7 +77,11 @@ describe("fail codegen (§19.3)", () => {
     expect(matches?.length).toBe(2);
   });
 
-  test("fail Type.Variant (no args) emits data: undefined", () => {
+  test("fail Type.Variant (no args) emits data: null", () => {
+    // M-7C-D-12 Track 3 (S90 OQ-5(a) ratified): the missing-payload fallback in
+    // fail-expr codegen is `null`, not `undefined`. scrml absence is JS `null`
+    // per §42.5/§42.8; the literal `undefined` JS keyword is no longer
+    // interpolated into compiled output.
     const source = `\${
   type E:enum = { Empty }
   function f()! -> E {
@@ -86,7 +91,8 @@ describe("fail codegen (§19.3)", () => {
 <p>x</>`;
     const { fatalErrors, clientJs } = compileSource(source, "fail-no-args.scrml");
     expect(fatalErrors.length).toBe(0);
-    expect(clientJs).toContain(`data: undefined`);
+    expect(clientJs).toContain(`data: null`);
+    expect(clientJs).not.toContain(`data: undefined`);
     expect(clientJs).not.toMatch(/data:\s*}/);
   });
 

@@ -609,7 +609,10 @@ function _emitInitThunkSidecar(node: any, qualifiedName: string, opts: EmitLogic
     return `_scrml_init_set(${JSON.stringify(encodedName)}, () => ${initBody});`;
   }
   const initStr: string = node.init ?? "";
-  if (!initStr || initStr === "undefined") return null;
+  // M-7C-D-12 Track 3: post-OQ-5(a) the "no init present" sentinel string is "null"
+  // (was "undefined" pre-S90). Both branches treat the cell as un-initializable —
+  // there's no real expression to re-evaluate on reset.
+  if (!initStr || initStr === "null") return null;
   // Use emitExprField with the raw fallback so derivedNames/server-mode
   // routing matches the main reactive-set arm.
   const initBody = emitExprField(node.initExpr, initStr, _makeExprCtx(opts));
@@ -1778,11 +1781,12 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           }
           // _lowered === null: the helper hit a recoverable error and
           // already pushed a diagnostic. Emit a defensive fallback that
-          // doesn't crash the runtime: `_scrml_reactive_set(name, undefined)`.
+          // doesn't crash the runtime: `_scrml_reactive_set(name, null)`
+          // (M-7C-D-12 Track 3 — `null` is the canonical scrml absence per §42.5/§42.8).
           const ctx21 = opts.encodingCtx;
           const encoded21 = ctx21 ? ctx21.encode(_qualifiedName) : _qualifiedName;
           return _appendSidecar(
-            `/* E-TYPE-001 — see diagnostic */ ${_emitReactiveSet(encoded21, "undefined", opts, node.name, true)}`
+            `/* E-TYPE-001 — see diagnostic */ ${_emitReactiveSet(encoded21, "null", opts, node.name, true)}`
           );
         }
       }
@@ -1841,7 +1845,11 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         return _appendSidecar(`// SQL-init for @${node.name} — client cannot evaluate _scrml_sql (E-CG-006); declare as \`server @${node.name}\` for mount-hydration (§8.11).`);
       }
       // Legacy fallthrough for non-SQL state-decl initializers.
-      const initStr: string = node.init ?? "undefined";
+      // M-7C-D-12 Track 3 (OQ-5(a) ratified S90): the missing-init sentinel string is
+      // "null" — replacing the prior "undefined" — because §42.5/§42.8 specify scrml
+      // absence compiles to JS `null`. The downstream `initStr !== "null"` checks
+      // below (predicateCheck zone guards) migrate in lockstep.
+      const initStr: string = node.init ?? "null";
       const ctx = opts.encodingCtx;
       const encodedName = ctx ? ctx.encode(_qualifiedName) : _qualifiedName;
       // Historically state-decl was treated as the initial declaration
@@ -1903,7 +1911,8 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       if (node.initExpr) {
         const rewrittenInit = emitExpr(_effectiveInitExpr, _makeExprCtx(opts));
         const wrappedInit = _wrapDeepReactive(rewrittenInit, initStr, _effectiveInitExpr);
-        if (node.predicateCheck && node.predicateCheck.zone === "boundary" && initStr !== "undefined") {
+        // M-7C-D-12 Track 3: lockstep with L1844 sentinel — `"null"` means "no init"
+        if (node.predicateCheck && node.predicateCheck.zone === "boundary" && initStr !== "null") {
           const _pc = node.predicateCheck;
           const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
           const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null);
@@ -1918,7 +1927,8 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // Phase 4 simplified fallback: initExpr is missing (rare)
       const rewrittenInit = emitExprField(node.initExpr, initStr, _makeExprCtx(opts));
       const wrappedInit = _wrapDeepReactive(rewrittenInit, initStr);
-      if (node.predicateCheck && node.predicateCheck.zone === "boundary" && initStr !== "undefined") {
+      // M-7C-D-12 Track 3: lockstep with L1844 sentinel — `"null"` means "no init"
+      if (node.predicateCheck && node.predicateCheck.zone === "boundary" && initStr !== "null") {
         const _pc = node.predicateCheck;
         const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
         const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null);
@@ -2171,9 +2181,11 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       const enumType: string = node.enumType ?? "";
       const variant: string = node.variant ?? "";
       const rawArgs: string = (node.args ?? "").trim();
+      // M-7C-D-12 Track 3: when fail() carries no payload, emit `data: null`
+      // (was `data: undefined` pre-S90) per §42.5/§42.8 canonical absence.
       const args = rawArgs.length > 0
         ? emitExprField(node.argsExpr, rawArgs, _makeExprCtx(opts))
-        : "undefined";
+        : "null";
       return `return { __scrml_error: true, type: ${JSON.stringify(enumType)}, variant: ${JSON.stringify(variant)}, data: ${args} };`;
     }
 
@@ -2284,12 +2296,13 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // guard check below. The S88 two-step pattern collapses to one line.
       let _autoAwait = false;
       if (guardedNode) {
+        // M-7C-D-12 Track 3: missing init falls back to "null" (was "undefined") per §42.5/§42.8.
         if (guardedNode.kind === "let-decl" && guardedNode.name) {
           bindingName = guardedNode.name;
-          initExpr = emitExprField(guardedNode.initExpr, guardedNode.init ?? "undefined", _makeExprCtx(opts));
+          initExpr = emitExprField(guardedNode.initExpr, guardedNode.init ?? "null", _makeExprCtx(opts));
         } else if ((guardedNode.kind === "const-decl" || guardedNode.kind === "tilde-decl") && guardedNode.name) {
           bindingName = guardedNode.name;
-          initExpr = emitExprField(guardedNode.initExpr, guardedNode.init ?? "undefined", _makeExprCtx(opts));
+          initExpr = emitExprField(guardedNode.initExpr, guardedNode.init ?? "null", _makeExprCtx(opts));
         } else {
           const bodyCode = emitLogicNode(guardedNode);
           if (bodyCode) {
@@ -2329,7 +2342,9 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
 
       const emitArmAssign = (armBody: string): string[] => {
         const trimmed = armBody.trim();
-        if (!trimmed) return [`    ${resultVar} = undefined;`];
+        // M-7C-D-12 Track 3: empty-body arm produces `resultVar = null;` (was `= undefined;`)
+        // per §42.5/§42.8 canonical scrml absence.
+        if (!trimmed) return [`    ${resultVar} = null;`];
         if (trimmed.includes("\n")) {
           // Multi-statement handler: emit body as-is (authors should assign to
           // resultVar themselves for non-trivial bodies).
@@ -2426,7 +2441,8 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       const encodedTarget = ctx ? ctx.encode(node.target) : node.target;
       const target = JSON.stringify(encodedTarget);
       const path = JSON.stringify(node.path ?? []);
-      const value = emitExprField(node.valueExpr, node.value ?? "undefined", _makeExprCtx(opts));
+      // M-7C-D-12 Track 3: fallback uses "null" not "undefined" per §42.5/§42.8.
+      const value = emitExprField(node.valueExpr, node.value ?? "null", _makeExprCtx(opts));
       return `_scrml_reactive_set(${target}, _scrml_deep_set(_scrml_reactive_get(${target}), ${path}, ${value}));`;
     }
 

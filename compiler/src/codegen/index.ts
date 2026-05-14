@@ -42,6 +42,7 @@ import { collectTopLevelLogicStatements } from "./collect.ts";
 import type { CompileContext } from "./context.ts";
 import type { ReachabilityRecord } from "../types/reachability.ts";
 import { resolveDbDriver } from "./db-driver.ts";
+import { lintCompiledForUndefined } from "./lint-undefined-interpolation.ts";
 
 // ---------------------------------------------------------------------------
 // Input / output types
@@ -818,6 +819,13 @@ export function runCG(input: CgInput): CgOutput {
       ...(serverJsMap !== null && { serverJsMap }),
     };
     outputs.set(filePath, browserOutput);
+
+    // M-7C-D-12 Track 3 (S90): W-CG-UNDEFINED-INTERPOLATION regression guard.
+    // Scans the just-emitted compiled JS for bare `undefined` JS-keyword usage
+    // outside the canonical paired-absence-check idiom. Fires per-line. See
+    // lint-undefined-interpolation.ts for the legitimate-idiom exception set.
+    const undefinedLintErrors = lintCompiledForUndefined(filePath, clientJs, serverJs);
+    if (undefinedLintErrors.length > 0) errors.push(...undefinedLintErrors);
   }
 
   const runtimeJs = embedRuntime ? null : SCRML_RUNTIME;
