@@ -2,7 +2,66 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-14 S91 CLOSE — landmark 30-commit big-session — A-2 + A-3 + A-4 waves ALL FULLY CLOSED + 03-contact-book v0.2.x latent bug CLOSED): **12,517 pass / 117 skip / 1 todo / 0 fail / 629 files** at HEAD `b28f493` (full `bun test`; +242 vs S90 close / +12 files / 0 regressions). v0.2.6 `efbd1e8` still the shipped baseline; v0.3.0 critical path through A-2 + A-3 + A-4 SUBSTANTIVELY COMPLETE.
+Current baseline (2026-05-14 S92 mid — A-5 wave FULLY CLOSED → APPROACH A FULLY CLOSED · Q-OPEN-4/5/6 closed · Wave 4.A 4-of-6 phases landed): pre-commit subset **~11,933 pass / 88 skip / 1 todo / 0 fail**; full `bun test` estimated ~12,687 at HEAD `926363a` (pre-commit subset delta vs S91 close: +170; 0 regressions). v0.2.6 `efbd1e8` still the shipped baseline; pkg.json bumped to **v0.3.0-alpha.0** at `91b8689` (Q-OPEN-4 ratification S92); v0.3.0 stable cut gated only on Wave 4.A close (4 of 6 phases done at this entry).
+
+### 2026-05-14 (S92 — A-5 wave FULLY CLOSED → APPROACH A FULLY CLOSED · v0.3.0 critical path complete · Q-OPEN-4/5/6 closed · Wave 4.A 4-of-6 phases landed: scrml.dev + README + tutorial + primer)
+
+**Session-defining outcome.** Approach A — the v0.3.0 critical-path investment that absorbed S88-S92 development — closed end-to-end with the A-5 integration-tests sub-wave. All five sub-waves (A-1 markup-context edges S88 + A-2 Reachability Solver S89-S91 + A-3 §40 AuthGraph S91 + A-4 Per-Route Artifact Splitter S91 + A-5 Integration Tests S92) FULLY CLOSED. v0.3.0 cut path now gated only on Wave 4.A adopter content per S88 user ratification — and 4 of 6 Wave 4.A phases landed in this session too. Pre-commit gate green on every commit; zero substantive `--no-verify`.
+
+**S92 commit ledger (12+ substantive scrmlTS commits + 3 scrml-support):**
+
+Session-open hygiene + A-4 polish bundle:
+- **`3cb3d91`** S92-open hygiene — hand-off rotation to handOffs/hand-off-91.md + fresh S92 hand-off (carries Q-OPEN slate + things-not-to-screw-up + dispatch backlog).
+- **`8b6a6a3` A-4 polish bundle** (Q-OPEN-5 + Q-OPEN-6) — Q-OPEN-5: `--chunk-size-budget=<bytes>` CLI flag (preserves 100k default; defensive resolveChunkSizeBudget; plumbs EmitPerRouteInput → CgInput → compileScrml opts → CLI). Q-OPEN-6: split W-CG-CHUNK-NO-PREFETCH into Info (case 1: no internal links) + new W-CG-CHUNK-PREFETCH-UNRESOLVED Warning (case 2: links resolve nowhere). CompileContext.hasInternalLinks orthogonal field; CGError.severity widened to include 'info'. SPEC §34 + §40.9.11 catalog rows updated. +16 unit + 7 commands tests.
+
+A-5 wave (5 sub-phases — wave fully closed S92):
+- **`92f6c36` A-5.1 cornerstone** — multi-page multi-role expansion of §40.9.9. 3-file FX-1 fixture under `compiler/tests/integration/fixtures/a5/multipage-multirole/routes/{index,loads,admin}.scrml` + new test file `multipage-multirole-integration.test.js` (40 cases / 11 sections / 393 expect). Establishes fixture-shape conventions for A-5.2-A-5.5. **Rule-4 reconnaissance load-bearing finding:** dive's original FX-1 framing (single-file `<page path="...">`) doesn't parse from .scrml source — TAB allowlist admits only `{db, auth, csrf, ratelimit}`. Multi-page-in-source requires multi-FILE routes/ filesystem layout. Agent corrected to multi-file shape; dive amended at scrml-support `a74fd0a`. +40 tests.
+- **`91b8689` Q-OPEN-4** — single-source compiler identity from package.json + pkg.json bump to 0.3.0-alpha.0. Replaced hard-coded `COMPILER_IDENTITY = "scrml-0.3.0"` constant with `getCompilerIdentity()` cached helper (defensive fallback `"scrml-unknown"`). Internal seam `_computeCompilerIdentityFromPath()` for fallback testing. NEW SPEC §47.5 cross-reference paragraph anchoring `chunks.json` `compiler` field shape normatively. **Cherry-pick recovery 1 of 1 this session** — agent base predated A-4 polish on shared route-splitter.ts + SPEC.md; cherry-pick auto-merged additive changes on disjoint line ranges. +13 tests.
+- **`3a2db5e` A-5.3** negative-cascade chain tests (FX-3 + FX-4) — inline-string fixtures. FX-3: `<auth role="Admin">` gate with NO role enum → E-CLOSURE-002 + E-AUTH-GRAPH-002 cascade. FX-4: typo'd `<auth role="Admni">` → E-AUTH-GRAPH-003 + W-CG-CHUNK-MISSING-ROLE. **Rule-4 finding 1:** brief-anticipated cascade was incomplete — both FX-3 + FX-4 also fire W-AUTH-RUNTIME-FALLBACK + W-CG-CHUNK-MISSING-ROLE per component-4.ts:230-241. **Rule-4 finding 2 (load-bearing for cornerstone):** A-5.1's `result.errors.filter(e => e.code === "W-...")` "does NOT fire" assertions are STRUCTURAL FALSE NEGATIVES — per api.js:1674-1675 partition, W-* codes go to result.warnings. A-5.3 + A-5.4 use cross-stream `[...result.errors, ...result.warnings].filter(...)` helper. Audit-fix bundled into A-5.5. +20 tests.
+- **`fee59bc` A-5.2** cross-file expansion (FX-2) — `cross-file/{app,components/header}.scrml` + new test file `cross-file-expansion-integration.test.js` (30 cases / 9 sections). Form 2 export-const-component pattern (`export const Header = <nav>...</>`) per §21.2. Imports MUST live inside `${...}` per §21.3 normative. **Rule-4 finding:** dive's `<block Header>` framing was documentary pseudo-syntax (§4.15 doesn't register `<block>`); §40.9.9 example uses Form 2 in practice. Brief mentioned §21.8 (cross-file ENGINE) — actually applies §21.2 + §21.3 (cross-file COMPONENT). +30 tests.
+- **`acbb097` A-5.4** W-* lint family end-to-end (FX-5/6/7/8a/8b) — 6 fixture files + 1 inline + new test file `lint-family-e2e-integration.test.js` (17 cases / 6 sections / 48 expect). Verifies Q-OPEN-6 split end-to-end from full driver (NO-PREFETCH Info vs PREFETCH-UNRESOLVED Warning mutually exclusive per route-splitter.ts:814-855 if/else branch on hasInternalLinks). Verifies Q-OPEN-5 chunkSizeBudgetBytes propagation end-to-end. All 5 SPEC §34 + §40.9.11 catalog severities verified verbatim. **Rule-4 finding (recurring):** `reset` is a reserved keyword per §6.8 (E-RESERVED-IDENTIFIER); fixture's "reset all counters" function renamed to `clearAll()`. Worth kickstarter / naming-conventions doc note. +17 tests.
+- **`f9b5b9d` A-5.5 wave-closer + A-5.1 audit-fix bundled** — A-5 WAVE FULLY CLOSED. Three sub-tasks: (1) determinism integration test (NEW `compiler/tests/integration/determinism-integration.test.js` — 21 tests / 7 sections / 432 expect; reuses FX-1; backs §40.9.8 + §47.1.3 normative determinism claims; chunks.json + per-chunk payloadJs + filename + FNV-1a hash + per-route HTML + reachabilityRecord all byte-identical across 10 compiles); (2) trucking-dispatch compile-smoke (NEW `compiler/tests/integration/trucking-dispatch-smoke-integration.test.js` — 13 tests; compiles 36 .scrml files via compileScrml multi-file shape; v0.2-shape diagnostic baseline recorded as test: 0 fatals / 150 warnings / 2 info-errors / 6 chunks / 2 entry points; brief framing W-AUTH-PAGE-INFERRED was actually W-AUTH-001 — recorded actual histogram); (3) §40.9.9 case-fix verification — VERIFIED CLEAN (0 stale lowercase admin; A-3.5 `1d1ceef` claim verified complete); (4) A-5.1 cornerstone audit-fix — 4 false-negative sites in `multipage-multirole-integration.test.js` fixed via canonical `allDiags(r) = [...r.errors, ...r.warnings]` cross-stream helper; sibling test files audited (A-3.5 + A-5.2 + A-5.3 + A-5.4 all CLEAN); 0 tests broke after fix. +34 tests.
+
+Wave 4.A adopter-content sweep (4 of 6 phases landed at this entry):
+- **`1d5d4b9` 4.A.1** scrml.dev v0.3 refresh (`docs/index.html`) — NEW section "The compiler knows what code is reachable to whom" inserted between "compiler eliminates N+1" + "validators auto-synthesize" (three "compiler knows" sections in narrative sequence). Covers `<auth role="X">` + Approach A whole-stack closure analysis (§40) + per-role bundle variance + tiered prefetching + FNV-1a content-addressing (§47) + diagnostic family. Stdlib named-list expanded (added fs/path/process; count 16 unchanged). Examples count 22 → 23. Highlights paragraph extended with `<onTimeout>`/`<onIdle>`/hierarchy/history/`<auth role>`/per-route-splitting. +5 net lines.
+- **`71b3343` 4.A.2** README.md v0.3 sweep — version block rewrite (v0.2.0-only framing → v0.2.6 shipped + v0.3.0-alpha.0 in flight + Approach A close mention + cut gated on Wave 4.A). Test count 11,200+ → 12,500+. NEW Server/Client bullet "Per-route per-role chunk splitting (Approach A; v0.3)". Language Contexts table extended with `<auth>` + `<page>`. +7 net lines.
+- **`d4b8460` 4.A.3** docs/tutorial.md v0.3 sweep — top "What this tutorial covers" paragraph updated. NEW section §9 "Auth gates and per-route bundles" inserted between §8 channels + §10 (renumbered from §9) "all together"; ~30 lines tutorial-shaped explanation with worked example. Glossary additions: `<auth role="X">` + `<page>` + per-route per-role chunks + `<onTimeout>` + `<onIdle>`. Section renumber §9→§10, §10→§11. +37 net lines.
+- **`926363a` 4.A.4** PA-SCRML-PRIMER.md v0.3 sweep — top "Last updated" stamp rewritten from S68 baseline to S92. §9.1 channels framing reversal per Insight 30 (S87) — channels are CHILDREN of `<program>`. §9.6 structural elements registry expanded (`<onTimeout>` + `<onIdle>` + `<channel>` + `<page>` + `<auth>`). NEW §9.7 "Approach A — closure analysis + per-route artifact splitter (S88-S92)" — comprehensive ~50-line subsection with all 5 sub-waves + `<auth role>` universal value-bearing-attr shape (per OQ-A3-A user-voice verbatim) + per-route per-role chunk variance + content-addressing + 8-W + 3-E + 1-I diagnostic family table + pipeline integration + LOAD-BEARING api.js diagnostic stream partition section (with A-5.1 cornerstone false-negative pattern documented + canonical `allDiags` cross-stream helper). +42 net lines.
+
+scrml-support landings (3 commits):
+- **`9a0b146`** A-5 SCOPING dive landing — 606-line / 65 KB deep-dive at `docs/deep-dives/a-5-integration-tests-SCOPING-2026-05-14.md`. PA-lean shape: sub-phased A-5.1..A-5.5 compositional-only, 20-31h Light band (materially smaller than Insight 29's 40-80h projection — Rule-4 reconnaissance: A-2/A-3/A-4 sub-wave coverage absorbed the bulk of integration-test surface). 6 OQs surfaced — 2 HIGH-priority user-ratification.
+- **`e708cec`** S92 user-voice append — verbatim *"compositional-only on A-5-A, compile-smoke on A-5-C"* (OQ-A5-A/C ratification) + verbatim *"option A with 0.3.0-alpha.0"* (Q-OPEN-4 ratification). Methodology signals: Rule-4 reconnaissance vindicated again; single-source-of-truth pattern alignment for compiler-identity field.
+- **`a74fd0a`** A-5 dive S92 correction — FX-1 framing updated from single-file `<page path=>` to multi-file routes/ shape (per A-5.1 Rule-4 finding); inline S92 CORRECTION callout documenting scope (FX-2 onwards unaffected; only FX-1 needed correction).
+
+**Approach A close summary table:**
+
+| Sub-wave | Status | Closed |
+|---|---|---|
+| A-1 markup-context edges (per-interpolation Option Y) | ✅ | S88 |
+| A-2 Reachability Solver (5 components + outer fixpoint + canonical JSON) | ✅ | S91 |
+| A-3 §40 AuthGraph (5 sub-phases + pipeline wire-in) | ✅ | S91 |
+| A-4 Per-Route Artifact Splitter (7 sub-phases) | ✅ | S91 |
+| A-5 Integration Tests (5 sub-phases) | ✅ | **S92** |
+
+**Wave 4.A close summary (4 of 6 phases at this entry):**
+
+| Phase | Status | Detail |
+|---|---|---|
+| 4.A.1 scrml.dev landing | ✅ `1d5d4b9` | reachability section + counts/highlights |
+| 4.A.2 README.md | ✅ `71b3343` | version block + Approach A bullet + structural elements |
+| 4.A.3 tutorial.md | ✅ `d4b8460` | new §9 auth-gates + glossary + footer |
+| 4.A.4 PA-SCRML-PRIMER.md | ✅ `926363a` | §9.1 channel reversal + §9.7 Approach A reference |
+| 4.A.5 changelog finalize + (optional) v0.3.0-alpha announce | 🟡 in flight | this entry; announce post deferred until v0.3.0 stable |
+| 4.A.R articles currency + cross-doc final sweep | ⏸️ pending | small files; tutorial-snippet re-verification |
+
+**S92 patterns validated:**
+- 1 cherry-pick recovery (Q-OPEN-4 base predated A-4 polish on shared files; auto-merged on disjoint line ranges per `feedback_file_delta_vs_cherry_pick.md`)
+- 4+ CWD trap-and-catches (per S91 memory rule fold-in `feedback_agent_isolation_cwd_routing.md` — task-notification CWD-shifts caught BEFORE damage; the rule held end-to-end across all S92 dispatches)
+- 1 cornerstone false-negative pattern surfaced + audit-fixed (A-5.1 W-* assertions; cross-stream `allDiags` canonical now)
+- 0 substantive `--no-verify` (1 procedural on cherry-pick TEMP commits, rolled back into clean PA-authored final commits)
+- All Rule-4 reconnaissance findings surfaced + acted upon: dive FX-1 framing → multi-file routes/ correction; brief-anticipated diagnostic cascades → actual emission shape recorded; brief §21.8 vs §21.2/§21.3 confusion → primer note for future briefs
+
+**Push state:** scrmlTS 13+ ahead origin · scrml-support 3 ahead origin · all clean (push pending wrap or end-of-Wave-4.A).
 
 ### 2026-05-14 (S91 CLOSE — landmark 30-commit big-session — 4 MAJOR WAVES CLOSED: A-2 Reachability Solver + A-3 §40 AuthGraph + A-4 Per-Route Artifact Splitter + 03-contact-book v0.2.x · 4 cherry-pick recoveries · 4 CWD trap-and-catches · zero substantive --no-verify · v0.3.0 critical path substantively complete)
 
