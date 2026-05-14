@@ -15,6 +15,7 @@
  */
 
 import { CGError } from "./errors.ts";
+import { fnv1aHash } from "./fnv1a-hash.ts";
 
 // ---------------------------------------------------------------------------
 // Local type interfaces — mirrors of the non-exported types from type-system.ts
@@ -274,21 +275,21 @@ export function normalizeType(type: ResolvedType, seen?: Set<string>): string {
 // ---------------------------------------------------------------------------
 // FNV-1a hash — 32-bit, output as 8-char base36
 // ---------------------------------------------------------------------------
+//
+// A-4.6 extraction: the primitive moved to `./fnv1a-hash.ts` so the
+// content-addressing call site in `route-splitter.ts:computeChunkHash`
+// (per SPEC §47.5 / §40.9.8) and the per-binding name-encoding call
+// site here can share the same byte-identical implementation. The
+// re-export below preserves the existing import surface — any module
+// that imports `{ fnv1aHash } from "./type-encoding.ts"` continues to
+// resolve to the identical function. Function parameters (FNV prime
+// 16777619, offset basis 2166136261, 32-bit, 8-char base36, lowercase,
+// zero-padded) are NORMATIVE per §47.1.3 and unchanged.
+//
+// See `./fnv1a-hash.ts` for the canonical implementation + the full
+// rationale for the extraction.
 
-const FNV_OFFSET = 2166136261;
-const FNV_PRIME = 16777619;
-
-/**
- * FNV-1a 32-bit hash, output as zero-padded 8-char base36 string (~41 bits).
- */
-export function fnv1aHash(input: string): string {
-  let hash = FNV_OFFSET;
-  for (let i = 0; i < input.length; i++) {
-    hash ^= input.charCodeAt(i);
-    hash = Math.imul(hash, FNV_PRIME) >>> 0; // keep unsigned 32-bit
-  }
-  return hash.toString(36).padStart(8, "0");
-}
+export { fnv1aHash };
 
 // ---------------------------------------------------------------------------
 // encodeTypeName / encodeTypeNameDebug

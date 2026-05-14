@@ -235,7 +235,12 @@ describe("§40.9.7 / OQ-A4-C — tier-1 filename pattern", () => {
     for (const chunk of result.chunks.values()) {
       if (chunk.tier !== "tier1") continue;
       expect(chunk.filename).toMatch(/^[A-Za-z0-9_/-]+\/\w+\.tier1\.[0-9a-zA-Z]{8}\.js$/);
-      expect(chunk.chunkHash).toBe("00000000"); // A-4.1 placeholder.
+      // A-4.6 wired content-addressing: real hash, NOT the A-4.1
+      // placeholder. Empty tier-1 admission (the worked-example
+      // viewer=Driver `prefetch_tier_1(/) = {}` case) still produces
+      // a deterministic real hash from the canonical empty-input.
+      expect(chunk.chunkHash).not.toBe("00000000");
+      expect(chunk.chunkHash).toMatch(/^[0-9a-z]{8}$/);
     }
   });
 });

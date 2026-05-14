@@ -2555,7 +2555,7 @@ interface ChunkContents {
     the worked-example §40.9.9 viewer=Driver case (`prefetch_tier_1(/) = {}`) is the canonical
     DEAD tree-shake. OQ-A4-G ratification (S91): Option γ — `requestIdleCallback` browser-side
     + `setTimeout(fn, 1)` Safari fallback + Bun-runtime extension point reserved for v0.4.
-    Tier 2 / Tier N payloads remain empty placeholders pending A-4.4 / A-4.5.
+    Tier 2 payload remains empty placeholder pending A-4.4.
   - **A-4.5 tier-N (N>=3) on-demand dispatch hook (S91):** ships the runtime-side dispatch
     surface — `_scrml_fetch_chunk(epId, role, tier)` in `compiler/src/runtime-template.js`,
     appended inside the existing `prefetch` runtime chunk alongside `_scrml_prefetch_tier1`.
@@ -2567,8 +2567,32 @@ interface ChunkContents {
     file; the v0.3 floor (both empty) elides the chunk entirely (the function's call target
     is then dead-code-eliminated). Returns `Promise<string>` via `fetch().text()` for a
     registered tuple OR JS `null` for an unregistered tuple — adopters MUST null-check the
-    return before chaining (canonical scrml absence per §42.5 / §42.8). Tier 2 payload
-    remains empty placeholder pending A-4.4.
+    return before chaining (canonical scrml absence per §42.5 / §42.8).
+  - **A-4.6 content-addressed chunk hashing (S91):** the A-4.1 `"00000000"` placeholder on
+    every emitted `ChunkOutput` is replaced by the real FNV-1a base36 8-char content-addressed
+    hash per SPEC §47.5 / §40.9.8 / §47.1.3. The hash is computed over the canonical
+    concatenation `(componentNodeIds, reactiveCellNodeIds, serverFnNodeIds, vendorUnitNames,
+    payloadJs)` — admission-set ids sorted via the stratified comparator (numbers < strings,
+    codepoint compare within stratum, mirrors A-2.8) and joined with `","`; the five top-level
+    fields are joined with `"\x1F"` (ASCII Unit Separator — collision-safe boundary marker
+    that cannot appear in well-formed chunk JS bytes). The shared primitive lives at
+    `compiler/src/codegen/fnv1a-hash.ts` (`fnv1aHash` + the §47.1.3 normative parameters
+    `FNV_PRIME = 16777619` / `FNV_OFFSET = 2166136261` as exported constants);
+    `compiler/src/codegen/type-encoding.ts` re-exports it for the existing per-binding name
+    encoding call site (byte-identical to pre-A-4.6). The chunk-side call site is
+    `route-splitter.ts:computeChunkHash` + `finalizeChunkHash` (the latter overwrites the
+    placeholder before any `ChunkOutput` surfaces externally). The on-disk `chunks.json`
+    artifact carries URL-style filenames (e.g. `"/app/Driver.initial.a4b9c2d1.js"`) for the
+    adopter cache layer (browser-cache / CDN / service-worker); the in-memory
+    `ChunksManifestEntry` retains `ChunkKey` values for in-process lookup into the `chunks`
+    Map (`serializeChunksManifest(manifest, chunks)` performs the on-disk transform).
+    Determinism (§40.9.8 normative): identical source → identical admission sets → identical
+    payload bytes → identical hash, byte-for-byte across builds. The A-4.2 R1 chunk-payload
+    determinism test is the precondition; the A-4.6 hash byte-identity is asserted by 12
+    unit tests in `compiler/tests/unit/chunk-content-addressing.test.js` + 4 integration
+    tests in `compiler/tests/integration/initial-chunk-emission.test.js`'s §40.9.8 block.
+    The `CHUNK_HASH_PLACEHOLDER` constant in `route-splitter.ts` is retained as the
+    regression-guard sentinel — every emitted chunk's hash MUST NOT equal it.
 - Consumer: Compiler output writer (writes files to disk)
 
 **Error contract:**

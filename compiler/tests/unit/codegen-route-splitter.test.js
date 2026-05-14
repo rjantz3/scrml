@@ -206,9 +206,20 @@ describe("§4 OQ-A4-C filename pattern", () => {
     const { chunks } = emitPerRouteChunks({ reachabilityRecord: record });
     const initial = chunks.get(`/abs/foo.scrml::#page::/dispatch/board::Admin::initial`);
     expect(initial).toBeDefined();
-    expect(initial.filename).toBe(`dispatch/board/Admin.initial.${CHUNK_HASH_PLACEHOLDER}.js`);
-    expect(initial.chunkHash).toBe(CHUNK_HASH_PLACEHOLDER);
-    // payloadJs is empty at A-4.1; A-4.2 populates initial-tier content.
+    // A-4.6: filename now carries the real FNV-1a base36 content hash.
+    // The placeholder is the regression-guard sentinel: assert NOT it.
+    expect(initial.chunkHash).not.toBe(CHUNK_HASH_PLACEHOLDER);
+    // OQ-A4-C shape: <route>/<role>.<tier>.<8-char-base36>.js
+    expect(initial.filename).toMatch(/^dispatch\/board\/Admin\.initial\.[0-9a-z]{8}\.js$/);
+    // Per-chunk identity is reproducible across invocations on the
+    // same source — re-emit and assert byte-identical filename + hash.
+    const { chunks: chunks2 } = emitPerRouteChunks({ reachabilityRecord: record });
+    const initial2 = chunks2.get(`/abs/foo.scrml::#page::/dispatch/board::Admin::initial`);
+    expect(initial2.chunkHash).toBe(initial.chunkHash);
+    expect(initial2.filename).toBe(initial.filename);
+    // payloadJs falls back to "" when no CompileContext is provided
+    // (synthetic-test direct invocation); the canonical empty-input
+    // hash is still deterministic and distinct from "00000000".
     expect(initial.payloadJs).toBe("");
   });
 
@@ -221,7 +232,9 @@ describe("§4 OQ-A4-C filename pattern", () => {
     ]);
     const { chunks } = emitPerRouteChunks({ reachabilityRecord: record });
     const initial = chunks.get(`/abs/app.scrml::#program::${ANONYMOUS_ROLE}::initial`);
-    expect(initial.filename).toBe(`app/${ANONYMOUS_ROLE}.initial.${CHUNK_HASH_PLACEHOLDER}.js`);
+    // A-4.6: real hash; placeholder is the negative-assertion sentinel.
+    expect(initial.chunkHash).not.toBe(CHUNK_HASH_PLACEHOLDER);
+    expect(initial.filename).toMatch(/^app\/_anonymous\.initial\.[0-9a-z]{8}\.js$/);
   });
 });
 

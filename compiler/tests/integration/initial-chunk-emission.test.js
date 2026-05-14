@@ -247,6 +247,87 @@ describe("§40.9.8 — chunk determinism (two builds → byte-identical)", () =>
     const bJson = b.chunksManifestJson();
     expect(aJson).toBe(bJson);
   });
+
+  // -- A-4.6 content-addressing determinism --
+  test("A-4.6 hash byte-identity — two builds → identical chunkHash per chunk", () => {
+    const a = compileWorked();
+    const b = compileWorked();
+    expect(a.chunks.size).toBe(b.chunks.size);
+    for (const [key, chunkA] of a.chunks) {
+      const chunkB = b.chunks.get(key);
+      expect(chunkB).toBeDefined();
+      expect(chunkB.chunkHash).toBe(chunkA.chunkHash);
+      expect(chunkB.filename).toBe(chunkA.filename);
+    }
+  });
+
+  test("A-4.6 5-run hash replay — same source produces same hash across N=5 builds", () => {
+    const runs = Array.from({ length: 5 }, () => compileWorked());
+    const baseline = runs[0];
+    for (let i = 1; i < runs.length; i++) {
+      for (const [key, baselineChunk] of baseline.chunks) {
+        const replayChunk = runs[i].chunks.get(key);
+        expect(replayChunk).toBeDefined();
+        expect(replayChunk.chunkHash).toBe(baselineChunk.chunkHash);
+        expect(replayChunk.payloadJs).toBe(baselineChunk.payloadJs);
+      }
+    }
+  });
+
+  // -- A-4.6 §47.5 source-change → hash-change --
+  test("A-4.6 source-change → hash-change — modifying source flips at least one chunk hash", () => {
+    const a = compileWorked();
+    // Modify the worked-example source: increment the @count seed
+    // value from 0 to 1. The reactive cell's init line bytes change
+    // → initial chunk payloadJs changes → hash changes.
+    const modifiedSource = WORKED_EXAMPLE_SOURCE.replace("<count> = 0", "<count> = 1");
+    expect(modifiedSource).not.toBe(WORKED_EXAMPLE_SOURCE);
+    const fixturePath = join(TMP, "modified.scrml");
+    writeFileSync(fixturePath, modifiedSource);
+    const outDir = join(TMP, "out-modified");
+    mkdirSync(outDir, { recursive: true });
+    const b = compileScrml({
+      inputFiles: [fixturePath],
+      outputDir: outDir,
+      emitPerRoute: true,
+      write: false,
+    });
+    expect(b.chunks).toBeDefined();
+    // The chunk-key shape includes the source-file path, so the
+    // chunks Maps don't share keys cleanly. We compare via tier
+    // and role grouping: at least one (tier, role) initial chunk's
+    // hash must differ between the baseline + the modified source.
+    const baselineHashesByLabel = new Map();
+    for (const chunk of a.chunks.values()) {
+      baselineHashesByLabel.set(`${chunk.role}::${chunk.tier}`, chunk.chunkHash);
+    }
+    let foundDifference = false;
+    for (const chunk of b.chunks.values()) {
+      const baselineHash = baselineHashesByLabel.get(`${chunk.role}::${chunk.tier}`);
+      if (baselineHash !== undefined && baselineHash !== chunk.chunkHash) {
+        foundDifference = true;
+        break;
+      }
+    }
+    expect(foundDifference).toBe(true);
+  });
+
+  // -- A-4.6 no placeholder leak --
+  test("A-4.6 NO placeholder leak — emitted chunks contain ZERO occurrences of `00000000`", () => {
+    const result = compileWorked();
+    for (const chunk of result.chunks.values()) {
+      expect(chunk.chunkHash).not.toBe("00000000");
+      expect(chunk.filename).not.toContain(".00000000.js");
+      // The payload itself must not embed a chunk-URL referencing the
+      // placeholder. The initial-chunk IIFE-tail prefetch URL is the
+      // primary risk surface — it must reference the real-hash tier-1
+      // filename (when tier-1 admission is non-empty).
+      expect(chunk.payloadJs).not.toContain("00000000.js");
+    }
+    // The on-disk chunks.json shape (URL-style) must also be clean.
+    const manifestJson = result.chunksManifestJson();
+    expect(manifestJson).not.toContain("00000000");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -306,7 +387,13 @@ describe("§40.9.7 — chunk filename + manifest manifest still well-formed", ()
     for (const chunk of result.chunks.values()) {
       // Pattern: <segment>/<RoleVariant>.<tier>.<8-char-hash>.js
       expect(chunk.filename).toMatch(/^[A-Za-z0-9_/-]+\/\w+\.(initial|tier\d+|tierN\d+)\.[0-9a-zA-Z]{8}\.js$/);
-      expect(chunk.chunkHash).toBe("00000000"); // A-4.1 placeholder still in effect.
+      // A-4.6 wired content-addressing: the chunkHash is the real
+      // FNV-1a base36 8-char hash, NOT the A-4.1 placeholder. The
+      // placeholder remains a constant in route-splitter.ts as the
+      // regression-guard sentinel (so this assertion proves the
+      // replacement happened).
+      expect(chunk.chunkHash).not.toBe("00000000");
+      expect(chunk.chunkHash).toMatch(/^[0-9a-z]{8}$/);
     }
   });
 

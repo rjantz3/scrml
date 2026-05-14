@@ -8,21 +8,25 @@
  * Sits ABOVE the per-file codegen pipeline (Stage 8): per-file codegen
  * produces atoms; the route-splitter composes atoms into chunks.
  *
- * Sub-phase A-4.1 (this file's initial scope):
- *   - Iteration scaffold ONLY. Empty `payloadJs: ""` body per chunk.
- *   - Placeholder 8-character hash `"00000000"` until A-4.6 lands content-
- *     addressing.
- *   - Correctly-shaped `ChunkKey` / `ChunkOutput` / `ChunksManifest` so
- *     A-4.2..A-4.7 can attach to a stable contract.
+ * Sub-phase history:
+ *   - A-4.1 — Iteration scaffold + empty `payloadJs: ""` + placeholder
+ *     `"00000000"` hash; correctly-shaped `ChunkKey` / `ChunkOutput` /
+ *     `ChunksManifest` so A-4.2..A-4.7 attach to a stable contract.
+ *   - A-4.2 — Populates `payloadJs` for `initialChunk` from per-file
+ *     emitter atoms.
+ *   - A-4.3 — Populates `payloadJs` for `prefetchTier1` + idle-prefetch
+ *     runtime wiring (`_scrml_prefetch_tier1`).
+ *   - **A-4.6** — Content-addressed `chunkHash` (FNV-1a base36 over
+ *     `(admission_sets, payloadJs)`, per §47.5 / §40.9.8 / §47.1.3).
+ *     The placeholder `"00000000"` is now ALWAYS replaced via
+ *     `finalizeChunkHash` BEFORE the chunk descriptor surfaces on the
+ *     public return; the constant `CHUNK_HASH_PLACEHOLDER` is retained
+ *     solely as the regression-guard sentinel ("assert NOT placeholder").
  *
  * Subsequent sub-phases:
- *   - A-4.2 — populate `payloadJs` for `initialChunk` from per-file
- *     emitter atoms.
- *   - A-4.3/A-4.4 — populate `payloadJs` for `prefetchTier1` /
- *     `prefetchTier2` + idle/hover runtime wiring.
+ *   - A-4.4 — Populate `payloadJs` for `prefetchTier2` + hover-prefetch.
  *   - A-4.5 — `prefetchTierN` (N ≥ 3) dispatch hook.
- *   - A-4.6 — content-addressed `chunkHash` (FNV-1a base36, §47.1.3).
- *   - A-4.7 — per-route HTML augmentation + W-CG-CHUNK-* lints.
+ *   - A-4.7 — Per-route HTML augmentation + W-CG-CHUNK-* lints.
  *
  * Output filename convention per SCOPING OQ-A4-C (ratified):
  *
@@ -34,8 +38,8 @@
  *   - `<RoleVariant>` is the role-enum variant name (or `_anonymous` for
  *     the floor case).
  *   - `<tier>` is one of `initial` / `tier1` / `tier2` / `tierN<N>`.
- *   - `<8-char-hash>` is the content-addressed hash (placeholder
- *     `"00000000"` at A-4.1).
+ *   - `<8-char-hash>` is the FNV-1a base36 content-addressed hash
+ *     (real after A-4.6; replaces the A-4.1 `"00000000"` placeholder).
  *
  * Cross-references:
  *   - SPEC.md §40.9.7 (L17774-17793) — per-tier output structure.
@@ -71,6 +75,7 @@ import {
   findNodeById,
   type RouteInfo,
 } from "./atom-emitter.ts";
+import { fnv1aHash } from "./fnv1a-hash.ts";
 
 // ---------------------------------------------------------------------------
 // Public types — chunk descriptor shapes (A-4.1)
@@ -107,12 +112,20 @@ export type ChunkKey = `${EntryPointId}::${RoleVariant}::${ChunkTier}`;
 /**
  * The emit-shape for a single per-(entry-point, role, tier) chunk.
  *
- * At A-4.1 `payloadJs` is always `""` (empty placeholder body) and
- * `chunkHash` is always `"00000000"` (placeholder). A-4.2 populates
- * `payloadJs`; A-4.6 populates `chunkHash`.
+ * Post-A-4.6:
+ *   - `chunkHash` is the FNV-1a base36 8-char content-addressed hash
+ *     of `(admission_sets, payloadJs)` per §47.5 / §40.9.8 / §47.1.3.
+ *     The A-4.1 placeholder `"00000000"` is replaced by
+ *     `finalizeChunkHash` before any chunk descriptor leaves the
+ *     splitter.
+ *   - `filename` mirrors the real hash via the same finalization step.
+ *   - `payloadJs` is populated for `tier === "initial"` (A-4.2) and
+ *     `tier === "tier1"` (A-4.3) when a CompileContext is supplied;
+ *     remains `""` for the unit-test direct-invocation path and for
+ *     `tier2` / `tierN` until A-4.4 / A-4.5 land their composers.
  *
- * The atom-id sets are pass-through copies from `ChunkContents` so A-4.2
- * (and later) can compose payloads without re-reading the
+ * The atom-id sets are pass-through copies from `ChunkContents` so the
+ * downstream composers can compose payloads without re-reading the
  * ReachabilityRecord.
  */
 export interface ChunkOutput {
@@ -129,18 +142,24 @@ export interface ChunkOutput {
    *
    * Shape (OQ-A4-C): `<route-path>/<RoleVariant>.<tier>.<8-char-hash>.js`.
    *
-   * Computed at A-4.1; the `<8-char-hash>` segment is the placeholder
-   * `"00000000"` until A-4.6 lands real content-addressing.
+   * Post-A-4.6: the `<8-char-hash>` segment is the real FNV-1a base36
+   * content-addressed hash. The A-4.1 placeholder is replaced by
+   * `finalizeChunkHash` immediately after payload composition.
    */
   filename: string;
   /**
-   * 8-character content-address hash. Placeholder `"00000000"` at A-4.1;
-   * real FNV-1a base36 hash (§47.1.3) lands at A-4.6.
+   * 8-character content-address hash (FNV-1a base36 over the canonical
+   * `(admission_sets, payloadJs)` input — §47.1.3 + §47.5).
+   *
+   * Post-A-4.6: real hash; the A-4.1 `"00000000"` placeholder is
+   * never observable on a public ChunkOutput.
    */
   chunkHash: string;
   /**
-   * The chunk's JS payload body. Empty string at A-4.1; A-4.2 populates
-   * for `tier === "initial"`; A-4.3/A-4.4 for tier1/tier2.
+   * The chunk's JS payload body. Populated for `tier === "initial"`
+   * (A-4.2) and `tier === "tier1"` (A-4.3) when a CompileContext is
+   * supplied. Empty `""` for the unit-test direct-invocation path AND
+   * for `tier2` / `tierN` (until A-4.4 / A-4.5).
    */
   payloadJs: string;
   /** Component DG node ids admitted to this chunk (pass-through from ChunkContents). */
@@ -239,11 +258,24 @@ export interface EmitPerRouteResult {
 // ---------------------------------------------------------------------------
 
 /**
- * Placeholder hash used at A-4.1 before A-4.6 lands content-addressing.
+ * Sentinel hash retained as the A-4.6 regression guard.
  *
- * Eight zeros — distinct from any real FNV-1a base36 hash so tests can
- * assert the placeholder is present (and A-4.6's tests can assert it is
- * REPLACED).
+ * Eight zeros — distinct from any real FNV-1a base36 hash. Post-A-4.6
+ * the placeholder is NEVER observable on a public ChunkOutput
+ * (`finalizeChunkHash` replaces it with the real content-addressed
+ * hash before the chunk surfaces on `emitPerRouteChunks`'s return).
+ * The constant is kept for two reasons:
+ *
+ *   1. **Regression-guard sentinel.** Tests assert
+ *      `chunk.chunkHash !== CHUNK_HASH_PLACEHOLDER` to prove the
+ *      placeholder was replaced. If a future refactor accidentally
+ *      drops the `finalizeChunkHash` call, these tests fail loudly.
+ *
+ *   2. **Internal stamp before finalize.** `makeChunkOutput` still
+ *      uses this value as the initial `chunkHash` / filename hash
+ *      segment. The value is overwritten by `finalizeChunkHash`
+ *      before the chunk surfaces externally; it is never the final
+ *      value on any emitted chunk.
  */
 export const CHUNK_HASH_PLACEHOLDER = "00000000";
 
@@ -345,6 +377,15 @@ export function emitPerRouteChunks(
       if (epCtx && tier1NonEmpty) {
         tier1Chunk.payloadJs = composeTier1Chunk(plan.prefetchTier1, epCtx, epId, role);
       }
+      // -- A-4.6 § content-addressing -- The placeholder `"00000000"`
+      // hash is replaced with the real FNV-1a base36 hash computed
+      // over `(admissionSets, payloadJs)`. We MUST hash the tier-1
+      // chunk BEFORE deriving `tier1Url` so the URL passed into the
+      // initial-chunk IIFE tail references the content-addressed
+      // filename, not the placeholder one. See SPEC §47.5 + §40.9.8 +
+      // SCOPING §3.6 for the normative contract.
+      finalizeChunkHash(tier1Chunk);
+
       // The IIFE-tail prefetch URL is the tier-1 chunk's filename
       // resolved relative to the per-app dist root. We emit it as an
       // absolute-path URL (`/<filename>`) so the runtime fetch resolves
@@ -372,14 +413,32 @@ export function emitPerRouteChunks(
           tier1Url,
         );
       }
+      // -- A-4.6 -- Hash AFTER payload composition. The tier-1-URL
+      // reference inside the initial payload contributes to its bytes,
+      // so the hash bakes in the tier-1 chunk's filename. This makes
+      // the initial-chunk hash sensitive to upstream tier-1 changes
+      // (which is the right behavior — a tier-1 hash flip means the
+      // initial chunk's prefetch URL changed, so the initial chunk's
+      // observable behavior changed too).
+      finalizeChunkHash(initialChunk);
+
       chunks.set(initialChunk.key, initialChunk);
       entry.initial = initialChunk.key;
 
       chunks.set(tier1Chunk.key, tier1Chunk);
       entry.tier1 = tier1Chunk.key;
 
-      // tier2 — A-4.4 territory; payload remains "" at A-4.2.
+      // tier2 — A-4.4 territory; payload remains "" at A-4.6.
       const tier2Chunk = makeChunkOutput(epId, role, "tier2", plan.prefetchTier2);
+      // -- A-4.6 -- Empty-payload chunks still get a real hash. The
+      // canonical empty-input hash is a deterministic constant per
+      // §40.9.8; the manifest entry is preserved per OQ-A4-A always-
+      // emit (the file write itself is elided by api.js — but the
+      // manifest still references the hash-named chunk so v0.3 tests
+      // can replay the determinism contract end-to-end). When A-4.4
+      // lands a real tier-2 composer, the hash will pick up the
+      // populated payload automatically.
+      finalizeChunkHash(tier2Chunk);
       chunks.set(tier2Chunk.key, tier2Chunk);
       entry.tier2 = tier2Chunk.key;
 
@@ -390,6 +449,8 @@ export function emitPerRouteChunks(
         for (let i = 0; i < plan.prefetchTierN.length; i++) {
           const nLabel = `tierN${i + 3}` as ChunkTier;
           const tierNChunk = makeChunkOutput(epId, role, nLabel, plan.prefetchTierN[i]);
+          // -- A-4.6 -- Same empty-payload hash treatment as tier-2.
+          finalizeChunkHash(tierNChunk);
           chunks.set(tierNChunk.key, tierNChunk);
           entry.tierN.push(tierNChunk.key);
         }
@@ -927,6 +988,47 @@ function makeChunkOutput(
 }
 
 /**
+ * Replace a ChunkOutput's placeholder hash + filename with the real
+ * content-addressed hash (per A-4.6).
+ *
+ * Called by `emitPerRouteChunks` AFTER `payloadJs` is composed for the
+ * chunk. Computes `computeChunkHash(contents, payloadJs)` and rebuilds
+ * the filename so the on-disk path reflects the content-addressed
+ * 8-char hash instead of the A-4.1 `CHUNK_HASH_PLACEHOLDER` sentinel.
+ *
+ * Per SPEC §47.5 + §40.9.8: the resulting hash is deterministic-from-
+ * source-only. Two builds of the same source → identical hash →
+ * identical filename → adopter cache (browser, CDN, service-worker)
+ * sees a stable URL across builds.
+ *
+ * The ChunkContents pass-through fields (`componentNodeIds`,
+ * `reactiveCellNodeIds`, `serverFnNodeIds`, `vendorUnitNames`) on the
+ * ChunkOutput are read by the hash computation — they're the
+ * authoritative admission-set source even before payload composition.
+ * The payload bytes are read from the ChunkOutput's `payloadJs` field
+ * (which has been set by the composer call upstream).
+ *
+ * Mutates the input. Returns nothing — the chunk descriptor is updated
+ * in-place so the caller can continue using the same reference.
+ */
+function finalizeChunkHash(chunk: ChunkOutput): void {
+  const contents: ChunkContents = {
+    componentNodeIds: chunk.componentNodeIds,
+    reactiveCellNodeIds: chunk.reactiveCellNodeIds,
+    serverFnNodeIds: chunk.serverFnNodeIds,
+    vendorUnitNames: chunk.vendorUnitNames,
+  };
+  const realHash = computeChunkHash(contents, chunk.payloadJs);
+  chunk.chunkHash = realHash;
+  chunk.filename = makeChunkFilename(
+    chunk.entryPointId,
+    chunk.role,
+    chunk.tier,
+    realHash,
+  );
+}
+
+/**
  * Compose the canonical `${EpId}::${Role}::${Tier}` key.
  */
 function makeChunkKey(
@@ -1024,6 +1126,170 @@ function basenameOfFile(filePath: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Content-addressed chunk hashing — A-4.6 (SPEC §47.5 / §40.9.8 / §47.1.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Canonical-string field separator for `computeChunkHash`.
+ *
+ * Choice rationale: ASCII Unit Separator (U+001F, `\x1F`). Reasons:
+ *
+ *   1. **Collision-prone delimiters rejected.** A literal newline / comma
+ *      / pipe could appear inside the JS payload bytes (the last field
+ *      of the canonical input) and ambiguate the field boundary. The
+ *      Unit Separator is reserved by ASCII for exactly this purpose:
+ *      separating data fields in a structured record where the field
+ *      contents are otherwise opaque.
+ *
+ *   2. **Forbidden in JS source.** A `\x1F` byte cannot appear in
+ *      well-formed JavaScript outside a string literal — even inside a
+ *      string literal it would normally be escaped. The chunk payload
+ *      bytes (the last field) are well-formed JS by construction
+ *      (`composeInitialChunk` / `composeTier1Chunk` produce template-
+ *      literal-style assembled output with explicit `JSON.stringify`
+ *      for any embedded string). So `\x1F` cannot collide with payload
+ *      content; the field boundary is unambiguous.
+ *
+ *   3. **Stable across SPEC amendments.** §47.1.4 canonical-string
+ *      normalization for per-binding name encoding uses `{}` / `()` /
+ *      `:` / `,` as structural delimiters. The chunk-hash canonical
+ *      input layers on top of those: each node id (string OR number)
+ *      is converted to its string-rep, the four admission sets are
+ *      joined with `,` internally, and `\x1F` separates the five
+ *      top-level fields (4 admission sets + payload bytes). The choice
+ *      does NOT conflict with §47.1.4.
+ *
+ * The constant is not exported — `computeChunkHash` is the SOLE caller
+ * and the boundary is an internal contract. Tests pin the
+ * canonical-input shape end-to-end (via hash byte-identity assertions)
+ * rather than introspecting the separator.
+ */
+const CHUNK_HASH_FIELD_SEPARATOR = "\x1F";
+
+/**
+ * Canonical-string field-inner separator for `computeChunkHash`.
+ *
+ * Joins individual node-id / vendor-unit strings WITHIN a single
+ * admission-set field. Choice rationale parallel to the field
+ * separator: a comma cannot appear in a canonical NodeId string (the
+ * pipeline uses `::` for path-segment joining; no comma is ever a
+ * structural part of an id) so the comma is a clean inner-separator.
+ */
+const CHUNK_HASH_ID_SEPARATOR = ",";
+
+/**
+ * Compute the §47.5 content-addressed hash for a single chunk.
+ *
+ * **Algorithm (per SPEC §47.5 + §40.9.8 + A-4 SCOPING §3.6):**
+ *
+ * ```
+ *   canonical_chunk_input := <componentNodeIds_sorted>
+ *                          | <reactiveCellNodeIds_sorted>
+ *                          | <serverFnNodeIds_sorted>
+ *                          | <vendorUnitNames_sorted>
+ *                          | <chunk_js_bytes>
+ *   chunk_hash := fnv1a_base36(canonical_chunk_input)[0..8]
+ * ```
+ *
+ * Where:
+ *   - Each admission-set field is built by `canonicalNodeIdArray` /
+ *     `canonicalVendorUnitArray` (stratified comparator: numbers <
+ *     strings; codepoint compare within stratum — A-2.8 pattern),
+ *     `String(id)`-coerced, then joined with `","` (the inner
+ *     separator).
+ *   - Field-to-field boundaries use the ASCII Unit Separator (U+001F)
+ *     — see `CHUNK_HASH_FIELD_SEPARATOR` for the rationale.
+ *   - `chunk_js_bytes` is `chunk.payloadJs` verbatim. A-4.2's R1
+ *     determinism test (`compiler/tests/integration/
+ *     initial-chunk-emission.test.js` "two compileScrml invocations on
+ *     identical source → byte-identical initial chunk JS") is the
+ *     PRECONDITION: identical source → identical `payloadJs` →
+ *     identical hash. If the precondition is violated the hash
+ *     determinism breaks; the precondition is a separate test surface.
+ *
+ * **Determinism contract (§40.9.8).** Two builds of the same source
+ * produce identical `payloadJs` (A-4.2 R1) AND identical admission
+ * sets (RS canonical Map ordering) AND therefore identical
+ * `canonical_chunk_input` AND therefore identical hashes. No source-
+ * environment axis (timestamp, env var, build flag) participates.
+ *
+ * **Why include both admission sets AND payload bytes?** The §47.5 +
+ * SCOPING §3.6 contract reads:
+ *
+ *   > all inputs to `playable_surface(E, R, N)` PLUS the chunk's
+ *   > content-bytes itself
+ *
+ * Admission sets ARE inputs to the chunk identity (a chunk's "what's
+ * inside" surface — same admission set across two roles produces the
+ * same hash even if the same role-tag is irrelevant to the payload).
+ * Payload bytes are the "produced output". Hashing the concatenation
+ * means: a change to either side flips the hash. The cache invalidates
+ * IFF the chunk's observable behavior changed.
+ *
+ * **Empty-chunk case.** When all four admission sets are empty AND
+ * `payloadJs === ""`, the canonical input is exactly four field
+ * separators (`\x1F\x1F\x1F\x1F\x1F`-with-nothing-between since the
+ * fields are empty strings interspersed with separators). The hash is
+ * a deterministic constant — not the placeholder `"00000000"` (FNV-1a
+ * of four-or-five-byte input lands in the 8-char base36 space with
+ * extremely low probability of zero collision). The brief notes the
+ * disposition for what to do with empty-chunk MANIFEST entries
+ * separately (per Sub-task 3 — current A-4.1 behavior skips writing
+ * empty chunk files but still surfaces a manifest entry; the hash
+ * computed here is the same deterministic empty-input hash).
+ *
+ * @param contents The `ChunkContents` admission set for this chunk.
+ *   Sourced from `ChunkPlan.{initialChunk|prefetchTier1|prefetchTier2|
+ *   prefetchTierN[i]}`.
+ * @param payloadJs The fully-composed `chunk.payloadJs` body — typically
+ *   the output of `composeInitialChunk` / `composeTier1Chunk` /
+ *   `composeTier2Chunk` (A-4.4) / etc. Empty string when the chunk
+ *   would not have been written (still hashed for manifest determinism).
+ * @returns 8-char lowercase base36 zero-padded hash string. Bit-
+ *   identical to the per-binding-encoding `fnv1aHash` output for the
+ *   same canonical input (§47.1.3 normative parameters).
+ */
+export function computeChunkHash(
+  contents: ChunkContents,
+  payloadJs: string,
+): string {
+  // Sort each admission set into its canonical order. The stratified
+  // comparator (numbers < strings) lifts to a stable codepoint compare
+  // within each stratum — mirrors A-2.8's `sortedArrayFromSet`.
+  const compIds = canonicalNodeIdArray(contents.componentNodeIds)
+    .map((id) => String(id))
+    .join(CHUNK_HASH_ID_SEPARATOR);
+  const reactIds = canonicalNodeIdArray(contents.reactiveCellNodeIds)
+    .map((id) => String(id))
+    .join(CHUNK_HASH_ID_SEPARATOR);
+  const fnIds = canonicalNodeIdArray(contents.serverFnNodeIds)
+    .map((id) => String(id))
+    .join(CHUNK_HASH_ID_SEPARATOR);
+  const vendorIds = canonicalVendorUnitArray(contents.vendorUnitNames)
+    .join(CHUNK_HASH_ID_SEPARATOR);
+
+  // Field order is FIXED. Documented as the §47.5 canonical input
+  // shape. Reordering would break the determinism contract for any
+  // cached chunk-hash artifact; the order MUST be preserved across
+  // releases.
+  //
+  //   1. componentNodeIds
+  //   2. reactiveCellNodeIds
+  //   3. serverFnNodeIds
+  //   4. vendorUnitNames
+  //   5. payloadJs
+  const canonicalInput = [
+    compIds,
+    reactIds,
+    fnIds,
+    vendorIds,
+    payloadJs,
+  ].join(CHUNK_HASH_FIELD_SEPARATOR);
+
+  return fnv1aHash(canonicalInput);
+}
+
+// ---------------------------------------------------------------------------
 // Manifest serialization
 // ---------------------------------------------------------------------------
 
@@ -1035,11 +1301,96 @@ function basenameOfFile(filePath: string): string {
  * the Map iteration upstream is already in canonical (insertion) order
  * and `Record<>` field insertion order is preserved by ES2015+ engines.
  *
+ * **A-4.6 polish — on-disk JSON carries content-addressed URLs.**
+ * The in-memory `ChunksManifestEntry` shape stores `ChunkKey` strings
+ * (`${epId}::${role}::${tier}`) so adopter-side in-process tools can
+ * dereference each entry into a full `ChunkOutput` via the `chunks`
+ * Map. The ON-DISK chunks.json artifact instead carries URL-style
+ * filenames (e.g. `"/app/Driver.initial.a4b9c2d1.js"`) so the
+ * browser-cache / CDN / service-worker layer can consume the manifest
+ * without re-deriving filenames from the ChunkKey shape. The transform
+ * lives here so the dual-shape contract is centralized.
+ *
+ * The `chunks` Map is the lookup table from ChunkKey → ChunkOutput
+ * (which carries `filename`). The transform is a 1:1 Map lookup per
+ * tier entry — keys that don't resolve (defensive) are surfaced as
+ * `null` in the on-disk shape so adopter tools can detect a bad
+ * manifest at parse time.
+ *
  * Exported so api.js can call it to write `chunks.json` post-codegen
  * without re-implementing the contract.
+ *
+ * @param manifest The in-memory manifest (ChunkKey-valued).
+ * @param chunks   Optional ChunkKey → ChunkOutput Map. When supplied,
+ *                 the on-disk JSON uses URL-style filenames. When
+ *                 omitted (e.g., back-compat callers, unit tests that
+ *                 pre-dated A-4.6), the manifest is serialized
+ *                 unchanged (ChunkKey-valued JSON) — preserves the
+ *                 existing pre-A-4.6 contract.
  */
-export function serializeChunksManifest(manifest: ChunksManifest): string {
-  return JSON.stringify(manifest, null, 2) + "\n";
+export function serializeChunksManifest(
+  manifest: ChunksManifest,
+  chunks?: Map<ChunkKey, ChunkOutput>,
+): string {
+  if (!chunks) {
+    // Back-compat path: pre-A-4.6 callers (or tests that pass only the
+    // manifest) get the ChunkKey-valued JSON unchanged.
+    return JSON.stringify(manifest, null, 2) + "\n";
+  }
+
+  // A-4.6 transform: ChunkKey → URL-style content-addressed filename.
+  // Build a parallel `Record<>` shape with filename-valued entries so
+  // the JSON.stringify call produces the adopter-facing shape. The
+  // top-level `version` + `compiler` fields pass through unchanged.
+  const transformed: {
+    version: 1;
+    compiler: string;
+    entryPoints: Record<string, Record<string, {
+      initial?: string | null;
+      tier1?: string | null;
+      tier2?: string | null;
+      tierN?: Array<string | null>;
+    }>>;
+  } = {
+    version: manifest.version,
+    compiler: manifest.compiler,
+    entryPoints: {},
+  };
+  const keyToUrl = (k: ChunkKey | undefined): string | null => {
+    if (k === undefined) return null;
+    const chunk = chunks.get(k);
+    if (!chunk) return null;
+    // URL-style: leading slash so the cache layer treats it as a
+    // path-absolute URL relative to the deployment origin. Matches the
+    // tier-1 prefetch URL convention (`emitPerRouteChunks` already
+    // composes `/${chunk.filename}` for that purpose — same shape).
+    return `/${chunk.filename}`;
+  };
+  for (const [epId, roleMap] of Object.entries(manifest.entryPoints)) {
+    const transformedRoleMap: Record<string, {
+      initial?: string | null;
+      tier1?: string | null;
+      tier2?: string | null;
+      tierN?: Array<string | null>;
+    }> = {};
+    for (const [role, entry] of Object.entries(roleMap)) {
+      const transformedEntry: {
+        initial?: string | null;
+        tier1?: string | null;
+        tier2?: string | null;
+        tierN?: Array<string | null>;
+      } = {};
+      if (entry.initial !== undefined) transformedEntry.initial = keyToUrl(entry.initial);
+      if (entry.tier1 !== undefined) transformedEntry.tier1 = keyToUrl(entry.tier1);
+      if (entry.tier2 !== undefined) transformedEntry.tier2 = keyToUrl(entry.tier2);
+      if (entry.tierN !== undefined) {
+        transformedEntry.tierN = entry.tierN.map((k) => keyToUrl(k));
+      }
+      transformedRoleMap[role] = transformedEntry;
+    }
+    transformed.entryPoints[epId] = transformedRoleMap;
+  }
+  return JSON.stringify(transformed, null, 2) + "\n";
 }
 
 // Re-export the ANONYMOUS_ROLE constant for test convenience without

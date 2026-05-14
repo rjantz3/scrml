@@ -1566,10 +1566,15 @@ export function compileScrml(options = {}) {
     // <tier>.<8-char-hash>.js` (OQ-A4-C filename convention). Also write
     // `<outputDir>/chunks.json` per OQ-A4-A always-emit ratification.
     //
-    // At A-4.1 every chunk file is empty (placeholder payload).
-    // A-4.2..A-4.7 populate real content. A-4.6 replaces the placeholder
-    // `00000000` hash segment with a content-addressed FNV-1a base36
-    // hash (§47.1.3).
+    // Post-A-4.6: every chunk's filename carries the real FNV-1a base36
+    // content-addressed hash (§47.5 / §40.9.8 / §47.1.3). The A-4.1
+    // placeholder `"00000000"` is replaced by `finalizeChunkHash` in
+    // route-splitter.ts before any descriptor surfaces here. Empty
+    // tier-N chunks still carry a deterministic real-hash filename;
+    // the file write is elided when payloadJs is empty (per A-4.3
+    // empty-payload skip below) but the chunks.json manifest still
+    // references the chunk by hash so adopter tooling can replay the
+    // deterministic-from-source contract end-to-end.
     // -------------------------------------------------------------------------
     if (emitPerRoute && cgResult.chunks && cgResult.chunksManifest) {
       // S91 A-4.3 — surface per-tier byte totals in the verbose log so
@@ -1610,7 +1615,11 @@ export function compileScrml(options = {}) {
         }
       }
       const manifestPath = join(outputDir, "chunks.json");
-      const manifestBody = serializeChunksManifest(cgResult.chunksManifest);
+      // A-4.6 — pass `cgResult.chunks` so the on-disk JSON resolves
+      // ChunkKey → URL-style content-addressed filename per the
+      // adopter-facing shape (`"/<route>/<role>.<tier>.<hash>.js"`).
+      // See `serializeChunksManifest` dual-shape rationale.
+      const manifestBody = serializeChunksManifest(cgResult.chunksManifest, cgResult.chunks);
       writeFileSync(manifestPath, manifestBody);
       fileCount++;
       if (verbose) {
@@ -1671,9 +1680,12 @@ export function compileScrml(options = {}) {
     // `reachabilityRecordJson`.
     chunks: cgResult.chunks,
     chunksManifest: cgResult.chunksManifest,
+    // A-4.6 — pass `cgResult.chunks` so the JSON output uses the
+    // adopter-facing URL-style filename shape (matches what api.js
+    // writes to chunks.json on disk).
     chunksManifestJson: () =>
       cgResult.chunksManifest
-        ? serializeChunksManifest(cgResult.chunksManifest)
+        ? serializeChunksManifest(cgResult.chunksManifest, cgResult.chunks)
         : null,
   };
 }
