@@ -2,7 +2,53 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-15 S93 CLOSE — v0.3.x patch arc opened post-v0.3.0 STABLE · 16-commit session · 6 compiler bugs closed + 3 corpus migrations + adopter-facing roadmap drafted): full `bun test` **12,721 pass / 117 skip / 1 todo / 0 fail / 641 files** at HEAD `d437589` (+27 vs S92 close `c520369`'s 12,694; 0 regressions). v0.3.0 STABLE `c520369` is the shipped baseline; v0.3.x patch series in flight (no patch tags yet — each commit lands incrementally to main with pre-push test gate).
+Current baseline (2026-05-15 S94 CLOSE — v0.3.x patch arc marathon · 17-commit session · 11 backlog items closed end-to-end · 2 design-axiom ratifications · 3 new PA-memory rules): full `bun run test` **12,826 pass / 117 skip / 1 todo / 0 fail / 650 files / 42,968 expect** at HEAD `156c0ba` (+105 vs S93 close `d437589`'s 12,721; 0 regressions). v0.3.0 STABLE `c520369` is the shipped baseline; v0.3.x patch series in flight (no patch tags yet — each commit lands incrementally to main with pre-push test gate).
+
+### 2026-05-15 (S94 CLOSE — v0.3.x patch arc marathon · 17 commits · 11 backlog items closed · 2 design-axiom ratifications)
+
+**Session-defining outcome.** Substantial v0.3.x patch arc throughput. Eleven backlog items closed end-to-end across HIGH, MEDIUM, and LOW priorities. Two load-bearing design-axiom ratifications surfaced + recorded (designer-card on `~`; state-vs-logic boundary). The `~` (last-unbound-expression carry-forward) primitive's half-shipped codegen surface closed end-to-end (codegen-lowering + parser round-trip + adopter-facing examples + gaps 5/6/7). Phase B SPA tree-shake landed (−25 KB gzip on TodoMVC; bundle now beats every prior v0.2.x measurement). Auth-redirect UX loop closed end-to-end (diagnostic tightening + D-RI-PAGES route-prefix recognition + `scrml generate auth` scaffold path derivation; adopters get a one-line copy-pasteable fix). hos.scrml restructured to canonical non-entry `<page>` shape (DEFERRED §2 from S93 CLOSED). Perf characterization validated the roadmap's "per-file dominates cross-file" claim with concrete 16.6× ratio + identified CG as 78% of pipeline + flagged DG super-linear scaling. BS-batch v2 closed the 3 residual `${}` wrapper shapes from S93 DEFERRED + BSBv3 closed the sibling component-expander whitespace fire. pkg.json bump-on-tag convention formalized into pa.md.
+
+**S94 commit ledger (17 scrmlTS + 1 scrml-support):**
+
+```
+156c0ba  fix(tilde): close Gaps 5/6/7 — failable-handler + <program>-direct-child + chain
+a1c720c  docs(perf): closure-analysis pipeline characterization (v0.3.x roadmap item 5)
+9e96281  docs(pa,master-list): formalize package.json bump-on-tag versioning convention
+0c503c5  feat(ri): D-RI-PAGES — buildPageRouteTree recognizes `pages/` as canonical v0.3 prefix
+69260c3  fix(auth): tighten I-AUTH-REDIRECT-UNRESOLVED + W-AUTH-LOGIN-MISSING + generate scaffold
+fd052ec  fix(corpus): hos.scrml — canonical non-entry <page> restructure + DEFERRED §2 close
+13beb3f  fix(ce): BSBv3 — apply E-COMPONENT-031 predicate change to current main
+bec57a3  fix(ce): BSBv3 — filter whitespace-only text from E-COMPONENT-031 predicate
+0aa2b18  docs(examples): sprinkle `~` usage + file 3 remaining codegen shape gaps
+09cd0c7  fix(expr-parser): `~` parseExprToNode/emitStringFromTree round-trip stability
+d37b1f5  fix(codegen): `~` last-unbound-expression carry-forward — close half-shipped surface
+2201556  fix(bs+ce): BS-batch v2 — close 3 residual ${} wrapper shapes (examples 12/19/20)
+783dd46  docs(roadmap): record S94 design insights — `^{}` narrowing + `~` keeper
+42abfca  docs(bench): re-frame bundle narrative post-Phase-B with honest measurements
+1f73732  fix(codegen): v0.3.x SPA tree-shake — shared-runtime union + wire chunk + hash filename
+66c1be0  docs(kickstarter): strengthen §6.6 — `reset` is a reserved identifier
+95e13c8  docs(s94-open): hand-off rotation + Phase A SCOPING for v0.3.x SPA tree-shake
+bb1eb91  (scrml-support) docs(user-voice): S94 — `~` is designer-card-protected primitive
+```
+
+**11 backlog items closed end-to-end** — see master-list §S94 CLOSE addendum for full per-item detail. Headline: (1) closure-analysis runtime tree-shake → TodoMVC 40.8 → 15.8 KB gzip (−25 KB); (2) BS-batch v2; (3) `~` codegen lowering (half-shipped surface closed); (4) `~` parser round-trip stability; (5) `~` example sprinkle; (6) `~` codegen gaps 5/6/7; (7) BSBv3 component-expander whitespace; (8) hos.scrml restructure; (9) auth-redirect tightening; (10) D-RI-PAGES (closes auth UX loop); (11) perf characterization. Plus 1 LOW (pkg.json versioning convention formalization).
+
+**Two design-axiom ratifications recorded** (verbatim in user-voice S94):
+- **Designer-card on `~`** — naming intermediates is a cost the language shouldn't impose; `~` is keeper at all phases; adoption gap is documentation surface not feature-existence question.
+- **State ↔ logic boundary axiom** — state owns nouns; logic owns verbs; they must not blur. Analogous to logic ↔ type system boundary. Operational consequence: `fn()` dominates work-a-day scrml (~90/10).
+
+**Three new PA-memory rules filed:** `feedback_designer_card_and_retirement_framing.md` · `feedback_cwd_slip_after_worktree_dispatch.md` · `feedback_state_vs_logic_boundary.md`.
+
+**S95 priority — heads-up coding session** (user-stated just before wrap): exploratory authorship session, NOT compiler dispatch. PA's role: collaborative authorship + grounded honesty on what works vs surfaces gaps. Stress-test the canonical scrml shape against real adopter problems.
+
+**State at S94 close.**
+- HEAD `156c0ba` (post-final-substantive-commit; this CLOSE-wrap commit lands after).
+- 17 scrmlTS commits ahead of origin pre-wrap-push.
+- 1 scrml-support commit ahead of origin (`bb1eb91`).
+- Working tree clean.
+- No agent worktrees.
+- Inbox empty.
+- v0.3.0 STABLE `c520369` remains the tag baseline; no semver bump this session.
 
 ### 2026-05-15 (S93 CLOSE — v0.3.x patch arc opened · 16 commits · 6 compiler bugs closed · 3 corpus migrations · adopter-facing roadmap drafted)
 
