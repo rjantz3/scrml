@@ -348,6 +348,21 @@ const BARE_DECL_RE = /^\s*(?:export\s+)?(server\s+(?:fn|function)\s|type\s+\w|fn
 const TOPLEVEL_STATE_DECL_RE = /^\s*(?:export\s+)?(?:const\s+)?<\s*[A-Za-z_][A-Za-z0-9_]*[^>]*>\s*[=:]/;
 
 /**
+ * §32 Gap 6 — tilde-bearing text at `<program>` / `<page>` / `<channel>`
+ * direct child position. The v0.3 default-logic-mode promise (SPEC §40.8)
+ * says these bodies parse as logic by default. BARE_DECL_RE / TOPLEVEL_STATE_DECL_RE
+ * lift the canonical decl shapes, but a text fragment that opens with a bare
+ * call (e.g. `step1(2)\n  const result = step2(~)`) doesn't match those
+ * patterns and stays as a TEXT node — emitting no code. The fragment
+ * boundary can be created by an intervening JS line comment (`// ...`)
+ * which BS extracts as a separate `comment` child, flushing the preceding
+ * text. The `~` accumulator is an unambiguous tell that the fragment is
+ * logic code (not markup prose), so lifting it on this signal is safe and
+ * conservative. SPEC §32 is normative for `~`.
+ */
+const TILDE_TOKEN_RE = /(?<![A-Za-z0-9_$])~(?![A-Za-z0-9_$])/;
+
+/**
  * P2: regex matching a text block whose only meaningful content is the bare
  * `export` keyword. Used to detect the `export <ComponentName ...>...</>`
  * pattern (text "export " block followed by a PascalCase markup block).
@@ -1146,6 +1161,38 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
         isComponent: false,
         _synthetic: true,
         _toplevelStateDecl: true, // diagnostic marker
+      });
+      continue;
+    }
+
+    // §32 Gap 6 — `~`-bearing text at <program>/<page>/<channel> direct child.
+    //
+    // BS extracts JS line comments (`// ...`) as separate `comment` children
+    // at markup/state context, which flushes the preceding text. A text
+    // fragment after such a comment that opens with a bare call (e.g.
+    // `step1(2)\n  const result = step2(~)`) does NOT start with a decl
+    // keyword, so BARE_DECL_RE / TOPLEVEL_STATE_DECL_RE skip it and the
+    // fragment stays as a TEXT node, emitting no code (E-SCOPE-001 fires on
+    // downstream references to `result`). Lifting on `~`-token presence is
+    // conservative: `~` is an unambiguous logic-mode signal (SPEC §32 is
+    // normative); prose containing literal `~` is not produced by adopters
+    // at <program>/<page>/<channel> direct-child position.
+    //
+    // Gated on parentType === "state" (= <program>, <page>, <channel> direct
+    // children — see liftBareDeclarations's parentType propagation above)
+    // to avoid lifting prose markup that happens to contain `~`.
+    if (block.type === "text" && parentType === "state" && TILDE_TOKEN_RE.test(block.raw)) {
+      result.push({
+        type: "logic",
+        raw: "${" + block.raw + "}",
+        span: block.span,
+        depth: block.depth,
+        children: [],
+        name: null,
+        closerForm: null,
+        isComponent: false,
+        _synthetic: true,
+        _tildeBearingLift: true,  // diagnostic marker
       });
       continue;
     }

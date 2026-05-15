@@ -1148,9 +1148,18 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // Phase 3 fast path: when exprNode is present, skip all string heuristics
       if (node.exprNode) {
         if (opts.tildeContext) {
+          // §32 Gap 7: pure consume+reinit. A bare-expr that ALSO references `~`
+          // in its RHS (e.g. `step2(~)` after `step1(2)` initialized `~`) must
+          // emit RHS using the PREVIOUS tilde-var, then rebind `~` to the NEW
+          // var for downstream statements. If we set opts.tildeContext.var to
+          // tVar BEFORE constructing the expr ctx, _makeExprCtx would capture
+          // the new tVar — and `~` in the RHS would self-reference its own
+          // initializer (`let _scrml_tilde_N = step2(_scrml_tilde_N);`).
+          // Capture the prev expr ctx first; THEN overwrite tildeContext.var.
           const tVar = genVar("tilde");
+          const prevExprCtx = _makeExprCtx(opts);
           opts.tildeContext.var = tVar;
-          return `let ${tVar} = ${emitExpr(node.exprNode, _makeExprCtx(opts))};`;
+          return `let ${tVar} = ${emitExpr(node.exprNode, prevExprCtx)};`;
         }
         // §51.5 machine-binding interception: if this bare-expr is a
         // reactive `@var = expr` assignment AND the var is machine-bound,
@@ -1294,10 +1303,14 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       if (isLeakedComment(trimmed)) return `// ${trimmed}`;
       // §32: If a tilde context is active, this bare-expr initializes the tilde variable.
       // Emit as `let _scrml_tilde_N = <expr>;` so `~` in subsequent nodes can reference it.
+      // Gap 7: capture prev expr ctx (with previous tildeVar) BEFORE overwriting
+      // opts.tildeContext.var — otherwise `~` in the RHS would self-reference
+      // the new var. Same pattern as the exprNode fast path above.
       if (opts.tildeContext) {
         const tVar = genVar("tilde");
+        const prevExprCtx = _makeExprCtx(opts);
         opts.tildeContext.var = tVar;
-        return `let ${tVar} = ${emitExprField(null, bareExpr, _makeExprCtx(opts))};`;
+        return `let ${tVar} = ${emitExprField(null, bareExpr, prevExprCtx)};`;
       }
       return `${emitExprField(null, bareExpr, _makeExprCtx(opts))};`;
     }
@@ -2410,6 +2423,16 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       if (bindingName) {
         lines.push(`var ${bindingName} = ${resultVar};`);
       }
+      // §32 Gap 5: when this guarded-expr's success-path produces a value
+      // (i.e. the guardedNode was a bare-expr call, not a let/const/tilde-decl
+      // with its own binding), the success value lives in `resultVar`. If an
+      // outer tilde context is active, subsequent statements that reference
+      // `~` (e.g. `return format(~)` after `loadItem(id) !{ ... }`) must
+      // resolve to `resultVar`. Without this wire, `~` falls through emitIdent's
+      // tildeVar=null arm and emits literal `~` — JS SyntaxError.
+      if (opts.tildeContext && !bindingName) {
+        opts.tildeContext.var = resultVar;
+      }
       return lines.join("\n");
     }
 
@@ -3252,6 +3275,21 @@ function nodeContainsTildeRef(node: any): boolean {
   if (node.alternate) {
     if (Array.isArray(node.alternate) && nodeListContainsTildeRef(node.alternate)) return true;
     if (typeof node.alternate === "object" && nodeContainsTildeRef(node.alternate)) return true;
+  }
+  // §32 Gap 5 — guarded-expr (`<expr> !{ arms }`) carries the guarded expression
+  // on `guardedNode` and the handler arms on `arms`. Walk both: a `~` inside
+  // the guarded expression OR an arm body must activate tildeContext so the
+  // subsequent statements' tilde refs lower correctly.
+  if (node.guardedNode && typeof node.guardedNode === "object" &&
+      nodeContainsTildeRef(node.guardedNode)) return true;
+  if (Array.isArray(node.arms)) {
+    for (const arm of node.arms) {
+      if (!arm || typeof arm !== "object") continue;
+      // Arms have `handler` (string) and `handlerExpr` (ExprNode) per ast.ts:163.
+      if (typeof arm.handler === "string" && hasTildeToken(arm.handler)) return true;
+      if (arm.handlerExpr && typeof arm.handlerExpr === "object" &&
+          exprContainsTildeRef(arm.handlerExpr)) return true;
+    }
   }
   return false;
 }

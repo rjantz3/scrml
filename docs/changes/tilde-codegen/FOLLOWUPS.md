@@ -4,6 +4,16 @@
 **Companion:** `SURVEY.md` (S94 codegen-lowering dispatch survey) +
 `ROUND-TRIP-SURVEY.md` (S94 parser round-trip survey).
 
+**STATUS UPDATE (2026-05-15 S95):** Gaps 5/6/7 are all **CLOSED** by the
+follow-up dispatch at `docs/changes/tilde-gaps-567/`. The end-to-end `~`
+codegen surface is now complete for v0.3.x. Regression coverage lives at
+`compiler/tests/integration/tilde-gaps-567.test.js` (11 tests). The four
+S94 SURVEY-deferred items (E-TILDE-001/002 ExprNode-form firing,
+unbound-if-as-expression parse, accumulation-lift tilde, function-body
+value-lift coverage) remain open and are tracked separately. Two new
+gaps surfaced during the S95 investigation — see "New gaps surfaced"
+section below.
+
 When PA wrote `examples/24-tilde-pipeline.scrml` and retrofitted
 `examples/16-remote-data.scrml`'s `load()` function with `~`, three additional
 shape gaps surfaced that the agent's regression suite did not cover. Each is a
@@ -16,7 +26,17 @@ tildeActive falling through to escape-hatch) is **already closed** at commit
 
 ---
 
-## Gap 5 — `~` after `!{}` handler doesn't lower
+## Gap 5 — `~` after `!{}` handler doesn't lower — **CLOSED S95**
+
+**Closure:** Fixed at S95 commit `150c3dd`. `case "guarded-expr"` now wires
+`opts.tildeContext.var = resultVar` at its tail when an outer tildeContext is
+active AND the guardedNode is a bare-expr (i.e., no explicit binding name).
+The success-path value lives in resultVar; subsequent `~` references lower
+correctly. Companion: `nodeContainsTildeRef` extended to walk `guardedNode`
+and `arms.handler/handlerExpr` so the pre-scan correctly detects `~`-bearing
+guarded-expr shapes. Regression coverage: 3 tests in
+`compiler/tests/integration/tilde-gaps-567.test.js`.
+
 
 ### Shape
 
@@ -71,7 +91,21 @@ Without this gap closed, the roadmap's framing claim doesn't hold.
 
 ---
 
-## Gap 6 — `~` at `<program>` direct-child position silently dropped
+## Gap 6 — `~` at `<program>` direct-child position silently dropped — **CLOSED S95**
+
+**Closure:** Fixed at S95 commit `7cf501b`. The root cause turned out to be a
+text-block-fragmentation issue: a JS line comment (`// ...`) extracted by BS
+as a separate `comment` child flushes the preceding text accumulator, and a
+text fragment AFTER the comment that opens with a bare-call (not a decl
+keyword) fails BARE_DECL_RE / TOPLEVEL_STATE_DECL_RE and stays as a TEXT
+node. Fix: `ast-builder.js` adds a sibling lift in `liftBareDeclarations`
+that wraps text fragments containing a `~` token (`TILDE_TOKEN_RE`) into a
+synthetic `${...}` logic block when `parentType === "state"` (i.e.,
+`<program>`, `<page>`, `<channel>` direct-child position). The `~` is a
+robust logic-mode sentinel (SPEC §32 normative). Regression coverage:
+4 tests in `compiler/tests/integration/tilde-gaps-567.test.js`. The
+`examples/24-tilde-pipeline.scrml` workaround has been removed.
+
 
 ### Shape
 
@@ -139,7 +173,17 @@ dropped to match the v0.3 canonical shape.
 
 ---
 
-## Gap 7 — pure consume+reinit chain self-references
+## Gap 7 — pure consume+reinit chain self-references — **CLOSED S95**
+
+**Closure:** Fixed at S95 commit `5a28dbb`. `case "bare-expr"` (Phase 3 fast
+path at emit-logic.ts:1150 + legacy-string-path at :1306) reordered to
+capture `_makeExprCtx(opts)` BEFORE overwriting `opts.tildeContext.var =
+tVar`. Pre-fix, `_makeExprCtx` captured the JUST-WRITTEN new tVar into
+`ctx.tildeVar`, so `~` in the RHS resolved to the SELF-name. Post-fix, the
+RHS emits with the PREVIOUS tildeVar; the new tVar takes effect for the
+NEXT statement. Regression coverage: 3 tests in
+`compiler/tests/integration/tilde-gaps-567.test.js`.
+
 
 ### Shape
 
@@ -203,23 +247,57 @@ The S94 dispatches landed:
   parseExprToNode` is now stable for all `~` shapes; pre-commit corpus invariant
   test passes for `~` examples.
 
-Tests cover those shapes (19 round-trip + 5 codegen-lowering). Gaps 5/6/7
-above + the four S94 SURVEY-deferred items (E-TILDE-001/002 not firing on
-ExprNode-form `~` reads; unbound if-as-expression parser gap; accumulation-
-lift not honoring tildeContext; function-body value-lift untested) are the
-remaining surface.
+The S95 dispatch landed (this dispatch — `docs/changes/tilde-gaps-567/`):
+- **Gap 5 — `~` after `!{}` handler** (`150c3dd`) — codegen `case "guarded-expr"`
+  now wires `opts.tildeContext.var = resultVar` so `~` carries forward.
+- **Gap 6 — text-block at `<program>` direct child** (`7cf501b`) — ast-builder
+  adds `TILDE_TOKEN_RE` sentinel-based auto-lift; comment-fragmented text
+  with `~` now lifts cleanly.
+- **Gap 7 — pure consume+reinit chain self-reference** (`5a28dbb`) — bare-expr
+  Phase 3 (and legacy) fast paths reorder `_makeExprCtx` capture before
+  overwriting `opts.tildeContext.var`.
+
+Tests cover those shapes (19 round-trip + 5 codegen-lowering + 11 gaps-567).
+
+**Remaining S94 SURVEY-deferred items:**
+- E-TILDE-001/002 not firing on ExprNode-form `~` reads.
+- Unbound if-as-expression parser gap.
+- Accumulation-lift not honoring tildeContext (markup `<ul>${ for ... { lift <li>.../ } }`).
+- Function-body value-lift untested (`lift 3` as standalone statement).
 
 **Adopter-facing impact:** the v0.4 body-split arc framing in
-`docs/website/roadmap-from-v0.3-2026-05-14.md` depends on Gap 5 closing
-(failable pipelines are the canonical v0.4 example). Gap 6 limits where
-adopters can write `~` (today: only inside explicit `${}` and inside fn
-bodies; not directly under `<program>` despite the v0.3 default-logic-mode
-expectation). Gap 7 limits chain length to two links unless intermediate
-bindings are used.
+`docs/website/roadmap-from-v0.3-2026-05-14.md` now holds — failable pipelines
+compile cleanly. Adopters can write `~` chains at `<program>` direct-child
+position WITHOUT an explicit `${}` wrapper. Chains of arbitrary length are
+supported (Gap 7 closed).
 
-**Recommendation:** dispatch a second `~`-codegen pass when v0.3.x patch arc
-drains and v0.4 body-split design lands — Gaps 5+6+7 are a natural bundle for
-that work and would close the surface end-to-end.
+## New gaps surfaced during S95 investigation
+
+- **Gap 8 — `guarded-expr` arm-body emission produces invalid JS.** The
+  current `emitArmAssign` path treats arm bodies as assignment-target
+  expressions, so a `| .NotFound -> { return "missing" }` arm body emits
+  as `_scrml_result_N = return "missing";` — invalid JS. The intent is
+  that the arm body executes its statements as-is (the user's `return`
+  exits the enclosing function). Fix surface: emit-logic.ts:2363-2375
+  `emitArmAssign` needs to handle return/throw/fail/break/continue arm
+  bodies as standalone statements (no `resultVar = ...` wrapping), and
+  reserve the assignment wrapping only for value-yielding expression
+  bodies. Pre-existing; surfaced by Gap 5 repro but NOT load-bearing for
+  the `~` symptom. Estimated effort: ~3-5h.
+
+- **Gap 9 — top-level (file-root) function-body `!{}` not block-split.**
+  When a `function` decl with a body containing `!{}` lives OUTSIDE any
+  markup container (file-root level), the BS layer's orphan-brace path
+  doesn't push an `error-effect` BLOCK_REF for the inner `!{}`. The
+  function-body content is opaque text, then the AST builder retokenizes
+  it and sees `!` + `{` as separate PUNCT tokens (no BLOCK_REF), and
+  parseRecursiveBody's GUARDED-EXPR detector (BLOCK_REF lookahead) never
+  fires. Result: the `!{}` is silently treated as something else and the
+  error-handler arms are dropped from codegen. This is a structural BS
+  issue cousin to Gap 6. Adopters who place all their fn decls inside
+  `<program>` are not affected; this only impacts pure-module files with
+  file-root fn decls + failable calls. Estimated effort: ~4-6h (BS layer
+  recursion into orphan-brace contexts for sigil openers).
 
 ---
 
@@ -227,8 +305,10 @@ that work and would close the surface end-to-end.
 
 - `SURVEY.md` — S94 codegen-lowering dispatch survey
 - `ROUND-TRIP-SURVEY.md` — S94 parser round-trip survey
-- `compiler/tests/integration/tilde-carry-forward.test.js` — codegen-lowering regression suite
-- `compiler/tests/integration/tilde-roundtrip.test.js` — round-trip regression suite
+- `../tilde-gaps-567/SURVEY.md` — S95 Gaps 5/6/7 dispatch survey
+- `compiler/tests/integration/tilde-carry-forward.test.js` — S94 codegen-lowering regression suite (5 tests)
+- `compiler/tests/integration/tilde-roundtrip.test.js` — S94 round-trip regression suite (19 tests)
+- `compiler/tests/integration/tilde-gaps-567.test.js` — S95 Gaps 5/6/7 regression suite (11 tests)
 - `docs/website/roadmap-from-v0.3-2026-05-14.md` "Surfaces that will likely change visibility" section
-- `examples/24-tilde-pipeline.scrml` — adopter-facing showcase (uses Gap 6 workaround)
+- `examples/24-tilde-pipeline.scrml` — adopter-facing showcase (post-Gap-6: no explicit `${}` wrapper)
 - `examples/16-remote-data.scrml` — retrofit using the smoke shape (no gaps hit)

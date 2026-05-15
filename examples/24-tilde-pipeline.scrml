@@ -13,9 +13,12 @@
 // does NOT leak out. Tree-shake: bodies that never reference `~` get
 // zero `~` overhead.
 //
-// Currently-working shapes (other shapes are queued — see SPEC §32):
+// Currently-working shapes (S95 — full §32 surface):
 //   - bare call + next-line consume:  `fetch(); const x = process(~)`
 //   - function body:                  `fn(start) { step(start); return next(~) }`
+//   - pure consume+reinit chain:      `step1(n); step2(~); const out = ~`
+//   - <program> direct child:          (no `${}` wrapper required)
+//   - `~` after `!{}` handler:        `call() !{ ... }; return next(~)`
 //
 // Styling: co-located scoped `#{}` per markup section (S86 styling rule).
 
@@ -32,14 +35,14 @@
     return step2(~)
   }
 
-  // Top-level pipeline inside an explicit `${}` logic block — also its
-  // own `~` scope. Bare-call initializes `~`; bound consume on the next
-  // line. Replaces the verbose form `const intermediate = step1(2);
-  // const result = step2(intermediate)`.
-  ${
-    step1(2)
-    const result = step2(~)
-  }
+  // Top-level pipeline at <program> direct child position — the v0.3
+  // default-logic-mode body. Bare-call initializes `~`; bound consume on
+  // the next line. Replaces the verbose form `const intermediate =
+  // step1(2); const result = step2(intermediate)`. No explicit `${}`
+  // wrapper needed — <program> bodies parse as logic by default
+  // (SPEC §40.8).
+  step1(2)
+  const result = step2(~)
 
   // Function call. Each fn body has its OWN ~ scope, so the outer ~
   // above is independent of the one inside `pipeline()`.
