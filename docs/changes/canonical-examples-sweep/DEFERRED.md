@@ -121,6 +121,8 @@ Add `compiler/tests/unit/non-entry-file-bare-exports.test.js`:
 
 ## Deferred 2 — `examples/23-trucking-dispatch/pages/driver/hos.scrml` non-entry page with stray `<program>` wrapper
 
+**STATUS: CLOSED (S94, 2026-05-15 — commit `6c2e561`).** hos.scrml migrated to canonical `<page db= auth=>` shape; OQ-A/B/C resolved per `docs/changes/hos-restructure/SURVEY.md`. The 19-sibling-page corpus shape under `pages/{auth,customer,dispatch,driver}/` is now uniform. Restructure landed surgically — 0 new compile errors, the trucking-dispatch-smoke-integration regression test baseline updated to reflect the histo shift (counts mechanically explained in the test header). Spec-prose follow-ups surfaced in SURVEY §"Spec-prose follow-ups" (one §51.0.K wording clarification; two BS-layer attribute-validator + W-PROGRAM-001 suppression gaps — out of scope for this dispatch; cross-ref DEFERRED §1 for the W-PROGRAM-001 suppression sibling concern).
+
 ### Symptom
 
 S85 Q2 canonical shape: non-entry files have NO `<program>` wrapper. `23-trucking-dispatch/` is the canonical multi-file app, with `app.scrml` as the entry file carrying the program-level config (`<program db= auth=>`). Every other file under `pages/`, `components/`, `channels/`, `models/` should be a non-entry file — no `<program>` wrapper.
@@ -168,43 +170,33 @@ Substantial restructure required — not a simple wrapper drop:
 
 The migration needs careful per-fragment analysis to preserve scope semantics. Filed as a deferred standalone dispatch rather than risk a brittle PA-hands-on edit.
 
-### Open questions
+### Open questions — resolved at S94 (per SURVEY)
 
-**OQ-DEF2-A: db/auth attribute inheritance.** Does the entry-file `<program db= auth=>` propagate the `db=` + `auth=` config to all non-entry pages? If YES, hos.scrml's redundant `<program db= auth=>` can be dropped without re-declaring. If NO, the spec needs to define how non-entry pages access the same db/auth context.
+**OQ-DEF2-A — db/auth attribute inheritance: RESOLVED — NO inheritance; canonical is explicit `<page db= auth=>`.**
 
-**Audit:** the other 29 non-entry files under `23-trucking-dispatch/{pages,components,channels,models}/` have NO `<program>` wrapper and presumably work — implying the answer to OQ-DEF2-A is YES (inheritance works) and hos.scrml is the outlier needing fix-up.
+The deferred-2 framing was off by one: the 19 sibling non-entry pages do not rely on silent inheritance from the entry-file `<program>`. Instead they use the canonical v0.3 Wave 1 first-class non-entry-page container — `<page>` — which accepts EXACTLY the four per-route attributes `{ db=, auth=, csrf=, ratelimit= }` (SPEC §4.15 line 1000, §40). Per SPEC §40 + W-AUTH-PAGE-INFERRED (§34 catalog row 14946) auth is explicitly NOT auto-inherited at the closure-analysis layer; the per-page `auth=` is the canonical declaration. hos.scrml's prior `<program db= auth=>` wrapper was not just redundant with `app.scrml`'s — it was using the WRONG container element entirely (should have been `<page>`, not `<program>`).
 
-**OQ-DEF2-B: `<engine>` placement in non-entry pages.** Per v0.3 canonical, engines live INSIDE `<program>`. In a non-entry page (no `<program>` wrapper), where does the `<engine>` go? Options:
-- (a) At file-top, as a direct file-scope child — same as types/functions
-- (b) Disallowed in non-entry files (engines are app-scope singletons; auto-declared engine variables would conflict with the entry-file program scope)
+**OQ-DEF2-B — `<engine>` placement in non-entry pages: RESOLVED — INSIDE `<page>` body is canonical.**
 
-Mario uses option-(a)-shape inside its `<program>` (engine as direct child); whether engines can appear at file-top of non-entry pages is unclear.
+Per SPEC §51.0.K Machine Cohesion footnote (S67 ratification, lines 21823-21844): engines MAY be declared at file scope OR inside another engine's composite state-child. The footnote enumerates these two loci explicitly but does not enumerate `<page>` body — but `<page>` body is mode-equivalent to `<program>` body per §4.15 line 1000 ("default-logic body"), both are file-scope-extensions for the runtime app, and §51.0.D's worked example (line 21480-21484) already shows engine elements grammatical inside `<page>`. Spec-prose follow-up surfaced: §51.0.K wording could be amended to explicitly enumerate `<page>` body as an allowed locus (SURVEY §"Spec-prose follow-ups" #1).
 
-**OQ-DEF2-C: pre-existing E-CG-006 + I-AUTH-REDIRECT-UNRESOLVED on 23-trucking-dispatch.** Compiling `23-trucking-dispatch/app.scrml` today (S93) surfaces:
-- `E-CG-006`: server-only pattern in client JS output (security violation; pre-existing, NOT migration regression per S93 verify)
-- `I-AUTH-REDIRECT-UNRESOLVED`: `/login` redirect target not in RouteMap (Info; expected from v0.3 AuthGraph S91)
+**OQ-DEF2-C — pre-existing E-CG-006 + I-AUTH-REDIRECT-UNRESOLVED: RESOLVED — E-CG-006 NOT firing at HEAD (S93 patch arc closed it); I-AUTH-REDIRECT-UNRESOLVED is pre-existing and unchanged by the restructure.**
 
-These are pre-existing but adjacent. Worth investigating whether the hos.scrml restructure could resolve OR exacerbate either.
+The DEFERRED.md text was stale on E-CG-006 — the S93 patch arc bug #1 (route-inference.ts + emit-logic.ts + collect.ts 3-layer fix per primary.map.md) closed the `return ?{...}.method()` server-only-body-leak shape. Compiling `examples/23-trucking-dispatch/app.scrml` at HEAD `0aa2b18` (S94 open) surfaces ONLY I-AUTH-REDIRECT-UNRESOLVED + W-AUTH-LOGIN-MISSING. Post-restructure: same 2 warnings, unchanged.
 
-### Recommended dispatch shape
+### Dispatched + closed (S94)
 
-Standalone deep-dive + restructure dispatch (T1 surface — touches scrml source in canonical-app fixture):
+Phases executed exactly as recommended above. Outcome:
+- **Phase 0** (SURVEY) — OQ-A/B/C resolved per `docs/changes/hos-restructure/SURVEY.md` (~167 lines).
+- **Phase 1** — `<program>` wrapper dropped; `<page db= auth=>` opener added; engine moved into `<page>` body (above the `<db>` block).
+- **Phase 2** — imports consolidated into a single `${ }` block at top of `<page>` body. Server functions + state cells + markup preserved verbatim. Post-restructure standalone compile: 5 warnings (uniform with sibling pages), 0 errors. Full multi-file compile via `compileScrml({inputFiles: [...all 23-td .scrml files], emitPerRoute: true})`: 87 warnings total, 0 errors — `trucking-dispatch-smoke-integration.test.js` baseline updated with mechanical histo-delta explanation in test header.
+- **Phase 3** — spec-prose gap on `<page>` body as engine-cohesion locus surfaced for spec-team follow-up (SURVEY §"Spec-prose follow-ups"). NOT a blocker (the SPEC's existing §4.15 + §51.0.D worked-example covers the natural reading).
 
-1. **Phase 0:** verify db/auth inheritance from entry `<program>` → non-entry pages (OQ-DEF2-A). Test by removing hos.scrml's `<program db= auth=>` wrapper + checking whether server functions still escalate correctly. If inheritance works, proceed.
+### Cross-refs (post-close)
 
-2. **Phase 1:** restructure hos.scrml — drop redundant `<program>` wrapper; move engine to file-top OR inside the file's main markup section; flatten nested `${...}` wrappers where the v0.3 logic-default applies (subject to BS-layer bug batch — some may need to stay).
-
-3. **Phase 2:** verify the file compiles cleanly + still serves the `/driver/hos` route under 23-trucking-dispatch's app shell.
-
-4. **Phase 3:** if OQ-DEF2-B reveals engines can't live at file-top of non-entry pages, surface the gap for spec ratification.
-
-### Est: 8-12h (424-line file + 3 open questions; deep-dive shape)
-
-### Trigger conditions
-
-- A 23-trucking-dispatch full-stack benchmark dispatch (queued bench refresh would touch this app) may benefit from clean state
-- Adopter friction on multi-file app shape would accelerate
-- BS-layer corpus-friction bug batch fix could be folded in if it touches engine-placement-in-non-entry surface
+- `docs/changes/hos-restructure/SURVEY.md` — full empirical survey + OQ resolutions + diagnostic delta tables.
+- Commit `c8ef5e7` — SURVEY landing.
+- Commit `6c2e561` — restructure + test baseline update.
 
 ---
 

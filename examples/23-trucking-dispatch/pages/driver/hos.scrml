@@ -4,7 +4,7 @@
 // time-in-current-state, hours-driven-today, hours-on-duty-today, plus
 // the last 24h of hos_change log entries for cycle history.
 //
-// Scoping §7 calls for a `<engine>` here (canonical keyword P1+; legacy `<engine>`
+// Scoping §7 calls for a `<engine>` here (canonical keyword P1+; legacy `<machine>`
 // remains a deprecated alias emitting W-DEPRECATED-001). HOS is client-driven (the app
 // derives state + cumulative hours from log entries + clock); unlike
 // load.status (server-persisted), the machine fits cleanly. The state
@@ -26,7 +26,7 @@
 // directly; the local re-declaration workaround has been removed.
 //
 // FRICTION (F-NULL-001 — see FRICTION.md): file with a `<engine>` block (or
-    // `<engine>` deprecated alias)
+// `<machine>` deprecated alias)
 // + `null` literals/comparisons in client-fn bodies fires E-SYNTAX-042 in
 // GCP3 even though identical patterns compile clean elsewhere. Workaround:
 // use `is some`/`is not` for absence checks instead of `== null`/`!= null`,
@@ -38,29 +38,42 @@
 // Real-time hookpoint (M5): no real-time use here — HOS is per-driver
 // client state. Maybe broadcast HOS events to dispatch-board so dispatcher
 // sees driver-status changes in real time.
+//
+// v0.3 canonical non-entry-page shape (S94 hos-restructure, 2026-05-15 — SPEC §4.15
+// / §40 Wave 1 + DEFERRED §2):
+//   - `<page db= auth=>` wrapper (matches 19 sibling pages in this corpus)
+//   - `<engine>` declaration lives INSIDE `<page>` body (file-scope-extension
+//     per §51.0.K Machine Cohesion footnote — page body is logic-default and
+//     mode-equivalent to `<program>` body per §4.15)
+//   - Single imports `${}` block at the top of `<page>` body (consolidated
+//     from prior file-top imports + inner imports)
+//   - No `<program>` wrapper — only the entry file (`app.scrml`) carries the
+//     app-scope `<program db= auth=>` per S85 Q2 canonical
+//   - Per W-PROGRAM-REDUNDANT-LOGIC: the imports `${}` AND the server-fns /
+//     state-cells `${}` are retained because the sibling shape (messages.scrml)
+//     retains them — BS-layer residual edge cases (cross-ref DEFERRED §S93
+//     BS-batch v2 residuals 1/2/3); a v0.3 sweep dropping these wrappers
+//     awaits the BS-batch v2 follow-up dispatch.
 
-${
-    // F-ENGINE-001 RESOLVED (P3.B, 2026-05-02 — SPEC §51.16).
-    // `<engine for=ImportedType>` now resolves cross-file via TAB type-decl
-    // synthesis, so we import `DriverStatus` from schema.scrml instead of
-    // re-declaring it locally.
-    import { DriverStatus } from '../../schema.scrml'
-}
-
-<engine for=DriverStatus initial=.OffDuty>
-    <OffDuty      rule=(.OnDuty | .SleeperBerth)></>
-    <OnDuty       rule=(.OffDuty | .Driving)></>
-    <Driving      rule=(.OffDuty | .OnDuty)></>
-    <SleeperBerth rule=(.OnDuty | .OffDuty)></>
-</>
-
-<program db="../../dispatch.db" auth="required">
+<page db="../../dispatch.db" auth="required">
 
   ${
+      // F-ENGINE-001 RESOLVED (P3.B, 2026-05-02 — SPEC §51.16).
+      // `<engine for=ImportedType>` now resolves cross-file via TAB type-decl
+      // synthesis, so we import `DriverStatus` from schema.scrml instead of
+      // re-declaring it locally.
+      import { DriverStatus } from '../../schema.scrml'
       import { driverStatusClasses, driverStatusLabel } from '../../components/driver-card.scrml'
       import { createSessionStore } from 'scrml:store'
       import { SESSION_DB_PATH } from '../../models/auth.scrml'
   }
+
+  <engine for=DriverStatus initial=.OffDuty>
+      <OffDuty      rule=(.OnDuty | .SleeperBerth)></>
+      <OnDuty       rule=(.OffDuty | .Driving)></>
+      <Driving      rule=(.OffDuty | .OnDuty)></>
+      <SleeperBerth rule=(.OnDuty | .OffDuty)></>
+  </>
 
   <db src="../../dispatch.db" protect="password_hash" tables="users, drivers, log_entries">
 
@@ -421,4 +434,4 @@ ${
 
   </>
 
-</program>
+</page>

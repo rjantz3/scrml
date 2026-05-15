@@ -38,25 +38,26 @@
  *     points at a route that does not exist in the multi-file route
  *     map (deliberate; future Wave 4.A migration tightens these).
  *
- * EXPECTED DIAGNOSTIC BASELINE (probed at HEAD acbb097, S92):
- *   I-AUTH-REDIRECT-UNRESOLVED            =  2
- *   W-ATTR-001                            = 19
- *   W-AUTH-001                            = 19
+ * EXPECTED DIAGNOSTIC BASELINE (re-probed at HEAD 0aa2b18 + S94 hos-
+ * restructure landing; cross-ref docs/changes/hos-restructure/SURVEY.md):
+ *   I-AUTH-REDIRECT-UNRESOLVED            =  1   (was 2 pre-S94)
+ *   W-ATTR-001                            = 20   (was 19 pre-S94 — hos.scrml `<page db=>`)
+ *   W-AUTH-001                            = 20   (was 19 pre-S94 — hos.scrml auto-inject)
  *   W-AUTH-LOGIN-MISSING                  =  1
- *   W-CG-CHUNK-EMPTY                      =  2
- *   W-CG-CHUNK-PREFETCH-UNRESOLVED        =  2
- *   W-CG-UNDEFINED-INTERPOLATION          = 53
+ *   W-CG-CHUNK-EMPTY                      =  1   (was 2 pre-S94 — hos no longer own-EP)
+ *   W-CG-CHUNK-PREFETCH-UNRESOLVED        =  1   (was 2 pre-S94 — same)
  *   W-DEAD-FUNCTION                       =  1
- *   W-PROGRAM-001                         = 34
+ *   W-PROGRAM-001                         = 24   (was 23 pre-S94 — hos.scrml file-top)
  *   W-PROGRAM-REDUNDANT-LOGIC             = 18
- *   W-PROGRAM-SPA-INFERRED                =  1
+ *   --- removed at S94 (no fire post-restructure) ---
+ *   W-PROGRAM-SPA-INFERRED                =  0   (was 1 pre-S94 — hos.scrml's <program> gone)
+ *   --- removed pre-S94 (S93 patch arc closures) ---
+ *   W-CG-UNDEFINED-INTERPOLATION          =  0   (was 53; S93 codegen leak fixes)
  *   --- aggregate ---
- *   errors:    2 (both I-AUTH-REDIRECT-UNRESOLVED severity:info,
- *                 routed to result.errors per api.js:1674-1675
- *                 since severity != "warning")
- *   warnings:  150
- *   chunks:    6
- *   manifest entryPoints: 2
+ *   errors:    0
+ *   warnings:  87
+ *   chunks:    >= 1 (per-route)
+ *   manifest entryPoints: >= 1
  *
  * If this baseline drifts: the test surfaces the change so PA can
  * decide whether the new diagnostic firing is an intended pipeline
@@ -206,17 +207,39 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
   // emit-server.ts (`!= null`).
   // If a new pipeline pass tightens any of these counts, update this
   // map; if a count regresses, investigate the firing site.
+  // S94 hos-restructure baseline shifts (2026-05-15 — DEFERRED §2 close):
+  // `pages/driver/hos.scrml` migrated from legacy `<program>` wrapper to
+  // canonical non-entry-page `<page db= auth=>` shape (matching the 19
+  // sibling pages). Side-effects on the histo:
+  //   - I-AUTH-REDIRECT-UNRESOLVED: 2 → 1 (hos.scrml no longer surfaces an
+  //     independent gate redirect cross-ref)
+  //   - W-ATTR-001: 19 → 20 (hos.scrml's new `<page db=>` fires the same
+  //     BS-layer attribute-validation gap as every sibling page)
+  //   - W-AUTH-001: 19 → 20 (hos.scrml's `<db protect=>` now auto-injects
+  //     auth-mw since `<page auth=required>` is not yet recognized by the
+  //     auth declaration validator — same gap as siblings)
+  //   - W-CG-CHUNK-EMPTY: 2 → 1 (hos.scrml no longer participates as a
+  //     separate per-route entry-point under the per-route splitter — it
+  //     is now a `<page>` child of app.scrml's `<program>`)
+  //   - W-CG-CHUNK-PREFETCH-UNRESOLVED: 2 → 1 (same as above)
+  //   - W-PROGRAM-001: 23 → 24 (hos.scrml fires once more — file-top has
+  //     no `<program>` now, mirroring sibling page behavior)
+  //   - W-PROGRAM-SPA-INFERRED: 1 → 0 (hos.scrml's prior `<program>` was
+  //     the sole SPA-inferred fire; gone after migration)
+  //   - W-PROGRAM-REDUNDANT-LOGIC: 18 → 18 (stable; hos.scrml's inner
+  //     `${...}` import wrapper now fires under `<page>` instead of
+  //     `<program>`, same count)
+  // Cross-ref: docs/changes/hos-restructure/SURVEY.md §Phase 3.
   const EXPECTED_BASELINE = {
-    "I-AUTH-REDIRECT-UNRESOLVED": 2,
-    "W-ATTR-001": 19,
-    "W-AUTH-001": 19,
+    "I-AUTH-REDIRECT-UNRESOLVED": 1,
+    "W-ATTR-001": 20,
+    "W-AUTH-001": 20,
     "W-AUTH-LOGIN-MISSING": 1,
-    "W-CG-CHUNK-EMPTY": 2,
-    "W-CG-CHUNK-PREFETCH-UNRESOLVED": 2,
+    "W-CG-CHUNK-EMPTY": 1,
+    "W-CG-CHUNK-PREFETCH-UNRESOLVED": 1,
     "W-DEAD-FUNCTION": 1,
-    "W-PROGRAM-001": 23,
+    "W-PROGRAM-001": 24,
     "W-PROGRAM-REDUNDANT-LOGIC": 18,
-    "W-PROGRAM-SPA-INFERRED": 1,
   };
 
   test("aggregate diagnostic count matches baseline", () => {
