@@ -48,30 +48,20 @@
   <username> = ""
   <draft>    = ""
 
-  // The `formatTime` function body uses a template-literal
-  // `${hh}:${mm}` interpolation; the bare-decl auto-lift at
-  // `<program>` direct-child level does not currently handle the
-  // template-literal `${}` sequence inside a function body without an
-  // explicit logic-block wrapper (the splitter treats `${` inside a
-  // backtick string as the start of a new logic block). Wrapping the
-  // function in an explicit `${...}` block sidesteps this. The
-  // accompanying `send` function shares the wrapper for tidiness.
-  ${
-    // Time formatter — uses `new Date()` which is non-deterministic, so
-    // this is a `function` (not `fn` — pure-fn category forbids
-    // non-deterministic calls per §48 / E-FN-004).
-    function formatTime(ms) {
-      const d = new Date(ms)
-      const hh = String(d.getHours()).padStart(2, "0")
-      const mm = String(d.getMinutes()).padStart(2, "0")
-      return `${hh}:${mm}`
-    }
+  // Time formatter — uses `new Date()` which is non-deterministic, so
+  // this is a `function` (not `fn` — pure-fn category forbids
+  // non-deterministic calls per §48 / E-FN-004).
+  function formatTime(ms) {
+    const d = new Date(ms)
+    const hh = String(d.getHours()).padStart(2, "0")
+    const mm = String(d.getMinutes()).padStart(2, "0")
+    return `${hh}:${mm}`
+  }
 
-    function send() {
-      if (@draft.trim() == "" || @username.trim() == "") return
-      postMessage(@username, @draft)
-      reset(@draft)
-    }
+  function send() {
+    if (@draft.trim() == "" || @username.trim() == "") return
+    postMessage(@username, @draft)
+    reset(@draft)
   }
 
   // Chat-shell + header styles — co-located with the outer chat wrapper.

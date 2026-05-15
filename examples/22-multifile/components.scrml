@@ -5,14 +5,10 @@
 //
 // Used by: ./app.scrml
 
-${
-  import { UserRole, badgeColor } from './types.scrml'
-}
+import { UserRole, badgeColor } from './types.scrml'
 
-${
-  export const UserBadge = <span class="badge" props={ name: string, role: UserRole }>
-    <span class="badge-dot" style="background:${badgeColor(role)}"></span>
-    <span class="badge-name">${name}</span>
-    <span class="badge-role">${role}</span>
-  </>
-}
+export const UserBadge = <span class="badge" props={ name: string, role: UserRole }>
+  <span class="badge-dot" style="background:${badgeColor(role)}"></span>
+  <span class="badge-name">${name}</span>
+  <span class="badge-role">${role}</span>
+</>

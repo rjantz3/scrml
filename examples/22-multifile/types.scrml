@@ -1,24 +1,22 @@
-// Pure-type file (§21.5). Contains only `${ export ... }` blocks — no markup,
+// Pure-type file (§21.5). Contains only export declarations — no markup,
 // no CSS. The compiler recognizes this pattern automatically and emits ONLY
 // a JS module with the exported bindings; no HTML, no CSS, no page route.
 //
 // Used by: ./app.scrml
 
-${
-  export type UserRole:enum = {
-    Admin
-    Moderator
-    Member
-    Guest
-  }
+export type UserRole:enum = {
+  Admin
+  Moderator
+  Member
+  Guest
+}
 
-  // Pure helper — runs in any context (no @reactive reads, no server I/O).
-  export function badgeColor(role: UserRole) -> string {
-    match role {
-      .Admin     => "red"
-      .Moderator => "blue"
-      .Member    => "green"
-      .Guest     => "gray"
-    }
+// Pure helper — runs in any context (no @reactive reads, no server I/O).
+export function badgeColor(role: UserRole) -> string {
+  match role {
+    .Admin     => "red"
+    .Moderator => "blue"
+    .Member    => "green"
+    .Guest     => "gray"
   }
 }

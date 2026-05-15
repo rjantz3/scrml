@@ -51,15 +51,8 @@
   }
 
   // Step components — must precede the markup that references them in
-  // the file (E-COMPONENT-020 if forward-ref). The `const Name =
-  // <markup/>` form requires an explicit `${...}` wrapper at `<program>`
-  // direct-child position because the bare-decl auto-lift currently
-  // splits `const Name = ` (text) from `<markup>...</markup>` (markup
-  // block) and does not re-pair them. The W-PROGRAM-REDUNDANT-LOGIC lint
-  // is a false-positive for this `${}` wrapper — tracked as a follow-up
-  // (component-def in DECL_KINDS but no corresponding auto-lift pair).
-  ${
-    const InfoStep = <div class="step">
+  // the file (E-COMPONENT-020 if forward-ref).
+  const InfoStep = <div class="step">
       <h2>Your Info</>
       <label>First Name <input type="text" bind:value=@firstName required></label>
       <label>Last Name  <input type="text" bind:value=@lastName  required></label>
@@ -103,7 +96,6 @@
         <button onclick=submit()>Submit</button>
       </div>
     </div>
-  }
 
   // Wizard-chrome styles — co-located with the outer wizard markup.
   #{
