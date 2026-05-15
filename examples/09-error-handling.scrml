@@ -2,6 +2,13 @@
 // A contact form that can fail at validation or submission. Error types are enums
 // with renders clauses so they display themselves inside `<errorBoundary>`.
 // Styled with Tailwind utility classes — no #{} block needed for layout.
+//
+// v0.3 program-as-container shape: logic-default body in <program>. NOTE:
+// the type with `renders` clauses (markup interpolation `${email}` inside
+// a renders <p>...</> body) currently requires a ${...} wrapper at this
+// scope level due to a BS-layer bug where the splitter mis-reads markup-
+// context interpolation as logic-context. Tracked as a deferred compiler
+// bug; remove the wrapper once fixed.
 
 <program>
 
