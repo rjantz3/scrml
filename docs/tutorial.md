@@ -48,7 +48,7 @@ There is no `scrml.config.js`, no `defineConfig`, no `tailwind.config.js`. The d
 
 ## 1. The shape of a scrml file
 
-Every scrml program is one `<program>` element. Inside it, a `${ ... }` logic block holds declarations and functions, and the rest is markup. Here is the smallest useful program:
+Every scrml program is one `<program>` element. Inside it, default mode is **logic** — types, state declarations, and functions appear as direct text children; markup tags re-enter markup mode. Here is the smallest useful program:
 
 ```scrml
 // 01-hello.scrml — the minimal program. Plain text in markup, no state.
@@ -61,13 +61,13 @@ Every scrml program is one `<program>` element. Inside it, a `${ ... }` logic bl
 </program>
 ```
 
-There is no `<html>`, no `<head>`, no `<body>` — the compiler wraps what you write in a proper document shell. A few elements may appear at file top level alongside `<program>` (notably `<schema>`, §2.2), but `<channel>` lives inside `<program>` (§8). Comments use `// ...` and `/* ... */` and are allowed anywhere.
+There is no `<html>`, no `<head>`, no `<body>` — the compiler wraps what you write in a proper document shell. Comments use `// ...` and `/* ... */` and are allowed anywhere.
 
-A `<program>` body holds three kinds of content:
+A `<program>` body holds three kinds of content (default mode is **logic** — markup tags re-enter markup mode):
 
-1. **Markup** — HTML elements (`<div>`, `<p>`, `<form>`, ...) plus a small set of scrml-specific extensions (`bind:value`, `class:active`, `onclick=`, `if=`, `for`/`lift`).
-2. **`${ ... }` logic blocks** — JavaScript-shaped statements: declarations, functions, imports. Inside markup, `${expression}` is an interpolation slot that substitutes the expression's value.
-3. **`#{ ... }` style blocks** — scoped CSS for the program. (See §2.3.)
+1. **Logic** — declarations (`<count> = 0`), types (`type Phase:enum = {...}`), functions, engines (`<engine for=Phase>`), imports. These appear as direct text children of `<program>`; no `${ ... }` wrapper needed. (The `${ ... }` block-form survives only as the markup-to-logic re-entry sigil inside markup elements — e.g., `${ for (let p of @items) { lift <li>...</li> } }` inside a `<ul>`.)
+2. **Markup** — HTML elements (`<div>`, `<p>`, `<form>`, ...) plus a small set of scrml-specific extensions (`bind:value`, `class:active`, `onclick=`, `if=`, `for`/`lift`). Inside markup, `${expression}` is the interpolation slot that substitutes the expression's value.
+3. **`#{ ... }` style blocks** — co-located scoped CSS placed immediately before the markup section they style. Multiple small `#{ ... }` blocks beat one centralized dump (§2.3).
 
 Tag closing has three forms: explicit `</tagname>`, shorthand `</>` (closes the most recently opened tag), and a trailing `/` on void elements (`<br/>`). The shorthand `</>` is the canonical scrml closer; use it freely.
 
@@ -488,12 +488,13 @@ Three things are new:
 
 ### 4.3 Tier 2 — `<engine for=Type initial=...>` with `rule=` transitions
 
-The full engine surface adds three additive concepts to the Tier-1 shape: an `initial=` state, a `rule=` attribute on each state-child declaring legal transitions out, and `<onTransition>` blocks for cross-state effects. The engine is declared at **file level** (a sibling of `<program>`, not a child). State-child bodies MAY hold markup directly (Phase A10, shipped S78 — the dispatcher swaps the variant body's innerHTML when the engine variable changes); for the introductory shape below we render the variants via a `match` block inside `<program>` since that pattern carries forward verbatim from Tier 1.
+The full engine surface adds three additive concepts to the Tier-1 shape: an `initial=` state, a `rule=` attribute on each state-child declaring legal transitions out, and `<onTransition>` blocks for cross-state effects. The engine is declared **inside `<program>`** as a direct child — types, functions, and engines all live as program-scoped declarations. State-child bodies MAY hold markup directly (Phase A10, shipped S78 — the dispatcher swaps the variant body's innerHTML when the engine variable changes); for the introductory shape below we render the variants via a `match` block inside `<program>` since that pattern carries forward verbatim from Tier 1.
 
 ```scrml
 // 04b-tier2-engine.scrml — Tier 2: <engine> with rule= contracts.
 
-${
+<program>
+
   type LoadPhase:enum = {
     Idle
     Loading
@@ -505,29 +506,26 @@ ${
     @loadPhase = .Loading
     @loadPhase = LoadPhase.Loaded(42)        // fake result for the demo
   }
-}
 
-<engine for=LoadPhase initial=.Idle>
-  <Idle    rule=.Loading></>
-  <Loading rule=(.Loaded | .Failed)></>
-  <Loaded  rule=.Idle></>
-  <Failed  rule=.Idle></>
-</>
+  <engine for=LoadPhase initial=.Idle>
+    <Idle    rule=.Loading></>
+    <Loading rule=(.Loaded | .Failed)></>
+    <Loaded  rule=.Idle></>
+    <Failed  rule=.Idle></>
+  </>
 
-<program>
-
-<div>
-  ${
-    match @loadPhase {
-      .Idle        => { lift <button onclick=load()>Load</button> }
-      .Loading     => { lift <p>Loading…</p> }
-      .Loaded(n)   => { lift <p>Got ${n} rows.</p>
-                        lift <button onclick=${@loadPhase = .Idle}>Reset</button> }
-      .Failed(msg) => { lift <p class="err">Failed: ${msg}</p>
-                        lift <button onclick=${@loadPhase = .Idle}>Try again</button> }
+  <div>
+    ${
+      match @loadPhase {
+        .Idle        => { lift <button onclick=load()>Load</button> }
+        .Loading     => { lift <p>Loading…</p> }
+        .Loaded(n)   => { lift <p>Got ${n} rows.</p>
+                          lift <button onclick=${@loadPhase = .Idle}>Reset</button> }
+        .Failed(msg) => { lift <p class="err">Failed: ${msg}</p>
+                          lift <button onclick=${@loadPhase = .Idle}>Try again</button> }
+      }
     }
-  }
-</div>
+  </div>
 
 </program>
 ```
@@ -536,14 +534,14 @@ Read it as: "the engine owns the `LoadPhase` enum, starts in `.Idle`, declares t
 
 Things to notice:
 
-- **`<engine for=LoadPhase initial=.Idle>`** at file level declares the engine. The engine's variable is **auto-declared** by the compiler — its name is the lowercase first run of the type (`loadPhase` here). You do NOT also write `<loadPhase> = .Idle`; that would be a duplicate declaration.
+- **`<engine for=LoadPhase initial=.Idle>`** inside `<program>` declares the engine. The engine's variable is **auto-declared** by the compiler — its name is the lowercase first run of the type (`loadPhase` here). You do NOT also write `<loadPhase> = .Idle`; that would be a duplicate declaration.
 - **`initial=.Idle`** sets the starting state. Required on non-derived engines.
 - **`rule=` declares legal transitions OUT** of this state-child. `rule=.Loading` means "from `.Idle` you may transition to `.Loading`." Multi-target uses parens with `|`: `rule=(.Loaded | .Failed)`.
 - **State-child bodies are empty (`</>`)** in the snippet above. They MAY hold markup directly (Phase A10, shipped S78 — the variant-guard dispatcher swaps the body's `innerHTML` on transition and re-wires the reactive bindings inside). The empty-body shape with a sibling `match` block is the introductory idiom because it keeps "where the markup lives" obvious; the body-rendering shape is the canonical idiom once you are comfortable with engines.
 - **Transitions are direct writes.** `@loadPhase = .Loading` triggers the engine's validation: if the destination is not in the current state-child's `rule=` set, you get `E-ENGINE-INVALID-TRANSITION` (compile-time when the from-state is statically known, runtime otherwise).
 - **`<onTransition from=A to=B>`** declares a cross-state effect — code that runs when the engine moves from A to B. Use it for analytics, animations, cleanup, anything that should happen on the transition itself.
 
-The migration story from Tier 1 to Tier 2 is mechanical: the `match` block carries forward verbatim; you add a file-level `<engine for=Type initial=...>` declaration with `rule=` contracts; the type annotation `<phase>: LoadPhase` becomes the engine's auto-declared variable (`@loadPhase`).
+The migration story from Tier 1 to Tier 2 is mechanical: the `match` block carries forward verbatim; you add an `<engine for=Type initial=...>` declaration with `rule=` contracts inside `<program>`; the type annotation `<phase>: LoadPhase` becomes the engine's auto-declared variable (`@loadPhase`).
 
 > **Engines render at their declaration position** when state-child bodies hold markup (Phase A10, shipped S78). When the bodies are empty (this snippet), rendering happens at the `match` block inside `<program>`. Cross-file engines (imported from another `.scrml` file) use a `<EngineName/>` use-site mount tag, but you only meet that when you split a program across files.
 
@@ -581,19 +579,16 @@ Here is a multi-step signup form that exercises the full surface:
 ```scrml
 // 05-signup-form.scrml — declarative form with auto-synth validity surface.
 
-${
-  type SignupPhase:enum = { Editing, Submitting, Done }
-}
-
-<engine for=SignupPhase initial=.Editing>
-  <Editing    rule=.Submitting></>
-  <Submitting rule=.Done></>
-  <Done       rule=.Editing></>
-</>
-
 <program>
 
-${
+  type SignupPhase:enum = { Editing, Submitting, Done }
+
+  <engine for=SignupPhase initial=.Editing>
+    <Editing    rule=.Submitting></>
+    <Submitting rule=.Done></>
+    <Done       rule=.Editing></>
+  </>
+
   <signup>
     <name     req length(>=2)>             = <input type="text"/>
     <email    req pattern(/^[^@]+@[^@]+$/)> = <input type="email"/>
@@ -613,9 +608,8 @@ ${
     // Hash + persist — see §6 for the failable variant.
     ?{`INSERT INTO users (name, email, password_hash) VALUES (${name}, ${email}, ${password})`}.run()
   }
-}
 
-<div>
+  <div>
   ${
     match @signupPhase {
       .Editing => {
@@ -639,7 +633,7 @@ ${
       }
     }
   }
-</div>
+  </div>
 
 </program>
 ```
@@ -691,7 +685,7 @@ Error messages resolve through a four-level chain: inline override on the decl (
 
 ### 5.6 The form is driven by an engine
 
-The signup form is one state of a three-state engine (`Editing` → `Submitting` → `Done`). The engine declared at file level owns the legal transitions; the `match` block inside `<program>` renders the right markup for the current phase. This is the canonical Tier-2 idiom: the form's lifecycle (you can submit it, then you can't, then you're done) is a state machine, and the engine makes that explicit.
+The signup form is one state of a three-state engine (`Editing` → `Submitting` → `Done`). The engine inside `<program>` owns the legal transitions; the `match` block in the markup section renders the right markup for the current phase. This is the canonical Tier-2 idiom: the form's lifecycle (you can submit it, then you can't, then you're done) is a state machine, and the engine makes that explicit.
 
 The `disabled=not @signup.isValid` on the submit button uses the `not` operator (§7) — `not x` is logical negation, the scrml spelling of JavaScript's `!x`. Combined with the auto-synth surface, the button is automatically enabled or disabled based on whether every field passes its validators.
 
@@ -714,7 +708,8 @@ Some operations can fail: a network call, a database query, a parsing pass. scrm
 ```scrml
 // 06-failable.scrml — failable function with a typed error enum.
 
-${
+<program>
+
   type SaveError:enum = {
     EmptyName
     InvalidEmail(input: string)
@@ -722,20 +717,16 @@ ${
   }
 
   type Phase:enum = { Editing, Saving, Saved, Errored(msg: string) }
-}
 
-<engine for=Phase initial=.Editing>
-  <Editing rule=.Saving></>
-  <Saving  rule=(.Saved | .Errored)></>
-  <Saved   rule=.Editing></>
-  <Errored rule=.Editing></>
-</>
+  <engine for=Phase initial=.Editing>
+    <Editing rule=.Saving></>
+    <Saving  rule=(.Saved | .Errored)></>
+    <Saved   rule=.Editing></>
+    <Errored rule=.Editing></>
+  </>
 
-<program>
+  <db src="users.db" tables="users">
 
-<db src="users.db" tables="users">
-
-  ${
     <form>
       <name  req length(>=2)>             = <input type="text"/>
       <email req pattern(/^[^@]+@[^@]+$/)> = <input type="email"/>
@@ -760,7 +751,6 @@ ${
       }
       @phase = Phase.Saved
     }
-  }
 
   <div>
     ${
@@ -821,7 +811,7 @@ A small but load-bearing detail. scrml uses three operators where JavaScript use
 The `not` keyword is the canonical operator-form (per §42 — Absence Semantics, and §45.7 for equality interactions); the `!x` JavaScript spelling also compiles but `not x` is preferred for readability.
 
 ```scrml
-${
+<program>
   <user>: User? = not              // optional — initial value is `not` (absent)
 
   function welcome() {
@@ -835,7 +825,7 @@ ${
   if (not @loggedIn) {
     @phase = .Promoting
   }
-}
+</program>
 ```
 
 `not` is the absence sentinel — `<user>: User? = not` reads "user is an optional User, initialized to absent." Writing `null` or `undefined` here is `E-SYNTAX-042` (per §7, scrml has no `null`/`undefined` keywords). Assigning `not` to a non-optional cell is `E-TYPE-041`.
@@ -861,7 +851,6 @@ Real-time sync over a WebSocket connection is built into the language as a `<cha
   }
 </>
 
-${
   <username> = ""
   <draft>    = ""
 
@@ -870,9 +859,8 @@ ${
     postMessage(@username, @draft)
     reset(@draft)
   }
-}
 
-<div class="chat">
+  <div class="chat">
   <input type="text" bind:value=@username placeholder="Your name"/>
   <ul>
     ${
@@ -885,7 +873,7 @@ ${
     <input type="text" bind:value=@draft placeholder="Message"/>
     <button type="submit">Send</button>
   </form>
-</div>
+  </div>
 
 </program>
 ```
@@ -939,34 +927,33 @@ The `W-CG-CHUNK-* / W-AUTH-*` diagnostic family flags shapes that defeat the ana
 By now you have seen every primitive you need to build a working scrml app. Let's collect them in one place — this is the idiomatic shape of a non-trivial scrml file:
 
 ```scrml
-<schema>
-  table_one { ... }
-  table_two { ... }
-</>
-
-${
-  // Types — structs and enums
-  type Foo:struct = { ... }
-  type Phase:enum = { Idle, Loading, Loaded(rows), Failed(msg: string) }
-}
-
-// Engine — declared at file level (sibling of <program>)
-<engine for=Phase initial=.Idle>
-  <Idle    rule=.Loading></>
-  <Loading rule=(.Loaded | .Failed)></>
-  <Loaded  rule=.Idle></>
-  <Failed  rule=.Idle></>
-</>
-
 <program>
 
-<channel name="...">      <!-- (optional, inside <program>) -->
-  <synced_state> = ...
-</>
+  // Types — structs and enums, as direct <program> children
+  type Foo:struct = { ... }
+  type Phase:enum = { Idle, Loading, Loaded(rows), Failed(msg: string) }
 
-<db src="..." tables="..." protect="...">
+  // Schema — co-located with the rest of the program
+  <schema>
+    table_one { ... }
+    table_two { ... }
+  </>
 
-  ${
+  // Engine — also a direct <program> child; auto-declares @phase
+  <engine for=Phase initial=.Idle>
+    <Idle    rule=.Loading></>
+    <Loading rule=(.Loaded | .Failed)></>
+    <Loaded  rule=.Idle></>
+    <Failed  rule=.Idle></>
+  </>
+
+  // Optional channel for real-time sync
+  <channel name="...">
+    <synced_state> = ...
+  </>
+
+  <db src="..." tables="..." protect="...">
+
     // State — declared structurally, accessed canonically
     <local> = init                          // plain reactive
     const <derived> = @local * 2            // derived reactive
@@ -988,27 +975,30 @@ ${
     }
 
     // Components — multi-instance
-    const Row = <li class="row" props={ item: Foo }>...</li>
-  }
-
-  <div>
     ${
-      match @phase {
-        .Idle => { lift <button onclick=load()>Load</button> }
-        .Loading => { lift <p>Loading…</p> }
-        .Loaded(rows) => {
-          lift <ul>${ for (let r of rows) { lift <Row item=r/> } }</ul>
-        }
-        .Failed(msg) => { lift <p class="err">${msg}</p> }
-      }
+      const Row = <li class="row" props={ item: Foo }>...</li>
     }
-  </div>
 
-</>
+    // Co-located scoped CSS for the section that follows
+    #{
+      .row { padding: 0.5rem; border-bottom: 1px solid #eee; }
+    }
+    <div>
+      ${
+        match @phase {
+          .Idle => { lift <button onclick=load()>Load</button> }
+          .Loading => { lift <p>Loading…</p> }
+          .Loaded(rows) => {
+            lift <ul>${ for (let r of rows) { lift <Row item=r/> } }</ul>
+          }
+          .Failed(msg) => { lift <p class="err">${msg}</p> }
+        }
+      }
+    </div>
+
+  </>
 
 </program>
-
-#{ /* scoped CSS */ }
 ```
 
 That shape is the idiomatic scrml file. Once it feels natural, the language is no longer doing anything new at you — you are combining primitives you already know.
@@ -1119,4 +1109,4 @@ If you don't see your case in the table, default to the shape from §10. Don't i
 
 ---
 
-*Last updated: 2026-05-14 — v0.3 canonical (post-S92 Approach A close end-to-end: A-1 markup-context edges + A-2 Reachability Solver + A-3 §40 AuthGraph + A-4 per-route artifact splitter + A-5 integration tests; v0.3.0 cut gated only on remaining Wave 4.A adopter-content sweep). Tutorial snippets verified against current binary at S89; re-verification under S92 HEAD queued for 4.A.R cross-doc final sweep.*
+*Last updated: 2026-05-14 (S93) — v0.3 program-as-container canonical sweep: types, functions, engines, schema, channels all as direct `<program>` children (default mode = logic); `${ ... }` block-form retained only as the markup-to-logic re-entry sigil inside markup elements (e.g. `<ul>${ for/lift }</ul>`); co-located scoped `#{ ... }` placed immediately before the markup section it styles per S86. Post-S92 Approach A close end-to-end (v0.3.0 STABLE shipped). Tutorial snippets reflect post-sweep canonical shape; engine-related code samples restructured from "engine as file-level sibling of <program>" (pre-v0.3) to "engine as direct child of <program>" (v0.3 canonical).*
