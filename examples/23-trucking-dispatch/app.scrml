@@ -18,13 +18,19 @@
 //   Pages declare it for documentation but layer their own server-side
 //   checkRole() fallback.
 //
-// v0.2.4 canonical forms used:
-//   - <schema> / <db> openers (no leading whitespace)
+// v0.3 canonical forms used (S85 + S86):
+//   - ONE `<program>` per app — this file is the entry; non-entry
+//     files (pages/, components/, channels/, models/) have NO
+//     `<program>` wrapper (S85 Q2).
+//   - `<schema>` / `<db>` openers as direct `<program>` children
 //   - V5-strict — no @var declarations introduced in this file
 //   - `null` literal eliminated: use `is some` / `is not` for absence
-//   - bare `function` modifier — auth fns escalate to server structurally
-//     via their ?{} bodies (login/register/getCurrentUser) or via
-//     caller-context-propagation (_sessionStore/logout) (Insight 26 D3).
+//   - bare `function` modifier — auth fns escalate to server
+//     structurally via their `?{}` bodies (login/register/
+//     getCurrentUser) or via caller-context-propagation (_sessionStore
+//     / logout) (Insight 26 D3).
+//   - Styling is inline Tailwind utility classes per S86 (utility-
+//     inline canonical; no file-top `#{}` placeholder).
 
 <program db="./dispatch.db" auth="required">
 
@@ -291,10 +297,5 @@
         </main>
     </div>
 </>
-
-#{
-  /* Scoped CSS reserved for app-level overrides. Styling is Tailwind 3
-     utility classes only (per scoping §10). */
-}
 
 </program>

@@ -1,46 +1,41 @@
 // Example 05: Multi-Step Form — wizard UI with components, enums, match.
-// Demonstrates type:enum, match exhaustive dispatch, component instances,
-// `class:active=` dynamic class. Steps: Info → Preferences → Confirm.
-// Submit guard uses a plain reactive boolean (simpler than a one-shot token
-// for a teaching example).
+// Demonstrates v0.3 program-as-container shape (logic-default body, no
+// file-top `${...}` wrapper) + type:enum + match exhaustive dispatch +
+// component instances + `class:active=` dynamic class. Styling uses
+// co-located scoped `#{}` blocks placed immediately before each markup
+// section (S86 styling rule: split per section, never one centralised
+// block). Steps: Info → Preferences → Confirm.
 
 <program>
 
-${
   type Step:enum = { Info, Preferences, Confirm }
 
-  // Explicit type annotation on the reactive — the type system carries it
-  // into match-subject narrowing.
   <currentStep>: Step = .Info
 
-  // Form data — accumulated across steps.
-  <firstName> = ""
-  <lastName>  = ""
-  <email>     = ""
-  <theme>     = "light"
+  <firstName>  = ""
+  <lastName>   = ""
+  <email>      = ""
+  <theme>      = "light"
   <newsletter> = false
 
-  // Submit guard — prevents double-submit.
   <submitted> = false
 
   function next() {
     match @currentStep {
       .Info        => { @currentStep = Step::Preferences }
       .Preferences => { @currentStep = Step::Confirm }
-      .Confirm     => { }   // handled by submit
+      .Confirm     => { }
     }
   }
 
   function back() {
     match @currentStep {
-      .Info        => { }   // already first step
+      .Info        => { }
       .Preferences => { @currentStep = Step::Info }
       .Confirm     => { @currentStep = Step::Preferences }
     }
   }
 
-  // Server function only persists — no @state assignments (E-RI-002).
-  // Body-content inference promotes automatically via ?{} SQL.
   function persistSignup(firstName, lastName, email, theme, newsletter) {
     ?{`
       INSERT INTO signups (first_name, last_name, email, theme, newsletter)
@@ -54,127 +49,127 @@ ${
     persistSignup(@firstName, @lastName, @email, @theme, @newsletter)
     @currentStep = Step::Confirm
   }
-}
 
-// Step components — each accepts only the fields it needs.
-// Component definitions must be inside ${ } blocks AND must precede the markup
-// that references them in the file (E-COMPONENT-020 if forward-ref).
-
-${
-  const InfoStep = <div class="step">
-    <h2>Your Info</>
-    <label>First Name <input type="text" bind:value=@firstName required></label>
-    <label>Last Name  <input type="text" bind:value=@lastName  required></label>
-    <label>Email      <input type="email" bind:value=@email    required></label>
-    <div class="step-nav">
-      <span></span>
-      <button onclick=next()>Next</button>
+  // Step components — must precede the markup that references them in
+  // the file (E-COMPONENT-020 if forward-ref). The `const Name =
+  // <markup/>` form requires an explicit `${...}` wrapper at `<program>`
+  // direct-child position because the bare-decl auto-lift currently
+  // splits `const Name = ` (text) from `<markup>...</markup>` (markup
+  // block) and does not re-pair them. The W-PROGRAM-REDUNDANT-LOGIC lint
+  // is a false-positive for this `${}` wrapper — tracked as a follow-up
+  // (component-def in DECL_KINDS but no corresponding auto-lift pair).
+  ${
+    const InfoStep = <div class="step">
+      <h2>Your Info</>
+      <label>First Name <input type="text" bind:value=@firstName required></label>
+      <label>Last Name  <input type="text" bind:value=@lastName  required></label>
+      <label>Email      <input type="email" bind:value=@email    required></label>
+      <div class="step-nav">
+        <span></span>
+        <button onclick=next()>Next</button>
+      </div>
     </div>
-  </div>
 
-  const PreferencesStep = <div class="step">
-    <h2>Preferences</>
-    <label>
-      Theme:
-      <select bind:value=@theme>
-        <option value="light">Light</option>
-        <option value="dark">Dark</option>
-        <option value="system">System</option>
-      </select>
-    </label>
-    <label class="checkbox-label">
-      <input type="checkbox" bind:value=@newsletter>
-      Subscribe to newsletter
-    </label>
-    <div class="step-nav">
-      <button onclick=back()>Back</button>
-      <button onclick=next()>Next</button>
+    const PreferencesStep = <div class="step">
+      <h2>Preferences</>
+      <label>
+        Theme:
+        <select bind:value=@theme>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+          <option value="system">System</option>
+        </select>
+      </label>
+      <label class="checkbox-label">
+        <input type="checkbox" bind:value=@newsletter>
+        Subscribe to newsletter
+      </label>
+      <div class="step-nav">
+        <button onclick=back()>Back</button>
+        <button onclick=next()>Next</button>
+      </div>
     </div>
-  </div>
 
-  const ConfirmStep = <div class="step">
-    <h2>Confirm</>
-    <dl>
-      <dt>Name</dt>   <dd>${@firstName} ${@lastName}</dd>
-      <dt>Email</dt>  <dd>${@email}</dd>
-      <dt>Theme</dt>  <dd>${@theme}</dd>
-      <dt>Newsletter</dt> <dd>${@newsletter ? "Yes" : "No"}</dd>
-    </dl>
-    <div class="step-nav">
-      <button onclick=back()>Back</button>
-      <button onclick=submit()>Submit</button>
+    const ConfirmStep = <div class="step">
+      <h2>Confirm</>
+      <dl>
+        <dt>Name</dt>   <dd>${@firstName} ${@lastName}</dd>
+        <dt>Email</dt>  <dd>${@email}</dd>
+        <dt>Theme</dt>  <dd>${@theme}</dd>
+        <dt>Newsletter</dt> <dd>${@newsletter ? "Yes" : "No"}</dd>
+      </dl>
+      <div class="step-nav">
+        <button onclick=back()>Back</button>
+        <button onclick=submit()>Submit</button>
+      </div>
     </div>
+  }
+
+  // Wizard-chrome styles — co-located with the outer wizard markup.
+  #{
+    .wizard {
+      max-width: 480px;
+      margin: 2rem auto;
+      font-family: sans-serif;
+    }
+    .progress {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    .progress span {
+      color: #aaa;
+      font-size: 0.85rem;
+    }
+    .progress span.active {
+      color: #2563eb;
+      font-weight: 600;
+    }
+  }
+  <div class="wizard">
+    <div class="progress">
+      <span class:active=(@currentStep == Step::Info)>1. Info</span>
+      <span class:active=(@currentStep == Step::Preferences)>2. Preferences</span>
+      <span class:active=(@currentStep == Step::Confirm)>3. Confirm</span>
+    </div>
+
+    <!-- Step-content styles — co-located with the step component
+         instances they scope. The `.step` shape is shared across all
+         three components (InfoStep / PreferencesStep / ConfirmStep) so
+         a single block here covers the rendered step markup. -->
+    #{
+      .step {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+      label {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        font-size: 0.9rem;
+      }
+      .checkbox-label {
+        flex-direction: row;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      input, select {
+        padding: 0.5rem;
+        font-size: 1rem;
+      }
+      .step-nav {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 1rem;
+      }
+    }
+
+    <!-- Conditional component rendering via if= chain (§17.1.1). -->
+    <InfoStep        if=(@currentStep == Step::Info)/>
+    <PreferencesStep else-if=(@currentStep == Step::Preferences)/>
+    <ConfirmStep     else/>
+
   </div>
-}
-
-<div class="wizard">
-  <div class="progress">
-    <span class:active=(@currentStep == Step::Info)>1. Info</span>
-    <span class:active=(@currentStep == Step::Preferences)>2. Preferences</span>
-    <span class:active=(@currentStep == Step::Confirm)>3. Confirm</span>
-  </div>
-
-  // Conditional component rendering via if= chain (§17.1.1).
-  // Both this if= chain and the match-with-lift form (`match @x { .V => { lift <Comp> } }`)
-  // are valid §17 patterns.
-  <InfoStep        if=(@currentStep == Step::Info)/>
-  <PreferencesStep else-if=(@currentStep == Step::Preferences)/>
-  <ConfirmStep     else/>
-
-</div>
-
-#{
-  .wizard {
-    max-width: 480px;
-    margin: 2rem auto;
-    font-family: sans-serif;
-  }
-
-  .progress {
-    display: flex;
-    gap: 1rem;
-    margin-bottom: 1.5rem;
-  }
-
-  .progress span {
-    color: #aaa;
-    font-size: 0.85rem;
-  }
-
-  .progress span.active {
-    color: #2563eb;
-    font-weight: 600;
-  }
-
-  .step {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
-
-  label {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    font-size: 0.9rem;
-  }
-
-  .checkbox-label {
-    flex-direction: row;
-    align-items: center;
-    gap: 0.5rem;
-  }
-
-  input, select {
-    padding: 0.5rem;
-    font-size: 1rem;
-  }
-
-  .step-nav {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 1rem;
-  }
-}
 
 </program>

@@ -1,23 +1,24 @@
 // Example 10: Inline tests — ~{} test sigil stripped from production.
-// A counter with reactive state. Tests verify state transitions directly.
-// ~{} blocks are compile-time artifacts: present in dev, absent in production output.
-// Styled with Tailwind utility classes.
+// Demonstrates v0.3 program-as-container shape (logic-default body, no
+// file-top `${...}` wrapper) + a counter with reactive state. Tests
+// verify state transitions directly. ~{} blocks are compile-time
+// artifacts: present in dev, absent in production output. All visual
+// styling is inline Tailwind utility classes (S86 styling rule:
+// utility-inline canonical for visual style).
 
 <program>
 
+  <count> = 0
+  <step>  = 1
 
-    <count> = 0
-    <step>  = 1
+  function increment() { @count = @count + @step }
+  function decrement() { @count = @count - @step }
+  // `reset` is a reserved keyword (§6.8); use a distinct local name.
+  // reset(@cell) is the canonical reset keyword form.
+  function clearCount() { reset(@count) }
+  function setStep(n)  { @step = n }
 
-    function increment() { @count = @count + @step }
-    function decrement() { @count = @count - @step }
-    // `reset` is a reserved keyword (§6.8); use a distinct local name.
-    // reset(@cell) is the canonical reset keyword form.
-    function clearCount() { reset(@count) }
-    function setStep(n)  { @step = n }
-
-
-<div class="flex flex-col items-center gap-4 p-8">
+  <div class="flex flex-col items-center gap-4 p-8">
     <h2 class="text-2xl font-bold text-gray-800">Counter</>
     <p class="text-5xl font-bold text-blue-600">${@count}</>
 

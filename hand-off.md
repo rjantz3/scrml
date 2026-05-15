@@ -53,15 +53,32 @@ Q-OPEN-4 ratification means pkg.json bumps couple to tag-cut events. v0.3.1 patc
 
 ---
 
-## S93 PA dispatch backlog (in priority order — same as S92 close, less Q-OPEN-1/2 which closed)
+## S93 PA dispatch backlog (in priority order)
 
 | Priority | Item | Est | Notes |
 |---|---|---|---|
-| MEDIUM | A-2.9 perf + memory characterization | 7-12h | Carried Q-OPEN-1; v0.3.1 candidate |
+| **IN FLIGHT** | Canonical-examples + tutorial v0.3 sweep | 6-10h | Single general-purpose worktree dispatch (agentId `a86f44f42f0576a65`). Covers 20 single-file examples + 22/23 multi-file + tutorial. Mario landed at `a2f9f9b` as proof-of-shape. |
+| **QUEUED (post-sweep)** | Benchmark refresh — full scope | 1-3h | All stale refreshes (Chrome TodoMVC re-run, bundle+build, full-stack, SQL-batching) + new per-route per-role chunk-size bench for v0.3.0. User-authorized this session. Machine must be quiet — fire AFTER canonical-examples sweep returns + lands. |
+| MEDIUM | A-2.9 perf + memory characterization | 7-12h | Carried; v0.3.1 candidate (separate from bench refresh) |
 | LOW | A-5.2 mount-marker emitter granularity decision | TBD | Q-OPEN-2; user-call-needed |
 | LOW | `reset` keyword note for kickstarter | <1h | Q-OPEN-3 |
 | LOW | `feedback_diagnostic_stream_partition.md` memory write | <1h | Q-OPEN-4 |
-| LOW | pkg.json convention formalization | <1h | Q-OPEN-5; surfaces at next development-cycle open |
+| LOW | pkg.json convention formalization | <1h | Q-OPEN-5 |
+
+### Bench refresh scope detail (queued)
+
+**Stale (re-run on v0.3.0 HEAD):**
+- Chrome (Puppeteer) TodoMVC vs React/Svelte/Vue — `benchmarks/RESULTS.md` Chrome table is 2026-04-13 v0.2.4-era; README L423-435 quotes "scrml wins 6/10"
+- Bundle size (gzipped) — README quotes "14.8 KB / 0 dependencies"; need v0.3 re-measure
+- Build time (TodoMVC + full-stack) — README quotes "43.7 ms" / "26 ms"
+- Full-stack contact-form (`benchmarks/fullstack-scrml` vs `benchmarks/fullstack-react`) — "3.9x faster, 5.2x smaller, 0 deps" claim
+- SQL-batching (`benchmarks/sql-batching`) — "~2x/3x/4x at N=10/100/1000" claim; re-verify on v0.3.0
+
+**New (v0.3.0 narrative):**
+- Per-route per-role chunk-size variance — anonymous vs admin initial chunk delta; new RESULTS.md section
+- Content-addressing hash stability across rebuilds (deterministic FNV-1a per §47)
+
+**User-stated expectation:** "I accept that the numbers wont 'look' as impresive. but given how much more impresive the language has gotten, I don't think its too much of a concern. but we gotta have em." — bundle/build likely regressed; runtime steady; per-route variance is the new strong story.
 
 ---
 

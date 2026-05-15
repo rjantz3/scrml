@@ -1,13 +1,18 @@
 // Example 13: Nested <program> — web worker for off-thread computation.
-// The main app hands prime-finding work to a worker so the UI stays responsive.
-// Communication is message-passing (.send() / when message).
-// Styled with Tailwind utility classes.
+// Demonstrates v0.3 program-as-container shape + a nested
+// `<program name="primes">` for off-thread Web-Worker compute. The
+// main app hands prime-finding work to the worker so the UI stays
+// responsive. Communication is message-passing (.send() / when
+// message). Both `${...}` logic blocks intentionally mix decls with
+// `when` event handlers (non-decl statements) — they are NOT
+// W-PROGRAM-REDUNDANT-LOGIC false positives. All visual styling is
+// inline Tailwind utility classes (S86 styling rule).
 
 <program>
 
-// The worker program lives in its own isolated execution context.
-// No parent-scope bindings are visible inside it (E-PROG-003 if you try).
-<program name="primes">
+  // The worker program lives in its own isolated execution context.
+  // No parent-scope bindings are visible inside it (E-PROG-003 if you try).
+  <program name="primes">
     ${
         // Sieve of Eratosthenes up to limit.
         function sieve(limit: number) -> number[] {
@@ -76,7 +81,7 @@ ${
         </button>
     </>
 
-    // Show results only when @result has a value — use `is some` for presence check (§42.2.4).
+    <!-- Show results only when @result has a value — use `is some` for presence check (§42.2.4). -->
     <div class="p-4 bg-gray-100 rounded-lg mt-4" if=(@result is some)>
         <p>
             Found <strong>${@result.count}</strong>

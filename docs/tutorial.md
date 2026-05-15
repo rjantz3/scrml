@@ -79,21 +79,22 @@ The classic first program in any reactive language: a counter with a `+` button.
 
 ```scrml
 // 02-counter.scrml — reactive state, V5-strict declaration form.
+// v0.3 program-as-container shape: logic-default body, no file-top
+// `${...}` wrapper; types/state/functions are direct `<program>`
+// children.
 
 <program>
 
-${
   <count> = 0
 
   function inc() { @count = @count + 1 }
   function dec() { @count = @count - 1 }
-}
 
-<div>
-  <h1>Counter: ${@count}</h1>
-  <button onclick=dec()>−</button>
-  <button onclick=inc()>+</button>
-</div>
+  <div>
+    <h1>Counter: ${@count}</h1>
+    <button onclick=dec()>−</button>
+    <button onclick=inc()>+</button>
+  </div>
 
 </program>
 ```
@@ -127,20 +128,18 @@ When a value is a pure function of other reactive state, declare it with `const 
 
 <program>
 
-${
   <count> = 0
   const <doubled> = @count * 2
   const <parity> = @count % 2 == 0 ? "even" : "odd"
 
   function inc() { @count = @count + 1 }
-}
 
-<div>
-  <p>Count: ${@count}</p>
-  <p>Doubled: ${@doubled}</p>
-  <p>Parity: ${@parity}</p>
-  <button onclick=inc()>+</button>
-</div>
+  <div>
+    <p>Count: ${@count}</p>
+    <p>Doubled: ${@doubled}</p>
+    <p>Parity: ${@parity}</p>
+    <button onclick=inc()>+</button>
+  </div>
 
 </program>
 ```
@@ -165,42 +164,42 @@ A counter in memory is gone the moment you refresh the page. Let's persist it. s
 
 <program>
 
-<db src="counter.db" tables="counters">
+  <db src="counter.db" tables="counters">
 
-  ${
-    <count> = loadCount()
+    ${
+      <count> = loadCount()
 
-    // No `server` keyword needed — these functions escalate to the server
-    // automatically because they touch a `?{}` SQL block. (Body-content
-    // inference, Insight 26 — the `server` keyword is deprecated.)
-    function loadCount() {
-      const row = ?{`SELECT value FROM counters WHERE id = 1`}.get()
-      return row is some ? row.value : 0
+      // No `server` keyword needed — these functions escalate to the server
+      // automatically because they touch a `?{}` SQL block. (Body-content
+      // inference, Insight 26 — the `server` keyword is deprecated.)
+      function loadCount() {
+        const row = ?{`SELECT value FROM counters WHERE id = 1`}.get()
+        return row is some ? row.value : 0
+      }
+
+      function persistCount(n) {
+        ?{`INSERT INTO counters (id, value) VALUES (1, ${n})
+           ON CONFLICT(id) DO UPDATE SET value = ${n}`}.run()
+      }
+
+      function inc() {
+        @count = @count + 1
+        persistCount(@count)
+      }
+
+      function dec() {
+        @count = @count - 1
+        persistCount(@count)
+      }
     }
 
-    function persistCount(n) {
-      ?{`INSERT INTO counters (id, value) VALUES (1, ${n})
-         ON CONFLICT(id) DO UPDATE SET value = ${n}`}.run()
-    }
+    <div>
+      <h1>Persistent counter: ${@count}</h1>
+      <button onclick=dec()>−</button>
+      <button onclick=inc()>+</button>
+    </div>
 
-    function inc() {
-      @count = @count + 1
-      persistCount(@count)
-    }
-
-    function dec() {
-      @count = @count - 1
-      persistCount(@count)
-    }
-  }
-
-  <div>
-    <h1>Persistent counter: ${@count}</h1>
-    <button onclick=dec()>−</button>
-    <button onclick=inc()>+</button>
-  </div>
-
-</>
+  </>
 
 </program>
 ```
@@ -222,32 +221,36 @@ The one rule that distinguishes server functions from client functions is that *
 scrml has two styling tools, used together or apart depending on taste.
 
 ```scrml
-// 02c-styles.scrml — scoped CSS via #{}.
+// 02c-styles.scrml — scoped CSS via #{}, co-located with markup it scopes.
 
 <program>
 
-${ <count> = 0 ; function inc() { @count = @count + 1 } }
+  <count> = 0
+  function inc() { @count = @count + 1 }
 
-<div class="card">
-  <h1>${@count}</h1>
-  <button onclick=inc()>+</button>
-</div>
-
-#{
-  .card {
-    max-width: 280px;
-    margin: 2rem auto;
-    padding: 1.5rem;
-    border: 1px solid #ddd;
-    border-radius: 8px;
-    text-align: center;
+  // Co-located `#{}` block — placed immediately before the markup it
+  // scopes (S86 styling rule). Multiple smaller blocks before each
+  // markup section are preferred over one centralised block at file
+  // top.
+  #{
+    .card {
+      max-width: 280px;
+      margin: 2rem auto;
+      padding: 1.5rem;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      text-align: center;
+    }
+    button {
+      margin-top: 0.5rem;
+      padding: 0.5rem 1rem;
+      font-size: 1.25rem;
+    }
   }
-  button {
-    margin-top: 0.5rem;
-    padding: 0.5rem 1rem;
-    font-size: 1.25rem;
-  }
-}
+  <div class="card">
+    <h1>${@count}</h1>
+    <button onclick=inc()>+</button>
+  </div>
 
 </program>
 ```
@@ -278,7 +281,6 @@ The next step beyond a counter is a list. Here is a small todo app — keep the 
 
 <program>
 
-${
   type Todo:struct = { id: number, body: string, done: boolean }
 
   <items>: Todo[] = []
@@ -300,35 +302,42 @@ ${
     @items = @items.filter(t => t.id != id)
   }
 
-  const TodoRow = <li class="row" props={ item: Todo }>
-    <input type="checkbox" checked=@item.done onchange=toggle(@item.id)/>
-    <span class:done=@item.done>${@item.body}</span>
-    <button onclick=remove(@item.id)>x</button>
-  </li>
-}
+  // The `const Name = <markup/>` component-def form sits in an
+  // explicit `${...}` wrapper because the bare-decl auto-lift does
+  // not currently pair `const Name = ` (text) with the following
+  // `<markup>...</markup>` (markup block) at `<program>` direct-child
+  // position (a known compiler gap).
+  ${
+    const TodoRow = <li class="row" props={ item: Todo }>
+      <input type="checkbox" checked=@item.done onchange=toggle(@item.id)/>
+      <span class:done=@item.done>${@item.body}</span>
+      <button onclick=remove(@item.id)>x</button>
+    </li>
+  }
 
-<div class="todo-app">
-  <h1>Todos</h1>
-  <form onsubmit=add()>
-    <input type="text" bind:value=@draft placeholder="What's next?"/>
-    <button type="submit">Add</button>
-  </form>
-  <ul>
-    ${
-      for (let t of @items) {
-        lift <TodoRow item=t/>
+  // Co-located `#{}` block — placed immediately before the markup it
+  // scopes (S86 styling rule).
+  #{
+    .todo-app { max-width: 420px; margin: 2rem auto; font-family: sans-serif; }
+    form { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+    input[type="text"] { flex: 1; padding: 0.5rem; }
+    .row { display: flex; align-items: center; gap: 0.5rem; padding: 0.25rem 0; }
+    .row .done { text-decoration: line-through; color: #999; }
+  }
+  <div class="todo-app">
+    <h1>Todos</h1>
+    <form onsubmit=add()>
+      <input type="text" bind:value=@draft placeholder="What's next?"/>
+      <button type="submit">Add</button>
+    </form>
+    <ul>
+      ${
+        for (let t of @items) {
+          lift <TodoRow item=t/>
+        }
       }
-    }
-  </ul>
-</div>
-
-#{
-  .todo-app { max-width: 420px; margin: 2rem auto; font-family: sans-serif; }
-  form { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
-  input[type="text"] { flex: 1; padding: 0.5rem; }
-  .row { display: flex; align-items: center; gap: 0.5rem; padding: 0.25rem 0; }
-  .row .done { text-decoration: line-through; color: #999; }
-}
+    </ul>
+  </div>
 
 </program>
 ```
@@ -433,7 +442,6 @@ The first commitment step is to name the screen's phases as an enum and dispatch
 
 <program>
 
-${
   type LoadPhase:enum = {
     Idle
     Loading
@@ -449,20 +457,19 @@ ${
   }
 
   function reset_phase() { @phase = .Idle }
-}
 
-<div>
-  ${
-    match @phase {
-      .Idle        => { lift <button onclick=load()>Load</button> }
-      .Loading     => { lift <p>Loading…</p> }
-      .Loaded(n)   => { lift <p>Got ${n} rows.</p>
-                        lift <button onclick=reset_phase()>Reset</button> }
-      .Failed(msg) => { lift <p class="err">Failed: ${msg}</p>
-                        lift <button onclick=reset_phase()>Try again</button> }
+  <div>
+    ${
+      match @phase {
+        .Idle        => { lift <button onclick=load()>Load</button> }
+        .Loading     => { lift <p>Loading…</p> }
+        .Loaded(n)   => { lift <p>Got ${n} rows.</p>
+                          lift <button onclick=reset_phase()>Reset</button> }
+        .Failed(msg) => { lift <p class="err">Failed: ${msg}</p>
+                          lift <button onclick=reset_phase()>Try again</button> }
+      }
     }
-  }
-</div>
+  </div>
 
 </program>
 ```

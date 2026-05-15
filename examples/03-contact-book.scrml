@@ -1,6 +1,9 @@
 // Example 03: Contact Book — full-stack in one file.
-// Demonstrates <db> declaration, server functions, V5-strict state decls,
-// form binding, for/lift list rendering. This is a real app.
+// Demonstrates v0.3 program-as-container shape + `<db>` declaration,
+// server functions, V5-strict state decls, form binding, and for/lift
+// list rendering. Styling uses co-located scoped `#{}` blocks placed
+// immediately before each markup section (per S86 styling rule: split
+// per section, never one centralised block).
 //
 // NOTE on auth: this example focuses on the CRUD + persistence story and
 // does NOT declare auth="required" — the contact book is a single-file
@@ -9,8 +12,6 @@
 // auth-bearing app with a real /login) or run `scrml generate auth` to
 // scaffold a login page next to this one and add auth="required" yourself.
 
-// State block — the compiler generates a server route automatically for
-// server-fn calls; we never touch routing code.
 <program>
 
 <db src="contacts.db" tables="contacts">
@@ -46,9 +47,31 @@
     }
   }
 
+  // Page shell styles — co-located with the outer container they scope.
+  #{
+    .contact-book {
+      max-width: 640px;
+      margin: 2rem auto;
+      font-family: sans-serif;
+    }
+  }
   <div class="contact-book">
     <h1>Contact Book</h1>
 
+    // Form-section styles — co-located with the form markup below.
+    #{
+      form {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        margin-bottom: 1.5rem;
+      }
+      input {
+        flex: 1;
+        padding: 0.5rem;
+        min-width: 140px;
+      }
+    }
     <form onsubmit=addContact()>
       <input type="text"  bind:value=@name  placeholder="Name"  required/>
       <input type="email" bind:value=@email placeholder="Email" required/>
@@ -56,6 +79,23 @@
       <button type="submit">Add Contact</button>
     </form>
 
+    // Contacts-list styles — co-located with the list markup below.
+    #{
+      .contacts {
+        list-style: none;
+        padding: 0;
+      }
+      .contact-row {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        padding: 0.75rem 0;
+        border-bottom: 1px solid #eee;
+      }
+      .name  { font-weight: 600; flex: 1; }
+      .email { color: #555; flex: 1.5; }
+      .phone { color: #777; flex: 1; }
+    }
     <ul class="contacts">
       ${
         for (let contact of loadContacts()) {
@@ -71,43 +111,5 @@
   </div>
 
 </>
-
-#{
-  .contact-book {
-    max-width: 640px;
-    margin: 2rem auto;
-    font-family: sans-serif;
-  }
-
-  form {
-    display: flex;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-    margin-bottom: 1.5rem;
-  }
-
-  input {
-    flex: 1;
-    padding: 0.5rem;
-    min-width: 140px;
-  }
-
-  .contacts {
-    list-style: none;
-    padding: 0;
-  }
-
-  .contact-row {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    padding: 0.75rem 0;
-    border-bottom: 1px solid #eee;
-  }
-
-  .name  { font-weight: 600; flex: 1; }
-  .email { color: #555; flex: 1.5; }
-  .phone { color: #777; flex: 1; }
-}
 
 </program>

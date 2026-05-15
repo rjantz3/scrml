@@ -1,92 +1,101 @@
 // Example 20: Middleware — `<program>` attributes + `handle()` escape hatch (§40).
-// Demonstrates the two-tier middleware model:
-//   1. Compiler-auto tier — `<program>` attributes (cors=, log=, headers=,
-//      ratelimit=, csrf=) generate full middleware handlers with no developer
-//      code. Single attributes for the common 80%.
-//   2. Escape-hatch tier — `server function handle(request, resolve)` is the
-//      onion-model interceptor for the remaining 20%. Code before resolve()
-//      runs as pre-middleware, code after runs as post-middleware. Calling
-//      resolve() exactly once is enforced (E-MW-003).
+// Demonstrates v0.3 program-as-container shape (logic-default body, no
+// file-top `${...}` wrapper) + the two-tier middleware model:
+//   1. Compiler-auto tier — `<program>` attributes (cors=, log=,
+//      headers=, ratelimit=, csrf=) generate full middleware handlers
+//      with no developer code. Single attributes for the common 80%.
+//   2. Escape-hatch tier — `server function handle(request, resolve)`
+//      is the onion-model interceptor for the remaining 20%. Code
+//      before resolve() runs as pre-middleware, code after runs as
+//      post-middleware. Calling resolve() exactly once is enforced
+//      (E-MW-003).
 //
-// Most scrml apps need ZERO middleware code. This example deliberately uses
-// both forms together to show the layering.
+// Most scrml apps need ZERO middleware code. This example deliberately
+// uses both forms together to show the layering. Styling uses
+// co-located scoped `#{}` blocks per markup section (S86 rule).
 
 <program log="structured" headers="strict" cors="*">
 
-${
   // Custom request-ID injection — typical handle() use case.
-  // Pre-middleware: mint a UUID; post-middleware: stamp it on the response.
-  // The compiler order (§40.3.3) is:
+  // Pre-middleware: mint a UUID; post-middleware: stamp it on the
+  // response. The compiler order (§40.3.3) is:
   //   [CORS preflight] → [rate limit] → handle() PRE → [CSRF check] →
   //   [route dispatch] → handle() POST → [security headers] → [logging]
-  server function handle(request, resolve) {
-    const reqId = crypto.randomUUID()
-    const start = Date.now()
+  //
+  // The function bodies below are wrapped in an explicit `${...}`
+  // logic block because the bare-decl auto-lift currently mis-handles
+  // multi-line `server function` bodies at `<program>` direct-child
+  // position (E-SCOPE-001 false-positive on body locals). The
+  // W-PROGRAM-REDUNDANT-LOGIC lint flagged here is a false-positive
+  // (tracked as a separate compiler gap; sibling shape of the
+  // template-literal gap surfaced in 15-channel-chat and 19-lin-token).
+  ${
+    server function handle(request, resolve) {
+      const reqId = crypto.randomUUID()
+      const start = Date.now()
 
-    // resolve(request) runs the rest of the pipeline + the matched route.
-    // It MUST be called exactly once on every path that doesn't early-return
-    // (E-MW-003 if called zero times or more than once).
-    const response = resolve(request)
+      // resolve(request) runs the rest of the pipeline + the matched
+      // route. It MUST be called exactly once on every path that
+      // doesn't early-return (E-MW-003 if called zero times or more
+      // than once).
+      const response = resolve(request)
 
-    response.headers.set("X-Request-Id", reqId)
-    response.headers.set("X-Response-Time-ms", String(Date.now() - start))
-    return response
+      response.headers.set("X-Request-Id", reqId)
+      response.headers.set("X-Response-Time-ms", String(Date.now() - start))
+      return response
+    }
   }
 
   <count> = 0
 
   function bump() { @count = @count + 1 }
-}
 
-<div class="demo">
-  <h1>Middleware demo</>
-  <p class="hint">
-    Three program attributes (log, headers, cors) generate the auto-middleware
-    layer. The handle() function above adds a request id and response-time
-    header without replacing any of that.
-  </p>
-
-  <p>Counter: ${@count}</>
-  <button onclick=bump()>Bump (sends a server roundtrip)</button>
-
-  <p class="hint">
-    Open the dev tools network tab. Every response carries X-Request-Id and
-    X-Response-Time-ms headers from handle(), plus the secure-default headers
-    from the strict policy (X-Frame-Options, Content-Security-Policy, etc.).
-  </p>
-</div>
-
-#{
-  .demo {
-    max-width: 640px;
-    margin: 2rem auto;
-    font-family: sans-serif;
+  // Demo-shell + hint styles — co-located with the outer demo wrapper.
+  #{
+    .demo {
+      max-width: 640px;
+      margin: 2rem auto;
+      font-family: sans-serif;
+    }
+    .hint {
+      color: #6b7280;
+      font-size: 0.9rem;
+      background: #f3f4f6;
+      padding: 0.75rem 1rem;
+      border-radius: 6px;
+    }
+    code {
+      font-family: monospace;
+      background: #e5e7eb;
+      padding: 0.1rem 0.3rem;
+      border-radius: 3px;
+    }
+    button {
+      padding: 0.5rem 1rem;
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.95rem;
+    }
   }
+  <div class="demo">
+    <h1>Middleware demo</>
+    <p class="hint">
+      Three program attributes (log, headers, cors) generate the auto-middleware
+      layer. The handle() function above adds a request id and response-time
+      header without replacing any of that.
+    </p>
 
-  .hint {
-    color: #6b7280;
-    font-size: 0.9rem;
-    background: #f3f4f6;
-    padding: 0.75rem 1rem;
-    border-radius: 6px;
-  }
+    <p>Counter: ${@count}</>
+    <button onclick=bump()>Bump (sends a server roundtrip)</button>
 
-  code {
-    font-family: monospace;
-    background: #e5e7eb;
-    padding: 0.1rem 0.3rem;
-    border-radius: 3px;
-  }
-
-  button {
-    padding: 0.5rem 1rem;
-    background: #2563eb;
-    color: #fff;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 0.95rem;
-  }
-}
+    <p class="hint">
+      Open the dev tools network tab. Every response carries X-Request-Id and
+      X-Response-Time-ms headers from handle(), plus the secure-default headers
+      from the strict policy (X-Frame-Options, Content-Security-Policy, etc.).
+    </p>
+  </div>
 
 </program>

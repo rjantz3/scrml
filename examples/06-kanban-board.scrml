@@ -1,10 +1,12 @@
 // Example 06: Kanban Board — enum-driven UI with for/if filtering, CSS grid.
-// Demonstrates type:enum column states (bar-form `.A | .B | .C` syntax),
-// reactive array mutation via `.map()`, for/if filtering per column,
-// moving cards between columns, #{} grid layout. No external state library.
+// Demonstrates v0.3 program-as-container shape (logic-default body, no
+// file-top `${...}` wrapper) + type:enum column states (bar-form
+// `.A | .B | .C` syntax) + reactive array mutation via `.map()` + for/if
+// filtering per column + co-located scoped `#{}` blocks. Styling is split
+// into three co-located blocks (board chrome / column shape / card shape)
+// placed immediately before the markup they scope (S86 styling rule).
 
 <program>
-
 
   type Status:enum = .Todo | .InProgress | .Done
 
@@ -23,128 +25,129 @@
     @cards = @cards.map(c => c.id == id ? { ...c, status: newStatus } : c)
   }
 
+  // Board-chrome styles — co-located with the outer board wrapper.
+  #{
+    .board {
+      font-family: sans-serif;
+      padding: 1.5rem;
+    }
+    .columns {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+    }
+  }
+  <div class="board">
+    <h1>Board</>
 
-<div class="board">
-  <h1>Board</>
+    <div class="columns">
 
-  <div class="columns">
-    <div class="column">
-      <h3 class="column-title">Todo</h3>
-      <div class="column-cards">
-        ${
-          for (let card of @cards) {
-            if (card.status != .Todo) continue
-            lift <div class="card">
-              <p class="card-title">${card.title}</p>
-              <div class="card-actions">
-                <button onclick=moveTo(card.id, .InProgress)>Start</button>
-              </div>
-            </div>
-          }
+      <!-- Column-shape styles — co-located with the column markup that
+           follows. Shared across all three columns. -->
+      #{
+        .column {
+          background: #f4f5f7;
+          border-radius: 8px;
+          padding: 1rem;
+          min-height: 300px;
         }
+        .column-title {
+          font-size: 0.8rem;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          color: #555;
+          margin: 0 0 0.75rem 0;
+        }
+        .column-cards {
+          display: flex;
+          flex-direction: column;
+          gap: 0.5rem;
+        }
+      }
+
+      <!-- Card-shape styles — co-located with the card markup lifted
+           inside each column-cards container below. -->
+      #{
+        .card {
+          background: #fff;
+          border-radius: 6px;
+          padding: 0.75rem;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        .card-title {
+          margin: 0 0 0.5rem 0;
+          font-size: 0.95rem;
+        }
+        .card-actions {
+          display: flex;
+          gap: 0.4rem;
+        }
+        button {
+          font-size: 0.8rem;
+          padding: 0.25rem 0.6rem;
+          cursor: pointer;
+          border: 1px solid #ddd;
+          border-radius: 4px;
+          background: #fff;
+        }
+        button:hover {
+          background: #f0f4ff;
+        }
+      }
+
+      <div class="column">
+        <h3 class="column-title">Todo</h3>
+        <div class="column-cards">
+          ${
+            for (let card of @cards) {
+              if (card.status != .Todo) continue
+              lift <div class="card">
+                <p class="card-title">${card.title}</p>
+                <div class="card-actions">
+                  <button onclick=moveTo(card.id, .InProgress)>Start</button>
+                </div>
+              </div>
+            }
+          }
+        </div>
+      </div>
+
+      <div class="column">
+        <h3 class="column-title">In Progress</h3>
+        <div class="column-cards">
+          ${
+            for (let card of @cards) {
+              if (card.status != .InProgress) continue
+              lift <div class="card">
+                <p class="card-title">${card.title}</p>
+                <div class="card-actions">
+                  <button onclick=moveTo(card.id, .Todo)>Back</button>
+                  <button onclick=moveTo(card.id, .Done)>Done</button>
+                </div>
+              </div>
+            }
+          }
+        </div>
+      </div>
+
+      <div class="column">
+        <h3 class="column-title">Done</h3>
+        <div class="column-cards">
+          ${
+            for (let card of @cards) {
+              if (card.status != .Done) continue
+              lift <div class="card">
+                <p class="card-title">${card.title}</p>
+                <div class="card-actions">
+                  <button onclick=moveTo(card.id, .InProgress)>Reopen</button>
+                </div>
+              </div>
+            }
+          }
+        </div>
       </div>
     </div>
 
-    <div class="column">
-      <h3 class="column-title">In Progress</h3>
-      <div class="column-cards">
-        ${
-          for (let card of @cards) {
-            if (card.status != .InProgress) continue
-            lift <div class="card">
-              <p class="card-title">${card.title}</p>
-              <div class="card-actions">
-                <button onclick=moveTo(card.id, .Todo)>Back</button>
-                <button onclick=moveTo(card.id, .Done)>Done</button>
-              </div>
-            </div>
-          }
-        }
-      </div>
-    </div>
-
-    <div class="column">
-      <h3 class="column-title">Done</h3>
-      <div class="column-cards">
-        ${
-          for (let card of @cards) {
-            if (card.status != .Done) continue
-            lift <div class="card">
-              <p class="card-title">${card.title}</p>
-              <div class="card-actions">
-                <button onclick=moveTo(card.id, .InProgress)>Reopen</button>
-              </div>
-            </div>
-          }
-        }
-      </div>
-    </div>
   </div>
-
-</div>
-
-#{
-  .board {
-    font-family: sans-serif;
-    padding: 1.5rem;
-  }
-
-  .columns {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 1rem;
-  }
-
-  .column {
-    background: #f4f5f7;
-    border-radius: 8px;
-    padding: 1rem;
-    min-height: 300px;
-  }
-
-  .column-title {
-    font-size: 0.8rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: #555;
-    margin: 0 0 0.75rem 0;
-  }
-
-  .column-cards {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-
-  .card {
-    background: #fff;
-    border-radius: 6px;
-    padding: 0.75rem;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-  }
-
-  .card-title {
-    margin: 0 0 0.5rem 0;
-    font-size: 0.95rem;
-  }
-
-  .card-actions {
-    display: flex;
-    gap: 0.4rem;
-  }
-
-  button {
-    font-size: 0.8rem;
-    padding: 0.25rem 0.6rem;
-    cursor: pointer;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    background: #fff;
-  }
-
-  button:hover {
-    background: #f0f4ff;
-  }
-}
 
 </program>
