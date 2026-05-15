@@ -1972,12 +1972,32 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // followed directly by a SQL BLOCK_REF), recurse into `case "sql"` and
       // wrap the resulting expression as a return statement. Mirrors the
       // `lift ?{...}.method()` SQL handling in `case "lift-expr"` above.
+      //
+      // S93 cg-006 fix (Layer 2 — defense-in-depth): gate sqlNode emission on
+      // `opts.boundary === "server"`. The let-decl path (line ~1333) and the
+      // state-decl path (line ~1807) already gate this way; this aligns the
+      // return-stmt path with the sibling pattern. The primary fix is at the
+      // RI layer (route-inference.ts walkBodyForTriggers) — a function with
+      // `return ?{...}` MUST be classified `boundary === "server"`. This
+      // emit-logic guard is the fail-safe in case RI ever misclassifies (and
+      // mirrors the symmetric let-decl client-boundary stub). E-CG-006 stays
+      // intact as the final post-emission scan.
       if (node.sqlNode && node.sqlNode.kind === "sql") {
-        const sqlStmt = emitLogicNode(node.sqlNode, opts);
-        // `case "sql"` always returns an expression form ending in `;`.
-        // Strip the trailing `;` so we can wrap as `return …;`.
-        const sqlExpr = sqlStmt.replace(/;\s*$/, "");
-        return _wrapReturnWithCheck(sqlExpr);
+        if (opts.boundary === "server") {
+          const sqlStmt = emitLogicNode(node.sqlNode, opts);
+          // `case "sql"` always returns an expression form ending in `;`.
+          // Strip the trailing `;` so we can wrap as `return …;`.
+          const sqlExpr = sqlStmt.replace(/;\s*$/, "");
+          return _wrapReturnWithCheck(sqlExpr);
+        }
+        // Client boundary: `_scrml_sql` is server-only (E-CG-006). Emit a
+        // defensive comment + `return null;` so the emitted JS still parses
+        // and the diagnostic is visible at inspection. Mirrors the let-decl
+        // path at ~1333: `let ${name}; // SQL-init — client cannot evaluate
+        // _scrml_sql (E-CG-006)`. Reaching this branch indicates an upstream
+        // RI classification miss; the post-emission SQL_LEAK_PATTERNS scan in
+        // emit-client.ts still fires E-CG-006 if anything else slipped through.
+        return `return null; // SQL — client cannot evaluate _scrml_sql (E-CG-006); RI should classify this fn as server-bound.`;
       }
       // Phase 3 fast path: when exprNode is present, skip all string splitting
       if (node.exprNode) {

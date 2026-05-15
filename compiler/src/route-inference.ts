@@ -780,6 +780,83 @@ export function walkBodyForTriggers(
       return;
     }
 
+    // S93 cg-006 fix (Layer 1): return-stmt / throw-stmt with a structured
+    // `sqlNode` field (produced by ast-builder.js:4755-4773 for `return ?{...}.method()`).
+    // Pre-fix, visitNode had no explicit handler for return-stmt/throw-stmt — the
+    // generic array-recursion fallback at the bottom of this function does NOT
+    // see `sqlNode` (it is a plain object, not an array). Result: a function whose
+    // ONLY server-only resource is in a `return ?{...}` expression never got a
+    // server-trigger pushed, so RI classified the function as client-boundary and
+    // the SQL body landed in `.client.js` (caught post-emission by E-CG-006).
+    //
+    // Mirrors the let-decl / const-decl / tilde-decl / state-decl handlers above
+    // which already check `(node as any).sqlNode?.kind === "sql"`.
+    //
+    // Reproducer: examples/23-trucking-dispatch/app.scrml `getCurrentUser`
+    // (file-scope `<db>` body fn with body `return ?{`SELECT ...`}.get()`).
+    if (node.kind === "return-stmt" || node.kind === "throw-stmt") {
+      if ((node as any).sqlNode && (node as any).sqlNode.kind === "sql") {
+        triggers.push({
+          kind: "server-only-resource",
+          resourceType: "sql-query",
+          span: node.span,
+        });
+      }
+      // Also walk the expr / exprNode string surface for any SQL / Bun / env()
+      // patterns that DO live in the string (vs the sqlNode attachment). The
+      // ast-builder only attaches `sqlNode` for the special `return ?{...}` /
+      // `throw ?{...}` shape; other server-only patterns inside complex return
+      // expressions (e.g. `return foo(?{...}.get())`) still go through `expr`.
+      const expr = (node as any).exprNode
+        ? emitStringFromTree((node as any).exprNode)
+        : ((node as any).expr ?? "");
+      const resourceType = detectServerOnlyResource(expr);
+      if (resourceType !== null) {
+        triggers.push({
+          kind: "server-only-resource",
+          resourceType,
+          span: node.span,
+        });
+      }
+      const nsRefRet = detectImportedServerNamespaceRef(expr);
+      if (nsRefRet !== null) {
+        triggers.push({
+          kind: "server-only-resource",
+          resourceType: `imported-server-namespace:${nsRefRet}`,
+          span: node.span,
+        });
+      }
+      // Protected field access inside a return expression (mirrors bare-expr handler).
+      for (const fieldName of protectedFields) {
+        if (bareExprAccessesField(expr, fieldName)) {
+          triggers.push({
+            kind: "protected-field-access",
+            field: fieldName,
+            stateBlockId: stateBlockIdByField.get(fieldName) ?? "",
+          });
+        }
+      }
+      // Callees inside the return expression.
+      callees.push(...extractCalleesFromNode(node, "expr"));
+      return;
+    }
+
+    // S93 cg-006 fix (Layer 1, continued): lift-expr inside a function body —
+    // `lift ?{...}.method()` shape stores SQL under `expr: { kind: "sql", node: <sqlNode> }`
+    // (ast-builder.js similar to return-stmt path). Walk lift's sql-bearing child.
+    if (node.kind === "lift-expr") {
+      const liftE = (node as any).expr;
+      if (liftE && liftE.kind === "sql") {
+        triggers.push({
+          kind: "server-only-resource",
+          resourceType: "sql-query",
+          span: node.span,
+        });
+      }
+      // Fall through to the generic recursion below so any nested logic
+      // (e.g. lift markup with bare-expr children) still gets walked.
+    }
+
     // For nested function-decl: do NOT recurse into their bodies
     // here — they are separate function nodes with their own analysis entries.
     if (node.kind === "function-decl") {

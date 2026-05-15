@@ -424,6 +424,15 @@ export function isServerOnlyNode(node: unknown): boolean {
     const init = (n as any).initExpr ? emitStringFromTree((n as any).initExpr) : (typeof n.init === "string" ? n.init : "");
     if (SQL_SIGIL_PATTERN.test(init)) return true;
     if (ENV_PATTERN.test(init)) return true;
+    // NOTE (S93 cg-006): we intentionally do NOT short-circuit on
+    // `(n as any).sqlNode` here. Top-level `@x = ?{...}` (state-decl) is
+    // legitimately handled at emit time as a client-boundary stub (see
+    // emit-logic.ts case "state-decl" line ~1844 — "// SQL-init for @<name>"
+    // client-cannot-evaluate comment). Treating it as server-only here
+    // would suppress that defensive emission and emit W-CG-001 instead
+    // (see emit-reactive-wiring.ts line 373).  The codegen path is
+    // already correct for state-decls; the return-stmt/throw-stmt case
+    // below is the actual bug the S93 fix addresses.
   }
 
   // Catch inline ?{} SQL sigil in bare-expr nodes.
@@ -432,6 +441,31 @@ export function isServerOnlyNode(node: unknown): boolean {
     const expr = (n as any).exprNode ? emitStringFromTree((n as any).exprNode) : (typeof n.expr === "string" ? n.expr : "");
     if (SQL_SIGIL_PATTERN.test(expr)) return true;
     if (ENV_PATTERN.test(expr)) return true;
+  }
+
+  // S93 cg-006 fix (Layer 3): return-stmt / throw-stmt with a structured
+  // `sqlNode` field (produced by ast-builder.js for `return ?{...}.method()` /
+  // `throw ?{...}` shapes — see ast-builder.js:4755-4773). Same shape as the
+  // let-decl/const-decl/state-decl sqlNode handling above.
+  //
+  // Layer 1 (RI) already classifies such functions as server-bound so they
+  // never reach the client-emission Step 3 path. This is defense-in-depth
+  // for cases where Step 3 is invoked anyway (test harnesses, future RI
+  // changes that miss a case). E-CG-006 remains the final post-emission scan.
+  if (n.kind === "return-stmt" || n.kind === "throw-stmt") {
+    if ((n as any).sqlNode && (n as any).sqlNode.kind === "sql") return true;
+    const expr = (n as any).exprNode ? emitStringFromTree((n as any).exprNode) : (typeof (n as any).expr === "string" ? (n as any).expr : "");
+    if (SQL_SIGIL_PATTERN.test(expr)) return true;
+    if (ENV_PATTERN.test(expr)) return true;
+  }
+
+  // S93 cg-006 fix (Layer 3, continued): lift-expr with a `sql` child carries
+  // SQL the same way (`expr: { kind: "sql", node: <sqlNode> }`). The lift-expr
+  // node only appears as a stand-alone statement in markup-yielding contexts,
+  // but if it ever reaches a client-emission filter, treat as server-only.
+  if (n.kind === "lift-expr") {
+    const liftE = (n as any).expr;
+    if (liftE && liftE.kind === "sql") return true;
   }
 
   return false;
