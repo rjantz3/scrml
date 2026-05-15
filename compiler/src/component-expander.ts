@@ -106,6 +106,7 @@ import type {
   TransactionBlockNode,
   MetaNode,
   LiftExprNode,
+  TextNode,
 } from "./types/ast.ts";
 
 // ---------------------------------------------------------------------------
@@ -2081,8 +2082,18 @@ function _injectChildrenWalk(
     result.push(...callerChildren);
   }
 
-  // §14.9: E-COMPONENT-031 — unslotted children but no spread slot
-  if (unslottedChildren && unslottedChildren.length > 0 && !state.spreadFound && slottedGroups && slottedGroups.size > 0) {
+  // §14.9: E-COMPONENT-031 — unslotted children but no spread slot.
+  // Whitespace-only text nodes (value matches /^\s*$/) are source-format
+  // niceties — newlines / indent between slotted children — and do not count
+  // as adopter-authored unslotted content for this check. A node like
+  // "  hello  " (whitespace surrounding real text) STILL counts.
+  // (S94 BSBv3 — fix surfaced by BS-batch v2 sibling-friction note.)
+  const hasNonWhitespaceUnslottedChild = unslottedChildren && unslottedChildren.some((c) => {
+    if (!c) return false;
+    if (c.kind === "text") return !/^\s*$/.test(((c as TextNode).value) ?? "");
+    return true;
+  });
+  if (hasNonWhitespaceUnslottedChild && !state.spreadFound && slottedGroups && slottedGroups.size > 0) {
     if (ceErrors) {
       ceErrors.push(makeCEError(
         "E-COMPONENT-031",
