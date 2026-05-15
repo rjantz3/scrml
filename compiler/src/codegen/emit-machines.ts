@@ -249,7 +249,11 @@ export function emitProjectionFunction(machine: DerivedMachineLike): string[] {
       lines.push(`  if (tag === "${rule.from}") return ${toLiteral};`);
     }
   }
-  lines.push(`  return undefined;`);
+  // Defensive fallthrough — exhaustiveness was checked at compile time so
+  // this branch should be unreachable for well-typed source values. Return
+  // `null` (canonical scrml absence per M-7C-D-12 + §42.5) rather than the
+  // bare `undefined` keyword (W-CG-UNDEFINED-INTERPOLATION leak).
+  lines.push(`  return null;`);
   lines.push(`}`);
   return lines;
 }

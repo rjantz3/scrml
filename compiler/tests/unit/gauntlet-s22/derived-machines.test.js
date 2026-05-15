@@ -278,14 +278,19 @@ describe("§51.9 slice 2 — emitProjectionFunction", () => {
     expect(code).toContain('var tag = (src != null && typeof src === "object") ? src.variant : src;');
     expect(code).toContain('if (tag === "Draft") return "Editable";');
     expect(code).toContain('if (tag === "Refunded") return "Terminal";');
-    expect(code).toContain("return undefined;");
+    // S93 — defensive fallthrough returns `null` (canonical scrml absence
+    // per M-7C-D-12) rather than bare `undefined` keyword (W-CG-UNDEFINED-
+    // INTERPOLATION leak in compiled output).
+    expect(code).toContain("return null;");
     // Execute the function and check runtime behavior.
     const project = new Function(code + "\nreturn _scrml_project_UI;")();
     expect(project("Draft")).toBe("Editable");
     expect(project("Paid")).toBe("ReadOnly");
     expect(project("Refunded")).toBe("Terminal");
     expect(project({ variant: "Delivered", data: {} })).toBe("Terminal");
-    expect(project("Unknown")).toBeUndefined();
+    // S93 — defensive fallthrough returns null (canonical absence per
+    // M-7C-D-12), not undefined.
+    expect(project("Unknown")).toBeNull();
   });
 
   test("guarded rules become `if (tag === X && (guard)) return Y;`", () => {

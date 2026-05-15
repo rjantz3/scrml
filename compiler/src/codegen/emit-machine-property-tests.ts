@@ -413,7 +413,10 @@ function emitProjectionDescribe(m: MachineLike): string[] {
       lines.push(`    if (tag === ${JSON.stringify(rule.from)}) return ${JSON.stringify(rule.to)};`);
     }
   }
-  lines.push(`    return undefined;`);
+  // Defensive fallthrough — canonical absence is `null` per M-7C-D-12
+  // (avoids W-CG-UNDEFINED-INTERPOLATION leak in compiled property-test
+  // output).
+  lines.push(`    return null;`);
   lines.push(`  }`);
   lines.push(``);
 

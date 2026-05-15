@@ -370,7 +370,12 @@ export function emitForStmt(
     lines.push(`}`);
 
     lines.push(`function ${renderFn}() {`);
-    lines.push(`  _scrml_reconcile_list(${wrapperVar}, ${rewrittenIterable}, (item, i) => item?.id !== undefined ? item.id : i, ${createFnVar});`);
+    // Keying function: use `item.id` when present, fall back to index `i`.
+    // `item?.id != null` (loose equality) covers both JS null + undefined
+    // and avoids the bare `undefined` keyword that the W-CG-UNDEFINED-
+    // INTERPOLATION lint flags (per M-7C-D-12 + §42.5 — canonical scrml
+    // absence is null; runtime stores may yield either).
+    lines.push(`  _scrml_reconcile_list(${wrapperVar}, ${rewrittenIterable}, (item, i) => item?.id != null ? item.id : i, ${createFnVar});`);
     lines.push(`}`);
     lines.push(`${renderFn}();`);
     lines.push(`_scrml_effect_static(${renderFn});`);

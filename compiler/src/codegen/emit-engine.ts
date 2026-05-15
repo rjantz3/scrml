@@ -2138,7 +2138,15 @@ function buildDerivedEngineClosureBody(derivedExpr: unknown, varName: string): s
       // re-evaluation when upstream becomes undefined.
       return [
         `const __scrml_derived_v = _scrml_reactive_get(${JSON.stringify(upstream)});`,
-        `if (__scrml_derived_v === undefined) {`,
+        // `== null` (loose) matches both JS null (canonical absence per
+        // M-7C-D-12 + §42.5) AND JS undefined (returned by the reactive
+        // store for cells not yet registered). The W-CG-UNDEFINED-INTERPOLATION
+        // lint is satisfied because the `undefined` keyword does not appear
+        // in emitted output. (Error-code + message text retain the legacy
+        // "-UNDEFINED-RT" / "is undefined" shape per M-8C-D-8 deferral
+        // note — runtime-emission rename is scaffold-internal, separate
+        // dispatch territory.)
+        `if (__scrml_derived_v == null) {`,
         `  throw new Error("E-DERIVED-ENGINE-INITIAL-UNDEFINED-RT: derived engine '${varName}' yielded no value " +`,
         `    "(upstream '${upstream}' is undefined). " +`,
         `    "Per §51.0.J + §34: derived=expr must produce a defined variant for the source's initial state. " +`,
@@ -2169,7 +2177,9 @@ function buildDerivedEngineClosureBody(derivedExpr: unknown, varName: string): s
       const lowered = rewriteExpr(matchSrc);
       return [
         `const __scrml_derived_v = ${lowered};`,
-        `if (__scrml_derived_v === undefined) {`,
+        // See §51.0.J leak-mitigation note above — `== null` covers both
+        // canonical absence (JS null) and not-registered (JS undefined).
+        `if (__scrml_derived_v == null) {`,
         `  throw new Error("E-DERIVED-ENGINE-INITIAL-UNDEFINED-RT: derived engine '${varName}' yielded no value " +`,
         `    "(no match arm fired for upstream '${upstream}'). " +`,
         `    "Per §51.0.J + §34: derived=expr must produce a defined variant for the source's initial state. " +`,

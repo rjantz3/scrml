@@ -330,8 +330,10 @@ describe("fix-server-eq-helper-import — server helper inlining (approach b)", 
     const { serverJs } = compileSource(src, "enum-tag");
     expect(serverJs).toContain("_scrml_structural_eq(a, b)");
     expect(serverJs).toContain("function _scrml_structural_eq(a, b)");
-    // The inlined helper has the enum-tag branch.
-    expect(serverJs).toContain("a._tag !== undefined && b._tag !== undefined");
+    // The inlined helper has the enum-tag branch. S93 — switched from strict
+    // `!== undefined` to loose `!= null` (covers both null + undefined,
+    // avoids the bare `undefined` keyword per M-7C-D-12).
+    expect(serverJs).toContain("a._tag != null && b._tag != null");
   });
 });
 

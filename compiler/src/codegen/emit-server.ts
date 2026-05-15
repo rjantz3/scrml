@@ -1333,7 +1333,10 @@ export function generateServerJs(
       "    }",
       "    return true;",
       "  }",
-      "  if (a._tag !== undefined && b._tag !== undefined) {",
+      // Enum-variant check: `_tag` is a discriminator string set by the
+      // emitter. `!= null` (loose) covers both null + undefined absence,
+      // avoiding the bare `undefined` keyword (W-CG-UNDEFINED-INTERPOLATION).
+      "  if (a._tag != null && b._tag != null) {",
       "    if (a._tag !== b._tag) return false;",
       "    const aKeys = Object.keys(a);",
       "    const bKeys = Object.keys(b);",

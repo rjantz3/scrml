@@ -246,9 +246,13 @@ describe("C14 §C14.3 — section ordering: declare → subscribe → forced-get
 // ---------------------------------------------------------------------------
 
 describe("C14 §C14.4 — E-DERIVED-ENGINE-INITIAL-UNDEFINED throw is inline", () => {
-  test("closure body checks for undefined and throws E-DERIVED-ENGINE-INITIAL-UNDEFINED-RT", () => {
+  test("closure body checks for absence and throws E-DERIVED-ENGINE-INITIAL-UNDEFINED-RT", () => {
     const out = emitDerivedEngineSubstrate(meta()).join("\n");
-    expect(out).toContain("if (__scrml_derived_v === undefined)");
+    // S93 fix — `== null` (loose) replaces strict `=== undefined` so the
+    // W-CG-UNDEFINED-INTERPOLATION lint doesn't fire on emitted output.
+    // `== null` covers both JS null (canonical scrml absence per M-7C-D-12)
+    // and JS undefined (returned by reactive store for unregistered cells).
+    expect(out).toContain("if (__scrml_derived_v == null)");
     expect(out).toContain("E-DERIVED-ENGINE-INITIAL-UNDEFINED-RT");
   });
 

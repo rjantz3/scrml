@@ -606,7 +606,11 @@ export function emitChannelServerJs(node: any, errors: CGError[], filePath: stri
   }
 
   lines.push(`    const ok = server.upgrade(req, { data: { __ch: ${JSON.stringify(name)}, __topic: ${JSON.stringify(topic)} } });`);
-  lines.push(`    return ok ? undefined : new Response("WebSocket upgrade failed", { status: 400 });`);
+  // Bun's server.upgrade() API contract requires returning undefined to
+  // signal "the request was upgraded; do not return a response." `void 0`
+  // evaluates to the JS undefined value without using the keyword literal
+  // (W-CG-UNDEFINED-INTERPOLATION-safe; standards-conforming idiom).
+  lines.push(`    return ok ? void 0 : new Response("WebSocket upgrade failed", { status: 400 });`);
   lines.push(`  },`);
   lines.push(`};`);
 

@@ -195,6 +195,15 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
   // (11 module files affected: types/utility/components/channels modules
   // in pages/ subdirs lacking <program> wrapper per S85 Q2 non-entry-file
   // canonical shape).
+  // Refreshed at S93 W-CG-UNDEFINED-INTERPOLATION sweep — 53 → 0 after
+  // four codegen leak sites closed: derived-engine identity + match-arm
+  // forms in emit-engine.ts (switched to `== null` loose-equality); §51.9
+  // projection function fallback in emit-machines.ts + property-test
+  // scaffold in emit-machine-property-tests.ts (switched to `return null;`);
+  // for/lift reconcile-keying in emit-control-flow.ts (`item?.id != null`);
+  // channel WebSocket upgrade fallback in emit-channel.ts (`void 0` for the
+  // Bun-API-required undefined-return path); structural-eq enum check in
+  // emit-server.ts (`!= null`).
   // If a new pipeline pass tightens any of these counts, update this
   // map; if a count regresses, investigate the firing site.
   const EXPECTED_BASELINE = {
@@ -204,7 +213,6 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
     "W-AUTH-LOGIN-MISSING": 1,
     "W-CG-CHUNK-EMPTY": 2,
     "W-CG-CHUNK-PREFETCH-UNRESOLVED": 2,
-    "W-CG-UNDEFINED-INTERPOLATION": 53,
     "W-DEAD-FUNCTION": 1,
     "W-PROGRAM-001": 23,
     "W-PROGRAM-REDUNDANT-LOGIC": 18,
