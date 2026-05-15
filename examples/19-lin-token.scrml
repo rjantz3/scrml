@@ -30,47 +30,41 @@
   // branches not all). Template-literal interpolation `${ticket}`
   // counts as a consumption event per §35.3 rule 1.
   //
-  // The function bodies below use template-literal interpolation in
-  // their return values, so they MUST sit inside an explicit `${...}`
-  // logic block at `<program>` direct-child position — the bare-decl
-  // auto-lift currently does not handle `${` inside a backtick string
-  // and would split the function across blocks. The
-  // W-PROGRAM-REDUNDANT-LOGIC lint flagged here is a false-positive
-  // (same shape as 15-channel-chat — tracked as a separate compiler
-  // gap).
-  ${
-    function redeem(lin ticket: string, username: string) {
-      return `Redeemed ticket=${ticket} for user=${username}`
-    }
+  // The function bodies below use template-literal interpolation +
+  // `//` line comments — both work cleanly at `<program>` direct-child
+  // position without the `${...}` wrapper (S94 BS-batch v2 closed the
+  // residual orphan-brace comment-extraction gap).
+  function redeem(lin ticket: string, username: string) {
+    return `Redeemed ticket=${ticket} for user=${username}`
+  }
 
-    server function mintTicket(username, password) {
-      if (username == "" || password == "") return ""
-      return `tk_${username}_${Date.now()}`
-    }
+  server function mintTicket(username, password) {
+    if (username == "" || password == "") return ""
+    return `tk_${username}_${Date.now()}`
+  }
 
-    // `.idempotent()` asserts the function's CPS batches are
-    // monotone-by-construction (§19.9.7) — necessary here because
-    // mintTicket() uses Date.now() which the static classifier flags
-    // non-monotone (non-deterministic RHS); a real auth workflow would
-    // persist tickets server-side with INSERT ... ON CONFLICT DO
-    // NOTHING (idempotent upsert).
-    function login().idempotent() {
-      // `lin` declaration — exactly-once consumption rule (§35.3).
-      // The compiler tracks `ticket` from declaration to consumption
-      // and refuses to let it be referenced twice or dropped on any
-      // branch.
-      lin ticket = mintTicket(@username, @password)
+  // `.idempotent()` asserts the function's CPS batches are
+  // monotone-by-construction (§19.9.7) — necessary here because
+  // mintTicket() uses Date.now() which the static classifier flags
+  // non-monotone (non-deterministic RHS); a real auth workflow would
+  // persist tickets server-side with INSERT ... ON CONFLICT DO
+  // NOTHING (idempotent upsert).
+  function login().idempotent() {
+    // `lin` declaration — exactly-once consumption rule (§35.3).
+    // The compiler tracks `ticket` from declaration to consumption
+    // and refuses to let it be referenced twice or dropped on any
+    // branch.
+    lin ticket = mintTicket(@username, @password)
 
-      // Single consumption — passing to the redeem server fn (which
-      // itself declares the parameter as `lin`, so the
-      // consume-exactly-once rule continues inside that function
-      // body).
-      const message = redeem(ticket, @username)
-      @result = message
+    // Single consumption — passing to the redeem server fn (which
+    // itself declares the parameter as `lin`, so the
+    // consume-exactly-once rule continues inside that function
+    // body).
+    const message = redeem(ticket, @username)
+    @result = message
 
-      // Trying to reference `ticket` again here would be E-LIN-002:
-      //   console.log(ticket)   // ← compile error
-    }
+    // Trying to reference `ticket` again here would be E-LIN-002:
+    //   console.log(ticket)   // ← compile error
   }
 
   // Login-shell + hint styles — co-located with the outer login wrapper.

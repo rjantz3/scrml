@@ -608,9 +608,32 @@ export function splitBlocks(filePath, source) {
     const c = source[pos];
 
     // -----------------------------------------------------------------------
-    // Section 4.7: '//' comment suppression (applies at ALL context levels)
+    // Section 4.7: '//' comment suppression (applies at most context levels)
+    //
+    // S94 BS-batch v2 (Shape #19 / #20) — `//` comment extraction must NOT
+    // fire inside an orphan-brace body (function-body or type-decl body at
+    // markup direct-child level). Inside such a body, the text is the
+    // ENTIRE function body destined for BARE_DECL_RE auto-lift; if BS
+    // extracts comments as separate `comment` blocks, the lift sees only
+    // the FIRST text fragment (everything up to the first comment) and the
+    // rest of the body — including the closing `}` — leaks into the parent
+    // markup as orphan siblings. Downstream this surfaces as E-PARSE-001
+    // on the dangling `}` and E-SCOPE-001 on body-local identifiers.
+    //
+    // Inside an orphan-brace body, `//` is content text. The body's eventual
+    // re-tokenization via tokenizeLogic's own `readLineComment` (after
+    // BARE_DECL_RE wraps the body in `${...}` and parseLogicBody runs)
+    // handles JS-style line comments correctly. So pulling the comment out
+    // at BS level only hurts; pulling it out only inside non-orphan-brace
+    // contexts is the canonical behaviour.
+    //
+    // At brace-delimited contexts (`${...}` / `?{...}` / etc.), this gate
+    // does NOT apply — the comment IS pulled out as a separate `comment`
+    // BS child (and tokenizeLogic still re-handles `//` inside the bodyRaw
+    // content, so the duplication is benign). The orphan-brace case is
+    // distinct because the lift pass expects ONE TEXT BLOCK.
     // -----------------------------------------------------------------------
-    if (c === "/" && ch(1) === "/" && !inDoubleQuote && !inSingleQuote) {
+    if (c === "/" && ch(1) === "/" && !inDoubleQuote && !inSingleQuote && !(orphanBraceDepth > 0 && !topIsBraceContext())) {
       flushText();
       const commentStart = curPos;
       const commentStartLine = curLine;

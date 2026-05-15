@@ -10,31 +10,27 @@
 
   // Card: two required named slots (header, body) and one optional
   // slot (actions). The component body renders each slot with
-  // `${render propName()}`. The `const Name = <markup>` form requires
-  // an explicit `${...}` wrapper at `<program>` direct-child position
-  // because the bare-decl auto-lift currently splits the text-block
-  // `const Name = ` from the markup block that follows; the
-  // W-PROGRAM-REDUNDANT-LOGIC lint flagged for this wrapper is a
-  // false-positive (component-def in DECL_KINDS but no corresponding
-  // auto-lift pair).
-  ${
-    const Card = <div class="card" props={
-      header:   snippet,
-      body:     snippet,
-      actions?: snippet,
-    }>
-      ${children}
-      <div class="card__header">
-        ${render header()}
-      </>
-      <div class="card__body">
-        ${render body()}
-      </>
-      <div class="card__actions" if=(actions is some)>
-        ${render actions()}
-      </>
+  // `${render propName()}`. The `const Name = <markup>` form uses the
+  // v0.3 bare-decl auto-lift — no explicit `${...}` wrapper needed at
+  // `<program>` direct-child position (S94 BS-batch v2 closed the
+  // residual gap where `${children}` / `${render fn()}` inside the
+  // component body lost their slot semantics after the Bug 2 lift).
+  const Card = <div class="card" props={
+    header:   snippet,
+    body:     snippet,
+    actions?: snippet,
+  }>
+    ${children}
+    <div class="card__header">
+      ${render header()}
     </>
-  }
+    <div class="card__body">
+      ${render body()}
+    </>
+    <div class="card__actions" if=(actions is some)>
+      ${render actions()}
+    </>
+  </>
 
   // ProfileCard data — User struct and a sample @users list. A specialised
   // card-using markup pattern can splice these into Card via slot=.

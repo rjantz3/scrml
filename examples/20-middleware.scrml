@@ -22,28 +22,24 @@
   //   [CORS preflight] → [rate limit] → handle() PRE → [CSRF check] →
   //   [route dispatch] → handle() POST → [security headers] → [logging]
   //
-  // The function bodies below are wrapped in an explicit `${...}`
-  // logic block because the bare-decl auto-lift currently mis-handles
-  // multi-line `server function` bodies at `<program>` direct-child
-  // position (E-SCOPE-001 false-positive on body locals). The
-  // W-PROGRAM-REDUNDANT-LOGIC lint flagged here is a false-positive
-  // (tracked as a separate compiler gap; sibling shape of the
-  // template-literal gap surfaced in 15-channel-chat and 19-lin-token).
-  ${
-    server function handle(request, resolve) {
-      const reqId = crypto.randomUUID()
-      const start = Date.now()
+  // The `server function handle()` body uses `//` line comments inside
+  // the body — both work cleanly at `<program>` direct-child position
+  // without the `${...}` wrapper (S94 BS-batch v2 closed the residual
+  // orphan-brace comment-extraction gap so multi-line function bodies
+  // with comments survive the bare-decl auto-lift intact).
+  server function handle(request, resolve) {
+    const reqId = crypto.randomUUID()
+    const start = Date.now()
 
-      // resolve(request) runs the rest of the pipeline + the matched
-      // route. It MUST be called exactly once on every path that
-      // doesn't early-return (E-MW-003 if called zero times or more
-      // than once).
-      const response = resolve(request)
+    // resolve(request) runs the rest of the pipeline + the matched
+    // route. It MUST be called exactly once on every path that
+    // doesn't early-return (E-MW-003 if called zero times or more
+    // than once).
+    const response = resolve(request)
 
-      response.headers.set("X-Request-Id", reqId)
-      response.headers.set("X-Response-Time-ms", String(Date.now() - start))
-      return response
-    }
+    response.headers.set("X-Request-Id", reqId)
+    response.headers.set("X-Response-Time-ms", String(Date.now() - start))
+    return response
   }
 
   <count> = 0

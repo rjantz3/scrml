@@ -374,6 +374,40 @@ function normalizeTokenizedRaw(raw: string): string {
   //   discarded downstream regardless.
   s = s.replace(/<\s*!\s*-\s*-\s*([\s\S]*?)\s*-\s*-\s*>/g, "<!-- $1 -->");
 
+  // Step 0b (S94 BS-batch v2 — Shape #12): Normalize tokenized logic-block
+  //   openers: "$ {" → "${" (and "$\n{" → "${").
+  //
+  //   When a `const Name = <markup>` component-def is declared at <program>
+  //   direct-child level, the BS-batch v1 Bug 2 fix synthesises a
+  //   `${ const Name = <markup-raw> }` lift wrapper with `children: []` —
+  //   dropping the BS-layer BLOCK_REFs that the original markup body had
+  //   for inner `${children}` / `${render name()}` slots. When parseLogicBody
+  //   re-tokenizes the synthetic body, the logic tokenizer (tokenizer.ts:571)
+  //   classifies `$` as `isIdentStart`, so `${children}` becomes the token
+  //   stream IDENT(`$`) PUNCT(`{`) IDENT(`children`) PUNCT(`}`) — re-joined
+  //   by `joinWithNewlines` as `$ { children }`. This space-separated form
+  //   reaches parseComponentBody (here), and the downstream BS re-split
+  //   inside parseComponentBody no longer recognises `$ {` as the logic-
+  //   block opener (BS only matches the literal 2-char `${`). The inner
+  //   `${children}` slot marker is silently lost; component-expander's
+  //   children-slot detector finds no slot; E-COMPONENT-031 fires at every
+  //   use-site that passes unslotted children.
+  //
+  //   Collapsing `$\s+{` back to `${` re-enables BS's logic-block detection
+  //   inside the component body. The matching `}` (later in the content,
+  //   at the same brace-depth) closes the synthesized logic block. Inner
+  //   whitespace inside the logic body (e.g. `${ children }` after collapse)
+  //   is benign — parseLogicBody trims/skips whitespace.
+  //
+  //   Specificity: `$` followed by whitespace followed by `{` is the
+  //   tokenized form of `${`. JS identifier `$foo` has no whitespace; a
+  //   regular `${...}` source has no whitespace. So this rewrite touches
+  //   ONLY the tokenized re-emission shape — no false positives.
+  //
+  //   Must run before Step 1's `< ` → `<` collapse so the result is then
+  //   subject to all subsequent markup normalisation passes.
+  s = s.replace(/\$\s+\{/g, "${");
+
   // Step 1a': Normalize tokenized BARE closers: "< / >" → "</>"
   //   Multi-line component bodies contain internal bare closers like "</>" that
   //   the logic tokenizer emits as "< / >" (three tokens with spaces). Must run
