@@ -246,3 +246,167 @@ describe("§6 template content quality", () => {
     expect(src).toMatch(/import\s+\{\s*verifyPassword\s*\}\s+from\s+'scrml:auth'/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// §7 — S94 path derivation from non-default loginRedirect
+// ---------------------------------------------------------------------------
+
+describe("§7 non-default loginRedirect derives scaffold output path", () => {
+  beforeEach(setupTmp);
+  afterEach(teardownTmp);
+
+  test("`<program loginRedirect=\"/signin\">` writes scaffold to pages/signin.scrml (not pages/auth/login.scrml)", async () => {
+    writeFileSync(
+      join(tmpDir, "app.scrml"),
+      `<program auth="required" loginRedirect="/signin">\n  <div><h1>Hi</h1></div>\n</program>\n`,
+      "utf8",
+    );
+    await runGenerateInTmp(["auth"]);
+
+    // Scaffold lands at the redirect-derived path.
+    expect(existsSync(join(tmpDir, "pages", "signin.scrml"))).toBe(true);
+    // NOT at the default path.
+    expect(existsSync(join(tmpDir, "pages", "auth", "login.scrml"))).toBe(false);
+  });
+
+  test("`<program loginRedirect=\"/account/login\">` derives nested path pages/account/login.scrml", async () => {
+    writeFileSync(
+      join(tmpDir, "app.scrml"),
+      `<program auth="required" loginRedirect="/account/login">\n  <div></div>\n</program>\n`,
+      "utf8",
+    );
+    await runGenerateInTmp(["auth"]);
+
+    expect(existsSync(join(tmpDir, "pages", "account", "login.scrml"))).toBe(true);
+    expect(existsSync(join(tmpDir, "pages", "auth", "login.scrml"))).toBe(false);
+  });
+
+  test("default `<program auth=\"required\">` (no explicit loginRedirect) still writes pages/auth/login.scrml", async () => {
+    // Verifies the default path is preserved when loginRedirect is implicit.
+    writeFileSync(
+      join(tmpDir, "app.scrml"),
+      `<program auth="required">\n  <div></div>\n</program>\n`,
+      "utf8",
+    );
+    await runGenerateInTmp(["auth"]);
+
+    expect(existsSync(join(tmpDir, "pages", "auth", "login.scrml"))).toBe(true);
+    expect(existsSync(join(tmpDir, "pages", "login.scrml"))).toBe(false);
+  });
+
+  test("explicit `<program loginRedirect=\"/login\">` (same as default) writes pages/auth/login.scrml", async () => {
+    // Explicit override that matches the default should still use the
+    // canonical pages/auth/login.scrml path (not pages/login.scrml).
+    writeFileSync(
+      join(tmpDir, "app.scrml"),
+      `<program auth="required" loginRedirect="/login">\n  <div></div>\n</program>\n`,
+      "utf8",
+    );
+    await runGenerateInTmp(["auth"]);
+
+    expect(existsSync(join(tmpDir, "pages", "auth", "login.scrml"))).toBe(true);
+    expect(existsSync(join(tmpDir, "pages", "login.scrml"))).toBe(false);
+  });
+
+  test("explicit `--target` overrides loginRedirect-derived path", async () => {
+    writeFileSync(
+      join(tmpDir, "app.scrml"),
+      `<program auth="required" loginRedirect="/signin">\n  <div></div>\n</program>\n`,
+      "utf8",
+    );
+    await runGenerateInTmp(["auth", "--target=./custom/path.scrml"]);
+
+    expect(existsSync(join(tmpDir, "custom", "path.scrml"))).toBe(true);
+    // Derivation should NOT apply when --target is explicit.
+    expect(existsSync(join(tmpDir, "pages", "signin.scrml"))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §8 — S94 mismatch warning when --target conflicts with loginRedirect
+// ---------------------------------------------------------------------------
+
+describe("§8 mismatch warning when --target disagrees with loginRedirect", () => {
+  beforeEach(setupTmp);
+  afterEach(teardownTmp);
+
+  test("`<program loginRedirect=\"/signin\">` + `--target=./pages/auth/login.scrml` warns about route mismatch", async () => {
+    writeFileSync(
+      join(tmpDir, "app.scrml"),
+      `<program auth="required" loginRedirect="/signin">\n  <div></div>\n</program>\n`,
+      "utf8",
+    );
+    const { warns } = await runGenerateInTmp(["auth", "--target=./pages/auth/login.scrml"]);
+    const allWarns = warns.join("\n");
+    // Mismatch warning surfaced.
+    expect(allWarns).toContain('loginRedirect="/signin"');
+    expect(allWarns).toContain("/auth/login");
+    expect(allWarns).toContain("302");
+  });
+
+  test("`<program loginRedirect=\"/signin\">` + `--target-dir=./mydir` warns about route mismatch", async () => {
+    writeFileSync(
+      join(tmpDir, "app.scrml"),
+      `<program auth="required" loginRedirect="/signin">\n  <div></div>\n</program>\n`,
+      "utf8",
+    );
+    const { warns } = await runGenerateInTmp(["auth", "--target-dir=./mydir"]);
+    const allWarns = warns.join("\n");
+    expect(allWarns).toContain("loginRedirect=");
+    expect(allWarns).toContain("/signin");
+  });
+
+  test("explicit --target that DOES match loginRedirect-derived path produces NO mismatch warning", async () => {
+    writeFileSync(
+      join(tmpDir, "app.scrml"),
+      `<program auth="required" loginRedirect="/signin">\n  <div></div>\n</program>\n`,
+      "utf8",
+    );
+    const { warns } = await runGenerateInTmp(["auth", "--target=./pages/signin.scrml"]);
+    const allWarns = warns.join("\n");
+    // Should NOT contain the mismatch language when paths agree.
+    expect(allWarns).not.toContain("302");
+  });
+
+  test("default loginRedirect (`/login`) + explicit --target → no mismatch warning fired", async () => {
+    writeFileSync(
+      join(tmpDir, "app.scrml"),
+      `<program auth="required">\n  <div></div>\n</program>\n`,
+      "utf8",
+    );
+    const { warns } = await runGenerateInTmp(["auth", "--target=./elsewhere.scrml"]);
+    // No explicit loginRedirect → mismatch check is skipped.
+    expect(warns.join("\n")).not.toContain("302");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §9 — S94 next-steps echoes actual loginRedirect (not hard-coded /login)
+// ---------------------------------------------------------------------------
+
+describe("§9 next-steps echoes actual login route", () => {
+  beforeEach(setupTmp);
+  afterEach(teardownTmp);
+
+  test("non-default loginRedirect → next-steps says `visit /signin` (not /login)", async () => {
+    writeFileSync(
+      join(tmpDir, "app.scrml"),
+      `<program auth="required" loginRedirect="/signin">\n  <div></div>\n</program>\n`,
+      "utf8",
+    );
+    const { logs } = await runGenerateInTmp(["auth"]);
+    const out = logs.join("\n");
+    expect(out).toContain("visit /signin");
+    expect(out).not.toContain("visit /login");
+  });
+
+  test("default loginRedirect → next-steps says `visit /login`", async () => {
+    writeFileSync(
+      join(tmpDir, "app.scrml"),
+      `<program auth="required">\n  <div></div>\n</program>\n`,
+      "utf8",
+    );
+    const { logs } = await runGenerateInTmp(["auth"]);
+    expect(logs.join("\n")).toContain("visit /login");
+  });
+});

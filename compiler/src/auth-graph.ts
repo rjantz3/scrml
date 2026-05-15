@@ -512,15 +512,22 @@ function crossRefRedirects(
       anyResolved = true;
     } else {
       unresolvedTargets.add(redirect);
+      // Tightened S94: name the concrete fix command (`scrml generate
+      // auth`) and the scaffold output path so the adopter has a
+      // copy-pasteable resolution. For redirects other than the default
+      // `/login`, suggest `--target-dir` so the adopter can place the
+      // scaffold under the matching page path.
+      const fixHint = redirect === "/login"
+        ? `Run \`scrml generate auth\` to scaffold a working login page at \`pages/auth/login.scrml\`.`
+        : `Run \`scrml generate auth --target=./pages${redirect}.scrml\` to scaffold a working login page at the redirect path.`;
       errors.push({
         code: "I-AUTH-REDIRECT-UNRESOLVED",
         severity: "info",
         message:
           `Auth gate redirect target "${redirect}" does not match any ` +
-          `page URL pattern in the route map. The redirect target's own ` +
-          `entry-point must exist independently (per OQ-A2-E — no ` +
-          `entry-point synthesis). Add a page at this path, or correct ` +
-          `the redirect target. (SPEC §40.1.1.)`,
+          `page URL pattern in the route map. Either author a page at ` +
+          `this path, or correct the redirect target. ${fixHint} ` +
+          `(SPEC §40.1.1.)`,
         span: gate.span,
         filePath: gate.filePath,
       });
@@ -540,15 +547,20 @@ function crossRefRedirects(
   // path that doesn't require authoring the page from scratch.
   if (firstRedirectGate != null && !anyResolved && unresolvedTargets.size > 0) {
     const targets = [...unresolvedTargets].map(t => `"${t}"`).join(", ");
+    // Tightened S94: lead with the actionable `scrml generate auth`
+    // command and name the exact file the scaffold writes
+    // (`pages/auth/login.scrml`) so the adopter has a one-line fix.
+    // The "author manually" alternative is preserved as a secondary
+    // path for adopters who need a custom login flow.
     errors.push({
       code: "W-AUTH-LOGIN-MISSING",
       severity: "warning",
       message:
         `Auth gates declare redirect target(s) ${targets} but no page in ` +
         `the compilation unit matches any of these paths. The runtime ` +
-        `auth-check will 302 to a 404. Author a login page at the redirect ` +
-        `path, or run \`scrml generate auth\` to scaffold one. ` +
-        `(SPEC §40.1.1.)`,
+        `auth-check will 302 to a 404. Run \`scrml generate auth\` to ` +
+        `scaffold a working login page at \`pages/auth/login.scrml\` — ` +
+        `or author one at the redirect path manually. (SPEC §40.1.1.)`,
       span: firstRedirectGate.span,
       filePath: firstRedirectGate.filePath,
     });

@@ -282,15 +282,30 @@ function generateAuth(opts) {
 
   // Resolve the output path.
   // Precedence:
-  //   1. --target=<path> wins
+  //   1. --target=<path> wins (explicit; never overridden)
   //   2. --target-dir=<dir> → <dir>/login.scrml
-  //   3. default: pages/auth/login.scrml under the project root
-  //      (filesystem-routing convention per v0.3 page-helper)
+  //   3. When the program declares an explicit non-default loginRedirect
+  //      (e.g., `/signin`), derive the filesystem path from the route so
+  //      the scaffold lands where the auth gate actually points
+  //      (e.g., /signin → pages/signin.scrml). v0.3 filesystem-routing
+  //      maps URL pattern `/foo/bar` → `pages/foo/bar.scrml`.
+  //   4. default: pages/auth/login.scrml under the project root
+  //      (filesystem-routing convention; matches default loginRedirect=/login)
   let outAbs;
   if (targetPath) {
     outAbs = resolve(cwd, targetPath);
   } else if (targetDir) {
     outAbs = resolve(cwd, targetDir, "login.scrml");
+  } else if (explicitLoginRedirect && explicitLoginRedirect !== "/login") {
+    // Strip leading slash; treat root-redirect "/" as a degenerate
+    // case that falls back to the default pages/auth/login.scrml so
+    // we never write to pages/.scrml or similar.
+    const trimmed = explicitLoginRedirect.replace(/^\/+/, "");
+    if (trimmed.length === 0) {
+      outAbs = resolve(cwd, "pages", "auth", "login.scrml");
+    } else {
+      outAbs = resolve(cwd, "pages", `${trimmed}.scrml`);
+    }
   } else {
     outAbs = resolve(cwd, "pages", "auth", "login.scrml");
   }
@@ -312,13 +327,25 @@ function generateAuth(opts) {
     return { wrote: false, target: outAbs };
   }
 
+  // Mismatch warning: if the adopter forced an explicit target via
+  // --target / --target-dir AND the program declares a non-default
+  // loginRedirect, the scaffold may not match the URL the auth gate
+  // points to. Surface this so the adopter can re-route.
+  if ((targetPath || targetDir) && explicitLoginRedirect && explicitLoginRedirect !== "/login") {
+    const scaffoldRoute = "/" + relative(resolve(cwd, "pages"), outAbs).replace(/\.scrml$/, "").replace(/\\/g, "/");
+    if (scaffoldRoute !== explicitLoginRedirect) {
+      console.warn(c.yellow("warning:") + ` <program loginRedirect="${explicitLoginRedirect}"> but the scaffold was written to a path that filesystem-routes to "${scaffoldRoute}".`);
+      console.warn(c.dim("  The runtime auth-check will still 302 to " + explicitLoginRedirect + " — adjust --target / --target-dir, or change loginRedirect to match."));
+    }
+  }
+
   // Ensure parent directory exists.
   mkdirSync(dirname(outAbs), { recursive: true });
 
   // Write.
   writeFileSync(outAbs, body, "utf8");
   console.log(c.green("  created") + ` ${relative(cwd, outAbs) || outAbs}`);
-  return { wrote: true, target: outAbs };
+  return { wrote: true, target: outAbs, loginRedirect };
 }
 
 // ---------------------------------------------------------------------------
@@ -385,6 +412,12 @@ with a warning.
   // Next-steps hint.
   console.log("");
   if (result && result.wrote) {
+    // Echo the actual login route the program declared (default `/login`,
+    // or the explicit `loginRedirect=` override). Hard-coding `/login`
+    // here lies to adopters whose loginRedirect is non-default.
+    const visitRoute = (result.loginRedirect && typeof result.loginRedirect === "string")
+      ? result.loginRedirect
+      : "/login";
     console.log(c.bold(c.green("Done.")));
     console.log(`
 Next steps:
@@ -395,7 +428,7 @@ Next steps:
        email TEXT UNIQUE NOT NULL,
        password_hash TEXT NOT NULL
   3. Seed a test user (use hashPassword from scrml:auth).
-  4. Run ${c.cyan("scrml dev")} and visit /login.
+  4. Run ${c.cyan("scrml dev")} and visit ${visitRoute}.
 `);
   } else {
     console.log(c.yellow("Nothing written — see warnings above."));
