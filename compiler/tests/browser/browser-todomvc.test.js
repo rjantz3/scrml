@@ -42,7 +42,7 @@
 import { describe, test, expect } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, readdirSync } from "fs";
 import { resolve } from "path";
 
 if (!globalThis.document) GlobalRegistrator.register();
@@ -61,7 +61,15 @@ const distExists = existsSync(resolve(DIST, "app.html")) &&
 function loadTodoMVC() {
   const htmlFile = resolve(DIST, "app.html");
   const jsFile = resolve(DIST, "app.client.js");
-  const runtimeFile = resolve(DIST, "scrml-runtime.js");
+  // v0.3.x SPA tree-shake Phase B 3.3 — the shared runtime is emitted
+  // with a content hash (`scrml-runtime.<hash>.js`). Find the actual
+  // file by scanning the dist directory for the prefix; fall back to
+  // the legacy literal for compatibility with older dist snapshots.
+  const dirEntries = existsSync(DIST) ? readdirSync(DIST) : [];
+  const runtimeName = dirEntries.find(
+    f => f.startsWith("scrml-runtime") && f.endsWith(".js")
+  );
+  const runtimeFile = resolve(DIST, runtimeName ?? "scrml-runtime.js");
 
   const htmlContent = readFileSync(htmlFile, "utf-8");
   const clientJs = readFileSync(jsFile, "utf-8");

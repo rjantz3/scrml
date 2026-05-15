@@ -626,7 +626,11 @@ describe("self-host smoke: compiled output assessment", () => {
     const html = readFileSync(htmlPath, "utf-8");
     // Current output wraps in a full HTML document — library mode wouldn't do this
     expect(html).toContain("<!DOCTYPE html>");
-    expect(html).toContain("<script src=\"scrml-runtime.js\">");
+    // v0.3.x SPA tree-shake Phase B 3.3 — runtime filename is hashed
+    // (`scrml-runtime.<hash>.js`). Match either the new hashed shape
+    // or the legacy literal (pre-existing dists committed before the
+    // Phase B landing may still carry the older name).
+    expect(html).toMatch(/<script src="scrml-runtime(?:\.[^"]+)?\.js">/);
   });
 
   test("compiled output lacks ES module exports (library-mode gap)", () => {

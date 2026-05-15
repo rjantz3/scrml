@@ -23,7 +23,7 @@ const DIST_DIR = resolve(TODOMVC_DIR, "dist");
 const SCRML_FILE = resolve(TODOMVC_DIR, "app.scrml");
 
 describe("TodoMVC E2E Browser Test", () => {
-  let html, css, clientJs, runtimeJs;
+  let html, css, clientJs, runtimeJs, runtimeFilename;
 
   beforeAll(() => {
     // Compile fresh
@@ -34,10 +34,15 @@ describe("TodoMVC E2E Browser Test", () => {
     });
     expect(result.errors.length).toBe(0);
 
+    // v0.3.x SPA tree-shake Phase B 3.3 — shared runtime is now hashed
+    // (e.g. scrml-runtime.<hash>.js); read the filename from the
+    // compileScrml result rather than hard-coding the legacy literal.
+    runtimeFilename = result.runtimeFilename ?? "scrml-runtime.js";
+
     html = readFileSync(resolve(DIST_DIR, "app.html"), "utf8");
     css = readFileSync(resolve(DIST_DIR, "app.css"), "utf8");
     clientJs = readFileSync(resolve(DIST_DIR, "app.client.js"), "utf8");
-    runtimeJs = readFileSync(resolve(DIST_DIR, "scrml-runtime.js"), "utf8");
+    runtimeJs = readFileSync(resolve(DIST_DIR, runtimeFilename), "utf8");
   });
 
   // §1 Compilation produces all expected files
@@ -45,7 +50,7 @@ describe("TodoMVC E2E Browser Test", () => {
     expect(existsSync(resolve(DIST_DIR, "app.html"))).toBe(true);
     expect(existsSync(resolve(DIST_DIR, "app.css"))).toBe(true);
     expect(existsSync(resolve(DIST_DIR, "app.client.js"))).toBe(true);
-    expect(existsSync(resolve(DIST_DIR, "scrml-runtime.js"))).toBe(true);
+    expect(existsSync(resolve(DIST_DIR, runtimeFilename))).toBe(true);
   });
 
   // §2 HTML has correct TodoMVC structure
@@ -62,7 +67,7 @@ describe("TodoMVC E2E Browser Test", () => {
   // §3 HTML links CSS and JS correctly
   test("HTML links stylesheet and scripts", () => {
     expect(html).toContain('href="app.css"');
-    expect(html).toContain('src="scrml-runtime.js"');
+    expect(html).toContain(`src="${runtimeFilename}"`);
     expect(html).toContain('src="app.client.js"');
   });
 

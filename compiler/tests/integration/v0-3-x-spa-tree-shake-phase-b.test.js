@@ -1,0 +1,295 @@
+/**
+ * v0.3.x SPA tree-shake — Phase B regression suite.
+ *
+ * Covers SCOPING §3.1 (shared-runtime union), §3.2 (`wire` chunk gate
+ * for `_scrml_wire_decode`), and §5.3 (a) / §3.3 (content-hashed
+ * runtime filename). One test file per scoping concern to keep the
+ * crash-recovery story clear if any individual section breaks.
+ *
+ * Scoping authority:
+ *   - docs/changes/v0.3.x-spa-tree-shake/SCOPING.md §3.1 / §3.2 / §3.3.
+ *   - SPEC.md §57 (Wire Format dual-decoder) — `_scrml_wire_decode`
+ *     trigger surface (gate predicate).
+ *
+ * Measurement anchors (SCOPING §1.2 / §1.3): pre-fix TodoMVC shared-
+ * runtime was 38,681 B gzip; embed-mode TodoMVC was 14,104 B gzip.
+ * Phase B 3.1 + 3.2 should bring shared-mode TodoMVC's runtime below
+ * 16 KB gzip (the assembly is the same chunk union as embed mode).
+ *
+ * Coverage:
+ *   §1  shared-runtime tree-shake (3.1) — assemble runtime from the
+ *       union of `usedRuntimeChunks`; size below 16 KB gzip for SPA
+ *       shape; absent chunks excluded from runtime content.
+ *   §2  wire-decode chunk gate (3.2) — SPA-shape with zero server-fns
+ *       has no `_scrml_wire_decode` in runtime; presence flips on
+ *       when a server-fn is declared.
+ *   §3  hash-stable filename (3.3) — same compile-unit set produces
+ *       same hash (deterministic); different unit set produces
+ *       different hash; per-file client.js + html reference the
+ *       hashed filename consistently.
+ *   §4  embed-mode regression-free path — `embedRuntime: true` still
+ *       produces no shared runtime file and an embed bundle that
+ *       tree-shakes the wire chunk for SPA shape.
+ */
+
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
+import { gzipSync } from "zlib";
+import { compileScrml } from "../../src/api.js";
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+// SPA shape — no server-fns, no `use foreign:`, single page-less file.
+// Modeled on examples/02-counter.scrml.
+const SPA_COUNTER = `<count> = 0
+
+<button onclick={ @count = @count + 1 }>
+  count is \${@count}
+</button>
+`;
+
+// Same shape as SPA_COUNTER but with a server-fn declared in a logic block
+// — should activate the 'wire' chunk gate.
+const SPA_WITH_SERVER_FN = `<count> = 0
+
+\${
+  server function loadCount() {
+    return 42
+  }
+}
+
+<button onclick={ @count = @count + 1 }>
+  count is \${@count}
+</button>
+`;
+
+// Multi-file shape — two files sharing one runtime. Used to verify
+// the per-file `// Requires:` lines all carry the SAME hash.
+const MULTI_A = `<a> = "hello"
+<div>\${@a}</div>
+`;
+
+const MULTI_B = `<b> = "world"
+<span>\${@b}</span>
+`;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+let TMP;
+beforeAll(() => {
+  TMP = mkdtempSync(join(tmpdir(), "phase-b-spa-tree-shake-"));
+});
+afterAll(() => {
+  if (TMP && existsSync(TMP)) rmSync(TMP, { recursive: true, force: true });
+});
+
+function compileSingle(source, opts = {}) {
+  const inputDir = mkdtempSync(join(TMP, "in-"));
+  const outDir = join(inputDir, "dist");
+  const filePath = join(inputDir, "app.scrml");
+  writeFileSync(filePath, source);
+  return {
+    result: compileScrml({
+      inputFiles: [filePath],
+      outputDir: outDir,
+      write: true,
+      log: () => {},
+      ...opts,
+    }),
+    outDir,
+    filePath,
+  };
+}
+
+function compileMulti(sources /* { name: source } */, opts = {}) {
+  const inputDir = mkdtempSync(join(TMP, "multi-"));
+  const outDir = join(inputDir, "dist");
+  const filePaths = [];
+  for (const [name, src] of Object.entries(sources)) {
+    const p = join(inputDir, `${name}.scrml`);
+    writeFileSync(p, src);
+    filePaths.push(p);
+  }
+  return {
+    result: compileScrml({
+      inputFiles: filePaths,
+      outputDir: outDir,
+      write: true,
+      log: () => {},
+      ...opts,
+    }),
+    outDir,
+    filePaths,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// §1 — shared-runtime tree-shake (SCOPING §3.1)
+// ---------------------------------------------------------------------------
+
+describe("§1 shared-runtime tree-shake (Phase B 3.1)", () => {
+  test("SPA shape produces a shared runtime under 16 KB gzip", () => {
+    const { result, outDir } = compileSingle(SPA_COUNTER);
+    expect(result.errors.length).toBe(0);
+    expect(result.runtimeFilename).toBeTruthy();
+    const runtimeBytes = readFileSync(join(outDir, result.runtimeFilename));
+    const gzip = gzipSync(runtimeBytes);
+    // Pre-fix TodoMVC shared runtime was 38,681 B gzip. SPA counter
+    // assembles fewer chunks; expect well under 16 KB.
+    expect(gzip.length).toBeLessThan(16 * 1024);
+  });
+
+  test("SPA shape excludes prefetch + mount + vendor-ref + wire chunks from runtime", () => {
+    const { result, outDir } = compileSingle(SPA_COUNTER);
+    const runtime = readFileSync(join(outDir, result.runtimeFilename), "utf8");
+    // The targeted SPA-irrelevant chunks should NOT be present.
+    expect(runtime).not.toContain("_scrml_prefetch_tier1");
+    expect(runtime).not.toContain("_scrml_prefetch_tier2");
+    expect(runtime).not.toContain("_scrml_chunk_mount");
+    expect(runtime).not.toContain("_scrml_vendor_require");
+    expect(runtime).not.toContain("_scrml_wire_decode");
+  });
+
+  test("SPA shape includes core + scope + errors + transitions (always-present set)", () => {
+    const { result, outDir } = compileSingle(SPA_COUNTER);
+    const runtime = readFileSync(join(outDir, result.runtimeFilename), "utf8");
+    // 'core' chunk
+    expect(runtime).toContain("_scrml_reactive_get");
+    expect(runtime).toContain("_scrml_reactive_set");
+    // 'scope' chunk
+    expect(runtime).toContain("_scrml_register_cleanup");
+    // 'errors' chunk
+    expect(runtime).toContain("class _ScrmlError");
+    expect(runtime).toContain("class NetworkError");
+    // 'transitions' chunk (always shipped — small CSS IIFE)
+    expect(runtime).toContain("Transition CSS injection");
+  });
+
+  test("assembled shared runtime is syntactically valid JS", () => {
+    const { result, outDir } = compileSingle(SPA_COUNTER);
+    const runtime = readFileSync(join(outDir, result.runtimeFilename), "utf8");
+    // The Function constructor parses the runtime as a function body.
+    // Pre-Phase-B-splitter-fix this would have thrown on a bare `§`
+    // token from an omitted-chunk's marker prefix.
+    expect(() => new Function(runtime)).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §2 — wire-decode chunk gate (SCOPING §3.2)
+// ---------------------------------------------------------------------------
+
+describe("§2 wire-decode chunk gate (Phase B 3.2)", () => {
+  test("compile with zero server-fns has no _scrml_wire_decode in runtime", () => {
+    const { result, outDir } = compileSingle(SPA_COUNTER);
+    const runtime = readFileSync(join(outDir, result.runtimeFilename), "utf8");
+    expect(runtime).not.toContain("function _scrml_wire_decode");
+    expect(runtime).not.toContain("__scrml_absent");
+  });
+
+  test("compile with a server-fn DOES include _scrml_wire_decode in runtime", () => {
+    const { result, outDir } = compileSingle(SPA_WITH_SERVER_FN);
+    expect(result.errors.length).toBe(0);
+    const runtime = readFileSync(join(outDir, result.runtimeFilename), "utf8");
+    expect(runtime).toContain("function _scrml_wire_decode");
+    expect(runtime).toContain("__scrml_absent");
+  });
+
+  test("embed-mode SPA bundle does not ship _scrml_wire_decode either", () => {
+    const { result, outDir } = compileSingle(SPA_COUNTER, { embedRuntime: true });
+    expect(result.errors.length).toBe(0);
+    // Embed mode does not write a shared runtime file to disk (runtimeJs
+    // is null, so api.js skips the writeFileSync). The runtimeFilename
+    // field may still carry the legacy literal for back-compat with
+    // callers that surface it unconditionally.
+    const dirEntries = require("fs").readdirSync(outDir);
+    const runtimeFiles = dirEntries.filter(f => f.startsWith("scrml-runtime"));
+    expect(runtimeFiles.length).toBe(0);
+    const clientJs = readFileSync(join(outDir, "app.client.js"), "utf8");
+    expect(clientJs).not.toContain("function _scrml_wire_decode");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §3 — hash-stable filename (SCOPING §3.3)
+// ---------------------------------------------------------------------------
+
+describe("§3 hash-stable runtime filename (Phase B 3.3)", () => {
+  test("identical compile-unit sets produce identical runtime hashes", () => {
+    const a = compileSingle(SPA_COUNTER);
+    const b = compileSingle(SPA_COUNTER);
+    expect(a.result.runtimeFilename).toBe(b.result.runtimeFilename);
+    // Sanity: filename matches the hashed shape.
+    expect(a.result.runtimeFilename).toMatch(/^scrml-runtime\.[a-z0-9]{8}\.js$/);
+  });
+
+  test("different compile-unit sets produce different runtime hashes", () => {
+    // SPA_COUNTER (no server-fns, no wire chunk) vs SPA_WITH_SERVER_FN
+    // (server-fn + wire chunk). The chunk union differs → the
+    // assembled runtime content differs → the hash differs.
+    const a = compileSingle(SPA_COUNTER);
+    const b = compileSingle(SPA_WITH_SERVER_FN);
+    expect(a.result.runtimeFilename).not.toBe(b.result.runtimeFilename);
+  });
+
+  test("per-file `// Requires:` line references the hashed runtime filename", () => {
+    const { result, outDir } = compileSingle(SPA_COUNTER);
+    const clientJs = readFileSync(join(outDir, "app.client.js"), "utf8");
+    expect(clientJs.startsWith(`// Requires: ${result.runtimeFilename}\n`)).toBe(true);
+  });
+
+  test("HTML `<script src=...>` tag references the hashed runtime filename", () => {
+    const { result, outDir } = compileSingle(SPA_COUNTER);
+    const html = readFileSync(join(outDir, "app.html"), "utf8");
+    expect(html).toContain(`<script src="${result.runtimeFilename}"></script>`);
+  });
+
+  test("multi-file compile produces ONE runtime — every per-file client.js carries the SAME hash", () => {
+    const { result, outDir, filePaths } = compileMulti({ a: MULTI_A, b: MULTI_B });
+    expect(result.errors.length).toBe(0);
+    const hashedFilename = result.runtimeFilename;
+    expect(hashedFilename).toMatch(/^scrml-runtime\.[a-z0-9]{8}\.js$/);
+    // Only one runtime file written.
+    const aClient = readFileSync(join(outDir, "a.client.js"), "utf8");
+    const bClient = readFileSync(join(outDir, "b.client.js"), "utf8");
+    expect(aClient).toContain(`// Requires: ${hashedFilename}`);
+    expect(bClient).toContain(`// Requires: ${hashedFilename}`);
+    // Neither client.js should carry a competing hash reference.
+    const otherHashRegex = /scrml-runtime\.[a-z0-9]{8}\.js/g;
+    const aMatches = aClient.match(otherHashRegex) ?? [];
+    const bMatches = bClient.match(otherHashRegex) ?? [];
+    for (const m of aMatches) expect(m).toBe(hashedFilename);
+    for (const m of bMatches) expect(m).toBe(hashedFilename);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §4 — embed-mode regression-free path
+// ---------------------------------------------------------------------------
+
+describe("§4 embed-mode regression-free path", () => {
+  test("embedRuntime: true produces no shared runtime file on disk", () => {
+    const { outDir } = compileSingle(SPA_COUNTER, { embedRuntime: true });
+    // api.js writes a runtime only when both cgResult.runtimeJs (the
+    // assembled bytes) AND cgResult.runtimeFilename are truthy.
+    // Embed mode sets runtimeJs to null, so no file lands on disk.
+    const fsList = require("fs").readdirSync(outDir);
+    const runtimeFiles = fsList.filter(f => f.startsWith("scrml-runtime"));
+    expect(runtimeFiles.length).toBe(0);
+  });
+
+  test("embed-mode SPA bundle tree-shakes (no prefetch / mount / vendor-ref / wire)", () => {
+    const { outDir } = compileSingle(SPA_COUNTER, { embedRuntime: true });
+    const clientJs = readFileSync(join(outDir, "app.client.js"), "utf8");
+    expect(clientJs).not.toContain("_scrml_prefetch_tier1");
+    expect(clientJs).not.toContain("_scrml_chunk_mount");
+    expect(clientJs).not.toContain("_scrml_vendor_require");
+    expect(clientJs).not.toContain("_scrml_wire_decode");
+  });
+});

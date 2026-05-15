@@ -146,8 +146,8 @@ describe("C10 §C10.0 — Chunk wiring", () => {
     expect(RUNTIME_CHUNKS.messages).toContain("_SCRML_TAG_TO_VALIDATOR");
   });
 
-  test("RUNTIME_CHUNK_ORDER has 21 chunks total (17 + 'engine' added by C13 + 'prefetch' added by A-4.3 + 'mount' + 'vendor-ref' added by A-4.7)", () => {
-    expect(RUNTIME_CHUNK_ORDER.length).toBe(21);
+  test("RUNTIME_CHUNK_ORDER has 22 chunks total (17 + 'engine' added by C13 + 'prefetch' added by A-4.3 + 'mount' + 'vendor-ref' added by A-4.7 + 'wire' added by v0.3.x SPA tree-shake Phase B 3.2)", () => {
+    expect(RUNTIME_CHUNK_ORDER.length).toBe(22);
   });
 });
 

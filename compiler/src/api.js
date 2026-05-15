@@ -1706,6 +1706,12 @@ export function compileScrml(options = {}) {
     outputDir: outputDir || "",
     durationMs,
     outputs: cgResult.outputs || new Map(),
+    // v0.3.x SPA tree-shake Phase B 3.3 — runtime filename written to
+    // `outputDir` (when `!embedRuntime`). Carries the content hash
+    // (e.g. "scrml-runtime.a1b2c3d4.js"). Undefined when CG was not
+    // exercised (e.g. fatal upstream errors); callers fall back to the
+    // legacy literal `RUNTIME_FILENAME` when needed.
+    runtimeFilename: cgResult.runtimeFilename,
     // W2 §21.7: the full gathered .scrml file set (after auto-gather pre-pass).
     // Equal to options.inputFiles when gather is disabled. Includes all
     // transitively-reachable .scrml files when gather is enabled.

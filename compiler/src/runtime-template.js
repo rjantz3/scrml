@@ -89,21 +89,6 @@ const _scrml_reactivity_rules = Object.create(null);
 const _scrml_reactivity_bypass = Object.create(null);
 const _scrml_throttle_state = Object.create(null);
 
-// --- §57 Wire Format dual-decoder (M-7C-D-12 Track 2) ---
-// Accepts BOTH the canonical envelope { __scrml_absent: true } (encoder
-// always emits this) AND raw JSON null (legacy / pre-v0.3 / foreign-client).
-// Both lower to scrml \`not\` (JS null per §42.5 / §42.8). Any other value
-// passes through unchanged. Dual-decoder retires at v1.0 (OQ-4 (a)).
-//
-// Lives in the 'core' chunk so every server-fn fetch stub that compiles
-// can reference \`_scrml_wire_decode\` without needing a runtime-chunk
-// inclusion vote. The helper is small (single conditional + one type check).
-function _scrml_wire_decode(value) {
-  if (value === null) return null;
-  if (value !== null && typeof value === "object" && value.__scrml_absent === true) return null;
-  return value;
-}
-
 // --- derived reactive state (§6.6) ---
 // _scrml_derived_fns: name → () => value  (evaluation function for each derived node)
 // _scrml_derived_cache: name → cached value
@@ -405,6 +390,28 @@ function _scrml_reactive_derived(name, fn) {
     "scrml runtime: _scrml_reactive_derived is retired (§6.6). " +
     "Recompile this file with the current compiler to use _scrml_derived_declare."
   );
+}
+
+// ---------------------------------------------------------------------------
+// §57 Wire Format dual-decoder (chunk: 'wire')
+// ---------------------------------------------------------------------------
+// --- §57 Wire Format dual-decoder (M-7C-D-12 Track 2) ---
+// Accepts BOTH the canonical envelope { __scrml_absent: true } (encoder
+// always emits this) AND raw JSON null (legacy / pre-v0.3 / foreign-client).
+// Both lower to scrml \`not\` (JS null per §42.5 / §42.8). Any other value
+// passes through unchanged. Dual-decoder retires at v1.0 (OQ-4 (a)).
+//
+// v0.3.x SPA tree-shake (Phase B 3.2): the dual-decoder moved out of
+// 'core' into the dedicated 'wire' chunk so SPA-shape compile units
+// (no server-fns + no \`use foreign:\` use-decls) ship without it.
+// Activated by \`emit-client.ts:detectRuntimeChunks\` when ANY file in
+// the compile unit contains a server \`function-decl\` OR a \`use foreign:\`
+// use-decl. The chunk-side reference sites are the server-fn fetch
+// stubs emitted by \`emit-functions.ts\` and \`atom-emitter.ts\`.
+function _scrml_wire_decode(value) {
+  if (value === null) return null;
+  if (value !== null && typeof value === "object" && value.__scrml_absent === true) return null;
+  return value;
 }
 
 // ---------------------------------------------------------------------------

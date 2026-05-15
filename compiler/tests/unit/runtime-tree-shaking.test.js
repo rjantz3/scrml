@@ -237,7 +237,12 @@ describe("runtime size", () => {
     expect(minimal.length).toBeLessThan(SCRML_RUNTIME.length * 0.30);
   });
 
-  test("RUNTIME_CHUNK_ORDER has 21 chunks", () => {
+  test("RUNTIME_CHUNK_ORDER has 22 chunks", () => {
+    // 22 chunks post-v0.3.x SPA tree-shake Phase B 3.2: 'wire' chunk added
+    // for the §57 dual-decoder (_scrml_wire_decode). Activated by
+    // detectRuntimeChunks when ANY file in the compile unit has a server
+    // 'function-decl' OR a 'use foreign:' use-decl.
+    //
     // 21 chunks post-A-4.7: 'mount' + 'vendor-ref' chunks added for SPEC
     // §40.9.7 chunk-side record-keeping helpers (_scrml_chunk_mount,
     // _scrml_vendor_require). Chunk-detection trigger: detectRuntimeChunks
@@ -251,6 +256,6 @@ describe("runtime size", () => {
     //   18 chunks post-C13: 'engine' chunk for §51.0.F + §51.0.G engine
     //   state-machine runtime hooks.
     //   17 chunks post-C10: 'messages' chunk for §55.10.
-    expect(RUNTIME_CHUNK_ORDER.length).toBe(21);
+    expect(RUNTIME_CHUNK_ORDER.length).toBe(22);
   });
 });

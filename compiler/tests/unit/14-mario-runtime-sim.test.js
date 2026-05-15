@@ -43,10 +43,12 @@ function compileMario() {
   mkdirSync(tmpDir, { recursive: true });
   writeFileSync(tmpInput, src);
   try {
-    compileScrml({ inputFiles: [tmpInput], write: true, outputDir: outDir });
+    const result = compileScrml({ inputFiles: [tmpInput], write: true, outputDir: outDir });
     const html = readFileSync(resolve(outDir, "14-mario.html"), "utf-8");
     const clientJs = readFileSync(resolve(outDir, "14-mario.client.js"), "utf-8");
-    const runtimeJs = readFileSync(resolve(outDir, "scrml-runtime.js"), "utf-8");
+    // v0.3.x SPA tree-shake Phase B 3.3 — runtime filename is hashed
+    // (scrml-runtime.<hash>.js); read it from compileScrml result.
+    const runtimeJs = readFileSync(resolve(outDir, result.runtimeFilename ?? "scrml-runtime.js"), "utf-8");
     return { html, clientJs, runtimeJs };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });

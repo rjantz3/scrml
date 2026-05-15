@@ -19,8 +19,34 @@
 
 import { scanClassesFromHtml, getAllUsedCSS } from "../tailwind-classes.js";
 import { basename } from "path";
-import { SCRML_RUNTIME, RUNTIME_FILENAME } from "../runtime-template.js";
+import { RUNTIME_FILENAME } from "../runtime-template.js";
+import { assembleRuntime } from "./runtime-chunks.ts";
+import { fnv1aHash } from "./fnv1a-hash.ts";
 import { CGError } from "./errors.ts";
+
+/**
+ * v0.3.x SPA tree-shake Phase B 3.1 + 3.3 — runtime-filename placeholder.
+ *
+ * The per-file emit phase injects this token wherever the shared-runtime
+ * filename would normally appear (the `// Requires: ...` clientJs comment
+ * and the `<script src=...></script>` HTML tag). After the per-file loop
+ * finishes, `runCG` computes the chunk union, assembles the shared
+ * runtime, hashes its content (FNV-1a over canonical bytes), derives the
+ * final hashed filename (e.g. `scrml-runtime.a1b2c3d4.js`), and
+ * substitutes the placeholder in every per-file output.
+ *
+ * Substitution is unconditional even when the union assembly happens to
+ * match the legacy full-runtime content; the filename always carries
+ * the hash so cache-busting is deterministic across compile-unit
+ * shapes. (Without this, an adopter pinning a stable `scrml-runtime.js`
+ * URL would see the runtime content change silently when one of their
+ * .scrml files toggled a chunk-gate predicate — exactly the cache
+ * invalidation that SCOPING §5.3 (a) flags.)
+ *
+ * The token is intentionally distinctive (uppercase, with delimiters) to
+ * avoid clashing with any user-authored string literal.
+ */
+const RUNTIME_FILENAME_PLACEHOLDER = "__SCRML_RUNTIME_FILENAME_PLACEHOLDER__";
 import { resetVarCounter } from "./var-counter.ts";
 import { escapeHtmlAttr } from "./utils.ts";
 import { generateHtml, augmentHtmlForChunks } from "./emit-html.ts";
@@ -668,12 +694,16 @@ export function runCG(input: CgInput): CgOutput {
 
     let clientJs: string | null = clientJsRaw;
     if (clientJsRaw && !embedRuntime) {
+      // v0.3.x SPA tree-shake Phase B 3.3 — emit a placeholder filename
+      // here; runCG substitutes the final hashed filename
+      // (`scrml-runtime.<hash>.js`) in a post-pass once the union has
+      // been assembled.
       const runtimeEnd = clientJsRaw.indexOf("\n// --- end scrml reactive runtime ---");
       if (runtimeEnd !== -1) {
         const afterRuntime = clientJsRaw.substring(
           runtimeEnd + "\n// --- end scrml reactive runtime ---".length
         );
-        clientJs = `// Requires: ${RUNTIME_FILENAME}\n` + afterRuntime;
+        clientJs = `// Requires: ${RUNTIME_FILENAME_PLACEHOLDER}\n` + afterRuntime;
       } else {
         const runtimeStart = clientJsRaw.indexOf("// --- scrml reactive runtime ---");
         if (runtimeStart !== -1) {
@@ -683,7 +713,7 @@ export function runCG(input: CgInput): CgOutput {
             if (closeBrace !== -1) {
               const before = clientJsRaw.substring(0, runtimeStart);
               const after = clientJsRaw.substring(closeBrace + 2);
-              clientJs = before + `// Requires: ${RUNTIME_FILENAME}\n` + after;
+              clientJs = before + `// Requires: ${RUNTIME_FILENAME_PLACEHOLDER}\n` + after;
             }
           }
         }
@@ -775,7 +805,9 @@ export function runCG(input: CgInput): CgOutput {
       docParts.push("<body>");
       docParts.push(htmlBody);
       if (clientJs && !embedRuntime) {
-        docParts.push(`<script src="${RUNTIME_FILENAME}"></script>`);
+        // v0.3.x SPA tree-shake Phase B 3.3 — placeholder; runCG
+        // substitutes the final hashed filename in a post-pass.
+        docParts.push(`<script src="${RUNTIME_FILENAME_PLACEHOLDER}"></script>`);
       }
       if (clientJs) {
         docParts.push(`<script src="${base}.client.js"></script>`);
@@ -892,7 +924,83 @@ export function runCG(input: CgInput): CgOutput {
     if (undefinedLintErrors.length > 0) errors.push(...undefinedLintErrors);
   }
 
-  const runtimeJs = embedRuntime ? null : SCRML_RUNTIME;
+  // -------------------------------------------------------------------------
+  // v0.3.x SPA tree-shake Phase B 3.1 + 3.3 — shared-runtime union + hash.
+  //
+  // In `embedRuntime: true` mode each per-file client.js carries its own
+  // tree-shaken runtime; the shared runtime is not produced. The legacy
+  // path (`!embedRuntime`) used to ship the entire `SCRML_RUNTIME`
+  // template verbatim regardless of which chunks the compile unit
+  // actually used. Phase B 3.1 closes that gap by assembling the
+  // runtime from the UNION of `usedRuntimeChunks` across every file's
+  // CompileContext.
+  //
+  // Phase B 3.3 then content-hashes the assembled runtime (FNV-1a over
+  // its bytes) and embeds the hash in the runtime filename so adopters
+  // serving the runtime from a stable URL get a deterministic
+  // cache-busting key: changing which `.scrml` files are in the build
+  // (or which chunk-gate predicates fire) flips the hash, but compiling
+  // the same source set twice produces a byte-identical filename.
+  //
+  // Substitution: per-file emission writes a placeholder
+  // (`RUNTIME_FILENAME_PLACEHOLDER`) wherever the filename would appear
+  // (`// Requires: <filename>` line in client.js + `<script src=...>`
+  // tag in HTML). Once the final hashed filename is computed below, we
+  // pass over every output's `clientJs` and `html` and substitute.
+  // -------------------------------------------------------------------------
+  let runtimeJs: string | null = null;
+  let runtimeFilename: string = RUNTIME_FILENAME;
+  if (!embedRuntime) {
+    // Union usedRuntimeChunks across every compiled file in this run.
+    // Always include the per-spec always-present set (`core`, `scope`,
+    // `errors`, `transitions`) so files that skipped CG (library mode,
+    // empty workers, fixture files with no AST features) still produce
+    // a runnable runtime.
+    const union = new Set<string>();
+    for (const ctx of cgContextByFile.values()) {
+      for (const name of ctx.usedRuntimeChunks) union.add(name);
+    }
+    union.add("core");
+    union.add("scope");
+    union.add("errors");
+    union.add("transitions");
+    runtimeJs = assembleRuntime(union);
+
+    // Phase B 3.3 — content-hash the assembled runtime. FNV-1a 32-bit
+    // (the same primitive used for §47 type-encoding and §47.5 per-chunk
+    // content-addressing per A-4.6). 8-char base36 entropy; collision
+    // risk for a per-build shared runtime is negligible.
+    const hash = fnv1aHash(runtimeJs);
+    // Splice the hash into the legacy `scrml-runtime.js` shape →
+    // `scrml-runtime.<hash>.js`. Keep the suffix derivation tied to
+    // `RUNTIME_FILENAME` (current value: "scrml-runtime.js") so a
+    // future template change cascades naturally.
+    const dotIdx = RUNTIME_FILENAME.lastIndexOf(".");
+    const base = dotIdx === -1 ? RUNTIME_FILENAME : RUNTIME_FILENAME.slice(0, dotIdx);
+    const ext = dotIdx === -1 ? "" : RUNTIME_FILENAME.slice(dotIdx);
+    runtimeFilename = `${base}.${hash}${ext}`;
+
+    // Substitute the placeholder in every output's clientJs and html.
+    // Files that don't ship a `<script src=...>` runtime reference (e.g.
+    // library-mode or worker-only outputs) are unaffected — the
+    // placeholder is absent and the `replaceAll` is a no-op.
+    for (const [path, out] of outputs) {
+      let mutated = false;
+      let nextClient = out.clientJs ?? null;
+      let nextHtml = out.html ?? null;
+      if (nextClient && nextClient.includes(RUNTIME_FILENAME_PLACEHOLDER)) {
+        nextClient = nextClient.split(RUNTIME_FILENAME_PLACEHOLDER).join(runtimeFilename);
+        mutated = true;
+      }
+      if (nextHtml && nextHtml.includes(RUNTIME_FILENAME_PLACEHOLDER)) {
+        nextHtml = nextHtml.split(RUNTIME_FILENAME_PLACEHOLDER).join(runtimeFilename);
+        mutated = true;
+      }
+      if (mutated) {
+        outputs.set(path, { ...out, clientJs: nextClient, html: nextHtml });
+      }
+    }
+  }
 
   // §51.5.1 (S28 slice 3) — drain E-ENGINE-001 compile errors accumulated
   // by emit-machines during this compile.
@@ -1063,7 +1171,11 @@ export function runCG(input: CgInput): CgOutput {
     outputs,
     errors,
     runtimeJs,
-    runtimeFilename: RUNTIME_FILENAME,
+    // Phase B 3.3 — in `!embedRuntime` mode this is the hashed
+    // filename (e.g. `scrml-runtime.a1b2c3d4.js`); in embed mode it
+    // remains the legacy literal but `runtimeJs` is `null` so the
+    // caller writes nothing.
+    runtimeFilename,
     ...(chunks !== undefined && { chunks }),
     ...(chunksManifest !== undefined && { chunksManifest }),
   };

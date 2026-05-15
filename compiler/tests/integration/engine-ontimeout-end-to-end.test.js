@@ -43,7 +43,11 @@ function compile(source, suffix = "ot-e2e") {
       outputDir: outDir,
     });
     const clientPath = resolve(outDir, `${name}.client.js`);
-    const runtimePath = resolve(outDir, "scrml-runtime.js");
+    // v0.3.x SPA tree-shake Phase B 3.3 — runtime filename is hashed
+    // (scrml-runtime.<hash>.js); read it from the compileScrml result
+    // rather than hard-coding the legacy literal.
+    const runtimeFilename = result.runtimeFilename ?? "scrml-runtime.js";
+    const runtimePath = resolve(outDir, runtimeFilename);
     return {
       errors: result.errors ?? [],
       clientJs: existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "",

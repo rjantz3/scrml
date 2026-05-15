@@ -16,6 +16,11 @@
  *
  * Chunk → runtime functions:
  *   core          _scrml_state, _scrml_subscribers, _scrml_reactive_get/set/subscribe/propagate_dirty
+ *   wire          _scrml_wire_decode (§57 dual-decoder, v0.3.x SPA tree-shake Phase B 3.2).
+ *                 Only referenced by emitted server-fn fetch stubs
+ *                 (`emit-functions.ts` + `atom-emitter.ts`). Tree-shaken when
+ *                 the compile unit has no `function-decl` with `isServer:true`
+ *                 AND no `use foreign:` use-decl.
  *   reset         _scrml_default_set/_fns, _scrml_init_set/_fns, _scrml_reset (§6.8)
  *   validators    14 universal-core fire functions, VALIDATOR_RUNTIME map,
  *                 _scrml_validator_fire (§55.1, C7) — inlined verbatim from
@@ -101,6 +106,7 @@ import { SCRML_RUNTIME } from "../runtime-template.js";
 
 export const RUNTIME_CHUNK_ORDER = [
   'core',
+  'wire',
   'reset',
   'validators',
   'derived',
@@ -156,6 +162,14 @@ type NonCoreChunkName = Exclude<RuntimeChunkName, 'core'>;
 const CHUNK_MARKERS: Record<NonCoreChunkName, string> = {
   // §X.X section header comments — each appears exactly once, in a // comment line.
   // Split position is mid-comment-line (after '// '). Both sides are valid JS.
+
+  // v0.3.x SPA tree-shake (Phase B 3.2) — `wire` chunk gates the §57 dual-
+  // decoder (`_scrml_wire_decode`). The helper is only referenced from
+  // emitted server-fn fetch stubs (emit-functions.ts + atom-emitter.ts);
+  // SPA-shape compile units with zero server-fns ship without it.
+  // Activated by `detectRuntimeChunks` when ANY file in the compile unit
+  // contains a server `function-decl` OR a `use foreign:` use-decl.
+  wire:           "§57 Wire Format dual-decoder (chunk: 'wire')",
   reset:          "§6.8 reset+default runtime (chunk: 'reset')",
   validators:     "§55.1 Validator predicate runtime catalog (chunk: 'validators')",
   derived:        '§6.6 Derived reactive runtime',
@@ -216,7 +230,38 @@ function buildRuntimeChunks(): Record<RuntimeChunkName, string> {
       }
       continue;
     }
-    positions.push({ name, idx });
+
+    // v0.3.x SPA tree-shake Phase B (2026-05-15) — back the chunk start up
+    // to include the line-comment prefix for markers that fall mid-line
+    // inside a `// ...` line comment. Pre-Phase-B, the splitter docs
+    // claimed "the '// ' prefix stays in the previous chunk" — that worked
+    // when the previous chunk was always included (shared-runtime path)
+    // but breaks the moment an adjacent chunk gets tree-shaken: the next
+    // included chunk then opens with a bare marker token (e.g. `§X.X` or
+    // `Transition`) which is a JS syntax error. By absorbing the `// `
+    // into THIS chunk's start, each chunk's content is self-contained as
+    // valid JS regardless of which neighbours are included or omitted.
+    //
+    // Function-name markers (`'function _scrml_lift'`, etc.) start at a
+    // function-declaration boundary already and need no shift; we detect
+    // them by checking the start of the marker text.
+    let chunkStart = idx;
+    if (!marker.startsWith("function ")) {
+      // Walk backward to the start of THIS line, then search forward for
+      // the line's `//` prefix. The line layout is uniformly
+      // `// <decoration>? <marker> ...`, where decoration may be empty
+      // (`// §X.X ...`) or contain dashes (`// --- Transition CSS ...`).
+      // Absorbing the line-comment prefix into THIS chunk's start makes
+      // each chunk's content self-contained as valid JS regardless of
+      // which neighbours are included or omitted.
+      let lineStart = idx;
+      while (lineStart > 0 && SCRML_RUNTIME[lineStart - 1] !== "\n") lineStart--;
+      const slashSlashIdx = SCRML_RUNTIME.indexOf("//", lineStart);
+      if (slashSlashIdx !== -1 && slashSlashIdx < idx) {
+        chunkStart = slashSlashIdx;
+      }
+    }
+    positions.push({ name, idx: chunkStart });
   }
 
   // Sort by ascending position

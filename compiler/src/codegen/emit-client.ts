@@ -281,6 +281,36 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
         chunks.add("lift");
         break;
 
+      // v0.3.x SPA tree-shake (Phase B 3.2) — `wire` chunk gate.
+      // The §57 dual-decoder `_scrml_wire_decode` is only referenced from
+      // emitted server-fn fetch stubs (emit-functions.ts at the `T | not`
+      // call site + atom-emitter.ts at the chunked server-fn stub call
+      // site). Activate the chunk whenever a server `function-decl` appears
+      // in this file's AST. The gate is conservative: even pure-`T`
+      // server-fns activate the chunk (the helper is small and the
+      // detectRuntimeChunks walk runs before return-type analysis would
+      // be available here). A future tightening could gate on
+      // `returnTypeAllowsAbsence(fn.returnTypeAnnotation)` per server-fn.
+      case "function-decl":
+        if ((node as any).isServer === true) {
+          chunks.add("wire");
+        }
+        break;
+
+      // v0.3.x SPA tree-shake (Phase B 3.2) — `wire` chunk gate (sidecar
+      // form). `use foreign:NAME { fn-list }` (§23.4) imports
+      // sidecar-process functions whose call sites flow through the same
+      // wire-format decoder path as cross-boundary server-fns. Activate
+      // the chunk when the source string begins with `foreign:`.
+      case "use-decl":
+        if (
+          typeof (node as any).source === "string" &&
+          (node as any).source.startsWith("foreign:")
+        ) {
+          chunks.add("wire");
+        }
+        break;
+
       // state-decl — @x = value. Uses _scrml_deep_reactive for object/array wrapping.
       // Phase A1a Step 11.5 — fold: state-decl with shape:"derived" AND
       // structuralForm:false is the post-fold representation of legacy
