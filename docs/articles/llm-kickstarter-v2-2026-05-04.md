@@ -630,7 +630,9 @@ Default `<errors of=...>` shows `errors[0]` only. Use `all` attribute for full-l
 
 ### 6.6 Resetting state — `reset(@cell)`
 
-`reset()` is a language keyword (no import needed). Mutates in place; returns nothing.
+`reset()` is a **reserved language keyword** per SPEC §6.8 — no import needed AND you cannot define your own `reset`. A local declaration named `reset` (function or otherwise) collides with the keyword and fails. **Pick a different name** (`clearForm`, `resetSignup`, `wipeFields`) when you need a custom reset routine.
+
+`reset(@cell)` mutates in place; returns nothing.
 
 ```scrml
 <button onclick=reset(@signup)>Clear form</button>
