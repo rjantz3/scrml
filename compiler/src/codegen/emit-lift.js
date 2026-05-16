@@ -452,6 +452,17 @@ function emitSetAttrs(elVar, attrs) {
       for (const ref of uniqueRefs) {
         lines.push(`_scrml_reactive_subscribe(${JSON.stringify(ref)}, ${updaterVar});`);
       }
+    } else if (attr.name.startsWith("class:")) {
+      // §5.5.2 conditional class directive — see the parity branch in
+      // emitCreateElementFromMarkup for the value-kind-AST equivalent.
+      // attr.value here is the raw source string (e.g. "@isActive",
+      // "todo.done", "(item.id == @selected)", "isPicked()"). emitExprField
+      // rewrites @-prefixed refs to _scrml_reactive_get(...) and passes
+      // closure-captured identifiers (loop iterables) through unchanged.
+      const className = attr.name.slice(6);
+      const raw = (attr.value ?? "").trim();
+      const condExpr = emitExprField(null, raw, { mode: "client" });
+      lines.push(`_scrml_effect(() => { ${elVar}.classList.toggle(${JSON.stringify(className)}, !!(${condExpr})); });`);
     } else if (/^on[a-z]/.test(attr.name)) {
       // BUG-6 fix: event attributes like onclick, ondblclick, onsubmit
       // must use addEventListener, not setAttribute
@@ -613,6 +624,37 @@ export function emitCreateElementFromMarkup(node, lines) {
       for (const ref of uniqueRefs) {
         lines.push(`_scrml_reactive_subscribe(${JSON.stringify(ref)}, ${updaterVar});`);
       }
+      continue;
+    }
+
+    // class:NAME=expr conditional class directive (§5.5.2). Must run BEFORE the
+    // generic value-kind dispatch — otherwise `class:dragging` falls through to
+    // `setAttribute("class:dragging", ...)`, which is a literal HTML attribute
+    // and does nothing useful at runtime.
+    //
+    // Top-level (non-lift) emission handles this via a stamped marker attribute
+    // (`data-scrml-class-NAME`) + querySelector lookup. Inside a lift factory
+    // we already have a direct reference to the element (`elVar`), so we wire
+    // the reactive effect directly on `elVar` and skip the marker.
+    if (val && name.startsWith("class:") && (
+      val.kind === "variable-ref" || val.kind === "expr" || val.kind === "call-ref"
+    )) {
+      const className = name.slice(6);
+      let condExpr;
+      if (val.kind === "variable-ref") {
+        const rawRef = (val.name || "").replace(/^@/, "");
+        condExpr = emitExprField(val.exprNode, rawRef, { mode: "client" });
+      } else if (val.kind === "expr") {
+        const raw = val.raw ?? "";
+        condExpr = emitExprField(val.exprNode, raw, { mode: "client" });
+      } else {
+        const rawArgs = val.argExprNodes
+          ? val.argExprNodes.map(n => emitExprField(n, "", { mode: "client" })).join(", ")
+          : (val.args || []).map(a => emitExprField(null, a.trim(), { mode: "client" })).join(", ");
+        const rewrittenName = emitExprField(null, val.name, { mode: "client" });
+        condExpr = `${rewrittenName}(${rawArgs})`;
+      }
+      lines.push(`_scrml_effect(() => { ${elVar}.classList.toggle(${JSON.stringify(className)}, !!(${condExpr})); });`);
       continue;
     }
 
