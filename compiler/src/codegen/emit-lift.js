@@ -80,13 +80,25 @@ function parseAttrs(attrsStr) {
     // BUG-4 fix: handle tokenizer-spaced hyphenated names like `data - id`.
     // After reading "data", if whitespace is followed by `-` then more name chars,
     // merge them into a single hyphenated attribute name.
+    //
+    // S96 Bug 10 fix — extend the merge logic on TWO axes:
+    //   (a) Also accept `:` as a separator. The tokenizer spaces `class:opacity`
+    //       to `class : opacity`; without this branch, `class:opacity-40` parses
+    //       as 5 separate empty attributes (`class`, `:`, `opacity`, `-`, `40`).
+    //       Spec §5.5.2 `class-name ::= [a-zA-Z][a-zA-Z0-9_-]*` admits the form.
+    //   (b) Accept digit-starting continuation chunks. `bg-blue-500`, `opacity-40`,
+    //       `text-2xl` are canonical Tailwind utility class names; the leading
+    //       segment is alpha (line 76 gate) but subsequent `-N` chunks may start
+    //       with a digit. Relaxing the inner gate from `[A-Za-z]` to `[A-Za-z0-9]`
+    //       admits all spec-grammar-legal class-names.
     while (true) {
       let j = i;
       while (j < s.length && /\s/.test(s[j])) j++;
-      if (j < s.length && s[j] === '-') {
+      if (j < s.length && (s[j] === '-' || s[j] === ':')) {
+        const sep = s[j];
         let k = j + 1;
         while (k < s.length && /\s/.test(s[k])) k++;
-        if (k < s.length && /[A-Za-z]/.test(s[k])) {
+        if (k < s.length && /[A-Za-z0-9]/.test(s[k])) {
           // Check this isn't actually an = sign coming (not a hyphenated continuation)
           let nameEnd = k;
           while (nameEnd < s.length && /[A-Za-z0-9_:\-.]/.test(s[nameEnd])) nameEnd++;
@@ -95,9 +107,9 @@ function parseAttrs(attrsStr) {
           // Only merge if the next part is NOT followed by = (which would mean
           // this is a separate attribute like `- id = "val"`)
           // Actually for hyphenated attrs like data-id, the merged name IS followed by =
-          // So always merge when we see name-space-hyphen-space-name pattern
+          // So always merge when we see name-space-sep-space-name pattern
           const nextPart = s.slice(k, nameEnd);
-          name = name + "-" + nextPart;
+          name = name + sep + nextPart;
           i = nameEnd;
           continue;
         }

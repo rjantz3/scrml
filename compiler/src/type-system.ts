@@ -10396,7 +10396,13 @@ function checkFnBodyProhibitions(
       const txt = nodeText(stmt);
       if (txt) {
         // E-FN-001: ?{} SQL access (text-heuristic — catches ?{} embedded in let-decl init or return-stmt)
-        if (stmt.kind !== "sql" && /\?\s*\{/.test(txt)) {
+        // S96 Bug 15 fix — pattern must be `?{` with NO whitespace. The pre-fix
+        // `/\?\s*\{/` regex matched `? {` (ternary with object-literal arm),
+        // false-firing on shapes like `t.id == id ? { ...t } : t` inside fn
+        // bodies. SPEC §48 (purity) targets the SQL sigil `?{` which is
+        // tokenized as a single unit — no whitespace permitted between `?`
+        // and `{`. Tightening the regex matches that tokenizer contract.
+        if (stmt.kind !== "sql" && /\?\{/.test(txt)) {
           errors.push(new TSError(
             "E-FN-001",
             `E-FN-001: \`fn ${fnName}\` body contains a \`?{}\` SQL access. ` +
