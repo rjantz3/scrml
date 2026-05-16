@@ -499,6 +499,37 @@ function normalizeTokenizedRaw(raw: string): string {
   s = s.replace(/(\w)\s+=\s+/g, "$1=");
   s = s.replace(/\s+=\s+/g, "=");
 
+  // Step 6 (S97 — Bug 4 root cause): Collapse tokenized call-form spacing
+  // so `ident ( args )` becomes `ident(args)`. The logic tokenizer emits
+  // every `(` / `)` as its own space-padded token; in attribute values
+  // like `ondrop=dropOn ( name )` the markup tokenizer reads `dropOn` as
+  // ATTR_IDENT (stops at the space) and then treats `(`/`name`/`)` as
+  // stray attribute fragments — `name` ends up as a separate boolean
+  // attribute, the original `dropOn(name)` call shape is lost, and HTML
+  // emit produces `<li ondrop="dropOn" name>` instead of the intended
+  // call-ref binding. Collapsing the call-form spacing restores ATTR_CALL
+  // tokenization at the markup-tokenizer level (tokenizer.ts:403
+  // `ch() === "("` check fires correctly).
+  //
+  // Three sub-steps cover the shapes the logic tokenizer emits:
+  //   (a) `\w\s+\(` → `\w(`  — close the ident-to-open-paren gap
+  //   (b) `\(\s+`   → `(`    — strip leading whitespace inside parens
+  //   (c) `\s+\)`   → `)`    — strip trailing whitespace before close
+  //
+  // (a) is the load-bearing one for ATTR_CALL detection. (b)+(c) keep
+  // the resulting call args tidy and prevent re-introduction of the
+  // tokenized-whitespace shape downstream.
+  //
+  // Safety: this only collapses whitespace tokens — content inside the
+  // parens (the args themselves) is preserved verbatim. The logic
+  // tokenizer doesn't put newlines mid-call, so `\s+` matches only the
+  // single space the tokenizer inserts. Multi-line call args (rare in
+  // template bodies) would still survive because the inner content's
+  // structure isn't whitespace-tokenized this way.
+  s = s.replace(/(\w)\s+\(/g, "$1(");
+  s = s.replace(/\(\s+/g, "(");
+  s = s.replace(/\s+\)/g, ")");
+
   return s;
 }
 
@@ -1445,6 +1476,91 @@ function substituteProps(
           const newVal = applyPropSubstitutions(attr.value.value, props);
           if (newVal !== attr.value.value) {
             return { ...attr, value: { ...attr.value, value: newVal } };
+          }
+        }
+        // S97 — Bug 4 fix: substitute prop refs inside structured attribute
+        // values (call-ref / variable-ref / expr). Without this, refs like
+        // `dropOn(name)` in a template's `<li ondrop=dropOn(name)>` leave the
+        // `name` IdentExpr pointing at a non-existent local. With the
+        // normalizeTokenizedRaw fix (Step 6) the tokenizer now correctly
+        // produces ATTR_CALL with the inner `name` arg; without prop
+        // substitution here, the emitted handler is
+        // `function(event){ _scrml_dropOn(name); }` where `name` is unbound.
+        // Same shape applies to any prop-typed ident passed as an event-
+        // handler arg, conditional, or bind target.
+        if (propExprMap && attr.value.kind === "call-ref") {
+          const callVal = attr.value as { name: string; args: string[]; argExprNodes?: ExprNode[]; span: ExprSpan };
+          const argNodes = callVal.argExprNodes;
+          if (Array.isArray(argNodes) && argNodes.length > 0) {
+            let changed = false;
+            const newArgNodes = argNodes.map((node) => {
+              const replaced = substitutePropsInExprNode(node, propExprMap, new Set());
+              if (replaced !== node) changed = true;
+              return replaced;
+            });
+            if (changed) {
+              // Re-serialize args from substituted nodes so the raw `args`
+              // strings (consumed by emit-event-wiring + HTML emit paths
+              // that don't read argExprNodes) reflect the substitution.
+              const newArgs = newArgNodes.map((n) => {
+                try {
+                  return emitStringFromTree(n as ExprNode);
+                } catch (_e) {
+                  return ""; // defensive — should not fire for sub'd nodes
+                }
+              });
+              return { ...attr, value: { ...callVal, args: newArgs, argExprNodes: newArgNodes } };
+            }
+          }
+        }
+        if (propExprMap && attr.value.kind === "variable-ref") {
+          const varVal = attr.value as { name: string; exprNode?: ExprNode; span: ExprSpan };
+          // The variable-ref's `name` is the raw text (e.g. "name", "@cell").
+          // Check if the bare name (stripped of leading `@`) is a prop.
+          const bareName = varVal.name.startsWith("@") ? varVal.name.slice(1) : varVal.name;
+          if (propExprMap.has(bareName)) {
+            const propExpr = propExprMap.get(bareName)!;
+            let raw = "";
+            try {
+              raw = emitStringFromTree(propExpr);
+            } catch (_e) {
+              raw = varVal.name;
+            }
+            return {
+              ...attr,
+              value: {
+                kind: "expr",
+                raw,
+                refs: [],
+                exprNode: propExpr,
+                span: varVal.span,
+              },
+            };
+          }
+          // Also substitute inside a pre-parsed exprNode if the name itself
+          // wasn't a direct prop match but the exprNode contains prop refs.
+          if (varVal.exprNode) {
+            const replaced = substitutePropsInExprNode(varVal.exprNode, propExprMap, new Set());
+            if (replaced !== varVal.exprNode) {
+              let raw = varVal.name;
+              try {
+                raw = emitStringFromTree(replaced);
+              } catch (_e) { /* keep original */ }
+              return { ...attr, value: { ...varVal, name: raw, exprNode: replaced } };
+            }
+          }
+        }
+        if (propExprMap && attr.value.kind === "expr") {
+          const exprVal = attr.value as { raw: string; refs: string[]; exprNode?: ExprNode; span: ExprSpan };
+          if (exprVal.exprNode) {
+            const replaced = substitutePropsInExprNode(exprVal.exprNode, propExprMap, new Set());
+            if (replaced !== exprVal.exprNode) {
+              let raw = exprVal.raw;
+              try {
+                raw = emitStringFromTree(replaced);
+              } catch (_e) { /* keep original */ }
+              return { ...attr, value: { ...exprVal, raw, exprNode: replaced } };
+            }
           }
         }
         return attr;
