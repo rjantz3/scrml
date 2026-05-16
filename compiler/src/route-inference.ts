@@ -2274,6 +2274,16 @@ export function runRI(input: RIInput): RIOutput {
     ) {
       collectIdentsFromText(node.bodyRaw);
     }
+    // S96 Bug 7 fix — component-def bodies are stored as raw text strings
+    // (per primer §13.7 B17 specifics: "component-def stores body as
+    // `raw: string`, not walkable AST"). Functions called from event-handler
+    // attributes inside component bodies (e.g., `ondragstart=startDrag(...)`
+    // inside `const TaskCard = <li ...>`) are invisible to the generic
+    // recursion below because it only descends into Array + object-with-kind
+    // fields. Mirror the when-handler `bodyRaw` pattern above.
+    if (node.kind === "component-def" && typeof node.raw === "string") {
+      collectIdentsFromText(node.raw);
+    }
     // Bug 4 / S87 Trio A: nodes nested INSIDE markup-context logic blocks
     // (if-stmt / while-stmt / for-stmt / return-stmt / let-decl / etc.) carry
     // their expression payloads in STRING fields (`condition`, `header`,

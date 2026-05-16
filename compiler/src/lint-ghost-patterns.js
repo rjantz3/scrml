@@ -245,6 +245,43 @@ function buildTildeRanges(source) {
   return ranges;
 }
 
+/**
+ * Collect ranges that correspond to `function NAME(...) { ... }` and
+ * `fn NAME(...) -> T { ... }` bodies at file scope (v0.3 logic-default
+ * mode). Inside these bodies, lint patterns that target attribute-position
+ * shapes should not fire — `@cell = .Variant` reactive writes look
+ * superficially like Vue `@click=` shorthand but are valid scrml.
+ *
+ * Brace-matching mirrors `buildLogicRanges` / `buildTildeRanges`: the
+ * opener pair (the `(` and `{`) lock the range start; depth-counting walks
+ * to the matching `}`. Does NOT handle braces inside string literals
+ * (same caveat as the sibling builders).
+ *
+ * S96 Bug 9 fix.
+ *
+ * @param {string} source
+ * @returns {Array<[number, number]>}
+ */
+function buildFunctionBodyRanges(source) {
+  const ranges = [];
+  // Match `function NAME(...)` or `fn NAME(...) -> T` followed by `{`.
+  // The return-type clause is optional (functions don't have it; `fn` does).
+  const re = /\b(?:function|fn)\s+\w+\s*\([^)]*\)\s*(?:->[^{]*)?\{/g;
+  let m;
+  while ((m = re.exec(source)) !== null) {
+    const start = m.index;
+    let i = m.index + m[0].length; // position after the opening `{`
+    let depth = 1;
+    while (i < source.length && depth > 0) {
+      if (source[i] === "{") depth++;
+      else if (source[i] === "}") depth--;
+      i++;
+    }
+    ranges.push([start, i]);
+  }
+  return ranges;
+}
+
 // ---------------------------------------------------------------------------
 // Pattern definitions
 // ---------------------------------------------------------------------------
@@ -329,8 +366,17 @@ const PATTERNS = [
   // Matches prop={  but NOT prop=${ and NOT value= (covered by P5)
   // Only trigger when the attribute name is NOT 'value' (P5 covers that)
   // Skip when the match falls inside a `//` or block comment (per SPEC §27).
+  //
+  // S96 Bug 8 fix:
+  //   - `(?<![:\w])` excludes `:struct`/`:enum`/`:union` etc. — the colon-
+  //     tagged type-shape in `type Task:struct = { ... }` made `struct = {`
+  //     fire as a false positive. `:\w` includes any word-char-preceded
+  //     identifier (covers `type:X` shape variants).
+  //   - `(?<!type )` excludes the non-tagged form `type X = { ... }`.
+  //   - `props\b` added to the exclusion list — canonical component-prop
+  //     declaration `props = { name: string }` is intentional scrml shape.
   {
-    regex: /\b(?!value\b)(\w+)\s*=\s*(?<!\$)\{(?!\{)/g,
+    regex: /(?<!:\w*)(?<!type )\b(?!value\b|props\b)(\w+)\s*=\s*(?<!\$)\{(?!\{)/g,
     ghost: "<Comp prop={val}>",
     correction: "<Comp prop=val>",
     see: "§5",
@@ -413,10 +459,16 @@ const PATTERNS = [
     correction: "onclick=handler() (scrml uses standard on<event> attribute names)",
     see: "§5",
     code: "W-LINT-013",
-    skipIf: (offset, logicRanges, _cssRanges, commentRanges, tildeRanges) =>
+    // S96 Bug 9 fix — also skip function-body ranges. `@dragPhase = .Dragging`
+    // inside `function startDrag() { ... }` is a legitimate reactive write,
+    // not a Vue ghost. Function bodies in v0.3 logic-default mode live at
+    // file scope WITHOUT a wrapping `${...}`, so logicRanges doesn't cover
+    // them.
+    skipIf: (offset, logicRanges, _cssRanges, commentRanges, tildeRanges, functionBodyRanges) =>
       inRange(offset, logicRanges) ||
       inRange(offset, commentRanges) ||
-      inRange(offset, tildeRanges),
+      inRange(offset, tildeRanges) ||
+      inRange(offset, functionBodyRanges || []),
   },
 
   // Pattern 14: Svelte block directives `{#if ...}`, `{:else}`, `{/if}`,
@@ -483,6 +535,7 @@ export function lintGhostPatterns(source, filePath) {
   const cssRanges = buildCssRanges(source);
   const commentRanges = buildCommentRanges(source);
   const tildeRanges = buildTildeRanges(source);
+  const functionBodyRanges = buildFunctionBodyRanges(source);
   const diagnostics = [];
 
   for (const pattern of PATTERNS) {
@@ -492,7 +545,7 @@ export function lintGhostPatterns(source, filePath) {
       const offset = match.index;
 
       // Apply false-positive guard
-      if (pattern.skipIf && pattern.skipIf(offset, logicRanges, cssRanges, commentRanges, tildeRanges)) {
+      if (pattern.skipIf && pattern.skipIf(offset, logicRanges, cssRanges, commentRanges, tildeRanges, functionBodyRanges)) {
         continue;
       }
 
