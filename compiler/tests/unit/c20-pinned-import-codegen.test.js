@@ -255,8 +255,11 @@ describe("§C20.2 mixed pinned + non-pinned specifiers preserved (client)", () =
     const ctx = makeTestCtx(fileAST);
     const clientJs = generateClientJs(ctx);
 
-    // scrml: imports pass through unchanged (per §41.3).
-    expect(clientJs).toContain('import { hash, uuid } from "scrml:crypto"');
+    // scrml: client imports lower to a destructuring read from the
+    // _scrml_stdlib registry (Bug 18 S95 — bare ES-module specifiers
+    // cannot resolve in the browser). Server emission keeps the
+    // bare specifier and rewrites it to a relative path post-codegen.
+    expect(clientJs).toContain('const { hash, uuid } = _scrml_stdlib.crypto;');
     expect(clientJs).not.toContain("pinned");
   });
 });
@@ -384,7 +387,9 @@ describe("§C20.5 `pinned` keyword does NOT leak into emitted output", () => {
     // Sanity: every import was emitted.
     expect(clientJs).toContain('import { a1, a2 } from "./a.client.js"');
     expect(clientJs).toContain('import { b1 } from "./b.client.js"');
-    expect(clientJs).toContain('import { hash } from "scrml:crypto"');
+    // scrml: client imports lower to a destructuring read from the
+    // _scrml_stdlib registry (Bug 18 S95).
+    expect(clientJs).toContain('const { hash } = _scrml_stdlib.crypto;');
   });
 
   test("§C20.5.3 ES module hoisting: pinned imports appear above runtime body", () => {

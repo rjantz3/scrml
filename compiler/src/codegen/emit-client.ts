@@ -1,6 +1,6 @@
 import { SCRML_RUNTIME } from "../runtime-template.js";
 import { exprNodeContainsCall } from "../expression-parser.ts";
-import { assembleRuntime } from "./runtime-chunks.ts";
+import { assembleRuntime, RUNTIME_CHUNK_ORDER } from "./runtime-chunks.ts";
 import { CGError } from "./errors.ts";
 import { escapeRegex } from "./utils.ts";
 import { emitFunctions } from "./emit-functions.ts";
@@ -204,6 +204,28 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
   // range; see `runtime-chunks.ts:CHUNK_MARKERS.prefetch`.
   if (ctx.hasPrefetchableLinks) {
     chunks.add("prefetch");
+  }
+
+  // Stdlib registry chunks (Bug 18 fix, S95) — light up `stdlib-<name>`
+  // when this file imports from `scrml:<name>`. The chunk populates
+  // `_scrml_stdlib.<name>` so the import-rewrite emitted below resolves
+  // at runtime. Browsers cannot resolve bare `scrml:NAME` specifiers;
+  // emitting the bare import statement is a SyntaxError in classic-
+  // script context.
+  const allImportsForStdlib: any[] = fileAST?.ast?.imports ?? fileAST?.imports ?? [];
+  for (const stmt of allImportsForStdlib) {
+    if ((stmt.kind === "import-decl" || stmt.kind === "use-decl") && typeof stmt.source === "string") {
+      if (stmt.source.startsWith("scrml:")) {
+        const name = stmt.source.slice("scrml:".length);
+        const chunkName = `stdlib-${name}`;
+        // Only register chunks the runtime actually carries. Unknown
+        // names fall through; the import is dropped at emit time below
+        // and use sites produce a clear runtime error.
+        if (RUNTIME_CHUNK_ORDER.includes(chunkName as any)) {
+          chunks.add(chunkName);
+        }
+      }
+    }
   }
 
   // Check if an ExprNode tree contains == or != (structural equality)
@@ -642,8 +664,15 @@ export function generateClientJs(ctx: CompileContext): string {
 
   // Emit JS imports from use-decl and import-decl nodes (§40, §21.3, §41.3).
   // Local .scrml imports are rewritten to .client.js (compiled browser output).
-  // scrml: and vendor: prefixed imports pass through unchanged — they are valid
-  // Bun module specifiers and resolve at runtime against the bundled stdlib.
+  // `scrml:NAME` imports are lowered to `const { ... } = _scrml_stdlib.<name>;`
+  // because browsers cannot resolve bare ES-module specifiers and the
+  // client.js script tag is a classic (non-module) script — bare imports
+  // would SyntaxError at parse time. The `_scrml_stdlib` registry is
+  // populated by the corresponding `stdlib-<name>` runtime chunk (see
+  // runtime-template.js + runtime-chunks.ts).
+  //
+  // `vendor:` imports continue to pass through unchanged — they resolve
+  // against the project's vendor/ directory at runtime.
   //
   // Task #17 (S85): cross-file channel imports (kebab-named, string-literal
   // form in source — `import { "dispatch-board" as alias } from '...'`) are
@@ -654,9 +683,24 @@ export function generateClientJs(ctx: CompileContext): string {
   const allImports: any[] = fileAST?.ast?.imports ?? fileAST?.imports ?? [];
   for (const stmt of allImports) {
     if ((stmt.kind === "import-decl" || stmt.kind === "use-decl") && stmt.source && stmt.names?.length > 0) {
+      const stdlibMatch = typeof stmt.source === "string" && stmt.source.startsWith("scrml:")
+        ? stmt.source.slice("scrml:".length)
+        : null;
+      if (stdlibMatch !== null) {
+        if (stmt.isDefault) {
+          // No stdlib module exports a default binding; skip.
+          continue;
+        }
+        const kept = filterChannelImportSpecifiers(stmt, filePath, ctx.exportRegistry ?? null);
+        if (kept.length === 0) continue;
+        const destructured = kept
+          .map((s) => (s.imported === s.local ? s.imported : `${s.imported}: ${s.local}`))
+          .join(", ");
+        lines.push(`const { ${destructured} } = _scrml_stdlib.${stdlibMatch};`);
+        continue;
+      }
       let jsSource: string = stmt.source;
       // Rewrite local .scrml imports to point to the compiled browser JS output.
-      // scrml: and vendor: prefixed imports pass through unchanged — they are valid Bun module specifiers.
       if (jsSource.endsWith(".scrml")) {
         jsSource = jsSource.replace(/\.scrml$/, ".client.js");
       }

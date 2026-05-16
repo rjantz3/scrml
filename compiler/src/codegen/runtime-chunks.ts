@@ -127,6 +127,15 @@ export const RUNTIME_CHUNK_ORDER = [
   'deep_reactive',
   'messages',
   'engine',
+  // Stdlib registry chunks — inlined from compiler/runtime/stdlib/<name>.js
+  // via _scrml_stdlib.<name>. Activated per-file by detectRuntimeChunks when
+  // the source file imports from the matching `scrml:<name>` specifier.
+  // Server-only stdlibs (store) are intentionally absent — the server path
+  // continues to use the bundleStdlibForRun + rewriteStdlibImports route.
+  'stdlib-auth',
+  'stdlib-crypto',
+  'stdlib-data',
+  'stdlib-host',
 ] as const;
 
 export type RuntimeChunkName = (typeof RUNTIME_CHUNK_ORDER)[number];
@@ -208,6 +217,16 @@ const CHUNK_MARKERS: Record<NonCoreChunkName, string> = {
   lift:           'function _scrml_lift',
   reconciliation: 'function _scrml_reconcile_list',
   utilities:      'function _scrml_deep_set',
+
+  // Stdlib chunk markers — each shim is emitted as `// --- chunk: stdlib-<name> ---`
+  // by `_loadStdlibChunk` in runtime-template.js. Each marker appears exactly
+  // once. The previous chunk's content ends with the closing `}` of the
+  // preceding IIFE (or, for the FIRST stdlib, with the engine chunk's last
+  // function), so the boundary is at a syntactically clean position.
+  "stdlib-auth":   "--- chunk: stdlib-auth ---",
+  "stdlib-crypto": "--- chunk: stdlib-crypto ---",
+  "stdlib-data":   "--- chunk: stdlib-data ---",
+  "stdlib-host":   "--- chunk: stdlib-host ---",
 };
 
 // ---------------------------------------------------------------------------

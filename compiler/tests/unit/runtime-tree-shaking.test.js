@@ -237,7 +237,15 @@ describe("runtime size", () => {
     expect(minimal.length).toBeLessThan(SCRML_RUNTIME.length * 0.30);
   });
 
-  test("RUNTIME_CHUNK_ORDER has 22 chunks", () => {
+  test("RUNTIME_CHUNK_ORDER has 26 chunks", () => {
+    // 26 chunks post-Bug 18 S95: 4 'stdlib-<name>' chunks added for the
+    // _scrml_stdlib registry — one per hand-written shim under
+    // compiler/runtime/stdlib/ (auth, crypto, data, host). Each chunk
+    // populates `_scrml_stdlib.<name>` so the import-rewrite at
+    // emit-client.ts resolves at runtime in classic-script (non-module)
+    // context. Activated per-file when the source imports from
+    // `scrml:<name>`.
+    //
     // 22 chunks post-v0.3.x SPA tree-shake Phase B 3.2: 'wire' chunk added
     // for the §57 dual-decoder (_scrml_wire_decode). Activated by
     // detectRuntimeChunks when ANY file in the compile unit has a server
@@ -256,6 +264,6 @@ describe("runtime size", () => {
     //   18 chunks post-C13: 'engine' chunk for §51.0.F + §51.0.G engine
     //   state-machine runtime hooks.
     //   17 chunks post-C10: 'messages' chunk for §55.10.
-    expect(RUNTIME_CHUNK_ORDER.length).toBe(22);
+    expect(RUNTIME_CHUNK_ORDER.length).toBe(26);
   });
 });

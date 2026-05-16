@@ -414,15 +414,24 @@ describe("§H  .js import passes through unchanged", () => {
 });
 
 // ---------------------------------------------------------------------------
-// §I  emit-client.ts — scrml: and vendor: imports emit as real JS import statements (§41.3)
+// §I  emit-client.ts — scrml:/vendor: imports in client output (§41.3, Bug 18 S95)
 //
-// Per §41.3, scrml: prefixed imports are valid Bun module specifiers and must be
-// emitted as real JS import statements in the client output. They are NOT commented
-// out. vendor: imports follow the same rule.
+// scrml: client imports lower to a destructuring read from the
+// _scrml_stdlib registry — browsers cannot resolve bare ES-module
+// specifiers and the client.js script tag is a classic (non-module)
+// script. The corresponding stdlib-<name> runtime chunk populates the
+// registry at runtime load.
+//
+// vendor: imports emit as real ES-module import statements (§41.3) —
+// they resolve against the project's vendor/ directory.
+//
+// Server emission (emit-server.ts) keeps the bare scrml:NAME specifier;
+// api.js post-codegen rewrites it to a relative path under _scrml/ so
+// Bun's filesystem resolver finds the bundled shim.
 // ---------------------------------------------------------------------------
 
-describe("§I  scrml: and vendor: imports emit as real JS import statements", () => {
-  test("§I1  scrml:http use-decl emits as a real import statement", () => {
+describe("§I  scrml:/vendor: imports in client output", () => {
+  test("§I1  scrml:http use-decl lowers to _scrml_stdlib destructure", () => {
     const fileAST = {
       filePath: "/app/app.scrml",
       imports: [],
@@ -446,9 +455,9 @@ describe("§I  scrml: and vendor: imports emit as real JS import statements", ()
     const ctx = makeTestCtx(fileAST);
     const clientJs = generateClientJs(ctx);
 
-    // scrml: imports must emit as real import statements (§41.3)
-    expect(clientJs).toContain('import { fetch } from "scrml:http"');
-    // Must NOT be commented out
+    // scrml: client imports lower to _scrml_stdlib destructuring (Bug 18 S95).
+    expect(clientJs).toContain('const { fetch } = _scrml_stdlib.http;');
+    expect(clientJs).not.toContain('import { fetch } from "scrml:http"');
     expect(clientJs).not.toContain("// use-decl: use scrml:http { fetch }");
   });
 
@@ -482,7 +491,7 @@ describe("§I  scrml: and vendor: imports emit as real JS import statements", ()
     expect(clientJs).not.toContain("// import-decl:");
   });
 
-  test("§I3  scrml:crypto import emits correct named import statement", () => {
+  test("§I3  scrml:crypto import lowers to _scrml_stdlib.crypto destructure", () => {
     const fileAST = {
       filePath: "/app/app.scrml",
       imports: [],
@@ -506,7 +515,8 @@ describe("§I  scrml: and vendor: imports emit as real JS import statements", ()
     const ctx = makeTestCtx(fileAST);
     const clientJs = generateClientJs(ctx);
 
-    expect(clientJs).toContain('import { hash } from "scrml:crypto"');
+    expect(clientJs).toContain('const { hash } = _scrml_stdlib.crypto;');
+    expect(clientJs).not.toContain('import { hash } from "scrml:crypto"');
   });
 });
 
@@ -515,7 +525,7 @@ describe("§I  scrml: and vendor: imports emit as real JS import statements", ()
 // ---------------------------------------------------------------------------
 
 describe("§J  multiple stdlib imports emit correctly", () => {
-  test("§J1  two scrml: imports in same file both emit as real import statements", () => {
+  test("§J1  two scrml: imports in same file both lower to _scrml_stdlib destructures", () => {
     const fileAST = {
       filePath: "/app/app.scrml",
       imports: [],
@@ -546,13 +556,14 @@ describe("§J  multiple stdlib imports emit correctly", () => {
     const ctx = makeTestCtx(fileAST);
     const clientJs = generateClientJs(ctx);
 
-    expect(clientJs).toContain('import { hash, uuid } from "scrml:crypto"');
-    expect(clientJs).toContain('import { session } from "scrml:auth"');
-    // Neither should be commented out
+    expect(clientJs).toContain('const { hash, uuid } = _scrml_stdlib.crypto;');
+    expect(clientJs).toContain('const { session } = _scrml_stdlib.auth;');
+    expect(clientJs).not.toContain('import { hash, uuid } from "scrml:crypto"');
+    expect(clientJs).not.toContain('import { session } from "scrml:auth"');
     expect(clientJs).not.toContain("// import-decl:");
   });
 
-  test("§J2  scrml: import and local .scrml import coexist correctly", () => {
+  test("§J2  scrml: stdlib import and local .scrml import coexist correctly", () => {
     const fileAST = {
       filePath: "/app/app.scrml",
       imports: [],
@@ -583,8 +594,9 @@ describe("§J  multiple stdlib imports emit correctly", () => {
     const ctx = makeTestCtx(fileAST);
     const clientJs = generateClientJs(ctx);
 
-    // stdlib import passes through unchanged
-    expect(clientJs).toContain('import { hash } from "scrml:crypto"');
+    // stdlib import lowers to _scrml_stdlib destructure (Bug 18 S95).
+    expect(clientJs).toContain('const { hash } = _scrml_stdlib.crypto;');
+    expect(clientJs).not.toContain('import { hash } from "scrml:crypto"');
     // local .scrml import is rewritten to .client.js
     expect(clientJs).toContain('import { UserRole } from "./types.client.js"');
     // original .scrml path must not appear

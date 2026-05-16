@@ -167,7 +167,7 @@ describe("OQ-2 §1: helpers (unit)", () => {
 // §2. End-to-end: minimal app with stdlib → emitted JS is loadable
 // ---------------------------------------------------------------------------
 
-describe("OQ-2 §2: end-to-end smoke — emitted JS imports rewritten path and loads in Bun", () => {
+describe("OQ-2 §2: end-to-end smoke — emitted JS uses bundled shim and loads in Bun", () => {
   test("minimal `scrml:auth` consumer compiles, bundles shim, and loads in Bun", async () => {
     const ROOT = join(TMP, "e2e-1");
     const src = fx("e2e-1/app.scrml", FIXTURE_SCRML);
@@ -186,20 +186,26 @@ describe("OQ-2 §2: end-to-end smoke — emitted JS imports rewritten path and l
     // Bundling fired: hand-written shim exists at <outputDir>/_scrml/auth.js.
     expect(existsSync(join(outDir, "_scrml/auth.js"))).toBe(true);
 
-    // Emitted client JS uses the rewritten relative import — no `scrml:` left.
+    // CLIENT JS path (Bug 18 S95): `scrml:NAME` imports lower to
+    // `const { ... } = _scrml_stdlib.<name>;`. Browsers cannot resolve
+    // bare ES-module specifiers and the client.js script tag is a
+    // classic (non-module) script. The runtime's `stdlib-<name>` chunk
+    // populates the registry at load time. No bare `scrml:` left;
+    // no `./_scrml/auth.js` filesystem ref left either (server path).
     const clientJs = readFileSync(join(outDir, "app.client.js"), "utf8");
-    expect(clientJs).toContain(`from "./_scrml/auth.js"`);
+    expect(clientJs).toContain(`_scrml_stdlib.auth`);
     expect(clientJs).not.toContain(`from "scrml:`);
+    expect(clientJs).not.toContain(`from "./_scrml/auth.js"`);
 
-    // The acid test: emitted JS is loadable. Pre-fix this throws
-    // `Cannot find package 'scrml:auth'`. Post-fix it must resolve cleanly.
-    let loadError = null;
-    try {
-      await import(join(outDir, "app.client.js"));
-    } catch (e) {
-      loadError = e;
-    }
-    expect(loadError).toBeNull();
+    // The shared runtime file emitted alongside this app ships the
+    // stdlib-auth chunk (the only consumer of scrml:auth is this file).
+    // Verify it contains the registry assignment so the client's
+    // destructure resolves at runtime when both scripts load.
+    const fs2 = require("fs");
+    const runtimeFile = fs2.readdirSync(outDir).find((f) => /^scrml-runtime\./.test(f));
+    expect(runtimeFile).toBeDefined();
+    const runtimeJs = readFileSync(join(outDir, runtimeFile), "utf8");
+    expect(runtimeJs).toContain(`_scrml_stdlib.auth = (function()`);
   });
 });
 
@@ -207,15 +213,30 @@ describe("OQ-2 §2: end-to-end smoke — emitted JS imports rewritten path and l
 // §3. Nested-output case (W0a / F-COMPILE-001 interaction)
 // ---------------------------------------------------------------------------
 
+// Server-only fixture: a server function uses `hashPassword`, forcing
+// server.js emission so the nested-path rewrite has something to operate on.
+// Bug 18 S95: only SERVER JS retains the rewrite to `./_scrml/<name>.js` —
+// client JS lowers scrml:NAME imports to `_scrml_stdlib.<name>` destructure.
+const FIXTURE_SCRML_SERVER = `\${
+    import { hashPassword } from 'scrml:auth'
+    server function hashIt(pw) {
+        return hashPassword(pw)
+    }
+}
+h1 "OQ-2 nested smoke"
+`;
+
 describe("OQ-2 §3: nested-output W0a interaction — relative path matches actual depth", () => {
-  test("source under a deeper subdir emits a `../../_scrml/...` relative import", () => {
+  test("server JS under a deeper subdir emits a `../../_scrml/...` relative import", () => {
     // Multi-file invocation forces W0a's `computeOutputBaseDir` to use the
     // common ancestor as the base. With a top-level file + a nested file,
     // the base is the top-level dir, so the nested file's output ends up at
-    // `dist/sub/dir/X.client.js` and must reach `_scrml/` via `../../`.
+    // `dist/sub/dir/X.server.js` and must reach `_scrml/` via `../../`.
+    // The rewrite applies to SERVER JS only (client JS uses the
+    // _scrml_stdlib registry — see §2 for the post-Bug-18 contract).
     const ROOT = join(TMP, "e2e-2");
-    const top = fx("e2e-2/top.scrml", FIXTURE_SCRML);
-    const nested = fx("e2e-2/sub/dir/nested.scrml", FIXTURE_SCRML);
+    const top = fx("e2e-2/top.scrml", FIXTURE_SCRML_SERVER);
+    const nested = fx("e2e-2/sub/dir/nested.scrml", FIXTURE_SCRML_SERVER);
     const outDir = join(ROOT, "dist");
 
     const result = compileScrml({
@@ -226,15 +247,15 @@ describe("OQ-2 §3: nested-output W0a interaction — relative path matches actu
     });
     expect(result.errors).toEqual([]);
 
-    // Top-level file lives at dist/top.client.js → `./_scrml/auth.js`.
-    const topJs = readFileSync(join(outDir, "top.client.js"), "utf8");
-    expect(topJs).toContain(`from "./_scrml/auth.js"`);
+    // Top-level server lives at dist/top.server.js → `./_scrml/auth.js`.
+    const topServer = readFileSync(join(outDir, "top.server.js"), "utf8");
+    expect(topServer).toContain(`from "./_scrml/auth.js"`);
 
-    // Nested file lives at dist/sub/dir/nested.client.js → `../../_scrml/auth.js`.
-    expect(existsSync(join(outDir, "sub/dir/nested.client.js"))).toBe(true);
-    const nestedJs = readFileSync(join(outDir, "sub/dir/nested.client.js"), "utf8");
-    expect(nestedJs).toContain(`from "../../_scrml/auth.js"`);
-    expect(nestedJs).not.toContain(`from "scrml:`);
+    // Nested server lives at dist/sub/dir/nested.server.js → `../../_scrml/auth.js`.
+    expect(existsSync(join(outDir, "sub/dir/nested.server.js"))).toBe(true);
+    const nestedServer = readFileSync(join(outDir, "sub/dir/nested.server.js"), "utf8");
+    expect(nestedServer).toContain(`from "../../_scrml/auth.js"`);
+    expect(nestedServer).not.toContain(`from "scrml:`);
 
     // The shim itself is bundled exactly once at <outputDir>/_scrml/.
     expect(existsSync(join(outDir, "_scrml/auth.js"))).toBe(true);

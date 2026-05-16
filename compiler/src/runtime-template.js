@@ -27,6 +27,61 @@ const _VALIDATOR_RUNTIME_SOURCE = readFileSync(
 ).replace(/^export /gm, "");
 
 /**
+ * Stdlib shim loader. Reads a hand-written `compiler/runtime/stdlib/<name>.js`
+ * shim, strips `export ` prefixes, collects the exported names, and produces
+ * a runtime chunk string that registers the names on `_scrml_stdlib.<name>`.
+ *
+ * The emitted shape is an IIFE so the inlined function declarations stay
+ * scoped — they don't pollute the global classic-script namespace.
+ *
+ * Mirrors the validator-runtime pattern (line 23-27 above): the on-disk
+ * shim file is the single source of truth. Server-emit consumes it via
+ * `compileScrml`'s `bundleStdlibForRun` (copies the file into
+ * `<outputDir>/_scrml/<name>.js`); client-emit consumes it through this
+ * inline path so the browser does not see a bare `import { x } from
+ * "scrml:NAME"` (which fails — see Bug 18, S95).
+ *
+ * Const-named export support: a shim may export non-function bindings via
+ * `export const Name = ...`. The loader collects both forms.
+ */
+function _loadStdlibChunk(name) {
+  const shimPath = join(__runtime_template_dir, "../runtime/stdlib", `${name}.js`);
+  const source = readFileSync(shimPath, "utf8");
+  const exportedNames = [];
+  const fnRe = /^export\s+(async\s+)?function\s+([A-Za-z_$][\w$]*)/gm;
+  let m;
+  while ((m = fnRe.exec(source)) !== null) exportedNames.push(m[2]);
+  const constRe = /^export\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)/gm;
+  while ((m = constRe.exec(source)) !== null) exportedNames.push(m[1]);
+  // Strip `export ` from top-level declarations AND any top-level `import ...`
+  // statements. Inlining a shim inside an IIFE for the classic-script runtime
+  // disallows ES-module syntax; functions that referenced an imported symbol
+  // (e.g. \`bun:sqlite\`'s Database) will throw at first call in the browser,
+  // which mirrors today's loud-failure pattern for server-only stdlib paths
+  // reaching client emission.
+  const stripped = source
+    .replace(/^export /gm, "")
+    .replace(/^import[\s\S]*?;[ \t]*$\n?/gm, "");
+  return (
+    `// --- chunk: stdlib-${name} ---\n` +
+    `_scrml_stdlib.${name} = (function() {\n` +
+    stripped + "\n" +
+    `  return { ${exportedNames.join(", ")} };\n` +
+    `})();\n`
+  );
+}
+
+// Inline a stdlib chunk for each shim that ships in compiler/runtime/stdlib/.
+// `store` is intentionally excluded — its shim is a bun:sqlite wrapper with
+// no browser-callable surface; client-side use is meaningless. Server-side
+// access continues through the `bundleStdlibForRun` path (api.js) which
+// copies the shim to `<outputDir>/_scrml/store.js`.
+const _STDLIB_AUTH_CHUNK   = _loadStdlibChunk("auth");
+const _STDLIB_CRYPTO_CHUNK = _loadStdlibChunk("crypto");
+const _STDLIB_DATA_CHUNK   = _loadStdlibChunk("data");
+const _STDLIB_HOST_CHUNK   = _loadStdlibChunk("host");
+
+/**
  * scrml reactive runtime — shared runtime library.
  *
  * This module exports the runtime source as a string constant. The code generator
@@ -80,6 +135,10 @@ const _VALIDATOR_RUNTIME_SOURCE = readFileSync(
 export const SCRML_RUNTIME = `// --- scrml reactive runtime ---
 const _scrml_state = {};
 const _scrml_subscribers = {};
+// scrml: stdlib registry — populated by per-stdlib chunks (see end of runtime).
+// Client-emitted code rewrites \`import { x } from "scrml:NAME"\` to
+// \`const { x } = _scrml_stdlib.NAME;\` (browser cannot resolve bare specifiers).
+const _scrml_stdlib = {};
 // S79 / §6.13 reactivity attribute registries — hoisted to module top to
 // avoid TDZ when _scrml_reactive_set (called early during module-init by
 // state-decl substrates) consults them. Implementations of the helpers
@@ -2958,7 +3017,7 @@ function _scrml_engine_reset_idle_watchdog(varName, idleEntry, table) {
   _scrml_engine_arm_idle_watchdog(varName, idleEntry, table);
 }
 
-`;
+${_STDLIB_AUTH_CHUNK}${_STDLIB_CRYPTO_CHUNK}${_STDLIB_DATA_CHUNK}${_STDLIB_HOST_CHUNK}`;
 
 /**
  * Runtime filename used in external mode.
