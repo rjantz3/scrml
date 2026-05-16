@@ -1,0 +1,161 @@
+// Triage Board — drag tasks between Inbox / Doing / Done columns.
+//
+// State-vs-logic axiom (S94 corrected, S95 corrigendum):
+//   The state system should be able to fully describe its own transitions.
+//   The logic system provides pure computation that the state system consumes.
+//   Logic CAN describe state mutations but it shouldn't HAVE to.
+//
+// The current language is incomplete on this axis. Until the event-payload-
+// transition primitive lands (docs/changes/heads-up-s95-bugs/MISSING-PRIMITIVE.md),
+// the three `function`s below remain as irreducible glue. They are tagged inline.
+// The remaining `function allowDrop` is irreducible DOM-API ceremony (HTML5 DnD
+// requires preventDefault on ondragover); that one stays even post-primitive.
+//
+// Current ratio: 3 fn / 4 function = 43%.
+// Post-Bug-2-closure (payload variant engine writes work): 3 fn / 2 function = 60%.
+// Post-missing-primitive-landing: 3 fn / 1 function = 75%.
+// Plus a state-system "dropzone" primitive: 3 fn / 0 function = 100%.
+
+<program title="Triage Board">
+
+    // Reverted from `import { sortBy } from 'scrml:data'` per Bug 18:
+    // scrml:NAME capability imports emit as unresolved ES module imports and
+    // fail at runtime with a SyntaxError. Vanilla .sort() until that's fixed.
+
+    type Task:struct = {
+        id:     number
+        title:  string
+        column: string
+        order:  number
+    }
+
+    type DragPhase:enum = { Idle, Dragging }
+
+    const columns = ["Inbox", "Doing", "Done"]
+
+    <tasks> = [
+        { id: 1, title: "Triage incoming bug reports", column: "Inbox", order: 0 },
+        { id: 2, title: "Review PR #42",               column: "Inbox", order: 1 },
+        { id: 3, title: "Wire up onboarding flow",     column: "Doing", order: 0 },
+        { id: 4, title: "Update changelog",            column: "Done",  order: 0 },
+    ]
+
+    <draggingTaskId> = 0
+
+    // PURE — given tasks + a column, what's the next order value for a new task?
+    fn nextOrderIn(tasks: Task[], column: string) -> number {
+        const existing = tasks.filter(t => t.column == column)
+        if (existing.length == 0) return 0
+        return Math.max(...existing.map(t => t.order)) + 1
+    }
+
+    // PURE — return the task with the column/order updated, or the original.
+    // (Extracted from taskMovedTo to avoid Bug 15: `fn`-body parser false-fires
+    // E-FN-001 on `t.id == id ? { ...t, ... } : t` — reads `? {` as SQL block.)
+    fn updateIfMatched(t: Task, id: number, column: string, order: number) -> Task {
+        if (t.id == id) return { ...t, column: column, order: order }
+        return t
+    }
+
+    // PURE — given tasks + an id + a target column, return the new tasks list
+    // with the moved task at the end of the target column.
+    fn taskMovedTo(tasks: Task[], id: number, toColumn: string) -> Task[] {
+        const order = nextOrderIn(tasks, toColumn)
+        return tasks.map(t => updateIfMatched(t, id, toColumn, order))
+    }
+
+    // PURE — is the given task the one currently being dragged?
+    fn isDraggingTask(id: number, phase: DragPhase, currentId: number) -> boolean {
+        match phase {
+            .Dragging => currentId == id
+            .Idle     => false
+        }
+    }
+
+    // GLUE (blocked on Bug 2 + missing primitive):
+    // Two state writes that would collapse to a bare-form event handler
+    //   `ondragstart=@dragPhase = .Dragging(task.id)`
+    // once (a) payload-variant engine direct-write codegen ships (Bug 2)
+    // and (b) the event-payload-transition primitive lands.
+    function startDrag(id) {
+        @draggingTaskId = id
+        @dragPhase = .Dragging
+    }
+
+    // GLUE (same blockers): would collapse to `ondragend=@dragPhase = .Idle`.
+    function endDrag() {
+        @draggingTaskId = 0
+        @dragPhase = .Idle
+    }
+
+    // GLUE (blocked on missing primitive): branches on engine state, applies
+    // a pure transform (taskMovedTo), fires three state writes. With the
+    // event-payload-transition primitive, this would live inside the engine
+    // as an `<onTransition to=.Idle>` body consuming an event-bound payload
+    // carrying the drop column.
+    function dropOn(toColumn) {
+        if (@dragPhase == .Idle) { return }
+        @tasks = taskMovedTo(@tasks, @draggingTaskId, toColumn)
+        @draggingTaskId = 0
+        @dragPhase = .Idle
+    }
+
+    // GLUE (irreducible — DOM API ceremony). HTML5 DnD requires preventDefault
+    // on ondragover for the drop event to fire. This is the browser's API
+    // surface, not application state. Will remain even post-primitive unless
+    // the state system grows a "dropzone" primitive that auto-handles this.
+    function allowDrop(e) {
+        e.preventDefault()
+    }
+
+    // STATE-SYSTEM: drag-lifecycle engine.
+    // Today this only describes its `rule=` contract — the rules are enforced
+    // at runtime when transitions fire from the event-handler functions above.
+    // Post-missing-primitive, this would ALSO declare event-bound transitions
+    // (on:dragstart, on:drop, on:dragend) so the engine self-describes them.
+    <engine for=DragPhase initial=.Idle>
+        <Idle     rule=.Dragging></>
+        <Dragging rule=.Idle></>
+    </>
+
+    <div class="board">
+        <h1 class="board-title">Triage Board</h1>
+
+        <div class="columns">
+            ${ for (let col of columns) {
+                lift <section class="column">
+                    <h2 class="column-title">${col}</>
+
+                    <ul
+                        class="task-list"
+                        ondragover=allowDrop
+                        ondrop=dropOn(col)
+                    >
+                        ${ for (let task of @tasks.filter(t => t.column == col).sort((a, b) => a.order - b.order)) {
+                            lift <li
+                                class="task"
+                                class:dragging=(isDraggingTask(task.id, @dragPhase, @draggingTaskId))
+                                draggable=true
+                                ondragstart=startDrag(task.id)
+                                ondragend=endDrag()
+                            >${task.title}</>
+                        } }
+                    </>
+                </>
+            } }
+        </>
+    </>
+
+    #{
+        body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: #f9fafb; color: #1f2937; }
+        .board { padding: 1.5rem; max-width: 1100px; margin: 0 auto; }
+        .board-title { font-size: 1.5rem; font-weight: 600; margin: 0 0 1rem 0; }
+        .columns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+        .column { background: #f3f4f6; border-radius: 8px; padding: 0.75rem; min-height: 240px; }
+        .column-title { font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #4b5563; margin: 0 0 0.75rem 0; }
+        .task-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; min-height: 100px; }
+        .task { background: white; border-radius: 6px; padding: 0.6rem 0.75rem; box-shadow: 0 1px 2px rgba(0,0,0,0.08); cursor: grab; user-select: none; }
+        .task:active { cursor: grabbing; }
+    }
+
+</program>
