@@ -470,18 +470,37 @@ function emitBinary(node: BinaryExpr, ctx: EmitExprContext): string {
     case "is-not-not":
       return `(${left} !== null && ${left} !== undefined)`;
 
-    // §43 enum membership: x is .Variant → x === "Variant"
+    // §43 enum membership: x is .Variant → x === "Variant" (unit variant) OR
+    // x.variant === "Variant" (payload-bearing variant — cell value is a
+    // tagged-object `{ variant, data }` per SPEC §51.3.2).
+    //
+    // S95 Bug 2 — left-side normalization to tag space. Without this, a
+    // payload-bearing engine cell whose value is `{ variant: "Dragging", data }`
+    // would fail `cell === "Dragging"` and `is .Dragging` would always be
+    // false. Use an inline conditional that handles both shapes:
+    //   `(typeof __v === "object" && __v !== null && typeof __v.variant === "string"
+    //     ? __v.variant : __v) === "Variant"`
+    // The IIFE binds `__v` once so a side-effecting `left` (e.g. `_scrml_reactive_get`)
+    // is evaluated exactly once.
     case "is": {
       // The right operand is an enum variant (.Active, Enum.Variant, null, undefined).
-      // Dot-prefixed variants emit as string literals to match rewriteIsOperator behavior.
       let rhs = right;
       if (node.right.kind === "ident" && node.right.name.startsWith(".")) {
         rhs = `"${node.right.name.slice(1)}"`;
       } else if (node.right.kind === "member") {
         // Enum.Variant → "Variant"
         rhs = `"${node.right.property}"`;
+      } else {
+        // Right side is not an enum variant (e.g. `is null` / `is undefined`)
+        // — preserve legacy `===` shape without tag normalization, since
+        // `null`/`undefined` are never variant-shaped.
+        return `(${left} === ${rhs})`;
       }
-      return `(${left} === ${rhs})`;
+      // Tag-normalize the left side. The inline `(typeof v === "object" ...)`
+      // pattern matches `_scrml_engine_variant_tag` from the runtime template
+      // but is inlined here so server boundary + escape-hatch contexts
+      // don't depend on the runtime helper being in scope.
+      return `(function(__v){return (typeof __v === "object" && __v !== null && typeof __v.variant === "string" ? __v.variant : __v) === ${rhs};})(${left})`;
     }
 
     default:
