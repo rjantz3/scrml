@@ -1623,7 +1623,17 @@ export function parseExprToNode(raw: string, filePath: string, offset: number, o
   }
 
   try {
-    return esTreeToExprNode(estree, filePath, offset, trimmed);
+    // S97 bug fix: pass `processed` (not `trimmed`) as rawSource so that
+    // FunctionExpression/ArrowFunctionExpression escape-hatch slices
+    // (esTreeToExprNode line 1466) align with acorn's reported start/end
+    // positions. Acorn parsed `processed`; its nodeStart/nodeEnd are in
+    // processed coordinates. preprocessForAcorn shrinks (`::` → `.`) and
+    // grows (`is not` → `__scrml_is_not__(...)`) the string, so passing
+    // `trimmed` desynchronized the slice. The escape-hatch raw is then fed
+    // through rewriteExpr's string-rewrite pipeline, which idempotently
+    // handles preprocessed forms (e.g. `Mode.A` is valid JS for what was
+    // originally `Mode::A`).
+    return esTreeToExprNode(estree, filePath, offset, processed);
   } catch (e) {
     const span: ExprSpan = { file: filePath, start: offset, end: offset + trimmed.length, line: 1, col: 1 };
     return {
