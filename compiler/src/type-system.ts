@@ -4758,6 +4758,19 @@ function annotateNodes(
                 bvCtxType = prior.resolvedType;
               }
             }
+            // S96 — binary-expr comparison-site pre-pass, parity with
+            // let-decl / const-decl (line ~4535) and bare-expr (line ~4880).
+            // Without this, state-decl init expressions like
+            // `const <r> = @mode == .A ? @items.filter(...) : @items` fire
+            // E-VARIANT-AMBIGUOUS on `.A` even though `@mode`'s enum type
+            // statically fixes the variant context. Pre-S96 only the
+            // let/const-decl + bare-expr sites threaded this walker; state-
+            // decl (V5-strict `<x>:T = expr` AND `const <x> = expr`) was
+            // missed. Runs BEFORE the struct-nav walker so resolved bare
+            // variants are stamped `_bareVariantInferredAtBinaryExpr=true`
+            // and the LHS-driven walker skips them (preventing the
+            // duplicate-fire that the stamp convention was designed for).
+            inferBareVariantsAtComparisonSites(reactInitExprNode, scopeChain, reactSpan, errors);
             // S84 v0.2.4 #4.5: struct-nav walker handles array-of-struct and
             // struct contextTypes (e.g. the kanban shape
             // `<cards>: { id, title, status: Status }[] = [...]`).
