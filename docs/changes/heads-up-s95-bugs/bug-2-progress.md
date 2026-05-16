@@ -52,3 +52,41 @@ Integration tests:
 - mixed file (unit + payload variants in same engine)
 
 ## Progress log
+
+### 2026-05-16 — Initial investigation
+- Confirmed bug via reproducer at /tmp/bug2-repro/repro.scrml. Output line:
+  `_scrml_engine_direct_set("dragPhase", "Dragging"(taskId), ...)` — calling a string as a function.
+- Root cause located: `emit-expr.ts:emitIdent` line 286-288 (bare-dot variant always lowers to JSON.stringify tag).
+- SPEC §51.3.2 (Implementation notes S22) confirmed the canonical runtime shape: `{ variant: "X", data: { fieldName: value } }`.
+- Pre-existing dispatcher bug found at `emit-variant-guard.ts:730-731` (reads `_v.tag` / `_v.payload` — wrong keys; should be `.variant` / `.data`).
+- Pre-existing `_scrml_engine_check_transition` and self-write comparison work in tag space, so structured-object target values fail comparison.
+
+### 2026-05-16 — Phase 1: codegen + runtime + dispatcher (commit 7ef8634)
+- `emit-expr.ts:emitCall` — detect bare-dot `.Variant(args)` callee form, emit `{ variant: "X", data: { fieldName: arg } }` literal using new `emit-control-flow.ts:getVariantFieldSchema` export.
+- `runtime-template.js` — new `_scrml_engine_variant_tag(value)` helper, used in `_scrml_engine_direct_set` + `_scrml_engine_advance` + `_scrml_engine_check_transition` for tag-space comparisons. Cell write preserves the full target value.
+- `emit-variant-guard.ts` dispatcher — replaced `_v.tag` / `_v.payload` reads with `.variant` / `.data` (the canonical SPEC §51.3.2 shape). Dispatcher arg passing changed from positional `_payload[<index>]` to named `_data[<bindingName>]`.
+- Updated 1 unit test (engine-body-render.test.js Phase 3 §6) for the new emission shape.
+
+### 2026-05-16 — Phase 2: is operator + integration tests (commit adc830b)
+- `emit-expr.ts:emitBinary case "is"` — wrap left side in tag-extraction IIFE so `(@cell) is .Variant` works for both bare-string and tagged-object cells.
+- New file `compiler/tests/integration/s95-bug-2-engine-payload-variant.test.js` — 10 integration tests covering canonical reproducer, unit-variant regression, `.advance()` payload form, mixed variants, qualified `Enum.Variant(args)`, dispatcher shape, runtime helper presence.
+
+### 2026-05-16 — Phase 3: string-rewrite path (commit 1671446)
+- Found that the escape-hatch `${...}` event-handler path goes through the string-rewrite pipeline (`rewriteExpr` / `rewriteServerExpr`), not the structured AST. `rewriteEnumVariantAccess` line 1372 regex was matching `.Variant` even when followed by `(`, producing `"Variant"(args)` — same Bug 2 surface.
+- Added `_rewritePayloadVariantConstructorCalls` helper in `rewrite.ts` — paren-balanced argument scanning, quoted-string aware, splits args at top-level commas. Uses new module-level `_rewriterVariantFields` registry set via new `setVariantFieldsForRewriter` export.
+- Updated `rewriteEnumVariantAccess` unit-variant regex with `(?!\s*\()` negative lookahead so it skips the constructor-call form.
+- Wired `setVariantFieldsForRewriter` into BOTH `generateClientJs` and `generateServerJs` (server runs first per codegen/index.ts pipeline ordering).
+
+### 2026-05-16 — Phase 4: expanded integration tests (commit 5af847d)
+- §8: escape-hatch event-handler path — 3 tests (bare reproducer, nested function-call args, multi-field variant).
+- §9: AST-path `is .Variant` tag normalization — synthesized AST node test (bypasses a separate pre-existing parser issue where bare-dot identifiers don't reliably reach the ExprNode AST in some user-facing contexts; tracked outside Bug 2 scope).
+
+## Test results
+- Baseline: 12054 pass / 88 skip / 1 todo / 0 fail (12143 total across 619 files)
+- Final: 12068 pass / 88 skip / 1 todo / 0 fail (12157 total across 620 files)
+- Delta: +14 new integration tests, 0 regressions.
+
+## Followups not in scope
+- `rewriteIsOperator` (string-rewrite path) still emits `=== "Variant"` shape — fix when an adopter is reached via that path. The structured AST path is correct.
+- Bare-dot `.Variant` ident in some user-facing contexts (e.g. inside ternary inside `${}` inside markup interpolation) doesn't reach the ExprNode AST — a pre-existing parser-level issue separate from Bug 2.
+- PA-side post-Bug-2 follow-up: refactor `examples/25-triage-board.scrml` from no-payload workaround to canonical payload-variant.
