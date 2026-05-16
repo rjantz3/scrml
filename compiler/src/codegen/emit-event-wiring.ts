@@ -471,13 +471,20 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       if (cancelTimerLowered !== null) {
         handlerExpr = `function(event) { ${preventLine}${cancelTimerLowered}; }`;
       } else {
-        // Per tutorial §1.5: `onkeydown=handleKey()` passes the native event
-        // implicitly. When the user wrote no args, thread `event` into the call
-        // so handlers declared as `fn(e)` receive it as the first arg. Handlers
-        // that ignore the arg are unaffected (extra positional args are silent
-        // in JS). Non-empty args are left alone — user was explicit.
-        const callArgs = argsStr.length === 0 ? "event" : argsStr;
-        handlerExpr = `function(event) { ${preventLine}${resolvedHandler}(${callArgs}); }`;
+        // SPEC §5.2.2 normative: `onclick=fn()` SHALL emit
+        // `function(event) { fn(); }` — `fn` is invoked with the user's
+        // declared args (none for bare-call zero-args). The wrapper STILL
+        // takes `event` as its parameter (so it satisfies the listener
+        // signature), but does NOT forward it into `fn`. The escape-hatch
+        // for "needs event" is `onclick=${(e) => fn(e)}` per §5.2.2 line 1123.
+        //
+        // S96 Bug 14 fix — pre-fix code at this site cited "tutorial §1.5:
+        // passes the native event implicitly" + a locked test
+        // (event-handler-args-e2e.test.js §4 "threads event"). Tutorial is
+        // not normative (Rule 4); locked test was locking spec-divergent
+        // behavior. User explicitly chose option-1-spec-wins. Tutorial §1.5
+        // also needs alignment.
+        handlerExpr = `function(event) { ${preventLine}${resolvedHandler}(${argsStr}); }`;
       }
     }
 

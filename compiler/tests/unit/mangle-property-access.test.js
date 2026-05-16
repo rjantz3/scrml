@@ -102,8 +102,11 @@ describe("§1: classList.toggle is NOT rewritten", () => {
     });
 
     const clientJs = result.outputs.get(TOGGLE_FIXTURE).clientJs;
-    // User fn `toggle` IS mangled at its call site (onclick delegation)
-    expect(clientJs).toMatch(/_scrml_toggle_\d+\(event\)/);
+    // User fn `toggle` IS mangled at its call site (onclick delegation).
+    // S96 Bug 14 — SPEC §5.2.2: `onclick=toggle()` emits `toggle()` in
+    // wrapper body, NOT `toggle(event)`. Wrapper still takes `event` for
+    // the listener signature.
+    expect(clientJs).toMatch(/_scrml_toggle_\d+\(\)/);
     // And at its declaration
     expect(clientJs).toMatch(/function _scrml_toggle_\d+/);
   });
@@ -130,7 +133,8 @@ describe("§2: forEach as user fn does not corrupt .forEach(...) DOM calls", () 
     // we must confirm the user fn rename does not bleed onto any .forEach
     // property access that may appear in the runtime template or wiring.
     expect(clientJs).not.toMatch(/\._scrml_forEach_/);
-    // User fn is still mangled at its call site
-    expect(clientJs).toMatch(/_scrml_forEach_\d+\(event\)/);
+    // User fn is still mangled at its call site.
+    // S96 Bug 14 — SPEC §5.2.2 spec-aligned bare-call shape (no event thread).
+    expect(clientJs).toMatch(/_scrml_forEach_\d+\(\)/);
   });
 });

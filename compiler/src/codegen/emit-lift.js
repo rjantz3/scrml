@@ -479,24 +479,16 @@ function emitSetAttrs(elVar, attrs) {
       // BUG-6 fix: event attributes like onclick, ondblclick, onsubmit
       // must use addEventListener, not setAttribute
       const eventName = attr.name.replace(/^on/, "");
-      // LIFT-4 fix (S88) — auto-inject `event` arg for bare-call empty-args
-      // event handlers, parity with top-level per §5.2.2 + the locked
-      // invariant in event-handler-args-e2e.test.js §4 "bare-call
-      // onkeydown=handleKey() threads event".
-      //
-      // Pre-fix: `onkeydown=handleKey()` inside lift emitted
-      // `_scrml_handleKey_N()` (empty parens — event lost). Top-level emits
-      // `_scrml_handleKey_N(event)` for the identical source-level shape.
-      //
-      // Detection: handler is a bare identifier (or dotted path) followed by
-      // an empty argument list and no other content. If matched, replace `()`
-      // with `(event)` BEFORE lowering through emitExprField — emitExprField
-      // sees `handleKey(event)` and produces `_scrml_handleKey_N(event)`.
-      let handlerSource = attr.value;
-      const bareCallMatch = /^\s*([A-Za-z_$][A-Za-z0-9_$.]*)\s*\(\s*\)\s*$/.exec(handlerSource);
-      if (bareCallMatch) {
-        handlerSource = `${bareCallMatch[1]}(event)`;
-      }
+      // SPEC §5.2.2 normative: `onclick=fn()` SHALL emit
+      // `function(event) { fn(); }` — `fn` is invoked with the user's
+      // declared args, NOT auto-threaded `event`. The pre-S96 LIFT-4 fix
+      // (S88) replaced `fn()` with `fn(event)` here to match a locked test
+      // citing "tutorial §1.5: passes the native event implicitly". Per
+      // pa.md Rule 4 (SPEC normative; tutorials and tests do NOT override
+      // SPEC), this auto-thread was wrong. S96 Bug 14 user-decision: spec
+      // wins, restore the bare-call shape. Escape-hatch for "needs event"
+      // is `onclick=${(e) => fn(e)}` (§5.2.2 expression form).
+      const handlerSource = attr.value;
       // The value may be a function call like "toggleTodo(todo.id)" or just a name
       const handlerExpr = handlerSource.includes('${') || /\$\s*\{/.test(handlerSource)
         ? (() => {
@@ -505,7 +497,25 @@ function emitSetAttrs(elVar, attrs) {
             return parts.map(p => p.type === "expr" ? emitExprField(null, p.value, { mode: "client" }) : p.value).join("");
           })()
         : emitExprField(null, handlerSource, { mode: "client" });
-      lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${handlerExpr}; });`);
+      // S96 Bug 11+12 fix — when handlerExpr is already a callable (arrow
+      // function `(x) => ...` / `x => ...` / function expression
+      // `function(...) {...}`), emit it DIRECTLY as the handler. The
+      // pre-fix code unconditionally wrapped in `function(event) { ${expr}; }`
+      // which made the inner arrow a dead expression-statement — the spec
+      // §5.2.1 escape-hatch `onclick=${(e) => fn(e)}` never invoked. Bug 12
+      // (closure-capture-in-iteration: `ondragstart=${() => startDrag(task.id)}`)
+      // shared this root cause; the FOLLOWUPS framing as a BS-layer parser
+      // issue was misdiagnosed. Mirrors the emit-event-wiring.ts Case A/B
+      // dispatch for top-level event handlers.
+      const trimmedHandler = handlerExpr.trim();
+      const isCallable =
+        /^function\s*\(/.test(trimmedHandler) ||
+        /^(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>/.test(trimmedHandler);
+      if (isCallable) {
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${handlerExpr});`);
+      } else {
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${handlerExpr}; });`);
+      }
     } else {
       // Check if the value contains interpolation (compact or tokenizer-spaced)
       if (attr.value.includes('${') || /\$\s*\{/.test(attr.value)) {
@@ -684,22 +694,19 @@ export function emitCreateElementFromMarkup(node, lines) {
         lines.push(`${elVar}.setAttribute(${JSON.stringify(name)}, ${rewritten});`);
       }
     } else if (val.kind === "call-ref") {
-      // Function call in attribute — reconstruct full call with arguments
-      // LIFT-4 fix (S88) — for event handlers with empty arg list, auto-inject
-      // `event` per §5.2.2 + event-handler-args-e2e.test.js §4. Top-level
-      // emission does this; lift template previously did not.
-      const hasArgs = val.argExprNodes
-        ? val.argExprNodes.length > 0
-        : (val.args || []).length > 0;
+      // Function call in attribute — reconstruct full call with arguments.
+      // SPEC §5.2.2: `onclick=fn()` emits `function(event) { fn(); }`; declared
+      // args forwarded verbatim, NOT auto-threaded with `event`. The S88 LIFT-4
+      // fix used to auto-inject `event` for empty-args; S96 Bug 14 reverted
+      // that per Rule 4 + user decision. See companion fix at line ~480 (the
+      // legacy-attrs path) for the same restoration.
       const rewrittenArgs = val.argExprNodes
         ? val.argExprNodes.map(n => emitExprField(n, "", { mode: "client" })).join(", ")
         : (val.args || []).map(a => emitExprField(null, a.trim(), { mode: "client" })).join(", ");
       const rewrittenName = emitExprField(null, val.name, { mode: "client" });
       if (/^on[a-z]/.test(name)) {
         const eventName = name.replace(/^on/, "");
-        // Auto-inject `event` when source had empty parens.
-        const finalArgs = hasArgs ? rewrittenArgs : "event";
-        const callExpr = `${rewrittenName}(${finalArgs})`;
+        const callExpr = `${rewrittenName}(${rewrittenArgs})`;
         lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${callExpr}; });`);
       } else {
         const callExpr = `${rewrittenName}(${rewrittenArgs})`;
@@ -715,7 +722,22 @@ export function emitCreateElementFromMarkup(node, lines) {
       if (/^on[a-z]/.test(name)) {
         const eventName = name.replace(/^on/, "");
         const rewritten = emitExprField(val.exprNode, raw, { mode: "client" });
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${rewritten}; });`);
+        // S96 Bug 11+12 fix — if the expression IS a callable (arrow
+        // function or function expression), use it directly per SPEC §5.2.2:
+        //   `onclick=${(e) => fn(e, arg)}` — `${}` expression used as-is.
+        // Pre-fix wrapped in `function(event) { ${expr}; }`, making the inner
+        // arrow a dead expression-statement that never runs. Bug 12
+        // (closure-capture-in-iteration) is the same root cause as Bug 11;
+        // both collapsed to this single fix at the AST-attrs path.
+        const trimmedExpr = rewritten.trim();
+        const isCallable =
+          /^function\s*\(/.test(trimmedExpr) ||
+          /^(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>/.test(trimmedExpr);
+        if (isCallable) {
+          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${rewritten});`);
+        } else {
+          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${rewritten}; });`);
+        }
       } else {
         const rewritten = emitExprField(val.exprNode, raw, { mode: "client" });
         lines.push(`${elVar}.setAttribute(${JSON.stringify(name)}, String(${rewritten} ?? ""));`);

@@ -213,11 +213,26 @@ describe("§3: multiple args — onclick=fn(item.id, \"action\") → fn(item.id,
 });
 
 // ---------------------------------------------------------------------------
-// §4: No args — onclick=fn() → fn(event) (tutorial §1.5: implicit event arg)
+// §4: No args — onclick=fn() → function(event) { fn(); } per SPEC §5.2.2
 // ---------------------------------------------------------------------------
+//
+// S96 Bug 14 — SPEC §5.2.2 normative wording (line 1128):
+//   "`onclick=fn()` SHALL wire `fn` as a click handler. The compiler MUST
+//    auto-wrap the call as `function(event) { fn(); }`. `fn` is NOT invoked
+//    at render time."
+//
+// Spec is explicit: `fn()` SHALL emit `fn()` inside the wrapper — NOT
+// `fn(event)`. The escape-hatch for handlers needing the event object is
+// `onclick=${(e) => fn(e)}` per §5.2.2 line 1123.
+//
+// Pre-S96 the implementation auto-threaded `event` here citing tutorial §1.5
+// (non-normative) and locking the behavior in these tests. Per pa.md Rule 4
+// (SPEC normative; derived docs are NOT) and user-decision S96 option-1,
+// the implementation was reverted to the spec-compliant shape and these
+// tests were updated in lockstep.
 
-describe("§4: no args — onclick=fn() → fn(event)", () => {
-  test("empty args array threads `event` into the handler call", () => {
+describe("§4: no args — onclick=fn() → function(event) { fn(); } (SPEC §5.2.2)", () => {
+  test("empty args array preserves bare-call shape — does NOT thread event into fn", () => {
     const result = runCGSimple([
       makeMarkupNode("button", [
         {
@@ -230,13 +245,13 @@ describe("§4: no args — onclick=fn() → fn(event)", () => {
 
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    // Tutorial §1.5: bare `fn()` on an event attr passes native event as first arg
-    expect(out.clientJs).toContain("doThing(event)");
-    // Must not be the buggy bare-call form
-    expect(out.clientJs).not.toMatch(/doThing\(\s*\)/);
+    // SPEC §5.2.2: fn() stays fn() — wrapper takes `event` but doesn't forward it
+    expect(out.clientJs).toMatch(/function\(event\)\s*\{\s*doThing\(\);/);
+    // Pre-S96 spec-divergent shape must not reappear
+    expect(out.clientJs).not.toContain("doThing(event)");
   });
 
-  test("onkeydown=handleKey() threads event (Bug A repro from 6nz)", () => {
+  test("onkeydown=handleKey() — bare-call wrapped without event-threading (SPEC §5.2.2)", () => {
     const result = runCGSimple([
       makeMarkupNode("input", [
         {
@@ -249,9 +264,12 @@ describe("§4: no args — onclick=fn() → fn(event)", () => {
 
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("handleKey(event)");
-    // The wrapper must still take `event` as its single parameter
-    expect(out.clientJs).toMatch(/function\(event\)\s*\{\s*handleKey\(event\);/);
+    // SPEC: `handleKey()` is invoked with the user's declared args (none here).
+    // The wrapper still takes `event` so the listener signature is satisfied,
+    // but `event` is NOT forwarded into the call. The escape-hatch for keyboard
+    // handlers that need the event is `onkeydown=${(e) => handleKey(e)}`.
+    expect(out.clientJs).toMatch(/function\(event\)\s*\{\s*handleKey\(\);/);
+    expect(out.clientJs).not.toContain("handleKey(event)");
   });
 
   test("non-empty args are NOT auto-injected (user was explicit)", () => {

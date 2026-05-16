@@ -268,15 +268,17 @@ describe("§B: lift-template attribute parser — current-broken-output repros",
     expect(js).toMatch(/_scrml_reactive_subscribe\("editingId"/);
   });
 
-  test("§B.4 onkeydown=fn() inside lift auto-injects event (FIXED by LIFT-4 patch)", () => {
+  test("§B.4 onkeydown=fn() inside lift wraps without event-threading (SPEC §5.2.2)", () => {
     const result = compile(liftOnKeydownFx);
     expect(result.errors).toEqual([]);
     const js = result.outputs.get(liftOnKeydownFx).clientJs;
-    // LIFT-4 FIX: bare-call empty-args now auto-injects `event` per §5.2.2 +
-    // event-handler-args-e2e.test.js §4 locked invariant. Astring inserts
-    // spaces inside (): `_scrml_handleKey_N ( event )`.
-    expect(js).toMatch(/_scrml_handleKey_\d+\s*\(\s*event\s*\)/);
-    // No bare empty-parens form.
-    expect(js).not.toMatch(/_scrml_handleKey_\d+\s*\(\s*\)/);
+    // S96 Bug 14 — SPEC §5.2.2 normative: `onclick=fn()` SHALL emit
+    // `function(event) { fn(); }`. The wrapper takes `event` (for the
+    // listener signature) but does NOT forward it into `fn`. The pre-S96
+    // LIFT-4 fix auto-threaded `event` per tutorial §1.5; tutorials are not
+    // normative (pa.md Rule 4). Reverted to spec shape.
+    expect(js).toMatch(/function\(event\)\s*\{\s*_scrml_handleKey_\d+\s*\(\s*\)/);
+    // The pre-S96 spec-divergent form (event auto-threaded) must not reappear.
+    expect(js).not.toMatch(/_scrml_handleKey_\d+\s*\(\s*event\s*\)/);
   });
 });

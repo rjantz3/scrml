@@ -64,8 +64,9 @@ describe("§1: single click handler", () => {
 
     expect(out).toContain("_scrml_click");
     expect(out).toContain('"_scrml_attr_onclick_10"');
-    // Tutorial §1.5: bare-call event handlers receive `event` as first arg
-    expect(out).toContain("handleClick(event)");
+    // S96 Bug 14 — SPEC §5.2.2: bare-call `fn()` emits `fn()` in wrapper body;
+    // wrapper still takes `event` for the listener signature.
+    expect(out).toContain("handleClick();");
   });
 
   test("emits document.addEventListener for click (not querySelectorAll)", () => {
@@ -229,10 +230,11 @@ describe("§5: server-escalated handler name resolution", () => {
       fnNameMap
     );
 
-    // Tutorial §1.5: bare-call event handlers receive `event` as first arg
-    expect(out).toContain("_scrml_saveData_42(event)");
+    // S96 Bug 14 — SPEC §5.2.2: server-escalated bare-call still emits `fn()`
+    // in wrapper body (no event auto-thread).
+    expect(out).toContain("_scrml_saveData_42();");
     expect(out).not.toContain("saveData(event)");
-    expect(out).not.toContain("saveData()");
+    expect(out).not.toContain("_scrml_saveData_42(event)");
   });
 
   test("original name used as fallback when not in fnNameMap", () => {
@@ -243,7 +245,7 @@ describe("§5: server-escalated handler name resolution", () => {
       fnNameMap
     );
 
-    expect(out).toContain("handleClick(event)");
+    expect(out).toContain("handleClick();");
   });
 });
 
@@ -258,7 +260,10 @@ describe("§6: submit event with preventDefault", () => {
     ]);
 
     expect(out).toContain("event.preventDefault()");
-    expect(out).toContain("handleSubmit(event)");
+    // S96 Bug 14 — SPEC §5.2.2: submit bare-call emits `handleSubmit()` in
+    // wrapper body. The auto-injected preventDefault() before the call runs
+    // in the wrapper, not as an arg to the user's fn.
+    expect(out).toContain("handleSubmit();");
   });
 
   test("click handler does NOT include event.preventDefault()", () => {
@@ -642,15 +647,17 @@ describe("§16: raw-string args from splitArgs — real AST shape regression", (
     expect(out).not.toContain("handleAction()");
   });
 
-  test("onclick=fn() — no args threads `event` implicitly (tutorial §1.5)", () => {
+  test("onclick=fn() — no args wraps as fn() inside event handler (SPEC §5.2.2)", () => {
     // splitArgs('') with empty rawArgs → argList = [] (early exit in ast-builder).
-    // Per tutorial §1.5: bare-call event attrs receive the native event as
-    // first arg. Bug A repro from 6nz session 8.
+    // S96 Bug 14 — SPEC §5.2.2 normative: `onclick=fn()` SHALL emit
+    // `function(event) { fn(); }`. The escape-hatch for handlers needing the
+    // event is `onclick=${(e) => fn(e)}`. Pre-S96 the impl auto-threaded event
+    // citing tutorial §1.5 (non-normative); reverted per pa.md Rule 4.
     const out = run([
       makeBinding("_scrml_attr_onclick_10", "onclick", "doThing", []),
     ]);
-    expect(out).toContain("doThing(event)");
-    expect(out).not.toMatch(/doThing\(\s*\)/);
+    expect(out).toContain("doThing();");
+    expect(out).not.toContain("doThing(event)");
   });
 
   test("raw-string arg with reactive ref inside delegated handler", () => {
