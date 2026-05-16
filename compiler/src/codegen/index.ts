@@ -18,6 +18,7 @@
  */
 
 import { scanClassesFromHtml, getAllUsedCSS } from "../tailwind-classes.js";
+import { collectClassNamesFromAst } from "./collect-class-names.ts";
 import { basename } from "path";
 import { RUNTIME_FILENAME } from "../runtime-template.js";
 import { assembleRuntime } from "./runtime-chunks.ts";
@@ -658,10 +659,24 @@ export function runCG(input: CgInput): CgOutput {
       ? generateHtml(nodes, compileCtx)
       : null;
 
+    // Bug 17 (SPEC §26.1): collect Tailwind utility class names from BOTH the
+    // emitted static HTML AND the source AST. The HTML scan covers `class="..."`
+    // on top-level markup; the AST walker covers class names reachable ONLY
+    // through `${ for ... lift <markup class="..."> }` iteration bodies and
+    // sibling control-flow shapes (if-stmt, match-stmt, etc.) — those bodies
+    // are emitted as `_scrml_lift(() => { el.setAttribute("class", "...") })`
+    // factory JS, NOT as static HTML, so a pure HTML scan misses them.
     let tailwindCss = "";
+    const usedClasses = new Set<string>();
     if (htmlBody) {
-      const usedClasses = scanClassesFromHtml(htmlBody);
-      tailwindCss = getAllUsedCSS(usedClasses);
+      for (const cls of scanClassesFromHtml(htmlBody)) usedClasses.add(cls);
+    }
+    // Even with no static HTML body, an engine-only file can carry markup
+    // inside arm bodies that emit-engine renders at runtime — walk the AST
+    // unconditionally.
+    for (const cls of collectClassNamesFromAst(nodes)) usedClasses.add(cls);
+    if (usedClasses.size > 0) {
+      tailwindCss = getAllUsedCSS([...usedClasses]);
     }
 
     const cssParts: string[] = [];
