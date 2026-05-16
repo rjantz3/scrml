@@ -686,6 +686,85 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     }
   }
 
+  // Bug 2 (S95) — `.Variant(args)` bare-dot payload-variant constructor.
+  //
+  // Without this dispatch, `emitIdent` lowers a bare-dot uppercase ident
+  // (`.Variant`) to its string tag (`"Variant"`), and the surrounding CallExpr
+  // emits `"Variant"(args)` — calling a string as a function (runtime TypeError).
+  // Bare-dot ident is the §14.10 / §18.0.3 inference shape; when it appears as
+  // a CallExpr callee, it can only be a payload-bearing constructor (unit
+  // variants never carry parens).
+  //
+  // Canonical shape per SPEC §51.3.2 (Implementation notes, landed S22):
+  //   `Shape.Circle(10)` → `{ variant: "Circle", data: { r: 10 } }`
+  // The runtime cell value for payload-bearing variants IS this tagged-object
+  // shape (matches §19.3.2 `fail` minus the `__scrml_error` sentinel; one
+  // runtime dispatches both error and regular variants by `.variant`).
+  //
+  // Codegen lowers `.Circle(10)` to the inline tagged-object literal directly
+  // (rather than indirecting through the enum's constructor function) so:
+  //   1. No dependency on the EnumName-frozen-object being in scope at the
+  //      call site (escape-hatch contexts, server boundary, IIFE chains).
+  //   2. Self-contained — the constructor's emit is purely the field-name
+  //      registry lookup populated at file-init by buildVariantFieldsRegistry.
+  //   3. Mirrors the existing rewrite-path policy for bare-dot unit variants:
+  //      collapse to the canonical runtime literal at emit time.
+  //
+  // Field-name resolution uses the module-level variant-fields registry
+  // (emit-control-flow.ts:getVariantFieldSchema). When the variant has a
+  // declared field list, the emit pairs each positional argument with the
+  // declared field name. When the variant is unknown or in the collision
+  // set (same name across two enums in one file), we fall through to the
+  // generic emission path — qualified `Enum.Variant(args)` will dispatch
+  // via the standard MemberExpr emit, which works correctly because the
+  // frozen enum object's `Variant` property IS a constructor function.
+  //
+  // The qualified `Enum.Variant(args)` shape continues to work via the
+  // standard MemberExpr → CallExpr emission — `Enum.Variant` resolves to the
+  // frozen enum's constructor function (per `emit-client.ts:emitEnumVariantObjects`),
+  // and `(args)` invokes it. No change needed for the qualified form.
+  if (
+    node.callee.kind === "ident" &&
+    typeof (node.callee as IdentExpr).name === "string"
+  ) {
+    const ident = node.callee as IdentExpr;
+    const name = ident.name;
+    if (
+      name.length >= 2 &&
+      name.charCodeAt(0) === 46 /* . */ &&
+      name.charCodeAt(1) >= 65 && name.charCodeAt(1) <= 90 /* A-Z */
+    ) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getVariantFieldSchema } = require("./emit-control-flow.ts") as {
+        getVariantFieldSchema: (variantName: string) => string[] | null;
+      };
+      const variantName = name.slice(1);
+      const fieldNames = getVariantFieldSchema(variantName);
+      if (fieldNames !== null) {
+        // Emit `{ variant: "X", data: { field0: arg0, field1: arg1, ... } }`.
+        // Truncate to min(args.length, fieldNames.length) so an over-long
+        // call (extra args ignored) or under-long call (missing args lower
+        // to `undefined`, which is later normalized at the wire layer per
+        // §57) both produce valid JS. The type-checker's earlier passes
+        // catch arity mismatches as E-TYPE-* — by codegen, the call is
+        // arity-aligned in well-typed programs.
+        const argExprs = node.args.map(a => emitExpr(a, ctx));
+        const pairCount = Math.min(argExprs.length, fieldNames.length);
+        const pairs: string[] = [];
+        for (let i = 0; i < pairCount; i++) {
+          pairs.push(`${fieldNames[i]}: ${argExprs[i]}`);
+        }
+        const dataLiteral = pairs.length === 0 ? "{}" : `{ ${pairs.join(", ")} }`;
+        return `{ variant: ${JSON.stringify(variantName)}, data: ${dataLiteral} }`;
+      }
+      // Unknown variant or collision — fall through to the generic emit. The
+      // generic path emits `"Variant"(args)` for bare-dot which is broken JS,
+      // but the typer should have rejected an unknown-variant call upstream
+      // (E-VARIANT-AMBIGUOUS / E-TYPE-063 at B20); reaching this fall-through
+      // implies an upstream gap, not a codegen contract.
+    }
+  }
+
   // §51.14 replay(@target, @log[, index]) → _scrml_replay("target", _scrml_reactive_get("log"), index?)
   // The target's @-ref becomes a name string literal (not its value) so the
   // runtime helper knows which reactive-store slot to write. Matched before

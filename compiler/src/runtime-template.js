@@ -2649,10 +2649,33 @@ function _scrml_message_for(error, fieldName, cellName) {
 
 function _scrml_engine_check_transition(currentVariant, target, table) {
   if (table == null) return false;
-  const entry = table[currentVariant];
+  // S95 Bug 2 — normalize both sides to the bare tag string. Unit variants
+  // are stored as bare strings; payload-bearing variants as \`{ variant, data }\`
+  // tagged-objects (SPEC §51.3.2 Implementation notes, landed S22). The
+  // transition table is keyed/valued by bare tags, so both sides need
+  // extraction. Self-write idempotent check and the \`entry.indexOf(target)\`
+  // lookup both depend on tag-shaped comparands.
+  const fromTag = _scrml_engine_variant_tag(currentVariant);
+  const toTag = _scrml_engine_variant_tag(target);
+  const entry = table[fromTag];
   if (entry === "*") return true;
-  if (Array.isArray(entry) && entry.indexOf(target) !== -1) return true;
+  if (Array.isArray(entry) && entry.indexOf(toTag) !== -1) return true;
   return false;
+}
+
+// S95 Bug 2 — Extract the bare tag string from an enum variant value.
+// Unit variants are stored as bare strings (\`"Idle"\`); payload-bearing
+// variants as \`{ variant: "X", data: {...} }\` tagged-objects per SPEC §51.3.2.
+// Used by engine helpers + dispatchers that need to switch / compare against
+// the variant tag without caring whether a payload is present. Returns the
+// input untouched when neither shape applies (defensive; non-variant values
+// are not legitimate engine cell values and would already be a contract
+// violation at the codegen level).
+function _scrml_engine_variant_tag(value) {
+  if (value != null && typeof value === "object" && typeof value.variant === "string") {
+    return value.variant;
+  }
+  return value;
 }
 
 // A5-7 Wave 2.4 (§51.0.Q.1 + §51.0.N, Bug #2) — pending-history-restore flag map.
@@ -2716,6 +2739,13 @@ function _scrml_engine_advance(varName, target, table, timersTable, idleEntry, i
   // the cell write. The internal branch (above) skips this capture by
   // construction (no real exit).
   const current = _scrml_reactive_get(varName);
+  // S95 Bug 2 — normalize both sides to bare tag for control-flow decisions.
+  // The CELL writes still store the full \`target\` (which may be a payload-
+  // bearing \`{ variant, data }\` tagged-object); only the tag is used for
+  // rule= comparison, self-write detection, timer/history lookup keys, and
+  // the pending-history-restore flag (which lives in tag space).
+  const currentTag = _scrml_engine_variant_tag(current);
+  const targetTag = _scrml_engine_variant_tag(target);
   // §51.0.F (v0.3 Option-d synthesis) — IDEMPOTENT SELF-WRITE NO-OP.
   // When target equals the current variant, this is a self-write — by spec
   // a true no-op (NOT a rule= violation, even when the from-state's rule=
@@ -2728,14 +2758,23 @@ function _scrml_engine_advance(varName, target, table, timersTable, idleEntry, i
   // circuits self-loops as "not a real exit"; this guard makes the front-
   // door helpers consistent with that intuition. W-ENGINE-SELF-WRITE-DETECTED
   // (info-level) surfaces the no-op at compile time when statically detectable.
-  if (current === target) return false;
+  //
+  // S95 Bug 2 — self-write detection runs on TAGS (a payload-bearing self-
+  // write \`@phase = .Dragging(otherId)\` is a tag-identity self-write — same
+  // state-child, just refreshing payload). Re-evaluating semantics here:
+  // SPEC §51.0.F.1 frames idempotency as "self-write to the current variant"
+  // which is variant-identity, not value-identity. A payload-refresh self-
+  // write IS a tag self-write under this spec — runtime no-op. If adopters
+  // need payload-refresh-fires-subscribers semantics in the future, that's
+  // a SPEC amendment, not a runtime change here.
+  if (currentTag === targetTag) return false;
   // A5-7 Wave 2.2 — internal-path check FIRST. Per §51.0.O an internal
   // transition is preferred when both an internal rule and an external rule
   // permit the same target (canonical example: composite self-loop
   // internal-rule=.Playing from .Playing; if the user also has
   // rule=.Playing for some reason, the internal semantics win — they're
   // the more-specific "stay in place" intent).
-  if (internalTable != null && _scrml_engine_check_transition(current, target, internalTable)) {
+  if (internalTable != null && _scrml_engine_check_transition(currentTag, targetTag, internalTable)) {
     // §51.0.O internal write path:
     //   - Update the cell value WITHOUT firing subscribers (variant-guard
     //     dispatcher would tear down + re-create the arm body, including the
@@ -2750,10 +2789,10 @@ function _scrml_engine_advance(varName, target, table, timersTable, idleEntry, i
     if (idleEntry != null) _scrml_engine_reset_idle_watchdog(varName, idleEntry, table);
     return false;
   }
-  if (!_scrml_engine_check_transition(current, target, table)) {
+  if (!_scrml_engine_check_transition(currentTag, targetTag, table)) {
     throw new Error(
       "E-ENGINE-INVALID-TRANSITION: asserted advance failed. " +
-      "Variable: " + varName + ". Move: ." + String(current) + " => ." + String(target) +
+      "Variable: " + varName + ". Move: ." + String(currentTag) + " => ." + String(targetTag) +
       ". The from-state's rule= contract does not permit this target."
     );
   }
@@ -2761,23 +2800,33 @@ function _scrml_engine_advance(varName, target, table, timersTable, idleEntry, i
   // BEFORE the cell write so the captured inner variant reflects the state
   // at the moment of exit (not after any side effect of the write). Tree-
   // shaken via null historyMap.
-  if (historyMap != null) _scrml_engine_history_capture_on_exit(varName, current, target, historyMap);
+  //
+  // S95 Bug 2 — pass currentTag (not raw \`current\`) so history-cell key
+  // construction operates on tag space. The captured inner-engine value
+  // stored in the synth cell IS the inner cell value (also potentially a
+  // tagged-object — handled by the inner engine's read sites).
+  if (historyMap != null) _scrml_engine_history_capture_on_exit(varName, currentTag, targetTag, historyMap);
   // A5-7 Wave 2.4 §51.0.Q.1 — set the pending-history-restore flag BEFORE
   // the cell write (which fires the outer dispatcher's subscriber). The
   // dispatcher composite-arm postMountJs reads the flag, restores inner
   // from the synth cell when set, and clears the flag. Tree-shaken via
   // isHistoryRestore default-false.
-  if (isHistoryRestore === true && historyMap != null && historyMap[target] != null) {
-    _scrml_engine_pending_history_restore[varName] = target;
+  //
+  // S95 Bug 2 — historyMap is keyed by tag (outerVariantTag → innerVarName),
+  // pending-restore flag is keyed by tag too. Use targetTag.
+  if (isHistoryRestore === true && historyMap != null && historyMap[targetTag] != null) {
+    _scrml_engine_pending_history_restore[varName] = targetTag;
   }
   // Clear timers attached to the OUTGOING state-child first (timers belong
   // to the from-state — the spec semantics are "armed on entry, cleared on
   // exit"). Re-entering the same state-child clears + re-arms below.
-  if (timersTable != null) _scrml_engine_clear_state_timers(varName, current, timersTable);
+  //
+  // S95 Bug 2 — timersTable is keyed by tag (state-child names map directly).
+  if (timersTable != null) _scrml_engine_clear_state_timers(varName, currentTag, timersTable);
   _scrml_reactive_set(varName, target);
   // Arm timers for the INCOMING state-child. Re-entering the same state-child
   // (current === target) re-arms a fresh timer per §51.12.4 reset semantics.
-  if (timersTable != null) _scrml_engine_arm_state_timers(varName, target, timersTable, table);
+  if (timersTable != null) _scrml_engine_arm_state_timers(varName, targetTag, timersTable, table);
   // A5-6 §51.0.R — reset the engine's idle watchdog on every successful
   // transition (machine-wide event-timeout). idleEntry is null when the
   // engine declares no <onIdle> (tree-shake).
@@ -2793,14 +2842,21 @@ function _scrml_engine_direct_set(varName, target, table, timersTable, idleEntry
   // historyMap (A5-7 Wave 2.3 §51.0.N): per-engine history map or null. See
   // _scrml_engine_advance above for full semantics.
   const current = _scrml_reactive_get(varName);
+  // S95 Bug 2 — tag-space normalization (see _scrml_engine_advance for the
+  // full rationale). The cell stores the full target value (payload-bearing
+  // variants are \`{ variant, data }\`); transition-table lookups, self-write
+  // detection, history-map / pending-restore lookups, and timer-table
+  // lookups all operate in tag space.
+  const currentTag = _scrml_engine_variant_tag(current);
+  const targetTag = _scrml_engine_variant_tag(target);
   // §51.0.F (v0.3 Option-d synthesis) — IDEMPOTENT SELF-WRITE NO-OP.
   // See _scrml_engine_advance above for the full rationale. A self-write
   // (target === current) is a true no-op, NOT a rule= violation. Returns
   // false (matches the non-external-transition signal). Surfaced at compile
   // time by W-ENGINE-SELF-WRITE-DETECTED (info-level lint).
-  if (current === target) return false;
+  if (currentTag === targetTag) return false;
   // A5-7 Wave 2.2 — internal-path check FIRST (see _scrml_engine_advance).
-  if (internalTable != null && _scrml_engine_check_transition(current, target, internalTable)) {
+  if (internalTable != null && _scrml_engine_check_transition(currentTag, targetTag, internalTable)) {
     // §51.0.O internal write path — see _scrml_engine_advance for full
     // rationale. Side-effect-free write: update cell value, do NOT fire
     // subscribers, do NOT touch timers, do NOT touch history. Idle watchdog
@@ -2809,24 +2865,24 @@ function _scrml_engine_direct_set(varName, target, table, timersTable, idleEntry
     if (idleEntry != null) _scrml_engine_reset_idle_watchdog(varName, idleEntry, table);
     return false;
   }
-  if (!_scrml_engine_check_transition(current, target, table)) {
+  if (!_scrml_engine_check_transition(currentTag, targetTag, table)) {
     throw new Error(
       "E-ENGINE-INVALID-TRANSITION: illegal direct write to engine variable. " +
-      "Variable: " + varName + ". Move: ." + String(current) + " => ." + String(target) +
+      "Variable: " + varName + ". Move: ." + String(currentTag) + " => ." + String(targetTag) +
       ". The from-state's rule= contract does not permit this target."
     );
   }
   // A5-7 Wave 2.3 §51.0.N — history capture on EXTERNAL outer-exit (see
   // _scrml_engine_advance for rationale). Tree-shaken via null historyMap.
-  if (historyMap != null) _scrml_engine_history_capture_on_exit(varName, current, target, historyMap);
+  if (historyMap != null) _scrml_engine_history_capture_on_exit(varName, currentTag, targetTag, historyMap);
   // A5-7 Wave 2.4 §51.0.Q.1 — pending-history-restore flag (see
   // _scrml_engine_advance for rationale).
-  if (isHistoryRestore === true && historyMap != null && historyMap[target] != null) {
-    _scrml_engine_pending_history_restore[varName] = target;
+  if (isHistoryRestore === true && historyMap != null && historyMap[targetTag] != null) {
+    _scrml_engine_pending_history_restore[varName] = targetTag;
   }
-  if (timersTable != null) _scrml_engine_clear_state_timers(varName, current, timersTable);
+  if (timersTable != null) _scrml_engine_clear_state_timers(varName, currentTag, timersTable);
   _scrml_reactive_set(varName, target);
-  if (timersTable != null) _scrml_engine_arm_state_timers(varName, target, timersTable, table);
+  if (timersTable != null) _scrml_engine_arm_state_timers(varName, targetTag, timersTable, table);
   if (idleEntry != null) _scrml_engine_reset_idle_watchdog(varName, idleEntry, table);
   return true;
 }

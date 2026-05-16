@@ -69,6 +69,32 @@ export function setVariantFieldsForFile(
   _variantFieldCollisions = collisions ?? null;
 }
 
+/**
+ * Bug 2 (S95) — Lookup helper for the variant payload-field schema. Used by
+ * `emit-expr.ts:emitCall` to lower `.Variant(args)` bare-dot constructor
+ * calls (and qualified `Enum.Variant(args)` calls — see emitCall for the
+ * dispatch logic) into the canonical `{ variant, data }` tagged-object shape
+ * matching what the emitted enum-constructor function would return (see
+ * `emit-client.ts:emitEnumVariantObjects`).
+ *
+ * Returns the ordered declared field-name list for a payload variant, or
+ * `null` when the variant name is unknown (unit variant, or no enum decl in
+ * the current file declares the name).
+ *
+ * Collision policy mirrors the existing positional-binding path: when two
+ * enums in the same file declare a variant with the same name, the variant
+ * is in `_variantFieldCollisions` and we conservatively return `null` here
+ * (caller falls back to the legacy `callee(args)` emission — which today
+ * produces broken code only when the callee was bare-dot; with a qualified
+ * `Enum.Variant(args)` the enum-namespaced constructor handles the
+ * disambiguation correctly).
+ */
+export function getVariantFieldSchema(variantName: string): string[] | null {
+  if (!_variantFields) return null;
+  if (_variantFieldCollisions && _variantFieldCollisions.has(variantName)) return null;
+  return _variantFields.get(variantName) ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------

@@ -256,7 +256,7 @@ describe("Phase A10 Phase 3 §5 — body with ${@cell} interpolation", () => {
 // ---------------------------------------------------------------------------
 
 describe("Phase A10 Phase 3 §6 — body with payload binding", () => {
-  test("Error msg arm render fn takes msg parameter; dispatcher passes _payload[0]", () => {
+  test("Error msg arm render fn takes msg parameter; dispatcher passes _data[\"msg\"]", () => {
     const src = `\${
   type Phase:enum = { Idle, Error(msg: string) }
 }
@@ -271,8 +271,11 @@ describe("Phase A10 Phase 3 §6 — body with payload binding", () => {
     expect(errors).toEqual([]);
     // Error render fn signature includes the msg parameter
     expect(clientJs).toMatch(/function _scrml_engine_phase_render_Error\(msg\) {/);
-    // Dispatcher passes _payload && _payload[0] for the Error branch
-    expect(clientJs).toMatch(/_scrml_engine_phase_render_Error\(_payload && _payload\[0\]\)/);
+    // S95 Bug 2 fix — dispatcher passes the named-field lookup
+    // `_data && _data["msg"]` instead of the never-realized positional
+    // `_payload[0]`. Per SPEC §51.3.2 the runtime data shape is
+    // `{ fieldName: value }` keyed by the variant's declared field names.
+    expect(clientJs).toMatch(/_scrml_engine_phase_render_Error\(_data && _data\["msg"\]\)/);
   });
 });
 

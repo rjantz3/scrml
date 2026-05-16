@@ -723,12 +723,18 @@ export function emitVariantGuardedRender(
   dispatcherLines.push(`function ${dispatchFnName}(_v) {`);
   dispatcherLines.push(`  const _mount = document.querySelector('[${mountAttr}="${idPrefix}"]');`);
   dispatcherLines.push(`  if (!_mount) return;`);
-  // Variant tag extraction. Per C12 the variant is a STRING tag (e.g.
-  // "Idle"). Future variant kinds (struct-discriminator, payload-bearing
-  // tagged-union) MAY surface a `{tag, payload}`-shaped runtime value;
-  // the helper handles both shapes defensively.
-  dispatcherLines.push(`  const _tag = typeof _v === "string" ? _v : (_v && _v.tag);`);
-  dispatcherLines.push(`  const _payload = (_v && typeof _v === "object" && Array.isArray(_v.payload)) ? _v.payload : null;`);
+  // Variant tag extraction. Unit variants live as bare string tags ("Idle");
+  // payload-bearing variants live as `{ variant: "X", data: { fieldName: val } }`
+  // tagged-objects per SPEC §51.3.2 / emit-client.ts:emitEnumVariantObjects.
+  // The dispatcher handles both shapes uniformly:
+  //   - bare string  → use as the tag
+  //   - object       → extract `.variant` as the tag and `.data` as the payload
+  // S95 Bug 2 fix — the previous shape (`_v.tag` / Array `_v.payload`) was a
+  // never-realized placeholder; payload-bearing engines never reached the
+  // dispatcher because the upstream codegen bug crashed earlier
+  // (`"Variant"(args)` calling a string).
+  dispatcherLines.push(`  const _tag = (typeof _v === "object" && _v !== null && typeof _v.variant === "string") ? _v.variant : _v;`);
+  dispatcherLines.push(`  const _data = (typeof _v === "object" && _v !== null && _v.data && typeof _v.data === "object") ? _v.data : null;`);
   // Tear down the prior arm's wiring before the innerHTML replace so
   // _scrml_effect callbacks don't fire against detached spans (memory
   // hygiene). Idempotent — calling dispose twice is a no-op (the runtime
@@ -741,10 +747,20 @@ export function emitVariantGuardedRender(
     const fnName = `${renderFnPrefix}_${idPrefix}_render_${arm.tag}`;
     const wireFnName = `${renderFnPrefix}_${idPrefix}_wire_${arm.tag}`;
     const head = i === 0 ? `if` : `else if`;
-    // Pass payload positionals: _payload[0], _payload[1], ... — undefined
-    // when the runtime variant is a bare string tag.
+    // Pass payload as named-field lookups: `_data && _data["<bindingName>"]`.
+    // Per SPEC §51.3.2 (Implementation notes S22) the runtime data shape is
+    // `{ fieldName: value }` — keyed by the variant's declared field names.
+    // The state-child's bareword attrs (e.g. `<Dragging id>`) ARE those field
+    // names by §51.3.2 (named bindings name the field directly). When the
+    // runtime value is a bare string tag (unit variant), `_data` is null
+    // and the lookup chain produces `undefined` — passing `undefined` to a
+    // unit-variant arm's render fn is a no-op (the render fn doesn't read it).
+    //
+    // S95 Bug 2 — the previous shape (`_payload[<index>]` Array lookup) was
+    // never realized at runtime; the upstream codegen bug crashed before any
+    // payload-bearing variant value reached the dispatcher.
     const args = arm.payloadBindings
-      .map((_, j) => `_payload && _payload[${j}]`)
+      .map((bindingName) => `_data && _data[${JSON.stringify(bindingName)}]`)
       .join(", ");
     dispatcherLines.push(`  ${head} (_tag === ${JSON.stringify(arm.tag)}) {`);
     dispatcherLines.push(`    _mount.innerHTML = ${fnName}(${args});`);
