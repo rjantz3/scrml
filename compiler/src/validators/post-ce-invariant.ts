@@ -86,6 +86,18 @@ export function runPostCEInvariantFile(file: {
     //       reference (via the uppercase syntactic heuristic) but NR could not
     //       resolve it (no same-file decl, no import). This is the silent
     //       phantom-DOM emission case VP-2 was created to catch.
+    //   (c) S95 Bug 5: resolvedKind absent (NR never visited this node) AND
+    //       uppercase-first tag. Defense-in-depth for AST shapes that bypass
+    //       NR — specifically, nodes inside a component-def body that CE re-
+    //       parses via parseComponentBody (BS+TAB only, no NR). These nodes
+    //       reach VP-2 with no resolvedKind stamp; the uppercase heuristic
+    //       (BS's syntactic component-name predicate) is the only signal
+    //       available. Without this branch the residual TaskCard inside
+    //       Column's expanded body slipped past VP-2 silently and reached
+    //       codegen as `createElement("TaskCard")`. The right architectural
+    //       fix is Bug 5a (CE must recurse into expanded user-component
+    //       bodies); this branch is the defensive backstop, mirroring the
+    //       (b) clause's tag-only routing.
     // The uppercase-first-char heuristic mirrors BS's isComponentName predicate
     // (tag charCode in 'A'..'Z') without reading the legacy isComponent boolean.
     const tag = n.tag ?? "";
@@ -93,7 +105,8 @@ export function runPostCEInvariantFile(file: {
       tag.length > 0 && tag.charCodeAt(0) >= 65 && tag.charCodeAt(0) <= 90;
     const isResidualComponent =
       n.resolvedKind === "user-component" ||
-      (n.resolvedKind === "unknown" && looksLikeComponent);
+      (n.resolvedKind === "unknown" && looksLikeComponent) ||
+      (n.resolvedKind == null && looksLikeComponent);
     if (!isResidualComponent) return;
 
     const tagDisplay = tag.length > 0 ? tag : "<unknown>";

@@ -2381,7 +2381,30 @@ function walkLogicBody(
           // For lift-expr: take the first expanded node (Phase 2 for full multi-root lift)
           const expanded = expandedNodes[0];
           if (expanded && expanded !== liftMarkup) {
-            const newNode = { ...n, expr: { kind: "markup", node: expanded } };
+            // S95 Bug 5a: recurse into the expanded body's children so any
+            // nested user-component references (e.g. Column's body contains
+            // `lift <TaskCard .../>`) get expanded too. Pre-fix, the
+            // expansion was wrapped into the new lift node without descending
+            // into its body — the inner TaskCard ref survived to codegen as
+            // `document.createElement("TaskCard")` (phantom DOM). Mirrors the
+            // walkAndExpand non-lift path at line ~2150 and the wrapper-element
+            // path at line ~2389 below.
+            //
+            // parseComponentBody (used to materialise the component's stored
+            // body) re-parses via BS+TAB only — no NR pass — so nested refs
+            // inside the parsed body have isComponent:true but no
+            // resolvedKind. isUserComponentMarkup's legacy fallback at
+            // line 212 (resolvedKind==null && isComponent===true) is what
+            // makes the nested expansion succeed.
+            let finalExpanded: MarkupNode = expanded;
+            if (!isUserComponentMarkup(expanded)) {
+              const expandedChildren = walkAndExpand(
+                (expanded as MarkupNode).children ?? [],
+                registry, filePath, counter, ceErrors,
+              );
+              finalExpanded = { ...(expanded as MarkupNode), children: expandedChildren } as MarkupNode;
+            }
+            const newNode = { ...n, expr: { kind: "markup", node: finalExpanded } };
             result.push(newNode);
             changed = true;
             continue;
@@ -2433,7 +2456,16 @@ function walkLogicBody(
             const expandedNodes = expandComponentNode(bareMarkup, registry, filePath, counter, ceErrors);
             const expanded = expandedNodes[0];
             if (expanded && expanded !== bareMarkup) {
-              const newNode = { ...n, expr: { kind: "markup", node: expanded } };
+              // S95 Bug 5a: recurse into expanded body so nested refs expand.
+              let finalExpanded: MarkupNode = expanded;
+              if (!isUserComponentMarkup(expanded)) {
+                const expandedChildren = walkAndExpand(
+                  (expanded as MarkupNode).children ?? [],
+                  registry, filePath, counter, ceErrors,
+                );
+                finalExpanded = { ...(expanded as MarkupNode), children: expandedChildren } as MarkupNode;
+              }
+              const newNode = { ...n, expr: { kind: "markup", node: finalExpanded } };
               result.push(newNode);
               changed = true;
               continue;
@@ -2469,7 +2501,16 @@ function walkLogicBody(
               const expandedNodes = expandComponentNode(markupNode, registry, filePath, counter, ceErrors);
               const expanded = expandedNodes[0];
               if (expanded && expanded !== markupNode) {
-                const newNode = { ...n, expr: { kind: "markup", node: expanded } };
+                // S95 Bug 5a: recurse into expanded body so nested refs expand.
+                let finalExpanded: MarkupNode = expanded;
+                if (!isUserComponentMarkup(expanded)) {
+                  const expandedChildren = walkAndExpand(
+                    (expanded as MarkupNode).children ?? [],
+                    registry, filePath, counter, ceErrors,
+                  );
+                  finalExpanded = { ...(expanded as MarkupNode), children: expandedChildren } as MarkupNode;
+                }
+                const newNode = { ...n, expr: { kind: "markup", node: finalExpanded } };
                 result.push(newNode);
                 changed = true;
                 continue;
