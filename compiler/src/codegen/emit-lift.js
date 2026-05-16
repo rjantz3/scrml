@@ -3,6 +3,7 @@ import { emitStringFromTree } from "../expression-parser.ts";
 import { emitLogicNode } from "./emit-logic.js";
 import { genVar } from "./var-counter.ts";
 import { VOID_ELEMENTS } from "./utils.ts";
+import { iterableHasReactiveRefs } from "./reactive-deps.ts";
 
 // ---------------------------------------------------------------------------
 // Render keyword rewriter (§16.6)
@@ -1097,9 +1098,79 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
   }
 
   const rewrittenIterable = emitExprField(forNode.iterExpr, iterable, { mode: "client" });
+
+  // S96 Issue C — Option A nested-in-lift reactive emit.
+  //
+  // When the iterable contains an @-prefix ref (direct or transitive),
+  // emit the reconcile_list shape per-outer-iteration. Mirrors the
+  // top-level reactive emit at emit-control-flow.ts:330-408 but appends
+  // the wrapper to `containerElVar` instead of using the ambient
+  // `_scrml_lift()` (the outer for-stmt already established the container).
+  //
+  // Pre-S96 the nested codepath always emitted plain `for` regardless of
+  // reactivity. Real-code precedent: examples/25-triage-board.scrml has
+  // `for (let col of columns) { lift <section> for (let task of @tasks.filter(...)) ... </section> }`
+  // — outer is non-reactive (columns is const), inner is reactive (`@tasks`
+  // direct ref). Without this branch, the inner list rendered once at
+  // module-init and never reactively updated on `@tasks` mutation — the
+  // canonical adopter-shape footgun Option A is designed to close.
+  //
+  // fnBodyRegistry is null here (emit-lift's recursive calls don't thread
+  // it). Direct @-refs still resolve via `extractReactiveDeps`; only the
+  // transitive-through-fn-call case requires the registry. The triage-board
+  // shape is direct, so the predicate fires correctly without registry.
+  const iterIsReactive = iterableHasReactiveRefs(forNode, opts.fnBodyRegistry ?? null);
+  const body = forNode.body ?? [];
+
+  if (iterIsReactive) {
+    const wrapperVar = genVar('list_wrapper');
+    const renderFn = genVar('render_list');
+    const createFnVar = genVar('create_item');
+    const tmpContainerVar = genVar('tmp');
+
+    lines.push(`const ${wrapperVar} = document.createElement("div");`);
+    lines.push(`${containerElVar}.appendChild(${wrapperVar});`);
+
+    lines.push(`function ${createFnVar}(${varName}, _scrml_idx) {`);
+    lines.push(`  const ${tmpContainerVar} = document.createDocumentFragment();`);
+
+    for (const child of body) {
+      if (!child) continue;
+      if (child.kind === 'lift-expr') {
+        const code = emitLiftExpr(child, { containerVar: tmpContainerVar });
+        if (code) {
+          for (const line of code.split('\n')) lines.push('  ' + line);
+        }
+      } else if (child.kind === 'for-stmt') {
+        const code = emitForStmtWithContainer(child, tmpContainerVar, { ...opts, continueBehavior: "return" });
+        if (code) {
+          for (const line of code.split('\n')) lines.push('  ' + line);
+        }
+      } else if (child.kind === 'if-stmt') {
+        const code = emitIfStmtWithContainer(child, tmpContainerVar, { ...opts, continueBehavior: "return" });
+        if (code) {
+          for (const line of code.split('\n')) lines.push('  ' + line);
+        }
+      } else {
+        const code = emitLogicNode(child, { continueBehavior: "return" });
+        if (code) lines.push('  ' + code);
+      }
+    }
+
+    lines.push(`  return ${tmpContainerVar}.firstChild;`);
+    lines.push(`}`);
+
+    lines.push(`function ${renderFn}() {`);
+    lines.push(`  _scrml_reconcile_list(${wrapperVar}, ${rewrittenIterable}, (item, i) => item?.id != null ? item.id : i, ${createFnVar});`);
+    lines.push(`}`);
+    lines.push(`${renderFn}();`);
+    lines.push(`_scrml_effect_static(${renderFn});`);
+    return lines.join('\n');
+  }
+
+  // Non-reactive path — plain for loop (pre-S96 behavior, preserved).
   lines.push(`for (const ${varName} of ${rewrittenIterable}) {`);
 
-  const body = forNode.body ?? [];
   for (const child of body) {
     if (!child) continue;
     if (child.kind === 'lift-expr') {

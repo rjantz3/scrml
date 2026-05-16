@@ -1,6 +1,7 @@
 import { SCRML_RUNTIME } from "../runtime-template.js";
 import { exprNodeContainsCall } from "../expression-parser.ts";
 import { assembleRuntime, RUNTIME_CHUNK_ORDER } from "./runtime-chunks.ts";
+import { buildFunctionBodyRegistry, iterableHasReactiveRefs } from "./reactive-deps.ts";
 import { CGError } from "./errors.ts";
 import { escapeRegex } from "./utils.ts";
 import { emitFunctions } from "./emit-functions.ts";
@@ -97,6 +98,15 @@ function hasRuntimeMetaBlocks(fileAST: any): boolean {
 function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
   const chunks = ctx.usedRuntimeChunks;
   const allNodes: any[] = fileAST?.ast?.nodes ?? fileAST?.nodes ?? [];
+  // S96 Issue C — build the function-body registry once so the for-stmt
+  // chunk-gate (case "for-stmt" below) can detect transitive reactive
+  // dependencies through function-call iterables (`fn()` where fn body
+  // reads `@state`). Without this, the gate misses Cases 3 + transitive
+  // from the Option A table — see iterableHasReactiveRefs docstring.
+  // Mirror of the registry build at emit-reactive-wiring.ts:286.
+  const fnRegistry = buildFunctionBodyRegistry(
+    fileAST?.ast ?? fileAST ?? {},
+  );
 
   // A-4.3 + A-4.5 — `prefetch` chunk lights up when the Stage 7.6 RS has
   // produced EITHER:
@@ -439,11 +449,15 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
 
       // for-stmt — reactive for-loops use _scrml_reconcile_list + _scrml_effect_static + _scrml_lift
       case "for-stmt": {
-        // Phase 4d: ExprNode-first — check iterExpr for reactive @var, string fallback
-        const _iterExpr = node.iterExpr;
-        const iterIsReactive = _iterExpr
-          ? (_iterExpr.kind === "ident" && typeof _iterExpr.name === "string" && _iterExpr.name.startsWith("@"))
-          : /^@[A-Za-z_$][A-Za-z0-9_$]*$/.test((node.iterable ?? node.collection ?? "").trim());
+        // S96 Issue C — predicate widened from "iterable is bare @ident" to
+        // "iterable contains any @-prefix ref (direct or transitive through
+        // fn-call body)". Closes the silent-non-reactivity gap for shapes
+        // like `for (let x of @cell.filter(...))` and `for (let x of fn())`
+        // where fn body reads `@state`. V5-strict ensures bare identifiers
+        // are LOCAL (per §6.1.3 + E-NAME-COLLIDES-STATE), so "no @-ref" is
+        // unambiguously snapshot semantics. See iterableHasReactiveRefs
+        // in reactive-deps.ts for the helper.
+        const iterIsReactive = iterableHasReactiveRefs(node, fnRegistry);
         if (iterIsReactive) {
           chunks.add("reconciliation");
           chunks.add("lift");

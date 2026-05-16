@@ -2045,7 +2045,9 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       if (opts.tildeContext) {
         return _emitForStmtWithTilde(node, opts);
       }
-      return emitForStmt(node, { dbVar: opts.dbVar, declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody });
+      // S96 Issue C — thread fnBodyRegistry so emitForStmt's reactive-iterable
+      // predicate can detect transitive @-refs through fn-call iterables.
+      return emitForStmt(node, { dbVar: opts.dbVar, declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, fnBodyRegistry: opts.fnBodyRegistry });
 
     case "while-stmt":
       // §32 array accumulator: same pattern as for-stmt above.

@@ -586,3 +586,49 @@ export function extractReactiveDepsTransitive(
 
   return allDeps;
 }
+
+/**
+ * S96 Issue C — Reactive iterable detection for `for (let x of EXPR)`.
+ *
+ * Returns true when EXPR contains AT LEAST ONE `@`-prefixed reactive ref —
+ * either directly (`@cell`, `@cell.filter(...)`, `[...@cells, ...]`) OR
+ * transitively through function-call indirection (`fn()` where `fn` body
+ * reads `@state`).
+ *
+ * Per pa.md Rule 4 + SPEC V5-strict (§6.1.3): bare identifiers are LOCAL
+ * (and shadow-collisions fire E-NAME-COLLIDES-STATE), so the V5-strict
+ * boundary makes this predicate principled — "no `@`-ref in iterable" is
+ * unambiguously snapshot semantics.
+ *
+ * Pre-S96 Issue C, both the chunk-gate in `emit-client.ts:detectRuntimeChunks`
+ * and the for-stmt emitter in `emit-control-flow.ts:emitForStmt` matched only
+ * the bare `@ident` shape. Iterables like `@tasks.filter(...)` (Case 3) and
+ * `visibleItems()` (transitive) silently fell through to plain-for emission
+ * — the surrounding `<ul>` rendered once at module-init and never re-rendered
+ * on `@state` change. Adopter-visible "list never updates" bug.
+ *
+ * The fix preserves snapshot semantics for genuinely non-reactive iterables
+ * (`fetchUsers()` reading only DB state, `localVar.filter(...)` where local
+ * is a snapshot copy) — those produce empty dep sets and short-circuit to
+ * the existing plain-for path.
+ *
+ * @param node — for-stmt AST node (carries `iterExpr` ExprNode and/or
+ *   string fallback `iterable` / `collection`)
+ * @param fnRegistry — function body registry from `buildFunctionBodyRegistry`.
+ *   When null, only direct refs are checked (snapshot-correct but misses
+ *   the transitive case).
+ * @returns true if iterable depends on at least one reactive cell
+ */
+export function iterableHasReactiveRefs(
+  node: { iterExpr?: unknown; iterable?: string; collection?: string },
+  fnRegistry: FunctionBodyRegistry | null,
+): boolean {
+  const iterStr = (node.iterExpr && typeof node.iterExpr === "object")
+    ? emitStringFromTreeSafe(node.iterExpr)
+    : ((node.iterable as string | undefined) ?? (node.collection as string | undefined) ?? "");
+  if (!iterStr) return false;
+  if (fnRegistry) {
+    return extractReactiveDepsTransitive(iterStr, null, fnRegistry).size > 0;
+  }
+  return extractReactiveDeps(iterStr, null).size > 0;
+}

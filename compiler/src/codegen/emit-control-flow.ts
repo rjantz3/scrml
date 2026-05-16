@@ -4,6 +4,7 @@ import { emitLogicNode, emitLogicBody } from "./emit-logic.js";
 import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer } from "./emit-lift.js";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
+import { iterableHasReactiveRefs, type FunctionBodyRegistry } from "./reactive-deps.ts";
 
 // ---------------------------------------------------------------------------
 // Module-level Tier 2 hoist registry (§8.10)
@@ -279,7 +280,7 @@ export function emitIfStmt(node: any, opts: IfOpts = {}): string {
  */
 export function emitForStmt(
   node: any,
-  opts?: { dbVar?: string; declaredNames?: Set<string>; insideFunctionBody?: boolean },
+  opts?: { dbVar?: string; declaredNames?: Set<string>; insideFunctionBody?: boolean; fnBodyRegistry?: FunctionBodyRegistry | null },
 ): string {
   const lines: string[] = [];
   let varName: string = node.variable ?? node.name ?? "item";
@@ -322,14 +323,24 @@ export function emitForStmt(
     }
   }
 
-  // Detect reactive iterable: bare `@varName` (e.g. "@items").
-  const reactiveMatch = typeof iterable === "string"
-    ? iterable.trim().match(/^@([A-Za-z_$][A-Za-z0-9_$]*)$/)
-    : null;
+  // S96 Issue C — predicate widened: reactive iff iterable contains any
+  // @-prefix ref (direct or transitive through fn-call body), not just
+  // bare-@-ident. Mirrors the chunk-gate predicate in
+  // emit-client.ts:detectRuntimeChunks (both sites must agree, otherwise
+  // the runtime ships the reconciliation chunk but the emit uses plain
+  // for-loop, or vice versa).
+  //
+  // Pre-S96: `for (let task of @tasks.filter(...))` (real-code shape from
+  // examples/25-triage-board.scrml) and `for (let x of fn())` where fn
+  // reads `@state` both silently fell through to plain `for (const x of
+  // ...)` emission. The surrounding `<ul>` would render once at module-init
+  // and never re-render on state change. V5-strict enforcement at the
+  // identifier level (§6.1.3 + E-NAME-COLLIDES-STATE) makes "no @-ref =
+  // snapshot" unambiguous, so the predicate widening is sound.
+  const iterIsReactive = iterableHasReactiveRefs(node, opts?.fnBodyRegistry ?? null);
 
-  if (reactiveMatch) {
+  if (iterIsReactive) {
     // Reactive for/lift path — §6.5.3 with keyed reconciliation
-    const reactiveVarName = reactiveMatch[1];
     const wrapperVar = genVar("list_wrapper");
     const renderFn = genVar("render_list");
     const createFnVar = genVar("create_item");
