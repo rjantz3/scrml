@@ -96,7 +96,7 @@ function loadTodoMVC() {
     window._scrml_reactive_set = _scrml_reactive_set;
     window._scrml_reactive_subscribe = _scrml_reactive_subscribe;
     window._scrml_lift = _scrml_lift;
-    window._scrml_reconcile_list = _scrml_reconcile_list;
+    if (typeof _scrml_reconcile_list !== "undefined") window._scrml_reconcile_list = _scrml_reconcile_list;
     if (typeof _scrml_deep_reactive !== "undefined") window._scrml_deep_reactive = _scrml_deep_reactive;
     if (typeof _scrml_effect !== "undefined") window._scrml_effect = _scrml_effect;
     if (typeof _scrml_effect_static !== "undefined") window._scrml_effect_static = _scrml_effect_static;
@@ -222,10 +222,12 @@ describe("TodoMVC §2: reactive state initialization", () => {
     expect(api.get("newTodoText")).toBe("");
   });
 
-  test("@filter initialized to 'all'", () => {
+  test("@filter initialized to FilterMode.All", () => {
     if (!distExists) return;
     const api = loadTodoMVC();
-    expect(api.get("filter")).toBe("all");
+    // S96: @filter promoted from string ("all") to FilterMode:enum (.All).
+    // The runtime representation of an enum variant is its name string.
+    expect(api.get("filter")).toBe("All");
   });
 
   test("@editingId initialized to null", () => {

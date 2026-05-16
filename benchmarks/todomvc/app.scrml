@@ -13,7 +13,7 @@
 
         @todos = []
         @newTodoText = ""
-        @filter = "all"
+        <filter>: FilterMode = .All
         @editingId = not
         @editText = ""
         @nextId = 1
@@ -77,10 +77,6 @@
             saveTodos()
         }
 
-        function setFilter(mode) {
-            @filter = mode
-        }
-
         function startEdit(id, title) {
             @editingId = id
             @editText = title
@@ -130,15 +126,32 @@
             return @todos.filter(function(t) { return t.completed }).length
         }
 
-        function visibleTodos() {
-            if (@filter == "active") {
+        function setFilter(mode) {
+            @filter = mode
+        }
+
+        // Helper: returns the filtered list for the current @filter value.
+        // Reads @filter and @todos; pure with respect to its inputs. Called
+        // from the derived cell below so the derived RHS stays a single
+        // function-call expression (simpler codegen path than inlining the
+        // branches into the derived expression itself — match-form and
+        // ternary-form both surfaced derived-emit codegen bugs).
+        function computeVisibleTodos() {
+            if (@filter == FilterMode::Active) {
                 return @todos.filter(function(t) { return !t.completed })
             }
-            if (@filter == "completed") {
+            if (@filter == FilterMode::Completed) {
                 return @todos.filter(function(t) { return t.completed })
             }
             return @todos
         }
+
+        // Reactive derived view — re-evaluates when @filter or @todos change.
+        // The for-loop below iterates @visibleTodos (bare cell ident), which
+        // activates the `reconciliation` chunk gate at emit-client.ts (~L445)
+        // — without that gate the <ul> would render once at module-init and
+        // never reactively re-render.
+        const <visibleTodos> = computeVisibleTodos()
 
         // Load on startup
         loadTodos()
@@ -163,7 +176,7 @@
         <label for="toggle-all">Mark all as complete</>
         <ul class="todo-list">
             ${
-                for (let todo of visibleTodos()) {
+                for (let todo of @visibleTodos) {
                     lift <li class="todo-item" data-id=${todo.id}>
                         <div class="view" if=@editingId != todo.id>
                             <input class="toggle" type="checkbox" checked=${todo.completed} onclick=toggleTodo(todo.id)/>
@@ -184,13 +197,13 @@
         </>
         <ul class="filters">
             <li>
-                <a href="#/" onclick=setFilter("all")>All</>
+                <a href="#/" onclick=setFilter(FilterMode::All)>All</>
             </li>
             <li>
-                <a href="#/active" onclick=setFilter("active")>Active</>
+                <a href="#/active" onclick=setFilter(FilterMode::Active)>Active</>
             </li>
             <li>
-                <a href="#/completed" onclick=setFilter("completed")>Completed</>
+                <a href="#/completed" onclick=setFilter(FilterMode::Completed)>Completed</>
             </li>
         </ul>
         ${

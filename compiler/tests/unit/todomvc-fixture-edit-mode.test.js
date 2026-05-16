@@ -192,8 +192,16 @@ describe("§A: TodoMVC fixture (benchmarks/todomvc/app.scrml) — post Bug 5 fix
     expect(js).toMatch(/_scrml_handleEditKey_\d+/);
     // commitEdit is referenced (wired via onblur — was W-DEAD pre-S89).
     expect(js).toMatch(/_scrml_commitEdit_\d+/);
-    // visibleTodos is referenced (wired as for-iterable — was W-DEAD pre-S89).
-    expect(js).toMatch(/_scrml_visibleTodos_\d+/);
+    // visibleTodos is wired as the reactive for-iterable. S96 refactor
+    // promoted it from a JS `function visibleTodos()` to a derived state
+    // cell `const <visibleTodos> = computeVisibleTodos()` — the bare-cell
+    // ident in `for (let todo of @visibleTodos)` is what activates the
+    // `reconciliation` chunk gate (emit-client.ts ~L445) so the <ul>
+    // re-renders reactively. The helper that the derived calls is
+    // `_scrml_computeVisibleTodos_NN`.
+    expect(js).toMatch(/_scrml_derived_declare\("visibleTodos"/);
+    expect(js).toMatch(/_scrml_computeVisibleTodos_\d+/);
+    expect(js).toMatch(/_scrml_reconcile_list\([^,]+,\s*_scrml_reactive_get\("visibleTodos"\)/);
   });
 
   test("activeCount() preserves .filter(cb).length callback (Bug 5 anchor)", () => {
