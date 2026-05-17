@@ -2,7 +2,53 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-17 S97 CLOSE — 18 commits · all S95/S96/B1 catalogs closed end-to-end · ghost-pattern lint catalog 16 → 23 entries · stress harness scaffolded with living scorecard · 5 new diagnostic codes covering React/Vue/Svelte/Solid/Angular/TS): full `bun run test` **13,019 pass / 117 skip / 1 todo / 0 fail / 667 files / 43,402 expect** at HEAD `b855d0d` (+127 vs S96 close `d3e8325`'s 12,892). Pre-push gate fully restored — every commit lands without `--no-verify`. v0.3.0 STABLE `c520369` is the shipped baseline; v0.3.x patch series in flight.
+Current baseline (2026-05-17 S99 CLOSE — two-track parallel session · Machine A compiler-fix cascade end-to-end · Machine B voice + website build-out · 30+ commits across both repos · Day-30 reference build-out 11 pages shipped · twitter-archive 507 candidates extracted · 3-gap dev-server bug filed): full `bun test` **15,325 pass / 129 skip / 1 todo / 1 fail / 685 files / 44,181 expect** at HEAD `83a902e` (+2,306 pass / +18 files vs S97 CLOSE `b855d0d`'s 13,019). The 1 fail is `compiler/tests/unit/bug-k-sync-effect-throw.test.js` — pre-existing orthogonal carried from S98 close; investigation candidate. `--no-verify` pushes authorized throughout S99 per user direction per S88 protocol. v0.3.0 STABLE `c520369` is the shipped baseline; v0.3.x patch series in flight.
+
+### 2026-05-17 (S99 CLOSE — two-track parallel session · A2-anomaly cascade closure end-to-end · Day-30 reference build-out 11 pages · twitter-archive 507 candidates · 3-gap dev-server bug filed)
+
+**Session-defining outcome:** parallel-machine velocity-mode operationalized. Machine A (on the `bryan` filesystem) ran the compiler-fix arc (A1+A2+A2-FUP+A3+A4+A5-FUP+A7+B1+B1-FUP+is-some Phase B = 10+ closures) including the A2-anomaly-2 cascade unmasked-and-closed end-to-end + Track 2 of the A3 SURVEY (§51.0.B.1 compiler-feature wiring) + README refresh + S99 LIVE hand-off rotation + corpus-refresh (425 Claude-transcript candidates) + twitter-archive drop (21.2 MB to voice/corpus-sources/). Machine B (on the `bryan-maclee` filesystem) ran the voice-author assembly + twitter-corpus extraction (507 candidates) + Day-30 reference build-out (11 element + context pages) + dev-server bug filing. Combined session: ~30 commits across scrmlTS + scrml-support.
+
+**Compiler fixes (Machine A — 10 closures across scrmlTS):**
+
+- **`c4fc98a`** A2 anomaly-2 fix. `export function` synth stubs were emitting empty `params` + `body` post-block-splitter; AST-builder now populates them via token-slice approach. +10 regression tests. Unmasked a cascade of pre-existing scope/parser gaps (closed below).
+- **`79c0714`** A3 fix. `parseParamList` accumulated tokens between commas into one string; default-value `= expr` separator never detected. Fixed at `ast-builder.js parseParamList` + new `paramSignature` helper in `codegen/utils.ts` + `token.scrml` §42 migration (bare `null` → `not`).
+- **`dbd827f`** A2-FUP-2 RI promotion. `export function foo() { server { ?{} } }` wasn't being promoted by route-inference because the bare `server` keyword captured as malformed `bare-expr`. New `route-inference.ts` pre-pass `rewriteServerBlockStubs`. +9 tests.
+- **`64b2e54`** A1 scope-walker fix. `type-system.ts` scope walker missed (§A) `export class` names, (§B) for-of destructure, (§C) const destructure. New helper `extractDestructuredNames`. +12 unit tests.
+- **`87426c8`** A4 `is some` / `is not` / `is .V` preprocessor fix. `LHS_IDENT_CHAIN` char-class allowed `.` but not whitespace around `.`; preprocessor inverted receiver/argument on certain shapes. Member-access LHS now preserved. +13 tests; un-skip 1 trucking-dispatch.
+- **`9754f1f`** B1-FUP TS scope walker for §51.0.B.1 named-form RHS identifiers (compiler-feature wiring follow-up).
+- **`23c0943`** A5-FUP function-parameter destructuring in parseParamList.
+- **`518ebc9`** is-some Phase B — bare-compound LHS support (`regex.exec(str) is some`, `a || b is some` per SPEC §42.2.4 implementation note).
+- **`b07b37f`** A7 fix — E-SWITCH-FORBIDDEN silent-bypass closed via new structural post-parse walker (the `switch` keyword wasn't fired through certain function-body paths).
+- **`c4c99e4`** B1 §51.0.B.1 payload-binding compiler-feature wiring (track 2 of A3 SURVEY). 3 sub-deliverables: engine-statechild-parser extracts payloadBindings per 3 forms (bare-attribute / named / parenthesized); symbol-table PASS 11 fires E-ENGINE-PAYLOAD-ON-UNIT-VARIANT + -ARITY-MISMATCH + -RESERVED-COLLISION; codegen wires payload-scope injection.
+
+**README + hand-off** (Machine A):
+- **`c9b8821`** README refresh — v0.3.0 STABLE framing, count updates, Phase B SPA tree-shake noted, S99 in-flight noted.
+- **`805a21b`** S99 LIVE hand-off written by Machine A; **`8c0e8ff`** corpus-audit-complete notification to Machine B.
+
+**Voice-author work (Machine B — 4 scrml-support commits):**
+
+- **`e644ffd`** S99 working-draft assembly of state-vs-logic axiom essay. User's S98 bridge-Q1 prose preserved verbatim; 3 scaffold quotes inserted at user-marked `<insert qt here>` placeholders; user's "I would" closing fragment preserved; 8 scaffolder thoughts at bottom.
+- **`50f5d5d`** DRAFT rev-2 — Q3 swap (shoot-straight → GingerBill twitter reply 2026-05-15) per the "if I have already said something well once, why come up with it again" principle. Same controversy-drives-evolution thesis, public attestation. Shoot-straight now reserved exclusively for building-anyway essay. Quote 2 extended to include the truncated "When I reread what I originally typed, its totally not what I meant" sentence.
+- **`2f04d28`** Twitter-archive corpus extraction. **507 candidates** (451 tweets + 56 note-tweets) from 21.2 MB archive. JSON-schema-compatible with both Claude-transcript corpora. Top topics: language-design 147, compiler-design 73, llm-era-adoption 64, industry-field-culture 54.
+- **`1527d42`** Extractor script promoted to `scrml-support/scripts/regen-twitter-corpus-candidates.py`. Companion to other machine's `regen-corpus-candidates.py`.
+
+**Combined voice corpus pool now 1,577 candidates across 3 streams** (machine-A-corpus 425 + machine-B-corpus 645 + twitter-corpus 507) awaiting user-review-curation into canonical `quote-library.json`.
+
+**Website reference build-out (Machine B — 5 scrmlTS commits — Day-30 surface 11 of ~22 element+context pages shipped):**
+
+- **`bbdad7e`** Batch 1: /reference landing + match + program.
+- **`41086cd`** Batch 2: channel + auth + logic context.
+- **`74bcca9`** Website nav patch — hard-coded `/pages/` prefixes in 16 .scrml files (workaround for dev-server URL-routing gap).
+- **`5cb1e3b`** Tailwind-engine-gap addendum to dev-server bug report.
+- **`83a902e`** Batch 3: onTransition + page + schema.
+
+All 11 element + context pages follow the 8-section template. Authoring conventions captured for future feature pages.
+
+**Dev-server bug filed back to Machine A** (`handOffs/incoming/2026-05-17-1815-machine-B-to-machine-A-dev-server-routing-bug.md`): three distinct gaps — (1) URL routing (`/reference` 404s), (2) Shell composition (app.html empty `<main>`, no chrome on pages), (3) Tailwind engine coverage (missing `prose` / `font-mono` / etc). 4 fix-shape options per gap + PA recommendation (Option C: emit `dist/<route>.html` with shell inlined — matches SPEC §40.8.1). Workarounds applied (URL-prefix hard-coding + Tailwind CDN injection); band-aids only. v0.3.x candidate.
+
+**1 new durable user-voice S99 entry + 1 PA-methodology rule:** *"If I have already said something well once, why come up with it again."* — reuse-over-reinvent for voice work. Substrate (quote-library + corpus-candidates + tweet-drafts + prior articles) is the resource; cross-essay quote-overstacking is signal — surface a sibling-quote swap. Visit-and-verify is part of the docs-build-out loop.
+
+**Origin sync at S99 close:** both repos pushed mid-session 5×+4× + wrap chain. Both clean at wrap-start.
 
 ### 2026-05-17 (S97 CLOSE — 18 commits · all S95/S96/B1 bugs closed end-to-end · ghost-pattern lint catalog +7 entries / +8 frameworks covered · stress harness scaffolded)
 
