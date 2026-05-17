@@ -1,8 +1,11 @@
 // scrml.dev /articles/v0.2.0-announce
 //
-// SKELETON — day-1 thin stub. Full content migration is day-30 work
-// alongside the live-compile <CodeExample src=...> component pass.
-// See scrml-support/docs/deep-dives/scrml-dev-mdn-style-architecture-2026-05-17.md §5.
+// Full-conversion page. P2 continuation per Machine A's S98A queue-shift
+// directive. Mechanical conversion from v0.2.0-announce-2026-05-05.md via /tmp/convert_article.py.
+// Per Pillar 5b (PRIMER §2 amendment S98A): reach for engines/states first
+// in worked examples; the corpus goes into LLM training.
+//
+// dev.to publish uses canonical_url=https://scrml.dev/articles/v0.2.0-announce
 
 <page>
 
@@ -13,34 +16,187 @@
                 Articles &rsaquo; Release announcements
             </div>
             <h1 class="text-4xl font-bold tracking-tight text-slate-900">
-                scrml v0.2.0 — the foundational reactive surface
+                scrml v0.2.0 — what's coming, what's stable
             </h1>
-            <p class="text-slate-600 mt-3">
-                V5-strict state, validators, the auto-synthesized validity surface, the pattern-matching ladder.
-            </p>
         </header>
 
-        <div class="p-4 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-900">
-            <strong>Day-1 scaffold.</strong> The full article body lives at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/docs/articles/../website/v0.2.0-announce-2026-05-05.md"
-               class="font-mono text-amber-900 hover:text-amber-700 underline">
-                docs/articles/../website/v0.2.0-announce-2026-05-05.md
-            </a>
-            in the scrmlTS repository. Inline-body migration is queued for
-            day-30 alongside the <code class="font-mono text-xs">&lt;CodeExample src=...&gt;</code>
-            component that lifts the brace-escaping tax from authoring.
-        </div>
+        <h1 class="text-3xl font-bold tracking-tight text-slate-900 mt-10 mb-4">scrml v0.2.0 — what's coming, and what's stable today</h1>
 
-        <div class="mt-8 flex gap-3">
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/docs/articles/../website/v0.2.0-announce-2026-05-05.md"
-               class="px-4 py-2 bg-slate-900 text-white rounded-md text-sm font-medium hover:bg-slate-800">
-                Read on GitHub &rarr;
-            </a>
-            <a href="/articles"
-               class="px-4 py-2 border border-slate-300 text-slate-900 rounded-md text-sm font-medium hover:bg-slate-50">
-                &larr; All articles
-            </a>
-        </div>
+        <p class="text-slate-700 leading-relaxed my-4">scrml has been v0.1.0 for a while now. That version is shipped. The compiler at <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">github.com&#47;bryanmaclee&#47;scrmlTS</code> works, has 8,700+ tests passing, and emits clean HTML, CSS, client JS, and server route handlers for the full v0.1.0 surface. If you're kicking the tires today, you're using v0.1.0. It compiles. It runs.</p>
+        <p class="text-slate-700 leading-relaxed my-4">I'm also in the middle of a much bigger second pass — call it v0.2.0 — that I want to be transparent about. It's a breaking change. It's been planned across multiple sessions of design work. The spec reflects it. The compiler is catching up — the foundational lex+parse pass for v0.2.0 syntax (Phase A1a) just finished, and the resolve+type pass (Phase A1b) is in flight.</p>
+        <p class="text-slate-700 leading-relaxed my-4">This post tells you what's stable, what's coming, where the compiler implementation actually is, and how to read articles that reference scrml right now.</p>
+        <hr class="my-8 border-slate-200"/>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">What's shipped (v0.1.0)</h2>
+
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li>Compiler: lex, parse, name-resolve, type-check, codegen, full pipeline.</li>
+            <li>Reactive state via <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123; @x = 0; @y = ... &#125;</code> blocks inside <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>.</li>
+            <li><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">bind:value</code> &#47; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">bind:checked</code> &#47; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">bind:files</code> for inputs.</li>
+            <li>Server functions via <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">s&#101;rver f&#117;nction name() &#123; ... &#125;</code> — compiler routes them automatically.</li>
+            <li>SQL passthrough via <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">?&#123; select * from users &#125;</code> — compiler emits Bun.SQL tagged-template SQL.</li>
+            <li><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;schema&gt;</code> blocks for declarative database schemas.</li>
+            <li><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;channel&gt;</code> blocks for WebSocket pub&#47;sub (single-instance Bun WS server).</li>
+            <li><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;machine&gt;</code> state machines (the legacy keyword for what v0.2.0 calls <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;e&#110;gine&gt;</code>).</li>
+            <li>Inline tests via <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">~&#123; ... &#125;</code> blocks.</li>
+            <li>16-module stdlib: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">auth</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">crypto</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">data</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">format</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">fs</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">http</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">oauth</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">path</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">process</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">redis</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">cron</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">regex</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">router</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">store</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">test</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">time</code>.</li>
+            <li>32 example apps + a real-world trucking-dispatch multi-page app.</li>
+            <li>LSP server, VSCode extension, neovim treesitter grammar.</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4">The published <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">scrml init</code> scaffold + the kickstarter article (v1) describe v0.1.0 idioms — those compile against the current compiler.</p>
+        <hr class="my-8 border-slate-200"/>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">What's in flight (v0.2.0)</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">A multi-month migration. The headline:</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">V5-strict access</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">The declaration site uses <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;name&gt;</code>. The expression site uses <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@name</code>. Bare names are local variables only.</p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;count&gt; = 0                        &#47;&#47; declaration — structural form
+@count = @count + 1                &#47;&#47; expression — canonical access</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">Today scrml uses <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@count = 0</code> for the declaration too. v0.2.0 promotes the angle-bracket form as the canonical decl shape.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Three RHS shapes for state</h3>
+
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;count&gt; = 0                                &#47;&#47; Shape 1 — plain
+&lt;userName r&#101;q length(&gt;=2)&gt; = &lt;input&#47;&gt;      &#47;&#47; Shape 2 — decl coupled with render-spec + validators
+c&#111;nst &lt;doubled&gt; = @count * 2               &#47;&#47; Shape 3 — derived (read-only)</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">Shape 2 is the new ergonomic for forms. The compiler dispatches <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">bind:value&#47;checked&#47;files</code> based on the render-spec markup type. The <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">r&#101;q length(&gt;=2)</code> validators live on the decl itself.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Auto-synthesized validity surface</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">If a compound state has validators, the compiler synthesizes a reactive validity surface — <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@form.isValid</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@form.errors</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@form.touched</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@form.submitted</code>, plus per-field versions. Read-only. Reactive.</p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;signup&gt;
+  &lt;name  r&#101;q length(&gt;=2)&gt;  = &lt;input t&#121;pe="text"&#47;&gt;
+  &lt;email r&#101;q email&gt;        = &lt;input t&#121;pe="email"&#47;&gt;
+  &lt;agree r&#101;q&gt;              = &lt;input t&#121;pe="checkbox"&#47;&gt;
+&lt;&#47;&gt;
+
+&lt;button disabled=&#36;&#123;!@signup.isValid&#125; onclick=submit()&gt;Submit&lt;&#47;button&gt;
+&lt;errors of=@signup.email&#47;&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">No external validation library. No manual <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">i&#102; (errors.length &gt; 0)</code> plumbing.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Tier 0&#47;1&#47;2 ladder for case analysis</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">Apps don't start at the north star. They evolve toward it.</p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li><strong>Tier 0</strong> — <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">i&#102;=</code> chains and boolean lifecycle flags. No exhaustiveness checking, but you can prototype fast. Compiler nudges via lint when you're accumulating booleans-as-state.</li>
+            <li><strong>Tier 1</strong> — <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;m&#97;tch f&#111;r=Phase&gt;</code> block. Structural exhaustiveness checked. Rules-inert (you can write <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">rule="..."</code> and the compiler stays quiet).</li>
+            <li><strong>Tier 2</strong> — <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;e&#110;gine f&#111;r=Phase initial=.Idle&gt;</code>. Full state machine: exhaustiveness + active rules + transition handlers + <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTransition&gt;</code> effects.</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4">Promotion is mechanical — the state-children carry forward verbatim from Tier 1 to Tier 2.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">File-level channels</h3>
+
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;channel name="chat" topic="lobby"&gt;
+  &lt;messages&gt; = []                                    &#47;&#47; V5-strict — auto-syncs across clients
+  s&#101;rver f&#117;nction postMessage(author, body) &#123;
+    @messages = [...@messages, &#123; author, body, ts: Date.now() &#125;]
+  &#125;
+&lt;&#47;&gt;
+
+&lt;program&gt;
+  &#36;&#123; c&#111;nst count = @messages.length &#125;                &#47;&#47; cross-scope canonical access
+&lt;&#47;&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;channel&gt;</code> becomes a sibling of <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code> (not a child). The <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@shared</code> modifier is removed; cells in channel body auto-sync by being there.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Schema vocabulary unification</h3>
+
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;schema&gt;
+  users &#123;
+    email: text n&#111;t null unique           &#47;&#47; SQL-mirror native — canonical
+    name:  text r&#101;q length(&gt;=2)           &#47;&#47; shared-core additive — lowers to NOT NULL + CHECK
+    age:   integer min(18) max(120)       &#47;&#47; lowers to CHECK constraints
+  &#125;
+&lt;&#47;&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">The same predicate vocabulary (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">r&#101;q</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">length</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">pattern</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">min</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">max</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">gte</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lte</code>, etc.) works in three contexts: state-cell validators, refinement type predicates, and now schema column constraints. Lowered to standard SQL DDL — passthrough remains inviolable.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Refinement-type predicates</h3>
+
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;email&gt;: string(pattern(&#47;^[^@]+@[^@]+&#36;&#47;)) r&#101;q = &lt;input t&#121;pe="email"&#47;&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">Predicates on type annotations fire at compile-time AND runtime boundary. Stronger than state validators (runtime-only-reactive); composes cleanly with them.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Full L1-L21 lock list</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">There are 21 architectural locks ratified across sessions S55-S59. Markup-as-first-class-value (the pillar held since the very first prototype). Variant C compound state. Multi-statement event handlers force named function. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">p&#105;nned</code> modifier. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">reset(@cell)</code> keyword. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">default=</code> attribute. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">derived=expr</code> engine attribute. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">i&#115; s&#111;me</code> vs <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">r&#101;q</code> distinction. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;errors of=expr&#47;&gt;</code> first-class element. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-DERIVED-VALUE-MUTATE</code> (no in-place mutation of <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">c&#111;nst</code>-derived cells). And about a dozen more.</p>
+        <p class="text-slate-700 leading-relaxed my-4">Full list with cross-references: <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/docs/PA-SCRML-PRIMER.md" class="text-blue-700 hover:text-blue-900 underline"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">docs&#47;PA-SCRML-PRIMER.md</code></a> — a primer that distills the whole language design as it'll exist post-v0.2.0.</p>
+        <hr class="my-8 border-slate-200"/>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">Where the compiler is today (2026-05-05)</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">The implementation is split into phases. Each lands as a sequence of focused, tested sub-steps before the next phase opens.</p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li><strong>Phase A1a — foundational lex+parse for v0.2.0 syntax.</strong> ✅ <strong>Done.</strong> 20 sub-steps, +184 tests, 0 regressions. The parser now recognizes <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;count&gt; = 0</code> decl form, the three RHS shapes (plain &#47; decl-with-spec &#47; derived), Variant C compound state, the <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">p&#105;nned</code> modifier, the <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">default=</code> attribute, the <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">reset(@cell)</code> keyword, and the rest of A1a's surface. Final state: 8,902 tests passing across 439 files.</li>
+            <li><strong>Phase A1b — resolve + type.</strong> 🟡 <strong>In flight.</strong> 22 focused sub-steps (B1-B22) totaling roughly 85-120 hours. B1 (per-scope state-cell symbol-table extension) is dispatched as of this writing. A1b is the enforcement phase — it walks the A1a-produced AST, builds symbol tables, fires diagnostics for the architectural locks (V5-strict, derived-cell read-only, validity-surface synthesis), and produces an annotated AST that A1c can emit from.</li>
+            <li><strong>Phase A1c — codegen + runtime + PIPELINE prose pass.</strong> ⏸️ Pending A1b. Roughly 96-136 hours. Emits JavaScript for the new AST shapes, lowers the validity surface to runtime cells, wires file-level channels to WebSocket endpoints, lowers shared-core schema vocabulary to SQL DDL.</li>
+            <li><strong>Phases A2-A6</strong> (structural elements, validators-end-to-end, schema&#47;refinement&#47;pinned, resolver&#47;typer alignment, codegen&#47;runtime full sweep) — pending after A1.</li>
+            <li><strong>Parallel tracks B1-B5</strong> (examples rewrite, sample curation, stdlib audit, self-host bootstrap, editor support) — most can run alongside A2+.</li>
+            <li><strong>Documentation tracks C1-C3</strong> (tutorial rewrite, articles triage, README + scrml.dev refresh) — gated on the appropriate compiler phase.</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4">What this means concretely: the v0.2.0 syntax now PARSES into the right AST shape. It doesn't yet RESOLVE, TYPE, or CODEGEN — those are A1b and A1c. So if you write a v0.2.0-shaped file today, the parser accepts it, but downstream stages will fail until A1b&#47;A1c land.</p>
+        <p class="text-slate-700 leading-relaxed my-4">The methodology is per-step focused dispatches with PA cherry-pick to main between steps and a depth-of-survey discount applied at every dispatch (existing infrastructure routinely covers more than initial audits assume — confirmed 9× across A1a). Steady cadence, no regressions, full test suite green at every step.</p>
+        <hr class="my-8 border-slate-200"/>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">What this means for code you read today</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">If you read articles, blog posts, or LLM-generated scrml that shows:</p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;count&gt; = 0</code> decl form (without a leading <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@</code>)</li>
+            <li><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;e&#110;gine f&#111;r=Phase initial=.Idle&gt;</code> block-form engines</li>
+            <li><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;m&#97;tch f&#111;r=Type&gt;</code> block-form match</li>
+            <li><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@form.isValid</code> validity surface reads</li>
+            <li><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;errors of=expr&#47;&gt;</code> elements</li>
+            <li><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">default=</code> attribute on a state-cell decl</li>
+            <li><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">p&#105;nned</code> modifier</li>
+            <li><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">c&#111;nst &lt;derived&gt; = expr</code> (with the angle brackets on the LHS)</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4"><strong>Those describe v0.2.0 design.</strong> They will not compile against the current v0.1.0 compiler. The article authors aren't lying — the spec does say those things. But the compiler hasn't caught up yet. We are explicit about this so readers don't waste time thinking they're typing the wrong thing.</p>
+        <p class="text-slate-700 leading-relaxed my-4">If you read code that uses <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@count = 0</code>-style declarations inside <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123;...&#125;</code> blocks — that's v0.1.0 and compiles cleanly today.</p>
+        <p class="text-slate-700 leading-relaxed my-4">The v1 kickstarter article (<a href="./articles/llm-kickstarter-v1" class="text-blue-700 hover:text-blue-900 underline"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">llm-kickstarter-v1</code></a>) describes v0.1.0 idioms. The v2 kickstarter (<a href="./articles/llm-kickstarter-v2" class="text-blue-700 hover:text-blue-900 underline"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">llm-kickstarter-v2</code></a>) describes v0.2.0 design and is intended for LLM dev-agent dispatches <strong>only</strong>, not for human onboarding to current scrml.</p>
+        <hr class="my-8 border-slate-200"/>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">Why we're doing this now</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">A few reasons. Honest:</p>
+        <p class="text-slate-700 leading-relaxed my-4">1. <strong>The angle-bracket-on-decl-site form was always the intent.</strong> v0.1.0 ended up with <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@</code>-on-decl because the parser was easier that way. It's been visibly drifting from the language envisioned for some time. The migration is a correction. 2. <strong>State machines deserve to be first-class.</strong> v0.1.0's <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;machine&gt;</code> keyword works but doesn't feel like the centerpiece of the language. v0.2.0 promotes engines to where they belong: the structural shape of the UI tree IS the structural shape of the application's state. That's the north star. 3. <strong>Forms are 80% of what apps actually do.</strong> v0.1.0 makes you wire validation by hand. v0.2.0 auto-synthesizes the validity surface from the validator decls themselves. No external library. No hooks rules. It just works. 4. <strong>No production adopters means no migration tooling needed.</strong> Every other language migration in flight requires building a v0.compat path or a <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">scrml migrate</code> translation tool. We have neither. We have a small set of ourselves and some early experimenters; the migration is a coordinated change-everything pass, not a backward-compat negotiation.</p>
+        <hr class="my-8 border-slate-200"/>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">Timeline</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">The compiler-source critical path — Phase A1 (foundational lex&#47;parse + resolve&#47;type + codegen — itself split into A1a &#47; A1b &#47; A1c) → A2 (structural elements) → A3 (validators end-to-end) → A4 (schema&#47;refinement&#47;pinned) → A5 (resolver&#47;typer alignment) → A6 (full codegen&#47;runtime sweep) — is roughly 145-235 hours of focused engineering. A1a is done; A1b&#47;A1c together are roughly 180-260 hours and are the next two phases. Parallel tracks (examples rewrite, sample curation, stdlib audit, self-host bootstrap, editor support) add another ~100-200 hours, much of which runs alongside the critical path.</p>
+        <p class="text-slate-700 leading-relaxed my-4">Realistic calendar: 3-9 months from the original v0.2.0 design freeze (S58, 2026-05-04) depending on session cadence. A1a finished one day after design freeze. It will ship when it's done, not on a date.</p>
+        <p class="text-slate-700 leading-relaxed my-4">We'll post incremental milestones as each Phase lands. The full inventory and live dashboard are visible to anyone reading the repo:</p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li><a href="https://github.com/bryanmaclee/scrmlTS/blob/main/master-list.md" class="text-blue-700 hover:text-blue-900 underline"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">master-list.md</code></a> — live progress dashboard.</li>
+            <li><a href="https://github.com/bryanmaclee/scrmlTS/blob/main/docs/changes/v0next-inventory/SCOPE-MAP-2026-05-05.md" class="text-blue-700 hover:text-blue-900 underline"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">docs&#47;changes&#47;v0next-inventory&#47;SCOPE-MAP-2026-05-05.md</code></a> — full subsystem-by-subsystem inventory.</li>
+            <li><a href="https://github.com/bryanmaclee/scrmlTS/blob/main/docs/changes/v0next-audit/PARSER-AUDIT-2026-05-05.md" class="text-blue-700 hover:text-blue-900 underline"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">docs&#47;changes&#47;v0next-audit&#47;PARSER-AUDIT-2026-05-05.md</code></a> — parser-vs-spec gap audit.</li>
+            <li><a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md" class="text-blue-700 hover:text-blue-900 underline"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">compiler&#47;SPEC.md</code></a> — the engineering target.</li>
+        </ul>
+        <hr class="my-8 border-slate-200"/>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">TL;DR</h2>
+
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li><strong>Today: v0.1.0.</strong> Use <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@x = 0</code> for declarations inside <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123;...&#125;</code> blocks. Compiles, runs, ships.</li>
+            <li><strong>In flight: v0.2.0.</strong> Will land <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;x&gt; = 0</code> decl form, Tier 0&#47;1&#47;2 ladder, auto-synth validity surface, file-level channels, shared-core schema vocab, refinement-type predicates, plus the rest of the L1-L21 lock list.</li>
+            <li><strong>Compiler implementation status:</strong> Phase A1a (foundational lex+parse) ✅ done as of 2026-05-05. Phase A1b (resolve+type) 🟡 in flight. A1c through A6 + parallel tracks ⏸️ ahead.</li>
+            <li><strong>Articles showing v0.2.0 syntax describe the spec target, not the current compiler.</strong> Don't waste cycles trying to compile them yet.</li>
+            <li><strong>No migration tooling is planned.</strong> v0.2.0 supersedes v0.1.0 cleanly; v0.1.0 code does not get a backward-compat path.</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4">If you want to follow along, watch the repo. If you want to wait until v0.2.0 ships, that's also a reasonable call.</p>
 
     </article>
 

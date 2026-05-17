@@ -1,8 +1,11 @@
 // scrml.dev /articles/server-boundary-disappears
 //
-// SKELETON — day-1 thin stub. Full content migration is day-30 work
-// alongside the live-compile <CodeExample src=...> component pass.
-// See scrml-support/docs/deep-dives/scrml-dev-mdn-style-architecture-2026-05-17.md §5.
+// Full-conversion page. P2 continuation per Machine A's S98A queue-shift
+// directive. Mechanical conversion from server-boundary-disappears-devto-2026-04-28.md via /tmp/convert_article.py.
+// Per Pillar 5b (PRIMER §2 amendment S98A): reach for engines/states first
+// in worked examples; the corpus goes into LLM training.
+//
+// dev.to publish uses canonical_url=https://scrml.dev/articles/server-boundary-disappears
 
 <page>
 
@@ -15,32 +18,193 @@
             <h1 class="text-4xl font-bold tracking-tight text-slate-900">
                 The server boundary disappears
             </h1>
-            <p class="text-slate-600 mt-3">
-                What changes when the compiler partitions client and server automatically: no API routes, no fetch wrappers, no request/response types.
-            </p>
         </header>
+        <p class="text-slate-700 leading-relaxed my-4"><em>authored by claude, rubber stamped by Bryan MacLee</em></p>
+        <p class="text-slate-700 leading-relaxed my-4"><strong>TL;DR: Stop writing API routes. The compiler does it.</strong></p>
+        <p class="text-slate-700 leading-relaxed my-4">Every framework dev has shipped a bug where they thought a function ran on the server but it didn't, or thought it ran on the client but it didn't. I am not an experienced framework developer. I can hobble through React if I HAVE TO. But across about twenty compiler attempts the same shape kept showing up: the compiler should know which side of the wire each function is on, because the wire is part of the program.</p>
+        <p class="text-slate-700 leading-relaxed my-4">I'm obsessed with performance. I'm also a believer in "do it right, the first time, even if it takes more time." The server boundary is a place where most languages do neither, and the runtime pays for both. So this is the second of six features the browser-language overview piece promised to unpack later. The boundary, in detail.</p>
 
-        <div class="p-4 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-900">
-            <strong>Day-1 scaffold.</strong> The full article body lives at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/docs/articles/server-boundary-disappears-devto-2026-04-28.md"
-               class="font-mono text-amber-900 hover:text-amber-700 underline">
-                docs/articles/server-boundary-disappears-devto-2026-04-28.md
-            </a>
-            in the scrmlTS repository. Inline-body migration is queued for
-            day-30 alongside the <code class="font-mono text-xs">&lt;CodeExample src=...&gt;</code>
-            component that lifts the brace-escaping tax from authoring.
-        </div>
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">What "shipping a typed POST endpoint" actually costs</h2>
 
-        <div class="mt-8 flex gap-3">
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/docs/articles/server-boundary-disappears-devto-2026-04-28.md"
-               class="px-4 py-2 bg-slate-900 text-white rounded-md text-sm font-medium hover:bg-slate-800">
-                Read on GitHub &rarr;
-            </a>
-            <a href="/articles"
-               class="px-4 py-2 border border-slate-300 text-slate-900 rounded-md text-sm font-medium hover:bg-slate-50">
-                &larr; All articles
-            </a>
-        </div>
+        <p class="text-slate-700 leading-relaxed my-4">Pick a framework. Next, Remix, Express plus a React frontend, doesn't matter. The minimum table-stakes for a single server endpoint that takes some data, validates it, persists it, and returns a typed response looks like this:</p>
+        <p class="text-slate-700 leading-relaxed my-4"><strong>On the server:</strong></p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&#47;&#47; app&#47;api&#47;orders&#47;route.ts
+i&#109;port &#123; z &#125; from "zod";
+i&#109;port &#123; auth &#125; from "@&#47;lib&#47;auth";
+i&#109;port &#123; db &#125; from "@&#47;lib&#47;db";
+
+c&#111;nst SubmitOrderInput = z.object(&#123;
+  items: z.array(z.object(&#123;
+    productId: z.string().uuid(),
+    qty: z.number().int().min(1).max(99),
+  &#125;)),
+&#125;);
+
+c&#111;nst SubmitOrderOutput = z.object(&#123;
+  orderId: z.string().uuid(),
+  total: z.number(),
+&#125;);
+t&#121;pe SubmitOrderOutput = z.infer&lt;typeof SubmitOrderOutput&gt;;
+
+e&#120;port async f&#117;nction POST(r&#101;q: Request) &#123;
+  c&#111;nst session = await auth(r&#101;q);
+  i&#102; (!session) r&#101;turn new Response("Unauthorized", &#123; status: 401 &#125;);
+
+  l&#101;t body: unknown;
+  try &#123; body = await r&#101;q.json(); &#125;
+  catch &#123; r&#101;turn new Response("Bad JSON", &#123; status: 400 &#125;); &#125;
+
+  c&#111;nst parsed = SubmitOrderInput.safeParse(body);
+  i&#102; (!parsed.success) &#123;
+    r&#101;turn new Response(JSON.stringify(parsed.error), &#123; status: 400 &#125;);
+  &#125;
+
+  &#47;&#47; ... actual business logic finally starts here ...
+  c&#111;nst order = await db.orders.insert(...);
+  r&#101;turn Response.json(&#123; orderId: order.id, total: order.total &#125;);
+&#125;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4"><strong>On the client:</strong></p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&#47;&#47; app&#47;cart&#47;page.tsx
+t&#121;pe SubmitOrderInput = &#123; items: &#123; productId: string; qty: number &#125;[] &#125;;
+t&#121;pe SubmitOrderOutput = &#123; orderId: string; total: number &#125;;
+
+async f&#117;nction submitOrder(input: SubmitOrderInput): Promise&lt;SubmitOrderOutput&gt; &#123;
+  c&#111;nst res = await fetch("&#47;api&#47;orders", &#123;
+    method: "POST",
+    headers: &#123; "content-t&#121;pe": "application&#47;json", "x-csrf-token": getToken() &#125;,
+    body: JSON.stringify(input),
+  &#125;);
+  i&#102; (!res.ok) throw new Error(await res.text());
+  r&#101;turn res.json() as Promise&lt;SubmitOrderOutput&gt;;
+&#125;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">That's the <em>minimum</em>. No retry. No timeout. No proper error type. No loading state. The shapes are typed twice, once with zod and once with hand-written TS. The CSRF token plumbing is manual. If you change the input shape on the server and forget to update the client TS type, nothing fails until production traffic hits it.</p>
+        <p class="text-slate-700 leading-relaxed my-4">This is the seam. It is the most expensive seam in the application. It is also the seam that no framework can close, because the framework doesn't own both sides of it.</p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">The same feature in scrml</h2>
+
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;program&gt;
+
+&lt;db src=".&#47;app.db" tables="orders,order_items"&#47;&gt;
+
+&#36;&#123;
+    t&#121;pe SubmitError:enum = &#123;
+        ItemCountOutOfRange
+    &#125;
+
+    s&#101;rver f&#117;nction submitOrder(items)! -&gt; SubmitError &#123;
+        i&#102; (items.length == 0 || items.length &gt; 100) &#123;
+            f&#97;il SubmitError::ItemCountOutOfRange
+        &#125;
+        c&#111;nst total = items.reduce((acc, it) =&gt; acc + it.price * it.qty, 0)
+        c&#111;nst orderId = ?&#123;`INSERT INTO orders (total) VALUES (&#36;&#123;total&#125;) RETURNING id`&#125;.get().id
+        f&#111;r (l&#101;t it of items) &#123;
+            ?&#123;`INSERT INTO order_items (order_id, product_id, qty)
+               VALUES (&#36;&#123;orderId&#125;, &#36;&#123;it.productId&#125;, &#36;&#123;it.qty&#125;)`&#125;.run()
+        &#125;
+        r&#101;turn &#123; orderId: orderId, total: total &#125;
+    &#125;
+&#125;
+
+&lt;&#47;program&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">And the call site, anywhere in the same file or another <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.scrml</code> file in the project:</p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>l&#101;t result = submitOrder(@cart.items)</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">That's the entire feature. Both halves.</p>
+        <p class="text-slate-700 leading-relaxed my-4">What the compiler did with <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">s&#101;rver f&#117;nction</code>:</p>
+        <p class="text-slate-700 leading-relaxed my-4">1. Generated a server-side route handler. Route name is compiler-internal; you don't reference it. 2. Generated the client-side <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">fetch</code> call that invokes the route, with arg serialization, response deserialization, and auto-<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">await</code> insertion. The developer SHALL NOT write <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">JSON.stringify</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">JSON.parse</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">await</code>, or <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">fetch</code> to consume server function return values (§12.5 + §13.1 — scrml is auto-await throughout the source surface). 3. Type-checked the call site. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">submitOrder(@cart.items)</code> checks the argument shape against the server fn signature in the same compile pass. There is no client-side <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">t&#121;pe SubmitOrderInput</code> declaration to drift. 4. Emitted the function body to the server output only. The client gets a fetch stub. 5. Enforced the failable contract at the server boundary. The <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">f&#97;il SubmitError::ItemCountOutOfRange</code> lands on the server, before any database write. (Refinement-type predicate arguments on parameters — <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">items: List&lt;Item&gt;(@length &gt; 0 &amp;&amp; @length &lt; 100)</code> style — are part of the §53 design surface still landing through v0.2.x; today the bounds check rides as the failable-function entry guard above.)</p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">What the compiler refuses</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">Six refusals, every one of them a real diagnostic with an E-code you can look up.</p>
+        <p class="text-slate-700 leading-relaxed my-4"><strong>1. Reading a server-only field on the client. (E-PROTECT-001)</strong> If <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt; db&gt;</code> declares <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">protect="passwordHash"</code>, then <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">passwordHash</code> does not exist on the client type. A client-side function trying to read it is a compile error, not a runtime exposure.</p>
+        <p class="text-slate-700 leading-relaxed my-4"><strong>2. Code that accesses a protected field but might run client-side. (E-PROTECT-002)</strong> The compiler verifies at compile time that no function accessing protected fields executes on the client. Any code path that could route to the client and touches a protected field fails compile.</p>
+        <p class="text-slate-700 leading-relaxed my-4"><strong>3. A server fn calling a client-only fn. (E-ROUTE-002)</strong> If a <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">s&#101;rver f&#110;</code> transitively calls a function that touches the DOM or reads a client-only derived value, compile fails with the call chain printed. The error message names the server function, the client-only callee, and the path between them, then suggests three resolutions: extract a pure function, duplicate the logic, or re-evaluate the classification.</p>
+        <p class="text-slate-700 leading-relaxed my-4"><strong>4. A non-serializable return type from a server fn. (E-ROUTE-003)</strong> Try to return a function, a DOM node, or a class instance from <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">s&#101;rver f&#110;</code> and the compile fails. The wire is JSON; the type system enforces it.</p>
+        <p class="text-slate-700 leading-relaxed my-4"><strong>5. A client-local <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@v&#97;r</code> used as a bound parameter in INSERT, UPDATE, or DELETE outside a server fn. (E-AUTH-001)</strong> The compiler refuses to silently persist client-local state. The error message tells the developer to pass the value to a server function first.</p>
+        <p class="text-slate-700 leading-relaxed my-4"><strong>6. A predicate violation at the boundary. (E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at the boundary.)</strong> If the compiler can prove a literal violates a predicate, the build fails. If the value is only known at runtime, a server-side boundary check fires before any business logic runs and rejects the request.</p>
+        <p class="text-slate-700 leading-relaxed my-4">That's six refusals. Every one of them is a type-system answer to a question that, in framework land, is "hope your tests catch it."</p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">What gets generated for free</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">Beyond refusing the wrong things, the compiler also generates the things you would have written by hand:</p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li><strong>The fetch stub.</strong> Argument serialization, response deserialization, automatic <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">await</code>. No <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">JSON.stringify</code>. No <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">JSON.parse</code>. No manual <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">await</code>.</li>
+            <li><strong>The route handler.</strong> With its name as a compiler-internal detail you never see.</li>
+            <li><strong>CSRF plumbing, when <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program csrf="on"&gt;</code> is set.</strong> A token-mint server fn, a <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;meta name="csrf-token"&gt;</code> injection in the generated HTML, a request interceptor that adds the <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">X-CSRF-Token</code> header to every state-mutating request, and a server-side validator that returns 403 if the token is missing or invalid (§39.2.3).</li>
+            <li><strong>Predicate validation at the boundary.</strong> Inline predicate constraints on server function parameters are enforced server-side, before any database write or business logic, independently of any client-side check. A server function's parameter constraint cannot be bypassed by raw HTTP requests (§53.9.4).</li>
+            <li><strong>Async parallelization.</strong> Independent server calls in the same function body are parallelized in generated code; dependent ones are sequenced. The developer writes flat synchronous-looking code; the compiler emits <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Promise.all</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">await</code> correctly (§13.2).</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4">The compiler is the dev's best friend. That phrase comes up a lot in my notes. This is what it means in practice. Every line of the framework boilerplate above is moved into the compiler, where it cannot drift, cannot be skipped under deadline pressure, and cannot be wrong without the build failing.</p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">What this kills</h2>
+
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li>The <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">app&#47;api&#47;</code> directory. There aren't any route files. There are functions.</li>
+            <li>Hand-written fetch wrappers. There is no <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">apiClient.ts</code>.</li>
+            <li>tRPC and OpenAPI codegen steps. The type goes through the boundary natively because the compiler owns both sides.</li>
+            <li>Zod-on-the-wire. Inline predicates <em>are</em> the type. A schema file isn't a separate artifact. Why would anyone bring zod into a scrml project?</li>
+            <li>Type-drift bugs that ship to prod. The client and server agree on the shape because there is one declaration.</li>
+        </ul>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">What is still real</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">Server-side concerns don't disappear. They just stop being plumbing.</p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li><strong>Auth.</strong> Still your job. The <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">s&#101;rver</code> annotation is described in the spec as a security escape hatch precisely because compile-time inference of "what touches protected data" is not always sufficient on its own (§11.4). Annotate auth-touching functions with <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">s&#101;rver</code> explicitly.</li>
+            <li><strong>Rate limiting.</strong> A <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program ratelimit="100&#47;min"&gt;</code> attribute generates a sliding-window limiter (§39.2.4). Tune the rate to your business; the mechanism is built in.</li>
+            <li><strong>Input validation against business rules.</strong> Predicates handle shape and range. Business rules ("this user can submit at most 3 of these per day") are still business logic. They live inside the <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">s&#101;rver f&#110;</code>. They benefit from running where the data lives.</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4">The line between "plumbing the framework forced you to write" and "actual business logic" gets a lot brighter when one side of it is gone.</p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">The deeper claim</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">A reactive system that wires its dependencies at compile time does no work at runtime to figure out what to update. A query that batches itself at compile time doesn't need a DataLoader. A boundary that is enforced at compile time doesn't need a validator on the wire.</p>
+        <p class="text-slate-700 leading-relaxed my-4">The runtime does less because the compiler did more. The seam between client and server stops being a place where bugs live and starts being a place where the type system has the most leverage. That is the design. A little short of perfect is still pretty awesome.</p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">Further reading</h2>
+
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li><a href="https://dev.to/bryan_maclee/why-programming-for-the-browser-needs-a-different-kind-of-language-6m2" class="text-blue-700 hover:text-blue-900 underline">Why programming for the browser needs a different kind of language</a>. The high-altitude six-feature overview that this piece zooms in on.</li>
+            <li><a href="https://dev.to/bryan_maclee/what-npm-package-do-you-actually-need-in-scrml-2247" class="text-blue-700 hover:text-blue-900 underline">What npm package do you actually need in scrml?</a>. The package-list-collapses argument worked through one tier at a time.</li>
+            <li><a href="https://dev.to/bryan_maclee/what-scrmls-lsp-can-do-that-no-other-lsp-can-and-why-giti-follows-from-the-same-principle-4899" class="text-blue-700 hover:text-blue-900 underline">What scrml's LSP can do that no other LSP can, and why giti follows from the same principle</a>. What vertical integration unlocks for tooling and version control.</li>
+            <li><a href="https://dev.to/bryan_maclee/introducing-scrml-a-single-file-full-stack-reactive-web-language-9dp" class="text-blue-700 hover:text-blue-900 underline">Introducing scrml: a single-file, full-stack reactive web language</a>. The starting-point overview if you haven't seen scrml before.</li>
+            <li><a href="https://dev.to/bryan_maclee/null-was-a-billion-dollar-mistake-falsy-was-the-second-3o61" class="text-blue-700 hover:text-blue-900 underline">Null was a billion-dollar mistake. Falsy was the second.</a>. On <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">n&#111;t</code>, presence as a type-system question, and why scrml refuses to inherit JavaScript's truthiness rules.</li>
+            <li><a href="https://dev.to/bryan_maclee/scrmls-living-compiler-23f9" class="text-blue-700 hover:text-blue-900 underline">scrml's Living Compiler</a>. The transformation-registry framing.</li>
+            <li><strong>scrml on GitHub:</strong> <a href="https://github.com/bryanmaclee/scrmlTS" class="text-blue-700 hover:text-blue-900 underline">github.com&#47;bryanmaclee&#47;scrmlTS</a>. The working compiler, examples, spec, benchmarks.</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4">&lt;!--</p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">Internal verification trail (private — agent-only, not for publish)</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">This block is an HTML comment so it does not render on dev.to.</p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li>Bio: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;home&#47;bryan&#47;scrmlMaster&#47;scrml-support&#47;voice&#47;user-bio.md</code> (v1, signed off 2026-04-27; project memory marks BAKED 2026-04-28).</li>
+            <li>Private draft &#47; verification log: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;home&#47;bryan&#47;scrmlMaster&#47;scrml-support&#47;voice&#47;articles&#47;s&#101;rver-boundary-disappears-draft-2026-04-28.md</code>.</li>
+            <li>Companion published: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">why-programming-f&#111;r-the-browser-needs-a-different-kind-of-language-devto-2026-04-27.md</code> (the six-feature overview this piece zooms in on).</li>
+            <li>Companion published: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">npm-myth-devto-2026-04-28.md</code> (CSRF mint-on-403 prior framing; soft-rephrased here per spec validation).</li>
+            <li>Companion published: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lsp-and-giti-advantages-devto-2026-04-28.md</code> (verification log structure pattern).</li>
+            <li>Agent: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;home&#47;bryan&#47;.claude&#47;agents&#47;scrml-voice-author.md</code> (article mode, gate cleared per project memory bio-baked 2026-04-28).</li>
+            <li>SPEC: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;home&#47;bryan&#47;scrmlMaster&#47;scrmlTS&#47;compiler&#47;SPEC.md</code> (§11, §12, §13, §39, §52, §53 cited).</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4"><strong>Spec validation summary:</strong></p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li>✅ <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">s&#101;rver f&#110;</code> syntax current (§11.4 lines 5443-5447, grammar line 15163).</li>
+            <li>✅ Boundary security at compile time: E-PROTECT-001&#47;002, E-ROUTE-002, E-AUTH-001, E-CONTRACT-001 all spec-defined and ship.</li>
+            <li>✅ Auto-generated fetch + route handler (§12.3, §12.5, §13.2).</li>
+            <li>✅ Predicate enforcement at server boundary (§53.9.4, verbatim normative).</li>
+            <li>✅ Schema-level argument typing across boundary (route analysis runs before codegen, §12.4).</li>
+            <li>⚠️ "CSRF mint-on-403" (npm-myth's shortcut) softened to enumerate the four spec-confirmed components (§39.2.3): mint server fn, meta-tag injection, request interceptor, server-side validator returning 403. The spec does not normatively define a client-side retry-with-fresh-token loop.</li>
+            <li>⚠️ "Tree-shake server-only code from client bundle" softened. Spec normatively documents this for SSE generators (§13.2.6) and channel handlers (§38.8) and protect= fields (§52). For general <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">s&#101;rver f&#110;</code>, the partition follows from §12.3 (route handler is server-side, client gets fetch call) but the spec does not have a single global "tree-shake" claim. Article wording: "the function body is emitted to the server output only; the client gets a fetch stub."</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4"><strong>Forbidden territory check (bio §6):</strong> all clear. React hobble-through disclosure used in opener (bio-attested). Framework-fatigue narrative avoided (article is structural, not autobiographical-recovery). User-attested motivations only ("obsessed with performance", "do it right, the first time", "compiler is the dev's best friend").</p>
+        <p class="text-slate-700 leading-relaxed my-4">--&gt;</p>
 
     </article>
 

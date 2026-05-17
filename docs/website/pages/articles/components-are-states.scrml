@@ -1,8 +1,11 @@
 // scrml.dev /articles/components-are-states
 //
-// SKELETON — day-1 thin stub. Full content migration is day-30 work
-// alongside the live-compile <CodeExample src=...> component pass.
-// See scrml-support/docs/deep-dives/scrml-dev-mdn-style-architecture-2026-05-17.md §5.
+// Full-conversion page. P2 continuation per Machine A's S98A queue-shift
+// directive. Mechanical conversion from components-are-states-devto-2026-04-29.md via /tmp/convert_article.py.
+// Per Pillar 5b (PRIMER §2 amendment S98A): reach for engines/states first
+// in worked examples; the corpus goes into LLM training.
+//
+// dev.to publish uses canonical_url=https://scrml.dev/articles/components-are-states
 
 <page>
 
@@ -15,32 +18,232 @@
             <h1 class="text-4xl font-bold tracking-tight text-slate-900">
                 Components are states
             </h1>
-            <p class="text-slate-600 mt-3">
-                Why the UI of a scrml app should be a fully-handled state machine — and why that's a language-level claim, not a framework convention.
-            </p>
         </header>
+        <p class="text-slate-700 leading-relaxed my-4"><em>authored by claude, rubber stamped by Bryan MacLee</em></p>
+        <p class="text-slate-700 leading-relaxed my-4"><strong>TL;DR: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;input&gt;</code> is already a state. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;Card&gt;</code> should be too. One concept replaces useState, hooks rules, dependency arrays, Zustand, Pinia, Redux, context, and most prop drilling.</strong></p>
+        <p class="text-slate-700 leading-relaxed my-4">&gt; <strong>Status (v0.2.x):</strong> the conceptual frame (state-as-type, primitive <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;x&gt; = 0</code> reactive cells, compound state with structural-children, validators on cells, server-side authority via <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;schema&gt;</code> + <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">protect=</code> + <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;db&gt;</code> + <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;channel&gt;</code>) is the v0.2.4 working baseline. The single scrml example below is a 2026-04 design preview of the user-defined <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;Card authority="s&#101;rver" table="cards"&gt;</code> "state object" surface — that exact declaration shape is still landing through v0.2.x and the example may use older draft attribute names. The point of the example is structural (one declaration covers shape + sync + boundary); the canonical v0.2.4 spelling lives in the kickstarter v2 §11.3 (channel recipe) + §3 (compound state) + §11.1 (engine recipe). See <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">docs&#47;articles&#47;llm-kickstarter-v2-2026-05-04.md</code> for the up-to-date code.</p>
+        <p class="text-slate-700 leading-relaxed my-4">Every framework I have looked at picks one of <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">useState</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">ref</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">createSignal</code>, or <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">signal</code>, and then bolts on a stack of secondary mechanisms to plug the gaps that one primitive cannot fill on its own. Hooks rules. Dependency arrays. A store library. A context API. Prop drilling for everything in between. I have hobbled through React when I had to. I have written enough TypeScript to be annoyed by it. I have spent eighteen months and about twenty compiler attempts circling one question: what would happen if state were a type, and a component were a state?</p>
+        <p class="text-slate-700 leading-relaxed my-4">It turns out the same thing happens that happened with the server boundary. A whole shelf of libraries falls off the shelf.</p>
+        <p class="text-slate-700 leading-relaxed my-4">This is the third of six features the browser-language overview piece promised to unpack. State.</p>
 
-        <div class="p-4 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-900">
-            <strong>Day-1 scaffold.</strong> The full article body lives at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/docs/articles/components-are-states-devto-2026-04-29.md"
-               class="font-mono text-amber-900 hover:text-amber-700 underline">
-                docs/articles/components-are-states-devto-2026-04-29.md
-            </a>
-            in the scrmlTS repository. Inline-body migration is queued for
-            day-30 alongside the <code class="font-mono text-xs">&lt;CodeExample src=...&gt;</code>
-            component that lifts the brace-escaping tax from authoring.
-        </div>
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">What you write today, and what every line of it costs</h2>
 
-        <div class="mt-8 flex gap-3">
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/docs/articles/components-are-states-devto-2026-04-29.md"
-               class="px-4 py-2 bg-slate-900 text-white rounded-md text-sm font-medium hover:bg-slate-800">
-                Read on GitHub &rarr;
-            </a>
-            <a href="/articles"
-               class="px-4 py-2 border border-slate-300 text-slate-900 rounded-md text-sm font-medium hover:bg-slate-50">
-                &larr; All articles
-            </a>
-        </div>
+        <p class="text-slate-700 leading-relaxed my-4">A real React app, scoped to one screen. Card list, edit dialog, optimistic updates, server sync. The state surface looks roughly like this.</p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&#47;&#47; useCards.ts
+i&#109;port &#123; create &#125; from "zustand";
+
+interface Card &#123; id: string; title: string; column: "todo" | "doing" | "done"; &#125;
+
+interface CardsStore &#123;
+  cards: Card[];
+  isLoading: boolean;
+  error: string | null;
+  fetchCards: () =&gt; Promise&lt;void&gt;;
+  addCard: (input: Omit&lt;Card, "id"&gt;) =&gt; Promise&lt;void&gt;;
+&#125;
+
+e&#120;port c&#111;nst useCardsStore = create&lt;CardsStore&gt;((set) =&gt; (&#123;
+  cards: [],
+  isLoading: false,
+  error: null,
+  fetchCards: async () =&gt; &#123;
+    set(&#123; isLoading: true &#125;);
+    try &#123;
+      c&#111;nst res = await fetch("&#47;api&#47;cards");
+      c&#111;nst cards = (await res.json()) as Card[];
+      set(&#123; cards, isLoading: false &#125;);
+    &#125; catch (e) &#123;
+      set(&#123; error: String(e), isLoading: false &#125;);
+    &#125;
+  &#125;,
+  addCard: async (input) =&gt; &#123;
+    c&#111;nst tempId = crypto.randomUUID();
+    c&#111;nst optimistic = &#123; ...input, id: tempId &#125;;
+    set((s) =&gt; (&#123; cards: [...s.cards, optimistic] &#125;));
+    &#47;&#47; ... POST to &#47;api&#47;cards, reconcile, rollback on failure ...
+  &#125;,
+&#125;));</code></pre>
+
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&#47;&#47; CardList.tsx
+e&#120;port f&#117;nction CardList() &#123;
+  c&#111;nst cards = useCardsStore((s) =&gt; s.cards);
+  c&#111;nst isLoading = useCardsStore((s) =&gt; s.isLoading);
+  c&#111;nst fetchCards = useCardsStore((s) =&gt; s.fetchCards);
+  c&#111;nst [editingId, setEditingId] = useState&lt;string | null&gt;(null);
+  c&#111;nst [draftTitle, setDraftTitle] = useState("");
+
+  useEffect(() =&gt; &#123; fetchCards(); &#125;, [fetchCards]);
+
+  i&#102; (isLoading) r&#101;turn &lt;Spinner &#47;&gt;;
+  r&#101;turn (
+    &lt;ul&gt;
+      &#123;cards.map((c) =&gt; (
+        &lt;CardRow
+          key=&#123;c.id&#125;
+          card=&#123;c&#125;
+          isEditing=&#123;editingId === c.id&#125;
+          draftTitle=&#123;draftTitle&#125;
+          setDraftTitle=&#123;setDraftTitle&#125;
+          onStartEdit=&#123;() =&gt; &#123; setEditingId(c.id); setDraftTitle(c.title); &#125;&#125;
+          onCancelEdit=&#123;() =&gt; setEditingId(null)&#125;
+        &#47;&gt;
+      ))&#125;
+    &lt;&#47;ul&gt;
+  );
+&#125;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">Now the costs.</p>
+        <p class="text-slate-700 leading-relaxed my-4">The <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Card</code> interface lives in TypeScript only. The server schema lives somewhere else. They drift. You catch it in production.</p>
+        <p class="text-slate-700 leading-relaxed my-4"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">useState</code> has placement rules. Same call order every render. No conditionals. Hooks rules are real lint warnings because the runtime cannot recover from a mistake.</p>
+        <p class="text-slate-700 leading-relaxed my-4"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">useEffect</code> has a dependency array. Forget an entry, stale closure. Add an extra entry, infinite loop. The IDE helps. It is not a type-system answer.</p>
+        <p class="text-slate-700 leading-relaxed my-4"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">useCardsStore</code> is a Zustand boilerplate file because cross-component state cannot live in a hook. So you add a library. The library has its own mental model. Now you have two state primitives.</p>
+        <p class="text-slate-700 leading-relaxed my-4"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">editingId</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">draftTitle</code> are local to <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">CardList</code> because they are ephemeral. So they leak into every child as props. That is prop drilling. The fix is a context API. That is a third state primitive.</p>
+        <p class="text-slate-700 leading-relaxed my-4">The optimistic update pattern (insert temp ID, POST, reconcile or rollback) is hand-written every time. Every team writes it slightly differently. Every team ships a bug in it eventually.</p>
+        <p class="text-slate-700 leading-relaxed my-4">This is what one screen costs in a framework. The shape of the costs repeats across <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">useState</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">ref</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">createSignal</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">signal</code>. The primitive name changes. The bolt-on stack does not.</p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">The same screen in scrml</h2>
+
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt; Card authority="s&#101;rver" table="cards"&gt;
+    id: number
+    title: string
+    column: Column
+&lt;&#47;&gt;
+
+&lt; EditState&gt;
+    editingId: number | n&#111;t
+    draftTitle: string
+&lt;&#47;&gt;
+
+&lt;Card&gt; @cards
+&lt;EditState&gt; @ui
+
+&lt;ul&gt;
+    &#36;&#123;@cards.map(c =&gt; l&#105;ft &lt;CardRow card=c
+                                   isEditing=&#36;&#123;@ui.editingId == c.id&#125;
+                                   bind:draftTitle=@ui.draftTitle&#47;&gt;)&#125;
+&lt;&#47;ul&gt;
+
+s&#101;rver f&#110; renameCard(id: number, title: string(.length &gt; 0 &amp;&amp; .length &lt; 200)) &#123;
+    ?&#123;`UPDATE cards SET title = &#36;&#123;title&#125; WHERE id = &#36;&#123;id&#125;`&#125;.run()
+&#125;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">That is the screen. Both halves.</p>
+        <p class="text-slate-700 leading-relaxed my-4"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;Card&gt;</code> is a state type. The fields are typed. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">authority="s&#101;rver"</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">table="cards"</code> say where the source of truth lives. The compiler reads the SQLite schema at compile time, generates the initial-load query, generates the optimistic-update path, generates the rollback, and pre-renders the list in SSR (§52.3). The <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Card</code> interface in TypeScript and the schema on disk cannot drift, because there is one declaration.</p>
+        <p class="text-slate-700 leading-relaxed my-4"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;EditState&gt;</code> is also a state type. No <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">authority=</code> attribute, so it is client-local by default (§52.2). The compiler emits zero sync infrastructure for it.</p>
+        <p class="text-slate-700 leading-relaxed my-4"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;Card&gt;</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;EditState&gt;</code> are instantiations. They look like HTML element opens because that is what they are at the type level. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;input&gt;</code> is a state with a value, a lifecycle, and user interaction. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;Card&gt;</code> is too. The grammar treats them the same way.</p>
+        <p class="text-slate-700 leading-relaxed my-4"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@cards</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@ui</code> are reactive. Reads in markup subscribe. Writes propagate. The compiler tracks the dependency graph at compile time (§31), so the runtime does no diffing to figure out what changed.</p>
+        <p class="text-slate-700 leading-relaxed my-4"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">bind:draftTitle=@ui.draftTitle</code> is the two-way binding form (§5.2.2). <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;input bind:value=@x&gt;</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;CardRow bind:draftTitle=@ui.draftTitle&gt;</code> are the same mechanism. There is no conceptual gap between "the input element is a state" and "the user-defined component is a state."</p>
+        <p class="text-slate-700 leading-relaxed my-4"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">title: string(.length &gt; 0 &amp;&amp; .length &lt; 200)</code> is an inline type predicate (§53). The constraint is part of the type. A literal that fails the predicate fails the build (E-CONTRACT-001). A runtime value that fails the predicate is rejected at the server boundary before any database write (§53.9.4).</p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">What unifies all of this</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">One concept. State is a type.</p>
+        <p class="text-slate-700 leading-relaxed my-4"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;input&gt;</code> is a built-in state type. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code> is a built-in state type. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;channel&gt;</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;request&gt;</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;timer&gt;</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;keyboard&gt;</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;mouse&gt;</code> are built-in state types (§36, §37, §38). <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;Card&gt;</code> is a user-defined state type. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@count</code> is a primitive reactive variable, which is the simplest case of the same idea.</p>
+        <p class="text-slate-700 leading-relaxed my-4">Every one of them has the same compile-time guarantees:</p>
+        <p class="text-slate-700 leading-relaxed my-4">1. A typed value. The shape is known to the compiler. 2. Predicate-checked writes. Inline constraints (§53) gate every assignment. 3. Reactive subscribers tracked at compile time. The dependency graph is built before the program runs. 4. Optional authority. State that lives on a server is declared <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">authority="s&#101;rver"</code> and gets sync infrastructure for free. 5. Optional state-machine rules. A reactive variable can be bound to a <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt; machine&gt;</code> (§51) so transitions are typed too.</p>
+        <p class="text-slate-700 leading-relaxed my-4">Layer those as you need them. Leave them off where you don't. A counter is one line: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@count = 0</code>. A server-synced kanban is the example above. The mechanism is the same.</p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">What this kills</h2>
+
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li><strong>Hooks rules.</strong> A reactive variable is a typed declaration, not a call-order convention. There is no <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@v&#97;r</code> call sequence to preserve across renders.</li>
+            <li><strong>Dependency arrays.</strong> The compiler builds the dependency graph from the source. A derived value subscribes to what it reads.</li>
+            <li><strong>State libraries.</strong> Zustand, Pinia, Redux, Jotai, MobX. Cross-component state is a state declared higher up, or a primitive reactive variable at file scope. There is no library to wire in.</li>
+            <li><strong>Context APIs.</strong> A <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@v&#97;r</code> at the enclosing scope is reachable from any component nested inside it (§6.2). No provider component, no consumer hook.</li>
+            <li><strong>Most prop drilling.</strong> State that does not need to be local does not have to travel through five components to reach where it is used.</li>
+            <li><strong>Runtime validators on the wire.</strong> Inline predicates (§53) are checked at the boundary because they are part of the type. There is no zod schema sitting next to the TS type.</li>
+            <li><strong>Optimistic-update boilerplate.</strong> A type with <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">authority="s&#101;rver"</code> gets the optimistic insert, reconcile, and rollback generated (§52). I am not asking developers to hand-write the same ten lines on every screen.</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4">That is most of a typical app's <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">package.json</code> state-management section. The reason it can be killed is that one primitive (state-as-type) is doing the work that five different primitives used to share.</p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">What is still real</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">This is a position piece, not a sales pitch. The point is not that scrml has no concepts. The point is that one concept covers what a stack of libraries used to.</p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li><strong>Some state is genuinely global.</strong> Auth session, theme, current user. Declare it at file scope, or in a top-level state block. The mechanism is the same, the placement is the developer's call.</li>
+            <li><strong>Some forms are genuinely complex.</strong> A multi-step wizard with cross-step validation is not five lines in any language. scrml gives you <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt; machine&gt;</code> for the transition rules and inline predicates for the value constraints. The shape of the work is smaller. The work is still real.</li>
+            <li><strong>Some state crosses a network.</strong> <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">authority="s&#101;rver"</code> is the declaration; the sync infrastructure is generated. The wire is still a wire. The compiler does not pretend latency is zero. It just stops asking the developer to write the same fetch-reconcile-rollback by hand.</li>
+            <li><strong>Mutability contracts are deeper than predicates alone.</strong> Predicates are the value layer. Lifecycles (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">null → number</code>) and machine transitions are the other two. I am writing the dedicated unpacking of all three in the next piece in this series. This article only touches the value layer because that is what the state-as-type frame needs.</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4">The line between "framework plumbing" and "actual app logic" is a lot brighter when one side of it is a typed declaration instead of five libraries negotiating.</p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">The deeper claim</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">A reactive primitive that is not a type cannot prove anything about itself at compile time. The framework era treated reactivity as a runtime trick (a closure, a proxy, a signal) and built tooling, conventions, and library ecosystems on top to recover the guarantees the type system was supposed to give.</p>
+        <p class="text-slate-700 leading-relaxed my-4">State as a type gets those guarantees back. The compiler knows what every reactive variable is, what shape every component instance has, where the source of truth lives, and which subscribers re-render when a write lands. It knows because the developer wrote it down once, in one declaration, that the compiler reads.</p>
+        <p class="text-slate-700 leading-relaxed my-4">That is the design. Do it right, the first time, even if it takes more time. A little short of perfect is still pretty awesome.</p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">Further reading</h2>
+
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li><a href="https://dev.to/bryan_maclee/why-programming-for-the-browser-needs-a-different-kind-of-language-6m2" class="text-blue-700 hover:text-blue-900 underline">Why programming for the browser needs a different kind of language</a>. The high-altitude six-feature overview that this piece zooms in on.</li>
+            <li><a href="https://dev.to/bryan_maclee/the-server-boundary-disappears-hap" class="text-blue-700 hover:text-blue-900 underline">The server boundary disappears</a>. The companion zoom-in: why the server fn lets the type system own the wire.</li>
+            <li><a href="https://dev.to/bryan_maclee/what-npm-package-do-you-actually-need-in-scrml-2247" class="text-blue-700 hover:text-blue-900 underline">What npm package do you actually need in scrml?</a>. The package-list-collapses argument, with the state-management category enumerated.</li>
+            <li><a href="https://dev.to/bryan_maclee/what-scrmls-lsp-can-do-that-no-other-lsp-can-and-why-giti-follows-from-the-same-principle-4899" class="text-blue-700 hover:text-blue-900 underline">What scrml's LSP can do that no other LSP can, and why giti follows from the same principle</a>. What vertical integration unlocks for tooling and version control.</li>
+            <li><a href="https://dev.to/bryan_maclee/introducing-scrml-a-single-file-full-stack-reactive-web-language-9dp" class="text-blue-700 hover:text-blue-900 underline">Introducing scrml: a single-file, full-stack reactive web language</a>. The starting-point overview if you haven't seen scrml before.</li>
+            <li><a href="https://dev.to/bryan_maclee/null-was-a-billion-dollar-mistake-falsy-was-the-second-3o61" class="text-blue-700 hover:text-blue-900 underline">Null was a billion-dollar mistake. Falsy was the second.</a>. On <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">n&#111;t</code>, presence as a type-system question, and why scrml refuses to inherit JavaScript's truthiness rules.</li>
+            <li><a href="https://dev.to/bryan_maclee/scrmls-living-compiler-23f9" class="text-blue-700 hover:text-blue-900 underline">scrml's Living Compiler</a>. The transformation-registry framing for the compile-time vs. runtime split that makes state-as-type cheap.</li>
+            <li><a href="/articles/orm-trap" class="text-blue-700 hover:text-blue-900 underline">The ORM trap, and why scrml does not need one</a>. Companion piece: SQL as a primitive, not a thing you import.</li>
+            <li><a href="/articles/mutability-contracts" class="text-blue-700 hover:text-blue-900 underline">Mutability contracts: predicates, lifecycles, machines</a>. The three layers of write-time guarantee the value layer of this piece is one third of.</li>
+            <li><a href="/articles/css-without-build-step" class="text-blue-700 hover:text-blue-900 underline">CSS without a build step</a>. Native scope, native variables, no styled-components.</li>
+            <li><a href="/articles/realtime-and-workers" class="text-blue-700 hover:text-blue-900 underline">Realtime and workers as syntax</a>. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;channel&gt;</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code> finishing the state-types-as-built-ins story.</li>
+            <li><strong>scrml on GitHub:</strong> <a href="https://github.com/bryanmaclee/scrmlTS" class="text-blue-700 hover:text-blue-900 underline">github.com&#47;bryanmaclee&#47;scrmlTS</a>. The working compiler, examples, spec, benchmarks.</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4">&lt;!--</p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">Internal verification trail (private — agent-only, not for publish)</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">This block is an HTML comment so it does not render on dev.to.</p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li>Bio: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;home&#47;bryan&#47;scrmlMaster&#47;scrml-support&#47;voice&#47;user-bio.md</code> (v1, signed off 2026-04-27; project memory marks BAKED 2026-04-28).</li>
+            <li>Private draft &#47; verification log: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;home&#47;bryan&#47;scrmlMaster&#47;scrml-support&#47;voice&#47;articles&#47;components-are-states-draft-2026-04-29.md</code>.</li>
+            <li>Companion published: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">why-programming-f&#111;r-the-browser-needs-a-different-kind-of-language-devto-2026-04-27.md</code> (the six-feature overview this piece zooms in on; slate item #1).</li>
+            <li>Companion published: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">s&#101;rver-boundary-disappears-devto-2026-04-28.md</code> (slate item #2 in the same six-feature unpacking).</li>
+            <li>Companion published: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">npm-myth-devto-2026-04-28.md</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lsp-and-giti-advantages-devto-2026-04-28.md</code> (style&#47;frontmatter pattern, voice fidelity reference).</li>
+            <li>Same-batch sibling drafts (will be patched to dev.to URLs post-publish): <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.&#47;orm-trap-devto-2026-04-29.md</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.&#47;mutability-contracts-devto-2026-04-29.md</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.&#47;css-without-build-step-devto-2026-04-29.md</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.&#47;realtime-and-workers-as-syntax-devto-2026-04-29.md</code>.</li>
+            <li>Agent: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;home&#47;bryan&#47;.claude&#47;agents&#47;scrml-voice-author.md</code> (article mode, gate cleared per project memory bio-baked 2026-04-28).</li>
+            <li>SPEC: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;home&#47;bryan&#47;scrmlMaster&#47;scrmlTS&#47;compiler&#47;SPEC.md</code> (§1 design principles "state is a first-class type" line 115; §6 reactivity; §15 components; §51 machines; §52 state authority; §53 inline predicates; §31 dependency graph cited).</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4"><strong>Spec validation summary:</strong></p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li>✅ "State is a first-class type" — verbatim spec design principle (SPEC §1.1 line 115).</li>
+            <li>✅ <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt; Card authority="s&#101;rver" table="cards"&gt;</code> state type declaration syntax — SPEC §52.3.1 lines 18717-18728. Worked example with <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;Card&gt;</code> instantiation at SPEC §52.3.5 lines 18763-18803, including the exact pattern used in the article (server-authoritative <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Card</code>, client-local <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">EditState</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;Card&gt; @cards</code> instance binding).</li>
+            <li>✅ <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;input&gt;</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;channel&gt;</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;request&gt;</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;timer&gt;</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;keyboard&gt;</code>&#47;<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;mouse&gt;</code> as built-in state types — SPEC line 175 (state context grammar), §36 (input state types), §37 (SSE), §38 (channels), §6.7.5&#47;6.7.6 (timer&#47;poll), §6.7.7 (request).</li>
+            <li>✅ <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">bind:value=@v&#97;r</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">bind:propName</code> for two-way reactive — SPEC §5.2.2 (line 994 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">bind:value=@v&#97;r</code> desugaring), §15.11.1 (component bind props).</li>
+            <li>✅ Inline predicates <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">string(.length &gt; 0 &amp;&amp; .length &lt; 200)</code> — SPEC §53.2.1 grammar (line 19265-19293), §53.2.2 usage positions (line 19299-19309).</li>
+            <li>✅ Dependency graph at compile time — SPEC §31 (line 11745-11768 "Dependency Graph: Purpose, construction, route analysis").</li>
+            <li>✅ Optimistic update &#47; sync infrastructure for <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">authority="s&#101;rver"</code> — SPEC §52.1 motivation enumerates "Generate server-sync infrastructure automatically (initial load, optimistic update, rollback, re-fetch)" line 18699.</li>
+            <li>✅ Default authority is local; form state needs no declaration — SPEC §52.2 lines 18711-18713.</li>
+            <li>✅ <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt; machine&gt;</code> binding for typed transitions — SPEC §6.1.1 line 1386 (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@v&#97;r: MachineName = initialValue</code> syntax confirmed live as an opt-in layer).</li>
+            <li>⚠️ The article claims the compiler "generates the optimistic-update path, generates the rollback, and pre-renders the list in SSR" for <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">authority="s&#101;rver"</code>. SPEC §52.1 enumerates these as compiler-generated infrastructure (lines 18696-18701) and §52.3.4 normative statements confirm sync generation is mandatory for <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">authority="s&#101;rver"</code>. The detailed implementation status of every sub-piece (e.g., is rollback fully wired today vs. spec-aspirational) is not exhaustively re-verified per file in the compiler source for this draft — the claim follows the spec, which is the article-level source of truth. Soften wording is unnecessary; this is what <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">authority="s&#101;rver"</code> is normatively defined to mean. Flag retained for awareness.</li>
+            <li>⚠️ The article uses <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;EditState&gt; @ui</code> as the instance-binding form (matching the SPEC §52.3.5 worked example exactly). This binding form is current per the worked example. If the binding-form syntax has drifted between spec and implementation, this would need re-checking; per spec it is correct.</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4"><strong>Forbidden territory check (bio §6):</strong> all clear.</p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li>React hobble-through disclosure used in opener, bio-attested (voice-scrmlTS:3600). No "I shipped React in production" claim. The TypeScript-frustration line ("written enough TypeScript to be annoyed by it") is a verbatim-paraphrase of voice-archive:1506 ("when i have written TS, I get so annoyed that I have to explicate that a variable can be a null or a number"). Both within bio §2b hobble-through bucket.</li>
+            <li>Framework-fatigue narrative avoided. Critique is structural ("the bolt-on stack does not change", "one primitive cannot fill on its own"), not autobiographical-recovery ("after years of React I'm tired"). The opener picks a fresh angle (one-primitive-plus-bolt-ons) distinct from server-boundary's "every framework dev has shipped a bug" and npm-myth's "back in the cab."</li>
+            <li>"First-principles, full-stack language" &#47; "designed end-to-end" framing preserved. Article does NOT call scrml "opinionated."</li>
+            <li>User-attested motivations only: "love solving puzzles" via the puzzle framing in the opener (bio §6 confirmed user-valid 2026-04-27); "do it right, the first time" verbatim from voice-scrmlTS:2700 in the close; "obsessed with performance" implicit in the runtime-does-less framing but not falsely overclaimed.</li>
+            <li>Active first-person for ship commitments preserved: "I am writing the dedicated unpacking of all three in the next piece in this series" — first person, not agentless.</li>
+            <li>Reception-fabrication check: zero "people tell me", "the most common critique", "frequently dismissed", "what everyone keeps saying". The "framework era taught us this was too hard" &#47; "the bolt-on stack does not change" lines are structural claims about the ecosystem, not invented audience reception.</li>
+            <li>No em-dashes &#47; en-dashes in body. Hyphens (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">first-principles</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">compile-time</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">state-as-t&#121;pe</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">state-management</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">optimistic-update</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">prop-drilling</code>) preserved as regular hyphens.</li>
+            <li>Authorship line present immediately under H1.</li>
+            <li>TL;DR placed under authorship line, above the voice-paragraph opener.</li>
+            <li>Vendor links (Zustand, Pinia, Redux, Jotai, MobX, etc.) named as references but no claim that the user has used them in production. They are named as examples of "the bolt-on stack" the article is contrasting with.</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4"><strong>Voice fidelity (bio §4):</strong></p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li>Truck-driver framing kept implicit (used in puzzle-framing through "eighteen months and about twenty compiler attempts"). Not over-played.</li>
+            <li>"I have hobbled through React when I had to" — voice-scrmlTS:3600 paraphrased with proper contraction (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">I have</code> not <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">I've</code>, neutral; preserved "hobbled" &#47; "hobble-through" vocabulary per bio §2b).</li>
+            <li>"do it right, the first time" — voice-scrmlTS:2700 verbatim used in close.</li>
+            <li>"a little short of perfect is still pretty awesome" — voice-archive:1292 verbatim used as kicker.</li>
+            <li>Sentence shape: short imperative bursts in "What this kills" list, fragments allowed.</li>
+            <li>No consultant-speak, no "leveraging", no "synergy".</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4">--&gt;</p>
 
     </article>
 

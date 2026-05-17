@@ -1,8 +1,11 @@
 // scrml.dev /articles/roadmap-2026-05-14
 //
-// SKELETON — day-1 thin stub. Full content migration is day-30 work
-// alongside the live-compile <CodeExample src=...> component pass.
-// See scrml-support/docs/deep-dives/scrml-dev-mdn-style-architecture-2026-05-17.md §5.
+// Full-conversion page. P2 continuation per Machine A's S98A queue-shift
+// directive. Mechanical conversion from roadmap-from-v0.3-2026-05-14.md via /tmp/convert_article.py.
+// Per Pillar 5b (PRIMER §2 amendment S98A): reach for engines/states first
+// in worked examples; the corpus goes into LLM training.
+//
+// dev.to publish uses canonical_url=https://scrml.dev/articles/roadmap-2026-05-14
 
 <page>
 
@@ -13,34 +16,121 @@
                 Articles &rsaquo; Release announcements
             </div>
             <h1 class="text-4xl font-bold tracking-tight text-slate-900">
-                Roadmap from v0.3 forward
+                scrml — where the compiler is going from v0.3
             </h1>
-            <p class="text-slate-600 mt-3">
-                What's pending, what's in flight, what's next. Honest current-state framing.
-            </p>
         </header>
 
-        <div class="p-4 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-900">
-            <strong>Day-1 scaffold.</strong> The full article body lives at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/docs/articles/../website/roadmap-from-v0.3-2026-05-14.md"
-               class="font-mono text-amber-900 hover:text-amber-700 underline">
-                docs/articles/../website/roadmap-from-v0.3-2026-05-14.md
-            </a>
-            in the scrmlTS repository. Inline-body migration is queued for
-            day-30 alongside the <code class="font-mono text-xs">&lt;CodeExample src=...&gt;</code>
-            component that lifts the brace-escaping tax from authoring.
-        </div>
+        <h1 class="text-3xl font-bold tracking-tight text-slate-900 mt-10 mb-4">scrml — where the compiler is going from v0.3</h1>
 
-        <div class="mt-8 flex gap-3">
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/docs/articles/../website/roadmap-from-v0.3-2026-05-14.md"
-               class="px-4 py-2 bg-slate-900 text-white rounded-md text-sm font-medium hover:bg-slate-800">
-                Read on GitHub &rarr;
-            </a>
-            <a href="/articles"
-               class="px-4 py-2 border border-slate-300 text-slate-900 rounded-md text-sm font-medium hover:bg-slate-50">
-                &larr; All articles
-            </a>
-        </div>
+        <p class="text-slate-700 leading-relaxed my-4">scrml v0.3.0 just shipped. This document is a forward-looking sketch — what the compiler is investing in next, and why. <strong>No timelines.</strong> scrml is a one-person language; estimates are inherently soft. What's stable is the <em>direction</em>. The order is what matters.</p>
+        <p class="text-slate-700 leading-relaxed my-4">If you've looked at the v0.3.0 benchmark numbers and they look weaker than the v0.2 numbers did, this document is the context. The short version: v0.3.0 traded single-page-app runtime for a multi-page-multi-role capability that single-page apps don't pay attention to. Most production apps aren't single-page. The trade is in the right direction. The next investments compound on it.</p>
+        <hr class="my-8 border-slate-200"/>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">Where v0.3.0 stands</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">The v0.3.0 critical-path investment was <strong>whole-stack closure analysis</strong>. At compile time, the compiler now computes exactly which code is reachable from each entry point and from each role. Two adopter-facing consequences:</p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li><strong><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;auth role="Admin"&gt;</code></strong> is a first-class compile-time visibility constraint. The compiler analyzes the auth graph statically and emits separate bundles per role. Anonymous visitors literally can't see admin code — it's not in their bundle.</li>
+            <li><strong>Per-route per-role content-addressed chunks</strong> ship in three prefetch tiers (idle &#47; hover &#47; on-demand). Filenames embed a deterministic content hash so adopter caches stay valid across builds when source bytes don't change.</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4">That investment had a runtime cost. The compiler's runtime now includes a chunk loader, role-detection bootstrap, content-addressed routing, and mount-hydration coalescing. <strong>A single-page app pays for all of this without using any of it.</strong> That's the bench regression the v0.3.0 measurements caught: scrml's TodoMVC bundle grew from 14.8 KB gzipped to 39.9 KB; runtime perf on a 10-operation TodoMVC suite regressed from winning 6&#47;10 to winning 0&#47;10.</p>
+        <p class="text-slate-700 leading-relaxed my-4">A multi-page multi-role app sees the inverse trade. The new per-route per-role chunk bench shipped in v0.3.0 measures the win directly: anonymous-visitor initial chunks land at sub-1-KB gzipped; per-role overhead peaks at 13% for admin within <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;admin</code>; the total reduction versus a hypothetical single-bundle is 96%.</p>
+        <p class="text-slate-700 leading-relaxed my-4">That's the v0.3.0 deal. It is the right deal for production apps. It is the wrong deal for one-page demos. The next-version-and-a-half of work is partly about making the one-page case carry less of that weight.</p>
+        <hr class="my-8 border-slate-200"/>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">v0.3.x — what the patches do</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">The next several patch releases close gaps surfaced by the v0.3.0 cut. These are not new features. They are the compiler bugs and performance narrowings the v0.3.0 measurements + example-corpus migration revealed.</p>
+        <p class="text-slate-700 leading-relaxed my-4">In order of likely landing:</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">1. Server-only body-emission tightening</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">A bug surfaced during v0.3.0 verification: under specific conditions, the codegen could emit a server-scoped function body into the client bundle. The <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-CG-006</code> fail-safe caught it, so adopters running the reference multi-file demo got a hard compile error rather than a silent SQL leak. The underlying bug — a missing handler in the route-inference walker — is now fixed; the diagnostic stays in place as a permanent fail-safe.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">2. Edge-case parser fixes for the program-as-container shape</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">v0.3 moved the canonical file shape to "everything inside <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>, default mode = logic." The migration of the example corpus to this shape surfaced five distinct parser bugs where specific constructs — JavaScript template-literal interpolation inside a function body, HTML comments inside a component definition, bare <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">e&#120;port t&#121;pe</code> at file-top in a non-entry module — forced a <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123; ... &#125;</code> wrapper as a workaround. Workarounds are documented; the fixes are filed and queued. After they land, the workarounds come out of the examples and the canonical shape carries through end-to-end.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">3. Closure-analysis runtime tree-shake for single-page apps</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">This is the big perf-narrowing patch. When an app has zero <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;auth&gt;</code> blocks and zero <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;page&gt;</code> siblings (the single-page case), the new runtime additions — chunk loader, content-addressed routing, role-detection bootstrap, prefetch helpers — are dead weight. The compiler should detect this case statically and emit zero of those helpers. The TodoMVC numbers should recover most of the regression once this lands. Multi-page-multi-role apps continue to get the full surface, unchanged.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">4. Auth-redirect resolution + login-page scaffolding</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">The <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program auth="required"&gt;</code> shape needs a corresponding <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;login</code> page. Adopters who declare auth without one currently get an <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">I-AUTH-REDIRECT-UNRESOLVED</code> info-level diagnostic. The <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">scrml generate auth</code> CLI subcommand scaffolds a default login page. The diagnostic and the scaffold link will be tightened so adopters get a one-line fix.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">5. Performance characterization</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">The v0.3.0 bench refresh measured TodoMVC + per-route per-role + SQL batching + bundle + build time. It did <strong>not</strong> measure the closure-analysis pipeline's own cost — how long the analysis takes on large codebases, peak memory, how the cost scales with code volume. That measurement is queued. The expectation is that closure-analysis cost is dominated by per-file work rather than cross-file work, but the measurement is the way to find out.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">6. Smaller items</h3>
+
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li>A documentation note clarifying that <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">reset</code> is a reserved keyword (per §6.8) — adopters reflexively naming a function <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">reset()</code> hit an error during the corpus migration.</li>
+            <li>Versioning convention formalization across <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">package.json</code> and the compiler identity emitted into the chunks manifest.</li>
+            <li>Test-authoring note: when asserting on <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">W-*</code> &#47; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">I-*</code> diagnostics, use a cross-stream helper that reads both <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">result.errors</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">result.warnings</code> — info-level diagnostics partition into <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">result.warnings</code>, not <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">result.errors</code>.</li>
+        </ul>
+        <hr class="my-8 border-slate-200"/>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">v0.4 — body-split</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">The next minor release anchors on a feature we're calling <strong>body-split</strong>: an ergonomic and correctness improvement for the server-function surface.</p>
+        <p class="text-slate-700 leading-relaxed my-4">Today, when a <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">f&#117;nction</code> body touches a server-only resource (a <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">?&#123;&#125;</code> SQL block, server I&#47;O, etc.), the compiler escalates the whole function to a server route via body-content inference. Multiple statements in one function become one server round-trip. That's fine for most cases. It is less fine for a couple of specific shapes:</p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li><strong>Failable batches.</strong> A handler that calls three failable functions in sequence and routes each error variant to a different recovery path currently makes either three round-trips (when the failable functions are independently server-escalated) or one round-trip whose failure semantics are awkward to express at the call site.</li>
+            <li><strong>Idempotent retries.</strong> A handler that's safe to replay should be safely replayable when the network connection blips mid-call. The retry-key shape that makes this work — Stripe-style <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Idempotency-Key</code> semantics — has nothing to do with the developer-authored scrml; it should be the compiler's job to apply it.</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4">The v0.4 body-split work adds two extensions to the existing escalation:</p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li><strong>Function bodies split at server-escalation boundaries; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">!&#123;&#125;</code> handler context propagated through.</strong> The compiler analyzes each call site, splits the function body where it crosses the server boundary, and threads the <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">!&#123;&#125;</code> recovery handlers through to the right error arm. The shape that today requires three handlers becomes the shape adopters wrote — one <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">!&#123;&#125;</code> block at the call site.</li>
+            <li><strong>Static monotonicity classifier + idempotency-key storage.</strong> Per-batch, the compiler classifies whether the operations are monotone (safe to re-apply regardless of order). Monotone batches need no retry-key — replay is a no-op. Non-monotone batches get a Stripe-style <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Idempotency-Key</code> automatically, backed by an adopter-configured storage backend declared in the project config.</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4">This is backwards-compatible. Apps that don't use the new patterns compile as they do today. Apps that do use them get correctness + ergonomics improvements automatically.</p>
+        <p class="text-slate-700 leading-relaxed my-4">The full body-split surface — multi-batch, conditional-tier, loop-aware splitting — is bigger than the first v0.4 cut. It sequences after v0.4 lands and after adopter friction shows where the next ergonomic gap actually is. Cross-function body-split (analysis across function calls) is bigger still and sits on the v0.5+ horizon; the v0.4 cut does not foreclose it.</p>
+        <hr class="my-8 border-slate-200"/>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">v0.5+ — the horizon</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">Two arcs sit past v0.4, both already explored in earlier design work, neither yet committed to a specific version target:</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Profile-guided optimization</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">Whole-stack closure analysis (the v0.3 investment) lets the compiler know, at compile time, which code is reachable. The natural next step is letting <strong>runtime telemetry</strong> shape codegen. Hot paths get inlined. Cold paths get tree-shaken harder. Per-app codegen tightens around the actual usage shape, not the theoretical reachable set.</p>
+        <p class="text-slate-700 leading-relaxed my-4">The mechanism is an open design question — LLVM-style profile-guided optimization, Erlang-VM-style hot-swap, or a novel scrml-native shape — but the direction is established. The compiler's analysis surface keeps widening; this is the version that brings runtime feedback into the loop.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">A compiler that's alive in the developer's environment</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">Earlier design work explored what it would look like if the compiler weren't a batch tool that re-parses every keystroke, but a long-running state machine that maintains incremental invariants and can be queried — "what would change if I made this edit?" "what's reachable from this entry point right now?" "what would break if I renamed this variable?"</p>
+        <p class="text-slate-700 leading-relaxed my-4">The full shape (recoverability, structured editing, hot-swap, persistent compiler state) is a substantial set of design decisions. The exploration mapped the space; the implementation path is still open.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Self-host</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">scrml will eventually be written in scrml. Not as a mechanical port of the current TypeScript implementation — that would lose the language's advantages. As a from-scratch rewrite using scrml's natural idioms: optional <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">n&#111;t</code>, failable functions, refinement types, reactive deps, engine state machines. The TypeScript implementation is the scaffold; self-host is the proof.</p>
+        <p class="text-slate-700 leading-relaxed my-4">Self-host is sequenced after v1.0 stable. It is the destination, not the path.</p>
+        <hr class="my-8 border-slate-200"/>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">Surfaces that will likely change visibility in adopter docs</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">A few language features sit in a particular spot — they have spec real-estate and compiler implementation but a narrowing or atypical adopter surface. Honest about each:</p>
+        <p class="text-slate-700 leading-relaxed my-4"><strong>Compile-time meta blocks (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">^&#123;&#125;</code>).</strong> Three current use shapes: (1) compile-time markup generation via <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">emit()</code> from data arrays, (2) compile-time reflection via <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">reflect(TypeName)</code> for type inspection, (3) self-host compiler internals (extensive use in <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">stdlib&#47;compiler&#47;*.scrml</code>). The L22 type-as-argument family (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">parseVariant</code> shipped at v0.next; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">serialize</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">formFor</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">schemaFor</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">tableFor</code> planned) is structurally undercutting shape #2 — adopters who want "compile-time type introspection" will reach for <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">formFor(StructType)</code> rather than <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">^&#123; reflect(StructType) ... &#125;</code>. Shape #1 (markup-from-data unrolling) and shape #3 (self-host internals) remain. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">^&#123;&#125;</code> won't deprecate; the primitive is what the L22 family rides on internally. But its visibility in adopter docs will likely narrow over v0.4 → v0.5 as family primitives ship as the recommended surface. The flagship marketing pitch shifts to "define struct → get form" via <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">formFor</code>, not "you can write compile-time code" via raw <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">^&#123;&#125;</code>.</p>
+        <p class="text-slate-700 leading-relaxed my-4"><strong>The last-unbound-expression carry-forward (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">~</code>).</strong> Substantive spec real-estate and compiler implementation (linearity-tracked, with discrete diagnostics — <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-TILDE-001</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-TILDE-002</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-MU-001</code>) but currently zero adopter-facing corpus usage. The primitive captures the result of an unbound expression or lift — <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">fetchUser(id)</code> initializes <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">~</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">process(~)</code> consumes it. Designed for pipeline shapes where naming each intermediate value would be noise. The closest existing-language analogue is Perl's <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;_</code>, but <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">~</code> has full linearity + scope rules rather than being a global magic.</p>
+        <p class="text-slate-700 leading-relaxed my-4"><strong>Naming intermediates is a real cost.</strong> The design intent here is load-bearing: the time cost of choosing a good name for a value you're going to use exactly once in the next line is a tax the language shouldn't impose. The cleanliness of <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">fetchUser(id); validate(~); save(~)</code> over <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">l&#101;t u = fetchUser(id); l&#101;t v = validate(u); save(v)</code> is the point — same shape of motivation that makes ternary expressions feel clean.</p>
+        <p class="text-slate-700 leading-relaxed my-4"><strong>Adoption path: v0.4 body-split is the natural discovery moment.</strong> The v0.4 anchor introduces failable batches + <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">!&#123;&#125;</code> handler propagation across CPS-split function bodies — exactly the pipeline shape where <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">~</code> shines. Post-v0.4 the canonical failable-pipeline example reads:</p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>fetchUser(id) !&#123; | ::NotFound -&gt; &#123; r&#101;turn &#125; &#125;
+validateUser(~) !&#123; | ::Invalid -&gt; &#123; r&#101;turn &#125; &#125;
+saveToDB(~)    !&#123; | ::DBError -&gt; &#123; r&#101;turn &#125; &#125;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">The empty corpus is a documentation surface, not an adoption signal. v0.4's example refresh + recipes are the natural place to make <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">~</code> visible — adopters learn the pipeline shape and the <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">~</code> primitive together.</p>
+        <hr class="my-8 border-slate-200"/>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">The shape, not the schedule</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">Three patterns repeat across the work above:</p>
+        <p class="text-slate-700 leading-relaxed my-4"><strong>Investments compound.</strong> Closure analysis made it possible to know which code is reachable; that knowledge is what makes the v0.3.x tree-shake work, what makes the v0.4 body-split classifier sharper, what makes runtime-feedback codegen meaningful later. None of these investments stand alone.</p>
+        <p class="text-slate-700 leading-relaxed my-4"><strong>Benchmarks are a measurement, not the goal.</strong> v0.3.0's TodoMVC numbers regressed. The right response is not to re-tune the runtime to make TodoMVC win; it's to make sure TodoMVC isn't paying for things TodoMVC doesn't use (the v0.3.x tree-shake), and to make sure the per-role chunk story is measurable for the apps that use it (the new per-route per-role bench).</p>
+        <p class="text-slate-700 leading-relaxed my-4"><strong>The language is post-training-cutoff for every LLM.</strong> Adopters using LLMs to write scrml will see the LLM reach for React or Vue or Svelte patterns. The language reference, the canonical examples, and an LLM anti-pattern catalog are the corrective. Each version's corpus migration is part of keeping the canonical examples honest, so that LLMs reading them learn the right shape.</p>
+        <p class="text-slate-700 leading-relaxed my-4">That's the shape. The schedule is the schedule.</p>
 
     </article>
 

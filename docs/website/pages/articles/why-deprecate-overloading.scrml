@@ -1,8 +1,11 @@
 // scrml.dev /articles/why-deprecate-overloading
 //
-// SKELETON — day-1 thin stub. Full content migration is day-30 work
-// alongside the live-compile <CodeExample src=...> component pass.
-// See scrml-support/docs/deep-dives/scrml-dev-mdn-style-architecture-2026-05-17.md §5.
+// Full-conversion page. P2 continuation per Machine A's S98A queue-shift
+// directive. Mechanical conversion from why-scrml-has-to-deprecate-function-and-component-overloading-devto-2026-05-06.md via /tmp/convert_article.py.
+// Per Pillar 5b (PRIMER §2 amendment S98A): reach for engines/states first
+// in worked examples; the corpus goes into LLM training.
+//
+// dev.to publish uses canonical_url=https://scrml.dev/articles/why-deprecate-overloading
 
 <page>
 
@@ -15,32 +18,225 @@
             <h1 class="text-4xl font-bold tracking-tight text-slate-900">
                 Why scrml has to deprecate function and component overloading
             </h1>
-            <p class="text-slate-600 mt-3">
-                Overloading is library-syntactic-sugar; structural exhaustiveness is a language commitment. The trio that replaces overloading.
-            </p>
         </header>
+        <p class="text-slate-700 leading-relaxed my-4"><em>by Bryan MacLee</em></p>
+        <p class="text-slate-700 leading-relaxed my-4"><strong>TL;DR: Two scrml features, function overloading and component overloading, are dying in v0.2.0. They shipped, they worked, and on a self-audit nothing in scrml's own samples, examples, stdlib, or self-host modules actually relied on them. The companion piece, "The compiler that grows up with your app," shows the primitives that survived. This piece explains why these two didn't.</strong></p>
+        <p class="text-slate-700 leading-relaxed my-4">Two features are leaving the language in v0.2.0. They shipped, they worked, and I had been quietly wondering for a while what I would actually use them for, given everything scrml's primitives already do. Last week I asked claude, the LLM I have been pair-programming the compiler with, to walk me through what using the function-overload mechanism for a real centralization problem would actually look like. The drafts confirmed what I had been suspecting. Fifteen minutes after the engine-shaped rewrite landed on screen, the features were dead.</p>
+        <p class="text-slate-700 leading-relaxed my-4">If that sounds dismissive, hear me out. State-type-discriminated function overloading has been in the compiler for roughly a year and it did work. Sixty lines of codegen, cleanly written, tests covering it. Component overloading was a different beast: a SPEC-ISSUE that tracked the design intent but was never implemented in the compiler. So one half of what is leaving v0.2.0 is shipped code with users that turned out to be zero; the other half is a doc-only proposal that never quite earned implementation. With the language as it is today, neither shape can do anything <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">m&#97;tch</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">e&#110;gine</code> don't already do better, and the self-audit couldn't surface a single case to the contrary.</p>
+        <p class="text-slate-700 leading-relaxed my-4">About twenty compiler attempts behind me. Eighteen months of design. The thing that made me kill these two features was not a benchmark or a roadmap pruning. It was an introspective moment of epiphany'd defeat. I had insisted on and worked to add overloading as a first-class feature. I wanted scrml to have an easy bridge from JS. And perhaps without building that bridge for myself, I wouldn't have had the perspective to see the right path.</p>
 
-        <div class="p-4 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-900">
-            <strong>Day-1 scaffold.</strong> The full article body lives at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/docs/articles/why-scrml-has-to-deprecate-function-and-component-overloading-devto-2026-05-06.md"
-               class="font-mono text-amber-900 hover:text-amber-700 underline">
-                docs/articles/why-scrml-has-to-deprecate-function-and-component-overloading-devto-2026-05-06.md
-            </a>
-            in the scrmlTS repository. Inline-body migration is queued for
-            day-30 alongside the <code class="font-mono text-xs">&lt;CodeExample src=...&gt;</code>
-            component that lifts the brace-escaping tax from authoring.
-        </div>
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">What they were</h2>
 
-        <div class="mt-8 flex gap-3">
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/docs/articles/why-scrml-has-to-deprecate-function-and-component-overloading-devto-2026-05-06.md"
-               class="px-4 py-2 bg-slate-900 text-white rounded-md text-sm font-medium hover:bg-slate-800">
-                Read on GitHub &rarr;
-            </a>
-            <a href="/articles"
-               class="px-4 py-2 border border-slate-300 text-slate-900 rounded-md text-sm font-medium hover:bg-slate-50">
-                &larr; All articles
-            </a>
-        </div>
+        <p class="text-slate-700 leading-relaxed my-4">Function overloading scrml-style let you declare two functions with the same name in two different state-type bodies. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">f&#117;nction dothe(): UserFlow &#123; ... &#125;</code> lives inside <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">UserFlow</code>'s state-constructor. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">f&#117;nction dothe(): AdminFlow &#123; ... &#125;</code> lives inside <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">AdminFlow</code>'s. The compiler tags each one with its enclosing state-type, builds a registry, and at the call site emits a dispatch shim that reads the argument's runtime state-type tag and routes to the matching body.</p>
+        <p class="text-slate-700 leading-relaxed my-4">Component overloading was the same shape on the markup side: multiple definitions of <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;Card&gt;</code>, prop-type-discriminated. The exact syntax was tracked as SPEC-ISSUE-010, never pinned down, and never implemented in the compiler — it lived as design intent in the spec text and nowhere else.</p>
+        <p class="text-slate-700 leading-relaxed my-4">The motivation is reasonable on paper. Two actor types, two implementations of the same operation, one name at the call site. Method dispatch.</p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">The conversation</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">I have been pair-programming the scrml compiler with Claude for several months. Most of our work is in the compiler; some of it is design discussion. I went into this side-quest with a posture I want to be honest about: I had a prior (<em>these features don't earn their keep</em>), and I was actively suspicious that an LLM working with me daily might tell me what I wanted to hear instead of doing the work. So I framed the question to demand the work, not the conclusion. <em>How is function overloading done in scrml today?</em> Claude answered the mechanism. I followed up: <em>if a dev wants the body centralized, written once instead of twice, what do they actually have to type?</em> Show me the code. Don't tell me whether the feature is good. Type it.</p>
+        <p class="text-slate-700 leading-relaxed my-4">The scenario was small and realistic. Two actor types: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">UserFlow</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">AdminFlow</code>. One operation: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">sendNotification(message)</code>. Different rails per actor (email queue for users, pager for admins, plus an admin-audit row for admins). One shared rule: rate-limit by recent sends, no actor sends more than ten in a minute. Ten lines of business spec at most.</p>
+        <p class="text-slate-700 leading-relaxed my-4">Claude wrote three drafts. None of them were good.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Draft one: split the body across the two state-constructor scopes</h3>
+
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;program&gt;&#36;&#123;
+
+  f&#117;nction checkRateLimit(actorId: string, kind: string) -&gt; boolean &#123;
+    c&#111;nst recent = ?&#123;
+      SELECT COUNT(*) AS n FROM notifications_log
+      WHERE actor_id = &#36;&#123;actorId&#125;
+        AND kind = &#36;&#123;kind&#125;
+        AND created_at &gt; NOW() - INTERVAL '1 minute'
+    &#125;;
+    r&#101;turn recent.n &lt; 10;
+  &#125;
+
+  &lt;UserFlow userId(string) email(string) name(string)&gt;
+    &#36;&#123;
+      f&#117;nction sendNotification(message: string) -&gt; string &#123;
+        i&#102; (n&#111;t checkRateLimit(this.userId, "user")) &#123;
+          r&#101;turn "rate-limited";
+        &#125;
+        c&#111;nst subject = "Notification f&#111;r " + this.name;
+        c&#111;nst body = "Hi " + this.name + ",\n\n" + message;
+        c&#111;nst id = ?&#123;
+          INSERT INTO email_queue (to_addr, subject, body)
+          VALUES (&#36;&#123;this.email&#125;, &#36;&#123;subject&#125;, &#36;&#123;body&#125;)
+          RETURNING id
+        &#125;;
+        r&#101;turn "queued:" + id;
+      &#125;
+    &#125;
+  &lt;&#47;&gt;
+
+  &lt;AdminFlow adminId(string) pagerToken(string) role(string)&gt;
+    &#36;&#123;
+      f&#117;nction sendNotification(message: string) -&gt; string &#123;
+        i&#102; (n&#111;t checkRateLimit(this.adminId, "admin")) &#123;
+          r&#101;turn "rate-limited";
+        &#125;
+        c&#111;nst payload = "[ALERT][" + this.role + "] " + message;
+        c&#111;nst id = ?&#123;
+          INSERT INTO pager_queue (token, payload)
+          VALUES (&#36;&#123;this.pagerToken&#125;, &#36;&#123;payload&#125;)
+          RETURNING id
+        &#125;;
+        ?&#123; INSERT INTO admin_audit (admin_id, action) VALUES (&#36;&#123;this.adminId&#125;, 'paged') &#125;;
+        r&#101;turn "paged:" + id;
+      &#125;
+    &#125;
+  &lt;&#47;&gt;
+
+&#125;&lt;&#47;program&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">Call site is fine: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">target.sendNotification("s&#101;rver maintenance at 3am")</code>. The compiler dispatches by state-type tag.</p>
+        <p class="text-slate-700 leading-relaxed my-4">The cost isn't at the call site. It's that the <em>shape</em> of <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">sendNotification</code> (rate-limit gate, then act, then return a stringly-typed status) is invisible. Two bodies, no contract. Anyone editing one and not the other silently drifts the rules.</p>
+        <p class="text-slate-700 leading-relaxed my-4">This draft fragments the <strong>bodies</strong>.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Draft two: give up on overloading; rename the functions</h3>
+
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>f&#117;nction sendUserNotification(user: UserFlow, message: string) -&gt; string &#123;
+  i&#102; (n&#111;t checkRateLimit(user.userId, "user")) &#123; r&#101;turn "rate-limited"; &#125;
+  &#47;&#47; ... user body, same as above ...
+&#125;
+
+f&#117;nction sendAdminNotification(admin: AdminFlow, message: string) -&gt; string &#123;
+  i&#102; (n&#111;t checkRateLimit(admin.adminId, "admin")) &#123; r&#101;turn "rate-limited"; &#125;
+  &#47;&#47; ... admin body, same as above ...
+&#125;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">Bodies are centralized; the contract is at least visible. But every call site replaces the dispatch the compiler used to do:</p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>i&#102; (currentActor.__scrml_state_type == "UserFlow") &#123;
+  result = sendUserNotification(currentActor, msg);
+&#125; e&#108;se &#123;
+  result = sendAdminNotification(currentActor, msg);
+&#125;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">__scrml_state_type</code> is a compiler-internal runtime tag. Reading it from user source is reaching under the hood. If a developer is uncomfortable doing that (and they should be), they reinvent a discriminator field on every state type by hand.</p>
+        <p class="text-slate-700 leading-relaxed my-4">This draft fragments the <strong>call sites</strong>.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Draft three: manual one-name top-level dispatcher</h3>
+
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>f&#117;nction sendNotification(target, message: string) -&gt; string &#123;
+  c&#111;nst tag = target.__scrml_state_type;
+  i&#102; (tag == "UserFlow") &#123;
+    i&#102; (n&#111;t checkRateLimit(target.userId, "user")) &#123; r&#101;turn "rate-limited"; &#125;
+    &#47;&#47; ... user body ...
+    r&#101;turn "queued:" + id;
+  &#125; e&#108;se i&#102; (tag == "AdminFlow") &#123;
+    i&#102; (n&#111;t checkRateLimit(target.adminId, "admin")) &#123; r&#101;turn "rate-limited"; &#125;
+    &#47;&#47; ... admin body ...
+    r&#101;turn "paged:" + id;
+  &#125; e&#108;se &#123;
+    f&#97;il .UnknownActor("sendNotification: unknown actor t&#121;pe " + tag);
+  &#125;
+&#125;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">The call site is <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">sendNotification(target, msg)</code> again. Inside the body, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">target</code> has no type annotation (there is no type to give it that captures "either UserFlow or AdminFlow with all their distinct fields"), so the type system is turned off for the entire function. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">target.userId</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">target.adminId</code> are bare property accesses with no checking. Hand-rolled exhaustiveness. Hand-rolled dispatch. Untyped parameter. The compiler gets to type-check the spaghetti.</p>
+        <p class="text-slate-700 leading-relaxed my-4">This draft fragments the <strong>type system</strong>.</p>
+        <p class="text-slate-700 leading-relaxed my-4">Three drafts. Three different things fragmented. I read them and felt the engineering question forming: <em>which is the least bad?</em> That question is the trap. As long as I am answering "one of these three," the feature stays alive, never on its own merits, just as the least-bad workaround.</p>
+        <p class="text-slate-700 leading-relaxed my-4">Then I asked the question that killed it.</p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">"Isn't <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">recent</code> state?"</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">The drafts all included a helper called <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">checkRateLimit(actorId, kind) -&gt; boolean</code>. Inside the helper was a SQL query that counted how many notifications the actor had sent in the last minute. The function returned true if the count was under ten.</p>
+        <p class="text-slate-700 leading-relaxed my-4">I looked at it and said: hold on. The helper is a derived view of state — a SQL query against the notifications log, scoped to an actor, bounded by a window. That query <em>is</em> the data; the rate-limit gate is one expression on top of it (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">recentSendCount(target) &gt;= 10</code>). scrml routes the query server-side automatically; no boilerplate, no separate "service layer," no helper-of-a-helper-of-a-helper.</p>
+        <p class="text-slate-700 leading-relaxed my-4">And once the gate is one expression, the stringly-typed return is the other half of the problem. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">"rate-limited"</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">"queued:5"</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">"paged:7"</code> — a sum-type return value smuggled in as a string. The call site loses every typed-variant guarantee; downstream consumers stringly-compare instead of pattern-matching. Exactly the bug class that <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">enum</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">m&#97;tch</code> were specifically designed to kill.</p>
+        <p class="text-slate-700 leading-relaxed my-4">Claude rewrote the example. The new version had no <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">sendNotification</code> overload at all — one function, dispatched at the match-arm:</p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;program&gt;&#36;&#123;
+
+  t&#121;pe SendOutcome:enum = &#123;
+    RateLimited,
+    Queued(id: string),
+    Paged(id: string)
+  &#125;
+
+  t&#121;pe Actor:enum = &#123;
+    User(userId: string, email: string, name: string),
+    Admin(adminId: string, pagerToken: string, role: string)
+  &#125;
+
+  f&#110; actorKey(a: Actor) -&gt; string &#123;
+    m&#97;tch a &#123;
+      .User u  -&gt; u.userId
+      .Admin a -&gt; a.adminId
+    &#125;
+  &#125;
+
+  &#47;&#47; Derived view of state: how many messages has this actor sent recently?
+  &#47;&#47; The body i&#115; a SQL query; the compiler routes it s&#101;rver-side automatically.
+  f&#117;nction recentSendCount(target: Actor) -&gt; number &#123;
+    c&#111;nst result = ?&#123;
+      SELECT COUNT(*) AS n FROM notifications_log
+      WHERE actor_id = &#36;&#123;actorKey(target)&#125;
+        AND created_at &gt; NOW() - INTERVAL '1 minute'
+    &#125;
+    r&#101;turn result.n
+  &#125;
+
+  &#47;&#47; One send. No overloading. Match-on-arm IS the dispatch.
+  f&#117;nction send(target: Actor, message: string) -&gt; SendOutcome &#123;
+    i&#102; (recentSendCount(target) &gt;= 10) &#123; r&#101;turn .RateLimited &#125;
+
+    m&#97;tch target &#123;
+      .User u -&gt; &#123;
+        l&#101;t emailId = ?&#123;
+          INSERT INTO email_queue (to_addr, subject, body)
+          VALUES (&#36;&#123;u.email&#125;,
+                  "Notification f&#111;r " + u.name,
+                  "Hi " + u.name + ",\n\n" + message)
+          RETURNING id
+        &#125;
+        r&#101;turn .Queued(emailId)
+      &#125;
+      .Admin a -&gt; &#123;
+        l&#101;t pagerId = ?&#123;
+          INSERT INTO pager_queue (token, payload)
+          VALUES (&#36;&#123;a.pagerToken&#125;,
+                  "[ALERT][" + a.role + "] " + message)
+          RETURNING id
+        &#125;
+        ?&#123; INSERT INTO admin_audit (admin_id, action)
+           VALUES (&#36;&#123;a.adminId&#125;, 'paged') &#125;
+        r&#101;turn .Paged(pagerId)
+      &#125;
+    &#125;
+  &#125;
+
+&#125;&lt;&#47;program&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">Look at what disappeared. There is no <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">sendNotification</code> <em>overload</em>, because there is no need for one. There is one <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">send</code> function, written once, whose body dispatches by match-on-arm over the <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Actor</code> enum. Each arm gets the variant's payload statically typed (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">u: &#123; userId, email, name &#125;</code> in the User arm, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">a: &#123; adminId, pagerToken, role &#125;</code> in the Admin arm) — the same per-actor type-safety that the overload mechanism was trying to provide, but uniformly, in one body, with the return type a typed <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">SendOutcome</code> variant instead of a string sum-type smuggled through <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">"queued:5"</code> &#47; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">"paged:7"</code> &#47; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">"rate-limited"</code>.</p>
+        <p class="text-slate-700 leading-relaxed my-4">No string sum-type. No <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">i&#102;</code>-ladder over a runtime tag. No two function bodies that have to stay in sync. No reaching under the hood for <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">__scrml_state_type</code>. The whole "where do I centralize the overload?" question dissolved, because the dispatch primitive <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">m&#97;tch</code> does the discrimination directly. The actor types live in one enum, the send body lives in one function, and the arms of the match handle the variant-specific work with full type-system visibility into each variant's payload.</p>
+        <p class="text-slate-700 leading-relaxed my-4">That is the moment the feature died. Not because it was broken. Because the language already had its dispatch primitives (typed <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">enum</code>s with payloads, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">m&#97;tch</code> over discriminated unions, derived state for queries-as-data, and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;e&#110;gine&gt;</code> for genuinely stateful flows) that did the same job at a higher level of expressiveness, with full type-system visibility, with no string contracts and no hand-rolled dispatch. The bridge I had insisted on building was already in the language.</p>
+        <p class="text-slate-700 leading-relaxed my-4">If you want to see those three primitives in action, that is what the <a href="/articles/tier-ladder-promotion" class="text-blue-700 hover:text-blue-900 underline">companion piece, *The compiler that grows up with your app*</a>, shows in detail. The <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">i&#102;=</code> → <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;m&#97;tch&gt;</code> → <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;e&#110;gine&gt;</code> ladder where state-children migrate verbatim and the wrapper is the only thing that changes. That ladder is the canonical path for case analysis on a discriminated value. Function and component overloading were a parallel path that did not earn its keep against the ladder.</p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">The sliver test</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">After the rewrite, I tried to invent a single case where function overloading would beat the engine-shaped re-expression. A pure, side-effect-free transformation whose body genuinely differs by state-type and isn't reasonably expressible as a <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">m&#97;tch</code> arm.</p>
+        <p class="text-slate-700 leading-relaxed my-4">I came up empty. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">format(user)</code> versus <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">format(admin)</code> is a <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">m&#97;tch</code>. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">permissions(user)</code> versus <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">permissions(admin)</code> is a <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">m&#97;tch</code>. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">displayName(user)</code> versus <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">displayName(admin)</code> is a <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">m&#97;tch</code>. Anything involving effect, time, or multi-step dispatch is the engine. Anything that's "compute X about an actor" is a derived cell. There is no fourth category that wants the parallel-method-bodies shape.</p>
+        <p class="text-slate-700 leading-relaxed my-4">The sliver test, as I am calling it: if I cannot easily invent a case that needs the feature, the feature is empty enough to act on.</p>
+        <p class="text-slate-700 leading-relaxed my-4">Then the same anti-sycophancy worry kicked in again. I had reached a conclusion in conversation with the same LLM that walked me through the example. I needed to know whether the conclusion was load-bearing or whether I had talked myself into something the data did not actually support. So I asked claude to dispatch a radical-doubt deep dive; explicitly framed to find evidence against the conclusion. <em>Take the case for keeping these features seriously. Find counter-evidence. The working assumption is that the sliver is NOT empty.</em></p>
+        <p class="text-slate-700 leading-relaxed my-4">The deep dive went broad. It looked at how this dispatch shape has played out across other languages that ship some flavor of it, the kinds of language designers who would push back hardest on the deletion, and the realistic use cases the mechanism was meant to serve. None of it surfaced a counter-case. Every reasonable use of the overload mechanism collapsed into one of <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">m&#97;tch</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">e&#110;gine</code>, or derived state, with the existing primitives doing more work, more typed, with less ceremony. The radical-doubt framing did not change the conclusion; it confirmed it.</p>
+        <p class="text-slate-700 leading-relaxed my-4">Component overloading collapsed under the same scrutiny, by a slightly different route. Because no code ever shipped, the question was not "delete this implementation" but "should we still ship it." A second debate ran the panel through that question, and the convergent reading was the same shape as the function-overload finding: every plausible "multi-definition overload" use case in the markup tree reduces to either two-different-components, a single component whose body is a <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">m&#97;tch</code>, or a <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">m&#97;tch f&#111;r=state</code> over an enum. The case that the JSX call site is structurally asymmetric to a function call site (which is true for React, Vue, Solid, Svelte) does not survive scrml's specific shape, because scrml's <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;m&#97;tch f&#111;r=Type&gt;</code> is itself a markup expression of the same kind as <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;Foo&#47;&gt;</code>. There is nothing the multi-definition form does that one of those three doesn't do better.</p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">What goes away in v0.2.0</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">For function overloading: the dispatch emitter, the registry-building pass, the AST tag the parser was setting, the tests that asserted the registry's shape — gone. For component overloading: nothing in the codegen, because there was nothing in the codegen. What goes away there is the spec text and the pending issue that tracked it. The spec section that called overloading "the primary dispatch mechanism" is rewritten to point at <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">m&#97;tch</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">e&#110;gine</code> instead. The pending spec issue that was supposed to nail down the overload syntax closes without resolution.</p>
+        <p class="text-slate-700 leading-relaxed my-4">The replacement primitives are already in the language and already taught. See the companion piece for the full ladder.</p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">The lesson the language is keeping</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">Two features tried to do something the language could already do better. They shipped. They got a little spec text, a little codegen, a little registry. They sat there for the better part of a year before I asked the question, watched the drafts come back obviously worse than the engine-shaped alternative, and finally checked whether anything I had built actually relied on them.</p>
+        <p class="text-slate-700 leading-relaxed my-4">The lesson is not "delete unused code." Plenty of unused code earns its keep by existing for the future. The lesson is <em>the sliver test</em>: if I cannot easily invent a case where this feature does something the existing primitives can't, the feature is paying interest on a debt with no creditor. v0.2.0 is the breaking-by-design release; this is the right moment to take that debt off the books.</p>
+        <p class="text-slate-700 leading-relaxed my-4">Function overloading and component overloading reached for argument-type-discriminated method dispatch as a primitive. scrml already has argument-type discrimination: it is <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">m&#97;tch</code> over a discriminated union, or an <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">e&#110;gine</code> whose transition arms are typed. The match-on-arm syntax IS the dispatch. The dispatch was never the missing primitive. The instinct to reach for it was. And yes, the instinct is mine. I had been suspicious for a while; the drafts on screen were what moved the suspicion from quiet to acted-on. I started this language with the intent that it be JS-identical with a slight superset. For a long time I tried to keep the easy dev-conversion path open, even though I had known for some time that scrml had grown past that. This is a language. It is its own. It should stand as such. The companion piece is about the ladder that catches the instinct early. This piece is about closing the dead end of the language because the ladder already covers it.</p>
+        <p class="text-slate-700 leading-relaxed my-4">Two features. Fifteen minutes. Dead. Onward.</p>
+        <hr class="my-8 border-slate-200"/>
+        <p class="text-slate-700 leading-relaxed my-4"><em>Drafted with Claude. The verbatim conversation and the radical-doubt deep dive that produced this article are both preserved in the project's design archive. Companion: [The compiler that grows up with your app](&#47;articles&#47;tier-ladder-promotion).</em></p>
 
     </article>
 

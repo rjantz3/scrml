@@ -1,8 +1,11 @@
 // scrml.dev /articles/lsp-and-giti-advantages
 //
-// SKELETON — day-1 thin stub. Full content migration is day-30 work
-// alongside the live-compile <CodeExample src=...> component pass.
-// See scrml-support/docs/deep-dives/scrml-dev-mdn-style-architecture-2026-05-17.md §5.
+// Full-conversion page. P2 continuation per Machine A's S98A queue-shift
+// directive. Mechanical conversion from lsp-and-giti-advantages-devto-2026-04-28.md via /tmp/convert_article.py.
+// Per Pillar 5b (PRIMER §2 amendment S98A): reach for engines/states first
+// in worked examples; the corpus goes into LLM training.
+//
+// dev.to publish uses canonical_url=https://scrml.dev/articles/lsp-and-giti-advantages
 
 <page>
 
@@ -13,34 +16,204 @@
                 Articles &rsaquo; The why-not
             </div>
             <h1 class="text-4xl font-bold tracking-tight text-slate-900">
-                What scrml's LSP can do that no other LSP can
+                What scrml's LSP can do that no other LSP can, and why giti follows from the same principle
             </h1>
-            <p class="text-slate-600 mt-3">
-                SQL column completion. Cross-file go-to-def. Code actions for tier promotion. What vertical integration unlocks at the editor layer.
-            </p>
         </header>
+        <p class="text-slate-700 leading-relaxed my-4"><em>authored by claude, rubber stamped by Bryan MacLee</em></p>
+        <p class="text-slate-700 leading-relaxed my-4"><strong>TL;DR: mainstream LSPs are unions of partial language services. scrml's LSP is a single service that knows every context. giti is the same idea applied to version control.</strong></p>
+        <p class="text-slate-700 leading-relaxed my-4">The LSP and giti both sit downstream of one integrated compiler that owns markup, logic, SQL, components, and reactivity in one AST. That single fact is what this piece is about, because it is what lets both of them ship features that piecewise alternatives in mainstream stacks literally cannot.</p>
+        <p class="text-slate-700 leading-relaxed my-4">That structural difference unlocks features the union model literally cannot ship. Giti is a parallel structural argument: a version control surface designed for the median developer, with the scrml compiler as its review gate. The same "single integrated thing knows everything" pattern is what makes it possible.</p>
 
-        <div class="p-4 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-900">
-            <strong>Day-1 scaffold.</strong> The full article body lives at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/docs/articles/lsp-and-giti-advantages-devto-2026-04-28.md"
-               class="font-mono text-amber-900 hover:text-amber-700 underline">
-                docs/articles/lsp-and-giti-advantages-devto-2026-04-28.md
-            </a>
-            in the scrmlTS repository. Inline-body migration is queued for
-            day-30 alongside the <code class="font-mono text-xs">&lt;CodeExample src=...&gt;</code>
-            component that lifts the brace-escaping tax from authoring.
-        </div>
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">Part 1: The LSP</h2>
 
-        <div class="mt-8 flex gap-3">
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/docs/articles/lsp-and-giti-advantages-devto-2026-04-28.md"
-               class="px-4 py-2 bg-slate-900 text-white rounded-md text-sm font-medium hover:bg-slate-800">
-                Read on GitHub &rarr;
-            </a>
-            <a href="/articles"
-               class="px-4 py-2 border border-slate-300 text-slate-900 rounded-md text-sm font-medium hover:bg-slate-50">
-                &larr; All articles
-            </a>
-        </div>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Why mainstream LSPs hit a ceiling</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">Take Vue. A <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.vue</code> file has three contexts: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;template&gt;</code> (HTML), <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;style&gt;</code> (CSS), <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;script&gt;</code> (TypeScript). Volar (Vue's LSP) solves this with a thin LSP shell that delegates each region to a dedicated language service: HTML service, CSS service, TS service. To get TS-level features inside the template, Volar transforms the SFC to virtual TypeScript (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">svelte2tsx</code>-style) and asks tsserver. It works, and it's a real engineering achievement. But the union approach has a hard ceiling: each per-context service knows only its own context.</p>
+        <p class="text-slate-700 leading-relaxed my-4">The thing every Vue dev has hit: you can't get column completion in a SQL string inside a Vue script setup, because no Vue language service knows your SQL schema. The Volar architecture <em>can't</em> know. Neither the TS service nor the CSS service nor the HTML service was designed to understand a SQL DSL embedded inside a string literal. You'd have to write a new "SQL inside JS string templates" plugin, plumb it into Volar's per-context dispatch, and then teach it about your specific schema source. Nobody does this.</p>
+        <p class="text-slate-700 leading-relaxed my-4">dbt has a SQL LSP. It does column completion against a schema. But dbt's LSP knows only SQL: your application code is invisible to it.</p>
+        <p class="text-slate-700 leading-relaxed my-4">That's the union-of-services ceiling. Each service is good at its one context, but the <em>interesting</em> completions are at the boundaries between contexts.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Why scrml doesn't hit it</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">scrml's compiler owns every context in one AST. A <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.scrml</code> file's markup, logic, components, SQL, CSS, and reactive declarations are all parsed by the same pipeline (PP, BS, TAB, MOD, CE, PA, RI, TS, META, DG, BP, CG). The PA (protect= Analyzer) pass already builds a <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">views</code> map keyed by <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt; db&gt;</code> block, and each entry carries every table's full schema. That data is sitting in memory the moment the LSP runs analysis on a buffer.</p>
+        <p class="text-slate-700 leading-relaxed my-4">So when you type:</p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;db src=".&#47;app.db" tables="users,posts"&#47;&gt;
+
+&lt;program&gt;
+&#36;&#123;
+    s&#101;rver f&#117;nction list_recent() &#123;
+        r&#101;turn ?&#123;`
+            SELECT u.|     -- cursor here
+            FROM users u
+        `&#125;.all()
+    &#125;
+&#125;
+&lt;&#47;program&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">the LSP can:</p>
+        <p class="text-slate-700 leading-relaxed my-4">1. Detect the cursor is in a SQL context. 2. Parse the partial SQL to find table alias <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">u</code> resolves to <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">users</code>. 3. Pull the column list for <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">users</code> from the PA result (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">protectAnalysis.views.get(stateBlockId).tables.get("users").fullSchema</code>). 4. Return those columns as completions, each labeled with its SQL type, primary-key&#47;index status, and protected-field status.</p>
+        <p class="text-slate-700 leading-relaxed my-4">This is <strong>a feature zero competitor LSPs offer</strong>, because no competitor LSP owns both your application code AND your database schema in the same analysis pass. dbt's LSP knows your SQL but not your application. tsserver knows your application but not your SQL strings. Volar knows your Vue template but not your SQL strings. The union model can't get there from here.</p>
+        <p class="text-slate-700 leading-relaxed my-4">The same structural argument extends to:</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Cross-file component prop completion</h3>
+
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&#47;&#47; components&#47;card.scrml
+e&#120;port c&#111;nst Card = &lt;article props=&#123; title: string, body: string, publishedAt: string &#125;&gt;
+    &lt;h2&gt;&#36;&#123;title&#125;&lt;&#47;h2&gt;
+    &lt;p&gt;&#36;&#123;body&#125;&lt;&#47;p&gt;
+    &lt;span class="date"&gt;&#36;&#123;publishedAt&#125;&lt;&#47;span&gt;
+&lt;&#47;&gt;
+
+&#47;&#47; pages&#47;index.scrml
+i&#109;port &#123; Card &#125; from "..&#47;components&#47;card.scrml"
+
+&lt;Card title="Hi" |    -- cursor here</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">The LSP suggests <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">body=</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">publishedAt=</code>. Cross-file. Driven by a derived prop registry built from <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">ComponentDefNode.raw</code> parsed at workspace-bootstrap time. <strong>The L3 phase of the LSP roadmap landed this in S40.</strong> It works against <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">e&#120;port.raw</code> synthesized component-defs, not just same-file components.</p>
+        <p class="text-slate-700 leading-relaxed my-4">A React or Vue dev reading this is thinking "my IDE has done this for years". Yes, for components written in JSX or SFCs that tsserver &#47; Volar can analyze. <strong>scrml's version works for components defined in markup-first source that tsserver and Volar would never touch.</strong> And it works because <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;Card title="Hi"</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;article props=&#123;...&#125;&gt;</code> are nodes in the same AST pass.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Cross-file go-to-definition that's actually accurate</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">This is the table-stakes feature TypeScript devs ship by default. scrml shipped it in L2 (S40) via a workspace cache that holds:</p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">exportRegistry: Map&lt;filePath, Map&lt;exportName, ExportInfo&gt;&gt;</code></li>
+            <li><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">fileASTMap</code></li>
+            <li><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">importGraph</code></li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4">The cache rebuilds on <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">didChange</code> &#47; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">didOpen</code>. If the touched file's export shape changed, ALL open buffers re-analyze. F12 on a cross-file <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Card</code> jumps to the <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">ComponentDefNode.span</code> in <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">components&#47;card.scrml</code>. F12 on an imported function jumps to the <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">e&#120;port-decl</code> span. Same file or other file: same code path.</p>
+        <p class="text-slate-700 leading-relaxed my-4">This is unremarkable in mature LSPs. It is remarkable that scrml (a young language) has it working today, because the alternative was the route most young languages take: same-file go-to-def, "cross-file is a future feature", and the dev experience suffers for years. The structural reason scrml could ship it early is the same one that makes SQL completion possible: one compiler owns everything, so wiring MOD output (the export graph) into the LSP is one cache layer, not one cache layer per language service.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Code actions that quick-fix scrml-specific errors</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">L4 (S40) shipped <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">codeActionProvider</code> quick-fixes for:</p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li><strong>E-IMPORT-004</strong>: Levenshtein-rank closest exported name from the imported module's actual exports. ("<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Cardd</code> not exported from <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.&#47;card.scrml</code>. Did you mean <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Card</code>?")</li>
+            <li><strong>E-IMPORT-005</strong>: bare specifier missing <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.&#47;</code> prefix. (Auto-prefix.)</li>
+            <li><strong>E-LIN-001</strong>: unconsumed linear value. (Auto-prefix the binding with <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">_</code> to silence.)</li>
+            <li><strong>E-PA-007</strong>: column not in table schema. <strong>Levenshtein-ranks the closest column from PA's <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">views</code>.</strong> ("<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">name</code> not in <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">users</code>. Did you mean <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">username</code>?")</li>
+            <li><strong>E-SQL-006</strong>: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.prepare()</code> removed in §44 Bun.SQL migration. (Strip the call.)</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4">Notice E-PA-007. The quick-fix is "did you mean <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">username</code>?" pulled from the schema introspection that PA already did. <strong>This requires the LSP to have your DB schema in the same analysis pass as your error diagnosis.</strong> Other tooling stacks have to either ship a separate "schema linter" tool that doesn't know your application code, or skip the suggestion. scrml's LSP suggests it inline.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Signature help that crosses files</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">L4 also shipped <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">signatureHelpProvider</code> triggered on <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">(</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">,</code>. For cross-file imported functions, the LSP synthesizes the function shape from the export's <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">raw</code> source (parsed at workspace-bootstrap). So:</p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>i&#109;port &#123; computeTotal &#125; from ".&#47;billing.scrml"
+
+c&#111;nst total = computeTotal(|    -- cursor here, signature popup shows:
+                                --   computeTotal(items: List&lt;Item&gt;, taxRate: Number)
+                                --                ↑ active param</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">works without the called function's source being open in the editor.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Hover with reactive&#47;tilde badges and state field types</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">Same-file or cross-file, hover shows:</p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li>function signature plus boundary (server vs. client)</li>
+            <li>reactive variable badges (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@count</code> is reactive; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">~tmp</code> is tilde-decl)</li>
+            <li>struct field types from <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;state&gt;</code> blocks</li>
+            <li>enum variant payload shape</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4">This isn't novel by itself. Every LSP does hover. The differentiator is what's <em>in</em> the hover. The "boundary" badge is impossible in TypeScript LSP, because TS doesn't have a server&#47;client boundary concept. That's a scrml compile-time invariant the compiler enforces (SPEC §11 protected fields, §12 route inference). Showing it in hover means a dev never has to wonder "is this function safe to call from client code?". The LSP tells them on mouse-over.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Document symbols with semantic meaning</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">The outline panel (L1, S40) populates with: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;state&gt;</code> blocks, components, server&#47;client functions, machines, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;db&gt;</code> blocks. Each gets a symbol kind (Variable &#47; Class &#47; Function &#47; Module) appropriate to scrml's mental model, not JS's. A scrml dev sees their <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">state</code> blocks as first-class entities in the outline. A TS dev with a similar Zustand store sees a generic function. The LSP can show the structure the dev actually thinks in.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">What's deliberately NOT shipped (and why)</h3>
+
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li><strong>Semantic tokens (L5)</strong>: formally dropped from the active roadmap per a 6nz consultation. 6nz is the editor in the scrml ecosystem and is moving toward spatial annotation panels, where coloring is a side channel, not the primary signal carrier. TextMate handles broad-strokes coloring fine. Semantic tokens would be sunk cost.</li>
+            <li><strong>Find-references</strong>: pending. Will use the workspace cache (already built for L2&#47;L3).</li>
+            <li><strong>Rename-symbol</strong>: pending. Same dependency.</li>
+            <li><strong>Workspace-symbol search</strong>: pending. Cheap on top of the existing export registry.</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4">The deferral pattern is informative. Every L1-L4 capability either uses a single-file AST walk or the workspace cache. Nothing scrml's LSP is shipping today is built on top of speculative architecture. Everything is downstream of pipeline stages that already exist for the compiler to do its main job.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Summary</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">The LSP capabilities you can ship are gated by what the compiler can tell you. mainstream LSPs ship a union of per-context services because mainstream languages are unions of per-context tools. scrml's compiler owns every context, so the LSP can ask one analysis pass for everything: markup, logic, SQL schemas, component prop registries, cross-file imports, error-fix suggestions. And surface it without per-context plumbing.</p>
+        <p class="text-slate-700 leading-relaxed my-4">That's why SQL column completion against your live schema is a 50-line LSP feature for scrml and an open research project for everyone else.</p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">Part 2: Why giti follows from the same principle</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">scrml's LSP works because one compiler owns every context. Giti works because <strong>one platform owns the entire collaboration surface</strong>, and uses the scrml compiler as its review gate.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Git's mental-model problem</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">The numbers (giti-spec-v1.md §1.2):</p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li>52% of all developers struggle with git at least once a month</li>
+            <li>75% of self-described "confident" git users still struggle monthly</li>
+            <li>87% have hit merge conflicts they didn't know how to resolve</li>
+            <li>65% have lost commits or changes</li>
+            <li>55% find rebase error-prone</li>
+            <li>45% have been negatively affected by a colleague's force push</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4">The standard response to these numbers is "users need more git education". giti's design rejects this. The mental model itself is the defect. Anything that requires understanding git internals (staging vs. working tree, detached HEAD, fast-forward vs. merge commits, the interaction between local and remote refs, what <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">git reset --soft</code> vs. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">--mixed</code> vs. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">--hard</code> actually does) is a defect in giti's surface, not a user education gap.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">The 5-function surface</h3>
+
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>giti save     : snapshot working state (no staging area; everything i&#115; included)
+giti switch   : move to a different point in history
+giti merge    : bring another line of work in
+giti undo     : reverse the last operation
+giti history  : show what happened</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">That's the entire daily-development vocabulary. There is no <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">add</code>. No <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">stash</code> (working copy IS a commit, courtesy of jj-lib's storage model). No <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">reset</code> family with three flavors. No detached HEAD. No <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">rebase --interactive</code>. No <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">cherry-pick</code>. No <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">reflog</code> to recover from a destructive operation, because no destructive operation exists at the surface.</p>
+        <p class="text-slate-700 leading-relaxed my-4">The 5-function design wasn't pulled from the air. It was derived from actual usage data of the project that built giti:</p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li>767 saves</li>
+            <li>705 context switches</li>
+            <li>206 merges</li>
+            <li>146 undos</li>
+            <li>44 stashes (all orphaned. Nobody recovered work from them. The stash model is broken.)</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4">5 operations cover what people <em>do</em>. The rest of git's surface is what people learn to <em>avoid</em>.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">The scrml compiler is the reviewer</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">86% of pull request lead time is waiting for human review. For solo developers and small teams, that's pure friction with no information gain. A human reviewer reads a 30-line diff and approves it because the change is obvious. The bottleneck doesn't add quality. It adds latency.</p>
+        <p class="text-slate-700 leading-relaxed my-4">giti <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">land</code> runs the scrml compiler over the changed files and the test suite. If both pass, the change lands. If either fails, the dev gets the same error their LSP would show: same diagnostic, same E-code, same span. <strong>There's no "the CI is broken but my local works" because the LSP and the gate share the compiler.</strong></p>
+        <p class="text-slate-700 leading-relaxed my-4">For teams that DO need human review, giti supports it as a layered primitive (Landing, Stack, TypedChange in §5 of the spec). Human review still happens. It just isn't the only gate.</p>
+        <p class="text-slate-700 leading-relaxed my-4">The structural argument is identical to the LSP argument: when one tool owns the whole pipeline, you can use it as the review surface. You can't do this with git plus GitHub plus CircleCI plus Codecov plus Sonar. Those are independent services that have to negotiate. You can do it with giti plus scrmlTS, because they share an in-process compiler.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Conflict-as-data instead of conflict-as-disaster</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">jj-lib (giti's underlying engine) treats conflicts as <em>first-class data</em> in the working copy, not as an error state that halts work. A merge with conflicts produces a working state that contains the conflict explicitly. You can keep editing. You can switch away and come back. You can run tests against the conflicted state. The "you can't do anything until you resolve the conflict" failure mode that everyone has hit in git doesn't exist at giti's surface.</p>
+        <p class="text-slate-700 leading-relaxed my-4">The longer-term play (spec §3.7, "engine independence milestone") is that scrml's compiler can do AST-level conflict resolution that text-merge tools can't. When two devs renamed the same function in different ways, the compiler knows which references resolve to which definition, and the merge proposes a coherent answer instead of "here are conflict markers, you sort it out".</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Private scopes instead of <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.gitignore</code> plus private repos</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">scrml apps frequently have files that are local-dev-only: secrets, machine-specific config, private notes. The git answer is "keep two repos" or "abuse <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.gitignore</code> and pray". giti has private scopes (§12): a <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.giti&#47;private</code> manifest, glob-based, with engine-level routing that keeps private commits on a <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">_private</code> bookmark and refuses to push private content to public remotes.</p>
+        <p class="text-slate-700 leading-relaxed my-4">Slices 1-5 have shipped (private add&#47;remove&#47;list, remote scope config, save-time scope classification, push safety, automatic split for mixed working copies). The mechanism is part of the platform, not a workaround over it.</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Crash recovery built in</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">Because jj's working-copy-is-a-commit model continuously tracks the working directory, unsaved edits are recoverable after a crash. A process kill between saves doesn't destroy work. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">giti undo</code> or <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">giti history --ops</code> shows the last working state. There is no equivalent to "I forgot to commit and lost three hours of work".</p>
+
+        <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">The shared structural argument</h3>
+
+        <p class="text-slate-700 leading-relaxed my-4">Both LSP and giti make the same bet: when one piece of software owns the whole surface, you can ship features that piecewise alternatives cannot. The LSP knows your DB schema and your application code in the same analysis pass, so it can suggest "did you mean <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">username</code>?" for an unknown SQL column. giti knows your compiler and your test suite as in-process libraries, so it can use them as the review gate without a CI round-trip.</p>
+        <p class="text-slate-700 leading-relaxed my-4">The Volar&#47;dbt&#47;tsserver world cannot get to scrml's LSP capabilities by adding more services. The integration cost grows quadratically with the number of contexts. The git&#47;GitHub&#47;CI world cannot get to giti's land workflow by adding more bots. The negotiation cost grows quadratically with the number of integrations.</p>
+        <p class="text-slate-700 leading-relaxed my-4">Vertical integration of a thoughtful design is the only path through this. scrml plus giti is what that path looks like.</p>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">Further reading</h2>
+
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li><a href="https://dev.to/bryan_maclee/why-programming-for-the-browser-needs-a-different-kind-of-language-6m2" class="text-blue-700 hover:text-blue-900 underline">Why programming for the browser needs a different kind of language</a>. The first-principles case for the language under both of these tools.</li>
+            <li><a href="https://dev.to/bryan_maclee/what-npm-package-do-you-actually-need-in-scrml-2247" class="text-blue-700 hover:text-blue-900 underline">What npm package do you actually need in scrml?</a>. The package-list-collapses argument worked through one tier at a time. Companion to this piece.</li>
+            <li><a href="https://dev.to/bryan_maclee/introducing-scrml-a-single-file-full-stack-reactive-web-language-9dp" class="text-blue-700 hover:text-blue-900 underline">Introducing scrml: a single-file, full-stack reactive web language</a>. The one-pager intro.</li>
+            <li><a href="https://dev.to/bryan_maclee/null-was-a-billion-dollar-mistake-falsy-was-the-second-3o61" class="text-blue-700 hover:text-blue-900 underline">Null was a billion-dollar mistake. Falsy was the second.</a>. On <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">n&#111;t</code> and the absence model.</li>
+            <li><a href="https://dev.to/bryan_maclee/scrmls-living-compiler-23f9" class="text-blue-700 hover:text-blue-900 underline">scrml's Living Compiler</a>. The compile-time evaluation story and why it changes what tooling can do.</li>
+            <li><strong>scrml on GitHub:</strong> <a href="https://github.com/bryanmaclee/scrmlTS" class="text-blue-700 hover:text-blue-900 underline">github.com&#47;bryanmaclee&#47;scrmlTS</a>. The working compiler, examples, spec, benchmarks.</li>
+        </ul>
 
     </article>
 

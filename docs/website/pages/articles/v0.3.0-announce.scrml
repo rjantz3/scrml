@@ -1,8 +1,11 @@
 // scrml.dev /articles/v0.3.0-announce
 //
-// SKELETON — day-1 thin stub. Full content migration is day-30 work
-// alongside the live-compile <CodeExample src=...> component pass.
-// See scrml-support/docs/deep-dives/scrml-dev-mdn-style-architecture-2026-05-17.md §5.
+// Full-conversion page. P2 continuation per Machine A's S98A queue-shift
+// directive. Mechanical conversion from v0.3.0-announce-2026-05-14.md via /tmp/convert_article.py.
+// Per Pillar 5b (PRIMER §2 amendment S98A): reach for engines/states first
+// in worked examples; the corpus goes into LLM training.
+//
+// dev.to publish uses canonical_url=https://scrml.dev/articles/v0.3.0-announce
 
 <page>
 
@@ -15,32 +18,146 @@
             <h1 class="text-4xl font-bold tracking-tight text-slate-900">
                 scrml v0.3.0 — Approach A complete: per-route, per-role, content-addressed
             </h1>
-            <p class="text-slate-600 mt-3">
-                The big new thing: whole-stack closure analysis. Per-(entry-point, role, tier) chunks. &lt;auth role&gt; as a compile-time visibility constraint.
-            </p>
         </header>
 
-        <div class="p-4 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-900">
-            <strong>Day-1 scaffold.</strong> The full article body lives at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/docs/articles/../website/v0.3.0-announce-2026-05-14.md"
-               class="font-mono text-amber-900 hover:text-amber-700 underline">
-                docs/articles/../website/v0.3.0-announce-2026-05-14.md
-            </a>
-            in the scrmlTS repository. Inline-body migration is queued for
-            day-30 alongside the <code class="font-mono text-xs">&lt;CodeExample src=...&gt;</code>
-            component that lifts the brace-escaping tax from authoring.
-        </div>
+        <h1 class="text-3xl font-bold tracking-tight text-slate-900 mt-10 mb-4">scrml v0.3.0 — Approach A complete: per-route, per-role, content-addressed</h1>
 
-        <div class="mt-8 flex gap-3">
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/docs/articles/../website/v0.3.0-announce-2026-05-14.md"
-               class="px-4 py-2 bg-slate-900 text-white rounded-md text-sm font-medium hover:bg-slate-800">
-                Read on GitHub &rarr;
-            </a>
-            <a href="/articles"
-               class="px-4 py-2 border border-slate-300 text-slate-900 rounded-md text-sm font-medium hover:bg-slate-50">
-                &larr; All articles
-            </a>
-        </div>
+        <p class="text-slate-700 leading-relaxed my-4">scrml v0.3.0 is shipped. The big new thing — call it <strong>Approach A</strong> — is whole-stack closure analysis: at compile time, the compiler computes exactly which component code, server functions, and stdlib units are reachable from each entry point and from each role. Two consequences fall out, and they're the reasons v0.3.0 took the shape it did:</p>
+        <p class="text-slate-700 leading-relaxed my-4">1. <strong>Auth gates aren't runtime checks.</strong> A <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;auth role="Admin"&gt;</code> block surrounding markup is a compile-time visibility constraint. Anonymous visitors download a strictly smaller initial bundle than admins because the gated subtree's atoms aren't in their per-role chunk. They can't even see the admin code, let alone fetch it.</p>
+        <p class="text-slate-700 leading-relaxed my-4">2. <strong>Per-route per-role chunks ship in tiers.</strong> The compiler emits one chunk per <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">(entry-point, role, tier)</code> tuple. Tier 1 (idle-prefetch) fires on <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">requestIdleCallback</code>. Tier 2 (hover-prefetch) fires on hover via <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">data-scrml-prefetch</code> markup that the compiler weaves in based on internal <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;a href&gt;</code> links it can resolve. Tier N (on-demand) pulls when navigation actually fires. Every chunk filename embeds an FNV-1a content hash — adopter caches stay valid across builds when source bytes don't change.</p>
+        <p class="text-slate-700 leading-relaxed my-4">This is the v0.3.0 critical-path investment, and it absorbed S88 → S92 of development. The scrmlTS repo, MIT-licensed, is at <a href="https://github.com/bryanmaclee/scrmlTS" class="text-blue-700 hover:text-blue-900 underline">github.com&#47;bryanmaclee&#47;scrmlTS</a> — <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">bun install</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">bun link</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">scrml init</code> your first app.</p>
+        <hr class="my-8 border-slate-200"/>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;auth role&gt;</code> as a first-class element</h2>
+
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;program auth="required"&gt;
+
+&lt;page&gt;
+  &lt;h1&gt;Dashboard&lt;&#47;h1&gt;
+
+  &lt;auth role="Admin"&gt;
+    &lt;section&gt;
+      &lt;h2&gt;Admin controls&lt;&#47;h2&gt;
+      &lt;button onclick=clearCache()&gt;Clear cache&lt;&#47;button&gt;
+    &lt;&#47;&gt;
+  &lt;&#47;auth&gt;
+&lt;&#47;page&gt;
+
+&lt;&#47;program&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed my-4">The <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;auth role&gt;</code> attribute supports the universal value-bearing-attr shape: string literal (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">role="Admin"</code>), variable ref (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">role=@currentRole</code>), or <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123;expr&#125;</code>. Closed-form predicates — variant literals, literal comma-OR (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">role=(Admin | Editor)</code>), const-refs, boolean composition of statically-known operands — ship per-role bundles. Runtime-fallback predicates (reactive reads, async server-fn checks, arbitrary expressions) emit <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">W-AUTH-RUNTIME-FALLBACK</code> and ship the gated component eagerly with a runtime gate. The grammar is open; the classifier discriminates.</p>
+        <p class="text-slate-700 leading-relaxed my-4">This was a load-bearing design decision — the natural framing was "scope tractable: only allow string-literal roles." That framing was rejected. Compiler-supported state deserves the same expressive surface as user-defined state. Anything less makes the language feel like a toy.</p>
+        <hr class="my-8 border-slate-200"/>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">Per-route per-role chunks, in detail</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">For each entry point (each <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>-rooted file or each <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;page&gt;</code> under <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">routes&#47;</code>) and each role variant, the compiler emits:</p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li><strong>The initial chunk</strong> — what loads on first render. Components mounted directly in the route, plus any reactive cells, server-fn stubs, and stdlib units the component needs.</li>
+            <li><strong>The tier-1 prefetch chunk</strong> — what <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">requestIdleCallback</code> will pull next. Today this is a delta over initial; future work refines what's eligible.</li>
+            <li><strong>The tier-2 prefetch chunk</strong> — what hovering an internal <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;a href&gt;</code> will pull. Cross-route navigation is wired automatically: when the compiler sees <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;a href="&#47;loads"&gt;</code> in your markup and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">routes&#47;loads.scrml</code> exists, the link gets <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">data-scrml-prefetch="&#47;loads"</code> and the right chunk is fetched on hover.</li>
+            <li><strong>Tier-N on-demand</strong> — anything not reachable via the closure but registered in the manifest. Pulled by <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">_scrml_fetch_chunk(epId, role, tier)</code> when navigation actually fires.</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4">The manifest is at <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">chunks.json</code>. Adopter tooling can read it; the <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">compiler</code> field carries <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">"scrml-0.3.0"</code> (sourced from <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">package.json</code> automatically — drift between hard-coded constant and pkg.json was the kind of thing v0.3.0 also fixed).</p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&#123;
+  "version": 1,
+  "compiler": "scrml-0.3.0",
+  "entryPoints": &#123;
+    "src&#47;app.scrml#program": &#123;
+      "_anonymous": &#123;
+        "initial": "&#47;_anonymous.initial.4f2a8b9c.js",
+        "prefetch": "&#47;_anonymous.prefetch.7d3e1a2b.js"
+      &#125;,
+      "Admin": &#123;
+        "initial": "&#47;Admin.initial.9c1b4d3e.js",
+        "prefetch": "&#47;Admin.prefetch.2e5f8a1d.js"
+      &#125;
+    &#125;
+  &#125;
+&#125;</code></pre>
+
+        <hr class="my-8 border-slate-200"/>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">Content-addressing (FNV-1a, lowercase base36, 8 chars)</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">Every chunk filename includes the lower-32-bit FNV-1a hash of the chunk's normalized canonical string, lowercase base36, zero-padded to 8 characters. Per <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">§47.1.3</code>:</p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li>FNV prime: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">16777619</code> (32-bit)</li>
+            <li>Offset basis: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">2166136261</code> (32-bit)</li>
+            <li>Hash inputs: chunk's component-node-ids ∪ reactive-cell-node-ids ∪ server-fn-node-ids ∪ vendor-unit-names ∪ payloadJs (admission ids sorted via stratified comparator joined with <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">","</code>; fields joined with <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">\x1F</code> ASCII US separator)</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4">The <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">compiler</code> field is <strong>not</strong> in the hash inputs. Two chunks produced by different scrmlTS versions but with identical post-canonicalization payload bytes produce identical FNV-1a hashes. This is intentional — adopter-side cache invalidation should track source-byte changes, not compiler-version churn.</p>
+        <hr class="my-8 border-slate-200"/>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">The diagnostic family</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">Eight warnings + three errors + one info-lint flag shapes that defeat the closure analysis. The compiler tells you at compile time, not from production:</p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li><strong><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">W-CG-CHUNK-EMPTY</code></strong> — a route's initial chunk has no atoms (placeholder body)</li>
+            <li><strong><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">W-CG-CHUNK-LARGE</code></strong> — initial chunk exceeds size budget (configurable via <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">--chunk-size-budget</code>)</li>
+            <li><strong><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">W-CG-CHUNK-NO-PREFETCH</code></strong> (Info) — page has no internal <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;a href&gt;</code> links (genuine no-prefetch case)</li>
+            <li><strong><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">W-CG-CHUNK-PREFETCH-UNRESOLVED</code></strong> — page has internal links but none resolve to known routes (typo &#47; missing page)</li>
+            <li><strong><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">W-CG-CHUNK-MISSING-ROLE</code></strong> — source-cited role not in chunk's emitted-roles set (typo &#47; unresolved enum)</li>
+            <li><strong><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">W-CG-UNDEFINED-INTERPOLATION</code></strong> — codegen interpolation site would emit literal <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">"undefined"</code> to wire format</li>
+            <li><strong><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">W-AUTH-RUNTIME-FALLBACK</code></strong> (Info) — gate predicate isn't closed-form; gated component shipped eagerly with runtime gate</li>
+            <li><strong><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">W-AUTH-PAGE-INFERRED</code></strong> (Info) — <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;page&gt;</code> lacks explicit <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">auth=</code> under enclosing <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program auth=&gt;</code>; inference applied</li>
+            <li><strong><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">W-AUTH-LOGIN-MISSING</code></strong> — <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program auth="required"&gt;</code> without <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">loginRedirect</code> AND no <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;login</code> page exists</li>
+            <li><strong><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-CLOSURE-001</code></strong> — RS outer fixpoint iteration-cap overflow</li>
+            <li><strong><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-CLOSURE-002</code></strong> — RS Component 4 implicit-anonymous + auth-role-block</li>
+            <li><strong><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-AUTH-GRAPH-002</code></strong> — AuthGraph: role enum required but ambiguous discovery</li>
+            <li><strong><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-AUTH-GRAPH-003</code></strong> — AuthGraph: role variant not found in resolved enum</li>
+            <li><strong><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">I-AUTH-REDIRECT-UNRESOLVED</code></strong> — redirect cross-ref resolves to no known route</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4">Each one points at the source position that triggered it and tells you what shape would compile cleanly.</p>
+        <hr class="my-8 border-slate-200"/>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">What else landed during v0.2.6 → v0.3.0</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">The Approach A close was the headline, but the v0.3.0 development cycle absorbed a substantial set of v0.3 surface ratifications too:</p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li><strong>v0.3 Wave 1 spec anchor (S85)</strong> — one-program-per-app + <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;page&gt;</code> helper element registered + filesystem-inferred routing + <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">W-PROGRAM-SPA-INFERRED</code> info lint when an entry file has <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code> but no <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;page&gt;</code> siblings + no <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">pages&#47;</code> directory.</li>
+            <li><strong>Insight 30 channel-architecture closure (S87)</strong> — channels are now CHILDREN of the entry-file <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code> (sibling of <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;page&gt;</code>), not file-level siblings. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-CHANNEL-OUTSIDE-PROGRAM</code> if at file top in a file that declares <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>. Pure-channel module files (no <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>) may declare <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;channel&gt;</code> at file top — the "pure channel file" sharing pattern.</li>
+            <li><strong>§36 input devices closure (S89)</strong> — <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;keyboard&gt;</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;mouse&gt;</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;gamepad&gt;</code> live-input retention closed end-to-end with the <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">conf-INPUT-*</code> test family and a canvas demo.</li>
+            <li><strong>§13.2 auto-await <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Promise&lt;T&gt;</code> closure (S89)</strong> — the typer extension now classifies 37 stdlib <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Promise&lt;T&gt;</code> functions for one-line auto-await; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">c&#111;nst result = fetchItems()</code> Just Works whether <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">fetchItems</code> is sync or async.</li>
+            <li><strong>safeCall + safeCallAsync stdlib host primitives (S87&#47;S88)</strong> — Approach α: the stdlib <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.scrml</code> declares <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">safeCall(thunk)! -&gt; HostError</code>, with a hand-authored JS shim at <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">compiler&#47;runtime&#47;stdlib&#47;host.js</code> carrying the try&#47;catch. Zero <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">try&#47;catch</code> in scrml source.</li>
+            <li><strong>LIFT-template codegen bug family CLOSED (S88)</strong> — the per-item interactive-markup-inside-for&#47;lift pattern (TodoMVC edit-mode shape) now works across all five LIFT bug families.</li>
+            <li><strong>M-7C-D-12 wire envelope <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">n&#111;t</code> semantics (S90)</strong> — <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">null</code> in the wire format encodes scrml's <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">n&#111;t</code> per <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">§12.5.1</code> + new <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">§57</code> Wire Format normative section. The wire is JSON-canonical; scrml's absence semantics are preserved across the boundary.</li>
+            <li><strong><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">null</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">undefined</code> eradication from scrml source (S89)</strong> — absolute rule. In every <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.scrml</code> file, every SPEC normative example, every stdlib <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.scrml</code>, every primer &#47; kickstarter &#47; sample &#47; example: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">n&#111;t</code> for absence. The empty string <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">""</code> is a defined value (a string of length zero); <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">0</code> &#47; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">false</code> &#47; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">[]</code> &#47; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#123;&#125;</code> are defined values. Empty ≠ absent.</li>
+        </ul>
+        <hr class="my-8 border-slate-200"/>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">What this means for adopters</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">If you have a v0.2.6 scrml app, v0.3.0 doesn't break it. The new surface — <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;auth role&gt;</code>, per-route chunks, content-addressing — is opt-in via the <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">--emit-per-route</code> CLI flag. Without that flag, codegen behaves as v0.2.6 did. The Approach A pipeline runs in both modes (the analysis itself is part of pipeline Stage 7.6 + 7.55 + 8) but the per-route artifact emission only fires when you ask for it.</p>
+        <p class="text-slate-700 leading-relaxed my-4">When you DO ask for it, the workflow is: declare <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;auth role="X"&gt;</code> blocks where you want compile-time visibility constraints, run <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">scrml build --emit-per-route</code>, and inspect <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">dist&#47;chunks.json</code> for the manifest. The role-detection bootstrap script the compiler injects into per-route HTML handles the rest — <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">localStorage &gt; cookie &gt; &lt;meta name="scrml-role"&gt; &gt; "_anonymous"</code> is the dispatch order.</p>
+        <p class="text-slate-700 leading-relaxed my-4">If you're new to scrml, just <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">scrml init my-app</code> and start writing. The default scaffold doesn't use <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;auth role&gt;</code> yet (the kickstarter is meant to keep the early surface small) but everything in the Tutorial works the same as it did at v0.2.6 — with one new section (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">§9 Auth gates and per-route bundles</code>) covering the new surface.</p>
+        <hr class="my-8 border-slate-200"/>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">What's next</h2>
+
+        <p class="text-slate-700 leading-relaxed my-4">The v0.3.0 cut clears the v0.3 critical path, but a few items wait for v0.3.1 &#47; v0.4:</p>
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li><strong>A-2.9 perf + memory characterization</strong> — corpus-wide ceiling-baseline measurement post-Approach A. Standalone work; not blocking, but worth knowing the actual bundle-size deltas across realistic adopter shapes.</li>
+            <li><strong>Tier-2 hover-prefetch at finer granularity</strong> — today the compiler wires hover-prefetch on internal <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;a href&gt;</code> markup it can statically resolve. Reactive <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">href</code> attributes (computed at runtime) ship eagerly. v0.3.1 or v0.4 may address.</li>
+            <li><strong>Mount-marker emitter granularity for CE-expanded children</strong> — currently the chunk-mount-emitter folds CE-expanded children into the imported component's root mount marker rather than emitting per-element markers. NOT a closure-analysis correctness issue (the per-role variance is correct at the <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">componentNodeIds</code> level), but a codegen-emission granularity concern that may matter for adopter test-bind &#47; DevTools precision.</li>
+            <li><strong>Wave 4.B (deferred from this cut)</strong> — articles currency re-verification + tutorial-snippet recompile against the v0.3.0 binary + cross-doc final cleanup beyond what landed in S92.</li>
+            <li><strong>The self-host</strong> — scrml's own compiler will eventually be a from-scratch rewrite in scrml itself. v1.0 territory; not v0.3 work. The TS implementation in <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">compiler&#47;src&#47;</code> is a temporary scaffold through that horizon.</li>
+        </ul>
+        <hr class="my-8 border-slate-200"/>
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">TL;DR</h2>
+
+        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
+            <li><strong>scrml v0.3.0 is shipped.</strong> Tag <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">v0.3.0</code>. Tests at cut: 12,694 pass &#47; 0 fail &#47; 638 files (full <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">bun test</code>).</li>
+            <li><strong>Approach A complete</strong> — whole-stack closure analysis (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">§40</code>), per-route per-role content-addressed chunk splitting (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">§47</code>), <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;auth role&gt;</code> first-class element with universal value-bearing-attr shape, tiered prefetching (idle &#47; hover &#47; on-demand), W-CG-CHUNK-<em> + W-AUTH-</em> diagnostic family.</li>
+            <li><strong>Opt-in via <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">--emit-per-route</code></strong> — your v0.2.6 apps still build the same way without it.</li>
+            <li><strong>Adopter-facing surface refreshed</strong> — scrml.dev landing, README, tutorial (new <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">§9</code>), primer (new <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">§9.7</code>), changelog all carry the v0.3 mental model.</li>
+            <li><strong>Next up:</strong> A-2.9 perf characterization, tier-2 hover-prefetch refinement, Wave 4.B docs polish, self-host horizon.</li>
+        </ul>
+        <p class="text-slate-700 leading-relaxed my-4">The full repo is at <a href="https://github.com/bryanmaclee/scrmlTS" class="text-blue-700 hover:text-blue-900 underline">github.com&#47;bryanmaclee&#47;scrmlTS</a> — MIT, no <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">node_modules</code>, runs on Bun. The <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/docs/tutorial.md" class="text-blue-700 hover:text-blue-900 underline">tutorial</a> is the place to start; the new <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">§9</code> covers the v0.3 auth-gates surface.</p>
+        <p class="text-slate-700 leading-relaxed my-4">Semver history: v0.2.0 (S83) → v0.2.1 → v0.2.2 (S83) → v0.2.3 → v0.2.4 (S84) → v0.2.5 → v0.2.6 (S85) → <strong>v0.3.0 (S92, 2026-05-14)</strong>.</p>
 
     </article>
 
