@@ -701,6 +701,33 @@ const PATTERNS = [
     skipIf: (offset, _logicRanges, _cssRanges, commentRanges) => inRange(offset, commentRanges),
   },
 
+  // Pattern 27: React Fragment `<>` opener (W-LINT-023, S97).
+  //
+  // Adopter writes `<><div>a</div><div>b</div></>` expecting a React
+  // Fragment (group siblings without a wrapper element). Pre-fix this
+  // fired generic `E-CTX-001` — context-mismatch error, no hint that
+  // adopter reached for a Fragment. Post-fix W-LINT-023 names the
+  // shape + scrml alternatives.
+  //
+  // Pattern matches the LITERAL two-char sequence `<>` — the Fragment
+  // opener. scrml's BARE CLOSER `</>` (open + slash + close) is NOT
+  // matched because the `<` and `>` aren't adjacent (the `/` separates
+  // them). `<>` with no element name is unambiguous as a React-ism in
+  // scrml's vocabulary — markup openers always carry an element name
+  // (HTML or scrml-defined).
+  //
+  // Skip in comments. Don't skip in logic blocks — markup-as-value
+  // pillar (L1) means a function might `return <></>` as a Fragment-as-
+  // value; that's still a React-ism worth flagging.
+  {
+    regex: /<>/g,
+    ghost: "<>...</> (React Fragment)",
+    correction: "scrml has no Fragment shape. To group sibling elements: wrap in a real element (`<div>`, `<span>`, etc.), use `${ ... lift ... }` iteration, or return a single-root markup tree. Components return ONE root element per definition (§15); multi-root components are not supported.",
+    see: "§15, §16",
+    code: "W-LINT-023",
+    skipIf: (offset, _logicRanges, _cssRanges, commentRanges) => inRange(offset, commentRanges),
+  },
+
   // Pattern 16: W-LIFECYCLE-CANDIDATE — string-discriminator trap.
   //
   // S64 debate-04 verdict A+ #2 (string-switch trap, gingerbill design insight):

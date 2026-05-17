@@ -134,7 +134,7 @@ const REACT_FIXTURES = [
   {
     name: "React Fragment <>",
     src: `<program><><div>a</div><div>b</div></></program>`,
-    expect: { category: "generic-error", codePrefix: "E-CTX-001" },
+    expect: { category: "ghost-caught", code: "W-LINT-023" },
   },
 ];
 
