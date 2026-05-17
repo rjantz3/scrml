@@ -4927,6 +4927,7 @@ The `pinned` keyword (§6.10) opts a declaration OUT of hoisting. A `pinned` dec
 **Cross-references:**
 - §6.10 — The `pinned` keyword (opt-out of hoisting)
 - §34 — E-STATE-PINNED-FORWARD-REF
+- §48.6.4 — `fn` declarations at file scope hoist per this section, mirroring `function`; mutual recursion of `fn` is supported without source-order constraints. `pinned fn` is the per-declaration opt-out (parser-recognition implementation-pending).
 
 ---
 
@@ -19802,6 +19803,52 @@ fn buildItem(name) {
 
 When a `fn` is stored in a `<state>` field, the field's type annotation carries the `fn` constraint. Calling the stored function is subject to the same constraints as calling any `fn` directly.
 
+#### 48.6.4 Mutual Recursion and Hoisting
+
+**Added:** 2026-05-17 (S98 — Acorn-replacement Phase 0 DD §D4 P2). Resolves a missing-primitive surfaced while sizing the scrml-native JS parser (~30 mutually recursive `parse*` functions): without an explicit hoisting clause on `fn`, parse-function declaration order would become load-bearing source-order, blocking `fn` as the Pillar-5b-default declaration form for pure-compute recursive-descent bodies.
+
+`fn` declarations at file scope hoist per §6.9, mirroring `function` declarations. All `fn` declarations within a structural scope (§6.9.1 — file top-level, `<program>` body, engine body, channel body, schema body) are registered before any expression in that scope evaluates a call site. Mutual recursion of `fn` is therefore supported without source-order constraints: a `fn` declared earlier in source order MAY call a `fn` declared later in the same structural scope, and vice versa, with no forward-reference diagnostic.
+
+```scrml
+// Recursive-descent parser shape — mutual recursion across ~N parse functions.
+// Source order is non-load-bearing; any permutation type-checks identically.
+
+fn parseExpression(cursor) {
+    return parseAssignment(cursor)            // forward reference — valid (hoisted)
+}
+
+fn parseAssignment(cursor) {
+    let left = parseConditional(cursor)       // forward reference — valid (hoisted)
+    // ...
+    return left
+}
+
+fn parseConditional(cursor) {
+    let cond = parseBinary(cursor)            // forward reference — valid (hoisted)
+    // ...
+    return cond
+}
+
+fn parseBinary(cursor) {
+    // May recurse back into parseExpression — valid (hoisted)
+    let right = parseExpression(cursor)
+    // ...
+    return right
+}
+```
+
+`fn` declarations inside a logic context `${ }` do NOT hoist beyond the `${ }` block; they follow declaration-before-use rules within their block, mirroring §6.9.1's treatment of state cells inside `${ }`. Inner `fn` declarations (nested inside an outer `fn` body, per §7.3.1) hoist to the enclosing `fn` body's local scope, not to the file scope.
+
+**`pinned fn` (opt-out).** Per §6.10, the `pinned` bareword modifier opts a declaration OUT of hoisting. The opt-out form for `fn` is `pinned fn name() { ... }`; a forward reference to a `pinned fn` declaration is **E-STATE-PINNED-FORWARD-REF** (§34), reusing the existing diagnostic. **Implementation status (2026-05-17):** the `pinned` modifier is currently recognized by the parser on reactive cell declarations, `<engine>` declarations, and import specifiers; parser recognition of `pinned fn` is implementation-pending. The normative semantics are specified here so that an `fn` author who later needs source-position pinning has a defined surface; the parser/symbol-table work to surface `pinned fn` is a separate dispatch.
+
+**Cross-references:**
+- §6.9 — Hoisting model (the default behavior `fn` declarations now share with state cells and `function` declarations).
+- §6.9.1 — Structural scopes (the boundary at which `fn` hoisting applies).
+- §6.10 — The `pinned` keyword (opt-out, including the not-yet-parsed `pinned fn` form).
+- §7.3 — `function` declarations (the JS-host-hoisted form `fn` now mirrors at the file scope).
+- §7.3.1 — Nested function declarations (inner `fn` hoists to enclosing `fn` body, not file scope).
+- §34 — E-STATE-PINNED-FORWARD-REF (the forward-reference diagnostic reused for `pinned fn`).
+
 ### 48.7 Multiple `<state>` Objects in One `fn`
 
 A single `fn` body MAY construct multiple `< state>` objects. **Amended 2026-04-20 (S32):** each state literal is checked independently at its own closing tag by E-STATE-COMPLETE (§54.6.1); there is no longer a consolidated return-site phase check. Multiple literals in one `fn` body produce independent diagnostics, each pointing at the specific unassigned field.
@@ -19895,6 +19942,8 @@ Rationale: `fn` is a pure function, not a query executor. Database access is a c
 - Establishing a live reactive dependency on an `@variable` declared outside the `fn` boundary SHALL be a compile error (E-FN-009). (§48.5.4)
 - A `fn` body MAY call other `fn`-declared functions. (§48.6.1)
 - A `fn` body MAY call `pure function` declarations. (§48.6.2)
+- **Added 2026-05-17 (S98).** `fn` declarations at file scope SHALL hoist per §6.9, mirroring `function` declarations. Within any structural scope (§6.9.1), all `fn` declarations SHALL be registered before any expression in that scope evaluates a call site, and mutual recursion of `fn` SHALL be supported without source-order constraints. `fn` declarations inside a logic context `${ }` SHALL NOT hoist beyond the `${ }` block. (§48.6.4)
+- **Added 2026-05-17 (S98).** `pinned fn name() { ... }` SHALL opt the declaration out of hoisting per §6.10. A forward reference to a `pinned fn` SHALL be E-STATE-PINNED-FORWARD-REF (§34). Parser recognition of the `pinned fn` form is implementation-pending; the normative semantics specified at §48.6.4 are authoritative. (§48.6.4)
 - `fn` body constraints SHALL be verified at the TS stage (compiler Stage 6), after type resolution and route inference. (§48.1)
 - All E-FN-001 through E-FN-009 errors SHALL be reported in a single pass. Compilation SHALL NOT halt after the first error in the set. (§48.7, implied)
 - The `pure fn` combination is valid. `pure` adds memoization and compile-time evaluation permissions but does not add constraints beyond `fn`'s existing prohibitions. (§48.9)
