@@ -940,6 +940,303 @@ export function runCG(input: CgInput): CgOutput {
   }
 
   // -------------------------------------------------------------------------
+  // mpa-shell-clean-urls Sub 2 (2026-05-17) — per-page shell composition.
+  //
+  // Per SPEC §40.8 v0.3 program shape: the entry file declares the
+  // top-level `<program>` (the application shell — header / nav / footer
+  // / `<main>` slot), and non-entry-page files (`<page>` openers) declare
+  // per-route content. Pre-fix the dev server emitted `app.html` (shell
+  // with empty `<main>`) and `pages/X.html` (standalone page body with
+  // no chrome) as fully independent files; visiting `/X` showed a page
+  // with no header/footer, and `/` showed an empty shell.
+  //
+  // §40.8.1 normative text is silent on the COMPOSITION mechanism (it
+  // resolves the SPA-vs-multi-page-app inference but does not specify
+  // whether per-page HTML is per-page-inlined, server-side-templated,
+  // or client-side-routed). The user-ratified intent (Machine B PA
+  // recommendation 2026-05-17) is per-page-inlined: each per-route HTML
+  // contains the shell chrome wrapped around the page body. This shape:
+  //   - works with any static file server (S3 / Netlify / Bun.serve)
+  //   - requires no client-side router
+  //   - composes with the per-route per-role artifact splitter that
+  //     landed in v0.3.0 (Approach A)
+  //   - keeps each per-route emission self-contained
+  //
+  // Implementation: post-pass after the per-file emit loop. Find the
+  // entry file (the one with `hasProgramRoot: true`), extract its
+  // rendered body, find the FIRST `<main ...>...</main>` element to
+  // identify the slot, and rewrite each non-entry-page file's html so
+  // its body content sits inside the shell's `<main>`.
+  //
+  // app.scrml disposition (Sub 4 — option (i)): the entry file still
+  // emits its own \`dist/app.html\` artifact alongside per-page composed
+  // HTMLs. Rationale:
+  //   - Adopter-facing inspectable: opening dist/app.html in a browser
+  //     shows the shell with the empty <main> placeholder, useful as a
+  //     "what does my shell template render to" dev-tool view.
+  //   - No conflict with the home route: \`/\` resolves to dist/index.html
+  //     (from pages/index.scrml) under the dev server's path-strip
+  //     resolution (Sub 1 + Sub 3); app.html only serves at \`/app\`.
+  //   - Symmetric with the routes/ legacy convention (entry stays as-is).
+  // The alternative (drop app.html standalone emission) was considered
+  // and rejected for v0.3.x: it saves one file but removes the
+  // dev-tool inspection affordance with no offsetting adopter benefit.
+  // Future spec work (§40.8.2?) may formalize the choice.
+  //
+  // Limitations (acceptable for v0.3.x):
+  //   - Reactive bindings inside the shell render with their initial
+  //     values on per-page emissions; the shell's app.client.js is
+  //     loaded by per-page HTMLs to wire them up.
+  //   - Shell composition is purely textual; complex shell structures
+  //     (e.g., nested `<main>` slots) are unsupported — the FIRST
+  //     `<main>` is the slot.
+  //   - When the entry file has no `<main>`, composition is a no-op
+  //     (per-page HTMLs remain standalone, matching pre-fix behavior).
+  // -------------------------------------------------------------------------
+  {
+    // Find the entry file. Per §40.8, exactly ONE top-level `<program>`
+    // per application; the first file with `hasProgramRoot: true` is
+    // the entry. Single-file invocations on a non-entry-page file have
+    // no shell — fall through to the no-op branch.
+    // `hasProgramRoot` lives on the FileAST. In the CG pipeline,
+    // fileAST can arrive either as `{ filePath, ast: { hasProgramRoot, ... } }`
+    // (wrapped — from CE output before unwrapping) or `{ filePath,
+    // hasProgramRoot, ... }` (unwrapped — from TS output downstream).
+    // Check both shapes for robustness.
+    function getHasProgramRoot(f: any): boolean {
+      return f?.ast?.hasProgramRoot === true || f?.hasProgramRoot === true;
+    }
+    let entryFile: any = null;
+    for (const f of files) {
+      if (getHasProgramRoot(f)) {
+        entryFile = f;
+        break;
+      }
+    }
+
+    if (entryFile) {
+      const entryFilePath = (entryFile as any).filePath as string;
+      const entryOutput = outputs.get(entryFilePath);
+      const entryHtml = entryOutput?.html ?? null;
+      const entryBase = entryFilePath
+        ? entryFilePath.replace(/\.scrml$/, "").split("/").pop()
+        : null;
+
+      // Extract the `<body>...</body>` block from the entry's html. This
+      // gives us the rendered shell — header, footer, the `<main>` slot,
+      // and everything else inside `<body>`. Defensive: if the entry
+      // doesn't have a `<body>` (e.g., library-mode entry), shellBody is
+      // null and composition is skipped.
+      //
+      // Strip the entry's TRAILING `<script>` tags from the shell body —
+      // those scripts (runtime + app.client.js) are re-emitted by the
+      // per-page composition below so they sit AFTER the composed page
+      // body, with correct upToRoot prefixes for nested per-page HTMLs.
+      // Without this strip, per-page HTMLs would double-load the runtime
+      // and app.client.js (once from the shell body's literal scripts,
+      // once from the per-page composition's re-added scripts).
+      let shellBody: string | null = null;
+      if (entryHtml) {
+        // Match the body content greedy-laziest possible. <body[^>]*>
+        // tolerates body attrs (the current envelope writes bare <body>
+        // but future changes might add classes); the closing </body>
+        // anchor is the literal terminator.
+        const bodyMatch = entryHtml.match(/<body[^>]*>([\s\S]*?)<\/body>/);
+        if (bodyMatch) {
+          // Strip a trailing run of <script src="..."></script> tags
+          // (including the runtime placeholder + the entry's client.js).
+          // The envelope emits these in sequence at the end of <body>;
+          // they're identifiable by being the LAST non-whitespace content.
+          shellBody = bodyMatch[1].replace(
+            /(\s*<script\s+src="[^"]*"><\/script>)+\s*$/,
+            "",
+          );
+        }
+      }
+
+      // Locate the FIRST `<main ...>...</main>` in the shell body. The
+      // `<main>` content is the slot — we'll replace its children with
+      // the page body during composition. If no `<main>` is found,
+      // composition is a no-op (the shell has nowhere to host page
+      // content; the per-page HTML emits standalone).
+      let mainOpenIdx = -1;
+      let mainOpenEndIdx = -1;
+      let mainCloseIdx = -1;
+      if (shellBody) {
+        const mainOpenMatch = shellBody.match(/<main(\s[^>]*)?>/);
+        if (mainOpenMatch && mainOpenMatch.index !== undefined) {
+          mainOpenIdx = mainOpenMatch.index;
+          mainOpenEndIdx = mainOpenIdx + mainOpenMatch[0].length;
+          // Find the matching </main>. Simple lookup — nested <main>s
+          // would defeat this but HTML5 forbids nested <main>
+          // (https://html.spec.whatwg.org/#the-main-element). For v0.3.x
+          // we honor the spec rule; future work can teach this a depth
+          // counter if adopters actually nest <main>.
+          mainCloseIdx = shellBody.indexOf("</main>", mainOpenEndIdx);
+        }
+      }
+
+      const shellAvailable =
+        shellBody !== null && mainOpenIdx >= 0 && mainCloseIdx > mainOpenEndIdx;
+
+      if (shellAvailable && shellBody !== null) {
+        const shellPrefix = shellBody.slice(0, mainOpenEndIdx);
+        const shellSuffix = shellBody.slice(mainCloseIdx);
+        // entryClientJs base is needed so per-page HTMLs can <script src=>
+        // the shell's app.client.js (so reactive shell elements such as
+        // `${VERSION}` in the docs/website shell remain wired).
+
+        for (const [filePath, output] of outputs) {
+          if (filePath === entryFilePath) continue;
+          if (!output.html) continue;
+
+          // Detect non-entry-page files via the same shape as ast-builder.js
+          // line 12222: !hasProgramRoot AND at least one top-level markup
+          // node with tag === "page".
+          const fileAST = files.find(
+            (f) => (f as any)?.filePath === filePath,
+          );
+          if (!fileAST) continue;
+          if (getHasProgramRoot(fileAST)) continue;
+          const fileNodes: any[] =
+            (fileAST as any).ast?.nodes ?? (fileAST as any).nodes ?? [];
+          const hasPageOpener = fileNodes.some(
+            (n: any) =>
+              n && n.kind === "markup" && n.tag === "page",
+          );
+          if (!hasPageOpener) continue;
+
+          // Extract the page's body content from its html envelope —
+          // same regex as the entry. The page-tag stripper added to
+          // emit-html.ts emits the page's children directly without a
+          // wrapping `<page>` tag, so pageBody is the page's content.
+          const pageHtml = output.html;
+          const pageBodyMatch = pageHtml.match(
+            /<body[^>]*>([\s\S]*?)<\/body>/,
+          );
+          if (!pageBodyMatch) continue;
+          const pageBodyRaw = pageBodyMatch[1];
+
+          // Strip the trailing `<script>` tags that the envelope emitted
+          // for this page's own client.js / runtime — we'll re-append a
+          // composed script set (shell's app.client.js + page's
+          // client.js) below.
+          const pageBodyStripped = pageBodyRaw
+            .replace(
+              /\s*<script\s+src="[^"]*\.client\.js"><\/script>\s*$/,
+              "",
+            )
+            .replace(
+              /\s*<script\s+src="[^"]*"><\/script>\s*$/,
+              "",
+            );
+
+          // Compose: shell prefix (everything up to and including the
+          // `<main ...>` opener) + page body + shell suffix (the
+          // `</main>` and everything after it).
+          const composedBody =
+            shellPrefix + "\n" + pageBodyStripped + "\n" + shellSuffix;
+
+          // Re-emit the script set on the composed body. The shell's
+          // app.client.js is added FIRST (so its const declarations are
+          // in scope before any per-page wiring runs), then the page's
+          // own client.js. Both load against the shared runtime.
+          //
+          // pathFromPageToEntry: resolve a relative href from this
+          // page's dist dir to the entry's dist dir so the <script src>
+          // works regardless of nesting depth. mpa-shell-clean-urls
+          // Sub 1 strips `pages/` from dist paths, so the entry is at
+          // dist root and per-page files may be at dist/X/ —
+          // computing the relative path keeps the script ref correct
+          // for any depth.
+          const pageDistDir =
+            filePath
+              .replace(/\.scrml$/, "")
+              .replace(/[^/]+$/, "")
+              .replace(/.*\/pages\//, "")
+              .replace(/^pages\//, "") || "";
+          const depth = pageDistDir
+            ? pageDistDir.split("/").filter(Boolean).length
+            : 0;
+          const upToRoot = depth > 0 ? "../".repeat(depth) : "";
+
+          const scriptParts: string[] = [];
+          // Use the existing closing-script lines from the page's
+          // original envelope — the runtime placeholder is per-file but
+          // identical across files (substituted in the same post-pass
+          // below), so we can either keep the page's runtime tag (which
+          // is what we strip-and-readd) or take the entry's. We use the
+          // page's existing runtime tag with the relative-up prefix.
+          if (entryOutput?.clientJs && entryBase) {
+            scriptParts.push(
+              `<script src="${upToRoot}${entryBase}.client.js"></script>`,
+            );
+          }
+          // Re-add the page's own client.js (was stripped above).
+          const pageBase = filePath
+            .replace(/\.scrml$/, "")
+            .split("/")
+            .pop();
+          if (output.clientJs) {
+            scriptParts.push(
+              `<script src="${pageBase}.client.js"></script>`,
+            );
+          }
+
+          // Find the runtime <script src=...> in the original pageHtml.
+          // At post-emit time the src is the placeholder
+          // `__SCRML_RUNTIME_FILENAME_PLACEHOLDER__`; the existing
+          // Phase B 3.3 post-pass below substitutes it for the final
+          // hashed filename. We rewrite the placeholder's href with the
+          // upToRoot prefix so the substituted runtime URL resolves
+          // from the per-page HTML's nested dist dir.
+          const runtimeMatch = pageHtml.match(
+            /<script\s+src="([^"]*)"><\/script>/,
+          );
+          let runtimeTagRewritten: string | null = null;
+          if (runtimeMatch) {
+            const src = runtimeMatch[1];
+            // Only rewrite the runtime placeholder, not the page's
+            // own client.js (which is at the same nested dir as the
+            // page itself and uses just basename).
+            if (src.includes("__SCRML_RUNTIME_FILENAME_PLACEHOLDER__")) {
+              if (src.startsWith("/") || /^https?:/.test(src)) {
+                runtimeTagRewritten = runtimeMatch[0];
+              } else {
+                runtimeTagRewritten = `<script src="${upToRoot}${src.replace(/^\.\//, "")}"></script>`;
+              }
+            }
+          }
+
+          let composedHtml = pageHtml
+            .replace(
+              /<body[^>]*>[\s\S]*?<\/body>/,
+              `<body>\n${composedBody}\n${runtimeTagRewritten ? runtimeTagRewritten + "\n" : ""}${scriptParts.join("\n")}\n</body>`,
+            );
+
+          // Add the entry's CSS link so shell styles (Tailwind utility
+          // classes used by header/footer/nav) reach per-page HTMLs.
+          // The entry CSS lives at `<entryBase>.css` next to app.html;
+          // per-page HTMLs may be nested, so prefix with upToRoot.
+          if (entryOutput?.css && entryBase) {
+            const entryCssTag = `  <link rel="stylesheet" href="${upToRoot}${entryBase}.css">`;
+            // Insert right before the </head> so it appears AFTER the
+            // page's own CSS (so per-page CSS — which is more specific
+            // — wins on conflicts, consistent with the page-content-
+            // overrides-shell intent).
+            composedHtml = composedHtml.replace(
+              /<\/head>/,
+              `${entryCssTag}\n</head>`,
+            );
+          }
+
+          outputs.set(filePath, { ...output, html: composedHtml });
+        }
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // v0.3.x SPA tree-shake Phase B 3.1 + 3.3 — shared-runtime union + hash.
   //
   // In `embedRuntime: true` mode each per-file client.js carries its own

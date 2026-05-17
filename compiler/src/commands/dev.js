@@ -395,13 +395,33 @@ function buildServeConfig(opts, serveDir) {
 
       // ------------------------------------------------------------------
       // Static file fallback
+      //
+      // mpa-shell-clean-urls (2026-05-17): with the build now stripping
+      // `pages/` from dist paths (api.js pathFor), URLs map directly to
+      // dist files. Resolution order:
+      //   1. exact file (`/foo/bar.js` → `dist/foo/bar.js`)
+      //   2. with .html suffix (`/foo` → `dist/foo.html`)
+      //   3. as directory index (`/foo` → `dist/foo/index.html`)
+      //   4. as trailing-slash directory index (`/foo/` → `dist/foo/index.html`)
+      //   5. (root only) any .html file in dist root
+      // Step 3 + 4 are new — pre-fix only steps 1 + 2 + 5 existed; with
+      // the path strip, nested pages (`pages/foo/index.scrml` →
+      // `dist/foo/index.html`) need directory-index resolution for
+      // `/foo` to land on the right file.
       // ------------------------------------------------------------------
-      let staticPathname = pathname === "/" ? "/index.html" : pathname;
+      // Normalize trailing slash to fold `/foo/` into `/foo` for the
+      // first probe (the trailing-slash form still resolves via the
+      // directory-index candidate below).
+      const trimmedPathname = (pathname !== "/" && pathname.endsWith("/"))
+        ? pathname.slice(0, -1)
+        : pathname;
+      let staticPathname = trimmedPathname === "/" ? "/index.html" : trimmedPathname;
 
-      // Try exact path first, then with .html extension
+      // Try, in order: exact file, with .html, as dir/index.html.
       const candidates = [
         join(serveDir, staticPathname),
         join(serveDir, `${staticPathname}.html`),
+        join(serveDir, staticPathname, "index.html"),
       ];
 
       for (const candidate of candidates) {

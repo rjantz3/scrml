@@ -128,10 +128,16 @@ describe("F-COMPILE-001 §1: same-basename sources in different subdirs", () => 
     expect(existsSync(join(outDir, "driver/load-detail.html"))).toBe(true);
   });
 
-  test("dispatch-app shape: top-level files force preservation of `pages/` prefix", () => {
+  test("dispatch-app shape: `pages/` prefix stripped from dist paths (mpa-shell-clean-urls)", () => {
     // This is the actual examples/23-trucking-dispatch/ shape — a top-level
-    // file (app.scrml) at the root forces the common base to be the root,
-    // so nested files retain their full relative path including `pages/`.
+    // file (app.scrml) at the root forces the common base to be the root.
+    //
+    // mpa-shell-clean-urls (2026-05-17): the dist emit now strips the
+    // leading `pages/` segment so route URLs (`/customer/home` per
+    // §47.9.2) align with dist paths (`dist/customer/home.html`). The
+    // collision-prevention property §47.9.3 still holds:
+    // `customer/home.html` and `driver/home.html` are distinct dist
+    // paths even with `pages/` stripped.
     const ROOT = join(TMP, "case-1c");
     mkdirSync(ROOT, { recursive: true });
     const app = fx("case-1c/app.scrml");
@@ -148,8 +154,12 @@ describe("F-COMPILE-001 §1: same-basename sources in different subdirs", () => 
 
     expect(result.errors).toEqual([]);
     expect(existsSync(join(outDir, "app.html"))).toBe(true);
-    expect(existsSync(join(outDir, "pages/customer/home.html"))).toBe(true);
-    expect(existsSync(join(outDir, "pages/driver/home.html"))).toBe(true);
+    // pages/ stripped — dist paths align with route URLs.
+    expect(existsSync(join(outDir, "customer/home.html"))).toBe(true);
+    expect(existsSync(join(outDir, "driver/home.html"))).toBe(true);
+    // Pre-strip paths under pages/ MUST NOT exist.
+    expect(existsSync(join(outDir, "pages/customer/home.html"))).toBe(false);
+    expect(existsSync(join(outDir, "pages/driver/home.html"))).toBe(false);
     // No collision under `dist/home.html` (the F-COMPILE-001 bug shape).
     expect(existsSync(join(outDir, "home.html"))).toBe(false);
   });
@@ -161,7 +171,9 @@ describe("F-COMPILE-001 §1: same-basename sources in different subdirs", () => 
 // ---------------------------------------------------------------------------
 
 describe("F-COMPILE-001 §2: top-level + nested mix", () => {
-  test("app.scrml at root + pages/foo.scrml gives flat app.html + pages/foo.html", () => {
+  test("app.scrml at root + pages/foo.scrml gives flat app.html + foo.html (pages/ stripped)", () => {
+    // mpa-shell-clean-urls (2026-05-17): `pages/` is stripped from dist
+    // emit so `pages/foo.scrml` → `dist/foo.html` (route URL `/foo`).
     const ROOT = join(TMP, "case-2");
     mkdirSync(ROOT, { recursive: true });
     const app = fx("case-2/app.scrml");
@@ -177,7 +189,9 @@ describe("F-COMPILE-001 §2: top-level + nested mix", () => {
 
     expect(result.errors).toEqual([]);
     expect(existsSync(join(outDir, "app.html"))).toBe(true);
-    expect(existsSync(join(outDir, "pages/foo.html"))).toBe(true);
+    // pages/ stripped from foo's dist path.
+    expect(existsSync(join(outDir, "foo.html"))).toBe(true);
+    expect(existsSync(join(outDir, "pages/foo.html"))).toBe(false);
 
     // Top-level file MUST NOT land in a subdirectory.
     expect(existsSync(join(outDir, "pages/app.html"))).toBe(false);
@@ -404,19 +418,27 @@ describe("F-COMPILE-001 §7: dispatch-app E2E shape", () => {
 
     expect(result.errors).toEqual([]);
 
+    // mpa-shell-clean-urls: pages/ is stripped from dist; every per-role
+    // subdir still produces a distinct dist path (collision-prevention
+    // §47.9.3 holds because customer/dispatch/driver subdirs differ).
     // Every source must have a unique output — no silent overwrites.
     expect(existsSync(join(outDir, "app.html"))).toBe(true);
-    expect(existsSync(join(outDir, "pages/customer/home.html"))).toBe(true);
-    expect(existsSync(join(outDir, "pages/customer/profile.html"))).toBe(true);
-    expect(existsSync(join(outDir, "pages/customer/load-detail.html"))).toBe(true);
-    expect(existsSync(join(outDir, "pages/dispatch/home.html"))).toBe(true);
-    expect(existsSync(join(outDir, "pages/dispatch/profile.html"))).toBe(true);
-    expect(existsSync(join(outDir, "pages/dispatch/load-detail.html"))).toBe(true);
-    expect(existsSync(join(outDir, "pages/driver/home.html"))).toBe(true);
-    expect(existsSync(join(outDir, "pages/driver/profile.html"))).toBe(true);
-    expect(existsSync(join(outDir, "pages/driver/load-detail.html"))).toBe(true);
+    expect(existsSync(join(outDir, "customer/home.html"))).toBe(true);
+    expect(existsSync(join(outDir, "customer/profile.html"))).toBe(true);
+    expect(existsSync(join(outDir, "customer/load-detail.html"))).toBe(true);
+    expect(existsSync(join(outDir, "dispatch/home.html"))).toBe(true);
+    expect(existsSync(join(outDir, "dispatch/profile.html"))).toBe(true);
+    expect(existsSync(join(outDir, "dispatch/load-detail.html"))).toBe(true);
+    expect(existsSync(join(outDir, "driver/home.html"))).toBe(true);
+    expect(existsSync(join(outDir, "driver/profile.html"))).toBe(true);
+    expect(existsSync(join(outDir, "driver/load-detail.html"))).toBe(true);
 
-    // Pre-fix collision paths MUST NOT exist.
+    // Pre-strip paths under pages/ MUST NOT exist.
+    expect(existsSync(join(outDir, "pages/customer/home.html"))).toBe(false);
+    expect(existsSync(join(outDir, "pages/dispatch/home.html"))).toBe(false);
+    expect(existsSync(join(outDir, "pages/driver/home.html"))).toBe(false);
+
+    // Pre-fix collision paths (flat — no role subdir) MUST NOT exist.
     expect(existsSync(join(outDir, "home.html"))).toBe(false);
     expect(existsSync(join(outDir, "profile.html"))).toBe(false);
     expect(existsSync(join(outDir, "load-detail.html"))).toBe(false);

@@ -823,6 +823,20 @@ export function generateHtml(
         return;
       }
 
+      // mpa-shell-clean-urls (2026-05-17): the `<page>` element (§40.8 v0.3
+      // Wave 1) is a per-route attribute container — it carries
+      // `db=`/`auth=`/`csrf=`/`ratelimit=` for the inferred route, but it
+      // does NOT correspond to a DOM element. Emit its children transparently
+      // (same shape as the unnamed `<program>` above). Prior to this change
+      // emit-html left the literal `<page>` tag in output HTML, which the
+      // browser ignored but cluttered the rendered DOM.
+      if (tag === "page") {
+        for (const child of children) {
+          emitNode(child);
+        }
+        return;
+      }
+
       if (LIFECYCLE_SILENT_TAGS.has(tag)) {
         const span = node.span ?? { file: "", start: 0, end: 0, line: 1, col: 1 };
         const attrMap = new Map<string, any>((attrs ?? []).map((a: any) => [a.name, a]));

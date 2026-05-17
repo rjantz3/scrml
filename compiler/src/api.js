@@ -1463,7 +1463,33 @@ export function compileScrml(options = {}) {
         // Compute the dist-relative directory + basename for this source file.
         // outputBaseDir is guaranteed non-null here because cgResult.outputs is non-empty.
         const base = basename(filePath, ".scrml");
-        const relDir = dirname(relative(outputBaseDir, filePath));
+        const relDirRaw = dirname(relative(outputBaseDir, filePath));
+        // mpa-shell-clean-urls: strip the leading `pages/` segment from the
+        // dist directory so route URLs (filesystem-inferred per §47.9.2 —
+        // `pages/customer/loads.scrml` → `/customer/loads`) align with dist
+        // paths (now `dist/customer/loads.html`). Without this strip, the
+        // dist tree preserved `pages/` (matching §47.9.5 worked example) but
+        // every URL needed an inverse-rewrite by the dev server. Stripping
+        // unifies URL = dist path; static-file servers (S3, Netlify, Bun.serve)
+        // resolve `/customer/loads` → `dist/customer/loads.html` trivially.
+        //
+        // Only `pages/` (the v0.3 canonical convention per §40.8.1 +
+        // §47.9.2) is stripped. The legacy `routes/` prefix is preserved
+        // as-is to avoid surprise URL shifts for existing apps that opted
+        // into the legacy convention.
+        //
+        // The strip is segment-aligned: only an exact leading `pages` segment
+        // (or `pages/...`) is removed. A file at outputBase named
+        // `pages.scrml` keeps its dist name. A file at
+        // outputBase/sub/pages/X.scrml is NOT stripped because the leading
+        // segment is `sub`, not `pages` — this preserves outputBase semantics
+        // when the user invokes the compiler with a non-`./` outputBase.
+        let relDir = relDirRaw;
+        if (relDirRaw === "pages") {
+          relDir = ".";
+        } else if (relDirRaw.startsWith("pages/")) {
+          relDir = relDirRaw.slice("pages/".length);
+        }
         // relative() may yield "." for files at outputBaseDir itself.
         const targetDir = (relDir === "." || relDir === "") ? outputDir : join(outputDir, relDir);
         return { targetDir, base, fullPath: join(targetDir, `${base}${suffix}`) };

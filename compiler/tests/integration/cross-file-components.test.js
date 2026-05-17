@@ -406,13 +406,17 @@ ${"$"}{
 
     // Bare top-level <Badge/> expands to static HTML; client.js holds
     // hydration metadata only.
-    const htmlPath = join(outDir, "pages/team.html");
+    //
+    // mpa-shell-clean-urls (2026-05-17): pages/ is stripped from dist
+    // emit so pages/team.scrml → dist/team.html (not dist/pages/team.html).
+    const htmlPath = join(outDir, "team.html");
     expect(existsSync(htmlPath)).toBe(true);
+    expect(existsSync(join(outDir, "pages/team.html"))).toBe(false);
     const html = readFileSync(htmlPath, "utf8");
     expect(html).toContain("c9-badge");
     expect(html).not.toContain('<Badge');
 
-    const clientJsPath = join(outDir, "pages/team.client.js");
+    const clientJsPath = join(outDir, "team.client.js");
     if (existsSync(clientJsPath)) {
       const clientJs = readFileSync(clientJsPath, "utf8");
       expect(clientJs).not.toContain('createElement("Badge")');
