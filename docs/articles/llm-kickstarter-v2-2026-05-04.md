@@ -67,24 +67,24 @@ Start from the canonical shape below and modify what you need. Don't write from 
     }
   }
 
-  <div class="contact-book">
-    <h1>Contact Book</h1>
+  <div class="max-w-2xl mx-auto my-8 font-sans">
+    <h1 class="text-2xl font-semibold mb-4">Contact Book</h1>
 
-    <form onsubmit=addContact()>
-      <input type="text"  bind:value=@name  placeholder="Name"  required/>
-      <input type="email" bind:value=@email placeholder="Email" required/>
-      <input type="tel"   bind:value=@phone placeholder="Phone"/>
-      <button type="submit">Add Contact</button>
+    <form onsubmit=addContact() class="flex gap-2 mb-6">
+      <input type="text"  bind:value=@name  placeholder="Name"  required class="flex-1 p-2 border border-slate-300 rounded"/>
+      <input type="email" bind:value=@email placeholder="Email" required class="flex-1 p-2 border border-slate-300 rounded"/>
+      <input type="tel"   bind:value=@phone placeholder="Phone"        class="flex-1 p-2 border border-slate-300 rounded"/>
+      <button type="submit" class="px-4 py-2 bg-slate-900 text-white rounded">Add</button>
     </form>
 
-    <ul class="contacts">
+    <ul class="list-none p-0">
       ${
         for (let contact of loadContacts()) {
-          lift <li class="contact-row">
-            <span class="name">${contact.name}</span>
-            <span class="email">${contact.email}</span>
-            <span class="phone">${contact.phone}</span>
-            <button onclick=deleteContact(contact.id)>Remove</button>
+          lift <li class="flex gap-4 py-3 border-b border-slate-200">
+            <span>${contact.name}</span>
+            <span class="text-slate-600">${contact.email}</span>
+            <span class="text-slate-500">${contact.phone}</span>
+            <button onclick=deleteContact(contact.id) class="ml-auto text-rose-700 hover:text-rose-900">Remove</button>
           </li>
         }
       }
@@ -92,14 +92,6 @@ Start from the canonical shape below and modify what you need. Don't write from 
   </div>
 
 </>
-
-#{
-  .contact-book { max-width: 640px; margin: 2rem auto; font-family: sans-serif; }
-  form { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
-  input { flex: 1; padding: 0.5rem; }
-  .contacts { list-style: none; padding: 0; }
-  .contact-row { display: flex; gap: 1rem; padding: 0.75rem 0; border-bottom: 1px solid #eee; }
-}
 
 </program>
 ```
