@@ -440,6 +440,45 @@ function isStaticallyPrimitive(node: ExprNode): boolean {
   }
 }
 
+/**
+ * Determine whether the LHS of an `is some` / `is not` / `is not not` predicate
+ * needs an extra paren wrap on emission. The emit form for these predicates is
+ * `(<lhs> !== null && <lhs> !== undefined)` (or the `=== null || === undefined`
+ * absence form). Any LHS whose emitted JS contains binary / ternary / unary
+ * operators at the top level would be mis-associated by the `&&` / `||`
+ * between the two halves of the absence check, so wrap defensively.
+ *
+ * Bare idents (`x`, `obj.foo.bar`, `_scrml_reactive_get(...)`), index access
+ * (`arr[i]`), call expressions (`f(...)`), and member access through call/
+ * index tails do NOT need wrapping — their emitted forms bind tightly enough
+ * that `<lhs> !== null` already parses as `(<lhs>) !== null` in JS.
+ *
+ * Only top-level binary / ternary / assignment / unary nodes require wrapping
+ * — for those the emit either lacks outer parens or has operators that bind
+ * looser than `!==`.
+ */
+function needsIsLhsParenWrap(left: ExprNode): boolean {
+  switch (left.kind) {
+    case "binary":
+      // Binary operators all bind looser than `!==` / `===` in JS, so a binary
+      // LHS would re-associate without explicit wrapping. (Exception: nested
+      // `is-some` / `is-not` BinaryExprs already emit their own outer parens
+      // from this very function, so they're already self-bracketed — but we
+      // still wrap defensively for readability.)
+      return true;
+    case "ternary":
+    case "assign":
+    case "unary":
+      // These bind looser than (or interact poorly with) `!==`.
+      return true;
+    default:
+      // ident / lit / array / object / member / index / call / new / lambda /
+      // cast / match-expr / sql-ref / input-state-ref / escape-hatch / spread:
+      // their emitted forms are already self-contained primaries.
+      return false;
+  }
+}
+
 function emitBinary(node: BinaryExpr, ctx: EmitExprContext): string {
   const left = emitExpr(node.left, ctx);
   const right = emitExpr(node.right, ctx);
@@ -462,13 +501,37 @@ function emitBinary(node: BinaryExpr, ctx: EmitExprContext): string {
       }
       return `!_scrml_structural_eq(${left}, ${right})`;
 
-    // §42 presence/absence checks
-    case "is-not":
-      return `(${left} === null || ${left} === undefined)`;
-    case "is-some":
-      return `(${left} !== null && ${left} !== undefined)`;
-    case "is-not-not":
-      return `(${left} !== null && ${left} !== undefined)`;
+    // §42 presence/absence checks.
+    //
+    // The LHS may be any expression (per §42.2.4 — including binary, call,
+    // index, member chains). For bare-ident LHS the simple form `(x !== null
+    // && x !== undefined)` is correct and readable. For compound LHS — most
+    // notably a binary expression like `(a || b)` — we MUST wrap the emitted
+    // LHS in parens to preserve precedence; otherwise the surrounding `&&` /
+    // `||` operators in the absence check would re-associate with the LHS's
+    // operators (e.g. `a || b !== null` parses as `a || (b !== null)`).
+    //
+    // Single-evaluation note (SPEC §42.2.4): for a side-effecting LHS like
+    // `f() is some` or `(a || b) is some`, this AST emit path currently
+    // evaluates the LHS twice. The legacy STRING pipeline (rewrite.ts
+    // _rewriteParenthesizedIsOp) handled single-evaluation via a temp-var
+    // assignment for the parenthesized form. Single-eval in the AST emit
+    // path is a known follow-on (Phase B-2); the current double-eval is a
+    // strict improvement over the prior Phase A state — where compound
+    // bare-form LHS was either rejected at parse or routed through a broken
+    // multi-pass suffix substitution chain that produced invalid JS.
+    case "is-not": {
+      const lhs = needsIsLhsParenWrap(node.left) ? `(${left})` : left;
+      return `(${lhs} === null || ${lhs} === undefined)`;
+    }
+    case "is-some": {
+      const lhs = needsIsLhsParenWrap(node.left) ? `(${left})` : left;
+      return `(${lhs} !== null && ${lhs} !== undefined)`;
+    }
+    case "is-not-not": {
+      const lhs = needsIsLhsParenWrap(node.left) ? `(${left})` : left;
+      return `(${lhs} !== null && ${lhs} !== undefined)`;
+    }
 
     // §43 enum membership: x is .Variant → x === "Variant" (unit variant) OR
     // x.variant === "Variant" (payload-bearing variant — cell value is a

@@ -682,6 +682,316 @@ function spanFromEstree(node: ESNode, filePath: string, baseOffset: number): Exp
 
 const SCRML_PLACEHOLDER_PREFIX = "__scrml_";
 
+// ---------------------------------------------------------------------------
+// rewriteIsPredicates — structural scanner for `is some|given|not|not not|.V|T.V`
+// ---------------------------------------------------------------------------
+//
+// Phase B (2026-05-17) replaces the brittle multi-pass regex chain of S99
+// Phase A with a single left-to-right structural scanner. See the call site
+// in preprocessForAcorn for the algorithmic rationale and the SPEC §42.2.4
+// binding semantics this rewrite honors.
+//
+// Returns the input string with every `<lhs> is <suffix>` occurrence outside
+// string literals replaced by the corresponding `__scrml_is_X__(<lhs>)` call.
+//
+// Honor-string-literals: the scanner tracks `"`, `'`, and `` ` `` interiors
+// and skips them entirely (so `"x is not"` inside a string literal stays
+// verbatim). Template-literal interpolations `${...}` are NOT scanned here —
+// the outer expression-parser pipeline handles template literals by lifting
+// interpolations into separate parseExprToNode calls, so the `is` operator
+// inside `${...}` arrives in its own preprocessing pass.
+
+/** Return the byte index of the matching open character for a balanced group ending at `s[end - 1]` (close). */
+function findMatchingOpenLeft(s: string, end: number, open: string, close: string): number {
+  // s[end - 1] is the closer (e.g. `)` or `]`). Scan back to its opener.
+  // We rely on the assumption that the input has well-formed bracket structure;
+  // pathological inputs route through the escape-hatch path downstream.
+  let depth = 0;
+  for (let i = end - 1; i >= 0; i--) {
+    const c = s[i];
+    if (c === close) depth++;
+    else if (c === open) {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Scan leftward from `isStart` (the index of the `i` of the `is` keyword)
+ * to find the LHS predicate-target extent. Returns the byte index of the
+ * start of the LHS (inclusive), or -1 if no valid LHS is found.
+ *
+ * The LHS grammar (per SPEC §42.2.4 — any valid expression target):
+ *   LHS    := Base (Tail)*
+ *   Base   := @? Ident                            (bare ident — required for
+ *                                                  bare-form `x is some`)
+ *           | ( Expr )                            (paren grouping — explicit
+ *                                                  Phase A form `(expr) is X`)
+ *   Tail   := . Ident                             (member access, whitespace
+ *                                                  tolerant per A4 fix)
+ *           | ( Args )                            (call tail, balanced nesting)
+ *           | [ Index ]                           (index tail, balanced nesting)
+ *
+ * The scanner walks right-to-left. Tails may chain directly (no `.` between
+ * `arr` and `[0]` in `arr[0]`, no `.` between `f()` and `()` in `f()()`).
+ * Member tails are preceded by `.`. The base is the LEFTMOST segment.
+ *
+ * The LHS extent terminates when a non-chain character precedes the current
+ * segment — e.g. binary operator, comma, semicolon, opening `(`/`[`/`{`, or
+ * the start of the string. The scanner does NOT consume operators; it stops
+ * just past them, leaving them in the prefix portion that is preserved
+ * verbatim in the output (so `a || b is some` becomes
+ * `a || __scrml_is_some__(b)`).
+ */
+function scanLhsLeft(s: string, isStart: number): number {
+  // 1. Skip whitespace immediately before `is`
+  let i = isStart - 1;
+  while (i >= 0 && /\s/.test(s[i])) i--;
+  if (i < 0) return -1;
+
+  // 2. The LHS must end with an identifier char, `)`, or `]`. Anything else
+  //    means there is no valid bare-form LHS here (e.g. preceded by operator).
+  const tailChar = s[i];
+  if (!(/[A-Za-z0-9_$]/.test(tailChar) || tailChar === ")" || tailChar === "]")) {
+    return -1;
+  }
+
+  // 3. Walk leftward through chained segments.
+  //
+  // State machine: `expecting`
+  //   - "tail-or-base" — the previous segment was a `(...)`, `[...]`, or `.ident`
+  //                       tail, or we have not consumed anything yet. Left of
+  //                       here we accept: another `(...)` / `[...]` tail (chained
+  //                       no-dot, e.g. `arr[0][1]` or `f()()`), a `.ident`
+  //                       member tail, or a `@?Ident` base.
+  //   - "after-base" — we just consumed a bare ident. The chain has hit its
+  //                    base; the loop terminates.
+  //
+  // The state captures: an ident segment without a leading `.` is a BASE and
+  // therefore stops the leftward walk unless we are walking up a member-access
+  // chain (i.e., a `.` was just consumed on the right).
+  //
+  // Whitespace tolerance: the joinWithNewlines path in ast-builder emits
+  // condition strings with whitespace AROUND every token, so `arr[0].trim()
+  // is some` reaches this scanner as `arr [ 0 ] . trim ( ) is some`. The
+  // scanner skips whitespace between consecutive chain segments.
+  let pos = i;
+  let chainStart = pos + 1; // exclusive — furthest-left consumed
+  let expecting: "tail-or-base" | "after-base" = "tail-or-base";
+
+  while (pos >= 0 && expecting === "tail-or-base") {
+    // Skip whitespace between segments.
+    while (pos >= 0 && /\s/.test(s[pos])) pos--;
+    if (pos < 0) break;
+
+    const c = s[pos];
+
+    if (c === ")") {
+      // Call tail.
+      const openIdx = findMatchingOpenLeft(s, pos + 1, "(", ")");
+      if (openIdx === -1) return -1;
+      chainStart = openIdx;
+      pos = openIdx - 1;
+      // After a call/index tail, we expect another tail or a base.
+      expecting = "tail-or-base";
+    } else if (c === "]") {
+      // Index tail.
+      const openIdx = findMatchingOpenLeft(s, pos + 1, "[", "]");
+      if (openIdx === -1) return -1;
+      chainStart = openIdx;
+      pos = openIdx - 1;
+      expecting = "tail-or-base";
+    } else if (/[A-Za-z0-9_$]/.test(c)) {
+      // Ident segment. This may be:
+      //   - the BASE of the chain (no `.` left of it) — terminate after,
+      //   - or a member-tail-name (a `.` left of it) — continue chain.
+      while (pos >= 0 && /[A-Za-z0-9_$]/.test(s[pos])) pos--;
+      const identStart = pos + 1;
+      chainStart = identStart;
+
+      // Look for `.` (whitespace-tolerant) to the left — that makes the ident
+      // a member-tail, NOT a base.
+      let scan = pos;
+      while (scan >= 0 && /\s/.test(s[scan])) scan--;
+      if (scan >= 0 && s[scan] === ".") {
+        // Member-access chain link. Consume the `.` and continue.
+        pos = scan - 1;
+        chainStart = scan; // include the `.` in the LHS
+        // expecting stays "tail-or-base" — there must be another segment left.
+        continue;
+      }
+
+      // No `.` — this ident is the BASE. Include optional `@` sigil (with
+      // whitespace tolerance) and stop.
+      if (scan >= 0 && s[scan] === "@") {
+        chainStart = scan;
+      }
+      expecting = "after-base";
+    } else {
+      // Not a continuation char (binary operator, comma, semicolon, `{`, etc.)
+      // — the chain terminates without consuming more.
+      break;
+    }
+  }
+
+  // If we never consumed anything, the LHS is empty/invalid.
+  if (chainStart > i) return -1;
+  return chainStart;
+}
+
+/** Suffix descriptor: what follows `is ` and how to translate. */
+type IsPredicateSuffix =
+  | { kind: "is-not-not"; consumeLen: number }
+  | { kind: "is-not"; consumeLen: number }
+  | { kind: "is-some"; consumeLen: number }
+  | { kind: "is-variant"; consumeLen: number; variant: string };
+
+/**
+ * Match the suffix starting at `s[start]`, which is positioned just after the
+ * `is` keyword's trailing whitespace. Returns the matched form and the byte
+ * length it occupies (the number of bytes after the `is`-trailing-whitespace
+ * the suffix consumed).
+ *
+ * Returns null if no recognized predicate suffix follows.
+ *
+ * Precedence (longest-match-first):
+ *   1. `not not` (presence — double negation)
+ *   2. `not`     (absence)
+ *   3. `some` / `given` (presence)
+ *   4. `Type.Variant` (qualified — prefer over bare-dot when applicable)
+ *   5. `.VariantName`
+ */
+function matchIsPredicateSuffix(s: string, start: number): IsPredicateSuffix | null {
+  const tail = s.slice(start);
+
+  // `not not` — must check before `not` (longest-match). Word-boundary on both
+  // sides.
+  const notNotMatch = /^not\s+not(?![A-Za-z0-9_$])/.exec(tail);
+  if (notNotMatch) return { kind: "is-not-not", consumeLen: notNotMatch[0].length };
+
+  const notMatch = /^not(?![A-Za-z0-9_$])/.exec(tail);
+  if (notMatch) return { kind: "is-not", consumeLen: notMatch[0].length };
+
+  const someMatch = /^(?:some|given)(?![A-Za-z0-9_$])/.exec(tail);
+  if (someMatch) return { kind: "is-some", consumeLen: someMatch[0].length };
+
+  // Qualified variant `Type.Variant` — match BEFORE bare `.Variant` so a
+  // qualified form is preferred when it applies.
+  const typedVariantMatch = /^([A-Z][A-Za-z0-9_]*\.[A-Z][A-Za-z0-9_]*)(?![A-Za-z0-9_$.])/.exec(tail);
+  if (typedVariantMatch) {
+    return { kind: "is-variant", consumeLen: typedVariantMatch[0].length, variant: typedVariantMatch[1] };
+  }
+
+  // Bare-dot variant `.Variant` (whitespace between `.` and the variant name
+  // is NOT permitted in this position — `is .Variant` is a single-token tag).
+  const bareVariantMatch = /^(\.[A-Z][A-Za-z0-9_]*)(?![A-Za-z0-9_$.])/.exec(tail);
+  if (bareVariantMatch) {
+    return { kind: "is-variant", consumeLen: bareVariantMatch[0].length, variant: bareVariantMatch[1] };
+  }
+
+  return null;
+}
+
+/** Format a placeholder call for the matched predicate. */
+function formatIsPredicate(lhs: string, suffix: IsPredicateSuffix): string {
+  switch (suffix.kind) {
+    case "is-not-not": return `__scrml_is_not_not__(${lhs})`;
+    case "is-not":     return `__scrml_is_not__(${lhs})`;
+    case "is-some":    return `__scrml_is_some__(${lhs})`;
+    case "is-variant": return `__scrml_is_variant__(${lhs}, "${suffix.variant}")`;
+  }
+}
+
+/**
+ * Replace every `<lhs> is <suffix>` occurrence in `s` with the corresponding
+ * `__scrml_is_X__(...)` placeholder call. Scans left-to-right, skipping
+ * string-literal interiors.
+ */
+function rewriteIsPredicates(s: string): string {
+  let result = "";
+  let i = 0;
+  let inString: string | null = null;
+
+  while (i < s.length) {
+    const c = s[i];
+
+    // String-literal tracking
+    if (inString === null) {
+      if (c === '"' || c === "'" || c === "`") {
+        inString = c;
+        result += c;
+        i++;
+        continue;
+      }
+    } else {
+      if (c === "\\") {
+        // Pass through the escape and its target
+        result += c;
+        i++;
+        if (i < s.length) { result += s[i]; i++; }
+        continue;
+      }
+      if (c === inString) {
+        inString = null;
+        result += c;
+        i++;
+        continue;
+      }
+      result += c;
+      i++;
+      continue;
+    }
+
+    // Look for the `is` keyword: word-boundary `is` followed by whitespace,
+    // followed by a recognised suffix. The character before `is` must be a
+    // non-identifier and the character after `is` must also be non-identifier
+    // (so we don't fire on `is_some` / `island` etc.).
+    if (c === "i" && s[i + 1] === "s") {
+      const before = i === 0 ? " " : s[i - 1];
+      const after = s[i + 2];
+      const isWord = /[A-Za-z0-9_$]/.test(before) || (after !== undefined && /[A-Za-z0-9_$]/.test(after));
+      if (!isWord) {
+        // After `is`, require at least one whitespace before the suffix.
+        let suffixStart = i + 2;
+        let wsCount = 0;
+        while (suffixStart < s.length && /\s/.test(s[suffixStart])) {
+          suffixStart++;
+          wsCount++;
+        }
+        if (wsCount > 0) {
+          const suffix = matchIsPredicateSuffix(s, suffixStart);
+          if (suffix !== null) {
+            // Find the LHS extent in `s` (the original string).
+            const lhsStart = scanLhsLeft(s, i);
+            if (lhsStart !== -1) {
+              // The bytes [lhsStart .. i) of `s` were already appended to
+              // `result` (no substitution can have intervened: substitutions
+              // only happen here, and after each one we skip past `is` +
+              // suffix, so the LHS-extent slice is verbatim in `result`'s
+              // tail). Trim that tail from `result` and emit the placeholder.
+              const lhsLenInS = i - lhsStart;
+              if (lhsLenInS > 0) {
+                result = result.slice(0, result.length - lhsLenInS);
+              }
+              const lhsText = s.slice(lhsStart, i).trimEnd();
+              result += formatIsPredicate(lhsText, suffix);
+              i = suffixStart + suffix.consumeLen;
+              continue;
+            }
+          }
+        }
+      }
+    }
+
+    result += c;
+    i++;
+  }
+
+  return result;
+}
+
 /** Pre-process scrml-specific operators for Acorn parsing. Returns transformed string. */
 function preprocessForAcorn(raw: string, opts?: { tildeActive?: boolean }): string {
   let s = raw.trim();
@@ -713,72 +1023,56 @@ function preprocessForAcorn(raw: string, opts?: { tildeActive?: boolean }): stri
   // This is processed first because match may contain `is` operators inside arms.
   s = preprocessMatchExprs(s);
 
-  // ─── LHS pattern for `is …` predicates (A4 fix S99 — invoice-card scope misfire) ───
+  // ─── `is …` predicate rewriting (Phase A: S99 / Phase B: 2026-05-17) ───
   //
-  // The collectExpr → joinWithNewlines path emits the condition string with
-  // whitespace AROUND each token, so `inv.paid_at is some` reaches this
-  // preprocessor as `inv . paid_at is some`. The prior pattern
-  // `[A-Za-z_$@][A-Za-z0-9_$.]*` allowed `.` inside the character class but
-  // required NO whitespace around the dot — so on the tokenized form the
-  // capture group only grabbed `paid_at`, producing the inverted-receiver
-  // emission `inv . __scrml_is_some__(paid_at)`. Downstream TS scope-walker
-  // then treated `paid_at` as a free-ident call argument and fired
-  // E-SCOPE-001 on the (correctly-bound) property name.
+  // Phase A (A4, S99) introduced a regex-based LHS capture: a base ident
+  // followed by member-access / single-level call / single-level index tail
+  // segments. That regex worked for chains like `obj.method().prop is some`
+  // and `arr[0] is some` but FAILED on nested parens/brackets inside a tail
+  // segment — `re.exec(str.trim()) is some` would route through a multi-pass
+  // suffix-substitution chain that introduced a stray `.` character and
+  // produced `re.exec(str.trim()).__scrml_is_some_suffix__` (invalid JS).
   //
-  // The widened pattern below captures:
-  //   - the base ident (`[A-Za-z_$@][A-Za-z0-9_$]*` — `@cell`, `inv`, `_x`)
-  //   - followed by zero or more tail segments, each one of:
-  //       · `\s*\.\s*<ident>`   member access, whitespace-tolerant
-  //       · `\([^()]*\)`        non-nested call parens
-  //       · `\[[^\[\]]*\]`      non-nested index brackets
+  // Phase B replaces the brittle multi-pass regex chain with a single
+  // structural scan via `rewriteIsPredicates`. The scanner walks the string
+  // once left-to-right, skipping string-literal interiors, and at every `is`
+  // keyword position it:
   //
-  // This preserves the FULL member/call/index chain as the LHS of `is …`,
-  // emitting `__scrml_is_some__(<full chain>)` so the resulting AST is a
-  // BinaryExpr `<member-access> is-some <not>` rather than a member-call
-  // shape that strands the property name as a free ident.
+  //   1. Looks right to identify the predicate suffix:
+  //        `is not not` (presence), `is some` / `is given` (presence),
+  //        `is not` (absence), `is .Variant` (variant tag), `is T.Variant`
+  //        (qualified variant tag).
+  //   2. Looks left through a BALANCED-paren / BALANCED-bracket scanner to
+  //      find the LHS predicate-target extent. The scanner consumes:
+  //        - bare or `@`-prefixed identifiers
+  //        - `.`-member-access chains (whitespace tolerant)
+  //        - balanced `(...)` call-tail groups, with nesting
+  //        - balanced `[...]` index-tail groups, with nesting
+  //      and STOPS at a binary operator (`||`, `&&`, comparison, arithmetic,
+  //      etc.), comma, semicolon, opening brace, or an unmatched `(` /
+  //      statement-start — matching standard JS precedence intuition.
+  //   3. Substitutes the matched `<LHS> is <suffix>` slice with the
+  //      placeholder call `__scrml_is_X__(<LHS>)` (or
+  //      `__scrml_is_variant__(<LHS>, "<variant>")` for variant tags).
   //
-  // Note: nested parens or brackets inside a tail segment fall through to
-  // the existing parenthesized-form rules (`\(([^)]+)\) is …`) — per SPEC
-  // §42.2.4 DQ-12 Phase A, parenthesized compound operands are the
-  // currently-supported shape; bare compound expressions without parens
-  // remain a Phase B item.
-  const LHS_IDENT_CHAIN = `[A-Za-z_$@][A-Za-z0-9_$]*(?:\\s*\\.\\s*[A-Za-z_$][A-Za-z0-9_$]*|\\([^()]*\\)|\\[[^\\[\\]]*\\])*`;
-
-  // Replace `is not not` (must come before `is not`)
-  // Pattern: <expr> is not not — left side is everything before ` is not not`
-  // We anchor on ` is not not` as a suffix (for the simple case)
-  // For parenthesized forms: (expr) is not not → __scrml_is_not_not__((expr))
-  s = s.replace(/\)\s+is\s+not\s+not(?!\s+not)/g, ") is_not_not_PLACEHOLDER");
-  s = s.replace(new RegExp(`(${LHS_IDENT_CHAIN})\\s+is\\s+not\\s+not(?!\\s+not)`, "g"), "__scrml_is_not_not__($1)");
-  s = s.replace(/\)\s*is_not_not_PLACEHOLDER/g, ") __scrml_is_not_not_result__");
-
-  // Replace `is not not` via parenthesized form
-  s = s.replace(/(__scrml_is_not_not_result__)/g, "__scrml_is_not_not_sentinel__");
-
-  // Replace `(expr) is not not` cleanly
-  s = s.replace(/\(([^)]+)\)\s+is\s+not\s+not/g, "__scrml_is_not_not__(($1))");
-
-  // Replace `is not` (absence check)
-  s = s.replace(/\)\s+is\s+not(?!\s+not)/g, ")__scrml_is_not_suffix__");
-  s = s.replace(new RegExp(`(${LHS_IDENT_CHAIN})\\s+is\\s+not(?!\\s+not)`, "g"), "__scrml_is_not__($1)");
-  s = s.replace(/\(([^)]+)\)\s+is\s+not(?!\s+not)/g, "__scrml_is_not__(($1))");
-  s = s.replace(/\)__scrml_is_not_suffix__/g, "__scrml_is_not__(PLACEHOLDER_PAREN)");
-
-  // Replace `is some` / `is given` (presence check)
-  s = s.replace(/\)\s+is\s+(?:some|given)/g, ").__scrml_is_some_suffix__");
-  s = s.replace(new RegExp(`(${LHS_IDENT_CHAIN})\\s+is\\s+(?:some|given)`, "g"), "__scrml_is_some__($1)");
-  s = s.replace(/\(([^)]+)\)\s+is\s+(?:some|given)/g, "__scrml_is_some__(($1))");
-  s = s.replace(/\)__scrml_is_some_suffix__/g, "__scrml_is_some__(PLACEHOLDER_PAREN_SOME)");
-
-  // Replace `is .Variant` (enum variant check, dot-prefixed)
-  s = s.replace(new RegExp(`(${LHS_IDENT_CHAIN})\\s+is\\s+(\\.[A-Z][A-Za-z0-9_]*)`, "g"),
-    '__scrml_is_variant__($1, "$2")');
-  s = s.replace(/\(([^)]+)\)\s+is\s+(\.[A-Z][A-Za-z0-9_]*)/g,
-    '__scrml_is_variant__(($1), "$2")');
-
-  // Replace `is TypeName.Variant` (qualified enum variant check)
-  s = s.replace(new RegExp(`(${LHS_IDENT_CHAIN})\\s+is\\s+([A-Z][A-Za-z0-9_]*\\.[A-Z][A-Za-z0-9_]*)`, "g"),
-    '__scrml_is_variant__($1, "$2")');
+  // Critical SPEC §42.2.4 semantics this rewrite honors:
+  //   - Parentheses around a compound expression have NO special meaning
+  //     beyond grouping (§42.2.4 line 18437). `(a || b) is some` and
+  //     `((a || b)) is some` both produce the same LHS — the balanced-paren
+  //     scanner consumes the wrapping parens as a single segment.
+  //   - Bare binary expressions (`a || b is some`) bind per JS precedence:
+  //     `||` has lower precedence than `is some`, so the scanner stops at
+  //     `||` going leftward and the result is `a || __scrml_is_some__(b)`.
+  //     If the programmer wants `(a || b)` as the predicate target, the
+  //     parens — as grouping — give it to them.
+  //   - Side-effecting LHS expressions like `re.exec(str)` evaluate once:
+  //     the placeholder consumer in esTreeToExprNode unwraps the call back
+  //     into a single BinaryExpr left-operand, which the AST builder emits
+  //     as a single evaluation (the temp-var single-eval guarantee in
+  //     codegen/rewrite.ts:_rewriteParenthesizedIsOp is enforced separately
+  //     by the codegen pipeline; the AST shape carries the full expression
+  //     as a node tree).
+  s = rewriteIsPredicates(s);
 
   // Bare-dot variants (.Variant) as primary expressions (S66 — principled fix per Bryan)
   //
