@@ -9535,7 +9535,13 @@ of an enum-typed reactive cell. It is the Tier 1 wrapper of the §17.0 case-anal
   ONLY when an `<engine for=Type>` for the same `Type` is in scope (most-local-semantics-friendly
   resolution). Outside that scope, `on=` is mandatory.
 - **State-children** with variant names match enum variants. Payload variants destructure
-  positionally: `<Ready(rows)>` binds `rows` for that arm's body.
+  positionally: `<Ready(rows)>` binds `rows` for that arm's body. The same payload-binding
+  surface — parenthesized form here at the Tier 1 (match) locus — also applies to engine
+  state-children under the Tier 2 (engine) wrapper per §51.0.B.1; promotion via wrapper
+  swap (§17.0 ladder) carries payload bindings forward verbatim. §51.0.B.1 additionally
+  authorizes a bare-attribute form (`<Ready rows>`) and a named form (`<Ready rows=r>`)
+  on engine state-children; these forms are normatively §51-locus only and do NOT appear
+  on `<match>` state-children, where the parenthesized form is canonical.
 - **Bodies** use the three legitimate body forms (cross-ref §4 / §51):
   - Self-closing `<Variant/>` — no body, renders nothing for that variant
   - Bare body `<Variant>...</>` — markup body with text, `${}` interpolation, nested tags
@@ -14697,6 +14703,9 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-ENGINE-RULE-LEGACY-SYNTAX | §51.0.F | A `rule=` value uses the legacy event-arrow form (`rule="event -> Variant"`). On `<engine>`, `rule=` must use one of the three §51.0.F target-only forms: single-target (`rule=.NextVariant`), multi-target (`rule=(.A \| .B \| .C)`), or wildcard (`rule=*`). Event-arrow rules belong to the legacy `<machine>` syntax (§51.3, deprecated). Migrate by writing the targets directly. (Catalog addition S68 — A1b B15.) | Error |
 | E-HISTORY-NO-INNER-ENGINE | §51.0.N, §51.0.Q | The `history` attribute appears on a state-child whose body does not contain a nested `<engine>`. `history` is meaningful only on composite state-children (those with an inner engine to track). Either add a nested `<engine>` to the body, or remove `history`. (Catalog addition S67 — DD-Harel Approach C Hybrid, Insight 23 grammar decision #2.) | Error |
 | E-INTERNAL-RULE-NOT-COMPOSITE | §51.0.O, §51.0.Q | The `internal:rule=` prefix appears on a state-child that is not composite (no nested `<engine>` body). The internal-vs-external distinction is meaningful only when there is an inner engine whose lifecycle would be preserved on internal transitions. Use canonical `rule=` on non-composite state-children. (Catalog addition S67 — DD-Harel Approach C Hybrid, Insight 23 grammar decision #4.) | Error |
+| E-ENGINE-PAYLOAD-ON-UNIT-VARIANT | §51.0.B.1 | Payload-binding attributes appear on an engine state-child whose variant is a unit variant (no payload fields per §14.4). Unit variants have no fields to bind; the bindings are a developer mistake (typically a payload field was removed from the variant declaration but the bindings on the state-child were not updated). Either add fields to the variant declaration (`Variant(field:type, ...)` per §14.4) or remove the binding attributes from the state-child opener. (Catalog addition S98 — §51.0.B.1 amendment.) | Error |
+| E-ENGINE-PAYLOAD-ARITY-MISMATCH | §51.0.B.1 | The number of payload-binding attributes on an engine state-child does not match the variant's payload field count (per §14.4). In the bare-attribute and positional-parenthesized forms, all fields MUST be bound; too few or too many bindings fire this code. Also fires when the bare-attribute or named form contains mixed positional + named bindings within the same state-child opener (the §18.7 mixed-form prohibition extends to this locus). Distinct from §18.7's `E-TYPE-021` because the diagnostic surface differs (state-child attribute list vs match arm pattern); in the parenthesized form `E-TYPE-021` fires for arity / mixed-form (per §18.7 inheritance) and `E-ENGINE-PAYLOAD-ARITY-MISMATCH` is reserved for the attribute-list-based forms. Resolution: list all payload field bindings in declaration order, OR use the named form to bind a subset by field name. (Catalog addition S98 — §51.0.B.1 amendment.) | Error |
+| E-ENGINE-PAYLOAD-RESERVED-COLLISION | §51.0.B.1 | A payload-binding name on an engine state-child collides with a reserved state-child attribute name (`rule`, `effect`, `history`, `internal:rule` — per §51.0.B / §51.0.F / §51.0.H / §51.0.N / §51.0.O). The reserved attribute interpretation takes precedence in the bare-attribute form, so the bareword would be consumed as the reserved attribute and the payload field would silently fail to bind. Resolution: either rename the payload field at its enum variant declaration site (§14.4), OR use the parenthesized form's positional binding with a non-colliding local name (`<Variant(rule_local)>` — binds the field positionally to a local that does not shadow the reserved name). (Catalog addition S98 — §51.0.B.1 amendment.) | Error |
 | E-VALIDATOR-CIRCULAR-DEP | §55.11 | Two or more validators reference each other via cross-field predicate args (e.g., `<a eq(@b)>` and `<b eq(@a)>`). The validator dependency graph is a DAG; cycles are forbidden. | Error |
 | E-DERIVED-WITH-VALIDATORS | §55.14 | Validators applied to a derived cell (`const <x ...>`). Derived cells are read-only; validators imply gating which is incoherent on a computed value. Use a refinement type instead (`const <x>: number(>=0) = ...`). | Error |
 | E-DEBOUNCED-WITH-DERIVED | §6.13 | A `debounced=` (or `throttled=`) reactivity attribute is applied to a derived cell (`const <x debounced=300ms> = expr`). Derived cells are read-only; debounce/throttle is a write-side wrapper; combining the two is meaningless. Resolution: debounce the upstream source instead (`<source debounced=300ms> = @raw; const <doubled> = @source * 2`). (Catalog addition S79 — debounce/throttle Approach B clean-cut.) | Error |
@@ -21464,6 +21473,257 @@ This declaration:
 - Validates writes to `@marioState` against the from-state's `rule=` (§51.0.F)
 - The `<engine>` body is an inline state-machine definition AND its rendered output
 
+**Normative statements (state-child attribute surface):**
+
+- A state-child opener tag SHALL be a PascalCase identifier matching a variant of the
+  engine's `for=Type` enum (`E-ENGINE-STATE-CHILD-INVALID-VARIANT`).
+- A state-child MAY carry the reserved attributes enumerated above (`rule=`, `effect=`,
+  `internal:rule=` — §51.0.O, `history` — §51.0.N) and the reserved structural-element
+  children enumerated above (`<onTransition>` — §51.0.H, `<onTimeout>` — §51.0.M).
+- A state-child MAY additionally carry **payload-binding attributes** declaring local
+  identifiers bound to the variant's payload fields (when the variant is payload-bearing
+  per §14.4). The three accepted forms — bare-attribute, named, and parenthesized —
+  are specified normatively in §51.0.B.1.
+- The set of attribute names recognized as **reserved state-child attributes** (those
+  which take precedence over payload-binding interpretation) is exactly
+  `{ rule, effect, history, internal:rule }`. Any extension to this set in a future
+  spec amendment SHALL cross-reference §51.0.B.1's reserved-name precedence rule and
+  SHALL define migration semantics for adopter code whose payload-binding names would
+  shadow the new reserved name.
+
+#### 51.0.B.1 Payload binding on state-children
+
+**Added:** 2026-05-17 (S98 amendment). Sister normative form to §18.0.1 (block-form
+match arm payload binding); brings §51's normative surface up to par with the form
+appearing in §51's own canonical worked examples (§51.0.M, §4.14, §21.8). Authority:
+`scrml-support/docs/deep-dives/payload-bearing-engine-state-child-variants-SURVEY-2026-05-17.md`
+(track 1 — SPEC amendment; compiler-feature wiring is sequenced separately as track 2).
+
+A state-child tag whose variant is **payload-bearing** (declared with one or more named
+fields per §14.4 — e.g., `Done(rows: int)`, `OpenAt(depth: int, opener: BracketKind,
+span: Span)`) MAY declare local bindings for the variant's payload fields. The bindings
+are in scope throughout the state-child body — markup interpolation (`${...}`), nested
+logic blocks, event-handler attribute values, `<onTransition>` and `<onTimeout>` element
+children, and any nested `<engine>` declaration's body.
+
+**Three accepted forms (positional, named, parenthesized):**
+
+The compiler SHALL recognize three syntactic forms for payload binding, all carrying the
+same semantics (the variant's payload field types per §14.4 / §14.3.2 propagate to the
+bound local identifiers as in §18.7).
+
+1. **Bare-attribute form (positional)** — payload field bindings appear as bareword
+   attributes (markup attribute values absent, per the §5 bare-form convention) on the
+   state-child opener tag, in declaration order. This is the form used in §51.0.M,
+   §4.14, and §21.8 worked examples.
+
+   ```scrml
+   type LoadPhase:enum = { Idle, Loading, Done(rows: int), Error(msg: string) }
+
+   <engine for=LoadPhase initial=.Idle>
+     <Idle rule=.Loading>: <button onclick=load()>Load</button>
+     <Loading rule=(.Done | .Error)>: Loading...
+     <Done rows rule=.Idle>: ${rows} rows
+     <Error msg rule=.Idle>: ${msg}
+   </>
+   ```
+
+   Bindings are extracted left-to-right from the attribute list, **skipping the reserved
+   attribute names** (`rule`, `effect`, `history`, `internal:rule`). The bareword
+   attributes that remain are interpreted as positional payload bindings.
+
+2. **Named form** — each binding appears as a `field=local` attribute, where `field` is
+   the declared payload field name and `local` is the binding identifier introduced
+   into scope. This form mirrors §18.7's named match-arm payload destructuring.
+
+   ```scrml
+   <Done rows=r rule=.Idle>: ${r} rows
+   <Error msg=m rule=.Idle>: ${m}
+   ```
+
+   The named form binds by field name (NOT by source order); the RHS identifier is the
+   local name introduced into scope. Mixing named and bare-attribute forms within the
+   same state-child opener is FORBIDDEN (§18.7's mixed-form prohibition extends to this
+   locus); fires `E-ENGINE-PAYLOAD-ARITY-MISMATCH`.
+
+3. **Parenthesized form (canonical, §18.0.1-parallel)** — bindings appear inside
+   parentheses immediately following the variant name on the opener tag. This is the
+   form §18.0.1 normatively specifies for match block-form state-children; the present
+   amendment authorizes it on engine state-children with identical semantics.
+
+   ```scrml
+   <Done(rows) rule=.Idle>: ${rows} rows
+   <OpenAt(depth, opener, span) rule=(.Balanced | .OpenAt)>
+     // body references `depth`, `opener`, `span` as in-scope locals
+   </>
+   ```
+
+   The parenthesized form is positional by default — bindings bind left-to-right to the
+   variant's fields in declaration order, per §18.7. Named-form-inside-parens
+   (`<Done(rows: r) rule=.Idle>`) is ALSO accepted and follows §18.7's named-form rules
+   (bind by field name; partial binding is valid in named form).
+
+**Positional vs named — semantic inheritance from §18.7:**
+
+For all three forms, payload-binding semantics inherit from §18.7:
+
+- Positional binding assigns fields left-to-right in **declaration order** (per §14.4 /
+  §14.3.2), regardless of the local name chosen. `<Done count>` on `Done(rows: int)`
+  binds the single payload field `rows` to the local identifier `count` — this is
+  valid positional binding (the local name `count` does not need to match the field
+  name `rows`).
+- Named binding (`<Done rows=r>` or `<Done(rows: r)>`) binds by field name; an unknown
+  field name fires `E-TYPE-022` (per §18.7).
+- Positional arity mismatch (binding count ≠ variant payload-field count) fires
+  `E-ENGINE-PAYLOAD-ARITY-MISMATCH` (NEW §34 row — distinct from §18.7's `E-TYPE-021`
+  because the diagnostic surface differs: state-child attribute list vs match arm
+  pattern; cross-references back to §18.7's positional-arity rule).
+- Partial named binding (naming fewer than all fields in the named form) is valid;
+  unnamed fields are inaccessible in the body but cause no error. This mirrors §18.7.
+
+**Reserved-name precedence:**
+
+The reserved state-child attribute names — `rule`, `effect`, `history`,
+`internal:rule` — take **precedence** over payload-binding interpretation in the
+bare-attribute form. A payload field named `rule`, `effect`, `history`, or `internal`
+CANNOT be bound via the bare-attribute form on its state-child — the bareword would be
+consumed as the reserved attribute. In that case the adopter MUST use the parenthesized
+form (`<Variant(rule)>` — never ambiguous) or the named form (`<Variant rule=r>` —
+field name on LHS, binding on RHS; reserved-name shadow detected at this site).
+
+When the parser-extracted payload-binding name (any form) collides with a reserved
+state-child attribute name, the compiler SHALL fire
+`E-ENGINE-PAYLOAD-RESERVED-COLLISION` (NEW §34 row). The diagnostic message SHALL
+direct the adopter to either rename the payload field at declaration site (§14.4) or
+suppress via the parenthesized form's positional binding (`<Variant(rule_local)>` —
+chooses a non-colliding local name).
+
+**Unit-variant rejection:**
+
+Payload-binding attributes on a state-child whose variant has NO payload fields (a unit
+variant per §14.4) SHALL fire `E-ENGINE-PAYLOAD-ON-UNIT-VARIANT` (NEW §34 row). Unit
+variants carry no fields to bind; the binding attribute represents a developer mistake
+(typically: a payload field was removed from the variant declaration but the bindings
+on the state-child were not updated). The diagnostic SHALL name the offending variant
+and direct the adopter to either add fields to the variant declaration or remove the
+binding attributes from the state-child opener.
+
+**Worked example — `BracketStack` engine (the canonical M1.x downstream use):**
+
+```scrml
+type BracketKind:enum = { Paren, Brace, Bracket }
+
+type BracketStack:enum = {
+    Balanced,
+    OpenAt(depth: int, opener: BracketKind, span: Span)
+}
+
+<engine for=BracketStack initial=.Balanced>
+  <Balanced rule=.OpenAt>
+    // open-bracket → push frame, transition to .OpenAt(depth=1, ...)
+  </>
+  <OpenAt depth opener span rule=(.Balanced | .OpenAt)>
+    //     ^^^^^^^^^^^^^^^^^^ ← three positional payload bindings
+    // body references `depth`, `opener`, `span` as in-scope locals; types
+    // inherit from the variant's payload field declarations (int, BracketKind, Span).
+    Depth: ${depth} (opener at ${span.line}:${span.col})
+  </>
+</>
+```
+
+The parenthesized form is also accepted and semantically identical:
+
+```scrml
+<OpenAt(depth, opener, span) rule=(.Balanced | .OpenAt)>
+  Depth: ${depth} (opener at ${span.line}:${span.col})
+</>
+```
+
+**Worked example — array-typed payload (`ErrorRecovery.AccumulatingSkipped`):**
+
+```scrml
+type ErrorRecovery:enum = {
+    Healthy,
+    AccumulatingSkipped(tokens: Token[]),
+    ReSynchronized(at: SyncToken)
+}
+
+<engine for=ErrorRecovery initial=.Healthy>
+  <Healthy rule=.AccumulatingSkipped></>
+  <AccumulatingSkipped tokens rule=(.AccumulatingSkipped | .ReSynchronized)>
+    // `tokens` is bound to the `Token[]` payload field; body may iterate.
+    Skipped ${tokens.length} tokens.
+  </>
+  <ReSynchronized at rule=.Healthy>
+    // `at` is bound to the `SyncToken` struct payload; body may access fields.
+    Resync at ${at.line}:${at.col}.
+  </>
+</>
+```
+
+Array-typed (`Token[]`) and struct-typed (`SyncToken`) payloads bind identically to
+scalar-typed payloads — the binding's type is the declared field type per §14.4 /
+§14.3.2.
+
+**Normative statements:**
+
+- An engine state-child tag for a payload-bearing variant MAY declare bindings for the
+  variant's payload fields via the bare-attribute, named, or parenthesized form.
+- Bindings introduced by any of the three forms SHALL be in scope throughout the
+  state-child body — markup interpolation, nested logic blocks, event-handler attribute
+  values, `<onTransition>` / `<onTimeout>` element children, and the body of any
+  nested `<engine>` declaration (per §51.0.Q.1 composite state-children).
+- The type of each bound local SHALL be the declared type of the corresponding payload
+  field in the variant's declaration (per §14.4, §14.3.2, and §18.7).
+- Positional binding (bare-attribute and parenthesized-without-`field:`-LHS forms)
+  SHALL assign fields left-to-right in declaration order, regardless of the chosen
+  local name. The local name does NOT need to match the field name; the binding is
+  position-determined, not name-determined.
+- Named binding (named form `<Variant field=local>` and parenthesized named form
+  `<Variant(field: local)>`) SHALL bind by field name. An unknown field name SHALL fire
+  `E-TYPE-022` (per §18.7).
+- Mixing positional and named binding forms within the same state-child opener SHALL be
+  a compile error. In the parenthesized form, this inherits §18.7's
+  positional-mixed-with-named prohibition (fires `E-TYPE-021`). In the
+  attribute-list-based forms (bare and named), the equivalent prohibition fires
+  `E-ENGINE-PAYLOAD-ARITY-MISMATCH`.
+- Payload-binding attribute counts in the bare-attribute and positional-parenthesized
+  forms SHALL match the variant's payload field count exactly. Too few or too many
+  bindings SHALL fire `E-ENGINE-PAYLOAD-ARITY-MISMATCH` (NEW §34 row).
+- Payload-binding attributes on a unit variant (zero payload fields per §14.4) SHALL
+  fire `E-ENGINE-PAYLOAD-ON-UNIT-VARIANT` (NEW §34 row).
+- A payload-binding name that collides with a reserved state-child attribute name
+  (`rule`, `effect`, `history`, `internal:rule`) SHALL fire
+  `E-ENGINE-PAYLOAD-RESERVED-COLLISION` (NEW §34 row). The reserved attribute
+  interpretation SHALL take precedence in the bare-attribute form; the parenthesized
+  form (`<Variant(rule_local)>`) provides an escape hatch via positional binding with a
+  non-colliding local name.
+
+**Cross-references:**
+
+- §14.4, §14.3.2 — enum payload-variant declaration form; payload field types.
+- §18.0.1 — sister normative form (match block-form state-children; parenthesized
+  payload binding). The present amendment is the §51-locus parallel.
+- §18.7 — positional vs named payload destructuring; arity rules; mixed-form
+  prohibition. The present amendment inherits these semantics.
+- §51.0.F — `rule=` contract (one of the four reserved attributes that take precedence
+  over payload-binding interpretation).
+- §51.0.H — `effect=` / `<onTransition>` (reserved attribute / structural element;
+  bindings are in scope within `<onTransition>` element children).
+- §51.0.M — `<onTimeout>` (structural element child of a state-child; bindings are in
+  scope within `<onTimeout>` attribute values such as computed-delay `${expr}<unit>`).
+- §51.0.N — `history` (reserved bareword attribute that takes precedence over
+  payload-binding interpretation).
+- §51.0.O — `internal:rule=` (reserved attribute that takes precedence; namespace
+  precedent).
+- §51.0.Q.1 — composite state-children; payload bindings are in scope within nested
+  `<engine>` declaration bodies inside composite state-children.
+- §34 — `E-ENGINE-PAYLOAD-ON-UNIT-VARIANT`, `E-ENGINE-PAYLOAD-ARITY-MISMATCH`,
+  `E-ENGINE-PAYLOAD-RESERVED-COLLISION`, plus the inherited §18.7 codes `E-TYPE-021`
+  (positional arity / mixed-form in the parenthesized form) and `E-TYPE-022`
+  (unknown-field-name in the named form).
+- Authority deep-dive: `scrml-support/docs/deep-dives/payload-bearing-engine-state-child-variants-SURVEY-2026-05-17.md`.
+
 #### 51.0.C Auto-declared variable + auto-derived var name
 
 When you declare `<engine for=Type ...>`, the compiler **auto-declares** a reactive state
@@ -21969,11 +22229,24 @@ function load() {
     Loading...
   </>
 
-  <Done count rule=.Idle>: ${count} rows
+  <Done rows rule=.Idle>: ${rows} rows
   <TimedOut rule=.Idle>: Timed out
   <Error msg rule=.Idle>: ${msg}
 </>
 ```
+
+> **Editorial note (S98 — §51.0.B.1 amendment cross-ref).** Pre-S98 revisions of this
+> example used `<Done count rule=.Idle>: ${count} rows` — a positional payload binding
+> whose local name (`count`) intentionally diverged from the field name (`rows`). That
+> form is still semantically valid per §51.0.B.1: positional binding assigns fields
+> left-to-right in declaration order regardless of the local name (the binding
+> `count` would still bind the single field `rows`). The current worked example uses
+> the field-matching name `rows` for pedagogical clarity — it keeps the canonical
+> example uniform with the variant declaration `Done(rows: int)` and avoids modelling
+> name-divergence in an introductory §51.0.M context. Adopters who prefer a different
+> local name (for shadow-avoidance or local readability) may use any non-reserved
+> identifier; the binding is positional, not name-determined. See §51.0.B.1 for the
+> full payload-binding contract.
 
 **Semantics:**
 
