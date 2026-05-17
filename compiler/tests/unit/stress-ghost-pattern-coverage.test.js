@@ -122,13 +122,14 @@ const REACT_FIXTURES = [
   {
     name: "React useState hook call in logic",
     src: `<program>\${ const [count, setCount] = useState(0) }<div>\${count}</div></program>`,
-    // No lint coverage for `useState(...)` — silently passes through, breaks at runtime.
-    expect: { category: "generic-error", codePrefix: "E-SCOPE-001" },
+    // S97 commit: W-LINT-016 added — pattern-specific React-hook diagnostic
+    // (was generic E-SCOPE-001 "undefined identifier" pre-fix).
+    expect: { category: "ghost-caught", code: "W-LINT-016" },
   },
   {
     name: "React useEffect hook call in logic",
     src: `<program>\${ useEffect(() => { console.log("mount") }, []) }<div>x</div></program>`,
-    expect: { category: "generic-error", codePrefix: "E-SCOPE-001" },
+    expect: { category: "ghost-caught", code: "W-LINT-016" },
   },
   {
     name: "React Fragment <>",

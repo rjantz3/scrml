@@ -492,6 +492,33 @@ const PATTERNS = [
     skipIf: (offset, logicRanges) => inRange(offset, logicRanges),
   },
 
+  // Pattern 17: React hooks — useState, useEffect, useRef, useMemo, useCallback,
+  // useContext, useReducer, useLayoutEffect, useTransition, useDeferredValue,
+  // useId, useSyncExternalStore, useInsertionEffect (W-LINT-016, S97).
+  //
+  // The adopter likely came from React and is reaching for hooks. Each maps
+  // to a scrml primitive that's structurally simpler:
+  //   useState(init)         → <x> = init  (read @x, write @x = expr)
+  //   useEffect(fn, [deps])  → reactive ${ ... } block (deps auto-tracked);
+  //                            lifecycle via <onMount>/<onCleanup> tags (§6.7)
+  //   useRef(init)           → <x> = init  OR  bind:this=@el for DOM refs
+  //   useMemo(() => e, deps) → const <x> = e  (derived cell, deps auto-tracked)
+  //   useCallback(fn, deps)  → just declare fn; no re-render model, no memo needed
+  //   useContext(Ctx)        → component prop-passing or stdlib equivalents
+  //   useReducer(red, init)  → <engine for=Type initial=.X> with rule= contracts
+  //
+  // Pattern matches `useFoo(` — the call form. Bare references without `(`
+  // can't act as hooks anyway. Skip in comments to avoid false positives in
+  // explanatory text.
+  {
+    regex: /\b(useState|useEffect|useRef|useMemo|useCallback|useContext|useReducer|useLayoutEffect|useTransition|useDeferredValue|useId|useSyncExternalStore|useInsertionEffect)\s*\(/g,
+    ghost: "useState() / useEffect() / useRef() etc. (React hook call)",
+    correction: "scrml has no React hooks (no virtual DOM, no re-render model). State: `<x> = init` (read `@x`, write `@x = expr`). Effects: reactive `${...}` blocks auto-track deps; lifecycle via `<onMount>` / `<onCleanup>`. Memo: `const <x> = expr`. Reducer: `<engine for=Type>` with `rule=` contracts. See SPEC §6 (state), §6.7 (lifecycle), §51 (engines).",
+    see: "§6, §6.7, §51",
+    code: "W-LINT-016",
+    skipIf: (offset, _logicRanges, _cssRanges, commentRanges) => inRange(offset, commentRanges),
+  },
+
   // Pattern 16: W-LIFECYCLE-CANDIDATE — string-discriminator trap.
   //
   // S64 debate-04 verdict A+ #2 (string-switch trap, gingerbill design insight):
