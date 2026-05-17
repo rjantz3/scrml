@@ -1,0 +1,332 @@
+// scrml.dev /reference/elements/channel
+//
+// Reference page for <channel>. The real-time multi-client surface.
+// V5-strict body, auto-sync, no @shared modifier.
+//
+// SPEC anchors: §38 (WebSocket Channels) + §38.1 (file-level
+// placement under Insight 30 S87) + §38.4 (V5-strict reactive sync)
+// + §38.12 (cross-file inline expansion) + §34 E-CHANNEL-INSIDE-PROGRAM
+// + E-CHANNEL-SHARED-MODIFIER + W-CHANNEL.
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Elements
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-slate-900 font-mono">
+                &lt;channel&gt;
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                Real-time multi-client state. Declared cells auto-sync
+                across connected clients over WebSocket. V5-strict
+                body; the compiler generates the endpoint, the wire
+                protocol, and the reconnect logic.
+            </p>
+            <div class="flex gap-4 mt-4 text-xs">
+                <span class="px-2 py-1 bg-emerald-50 text-emerald-700 rounded">
+                    Available since v0.2.0 (D3 rewrite 2026-05-04)
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§38"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC §38 (normative)
+                </a>
+            </div>
+        </header>
+
+        // ───────────────────────────────────────────────────────────
+        // §2 — Syntax
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Syntax
+        </h2>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;channel name="chat" topic="lobby"&gt;
+  &lt;cell&gt; = initialValue
+  ...
+&lt;/channel&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-4">
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">name=</code>
+            is the channel identifier (drives the WS endpoint
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">/_scrml_ws/&lt;name&gt;</code>).
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">topic=</code>
+            optionally partitions clients (defaults to
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">name</code>).
+            Inside the body, V5-strict declarations
+            (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;cell&gt; = init</code>)
+            create channel-scoped reactive cells that auto-sync
+            across subscribed clients.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §3 — Worked example
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Worked example
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            A minimal chat room. One channel, one synced list, one
+            server function exposed to clients.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;program&gt;
+
+  &lt;channel name="chat" topic="lobby"&gt;
+    &lt;messages&gt; = []
+
+    &#36;&#123; server function postMessage(author, body) &#123;
+        &#64;messages = [...&#64;messages, &#123; author, body, ts: Date.now() &#125;]
+    &#125; &#125;
+  &lt;/channel&gt;
+
+  &#36;&#123; const count = &#64;messages.length &#125;
+
+&lt;/program&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;messages&gt;</code>
+            is declared inside the channel body, so it auto-syncs.
+            Anywhere else in the
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>,
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#64;messages</code>
+            reads it &mdash; program-scope visibility for channel
+            cells is the canonical pattern (per &sect;38.4 + Insight
+            30).
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §4 — Semantics
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Semantics
+        </h2>
+
+        <ul class="space-y-3 text-slate-700">
+            <li>
+                <strong>Children of &lt;program&gt;, not file-level
+                siblings.</strong> Channels live INSIDE the entry-file
+                &lt;program&gt; (sibling of &lt;page&gt;). Pure
+                channel-module files (no &lt;program&gt; in the file)
+                MAY declare channels at file top &mdash; the
+                cross-file inline-expansion pattern per &sect;38.12.6.
+                Per Insight 30 (S87 placement reversal).
+            </li>
+            <li>
+                <strong>No &#64;shared modifier.</strong> Auto-sync is
+                a consequence of being declared inside the channel
+                body, NOT a per-cell modifier.
+                <a href="/reference/errors/E-CHANNEL-SHARED-MODIFIER"
+                   class="font-mono text-xs text-rose-700 underline">E-CHANNEL-SHARED-MODIFIER</a>
+                fires on the legacy form. Per &sect;38.4.
+            </li>
+            <li>
+                <strong>V5-strict body.</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;cell&gt; = init</code>
+                declares; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#64;cell</code>
+                reads / writes. Same access discipline as everywhere
+                else in scrml.
+            </li>
+            <li>
+                <strong>Auto-injected helpers in server functions.</strong>
+                Inside a channel body, server functions get
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">broadcast(data)</code>
+                and
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">disconnect()</code>
+                injected into scope. Use
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">broadcast</code>
+                for one-shot messages that don't fit a reactive cell;
+                use cell writes for state every client should track.
+            </li>
+            <li>
+                <strong>Event handlers.</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">onserver:message=handler(msg)</code>
+                and
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">onclient:connect=handler()</code>
+                handle the underlying WS events. Handler params
+                (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">msg</code>)
+                are function-local locals, accessed bare. V5-strict
+                local semantics; not state.
+            </li>
+            <li>
+                <strong>Compiler generates the wire.</strong> WebSocket
+                endpoint at
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">/_scrml_ws/&lt;name&gt;</code>
+                ; reconnect logic
+                (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">channel-reconnect=N</code>
+                on &lt;program&gt; sets the project-level default);
+                payload serialization; per-topic broadcast graph. The
+                developer writes the declared cells; the rest is
+                emitted.
+            </li>
+        </ul>
+
+        <h3 class="text-lg font-semibold text-slate-900 mt-6 mb-2">
+            Errors this feature can fire
+        </h3>
+        <ul class="space-y-1 text-sm text-slate-700 font-mono">
+            <li><a href="/reference/errors/E-CHANNEL-INSIDE-PROGRAM" class="text-rose-700 underline">E-CHANNEL-INSIDE-PROGRAM</a> &mdash; channel at file top in a file that already has &lt;program&gt;</li>
+            <li><a href="/reference/errors/E-CHANNEL-INSIDE-PAGE" class="text-rose-700 underline">E-CHANNEL-INSIDE-PAGE</a> &mdash; channel nested inside a &lt;page&gt;</li>
+            <li><a href="/reference/errors/E-CHANNEL-SHARED-MODIFIER" class="text-rose-700 underline">E-CHANNEL-SHARED-MODIFIER</a> &mdash; legacy &#64;shared modifier (removed v0.next)</li>
+            <li><a href="/reference/errors/E-CHANNEL-008" class="text-rose-700 underline">E-CHANNEL-008</a> &mdash; channel name collision</li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §5 — Edge cases
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Edge cases
+        </h2>
+
+        <ul class="space-y-4 text-slate-700">
+            <li>
+                <strong>Pure channel-module files.</strong> A
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.scrml</code>
+                file with no top-level &lt;program&gt; may declare
+                channels at file top. Other entry files import the
+                channel as a unit; the compiler inlines the channel's
+                cells into the importer's &lt;program&gt; (the
+                "channel-module sharing pattern", &sect;38.12.6).
+            </li>
+            <li>
+                <strong>topic= is the partition key.</strong>
+                Multiple clients on the same channel
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">name=</code>
+                but different
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">topic=</code>
+                are isolated. The default is
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">topic=name</code>
+                &mdash; one global room. For per-document rooms,
+                derive
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">topic=</code>
+                from the current route.
+            </li>
+            <li>
+                <strong>Channel writes from clients are server-
+                mediated.</strong> A client can only write a channel
+                cell via a server function declared inside the channel
+                body. The wire protocol passes through the
+                compiler-generated server-fn endpoint, which writes
+                the cell and broadcasts to peers. Direct client-side
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#64;cell = ...</code>
+                writes are scoped to the local client.
+            </li>
+            <li>
+                <strong>Channel-reconnect default.</strong> Project-
+                level reconnect window via
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program channel-reconnect=N&gt;</code>
+                (S81 &sect;38.3.1). Set to zero to disable
+                auto-reconnect on transient WS drops.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §6 — Related features
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related features
+        </h2>
+
+        <ul class="space-y-1 text-slate-700">
+            <li>
+                <a href="/reference/elements/program" class="text-blue-700 hover:text-blue-900 underline">
+                    &lt;program&gt;
+                </a> &mdash; channels live as children of the
+                entry-file &lt;program&gt;.
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">channel-reconnect=N</code>
+                on &lt;program&gt; sets the default reconnect window.
+            </li>
+            <li>
+                <span class="font-mono text-slate-500">server function</span>
+                &mdash; inside a channel body, server fns get
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">broadcast</code>
+                and
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">disconnect</code>
+                injected. Reference page queued.
+            </li>
+            <li>
+                <span class="font-mono text-slate-500">server function*</span>
+                (SSE generators, &sect;37) &mdash; the one-way
+                server-to-client equivalent; lighter than a channel
+                when clients don't write back.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §7 — Availability
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Availability
+        </h2>
+
+        <table class="w-full text-sm text-left border-collapse">
+            <thead>
+                <tr class="border-b border-slate-300">
+                    <th class="py-2 pr-4 font-semibold text-slate-900">Surface</th>
+                    <th class="py-2 pr-4 font-semibold text-slate-900">Since</th>
+                    <th class="py-2 font-semibold text-slate-900">Notes</th>
+                </tr>
+            </thead>
+            <tbody class="text-slate-700">
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">V5-strict body / no &#64;shared</td>
+                    <td class="py-2 pr-4">D3 rewrite (2026-05-04)</td>
+                    <td class="py-2 text-xs">Major SPEC &sect;38 rewrite — &#64;shared removed; auto-sync from placement</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">Channels as &lt;program&gt; children</td>
+                    <td class="py-2 pr-4">Insight 30 (S87)</td>
+                    <td class="py-2 pr-4 text-xs">Placement reversal — channels inside &lt;program&gt;, not file-level</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">channel-reconnect=N on &lt;program&gt;</td>
+                    <td class="py-2 pr-4">S81 (&sect;38.3.1)</td>
+                    <td class="py-2 text-xs">Project-level reconnect window default</td>
+                </tr>
+                <tr>
+                    <td class="py-2 pr-4 font-mono text-xs">Cross-file channel-module inline expansion</td>
+                    <td class="py-2 pr-4">&sect;38.12.6</td>
+                    <td class="py-2 text-xs">Pure-channel files import as a unit</td>
+                </tr>
+            </tbody>
+        </table>
+
+        // ───────────────────────────────────────────────────────────
+        // §8 — Specification
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            This page summarizes <strong>SPEC &sect;38</strong>
+            (WebSocket Channels). The normative text lives at
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+               class="text-blue-700 hover:text-blue-900 underline">
+                compiler/SPEC.md
+            </a>
+            in the scrmlTS repository.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed mt-4 text-sm">
+            Quick-lookup anchors:
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC-INDEX.md"
+               class="text-blue-700 hover:text-blue-900 underline">SPEC-INDEX.md</a>
+            entries &mdash; <em>channel file-level placement</em>,
+            <em>channel V5-strict body</em>,
+            <em>v1&rarr;v0.next channel migration</em>.
+        </p>
+
+    </article>
+
+</>

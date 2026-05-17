@@ -1,0 +1,341 @@
+// scrml.dev /reference/contexts/logic
+//
+// Reference page for the ${...} logic context. The most-used context;
+// pairs with the already-shipped sql.scrml feature page.
+//
+// SPEC anchors: §7 (Logic Contexts) + §7.4 (markup-as-expr under L1
+// pillar) + §7.6 (file-level scope under V5-strict) + §7.7
+// (logic-markup interleaving canonical form) + §6.1 (V5-strict access
+// — @ for state, bare for locals) + §50 (Assignment as Expression).
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Contexts
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-slate-900 font-mono">
+                &#36;&#123; ... &#125;
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                The logic context. Switches grammar from markup mode
+                to expression / statement mode. Where reactive
+                computation, control flow, and inline state writes
+                happen.
+            </p>
+            <div class="flex gap-4 mt-4 text-xs">
+                <span class="px-2 py-1 bg-emerald-50 text-emerald-700 rounded">
+                    Core since v0.1
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§7"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC §7 (normative)
+                </a>
+            </div>
+        </header>
+
+        // ───────────────────────────────────────────────────────────
+        // §2 — Syntax
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Syntax
+        </h2>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&#36;&#123; statementOrExpression &#125;
+&#36;&#123; &#64;cell &#125;
+&#36;&#123; &#64;count + 1 &#125;
+&#36;&#123; function name() &#123; ... &#125; &#125;
+&#36;&#123; if (cond) &#123; ... &#125; &#125;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-4">
+            Inside a logic context, the grammar is statement-and-
+            expression scrml. Outside (markup mode), text and
+            elements are the grammar.
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123;...&#125;</code>
+            is the universal switch from markup &rarr; logic; the
+            closing
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#125;</code>
+            returns to markup. Inside logic, markup may re-open via
+            element literals like
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;span&gt;...&lt;/span&gt;</code>
+            (markup-as-value per L1).
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §3 — Worked example
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Worked example
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            A counter with derived computation, an event handler, and
+            markup-as-value. Three uses of
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123;...&#125;</code>
+            in one snippet.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;count&gt; = 0
+const &lt;label&gt; = &#36;&#123; "Clicked " + &#64;count + " times" &#125;
+
+&lt;button onclick=&#36;&#123; &#64;count = &#64;count + 1 &#125;&gt;
+  &#36;&#123; &#64;label &#125;
+&lt;/button&gt;
+
+&lt;p&gt;Last bump: &#36;&#123; &#64;count &gt; 0 ? &lt;strong&gt;&#36;&#123;&#64;count&#125;&lt;/strong&gt; : "never" &#125;&lt;/p&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            The button's
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">onclick=&#36;&#123;...&#125;</code>
+            wraps a single assignment statement; the body's
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123;&#64;label&#125;</code>
+            is a reactive interpolation; the the paragraph's ternary
+            returns either markup (markup-as-value) or a string. Each
+            use is a logic context the compiler tracks for dependency
+            wiring.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §4 — Semantics
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Semantics
+        </h2>
+
+        <ul class="space-y-3 text-slate-700">
+            <li>
+                <strong>V5-strict access inside logic.</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#64;name</code>
+                reads or writes a reactive state cell;
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">name</code>
+                (bare) resolves to a function-scoped local. Bare names
+                NEVER resolve to reactive state &mdash; that is the
+                load-bearing point of the
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#64;</code>
+                marker.
+            </li>
+            <li>
+                <strong>Reactive interpolation tracks dependencies at
+                compile time.</strong> Every
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123; &#64;cell &#125;</code>
+                in markup-mode position subscribes the surrounding
+                node to that cell. Writes to the cell trigger re-emit
+                of exactly that node. No runtime diffing. Per SPEC
+                &sect;31 (Dependency Graph).
+            </li>
+            <li>
+                <strong>Statement vs expression position.</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123;...&#125;</code>
+                in markup body position accepts statements
+                (declarations, control flow, blocks) AND expressions.
+                In attribute-value position
+                (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">onclick=&#36;&#123;...&#125;</code>),
+                the body must be a single expression unless wrapped
+                in a function (E-MULTI-STATEMENT-HANDLER on inline
+                multi-statement). Per SPEC &sect;5.2.3 + L19.
+            </li>
+            <li>
+                <strong>Markup-as-value is bidirectional.</strong>
+                Inside a logic context, element literals
+                (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;div&gt;...&lt;/div&gt;</code>)
+                are first-class expressions. They can be passed as
+                arguments, returned from functions, stored in cells.
+                Per L1 (markup-as-first-class-value).
+            </li>
+            <li>
+                <strong>File-level logic context.</strong> A
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123;...&#125;</code>
+                at file top level is the canonical place for
+                module-scope declarations
+                (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">function</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">fn</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">const</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">type</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">import</code>).
+                Hoisting per SPEC &sect;6.9; pinned per &sect;6.10.
+            </li>
+            <li>
+                <strong>Assignment is an expression.</strong> Per SPEC
+                &sect;50,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#64;count = &#64;count + 1</code>
+                returns the assigned value. Useful for inline event
+                handlers and lift accumulation. The composition with
+                markup-as-value lands in &sect;50.14.
+            </li>
+        </ul>
+
+        <h3 class="text-lg font-semibold text-slate-900 mt-6 mb-2">
+            Common errors from logic context misuse
+        </h3>
+        <ul class="space-y-1 text-sm text-slate-700 font-mono">
+            <li><a href="/reference/errors/E-NAME-COLLIDES-STATE" class="text-rose-700 underline">E-NAME-COLLIDES-STATE</a> &mdash; local shadows registered state cell name</li>
+            <li><a href="/reference/errors/E-SCOPE-001" class="text-rose-700 underline">E-SCOPE-001</a> &mdash; undeclared identifier in logic expression</li>
+            <li><a href="/reference/errors/E-MULTI-STATEMENT-HANDLER" class="text-rose-700 underline">E-MULTI-STATEMENT-HANDLER</a> &mdash; multi-statement body in attribute-value position</li>
+            <li><a href="/reference/errors/E-PURE-VIOLATION" class="text-rose-700 underline">E-PURE-VIOLATION</a> &mdash; impure work inside a pure scope</li>
+            <li><a href="/reference/errors/E-EQ-004" class="text-rose-700 underline">E-EQ-004</a> &mdash; === / !== forbidden; scrml uses == / != per &sect;45</li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §5 — Edge cases
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Edge cases
+        </h2>
+
+        <ul class="space-y-4 text-slate-700">
+            <li>
+                <strong>Nested
+                    <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123; &lt;el&gt;&#36;&#123;...&#125;&lt;/el&gt; &#125;</code>.
+                </strong>
+                Logic can open markup which can open more logic.
+                The compiler tokenizes brace depth per context; arbitrary
+                nesting is legal. Per SPEC &sect;7.7 (logic-markup
+                interleaving canonical form, M8).
+            </li>
+            <li>
+                <strong>Bare names are locals, not state.</strong>
+                The most common new-adopter mistake:
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123; count &#125;</code>
+                instead of
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123; &#64;count &#125;</code>.
+                The first reads a function-local
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">count</code>;
+                if no such local is in scope, fires E-SCOPE-001 with
+                a "did you mean &#64;count?" hint.
+            </li>
+            <li>
+                <strong>pure scope.</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">pure</code>
+                marks a logic region that cannot read reactive state,
+                cannot perform server-fn calls, cannot have failable
+                effects.
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">fn</code>
+                is the pure-function form (no implicit reactive deps).
+                Per SPEC &sect;33 + &sect;48.
+            </li>
+            <li>
+                <strong>Comments.</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;&#47;</code>
+                line comments and
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;* ... *&#47;</code>
+                block comments are valid inside logic contexts. The
+                universal
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;&#47;</code>
+                line-comment form per SPEC &sect;27 also works in
+                markup mode.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §6 — Related contexts
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related contexts
+        </h2>
+
+        <ul class="space-y-1 text-slate-700">
+            <li>
+                <a href="/reference/contexts/sql" class="text-blue-700 hover:text-blue-900 underline">
+                    ?&#123; ... &#125;
+                </a> &mdash; SQL context. Per-handler coalescing,
+                N+1 loop hoist, multi-database adaptation.
+            </li>
+            <li>
+                <span class="font-mono text-slate-500">#&#123; ... &#125;</span>
+                &mdash; CSS context. Inline styles + scoped classes.
+                Reference page queued.
+            </li>
+            <li>
+                <span class="font-mono text-slate-500">^&#123; ... &#125;</span>
+                &mdash; meta context. Compile-time code execution +
+                splicing. Reference page queued.
+            </li>
+            <li>
+                <span class="font-mono text-slate-500">_&#123; ... &#125;</span>
+                &mdash; foreign code context. Level-marked braces;
+                WASM / sidecar interop. Reference page queued.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §7 — Availability
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Availability
+        </h2>
+
+        <table class="w-full text-sm text-left border-collapse">
+            <thead>
+                <tr class="border-b border-slate-300">
+                    <th class="py-2 pr-4 font-semibold text-slate-900">Surface</th>
+                    <th class="py-2 pr-4 font-semibold text-slate-900">Since</th>
+                    <th class="py-2 font-semibold text-slate-900">Notes</th>
+                </tr>
+            </thead>
+            <tbody class="text-slate-700">
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">&#36;&#123;&#125; logic context</td>
+                    <td class="py-2 pr-4">Core since v0.1</td>
+                    <td class="py-2 text-xs">The foundational context; SPEC &sect;7</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">V5-strict access (&#64; + bare)</td>
+                    <td class="py-2 pr-4">v0.2.0 ratification</td>
+                    <td class="py-2 text-xs">SPEC &sect;6.1 — bare names are locals only</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">Bare-form event handlers</td>
+                    <td class="py-2 pr-4">D4 (2026-05-04)</td>
+                    <td class="py-2 text-xs">SPEC &sect;5.2.3 — single-expression discipline + E-MULTI-STATEMENT-HANDLER</td>
+                </tr>
+                <tr>
+                    <td class="py-2 pr-4 font-mono text-xs">Assignment as expression composes</td>
+                    <td class="py-2 pr-4">SPEC &sect;50.14 / .15</td>
+                    <td class="py-2 text-xs">Composes with markup-as-value (L1) + bare-form handlers (L19)</td>
+                </tr>
+            </tbody>
+        </table>
+
+        // ───────────────────────────────────────────────────────────
+        // §8 — Specification
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            This page summarizes <strong>SPEC &sect;7</strong>
+            (Logic Contexts), plus the V5-strict access discipline
+            from <strong>&sect;6.1</strong> + <strong>&sect;1.6</strong>.
+            The normative text lives at
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+               class="text-blue-700 hover:text-blue-900 underline">
+                compiler/SPEC.md
+            </a>
+            in the scrmlTS repository.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed mt-4 text-sm">
+            Quick-lookup anchors:
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC-INDEX.md"
+               class="text-blue-700 hover:text-blue-900 underline">SPEC-INDEX.md</a>
+            entries &mdash; <em>logic context</em>,
+            <em>V5-strict access</em>,
+            <em>markup-as-expr</em>,
+            <em>file-level scope sharing</em>,
+            <em>logic-markup interleaving</em>,
+            <em>assignment as expression</em>.
+        </p>
+
+    </article>
+
+</>

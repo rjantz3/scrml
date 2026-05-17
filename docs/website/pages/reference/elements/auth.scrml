@@ -1,0 +1,354 @@
+// scrml.dev /reference/elements/auth
+//
+// Reference page for the auth element. First-class compile-time
+// visibility constraint. Drives the per-route per-role artifact
+// splitter (Approach A, S88-S92).
+//
+// SPEC anchors: §40.1 (auth first-class element) + §40.9 (Approach
+// A AuthGraph) + §40.9.9 (worked example) + §34 W-AUTH-RUNTIME-FALLBACK
+// + I-AUTH-REDIRECT-UNRESOLVED + W-AUTH-PAGE-INFERRED + W-AUTH-LOGIN-MISSING
+// + E-AUTH-GRAPH-002 + E-AUTH-GRAPH-003.
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Elements
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-slate-900 font-mono">
+                &lt;auth&gt;
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                Per-role visibility constraint. Wraps page subtrees
+                that should only render for specific roles. The
+                compiler emits per-role bundles automatically &mdash;
+                anonymous visitors download strictly smaller initial
+                artifacts.
+            </p>
+            <div class="flex gap-4 mt-4 text-xs">
+                <span class="px-2 py-1 bg-emerald-50 text-emerald-700 rounded">
+                    Available since v0.3.0 (Approach A — S91)
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§40"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC §40.1 + §40.9 (normative)
+                </a>
+            </div>
+        </header>
+
+        // ───────────────────────────────────────────────────────────
+        // §2 — Syntax
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Syntax
+        </h2>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;auth role="Admin"&gt;
+  &lt;page path="/admin" /&gt;
+  ...
+&lt;/auth&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-4">
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">role=</code>
+            takes a string literal, a variable reference, or a
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123;expr&#125;</code>
+            interpolation. Closed-form predicates (variant literals,
+            literal comma-OR, const-refs to role-set values, boolean
+            composition of statically-known operands) ship per-role
+            bundles via the artifact splitter. Anything else falls
+            back to a runtime gate and emits
+            <a href="/reference/errors/W-AUTH-RUNTIME-FALLBACK"
+               class="font-mono text-xs text-amber-700 underline">W-AUTH-RUNTIME-FALLBACK</a>.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §3 — Worked example
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Worked example
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            A small app with two public pages and one admin-only
+            page. Anonymous visitors get a chunk without any of the
+            admin subtree's atoms.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Role:enum = &#123; Anonymous, User, Admin &#125;
+
+&lt;program auth="required" loginRedirect="/login"&gt;
+
+  &lt;page path="/"        /&gt;
+  &lt;page path="/about"   /&gt;
+
+  &lt;auth role="Admin"&gt;
+    &lt;page path="/admin"        /&gt;
+    &lt;page path="/admin/users"  /&gt;
+  &lt;/auth&gt;
+
+&lt;/program&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            The compiler analyzes the closure of each page across the
+            three roles and emits three sets of chunks. Anonymous
+            visitors load the public pages and the login redirect;
+            the admin subtree's atoms are absent from their bundle.
+            Per &sect;40.9.9 the chunk variance is observable in the
+            generated
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">chunks.json</code>
+            manifest.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §4 — Semantics
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Semantics
+        </h2>
+
+        <ul class="space-y-3 text-slate-700">
+            <li>
+                <strong>Compile-time, not runtime.</strong>
+                &lt;auth&gt; is a visibility constraint the closure
+                analysis honors at chunk-splitting time. It is NOT a
+                middleware-style runtime check on its own &mdash; the
+                emitted bundle is the enforcement.
+                Server-side route guards are a separate layer
+                (&lt;program auth="required"&gt;).
+            </li>
+            <li>
+                <strong>Closed-form vs runtime-fallback.</strong>
+                Closed-form predicates ship per-role bundles. Runtime-
+                fallback predicates (reactive reads, async server-fn
+                calls, arbitrary
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123;expr&#125;</code>)
+                emit
+                <a href="/reference/errors/W-AUTH-RUNTIME-FALLBACK"
+                   class="font-mono text-xs text-amber-700 underline">W-AUTH-RUNTIME-FALLBACK</a>
+                and ship the gated component eagerly with a runtime
+                gate. Per &sect;40.9.5.
+            </li>
+            <li>
+                <strong>Roles are an enum.</strong> The
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">role=</code>
+                value must resolve to a variant of an enum reachable
+                from the entry file. Ambiguous role-enum discovery
+                fires
+                <a href="/reference/errors/E-AUTH-GRAPH-002"
+                   class="font-mono text-xs text-rose-700 underline">E-AUTH-GRAPH-002</a>.
+                Unknown role variants fire
+                <a href="/reference/errors/E-AUTH-GRAPH-003"
+                   class="font-mono text-xs text-rose-700 underline">E-AUTH-GRAPH-003</a>.
+            </li>
+            <li>
+                <strong>&lt;program auth=&gt; sets the default.</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program auth="required"&gt;</code>
+                gates every page that isn't otherwise marked public.
+                If <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">loginRedirect=</code>
+                isn't set AND no
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">/login</code>
+                page exists, the compiler fires
+                <a href="/reference/errors/W-AUTH-LOGIN-MISSING"
+                   class="font-mono text-xs text-amber-700 underline">W-AUTH-LOGIN-MISSING</a>.
+            </li>
+            <li>
+                <strong>Page-level inference.</strong> A &lt;page&gt;
+                inside an &lt;auth&gt; without its own explicit
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">auth=</code>
+                attribute inherits the wrapper's role. The compiler
+                emits
+                <a href="/reference/errors/W-AUTH-PAGE-INFERRED"
+                   class="font-mono text-xs text-blue-700 underline">W-AUTH-PAGE-INFERRED</a>
+                info-level so the inference is auditable.
+            </li>
+            <li>
+                <strong>Redirect cross-ref check.</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">loginRedirect=</code>
+                strings that don't resolve to a known route emit
+                <a href="/reference/errors/I-AUTH-REDIRECT-UNRESOLVED"
+                   class="font-mono text-xs text-blue-700 underline">I-AUTH-REDIRECT-UNRESOLVED</a>
+                info-level. Surfaces typos and missing scaffold pages.
+            </li>
+        </ul>
+
+        <h3 class="text-lg font-semibold text-slate-900 mt-6 mb-2">
+            Errors this feature can fire
+        </h3>
+        <ul class="space-y-1 text-sm text-slate-700 font-mono">
+            <li><a href="/reference/errors/E-AUTH-GRAPH-002" class="text-rose-700 underline">E-AUTH-GRAPH-002</a> &mdash; ambiguous role-enum discovery</li>
+            <li><a href="/reference/errors/E-AUTH-GRAPH-003" class="text-rose-700 underline">E-AUTH-GRAPH-003</a> &mdash; role variant not in resolved enum</li>
+            <li><a href="/reference/errors/W-AUTH-RUNTIME-FALLBACK" class="text-amber-700 underline">W-AUTH-RUNTIME-FALLBACK</a> &mdash; non-closed-form predicate</li>
+            <li><a href="/reference/errors/W-AUTH-PAGE-INFERRED" class="text-blue-700 underline">W-AUTH-PAGE-INFERRED</a> &mdash; inherited role</li>
+            <li><a href="/reference/errors/W-AUTH-LOGIN-MISSING" class="text-amber-700 underline">W-AUTH-LOGIN-MISSING</a> &mdash; auth=required without login route</li>
+            <li><a href="/reference/errors/I-AUTH-REDIRECT-UNRESOLVED" class="text-blue-700 underline">I-AUTH-REDIRECT-UNRESOLVED</a> &mdash; redirect to unknown route</li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §5 — Edge cases
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Edge cases
+        </h2>
+
+        <ul class="space-y-4 text-slate-700">
+            <li>
+                <strong>Closed-form role predicates.</strong> Boolean
+                composition of literals
+                (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">role="Admin"</code>),
+                literal comma-OR
+                (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">role="Admin,Moderator"</code>),
+                or const-refs to role-set values are closed-form.
+                Anything else &mdash; reactive reads, async calls,
+                arbitrary
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123;expr&#125;</code>
+                &mdash; falls back. Per &sect;40.9.5.
+            </li>
+            <li>
+                <strong>Full interpolation grammar.</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">role=&#36;&#123;expr&#125;</code>
+                works (S90 OQ-A3-A ratification &mdash; first-class
+                compiler state should have the same surface as
+                user-defined state). The closure analyzer constant-
+                folds where it can; non-foldable cases trigger
+                runtime fallback.
+            </li>
+            <li>
+                <strong>Channel auth is binary.</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;channel auth="required"&gt;</code>
+                gates the WS endpoint to authenticated users only.
+                Per-role channel partitioning rides on
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">topic=</code>
+                (per the &lt;channel&gt; reference page).
+            </li>
+            <li>
+                <strong>Anonymous visitors.</strong> An anonymous
+                role variant
+                (e.g., <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Role.Anonymous</code>)
+                is treated like any other role &mdash; the chunks for
+                anonymous visitors omit all subtrees gated to
+                authenticated roles. Per OQ-A2-F implicit-anonymous
+                ratification.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §6 — Related features
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related features
+        </h2>
+
+        <ul class="space-y-1 text-slate-700">
+            <li>
+                <a href="/reference/elements/program" class="text-blue-700 hover:text-blue-900 underline">
+                    &lt;program&gt;
+                </a> &mdash;
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">auth=</code>
+                on &lt;program&gt; sets the app-wide default
+                (required / public). Pair with
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">loginRedirect=</code>.
+            </li>
+            <li>
+                <span class="font-mono text-slate-500">&lt;page&gt;</span>
+                &mdash; individual page route. Inherits the wrapping
+                the auth element's role unless it has its own
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">auth=</code>.
+                Reference page queued.
+            </li>
+            <li>
+                <span class="font-mono text-slate-500">chunks.json</span>
+                &mdash; the per-route per-role manifest the compiler
+                emits. Inspect with
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">bun scrml build</code>
+                output. Documents the per-role chunk variance.
+            </li>
+            <li>
+                <span class="font-mono text-slate-500">scrml generate auth</span>
+                &mdash; CLI command that scaffolds a default
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">/login</code>
+                page when
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">auth="required"</code>
+                is set on &lt;program&gt; but no login route exists.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §7 — Availability
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Availability
+        </h2>
+
+        <table class="w-full text-sm text-left border-collapse">
+            <thead>
+                <tr class="border-b border-slate-300">
+                    <th class="py-2 pr-4 font-semibold text-slate-900">Surface</th>
+                    <th class="py-2 pr-4 font-semibold text-slate-900">Since</th>
+                    <th class="py-2 font-semibold text-slate-900">Notes</th>
+                </tr>
+            </thead>
+            <tbody class="text-slate-700">
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">&lt;auth role=&gt; first-class element</td>
+                    <td class="py-2 pr-4">v0.3.0 (Approach A — S91)</td>
+                    <td class="py-2 text-xs">A-3 AuthGraph + per-gate classifier + redirect cross-ref</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">Per-route per-role chunks</td>
+                    <td class="py-2 pr-4">v0.3.0 (A-4 splitter — S91)</td>
+                    <td class="py-2 text-xs">7 sub-phases; FNV-1a content-addressed chunk filenames</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">Full interpolation grammar (role=&#36;&#123;expr&#125;)</td>
+                    <td class="py-2 pr-4">S90 OQ-A3-A user override</td>
+                    <td class="py-2 text-xs">First-class compiler state matches user-defined state surface</td>
+                </tr>
+                <tr>
+                    <td class="py-2 pr-4 font-mono text-xs">scrml generate auth scaffold</td>
+                    <td class="py-2 pr-4">S94 (auth-redirect tightening)</td>
+                    <td class="py-2 text-xs">Generates /login page when auth=required and route missing</td>
+                </tr>
+            </tbody>
+        </table>
+
+        // ───────────────────────────────────────────────────────────
+        // §8 — Specification
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            This page summarizes <strong>SPEC &sect;40.1</strong>
+            (&lt;auth&gt; first-class element), <strong>&sect;40.9</strong>
+            (AuthGraph + per-gate classifier), and <strong>&sect;40.9.9</strong>
+            (worked example). The normative text lives at
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+               class="text-blue-700 hover:text-blue-900 underline">
+                compiler/SPEC.md
+            </a>
+            in the scrmlTS repository.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed mt-4 text-sm">
+            Quick-lookup anchors:
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC-INDEX.md"
+               class="text-blue-700 hover:text-blue-900 underline">SPEC-INDEX.md</a>
+            entries &mdash; <em>auth-graph</em>,
+            <em>per-route artifact splitter</em>,
+            <em>chunk-side runtime helpers</em>,
+            <em>FNV-1a content-addressing</em>.
+        </p>
+
+    </article>
+
+</>

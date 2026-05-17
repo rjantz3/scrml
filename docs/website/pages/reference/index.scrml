@@ -60,12 +60,20 @@
                     &lt;program&gt;
                 </a> &mdash; The root container. Owns route inference, middleware, channels, documentary metadata.
             </li>
+            <li>
+                <a href="/reference/elements/channel" class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    &lt;channel&gt;
+                </a> &mdash; Real-time multi-client state. V5-strict body, auto-sync, no &#64;shared modifier.
+            </li>
+            <li>
+                <a href="/reference/elements/auth" class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    &lt;auth&gt;
+                </a> &mdash; Per-role visibility constraint. Drives the per-route per-role artifact splitter.
+            </li>
             <li class="text-slate-500">
                 <span class="font-mono">&lt;onTransition&gt;</span>,
                 <span class="font-mono">&lt;onTimeout&gt;</span>,
                 <span class="font-mono">&lt;onIdle&gt;</span>,
-                <span class="font-mono">&lt;auth&gt;</span>,
-                <span class="font-mono">&lt;channel&gt;</span>,
                 <span class="font-mono">&lt;schema&gt;</span>,
                 <span class="font-mono">&lt;page&gt;</span>
                 &mdash; queued for the Day-30 build-out.
@@ -87,15 +95,19 @@
 
         <ul class="space-y-2 text-slate-700">
             <li>
+                <a href="/reference/contexts/logic" class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    &#36;&#123; ... &#125;
+                </a> &mdash; Logic. The foundational context; reactive computation, control flow, inline writes.
+            </li>
+            <li>
                 <a href="/reference/contexts/sql" class="font-mono text-blue-700 hover:text-blue-900 underline">
-                    ?{ ... }
+                    ?&#123; ... &#125;
                 </a> &mdash; SQL. Per-handler coalescing, N+1 loop hoist, multi-database adaptation.
             </li>
             <li class="text-slate-500">
-                <span class="font-mono">${ ... }</span> &mdash; logic.
-                <span class="font-mono">#{ ... }</span> &mdash; CSS.
-                <span class="font-mono">^{ ... }</span> &mdash; meta.
-                <span class="font-mono">_{ ... }</span> &mdash; foreign code.
+                <span class="font-mono">#&#123; ... &#125;</span> &mdash; CSS.
+                <span class="font-mono">^&#123; ... &#125;</span> &mdash; meta.
+                <span class="font-mono">_&#123; ... &#125;</span> &mdash; foreign code.
                 &mdash; queued for the Day-30 build-out.
             </li>
         </ul>
