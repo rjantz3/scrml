@@ -253,7 +253,7 @@ type Phase:enum = {
     Success(count: int)
 }
 
-server function fetchItems()! -> LoadError {
+function fetchItems()! -> LoadError {
     const result = ?{select * from items}
     if (result.length == 0) fail LoadError::Empty
     return result
@@ -366,7 +366,7 @@ form — no API layer, no ORM, no route files, no separate validation schema:
 </ul>
 
 ${
-    server function addContact() {
+    function addContact() {
         ?{insert into contacts (name, email) values (${@entry.name}, ${@entry.email})}.run()
         reset(@entry)
     }
