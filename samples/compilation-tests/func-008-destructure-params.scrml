@@ -1,0 +1,38 @@
+// func-008-destructure-params.scrml
+// A5-FUP — function-parameter destructuring (array, object, default, nested).
+//
+// Verifies that destructured params bind into the function body scope
+// (no E-SCOPE-001) and that the emitted client JS preserves the JS
+// destructuring binding pattern in the signature.
+
+<div>
+    ${
+        function takeFirst([a, b, c]) {
+            return a + b + c
+        }
+
+        function takeName({name, age}) {
+            return name
+        }
+
+        function withDef({a, b} = {a: 1, b: 2}) {
+            return a + b
+        }
+
+        function nested([x, [y, z]]) {
+            return x + y + z
+        }
+
+        function mixed(prefix, [a, b], {c, d}) {
+            return prefix + a + b + c + d
+        }
+
+        const sum = takeFirst([1, 2, 3])
+        const who = takeName({name: "Bryan", age: 42})
+        const def1 = withDef()
+        const def2 = withDef({a: 10, b: 20})
+        const nest = nested([1, [2, 3]])
+        const mix = mixed("k:", [1, 2], {c: 3, d: 4})
+    }
+    <p>destructure-params sample</p>
+</div>

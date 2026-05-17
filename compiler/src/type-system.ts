@@ -4300,15 +4300,31 @@ function annotateNodes(
         // on parameters (`function foo(x: Type)`) so downstream match / is .Variant
         // checks see the narrowed type. Without this the param resolves to `asIs`
         // and E-TYPE-025 fires on an otherwise-valid match.
+        //
+        // A5-FUP (2026-05-17) — destructured params (`function f([a, b])` or
+        // `function f({a, b})`): `param.name` is a structured DestructurePattern.
+        // Walk it via iterDestructuredNames and bind each yielded name as a
+        // plain `asIs` variable so the function body sees them in scope.
         if (Array.isArray(n.params)) {
           for (const param of (n.params as unknown[])) {
-            const paramName = typeof param === "string" ? param : (param as ASTNodeLike).name as string;
-            const paramAnnot = (typeof param === "object" && param !== null)
-              ? ((param as ASTNodeLike).typeAnnotation as string | undefined)
+            const paramObj = (typeof param === "object" && param !== null) ? (param as ASTNodeLike) : null;
+            const paramNameField = paramObj ? paramObj.name : undefined;
+            const paramAnnot = paramObj
+              ? (paramObj.typeAnnotation as string | undefined)
               : undefined;
-            const paramIsLin = (typeof param === "object" && param !== null)
-              ? Boolean((param as ASTNodeLike).isLin)
+            const paramIsLin = paramObj
+              ? Boolean(paramObj.isLin)
               : false;
+            // Destructured-param path.
+            if (paramNameField && isDestructurePattern(paramNameField)) {
+              for (const bind of iterDestructuredNames(paramNameField as DestructurePatternShape)) {
+                const entry: ScopeEntry = { kind: "variable", resolvedType: tAsIs() };
+                if (paramIsLin) entry.isLin = true;
+                scopeChain.bind(bind, entry);
+              }
+              continue;
+            }
+            const paramName = typeof param === "string" ? param : paramNameField as string;
             if (paramName) {
               let paramResolvedType: ResolvedType = tAsIs();
               if (paramAnnot) {
@@ -10258,7 +10274,17 @@ function checkFnBodyProhibitions(
   // Fn parameters are local
   if (Array.isArray(fnNode.params)) {
     for (const param of (fnNode.params as unknown[])) {
-      const paramName = typeof param === "string" ? param : (param as ASTNodeLike).name as string;
+      const paramNameField = typeof param === "object" && param !== null
+        ? (param as ASTNodeLike).name
+        : undefined;
+      // A5-FUP — destructured params: collect every yielded binding name.
+      if (paramNameField && isDestructurePattern(paramNameField)) {
+        for (const bind of iterDestructuredNames(paramNameField as DestructurePatternShape)) {
+          localNames.add(bind);
+        }
+        continue;
+      }
+      const paramName = typeof param === "string" ? param : paramNameField as string;
       if (paramName) localNames.add(paramName);
     }
   }

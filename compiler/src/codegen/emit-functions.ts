@@ -1,5 +1,5 @@
 import { genVar } from "./var-counter.ts";
-import { routePath, paramSignature } from "./utils.ts";
+import { routePath, paramName, paramSignature } from "./utils.ts";
 import { emitLogicNode, emitLogicBody, emitFnShortcutBody } from "./emit-logic.js";
 import { CGError } from "./errors.ts";
 import { isServerOnlyNode, collectFunctions } from "./collect.ts";
@@ -188,10 +188,11 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
 
     const httpMethod = route.explicitMethod ?? "POST";
     const params = (fnNode.params as Param[]) ?? [];
-    // Bug fix: strip :Type annotations from string params (e.g. "mario:Mario" → "mario")
-    const paramNames = params.map((p: Param, i: number) =>
-      typeof p === "string" ? p.split(":")[0].trim() : ((p as { name?: string }).name ?? `_scrml_arg_${i}`)
-    );
+    // Bug fix: strip :Type annotations from string params (e.g. "mario:Mario" → "mario").
+    // A5-FUP: paramName() resolves DestructurePattern names to _scrml_arg_N
+    // placeholders so the fetch stub forwards positional args correctly even
+    // when the original source used destructured params.
+    const paramNames = params.map((p: Param, i: number) => paramName(p, i));
 
     const stubName = genVar(`fetch_${name}`);
     serverFnStubs.set(name, stubName);
@@ -303,10 +304,9 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     const cpsSplit = route.cpsSplit;
     const body = (fnNode.body as ASTNode[]) ?? [];
     const params = (fnNode.params as Param[]) ?? [];
-    // Bug fix: strip :Type annotations from string params (e.g. "mario:Mario" → "mario")
-    const paramNames = params.map((p: Param, i: number) =>
-      typeof p === "string" ? p.split(":")[0].trim() : ((p as { name?: string }).name ?? `_scrml_arg_${i}`)
-    );
+    // Bug fix: strip :Type annotations from string params (e.g. "mario:Mario" → "mario").
+    // A5-FUP: paramName() resolves DestructurePattern → _scrml_arg_N placeholders.
+    const paramNames = params.map((p: Param, i: number) => paramName(p, i));
 
     // The CPS wrapper is always async (it calls the server stub).
     const wrapperName = genVar(`cps_${name}`);
@@ -439,11 +439,12 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
 
     const name = (fnNode.name as string) ?? "anon";
     const params = (fnNode.params as Param[]) ?? [];
-    // Bug fix: strip :Type annotations from string params (e.g. "mario:Mario" → "mario")
-    const paramNames = params.map((p: Param, i: number) =>
-      typeof p === "string" ? p.split(":")[0].trim() : ((p as { name?: string }).name ?? `_scrml_arg_${i}`)
-    );
+    // Bug fix: strip :Type annotations from string params (e.g. "mario:Mario" → "mario").
+    // A5-FUP: paramName() resolves DestructurePattern → _scrml_arg_N placeholders.
+    const paramNames = params.map((p: Param, i: number) => paramName(p, i));
     // §7.3.2: function-decl signatures carry `name = defaultValue` when defaults are present.
+    // A5-FUP: paramSignature also handles DestructurePattern names (emits valid JS
+    // destructuring bindings via emit-destructure-pattern.ts).
     const paramSigs = params.map((p: Param, i: number) => paramSignature(p, i));
 
     // Check if this function has any server-call callees that need async.

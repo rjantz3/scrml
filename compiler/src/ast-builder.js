@@ -6380,30 +6380,60 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   }
 
   /**
-   * Parse a function parameter list `( param, param, ... )` into string[].
+   * Parse a function parameter list `( param, param, ... )` into a list of
+   * param entries.
+   *
+   * Each entry has shape:
+   *   { name: string | DestructurePattern, typeAnnotation?, defaultValue?, isLin? }
+   *
+   * §53: typed params — "x: number(>0)" → {name: "x", typeAnnotation: "number(>0)"}.
+   * §7.3.2: default parameter values via `= expr` — "n = 0" → {name: "n", defaultValue: "0"}.
+   *   Defaults compile directly to JavaScript default parameter syntax. The compound forms
+   *   (`==`, `===`, `=>`, `+=`, ...) are tokenized as OPERATOR (multi-char) so the
+   *   bare PUNCT "=" we detect here is unambiguous — it is always the default-value separator.
+   * §35.2.1: lin-annotated params — "lin x" or "lin x: string" → {name: "x", isLin: true, ...}.
+   * A5-FUP (2026-05-17): destructured params — `function f([a, b])` / `function f({a, b})` /
+   *   `function f({a, b} = {a:0,b:0})`. When the next non-`lin` token at param-start is
+   *   `[` or `{`, route through parseDestructurePattern; `param.name` is then a structured
+   *   DestructurePattern AST node (codegen via emitDestructurePatternText in
+   *   codegen/emit-destructure-pattern.ts, scope-walker via iterDestructuredNames in
+   *   type-system.ts).
+   *
+   * Downstream consumers (emit-functions.ts, emit-server.ts, type-system.ts) already
+   * handle both string and structured forms via typeof checks.
+   *
    * Assumes next token is `(`.
    */
   function parseParamList() {
     const params = [];
     if (peek().text !== "(") return params;
     consume(); // consume `(`
+    // Text-buffer state for bare-ident params (legacy path).
     let depth = 1;
     let cur = "";          // name-and-type part of the current param
     let defBuf = "";       // default-value part (after `=`) of the current param
     let inDefault = false; // true once a top-level `=` has been consumed for this param
-    // §53: parse param entries into {name, typeAnnotation?, defaultValue?} objects.
-    // "x: number(>0)" → {name: "x", typeAnnotation: "number(>0)"}
-    // "x" → {name: "x"}
-    // §7.3.2: default parameter values via `= expr` — "n = 0" → {name: "n", defaultValue: "0"}.
-    //   Defaults compile directly to JavaScript default parameter syntax. The compound forms
-    //   (`==`, `===`, `=>`, `+=`, ...) are tokenized as OPERATOR (multi-char) so the
-    //   bare PUNCT "=" we detect here is unambiguous — it is always the default-value separator.
-    // §35.2.1: lin-annotated params — "lin x" or "lin x: string" → {name: "x", isLin: true, ...}
-    // Downstream consumers (emit-functions.ts, emit-server.ts, type-system.ts) already
-    // handle both string and {name} forms via typeof checks.
+    // A5-FUP: when the current param's LHS was a destructure pattern, store it
+    // here; pushParam picks it up instead of parsing `cur` as a bare ident.
+    let curPattern = null; // DestructurePattern | null
+    let curPatternIsLin = false;
+    let curPatternTypeAnnotation = null;
+
     function pushParam(nameRaw, defRaw) {
-      const s = nameRaw.trim();
       const def = defRaw == null ? null : defRaw.trim();
+      // A5-FUP — destructured param path: `curPattern` holds the structured
+      // DestructurePattern; `cur` may still contain residual type annotation
+      // tokens (after a `:`). Emit a structured entry without re-parsing the
+      // pattern from text.
+      if (curPattern) {
+        const entry = { name: curPattern };
+        if (curPatternTypeAnnotation) entry.typeAnnotation = curPatternTypeAnnotation;
+        if (curPatternIsLin) entry.isLin = true;
+        if (def && def.length > 0) entry.defaultValue = def;
+        params.push(entry);
+        return;
+      }
+      const s = nameRaw.trim();
       if (!s && !def) return;
       // §35.2.1: detect `lin name` prefix — parameter declared as linear.
       const LIN_PREFIX = /^lin\s+(.+)$/;
@@ -6445,6 +6475,40 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       if (bufName === 'cur') cur = next;
       else defBuf = next;
     }
+
+    // A5-FUP — at each param-start (i.e. right after `(` or after a `,` that
+    // closed the previous param), peek for an optional `lin` keyword followed
+    // by `[` or `{`. If so, consume those tokens and parse the destructure
+    // pattern in a structured way; subsequent `:` / `=` are handled by the
+    // main loop via the text buffer (typeAnnotation captured separately, then
+    // promoted into `curPatternTypeAnnotation` at the `=` boundary).
+    //
+    // Returns true if a destructure pattern was parsed; false otherwise.
+    function tryParseDestructureParamStart() {
+      let la = 0;
+      let sawLin = false;
+      if (peek(la).kind === 'KEYWORD' && peek(la).text === 'lin') {
+        sawLin = true;
+        la++;
+      }
+      const head = peek(la);
+      if (!(head && head.kind === 'PUNCT' && (head.text === '[' || head.text === '{'))) {
+        return false;
+      }
+      if (sawLin) consume(); // consume `lin`
+      const pat = parseDestructurePattern();
+      if (!pat) return false;
+      curPattern = pat;
+      curPatternIsLin = sawLin;
+      curPatternTypeAnnotation = null;
+      return true;
+    }
+
+    // Try at the very first param.
+    if (peek().kind !== 'PUNCT' || peek().text !== ')') {
+      tryParseDestructureParamStart();
+    }
+
     while (true) {
       const tok = peek();
       if (tok.kind === "EOF") break;
@@ -6464,11 +6528,25 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         cur = "";
         defBuf = "";
         inDefault = false;
+        curPattern = null;
+        curPatternIsLin = false;
+        curPatternTypeAnnotation = null;
         consume();
+        // Try destructure at the next param-start.
+        tryParseDestructureParamStart();
       } else if (depth === 1 && !inDefault && tok.kind === "PUNCT" && tok.text === "=") {
         // §7.3.2 default-value separator. PUNCT "=" at top level is unambiguous —
         // `==`/`===`/`=>`/`+=`/`-=`/`*=`/`/=`/`%=`/`&=`/`|=`/`^=`/`<<=`/`>>=`/`**=`/`??=`/`||=`/`&&=`
         // are all tokenized as OPERATOR (multi-char), so they cannot reach this branch.
+        // A5-FUP — when the current param is a destructure pattern, any text
+        // accumulated in `cur` between the closing `]`/`}` and this `=` is the
+        // typeAnnotation (after a `:`). Strip a leading `:` if present and
+        // promote to curPatternTypeAnnotation so pushParam carries it.
+        if (curPattern && cur.length > 0) {
+          const t = cur.trim();
+          curPatternTypeAnnotation = t.startsWith(':') ? t.slice(1).trim() : t;
+          cur = "";
+        }
         inDefault = true;
         consume();
       } else {
@@ -6476,6 +6554,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         else appendTok('cur', tok);
         consume();
       }
+    }
+    // A5-FUP — handle a trailing destructured param without default. Any text
+    // accumulated in `cur` after the pattern's closer (typically a `: Type`
+    // annotation) is the typeAnnotation.
+    if (curPattern && cur.length > 0 && !inDefault) {
+      const t = cur.trim();
+      curPatternTypeAnnotation = t.startsWith(':') ? t.slice(1).trim() : t;
+      cur = "";
     }
     pushParam(cur, inDefault ? defBuf : null);
     return params;

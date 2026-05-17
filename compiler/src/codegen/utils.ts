@@ -1,3 +1,5 @@
+import { emitDestructurePatternText } from "./emit-destructure-pattern.ts";
+
 /**
  * Build the HTTP route path for a server function.
  */
@@ -43,12 +45,17 @@ export const VOID_ELEMENTS = new Set<string>([
  * Structured shape (post-§7.3.2 — A3 default-parameter support):
  *   { name: string, typeAnnotation?: string, defaultValue?: string, isLin?: boolean, isRest?: boolean }
  *
+ * Post-A5-FUP (2026-05-17): `name` may also be a structured DestructurePattern
+ * AST node (`kind: "destructure-array" | "destructure-object"`) for params
+ * shaped `function f([a, b])` or `function f({a, b})`. Codegen serializes
+ * the pattern back to JS via emitDestructurePatternText.
+ *
  * Param.defaultValue, when present, is the RAW source text of the default
  * expression (`"0"`, `"start"`, `'"hello"'`, `"() => 42"`). It compiles
  * directly into the emitted JS via `${name} = ${defaultValue}` per §7.3.2.
  */
 export type ParamLike = string | {
-  name?: string;
+  name?: unknown;
   typeAnnotation?: string;
   defaultValue?: string;
   isLin?: boolean;
@@ -61,12 +68,19 @@ export type ParamLike = string | {
  * Used at call sites (e.g. `fetchStub(${paramNames.join(", ")})`) where we
  * want the identifier only.
  *
+ * Destructured params: returns a synthesized `_scrml_arg_N` placeholder since
+ * the pattern has no single canonical name. Call sites that pass destructured
+ * args to server-stubs need to switch to a separate argument-forwarding
+ * strategy; the synthesized name preserves the existing JS-arity invariant.
+ *
  * @param p the param entry from `fnNode.params`
  * @param i the param's index in the list (for synthesizing `_scrml_arg_N`)
  */
 export function paramName(p: ParamLike, i: number): string {
   if (typeof p === "string") return p.split(":")[0].trim();
-  return p.name ?? `_scrml_arg_${i}`;
+  if (typeof p.name === "string") return p.name;
+  // Destructured (or otherwise non-string) param: use a synthetic placeholder.
+  return `_scrml_arg_${i}`;
 }
 
 /**
@@ -77,6 +91,11 @@ export function paramName(p: ParamLike, i: number): string {
  * otherwise the bare `name` is emitted. Rest-parameter (`...name`) prefix is
  * applied when `p.isRest === true`.
  *
+ * A5-FUP (2026-05-17): when `p.name` is a structured DestructurePattern, the
+ * pattern is serialized via emitDestructurePatternText for direct emission as
+ * a JS destructuring binding pattern. Default-for-entire-pattern composes:
+ * `function f({a, b} = {a: 0, b: 0})` → `function f({ a, b } = {a: 0, b: 0})`.
+ *
  * NOT for call-site argument lists — use `paramName()` there.
  *
  * @param p the param entry from `fnNode.params`
@@ -84,10 +103,19 @@ export function paramName(p: ParamLike, i: number): string {
  */
 export function paramSignature(p: ParamLike, i: number): string {
   if (typeof p === "string") return p.split(":")[0].trim();
-  const name = p.name ?? `_scrml_arg_${i}`;
   const rest = p.isRest ? "..." : "";
   const def = typeof p.defaultValue === "string" && p.defaultValue.trim().length > 0
     ? ` = ${p.defaultValue}`
     : "";
+  // A5-FUP: structured destructure-pattern in `p.name`. Serialize via the
+  // shared codegen helper (also used by emit-logic / emit-control-flow /
+  // emit-lift for let/const/for-stmt destructuring).
+  if (p.name && typeof p.name === "object") {
+    const pat = p.name as { kind?: unknown };
+    if (pat.kind === "destructure-array" || pat.kind === "destructure-object") {
+      return `${rest}${emitDestructurePatternText(pat as Parameters<typeof emitDestructurePatternText>[0])}${def}`;
+    }
+  }
+  const name = typeof p.name === "string" ? p.name : `_scrml_arg_${i}`;
   return `${rest}${name}${def}`;
 }
