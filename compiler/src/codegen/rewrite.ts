@@ -1389,6 +1389,33 @@ function stripTransitionsBlock(expr: string): string {
 
 export function rewriteEnumVariantAccess(expr: string): string {
   if (!expr || typeof expr !== "string") return expr;
+
+  // S97 — unmask bare-variant placeholders. `preprocessForAcorn` rewrites
+  // `.Variant` → `__scrml_bare_variant_Variant__` so acorn can parse the
+  // surrounding expression. The structured-AST path (`esTreeToExprNode`
+  // line 1008) unmasks placeholders back to `IdentExpr { name: ".X" }`,
+  // but the STRING-REWRITE path (this function and its callers — e.g.
+  // match-arm RHS via `emitMatchExpr` → `emitExprField(null, arm.result,
+  // ctx)` → `rewriteExpr`) never sees the structured walker. Pre-fix the
+  // placeholder leaked verbatim into client JS, producing
+  // `return __scrml_bare_variant_Active__;` — a ReferenceError at runtime.
+  //
+  // Asymmetry that surfaced this: `preprocessMatchExprs` (expression-
+  // parser.ts) extracts match-arm bodies as quoted string literals
+  // (`__scrml_match__(subject, ".A => result", ...)`) BEFORE the bare-
+  // variant rewrite runs. The bare-variant regex's negative lookbehind
+  // includes `"` so the LHS-position `.Variant` directly after the opening
+  // quote is skipped (`".A => ...` stays as `.A`). But the RHS `.Variant`
+  // (preceded by space-or-arrow) is rewritten to a placeholder INSIDE
+  // the quoted arm string. The unmask here closes that asymmetry.
+  //
+  // Conversion is `__scrml_bare_variant_X__` → `.X`; the existing rewrites
+  // below then handle `.X` per shape:
+  //   - unit variant   `.X`         → `"X"` (line below regex)
+  //   - payload-call   `.X(args)`   → `{ variant: "X", data: {...} }` via
+  //                                  `_rewritePayloadVariantConstructorCalls`
+  expr = expr.replace(/__scrml_bare_variant_([A-Z][A-Za-z0-9_]*)__/g, ".$1");
+
   // Block-splitter adds spaces around `.` — collapse `X . UpperIdent` → `X.UpperIdent`
   // so the negative lookbehind below can correctly distinguish member access (e.g.
   // `Color . Red` → `Color.Red`, kept as-is) from standalone `.VariantName`.
