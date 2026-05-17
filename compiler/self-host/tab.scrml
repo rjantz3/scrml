@@ -1075,39 +1075,33 @@ ${
         let baseLine = span.line
         let baseCol = span.col
 
-        switch (type) {
-            case "markup":
-            case "state":
-                return tokenizeAttributes(raw, baseOffset, baseLine, baseCol, type)
-            case "logic": {
-                let body = raw.slice(2, raw.length - 1)
-                return tokenizeLogic(body, baseOffset + 2, baseLine, baseCol + 2, block.children)
-            }
-            case "meta": {
-                let body = raw.slice(2, raw.length - 1)
-                return tokenizeLogic(body, baseOffset + 2, baseLine, baseCol + 2, block.children)
-            }
-            case "sql": {
-                let body = raw.slice(2, raw.length - 1)
-                return tokenizeSQL(body, baseOffset + 2, baseLine, baseCol + 2)
-            }
-            case "css": {
-                let body = raw.slice(2, raw.length - 1)
-                return tokenizeCSS(body, baseOffset + 2, baseLine, baseCol + 2)
-            }
-            case "error-effect": {
-                let body = raw.slice(2, raw.length - 1)
-                return tokenizeError(body, baseOffset + 2, baseLine, baseCol + 2)
-            }
-            case "test": {
-                let body = raw.slice(2, raw.length - 1)
-                return tokenizeLogic(body, baseOffset + 2, baseLine, baseCol + 2, block.children)
-            }
-            case "text":
-            case "comment":
-                return tokenizePassthrough(type, raw, baseOffset, baseLine, baseCol)
-            default:
-                return [makeToken("EOF", "", baseOffset, baseOffset, baseLine, baseCol)]
+        // §17: scrml has no `switch` keyword. Tier-0 if/else-if chain — the
+        // SPEC-canonical replacement here (block-type strings are not enum
+        // variants, so a Tier-1 `<match for=Type>` form is not applicable).
+        if (type == "markup" || type == "state") {
+            return tokenizeAttributes(raw, baseOffset, baseLine, baseCol, type)
+        } else if (type == "logic") {
+            let body = raw.slice(2, raw.length - 1)
+            return tokenizeLogic(body, baseOffset + 2, baseLine, baseCol + 2, block.children)
+        } else if (type == "meta") {
+            let body = raw.slice(2, raw.length - 1)
+            return tokenizeLogic(body, baseOffset + 2, baseLine, baseCol + 2, block.children)
+        } else if (type == "sql") {
+            let body = raw.slice(2, raw.length - 1)
+            return tokenizeSQL(body, baseOffset + 2, baseLine, baseCol + 2)
+        } else if (type == "css") {
+            let body = raw.slice(2, raw.length - 1)
+            return tokenizeCSS(body, baseOffset + 2, baseLine, baseCol + 2)
+        } else if (type == "error-effect") {
+            let body = raw.slice(2, raw.length - 1)
+            return tokenizeError(body, baseOffset + 2, baseLine, baseCol + 2)
+        } else if (type == "test") {
+            let body = raw.slice(2, raw.length - 1)
+            return tokenizeLogic(body, baseOffset + 2, baseLine, baseCol + 2, block.children)
+        } else if (type == "text" || type == "comment") {
+            return tokenizePassthrough(type, raw, baseOffset, baseLine, baseCol)
+        } else {
+            return [makeToken("EOF", "", baseOffset, baseOffset, baseLine, baseCol)]
         }
     }
 }

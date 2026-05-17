@@ -11196,6 +11196,81 @@ function collapseIfChains(nodes, errors, filePath) {
 }
 
 /**
+ * Walk every node reachable from `nodes` and fire E-SWITCH-FORBIDDEN for any
+ * `switch-stmt` AST node whose span has NOT already received an
+ * E-SWITCH-FORBIDDEN error from one of the inline TAB parser fire sites
+ * (parseOneStatement / parseLogicBody main loop).
+ *
+ * Why a post-parse sweep is required (S99 / A7): the `export function name() {
+ * ... }` shape causes the export handler in parseLogicBody's main loop to
+ * greedily collect the entire `function ... { body }` into the export-decl's
+ * `expr` (collectExpr tracks brace depth and only stops at depth 0 — see
+ * ast-builder.js:2390-2395). The body is later re-parsed via the ANOMALY-2
+ * synth path at ~L7125 by recursively invoking parseLogicBody on a token
+ * slice — but the synth re-parse passes `[]` for `errors` so any inline
+ * E-SWITCH-FORBIDDEN emission inside the re-parse is intentionally discarded
+ * to avoid double-emit against collectExpr's own pass.
+ *
+ * The discarded-errors path leaves the `switch-stmt` AST node in place
+ * (attached to the synth function-decl's body) but no diagnostic surfaces —
+ * a silent soundness hole per SPEC §17 / §34 E-SWITCH-FORBIDDEN row, which
+ * forbids the `switch` keyword universally in scrml.
+ *
+ * This walker runs ONCE at the end of buildAST against the outer-most
+ * `errors` array, walking the final AST. Dedup by (code, file, span.start)
+ * is exact (the inline fire sites set `tokenSpan(startTok)` whose `start`
+ * equals the switch-stmt node's `span.start` from `spanOf(startTok, peek())`).
+ * Walker traverses through every `body`, `children`, and `bodyChildren`
+ * array — the standard node containers — so nested switch occurrences in
+ * function bodies, engine state-children, match arms, etc. are all covered.
+ */
+function collectForbiddenSwitches(nodes, errors, filePath) {
+  // Index existing E-SWITCH-FORBIDDEN errors for dedup. TABError stores its
+  // span on `tabSpan` (see L1218 constructor).
+  const seen = new Set();
+  for (const e of errors) {
+    if (e && e.code === "E-SWITCH-FORBIDDEN" && e.tabSpan) {
+      seen.add(`${e.tabSpan.file ?? filePath}:${e.tabSpan.start}`);
+    }
+  }
+
+  function visit(node) {
+    if (!node || typeof node !== "object") return;
+    if (node.kind === "switch-stmt") {
+      const sp = node.span;
+      const key = sp ? `${sp.file ?? filePath}:${sp.start}` : null;
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        errors.push(new TABError(
+          "E-SWITCH-FORBIDDEN",
+          "E-SWITCH-FORBIDDEN: `switch` is not a scrml keyword. " +
+          "Did you mean: " +
+          "`<match for=Type> ... </match>` for structural exhaustive case-analysis " +
+          "(Tier 1 block form; produces markup or executes statements per arm), " +
+          "or `match expr { .Variant -> ... }` for value-return case-analysis " +
+          "(Tier 1 JS-style form; produces a value in expression position)? " +
+          "See SPEC §18 for match block-form, primer §1 for the tier ladder.",
+          sp ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+        ));
+      }
+      // Continue walking the body — a nested switch inside a switch body is
+      // still a violation.
+    }
+    for (const key of Object.keys(node)) {
+      if (key === "span" || key === "id") continue;
+      const val = node[key];
+      if (Array.isArray(val)) {
+        for (const item of val) visit(item);
+      } else if (val && typeof val === "object" && val.kind) {
+        visit(val);
+      }
+    }
+  }
+
+  for (const n of nodes) visit(n);
+}
+
+/**
  * Walk an ASTNode tree and collect all import-decl, export-decl,
  * type-decl, and component-def nodes that live inside logic blocks.
  * These are hoisted into the FileAST top-level fields.
@@ -11334,6 +11409,21 @@ export function buildAST(bsOutput, tokenizerOverrides) {
 
   // §17.1.1: Collapse if=/else-if=/else sibling chains into IfChainExpr nodes
   nodes = collapseIfChains(nodes, errors, filePath);
+
+  // §17 / §34: Post-parse forbidden-keyword sweep — fire E-SWITCH-FORBIDDEN
+  // for any `switch-stmt` AST node that did not receive an error at one of
+  // the inline TAB fire sites (parseOneStatement L5089, parseLogicBody main
+  // loop L8567). The inline fire sites are span-precise and emit during
+  // parsing; this post-walker is the structural guarantee that the detector
+  // covers every position where a `switch-stmt` can land in the AST,
+  // including paths that re-parse function bodies into a throw-away errors
+  // array (see L7131: the `export function name() { ... }` synth re-parse).
+  // Per SPEC §17 and the §34 catalog row, `switch` is universally forbidden
+  // in scrml — there are no exceptions, so a missing error here would be a
+  // soundness hole. Dedup is by (code, span.start, span.file) so the inline
+  // fire-site error and this walker emission never both appear for the same
+  // switch keyword.
+  collectForbiddenSwitches(nodes, errors, filePath);
 
   // Hoist imports, exports, type decls, components, machine decls, channel decls
   // from logic blocks + top-level markup.
