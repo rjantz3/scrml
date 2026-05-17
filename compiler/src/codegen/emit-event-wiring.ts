@@ -447,10 +447,59 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       // Resolve the handler: check fnNameMap first, fall back to original name
       const resolvedHandler = fnNameMap.get(handlerName) || handlerName;
 
+      // S97 — reactive-method-call shape detection.
+      //
+      // The ATTR_CALL tokenization at tokenizer.ts:399-417 reads the LHS ident
+      // greedily including `.` characters — so `onclick=@outer.advance(.X)`
+      // produces ATTR_CALL with `name = "@outer.advance"`, `args = [".X"]`.
+      // Pre-fix the call-ref emitter spliced these verbatim into the wrapper
+      // (`function(event){ @outer.advance(...); }`) — invalid JS (`@` not a
+      // legal identifier char). Affected ALL `@<var>.method(args)` shapes,
+      // including `.advance(.Variant.history)` on engine vars (broken even
+      // though emit-expr.ts:emitCall has the C13 dispatch arm for it).
+      //
+      // Fix: when handlerName starts with `@`, synthesize a structured
+      // CallExpr (callee = MemberExpr chain from the dotted name; args =
+      // pre-parsed argExprNodes) and emit via emitExprField. The structured
+      // path then routes through emit-expr.ts:emitCall — for engine .advance
+      // shapes this hits the C13 dispatch (including history-restore peel-off
+      // on `.X.history` args); for non-engine method calls it produces
+      // `_scrml_reactive_get("var").method(args)` via emitMember + emitCall.
+      //
+      // Guard: only fires when handlerArgExprNodes is complete (length matches
+      // handlerArgs). Otherwise falls through to the legacy bare-call splice
+      // (which was broken for `@` shapes anyway — no regression introduced).
+      const _argNodes = binding.handlerArgExprNodes;
+      const _isReactiveMethodCall =
+        handlerName.startsWith("@") &&
+        Array.isArray(_argNodes) &&
+        _argNodes.length === (handlerArgs?.length ?? 0);
+
+      if (_isReactiveMethodCall) {
+        const synthSpan = binding.handlerExprNode?.span ?? { file: "", start: 0, end: 0, line: 1, col: 1 };
+        const parts = handlerName.split(".");
+        let callee: ExprNode = { kind: "ident", span: synthSpan, name: parts[0] };
+        for (let i = 1; i < parts.length; i++) {
+          callee = { kind: "member", span: synthSpan, object: callee, property: parts[i], optional: false };
+        }
+        const synthCall: ExprNode = {
+          kind: "call",
+          span: synthSpan,
+          callee,
+          args: _argNodes as ExprNode[],
+          optional: false,
+        };
+        const preventLine = domEvent === "submit" ? "event.preventDefault(); " : "";
+        const body = emitExprField(synthCall, "", {
+          mode: "client",
+          ...engineExprCtxExtras,
+        });
+        handlerExpr = `function(event) { ${preventLine}${body}; }`;
+      } else {
+
       // Serialize the arguments from the call-ref attribute value.
       // Args from the parser are raw expression strings (e.g. '"apple"', 'userId', '9.99').
       // Object args with .kind need special handling.
-      const _argNodes = binding.handlerArgExprNodes;
       const argsStr = (handlerArgs ?? []).map((a: unknown, idx: number) => {
         if (typeof a === "string") return emitExprField(_argNodes?.[idx], a, { mode: "client" });
         const node = a as Record<string, unknown>;
@@ -493,6 +542,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         // also needs alignment.
         handlerExpr = `function(event) { ${preventLine}${resolvedHandler}(${argsStr}); }`;
       }
+      } // close S97 reactive-method-call else branch
     }
 
     if (!byEventType.has(eventName)) {
