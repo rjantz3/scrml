@@ -228,12 +228,13 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 
 **Total v0.2.x patches resolved by these gaps:** 9 of 9 closed (100%). All B1-surfaced bugs landed across v0.2.1 / v0.2.2 / v0.2.3.
 
-**Other B1-surfaced follow-ons (NOT v0.2.x-bar, tracked for later):**
-- Pipe-alternation arms in `rewriteMatchExpr` (B3 follow-on; same limitation affects other rewriteMatchExpr call sites).
-- Comparison-position bare variant (`@cell == .V`) — Bug 7's `inferReactiveSiteBareVariants` doesn't cover binary-expr position. Separate dispatch when adopter friction surfaces.
-- Match-arm RHS bare variants — Phase 1 parser limitation.
-- Multi-statement function bodies with reactive writes — ast-builder collapsing; probe-only finding.
-- `.advance(.Variant.history)` write-site lowering parity — paired with Bug 2's history surface; small follow-up dispatch.
+**Other B1-surfaced follow-ons — S97 verification pass:**
+- ~~Pipe-alternation arms in `rewriteMatchExpr`~~ — ✅ CLOSED v0.2.4 (Bug 2, `28cd2ac`). Verified S97: `match @mode { .A | .B => "first" }` emits `_scrml_match_X === "A" || _scrml_match_X === "B"` correctly.
+- ~~Comparison-position bare variant (`@cell == .V`)~~ — ✅ CLOSED v0.2.4 (Bug 5, `28cd2ac`). Verified S97: `const <isIdle> = @mode == .Idle` emits `_scrml_structural_eq(_scrml_reactive_get("mode"), "Idle")` correctly.
+- **Match-arm RHS bare variants — 🟡 STILL OPEN.** Verified S97 repro: `match @mode { .Idle => .Active }` emits unresolved preprocessor placeholder `__scrml_bare_variant_Active__` in client JS — ReferenceError at runtime. The match-stmt codegen path doesn't unmask the preprocessor placeholders that `preprocessForAcorn` injects for bare-dot variants in acorn-parseable form. Likely fix: `emit-control-flow.ts` match-arm RHS codegen needs the same `__scrml_bare_variant_X__` → `"X"` unmask that `esTreeToExprNode` does for ident position.
+- ~~Multi-statement function bodies with reactive writes~~ — ✅ CLOSED (likely v0.2.4 cluster). Verified S97: `function f() { @a = 1; @b = 2; @c = 3 }` emits three sequential `_scrml_reactive_set` calls correctly.
+- **`.advance(.Variant.history)` write-site lowering parity — 🟡 STILL OPEN in event-handler context.** Verified S97 repro: `<button onclick=@outer.advance(.Playing.history)>` emits invalid JS `@outer.advance("Playing".history)` — `@` not converted, `.history` not peeled. The structured emit-expr path's `.advance(.X.history)` detection arm (`emit-expr.ts:665-682`) DOES handle the history-restore form when invoked, but the event-handler-attr routing here bypasses it. May need similar treatment to S97 commit `5df1a3a` (route postfix-like shapes through string-rewrite).
+- **NEW (S97 verification side-effect)**: `<Playing rule=.Idle history>` (rule attr followed by `history` boolean attr) tokenizes the rule value as `.Idle history` — boolean attribute swallowed into preceding value. Workaround: put `history` BEFORE `rule=`. Likely same root family as the bare-assignment value-reader work (`tokenizer.ts`); event-handler-bare-form fix doesn't cover the `rule=` attribute. Filed as v0.3.x candidate.
 
 **Memo:** `~/.claude/projects/-home-bryan-scrmlMaster-scrmlTS/memory/feedback_agent_commit_discipline.md` was created S83 after Bug 7's first-dispatch work-lost incident. Two-sided rule (agent commits + PA verifies pre-cleanup) folded into pa.md S67 protocol; held across all 4 subsequent Wave 4A + Wave 4B.1 dispatches with zero work-lost recurrence. **Pa.md is the authoritative location now — see pa.md §"Commit discipline — two-sided rule (S83 addendum)".**
 
