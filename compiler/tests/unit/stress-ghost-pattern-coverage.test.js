@@ -172,7 +172,7 @@ const VUE_FIXTURES = [
   {
     name: "Vue {{interpolation}} double-brace",
     src: `<program><div>{{ user.name }}</div></program>`,
-    expect: { category: "uncovered-gap" },
+    expect: { category: "ghost-caught", code: "W-LINT-020" },
   },
 ];
 
@@ -221,17 +221,17 @@ const ANGULAR_FIXTURES = [
   {
     name: "Angular *ngIf structural directive",
     src: `<program><div *ngIf="flag">x</div></program>`,
-    expect: { category: "uncovered-gap" },
+    expect: { category: "ghost-caught", code: "W-LINT-021" },
   },
   {
     name: "Angular (click)= event",
     src: `<program><button (click)="fn()">x</button></program>`,
-    expect: { category: "uncovered-gap" },
+    expect: { category: "ghost-caught", code: "W-LINT-021" },
   },
   {
     name: "Angular [(ngModel)]= two-way",
     src: `<program><input [(ngModel)]="name" /></program>`,
-    expect: { category: "uncovered-gap" },
+    expect: { category: "ghost-caught", code: "W-LINT-021" },
   },
 ];
 
@@ -262,12 +262,12 @@ const TYPESCRIPT_FIXTURES = [
   {
     name: "TypeScript interface declaration (not scrml)",
     src: `<program>\${ interface User { name: string } }<div>x</div></program>`,
-    expect: { category: "uncovered-gap" },
+    expect: { category: "ghost-caught", code: "W-LINT-022" },
   },
   {
     name: "TS untagged type alias `type X = { ... }`",
     src: `<program>\${ type User = { name: string } }<div>x</div></program>`,
-    expect: { category: "uncovered-gap" },
+    expect: { category: "ghost-caught", code: "W-LINT-022" },
   },
 ];
 

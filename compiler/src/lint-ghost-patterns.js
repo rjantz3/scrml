@@ -592,6 +592,115 @@ const PATTERNS = [
     skipIf: (offset, _logicRanges, _cssRanges, commentRanges) => inRange(offset, commentRanges),
   },
 
+  // Pattern 21: Vue double-brace interpolation `{{ expr }}` (W-LINT-020, S97).
+  //
+  // Vue uses `{{ user.name }}` in markup; scrml uses `${ @user.name }`.
+  // The `${` form is the canonical scrml markup-interpolation slot per
+  // §5 / §7.4. Adopter coming from Vue reflexively writes `{{ ... }}`;
+  // scrml silently emits the literal text `{{ user.name }}` into HTML
+  // (it's not recognized as an interpolation), so the bug is silent at
+  // compile time and visible only at runtime.
+  //
+  // Skip inside `${...}` logic blocks (where `{{` might be the start of
+  // a JS object-in-object literal — rare but valid), comments, and CSS.
+  {
+    regex: /\{\{[^}]*\}\}/g,
+    ghost: "{{ expr }} (Vue double-brace interpolation)",
+    correction: "scrml uses `${ expr }` for markup interpolation (§5, §7.4). Replace `{{ user.name }}` with `${@user.name}` (reactive read) or `${user.name}` (plain ident in scope).",
+    see: "§5, §7.4",
+    code: "W-LINT-020",
+    skipIf: (offset, logicRanges, cssRanges, commentRanges) =>
+      inRange(offset, logicRanges) || inRange(offset, cssRanges) || inRange(offset, commentRanges),
+  },
+
+  // Pattern 22: Angular structural directive `*ngIf`, `*ngFor`, etc.
+  // (W-LINT-021 — Angular family lint, shared code across the 3 sub-patterns).
+  //
+  // Match shape: whitespace + `*ng` + UppercaseWord + optional `=`.
+  // Common Angular structural directives: *ngIf, *ngFor, *ngSwitch,
+  // *ngSwitchCase, *ngSwitchDefault, *ngTemplateOutlet, *ngContent.
+  {
+    regex: /(?:^|\s)\*ng[A-Z]\w*\s*=/g,
+    ghost: "*ngIf= / *ngFor= / *ngSwitch= (Angular structural directive)",
+    correction: "scrml uses native markup conditionals: `if=@cond` / `else-if=@cond` / `else` for selection (§17); `for @items / lift item /` for iteration (§10); `<match for=Type on=@x>` for switch-on-discriminant (§18). No `*ng` prefix.",
+    see: "§10, §17, §18",
+    code: "W-LINT-021",
+    skipIf: (offset, logicRanges, _cssRanges, commentRanges) =>
+      inRange(offset, logicRanges) || inRange(offset, commentRanges),
+  },
+
+  // Pattern 23: Angular `(event)=` event binding (W-LINT-021 — same code).
+  //
+  // Match shape: `(word)=` where word is an event name like `click`,
+  // `submit`, `change`. Distinct from scrml's `class:active=(expr)` —
+  // the parens here are BEFORE `=` (as part of the attribute NAME),
+  // not after `=` (as the value).
+  {
+    regex: /(?:^|\s)\([a-z][a-zA-Z]*\)\s*=/g,
+    ghost: "(click)= / (submit)= (Angular event binding)",
+    correction: "scrml uses bare event-handler attributes: `onclick=fn()`, `onsubmit=fn()`, etc. No parens around the event name. Per SPEC §5.2.2 the bare-call auto-wraps as `function(event){ fn(); }`.",
+    see: "§5.2",
+    code: "W-LINT-021",
+    skipIf: (offset, logicRanges, _cssRanges, commentRanges) =>
+      inRange(offset, logicRanges) || inRange(offset, commentRanges),
+  },
+
+  // Pattern 24: Angular `[(ngModel)]=` two-way binding + `[prop]=` property
+  // binding (W-LINT-021 — same code).
+  //
+  // Match shape: `[name]=` or `[(name)]=`. Covers `[(ngModel)]="x"`,
+  // `[class.active]="isActive"`, `[disabled]="x"`, `[style.color]="c"`.
+  {
+    regex: /(?:^|\s)\[\(?[a-zA-Z][\w.-]*\)?\]\s*=/g,
+    ghost: "[(ngModel)]= / [class.X]= / [prop]= (Angular property/two-way binding)",
+    correction: "scrml uses `bind:value=@x` for two-way binding (§5.4); `class:name=@cond` for class binding (§5.5.2); `prop=@var` for one-way property binding. No square-bracket prefix.",
+    see: "§5.4, §5.5.2",
+    code: "W-LINT-021",
+    skipIf: (offset, logicRanges, _cssRanges, commentRanges) =>
+      inRange(offset, logicRanges) || inRange(offset, commentRanges),
+  },
+
+  // Pattern 25: TypeScript `interface Foo { ... }` declaration (W-LINT-022, S97).
+  //
+  // scrml's type vocabulary is `type Name:struct = { ... }` /
+  // `type Name:enum = { ... }` / `type Name:union = ...` — colon-tagged.
+  // The TS `interface` keyword is not in scrml. Adopter writing
+  // `interface User { name: string }` will get E-SCOPE-001 on
+  // `interface` (the identifier isn't bound) — generic.
+  //
+  // Match `\binterface\s+[A-Z]\w*` — the keyword + uppercase name; the
+  // `{` following is implied (interfaces with method/field bodies all
+  // open with `{`). Skip in comments + strings.
+  {
+    regex: /\binterface\s+[A-Z]\w*\b/g,
+    ghost: "interface Foo { ... } (TypeScript)",
+    correction: "scrml has no `interface` keyword. Use `type Foo:struct = { name: string }` for record-shaped types (§14.3). For sum/variant types use `type Foo:enum = { A, B(payload: T) }` (§14.4). For unions use `type Foo:union = A | B`. The colon-tagged shape is structural — not nominal — and works across SQL schema / refinement-type predicates.",
+    see: "§14.3, §14.4",
+    code: "W-LINT-022",
+    skipIf: (offset, _logicRanges, _cssRanges, commentRanges) => inRange(offset, commentRanges),
+  },
+
+  // Pattern 26: TypeScript untagged `type Name = { ... }` (W-LINT-022 — same code).
+  //
+  // scrml requires the `:struct` / `:enum` / `:union` tag. Untagged
+  // `type X = { ... }` is the TS form and silently passes through to
+  // codegen with `E-SCOPE-001` (the bare `{}` object literal becomes
+  // an empty object expression).
+  //
+  // Regex disambiguates from scrml's canonical form: `\btype\s+[A-Z]\w*`
+  // captures the keyword + name; `\s*=\s*\{` requires `=` directly
+  // (with whitespace) followed by `{`. scrml's `type X:struct = {` has
+  // `:struct` between `X` and `=` — the `\w*` (no `:`) won't match across
+  // that colon, so canonical scrml types don't trip the lint.
+  {
+    regex: /\btype\s+[A-Z]\w*\s*=\s*\{/g,
+    ghost: "type X = { ... } (TypeScript untagged type alias)",
+    correction: "scrml requires a colon tag: `type Foo:struct = { name: string }`. The tag determines structural meaning — `:struct` (record), `:enum` (sum / tagged variant), `:union` (untagged sum). See SPEC §14.3 / §14.4.",
+    see: "§14.3, §14.4",
+    code: "W-LINT-022",
+    skipIf: (offset, _logicRanges, _cssRanges, commentRanges) => inRange(offset, commentRanges),
+  },
+
   // Pattern 16: W-LIFECYCLE-CANDIDATE — string-discriminator trap.
   //
   // S64 debate-04 verdict A+ #2 (string-switch trap, gingerbill design insight):
