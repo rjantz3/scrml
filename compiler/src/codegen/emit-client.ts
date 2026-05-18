@@ -641,6 +641,34 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
 }
 
 // ---------------------------------------------------------------------------
+// PGO P2.1 (S102) — sub-emit timing helper.
+//
+// Mirrors `codegen/index.ts:codegenStage` but operates on the per-sub-emit
+// Map plumbed through `CompileContext.clientEmitTotals`. Same shape so the
+// flag-off baseline is identical to pre-instrumentation: one boolean check
+// + a direct call. When `ctx.debugPerf === true`, each call site adds two
+// `performance.now()` reads + one Map upsert — the same constant overhead
+// the outer P1.1 instrumentation pays.
+//
+// Naming convention: short kebab-case strings ("emit-functions",
+// "emit-bindings", ...) so the reporter columns align across runs and PGO
+// Phase 3 dispatches can cite the names directly.
+//
+// Sub-emits called inside `generateClientJs` are wrapped here. Any other
+// emit*() callers in this file (e.g. `emitEnumLookupTables` at module
+// top-level, used by tests) bypass the helper — instrumentation is scoped
+// to the per-file CG hot path.
+// ---------------------------------------------------------------------------
+function clientStage<T>(ctx: CompileContext, name: string, fn: () => T): T {
+  if (!ctx.debugPerf || !ctx.clientEmitTotals) return fn();
+  const start = performance.now();
+  const result = fn();
+  const elapsed = performance.now() - start;
+  ctx.clientEmitTotals.set(name, (ctx.clientEmitTotals.get(name) ?? 0) + elapsed);
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // generateClientJs
 // ---------------------------------------------------------------------------
 
@@ -663,7 +691,9 @@ export function generateClientJs(ctx: CompileContext): string {
   // escape-hatch expressions, and other legacy emission surfaces lower to
   // the canonical `{ variant, data }` tagged-object literal (matches the
   // structured AST path in emit-expr.ts:emitCall).
-  const { fields, collisions } = buildVariantFieldsRegistry(fileAST);
+  const { fields, collisions } = clientStage(ctx, "build-variant-fields-registry", () =>
+    buildVariantFieldsRegistry(fileAST)
+  );
   setVariantFieldsForFile(fields, collisions);
   setVariantFieldsForRewriter(fields, collisions);
 
@@ -678,8 +708,8 @@ export function generateClientJs(ctx: CompileContext): string {
   // Note: The registry (binding registry) is populated during HTML emission
   // which runs before client JS generation. By the time we reach here,
   // ctx.registry has event/logic bindings available for detection.
-  detectRuntimeChunks(fileAST, ctx);
-  const runtimeSource = assembleRuntime(ctx.usedRuntimeChunks);
+  clientStage(ctx, "detect-runtime-chunks", () => { detectRuntimeChunks(fileAST, ctx); });
+  const runtimeSource = clientStage(ctx, "assemble-runtime", () => assembleRuntime(ctx.usedRuntimeChunks));
   lines.push(runtimeSource);
   lines.push("// --- end scrml reactive runtime ---");
   lines.push("");
@@ -702,6 +732,7 @@ export function generateClientJs(ctx: CompileContext): string {
   // by CHX at the consumer site, not resolved via ES module bindings, so
   // emitting a JS import for them either produces a SyntaxError (bare kebab)
   // or a module-link error (no matching export on the channel-file side).
+  clientStage(ctx, "emit-imports", () => {
   const allImports: any[] = fileAST?.ast?.imports ?? fileAST?.imports ?? [];
   for (const stmt of allImports) {
     if ((stmt.kind === "import-decl" || stmt.kind === "use-decl") && stmt.source && stmt.names?.length > 0) {
@@ -738,9 +769,10 @@ export function generateClientJs(ctx: CompileContext): string {
     }
   }
   lines.push("");
+  });
 
   // Enum toEnum() lookup tables (SPEC §14.4.1)
-  const enumLookupLines = emitEnumLookupTables(fileAST);
+  const enumLookupLines = clientStage(ctx, "emit-enum-lookup-tables", () => emitEnumLookupTables(fileAST));
   if (enumLookupLines.length > 0) {
     lines.push("// --- enum toEnum() lookup tables (compiler-generated) ---");
     for (const line of enumLookupLines) lines.push(line);
@@ -749,7 +781,7 @@ export function generateClientJs(ctx: CompileContext): string {
 
   // Enum variant objects — `const Status = Object.freeze({ Loading: "Loading", ... })`
   // Allows `@status = Status.Loading` at runtime (§14.4)
-  const enumObjectLines = emitEnumVariantObjects(fileAST);
+  const enumObjectLines = clientStage(ctx, "emit-enum-variant-objects", () => emitEnumVariantObjects(fileAST));
   if (enumObjectLines.length > 0) {
     lines.push("// --- enum variant objects (compiler-generated) ---");
     for (const line of enumObjectLines) lines.push(line);
@@ -768,7 +800,7 @@ export function generateClientJs(ctx: CompileContext): string {
   // C15. See `compiler/src/codegen/emit-engine.ts` and the C12 SURVEY
   // (`docs/changes/phase-a1c-step-c12-engine-state-machine-runtime/SURVEY.md`)
   // for the full hand-off contract.
-  const engineLines = emitEngineSubstrate(fileAST);
+  const engineLines = clientStage(ctx, "emit-engine-substrate", () => emitEngineSubstrate(fileAST));
   if (engineLines.length > 0) {
     lines.push("// --- engine substrate (compiler-generated, §51.0) ---");
     for (const line of engineLines) lines.push(line);
@@ -788,7 +820,7 @@ export function generateClientJs(ctx: CompileContext): string {
   // others don't, hookless engines emit no hook-firing function (the wrap
   // emitters at the write-site call sites gate on `enginesWithHooks` /
   // `EngineBindingInfo.hasHooks`).
-  const engineHookLines = emitEngineHookFiringFunctionsForFile(fileAST);
+  const engineHookLines = clientStage(ctx, "emit-engine-hook-firing-functions", () => emitEngineHookFiringFunctionsForFile(fileAST));
   if (engineHookLines.length > 0) {
     lines.push("// --- engine hook-firing functions (compiler-generated, §51.0.H) ---");
     for (const line of engineHookLines) lines.push(line);
@@ -811,7 +843,7 @@ export function generateClientJs(ctx: CompileContext): string {
   // state-children remains DEFERRED — same parser blocker as C13. See
   // `compiler/src/codegen/emit-engine.ts` C14 section + the C14 SURVEY
   // (`docs/changes/phase-a1c-step-c14-derived-engines/SURVEY.md`).
-  const derivedEngineLines = emitDerivedEngineSubstrateForFile(fileAST);
+  const derivedEngineLines = clientStage(ctx, "emit-derived-engine-substrate", () => emitDerivedEngineSubstrateForFile(fileAST));
   if (derivedEngineLines.length > 0) {
     lines.push("// --- derived engine substrate (compiler-generated, §51.0.J) ---");
     for (const line of derivedEngineLines) lines.push(line);
@@ -833,8 +865,8 @@ export function generateClientJs(ctx: CompileContext): string {
   //
   // See SCOPE-AND-DECOMPOSITION.md §3.4 (Option C-prime, RATIFIED) and
   // PHASE-0-SURVEY §7.3 finalized helper signature.
-  const c12BodyRender = emitEngineBodyRenderForFile(fileAST, ctx);
-  const c14BodyRender = emitDerivedEngineBodyRenderForFile(fileAST, ctx);
+  const c12BodyRender = clientStage(ctx, "emit-engine-body-render", () => emitEngineBodyRenderForFile(fileAST, ctx));
+  const c14BodyRender = clientStage(ctx, "emit-derived-engine-body-render", () => emitDerivedEngineBodyRenderForFile(fileAST, ctx));
   const allRenderFns = [...c12BodyRender.renderFunctions, ...c14BodyRender.renderFunctions];
   const allDispatchers = [...c12BodyRender.dispatchers, ...c14BodyRender.dispatchers];
   if (allRenderFns.length > 0 || allDispatchers.length > 0) {
@@ -868,7 +900,9 @@ export function generateClientJs(ctx: CompileContext): string {
   //
   // See `compiler/src/codegen/emit-engine.ts` C15 section + the C15 SURVEY
   // (`docs/changes/phase-a1c-step-c15-cross-file-engine-mount/SURVEY.md`).
-  const crossFileEngineMountLines = emitCrossFileEngineMountsForFile(fileAST, ctx.exportRegistry ?? null);
+  const crossFileEngineMountLines = clientStage(ctx, "emit-cross-file-engine-mounts", () =>
+    emitCrossFileEngineMountsForFile(fileAST, ctx.exportRegistry ?? null)
+  );
   if (crossFileEngineMountLines.length > 0) {
     lines.push("// --- cross-file engine mounts (compiler-generated, §21.8 + §51.0.D) ---");
     for (const line of crossFileEngineMountLines) lines.push(line);
@@ -975,18 +1009,18 @@ export function generateClientJs(ctx: CompileContext): string {
   }
 
   // Emit fetch stubs, CPS wrappers, and client-boundary function bodies
-  const { lines: fnLines, fnNameMap } = emitFunctions(ctx);
+  const { lines: fnLines, fnNameMap } = clientStage(ctx, "emit-functions", () => emitFunctions(ctx));
   for (const line of fnLines) lines.push(line);
 
   // Emit top-level logic statements and CSS variable bridge
-  const reactiveLines = emitReactiveWiring(ctx);
+  const reactiveLines = clientStage(ctx, "emit-reactive-wiring", () => emitReactiveWiring(ctx));
   for (const line of reactiveLines) lines.push(line);
 
   // A5-4 (§51.0.M) — Initial-arm for engines with <onTimeout>. Emitted AFTER
   // emitReactiveWiring so the user reactive cells (which a computed-form
   // <onTimeout after=${@var}<unit>/> may read at arm time) are initialized
   // first. Tree-shake: empty when no engine in the file has <onTimeout>.
-  const engineInitArmLines = emitEngineInitialArmsForFile(fileAST);
+  const engineInitArmLines = clientStage(ctx, "emit-engine-initial-arms", () => emitEngineInitialArmsForFile(fileAST));
   if (engineInitArmLines.length > 0) {
     lines.push("");
     lines.push("// --- engine onTimeout initial-arms (compiler-generated, §51.0.M) ---");
@@ -994,11 +1028,11 @@ export function generateClientJs(ctx: CompileContext): string {
   }
 
   // Emit ref= and bind:/class: directive wiring
-  const bindingLines = emitBindings(ctx);
+  const bindingLines = clientStage(ctx, "emit-bindings", () => emitBindings(ctx));
   for (const line of bindingLines) lines.push(line);
 
   // Emit event handler wiring and reactive display wiring
-  const eventLines = emitEventWiring(ctx, fnNameMap);
+  const eventLines = clientStage(ctx, "emit-event-wiring", () => emitEventWiring(ctx, fnNameMap));
   for (const line of eventLines) lines.push(line);
 
   // Emit type decode table + runtime reflect when encoding is enabled
@@ -1006,8 +1040,8 @@ export function generateClientJs(ctx: CompileContext): string {
   if (encodingCtx?.enabled && hasRuntimeMetaBlocks(fileAST)) {
     lines.push("");
     lines.push("// --- type decode table (§47.2) ---");
-    lines.push(emitDecodeTable(encodingCtx));
-    lines.push(emitRuntimeReflect());
+    lines.push(clientStage(ctx, "emit-decode-table", () => emitDecodeTable(encodingCtx)));
+    lines.push(clientStage(ctx, "emit-runtime-reflect", () => emitRuntimeReflect()));
     lines.push("");
   }
 
@@ -1028,15 +1062,17 @@ export function generateClientJs(ctx: CompileContext): string {
   // `n . lines` in record literal values because the emitter outputs
   // spaces around `.`, so the fixed-width `(?<!\.)` lookbehind saw a
   // space instead of a dot. Extended to variable-length `(?<!\.\s*)`.
-  let clientCode = lines.join("\n");
+  let clientCode = clientStage(ctx, "lines-join", () => lines.join("\n"));
   if (fnNameMap && fnNameMap.size > 0) {
-    for (const [originalName, mangledName] of fnNameMap) {
-      const callSiteRegex = new RegExp(
-        `(?<!\\.\\s*)\\b${escapeRegex(originalName)}\\b(?=\\s*[(;,}\\]\\n)]|$)`,
-        "g",
-      );
-      clientCode = clientCode.replace(callSiteRegex, mangledName);
-    }
+    clientStage(ctx, "post-fn-name-mangle", () => {
+      for (const [originalName, mangledName] of fnNameMap) {
+        const callSiteRegex = new RegExp(
+          `(?<!\\.\\s*)\\b${escapeRegex(originalName)}\\b(?=\\s*[(;,}\\]\\n)]|$)`,
+          "g",
+        );
+        clientCode = clientCode.replace(callSiteRegex, mangledName);
+      }
+    });
 
     // GITI-001 (giti inbound 2026-04-20): `@data = serverFn(args)` emits
     // `_scrml_reactive_set("data", _scrml_fetch_serverFn_N(args));` — storing
@@ -1044,6 +1080,7 @@ export function generateClientJs(ctx: CompileContext): string {
     // the resolved value. Wrap each such statement in an async IIFE that
     // awaits the fetch stub before setting the reactive. Scoped by fnNameMap
     // so only server-fn call sites (fetch stubs / CPS wrappers) are touched.
+    clientStage(ctx, "post-server-fn-iife-wrap", () => {
     for (const [, mangledName] of fnNameMap) {
       if (!/^_scrml_(fetch|cps)_/.test(mangledName)) continue;
       // Match _scrml_reactive_set("NAME", <mangledName>( ... );) at statement level.
@@ -1122,6 +1159,7 @@ export function generateClientJs(ctx: CompileContext): string {
       }
       clientCode = parts.join("");
     }
+    });
   }
 
   // GITI-003 (giti inbound 2026-04-20): prune imports that are only used by
@@ -1141,7 +1179,7 @@ export function generateClientJs(ctx: CompileContext): string {
   // minimal (empty-body) fixtures would see their imports pruned (correctly
   // unused) without this carve-out. Real compilations always go through
   // testMode: false.
-  clientCode = ctx.testMode ? clientCode : (function pruneUnusedClientImports(code: string): string {
+  clientCode = ctx.testMode ? clientCode : clientStage(ctx, "post-prune-unused-imports", () => (function pruneUnusedClientImports(code: string): string {
     const importRe = /^import\s+(?:\{([^}]*)\}|([A-Za-z_$][A-Za-z0-9_$]*))\s+from\s+(['"])([^'"]+)\3\s*;?\s*$/gm;
     const imports: Array<{ match: string; start: number; end: number; names: string[]; isDefault: boolean; src: string }> = [];
     let m: RegExpExecArray | null;
@@ -1209,7 +1247,8 @@ export function generateClientJs(ctx: CompileContext): string {
     }
     result += code.slice(cursor);
     return result;
-  })(clientCode);
+  })(clientCode));
+  clientStage(ctx, "post-protected-field-scan", () => {
   for (const field of protectedFields) {
     const fieldRegex = new RegExp(`\\.${escapeRegex(field)}\\b`);
     if (fieldRegex.test(clientCode)) {
@@ -1221,11 +1260,13 @@ export function generateClientJs(ctx: CompileContext): string {
       ));
     }
   }
+  });
 
   // Security validation: client JS must not contain SQL execution calls.
   // §44 Bun.SQL identifier `_scrml_sql` (and scoped `_scrml_sql_<n>` for
   // nested <program db="..."> contexts) must never reach the client.
   // Detected forms: `_scrml_sql.method(`, `_scrml_sql\``, `_scrml_sql_2.unsafe(`
+  clientStage(ctx, "post-sql-leak-scan", () => {
   const SQL_LEAK_PATTERNS: RegExp[] = [
     /_scrml_sql_exec\s*\(/,                 // legacy helper name (defensive)
     /_scrml_db\s*\./,                       // legacy bun:sqlite db var (defensive)
@@ -1245,6 +1286,7 @@ export function generateClientJs(ctx: CompileContext): string {
       ));
     }
   }
+  });
 
   // S22 §1a slice 2: release the per-file variant registry.
   // S95 Bug 2: also release the rewriter's mirror.

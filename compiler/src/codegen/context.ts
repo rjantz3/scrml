@@ -137,6 +137,44 @@ export interface CompileContext {
    * resolve).
    */
   hasInternalLinks?: boolean;
+  /**
+   * PGO P2.1 (S102) — sub-emit timing instrumentation gate.
+   *
+   * When `true`, `generateClientJs` wraps every emit* call site with a
+   * `performance.now()` timing pair and accumulates totals into
+   * `clientEmitTotals`. When `false` (or absent), the instrumentation
+   * branch short-circuits so the flag-off baseline takes the same code
+   * path as pre-instrumentation (one boolean check + a direct call).
+   *
+   * Plumbed from `runCG({ debugPerf })` which is itself plumbed from
+   * `compileScrml({ debugPerf })` ← `--debug-perf` CLI flag (P1.5).
+   *
+   * Distinct from `runCG`'s outer `codegenStage`-keyed totals (which
+   * track top-level emit-* call sites like emit-client, emit-html,
+   * emit-server). This sub-key set decomposes the emit-client interior.
+   */
+  debugPerf?: boolean;
+  /**
+   * PGO P2.1 (S102) — log channel for `[CLIENT-EMIT]` lines. Defaults
+   * to `console.log` when unset. Mirrors `runCG.log` so the test
+   * harnesses + the CLI verbose-buffer share a single sink.
+   */
+  log?: (msg: string) => void;
+  /**
+   * PGO P2.1 (S102) — per-sub-emit timing accumulator. Map<name, ms>.
+   *
+   * Populated by `clientStage(name, fn)` in `emit-client.ts` when
+   * `debugPerf === true`. Aggregated across every file processed by
+   * `runCG`'s per-file loop and reported as a sorted `[CLIENT-EMIT]
+   * <name>: <total>ms (<pct>% of emit-client)` breakdown after the
+   * loop completes.
+   *
+   * `runCG` constructs the Map ONCE (outside the per-file loop) and
+   * threads the same reference into every `CompileContext` so totals
+   * accumulate across files. Null when `debugPerf === false` so the
+   * non-instrumented hot path doesn't allocate the Map.
+   */
+  clientEmitTotals?: Map<string, number> | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -188,5 +226,11 @@ export function makeCompileContext(partial: Partial<CompileContext> & { fileAST:
     // first absolute-path string-literal `<a href>` it encounters
     // (independent of whether it resolved to a known route).
     hasInternalLinks: partial.hasInternalLinks ?? false,
+    // PGO P2.1 (S102) — sub-emit timing instrumentation. Defaults to
+    // OFF so non-debug code paths take the same shape as before
+    // instrumentation landed.
+    debugPerf: partial.debugPerf ?? false,
+    log: partial.log ?? console.log,
+    clientEmitTotals: partial.clientEmitTotals ?? null,
   };
 }

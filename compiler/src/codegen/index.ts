@@ -304,6 +304,18 @@ export function runCG(input: CgInput): CgOutput {
   }
   const cgStart = debugPerf ? performance.now() : 0;
 
+  // PGO P2.1 (S102) — second-level decomposition INSIDE emit-client.
+  // S94 perf characterization (CLOSURE-ANALYSIS-COST.md) flagged emit-client
+  // as ~91% of CG (~38× the next-hottest emit-* path). Phase 2.1 instruments
+  // each emit*() call site inside `generateClientJs` so the top-3 hottest
+  // sub-emits surface as load-bearing data for Phase 3 chip-aways.
+  //
+  // The same Map reference is threaded into every per-file `CompileContext`
+  // so totals accumulate across the per-file loop. Sub-emit name keys are
+  // short ("emit-functions", "emit-bindings", ...) so the reporter columns
+  // line up across runs.
+  const clientEmitTotals: Map<string, number> | null = debugPerf ? new Map() : null;
+
   resetVarCounter();
 
   // §51.5.1 (S28 slice 3) — clear the machine-codegen error buffer before
@@ -697,6 +709,14 @@ export function runCG(input: CgInput): CgOutput {
       // A-2.1 — propagate Stage 7.6 ReachabilityRecord per-file; A-4 codegen
       // will consume per-entry-point per-role ChunkPlans. Empty until A-2.2+.
       reachabilityRecord: reachabilityRecordInput,
+      // PGO P2.1 (S102) — threaded so `emit-client.ts:clientStage` can
+      // gate timing on the same `debugPerf` flag, route output through
+      // the same `log` sink, and accumulate per-sub-emit totals into a
+      // SHARED Map (one instance for the whole runCG invocation, reused
+      // across every per-file compileCtx).
+      debugPerf,
+      log,
+      clientEmitTotals,
     };
 
     const hasMarkup = (analysis as any)?.markupNodes?.length > 0;
@@ -1601,6 +1621,31 @@ export function runCG(input: CgInput): CgOutput {
     for (const [name, total] of rows) {
       const pct = cgElapsed > 0 ? (total / cgElapsed) * 100 : 0;
       log(`  [CG-EMIT] ${name}: ${total.toFixed(1)}ms (${pct.toFixed(1)}% of CG)`);
+    }
+  }
+
+  // PGO P2.1 (S102) — second-level breakdown INSIDE emit-client.
+  //
+  // Percentages are computed against the top-level `emit-client`
+  // aggregate captured in `cgEmitTotals` (so the column lines up with
+  // the `[CG-EMIT] emit-client: <N>ms` row immediately above). When
+  // emit-client wasn't entered (library mode or fully-empty file
+  // corpus), the percentage falls back to zero rather than producing
+  // a divide-by-zero NaN — the absolute ms is still useful as a check
+  // that no sub-emit fired without the parent.
+  //
+  // Sum of `[CLIENT-EMIT]` rows is expected to be slightly LESS than
+  // the parent `emit-client` row: the un-instrumented post-pass work
+  // (fnNameMap rewrites, server-fn IIFE wrap, import pruning, SQL-leak
+  // scan, protected-field scan, runtime assembly composition) is part
+  // of `emit-client` wall time but not part of the per-sub-emit
+  // surface. The brief allows ±10ms slack on this sum.
+  if (debugPerf && clientEmitTotals && clientEmitTotals.size > 0) {
+    const emitClientTotal = cgEmitTotals.get("emit-client") ?? 0;
+    const rows = [...clientEmitTotals.entries()].sort((a, b) => b[1] - a[1]);
+    for (const [name, total] of rows) {
+      const pct = emitClientTotal > 0 ? (total / emitClientTotal) * 100 : 0;
+      log(`  [CLIENT-EMIT] ${name}: ${total.toFixed(1)}ms (${pct.toFixed(1)}% of emit-client)`);
     }
   }
 
