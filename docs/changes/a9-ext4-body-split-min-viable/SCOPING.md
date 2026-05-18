@@ -1,5 +1,17 @@
 # A9 — Body-Split Min-Viable: Extension 4 (S4 Wiring) — Implementation Scoping
 
+> ⚠️ **HISTORICAL — SCOPE-INVALIDATED at S101 (2026-05-18).** This doc was authored 2026-05-18 08:27 based on a stale master-list §0.1 table row that said "A9 — body-split min-viable RATIFIED S72 · Ext 4 dispatch-ready." The pre-dispatch sanity check by the A9 Ext 4 sub-agent surfaced that **A9 Ext 4 was actually shipped at `dc98313` (S72, 2026-05-08)** — 10 days before THIS doc was authored. Per master-list line 98 (current truth): *"A9 body-split min-viable v0.2.0 SHIPPED (S72 Ext 4 + S76 Ext 5)."* Verifiable artifacts: `compiler/src/codegen/emit-functions.ts:322-421` (client wrapper try/catch + CpsError envelope), `compiler/src/codegen/emit-server.ts:806-1147` (server stub try/catch — both CSRF + non-CSRF paths), `compiler/src/type-system.ts:3789, 3878-3887` (`fnCpsImplicitFailable`), `compiler/src/type-system.ts:4444-4498, 5054-5098` (two W-CPS-NEEDS-FAILABLE fire sites), SPEC §19.6.7 + §19.9.5 + §34 catalog rows, `compiler/tests/unit/a9-ext4-cps-failable-wiring.test.js` (16 passing tests). The implicit-error-enum is **`CpsError`** (synthetic, with `NetworkError` + `ServerError` variants per §19.9.5) — NOT the `Error::Generic | SqlError | NetworkError` framing in this doc's §1.
+>
+> **Real residuals if a follow-on dispatch is authorized** (per sub-agent's option β recommendation, ~14-23h not 30h):
+>   - **(a) PIPELINE.md addendum** ~1-2h — Stage 5 RI / Stage 6 TS contract for `cpsSplit.cpsImplicitFailable` + W-CPS-NEEDS-FAILABLE emission + caller-context propagation
+>   - **(b) Markup-context `<errorBoundary>` suppression** ~6-10h — today's impl warns even when call site is under an `<errorBoundary>` markup ancestor; SPEC §19.9.5 says this should suppress
+>   - **(c) Conformance test corpus expansion** ~5-8h — current 16 tests are unit-level wiring; SCOPING-prescribed 5-layer corpus (positive/negative + soundness + composition + adopter-realistic + negative) is unshipped
+>   - **(d) Lifecycle-hook static-reject set** ~2-3h — enumerate `<onMount>` / `<onCleanup>` / `<onTransition>` / `<onTimeout>` / `<onIdle>` rejection scope
+>
+> The content below this banner is preserved AS-WRITTEN for audit trail. Do NOT dispatch from this doc; the implementation already exists. If user authorizes residual work, scope from option β above.
+
+---
+
 **Status:** RATIFIED per pa.md / master-list § A9 row. Dispatch-ready.
 **Authority:**
 - `scrml-support/docs/deep-dives/soundness-analysis-for-body-split-2026-05-08.md` (S4–S8 soundness predicates)
