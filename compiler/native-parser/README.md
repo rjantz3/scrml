@@ -16,22 +16,24 @@ Per PRIMER §2 Pillar 5b ("Reach for state primitives first; reach for `fn` only
 
 A reader who points to any state-shape construct must be able to find its `<engine>` declaration; any `fn` body the reader points to must justify the calculation classification per the D1 charter. If a `fn` body cannot be justified, it surfaces as tension for re-litigation (per the dispatch rule "shoot straight; document tension; don't paper over").
 
-## M1.2 status (2026-05-17, S100)
+## M1.3 status (2026-05-18, S102)
 
 | Surface | Status |
 |---|---|
 | Token catalog (D3) | substantive — all TokenKind variants for JS subset + scrml extensions; M1.2 added `TemplateInterpStart` / `TemplateInterpEnd` for template-literal interp tokens |
-| LexMode engine (D2) | M1.2: `<InTemplateBody>` is now a COMPOSITE state-child per §51.0.Q.1 — body contains a nested `<engine for=LexMode var=innerLexMode initial=.InCode>`. State-children `.InSingleString` / `.InDoubleString` activated. Remaining bare bodies (`.InLineComment` / `.InBlockComment` / `.InRegexBody`) are M1.3 / M1.4 targets. |
+| LexMode engine (D2) | M1.2: `<InTemplateBody>` is a COMPOSITE state-child per §51.0.Q.1 — body contains a nested `<engine for=LexMode var=innerLexMode initial=.InCode>`. State-children `.InSingleString` / `.InDoubleString` activated. M1.3: `.InLineComment` / `.InBlockComment` activated. Remaining bare body (`.InRegexBody`) is M1.4. |
 | BracketStack engine (D2) | declared; live frame stack in the JS-host shadow |
 | ErrorRecovery engine (D2) | declared with all 3 state-children + full rule= matrix |
 | Cursor (D4 P5) | V5-strict-shaped; peek/advance/snapshot/restore |
-| InCode-state body | M1.1 substantive — delegates `'` / `"` / `` ` `` to the M1.2 dispatchers; intercepts `}` as `TemplateInterpEnd` when in a template-interp frame at matching bracket depth |
+| InCode-state body | M1.1 substantive — M1.3: delegates `'` / `"` / `` ` `` to the M1.2 string + template dispatchers AND `//` / `/*` to the M1.3 comment dispatchers; intercepts `}` as `TemplateInterpEnd` when in a template-interp frame at matching bracket depth. Regex `/` still delegates to the M1.4 stub. |
 | Single-quoted string body | M1.2 SUBSTANTIVE — escape-aware scanner (JS spec §12.8.4) — `\n` `\r` `\t` `\b` `\f` `\v` `\0` `\\` `\'` `\"` `` \` `` `\/`, `\xHH`, `\uHHHH`, `\u{...}` brace form, IdentityEscape passthrough, LineContinuation. File: `lex-in-single-string.scrml` / `.js` |
 | Double-quoted string body | M1.2 SUBSTANTIVE — mirror of single-quoted; shares `scanStringEscape` primitive. File: `lex-in-double-string.scrml` / `.js` |
 | Template-literal body | M1.2 SUBSTANTIVE — §51.0.Q.1 NESTED-ENGINE pattern. Emits sequence of `TemplateChunk` + `[TemplateInterpStart, ...inner-tokens, TemplateInterpEnd, TemplateChunk]*` per ECMA-262 §12.8.6. Per-call `ctx.templateStack` tracks per-template frames; `${` pushes (recording bracket-stack depth), matching `}` pops. Nested templates supported. File: `lex-in-template.scrml` / `.js` |
-| Comment / regex bodies | STUB (paired-delimiter scan + LexMode round-trip; inline-handled in InCode dispatch); M1.3 / M1.4 dispatches turn each on |
-| `lex(source): Token[]` entry point | functional end-to-end; loop dispatches by LexMode via the 4 active dispatchers + safety-net for M1.3+ modes |
-| Conformance test | `compiler/tests/parser-conformance-lexer.test.js` runs bench corpus + inline micro-corpus. M1.2 result: **87 pass / 3 skip / 0 fail** (up from M1.1's 57/12/0). Remaining 3 skips are 'smoke' disposition bench files reserved for the M1.3+ byte-identical Acorn-token-shape normalizer. |
+| Line comment body | M1.3 SUBSTANTIVE — scans `//` body up to (not including) the LineTerminator per ECMA-262 §11.3; emits no token (Acorn parity — comments non-emitted per the token-catalog policy). File: `lex-in-line-comment.scrml` / `.js` |
+| Block comment body | M1.3 SUBSTANTIVE — scans `/* ... */` per ECMA-262 §12.4; consumes both delimiters on close; tolerates EOF without `*/` (defers recovery diagnostic to a later milestone, matching the M1.2 string-body precedent). File: `lex-in-block-comment.scrml` / `.js` |
+| Regex body | STUB (paired-slash scan, char-class aware; inline-handled in InCode dispatch); M1.4 turns it into a proper prev-token-aware dispatch. |
+| `lex(source): Token[]` entry point | functional end-to-end; loop dispatches by LexMode via the 6 active dispatchers (InCode + InSingleString + InDoubleString + InTemplateBody + InLineComment + InBlockComment) + safety-net for M1.4+ modes |
+| Conformance test | `compiler/tests/parser-conformance-lexer.test.js` runs bench corpus + inline micro-corpus. M1.3 result: **90 pass / 0 skip / 0 fail** (up from M1.2's 87/3/0). The 3 prior-smoke bench files (expr-arrow / expr-spread-rest / stmt-control-flow) flipped to `full` disposition; the byte-identical comparator passes after the M1.3 normalizer extension (binary `+/-` label, 4-form `==/!=/===/!==` label, contextual-keyword `let/async/await/of` re-classification against native's JS_KEYWORDS). |
 
 ## File listing
 
@@ -47,7 +49,9 @@ A reader who points to any state-shape construct must be able to find its `<engi
 | `lex-in-single-string.scrml` / `.js` | M1.2 SUBSTANTIVE — escape-aware single-quoted string scanner per JS spec §12.8.4. Exports `scanStringEscape` reused by lex-in-double-string + lex-in-template |
 | `lex-in-double-string.scrml` / `.js` | M1.2 SUBSTANTIVE — mirror of single-quoted scanner |
 | `lex-in-template.scrml` / `.js` | M1.2 SUBSTANTIVE — §51.0.Q.1 NESTED-ENGINE pattern for template literals. Walks chunks, opens template-interp frame on `${`, recognizes matching `}` via bracket-stack-depth tracking |
-| `lex.scrml` / `.js` | Top-level `lex(source: string): Token[]`; loop dispatches by LexMode via 4 active dispatchers (InCode / InSingleString / InDoubleString / InTemplateBody); safety bound + cursor-progress sentinel |
+| `lex-in-line-comment.scrml` / `.js` | M1.3 SUBSTANTIVE — `//` body scanner; consumes to LineTerminator (not inclusive) or EOF; emits no token |
+| `lex-in-block-comment.scrml` / `.js` | M1.3 SUBSTANTIVE — `/* ... */` body scanner; consumes paired delimiters; EOF-tolerant; emits no token |
+| `lex.scrml` / `.js` | Top-level `lex(source: string): Token[]`; loop dispatches by LexMode via 6 active dispatchers (InCode / InSingleString / InDoubleString / InTemplateBody / InLineComment / InBlockComment); safety bound + cursor-progress sentinel |
 | `README.md` | this file |
 
 ## Swap-in roadmap
@@ -55,7 +59,7 @@ A reader who points to any state-shape construct must be able to find its `<engi
 | Mn | What changes | Status |
 |---|---|---|
 | M1.2 | Activates `<InTemplateBody>` (incl. `${...}` nested-engine per §51.0.Q.1) + `<InSingleString>` + `<InDoubleString>` state-child bodies; replaces M1.1 stub scanners | ✅ landed at S100 |
-| M1.3 | Activates `<InLineComment>` + `<InBlockComment>` state-child bodies | pending |
+| M1.3 | Activates `<InLineComment>` + `<InBlockComment>` state-child bodies (line/block comment scanners + dispatcher wiring); retires M1.1 stubScanLineComment / stubScanBlockComment; closes the 3 prior-smoke bench-corpus skips (87/3/0 → 90/0/0) via a normalizer extension covering Acorn's binary `+/-` label, 4-form `==/!=/===/!==` label, and `let/async/await/of` contextual-keyword `name` surface | ✅ landed at S102 |
 | M1.4 | Activates `<InRegexBody>` state-child body; refines DD §D4 P3 prev-token heuristic | pending |
 | M2 | Expression parser implemented in scrml; ParseContext engine; replaces `scrmlNativeParserStub.parse` body in `compiler/tests/parser-conformance/parsers.js` | pending |
 | M3-M6 | Per DD §D7 milestones — full statement parser, full bounded subset, scrmlTS pipeline swap-in, Acorn removal | pending |

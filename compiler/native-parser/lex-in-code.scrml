@@ -24,12 +24,13 @@
 //   The IDENTIFIER/KEYWORD DISCRIMINATION is CALCULATION (lookup in
 //   token.scrml's JS_KEYWORDS table; pure fn of input bytes).
 //
-// Status (M1.1): SUBSTANTIVE. Emits all InCode-state tokens for the
+// Status (M1.3): SUBSTANTIVE. Emits all InCode-state tokens for the
 // bench-corpus files (whitespace, identifiers, keywords, numeric
 // literals, punctuation, multi-char operators, string/comment/regex
-// transition triggers). String/comment/regex bodies STUB by scanning
-// to a paired delimiter character and emitting a coarse token; M1.2-M1.4
-// dispatches replace the stub with escape-aware lexing per state.
+// transition triggers). String bodies activated in M1.2; comment
+// bodies activated in M1.3 (this dispatch now delegates `//` and `/*`
+// to dispatchInLineComment / dispatchInBlockComment). Regex body
+// remains STUB pending M1.4 prev-token-aware regex/division split.
 //
 // scrml-extensions emitted in M1.1: at-prefix idents -> ScrmlAt token;
 // dot-prefix variants -> BareVariant token; tilde -> Tilde token;
@@ -46,6 +47,8 @@ ${
     import { dispatchInSingleString } from "./lex-in-single-string.scrml"
     import { dispatchInDoubleString } from "./lex-in-double-string.scrml"
     import { dispatchInTemplateBody, isTemplateInterpClose, emitTemplateInterpClose } from "./lex-in-template.scrml"
+    import { dispatchInLineComment } from "./lex-in-line-comment.scrml"
+    import { dispatchInBlockComment } from "./lex-in-block-comment.scrml"
 
     // ---------------------------------------------------------------------
     // Character-classification predicates (CALCULATION; pure fns).
@@ -292,32 +295,11 @@ ${
         return { raw: cursor.source.substring(start, cursor.pos), span: makeSpan(start, cursor.pos, line, col) }
     }
 
-    export function stubScanLineComment(cursor) {
-        const start = cursor.pos
-        const line = cursor.line
-        const col = cursor.col
-        // skip both `/` chars
-        advance(cursor, 2)
-        while (!isEof(cursor) && !isNewlineCode(peekCharCode(cursor, 0))) {
-            advance(cursor, 1)
-        }
-        return { raw: cursor.source.substring(start, cursor.pos), span: makeSpan(start, cursor.pos, line, col) }
-    }
-
-    export function stubScanBlockComment(cursor) {
-        const start = cursor.pos
-        const line = cursor.line
-        const col = cursor.col
-        advance(cursor, 2) // skip /*
-        while (!isEof(cursor)) {
-            if (peekChar(cursor, 0) == "*" && peekChar(cursor, 1) == "/") {
-                advance(cursor, 2)
-                break
-            }
-            advance(cursor, 1)
-        }
-        return { raw: cursor.source.substring(start, cursor.pos), span: makeSpan(start, cursor.pos, line, col) }
-    }
+    // (stubScanLineComment / stubScanBlockComment retired in M1.3 — the
+    //  proper body dispatchers live in lex-in-line-comment.scrml and
+    //  lex-in-block-comment.scrml. The InCode dispatch below transitions
+    //  LexMode and calls the proper dispatcher inline, matching the M1.2
+    //  single/double-string dispatch pattern.)
 
     // Regex literal — bounded paired-slash scan honoring `[...]` char-class.
     // Real regex-context detection lives in the caller (regexAllowed flag);
@@ -520,18 +502,19 @@ ${
             return true
         }
 
-        // -------- Comments (M1.1 STUB transitions) --------
+        // -------- Comments (M1.3 — proper body dispatchers) --------
+        // Mirrors the M1.2 string-dispatch shape: transition outer
+        // LexMode into the comment state, call the dispatcher inline
+        // (which scans the body + transitions back to .InCode), emit
+        // no token (comments are non-emitted per token-catalog policy).
         if (c0 == "/" && peekChar(cursor, 1) == "/") {
             setMode(ctx, LexMode.InLineComment)
-            stubScanLineComment(cursor)
-            setMode(ctx, LexMode.InCode)
-            // Comments emit no token (Acorn parity)
+            dispatchInLineComment(cursor, ctx)
             return true
         }
         if (c0 == "/" && peekChar(cursor, 1) == "*") {
             setMode(ctx, LexMode.InBlockComment)
-            stubScanBlockComment(cursor)
-            setMode(ctx, LexMode.InCode)
+            dispatchInBlockComment(cursor, ctx)
             return true
         }
 

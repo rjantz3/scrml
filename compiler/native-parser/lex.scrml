@@ -13,16 +13,19 @@
 //   engine-shaped. Per D1 OQ1: "the operational test classifies the
 //   LOCUS, and a calculation may contain state-shape subroutines."
 //
-// Status (M1.2): functional end-to-end for InCode + string + template
-// modes. The loop dispatches by LexMode through dedicated dispatchers:
+// Status (M1.3): functional end-to-end for InCode + string + template +
+// comment modes. The loop dispatches by LexMode through dedicated
+// dispatchers:
 //   - .InCode → dispatchInCode (lex-in-code.scrml; M1.1)
 //   - .InSingleString → dispatchInSingleString (lex-in-single-string.scrml; M1.2)
 //   - .InDoubleString → dispatchInDoubleString (lex-in-double-string.scrml; M1.2)
 //   - .InTemplateBody → dispatchInTemplateBody (lex-in-template.scrml; M1.2,
 //     §51.0.Q.1 nested-engine pattern)
-//   - .InLineComment / .InBlockComment / .InRegexBody — M1.3 / M1.4; for
-//     M1.1+M1.2 still inline-dispatched within dispatchInCode (transition
-//     in + body scan + transition out happen synchronously inside InCode).
+//   - .InLineComment → dispatchInLineComment (lex-in-line-comment.scrml; M1.3)
+//   - .InBlockComment → dispatchInBlockComment (lex-in-block-comment.scrml; M1.3)
+//   - .InRegexBody — M1.4; still inline-dispatched within dispatchInCode
+//     (transition in + body scan + transition out happen synchronously
+//     inside InCode).
 // Per-call ctx grows a `templateStack` array tracking template-interp
 // frames (see lex-in-template.scrml for the §51.0.Q.1 lifecycle coupling).
 
@@ -36,6 +39,8 @@ ${
     import { dispatchInSingleString } from "./lex-in-single-string.scrml"
     import { dispatchInDoubleString } from "./lex-in-double-string.scrml"
     import { dispatchInTemplateBody } from "./lex-in-template.scrml"
+    import { dispatchInLineComment } from "./lex-in-line-comment.scrml"
+    import { dispatchInBlockComment } from "./lex-in-block-comment.scrml"
 
     // makeLexContext — STATE constructor: collects all engine state into
     // one ctx object. The CANONICAL form would have each engine as a
@@ -86,10 +91,14 @@ ${
                 dispatchInDoubleString(cursor, ctx)
             } else if (mode == LexMode.InTemplateBody) {
                 dispatchInTemplateBody(cursor, ctx)
+            } else if (mode == LexMode.InLineComment) {
+                dispatchInLineComment(cursor, ctx)
+            } else if (mode == LexMode.InBlockComment) {
+                dispatchInBlockComment(cursor, ctx)
             } else {
-                // M1.3+ modes (InLineComment, InBlockComment, InRegexBody)
-                // — still inline-dispatched within dispatchInCode for M1.2;
-                // this branch is the safety-net + future-extension point.
+                // M1.4+ modes (InRegexBody) — still inline-dispatched
+                // within dispatchInCode for M1.3; this branch is the
+                // safety-net + future-extension point.
                 setMode(ctx, LexMode.InCode)
             }
 

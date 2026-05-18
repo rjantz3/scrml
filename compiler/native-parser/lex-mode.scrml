@@ -17,7 +17,7 @@
 //   Engine is THE correct shape per the §D1 two-table operational test.
 //   `fn`-shape would lose to engine on EVERY axis named in DD §D1.
 //
-// Status (M1.2): canonical <engine> declaration LANDS at top-level (parses +
+// Status (M1.3): canonical <engine> declaration LANDS at top-level (parses +
 // compiles). State-child bodies:
 //   - InCode  — real body in lex-in-code.scrml (M1.1 substantive work).
 //   - InTemplateBody — ACTIVATED M1.2. COMPOSITE STATE-CHILD per §51.0.Q.1
@@ -27,7 +27,10 @@
 //     scanner; body in lex-in-single-string.scrml).
 //   - InDoubleString — ACTIVATED M1.2 (escape-aware double-quoted string
 //     scanner; body in lex-in-double-string.scrml).
-//   - InLineComment / InBlockComment — STUB for M1.3 (comment scanning).
+//   - InLineComment — ACTIVATED M1.3 (line-comment body scanner; body in
+//     lex-in-line-comment.scrml).
+//   - InBlockComment — ACTIVATED M1.3 (block-comment body scanner; body
+//     in lex-in-block-comment.scrml).
 //   - InRegexBody — STUB for M1.4 (regex literal scanning; needs
 //     prev-token context per DD §D4 P3).
 //
@@ -90,6 +93,10 @@ ${
 // inner instance; nested templates produce stacked instances.
 // InSingleString / InDoubleString remain non-composite (no inner engine
 // needed — bounded scans).
+//
+// M1.3: InLineComment / InBlockComment activate as non-composite bodies —
+// each scans a bounded comment span and transitions back to .InCode. The
+// scan emits no token (comments are non-emitted per the token catalog).
 <engine for=LexMode initial=.InCode>
     <InCode rule=(.InTemplateBody | .InSingleString | .InDoubleString | .InLineComment | .InBlockComment | .InRegexBody)></>
     <InTemplateBody rule=.InCode>

@@ -11,6 +11,8 @@ import { dispatchInCode } from "./lex-in-code.js";
 import { dispatchInSingleString } from "./lex-in-single-string.js";
 import { dispatchInDoubleString } from "./lex-in-double-string.js";
 import { dispatchInTemplateBody } from "./lex-in-template.js";
+import { dispatchInLineComment } from "./lex-in-line-comment.js";
+import { dispatchInBlockComment } from "./lex-in-block-comment.js";
 
 export function makeLexContext() {
     return {
@@ -49,10 +51,14 @@ export function lex(source) {
             dispatchInDoubleString(cursor, ctx);
         } else if (mode === LexMode.InTemplateBody) {
             dispatchInTemplateBody(cursor, ctx);
+        } else if (mode === LexMode.InLineComment) {
+            dispatchInLineComment(cursor, ctx);
+        } else if (mode === LexMode.InBlockComment) {
+            dispatchInBlockComment(cursor, ctx);
         } else {
-            // M1.3+ modes (InLineComment, InBlockComment, InRegexBody) —
-            // dispatched inline from dispatchInCode in M1.1; safety net for
-            // unreachable cases. Transitions back to InCode immediately.
+            // M1.4+ modes (InRegexBody) — dispatched inline from
+            // dispatchInCode in M1.3; safety net for unreachable cases.
+            // Transitions back to InCode immediately.
             setMode(ctx, LexMode.InCode);
         }
 

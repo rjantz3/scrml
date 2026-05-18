@@ -11,6 +11,8 @@ import { dispatchInSingleString } from "./lex-in-single-string.js";
 import { dispatchInDoubleString } from "./lex-in-double-string.js";
 import { dispatchInTemplateBody } from "./lex-in-template.js";
 import { isTemplateInterpClose, emitTemplateInterpClose } from "./lex-in-template.js";
+import { dispatchInLineComment } from "./lex-in-line-comment.js";
+import { dispatchInBlockComment } from "./lex-in-block-comment.js";
 
 // --- Character-classification predicates ---
 export function isWhitespaceCode(c) {
@@ -201,32 +203,6 @@ export function stubScanTemplate(cursor) {
     return { raw: cursor.source.substring(start, cursor.pos), span: makeSpan(start, cursor.pos, line, col) };
 }
 
-export function stubScanLineComment(cursor) {
-    const start = cursor.pos;
-    const line = cursor.line;
-    const col = cursor.col;
-    advance(cursor, 2);
-    while (!isEof(cursor) && !isNewlineCode(peekCharCode(cursor, 0))) {
-        advance(cursor, 1);
-    }
-    return { raw: cursor.source.substring(start, cursor.pos), span: makeSpan(start, cursor.pos, line, col) };
-}
-
-export function stubScanBlockComment(cursor) {
-    const start = cursor.pos;
-    const line = cursor.line;
-    const col = cursor.col;
-    advance(cursor, 2);
-    while (!isEof(cursor)) {
-        if (peekChar(cursor, 0) === "*" && peekChar(cursor, 1) === "/") {
-            advance(cursor, 2);
-            break;
-        }
-        advance(cursor, 1);
-    }
-    return { raw: cursor.source.substring(start, cursor.pos), span: makeSpan(start, cursor.pos, line, col) };
-}
-
 export function stubScanRegex(cursor) {
     const start = cursor.pos;
     const line = cursor.line;
@@ -396,17 +372,20 @@ export function dispatchInCode(cursor, ctx) {
         return true;
     }
 
-    // Comments (M1.1 STUB transitions)
+    // Comments (M1.3 — proper body dispatchers in lex-in-line-comment.js
+    // and lex-in-block-comment.js; the LexMode engine governs the
+    // InCode → InLineComment / InBlockComment → InCode transitions via
+    // setMode within each dispatcher. Mirrors the M1.2 string-dispatch
+    // pattern: the dispatcher synchronously sets mode, scans the body,
+    // sets mode back, and emits no token (comments non-emitted).)
     if (c0 === "/" && peekChar(cursor, 1) === "/") {
         setMode(ctx, LexMode.InLineComment);
-        stubScanLineComment(cursor);
-        setMode(ctx, LexMode.InCode);
+        dispatchInLineComment(cursor, ctx);
         return true;
     }
     if (c0 === "/" && peekChar(cursor, 1) === "*") {
         setMode(ctx, LexMode.InBlockComment);
-        stubScanBlockComment(cursor);
-        setMode(ctx, LexMode.InCode);
+        dispatchInBlockComment(cursor, ctx);
         return true;
     }
 
