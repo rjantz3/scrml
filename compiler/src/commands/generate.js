@@ -239,7 +239,10 @@ function applySubstitutions(body, subs) {
   let out = body;
   if (subs.dbSrc) {
     // Match the literal placeholder src="./app.db" emitted by login.scrml.
-    out = out.replace(/(<db\s+src=)"\.\/app\.db"/, `$1"${subs.dbSrc}"`);
+    // Function-form .replace() so any `$` chars in subs.dbSrc (read from a
+    // user's program-root `<db src="...">` attribute) aren't interpreted as
+    // `$&` / `$N` backreferences (S100 `01eeda9` bug class).
+    out = out.replace(/(<db\s+src=)"\.\/app\.db"/, (_, prefix) => `${prefix}"${subs.dbSrc}"`);
   }
   return out;
 }

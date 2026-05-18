@@ -2164,9 +2164,12 @@ function _injectChildrenWalk(
         // §16.6: ${render name(expr)} → substitute parametric snippet lambda body
         const snippet = parametricSnippets.get(renderParamMatch.name);
         if (snippet) {
-          // Replace all occurrences of paramName with argExpr in the lambda body
+          // Replace all occurrences of paramName with argExpr in the lambda body.
+          // Function-form .replace() so any `$` chars in argExpr aren't interpreted
+          // as `$&` / `$N` backreferences (S100 `01eeda9` bug class — argExpr is
+          // user-authored scrml expression text).
           const paramRe = new RegExp(`\\b${snippet.paramName}\\b`, "g");
-          const substituted = snippet.body.replace(paramRe, renderParamMatch.argExpr);
+          const substituted = snippet.body.replace(paramRe, () => renderParamMatch.argExpr);
           // Emit as a bare-expr logic node containing the substituted markup
           result.push({
             kind: "logic",

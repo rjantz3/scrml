@@ -1574,7 +1574,11 @@ function rewriteMultiRuleSelector(baseRules, baseName, escapedFullName, state) {
   // token in the rule block. Escape the baseName for regex use.
   const escaped = baseName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const re = new RegExp(`\\.${escaped}(?![a-zA-Z0-9_-])`, "g");
-  return baseRules.replace(re, newSelectorBase);
+  // Function-form .replace() so any `$` chars in newSelectorBase (possible
+  // via escapedFullName from arbitrary-value Tailwind classes like
+  // `bg-[var($foo)]`) aren't interpreted as `$&` / `$N` backreferences
+  // (S100 `01eeda9` bug class). escapeCssClass does NOT escape `$`.
+  return baseRules.replace(re, () => newSelectorBase);
 }
 
 /**
