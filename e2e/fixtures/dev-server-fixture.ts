@@ -27,12 +27,14 @@ import { test as base, expect } from "@playwright/test";
 
 export const EXAMPLES_BASE_URL = "http://localhost:3100";
 export const TODOMVC_BASE_URL = "http://localhost:3101";
+export const DOCS_WEBSITE_BASE_URL = "http://localhost:3102";
 
 type UrlBuilder = (path: string) => string;
 
 interface ScrmlFixtures {
   examplesUrl: UrlBuilder;
   todomvcUrl: UrlBuilder;
+  docsUrl: UrlBuilder;
 }
 
 const joinUrl = (base: string, path: string): string => {
@@ -47,6 +49,9 @@ export const test = base.extend<ScrmlFixtures>({
   },
   todomvcUrl: async ({}, use) => {
     await use((path: string) => joinUrl(TODOMVC_BASE_URL, path));
+  },
+  docsUrl: async ({}, use) => {
+    await use((path: string) => joinUrl(DOCS_WEBSITE_BASE_URL, path));
   },
 });
 

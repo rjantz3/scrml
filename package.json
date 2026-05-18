@@ -51,6 +51,7 @@
     "docs:build": "bun run docs/build.ts",
     "e2e": "playwright test --config=e2e/playwright.config.ts",
     "e2e:ui": "playwright test --config=e2e/playwright.config.ts --ui",
+    "e2e:docs": "playwright test --config=e2e/playwright.docs.config.ts",
     "e2e:install": "playwright install chromium firefox webkit"
   },
   "dependencies": {

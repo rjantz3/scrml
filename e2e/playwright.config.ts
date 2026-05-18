@@ -21,6 +21,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests",
+  // Exclude docs-website spec — it runs under playwright.docs.config.ts.
+  testIgnore: "docs-website.spec.ts",
   // Run files in parallel within each project.
   fullyParallel: true,
   // CI gets two retries to swallow transient flake; local devs see real failures.
@@ -97,5 +99,9 @@ export default defineConfig({
       stdout: "pipe",
       stderr: "pipe",
     },
+    // docs/website intentionally NOT in this config — see playwright.docs.config.ts
+    // for the decoupled docs-website e2e harness. Keeping docs as a separate
+    // config prevents pre-existing examples/ breakage (e.g. trucking-dispatch
+    // import errors) from blocking the docs site regression tests.
   ],
 });

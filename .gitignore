@@ -20,12 +20,20 @@ docs/SEO-LAUNCH.md
 # debounce-throttle-attribute.test.js compileInline). Regenerated each run.
 compiler/tests/unit/__fixtures__/
 
-# Playwright e2e — generated test artifacts (Wave 3 Dispatch 1)
+# Playwright e2e — generated test artifacts (Wave 3 Dispatch 1 + S100 docs harness)
 e2e/test-results/
 e2e/playwright-report/
+e2e/test-results-docs/
+e2e/playwright-report-docs/
 e2e/blob-report/
 e2e/.playwright/
 playwright/.cache/
+
+# Runtime SQLite databases — examples + benchmarks create these on e2e + dev runs
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
 
 # docs/build.ts output — generated per-article HTML pages.
 # Source: docs/articles/*.md. Build: `bun run docs/build.ts`.
