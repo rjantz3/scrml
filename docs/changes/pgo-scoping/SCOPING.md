@@ -133,18 +133,30 @@ S94 noted warm runs are ~18% faster than cold. Adopter `scrml compile` invocatio
 - Measure: which stages have hot path-caching vs cold path-recomputing?
 - Candidates: stdlib auto-gather (~72 files extra on trucking; cold-parsed every time?), Acorn parse cache, type-registry build.
 
-### Phase 3 — Optimizations (data-driven; ~variable per item)
+### Phase 3 — Optimizations (data-driven; revised post-P2.1+P2.2 — S102)
 
-Each P3 item is its own dispatch with its own SCOPING, gated on P2 data. Listed here as anticipated candidates, NOT committed work.
+> **Post-P2 reordering (S102, supersedes the prior anticipated candidates).** P2.1's empirical breakdown of emit-client REFUTED the S94 hypothesis that emit-bindings + emit-reactive-wiring were the hot paths (combined 2.6% of emit-client). P2.2 isolated `findOwningRenderDGNode` (O(n) linear scan) as the DG super-linear culprit, refuting the V8 hash-rehash hypothesis. Phase 3 candidates re-ranked by measured impact.
+>
+> **Detailed Phase 3 SCOPING + dispatch plan lives at:** `docs/changes/pgo-phase-3-scoping/SCOPING.md` (S102).
 
-**Anticipated candidates (subject to P2 data confirming):**
-- **P3.1** — String-builder pattern for hot emit-* concatenation loops (if P1.1+P2.1 confirms emit-html is hot).
-- **P3.2** — Memoize per-cell emission output when source-AST + cell-state hash unchanged (if P1.1+P2.1 confirms emit-bindings/emit-reactive-wiring is hot).
-- **P3.3** — Index DG cross-file lookups (if P1.3+P2.2 confirms cross-file lookup repetition is the slope cause).
-- **P3.4** — Stdlib parse-cache (if P2.3 confirms stdlib auto-gather is significant cold-path cost).
-- **P3.5** — Parallel codegen across files (CG's per-file loop is embarrassingly parallel; concurrency would amortize the 908ms across cores).
+**Re-ranked candidates by measured impact:**
 
-**Discipline:** every P3 item lands with a before/after benchmark vs P1.4 baseline. No "felt faster" PGO work without measurement.
+- **P3.A** — Collapse fnNameMap rewrites into a single multi-pattern regex (or proper tokenizer pass). Target: `post-fn-name-mangle` (~545ms, 58.1% of emit-client on trucking). Anticipated saving: 50-80% of that = **~275-435ms** = ~12-19% of total pipeline. Highest absolute leverage.
+- **P3.B** — Tag runtime-chunk-relevance during existing emit walks (eliminate the separate `detectRuntimeChunks` second-pass walk). Target: `detect-runtime-chunks` (~306ms, 32.6% of emit-client). Anticipated saving: ~80% = **~245ms** = ~11% of total pipeline.
+- **P3.C** — AST-walk-derived owner stack for `findOwningRenderDGNode` (eliminate the per-emission O(n) linear scan; track current enclosing RenderDGNode in a stack during the existing `sweepNodeForAtRefs` recursion). Target: ~31ms findOwning + ~33ms emitMarkupReadEdge (93% sub-call to findOwning). Anticipated saving: ~30ms on trucking = ~40% of markup sweep = **~18% of DG total**. At >500-file horizon this slope is what kills DG.
+
+**Combined Phase 3 chip-away potential: ~520-680ms of trucking-dispatch's 2326ms pipeline = 22-29% speedup if all three land.**
+
+**Retired candidates (no longer Phase 3 priorities, per P2 data):**
+
+- ~~P3.1 — String-builder pattern for emit-* concatenation~~ → emit-html is 2.3% of CG; not hot enough to chase.
+- ~~P3.2 — Memoize per-cell emit-bindings/emit-reactive-wiring~~ → combined 2.6% of emit-client (S94 hypothesis refuted).
+- ~~P3.3 — Index DG cross-file lookups~~ → cross-file is 6% of DG; the slope source is per-file work (P2.2 finding).
+- **Still on the long-horizon list (not retired, just not v0.4-anchor):**
+  - P3.4 — Stdlib parse-cache (Phase 2.3 not yet run; cold-vs-warm characterization pending).
+  - P3.5 — Parallel codegen across files (largest architectural lift; deferred until at least P3.A + P3.B + P3.C land + show whether single-thread is fast enough at adopter scale).
+
+**Discipline (unchanged):** every P3 item lands with a before/after benchmark vs `benchmarks/perf-baseline.json` (P1.4 baseline). No "felt faster" PGO work without measurement.
 
 ---
 
