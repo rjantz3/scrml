@@ -1217,6 +1217,15 @@ export function runDG(input: DGInput): DGOutput {
               `Q3=${fmt(stat.q[2])}ms Q4=${fmt(stat.q[3])}ms`,
           );
         }
+        // P3.C diagnostic — non-zero only if the stack-empty fallback to the
+        // legacy linear scan produced a non-null result. Healthy walker = 0.
+        if (renderOwnerStackFallbackFires_total > 0) {
+          log(
+            `  [DG-OWNER-STACK-FALLBACK] ${renderOwnerStackFallbackFires_total} ` +
+              `markup-read emit(s) fell back to findOwningRenderDGNode ` +
+              `(stack empty); possible missed boundary push.`,
+          );
+        }
       }
     }
     return { depGraph: { nodes, edges }, errors };
@@ -1269,6 +1278,28 @@ export function runDG(input: DGInput): DGOutput {
   const nodeIdToFunctionName = new Map<NodeId, string>();
   // Build function name -> boundary mapping from RouteMap
   const functionNameToBoundary = new Map<string, Boundary>();
+
+  // P3.C (S102) — AST-walk-derived owner stack for findOwningRenderDGNode.
+  //
+  // Markup AST node identity → RenderDGNode NodeId. Populated in loop #1 at the
+  // render node creation site (one entry per markup AST node that becomes a
+  // RenderDGNode). Consumed by loop #4 (markup sweep) which pushes the NodeId
+  // onto an in-flight owner stack as the recursion descends into a markup
+  // node's children, and pops on the way out. Lookups at emit time read the
+  // stack top instead of scanning all dgNodes — eliminates the O(n)-per-call
+  // linear scan that P2.2 measured at 42-53% of [DG-MARKUP-SWEEP] on trucking.
+  //
+  // Identity-keyed (Map<ASTNode, NodeId>) because makeNodeId embeds a monotonic
+  // counter and cannot be recomputed from (filePath, span) post-hoc; and because
+  // the sweep walks the same AST node references collected by
+  // collectAllMarkupNodes (no copying / cloning between the two passes).
+  const markupAstToRenderId = new Map<ASTNode, NodeId>();
+  // Cross-file aggregate — counts the number of times the stack-empty fallback
+  // to findOwningRenderDGNode produced a non-null result, which would indicate
+  // a missed boundary push in the walker. Reported via [DG-OWNER-STACK-FALLBACK]
+  // alongside the [DG-MARKUP-SWEEP] surfaces when --debug-perf is set AND the
+  // counter is non-zero.
+  let renderOwnerStackFallbackFires_total = 0;
 
   // ------------------------------------------------------------------
   // Phase 1: Graph construction
@@ -1515,6 +1546,10 @@ export function runDG(input: DGInput): DGOutput {
         span: mkNode.span,
       };
       nodes.set(nodeId, dgNode);
+      // P3.C — register AST identity → render NodeId so the markup-sweep
+      // walker (loop #4) can resolve the enclosing render node by stack-push
+      // on AST descent instead of an O(n) span scan over `nodes`.
+      markupAstToRenderId.set(mkNode as ASTNode, nodeId);
     }
 
     // Collect import nodes
@@ -2174,6 +2209,17 @@ export function runDG(input: DGInput): DGOutput {
     // blocks, which are already captured by the function-body DG scan above.
     let markupChildDepth = 0;
 
+    // P3.C — owner-stack of enclosing RenderDGNode NodeIds. Pushed when the
+    // recursion enters a markup AST node whose identity is registered in
+    // `markupAstToRenderId`; popped on exit. emitMarkupReadEdge reads the top
+    // of this stack as the `sourceRenderNodeId` for the emitted markup-read
+    // node, replacing the per-call O(n) findOwningRenderDGNode scan over the
+    // global `nodes` Map. findOwningRenderDGNode is kept as a fallback for
+    // call paths whose enclosing render node is not on the stack (e.g. the
+    // outer engine-decl self-read, lift-expr markup targets that are not
+    // registered as render nodes).
+    const renderOwnerStack: NodeId[] = [];
+
     // Helper: push one MarkupReadDGNode + one reads edge for a reactive var read
     // discovered at a markup-context site. Called from the 4 high-frequency shapes
     // below. attrSpan is the span of the interpolation or attribute site.
@@ -2182,10 +2228,32 @@ export function runDG(input: DGInput): DGOutput {
     // additionally splits findOwningRenderDGNode time from the rest of the
     // emission cost (Map writes + pushEdge) so the V8-hash-rehash hypothesis
     // can be evaluated against the linear-scan-over-growing-nodes hypothesis.
+    // P3.C — owner-stack-derived source render NodeId resolver. Returns the
+    // top of `renderOwnerStack` (the tightest enclosing RenderDGNode), or
+    // falls back to the legacy O(n) findOwningRenderDGNode scan when the
+    // stack is empty (which happens when emit is called from a context not
+    // nested inside any registered markup AST node — e.g. an engine-decl at
+    // file top-level, or a lift-expr whose target markup is not in the
+    // RenderDGNode registry). Increments a diagnostic counter when the
+    // fallback returns a non-null result, surfacing potential missed
+    // boundary pushes.
+    const resolveSourceRenderNodeId = (attrSpan: Span): NodeId | null => {
+      const stackTop =
+        renderOwnerStack.length > 0
+          ? renderOwnerStack[renderOwnerStack.length - 1]
+          : null;
+      if (stackTop !== null) return stackTop;
+      // Stack empty — fall back. If fallback finds something, that's a
+      // potential gap in boundary-push coverage; count it for diagnostics.
+      const fallback = findOwningRenderDGNode({ span: attrSpan } as ASTNode, nodes);
+      if (fallback !== null) renderOwnerStackFallbackFires_total++;
+      return fallback;
+    };
+
     const _baseEmitMarkupReadEdge = (attrSpan: Span, varName: string): void => {
       const reactiveNodeId = reactiveVarNodeIds.get(varName);
       if (!reactiveNodeId) return; // var not in DG — nothing to link to
-      const sourceRenderNodeId = findOwningRenderDGNode({ span: attrSpan } as ASTNode, nodes);
+      const sourceRenderNodeId = resolveSourceRenderNodeId(attrSpan);
       const { nodeId: mrNodeId, dgNode: mrDGNode } = createMarkupReadNode(
         attrSpan,
         sourceRenderNodeId,
@@ -2199,9 +2267,12 @@ export function runDG(input: DGInput): DGOutput {
           const reactiveNodeId = reactiveVarNodeIds.get(varName);
           if (!reactiveNodeId) return;
           const outerS = performance.now();
-          // Sub-timing — findOwningRenderDGNode is the linear-scan candidate.
+          // P3.C — sub-timing now measures the owner-stack-derived resolver
+          // (stack-top read + null-fallback to the legacy linear scan). On a
+          // healthy walker the fallback never fires, so the bulk of this
+          // attributed time is the stack-top read itself (~constant).
           const fS = performance.now();
-          const sourceRenderNodeId = findOwningRenderDGNode({ span: attrSpan } as ASTNode, nodes);
+          const sourceRenderNodeId = resolveSourceRenderNodeId(attrSpan);
           const fD = performance.now() - fS;
           const fSlot = markupSweepStats.findOwningRenderDGNode;
           fSlot.total += fD;
@@ -2222,6 +2293,22 @@ export function runDG(input: DGInput): DGOutput {
       : _baseEmitMarkupReadEdge;
 
     function sweepNodeForAtRefs(node: ASTNode): void {
+      // P3.C — push the enclosing-render-NodeId onto renderOwnerStack BEFORE
+      // any emit calls fire for this node. Markup nodes' own attribute emits
+      // (variable-ref / call-ref / if= conditional) run inside this function
+      // BEFORE the child-recursion at the bottom, so the push must happen at
+      // the top to make the stack reflect "we are now inside this markup's
+      // emit zone." Pop happens via the try/finally pattern at the bottom of
+      // the function to handle every return path consistently.
+      let pushedRenderOwner: NodeId | null = null;
+      if (node.kind === "markup") {
+        const ownId = markupAstToRenderId.get(node);
+        if (ownId !== undefined) {
+          renderOwnerStack.push(ownId);
+          pushedRenderOwner = ownId;
+        }
+      }
+
       // Phase 4d: ExprNode-first reactive ref + callee detection, string fallback
       // P2.2 — wrap the 3 ExprNode-walker calls. Each fires per AST node visited
       // by the recursion; aggregate cost grows with markup size + ExprNode depth.
@@ -2657,6 +2744,15 @@ export function runDG(input: DGInput): DGOutput {
           }
           if (enteringMarkupChildren) markupChildDepth--;
         }
+      }
+
+      // P3.C — pop the renderOwnerStack entry pushed at function entry. Only
+      // fires when push succeeded (gated on `pushedRenderOwner`). Early-return
+      // paths above (meta case at line ~2686, return path) are reached only
+      // when node.kind !== "markup", so the corresponding push never ran and
+      // there is nothing to leak.
+      if (pushedRenderOwner !== null) {
+        renderOwnerStack.pop();
       }
     }
 
