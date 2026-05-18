@@ -72,6 +72,22 @@ const VOID_ELEMENTS = new Set([
 ]);
 
 // ---------------------------------------------------------------------------
+// HTML raw-content elements (SPEC §4.17) — scrml tokens inside are text
+//
+// `<pre>` and `<code>` are code-display contexts; their entire body is a
+// single raw text run terminated only by the matching close tag. Inside,
+// `${...}` / `<TagName>` / `?{}` / `#{}` / `!{}` / `^{}` / `_{...}` and any
+// other scrml-significant token are NOT recognized — they pass through as
+// literal text. HTML entity-escaping of `<` / `>` / `&` for display remains
+// author responsibility (parallel to plain-HTML rules — browsers don't
+// auto-encode inside `<pre>` either).
+// ---------------------------------------------------------------------------
+
+const RAW_CONTENT_ELEMENTS = new Set([
+  "pre", "code",
+]);
+
+// ---------------------------------------------------------------------------
 // Component name detection
 //
 // A tag name is a component reference (not an HTML element) if and only if
@@ -1344,7 +1360,8 @@ export function splitBlocks(filePath, source) {
 
         const isComp = isComponentName(tagName);
         const { selfClosing } = scanAttributes();
-        if (selfClosing || VOID_ELEMENTS.has(tagName.toLowerCase())) {
+        const lowerTagName = tagName.toLowerCase();
+        if (selfClosing || VOID_ELEMENTS.has(lowerTagName)) {
           // Self-closing ('/>') or HTML void element - emit as leaf block, no context push
           targetChildren().push({
             type: "markup",
@@ -1354,6 +1371,72 @@ export function splitBlocks(filePath, source) {
             children: [],
             name: tagName,
             closerForm: "self-closing",
+            isComponent: isComp,
+            openerHadSpaceAfterLt: false,
+          });
+        } else if (!isComp && RAW_CONTENT_ELEMENTS.has(lowerTagName)) {
+          // SPEC §4.17 — raw-content element. Inside `<pre>` / `<code>`, scrml
+          // tokens (`${...}`, `<TagName>`, `?{}`, `#{}`, `!{}`, `^{}`, `_{...}`)
+          // are NOT recognized; the entire body is a single text run terminated
+          // by the matching close tag. HTML entity-escaping of `<` / `>` / `&`
+          // for display remains author responsibility (parallel to plain-HTML
+          // rules — browsers don't auto-encode inside `<pre>` either).
+          //
+          // The `!isComp` guard ensures `<Pre>` / `<Code>` (component refs,
+          // which lowercase to the same names) take the normal markup path,
+          // not raw-content — component-name detection is uppercase-first.
+          const contentStart = pos;
+          const contentStartLine = curLine;
+          const contentStartCol = curCol;
+          const closeNeedle = `</${lowerTagName}>`;
+          const closeLen = closeNeedle.length;
+          while (pos < len) {
+            if (
+              source[pos] === "<" &&
+              source.slice(pos, pos + closeLen).toLowerCase() === closeNeedle
+            ) {
+              break;
+            }
+            step();
+          }
+          const contentEnd = pos;
+          const children = [];
+          if (contentEnd > contentStart) {
+            children.push({
+              type: "text",
+              raw: source.slice(contentStart, contentEnd),
+              span: {
+                start: contentStart,
+                end: contentEnd,
+                line: contentStartLine,
+                col: contentStartCol,
+              },
+              depth: depth(),
+              children: [],
+              name: null,
+              closerForm: null,
+              isComponent: false,
+            });
+          }
+          let closerForm = "explicit";
+          if (pos < len) {
+            advance(closeLen);
+          } else {
+            errors.push(new BSError(
+              "E-CTX-001",
+              `Unclosed <${tagName}> raw-content element (expected '${closeNeedle}'). Add the matching close tag.`,
+              { start: curPos, end: pos, line: curLine, col: curCol }
+            ));
+            closerForm = "inferred";
+          }
+          targetChildren().push({
+            type: "markup",
+            raw: source.slice(curPos, pos),
+            span: { start: curPos, end: pos, line: curLine, col: curCol },
+            depth: depth(),
+            children,
+            name: tagName,
+            closerForm,
             isComponent: isComp,
             openerHadSpaceAfterLt: false,
           });

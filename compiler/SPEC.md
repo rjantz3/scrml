@@ -1028,6 +1028,50 @@ A multi-close shorthand of the form `<///>` (closing N nested elements at once w
 
 This subsection exists as a negative-space anchor — without it, model writers reflexively reach for the form because compact multi-close looks ergonomic. The decision is closed.
 
+### 4.17 Raw-content elements — `<pre>` and `<code>`
+
+**Status:** S101 amendment (2026-05-17). Closes the Bug-#2 friction class surfaced at S100 close — author wrote `${...}` inside a `<pre><code>` syntax-display block intending it as literal text; the compiler parsed it as live reactive interpolation and threw at runtime. The friction extends beyond `${...}` — `<TagName>`, `?{...}`, `#{...}`, `!{...}`, `^{...}`, `_{...}`, and any other scrml-significant token had the same shape inside code-display blocks. Pre-amendment, the docs corpus accumulated entity-escape workarounds (`&#36;&#123;...&#125;`, `&lt;.../&gt;`) as migration backlog; this section closes the underlying compiler behavior.
+
+**Normative statement:** The element names `pre` and `code` (matched case-insensitively) are **raw-content elements**. After the opening tag is parsed (including any attributes per §5), the block splitter SHALL scan the body as a single text run terminated only by the matching close tag. Inside the body:
+
+- `${...}` SHALL NOT be recognized as a logic-context interpolation; the literal characters `$`, `{`, `}` pass through as text.
+- `<TagName>` / `<TagName ...>` / `</TagName>` / `</>` SHALL NOT be recognized as markup-element openers or closers; the literal characters `<`, `>`, `/` pass through as text.
+- The brace contexts `?{...}` / `#{...}` / `!{...}` / `^{...}` / `_{...}` SHALL NOT be recognized; the sigil characters pass through as text.
+- The `//` line-comment suppression (§4.7) and `<!-- -->` markup-comment skip (§4.7 S87 amendment) SHALL NOT apply to raw-content bodies; both pass through verbatim.
+- Recognition resumes at the matching close tag. The close-tag match is case-insensitive on the element name (`</pre>` closes `<PRE>`; `</CODE>` closes `<code>`).
+
+**HTML entity-escaping of `<` / `>` / `&` / `"` for display remains author responsibility.** The block splitter does not auto-encode these in raw-content bodies. This parallels HTML's own rules: browsers do not auto-encode entities inside `<pre>` or `<code>` either. Authors writing code samples for visual display escape `&lt;` / `&gt;` / `&amp;` / `&quot;` in the source; the dist HTML preserves them verbatim; the browser decodes them at render time.
+
+**Closer recovery:** If EOF is reached before the matching close tag, the block splitter SHALL emit `E-CTX-001` against the unterminated opener and emit the markup block with `closerForm: "inferred"`. The captured raw-text child spans from the byte after the opener's `>` through end-of-file.
+
+**Authoring example.** Pre-S101 (workaround required):
+
+```scrml
+<pre><code>&lt;button disabled=&#36;&#123;!&#64;signup.isValid&#125;&gt;Submit&lt;/button&gt;</code></pre>
+```
+
+Post-S101 (natural; only HTML-side entity-escaping for the visible `<` `>` characters):
+
+```scrml
+<pre><code>&lt;button disabled=${!@signup.isValid}&gt;Submit&lt;/button&gt;</code></pre>
+```
+
+The `${!@signup.isValid}` substring is now literal text in the rendered page — no compile-time interpolation attempt, no reactive-cell binding, no runtime undefined-access. The `&lt;` / `&gt;` are still required (and still browser-decoded at render time) — those entity-escapes are HTML semantics, not scrml semantics, and remain unchanged.
+
+**Out-of-band opt-back-in deferred.** A future amendment may introduce an explicit opt-back-in surface (e.g., a `--interp` attribute or a non-raw nested wrapper) for the rare case of wanting live interpolation inside a `<pre>` — common pattern: a syntax-highlighted code preview that should also show the current value of a state cell at one position. Until then, the same effect is achievable by composing markup AROUND the `<pre>` block:
+
+```scrml
+Counter is now ${@count}:
+<pre><code>const x = N;  // (display-only)</code></pre>
+```
+
+**Companion considerations:**
+
+- The HTML element set `{textarea}` is also raw-content in HTML's own parsing rules. v0.next scrml does NOT yet register `<textarea>` as raw-content at the BS layer because the canonical scrml shape for editable text fields is the Shape-2 decl `<draft> = <textarea/>` (§6.2) — the `<textarea>` opener is parsed by `scanAttributes` and the form is self-closing; there is no body to enter raw mode for. If the canonical shape later admits a non-self-closing `<textarea>` body, this section may extend to include it.
+- `<script>` and `<style>` are NOT raw-content in scrml because scrml does not admit those elements at all — `<style>` triggers `E-STYLE-001` at the block-splitter level (CSS lives in `#{...}`), and `<script>` is a Ghost-Pattern lint surface (W-LINT-018 family) because JS lives in logic-context `${...}`.
+
+**Implementation locus:** `compiler/src/block-splitter.js`. `RAW_CONTENT_ELEMENTS` Set declaration carries the element list; the recognition branch sits between the void-element emit and the normal `pushTagContext` push in the markup-opener path.
+
 ---
 
 ## 5. Attribute Quoting Semantics
@@ -13754,6 +13798,10 @@ The compiler has full awareness of the HTML specification. Every HTML element is
 - Component definitions inherit the shape of their root element.
 - `const card = <div>` means `card` is valid anywhere `<div>` is valid.
 - `div` and `span` are distinct shapes. The compiler SHALL enforce shape constraints at component use sites.
+
+### 24.3.1 Raw-content HTML elements (S101 cross-ref)
+
+The HTML elements `<pre>` and `<code>` are **raw-content elements** at the scrml block-splitter layer. Their bodies are a single text run; scrml-significant tokens inside (`${...}`, `<TagName>`, `?{...}`, `#{...}`, `!{...}`, `^{...}`, `_{...}`) are NOT recognized and pass through as literal text. Normative semantics: §4.17. HTML attribute validation on the opener still applies per §24.2 (e.g., `<pre invalid-attr>` is `E-HTML-001`). HTML entity-escaping of `<` / `>` / `&` for display remains author responsibility — parallel to plain-HTML rules.
 
 ### 24.4 Scrml-defined structural elements (Stage 0b D4 — registry distinction)
 

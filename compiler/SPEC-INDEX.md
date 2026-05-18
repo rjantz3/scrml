@@ -31,7 +31,7 @@ Total lines: 27,144 | Total sections: 57 + appendices  (S90 M-7C-D-12 Track 4: �
 | 1 | Overview | 103-184 | 82 | Design principles, Bun runtime, markup-as-value (§1.4), north-star ladder (§1.5), V5-strict access (§1.6) |
 | 2 | File Format and Compilation Model | 185-225 | 41 | Source files, output, entry point, perf target |
 | 3 | Context Model | 226-285 | 60 | Contexts, stack rules, coercion, V5-strict access form per locus (§3.4) |
-| 4 | Block Grammar | 286-1032 | 747 | Tags, states, closer forms, PA rules, keywords, angleDepth (PA-005). **D4 +3 subsections:** §4.14 `:`-shorthand body form (M15, L20); §4.15 scrml-defined structural elements registry (`<engine>`/`<match>`/`<errors>`/`<onTransition>`); §4.16 M7 multi-close `<///>` negative-space anchor. |
+| 4 | Block Grammar | 286-1085 | ~800 | Tags, states, closer forms, PA rules, keywords, angleDepth (PA-005). **D4 +3 subsections:** §4.14 `:`-shorthand body form (M15, L20); §4.15 scrml-defined structural elements registry (`<engine>`/`<match>`/`<errors>`/`<onTransition>`); §4.16 M7 multi-close `<///>` negative-space anchor. **S101 +1 subsection (2026-05-17):** §4.17 raw-content elements `<pre>` / `<code>` — bodies are a single text run; scrml tokens (`${...}`, `<TagName>`, brace sigils) NOT recognized inside; HTML entity-escaping of `<` / `>` / `&` for display remains author responsibility. Closes Bug-#2 friction class. Line ranges below §4.17 may shift by ~54 lines; regen via `bun run scripts/regen-spec-index.ts` for surgical updates. |
 | 5 | Attribute Quoting Semantics | 1033-1681 | 649 | Three forms, bind:, dynamic class, event handler binding (§5.2.2). **D4 +2 subsections:** §5.2.3 bare-form event handler rule (L19, M11) — single-expression discipline + E-MULTI-STATEMENT-HANDLER; §5.4.1 bind-dispatch table by render-spec shape (L17). |
 | 6 | Reactivity and the V5-Strict Access Model | 1682-5123 | 3442 | V5-strict two forms (§6.1), three RHS shapes (§6.2), compound state (§6.3), render-by-tag (§6.4), arrays (§6.5), derived+in-compound (§6.6+§6.6.16-17), lifecycle (§6.7), default+reset (§6.8), hoisting (§6.9), pinned (§6.10), validity stub (§6.11), §11 inheritance (§6.12). **S69 amendment (2026-05-08):** §6.8.2 normatively allows multi-level compound-nav targets in `reset(@a.b.c.d)` (B22). **S89 amendment (2026-05-13):** §6.8.1 makes `default=not` the canonical absence form; `null` AND `undefined` in attribute-value position are rejected via E-SYNTAX-042 + surfaced via W-ABSENCE-IN-SCRML-SOURCE (§34; renamed from W-NULL-IN-SCRML-SOURCE). |
 | 7 | Logic Contexts | 5124-5363 | 240 | `{}` syntax, function forms, markup-as-expr, type annotations, file-level scope (§7.6). **D4 +3 subsections:** §7.4.1 markup-as-expression under markup-as-value pillar (L1); §7.6.1 file-level scope under V5-strict + hoisting + `pinned` (M11); §7.7 logic-markup interleaving (M8). |
@@ -93,6 +93,7 @@ Total lines: 27,144 | Total sections: 57 + appendices  (S90 M-7C-D-12 Track 4: �
 
 ## Quick Lookup: Topic → Section
 
+- raw-content elements `<pre>` / `<code>` (S101 — scrml tokens NOT parsed inside; HTML entity-escaping for display remains author concern) → §4.17 + §24.3.1
 - attribute parsing → §5 (1026-1674)
 - bind:value → §5 (~1147+)
 - event handler binding → §5.2.2 (1105-1126)
