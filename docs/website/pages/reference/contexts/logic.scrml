@@ -44,11 +44,11 @@
             Syntax
         </h2>
 
-        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&#36;&#123; statementOrExpression &#125;
-&#36;&#123; &#64;cell &#125;
-&#36;&#123; &#64;count + 1 &#125;
-&#36;&#123; function name() &#123; ... &#125; &#125;
-&#36;&#123; if (cond) &#123; ... &#125; &#125;</code></pre>
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>${ statementOrExpression }
+${ @cell }
+${ @count + 1 }
+${ function name() { ... } }
+${ if (cond) { ... } }</code></pre>
 
         <p class="text-slate-700 leading-relaxed mt-4">
             Inside a logic context, the grammar is statement-and-

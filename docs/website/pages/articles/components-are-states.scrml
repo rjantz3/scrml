@@ -121,14 +121,14 @@ e&#120;port f&#117;nction CardList() &#123;
 &lt;EditState&gt; @ui
 
 &lt;ul&gt;
-    &#36;&#123;@cards.map(c =&gt; l&#105;ft &lt;CardRow card=c
-                                   isEditing=&#36;&#123;@ui.editingId == c.id&#125;
-                                   bind:draftTitle=@ui.draftTitle&#47;&gt;)&#125;
+    ${@cards.map(c =&gt; l&#105;ft &lt;CardRow card=c
+                                   isEditing=${@ui.editingId == c.id}
+                                   bind:draftTitle=@ui.draftTitle&#47;&gt;)}
 &lt;&#47;ul&gt;
 
-s&#101;rver f&#110; renameCard(id: number, title: string(.length &gt; 0 &amp;&amp; .length &lt; 200)) &#123;
-    ?&#123;`UPDATE cards SET title = &#36;&#123;title&#125; WHERE id = &#36;&#123;id&#125;`&#125;.run()
-&#125;</code></pre>
+s&#101;rver f&#110; renameCard(id: number, title: string(.length &gt; 0 &amp;&amp; .length &lt; 200)) {
+    ?{`UPDATE cards SET title = ${title} WHERE id = ${id}`}.run()
+}</code></pre>
 
         <p class="text-slate-700 leading-relaxed my-4">That is the screen. Both halves.</p>
         <p class="text-slate-700 leading-relaxed my-4"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;Card&gt;</code> is a state type. The fields are typed. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">authority="s&#101;rver"</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">table="cards"</code> say where the source of truth lives. The compiler reads the SQLite schema at compile time, generates the initial-load query, generates the optimistic-update path, generates the rollback, and pre-renders the list in SSR (§52.3). The <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Card</code> interface in TypeScript and the schema on disk cannot drift, because there is one declaration.</p>
