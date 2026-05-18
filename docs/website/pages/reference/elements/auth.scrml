@@ -54,7 +54,7 @@
         <p class="text-slate-700 leading-relaxed mt-4">
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">role=</code>
             takes a string literal, a variable reference, or a
-            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123;expr&#125;</code>
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${expr}</code>
             interpolation. Closed-form predicates (variant literals,
             literal comma-OR, const-refs to role-set values, boolean
             composition of statically-known operands) ship per-role
@@ -78,7 +78,7 @@
             admin subtree's atoms.
         </p>
 
-        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Role:enum = &#123; Anonymous, User, Admin &#125;
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Role:enum = { Anonymous, User, Admin }
 
 &lt;program auth="required" loginRedirect="/login"&gt;
 
@@ -126,7 +126,7 @@
                 Closed-form predicates ship per-role bundles. Runtime-
                 fallback predicates (reactive reads, async server-fn
                 calls, arbitrary
-                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123;expr&#125;</code>)
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${expr}</code>)
                 emit
                 <a href="/reference/errors/W-AUTH-RUNTIME-FALLBACK"
                    class="font-mono text-xs text-amber-700 underline">W-AUTH-RUNTIME-FALLBACK</a>
@@ -206,12 +206,12 @@
                 or const-refs to role-set values are closed-form.
                 Anything else &mdash; reactive reads, async calls,
                 arbitrary
-                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123;expr&#125;</code>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${expr}</code>
                 &mdash; falls back. Per &sect;40.9.5.
             </li>
             <li>
                 <strong>Full interpolation grammar.</strong>
-                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">role=&#36;&#123;expr&#125;</code>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">role=${expr}</code>
                 works (S90 OQ-A3-A ratification &mdash; first-class
                 compiler state should have the same surface as
                 user-defined state). The closure analyzer constant-

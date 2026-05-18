@@ -42,14 +42,14 @@
         <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;db src=".&#47;app.db" tables="users,posts"&#47;&gt;
 
 &lt;program&gt;
-&#36;&#123;
-    s&#101;rver f&#117;nction list_recent() &#123;
-        r&#101;turn ?&#123;`
+${
+    s&#101;rver f&#117;nction list_recent() {
+        r&#101;turn ?{`
             SELECT u.|     -- cursor here
             FROM users u
-        `&#125;.all()
-    &#125;
-&#125;
+        `}.all()
+    }
+}
 &lt;&#47;program&gt;</code></pre>
 
         <p class="text-slate-700 leading-relaxed my-4">the LSP can:</p>
@@ -61,19 +61,19 @@
 
 
         <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&#47;&#47; components&#47;card.scrml
-e&#120;port c&#111;nst Card = &lt;article props=&#123; title: string, body: string, publishedAt: string &#125;&gt;
-    &lt;h2&gt;&#36;&#123;title&#125;&lt;&#47;h2&gt;
-    &lt;p&gt;&#36;&#123;body&#125;&lt;&#47;p&gt;
-    &lt;span class="date"&gt;&#36;&#123;publishedAt&#125;&lt;&#47;span&gt;
+e&#120;port c&#111;nst Card = &lt;article props={ title: string, body: string, publishedAt: string }&gt;
+    &lt;h2&gt;${title}&lt;&#47;h2&gt;
+    &lt;p&gt;${body}&lt;&#47;p&gt;
+    &lt;span class="date"&gt;${publishedAt}&lt;&#47;span&gt;
 &lt;&#47;&gt;
 
 &#47;&#47; pages&#47;index.scrml
-i&#109;port &#123; Card &#125; from "..&#47;components&#47;card.scrml"
+i&#109;port { Card } from "..&#47;components&#47;card.scrml"
 
 &lt;Card title="Hi" |    -- cursor here</code></pre>
 
         <p class="text-slate-700 leading-relaxed my-4">The LSP suggests <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">body=</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">publishedAt=</code>. Cross-file. Driven by a derived prop registry built from <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">ComponentDefNode.raw</code> parsed at workspace-bootstrap time. <strong>The L3 phase of the LSP roadmap landed this in S40.</strong> It works against <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">e&#120;port.raw</code> synthesized component-defs, not just same-file components.</p>
-        <p class="text-slate-700 leading-relaxed my-4">A React or Vue dev reading this is thinking "my IDE has done this for years". Yes, for components written in JSX or SFCs that tsserver &#47; Volar can analyze. <strong>scrml's version works for components defined in markup-first source that tsserver and Volar would never touch.</strong> And it works because <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;Card title="Hi"</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;article props=&#123;...&#125;&gt;</code> are nodes in the same AST pass.</p>
+        <p class="text-slate-700 leading-relaxed my-4">A React or Vue dev reading this is thinking "my IDE has done this for years". Yes, for components written in JSX or SFCs that tsserver &#47; Volar can analyze. <strong>scrml's version works for components defined in markup-first source that tsserver and Volar would never touch.</strong> And it works because <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;Card title="Hi"</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;article props={...}&gt;</code> are nodes in the same AST pass.</p>
 
         <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Cross-file go-to-definition that's actually accurate</h3>
 
@@ -102,7 +102,7 @@ i&#109;port &#123; Card &#125; from "..&#47;components&#47;card.scrml"
 
         <p class="text-slate-700 leading-relaxed my-4">L4 also shipped <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">signatureHelpProvider</code> triggered on <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">(</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">,</code>. For cross-file imported functions, the LSP synthesizes the function shape from the export's <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">raw</code> source (parsed at workspace-bootstrap). So:</p>
 
-        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>i&#109;port &#123; computeTotal &#125; from ".&#47;billing.scrml"
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>i&#109;port { computeTotal } from ".&#47;billing.scrml"
 
 c&#111;nst total = computeTotal(|    -- cursor here, signature popup shows:
                                 --   computeTotal(items: List&lt;Item&gt;, taxRate: Number)

@@ -31,14 +31,14 @@
 
         <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
             <li>Compiler: lex, parse, name-resolve, type-check, codegen, full pipeline.</li>
-            <li>Reactive state via <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123; @x = 0; @y = ... &#125;</code> blocks inside <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>.</li>
+            <li>Reactive state via <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${ @x = 0; @y = ... }</code> blocks inside <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>.</li>
             <li><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">bind:value</code> &#47; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">bind:checked</code> &#47; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">bind:files</code> for inputs.</li>
-            <li>Server functions via <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">s&#101;rver f&#117;nction name() &#123; ... &#125;</code> — compiler routes them automatically.</li>
-            <li>SQL passthrough via <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">?&#123; select * from users &#125;</code> — compiler emits Bun.SQL tagged-template SQL.</li>
+            <li>Server functions via <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">s&#101;rver f&#117;nction name() { ... }</code> — compiler routes them automatically.</li>
+            <li>SQL passthrough via <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">?{ select * from users }</code> — compiler emits Bun.SQL tagged-template SQL.</li>
             <li><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;schema&gt;</code> blocks for declarative database schemas.</li>
             <li><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;channel&gt;</code> blocks for WebSocket pub&#47;sub (single-instance Bun WS server).</li>
             <li><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;machine&gt;</code> state machines (the legacy keyword for what v0.2.0 calls <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;e&#110;gine&gt;</code>).</li>
-            <li>Inline tests via <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">~&#123; ... &#125;</code> blocks.</li>
+            <li>Inline tests via <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">~{ ... }</code> blocks.</li>
             <li>16-module stdlib: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">auth</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">crypto</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">data</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">format</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">fs</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">http</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">oauth</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">path</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">process</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">redis</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">cron</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">regex</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">router</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">store</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">test</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">time</code>.</li>
             <li>32 example apps + a real-world trucking-dispatch multi-page app.</li>
             <li>LSP server, VSCode extension, neovim treesitter grammar.</li>
@@ -78,7 +78,7 @@ c&#111;nst &lt;doubled&gt; = @count * 2               &#47;&#47; Shape 3 — der
   &lt;agree r&#101;q&gt;              = &lt;input t&#121;pe="checkbox"&#47;&gt;
 &lt;&#47;&gt;
 
-&lt;button disabled=&#36;&#123;!@signup.isValid&#125; onclick=submit()&gt;Submit&lt;&#47;button&gt;
+&lt;button disabled=${!@signup.isValid} onclick=submit()&gt;Submit&lt;&#47;button&gt;
 &lt;errors of=@signup.email&#47;&gt;</code></pre>
 
         <p class="text-slate-700 leading-relaxed my-4">No external validation library. No manual <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">i&#102; (errors.length &gt; 0)</code> plumbing.</p>
@@ -98,13 +98,13 @@ c&#111;nst &lt;doubled&gt; = @count * 2               &#47;&#47; Shape 3 — der
 
         <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;channel name="chat" topic="lobby"&gt;
   &lt;messages&gt; = []                                    &#47;&#47; V5-strict — auto-syncs across clients
-  s&#101;rver f&#117;nction postMessage(author, body) &#123;
-    @messages = [...@messages, &#123; author, body, ts: Date.now() &#125;]
-  &#125;
+  s&#101;rver f&#117;nction postMessage(author, body) {
+    @messages = [...@messages, { author, body, ts: Date.now() }]
+  }
 &lt;&#47;&gt;
 
 &lt;program&gt;
-  &#36;&#123; c&#111;nst count = @messages.length &#125;                &#47;&#47; cross-scope canonical access
+  ${ c&#111;nst count = @messages.length }                &#47;&#47; cross-scope canonical access
 &lt;&#47;&gt;</code></pre>
 
         <p class="text-slate-700 leading-relaxed my-4"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;channel&gt;</code> becomes a sibling of <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code> (not a child). The <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@shared</code> modifier is removed; cells in channel body auto-sync by being there.</p>
@@ -113,11 +113,11 @@ c&#111;nst &lt;doubled&gt; = @count * 2               &#47;&#47; Shape 3 — der
 
 
         <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;schema&gt;
-  users &#123;
+  users {
     email: text n&#111;t null unique           &#47;&#47; SQL-mirror native — canonical
     name:  text r&#101;q length(&gt;=2)           &#47;&#47; shared-core additive — lowers to NOT NULL + CHECK
     age:   integer min(18) max(120)       &#47;&#47; lowers to CHECK constraints
-  &#125;
+  }
 &lt;&#47;&gt;</code></pre>
 
         <p class="text-slate-700 leading-relaxed my-4">The same predicate vocabulary (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">r&#101;q</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">length</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">pattern</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">min</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">max</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">gte</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lte</code>, etc.) works in three contexts: state-cell validators, refinement type predicates, and now schema column constraints. Lowered to standard SQL DDL — passthrough remains inviolable.</p>
@@ -164,7 +164,7 @@ c&#111;nst &lt;doubled&gt; = @count * 2               &#47;&#47; Shape 3 — der
             <li><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">c&#111;nst &lt;derived&gt; = expr</code> (with the angle brackets on the LHS)</li>
         </ul>
         <p class="text-slate-700 leading-relaxed my-4"><strong>Those describe v0.2.0 design.</strong> They will not compile against the current v0.1.0 compiler. The article authors aren't lying — the spec does say those things. But the compiler hasn't caught up yet. We are explicit about this so readers don't waste time thinking they're typing the wrong thing.</p>
-        <p class="text-slate-700 leading-relaxed my-4">If you read code that uses <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@count = 0</code>-style declarations inside <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123;...&#125;</code> blocks — that's v0.1.0 and compiles cleanly today.</p>
+        <p class="text-slate-700 leading-relaxed my-4">If you read code that uses <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@count = 0</code>-style declarations inside <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${...}</code> blocks — that's v0.1.0 and compiles cleanly today.</p>
         <p class="text-slate-700 leading-relaxed my-4">The v1 kickstarter article (<a href="./articles/llm-kickstarter-v1" class="text-blue-700 hover:text-blue-900 underline"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">llm-kickstarter-v1</code></a>) describes v0.1.0 idioms. The v2 kickstarter (<a href="./articles/llm-kickstarter-v2" class="text-blue-700 hover:text-blue-900 underline"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">llm-kickstarter-v2</code></a>) describes v0.2.0 design and is intended for LLM dev-agent dispatches <strong>only</strong>, not for human onboarding to current scrml.</p>
         <hr class="my-8 border-slate-200"/>
 
@@ -190,7 +190,7 @@ c&#111;nst &lt;doubled&gt; = @count * 2               &#47;&#47; Shape 3 — der
         <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">TL;DR</h2>
 
         <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
-            <li><strong>Today: v0.1.0.</strong> Use <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@x = 0</code> for declarations inside <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123;...&#125;</code> blocks. Compiles, runs, ships.</li>
+            <li><strong>Today: v0.1.0.</strong> Use <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@x = 0</code> for declarations inside <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${...}</code> blocks. Compiles, runs, ships.</li>
             <li><strong>In flight: v0.2.0.</strong> Will land <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;x&gt; = 0</code> decl form, Tier 0&#47;1&#47;2 ladder, auto-synth validity surface, file-level channels, shared-core schema vocab, refinement-type predicates, plus the rest of the L1-L21 lock list.</li>
             <li><strong>Compiler implementation status:</strong> Phase A1a (foundational lex+parse) ✅ done as of 2026-05-05. Phase A1b (resolve+type) 🟡 in flight. A1c through A6 + parallel tracks ⏸️ ahead.</li>
             <li><strong>Articles showing v0.2.0 syntax describe the spec target, not the current compiler.</strong> Don't waste cycles trying to compile them yet.</li>

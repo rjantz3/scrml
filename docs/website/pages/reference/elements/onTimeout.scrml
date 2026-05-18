@@ -81,10 +81,10 @@
             </li>
             <li>
                 <strong>Computed:</strong>
-                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">after=&dollar;&lcub;expr&rcub;&lt;unit&gt;</code>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">after=${expr}&lt;unit&gt;</code>
                 where the expression evaluates to a non-negative number at
                 state-entry time. Example:
-                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">after=&dollar;&lcub;@retryDelay&rcub;s</code>.
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">after=${@retryDelay}s</code>.
                 Computed-form rules opt out of multi-step JSON-encoded chained
                 auto-rearm (per SPEC §51.12.4 S77 amendment).
             </li>
@@ -121,16 +121,16 @@
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.TimedOut</code>.
         </p>
 
-        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type LoadPhase:enum = &#123; Idle, Loading, Done(rows: int), TimedOut, Error(msg: string) &#125;
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type LoadPhase:enum = { Idle, Loading, Done(rows: int), TimedOut, Error(msg: string) }
 
-function load() &#123;
+function load() {
   @loadPhase = .Loading
-  const result = fetchItems() !&#123;
-    | ::Network msg -&gt; &#123; @loadPhase = .Error(msg); return &#125;
-    | ::Empty       -&gt; &#123; @loadPhase = .Done(0);    return &#125;
-  &#125;
+  const result = fetchItems() !{
+    | ::Network msg -&gt; { @loadPhase = .Error(msg); return }
+    | ::Empty       -&gt; { @loadPhase = .Done(0);    return }
+  }
   @loadPhase = .Done(result.length)
-&#125;
+}
 
 &lt;engine for=LoadPhase initial=.Idle&gt;
   &lt;Idle rule=.Loading&gt;
@@ -142,9 +142,9 @@ function load() &#123;
     Loading&hellip;
   &lt;/&gt;
 
-  &lt;Done rows rule=.Idle&gt;: &dollar;&lcub;rows&rcub; rows
+  &lt;Done rows rule=.Idle&gt;: ${rows} rows
   &lt;TimedOut rule=.Idle&gt;: Timed out
-  &lt;Error msg rule=.Idle&gt;: &dollar;&lcub;msg&rcub;
+  &lt;Error msg rule=.Idle&gt;: ${msg}
 &lt;/&gt;</code></pre>
 
         // ───────────────────────────────────────────────────────────
@@ -243,7 +243,7 @@ function load() &#123;
         <ul class="space-y-2 text-slate-700 mt-4">
             <li>
                 Name MUST be identifier-shaped:
-                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;^[A-Za-z_][A-Za-z0-9_]*&dollar;&#47;</code>.
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;^[A-Za-z_][A-Za-z0-9_]*$&#47;</code>.
                 Violations fire E-TIMER-NAME-INVALID.
             </li>
             <li>
@@ -261,7 +261,7 @@ function load() &#123;
                 supported (e.g.
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">onclick=cancelTimer("X")</code>).
                 Expression-form
-                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">onclick=&dollar;&lcub;cancelTimer("X")&rcub;</code>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">onclick=${cancelTimer("X")}</code>
                 and function-body calls fall through to ordinary emission and
                 runtime-fail with
                 <em class="text-rose-700">cancelTimer is not defined</em>.

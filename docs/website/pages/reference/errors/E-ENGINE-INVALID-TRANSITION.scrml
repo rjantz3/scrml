@@ -118,12 +118,12 @@
             Minimal reproducer
         </h2>
 
-        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Phase:enum = &#123; Idle, Loading, Done, Error &#125;
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Phase:enum = { Idle, Loading, Done, Error }
 
 &lt;engine for=Phase initial=.Idle&gt;
   &lt;Idle rule=.Loading&gt;
     // rule= only permits .Loading from here
-    &lt;button onclick=&dollar;&lcub;@phase = .Done&rcub;&gt;Skip to Done&lt;/button&gt;
+    &lt;button onclick=${@phase = .Done}&gt;Skip to Done&lt;/button&gt;
     //                              ^^^^^^
     //  E-ENGINE-INVALID-TRANSITION: .Done not in rule= set
   &lt;/&gt;
@@ -152,7 +152,7 @@
                 <strong>Add the variant to the rule= set</strong> if the
                 transition is legitimate. The compiler accepts:
                 <pre class="bg-slate-900 text-slate-100 p-3 rounded-md text-xs mt-2 overflow-x-auto"><code>&lt;Idle rule=(.Loading | .Done)&gt;
-  &lt;button onclick=&dollar;&lcub;@phase = .Done&rcub;&gt;Skip&lt;/button&gt;
+  &lt;button onclick=${@phase = .Done}&gt;Skip&lt;/button&gt;
 &lt;/&gt;</code></pre>
             </li>
             <li>

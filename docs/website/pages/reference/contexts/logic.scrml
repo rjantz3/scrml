@@ -54,10 +54,10 @@ ${ if (cond) { ... } }</code></pre>
             Inside a logic context, the grammar is statement-and-
             expression scrml. Outside (markup mode), text and
             elements are the grammar.
-            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123;...&#125;</code>
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${...}</code>
             is the universal switch from markup &rarr; logic; the
             closing
-            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#125;</code>
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">}</code>
             returns to markup. Inside logic, markup may re-open via
             element literals like
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;span&gt;...&lt;/span&gt;</code>
@@ -75,24 +75,24 @@ ${ if (cond) { ... } }</code></pre>
         <p class="text-slate-700 leading-relaxed mb-3">
             A counter with derived computation, an event handler, and
             markup-as-value. Three uses of
-            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123;...&#125;</code>
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${...}</code>
             in one snippet.
         </p>
 
         <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;count&gt; = 0
-const &lt;label&gt; = &#36;&#123; "Clicked " + &#64;count + " times" &#125;
+const &lt;label&gt; = ${ "Clicked " + @count + " times" }
 
-&lt;button onclick=&#36;&#123; &#64;count = &#64;count + 1 &#125;&gt;
-  &#36;&#123; &#64;label &#125;
+&lt;button onclick=${ @count = @count + 1 }&gt;
+  ${ @label }
 &lt;/button&gt;
 
-&lt;p&gt;Last bump: &#36;&#123; &#64;count &gt; 0 ? &lt;strong&gt;&#36;&#123;&#64;count&#125;&lt;/strong&gt; : "never" &#125;&lt;/p&gt;</code></pre>
+&lt;p&gt;Last bump: ${ @count &gt; 0 ? &lt;strong&gt;${@count}&lt;/strong&gt; : "never" }&lt;/p&gt;</code></pre>
 
         <p class="text-slate-700 leading-relaxed mt-3">
             The button's
-            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">onclick=&#36;&#123;...&#125;</code>
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">onclick=${...}</code>
             wraps a single assignment statement; the body's
-            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123;&#64;label&#125;</code>
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${@label}</code>
             is a reactive interpolation; the the paragraph's ternary
             returns either markup (markup-as-value) or a string. Each
             use is a logic context the compiler tracks for dependency
@@ -110,19 +110,19 @@ const &lt;label&gt; = &#36;&#123; "Clicked " + &#64;count + " times" &#125;
         <ul class="space-y-3 text-slate-700">
             <li>
                 <strong>V5-strict access inside logic.</strong>
-                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#64;name</code>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@name</code>
                 reads or writes a reactive state cell;
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">name</code>
                 (bare) resolves to a function-scoped local. Bare names
                 NEVER resolve to reactive state &mdash; that is the
                 load-bearing point of the
-                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#64;</code>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@</code>
                 marker.
             </li>
             <li>
                 <strong>Reactive interpolation tracks dependencies at
                 compile time.</strong> Every
-                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123; &#64;cell &#125;</code>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${ @cell }</code>
                 in markup-mode position subscribes the surrounding
                 node to that cell. Writes to the cell trigger re-emit
                 of exactly that node. No runtime diffing. Per SPEC
@@ -130,11 +130,11 @@ const &lt;label&gt; = &#36;&#123; "Clicked " + &#64;count + " times" &#125;
             </li>
             <li>
                 <strong>Statement vs expression position.</strong>
-                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123;...&#125;</code>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${...}</code>
                 in markup body position accepts statements
                 (declarations, control flow, blocks) AND expressions.
                 In attribute-value position
-                (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">onclick=&#36;&#123;...&#125;</code>),
+                (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">onclick=${...}</code>),
                 the body must be a single expression unless wrapped
                 in a function (E-MULTI-STATEMENT-HANDLER on inline
                 multi-statement). Per SPEC &sect;5.2.3 + L19.
@@ -149,7 +149,7 @@ const &lt;label&gt; = &#36;&#123; "Clicked " + &#64;count + " times" &#125;
             </li>
             <li>
                 <strong>File-level logic context.</strong> A
-                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123;...&#125;</code>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${...}</code>
                 at file top level is the canonical place for
                 module-scope declarations
                 (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">function</code>,
@@ -162,7 +162,7 @@ const &lt;label&gt; = &#36;&#123; "Clicked " + &#64;count + " times" &#125;
             <li>
                 <strong>Assignment is an expression.</strong> Per SPEC
                 &sect;50,
-                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#64;count = &#64;count + 1</code>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@count = @count + 1</code>
                 returns the assigned value. Useful for inline event
                 handlers and lift accumulation. The composition with
                 markup-as-value lands in &sect;50.14.
@@ -191,7 +191,7 @@ const &lt;label&gt; = &#36;&#123; "Clicked " + &#64;count + " times" &#125;
         <ul class="space-y-4 text-slate-700">
             <li>
                 <strong>Nested
-                    <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123; &lt;el&gt;&#36;&#123;...&#125;&lt;/el&gt; &#125;</code>.
+                    <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${ &lt;el&gt;${...}&lt;/el&gt; }</code>.
                 </strong>
                 Logic can open markup which can open more logic.
                 The compiler tokenizes brace depth per context; arbitrary
@@ -201,9 +201,9 @@ const &lt;label&gt; = &#36;&#123; "Clicked " + &#64;count + " times" &#125;
             <li>
                 <strong>Bare names are locals, not state.</strong>
                 The most common new-adopter mistake:
-                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123; count &#125;</code>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${ count }</code>
                 instead of
-                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#36;&#123; &#64;count &#125;</code>.
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${ @count }</code>.
                 The first reads a function-local
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">count</code>;
                 if no such local is in scope, fires E-SCOPE-001 with

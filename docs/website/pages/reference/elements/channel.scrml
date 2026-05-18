@@ -80,12 +80,12 @@
   &lt;channel name="chat" topic="lobby"&gt;
     &lt;messages&gt; = []
 
-    &#36;&#123; server function postMessage(author, body) &#123;
-        &#64;messages = [...&#64;messages, &#123; author, body, ts: Date.now() &#125;]
-    &#125; &#125;
+    ${ server function postMessage(author, body) {
+        @messages = [...@messages, { author, body, ts: Date.now() }]
+    } }
   &lt;/channel&gt;
 
-  &#36;&#123; const count = &#64;messages.length &#125;
+  ${ const count = @messages.length }
 
 &lt;/program&gt;</code></pre>
 
@@ -94,7 +94,7 @@
             is declared inside the channel body, so it auto-syncs.
             Anywhere else in the
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>,
-            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#64;messages</code>
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@messages</code>
             reads it &mdash; program-scope visibility for channel
             cells is the canonical pattern (per &sect;38.4 + Insight
             30).
@@ -129,7 +129,7 @@
             <li>
                 <strong>V5-strict body.</strong>
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;cell&gt; = init</code>
-                declares; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#64;cell</code>
+                declares; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@cell</code>
                 reads / writes. Same access discipline as everywhere
                 else in scrml.
             </li>
@@ -215,7 +215,7 @@
                 body. The wire protocol passes through the
                 compiler-generated server-fn endpoint, which writes
                 the cell and broadcasts to peers. Direct client-side
-                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#64;cell = ...</code>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@cell = ...</code>
                 writes are scoped to the local client.
             </li>
             <li>

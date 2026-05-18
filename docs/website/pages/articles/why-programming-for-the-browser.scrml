@@ -6,7 +6,7 @@
 //   - Frontmatter dropped (scrml file, not markdown)
 //   - Headers wrapped in <h1>/<h2>/<h3> with Tailwind utility classes
 //   - Inline `code` wrapped in <code class="..."> per S86
-//   - Code blocks escaped via &#36;&#123; etc. for ?{} / ${} sites
+//   - Code blocks escaped via ${ etc. for ?{} / ${} sites
 //   - dev.to article links → /articles/<slug> scrml.dev routes
 //
 // dev.to publish gets canonical_url=https://scrml.dev/articles/why-programming-for-the-browser
@@ -138,7 +138,7 @@
 
         <p class="text-slate-700 leading-relaxed mt-4">
             If the compiler owns the SQL block, you do not need an ORM.
-            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">?&#123;SELECT * FROM users WHERE id = $&#123;@id&#125;&#125;.get()</code>
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">?{SELECT * FROM users WHERE id = ${@id}}.get()</code>
             writes a parameterized query. The compiler reads your schema. When it sees a
             query inside a loop, it pre-fetches with
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">WHERE id IN (...)</code>

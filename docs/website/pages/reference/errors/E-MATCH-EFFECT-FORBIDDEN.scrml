@@ -60,11 +60,11 @@
             Minimal reproducer
         </h2>
 
-        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Phase:enum = &#123; Idle, Loading, Done &#125;
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Phase:enum = { Idle, Loading, Done }
 
 &lt;match for=Phase&gt;
   &lt;Idle&gt;&lt;/&gt;
-  &lt;Loading effect=&dollar;&lcub; analytics.track("load") &rcub;&gt;&lt;/&gt;
+  &lt;Loading effect=${ analytics.track("load") }&gt;&lt;/&gt;
   //       ^^^^^^^
   //       E-MATCH-EFFECT-FORBIDDEN: effect= on match arm.
   //       Promote to &lt;engine&gt; to activate effects.
@@ -87,7 +87,7 @@
 
         <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;engine for=Phase initial=.Idle&gt;
   &lt;Idle    rule=.Loading /&gt;
-  &lt;Loading rule=.Done effect=&dollar;&lcub; analytics.track("load") &rcub; /&gt;
+  &lt;Loading rule=.Done effect=${ analytics.track("load") } /&gt;
   &lt;Done    rule=.Idle    /&gt;
 &lt;/engine&gt;</code></pre>
 

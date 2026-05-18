@@ -71,7 +71,7 @@
             and cleanup on the error transition.
         </p>
 
-        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Phase:enum = &#123; Idle, Loading, Error(msg: string), Success(count: int) &#125;
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Phase:enum = { Idle, Loading, Error(msg: string), Success(count: int) }
 
 &lt;engine for=Phase initial=.Idle&gt;
   &lt;Idle    rule=.Loading /&gt;
@@ -80,15 +80,15 @@
   &lt;Success rule=.Idle /&gt;
 
   &lt;onTransition from=.Loading to=.Success&gt;
-    &#36;&#123; analytics.track("load.success") &#125;
+    ${ analytics.track("load.success") }
   &lt;/onTransition&gt;
 
   &lt;onTransition to=.Error&gt;
-    &#36;&#123; cleanup() &#125;
+    ${ cleanup() }
   &lt;/onTransition&gt;
 
   &lt;onTransition from=.Idle to=.Loading once&gt;
-    &#36;&#123; firstLoadInstrumentation() &#125;
+    ${ firstLoadInstrumentation() }
   &lt;/onTransition&gt;
 &lt;/engine&gt;</code></pre>
 

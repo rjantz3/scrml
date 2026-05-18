@@ -57,7 +57,7 @@
             Minimal reproducer
         </h2>
 
-        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Phase:enum = &#123; Idle, Loading, Done &#125;
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Phase:enum = { Idle, Loading, Done }
 
 &lt;match for=Phase&gt;
   &lt;Idle&gt;&lt;/&gt;
@@ -67,7 +67,7 @@
   &lt;onTransition to=.Done&gt;
     // ^^^^^^^^^^^^^^^^^^^^^^
     // E-MATCH-ONTRANSITION-FORBIDDEN: transition handlers are engine-only.
-    &dollar;&lcub; analytics.track("done") &rcub;
+    ${ analytics.track("done") }
   &lt;/onTransition&gt;
 &lt;/match&gt;</code></pre>
 
@@ -95,7 +95,7 @@
   &lt;Done    rule=.Idle    /&gt;
 
   &lt;onTransition to=.Done&gt;
-    &dollar;&lcub; analytics.track("done") &rcub;
+    ${ analytics.track("done") }
   &lt;/onTransition&gt;
 &lt;/engine&gt;</code></pre>
 
@@ -105,7 +105,7 @@
 
         <p class="text-slate-700 leading-relaxed">
             Match is one of two Tier-1 shapes (the other being JS-style
-            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#x6D;atch expr &lcub; &rcub;</code>
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#x6D;atch expr { }</code>
             value-return form). Both are case analysis on a discriminating
             type with compile-time exhaustiveness. NEITHER models
             transitions &mdash; match looks at WHAT a value IS, not how it

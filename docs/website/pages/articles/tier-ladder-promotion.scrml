@@ -21,7 +21,7 @@
         </header>
         <p class="text-slate-700 leading-relaxed my-4"><em>by Bryan MacLee</em></p>
         <p class="text-slate-700 leading-relaxed my-4"><strong>TL;DR: The goal is a shipped app that is essentially bullet-proof — every reachable state has UI, every transition is intentional, every effect runs at the right moment. Getting there should not require rewriting the prototype. scrml has a three-tier ladder — <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">i&#102;=</code> → <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;m&#97;tch&gt;</code> → <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;e&#110;gine&gt;</code> — where the state-children migrate verbatim. The compiler tells you when to promote. The wrapper swap is the commitment moment.</strong></p>
-        <p class="text-slate-700 leading-relaxed my-4">&gt; <strong>Status (v0.2.x):</strong> Tier 0 (lifecycle booleans + <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">i&#102;=</code> chains) and Tier 2 (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;e&#110;gine&gt;</code> with target-only <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">rule=.Variant</code> forms) are shipped in v0.2.4 and the code blocks below compile against the current compiler. <strong>Tier 1 block-form <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;m&#97;tch f&#111;r=Type&gt;</code> is spec-ratified but the parser does not yet recognize it in v0.2.4</strong> (the JS-style value-return <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">m&#97;tch expr &#123;&#125;</code> shape from §"Aside" below DOES work today). When the Tier 1 block-form lands, the promotion path is literally the wrapper swap shown in this article. Until then, treat the Tier 1 example as a design preview of where the language is going; if you want the exhaustiveness check today, skip directly from Tier 0 to Tier 2.</p>
+        <p class="text-slate-700 leading-relaxed my-4">&gt; <strong>Status (v0.2.x):</strong> Tier 0 (lifecycle booleans + <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">i&#102;=</code> chains) and Tier 2 (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;e&#110;gine&gt;</code> with target-only <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">rule=.Variant</code> forms) are shipped in v0.2.4 and the code blocks below compile against the current compiler. <strong>Tier 1 block-form <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;m&#97;tch f&#111;r=Type&gt;</code> is spec-ratified but the parser does not yet recognize it in v0.2.4</strong> (the JS-style value-return <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">m&#97;tch expr {}</code> shape from §"Aside" below DOES work today). When the Tier 1 block-form lands, the promotion path is literally the wrapper swap shown in this article. Until then, treat the Tier 1 example as a design preview of where the language is going; if you want the exhaustiveness check today, skip directly from Tier 0 to Tier 2.</p>
         <p class="text-slate-700 leading-relaxed my-4">This piece and its companion arrived together. This one shows the ladder. The companion piece, <em>Why scrml has to deprecate function and component overloading</em>, explains two features the language is deleting in v0.2.0 because the ladder you are about to read already does their job better.</p>
         <p class="text-slate-700 leading-relaxed my-4">Every framework I have looked at picks a side in the same fight. The state-machine evangelists insist you specify your machine before you write a feature. The rapid-prototyping evangelists hand you <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">useState</code> and let you stack booleans until you have a runtime invariant problem you cannot debug. Both camps are right about something and wrong about something else.</p>
         <p class="text-slate-700 leading-relaxed my-4">I have hobbled through React when I had to. I have written enough boolean-lifecycle code in my own experiments to recognize exactly the bug class state machines are supposed to prevent. The state-machine-first response to that bug class is fine in theory, but the prototype is the place where you find out what the states actually are. Asking the developer to name the machine before the feature exists is asking them to commit before they know.</p>
@@ -37,50 +37,50 @@
          version="0.1.0"
          license="MIT"&gt;
 
-&#36;&#123;
-    t&#121;pe LoadError:enum = &#123;
+${
+    t&#121;pe LoadError:enum = {
         Network(msg: string)
         Empty
-    &#125;
+    }
 
     &lt;isLoading&gt; = false
     &lt;isError&gt;   = false
     &lt;errorMsg&gt;  = ""
     &lt;data&gt;      = n&#111;t
 
-    s&#101;rver f&#117;nction fetchItems()! -&gt; LoadError &#123;
-        c&#111;nst result = ?&#123;`SELECT * FROM items`&#125;.all()
+    s&#101;rver f&#117;nction fetchItems()! -&gt; LoadError {
+        c&#111;nst result = ?{`SELECT * FROM items`}.all()
         i&#102; (result.length == 0) f&#97;il LoadError::Empty
         r&#101;turn result
-    &#125;
+    }
 
-    f&#117;nction load() &#123;
+    f&#117;nction load() {
         @isLoading = true
         @isError = false
-        c&#111;nst rows = fetchItems() !&#123;
-            | ::Network msg -&gt; &#123;
+        c&#111;nst rows = fetchItems() !{
+            | ::Network msg -&gt; {
                 @isError = true
                 @errorMsg = msg
                 @isLoading = false
                 r&#101;turn
-            &#125;
-            | ::Empty -&gt; &#123;
+            }
+            | ::Empty -&gt; {
                 @isError = true
                 @errorMsg = "no rows"
                 @isLoading = false
                 r&#101;turn
-            &#125;
-        &#125;
+            }
+        }
         @data = rows
         @isLoading = false
-    &#125;
-&#125;
+    }
+}
 
 &lt;button i&#102;=(@isLoading == false &amp;&amp; @isError == false) onclick=load()&gt;Load&lt;&#47;button&gt;
 
 &lt;div i&#102;=@isLoading&gt;Loading...&lt;&#47;div&gt;
-&lt;div i&#102;=@isError&gt;&#36;&#123;@errorMsg&#125;&lt;&#47;div&gt;
-&lt;div i&#102;=(@data i&#115; s&#111;me)&gt;Got it: &#36;&#123;@data.length&#125; rows&lt;&#47;div&gt;
+&lt;div i&#102;=@isError&gt;${@errorMsg}&lt;&#47;div&gt;
+&lt;div i&#102;=(@data i&#115; s&#111;me)&gt;Got it: ${@data.length} rows&lt;&#47;div&gt;
 
 &lt;&#47;program&gt;</code></pre>
 
@@ -105,36 +105,36 @@ Consider promoting to &lt;m&#97;tch f&#111;r=Type&gt; f&#111;r structural exhaus
 
         <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;program&gt;
 
-&#36;&#123;
-    t&#121;pe LoadError:enum = &#123;
+${
+    t&#121;pe LoadError:enum = {
         Network(msg: string)
         Empty
-    &#125;
+    }
 
-    t&#121;pe Phase:enum = &#123;
+    t&#121;pe Phase:enum = {
         Idle
         Loading
         Error(msg: string)
         Empty
         Success(count: int)
-    &#125;
+    }
     &lt;phase&gt;: Phase = .Idle
 
-    s&#101;rver f&#117;nction fetchItems()! -&gt; LoadError &#123;
-        c&#111;nst result = ?&#123;`SELECT * FROM items`&#125;.all()
+    s&#101;rver f&#117;nction fetchItems()! -&gt; LoadError {
+        c&#111;nst result = ?{`SELECT * FROM items`}.all()
         i&#102; (result.length == 0) f&#97;il LoadError::Empty
         r&#101;turn result
-    &#125;
+    }
 
-    f&#117;nction load() &#123;
+    f&#117;nction load() {
         @phase = .Loading
-        c&#111;nst rows = fetchItems() !&#123;
-            | ::Network msg -&gt; &#123; @phase = .Error(msg); r&#101;turn &#125;
-            | ::Empty       -&gt; &#123; @phase = .Empty;     r&#101;turn &#125;
-        &#125;
+        c&#111;nst rows = fetchItems() !{
+            | ::Network msg -&gt; { @phase = .Error(msg); r&#101;turn }
+            | ::Empty       -&gt; { @phase = .Empty;     r&#101;turn }
+        }
         @phase = .Success(rows.length)
-    &#125;
-&#125;
+    }
+}
 
 &lt;m&#97;tch f&#111;r=Phase&gt;
     &lt;Idle&gt;
@@ -144,13 +144,13 @@ Consider promoting to &lt;m&#97;tch f&#111;r=Type&gt; f&#111;r structural exhaus
         Loading...
     &lt;&#47;&gt;
     &lt;Error(msg)&gt;
-        &lt;div&gt;&#36;&#123;msg&#125;&lt;&#47;div&gt;
+        &lt;div&gt;${msg}&lt;&#47;div&gt;
     &lt;&#47;&gt;
     &lt;Empty&gt;
         &lt;div&gt;No rows yet.&lt;&#47;div&gt;
     &lt;&#47;&gt;
     &lt;Success(count)&gt;
-        &lt;div&gt;Got it: &#36;&#123;count&#125; rows&lt;&#47;div&gt;
+        &lt;div&gt;Got it: ${count} rows&lt;&#47;div&gt;
     &lt;&#47;&gt;
 &lt;&#47;&gt;
 
@@ -161,7 +161,7 @@ Consider promoting to &lt;m&#97;tch f&#111;r=Type&gt; f&#111;r structural exhaus
             <li><strong>Structural exhaustiveness.</strong> If you forget to handle <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Success</code>, the compiler errors. If a future version of <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Phase</code> adds another variant, every <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;m&#97;tch f&#111;r=Phase&gt;</code> site fails compilation until you handle it.</li>
             <li><strong>No more boolean math.</strong> "Is the spinner showing AND the result showing?" is now a question the type system answers. You are in exactly one variant at a time.</li>
             <li><strong>Variant data is local.</strong> <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;Error msg&gt;</code> binds the string payload to <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">msg</code> inside the variant body. No more <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@errorMsg</code> scoped to the whole file.</li>
-            <li><strong>Errors are states.</strong> <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">LoadError::Network</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">LoadError::Empty</code> map onto <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Error(msg)</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Empty</code> Phase variants the moment they fail. The two extra <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;isError&gt;</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;errorMsg&gt;</code> cells from Tier 0 are gone — the failure modes live in the type. The <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">!&#123;&#125;</code> handler still exists at the call site, but it does only one thing: route each error variant into the right Phase variant.</li>
+            <li><strong>Errors are states.</strong> <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">LoadError::Network</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">LoadError::Empty</code> map onto <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Error(msg)</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Empty</code> Phase variants the moment they fail. The two extra <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;isError&gt;</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;errorMsg&gt;</code> cells from Tier 0 are gone — the failure modes live in the type. The <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">!{}</code> handler still exists at the call site, but it does only one thing: route each error variant into the right Phase variant.</li>
         </ul>
         <p class="text-slate-700 leading-relaxed my-4">The state-children are the same blocks of markup you would have written in Tier 0, just gathered under their variant. Promotion is mostly cut-and-paste, plus the <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">t&#121;pe</code> decl.</p>
         <p class="text-slate-700 leading-relaxed my-4">One detail worth being precise about: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">rule="..."</code> attributes are <em>allowed</em> inside <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;m&#97;tch&gt;</code> variants. They parse, and the compiler may check them as-if — the transition graph they imply has to be internally well-formed — but they do nothing at Tier 1. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;m&#97;tch&gt;</code> is a render-time projection, not a state machine. The rules sit there inert. Tier 1's contract is structural exhaustiveness, not transition enforcement; writing rules in a match documents intent, not behavior. Promotion to <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;e&#110;gine&gt;</code> is what makes them load-bearing.</p>
@@ -171,15 +171,15 @@ Consider promoting to &lt;m&#97;tch f&#111;r=Type&gt; f&#111;r structural exhaus
 
         <p class="text-slate-700 leading-relaxed my-4">Sometimes you want the case-analysis to return a value into an expression position, not project markup. scrml has the same Tier-1 shape, JS-style:</p>
 
-        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>c&#111;nst summary = m&#97;tch @phase &#123;
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>c&#111;nst summary = m&#97;tch @phase {
     .Idle             -&gt; "Click load to begin"
     .Loading          -&gt; "Loading…"
-    .Error msg        -&gt; "Failed: &#36;&#123;msg&#125;"
+    .Error msg        -&gt; "Failed: ${msg}"
     .Empty            -&gt; "No items"
-    .Success count    -&gt; "Loaded &#36;&#123;count&#125; items"
-&#125;</code></pre>
+    .Success count    -&gt; "Loaded ${count} items"
+}</code></pre>
 
-        <p class="text-slate-700 leading-relaxed my-4">Same exhaustiveness contract — every variant must be covered, the compiler errors otherwise. Same payload destructuring (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Error msg</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Success count</code>). The difference is <em>position</em> and <em>output</em>: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;m&#97;tch f&#111;r=Phase&gt;</code> projects markup into a render tree; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">m&#97;tch @phase &#123;&#125;</code> evaluates to a value. Use whichever fits.</p>
+        <p class="text-slate-700 leading-relaxed my-4">Same exhaustiveness contract — every variant must be covered, the compiler errors otherwise. Same payload destructuring (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Error msg</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Success count</code>). The difference is <em>position</em> and <em>output</em>: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;m&#97;tch f&#111;r=Phase&gt;</code> projects markup into a render tree; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">m&#97;tch @phase {}</code> evaluates to a value. Use whichever fits.</p>
         <p class="text-slate-700 leading-relaxed my-4">Both forms are Tier 1. They coexist. They check the same way. Pick the one that matches the shape of what you're producing — UI tree vs. value.</p>
         <p class="text-slate-700 leading-relaxed my-4">The promotion path I'll walk in the rest of this article uses the structural <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;m&#97;tch f&#111;r=Phase&gt;</code> form because the example produces UI. If your case-analysis is producing a value, you stay in the JS-style form indefinitely; there's no Tier 2 for value-return. Engines are about state machines, not expression evaluation.</p>
 
@@ -207,35 +207,35 @@ transition validation.
 
         <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;program&gt;
 
-&#36;&#123;
-    t&#121;pe LoadError:enum = &#123;
+${
+    t&#121;pe LoadError:enum = {
         Network(msg: string)
         Empty
-    &#125;
+    }
 
-    t&#121;pe Phase:enum = &#123;
+    t&#121;pe Phase:enum = {
         Idle
         Loading
         Error(msg: string)
         Empty
         Success(count: int)
-    &#125;
+    }
 
-    s&#101;rver f&#117;nction fetchItems()! -&gt; LoadError &#123;
-        c&#111;nst result = ?&#123;`SELECT * FROM items`&#125;.all()
+    s&#101;rver f&#117;nction fetchItems()! -&gt; LoadError {
+        c&#111;nst result = ?{`SELECT * FROM items`}.all()
         i&#102; (result.length == 0) f&#97;il LoadError::Empty
         r&#101;turn result
-    &#125;
+    }
 
-    f&#117;nction load() &#123;
+    f&#117;nction load() {
         @phase = .Loading
-        c&#111;nst rows = fetchItems() !&#123;
-            | ::Network msg -&gt; &#123; @phase = .Error(msg); r&#101;turn &#125;
-            | ::Empty       -&gt; &#123; @phase = .Empty;     r&#101;turn &#125;
-        &#125;
+        c&#111;nst rows = fetchItems() !{
+            | ::Network msg -&gt; { @phase = .Error(msg); r&#101;turn }
+            | ::Empty       -&gt; { @phase = .Empty;     r&#101;turn }
+        }
         @phase = Phase.Success(rows.length)
-    &#125;
-&#125;
+    }
+}
 
 &lt;e&#110;gine f&#111;r=Phase initial=.Idle&gt;
 
@@ -248,7 +248,7 @@ transition validation.
     &lt;&#47;&gt;
 
     &lt;Error msg rule=.Loading&gt;
-        &lt;div&gt;&#36;&#123;msg&#125;&lt;&#47;div&gt;
+        &lt;div&gt;${msg}&lt;&#47;div&gt;
         &lt;button onclick=@phase = .Loading&gt;Retry&lt;&#47;button&gt;
     &lt;&#47;&gt;
 
@@ -258,9 +258,9 @@ transition validation.
     &lt;&#47;&gt;
 
     &lt;Success count&gt;
-        &lt;div&gt;Got it: &#36;&#123;count&#125; rows&lt;&#47;div&gt;
+        &lt;div&gt;Got it: ${count} rows&lt;&#47;div&gt;
         &lt;onTransition from=.Loading&gt;
-            &#36;&#123; analytics.track("load.success") &#125;
+            ${ analytics.track("load.success") }
         &lt;&#47;&gt;
     &lt;&#47;&gt;
 
@@ -281,7 +281,7 @@ transition validation.
             <li><strong>Exhaustive transition validation.</strong> If you wrote <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@phase = .Sucess(rows.length)</code> (typo on <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Success</code>), the compiler errors. If <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Phase</code> gains a <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Cancelled</code> variant and no <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">rule=</code> lists it as a target, the compiler tells you the variant is unreachable.</li>
             <li><strong><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTransition&gt;</code> blocks.</strong> The analytics event lives in one place, declared structurally, attached to a specific edge in the graph. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTransition from=.Loading&gt;</code> inside <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;Success&gt;</code> fires when entering Success from Loading. It cannot accidentally fire on the wrong path.</li>
             <li><strong>Direct writes are still the canonical path.</strong> <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@phase = .Loading</code> is the quiet form — invalid transitions fail compile (when from-state is known) or fail at runtime with <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-ENGINE-INVALID-TRANSITION</code> (when not known). <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@phase.advance(.Loading)</code> is the loud form — same validation but the developer is asserting "this MUST work" so failure throws an asserted-advance error. There is no <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.tryAdvance</code> silent no-op; silent failure hides bugs (S55 verdict).</li>
-            <li><strong>The error handler routes into the Phase enum directly.</strong> The <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">!&#123;&#125;</code> block in <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">load()</code> does no UI work, no logging, no fallback values. Each error variant just writes the corresponding Phase variant — <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@phase = .Error(msg)</code> or <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@phase = .Empty</code>. The error path and the success path are the same shape: one write each.</li>
+            <li><strong>The error handler routes into the Phase enum directly.</strong> The <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">!{}</code> block in <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">load()</code> does no UI work, no logging, no fallback values. Each error variant just writes the corresponding Phase variant — <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@phase = .Error(msg)</code> or <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@phase = .Empty</code>. The error path and the success path are the same shape: one write each.</li>
         </ul>
         <p class="text-slate-700 leading-relaxed my-4">The app is now what we wanted from the start. Every reachable state has UI. Every transition is intentional. Every effect is wired to a specific edge in the graph. The whole thing is structurally checkable at compile time.</p>
 
@@ -291,13 +291,13 @@ transition validation.
         <p class="text-slate-700 leading-relaxed my-4">The only thing that changes between tiers is the wrapper.</p>
 
         <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>Tier 0:  i&#102;= chains scattered across markup           (no wrapper)
-Tier 1:  &lt;m&#97;tch f&#111;r=Phase&gt; &#123; state-children &#125;         (structural exhaustiveness;
+Tier 1:  &lt;m&#97;tch f&#111;r=Phase&gt; { state-children }         (structural exhaustiveness;
                                                        rule= allowed but inert)
-Tier 2:  &lt;e&#110;gine f&#111;r=Phase initial=.Variant&gt; &#123;        (transition validation +
+Tier 2:  &lt;e&#110;gine f&#111;r=Phase initial=.Variant&gt; {        (transition validation +
             state-children                              transition handlers;
             + rule=.Target attributes (now active)      rule= now load-bearing)
             + &lt;onTransition from= &#47; to= &gt; blocks
-         &#125;</code></pre>
+         }</code></pre>
 
         <p class="text-slate-700 leading-relaxed my-4">You climb the ladder by adding a wrapper, not by rewriting your code. That is the difference between a language that punishes you for prototyping and a language that grows up with your app.</p>
 
@@ -305,7 +305,7 @@ Tier 2:  &lt;e&#110;gine f&#111;r=Phase initial=.Variant&gt; &#123;        (tran
 
         <p class="text-slate-700 leading-relaxed my-4">The mechanical-promotion claim above ("state-children carry forward verbatim, only the wrapper changes") is not a marketing line — it is also the operational design that scrml's compiler + CLI surface make concrete.</p>
         <p class="text-slate-700 leading-relaxed my-4">Two pieces, paired:</p>
-        <p class="text-slate-700 leading-relaxed my-4"><strong>The lint surfaces the opportunity at compile time.</strong> When you write an if-else chain over an enum-typed state cell — <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">i&#102; (@phase == .Idle) &#123; ... &#125; e&#108;se i&#102; (@phase == .Loading) &#123; ... &#125; e&#108;se i&#102; (@phase == .Error) &#123; ... &#125;</code> — the compiler emits an info-level diagnostic, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">I-MATCH-PROMOTABLE</code>. Three message shapes:</p>
+        <p class="text-slate-700 leading-relaxed my-4"><strong>The lint surfaces the opportunity at compile time.</strong> When you write an if-else chain over an enum-typed state cell — <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">i&#102; (@phase == .Idle) { ... } e&#108;se i&#102; (@phase == .Loading) { ... } e&#108;se i&#102; (@phase == .Error) { ... }</code> — the compiler emits an info-level diagnostic, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">I-MATCH-PROMOTABLE</code>. Three message shapes:</p>
         <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
             <li><em>Exhaustive coverage:</em> "this if-else exhaustively covers Phase (.Idle, .Loading, .Error, .Success). Run <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">bun scrml promote --m&#97;tch app.scrml:42</code> to convert."</li>
             <li><em>Near-miss:</em> "this if-else covers Phase partially (.Idle, .Loading, .Error). Missing .Success. Add the missing arm, then run <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">bun scrml promote --m&#97;tch app.scrml:42</code> to convert. Once promoted, the compiler will catch any future variant-add at the <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;m&#97;tch&gt;</code> site automatically."</li>
@@ -319,7 +319,7 @@ bun scrml promote --m&#97;tch app.scrml          # all promotable sites in the f
 bun scrml promote --m&#97;tch src&#47; --dry-run     # preview the diff f&#111;r the whole tree
 bun scrml promote --e&#110;gine app.scrml         # Tier 1→2: &lt;m&#97;tch&gt; → &lt;e&#110;gine&gt;</code></pre>
 
-        <p class="text-slate-700 leading-relaxed my-4">The transformation is AST-aware: per-branch rewrite rules handle <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">i&#102; (@cell == .X) &#123; body &#125;</code> → <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;X&gt;&#123;body&#125;&lt;&#47;&gt;</code>, payload destructure <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">i&#102; (@cell == .Error msg)</code> → <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;Error msg&gt;&#123;body&#125;&lt;&#47;&gt;</code>, the <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.i&#115;(.X)</code> predicate form, and the trailing <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">e&#108;se</code> (dropped on exhaustive coverage). Comments, indentation, and surrounding markup are preserved verbatim. Re-running the verb on already-promoted code is a no-op.</p>
+        <p class="text-slate-700 leading-relaxed my-4">The transformation is AST-aware: per-branch rewrite rules handle <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">i&#102; (@cell == .X) { body }</code> → <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;X&gt;{body}&lt;&#47;&gt;</code>, payload destructure <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">i&#102; (@cell == .Error msg)</code> → <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;Error msg&gt;{body}&lt;&#47;&gt;</code>, the <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.i&#115;(.X)</code> predicate form, and the trailing <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">e&#108;se</code> (dropped on exhaustive coverage). Comments, indentation, and surrounding markup are preserved verbatim. Re-running the verb on already-promoted code is a no-op.</p>
         <p class="text-slate-700 leading-relaxed my-4">The pairing matters. React, Vue, Svelte have nothing comparable — there is no equivalent of "your compiler told you a region is ready to lift, and the CLI does the lift mechanically without rewriting your hand-written code." It is uniquely available because scrml's tier ladder is uniquely a <em>language</em> feature, not a library convention.</p>
         <p class="text-slate-700 leading-relaxed my-4"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">bun scrml promote</code> is a sibling of <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">bun scrml migrate</code> (which rewrites deprecated→current syntax, e.g., <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;machine&gt;</code> → <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;e&#110;gine&gt;</code>). Different verb, different semantics: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">migrate</code> removes the old form; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">promote</code> keeps both forms valid. You promote because you decide to, not because something is going away.</p>
         <p class="text-slate-700 leading-relaxed my-4">(<em>Status note (S66): <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">bun scrml promote --m&#97;tch</code> is shipped — the I-MATCH-PROMOTABLE lint fires with three message shapes (exhaustive &#47; near-miss &#47; compound), and the CLI executes the AST→AST span-rewrite. Both <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">i&#102; (@cell i&#115; .X)</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">i&#102; (@cell == .X)</code> predicate forms are accepted. The CLI's companion <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">--e&#110;gine</code> flag (Tier 1→2 lift) is deferred to a follow-up dispatch — it pairs with <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">W-MATCH-TRANSITIONS-ACCRUING</code>, a sibling lint that needs its own §34 catalog + impl groundwork; the flag stays registered but prints a clear "deferred" message until that lands.</em>)</p>

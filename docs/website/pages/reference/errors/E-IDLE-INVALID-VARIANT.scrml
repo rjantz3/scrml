@@ -77,7 +77,7 @@
                 non-variant expression in the target slot (e.g.,
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">to=&quot;Idle&quot;</code>
                 as a string, or
-                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">to=&dollar;&lcub;@target&rcub;</code>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">to=${@target}</code>
                 as a dynamic expression).
             </li>
         </ul>
@@ -86,7 +86,7 @@
             Minimal reproducer
         </h2>
 
-        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Phase:enum = &#123; Active, Idle &#125;
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Phase:enum = { Active, Idle }
 
 &lt;engine for=Phase initial=.Active&gt;
   &lt;Active rule=.Idle/&gt;

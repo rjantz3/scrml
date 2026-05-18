@@ -27,7 +27,7 @@
 
         <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">What they were</h2>
 
-        <p class="text-slate-700 leading-relaxed my-4">Function overloading scrml-style let you declare two functions with the same name in two different state-type bodies. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">f&#117;nction dothe(): UserFlow &#123; ... &#125;</code> lives inside <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">UserFlow</code>'s state-constructor. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">f&#117;nction dothe(): AdminFlow &#123; ... &#125;</code> lives inside <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">AdminFlow</code>'s. The compiler tags each one with its enclosing state-type, builds a registry, and at the call site emits a dispatch shim that reads the argument's runtime state-type tag and routes to the matching body.</p>
+        <p class="text-slate-700 leading-relaxed my-4">Function overloading scrml-style let you declare two functions with the same name in two different state-type bodies. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">f&#117;nction dothe(): UserFlow { ... }</code> lives inside <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">UserFlow</code>'s state-constructor. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">f&#117;nction dothe(): AdminFlow { ... }</code> lives inside <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">AdminFlow</code>'s. The compiler tags each one with its enclosing state-type, builds a registry, and at the call site emits a dispatch shim that reads the argument's runtime state-type tag and routes to the matching body.</p>
         <p class="text-slate-700 leading-relaxed my-4">Component overloading was the same shape on the markup side: multiple definitions of <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;Card&gt;</code>, prop-type-discriminated. The exact syntax was tracked as SPEC-ISSUE-010, never pinned down, and never implemented in the compiler — it lived as design intent in the spec text and nowhere else.</p>
         <p class="text-slate-700 leading-relaxed my-4">The motivation is reasonable on paper. Two actor types, two implementations of the same operation, one name at the call site. Method dispatch.</p>
 
@@ -40,55 +40,55 @@
         <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Draft one: split the body across the two state-constructor scopes</h3>
 
 
-        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;program&gt;&#36;&#123;
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;program&gt;${
 
-  f&#117;nction checkRateLimit(actorId: string, kind: string) -&gt; boolean &#123;
-    c&#111;nst recent = ?&#123;
+  f&#117;nction checkRateLimit(actorId: string, kind: string) -&gt; boolean {
+    c&#111;nst recent = ?{
       SELECT COUNT(*) AS n FROM notifications_log
-      WHERE actor_id = &#36;&#123;actorId&#125;
-        AND kind = &#36;&#123;kind&#125;
+      WHERE actor_id = ${actorId}
+        AND kind = ${kind}
         AND created_at &gt; NOW() - INTERVAL '1 minute'
-    &#125;;
+    };
     r&#101;turn recent.n &lt; 10;
-  &#125;
+  }
 
   &lt;UserFlow userId(string) email(string) name(string)&gt;
-    &#36;&#123;
-      f&#117;nction sendNotification(message: string) -&gt; string &#123;
-        i&#102; (n&#111;t checkRateLimit(this.userId, "user")) &#123;
+    ${
+      f&#117;nction sendNotification(message: string) -&gt; string {
+        i&#102; (n&#111;t checkRateLimit(this.userId, "user")) {
           r&#101;turn "rate-limited";
-        &#125;
+        }
         c&#111;nst subject = "Notification f&#111;r " + this.name;
         c&#111;nst body = "Hi " + this.name + ",\n\n" + message;
-        c&#111;nst id = ?&#123;
+        c&#111;nst id = ?{
           INSERT INTO email_queue (to_addr, subject, body)
-          VALUES (&#36;&#123;this.email&#125;, &#36;&#123;subject&#125;, &#36;&#123;body&#125;)
+          VALUES (${this.email}, ${subject}, ${body})
           RETURNING id
-        &#125;;
+        };
         r&#101;turn "queued:" + id;
-      &#125;
-    &#125;
+      }
+    }
   &lt;&#47;&gt;
 
   &lt;AdminFlow adminId(string) pagerToken(string) role(string)&gt;
-    &#36;&#123;
-      f&#117;nction sendNotification(message: string) -&gt; string &#123;
-        i&#102; (n&#111;t checkRateLimit(this.adminId, "admin")) &#123;
+    ${
+      f&#117;nction sendNotification(message: string) -&gt; string {
+        i&#102; (n&#111;t checkRateLimit(this.adminId, "admin")) {
           r&#101;turn "rate-limited";
-        &#125;
+        }
         c&#111;nst payload = "[ALERT][" + this.role + "] " + message;
-        c&#111;nst id = ?&#123;
+        c&#111;nst id = ?{
           INSERT INTO pager_queue (token, payload)
-          VALUES (&#36;&#123;this.pagerToken&#125;, &#36;&#123;payload&#125;)
+          VALUES (${this.pagerToken}, ${payload})
           RETURNING id
-        &#125;;
-        ?&#123; INSERT INTO admin_audit (admin_id, action) VALUES (&#36;&#123;this.adminId&#125;, 'paged') &#125;;
+        };
+        ?{ INSERT INTO admin_audit (admin_id, action) VALUES (${this.adminId}, 'paged') };
         r&#101;turn "paged:" + id;
-      &#125;
-    &#125;
+      }
+    }
   &lt;&#47;&gt;
 
-&#125;&lt;&#47;program&gt;</code></pre>
+}&lt;&#47;program&gt;</code></pre>
 
         <p class="text-slate-700 leading-relaxed my-4">Call site is fine: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">target.sendNotification("s&#101;rver maintenance at 3am")</code>. The compiler dispatches by state-type tag.</p>
         <p class="text-slate-700 leading-relaxed my-4">The cost isn't at the call site. It's that the <em>shape</em> of <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">sendNotification</code> (rate-limit gate, then act, then return a stringly-typed status) is invisible. Two bodies, no contract. Anyone editing one and not the other silently drifts the rules.</p>
@@ -97,23 +97,23 @@
         <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Draft two: give up on overloading; rename the functions</h3>
 
 
-        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>f&#117;nction sendUserNotification(user: UserFlow, message: string) -&gt; string &#123;
-  i&#102; (n&#111;t checkRateLimit(user.userId, "user")) &#123; r&#101;turn "rate-limited"; &#125;
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>f&#117;nction sendUserNotification(user: UserFlow, message: string) -&gt; string {
+  i&#102; (n&#111;t checkRateLimit(user.userId, "user")) { r&#101;turn "rate-limited"; }
   &#47;&#47; ... user body, same as above ...
-&#125;
+}
 
-f&#117;nction sendAdminNotification(admin: AdminFlow, message: string) -&gt; string &#123;
-  i&#102; (n&#111;t checkRateLimit(admin.adminId, "admin")) &#123; r&#101;turn "rate-limited"; &#125;
+f&#117;nction sendAdminNotification(admin: AdminFlow, message: string) -&gt; string {
+  i&#102; (n&#111;t checkRateLimit(admin.adminId, "admin")) { r&#101;turn "rate-limited"; }
   &#47;&#47; ... admin body, same as above ...
-&#125;</code></pre>
+}</code></pre>
 
         <p class="text-slate-700 leading-relaxed my-4">Bodies are centralized; the contract is at least visible. But every call site replaces the dispatch the compiler used to do:</p>
 
-        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>i&#102; (currentActor.__scrml_state_type == "UserFlow") &#123;
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>i&#102; (currentActor.__scrml_state_type == "UserFlow") {
   result = sendUserNotification(currentActor, msg);
-&#125; e&#108;se &#123;
+} e&#108;se {
   result = sendAdminNotification(currentActor, msg);
-&#125;</code></pre>
+}</code></pre>
 
         <p class="text-slate-700 leading-relaxed my-4"><code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">__scrml_state_type</code> is a compiler-internal runtime tag. Reading it from user source is reaching under the hood. If a developer is uncomfortable doing that (and they should be), they reinvent a discriminator field on every state type by hand.</p>
         <p class="text-slate-700 leading-relaxed my-4">This draft fragments the <strong>call sites</strong>.</p>
@@ -121,20 +121,20 @@ f&#117;nction sendAdminNotification(admin: AdminFlow, message: string) -&gt; str
         <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Draft three: manual one-name top-level dispatcher</h3>
 
 
-        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>f&#117;nction sendNotification(target, message: string) -&gt; string &#123;
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>f&#117;nction sendNotification(target, message: string) -&gt; string {
   c&#111;nst tag = target.__scrml_state_type;
-  i&#102; (tag == "UserFlow") &#123;
-    i&#102; (n&#111;t checkRateLimit(target.userId, "user")) &#123; r&#101;turn "rate-limited"; &#125;
+  i&#102; (tag == "UserFlow") {
+    i&#102; (n&#111;t checkRateLimit(target.userId, "user")) { r&#101;turn "rate-limited"; }
     &#47;&#47; ... user body ...
     r&#101;turn "queued:" + id;
-  &#125; e&#108;se i&#102; (tag == "AdminFlow") &#123;
-    i&#102; (n&#111;t checkRateLimit(target.adminId, "admin")) &#123; r&#101;turn "rate-limited"; &#125;
+  } e&#108;se i&#102; (tag == "AdminFlow") {
+    i&#102; (n&#111;t checkRateLimit(target.adminId, "admin")) { r&#101;turn "rate-limited"; }
     &#47;&#47; ... admin body ...
     r&#101;turn "paged:" + id;
-  &#125; e&#108;se &#123;
+  } e&#108;se {
     f&#97;il .UnknownActor("sendNotification: unknown actor t&#121;pe " + tag);
-  &#125;
-&#125;</code></pre>
+  }
+}</code></pre>
 
         <p class="text-slate-700 leading-relaxed my-4">The call site is <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">sendNotification(target, msg)</code> again. Inside the body, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">target</code> has no type annotation (there is no type to give it that captures "either UserFlow or AdminFlow with all their distinct fields"), so the type system is turned off for the entire function. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">target.userId</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">target.adminId</code> are bare property accesses with no checking. Hand-rolled exhaustiveness. Hand-rolled dispatch. Untyped parameter. The compiler gets to type-check the spaghetti.</p>
         <p class="text-slate-700 leading-relaxed my-4">This draft fragments the <strong>type system</strong>.</p>
@@ -148,69 +148,69 @@ f&#117;nction sendAdminNotification(admin: AdminFlow, message: string) -&gt; str
         <p class="text-slate-700 leading-relaxed my-4">And once the gate is one expression, the stringly-typed return is the other half of the problem. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">"rate-limited"</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">"queued:5"</code>, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">"paged:7"</code> — a sum-type return value smuggled in as a string. The call site loses every typed-variant guarantee; downstream consumers stringly-compare instead of pattern-matching. Exactly the bug class that <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">enum</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">m&#97;tch</code> were specifically designed to kill.</p>
         <p class="text-slate-700 leading-relaxed my-4">Claude rewrote the example. The new version had no <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">sendNotification</code> overload at all — one function, dispatched at the match-arm:</p>
 
-        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;program&gt;&#36;&#123;
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&lt;program&gt;${
 
-  t&#121;pe SendOutcome:enum = &#123;
+  t&#121;pe SendOutcome:enum = {
     RateLimited,
     Queued(id: string),
     Paged(id: string)
-  &#125;
+  }
 
-  t&#121;pe Actor:enum = &#123;
+  t&#121;pe Actor:enum = {
     User(userId: string, email: string, name: string),
     Admin(adminId: string, pagerToken: string, role: string)
-  &#125;
+  }
 
-  f&#110; actorKey(a: Actor) -&gt; string &#123;
-    m&#97;tch a &#123;
+  f&#110; actorKey(a: Actor) -&gt; string {
+    m&#97;tch a {
       .User u  -&gt; u.userId
       .Admin a -&gt; a.adminId
-    &#125;
-  &#125;
+    }
+  }
 
   &#47;&#47; Derived view of state: how many messages has this actor sent recently?
   &#47;&#47; The body i&#115; a SQL query; the compiler routes it s&#101;rver-side automatically.
-  f&#117;nction recentSendCount(target: Actor) -&gt; number &#123;
-    c&#111;nst result = ?&#123;
+  f&#117;nction recentSendCount(target: Actor) -&gt; number {
+    c&#111;nst result = ?{
       SELECT COUNT(*) AS n FROM notifications_log
-      WHERE actor_id = &#36;&#123;actorKey(target)&#125;
+      WHERE actor_id = ${actorKey(target)}
         AND created_at &gt; NOW() - INTERVAL '1 minute'
-    &#125;
+    }
     r&#101;turn result.n
-  &#125;
+  }
 
   &#47;&#47; One send. No overloading. Match-on-arm IS the dispatch.
-  f&#117;nction send(target: Actor, message: string) -&gt; SendOutcome &#123;
-    i&#102; (recentSendCount(target) &gt;= 10) &#123; r&#101;turn .RateLimited &#125;
+  f&#117;nction send(target: Actor, message: string) -&gt; SendOutcome {
+    i&#102; (recentSendCount(target) &gt;= 10) { r&#101;turn .RateLimited }
 
-    m&#97;tch target &#123;
-      .User u -&gt; &#123;
-        l&#101;t emailId = ?&#123;
+    m&#97;tch target {
+      .User u -&gt; {
+        l&#101;t emailId = ?{
           INSERT INTO email_queue (to_addr, subject, body)
-          VALUES (&#36;&#123;u.email&#125;,
+          VALUES (${u.email},
                   "Notification f&#111;r " + u.name,
                   "Hi " + u.name + ",\n\n" + message)
           RETURNING id
-        &#125;
+        }
         r&#101;turn .Queued(emailId)
-      &#125;
-      .Admin a -&gt; &#123;
-        l&#101;t pagerId = ?&#123;
+      }
+      .Admin a -&gt; {
+        l&#101;t pagerId = ?{
           INSERT INTO pager_queue (token, payload)
-          VALUES (&#36;&#123;a.pagerToken&#125;,
+          VALUES (${a.pagerToken},
                   "[ALERT][" + a.role + "] " + message)
           RETURNING id
-        &#125;
-        ?&#123; INSERT INTO admin_audit (admin_id, action)
-           VALUES (&#36;&#123;a.adminId&#125;, 'paged') &#125;
+        }
+        ?{ INSERT INTO admin_audit (admin_id, action)
+           VALUES (${a.adminId}, 'paged') }
         r&#101;turn .Paged(pagerId)
-      &#125;
-    &#125;
-  &#125;
+      }
+    }
+  }
 
-&#125;&lt;&#47;program&gt;</code></pre>
+}&lt;&#47;program&gt;</code></pre>
 
-        <p class="text-slate-700 leading-relaxed my-4">Look at what disappeared. There is no <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">sendNotification</code> <em>overload</em>, because there is no need for one. There is one <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">send</code> function, written once, whose body dispatches by match-on-arm over the <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Actor</code> enum. Each arm gets the variant's payload statically typed (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">u: &#123; userId, email, name &#125;</code> in the User arm, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">a: &#123; adminId, pagerToken, role &#125;</code> in the Admin arm) — the same per-actor type-safety that the overload mechanism was trying to provide, but uniformly, in one body, with the return type a typed <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">SendOutcome</code> variant instead of a string sum-type smuggled through <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">"queued:5"</code> &#47; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">"paged:7"</code> &#47; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">"rate-limited"</code>.</p>
+        <p class="text-slate-700 leading-relaxed my-4">Look at what disappeared. There is no <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">sendNotification</code> <em>overload</em>, because there is no need for one. There is one <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">send</code> function, written once, whose body dispatches by match-on-arm over the <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Actor</code> enum. Each arm gets the variant's payload statically typed (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">u: { userId, email, name }</code> in the User arm, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">a: { adminId, pagerToken, role }</code> in the Admin arm) — the same per-actor type-safety that the overload mechanism was trying to provide, but uniformly, in one body, with the return type a typed <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">SendOutcome</code> variant instead of a string sum-type smuggled through <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">"queued:5"</code> &#47; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">"paged:7"</code> &#47; <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">"rate-limited"</code>.</p>
         <p class="text-slate-700 leading-relaxed my-4">No string sum-type. No <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">i&#102;</code>-ladder over a runtime tag. No two function bodies that have to stay in sync. No reaching under the hood for <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">__scrml_state_type</code>. The whole "where do I centralize the overload?" question dissolved, because the dispatch primitive <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">m&#97;tch</code> does the discrimination directly. The actor types live in one enum, the send body lives in one function, and the arms of the match handle the variant-specific work with full type-system visibility into each variant's payload.</p>
         <p class="text-slate-700 leading-relaxed my-4">That is the moment the feature died. Not because it was broken. Because the language already had its dispatch primitives (typed <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">enum</code>s with payloads, <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">m&#97;tch</code> over discriminated unions, derived state for queries-as-data, and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;e&#110;gine&gt;</code> for genuinely stateful flows) that did the same job at a higher level of expressiveness, with full type-system visibility, with no string contracts and no hand-rolled dispatch. The bridge I had insisted on building was already in the language.</p>
         <p class="text-slate-700 leading-relaxed my-4">If you want to see those three primitives in action, that is what the <a href="/articles/tier-ladder-promotion" class="text-blue-700 hover:text-blue-900 underline">companion piece, *The compiler that grows up with your app*</a>, shows in detail. The <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">i&#102;=</code> → <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;m&#97;tch&gt;</code> → <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;e&#110;gine&gt;</code> ladder where state-children migrate verbatim and the wrapper is the only thing that changes. That ladder is the canonical path for case analysis on a discriminated value. Function and component overloading were a parallel path that did not earn its keep against the ladder.</p>

@@ -30,56 +30,56 @@
         <p class="text-slate-700 leading-relaxed my-4"><strong>On the server:</strong></p>
 
         <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&#47;&#47; app&#47;api&#47;orders&#47;route.ts
-i&#109;port &#123; z &#125; from "zod";
-i&#109;port &#123; auth &#125; from "@&#47;lib&#47;auth";
-i&#109;port &#123; db &#125; from "@&#47;lib&#47;db";
+i&#109;port { z } from "zod";
+i&#109;port { auth } from "@&#47;lib&#47;auth";
+i&#109;port { db } from "@&#47;lib&#47;db";
 
-c&#111;nst SubmitOrderInput = z.object(&#123;
-  items: z.array(z.object(&#123;
+c&#111;nst SubmitOrderInput = z.object({
+  items: z.array(z.object({
     productId: z.string().uuid(),
     qty: z.number().int().min(1).max(99),
-  &#125;)),
-&#125;);
+  })),
+});
 
-c&#111;nst SubmitOrderOutput = z.object(&#123;
+c&#111;nst SubmitOrderOutput = z.object({
   orderId: z.string().uuid(),
   total: z.number(),
-&#125;);
+});
 t&#121;pe SubmitOrderOutput = z.infer&lt;typeof SubmitOrderOutput&gt;;
 
-e&#120;port async f&#117;nction POST(r&#101;q: Request) &#123;
+e&#120;port async f&#117;nction POST(r&#101;q: Request) {
   c&#111;nst session = await auth(r&#101;q);
-  i&#102; (!session) r&#101;turn new Response("Unauthorized", &#123; status: 401 &#125;);
+  i&#102; (!session) r&#101;turn new Response("Unauthorized", { status: 401 });
 
   l&#101;t body: unknown;
-  try &#123; body = await r&#101;q.json(); &#125;
-  catch &#123; r&#101;turn new Response("Bad JSON", &#123; status: 400 &#125;); &#125;
+  try { body = await r&#101;q.json(); }
+  catch { r&#101;turn new Response("Bad JSON", { status: 400 }); }
 
   c&#111;nst parsed = SubmitOrderInput.safeParse(body);
-  i&#102; (!parsed.success) &#123;
-    r&#101;turn new Response(JSON.stringify(parsed.error), &#123; status: 400 &#125;);
-  &#125;
+  i&#102; (!parsed.success) {
+    r&#101;turn new Response(JSON.stringify(parsed.error), { status: 400 });
+  }
 
   &#47;&#47; ... actual business logic finally starts here ...
   c&#111;nst order = await db.orders.insert(...);
-  r&#101;turn Response.json(&#123; orderId: order.id, total: order.total &#125;);
-&#125;</code></pre>
+  r&#101;turn Response.json({ orderId: order.id, total: order.total });
+}</code></pre>
 
         <p class="text-slate-700 leading-relaxed my-4"><strong>On the client:</strong></p>
 
         <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto my-4"><code>&#47;&#47; app&#47;cart&#47;page.tsx
-t&#121;pe SubmitOrderInput = &#123; items: &#123; productId: string; qty: number &#125;[] &#125;;
-t&#121;pe SubmitOrderOutput = &#123; orderId: string; total: number &#125;;
+t&#121;pe SubmitOrderInput = { items: { productId: string; qty: number }[] };
+t&#121;pe SubmitOrderOutput = { orderId: string; total: number };
 
-async f&#117;nction submitOrder(input: SubmitOrderInput): Promise&lt;SubmitOrderOutput&gt; &#123;
-  c&#111;nst res = await fetch("&#47;api&#47;orders", &#123;
+async f&#117;nction submitOrder(input: SubmitOrderInput): Promise&lt;SubmitOrderOutput&gt; {
+  c&#111;nst res = await fetch("&#47;api&#47;orders", {
     method: "POST",
-    headers: &#123; "content-t&#121;pe": "application&#47;json", "x-csrf-token": getToken() &#125;,
+    headers: { "content-t&#121;pe": "application&#47;json", "x-csrf-token": getToken() },
     body: JSON.stringify(input),
-  &#125;);
+  });
   i&#102; (!res.ok) throw new Error(await res.text());
   r&#101;turn res.json() as Promise&lt;SubmitOrderOutput&gt;;
-&#125;</code></pre>
+}</code></pre>
 
         <p class="text-slate-700 leading-relaxed my-4">That's the <em>minimum</em>. No retry. No timeout. No proper error type. No loading state. The shapes are typed twice, once with zod and once with hand-written TS. The CSRF token plumbing is manual. If you change the input shape on the server and forget to update the client TS type, nothing fails until production traffic hits it.</p>
         <p class="text-slate-700 leading-relaxed my-4">This is the seam. It is the most expensive seam in the application. It is also the seam that no framework can close, because the framework doesn't own both sides of it.</p>
@@ -91,24 +91,24 @@ async f&#117;nction submitOrder(input: SubmitOrderInput): Promise&lt;SubmitOrder
 
 &lt;db src=".&#47;app.db" tables="orders,order_items"&#47;&gt;
 
-&#36;&#123;
-    t&#121;pe SubmitError:enum = &#123;
+${
+    t&#121;pe SubmitError:enum = {
         ItemCountOutOfRange
-    &#125;
+    }
 
-    s&#101;rver f&#117;nction submitOrder(items)! -&gt; SubmitError &#123;
-        i&#102; (items.length == 0 || items.length &gt; 100) &#123;
+    s&#101;rver f&#117;nction submitOrder(items)! -&gt; SubmitError {
+        i&#102; (items.length == 0 || items.length &gt; 100) {
             f&#97;il SubmitError::ItemCountOutOfRange
-        &#125;
+        }
         c&#111;nst total = items.reduce((acc, it) =&gt; acc + it.price * it.qty, 0)
-        c&#111;nst orderId = ?&#123;`INSERT INTO orders (total) VALUES (&#36;&#123;total&#125;) RETURNING id`&#125;.get().id
-        f&#111;r (l&#101;t it of items) &#123;
-            ?&#123;`INSERT INTO order_items (order_id, product_id, qty)
-               VALUES (&#36;&#123;orderId&#125;, &#36;&#123;it.productId&#125;, &#36;&#123;it.qty&#125;)`&#125;.run()
-        &#125;
-        r&#101;turn &#123; orderId: orderId, total: total &#125;
-    &#125;
-&#125;
+        c&#111;nst orderId = ?{`INSERT INTO orders (total) VALUES (${total}) RETURNING id`}.get().id
+        f&#111;r (l&#101;t it of items) {
+            ?{`INSERT INTO order_items (order_id, product_id, qty)
+               VALUES (${orderId}, ${it.productId}, ${it.qty})`}.run()
+        }
+        r&#101;turn { orderId: orderId, total: total }
+    }
+}
 
 &lt;&#47;program&gt;</code></pre>
 

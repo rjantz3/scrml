@@ -72,7 +72,7 @@
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Nm</code> &#47;
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Nh</code>
             or computed
-            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&dollar;&lcub;expr&rcub;&lt;unit&gt;</code>.
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${expr}&lt;unit&gt;</code>.
             See SPEC §51.12.3 / §51.12.3.1.
         </p>
 
@@ -117,10 +117,10 @@
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Idle</code>.
         </p>
 
-        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&dollar;&lcub;
-  type Phase:enum = &#123; Active, Idle &#125;
-  function refresh() &#123; @phase = .Active &#125;
-&rcub;
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>${
+  type Phase:enum = { Active, Idle }
+  function refresh() { @phase = .Active }
+}
 
 &lt;engine for=Phase initial=.Active&gt;
   &lt;Active rule=.Idle&gt;
