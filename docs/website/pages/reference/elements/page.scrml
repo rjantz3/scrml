@@ -147,7 +147,7 @@ pages/
                 wrapper inherits the role unless it has its own
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">auth=</code>
                 attribute. The compiler emits
-                <a href="/pages/reference/errors/W-AUTH-PAGE-INFERRED"
+                <a href="/reference/errors/W-AUTH-PAGE-INFERRED"
                    class="font-mono text-xs text-blue-700 underline">W-AUTH-PAGE-INFERRED</a>
                 info-level when the inference applies, so the
                 inheritance is auditable.
@@ -174,9 +174,9 @@ pages/
             Errors this feature can fire
         </h3>
         <ul class="space-y-1 text-sm text-slate-700 font-mono">
-            <li><a href="/pages/reference/errors/W-PROGRAM-SPA-INFERRED" class="text-blue-700 underline">W-PROGRAM-SPA-INFERRED</a> &mdash; top-level program with no pages/ tree (SPA inferred)</li>
-            <li><a href="/pages/reference/errors/W-AUTH-PAGE-INFERRED" class="text-blue-700 underline">W-AUTH-PAGE-INFERRED</a> &mdash; inherits auth role from wrapper</li>
-            <li><a href="/pages/reference/errors/E-STRUCTURAL-ELEMENT-MISPLACED" class="text-rose-700 underline">E-STRUCTURAL-ELEMENT-MISPLACED</a> &mdash; &lt;page&gt; in unsupported context</li>
+            <li><a href="/reference/errors/W-PROGRAM-SPA-INFERRED" class="text-blue-700 underline">W-PROGRAM-SPA-INFERRED</a> &mdash; top-level program with no pages/ tree (SPA inferred)</li>
+            <li><a href="/reference/errors/W-AUTH-PAGE-INFERRED" class="text-blue-700 underline">W-AUTH-PAGE-INFERRED</a> &mdash; inherits auth role from wrapper</li>
+            <li><a href="/reference/errors/E-STRUCTURAL-ELEMENT-MISPLACED" class="text-rose-700 underline">E-STRUCTURAL-ELEMENT-MISPLACED</a> &mdash; &lt;page&gt; in unsupported context</li>
         </ul>
 
         // ───────────────────────────────────────────────────────────
@@ -237,13 +237,13 @@ pages/
 
         <ul class="space-y-1 text-slate-700">
             <li>
-                <a href="/pages/reference/elements/program" class="text-blue-700 hover:text-blue-900 underline">
+                <a href="/reference/elements/program" class="text-blue-700 hover:text-blue-900 underline">
                     &lt;program&gt;
                 </a> &mdash; root container; documents the multi-
                 page shape via filesystem-routed page children.
             </li>
             <li>
-                <a href="/pages/reference/elements/auth" class="text-blue-700 hover:text-blue-900 underline">
+                <a href="/reference/elements/auth" class="text-blue-700 hover:text-blue-900 underline">
                     &lt;auth role=&gt;
                 </a> &mdash; per-role visibility wrapper for pages;
                 drives per-role chunk variance.

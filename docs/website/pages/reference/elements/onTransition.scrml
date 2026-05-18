@@ -53,7 +53,7 @@
             or
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">to=</code>
             is required &mdash; without a target,
-            <a href="/pages/reference/errors/E-ONTRANSITION-NO-TARGET"
+            <a href="/reference/errors/E-ONTRANSITION-NO-TARGET"
                class="font-mono text-xs text-rose-700 underline">E-ONTRANSITION-NO-TARGET</a>
             fires.
         </p>
@@ -121,7 +121,7 @@
                 not free-standing. It is also forbidden inside
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;match&gt;</code>
                 blocks &mdash;
-                <a href="/pages/reference/errors/E-MATCH-ONTRANSITION-FORBIDDEN"
+                <a href="/reference/errors/E-MATCH-ONTRANSITION-FORBIDDEN"
                    class="font-mono text-xs text-rose-700 underline">E-MATCH-ONTRANSITION-FORBIDDEN</a>.
                 Match is pass-through case analysis; effects belong
                 on engines.
@@ -168,9 +168,9 @@
             Errors this feature can fire
         </h3>
         <ul class="space-y-1 text-sm text-slate-700 font-mono">
-            <li><a href="/pages/reference/errors/E-ONTRANSITION-NO-TARGET" class="text-rose-700 underline">E-ONTRANSITION-NO-TARGET</a> &mdash; neither from= nor to=</li>
-            <li><a href="/pages/reference/errors/E-MATCH-ONTRANSITION-FORBIDDEN" class="text-rose-700 underline">E-MATCH-ONTRANSITION-FORBIDDEN</a> &mdash; inside &lt;match&gt; block</li>
-            <li><a href="/pages/reference/errors/E-STRUCTURAL-ELEMENT-MISPLACED" class="text-rose-700 underline">E-STRUCTURAL-ELEMENT-MISPLACED</a> &mdash; outside &lt;engine&gt;</li>
+            <li><a href="/reference/errors/E-ONTRANSITION-NO-TARGET" class="text-rose-700 underline">E-ONTRANSITION-NO-TARGET</a> &mdash; neither from= nor to=</li>
+            <li><a href="/reference/errors/E-MATCH-ONTRANSITION-FORBIDDEN" class="text-rose-700 underline">E-MATCH-ONTRANSITION-FORBIDDEN</a> &mdash; inside &lt;match&gt; block</li>
+            <li><a href="/reference/errors/E-STRUCTURAL-ELEMENT-MISPLACED" class="text-rose-700 underline">E-STRUCTURAL-ELEMENT-MISPLACED</a> &mdash; outside &lt;engine&gt;</li>
         </ul>
 
         // ───────────────────────────────────────────────────────────
@@ -207,7 +207,7 @@
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">effect=</code>
                 attribute is the shorter form. Multi-target rules
                 fire
-                <a href="/pages/reference/errors/E-ENGINE-EFFECT-AMBIGUOUS"
+                <a href="/reference/errors/E-ENGINE-EFFECT-AMBIGUOUS"
                    class="font-mono text-xs text-rose-700 underline">E-ENGINE-EFFECT-AMBIGUOUS</a>
                 because the destination is ambiguous; use
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTransition&gt;</code>
@@ -232,7 +232,7 @@
 
         <ul class="space-y-1 text-slate-700">
             <li>
-                <a href="/pages/reference/elements/engine" class="text-blue-700 hover:text-blue-900 underline">
+                <a href="/reference/elements/engine" class="text-blue-700 hover:text-blue-900 underline">
                     &lt;engine&gt;
                 </a> &mdash; the container. Without an engine,
                 onTransition has nowhere to live.
@@ -250,7 +250,7 @@
                 queued.
             </li>
             <li>
-                <a href="/pages/reference/elements/match" class="text-blue-700 hover:text-blue-900 underline">
+                <a href="/reference/elements/match" class="text-blue-700 hover:text-blue-900 underline">
                     &lt;match&gt;
                 </a> &mdash; forbidden context. Promote to engine
                 first if you need transition effects.

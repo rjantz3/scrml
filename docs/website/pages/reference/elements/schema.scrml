@@ -188,9 +188,9 @@
             Errors this feature can fire
         </h3>
         <ul class="space-y-1 text-sm text-slate-700 font-mono">
-            <li><a href="/pages/reference/errors/E-SQL-006" class="text-rose-700 underline">E-SQL-006</a> &mdash; deprecated SQL form in schema</li>
-            <li><a href="/pages/reference/errors/E-SQL-008" class="text-rose-700 underline">E-SQL-008</a> &mdash; bracket-matched ?&#123; scanner caught unmatched brace</li>
-            <li><a href="/pages/reference/errors/E-STRUCTURAL-ELEMENT-MISPLACED" class="text-rose-700 underline">E-STRUCTURAL-ELEMENT-MISPLACED</a> &mdash; &lt;schema&gt; in unsupported context</li>
+            <li><a href="/reference/errors/E-SQL-006" class="text-rose-700 underline">E-SQL-006</a> &mdash; deprecated SQL form in schema</li>
+            <li><a href="/reference/errors/E-SQL-008" class="text-rose-700 underline">E-SQL-008</a> &mdash; bracket-matched ?&#123; scanner caught unmatched brace</li>
+            <li><a href="/reference/errors/E-STRUCTURAL-ELEMENT-MISPLACED" class="text-rose-700 underline">E-STRUCTURAL-ELEMENT-MISPLACED</a> &mdash; &lt;schema&gt; in unsupported context</li>
         </ul>
 
         // ───────────────────────────────────────────────────────────
@@ -248,7 +248,7 @@
 
         <ul class="space-y-1 text-slate-700">
             <li>
-                <a href="/pages/reference/contexts/sql" class="text-blue-700 hover:text-blue-900 underline">
+                <a href="/reference/contexts/sql" class="text-blue-700 hover:text-blue-900 underline">
                     ?&#123; ... &#125;
                 </a> &mdash; SQL context. Queries cross-checked
                 against the schema at compile time.
