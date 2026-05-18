@@ -162,10 +162,25 @@ interface RouteMap {
  * object (from the real pipeline) where the FileAST is nested under `.ast`.
  * The JS original used duck-typing with `fileAST.nodes ?? fileAST.ast?.nodes`.
  * We preserve that here using `unknown` at the boundary.
+ *
+ * PGO P1.3 (S102) — when `debugPerf === true`, DG emits two sub-stage timing
+ * lines via the `log` channel:
+ *   `[DG-PER-FILE] <total>ms across <F> files (avg <M>ms/file, Q1=<P1>ms Q2=<P2>ms Q3=<P3>ms Q4=<P4>ms)`
+ *   `[DG-CROSS-FILE] <N>ms`
+ * The quartile breakdown samples per-file work at four evenly-spaced bins
+ * through the file list to surface whether the S94-observed 8.5× super-
+ * linear DG growth is (a) per-file work growing as corpus grows OR
+ * (b) cross-file repeated lookups against a growing structure.
+ * When `debugPerf` is unset, NO instrumentation overhead is incurred and
+ * NO lines are emitted.
  */
 interface DGInput {
   files: unknown[];
   routeMap: RouteMap;
+  /** PGO P1.3 — opt-in sub-stage timing (default false, zero overhead when unset). */
+  debugPerf?: boolean;
+  /** PGO P1.3 — log channel for sub-stage lines; defaults to console.log when emitting. */
+  log?: (msg: string) => void;
 }
 
 interface DGOutput {
@@ -1073,8 +1088,121 @@ function detectCycle(
  */
 export function runDG(input: DGInput): DGOutput {
   const { files, routeMap } = input;
+  const debugPerf = input.debugPerf === true;
+  const log = input.log ?? console.log;
 
   _nodeCounter = 0;
+
+  // ------------------------------------------------------------------
+  // PGO P1.3 (S102) — sub-stage timing instrumentation
+  //
+  // Gated on `debugPerf === true`. When unset, ALL timing code is skipped
+  // (the `_t` / `_perFileEnd` helpers are no-ops). When set, we accumulate
+  // per-file iteration time by file-index across all five `for (const rawFile
+  // of files)` loops in this function, and cross-file resolution time as a
+  // separate scalar. At end of runDG we emit:
+  //   [DG-PER-FILE] <total>ms across <F> files (avg <M>ms/file, Q1=... Q4=...)
+  //   [DG-CROSS-FILE] <N>ms
+  //
+  // Cost model: Hypothesis (a) — per-file work grows AS the corpus is
+  // processed — manifests as Q4 >> Q1. Hypothesis (b) — cross-file repeated
+  // lookups against a growing structure — manifests as Q1 ≈ Q4 with the
+  // cross-file scalar carrying the slope. S94 observed 8.5× growth in
+  // marginal DG cost (0.064 → 0.546 ms/file across 28→108 sweep); P1.3's
+  // job is to attribute that slope to (a) or (b).
+  //
+  // The five per-file loops in runDG (file-index keys this measurement):
+  //   1. Phase 1 graph construction (line ~1140 of original) — function /
+  //      reactive / engine / tilde / markup / import / SQL / meta node
+  //      collection + within-file edge prep.
+  //   2. Reactive-var function-body @var scan (line ~1545) — emits reads /
+  //      writes / invalidates edges within fn bodies.
+  //   3. Direct-reads + call-graph build (line ~1689) — pre-fixpoint per-fn
+  //      bookkeeping.
+  //   4. Markup AST sweep (line ~1871) — the large per-file pass that emits
+  //      markup-read nodes + creditReader sentinel edges.
+  //   5. Validator-arg edge emission (line ~2453) — emitValidatorArgEdgesForFile.
+  //
+  // Cross-file blocks (all interleaved between the per-file loops):
+  //   - Resolve pending callees → edges (functionNameToNodeId lookup)
+  //   - Reactive-var nodeId map build + derived/engine read-edge resolution
+  //   - Transitive read fixpoint
+  //   - Derived-cell transitive reads via call edges
+  //   - E-DG-002 sweep
+  //   - All cycle detection (validator, derived, engine, awaits)
+  //   - Lift concurrent detection
+  // ------------------------------------------------------------------
+  const perFileMs: number[] = debugPerf ? new Array(files.length).fill(0) : [];
+  let crossFileMs = 0;
+  let _perFileStart = 0;
+  let _crossFileStart = 0;
+  const _tPerFileStart = (): void => {
+    if (debugPerf) _perFileStart = performance.now();
+  };
+  const _tPerFileEnd = (fileIdx: number): void => {
+    if (debugPerf) perFileMs[fileIdx] += performance.now() - _perFileStart;
+  };
+  const _tCrossStart = (): void => {
+    if (debugPerf) _crossFileStart = performance.now();
+  };
+  const _tCrossEnd = (): void => {
+    if (debugPerf) crossFileMs += performance.now() - _crossFileStart;
+  };
+
+  /**
+   * Finalize timing + emit the two PGO P1.3 sub-stage lines, then return the
+   * DG result. Called from every `return` path inside runDG so per-file +
+   * cross-file totals are always reported when `debugPerf` is enabled, even
+   * on fail-fast cycle-detection exits. The `_crossOpen` parameter signals
+   * whether a cross-file timing block is currently open and needs closing
+   * (most early-return sites are inside the cycle-detection cross-file
+   * window, so default = true).
+   */
+  const _finalizeDG = (_crossOpen: boolean = true): DGOutput => {
+    if (debugPerf) {
+      if (_crossOpen) _tCrossEnd();
+      const F = perFileMs.length;
+      let total = 0;
+      for (const ms of perFileMs) total += ms;
+      const avg = F > 0 ? total / F : 0;
+      // Quartile bins: split file-index range into 4 even slices.
+      // Q1 = first 25% of files, Q4 = last 25%. Each Qn reports the AVERAGE
+      // per-file time within its bin so growth pattern is readable
+      // independently of file-count.
+      const quartileAvgs: number[] = [0, 0, 0, 0];
+      if (F > 0) {
+        const bin = (i: number): number => {
+          // Map file-index i ∈ [0, F) → quartile ∈ [0, 4). Floor-divide.
+          const q = Math.floor((i * 4) / F);
+          return q > 3 ? 3 : q;
+        };
+        const bucketSums: number[] = [0, 0, 0, 0];
+        const bucketCounts: number[] = [0, 0, 0, 0];
+        for (let i = 0; i < F; i++) {
+          const q = bin(i);
+          bucketSums[q] += perFileMs[i];
+          bucketCounts[q]++;
+        }
+        for (let q = 0; q < 4; q++) {
+          quartileAvgs[q] = bucketCounts[q] > 0 ? bucketSums[q] / bucketCounts[q] : 0;
+        }
+      }
+      const fmt = (n: number): string => n.toFixed(2);
+      log(
+        `  [DG-PER-FILE] ${fmt(total)}ms across ${F} files (avg ${fmt(avg)}ms/file, ` +
+          `Q1=${fmt(quartileAvgs[0])}ms Q2=${fmt(quartileAvgs[1])}ms ` +
+          `Q3=${fmt(quartileAvgs[2])}ms Q4=${fmt(quartileAvgs[3])}ms)`,
+      );
+      log(`  [DG-CROSS-FILE] ${fmt(crossFileMs)}ms`);
+    }
+    return { depGraph: { nodes, edges }, errors };
+  };
+
+  // P1.3 — pre-loop setup (node maps, RouteMap iteration, pushEdge closure
+  // allocation) counts as cross-file work — it operates on accumulated input,
+  // not per-file. Captures the small startup overhead so per-file +
+  // cross-file ≈ DG aggregate.
+  _tCrossStart();
 
   const nodes = new Map<NodeId, DGNode>();
   const edges: DGEdge[] = [];
@@ -1126,9 +1254,15 @@ export function runDG(input: DGInput): DGOutput {
   // Map<logicBlockId, Array<{ nodeId: string, bodyIndex: number }>>
   const logicBlockNodes = new Map<string, Array<{ nodeId: NodeId; bodyIndex: number }>>();
 
-  for (const rawFile of files) {
+  // P1.3 — close cross-file startup block before entering per-file loop #1.
+  _tCrossEnd();
+
+  // P1.3 — per-file loop #1: Phase 1 graph construction
+  for (let _fileIdx = 0; _fileIdx < files.length; _fileIdx++) {
+    const rawFile = files[_fileIdx];
+    _tPerFileStart();
     const fileAST = resolveFileAST(rawFile);
-    if (!fileAST) continue;
+    if (!fileAST) { _tPerFileEnd(_fileIdx); continue; }
 
     const filePath = fileAST.filePath;
 
@@ -1418,11 +1552,17 @@ export function runDG(input: DGInput): DGOutput {
         logicBlockNodes.set(blockId, blockNodeEntries);
       }
     }
+    _tPerFileEnd(_fileIdx);
   }
 
   // ------------------------------------------------------------------
   // Resolve pending callees into edges
   // ------------------------------------------------------------------
+  // P1.3 — cross-file block start: name-resolution + reactive-var edge maps +
+  // engine-derived reads + transitive read fixpoint + derived-cell transitive
+  // reads via call edges. All operate on the accumulated maps (functionNameToNodeId,
+  // reactiveVarNodeIds, fnTransitiveReads, etc.) — no per-file iteration.
+  _tCrossStart();
 
   for (const [nodeId, dgNode] of nodes) {
     if (dgNode.kind !== "function" || !dgNode._pendingCallees) continue;
@@ -1532,10 +1672,16 @@ export function runDG(input: DGInput): DGOutput {
     delete anyNode._pendingEngineDerivedReads;
   }
 
+  // P1.3 — cross-file block end (resolve callees + reactive-var map + engine-derived).
+  _tCrossEnd();
+
   // Scan function bodies for reactive variable references
-  for (const rawFile of files) {
+  // P1.3 — per-file loop #2: function-body @var ref scan
+  for (let _fileIdx2 = 0; _fileIdx2 < files.length; _fileIdx2++) {
+    const rawFile = files[_fileIdx2];
+    _tPerFileStart();
     const fileAST = resolveFileAST(rawFile);
-    if (!fileAST) continue;
+    if (!fileAST) { _tPerFileEnd(_fileIdx2); continue; }
 
     const fnNodes = collectAllFunctions(fileAST);
     for (const fnNode of fnNodes) {
@@ -1653,6 +1799,7 @@ export function runDG(input: DGInput): DGOutput {
       }
       walkBodyForReactiveRefs(fnNode.body);
     }
+    _tPerFileEnd(_fileIdx2);
   }
 
   // ------------------------------------------------------------------
@@ -1677,9 +1824,12 @@ export function runDG(input: DGInput): DGOutput {
   // ever has a hole.
   const fnPurityMap = new Map<string, boolean>(); // fnName -> isPure
 
-  for (const rawFile of files) {
+  // P1.3 — per-file loop #3: direct reactive reads + call-graph build
+  for (let _fileIdx3 = 0; _fileIdx3 < files.length; _fileIdx3++) {
+    const rawFile = files[_fileIdx3];
+    _tPerFileStart();
     const fileAST = resolveFileAST(rawFile);
-    if (!fileAST) continue;
+    if (!fileAST) { _tPerFileEnd(_fileIdx3); continue; }
 
     const fnNodes = collectAllFunctions(fileAST);
     for (const fnNode of fnNodes) {
@@ -1755,7 +1905,11 @@ export function runDG(input: DGInput): DGOutput {
       }
       collectReadsAndCalls(fnNode.body);
     }
+    _tPerFileEnd(_fileIdx3);
   }
+
+  // P1.3 — cross-file block: transitive read fixpoint + derived-cell transitive reads.
+  _tCrossStart();
 
   // Step 2: Propagate transitive reactive reads through the call graph (fixed-point)
   const fnTransitiveReads = new Map<string, Set<string>>();
@@ -1853,15 +2007,21 @@ export function runDG(input: DGInput): DGOutput {
     }
   }
 
+  // P1.3 — cross-file block end (transitive fixpoint + derived-cell transitive reads).
+  _tCrossEnd();
+
   // Scan ALL AST nodes (markup, attributes, top-level logic) for @var references
   // not captured by the function-body scan above. Markup interpolations like ${@var}
   // are the primary case — they consume reactive variables but don't go through
   // function DG nodes. Any @var read anywhere outside a function still satisfies
   // the "has readers" check for E-DG-002 purposes.
   const MARKUP_READER_SENTINEL = "__markup__";
-  for (const rawFile of files) {
+  // P1.3 — per-file loop #4: markup AST sweep for @var refs + markup-read edges
+  for (let _fileIdx4 = 0; _fileIdx4 < files.length; _fileIdx4++) {
+    const rawFile = files[_fileIdx4];
+    _tPerFileStart();
     const fileAST = resolveFileAST(rawFile);
-    if (!fileAST) continue;
+    if (!fileAST) { _tPerFileEnd(_fileIdx4); continue; }
 
     // §51.9 — projected vars (e.g. @ui) read their source var (e.g. @order)
     // at runtime via the derived-fn chain. A reference to @ui therefore also
@@ -2346,7 +2506,12 @@ export function runDG(input: DGInput): DGOutput {
     for (const topNode of fileAST.nodes) {
       sweepNodeForAtRefs(topNode);
     }
+    _tPerFileEnd(_fileIdx4);
   }
+
+  // P1.3 — cross-file block: E-DG-002 sweep + validator/derived/engine cycle
+  // detection + lift-concurrent detection. All operate on accumulated maps.
+  _tCrossStart();
 
   // E-DG-002: reactive variables with no readers
   for (const [varName, readers] of reactiveVarReaders) {
@@ -2444,11 +2609,18 @@ export function runDG(input: DGInput): DGOutput {
     }
   }
 
-  for (const rawFile of files) {
+  // P1.3 — pause cross-file timing for per-file loop #5 (validator-arg edge emission).
+  _tCrossEnd();
+  for (let _fileIdx5 = 0; _fileIdx5 < files.length; _fileIdx5++) {
+    const rawFile = files[_fileIdx5];
+    _tPerFileStart();
     const fileAST = resolveFileAST(rawFile);
-    if (!fileAST) continue;
+    if (!fileAST) { _tPerFileEnd(_fileIdx5); continue; }
     emitValidatorArgEdgesForFile(fileAST);
+    _tPerFileEnd(_fileIdx5);
   }
+  // P1.3 — resume cross-file timing for cycle detection + lift-concurrent detection.
+  _tCrossStart();
 
   // ------------------------------------------------------------------
   // Phase A1b B7 — Cycle detection in derived-cell `reads` subgraph
@@ -2525,7 +2697,7 @@ export function runDG(input: DGInput): DGOutput {
   // this is a hard error that should fail-fast before the derived-cycle
   // scan to give clean diagnostics.
   if (selfReferencingValidatorNodes.size > 0 || validatorCycle) {
-    return { depGraph: { nodes, edges }, errors };
+    return _finalizeDG();
   }
 
   // Self-references: degenerate 1-cycle case (SPEC §6.6.10 line 2712).
@@ -2572,7 +2744,7 @@ export function runDG(input: DGInput): DGOutput {
   // E-DERIVED-CIRCULAR-DEP blocks code generation (SPEC §6.6.10 line 2710).
   // Fail-fast if any derived cycle was found, mirroring E-DG-001 behaviour.
   if (selfReferencingDerivedNodes.size > 0 || derivedCycle) {
-    return { depGraph: { nodes, edges }, errors };
+    return _finalizeDG();
   }
 
   // ------------------------------------------------------------------
@@ -2645,7 +2817,7 @@ export function runDG(input: DGInput): DGOutput {
   // E-DERIVED-ENGINE-CIRCULAR blocks code generation (per §51.0.J + §34).
   // Fail-fast mirrors E-DERIVED-CIRCULAR-DEP and E-VALIDATOR-CIRCULAR-DEP.
   if (selfReferencingDerivedEngineNodes.size > 0 || engineCycle) {
-    return { depGraph: { nodes, edges }, errors };
+    return _finalizeDG();
   }
 
   // ------------------------------------------------------------------
@@ -2670,7 +2842,7 @@ export function runDG(input: DGInput): DGOutput {
     );
 
     // Fail-fast on E-DG-001
-    return { depGraph: { nodes, edges }, errors };
+    return _finalizeDG();
   }
 
   // ------------------------------------------------------------------
@@ -2716,5 +2888,5 @@ export function runDG(input: DGInput): DGOutput {
     }
   }
 
-  return { depGraph: { nodes, edges }, errors };
+  return _finalizeDG();
 }

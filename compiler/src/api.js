@@ -1310,6 +1310,10 @@ export function compileScrml(options = {}) {
   const dgResult = stage("DG", () => _runDG({
     files: metaFiles,
     routeMap: riResult.routeMap,
+    // PGO P1.3 — when --debug-perf is set, DG emits per-file Q1-Q4
+    // growth breakdown + cross-file resolution time via `log`.
+    debugPerf,
+    log,
   }));
   collectErrors("DG", dgResult.errors);
 
