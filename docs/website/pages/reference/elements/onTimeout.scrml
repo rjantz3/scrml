@@ -1,0 +1,408 @@
+// scrml.dev /reference/elements/onTimeout
+//
+// Reference page for the <onTimeout> element. Per-state-child temporal
+// transition trigger; armed on entry, cleared on exit.
+//
+// SPEC anchors: §51.0.M (form + semantics + placement + composition) +
+// §51.0.M.1 (name= attribute + cancelTimer builtin, S79) + §51.12 (legacy
+// machine temporal backbone shared at runtime) + §51.12.3 (DURATION units)
+// + §51.12.3.1 (computed-delay form) + §34 E-ENGINE-INVALID-TRANSITION +
+// E-STRUCTURAL-ELEMENT-MISPLACED + E-TIMER-NAME-INVALID +
+// E-TIMER-NAME-DUPLICATE.
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Elements
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-slate-900 font-mono">
+                &lt;onTimeout&gt;
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                Per-state-child timer. Armed on entry to the state, cleared on
+                exit. Fires a transition to a declared target variant when the
+                duration elapses. Sibling of
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTransition&gt;</code>
+                with distinct semantics.
+            </p>
+            <div class="flex gap-4 mt-4 text-xs">
+                <span class="px-2 py-1 bg-emerald-50 text-emerald-700 rounded">
+                    Available since v0.3.0 Wave 1
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§51"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC §51.0.M (normative)
+                </a>
+            </div>
+        </header>
+
+        // ───────────────────────────────────────────────────────────
+        // §2 — Syntax
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Syntax
+        </h2>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;onTimeout after=DURATION to=.Variant [name=IDENT] /&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-4">
+            Self-closing only. Both
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">after=</code>
+            and
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">to=</code>
+            are required. The optional
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">name=</code>
+            attribute makes the timer cancellable via
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">cancelTimer("name")</code>
+            (S79; see Named timers below).
+        </p>
+
+        <h3 class="text-lg font-semibold text-slate-900 mt-6 mb-2">
+            <code class="font-mono text-base bg-slate-100 px-1.5 py-0.5 rounded">after=DURATION</code>
+        </h3>
+        <p class="text-slate-700 leading-relaxed">
+            Time before the timer fires. Two forms:
+        </p>
+        <ul class="space-y-2 text-slate-700 mt-2">
+            <li>
+                <strong>Literal:</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Nms</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Ns</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Nm</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Nh</code>
+                where N is a non-negative integer. Examples:
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">after=500ms</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">after=30s</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">after=5m</code>.
+            </li>
+            <li>
+                <strong>Computed:</strong>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">after=&dollar;&lcub;expr&rcub;&lt;unit&gt;</code>
+                where the expression evaluates to a non-negative number at
+                state-entry time. Example:
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">after=&dollar;&lcub;@retryDelay&rcub;s</code>.
+                Computed-form rules opt out of multi-step JSON-encoded chained
+                auto-rearm (per SPEC §51.12.4 S77 amendment).
+            </li>
+        </ul>
+
+        <h3 class="text-lg font-semibold text-slate-900 mt-6 mb-2">
+            <code class="font-mono text-base bg-slate-100 px-1.5 py-0.5 rounded">to=.Variant</code>
+        </h3>
+        <p class="text-slate-700 leading-relaxed">
+            Target variant on timer fire. MUST be a legal target per the
+            surrounding state-child's
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">rule=</code>
+            set (single, multi, or wildcard). Strict-by-default. Violations fire
+            <a href="/reference/errors/E-ENGINE-INVALID-TRANSITION"
+               class="font-mono text-xs text-rose-700 underline">E-ENGINE-INVALID-TRANSITION</a>
+            at compile time (the from-state is statically known &mdash; it IS
+            the surrounding state-child).
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §3 — Worked example
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Worked example
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            Load with a 30-second timeout. The
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Loading</code>
+            state arms a timer on entry; if the load returns first the timer is
+            cleared on transition out; if 30 seconds elapses first the engine
+            commits
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.TimedOut</code>.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type LoadPhase:enum = &#123; Idle, Loading, Done(rows: int), TimedOut, Error(msg: string) &#125;
+
+function load() &#123;
+  @loadPhase = .Loading
+  const result = fetchItems() !&#123;
+    | ::Network msg -&gt; &#123; @loadPhase = .Error(msg); return &#125;
+    | ::Empty       -&gt; &#123; @loadPhase = .Done(0);    return &#125;
+  &#125;
+  @loadPhase = .Done(result.length)
+&#125;
+
+&lt;engine for=LoadPhase initial=.Idle&gt;
+  &lt;Idle rule=.Loading&gt;
+    &lt;button onclick=load()&gt;Load&lt;/button&gt;
+  &lt;/&gt;
+
+  &lt;Loading rule=(.Done | .TimedOut | .Error)&gt;
+    &lt;onTimeout after=30s to=.TimedOut/&gt;
+    Loading&hellip;
+  &lt;/&gt;
+
+  &lt;Done rows rule=.Idle&gt;: &dollar;&lcub;rows&rcub; rows
+  &lt;TimedOut rule=.Idle&gt;: Timed out
+  &lt;Error msg rule=.Idle&gt;: &dollar;&lcub;msg&rcub;
+&lt;/&gt;</code></pre>
+
+        // ───────────────────────────────────────────────────────────
+        // §4 — Semantics
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Semantics
+        </h2>
+
+        <ul class="space-y-3 text-slate-700">
+            <li>
+                <strong>Armed on entry, cleared on exit.</strong>
+                A fresh timer is armed when the state-child becomes active.
+                The timer is cleared when the engine leaves the state-child
+                via any path &mdash; rule= transition, the timer&apos;s own
+                fire, or external write.
+            </li>
+            <li>
+                <strong>Reset on re-entry.</strong>
+                Per §51.12.4, re-entering the state-child re-arms a fresh
+                timer; the previous timer&apos;s elapsed time is discarded.
+                Two consecutive entries with 20 seconds between them and an
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">after=30s</code>
+                each get the full 30 seconds.
+            </li>
+            <li>
+                <strong>Multiple timers per state-child are legal.</strong>
+                Each
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTimeout&gt;</code>
+                sibling arms an independent timer with its own
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">after=</code>
+                and
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">to=</code>.
+                Independent firing; whichever timer wins drives the
+                transition; the others clear on exit.
+            </li>
+            <li>
+                <strong>Compile-time
+                    <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">to=</code>
+                    validation.</strong>
+                The from-state is statically known (it IS the surrounding
+                state-child), so the
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">rule=</code>
+                legality check fires at compile time. Same discipline as
+                §51.0.F direct-write check.
+            </li>
+            <li>
+                <strong>Watchdog-induced transitions are real transitions.</strong>
+                The fire commits via the same write path as a direct write.
+                Sibling
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTransition&gt;</code>
+                handlers matching the resulting variant fire too.
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">effect=</code>
+                on the destination state-child fires too.
+            </li>
+        </ul>
+
+        <h3 class="text-lg font-semibold text-slate-900 mt-6 mb-2">
+            Errors this feature can fire
+        </h3>
+        <ul class="space-y-1 text-sm text-slate-700 font-mono">
+            <li><a href="/reference/errors/E-ENGINE-INVALID-TRANSITION" class="text-rose-700 underline">E-ENGINE-INVALID-TRANSITION</a> &mdash; to= target not in surrounding state-child&apos;s rule= set</li>
+            <li><a href="/reference/errors/E-STRUCTURAL-ELEMENT-MISPLACED" class="text-rose-700 underline">E-STRUCTURAL-ELEMENT-MISPLACED</a> &mdash; outside an engine state-child body</li>
+            <li><a href="/reference/errors/E-TIMER-NAME-INVALID" class="text-rose-700 underline">E-TIMER-NAME-INVALID</a> &mdash; name= value is not a valid identifier (S79)</li>
+            <li><a href="/reference/errors/E-TIMER-NAME-DUPLICATE" class="text-rose-700 underline">E-TIMER-NAME-DUPLICATE</a> &mdash; two onTimeout elements in the same state-child share a name= (S79)</li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §5 — Named timers and cancelTimer
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Named timers and
+            <code class="font-mono text-xl bg-slate-100 px-1.5 py-0.5 rounded">cancelTimer</code>
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            S79 added an optional
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">name=IDENT</code>
+            attribute. Named timers are cancellable from within the state-child
+            body via the
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">cancelTimer("name")</code>
+            builtin. Unnamed timers are positional and not addressable from
+            scrml; they only fire or clear-on-exit.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;Loading rule=(.Done | .TimedOut)&gt;
+  &lt;onTimeout name=slow  after=5s  to=.Loading.history /&gt;
+  &lt;onTimeout name=abort after=30s to=.TimedOut       /&gt;
+
+  &lt;button onclick=cancelTimer("slow")&gt;Don&apos;t show the slow banner&lt;/button&gt;
+  Loading&hellip;
+&lt;/&gt;</code></pre>
+
+        <ul class="space-y-2 text-slate-700 mt-4">
+            <li>
+                Name MUST be identifier-shaped:
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;^[A-Za-z_][A-Za-z0-9_]*&dollar;&#47;</code>.
+                Violations fire E-TIMER-NAME-INVALID.
+            </li>
+            <li>
+                Names are scope-local to the state-child &mdash; two siblings
+                with the same name fire E-TIMER-NAME-DUPLICATE; the same name
+                in different state-children is fine.
+            </li>
+            <li>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">cancelTimer</code>
+                on an unknown name is a runtime no-op (same shape as
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">clearTimeout(undefined)</code>).
+            </li>
+            <li>
+                v1 implementation: only the call-ref event-handler form is
+                supported (e.g.
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">onclick=cancelTimer("X")</code>).
+                Expression-form
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">onclick=&dollar;&lcub;cancelTimer("X")&rcub;</code>
+                and function-body calls fall through to ordinary emission and
+                runtime-fail with
+                <em class="text-rose-700">cancelTimer is not defined</em>.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §6 — Placement and composition
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Placement and composition
+        </h2>
+
+        <ul class="space-y-3 text-slate-700">
+            <li>
+                <strong>Engine state-child only.</strong>
+                Outside that scope &mdash; E-STRUCTURAL-ELEMENT-MISPLACED.
+                Inside a
+                <a href="/reference/elements/match" class="text-blue-700 hover:text-blue-900 underline">&lt;match&gt;</a>
+                block-form state-child &mdash; also misplaced (match is
+                rules-inert per §18.0.2).
+            </li>
+            <li>
+                <strong>Coexists with effect= and &lt;onTransition&gt;.</strong>
+                A state-child may carry an
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">effect=</code>
+                attribute, multiple
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTransition&gt;</code>
+                siblings, and multiple
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTimeout&gt;</code>
+                siblings. All three compose; the timer fire is just one of the
+                events that can cause the transition.
+            </li>
+            <li>
+                <strong>Derived engines (§51.0.J) accept &lt;onTimeout&gt;.</strong>
+                Legal but rarely useful: derived engines reject direct writes,
+                so the timer can only fire when the source expression&apos;s
+                value reaches
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">to=</code>&apos;s
+                variant.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §7 — Related features
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related features
+        </h2>
+
+        <ul class="space-y-1 text-slate-700">
+            <li>
+                <a href="/reference/elements/onIdle" class="text-blue-700 hover:text-blue-900 underline">
+                    &lt;onIdle&gt;
+                </a> &mdash; engine-wide event-timeout watchdog. Distinct
+                from onTimeout: armed at module-init, reset on every
+                transition.
+            </li>
+            <li>
+                <a href="/reference/elements/onTransition" class="text-blue-700 hover:text-blue-900 underline">
+                    &lt;onTransition&gt;
+                </a> &mdash; sibling effect element; runs after a transition
+                commits.
+            </li>
+            <li>
+                <a href="/reference/elements/engine" class="text-blue-700 hover:text-blue-900 underline">
+                    &lt;engine&gt;
+                </a> &mdash; the container. onTimeout has no meaning outside
+                an engine state-child.
+            </li>
+            <li>
+                <span class="font-mono text-slate-500">effect=</span>
+                attribute on a state-child &mdash; per-rule inline effect
+                (single-target only). Composes with onTimeout fires.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §8 — Availability
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Availability
+        </h2>
+
+        <table class="w-full text-sm text-left border-collapse">
+            <thead>
+                <tr class="border-b border-slate-300">
+                    <th class="py-2 pr-4 font-semibold text-slate-900">Surface</th>
+                    <th class="py-2 pr-4 font-semibold text-slate-900">Since</th>
+                    <th class="py-2 font-semibold text-slate-900">Notes</th>
+                </tr>
+            </thead>
+            <tbody class="text-slate-700">
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">&lt;onTimeout after=DURATION to=.V/&gt;</td>
+                    <td class="py-2 pr-4">S67 / S68</td>
+                    <td class="py-2 text-xs">SPEC §51.0.M; literal DURATION; armed-on-entry semantics</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">A5-4 codegen</td>
+                    <td class="py-2 pr-4">S77</td>
+                    <td class="py-2 text-xs">End-to-end runtime emission; tree-shake when zero onTimeout per engine</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">Computed-form after=&dollar;&lcub;expr&rcub;&lt;unit&gt;</td>
+                    <td class="py-2 pr-4">S67 / S77</td>
+                    <td class="py-2 text-xs">SPEC §51.12.3.1; runtime applies negative/NaN → 0 clamp + Math.round</td>
+                </tr>
+                <tr>
+                    <td class="py-2 pr-4 font-mono text-xs">name=IDENT + cancelTimer("name")</td>
+                    <td class="py-2 pr-4">S79</td>
+                    <td class="py-2 text-xs">SPEC §51.0.M.1; identifier-shaped; scope-local to state-child</td>
+                </tr>
+            </tbody>
+        </table>
+
+        // ───────────────────────────────────────────────────────────
+        // §9 — Specification
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            This page summarizes <strong>SPEC §51.0.M</strong>
+            (form / semantics / placement / composition) +
+            <strong>§51.0.M.1</strong> (name= and cancelTimer, S79) +
+            <strong>§51.12</strong> (runtime backbone, shared with legacy
+            machine temporal) + <strong>§51.12.3 / §51.12.3.1</strong>
+            (DURATION grammar). The normative text lives at
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+               class="text-blue-700 hover:text-blue-900 underline">
+                compiler/SPEC.md
+            </a>
+            in the scrmlTS repository.
+        </p>
+
+    </article>
+
+</>

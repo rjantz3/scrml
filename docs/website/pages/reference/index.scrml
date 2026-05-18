@@ -75,6 +75,19 @@
                     &lt;onTransition&gt;
                 </a> &mdash; Engine effect element. Runs at transition commit; filterable by from / to / once / if.
             </li>
+
+            <li>
+                <a href="/reference/elements/onTimeout" class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    &lt;onTimeout&gt;
+                </a> &mdash; Per-state-child timer. Armed on entry, cleared on exit. Optional name= for cancellation.
+            </li>
+
+            <li>
+                <a href="/reference/elements/onIdle" class="font-mono text-blue-700 hover:text-blue-900 underline">
+                    &lt;onIdle&gt;
+                </a> &mdash; Engine-wide event-timeout watchdog. Armed at module-init, reset on every successful transition.
+            </li>
+
             <li>
                 <a href="/reference/elements/page" class="font-mono text-blue-700 hover:text-blue-900 underline">
                     &lt;page&gt;

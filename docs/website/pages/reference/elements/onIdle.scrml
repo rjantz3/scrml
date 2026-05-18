@@ -1,0 +1,419 @@
+// scrml.dev /reference/elements/onIdle
+//
+// Reference page for the <onIdle> element. Engine-wide event-timeout
+// watchdog; armed at module-init, reset on every successful transition.
+//
+// SPEC anchors: §51.0.R (form + semantics + placement + composition with
+// onTimeout) + §51.12 (legacy machine temporal backbone shared at runtime)
+// + §51.12.3 (DURATION units) + §51.12.3.1 (computed-delay form) + §34
+// E-IDLE-DUPLICATE + E-IDLE-INVALID-VARIANT + E-IDLE-MISPLACED +
+// E-ENGINE-INVALID-TRANSITION.
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Elements
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-slate-900 font-mono">
+                &lt;onIdle&gt;
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                Engine-wide event-timeout watchdog. Armed at module-init, reset
+                on every successful transition. Fires after N ms of silence
+                across the whole engine.
+            </p>
+            <div class="flex gap-4 mt-4 text-xs">
+                <span class="px-2 py-1 bg-emerald-50 text-emerald-700 rounded">
+                    Available since v0.3.0 Wave 1
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§51"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC §51.0.R (normative)
+                </a>
+            </div>
+        </header>
+
+        // ───────────────────────────────────────────────────────────
+        // §2 — Syntax
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Syntax
+        </h2>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;onIdle after=DURATION to=.Variant /&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-4">
+            Self-closing only. Both
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">after=</code>
+            and
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">to=</code>
+            are required.
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onIdle&gt;</code>
+            is engine-wide: it sits at engine root (sibling of state-children),
+            not inside any state-child body.
+        </p>
+
+        <h3 class="text-lg font-semibold text-slate-900 mt-6 mb-2">
+            <code class="font-mono text-base bg-slate-100 px-1.5 py-0.5 rounded">after=DURATION</code>
+        </h3>
+        <p class="text-slate-700 leading-relaxed">
+            Time of silence before the watchdog fires. Same shape as
+            <a href="/reference/elements/onTimeout" class="text-blue-700 hover:text-blue-900 underline">
+                <code class="font-mono text-sm">&lt;onTimeout&gt;</code>
+            </a>
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">after=</code>:
+            literal
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Nms</code> &#47;
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Ns</code> &#47;
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Nm</code> &#47;
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">Nh</code>
+            or computed
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&dollar;&lcub;expr&rcub;&lt;unit&gt;</code>.
+            See SPEC §51.12.3 / §51.12.3.1.
+        </p>
+
+        <h3 class="text-lg font-semibold text-slate-900 mt-6 mb-2">
+            <code class="font-mono text-base bg-slate-100 px-1.5 py-0.5 rounded">to=.Variant</code>
+        </h3>
+        <p class="text-slate-700 leading-relaxed">
+            Target variant on watchdog fire. MUST be a variant of the engine&apos;s
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">for=</code>
+            enum. Strict-by-default. Unknown variants fire
+            <a href="/reference/errors/E-IDLE-INVALID-VARIANT"
+               class="font-mono text-xs text-rose-700 underline">E-IDLE-INVALID-VARIANT</a>
+            at compile time.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Note: the
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">to=</code>
+            target is NOT checked against the current state&apos;s
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">rule=</code>
+            at compile time (the current state at fire time is dynamic). The
+            watchdog write commits via the same write path as a direct write;
+            if the current state&apos;s
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">rule=</code>
+            does not permit the target, E-ENGINE-INVALID-TRANSITION fires at
+            runtime.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §3 — Worked example
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Worked example
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            Session-idle detection. The user clicking refresh transitions
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Active &rarr; .Active</code>,
+            which counts as a successful transition and resets the watchdog.
+            After 5 minutes without any transition, the engine moves to
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Idle</code>.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&dollar;&lcub;
+  type Phase:enum = &#123; Active, Idle &#125;
+  function refresh() &#123; @phase = .Active &#125;
+&rcub;
+
+&lt;engine for=Phase initial=.Active&gt;
+  &lt;Active rule=.Idle&gt;
+    &lt;button onclick=refresh()&gt;I&apos;m here&lt;/button&gt;
+  &lt;/&gt;
+  &lt;Idle/&gt;
+  &lt;onIdle after=5m to=.Idle/&gt;
+&lt;/&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Module-init counts as the first event &mdash; the watchdog arms
+            with the full 5 minutes. Each transition (including the
+            self-write to
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Active</code>
+            from
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">refresh()</code>)
+            resets to a fresh 5 minutes. After 5 minutes of no transitions,
+            the watchdog fires
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@phase = .Idle</code>.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §4 — Semantics
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Semantics
+        </h2>
+
+        <ul class="space-y-3 text-slate-700">
+            <li>
+                <strong>Armed at module-init.</strong>
+                Alongside the engine variant cell. Module-init counts as the
+                &quot;first event&quot;; the timer arms with the full duration
+                remaining.
+            </li>
+            <li>
+                <strong>Reset on every successful transition.</strong>
+                Any
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">_scrml_engine_direct_set</code>
+                or
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">_scrml_engine_advance</code>
+                commit triggers reset (clear + re-arm). Includes self-writes
+                that pass through commit-path (idempotent self-writes
+                detected by
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">W-ENGINE-SELF-WRITE-DETECTED</code>
+                are runtime no-ops and do NOT reset).
+            </li>
+            <li>
+                <strong>rule=-honoring fire.</strong>
+                When the watchdog fires, the resulting transition write goes
+                through the same write path as a direct write. The current
+                state&apos;s
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">rule=</code>
+                validation applies per §51.0.F. If the current state&apos;s
+                rule= does not permit the target,
+                <a href="/reference/errors/E-ENGINE-INVALID-TRANSITION"
+                   class="font-mono text-xs text-rose-700 underline">E-ENGINE-INVALID-TRANSITION</a>
+                fires at runtime.
+            </li>
+            <li>
+                <strong>One per engine maximum.</strong>
+                Multiple
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onIdle&gt;</code>
+                declarations fire
+                <a href="/reference/errors/E-IDLE-DUPLICATE"
+                   class="font-mono text-xs text-rose-700 underline">E-IDLE-DUPLICATE</a>.
+            </li>
+            <li>
+                <strong>Tree-shakeable.</strong>
+                Runtime helpers
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">_scrml_engine_arm_idle_watchdog</code>
+                &#47;
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">_scrml_engine_reset_idle_watchdog</code>
+                only ship when at least one engine in the file declares
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onIdle&gt;</code>.
+                Engines without
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onIdle&gt;</code>
+                pass
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">null</code>
+                for the idleEntry arg at every commit-path call site; the
+                runtime no-ops.
+            </li>
+        </ul>
+
+        <h3 class="text-lg font-semibold text-slate-900 mt-6 mb-2">
+            Errors this feature can fire
+        </h3>
+        <ul class="space-y-1 text-sm text-slate-700 font-mono">
+            <li><a href="/reference/errors/E-IDLE-DUPLICATE" class="text-rose-700 underline">E-IDLE-DUPLICATE</a> &mdash; engine declares more than one &lt;onIdle&gt;</li>
+            <li><a href="/reference/errors/E-IDLE-INVALID-VARIANT" class="text-rose-700 underline">E-IDLE-INVALID-VARIANT</a> &mdash; to= references a variant not in the engine&apos;s for= enum, or to= is missing/malformed</li>
+            <li><a href="/reference/errors/E-IDLE-MISPLACED" class="text-rose-700 underline">E-IDLE-MISPLACED</a> &mdash; &lt;onIdle&gt; appears inside a state-child body</li>
+            <li><a href="/reference/errors/E-ENGINE-INVALID-TRANSITION" class="text-rose-700 underline">E-ENGINE-INVALID-TRANSITION</a> &mdash; runtime fire targets a variant the current state&apos;s rule= forbids</li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §5 — onIdle vs onTimeout
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            <code class="font-mono text-xl bg-slate-100 px-1.5 py-0.5 rounded">&lt;onIdle&gt;</code>
+            vs
+            <code class="font-mono text-xl bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTimeout&gt;</code>
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            Both are temporal triggers on an engine, but they have different
+            scope and timing semantics.
+        </p>
+
+        <table class="w-full text-sm text-left border-collapse">
+            <thead>
+                <tr class="border-b border-slate-300">
+                    <th class="py-2 pr-4 font-semibold text-slate-900">Axis</th>
+                    <th class="py-2 pr-4 font-semibold text-slate-900">&lt;onTimeout&gt;</th>
+                    <th class="py-2 font-semibold text-slate-900">&lt;onIdle&gt;</th>
+                </tr>
+            </thead>
+            <tbody class="text-slate-700">
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4">Scope</td>
+                    <td class="py-2 pr-4">Per state-child</td>
+                    <td class="py-2">Engine-wide</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4">Placement</td>
+                    <td class="py-2 pr-4">Inside a state-child body</td>
+                    <td class="py-2">At engine root (sibling of state-children)</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4">Armed</td>
+                    <td class="py-2 pr-4">On entry to the state-child</td>
+                    <td class="py-2">At module-init</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4">Cleared</td>
+                    <td class="py-2 pr-4">On exit from the state-child</td>
+                    <td class="py-2">Never (resets, doesn&apos;t clear)</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4">Reset trigger</td>
+                    <td class="py-2 pr-4">Re-entry to the state-child</td>
+                    <td class="py-2">Every successful transition (including self-writes that commit)</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4">Max per engine</td>
+                    <td class="py-2 pr-4">Any (per state-child)</td>
+                    <td class="py-2">One</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4">to= validation</td>
+                    <td class="py-2 pr-4">Compile-time vs surrounding state-child&apos;s rule=</td>
+                    <td class="py-2">Compile-time vs engine for= enum; runtime vs current rule=</td>
+                </tr>
+                <tr>
+                    <td class="py-2 pr-4">Typical use</td>
+                    <td class="py-2 pr-4">Per-state timeout (e.g. .Loading times out after 30s)</td>
+                    <td class="py-2">Whole-app idle (e.g. lock the screen after 5m of inactivity)</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <p class="text-slate-700 leading-relaxed mt-4">
+            They compose. An engine may declare both: per-state timers AND a
+            machine-wide watchdog. Each occupies a distinct slot in the
+            runtime&apos;s
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">_scrml_machine_timers</code>
+            map (composite key
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;varName&gt;::&lt;stateName&gt;::&lt;index&gt;</code>
+            for per-state;
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;varName&gt;::__idle</code>
+            for the watchdog).
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §6 — Placement and composition
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Placement and composition
+        </h2>
+
+        <ul class="space-y-3 text-slate-700">
+            <li>
+                <strong>Engine root only.</strong>
+                Inside a state-child body &mdash; E-IDLE-MISPLACED.
+                For per-state timer semantics, use
+                <a href="/reference/elements/onTimeout" class="text-blue-700 hover:text-blue-900 underline">&lt;onTimeout&gt;</a>
+                instead.
+            </li>
+            <li>
+                <strong>Composes with &lt;onTransition&gt;.</strong>
+                A watchdog-induced transition IS a legal transition event;
+                matching
+                <a href="/reference/elements/onTransition" class="text-blue-700 hover:text-blue-900 underline">&lt;onTransition&gt;</a>
+                handlers fire too. Same write-path semantics as direct
+                writes.
+            </li>
+            <li>
+                <strong>Derived engines (§51.0.J) accept &lt;onIdle&gt;.</strong>
+                Legal but rarely useful: derived engines reject direct writes,
+                so the watchdog can only fire when the source expression&apos;s
+                value reaches
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">to=</code>&apos;s
+                target.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §7 — Related features
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related features
+        </h2>
+
+        <ul class="space-y-1 text-slate-700">
+            <li>
+                <a href="/reference/elements/onTimeout" class="text-blue-700 hover:text-blue-900 underline">
+                    &lt;onTimeout&gt;
+                </a> &mdash; per-state-child timer. Sibling temporal trigger
+                with distinct scope and timing.
+            </li>
+            <li>
+                <a href="/reference/elements/onTransition" class="text-blue-700 hover:text-blue-900 underline">
+                    &lt;onTransition&gt;
+                </a> &mdash; engine effect element. Fires when a transition
+                commits (including watchdog-induced transitions).
+            </li>
+            <li>
+                <a href="/reference/elements/engine" class="text-blue-700 hover:text-blue-900 underline">
+                    &lt;engine&gt;
+                </a> &mdash; the container. onIdle has no meaning outside an
+                engine.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §8 — Availability
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Availability
+        </h2>
+
+        <table class="w-full text-sm text-left border-collapse">
+            <thead>
+                <tr class="border-b border-slate-300">
+                    <th class="py-2 pr-4 font-semibold text-slate-900">Surface</th>
+                    <th class="py-2 pr-4 font-semibold text-slate-900">Since</th>
+                    <th class="py-2 font-semibold text-slate-900">Notes</th>
+                </tr>
+            </thead>
+            <tbody class="text-slate-700">
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">&lt;onIdle after=DURATION to=.V/&gt;</td>
+                    <td class="py-2 pr-4">S77 A5-6</td>
+                    <td class="py-2 text-xs">SPEC §51.0.R; armed-at-module-init + reset-on-every-transition semantics</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">Computed-form after=&dollar;&lcub;expr&rcub;&lt;unit&gt;</td>
+                    <td class="py-2 pr-4">S77</td>
+                    <td class="py-2 text-xs">SPEC §51.12.3.1; rides parseAfterDuration helper</td>
+                </tr>
+                <tr>
+                    <td class="py-2 pr-4 font-mono text-xs">Tree-shake when no &lt;onIdle&gt; per engine</td>
+                    <td class="py-2 pr-4">S77</td>
+                    <td class="py-2 text-xs">Runtime helpers only ship when at least one engine declares onIdle</td>
+                </tr>
+            </tbody>
+        </table>
+
+        // ───────────────────────────────────────────────────────────
+        // §9 — Specification
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            This page summarizes <strong>SPEC §51.0.R</strong>
+            (form / semantics / placement / composition) +
+            <strong>§51.12</strong> (runtime backbone, shared with legacy
+            machine temporal) + <strong>§51.12.3 / §51.12.3.1</strong>
+            (DURATION grammar). The normative text lives at
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+               class="text-blue-700 hover:text-blue-900 underline">
+                compiler/SPEC.md
+            </a>
+            in the scrmlTS repository.
+        </p>
+
+    </article>
+
+</>
