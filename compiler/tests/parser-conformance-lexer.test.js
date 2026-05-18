@@ -235,10 +235,112 @@ function normalizeNativeToken(tok) {
 
 function tokenizeWithAcorn(source) {
     const out = [];
+    // M1.5 template-mode tracking — Acorn emits backticks + braces around
+    // template-literal interpolations as separate tokens with their own
+    // labels (`"\`"`, `"${"`, `"}"`). The native lexer deliberately coalesces
+    // backticks into the TemplateChunk stream + uses dedicated
+    // TemplateInterpStart/End kinds for the ${ } interp boundaries. The
+    // re-classifier below brings Acorn's stream into native shape:
+    //
+    //   - Opening `` ` `` is DROPPED (native's first TemplateChunk starts
+    //     right after the opener, matching the Acorn template chunk's span).
+    //   - In-template `${` is re-classified as TemplateInterpStart (instead
+    //     of LogicEscapeOpen, which is scrml's logic-block opener — only
+    //     correct outside templates).
+    //   - In-template `}` that closes the matching `${...}` is re-classified
+    //     as TemplateInterpEnd (instead of RBrace). Nested `{...}` inside
+    //     the interp expression are tracked so only the matching close fires.
+    //   - Closing `` ` `` merges with a preceding empty trailing
+    //     TemplateChunk (Acorn shape: empty chunk at [N,N] + backtick at
+    //     [N,N+1]) into a single TemplateChunk text="`" at [N,N+1] —
+    //     matching the native lexer's chunk-with-backtick representation.
+    //
+    // templateDepth > 0 means we are inside a template literal (between an
+    // unmatched opening `` ` `` and its closing partner). interpDepth > 0
+    // means we are inside one or more `${...}` interpolations. Both stacks
+    // are simple counters because template literals nest at the interp
+    // boundary in a controlled way: an `${` opens a new logic context that
+    // can itself contain another template literal which itself can contain
+    // `${...}`, etc.; depth tracking covers this.
+    let templateDepth = 0;
+    let interpDepth = 0;
     try {
         const tokenizer = acorn.Parser.tokenizer(source, ACORN_OPTS);
         let tok = tokenizer.getToken();
         while (tok.type.label !== "eof") {
+            const label = tok.type.label;
+            const text = source.substring(tok.start, tok.end);
+
+            // Backtick boundary — opener dropped, closer merged.
+            if (label === "`") {
+                if (templateDepth === 0) {
+                    // Opening — drop, enter template mode.
+                    templateDepth++;
+                } else {
+                    // Closing — merge with preceding empty trailing chunk
+                    // (Acorn shape: empty TemplateChunk at [N,N] sitting
+                    // directly before the closing backtick at [N,N+1]).
+                    const prev = out[out.length - 1];
+                    if (
+                        prev &&
+                        prev.kind === TokenKind.TemplateChunk &&
+                        prev.text === "" &&
+                        prev.start === tok.start &&
+                        prev.end === tok.start
+                    ) {
+                        prev.text = "`";
+                        prev.end = tok.end;
+                    } else {
+                        // Standalone closing — emit as TemplateChunk text="`".
+                        out.push({
+                            kind: TokenKind.TemplateChunk,
+                            text: "`",
+                            start: tok.start,
+                            end: tok.end,
+                        });
+                    }
+                    templateDepth--;
+                }
+                tok = tokenizer.getToken();
+                continue;
+            }
+
+            // In-template `${` is interp start, not logic-escape open.
+            if (templateDepth > 0 && interpDepth === 0 && label === "${") {
+                out.push({
+                    kind: TokenKind.TemplateInterpStart,
+                    text,
+                    start: tok.start,
+                    end: tok.end,
+                });
+                interpDepth++;
+                tok = tokenizer.getToken();
+                continue;
+            }
+
+            // Inside the `${...}` interp body. Track brace depth so the
+            // outermost `}` closes the interp (TemplateInterpEnd); inner
+            // braces stay RBrace per the standard mapping.
+            if (interpDepth > 0) {
+                if (label === "{") {
+                    interpDepth++;
+                } else if (label === "}") {
+                    interpDepth--;
+                    if (interpDepth === 0) {
+                        out.push({
+                            kind: TokenKind.TemplateInterpEnd,
+                            text,
+                            start: tok.start,
+                            end: tok.end,
+                        });
+                        tok = tokenizer.getToken();
+                        continue;
+                    }
+                    // else: inner brace close — fall through to standard map.
+                }
+                // else: token inside the interp body — normalize standard.
+            }
+
             const n = normalizeAcornToken(tok, source);
             if (n) out.push(n);
             tok = tokenizer.getToken();
@@ -292,7 +394,15 @@ const BENCH_DISPOSITION = {
     // closes the residual byte-identical gap for these three files.
     "expr-arrow.js":          "full",        // arrow functions; mostly InCode + line-comments
     "expr-async-await.js":    "M1.2-string",
-    "expr-literals.js":       "M1.2-string-template-regex",
+    // M1.5 — template-mode tracking in tokenizeWithAcorn lifts expr-literals
+    // to byte-identical Acorn-vs-native parity. Acorn's opening backtick is
+    // dropped, in-template ${ } pairs are re-classified as
+    // TemplateInterpStart/End, closing backtick merges with the empty
+    // trailing TemplateChunk into a single TemplateChunk text="`". The
+    // regex + BigInt literals were already correctly normalized via the
+    // ACORN_LABEL_TO_KIND map ("regexp" → RegexLit, "num" → NumberLit
+    // which Acorn also uses for BigInt literals).
+    "expr-literals.js":       "full",
     "expr-optional-chain.js": "M1.2-string",
     "expr-spread-rest.js":    "full",        // spread/rest + line-comments
     "expr-template-literal.js":"M1.2-template",
