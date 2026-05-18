@@ -1,0 +1,277 @@
+// scrml.dev /reference/errors/E-STRUCTURAL-ELEMENT-MISPLACED
+//
+// Reference page for E-STRUCTURAL-ELEMENT-MISPLACED. A scrml-defined
+// structural element appears outside its owning locus.
+//
+// SPEC anchors: §4.15 (structural-element registry) + §24.4 + §51.0.H
+// (<onTransition>) + §51.0.M (<onTimeout>) + §51.0.R (<onIdle>) +
+// §55.8 (<errors>) + §34 catalog row.
+
+<page>
+
+    <article class="prose prose-slate max-w-3xl">
+
+        <header class="not-prose mb-8 pb-6 border-b border-slate-200">
+            <div class="text-xs font-mono text-slate-500 mb-2">
+                Reference &rsaquo; Errors
+            </div>
+            <h1 class="text-4xl font-bold tracking-tight text-rose-700 font-mono">
+                E-STRUCTURAL-ELEMENT-MISPLACED
+            </h1>
+            <p class="text-lg text-slate-600 mt-2">
+                A scrml-defined structural element appears outside the locus
+                it belongs to.
+            </p>
+            <div class="flex gap-4 mt-4 text-xs">
+                <span class="px-2 py-1 bg-rose-50 text-rose-700 rounded font-semibold">
+                    Error
+                </span>
+                <span class="px-2 py-1 bg-amber-50 text-amber-700 rounded">
+                    Compile-time (BS &#47; PA stage)
+                </span>
+                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§4.15"
+                   class="text-blue-700 hover:text-blue-900 underline">
+                    SPEC §4.15 (normative)
+                </a>
+            </div>
+        </header>
+
+        // ───────────────────────────────────────────────────────────
+        // §1 — What it means
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            What it means
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            scrml defines a small set of <strong>structural elements</strong>
+            that look like HTML tags but are scrml-language constructs:
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;engine&gt;</code>,
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;match&gt;</code>,
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;errors&gt;</code>,
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTransition&gt;</code>,
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTimeout&gt;</code>,
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onIdle&gt;</code>,
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;page&gt;</code>.
+            Each has a strict <strong>owning locus</strong> — the place
+            it&apos;s grammatical to use it. Outside that locus, the compiler
+            emits E-STRUCTURAL-ELEMENT-MISPLACED.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §2 — Owning loci
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Owning loci
+        </h2>
+
+        <table class="w-full text-sm text-left border-collapse">
+            <thead>
+                <tr class="border-b border-slate-300">
+                    <th class="py-2 pr-4 font-semibold text-slate-900">Element</th>
+                    <th class="py-2 pr-4 font-semibold text-slate-900">Grammatical only as&hellip;</th>
+                    <th class="py-2 font-semibold text-slate-900">SPEC</th>
+                </tr>
+            </thead>
+            <tbody class="text-slate-700">
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">&lt;onTransition&gt;</td>
+                    <td class="py-2 pr-4">Child of <code class="font-mono text-xs">&lt;engine&gt;</code></td>
+                    <td class="py-2 text-xs">§51.0.H</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">&lt;onTimeout&gt;</td>
+                    <td class="py-2 pr-4">Child of an engine state-child</td>
+                    <td class="py-2 text-xs">§51.0.M</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">&lt;onIdle&gt;</td>
+                    <td class="py-2 pr-4">Child of <code class="font-mono text-xs">&lt;engine&gt;</code> (sibling of state-children; one per engine)</td>
+                    <td class="py-2 text-xs">§51.0.R<br>(specific code: E-IDLE-MISPLACED)</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">&lt;errors&gt;</td>
+                    <td class="py-2 pr-4">Anywhere with a parent context that supports validity-surface rendering</td>
+                    <td class="py-2 text-xs">§55.8</td>
+                </tr>
+                <tr class="border-b border-slate-200">
+                    <td class="py-2 pr-4 font-mono text-xs">&lt;page&gt;</td>
+                    <td class="py-2 pr-4">Child of <code class="font-mono text-xs">&lt;program&gt;</code> in MPA mode</td>
+                    <td class="py-2 text-xs">§40.8</td>
+                </tr>
+                <tr>
+                    <td class="py-2 pr-4 font-mono text-xs">&lt;engine&gt; &#47; &lt;match&gt;</td>
+                    <td class="py-2 pr-4">File scope or inside an engine&apos;s composite state-child (engines may nest per §51.0.K)</td>
+                    <td class="py-2 text-xs">§51 &#47; §18.0</td>
+                </tr>
+            </tbody>
+        </table>
+
+        // ───────────────────────────────────────────────────────────
+        // §3 — Minimal reproducer
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Minimal reproducer
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed mb-3">
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTransition&gt;</code>
+            at file scope, outside any engine:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;onTransition from=.A to=.B&gt;
+  &dollar;&lcub; log("transitioned") &rcub;
+&lt;/onTransition&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            E-STRUCTURAL-ELEMENT-MISPLACED fires at the opener &mdash;
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTransition&gt;</code>
+            outside <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;engine&gt;</code>.
+        </p>
+
+        <p class="text-slate-700 leading-relaxed mt-4 mb-3">
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTimeout&gt;</code>
+            at file scope:
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;onTimeout after=5s to=.Done&#47;&gt;</code></pre>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            Same error &mdash;
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTimeout&gt;</code>
+            outside an engine state-child.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §4 — How to fix
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            How to fix
+        </h2>
+
+        <ol class="space-y-3 text-slate-700 list-decimal list-outside ml-6">
+            <li>
+                <strong>Move the element inside its owning locus.</strong>
+                For <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTransition&gt;</code>,
+                wrap it in an engine declaration. For
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTimeout&gt;</code>,
+                place it inside a state-child body.
+            </li>
+            <li>
+                <strong>If the element shouldn&apos;t exist, delete it.</strong>
+                Misplacement sometimes reveals dead code that was moved
+                away from its engine during refactoring.
+            </li>
+            <li>
+                <strong>Check the rules-inert siblings.</strong>
+                Inside a <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;match&gt;</code>
+                block (§18.0.2),
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTransition&gt;</code>
+                fires the more specific
+                <a href="/reference/errors/E-MATCH-ONTRANSITION-FORBIDDEN"
+                   class="font-mono text-xs text-rose-700 underline">E-MATCH-ONTRANSITION-FORBIDDEN</a>
+                instead. Promote the match to an engine if you need
+                transition effects.
+            </li>
+        </ol>
+
+        // ───────────────────────────────────────────────────────────
+        // §5 — Specific misplacement codes
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specific misplacement codes
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Some elements have a dedicated misplacement code with sharper
+            messaging:
+        </p>
+
+        <ul class="space-y-2 text-slate-700 mt-3">
+            <li>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onIdle&gt;</code>
+                inside a state-child body &rarr;
+                <a href="/reference/errors/E-IDLE-MISPLACED"
+                   class="font-mono text-xs text-rose-700 underline">E-IDLE-MISPLACED</a>
+                (more specific than E-STRUCTURAL-ELEMENT-MISPLACED;
+                directs to <code class="font-mono text-xs">&lt;onTimeout&gt;</code>
+                instead).
+            </li>
+            <li>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;onTransition&gt;</code>
+                inside a <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;match&gt;</code>
+                block &rarr;
+                <a href="/reference/errors/E-MATCH-ONTRANSITION-FORBIDDEN"
+                   class="font-mono text-xs text-rose-700 underline">E-MATCH-ONTRANSITION-FORBIDDEN</a>.
+            </li>
+            <li>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">effect=</code>
+                attribute on a state-child inside
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;match&gt;</code>
+                &rarr;
+                <a href="/reference/errors/E-MATCH-EFFECT-FORBIDDEN"
+                   class="font-mono text-xs text-rose-700 underline">E-MATCH-EFFECT-FORBIDDEN</a>.
+            </li>
+        </ul>
+
+        <p class="text-slate-700 leading-relaxed mt-3">
+            When a more specific code applies, the compiler fires that one
+            instead of the generic E-STRUCTURAL-ELEMENT-MISPLACED.
+        </p>
+
+        // ───────────────────────────────────────────────────────────
+        // §6 — Related
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Related
+        </h2>
+
+        <ul class="space-y-1 text-slate-700">
+            <li>
+                <a href="/reference/elements/engine" class="text-blue-700 hover:text-blue-900 underline">&lt;engine&gt;</a>
+                &mdash; the canonical owner of onTransition &#47; onTimeout &#47; onIdle.
+            </li>
+            <li>
+                <a href="/reference/elements/match" class="text-blue-700 hover:text-blue-900 underline">&lt;match&gt;</a>
+                &mdash; rules-inert; effect=/onTransition forbidden here. Promote to engine instead.
+            </li>
+            <li>
+                <a href="/reference/elements/errors" class="text-blue-700 hover:text-blue-900 underline">&lt;errors&gt;</a>
+                &mdash; renders the auto-synthesized validity surface; needs a parent context with validators.
+            </li>
+            <li>
+                <a href="/reference/errors/E-NAME-COLLIDES-RESERVED"
+                   class="text-rose-700 hover:text-rose-900 underline">E-NAME-COLLIDES-RESERVED</a>
+                &mdash; companion error when a user component name collides with a reserved structural-element identifier.
+            </li>
+        </ul>
+
+        // ───────────────────────────────────────────────────────────
+        // §7 — Specification
+        // ───────────────────────────────────────────────────────────
+
+        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">
+            Specification
+        </h2>
+
+        <p class="text-slate-700 leading-relaxed">
+            Normative text:
+            <strong>SPEC §4.15</strong> (structural-element registry),
+            <strong>§24.4</strong> (HTML-aware element classification),
+            per-element owning sections (§51.0.H &#47; §51.0.M &#47; §51.0.R &#47; §55.8 &#47; §40.8),
+            <strong>§34</strong> catalog row. Spec lives at
+            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+               class="text-blue-700 hover:text-blue-900 underline">
+                compiler/SPEC.md
+            </a>.
+        </p>
+
+    </article>
+
+</>
