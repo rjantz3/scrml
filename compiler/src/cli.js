@@ -54,6 +54,7 @@ Options (compile / dev):
   --emit-reachability     Emit <base>.reachability.json (Stage 7.6 / SPEC §40.9)
   --chunk-size-budget=N   Soft size budget (bytes) for W-CG-CHUNK-LARGE (default 100000)
   --emit-machine-tests    Emit <base>.machine.test.js for each source (§51.13)
+  --debug-perf            Sub-stage timing for CG / RS / DG (PGO instrumentation)
   --watch, -w             Watch for changes and recompile (compile command only)
 
 Options (dev):

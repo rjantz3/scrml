@@ -441,6 +441,14 @@ export function compileScrml(options = {}) {
      * the `--chunk-size-budget=<bytes>` CLI flag.
      */
     chunkSizeBudgetBytes,
+    /**
+     * PGO P1.5 (S102) — opt-in sub-stage instrumentation for profile-guided
+     * optimization. When TRUE, CG/RS/DG emit sub-stage `[CG-EMIT name] Nms`,
+     * `[RS-COMPONENT N] Nms`, `[DG-PER-FILE] / [DG-CROSS-FILE]` lines via the
+     * existing `log` channel. Consumers wire in P1.1/P1.2/P1.3; this option
+     * is the plumbing precondition. Default FALSE; zero overhead when unset.
+     */
+    debugPerf = false,
     log = console.log,
     selfHostModules = null,
   } = options;

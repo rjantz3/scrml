@@ -97,6 +97,10 @@ function parseArgs(args) {
   let emitMachineTests = false;
   // W2 §21.7: auto-gather defaults ON. `--no-gather` opts out.
   let gather = true;
+  // PGO P1.5 (S102) — opt-in sub-stage instrumentation for profile-guided
+  // optimization work. When set, CG/RS/DG sub-stage timings emit at the
+  // sub-stage granularity (P1.1/P1.2/P1.3 consumers). Zero overhead when unset.
+  let debugPerf = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -168,6 +172,9 @@ function parseArgs(args) {
     } else if (arg === "--no-gather") {
       // W2 §21.7: opt out of transitive .scrml import closure pre-pass.
       gather = false;
+    } else if (arg === "--debug-perf") {
+      // PGO P1.5 (S102) — opt-in sub-stage instrumentation.
+      debugPerf = true;
     } else if (arg === "--help" || arg === "-h") {
       printHelp();
       process.exit(0);
@@ -203,7 +210,7 @@ function parseArgs(args) {
     }
   }
 
-  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, watchMode, mode, selfHost, emitBatchPlan, emitReachability, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather };
+  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, watchMode, mode, selfHost, emitBatchPlan, emitReachability, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf };
 }
 
 // ---------------------------------------------------------------------------
@@ -333,7 +340,7 @@ function formatLintDiagnostic(diag, cwd) {
  * @returns {{ success: boolean }}
  */
 function runOnce(opts, selfHostModules = null) {
-  const { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, mode, emitBatchPlan, emitReachability, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather } = opts;
+  const { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, mode, emitBatchPlan, emitReachability, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf } = opts;
   const cwd = process.cwd();
 
   if (verbose) {
@@ -361,6 +368,9 @@ function runOnce(opts, selfHostModules = null) {
       // flag absent; the route-splitter falls back to its default).
       chunkSizeBudgetBytes,
       gather,
+      // PGO P1.5 (S102) — opt-in sub-stage instrumentation for CG/RS/DG.
+      // Consumers wire in P1.1/P1.2/P1.3; this just threads the flag.
+      debugPerf,
       write: true,
       log: verbose ? (msg) => console.log(c.dim(msg)) : () => {},
       selfHostModules,
