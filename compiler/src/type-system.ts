@@ -4927,8 +4927,44 @@ function annotateNodes(
         }
         if (n.name) {
           const isServer = !!(n as ASTNodeLike).isServer;
-          scopeChain.bind(`@${n.name as string}`, { kind: "reactive", resolvedType, isServer });
-          scopeChain.bind(n.name as string, { kind: "reactive", resolvedType, isServer });
+          // BUG-2 (S102) — sequential bare-variant writes to the same engine
+          // cell. The AST builder collapses every `@phase = .V` inside a
+          // function body into a fresh `state-decl` with no typeAnnotation
+          // (§51.0.C / Move 16). Without a guard, the bind call below would
+          // CLOBBER the engine pre-bind's enum-typed resolvedType (line 6145)
+          // with the local `tAsIs()` default. The first write then leaves
+          // `@phase` rebound as `asIs`, and the second write's bare-variant
+          // inference loses its type context — spurious E-VARIANT-AMBIGUOUS
+          // fires (§14.10 normative position #2 requires the cell's type to
+          // drive the variant context).
+          //
+          // Fix: when this state-decl produced no richer-than-asIs local
+          // resolvedType AND a prior reactive bind already carries a richer
+          // type (engine pre-bind OR a typed first-decl), preserve the prior
+          // type. The bind is still updated for non-reactive metadata
+          // (`isServer` — though re-writes don't change that in practice).
+          //
+          // Richness ordering: anything that isn't `asIs` or `unknown` is
+          // "richer" — enum, union, struct, array, primitive, machine, etc.
+          // The local `resolvedType` only beats prior when this state-decl
+          // is itself typed (reactAnnot present + resolution upgraded above).
+          let bindType: ResolvedType = resolvedType;
+          if (resolvedType.kind === "asIs" || resolvedType.kind === "unknown") {
+            const priorBind = scopeChain.lookup(`@${n.name as string}`) as
+              | { kind?: string; resolvedType?: ResolvedType }
+              | undefined;
+            if (
+              priorBind &&
+              priorBind.kind === "reactive" &&
+              priorBind.resolvedType &&
+              priorBind.resolvedType.kind !== "asIs" &&
+              priorBind.resolvedType.kind !== "unknown"
+            ) {
+              bindType = priorBind.resolvedType;
+            }
+          }
+          scopeChain.bind(`@${n.name as string}`, { kind: "reactive", resolvedType: bindType, isServer });
+          scopeChain.bind(n.name as string, { kind: "reactive", resolvedType: bindType, isServer });
 
           if (isServer) {
             const declSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
