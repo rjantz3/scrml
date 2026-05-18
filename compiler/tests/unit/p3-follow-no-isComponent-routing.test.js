@@ -81,7 +81,7 @@ const SRC_DIR = join(__dirname, "../../src");
 // The upper bound is a smoke-test: if it grows the migration may have
 // regressed; reviewer must look.
 const ALLOWED = {
-  "block-splitter.js": 20,         // 14 stamps + doc comments + S101 §4.17 raw-content gate (!isComp guard + emit-stamp + comment)
+  "block-splitter.js": 21,         // 14 stamps + doc comments + S101 §4.17 raw-content gate (!isComp guard + emit-stamp + comment) + S101 Bug-3 compound-state-decl text-emit stamp
   "ast-builder.js": 25,            // 20 stamps + parseAttributes param + comments
   "module-resolver.js": 11,        // info.isComponent stamp + doc + signature mentions
                                    // + S76 §C15.13 re-export resolution (3 added: pass-1

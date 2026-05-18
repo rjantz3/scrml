@@ -343,18 +343,32 @@ const BARE_DECL_RE = /^\s*(?:export\s+)?(server\s+(?:fn|function)\s|type\s+\w|fn
  * Such text blocks always start with optional `const`, optional whitespace,
  * then `<` IDENT (optionally with attrs), `>`, then `=` or `:`.
  *
- * SPEC §6.2 (Three RHS Shapes), §6.6 (derived const), §35.2 (typed-decl).
+ * Bug-3 (S101) extension: Variant C compound state-decl
+ * (`<formRes><name>="" <email>="" </>`) is also a top-level state-decl
+ * shape at <program>/<page>/<channel> direct-child position per SPEC §6.3.2 +
+ * §40.8. BS's `peekCompoundStateDeclSignal` emits the entire compound span
+ * as a single text block; this regex's alternation accepts the compound
+ * shape (parent `>` followed by whitespace + `<` of nested child decl).
+ *
+ * SPEC §6.2 (Three RHS Shapes), §6.3.2 (Variant C compound),
+ *      §6.6 (derived const), §35.2 (typed-decl), §40.8 (default-logic mode).
  *
  * Notes:
  *   - The regex anchors on `^\s*` to permit leading newlines/spaces.
  *   - Optional `const\s+` matches Shape 3 (derived).
  *   - The attrs portion `[^>]*` is permissive — actual attr parsing happens
  *     in parseLogicBody → tryParseStructuralDecl after the `${...}` wrap.
- *   - The terminator `>\s*[=:]` is the discriminator vs ordinary markup
- *     content. Markup like `<div>hello</>` has `>` followed by content,
- *     never `=` or `:` directly.
+ *   - Original alternation `>\s*[=:]` matches Shape 1/2/3 (RHS-bearing).
+ *   - New alternation `>\s*<[A-Za-z_]` matches Variant C compound (the
+ *     parent's `>` is followed by whitespace and a nested child opener).
+ *     Ordinary markup-prose like `<div><span>hello</></>` would also
+ *     match this pattern at the regex level, but BS only emits such a
+ *     text block when `peekCompoundStateDeclSignal` confirmed the shape
+ *     (i.e., the nested `<child>` is itself a state-decl); ordinary
+ *     markup-prose stays as markup nodes and never reaches this regex.
  */
-const TOPLEVEL_STATE_DECL_RE = /^\s*(?:export\s+)?(?:const\s+)?<\s*[A-Za-z_][A-Za-z0-9_]*[^>]*>\s*[=:]/;
+const TOPLEVEL_STATE_DECL_RE =
+  /^\s*(?:export\s+)?(?:const\s+)?<\s*[A-Za-z_][A-Za-z0-9_]*[^>]*>\s*(?:[=:]|<[A-Za-z_])/;
 
 /**
  * §32 Gap 6 — tilde-bearing text at `<program>` / `<page>` / `<channel>`

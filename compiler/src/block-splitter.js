@@ -88,6 +88,23 @@ const RAW_CONTENT_ELEMENTS = new Set([
 ]);
 
 // ---------------------------------------------------------------------------
+// Bug-3 (S101) — Reserved document-root structural tags.
+//
+// These tags are document/route/channel/schema/module container roots per
+// SPEC §4.15 / §38 / §39 / §40.8 / §41. They are never state-decl shapes
+// even when their body contains nested state-decls (e.g.
+// `<program>\n<formRes>...</></>` — `<program>` is the document root and
+// `<formRes>` is the compound state-decl child INSIDE it).
+//
+// The compound-state-decl auto-lift (`peekCompoundStateDeclSignal`) must
+// exclude these names so the parent is not misclassified as a compound.
+// ---------------------------------------------------------------------------
+
+const COMPOUND_LIFT_EXEMPT_TAGS = new Set([
+  "program", "page", "channel", "schema", "seeds", "module",
+]);
+
+// ---------------------------------------------------------------------------
 // Component name detection
 //
 // A tag name is a component reference (not an HTML element) if and only if
@@ -510,6 +527,257 @@ export function splitBlocks(filePath, source) {
       return true;
     }
     return false;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Bug-3 (S101) — Variant C compound state-decl peek
+  //
+  // SPEC §6.3.2 (Tier 2 ad-hoc compound): the parent opener `<NAME>` is
+  // followed by structural-children declarations and a `</>` (or `</NAME>`)
+  // close. Distinct from Shape 1 / Shape 2 (peeked by
+  // peekTopLevelStateDeclSignal above) because the post-`>` lookahead is
+  // NOT `=`/`:` — it's whitespace (possibly newline) + nested `<child>`.
+  //
+  // Lookahead pattern:
+  //   `<NAME [attrs]>` `\s*` `<` IDENT `[attrs]>` `\s*` (`=` | `:` | `<` ...)
+  //
+  // The nested `<child>` must itself look like a state-decl (its `>` followed
+  // by `=`/`:`) OR itself look like a recursive compound (its `>` followed by
+  // whitespace + another `<`). Either way we're in compound territory.
+  //
+  // Self-closing parent `<NAME/>` is NOT a compound (it's a markup leaf).
+  // Anonymous close `</>` immediately after parent's `>` (empty compound)
+  // IS allowed — `<formRes></>` is a degenerate but legal compound (no
+  // children). Matched by recognising `</` after whitespace.
+  //
+  // Returns true iff a compound state-decl shape is detected. Does NOT
+  // modify scanner state.
+  // ---------------------------------------------------------------------------
+
+  /** @returns {boolean} */
+  function peekCompoundStateDeclSignal() {
+    // Reserved document-root tags (program / page / channel / schema /
+    // seeds / module) are container roots, not state-decl shapes, even
+    // when their body contains nested state-decls. Bail early so the parent
+    // is not misclassified as a compound.
+    let p = pos + 1;
+    let nameEnd = p;
+    while (nameEnd < len && /[A-Za-z0-9_\-]/.test(source[nameEnd])) nameEnd++;
+    if (nameEnd === p) return false;
+    const tagName = source.slice(p, nameEnd);
+    if (COMPOUND_LIFT_EXEMPT_TAGS.has(tagName)) return false;
+
+    // Use the classifier to determine whether the parent at `pos` looks like
+    // a compound state-decl opener. The classifier inspects the nested child
+    // (if any) and only returns "compound" when the child itself is a
+    // state-decl-shaped opener (`<x> = …` / `<x>: T = …`) OR another
+    // recursive compound. Ordinary markup parents
+    // (`<keyboard id="x"/>` + `<mouse id="x"/>` siblings) and prose-bearing
+    // parents (`<div>hello<span/></div>`) are classified as "markup" and
+    // return false here.
+    const cls = classifyOpenerForCompoundScan(pos);
+    return cls != null && cls.kind === "compound";
+  }
+
+  // ---------------------------------------------------------------------------
+  // Bug-3 (S101) — Variant C compound: scan forward to find the matching
+  // `</>` / `</NAME>` close. Counts nested `<NAME>...</>` pairs so that
+  // recursive compound is accumulated as a single text run.
+  //
+  // Pre-condition: source[pos] === '<', source[pos+1] is a markup ident,
+  // and peekCompoundStateDeclSignal() returned true.
+  //
+  // Returns the byte offset of the position JUST AFTER the matching close
+  // tag, or -1 if the compound is unclosed (in which case the caller should
+  // fall back to the default markup-opener path so existing E-CTX-003
+  // diagnostics fire correctly).
+  //
+  // The scan is permissive — it walks through nested `<ident ...>` openers
+  // and matching closers, tracking depth. Sigil-prefixed brace contexts
+  // (`${...}`, `?{...}`, etc.) are NOT entered because the compound body
+  // is structural-state-decls only; if such tokens appear they're either
+  // RHS init exprs (handled at parse-time by tryParseStructuralDecl, which
+  // re-tokenizes the wrapped logic body) or content of a Shape 2 markup
+  // RHS (also re-tokenized). Both cases are fine to accumulate as text.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Helper for scanCompoundBlockEnd — classify a `<ident...>` opener at
+   * offset `p` as one of:
+   *   - "state-decl": followed by `=` or `:` after `>` (no close tag needed)
+   *   - "compound":   followed by whitespace + `<` (recursive compound; needs close)
+   *   - "markup":     ordinary markup opener (close tag needed)
+   *   - "self-close": `<NAME/>` (no close needed)
+   *
+   * Also returns the byte offset of the position JUST AFTER the opener's
+   * terminating `>` (or `/>`).
+   *
+   * @param {number} p — must point at `<` followed by an ident
+   * @returns {{ kind: "state-decl"|"compound"|"markup"|"self-close", afterOpener: number } | null}
+   */
+  function classifyOpenerForCompoundScan(p) {
+    if (source[p] !== "<") return null;
+    let q = p + 1;
+    if (q >= len) return null;
+    if (!/[A-Za-z_]/.test(source[q])) return null;
+    while (q < len && /[A-Za-z0-9_\-]/.test(source[q])) q++;
+    // Attr scan with balanced quotes / braces / parens — mirrors
+    // peekTopLevelStateDeclSignal's pattern.
+    let braceDepth = 0;
+    let parenDepth = 0;
+    let qDouble = false;
+    let qSingle = false;
+    let selfClosing = false;
+    while (q < len) {
+      const c2 = source[q];
+      if (braceDepth > 0) {
+        if (c2 === "{") braceDepth++;
+        else if (c2 === "}") braceDepth--;
+        q++;
+        continue;
+      }
+      if (parenDepth > 0) {
+        if (c2 === "(") parenDepth++;
+        else if (c2 === ")") parenDepth--;
+        q++;
+        continue;
+      }
+      if (!qDouble && !qSingle) {
+        if (c2 === ">") { q++; break; }
+        if (c2 === "/" && q + 1 < len && source[q + 1] === ">") {
+          selfClosing = true;
+          q += 2;
+          break;
+        }
+        if ((c2 === "$" || c2 === "?" || c2 === "#" || c2 === "!" || c2 === "^" || c2 === "~") && q + 1 < len && source[q + 1] === "{") {
+          braceDepth = 1; q += 2; continue;
+        }
+        if (c2 === "{") { braceDepth++; q++; continue; }
+        if (c2 === "(") { parenDepth++; q++; continue; }
+        if (c2 === '"') { qDouble = true; q++; continue; }
+        if (c2 === "'") { qSingle = true; q++; continue; }
+      } else if (qDouble && c2 === '"') { qDouble = false; q++; continue; }
+      else if (qSingle && c2 === "'") { qSingle = false; q++; continue; }
+      else if (c2 === "\\") { q += 2; continue; }
+      q++;
+    }
+    if (q > len) return null;
+    if (selfClosing) {
+      return { kind: "self-close", afterOpener: q };
+    }
+    // Inspect what follows `>`.
+    let r = q;
+    while (r < len && (source[r] === " " || source[r] === "\t")) r++;
+    if (r < len) {
+      if (source[r] === "=") {
+        const nxt = r + 1 < len ? source[r + 1] : "";
+        if (nxt !== "=" && nxt !== ">") return { kind: "state-decl", afterOpener: q };
+      } else if (source[r] === ":") {
+        return { kind: "state-decl", afterOpener: q };
+      }
+    }
+    // Try the compound classification: post-`>` newline + ident.
+    // EMPTY body (`<NAME></>` — immediate close after the opener) is
+    // ambiguous between empty compound state and empty markup element; the
+    // safe default is "markup" so existing markup behaviour is preserved.
+    // A user wanting an empty compound state-decl can wrap in `${...}`.
+    let s = q;
+    while (s < len && /\s/.test(source[s])) s++;
+    if (s < len && source[s] === "<") {
+      const nx = s + 1 < len ? source[s + 1] : "";
+      if (/[A-Za-z_]/.test(nx)) {
+        // Disambiguate by classifying the NESTED opener — if it's
+        // state-decl-shaped or recursive-compound-shaped, the outer is a
+        // compound. Otherwise it's ordinary markup.
+        const nested = classifyOpenerForCompoundScan(s);
+        if (nested && (nested.kind === "state-decl" || nested.kind === "compound")) {
+          return { kind: "compound", afterOpener: q };
+        }
+        // Self-close child or markup child — outer is markup.
+      }
+      // `<` followed by `/` (immediate close) — empty body, default to markup.
+    }
+    return { kind: "markup", afterOpener: q };
+  }
+
+  /**
+   * Bug-3 (S101) — Variant C compound: scan forward to find the matching
+   * `</>` / `</NAME>` close. Properly handles compound children
+   * (`<NAME> = init` form — no close tag needed) vs nested-compound /
+   * markup-RHS sub-structures (which DO need balanced closes).
+   *
+   * Pre-condition: source[pos] === '<', source[pos+1] is a markup ident,
+   * and peekCompoundStateDeclSignal() returned true.
+   *
+   * @returns {number} byte offset just past close tag, or -1 if unclosed
+   */
+  function scanCompoundBlockEnd() {
+    // Step 1: skip past the parent compound's opener (the `<NAME>` at pos).
+    const cls = classifyOpenerForCompoundScan(pos);
+    if (!cls || cls.kind === "self-close") return -1;
+    let p = cls.afterOpener;
+    let depth = 1; // we're now inside the parent compound
+
+    let inDouble = false;
+    let inSingle = false;
+    while (p < len && depth > 0) {
+      const c = source[p];
+      if (inDouble) {
+        if (c === "\\") { p += 2; continue; }
+        if (c === '"') inDouble = false;
+        p++;
+        continue;
+      }
+      if (inSingle) {
+        if (c === "\\") { p += 2; continue; }
+        if (c === "'") inSingle = false;
+        p++;
+        continue;
+      }
+      if (c === '"') { inDouble = true; p++; continue; }
+      if (c === "'") { inSingle = true; p++; continue; }
+      if (c === "<") {
+        const next = p + 1 < len ? source[p + 1] : "";
+        if (next === "/") {
+          // Close tag — `</>` or `</NAME>`. Advance past `>`.
+          let q = p + 2;
+          while (q < len && source[q] !== ">" && source[q] !== "\n") q++;
+          if (q >= len) return -1;
+          if (source[q] !== ">") return -1;
+          q++;
+          depth--;
+          if (depth === 0) return q;
+          p = q;
+          continue;
+        }
+        if (/[A-Za-z_]/.test(next)) {
+          const inner = classifyOpenerForCompoundScan(p);
+          if (!inner) {
+            // Malformed — fall through as content.
+            p++;
+            continue;
+          }
+          // State-decl shape (`<x> = …` / `<x>: T = …`) — the child has NO
+          // matching close tag. The RHS init expression continues until the
+          // next sibling decl opener / parent close — which we'll naturally
+          // encounter as the loop continues. No depth change.
+          if (inner.kind === "state-decl" || inner.kind === "self-close") {
+            p = inner.afterOpener;
+            continue;
+          }
+          // Compound or ordinary markup — requires a matching close.
+          // Increment depth and continue past the opener.
+          depth++;
+          p = inner.afterOpener;
+          continue;
+        }
+        // `<` followed by something else (`<=`, `<<`). Treat as content.
+        p++;
+        continue;
+      }
+      p++;
+    }
+    return depth === 0 ? p : -1;
   }
 
   // ---------------------------------------------------------------------------
@@ -1330,6 +1598,49 @@ export function splitBlocks(filePath, source) {
           beginText();
           step(); // consume '<' so we don't loop on it
           continue;
+        }
+        // Bug-3 (S101) — Variant C compound state-decl auto-lift.
+        // SPEC §6.3.2 (Tier 2 ad-hoc compound) at <program>/<page>/<channel>
+        // direct-child position under v0.3 default-logic mode (§40.8). The
+        // parent opener `<NAME>` is followed by structural state-decl
+        // children + `</>` close. Distinct from Shape 1/2 (which have `=`/`:`
+        // immediately after `>` — peeked above).
+        //
+        // When detected, scan forward to the matching `</>` close and emit
+        // the entire span as a SINGLE text block. liftBareDeclarations then
+        // wraps in `${...}` (via TOPLEVEL_STATE_DECL_RE extension) and the
+        // parser's tryParseStructuralDecl handles the compound shape natively.
+        if ((stack.length === 0 || isChannelBody || isProgramBody || isPageBody) && peekCompoundStateDeclSignal()) {
+          const endPos = scanCompoundBlockEnd();
+          if (endPos > pos) {
+            flushText();
+            const startPos = curPos;
+            const startLine = curLine;
+            const startCol = curCol;
+            // Advance the scanner through the entire compound span,
+            // tracking line/col via step() so subsequent block spans stay
+            // accurate.
+            while (pos < endPos) step();
+            targetChildren().push({
+              type: "text",
+              raw: source.slice(startPos, pos),
+              span: { start: startPos, end: pos, line: startLine, col: startCol },
+              depth: depth(),
+              children: [],
+              name: null,
+              closerForm: null,
+              isComponent: false,
+            });
+            // Reset textStart so subsequent text accumulation doesn't
+            // re-include the compound span.
+            textStart = -1;
+            inDoubleQuote = false;
+            inSingleQuote = false;
+            continue;
+          }
+          // scanCompoundBlockEnd returned -1 — unclosed compound. Fall
+          // through to the default markup-opener path so the standard
+          // E-CTX-003 diagnostic fires.
         }
         flushText();
         step(); // consume '<'
