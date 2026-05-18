@@ -78,6 +78,9 @@ const COLOR_SHADES = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950];
 const COLOR_PALETTE = {
   slate:   { 50: "#f8fafc", 100: "#f1f5f9", 200: "#e2e8f0", 300: "#cbd5e1", 400: "#94a3b8", 500: "#64748b", 600: "#475569", 700: "#334155", 800: "#1e293b", 900: "#0f172a", 950: "#020617" },
   gray:    { 50: "#f9fafb", 100: "#f3f4f6", 200: "#e5e7eb", 300: "#d1d5db", 400: "#9ca3af", 500: "#6b7280", 600: "#4b5563", 700: "#374151", 800: "#1f2937", 900: "#111827", 950: "#030712" },
+  zinc:    { 50: "#fafafa", 100: "#f4f4f5", 200: "#e4e4e7", 300: "#d4d4d8", 400: "#a1a1aa", 500: "#71717a", 600: "#52525b", 700: "#3f3f46", 800: "#27272a", 900: "#18181b", 950: "#09090b" },
+  neutral: { 50: "#fafafa", 100: "#f5f5f5", 200: "#e5e5e5", 300: "#d4d4d4", 400: "#a3a3a3", 500: "#737373", 600: "#525252", 700: "#404040", 800: "#262626", 900: "#171717", 950: "#0a0a0a" },
+  stone:   { 50: "#fafaf9", 100: "#f5f5f4", 200: "#e7e5e4", 300: "#d6d3d1", 400: "#a8a29e", 500: "#78716c", 600: "#57534e", 700: "#44403c", 800: "#292524", 900: "#1c1917", 950: "#0c0a09" },
   red:     { 50: "#fef2f2", 100: "#fee2e2", 200: "#fecaca", 300: "#fca5a5", 400: "#f87171", 500: "#ef4444", 600: "#dc2626", 700: "#b91c1c", 800: "#991b1b", 900: "#7f1d1d", 950: "#450a0a" },
   orange:  { 50: "#fff7ed", 100: "#ffedd5", 200: "#fed7aa", 300: "#fdba74", 400: "#fb923c", 500: "#f97316", 600: "#ea580c", 700: "#c2410c", 800: "#9a3412", 900: "#7c2d12", 950: "#431407" },
   amber:   { 50: "#fffbeb", 100: "#fef3c7", 200: "#fde68a", 300: "#fcd34d", 400: "#fbbf24", 500: "#f59e0b", 600: "#d97706", 700: "#b45309", 800: "#92400e", 900: "#78350f", 950: "#451a03" },
@@ -159,11 +162,20 @@ function registerSpacing() {
     }
   }
 
-  // space-x-* and space-y-*
+  // space-x-* and space-y-*. Per Tailwind v3, the margin lands on the
+  // adjacent sibling: `.space-y-{N} > :not([hidden]) ~ :not([hidden])`
+  // applies margin-top to every child after the first (modulo `[hidden]`).
   for (const [scale, value] of Object.entries(SPACING_SCALE)) {
     registry.set(`space-x-${scale}`, `.space-x-${escapeCssClass(scale)} > :not([hidden]) ~ :not([hidden]) { margin-left: ${value} }`);
     registry.set(`space-y-${scale}`, `.space-y-${escapeCssClass(scale)} > :not([hidden]) ~ :not([hidden]) { margin-top: ${value} }`);
   }
+
+  // space-x-reverse and space-y-reverse swap which sibling receives the
+  // margin via the --tw-space-{x,y}-reverse custom property (Tailwind v3
+  // behavior). When `reverse` is applied with a numeric scale, the margin
+  // lands on the LEFT/TOP sibling instead of the RIGHT/BOTTOM one.
+  registry.set("space-x-reverse", ".space-x-reverse > :not([hidden]) ~ :not([hidden]) { --tw-space-x-reverse: 1 }");
+  registry.set("space-y-reverse", ".space-y-reverse > :not([hidden]) ~ :not([hidden]) { --tw-space-y-reverse: 1 }");
 }
 
 // ---------------------------------------------------------------------------
@@ -354,6 +366,17 @@ function registerTypography() {
     registry.set(`font-${k}`, `.font-${k} { font-weight: ${v} }`);
   }
 
+  // Font families (Tailwind v3 defaults). Each value is the full font-family stack.
+  const FONT_FAMILY = {
+    "sans": `ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"`,
+    "serif": `ui-serif, Georgia, Cambria, "Times New Roman", Times, serif`,
+    "mono": `ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace`,
+  };
+
+  for (const [k, v] of Object.entries(FONT_FAMILY)) {
+    registry.set(`font-${k}`, `.font-${k} { font-family: ${v} }`);
+  }
+
   // Text alignment
   registry.set("text-left", ".text-left { text-align: left }");
   registry.set("text-center", ".text-center { text-align: center }");
@@ -405,6 +428,16 @@ function registerTypography() {
   registry.set("overline", ".overline { text-decoration-line: overline }");
   registry.set("line-through", ".line-through { text-decoration-line: line-through }");
   registry.set("no-underline", ".no-underline { text-decoration-line: none }");
+
+  // List style type
+  registry.set("list-disc", ".list-disc { list-style-type: disc }");
+  registry.set("list-decimal", ".list-decimal { list-style-type: decimal }");
+  registry.set("list-none", ".list-none { list-style-type: none }");
+  registry.set("list-square", ".list-square { list-style-type: square }");
+
+  // List style position
+  registry.set("list-inside", ".list-inside { list-style-position: inside }");
+  registry.set("list-outside", ".list-outside { list-style-position: outside }");
 }
 
 // ---------------------------------------------------------------------------
@@ -589,6 +622,350 @@ function registerLayout() {
   registry.set("select-text", ".select-text { user-select: text }");
   registry.set("select-all", ".select-all { user-select: all }");
   registry.set("select-auto", ".select-auto { user-select: auto }");
+
+  // Table — border-collapse + table-layout
+  registry.set("border-collapse", ".border-collapse { border-collapse: collapse }");
+  registry.set("border-separate", ".border-separate { border-collapse: separate }");
+  registry.set("table-auto", ".table-auto { table-layout: auto }");
+  registry.set("table-fixed", ".table-fixed { table-layout: fixed }");
+}
+
+// ---------------------------------------------------------------------------
+// Typography plugin: prose, prose-{color}, prose-{size}, not-prose
+// (Tailwind v3 @tailwindcss/typography port — SPEC §26.6)
+// ---------------------------------------------------------------------------
+//
+// Implementation strategy: rather than hand-author hundreds of lines of CSS
+// string literals, we describe the prose nested-element styling as a
+// structured spec (element selector → declarations) and emit it via a
+// builder. Each nested rule is suffixed `:not(:where([class~="not-prose"] *))`
+// so that the `not-prose` opt-out marker works at any depth without bumping
+// specificity. Tailwind v3 wraps the element selector itself in `:where()`
+// for the same reason — descendant rules stay specificity 0,1,0.
+//
+// Color and size variants override specific declarations on the base prose
+// shape. We re-emit only the changed declarations so callers can compose
+// `prose prose-slate prose-lg` and get the union behavior cleanly.
+
+/**
+ * Build a single nested prose rule.
+ *
+ *   .{proseClass} :where({selector}):not(:where([class~="not-prose"] *)) { decls }
+ *
+ * `proseClass` is the outer container class (e.g. "prose", "prose-slate",
+ * "prose-lg"). `selector` is the descendant element selector (e.g. "p",
+ * "h1", "blockquote", "code:not(pre code)").
+ *
+ * @param {string} proseClass
+ * @param {string} selector
+ * @param {string} decls   semicolon-separated declarations, no trailing `;`
+ * @returns {string}
+ */
+function buildProseRule(proseClass, selector, decls) {
+  return `.${proseClass} :where(${selector}):not(:where([class~="not-prose"] *)) { ${decls} }`;
+}
+
+/**
+ * Emit the base `.prose` rule + all nested-element rules for the bare
+ * `prose` class. Mirrors Tailwind v3 typography plugin's `DEFAULTS.css`
+ * shape; values come from the plugin's slate-700 / 1.75 line-height
+ * defaults.
+ *
+ * @returns {string[]}
+ */
+function buildBaseProseRules() {
+  const rules = [];
+
+  // The outermost `.prose` rule itself — color, max-width, line-height,
+  // baseline font-size.
+  rules.push(
+    `.prose { color: #374151; max-width: 65ch; font-size: 1rem; line-height: 1.75 }`
+  );
+
+  // Helper: nested rule with the not-prose opt-out suffix.
+  const r = (sel, decls) => buildProseRule("prose", sel, decls);
+
+  // Paragraphs
+  rules.push(r("p", "margin-top: 1.25em; margin-bottom: 1.25em"));
+
+  // Lead paragraph (first paragraph with .lead applied)
+  rules.push(r("[class~=\"lead\"]", "color: #4b5563; font-size: 1.25em; line-height: 1.6; margin-top: 1.2em; margin-bottom: 1.2em"));
+
+  // Links
+  rules.push(r("a", "color: #111827; text-decoration: underline; font-weight: 500"));
+
+  // Strong / em
+  rules.push(r("strong", "color: #111827; font-weight: 600"));
+  rules.push(r("a strong", "color: inherit"));
+  rules.push(r("blockquote strong", "color: inherit"));
+  rules.push(r("thead th strong", "color: inherit"));
+  rules.push(r("em", "font-style: italic"));
+
+  // Lists — ordered / unordered / list items
+  rules.push(r("ol", "list-style-type: decimal; margin-top: 1.25em; margin-bottom: 1.25em; padding-left: 1.625em"));
+  rules.push(r("ol[type=\"A\"]", "list-style-type: upper-alpha"));
+  rules.push(r("ol[type=\"a\"]", "list-style-type: lower-alpha"));
+  rules.push(r("ol[type=\"I\"]", "list-style-type: upper-roman"));
+  rules.push(r("ol[type=\"i\"]", "list-style-type: lower-roman"));
+  rules.push(r("ol[type=\"1\"]", "list-style-type: decimal"));
+  rules.push(r("ul", "list-style-type: disc; margin-top: 1.25em; margin-bottom: 1.25em; padding-left: 1.625em"));
+  rules.push(r("li", "margin-top: 0.5em; margin-bottom: 0.5em"));
+  rules.push(r("ol > li", "padding-left: 0.375em"));
+  rules.push(r("ul > li", "padding-left: 0.375em"));
+  rules.push(r("> ul > li p", "margin-top: 0.75em; margin-bottom: 0.75em"));
+  rules.push(r("> ul > li > *:first-child", "margin-top: 1.25em"));
+  rules.push(r("> ul > li > *:last-child", "margin-bottom: 1.25em"));
+  rules.push(r("> ol > li > *:first-child", "margin-top: 1.25em"));
+  rules.push(r("> ol > li > *:last-child", "margin-bottom: 1.25em"));
+  rules.push(r("ul ul, ul ol, ol ul, ol ol", "margin-top: 0.75em; margin-bottom: 0.75em"));
+
+  // Horizontal rule
+  rules.push(r("hr", "border-color: #e5e7eb; border-top-width: 1px; margin-top: 3em; margin-bottom: 3em"));
+
+  // Blockquote
+  rules.push(r("blockquote", "font-weight: 500; font-style: italic; color: #111827; border-left-width: 0.25rem; border-left-color: #e5e7eb; quotes: \"\\201C\" \"\\201D\" \"\\2018\" \"\\2019\"; margin-top: 1.6em; margin-bottom: 1.6em; padding-left: 1em"));
+  rules.push(r("blockquote p:first-of-type::before", "content: open-quote"));
+  rules.push(r("blockquote p:last-of-type::after", "content: close-quote"));
+
+  // Headings — h1..h4
+  rules.push(r("h1", "color: #111827; font-weight: 800; font-size: 2.25em; margin-top: 0; margin-bottom: 0.8888889em; line-height: 1.1111111"));
+  rules.push(r("h1 strong", "font-weight: 900; color: inherit"));
+  rules.push(r("h2", "color: #111827; font-weight: 700; font-size: 1.5em; margin-top: 2em; margin-bottom: 1em; line-height: 1.3333333"));
+  rules.push(r("h2 strong", "font-weight: 800; color: inherit"));
+  rules.push(r("h3", "color: #111827; font-weight: 600; font-size: 1.25em; margin-top: 1.6em; margin-bottom: 0.6em; line-height: 1.6"));
+  rules.push(r("h3 strong", "font-weight: 700; color: inherit"));
+  rules.push(r("h4", "color: #111827; font-weight: 600; margin-top: 1.5em; margin-bottom: 0.5em; line-height: 1.5"));
+  rules.push(r("h4 strong", "font-weight: 700; color: inherit"));
+
+  // Images / figures / videos
+  rules.push(r("img", "margin-top: 2em; margin-bottom: 2em"));
+  rules.push(r("picture", "display: block; margin-top: 2em; margin-bottom: 2em"));
+  rules.push(r("video", "margin-top: 2em; margin-bottom: 2em"));
+  rules.push(r("kbd", "font-weight: 500; font-family: inherit; color: #111827; box-shadow: 0 0 0 1px rgb(0 0 0 / 0.1), 0 3px 0 rgb(0 0 0 / 0.1); font-size: 0.875em; border-radius: 0.3125rem; padding-top: 0.1875em; padding-right: 0.375em; padding-bottom: 0.1875em; padding-left: 0.375em"));
+  rules.push(r("figure", "margin-top: 2em; margin-bottom: 2em"));
+  rules.push(r("figure > *", "margin-top: 0; margin-bottom: 0"));
+  rules.push(r("figcaption", "color: #6b7280; font-size: 0.875em; line-height: 1.4285714; margin-top: 0.8571429em"));
+
+  // Inline code + code blocks
+  // (Inline code is `<code>` not inside `<pre>`; the `:not(pre code)`
+  // selector keeps block code from inheriting the inline-code styling.)
+  rules.push(r("code", "color: #111827; font-weight: 600; font-size: 0.875em; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"));
+  rules.push(r("code::before", "content: \"`\""));
+  rules.push(r("code::after", "content: \"`\""));
+  rules.push(r("a code", "color: inherit"));
+  rules.push(r("h1 code, h2 code, h3 code, h4 code", "color: inherit"));
+  rules.push(r("blockquote code", "color: inherit"));
+  rules.push(r("thead th code", "color: inherit"));
+  rules.push(r("pre", "color: #e5e7eb; background-color: #1f2937; overflow-x: auto; font-weight: 400; font-size: 0.875em; line-height: 1.7142857; margin-top: 1.7142857em; margin-bottom: 1.7142857em; border-radius: 0.375rem; padding-top: 0.8571429em; padding-right: 1.1428571em; padding-bottom: 0.8571429em; padding-left: 1.1428571em; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"));
+  rules.push(r("pre code", "background-color: transparent; border-width: 0; border-radius: 0; padding: 0; font-weight: inherit; color: inherit; font-size: inherit; font-family: inherit; line-height: inherit"));
+  rules.push(r("pre code::before", "content: none"));
+  rules.push(r("pre code::after", "content: none"));
+
+  // Tables
+  rules.push(r("table", "width: 100%; table-layout: auto; text-align: left; margin-top: 2em; margin-bottom: 2em; font-size: 0.875em; line-height: 1.7142857"));
+  rules.push(r("thead", "border-bottom-width: 1px; border-bottom-color: #d1d5db"));
+  rules.push(r("thead th", "color: #111827; font-weight: 600; vertical-align: bottom; padding-right: 0.5714286em; padding-bottom: 0.5714286em; padding-left: 0.5714286em"));
+  rules.push(r("tbody tr", "border-bottom-width: 1px; border-bottom-color: #e5e7eb"));
+  rules.push(r("tbody tr:last-child", "border-bottom-width: 0"));
+  rules.push(r("tbody td", "vertical-align: baseline; padding: 0.5714286em"));
+  rules.push(r("tfoot", "border-top-width: 1px; border-top-color: #d1d5db"));
+  rules.push(r("tfoot td", "vertical-align: top; padding: 0.5714286em"));
+
+  return rules;
+}
+
+/**
+ * Color-variant overrides for `prose-{color}`. Each variant overrides
+ * body-text color, heading colors, link colors, strong colors, code
+ * colors, blockquote, hr, table borders, etc. against the named color's
+ * shade palette.
+ *
+ * Tailwind v3 ships variants for slate, gray, zinc, neutral, stone — the
+ * five neutral palettes already present in COLOR_PALETTE.
+ *
+ * Per Tailwind v3, the prose-{color} variant only changes the
+ * gray-tone scale used for body/headings/code. We map shade overrides:
+ *
+ *   body          → 700
+ *   headings      → 900
+ *   lead          → 600
+ *   links         → 900
+ *   bold          → 900
+ *   counters      → 500
+ *   bullets       → 300
+ *   hr / border   → 200
+ *   quotes        → 900
+ *   captions      → 500
+ *   kbd           → 900
+ *   code          → 900
+ *   pre code      → 200
+ *   pre bg        → 800
+ *   th borders    → 300
+ *   td borders    → 200
+ *
+ * @param {string} colorName  one of slate / gray / zinc / neutral / stone
+ * @returns {string[]}
+ */
+function buildProseColorRules(colorName) {
+  const shades = COLOR_PALETTE[colorName];
+  if (!shades) return [];
+
+  const cls = `prose-${colorName}`;
+  const r = (sel, decls) => buildProseRule(cls, sel, decls);
+  const rules = [];
+
+  // No outer `.prose-{color}` self rule; the variant only overrides
+  // descendant styling. Body color override happens on the container
+  // via a non-nested rule for the `prose` class itself when combined.
+  // Tailwind v3 does this via CSS custom properties — we inline the
+  // colors directly here for simpler emission.
+
+  rules.push(`.${cls} { color: ${shades[700]} }`);
+  rules.push(r("[class~=\"lead\"]", `color: ${shades[600]}`));
+  rules.push(r("a", `color: ${shades[900]}`));
+  rules.push(r("strong", `color: ${shades[900]}`));
+  rules.push(r("ol > li::marker", `color: ${shades[500]}`));
+  rules.push(r("ul > li::marker", `color: ${shades[300]}`));
+  rules.push(r("hr", `border-color: ${shades[200]}`));
+  rules.push(r("blockquote", `color: ${shades[900]}; border-left-color: ${shades[200]}`));
+  rules.push(r("h1", `color: ${shades[900]}`));
+  rules.push(r("h2", `color: ${shades[900]}`));
+  rules.push(r("h3", `color: ${shades[900]}`));
+  rules.push(r("h4", `color: ${shades[900]}`));
+  rules.push(r("kbd", `color: ${shades[900]}`));
+  rules.push(r("code", `color: ${shades[900]}`));
+  rules.push(r("pre", `color: ${shades[200]}; background-color: ${shades[800]}`));
+  rules.push(r("thead", `border-bottom-color: ${shades[300]}`));
+  rules.push(r("thead th", `color: ${shades[900]}`));
+  rules.push(r("tbody tr", `border-bottom-color: ${shades[200]}`));
+  rules.push(r("tfoot", `border-top-color: ${shades[300]}`));
+  rules.push(r("figcaption", `color: ${shades[500]}`));
+
+  return rules;
+}
+
+/**
+ * Size-variant overrides. Each `prose-{size}` overrides font-size,
+ * line-height, and per-element margin/padding/font-size scales.
+ *
+ * Tailwind v3 ships prose-sm, prose-base, prose-lg, prose-xl, prose-2xl.
+ * The per-size specs are the ones from the Tailwind v3 plugin
+ * `styles.js` (sm / base / lg / xl / 2xl).
+ *
+ * To keep this readable, each entry is a fontSize/lineHeight pair plus a
+ * minimal element-override set (paragraph/heading/code/pre). Adopters
+ * needing finer-grained overrides per element can layer additional
+ * utilities or write per-page CSS.
+ *
+ * @returns {Map<string, string[]>}   size variant class -> rule strings
+ */
+function buildProseSizeRules() {
+  const sizes = {
+    "sm": {
+      fontSize: "0.875rem",
+      lineHeight: "1.7142857",
+      h1: "2.1428571em; margin-top: 0; margin-bottom: 0.8em; line-height: 1.2",
+      h2: "1.4285714em; margin-top: 1.6em; margin-bottom: 0.8em; line-height: 1.4",
+      h3: "1.2857143em; margin-top: 1.5555556em; margin-bottom: 0.4444444em; line-height: 1.5555556",
+      h4: "margin-top: 1.4285714em; margin-bottom: 0.5714286em; line-height: 1.4285714",
+      pre: "font-size: 0.7857143em; line-height: 1.6363636; margin-top: 1.6363636em; margin-bottom: 1.6363636em; border-radius: 0.25rem; padding-top: 0.6363636em; padding-right: 1em; padding-bottom: 0.6363636em; padding-left: 1em",
+      code: "font-size: 0.8571429em",
+    },
+    "base": {
+      fontSize: "1rem",
+      lineHeight: "1.75",
+      h1: "2.25em; margin-top: 0; margin-bottom: 0.8888889em; line-height: 1.1111111",
+      h2: "1.5em; margin-top: 2em; margin-bottom: 1em; line-height: 1.3333333",
+      h3: "1.25em; margin-top: 1.6em; margin-bottom: 0.6em; line-height: 1.6",
+      h4: "margin-top: 1.5em; margin-bottom: 0.5em; line-height: 1.5",
+      pre: "font-size: 0.875em; line-height: 1.7142857; margin-top: 1.7142857em; margin-bottom: 1.7142857em; border-radius: 0.375rem; padding-top: 0.8571429em; padding-right: 1.1428571em; padding-bottom: 0.8571429em; padding-left: 1.1428571em",
+      code: "font-size: 0.875em",
+    },
+    "lg": {
+      fontSize: "1.125rem",
+      lineHeight: "1.7777778",
+      h1: "2.6666667em; margin-top: 0; margin-bottom: 0.8333333em; line-height: 1",
+      h2: "1.6666667em; margin-top: 1.8666667em; margin-bottom: 1.0666667em; line-height: 1.3333333",
+      h3: "1.3333333em; margin-top: 1.6666667em; margin-bottom: 0.6666667em; line-height: 1.5",
+      h4: "margin-top: 1.7777778em; margin-bottom: 0.4444444em; line-height: 1.5555556",
+      pre: "font-size: 0.8888889em; line-height: 1.75; margin-top: 2em; margin-bottom: 2em; border-radius: 0.375rem; padding-top: 1em; padding-right: 1.5em; padding-bottom: 1em; padding-left: 1.5em",
+      code: "font-size: 0.8888889em",
+    },
+    "xl": {
+      fontSize: "1.25rem",
+      lineHeight: "1.8",
+      h1: "2.8em; margin-top: 0; margin-bottom: 0.8571429em; line-height: 1",
+      h2: "1.8em; margin-top: 1.5555556em; margin-bottom: 0.8888889em; line-height: 1.1111111",
+      h3: "1.5em; margin-top: 1.6em; margin-bottom: 0.6666667em; line-height: 1.3333333",
+      h4: "margin-top: 1.8em; margin-bottom: 0.6em; line-height: 1.6",
+      pre: "font-size: 0.9em; line-height: 1.7777778; margin-top: 2em; margin-bottom: 2em; border-radius: 0.5rem; padding-top: 1.1111111em; padding-right: 1.3333333em; padding-bottom: 1.1111111em; padding-left: 1.3333333em",
+      code: "font-size: 0.9em",
+    },
+    "2xl": {
+      fontSize: "1.5rem",
+      lineHeight: "1.6666667",
+      h1: "2.6666667em; margin-top: 0; margin-bottom: 0.875em; line-height: 1",
+      h2: "2em; margin-top: 1.5em; margin-bottom: 0.8333333em; line-height: 1.0833333",
+      h3: "1.5em; margin-top: 1.5555556em; margin-bottom: 0.6666667em; line-height: 1.2222222",
+      h4: "margin-top: 1.6666667em; margin-bottom: 0.6666667em; line-height: 1.5",
+      pre: "font-size: 0.8333333em; line-height: 1.8; margin-top: 2em; margin-bottom: 2em; border-radius: 0.5rem; padding-top: 1.2em; padding-right: 1.6em; padding-bottom: 1.2em; padding-left: 1.6em",
+      code: "font-size: 0.8333333em",
+    },
+  };
+
+  const out = new Map();
+  for (const [size, spec] of Object.entries(sizes)) {
+    const cls = `prose-${size}`;
+    const r = (sel, decls) => buildProseRule(cls, sel, decls);
+    const rules = [];
+
+    // Container-level font-size + line-height override.
+    rules.push(`.${cls} { font-size: ${spec.fontSize}; line-height: ${spec.lineHeight} }`);
+
+    // Per-element overrides — h1..h4, pre, inline code.
+    rules.push(r("h1", `font-size: ${spec.h1}`));
+    rules.push(r("h2", `font-size: ${spec.h2}`));
+    rules.push(r("h3", `font-size: ${spec.h3}`));
+    rules.push(r("h4", spec.h4));
+    rules.push(r("pre", spec.pre));
+    rules.push(r("code", spec.code));
+
+    out.set(cls, rules);
+  }
+
+  return out;
+}
+
+/**
+ * Register the prose family (SPEC §26.6). Bare `prose` ships the base
+ * nested-element styling. `prose-{slate,gray,zinc,neutral,stone}` override
+ * color tones. `prose-{sm,base,lg,xl,2xl}` override sizing. `not-prose`
+ * is an opt-out marker that relies on the `:not(:where([class~="not-prose"] *))`
+ * suffix already present in every nested rule.
+ */
+function registerProse() {
+  // Bare `prose` — base rule + nested-element shape.
+  registry.set("prose", buildBaseProseRules().join("\n"));
+
+  // Color variants
+  for (const colorName of ["slate", "gray", "zinc", "neutral", "stone"]) {
+    const rules = buildProseColorRules(colorName);
+    if (rules.length > 0) {
+      registry.set(`prose-${colorName}`, rules.join("\n"));
+    }
+  }
+
+  // Size variants
+  for (const [cls, rules] of buildProseSizeRules()) {
+    registry.set(cls, rules.join("\n"));
+  }
+
+  // `not-prose` is an opt-out marker. The actual opt-out wiring lives in
+  // every nested rule above via `:not(:where([class~="not-prose"] *))`.
+  // The rule itself emits an empty declaration block so it's a no-op for
+  // CSS purposes — present so adopters can write `class="not-prose"`
+  // without triggering W-TAILWIND-001 or an unknown-class miss.
+  registry.set("not-prose", ".not-prose { }");
 }
 
 // ---------------------------------------------------------------------------
@@ -1111,30 +1488,48 @@ function resolveArbitraryValue(base, escapedClassName) {
  * The base rule is `.<some-name> { decl }` (or null for arbitrary, in
  * which case `arbitraryDecl` is used).
  *
+ * For multi-rule registry values (newline-separated rules — used by the
+ * prose family per §26.6), each constituent rule's leading class selector
+ * is rewritten so the variant-prefixed class name takes its place. The
+ * descendant selectors (e.g., ` :where(p)...`) are preserved verbatim.
+ *
  * @param {string|null} baseRule
  * @param {string|null} arbitraryDecl    css declaration body for arbitrary values
  * @param {string} escapedClassName
  * @param {{ breakpoint, theme, state }} variants
+ * @param {string} [baseName]   the un-prefixed class name (e.g., "prose-lg")
+ *                              — required for multi-rule rewriting
  * @returns {string|null}
  */
-function wrapWithVariants(baseRule, arbitraryDecl, escapedClassName, { breakpoint, theme, state }) {
-  let declaration;
+function wrapWithVariants(baseRule, arbitraryDecl, escapedClassName, { breakpoint, theme, state }, baseName) {
+  let rule;
   if (arbitraryDecl !== null) {
-    declaration = arbitraryDecl;
+    // Arbitrary-value path: single declaration body, no descendant rules.
+    if (state) {
+      const pseudo = STATE_PSEUDO_CLASSES[state];
+      rule = `.${escapedClassName}:${pseudo} {${arbitraryDecl}}`;
+    } else {
+      rule = `.${escapedClassName} {${arbitraryDecl}}`;
+    }
   } else if (baseRule) {
-    const m = baseRule.match(/^(\.[^\s{]+)\s*\{(.+)\}$/s);
-    if (!m) return baseRule;
-    declaration = m[2];
+    // Multi-rule detection: a registry value containing more than one
+    // top-level rule (joined with `\n`) needs per-rule selector
+    // substitution. Single-rule case stays on the original simple path.
+    if (baseRule.includes("\n") && baseName) {
+      rule = rewriteMultiRuleSelector(baseRule, baseName, escapedClassName, state);
+    } else {
+      const m = baseRule.match(/^(\.[^\s{]+)\s*\{(.+)\}$/s);
+      if (!m) return baseRule;
+      const declaration = m[2];
+      if (state) {
+        const pseudo = STATE_PSEUDO_CLASSES[state];
+        rule = `.${escapedClassName}:${pseudo} {${declaration}}`;
+      } else {
+        rule = `.${escapedClassName} {${declaration}}`;
+      }
+    }
   } else {
     return null;
-  }
-
-  let rule;
-  if (state) {
-    const pseudo = STATE_PSEUDO_CLASSES[state];
-    rule = `.${escapedClassName}:${pseudo} {${declaration}}`;
-  } else {
-    rule = `.${escapedClassName} {${declaration}}`;
   }
 
   // Theme media query stacks INSIDE the responsive query so that
@@ -1149,6 +1544,37 @@ function wrapWithVariants(baseRule, arbitraryDecl, escapedClassName, { breakpoin
     rule = `@media (min-width: ${bp}) { ${rule} }`;
   }
   return rule;
+}
+
+/**
+ * Rewrite a multi-rule registry value so each constituent rule's leading
+ * `.{baseName}` selector is replaced with `.{escapedFullName}`, optionally
+ * suffixed with a `:pseudo` state.
+ *
+ * Used by the prose family, where one logical utility expands to a base
+ * `.prose { ... }` rule plus many `.prose :where(<tag>)... { ... }` nested
+ * rules. For `md:prose`, every constituent's `.prose` prefix becomes
+ * `.md\:prose` so the variant-prefixed class scopes ALL descendant rules.
+ *
+ * The base class name is matched as a token immediately following the
+ * leading `.`, terminating at the next character that is not a valid
+ * CSS-class-name continuation. This preserves trailing selector content
+ * (descendant combinators, `:where()` parts, pseudo-class chains).
+ *
+ * @param {string} baseRules         newline-joined rules
+ * @param {string} baseName          un-escaped registered class name (e.g., "prose-lg")
+ * @param {string} escapedFullName   already-escaped variant-prefixed class name
+ * @param {string|null} state        state pseudo-class name (e.g., "hover") or null
+ * @returns {string}
+ */
+function rewriteMultiRuleSelector(baseRules, baseName, escapedFullName, state) {
+  const pseudoSuffix = state ? `:${STATE_PSEUDO_CLASSES[state]}` : "";
+  const newSelectorBase = `.${escapedFullName}${pseudoSuffix}`;
+  // Build a regex that matches `.<baseName>` at the start of any selector
+  // token in the rule block. Escape the baseName for regex use.
+  const escaped = baseName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`\\.${escaped}(?![a-zA-Z0-9_-])`, "g");
+  return baseRules.replace(re, newSelectorBase);
 }
 
 /**
@@ -1214,7 +1640,7 @@ export function getTailwindCSSWithDiagnostic(className) {
   if (!breakpoint && !theme && !state) {
     return { css: baseRule, diagnostic: null };
   }
-  const wrapped = wrapWithVariants(baseRule, null, escapedName, { breakpoint, theme, state });
+  const wrapped = wrapWithVariants(baseRule, null, escapedName, { breakpoint, theme, state }, base);
   return { css: wrapped, diagnostic: null };
 }
 
@@ -1495,3 +1921,4 @@ registerColors();
 registerBorders();
 registerEffects();
 registerLayout();
+registerProse();

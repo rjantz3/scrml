@@ -13978,6 +13978,84 @@ The variant-prefix `:` separator is bracket-aware: a `:` inside a `[...]` arbitr
 - Container queries (`@container`) — TBD.
 For the deferred items above, when a class string in source uses one of those syntaxes (e.g. `group-hover:p-4`, custom-theme-prefix `brand:foo-bar`), the compiler SHALL emit W-TAILWIND-001. The warning is non-fatal — compilation produces output regardless. Class strings using variants and arbitrary values that ARE supported (Sections 26.3 and 26.4) compile cleanly and produce no warning. `${...}` interpolation regions inside the class attribute value are masked before scanning so dynamic-class expressions like `class="${cond ? 'a' : 'b'}"` do not produce false positives on the ternary's `:`.
 
+### 26.6 Typography Plugin
+
+The compiler SHALL recognize the `prose` utility family per the Tailwind v3 Typography plugin contract. The `prose` class applied to a containing element styles its descendant typography (paragraphs, headings, lists, code blocks, blockquotes, tables, images, etc.) without requiring per-element utility authoring.
+
+The family comprises four classes (and their compositions):
+
+- `prose` — base nested-typography styling.
+- `prose-{color}` — color-tone variant (slate, gray, zinc, neutral, stone).
+- `prose-{size}` — size variant (sm, base, lg, xl, 2xl).
+- `not-prose` — opt-out marker; suppresses prose styling within an opted-out subtree.
+
+Compositions stack: `prose prose-slate prose-lg` produces the union of the three rule sets. Variants are applicable: `md:prose-lg` wraps the entire prose rule block in `@media (min-width: 768px) { ... }`.
+
+#### 26.6.1 Base Prose Styling
+
+The bare `prose` class SHALL emit a base rule (color, max-width, font-size, line-height) plus a comprehensive set of nested descendant rules covering:
+
+- Paragraphs (`p`, `[class~="lead"]`)
+- Inline content (`a`, `strong`, `em`, `kbd`)
+- Lists (`ol`, `ul`, `li`, including `ol[type="A"]`/`[type="a"]`/`[type="I"]`/`[type="i"]`/`[type="1"]`)
+- Horizontal rules (`hr`)
+- Blockquotes (`blockquote`, including `::before` / `::after` quote pseudo-elements)
+- Headings (`h1`, `h2`, `h3`, `h4`, plus heading-strong overrides)
+- Media (`img`, `picture`, `video`, `figure`, `figcaption`)
+- Code (`code`, `pre`, `pre code`, with inline-code `::before` / `::after` backtick rendering)
+- Tables (`table`, `thead`, `thead th`, `tbody tr`, `tbody td`, `tfoot`, `tfoot td`)
+
+Each nested rule SHALL use the form:
+
+```
+.prose :where(<selector>):not(:where([class~="not-prose"] *)) { ... }
+```
+
+The `:where()` wrapper around the descendant selector keeps the nested rule at specificity (0, 1, 0) so adopter overrides do not require `!important`. The `:not(:where([class~="not-prose"] *))` suffix is the wiring for §26.6.4 opt-out.
+
+#### 26.6.2 Color Variants
+
+`prose-slate`, `prose-gray`, `prose-zinc`, `prose-neutral`, `prose-stone` SHALL emit color overrides drawing from the named palette. Each variant SHALL override:
+
+| Element / target | Shade |
+|---|---|
+| Container body color | 700 |
+| `[class~="lead"]` | 600 |
+| `a`, `strong`, headings (h1..h4), `kbd`, `code` | 900 |
+| `blockquote` color | 900; `border-left-color` 200 |
+| `ol > li::marker` | 500 |
+| `ul > li::marker` | 300 |
+| `hr` border-color | 200 |
+| `pre` color / background | 200 / 800 |
+| `thead` border-bottom-color | 300 |
+| `tbody tr` border-bottom-color | 200 |
+| `tfoot` border-top-color | 300 |
+| `figcaption` color | 500 |
+
+#### 26.6.3 Size Variants
+
+`prose-sm`, `prose-base`, `prose-lg`, `prose-xl`, `prose-2xl` SHALL emit size overrides covering at minimum:
+
+- Container `font-size` and `line-height`.
+- Heading sizes (`h1`, `h2`, `h3`, `h4`) with associated margins and line-heights.
+- Code-block (`pre`) font-size, line-height, margin, padding, border-radius.
+- Inline code (`code`) font-size.
+
+Adopters needing finer-grained per-element size overrides can layer additional utilities or write per-page CSS.
+
+#### 26.6.4 not-prose Opt-Out
+
+`not-prose` is an opt-out marker. The class itself SHALL emit an empty CSS declaration block (`.not-prose { }`) — the actual opt-out mechanism is the `:not(:where([class~="not-prose"] *))` suffix already present in every nested rule under §26.6.1 / §26.6.2 / §26.6.3.
+
+Inside an opted-out subtree (any descendant of an element bearing `class="not-prose"`), all prose nested rules SHALL be suppressed; the descendant adopts its default browser styling.
+
+The `:where()` wrapping inside the `:not()` keeps the opt-out condition at specificity 0,0,0 so it does not influence the overall rule specificity.
+
+#### 26.6.5 Open Items
+
+- Custom theme overrides for prose (e.g., adopter-provided body / heading color schemes) — cross-ref §26.5 SPEC-ISSUE-012.
+- Per-element prose modifiers (`prose-headings:`, `prose-a:`, etc.) — Tailwind v3 plugin extension; deferred to future revision.
+
 ---
 
 ## 27. Comment Syntax

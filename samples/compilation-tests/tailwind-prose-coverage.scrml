@@ -1,0 +1,80 @@
+// tailwind-prose-coverage.scrml
+// SPEC §26.6 end-to-end fixture for the prose utility family.
+// Exercises: prose, prose-slate, prose-lg (composition), not-prose opt-out,
+// plus diverse descendant elements (h1..h4, p, blockquote, code, pre, table,
+// ul, ol, hr, img, a, kbd, figure, figcaption).
+
+<article class="prose prose-slate prose-lg">
+    <h1>Typography Plugin Test</>
+    <p>This article exercises the <code>prose</> utility family per SPEC §26.6. The container has <code>class="prose prose-slate prose-lg"</> applied, so nested typography should pick up base styling, slate color overrides, and large-size scaling.</>
+
+    <h2>Headings</>
+    <p>The <kbd>prose</> family styles <code>h1</> through <code>h4</> with progressive sizes.</>
+
+    <h3>Inline content</>
+    <p>Links like <a href="https://example.com">example.com</> render with prose link styling. <strong>Bold text</> uses the heading color. Inline <code>code</> appears in monospace with backtick markers.</>
+
+    <h4>Code blocks</>
+    <pre><code>function greet(name) {
+  return `Hello, ${name}`;
+}</></>
+
+    <h2>Lists</>
+    <ul>
+        <li>Unordered item one</>
+        <li>Unordered item two with <em>emphasis</></>
+        <li>Unordered item three</>
+    </ul>
+
+    <ol>
+        <li>Ordered item one</>
+        <li>Ordered item two</>
+        <li>Ordered item three</>
+    </ol>
+
+    <h2>Blockquotes</>
+    <blockquote>
+        <p>A quoted passage uses italic styling, a left border in the variant's 200-shade, and the variant's 900-shade for body color.</>
+    </blockquote>
+
+    <h2>Tables</>
+    <table>
+        <thead>
+            <tr>
+                <th>Property</>
+                <th>Description</>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>prose</>
+                <td>Base nested-typography styling</>
+            </tr>
+            <tr>
+                <td>prose-slate</>
+                <td>Slate-tone color overrides</>
+            </tr>
+            <tr>
+                <td>prose-lg</>
+                <td>Large size scaling</>
+            </tr>
+        </tbody>
+    </table>
+
+    <hr/>
+
+    <h2>Opt-out (not-prose)</>
+    <p>The block below is marked <code>not-prose</> and should escape prose styling entirely:</>
+
+    <div class="not-prose">
+        <h3>Plain heading inside not-prose</>
+        <p>This paragraph uses default browser styling, not prose typography.</>
+        <a href="#">A link with no prose styling</>
+    </div>
+
+    <h2>Figures</>
+    <figure>
+        <img src="/example.png" alt="example"/>
+        <figcaption>A caption rendered in the prose figcaption style.</>
+    </figure>
+</article>
