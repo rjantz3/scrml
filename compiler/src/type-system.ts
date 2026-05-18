@@ -3970,6 +3970,104 @@ function annotateNodes(
     walkAndValidateParseVariantCalls(_allTopNodes, parseVariantLocals, typeRegistry, errors, _pvDefaultSpan);
   }
 
+  // ---------------------------------------------------------------------------
+  // §41.14 / §53.14 — formFor markup-element recognition + AST rewrite pass.
+  //
+  // formFor is the second general-position member of the §53.14 type-as-
+  // argument family (after parseVariant §41.13). The TS pass:
+  //
+  //   1. Collect local names that bind to `formFor` from imports of
+  //      `'scrml:data'`.
+  //   2. Walk every `<formFor>` markup node in the file's AST.
+  //   3. Validate per §41.14.1-§41.14.8 (the 8 normative error codes).
+  //   4. Build a FormForExpansion plan + invoke the emit-form-for expander to
+  //      synthesize the equivalent compound state-decl + <form> markup tree.
+  //   5. Splice the synthesized nodes in place of the original <formFor>
+  //      node in the parent's children array.
+  //
+  // The rewrite makes the downstream stages (DG / VSS / CG) see a tree that
+  // is identical in shape to hand-authored Shape 2 + <form> + <errors>. Per
+  // §41.14.10 the emitted output is standard scrml — Pillar 5 invariant.
+  // ---------------------------------------------------------------------------
+  const formForLocals = new Set<string>();
+  function collectFormForImports(nodes: ASTNodeLike[]): void {
+    for (const n of nodes) {
+      if (!n || typeof n !== "object") continue;
+      if (n.kind === "import-decl" && (n as ASTNodeLike).source === "scrml:data") {
+        const specifiers = (n as ASTNodeLike).specifiers as Array<{ imported?: string; local?: string }> | undefined;
+        if (Array.isArray(specifiers)) {
+          for (const spec of specifiers) {
+            if (spec && spec.imported === "formFor" && typeof spec.local === "string") {
+              formForLocals.add(spec.local);
+            }
+          }
+        } else if (Array.isArray(n.names)) {
+          for (const name of n.names as unknown[]) {
+            if (typeof name === "string" && name === "formFor") {
+              formForLocals.add("formFor");
+            }
+          }
+        }
+      }
+      const body = n.body as ASTNodeLike[] | undefined;
+      if (Array.isArray(body)) collectFormForImports(body);
+      const children = n.children as ASTNodeLike[] | undefined;
+      if (Array.isArray(children)) collectFormForImports(children);
+    }
+  }
+  collectFormForImports(_allTopNodes);
+
+  // Build a fieldName→rawClause map per struct typeDecl so the expander can
+  // pull validator clauses straight from the source text. buildTypeRegistry
+  // resolves the type-portion but discards the validator-tail; we re-walk the
+  // raw body here to recover it without disturbing the existing resolver.
+  const _structFieldRawClauses = new Map<string, Map<string, string>>();
+  const _ffTypeDecls = ((fileAST.typeDecls as ASTNodeLike[] | undefined)
+    ?? ((fileAST.ast as FileAST | undefined)?.typeDecls as ASTNodeLike[] | undefined)
+    ?? []);
+  for (const decl of _ffTypeDecls) {
+    if (!decl || decl.typeKind !== "struct") continue;
+    const structName = (decl.name as string) ?? "";
+    if (!structName) continue;
+    const fieldMap = new Map<string, string>();
+    const rawBody = (decl.raw as string) ?? "";
+    let body = rawBody.trim();
+    if (body.startsWith("{")) body = body.slice(1);
+    if (body.endsWith("}")) body = body.slice(0, -1);
+    body = body.trim();
+    const lines = splitTopLevel(body, [",", "\n"]);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const colonIdx = trimmed.indexOf(":");
+      if (colonIdx === -1) continue;
+      const fieldName = trimmed.slice(0, colonIdx).trim();
+      const clauseRaw = trimmed.slice(colonIdx + 1).trim();
+      if (!fieldName || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(fieldName)) continue;
+      fieldMap.set(fieldName, clauseRaw);
+    }
+    _structFieldRawClauses.set(structName, fieldMap);
+  }
+
+  // Walk the AST for <formFor> nodes. Validation + rewrite happens in one
+  // pass — the AST mutation (children-array splice) MUST happen in-place
+  // because parent references are not threaded through the visitor.
+  if (formForLocals.size > 0) {
+    const _ffDefaultSpan: Span = { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+    walkAndExpandFormForNodes(
+      _allTopNodes,
+      formForLocals,
+      typeRegistry,
+      _structFieldRawClauses,
+      fnSignatures,
+      fnErrorTypes,
+      routeMap,
+      errors,
+      filePath,
+      _ffDefaultSpan,
+    );
+  }
+
   function visitNode(node: unknown): ResolvedType {
     if (!node || typeof node !== "object") return tUnknown();
 
@@ -9785,6 +9883,539 @@ function walkAndValidateParseVariantCalls(
   }
 
   for (const n of nodes) walkNode(n);
+}
+
+// ---------------------------------------------------------------------------
+// §41.14 — formFor validation + AST rewrite helpers.
+//
+// Recognition + validation runs at the type-system stage per §53.14.5.
+// The expander synthesizes the equivalent Shape 2 + <form> + <errors>
+// markup tree (cross-ref compiler/src/codegen/emit-form-for.ts).
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract a bare-identifier attribute value. Returns null when the attribute
+ * is missing or carries a non-identifier value shape (string-literal, expr,
+ * etc. — those are flagged at the call site since the wanted error code
+ * differs per attribute).
+ */
+function _ffGetIdentAttr(
+  attrs: ASTNodeLike[] | undefined,
+  name: string,
+): { ref: string; span: Span | undefined } | null {
+  if (!Array.isArray(attrs)) return null;
+  for (const a of attrs) {
+    if (!a || (a as ASTNodeLike).name !== name) continue;
+    const val = (a as ASTNodeLike).value as { kind?: string; name?: string; span?: Span } | undefined;
+    if (val && val.kind === "variable-ref" && typeof val.name === "string") {
+      // Allow `@`-prefixed (for `as=@var`) — strip @ for caller.
+      const ref = val.name.startsWith("@") ? val.name.slice(1) : val.name;
+      return { ref, span: val.span };
+    }
+    // ATTR_IDENT also lands as "variable-ref" in the parsed AST. Done.
+    return { ref: "", span: val?.span };
+  }
+  return null;
+}
+
+/**
+ * Extract the raw attribute value text for an attribute that may carry a
+ * string-literal, variable-ref, or expr shape. Returns the verbatim payload
+ * (without quotes) — caller decides interpretation.
+ */
+function _ffGetAttrRawValue(
+  attrs: ASTNodeLike[] | undefined,
+  name: string,
+): { rawValue: string; valueKind: string; span: Span | undefined } | null {
+  if (!Array.isArray(attrs)) return null;
+  for (const a of attrs) {
+    if (!a || (a as ASTNodeLike).name !== name) continue;
+    const val = (a as ASTNodeLike).value as { kind?: string; value?: unknown; raw?: string; name?: string; span?: Span } | undefined;
+    if (!val) return { rawValue: "", valueKind: "absent", span: undefined };
+    const kind = val.kind ?? "unknown";
+    if (kind === "string-literal") {
+      return { rawValue: String(val.value ?? ""), valueKind: kind, span: val.span };
+    }
+    if (kind === "variable-ref" || kind === "ident" || kind === "call-ref") {
+      return { rawValue: String(val.name ?? val.raw ?? ""), valueKind: kind, span: val.span };
+    }
+    if (kind === "expr") {
+      return { rawValue: String(val.raw ?? ""), valueKind: kind, span: val.span };
+    }
+    return { rawValue: String(val.raw ?? val.value ?? ""), valueKind: kind, span: val.span };
+  }
+  return null;
+}
+
+/**
+ * Parse an array-literal attribute (`pick=["a", "b"]` or `omit=["c"]`) into
+ * the list of bare field-name strings. Returns null on a non-array shape.
+ * Permissive: accepts both string-literal entries (`"a"`) and bare-ident
+ * entries (`a`) since adopters write either form interchangeably.
+ */
+function _ffParseStringArray(raw: string): string[] | null {
+  if (!raw) return null;
+  let s = raw.trim();
+  // Strip outer brackets (and parens, defensively).
+  if (s.startsWith("[") && s.endsWith("]")) s = s.slice(1, -1).trim();
+  else if (s.startsWith("(") && s.endsWith(")")) s = s.slice(1, -1).trim();
+  else return null;
+  if (!s) return [];
+  const parts = s.split(",").map(p => p.trim()).filter(p => p.length > 0);
+  const out: string[] = [];
+  for (const p of parts) {
+    let v = p;
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+      v = v.slice(1, -1);
+    }
+    if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(v)) out.push(v);
+    else return null;  // malformed entry
+  }
+  return out;
+}
+
+/**
+ * Walk the file's AST and find every `<formFor>` markup-element node;
+ * validate per §41.14.1-§41.14.8; on success, rewrite the parent's children
+ * array to splice in the synthesized compound state-decl + <form> markup
+ * tree.
+ *
+ * Parent threading: we cannot rely on parent backrefs (AST construction
+ * doesn't populate them). Instead, the walker iterates over each parent's
+ * `children`/`body` array and detects formFor children itself, splicing in
+ * the synthesized nodes when a match is found.
+ */
+function walkAndExpandFormForNodes(
+  nodes: ASTNodeLike[],
+  formForLocals: Set<string>,
+  typeRegistry: Map<string, ResolvedType>,
+  structFieldRawClauses: Map<string, Map<string, string>>,
+  fnSignatures: Map<string, { params: Array<{ name: string; type: ResolvedType }>; returnType: ResolvedType }>,
+  fnErrorTypes: Map<string, string>,
+  routeMap: RouteMap,
+  errors: TSError[],
+  filePath: string,
+  defaultSpan: Span,
+): void {
+  // Dynamic import to avoid a static cycle (codegen → type-system) — the
+  // emit-form-for module is leaf-clean (no imports back into type-system).
+  // We use a synchronous-resolve dance: bun supports top-level require via
+  // createRequire, but for compatibility we stash the helpers under a
+  // lazy-loaded local. The first walk triggers the load.
+  let expanderModule: typeof import("./codegen/emit-form-for.ts") | null = null;
+  function loadExpander(): typeof import("./codegen/emit-form-for.ts") {
+    if (expanderModule) return expanderModule;
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    expanderModule = require("./codegen/emit-form-for.ts");
+    return expanderModule;
+  }
+
+  function processFormForNode(
+    node: ASTNodeLike,
+  ): { compoundDecl: unknown; formElement: unknown } | null {
+    const span = ((node.span as Span | undefined) ?? defaultSpan);
+    const attrs = (node.attrs as ASTNodeLike[] | undefined) ?? (node.attributes as ASTNodeLike[] | undefined);
+
+    // §41.14.1 — Validate `for=` attribute.
+    const forAttr = _ffGetAttrRawValue(attrs, "for");
+    if (!forAttr || !forAttr.rawValue) {
+      errors.push(new TSError(
+        "E-FORMFOR-TYPE-NOT-STRUCT",
+        `E-FORMFOR-TYPE-NOT-STRUCT: \`<formFor for=...>\` is missing the required \`for=\` attribute. ` +
+        `The \`for=\` attribute SHALL be a bare scrml-native \`:struct\` type identifier — e.g. \`<formFor for=Signup .../>\`. ` +
+        `See SPEC §41.14.1.`,
+        forAttr?.span ?? span,
+      ));
+      return null;
+    }
+    if (forAttr.valueKind === "string-literal") {
+      errors.push(new TSError(
+        "E-FORMFOR-TYPE-NOT-STRUCT",
+        `E-FORMFOR-TYPE-NOT-STRUCT: \`<formFor for=...>\` was given a quoted string value '"${forAttr.rawValue}"'. ` +
+        `The \`for=\` attribute SHALL be a bare scrml-native \`:struct\` type identifier — not a string literal. ` +
+        `Example: \`<formFor for=Signup .../>\` (NOT \`<formFor for="Signup"/>\`). See SPEC §41.14.1.`,
+        forAttr.span ?? span,
+      ));
+      return null;
+    }
+    const structTypeName = forAttr.rawValue;
+    const resolved = typeRegistry.get(structTypeName);
+    if (!resolved) {
+      errors.push(new TSError(
+        "E-FORMFOR-TYPE-NOT-STRUCT",
+        `E-FORMFOR-TYPE-NOT-STRUCT: \`<formFor for=${structTypeName}>\` references unknown type '${structTypeName}'. ` +
+        `The \`for=\` attribute must name a scrml-native \`:struct\` type declared in this file ` +
+        `(or imported via \`\${ import { ${structTypeName} } from './path.scrml' }\`). See SPEC §41.14.1.`,
+        forAttr.span ?? span,
+      ));
+      return null;
+    }
+    if (resolved.kind !== "struct") {
+      errors.push(new TSError(
+        "E-FORMFOR-TYPE-NOT-STRUCT",
+        `E-FORMFOR-TYPE-NOT-STRUCT: \`<formFor for=${structTypeName}>\` references type '${structTypeName}' which is a ${resolved.kind}, not a struct. ` +
+        `\`formFor\` only accepts scrml-native \`:struct\` types — the field set is what drives the auto-generated form. ` +
+        `For enum-shape boundary parsing, use \`parseVariant\` (§41.13) instead. See SPEC §41.14.1.`,
+        forAttr.span ?? span,
+      ));
+      return null;
+    }
+    const structType = resolved as StructType;
+
+    // §41.14.2 — Resolve cell name (default = camel-cased struct name,
+    // `as=@varName` override).
+    const asAttr = _ffGetAttrRawValue(attrs, "as");
+    let cellName = (loadExpander().camelizeStructName(structTypeName));
+    if (asAttr && asAttr.rawValue) {
+      const asRaw = asAttr.rawValue.startsWith("@") ? asAttr.rawValue.slice(1) : asAttr.rawValue;
+      if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(asRaw)) cellName = asRaw;
+    }
+
+    // §41.14.5 — Validate pick=/omit=/partial=.
+    const pickAttr = _ffGetAttrRawValue(attrs, "pick");
+    const omitAttr = _ffGetAttrRawValue(attrs, "omit");
+    const partialAttr = _ffGetAttrRawValue(attrs, "partial");
+
+    if (pickAttr && omitAttr) {
+      errors.push(new TSError(
+        "E-FORMFOR-PICK-OMIT-CONFLICT",
+        `E-FORMFOR-PICK-OMIT-CONFLICT: \`<formFor>\` was given BOTH \`pick=\` AND \`omit=\` attributes. ` +
+        `The two are mutually exclusive — \`pick=\` names the only fields to include; \`omit=\` names fields to exclude. ` +
+        `Resolution: choose one. For combined transforms, layer Pick over Omit at the type level. See SPEC §41.14.5.`,
+        span,
+      ));
+      return null;
+    }
+
+    let pickList: string[] | null = null;
+    if (pickAttr && pickAttr.rawValue) {
+      pickList = _ffParseStringArray(pickAttr.rawValue);
+      if (!pickList) {
+        errors.push(new TSError(
+          "E-FORMFOR-PICK-INVALID-FIELD",
+          `E-FORMFOR-PICK-INVALID-FIELD: \`<formFor pick=...>\` value '${pickAttr.rawValue}' is not a recognized array-of-strings literal. ` +
+          `Use the form \`pick=["fieldA", "fieldB"]\` with bare field-name strings. See SPEC §41.14.5.`,
+          pickAttr.span ?? span,
+        ));
+        return null;
+      }
+      for (const fieldName of pickList) {
+        if (!structType.fields.has(fieldName)) {
+          errors.push(new TSError(
+            "E-FORMFOR-PICK-INVALID-FIELD",
+            `E-FORMFOR-PICK-INVALID-FIELD: \`<formFor for=${structTypeName} pick=[...]>\` references field '${fieldName}' which is not present on struct '${structTypeName}'. ` +
+            `Declared fields: ${[...structType.fields.keys()].join(", ")}. See SPEC §41.14.5.`,
+            pickAttr.span ?? span,
+          ));
+          return null;
+        }
+      }
+    }
+
+    let omitList: string[] | null = null;
+    if (omitAttr && omitAttr.rawValue) {
+      omitList = _ffParseStringArray(omitAttr.rawValue);
+      if (!omitList) {
+        errors.push(new TSError(
+          "E-FORMFOR-OMIT-INVALID-FIELD",
+          `E-FORMFOR-OMIT-INVALID-FIELD: \`<formFor omit=...>\` value '${omitAttr.rawValue}' is not a recognized array-of-strings literal. ` +
+          `Use the form \`omit=["fieldA", "fieldB"]\` with bare field-name strings. See SPEC §41.14.5.`,
+          omitAttr.span ?? span,
+        ));
+        return null;
+      }
+      for (const fieldName of omitList) {
+        if (!structType.fields.has(fieldName)) {
+          errors.push(new TSError(
+            "E-FORMFOR-OMIT-INVALID-FIELD",
+            `E-FORMFOR-OMIT-INVALID-FIELD: \`<formFor for=${structTypeName} omit=[...]>\` references field '${fieldName}' which is not present on struct '${structTypeName}'. ` +
+            `Declared fields: ${[...structType.fields.keys()].join(", ")}. See SPEC §41.14.5.`,
+            omitAttr.span ?? span,
+          ));
+          return null;
+        }
+      }
+    }
+
+    const partial = !!(partialAttr && (
+      partialAttr.rawValue === "true"
+      || partialAttr.valueKind === "boolean-flag"
+      || (partialAttr.valueKind === "absent" && partialAttr.rawValue === "")
+    ));
+
+    // §41.14.6 — Validate error-strategy.
+    const errStratAttr = _ffGetAttrRawValue(attrs, "error-strategy");
+    let errorStrategy: "per-field" | "summary" | "both" = "per-field";
+    if (errStratAttr && errStratAttr.rawValue !== "") {
+      const v = errStratAttr.rawValue;
+      if (v !== "per-field" && v !== "summary" && v !== "both") {
+        errors.push(new TSError(
+          "E-FORMFOR-ERROR-STRATEGY-INVALID",
+          `E-FORMFOR-ERROR-STRATEGY-INVALID: \`<formFor error-strategy="${v}"/>\` is not a recognized strategy value. ` +
+          `Valid values: "per-field" (default), "summary", "both". See SPEC §41.14.6.`,
+          errStratAttr.span ?? span,
+        ));
+        return null;
+      }
+      errorStrategy = v as "per-field" | "summary" | "both";
+    }
+
+    // §41.14.4 — Walk slot children; validate slot names against struct fields.
+    const slotOverrides = new Map<string, unknown[]>();
+    const declaredFieldNames = new Set(structType.fields.keys());
+    const childNodes = (node.children as ASTNodeLike[] | undefined) ?? [];
+    for (const child of childNodes) {
+      if (!child || typeof child !== "object") continue;
+      // Slot children inside <formFor> are <slot name="X">...</> or a typed
+      // child element with `slot="X"` (component-slot convention per §16).
+      // We accept both forms — a <slot name="X"> element OR any element with
+      // a `slot="X"` attribute — to match adopter expectations.
+      let slotName: string | null = null;
+      let slotContent: ASTNodeLike[] | null = null;
+      if (child.kind === "markup" && (child.tag === "slot" || (child as ASTNodeLike).tagName === "slot")) {
+        const slotAttrs = (child.attrs as ASTNodeLike[] | undefined) ?? (child.attributes as ASTNodeLike[] | undefined);
+        const nameAttr = _ffGetAttrRawValue(slotAttrs, "name");
+        if (nameAttr && nameAttr.rawValue) {
+          slotName = nameAttr.rawValue;
+          slotContent = (child.children as ASTNodeLike[] | undefined) ?? [];
+        }
+      } else if (child.kind === "markup") {
+        // Inline form: any element bearing a `slot="X"` attribute.
+        const cAttrs = (child.attrs as ASTNodeLike[] | undefined) ?? (child.attributes as ASTNodeLike[] | undefined);
+        const slotAttr = _ffGetAttrRawValue(cAttrs, "slot");
+        if (slotAttr && slotAttr.rawValue) {
+          slotName = slotAttr.rawValue;
+          // The whole child element IS the slot content.
+          slotContent = [child];
+        }
+      }
+      if (slotName !== null) {
+        // §41.14.4 — slot name must match a struct field name OR the reserved "submit" slot.
+        if (slotName !== "submit" && !declaredFieldNames.has(slotName)) {
+          errors.push(new TSError(
+            "E-FORMFOR-SLOT-UNKNOWN",
+            `E-FORMFOR-SLOT-UNKNOWN: \`<formFor for=${structTypeName}>\` contains a slot \`name="${slotName}"\` that does not match any struct field or the reserved "submit" slot. ` +
+            `Valid slot names: ${["submit", ...structType.fields.keys()].join(", ")}. See SPEC §41.14.4.`,
+            (child.span as Span | undefined) ?? span,
+          ));
+          return null;
+        }
+        slotOverrides.set(slotName, slotContent ?? []);
+      }
+      // Non-slot children (text, comments, etc.) are silently ignored — the
+      // formFor body's load-bearing content is its slot overrides; other
+      // children are spurious whitespace.
+    }
+
+    // §41.14.5 — Compute the included field set.
+    const allFieldNames = [...structType.fields.keys()];
+    let includedFieldNames: string[];
+    if (pickList) {
+      includedFieldNames = pickList;
+    } else if (omitList) {
+      const omitSet = new Set(omitList);
+      includedFieldNames = allFieldNames.filter(f => !omitSet.has(f));
+    } else {
+      includedFieldNames = allFieldNames;
+    }
+
+    // §41.14.8 — Nested struct fields require slot overrides.
+    const rawClauses = structFieldRawClauses.get(structTypeName) ?? new Map<string, string>();
+    const includedFields: import("./codegen/emit-form-for.ts").FieldInfo[] = [];
+    for (const fieldName of includedFieldNames) {
+      const fieldType = structType.fields.get(fieldName);
+      if (!fieldType) continue;
+      const fieldKind = (fieldType as { kind?: string }).kind ?? "asIs";
+      const isNestedStruct = fieldKind === "struct";
+      if (isNestedStruct && !slotOverrides.has(fieldName)) {
+        errors.push(new TSError(
+          "E-FORMFOR-NESTED-STRUCT-NO-SLOT",
+          `E-FORMFOR-NESTED-STRUCT-NO-SLOT: \`<formFor for=${structTypeName}>\` has a struct-typed field '${fieldName}' but no \`<slot name="${fieldName}">\` override was provided. ` +
+          `v1.0 does NOT auto-recurse into nested struct fields (deferred to v1.next per OQ-FF-11). ` +
+          `Resolution: provide an explicit slot override (typically a sibling \`<formFor for=${(fieldType as { name?: string }).name ?? "NestedType"}/>\` call), OR exclude the field via \`omit=["${fieldName}"]\`. See SPEC §41.14.8.`,
+          span,
+        ));
+        return null;
+      }
+      // Determine the base-type name for input-shape selection. The
+      // typeRegistry path handles predicated + primitive resolution; for
+      // fall-through cases (the legacy struct-body parser drops trailing
+      // `req length(...)` validators into asIs), we extract the leading
+      // bare type token from the raw clause text.
+      const clauseRaw = rawClauses.get(fieldName) ?? "";
+      let baseTypeName: string =
+        fieldKind === "predicated"
+          ? ((fieldType as { baseType?: string }).baseType ?? "string")
+          : (fieldKind === "primitive"
+              ? ((fieldType as { name?: string }).name ?? "string")
+              : fieldKind);
+      if (baseTypeName === "asIs" || baseTypeName === "unknown") {
+        // Pull the leading token from clauseRaw — `"boolean req"` → `"boolean"`,
+        // `"string req length(>=2)"` → `"string"`, etc.
+        const m = clauseRaw.match(/^([A-Za-z_][A-Za-z0-9_]*)/);
+        if (m) baseTypeName = m[1];
+      }
+      const validators = loadExpander().parseValidatorClauses(clauseRaw);
+      includedFields.push({
+        name: fieldName,
+        baseTypeName,
+        label: loadExpander().mechanicalLabel(fieldName),
+        validators,
+        isNestedStruct,
+      });
+    }
+
+    // §41.14.3 — Validate onsubmit handler signature.
+    const onsubmitAttr = _ffGetAttrRawValue(attrs, "onsubmit");
+    let onsubmitFnName: string | null = null;
+    let onsubmitBoundary: "server" | "client" | null = null;
+    let peActionUrl = "";
+    if (onsubmitAttr && onsubmitAttr.rawValue) {
+      onsubmitFnName = onsubmitAttr.rawValue;
+      // Strip trailing `()` if adopter wrote bare-call form `fn()`.
+      if (onsubmitFnName.endsWith("()")) onsubmitFnName = onsubmitFnName.slice(0, -2).trim();
+      const sig = fnSignatures.get(onsubmitFnName);
+      if (!sig) {
+        // Defensive — fn name resolution may fail on cross-file imports OR
+        // when the fn is declared later in source. We avoid firing
+        // E-FORMFOR-ONSUBMIT-SIGNATURE for unresolved-name cases to keep
+        // false positives down; the adopter sees E-NAME-UNDECLARED at the
+        // ident position instead.
+      } else {
+        // Param-1 type must be assignable from the (post-transform) struct shape.
+        const firstParam = sig.params[0];
+        if (!firstParam) {
+          errors.push(new TSError(
+            "E-FORMFOR-ONSUBMIT-SIGNATURE",
+            `E-FORMFOR-ONSUBMIT-SIGNATURE: \`<formFor onsubmit=${onsubmitFnName}/>\`'s handler takes zero arguments. ` +
+            `Expected signature: \`fn(values: ${structTypeName}${pickList || omitList ? " /* or derived shape */" : ""}) ! ErrorType\`. ` +
+            `See SPEC §41.14.3.`,
+            onsubmitAttr.span ?? span,
+          ));
+          return null;
+        }
+        const paramType = firstParam.type;
+        const paramKind = (paramType as { kind?: string }).kind ?? "asIs";
+        // Conservative match: accept exact struct match OR asIs/unknown (defer to caller's discipline).
+        // pick/omit transforms produce a derived shape — v1.0 accepts the unmodified struct type
+        // as a signature match and reserves stricter checking for v1.next per §41.14.5 last bullet.
+        if (paramKind === "struct") {
+          const paramStructName = (paramType as { name?: string }).name ?? "";
+          if (paramStructName && paramStructName !== structTypeName) {
+            errors.push(new TSError(
+              "E-FORMFOR-ONSUBMIT-SIGNATURE",
+              `E-FORMFOR-ONSUBMIT-SIGNATURE: \`<formFor for=${structTypeName} onsubmit=${onsubmitFnName}/>\`'s handler's first parameter has type '${paramStructName}', not '${structTypeName}'. ` +
+              `Expected signature: \`fn(values: ${structTypeName}) ! ErrorType\`. See SPEC §41.14.3.`,
+              onsubmitAttr.span ?? span,
+            ));
+            return null;
+          }
+        } else if (paramKind !== "asIs" && paramKind !== "unknown") {
+          errors.push(new TSError(
+            "E-FORMFOR-ONSUBMIT-SIGNATURE",
+            `E-FORMFOR-ONSUBMIT-SIGNATURE: \`<formFor for=${structTypeName} onsubmit=${onsubmitFnName}/>\`'s handler's first parameter is typed '${paramKind}' (expected struct type '${structTypeName}'). ` +
+            `Expected signature: \`fn(values: ${structTypeName}) ! ErrorType\`. See SPEC §41.14.3.`,
+            onsubmitAttr.span ?? span,
+          ));
+          return null;
+        }
+
+        // Classify the handler: server fn ↔ PE-default action= per §41.14.3 + §12.5.
+        // FunctionRoute keys to functionNodeId = `${filePath}::${fnNode.span.start}`.
+        // We find the function-decl AST node for onsubmitFnName and look up its
+        // route by the same key shape that route-inference.ts uses.
+        let fnRoute: { boundary?: string; generatedRouteName?: string | null; explicitRoute?: string | null } | undefined;
+        if (routeMap?.functions) {
+          // Walk top-level AST for the named function-decl.
+          let onsubmitFnSpanStart: number | undefined;
+          function findFnDecl(arr: ASTNodeLike[] | undefined): void {
+            if (!Array.isArray(arr)) return;
+            for (const nn of arr) {
+              if (!nn || typeof nn !== "object") continue;
+              if (nn.kind === "function-decl" && nn.name === onsubmitFnName) {
+                onsubmitFnSpanStart = (nn.span as Span | undefined)?.start;
+                return;
+              }
+              findFnDecl(nn.body as ASTNodeLike[] | undefined);
+              if (onsubmitFnSpanStart != null) return;
+              findFnDecl(nn.children as ASTNodeLike[] | undefined);
+              if (onsubmitFnSpanStart != null) return;
+            }
+          }
+          findFnDecl(nodes);
+          if (typeof onsubmitFnSpanStart === "number") {
+            const fnNodeId = `${filePath}::${onsubmitFnSpanStart}`;
+            fnRoute = routeMap.functions.get(fnNodeId) as typeof fnRoute;
+          }
+        }
+        if (fnRoute) {
+          if (fnRoute.boundary === "server") {
+            onsubmitBoundary = "server";
+            const route = fnRoute.explicitRoute || fnRoute.generatedRouteName;
+            if (route) {
+              peActionUrl = route.startsWith("/") ? route : `/api/${route}`;
+            } else {
+              peActionUrl = `/api/${onsubmitFnName}`;
+            }
+          } else if (fnRoute.boundary === "client") {
+            onsubmitBoundary = "client";
+          }
+        }
+      }
+    }
+
+    // Build the expansion plan + invoke the AST builder.
+    const exp: import("./codegen/emit-form-for.ts").FormForExpansion = {
+      cellName,
+      structName: structTypeName,
+      includedFields,
+      slotOverrides,
+      onsubmitFnName,
+      onsubmitBoundary,
+      peActionUrl,
+      errorStrategy,
+      partial,
+      span,
+    };
+    const [compoundDecl, formElement] = loadExpander().expandFormFor(exp);
+    return { compoundDecl, formElement };
+  }
+
+  /**
+   * Splice the synthesized [compoundDecl, formElement] in place of the
+   * formFor child at index `i` of `arr`. The original formFor node is
+   * removed; the two synth nodes are inserted in order so the compound
+   * state-decl precedes the markup that uses it via render-by-tag.
+   */
+  function spliceFormFor(arr: ASTNodeLike[], i: number, synth: { compoundDecl: unknown; formElement: unknown }): void {
+    arr.splice(i, 1, synth.compoundDecl as ASTNodeLike, synth.formElement as ASTNodeLike);
+  }
+
+  function walkAndSplice(arr: ASTNodeLike[] | undefined): void {
+    if (!Array.isArray(arr)) return;
+    // Walk in reverse so splice insertions don't disturb forward indices for
+    // siblings we haven't visited. Each formFor child expands to 2 nodes.
+    for (let i = arr.length - 1; i >= 0; i--) {
+      const child = arr[i];
+      if (!child || typeof child !== "object") continue;
+      if (child.kind === "markup") {
+        const tag = (child.tag as string | undefined)
+          ?? ((child as ASTNodeLike).tagName as string | undefined);
+        if (tag === "formFor" || tag === "formfor") {
+          const synth = processFormForNode(child);
+          if (synth) spliceFormFor(arr, i, synth);
+          continue;  // do not recurse into the formFor's children (they're consumed)
+        }
+      }
+      // Recurse into children + body of non-formFor nodes.
+      const cChildren = (child as ASTNodeLike).children as ASTNodeLike[] | undefined;
+      if (Array.isArray(cChildren)) walkAndSplice(cChildren);
+      const cBody = (child as ASTNodeLike).body as ASTNodeLike[] | undefined;
+      if (Array.isArray(cBody)) walkAndSplice(cBody);
+    }
+  }
+
+  walkAndSplice(nodes);
 }
 
 // ---------------------------------------------------------------------------

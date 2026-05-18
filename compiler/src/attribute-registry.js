@@ -291,6 +291,31 @@ ELEMENT_ATTR_REGISTRY.set("errors", {
 });
 
 // ---------------------------------------------------------------------------
+// <formFor> — type-driven form generation (SPEC §41.14, S102).
+//
+// Markup-element form `<formFor for=StructType [onsubmit=fn] [as=@var]
+// [pick=[...]] [omit=[...]] [partial=true|false] [error-strategy="..."]>`.
+//
+// All attribute values are bare scrml-native references / literals — no
+// `${...}` interpolation. Per SPEC §41.14 the attribute grammar mirrors
+// other compile-time structural elements (e.g. <engine for=Type>, <match
+// for=Type>) where the type identifier is consumed verbatim at the
+// type-system stage.
+// ---------------------------------------------------------------------------
+
+ELEMENT_ATTR_REGISTRY.set("formfor", {
+  allowedAttrs: new Map([
+    ["for",             attrSpec({ supportsInterpolation: false })],
+    ["onsubmit",        attrSpec({ supportsInterpolation: false })],
+    ["as",              attrSpec({ supportsInterpolation: false })],
+    ["pick",            attrSpec({ supportsInterpolation: false })],
+    ["omit",            attrSpec({ supportsInterpolation: false })],
+    ["partial",         attrSpec({ supportsInterpolation: false })],
+    ["error-strategy",  attrSpec({ supportsInterpolation: false })],
+  ]),
+});
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 

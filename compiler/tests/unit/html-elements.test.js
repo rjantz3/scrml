@@ -101,7 +101,7 @@ describe("void elements", () => {
 
 describe("rendersToDom", () => {
   it("is true for all HTML elements", () => {
-    const nonDomElements = new Set(["program", "errorboundary", "errors", "auth"]);
+    const nonDomElements = new Set(["program", "errorboundary", "errors", "auth", "formfor"]);
     for (const tag of getAllElementNames()) {
       if (nonDomElements.has(tag)) continue; // scrml structural elements
       expect(getElementShape(tag).rendersToDom).toBe(true);
@@ -133,6 +133,16 @@ describe("rendersToDom", () => {
   // the <auth> tag itself does not render to DOM.
   it("is false for auth (scrml role-gate element)", () => {
     const shape = getElementShape("auth");
+    expect(shape).not.toBeNull();
+    expect(shape.rendersToDom).toBe(false);
+  });
+
+  // S102 §41.14: <formFor for=StructType/> type-driven form-generation element.
+  // Compile-time recognized at TS stage; codegen replaces it with the
+  // equivalent Shape 2 + <errors of=> + <form action=> markup tree. The
+  // formFor tag itself does not render to DOM.
+  it("is false for formFor (scrml type-driven form element)", () => {
+    const shape = getElementShape("formfor");
     expect(shape).not.toBeNull();
     expect(shape.rendersToDom).toBe(false);
   });

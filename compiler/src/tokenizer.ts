@@ -452,6 +452,54 @@ export function tokenizeAttributes(raw: string, baseOffset: number, baseLine: nu
             advance();
           }
           tokens.push(makeToken("ATTR_EXPR", expr, vs, absOff(), vl, vc));
+        } else if (ch() === "[") {
+          // §41.14 — Array-literal attribute value: `pick=["a", "b"]`,
+          // `omit=["c"]`. The array-literal form is normative for the formFor
+          // `pick=`/`omit=` attributes (§41.14.5). The form is admitted
+          // generically for any attribute name — there's no per-attribute
+          // gate at the tokenizer level; downstream attribute-grammar
+          // validation (attribute-registry.js) may further restrict.
+          //
+          // Read everything between matched square brackets, preserving the
+          // brackets in the output. Supports nested brackets/quotes:
+          //   pick=[["a", "b"], ["c"]]                ← nested arrays
+          //   pick=["a, b, c"]                         ← comma in string
+          //
+          // Bracket-depth tracking is depth-aware over `[` / `]`; string
+          // literal contexts are tracked so `[` inside `"..."` does NOT
+          // increment depth. Mirrors the brace-block / paren handlers.
+          const vs = absOff();
+          const vl = line;
+          const vc = col;
+          let expr = "";
+          expr += raw[pos]; // include opening [
+          advance();
+          let depth = 1;
+          let inSQ = false;
+          let inDQ = false;
+          while (pos < raw.length && depth > 0) {
+            const c = raw[pos];
+            if (inSQ) {
+              if (c === "'" && raw[pos - 1] !== "\\") inSQ = false;
+            } else if (inDQ) {
+              if (c === '"' && raw[pos - 1] !== "\\") inDQ = false;
+            } else {
+              if (c === "'") inSQ = true;
+              else if (c === '"') inDQ = true;
+              else if (c === "[") depth++;
+              else if (c === "]") {
+                depth--;
+                if (depth === 0) {
+                  expr += c;
+                  advance();
+                  break;
+                }
+              }
+            }
+            expr += c;
+            advance();
+          }
+          tokens.push(makeToken("ATTR_EXPR", expr, vs, absOff(), vl, vc));
         } else if (ch() === '$' && pos + 1 < raw.length && raw[pos + 1] === '{') {
           // Inline expression: ${() => fn(arg)}, ${condition ? a : b}, etc.
           const vs = absOff();

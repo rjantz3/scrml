@@ -626,6 +626,49 @@ REGISTRY.set("errors", {
 });
 
 // ---------------------------------------------------------------------------
+// <formFor> — type-driven form generation (SPEC §41.14, S102).
+//
+// Second general-position member of the §53.14 type-as-argument family
+// (after parseVariant §41.13). Compile-time recognized at type-system stage
+// (cross-ref §53.14.5) — the parser produces a regular markup node; the TS
+// pass validates `for=` against the file's struct typeRegistry and rewrites
+// the node into the equivalent Shape 2 + <errors of=> + <form action=>
+// markup tree (§6.2 + §55 + §16 + §5.2.3 + §12.5).
+//
+// Attributes (per SPEC §41.14):
+//   for=             — required struct-type identifier (E-FORMFOR-TYPE-NOT-STRUCT)
+//   onsubmit=        — optional bare-form event handler (E-FORMFOR-ONSUBMIT-SIGNATURE)
+//   as=              — optional @varName override for the synthesized compound cell
+//   pick=            — optional array of field names to include (E-FORMFOR-PICK-INVALID-FIELD)
+//   omit=            — optional array of field names to exclude (E-FORMFOR-OMIT-INVALID-FIELD)
+//   partial=         — optional boolean; relaxes `req` validators when true
+//   error-strategy=  — "per-field" (default) | "summary" | "both" (E-FORMFOR-ERROR-STRATEGY-INVALID)
+//
+// Slot children (per §41.14.4 + §16): each <slot name="<fieldName>">override
+// markup customizes one field; `<slot name="submit">` customizes the submit
+// button. Unknown slot names fire E-FORMFOR-SLOT-UNKNOWN.
+//
+// rendersToDom: false — codegen replaces this node with the synthesized
+// markup tree; nothing renders FROM the formFor tag itself.
+// ---------------------------------------------------------------------------
+
+REGISTRY.set("formfor", {
+  tag: "formFor",
+  attributes: new Map([
+    ...GLOBAL_ATTRIBUTES,
+    ["for",            attr("string", true)],   // required — struct type identifier
+    ["onsubmit",       attr("string")],         // optional — handler reference
+    ["as",             attr("string")],         // optional — synth cell name override (@varName)
+    ["pick",           attr("string")],         // optional — array literal of field names
+    ["omit",           attr("string")],         // optional — array literal of field names
+    ["partial",        attr("boolean")],        // optional — relax req validators
+    ["error-strategy", attr("string")],         // optional — "per-field" | "summary" | "both"
+  ]),
+  isVoid: false,
+  rendersToDom: false,
+});
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
