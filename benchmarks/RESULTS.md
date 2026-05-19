@@ -80,31 +80,45 @@ The happy-dom results (below) differ significantly from real Chrome. Key differe
 - happy-dom's `cloneNode(true)` and `innerHTML` are slower than `createElement` (opposite of real browsers)
 - Chrome is 1.2-2x faster than happy-dom at DOM creation
 
-## Runtime Performance — happy-dom (medians in ms, lower is better) — 2026-05-19 v0.3.3 + Vanilla baseline (S103 P1.C)
+## Runtime Performance — happy-dom (medians in ms, lower is better) — 2026-05-19 v0.3.3 + Phase 3 Candidate A + `!=` follow-on
 
-Regenerated 2026-05-19 against HEAD `6bc5128` (S103 / v0.3.3 post-PGO Phase 3 + formFor + P1.B runtime instrumentation + derived-chunk-gate widening). **NEW: Vanilla JS added as 5th baseline** (raw DOM API, zero framework — represents the irreducible per-row cost floor; anything above it is framework overhead). Per runtime-perf SCOPING §2.3 P1.C; OQ-RUNTIME-OPEN-1/2/3/4 all ratified S103.
-
-Bun 1.3.13, happy-dom. 2-3 warmup + 5-10 iterations per benchmark; medians shown.
+**Re-measured 2026-05-19** after S103 Phase 3 Candidate A landing (`91fcc72`) + the `!=` detector follow-on (this dispatch). HEAD ≈ post-`91fcc72`.
 
 | Operation | scrml | React 19 | Svelte 5 | Vue 3 | Vanilla JS | scrml vs React | scrml vs Svelte | scrml vs Vue | scrml vs Vanilla |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | initial-render | 2.68 | 0.73 | 0.59 | 0.57 | **0.48** | 0.3x | 0.2x | 0.2x | 0.2x |
 | create-1000 | 52.2 | 55.8 | **23.9** | 56.0 | 27.8 | 1.1x | 0.5x | 1.1x | 0.5x |
 | replace-1000 | 58.4 | 51.2 | **27.7** | 43.1 | 34.3 | 0.9x | 0.5x | 0.7x | 0.6x |
-| partial-update | 2.36 | 22.8 | 13.8 | 4.01 | **0.73** | **9.7x** | 5.8x | 1.7x | 0.3x |
+| partial-update | 2.28 | 23.2 | 13.8 | 3.31 | **0.63** | **10.1x** | 6.0x | 1.5x | 0.3x |
 | delete-every-10th | 3.68 | 20.7 | 11.2 | 3.58 | **0.87** | 5.6x | 3.0x | 1.0x | 0.2x |
 | clear-all | 8.78 | **4.10** | 5.40 | 5.24 | 5.91 | 0.5x | 0.6x | 0.6x | 0.7x |
-| select-row | 4.97 | 5.29 | 0.036 | 0.023 | **0.012** | 1.1x | **0.0x** | **0.0x** | **0.0x** |
-| swap-rows | 3.35 | 30.0 | 18.5 | 2.79 | **0.069** | 9.0x | 5.5x | 0.8x | **0.0x** |
-| remove-row | 4.42 | 20.2 | 11.1 | 2.33 | **0.039** | 4.6x | 2.5x | 0.5x | **0.0x** |
+| **select-row** | **0.12** | 3.96 | 0.043 | 0.023 | **0.014** | **33.1x** | 0.4x | 0.2x | 0.1x |
+| swap-rows | 3.59 | 31.4 | 18.5 | 2.49 | **0.066** | 8.7x | 5.1x | 0.7x | 0.0x |
+| remove-row | 4.42 | 20.2 | 11.1 | 2.33 | **0.039** | 4.6x | 2.5x | 0.5x | 0.0x |
 | create-10000 | 527.3 | 489.7 | **242.9** | 387.8 | 253.0 | 0.9x | 0.5x | 0.7x | 0.5x |
 | append-1000 | 65.2 | 63.4 | 38.1 | 34.6 | **25.3** | 1.0x | 0.6x | 0.5x | 0.4x |
 
 **Summary:**
-- scrml is **3.1x faster** than React 19 on average (faster in 6/11 benchmarks)
-- scrml is **1.8x faster** than Svelte 5 on average (faster in 4/11 benchmarks)
-- scrml is **0.7x faster** than Vue 3 on average (faster in 2/11 benchmarks)
-- scrml is **0.3x faster** than Vanilla JS on average (faster in 0/11 benchmarks — expected; vanilla is the floor)
+- scrml is **6.1x faster** than React 19 on average (was 3.1x at P1.C; **+97%** from Phase 3 Candidate A + != extension)
+- scrml is **1.8x faster** than Svelte 5 on average (faster in 4/11)
+- scrml is **0.7x faster** than Vue 3 on average
+- scrml is **0.3x faster** than Vanilla JS on average (0/11 — expected; vanilla is the floor)
+
+### select-row: cumulative Phase 3 chip-away
+
+| State | select-row median | vs React | vs Svelte | vs Vanilla |
+|---|---:|---:|---:|---:|
+| P1.C baseline (v0.3.3) | 4.97ms | 1.1× | 138× worse | **414× worse** |
+| + Phase 3 Candidate A (`==` only) | 1.03ms | ~5× faster | ~30× worse | ~86× worse |
+| + `!=` extension (this dispatch) | **0.12ms** | **33× faster** | **2.3× worse** | **8× worse** |
+
+**Cumulative −97.6%** wall-clock reduction on select-row from P1.C baseline. notify_subscribers exclusive: 5.224ms → **gone** (both `==` and `!=` halves now route through value-indexed). notify_value_indexed exclusive: 0.041ms.
+
+The `!=` detector extension was the agent's deferred follow-on from the Phase 3 Candidate A dispatch (capture TodoMVC's `if=@editingId != todo.id` half of the per-row hot path). Runtime dispatch is identical for `==` and `!=` — subscribers fire on transitions to/from valueKey regardless of predicate polarity; the bind function recomputes truthiness internally. The agent's "different dispatch strategy (N-2 buckets)" warning was incorrect on analysis.
+
+### Bonus wins: still apply only where predicates exist
+
+Other TodoMVC ops (remove-row / partial-update / clear-all / swap-rows) still don't benefit substantially — they write `@todos` (not `@editingId`); the narrowing keys off the cell with predicate-shape binds. Other apps with multiple predicate-bind cells would see proportional wins.
 
 **Narrative shift vs the removed-from-README v0.3.0 STABLE data:** the prior README captured scrml at 0/10 wins vs React. v0.3.3 HEAD measures 6/11 wins (3.1x avg). Most plausible cause: runtime-template tweaks across v0.3.1-v0.3.3 + P1.B's derived-chunk-gate widening unblocking the V5-strict `const <x>` form (some prior v0.3.0 measurements may have been on a harness that throw'd `_scrml_derived_declare is not defined` and recovered to a degraded state). **README republishing remains deferred** per S102 user direction.
 

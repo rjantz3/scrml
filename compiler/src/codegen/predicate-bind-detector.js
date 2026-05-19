@@ -1,7 +1,14 @@
 // S103 Phase 3 select-row chip-away (Candidate A) — predicate-bind detector.
 //
-// Per OQ-RT3-SR-OPEN-2 ratified STRICTEST scope (S103):
-//   - equality operator only (==), no !=, in, .includes
+// Initial scope per OQ-RT3-SR-OPEN-2 ratified STRICTEST (S103) — equality only;
+// extended S103 to also accept `!=` (Phase 3 follow-on, captures the other half
+// of the TodoMVC select-row hot path). The dispatch semantics are IDENTICAL for
+// == and != because the runtime fires subscribers on transitions to/from valueKey
+// regardless of predicate polarity — the bind function itself recomputes the
+// per-row truthiness based on its own expression. No runtime change needed.
+//
+// Current scope:
+//   - == or != operator (NOT === / !==)
 //   - one side must be a single @CELL reference (no dotted-path tail)
 //   - the OTHER side must be either:
 //       (a) a JS primitive literal (string / number / boolean / null /
@@ -13,7 +20,8 @@
 //   - REJECT any shape with @-prefixed refs on BOTH sides (would defeat the
 //     narrowing — both bind sites would re-fire whenever either cell moves)
 //   - REJECT call expressions, arithmetic, indexing, optional chaining,
-//     anything non-trivial — fall back to LEGACY _scrml_reactive_subscribe
+//     `in`, `.includes`, anything non-trivial — fall back to LEGACY
+//     _scrml_reactive_subscribe
 //
 // Returns:
 //   { matched: true, cellName, valueExprJS } — wire into
@@ -23,7 +31,7 @@
 // The detector operates on the RAW source-text expression string (the same
 // string passed to emitExprField). It does NOT consume the ExprNode AST in
 // this initial scope to keep the surface tight + auditable; future extension
-// (e.g. !=, .includes) may upgrade to AST.
+// (e.g. `.includes`, `in`) may upgrade to AST.
 
 /**
  * Strip exactly one balanced outer paren wrap if present. Returns the inner
@@ -51,18 +59,24 @@ function stripOuterParens(s) {
 }
 
 /**
- * Split s on the top-level == operator (NOT ===) at a paren/bracket depth of
- * zero. Returns [lhs, rhs] when exactly one top-level == is found, or null
- * when there are zero or multiple top-level == operators.
+ * Split s on the top-level equality operator (== OR !=, NOT === / !==) at a
+ * paren/bracket depth of zero. Returns [lhs, rhs] when exactly one top-level
+ * equality operator is found, or null when there are zero or multiple.
  *
  * Honors string-literal delimiters (single, double, backtick) so a string
  * containing "==" doesn't get split.
+ *
+ * Note: the polarity (== vs !=) is NOT propagated to the caller. Runtime
+ * dispatch is identical for both — value-indexed subscribers fire on
+ * transitions to/from valueKey regardless of predicate polarity; the bind
+ * function recomputes its own truthiness internally.
  */
-function splitOnTopLevelEq(s) {
+function splitOnTopLevelEquality(s) {
   let depth = 0;
   let inStr = null; // null or "'", '"', '`'
-  let eqIdx = -1;
-  let eqCount = 0;
+  let opIdx = -1;
+  let opCount = 0;
+  let opSkip = 2; // == and != are both 2-char ops
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
     if (inStr !== null) {
@@ -74,18 +88,28 @@ function splitOnTopLevelEq(s) {
     if (c === "(" || c === "[" || c === "{") { depth++; continue; }
     if (c === ")" || c === "]" || c === "}") { depth--; continue; }
     if (depth !== 0) continue;
+    // == or != at depth 0
     if (c === "=" && s[i + 1] === "=") {
-      // Reject === or != or !==
+      // Reject === (third =)
       if (s[i + 2] === "=") return null;
-      if (i > 0 && s[i - 1] === "!") return null;
-      eqIdx = i;
-      eqCount++;
-      if (eqCount > 1) return null;
+      opIdx = i;
+      opCount++;
+      if (opCount > 1) return null;
       i++; // skip second =
+      continue;
+    }
+    if (c === "!" && s[i + 1] === "=") {
+      // Reject !== (third =)
+      if (s[i + 2] === "=") return null;
+      opIdx = i;
+      opCount++;
+      if (opCount > 1) return null;
+      i++; // skip the =
+      continue;
     }
   }
-  if (eqCount !== 1) return null;
-  return [s.slice(0, eqIdx).trim(), s.slice(eqIdx + 2).trim()];
+  if (opCount !== 1) return null;
+  return [s.slice(0, opIdx).trim(), s.slice(opIdx + opSkip).trim()];
 }
 
 /**
@@ -166,7 +190,7 @@ export function detectPredicateShapeBind(rawExpr) {
   if (typeof rawExpr !== "string") return { matched: false };
   const stripped = stripOuterParens(rawExpr);
   if (!stripped) return { matched: false };
-  const split = splitOnTopLevelEq(stripped);
+  const split = splitOnTopLevelEquality(stripped);
   if (!split) return { matched: false };
   const [lhsRaw, rhsRaw] = split;
   const lhs = stripOuterParens(lhsRaw);

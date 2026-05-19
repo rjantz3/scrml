@@ -124,21 +124,62 @@ describe("predicate-bind-detector — accept cases", () => {
     expect(r.cellName).toBe("offset");
     expect(r.valueExprJS).toBe("-1");
   });
-});
 
-describe("predicate-bind-detector — reject cases", () => {
-  test("not-equal operator (!=)", () => {
+  // S103 follow-on — `!=` accepted same shape as `==`. Runtime dispatch is
+  // identical (value-indexed subscribers fire on transitions to/from valueKey
+  // regardless of predicate polarity; the bind function recomputes its own
+  // truthiness internally). Closes TodoMVC's `if=@editingId != todo.id` half
+  // of the select-row hot path.
+
+  test("not-equal with cell + literal string", () => {
+    const r = detectPredicateShapeBind('@editingId != "row-5"');
+    expect(r.matched).toBe(true);
+    expect(r.cellName).toBe("editingId");
+    expect(r.valueExprJS).toBe('"row-5"');
+  });
+
+  test("not-equal with cell + closure-captured dotted path (TodoMVC pattern)", () => {
+    const r = detectPredicateShapeBind("@editingId != todo.id");
+    expect(r.matched).toBe(true);
+    expect(r.cellName).toBe("editingId");
+    expect(r.valueExprJS).toBe("todo.id");
+  });
+
+  test("not-equal symmetric (literal on LHS)", () => {
+    const r = detectPredicateShapeBind("5 != @count");
+    expect(r.matched).toBe(true);
+    expect(r.cellName).toBe("count");
+    expect(r.valueExprJS).toBe("5");
+  });
+
+  test("not-equal with paren wrap", () => {
+    const r = detectPredicateShapeBind("(@editingId != todo.id)");
+    expect(r.matched).toBe(true);
+    expect(r.cellName).toBe("editingId");
+    expect(r.valueExprJS).toBe("todo.id");
+  });
+
+  test("not-equal with bool literal", () => {
+    const r = detectPredicateShapeBind("@done != true");
+    expect(r.matched).toBe(true);
+    expect(r.cellName).toBe("done");
+    expect(r.valueExprJS).toBe("true");
+  });
+
+  test("not-equal rejects reactive-on-both-sides", () => {
     const r = detectPredicateShapeBind("@a != @b");
     expect(r.matched).toBe(false);
   });
+});
 
-  test("not-equal with cell + literal", () => {
-    const r = detectPredicateShapeBind("@editingId != todo.id");
+describe("predicate-bind-detector — reject cases", () => {
+  test("strict-equal (===) operator", () => {
+    const r = detectPredicateShapeBind("@editingId === 5");
     expect(r.matched).toBe(false);
   });
 
-  test("strict-equal (===) operator", () => {
-    const r = detectPredicateShapeBind("@editingId === 5");
+  test("strict-not-equal (!==) operator", () => {
+    const r = detectPredicateShapeBind("@editingId !== 5");
     expect(r.matched).toBe(false);
   });
 
