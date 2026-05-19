@@ -1,0 +1,401 @@
+/**
+ * bug-1-tailwind-unrecognized-class — Unit tests for W-TAILWIND-UNRECOGNIZED-CLASS
+ *
+ * Dogfood Bug 1 FLOOR fix (S108). The full bug surface is at
+ * `handOffs/incoming/read/2026-05-19-0614-side-session-to-scrmlTS-PA-dogfood-bug-surface.md`
+ * §"Bug 1". This lint converts the silent-no-op layout-breakage surface
+ * into compile-time friction: any class-name token in a `class="..."`
+ * attribute that does NOT resolve via the embedded Tailwind registry
+ * emits a `W-TAILWIND-UNRECOGNIZED-CLASS` info-level diagnostic.
+ *
+ * Three legitimate causes the lint message points adopters at:
+ *   (a) misspelling — `flexx` vs `flex`
+ *   (b) Tailwind arbitrary-value class whose particular utility prefix
+ *       is not yet supported by the embedded engine —
+ *       `grid-cols-[auto_1fr_auto]`
+ *   (c) custom user-defined CSS class (acknowledged false positive)
+ *
+ * Coverage:
+ *   §1  Recognized utilities — no warning
+ *   §2  Arbitrary-value class that engine doesn't handle — warning
+ *   §3  Misspelled utility — warning
+ *   §4  Mixed recognized + unrecognized — warning only on the unrecognized
+ *   §5  Custom (non-tailwind) hyphenated class — warning (acknowledged FP)
+ *   §6  Suppression via compilerSettings.lintTailwindUnrecognizedClass="off"
+ *   §7  Integration via compileScrml.lintDiagnostics
+ *   §8  Diagnostic shape (code, severity, message, line, column)
+ *   §9  Dedupe within attribute + sort
+ *   §10 ${...} interpolation masking
+ */
+
+import { describe, test, expect } from "bun:test";
+import { findUnrecognizedClasses } from "../../src/tailwind-classes.js";
+import { compileScrml } from "../../src/api.js";
+import { writeFileSync, unlinkSync, mkdirSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function scan(source) {
+  return findUnrecognizedClasses(source);
+}
+
+function firedOn(diags, className) {
+  return diags.some(
+    d => d.code === "W-TAILWIND-UNRECOGNIZED-CLASS" && d.className === className
+  );
+}
+
+function compileSource(source, options = {}) {
+  const dir = join(
+    tmpdir(),
+    "scrml-bug1-tailwind-test-" + Math.random().toString(36).slice(2),
+  );
+  mkdirSync(dir, { recursive: true });
+  const filePath = join(dir, "test.scrml");
+  writeFileSync(filePath, source, "utf8");
+  let result;
+  try {
+    result = compileScrml({
+      inputFiles: [filePath],
+      outputDir: join(dir, "dist"),
+      write: false,
+      ...options,
+    });
+  } finally {
+    try { unlinkSync(filePath); } catch {}
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// §1 Recognized utilities — no warning
+// ---------------------------------------------------------------------------
+
+describe("§1 Recognized Tailwind utilities — no warning fires", () => {
+  test("base utility `flex` does not fire", () => {
+    const diags = scan('<div class="flex"></div>');
+    expect(diags).toHaveLength(0);
+  });
+
+  test("base utility `p-4` does not fire", () => {
+    const diags = scan('<div class="p-4"></div>');
+    expect(diags).toHaveLength(0);
+  });
+
+  test("multiple recognized utilities do not fire", () => {
+    const diags = scan('<div class="flex items-center justify-between p-4 bg-blue-500"></div>');
+    expect(diags).toHaveLength(0);
+  });
+
+  test("variant-prefixed recognized utility (`md:p-4`) does not fire", () => {
+    const diags = scan('<div class="md:p-4"></div>');
+    expect(diags).toHaveLength(0);
+  });
+
+  test("recognized arbitrary-value utility (`w-[420px]`) does not fire", () => {
+    // Per §26.4, valid arbitrary values produce CSS via getTailwindCSS.
+    const diags = scan('<div class="w-[420px]"></div>');
+    expect(diags).toHaveLength(0);
+  });
+
+  test("recognized arbitrary-value with function (`text-[clamp(1rem,2vw,1.5rem)]`) does not fire", () => {
+    const diags = scan('<span class="text-[clamp(1rem,2vw,1.5rem)]"></span>');
+    expect(diags).toHaveLength(0);
+  });
+
+  test("empty `class=` attribute produces no diagnostics", () => {
+    const diags = scan('<div class=""></div>');
+    expect(diags).toHaveLength(0);
+  });
+
+  test("element without `class=` attribute produces no diagnostics", () => {
+    const diags = scan('<div></div><span>hi</span>');
+    expect(diags).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §2 Arbitrary-value class that engine doesn't handle — warning
+// ---------------------------------------------------------------------------
+
+describe("§2 Arbitrary-value class engine doesn't handle — warning fires", () => {
+  test("`grid-cols-[auto_1fr_auto]` fires (dogfood Bug 1 headline case)", () => {
+    // This is the exact case from the bug surface: grid-template-columns
+    // arbitrary value is silently dropped by the embedded engine; the lint
+    // surfaces the silence so adopters see compile-time friction.
+    const diags = scan('<div class="grid-cols-[auto_1fr_auto]"></div>');
+    expect(firedOn(diags, "grid-cols-[auto_1fr_auto]")).toBe(true);
+  });
+
+  test("`grid-cols-[200px_1fr]` fires (variant of headline case)", () => {
+    const diags = scan('<div class="grid-cols-[200px_1fr]"></div>');
+    expect(firedOn(diags, "grid-cols-[200px_1fr]")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §3 Misspelled utility — warning
+// ---------------------------------------------------------------------------
+
+describe("§3 Misspelled utility — warning fires", () => {
+  test("`flexx` (misspelling of `flex`) fires", () => {
+    const diags = scan('<div class="flexx"></div>');
+    expect(firedOn(diags, "flexx")).toBe(true);
+  });
+
+  test("`p-99` (out-of-scale spacing) fires", () => {
+    // p-99 is not in the SPACING_SCALE registry (max is p-96 + special
+    // entries); adopter likely meant p-9 or p-96.
+    const diags = scan('<div class="p-99"></div>');
+    expect(firedOn(diags, "p-99")).toBe(true);
+  });
+
+  test("`bg-bluuue-500` (color typo) fires", () => {
+    const diags = scan('<div class="bg-bluuue-500"></div>');
+    expect(firedOn(diags, "bg-bluuue-500")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §4 Mixed recognized + unrecognized — warning only on the unrecognized
+// ---------------------------------------------------------------------------
+
+describe("§4 Mixed recognized + unrecognized — fires only on the unrecognized", () => {
+  test("`flex flexx items-center` fires once on `flexx` only", () => {
+    const diags = scan('<div class="flex flexx items-center"></div>');
+    expect(firedOn(diags, "flexx")).toBe(true);
+    expect(firedOn(diags, "flex")).toBe(false);
+    expect(firedOn(diags, "items-center")).toBe(false);
+    expect(diags).toHaveLength(1);
+  });
+
+  test("recognized + unrecognized + recognized arbitrary fires only on the unrecognized", () => {
+    const diags = scan('<div class="flex grid-cols-[auto_1fr_auto] w-[420px]"></div>');
+    expect(firedOn(diags, "grid-cols-[auto_1fr_auto]")).toBe(true);
+    expect(firedOn(diags, "flex")).toBe(false);
+    expect(firedOn(diags, "w-[420px]")).toBe(false);
+    expect(diags).toHaveLength(1);
+  });
+
+  test("multiple unrecognized fire each", () => {
+    const diags = scan('<div class="flex flexx p-99 bg-bluuue-500 items-center"></div>');
+    expect(firedOn(diags, "flexx")).toBe(true);
+    expect(firedOn(diags, "p-99")).toBe(true);
+    expect(firedOn(diags, "bg-bluuue-500")).toBe(true);
+    expect(firedOn(diags, "flex")).toBe(false);
+    expect(firedOn(diags, "items-center")).toBe(false);
+    expect(diags).toHaveLength(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §5 Custom (non-tailwind) hyphenated class — warning (acknowledged FP)
+// ---------------------------------------------------------------------------
+
+describe("§5 Custom hyphenated class — warning fires (acknowledged false-positive)", () => {
+  test("`counter-app` fires (false-positive acceptable at floor level)", () => {
+    // Adopters whose codebase relies on custom CSS class names will hit
+    // this; they can suppress via compilerSettings (see §6).
+    const diags = scan('<div class="counter-app"></div>');
+    expect(firedOn(diags, "counter-app")).toBe(true);
+  });
+
+  test("BEM-style class (`card__header--featured`) fires (FP acceptable)", () => {
+    const diags = scan('<div class="card__header--featured"></div>');
+    expect(firedOn(diags, "card__header--featured")).toBe(true);
+  });
+
+  test("camelCase class (`myCustomClass`) fires (FP acceptable)", () => {
+    const diags = scan('<div class="myCustomClass"></div>');
+    expect(firedOn(diags, "myCustomClass")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §6 Suppression via compilerSettings.lintTailwindUnrecognizedClass="off"
+// ---------------------------------------------------------------------------
+
+describe("§6 Suppression — compilerSettings opt-out", () => {
+  test("default behavior (no compilerSettings passed) surfaces the lint", () => {
+    const source = '<markup name="app">\n  <div class="flexx"></div>\n</>';
+    const result = compileSource(source);
+    const diags = (result.lintDiagnostics || []).filter(
+      d => d.code === "W-TAILWIND-UNRECOGNIZED-CLASS",
+    );
+    expect(diags.length).toBeGreaterThan(0);
+    expect(diags.some(d => d.className === "flexx")).toBe(true);
+  });
+
+  test("compilerSettings.lintTailwindUnrecognizedClass='off' suppresses the lint", () => {
+    const source = '<markup name="app">\n  <div class="flexx"></div>\n</>';
+    const result = compileSource(source, {
+      compilerSettings: { lintTailwindUnrecognizedClass: "off" },
+    });
+    const diags = (result.lintDiagnostics || []).filter(
+      d => d.code === "W-TAILWIND-UNRECOGNIZED-CLASS",
+    );
+    expect(diags).toHaveLength(0);
+  });
+
+  test("compilerSettings.lintTailwindUnrecognizedClass='warn' (explicit) surfaces the lint", () => {
+    const source = '<markup name="app">\n  <div class="flexx"></div>\n</>';
+    const result = compileSource(source, {
+      compilerSettings: { lintTailwindUnrecognizedClass: "warn" },
+    });
+    const diags = (result.lintDiagnostics || []).filter(
+      d => d.code === "W-TAILWIND-UNRECOGNIZED-CLASS",
+    );
+    expect(diags.length).toBeGreaterThan(0);
+  });
+
+  test("suppression does not affect W-TAILWIND-001 (independent code)", () => {
+    // The opt-out is per-code; W-TAILWIND-001 keeps firing on its own scope.
+    const source = '<markup name="app">\n  <div class="group-hover:p-4"></div>\n</>';
+    const result = compileSource(source, {
+      compilerSettings: { lintTailwindUnrecognizedClass: "off" },
+    });
+    const tailwind001 = (result.lintDiagnostics || []).filter(
+      d => d.code === "W-TAILWIND-001",
+    );
+    expect(tailwind001.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §7 Integration via compileScrml.lintDiagnostics
+// ---------------------------------------------------------------------------
+
+describe("§7 Integration — compileScrml surfaces the lint in lintDiagnostics", () => {
+  test("`grid-cols-[auto_1fr_auto]` shows up in lintDiagnostics", () => {
+    const source =
+      '<markup name="app">\n' +
+      '  <div class="grid-cols-[auto_1fr_auto]"></div>\n' +
+      '</>';
+    const result = compileSource(source);
+    const diags = (result.lintDiagnostics || []).filter(
+      d => d.code === "W-TAILWIND-UNRECOGNIZED-CLASS",
+    );
+    expect(diags.some(d => d.className === "grid-cols-[auto_1fr_auto]")).toBe(true);
+  });
+
+  test("lint is non-fatal — compilation still succeeds", () => {
+    const source =
+      '<markup name="app">\n' +
+      '  <div class="flexx grid-cols-[auto_1fr_auto]"></div>\n' +
+      '</>';
+    const result = compileSource(source);
+    // The unrecognized-class lint is info-level: no E-* code, no fatal exit.
+    const fatalErrors = result.errors.filter(e => !e.code?.startsWith("W-") && !e.code?.startsWith("I-"));
+    expect(fatalErrors).toHaveLength(0);
+    const outputs = [...result.outputs.values()];
+    expect(outputs.length).toBe(1);
+  });
+
+  test("recognized-only source produces no W-TAILWIND-UNRECOGNIZED-CLASS diagnostics", () => {
+    const source =
+      '<markup name="app">\n' +
+      '  <div class="flex items-center p-4 bg-blue-500"></div>\n' +
+      '</>';
+    const result = compileSource(source);
+    const diags = (result.lintDiagnostics || []).filter(
+      d => d.code === "W-TAILWIND-UNRECOGNIZED-CLASS",
+    );
+    expect(diags).toHaveLength(0);
+  });
+
+  test("lintDiagnostics entry carries filePath (consumed by dev-server formatter)", () => {
+    const source =
+      '<markup name="app">\n' +
+      '  <div class="flexx"></div>\n' +
+      '</>';
+    const result = compileSource(source);
+    const diags = (result.lintDiagnostics || []).filter(
+      d => d.code === "W-TAILWIND-UNRECOGNIZED-CLASS",
+    );
+    expect(diags.length).toBeGreaterThan(0);
+    expect(typeof diags[0].filePath).toBe("string");
+    expect(diags[0].filePath.endsWith(".scrml")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §8 Diagnostic shape
+// ---------------------------------------------------------------------------
+
+describe("§8 Diagnostic shape", () => {
+  test("carries code, severity, className, line, column, message", () => {
+    const diags = scan('<div class="grid-cols-[auto_1fr_auto]"></div>');
+    expect(diags).toHaveLength(1);
+    const d = diags[0];
+    expect(d.code).toBe("W-TAILWIND-UNRECOGNIZED-CLASS");
+    expect(d.severity).toBe("info");
+    expect(d.className).toBe("grid-cols-[auto_1fr_auto]");
+    expect(typeof d.line).toBe("number");
+    expect(typeof d.column).toBe("number");
+    expect(d.line).toBeGreaterThan(0);
+    expect(d.column).toBeGreaterThan(0);
+    expect(typeof d.message).toBe("string");
+    // Message names the three legitimate causes to help adopters self-triage.
+    expect(d.message).toContain("misspelled");
+    expect(d.message).toContain("arbitrary-value");
+    expect(d.message).toContain("custom class");
+    expect(d.message).toContain("grid-cols-[auto_1fr_auto]");
+  });
+
+  test("message points adopters at the #{} CSS shim workaround for arbitrary values", () => {
+    const diags = scan('<div class="grid-cols-[auto_1fr_auto]"></div>');
+    expect(diags[0].message).toContain("#{}");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §9 Dedupe within attribute + sort
+// ---------------------------------------------------------------------------
+
+describe("§9 Dedupe + sort", () => {
+  test("dedupe — same unrecognized class twice in one attribute fires once", () => {
+    const diags = scan('<div class="flexx flexx flexx"></div>');
+    const count = diags.filter(d => d.className === "flexx").length;
+    expect(count).toBe(1);
+  });
+
+  test("diagnostics sorted by line then column", () => {
+    const source =
+      '<div class="flexx"></div>\n' +
+      '  <span class="flexyy">x</span>';
+    const diags = scan(source);
+    expect(diags).toHaveLength(2);
+    expect(diags[0].line).toBeLessThanOrEqual(diags[1].line);
+    if (diags[0].line === diags[1].line) {
+      expect(diags[0].column).toBeLessThan(diags[1].column);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §10 ${...} interpolation masking
+// ---------------------------------------------------------------------------
+
+describe("§10 ${...} interpolation masking — no false positives on JS expr contents", () => {
+  test("ternary in dynamic class does not fire on the literal strings", () => {
+    // `'a'` and `'b'` are string literals INSIDE a `${...}` block; the mask
+    // replaces the block with whitespace before scanning so they don't show
+    // up as class-name tokens.
+    const diags = scan(`<div class="\${cond ? 'a' : 'b'}"></div>`);
+    expect(diags).toHaveLength(0);
+  });
+
+  test("static unrecognized class next to a ternary interpolation still fires on the static portion", () => {
+    const diags = scan(`<div class="flexx \${cond ? 'a' : 'b'}"></div>`);
+    expect(firedOn(diags, "flexx")).toBe(true);
+  });
+
+  test("nested ternary in dynamic class does not fire", () => {
+    const diags = scan(`<div class="\${a ? (b ? 'x' : 'y') : 'z'}"></div>`);
+    expect(diags).toHaveLength(0);
+  });
+});
