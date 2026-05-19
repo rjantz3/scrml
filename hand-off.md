@@ -1,59 +1,66 @@
-# scrmlTS — Session 107 (CLOSE)
+# scrmlTS — Session 108 (CLOSE)
 
 **Date:** 2026-05-19
-**Previous:** `handOffs/hand-off-109.md` (S106 CLOSE — rotated at S107 OPEN)
+**Previous:** `handOffs/hand-off-110.md` (S107 CLOSE — rotated at S108 OPEN)
 **Machine:** single-machine (S100 directive holds)
-**HEAD at S107 CLOSE (pre-wrap):** `c91fae0` (match-block Phase 2 SHIPPED)
-**HEAD at S107 CLOSE (post-wrap):** `<wrap-sha>` (this hand-off + master-list + changelog wrap commit)
-**Origin sync at CLOSE:** scrmlTS post-push 0/0; scrml-support 0/0 (no changes this session)
+**HEAD at S108 CLOSE (pre-wrap):** `eba8ded` (Bug 4 C-narrow shipped)
+**HEAD at S108 CLOSE (post-wrap):** `<wrap-sha>` (this hand-off + master-list + changelog wrap commit)
+**Origin sync at CLOSE:** scrmlTS pre-wrap 0/0; scrml-support 0/0 (no changes this session)
 
 ---
 
-## S107 net outcome — 9 substantive commits + major spec-vs-impl gap discovery + impl arc through Phase 2
+## S108 net outcome — 20 substantive commits + 5 HIGH/MED-HI adopter closures + 2 in-flight closures + 1 dispatched deep-dive
 
-Session was scoped at OPEN as "drain dogfood-bug carry from S106." Net result: **9 substantive PA-direct commits** + the discovery of a structural spec-vs-impl gap (`<match>` block-form unparsed) that triggered a 5-phase impl arc, with **Phases 1 + 2 shipped** end-to-end this session. The "Known gaps" surface added to docs/known-gaps.md is a new adopter-direct meta-doc that didn't exist before — closes the mouth-to-reality framing the user surfaced ("v0.3.0 stable was overclaimed if it means every spec'd surface implemented").
+Session was scoped at OPEN as "match Phase 3 codegen + parallel agents." Net result: **20 substantive commits**, **5 adopter-visible HIGH/MED-HI dogfood/feature surfaces closed end-to-end**, **3 parallel-agent dispatches successfully cherry-picked into main**, and **1 deep-dive (Bug 4 docs-mode escape) completed + implemented in-session**. Net change at HEAD `eba8ded`: pre-commit subset **13,304 pass / 88 skip / 1 todo / 0 fail / 690 files / 44,794 expect**; full `bun test compiler/tests/` **16,147 pass / 169 skip / 1 todo / 0 fail / 723 files / 47,209 expect**. Delta vs S107 close (15,930 / 714 / 46,845): **+217 pass / +9 files / +364 expect / 0 fail / 0 regressions** — matches new-test count + minor in-place rotations.
 
-Commits in order:
+Commits in order (S107 close → S108 close):
 
-1. **`c70176e`** `feat(codegen): bug-5 Phase 1 — ${IDENT} non-reactive interpolation wires textContent` — closed dogfood Bug 5 HIGH-severity symptom; added one-shot textContent write at DOMContentLoaded for non-reactive `${VERSION}` / `${"literal"}` interpolations; 19 unit tests + tilde-guard; 17 regressions surfaced + fixed via kind-guard restriction.
+1. **`6d520d2`** `docs(readme): trim current-state section` — dropped stale v0.1/v0.2 framing, dropped A2-anomaly-2 patch-arc paragraph, updated match-block status to Phase 1+2 shipped (52 → 30 lines).
+2. **`b685cf0`** `chore(maps): S108 incremental refresh` — 8 maps refreshed (primary + error + structure + test + domain + schema + non-compliance + INDEX) via project-mapper agent + file-delta.
+3. **`ef9d219`** `feat(match-block): Phase 3 codegen render dispatch` — new `compiler/src/codegen/emit-match.ts` (~430 LOC) consumer; reuses `emit-variant-guard.ts:emitVariantGuardedRender` (variant-source-agnostic helper factored S78 specifically for this future reuse). 9 unit tests. on= resolution: bare `@cell` Shape A subscribe; `${expr}` Shape A/B; auto-implied via in-scope engine.
+4. **`811181e`** `feat(bug-5): Phase 3 + SPEC §7.4.2` — constant-folding (Option γ) for `${IDENT}` non-reactive interpolation; NEW `compiler/src/codegen/const-fold-env.ts` (~155 LOC, cached env via `partiallyEvaluateExpr`); 14 unit tests + `_constantFolded` marker threads through `collect.ts` + `emit-reactive-wiring.ts` to suppress orphan literal at file-scope; SPEC §7.4.2 normative section (60 lines) authorizes the compile-time inline optimization.
+5. **`0b2a8fe`** `WIP(bug1-tailwind-lint): start at /home/.../agent-a7ccf90ad1a63fb4a — findUnrecognizedClasses` (Bug 1 floor agent dispatch start).
+6. **`2873515`** `WIP(bug1-tailwind-lint): wire findUnrecognizedClasses into compileScrml` (Bug 1 floor agent — api.js wiring).
+7. **`c1e3517`** `WIP(bug1-tailwind-lint): SPEC §34 + §28 + §26.5 — W-TAILWIND-UNRECOGNIZED-CLASS` (Bug 1 floor agent — SPEC normative).
+8. **`0617afd`** `WIP(bug1-tailwind-lint): add 34 unit tests for W-TAILWIND-UNRECOGNIZED-CLASS` (Bug 1 floor agent — tests).
+9. **`dce4f06`** `WIP(bug1-tailwind-lint): rotate known-gaps Bug 1 entry — FLOOR shipped, full fix open` (Bug 1 floor agent — known-gaps; conflict resolved at cherry-pick time with my match-`:`-shorthand entry).
+10. **`204b303`** `feat(match-block): Phase 4 — :-shorthand body codegen via parseExprToNode` — extends emit-match.ts buildMatchArms for `bodyForm: "shorthand"`; synthesizes `logic > bare-expr` AST routed through generateHtml's interpolation case (constants fold via Bug 5 P3; cells emit placeholder + reactive binding); 6 unit tests.
+11. **`b261274`** `feat(form-for): B5 — L2 label-store consultation in expander` — emit-form-for.ts buildFieldGroup emits `${(typeof _scrml_label_for === "function" ? _scrml_label_for("Struct", "field") : "Mechanical Default")}` interpolation; closes the wired-but-unconsumed `registerLabels` runtime; SPEC §41.14.7 amended with Codegen subsection.
+12. **`1bf2135`** `WIP(pgo-c2): start at /home/.../agent-a039af8b7a78ac87a — detectMarkupForStmtChunkPresence TAB-time walker` (PGO C2 agent — start).
+13. **`bd67e62`** `WIP(pgo-c2): emit-client consumer + self-host strip` (PGO C2 agent — consumer wiring).
+14. **`ae9bca4`** `test(pgo-c2): add 25 unit tests for hasChunkedMarkupTag + hasForStmt flags` (PGO C2 agent — tests). Fold pattern: skip `buildFunctionBodyRegistry` when no for-stmt; elide markup tag-test per-node when no chunked-markup-tag. Mirrors S102 (hasResetExpr) + S106 (hasEqualityExpr) Option-2 precedent.
+15. **`37f8f62`** `feat(tailwind-arbitrary): S108 wave 1 — grid/flex/aspect families` (Bug 1 full-fix agent — substantive). 9 prefix entries + universal underscore-as-space + ratio + repeat/minmax/fit-content function whitelist; 66 unit tests.
+16. **`2830579`** `test(tailwind-arbitrary): S108 wave 1 — coverage + rotated unrecognized cases` (Bug 1 full-fix agent — test landing).
+17. **`e9bd611`** `docs(tailwind-arbitrary): SPEC §26.4 + SPEC-INDEX + known-gaps for S108 wave 1` (Bug 1 full-fix agent — docs; resolved known-gaps conflict at cherry-pick time keeping agent's full-fix-shipped status).
+18. **`bdb9287`** `feat(tailwind-arbitrary): S108 wave 2 — transition/timing + individual transforms + outline` — PA-direct wave: 9 prefix entries (`transition`, `duration`, `delay`, `ease`, `rotate`, `scale`, `translate`, `outline`, `outline-offset`) + 8 function names in VALID_MATH_FUNCTIONS (`cubic-bezier`, `steps`, `rotate3d`, `translate3d`, `scale3d`, `matrix`, `matrix3d`, plus 3D variants); 26 unit tests.
+19. **`a40ac64`** `feat(tailwind-arbitrary): S108 wave 3 — transform shorthand + directional transforms` — PA-direct wave: 1 prefix entry (`transform`) + 9 directional decl-transform emitters (`translate-x`/`-y`, `scale-x`/`-y`, `rotate-x`/`-y`/`-z`, `skew-x`/`-y`) + 14 more function names in VALID_MATH_FUNCTIONS (lowercased 2D + 3D transform fns + `perspective`); 23 unit tests.
+20. **`eba8ded`** `feat(bug-4): C-narrow — markup-text-mode SQL locus gate (SPEC §3.1 + §8.1 conformance)` — PA-direct C-narrow implementation: removed `?{` recognition from block-splitter.js markup-text loop with explanatory comment block; SPEC §4.17 amended with sibling locus-gating principle cross-ref; 8 dedicated Bug 4 tests + 3 existing block-splitter tests updated to C-narrow semantics. Bug 4 deep-dive at `scrml-support/docs/deep-dives/bug-4-docs-mode-escape-2026-05-19.md` (530 lines, 11 prior-art systems, 372 workaround occurrences in adopter corpus).
 
-2. **`a7fbfa8`** `feat(codegen): bug-5 Phase 2 — close Anomalies B + C (phantom placeholder + orphan no-op)` — closed phantom `<span data-scrml-logic>` from decl-only logic bodies + orphan `IDENT;` / `_scrml_reactive_get("count");` no-op JS at file-scope; 7 new tests + 4 brittle pre-existing tests fixed (engine-event-handler-writes `_scrml_attr_onclick_2` hardcoding → regex).
+Plus this wrap commit (hand-off + master-list + changelog).
 
-3. **`f5d35b6`** `docs(readme): add "A note from the designer" section` — user-authored personal note inserted between tagline and v0.3.0 STABLE blockquote; PA fixed user-confirmed typos (department / husband / doesn't / experiments / language / at least), preserved deliberate casualness (fudging / regurget-asemble-ing / lowercase "i" / fragments).
+## Tests at S108 CLOSE
 
-4. **`2e9f9c3`** `fix(diagnostics): bug-3 — [BS] / [TAB] errors + warnings carry file:line:col` — closed dogfood Bug 3 (MED, internal-consistency between W-LINT-* and BS/TAB diagnostic streams); api.js collectErrors enriched with optional filePath; bsSpan→span normalization; dev.js + build.js formatters mirror W-LINT-* shape; 6 unit tests.
+- **Pre-commit subset** (unit + integration + conformance): **13,304 pass / 88 skip / 1 todo / 0 fail / 690 files / 44,794 expect**
+- **Full `bun test compiler/tests/`**: **16,147 pass / 169 skip / 1 todo / 0 fail / 723 files / 47,209 expect**
+- Delta vs S107 close (full 15,930 / 714 files / 46,845 expect): **+217 pass / +9 files / +364 expect / 0 fail / 0 regressions**
 
-5. **`c4d1114`** `docs(website): bug-6 — retire 2 hallucinated error-code references` — closed dogfood Bug 6 (MED, DOC-DRIFT); discovered the actual drift was different from side-session prediction (zero retired-rename hits; instead 2 codes that were NEVER in §34: E-ENGINE-INCOMPLETE-COVERAGE → E-ENGINE-STATE-CHILD-MISSING + E-PURE-VIOLATION → E-PURE-001); also surfaced PRIMER + article follow-ups as out-of-scope.
-
-6. **`b4a8db1`** `docs(scoping): match-block-form impl arc — 5-phase plan, 4 OQs ratified` — README rule= clarification investigation traced silent acceptance of `<match>` to opaque html-fragment fallthrough; entire SPEC §18.0.1+§18.0.2+§18.0.3 unparsed; SCOPING.md authored with 5-phase plan + 10 OQs (4 ratified: Q-MB-1 new AST kind / Q-MB-3 reuse §51.0.B.1 payload parser / Q-MB-5 new E-MATCH-ON-REQUIRED row / Q-MB-7 cut-over no migration); README rule= clarification + Tier-ladder table row updates bundled in.
-
-7. **`a3629fe`** `docs: honest "Known gaps" surface — README callout + docs/known-gaps.md` — user-direction: "honest current state, link to error log, major ones called out on front page"; new `docs/known-gaps.md` adopter-direct curated list of spec-vs-impl drift (HIGH/MED-HI/MED/LOW-MED severity; status: spec'd/scoping/in-impl/blocked); README current-state blockquote adds "Known gaps" paragraph naming match block-form inline + linking to the file.
-
-8. **`82c48fd`** `feat(match-block): Phase 1 — structured AST node for <match> block-form` — found actual root cause was one line in block-splitter.js (`<match>` missing from `COMPOUND_LIFT_EXEMPT_TAGS`); two-site fix produces structured `kind: "match-block"` AST node with `forType` + `onExprRaw` + `armsRaw`; 9 unit tests; Phase 1 known limitation: bare-body only (`:`-shorthand deferred to Phase 2).
-
-9. **`c91fae0`** `feat(match-block): Phase 2 — 5 SYM diagnostics + arm-parser + :-shorthand` — Phase 2 ships full structural validation: STRUCTURAL_RAW_BODY_ELEMENTS BS gate + match-statechild-parser.ts (NEW, 440 lines) recognizing 3 body forms + wildcard + payload bindings + new SYM PASS 20 firing all 5 diagnostics + SPEC §34 + §18.0.1 amendments naming E-MATCH-ON-REQUIRED; 18 unit tests; `:`-shorthand limitation closed.
-
-## Tests at S107 CLOSE
-
-- **Pre-commit subset** (unit + integration + conformance): **13,087 pass / 88 skip / 1 todo / 0 fail / 681 files / 44,430 expect**
-- **Full `bun test compiler/tests/`**: **15,930 pass / 169 skip / 1 todo / 0 fail / 714 files / 46,845 expect**
-- Delta vs S106 close (full 15,867 / 710 files / 46,721 expect): **+63 pass / +4 files / +124 expect / 0 fail / 0 regressions**
-- New tests by track: Bug 5 const-interpolation (Phase 1 + 2) 26 · Bug 3 diagnostic file paths 6 · Match Phase 1 9 · Match Phase 2 18 = 59 new + 4 fixture-shape adjustments to existing tests
-
-## S107 commit ledger
+## S108 commit ledger (20 substantive + 1 wrap)
 
 | # | Commit | What | Tests |
 |---|---|---|---|
-| 1 | `c70176e` | bug-5 Phase 1 (${IDENT} interpolation) | +19 |
-| 2 | `a7fbfa8` | bug-5 Phase 2 (Anomalies B + C) | +7 |
-| 3 | `f5d35b6` | README designer note | — |
-| 4 | `2e9f9c3` | bug-3 ([BS]/[TAB] file:line:col) | +6 |
-| 5 | `c4d1114` | bug-6 (hallucinated error refs) | — |
-| 6 | `b4a8db1` | match-block SCOPING + README rule= | — |
-| 7 | `a3629fe` | known-gaps surface + README callout | — |
-| 8 | `82c48fd` | match-block Phase 1 (AST node) | +9 |
-| 9 | `c91fae0` | match-block Phase 2 (5 diagnostics + parser + `:`-shorthand) | +18 |
-| 10 | `<wrap-sha>` | this wrap commit | — |
+| 1 | `6d520d2` | docs(readme) current-state trim | — |
+| 2 | `b685cf0` | chore(maps) S108 refresh | — |
+| 3 | `ef9d219` | feat(match-block) Phase 3 codegen | +9 |
+| 4 | `811181e` | feat(bug-5) Phase 3 + SPEC §7.4.2 | +14 |
+| 5-9 | `0b2a8fe`..`dce4f06` | Bug 1 floor lint (agent) | +34 |
+| 10 | `204b303` | feat(match-block) Phase 4 `:`-shorthand | +6 |
+| 11 | `b261274` | feat(form-for) B5 L2 label-store | (in-place updates) |
+| 12-14 | `1bf2135`..`ae9bca4` | PGO C2 fold (agent) | +25 |
+| 15-17 | `37f8f62`..`e9bd611` | Bug 1 full-fix wave 1 — grid/flex/aspect (agent) | +71 |
+| 18 | `bdb9287` | Bug 1 wave 2 — transition/transforms/outline (PA) | +26 |
+| 19 | `a40ac64` | Bug 1 wave 3 — transform shorthand + directional (PA) | +23 |
+| 20 | `eba8ded` | feat(bug-4) C-narrow + SPEC §4.17 + deep-dive | +8 |
+| 21 | `<wrap-sha>` | this wrap commit | — |
 
 Both repos pushed at close.
 
@@ -61,123 +68,127 @@ Both repos pushed at close.
 
 | Item | Status |
 |---|---|
-| Tests pre-commit subset | 13,087 / 88 / 1 / 0 fail / 681 files / 44,430 expect |
-| Tests full pre-push gate | 15,930 / 169 / 1 / 0 fail / 714 files / 46,845 expect |
-| Test delta from S106 | +63 pass / +4 files / +124 expect / 0 fail / 0 regressions |
-| Worktree list | main only (no in-flight dispatches) |
-| Origin sync (scrmlTS) | post-wrap push: 0/0 |
-| Origin sync (scrml-support) | 0/0 (no changes this session) |
+| Tests pre-commit subset | 13,304 / 88 / 1 / 0 fail / 690 files / 44,794 expect |
+| Tests full pre-push gate | 16,147 / 169 / 1 / 0 fail / 723 files / 47,209 expect |
+| Test delta from S107 | +217 pass / +9 files / +364 expect / 0 fail / 0 regressions |
+| Worktree list | main only (all 3 agent worktrees cleaned during cherry-pick landing) |
+| Origin sync (scrmlTS) | post-wrap push: target 0/0 |
+| Origin sync (scrml-support) | 0/0 (deep-dive added to scrml-support via agent + already on origin; no further scrml-support edits this session) |
 | Inbox `handOffs/incoming/` | empty |
 | Path-discipline hook | active (Configuration B installed; `.git/hooks/` has pre-commit + post-commit + pre-push) |
-| Post-commit hook | INSTALLED (full-suite re-run on compiler changes + TodoMVC gauntlet + browser validation) |
-| Pre-push hook | INSTALLED (full suite + TodoMVC quick check + README scrml gate on release-tag pushes; ~5min) |
 | Self-host bootstrap | unchanged (S102 broken-import-path still unaddressed) |
-| Maps watermark | `d8427f2` (S105) — **9 commits behind HEAD** (this session's 9 substantive landings + wrap). **S108 session-start MUST refresh BEFORE any dev-agent dispatch.** |
+| Maps watermark | refreshed S108 OPEN to `6616a69`; **22 commits behind HEAD `eba8ded`** (this session's 20 substantive commits since OPEN refresh + wrap). **S109 session-start MUST refresh BEFORE any dev-agent dispatch.** |
 | scrml-support untracked | unchanged from S106 (voice articles + tools/ — user's territory) |
-| docs/known-gaps.md | NEW THIS SESSION (4 open + 3 closed-in-S107; adopter-facing) |
-| Match block-form impl arc | Phases 1+2 SHIPPED; Phase 3 (codegen render dispatch, ~3-5h) queued; Phase 4 (bare-variant inference + edges, ~2-3h) queued; Phase 5 (samples + tests + docs, ~2-3h) queued |
-| pkg.json version | 0.3.3 (unchanged — no release cut this session) |
+| docs/known-gaps.md | rotated 4× across S108 (Bug 5 P3 closure + Bug 1 floor + Bug 1 wave 1+2+3 + match `:`-shorthand closure + Bug 4 `?{` closure + bare-`/` half retained as deferred) |
+| pkg.json version | 0.3.3 (unchanged — no release cut this session; v0.3.x patch arc continues) |
 
-## Carry-forwards for S108
+## S108 adopter-visible closures (5 HIGH/MED-HI end-to-end)
 
-### High priority — match block-form Phase 3 (codegen render dispatch)
+1. **Match block-form Tier 1 case-analysis** — was opaque HTML pass-through at S107 OPEN; now end-to-end functional. Phases 1+2 (S107) + Phase 3 codegen (S108) + Phase 4 `:`-shorthand body codegen (S108). All four body shapes supported (bare-body markup / self-closing / `:`-shorthand expressions / parenthesized payload bindings). Constants fold inline via Bug 5 P3; reactive cells emit placeholder + binding; multiple match-blocks per file → independent dispatchers indexed by AST id; auto-implied `on=` from in-scope engine works.
+2. **Bug 5 `${IDENT}` const-interpolation arc closed end-to-end (Phases 1+2+3 + SPEC §7.4.2)** — was empty placeholder + orphan no-op JS at S106 OPEN; constants like `const VERSION = "v0.3.0"` + `${VERSION}` now fold inline at compile time (zero placeholder, zero JS wiring, zero runtime cost); reactive cells get placeholder + reactive binding; non-foldable non-reactive get placeholder + one-shot textContent at DOMContentLoaded.
+3. **Bug 1 Tailwind FLOOR + FULL fix (3 waves)** — was silent layout breakage at S106 close (dogfood report); FLOOR (S108) lint surfaces compile-time friction; FULL fix waves 1-3 ship CSS emission for grid/flex/aspect + transition/timing + individual + shorthand + directional transforms + outline families (~25+ prefix entries + 14 function name additions to VALID_MATH_FUNCTIONS).
+4. **formFor B5 L2 label-store** — `data.registerLabels({Struct: {field: "Display"}})` was wired-but-unconsumed (runtime helper + map existed; expander never consulted); now the expander emits `${(typeof _scrml_label_for === "function" ? _scrml_label_for(...) : "Mechanical Default")}` per `<label>` position; SPEC §41.14.7 amended.
+5. **Bug 4 `?{` C-narrow** — was catastrophic EOF-cascade when bare `?{` appeared in markup-text body (scrml-about-scrml prose); now `?{` is a SQL opener only inside Logic context per SPEC §3.1 + §8.1 (1 line removal + comment block in block-splitter.js; SPEC §4.17 amended with sibling locus-gating principle cross-ref); 86% of adopter pages already used entity-escape workarounds (zero migration cost).
 
-| Phase | Item | Cost |
-|---|---|---|
-| **Match Phase 3** | Codegen — per-arm render dispatch + reactive subscription on on= cell; mirrors engine state-child render dispatch shape | ~3-5h PA-direct |
-| **Match Phase 4** | Bare-variant inference (§18.0.3) + payload-binding type-system integration (§18.0.1 line 9586-9588 parenthesized form) | ~2-3h PA-direct |
-| **Match Phase 5** | Sample fixtures + integration tests + browser test (runtime arm-swap on reactive change) + docs/known-gaps.md rotation (match-block moves from "in-impl" to closed) + PRIMER §18 refresh | ~2-3h PA-direct |
+## Compile-time perf closure (PGO Phase 3 C2 fold)
 
-### High priority — remaining dogfood bugs (carried from S106)
+PGO Phase 3 C2 (agent-dispatched) — skip `buildFunctionBodyRegistry` when `hasForStmt === false`; elide markup tag-test per-node when `hasChunkedMarkupTag === false`. Mirrors S102 hasResetExpr + S106 hasEqualityExpr Option-2 pattern (one TAB-time DFS walk with throw-sentinel short-circuit; cache booleans on `FileAST`; codegen-time consumers gate downstream work on O(1) flags).
+
+## Carry-forwards for S109
+
+### High priority — remaining dogfood bugs
 
 | # | Severity | Item | Cost |
 |---|---|---|---|
-| Bug 1 | HIGH | Tailwind arbitrary-value classes silent no-op (`grid-cols-[auto_1fr_auto]`) | floor (lint unrecognized): ~2-3h; full fix: medium |
 | Bug 2 | MED-HI | Phantom E-SYNTAX-050 + 4-cascade on multi-line `<a>` + entity-encoded body | needs bisecting reducer; ~2-4h |
-| Bug 4 | LOW-MED | Bare `?{` / `/` in markup copy — no docs-mode escape | deep-dive on design space; ~3-5h |
+| Bug 4 (bare-`/` half) | LOW-MED | Broad-C extension at block-splitter.js:1962-1987 (refine `looksLikeCloser` lookahead) | ~10-20 LOC; deferred pending friction signal |
 
-### High priority — Bug 5 Phase 3 (carried from S106)
+### High priority — Bug 1 still-deferred families
 
-| Phase | Item | Cost |
+| Family | Surface | Cost |
 |---|---|---|
-| **Bug 5 Phase 3** | Constant-folding (Option γ) + SPEC §7.4.2 normative section + tilde context threading + multi-binding placeholder dedup | ~5-8h aggregate |
+| `ring-*` / `ring-offset-*` | Tailwind compound — box-shadow stack trick | medium (compound CSS emission) |
+| `bg-gradient-*` / `from-*` / `to-*` / `via-*` | gradient stop-color compound | medium (multi-utility coordination) |
+| `content-["..."]` / `font-[Inter]` | string-shaped values | needs bracket-parser change (quoted strings) |
+| Safelist / `@apply` | precision improvement for adopter false-positive lint surface | medium-large architectural |
 
-### Substantive (mid-tier remaining from S105 / S106)
+### Substantive — L22 family v1.next + new members
 
 | Track | Item | Cost |
 |---|---|---|
-| Phase 3.B | B4 count-derived dep precision (agent-dispatched; Q-RT3B-OPEN-2 ratified) | ~3-5h |
-| formFor v1.next | B2/B3/B4/B5 (registerRenderer / @label / auto-recurse / L2 label-store) | ~12-22h aggregate |
-| PGO Phase 3 follow-up | C2 Markup/for-stmt double-walk fold + C3 detector extensions + C4 equality runtime-chunk cleanup | ~7-11h |
-| Native parser | M2 expression parser | ~2-4 sessions |
-| Self-host bootstrap | broken-import-path investigation (S102 carry; still unaddressed S103-S107) | ~2-4h |
+| formFor v1.next | B2 (registerRenderer per-type registry) + B3 (`@label` annotation) + B4 (auto-recurse nested struct) | ~8-15h aggregate |
+| schemaFor v1.next | FK derivation (OQ-SCH-4) + payload-bearing enum lowering | ~4-8h |
+| tableFor v1.next | 6 items from S105: sort-state explicit decl + SELECTABLE-CELL-WRONG-TYPE strict-mode + positional column slots + §17.4a for/else codegen + `date`/`timestamp` BUILTIN_TYPE + inline event handler arrow-param | ~6-10h aggregate |
+| L22 next member | `variantNames(EnumType)` — smallest primitive; tightens the family | full 4-gate walk first |
 
-### tableFor v1.next follow-ups (carried from S106)
+### Substantive — Match block-form Phase 5 polish (v0.4+ enrichment)
 
-| # | Item | Cost |
+| Item | Cost |
+|---|---|
+| Samples + integration tests | ~2-3h |
+| Browser test for runtime arm-swap on reactive change | ~1-2h |
+| PRIMER §18 refresh | ~30min |
+| Wildcard `<_>` explicit render (currently fall-through via no-default-branch) | ~1-2h |
+| Payload-binding typer scope (`<Ready(rows)> : doSomething(rows)`) | ~2-3h |
+| Bare-variant inference in nested expression positions | ~2-3h |
+
+### Substantive — mid-tier carry from S107
+
+| Track | Item | Cost |
 |---|---|---|
-| 2 | §41.16.7 sort-state cell as explicit state-decl | small |
-| 3 | §41.16.8 E-TABLEFOR-SELECTABLE-CELL-WRONG-TYPE strict-mode fire-site | small |
-| 4 | OQ-TF-7 positional/computed `<column>` slots | medium |
-| 5 | §17.4a for/else codegen (pre-existing gap; `<empty>` slot text emission) | medium |
-| 6 | `date`/`timestamp` BUILTIN_TYPE entries | small (cross-L22 scoping) |
-| 7 | Inline event handler shape with non-`event` arrow param | small |
+| Phase 3.B B4 | count-derived dep precision (agent-dispatched; Q-RT3B-OPEN-2 ratified) | ~3-5h |
+| Native parser | M2 expression parser | ~2-4 sessions |
+| Self-host bootstrap | broken-import-path investigation (S102 carry; still unaddressed S103-S108) | ~2-4h |
 
-### Investigations + follow-ups noted in commits
+### Light (cleanup)
 
-- **Engine `:`-shorthand at file-top has same BS trap** (noted in match Phase 2 commit body): compound-state-decl misclassification + text-block split. Engine tests use bare-body so doesn't surface in CI. Same fix shape as match (STRUCTURAL_RAW_BODY_ELEMENTS gate) but engine state-children have structural needs beyond raw-body capture — design needed. Filed for follow-up.
-- **PRIMER §7 / §18 / channel-direction sections** describe pre-S87 state in 4-5 lines (PA-internal doc; not adopter-facing). Queue for primer-audit follow-up (per Bug 6 commit body).
-- **docs/articles/realtime-and-workers-as-syntax-devto-2026-04-29.md** (line 131) describes pre-S87 channel direction; archived article describing pre-v0.3 behavior. Needs editorial reframe OR "pre-v0.3 snapshot" header (per Bug 6 commit body).
-- **docs/website build** currently fails on Bug 2/4 patterns in 4 files (9 E-SYNTAX-050 errors); pre-existing dogfood findings. dist/ regen will follow once Bug 2/4 close.
-- **runtime-results.json drift** — committed baseline on Bun 1.3.13; S106 measurement was on 1.3.6; if S108 does runtime-perf work, re-measure on matched Bun.
-- **Maps refresh required BEFORE any dev-agent dispatch S108** (9 commits behind).
+- Maps refresh required again BEFORE any dev-agent dispatch S109 (22 commits behind watermark `6616a69`)
+- Build benchmarks refresh — last measured 2026-05-14 (v0.3.0 STABLE), now 5 days + 20 commits stale; runtime got refreshed today but build did not
+- OQ-TF-11 sub-debate (if user contests MEDIUM verdict on row binding `:let` vs implicit `@row`)
+- Puppeteer dep cleanup (Q-PW-PORT-OPEN-1 ratified DEFER; awaiting 1-2 release cycles post-S103 Playwright cutover)
+- LEGACY `_scrml_subscribers` retirement (v0.4+; Q-RT3-SR-OPEN-3 ratified DEFER post-impl)
 
 ### v1.0+ follow-up
 
 - Structural cleanup of browser-test effect-leak pattern (G1 close residue from S105)
-
-### Light (cleanup)
-
-- OQ-TF-11 sub-debate (if user contests MEDIUM verdict on row binding `:let` vs implicit `@row`)
-- Puppeteer dep cleanup (Q-PW-PORT-OPEN-1 ratified DEFER; awaiting 1-2 release cycles post-S103 Playwright cutover)
-- LEGACY `_scrml_subscribers` retirement (v0.4+; Q-RT3-SR-OPEN-3 ratified DEFER post-impl)
 
 ### Marketing-shaped (per pa.md Rule 1 — DEFER unless raised)
 
 - formFor + schemaFor + tableFor combined sample app + scrml.dev refresh + README compile-gate block
 - L22 family 4-of-6-shipped narrative + tableFor admin-UI-lift adoption pitch
 - v0.4 announce content
-- Match block-form + Known gaps frame ("we're being honest about gaps now") adoption story
+- Bug 4 C-narrow + Bug 5 P3 + match block-form full Tier 1 closure narrative ("we shipped the language design + the dogfood loop validated it")
 
-## Things S108 PA must NOT screw up
+## Things S109 PA must NOT screw up
 
-In addition to S96-S106 carry-forwards:
+In addition to S96-S107 carry-forwards:
 
-- **Maps refresh BEFORE any dev-agent dispatch** — 9 commits behind watermark `d8427f2`. PA-direct fold-in OR re-attempt project-mapper agent at session-start.
-- **Match block-form Phase 3 codegen mirror** — Phase 3 implements per-arm render dispatch; the natural mirror is engine state-child render dispatch in `emit-engine.ts` + `emit-html.ts`. PA must read those files in full per pa.md Rule 4 (SPEC §51 is the spec authority for engine; §18.0.1 is for match — both are normative). Phase 3 codegen should produce output that adopters CAN run in browser (not just compile-time validation).
-- **`</match>` is the canonical closer for match block-form at Phase 2 baseline** — Phase 5 may add `</>` support but until then, adopters must write `</match>` explicitly. The `docs/known-gaps.md` Phase 5 item documents this.
-- **Engine `:`-shorthand follow-up** — orthogonal to match arc but discovered during Phase 2 investigation. If S108 touches engine codegen or any engine `:`-shorthand work, the BS-layer trap surfaces.
-- **Known gaps file is adopter-direct** — rotate as gaps close (each closure should remove the entry from open list + add to closed-for-reference section). PA maintains.
+- **Maps refresh BEFORE any dev-agent dispatch** — 22 commits behind watermark `6616a69`. PA-direct fold-in OR re-attempt project-mapper agent at session-start.
+- **`?{` recognition is now Logic-context-only** — adopters writing scrml-about-scrml docs prose can use `?{` literally. If S109 work touches block-splitter.js's brace-context recognition area, preserve the C-narrow gate (the comment block at line 1443 names SPEC §3.1 + §8.1 + the deep-dive path explicitly).
+- **`_scrml_label_for` is messages-chunk-gated** — the typeof-guard in emit-form-for.ts is load-bearing for formFor in files without inline-override validators. Don't remove the typeof check unless either (a) messages chunk activates unconditionally on formFor expansion (preferred long-term — eliminates the guard cost) or (b) the runtime helper is moved to an always-present chunk.
+- **Match block-form Phase 4 v1 limitations documented in module header** — wildcard `<_>` no explicit render (fall-through via no-default-branch); payload-binding typer scope not extended into arm body (E-NAME-NOT-FOUND on payload names in `${expr}` inside arm bodies is expected); bare-variant inference in nested expression positions is broader typer work. If S109 touches emit-match.ts, read module header first.
+- **Tailwind ARBITRARY_PREFIX_MAP + VALID_MATH_FUNCTIONS are now the source of truth for FULL fix** — when adding a new family, update both (engine emit + lint sync share `getTailwindCSS`). The `ring-*` family in particular needs compound-multi-property emission (box-shadow stack), not just a 1:1 prop mapping.
 - **Hook gate is Configuration B** — local-rich (pre-commit + post-commit + pre-push). `--no-verify` is the S88 process-violation surface; never bypass without explicit authorization.
+- **Bug 4 C-narrow has scope-expansion follow-ons** — 6 OQs surfaced in the deep-dive; Q-BUG4-OPEN-1 (extend gate to `!{`/`^{`/`_{`) + Q-BUG4-OPEN-5 (broad-C bare-`/` extension) are the load-bearing scope expansions. None block C-narrow; all deferred pending friction signal.
 
-## Session-start checklist for S108 PA
+## Session-start checklist for S109 PA
 
 1. Read `pa.md` pointer → `../scrml-support/pa-scrmlTS.md` IN FULL
-2. Read `docs/PA-SCRML-PRIMER.md` IN FULL (Pillar 5b applies)
-3. Read `compiler/SPEC-INDEX.md` IN FULL — note S107 SPEC change: §34 +1 row (E-MATCH-ON-REQUIRED) + §18.0.1 normative bullet
-4. Read `master-list.md` §0 LIVE DASHBOARD IN FULL — note S107 CLOSE addendum at top
-5. Read this `hand-off.md` (S107 CLOSE) — will be rotated to `handOffs/hand-off-110.md` at S108 open
+2. Read `docs/PA-SCRML-PRIMER.md` IN FULL (Pillar 5b applies; refresh queued)
+3. Read `compiler/SPEC-INDEX.md` IN FULL — note S108 SPEC changes: §7.4.2 NEW (Bug 5 P3 normative) + §4.17 amended (Bug 4 C-narrow sibling cross-ref) + §41.14.7 amended (formFor B5 Codegen subsection) + §34 +1 row (`W-TAILWIND-UNRECOGNIZED-CLASS` — was S108 floor lint) + §26.4/§26.5 expansion (Tailwind full-fix prefix catalog growth)
+4. Read `master-list.md` §0 LIVE DASHBOARD IN FULL — note S108 CLOSE addendum at top
+5. Read this `hand-off.md` (S108 CLOSE) — will be rotated to `handOffs/hand-off-111.md` at S109 open
 6. Read last ~10 contentful user-voice entries — no new entries this session
 7. Sync hygiene: `git fetch origin && git rev-list --left-right --count origin/main...HEAD` should be 0/0
 8. Inbox check — `handOffs/incoming/*.md` should be empty
 9. Verify worktrees: `git worktree list` shows main only
 10. Verify hook gate: `git config --get core.hooksPath` empty (Configuration B `.git/hooks/`) with pre-commit + post-commit + pre-push installed
 11. Self-host bootstrap state check — `ls -la compiler/dist/self-host/`; partial-broken state persists from S102; decide whether to investigate OR delete to skip cleanly
-12. **Maps currency check + REFRESH** — `head -3 .claude/maps/primary.map.md` will show `d8427f2` watermark; HEAD is 9 commits ahead. REFRESH BEFORE any scrml-source-shape dispatch.
-13. **Read `docs/known-gaps.md`** — NEW THIS SESSION; adopter-facing gap log. Update as Phase 3/4/5 close match-block; update as Bug 1/2/4 close.
-14. **Surface carry-forward list** — top priority is match-block Phase 3 (codegen); secondary is remaining dogfood bugs (1/2/4) + Bug 5 Phase 3 + mid-tier (Phase 3.B B4, formFor v1.next).
+12. **Maps currency check + REFRESH** — `head -3 .claude/maps/primary.map.md` will show `6616a69` watermark; HEAD is 22 commits ahead. REFRESH BEFORE any scrml-source-shape dispatch.
+13. **Read `docs/known-gaps.md`** — rotated 4× during S108; current state has remaining MED-HI Bug 2 phantom-E-SYNTAX-050 + LOW-MED Bug 4 bare-`/` half + various v1.next L22 family enrichment items at varying priority.
+14. **Surface carry-forward list** — top priority candidates: Bug 1 ring/gradient compound (medium); Bug 2 bisecting reducer; formFor v1.next (B2-B4); tableFor v1.next 6-item batch; variantNames (next L22 member); Native parser M2; Self-host bootstrap S102 carry.
 15. Report: caught up + next priority
 
 ## Tags
 
-#session-107 #CLOSE #match-block-impl-arc #bug-5-phase-1-2 #bug-3 #bug-6 #known-gaps-surface #readme-designer-note #spec-vs-impl-gap-discovery #9-commits #+63-pass #pre-commit-13087 #full-suite-15930
+#session-108 #CLOSE #20-commits #+217-pass #pre-commit-13304 #full-suite-16147 #match-block-phase-3-4-shipped #bug-5-p3-spec-742 #bug-1-floor-plus-full-fix-3-waves #bug-4-c-narrow-spec-conformance #form-for-b5-label-store #pgo-c2-fold #zero-regressions
