@@ -805,6 +805,19 @@ export interface FunctionDeclNode extends BaseNode {
    * Recognized by: isServer && !isGenerator && name === "handle".
    */
   isHandleEscapeHatch?: boolean;
+  /**
+   * True if prefixed with `pinned` keyword (S98 SPEC §48.6.4).
+   *
+   * Opts the `fn` declaration OUT of hoisting per §6.10. A forward reference
+   * to a `pinned fn` SHALL fire `E-STATE-PINNED-FORWARD-REF` (§34). Valid
+   * only when `fnKind === "fn"`; the `function` keyword has no pinned form.
+   * Outermost prefix — must precede any other modifier (`async`/`pure`/`server`).
+   *
+   * **S105 status (2026-05-19):** parser-recognition landed; symbol-table
+   * forward-ref enforcement is a separate follow-on dispatch. AST flag
+   * propagates but downstream consumers are TBD.
+   */
+  isPinned?: boolean;
 }
 
 // -- Component Definition --

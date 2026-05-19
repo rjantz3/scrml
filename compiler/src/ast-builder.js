@@ -5584,8 +5584,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // scope for A6 but did not produce parse-invalid JS until we added the
     // nested `fn`-decl recognizer).
     const _peekAfterFnPrefix = () => {
-      // Walk past `async`/`pure`/`server` prefix and `fn` to the name position.
+      // Walk past `pinned`/`async`/`pure`/`server` prefixes and `fn` to the name position.
+      // S98 §48.6.4 (parser-recognition impl S105): `pinned` is the OUTERMOST modifier.
       let off = 0;
+      // Optional `pinned` (IDENT — not in tokenizer KEYWORDS).
+      if (peek(off)?.kind === "IDENT" && peek(off)?.text === "pinned") off++;
       const t0 = peek(off);
       if (t0?.text === "async" && (t0.kind === "KEYWORD" || t0.kind === "IDENT")) off++;
       else if (t0?.text === "pure" && (t0.kind === "IDENT" || t0.kind === "KEYWORD")) off++;
@@ -5609,10 +5612,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     const _nestedFnServerLookahead = tok.kind === "KEYWORD" && tok.text === "server" &&
       peek(1)?.kind === "KEYWORD" && peek(1)?.text === "fn";
     const _bareNestedFn = tok.kind === "KEYWORD" && tok.text === "fn";
+    // S98 §48.6.4 — `pinned fn` (parser-recognition impl S105).
+    // `pinned` is IDENT (not in tokenizer KEYWORDS); must precede any other prefix.
+    // Reuses `_peekAfterFnPrefix` which now accepts a leading `pinned` IDENT.
+    const _nestedFnPinnedLookahead = tok.kind === "IDENT" && tok.text === "pinned" &&
+      _peekAfterFnPrefix() !== null;
     // Require the post-`fn` token to be IDENT or KEYWORD (the declaration's name).
     // A `(` indicates `fn(args)` call form — fall through to bare-expr.
     const _afterFnName = (_bareNestedFn || _nestedFnAsyncLookahead ||
-      _nestedFnPureLookahead || _nestedFnServerLookahead)
+      _nestedFnPureLookahead || _nestedFnServerLookahead || _nestedFnPinnedLookahead)
       ? _peekAfterFnPrefix()
       : null;
     const _hasName = _afterFnName && (_afterFnName.kind === "IDENT" || _afterFnName.kind === "KEYWORD");
@@ -5621,31 +5629,40 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         _bareNestedFn ||
         _nestedFnAsyncLookahead ||
         _nestedFnPureLookahead ||
-        _nestedFnServerLookahead
+        _nestedFnServerLookahead ||
+        _nestedFnPinnedLookahead
       )
     ) {
       let isAsync = false;
       let isPure = false;
       let isServer = false;
+      let isPinned = false;
       let startTok = tok;
 
-      if (tok.text === "async") {
+      // S98 §48.6.4 — consume `pinned` first (outermost). startTok stays at `pinned`.
+      let dispatchText = tok.text;
+      if (_nestedFnPinnedLookahead) {
+        isPinned = true;
+        consume(); // consume `pinned`
+        dispatchText = peek().text;
+      }
+      if (dispatchText === "async") {
         isAsync = true;
-        startTok = consume(); // consume `async`
+        consume(); // consume `async`
         if (peek().kind === "KEYWORD" && peek().text === "server") {
           isServer = true;
           consume(); // consume `server`
         }
-      } else if (tok.text === "pure") {
+      } else if (dispatchText === "pure") {
         isPure = true;
-        startTok = consume(); // consume `pure`
+        consume(); // consume `pure`
         if (peek().kind === "KEYWORD" && peek().text === "server") {
           isServer = true;
           consume(); // consume `server`
         }
-      } else if (tok.text === "server") {
+      } else if (dispatchText === "server") {
         isServer = true;
-        startTok = consume(); // consume `server`
+        consume(); // consume `server`
       }
       consume(); // consume `fn`
 
@@ -5750,6 +5767,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         isServer,
         ...(isAsync ? { isAsync: true } : {}),
         ...(isPure ? { isPure: true } : {}),
+        ...(isPinned ? { isPinned: true } : {}),
         canFail,
         errorType,
         ...(hasReturnType ? { hasReturnType: true } : {}),
@@ -8329,8 +8347,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       continue;
     }
 
-    // FN SHORTHAND: `[pure|async] [server] fn name { body }` (no parens)
-    // `async` and `pure` tokenize as IDENT — detect via text + lookahead.
+    // FN SHORTHAND: `[pinned] [pure|async] [server] fn name { body }` (no parens)
+    // `async` and `pure` tokenize as IDENT; `pinned` tokenizes as IDENT — detect via text + lookahead.
+    // S98 §48.6.4 (parser-recognition impl S105): `pinned` is the OUTERMOST modifier.
     const _asyncFnLookahead = tok.text === "async" && (
       (peek(1)?.kind === "KEYWORD" && peek(1)?.text === "fn") ||
       (peek(1)?.kind === "KEYWORD" && peek(1)?.text === "server" &&
@@ -8342,11 +8361,28 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       (peek(1)?.kind === "KEYWORD" && peek(1)?.text === "server" &&
        peek(2)?.kind === "KEYWORD" && peek(2)?.text === "fn")
     );
+    // `pinned fn` (S98 §48.6.4) — `pinned` is IDENT; outermost modifier.
+    // Recognizes: `pinned fn`, `pinned async [server] fn`, `pinned pure [server] fn`, `pinned server fn`.
+    const _pinnedFnLookahead = tok.kind === "IDENT" && tok.text === "pinned" && (() => {
+      const p1 = peek(1);
+      if (!p1) return false;
+      if (p1.kind === "KEYWORD" && p1.text === "fn") return true;
+      if (p1.kind === "KEYWORD" && p1.text === "server" &&
+          peek(2)?.kind === "KEYWORD" && peek(2)?.text === "fn") return true;
+      if ((p1.kind === "IDENT" || p1.kind === "KEYWORD") &&
+          (p1.text === "async" || p1.text === "pure")) {
+        if (peek(2)?.kind === "KEYWORD" && peek(2)?.text === "fn") return true;
+        if (peek(2)?.kind === "KEYWORD" && peek(2)?.text === "server" &&
+            peek(3)?.kind === "KEYWORD" && peek(3)?.text === "fn") return true;
+      }
+      return false;
+    })();
     if (
       tok.kind === "KEYWORD" && tok.text === "fn" ||
       (tok.kind === "KEYWORD" && tok.text === "server" && peek(1).kind === "KEYWORD" && peek(1).text === "fn") ||
       _asyncFnLookahead ||
-      _pureFnShorthandLookahead
+      _pureFnShorthandLookahead ||
+      _pinnedFnLookahead
     ) {
       // E-PARSE-002: `fn` shorthand is only valid in a logic context, not meta or other blocks
       if (blockContext !== "logic") {
@@ -8362,25 +8398,33 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       let isServer = false;
       let isAsync = false;
       let isPure = false;
+      let isPinned = false;
       let startTok = tok;
 
-      if (tok.text === "async") {
+      // S98 §48.6.4 — consume `pinned` first (outermost modifier).
+      let dispatchText = tok.text;
+      if (_pinnedFnLookahead) {
+        isPinned = true;
+        consume(); // consume `pinned`
+        dispatchText = peek().text;
+      }
+      if (dispatchText === "async") {
         isAsync = true;
-        startTok = consume(); // consume `async`
+        consume(); // consume `async`
         if (peek().kind === "KEYWORD" && peek().text === "server") {
           isServer = true;
           consume(); // consume `server`
         }
-      } else if (tok.text === "pure") {
+      } else if (dispatchText === "pure") {
         isPure = true;
-        startTok = consume(); // consume `pure`
+        consume(); // consume `pure`
         if (peek().kind === "KEYWORD" && peek().text === "server") {
           isServer = true;
           consume(); // consume `server`
         }
-      } else if (tok.text === "server") {
+      } else if (dispatchText === "server") {
         isServer = true;
-        startTok = consume(); // consume `server`
+        consume(); // consume `server`
       }
       consume(); // consume `fn`
 
@@ -8490,6 +8534,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         isServer,
         ...(isAsync ? { isAsync: true } : {}),
         ...(isPure ? { isPure: true } : {}),
+        ...(isPinned ? { isPinned: true } : {}),
         canFail,
         errorType,
         ...(hasReturnType ? { hasReturnType: true } : {}),
