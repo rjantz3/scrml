@@ -1,6 +1,6 @@
 # error.map.md
 # project: scrmlts
-# updated: 2026-05-18T18:37:27-06:00  commit: 84c736e
+# updated: 2026-05-19T12:00:00-06:00  commit: d8427f2
 
 ## Error Code System
 
@@ -71,6 +71,27 @@ All extend `_ScrmlError extends Error`.
 | E-FORMFOR-ONSUBMIT-SIGNATURE | §41.14.3 | onsubmit= handler arg type mismatch or zero args; fire-site: type-system.ts (S102) |
 | E-FORMFOR-ERROR-STRATEGY-INVALID | §41.14.6 | `error-strategy=` value not "per-field", "summary", or "both"; fire-site: type-system.ts (S102) |
 | E-FORMFOR-NESTED-STRUCT-NO-SLOT | §41.14.8 | Struct-typed field present with no slot override; fire-site: type-system.ts (S102) |
+| E-SCHEMAFOR-TYPE-NOT-STRUCT | §41.15.1 | `schemaFor(X)` arg is missing, quoted, unknown, or non-struct; fire-site: type-system.ts §41.15 pass (S104) |
+| E-SCHEMAFOR-INVALID-CALL-CONTEXT | §41.15.1 | `schemaFor(...)` interpolation outside `<schema>` body; fire-site: type-system.ts §41.15 Pass B (S104) |
+| E-SCHEMAFOR-PICK-INVALID-FIELD | §41.15.4 | `pick:` arg not array-of-strings literal or names unknown field; fire-site: type-system.ts (S104) |
+| E-SCHEMAFOR-OMIT-INVALID-FIELD | §41.15.4 | `omit:` arg not array-of-strings literal or names unknown field; fire-site: type-system.ts (S104) |
+| E-SCHEMAFOR-PICK-OMIT-CONFLICT | §41.15.4 | Both `pick:` AND `omit:` present; fire-site: type-system.ts (S104) |
+| E-SCHEMAFOR-NESTED-STRUCT-NO-FK-V1 | §41.15.7 | Struct-typed field with no v1.0 FK derivation; fire-site: type-system.ts (S104) |
+| E-SCHEMAFOR-VARIANT-PAYLOAD-ENUM-V1 | §41.15.6 | Payload-bearing enum field rejected v1.0 (bare-variant only); fire-site: type-system.ts (S104) |
+| E-SCHEMAFOR-NO-MAPPING | §41.15.6 | Struct field type has no shared-core lowering; fire-site: type-system.ts (S104) |
+| E-TABLEFOR-TYPE-NOT-STRUCT | §41.16.1 | `<tableFor for=X>` is missing `for=`, or `for=` is a quoted string, or references unknown type, or references non-struct type; fire-site: type-system.ts §41.16 pass (S105) |
+| E-TABLEFOR-ROWS-MISSING | §41.16.1 | `<tableFor for=T>` missing `rows=` attribute; fire-site: type-system.ts §41.16 pass (S105) |
+| E-TABLEFOR-ROWS-WRONG-TYPE | §41.16.1 | `<tableFor rows=@cell>` cell type is not `T[]` matching `for=T`; fire-site: type-system.ts §41.16 pass (S105) |
+| E-TABLEFOR-PICK-INVALID-FIELD | §41.16.5 | `pick:` value not array-of-strings literal or names unknown field; fire-site: type-system.ts (S105) |
+| E-TABLEFOR-OMIT-INVALID-FIELD | §41.16.5 | `omit:` value not array-of-strings literal or names unknown field; fire-site: type-system.ts (S105) |
+| E-TABLEFOR-PICK-OMIT-CONFLICT | §41.16.5 | Both `pick:` AND `omit:` attributes present; fire-site: type-system.ts (S105) |
+| E-TABLEFOR-COLUMN-FIELD-UNKNOWN | §41.16.3 | `<column field="X">` names a field absent from struct or excluded by pick/omit; fire-site: type-system.ts (S105) |
+| E-TABLEFOR-NESTED-STRUCT-NO-SLOT | §41.16.6 | Struct-typed field present with no `<column field="X">` slot override; fire-site: type-system.ts (S105) |
+| E-TABLEFOR-VARIANT-PAYLOAD-ENUM-V1 | §41.16.6 | Payload-bearing enum field rejected v1.0 (bare-variant only); fire-site: type-system.ts (S105) |
+| E-TABLEFOR-NO-DISPLAY-MAPPING | §41.16.6 | Struct field type has no default display lowering AND no slot override; fire-site: type-system.ts (S105) |
+| E-TABLEFOR-SORTABLE-REQUIRES-CELL-ROWS | §41.16.7 | `<column sortable>` requires `rows=@cell` to be a reactive cell (not a literal); fire-site: type-system.ts (S105) |
+| E-TABLEFOR-NO-PRIMARY-KEY | §41.16.8 | `selectable=@cell` with no `id` field on struct AND no `selectedBy=` attribute; fire-site: type-system.ts (S105) |
+| E-TABLEFOR-SELECTABLE-CELL-WRONG-TYPE | §41.16.8 | `selectable=@cell` cell is not `T[]` matching `for=T` (deferred to downstream type-checker per SPEC deviation S105) |
 | E-IMPORT-* | 005, 006, 007 | Import violations |
 | E-INPUT-* | 001–005 | §36 input device errors |
 | E-LIFT-* | 001 | Concurrent lift detection (DG) |
@@ -192,10 +213,26 @@ W-CG-CHUNK-NO-PREFETCH and W-CG-CHUNK-PREFETCH-UNRESOLVED are mutually exclusive
 | compiler/src/codegen/route-splitter.ts emitChunkLints() | W-CG-CHUNK-* family + W-CG-CHUNK-PREFETCH-UNRESOLVED |
 | compiler/src/engine-statechild-parser.ts | E-TIMER-NAME-DUPLICATE + E-TIMER-NAME-INVALID (§51.0.M.1) |
 | compiler/src/type-system.ts §41.14 pass | E-FORMFOR-* (8 codes; S102) |
+| compiler/src/type-system.ts §41.15 pass | E-SCHEMAFOR-* (8 codes; S104) — `collectSchemaForImports` + `walkAndExpandSchemaForCalls` two-pass (Pass A inside `<schema>` body; Pass B everywhere-else fires E-SCHEMAFOR-INVALID-CALL-CONTEXT) |
+| compiler/src/type-system.ts §41.16 pass | E-TABLEFOR-* (13 codes; S105) — `collectTableForImports` + `walkAndExpandTableForNodes` (mirror of formFor + schemaFor pattern) |
+| compiler/src/symbol-table.ts SYM PASS 19 | E-STATE-PINNED-FORWARD-REF for `pinned fn` (S105) — walks every CallExpr in every ExprNode payload; fires when readPos < declSpan.start. **Distinct from B4 cell+import pinned-forward-ref check** (which uses `declSpan.end` because non-fn pinned forms forbid self-reference); A4 fn-pinned uses `declSpan.start` because fn semantics admit self-recursion |
 | compiler/src/codegen/rewrite.ts _rewriteParenthesizedIsOp | E-TYPE-042 for `!(x is not)` shape (S103 paren-form rewrite) |
 
+## Reactive Boolean Attribute Dispatch (S105)
+
+Three boolean HTML attrs use setAttribute/removeAttribute toggle via `_scrml_effect` rather than literal `attr=value` interpolation:
+
+| File / Site | Purpose |
+|-------------|---------|
+| compiler/src/codegen/emit-html.ts:41 | `REACTIVE_BOOL_ATTRS = new Set(["disabled", "readonly", "required"])` — Set membership gate |
+| compiler/src/codegen/emit-html.ts:1508 | Dispatch site — boolean-shape attributes route through reactive effect emit; runtime calls setAttribute(name,"") on true, removeAttribute(name) on false |
+| compiler/runtime/scrml-runtime.js _scrml_effect | Runtime toggle target |
+| compiler/tests/unit/reactive-bool-attrs.test.js | 13 unit tests (S105) — happy-path each attr + interaction with @cell + interaction with formFor follow-on case |
+
+Closes §41.14 formFor follow-on: `disabled=!@<cellName>.isValid` on the synthesized submit button was silently dropping prior to S105. Extension candidate set: `checked`, `selected`, `hidden`, `open`, `multiple`, `loop`, `muted` (deferred — extend the Set when adopter friction surfaces).
+
 ## Tags
-#scrmlts #map #error #diagnostics #runtime-errors #error-codes #s103 #v0.3.3 #formfor #e-formfor #wire-format #auth-graph #w-cg-undefined #closure #auth-runtime-fallback #w-cg-chunk #w-auth-login-missing #route-splitter #q-open-6 #payload-binding #named-timers #raw-content #paren-form-fix
+#scrmlts #map #error #diagnostics #runtime-errors #error-codes #s105 #v0.3.3 #formfor #e-formfor #schemafor #e-schemafor #tablefor #e-tablefor #pinned-fn #pass-19 #reactive-bool-attrs #wire-format #auth-graph #w-cg-undefined #closure #auth-runtime-fallback #w-cg-chunk #w-auth-login-missing #route-splitter #q-open-6 #payload-binding #named-timers #raw-content #paren-form-fix
 
 ## Links
 - [primary.map.md](./primary.map.md)

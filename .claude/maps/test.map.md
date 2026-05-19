@@ -1,6 +1,6 @@
 # test.map.md
 # project: scrmlts
-# updated: 2026-05-18T18:37:27-06:00  commit: 84c736e
+# updated: 2026-05-19T12:00:00-06:00  commit: d8427f2
 
 ## Test Framework
 
@@ -16,15 +16,32 @@
 | With bail | `bun test ... --bail` (used by pre-commit hook) |
 | Coverage | `bun test compiler/tests/ --coverage` |
 
-## Test Counts (S103 / v0.3.3 era, 2026-05-18)
+## Test Counts (S105 / post-v0.3.3 era, 2026-05-19)
 
-Pre-commit subset (unit + integration + conformance): **12,719 pass / 88 skip / 1 todo / 0 fail / 696 files**
-Full suite (`bun run test`): See pre-commit subset; S102 close addendum notes 12,718 pass at `08d05b3`
+Pre-commit subset (unit + integration + conformance): **12,998 pass / 92 skip / 1 todo / 0 fail / 675 files**
+Full suite (`bun test compiler/tests/`): **15,841 pass / 173 skip / 1 todo / 0 fail / 708 files / 46,663 expect**
 Native-parser conformance: **97 pass / 0 skip / 0 fail** (parser-conformance-lexer.test.js, M1.4 / M1.5 template-mode tracking)
 
-Prior watermarks: S101 close — 12,645 pass / 88 skip / 1 todo / 0 fail / 658 files (pre-commit); S100 close — 15,444 pass / 172 skip / 1 todo / 0 fail / 689 files (full); S92 close — 12,694 pass / 638 files (pre-commit subset)
+Prior watermarks: S104 close — 12,872 pass / 88 skip / 1 todo / 0 fail / 670 files / 43,337 expect (pre-commit); full pre-push 15,709 pass / 169 skip. S103 close — 12,807 pass / 88 skip / 1 todo / 0 fail / 668 files. S101 close — 12,645 pass / 88 skip / 1 todo / 0 fail / 658 files (pre-commit). S100 close — 15,444 pass / 172 skip / 1 todo / 0 fail / 689 files (full). S92 close — 12,694 pass / 638 files (pre-commit subset).
 
-## New Tests Since S101 Baseline (S102-S103)
+S105 delta vs S104 close: **+132 pass / +30 files / +954 expect / 0 fail / 0 regressions**. New tests by track: 16 pinned-fn-parser + 14 pinned-fn-forward-ref + 13 reactive-bool-attrs + 68 tableFor-unit + 16 tableFor-integration + 3 test-fixups + 1 bug-18-now-passes (was failing) = 131 (matches +132 with 1 incidental).
+
+## New Tests Since S101 Baseline (S102-S105)
+
+**§41.16 tableFor (NEW S105 — agent-dispatched + S67 file-delta land):**
+- compiler/tests/unit/table-for.test.js — 68 unit tests covering 13 E-TABLEFOR-* error codes; all validation paths (TYPE-NOT-STRUCT, ROWS-MISSING, ROWS-WRONG-TYPE, PICK/OMIT family, COLUMN-FIELD-UNKNOWN, NESTED-STRUCT-NO-SLOT, VARIANT-PAYLOAD-ENUM-V1, NO-DISPLAY-MAPPING, SORTABLE-REQUIRES-CELL-ROWS, NO-PRIMARY-KEY, SELECTABLE-CELL-WRONG-TYPE); helper validation paths; per-cell type-driven default rendering; per-column slot override; sortable opt-in; selectable PK derivation
+- compiler/tests/integration/table-for.test.js — 16 integration tests: end-to-end `<tableFor for=Users rows=@users/>` compiles to full `<table>`+`<thead>`+`<tbody>` with reactive row rendering; sort handler wiring; selection checkbox column; empty slot dispatch; pick/omit applied; 07-admin-dashboard.scrml rewrite as canonical adopter usage
+
+**§48.6.4 pinned fn (NEW S105 — PA-direct):**
+- compiler/tests/unit/pinned-fn-parser.test.js — 16 tests: 6 form variants positive cases (pinned fn / pinned async fn / pinned pure fn / pinned server fn / pinned async server fn / pinned pure server fn); regression baselines (let pinned = true / pinned function not recognized per §48.6.4 spec'd `fn` only); ast `isPinned?: boolean` field round-trip
+- compiler/tests/unit/pinned-fn-forward-ref.test.js — 14 tests: SYM PASS 19 fires E-STATE-PINNED-FORWARD-REF when readPos < declSpan.start; allows self-recursion (declSpan.start vs B4 cell-pinned declSpan.end); mutual-recursion between two pinned fns; correctly does NOT fire for non-pinned fn forward-refs (which hoist per §6.9)
+
+**REACTIVE_BOOL_ATTRS dispatch (NEW S105 — PA-direct):**
+- compiler/tests/unit/reactive-bool-attrs.test.js — 13 tests: `disabled` / `readonly` / `required` each with @cell + with derived + with negation; setAttribute/removeAttribute toggle vs literal interpolation; integration with formFor synth submit button; emit-html.ts:1508 dispatch coverage
+
+**§41.15 schemaFor (NEW S104 — agent-dispatched):**
+- compiler/tests/unit/schema-for.test.js — 53 unit tests covering 8 E-SCHEMAFOR-* codes; per-error-code 8 fire + 8 no-fire pairs confirmed
+- compiler/tests/integration/schema-for.test.js — 9 integration tests: round-trip schemaFor → expanded text → parseSchemaBlock → diffSchema → CREATE TABLE SQL; flagship OQ-SCH-12 enum lowering verification
 
 **§41.14 formFor (NEW S102):**
 - compiler/tests/unit/form-for.test.js — 8 E-FORMFOR-* error codes; all validation error paths (TYPE-NOT-STRUCT, SLOT-UNKNOWN, PICK-INVALID-FIELD, OMIT-INVALID-FIELD, PICK-OMIT-CONFLICT, ONSUBMIT-SIGNATURE, ERROR-STRATEGY-INVALID, NESTED-STRUCT-NO-SLOT); +58 tests
@@ -111,13 +128,18 @@ parser-conformance-lexer.test.js [M1.1 skeleton → M1.2 strings+templates+§51.
 | html-elements.test.js | html-elements registry (updated S102 for formFor element) |
 | form-for.test.js | §41.14 formFor error codes (NEW S102) |
 | form-for-expander.test.js | §41.14 expand pass (NEW S102) |
+| schema-for.test.js | §41.15 schemaFor error codes + expansion (NEW S104) |
+| table-for.test.js | §41.16 tableFor error codes + expansion (NEW S105) |
+| pinned-fn-parser.test.js | §48.6.4 pinned fn AST recognition (NEW S105) |
+| pinned-fn-forward-ref.test.js | §48.6.4 SYM PASS 19 forward-ref enforcement (NEW S105) |
+| reactive-bool-attrs.test.js | REACTIVE_BOOL_ATTRS dispatch (NEW S105) |
 | emit-match.test.js, emit-test.test.js, emit-library.test.js, emit-lift.test.js | CG emitters |
 | auth-graph-*.test.ts | Stage 7.55 AuthGraph (A-3) |
 | reachability-solver-*.test.js | Stage 7.6 RS (A-2) |
 | codegen-route-splitter*.test.js, chunk-*.test.js | A-4 per-route artifact splitter |
 
 ## Tags
-#scrmlts #map #test #bun-test #s103 #v0.3.3 #formfor #spec-41-14 #e-formfor #paren-form-fix #dq-12 #native-parser #m1-5 #template-mode #pgo-p3 #hasResetExpr #self-host-ast-parity #approach-a #approach-a5
+#scrmlts #map #test #bun-test #s105 #v0.3.3 #formfor #spec-41-14 #e-formfor #schemafor #spec-41-15 #e-schemafor #tablefor #spec-41-16 #e-tablefor #l22-4-of-6 #pinned-fn-shipped #spec-48-6-4 #sym-pass-19 #reactive-bool-attrs #paren-form-fix #dq-12 #native-parser #m1-5 #template-mode #pgo-p3 #hasResetExpr #self-host-ast-parity #approach-a #approach-a5
 
 ## Links
 - [primary.map.md](./primary.map.md)

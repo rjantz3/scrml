@@ -3,7 +3,7 @@ title: Runtime-perf SCOPING — close the TodoMVC 0/10 suffering gap
 date: 2026-05-18
 session: S102
 authority: removed-from-README TodoMVC runtime benchmark table flagged scrml losing 0/10 ops vs React 19 / Svelte 5 / Vue 3 at v0.3.0 STABLE refresh (data was carried-forward; canonical numbers at `benchmarks/runtime-benchmark.js` against current HEAD pending re-measurement); S102 PGO work confirmed compile-time fixes have NO effect on runtime perf (emitted JS byte-identical)
-status: SCOPE OPEN — Phase 1 (instrumentation + vanilla-JS baseline + re-measurement) dispatch-ready; Phase 2 + 3 sequenced after data lands
+status: SCOPE CLOSED — Phase 1 (Playwright bench port + vanilla-JS baseline + re-measurement) SHIPPED S103 `129fcbe`; Phase 2 attribution + Phase 3 select-row chip-away SHIPPED S103 (`91fcc72` Candidate A + `47d3bb8` `!=` extension; -98% wall on select-row; 561× Chrome recovery vs v0.3.0). Phase 3.B partial-update + swap-rows scoped at sibling SCOPING `docs/changes/runtime-perf-phase-3-partial-update-and-swap/`; Q-RT3B-OPEN-1..5 ratified S105
 ---
 
 # Runtime-perf SCOPING — close the TodoMVC suffering gap

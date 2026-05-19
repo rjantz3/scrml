@@ -1,6 +1,6 @@
 # domain.map.md
 # project: scrmlts
-# updated: 2026-05-18T18:37:27-06:00  commit: 84c736e
+# updated: 2026-05-19T12:00:00-06:00  commit: d8427f2
 
 ## Core Concepts
 
@@ -54,7 +54,17 @@
 | scrml:host | Stdlib module: `safeCall`, `safeCallAsync`, `HostError`. try/catch lives ONLY in compiler/runtime/stdlib/host.js — never in scrml source |
 | Raw-content elements (§4.17) | `<pre>` and `<code>` — bodies are a single text run. scrml tokens (`${...}`, `<TagName>`, brace sigils) NOT recognized inside. `RAW_CONTENT_ELEMENTS` Set in block-splitter.js. S101 landing, companion §24.3.1 cross-ref |
 | Tailwind typography plugin (§26.6) | `prose` / `prose-{color}` / `prose-{size}` / `not-prose` opt-out. §26.6.1 base prose styling with `:where()`+`:not(:where([class~="not-prose"] *))` selectors. §26.6.2 color variants (slate/gray/zinc/neutral/stone). §26.6.3 size variants (sm/base/lg/xl/2xl). Implemented in tailwind-classes.js +415 LOC (S100) |
-| fn mutual recursion / hoisting (§48.6.4) | `fn` declarations at file scope hoist per §6.9, mirroring `function`; mutual recursion supported without source-order constraints; `pinned fn` opt-out (parser-recognition implementation-pending). S98 SPEC-only landing |
+| fn mutual recursion / hoisting (§48.6.4) | `fn` declarations at file scope hoist per §6.9, mirroring `function`; mutual recursion supported without source-order constraints; `pinned fn` opt-out **SHIPPED end-to-end S105** — parser recognition `dc3c460` (AST `FunctionDeclNode.isPinned?: boolean`, 6 form variants) + SYM PASS 19 forward-ref enforcement `7910162` (E-STATE-PINNED-FORWARD-REF; readPos < declSpan.start). 30 unit tests |
+| SYM PASS 19 — `pinned fn` forward-ref check | `compiler/src/symbol-table.ts` line ~8390/8930: walks every CallExpr in every ExprNode payload; fires E-STATE-PINNED-FORWARD-REF when readPos < declSpan.start AND target FunctionDeclNode has `isPinned=true`. **Distinct from B4 cell+import pinned-forward-ref** (B4 uses `declSpan.end`; A4 uses `declSpan.start` because fn semantics admit self-recursion AND fn-decl spans overlap with next statement via ast-builder's `spanOf(startTok, peek())` peek-end anchor) |
+| REACTIVE_BOOL_ATTRS dispatch (S105) | `compiler/src/codegen/emit-html.ts:41` — `REACTIVE_BOOL_ATTRS = new Set(["disabled", "readonly", "required"])`. Dispatch at `:1508` routes boolean-shape reactive attrs through `_scrml_effect` setAttribute/removeAttribute toggle (vs literal `attr=value` interpolation). Closes §41.14 formFor follow-on B1 (synth submit button `disabled=!@<cellName>.isValid` was silently dropping). Extension candidates: `checked`, `selected`, `hidden`, `open`, `multiple`, `loop`, `muted` — deferred until adopter friction surfaces. 13 unit tests at `compiler/tests/unit/reactive-bool-attrs.test.js` |
+| tableFor (§41.16) | **FOURTH L22 family member — SHIPPED S105**. Type-driven `<table>` rendering from struct definition + rows cell. Markup-element form `<tableFor for=StructType rows=@cell pick:=[...] omit:=[...]>` per OQ-TF-1 synthesis-mode verdict 53/60 (vs Form B function-call 34/60 vs Form C block-attribute 29/60; 19-pt margin). Source-level expansion at type-system stage: walks struct fields + pick/omit filter + slot dispatch + per-cell type-driven default rendering. Opt-in `<column sortable>` per-column with auto-synth `@<varName>.sortedBy: TableSort | not` state cell. Opt-in `selectable=@cell` outer attribute with mechanical `id`-field PK derivation + `selectedBy=` override. `<empty>` slot for empty-state. 13 E-TABLEFOR-* error codes. SPEC §41.16 + emit-table-for.ts (NEW) + collectTableForImports + walkAndExpandTableForNodes + 84 tests. stdlib re-export `stdlib/data/table-for.scrml` + `TableSort:struct` type. 3 documented SPEC deviations + 7 v1.next follow-ups |
+| TableSort | Stdlib struct type for tableFor sort surface: `TableSort:struct = { field: string, dir: SortDir }` + `SortDir:enum = .Asc | .Desc`. Auto-synthesized state cell `@<varName>.sortedBy: TableSort | not` is `not` until first column header click; column header click handler writes a TableSort variant. v1.next: explicit state-decl form |
+| schemaFor (§41.15) | **THIRD L22 family member — SHIPPED S104**. Type-driven SQL DDL generation. FUNCTION-CALL form `${ schemaFor(StructType) }` interpolated inside `<schema>` block per OQ-SCH-1 debate verdict (Form B 50/60). Closes the §39+L4 vocabulary-unification loop waiting since L4 landed S58. Flagship value-add OQ-SCH-12: enum-typed struct fields auto-lower to `text req oneOf([variant-names...])` (closes enum-knowledge-loss-at-DB-boundary gap). emit-schema-for.ts 386L + collectSchemaForImports + walkAndExpandSchemaForCalls two-pass + 8 E-SCHEMAFOR-* codes + 62 tests |
+| L22 family roster | parseVariant ✓ S65 · formFor ✓ S102-S103 · schemaFor ✓ S104 · serialize ✗ STASHED S103 (§53.14.4 Gate 2 synonym-risk) · **tableFor ✓ S105** · variantNames / reflective planned. Discipline-health datum: 3 debate-05 rejections + 1 STASHED vs **4** advancements — §53.14.4 filter empirically working |
+| Phase 3 select-row chip-away (S103) | Runtime-perf Phase 2 attribution dive identified LEGACY `_scrml_subscribers` O(n) walk as 90% wall on select-row. Candidate A (`91fcc72`) value-indexed predicate-bind subscription -80% wall + `!=` detector extension follow-on (`47d3bb8`) cumulative -98% wall. select-row 4.97ms → **0.12ms happy-dom + 0.30ms Chrome** (vs 168.2ms v0.3.0 STABLE = **561× faster**). Average vs React 6.1× faster (was 3.1× at P1.C) |
+| Phase 3.B candidate set (S104 SCOPED) | Partial-update + swap-rows targets per `docs/changes/runtime-perf-phase-3-partial-update-and-swap/SCOPING.md`. B2 same-keys-in-same-order fast-path (HIGH; ~30-50% partial-update savings; PA-direct ~2-3h); B4 count-derived dep precision (MED-HIGH; ~30-50% partial + ~20-40% swap; agent-dispatched ~3-5h); B3 batched microtask reconcile (GATED on B2+B4 residual); B1 array-reorder fast-path (DEFER — already fast-bailing). Q-RT3B-OPEN-1..5 ratified S105 — B2/B4 unblocked for S106 dispatch. Counter-intuitive: scrml partial-update already WINS Chrome (1.00ms vs Vanilla 2.60ms, React 4.65ms, Svelte 4.10ms); Phase 3.B targets happy-dom + swap-rows where Chrome gap remains |
+| Playwright Chrome bench port (S103) | Q-RUNTIME-OPEN-2 closed via `129fcbe` — replaces Puppeteer (legacy) with project-standard Playwright. Vanilla 5th baseline + new dated Chrome row at `benchmarks/RESULTS.md`; v0.3.0 STABLE row preserved as Historical. Chrome validates Phase 3 work: scrml wins 1/10 outright (partial-update); within 5-25% of Vanilla on every bulk-DOM op; beats React on 5/10; beats Vue on 9/10. Playwright is the project automation standard (Q-PW-PORT-OPEN-1 ratified DEFER on retiring Puppeteer until 1-2 release cycles show no divergence) |
+| Bug-18 happy-dom env reset (G1, S105) | Test-isolation failure root cause: runtime IIFE effect leak across closures. `compiler/tests/browser/browser-components.test.js`'s runtime IIFE writes effects to closure-held DOM refs; effects persist across tests + re-fire when bug-18 §5 sets body.innerHTML; OLD effects find compile-counter-collision selectors + overwrite bug-18's content. Fix: GlobalRegistrator.unregister + register at top of bug-18 §5 (`5a7441b`). **v0.4 follow-up filed: structural cleanup of browser-test effect-leak pattern** (afterEach happy-dom re-register / closure-ref refactor / sibling-test GlobalRegistrator convention) |
 | Native parser (Mn series) | `compiler/native-parser/` — bottom-up scrml-native JS lexer replacing Acorn pre-v1.0. M1.1 (S99) + M1.2 strings/templates/§51.0.Q.1 nested-engine (S100) + M1.3 line/block comments (S102) + M1.4 regex (S103) + M1.5 template-mode tracking in Acorn oracle (S102). M1 LADDER COMPLETE: all 7 LexMode state-children have substantive body dispatchers. Acorn is the conformance oracle, not the design template. |
 | §51.0.Q.1 nested engine | SPEC-canonical pattern for composite state-children containing an inner `<engine>` over the same type. `var=innerLexMode` is the canonical disambiguation (SPEC §51.0.C + §51.0.Q.1). Exemplified in `lex-mode.scrml` InTemplateBody state-child. |
 | Named timers (§51.0.M.1) | `<onTimeout name=IDENT after=DURATION to=.Variant>` — addressable timer; `cancelTimer("IDENT")` from event-handler inside same state-child body. E-TIMER-NAME-DUPLICATE + E-TIMER-NAME-INVALID diagnostics. SHIPPED S79 A5-6 Feature 1 |
@@ -70,18 +80,35 @@
 | paren-form `is not` / `is some` fix (S103) | `(expr) is not` / `(expr) is some` / `(expr) is not not` — rewrite.ts _rewriteParenthesizedIsOp no longer interposes `_scrml_tmp_N = (expr)` tmpvar. Prior tmpvar was undeclared in ES-module strict mode → ReferenceError. Fix: `(expr) is not` → `((expr) == null)` directly. Single-evaluation intrinsic to paren form |
 | runtime-perf SCOPING | S102 SCOPE OPEN: close the TodoMVC 0/10 runtime benchmark gap vs React/Svelte/Vue. Phase 1 (instrumentation + vanilla-JS baseline + re-measurement) dispatch-ready. Compile-time PGO has zero effect on runtime perf (emitted JS byte-identical) |
 
-## v0.3.x Status (HEAD 84c736e, 2026-05-18)
+## v0.3.x Status (HEAD d8427f2, 2026-05-19)
 
-**v0.3.3** — cut at S102 tag `5815cf6`. v0.3.3 = PGO Phase 3 wave + formFor impl + runtime-perf SCOPING.
+**v0.3.3** — cut at S102 tag `5815cf6`. v0.3.3 = PGO Phase 3 wave + formFor impl + runtime-perf SCOPING. pkg.json at 0.3.0 (no new tag cut S103-S105 despite substantive landings; tag/bump pairing per S94 versioning rule will fold at v0.4 release point).
+
+**CLOSED at S105 (post-v0.3.3 patch — multi-track):**
+- §41.16 tableFor SPEC + impl SHIPPED end-to-end (FOURTH L22 family member; 84 tests; +3890 LOC; deep-dive 1452L at scrml-support) ✓
+- §48.6.4 pinned fn parser-recognition (`dc3c460`) + SYM PASS 19 forward-ref enforcement (`7910162`); 30 tests ✓
+- REACTIVE_BOOL_ATTRS dispatch (B1 close — disabled/readonly/required boolean-attr reactive wiring); 13 tests ✓
+- G1 bug-18 happy-dom env reset (test-isolation failure closed via GlobalRegistrator reset) ✓
+- README runtime-benchmark refresh + dangling sixth-variant prose fix + match-tier-ladder context ✓
+- Phase 3.B Q-RT3B-OPEN-1..5 RATIFIED — B2/B4 unblocked ✓
+
+**CLOSED at S104 (post-v0.3.3 patch — schemaFor SHIPPED):**
+- §41.15 schemaFor SPEC + impl SHIPPED end-to-end (THIRD L22 family member; OQ-SCH-12 enum lowering load-bearing; 62 tests) ✓
+- Phase 3.B SCOPING + 4 candidates ranked (B1/B2/B3/B4); B1 DEFER, B2/B3/B4 candidate set surfaced ✓
+- 5 non-compliance derefs (legacy v0-kickstarter + superseded-closure + wave-4-adopter-content + promotion-ergonomics TIER-C-SCOPE + v0.3-approach-a-impl SCOPING) → scrml-support/archive ✓
+
+**CLOSED at S103 (post-v0.3.3 patch — runtime-perf + L22 + Playwright):**
+- Phase 3 select-row chip-away: Candidate A (`91fcc72`) -80% wall + `!=` extension (`47d3bb8`) cumulative -98% wall; 561× faster than v0.3.0 ✓
+- formFor stdlib re-export + §53.14.3 family-roster row flip ✓
+- serialize STASHED per §53.14.4 Gate 2 synonym-risk; revival triggers documented ✓
+- Playwright Chrome bench port (Q-RUNTIME-OPEN-2 closed); replaces Puppeteer legacy ✓
+- paren-form `is not` / `is some` codegen fix — tmpvar-free shape ✓
 
 **CLOSED at S102 (v0.3.3):**
 - PGO Phase 3: P3.A regex collapse + P3.B detect-runtime-chunks fold + P3.C owner-stack + P3.B-followup hasResetExpr ✓
 - §41.14 formFor SPEC (11 normative subsections, 8 error codes) + compiler impl (expandFormFor, type-system validation, +58 tests) ✓
 - M1.5 template-mode tracking in Acorn oracle (parser-conformance-lexer.test.js) ✓
 - runtime-perf SCOPING (3-phase ladder; Phase 1 dispatch-ready) ✓
-
-**CLOSED at S103 (post-v0.3.3 patch):**
-- paren-form `is not` / `is some` codegen fix — tmpvar-free shape; not-keyword.test.js §42.2.4 Phase A tests ✓
 
 **CLOSED at S99-S101 (post-v0.3.0 patch arc):**
 - §51.0.B.1 payload-binding compiler wiring (Track 2) ✓
@@ -90,12 +117,18 @@
 - M1.2 strings + templates + §51.0.Q.1 nested-engine ✓
 - §4.17 raw-content elements + PIPELINE.md v0.7.2 + SPEC §24.3.1 ✓
 
-**Pending (post-v0.3.3):**
-- M1.5 native-parser: flip `expr-literals.js` to "full" disposition (regex-token normalizer extension)
+**Pending (post-v0.3.3, mid-tier carry-forward at S106 open):**
+- Phase 3.B B2 same-keys-in-same-order fast-path (PA-direct ~2-3h; OQs ratified S105)
+- Phase 3.B B4 count-derived dep precision (agent-dispatched ~3-5h; OQs ratified S105)
+- OQ-TF-13 helper extraction (`validateTypeArgument` shared helper across formFor+schemaFor+tableFor+parseVariant callers; ~1-2h)
+- formFor v1.next: B2 registerRenderer / B3 @label / B4 auto-recurse nested struct (~12-22h aggregate)
+- PGO Phase 3 follow-ons: C1 hasEqualityExpr / C2 Markup-for-stmt double-walk / C3 in/.includes()/deep-path-key / C4 equality runtime-chunk detector cleanup (~8-14h aggregate)
+- 7 newly-surfaced tableFor v1.next follow-ups (sort-state explicit decl / SELECTABLE-CELL-WRONG-TYPE strict-mode / positional column slots / §17.4a for/else codegen / date/timestamp BUILTIN_TYPE / inline event handler arrow-param rewrite)
 - M2: expression parser in scrml; ParseContext engine
+- Self-host bootstrap broken-import-path investigation (S102 carry; unaddressed S103-S105)
+- v1.0 follow-up: structural cleanup of browser-test effect-leak pattern (G1 close residue)
 - stdlib/http async migration (4 try-catch sites tracked by W-TRY-CATCH lint)
-- formFor stdlib + sample-app + scrml.dev refresh → v0.4 anchor (per S101 user direction)
-- runtime-perf Phase 1 (instrumentation + vanilla-JS baseline + re-measurement)
+- formFor + schemaFor + tableFor combined sample app + scrml.dev refresh + README compile-gate block → v0.4 anchor (marketing-shaped, per pa.md Rule 1 DEFER unless raised)
 
 ## Business Invariants
 
@@ -151,6 +184,28 @@
 | E-FORMFOR-ONSUBMIT-SIGNATURE | error | type-system.ts §41.14 pass | Handler arg type mismatch or zero args | S102 |
 | E-FORMFOR-ERROR-STRATEGY-INVALID | error | type-system.ts §41.14 pass | error-strategy= not "per-field"/"summary"/"both" | S102 |
 | E-FORMFOR-NESTED-STRUCT-NO-SLOT | error | type-system.ts §41.14 pass | Struct-typed field with no slot override | S102 |
+| E-SCHEMAFOR-TYPE-NOT-STRUCT | error | type-system.ts §41.15 pass | `schemaFor(X)` arg missing/quoted/unknown/non-struct | S104 |
+| E-SCHEMAFOR-INVALID-CALL-CONTEXT | error | type-system.ts §41.15 Pass B | `schemaFor(...)` outside `<schema>` body | S104 |
+| E-SCHEMAFOR-PICK-INVALID-FIELD | error | type-system.ts §41.15 pass | pick: not array-of-strings or unknown field | S104 |
+| E-SCHEMAFOR-OMIT-INVALID-FIELD | error | type-system.ts §41.15 pass | omit: not array-of-strings or unknown field | S104 |
+| E-SCHEMAFOR-PICK-OMIT-CONFLICT | error | type-system.ts §41.15 pass | Both pick: and omit: present | S104 |
+| E-SCHEMAFOR-NESTED-STRUCT-NO-FK-V1 | error | type-system.ts §41.15 pass | Struct-typed field with no v1.0 FK derivation | S104 |
+| E-SCHEMAFOR-VARIANT-PAYLOAD-ENUM-V1 | error | type-system.ts §41.15 pass | Payload-bearing enum field rejected v1.0 | S104 |
+| E-SCHEMAFOR-NO-MAPPING | error | type-system.ts §41.15 pass | Struct field type has no shared-core lowering | S104 |
+| E-TABLEFOR-TYPE-NOT-STRUCT | error | type-system.ts §41.16 pass | `for=` missing/quoted/unknown/non-struct | S105 |
+| E-TABLEFOR-ROWS-MISSING | error | type-system.ts §41.16 pass | `<tableFor for=T>` missing `rows=` attr | S105 |
+| E-TABLEFOR-ROWS-WRONG-TYPE | error | type-system.ts §41.16 pass | `rows=@cell` not `T[]` matching `for=T` | S105 |
+| E-TABLEFOR-PICK-INVALID-FIELD | error | type-system.ts §41.16 pass | pick: not array-of-strings or unknown field | S105 |
+| E-TABLEFOR-OMIT-INVALID-FIELD | error | type-system.ts §41.16 pass | omit: not array-of-strings or unknown field | S105 |
+| E-TABLEFOR-PICK-OMIT-CONFLICT | error | type-system.ts §41.16 pass | Both pick: and omit: present | S105 |
+| E-TABLEFOR-COLUMN-FIELD-UNKNOWN | error | type-system.ts §41.16 pass | `<column field="X">` field unknown to struct or excluded by pick/omit | S105 |
+| E-TABLEFOR-NESTED-STRUCT-NO-SLOT | error | type-system.ts §41.16 pass | Struct-typed field with no `<column>` slot override | S105 |
+| E-TABLEFOR-VARIANT-PAYLOAD-ENUM-V1 | error | type-system.ts §41.16 pass | Payload-bearing enum field rejected v1.0 | S105 |
+| E-TABLEFOR-NO-DISPLAY-MAPPING | error | type-system.ts §41.16 pass | Struct field has no default display lowering AND no slot | S105 |
+| E-TABLEFOR-SORTABLE-REQUIRES-CELL-ROWS | error | type-system.ts §41.16 pass | `<column sortable>` requires `rows=@cell` reactive cell | S105 |
+| E-TABLEFOR-NO-PRIMARY-KEY | error | type-system.ts §41.16 pass | `selectable=@cell` with no `id` field + no `selectedBy=` | S105 |
+| E-TABLEFOR-SELECTABLE-CELL-WRONG-TYPE | error | type-system.ts §41.16 pass | `selectable=@cell` cell wrong type (deferred to downstream) | S105 |
+| E-STATE-PINNED-FORWARD-REF | error | symbol-table.ts SYM PASS 19 | Call to `pinned fn` before its declaration source-position | S105 |
 
 ## Domain Events (Compiler Pipeline)
 
@@ -201,8 +256,14 @@
 | §51.0.M.1 named timers + cancelTimer | SHIPPED S79 A5-6 Feature 1 — engine-statechild-parser.ts + emit-variant-guard.ts + binding-registry.ts + runtime-template.js |
 | §26.6 typography plugin | CLOSED S100 — tailwind-classes.js buildProseRule/buildProseColorRule/buildProseSizeRule (SPEC §26.6.1-§26.6.5) |
 | §4.17 raw-content elements | CLOSED S101 — block-splitter.js RAW_CONTENT_ELEMENTS Set + PIPELINE.md v0.7.2 + SPEC §24.3.1 cross-ref |
-| §48.6.4 fn mutual recursion / hoisting | SPEC-only S98 — parser-recognition implementation-pending (normative semantics specified) |
+| §48.6.4 fn mutual recursion / hoisting | **SHIPPED end-to-end S105** — SPEC S98 normative + parser-recognition `dc3c460` (AST `FunctionDeclNode.isPinned?: boolean`; 6 form variants) + SYM PASS 19 forward-ref enforcement `7910162` (E-STATE-PINNED-FORWARD-REF). 30 unit tests |
 | §41.14 formFor | SHIPPED S102 — type-system.ts §41.14 pass + emit-form-for.ts expandFormFor() + 8 E-FORMFOR-* codes + 3 test files; html-elements.js formFor element spec; attribute-registry.js + tokenizer.ts updates for pick=/omit= array-literal parsing |
+| §41.15 schemaFor | SHIPPED S104 — type-system.ts §41.15 pass + emit-schema-for.ts expandSchemaFor + 8 E-SCHEMAFOR-* codes + 62 tests; OQ-SCH-12 enum-lowering flagship value-add; closes §39+L4 vocabulary-unification loop |
+| §41.16 tableFor | **SHIPPED end-to-end S105** — type-system.ts §41.16 pass + emit-table-for.ts expandTableForElement() + 13 E-TABLEFOR-* codes + 84 tests (68 unit + 16 integration); stdlib re-export `stdlib/data/table-for.scrml` + `TableSort:struct` type; 1452L deep-dive at scrml-support `67fe2b8`; 3 documented SPEC deviations + 7 v1.next follow-ups |
+| REACTIVE_BOOL_ATTRS dispatch | SHIPPED S105 — emit-html.ts:41 Set definition + :1508 dispatch; closes §41.14 formFor follow-on B1 (`disabled=!@cell` was silently dropping); 13 unit tests |
+| Phase 3 select-row chip-away | CLOSED S103 — `91fcc72` Candidate A (-80% wall) + `47d3bb8` `!=` extension (cumulative -98% wall); select-row 4.97ms → 0.12ms happy-dom + 0.30ms Chrome (561× faster than v0.3.0 STABLE) |
+| Phase 3.B (partial-update + swap-rows) | SCOPED S104 — `docs/changes/runtime-perf-phase-3-partial-update-and-swap/SCOPING.md`; Q-RT3B-OPEN-1..5 ratified S105 — B2 + B4 unblocked for S106 dispatch |
+| Playwright Chrome bench | CLOSED S103 — Q-RUNTIME-OPEN-2 closed via `129fcbe`; vanilla 5th baseline; project automation standard (Puppeteer legacy) |
 | MPA shell-composition $& fix | CLOSED S100/S101 — codegen/index.ts:1214 + component-expander.ts:2169 + commands/generate.js:242 |
 | Native parser M1 ladder | CLOSED S103 (M1.4) — compiler/native-parser/ all 7 LexMode state-children active; M1.5 regex-token normalizer pending |
 | PGO Phase 3 | CLOSED S102 — emit-client.ts P3.A+P3.B+P3.B-followup; dependency-graph.ts P3.C owner-stack; ast-builder.js hasResetExpr; −62% pipeline on trucking-dispatch |
@@ -216,7 +277,7 @@
 | runtime-perf SCOPING | docs/changes/runtime-perf-scoping/SCOPING.md — Phase 1 dispatch-ready; Phase 2+3 sequenced after data |
 
 ## Tags
-#scrmlts #map #domain #concepts #pipeline #engine #reactive #s103 #v0.3.3 #formfor #spec-41-14 #approach-a #approach-a2 #approach-a3 #approach-a4 #approach-a5 #reachability #auth-graph #wire-format #null-eradication #route-splitter #fnv1a-hash #chunk-prefetch #generate-auth #q-open-4 #q-open-5 #q-open-6 #native-parser #m1-4 #m1-5 #m1-ladder-complete #raw-content #typography #payload-binding #named-timers #spec-51-0-b-1 #spec-4-17 #spec-26-6 #spec-48-6-4 #pgo-phase-3 #hasResetExpr #paren-form-fix #dq-12 #runtime-perf
+#scrmlts #map #domain #concepts #pipeline #engine #reactive #s105 #v0.3.3 #formfor #spec-41-14 #schemafor #spec-41-15 #tablefor #spec-41-16 #l22-4-of-6 #TableSort #pinned-fn-shipped #spec-48-6-4 #sym-pass-19 #reactive-bool-attrs #phase-3-select-row #phase-3b-scoped #phase-3b-b2 #phase-3b-b4 #playwright-bench #561x-chrome #approach-a #approach-a2 #approach-a3 #approach-a4 #approach-a5 #reachability #auth-graph #wire-format #null-eradication #route-splitter #fnv1a-hash #chunk-prefetch #generate-auth #q-open-4 #q-open-5 #q-open-6 #native-parser #m1-5 #m1-ladder-complete #raw-content #typography #payload-binding #named-timers #spec-51-0-b-1 #spec-4-17 #spec-26-6 #pgo-phase-3 #hasResetExpr #paren-form-fix #dq-12 #runtime-perf #g1-bug-18
 
 ## Links
 - [primary.map.md](./primary.map.md)

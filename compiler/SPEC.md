@@ -4971,7 +4971,7 @@ The `pinned` keyword (§6.10) opts a declaration OUT of hoisting. A `pinned` dec
 **Cross-references:**
 - §6.10 — The `pinned` keyword (opt-out of hoisting)
 - §34 — E-STATE-PINNED-FORWARD-REF
-- §48.6.4 — `fn` declarations at file scope hoist per this section, mirroring `function`; mutual recursion of `fn` is supported without source-order constraints. `pinned fn` is the per-declaration opt-out (parser-recognition implementation-pending).
+- §48.6.4 — `fn` declarations at file scope hoist per this section, mirroring `function`; mutual recursion of `fn` is supported without source-order constraints. `pinned fn` is the per-declaration opt-out (parser recognition + symbol-table forward-ref enforcement SHIPPED S105 — commits `dc3c460` + `7910162`).
 
 ---
 
@@ -20487,7 +20487,7 @@ fn parseBinary(cursor) {
 
 `fn` declarations inside a logic context `${ }` do NOT hoist beyond the `${ }` block; they follow declaration-before-use rules within their block, mirroring §6.9.1's treatment of state cells inside `${ }`. Inner `fn` declarations (nested inside an outer `fn` body, per §7.3.1) hoist to the enclosing `fn` body's local scope, not to the file scope.
 
-**`pinned fn` (opt-out).** Per §6.10, the `pinned` bareword modifier opts a declaration OUT of hoisting. The opt-out form for `fn` is `pinned fn name() { ... }`; a forward reference to a `pinned fn` declaration is **E-STATE-PINNED-FORWARD-REF** (§34), reusing the existing diagnostic. **Implementation status (2026-05-17):** the `pinned` modifier is currently recognized by the parser on reactive cell declarations, `<engine>` declarations, and import specifiers; parser recognition of `pinned fn` is implementation-pending. The normative semantics are specified here so that an `fn` author who later needs source-position pinning has a defined surface; the parser/symbol-table work to surface `pinned fn` is a separate dispatch.
+**`pinned fn` (opt-out).** Per §6.10, the `pinned` bareword modifier opts a declaration OUT of hoisting. The opt-out form for `fn` is `pinned fn name() { ... }`; a forward reference to a `pinned fn` declaration is **E-STATE-PINNED-FORWARD-REF** (§34), reusing the existing diagnostic. **Implementation status (2026-05-19, S105 — SHIPPED end-to-end):** parser recognition landed at commit `dc3c460` (AST `FunctionDeclNode.isPinned?: boolean`; 6 form variants — `pinned fn` / `pinned async fn` / `pinned pure fn` / `pinned server fn` / `pinned async server fn` / `pinned pure server fn`; recognition at both fn-decl parser sites in `compiler/src/ast-builder.js`); symbol-table forward-ref enforcement landed at commit `7910162` (NEW SYM PASS 19 walks every CallExpr in every ExprNode payload; fires E-STATE-PINNED-FORWARD-REF when readPos < declSpan.start). 30 unit tests collectively (16 parser-recognition + 14 forward-ref).
 
 **Cross-references:**
 - §6.9 — Hoisting model (the default behavior `fn` declarations now share with state cells and `function` declarations).
@@ -20591,7 +20591,7 @@ Rationale: `fn` is a pure function, not a query executor. Database access is a c
 - A `fn` body MAY call other `fn`-declared functions. (§48.6.1)
 - A `fn` body MAY call `pure function` declarations. (§48.6.2)
 - **Added 2026-05-17 (S98).** `fn` declarations at file scope SHALL hoist per §6.9, mirroring `function` declarations. Within any structural scope (§6.9.1), all `fn` declarations SHALL be registered before any expression in that scope evaluates a call site, and mutual recursion of `fn` SHALL be supported without source-order constraints. `fn` declarations inside a logic context `${ }` SHALL NOT hoist beyond the `${ }` block. (§48.6.4)
-- **Added 2026-05-17 (S98).** `pinned fn name() { ... }` SHALL opt the declaration out of hoisting per §6.10. A forward reference to a `pinned fn` SHALL be E-STATE-PINNED-FORWARD-REF (§34). Parser recognition of the `pinned fn` form is implementation-pending; the normative semantics specified at §48.6.4 are authoritative. (§48.6.4)
+- **Added 2026-05-17 (S98); SHIPPED 2026-05-19 (S105).** `pinned fn name() { ... }` SHALL opt the declaration out of hoisting per §6.10. A forward reference to a `pinned fn` SHALL be E-STATE-PINNED-FORWARD-REF (§34). Parser recognition + symbol-table forward-ref enforcement SHIPPED S105 (commits `dc3c460` parser + `7910162` symbol-table). 30 unit tests. (§48.6.4)
 - `fn` body constraints SHALL be verified at the TS stage (compiler Stage 6), after type resolution and route inference. (§48.1)
 - All E-FN-001 through E-FN-009 errors SHALL be reported in a single pass. Compilation SHALL NOT halt after the first error in the set. (§48.7, implied)
 - The `pure fn` combination is valid. `pure` adds memoization and compile-time evaluation permissions but does not add constraints beyond `fn`'s existing prohibitions. (§48.9)

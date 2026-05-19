@@ -1,6 +1,6 @@
 # schema.map.md
 # project: scrmlts
-# updated: 2026-05-18T18:37:27-06:00  commit: 84c736e
+# updated: 2026-05-19T12:00:00-06:00  commit: d8427f2
 
 ## TypeScript AST — `compiler/src/types/ast.ts` (~1,858 LOC)
 
@@ -72,6 +72,11 @@ LetDeclNode, ConstDeclNode, TildeDeclNode, LinDeclNode, ReactiveDeclNode, Functi
 EngineDeclNode, IfStmtNode, IfExprNode, ForExprNode, ForStmtNode, WhileStmtNode,
 ReturnStmtNode, ThrowStmtNode, SwitchStmtNode, TryStmtNode, MatchStmtNode, WhenEffectNode
 (30+ named node kinds — see `export type ASTNode` for full union)
+
+### FunctionDeclNode  [ast.ts:~820]
+name: string, params: ParamNode[], body: Stmt[], async?: boolean, pure?: boolean, server?: boolean,
+isPinned?: boolean  [S105 — §48.6.4 `pinned fn` opt-out-of-hoisting marker; set by ast-builder.js at both fn-decl parser sites (~:5587+ nested + ~:8350+ top-level) when `pinned` is outermost IDENT prefix; consumed by SYM PASS 19 in symbol-table.ts for E-STATE-PINNED-FORWARD-REF firing],
+span: Span
 
 ### ExprNode (union)  [ast.ts:1838]
 IdentExpr | LitExpr | ArrayExpr | ObjectExpr | SpreadExpr | UnaryExpr | BinaryExpr |
@@ -199,6 +204,42 @@ Exports (constants + function):
 
 Wire envelope shape (canonical, SPEC §57): `{"__scrml_absent": true}`
 
+## §41.16 tableFor Types — `compiler/src/codegen/emit-table-for.ts` (S105)
+
+Source-level expansion; types used by the type-system §41.16 stage to pass the expansion plan to `expandTableForElement()`. Mirror of formFor + schemaFor pattern (`collectTableForImports` + `walkAndExpandTableForNodes` in type-system.ts).
+
+### TableForColumnInfo  [emit-table-for.ts:~95]
+fieldName: string, label: string, baseTypeName: "string"|"number"|"integer"|"boolean"|"struct"|"enum"|"asIs"|"date"|"timestamp",
+isNestedStruct: boolean, isSortable: boolean, hasSlotOverride: boolean, slotChildren: unknown[] | null
+
+### TableForSelectionInfo  [emit-table-for.ts:150]
+cellName: string, pkFieldName: string  [mechanical `id`-field PK derivation; `selectedBy="field"` overrides]
+
+### TableForExpansion  [emit-table-for.ts:122]
+structName: string, rowsExpr: string, rowsCellVarName: string | null,
+columns: TableForColumnInfo[]  [pick/omit-filtered list in declared order],
+hasSortable: boolean  [any column has sortable=true → auto-synth `@<varName>.sortedBy: TableSort | not` state cell],
+selection: TableForSelectionInfo | null  [non-null when outer `selectable=@cell` attr present],
+emptySlot: unknown[] | null  [`<empty>` slot children; null → default "No rows" text],
+span: unknown
+
+**Pipeline-input contract:** built by `compiler/src/type-system.ts` §41.16 pass (`walkAndExpandTableForNodes`); consumed by `expandTableForElement()` which produces synth MarkupNode tree (table + thead + tbody + tr/td for each row) inlined in-place. DG / VSS / CG stages receive it as ordinary scrml AST. Approach A invariant: "emitted output is standard scrml" — same as formFor + schemaFor.
+
+**SPEC §41.16 deviations documented in commit `1fdeef8`:**
+1. Sort-state cell auto-synthesized implicit (functionally equivalent to explicit state-decl per §41.16.7 — v1.next can flip to explicit if adopter friction surfaces)
+2. SELECTABLE-CELL-WRONG-TYPE fire-site deferred to downstream type-checker (currently works via downstream type-check; v1.next strict-mode can fire at §41.16 pass)
+3. `<empty>` slot codegen depends on pre-existing §17.4a for/else gap (affects all `<empty>` slot text emission; v1.next when §17.4a closes)
+
+## §41.15 schemaFor Types — `compiler/src/codegen/emit-schema-for.ts` (S104)
+
+Source-level expansion at type-system stage; FUNCTION-CALL form `${ schemaFor(StructType) }` interpolated inside `<schema>` block per OQ-SCH-1 debate verdict (Form B 50/60).
+
+Key helpers:
+- `pluralizeStructName(name)` — SPEC §41.15.2 normative (lowercase + trailing `s`; SPEC supersedes deep-dive's snake_case framing per Rule 4)
+- `classifyFieldForSql(fieldType)` — six-way dispatch: primitive / predicated / bare-enum / payload-enum / nested-struct / no-mapping
+- `lowerFieldToSharedCore(fieldName, fieldType)` — emits shared-core vocabulary (req/length/pattern/min/max/oneOf/notIn) per §39.5.7; flagship enum lowering injects `oneOf([variant-names...])` for bare-variant enum fields per OQ-SCH-12
+- `walkAndExpandSchemaForCalls(ast, ctx)` — two-pass: Pass A descends `<schema>` state nodes + validates + replaces `logic` children with synthesized `text`; Pass B walks every other ExprNode firing E-SCHEMAFOR-INVALID-CALL-CONTEXT
+
 ## §41.14 formFor Types — `compiler/src/codegen/emit-form-for.ts` (S102)
 
 Source-level expansion; types used by the type-system stage to pass the expansion plan to `expandFormFor()`.
@@ -310,7 +351,7 @@ Single | Double | Backtick
 `makeEof(pos, line, col)` → Token
 
 ## Tags
-#scrmlts #map #schema #ast #types #codegen #ir #s103 #v0.3.3 #formfor #emit-form-for #auth-graph #wire-format #reachability #approach-a2 #approach-a3 #approach-a4 #route-splitter #fnv1a-hash #chunk-plan #q-open-4 #q-open-5 #q-open-6 #native-parser #token-catalog #m1-4 #hasResetExpr #pgo-p3
+#scrmlts #map #schema #ast #types #codegen #ir #s105 #v0.3.3 #formfor #emit-form-for #schemafor #emit-schema-for #tablefor #emit-table-for #l22-4-of-6 #FunctionDeclNode-isPinned #auth-graph #wire-format #reachability #approach-a2 #approach-a3 #approach-a4 #route-splitter #fnv1a-hash #chunk-plan #q-open-4 #q-open-5 #q-open-6 #native-parser #token-catalog #m1-5 #hasResetExpr #pgo-p3
 
 ## Links
 - [primary.map.md](./primary.map.md)
