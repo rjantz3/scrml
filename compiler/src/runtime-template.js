@@ -1290,6 +1290,27 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
     return;
   }
 
+  // Fast path B2 (S106 — same keys in same order): partial-update happy path.
+  // When in-place mutations (e.g. toggling .completed on existing rows) leave
+  // the key sequence unchanged, skip the LIS pipeline entirely. Per-row effects
+  // fire separately via _scrml_prop_subscribers; this function only needs to
+  // confirm DOM ordering matches and bail.
+  // Single forward pass; bails on first mismatch; allocates nothing on hit.
+  if (newItems.length === oldNodes.size) {
+    let i = 0;
+    let sameOrder = true;
+    for (const child of container.childNodes) {
+      if (child._scrml_key === undefined) continue;
+      if (i >= newItems.length) { sameOrder = false; break; }
+      if (keyFn(newItems[i], i) !== child._scrml_key) { sameOrder = false; break; }
+      i++;
+    }
+    if (sameOrder && i === newItems.length) {
+      // All keys match in order — no LIS, no DOM moves. (finally block bumps perf.)
+      return;
+    }
+  }
+
   const newLen = newItems.length;
   const newKeys = new Array(newLen);
   for (let i = 0; i < newLen; i++) newKeys[i] = keyFn(newItems[i], i);
