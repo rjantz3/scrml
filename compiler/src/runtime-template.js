@@ -139,6 +139,80 @@ const _scrml_subscribers = {};
 // Client-emitted code rewrites \`import { x } from "scrml:NAME"\` to
 // \`const { x } = _scrml_stdlib.NAME;\` (browser cannot resolve bare specifiers).
 const _scrml_stdlib = {};
+
+// ---------------------------------------------------------------------------
+// P1.B — Per-op runtime instrumentation (SCOPING §2.2, S103).
+//
+// Gated on \`globalThis.__SCRML_DEBUG_PERF\`. When the flag is unset (the
+// production path), \`__SCRML_PERF\` is null and every \`if (__SCRML_PERF)\`
+// branch below collapses to a predictable null-check the JIT inlines away.
+// When set, the runtime accumulates per-category ms + call counts and emits a
+// breakdown via \`_scrml_perf_dump()\` on demand (or \`_scrml_perf_reset()\`
+// between benchmark iterations).
+//
+// Categories tracked:
+//   reactive_get        every _scrml_reactive_get call
+//   reactive_set        every _scrml_reactive_set call (incl. timing-wrapped)
+//   reconcile_list      every _scrml_reconcile_list call (keyed list diff)
+//   notify_subscribers  the subscriber-fan-out loop inside _scrml_reactive_set
+//   dom_write           DOM mutation calls inside _scrml_reconcile_list
+//                       (appendChild / insertBefore / removeChild /
+//                       replaceChildren)
+//   effect_scheduling   reactive-effect re-runs (_scrml_trigger + _scrml_effect
+//                       body)
+//
+// Verify zero-overhead empirically against AC1: warm-run delta < 1ms on a
+// representative TodoMVC op.
+const __SCRML_PERF = (typeof globalThis !== "undefined" && globalThis.__SCRML_DEBUG_PERF)
+  ? {
+      reactive_get:       { ms: 0, count: 0 },
+      reactive_set:       { ms: 0, count: 0 },
+      reconcile_list:     { ms: 0, count: 0 },
+      notify_subscribers: { ms: 0, count: 0 },
+      dom_write:          { ms: 0, count: 0 },
+      effect_scheduling:  { ms: 0, count: 0 },
+    }
+  : null;
+const __SCRML_PERF_NOW = (typeof performance !== "undefined" && performance.now)
+  ? function () { return performance.now(); }
+  : function () { return Date.now(); };
+function _scrml_perf_reset() {
+  if (!__SCRML_PERF) return;
+  for (const k in __SCRML_PERF) {
+    __SCRML_PERF[k].ms = 0;
+    __SCRML_PERF[k].count = 0;
+  }
+}
+function _scrml_perf_snapshot() {
+  if (!__SCRML_PERF) return null;
+  const out = {};
+  for (const k in __SCRML_PERF) {
+    const c = __SCRML_PERF[k].count;
+    const ms = __SCRML_PERF[k].ms;
+    out[k] = { ms: ms, count: c, avgMs: c > 0 ? ms / c : 0 };
+  }
+  return out;
+}
+function _scrml_perf_dump(label) {
+  if (!__SCRML_PERF) return;
+  const snap = _scrml_perf_snapshot();
+  const tag = label ? " [" + label + "]" : "";
+  for (const k in snap) {
+    const s = snap[k];
+    if (s.count === 0) continue;
+    console.log(
+      "[SCRML-RUNTIME]" + tag + " " + k + ": " +
+      s.ms.toFixed(3) + " (" + s.count + " calls, " +
+      s.avgMs.toFixed(4) + " avg-ms-per-call)"
+    );
+  }
+}
+if (typeof globalThis !== "undefined") {
+  globalThis._scrml_perf_reset = _scrml_perf_reset;
+  globalThis._scrml_perf_snapshot = _scrml_perf_snapshot;
+  globalThis._scrml_perf_dump = _scrml_perf_dump;
+}
+
 // S79 / §6.13 reactivity attribute registries — hoisted to module top to
 // avoid TDZ when _scrml_reactive_set (called early during module-init by
 // state-decl substrates) consults them. Implementations of the helpers
@@ -320,6 +394,17 @@ function _scrml_replay(name, log, endIdx) {
 }
 
 function _scrml_reactive_get(name) {
+  if (__SCRML_PERF) {
+    const __t0 = __SCRML_PERF_NOW();
+    // Bridge with _scrml_effect auto-tracking: record _scrml_state[name] as a dependency
+    if (typeof _scrml_track === "function") _scrml_track(_scrml_state, name);
+    let __r;
+    if (_scrml_derived_fns[name]) __r = _scrml_derived_get(name);
+    else __r = _scrml_state[name];
+    __SCRML_PERF.reactive_get.ms += __SCRML_PERF_NOW() - __t0;
+    __SCRML_PERF.reactive_get.count++;
+    return __r;
+  }
   // Bridge with _scrml_effect auto-tracking: record _scrml_state[name] as a dependency
   if (typeof _scrml_track === "function") _scrml_track(_scrml_state, name);
   // Derived reactives are stored in _scrml_derived_cache, not _scrml_state.
@@ -329,6 +414,7 @@ function _scrml_reactive_get(name) {
 }
 
 function _scrml_reactive_set(name, value) {
+  const __t_set_top = __SCRML_PERF ? __SCRML_PERF_NOW() : 0;
   // S79 / §6.13 — when a reactivity rule is registered for the cell, route
   // the write through the timing wrapper. Guarded so cells without a rule
   // (the common case) take zero overhead beyond a single property lookup.
@@ -347,8 +433,13 @@ function _scrml_reactive_set(name, value) {
         _scrml_state[name] = value;
         const dirtied = _scrml_propagate_dirty(name);
         if (_scrml_subscribers[name]) {
+          const __t_sub = __SCRML_PERF ? __SCRML_PERF_NOW() : 0;
           for (const fn of _scrml_subscribers[name]) {
             try { fn(value); } catch(e) { console.error("scrml subscriber error:", e); }
+          }
+          if (__SCRML_PERF) {
+            __SCRML_PERF.notify_subscribers.ms += __SCRML_PERF_NOW() - __t_sub;
+            __SCRML_PERF.notify_subscribers.count++;
           }
         }
         if (typeof _scrml_trigger === "function") _scrml_trigger(_scrml_state, name);
@@ -359,6 +450,10 @@ function _scrml_reactive_set(name, value) {
     } finally {
       _scrml_reactivity_bypass[name] = false;
     }
+    if (__SCRML_PERF) {
+      __SCRML_PERF.reactive_set.ms += __SCRML_PERF_NOW() - __t_set_top;
+      __SCRML_PERF.reactive_set.count++;
+    }
     return value;
   }
   _scrml_state[name] = value;
@@ -366,8 +461,13 @@ function _scrml_reactive_set(name, value) {
   // before subscribers fire and before this call returns. Synchronous, no re-evaluation.
   const dirtied = _scrml_propagate_dirty(name);
   if (_scrml_subscribers[name]) {
+    const __t_sub = __SCRML_PERF ? __SCRML_PERF_NOW() : 0;
     for (const fn of _scrml_subscribers[name]) {
       try { fn(value); } catch(e) { console.error("scrml subscriber error:", e); }
+    }
+    if (__SCRML_PERF) {
+      __SCRML_PERF.notify_subscribers.ms += __SCRML_PERF_NOW() - __t_sub;
+      __SCRML_PERF.notify_subscribers.count++;
     }
   }
   // Bridge with _scrml_effect auto-tracking: fire effects tracking _scrml_state[name]
@@ -378,6 +478,10 @@ function _scrml_reactive_set(name, value) {
     for (const derived of dirtied) {
       _scrml_trigger(_scrml_state, derived);
     }
+  }
+  if (__SCRML_PERF) {
+    __SCRML_PERF.reactive_set.ms += __SCRML_PERF_NOW() - __t_set_top;
+    __SCRML_PERF.reactive_set.count++;
   }
   return value;
 }
@@ -995,8 +1099,18 @@ function animationFrame(fn) {
  * @param {function} createFn — (item, index) => HTMLElement — creates a DOM node for a new item
  */
 function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
+  const __t_rec_top = __SCRML_PERF ? __SCRML_PERF_NOW() : 0;
   // Fast path: clear all — avoid iterating old nodes one by one
   if (newItems.length === 0) {
+    if (__SCRML_PERF) {
+      const __t_dw = __SCRML_PERF_NOW();
+      container.replaceChildren();
+      __SCRML_PERF.dom_write.ms += __SCRML_PERF_NOW() - __t_dw;
+      __SCRML_PERF.dom_write.count++;
+      __SCRML_PERF.reconcile_list.ms += __SCRML_PERF_NOW() - __t_rec_top;
+      __SCRML_PERF.reconcile_list.count++;
+      return;
+    }
     container.replaceChildren();
     return;
   }
@@ -1019,6 +1133,18 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
 
   // Fast path: bulk create from empty — skip diffing, append directly
   if (oldNodes.size === 0) {
+    if (__SCRML_PERF) {
+      for (let i = 0; i < newItems.length; i++) {
+        const node = createFn(newItems[i], i);
+        if (!node) continue; // createFn returned undefined (filtered item)
+        node._scrml_key = keyFn(newItems[i], i);
+        const __t_dw = __SCRML_PERF_NOW();
+        container.appendChild(node);
+        __SCRML_PERF.dom_write.ms += __SCRML_PERF_NOW() - __t_dw;
+        __SCRML_PERF.dom_write.count++;
+      }
+      return;
+    }
     for (let i = 0; i < newItems.length; i++) {
       const node = createFn(newItems[i], i);
       if (!node) continue; // createFn returned undefined (filtered item)
@@ -1034,8 +1160,19 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
 
   const newKeySet = new Set(newKeys);
   // Remove nodes whose keys are no longer present
-  for (const [key, node] of oldNodes) {
-    if (!newKeySet.has(key)) container.removeChild(node);
+  if (__SCRML_PERF) {
+    for (const [key, node] of oldNodes) {
+      if (!newKeySet.has(key)) {
+        const __t_dw = __SCRML_PERF_NOW();
+        container.removeChild(node);
+        __SCRML_PERF.dom_write.ms += __SCRML_PERF_NOW() - __t_dw;
+        __SCRML_PERF.dom_write.count++;
+      }
+    }
+  } else {
+    for (const [key, node] of oldNodes) {
+      if (!newKeySet.has(key)) container.removeChild(node);
+    }
   }
 
   // Build old key→position map for LIS computation
@@ -1070,16 +1207,36 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
 
   // Place nodes: iterate in reverse so insertBefore targets are stable
   let nextSibling = null;
-  for (let i = newLen - 1; i >= 0; i--) {
-    const node = newNodes[i];
-    if (!node) continue; // filtered item (createFn returned undefined)
-    if (!inLIS.has(i)) {
-      container.insertBefore(node, nextSibling);
+  if (__SCRML_PERF) {
+    for (let i = newLen - 1; i >= 0; i--) {
+      const node = newNodes[i];
+      if (!node) continue; // filtered item (createFn returned undefined)
+      if (!inLIS.has(i)) {
+        const __t_dw = __SCRML_PERF_NOW();
+        container.insertBefore(node, nextSibling);
+        __SCRML_PERF.dom_write.ms += __SCRML_PERF_NOW() - __t_dw;
+        __SCRML_PERF.dom_write.count++;
+      }
+      nextSibling = node;
     }
-    nextSibling = node;
+  } else {
+    for (let i = newLen - 1; i >= 0; i--) {
+      const node = newNodes[i];
+      if (!node) continue; // filtered item (createFn returned undefined)
+      if (!inLIS.has(i)) {
+        container.insertBefore(node, nextSibling);
+      }
+      nextSibling = node;
+    }
   }
 
-  } finally { _scrml_tracking_paused = wasPaused; }
+  } finally {
+    _scrml_tracking_paused = wasPaused;
+    if (__SCRML_PERF) {
+      __SCRML_PERF.reconcile_list.ms += __SCRML_PERF_NOW() - __t_rec_top;
+      __SCRML_PERF.reconcile_list.count++;
+    }
+  }
 }
 
 /**
@@ -2095,6 +2252,15 @@ function _scrml_trigger(target, prop) {
   // Each effect is wrapped in try/catch so that a throwing effect (e.g. a
   // derived expression that evaluates null.property) does not halt the
   // trigger loop or propagate up to the reactive-set caller — Bug K.
+  if (__SCRML_PERF) {
+    const __t_eff = __SCRML_PERF_NOW();
+    for (const effect of [...effects]) {
+      try { effect(); } catch(e) { console.error("scrml effect error:", e); }
+    }
+    __SCRML_PERF.effect_scheduling.ms += __SCRML_PERF_NOW() - __t_eff;
+    __SCRML_PERF.effect_scheduling.count++;
+    return;
+  }
   for (const effect of [...effects]) {
     try { effect(); } catch(e) { console.error("scrml effect error:", e); }
   }

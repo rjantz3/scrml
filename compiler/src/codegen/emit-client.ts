@@ -482,10 +482,17 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
       // in the file) is handled by the ExprNode walker below.
       case "state-decl":
         chunks.add("deep_reactive");
-        if (
-          (node as any).shape === "derived" &&
-          (node as any).structuralForm === false
-        ) {
+        // Derived chunk gate covers BOTH the legacy folded form
+        // (shape:"derived" + structuralForm:false — Phase A1a Step 11.5 fold of
+        // `reactive-derived-decl` into state-decl, the `const @x = expr` shape)
+        // AND the Shape 3 V5-strict form (`const <x> = expr` with
+        // structuralForm:true). Both emit `_scrml_derived_declare` /
+        // `_scrml_derived_subscribe` call sites; without the chunk, those calls
+        // throw at runtime. Pre-S103 only the structuralForm:false branch was
+        // covered — V5-strict derived cells leaked through the tree-shaker and
+        // broke at runtime when imported. Surfaced while landing P1.B runtime
+        // instrumentation (the TodoMVC fixture uses `const <visibleTodos>`).
+        if ((node as any).shape === "derived") {
           chunks.add("derived");
         }
         if ((node as any).defaultExpr) {
