@@ -9856,6 +9856,47 @@ function checkLoopControl(nodes: ASTNodeLike[], errors: TSError[], filePath: str
 }
 
 // ---------------------------------------------------------------------------
+// §53.14.5 — L22 family resolve-and-check helper (OQ-TF-13, S106).
+//
+// Shared sub-case-3 (unknown type) + sub-case-4 (wrong kind) handler for the
+// type-as-argument family (parseVariant §41.13, formFor §41.14, schemaFor
+// §41.15, tableFor §41.16). Each family member's caller still drives sub-
+// case-1 (missing arg) + sub-case-2 (wrong-shape arg) since those vary by
+// surface form (markup-attr vs call-arg).
+//
+// Triggered by S104 third-caller threshold (`docs/changes/serialize-scoping/
+// SCOPING.md` + master-list S104 close addendum); tableFor S105 was the
+// fourth caller; extraction landed S106 per OQ-TF-13 follow-up.
+//
+// Future family members (variantNames, reflective) inherit this shape: caller
+// extracts the bare type name, drives sub-case-1/2 surface-specific
+// validation, then delegates to this helper for the resolve + kind check.
+// ---------------------------------------------------------------------------
+function _resolveAndCheckL22TypeName(
+  typeName: string,
+  expectedKind: "struct" | "enum",
+  typeRegistry: Map<string, ResolvedType>,
+  errors: TSError[],
+  ctx: {
+    code: string,
+    unknownMessage: string,
+    wrongKindMessage: (actualKind: string) => string,
+    span: Span,
+  },
+): ResolvedType | null {
+  const resolved = typeRegistry.get(typeName);
+  if (!resolved) {
+    errors.push(new TSError(ctx.code, ctx.unknownMessage, ctx.span));
+    return null;
+  }
+  if (resolved.kind !== expectedKind) {
+    errors.push(new TSError(ctx.code, ctx.wrongKindMessage(resolved.kind), ctx.span));
+    return null;
+  }
+  return resolved;
+}
+
+// ---------------------------------------------------------------------------
 // §41.13 / §53.10 — parseVariant validation helper.
 //
 // Validates that a CallExpr node's second argument is a bare type-name
@@ -9868,8 +9909,9 @@ function checkLoopControl(nodes: ASTNodeLike[], errors: TSError[], filePath: str
 //
 // On success, returns the resolved EnumType; otherwise null.
 //
-// Future family members (`serialize`, `formFor`, etc.) will reuse the same
-// shape with a different code prefix — keep the helper signature flexible.
+// Sub-cases 3 + 4 delegate to `_resolveAndCheckL22TypeName` (§53.14.5
+// L22 family helper, S106). Sub-cases 1 + 2 stay here because parseVariant's
+// surface is CallExpr arg-shaped (vs markup-attr-shaped for formFor/tableFor).
 // ---------------------------------------------------------------------------
 function validateParseVariantTypeArg(
   call: { args?: unknown[] },
@@ -9896,28 +9938,19 @@ function validateParseVariantTypeArg(
   }
 
   const typeName = typeArg.name;
-  const resolved = typeRegistry.get(typeName);
-  if (!resolved) {
-    errors.push(new TSError(
-      "E-PARSEVARIANT-TYPE-NOT-ENUM",
+  const resolved = _resolveAndCheckL22TypeName(typeName, "enum", typeRegistry, errors, {
+    code: "E-PARSEVARIANT-TYPE-NOT-ENUM",
+    unknownMessage:
       `E-PARSEVARIANT-TYPE-NOT-ENUM: \`parseVariant\` references unknown type '${typeName}'. ` +
       `The second argument must name a scrml-native \`:enum\` type declared in this file, ` +
       `or imported from another file. (See \`< match for=Type>\` E-ENGINE-004 for the parallel diagnostic.)`,
-      span,
-    ));
-    return null;
-  }
-  if (resolved.kind !== "enum") {
-    errors.push(new TSError(
-      "E-PARSEVARIANT-TYPE-NOT-ENUM",
-      `E-PARSEVARIANT-TYPE-NOT-ENUM: \`parseVariant\` references type '${typeName}' which is a ${resolved.kind}, not an enum. ` +
+    wrongKindMessage: (kind) =>
+      `E-PARSEVARIANT-TYPE-NOT-ENUM: \`parseVariant\` references type '${typeName}' which is a ${kind}, not an enum. ` +
       `parseVariant only accepts scrml-native \`:enum\` types — the variant set is what dispatches on the discriminator. ` +
       `For struct boundary parsing, use a server-fn entry point with §53 SPARK predicate refinement on the typed parameter.`,
-      span,
-    ));
-    return null;
-  }
-  return resolved as EnumType;
+    span,
+  });
+  return resolved as EnumType | null;
 }
 
 /**
@@ -10171,27 +10204,19 @@ function walkAndExpandFormForNodes(
       return null;
     }
     const structTypeName = forAttr.rawValue;
-    const resolved = typeRegistry.get(structTypeName);
-    if (!resolved) {
-      errors.push(new TSError(
-        "E-FORMFOR-TYPE-NOT-STRUCT",
+    const resolved = _resolveAndCheckL22TypeName(structTypeName, "struct", typeRegistry, errors, {
+      code: "E-FORMFOR-TYPE-NOT-STRUCT",
+      unknownMessage:
         `E-FORMFOR-TYPE-NOT-STRUCT: \`<formFor for=${structTypeName}>\` references unknown type '${structTypeName}'. ` +
         `The \`for=\` attribute must name a scrml-native \`:struct\` type declared in this file ` +
         `(or imported via \`\${ import { ${structTypeName} } from './path.scrml' }\`). See SPEC §41.14.1.`,
-        forAttr.span ?? span,
-      ));
-      return null;
-    }
-    if (resolved.kind !== "struct") {
-      errors.push(new TSError(
-        "E-FORMFOR-TYPE-NOT-STRUCT",
-        `E-FORMFOR-TYPE-NOT-STRUCT: \`<formFor for=${structTypeName}>\` references type '${structTypeName}' which is a ${resolved.kind}, not a struct. ` +
+      wrongKindMessage: (kind) =>
+        `E-FORMFOR-TYPE-NOT-STRUCT: \`<formFor for=${structTypeName}>\` references type '${structTypeName}' which is a ${kind}, not a struct. ` +
         `\`formFor\` only accepts scrml-native \`:struct\` types — the field set is what drives the auto-generated form. ` +
         `For enum-shape boundary parsing, use \`parseVariant\` (§41.13) instead. See SPEC §41.14.1.`,
-        forAttr.span ?? span,
-      ));
-      return null;
-    }
+      span: forAttr.span ?? span,
+    });
+    if (!resolved) return null;
     const structType = resolved as StructType;
 
     // §41.14.2 — Resolve cell name (default = camel-cased struct name,
@@ -10677,28 +10702,20 @@ function _processSchemaForCallInSchemaContext(
     return null;
   }
   const structTypeName = typeArg.name as string;
-  const resolved = typeRegistry.get(structTypeName);
-  if (!resolved) {
-    errors.push(new TSError(
-      "E-SCHEMAFOR-TYPE-NOT-STRUCT",
+  const resolved = _resolveAndCheckL22TypeName(structTypeName, "struct", typeRegistry, errors, {
+    code: "E-SCHEMAFOR-TYPE-NOT-STRUCT",
+    unknownMessage:
       `E-SCHEMAFOR-TYPE-NOT-STRUCT: \`schemaFor(${structTypeName})\` references unknown type '${structTypeName}'. ` +
       `The first argument must name a scrml-native \`:struct\` type declared in this file ` +
       `(or imported via \`\${ import { ${structTypeName} } from './path.scrml' }\`). See SPEC §41.15.1.`,
-      span,
-    ));
-    return null;
-  }
-  if (resolved.kind !== "struct") {
-    errors.push(new TSError(
-      "E-SCHEMAFOR-TYPE-NOT-STRUCT",
-      `E-SCHEMAFOR-TYPE-NOT-STRUCT: \`schemaFor(${structTypeName})\` references type '${structTypeName}' which is a ${resolved.kind}, not a struct. ` +
+    wrongKindMessage: (kind) =>
+      `E-SCHEMAFOR-TYPE-NOT-STRUCT: \`schemaFor(${structTypeName})\` references type '${structTypeName}' which is a ${kind}, not a struct. ` +
       `\`schemaFor\` only accepts scrml-native \`:struct\` types — the field set is what drives the auto-generated DDL. ` +
       `For enum-shape boundary parsing, use \`parseVariant\` (§41.13); for form generation, use \`formFor\` (§41.14). ` +
       `See SPEC §41.15.1.`,
-      span,
-    ));
-    return null;
-  }
+    span,
+  });
+  if (!resolved) return null;
   const structType = resolved as StructType;
 
   // §41.15.4 — Validate options arg (if present): pick, omit, mutual exclusion.
@@ -11135,27 +11152,19 @@ function _processTableForNode(
     return null;
   }
   const structTypeName = forAttr.rawValue;
-  const resolved = typeRegistry.get(structTypeName);
-  if (!resolved) {
-    errors.push(new TSError(
-      "E-TABLEFOR-TYPE-NOT-STRUCT",
+  const resolved = _resolveAndCheckL22TypeName(structTypeName, "struct", typeRegistry, errors, {
+    code: "E-TABLEFOR-TYPE-NOT-STRUCT",
+    unknownMessage:
       `E-TABLEFOR-TYPE-NOT-STRUCT: \`<tableFor for=${structTypeName}>\` references unknown type '${structTypeName}'. ` +
       `The \`for=\` attribute must name a scrml-native \`:struct\` type declared in this file ` +
       `(or imported via \`\${ import { ${structTypeName} } from './path.scrml' }\`). See SPEC §41.16.1.`,
-      forAttr.span ?? span,
-    ));
-    return null;
-  }
-  if (resolved.kind !== "struct") {
-    errors.push(new TSError(
-      "E-TABLEFOR-TYPE-NOT-STRUCT",
-      `E-TABLEFOR-TYPE-NOT-STRUCT: \`<tableFor for=${structTypeName}>\` references type '${structTypeName}' which is a ${resolved.kind}, not a struct. ` +
+    wrongKindMessage: (kind) =>
+      `E-TABLEFOR-TYPE-NOT-STRUCT: \`<tableFor for=${structTypeName}>\` references type '${structTypeName}' which is a ${kind}, not a struct. ` +
       `\`tableFor\` only accepts scrml-native \`:struct\` types — the field set is what drives the auto-generated columns. ` +
       `For enum-shape boundary parsing, use \`parseVariant\` (§41.13); for form generation, use \`formFor\` (§41.14); for SQL DDL generation, use \`schemaFor\` (§41.15). See SPEC §41.16.1.`,
-      forAttr.span ?? span,
-    ));
-    return null;
-  }
+    span: forAttr.span ?? span,
+  });
+  if (!resolved) return null;
   const structType = resolved as StructType;
 
   // §41.16.2 — Validate `rows=` attribute.
