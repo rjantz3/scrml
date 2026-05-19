@@ -399,6 +399,43 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
         continue;
       }
       const code = emitLogicNode(stmt, groupEmitOpts);
+
+      // Bug 5 Phase 2 (S107, 2026-05-19) — Anomaly B fix.
+      //
+      // For pid-tagged groups (interpolation-in-markup `${...}`), bare-expr
+      // bodies are CONSUMED by binding wiring at DOMContentLoaded via
+      // emit-event-wiring.ts. Pre-S107 also emitted them at file-scope as
+      // standalone expression statements — producing orphan no-ops like
+      // `VERSION;` (from `${VERSION}`) or `_scrml_reactive_get("count");`
+      // (from `${@count}`). Harmless but adopter-visible noise in inspected
+      // client.js.
+      //
+      // Skip the file-scope emission when:
+      //   - pid is set (this is an interpolation, not a file-level ${...} block)
+      //   - !groupTildeCtx (tilde groups emit `let _scrml_tilde_N = ...`
+      //     statements that MUST live at file-scope for the wiring closure to
+      //     read them — Phase 3 will thread tilde context properly)
+      //   - stmt.kind === "bare-expr" (declarations + assignments + side-
+      //     effecting calls always emit; only pure read-shape statements skip)
+      //   - the emitted code matches a "pure read orphan" shape: a bare
+      //     identifier, dotted-path member access, or a `_scrml_reactive_get`
+      //     / `_scrml_derived_get` call followed by `;`. Anything else
+      //     (function calls, assignments, blocks, multi-statement output)
+      //     keeps emitting to preserve side effects.
+      //
+      // Pure-read regex matches `IDENT;`, `IDENT.path;`, `_scrml_reactive_get("x");`,
+      // `_scrml_derived_get("x");`. Doesn't match: `foo();` (call), `@x = 1;`
+      // (assignment), `{ ... }` (block), multi-line output.
+      if (
+        pid &&
+        !groupTildeCtx &&
+        stmt.kind === "bare-expr" &&
+        code &&
+        /^(?:[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*|_scrml_(?:reactive|derived)_get\([^)]*\))\s*;?\s*$/.test(code.trim())
+      ) {
+        continue;
+      }
+
       if (code) codes.push(code);
       if (stmtContainsLift(stmt)) groupHasLift = true;
       // Check for reactive deps in the emitted code (after @var rewriting)

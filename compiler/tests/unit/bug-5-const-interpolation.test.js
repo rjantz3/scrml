@@ -282,3 +282,94 @@ describe("§8: reactive-display-wiring block is NOT empty for const interpolatio
     expect(js).not.toMatch(/Reactive display wiring ---\s*\n\s*\}\);/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// §9: Phase 2 — Anomaly C (phantom placeholder from decl-only logic body) closed
+// ---------------------------------------------------------------------------
+
+describe("§9 (Phase 2): Anomaly C — bare `const` decl in <program> body does NOT emit phantom <span data-scrml-logic>", () => {
+  test("const-string fixture: HTML has ONE data-scrml-logic placeholder (the ${VERSION} target), NOT two", () => {
+    const result = compile(constStringFx);
+    const html = result.outputs.get(constStringFx).html;
+    // Pre-Phase-2: HTML had `<span data-scrml-logic="_scrml_logic_1"></span>` rendered
+    // OUTSIDE the version-pill span (phantom from implicit logic-wrap of `const VERSION = ...`).
+    // Post-Phase-2: only the intended interpolation placeholder remains.
+    const placeholderCount = (html.match(/data-scrml-logic="_scrml_logic_\d+"/g) ?? []).length;
+    expect(placeholderCount).toBe(1);
+  });
+
+  test("const-string fixture: the surviving placeholder is INSIDE the version-pill span (not outside)", () => {
+    const result = compile(constStringFx);
+    const html = result.outputs.get(constStringFx).html;
+    // Match shape: `<span class="version-pill"><span data-scrml-logic="..."></span></span>`.
+    // Anomaly C symptom: a SIBLING `<span data-scrml-logic="..."></span>` BEFORE the version-pill.
+    expect(html).toMatch(/<span class="version-pill"><span data-scrml-logic="_scrml_logic_\d+"><\/span><\/span>/);
+    expect(html).not.toMatch(/<span data-scrml-logic="[^"]+"><\/span><span class="version-pill">/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §10: Phase 2 — Anomaly B (orphan IDENT; no-op JS statement at file-scope) closed
+// ---------------------------------------------------------------------------
+
+describe("§10 (Phase 2): Anomaly B — interpolation body does NOT emit orphan pure-read JS at file-scope", () => {
+  test("const-string fixture: client.js does NOT have an orphan `VERSION;` no-op statement", () => {
+    const result = compile(constStringFx);
+    const js = result.outputs.get(constStringFx).clientJs;
+    // Pre-Phase-2: client.js had a line `VERSION;` at file scope from emit-reactive-wiring.ts
+    // dumping the ${VERSION} body. Post-Phase-2: skipped per the pure-read orphan filter.
+    // Match the file-scope region only (BEFORE the `// --- Event handler wiring` marker).
+    const fileScope = js.split("// --- Event handler wiring")[0] ?? "";
+    expect(fileScope).not.toMatch(/^VERSION\s*;\s*$/m);
+  });
+
+  test("at-var fixture: client.js does NOT have an orphan `_scrml_reactive_get(\"count\");` no-op", () => {
+    const result = compile(atVarFx);
+    const js = result.outputs.get(atVarFx).clientJs;
+    // Same pattern for reactive case: the `${@count}` body emitted
+    // `_scrml_reactive_get("count");` at file-scope as a pure-read orphan.
+    // Phase 2's orphan filter matches `_scrml_reactive_get(...);` shape.
+    const fileScope = js.split("// --- Event handler wiring")[0] ?? "";
+    expect(fileScope).not.toMatch(/^_scrml_reactive_get\("count"\)\s*;\s*$/m);
+  });
+
+  test("const-string fixture: the file-scope `const VERSION = \"v0.3.0\";` declaration IS still emitted", () => {
+    // Regression guard: Phase 2 filter must NOT skip legitimate declarations.
+    // Only pure-read bare-exprs in pid groups are skipped.
+    const result = compile(constStringFx);
+    const js = result.outputs.get(constStringFx).clientJs;
+    expect(js).toMatch(/const\s+VERSION\s*=\s*"v0\.3\.0"\s*;/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §11: Phase 2 — side-effecting bare-exprs in interpolations are NOT skipped
+// ---------------------------------------------------------------------------
+
+describe("§11 (Phase 2): Anomaly B filter preserves side-effecting bare-exprs in interpolations", () => {
+  let assignFx;
+  beforeAll(() => {
+    // `${@count = @count + 1}` inside markup — a bare-expr that has side
+    // effects (assignment). The Phase 2 orphan filter MUST NOT skip this.
+    assignFx = fix("assign-in-interp.scrml", `<program>
+\${ @count = 0 }
+<p>\${ @count = @count + 1 }</p>
+</program>
+`);
+  });
+
+  test("compile succeeds", () => {
+    const result = compile(assignFx);
+    expect(result.errors).toEqual([]);
+  });
+
+  test("the assignment IS emitted at file-scope (not skipped as orphan)", () => {
+    const result = compile(assignFx);
+    const js = result.outputs.get(assignFx).clientJs;
+    // The assignment expression in `${@count = @count + 1}` should produce
+    // `_scrml_reactive_set("count", _scrml_reactive_get("count") + 1);` at
+    // file scope. Phase 2's filter matches only pure-read shapes; assignment
+    // shapes (with `=` operator) are preserved.
+    expect(js).toMatch(/_scrml_reactive_set\("count",/);
+  });
+});

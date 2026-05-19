@@ -204,7 +204,10 @@ describe("engine-event-handler-writes §3 — hooks wrap in event handlers", () 
     // capture-pre + conditional fire-hooks-post pattern. The exact emission
     // is multi-line — verify each landmark appears AFTER the handler-prop
     // header (so the lines are inside the handler scope).
-    const handlerHeaderIdx = clientJs.indexOf('_scrml_attr_onclick_2": function(event)');
+    // Counter-resilient: match any _scrml_attr_onclick_N handler header.
+    // (Bug 5 Phase 2 removed phantom placeholders for declaration-only logic
+    // bodies, shifting the genVar counter — tests SHALL NOT depend on exact N.)
+    const handlerHeaderIdx = clientJs.search(/_scrml_attr_onclick_\d+": function\(event\)/);
     expect(handlerHeaderIdx).toBeGreaterThan(-1);
     const slice = clientJs.slice(handlerHeaderIdx);
     // Inside the handler body, the wrap pattern must appear before the
@@ -292,7 +295,10 @@ describe("engine-event-handler-writes §5 — history-map threading", () => {
     // _scrml_engine_direct_set. Without internal-rules + without timers/idle,
     // the positional shape is: direct_set(name, value, table, null, null,
     // null, historyMap). Verify the call site contains the history-map ident.
-    const handlerHeaderIdx = clientJs.indexOf('_scrml_attr_onclick_2": function(event)');
+    // Counter-resilient: match any _scrml_attr_onclick_N handler header.
+    // (Bug 5 Phase 2 removed phantom placeholders for declaration-only logic
+    // bodies, shifting the genVar counter — tests SHALL NOT depend on exact N.)
+    const handlerHeaderIdx = clientJs.search(/_scrml_attr_onclick_\d+": function\(event\)/);
     expect(handlerHeaderIdx).toBeGreaterThan(-1);
     const slice = clientJs.slice(handlerHeaderIdx);
     // Find _scrml_engine_direct_set call inside the handler slice and
@@ -332,7 +338,10 @@ describe("engine-event-handler-writes §6 — .Variant.history restore-form", ()
     const { errors, clientJs } = compileToClientJs(src, "evt-advance-restore");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
-    const handlerHeaderIdx = clientJs.indexOf('_scrml_attr_onclick_2": function(event)');
+    // Counter-resilient: match any _scrml_attr_onclick_N handler header.
+    // (Bug 5 Phase 2 removed phantom placeholders for declaration-only logic
+    // bodies, shifting the genVar counter — tests SHALL NOT depend on exact N.)
+    const handlerHeaderIdx = clientJs.search(/_scrml_attr_onclick_\d+": function\(event\)/);
     expect(handlerHeaderIdx).toBeGreaterThan(-1);
     const slice = clientJs.slice(handlerHeaderIdx);
     const callStart = slice.indexOf('_scrml_engine_advance("appMode",');
@@ -384,7 +393,10 @@ describe("engine-event-handler-writes §6 — .Variant.history restore-form", ()
     // runtime value passed to _scrml_engine_direct_set is the bare variant
     // tag (`AppMode.Playing`), and isHistoryRestore=true is the trailing
     // (8th) positional arg.
-    const handlerHeaderIdx = clientJs.indexOf('_scrml_attr_onclick_2": function(event)');
+    // Counter-resilient: match any _scrml_attr_onclick_N handler header.
+    // (Bug 5 Phase 2 removed phantom placeholders for declaration-only logic
+    // bodies, shifting the genVar counter — tests SHALL NOT depend on exact N.)
+    const handlerHeaderIdx = clientJs.search(/_scrml_attr_onclick_\d+": function\(event\)/);
     expect(handlerHeaderIdx).toBeGreaterThan(-1);
     const slice = clientJs.slice(handlerHeaderIdx);
     const callStart = slice.indexOf('_scrml_engine_direct_set("appMode",');

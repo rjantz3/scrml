@@ -65,6 +65,39 @@ const LIFECYCLE_SILENT_TAGS = new Set(["timer", "poll"]);
  * Conservative: when in doubt, return false (display-toggle is the safe
  * fallback that already works).
  */
+/**
+ * Bug 5 Phase 2 (S107, 2026-05-19) — Anomaly C classifier.
+ *
+ * Checks whether a logic-body child contributes "renderable content" to its
+ * markup-walk position. Renderable = needs a DOM anchor. Two kinds qualify:
+ *   - `bare-expr` — interpolation value consumed by binding-wiring textContent
+ *     write at DOMContentLoaded
+ *   - `lift-expr` — DOM positioning target consumed by lift-target wiring
+ *
+ * Declarations (const/let/function/type) and statement constructs (if/for/while)
+ * are renderable only if they CONTAIN a bare-expr or lift-expr (recursive).
+ *
+ * Used at the `node.kind === "logic"` branch to skip placeholder allocation
+ * for declaration-only bodies — closes the phantom `<span data-scrml-logic>`
+ * anomaly visible on `<program>`-body bare `const VERSION = "v0.3.0"` shapes.
+ *
+ * Mirror of `stmtContainsLift` at emit-reactive-wiring.ts:174 with the
+ * `bare-expr` shortcut added. Kept inline (not imported) to avoid the
+ * codegen circular-import surface.
+ */
+function stmtContainsRenderableLogic(node: any): boolean {
+  if (!node || typeof node !== "object") return false;
+  if (node.kind === "bare-expr" || node.kind === "lift-expr") return true;
+  for (const key of ["body", "consequent", "alternate"]) {
+    if (Array.isArray(node[key])) {
+      for (const child of node[key]) {
+        if (stmtContainsRenderableLogic(child)) return true;
+      }
+    }
+  }
+  return false;
+}
+
 function isCleanIfSubtree(children: any[]): boolean {
   for (const child of children ?? []) {
     if (!isCleanIfNode(child)) return false;
@@ -1668,6 +1701,29 @@ export function generateHtml(
           }
         }
       }
+
+      // Bug 5 Phase 2 (S107, 2026-05-19) — Anomaly C fix.
+      //
+      // Pre-S107 unconditionally allocated a placeholder for every logic node
+      // in markup-walk position. The implicit logic-wrap of bare statements
+      // inside `<program>` body (S101 §40.8 program-as-container) then
+      // produced phantom `<span data-scrml-logic>` nodes for declaration-only
+      // bodies like `const VERSION = "v0.3.0"` — visible bloat in adopter-
+      // inspected DOM with no purpose (declarations have no DOM presence).
+      //
+      // Fix: only emit a placeholder when the body has RENDERABLE content —
+      // bare-expr (interpolation values consumed by binding wiring) or
+      // lift-expr (DOM positioning targets via lift-target wiring). Pure
+      // declarations / function decls / type decls produce file-scope JS
+      // only and need no DOM anchor.
+      //
+      // Phase 1 left this behavior unchanged; Phase 2 closes it. Downstream
+      // emit-reactive-wiring.ts groups by `_placeholderId` — when this branch
+      // skips placeholder allocation, the resulting node has no `_placeholderId`
+      // annotation, so the file-scope-statement-emit loop classifies it as a
+      // non-pid (file-level) group and emits its body normally.
+      const bodyHasRenderableContent = (node.body ?? []).some((child: any) => stmtContainsRenderableLogic(child));
+      if (!bodyHasRenderableContent) return;
 
       const placeholderId = genVar("logic");
       // Annotate the AST node with its placeholder ID so the client JS emitter
