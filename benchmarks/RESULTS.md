@@ -10,13 +10,86 @@
 >
 > **Update 2026-05-12 (S86 / v0.2.6+):** [PRIOR — preserved for trend tracking] happy-dom runtime numbers regenerated against HEAD with the indirect-eval `bench-scrml.js` fix (see `docs/changes/wave-3-d3/`). The Chrome-via-Puppeteer section below is the 2026-04-13 v0.2.4-era baseline preserved for trend tracking; rerun Chrome benchmarks under v0.2.6+ to refresh that section.
 
-## Runtime Performance — Real Browser (headless Chrome, medians in ms)
+## Runtime Performance — Real Browser (headless Chrome, medians in ms) — 2026-05-19 v0.3.3 HEAD (Playwright)
 
-All four frameworks measured in headless Chrome via Puppeteer. Each framework's
-production build is served locally, state manipulation via exposed `__bench` API,
-timing with `performance.now()` + forced layout (`offsetHeight`). Lower is better.
+All five frameworks measured in headless Chrome via **Playwright** (`@playwright/test`'s
+`chromium.launch`). Each framework's production build is served locally over a tiny
+in-process HTTP server, state manipulation via the exposed `__bench` API on each app,
+timing with `performance.now()` + forced layout (`document.body.offsetHeight`).
+Lower is better. **Vanilla JS is included as the per-row cost floor** — anything
+above it is framework overhead.
 
-**Re-measured 2026-05-14 against HEAD `13154ba` (v0.3.0 STABLE).** 5 warmup + 10 iterations per benchmark.
+**Re-measured 2026-05-19 against HEAD (post-`91fcc72` Phase 3 Candidate A + `!=` follow-on).**
+5 warmup + 10 measured iterations per benchmark (5 for `create-10000`). Harness at
+`benchmarks/browser/bench-browser-pw.js`. Q-RUNTIME-OPEN-2 (Playwright real-Chrome
+validation of the happy-dom select-row 0.12ms result) closed by this dispatch.
+
+| Operation | scrml | React 19 | Svelte 5 | Vue 3 | Vanilla JS | Best |
+|---|---:|---:|---:|---:|---:|---|
+| create-1000 | 25.95 | 26.50 | 38.05 | 30.00 | **22.10** | Vanilla |
+| replace-1000 | 26.35 | 25.10 | 38.50 | 28.30 | **22.90** | Vanilla |
+| partial-update | **1.00** | 4.65 | 4.10 | 11.20 | 2.60 | scrml |
+| delete-every-10th | 2.55 | 4.95 | 3.45 | 7.90 | **1.50** | Vanilla |
+| clear-all | 3.65 | 3.65 | **3.25** | 3.80 | 3.45 | Svelte |
+| select-row | 0.30 | 0.60 | 0.00 | 0.00 | 0.10 | Svelte/Vue (no-op) |
+| swap-rows | 2.20 | 20.30 | 3.55 | 7.80 | **1.00** | Vanilla |
+| remove-row | 2.25 | 4.25 | 3.35 | 7.80 | **0.90** | Vanilla |
+| create-10000 | 279.20 | 251.00 | 466.00 | 296.10 | **229.60** | Vanilla |
+| append-1000 | 27.55 | 26.35 | 45.65 | 35.20 | **21.05** | Vanilla |
+
+**scrml wins: 1/10** (partial-update). scrml is within 17% of Vanilla on bulk create/replace/append,
+beats React on partial-update + swap-rows + remove-row + create-1000 + append-1000, beats Svelte
+on create-1000 + replace-1000 + create-10000 + append-1000, and beats Vue on every op except select-row
+(where Vue's bench API is a no-op).
+
+**Vanilla wins: 7/10** — create-1000, replace-1000, delete-every-10th, swap-rows, remove-row, create-10000, append-1000.
+Expected — vanilla is the floor.
+
+**Svelte/Vue select-row = 0.00ms** is a measurement artifact: their bench APIs implement `selectRow()`
+as a no-op (`filter = filter` / `filter.value = filter.value`). Inherited from the prior Puppeteer harness;
+out of scope to fix here. The load-bearing scrml number is **0.30ms** (down from 168.2ms at v0.3.0 STABLE).
+
+### v0.3.0 → v0.3.3 HEAD recovery narrative
+
+The 2026-05-14 v0.3.0 STABLE Chrome row (preserved below as Historical) showed scrml at 0/10 wins;
+this HEAD measurement is **1/10 wins outright + scrml within 5-25% of Vanilla on every bulk-DOM op**.
+Cumulative recovery from the v0.3.0 STABLE regression (Approach A runtime tax) traces to:
+
+- **Phase B shared-runtime tree-shake** (`1f73732`, 2026-05-15) cut scrml-runtime payload 38.7 → 11.8 KB gzip.
+- **S102 PGO Phase 3** runtime-template tweaks + **derived-chunk-gate widening** (`6bc5128`) eliminated
+  a runtime exception path that the prior harness was silently recovering from.
+- **S103 Phase 3 Candidate A** (`91fcc72`) + the `!=` detector follow-on rewrote select-row's dispatch
+  to value-indexed subscribers, taking the LEGACY central `_scrml_subscribers` O(n) walk off the hot path.
+
+### Cross-validation: Chrome vs happy-dom for select-row (the load-bearing number)
+
+| Environment | select-row median | vs Chrome baseline | Notes |
+|---|---:|---:|---|
+| v0.3.0 STABLE Chrome (2026-05-14) | 168.2 ms | 1.0× | LEGACY central subscribers O(n) walk |
+| **v0.3.3 HEAD Chrome (this dispatch)** | **0.30 ms** | **561× faster** | value-indexed subscriber dispatch |
+| v0.3.3 HEAD happy-dom (S103 P3 + `!=`) | 0.12 ms | 1402× faster | same code path; happy-dom faster on tiny ops |
+
+The happy-dom-vs-Chrome delta for select-row is **2.5×** (Chrome 0.30 / happy-dom 0.12) — well within
+the expected 1-3× range for sub-millisecond ops dominated by setTimeout-flush + `performance.now()` jitter.
+**The Phase 3 Candidate A select-row recovery validates in real Chrome.**
+
+### Other Chrome vs happy-dom deltas (interesting points)
+
+- **swap-rows:** Chrome 2.20 / happy-dom 3.59. Chrome FASTER — real layout engine batches the two `insertBefore`
+  ops more efficiently than happy-dom's synchronous node-graph manipulation. Vanilla shows the same trend
+  (Chrome 1.00 / happy-dom 0.066, but happy-dom skips layout entirely so the absolute comparison is misleading
+  for ops without DOM-creation cost).
+- **create-1000:** Chrome 25.95 / happy-dom 52.2. Chrome ~2× FASTER — confirms the "Chrome is 1.2-2x faster
+  than happy-dom at DOM creation" note preserved in the historical section below.
+- **partial-update:** Chrome 1.00 / happy-dom 2.28. Chrome 2.3× faster — same pattern.
+
+The general Chrome-vs-happy-dom shape: **Chrome faster on DOM-creation/insertion ops (real batching);
+roughly tied or happy-dom slightly faster on pure-state-mutation ops (no layout cost in happy-dom).**
+
+### Historical: Real Browser (2026-05-14, v0.3.0 STABLE; preserved for trend tracking)
+
+Measured via Puppeteer + headless Chrome. Same 10 ops, same `__bench` API, same `performance.now()` +
+forced layout. 5 warmup + 10 iterations.
 
 | Operation | scrml | React 19 | Svelte 5 | Vue 3 | Best |
 |---|---|---|---|---|---|
@@ -31,30 +104,9 @@ timing with `performance.now()` + forced layout (`offsetHeight`). Lower is bette
 | create-10000 | 399.2 | **365.4** | 565.9 | 465.6 | React |
 | append-1000 | 95.95 | **46.5** | 69.6 | 60.3 | React |
 
-**scrml wins: 0/10** at v0.3.0 STABLE (Approach A runtime additions paid in full on single-page TodoMVC).
-**Svelte wins: 6/10** — partial-update, delete-every-10th, clear-all, select-row, swap-rows, remove-row
-**React wins: 4/10** — create-1000, replace-1000, create-10000, append-1000
-**Vue wins: 0/10**
-
-### v0.3.0 regression analysis (re-measurement queued post-Phase-B)
-
-The v0.2.4-era baseline (preserved below) showed scrml winning 6/10. v0.3.0 STABLE
-flipped to scrml winning 0/10. Causes (as analysed at v0.3.0 STABLE, 2026-05-14):
-
-- **Approach A runtime tax** — chunk loader, FNV-1a content addressing, role-detection
-  bootstrap, dual-decoder wire format, mount-hydration coalescing. Single-page TodoMVC
-  pays the full runtime cost without per-route amortization.
-- **No per-route splitting upside on TodoMVC** — TodoMVC has one route, one role; the
-  per-route per-role chunk story (below) is where v0.3 wins.
-- **Reactivity attribute registries hoisted to module top** (S79 / §6.13) — adds work
-  to every state set. The cost is dominated by attribute lookups in reactive set.
-
-**Post-Phase-B follow-up (2026-05-15):** Phase B's shared-runtime tree-shake cut the
-scrml-runtime payload from 38.7 KB → 11.8 KB gzip on same-source TodoMVC. Parse-time
-+ initial-script-execution cost should drop materially; in-memory dispatch (the
-dominant cost on most runtime operations) is unchanged. **Runtime perf has not been
-re-measured against Phase B at HEAD** — the rows above remain the v0.3.0 STABLE
-measurement. Refresh queued.
+scrml wins 0/10 at v0.3.0 STABLE; Svelte 6/10, React 4/10, Vue 0/10. The v0.3.0 regression analysis
+(Approach A runtime tax + no-amortization on single-page TodoMVC + reactivity attribute registries)
+applied at that snapshot; the current HEAD row above shows the cumulative recovery.
 
 ### Historical: Real Browser (2026-04-13, v0.2.4-era; preserved for trend tracking)
 

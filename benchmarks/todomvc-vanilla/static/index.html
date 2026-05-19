@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>TodoMVC - Vanilla JS</title>
+</head>
+<body>
+  <!--
+    Vanilla JS TodoMVC for the real-Chrome benchmark harness.
+
+    Exposes window.__bench with the same API as the React/Svelte/Vue/scrml
+    apps so the same bench operations apply uniformly. Implementation mirrors
+    benchmarks/todomvc-vanilla/bench.js (per-row surgical DOM mutation, no
+    DocumentFragment buffering — matches js-framework-benchmark vanilla-js).
+
+    This is the per-row cost floor in a real browser: every framework above
+    these numbers is paying overhead.
+  -->
+  <script>
+    (function () {
+      const adj = ["pretty","large","big","small","tall","short","long","handsome","plain","quaint","clean","elegant","easy","angry","crazy","helpful","mushy","odd","unsightly","adorable","important","inexpensive","cheap","expensive","fancy"];
+      const col = ["red","yellow","blue","green","pink","brown","purple","brown","white","black","orange"];
+      const noun = ["table","chair","house","bbq","desk","car","pony","cookie","sandwich","burger","pizza","mouse","keyboard"];
+      function buildTitle(i) { return adj[i % adj.length] + " " + col[i % col.length] + " " + noun[i % noun.length]; }
+
+      // State + parallel node array. Each operation mutates only the affected
+      // DOM nodes — no virtual DOM, no signals, no reconciliation pass.
+      let nextId = 1;
+      let todos = [];
+      let nodes = [];
+
+      let todoAppEl, mainSection, todoListEl, footerEl, countStrongEl, countTextEl;
+
+      function buildRow(todo) {
+        const li = document.createElement("li");
+        li.className = "todo-item";
+        const view = document.createElement("div");
+        view.className = "view";
+        const toggle = document.createElement("input");
+        toggle.className = "toggle";
+        toggle.type = "checkbox";
+        if (todo.completed) toggle.checked = true;
+        const label = document.createElement("label");
+        label.textContent = todo.title;
+        const destroy = document.createElement("button");
+        destroy.className = "destroy";
+        view.appendChild(toggle);
+        view.appendChild(label);
+        view.appendChild(destroy);
+        li.appendChild(view);
+        return li;
+      }
+
+      function createDOM() {
+        document.body.innerHTML = "";
+
+        todoAppEl = document.createElement("div");
+        todoAppEl.className = "todoapp";
+
+        const header = document.createElement("header");
+        header.className = "header";
+        const h1 = document.createElement("h1");
+        h1.textContent = "todos";
+        header.appendChild(h1);
+        todoAppEl.appendChild(header);
+
+        mainSection = document.createElement("section");
+        mainSection.className = "main";
+        mainSection.style.display = "none";
+        todoListEl = document.createElement("ul");
+        todoListEl.className = "todo-list";
+        mainSection.appendChild(todoListEl);
+        todoAppEl.appendChild(mainSection);
+
+        footerEl = document.createElement("footer");
+        footerEl.className = "footer";
+        footerEl.style.display = "none";
+        const countSpan = document.createElement("span");
+        countSpan.className = "todo-count";
+        countStrongEl = document.createElement("strong");
+        countStrongEl.textContent = "0";
+        countTextEl = document.createTextNode(" items left");
+        countSpan.appendChild(countStrongEl);
+        countSpan.appendChild(countTextEl);
+        footerEl.appendChild(countSpan);
+        todoAppEl.appendChild(footerEl);
+
+        document.body.appendChild(todoAppEl);
+      }
+
+      function updateChrome() {
+        let activeCount = 0;
+        for (let i = 0; i < todos.length; i++) {
+          if (!todos[i].completed) activeCount++;
+        }
+        countStrongEl.textContent = String(activeCount);
+        countTextEl.nodeValue = activeCount === 1 ? " item left" : " items left";
+        if (todos.length > 0) {
+          mainSection.style.display = "";
+          footerEl.style.display = "";
+        } else {
+          mainSection.style.display = "none";
+          footerEl.style.display = "none";
+        }
+      }
+
+      function createRowsOp(n) {
+        for (let i = 0; i < n; i++) {
+          const todo = { id: nextId++, title: buildTitle(i), completed: false };
+          todos.push(todo);
+          const li = buildRow(todo);
+          nodes.push(li);
+          todoListEl.appendChild(li);
+        }
+        updateChrome();
+      }
+
+      function clearRowsOp() {
+        todos = [];
+        nodes = [];
+        todoListEl.textContent = "";
+        updateChrome();
+      }
+
+      function updateEvery10thOp() {
+        for (let i = 0; i < todos.length; i += 10) {
+          todos[i].title = todos[i].title + " !!!";
+          const label = nodes[i].firstChild.childNodes[1];
+          label.textContent = todos[i].title;
+        }
+      }
+
+      function selectRowOp(idx) {
+        if (nodes[idx]) nodes[idx].className = "todo-item selected";
+      }
+
+      function swapRowsOp(a, b) {
+        if (a === b) return;
+        if (!todos[a] || !todos[b]) return;
+        if (a > b) { const t = a; a = b; b = t; }
+        const nodeA = nodes[a];
+        const nodeB = nodes[b];
+        const afterB = nodeB.nextSibling;
+        todoListEl.insertBefore(nodeB, nodeA);
+        todoListEl.insertBefore(nodeA, afterB);
+        const tmpT = todos[a]; todos[a] = todos[b]; todos[b] = tmpT;
+        const tmpN = nodes[a]; nodes[a] = nodes[b]; nodes[b] = tmpN;
+      }
+
+      function removeRowOp(idx) {
+        if (idx < 0 || idx >= todos.length) return;
+        todoListEl.removeChild(nodes[idx]);
+        todos.splice(idx, 1);
+        nodes.splice(idx, 1);
+        updateChrome();
+      }
+
+      function deleteEvery10thOp() {
+        const removeAt = [];
+        for (let i = 0; i < todos.length; i += 10) removeAt.push(i);
+        for (let k = removeAt.length - 1; k >= 0; k--) {
+          const i = removeAt[k];
+          todoListEl.removeChild(nodes[i]);
+          todos.splice(i, 1);
+          nodes.splice(i, 1);
+        }
+        updateChrome();
+      }
+
+      function resetApp() {
+        todos = [];
+        nodes = [];
+        nextId = 1;
+        createDOM();
+        updateChrome();
+      }
+
+      // Initial mount + __bench API
+      createDOM();
+
+      window.__benchFlush = () => Promise.resolve();
+      window.__bench = {
+        createRows(n) { createRowsOp(n); },
+        clearRows() { clearRowsOp(); },
+        updateEvery10th() { updateEvery10thOp(); },
+        deleteEvery10th() { deleteEvery10thOp(); },
+        swapRows(a, b) { swapRowsOp(a, b); },
+        removeRow(idx) { removeRowOp(idx); },
+        selectRow(idx) { selectRowOp(idx); },
+        reset() { resetApp(); },
+      };
+    })();
+  </script>
+</body>
+</html>
