@@ -1136,6 +1136,40 @@ const ARBITRARY_PREFIX_MAP = {
   // `aspect-[16/9]` produces `aspect-ratio: 16/9`. The `/` is bracket-
   // legal (not in the injection-vector set) and passes through verbatim.
   "aspect": "aspect-ratio",
+  // Transitions + animations (S108 Bug 1 minor families).
+  //
+  // All four accept the standard underscore-as-space convention for
+  // multi-token shorthand. Examples:
+  //   `transition-[opacity_0.5s_ease-in-out]` -> `transition: opacity 0.5s ease-in-out`
+  //   `duration-[200ms]`                       -> `transition-duration: 200ms`
+  //   `delay-[100ms]`                          -> `transition-delay: 100ms`
+  //   `ease-[cubic-bezier(0.4,0,0.2,1)]`       -> `transition-timing-function: cubic-bezier(0.4,0,0.2,1)`
+  //   `ease-[ease-in-out]`                     -> `transition-timing-function: ease-in-out`
+  "transition": "transition",
+  "duration": "transition-duration",
+  "delay": "transition-delay",
+  "ease": "transition-timing-function",
+  // Individual transform properties (modern CSS — Level 2 transform module).
+  // Tailwind also has `transform-[matrix(...)]` for the shorthand but that's
+  // less common; the individual `rotate-` / `scale-` / `translate-` map to
+  // the modern individual transform CSS properties which avoid clobbering.
+  //
+  //   `rotate-[45deg]`                  -> `rotate: 45deg`
+  //   `scale-[1.5]`                     -> `scale: 1.5`
+  //   `translate-[10px_20px]`           -> `translate: 10px 20px`
+  "rotate": "rotate",
+  "scale": "scale",
+  "translate": "translate",
+  // Outline + ring
+  //
+  // `outline-[2px_solid_red]` uses the list/underscore-as-space mechanic
+  // to produce the outline shorthand `outline: 2px solid red`. Color-only
+  // (`outline-[#ff0000]`) maps directly. Length-only (`outline-[2px]`)
+  // emits `outline: 2px` which CSS interprets as outline-width with
+  // outline-style/color defaulted — adopters who only want width can use
+  // `outline-offset-[2px]` or specify the full shorthand.
+  "outline": "outline",
+  "outline-offset": "outline-offset",
 };
 
 // Prefix → emit-transform map for arbitrary-value classes whose CSS
@@ -1196,13 +1230,23 @@ const VALID_COLOR_FUNCTIONS = new Set([
 
 // CSS math/utility-function names accepted in arbitrary values.
 //
-// S109 expansion (Bug 1 full fix): `repeat`, `minmax`, `fit-content` enable
+// S108 expansion (Bug 1 full fix): `repeat`, `minmax`, `fit-content` enable
 // grid-template values like `grid-cols-[repeat(3,minmax(0,1fr))]`. These
 // are CSS-level functions, not math — keeping them in the same whitelist
 // keeps the validator's one-function-table contract.
+//
+// S108 Bug 1 minor families expansion: `cubic-bezier` + `steps` enable
+// transition-timing-function values like `ease-[cubic-bezier(0.4,0,0.2,1)]`
+// and `ease-[steps(5,end)]`. `rotate3d`, `translate3d`, `scale3d`, `matrix`,
+// `matrix3d` enable modern transform values like
+// `rotate-[matrix(1,0,0,1,0,0)]` — passing through verbatim per the
+// existing function-call validation (balanced parens; whitelisted name).
 const VALID_MATH_FUNCTIONS = new Set([
   "calc", "min", "max", "clamp", "var",
   "repeat", "minmax", "fit-content",
+  "cubic-bezier", "steps",
+  "rotate3d", "translate3d", "scale3d", "matrix", "matrix3d",
+  "skew", "skewx", "skewy",
 ]);
 
 // CSS-wide keywords accepted as bare values.

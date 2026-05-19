@@ -392,9 +392,12 @@ describe("§12 W-TAILWIND-UNRECOGNIZED-CLASS lint sync — engine + lint single 
     expect(diags).toHaveLength(0);
   });
 
-  test("still-unsupported family (`transition-[opacity_0.5s]`) DOES trigger", () => {
+  test("still-unsupported family (`ring-[2px]`) DOES trigger", () => {
     // Sanity check — the lint still works for families NOT shipped in this dispatch.
-    const diags = findUnrecognizedClasses('<div class="transition-[opacity_0.5s]"></div>');
+    // S108 v2 (Bug 1 minor families) added transition/duration/delay/ease + rotate/
+    // scale/translate + outline + outline-offset. `ring-` is still deferred
+    // (Tailwind compound utility — box-shadow stack).
+    const diags = findUnrecognizedClasses('<div class="ring-[2px]"></div>');
     expect(diags.length).toBeGreaterThan(0);
     expect(diags[0].code).toBe("W-TAILWIND-UNRECOGNIZED-CLASS");
   });

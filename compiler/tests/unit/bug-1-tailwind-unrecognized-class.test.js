@@ -12,7 +12,7 @@
  *   (a) misspelling — `flexx` vs `flex`
  *   (b) Tailwind arbitrary-value class whose particular utility prefix
  *       is not yet supported by the embedded engine — e.g.
- *       `transition-[opacity_0.5s]` (S109 full fix landed grid-cols-/
+ *       `skew-[10deg]` (S109 full fix landed grid-cols-/
  *       grid-rows-/col-span-/row-span-/aspect-/flex-/grow-/shrink-/
  *       order-/basis-/col-start/end-/row-start/end-/aspect- families,
  *       but transition / transform / outline / ring / scale / etc. are
@@ -24,7 +24,7 @@
  * canonical unrecognized arbitrary-value class. That family is NOW
  * supported by the engine (`grid-template-columns: auto 1fr auto`); the
  * §1 NEW tests assert it. The unrecognized-arbitrary tests rotated to
- * `transition-[opacity_0.5s]` (a still-unsupported family).
+ * `skew-[10deg]` (a still-unsupported family).
  *
  * Coverage:
  *   §1  Recognized utilities — no warning (incl. S109-new families)
@@ -163,16 +163,16 @@ describe("§2 Arbitrary-value class engine doesn't handle — warning fires", ()
   // the canonical unrecognized arbitrary-value pattern is now a
   // still-unsupported family. transition-/transform-/outline-/ring- are
   // viable; transition-[<list>] is a realistic adopter case.
-  test("`transition-[opacity_0.5s]` fires (still-unsupported family)", () => {
+  test("`skew-[10deg]` fires (still-unsupported family)", () => {
     // transition is not in ARBITRARY_PREFIX_MAP (S109 scope is grid/flex
     // families; transition + transform are future expansion).
-    const diags = scan('<div class="transition-[opacity_0.5s]"></div>');
-    expect(firedOn(diags, "transition-[opacity_0.5s]")).toBe(true);
+    const diags = scan('<div class="skew-[10deg]"></div>');
+    expect(firedOn(diags, "skew-[10deg]")).toBe(true);
   });
 
-  test("`outline-[2px_solid_red]` fires (still-unsupported family)", () => {
-    const diags = scan('<div class="outline-[2px_solid_red]"></div>');
-    expect(firedOn(diags, "outline-[2px_solid_red]")).toBe(true);
+  test("`translate-x-[10px]` fires (still-unsupported family)", () => {
+    const diags = scan('<div class="translate-x-[10px]"></div>');
+    expect(firedOn(diags, "translate-x-[10px]")).toBe(true);
   });
 
   test("`ring-[2px]` fires (still-unsupported family)", () => {
@@ -219,8 +219,8 @@ describe("§4 Mixed recognized + unrecognized — fires only on the unrecognized
 
   test("recognized + unrecognized + recognized arbitrary fires only on the unrecognized", () => {
     // S109 — grid-cols-[<list>] now supported, rotated to transition-[...]
-    const diags = scan('<div class="flex transition-[opacity_0.5s] w-[420px]"></div>');
-    expect(firedOn(diags, "transition-[opacity_0.5s]")).toBe(true);
+    const diags = scan('<div class="flex skew-[10deg] w-[420px]"></div>');
+    expect(firedOn(diags, "skew-[10deg]")).toBe(true);
     expect(firedOn(diags, "flex")).toBe(false);
     expect(firedOn(diags, "w-[420px]")).toBe(false);
     expect(diags).toHaveLength(1);
@@ -315,24 +315,24 @@ describe("§6 Suppression — compilerSettings opt-out", () => {
 // ---------------------------------------------------------------------------
 
 describe("§7 Integration — compileScrml surfaces the lint in lintDiagnostics", () => {
-  test("`transition-[opacity_0.5s]` shows up in lintDiagnostics (S109 rotated case)", () => {
+  test("`skew-[10deg]` shows up in lintDiagnostics (S109 rotated case)", () => {
     // Previously this asserted grid-cols-[auto_1fr_auto], which is now
     // a recognized class per S109. transition-[...] is the rotated case.
     const source =
       '<markup name="app">\n' +
-      '  <div class="transition-[opacity_0.5s]"></div>\n' +
+      '  <div class="skew-[10deg]"></div>\n' +
       '</>';
     const result = compileSource(source);
     const diags = (result.lintDiagnostics || []).filter(
       d => d.code === "W-TAILWIND-UNRECOGNIZED-CLASS",
     );
-    expect(diags.some(d => d.className === "transition-[opacity_0.5s]")).toBe(true);
+    expect(diags.some(d => d.className === "skew-[10deg]")).toBe(true);
   });
 
   test("lint is non-fatal — compilation still succeeds", () => {
     const source =
       '<markup name="app">\n' +
-      '  <div class="flexx transition-[opacity_0.5s]"></div>\n' +
+      '  <div class="flexx skew-[10deg]"></div>\n' +
       '</>';
     const result = compileSource(source);
     // The unrecognized-class lint is info-level: no E-* code, no fatal exit.
@@ -376,13 +376,13 @@ describe("§7 Integration — compileScrml surfaces the lint in lintDiagnostics"
 describe("§8 Diagnostic shape", () => {
   test("carries code, severity, className, line, column, message", () => {
     // S109 — rotated from grid-cols-[auto_1fr_auto] (now supported) to
-    // transition-[opacity_0.5s] (still unsupported family).
-    const diags = scan('<div class="transition-[opacity_0.5s]"></div>');
+    // skew-[10deg] (still unsupported family).
+    const diags = scan('<div class="skew-[10deg]"></div>');
     expect(diags).toHaveLength(1);
     const d = diags[0];
     expect(d.code).toBe("W-TAILWIND-UNRECOGNIZED-CLASS");
     expect(d.severity).toBe("info");
-    expect(d.className).toBe("transition-[opacity_0.5s]");
+    expect(d.className).toBe("skew-[10deg]");
     expect(typeof d.line).toBe("number");
     expect(typeof d.column).toBe("number");
     expect(d.line).toBeGreaterThan(0);
@@ -392,11 +392,11 @@ describe("§8 Diagnostic shape", () => {
     expect(d.message).toContain("misspelled");
     expect(d.message).toContain("arbitrary-value");
     expect(d.message).toContain("custom class");
-    expect(d.message).toContain("transition-[opacity_0.5s]");
+    expect(d.message).toContain("skew-[10deg]");
   });
 
   test("message points adopters at the #{} CSS shim workaround for arbitrary values", () => {
-    const diags = scan('<div class="transition-[opacity_0.5s]"></div>');
+    const diags = scan('<div class="skew-[10deg]"></div>');
     expect(diags[0].message).toContain("#{}");
   });
 });
