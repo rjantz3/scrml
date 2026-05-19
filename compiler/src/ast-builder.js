@@ -10517,6 +10517,150 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
 
     // -------------------------------------------------------------- markup
     case "markup": {
+      // Match block-form (SPEC §18.0.1, S107 Phase 1 of multi-phase impl arc;
+      // see docs/changes/match-block-form-scoping/SCOPING.md).
+      //
+      // Pre-S107: `<match for=Type [on=expr]>...</>` blocks were misclassified
+      // by block-splitter's classifyOpenerForCompoundScan and captured as
+      // opaque html-fragment text. S107 BS-layer fix added `"match"` to
+      // COMPOUND_LIFT_EXEMPT_TAGS — BS now produces a `type=markup name=match`
+      // block that lands here. This dispatch intercepts BEFORE the regular
+      // markup AST construction and returns a structured `match-block` AST
+      // node (Q-MB-1 ratification: NEW kind, not flag-on-markup).
+      //
+      // Phase 1 (THIS LANDING): produce the AST node with `forType` +
+      // `onExprRaw` + `armsRaw`. Mirrors the `engine-decl` shape (armsRaw
+      // post-processed by a dedicated parser at SYM time). Phase 2 will add
+      // `match-statechild-parser.ts` + new SYM PASS firing the 4 §18.0.2
+      // diagnostics (W-MATCH-RULE-INERT / E-MATCH-EFFECT-FORBIDDEN /
+      // E-MATCH-ONTRANSITION-FORBIDDEN / E-MATCH-NOT-EXHAUSTIVE) +
+      // E-MATCH-ON-REQUIRED (new §34 row per Q-MB-5 ratification). Phase 3
+      // adds codegen render dispatch.
+      //
+      // Q-MB-7 ratification: zero adopter source files use `<match>` today
+      // (pre-flight grep S107 — only doc pages REFERENCE it via comment
+      // headers; no live use), so the cut-over is safe with no migration
+      // window.
+      //
+      // Phase 1 known limitation (`:`-shorthand body NOT yet supported):
+      // arm-children today must use bare-body form `<Variant>...</>` or
+      // self-closing `<Variant/>`. The `<Variant> : expr` `:`-shorthand
+      // body form (SPEC §18.0.1 line 9592) fires E-CTX-003 at BS-time
+      // because the `<Variant>` opener never finds a closer. `:`-shorthand
+      // support requires a BS-layer extension parallel to engine state-
+      // child `:`-shorthand handling; deferred to Phase 2 (when the arm-
+      // parser lands and can coordinate the BS-level shape recognition).
+      if (block.name === "match") {
+        const matchRaw = (block.raw || "").trim();
+
+        // Brace-aware opener-end finder (mirrors engine-decl's _findOpenerEnd
+        // — `>` inside `{...}` is skipped so `on=${expr.contains(">")}`
+        // doesn't truncate the header).
+        function _findMatchOpenerEnd(s) {
+          let depth = 0;
+          let inDQ = false;
+          let inSQ = false;
+          for (let i = 0; i < s.length; i++) {
+            const c = s[i];
+            if (inDQ) { if (c === '"') inDQ = false; else if (c === "\\") i++; continue; }
+            if (inSQ) { if (c === "'") inSQ = false; else if (c === "\\") i++; continue; }
+            if (c === '"') { inDQ = true; continue; }
+            if (c === "'") { inSQ = true; continue; }
+            if (c === "{") { depth++; continue; }
+            if (c === "}") { if (depth > 0) depth--; continue; }
+            if (c === ">" && depth === 0) return i;
+          }
+          return -1;
+        }
+
+        const firstLineEnd = _findMatchOpenerEnd(matchRaw);
+        const headerLine = firstLineEnd >= 0
+          ? matchRaw.slice(0, firstLineEnd)
+          : matchRaw.split("\n")[0];
+        // Strip "<match " prefix (also handles `< match` with leading space).
+        let header = headerLine;
+        const matchIdx = header.indexOf("match");
+        if (matchIdx >= 0) header = header.slice(matchIdx + "match".length).trim();
+        // Strip trailing `/` (self-closing — invalid for match but defensive)
+        // or `>` fragments from the header.
+        header = header.replace(/[/>]+\s*$/, "").trim();
+
+        // Bareword-ident regex — reused for `for=Type`.
+        const M_IDENT = /[A-Za-z_$][A-Za-z0-9_$]*/;
+        const forMatchAttr = header.match(new RegExp(`\\bfor\\s*=\\s*(${M_IDENT.source})\\b`));
+
+        // `on=expr` capture: takes everything after `on=` up to the next
+        // standalone attribute boundary OR end of header. Conservative —
+        // full expression parsing defers to Phase 2 (routes through the
+        // existing ExprNode pipeline). Common shapes `on=@ident`, `on="..."`,
+        // `on=${...}` captured verbatim into `onExprRaw`.
+        let onExprRaw = null;
+        const onPos = header.search(/\bon\s*=/);
+        if (onPos >= 0) {
+          const afterEq = header.slice(onPos).replace(/^\bon\s*=\s*/, "");
+          let end = afterEq.length;
+          let depth = 0;
+          let inDQ = false;
+          let inSQ = false;
+          for (let i = 0; i < afterEq.length; i++) {
+            const c = afterEq[i];
+            if (inDQ) { if (c === '"') inDQ = false; else if (c === "\\") i++; continue; }
+            if (inSQ) { if (c === "'") inSQ = false; else if (c === "\\") i++; continue; }
+            if (c === '"') { inDQ = true; continue; }
+            if (c === "'") { inSQ = true; continue; }
+            if (c === "{") { depth++; continue; }
+            if (c === "}") { if (depth > 0) depth--; continue; }
+            if (depth === 0 && /\s/.test(c)) {
+              let j = i;
+              while (j < afterEq.length && /\s/.test(afterEq[j])) j++;
+              if (j < afterEq.length && /[A-Za-z_$]/.test(afterEq[j])) {
+                let k = j;
+                while (k < afterEq.length && /[A-Za-z0-9_$:-]/.test(afterEq[k])) k++;
+                while (k < afterEq.length && /\s/.test(afterEq[k])) k++;
+                if (afterEq[k] === "=") {
+                  end = i;
+                  break;
+                }
+              }
+            }
+          }
+          onExprRaw = afterEq.slice(0, end).trim();
+          if (onExprRaw === "") onExprRaw = null;
+        }
+
+        const forType = forMatchAttr ? forMatchAttr[1] : "";
+
+        // Capture armsRaw: body text after the opener line, before the closer.
+        // BS-layer captures arm-child markup as block.children entries when
+        // they parse cleanly (bare-body form). For Phase 1, concatenate the
+        // raw text of those children into armsRaw — Phase 2 will re-tokenize.
+        let armsRaw = "";
+        if (Array.isArray(block.children)) {
+          for (const child of block.children) {
+            if (child && typeof child === "object" && typeof child.raw === "string") {
+              armsRaw += child.raw;
+            }
+          }
+        }
+        // Fallback when children parse failed: capture body via raw slice
+        // between opener-end and closer.
+        if (!armsRaw && firstLineEnd >= 0) {
+          armsRaw = matchRaw.slice(firstLineEnd + 1);
+          armsRaw = armsRaw.replace(/<\s*\/\s*(?:match)?\s*>\s*$/, "");
+        }
+        armsRaw = armsRaw.trim();
+
+        return {
+          id: ++counter.next,
+          kind: "match-block",
+          forType,       // bareword type name (REQUIRED per §18.0.1; SYM PASS validates)
+          onExprRaw,     // raw text of on= attribute (Phase 2 parses via ExprNode pipeline)
+          armsRaw,       // raw body text — Phase 2's match-statechild-parser produces MatchArmEntry[]
+          span,
+          openerHadSpaceAfterLt: block.openerHadSpaceAfterLt === true,
+        };
+      }
+
       const attrTokens = tokenizeAttributes(
         block.raw,
         block.span.start,
@@ -10963,6 +11107,129 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           openerHadSpaceAfterLt: block.openerHadSpaceAfterLt === true,
           legacyMachineKeyword: isLegacyMachineKeyword,
           span,
+        };
+      }
+
+      // Match block-form (SPEC §18.0.1, S107 Phase 1 of multi-phase impl arc;
+      // see docs/changes/match-block-form-scoping/SCOPING.md).
+      //
+      // NOTE: this dispatch is unreachable because BS produces type=markup
+      // for `<match>` blocks (S107 fix routed `<match>` through the regular
+      // markup path via the COMPOUND_LIFT_EXEMPT_TAGS addition); the real
+      // match-block dispatch lives in `case "markup":` above. Leaving this
+      // defensive copy in `case "state":` in case future BS changes route
+      // `<match>` through the state-type path (mirrors engine's dual-residence
+      // — engine is `type=markup` in S107+ but the dispatch historically lived
+      // here for the legacy `< machine>` whitespace-state-opener path).
+      if (block.name === "match") {
+        const matchRaw = (block.raw || "").trim();
+
+        // Brace-aware opener-end finder (same shape as engine-decl's helper
+        // above — `>` inside `{...}` is skipped so `on=${expr.contains(">")}`
+        // doesn't truncate the header).
+        function _findMatchOpenerEnd(s) {
+          let depth = 0;
+          let inDQ = false;
+          let inSQ = false;
+          for (let i = 0; i < s.length; i++) {
+            const c = s[i];
+            if (inDQ) { if (c === '"') inDQ = false; else if (c === "\\") i++; continue; }
+            if (inSQ) { if (c === "'") inSQ = false; else if (c === "\\") i++; continue; }
+            if (c === '"') { inDQ = true; continue; }
+            if (c === "'") { inSQ = true; continue; }
+            if (c === "{") { depth++; continue; }
+            if (c === "}") { if (depth > 0) depth--; continue; }
+            if (c === ">" && depth === 0) return i;
+          }
+          return -1;
+        }
+
+        const firstLineEnd = _findMatchOpenerEnd(matchRaw);
+        const headerLine = firstLineEnd >= 0
+          ? matchRaw.slice(0, firstLineEnd)
+          : matchRaw.split("\n")[0];
+        // Strip "<match " prefix (also handles `< match` with leading space).
+        let header = headerLine;
+        const matchIdx = header.indexOf("match");
+        if (matchIdx >= 0) header = header.slice(matchIdx + "match".length).trim();
+        // Strip trailing `/` (self-closing — invalid for match but defensive)
+        // or `>` fragments from the header.
+        header = header.replace(/[/>]+\s*$/, "").trim();
+
+        // Bareword-ident regex — reused for `for=Type`.
+        const M_IDENT = /[A-Za-z_$][A-Za-z0-9_$]*/;
+        const forMatchAttr = header.match(new RegExp(`\\bfor\\s*=\\s*(${M_IDENT.source})\\b`));
+
+        // `on=expr` capture: takes everything after `on=` up to the next
+        // standalone attribute boundary (whitespace + ident + `=`) OR the
+        // end of the header. Conservative regex — full expression parsing
+        // defers to Phase 2 (which will route through the existing ExprNode
+        // pipeline). For Phase 1, the common shapes `on=@ident`, `on="..."`,
+        // `on=${...}` are captured verbatim into `onExprRaw`.
+        let onExprRaw = null;
+        const onPos = header.search(/\bon\s*=/);
+        if (onPos >= 0) {
+          const afterEq = header.slice(onPos).replace(/^\bon\s*=\s*/, "");
+          let end = afterEq.length;
+          let depth = 0;
+          let inDQ = false;
+          let inSQ = false;
+          for (let i = 0; i < afterEq.length; i++) {
+            const c = afterEq[i];
+            if (inDQ) { if (c === '"') inDQ = false; else if (c === "\\") i++; continue; }
+            if (inSQ) { if (c === "'") inSQ = false; else if (c === "\\") i++; continue; }
+            if (c === '"') { inDQ = true; continue; }
+            if (c === "'") { inSQ = true; continue; }
+            if (c === "{") { depth++; continue; }
+            if (c === "}") { if (depth > 0) depth--; continue; }
+            // Attribute boundary: whitespace followed by ident-start-char + `=`
+            // at depth 0. Look ahead.
+            if (depth === 0 && /\s/.test(c)) {
+              let j = i;
+              while (j < afterEq.length && /\s/.test(afterEq[j])) j++;
+              if (j < afterEq.length && /[A-Za-z_$]/.test(afterEq[j])) {
+                let k = j;
+                while (k < afterEq.length && /[A-Za-z0-9_$:-]/.test(afterEq[k])) k++;
+                while (k < afterEq.length && /\s/.test(afterEq[k])) k++;
+                if (afterEq[k] === "=") {
+                  end = i;
+                  break;
+                }
+              }
+            }
+          }
+          onExprRaw = afterEq.slice(0, end).trim();
+          if (onExprRaw === "") onExprRaw = null;
+        }
+
+        const forType = forMatchAttr ? forMatchAttr[1] : "";
+
+        // Capture armsRaw: body text after the opener line, before the closer.
+        // The closer `</>` or `</match>` is excluded; everything else (text +
+        // markup tokens for arm-children) is captured verbatim for the Phase 2
+        // arm-parser to process.
+        let armsRaw = "";
+        if (Array.isArray(block.children)) {
+          for (const child of block.children) {
+            if (child && typeof child === "object" && typeof child.raw === "string") {
+              armsRaw += child.raw;
+            }
+          }
+        }
+        if (!armsRaw && firstLineEnd >= 0) {
+          armsRaw = matchRaw.slice(firstLineEnd + 1);
+          armsRaw = armsRaw.replace(/<\s*\/\s*(?:match)?\s*>\s*$/, "");
+        }
+        armsRaw = armsRaw.trim();
+
+        return {
+          id: ++counter.next,
+          kind: "match-block",
+          forType,       // bareword type name (REQUIRED per §18.0.1; SYM PASS validates)
+          onExprRaw,     // raw text of on= attribute (Phase 2 parses via ExprNode pipeline)
+          armsRaw,       // raw body text — Phase 2's match-statechild-parser produces MatchArmEntry[]
+          span,
+          openerHadSpaceAfterLt: block.openerHadSpaceAfterLt === true,
         };
       }
 

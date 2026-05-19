@@ -102,6 +102,18 @@ const RAW_CONTENT_ELEMENTS = new Set([
 
 const COMPOUND_LIFT_EXEMPT_TAGS = new Set([
   "program", "page", "channel", "schema", "seeds", "module",
+  // S107 Phase 1 (SPEC §18.0.1 match block-form impl arc).
+  // `<match for=Type [on=expr]> <Variant>...</> ... </>` is a Tier 1
+  // case-analysis container, not a compound state-decl. Its body looks
+  // structurally similar (parent opener + nested `<...>` children + `</>`
+  // close) so it was being misclassified by classifyOpenerForCompoundScan
+  // and captured as opaque text — the root cause of why match block-form
+  // was unparsed end-to-end pre-S107 (see docs/changes/match-block-form-
+  // scoping/SCOPING.md §4 "Site 1 — parser"). Exempting `match` here lets
+  // BS fall through to the regular markup-opener path, which then produces
+  // a `type=markup name=match` block that ast-builder.js dispatches into a
+  // structured `match-block` AST node (Phase 1).
+  "match",
 ]);
 
 // ---------------------------------------------------------------------------

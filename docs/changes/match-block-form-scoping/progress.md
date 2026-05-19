@@ -66,3 +66,46 @@ Empirical confirmation via `splitBlocks` output for the reproducer:
 **Phase 1 estimate refinement:** ~4-6h (was ~3-5h; +1h for BS-layer recognition + investigation).
 
 **Pause point:** README amendment requested by user mid-session ("honest current state, link to error log, major ones called out on front page"). Phase 1 deferred to next session OR continued after the README amendment + commit. The match block-form gap is the first entry in the new `docs/known-gaps.md`; the README current-state blockquote names it explicitly with link out.
+
+## 2026-05-19 (S107, post-README-pause) — Phase 1 SHIPPED
+
+Resumed Phase 1 after the README amendment commit. Real root cause located + fix shape simplified dramatically from the original revised estimate.
+
+**Actual root cause was one line in block-splitter.js.** The pre-existing `COMPOUND_LIFT_EXEMPT_TAGS = new Set(["program", "page", "channel", "schema", "seeds", "module"])` excludes those tags from `classifyOpenerForCompoundScan`'s compound-state-decl misclassification. `match` was NOT in the list, so `<match for=Phase on=@phase> <Idle>...</> ... </>` (which structurally looks like a compound-state-decl parent: opener + nested `<...>` children + `</>` close) got captured as opaque text. Adding `"match"` to the exempt list routes the block through the regular markup-opener path → BS produces `type=markup name=match` → ast-builder dispatches.
+
+**Two-site fix:**
+
+1. `compiler/src/block-splitter.js` — added `"match"` to `COMPOUND_LIFT_EXEMPT_TAGS` (one line + a 7-line comment explaining the S107 fix). Closes the BS-layer misclassification.
+
+2. `compiler/src/ast-builder.js` — added `if (block.name === "match")` dispatch at the TOP of `case "markup":` (NOT in `case "state":` where my first attempt mis-placed it; BS produces `type=markup` for `<match>`, not `type=state`). The dispatch produces a `kind: "match-block"` AST node with three fields:
+   - `forType: string` — bareword type name from `for=Type` (REQUIRED per §18.0.1)
+   - `onExprRaw: string | null` — raw text of `on=expr` attribute (null when omitted; Phase 2 SYM PASS will fire `E-MATCH-ON-REQUIRED` when null AND no engine for Type is in scope)
+   - `armsRaw: string` — raw body text (concatenated child .raw + fallback raw-slice). Phase 2's `match-statechild-parser.ts` will convert this into structured `MatchArmEntry[]`.
+
+Plus a defensive duplicate dispatch in `case "state":` documented as unreachable (mirrors engine's historical dual-residence pattern — engine is also `type=markup` in S107+ but has dispatch code in `case "state":` for the legacy `< machine>` whitespace-state-opener path).
+
+**Phase 1 known limitations (documented in `:`-shorthand comment + test file):**
+
+- **`:`-shorthand body form NOT yet supported** (SPEC §18.0.1 line 9592: `<Variant> : expr`). The BS-layer treats `<Variant>` as a markup opener that needs a closer; `:`-shorthand has no closer. Arm-children today MUST use bare-body form `<Variant>...</>` or self-closing `<Variant/>`. `:`-shorthand support requires BS-layer extension parallel to engine state-child `:`-shorthand handling; deferred to Phase 2 (when the arm-parser lands and can coordinate the BS-level shape recognition).
+
+- **AST-only landing.** SYM PASS for the 4 §18.0.2 diagnostics + E-MATCH-ON-REQUIRED ships in Phase 2. Codegen render dispatch ships in Phase 3.
+
+**9 new unit tests at `compiler/tests/unit/match-block-parser-phase1.test.js`:**
+- §1 basic recognition
+- §2 field extraction (forType, onExprRaw, armsRaw)
+- §3 multi-arm (3 variants all captured)
+- §4 missing on= → null (Phase 2 will validate)
+- §5 degenerate empty match — still produces AST node
+- §6 regression — `<engine>` still produces `engine-decl` (zero overlap)
+- §7 regression — `<div>` still produces regular `markup`
+
+**Tests at Phase 1 HEAD:** 13,069 pass / 88 skip / 1 todo / 0 fail / 680 files (delta vs pre-Phase-1: +9 pass / +1 file / +22 expect / 0 regressions).
+
+**Phase 1 file inventory (actual landings):**
+1. `compiler/src/block-splitter.js` — +9 lines (1 list entry + 7 comment lines)
+2. `compiler/src/ast-builder.js` — +145 lines (primary dispatch in `case "markup":` + defensive duplicate in `case "state":`)
+3. `compiler/tests/unit/match-block-parser-phase1.test.js` — +180 lines (new test file)
+
+**Phase 1 actual effort:** ~1.5h (was estimated ~4-6h after BS-layer discovery; actual much smaller because root cause was a single exempt-list entry, not a sweeping BS-layer rework).
+
+**Next: Phase 2** — match-statechild-parser.ts that converts `armsRaw` → structured `MatchArmEntry[]`, new SYM PASS firing the 4 §18.0.2 diagnostics + E-MATCH-ON-REQUIRED, §34 catalog row for E-MATCH-ON-REQUIRED + §18.0.1 normative bullet. `:`-shorthand body form support is the natural Phase 2 surface since the arm-parser needs to recognize all three body forms anyway (self-closing, bare-body, `:`-shorthand).
