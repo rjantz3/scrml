@@ -419,25 +419,14 @@ Measured against React 19, Svelte 5, and Vue 3 on an identical TodoMVC implement
 >
 > Runtime filename note: `scrml-runtime.<hash>.js` (content-addressed via FNV-1a) — deterministic cache-busting for adopters serving the runtime from a stable URL.
 
-**Runtime performance (headless Chrome, medians in ms, lower is better):**
-
-| Operation | scrml | React 19 | Svelte 5 | Vue 3 |
-|-----------|------:|---------:|---------:|------:|
-| Create 1000 | 45.0 | **39.9** | 59.3 | 48.9 |
-| Partial update | 52.5 | 8.5 | **8.2** | 22.9 |
-| Swap rows | 51.0 | 39.4 | **5.9** | 15.4 |
-| Select row | 168.2 | 0.9 | **0.1** | 0.1 |
-| Remove row | 51.9 | 6.7 | **5.9** | 16.6 |
-| Append 1000 | 95.95 | **46.5** | 69.6 | 60.3 |
-| Create 10,000 | 399.2 | **365.4** | 565.9 | 465.6 |
-
-scrml wins 0 of 10 TodoMVC benchmarks **at the 2026-05-14 v0.3.0 STABLE refresh**
-(was 6 of 10 at v0.2.4-era). The runtime perf table above is carried forward from
-that refresh and **has not been re-measured since the v0.3.x Phase B SPA tree-shake
-landed**. The tree-shake cut the scrml-runtime payload from 38.7 KB → 11.8 KB gzip,
-which should reduce parse + load cost; in-memory dispatch is unchanged. A fresh
-runtime + build refresh is queued. See [full results](benchmarks/RESULTS.md) including
-the v0.2.4-era baseline preserved for trend tracking.
+**Runtime performance — re-measurement pending against v0.3.3 HEAD.**
+The prior Chrome table was from the 2026-05-14 v0.3.0 STABLE refresh + has been
+materially superseded by post-v0.3.0 work (PGO Phase 3 — S102; Phase 3 select-row
+chip-away — S103). Current snapshot in happy-dom: scrml wins 6/11 vs React, 4/11
+vs Svelte, **6.1× faster than React on average** (driven by select-row at 33×
+faster + double-digit wins on swap-rows / partial-update / delete-every-10th).
+Chrome real-browser re-measurement queued — see [`benchmarks/RESULTS.md`](benchmarks/RESULTS.md)
+for the v0.3.3 happy-dom snapshot + per-op breakdown.
 
 **Build time (TodoMVC, median of 10):**
 
