@@ -1,122 +1,98 @@
-# scrmlTS — Session 104 (CLOSE)
+# scrmlTS — Session 105 (OPEN)
 
-**Date:** 2026-05-18 → 2026-05-19
-**Previous:** `handOffs/hand-off-106.md` (S103 CLOSE — rotated at S104 open)
+**Date:** 2026-05-19
+**Previous:** `handOffs/hand-off-107.md` (S104 CLOSE — rotated this session-open)
 **Machine:** single-machine (per S100 directive)
-**HEAD at S104 CLOSE (pre-wrap):** `8a6cd85` (S104 bundle: schemaFor + bookkeeping + 5 derefs)
-**HEAD at S104 CLOSE (post-wrap):** `<wrap-sha>` (this hand-off + master-list + changelog wrap commit)
-**Origin sync at CLOSE:** scrmlTS 0/0 (mid-session push: `5f4ada4→8a6cd85`; wrap push pending); scrml-support 0/0 (pushed: `a72636f→4a1d1c1`)
+**HEAD at S105 OPEN:** `07b1b22` (S104 wrap commit — hand-off + master-list + changelog)
+**Origin sync at OPEN:** scrmlTS 0/0; scrml-support 0/0 (5 untracked files surfaced; carry-forward — see §"Anomalies surfaced at session-open" below)
 
 ---
 
-## S104 net outcome — schemaFor impl SHIPPED end-to-end (L22 family member #3)
+## Session-start checklist (status)
 
-Substantial single-arc session with high-leverage outcome plus PA-direct stragglers:
+| # | Item | Status |
+|---|---|---|
+| 1 | Read `pa.md` → `../scrml-support/pa-scrmlTS.md` IN FULL | ✅ done |
+| 2 | Read `docs/PA-SCRML-PRIMER.md` IN FULL | ✅ done (899 lines) |
+| 3 | Read `compiler/SPEC-INDEX.md` IN FULL | ✅ done (348 lines) |
+| 4 | Read `master-list.md` §0 LIVE DASHBOARD IN FULL | ✅ done (lines 1–373 surveyed; §0 dashboard + L22 + open Qs + A7 deferral status all loaded) |
+| 5 | Read `hand-off.md` (rotated this open to `handOffs/hand-off-107.md`) | ✅ done |
+| 6 | Read last ~10 contentful user-voice entries | ✅ done (S98/S99/S100/S102/S103 + sentinel of S95/S96 + S94) |
+| 7 | Sync hygiene fetch+ahead/behind | ✅ scrmlTS 0/0; scrml-support 0/0 (5 untracked predate this session — see anomalies) |
+| 8 | Inbox check `handOffs/incoming/*.md` | ✅ empty (68 in `read/`) |
+| 9 | Worktree state `git worktree list` | ✅ main only |
+| 10 | Path-discipline hook + pre-push hook installed | ✅ **RESOLVED S105 OPEN** — configuration A installed (`git config core.hooksPath scripts/git-hooks`); pre-commit + pre-push active. No post-commit (informational; was machine-local-only on the prior setup). |
+| 11 | Self-host bootstrap dist state | 🟡 partial-broken state persists from S102 (gitignored; tab.js + bs.js + others at May 11 11:20; expression-parser.js + tokenizer.js at Apr 19 16:14) |
+| 12 | Maps currency check + REFRESH | ⏸️ deferred to user disposition — watermark `84c736e` is 26 commits behind HEAD `07b1b22` |
+| 13 | Report caught-up + next priority | ⏳ this hand-off + chat reply |
 
-1. **schemaFor impl SHIPPED end-to-end** — THIRD active L22 type-as-argument family member (after parseVariant S65 + formFor S102-S103). Closes the §39+L4 vocabulary-unification loop waiting since L4 landed S58. **FLAGSHIP: OQ-SCH-12 enum lowering** closes the enum-knowledge-loss-at-DB-boundary gap. Bare-variant enum-typed struct fields lower automatically to `text req oneOf([...])` → `CHECK (col IN (...))`. 23-trucking-dispatch precedent: 7 enum columns currently stored as bare `text not null` (unstoppable bad-string INSERTs); now mechanically constrained. Form B function-call form `${ schemaFor(T) }` interpolated inside `<schema>` block per OQ-SCH-1 debate verdict.
+---
 
-2. **Agent-crash partial-recovery WIN** — schemaFor agent (`isolation: "worktree"`, opus, run_in_background) ran 5h 40m / 218 tool uses; API stream-idle-timeout interrupted the FINAL REPORT MESSAGE only. All 8 work units committed to agent branch BEFORE timeout per S83 commit-discipline. Zero path-discipline leak (S99 hardening held). File-delta land per S67; recovery cost was ~5min PA file-delta operation only. Memo: this is the strongest validation of S83 + S99 + S67 protocols composing under a real partial-failure scenario.
+## Anomalies surfaced at session-open
 
-3. **Phase 3.B SCOPING (PA-direct, parallel to dispatch)** — runtime-perf Phase 2.2 attribution per Q-RT2-OPEN-3 ratified fold. Walked partial-update + swap-rows hotspots end-to-end. 4 candidates ranked: B2 same-keys-in-same-order fast-path (HIGH; ~30-50% partial-update savings), B4 count-derived dep precision (MED-HIGH; ~30-50% partial + ~20-40% swap), B3 batched microtask reconcile (gated), B1 array-reorder fast-path (DEFER). 5 OQs surfaced. Counter-intuitive finding: scrml partial-update already WINS Chrome (1.00ms vs Vanilla 2.60ms, React 4.65ms, Svelte 4.10ms); B candidates target happy-dom + swap-rows residual.
+### A1 — Commit gate hook RESOLVED at S105 OPEN (configuration A installed)
 
-4. **5 non-compliance derefs (stragglers batch)** — per scope principle: llm-kickstarter-v0 stub deleted + 4 historical SCOPINGs derefed to `scrml-support/archive/changes/` via companion commit `4a1d1c1`.
+**Initial state at session-open:** `core.hooksPath` was set to `/home/bryan/scrmlMaster/scrmlTS/.git/hooks` (absolute path; clone default). That dir contained ONLY `.sample` files (13 default Git samples; ZERO active hooks). The S104 hand-off CLOSE table reported "Path-discipline hook: active" and "Pre-push hook: source-controlled + local-rich; clean each push" — that state had NOT propagated to this clone. The previous local-rich setup (with `post-commit` informational re-run) lived on the other machine; only `pre-commit` + `pre-push` are source-controlled.
 
-## Tests at S104 CLOSE
+**Resolution (user direction: configuration A):**
 
-- **Pre-commit subset** (unit + integration + conformance): **12,872 pass / 88 skip / 1 todo / 0 fail / 670 files / 43,337 expect**
-- **Full `bun run test` (pre-push gate)**: **15,709 pass / 169 skip / 0 fail** + TodoMVC gauntlet quick check PASS
-- Delta vs S103 CLOSE (12,807): **+65 pass / +2 files / +118 expect / 0 fail / 0 regressions**
-- Per-error-code coverage: 8/8 fire + 8/8 no-fire confirmed for `E-SCHEMAFOR-*`
-- Pre-existing self-host bootstrap fail (S102 P3.B `rebuild-self-host-dist.ts` regression) DID NOT propagate — dist files gitignored
+```
+git config core.hooksPath scripts/git-hooks
+```
 
-## S104 commit ledger
+Result verified: `core.hooksPath = scripts/git-hooks`; `pre-commit` (794 bytes) + `pre-push` (2674 bytes) both executable + active.
 
-| # | Commit | Repo | What |
-|---|---|---|---|
-| 1 | `8a6cd85` | scrmlTS | S104 bundle — schemaFor impl (13 files / +2618 LOC) + S104 PA-direct bookkeeping (hand-off rotation + SCOPE + DISPATCH-BRIEF + Phase 3.B SCOPING) + 5 non-compliance derefs |
-| 2 | `4a1d1c1` | scrml-support | 4 archive landings (companion to deref batch) |
-| 3 | `<wrap-sha>` | scrmlTS | S104 CLOSE wrap (this hand-off + master-list + changelog) |
+**What runs now on every commit:** `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail` + main-branch informational warning.
 
-**Both repos pushed mid-session at landing time;** wrap push pending after this commit.
+**What runs now on every push:** full `bun test compiler/tests/` + TodoMVC gauntlet quick check (`compile + node --check` on emitted JS) + README scrml gate ONLY on `refs/tags/v*` pushes (S101).
 
-## Files touched this session (high-leverage)
+**What does NOT run anymore (vs the other machine's prior local-rich setup):** the `post-commit` informational full-suite re-run after compiler changes. That hook was never source-controlled. If desired later, hand-recreate by dropping a `post-commit` file directly into `.git/hooks/` (Git checks BOTH `core.hooksPath` AND `.git/hooks/` for some hook types — actually no, with `core.hooksPath` set Git only checks the configured path; would need to place `post-commit` at `scripts/git-hooks/post-commit` instead, which would also source-control it).
 
-**Compiler source:**
-- `compiler/src/codegen/emit-schema-for.ts` (NEW, 386L)
-- `compiler/src/type-system.ts` schemaFor section (+569L)
-- `compiler/runtime/stdlib/data.js` defensive shim (+24L)
-- `compiler/SPEC-INDEX.md` Quick Lookup additions (+3L)
+**Operational implication going forward:** commit + push paths are gated again. The pa.md S88 `--no-verify` rule applies — no bypass on commit or push without explicit user authorization.
 
-**Stdlib:**
-- `stdlib/data/schema-for.scrml` (NEW, 116L)
-- `stdlib/data/index.scrml` (+1 export line)
+### A2 — Maps watermark stale (26 commits behind HEAD)
 
-**Tests:**
-- `compiler/tests/unit/schema-for.test.js` (NEW, 835L; 53 tests)
-- `compiler/tests/integration/schema-for.test.js` (NEW, 456L; 9 tests)
+**Watermark in `.claude/maps/primary.map.md`:** commit `84c736e` (2026-05-18T18:37). **HEAD:** `07b1b22`. Delta includes S104's schemaFor surface (`compiler/src/codegen/emit-schema-for.ts` NEW + `compiler/src/type-system.ts` +569L schemaFor section + stdlib reorg). Hand-off S104 CLOSE listed this as item 12 of session-start: "Maps currency check + REFRESH — REFRESH BEFORE any scrml-source-shape dispatch."
 
-**Sample + example:**
-- `samples/compilation-tests/schemaFor-basic.scrml` (NEW)
-- `examples/26-type-derived-schema.scrml` (NEW, 94L)
+**Disposition:** ⏸️ deferred to user. Do NOT auto-refresh on session-open without confirmation. Maps refresh is project-mapper incremental dispatch; non-trivial; may surface non-compliance items needing PA-direct triage.
 
-**Docs:**
-- `docs/changelog.md` S104 entry (FLAGSHIP framing per S104 OPEN must-not-screw-up)
-- `master-list.md` §53.14.3 family-roster flip
-- `docs/changes/schemaFor-impl/SCOPE-AND-DECOMPOSITION.md` (PA-direct, NEW)
-- `docs/changes/schemaFor-impl/DISPATCH-BRIEF.md` (PA-direct, NEW)
-- `docs/changes/schemaFor-impl/progress.md` (agent's survey record, NEW)
-- `docs/changes/runtime-perf-phase-3-partial-update-and-swap/SCOPING.md` (PA-direct Phase 3.B, NEW)
-- `hand-off.md` (rotation: S103 CLOSE → `handOffs/hand-off-106.md`; fresh S104 OPEN then this S104 CLOSE)
+### A3 — scrml-support untracked files (5 files, S99-batch carry-forward)
 
-**Derefs (5 to scrml-support/archive/):**
-- `docs/articles/llm-kickstarter-v0-2026-04-25.md` → deleted (archive copy already exists from S79)
-- `docs/changes/undefined-eradication-self-host/SUPERSEDED-CLOSURE.md` → archive
-- `docs/changes/wave-4-adopter-content/SCOPING.md` → archive
-- `docs/changes/promotion-ergonomics/TIER-C-SCOPE.md` → archive
-- `docs/changes/v0.3-approach-a-impl/SCOPING.md` → archive
+Verified via `git -C ../scrml-support status --short`:
 
-## L22 family — current state at S104 CLOSE
+```
+?? tools/
+?? voice/articles/2026-05-09-devto-openers-tier1.md
+?? voice/articles/2026-05-09-devto-reply-modularity-v2-POST.md
+?? voice/articles/2026-05-09-devto-reply-modularity-v2-slow-burn.md
+?? voice/articles/2026-05-09-devto-reply-modularity.md
+?? voice/articles/2026-05-09-devto-reply-modularity-v2-slow-burn.md
+?? voice/articles/2026-05-09-server-keyword-deprecation.md
+```
 
-| Member | Status |
-|---|---|
-| parseVariant | ✓ shipped S65 (§41.13) |
-| formFor | ✓ shipped S102-S103 end-to-end (§41.14 + impl + stdlib re-export) |
-| serialize | ✗ STASHED S103 — Gate 2 synonym risk; revival triggers documented |
-| **schemaFor** | **✓ SHIPPED S104 (THIS SESSION)** (§41.15 + impl + stdlib re-export + 62 tests + flagship enum-lowering per OQ-SCH-12) |
-| tableFor | planned (heavier ~15-25h — markup synthesis + sort/select state surface) |
-| variantNames / reflective | planned (smaller primitive ~4-8h) |
+These predate S105 (dated 2026-05-09; S79-era voice work). Not load-bearing for S105 unless surfaced. Voice-author work is marketing-shaped per Rule 1 — DEFER unless user raises.
 
-**Discipline-health datum:** 3 debate-05 rejections + 1 STASHED vs 4 advanced. §53.14.4 filter empirically working.
+### A4 — Self-host bootstrap dist state (S102 carry, unaddressed S103/S104)
 
-## State-as-of-CLOSE
+`compiler/dist/self-host/` contains 12 .js files. Two mtimes: most files May 11 09:40 OR 11:20 (S78-S79 era); `expression-parser.js` + `tokenizer.js` at Apr 19 16:14 (pre-S58 era). Per S102 carry-forward: PA-run `rebuild-self-host-dist.ts` overwrote May-11 working dist with newly-compiled broken-import-path versions; the broken state is local-only (gitignored). S104 hand-off carry-forward §"State-as-of-CLOSE" line 105: "Self-host bootstrap: unchanged from S103 (partial dist state)." Pre-commit subset skips self-host parity, so this does not gate commits.
 
-| Item | Status |
-|---|---|
-| Tests pre-commit subset | 12,872 / 88 / 1 / 0 fail / 670 files / 43,337 expect |
-| Tests full pre-push gate | 15,709 / 169 skip / 0 fail + TodoMVC quick PASS |
-| Test delta from S103 | +65 pass / 0 fail / 0 regressions |
-| Worktree list | main only (agent worktree removed at landing) |
-| Origin sync (scrmlTS) | 0/0 mid-session-push at `8a6cd85`; wrap push pending |
-| Origin sync (scrml-support) | 0/0 post-push `4a1d1c1` |
-| Inbox `handOffs/incoming/` | empty (68 in `read/`) |
-| Path-discipline hook | active (scrmlTS-local; S100 hook held throughout) |
-| Pre-push hook | source-controlled + local-rich; clean each push |
-| Self-host bootstrap | unchanged from S103 (partial dist state May 18 17:47 + May 18 18:33; gitignored; pre-commit subset doesn't run self-host parity) |
-| Maps watermark | `84c736e` (S103 open) — **DEFERRED to S105 session-start refresh** (25+ commits behind including S104 schemaFor surface) |
+**Disposition for S105:** carry-forward; investigation OR `rm -rf compiler/dist/self-host/` to let bootstrap test SKIP cleanly is a candidate, but defer to user direction.
 
-## Carry-forwards for S105
+---
 
-### High-priority (substantive compiler/L22)
+## What S104 left for S105 (carry-forward inventory)
+
+### High-priority substantive (compiler / L22)
 
 | Track | Item | Cost |
 |---|---|---|
-| **L22 family** | **tableFor impl dispatch** OR **variantNames impl dispatch** — next L22 member; each must pass §53.14.4 4-gate walk first (the discipline is empirically working) | tableFor ~15-25h / variantNames ~4-8h |
+| **L22 family** | **tableFor impl dispatch** OR **variantNames impl dispatch** — each must pass §53.14.4 4-gate walk first | tableFor ~15-25h / variantNames ~4-8h |
 | Runtime-perf Phase 3.B | B2 (same-keys fast-path; ~2-3h PA-direct) + B4 (count-derived dep precision; ~3-5h agent dispatch); B3 conditional; B1 deferred. **Pending 5-OQ ratification.** | ~5-8h aggregate (B2+B4) |
-| Native parser | M2 expression parser (~2-4 sessions per DD §D7; M1.2 in flight per master-list) | ~2-4 sessions |
+| Native parser | M2 expression parser (~2-4 sessions per DD §D7; M1.2 in flight) | ~2-4 sessions |
 | Native parser | §48.6.4 `pinned fn` parser-recognition impl (SPEC landed S98) | ~2-4h |
-| Self-host bootstrap | Investigate broken-import-path regen state (S102 carry; not addressed S103/S104) | ~2-4h |
+| Self-host bootstrap | Investigate broken-import-path regen state (S102 carry) | ~2-4h |
 
-### Medium (compiler-source — ratified-stragglers queued behind schemaFor, NOW UNBLOCKED)
+### Medium (ratified-stragglers — queued behind schemaFor; NOW UNBLOCKED)
 
 | Track | Item | Cost |
 |---|---|---|
@@ -132,8 +108,8 @@ Substantial single-arc session with high-leverage outcome plus PA-direct straggl
 
 ### Light (cleanup / orthogonal)
 
-- **Maps incremental refresh (S105 session-start, BEFORE any dev-agent dispatch)** — 25+ commits behind watermark including schemaFor surface
-- 4 NEW stale-header non-compliance items (pgo × 3 + formFor-scoping) — flip-in-place to CLOSED vs deref pending ratification (PA lean: flip-in-place lighter touch; these are historical SCOPING shape records that informed shipped work)
+- **Maps incremental refresh** (S105 session-start) — 26 commits behind watermark (A2 above)
+- 4 NEW stale-header non-compliance items (pgo × 3 + formFor-scoping) — flip-in-place to CLOSED vs deref pending ratification (PA lean: flip-in-place)
 - Puppeteer dep cleanup (Q-PW-PORT-OPEN-1 ratified DEFER; ~30min after 1-2 release cycles of clean Playwright runs)
 - LEGACY `_scrml_subscribers` retirement (v0.4+ proposal; Q-RT3-SR-OPEN-3 ratified DEFER post-impl)
 
@@ -142,68 +118,47 @@ Substantial single-arc session with high-leverage outcome plus PA-direct straggl
 - formFor + schemaFor sample app + scrml.dev refresh + README compile-gate block
 - v0.3.3 / v0.4 announce content
 - 561× select-row Chrome recovery narrative — LinkedIn / X snippets
-- L22 family completion narrative (3 of 6 shipped; the type-as-argument family is the unique scrml story)
+- L22 family completion narrative (3 of 6 shipped)
 
 ### Out-of-Q queue (kept tracked, not active)
 
-- serialize STASHED — revival triggers in `docs/changes/serialize-scoping/SCOPING.md` (≥2 adopter friction reports / sibling-impl edge / reflective-metadata symmetry)
+- serialize STASHED — revival triggers in `docs/changes/serialize-scoping/SCOPING.md`
 - tableFor + variantNames natural next L22 candidates (gated on 4-gate walk)
 - Bug-4 dot-path render-by-tag — user heads-up coding pre-pipeline filter still active
 
-## Carry-forwards (across-session standing rules — unchanged + S104 NOTES)
+---
 
-### Unchanged from S103
+## Carry-forwards (across-session standing rules — unchanged from S104)
 
-All S96-S103 durable PA-memory rules + pa.md Rules 1-5 + standing protocols:
-- pa.md Rules 1-5 (no marketing / full-production fidelity / right > easy / SPEC normative / shoot straight)
-- All S96-S103 PA-memory rules
-- S43 cross-machine (dormant per S100)
-- S83 commit discipline two-sided rule
-- S88 `isolation:"worktree"` mandatory + `--no-verify` requires explicit auth
-- S91 CWD-routing rule
-- S95 communication norms
-- S96 SPEC-at-session-start
-- S98 Pillar 5b (Reach discipline)
-- S99 path-discipline addendum + voice-author reuse-over-reinvent + context-budget operational datum
-- S100 PreToolUse hook
-- S101 v0.3.x patch arc pattern (bump-commit-tag-push paired) + corpus-ouroboros pre-dispatch sanity check
-- S102 README staleness paradox methodology + skip-OQ-FF-7 HIGH-confidence rule
-- S103 surface-form-DEBATED rule + STASH-with-revival-triggers pattern + hybrid file-delta+cherry-pick + output-kind-match rule
+All S96-S104 durable PA-memory rules + pa.md Rules 1-5 + standing protocols intact. No new rules introduced this session-open.
 
-### S104 NEW (operational — not durable design)
+---
 
-- **No new design-axiom ratifications this session.** Session was execution-focused; substantive work shipped per existing methodology.
-- **No new user-voice durable directives this session.** User directives ("dispatch schemaFor", "do runtime perf 2.2 + stragglers", "commit single S104 bundle then cleanup worktree", "push both", "wrap session") were operational sequencing, not durable framing.
-- **Validation datum for S83 + S99 + S67 protocols composing under agent partial-failure** — schemaFor agent's API stream-idle-timeout was a real-world test of the crash-recovery protocol; PA salvaged complete deliverables from agent's committed-but-unreported state with ~5min recovery cost. The protocols held. Memo this as standing-rule strength evidence in any future "are the safety protocols worth the overhead" discussion.
+## Tests at S105 OPEN
 
-## Things S105 PA must NOT screw up
+Not re-run at session-open. **S104 CLOSE baseline (HEAD `8a6cd85` pre-wrap):**
+- Pre-commit subset: 12,872 pass / 88 skip / 1 todo / 0 fail / 670 files / 43,337 expect
+- Full `bun run test`: 15,709 pass / 169 skip / 0 fail + TodoMVC gauntlet quick check PASS
 
-In addition to S96-S103 carry-forwards:
+Session-open does not re-run; first dispatch / commit will reset the gate verification once the hook situation (A1) is resolved.
 
-- **Maps refresh BEFORE any dev-agent dispatch.** 25+ commits behind watermark including major schemaFor surface in type-system.ts + emit-schema-for.ts. Stale-map dispatches risk wrong-shape advice. PA should invoke project-mapper incremental at session-start OR before first dispatch.
-- **L22 family discipline is empirically working** — next candidate (tableFor or variantNames) GETS THE SAME 4-gate honest walk; may surface a STASH verdict parallel to serialize precedent. Don't shortcut. Don't propose family members under PA-lean without per-shape sliver test + synonym-detection precondition + asymmetric-forfeit-cost decomposition + per-feature deep-dive (when convener has doubt).
-- **Phase 3.B candidate ranking is open** — 5 OQs need user ratification BEFORE dispatching B2 or B4. Don't proceed under PA-lean without explicit ratification per S103 Q-SCH-OPEN-3 user-direction precedent.
-- **schemaFor architectural shape is now load-bearing precedent for tableFor + variantNames.** Agent's two-pass walker (Pass A inside-`<schema>` validates+rewrites; Pass B everywhere-else fires E-SCHEMAFOR-INVALID-CALL-CONTEXT) is the template for context-sensitive CallExpression recognition. tableFor will need analogous markup-context detection (its surface is markup-element `<tableFor for=T rows=@items/>` per family precedent + output-kind-match rule); variantNames will be CallExpression-form like parseVariant + schemaFor.
-- **OQ-SCH-12 enum-lowering FLAGSHIP framing is now baked in** — future schemaFor follow-ons (e.g., `@table` v1.next annotation) should preserve this framing in adopter-facing narrative.
-- **Single-machine workflow unchanged** (S100 directive); cross-machine sync hygiene dormant.
-- **No marketing without prompt** (Rule 1). The 3-of-6-L22-shipped narrative is BIG but is marketing-shaped. If user raises it, work it. Otherwise stays in changelog + hand-off.
+---
 
-## Session-start checklist for S105 PA
+## Open questions to surface immediately to user
 
-1. Read `pa.md` pointer → `../scrml-support/pa-scrmlTS.md` IN FULL
-2. Read `docs/PA-SCRML-PRIMER.md` IN FULL (Pillar 5b applies; S98 ratification)
-3. Read `compiler/SPEC-INDEX.md` IN FULL — no new SPEC sections this session beyond S104 SPEC-INDEX +3L Quick Lookup
-4. Read `master-list.md` §0 LIVE DASHBOARD IN FULL — **note S104 CLOSE addendum at top + §53.14.3 schemaFor SHIPPED flip**
-5. Read this `hand-off.md` (S104 CLOSE) — will be rotated to `handOffs/hand-off-107.md` at S105 open
-6. Read last ~10 contentful user-voice entries — no new entries this session
-7. Session-start sync hygiene: `git fetch origin && git rev-list --left-right --count origin/main...HEAD` should be 0/0 (post-wrap-push)
-8. Inbox check — `handOffs/incoming/*.md` should be empty
-9. Verify worktrees: `git worktree list` shows main only
-10. Verify path-discipline hook + pre-push hook installed
-11. **Self-host bootstrap state check** — `ls -la compiler/dist/self-host/`; partial-broken state persists from S102; decide whether to investigate OR delete to let `bun test compiler/tests/integration/self-compilation.test.js` SKIP cleanly
-12. **Maps currency check + REFRESH** — `head -3 .claude/maps/primary.map.md` will show `84c736e` watermark; HEAD is now `<post-wrap-sha>` (26+ commits ahead). **REFRESH BEFORE any scrml-source-shape dispatch.** Invoke project-mapper incremental.
-13. Report: caught up + next priority
+1. ~~Hook gate (A1)~~ ✅ RESOLVED — configuration A installed.
+2. **Maps refresh (A2)** — refresh now (~5-15min project-mapper incremental) before any dispatch, OR defer to first-dispatch-need?
+3. **Self-host dist state (A4)** — investigate the broken-import-path regen (~2-4h) OR `rm -rf compiler/dist/self-host/` to let bootstrap test skip cleanly?
+4. **S105 priority direction:**
+   - **L22 next member** (tableFor heavier; variantNames smaller) — gated on §53.14.4 4-gate walk
+   - **Runtime-perf Phase 3.B** — B2+B4 chip-aways; needs 5-OQ ratification first
+   - **Medium-tier stragglers** (formFor follow-ons, PGO Phase 3 followups)
+   - **Native parser M2** — expression parser; ~2-4 sessions
+   - **Pinned-fn parser-recognition** (§48.6.4; ~2-4h)
+   - Or other PA-direct priority the user wants
+
+---
 
 ## Tags
 
-#session-104 #CLOSE #schemaFor-impl-shipped #L22-family-member-3 #flagship-enum-lowering-OQ-SCH-12 #agent-crash-partial-recovery-WIN #phase-3-b-SCOPING #5-non-compliance-derefs #single-arc-session #pre-commit-12872 #pre-push-15709 #pushed-to-origin
+#session-105 #OPEN #hook-gate-configA-installed #maps-stale-26-commits #self-host-bootstrap-broken #post-S104-schemaFor-shipped #L22-3-of-6-shipped #single-machine
