@@ -26,6 +26,20 @@ const SUPPORTED_BIND_NAMES = new Set(["value", "valueAsNumber", "checked", "sele
 // Supported transition types for transition:, in:, out: directives
 const SUPPORTED_TRANSITIONS = new Set(["fade", "slide", "fly"]);
 
+// S105 B1 — HTML Boolean attributes that admit reactive `${expr}` values.
+// When present on a markup element with kind:"expr" value, the codegen path
+// at this file emits a `data-scrml-bind-bool-<name>="<placeholderId>"`
+// placeholder + registers a logic binding. The runtime emit at
+// emit-event-wiring.ts wires an `_scrml_effect` that toggles attribute
+// presence (setAttribute on truthy / removeAttribute on falsy).
+//
+// Initial v0.3 catalog: the 3 form-control bool attrs that frequently want
+// reactive control. Extend in v0.4+ as adopter need surfaces (candidates:
+// `hidden`, `multiple`, `open`, `checked`, `selected` — last two already
+// have `bind:checked` / `bind:selected` paths; reactive-expr admission
+// would require dispatch-precedence design).
+const REACTIVE_BOOL_ATTRS = new Set(["disabled", "readonly", "required"]);
+
 // Element-type restrictions per SPEC §5.4
 const BIND_VALID_TAGS: Record<string, Set<string>> = {
   "bind:value":          new Set(["input", "textarea", "select"]),
@@ -1489,6 +1503,28 @@ export function generateHtml(
                 handlerArgs: [],
                 handlerExpr: val.raw,
                 handlerExprNode: val.exprNode,
+              });
+            }
+          } else if (REACTIVE_BOOL_ATTRS.has(name)) {
+            // S105 B1 — reactive Boolean HTML attribute (disabled, readonly,
+            // required). Closes §41.14 formFor follow-on (`disabled=!@form.isValid`
+            // on the default submit button) and unlocks general adopter use of
+            // `<input disabled=${@busy}>`, etc.
+            //
+            // The runtime path wires an `_scrml_effect` that toggles attribute
+            // presence (`setAttribute(name, "")` on truthy / `removeAttribute(name)`
+            // on falsy) — mirrors the if/show display-toggle structure.
+            const placeholderId = genVar(`attr_${name}`);
+            parts.push(` data-scrml-bind-bool-${name}="${placeholderId}"`);
+            if (registry) {
+              registry.addLogicBinding({
+                placeholderId,
+                expr: val.raw,
+                isReactiveBoolAttr: true,
+                boolAttrName: name,
+                condExpr: val.raw,
+                condExprNode: val.exprNode,
+                refs: val.refs,
               });
             }
           }

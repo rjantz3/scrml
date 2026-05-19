@@ -101,6 +101,23 @@ export interface LogicBinding {
   isVisibilityToggle?: boolean;
 
   /**
+   * S105 B1 — reactive Boolean HTML attribute binding.
+   *
+   * When set, the binding wires a reactive `${expr}` to a known HTML Boolean
+   * attribute (`disabled`, `readonly`, `required` in v0.3; extensible).
+   * `boolAttrName` carries the attribute name (e.g. `"disabled"`). The
+   * runtime path emits an `_scrml_effect` that toggles the attribute's
+   * presence (`setAttribute(name, "")` on truthy / `removeAttribute(name)`
+   * on falsy).
+   *
+   * Closes the §41.14 formFor follow-on (`disabled=!@form.isValid` on the
+   * default submit button); also unlocks general adopter use of
+   * `<input disabled=${@busy}>`, `<input readonly=${@locked}>`, etc.
+   */
+  isReactiveBoolAttr?: boolean;
+  boolAttrName?: string;
+
+  /**
    * Phase 2c: when set, the `if=` binding uses mount/unmount semantics
    * (template-clone on true, scope-destroy + DOM-remove on false) instead of
    * display-toggle. The compile-time emitter populates `templateId` and

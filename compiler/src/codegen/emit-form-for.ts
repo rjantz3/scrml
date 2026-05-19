@@ -616,17 +616,15 @@ function buildSubmitButton(
   }
 
   // §41.14.3 4th bullet — the default submit button SHALL be `disabled` when
-  // `!@<cellName>.isValid`. The current emit-html.ts attribute pipeline does
-  // NOT wire reactive Boolean expression-valued attributes other than `if=`
-  // and `show=`; emitting `disabled=` as kind:"expr" silently drops the attr
-  // at codegen time (same as hand-authored `disabled=@var` today — see
-  // gauntlet-r10 samples and TS issue surfaced during S102 formFor impl).
+  // `!@<cellName>.isValid`.
   //
-  // For v1.0 we emit the attribute as a kind:"expr" with raw text — adopters
-  // can target the synth button via the `data-scrml-formfor-submit` selector
-  // to add the right CSS or hand-wire a reactive disabled state via a slot
-  // override (which receives full bind/expr semantics). Documented in §41.14.3
-  // FOLLOWUP — wider attribute-reactivity is a separate dispatch.
+  // S105 B1 (this commit) wires reactive Boolean attribute expressions for the
+  // standard form-control bool attrs (disabled / readonly / required) via
+  // emit-html.ts REACTIVE_BOOL_ATTRS dispatch + emit-event-wiring.ts
+  // `_scrml_effect` toggle. The attribute is reactively present/absent based
+  // on the truthy evaluation of `!@<cellName>.isValid`. Adopters can also
+  // target the synth button via the `data-scrml-formfor-submit` selector for
+  // CSS styling, OR override the entire submit button via slot.
   const btnAttrs: unknown[] = [
     strAttr("type", "submit", span),
     strAttr("data-scrml-formfor-submit", cellName, span),

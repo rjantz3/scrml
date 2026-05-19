@@ -50,6 +50,9 @@ interface LogicBinding {
   reactiveRefs?: Set<string> | null;
   isConditionalDisplay?: boolean;
   isVisibilityToggle?: boolean;
+  /** S105 B1 — reactive HTML Boolean attr (disabled/readonly/required). */
+  isReactiveBoolAttr?: boolean;
+  boolAttrName?: string;
   /** Phase 2 if/show split: mount/unmount semantics. See binding-registry.ts. */
   isMountToggle?: boolean;
   templateId?: string;
@@ -288,6 +291,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
     if (b.kind != null) return true;
     if (b.isConditionalDisplay) return true;
     if (b.isVisibilityToggle) return true;
+    if (b.isReactiveBoolAttr) return true;
     if (b.isMountToggle) return true;
     return false;
   });
@@ -778,6 +782,28 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           lines.push(`    });`);
           lines.push(`  }`);
         }
+        continue;
+      }
+
+      // S105 B1 — reactive Boolean HTML attribute (disabled/readonly/required).
+      // Wire `_scrml_effect` that toggles attribute presence based on truthy
+      // evaluation of the bound expression. Closes §41.14 formFor follow-on
+      // (`disabled=!@form.isValid` on default submit button) and unlocks
+      // general adopter use of `<input disabled=${@busy}>`, etc.
+      if (binding.isReactiveBoolAttr && binding.boolAttrName) {
+        const attrName = binding.boolAttrName;
+        const dataAttr = `data-scrml-bind-bool-${attrName}`;
+        lines.push(`  {`);
+        lines.push(`    const el = document.querySelector('[${dataAttr}="${placeholderId}"]');`);
+        lines.push(`    if (el) {`);
+        if (binding.condExpr) {
+          const compiled = emitExprField(binding.condExprNode, binding.condExpr, { mode: "client" });
+          const conditionCode = `(${compiled})`;
+          lines.push(`      if (${conditionCode}) { el.setAttribute(${JSON.stringify(attrName)}, ""); } else { el.removeAttribute(${JSON.stringify(attrName)}); }`);
+          lines.push(`      _scrml_effect(function() { if (${conditionCode}) { el.setAttribute(${JSON.stringify(attrName)}, ""); } else { el.removeAttribute(${JSON.stringify(attrName)}); } });`);
+        }
+        lines.push(`    }`);
+        lines.push(`  }`);
         continue;
       }
 

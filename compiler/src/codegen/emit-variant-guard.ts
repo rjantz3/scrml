@@ -355,6 +355,7 @@ function emitArmWireFunction(
     if (b.isConditionalDisplay) return false;
     if (b.isVisibilityToggle) return false;
     if (b.isMountToggle) return false;
+    if (b.isReactiveBoolAttr) return false;
     return typeof b.placeholderId === "string" && typeof b.expr === "string";
   });
   // In-scope event bindings: only non-delegable events.
