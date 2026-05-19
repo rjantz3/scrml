@@ -14870,6 +14870,14 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-FORMFOR-ONSUBMIT-SIGNATURE | §41.14 | The function referenced by `<formFor onsubmit=fn/>` does NOT match the expected signature `fn(values: StructType) ! ErrorType`. Common shapes that fail: handler takes zero args; handler is not failable; handler's first arg type does not match the resolved (post-pick/omit/partial) struct shape. Resolution: align the handler signature with the resolved struct shape, or split the form into multiple `<formFor>` calls with type-matched handlers. (Stage TS; catalog addition S102) | Error |
 | E-FORMFOR-ERROR-STRATEGY-INVALID | §41.14 | `<formFor error-strategy="X"/>` was set to a value other than `"per-field"`, `"summary"`, or `"both"`. Resolution: use one of the three valid strategy values; the default (when the attribute is absent) is `"per-field"`. (Stage Parser/TS; catalog addition S102) | Error |
 | E-FORMFOR-NESTED-STRUCT-NO-SLOT | §41.14 | `<formFor for=StructType/>` has a struct-typed field but no `<slot name="<fieldName>">` override was provided for it. v1.0 does NOT auto-recurse into nested struct fields (deferred to v1.next per OQ-FF-11). Resolution: provide an explicit `<slot name="<fieldName>">` child that renders the nested struct (typically via a sibling `<formFor for=NestedStruct as=@nested/>` call wired through the slot), OR exclude the nested struct field via `omit=["<fieldName>"]`. (Stage TS; catalog addition S102) | Error |
+| E-SCHEMAFOR-TYPE-NOT-STRUCT | §41.15, §53.14 | `schemaFor(X)` was called with a non-struct type identifier. Enum types, named-shape types, refinement-type literals, generic-parameterized types, and arbitrary type expressions are rejected in the first-positional-argument position. Resolution: pass a `:struct` type as the first argument. For enum-shape boundary parsing, use `parseVariant` (§41.13); for form generation, use `formFor` (§41.14). (Stage TS — type-system pass; catalog addition S103 — schemaFor SPEC entry) | Error |
+| E-SCHEMAFOR-PICK-INVALID-FIELD | §41.15 | `schemaFor(StructType, { pick: ["a", "b", ...] })` references a field name that is not present on the struct type. Resolution: verify each pick array entry matches a declared struct field name. (Stage TS; catalog addition S103) | Error |
+| E-SCHEMAFOR-OMIT-INVALID-FIELD | §41.15 | `schemaFor(StructType, { omit: ["a", "b", ...] })` references a field name that is not present on the struct type. Resolution: verify each omit array entry matches a declared struct field name. (Stage TS; catalog addition S103) | Error |
+| E-SCHEMAFOR-PICK-OMIT-CONFLICT | §41.15 | `schemaFor(...)` was called with BOTH `pick` AND `omit` options simultaneously. The two transforms are mutually exclusive — pick names the only fields to render; omit names fields to exclude (the inverse). Resolution: choose one; if you need both, layer a Pick over an Omit at the type level (`type Visible = Pick<Omit<Struct, "secret">, ...>`) and pass the derived type. (Stage TS; catalog addition S103) | Error |
+| E-SCHEMAFOR-NESTED-STRUCT-NO-FK-V1 | §41.15 | `schemaFor(StructType)` has a struct-typed field (`address: Address:struct`) but v1.0 does NOT derive foreign-key columns from cross-type struct references (OQ-SCH-4 ratified out-of-scope; deferred to v1.next). Resolution: omit the nested struct field via `schemaFor(T, { omit: ["fieldName"] })` and hand-author the FK column inside the same `<schema>` block per §41.15.3 interleaving (e.g., `<field>_id: integer req references(<Table>.id)`), OR refactor the struct to use a flat `_id` field instead of the nested struct reference. (Stage TS; catalog addition S103) | Error |
+| E-SCHEMAFOR-NO-SQL-MAPPING | §41.15 | A struct field's declared type has no v1.0 SQL mapping (function types, Promise types, foreign-code types, deep-reactive proxy types, arbitrary opaque types). Resolution: exclude the field via `schemaFor(T, { omit: ["fieldName"] })`, OR refactor the struct to use a mappable shape (primitive scalar / string / number / boolean / enum / scrml-native temporal type). (Stage TS; catalog addition S103) | Error |
+| E-SCHEMAFOR-VARIANT-PAYLOAD-ENUM-V1 | §41.15, §39.5.8 | A struct field's declared type is a payload-bearing enum (one or more variants with payload, e.g., `Result:enum = { Ok(int), Err(string) }`). v1.0 does NOT lower payload enums to SQL — the choice between a JSON column (flexible; loses CHECK constraint precision) vs a separate-table join (relational; requires FK derivation per OQ-SCH-4) is deferred to v1.next. Bare-variant enums (no payloads) DO lower per §41.15.6 — `text req oneOf([...])`. Resolution: refactor to a bare-variant enum if the payload is not load-bearing, OR exclude the field via `omit:` and hand-author a JSON column / separate table as needed. (Stage TS; catalog addition S103) | Error |
+| E-SCHEMAFOR-INVALID-CALL-CONTEXT | §41.15 | `schemaFor(...)` was called outside a `<schema>` block — at the top level of a logic context, inside a `<program>` body without an enclosing `<schema>`, or inside any other markup context. The function-call form is canonical INSIDE `<schema>` blocks only (per OQ-SCH-1 + OQ-SCH-2 verdicts; the output is a `table-declaration` fragment that requires the `<schema>` parser context). Resolution: wrap the call inside a `<schema>${ schemaFor(...) }</>` block. (Stage TS; catalog addition S103) | Error |
 | I-MATCH-PROMOTABLE | §56 | Info-level lint surfaces an opportunity to promote an `if=` chain or `${ if (...) lift ... }` pattern over an enum-typed cell into a `<match for=Type on=@cell>` (Tier 1) block for structural exhaustiveness, OR into a `<engine for=Type>` (Tier 2) for full transition-validation. Run `bun scrml promote --match <file>[:line]` to mechanically lift the site. The lint is informational only; chains pre-S56 continue to compile cleanly. (Catalog addition S78 — reconciles SPEC §56 cross-ref claim. Emitted at `compiler/src/lint-promotable.ts` and consumed by `compiler/src/commands/promote.js`.) | Info |
 | W-CG-001 | §6 | A top-level `state-decl` / `let-decl` / `const-decl` / SQL block / etc. inside a logic block was suppressed from the client output (server-only emit, or unused). The lint surfaces what was filtered + why so the developer can confirm it was intentional. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-reactive-wiring.ts:366`.) | Warning |
 | W-CG-UNDEFINED-INTERPOLATION | §42.5, §42.8 | A literal `undefined` JS-keyword was detected in compiled output (CG-level regression guard). scrml absence is canonically JS `null` per §42.5 / §42.8 — `not` codegens to `null`, never to `undefined`. The lint runs post-emission across the per-file compiled JS and fires on each line containing a bare `undefined` keyword outside the canonical idiom exemptions: paired `null && undefined` absence-detection check (§42.5/§42.8 canon — both must be checked to detect scrml absence under JS-host normalisation); `typeof X !== "undefined"` env-detection (canonical JS idiom in quoted form, not a value-keyword interpolation); comments; string literals; template-literal text; embedded runtime block (hand-written JS, masked via `// --- scrml reactive runtime ---` / `// --- end ---` markers). Resolution: the codegen site emitting the bare `undefined` should be migrated to `null` (per §42.8 "null over undefined" rationale). (Catalog addition S90 — M-7C-D-12 Track 3 ratified per OQ-5 (a); emitted at `compiler/src/codegen/lint-undefined-interpolation.ts`.) | Warning |
@@ -17079,6 +17087,7 @@ The compiler lowers each shared-core predicate on a schema column to one or more
 | `gt(n)`, `lt(n)`, `gte(n)`, `lte(n)`, `eq(n)`, `neq(n)` | analogous `CHECK (col <op> n)` | When the predicate argument is a literal, lowered to a CHECK; when the argument is `@cell` (cross-field), lowered to a CHECK that references another column **only if** the other column is in the same table — cross-table cross-field is REJECTED at the schema locus. (Cross-field state-validator semantics differ from schema-column semantics; the schema is per-row.) |
 | `oneOf([v1, v2, ...])` | `CHECK (col IN (v1, v2, ...))` | The literal list is verbatim to the SQL `IN` clause. |
 | `notIn([v1, v2, ...])` | `CHECK (col NOT IN (v1, v2, ...))` | |
+| **bare-variant enum field** (e.g., `status: LoadStatus` where `LoadStatus:enum = { Pending, Active, Archived }`) | `TEXT NOT NULL CHECK (col != '') CHECK (col IN ('Pending', 'Active', 'Archived'))` | Added S103 — primarily reached via `schemaFor(StructType)` (§41.15) which lowers an enum-typed struct field to the shared-core form `text req oneOf([variant-names...])` automatically. Closes the enum-knowledge-loss-at-DB-boundary gap (hand-authored `<schema>` blocks routinely store enum columns as bare `text not null` losing the variant-set constraint). Variant additions to the enum trigger a CHECK alteration in the migration diff (§39.6.3 may require SQLite full-table rebuild). Payload-bearing enums (variants with payload data) are NOT lowered at v1.0 — `E-SCHEMAFOR-VARIANT-PAYLOAD-ENUM-V1` rejects them at the type-system stage; JSON-column or separate-table strategies are deferred to v1.next. |
 
 **Normative statements:**
 
@@ -18533,6 +18542,160 @@ Codegen emits the equivalent Shape 2 + `<errors of=>` + `<form action=...>` mark
 - §34 — `E-FORMFOR-TYPE-NOT-STRUCT`, `E-FORMFOR-SLOT-UNKNOWN`, `E-FORMFOR-PICK-INVALID-FIELD`, `E-FORMFOR-OMIT-INVALID-FIELD`, `E-FORMFOR-PICK-OMIT-CONFLICT`, `E-FORMFOR-ONSUBMIT-SIGNATURE`, `E-FORMFOR-ERROR-STRATEGY-INVALID`, `E-FORMFOR-NESTED-STRUCT-NO-SLOT`.
 
 **Authority:** S102 deep-dive (`scrml-support/docs/deep-dives/formFor-design-2026-05-18.md`) + OQ-FF-1 debate verdict (slot-style 51.5/60; `~/.claude/design-insights.md` S102 entry) + OQ-FF-2 debate verdict (explicit-attr + slot + PE-default 52/60; `~/.claude/design-insights.md` S102 entry) + S102 SCOPING (`docs/changes/formFor-scoping/SCOPING.md`).
+
+---
+
+### 41.15 `scrml:data` `schemaFor` — type-driven SQL DDL generation from a struct definition
+
+**Added:** S103, 2026-05-19 — ratified by the S103 deep-dive (`scrml-support/docs/deep-dives/schemaFor-design-2026-05-19.md`; 12 OQs deliberated — 10 SCOPING + 2 newly-surfaced — all closed with HIGH or MED-HIGH confidence) and the OQ-SCH-1 debate verdict that resolved the surface-form question (Form B function-call 50/60 vs Form A markup-element 39/60 vs Form C block-attribute 37/60; 11-point margin). `schemaFor` is the THIRD general-position member of the type-as-argument family (cross-ref §53.14), riding the parseVariant precedent from §41.13 + the formFor precedent from §41.14. It closes the §39 + L4 vocabulary-unification loop ("define type once → schema, form, validator, parser all derive") waiting since L4 landed at S58.
+
+**The API:**
+
+```scrml
+import { schemaFor } from 'scrml:data'
+
+type User:struct = {
+    email:    string req length(<=120) pattern(/^[^@]+@[^@]+$/)
+    name:     string req length(>=2, <=80)
+    role:     UserRole req
+}
+
+type UserRole:enum = { Admin, Editor, Viewer }
+
+<schema>
+    ${ schemaFor(User) }
+</schema>
+```
+
+That call expands at compile time into a `<schema>` `table-declaration` fragment using the shared-core vocabulary (per §39.5.7), which the existing `<schema>` parser lowers to SQL DDL per §39.5.8. The struct's refinement-type predicates lower to SQL `CHECK` constraints automatically; enum-typed fields lower to `text req oneOf([variant-names...])` (closing the enum-knowledge-loss-at-DB-boundary gap that hand-authored `<schema>` blocks leave open — the load-bearing v1.0 value-add per OQ-SCH-12).
+
+**Call signature (function-call form, per OQ-SCH-1 debate verdict):**
+
+```
+${ schemaFor(StructName[, { pick: ["field", ...], omit: ["field", ...] }]) }
+```
+
+The function-call form is canonical. A markup-element form (`<schemaFor for=Users/>`) was DEBATED + REJECTED at OQ-SCH-1 (5 distinct arguments per the deep-dive scoring rationale; primary: output-kind match — schemaFor produces a DDL string, not markup; markup-element form is structurally wrong-shape). A block-attribute form (`<schema source=Users/>`) was REJECTED at OQ-SCH-1 (collapses two surfaces; harder to compose multiple structs). Call sites SHALL appear inside a `<schema>` block via `${...}` interpolation per OQ-SCH-2 + OQ-SCH-3 verdicts.
+
+#### 41.15.1 Normative statements — type argument
+
+- The first positional argument SHALL be a bare scrml-native `:struct` type identifier. Enum types, named-shape types, refinement-type literals, generic-parameterized types, and arbitrary type expressions SHALL NOT be accepted in this position. Violations SHALL emit `E-SCHEMAFOR-TYPE-NOT-STRUCT` at the type-system stage (cross-ref §34). The compile-time enforcement mirrors `formFor`'s `E-FORMFOR-TYPE-NOT-STRUCT` (§41.14.1) and `parseVariant`'s `E-PARSEVARIANT-TYPE-NOT-ENUM` (§41.13).
+- The compiler SHALL resolve the type argument against the file's `typeRegistry` per §53.14.5; cross-file struct imports use the existing protocol of §21.
+
+#### 41.15.2 Normative statements — output shape (OQ-SCH-2)
+
+- `schemaFor(T)` SHALL produce a `<schema>` `table-declaration` fragment — table name + column declarations + constraints — **NOT** a wrapping `<schema>...</schema>` block. The caller SHALL wrap the call inside an enclosing `<schema>` block (or compose multiple calls inside one block per §41.15.3).
+- The table name SHALL be derived from the struct type name via a mechanical pluralization rule: lowercase + trailing `s` (e.g., `User` → `users`, `LoadAssignment` → `loadassignments`). Known irregulars (`Person` → `persons`, `Child` → `childs`) are accepted as imperfect; explicit `@table("name")` annotation is RESERVED for v1.next (per OQ-SCH-8).
+- The emitted column-declaration vocabulary SHALL be the shared-core form (per OQ-SCH-11 + §39.5.7): `column_name: column_type <constraints>` where `<constraints>` uses predicate names (`req`, `length`, `pattern`, `min`, `max`, etc.) verbatim from the struct field's refinement-type predicates. The `<schema>` parser ingests both shared-core and SQL-mirror forms identically (per §39.5.8 lowering); schemaFor's output is internally equivalent to the hand-authored shared-core form for the same struct shape (round-trip property per OQ-SCH-6).
+
+#### 41.15.3 Normative statements — multi-table composition (OQ-SCH-3)
+
+- Multiple `schemaFor(T)` calls SHALL be composable inside a single `<schema>` block via concatenation:
+
+  ```scrml
+  <schema>
+      ${ schemaFor(User) }
+      ${ schemaFor(Post) }
+      ${ schemaFor(Comment) }
+  </schema>
+  ```
+
+- Hand-authored table declarations + `schemaFor` calls SHALL be interleavable inside the same `<schema>` block (per OQ-SCH-10):
+
+  ```scrml
+  <schema>
+      ${ schemaFor(User) }
+
+      posts {
+          author_id: integer req references(users.id)
+          title:     text req length(<=200)
+      }
+  </schema>
+  ```
+
+  This admits adopters with mixed struct-derived + hand-authored schemas (the FK derivation case being the canonical mixed-mode use per OQ-SCH-4 deferral).
+
+- Array-form `schemaFor([User, Post])` is RESERVED for v1.next as a sibling ergonomic API; the per-call form is the canonical v1.0 surface.
+
+#### 41.15.4 Normative statements — field-set transforms
+
+- `pick: ["field", ...]` SHALL accept an array literal of bare field-name strings. The generated table-declaration SHALL include only the named fields. Field names not present on the struct SHALL emit `E-SCHEMAFOR-PICK-INVALID-FIELD`.
+- `omit: ["field", ...]` SHALL accept an array literal of bare field-name strings. The generated table-declaration SHALL include all struct fields except those named. Field names not present on the struct SHALL emit `E-SCHEMAFOR-OMIT-INVALID-FIELD`.
+- `pick` and `omit` SHALL NOT be combined on the same `schemaFor(...)` call. Co-occurrence is `E-SCHEMAFOR-PICK-OMIT-CONFLICT`.
+- The `partial: true` semantic from formFor (§41.14.5) is NOT-APPLICABLE to schemaFor — making schema columns nullable is a DB-side migration with semantic implications adopter authoring SHALL control by omitting the `req` predicate at the struct field level rather than via a schemaFor option.
+
+#### 41.15.5 Normative statements — predicate → SQL CHECK lowering (OQ-SCH-5)
+
+- Refinement-type predicates on struct fields SHALL lower to SQL `CHECK` constraints automatically per §39.5.8 lowering table. The lowering is unconditional in v1.0 (no opt-out attribute); adopters who need non-checked columns SHALL omit predicates at the struct field level.
+- The lowering rules (per §39.5.8): `req` → `NOT NULL`; `length(>=N)` → `CHECK (length(col) >= N)`; `length(<=N)` → `CHECK (length(col) <= N)`; `pattern(re)` → `CHECK (col REGEXP ...)` (driver-dependent — Postgres `~`, SQLite/MySQL `REGEXP`); `min(N)/max(N)/gt(N)/lt(N)/gte(N)/lte(N)/eq(N)/neq(N)` → corresponding numeric `CHECK`; `oneOf([...])` → `CHECK (col IN (...))`; `notIn([...])` → `CHECK (col NOT IN (...))`.
+
+#### 41.15.6 Normative statements — enum-typed field lowering (OQ-SCH-12 — load-bearing v1.0 value-add)
+
+- A struct field whose declared type is a bare-variant enum (no payload-bearing variants) SHALL lower to `text req oneOf([variant-names...])` in the shared-core emit form. The §39.5.8 lowering subsequently expands this to `TEXT NOT NULL CHECK (col IN ('Variant1', 'Variant2', ...))`. This closes the enum-knowledge-loss-at-DB-boundary gap — hand-authored `<schema>` blocks routinely store enum-typed columns as bare `text not null` because authors miss the manual `oneOf(...)` wiring; schemaFor encodes the constraint mechanically.
+
+  ```scrml
+  type Status:enum = { Pending, Active, Archived }
+  type Task:struct = { name: string req, status: Status req }
+
+  // schemaFor(Task) emits:
+  // tasks {
+  //     name:   text req length(<=...)
+  //     status: text req oneOf(["Pending", "Active", "Archived"])
+  // }
+  // — which §39.5.8 lowers to TEXT NOT NULL CHECK (status IN (...)).
+  ```
+
+- A struct field whose declared type is a payload-bearing enum (one or more variants with payload, e.g., `Result:enum = { Ok(int), Err(string) }`) SHALL emit `E-SCHEMAFOR-VARIANT-PAYLOAD-ENUM-V1` at the type-system stage. Payload enums require either a JSON column (deferred to v1.next) or a separate-table join (out of scope for schemaFor entirely); v1.0 rejects to surface the design tension explicitly rather than silently throw away payload data.
+
+- Variant additions to an enum-typed field SHALL trigger a `CHECK` constraint alteration in the migration diff (cross-ref §39.6.3 — SQLite may require a full-table rebuild). The friction is intrinsic to closing the L4 loop with correctness over migration-stability; surfaced explicitly in the migration emission and the v0.4 changelog.
+
+#### 41.15.7 Normative statements — nested struct fields (OQ-SCH-7)
+
+- A struct field whose declared type is itself a `:struct` (e.g., `address: Address`) SHALL emit `E-SCHEMAFOR-NESTED-STRUCT-NO-FK-V1` at the type-system stage. v1.0 has no foreign-key derivation rule (OQ-SCH-4 ratified out-of-scope); the error message SHALL name the field + the canonical workaround (hand-author the FK column as `<field>_id: integer references(<Table>.id)` inside the struct field's place OR `omit:` the nested struct field via `schemaFor(T, { omit: ["fieldName"] })` and hand-author the FK column inside the same `<schema>` block per §41.15.3 interleaving).
+- Auto-derived foreign-key columns for cross-type struct references are RESERVED for v1.next.
+
+#### 41.15.8 Normative statements — failure modes + out of scope for v1.0
+
+- A struct field whose declared type has no v1.0 SQL mapping (function types, Promise types, foreign-code types, deep-reactive proxy types) SHALL emit `E-SCHEMAFOR-NO-SQL-MAPPING` at the type-system stage. The error message SHALL name the field + the unmappable type + suggest exclusion via `omit:`.
+- `schemaFor(...)` calls outside a `<schema>` block (e.g., at the top level of a logic context, or inside a `<program>` body without an enclosing `<schema>`) SHALL emit `E-SCHEMAFOR-INVALID-CALL-CONTEXT`. The function-call form is canonical INSIDE `<schema>` blocks only.
+
+The following are explicitly NOT in v1.0; planned for v1.next:
+
+- **`@table("name")` annotation** for table-name override (mechanical pluralization edge cases).
+- **`@column("name")` annotation** for column-name override (legacy-DB-integration use cases).
+- **FK derivation** from cross-type struct references (OQ-SCH-4 ratified out-of-scope).
+- **Variant-payload enum lowering** (Result:enum) — JSON column vs separate-table join is a separate design decision deferred.
+- **Array-form** `schemaFor([User, Post])` for multi-table batch composition.
+- **`partial: true`** option — not applicable; adopter omits `req` at struct level instead.
+
+#### 41.15.9 Compile-time recognition
+
+`schemaFor(T[, options])` is recognized at the **type-system stage** (cross-ref §53.14.5) as a call expression with a struct-typed first argument. The compiler:
+
+1. Resolves the callee through the file's import registry (cross-ref §41.3 — MOD stage).
+2. If the callee resolves to `schemaFor`, inspects the first positional argument and resolves it against the file's `typeRegistry` per §53.14.5 step 3; validates `kind === "struct"`; emits `E-SCHEMAFOR-TYPE-NOT-STRUCT` on mismatch.
+3. Inspects the second positional argument if present (options object); validates `pick`/`omit` field names against the struct's field list (`E-SCHEMAFOR-PICK-INVALID-FIELD` / `E-SCHEMAFOR-OMIT-INVALID-FIELD`); validates that `pick` and `omit` do not co-occur (`E-SCHEMAFOR-PICK-OMIT-CONFLICT`).
+4. Validates the call context — call MUST appear inside a `<schema>` block via `${...}` interpolation; otherwise emits `E-SCHEMAFOR-INVALID-CALL-CONTEXT`.
+5. Walks the resolved struct's fields; for each field, validates the field's type has a v1.0 SQL mapping (`E-SCHEMAFOR-NO-SQL-MAPPING` on unmappable types), is not a nested `:struct` (`E-SCHEMAFOR-NESTED-STRUCT-NO-FK-V1`), and is not a payload-bearing enum (`E-SCHEMAFOR-VARIANT-PAYLOAD-ENUM-V1`).
+6. Annotates the AST node with the resolved struct shape + transform metadata for codegen consumption.
+
+Codegen (`emit-schema-for.ts`) emits the equivalent `<schema>` `table-declaration` fragment at the call site. The emitted output is standard scrml schema syntax (Pillar 5) — readable as if hand-authored — and rides the existing `<schema>` parser + §39.5.8 SQL DDL lowering pipeline. No new runtime hooks are needed (DDL is compile-time string).
+
+#### 41.15.10 Cross-references
+
+- §53.14 — type-as-argument family framing (schemaFor is the third general-position member).
+- §41.13 — `parseVariant` (first general-position family member; structural precedent for compile-time type-argument recognition).
+- §41.14 — `formFor` (second general-position family member; established the `validateTypeArgument(expr, 'struct', ...)` helper schemaFor reuses verbatim).
+- §39 — Schema and Migrations (the host surface schemaFor emits into).
+- §39.5.7 — shared-core vocabulary (the emit form schemaFor uses).
+- §39.5.8 — shared-core to SQL DDL lowering rules (the path from schemaFor's output to executable DDL).
+- §39.6.3 — migration diff + SQLite full-table-rebuild trigger (relevant for enum-variant additions per §41.15.6).
+- §14.3 — struct type definition syntax (the input source for schemaFor).
+- §14.4 — enum type definition syntax (the input for enum-typed fields).
+- L4 (S57 lock) — partial validator vocabulary unification (the architectural precondition that makes schemaFor structurally possible).
+- §34 — `E-SCHEMAFOR-TYPE-NOT-STRUCT`, `E-SCHEMAFOR-PICK-INVALID-FIELD`, `E-SCHEMAFOR-OMIT-INVALID-FIELD`, `E-SCHEMAFOR-PICK-OMIT-CONFLICT`, `E-SCHEMAFOR-NESTED-STRUCT-NO-FK-V1`, `E-SCHEMAFOR-NO-SQL-MAPPING`, `E-SCHEMAFOR-VARIANT-PAYLOAD-ENUM-V1`, `E-SCHEMAFOR-INVALID-CALL-CONTEXT`.
+
+**Authority:** S103 deep-dive (`scrml-support/docs/deep-dives/schemaFor-design-2026-05-19.md`) + OQ-SCH-1 debate verdict (Form B function-call 50/60 vs Form A markup-element 39/60 vs Form C block-attribute 37/60; synthesis-mode panel of 7 expert positions — vue-template-directives, drizzle-atlas, prisma, rails-activerecord, svelte-runes, htmx-hypermedia, simplicity-defender-precedent; live debate skipped per S103 user-direction given the 11-point margin + grounded 5-argument rationale) + S103 SCOPING (`docs/changes/schemaFor-scoping/SCOPING.md`) + Path B pivot from serialize STASH (`docs/changes/serialize-scoping/SCOPING.md`).
 
 ---
 
@@ -26665,7 +26828,7 @@ The type-as-argument family is open with bounded discipline (§53.14.4). The shi
 | `parseVariant(json, EnumType)` | shipped — S65 (§41.13) | PASSES — type-establishment for sum types is irreducible (constructor selection cannot be expressed via predicates) |
 | `serialize(value, EnumType)` | planned (~6-12mo horizon) | PASSES — symmetric to `parseVariant`; round-trip law `parseVariant(serialize(v, T), T) == .Ok(v)` is a structural invariant the language can guarantee |
 | `formFor(StructType)` | **shipped S102** (FLAGSHIP — `scrml.dev` demo). SPEC §41.14 (`0c16f58`) + impl (`e7f5241` — 11 files / +2733 LOC / +58 tests / 8 E-FORMFOR-* error codes) + stdlib re-export (S103 `b80ce2a` — `import { formFor, registerLabels } from 'scrml:data'` resolves; L2 label store wired at `_scrml_labels_registered` runtime helper, v1.0 expander always resolves to L4 title-case default; L2 consultation = separate follow-on). | PASSES — compile-time structural walk of struct fields → emits `<form>` markup tree using existing Shape 2 + auto-synth validity surface (§55) + `<errors of=>` machinery (§55.8) + §16 slots for customization + §5.2.3 `onsubmit=fn` for handler + §12.5-derived `action=` for progressive enhancement. Not expressible via predicates (predicates do not generate markup). |
-| `schemaFor(StructType)` | planned | PASSES — emits `<schema>` SQL DDL from struct field predicates. Closes the §39 + L4 vocabulary-unification loop ("define type once → schema, form, validator, parser all derive") |
+| `schemaFor(StructType)` | **spec'd S103** (THIRD active L22 general-position member after parseVariant + formFor; impl pending). SPEC §41.15 (this session) + 8 `E-SCHEMAFOR-*` codes at §34 + §39.5.8 enum-lowering row + §53.14.5 recognition list extension. Path B pivot from serialize STASH. Function-call form `${ schemaFor(Users) }` interpolated in `<schema>` per OQ-SCH-1 debate verdict (Form B 50/60 vs Form A markup-element 39/60 vs Form C block-attribute 37/60). | PASSES — emits `<schema>` SQL DDL from struct field predicates. Closes the §39 + L4 vocabulary-unification loop ("define type once → schema, form, validator, parser all derive") waiting since L4 landed at S58. Load-bearing v1.0 value-add: closes the enum-knowledge-loss-at-DB-boundary gap (`status: LoadStatus` lowers to `text req oneOf([variants...])` automatically per OQ-SCH-12; hand-authored `<schema>` blocks routinely store enum columns as bare `text not null` losing the variant-set constraint). |
 | `tableFor(StructType, rows)` | planned | PASSES — auto-`<table>` from struct fields + rows; per-column slot overrides; sorting/selection/empty-state attrs. Same family as `formFor` (admin-UI lift) |
 | `variantNames(EnumType)` / reflective metadata | planned | PASSES — exposes variant lists as runtime values, not currently surfaced; small primitive that tightens the family |
 
@@ -26690,9 +26853,9 @@ The doc `scrml-support/docs/type-as-argument-family-2026-05-06.md` records the d
 Type-as-argument primitives are recognized at the **type-system stage** (`compiler/src/type-system.ts`), not the parser. The parser produces a regular `CallExpression` whose positional arguments are general expressions; an identifier-as-argument is just an `IdentExpr` AST node. The type-system pass:
 
 1. Resolves the call's callee through the file's import registry (cross-ref §41.3 — MOD stage).
-2. If the callee resolves to a recognized type-as-argument primitive (`parseVariant`, `formFor`, future `serialize`/`schemaFor`/`tableFor`/`variantNames`), inspects the type-argument position(s). For markup-element forms (`<formFor for=Type>`), the `for=` attribute carries the type identifier.
+2. If the callee resolves to a recognized type-as-argument primitive (`parseVariant`, `formFor`, `schemaFor`, future `serialize`/`tableFor`/`variantNames`), inspects the type-argument position(s). For markup-element forms (`<formFor for=Type>`), the `for=` attribute carries the type identifier. For function-call forms (`parseVariant(json, T)`, `schemaFor(T)`), the type identifier is the dedicated positional argument (2nd for `parseVariant`; 1st for `schemaFor`).
 3. Validates the type-argument is a bare `IdentExpr` whose `name` resolves in `typeRegistry` to a type with the expected `kind` (`:enum` for `parseVariant`/`serialize`/`variantNames`; `:struct` for `formFor`/`schemaFor`/`tableFor`).
-4. On validation failure, emits the per-primitive `E-*-TYPE-NOT-*` error (`E-PARSEVARIANT-TYPE-NOT-ENUM` for `parseVariant`; `E-FORMFOR-TYPE-NOT-STRUCT` for `formFor` (§41.14); future members get sibling codes).
+4. On validation failure, emits the per-primitive `E-*-TYPE-NOT-*` error (`E-PARSEVARIANT-TYPE-NOT-ENUM` for `parseVariant`; `E-FORMFOR-TYPE-NOT-STRUCT` for `formFor` (§41.14); `E-SCHEMAFOR-TYPE-NOT-STRUCT` for `schemaFor` (§41.15); future members get sibling codes).
 5. On validation success, annotates the call-expression node with a back-reference to the resolved type so codegen can pick it up directly without re-resolving.
 
 The mechanism is structurally identical to `<engine for=Type>` validation (§51.0; `E-ENGINE-004` at `compiler/src/type-system.ts:1998-2018`) and `<match for=Type>` exhaustiveness checking (§18; `checkEnumExhaustiveness` at `type-system.ts:5267`). New family members SHOULD ride the existing helper extraction (planned: `validateTypeArgument(expr, expectedKind, errors, span)`) rather than re-implementing the lookup-and-classify logic.
