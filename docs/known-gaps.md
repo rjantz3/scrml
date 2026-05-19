@@ -20,13 +20,17 @@ The block-form `<match for=Type>` Tier 1 case-analysis is end-to-end functional 
 - **Impl arc:** 5-phase SCOPING at [`docs/changes/match-block-form-scoping/SCOPING.md`](./changes/match-block-form-scoping/SCOPING.md); Phases 1+2+3 shipped (S107 `82c48fd` + `c91fae0` + S108).
 - **Target:** v0.4 minor release.
 
-### Bug 1 — Tailwind arbitrary-value classes silently no-op — `spec'd`
+### Bug 1 — Tailwind arbitrary-value classes silently no-op — `floor-shipped` (S108) — full fix open
 
-`grid-cols-[auto_1fr_auto]`, `w-[420px]`, `text-[clamp(1rem,2vw,1.5rem)]`, etc. — every standard Tailwind arbitrary-value class is documented but the built-in Tailwind engine doesn't emit a CSS rule + doesn't warn. Layout breaks silently. Floor fix (lint unrecognized class names) is small; full fix (support standard Tailwind arbitrary-value syntax) is medium.
+`grid-cols-[auto_1fr_auto]`, plus any `<utility>-[<value>]` class whose particular utility prefix is not yet supported by the embedded engine (NOTE: investigation during the FLOOR fix found `w-[420px]` and `text-[clamp(1rem,2vw,1.5rem)]` ARE handled by the engine today — only certain prefix families like `grid-cols-*` are missing). Layout breaks silently for unsupported prefixes.
 
-- **Workaround:** use named utility classes only, OR drop a `#{}` CSS shim block with the arbitrary-value rules written by hand.
+**FLOOR fix shipped S108** — `W-TAILWIND-UNRECOGNIZED-CLASS` info-level lint (SPEC §34, §26.5). The lint fires on any class-name token in `class="..."` that doesn't resolve via the embedded Tailwind registry. Adopters now see compile-time friction at the spot the silent-no-op used to be. Three legitimate causes are named in the message (misspelling / unsupported arbitrary-value / custom CSS class). Suppressible per-project via `compilerSettings.lintTailwindUnrecognizedClass = "off"` for adopters whose codebase relies on custom CSS class names (acknowledged false-positive surface). Compiler source at `compiler/src/tailwind-classes.js` (`findUnrecognizedClasses`); 34-test coverage at `compiler/tests/unit/bug-1-tailwind-unrecognized-class.test.js`.
+
+**Full fix still open** — actually emit CSS for the unrecognized arbitrary-value classes (`grid-cols-[auto_1fr_auto]` → `grid-template-columns: auto 1fr auto`), plus a safelist / `@apply` mechanism to distinguish custom user-defined classes from typos so the lint is precise.
+
+- **Workaround (for unsupported arbitrary-values):** drop a `#{}` CSS shim block with the rules written by hand.
 - **Reproducer + analysis:** [`handOffs/incoming/read/2026-05-19-0614-side-session-to-scrmlTS-PA-dogfood-bug-surface.md`](../handOffs/incoming/read/2026-05-19-0614-side-session-to-scrmlTS-PA-dogfood-bug-surface.md) §"Bug 1".
-- **Status:** not yet SCOPING'd.
+- **Status:** FLOOR closed S108; full fix not yet SCOPING'd.
 
 ### Bug 2 — Phantom `E-SYNTAX-050` on multi-line `<a>` + entity-encoded element-name body — `spec'd`
 
