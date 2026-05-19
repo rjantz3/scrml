@@ -12,17 +12,19 @@
 
 ## MED-HI
 
-### Bug 1 — Tailwind arbitrary-value classes silently no-op — `floor-shipped` (S108) — full fix open
+### Bug 1 — Tailwind arbitrary-value classes silently no-op — `full-fix-grid+flex+aspect-shipped` (S108) — minor families still open
 
-`grid-cols-[auto_1fr_auto]`, plus any `<utility>-[<value>]` class whose particular utility prefix is not yet supported by the embedded engine (NOTE: investigation during the FLOOR fix found `w-[420px]` and `text-[clamp(1rem,2vw,1.5rem)]` ARE handled by the engine today — only certain prefix families like `grid-cols-*` are missing). Layout breaks silently for unsupported prefixes.
+**S108 — FULL-FIX FOR GRID/FLEX/ASPECT FAMILIES SHIPPED.** The dogfood headline case `grid-cols-[auto_1fr_auto]` now emits real CSS (`grid-template-columns: auto 1fr auto`); the same goes for the rest of the grid family (`grid-rows-`, `col-span-`, `row-span-`, `col-start/end-`, `row-start/end-`), flex family (`flex-`, `grow-`, `shrink-`, `order-`, `basis-`), and aspect family (`aspect-`). Tailwind's underscore-as-space convention is now applied universally (so `m-[1rem_2rem]` etc. all work), `aspect-[16/9]` ratio shape works, and grid-track CSS functions (`repeat()`, `minmax()`, `fit-content()`) are accepted as function-call values.
 
-**FLOOR fix shipped S108** — `W-TAILWIND-UNRECOGNIZED-CLASS` info-level lint (SPEC §34, §26.5). The lint fires on any class-name token in `class="..."` that doesn't resolve via the embedded Tailwind registry. Adopters now see compile-time friction at the spot the silent-no-op used to be. Three legitimate causes are named in the message (misspelling / unsupported arbitrary-value / custom CSS class). Suppressible per-project via `compilerSettings.lintTailwindUnrecognizedClass = "off"` for adopters whose codebase relies on custom CSS class names (acknowledged false-positive surface). Compiler source at `compiler/src/tailwind-classes.js` (`findUnrecognizedClasses`); 34-test coverage at `compiler/tests/unit/bug-1-tailwind-unrecognized-class.test.js`.
+**FLOOR fix shipped S108** — `W-TAILWIND-UNRECOGNIZED-CLASS` info-level lint (SPEC §34, §26.5). The lint fires on any class-name token in `class="..."` that doesn't resolve via the embedded Tailwind registry. Adopters see compile-time friction at the spot the silent-no-op used to be. Three legitimate causes named in the message (misspelling / unsupported arbitrary-value / custom CSS class). Suppressible per-project via `compilerSettings.lintTailwindUnrecognizedClass = "off"` for adopters whose codebase relies on custom CSS class names (acknowledged false-positive surface). Compiler source at `compiler/src/tailwind-classes.js` (`findUnrecognizedClasses`); 39-test coverage at `compiler/tests/unit/bug-1-tailwind-unrecognized-class.test.js`. Lint and emit share a single source-of-truth via `getTailwindCSS()` — when the engine ships a new family the lint automatically stops firing on it (verified by S108 regression tests).
 
-**Full fix still open** — actually emit CSS for the unrecognized arbitrary-value classes (`grid-cols-[auto_1fr_auto]` → `grid-template-columns: auto 1fr auto`), plus a safelist / `@apply` mechanism to distinguish custom user-defined classes from typos so the lint is precise.
+**S108 full-fix coverage:** 66-test coverage at `compiler/tests/unit/bug-1-tailwind-arbitrary-value-emit.test.js` (15 sections: per-family emit + cross-cutting underscore-as-space + variant integration + lint-sync regression + list-shape rejection + grid-track function support).
 
-- **Workaround (for unsupported arbitrary-values):** drop a `#{}` CSS shim block with the rules written by hand.
+**Remaining open** — arbitrary-value support for `transition-`, `transform-`, `outline-`, `ring-`, `translate-`, `rotate-`, `scale-`, etc. families is still deferred; the lint continues firing on those and adopters use the `#{}` CSS shim workaround. Also still deferred: a safelist / `@apply` mechanism to distinguish custom user-defined classes from typos so the lint is precise on mixed Tailwind+custom-CSS codebases.
+
+- **Workaround (for still-deferred families):** drop a `#{}` CSS shim block with the rules written by hand.
 - **Reproducer + analysis:** [`handOffs/incoming/read/2026-05-19-0614-side-session-to-scrmlTS-PA-dogfood-bug-surface.md`](../handOffs/incoming/read/2026-05-19-0614-side-session-to-scrmlTS-PA-dogfood-bug-surface.md) §"Bug 1".
-- **Status:** FLOOR closed S108; full fix not yet SCOPING'd.
+- **Status:** FLOOR closed S108; full-fix for grid/flex/aspect families closed S108; remaining minor families + safelist mechanism still open.
 
 ### Bug 2 — Phantom `E-SYNTAX-050` on multi-line `<a>` + entity-encoded element-name body — `spec'd`
 

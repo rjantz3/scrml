@@ -14058,6 +14058,9 @@ The supported utility prefixes are:
 - Border: `border` (width for length values), `rounded`
 - Effects: `opacity`, `shadow` (verbatim box-shadow)
 - Layout: `z`
+- Grid (S109): `grid-cols` (grid-template-columns), `grid-rows` (grid-template-rows), `col-span` (grid-column: span N / span N), `row-span` (grid-row: span N / span N), `col-start`, `col-end`, `row-start`, `row-end`
+- Flex (S109): `flex` (flex shorthand), `grow` (flex-grow), `shrink` (flex-shrink), `order`, `basis` (flex-basis)
+- Aspect (S109): `aspect` (aspect-ratio)
 
 For overloaded prefixes (`text`, `bg`, `border`), value disambiguation is heuristic per the value's parsed shape:
 
@@ -14076,10 +14079,16 @@ The compiler SHALL validate `<value>` at compile time and reject invalid syntax 
 - `<`, `>`, `;`, `{`, `}`, backtick → reject (CSS-injection / context-escape vectors).
 - Length values must end in a recognized CSS unit (`px`, `em`, `rem`, `%`, `vh`, `vw`, `vmin`, `vmax`, `ch`, `ex`, `lh`, `rlh`, `pt`, `pc`, `in`, `cm`, `mm`, `Q`, `fr`, `s`, `ms`, `deg`, `rad`, `grad`, `turn`, `Hz`, `kHz`, `dpi`, `dppx`, `dpcm`, `svh`, `lvh`, `dvh`, `svw`, `lvw`, `dvw`, `cqw`, `cqh`, `cqi`, `cqb`, `cqmin`, `cqmax`) or be unitless.
 - Hex colors must be 3, 4, 6, or 8 hex digits.
-- CSS function names must be one of: `rgb`, `rgba`, `hsl`, `hsla`, `hwb`, `lab`, `lch`, `oklab`, `oklch`, `color`, `color-mix`, `calc`, `min`, `max`, `clamp`, `var`, `url`. Unknown function names → reject.
+- CSS function names must be one of: `rgb`, `rgba`, `hsl`, `hsla`, `hwb`, `lab`, `lch`, `oklab`, `oklch`, `color`, `color-mix`, `calc`, `min`, `max`, `clamp`, `var`, `url`, `repeat`, `minmax`, `fit-content`. Unknown function names → reject.
 - Function arguments must have balanced parens.
 - `var()` body must start with `--` followed by a valid CSS identifier.
 - `url()` body may be unquoted, single-quoted, or double-quoted; quoted forms must have matching trailing quote.
+
+**S109 — underscore-as-space convention (multi-token list values).** Per the Tailwind v3 convention, an underscore (`_`) appearing OUTSIDE any `(...)` parens in the bracket content is a space substitute. `grid-cols-[auto_1fr_auto]` emits `grid-template-columns: auto 1fr auto`. `m-[1rem_2rem]` emits `margin: 1rem 2rem`. Each underscore-separated segment is validated independently per the rules above; an empty segment (leading `_`, trailing `_`, or `__`) → reject. Underscores INSIDE function parens are preserved literally (the splitter is paren-depth-aware so function bodies stay intact).
+
+**S109 — ratio value shape.** `<number>/<number>` (e.g. `aspect-[16/9]`, `aspect-[4/3]`) is accepted as a `ratio` value-kind. CSS `aspect-ratio` parses this form natively; the value is emitted verbatim.
+
+**S109 — declaration-transform prefixes.** Some prefixes (`col-span`, `row-span`) emit a CSS declaration whose body is NOT a literal `<prop>: <value>` substitution. Per Tailwind's named-utility behavior, `col-span-[N]` emits `grid-column: span N / span N` and `row-span-[N]` emits `grid-row: span N / span N`. These transforms accept a single-token value only; a list value (`col-span-[1_2]`) → reject with E-TAILWIND-001 ("`col-span-[]` expects a single token").
 
 The diagnostic message includes the offending bracket content and the specific reason (e.g., "invalid CSS unit \`quux\`", "unbalanced parens in \`...\`", "unknown CSS function \`notreal\`").
 
@@ -14097,7 +14106,7 @@ The variant-prefix `:` separator is bracket-aware: a `:` inside a `[...]` arbitr
 - Container queries (`@container`) — TBD.
 For the deferred items above, when a class string in source uses one of those syntaxes (e.g. `group-hover:p-4`, custom-theme-prefix `brand:foo-bar`), the compiler SHALL emit W-TAILWIND-001. The warning is non-fatal — compilation produces output regardless. Class strings using variants and arbitrary values that ARE supported (Sections 26.3 and 26.4) compile cleanly and produce no warning. `${...}` interpolation regions inside the class attribute value are masked before scanning so dynamic-class expressions like `class="${cond ? 'a' : 'b'}"` do not produce false positives on the ternary's `:`.
 
-Additionally, the compiler SHALL emit `W-TAILWIND-UNRECOGNIZED-CLASS` (info-level lint, §34) for any class-name token inside a `class="..."` attribute that does NOT resolve via the embedded Tailwind registry. This widens the surface beyond W-TAILWIND-001 to also catch (a) misspellings (`flexx` vs `flex`), (b) arbitrary-value classes whose particular utility prefix is not yet supported by the embedded engine (e.g. `grid-cols-[auto_1fr_auto]`), and (c) custom user-defined CSS classes (acknowledged false-positive at the **FLOOR-fix** level — S108 dogfood Bug 1). The lint is the floor of the dogfood-Bug-1 mitigation; the full fix (actually emitting CSS for the unrecognized arbitrary-value classes + a safelist/`@apply` mechanism to distinguish user-defined classes from typos) is deferred. Adopters whose codebases rely on extensive custom CSS class names may suppress per-project via `lint.tailwind-unrecognized-class = off` (§28).
+Additionally, the compiler SHALL emit `W-TAILWIND-UNRECOGNIZED-CLASS` (info-level lint, §34) for any class-name token inside a `class="..."` attribute that does NOT resolve via the embedded Tailwind registry. This widens the surface beyond W-TAILWIND-001 to also catch (a) misspellings (`flexx` vs `flex`), (b) arbitrary-value classes whose particular utility prefix is not yet supported by the embedded engine (e.g. `transition-[opacity_0.5s]`, `transform-[rotate(45deg)]` — note: `grid-cols-[auto_1fr_auto]` IS supported as of S109, see §26.4 grid family), and (c) custom user-defined CSS classes (acknowledged false-positive — S108 dogfood Bug 1). S109 landed the FULL fix for the grid/flex/aspect family arbitrary-value emission; a safelist/`@apply` mechanism to distinguish user-defined classes from typos remains deferred. Adopters whose codebases rely on extensive custom CSS class names may suppress per-project via `lint.tailwind-unrecognized-class = off` (§28).
 
 ### 26.6 Typography Plugin
 
