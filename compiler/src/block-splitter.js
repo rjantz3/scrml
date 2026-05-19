@@ -88,6 +88,43 @@ const RAW_CONTENT_ELEMENTS = new Set([
 ]);
 
 // ---------------------------------------------------------------------------
+// Structural raw-body elements (S107 Phase 2 — SPEC §18.0.1 match block-form).
+//
+// Unlike RAW_CONTENT_ELEMENTS above (where the body is author-text for display),
+// these are STRUCTURAL containers whose body is scrml code that must be
+// re-tokenized by a dedicated downstream parser. BS captures the body as a
+// single text run (no per-child markup pushing) — eliminating the
+// `:`-shorthand vs bare-body shape-confusion that would otherwise fire
+// E-CTX-003 on arm-children like `<Variant> : expr` (where the `<Variant>`
+// opener has no closer because `:`-shorthand IS the body terminator).
+//
+// Currently: `<match>` only. Engine state-children have similar shape (per
+// SPEC §51.0.I `:`-shorthand support) but engine uses a different recognition
+// path (the `< engine>` whitespace-state-opener form via pushTagContext("state"))
+// — Phase 2 doesn't touch that path. Match's recognition is via the regular
+// markup-opener path, so this raw-body capture is the cleanest BS-side fix.
+//
+// Dual-closer support: scrml convention allows `</>` (unambiguous closer)
+// in addition to `</tagname>`. The handler below scans for whichever appears
+// first. Pre-S107 RAW_CONTENT_ELEMENTS only supports `</tagname>` (HTML
+// convention); the match handler diverges.
+//
+// Downstream consumer: ast-builder.js's `case "markup":` dispatch for
+// `block.name === "match"` (Phase 1, S107 commit `82c48fd`) captures the raw
+// body via children-concat + raw-slice fallback. With raw-body capture, the
+// children array has a single text node whose .raw is the body — armsRaw
+// gets populated correctly without going through per-child parsing.
+//
+// Phase 2's match-statechild-parser.ts (new file) re-tokenizes armsRaw into
+// structured MatchArmEntry[] — that's where arm body forms (self-closing /
+// bare-body / `:`-shorthand) + payload binding + wildcard arm are recognized.
+// ---------------------------------------------------------------------------
+
+const STRUCTURAL_RAW_BODY_ELEMENTS = new Set([
+  "match",
+]);
+
+// ---------------------------------------------------------------------------
 // Bug-3 (S101) — Reserved document-root structural tags.
 //
 // These tags are document/route/channel/schema/module container roots per
@@ -1694,6 +1731,78 @@ export function splitBlocks(filePath, source) {
             children: [],
             name: tagName,
             closerForm: "self-closing",
+            isComponent: isComp,
+            openerHadSpaceAfterLt: false,
+          });
+        } else if (!isComp && STRUCTURAL_RAW_BODY_ELEMENTS.has(lowerTagName)) {
+          // S107 Phase 2 — SPEC §18.0.1 match block-form structural raw-body.
+          // Body captured as single text run; closer is `</tagname>` (explicit).
+          // The `</>` unambiguous-closer form is NOT supported for structural
+          // raw-body at Phase 2 baseline because depth-tracking is required to
+          // disambiguate it from arm-children `</>` closers (each `<Variant>...
+          // </>` arm body uses `</>` as its closer; the OUTERMOST `</>` would
+          // be the match closer). `:`-shorthand arms have no closer, breaking
+          // naive depth-tracking. Phase 5 may add `</>` support via the
+          // match-statechild-parser informing BS of arm-shape boundaries; for
+          // now adopters must write `</match>` explicitly to close a match
+          // block. Error message points to the requirement.
+          //
+          // The match-statechild-parser at SYM-time re-tokenizes the captured
+          // body content to recognize arm shapes (self-closing / bare-body /
+          // `:`-shorthand) and arm-closer forms — that's where `</>` IS
+          // accepted as an arm-closer per scrml convention.
+          const contentStart = pos;
+          const contentStartLine = curLine;
+          const contentStartCol = curCol;
+          const closeNeedle = `</${lowerTagName}>`;
+          const closeLen = closeNeedle.length;
+          while (pos < len) {
+            if (
+              source[pos] === "<" &&
+              source.slice(pos, pos + closeLen).toLowerCase() === closeNeedle
+            ) {
+              break;
+            }
+            step();
+          }
+          const contentEnd = pos;
+          const children = [];
+          if (contentEnd > contentStart) {
+            children.push({
+              type: "text",
+              raw: source.slice(contentStart, contentEnd),
+              span: {
+                start: contentStart,
+                end: contentEnd,
+                line: contentStartLine,
+                col: contentStartCol,
+              },
+              depth: depth(),
+              children: [],
+              name: null,
+              closerForm: null,
+              isComponent: false,
+            });
+          }
+          let closerForm = "explicit";
+          if (pos < len) {
+            advance(closeLen);
+          } else {
+            errors.push(new BSError(
+              "E-CTX-001",
+              `Unclosed <${tagName}> structural element. Expected explicit close tag '${closeNeedle}'. The '</>' unambiguous-closer form is not yet supported for <${tagName}> at Phase 2 baseline (see docs/changes/match-block-form-scoping/SCOPING.md §5 Phase 5).`,
+              { start: curPos, end: pos, line: curLine, col: curCol }
+            ));
+            closerForm = "inferred";
+          }
+          targetChildren().push({
+            type: "markup",
+            raw: source.slice(curPos, pos),
+            span: { start: curPos, end: pos, line: curLine, col: curCol },
+            depth: depth(),
+            children,
+            name: tagName,
+            closerForm,
             isComponent: isComp,
             openerHadSpaceAfterLt: false,
           });

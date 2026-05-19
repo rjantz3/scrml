@@ -16,11 +16,19 @@
  *     and returns a `kind: "match-block"` AST node with `forType` + `onExprRaw`
  *     + `armsRaw` (raw arm body text; Phase 2 will add the dedicated arm-parser)
  *
- * Phase 1 known limitation: arm-children must use bare-body form
- * `<Variant>...</>` or self-closing `<Variant/>`. The `:`-shorthand form
- * `<Variant> : expr` (SPEC §18.0.1 line 9592) fires E-CTX-003 at BS-time
- * because the `<Variant>` opener never finds a closer. `:`-shorthand support
- * requires a BS-layer extension and ships with Phase 2.
+ * Phase 2 update: arm-children body forms are now BS-agnostic — the match
+ * body is captured as a single raw text run (STRUCTURAL_RAW_BODY_ELEMENTS
+ * gate at block-splitter.js) which the match-statechild-parser re-tokenizes
+ * at SYM time. Bare-body, self-closing, and `:`-shorthand all coexist
+ * without BS-level shape conflicts.
+ *
+ * Phase 2 baseline: match-block closer is `</match>` (explicit). The `</>`
+ * unambiguous-closer form is NOT yet supported because depth-tracking is
+ * needed to disambiguate it from arm-children `</>` closers (each
+ * `<Variant>...</>` bare-body arm uses `</>` as its closer; the OUTERMOST
+ * `</>` would be the match closer, but `:`-shorthand arms have no closer,
+ * breaking naive depth-tracking). Phase 5 may add `</>` support via the
+ * match-statechild-parser informing BS of arm-shape boundaries.
  *
  * Coverage:
  *   §1  AST shape — basic `<match for=Phase on=@phase>` produces match-block
@@ -66,7 +74,7 @@ describe("§1: match-block AST node emitted for `<match for=Type on=expr>`", () 
     <Done>
         <p>Done</p>
     </>
-</>
+</match>
 `;
     const { tab } = parse(src);
     expect(tab.errors.length).toBe(0);
@@ -86,7 +94,7 @@ describe("§2: match-block fields — forType + onExprRaw + armsRaw", () => {
 <match for=Phase on=@phase>
     <Idle><p>Idle</p></>
     <Done><p>Done</p></>
-</>
+</match>
 `;
     const { tab } = parse(src);
     const matchBlock = findFirst(tab.ast.nodes, "match-block");
@@ -98,7 +106,7 @@ describe("§2: match-block fields — forType + onExprRaw + armsRaw", () => {
 <match for=Phase on=@phase>
     <Idle><p>Idle</p></>
     <Done><p>Done</p></>
-</>
+</match>
 `;
     const { tab } = parse(src);
     const matchBlock = findFirst(tab.ast.nodes, "match-block");
@@ -110,7 +118,7 @@ describe("§2: match-block fields — forType + onExprRaw + armsRaw", () => {
 <match for=Phase on=@phase>
     <Idle><p>Idle</p></>
     <Done><p>Done</p></>
-</>
+</match>
 `;
     const { tab } = parse(src);
     const matchBlock = findFirst(tab.ast.nodes, "match-block");
@@ -132,7 +140,8 @@ describe("§3: Multi-arm match block — armsRaw captures all arms", () => {
     <Idle><p>Idle</p></>
     <Loading><p>Loading</p></>
     <Done><p>Done</p></>
-</>
+</match>
+
 `;
     const { tab } = parse(src);
     const matchBlock = findFirst(tab.ast.nodes, "match-block");
@@ -152,7 +161,7 @@ describe("§4: missing on= attribute — onExprRaw is null (SYM Phase 2 will fir
 <match for=Phase>
     <Idle><p>Idle</p></>
     <Done><p>Done</p></>
-</>
+</match>
 `;
     const { tab } = parse(src);
     const matchBlock = findFirst(tab.ast.nodes, "match-block");
@@ -170,7 +179,7 @@ describe("§5: degenerate match — no arms (SYM Phase 2 will fire E-MATCH-NOT-E
   test("empty match block still produces match-block AST node", () => {
     const src = `\${ type Phase:enum = { Idle, Done } @phase = .Idle }
 <match for=Phase on=@phase>
-</>
+</match>
 `;
     const { tab } = parse(src);
     const matchBlock = findFirst(tab.ast.nodes, "match-block");

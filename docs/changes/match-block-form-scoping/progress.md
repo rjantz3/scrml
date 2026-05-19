@@ -109,3 +109,54 @@ Plus a defensive duplicate dispatch in `case "state":` documented as unreachable
 **Phase 1 actual effort:** ~1.5h (was estimated ~4-6h after BS-layer discovery; actual much smaller because root cause was a single exempt-list entry, not a sweeping BS-layer rework).
 
 **Next: Phase 2** — match-statechild-parser.ts that converts `armsRaw` → structured `MatchArmEntry[]`, new SYM PASS firing the 4 §18.0.2 diagnostics + E-MATCH-ON-REQUIRED, §34 catalog row for E-MATCH-ON-REQUIRED + §18.0.1 normative bullet. `:`-shorthand body form support is the natural Phase 2 surface since the arm-parser needs to recognize all three body forms anyway (self-closing, bare-body, `:`-shorthand).
+
+## 2026-05-19 (S107, post-Phase-1) — Phase 2 SHIPPED
+
+Phase 2 shipped end-to-end in one session-arc. All 5 diagnostics + parser + SPEC amendments + tests. Substantial deliverable; ~2.5h elapsed.
+
+**Investigation findings (Phase 2 step 1):**
+
+`:`-shorthand BS handling investigation surfaced that ENGINE `:`-shorthand body form ALSO breaks at BS-time when engine is at file-top (caught in same compound-state-decl + text-block-split trap that affected match). Engine tests using `:`-shorthand exist in spec but aren't exercised by the existing engine-statechild-parser tests (which use bare-body shape). Engine `:`-shorthand gap noted for follow-up but ORTHOGONAL to Phase 2 scope — engine tests pass, no regressions, fix is in match-side only this commit.
+
+**Phase 2 deliverables (5 files):**
+
+1. **`compiler/src/block-splitter.js` +75 lines** — added `STRUCTURAL_RAW_BODY_ELEMENTS = new Set(["match"])` + dedicated raw-body-with-explicit-close handler (mirrors RAW_CONTENT_ELEMENTS for `<pre>`/`<code>` but with `</match>` closer requirement). Match body now captured as single text-node child; arm-shape recognition deferred entirely to match-statechild-parser at SYM-time. Eliminates `:`-shorthand vs bare-body shape-confusion BEFORE downstream stages see anything.
+
+2. **`compiler/src/match-statechild-parser.ts` NEW (+440 lines)** — Tokenizes `armsRaw` → `MatchArmEntry[]`. Recognizes all 3 body forms (self-closing / `:`-shorthand / bare-body), wildcard arm `<_>`, parenthesized payload bindings `<Ready(rows)>` (raw text; Phase 4 will tokenize). Returns parser-time diagnostics for malformed arms. Helper `extractEnumVariants(rawText)` for SYM-side variant resolution from `type Foo:enum = { ... }` decl raw text.
+
+3. **`compiler/src/symbol-table.ts` +245 lines** — New SYM PASS 20 (`walkValidateMatchBlocks`) fires all 5 diagnostics:
+   - **W-MATCH-RULE-INERT** — `rule=` attr on any arm (§18.0.2)
+   - **E-MATCH-EFFECT-FORBIDDEN** — `effect=` attr on any arm (§18.0.2)
+   - **E-MATCH-ONTRANSITION-FORBIDDEN** — `<onTransition>` text in any bare-body arm (§18.0.2; body-text scan, Phase 4 may upgrade to structural-AST walk)
+   - **E-MATCH-NOT-EXHAUSTIVE** — variants missing AND no `<_>` wildcard (§18.0.1)
+   - **E-MATCH-ON-REQUIRED** — `on=` missing AND no `<engine for=Type>` in scope (NEW §34 row this commit per Q-MB-5 ratification)
+   
+   File-scope helpers `collectEnumTypes` + `collectEngineGovernedTypes` walk the AST once each to build registries; per-match-block validation looks up against those registries. Engine-orthogonal — runs last alongside PASS 18/19.
+
+4. **`compiler/SPEC.md` +2 lines** — §34 row for `E-MATCH-ON-REQUIRED` (between E-MATCH-NOT-EXHAUSTIVE and E-VARIANT-AMBIGUOUS) + §18.0.1 normative bullet at line 9615-9616 naming the diagnostic + cross-ref to Q-MB-5 ratification.
+
+5. **`compiler/tests/unit/match-block-phase2.test.js` NEW (+255 lines / 18 tests / 45 expects)**:
+   - §1 3 body forms (self-closing / `:`-shorthand / bare-body)
+   - §2 wildcard arm `<_>`
+   - §3 payload bindings captured as raw
+   - §4 arm attrs captured
+   - §5-7 attr-position diagnostics (W-MATCH-RULE-INERT / E-MATCH-EFFECT-FORBIDDEN / E-MATCH-ONTRANSITION-FORBIDDEN)
+   - §8-9 exhaustiveness (E-MATCH-NOT-EXHAUSTIVE fires when missing; silent when `<_>` present)
+   - §10-11 E-MATCH-ON-REQUIRED (fires without engine; silent with engine)
+   - §12 regression — engine state-child `rule=` is NOT flagged as W-MATCH-RULE-INERT (engine path untouched)
+   - §13 well-formed match block produces zero match diagnostics
+   - §14 `:`-shorthand now compiles cleanly (Phase 1 limitation closed)
+   - Helper unit: extractEnumVariants
+
+**Tests at HEAD:** 13,087 pass / 88 skip / 1 todo / 0 fail / 681 files / 44,430 expect (vs Phase 1 close 13,069 / 88 / 1 / 0 / 680 / 44,385). Delta: +18 pass / +1 file / +45 expect / **0 regressions**.
+
+**Phase 1 test fixture updates folded in:** updated `compiler/tests/unit/match-block-parser-phase1.test.js` to use `</match>` explicit closer (Phase 2 baseline; `</>` unambiguous closer for outer match is Phase 5 follow-up). Also incremented `p3-follow-no-isComponent-routing.test.js` block-splitter.js budget 21 → 23 to account for the new STRUCTURAL_RAW_BODY_ELEMENTS gate (1 isComp guard + 1 emit-stamp).
+
+**Phase 2 scope-out (deferred to Phase 3):**
+- Codegen render dispatch (per-arm DOM update on reactive cell change)
+- Bare-variant inference + payload-binding type-system integration (Phase 4)
+- `</>` unambiguous closer for outer match block (Phase 5; depth-tracking requires arm-parser/BS coordination)
+
+**Phase 2 actual effort:** ~2.5h (was estimated ~2-3h). Same shape as estimate; no surprises after the BS-layer approach was locked.
+
+**Next: Phase 3** — codegen render dispatch. Per-arm body emission with reactive subscription on `onExpr` cell. Mirrors engine state-child render dispatch shape. Estimate ~3-5h.

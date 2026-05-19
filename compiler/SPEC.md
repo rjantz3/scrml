@@ -9613,7 +9613,11 @@ value-return contexts (server logic, derivations).
 ```
 
 When NO engine for the same `Type` is in scope, `on=` is required. The compiler emits
-a clear diagnostic at parse time.
+**`E-MATCH-ON-REQUIRED`** (§34) at parse-time when `<match for=Type>` is missing `on=`
+AND no `<engine for=Type>` for the same `Type` is in scope. The diagnostic message names
+the expected resolution paths (add `on=expr` to the opener, or declare a compatible
+`<engine>` in scope). (Catalog addition S107 — Phase 2 of match block-form impl arc;
+see `docs/changes/match-block-form-scoping/SCOPING.md` Q-MB-5 ratification.)
 
 #### 18.0.2 Match attributes — `rule=` legal-but-inert; `effect=` and `<onTransition>` forbidden
 
@@ -14808,6 +14812,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-MATCH-EFFECT-FORBIDDEN | §18.0.2 | `effect=` attribute used on a state-child inside a `<match>` block. Effects presuppose transitions; transitions don't occur in match. Use `<engine>` (Tier 2). | Error |
 | E-MATCH-ONTRANSITION-FORBIDDEN | §18.0.2 | `<onTransition>` element used inside a `<match>` block. Transition handlers are engine-only. Use `<engine>` (Tier 2). | Error |
 | E-MATCH-NOT-EXHAUSTIVE | §18.0.1 | Block-form `<match for=Type>` is missing variants of `Type` and has no wildcard `<_>` catch-all. Add the missing variants or add `<_>`. | Error |
+| E-MATCH-ON-REQUIRED | §18.0.1 | (Catalog addition S107 — Phase 2 of match block-form impl arc.) Block-form `<match for=Type>` is missing the `on=expr` attribute AND no `<engine for=Type>` for the same `Type` is in scope (auto-implied `on=` per §18.0.1 line 9578-9580 requires a same-type engine for the most-local-semantics-friendly resolution). Add `on=expr` to the `<match>` opener or declare a compatible `<engine>` in scope. | Error |
 | E-VARIANT-AMBIGUOUS | §14.10, §18.0.3 | Bare variant reference (e.g., `let x = .Small` or `<Small>` arm pattern) is ambiguous because the position's type is a union with multiple members declaring the variant, OR the position has no statically-known enum type context. §14.10 covers general expression positions (LHS state-decl / let / const annotations, fn params, fn return); §18.0.3 covers match-arm patterns. Qualify the variant: `TypeName.Small` / `<TypeName.Small>`. | Error |
 | E-ENGINE-INVALID-TRANSITION | §51.0.F, §51.0.G | Direct write to engine variable or `.advance()` violates the from-state's `rule=` contract. Statically rejected when from-state is known; runtime-thrown otherwise. **v0.3 Option-d carve-out:** self-writes (target equals current variant) are NO-OPS, NOT violations — see §51.0.F.1 + W-ENGINE-SELF-WRITE-DETECTED. | Runtime |
 | W-ENGINE-SELF-WRITE-DETECTED | §51.0.F.1 | (v0.3, info-level) The compiler has detected an engine self-write — `@var = .CurrentVariant` or `@var.advance(.CurrentVariant)` where `.CurrentVariant` either matches the enclosing state-child tag (STRICT — inside-state-child fire) OR is a declared variant of the engine and the write site is outside any state-child body (CONSERVATIVE — outside-state-child fire). Per §51.0.F.1, self-writes are runtime NO-OPS: no `<onTransition>` fires, no history capture (§51.0.N), no timer rearm (§51.0.M), no idle-watchdog reset (§51.0.R), no subscriber notification. If the no-op-when-already-in-state behavior is INTENTIONAL (e.g., a defensive `set(.Current)` reachable from multiple variants), the lint is informational only — no action required. If a state change was expected unconditionally, verify the write target or guard the call site. Suppression: rephrase the write target via a derived cell (avoid the literal `.Variant` form), or remove the write entirely. Joins the small `W-PROGRAM-SPA-INFERRED` / `I-MATCH-PROMOTABLE` / `D-BATCH-001` family of synthesis-pattern info lints (Insight 30 closure precedent). (Catalog addition v0.3 Option-d synthesis 2026-05-12; emitted at `compiler/src/symbol-table.ts` PASS 16 fire-site #10 + PASS 12.B `walkEngineSelfWriteOutside`.) | Info |

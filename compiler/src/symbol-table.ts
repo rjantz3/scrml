@@ -141,6 +141,11 @@ import { scanForTopLevelSemicolon } from "./multi-statement-scan.ts";
 // stage-local — there is no shared helper today.
 import { resolveModulePath } from "./module-resolver.js";
 
+// S107 Phase 2 — match-statechild-parser for SPEC §18.0.1 block-form arm
+// recognition. Mirrors B15's engine-statechild-parser delegation pattern.
+import { parseMatchArms, extractEnumVariants } from "./match-statechild-parser.ts";
+import type { MatchArmEntry, MatchArmAttr } from "./match-statechild-parser.ts";
+
 // ---------------------------------------------------------------------------
 // B4 — Import binding registry
 // ---------------------------------------------------------------------------
@@ -8944,12 +8949,305 @@ export function runSYM(input: SYMInput): SYMResult {
     walkPinnedFnForwardRefCheck(ast.nodes, pinnedFnDecls, visitedPass19, errors, 0, filePath);
   }
 
+  // PASS 20 (S107 Phase 2): match-block diagnostics per SPEC §18.0.1 + §18.0.2.
+  //
+  // For every `kind: "match-block"` AST node in the file:
+  //   - Parse armsRaw → MatchArmEntry[] via match-statechild-parser.
+  //   - Resolve forType to its enum variants (file-scope type-decl lookup +
+  //     extractEnumVariants on the raw text).
+  //   - Check for in-scope `<engine for=Type>` declaration (for auto-implied
+  //     `on=` resolution).
+  //   - Fire 5 diagnostics:
+  //       * W-MATCH-RULE-INERT — `rule=` attr on any arm (per §18.0.2)
+  //       * E-MATCH-EFFECT-FORBIDDEN — `effect=` attr on any arm (per §18.0.2)
+  //       * E-MATCH-ONTRANSITION-FORBIDDEN — `<onTransition>` in any arm body
+  //       * E-MATCH-NOT-EXHAUSTIVE — variants missing AND no `<_>` wildcard
+  //       * E-MATCH-ON-REQUIRED — onExprRaw === null AND no in-scope engine
+  //
+  // Ordering: engine-orthogonal; runs last alongside PASS 18/19. Engine state-
+  // child machinery (B15-B17, A5-3 PASSes 11-17) is untouched.
+  const visitedPass20 = new WeakSet<object>();
+  walkValidateMatchBlocks(ast, ast.nodes, errors, filePath, visitedPass20);
+
   return {
     filePath,
     errors,
     fileScope,
     stats,
   };
+}
+
+// ---------------------------------------------------------------------------
+// PASS 20 (S107 Phase 2) — match-block diagnostics (SPEC §18.0.1 + §18.0.2)
+// ---------------------------------------------------------------------------
+//
+// Spec authority:
+//   §18.0.1 line 9561+  — Block-form syntax + exhaustiveness (E-MATCH-NOT-EXHAUSTIVE)
+//   §18.0.2 line 9618+  — Attribute legality (W-MATCH-RULE-INERT, E-MATCH-EFFECT-FORBIDDEN, E-MATCH-ONTRANSITION-FORBIDDEN)
+//   §18.0.1 line 9615+  — auto-implied `on=` requires in-scope engine (E-MATCH-ON-REQUIRED, new §34 row per Q-MB-5)
+//   §34 lines 14807-14810 — catalog rows for the 4 pre-existing diagnostics
+//
+// Q-MB-5 ratification: NEW §34 row `E-MATCH-ON-REQUIRED` lands in Phase 2 spec
+// amendment (separate edit to compiler/SPEC.md after this code lands).
+
+function walkValidateMatchBlocks(
+  ast: any,
+  nodes: any,
+  errors: SYMDiagnostic[],
+  filePath: string,
+  visited: WeakSet<object>,
+): void {
+  // Build a file-scope type-registry (typeName → variant-name array) by
+  // walking all type-decl nodes in the file. Mirrors how B15 resolves
+  // engine for=Type by walking type-decls. Phase 4 may replace this with
+  // proper type-system integration (the §14.10 bare-variant infrastructure).
+  const enumRegistry: Map<string, string[]> = new Map();
+  collectEnumTypes(nodes, enumRegistry, new WeakSet<object>());
+
+  // Build a set of in-scope engine governedTypes for E-MATCH-ON-REQUIRED
+  // resolution (auto-implied on= requires `<engine for=Type>` in scope).
+  const engineGovernedTypes: Set<string> = new Set();
+  collectEngineGovernedTypes(nodes, engineGovernedTypes, new WeakSet<object>());
+
+  // Walk the AST tree, visiting every match-block node.
+  walkMatchBlockNodes(nodes, errors, filePath, visited, enumRegistry, engineGovernedTypes);
+}
+
+function collectEnumTypes(
+  nodes: any,
+  registry: Map<string, string[]>,
+  visited: WeakSet<object>,
+): void {
+  if (!nodes) return;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) collectEnumTypes(n, registry, visited);
+    return;
+  }
+  if (typeof nodes !== "object") return;
+  if (visited.has(nodes)) return;
+  visited.add(nodes);
+
+  const node = nodes as any;
+  if (node.kind === "type-decl" && node.typeKind === "enum" && typeof node.name === "string" && typeof node.raw === "string") {
+    const variants = extractEnumVariants(node.raw);
+    if (variants.length > 0) {
+      registry.set(node.name, variants);
+    }
+  }
+
+  // Recurse through standard child arrays.
+  for (const key of ["body", "children", "defChildren", "consequent", "alternate"]) {
+    if (Array.isArray(node[key])) collectEnumTypes(node[key], registry, visited);
+  }
+  if (Array.isArray(node.arms)) {
+    for (const arm of node.arms) {
+      if (arm && Array.isArray(arm.body)) collectEnumTypes(arm.body, registry, visited);
+    }
+  }
+}
+
+function collectEngineGovernedTypes(
+  nodes: any,
+  governedTypes: Set<string>,
+  visited: WeakSet<object>,
+): void {
+  if (!nodes) return;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) collectEngineGovernedTypes(n, governedTypes, visited);
+    return;
+  }
+  if (typeof nodes !== "object") return;
+  if (visited.has(nodes)) return;
+  visited.add(nodes);
+
+  const node = nodes as any;
+  if (node.kind === "engine-decl" && typeof node.governedType === "string" && node.governedType.length > 0) {
+    governedTypes.add(node.governedType);
+  }
+
+  for (const key of ["body", "children", "defChildren", "consequent", "alternate"]) {
+    if (Array.isArray(node[key])) collectEngineGovernedTypes(node[key], governedTypes, visited);
+  }
+  if (Array.isArray(node.arms)) {
+    for (const arm of node.arms) {
+      if (arm && Array.isArray(arm.body)) collectEngineGovernedTypes(arm.body, governedTypes, visited);
+    }
+  }
+}
+
+function walkMatchBlockNodes(
+  nodes: any,
+  errors: SYMDiagnostic[],
+  filePath: string,
+  visited: WeakSet<object>,
+  enumRegistry: Map<string, string[]>,
+  engineGovernedTypes: Set<string>,
+): void {
+  if (!nodes) return;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) walkMatchBlockNodes(n, errors, filePath, visited, enumRegistry, engineGovernedTypes);
+    return;
+  }
+  if (typeof nodes !== "object") return;
+  if (visited.has(nodes)) return;
+  visited.add(nodes);
+
+  const node = nodes as any;
+  if (node.kind === "match-block") {
+    validateMatchBlock(node, errors, filePath, enumRegistry, engineGovernedTypes);
+  }
+
+  for (const key of ["body", "children", "defChildren", "consequent", "alternate"]) {
+    if (Array.isArray(node[key])) walkMatchBlockNodes(node[key], errors, filePath, visited, enumRegistry, engineGovernedTypes);
+  }
+  if (Array.isArray(node.arms)) {
+    for (const arm of node.arms) {
+      if (arm && Array.isArray(arm.body)) walkMatchBlockNodes(arm.body, errors, filePath, visited, enumRegistry, engineGovernedTypes);
+    }
+  }
+}
+
+function validateMatchBlock(
+  matchBlock: any,
+  errors: SYMDiagnostic[],
+  filePath: string,
+  enumRegistry: Map<string, string[]>,
+  engineGovernedTypes: Set<string>,
+): void {
+  const blockSpan: SYMDiagnostic["span"] = matchBlock.span ?? {
+    file: filePath, start: 0, end: 0, line: 1, col: 1,
+  };
+  const forType: string = matchBlock.forType ?? "";
+  const onExprRaw: string | null = matchBlock.onExprRaw ?? null;
+  const armsRaw: string = matchBlock.armsRaw ?? "";
+
+  // E-MATCH-ON-REQUIRED — auto-implied `on=` only legal when an
+  // `<engine for=Type>` is in scope (per SPEC §18.0.1 line 9578-9580).
+  if (onExprRaw === null && !engineGovernedTypes.has(forType)) {
+    errors.push({
+      code: "E-MATCH-ON-REQUIRED",
+      message:
+        `E-MATCH-ON-REQUIRED: \`<match for=${forType || "?"}>\` is missing required \`on=\` ` +
+        `attribute and no \`<engine for=${forType || "?"}>\` is in scope (auto-implied resolution ` +
+        `requires a same-type engine). Add \`on=expr\` to the \`<match>\` opener or declare a ` +
+        `compatible engine in scope. (SPEC §18.0.1 + §34.)`,
+      span: blockSpan,
+      severity: "error",
+    });
+  }
+
+  // Parse the arms.
+  const parseResult = parseMatchArms(armsRaw);
+  for (const d of parseResult.diagnostics) {
+    errors.push({
+      code: d.code,
+      message: d.message,
+      span: shiftSpan(blockSpan, matchBlock.span, d.spanStart, d.spanEnd),
+      severity: "error",
+    });
+  }
+  const arms: MatchArmEntry[] = parseResult.arms;
+
+  // E-MATCH-NOT-EXHAUSTIVE — every variant of for=Type must have a matching
+  // arm OR a `<_>` wildcard arm must be present (SPEC §18.0.1 line 9593-9594).
+  const hasWildcard = arms.some((a) => a.isWildcard);
+  if (!hasWildcard && forType) {
+    const expectedVariants = enumRegistry.get(forType);
+    if (expectedVariants) {
+      const armVariantSet = new Set(arms.filter((a) => !a.isWildcard).map((a) => a.variantName));
+      const missingVariants = expectedVariants.filter((v) => !armVariantSet.has(v));
+      if (missingVariants.length > 0) {
+        errors.push({
+          code: "E-MATCH-NOT-EXHAUSTIVE",
+          message:
+            `E-MATCH-NOT-EXHAUSTIVE: \`<match for=${forType}>\` is missing arm(s) for variant(s): ` +
+            `${missingVariants.map((v) => `.${v}`).join(", ")}. Add the missing arm(s) or include ` +
+            `a wildcard \`<_>...</_>\` catch-all. (SPEC §18.0.1 + §34.)`,
+          span: blockSpan,
+          severity: "error",
+        });
+      }
+    }
+    // If enum type isn't in registry, we can't check exhaustiveness; skip
+    // silently. Phase 4 may add E-MATCH-FOR-TYPE-UNKNOWN if useful.
+  }
+
+  // Per-arm validation.
+  for (const arm of arms) {
+    for (const attr of arm.attrs) {
+      // W-MATCH-RULE-INERT — `rule=` on any arm (SPEC §18.0.2 line 9625).
+      if (attr.name === "rule") {
+        errors.push({
+          code: "W-MATCH-RULE-INERT",
+          message:
+            `W-MATCH-RULE-INERT: \`rule=\` declared on \`<${arm.variantName}>\` inside a ` +
+            `\`<match>\` block. Rules are legal-but-inert in match-blocks — match is read-only ` +
+            `on the matched-on value, so the rule doesn't enforce. Promote to ` +
+            `\`<engine for=${forType || "Type"} initial=.Variant>\` (Tier 2) to activate the rule ` +
+            `contract and get \`E-ENGINE-INVALID-TRANSITION\` on violating writes. ` +
+            `(SPEC §18.0.2 + §34.)`,
+          span: shiftSpan(blockSpan, matchBlock.span, attr.spanStart, attr.spanEnd),
+          severity: "warning",
+        });
+      }
+      // E-MATCH-EFFECT-FORBIDDEN — `effect=` on any arm (SPEC §18.0.2 line 9626).
+      if (attr.name === "effect") {
+        errors.push({
+          code: "E-MATCH-EFFECT-FORBIDDEN",
+          message:
+            `E-MATCH-EFFECT-FORBIDDEN: \`effect=\` declared on \`<${arm.variantName}>\` inside a ` +
+            `\`<match>\` block. Effects presuppose transitions; transitions don't occur in match. ` +
+            `Use \`<engine for=${forType || "Type"} initial=.Variant>\` (Tier 2) to use \`effect=\` ` +
+            `or \`<onTransition>\`. (SPEC §18.0.2 + §34.)`,
+          span: shiftSpan(blockSpan, matchBlock.span, attr.spanStart, attr.spanEnd),
+          severity: "error",
+        });
+      }
+    }
+
+    // E-MATCH-ONTRANSITION-FORBIDDEN — `<onTransition>` element in any arm
+    // body (SPEC §18.0.2 line 9627). Body-text scan for the opener token.
+    // Phase 4 may upgrade to a structural body-AST walk once arm bodies are
+    // re-parsed into proper sub-trees.
+    if (arm.bodyForm === "bare-body" && /<\s*onTransition\b/i.test(arm.bodyRaw)) {
+      errors.push({
+        code: "E-MATCH-ONTRANSITION-FORBIDDEN",
+        message:
+          `E-MATCH-ONTRANSITION-FORBIDDEN: \`<onTransition>\` element appears inside a ` +
+          `\`<match>\` arm body (\`<${arm.variantName}>\` arm). \`<onTransition>\` is engine-only ` +
+          `— transitions don't occur in match. Use \`<engine for=${forType || "Type"} ` +
+          `initial=.Variant>\` (Tier 2) for transition handlers. (SPEC §18.0.2 + §34.)`,
+        span: shiftSpan(blockSpan, matchBlock.span, arm.spanStart, arm.spanEnd),
+        severity: "error",
+      });
+    }
+  }
+}
+
+/**
+ * Convert a parser-local span (offsets within `armsRaw`) into a SYMDiagnostic
+ * span by adding the match-block's absolute start position. Falls back to the
+ * match-block's span when match-block.span is unavailable.
+ *
+ * Note: line/col here are approximate (carried from the match-block's opener);
+ * arm-local line/col adjustment would require re-scanning newlines in armsRaw.
+ * Phase 4 may add precise per-arm line/col when the arm-parser tracks it.
+ */
+function shiftSpan(
+  fallback: SYMDiagnostic["span"],
+  matchBlockSpan: any,
+  localStart: number,
+  localEnd: number,
+): SYMDiagnostic["span"] {
+  if (!matchBlockSpan || typeof matchBlockSpan !== "object") return fallback;
+  const baseStart = typeof matchBlockSpan.start === "number" ? matchBlockSpan.start : 0;
+  return {
+    file: (matchBlockSpan as any).file ?? (fallback as any).file,
+    start: baseStart + localStart,
+    end: baseStart + localEnd,
+    line: (matchBlockSpan as any).line ?? (fallback as any).line ?? 1,
+    col: (matchBlockSpan as any).col ?? (fallback as any).col ?? 1,
+  } as any;
 }
 
 /**
