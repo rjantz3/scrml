@@ -536,14 +536,24 @@ export async function runBuild(args) {
   if (result.errors.length > 0) {
     console.error(`\nBuild failed with ${result.errors.length} error(s):`);
     for (const e of result.errors) {
-      console.error(`  [${e.stage}] ${e.code}: ${e.message?.slice(0, 120)}`);
+      // Bug 3 fix (S107) — same shape as dev.js error formatter; surface path:line:col.
+      const rel = e.filePath || e.span?.file || "";
+      const line = e.line ?? e.span?.line;
+      const col = e.column ?? e.col ?? e.span?.col;
+      const loc = line ? `:${line}${col ? `:${col}` : ""}` : "";
+      console.error(`  [${e.stage}] ${rel}${loc} ${e.code}: ${e.message?.slice(0, 120)}`);
     }
     process.exit(1);
   }
 
   if (result.warnings.length > 0) {
     for (const w of result.warnings) {
-      console.warn(`  [warn] ${w.code}: ${w.message?.slice(0, 120)}`);
+      // Bug 3 fix (S107) — warnings also get path:line:col.
+      const rel = w.filePath || w.span?.file || "";
+      const line = w.line ?? w.span?.line;
+      const col = w.column ?? w.col ?? w.span?.col;
+      const loc = line ? `:${line}${col ? `:${col}` : ""}` : "";
+      console.warn(`  [warn] ${rel}${loc} ${w.code}: ${w.message?.slice(0, 120)}`);
     }
   }
 

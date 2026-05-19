@@ -264,8 +264,12 @@ function runOnce(opts, gatheredOut) {
   if (result.warnings && result.warnings.length > 0) {
     console.error(`[dev] ${result.warnings.length} warning${result.warnings.length !== 1 ? "s" : ""}:`);
     for (const w of result.warnings) {
-      const rel = w.filePath || w.file || "";
-      const loc = w.line ? `:${w.line}` : "";
+      // Bug 3 fix (S107) — mirror the error-path fallback so BS-stage warnings
+      // (W-PROGRAM-* etc.) surface path:line:col now that api.js stamps span.
+      const rel = w.filePath || w.span?.file || w.file || "";
+      const line = w.line ?? w.span?.line;
+      const col = w.column ?? w.col ?? w.span?.col;
+      const loc = line ? `:${line}${col ? `:${col}` : ""}` : "";
       console.error(`  ${w.code ? "[" + w.code + "] " : ""}${rel}${loc} ${w.message?.slice(0, 120)}`);
     }
   }
@@ -273,7 +277,17 @@ function runOnce(opts, gatheredOut) {
   if (result.errors.length > 0) {
     console.error(`[dev] Compilation errors: ${result.errors.length}`);
     for (const e of result.errors) {
-      console.error(`  [${e.stage}] ${e.code}: ${e.message?.slice(0, 120)}`);
+      // Bug 3 fix (S107) — mirror the [W-LINT-*] formatter shape so adopters
+      // with many .scrml files can localize the failing source. CGError-shape
+      // diagnostics carry `span.line` / `span.col`; api.js's collectErrors
+      // stamps `filePath` (and `span.file`) on per-file stage outputs (BS / TAB)
+      // so this formatter can read them. Falls through both shapes — direct
+      // `e.line` (used by some later stages) and `e.span.line` (used by BS).
+      const rel = e.filePath || e.span?.file || "";
+      const line = e.line ?? e.span?.line;
+      const col = e.column ?? e.col ?? e.span?.col;
+      const loc = line ? `:${line}${col ? `:${col}` : ""}` : "";
+      console.error(`  [${e.stage}] ${rel}${loc} ${e.code}: ${e.message?.slice(0, 120)}`);
     }
     return { success: false, outputDir: result.outputDir };
   }

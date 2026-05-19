@@ -567,10 +567,35 @@ export function compileScrml(options = {}) {
     return result;
   }
 
-  function collectErrors(stageName, errors) {
+  function collectErrors(stageName, errors, filePath = null) {
     if (errors && errors.length > 0) {
       for (const e of errors) {
-        allErrors.push({ stage: stageName, code: e.code, message: e.message, severity: e.severity, ...e });
+        // Bug 3 fix (S107, 2026-05-19) — stamp filePath onto per-file stage
+        // diagnostics so the CLI formatters (dev / build / compile) can
+        // surface `path:line:col` per W-LINT-* convention. Pre-S107, [BS]
+        // and [TAB] errors arrived at dev.js / build.js with no file-origin
+        // info — adopters with 80+ files had to bisect by which dist HTML
+        // was missing to localize the failing source. CGError-shape diagnostics
+        // already carry `span.line` / `span.col`; this stamp closes the
+        // file-attribution gap.
+        const enriched = { stage: stageName, code: e.code, message: e.message, severity: e.severity, ...e };
+        // Normalize: BSError (compiler/src/block-splitter.js) extends native
+        // Error and stores its source-span as `bsSpan` rather than `span`
+        // (because the parent class consumes `span` for stack-trace purposes
+        // on some engines). Lift `bsSpan` → `span` here so downstream
+        // formatters can read a single field uniformly across BS / TAB / NR /
+        // SYM / CG / etc. CGError-shape diagnostics (used by most stages)
+        // already store as `span` and pass through unchanged.
+        if (!enriched.span && enriched.bsSpan) {
+          enriched.span = enriched.bsSpan;
+        }
+        if (filePath) {
+          if (!enriched.filePath) enriched.filePath = filePath;
+          if (enriched.span && typeof enriched.span === "object" && !enriched.span.file) {
+            enriched.span = { ...enriched.span, file: filePath };
+          }
+        }
+        allErrors.push(enriched);
         if (verbose) log(`  [${stageName}] ${e.code}: ${e.message}`);
       }
     }
@@ -623,7 +648,7 @@ export function compileScrml(options = {}) {
     try {
       const result = stage("BS", () => _splitBlocks(filePath, source));
       bsResults.push(result);
-      collectErrors("BS", result.errors);
+      collectErrors("BS", result.errors, filePath);
       if (verbose) log(`  [BS] ${filePath}: ${result.blocks.length} blocks`);
     } catch (e) {
       allErrors.push({ stage: "BS", code: e.code || "E-BS-000", message: e.message });
@@ -650,7 +675,7 @@ export function compileScrml(options = {}) {
   for (let i = 0; i < bsResults.length; i++) {
     const bsResult = bsResults[i];
     const result = stage("TAB", () => _buildAST(bsResult));
-    collectErrors("TAB", result.errors);
+    collectErrors("TAB", result.errors, result.filePath || bsResult.filePath);
     // Attach source text for library-mode codegen (export-decl span extraction)
     if (result.filePath && sourceByFile.has(result.filePath)) {
       result._sourceText = sourceByFile.get(result.filePath);
