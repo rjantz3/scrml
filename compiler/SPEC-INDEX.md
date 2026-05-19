@@ -188,6 +188,16 @@ Total lines: 27,144 | Total sections: 57 + appendices  (S90 M-7C-D-12 Track 4: �
 - registerMessages / scrml:data → §41.12 (16698+) (L12, D4)
 - formFor — type-driven form generation FLAGSHIP (S102 — L22 family second general-position member; SHIPPED S102-S103 end-to-end incl. stdlib re-export) → §41.14 (18389+)
 - schemaFor — type-driven SQL DDL generation (S104 — L22 family THIRD general-position member; SHIPPED S104 incl. stdlib re-export + 62 tests + flagship enum-lowering per OQ-SCH-12) → §41.15 (~18540+)
+- tableFor — type-driven `<table>` rendering FOURTH general-position L22 member; admin-UI-lift sibling to formFor (S105 — SPEC §41.16 + 13 `E-TABLEFOR-*` codes; impl pending). Markup-element form `<tableFor for=T rows=@cell>` per OQ-TF-1 synthesis-mode verdict 53/60 → §41.16 (~18700+)
+- tableFor markup-element form `<tableFor for=Type rows=@cell/>` (OQ-TF-1 debate verdict Form A 53/60 vs Form B function-call 34/60 vs Form C block-attribute 29/60; 19-pt margin) → §41.16
+- tableFor `<column field="X">` slot grammar (OQ-TF-7; rides §16 component slots; mirror formFor OQ-FF-1 51.5/60 verdict) → §41.16.3
+- tableFor sort surface — opt-in `<column sortable>` + auto-synth `@<varName>.sortedBy: TableSort | not` state cell (OQ-TF-2 + OQ-TF-12) → §41.16.7
+- tableFor selection surface — opt-in `selectable=@cell` outer attribute + leading checkbox column + mechanical `id`-field PK derivation + `selectedBy="field"` override (OQ-TF-3 + OQ-TF-12) → §41.16.8
+- tableFor empty-state default + `<empty>` slot override (OQ-TF-6) → §41.16.9
+- tableFor `pick:`/`omit:` field-set transforms (OQ-TF-8 family-vocabulary symmetry with formFor + schemaFor) → §41.16.5
+- tableFor per-cell type-driven default rendering (string/integer/real/boolean/timestamp/bare-variant-enum → text; payload-enum → E-TABLEFOR-VARIANT-PAYLOAD-ENUM-V1; nested-struct → E-TABLEFOR-NESTED-STRUCT-NO-SLOT) → §41.16.6
+- tableFor row binding inside `<column>` slot — explicit `:let={(row) => ...}` per §16.6 (OQ-TF-11 MEDIUM verdict; sub-debate optional if user contests implicit `@row` alternative) → §41.16.3
+- tableFor v1.0 scope-OUT (filtering / pagination / auto-recurse nested struct / `@label`/`@column` annotations / positional column slots / row-click handlers / server-side sort-filter-pagination / CSS-shipped styling / `<actions>` named slot / `registerColumnRenderer` registry / implicit `@row` magic var) → §41.16.10
 - schemaFor compiler-source impl (S104 — type-system walker + emit-schema-for.ts expander + 8 E-SCHEMAFOR-* codes wired) → compiler/src/type-system.ts (collectSchemaForImports + walkAndExpandSchemaForCalls + _processSchemaForCallInSchemaContext) + compiler/src/codegen/emit-schema-for.ts
 - schemaFor function-call form `${ schemaFor(Users) }` inside `<schema>` (OQ-SCH-1 debate verdict Form B 50/60) → §41.15.1
 - schemaFor `pick:`/`omit:` field-set transforms → §41.15.4

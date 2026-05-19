@@ -14878,6 +14878,19 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-SCHEMAFOR-NO-SQL-MAPPING | §41.15 | A struct field's declared type has no v1.0 SQL mapping (function types, Promise types, foreign-code types, deep-reactive proxy types, arbitrary opaque types). Resolution: exclude the field via `schemaFor(T, { omit: ["fieldName"] })`, OR refactor the struct to use a mappable shape (primitive scalar / string / number / boolean / enum / scrml-native temporal type). (Stage TS; catalog addition S103) | Error |
 | E-SCHEMAFOR-VARIANT-PAYLOAD-ENUM-V1 | §41.15, §39.5.8 | A struct field's declared type is a payload-bearing enum (one or more variants with payload, e.g., `Result:enum = { Ok(int), Err(string) }`). v1.0 does NOT lower payload enums to SQL — the choice between a JSON column (flexible; loses CHECK constraint precision) vs a separate-table join (relational; requires FK derivation per OQ-SCH-4) is deferred to v1.next. Bare-variant enums (no payloads) DO lower per §41.15.6 — `text req oneOf([...])`. Resolution: refactor to a bare-variant enum if the payload is not load-bearing, OR exclude the field via `omit:` and hand-author a JSON column / separate table as needed. (Stage TS; catalog addition S103) | Error |
 | E-SCHEMAFOR-INVALID-CALL-CONTEXT | §41.15 | `schemaFor(...)` was called outside a `<schema>` block — at the top level of a logic context, inside a `<program>` body without an enclosing `<schema>`, or inside any other markup context. The function-call form is canonical INSIDE `<schema>` blocks only (per OQ-SCH-1 + OQ-SCH-2 verdicts; the output is a `table-declaration` fragment that requires the `<schema>` parser context). Resolution: wrap the call inside a `<schema>${ schemaFor(...) }</>` block. (Stage TS; catalog addition S103) | Error |
+| E-TABLEFOR-TYPE-NOT-STRUCT | §41.16, §53.14 | `<tableFor for=X/>` was called with a non-struct type identifier. Enum types, named-shape types, refinement-type literals, generic-parameterized types, and arbitrary type expressions are rejected in `for=` position. Resolution: pass a `:struct` type as the `for=` value. For enum-shape boundary parsing, use `parseVariant` (§41.13); for form generation, use `formFor` (§41.14); for SQL DDL generation, use `schemaFor` (§41.15). (Stage TS; catalog addition S105 — tableFor SPEC entry) | Error |
+| E-TABLEFOR-ROWS-WRONG-TYPE | §41.16 | The `rows=` attribute on `<tableFor>` does not evaluate to `StructType[]` (e.g., `rows=@notAnArray`, `rows=@cellOfWrongStructType`, or `rows=42`). Resolution: ensure the cell/expression at `rows=` resolves to an array of the resolved `for=` struct type. (Stage TS; catalog addition S105 — tableFor SPEC entry) | Error |
+| E-TABLEFOR-ROWS-MISSING | §41.16 | A `<tableFor for=T/>` element omits the `rows=` attribute. Resolution: add `rows=@cellOrExpr` where the expression resolves to `T[]`. (Stage TS; catalog addition S105 — tableFor SPEC entry) | Error |
+| E-TABLEFOR-COLUMN-FIELD-UNKNOWN | §41.16 | A `<column field="X">` slot inside `<tableFor for=T>` names a field `X` not present on struct `T`. Resolution: correct the field name to match the struct definition, OR remove the `<column>` slot. (Stage TS; catalog addition S105 — tableFor SPEC entry) | Error |
+| E-TABLEFOR-PICK-INVALID-FIELD | §41.16 | The `pick=["X", ...]` attribute on `<tableFor for=T>` names a field `X` not present on struct `T`. Mirror of `E-FORMFOR-PICK-INVALID-FIELD` (§41.14) + `E-SCHEMAFOR-PICK-INVALID-FIELD` (§41.15). Resolution: correct or remove the invalid field name from the `pick:` array. (Stage TS; catalog addition S105 — tableFor SPEC entry) | Error |
+| E-TABLEFOR-OMIT-INVALID-FIELD | §41.16 | The `omit=["X", ...]` attribute on `<tableFor for=T>` names a field `X` not present on struct `T`. Mirror of `E-FORMFOR-OMIT-INVALID-FIELD` (§41.14) + `E-SCHEMAFOR-OMIT-INVALID-FIELD` (§41.15). Resolution: correct or remove the invalid field name from the `omit:` array. (Stage TS; catalog addition S105 — tableFor SPEC entry) | Error |
+| E-TABLEFOR-PICK-OMIT-CONFLICT | §41.16 | Both `pick=[...]` and `omit=[...]` were supplied on the same `<tableFor>` call. Mirror of `E-FORMFOR-PICK-OMIT-CONFLICT` (§41.14) + `E-SCHEMAFOR-PICK-OMIT-CONFLICT` (§41.15). Resolution: use exactly one of `pick:` or `omit:` per call. (Stage TS; catalog addition S105 — tableFor SPEC entry) | Error |
+| E-TABLEFOR-NESTED-STRUCT-NO-SLOT | §41.16 | A struct field's declared type is itself a `:struct` (e.g., `address: Address`) AND no explicit `<column field="address">` slot override is provided. Auto-recurse into nested struct fields is out-of-scope for tableFor v1.0 (mirror formFor §41.14.8 OQ-FF-11 v1.0 disposition). Resolution: provide a `<column field="address">` slot body that renders the nested struct (e.g., `${@row.address.street}, ${@row.address.city}`), OR exclude the field via `omit:`. (Stage TS; catalog addition S105 — tableFor SPEC entry) | Error |
+| E-TABLEFOR-VARIANT-PAYLOAD-ENUM-V1 | §41.16, §41.16.6 | A struct field's declared type is a payload-bearing enum (one or more variants with payload, e.g., `Result:enum = { Ok(int), Err(string) }`). v1.0 has no default rendering for payload variants (the choice between JSON-encoding the payload vs separate-table join is deferred to v1.next). Resolution: provide an explicit `<column field="X">` slot body with adopter-authored payload rendering, OR refactor to a bare-variant enum if the payload is not load-bearing, OR exclude via `omit:`. (Stage TS; catalog addition S105 — tableFor SPEC entry) | Error |
+| E-TABLEFOR-NO-DISPLAY-MAPPING | §41.16, §41.16.6 | A struct field's declared type has no v1.0 display mapping — function types, snippet types, Promise types, foreign-code types, deep-reactive proxy types, arbitrary opaque types. Resolution: exclude the field via `omit:`, OR provide an explicit `<column field="X">` slot body with adopter-authored rendering, OR refactor the struct to use a renderable type. (Stage TS; catalog addition S105 — tableFor SPEC entry) | Error |
+| E-TABLEFOR-SORTABLE-REQUIRES-CELL-ROWS | §41.16, §41.16.7 | At least one `<column field="X" sortable>` slot is present on `<tableFor>`, but the `rows=` attribute is not a cell reference (e.g., a literal array, or an arbitrary expression with no `@`-root from which to derive the synth state cell name). The sort surface requires `rows=@<varName>` (with optional `.method()` chains) so the synthesized `@<varName>.sortedBy: TableSort | not` cell has a stable name. Resolution: hoist the rows expression into a reactive cell (`<users> = ...` then `rows=@users`), OR remove the `sortable` attribute from the `<column>` slots if external sort is not needed. (Stage TS; catalog addition S105 — tableFor SPEC entry) | Error |
+| E-TABLEFOR-NO-PRIMARY-KEY | §41.16, §41.16.8 | The `selectable=@cell` attribute is set on `<tableFor for=T>`, but struct `T` has no field named `id` AND no `selectedBy="field"` override is provided. The selection surface needs a primary-key field to track which rows are selected. Resolution: add an `id` field to the struct, OR add `selectedBy="<some-other-field>"` to the `<tableFor>` element naming the PK field explicitly. (Stage TS; catalog addition S105 — tableFor SPEC entry) | Error |
+| E-TABLEFOR-SELECTABLE-CELL-WRONG-TYPE | §41.16, §41.16.8 | The cell referenced by `selectable=@cell` has a type other than `T[]` where `T` is the resolved primary-key field's type. (E.g., `selectable=@selectedIds` where `@selectedIds: string[]` but the PK field is `integer`.) Resolution: change the cell's declared type to match the PK field's type as an array (`T[]`), OR change the `selectedBy=` attribute to name a different PK field whose type matches the cell. (Stage TS; catalog addition S105 — tableFor SPEC entry) | Error |
 | I-MATCH-PROMOTABLE | §56 | Info-level lint surfaces an opportunity to promote an `if=` chain or `${ if (...) lift ... }` pattern over an enum-typed cell into a `<match for=Type on=@cell>` (Tier 1) block for structural exhaustiveness, OR into a `<engine for=Type>` (Tier 2) for full transition-validation. Run `bun scrml promote --match <file>[:line]` to mechanically lift the site. The lint is informational only; chains pre-S56 continue to compile cleanly. (Catalog addition S78 — reconciles SPEC §56 cross-ref claim. Emitted at `compiler/src/lint-promotable.ts` and consumed by `compiler/src/commands/promote.js`.) | Info |
 | W-CG-001 | §6 | A top-level `state-decl` / `let-decl` / `const-decl` / SQL block / etc. inside a logic block was suppressed from the client output (server-only emit, or unused). The lint surfaces what was filtered + why so the developer can confirm it was intentional. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-reactive-wiring.ts:366`.) | Warning |
 | W-CG-UNDEFINED-INTERPOLATION | §42.5, §42.8 | A literal `undefined` JS-keyword was detected in compiled output (CG-level regression guard). scrml absence is canonically JS `null` per §42.5 / §42.8 — `not` codegens to `null`, never to `undefined`. The lint runs post-emission across the per-file compiled JS and fires on each line containing a bare `undefined` keyword outside the canonical idiom exemptions: paired `null && undefined` absence-detection check (§42.5/§42.8 canon — both must be checked to detect scrml absence under JS-host normalisation); `typeof X !== "undefined"` env-detection (canonical JS idiom in quoted form, not a value-keyword interpolation); comments; string literals; template-literal text; embedded runtime block (hand-written JS, masked via `// --- scrml reactive runtime ---` / `// --- end ---` markers). Resolution: the codegen site emitting the bare `undefined` should be migrated to `null` (per §42.8 "null over undefined" rationale). (Catalog addition S90 — M-7C-D-12 Track 3 ratified per OQ-5 (a); emitted at `compiler/src/codegen/lint-undefined-interpolation.ts`.) | Warning |
@@ -18696,6 +18709,193 @@ Codegen (`emit-schema-for.ts`) emits the equivalent `<schema>` `table-declaratio
 - §34 — `E-SCHEMAFOR-TYPE-NOT-STRUCT`, `E-SCHEMAFOR-PICK-INVALID-FIELD`, `E-SCHEMAFOR-OMIT-INVALID-FIELD`, `E-SCHEMAFOR-PICK-OMIT-CONFLICT`, `E-SCHEMAFOR-NESTED-STRUCT-NO-FK-V1`, `E-SCHEMAFOR-NO-SQL-MAPPING`, `E-SCHEMAFOR-VARIANT-PAYLOAD-ENUM-V1`, `E-SCHEMAFOR-INVALID-CALL-CONTEXT`.
 
 **Authority:** S103 deep-dive (`scrml-support/docs/deep-dives/schemaFor-design-2026-05-19.md`) + OQ-SCH-1 debate verdict (Form B function-call 50/60 vs Form A markup-element 39/60 vs Form C block-attribute 37/60; synthesis-mode panel of 7 expert positions — vue-template-directives, drizzle-atlas, prisma, rails-activerecord, svelte-runes, htmx-hypermedia, simplicity-defender-precedent; live debate skipped per S103 user-direction given the 11-point margin + grounded 5-argument rationale) + S103 SCOPING (`docs/changes/schemaFor-scoping/SCOPING.md`) + Path B pivot from serialize STASH (`docs/changes/serialize-scoping/SCOPING.md`).
+
+### 41.16 `scrml:data` `tableFor` — type-driven `<table>` rendering from a struct definition + rows
+
+**Added:** S105, 2026-05-19 — ratified by the S105 deep-dive (`scrml-support/docs/deep-dives/tableFor-design-2026-05-19.md`; 9 SCOPING OQs + 3 newly-surfaced OQs deliberated; 3 HIGH / 7 MED-HIGH / 1 MEDIUM closed in deep-dive per S102 OQ-FF-7-skip methodology rule) and the OQ-TF-1 surface-form synthesis-mode verdict (Form A markup-element 53/60 vs Form B function-call 34/60 vs Form C block-attribute 29/60; 19-point margin) RATIFIED via user direction at S105 in lieu of live debate-curator dispatch (synthesis-mode-debate variant of the S103 surface-form-DEBATED rule; applicable when prior-art convergence is overwhelming + output-kind-match argument is structurally decisive + the deep-dive scoring rubric captures the load-bearing arguments). `tableFor` is the FOURTH general-position member of the type-as-argument family (cross-ref §53.14), the admin-UI-lift display sibling of formFor (§41.14). What `formFor` does for INPUT (struct → form + validators + submit), `tableFor` does for OUTPUT (struct + rows → table headers + per-row cells + optional sort/select state).
+
+**The API:**
+
+```scrml
+import { tableFor } from 'scrml:data'
+
+type User:struct = {
+    id:        integer
+    email:     string req
+    name:      string req
+    role:      UserRole req
+    createdAt: timestamp
+}
+
+type UserRole:enum = { Admin, Editor, Viewer }
+
+<users> = []
+<selectedIds>: integer[] = []
+
+<tableFor for=User rows=@users selectable=@selectedIds>
+    <column field="email"/>
+    <column field="name"/>
+    <column field="role" sortable>
+        <span class="badge badge-${@row.role}">${@row.role}</span>
+    </column>
+    <column field="createdAt" header="Joined" sortable/>
+    <column field="actions" :let={(row) =>
+        <button onclick=editUser(row.id)>Edit</button>
+        <button class="btn-danger" onclick=deleteUser(row.id)>Delete</button>
+    }/>
+    <empty>
+        <p>No users yet. <a href="/users/new">Invite the first one</a>.</p>
+    </empty>
+</tableFor>
+```
+
+That call expands at compile time into a `<table>` with `<thead>` (one `<th>` per included struct field) + `<tbody>` (one `<tr>` per row in `@users`, with one `<td>` per included field per row, default-rendered from the struct's field type or overridden via the matching `<column>` slot body). Opt-in `sortable` columns synthesize a compound reactive cell `@<varName>.sortedBy: TableSort | not` + click handlers on the relevant `<th>`s. Opt-in `selectable=@cell` wires a leading checkbox column to the adopter-declared `T[]` cell. The `<empty>` slot overrides the default empty-state markup.
+
+**Call signature (markup-element form, per OQ-TF-1 debate verdict):**
+
+```
+<tableFor for=StructType
+          rows=@cellOrExpr
+          [pick=["field", ...]]
+          [omit=["field", ...]]
+          [selectable=@selectedIdsCell]
+          [selectedBy="<pk-field>"]>
+    [<column field="<field>"
+             [header="<text>"]
+             [sortable]
+             [align="left"|"right"|"center"]
+             [class="<css>"]>
+        [override-markup-with-@row-OR-:let-scope]
+    </column>]*
+    [<empty>fallback-markup</empty>]
+</tableFor>
+```
+
+The markup-element form is canonical. A function-call form (`${ tableFor(Users, @users, { columns: {...}, empty: ... }) }`) was DEBATED + REJECTED at OQ-TF-1 (synthesis-mode 34/60 vs 53/60; primary: output-kind match — tableFor produces markup, and 9 of 10 prior-art frameworks ship markup-element form for table rendering with ZERO shipping markup-output via function-call form; secondary: the options-object with snippet-valued per-column entries is a Pillar 5 per-kind mini-DSL conflict + the function-prop shape OQ-FF-1 explicitly rejected at S102). A block-attribute form (`<table for=Users rows=@users>`) was REJECTED at OQ-TF-1 (29/60; collides with native HTML `<table>` semantics + ambiguous with HTML `for=` form-control attr + loses the explicit "this is a derived primitive" signal).
+
+#### 41.16.1 Normative statements — type argument
+
+- The `for=` attribute SHALL be a bare scrml-native `:struct` type identifier. Enum types, named-shape types, refinement-type literals, generic-parameterized types, and arbitrary type expressions SHALL NOT be accepted in this position. Violations SHALL emit `E-TABLEFOR-TYPE-NOT-STRUCT` at the type-system stage (cross-ref §34). The compile-time enforcement mirrors `formFor`'s `E-FORMFOR-TYPE-NOT-STRUCT` (§41.14.1) and `schemaFor`'s `E-SCHEMAFOR-TYPE-NOT-STRUCT` (§41.15.1).
+- The compiler SHALL resolve the `for=` type argument against the file's `typeRegistry` per §53.14.5; cross-file struct imports use the existing protocol of §21.
+
+#### 41.16.2 Normative statements — rows argument
+
+- The `rows=` attribute SHALL evaluate to an array of values of the resolved struct type (`StructType[]`). The runtime expression MAY be a `@cell` reactive reference, a `@cell.method()` call, an arithmetic expression yielding an array, or any other expression whose type-system inference resolves to `StructType[]`.
+- A type mismatch (e.g., `rows=@notAnArray` or `rows=@cellOfWrongStructType`) SHALL emit `E-TABLEFOR-ROWS-WRONG-TYPE` at the type-system stage.
+- The `rows=` attribute SHALL be present on every `<tableFor>` element. Absence SHALL emit `E-TABLEFOR-ROWS-MISSING`.
+- The compiler SHALL NOT mutate the array referenced by `rows=`. Sort/select state writes (§41.16.7, §41.16.8) write to AUTO-SYNTH or ADOPTER-OWNED state cells, never to the rows source.
+
+#### 41.16.3 Normative statements — column slot grammar (OQ-TF-7)
+
+- Per-column customization SHALL use the `<column field="<fieldName>">` slot mechanism (rides §16 component slots; mirrors `formFor`'s slot-style verdict OQ-FF-1 51.5/60).
+- The `field=` attribute SHALL be a string literal naming a struct field present on the resolved `for=` type. Unknown field names SHALL emit `E-TABLEFOR-COLUMN-FIELD-UNKNOWN`.
+- A `<column>` slot with empty body (`<column field="X"/>`) signals default-rendering for that field (per §41.16.6 type-driven dispatch).
+- A `<column>` slot with non-empty body invokes adopter-authored override markup; the slot body owns the inside of the `<td>` (the compiler emits the `<td>` wrapper + applies any `align=`/`class=` attributes).
+- The slot body SHALL expose the current row payload via explicit `:let={(row) => ...}` parametric-slot scope per §16.6. The bound name (`row`, `user`, `u`, etc.) is adopter-chosen.
+- `<column>` MAY also carry: `header="<text>"` (overrides §41.16.4 mechanical default); `sortable` (opts the column into §41.16.7 sort surface); `align="left"|"right"|"center"` (CSS text-align on `<th>` and `<td>`); `class="<css>"` (CSS class on `<th>` and `<td>`).
+- `<column>` slot SOURCE ORDER does NOT affect column emit order. Columns emit in struct field declaration order, with `pick:` array order taking precedence when present (per §41.16.5).
+- Positional `<column>` slots (no `field=` attribute) and computed-column slots are RESERVED for v1.next (per OQ-TF-7 v1.0 verdict — field-keyed only in v1.0).
+
+#### 41.16.4 Normative statements — header derivation
+
+- When `<column header="...">` is absent, the column header SHALL default to the **mechanical title-case** of the field name: lowercase characters following a capital letter are kept; non-alphanumeric separators are converted to spaces with title-casing on the following character. Examples: `email` → "Email"; `createdAt` → "Created At"; `is_admin` → "Is Admin"; `URL` → "URL" (all-caps preserved). This mirrors `formFor`'s §41.14.7 mechanical title-case Level-4 default.
+- Project-wide overrides via a `data.registerLabels({ field: "Custom" })` mechanism (mirror formFor's OQ-FF-7 v1.next Level-3) are RESERVED for v1.next.
+- Per-field annotation `@label("...")` is RESERVED for v1.next (per OQ-FF-7 v1.next carry; symmetric across formFor / tableFor).
+
+#### 41.16.5 Normative statements — field-set transforms (OQ-TF-8)
+
+- `pick=["field", ...]` SHALL accept an array literal of bare field-name strings. The emitted table SHALL include only the named fields, in the array's order (the `pick:` array order IS the column emit order; supersedes struct declaration order for the duration of this `<tableFor>` call). Field names not present on the struct SHALL emit `E-TABLEFOR-PICK-INVALID-FIELD`.
+- `omit=["field", ...]` SHALL accept an array literal of bare field-name strings. The emitted table SHALL include all struct fields except those named (preserving struct declaration order). Field names not present on the struct SHALL emit `E-TABLEFOR-OMIT-INVALID-FIELD`.
+- `pick=` and `omit=` SHALL NOT be combined on the same `<tableFor>` call. Co-occurrence is `E-TABLEFOR-PICK-OMIT-CONFLICT`.
+- The `partial: true` semantic from formFor (§41.14.5) is NOT-APPLICABLE to tableFor — tableFor is display-only; there are no validators to relax. Mirror schemaFor §41.15.4 NOT-APPLICABLE disposition.
+
+#### 41.16.6 Normative statements — per-cell default rendering (OQ-TF-7 type-driven dispatch)
+
+When a `<column field="X"/>` slot is empty (or omitted entirely for non-overridden fields), the compiler SHALL emit default `<td>` content based on the resolved field type:
+
+- **`string`** — bare interpolation: `${row.field}`.
+- **`integer` / `real`** — bare interpolation: `${row.field}` (no locale-aware numeric formatting in v1.0; deferred to v1.next).
+- **`boolean`** — text rendering: `"true"` / `"false"` (locale-aware label resolution via registerLabels is v1.next).
+- **`timestamp`** — ISO date string: `${row.field}` rendered via the existing timestamp-to-string default (locale-aware date formatting is v1.next).
+- **Bare-variant enum (no payload-bearing variants)** — variant name as text: `${row.field}`.
+- **Payload-bearing enum** (one or more variants with payload, e.g., `Result:enum = { Ok(int), Err(string) }`) — SHALL emit `E-TABLEFOR-VARIANT-PAYLOAD-ENUM-V1` at the type-system stage. Variant-payload rendering is OUT-OF-v1.0 (mirror schemaFor §41.15.6); adopter overrides via `<column field="X">` slot body for display-level handling.
+- **Nested struct field** (e.g., `address: Address`) — SHALL emit `E-TABLEFOR-NESTED-STRUCT-NO-SLOT` at the type-system stage. Auto-recurse into nested struct fields is OUT-OF-v1.0 (mirror formFor §41.14.8 + OQ-FF-11); adopter SHALL provide explicit `<column field="address">` slot body.
+- **Unmappable types** (function types, snippet types, Promise types, foreign-code types, deep-reactive proxy types) — SHALL emit `E-TABLEFOR-NO-DISPLAY-MAPPING` at the type-system stage. Error message SHALL name the field + the unmappable type + suggest `omit:` exclusion or explicit `<column field="X">` slot override.
+
+#### 41.16.7 Normative statements — sort surface (OQ-TF-2 + OQ-TF-12)
+
+- When AT LEAST ONE `<column field="X" sortable>` slot is present, tableFor SHALL synthesize a compound state cell `@<varName>.sortedBy: TableSort | not` where `TableSort` is the stdlib-declared shape `{ field: string, direction: "asc" | "desc" }` exported from `scrml:data`.
+- `<varName>` is derived from the `rows=` attribute via cell-reference extraction: `rows=@users` → `<varName> = users`; `rows=@items.filter(p)` → `<varName> = items`. The compiler SHALL emit `E-TABLEFOR-SORTABLE-REQUIRES-CELL-ROWS` if `rows=` is a non-cell expression (literal array, arbitrary expression with no @-root) AND any `<column sortable>` is present.
+- The synthesized cell's initial value SHALL be `not` (no sort applied at module init).
+- Click handlers on `<th>` for sortable columns SHALL toggle the sort: clicking an unsorted column SHALL set `@<varName>.sortedBy = { field: "X", direction: "asc" }`; re-clicking the same column SHALL toggle `direction` between `"asc"` and `"desc"`; clicking a different sortable column SHALL switch to that column at `"asc"`.
+- tableFor SHALL NOT mutate `@<varName>` (the rows source). Adopter wires a comparator on the rows via a derived cell or in-place computation reading `@<varName>.sortedBy`.
+- The sort surface SHALL compose with `pick:`/`omit:` — sortable fields excluded by `pick:` simply do not render a sortable `<th>`; the synth cell is still declared with the full `TableSort` shape so adopter wiring is uniform.
+
+#### 41.16.8 Normative statements — selection surface (OQ-TF-3 + OQ-TF-12)
+
+- The `selectable=@cell` outer attribute opts the table into row selection. The reactive cell type SHALL be `T[]` (homogeneous array) where `T` matches the resolved primary-key field's type.
+- The primary-key field SHALL default to a struct field named `id`. Override via the `selectedBy="<field-name>"` attribute on the `<tableFor>` element. If `selectable=` is set AND no `id` field exists on the struct AND `selectedBy=` is absent, the compiler SHALL emit `E-TABLEFOR-NO-PRIMARY-KEY`.
+- Type-checking: the `selectable=` cell type MUST equal `T[]` where `T` is the resolved primary-key field's type (after `selectedBy=` override if present). Mismatch SHALL emit `E-TABLEFOR-SELECTABLE-CELL-WRONG-TYPE`.
+- When `selectable=` is present, tableFor SHALL auto-synthesize a LEADING checkbox column (positioned before any other column, regardless of `pick:`/`omit:` content). The checkbox column has no `<th>` label by default; per-row `<td>` contains a `<input type="checkbox">` whose `checked` reactively reflects `@cell.includes(row.id)` and whose change handler toggles the row's PK value in `@cell`.
+- The `<thead>` SHALL also synthesize a master checkbox in the leading column: checked when `@cell.length === rows.length`, indeterminate when `0 < @cell.length < rows.length`, unchecked when `@cell.length === 0`. Click toggles all-on or all-off based on current state.
+- The selection surface SHALL compose with sort + pick/omit: sorting changes row order but preserves selection identity (cell content is PK values, not indices); `pick:`/`omit:` are orthogonal to selection (selection always applies at row granularity).
+
+#### 41.16.9 Normative statements — empty-state (OQ-TF-6)
+
+- When `rows.length == 0` at render time, tableFor SHALL emit one `<tr>` containing one `<td colspan="${field-count}">...</td>` where `<field-count>` is the count of emitted columns (including the leading checkbox column if `selectable=` is set).
+- When no `<empty>` slot is provided, the default `<td>` content SHALL be the bare text `"No rows to display"`.
+- When an `<empty>` slot is provided, the slot body content SHALL replace the default text inside the auto-wrapped `<tr><td colspan=N>...</td></tr>` structure. The slot body MAY contain any markup expression including `${...}` interpolations referencing reactive cells outside the `<tableFor>` element.
+- The `<empty>` slot rides §16 component slots. Multiple `<empty>` slots on the same `<tableFor>` SHALL be parser error (duplicate-slot rule per §16).
+- Locale-aware default text via registerMessages is RESERVED for v1.next.
+
+#### 41.16.10 Normative statements — wrapper shape + failure modes + out of scope for v1.0
+
+- tableFor SHALL emit ONLY the `<table>` element + content (`<thead>` + `<tbody>`). It SHALL NOT emit any outer wrapper element (`<div class="...">` etc.). Adopters compose external wrappers (page-shell header/footer, action buttons, summary captions) via ordinary scrml markup around the `<tableFor>` call site. Mirror schemaFor's bare-fragment emit shape + formFor's bare-`<form>` emit shape.
+- The following are explicitly NOT in v1.0; planned for v1.next:
+  - **Filtering surface** — adopter passes filtered `rows=` via expression OR derived cell.
+  - **Pagination surface** — adopter slices `rows=` via expression OR derived cell.
+  - **Auto-recurse nested struct fields** — emits `E-TABLEFOR-NESTED-STRUCT-NO-SLOT`.
+  - **`@label("...")` / `@column("...")` type-field annotations** — symmetric with formFor + schemaFor v1.next surfaces.
+  - **Positional `<column>` slots / computed-column slots** — for columns not on the struct (e.g., "actions").
+  - **Row-click handlers + row expansion / drill-down** — adopter wraps rows externally if needed in v1.0.
+  - **Server-side sort/filter/pagination** — adopter wires manually in v1.0.
+  - **CSS-shipped default styling** — tableFor emits plain `<table>` markup; adopter brings own CSS.
+  - **`<actions>` named slot** for row-action buttons — workaround via explicit `<column field="actions">` slot with ad-hoc struct field in v1.0.
+  - **`registerColumnRenderer(Type, ...)` registry** — type-driven default renderer overrides (mirror formFor's reserved Level-2 registerRenderer per OQ-FF-1 v1.next carry).
+  - **Implicit `@row` magic variable inside `<column>` slot bodies** — v1.0 requires explicit `:let={(row) => ...}` per §16.6. OQ-TF-11 sub-debate RECOMMENDED if user friction surfaces on the explicit form.
+  - **Variant-payload enum cell rendering** — emits `E-TABLEFOR-VARIANT-PAYLOAD-ENUM-V1` in v1.0.
+
+#### 41.16.11 Compile-time recognition
+
+`<tableFor for=StructType rows=@cell ...>` is recognized at the **type-system stage** (cross-ref §53.14.5) as a structural element. The compiler:
+
+1. Resolves the `for=` attribute against the file's `typeRegistry` per §53.14.5 step 3; validates `kind === "struct"`; emits `E-TABLEFOR-TYPE-NOT-STRUCT` on mismatch.
+2. Resolves the `rows=` attribute through standard expression type-inference; validates resolved type matches `StructType[]`; emits `E-TABLEFOR-ROWS-WRONG-TYPE` on mismatch + `E-TABLEFOR-ROWS-MISSING` on absence.
+3. Inspects `pick=` / `omit=` attributes if present; validates field names against the struct's field list (`E-TABLEFOR-PICK-INVALID-FIELD` / `E-TABLEFOR-OMIT-INVALID-FIELD`); validates non-co-occurrence (`E-TABLEFOR-PICK-OMIT-CONFLICT`).
+4. Inspects `selectable=` attribute if present; resolves the cell reference's type; derives PK field (mechanical `id` + `selectedBy=` override); validates cell type equals `T[]` (`E-TABLEFOR-NO-PRIMARY-KEY` + `E-TABLEFOR-SELECTABLE-CELL-WRONG-TYPE`).
+5. Walks each `<column>` slot child; validates `field=` attribute names a struct field (`E-TABLEFOR-COLUMN-FIELD-UNKNOWN`); detects `sortable` attribute presence to drive sort-state-cell synthesis.
+6. Walks the resolved struct's fields (filtered by `pick:`/`omit:`); for each field, validates the field's type has a v1.0 display mapping (`E-TABLEFOR-NO-DISPLAY-MAPPING` on unmappable types) and is not a payload-bearing enum (`E-TABLEFOR-VARIANT-PAYLOAD-ENUM-V1`) or nested struct without explicit slot (`E-TABLEFOR-NESTED-STRUCT-NO-SLOT`).
+7. If any column has `sortable` attribute, verifies `rows=` is a cell-reference expression (`E-TABLEFOR-SORTABLE-REQUIRES-CELL-ROWS` otherwise); registers the synthesized `@<varName>.sortedBy: TableSort | not` cell into the file's state-cell registry.
+8. Annotates the `<tableFor>` AST node with the resolved struct shape + transform metadata (pick/omit field list; sortable columns; selectable PK field; column slot overrides) for codegen consumption.
+
+Codegen (`compiler/src/codegen/emit-table-for.ts`) emits the equivalent `<table>` markup tree at the call site: `<thead><tr>` with auto-synth checkbox `<th>` (if `selectable=`) + per-field `<th>` (default or `<column>` slot's `header=` value) with click handlers for sortable columns; `<tbody>` containing iteration over `@rows` lifting per-row `<tr>` with checkbox `<td>` (if selectable) + per-field `<td>` (default-rendered or `<column>` slot body emission with `:let={(row) => ...}` substitution). The emitted output is standard scrml markup (Pillar 5) — readable as if hand-authored — and rides existing markup + reactive-render pipelines. The sort-state cell + click handlers + selection checkbox bindings are emitted as ordinary state-decl + event-handler nodes per §6.2 + §5.2.
+
+#### 41.16.12 Cross-references
+
+- §53.14 — type-as-argument family framing (tableFor is the fourth general-position member).
+- §41.13 — `parseVariant` (first general-position family member; structural precedent for compile-time type-argument recognition).
+- §41.14 — `formFor` (second general-position family member; closest output-kind-match precedent — both emit markup; established the slot-style customization OQ-FF-1 verdict tableFor inherits).
+- §41.15 — `schemaFor` (third general-position family member; output-kind-mismatch counter-precedent — schemaFor's function-call form is correct for string output; tableFor's markup-element form is correct for markup output; output-kind-match cross-check methodology applies symmetrically).
+- §16 — Component Slots (the `<column>` + `<empty>` slot machinery tableFor rides).
+- §16.6 — Parametric snippet `:let={(...) => markup}` (the row-binding mechanism for `<column>` slot bodies).
+- §6 — `${...}` interpolation (per-cell default rendering).
+- §17 — `lift` (per-row `<tr>` emission mechanism).
+- §6.5 — Reactive arrays (the `rows=@cell` reactivity substrate).
+- §14.3 — struct type definition syntax (the input source for tableFor).
+- L4 (S57 lock) — partial validator vocabulary unification (the architectural precondition that makes the type-as-argument family structurally cohesive).
+- §34 — `E-TABLEFOR-TYPE-NOT-STRUCT`, `E-TABLEFOR-ROWS-WRONG-TYPE`, `E-TABLEFOR-ROWS-MISSING`, `E-TABLEFOR-COLUMN-FIELD-UNKNOWN`, `E-TABLEFOR-PICK-INVALID-FIELD`, `E-TABLEFOR-OMIT-INVALID-FIELD`, `E-TABLEFOR-PICK-OMIT-CONFLICT`, `E-TABLEFOR-NESTED-STRUCT-NO-SLOT`, `E-TABLEFOR-VARIANT-PAYLOAD-ENUM-V1`, `E-TABLEFOR-NO-DISPLAY-MAPPING`, `E-TABLEFOR-SORTABLE-REQUIRES-CELL-ROWS`, `E-TABLEFOR-NO-PRIMARY-KEY`, `E-TABLEFOR-SELECTABLE-CELL-WRONG-TYPE`.
+
+**Authority:** S105 deep-dive (`scrml-support/docs/deep-dives/tableFor-design-2026-05-19.md`) + OQ-TF-1 surface-form synthesis-mode verdict (Form A markup-element 53/60 vs Form B function-call 34/60 vs Form C block-attribute 29/60; 19-point margin; RATIFIED via user direction S105 in lieu of live debate-curator dispatch per the synthesis-mode-debate variant of S103 surface-form-DEBATED rule — overwhelming prior-art convergence 9/10 markup-element + output-kind-match decisive + scoring rubric captures load-bearing arguments) + S105 SCOPING (`docs/changes/tableFor-scoping/SCOPING.md`).
 
 ---
 
@@ -26829,7 +27029,7 @@ The type-as-argument family is open with bounded discipline (§53.14.4). The shi
 | `serialize(value, EnumType)` | planned (~6-12mo horizon) | PASSES — symmetric to `parseVariant`; round-trip law `parseVariant(serialize(v, T), T) == .Ok(v)` is a structural invariant the language can guarantee |
 | `formFor(StructType)` | **shipped S102** (FLAGSHIP — `scrml.dev` demo). SPEC §41.14 (`0c16f58`) + impl (`e7f5241` — 11 files / +2733 LOC / +58 tests / 8 E-FORMFOR-* error codes) + stdlib re-export (S103 `b80ce2a` — `import { formFor, registerLabels } from 'scrml:data'` resolves; L2 label store wired at `_scrml_labels_registered` runtime helper, v1.0 expander always resolves to L4 title-case default; L2 consultation = separate follow-on). | PASSES — compile-time structural walk of struct fields → emits `<form>` markup tree using existing Shape 2 + auto-synth validity surface (§55) + `<errors of=>` machinery (§55.8) + §16 slots for customization + §5.2.3 `onsubmit=fn` for handler + §12.5-derived `action=` for progressive enhancement. Not expressible via predicates (predicates do not generate markup). |
 | `schemaFor(StructType)` | **spec'd S103** (THIRD active L22 general-position member after parseVariant + formFor; impl pending). SPEC §41.15 (this session) + 8 `E-SCHEMAFOR-*` codes at §34 + §39.5.8 enum-lowering row + §53.14.5 recognition list extension. Path B pivot from serialize STASH. Function-call form `${ schemaFor(Users) }` interpolated in `<schema>` per OQ-SCH-1 debate verdict (Form B 50/60 vs Form A markup-element 39/60 vs Form C block-attribute 37/60). | PASSES — emits `<schema>` SQL DDL from struct field predicates. Closes the §39 + L4 vocabulary-unification loop ("define type once → schema, form, validator, parser all derive") waiting since L4 landed at S58. Load-bearing v1.0 value-add: closes the enum-knowledge-loss-at-DB-boundary gap (`status: LoadStatus` lowers to `text req oneOf([variants...])` automatically per OQ-SCH-12; hand-authored `<schema>` blocks routinely store enum columns as bare `text not null` losing the variant-set constraint). |
-| `tableFor(StructType, rows)` | planned | PASSES — auto-`<table>` from struct fields + rows; per-column slot overrides; sorting/selection/empty-state attrs. Same family as `formFor` (admin-UI lift) |
+| `tableFor(StructType, rows)` | **spec'd S105** (FOURTH active L22 general-position member; admin-UI-lift sibling to formFor; impl pending). SPEC §41.16 (this session) + 13 `E-TABLEFOR-*` codes at §34. Markup-element form `<tableFor for=Users rows=@users>` with `<column field="X">` slot grammar per OQ-TF-1 synthesis-mode verdict 53/60 (vs Form B function-call 34/60 vs Form C block-attribute 29/60; 19-point margin; user-ratified in lieu of live debate via synthesis-mode-debate variant of S103 rule). | PASSES — auto-`<table>` from struct fields + rows; per-column slot overrides; opt-in `sortable` per-column with auto-synth `@<varName>.sortedBy: TableSort` state cell; opt-in `selectable=@cell` with mechanical PK derivation; `<empty>` slot. Closes the admin-UI-lift gap that hand-rolled `<table>` + per-row `lift <tr>` boilerplate currently leaves open across the corpus (5 hand-rolled tables in `examples/07-admin-dashboard.scrml`, `examples/11-meta-programming.scrml`, `examples/23-trucking-dispatch/`). |
 | `variantNames(EnumType)` / reflective metadata | planned | PASSES — exposes variant lists as runtime values, not currently surfaced; small primitive that tightens the family |
 
 **Family economics:** the architectural cost is paid once at `parseVariant` (S65, ~14-23h dispatch). Subsequent members harvest the precedent over a ~6-12mo horizon (~65-125h estimated for the rest of the family). Without the family discipline (§53.14.4), this surface would be a slippery slope into stdlib bloat; with the discipline, it is load-bearing infrastructure for ~85-145h of high-leverage feature surface that scrml's existing design center already points at.
@@ -26853,7 +27053,7 @@ The doc `scrml-support/docs/type-as-argument-family-2026-05-06.md` records the d
 Type-as-argument primitives are recognized at the **type-system stage** (`compiler/src/type-system.ts`), not the parser. The parser produces a regular `CallExpression` whose positional arguments are general expressions; an identifier-as-argument is just an `IdentExpr` AST node. The type-system pass:
 
 1. Resolves the call's callee through the file's import registry (cross-ref §41.3 — MOD stage).
-2. If the callee resolves to a recognized type-as-argument primitive (`parseVariant`, `formFor`, `schemaFor`, future `serialize`/`tableFor`/`variantNames`), inspects the type-argument position(s). For markup-element forms (`<formFor for=Type>`), the `for=` attribute carries the type identifier. For function-call forms (`parseVariant(json, T)`, `schemaFor(T)`), the type identifier is the dedicated positional argument (2nd for `parseVariant`; 1st for `schemaFor`).
+2. If the callee resolves to a recognized type-as-argument primitive (`parseVariant`, `formFor`, `schemaFor`, `tableFor`, future `serialize`/`variantNames`), inspects the type-argument position(s). For markup-element forms (`<formFor for=Type>`, `<tableFor for=Type rows=@cell>`), the `for=` attribute carries the type identifier. For function-call forms (`parseVariant(json, T)`, `schemaFor(T)`), the type identifier is the dedicated positional argument (2nd for `parseVariant`; 1st for `schemaFor`).
 3. Validates the type-argument is a bare `IdentExpr` whose `name` resolves in `typeRegistry` to a type with the expected `kind` (`:enum` for `parseVariant`/`serialize`/`variantNames`; `:struct` for `formFor`/`schemaFor`/`tableFor`).
 4. On validation failure, emits the per-primitive `E-*-TYPE-NOT-*` error (`E-PARSEVARIANT-TYPE-NOT-ENUM` for `parseVariant`; `E-FORMFOR-TYPE-NOT-STRUCT` for `formFor` (§41.14); `E-SCHEMAFOR-TYPE-NOT-STRUCT` for `schemaFor` (§41.15); future members get sibling codes).
 5. On validation success, annotates the call-expression node with a back-reference to the resolved type so codegen can pick it up directly without re-resolving.
