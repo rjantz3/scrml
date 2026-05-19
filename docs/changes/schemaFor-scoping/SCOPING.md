@@ -4,7 +4,7 @@ date: 2026-05-19
 session: S103
 authority: SPEC §53.14.3 (`schemaFor(StructType)` planned; sliver-test PASSES) + §53.14.4 (family discipline) + §39 (schema + migrations) + L4 (partial validator vocabulary unification — no bilingual schema) + family-precedent doc `scrml-support/docs/type-as-argument-family-2026-05-06.md`
 family_position: THIRD active L22 member (after parseVariant S65 + formFor S102-S103; serialize STASHED S103 `13e7919`)
-status: SCOPE OPEN — gates 1+2+3 expected STRONG PASS per pre-flight; gate 4 (deep-dive) RECOMMENDED FIRE with ~6-10 OQs; CLOSES §39+L4 vocabulary-unification loop that has been waiting since L4 landed
+status: 5/5 OQs RATIFIED S103 — deep-dive AUTHORIZED (Q-SCH-OPEN-1 YES); SPEC+impl-without-deep-dive REJECTED (Q-SCH-OPEN-2 NO); function form `schemaFor(Users)` returning DDL string PA-leaned for deep-dive disposition (Q-SCH-OPEN-3); FK derivation OUT-OF-SCOPE for v1.0 (Q-SCH-OPEN-4 NO); schemaFor advances OVER formFor marketing-shaped follow-ons per pa.md Rule 1 (Q-SCH-OPEN-5)
 ---
 
 # schemaFor — SCOPING
@@ -168,13 +168,17 @@ Mirror parseVariant + formFor architecture:
 
 ---
 
-## §9. Open questions BEFORE deep-dive
+## §9. Open questions — RATIFIED S103 (5/5 per PA-lean)
 
-1. **Q-SCH-OPEN-1 — Authorize deep-dive?** ~3-5h structured research dispatch (scrml-deep-dive agent). Output: deep-dive doc at `scrml-support/docs/deep-dives/schemaFor-design-YYYY-MM-DD.md` resolving 6-10 OQs above. PA recommends YES — gate-walk verdicts support advancing; OQ surface needs deliberation.
-2. **Q-SCH-OPEN-2 — Authorize skip-deep-dive AND go directly to SPEC + impl?** Risky — OQ surface is non-trivial; precedent (formFor) shows deep-dive surfaces structural concerns SCOPING misses. PA recommends NO.
-3. **Q-SCH-OPEN-3 — Surface form (markup-element vs function form) — preemptive ratification?** If PA-direct, save deep-dive scope. Tension: formFor settled on markup-element form via OQ-FF-1+OQ-FF-2 debates; schemaFor's output is NOT markup (it's a DDL string), so the markup-element form may be wrong-shape here. PA leans function form `schemaFor(Users)` returning a string — but defer to deep-dive rather than preempt.
-4. **Q-SCH-OPEN-4 — Foreign-key derivation in v1.0 (OQ-SCH-4)?** YES (auto-derive per convention) vs NO (defer to v1.next; explicit annotation required). PA leans NO for v1.0 — explicit-over-implicit + matches formFor's nested-struct-no-auto-recurse precedent.
-5. **Q-SCH-OPEN-5 — Sequencing relative to formFor follow-ons?** S102 master-list still has formFor follow-ons queued (sample app, scrml.dev refresh, README compile-gate block, conformance corpus expansion, `disabled=!@cell` reactive-attr wiring fix, v1.next items). schemaFor work would be IN ADDITION TO those. PA leans schemaFor over formFor-marketing-shaped follow-ons (per pa.md Rule 1) but flag conformance corpus expansion as a possible parallel.
+User ratified all 5 OQs per the recorded PA-leans (S103, 2026-05-19). Each OQ closed below.
+
+1. **Q-SCH-OPEN-1 — Authorize deep-dive?** **RATIFIED: YES.** ~3-5h structured research dispatch via scrml-deep-dive agent. Output target: `scrml-support/docs/deep-dives/schemaFor-design-2026-05-19.md`. Resolves the ~10 OQs (OQ-SCH-1..10) listed in §5 above.
+2. **Q-SCH-OPEN-2 — Skip deep-dive + go directly to SPEC + impl?** **RATIFIED: NO.** OQ surface is non-trivial; precedent (formFor S102 deep-dive surfaced design concerns the SCOPING alone missed) supports the methodology.
+3. **Q-SCH-OPEN-3 — Surface form (markup-element vs function form)?** **RATIFIED: function form `schemaFor(Users)` returning DDL string — PA-leaned position carried into deep-dive.** Deep-dive may revisit if structural reason surfaces but the leaning is the working assumption. Rationale: schemaFor's output is NOT markup; markup-element form (per formFor precedent) would be wrong-shape.
+4. **Q-SCH-OPEN-4 — FK derivation in v1.0?** **RATIFIED: NO.** Explicit-over-implicit; mirror formFor's nested-struct-no-auto-recurse precedent (OQ-FF-11 deferral). v1.next can add `@references(Table.id)` type-field annotation when adopter friction signals.
+5. **Q-SCH-OPEN-5 — Sequencing vs formFor follow-ons?** **RATIFIED: schemaFor advances over formFor marketing-shaped follow-ons per pa.md Rule 1** (no marketing/article/tweet work unless explicitly raised). The substantive bar is "compiler working as planned"; formFor's stdlib + impl already shipped — sample-app / scrml.dev refresh / README compile-gate are Rule-1 deferred. Conformance corpus expansion + `disabled=!@cell` reactive-attr fix remain possible parallel work but NOT a blocker for schemaFor.
+
+**Operational consequence:** deep-dive dispatch fires next; output lands at the named scrml-support path; resolves the 10 OQ-SCH-* design surface questions; gates the SPEC + impl phase that follows.
 
 ---
 
