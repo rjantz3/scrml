@@ -65,6 +65,19 @@ are the ideas any good?
 > recent landings: [`docs/changelog.md`](./docs/changelog.md); session
 > hand-offs: [`hand-off.md`](./hand-off.md) (current) +
 > [`handOffs/`](./handOffs/) (rotated).
+>
+> **Known gaps (spec-vs-impl drift).** The compiler does not yet implement every
+> feature the spec describes. The largest open gap as of v0.3.x:
+> **`<match>` block-form** (Tier 1 of the case-analysis ladder; SPEC §18.0.1)
+> currently compiles as opaque HTML pass-through — the block accepts source
+> mechanically but doesn't render in the browser and none of the spec'd safety
+> lints fire. Workaround: use `<engine>` (Tier 2, fully implemented). Full
+> implementation arc is scoped + active. Other open gaps: Tailwind arbitrary-
+> value classes silently no-op; one cascading-parse-error edge on multi-line
+> `<a>` openers with entity-encoded element-name bodies; bare context-opener
+> tokens (`?{` / `/`) in markup-text body have no docs-mode escape. Full list
+> with per-gap workarounds, reproducers, SCOPING links, and target releases:
+> **[`docs/known-gaps.md`](./docs/known-gaps.md)**.
 
 ## Quick start
 

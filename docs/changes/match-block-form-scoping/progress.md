@@ -32,3 +32,37 @@ User ratified all 4 PA recommendations:
 Remaining OQs (Q-MB-2 / 4 / 6 / 8 / 9 / 10) are PA-internal-decidable during dispatch — surface decisions in per-phase commits.
 
 **Next step:** commit SCOPING standalone; Phase 1 (parser) follows as the next PA action (this session if budget, otherwise next).
+
+## 2026-05-19 (S107, post-SCOPING) — Phase 1 attempt found deeper-than-expected scope; paused
+
+**Pre-flight grep complete (Q-MB-7 verification).** Zero adopter source files use `<match>` block-form today:
+- `examples/` + `samples/compilation-tests/` — all hits are inside gitignored `dist/scrml-runtime.js` (compiled-runtime comments)
+- `docs/website/pages/` — 4 hits are reference pages ABOUT `<match>` + its error codes (descriptive content with `//` comment headers + HTML-escaped descriptions), NOT live syntax
+- Cut-over is safe with no migration window. Q-MB-7 ratification holds.
+
+**Phase 1 attempt — ast-builder.js dispatch alone is insufficient.** Authored a `block.name === "match"` dispatch branch in `compiler/src/ast-builder.js` (mirroring the engine-decl `block.name === "engine"` branch at line 10657). Smoke-test failed: the new dispatch never fires.
+
+**Root cause:** the **block-splitter (BS layer) doesn't recognize `<match>` as a structural opener** at all. BS captures the entire `<match for=Phase>...</>` block as a single `type: "text"` raw-text child of the enclosing `<program>`. By the time ast-builder.js sees the data, there's no `block.name === "match"` to dispatch on — there's only opaque text inside a synthetic logic wrapper, which becomes the `kind: "html-fragment"` AST node seen earlier.
+
+Empirical confirmation via `splitBlocks` output for the reproducer:
+```
+- name="program" type=markup (children: 3)
+  - name=null type=text  raw-preview="<match for=Phase on=@phase>     <Idle rule=Loading> : ..."
+  - name=null type=text  raw-preview=" "
+```
+
+`name=null type=text` — the BS layer treats the whole match block as ambient text, never enters a structural-block recognizer. This is parallel to the channel + page + program + engine recognition that BS DOES perform (`name="program"` is the surrounding block in this dump).
+
+**Revised Phase 1 scope:** must include BS-layer recognition of `<match>` as a structural opener BEFORE ast-builder.js can structure it. Need to find the BS-layer block-recognizer (likely at `block-splitter.js`'s opener-token discrimination) and add `match` to whatever known-structural-tags surface it consults.
+
+**Reverted the ast-builder.js change** — it's dead until BS recognizes `<match>`. Saved this finding for next-session pickup. The SCOPING §8 file-inventory already lists `block-splitter.js` under Phase 1 ("recognize `<match>` as structural so it doesn't fall to html-fragment") with a `(maybe)` qualifier — that `(maybe)` is now confirmed REQUIRED.
+
+**Phase 1 revised file inventory:**
+1. `compiler/src/block-splitter.js` — add `<match>` to structural-tag recognition (probably ~1-2h investigation + edit)
+2. `compiler/src/ast-builder.js` — dispatch branch as already-drafted (~30min once BS feeds it)
+3. `compiler/src/attribute-registry.js` — register match-block attribute schema (`for=`, `on=`)
+4. parser unit tests covering AST shape
+
+**Phase 1 estimate refinement:** ~4-6h (was ~3-5h; +1h for BS-layer recognition + investigation).
+
+**Pause point:** README amendment requested by user mid-session ("honest current state, link to error log, major ones called out on front page"). Phase 1 deferred to next session OR continued after the README amendment + commit. The match block-form gap is the first entry in the new `docs/known-gaps.md`; the README current-state blockquote names it explicitly with link out.
