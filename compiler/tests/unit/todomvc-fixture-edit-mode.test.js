@@ -265,7 +265,12 @@ describe("§B: lift-template attribute parser — current-broken-output repros",
     expect(js).not.toMatch(/setAttribute\("if"/);
     // Display-style toggle + subscription to the reactive cell.
     expect(js).toMatch(/style\.display\s*=/);
-    expect(js).toMatch(/_scrml_reactive_subscribe\("editingId"/);
+    // S103 Phase 3 (Candidate A) — when the bind shape is a STRICTEST-scope
+    // predicate (`@cell == closure-expr`), emit-lift now routes through
+    // _scrml_reactive_subscribe_when (value-indexed sub-registry) instead of
+    // LEGACY _scrml_reactive_subscribe. Accept either shape so the test is
+    // robust across the chip-away wiring.
+    expect(js).toMatch(/_scrml_reactive_subscribe(?:_when)?\("editingId"/);
   });
 
   test("§B.4 onkeydown=fn() inside lift wraps without event-threading (SPEC §5.2.2)", () => {

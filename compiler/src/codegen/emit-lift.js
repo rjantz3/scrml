@@ -5,6 +5,7 @@ import { genVar } from "./var-counter.ts";
 import { VOID_ELEMENTS } from "./utils.ts";
 import { iterableHasReactiveRefs } from "./reactive-deps.ts";
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
+import { detectPredicateShapeBind } from "./predicate-bind-detector.js";
 
 // ---------------------------------------------------------------------------
 // Render keyword rewriter (§16.6)
@@ -463,8 +464,19 @@ function emitSetAttrs(elVar, attrs) {
       // `form` (matches the top-level if= subscription granularity).
       const refMatches = attr.value.match(/@([A-Za-z_$][A-Za-z0-9_$.]*)/g) || [];
       const uniqueRefs = [...new Set(refMatches.map(r => r.replace(/^@/, "").split(".")[0]))];
-      for (const ref of uniqueRefs) {
-        lines.push(`_scrml_reactive_subscribe(${JSON.stringify(ref)}, ${updaterVar});`);
+      // S103 Phase 3 select-row chip-away — value-indexed subscription
+      // dispatch. When the bind expression is a STRICTEST-scope predicate
+      // shape (cell == literal-or-closure-expr), register the updater under
+      // the value-indexed sub-registry so writes fire only the OLD-value +
+      // NEW-value buckets (O(2) per write instead of O(N) over all rows).
+      // Falls back to LEGACY for any non-predicate shape.
+      const predicate = detectPredicateShapeBind(attr.value);
+      if (predicate.matched && uniqueRefs.length === 1 && uniqueRefs[0] === predicate.cellName) {
+        lines.push(`_scrml_reactive_subscribe_when(${JSON.stringify(predicate.cellName)}, ${predicate.valueExprJS}, ${updaterVar});`);
+      } else {
+        for (const ref of uniqueRefs) {
+          lines.push(`_scrml_reactive_subscribe(${JSON.stringify(ref)}, ${updaterVar});`);
+        }
       }
     } else if (attr.name.startsWith("class:")) {
       // §5.5.2 conditional class directive — see the parity branch in
@@ -645,8 +657,15 @@ export function emitCreateElementFromMarkup(node, lines) {
       const rawText = val.kind === "variable-ref" ? (val.name || "") : (val.raw || "");
       const refMatches = rawText.match(/@([A-Za-z_$][A-Za-z0-9_$.]*)/g) || [];
       const uniqueRefs = [...new Set(refMatches.map(r => r.replace(/^@/, "").split(".")[0]))];
-      for (const ref of uniqueRefs) {
-        lines.push(`_scrml_reactive_subscribe(${JSON.stringify(ref)}, ${updaterVar});`);
+      // S103 Phase 3 select-row chip-away — value-indexed dispatch (parity
+      // with the attrs-string path above). See that branch for the rationale.
+      const predicate = detectPredicateShapeBind(rawText);
+      if (predicate.matched && uniqueRefs.length === 1 && uniqueRefs[0] === predicate.cellName) {
+        lines.push(`_scrml_reactive_subscribe_when(${JSON.stringify(predicate.cellName)}, ${predicate.valueExprJS}, ${updaterVar});`);
+      } else {
+        for (const ref of uniqueRefs) {
+          lines.push(`_scrml_reactive_subscribe(${JSON.stringify(ref)}, ${updaterVar});`);
+        }
       }
       continue;
     }

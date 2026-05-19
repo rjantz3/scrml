@@ -135,6 +135,15 @@ const _STDLIB_HOST_CHUNK   = _loadStdlibChunk("host");
 export const SCRML_RUNTIME = `// --- scrml reactive runtime ---
 const _scrml_state = {};
 const _scrml_subscribers = {};
+// S103 Phase 3 select-row chip-away (Candidate A) — value-indexed sub-registry
+// parallel to _scrml_subscribers. Predicate-shape binds emitted by emit-lift.js
+// register here under their static valueKey (the constant they compare the cell
+// to). At write time _scrml_reactive_set fires only the OLD-value bucket and
+// the NEW-value bucket — O(2) per write instead of O(N) over all rows.
+// Shape: { [name]: { [valueKey]: [fn, ...] } }
+// TDZ-safe: declared next to _scrml_subscribers since state-decl substrates
+// may write to cells during module-init before the helper functions resolve.
+const _scrml_value_indexed_subscribers = {};
 // scrml: stdlib registry — populated by per-stdlib chunks (see end of runtime).
 // Client-emitted code rewrites \`import { x } from "scrml:NAME"\` to
 // \`const { x } = _scrml_stdlib.NAME;\` (browser cannot resolve bare specifiers).
@@ -165,12 +174,13 @@ const _scrml_stdlib = {};
 // representative TodoMVC op.
 const __SCRML_PERF = (typeof globalThis !== "undefined" && globalThis.__SCRML_DEBUG_PERF)
   ? {
-      reactive_get:       { ms: 0, count: 0 },
-      reactive_set:       { ms: 0, count: 0 },
-      reconcile_list:     { ms: 0, count: 0 },
-      notify_subscribers: { ms: 0, count: 0 },
-      dom_write:          { ms: 0, count: 0 },
-      effect_scheduling:  { ms: 0, count: 0 },
+      reactive_get:         { ms: 0, count: 0 },
+      reactive_set:         { ms: 0, count: 0 },
+      reconcile_list:       { ms: 0, count: 0 },
+      notify_subscribers:   { ms: 0, count: 0 },
+      notify_value_indexed: { ms: 0, count: 0 },
+      dom_write:            { ms: 0, count: 0 },
+      effect_scheduling:    { ms: 0, count: 0 },
     }
   : null;
 const __SCRML_PERF_NOW = (typeof performance !== "undefined" && performance.now)
@@ -430,6 +440,7 @@ function _scrml_reactive_set(name, value) {
         _scrml_reactive_throttled(name, function () { return value; }, rule.ms);
       } else {
         // Unknown rule kind — defensive: fall through to immediate set.
+        const __oldValue_def = _scrml_state[name];
         _scrml_state[name] = value;
         const dirtied = _scrml_propagate_dirty(name);
         if (_scrml_subscribers[name]) {
@@ -440,6 +451,15 @@ function _scrml_reactive_set(name, value) {
           if (__SCRML_PERF) {
             __SCRML_PERF.notify_subscribers.ms += __SCRML_PERF_NOW() - __t_sub;
             __SCRML_PERF.notify_subscribers.count++;
+          }
+        }
+        // S103 Phase 3 select-row chip-away — value-indexed fan-out
+        if (_scrml_value_indexed_subscribers[name]) {
+          const __t_vi = __SCRML_PERF ? __SCRML_PERF_NOW() : 0;
+          _scrml_notify_value_indexed(name, __oldValue_def, value);
+          if (__SCRML_PERF) {
+            __SCRML_PERF.notify_value_indexed.ms += __SCRML_PERF_NOW() - __t_vi;
+            __SCRML_PERF.notify_value_indexed.count++;
           }
         }
         if (typeof _scrml_trigger === "function") _scrml_trigger(_scrml_state, name);
@@ -456,6 +476,11 @@ function _scrml_reactive_set(name, value) {
     }
     return value;
   }
+  // S103 Phase 3 select-row chip-away — capture OLD value BEFORE the write
+  // so value-indexed dispatch can fan out the OLD-value bucket alongside the
+  // NEW-value bucket. Cheap read; never null-throws because _scrml_state is
+  // a plain object initialized at runtime-template load.
+  const __oldValue = _scrml_state[name];
   _scrml_state[name] = value;
   // §6.6.3 Phase 2: eagerly propagate dirty flags to all downstream derived nodes
   // before subscribers fire and before this call returns. Synchronous, no re-evaluation.
@@ -468,6 +493,19 @@ function _scrml_reactive_set(name, value) {
     if (__SCRML_PERF) {
       __SCRML_PERF.notify_subscribers.ms += __SCRML_PERF_NOW() - __t_sub;
       __SCRML_PERF.notify_subscribers.count++;
+    }
+  }
+  // S103 Phase 3 select-row chip-away — value-indexed fan-out. Fires only the
+  // OLD-value bucket + NEW-value bucket; predicate-shape binds emitted by
+  // emit-lift.js register here instead of the LEGACY _scrml_subscribers when
+  // detectPredicateShapeBind matches. O(2) per write instead of O(N) over all
+  // rows.
+  if (_scrml_value_indexed_subscribers[name]) {
+    const __t_vi = __SCRML_PERF ? __SCRML_PERF_NOW() : 0;
+    _scrml_notify_value_indexed(name, __oldValue, value);
+    if (__SCRML_PERF) {
+      __SCRML_PERF.notify_value_indexed.ms += __SCRML_PERF_NOW() - __t_vi;
+      __SCRML_PERF.notify_value_indexed.count++;
     }
   }
   // Bridge with _scrml_effect auto-tracking: fire effects tracking _scrml_state[name]
@@ -539,6 +577,104 @@ function _scrml_reactive_subscribe(name, fn) {
       if (idx !== -1) subs.splice(idx, 1);
     }
   };
+}
+
+// S103 Phase 3 select-row chip-away — value-indexed subscription.
+//
+// Derive a stable property-key string for a primitive valueKey. The key must
+// distinguish "5" from 5 and "true" from true so the wrong bucket never gets
+// fired. JSON-style type prefixing is sufficient for the supported scope
+// (string / number / boolean / null / undefined).
+//
+// Non-primitive values (objects, arrays, functions) MUST NOT reach here —
+// the codegen detector rejects shapes that could yield a non-primitive
+// valueKey at registration time. Defensive fallback uses String(v) so the
+// runtime never throws, but the registration is effectively useless because
+// object identity isn't stable across closures.
+function _scrml_value_indexed_key(v) {
+  if (v === null || v === undefined) return "\\u0000n";
+  const t = typeof v;
+  if (t === "string") return "s:" + v;
+  if (t === "number") return "n:" + v;
+  if (t === "boolean") return v ? "b:1" : "b:0";
+  // Defensive fallback — not a supported registration path.
+  return "x:" + String(v);
+}
+
+/**
+ * Register fn under (name, valueKey) so it only fires when _scrml_reactive_set
+ * for 'name' touches the OLD-value === valueKey OR the NEW-value === valueKey
+ * bucket. Mirrors _scrml_reactive_subscribe's unsubscribe-closure shape.
+ *
+ * @param {string} name — reactive variable name (without @ prefix)
+ * @param {string|number|boolean|null|undefined} valueKey — the constant the
+ *     bind expression compares the cell to; must be a primitive that survives
+ *     _scrml_value_indexed_key() stable derivation
+ * @param {function} fn — subscriber callback, called with (newValue) when the
+ *     bucket fires (same shape as _scrml_reactive_subscribe)
+ * @returns {() => void} unsubscribe function
+ */
+function _scrml_reactive_subscribe_when(name, valueKey, fn) {
+  const key = _scrml_value_indexed_key(valueKey);
+  let nameMap = _scrml_value_indexed_subscribers[name];
+  if (!nameMap) {
+    nameMap = {};
+    _scrml_value_indexed_subscribers[name] = nameMap;
+  }
+  let bucket = nameMap[key];
+  if (!bucket) {
+    bucket = [];
+    nameMap[key] = bucket;
+  }
+  bucket.push(fn);
+  return () => {
+    const nm = _scrml_value_indexed_subscribers[name];
+    if (!nm) return;
+    const b = nm[key];
+    if (!b) return;
+    const idx = b.indexOf(fn);
+    if (idx !== -1) b.splice(idx, 1);
+    if (b.length === 0) delete nm[key];
+  };
+}
+
+// Fire the OLD-value bucket + NEW-value bucket for 'name' (predicate-shape
+// dispatch). Called from _scrml_reactive_set after the LEGACY fan-out.
+// Bucket entries fire in registration order. Each fn is invoked with
+// (newValue) for shape parity with the LEGACY callback contract — note that
+// for OLD-bucket subscribers, the predicate result was previously true and
+// has now flipped to false (the row that WAS editing is no longer editing).
+// The subscriber recomputes its full predicate from current cell state on
+// each call so the (newValue) argument is informational, not load-bearing.
+function _scrml_notify_value_indexed(name, oldValue, newValue) {
+  const nameMap = _scrml_value_indexed_subscribers[name];
+  if (!nameMap) return;
+  const oldKey = _scrml_value_indexed_key(oldValue);
+  const newKey = _scrml_value_indexed_key(newValue);
+  const oldBucket = nameMap[oldKey];
+  if (oldBucket) {
+    // Snapshot length to avoid disturbance from subscribers that mutate the
+    // bucket during fire (e.g. via unsubscribe).
+    const len = oldBucket.length;
+    for (let i = 0; i < len; i++) {
+      const fn = oldBucket[i];
+      if (!fn) continue;
+      try { fn(newValue); } catch(e) { console.error("scrml value-indexed subscriber error:", e); }
+    }
+  }
+  // Skip the new bucket when keys collide (no-op write) — fires the same
+  // subscribers twice otherwise.
+  if (newKey !== oldKey) {
+    const newBucket = nameMap[newKey];
+    if (newBucket) {
+      const len = newBucket.length;
+      for (let i = 0; i < len; i++) {
+        const fn = newBucket[i];
+        if (!fn) continue;
+        try { fn(newValue); } catch(e) { console.error("scrml value-indexed subscriber error:", e); }
+      }
+    }
+  }
 }
 
 /**
