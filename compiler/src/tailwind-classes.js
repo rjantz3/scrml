@@ -1108,6 +1108,45 @@ const ARBITRARY_PREFIX_MAP = {
   "z": "z-index",
   // Border radius
   "rounded": "border-radius",
+  // Grid (S109 dogfood Bug 1 — full fix)
+  //
+  // Grid template-track classes accept multi-token lists via the
+  // underscore-as-space convention: `grid-cols-[auto_1fr_auto]` emits
+  // `grid-template-columns: auto 1fr auto`. See validateArbitraryCss's
+  // "list" branch for the value-shape rules.
+  "grid-cols": "grid-template-columns",
+  "grid-rows": "grid-template-rows",
+  // Grid placement — start/end accept integer line numbers OR `auto`.
+  "col-start": "grid-column-start",
+  "col-end": "grid-column-end",
+  "row-start": "grid-row-start",
+  "row-end": "grid-row-end",
+  // Flexbox track scalars
+  "grow": "flex-grow",
+  "shrink": "flex-shrink",
+  "order": "order",
+  "basis": "flex-basis",
+  // Flex shorthand — `flex-[1_1_0]` emits `flex: 1 1 0`. Distinct from
+  // the static utilities `flex` (display:flex), `flex-1`, `flex-auto`,
+  // `flex-col`, etc. — those have no `[]` and resolve through the static
+  // registry. Only the bracketed form arrives here.
+  "flex": "flex",
+  // Aspect ratio
+  //
+  // `aspect-[16/9]` produces `aspect-ratio: 16/9`. The `/` is bracket-
+  // legal (not in the injection-vector set) and passes through verbatim.
+  "aspect": "aspect-ratio",
+};
+
+// Prefix → emit-transform map for arbitrary-value classes whose CSS
+// declaration cannot be expressed as the literal `<prop>: <css-value>`
+// substitution. `col-span-[2]` cannot map to `grid-column: 2` — it must
+// become `grid-column: span 2 / span 2` per Tailwind's named-utility
+// behavior. The transform receives the validated value descriptor and
+// returns the FULL declaration body (no leading `<prop>:`).
+const ARBITRARY_DECL_TRANSFORM = {
+  "col-span": (v) => `grid-column: span ${v.css} / span ${v.css}`,
+  "row-span": (v) => `grid-row: span ${v.css} / span ${v.css}`,
 };
 
 // Overloaded prefixes — property depends on value shape.
@@ -1156,8 +1195,14 @@ const VALID_COLOR_FUNCTIONS = new Set([
 ]);
 
 // CSS math/utility-function names accepted in arbitrary values.
+//
+// S109 expansion (Bug 1 full fix): `repeat`, `minmax`, `fit-content` enable
+// grid-template values like `grid-cols-[repeat(3,minmax(0,1fr))]`. These
+// are CSS-level functions, not math — keeping them in the same whitelist
+// keeps the validator's one-function-table contract.
 const VALID_MATH_FUNCTIONS = new Set([
   "calc", "min", "max", "clamp", "var",
+  "repeat", "minmax", "fit-content",
 ]);
 
 // CSS-wide keywords accepted as bare values.
@@ -1242,6 +1287,33 @@ function validateArbitraryCss(raw) {
     return { error: { code: "E-TAILWIND-001", reason: `invalid character (backtick) in \`${raw}\`` } };
   }
 
+  // Multi-token list value (S109 Bug 1 full fix). Tailwind's
+  // underscore-as-space convention: `_` at the TOP LEVEL of the bracket
+  // content is a space substitute. `grid-cols-[auto_1fr_auto]` ->
+  // `grid-template-columns: auto 1fr auto`. Underscores INSIDE function
+  // parens (e.g. `repeat(3,minmax(0,1fr))` has none, but a value like
+  // `clamp(1rem,_2vw,_3rem)` would) are preserved literally — that is,
+  // function bodies are validated as a single token, no inner splitting.
+  //
+  // Each underscore-separated part is validated recursively via this
+  // same function, so a list of `<keyword>_<length>_<keyword>` works,
+  // mixed with hex / functions / `var()` references.
+  if (containsTopLevelUnderscore(raw)) {
+    const parts = splitOnTopLevelUnderscore(raw);
+    const validated = [];
+    for (const part of parts) {
+      if (part.length === 0) {
+        return { error: { code: "E-TAILWIND-001", reason: `empty list segment in \`${raw}\` (consecutive '_' or trailing '_')` } };
+      }
+      const sub = validateArbitraryCss(part);
+      if (sub.error) {
+        return sub;
+      }
+      validated.push(sub);
+    }
+    return { kind: "list", css: validated.map(v => v.css).join(" ") };
+  }
+
   // Function-shaped value: `name(...)`
   const fnMatch = raw.match(/^([a-zA-Z][a-zA-Z0-9-]*)\((.*)\)$/);
   if (fnMatch) {
@@ -1304,6 +1376,15 @@ function validateArbitraryCss(raw) {
     return { error: { code: "E-TAILWIND-001", reason: `invalid CSS unit \`${unit}\` in \`${raw}\`` } };
   }
 
+  // Ratio: `<num>/<num>` (S109 Bug 1 full fix — `aspect-[16/9]`). CSS
+  // accepts this form for `aspect-ratio` and `grid-row` / `grid-column`
+  // shorthand line-specs. Both numbers must be positive (CSS spec); we
+  // accept unsigned digit-fraction shape.
+  const ratioMatch = raw.match(/^(\d+(?:\.\d+)?|\.\d+)\/(\d+(?:\.\d+)?|\.\d+)$/);
+  if (ratioMatch) {
+    return { kind: "ratio", css: raw };
+  }
+
   // Bare CSS keyword
   if (VALID_CSS_KEYWORDS.has(raw)) {
     return { kind: "keyword", css: raw };
@@ -1336,6 +1417,49 @@ function balancedParens(s) {
     }
   }
   return depth === 0;
+}
+
+/**
+ * Does the string contain at least one `_` outside any `(...)` parens?
+ * Used by `validateArbitraryCss` to detect multi-token list values per
+ * the Tailwind underscore-as-space convention (S109 Bug 1 full fix).
+ * @param {string} s
+ * @returns {boolean}
+ */
+function containsTopLevelUnderscore(s) {
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c === 0x28 /* ( */) depth++;
+    else if (c === 0x29 /* ) */) depth--;
+    else if (c === 0x5F /* _ */ && depth === 0) return true;
+  }
+  return false;
+}
+
+/**
+ * Split a string on `_` characters that are outside any `(...)` parens.
+ * Function bodies are preserved as single segments so `repeat(3,1fr)_1fr`
+ * splits to `["repeat(3,1fr)", "1fr"]`, NOT to `["repeat(3,1fr)_1fr"]`
+ * or `["repeat(3,1fr)", "", "1fr"]`. Mirrors `containsTopLevelUnderscore`.
+ * @param {string} s
+ * @returns {string[]}
+ */
+function splitOnTopLevelUnderscore(s) {
+  const parts = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c === 0x28 /* ( */) depth++;
+    else if (c === 0x29 /* ) */) depth--;
+    else if (c === 0x5F /* _ */ && depth === 0) {
+      parts.push(s.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(s.slice(start));
+  return parts;
 }
 
 /**
@@ -1456,6 +1580,30 @@ function resolveArbitraryValue(base, escapedClassName) {
         code: validated.error.code,
         message: `${validated.error.code}: ${validated.error.reason}`,
       },
+    };
+  }
+
+  // Declaration-transform path (S109 Bug 1 full fix). For prefixes whose
+  // CSS declaration is not a literal `<prop>: <value>` substitution —
+  // e.g., `col-span-[2]` -> `grid-column: span 2 / span 2` — the
+  // transform returns the FULL declaration body. The list-shape
+  // restriction below (single-token validate for `col-span`/`row-span`
+  // because the transform substitutes `v.css` twice) is enforced here.
+  const declTransform = ARBITRARY_DECL_TRANSFORM[prefix];
+  if (declTransform) {
+    if (validated.kind === "list") {
+      return {
+        css: null,
+        diagnostic: {
+          code: "E-TAILWIND-001",
+          message: `E-TAILWIND-001: \`${prefix}-[]\` expects a single token, got list \`${raw}\``,
+        },
+      };
+    }
+    const decl = declTransform(validated);
+    return {
+      css: `.${escapedClassName} { ${decl} }`,
+      diagnostic: null,
     };
   }
 
