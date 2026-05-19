@@ -26,57 +26,36 @@ AI code is still what it is. 100% mid. But its still all human mid that it is re
 
 are the ideas any good?
 
-> ## scrml — current state: v0.3.0 STABLE shipped + v0.3.x patch arc in flight
+> ## scrml — current state: v0.3.x
 >
-> The latest shipped tag is **v0.3.0** (cut S92, 2026-05-14). The compiler
-> ships v0.3.0 codegen + runtime semantics: **V5-strict** declaration
-> (`<x> = init` decl form + `@x` expression access), the **Tier 0/1/2 ladder**
-> for case analysis (booleans → `<match>` → `<engine>`), auto-synthesized
-> validity surface for forms, file-level `<channel>` blocks for realtime,
-> schema shared-core vocabulary, refinement-type predicates, hierarchical
-> engines with `history` + `<onTimeout>` + `<onIdle>` + `internal:rule=`,
-> whole-stack closure analysis with per-route per-role content-addressed
-> chunk splitting and tiered prefetch, the **`{"__scrml_absent": true}`** wire
-> envelope for `T | not` server returns (SPEC §57), and 22 architectural
-> locks (L1–L22).
+> The compiler ships v0.3.x codegen + runtime semantics: **V5-strict**
+> declaration (`<x> = init` decl form + `@x` expression access), the
+> **Tier 0/1/2 ladder** for case analysis (booleans → `<match>` → `<engine>`),
+> auto-synthesized validity surface for forms, file-level `<channel>` blocks
+> for realtime, schema shared-core vocabulary, refinement-type predicates,
+> hierarchical engines with `history` + `<onTimeout>` + `<onIdle>` +
+> `internal:rule=`, whole-stack closure analysis with per-route per-role
+> content-addressed chunk splitting and tiered prefetch, the
+> **`{"__scrml_absent": true}`** wire envelope for `T | not` server returns
+> (SPEC §57), and 22 architectural locks (L1–L22). v0.4 is the next minor
+> horizon.
 >
-> **v0.3.x patch arc in flight.** Phase B SPA tree-shake landed post-v0.3.0
-> and cut the scrml-runtime payload from 38.7 KB → 11.8 KB gzip. The current
-> session arc is closing four A2-anomaly-2-surfaced compiler-engineering
-> gaps: `export function` body population, parseParamList default values,
-> RI promotion through `server { … }` blocks, scope-walker handling of
-> `export class` + destructuring, and `is some` member-access LHS
-> preservation. See [`docs/changelog.md`](./docs/changelog.md) for the
-> per-session ledger.
+> Live phase status: [`master-list.md` §0](./master-list.md) (the
+> load-bearing dashboard); recent landings:
+> [`docs/changelog.md`](./docs/changelog.md); session hand-offs:
+> [`hand-off.md`](./hand-off.md) (current) + [`handOffs/`](./handOffs/)
+> (rotated).
 >
-> v0.1.0 was the previous shipped baseline. **v0.1.0-syntax code (using
-> `@var = 0` implicit declaration, `< machine>` for state machines, `~var`
-> for derived values) will not compile against v0.2.x or later.** No
-> production adopters exist, so there is no v0.compat / migration-tool path.
->
-> **Semver cadence.** v0.2.0 → v0.2.6 patches landed across S83 → S85;
-> v0.3.0 stable cut at S92. v0.3.x patches land during the active
-> development cycle; v0.4 is the next minor horizon. Backward-breaking
-> changes are reserved for a future major.
->
-> If you find articles or LLM-generated scrml that uses pre-v0.2 syntax,
-> they describe the prior language. Live phase status:
-> [`master-list.md` §0](./master-list.md) (the load-bearing dashboard);
-> recent landings: [`docs/changelog.md`](./docs/changelog.md); session
-> hand-offs: [`hand-off.md`](./hand-off.md) (current) +
-> [`handOffs/`](./handOffs/) (rotated).
->
-> **Known gaps (spec-vs-impl drift).** The compiler does not yet implement every
-> feature the spec describes. The largest open gap as of v0.3.x:
-> **`<match>` block-form** (Tier 1 of the case-analysis ladder; SPEC §18.0.1)
-> currently compiles as opaque HTML pass-through — the block accepts source
-> mechanically but doesn't render in the browser and none of the spec'd safety
-> lints fire. Workaround: use `<engine>` (Tier 2, fully implemented). Full
-> implementation arc is scoped + active. Other open gaps: Tailwind arbitrary-
-> value classes silently no-op; one cascading-parse-error edge on multi-line
-> `<a>` openers with entity-encoded element-name bodies; bare context-opener
-> tokens (`?{` / `/`) in markup-text body have no docs-mode escape. Full list
-> with per-gap workarounds, reproducers, SCOPING links, and target releases:
+> **Known gaps (spec-vs-impl drift).** The compiler does not yet implement
+> every feature the spec describes. The largest open gap: **`<match>`
+> block-form** (Tier 1 of the case-analysis ladder; SPEC §18.0.1) —
+> structural validation + 5 safety diagnostics ship; codegen render dispatch
+> is in active impl. Workaround: use `<engine>` (Tier 2, fully implemented).
+> Other open gaps: Tailwind arbitrary-value classes silently no-op; one
+> cascading-parse-error edge on multi-line `<a>` openers with
+> entity-encoded element-name bodies; bare context-opener tokens (`?{` /
+> `/`) in markup-text body have no docs-mode escape. Full list with per-gap
+> workarounds, reproducers, SCOPING links, and target releases:
 > **[`docs/known-gaps.md`](./docs/known-gaps.md)**.
 
 ## Quick start
