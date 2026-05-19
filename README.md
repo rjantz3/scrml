@@ -118,9 +118,9 @@ the wrapper swap is the commitment moment.
 | **1** | `<match for=Type [on=expr]>`               | structural exhaustiveness check at compile time                        |
 | **2** | `<engine for=Type initial=.Variant>`       | full deal — exhaustiveness + active transition rules (`rule=`) + per-state effect handlers (`<onTransition>`, `<onTimeout>`, `<onIdle>`) + composite hierarchy + `history` restore |
 
-Adding a sixth variant later forces the compiler to remind you where every
-transition into it should fire from. The state machine evolves; the compiler
-enforces.
+Adding a new variant to the discriminating type later forces the compiler to
+remind you where every transition into it should fire from. The state machine
+evolves; the compiler enforces.
 
 ## Why scrml
 
@@ -131,14 +131,17 @@ cells — all sit on the same primitive with different attributes. The compiler
 tracks the dependency graph and re-renders on change.
 
 **Engines are the centerpiece.** When state goes from "a few booleans" to "this
-app has phases," promote from booleans to a `<match>` block, then to `<engine>`.
-The engine declares legal transitions per state via `rule=`, runs effect
-handlers via `<onTransition>`, schedules timeouts via `<onTimeout>` (with
-`cancelTimer("X")` builtin), watches for engine-wide idle via `<onIdle>`,
-nests via composite state-children for sub-machines, and restores prior inner
-state on re-entry via the `history` attribute. Five behaviorally-distinct UI
-states authored once, exhaustively, with cross-state effects intentional and
-co-located.
+app has phases," promote from booleans (Tier 0 — `if=` chains) to a `<match for=Type>`
+block (Tier 1 — structural exhaustiveness; the compiler refuses to compile until
+every variant has a UI block), then to `<engine for=Type initial=.Variant>` (Tier 2 —
+exhaustiveness plus active transition rules). `<match>` is the rest-state for UI
+that doesn't yet need transition guarantees; `<engine>` adds the rules. The engine
+declares legal transitions per state via `rule=`, runs effect handlers via
+`<onTransition>`, schedules timeouts via `<onTimeout>` (with `cancelTimer("X")`
+builtin), watches for engine-wide idle via `<onIdle>`, nests via composite
+state-children for sub-machines, and restores prior inner state on re-entry via
+the `history` attribute. Five behaviorally-distinct UI states authored once,
+exhaustively, with cross-state effects intentional and co-located.
 
 **Full-stack in one file.** Markup, logic, styles, SQL, server functions, error
 handling, channels for realtime, inline tests — everything lives in `.scrml`.
@@ -398,7 +401,7 @@ Five things the compiler does that you don't write:
 
 ## Benchmarks
 
-Measured against React 19, Svelte 5, and Vue 3 on an identical TodoMVC implementation. Bundle row re-measured 2026-05-15 against HEAD `1f73732` (v0.3.0 + v0.3.x Phase B SPA tree-shake landed). Runtime + build rows below carry forward from the 2026-05-14 v0.3.0 STABLE refresh and are queued for re-measurement post-tree-shake — see [`benchmarks/RESULTS.md`](benchmarks/RESULTS.md) for full details.
+Measured against React 19, Svelte 5, and Vue 3 on an identical TodoMVC implementation. Bundle row re-measured 2026-05-15 against HEAD `1f73732` (v0.3.0 + v0.3.x Phase B SPA tree-shake). Runtime row re-measured 2026-05-19 against v0.3.3 HEAD (post-Phase 3 Candidate A select-row recovery) via real Chrome (Playwright headless). Build row carries forward from the 2026-05-14 v0.3.0 STABLE refresh. See [`benchmarks/RESULTS.md`](benchmarks/RESULTS.md) for full details + historical baselines.
 
 **Bundle size (gzip):**
 
@@ -419,14 +422,26 @@ Measured against React 19, Svelte 5, and Vue 3 on an identical TodoMVC implement
 >
 > Runtime filename note: `scrml-runtime.<hash>.js` (content-addressed via FNV-1a) — deterministic cache-busting for adopters serving the runtime from a stable URL.
 
-**Runtime performance — re-measurement pending against v0.3.3 HEAD.**
-The prior Chrome table was from the 2026-05-14 v0.3.0 STABLE refresh + has been
-materially superseded by post-v0.3.0 work (PGO Phase 3 — S102; Phase 3 select-row
-chip-away — S103). Current snapshot in happy-dom: scrml wins 6/11 vs React, 4/11
-vs Svelte, **6.1× faster than React on average** (driven by select-row at 33×
-faster + double-digit wins on swap-rows / partial-update / delete-every-10th).
-Chrome real-browser re-measurement queued — see [`benchmarks/RESULTS.md`](benchmarks/RESULTS.md)
-for the v0.3.3 happy-dom snapshot + per-op breakdown.
+**Runtime performance (headless Chrome via Playwright, medians in ms, lower is better) — 2026-05-19 v0.3.3 HEAD:**
+
+| Operation | scrml | React 19 | Svelte 5 | Vue 3 | Vanilla JS |
+|---|---:|---:|---:|---:|---:|
+| create-1000 | 25.95 | 26.50 | 38.05 | 30.00 | **22.10** |
+| replace-1000 | 26.35 | 25.10 | 38.50 | 28.30 | **22.90** |
+| partial-update | **1.00** | 4.65 | 4.10 | 11.20 | 2.60 |
+| delete-every-10th | 2.55 | 4.95 | 3.45 | 7.90 | **1.50** |
+| clear-all | 3.65 | 3.65 | **3.25** | 3.80 | 3.45 |
+| select-row | 0.30 | 0.60 | 0.00¹ | 0.00¹ | 0.10 |
+| swap-rows | 2.20 | 20.30 | 3.55 | 7.80 | **1.00** |
+| remove-row | 2.25 | 4.25 | 3.35 | 7.80 | **0.90** |
+| create-10000 | 279.20 | 251.00 | 466.00 | 296.10 | **229.60** |
+| append-1000 | 27.55 | 26.35 | 45.65 | 35.20 | **21.05** |
+
+scrml wins outright on **partial-update** (4.65× faster than React, 4.10× faster than Svelte, 11.2× faster than Vue, **better than Vanilla**); within 5-25% of Vanilla on every bulk-DOM op; beats React on 5/10 + Svelte on 4/10 + Vue on 9/10. **select-row 0.30 ms** is the load-bearing recovery from v0.3.0 STABLE's 168.2 ms — **561× faster** (S103 Phase 3 Candidate A value-indexed subscriber dispatch + the `!=` detector follow-on). swap-rows 2.20 ms beats React by 9.2× and is within ~2× of Vanilla.
+
+¹ Svelte/Vue `selectRow()` is a no-op in their bench API (inherited from the prior Puppeteer harness; not a real measurement). The load-bearing scrml number stands on its own at **0.30 ms** (vs 168.2 ms at v0.3.0 STABLE).
+
+See [`benchmarks/RESULTS.md`](benchmarks/RESULTS.md) for full per-op breakdown, v0.3.0 → v0.3.3 recovery narrative, Chrome-vs-happy-dom cross-validation, and historical baselines.
 
 **Build time (TodoMVC, median of 10):**
 
