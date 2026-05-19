@@ -1,163 +1,200 @@
-# scrmlTS — Session 101 (CLOSE)
+# scrmlTS — Session 102 (CLOSE)
 
-**Date:** 2026-05-17 → 2026-05-18
-**Previous:** `handOffs/hand-off-103.md` (S100 CLOSE — rotated at S101 open)
+**Date:** 2026-05-18
+**Previous:** `handOffs/hand-off-104.md` (S101 CLOSE — rotated at S102 open)
 **Machine:** single-machine
-**HEAD at S101 CLOSE:** v0.3.2 cut commit (this session) ahead of `bd5811d` (README block #3 wrap-form post-Bug-3)
-**Origin sync at CLOSE:** scrmlTS pushed (incl. tag v0.3.2); scrml-support pushed (QUEUED dot-path deep-dive)
+**HEAD at S102 CLOSE:** `08d05b3` (self-host stripIds fix; --no-verify per S88, surface as process violation) + this wrap commit landing on top
+**Origin sync at CLOSE:** scrmlTS 0/0 (4 commits pushed mid-session via --no-verify per user authorization); scrml-support 0/0 (2 commits pushed: user-voice S100 + Bug-4 pre-population)
+**v0.3.3 tag CUT mid-session:** `5815cf6` PGO Phase 3 wave + §41.14 formFor SPEC (tag pushed)
 
 ---
 
-## S101 net outcome — substantial 18-commit session + v0.3.1 + v0.3.2 cuts
+## S102 net outcome — 25-commit session across 3 macro-tracks
 
-S101 was a heavyweight session. Two release tags cut (v0.3.1 + v0.3.2). Two real compiler bugs caught + fixed via a NEW tooling surface (README compile-gate). The M1 native-parser lexer ladder completed (M1.4 InRegexBody). Three substantive scope-correction moments where sub-agents surfaced shipped-state rather than silently re-implementing — corpus-ouroboros caught three times.
+S102 was a heavyweight 25-commit session spanning three macro-tracks that ran in parallel and serialized at the right join-points:
 
-## Tests at S101 CLOSE
+1. **PGO Phase 3 wave** — landed −62% trucking-dispatch pipeline reduction (2326ms → ~880ms median). 4 commits across the wave + 2 SCOPING docs.
+2. **formFor (FLAGSHIP L22 family member)** — SCOPING → deep-dive → 2 debates → SPEC §41.14 (8 error codes) → impl dispatch (11 files / +2733 LOC / +58 tests). Six commits across the arc.
+3. **Runtime-perf SCOPING** — authored at session end per user direction "start that scope when current dispatches drain"; 3-phase ladder mirroring PGO methodology; Phase 1 includes vanilla-JS baseline.
 
-- **Pre-commit subset** (unit + integration + conformance): **12,660 pass / 88 skip / 1 todo / 0 fail / 660 files / 42,679 expect** (+15 from S101 baseline 12,645)
-- **Native-parser conformance**: 97 pass / 0 skip / 0 fail (M1 ladder complete; M1.5 normalizer extension still pending for `expr-literals.js` full-disposition flip)
-- **README compile-gate**: **3 pass / 1 skip / 0 fail** out of 4 blocks (gate is green)
-- **Pre-push gate**: clean every push this session
+**v0.3.3 PATCH TAG cut + pushed mid-session.** Tag `v0.3.3` carries PGO Phase 3 wave (P3.A + P3.B + P3.C) + §41.14 formFor SPEC entry (status: spec'd; impl pending in v0.3.x main; v0.4 anchor).
 
-## S101 commit chain (18 substantive commits, 2 tag cuts, all pushed)
+## Tests at S102 CLOSE
 
-| # | Commit | What |
+- **Pre-commit subset** (unit + integration + conformance): **12,718 pass / 88 skip / 1 todo / 1 fail / 663 files / 43,030 expect** (+58 from S101 baseline 12,660)
+- The 1 fail (`self-compilation: compiled module shape > compiled modules export resolveModules and runMetaChecker`) is **locally-introduced this session** by PA running `rebuild-self-host-dist.ts` which overwrote the May-11 working dist files. Pre-existing self-host bootstrap brokenness (S78-documented at "Bootstrap L3 host-compiler library-mode meta-block strip bug corrupting compiler/dist/self-host/ast.js") aggravated by the rebuild. Dist files gitignored → broken state is local-only; nothing propagated to origin.
+- formFor canonical example compiles end-to-end with full `<form>` element, PE-default `action=/api/__ri_route_persistSignup_1`, CSRF auto-injection, per-field render with shape-dispatched inputs (text/checkbox), title-case labels, error-rendering anchors, submit button.
+
+## S102 commit ledger (this session — scrmlTS)
+
+| # | Commit | Track | What |
+|---|---|---|---|
+| 1 | `2363428` | formFor | SCOPING — L22 family-discipline gate-walk + 10 OQs |
+| 2 | `b6a15f3` | PGO | SCOPING — 3-phase ladder grounded in S94 perf data |
+| 3 | `139bbc5` | PGO | P1.5 --debug-perf CLI flag plumbing |
+| 4 | `bdb7d50` | PGO | P1.4 baseline benchmark capture + regression-check tooling |
+| 5 | `aea0707` | docs | README BM over-removal (REVERTED) |
+| 6 | `30a24f8` | docs | revert of #5 |
+| 7 | `7de63a6` | docs | README stale-warning surgical removal (the actual fix) |
+| 8 | `f7ff521` | PGO | P1.1 CG sub-stage timing (revealed S94 hypothesis to be REFUTED) |
+| 9 | `94aef6e` | PGO | P1.2 RS component timing (amended; stage() helper widened) |
+| 10 | `fb49ced` | PGO | P1.3 DG sub-step timing + quartile growth tracking |
+| 11 | `3ac04a0` | PGO | Phase 2 SCOPING — emit-client deep-dive structure |
+| 12 | `bcb48c9` | M1.5 | M1.5 native-parser template-mode tracking (expr-literals → full disposition) |
+| 13 | `c79ef54` | PGO | P2.2 DG markup-sweep per-call-site characterization |
+| 14 | `c565055` | PGO | P2.1 emit-client sub-decomposition (S94 hypothesis REFUTED) |
+| 15 | `0c16f58` | formFor | SPEC §41.14 formFor API entry + 8 error codes + §53.14.3/.5/.INDEX |
+| 16 | `6478639` | PGO | Phase 3 SCOPING + §3 candidate-ranking refresh |
+| 17 | `efdcf88` | PGO | P3.A fnNameMap regex collapse (−44% pipeline) |
+| 18 | `8ff11f4` | PGO | P3.C owner-stack for findOwningRenderDGNode (−99.7%) |
+| 19 | `b1d3595` | PGO | P3.B fused detect-runtime-chunks probe (−72% pipeline cumulative) |
+| 20 | `5815cf6` | RELEASE | **v0.3.3 release** (pkg.json bump + tag) |
+| 21 | `857bf63` | PGO | P3.B-followup hasResetExpr flag (−71% on detect-runtime-chunks residual) |
+| 22 | `e7f5241` | formFor | impl landing — 11 files / +2733 LOC / +58 tests / 8 error codes verified |
+| 23 | `216b245` | runtime-perf | SCOPING — close TodoMVC 0/10 suffering gap |
+| 24 | `08d05b3` | self-host | stripIds fix for hasResetExpr + _p3aExport fields (--no-verify per S88) |
+| 25 | (this commit) | WRAP | S102 CLOSE — wrap step 1+2+3 (hand-off + master-list + changelog) |
+
+**scrml-support S102 ledger:** `020f255` user-voice S100 directive (completing prior-session-uncommitted append) · `02e575a` Bug-4 dot-path QUEUED stub pre-population. Both pushed.
+
+## PGO Phase 3 — Final state
+
+**Trucking-dispatch pipeline cost reduction (warm median of 5 runs, --debug-perf off):**
+
+| Stage | Baseline (perf-baseline.json `139bbc52`) | Post-Phase-3 + follow-up | Reduction |
+|---|---|---|---|
+| **Total pipeline** | **2326ms** | **~880ms** | **−62.2%** |
+| post-fn-name-mangle | 545ms | ~108ms | −80% |
+| detect-runtime-chunks | 305ms | ~33ms | −89% |
+| findOwningRenderDGNode | 31ms | 0.08ms | −99.7% |
+| emit-client (parent) | 1215ms | ~376ms | −69% |
+
+Below S94 baseline of 1170ms by ~290ms despite all Approach A closure-analysis work landing since v0.3.0.
+
+**S94 hypothesis REFUTED.** S94 anticipated `emit-bindings` + `emit-reactive-wiring` as the hot path; actual measurement showed `post-fn-name-mangle` (58%) + `detect-runtime-chunks` (33%) = 90.7% of emit-client. emit-bindings + emit-reactive-wiring combined were 2.6%.
+
+**Byte-identical output verified** across all four PGO Phase 3 landings (P3.A `diff -r` 113 files on trucking-dispatch dist; P3.B SHA256 on 8 corpora; P3.C SHA256 reachability JSON on 3 corpora; P3.B-followup `diff -r` 3 corpora). Zero behavior change.
+
+**Two follow-ups deferred (anticipated for future PGO pass):**
+- (a) `hasEqualityExpr` flag — sibling Option-2 pattern; smaller expected savings (most files have `==` so equality activates early in current behaviour)
+- (b) Markup/for-stmt double-walk in `detectRuntimeChunks` (lines 568-570 + 587) — clean Option-1-style fold of duplicated traversal; ~10-15ms additional savings expected
+
+## formFor (FLAGSHIP) — Final state
+
+**SCOPING + deep-dive + 2 debates + SPEC + impl all landed in S102.**
+
+- **SCOPING** `2363428` — L22 family-discipline gate-walk; 10 OQs catalogued; gates 1-3 PASS, gate 4 FIRES.
+- **Deep-dive** at `scrml-support/docs/deep-dives/formFor-design-2026-05-18.md` — 10 OQs deliberated, 7 closed HIGH/MED-HIGH, 3 surfaced for debate, 2 newly-surfaced OQs (nested-struct + read-only).
+- **OQ-FF-1 debate verdict** — slot-style customization wins 51.5/60 (vue-template-directives) vs function-valued-attr 31/60 (react-hook-form) vs v1-without 43.5/60 (simplicity-defender). Slot-style is Pillar-5-compliant; function-valued-attr is a per-primitive mini-DSL violation. Registry layer (`data.registerRenderer`) deferred v1.next as additive.
+- **OQ-FF-2 debate verdict** — explicit-attr + slot + progressive-enhancement default wins 52/60 (composed paradigm) vs explicit-attr-bare 49.5/60 (react-server-actions) vs magic-naming 30/60 (rails-simple-form). Magic-naming rejected for Pillar-5 (new dispatch primitive) + refactor-fragility + multiple-handlers-of-same-struct.
+- **OQ-FF-7 (label-derivation) debate SKIPPED** per S102 user direction "skip the debate and author the spec". Deep-dive MED-HIGH verdict adopted directly (4-level chain: slot > registerLabels > `@label` reserved > title-case default). Methodology rule filed: MED-HIGH or higher closes in deep-dive.
+- **SPEC §41.14** `0c16f58` — 11 normative subsections + 8 error codes + §53.14.3/.5/.INDEX companions.
+- **Impl** `e7f5241` — 11 files / +2733 LOC / 58 new tests / 8 error codes confirmed firing. Approach A source-level AST expansion per §41.14.10 Pillar-5 invariant. End-to-end verified.
+
+**§53.14.3 family-roster status:** "spec'd S102 (§41.14); impl pending (FLAGSHIP)" — will flip to "shipped S102" after the follow-on dispatches land:
+
+| formFor follow-on | Cost | Scope |
 |---|---|---|
-| 1 | `d77a60d` | fix(compiler): String.replace `$&` audit — 3 sites (component-expander + tailwind-classes + generate.js) |
-| 2 | `fae88e4` | docs(native-parser): reframe M1.2 ANOMALY-4 — `var=` + full enumeration are SPEC-CANONICAL, not gaps |
-| 3 | `cbe1b1e` | **release(s101): v0.3.1** — patch bump + annotated release notes |
-| 4 | tag `v0.3.1` |  |
-| 5 | `4ffd085` | docs(scoping): A9 Ext 4 body-split min-viable — SCOPING.md authored (later HISTORICAL-bannered) |
-| 6 | `020e47d` | docs(pipeline): 0.7.2 — Stage 2 (BS) v0.next addendum for §4.17 raw-content |
-| 7 | `8628a3a` | feat(native-parser): M1.3 — line + block comment body dispatchers (90/0/0 conformance) |
-| 8 | `dae8ff1` | docs(native-parser): strike moving-target counts; refresh test-file header for M1.4 |
-| 9 | `c40610f` | feat(native-parser): M1.4 — InRegexBody dispatcher (M1 ladder closer; 97 conformance) |
-| 10 | `a69d9e7` | docs(maps): /map incremental S101 — 8 maps regenerated, 1 NEW (native-parser.map.md) |
-| 11 | `7e39828` | docs(s101): scope-correction — A9 Ext 4 already shipped at S72; A1c FULLY CLOSED (master-list stale-row fix + SCOPING.md HISTORICAL banner) |
-| 12 | `99fd3cf` | feat(tooling): README scrml compile-gate on release-tag pushes (extractor + pre-push hook + marker convention + disclaimer) |
-| 13 | `d21c32d` | fix(type-system): bug-2 — state-decl bind preserves prior reactive type (subsequent bare-variant writes; +8 tests) |
-| 14 | `52456f7` | fix(bs): bug-3 — compound state-decl auto-lift in `<program>` / `<page>` / `<channel>` body (+7 conformance) |
-| 15 | `bd5811d` | docs(readme): block #3 — wrap-form + drop redundant `${...}` post-Bug-3 (gate now green) |
-| 16 | scrml-support `227b874` | docs(deep-dives): QUEUED — dot-path render-by-tag for compound children (S101 surfaced) |
-| 17 | (this commit) | **release(s101-close): v0.3.2** — wrap + bump + hand-off + master-list + changelog |
-| 18 | tag `v0.3.2` |  |
+| stdlib export | ~5-8h | Export `formFor` + `registerLabels` from `stdlib/data/` |
+| Sample + example app | ~3-5h | Flagship demo for scrml.dev |
+| scrml.dev refresh + README compile-gate block | ~3-5h | Marketing + adopter surface |
+| Comprehensive conformance corpus | ~3-5h | Beyond happy-path + per-error-code |
+| `disabled=!@cell` reactive-attr wiring fix | ~2-4h | Pre-existing compiler-wide gap surfaced by formFor default submit button; workaround = slot="submit" override |
+| v1.next: per-type renderer registry (`data.registerRenderer`) | ~3-5h | Per OQ-FF-1 verdict |
+| v1.next: `@label("...")` type-field annotation | ~3-5h | Per OQ-FF-7 verdict |
+| v1.next: auto-recurse into nested struct fields | ~5-8h | Per OQ-FF-11 verdict |
 
-## Session-defining outcomes
+## Runtime-perf SCOPING
 
-### 1. v0.3.1 + v0.3.2 patch tags cut
+**Authority:** removed-from-README TodoMVC runtime benchmark table flagged scrml losing 0/10 ops vs React 19 / Svelte 5 / Vue 3 at v0.3.0 STABLE refresh. Per S102 user direction "start that scope when current dispatches drain" + "include vanilla JS baseline in phase 1".
 
-v0.3.1 mid-session (`cbe1b1e`); v0.3.2 at close. First exercise of the NEW README compile-gate as a real pre-push blocker: v0.3.2's push WILL fire the gate; current state is green (3/1/0). Per pa.md S94 bump-commit-tag-push paired discipline.
+**3-phase ladder mirroring PGO methodology:**
 
-### 2. Two real compiler bugs caught + fixed via README compile-gate
+- **Phase 1 — measure first** (dispatch-ready):
+  - P1.A vanilla-JS TodoMVC baseline + runner extension to 5 subprocesses (zero-framework hand-rolled DOM mutation; per-row cost floor reference; per S102 user direction)
+  - P1.B scrml runtime per-op instrumentation (wrap `_scrml_reactive_get` / `_scrml_reactive_set` / `_scrml_reconcile_list` / `notifySubscribers` / DOM-write / effect-scheduling under `globalThis.__SCRML_DEBUG_PERF` flag)
+  - P1.C PA-direct re-measurement at v0.3.3 HEAD with vanilla baseline + instrumentation; write to `benchmarks/RESULTS.md` (NOT README — README data was deliberately pulled S102 per user direction; methodology learning that re-publish requires fresh data)
+- **Phase 2 — attribute** (data-driven). Hypothesized worst ops: Partial update / Select row / Swap rows. Hypotheses: subscription-set traversal cost / classList-toggle re-render scope / list-diff cost. All REFUTABLE from P1.B data.
+- **Phase 3 — optimizations** (data-driven). Anticipated candidates: signal-style direct subscription on hot paths (Solid.js precedent) / batched reconciliation at microtask boundary (Vue 3 precedent) / for-loop key-based diff for `_scrml_reconcile_list` (React/Svelte precedent) / static-region elision (Svelte 5 precedent) / per-row reactive scope (Solid.js precedent).
 
-Bugs #2 + #3 surfaced by the gate's dry-run on README — gate did its job exactly as designed (community-SoT accuracy enforcement).
+**4 open questions pending user disposition before Phase 1 dispatch:**
+1. Authorize Phase 1 (P1.A + P1.B parallel)?
+2. Playwright real-Chrome path if happy-dom masks the profile?
+3. Vanilla-JS style (raw DOM API per js-framework-benchmark canonical, recommended) vs pseudo-vanilla with helpers?
+4. Scope (existing 8 ops only, or add scrml-strength differentiating ops)?
 
-- **Bug-2 (`d21c32d`)** — state-decl bind clobber. Subsequent `@cell = .V` writes within a function body cleared the engine pre-bind's enum type → bare-variant inference dropped → E-VARIANT-AMBIGUOUS on every second-and-after bare-variant write. Fix: surgical guard at state-decl bind site to preserve prior reactive type when local resolvedType is `asIs`/`unknown`. 8 regression tests across 5 sub-describes.
-- **Bug-3 (`52456f7`)** — compound state-decl `<formRes>` ... `</>` shape doesn't auto-lift in `<program>` body. The S86 v0.3 "default-logic mode" amendment shipped Shape 1 + Shape 2 auto-lift but missed the compound form (different lookahead pattern). Fix: BS-layer extension — NEW `COMPOUND_LIFT_EXEMPT_TAGS` Set, `classifyOpenerForCompoundScan`, `peekCompoundStateDeclSignal`, `scanCompoundBlockEnd` (depth-tracked); ast-builder `TOPLEVEL_STATE_DECL_RE` broadened terminator. 7 conformance tests.
+## Self-host bootstrap state — process violation surfaced
 
-Both surfaced via the README gate dry-run; both fixed in parallel background dispatches.
+**PA ran `rebuild-self-host-dist.ts` mid-session** to investigate the 48-test ast-builder self-host parity failures. The rebuild overwrote the May-11 working dist files with newly-compiled versions. Newly-compiled versions have a broken import path (`../../../stdlib/compiler/expression-parser.js` doesn't exist locally — possibly `expression-parser.scrml` was intended; possibly a generator bug in `compiler/scripts/build-self-host.js`).
 
-### 3. NEW Bug-4 SURFACED + QUEUED for full design pipeline
+**State at CLOSE:**
+- All dist files at `compiler/dist/self-host/*.js` are dated May 18 17:47 (today)
+- All gitignored — broken state is LOCAL ONLY
+- Pre-existing scrml-source brokenness in `compiler/self-host/ast.scrml` (102 errors per S78 "Bootstrap L3" entry) compounds the issue — ast.scrml won't compile, so the bootstrap chain can't fully regenerate
+- 1 fail in pre-commit subset: `self-compilation: compiled module shape > compiled modules export resolveModules and runMetaChecker` — directly caused by the broken import path
 
-Bug-3's fix UNMASKED a third gap: dot-path render-by-tag (`<entry.name/>`) doesn't work in markup-mode outside `${...}` (works inside `${...}` via the markup-as-value pillar). Adopter ergonomics question; not a patch fix. User S101 verbatim:
+**User authorized `--no-verify` push** per S88 protocol (process violation visibility). The 4-commit wave (P3.B-followup + formFor + runtime-perf SCOPING + stripIds fix) landed at origin cleanly. The self-host issue does NOT propagate (dist files gitignored).
 
-> "honestly, i really like the dot path but it would requre the full pipeline as it would inolve spec, docs, and impl. deep-dive, debate, the whole 9 yards"
->
-> "we would have to use it in heads up coding as well see how i like the way it looks and feels and reads"
+**Carry-forward to S103:** investigate `compiler/scripts/build-self-host.js` generator vs `compiler/self-host/meta-checker.scrml` source for the broken-import-path origin. May require fixing `compiler/self-host/ast.scrml`'s 102 pre-existing errors first.
 
-Filed at `scrml-support/docs/deep-dives/QUEUED-dot-path-render-by-tag-compound-children.md`. Pre-pipeline filter: heads-up coding sessions to validate look/feel/read against substantive scrml.
+## Carry-forwards for S103 (load-bearing across sessions — substantial list)
 
-### 4. README compile-gate INFRASTRUCTURE shipped
+| Track | Item | Cost | Notes |
+|---|---|---|---|
+| Self-host bootstrap | Investigate broken import-path in regenerated dist | ~2-4h | meta-checker.js imports `../../../stdlib/compiler/expression-parser.js` which doesn't exist; pre-existing per S78 + aggravated S102 |
+| formFor follow-on | stdlib export `formFor` + `registerLabels` | ~5-8h | Sequenced after impl landing; needed before scrml.dev refresh |
+| formFor follow-on | Sample + example app (flagship demo for scrml.dev) | ~3-5h | |
+| formFor follow-on | scrml.dev refresh + README compile-gate block | ~3-5h | |
+| formFor follow-on | `disabled=!@cell` reactive-attr wiring fix | ~2-4h | Pre-existing compiler-wide gap; surfaced by formFor default submit button |
+| formFor follow-on | Comprehensive conformance corpus | ~3-5h | Beyond happy-path + per-error-code |
+| Runtime-perf | Phase 1 dispatch (P1.A + P1.B parallel) | ~9-18h | 4 open questions pending |
+| PGO Phase 3 followup | `hasEqualityExpr` flag (Option-2 sibling pattern) | ~1-2h | Smaller savings; pursue only after measuring residual |
+| PGO Phase 3 followup | Markup/for-stmt double-walk fold | ~2-3h | Clean Option-1-style fold |
+| Native parser | M2 expression parser | ~2-4 sessions | M1 lexer ladder complete S101 + S102 (M1.5) |
+| Native parser | §48.6.4 `pinned fn` parser-recognition impl | ~2-4h | SPEC landed S98; impl pending |
+| Bug-4 | Dot-path render-by-tag (heads-up coding gate) | full pipeline post-signal | User heads-up coding sessions are the pre-pipeline filter |
 
-`scripts/extract-readme-scrml.js` (extractor + compile + ghost-pattern lint) + `scripts/git-hooks/pre-push` (source-controlled, branches on `refs/tags/v*` ref payload) + README disclaimer near Documentation section + `// gate: skip` marker convention. Triggered only on release-tag pushes; regular pushes unchanged. Default: gated (opt-OUT via `// gate: skip`) per user-stated accuracy intent.
+## Carry-forwards (across-session standing rules — unchanged)
 
-### 5. M1 native-parser lexer ladder COMPLETE
-
-M1.3 line + block comments + M1.4 InRegexBody dispatcher landed via two parallel background dispatches. All 7 LexMode state-children now have substantive body dispatchers. Conformance 87/3/0 → 90/0/0 (M1.3) → 97/0/0 (M1.4; +7 direct dispatcher tests).
-
-### 6. Three corpus-ouroboros catches via pre-dispatch sanity check
-
-PA discipline was tested + held three times. In each case, a sub-agent's pre-dispatch grep caught that PA had authored a SCOPING/dispatch brief for work that was already shipped:
-
-- **§51.0.Q.1 ANOMALY-4** (M1.2 framing) — `var=innerLexMode` + full state-child enumeration framed as "compiler gaps." Per SPEC §51.0.C + §51.0.Q.1, both are spec-canonical patterns. README + comment reframed (`fae88e4`).
-- **A9 Ext 4 SCOPING dispatch** — PA authored a 205-line SCOPING.md ("v0.4 anchor") for work shipped at S72 (`dc98313`, 10 days before SCOPING was authored). Sub-agent surfaced via pre-dispatch sanity check; no code written. SCOPING.md HISTORICAL-bannered (`7e39828`).
-- **master-list A1c stale-row** — phase-progress table claimed "Wave 4 next" while line-98 narrative said "FULLY CLOSED Waves 1-6, C0-C23 ALL SHIPPED." Table-vs-narrative drift; corrected (`7e39828`).
-
-Standing rule that crystallized this session: **PA must `git log --grep=<feature>` BEFORE authoring SCOPING for any feature claimed by master-list.** The sub-agent's pre-dispatch sanity check is the canonical pattern; PA-direct work should mirror it.
-
-### 7. /map incremental refresh — 8 maps + 1 NEW (native-parser.map.md)
-
-Map watermark advanced from S92 (`13154ba`) → S101 (`a69d9e7`). Regenerated: primary + structure + schema + domain + error + test + non-compliance.report + NEW native-parser.map.md. Skipped (no relevant changes): dependencies + config + build + events. 4 non-compliant docs carried forward (all pre-existing self-marked); 3 uncertain unchanged.
-
-### 8. v0.4 framing question surfaced (not resolved)
-
-The pre-existing v0.4-anchor framing in the May 14 roadmap article ("v0.4 = body-split") is stale — body-split shipped at v0.2.0. User direction post-acknowledgement: cut v0.3.2 first (done) → formFor as the v0.4 anchor → chip away at profile-guided optimization wherever we can. SCOPING for formFor + PGO entry points DEFERRED to S102+.
-
-## State-as-of-CLOSE
-
-| Item | Status |
-|---|---|
-| Tests pre-commit subset | 12,660 / 88 / 1 / 0 / 660 files |
-| Native-parser conformance | 97 / 0 / 0 (M1 complete) |
-| README compile-gate | 3/1/0 green |
-| Worktree list | main only |
-| Origin sync (scrmlTS) | 0/0 (post-push) |
-| Origin sync (scrml-support) | 0/0 (post-push) |
-| Inbox `handOffs/incoming/` | empty (only `dist/` + `read/` subdirs) |
-| Path-discipline hook | active scrmlTS-local |
-| Pre-push hook | source-controlled; installed via install.sh |
-
-## Open / pending threads (carry to S102)
-
-| Item | Status |
-|---|---|
-| **formFor** (L22 family next member; v0.4 anchor) | User-authorized; needs SCOPING + per-shape sliver test + synonym-detection precondition + deep-dive per L22 family discipline |
-| **Profile-guided optimization** ("chip away wherever we can") | User-authorized incremental approach; entry-point candidates unknown — needs scoping for instrumentation hooks + runtime profile-collection scaffold |
-| **Bug-4 — dot-path render-by-tag** | QUEUED for full design pipeline (deep-dive + debate + SPEC + docs + impl). Pre-pipeline: user runs heads-up coding sessions with wrap-form to validate dot-path mentally-substituted reads cleaner. |
-| **M1.5 — regex-token normalizer extension** | Deferred. Closes the `expr-literals.js` bench-file `"M1.2-string-template-regex"` → `"full"` flip. ~30min mechanical work. |
-| **M2 — expression parser** | Native-parser ladder next milestone post-M1 ladder. ~2-4 sessions per DD §D7. |
-| **§48.6.4 parser-recognition impl** | SPEC landed S98; impl still pending (`pinned fn` parser recognition). Small dispatch. |
-
-## Carry-forwards (load-bearing across sessions — unchanged)
-
-- pa.md Rules 1-5
-- All S96-S101 PA-memory rules (S101 new: NONE filed yet — could write `feedback_corpus_ouroboros_pre_dispatch_sanity_check.md` to make the standing rule explicit)
-- S43 cross-machine (dormant)
+- pa.md Rules 1-5 (no marketing / full-production fidelity / right > easy / SPEC normative / shoot straight)
+- All S96-S102 PA-memory rules unchanged. **S102 NEW:** README staleness paradox methodology (the warning above the data has its own staleness clock; refresh-or-remove inline staleness warnings when refreshing the data itself).
+- S43 cross-machine (dormant per S100)
 - S83 commit discipline two-sided rule
-- S88 isolation:worktree mandatory + `--no-verify` requires explicit auth
-- S91 CWD-routing rule
-- S95 communication norms (shoot straight)
+- S88 `isolation:"worktree"` mandatory + `--no-verify` requires explicit auth
+- S91 CWD-routing rule (`git -C` doesn't change shell CWD; verify pwd before Agent dispatches after sibling-repo cd)
+- S95 communication norms (shoot straight, no preambles, push back when warranted)
 - S96 SPEC-at-session-start
 - S98 Pillar 5b (Reach discipline)
-- S99 path-discipline addendum + S100 PreToolUse hook
-- S99 voice-author reuse-over-reinvent
-- S99 context-budget operational datum
-- **S101 NEW:** v0.3.x patch arc pattern (bump-commit-tag-push paired; READMR gate as release-tag gate)
+- S99 path-discipline addendum + voice-author reuse-over-reinvent + context-budget operational datum
+- S100 PreToolUse hook (path-discipline closed at platform level)
+- S101 v0.3.x patch arc pattern (bump-commit-tag-push paired; README gate as release-tag gate)
+- S101 standing rule — corpus-ouroboros pre-dispatch sanity check (`git log --grep=<feature>` BEFORE authoring SCOPING)
 
-## Things S102 PA must NOT screw up
+## Things S103 PA must NOT screw up
 
-In addition to S100 carry-forwards:
+In addition to S101 + earlier carry-forwards:
 
-- **Bug-2 fix is a guard-on-rebind pattern.** Don't naively expand to other bind sites without verifying the same clobber pathology. Future bare-variant inference work touching `type-system.ts:4928` area needs to preserve the guard.
-- **Bug-3 fix uses `COMPOUND_LIFT_EXEMPT_TAGS` Set** — `program` / `page` / `channel` / `schema` / `seeds` / `module`. If a new document-root structural element gets added (e.g., a `<library>` or `<package>` keyword in some future SPEC §4.x amendment), it MUST be added to the exempt set OR the compound-classifier will misclassify the new element's body. Test coverage at `conf-COMPOUND-STATE-DECL-AUTOLIFT.test.js` includes a NEG case for `<div>`; add similar NEG when extending.
-- **The README compile-gate is INFRASTRUCTURE on release-tag pushes.** Regular pushes don't run it. Any future authoring change that breaks an example will block the next v0.X.Y push (correct behavior); don't reach for `--no-verify` on tag pushes without surfacing the failure.
-- **Bug-4 dot-path is QUEUED, not deferred-forever.** Pre-pipeline filter is the user's heads-up coding sessions. If a coding session surfaces dot-path-feels-clean signal, escalate to deep-dive. If it never gets re-raised, that's also signal (the wrap-form stays canonical).
-- **Sub-agent pre-dispatch sanity check IS the standing rule.** When authoring SCOPING for any feature, `git log --grep=<feature> --since=<plausible-shipping-date>` is the mandatory check. The S101 A9 Ext 4 dispatch demonstrated this; PA-direct work should mirror it.
+- **Don't run `rebuild-self-host-dist.ts` until the broken-import-path bug is fixed.** Once that's run, the May-11 working dist files are lost. The repair path needs to fix the generator OR fix `compiler/self-host/meta-checker.scrml` source so the regenerated dist files have correct imports.
+- **PGO Phase 3 byte-identity is a hard invariant.** Any future runtime optimization (Phase 3 follow-ups OR runtime-perf Phase 3) MUST verify byte-identical output OR explicitly document the bundle-shape change in the commit message.
+- **formFor §41.14.10 Pillar-5 invariant.** Any future formFor impl changes MUST preserve "emitted output is standard scrml, readable as if hand-authored" — if you find yourself adding emit-form-for-specific markup shapes that don't appear elsewhere in scrml, STOP and re-examine.
+- **OQ-FF-7-skip precedent is for HIGH or MED-HIGH confidence verdicts only.** Future L22 family member SPEC authoring: read the deep-dive's verdict-confidence column; only skip the debate for HIGH/MED-HIGH. MEDIUM or LOWER requires debate.
+- **README BM table has its own staleness clock from any inline warning above it.** When refreshing benchmark data, ALSO refresh / remove the inline staleness warning. Otherwise the warning becomes the misleading thing.
 
-## Session-start checklist for S102 PA
+## Session-start checklist for S103 PA
 
 1. Read `pa.md` pointer → `../scrml-support/pa-scrmlTS.md` IN FULL
 2. Read `docs/PA-SCRML-PRIMER.md` IN FULL (Pillar 5b applies; S98 ratification)
-3. Read `compiler/SPEC-INDEX.md` IN FULL
-4. Read `master-list.md` §0 LIVE DASHBOARD IN FULL — **NOTE the S101 stale-row correction at A1 row**; future stale-row catches should follow that pattern
-5. Read this `hand-off.md` (S101 CLOSE) — will be rotated to `handOffs/hand-off-104.md` at S102 open
-6. Read last ~10 contentful user-voice entries from `../scrml-support/user-voice-scrmlTS.md`
+3. Read `compiler/SPEC-INDEX.md` IN FULL (S102 §41.14 + S101 §4.17 + S98 §51.0.B.1 cumulative changes)
+4. Read `master-list.md` §0 LIVE DASHBOARD IN FULL — NOTE the S102 CLOSE addendum at the top; **NOTE the local self-host bootstrap brokenness in 1-fail state** documented there
+5. Read this `hand-off.md` (S102 CLOSE) — will be rotated to `handOffs/hand-off-105.md` at S103 open
+6. Read last ~10 contentful user-voice entries from `../scrml-support/user-voice-scrmlTS.md` (S102 entries: README staleness paradox + formFor SPEC path + runtime-perf vanilla-JS direction)
 7. Session-start sync hygiene: `git fetch origin && git rev-list --left-right --count origin/main...HEAD` should be 0/0
-8. Inbox check — `handOffs/incoming/*.md` should be empty
-9. Verify worktrees: `git worktree list` shows main only
+8. Inbox check — `handOffs/incoming/*.md` should be empty (verified S102 CLOSE)
+9. Verify worktrees: `git worktree list` shows main only (cleaned at S102 close; 10 landed worktrees removed)
 10. Verify path-discipline hook + pre-push hook installed
-11. Report: caught up + next priority
+11. **Self-host bootstrap state check** — `ls -la compiler/dist/self-host/`; if all files dated May 18 17:47, the broken-import state from S102 is still present. Decide whether to investigate the build-self-host.js generator OR delete the files and let `bun test compiler/tests/integration/self-compilation.test.js` SKIP cleanly. Either way, surface to user.
+12. Report: caught up + next priority
 
 ## Tags
 
-#session-101 #CLOSE #v0.3.1-cut #v0.3.2-cut #m1-ladder-complete #bug-2-fixed #bug-3-fixed #bug-4-queued #§4.17-raw-content #readme-compile-gate #corpus-ouroboros-caught-3x #scope-correction-mastered #18-commits #pre-commit-12660 #zero-regressions #pushed-to-origin
+#session-102 #CLOSE #v0.3.3-cut #pgo-phase-3-wave #-62-percent-pipeline #s94-hypothesis-refuted #formFor-spec-shipped #formFor-impl-shipped #runtime-perf-scoping-shipped #M1.5-landed #25-commits #pre-commit-12718 #self-host-bootstrap-process-violation #--no-verify-authorized-S88 #pushed-to-origin
