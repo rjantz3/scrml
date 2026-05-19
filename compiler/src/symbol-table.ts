@@ -106,6 +106,7 @@ import type {
   LinDeclNode,
   Span,
   IdentExpr,
+  CallExpr,
   ImportDeclNode,
   ImportSpecifier,
   ExprNode,
@@ -114,6 +115,7 @@ import type {
 } from "./types/ast.ts";
 import {
   forEachIdentInExprNode,
+  forEachCallInExprNode,
   emitStringFromTree,
   forEachResetExprInExprNode,
 } from "./expression-parser.ts";
@@ -8385,6 +8387,191 @@ function walkAnnotateTestBindKinds(
 
 
 // ---------------------------------------------------------------------------
+// A4 (S105) — §48.6.4 PASS 19: E-STATE-PINNED-FORWARD-REF on calls to
+// `pinned fn` declared LATER in source order.
+//
+// Parser-recognition for `pinned fn` landed S105 commit `dc3c460` — the
+// FunctionDeclNode's `isPinned?: boolean` flag is set on all 6 form variants
+// (`pinned fn`, `pinned async fn`, `pinned pure fn`, `pinned server fn`,
+// `pinned async server fn`, `pinned pure server fn`). This PASS 19 closes
+// the semantic-enforcement half: per SPEC §48.6.4, `pinned fn` opts the
+// declaration OUT of hoisting per §6.10, and forward references SHALL fire
+// E-STATE-PINNED-FORWARD-REF (§34 — same diagnostic used for pinned state
+// cells + pinned imports at PASS 3's B4 fire-paths).
+//
+// Walker shape mirrors PASS 3 (walkResolveAtNames): structural recursion,
+// readPos tracked via nodeReadPos, ExprNode payloads inspected via
+// B3_EXPR_FIELDS. The check itself uses `forEachCallInExprNode` (sibling of
+// `forEachIdentInExprNode`) to visit every CallExpr in the tree, then tests
+// bare-ident callees against the pinned-fn map.
+//
+// Map population: walk the AST once via `collectPinnedFunctionDecls` (a
+// scoped variant of test-bind's `collectSameFileFunctionDecls`); only nodes
+// with `isPinned === true` populate the map. When the map is empty (no
+// `pinned fn` in the file), PASS 19 returns early — zero performance cost.
+//
+// Cross-references:
+//   - SPEC §48.6.4 (lines 20254-20299) — the normative source.
+//   - SPEC §6.10 — the pinned modifier the §48.6.4 amendment extends.
+//   - SPEC §34 — E-STATE-PINNED-FORWARD-REF (shared diagnostic).
+//   - compiler/src/symbol-table.ts:1494-1551 — B4 cell + import pinned-
+//     forward-ref check (the pattern this PASS mirrors).
+//   - compiler/src/ast-builder.js (S105 dc3c460) — the parser-recognition
+//     half that populates `isPinned: true` on FunctionDeclNode.
+
+function collectPinnedFunctionDecls(
+  nodes: any,
+  out: Map<string, FunctionDeclNode>,
+  visited: WeakSet<object>,
+): void {
+  if (!nodes) return;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) collectPinnedFunctionDecls(n, out, visited);
+    return;
+  }
+  const node = nodes;
+  if (!node || typeof node !== "object") return;
+  if (visited.has(node)) return;
+  visited.add(node);
+  if (
+    node.kind === "function-decl"
+    && (node as FunctionDeclNode).isPinned === true
+    && typeof (node as FunctionDeclNode).name === "string"
+  ) {
+    // Last-wins on name collision (parser may emit duplicates under odd
+    // module shapes; the B4-pattern source-position check operates on
+    // whichever decl span lands last — same as cell-pinned semantics).
+    out.set((node as FunctionDeclNode).name, node as FunctionDeclNode);
+  }
+  // Recurse: same shape as test-bind collector.
+  if (Array.isArray(node.children)) collectPinnedFunctionDecls(node.children, out, visited);
+  if (Array.isArray(node.body)) collectPinnedFunctionDecls(node.body, out, visited);
+  if (Array.isArray(node.consequent)) collectPinnedFunctionDecls(node.consequent, out, visited);
+  if (Array.isArray(node.alternate)) collectPinnedFunctionDecls(node.alternate, out, visited);
+  if (Array.isArray(node.arms)) {
+    for (const arm of node.arms) {
+      if (arm && Array.isArray(arm.body)) collectPinnedFunctionDecls(arm.body, out, visited);
+    }
+  }
+  // engine-decl bodyChildren parallels Phase A10 (S78) — pinned fn forward
+  // refs inside engine state-child bodies should also fire.
+  if (Array.isArray(node.bodyChildren)) collectPinnedFunctionDecls(node.bodyChildren, out, visited);
+  if (node.kind === "lift-expr" && node.expr && node.expr.kind === "markup" && node.expr.node) {
+    collectPinnedFunctionDecls([node.expr.node], out, visited);
+  }
+}
+
+function checkPinnedFnForwardCallsInExpr(
+  exprNode: ExprNode | undefined | null,
+  pinnedFnDecls: Map<string, FunctionDeclNode>,
+  errors: SYMDiagnostic[],
+  readPos: number,
+  filePath: string,
+): void {
+  if (!exprNode || typeof exprNode !== "object") return;
+  forEachCallInExprNode(exprNode as any, (call: CallExpr) => {
+    if (!call || !call.callee || call.callee.kind !== "ident") return;
+    const calleeName = (call.callee as IdentExpr).name;
+    if (!calleeName || calleeName.startsWith("@")) return;
+    const pinnedDecl = pinnedFnDecls.get(calleeName);
+    if (!pinnedDecl) return;
+    const declSpan = (pinnedDecl as any).span;
+    if (!declSpan || typeof declSpan.start !== "number") return;
+    // Forward-ref rule for `pinned fn` differs from B4 cell-pinned in the
+    // comparison anchor: cells use `declSpan.end` (so self-ref inside the
+    // cell's own init expression fires — per SPEC §6.10.5); fns use
+    // `declSpan.start` (so self-recursion inside the fn body — which is
+    // SEMANTICALLY inside the decl-span between start and end — does NOT
+    // fire, because basic fn semantics admit recursion). The pinned-fn
+    // forward-ref forbids calls BEFORE the pinned-fn declaration is even
+    // partially introduced (i.e., before the `pinned` keyword token).
+    //
+    // ALSO: the fn-decl's `span.end` is computed by ast-builder.js's
+    // `spanOf(startTok, peek())` which uses `peek().span.end` — i.e., the
+    // END of the NEXT token after the fn body. That means fn-decl spans
+    // routinely OVERLAP with the next statement's span, making
+    // `readPos < span.end` unreliable for backward-call distinction.
+    // Comparison against `span.start` (the `pinned` keyword position) is
+    // both semantically correct AND structurally robust to that quirk.
+    if (readPos < declSpan.start) {
+      errors.push({
+        code: "E-STATE-PINNED-FORWARD-REF",
+        message:
+          `E-STATE-PINNED-FORWARD-REF: forward reference to \`pinned fn\` `
+          + `\`${calleeName}\`. The \`pinned\` modifier opts the function `
+          + `declaration OUT of hoisting per §48.6.4 + §6.10; calls before `
+          + `the declaration site are unsafe. Move the call after the `
+          + `\`pinned fn\` declaration, OR remove the \`pinned\` modifier `
+          + `to allow standard \`fn\` hoisting (SPEC §48.6.4 + §34).`,
+        span: { file: filePath, start: 0, end: 0, line: 1, col: 1 } as Span,
+        severity: "error",
+      });
+    }
+  });
+}
+
+function walkPinnedFnForwardRefCheck(
+  nodes: ASTNode[] | undefined,
+  pinnedFnDecls: Map<string, FunctionDeclNode>,
+  visited: WeakSet<object>,
+  errors: SYMDiagnostic[],
+  parentReadPos: number,
+  filePath: string,
+): void {
+  if (!nodes || pinnedFnDecls.size === 0) return;
+  for (const n of nodes) {
+    if (!n || typeof n !== "object") continue;
+    if (visited.has(n)) continue;
+    visited.add(n);
+    const anyN = n as any;
+    const kind = anyN.kind as string;
+    const readPos = nodeReadPos(anyN, parentReadPos);
+
+    // Check ExprNode payloads on this node for pinned-fn forward calls.
+    for (const f of B3_EXPR_FIELDS) {
+      const v = anyN[f];
+      if (v && typeof v === "object") {
+        checkPinnedFnForwardCallsInExpr(v, pinnedFnDecls, errors, readPos, filePath);
+      }
+    }
+    // c-style for parts (initExpr / condExpr / updateExpr) — same shape as PASS 3.
+    if (anyN.cStyleParts && typeof anyN.cStyleParts === "object") {
+      for (const f of ["initExpr", "condExpr", "updateExpr"]) {
+        const v = anyN.cStyleParts[f];
+        if (v && typeof v === "object") {
+          checkPinnedFnForwardCallsInExpr(v, pinnedFnDecls, errors, readPos, filePath);
+        }
+      }
+    }
+
+    // Structural recursion — mirror PASS 3 / walkResolveAtNames.
+    if (kind === "state-decl" && Array.isArray(anyN.children)) {
+      walkPinnedFnForwardRefCheck(anyN.children, pinnedFnDecls, visited, errors, readPos, filePath);
+      continue;
+    }
+    if (kind === "function-decl") {
+      walkPinnedFnForwardRefCheck(anyN.body, pinnedFnDecls, visited, errors, readPos, filePath);
+      continue;
+    }
+    if (Array.isArray(anyN.children)) walkPinnedFnForwardRefCheck(anyN.children, pinnedFnDecls, visited, errors, readPos, filePath);
+    if (Array.isArray(anyN.body)) walkPinnedFnForwardRefCheck(anyN.body, pinnedFnDecls, visited, errors, readPos, filePath);
+    if (Array.isArray(anyN.consequent)) walkPinnedFnForwardRefCheck(anyN.consequent, pinnedFnDecls, visited, errors, readPos, filePath);
+    if (Array.isArray(anyN.alternate)) walkPinnedFnForwardRefCheck(anyN.alternate, pinnedFnDecls, visited, errors, readPos, filePath);
+    if (Array.isArray(anyN.arms)) {
+      for (const arm of anyN.arms) {
+        if (arm && Array.isArray(arm.body)) walkPinnedFnForwardRefCheck(arm.body, pinnedFnDecls, visited, errors, readPos, filePath);
+      }
+    }
+    if (kind === "engine-decl" && Array.isArray(anyN.bodyChildren)) {
+      walkPinnedFnForwardRefCheck(anyN.bodyChildren, pinnedFnDecls, visited, errors, readPos, filePath);
+    }
+    if (kind === "lift-expr" && anyN.expr && anyN.expr.kind === "markup" && anyN.expr.node) {
+      walkPinnedFnForwardRefCheck([anyN.expr.node], pinnedFnDecls, visited, errors, readPos, filePath);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -8739,6 +8926,23 @@ export function runSYM(input: SYMInput): SYMResult {
   collectSameFileFunctionDecls(ast.nodes, fnDecls, visitedFnCollect);
   const visitedA63 = new WeakSet<object>();
   walkAnnotateTestBindKinds(ast.nodes, fnDecls, fileScope, errors, filePath, visitedA63);
+
+  // PASS 19 (A4 — S105): E-STATE-PINNED-FORWARD-REF on calls to `pinned fn`
+  // declared LATER in source order. Closes the S105 `dc3c460` parser-
+  // recognition's semantic-enforcement half per SPEC §48.6.4. Mirrors B4
+  // cell + import pinned-forward-ref check pattern (lines 1494-1551). Walks
+  // every ExprNode payload looking for CallExpr nodes whose bare-ident
+  // callee matches a same-file `pinned fn` declaration; fires when the
+  // call's enclosing AST-node readPos precedes the decl-span end. Returns
+  // early when no `pinned fn` declarations exist in the file (the common
+  // case — zero-cost on adopter code without pinned-fn use).
+  const pinnedFnDecls = new Map<string, FunctionDeclNode>();
+  const visitedPinnedCollect = new WeakSet<object>();
+  collectPinnedFunctionDecls(ast.nodes, pinnedFnDecls, visitedPinnedCollect);
+  if (pinnedFnDecls.size > 0) {
+    const visitedPass19 = new WeakSet<object>();
+    walkPinnedFnForwardRefCheck(ast.nodes, pinnedFnDecls, visitedPass19, errors, 0, filePath);
+  }
 
   return {
     filePath,
