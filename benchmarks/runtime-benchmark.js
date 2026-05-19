@@ -1,10 +1,14 @@
 #!/usr/bin/env bun
 /**
- * M1 Runtime Performance Benchmark — scrml vs React 19 vs Svelte 5 vs Vue 3
+ * M1 Runtime Performance Benchmark — scrml vs React 19 vs Svelte 5 vs Vue 3 vs Vanilla JS
  *
  * Unified runner that executes each framework's benchmark in a subprocess
  * (to avoid global DOM pollution between frameworks), collects results,
  * and produces a comparison table + JSON output.
+ *
+ * Vanilla JS (zero-framework, raw DOM API) is the per-row cost floor —
+ * the irreducible DOM mutation cost; everything above it is framework
+ * overhead. Added P1.A per docs/changes/runtime-perf-scoping/SCOPING.md.
  *
  * Each framework benchmark runs in happy-dom and measures:
  *   1. Create 1000 rows       — bulk insert
@@ -113,6 +117,12 @@ async function main() {
     resolve(__dirname, "todomvc-vue"),
   );
 
+  const vanillaResult = await runFrameworkBench(
+    "Vanilla JS",
+    resolve(__dirname, "todomvc-vanilla/bench.js"),
+    resolve(__dirname, "todomvc-vanilla"),
+  );
+
   // Collect results
   const frameworks = [];
   const allResults = {};
@@ -121,6 +131,7 @@ async function main() {
   if (reactResult) { frameworks.push("React 19"); allResults["React 19"] = reactResult.results; }
   if (svelteResult) { frameworks.push("Svelte 5"); allResults["Svelte 5"] = svelteResult.results; }
   if (vueResult) { frameworks.push("Vue 3"); allResults["Vue 3"] = vueResult.results; }
+  if (vanillaResult) { frameworks.push("Vanilla JS"); allResults["Vanilla JS"] = vanillaResult.results; }
 
   if (frameworks.length === 0) {
     console.error("\nNo frameworks completed successfully.");
@@ -145,6 +156,7 @@ async function main() {
     fwHeaders.push("**scrml vs React**");
     fwHeaders.push("**scrml vs Svelte**");
     fwHeaders.push("**scrml vs Vue**");
+    fwHeaders.push("**scrml vs Vanilla**");
   }
   console.log(`| Benchmark | ${fwHeaders.join(" | ")} |`);
   console.log(`|---|${fwHeaders.map(() => "---:").join("|")}|`);
@@ -161,10 +173,12 @@ async function main() {
       const reactR = allResults["React 19"]?.find(r => r.benchmark === benchName);
       const svelteR = allResults["Svelte 5"]?.find(r => r.benchmark === benchName);
       const vueR = allResults["Vue 3"]?.find(r => r.benchmark === benchName);
+      const vanillaR = allResults["Vanilla JS"]?.find(r => r.benchmark === benchName);
 
       cells.push(scrmlR && reactR ? ratio(scrmlR.median, reactR.median) : "N/A");
       cells.push(scrmlR && svelteR ? ratio(scrmlR.median, svelteR.median) : "N/A");
       cells.push(scrmlR && vueR ? ratio(scrmlR.median, vueR.median) : "N/A");
+      cells.push(scrmlR && vanillaR ? ratio(scrmlR.median, vanillaR.median) : "N/A");
     }
 
     console.log(`| ${benchName} | ${cells.join(" | ")} |`);
@@ -176,7 +190,7 @@ async function main() {
 
     const scrmlResults = allResults["scrml"];
 
-    for (const otherFw of ["React 19", "Svelte 5", "Vue 3"]) {
+    for (const otherFw of ["React 19", "Svelte 5", "Vue 3", "Vanilla JS"]) {
       const otherResults = allResults[otherFw];
       if (!otherResults) continue;
 
@@ -206,6 +220,7 @@ async function main() {
   console.log("- **React 19**: Uses `createRoot` + `flushSync` with a benchmark component exposing imperative state operations. Measures React's actual virtual DOM diffing and DOM reconciliation.");
   console.log("- **Svelte 5**: Simulates Svelte's compiled output pattern (direct imperative DOM manipulation with keyed reconciliation). This is representative because Svelte compiles away its framework into direct DOM operations.");
   console.log("- **Vue 3**: Uses `createApp` with Composition API (`ref`, `computed`) + `nextTick` flush. Measures Vue's reactivity system and virtual DOM patching.");
+  console.log("- **Vanilla JS**: Zero-framework, raw DOM API only (`document.createElement` / `appendChild` / `insertBefore` / `removeChild` / `textContent` / `setAttribute` / `className`). Per-op surgical DOM mutations — no virtual DOM, no signals, no reconciliation pass. Represents the irreducible per-row cost floor.");
   console.log("- All benchmarks run in happy-dom (simulated browser), not a real browser. Relative comparisons are meaningful; absolute numbers will differ from real browsers.");
   console.log("- Each benchmark: 2-3 warmup iterations, then 5-10 measured iterations. Median reported.");
 

@@ -5,7 +5,7 @@
  */
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, readdirSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -69,7 +69,20 @@ if (!existsSync(resolve(DIST, "app.html")) || !existsSync(resolve(DIST, "app.cli
 }
 
 const htmlContent = readFileSync(resolve(DIST, "app.html"), "utf-8");
-const runtimeJs = readFileSync(resolve(DIST, "scrml-runtime.js"), "utf-8");
+
+// Runtime filename is hashed at codegen time (`scrml-runtime.<hash>.js`).
+// Resolve by enumerating dist for the scrml-runtime*.js prefix to stay
+// agnostic to the specific hash.
+function resolveRuntimePath(distDir) {
+  const stable = resolve(distDir, "scrml-runtime.js");
+  if (existsSync(stable)) return stable;
+  const entries = readdirSync(distDir);
+  const hashed = entries.find(n => /^scrml-runtime\.[a-z0-9]+\.js$/.test(n));
+  if (hashed) return resolve(distDir, hashed);
+  throw new Error(`could not find scrml-runtime[.<hash>].js in ${distDir}`);
+}
+
+const runtimeJs = readFileSync(resolveRuntimePath(DIST), "utf-8");
 const clientJs = readFileSync(resolve(DIST, "app.client.js"), "utf-8");
 
 const bodyMatch = htmlContent.match(/<body[^>]*>([\s\S]*)<\/body>/i);
