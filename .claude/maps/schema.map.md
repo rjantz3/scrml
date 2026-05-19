@@ -1,6 +1,6 @@
 # schema.map.md
 # project: scrmlts
-# updated: 2026-05-18T00:00:00-06:00  commit: dae8ff1
+# updated: 2026-05-18T18:37:27-06:00  commit: 84c736e
 
 ## TypeScript AST — `compiler/src/types/ast.ts` (~1,858 LOC)
 
@@ -52,7 +52,8 @@ SQLNode | CSSInlineNode | StyleNode | ErrorEffectNode | MetaNode | LogicStatemen
 ### FileAST  [ast.ts:1392]
 filePath: string, nodes: ASTNode[], imports, exports, components, typeDecls,
 channelDecls?: ChannelDeclNode[], spans: Record<number, Span>, hasProgramRoot: boolean,
-authConfig: AuthConfig | null, middlewareConfig: MiddlewareConfig | null
+authConfig: AuthConfig | null, middlewareConfig: MiddlewareConfig | null,
+hasResetExpr?: boolean  [PGO P3.B-followup S102 — cached presence of reset-expr nodes, set by TAB/detectResetExprPresence; consumed by emit-client detectRuntimeChunks O(1) gate]
 
 ### TABOutput  [ast.ts:1424]
 filePath, ast: FileAST, errors: TABErrorInfo[]
@@ -198,6 +199,34 @@ Exports (constants + function):
 
 Wire envelope shape (canonical, SPEC §57): `{"__scrml_absent": true}`
 
+## §41.14 formFor Types — `compiler/src/codegen/emit-form-for.ts` (S102)
+
+Source-level expansion; types used by the type-system stage to pass the expansion plan to `expandFormFor()`.
+
+### FormForStructLike  [emit-form-for.ts:51]
+kind: "struct", name: string, fields: Map<string, unknown>
+(structural mirror of StructType from type-system.ts; avoids cross-module type dependency)
+
+### FieldInfo  [emit-form-for.ts:67]
+name: string, baseTypeName: "string"|"number"|"integer"|"boolean"|"struct"|"enum"|"asIs",
+label: string  [§41.14.7 mechanical default: title-case of field name],
+validators: FormForValidator[],
+isNestedStruct: boolean  [true → slot override required per §41.14.8]
+
+### FormForValidator  [emit-form-for.ts:79]
+name: "req"|"length"|"pattern"|"min"|"max"|"gt"|"lt"|"gte"|"lte"|"eq"|"neq"|"oneOf"|"notIn"|"custom"
+argsRaw: string | null  [raw text inside parens, or null for arg-less validators like `req`]
+
+### FormForExpansion  [emit-form-for.ts:90]
+cellName: string, structName: string, includedFields: FieldInfo[],
+slotOverrides: Map<string, unknown[]>,
+onsubmitFnName: string | null, onsubmitBoundary: "server"|"client"|null,
+peActionUrl: string, errorStrategy: "per-field"|"summary"|"both", partial: boolean, span: unknown
+
+### RewriteContext  [codegen/rewrite.ts:50]
+Context threaded through every rewrite pass; all fields optional. Key fields used by paren-form rewrite (S103):
+(no tmpvar field — paren-form single-evaluation is intrinsic to `(expr)` form; `_scrml_tmp_N` interposition removed)
+
 ## Codegen IR — `compiler/src/codegen/ir.ts`
 
 ### HtmlIR  parts: string[]
@@ -281,11 +310,9 @@ Single | Double | Backtick
 `makeEof(pos, line, col)` → Token
 
 ## Tags
-#scrmlts #map #schema #ast #types #codegen #ir #s101 #v0.3.1 #auth-graph #wire-format #reachability #approach-a2 #approach-a3 #approach-a4 #route-splitter #fnv1a-hash #chunk-plan #q-open-4 #q-open-5 #q-open-6 #native-parser #token-catalog #m1-4
+#scrmlts #map #schema #ast #types #codegen #ir #s103 #v0.3.3 #formfor #emit-form-for #auth-graph #wire-format #reachability #approach-a2 #approach-a3 #approach-a4 #route-splitter #fnv1a-hash #chunk-plan #q-open-4 #q-open-5 #q-open-6 #native-parser #token-catalog #m1-4 #hasResetExpr #pgo-p3
 
 ## Links
 - [primary.map.md](./primary.map.md)
 - [master-list.md](../../master-list.md)
 - [pa.md](../../pa.md)
-- [domain.map.md](./domain.map.md)
-- [native-parser.map.md](./native-parser.map.md)

@@ -1,6 +1,6 @@
 # domain.map.md
 # project: scrmlts
-# updated: 2026-05-18T00:00:00-06:00  commit: dae8ff1
+# updated: 2026-05-18T18:37:27-06:00  commit: 84c736e
 
 ## Core Concepts
 
@@ -11,8 +11,8 @@
 | Reactive cell (@var) | Mutable reactive variable declared with `@name = expr`; all subscriptions update on set |
 | Derived cell | Const-derived reactive variable (`const <name> = expr`); recomputed when deps change; shape:"derived" in AST |
 | Engine | State machine over a reactive cell (`<engine>` tag); governs legal transitions via rule= attributes; variant-guarded markup rendering |
-| State child | AST node inside an `<engine>` body representing a named variant; body is walkable AST; may carry payload binding per §51.0.B.1 (S98) |
-| Payload binding on state-child | §51.0.B.1 (S98 SPEC-only): three forms — bare-attribute, named, parenthesized; positional + named semantics inherit from §18.7; reserved-name precedence rule; unit-variant rejection. Track 2 (compiler wiring) pending. |
+| State child | AST node inside an `<engine>` body representing a named variant; body is walkable AST; may carry payload binding per §51.0.B.1 (SHIPPED S99) |
+| Payload binding on state-child | §51.0.B.1: three forms — bare-attribute, named, parenthesized; positional + named semantics inherit from §18.7; reserved-name precedence rule; unit-variant rejection. SPEC S98; compiler wiring CLOSED S99. |
 | Match block | Pattern-match expression (`match expr { .A => ..., .B => ... }`); match-as-expression and match-block-form |
 | Logic block (${ }) | Imperative code block; contains let/const/reactive decls, function defs, SQL blocks, control flow |
 | Meta block (^{ }) | Compile-time code execution block; evaluated at CG Stage 8; `meta.emit()` inserts HTML at the block's DOM position |
@@ -37,11 +37,11 @@
 | Per-Route Artifact Splitter | A-4 wave FULLY CLOSED S91. route-splitter.ts orchestrates per-(EP, role, tier) chunk emission from ChunkPlan atoms. Output: per-file `<route>/<Role>.<tier>.<8-char-hash>.js` + `chunks.json` manifest |
 | ChunkKey | (entryPointId, role, tier) tuple uniquely identifying one emitted JS chunk artifact |
 | ChunkOutput | One emitted chunk: payloadJs (atom-composed JS), chunkHash (FNV-1a base36 8-char, SPEC §47.5), filename, byteSize |
-| getCompilerIdentity() | Reads scrmlTS package.json `version` lazily, returns `"scrml-" + V` (e.g. `"scrml-0.3.1"`); cached after first call; fallback `"scrml-unknown"` on read failure. Populates `chunks.json` `compiler` field (Q-OPEN-4, CLOSED S92) |
+| getCompilerIdentity() | Reads scrmlTS package.json `version` lazily, returns `"scrml-" + V` (e.g. `"scrml-0.3.3"`); cached after first call; fallback `"scrml-unknown"` on read failure. Populates `chunks.json` `compiler` field (Q-OPEN-4, CLOSED S92) |
 | FNV-1a hash | Shared 32-bit base36 hash primitive at `codegen/fnv1a-hash.ts` (SPEC §47.1.3 normative). Two call sites: per-binding type-encoding (§47.1.2) and per-chunk content-addressing (§47.5). Pure-PURE; deterministic |
 | Tier-1 idle prefetch | `_scrml_prefetch_tier1(chunkUrl)`: requestIdleCallback browser-side + setTimeout(fn,1) Safari fallback; wired in IIFE tail when (EP,role) admits non-empty tier-1 |
 | Tier-2 hover prefetch | `_scrml_prefetch_tier2(routePath, role)`: mouseenter+focus once-listeners on `[data-scrml-prefetch]` anchors; `<a href="/internal">` wiring injects data-scrml-prefetch for exact RouteMap.pages matches |
-| Tier-N on-demand dispatch | `_scrml_fetch_chunk(epId, role, tier)`: returns Promise<string> for registered tuples, JS null for unregistered; structural-scaffolding only in v0.3 (never fires per OQ-A2-B + OQ-A4-D) |
+| Tier-N on-demand dispatch | `_scrml_fetch_chunk(epId, role, tier)`: returns Promise<string> for registered tuples, JS null for unregistered; structural-scaffolding only in v0.3 |
 | augmentHtmlForChunks | emit-html.ts ~295 LOC: injects `_SCRML_CHUNKS` inline manifest + `<link rel="modulepreload">` + role-detection bootstrap (localStorage > cookie > `<meta scrml-role>` > `"_anonymous"`) into each route's HTML file |
 | W-CG-CHUNK-* lint family | Five warning codes fired by route-splitter.ts emitChunkLints(): W-CG-CHUNK-EMPTY + W-CG-CHUNK-LARGE + W-CG-CHUNK-NO-PREFETCH + W-CG-CHUNK-PREFETCH-UNRESOLVED + W-CG-CHUNK-MISSING-ROLE |
 | Q-OPEN-5 chunkSizeBudgetBytes | Soft byte budget for W-CG-CHUNK-LARGE. Default 100,000 bytes. Configurable via `--chunk-size-budget=N` CLI flag (CLOSED S92) |
@@ -55,39 +55,47 @@
 | Raw-content elements (§4.17) | `<pre>` and `<code>` — bodies are a single text run. scrml tokens (`${...}`, `<TagName>`, brace sigils) NOT recognized inside. `RAW_CONTENT_ELEMENTS` Set in block-splitter.js. S101 landing, companion §24.3.1 cross-ref |
 | Tailwind typography plugin (§26.6) | `prose` / `prose-{color}` / `prose-{size}` / `not-prose` opt-out. §26.6.1 base prose styling with `:where()`+`:not(:where([class~="not-prose"] *))` selectors. §26.6.2 color variants (slate/gray/zinc/neutral/stone). §26.6.3 size variants (sm/base/lg/xl/2xl). Implemented in tailwind-classes.js +415 LOC (S100) |
 | fn mutual recursion / hoisting (§48.6.4) | `fn` declarations at file scope hoist per §6.9, mirroring `function`; mutual recursion supported without source-order constraints; `pinned fn` opt-out (parser-recognition implementation-pending). S98 SPEC-only landing |
-| Native parser (Mn series) | `compiler/native-parser/` — bottom-up scrml-native lexer replacing Acorn pre-v1.0. M1.1 (S99) + M1.2 strings/templates/§51.0.Q.1 nested-engine (S100) + M1.3 line/block comments (S102) + M1.4 regex (S103). M1 LADDER COMPLETE: all 7 LexMode state-children have substantive body dispatchers. Acorn is the conformance oracle, not the design template. Design authority: scrml-native-parser-design-2026-05-17.md |
+| Native parser (Mn series) | `compiler/native-parser/` — bottom-up scrml-native JS lexer replacing Acorn pre-v1.0. M1.1 (S99) + M1.2 strings/templates/§51.0.Q.1 nested-engine (S100) + M1.3 line/block comments (S102) + M1.4 regex (S103) + M1.5 template-mode tracking in Acorn oracle (S102). M1 LADDER COMPLETE: all 7 LexMode state-children have substantive body dispatchers. Acorn is the conformance oracle, not the design template. |
 | §51.0.Q.1 nested engine | SPEC-canonical pattern for composite state-children containing an inner `<engine>` over the same type. `var=innerLexMode` is the canonical disambiguation (SPEC §51.0.C + §51.0.Q.1). Exemplified in `lex-mode.scrml` InTemplateBody state-child. |
 | Named timers (§51.0.M.1) | `<onTimeout name=IDENT after=DURATION to=.Variant>` — addressable timer; `cancelTimer("IDENT")` from event-handler inside same state-child body. E-TIMER-NAME-DUPLICATE + E-TIMER-NAME-INVALID diagnostics. SHIPPED S79 A5-6 Feature 1 |
 | MPA shell-composition $& fix | S100 `01eeda9` + S101 `d77a60d`: `String.prototype.replace` second argument dollar-sign backreferences (`$&`, `$N`, `$'`, `` $` ``) silently substituted in multipage body replace calls; fixed by converting to function-form replace in codegen/index.ts:1214, component-expander.ts:2169, commands/generate.js:242 |
-| PIPELINE.md | v0.7.2 (S101 2026-05-18) — adds Stage 2 (BS) v0.next addendum for §4.17 raw-content elements. v0.7.1 (S101) was the prose-pass; v0.7.2 is the §4.17 contract addendum. No downstream stage contract changes |
+| PIPELINE.md | v0.7.2 (S101 2026-05-18) — adds Stage 2 (BS) v0.next addendum for §4.17 raw-content elements. No downstream stage contract changes |
+| formFor (§41.14) | FLAGSHIP L22 family member — type-driven form generation from struct definition. `<formFor for=StructType onsubmit=fn pick=[...] />` markup-element. Source-level expansion at type-system stage: auto-synthesizes compound state cell (§6.3.2 Variant C) + per-field Shape 2 sub-cells (§6.2) + `<form action=>` with PE-default + `<errors of=>` + submit button. 8 error codes (E-FORMFOR-*). SPEC §41.14 LANDED S102; compiler impl LANDED S102; +58 tests. SHIPPED |
+| formFor source-level expansion | expandFormFor() in emit-form-for.ts produces AST nodes consumed identically to hand-authored Shape 2 + `<form>`. DG / VSS / CG stages receive it as ordinary scrml AST — no codegen-stage changes. Approach A: "Pillar-5 invariant — emitted output is standard scrml" |
+| §41.14 slot customization | OQ-FF-1 debate verdict 51.5/60: slot-style wins over function-valued attributes. Per-field customization via §16 component slots; `<slot name="fieldName">` overrides default render for that field; "submit" slot overrides submit button |
+| §41.14 PE-default action= | OQ-FF-2 debate verdict 52/60: PE-default `action=/api/<route>` derived from onsubmit server-fn route. Written by expandFormFor; standard scrml `<form action=...>` downstream |
+| PGO Phase 3 (S102) | Profile-Guided Optimization wave: P3.A regex collapse (−44% pipeline; single alternation replaces per-name regex loop in emit-client.ts); P3.B detect-runtime-chunks fused probe (−72% cumulative); P3.B-followup hasResetExpr AST-builder flag (−71% additional on residual); P3.C owner-stack (−99% findOwningRenderDGNode). Trucking-dispatch: 2326ms → ~880ms = −62% reduction. v0.3.3 tag cut at S102 `5815cf6` |
+| hasResetExpr cache field | PGO P3.B-followup (S102): `FileAST.hasResetExpr` boolean cached at TAB time; enables O(1) gate in emit-client detectRuntimeChunks replacing per-node ExprNode descent. TAB is first stage with fully-assembled AST; all downstream consumers read as O(1) |
+| owner-stack DG optimization | PGO P3.C (S102): AST-walk-derived owner-stack replaces per-call O(n) findOwningRenderDGNode scan over global `nodes` Map for markup-read edge emission. 99.7% reduction on findOwningRenderDGNode hotspot |
+| paren-form `is not` / `is some` fix (S103) | `(expr) is not` / `(expr) is some` / `(expr) is not not` — rewrite.ts _rewriteParenthesizedIsOp no longer interposes `_scrml_tmp_N = (expr)` tmpvar. Prior tmpvar was undeclared in ES-module strict mode → ReferenceError. Fix: `(expr) is not` → `((expr) == null)` directly. Single-evaluation intrinsic to paren form |
+| runtime-perf SCOPING | S102 SCOPE OPEN: close the TodoMVC 0/10 runtime benchmark gap vs React/Svelte/Vue. Phase 1 (instrumentation + vanilla-JS baseline + re-measurement) dispatch-ready. Compile-time PGO has zero effect on runtime perf (emitted JS byte-identical) |
 
-## v0.3.x Status (HEAD dae8ff1, 2026-05-18)
+## v0.3.x Status (HEAD 84c736e, 2026-05-18)
 
-**v0.3.1** — v0.3.0 patch tag `cbe1b1e`. v0.3.x patch arc (S93+). All Approach A sub-waves CLOSED (v0.3.0 baseline).
+**v0.3.3** — cut at S102 tag `5815cf6`. v0.3.3 = PGO Phase 3 wave + formFor impl + runtime-perf SCOPING.
 
-**CLOSED at S93-S99 (post-v0.3.0 patch arc):**
-- S93-S99: 6+ substantive compiler bugs closed (scope-walker gaps, parseParamList default-value, export function synth stubs, `is some`/`is not` preprocessor, E-SWITCH-FORBIDDEN); B1 §51.0.B.1 payload-binding compiler-feature wiring Track 2 CLOSED S99
+**CLOSED at S102 (v0.3.3):**
+- PGO Phase 3: P3.A regex collapse + P3.B detect-runtime-chunks fold + P3.C owner-stack + P3.B-followup hasResetExpr ✓
+- §41.14 formFor SPEC (11 normative subsections, 8 error codes) + compiler impl (expandFormFor, type-system validation, +58 tests) ✓
+- M1.5 template-mode tracking in Acorn oracle (parser-conformance-lexer.test.js) ✓
+- runtime-perf SCOPING (3-phase ladder; Phase 1 dispatch-ready) ✓
 
-**CLOSED at S99:**
+**CLOSED at S103 (post-v0.3.3 patch):**
+- paren-form `is not` / `is some` codegen fix — tmpvar-free shape; not-keyword.test.js §42.2.4 Phase A tests ✓
+
+**CLOSED at S99-S101 (post-v0.3.0 patch arc):**
 - §51.0.B.1 payload-binding compiler wiring (Track 2) ✓
-- Day-30 reference build-out (11 pages shipped) ✓
+- §26.6 Tailwind typography plugin ✓
+- MPA shell-composition `$&` regex-injection bug fix ✓
+- M1.2 strings + templates + §51.0.Q.1 nested-engine ✓
+- §4.17 raw-content elements + PIPELINE.md v0.7.2 + SPEC §24.3.1 ✓
 
-**CLOSED at S100 (v0.3.x):**
-- §26.6 Tailwind typography plugin (tailwind-classes.js +415 LOC) ✓
-- MPA shell-composition `$&` regex-injection bug fix (codegen/index.ts) ✓
-- M1.2 native-parser: strings + template literals + §51.0.Q.1 nested-engine (M1.2 stress test) ✓
-
-**CLOSED at S101-S103 (v0.3.1 era):**
-- §4.17 raw-content elements (`<pre>` / `<code>`) — BS stage + PIPELINE.md v0.7.2 + SPEC §24.3.1 ✓
-- $& body-replace function-form fix at component-expander.ts + commands/generate.js ✓
-- M1.3 native-parser: line comments + block comments (S102) ✓
-- M1.4 native-parser: regex body dispatcher; M1 LADDER COMPLETE (S103) ✓
-
-**Pending (post-v0.3.1):**
+**Pending (post-v0.3.3):**
 - M1.5 native-parser: flip `expr-literals.js` to "full" disposition (regex-token normalizer extension)
 - M2: expression parser in scrml; ParseContext engine
-- §51.0.B.1 Track 2 compiler-feature (parser + typer + codegen wiring) — SPEC landed S98; compiler wiring CLOSED S99
 - stdlib/http async migration (4 try-catch sites tracked by W-TRY-CATCH lint)
+- formFor stdlib + sample-app + scrml.dev refresh → v0.4 anchor (per S101 user direction)
+- runtime-perf Phase 1 (instrumentation + vanilla-JS baseline + re-measurement)
 
 ## Business Invariants
 
@@ -111,8 +119,11 @@
 - `<pre>` and `<code>` bodies are NOT parsed for scrml tokens — they are raw-content text runs (§4.17)
 - Engine state-child payload-binding MUST NOT shadow reserved attribute names {rule, effect, history, internal:rule} — E-ENGINE-PAYLOAD-RESERVED-COLLISION (§51.0.B.1)
 - Engine state-child payload binding on a UNIT variant (no payload fields) raises E-ENGINE-PAYLOAD-ON-UNIT-VARIANT (§51.0.B.1)
+- `<formFor for=StructType>` requires `for=` to be a bare struct-type ident; quoted strings / unknown types / non-struct types all fire E-FORMFOR-TYPE-NOT-STRUCT (§41.14.1)
+- `<formFor pick=[...] omit=[...]>` cannot specify BOTH pick= AND omit= — fires E-FORMFOR-PICK-OMIT-CONFLICT (§41.14.5)
+- `(expr) is not` / `(expr) is some` codegen must NOT interpose undeclared tmpvar — single-evaluation intrinsic to paren form (S103 fix)
 
-## Diagnostic First-Fire-Sites (S90 + S91 + S92 — unchanged; new codes at S98)
+## Diagnostic First-Fire-Sites (S90-S103)
 
 | Code | Severity | File | Description | Session |
 |------|----------|------|-------------|---------|
@@ -129,9 +140,17 @@
 | W-CG-CHUNK-NO-PREFETCH | info | codegen/route-splitter.ts emitChunkLints() | Multi-route app, no internal links at all — Info (Q-OPEN-6 case 1) | S91/S92 |
 | W-CG-CHUNK-PREFETCH-UNRESOLVED | warning | codegen/route-splitter.ts emitChunkLints() | Internal-shaped links present but unresolved — Warning (Q-OPEN-6 case 2) | S92 |
 | W-CG-CHUNK-MISSING-ROLE | warning | codegen/route-splitter.ts emitChunkLints() | `<auth role=X>` role not in reachability record (A-4.7) | S91 |
-| E-ENGINE-PAYLOAD-ON-UNIT-VARIANT | error | SPEC §51.0.B.1 — compiler wiring pending Track 2 | Payload binding on a unit-variant state-child | S98 |
-| E-ENGINE-PAYLOAD-ARITY-MISMATCH | error | SPEC §51.0.B.1 — compiler wiring pending Track 2 | Binding count != variant payload field count | S98 |
-| E-ENGINE-PAYLOAD-RESERVED-COLLISION | error | SPEC §51.0.B.1 — compiler wiring pending Track 2 | Payload binding name shadows reserved state-child attribute | S98 |
+| E-ENGINE-PAYLOAD-ON-UNIT-VARIANT | error | type-system.ts §51.0.B.1 pass | Payload binding on a unit-variant state-child | S99 (wired) |
+| E-ENGINE-PAYLOAD-ARITY-MISMATCH | error | type-system.ts §51.0.B.1 pass | Binding count != variant payload field count | S99 (wired) |
+| E-ENGINE-PAYLOAD-RESERVED-COLLISION | error | type-system.ts §51.0.B.1 pass | Payload binding name shadows reserved state-child attribute | S99 (wired) |
+| E-FORMFOR-TYPE-NOT-STRUCT | error | type-system.ts §41.14 pass | `for=` missing/quoted/unknown/non-struct (4 sub-cases) | S102 |
+| E-FORMFOR-SLOT-UNKNOWN | error | type-system.ts §41.14 pass | Slot name not in struct fields or "submit" | S102 |
+| E-FORMFOR-PICK-INVALID-FIELD | error | type-system.ts §41.14 pass | pick= not array-of-strings or unknown field | S102 |
+| E-FORMFOR-OMIT-INVALID-FIELD | error | type-system.ts §41.14 pass | omit= not array-of-strings or unknown field | S102 |
+| E-FORMFOR-PICK-OMIT-CONFLICT | error | type-system.ts §41.14 pass | Both pick= and omit= present | S102 |
+| E-FORMFOR-ONSUBMIT-SIGNATURE | error | type-system.ts §41.14 pass | Handler arg type mismatch or zero args | S102 |
+| E-FORMFOR-ERROR-STRATEGY-INVALID | error | type-system.ts §41.14 pass | error-strategy= not "per-field"/"summary"/"both" | S102 |
+| E-FORMFOR-NESTED-STRUCT-NO-SLOT | error | type-system.ts §41.14 pass | Struct-typed field with no slot override | S102 |
 
 ## Domain Events (Compiler Pipeline)
 
@@ -150,18 +169,21 @@
 | emitChunkLints | Post-per-route-emission, per entry-point | codegen/route-splitter.ts |
 | augmentHtmlForChunks | Post-emit, when emitPerRoute=true + chunks manifest ready | codegen/emit-html.ts |
 | raw-content element passthrough | BS Stage 2: RAW_CONTENT_ELEMENTS.has(lowerTagName) — body becomes text run | block-splitter.js |
+| §41.14 formFor expansion | Type-system stage §41.14 pass — expandFormFor() produces synth AST nodes in-place | type-system.ts → emit-form-for.ts |
+| assembleRuntime deferred | PGO P3.B: runtime assembly deferred to post-emit phase; runtime placeholder spliced in | emit-client.ts |
 
 ## Aggregates
 
 | Aggregate | File | Owns |
 |-----------|------|------|
-| FileAST | compiler/src/types/ast.ts | All ASTNodes for one .scrml file |
+| FileAST | compiler/src/types/ast.ts | All ASTNodes for one .scrml file; hasResetExpr cache field (PGO P3.B-followup) |
 | CompileContext | compiler/src/codegen/context.ts | BindingRegistry, FileAnalysis, EncodingContext, error list, hasPrefetchableLinks, hasInternalLinks |
 | BindingRegistry | compiler/src/codegen/binding-registry.ts | EventBinding[], LogicBinding[] |
 | FileAnalysis | compiler/src/codegen/analyze.ts | Pre-computed AST slices |
 | AuthGraph | compiler/src/types/auth-graph.ts | gates Map, roleEnum, gateToEntryPoint, redirectTargets, errors — Stage 7.55 output |
 | ReachabilityRecord | compiler/src/types/reachability.ts | closures Map<EntryPointId, RolePlayableSurface> — Stage 7.6 output |
 | ChunksManifest | compiler/src/codegen/route-splitter.ts | Map<ChunkKey, ChunkOutput> + compiler identity field — per-route artifact index |
+| FormForExpansion | compiler/src/codegen/emit-form-for.ts | Pipeline-input contract; built by type-system §41.14 pass; consumed by expandFormFor() |
 
 ## Task-Shape Routing
 
@@ -180,17 +202,21 @@
 | §26.6 typography plugin | CLOSED S100 — tailwind-classes.js buildProseRule/buildProseColorRule/buildProseSizeRule (SPEC §26.6.1-§26.6.5) |
 | §4.17 raw-content elements | CLOSED S101 — block-splitter.js RAW_CONTENT_ELEMENTS Set + PIPELINE.md v0.7.2 + SPEC §24.3.1 cross-ref |
 | §48.6.4 fn mutual recursion / hoisting | SPEC-only S98 — parser-recognition implementation-pending (normative semantics specified) |
+| §41.14 formFor | SHIPPED S102 — type-system.ts §41.14 pass + emit-form-for.ts expandFormFor() + 8 E-FORMFOR-* codes + 3 test files; html-elements.js formFor element spec; attribute-registry.js + tokenizer.ts updates for pick=/omit= array-literal parsing |
 | MPA shell-composition $& fix | CLOSED S100/S101 — codegen/index.ts:1214 + component-expander.ts:2169 + commands/generate.js:242 |
-| Native parser M1 ladder | CLOSED S103 — compiler/native-parser/ all 7 LexMode state-children active (M1.4). Next: M1.5 regex-token normalizer |
+| Native parser M1 ladder | CLOSED S103 (M1.4) — compiler/native-parser/ all 7 LexMode state-children active; M1.5 regex-token normalizer pending |
+| PGO Phase 3 | CLOSED S102 — emit-client.ts P3.A+P3.B+P3.B-followup; dependency-graph.ts P3.C owner-stack; ast-builder.js hasResetExpr; −62% pipeline on trucking-dispatch |
+| paren-form `is not` codegen fix | CLOSED S103 — rewrite.ts _rewriteParenthesizedIsOp; not-keyword.test.js §42.2.4 Phase A updated |
 | stdlib/http async migration | stdlib/http/index.scrml lines 65/264 (W-TRY-CATCH fires) |
 | null/absence migration | docs/changes/null-eradication-*, undefined-eradication-*, stdlib-phase-1-5-null-sweep |
 | Chunk content-addressing | codegen/fnv1a-hash.ts (FNV-1a primitive) + route-splitter.ts computeChunkHash/finalizeChunkHash |
 | Per-binding name encoding | codegen/type-encoding.ts (re-exports fnv1aHash from fnv1a-hash.ts; callers byte-identical) |
 | HTML augmentation | codegen/emit-html.ts:augmentHtmlForChunks (per-route script injection + link hints + role bootstrap) |
 | Canonical JSON reachability | reachability-solver.ts:serializeReachabilityRecord (A-2.8) — stratified comparator + canonical diagnostic order |
+| runtime-perf SCOPING | docs/changes/runtime-perf-scoping/SCOPING.md — Phase 1 dispatch-ready; Phase 2+3 sequenced after data |
 
 ## Tags
-#scrmlts #map #domain #concepts #pipeline #engine #reactive #s101 #v0.3.1 #approach-a #approach-a2 #approach-a3 #approach-a4 #approach-a5 #reachability #auth-graph #wire-format #null-eradication #route-splitter #fnv1a-hash #chunk-prefetch #generate-auth #q-open-4 #q-open-5 #q-open-6 #native-parser #m1-4 #m1-ladder-complete #raw-content #typography #payload-binding #named-timers #spec-51-0-b-1 #spec-4-17 #spec-26-6 #spec-48-6-4
+#scrmlts #map #domain #concepts #pipeline #engine #reactive #s103 #v0.3.3 #formfor #spec-41-14 #approach-a #approach-a2 #approach-a3 #approach-a4 #approach-a5 #reachability #auth-graph #wire-format #null-eradication #route-splitter #fnv1a-hash #chunk-prefetch #generate-auth #q-open-4 #q-open-5 #q-open-6 #native-parser #m1-4 #m1-5 #m1-ladder-complete #raw-content #typography #payload-binding #named-timers #spec-51-0-b-1 #spec-4-17 #spec-26-6 #spec-48-6-4 #pgo-phase-3 #hasResetExpr #paren-form-fix #dq-12 #runtime-perf
 
 ## Links
 - [primary.map.md](./primary.map.md)

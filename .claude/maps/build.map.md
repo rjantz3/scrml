@@ -1,6 +1,6 @@
 # build.map.md
 # project: scrmlts
-# updated: 2026-05-14T16:19:26-06:00  commit: 13154ba
+# updated: 2026-05-18T18:37:27-06:00  commit: 84c736e
 
 ## Development Commands (root package.json > scripts)
 
@@ -31,6 +31,9 @@
 | `bun run scripts/regen-spec-index.ts` | Regenerate SPEC-INDEX.md line ranges + sizes in-place (idempotent) |
 | `scripts/compile-test-samples.sh` | Batch compile all samples/compilation-tests/ |
 | `bun run scripts/measure-markup-read-edges.ts` | Measure markup-read node ceiling (A-1.7 tool) |
+| `bun run scripts/benchmark-perf-baseline.ts` | Capture per-stage perf baseline → benchmarks/perf-baseline.json (PGO P1.4; S102) |
+| `bun run scripts/perf-regression-check.ts` | Diff current perf vs baseline; exit 1 on regression >TOLERANCE% (default 10%; S102) |
+| `node scripts/extract-readme-scrml.js` | Compile-gate for `scrml` fenced blocks in README.md (S102; called by pre-push hook on release-tag push) |
 
 ## CLI Subcommands
 
@@ -63,6 +66,18 @@ Steps:
 2. Run: `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail`
 3. Exit 1 on test failure
 
+## Pre-push Hook (scripts/git-hooks/pre-push — NEW S102)
+
+Source-controlled baseline. Install via `bash scripts/git-hooks/install.sh`.
+
+Steps:
+1. Parse push payload (one line per ref: `<local-ref> <local-sha> <remote-ref> <remote-sha>`)
+2. Detect any release-tag push (`refs/tags/v*`) in the payload
+3. On release-tag push: run `node scripts/extract-readme-scrml.js` — compile-gate for all ` ```scrml ` fenced blocks in README.md
+4. Regular (non-release-tag) pushes: skip README gate
+
+README gate behavior: default-gated (opt-OUT via `// gate: skip` marker in first non-blank line of block). Compile + lint-clean check; ghost-pattern lint W-LINT-* failures fail the gate.
+
 ## Bun Test Config (bunfig.toml)
 
 ```toml
@@ -79,7 +94,7 @@ Run subsets:
 
 ## No CI/CD Pipeline
 
-No `.github/workflows/`, `.gitlab-ci.yml`, or `Jenkinsfile` detected. CI is via local pre-commit hook.
+No `.github/workflows/`, `.gitlab-ci.yml`, or `Jenkinsfile` detected. CI is via local pre-commit and pre-push hooks.
 
 ## Docker
 
@@ -93,8 +108,16 @@ Gitignored; must be built locally on each machine:
 
 Rebuild: `bun run scripts/rebuild-self-host-dist.ts` and `bun run scripts/rebuild-tab-dist.ts`
 
+## PGO Performance Tooling (S102)
+
+| File | Purpose |
+|------|---------|
+| scripts/benchmark-perf-baseline.ts | Capture per-stage baseline (trucking-dispatch + contact-book + todomvc corpora). Output: benchmarks/perf-baseline.json |
+| scripts/perf-regression-check.ts | Re-run harness, diff vs baseline per stage, flag >TOLERANCE% slower (exit 1) |
+| benchmarks/perf-baseline.json | Versioned baseline JSON. Reference: docs/changes/perf-characterization/CLOSURE-ANALYSIS-COST.md (S94) |
+
 ## Tags
-#scrmlts #map #build #scripts #bun #pre-commit #self-host #playwright #e2e #s92 #v0.3.0 #generate-auth #emit-per-route #chunk-size-budget #q-open-5
+#scrmlts #map #build #scripts #bun #pre-commit #pre-push #self-host #playwright #e2e #s103 #v0.3.3 #generate-auth #emit-per-route #chunk-size-budget #q-open-5 #pgo-tooling #perf-baseline #readme-gate
 
 ## Links
 - [primary.map.md](./primary.map.md)

@@ -1,6 +1,6 @@
 # error.map.md
 # project: scrmlts
-# updated: 2026-05-18T00:00:00-06:00  commit: dae8ff1
+# updated: 2026-05-18T18:37:27-06:00  commit: 84c736e
 
 ## Error Code System
 
@@ -59,10 +59,18 @@ All extend `_ScrmlError extends Error`.
 | E-DG-* | 001, 002 | Dependency graph (Stage 7) |
 | E-ENGINE-* | 001, 003, 004, 005, 010, 013 | Engine declaration/transition |
 | E-ENGINE-INVALID-TRANSITION | §51.0.F | Direct write violating rule= contract |
-| E-ENGINE-PAYLOAD-ON-UNIT-VARIANT | §51.0.B.1 S98 | Payload binding attrs on a unit variant state-child; compiler wiring pending Track 2 |
-| E-ENGINE-PAYLOAD-ARITY-MISMATCH | §51.0.B.1 S98 | Binding count != variant payload field count; compiler wiring pending Track 2 |
-| E-ENGINE-PAYLOAD-RESERVED-COLLISION | §51.0.B.1 S98 | Payload binding name shadows reserved state-child attribute {rule, effect, history, internal:rule}; compiler wiring pending Track 2 |
+| E-ENGINE-PAYLOAD-ON-UNIT-VARIANT | §51.0.B.1 | Payload binding attrs on a unit variant state-child (SHIPPED S99 compiler wiring) |
+| E-ENGINE-PAYLOAD-ARITY-MISMATCH | §51.0.B.1 | Binding count != variant payload field count (SHIPPED S99 compiler wiring) |
+| E-ENGINE-PAYLOAD-RESERVED-COLLISION | §51.0.B.1 | Payload binding name shadows reserved state-child attribute {rule, effect, history, internal:rule} (SHIPPED S99 compiler wiring) |
 | E-ERROR-* | 008 | Error handling surface |
+| E-FORMFOR-TYPE-NOT-STRUCT | §41.14.1 | `<formFor for=...>` is missing `for=`, or `for=` is a quoted string, or references unknown type, or references non-struct type; fire-site: type-system.ts §41.14 pass (S102) |
+| E-FORMFOR-SLOT-UNKNOWN | §41.14.4 | Slot name not in struct fields or "submit"; fire-site: type-system.ts §41.14 pass (S102) |
+| E-FORMFOR-PICK-INVALID-FIELD | §41.14.5 | `pick=` value not an array-of-strings literal, or names unknown field; fire-site: type-system.ts (S102) |
+| E-FORMFOR-OMIT-INVALID-FIELD | §41.14.5 | `omit=` value not an array-of-strings literal, or names unknown field; fire-site: type-system.ts (S102) |
+| E-FORMFOR-PICK-OMIT-CONFLICT | §41.14.5 | Both `pick=` AND `omit=` attributes present; fire-site: type-system.ts (S102) |
+| E-FORMFOR-ONSUBMIT-SIGNATURE | §41.14.3 | onsubmit= handler arg type mismatch or zero args; fire-site: type-system.ts (S102) |
+| E-FORMFOR-ERROR-STRATEGY-INVALID | §41.14.6 | `error-strategy=` value not "per-field", "summary", or "both"; fire-site: type-system.ts (S102) |
+| E-FORMFOR-NESTED-STRUCT-NO-SLOT | §41.14.8 | Struct-typed field present with no slot override; fire-site: type-system.ts (S102) |
 | E-IMPORT-* | 005, 006, 007 | Import violations |
 | E-INPUT-* | 001–005 | §36 input device errors |
 | E-LIFT-* | 001 | Concurrent lift detection (DG) |
@@ -92,6 +100,7 @@ All extend `_ScrmlError extends Error`.
 | E-TIMER-NAME-DUPLICATE | §51.0.M.1 | Engine state-child declares two `<onTimeout>` with same `name=` value; fire-site: engine-statechild-parser.ts (A5-6 Feature 1, S79) |
 | E-TIMER-NAME-INVALID | §51.0.M.1 | `<onTimeout name=...>` value is not identifier-shaped; fire-site: engine-statechild-parser.ts (A5-6 Feature 1, S79) |
 | E-TYPE-* | 001, 004, 006, 020–081 | Type system errors (Stage 6 TS) |
+| E-TYPE-042 | §42.2.4 | Rewrite guard: `!(x is not)` shape error — "use `x is not` not `!(x is not)`"; fire-site: rewrite.ts _rewriteParenthesizedIsOp (S103) |
 | E-USE-* | 001, 002, 005 | Usage analysis errors |
 | E-VALIDATOR-* | CIRCULAR-DEP, INLINE-DYNAMIC | Validator graph errors |
 | E-VARIANT-AMBIGUOUS | §34 | Variant inference ambiguity |
@@ -182,13 +191,14 @@ W-CG-CHUNK-NO-PREFETCH and W-CG-CHUNK-PREFETCH-UNRESOLVED are mutually exclusive
 | compiler/src/reachability/outer-fixpoint.ts | E-CLOSURE-001 |
 | compiler/src/codegen/route-splitter.ts emitChunkLints() | W-CG-CHUNK-* family + W-CG-CHUNK-PREFETCH-UNRESOLVED |
 | compiler/src/engine-statechild-parser.ts | E-TIMER-NAME-DUPLICATE + E-TIMER-NAME-INVALID (§51.0.M.1) |
+| compiler/src/type-system.ts §41.14 pass | E-FORMFOR-* (8 codes; S102) |
+| compiler/src/codegen/rewrite.ts _rewriteParenthesizedIsOp | E-TYPE-042 for `!(x is not)` shape (S103 paren-form rewrite) |
 
 ## Tags
-#scrmlts #map #error #diagnostics #runtime-errors #error-codes #s101 #v0.3.1 #wire-format #auth-graph #w-cg-undefined #closure #auth-runtime-fallback #w-cg-chunk #w-auth-login-missing #route-splitter #q-open-6 #payload-binding #named-timers #raw-content
+#scrmlts #map #error #diagnostics #runtime-errors #error-codes #s103 #v0.3.3 #formfor #e-formfor #wire-format #auth-graph #w-cg-undefined #closure #auth-runtime-fallback #w-cg-chunk #w-auth-login-missing #route-splitter #q-open-6 #payload-binding #named-timers #raw-content #paren-form-fix
 
 ## Links
 - [primary.map.md](./primary.map.md)
 - [master-list.md](../../master-list.md)
 - [pa.md](../../pa.md)
 - [schema.map.md](./schema.map.md)
-- [domain.map.md](./domain.map.md)

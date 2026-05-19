@@ -1,6 +1,6 @@
 # test.map.md
 # project: scrmlts
-# updated: 2026-05-18T00:00:00-06:00  commit: dae8ff1
+# updated: 2026-05-18T18:37:27-06:00  commit: 84c736e
 
 ## Test Framework
 
@@ -16,28 +16,38 @@
 | With bail | `bun test ... --bail` (used by pre-commit hook) |
 | Coverage | `bun test compiler/tests/ --coverage` |
 
-## Test Counts (S101 / v0.3.1 era, 2026-05-18)
+## Test Counts (S103 / v0.3.3 era, 2026-05-18)
 
-Pre-commit subset (unit + integration + conformance): **12,645 pass / 88 skip / 1 todo / 0 fail / 658 files**
-Full suite (`bun run test`): **15,468+ pass / 0 fail** (S101 per invocation context)
-Native-parser conformance: **97 pass / 0 skip / 0 fail** (parser-conformance-lexer.test.js, M1.4)
+Pre-commit subset (unit + integration + conformance): **12,719 pass / 88 skip / 1 todo / 0 fail / 696 files**
+Full suite (`bun run test`): See pre-commit subset; S102 close addendum notes 12,718 pass at `08d05b3`
+Native-parser conformance: **97 pass / 0 skip / 0 fail** (parser-conformance-lexer.test.js, M1.4 / M1.5 template-mode tracking)
 
-Prior watermarks: S100 close — 15,444 pass / 172 skip / 1 todo / 0 fail / 689 files (full); S92 close — 12,694 pass / 638 files (pre-commit subset)
+Prior watermarks: S101 close — 12,645 pass / 88 skip / 1 todo / 0 fail / 658 files (pre-commit); S100 close — 15,444 pass / 172 skip / 1 todo / 0 fail / 689 files (full); S92 close — 12,694 pass / 638 files (pre-commit subset)
 
-## New Tests Since S92 Baseline
+## New Tests Since S101 Baseline (S102-S103)
 
-**M1.x native-parser conformance (NEW S99-S103):**
-- compiler/tests/parser-conformance-lexer.test.js — M1.1-M1.4 bench-corpus + inline micro-corpus. Acorn vs `lex.js` token-by-token comparison. As of M1.4: 97 pass / 0 skip / 0 fail. Bench-corpus `expr-literals.js` retains `"M1.2-string-template-regex"` skip pending M1.5 regex-token normalizer
-- compiler/tests/parser-conformance.test.js — top-level parser conformance driver (Acorn vs native at parse level)
-- compiler/tests/parser-conformance/bench/ — conformance bench corpus files
-- compiler/tests/parser-conformance/parsers.js — Acorn + native-parser adapter shims
-- compiler/tests/parser-conformance/tier-diff.js — token shape normalizer
+**§41.14 formFor (NEW S102):**
+- compiler/tests/unit/form-for.test.js — 8 E-FORMFOR-* error codes; all validation error paths (TYPE-NOT-STRUCT, SLOT-UNKNOWN, PICK-INVALID-FIELD, OMIT-INVALID-FIELD, PICK-OMIT-CONFLICT, ONSUBMIT-SIGNATURE, ERROR-STRATEGY-INVALID, NESTED-STRUCT-NO-SLOT); +58 tests
+- compiler/tests/unit/form-for-expander.test.js — expandFormFor() unit tests; expansion plan + slot-override merge + partial mode
+- compiler/tests/conformance/conf-form-for-canonical.test.js — end-to-end conformance: `<formFor for=Signup onsubmit=fn/>` compiles to full `<form>` with PE-default `action=/api/<route>`, CSRF auto-injection, per-field render with shape-dispatched inputs (text/checkbox), title-case labels, error-rendering anchors, submit button
 
-**§4.17 raw-content conformance (NEW S101):**
-- compiler/tests/conformance/conf-raw-content-pre-code.test.js — `<pre>` / `<code>` raw-content body passthrough + E-CTX-001 unclosed-element diagnostic
+**§42.2.4 paren-form `is some` / `is not` fix (S103):**
+- compiler/tests/unit/not-keyword.test.js — updated (§42.2.4 Phase A describe block, DQ-12); S103 fix removes tmpvar interposition: `(expr) is not` → `((expr) == null)` without `_scrml_tmp_N` lift; 6 tests covering absence/presence/double-negation/array-index/addition
 
-**S93-S103 compiler bug fixes (test coverage added per dispatch):**
-- Various unit tests for scope-walker gaps, parseParamList default-value handling, export function synth stubs, `is some`/`is not` preprocessor, E-SWITCH-FORBIDDEN post-parse walker — per docs/changes/heads-up-s95-bugs/
+**COMPOUND-STATE-DECL-AUTOLIFT (S102):**
+- compiler/tests/conformance/conf-COMPOUND-STATE-DECL-AUTOLIFT.test.js — conformance test for compound state declaration auto-lift behavior
+
+**M1.5 native-parser template-mode tracking (S102):**
+- compiler/tests/parser-conformance-lexer.test.js — updated: M1.5 template-mode tracking in `tokenizeWithAcorn`; opening backtick/brace drop (enter template mode); Acorn regex-token normalizer surface vs native `RegexLit` gap documented; `expr-literals.js` retains `"M1.2-string-template-regex"` skip pending M1.5 full flip
+
+**Self-host AST parity (S102):**
+- compiler/tests/self-host/ast.test.js — updated: strip `hasResetExpr` + `_p3aExport` fields before parity comparison; needed after PGO P3.B-followup adds `hasResetExpr` to FileAST and TAB adds `_p3aIsExport`/`_p3aExportName` flags
+
+**Misc S102:**
+- compiler/tests/unit/bare-variant-sequential-writes-bug2.test.js — bare-variant sequential-writes regression test
+- compiler/tests/unit/html-elements.test.js — updated for formFor element registration
+- compiler/tests/unit/p3-follow-no-isComponent-routing.test.js — P3.B follow-up regression: no isComponent routing breakage
+- compiler/tests/unit/type-system.test.js — updated for formFor type-system validation pass
 
 ## A-5 Integration Fixtures  [compiler/tests/integration/fixtures/a5/]
 
@@ -54,10 +64,9 @@ Prior watermarks: S100 close — 15,444 pass / 172 skip / 1 todo / 0 fail / 689 
 
 | Category | Path | Approx Count |
 |----------|------|--------------|
-| Unit (named) | compiler/tests/unit/ (top-level .test.*) | ~390 files |
-| Unit (gauntlet-s*) | compiler/tests/unit/gauntlet-s*/ | ~64 files |
+| Unit (named) | compiler/tests/unit/ (top-level .test.*) | ~484 files |
 | Integration | compiler/tests/integration/ | ~52 files |
-| Conformance (top-level) | compiler/tests/conformance/ (top-level) | ~26 files (+conf-raw-content-pre-code S101) |
+| Conformance (top-level) | compiler/tests/conformance/ (top-level) | ~28 files (conf-COMPOUND-STATE-DECL-AUTOLIFT + conf-form-for-canonical added S102) |
 | Conformance (subtrees) | compiler/tests/conformance/block-grammar, s32-fn-state-machine, tab | ~77 files |
 | Parser conformance | compiler/tests/parser-conformance-lexer.test.js + parser-conformance.test.js | 2 test files + bench corpus |
 | Browser | compiler/tests/browser/ | 11 files |
@@ -66,113 +75,53 @@ Prior watermarks: S100 close — 15,444 pass / 172 skip / 1 todo / 0 fail / 689 
 | Commands | compiler/tests/commands/ | 6 files |
 | E2E (Playwright) | e2e/tests/ | 5 spec files (3-browser) |
 
-## Unit Test Coverage Highlights (additions since S92 in brackets)
+## Unit Test Coverage Highlights (S102-S103 additions over S101)
 
-**M1.x Native Parser Conformance [NEW S99-S103]**
-parser-conformance-lexer.test.js [M1.1 skeleton → M1.2 strings+templates+§51.0.Q.1 → M1.3 comments → M1.4 regex; 97 pass at M1.4; Acorn bench-corpus token-by-token comparison; DD §D4 P3 regex-vs-division discrimination at Ident/RParen/return sites included]
+**§41.14 formFor [NEW S102]**
+form-for.test.js (8 error-code validation tests + edge cases) + form-for-expander.test.js (AST expansion unit tests) + conf-form-for-canonical.test.js (end-to-end compile conformance). expandFormFor() is type-system-stage expansion — no codegen-stage changes. Source-level AST expansion; output rides §6.2 Shape 2 + §55 validity surface + §16 slots pipelines unchanged.
 
-**§4.17 Raw-content Conformance [NEW S101]**
-conf-raw-content-pre-code.test.js [§4.17 `<pre>`/`<code>` passthrough + E-CTX-001 unclosed]
+**§42.2.4 paren-form fix [S103]**
+not-keyword.test.js §42.2.4 Phase A describe (DQ-12): paren-form `is not` / `is some` / `is not not` lower without `_scrml_tmp_N` tmpvar. Prior implementation's undeclared tmpvar threw `ReferenceError` in ES-module strict mode; surfaced when regenerated self-host `meta-checker.js` was executed. Tests assert tmpvar-free shape: `(regex.exec(str)) is not` → `((regex.exec(str)) == null)`.
 
-**A-5 Wave-Close Polish [S92]**
-codegen-chunk-lint-polish.test.js [Q-OPEN-5 chunkSizeBudgetBytes + Q-OPEN-6 W-CG-CHUNK-PREFETCH-UNRESOLVED split],
-codegen-chunk-manifest-compiler-identity.test.js [Q-OPEN-4 getCompilerIdentity() + fallback contract],
-compile-chunk-size-budget.test.js [--chunk-size-budget CLI flag, command-level]
+**PGO P3.B follow-up [S102]**
+self-host/ast.test.js strips `hasResetExpr` (FileAST cache field from PGO P3.B-followup) and `_p3aExport*` fields before AST parity comparison so the self-host shape-diff test remains clean.
 
-**A-5 Integration [S92]**
-multipage-multirole-integration.test.js [A-5.1 3-EP × 3-role FX-1 cornerstone],
-cross-file-expansion-integration.test.js [A-5.2 cross-file MOD+CE end-to-end],
-negative-cascade-integration.test.js [A-5.3 diagnostic cascade FX-3 + FX-4],
-lint-family-e2e-integration.test.js [A-5.4 W-AUTH-RUNTIME-FALLBACK + W-CG-CHUNK-* family],
-determinism-integration.test.js [A-5.5 cross-wave determinism 10-run + explicit budget],
-trucking-dispatch-smoke-integration.test.js [A-5.5 reference-app compile-smoke F-6]
+**M1.5 native-parser template-mode tracking [S102]**
+parser-conformance-lexer.test.js tokenizer helper updated; template-mode tracking in Acorn oracle disambiguates regex-vs-division at template interpolation sites. `expr-literals.js` bench-corpus retains "skip" pending M1.5 normalizer flip.
 
-**A-2 Reachability — S91**
-reachability-solver-outer-fixpoint.test.js [A-2.7 outer fixed-point + E-CLOSURE-001, 29 tests],
-reachability-record-determinism.test.js [A-2.8 canonical JSON, 21 tests]
+## M1.x Native Parser Conformance [S99-S103]
 
-**A-3 AuthGraph [S91]**
-auth-graph-login-missing.test.ts [W-AUTH-LOGIN-MISSING + W-AUTH-PAGE-INFERRED],
-auth-graph-spec-40-9-9-worked-example.test.js [§40.9.9 Driver/Admin/viewer per-role worked-example]
+parser-conformance-lexer.test.js [M1.1 skeleton → M1.2 strings+templates+§51.0.Q.1 → M1.3 comments → M1.4 regex → M1.5 template-mode-tracking; 97 pass at M1.4+M1.5; Acorn bench-corpus token-by-token comparison; DD §D4 P3 regex-vs-division discrimination at Ident/RParen/return sites included]
 
-**A-4 Route Splitter [S91]**
-codegen-route-splitter.test.js [A-4.1/A-4.2/A-4.3 orchestrator + atom-emitter, 43 tests],
-codegen-route-splitter-tier-n.test.js [A-4.5 tier-N dispatch, 14 tests],
-chunk-content-addressing.test.js [A-4.6 FNV-1a hash, 19 tests],
-codegen-html-augmentation.test.js [A-4.7 HTML augmenter + W-CG-CHUNK-* lints, 31 tests],
-initial-chunk-emission.test.js [A-4.2/A-4.6, 20 integration tests],
-tier1-idle-prefetch.test.js [A-4.3, 9 integration tests],
-tier2-hover-prefetch.test.js [A-4.4, 21 integration tests]
+## Pipeline Stage Coverage
 
-**Generate Auth [S91]**
-generate-auth.test.js [scrml generate auth CLI, 12 tests]
-
-**Codegen / Wire Format [S90 baseline]**
-wire-format-encoder-decoder.test.js [integration], conf-WIRE-FORMAT-DECODER.test.js [conformance]
-
-**AST / Tokenizer / Parser**
-ast-builder-*.test.js, tokenizer-*.test.js, expression-parser.test.js, block-splitter.test.js
-
-**Pipeline Stages**
-code-generator.test.js, type-system.test.js, dependency-graph.test.js, protect-analyzer.test.js,
-route-inference.test.js, batch-planner.test.js, symbol-table.test.js, binding-registry.test.js,
-name-resolver (p1e-name-resolver.test.js), module-resolver.test.js,
-dg-markup-read-node-a12.test.js, dg-markup-read-emission-a13.test.js,
-dg-markup-read-emission-a14.test.js, dg-markup-read-emission-a15.test.js
-
-**Auth / Session**
-session-auth.test.js, state-authority-codegen.test.js, state-authority-parsing.test.js,
-stdlib-auth.test.js, stdlib-oauth.test.js, stdlib-oauth-presets.test.js
-f-auth-002-export-modifiers.test.js [integration]
-
-**Codegen Emitters**
-emit-match.test.js, emit-test.test.js, emit-library.test.js, emit-lift.test.js,
-emit-logic.test.js, engine-body-render.test.js, engine-body-children.test.js,
-emit-expr-engine-routing-option-a.test.js, match-arm-*.test.js
-
-**Conformance (§34 error codes)**
-conf-AUTH-003..005, conf-CG-001-warn, conf-CG-010, conf-CG-014,
-conf-WIRE-FORMAT-DECODER, conf-INPUT-001..005, conf-CTRL-011,
-conf-ERROR-008, conf-IMPORT-007, conf-LIFECYCLE-015, conf-LOOP-005..007, conf-META-EVAL-002,
-conf-TRY-CATCH-IN-SCRML-SOURCE, conf-raw-content-pre-code (S101);
-block-grammar/conf-001..047 (47 files); s32-fn-state-machine/; tab/
-
-**Stdlib**
-stdlib-auth.test.js, stdlib-cron.test.js, stdlib-format.test.js, stdlib-fs.test.js,
-stdlib-http.test.js, stdlib-oauth.test.js, stdlib-path.test.js, stdlib-process.test.js,
-stdlib-redis.test.js, stdlib-regex.test.js, stdlib-router.test.js, stdlib-store.test.js, stdlib-time.test.js
-
-## Fixtures & Factories
-
-| Path | Contents |
-|------|----------|
-| compiler/tests/fixtures/ | promote-match-canonical.scrml, expr.ts (ExprNode builders), extract-user-fns.js |
-| compiler/tests/helpers/ | expr.ts — structured ExprNode test construction utilities |
-| compiler/tests/unit/__fixtures__/ | per-test scrml/JS snippet fixtures |
-| compiler/tests/unit/_tmp_*/ | temporary snapshot directories (bug regression fixtures) |
-| compiler/tests/commands/migrate-program-shape-fixtures/ | 7 bucket-classification fixtures |
-| compiler/tests/integration/fixtures/a5/ | A-5 integration fixtures: multipage-multirole, cross-file, lint-large-initial-chunk, lint-no-prefetch, lint-prefetch-unresolved, runtime-fallback-async-gate |
-| compiler/tests/parser-conformance/bench/ | JS-subset bench corpus files; expr-literals.js retains M1.5-pending skip |
-| samples/compilation-tests/ | ~311 .scrml fixtures compiled by pretest; dist/ gitignored |
-| e2e/ | Playwright: dev-server-fixture.ts; 02-counter, 03-contact-book, 05-multi-step-form, 14-mario, todomvc specs |
-
-## Pattern
-
-Tests use `bun:test` (`describe`, `test`, `expect`). Unit tests for pipeline passes:
-1. Construct a minimal scrml source string or AST fragment (V5-strict `<x> = 0` at top-level, `@x = 0` inside `${...}`)
-2. Run the target stage function directly
-3. Assert on the returned structure using `expect().toEqual()`, `expect().toContain()`, `expect().toMatchObject()`
-
-Native-parser tests import `lex.js` directly (not the .scrml shadow), compare Token[] against Acorn's tokenizer output via normalizer; milestone-gated SKIP annotations mark forward-milestone work.
-
-Integration tests run `compileScrml()` from `api.js` and assert on output HTML, client JS, server JS, and (when `emitPerRoute: true`) chunk payloads, chunks.json manifest, and diagnostic arrays. Cross-stream helper `allDiags(r) = [...r.errors, ...r.warnings]` is canonical for W-*/I-* assertions (single-stream filter silently misses W-* codes — S92 cornerstone finding).
+| File | Stage / Area |
+|------|-------------|
+| code-generator.test.js | Stage 8 CG |
+| type-system.test.js | Stage 6 TS (updated S102 for formFor) |
+| dependency-graph.test.js | Stage 7 DG |
+| protect-analyzer.test.js | Stage 4 PA |
+| route-inference.test.js | Stage 5 RI |
+| batch-planner.test.js | Stage 7.5 BP |
+| symbol-table.test.js | Symbol resolution |
+| binding-registry.test.js | CG binding tracking |
+| ast-builder-*.test.js | Stage 1 TAB (multiple files) |
+| tokenizer-*.test.js | Tokenizer |
+| not-keyword.test.js | §42 absence/presence rewrites (updated S103 — paren-form fix) |
+| html-elements.test.js | html-elements registry (updated S102 for formFor element) |
+| form-for.test.js | §41.14 formFor error codes (NEW S102) |
+| form-for-expander.test.js | §41.14 expand pass (NEW S102) |
+| emit-match.test.js, emit-test.test.js, emit-library.test.js, emit-lift.test.js | CG emitters |
+| auth-graph-*.test.ts | Stage 7.55 AuthGraph (A-3) |
+| reachability-solver-*.test.js | Stage 7.6 RS (A-2) |
+| codegen-route-splitter*.test.js, chunk-*.test.js | A-4 per-route artifact splitter |
 
 ## Tags
-#scrmlts #map #test #bun #conformance #unit #integration #s101 #v0.3.1 #approach-a5 #approach-a2 #approach-a3 #approach-a4 #reachability #auth-graph #wire-format #playwright #e2e #route-splitter #generate-auth #q-open-4 #q-open-5 #q-open-6 #native-parser #m1-4 #parser-conformance #raw-content
+#scrmlts #map #test #bun-test #s103 #v0.3.3 #formfor #spec-41-14 #e-formfor #paren-form-fix #dq-12 #native-parser #m1-5 #template-mode #pgo-p3 #hasResetExpr #self-host-ast-parity #approach-a #approach-a5
 
 ## Links
 - [primary.map.md](./primary.map.md)
 - [master-list.md](../../master-list.md)
 - [pa.md](../../pa.md)
-- [build.map.md](./build.map.md)
 - [error.map.md](./error.map.md)
+- [domain.map.md](./domain.map.md)
