@@ -624,11 +624,16 @@ export function rewriteNotKeyword(expr: string, errors?: any[]): string {
 // find the matching `(` (handling nested parens). Replaces the entire
 // `(expr) is X` with a temp-var form that evaluates `expr` exactly once.
 //
-//   (expr) is not not  →  ((__scrml_tmp_N = (expr)) != null)   [presence]
-//   (expr) is some     →  ((__scrml_tmp_N = (expr)) != null)   [presence]
-//   (expr) is not      →  ((__scrml_tmp_N = (expr)) == null)   [absence]
+//   (expr) is not not  →  ((expr) != null)   [presence]
+//   (expr) is some     →  ((expr) != null)   [presence]
+//   (expr) is not      →  ((expr) == null)   [absence]
 //
 // Uses double-equals (== / !=) to match both null and undefined in one check.
+// Single-evaluation of `expr` is intrinsic to the paren form — `expr` appears
+// exactly once on the LHS of the comparison; `null` is a constant, no second
+// reference needed. (Prior emit interposed `(_scrml_tmp_N = (expr))` for the
+// LHS, but that tmpvar was never declared in the emitted ES-module scope,
+// throwing ReferenceError under strict mode — see S103 self-host fix.)
 // Only the parenthesized form is handled here. Identifier/dotted paths are
 // handled by the existing regex patterns below (unchanged). §42.2.4 Phase A.
 function _rewriteParenthesizedIsOp(segment: string): string {
@@ -669,12 +674,10 @@ function _rewriteParenthesizedIsOp(segment: string): string {
       // Extract the full parenthesized expression (including the outer parens).
       const parenExpr = segment.slice(parenStart, opIdx + 1); // e.g. "(regex.exec(str))"
 
-      // Generate a unique temp var for single-evaluation guarantee (§42.2.4).
-      const tmp = genVar("tmp");
-
-      // Build the replacement: assign expr to tmp, then check tmp once.
+      // Build the replacement: compare expr to null directly.
+      // Single-evaluation is intrinsic — parenExpr appears once on the LHS.
       const cmp = op === "absence" ? "==" : "!=";
-      const replacement = `((${tmp} = ${parenExpr}) ${cmp} null)`;
+      const replacement = `(${parenExpr} ${cmp} null)`;
 
       // Splice the replacement into the segment.
       const fullMatch = parenExpr + suffix;

@@ -670,79 +670,59 @@ describe("§42.2.2a: is some — positive presence check", () => {
 // ---------------------------------------------------------------------------
 
 describe("§42.2.4 Phase A — parenthesized compound is not / is some (DQ-12)", () => {
-  // Reset the var counter before each test so temp-var names are deterministic.
-  // genVar("tmp") produces _scrml_tmp_1, _scrml_tmp_2, etc.
-  // We use beforeEach to ensure isolation between tests.
-  // Note: since we cannot import beforeEach here without affecting other suites,
-  // we call resetVarCounter() at the top of each test that cares about exact names.
+  // S103: paren-form lowering no longer interposes a tmpvar. Single-evaluation
+  // is intrinsic to the paren form — `(expr) cmp null` evaluates expr exactly
+  // once on the LHS; `null` is a constant on the RHS, no second reference.
+  // Prior emit `((_scrml_tmp_N = (expr)) cmp null)` used an undeclared tmpvar
+  // which threw ReferenceError in ES-module strict mode (caught when
+  // regenerated self-host meta-checker.js was executed against module-resolver.scrml).
 
-  test("§A1 (regex.exec(str)) is not — emits temp-var absence form", () => {
-    resetVarCounter();
+  test("§A1 (regex.exec(str)) is not — absence form", () => {
     const result = rewriteNotKeyword("(regex.exec(str)) is not");
-    // Should contain temp var assignment and == null check
-    expect(result).toMatch(/_scrml_tmp_\d+ = \(regex\.exec\(str\)\)/);
-    expect(result).toContain("== null");
+    expect(result).toBe("((regex.exec(str)) == null)");
     expect(result).not.toContain("is not");
     expect(result).not.toContain("=== null");  // must use double-equals for null+undefined
   });
 
-  test("§A2 (regex.exec(str)) is some — emits temp-var presence form", () => {
-    resetVarCounter();
+  test("§A2 (regex.exec(str)) is some — presence form", () => {
     const result = rewriteNotKeyword("(regex.exec(str)) is some");
-    expect(result).toMatch(/_scrml_tmp_\d+ = \(regex\.exec\(str\)\)/);
-    expect(result).toContain("!= null");
+    expect(result).toBe("((regex.exec(str)) != null)");
     expect(result).not.toContain("is some");
   });
 
-  test("§A3 (getUser(id)) is not not — emits temp-var presence form", () => {
-    resetVarCounter();
+  test("§A3 (getUser(id)) is not not — presence form", () => {
     const result = rewriteNotKeyword("(getUser(id)) is not not");
-    expect(result).toMatch(/_scrml_tmp_\d+ = \(getUser\(id\)\)/);
-    expect(result).toContain("!= null");
+    expect(result).toBe("((getUser(id)) != null)");
     expect(result).not.toContain("is not not");
     expect(result).not.toContain("is not");  // fully consumed
   });
 
-  test("§A4 (arr[0]) is not — emits temp-var absence form", () => {
-    resetVarCounter();
+  test("§A4 (arr[0]) is not — absence form", () => {
     const result = rewriteNotKeyword("(arr[0]) is not");
-    expect(result).toMatch(/_scrml_tmp_\d+ = \(arr\[0\]\)/);
-    expect(result).toContain("== null");
+    expect(result).toBe("((arr[0]) == null)");
     expect(result).not.toContain("is not");
   });
 
-  test("§A5 (x + y) is some — emits temp-var presence form", () => {
-    resetVarCounter();
+  test("§A5 (x + y) is some — presence form", () => {
     const result = rewriteNotKeyword("(x + y) is some");
-    expect(result).toMatch(/_scrml_tmp_\d+ = \(x \+ y\)/);
-    expect(result).toContain("!= null");
+    expect(result).toBe("((x + y) != null)");
     expect(result).not.toContain("is some");
   });
 
   test("§A6 nested parens ((f(g()))) is not — correctly finds outermost paren", () => {
-    resetVarCounter();
     const result = rewriteNotKeyword("((f(g()))) is not");
     // Should capture the full ((f(g()))) expression, not a partial inner paren
-    expect(result).toMatch(/_scrml_tmp_\d+ = \(\(f\(g\(\)\)\)\)/);
-    expect(result).toContain("== null");
+    expect(result).toBe("(((f(g()))) == null)");
     expect(result).not.toContain("is not");
   });
 
-  test("§A7 single-evaluation — temp var appears in output only once per expression", () => {
-    resetVarCounter();
+  test("§A7 single-evaluation — expr appears in output exactly once", () => {
     const result = rewriteNotKeyword("(sideEffect()) is not");
-    // The temp var assignment means sideEffect() is called exactly once in the output.
-    // The right side of == is just `null`, not the expression again.
-    const tmpMatch = result.match(/(_scrml_tmp_\d+)/);
-    expect(tmpMatch).not.toBeNull();
-    const tmpName = tmpMatch[1];
-    // tmpName should appear in the result exactly once (in the assignment)
-    // and the comparison is against null, not against sideEffect() again.
-    const occurrences = result.split(tmpName).length - 1;
-    expect(occurrences).toBe(1);  // appears only in the assignment, not repeated
-    expect(result).toContain("== null");
-    // The original expression is not duplicated on the rhs
+    // sideEffect() must appear exactly once — single-evaluation is the load-bearing
+    // invariant. The paren-form emit guarantees this: expr is on the LHS, `null` is
+    // a constant on the RHS, no duplication.
     expect(result.indexOf("sideEffect()")).toBe(result.lastIndexOf("sideEffect()"));
+    expect(result).toContain("== null");
   });
 
   test("§A8 regression — existing identifier is not still works unchanged", () => {
@@ -767,38 +747,29 @@ describe("§42.2.4 Phase A — parenthesized compound is not / is some (DQ-12)",
   });
 
   test("§A12 rewriteExpr pipeline — (regex.exec(str)) is not rewrites end-to-end", () => {
-    resetVarCounter();
     const result = rewriteExpr("(regex.exec(str)) is not");
-    expect(result).toMatch(/_scrml_tmp_\d+ = \(regex\.exec\(str\)\)/);
-    expect(result).toContain("== null");
+    // Client pipeline applies rewriteEqualityOps after rewriteNotKeyword:
+    // `== null` → `=== null` (strict). Library-mode emit skips rewriteEqualityOps
+    // and preserves `== null` (matches both null + undefined).
+    expect(result).toContain("(regex.exec(str)) === null");
   });
 
   test("§A13 multiple parenthesized expressions in one segment", () => {
-    resetVarCounter();
     const result = rewriteNotKeyword("(a()) is not && (b()) is some");
-    // Both should be rewritten with distinct temp vars
-    expect(result).toMatch(/_scrml_tmp_\d+ = \(a\(\)\)/);
-    expect(result).toMatch(/_scrml_tmp_\d+ = \(b\(\)\)/);
-    expect(result).toContain("== null");
-    expect(result).toContain("!= null");
+    expect(result).toBe("((a()) == null) && ((b()) != null)");
     expect(result).not.toContain("is not");
     expect(result).not.toContain("is some");
   });
 
   test("§A14 (expr) is not not — presence, not absence", () => {
-    resetVarCounter();
     const result = rewriteNotKeyword("(getValue()) is not not");
     // is not not = presence check = != null
     expect(result).toContain("!= null");
     expect(result).not.toContain("== null");
   });
 
-  test("§A15 bare paren around identifier still works (regression)", () => {
-    resetVarCounter();
-    // (x) is not — the paren form should use the temp var path even for identifiers.
-    // This is fine — it just means simple cases get a temp var. Not harmful.
+  test("§A15 bare paren around identifier — paren form lowers directly", () => {
     const result = rewriteNotKeyword("(x) is not");
-    expect(result).toMatch(/_scrml_tmp_\d+ = \(x\)/);
-    expect(result).toContain("== null");
+    expect(result).toBe("((x) == null)");
   });
 });
