@@ -1,0 +1,28 @@
+// match-002-block-form-arm-swap.scrml
+// Match block-form (Tier 1, SPEC §18.0.1) — runtime arm-swap on reactive
+// change. The `<match for=Phase on=@phase>` dispatcher subscribes to @phase;
+// each variant change swaps the matching arm's body into the mount slot.
+// Browser test (compiler/tests/browser/browser-match-block.test.js) drives
+// @phase through every variant and asserts the DOM updates.
+
+<div>
+    ${
+        type Phase:enum = { Idle, Loading, Ready, Failed }
+        <phase>: Phase = .Idle
+    }
+    <h1>Loader</h1>
+    <match for=Phase on=@phase>
+        <Idle>
+            <p data-arm="idle">Press to load</p>
+        </>
+        <Loading>
+            <p data-arm="loading">Loading now</p>
+        </>
+        <Ready>
+            <p data-arm="ready">All set</p>
+        </>
+        <_>
+            <p data-arm="fallback">Something else</p>
+        </>
+    </match>
+</div>

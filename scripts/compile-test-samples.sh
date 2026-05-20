@@ -18,6 +18,7 @@ SAMPLES=(
   control-001-if-basic
   control-002-if-else
   control-011-if-reactive
+  match-002-block-form-arm-swap
   reactive-014-form-state
   reactive-016-bind-value
   reactive-017-arrays
