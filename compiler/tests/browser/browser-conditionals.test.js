@@ -68,10 +68,18 @@ describe("If Basic (control-001): static conditional", () => {
     expect(p.textContent).toBe("Age checked");
   });
 
-  test("logic span is present for the if block", () => {
+  test("no phantom logic span for the decl-only if block (S108 Bug 5 Anomaly B)", () => {
+    // The `${...}` block here is decl-only — `let age`, an `if` with a
+    // `let status` body, no renderable output, no `${...}` interpolation.
+    // S108 Bug 5 Phase 2 (`a7fbfa8`) closed "Anomaly B" — a phantom
+    // `<span data-scrml-logic>` was being emitted for decl-only logic
+    // bodies. Post-S108 the classifier `stmtContainsRenderableLogic` gates
+    // synth-span emission on body content, so a decl-only block emits NO
+    // span. (This test asserted the pre-S108 buggy behavior and ran stale
+    // on un-recompiled `dist/` until S109's pretest run exposed it.)
     loadSample("control-001-if-basic");
     const logicSpan = document.querySelector("[data-scrml-logic]");
-    expect(logicSpan).not.toBeNull();
+    expect(logicSpan).toBeNull();
   });
 });
 
@@ -95,10 +103,14 @@ describe("If-Else (control-002): static branching", () => {
     expect(p.textContent).toBe("Score evaluated");
   });
 
-  test("logic span is present for the if-else block", () => {
+  test("no phantom logic span for the decl-only if-else block (S108 Bug 5 Anomaly B)", () => {
+    // Decl-only `${...}` block: `let score`, an `if/else` with `let result`
+    // bodies, no renderable output. Post-S108 Bug 5 Phase 2 a decl-only
+    // block emits NO phantom `<span data-scrml-logic>`. See control-001's
+    // equivalent test for the full Anomaly B context.
     loadSample("control-002-if-else");
     const logicSpan = document.querySelector("[data-scrml-logic]");
-    expect(logicSpan).not.toBeNull();
+    expect(logicSpan).toBeNull();
   });
 });
 
@@ -134,9 +146,15 @@ describe("If Reactive (control-011): reactive conditional", () => {
     expect(p.textContent).toBe("Auth check done");
   });
 
-  test("logic span is present for reactive if block", () => {
+  test("no phantom logic span for the decl-only reactive if block (S108 Bug 5 Anomaly B)", () => {
+    // The `${...}` block declares `<loggedIn> = true` and has an
+    // `if (@loggedIn)` whose body is `let greeting = ...` — decl-only.
+    // A reactive READ in the if-CONDITION does not make the block produce
+    // renderable output; the if-body is still decl-only. Post-S108 Bug 5
+    // Phase 2 → NO phantom `<span data-scrml-logic>`. See control-001's
+    // equivalent test for the full Anomaly B context.
     loadSample("control-011-if-reactive");
     const logicSpan = document.querySelector("[data-scrml-logic]");
-    expect(logicSpan).not.toBeNull();
+    expect(logicSpan).toBeNull();
   });
 });
