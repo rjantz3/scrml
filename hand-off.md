@@ -1,15 +1,33 @@
-# scrmlTS — Session 109 (IN-FLIGHT — user AFK)
+# scrmlTS — Session 109 (IN-FLIGHT)
 
 **Date:** 2026-05-19
 **Previous:** `handOffs/hand-off-111.md` (S108 CLOSE — rotated at S109 OPEN)
 **Machine:** single-machine (S100 directive holds)
 **HEAD at S109 OPEN:** `df1211d` (S108 wrap)
-**HEAD at this update:** `dc4b562` (S109 in-flight, 12 commits under AFK directive)
-**Origin sync at OPEN:** scrmlTS 0/0; scrml-support 0/0 (**push pending** — user did not authorize push during AFK session)
+**HEAD at this update:** `0780bc1` (S109 in-flight, 16 commits)
+**Origin sync:** scrmlTS pushed through `7d8ae42` (13 commits); **`9b9f1d2` + `0780bc1` are 2 unpushed commits** since the push.
 
 **Post-hand-off-commit landings (after `0d2e988`):**
-11. **`dc4b562`** `fix(test): sql-nobatch §8 end-to-end test was vacuous` — a SECOND vacuous-compileScrml test, PRE-EXISTING (predates S109), found via the post-`07904b9` grep sweep. Same `compileScrml(stringPath)` misuse + a stale `result.serverJs`-shape assumption. Fixed: options-object form + read emitted JS off disk + `fileCount`/`errors`/`emittedJs.length` guards. The grep sweep across `compiler/tests/` confirmed NO remaining string-first-arg call sites — only comment references. Vacuous-test follow-up from S109 surfaced-findings #2 is now CLOSED.
-12. (this hand-off touch-up)
+11. **`dc4b562`** `fix(test): sql-nobatch §8 end-to-end test was vacuous` — a SECOND vacuous-compileScrml test, PRE-EXISTING (predates S109), found via the post-`07904b9` grep sweep. Vacuous-test follow-up CLOSED — no remaining string-first-arg call sites in `compiler/tests/`.
+12. `chore(s109): hand-off touch-up` (`7d8ae42`).
+13. **PUSH** — 13 commits pushed to origin (`df1211d..7d8ae42`); pre-push gate 16,198 pass / 0 fail + TodoMVC gauntlet PASS.
+14. **`9b9f1d2`** `fix(match-block): Phase 5 — payload-bearing enums fired spurious E-MATCH-NOT-EXHAUSTIVE` — `extractEnumVariants` checked `s[pos] === "("` immediately after the variant name, but the enum type-decl's `raw` is tokenizer-JOINED (`Ready ( count : int )` with spaces). The payload-skip never fired → `count` + `int` read as phantom variants → every payload-bearing enum in a `<match>` block hard-failed E-MATCH-NOT-EXHAUSTIVE. Fixed: skip whitespace before the `(` probe. The hand-off's "payload-binding typer scope" Phase 5 item turned out to be a NON-ISSUE — it was masked by this bug; payload bindings thread correctly once the false exhaustiveness error is gone. 6 new tests.
+15. **`0780bc1`** `test(match-block): Phase 5 — sample + browser test for runtime arm-swap` — NEW `samples/compilation-tests/match-002-block-form-arm-swap.scrml` (added to pretest list) + NEW `compiler/tests/browser/browser-match-block.test.js` (6 happy-dom tests: initial render, arm-swap on .Loading/.Ready, wildcard `<_>` catch-all on .Failed, full round-trip). End-to-end runtime proof that match block-form works.
+
+## Match block-form Phase 5 — status at this update
+
+| Item | Status |
+|---|---|
+| Wildcard `<_>` explicit render | ✅ SHIPPED `2691b20` |
+| Full-pipeline integration gap (collectMatchBlocks) | ✅ FIXED `2691b20` |
+| Payload-bearing enum exhaustiveness | ✅ FIXED `9b9f1d2` |
+| Payload-binding typer scope | ✅ NON-ISSUE (verified — works once exhaustiveness bug gone) |
+| Samples | ✅ SHIPPED `0780bc1` (match-002) |
+| Browser test for runtime arm-swap | ✅ SHIPPED `0780bc1` (6 tests) |
+| Bare-variant inference in nested expression positions | ⏸️ NOT DONE — §18.0.3 typer work; needs a scope check before diving in |
+| PRIMER match-block section refresh | ⏸️ NOT DONE — docs; PRIMER has no dedicated match-block walkthrough |
+
+Match block-form is now genuinely end-to-end functional + runtime-verified. Two Phase 5 items remain: bare-variant inference in nested expression positions (typer work, needs scoping) + PRIMER refresh (docs).
 
 ## S109 in-flight landings (user authorized "ship Fix A, then keep going down the list. afk")
 
