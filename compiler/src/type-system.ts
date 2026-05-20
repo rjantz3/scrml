@@ -621,11 +621,28 @@ function tError(name: string, fields: Map<string, ResolvedType>): ErrorType {
 // ---------------------------------------------------------------------------
 
 const BUILTIN_TYPES: Map<string, ResolvedType> = new Map([
-  ["number",  tPrimitive("number")],
-  ["string",  tPrimitive("string")],
-  ["boolean", tPrimitive("boolean")],
-  ["bool",    tPrimitive("boolean")],  // alias
-  ["integer", tPrimitive("integer")],   // §53 base-type (maps to number at runtime)
+  ["number",    tPrimitive("number")],
+  ["string",    tPrimitive("string")],
+  ["boolean",   tPrimitive("boolean")],
+  ["bool",      tPrimitive("boolean")],  // alias
+  ["integer",   tPrimitive("integer")],   // §53 base-type (maps to number at runtime)
+  // S109 — date/timestamp as first-class primitive types for the
+  // structural-walk L22 family (formFor / schemaFor / tableFor v1.next
+  // item #5 per docs/changes/tableFor-impl/PROGRESS.md). Pre-S109
+  // adopters could write `when: date` in struct fields and the typer would
+  // accept it silently via fallback (date is also in NAMED_SHAPES with
+  // baseType=string → predicated path), but `timestamp` had NO formal
+  // registration and only the downstream switch statements in emit-table-for.ts
+  // (`mapPrimitiveToCellKind`) + emit-schema-for.ts (`mapPrimitiveToColumnType`)
+  // recognized it. Formalizing here ensures consistent typer behavior + makes
+  // the supported field-type vocabulary visible to introspection.
+  //
+  // Runtime semantics: both are surface-string-shaped (ISO-8601 date strings
+  // for `date`; ISO-8601 timestamp strings for `timestamp`). schemaFor lowers
+  // them to SQL DDL `date` / `timestamp` column types. tableFor renders them
+  // as text cells (with future v1.next refinement for locale-aware display).
+  ["date",      tPrimitive("date")],
+  ["timestamp", tPrimitive("timestamp")],
   // S90 M-7C-D-12 Track 1 (D-12.1e): `null` removed from BUILTIN_TYPES so
   // user type annotations cannot resolve `:null`. Canonical absence type is
   // `not` (§42). The internal `tPrimitive("null")` is still used by the

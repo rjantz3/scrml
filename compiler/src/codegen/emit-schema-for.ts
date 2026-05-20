@@ -117,6 +117,7 @@ export type SchemaColumnType =
   | "integer"
   | "real"
   | "boolean"
+  | "date"
   | "timestamp"
   | "blob";
 
@@ -277,6 +278,7 @@ function mapPrimitiveToColumnType(name: string | undefined): SchemaColumnType | 
     case "float":
     case "real":       return "real";
     case "boolean":    return "boolean";
+    case "date":       return "date";       // S109 — formalized as primitive in BUILTIN_TYPES; lowers to SQL `date` column
     case "timestamp":  return "timestamp";
     case "blob":       return "blob";
     default:           return null;

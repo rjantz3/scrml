@@ -453,6 +453,7 @@ function mapPrimitiveToCellKind(name: string | undefined): CellDisplayKind | nul
     case "float":
     case "real":       return { kind: "number" };
     case "boolean":    return { kind: "boolean" };
+    case "date":       return { kind: "string" };  // S109 — formalized as primitive in BUILTIN_TYPES; cell renders as text (ISO-8601 string)
     case "timestamp":  return { kind: "timestamp" };
     default:           return null;
   }
