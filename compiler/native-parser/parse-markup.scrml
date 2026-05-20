@@ -1,0 +1,215 @@
+// parse-markup.scrml — the markup-layer trampoline (MK1.1).
+//
+// The markup layer is a TRAMPOLINE — the same shape as M1's lex.scrml: a
+// loop dispatching by the BlockContext engine, with a safety bound and a
+// cursor-progress sentinel. Charter dive Q1.G: "the markup layer is a
+// trampoline (the same shape as lex.scrml): a loop dispatching by
+// BlockContext."
+//
+// MK1 is the CONTEXT-GRID. This trampoline recognizes which scrml
+// context the cursor is in (BlockContext) and dispatches the matching
+// per-context body. MK1 does NOT build the <tag> tree (MK2's TagFrame)
+// or the §4.18 body-mode (MK3's BodyMode).
+//
+// PILLAR 5b classification (DD §D1):
+//   The MARKUP LOOP is dispatched BY the BlockContext engine — STATE-
+//   shape governs which per-context body runs. This mirrors lex.scrml's
+//   classification exactly: the loop is engine-routed.
+//
+//   `parseMarkup` as a whole is `fn` per D1 OQ1: it takes a source
+//   string and produces a node array — a calculation classification at
+//   the outermost layer, even though its inner machinery is engine-
+//   shaped. "The operational test classifies the LOCUS, and a
+//   calculation may contain state-shape subroutines."
+//
+// MK1.1 SCOPE (this dispatch):
+//   - The trampoline RUNS — loop, dispatch-by-BlockContext, safety
+//     bound, cursor-progress sentinel — mirroring lex.scrml.
+//   - The `.TopLevel` dispatch is SUBSTANTIVE at a RECOGNITION level:
+//     it walks the cursor and, at each position, RECOGNIZES whether a
+//     context-entry sigil / `<ident` markup-tag boundary begins here
+//     (via the block-context.scrml recognizers). MK1.1 records the
+//     recognition; it does NOT consume the sigil and does NOT perform
+//     the transition — that, plus brace-depth tracking, is MK1.2.
+//   - The other 8 BlockContext dispatches are SKELETAL — they advance
+//     the cursor defensively. MK1.1's `.TopLevel` never transitions
+//     into them, so they are unreachable at MK1.1; deep boundary
+//     recognition lands at MK1.2 (sigils + brace-depth) and MK1.3
+//     (comments + sub-context stubs).
+//
+// MK1.2 lands: `.TopLevel` actually consumes a recognized sigil and
+//   transitions @blockContext; the `.InLogicEscape` dispatch pushes a
+//   DelegationFrame; brace-depth closing; the foreign-code opaque
+//   passthrough.
+// MK1.3 lands: `//` + `<!-- -->` comment recognition; the CSS / SQL /
+//   error-effect / meta / test sub-context dispatch stubs; conformance
+//   vs the current BS block tree.
+//
+// Spec / design authority:
+//   - charter dive Q1.G — the composite picture (trampoline shape).
+//   - M1's lex.scrml — the trampoline pattern this file mirrors.
+//   - SPEC §3 — the context grid.
+
+${
+    import { makeCursor, isEof, peekChar, peekStr, advance } from "./cursor.scrml"
+    import { makeParseContext } from "./parse-ctx.scrml"
+    import {
+        BlockContext,
+        getBlockContext,
+        setBlockContext,
+        contextForSigil,
+        isMarkupTagOpener,
+    } from "./block-context.scrml"
+
+    // -------------------------------------------------------------------
+    // recognizeContextEntryAt — CALCULATION (pure fn over the cursor's
+    // current position). Answers the MK1.1 `.TopLevel` question: "does a
+    // context-entry boundary begin at the cursor right now, and if so,
+    // which BlockContext does it enter?"
+    //
+    // Returns one of:
+    //   { kind: "sigil",  enters: <BlockContext>, sigil: <2-char string> }
+    //   { kind: "markupTag", enters: BlockContext.InMarkupTag }
+    //   { kind: "none" }
+    //
+    // This is a RECOGNITION — it does NOT advance the cursor and does
+    // NOT transition the engine. MK1.2 is the dispatch that consumes the
+    // recognized boundary and performs the @blockContext write.
+    //
+    // The recognition is a closed calculation (a two-char sigil lookup
+    // table + a `<ident` prev/next-char test) — the heuristic-
+    // elimination shape per charter Q2: the block-splitter GUESSES
+    // context; the native parser COMPUTES it from a closed rule.
+    // -------------------------------------------------------------------
+    export function recognizeContextEntryAt(cursor) {
+        // Two-character block-opener sigil? (the logic-escape /
+        // SQL-block / CSS-block / error-effect / meta-block / test-block
+        // / foreign-code sigils — see SIGIL_TO_CONTEXT in
+        // block-context.scrml). Paraphrased per the ANOMALY-1 note.
+        const twoChar = peekStr(cursor, 2)
+        const sigilContext = contextForSigil(twoChar)
+        if (sigilContext is not given) {
+            return { kind: "sigil", enters: sigilContext, sigil: twoChar }
+        }
+
+        // `<ident`-shaped markup-tag-context boundary?
+        const here = peekChar(cursor, 0)
+        const next = peekChar(cursor, 1)
+        if (isMarkupTagOpener(here, next)) {
+            return { kind: "markupTag", enters: BlockContext.InMarkupTag }
+        }
+
+        return { kind: "none" }
+    }
+
+    // -------------------------------------------------------------------
+    // dispatchTopLevel — the `.TopLevel` BlockContext state-child body
+    // (MK1.1 SUBSTANTIVE at a recognition level).
+    //
+    // At MK1.1 this scans ONE character of the .TopLevel context: it
+    // recognizes whether a context-entry boundary begins at the cursor
+    // (recognition is exercised), then advances ONE character. It does
+    // NOT consume a recognized sigil and does NOT transition the engine
+    // — MK1.2 owns the consume + transition. Advancing one char per
+    // dispatch keeps the trampoline's progress sentinel satisfied and
+    // the loop bounded.
+    //
+    // The return value surfaces the recognition so the trampoline (and,
+    // at MK1.2, the transition logic) has a hook.
+    // -------------------------------------------------------------------
+    export function dispatchTopLevel(cursor, ctx) {
+        const recognized = recognizeContextEntryAt(cursor)
+        // MK1.1: recognition only — advance one character. MK1.2 will,
+        // when `recognized.kind != "none"`, consume the boundary and
+        // call setBlockContext(ctx, recognized.enters) instead.
+        advance(cursor, 1)
+        return recognized
+    }
+
+    // -------------------------------------------------------------------
+    // dispatchSkeletalContext — the SKELETAL body shared by the 8
+    // non-.TopLevel BlockContext state-children at MK1.1.
+    //
+    // At MK1.1 the `.TopLevel` dispatch never transitions out of
+    // .TopLevel, so these contexts are UNREACHABLE — this body exists
+    // only so the trampoline's dispatch table is total and a future /
+    // defensive entry advances the cursor (progress sentinel) and
+    // returns to .TopLevel rather than spinning.
+    //
+    // MK1.2 replaces this for .InLogicEscape (DelegationFrame push +
+    // brace-depth closing) and .InForeignCode (§23 opaque passthrough);
+    // MK1.3 replaces it for .InCss / .InSql / .InErrorEffect / .InMeta /
+    // .InTest (sub-context stubs).
+    // -------------------------------------------------------------------
+    export function dispatchSkeletalContext(cursor, ctx) {
+        advance(cursor, 1)
+        setBlockContext(ctx, BlockContext.TopLevel)
+    }
+
+    // -------------------------------------------------------------------
+    // parseMarkup — entry point. Pure fn over the source string
+    // (calculation at the outermost layer; engine-shaped internals
+    // dispatch per BlockContext).
+    //
+    // The dispatch table mirrors the BlockContext engine's state-
+    // children. The loop is a thin trampoline — the SAME shape as
+    // lex.scrml: get the current state, dispatch the matching body, run
+    // the progress sentinel, bound the iteration count.
+    //
+    // MK1.1 returns ctx.nodes (the shared node sink). At MK1.1 .TopLevel
+    // is recognition-only so the sink stays empty; MK1.2+ append nodes
+    // as boundaries are recognized and contexts are entered.
+    // -------------------------------------------------------------------
+    export function parseMarkup(source) {
+        const cursor = makeCursor(source)
+        const ctx = makeParseContext()
+
+        // Safety bound — the same shape as lex.scrml: prevent an
+        // infinite loop if a per-context body forgets to advance.
+        // Bounded by source.length + 1 (the markup layer advances at
+        // least one character per dispatch; no multi-emit-per-char site
+        // exists at MK1.1).
+        const maxIters = (source.length + 1) * 4
+        let iters = 0
+
+        while (!isEof(cursor) && iters < maxIters) {
+            const context = getBlockContext(ctx)
+            const beforePos = cursor.pos
+
+            if (context == BlockContext.TopLevel) {
+                dispatchTopLevel(cursor, ctx)
+            } else if (context == BlockContext.InMarkupTag) {
+                dispatchSkeletalContext(cursor, ctx)
+            } else if (context == BlockContext.InLogicEscape) {
+                dispatchSkeletalContext(cursor, ctx)
+            } else if (context == BlockContext.InCss) {
+                dispatchSkeletalContext(cursor, ctx)
+            } else if (context == BlockContext.InSql) {
+                dispatchSkeletalContext(cursor, ctx)
+            } else if (context == BlockContext.InErrorEffect) {
+                dispatchSkeletalContext(cursor, ctx)
+            } else if (context == BlockContext.InMeta) {
+                dispatchSkeletalContext(cursor, ctx)
+            } else if (context == BlockContext.InTest) {
+                dispatchSkeletalContext(cursor, ctx)
+            } else if (context == BlockContext.InForeignCode) {
+                dispatchSkeletalContext(cursor, ctx)
+            } else {
+                // Defensive safety net for an unreachable future
+                // BlockContext variant — return to .TopLevel.
+                setBlockContext(ctx, BlockContext.TopLevel)
+            }
+
+            // Loop-progress sentinel — the same shape as lex.scrml:
+            // every iteration must consume input. If a dispatch left
+            // the cursor un-advanced, advance by one to break a
+            // potential infinite loop.
+            if (cursor.pos == beforePos && !isEof(cursor)) {
+                cursor.pos = cursor.pos + 1
+            }
+            iters = iters + 1
+        }
+
+        return ctx.nodes
+    }
+}

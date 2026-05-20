@@ -1,0 +1,298 @@
+// parse-ctx.scrml — the shared PARSE CONTEXT OBJECT (MK1.1).
+//
+// This is the seam substrate the whole native-parser front end is built
+// on. It is the "parse context object" of IMPLEMENTATION-ROADMAP §0.4 —
+// distinct from the JS-layer `<engine for=ParseMode>` (M2's job). The
+// variable is `ctx`; the constructor is `makeParseContext`.
+//
+// `makeParseContext` EXTENDS M1's `makeLexContext` (lex.scrml:56). M1's
+// lex ctx carried { tokens, currentMode, brackets, recovery,
+// templateStack }; the whole-front-end parser produces an AST, so MK1.1
+// adds:
+//   - a NODE SINK  — the AST-node sink the layers append produced nodes
+//     to (R1 spike §3.1: "M1 had only tokens; the whole-front-end parser
+//     produces AST, so a node sink is added").
+//   - `delegationStack` — the seam's instance stack; the §51.0.Q.1
+//     inner-instance hierarchy materialized, generalizing M1's
+//     `templateStack` (R1 spike §3.1).
+//
+// PUNCH-LIST P1 (R1 spike §6): the markup layer is built on this ONE
+// shared context. ONE `cursor`, ONE `BracketStack`, ONE `ErrorRecovery`,
+// ONE error stream, ONE node sink, plus `delegationStack`. The markup
+// layer does NOT get its own cursor or its own bracket counter.
+//
+// PUNCH-LIST P2 — THE ONE-CURSOR INVARIANT (R1 spike §3.3, §6): the
+// markup layer and the JS layer share ONE `Cursor`. No layer copies a
+// sub-range; no `Span` carries a base-offset. Every `Span` any layer
+// produces is already file-absolute (post-PP source coordinate space) —
+// there is no span-composition step, so there is no offset-arithmetic
+// bug class. An implementer must NOT, for a perceived encapsulation
+// benefit, introduce a sub-range cursor and reintroduce that bug class.
+//
+// PILLAR 5b classification (DD §D1):
+//   `makeParseContext` is a STATE CONSTRUCTOR — it collects all engine
+//   state (markup-layer + JS-layer) into one ctx object, exactly as
+//   M1's `makeLexContext` does. Per the §D1 OQ1 locus rule, a
+//   constructor that builds an initial state bundle is calculation at
+//   its own locus (a pure fn from no input to a fresh ctx) even though
+//   the THING it builds is state. Same classification M1's
+//   `makeLexContext` carries.
+//
+//   `DelegationKind` / `CloseCondition` / `DelegationFrame` are PURE
+//   DATA types — calculation classification per R1 spike §3.2 (the same
+//   classification `Span` and `Token` carry; no `<engine>` for the
+//   types themselves). The STACK of frames (`ctx.delegationStack`) is
+//   the §51.0.Q.1 instance hierarchy; the FRAMES are data. These types
+//   are declared at MK1.1 because the seam substrate must carry them;
+//   MK4 is the milestone that consumes the delegation machinery.
+//
+// Status (MK1.1): `makeParseContext` is functional — it extends
+// `makeLexContext` (imported from lex.scrml; this file does NOT edit
+// lex.scrml) with `nodes` (the node sink) + `delegationStack`, and
+// seeds the markup-layer engine state (BlockContext) the trampoline
+// dispatches on. The delegation-frame constructors are functional; the
+// JS-parse delegation that pushes/pops `.LogicEscape` frames lands at
+// MK4 (the seam milestone). MK1.2 wires the deep boundary recognition.
+
+${
+    import { makeCursor } from "./cursor.scrml"
+    import { makeLexContext } from "./lex.scrml"
+    import { initialBlockContext } from "./block-context.scrml"
+
+    // -------------------------------------------------------------------
+    // DelegationKind — PURE DATA enum (R1 spike §3.2). The classification
+    // of a markup↔JS delegation. CANONICAL scrml-source shape; the .js
+    // shadow mirrors it as a frozen tag table.
+    //
+    // (Sigils below are paraphrased per the ANOMALY-1 note in
+    // block-context.scrml — a literal block-opener sigil in a scrml
+    // line-comment derails the BS-layer block tokenizer.)
+    //
+    //   type DelegationKind:enum = {
+    //       // markup → JS delegations
+    //       LogicEscape,    // a logic-escape block             §7
+    //       FunctionBody,   // function/fn/pure body            subsumes BPP
+    //       AttrExpr,       // an escaped or call-shaped attr    §5.2
+    //       ShorthandBody,  // a :-shorthand body                §4.14
+    //       MetaBody,       // a meta block                     §22
+    //       Interpolation,  // an interpolation in a "..." lit  §4.18.4
+    //       // JS → markup delegation
+    //       ElementValue,   // a markup element as an operand   Pillar 1
+    //   }
+    //
+    // No <engine> — these are data, not state (no transition contract on
+    // the kind itself; the STACK of frames is the §51.0.Q.1 hierarchy).
+    // -------------------------------------------------------------------
+
+    // -------------------------------------------------------------------
+    // CloseCondition — PURE DATA enum (R1 spike §3.2). The datum a
+    // delegation frame carries to recognize its own close.
+    //
+    //   type CloseCondition:enum = {
+    //       BraceDepth(depthAtOpen: int),    // close at `}` when the
+    //                                        //   BracketStack depth returns
+    //                                        //   to depthAtOpen (M1's
+    //                                        //   template-interp mechanism)
+    //       TagFrameBalanced(tagDepthAtOpen: int),  // close when the
+    //                                        //   TagFrame stack returns to
+    //                                        //   tagDepthAtOpen (MK2 datum)
+    //       AttrTerminator,                  // close at the attribute-value
+    //                                        //   boundary
+    //       ShorthandEol,                    // close at the opener's `>` at
+    //                                        //   attr-depth 0
+    //   }
+    //
+    // The payload-bearing variants (`BraceDepth(depthAtOpen)`,
+    // `TagFrameBalanced(tagDepthAtOpen)`) follow the §51.0.B payload form
+    // bracket-stack.scrml's `.OpenAt(depth, opener, span)` uses. Per
+    // README ANOMALY-3, the live surface carries the payload as a struct
+    // field; the canonical payload-bearing variant tag is the SHAPE.
+    // -------------------------------------------------------------------
+
+    // -------------------------------------------------------------------
+    // DelegationFrame — PURE DATA struct (R1 spike §3.2). One frame on
+    // `ctx.delegationStack`. Generalizes M1's template-interp frame
+    // (which was just `{ bracketDepthAtOpen }`).
+    //
+    //   type DelegationFrame:struct = {
+    //       kind     : DelegationKind,
+    //       closeOn  : CloseCondition,
+    //       openSpan : Span,        // the opener token's span — the blame
+    //                               //   locus for an unterminated-body error
+    //       bodyMode : BodyMode,    // §4.18 body mode at the open (only
+    //                               //   meaningful for markup→JS frames; the
+    //                               //   JS layer threads it so display-text
+    //                               //   rules are known). MK3 owns BodyMode;
+    //                               //   MK1.1 carries the field as a tag.
+    //   }
+    // -------------------------------------------------------------------
+
+    // makeParseContext — STATE constructor. Extends M1's makeLexContext
+    // with the node sink + delegationStack, and seeds the markup-layer
+    // engine state. The CANONICAL form would have each engine as a
+    // file-scope singleton (§51.0.K Machine Cohesion); the LIVE SURFACE
+    // bundles them in a per-call ctx for re-entrant parse calls, exactly
+    // as M1's makeLexContext does.
+    //
+    // The fields inherited from makeLexContext (tokens, currentMode,
+    // brackets, recovery, templateStack) are spread in — parse-ctx does
+    // NOT re-declare them, so the one-cursor / one-bracket-counter /
+    // one-recovery / one-error-stream invariant (P1) holds by
+    // construction: there is exactly one of each, and it came from the
+    // single makeLexContext call.
+    export function makeParseContext() {
+        const lexCtx = makeLexContext()
+        return {
+            // --- inherited from M1's makeLexContext (the JS-layer state) ---
+            tokens:          lexCtx.tokens,
+            currentMode:     lexCtx.currentMode,
+            brackets:        lexCtx.brackets,
+            recovery:        lexCtx.recovery,
+            templateStack:   lexCtx.templateStack,
+
+            // --- NEW at MK1.1 (R1 spike §3.1) ---
+            // The shared AST-node sink. Whichever layer is active appends
+            // produced nodes here; the host layer's open node adopts them.
+            nodes:           [],
+            // The seam's instance stack — the §51.0.Q.1 inner-instance
+            // hierarchy materialized. Tagged frames: a markup→JS frame or
+            // a JS→markup frame. Generalizes M1's templateStack: an M1
+            // template-interp frame becomes one DelegationFrame of
+            // kind .Interpolation. MK4 pushes/pops these for real.
+            delegationStack: [],
+
+            // --- markup-layer engine state (MK1.1) ---
+            // The current BlockContext variant the markup trampoline
+            // dispatches on. The CANONICAL form is the engine's
+            // auto-declared @blockContext cell; the LIVE SURFACE mirrors
+            // it as a ctx slot, exactly as M1 mirrors @lexMode as
+            // ctx.currentMode.
+            blockContext:    initialBlockContext(),
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // The node sink — CALCULATION-shaped helpers (pure accumulation into
+    // ctx.nodes; no condition-dependent dispatch). Mirrors how M1's lex
+    // loop accumulates into ctx.tokens.
+    // -------------------------------------------------------------------
+
+    // appendNode — append a produced AST node to the shared node sink.
+    export function appendNode(ctx, node) {
+        ctx.nodes.push(node)
+    }
+
+    // nodeCount — read.
+    export function nodeCount(ctx) {
+        return ctx.nodes.length
+    }
+
+    // -------------------------------------------------------------------
+    // DelegationKind / CloseCondition tag tables — the canonical enum
+    // variants surfaced as values so MK1.2+ and MK4 can name them. These
+    // are data, not state.
+    // -------------------------------------------------------------------
+
+    // delegationKinds — the seven DelegationKind variant tags.
+    export function delegationKinds() {
+        return {
+            LogicEscape:   "LogicEscape",
+            FunctionBody:  "FunctionBody",
+            AttrExpr:      "AttrExpr",
+            ShorthandBody: "ShorthandBody",
+            MetaBody:      "MetaBody",
+            Interpolation: "Interpolation",
+            ElementValue:  "ElementValue",
+        }
+    }
+
+    // closeConditionKinds — the four CloseCondition variant tags. The
+    // payload-bearing ones (BraceDepth, TagFrameBalanced) carry their
+    // payload via the constructors below.
+    export function closeConditionKinds() {
+        return {
+            BraceDepth:       "BraceDepth",
+            TagFrameBalanced: "TagFrameBalanced",
+            AttrTerminator:   "AttrTerminator",
+            ShorthandEol:     "ShorthandEol",
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // CloseCondition constructors — CALCULATION (pure fns building a
+    // tagged data record). The payload-bearing variants carry their
+    // depth datum; the bare variants carry only the tag.
+    // -------------------------------------------------------------------
+
+    // closeOnBraceDepth — CloseCondition.BraceDepth(depthAtOpen). Close
+    // at the `}` that returns the BracketStack to depthAtOpen — M1's
+    // template-interp close mechanism.
+    export function closeOnBraceDepth(depthAtOpen) {
+        return { kind: "BraceDepth", depthAtOpen }
+    }
+
+    // closeOnTagFrameBalanced — CloseCondition.TagFrameBalanced(...). The
+    // JS→markup direction's close datum (MK2 supplies the tag depth).
+    export function closeOnTagFrameBalanced(tagDepthAtOpen) {
+        return { kind: "TagFrameBalanced", tagDepthAtOpen }
+    }
+
+    // closeOnAttrTerminator — CloseCondition.AttrTerminator (bare).
+    export function closeOnAttrTerminator() {
+        return { kind: "AttrTerminator" }
+    }
+
+    // closeOnShorthandEol — CloseCondition.ShorthandEol (bare).
+    export function closeOnShorthandEol() {
+        return { kind: "ShorthandEol" }
+    }
+
+    // -------------------------------------------------------------------
+    // makeDelegationFrame — CALCULATION (pure fn building the
+    // DelegationFrame data struct). One frame on ctx.delegationStack.
+    // -------------------------------------------------------------------
+    export function makeDelegationFrame(kind, closeOn, openSpan, bodyMode) {
+        return { kind, closeOn, openSpan, bodyMode }
+    }
+
+    // -------------------------------------------------------------------
+    // delegationStack helpers — STATE writes / reads on
+    // ctx.delegationStack. The push/pop ARE the §51.0.Q.1 "outer enters
+    // composite → inner engine initializes / outer exits → inner engine
+    // suspends" events, exactly as M1's pushTemplateFrame / popTemplateFrame
+    // are for the template-interp inner engine. MK4 drives these for the
+    // real markup↔JS delegation; MK1.1 provides them as the substrate.
+    // -------------------------------------------------------------------
+
+    // pushDelegationFrame — STATE write: a delegation opens.
+    export function pushDelegationFrame(ctx, frame) {
+        ctx.delegationStack.push(frame)
+    }
+
+    // popDelegationFrame — STATE write: a delegation closes. Returns the
+    // popped frame, or `not` if the stack was empty (caller dispatches
+    // ErrorRecovery — an unbalanced close).
+    export function popDelegationFrame(ctx) {
+        if (ctx.delegationStack.length == 0) return not
+        return ctx.delegationStack.pop()
+    }
+
+    // topDelegationFrame — CALCULATION (peek). The frame whose close
+    // condition the cursor is currently watching for.
+    export function topDelegationFrame(ctx) {
+        if (ctx.delegationStack.length == 0) return not
+        return ctx.delegationStack[ctx.delegationStack.length - 1]
+    }
+
+    // delegationDepth — CALCULATION (read). How many delegation frames
+    // are live. The R1 spike's deep-nesting smoke test (punch-list P11)
+    // asserts on this reaching 5+.
+    export function delegationDepth(ctx) {
+        return ctx.delegationStack.length
+    }
+
+    // inDelegation — CALCULATION (predicate). Is any delegation live?
+    export function inDelegation(ctx) {
+        return ctx.delegationStack.length > 0
+    }
+}

@@ -1,0 +1,305 @@
+// block-context.scrml — BlockContext engine (charter dive Q1.C; MK1.1).
+//
+// BlockContext is the MARKUP-LAYER context-grid engine — the top-level
+// engine of the markup-layer engine graph (charter Q1.B). It answers the
+// single load-bearing question every downstream markup tokenizing
+// decision asks: "which scrml context are we in right now?"
+//
+// MK1 is the CONTEXT-GRID — NOT the <tag> tree. BlockContext recognizes
+// the .InMarkupTag *boundary* (entering a markup-tag context); the
+// TagFrame engine that pairs tag openers with closers is MK2.
+//
+// NOTE on the file-top header style — per M1's ANOMALY-1 disposition
+// (README ANOMALY-1; lex-in-template.scrml header), literal text
+// resembling a block-opener sigil inside scrml line-comments is reached
+// by the BS-layer block tokenizer (line-comments are NOT stripped before
+// bracket matching) and opens a spurious context that derails closure
+// detection. This file therefore PARAPHRASES the block-opener sigils in
+// commentary — "the logic-escape sigil", "the SQL-block sigil", etc. —
+// rather than writing the brace-bearing characters literally. The actual
+// sigil strings live in the SIGIL_TO_CONTEXT table below, built via
+// character concatenation per the same ANOMALY-1 string-literal
+// workaround M1 uses.
+//
+// NOTE-2 (ANOMALY-2 class) — the v0.3 compiler rewrites a bare "~"
+// string literal to an internal "__scrml_tilde__" placeholder during
+// .scrml compilation (a §32 `~`-operator stage artifact). Like the
+// function-body stripping of README ANOMALY-2, this is a property of
+// the CURRENT compiler, not the language; the .js shadow (what tests
+// import and what runs) carries the correct literal. The M4+ self-host
+// swap retires the shadow and the artifact. The concat form below is
+// kept in its readable shape rather than contorted to side-step a
+// transient compiler artifact.
+//
+// PILLAR 5b classification (DD §D1 two-table operational test):
+//   BlockContext IS STATE. The SPEC §3 context grid is a finite set of
+//   named conditions; the transition contract is explicit (the
+//   logic-escape sigil enters .InLogicEscape, a closing brace at
+//   brace-depth-0 exits, an `<ident` opener enters .InMarkupTag, the
+//   markup closer exits, the CSS / SQL / error-effect / meta / test
+//   sigils enter their respective contexts); and "what context is this
+//   in right now?" is the question every markup tokenizing decision
+//   asks. `fn`-shape loses on every D1 axis — there is history (nested
+//   contexts), lifecycle (each context entry/exit is an event), and
+//   condition-dependent dispatch.
+//
+//   Engine is THE correct shape — the same verdict M1's LexMode carries.
+//   BlockContext is to the markup layer what LexMode is to the JS layer.
+//
+// MK1.1 SCOPE (this dispatch):
+//   - The <engine for=BlockContext> DECLARATION is COMPLETE: all 9
+//     variants, the full rule= contract per charter Q1.C.
+//   - The .TopLevel state-child is a SUBSTANTIVE dispatcher at a
+//     RECOGNITION level — it recognizes a context-entry sigil and names
+//     the BlockContext variant the cursor wants to enter. The DEEP work
+//     (consuming the sigil, brace-depth tracking, the actual transition)
+//     is MK1.2.
+//   - The other 8 state-child bodies are SKELETAL — deep boundary
+//     recognition + brace-depth closing is MK1.2.
+//   - .InLogicEscape is shaped as a §51.0.Q.1 COMPOSITE state-child
+//     (punch-list P3) — its body carries the JS-layer engine graph
+//     (the markup→JS delegation point). At MK1.1 the inner delegation
+//     is a stub frame; the actual JS-parse delegation lands at MK4.
+//
+// MK1.2 lands: the 7 block-opener sigils + brace-depth closing; the
+//   `<ident` markup-tag-context boundary; .InLogicEscape realized as a
+//   DelegationFrame push; the foreign-code opaque passthrough (§23).
+// MK1.3 lands: line comments + HTML comments recognized structurally;
+//   the .InCss / .InSql / .InErrorEffect / .InMeta / .InTest sub-context
+//   stubs at sketch depth; conformance vs the current BS block tree.
+//
+// Spec / design authority:
+//   - charter dive Q1.C — the BlockContext engine sketch (this file's
+//     SHAPE is lifted directly from Q1.C).
+//   - SPEC §3 — the context grid (the finite named-condition set).
+//   - SPEC §51.0.F — the rule= transition contract.
+//   - SPEC §51.0.Q.1 — composite state-children + nested engines (the
+//     .InLogicEscape markup→JS delegation point).
+//   - SPEC §51.0.B — exhaustiveness (all 9 variants enumerated).
+
+${
+    import { LexMode } from "./lex-mode.scrml"
+
+    type BlockContext:enum = {
+        TopLevel,
+        InMarkupTag,
+        InLogicEscape,
+        InCss,
+        InSql,
+        InErrorEffect,
+        InMeta,
+        InTest,
+        InForeignCode,
+    }
+}
+
+// CANONICAL scrml-source SHAPE — the engine declaration, lifted from
+// charter dive Q1.C. Per §51.0.C the engine auto-declares its reactive
+// variable @blockContext (the for=BlockContext → @blockContext
+// lowercasing rule). State-children carry rule= contracts per §51.0.F.
+//
+// The rule= contract per charter Q1.C:
+//   - .TopLevel may transition to any context-entry variant.
+//   - .InMarkupTag is a COMPOSITE state-child — its body carries a
+//     BodyMode engine (free-text vs code-default per §4.18). MK1.1
+//     declares the composite shape; MK3 owns BodyMode in full. NOTE:
+//     BodyMode is MK3's type — the nested engine here forward-references
+//     it; the .scrml is the canonical SHAPE per the README ANOMALY-2
+//     shadow discipline (the .js shadow is what runs).
+//   - .InLogicEscape is a COMPOSITE state-child (punch-list P3) — its
+//     body carries the JS-layer LexMode engine graph (M1 — already
+//     built; LexMode imported above). This is the markup→JS delegation
+//     point. The "outer x 1 = 1 inner instance" §51.0.Q.1 invariant
+//     means each logic-escape entry produces a fresh inner instance;
+//     nested escapes stack.
+//   - The CSS / SQL / error-effect / meta / test sub-contexts return to
+//     .TopLevel; their inner sub-tokenizer engines are sketch-depth
+//     (MK1.3).
+//   - .InForeignCode is opaque — no inner engine; passthrough per §23.
+<engine for=BlockContext initial=.TopLevel>
+
+    <TopLevel rule=(.InMarkupTag | .InLogicEscape | .InCss | .InSql | .InErrorEffect | .InMeta | .InTest)></>
+
+    // Composite state-child per §51.0.Q.1 — a markup tag's body carries
+    // a BodyMode engine (free-text vs code-default per §4.18). MK3 owns
+    // the BodyMode engine's substantive body; MK1.1 carries the
+    // composite SHAPE so MK2/MK3 extend rather than restructure.
+    <InMarkupTag rule=(.TopLevel | .InMarkupTag | .InLogicEscape)>
+        <engine for=BodyMode var=tagBodyMode initial=.FreeText>
+            <FreeText rule=.CodeDefault></>
+            <CodeDefault rule=.FreeText></>
+        </>
+    </>
+
+    // Composite state-child — THE markup→JS delegation point (punch-list
+    // P3). The logic-escape body is JS; its lexing + parsing is the M1
+    // JS-layer LexMode engine graph, nested here exactly as
+    // lex-mode.scrml's .InTemplateBody nests its inner engine for
+    // template-literal interpolation. At MK1.1 the delegation is a stub
+    // frame on ctx.delegationStack; the actual JS-parse delegation lands
+    // at MK4 (the seam milestone).
+    <InLogicEscape rule=(.TopLevel | .InMarkupTag | .InSql)>
+        <engine for=LexMode var=escapeLexMode initial=.InCode>
+            <InCode rule=(.InTemplateBody | .InSingleString | .InDoubleString | .InLineComment | .InBlockComment | .InRegexBody)></>
+            <InTemplateBody rule=.InCode></>
+            <InSingleString rule=.InCode></>
+            <InDoubleString rule=.InCode></>
+            <InLineComment  rule=.InCode></>
+            <InBlockComment rule=.InCode></>
+            <InRegexBody    rule=.InCode></>
+        </>
+    </>
+
+    <InCss         rule=.TopLevel></>   // CSS sub-tokenizer engine — sketch depth (MK1.3)
+    <InSql         rule=.TopLevel></>   // SQL sub-tokenizer engine — sketch depth (MK1.3)
+    <InErrorEffect rule=.TopLevel></>   // error-effect arm tokenizer — sketch depth (MK1.3)
+    <InMeta        rule=.TopLevel></>   // meta = logic-grammar; reuses the JS-layer graph (MK1.3)
+    <InTest        rule=.TopLevel></>   // test-block tokenizer — sketch depth (MK1.3)
+    <InForeignCode rule=.TopLevel></>   // opaque passthrough — §23; no inner engine
+</>
+
+${
+    // ---------------------------------------------------------------------
+    // LIVE MK1.1 SURFACE — JS-host mirror of the engine above.
+    //
+    // The canonical engine's variable would be @blockContext (auto-declared
+    // per §51.0.C). MK1.1 mirrors this with a `blockContext` slot inside
+    // the parse run's `ctx` object (created in parse-ctx.scrml).
+    // Transitions are simple assignments — same dispatch shape as the
+    // engine's rule=, just at the JS-host layer. This is exactly how
+    // lex-mode.scrml mirrors @lexMode as ctx.currentMode.
+    //
+    // Pillar 5b note: when the M4+ swap-in lights up the engine above,
+    // every transition site below becomes a write to @blockContext and
+    // the runtime engine's rule= enforces.
+    // ---------------------------------------------------------------------
+
+    // BlockContext variant tags (mirror of the canonical enum's .Variant
+    // names — all 9 per charter Q1.C).
+    export const BlockContext = Object.freeze({
+        TopLevel:      "TopLevel",
+        InMarkupTag:   "InMarkupTag",
+        InLogicEscape: "InLogicEscape",
+        InCss:         "InCss",
+        InSql:         "InSql",
+        InErrorEffect: "InErrorEffect",
+        InMeta:        "InMeta",
+        InTest:        "InTest",
+        InForeignCode: "InForeignCode",
+    })
+
+    // initialBlockContext — calculation (pure fn: returns the .Variant the
+    // engine starts in). Matches `initial=.TopLevel` on the engine above.
+    export function initialBlockContext() {
+        return BlockContext.TopLevel
+    }
+
+    // setBlockContext — STATE write helper (writes to ctx.blockContext).
+    // In the canonical form this would be `@blockContext = .NewContext`.
+    // The runtime engine's rule= contract validates legal transitions;
+    // at MK1.1 the dispatch sites honor the rule= matrix.
+    export function setBlockContext(ctx, context) {
+        ctx.blockContext = context
+    }
+
+    // getBlockContext — calculation (read).
+    export function getBlockContext(ctx) {
+        return ctx.blockContext
+    }
+
+    // LEGAL_FROM_TOP_LEVEL — the rule= matrix declared on the <TopLevel>
+    // state-child, as a JS-host lookup table. .TopLevel may enter any of
+    // the seven context-entry variants. (.InForeignCode is reached from a
+    // tag context, not directly from .TopLevel — it is not in this set,
+    // matching the charter Q1.C <TopLevel rule=...> contract.)
+    export const LEGAL_FROM_TOP_LEVEL = Object.freeze({
+        InMarkupTag:   true,
+        InLogicEscape: true,
+        InCss:         true,
+        InSql:         true,
+        InErrorEffect: true,
+        InMeta:        true,
+        InTest:        true,
+    })
+
+    // ---------------------------------------------------------------------
+    // CONTEXT-ENTRY RECOGNITION (the substantive .TopLevel body work).
+    //
+    // MK1.1 SCOPE — RECOGNITION LEVEL. These helpers answer "what
+    // BlockContext does the cursor want to enter at this position?" They
+    // do NOT consume the sigil and do NOT perform the transition — that
+    // (plus brace-depth tracking and the closing contract) is MK1.2.
+    //
+    // The seven block-opener sigils (charter Q1.C / roadmap §2 MK1.2),
+    // named here by paraphrase per the ANOMALY-1 note above:
+    //   logic-escape sigil   → .InLogicEscape   §7
+    //   SQL-block sigil      → .InSql           §8
+    //   CSS-block sigil      → .InCss           §16
+    //   error-effect sigil   → .InErrorEffect   §19
+    //   meta-block sigil     → .InMeta          §22
+    //   test-block sigil     → .InTest          §32
+    //   foreign-code sigil   → .InForeignCode   §23
+    // An `<ident` opener enters .InMarkupTag.
+    // ---------------------------------------------------------------------
+
+    // makeSigilTable — CALCULATION (pure fn). Builds the closed map from a
+    // two-character block-opener sigil to the BlockContext variant it
+    // enters. The sigil-string KEYS are assembled via character
+    // concatenation — the README ANOMALY-1 string-literal workaround
+    // (a string literal containing a brace-bearing sigil written
+    // literally trips the same BS-layer bracket-matching issue as a
+    // literal sigil in a comment). This table REPLACES the
+    // block-splitter's sigil-guessing — a closed lookup, not a heuristic.
+    export function makeSigilTable() {
+        const brace = "{"
+        const table = {}
+        table["$" + brace] = BlockContext.InLogicEscape
+        table["?" + brace] = BlockContext.InSql
+        table["#" + brace] = BlockContext.InCss
+        table["!" + brace] = BlockContext.InErrorEffect
+        table["^" + brace] = BlockContext.InMeta
+        table["~" + brace] = BlockContext.InTest
+        table["_" + brace] = BlockContext.InForeignCode
+        return table
+    }
+
+    // SIGIL_TO_CONTEXT — the closed sigil→BlockContext map (built once).
+    export const SIGIL_TO_CONTEXT = makeSigilTable()
+
+    // contextForSigil — CALCULATION (pure fn). Given a two-character
+    // lookahead string, return the BlockContext variant that sigil
+    // enters, or `not` if the two characters are not a block-opener
+    // sigil. A closed-name-set lookup — the heuristic-elimination shape
+    // per charter Q2.
+    export function contextForSigil(twoChar) {
+        const ctxName = SIGIL_TO_CONTEXT[twoChar]
+        if (ctxName is not) return not
+        return ctxName
+    }
+
+    // isBlockOpenerSigil — CALCULATION (predicate). Is this two-character
+    // string one of the seven block-opener sigils?
+    export function isBlockOpenerSigil(twoChar) {
+        return contextForSigil(twoChar) is not given
+    }
+
+    // isMarkupTagOpener — CALCULATION (predicate). Is the cursor at an
+    // `<ident`-shaped markup-tag-context boundary? A `<` immediately
+    // followed by an ASCII letter opens a markup tag (the markup-tag
+    // context); a `<` followed by whitespace, `/`, or EOF does not.
+    // The deep tag-TREE recognition (opener/closer pairing, TagKind) is
+    // MK2 — this predicate only recognizes the .InMarkupTag BOUNDARY.
+    export function isMarkupTagOpener(lessThanChar, nextChar) {
+        if (lessThanChar != "<") return false
+        return isAsciiLetter(nextChar)
+    }
+
+    // isAsciiLetter — CALCULATION (predicate). ASCII a-z / A-Z.
+    export function isAsciiLetter(ch) {
+        if (ch == "") return false
+        const c = ch.charCodeAt(0)
+        const isUpper = c >= 65 && c <= 90
+        const isLower = c >= 97 && c <= 122
+        return isUpper || isLower
+    }
+}

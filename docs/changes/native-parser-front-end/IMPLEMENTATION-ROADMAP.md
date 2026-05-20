@@ -218,6 +218,13 @@ they surface. **Do NOT** pre-invest the ~65h Option I-A throw-away fix. Trigger 
 reconsider I-A: 2+ distinct code-bearing-body misclassification bugs block delivery
 within one quarter.
 
+### §4.4 Known issues surfaced during implementation
+
+| # | Issue | Surfaced | Disposition |
+|---|---|---|---|
+| K1 | `block-context.scrml`'s `.InMarkupTag` composite state-child forward-references `<engine for=BodyMode>` — `BodyMode` is MK3's type, not yet declared. The `.scrml` carries it for charter-Q1.C SHAPE fidelity; it is a single deliberate `.scrml` compile error (E-ENGINE-004). | MK1.1 | Expected — resolves when MK3 lands `BodyMode`. The `.js` shadow runs correctly (ANOMALY-2 shadow discipline). |
+| K2 | Pre-existing M1 bug: `lex-in-code.scrml` ↔ `lex-in-regex.scrml` circular import (E-IMPORT-002); `lex-in-code.scrml`'s aliased imports (`import { push as pushBracket }`) trip E-SCOPE-001 under the v0.3 compiler. Blocks ALL native-parser `.scrml` from compiling cleanly (verified identical on M1's untouched `lex.scrml`). The `.js` shadows are unaffected; the full test suite passes. | MK1.1 (pre-existing in M1) | M1 follow-up — NOT in the README ANOMALY list. Must be fixed before M6 (the native parser self-hosts its `.scrml` source at M6 — charter Q8). Non-blocking for M2-M4 / MK1-MK4 (the `.js` shadows execute). |
+
 ---
 
 ## §5 Progress tracker
@@ -230,7 +237,7 @@ within one quarter.
 | M2.2 operators | ⬜ pending | — | — | depends M2.1 |
 | M2.3 call/member/arrow-heads | ⬜ pending | — | — | depends M2.2 |
 | M2.4 scrml-extension exprs | ⬜ pending | — | — | depends M2.3; closes Acorn-workaround failure modes |
-| **MK1.1** shared ctx + BlockContext skeleton | ⏳ DISPATCHED S112 | — | — | parallel w/ M2.1 |
+| **MK1.1** shared ctx + BlockContext skeleton | ✅ landed S112 | scrml-js-codegen-engineer (worktree) | S112 | parse-ctx + block-context + parse-markup (.scrml+.js); makeParseContext (node sink + delegationStack) + 9-variant BlockContext engine + trampoline; skeleton step, full suite 16,213/0 |
 | MK1.2 context-boundary recognition | ⬜ pending | — | — | depends MK1.1 |
 | MK1.3 comments + sub-context stubs + conformance | ⬜ pending | — | — | depends MK1.2 |
 | M3 / M4 / MK2 / MK3 / MK4 / M5 / M6 | ⬜ pending | — | — | decompose when scheduled (§3) |
