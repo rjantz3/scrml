@@ -46,12 +46,12 @@
 //   Engine is THE correct shape — the same verdict M1's LexMode carries.
 //   BlockContext is to the markup layer what LexMode is to the JS layer.
 //
-// MK1.2 SCOPE (this dispatch):
+// MK1 SCOPE (the three sub-steps, this file as of MK1.3):
 //   - The <engine for=BlockContext> DECLARATION is COMPLETE: all 9
 //     variants, the full rule= contract per charter Q1.C (unchanged
-//     from MK1.1).
+//     since MK1.1).
 //   - MK1.1 made the .TopLevel state-child substantive at a RECOGNITION
-//     level. MK1.2 deepens that to actual CONSUMPTION + TRANSITION: the
+//     level. MK1.2 deepened that to actual CONSUMPTION + TRANSITION: the
 //     seven block-opener sigils are CONSUMED and @blockContext (the live
 //     ctx.blockContext slot) TRANSITIONS to the matching variant; a
 //     brace-depth marker is recorded so the matching closing brace at
@@ -68,13 +68,26 @@
 //   - .InForeignCode is the §23 opaque passthrough — no inner
 //     recognition; the body is verbatim.
 //
-// MK1.2 lands (THIS dispatch): the 7 block-opener sigils + brace-depth
-//   closing; the `<ident` markup-tag-context boundary; .InLogicEscape
-//   realized as a DelegationFrame push/pop; the foreign-code opaque
-//   passthrough (§23).
-// MK1.3 lands: line comments + HTML comments recognized structurally;
-//   the .InCss / .InSql / .InErrorEffect / .InMeta / .InTest sub-context
-//   stubs at sketch depth; conformance vs the current BS block tree.
+// MK1.3 SCOPE (this dispatch):
+//   - COMMENTS recognized STRUCTURALLY (not heuristically). `//` line
+//     comments + `<!-- -->` HTML comments are recognized by the markup
+//     layer as structural constructs. This is the native-parser
+//     elimination of BS heuristics #6 (`//`-comment suppression,
+//     block-splitter.js:972-992) and #7 (`<!-- -->`-comment suppression,
+//     block-splitter.js:1014-1052) — per charter Q2.A those become a
+//     contracted recognition rule, NOT a quote-flag/orphanBraceDepth
+//     gate. The comment-form recognizers + extent calculations below are
+//     that contract. See the COMMENT RECOGNITION section.
+//   - The .InCss / .InSql / .InErrorEffect / .InMeta / .InTest
+//     sub-context stubs gain sketch-depth body dispatchers (in
+//     parse-markup.scrml) — they recognize the context's extent + its
+//     close. The deep per-context grammars (a CSS tokenizer, a SQL
+//     tokenizer, etc.) are LATER milestones, not MK1.3.
+//
+// MK1.3 lands (THIS dispatch): `//` + `<!-- -->` comments recognized
+//   structurally; the 5 sub-context sketch-depth body dispatchers; the
+//   markup-layer block-stream + the MK1.3 conformance harness diffing it
+//   against the current BS block tree.
 //
 // Spec / design authority:
 //   - charter dive Q1.C — the BlockContext engine sketch (this file's
@@ -572,5 +585,149 @@ ${
     // context's matching close — isBlockContextClose returned false).
     export function noteBraceClose(ctx) {
         popBracket(ctx.brackets)
+    }
+
+    // =====================================================================
+    // MK1.3 — COMMENT RECOGNITION (structural, not heuristic).
+    //
+    // SPEC §27.2 names two comment forms: `//` line comments and the
+    // `<!-- -->` HTML markup-comment. The block-splitter recognizes them
+    // with two heuristics:
+    //   #6 — `//`-comment suppression (block-splitter.js:972-992): gated
+    //        by `!inDoubleQuote && !inSingleQuote &&
+    //        !(orphanBraceDepth>0 && !topIsBraceContext())`.
+    //   #7 — `<!-- -->`-comment suppression (block-splitter.js:1014-1052):
+    //        gated by `!inDoubleQuote && !inSingleQuote &&
+    //        !topIsBraceContext()`.
+    // Both guesses exist because the BS is a single linear scan WITHOUT a
+    // grammar — it has to gate comment recognition on hand-tracked quote
+    // flags and a bare-brace counter.
+    //
+    // The native parser COMPUTES instead of guessing (charter Q2.A): a
+    // comment is recognized by a closed two-character / four-character
+    // sigil test, and where a comment is legal is a fact of the
+    // BlockContext (and, from MK3, the BodyMode). The recognizers below
+    // are the heuristic-elimination contract:
+    //   - recognizeCommentForm     — the closed sigil test (Line vs Html).
+    //   - lineCommentExtent        — the `//`-to-line-terminator extent.
+    //   - htmlCommentExtent        — the `<!-- -->` extent.
+    // The trampoline (parse-markup.scrml) consults these in the contexts
+    // where a comment is legal; it never consults a quote flag.
+    //
+    // PILLAR 5b: CommentForm is PURE DATA (a recognizer tag — calculation
+    // classification, the same as DelegationKind). recognizeCommentForm /
+    // lineCommentExtent / htmlCommentExtent are CALCULATIONS (pure fns
+    // over the cursor's position — no state write, no cursor advance).
+    // The trampoline performs the consume + the comment-block emit; the
+    // recognizers are pure.
+    // =====================================================================
+
+    // CommentForm — PURE DATA tags. The two SPEC §27.2 comment forms.
+    //   Line — a `//` line comment (JS-style; runs to the line terminator).
+    //   Html — a `<!-- -->` HTML markup-comment.
+    export const CommentForm = Object.freeze({
+        Line: "Line",
+        Html: "Html",
+    })
+
+    // doubleSlash — CALCULATION (pure fn). The two-character `//` line-
+    // comment sigil, assembled via character code per the README
+    // ANOMALY-1 string-literal workaround class (kept consistent with the
+    // closingBrace / openBrace concat form — a forward-slash pair is not
+    // itself brace-bearing, but a uniform assembly form keeps the .scrml
+    // free of any literal sigil run a future BS-layer scan might trip).
+    export function doubleSlash() {
+        return String.fromCharCode(47) + String.fromCharCode(47)
+    }
+
+    // htmlCommentOpen — CALCULATION (pure fn). The four-character `<!--`
+    // HTML-comment opener.
+    export function htmlCommentOpen() {
+        return "<" + "!" + String.fromCharCode(45) + String.fromCharCode(45)
+    }
+
+    // htmlCommentClose — CALCULATION (pure fn). The three-character `-->`
+    // HTML-comment closer.
+    export function htmlCommentClose() {
+        return String.fromCharCode(45) + String.fromCharCode(45) + ">"
+    }
+
+    // recognizeCommentForm — CALCULATION (pure fn). Given the cursor,
+    // return the CommentForm a comment STARTING at the cursor would be,
+    // or `not` if no comment opener is at the cursor. A closed sigil test
+    // — the heuristic-elimination shape per charter Q2.A #6/#7.
+    //
+    // The recognizer does NOT advance the cursor and does NOT decide
+    // WHERE a comment is legal — that is the trampoline's per-context
+    // dispatch (a comment is recognized in .TopLevel and the brace-code
+    // contexts; in a free-text markup body — MK3's BodyMode.FreeText —
+    // `//` is text). The recognizer answers only "is the byte sequence at
+    // the cursor a comment opener, and which form?".
+    export function recognizeCommentForm(cursor) {
+        if (peekStr(cursor, 2) == doubleSlash()) return CommentForm.Line
+        if (peekStr(cursor, 4) == htmlCommentOpen()) return CommentForm.Html
+        return not
+    }
+
+    // lineCommentExtent — CALCULATION (pure fn). Given a cursor positioned
+    // at a `//` line-comment opener, return the END offset of the comment
+    // — the position one past the comment's last consumed character.
+    //
+    // A `//` line comment runs from the `//` to the line terminator. The
+    // BS oracle (block-splitter.js:979-980) INCLUDES the `\n` in the
+    // comment's raw slice: it scans to the newline and then consumes it.
+    // lineCommentExtent matches that — the returned end is one past the
+    // `\n` (or the source length, if the comment runs to EOF with no
+    // newline). This is the structural extent — the trampoline consumes
+    // up to it.
+    export function lineCommentExtent(cursor) {
+        const source = cursor.source
+        const len = source.length
+        let p = cursor.pos
+        // Scan to the line terminator (do not include it yet).
+        while (p < len && source.charCodeAt(p) != 10) {
+            p = p + 1
+        }
+        // Consume the newline too, if present (BS-oracle parity).
+        if (p < len) {
+            p = p + 1
+        }
+        return p
+    }
+
+    // htmlCommentExtent — CALCULATION (pure fn). Given a cursor positioned
+    // at a `<!--` HTML-comment opener, return the END offset of the
+    // comment — one past the closing `-->`, or the source length if the
+    // comment runs to EOF without a closer.
+    //
+    // Nested HTML comments are not a thing per the HTML spec — the first
+    // `-->` closes (matching the BS oracle, block-splitter.js:1030-1036).
+    // An unterminated `<!--` runs to EOF (best-effort recovery, the same
+    // disposition the BS uses; a diagnostic for the unterminated case is
+    // a later milestone, matching the M1 string-body precedent).
+    export function htmlCommentExtent(cursor) {
+        const source = cursor.source
+        const len = source.length
+        const close = htmlCommentClose()
+        // Start scanning past the four-character `<!--` opener.
+        let p = cursor.pos + 4
+        while (p < len) {
+            if (source.substr(p, 3) == close) {
+                return p + 3
+            }
+            p = p + 1
+        }
+        // Unterminated — runs to EOF.
+        return len
+    }
+
+    // commentExtent — CALCULATION (pure fn). Dispatch on the recognized
+    // CommentForm: the END offset of the comment at the cursor. Returns
+    // `not` if no comment opener is at the cursor.
+    export function commentExtent(cursor) {
+        const form = recognizeCommentForm(cursor)
+        if (form is not) return not
+        if (form == CommentForm.Line) return lineCommentExtent(cursor)
+        return htmlCommentExtent(cursor)
     }
 }

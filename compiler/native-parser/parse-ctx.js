@@ -66,6 +66,47 @@ export function nodeCount(ctx) {
     return ctx.nodes.length;
 }
 
+// --- BLOCK-NODE — the markup-layer block-stream node (MK1.3) ---
+//
+// The markup trampoline produces a typed BLOCK-STREAM — the analogue of the
+// current block-splitter's block tree (charter Q1.G). At MK1.3 the trampoline
+// emits a FLAT sequence of typed blocks; the nested <tag> tree is MK2.
+//
+// BlockKind is pure data — the kind is computed once at block-recognition
+// time and carried (calculation classification, the same as DelegationKind).
+// The block-node struct carries { kind, span, commentForm }.
+
+// blockKinds — the ten BlockKind variant tags surfaced as values. The tag
+// strings read 1:1 with the BlockContext variant names where a context maps
+// to a block, plus the two non-context kinds (Text / Comment).
+export function blockKinds() {
+    return {
+        Text:        "Text",
+        Comment:     "Comment",
+        Markup:      "Markup",
+        LogicEscape: "LogicEscape",
+        Sql:         "Sql",
+        Css:         "Css",
+        ErrorEffect: "ErrorEffect",
+        Meta:        "Meta",
+        Test:        "Test",
+        ForeignCode: "ForeignCode",
+    };
+}
+
+// makeBlockNode — calculation (pure data builder). One typed block in the
+// markup block-stream. commentForm is the CommentForm for a Comment block,
+// null for every other kind.
+export function makeBlockNode(kind, span, commentForm) {
+    return { kind, span, commentForm };
+}
+
+// appendBlock — state write: append a typed block to the block-stream (the
+// shared ctx.nodes sink). A thin wrapper over appendNode.
+export function appendBlock(ctx, block) {
+    ctx.nodes.push(block);
+}
+
 // --- DelegationKind / CloseCondition tag tables (pure data) ---
 
 export function delegationKinds() {

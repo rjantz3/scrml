@@ -1,0 +1,6 @@
+// a leading line comment
+text between comments
+// a trailing line comment
+${
+    let value = 1
+}

@@ -1,0 +1,8 @@
+#{
+    .panel {
+        color: red
+    }
+    .panel:hover {
+        color: blue
+    }
+}

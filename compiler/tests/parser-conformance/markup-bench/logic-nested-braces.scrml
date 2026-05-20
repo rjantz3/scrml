@@ -1,0 +1,8 @@
+${
+    let pick = (flag) => {
+        if (flag) {
+            return { kind: "yes" }
+        }
+        return { kind: "no" }
+    }
+}

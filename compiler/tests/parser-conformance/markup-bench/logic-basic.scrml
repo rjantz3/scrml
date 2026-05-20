@@ -1,0 +1,5 @@
+${
+    let count = 0
+    let label = "hello"
+}
+some trailing text

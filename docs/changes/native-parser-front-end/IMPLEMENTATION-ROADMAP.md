@@ -240,7 +240,7 @@ within one quarter.
 | M2.4 scrml-extension exprs | ⬜ pending | — | — | depends M2.3; closes Acorn-workaround failure modes |
 | **MK1.1** shared ctx + BlockContext skeleton | ✅ landed S112 | scrml-js-codegen-engineer (worktree) | S112 | parse-ctx + block-context + parse-markup (.scrml+.js); makeParseContext (node sink + delegationStack) + 9-variant BlockContext engine + trampoline; skeleton step, full suite 16,213/0 |
 | MK1.2 context-boundary recognition | ✅ landed S112 | scrml-js-codegen-engineer (worktree) | S112 | 7 block-opener sigils + brace-depth closing + `<ident` boundary + `.InLogicEscape` DelegationFrame push; nested-context stack; +45 unit tests; full suite 16,372/0 |
-| MK1.3 comments + sub-context stubs + conformance | ⬜ pending | — | — | depends MK1.2 |
+| MK1.3 comments + sub-context stubs + conformance | ✅ landed S112 | scrml-js-codegen-engineer (worktree) | S112 | structural `//` + `<!-- -->` comment recognition (BS heuristics #6/#7 eliminated); 5 sub-context sketch-depth dispatchers; markup block-tree conformance harness vs the block-splitter oracle (D-1..D-4 divergences documented); +65 tests; full suite 16,649/0. **MK1 ladder complete.** |
 | M3 / M4 / MK2 / MK3 / MK4 / M5 / M6 | ⬜ pending | — | — | decompose when scheduled (§3) |
 
 **Legend:** ⬜ pending · ⏳ in flight · ✅ complete · 🟥 blocked

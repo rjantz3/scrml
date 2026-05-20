@@ -21,6 +21,8 @@
 // this test imports (README ANOMALY-2 shadow discipline).
 
 import { describe, test, expect } from "bun:test";
+import { readFileSync, readdirSync } from "fs";
+import { join } from "path";
 
 import {
     BlockContext,
@@ -35,6 +37,11 @@ import {
     topBlockContextFrame,
     blockContextDepth,
     closingBrace,
+    CommentForm,
+    recognizeCommentForm,
+    lineCommentExtent,
+    htmlCommentExtent,
+    commentExtent,
 } from "../native-parser/block-context.js";
 import {
     parseMarkup,
@@ -47,24 +54,37 @@ import { makeParseContext, delegationDepth } from "../native-parser/parse-ctx.js
 import { makeCursor, isEof } from "../native-parser/cursor.js";
 import { depth as bracketDepth } from "../native-parser/bracket-stack.js";
 
+// The MK1.3 conformance ORACLE — the current heuristic block-splitter
+// (compiler/src/block-splitter.js). The native markup block-stream is
+// diffed against the BS block tree on the conformance corpus (charter
+// Q4.A MK1 gating / roadmap §4.2). block-splitter.js is READ-ONLY here —
+// it is the oracle, never modified by this dispatch.
+import { splitBlocks } from "../src/block-splitter.js";
+
 // peakDelegationDepth — drive the trampoline dispatch by dispatch (the
 // dispatch fns are exported) and record the HIGH-WATER delegationStack
 // depth. parseMarkupTrace only exposes the FINAL ctx; for a nesting
 // assertion the peak is the load-bearing datum.
+//
+// MK1.3 — the dispatchers take a `run` text-accumulator as their first
+// argument (the trampoline threads it for block-stream Text emission).
+// This helper supplies a fresh run record; the depth assertions it backs
+// are unaffected by text accumulation.
 function peakDelegationDepth(source) {
     const cursor = makeCursor(source);
     const ctx = makeParseContext();
+    const run = { at: null };
     let peak = 0;
     let iters = 0;
     const maxIters = (source.length + 1) * 4;
     while (!isEof(cursor) && iters < maxIters) {
         const before = cursor.pos;
         if (ctx.blockContext === BlockContext.TopLevel) {
-            dispatchTopLevel(cursor, ctx);
+            dispatchTopLevel(run, cursor, ctx);
         } else {
             // Every context this helper exercises (logic-escape nesting)
             // routes through dispatchInLogicEscape.
-            dispatchInLogicEscape(cursor, ctx);
+            dispatchInLogicEscape(run, cursor, ctx);
         }
         if (delegationDepth(ctx) > peak) peak = delegationDepth(ctx);
         if (cursor.pos === before && !isEof(cursor)) cursor.pos = cursor.pos + 1;
@@ -393,22 +413,29 @@ describe("MK1.2 parseMarkup trampoline — context transitions end-to-end", () =
         expect(fs.blockContextDeep).toBe(0);
     });
 
-    test("dispatchTopLevel returns the recognition record (transition hook)", () => {
+    test("dispatchTopLevel performs the transition on a recognized sigil", () => {
+        // MK1.3 — dispatchTopLevel no longer returns a recognition record
+        // (the MK1.2 observability hook); the observable surface is now the
+        // @blockContext transition + the block-stream. A `run` accumulator
+        // is its first argument.
         const ctx = makeParseContext();
         const cursor = makeCursor("$" + brace + " x }");
-        const recognized = dispatchTopLevel(cursor, ctx);
-        expect(recognized.kind).toBe("sigil");
-        expect(recognized.enters).toBe(BlockContext.InLogicEscape);
-        // dispatchTopLevel performed the transition.
+        const run = { at: null };
+        dispatchTopLevel(run, cursor, ctx);
+        // dispatchTopLevel performed the transition into the entered context.
         expect(ctx.blockContext).toBe(BlockContext.InLogicEscape);
+        // The sigil's two characters were consumed.
+        expect(cursor.pos).toBe(2);
     });
 
-    test("parseMarkup returns the shared node sink (empty at MK1.2)", () => {
-        // MK1.2 recognizes/consumes/transitions through boundaries; node
-        // production lands as the per-context grammars fill in (MK1.3+).
+    test("parseMarkup returns the typed block-stream (MK1.3 — non-empty)", () => {
+        // MK1.3 — the trampoline now PRODUCES a block-stream. `${ x }` is a
+        // logic-escape context block; `<div>` enters a markup-tag boundary.
         const nodes = parseMarkup("$" + brace + " x } <div>");
         expect(Array.isArray(nodes)).toBe(true);
-        expect(nodes.length).toBe(0);
+        // At least the LogicEscape context block is emitted.
+        const kinds = nodes.map((n) => n.kind);
+        expect(kinds).toContain("LogicEscape");
     });
 });
 
@@ -559,4 +586,448 @@ describe("MK1.2 trampoline termination — every input halts", () => {
         expect(fs.blockContextDeep).toBe(0);
         expect(fs.delegation).toBe(0);
     });
+});
+
+// #############################################################################
+// MK1.3 — comments + sub-context stubs + conformance.
+//
+// Per IMPLEMENTATION-ROADMAP §2 MK1.3 + charter dive Q1.C / Q2.A:
+//   - `//` line comments + `<!-- -->` HTML comments are recognized
+//     STRUCTURALLY by the markup layer (not by a heuristic) — the
+//     elimination of BS heuristics #6 / #7.
+//   - The .InCss / .InSql / .InErrorEffect / .InMeta / .InTest
+//     sub-context stubs gain sketch-depth body dispatchers.
+//   - The markup-layer block-stream is diffed against the current BS
+//     block tree on the conformance corpus (the §14 harness).
+// #############################################################################
+
+// blockKinds — the typed-block tags the trampoline emits (mirror of the
+// parse-ctx.js blockKinds() table; the test names them inline so the
+// assertions read at the block-stream level of abstraction).
+const NativeBlockKind = {
+    Text:        "Text",
+    Comment:     "Comment",
+    Markup:      "Markup",
+    LogicEscape: "LogicEscape",
+    Sql:         "Sql",
+    Css:         "Css",
+    ErrorEffect: "ErrorEffect",
+    Meta:        "Meta",
+    Test:        "Test",
+    ForeignCode: "ForeignCode",
+};
+
+// blockStream — the native typed block-stream for a source: a list of
+// { kind, start, end } 3-tuples. The cleanest comparison shape against
+// the BS block tree's top-level blocks.
+function blockStream(source) {
+    return parseMarkup(source).map((b) => ({
+        kind:  b.kind,
+        start: b.span.start,
+        end:   b.span.end,
+    }));
+}
+
+// =============================================================================
+// MK1.3 §11 — structural comment recognition (BS heuristics #6/#7 eliminated).
+// =============================================================================
+describe("MK1.3 comment recognizers — the closed structural recognition", () => {
+    test("recognizeCommentForm recognizes the `//` line-comment opener", () => {
+        expect(recognizeCommentForm(makeCursor("// a comment"))).toBe(CommentForm.Line);
+        expect(recognizeCommentForm(makeCursor("//"))).toBe(CommentForm.Line);
+    });
+
+    test("recognizeCommentForm recognizes the `<!--` HTML-comment opener", () => {
+        expect(recognizeCommentForm(makeCursor("<!-- a comment -->"))).toBe(CommentForm.Html);
+        expect(recognizeCommentForm(makeCursor("<!---->"))).toBe(CommentForm.Html);
+    });
+
+    test("recognizeCommentForm returns null when no comment opener is at the cursor", () => {
+        expect(recognizeCommentForm(makeCursor("plain text"))).toBe(null);
+        expect(recognizeCommentForm(makeCursor("<div>"))).toBe(null);   // `<d` — not `<!--`
+        expect(recognizeCommentForm(makeCursor("/ x"))).toBe(null);     // a single `/`
+        expect(recognizeCommentForm(makeCursor("<!- x"))).toBe(null);   // `<!-` — short of `<!--`
+    });
+
+    test("lineCommentExtent — the extent INCLUDES the line terminator (BS-oracle parity)", () => {
+        // `// abc\nrest` — the comment extent is [0,7]: `// abc` + the `\n`.
+        // The BS oracle (block-splitter.js:979-980) scans to the newline
+        // then consumes it.
+        expect(lineCommentExtent(makeCursor("// abc\nrest"))).toBe(7);
+    });
+
+    test("lineCommentExtent — a `//` running to EOF ends at the source length", () => {
+        // `// abc` with no trailing newline — the extent is the full length.
+        expect(lineCommentExtent(makeCursor("// abc"))).toBe(6);
+    });
+
+    test("htmlCommentExtent — the extent INCLUDES the closing `-->`", () => {
+        // `<!-- abc -->rest` — the comment extent is [0,12].
+        expect(htmlCommentExtent(makeCursor("<!-- abc -->rest"))).toBe(12);
+    });
+
+    test("htmlCommentExtent — the FIRST `-->` closes (no nested HTML comments)", () => {
+        // `<!-- a --> b --> c` — the first `-->` at [7,10] closes; extent 10.
+        expect(htmlCommentExtent(makeCursor("<!-- a --> b --> c"))).toBe(10);
+    });
+
+    test("htmlCommentExtent — an unterminated `<!--` runs to EOF", () => {
+        // `<!-- no closer` — best-effort recovery, the extent is the length.
+        expect(htmlCommentExtent(makeCursor("<!-- no closer"))).toBe(14);
+    });
+
+    test("commentExtent dispatches on the recognized CommentForm", () => {
+        expect(commentExtent(makeCursor("// x\ny"))).toBe(5);
+        expect(commentExtent(makeCursor("<!-- x -->y"))).toBe(10);
+        expect(commentExtent(makeCursor("not a comment"))).toBe(null);
+    });
+});
+
+// =============================================================================
+// MK1.3 §12 — the block-stream (Text / Comment / context blocks).
+// =============================================================================
+describe("MK1.3 block-stream — typed blocks emitted by the trampoline", () => {
+    const brace = "{";
+
+    test("a plain-text source emits one Text block spanning the whole source", () => {
+        const s = blockStream("hello world");
+        expect(s).toEqual([{ kind: NativeBlockKind.Text, start: 0, end: 11 }]);
+    });
+
+    test("an empty source emits no blocks", () => {
+        expect(blockStream("")).toEqual([]);
+    });
+
+    test("a `//` line comment emits a Comment block; text on either side is split", () => {
+        // `before // c\nafter` — Text[0,7], Comment[7,12], Text[12,17].
+        const s = blockStream("before // c\nafter");
+        expect(s).toEqual([
+            { kind: NativeBlockKind.Text,    start: 0,  end: 7 },
+            { kind: NativeBlockKind.Comment, start: 7,  end: 12 },
+            { kind: NativeBlockKind.Text,    start: 12, end: 17 },
+        ]);
+    });
+
+    test("a `<!-- -->` HTML comment emits a Comment block", () => {
+        // `x <!-- c --> y` — Text[0,2], Comment[2,12], Text[12,14].
+        const s = blockStream("x <!-- c --> y");
+        expect(s).toEqual([
+            { kind: NativeBlockKind.Text,    start: 0,  end: 2 },
+            { kind: NativeBlockKind.Comment, start: 2,  end: 12 },
+            { kind: NativeBlockKind.Text,    start: 12, end: 14 },
+        ]);
+    });
+
+    test("the Comment block carries its CommentForm (Line vs Html)", () => {
+        const lineNodes = parseMarkup("// a line comment\n");
+        expect(lineNodes[0].kind).toBe(NativeBlockKind.Comment);
+        expect(lineNodes[0].commentForm).toBe(CommentForm.Line);
+
+        const htmlNodes = parseMarkup("<!-- an html comment -->");
+        expect(htmlNodes[0].kind).toBe(NativeBlockKind.Comment);
+        expect(htmlNodes[0].commentForm).toBe(CommentForm.Html);
+    });
+
+    test("a logic-escape context emits one LogicEscape block (no inner Text — divergence D-1)", () => {
+        // `${ let x = 1 }` — one LogicEscape block. The BS emits a `text`
+        // child for the body; the native layer does NOT (D-1 — the inner
+        // body grammar is a later milestone).
+        const s = blockStream("$" + brace + " let x = 1 }");
+        expect(s).toEqual([{ kind: NativeBlockKind.LogicEscape, start: 0, end: 14 }]);
+    });
+
+    test("each brace context emits its matching block kind", () => {
+        expect(blockStream("$" + brace + " a }")).toEqual([
+            { kind: NativeBlockKind.LogicEscape, start: 0, end: 6 },
+        ]);
+        expect(blockStream("?" + brace + " a }")).toEqual([
+            { kind: NativeBlockKind.Sql, start: 0, end: 6 },
+        ]);
+        expect(blockStream("#" + brace + " a }")).toEqual([
+            { kind: NativeBlockKind.Css, start: 0, end: 6 },
+        ]);
+        expect(blockStream("!" + brace + " a }")).toEqual([
+            { kind: NativeBlockKind.ErrorEffect, start: 0, end: 6 },
+        ]);
+        expect(blockStream("^" + brace + " a }")).toEqual([
+            { kind: NativeBlockKind.Meta, start: 0, end: 6 },
+        ]);
+        expect(blockStream("~" + brace + " a }")).toEqual([
+            { kind: NativeBlockKind.Test, start: 0, end: 6 },
+        ]);
+        expect(blockStream("_" + brace + " a }")).toEqual([
+            { kind: NativeBlockKind.ForeignCode, start: 0, end: 6 },
+        ]);
+    });
+
+    test("a `//` comment INSIDE a logic body does NOT emit a separate Comment block", () => {
+        // The comment is part of the logic body — at MK1.3 a context body
+        // has no inner block-stream (the body sub-grammar is a later
+        // milestone). The whole `${ ... }` is one LogicEscape block. The
+        // source `${ let x = 1 // note\n}` is 22 characters.
+        const src = "$" + brace + " let x = 1 // note\n}";
+        const s = blockStream(src);
+        expect(s).toEqual([{ kind: NativeBlockKind.LogicEscape, start: 0, end: src.length }]);
+    });
+
+    test("a `<!-- -->` sequence inside a logic body is NOT a comment (it is body text)", () => {
+        // `<!-- -->` is a markup-context construct — inside a logic body it
+        // is not recognized as a comment. The whole `${ ... }` is one block.
+        const src = "$" + brace + " x <!-- y --> }";
+        const s = blockStream(src);
+        expect(s).toEqual([{ kind: NativeBlockKind.LogicEscape, start: 0, end: src.length }]);
+    });
+
+    test("an UNTERMINATED context emits NO block (BS-oracle parity — E-CTX-003)", () => {
+        // The BS emits no block for an unterminated `${` (it emits an
+        // E-CTX-003 error). The native layer likewise emits no block; the
+        // frame stays on blockContextStack as the MK4 blame locus.
+        const s = blockStream("$" + brace + " unterminated body");
+        expect(s).toEqual([]);
+    });
+
+    test("a Markup block is emitted at the `<ident` boundary granularity (divergence D-4)", () => {
+        // `<div> x` — the native Markup block spans the `<div` opener run
+        // only (D-4 — the full element span + the tag tree are MK2).
+        const s = blockStream("<div> x");
+        expect(s[0]).toEqual({ kind: NativeBlockKind.Markup, start: 0, end: 4 });
+    });
+});
+
+// =============================================================================
+// MK1.3 §13 — the sub-context sketch-depth dispatchers.
+// =============================================================================
+describe("MK1.3 sub-context sketch dispatchers — extent + close recognition", () => {
+    const brace = "{";
+
+    // Each of the 5 sub-contexts (.InCss / .InSql / .InErrorEffect /
+    // .InMeta / .InTest) has a sketch-depth dispatcher: it recognizes the
+    // context's extent (by brace depth) and its matching close, and emits
+    // the context block. The DEEP per-context grammar is a later milestone.
+    const SUB_CONTEXT_ROWS = [
+        ["#" + brace, NativeBlockKind.Css,         "css"],
+        ["?" + brace, NativeBlockKind.Sql,         "sql"],
+        ["!" + brace, NativeBlockKind.ErrorEffect, "error-effect"],
+        ["^" + brace, NativeBlockKind.Meta,        "meta"],
+        ["~" + brace, NativeBlockKind.Test,        "test"],
+    ];
+
+    for (const [sigil, kind, label] of SUB_CONTEXT_ROWS) {
+        test(`the ${label} sub-context recognizes its extent + emits a ${kind} block`, () => {
+            const src = sigil + " body content }";
+            const s = blockStream(src);
+            expect(s).toEqual([{ kind, start: 0, end: src.length }]);
+        });
+
+        test(`the ${label} sub-context tracks inner braces (matching close at depth 0)`, () => {
+            // An inner `{ ... }` in the body must not prematurely close the
+            // context — the sketch dispatcher tracks brace depth.
+            const src = sigil + " a " + brace + " b } c }";
+            const s = blockStream(src);
+            expect(s).toEqual([{ kind, start: 0, end: src.length }]);
+        });
+    }
+
+    test("a sub-context block leaves all stacks balanced after its close", () => {
+        const fs = finalState("#" + brace + " .a { color: red } }");
+        expect(fs.brackets).toBe(0);
+        expect(fs.blockContextDeep).toBe(0);
+        expect(fs.delegation).toBe(0);
+    });
+});
+
+// =============================================================================
+// MK1.3 §14 — the conformance harness: block-stream vs the BS block tree.
+//
+// The MK1.3 conformance check (charter Q4.A MK1 gating / roadmap §4.2):
+// the markup-layer block-stream is diffed against the current BS block
+// tree on the conformance corpus. `compiler/src/block-splitter.js` is the
+// ORACLE.
+//
+// At MK1.3 the trampoline produces a FLAT block-stream; the BS produces a
+// tree. "Structural equivalence" at MK1.3 is checked as TOP-LEVEL block
+// equivalence: the native block-stream vs the BS's depth-0 `rootBlocks`,
+// compared on (kind, span). The corpus is split into two dispositions:
+//
+//   "conformance"  — clean files: only text / comment / brace-context
+//                    blocks at the top level, no top-level context
+//                    nesting. The native block-stream is asserted
+//                    structurally equal to the BS rootBlocks.
+//   "divergence-*" — files exercising a KNOWN, DOCUMENTED divergence
+//                    (D-2 SQL-at-top-level / D-3 foreign-code / D-4 the
+//                    <tag> tree). The divergence is recorded; the native
+//                    side is asserted internally correct.
+// =============================================================================
+
+// The BS type-string -> native BlockKind mapping. The BS uses lowercase /
+// kebab-case type strings; the native layer uses the BlockKind tags.
+const BS_TYPE_TO_NATIVE_KIND = {
+    "text":         NativeBlockKind.Text,
+    "comment":      NativeBlockKind.Comment,
+    "logic":        NativeBlockKind.LogicEscape,
+    "sql":          NativeBlockKind.Sql,
+    "css":          NativeBlockKind.Css,
+    "error-effect": NativeBlockKind.ErrorEffect,
+    "meta":         NativeBlockKind.Meta,
+    "test":         NativeBlockKind.Test,
+    "markup":       NativeBlockKind.Markup,
+    // `state` has no MK1.3 native equivalent — MK2's TagKind distinguishes
+    // markup from state. A corpus file producing a `state` block belongs in
+    // a divergence disposition, not the clean-conformance set.
+};
+
+// bsTopLevelStream — the BS block tree's top-level (depth-0) blocks as a
+// list of { kind, start, end } 3-tuples, mapped to native BlockKind tags.
+function bsTopLevelStream(source) {
+    const r = splitBlocks("conformance.scrml", source);
+    return {
+        blocks: r.blocks.map((b) => ({
+            kind:  BS_TYPE_TO_NATIVE_KIND[b.type] ?? `BS:${b.type}`,
+            start: b.span.start,
+            end:   b.span.end,
+        })),
+        errors: r.errors,
+    };
+}
+
+const MARKUP_BENCH_DIR = join(import.meta.dir, "parser-conformance", "markup-bench");
+
+// Per-corpus-file disposition. A file absent from this table defaults to
+// "conformance" (the clean top-level-equivalence gate).
+const MARKUP_BENCH_DISPOSITION = {
+    "logic-basic.scrml":         "conformance",
+    "logic-nested-braces.scrml": "conformance",
+    "css-block.scrml":           "conformance",
+    "comments-line.scrml":       "conformance",
+    "comments-html.scrml":       "conformance",
+    "multi-context.scrml":       "conformance",
+    // Divergence-exercising files — see the D-2/D-3/D-4 notes in
+    // parse-markup.scrml's header.
+    "markup-tags.scrml":         "divergence-markup-tree",   // D-4
+    "foreign-code.scrml":        "divergence-foreign-code",  // D-3
+};
+
+describe("MK1.3 conformance — block-stream vs the BS block tree (corpus)", () => {
+    const benchFiles = readdirSync(MARKUP_BENCH_DIR).filter((f) => f.endsWith(".scrml"));
+
+    // The corpus must be non-empty — a guard against a silently-empty
+    // markup-bench directory passing the suite vacuously.
+    test("the markup-bench corpus is non-empty", () => {
+        expect(benchFiles.length).toBeGreaterThan(0);
+    });
+
+    for (const file of benchFiles) {
+        const disposition = MARKUP_BENCH_DISPOSITION[file] ?? "conformance";
+        const source = readFileSync(join(MARKUP_BENCH_DIR, file), "utf8");
+
+        describe(file, () => {
+            // Every corpus file — the native trampoline must halt + produce
+            // a block-stream array (the termination guarantee, corpus-wide).
+            test(`(${disposition}) the native trampoline halts + produces a block-stream`, () => {
+                const s = blockStream(source);
+                expect(Array.isArray(s)).toBe(true);
+            });
+
+            if (disposition === "conformance") {
+                // The clean-conformance gate — the native block-stream is
+                // structurally equal (kind + span) to the BS rootBlocks.
+                test(`(conformance) native block-stream === BS top-level block tree`, () => {
+                    const native = blockStream(source);
+                    const bs = bsTopLevelStream(source);
+                    // The clean-conformance corpus is hand-designed to
+                    // compile without BS errors — a BS error would mean the
+                    // file belongs in a divergence disposition.
+                    expect(bs.errors.length).toBe(0);
+                    expect(native).toEqual(bs.blocks);
+                });
+            } else if (disposition === "divergence-markup-tree") {
+                // D-4 — the native MK1.3 layer emits `Markup` blocks at the
+                // `<ident` BOUNDARY granularity; the BS emits one `markup`
+                // block per ELEMENT (opener + children + closer). The
+                // <tag> tree is MK2. Record the divergence; assert the
+                // native side is internally coherent.
+                test(`(divergence D-4 — <tag> tree is MK2) native emits boundary-granular Markup blocks`, () => {
+                    const native = blockStream(source);
+                    // The native layer DOES recognize the markup-tag
+                    // boundaries — at least one Markup block is emitted.
+                    const markupBlocks = native.filter((b) => b.kind === NativeBlockKind.Markup);
+                    expect(markupBlocks.length).toBeGreaterThan(0);
+                    // Every Markup block spans a non-empty `<ident` run.
+                    for (const m of markupBlocks) {
+                        expect(m.end).toBeGreaterThan(m.start);
+                    }
+                    // DOCUMENTED DIVERGENCE: the BS top-level `markup` block
+                    // count differs from the native one (the BS spans whole
+                    // elements; the native spans boundaries). This is the
+                    // MK2-deferral — asserted as a divergence, not parity.
+                    const bs = bsTopLevelStream(source);
+                    const bsMarkup = bs.blocks.filter((b) => b.kind === NativeBlockKind.Markup);
+                    expect(bsMarkup.length).toBeGreaterThan(0);
+                });
+            } else if (disposition === "divergence-foreign-code") {
+                // D-3 — the native layer recognizes `_{}` (§23) as a
+                // .InForeignCode context + emits a ForeignCode block. The
+                // BS has NO `_{` opener — a top-level `_{}` is text +
+                // orphan-brace to the BS. The native layer is correct per
+                // §23; record the divergence.
+                test(`(divergence D-3 — BS has no _{ opener) native emits a ForeignCode block`, () => {
+                    const native = blockStream(source);
+                    const foreign = native.filter((b) => b.kind === NativeBlockKind.ForeignCode);
+                    expect(foreign.length).toBe(1);
+
+                    // DOCUMENTED DIVERGENCE: the BS produces NO ForeignCode
+                    // block (it has no `_{` opener) — the §23 foreign-code
+                    // body is text to the BS.
+                    const bs = bsTopLevelStream(source);
+                    const bsForeign = bs.blocks.filter((b) => b.kind === NativeBlockKind.ForeignCode);
+                    expect(bsForeign.length).toBe(0);
+                });
+            }
+        });
+    }
+});
+
+// =============================================================================
+// MK1.3 §15 — conformance: inline micro-corpus (fine-grained block-stream
+// equivalence assertions against the BS).
+//
+// The corpus-file harness above asserts whole-file equivalence; this
+// micro-corpus pins individual constructs — each entry is an inline source
+// whose native block-stream is asserted equal to the BS top-level stream.
+// =============================================================================
+describe("MK1.3 conformance — inline micro-corpus (block-stream === BS)", () => {
+    const brace = "{";
+
+    // Each case: a source whose native block-stream MUST equal the BS
+    // top-level block tree (kind + span). These are clean-conformance
+    // constructs — no D-2/D-3/D-4 surface.
+    const cases = [
+        { name: "plain text",                src: "just plain text" },
+        { name: "leading line comment",      src: "// note\nbody text" },
+        { name: "trailing line comment",     src: "body text\n// note\n" },
+        { name: "html comment",              src: "a <!-- c --> b" },
+        { name: "html comment with tag text", src: "x <!-- <p>inert</p> --> y" },
+        { name: "logic block",               src: "$" + brace + " let n = 1 }" },
+        { name: "logic + trailing text",     src: "$" + brace + " a }\ntrailing" },
+        { name: "css block",                 src: "#" + brace + " .a { x: y } }" },
+        { name: "error-effect block",        src: "!" + brace + " retry }" },
+        { name: "meta block",                src: "^" + brace + " title }" },
+        { name: "test block",                src: "~" + brace + " assert(1) }" },
+        { name: "two logic blocks + text",   src: "$" + brace + " a }\n$" + brace + " b }" },
+        { name: "comment then logic",        src: "// lead\n$" + brace + " x }" },
+        { name: "logic then comment",        src: "$" + brace + " x }\n// trail\n" },
+        { name: "logic with inner braces",   src: "$" + brace + " if (a) " + brace + " b } }" },
+        { name: "empty source",              src: "" },
+        { name: "whitespace only",           src: "   \n  \t " },
+    ];
+
+    for (const c of cases) {
+        test(`(conformance) ${c.name}`, () => {
+            const native = blockStream(c.src);
+            const bs = bsTopLevelStream(c.src);
+            // The micro-corpus is all clean-conformance — no BS errors.
+            expect(bs.errors.length).toBe(0);
+            expect(native).toEqual(bs.blocks);
+        });
+    }
 });

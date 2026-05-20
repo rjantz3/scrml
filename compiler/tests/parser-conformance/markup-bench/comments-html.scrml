@@ -1,0 +1,5 @@
+before the comment
+<!-- an HTML markup comment -->
+between two comments
+<!-- a second comment, with <p> tag text inside -->
+after the comment

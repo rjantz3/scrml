@@ -46,13 +46,20 @@
 //   are declared at MK1.1 because the seam substrate must carry them;
 //   MK4 is the milestone that consumes the delegation machinery.
 //
-// Status (MK1.1): `makeParseContext` is functional — it extends
+// Status (MK1.3): `makeParseContext` is functional — it extends
 // `makeLexContext` (imported from lex.scrml; this file does NOT edit
 // lex.scrml) with `nodes` (the node sink) + `delegationStack`, and
 // seeds the markup-layer engine state (BlockContext) the trampoline
 // dispatches on. The delegation-frame constructors are functional; the
 // JS-parse delegation that pushes/pops `.LogicEscape` frames lands at
-// MK4 (the seam milestone). MK1.2 wires the deep boundary recognition.
+// MK4 (the seam milestone). MK1.2 wired the deep boundary recognition.
+//
+// MK1.3 adds the BLOCK-NODE constructors — the typed-block records the
+// markup trampoline appends to `ctx.nodes`. The block-stream is what the
+// MK1.3 conformance harness diffs against the current BS block tree
+// (charter Q4.A MK1 gating). `BlockKind` / the block-node struct are
+// PURE DATA — calculation classification, the same as DelegationKind.
+// See the BLOCK-NODE section.
 
 ${
     import { makeCursor } from "./cursor.scrml"
@@ -199,6 +206,74 @@ ${
     // nodeCount — read.
     export function nodeCount(ctx) {
         return ctx.nodes.length
+    }
+
+    // -------------------------------------------------------------------
+    // BLOCK-NODE — the markup-layer block-stream node (MK1.3).
+    //
+    // The markup trampoline produces a typed BLOCK-STREAM — the analogue
+    // of the current block-splitter's block tree (charter Q1.G: "the
+    // output is a block tree"). At MK1.3 the trampoline emits a FLAT
+    // sequence of typed blocks; the nested <tag> tree is MK2 (TagFrame).
+    //
+    //   type BlockKind:enum = {
+    //       Text,          // a plain-text run
+    //       Comment,       // a // line comment or a <!-- --> HTML comment
+    //       Markup,        // a markup-tag block (boundary granularity —
+    //                      //   the tag tree is MK2)
+    //       LogicEscape,   // a logic-escape block             §7
+    //       Sql,           // a SQL block                      §8
+    //       Css,           // a CSS block                      §16
+    //       ErrorEffect,   // an error-effect block             §19
+    //       Meta,          // a meta block                     §22
+    //       Test,          // a test block                     §32
+    //       ForeignCode,   // a foreign-code block              §23
+    //   }
+    //
+    // BlockKind is PURE DATA — no <engine> (no transition contract on the
+    // kind itself; the kind is computed once at block-recognition time
+    // and carried). Calculation classification, the same as DelegationKind.
+    //
+    // The block-node STRUCT carries:
+    //   kind        — the BlockKind tag
+    //   span        — {start, end, line, col}; file-absolute (P2 — the
+    //                 one-cursor invariant means no offset arithmetic)
+    //   commentForm — for a Comment block, the CommentForm (Line/Html);
+    //                 `not` for every other kind
+    // -------------------------------------------------------------------
+
+    // blockKinds — the ten BlockKind variant tags surfaced as values so
+    // the trampoline + the conformance harness can name them. Data, not
+    // state. The tag strings are chosen to read 1:1 with the BlockContext
+    // variant names where a context maps to a block (LogicEscape / Sql /
+    // Css / ErrorEffect / Meta / Test / Markup / ForeignCode) plus the
+    // two non-context block kinds (Text / Comment).
+    export function blockKinds() {
+        return {
+            Text:        "Text",
+            Comment:     "Comment",
+            Markup:      "Markup",
+            LogicEscape: "LogicEscape",
+            Sql:         "Sql",
+            Css:         "Css",
+            ErrorEffect: "ErrorEffect",
+            Meta:        "Meta",
+            Test:        "Test",
+            ForeignCode: "ForeignCode",
+        }
+    }
+
+    // makeBlockNode — CALCULATION (pure fn building the block-node data
+    // struct). One typed block in the markup block-stream.
+    export function makeBlockNode(kind, span, commentForm) {
+        return { kind, span, commentForm }
+    }
+
+    // appendBlock — STATE write: append a typed block to the block-stream
+    // (the shared ctx.nodes sink). A thin wrapper over appendNode so the
+    // trampoline reads at the block-stream's level of abstraction.
+    export function appendBlock(ctx, block) {
+        ctx.nodes.push(block)
     }
 
     // -------------------------------------------------------------------

@@ -1,0 +1,11 @@
+${
+    let mounted = false
+}
+text after the logic block
+#{
+    .root { display: flex }
+}
+text after the css block
+!{
+    retry
+}

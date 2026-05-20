@@ -1,4 +1,4 @@
-// parse-markup.scrml — the markup-layer trampoline (MK1.1).
+// parse-markup.scrml — the markup-layer trampoline (MK1.3).
 //
 // The markup layer is a TRAMPOLINE — the same shape as M1's lex.scrml: a
 // loop dispatching by the BlockContext engine, with a safety bound and a
@@ -8,8 +8,9 @@
 //
 // MK1 is the CONTEXT-GRID. This trampoline recognizes which scrml
 // context the cursor is in (BlockContext) and dispatches the matching
-// per-context body. MK1 does NOT build the <tag> tree (MK2's TagFrame)
-// or the §4.18 body-mode (MK3's BodyMode).
+// per-context body, producing a typed BLOCK-STREAM (charter Q1.G: "the
+// output is a block tree"). MK1 does NOT build the <tag> tree (MK2's
+// TagFrame) or the §4.18 body-mode (MK3's BodyMode).
 //
 // PILLAR 5b classification (DD §D1):
 //   The MARKUP LOOP is dispatched BY the BlockContext engine — STATE-
@@ -22,46 +23,74 @@
 //   shaped. "The operational test classifies the LOCUS, and a
 //   calculation may contain state-shape subroutines."
 //
-// MK1.2 SCOPE (this dispatch):
-//   - The trampoline RUNS — loop, dispatch-by-BlockContext, safety
-//     bound, cursor-progress sentinel — mirroring lex.scrml.
-//   - The `.TopLevel` dispatch is SUBSTANTIVE: it walks the cursor and,
-//     at each position, recognizes whether a context-entry sigil /
-//     `<ident` markup-tag boundary begins here, and — the MK1.2 deepening
-//     — CONSUMES the boundary and TRANSITIONS @blockContext into the
-//     entered context (via block-context.scrml's enterBlockContext /
-//     enterMarkupTagContext).
-//   - The `.InLogicEscape` dispatch scans the logic-escape body tracking
-//     brace depth and closes the context (popping the DelegationFrame
-//     pushed at open — punch-list P3) at the matching brace-depth-0
-//     close. The JS-layer parse-delegation is not wired until MK4 — the
-//     body is captured as a span.
-//   - The `.InForeignCode` dispatch is the §23 opaque passthrough — no
-//     inner recognition; the body is verbatim; only the matching close
-//     is recognized (by brace depth).
-//   - The `.InSql` / `.InCss` / `.InErrorEffect` / `.InMeta` / `.InTest`
-//     dispatches track brace depth and close at the matching brace; the
-//     INNER sub-context grammar is MK1.3 (these stub the body as a
-//     brace-tracked span).
-//   - The `.InMarkupTag` dispatch consumes the boundary's tag-name run
-//     and returns to the prior context; the <tag> TREE is MK2.
+// MK1.3 SCOPE (this dispatch):
+//   - The trampoline now PRODUCES A BLOCK-STREAM. MK1.2 recognized /
+//     consumed / transitioned through context boundaries but emitted no
+//     nodes; MK1.3 emits a typed block per construct: a Text block for a
+//     plain-text run, a Comment block for a // or <!-- --> comment, and a
+//     context block (LogicEscape / Sql / Css / ErrorEffect / Meta / Test
+//     / ForeignCode) for each brace-delimited context, plus a Markup
+//     block at each `<ident` boundary. The block-stream is the analogue
+//     of the current BS block tree (the MK1.3 conformance harness diffs
+//     the two).
+//   - COMMENTS recognized STRUCTURALLY. `//` line comments + `<!-- -->`
+//     HTML comments are recognized by block-context.scrml's closed
+//     recognizers (recognizeCommentForm / commentExtent) — NOT by a
+//     quote-flag / orphanBraceDepth heuristic. This is the elimination
+//     of BS heuristics #6 / #7 (charter Q2.A). A `//` comment is
+//     recognized in `.TopLevel` (a code-default body per §40.8) and in
+//     the brace-code contexts; a `<!-- -->` comment is recognized in
+//     `.TopLevel` and `.InMarkupTag` (a markup-context construct).
+//   - The 5 SUB-CONTEXT STUBS gain SKETCH-DEPTH per-context dispatchers
+//     — dispatchInCss / dispatchInSql / dispatchInErrorEffect /
+//     dispatchInMeta / dispatchInTest. Each recognizes the context's
+//     extent + its matching close; the DEEP per-context grammars (a CSS
+//     tokenizer, a SQL tokenizer, the error-effect arm tokenizer, the
+//     meta logic-grammar, the test-block tokenizer) are LATER milestones.
 //
-// MK1.2 lands (THIS dispatch): `.TopLevel` consumes a recognized sigil /
-//   `<ident` boundary and transitions @blockContext; the `.InLogicEscape`
-//   dispatch pushes/pops a DelegationFrame; brace-depth closing; the
-//   foreign-code opaque passthrough.
-// MK1.3 lands: `//` + `<!-- -->` comment recognition; the CSS / SQL /
-//   error-effect / meta / test sub-context dispatch stubs; conformance
-//   vs the current BS block tree.
+// MK1.3 lands (THIS dispatch): the block-stream; structural `//` +
+//   `<!-- -->` comment recognition; the 5 sub-context sketch-depth
+//   dispatchers; the conformance harness (a separate test file) diffing
+//   the block-stream against the current BS block tree.
+//
+// KNOWN + DOCUMENTED DIVERGENCES from the BS block tree (charter Q4.A
+// MK1 gating — "structurally equivalent modulo the intentional
+// improvements"):
+//   D-1 — NO inner `text` body-captures. The BS emits a `text` child for
+//         a brace-context body (`${ x }` -> logic[0,N] > text[2,N-1])
+//         and a `text` raw-capture for a compound / `<match>` body. The
+//         native layer emits the context block but NOT its inner body —
+//         the inner grammar is later milestones (MK2/MK3) and the
+//         compound/match raw-capture is the charter's named intentional
+//         improvement (no raw `text` re-capture; recursive descent parses
+//         the body in place). The conformance harness compares the
+//         TOP-LEVEL block sequence.
+//   D-2 — SQL at top level. The native `BlockContext` rule= contract
+//         (charter Q1.C `<TopLevel rule=(... | .InSql | ...)>`) permits
+//         `?{}` to open a SQL context from top level. The BS (S108 Bug 4,
+//         block-splitter.js:1446-1471) does NOT — it places SQL strictly
+//         inside Logic per SPEC §3.1 / §8.1, so a top-level `?{}` is text
+//         + orphan-brace to the BS. The harness records this divergence;
+//         it is a charter-Q1.C-vs-BS difference, not a native-layer bug.
+//   D-3 — Foreign-code. The native layer recognizes `_{}` (§23) as a
+//         `.InForeignCode` context; the BS has no `_{` opener at all (a
+//         top-level `_{}` is text + orphan-brace to the BS). The native
+//         layer is correct per §23; the harness records the divergence.
+//   D-4 — The `<tag>` tree. The native MK1.3 `Markup` block is at the
+//         BOUNDARY granularity (it spans the `<ident` opener run). The BS
+//         `markup` block spans the whole element (opener + children +
+//         closer). The full tag tree + element span is MK2 (TagFrame).
 //
 // Spec / design authority:
 //   - charter dive Q1.G — the composite picture (trampoline shape).
 //   - M1's lex.scrml — the trampoline pattern this file mirrors.
 //   - SPEC §3 — the context grid.
+//   - SPEC §27.2 — the two comment forms (`//` + `<!-- -->`).
 
 ${
     import { makeCursor, isEof, peekChar, peekStr, advance } from "./cursor.scrml"
-    import { makeParseContext } from "./parse-ctx.scrml"
+    import { makeSpan } from "./span.scrml"
+    import { makeParseContext, blockKinds, makeBlockNode, appendBlock } from "./parse-ctx.scrml"
     import {
         BlockContext,
         getBlockContext,
@@ -75,7 +104,30 @@ ${
         popBlockContextFrame,
         noteBraceOpen,
         noteBraceClose,
+        recognizeCommentForm,
+        commentExtent,
     } from "./block-context.scrml"
+
+    // -------------------------------------------------------------------
+    // blockKindForContext — CALCULATION (pure fn). Maps a BlockContext
+    // variant to the BlockKind a closed context of that variant emits.
+    // The seven brace-delimited contexts + the markup-tag context each
+    // map to one BlockKind. Used by the trampoline when it emits a block
+    // on context close.
+    // -------------------------------------------------------------------
+    export function blockKindForContext(context) {
+        const k = blockKinds()
+        if (context == BlockContext.InLogicEscape) return k.LogicEscape
+        if (context == BlockContext.InSql)         return k.Sql
+        if (context == BlockContext.InCss)         return k.Css
+        if (context == BlockContext.InErrorEffect) return k.ErrorEffect
+        if (context == BlockContext.InMeta)        return k.Meta
+        if (context == BlockContext.InTest)        return k.Test
+        if (context == BlockContext.InForeignCode) return k.ForeignCode
+        if (context == BlockContext.InMarkupTag)   return k.Markup
+        // .TopLevel never closes into a block — defensive `not`.
+        return not
+    }
 
     // -------------------------------------------------------------------
     // recognizeContextEntryAt — CALCULATION (pure fn over the cursor's
@@ -89,8 +141,7 @@ ${
     //   { kind: "none" }
     //
     // This is a RECOGNITION — it does NOT advance the cursor and does
-    // NOT transition the engine. The MK1.2 dispatch helpers below
-    // perform the transition.
+    // NOT transition the engine.
     //
     // The recognition is a closed calculation (a two-char sigil lookup
     // table + a `<ident` prev/next-char test) — the heuristic-
@@ -98,10 +149,7 @@ ${
     // context; the native parser COMPUTES it from a closed rule.
     // -------------------------------------------------------------------
     export function recognizeContextEntryAt(cursor) {
-        // Two-character block-opener sigil? (the logic-escape /
-        // SQL-block / CSS-block / error-effect / meta-block / test-block
-        // / foreign-code sigils — see SIGIL_TO_CONTEXT in
-        // block-context.scrml). Paraphrased per the ANOMALY-1 note.
+        // Two-character block-opener sigil?
         const twoChar = peekStr(cursor, 2)
         const sigilContext = contextForSigil(twoChar)
         if (sigilContext is not given) {
@@ -119,49 +167,149 @@ ${
     }
 
     // -------------------------------------------------------------------
-    // dispatchTopLevel — the `.TopLevel` BlockContext state-child body
-    // (MK1.2 SUBSTANTIVE — recognize, consume, transition).
+    // The TEXT-RUN accumulator — the trampoline's equivalent of the BS's
+    // beginText / flushText. A plain-text run is a maximal stretch of
+    // ordinary characters between two structural constructs (a sigil, a
+    // comment, a markup-tag boundary, a context close, or EOF). The
+    // accumulator records WHERE the current run started; flushing it
+    // emits one Text block and resets the marker.
     //
-    // If a block-opener SIGIL begins here: consume it and transition
-    // @blockContext into the matching variant (enterBlockContext). If a
-    // `<ident` markup-tag boundary begins here: consume the `<` and
-    // transition into .InMarkupTag (enterMarkupTagContext). Otherwise:
-    // advance ONE character (ordinary top-level text — the §40.8
-    // default-logic body content recognition is MK1.3).
-    //
-    // The return value surfaces the recognition so the trampoline can
-    // record it (the MK1.2 unit tests observe transitions this way).
+    // `run` is a small record { at } where `at` is { start, line, col }
+    // or `not` (not accumulating). It is a local of the trampoline's
+    // run-state (see runMarkup).
     // -------------------------------------------------------------------
-    export function dispatchTopLevel(cursor, ctx) {
+
+    // beginTextRun — STATE write. Mark the start of a text run at the
+    // cursor IF a run is not already open. (Idempotent — calling it
+    // mid-run is a no-op, matching the BS's beginText.)
+    export function beginTextRun(run, cursor) {
+        if (run.at is not) {
+            run.at = { start: cursor.pos, line: cursor.line, col: cursor.col }
+        }
+    }
+
+    // flushTextRun — STATE write. If a text run is open, emit a Text
+    // block spanning [run.at.start, cursor.pos] and clear the marker. A
+    // zero-length run (start == cursor.pos) emits nothing — matching the
+    // BS's flushText, which skips empty raw slices.
+    export function flushTextRun(run, cursor, ctx) {
+        if (run.at is not) return
+        const start = run.at.start
+        if (cursor.pos > start) {
+            const k = blockKinds()
+            appendBlock(ctx, makeBlockNode(
+                k.Text,
+                makeSpan(start, cursor.pos, run.at.line, run.at.col),
+                not,
+            ))
+        }
+        run.at = not
+    }
+
+    // -------------------------------------------------------------------
+    // emitComment — STATE write. Consume a recognized comment at the
+    // cursor and emit a Comment block. Returns true if a comment was
+    // recognized + emitted, false if no comment opener is at the cursor.
+    //
+    // The recognition is block-context.scrml's recognizeCommentForm +
+    // commentExtent (the closed structural recognizers). The trampoline
+    // FLUSHES the open text run before the comment block so the
+    // block-stream order is text-then-comment-then-text — matching the BS
+    // block-tree order.
+    // -------------------------------------------------------------------
+    export function emitComment(run, cursor, ctx) {
+        const form = recognizeCommentForm(cursor)
+        if (form is not) return false
+
+        // The comment ends a text run.
+        flushTextRun(run, cursor, ctx)
+
+        const startPos = cursor.pos
+        const startLine = cursor.line
+        const startCol = cursor.col
+        const end = commentExtent(cursor)
+
+        // Consume the comment's full extent.
+        advance(cursor, end - startPos)
+
+        const k = blockKinds()
+        appendBlock(ctx, makeBlockNode(
+            k.Comment,
+            makeSpan(startPos, end, startLine, startCol),
+            form,
+        ))
+        return true
+    }
+
+    // -------------------------------------------------------------------
+    // emitContextBlock — STATE write. Emit a context block for a
+    // just-closed (or unterminated) block context. `frame` is the
+    // BlockContext frame (carrying openSpan); `endPos` is the position
+    // one past the context's last consumed character.
+    // -------------------------------------------------------------------
+    export function emitContextBlock(ctx, frame, endPos) {
+        const kind = blockKindForContext(frame.context)
+        if (kind is not) return
+        appendBlock(ctx, makeBlockNode(
+            kind,
+            makeSpan(frame.openSpan.start, endPos, frame.openSpan.line, frame.openSpan.col),
+            not,
+        ))
+    }
+
+    // -------------------------------------------------------------------
+    // dispatchTopLevel — the `.TopLevel` BlockContext state-child body
+    // (MK1.3 — block-stream production + structural comments).
+    //
+    // At each cursor position:
+    //   - a `//` / `<!-- -->` comment -> flush the text run + emit a
+    //     Comment block (structural recognition — BS heuristics #6/#7
+    //     eliminated);
+    //   - a block-opener SIGIL -> flush the text run + enter the context;
+    //   - a `<ident` boundary -> flush the text run + enter .InMarkupTag;
+    //   - anything else -> accumulate into the open text run.
+    // -------------------------------------------------------------------
+    export function dispatchTopLevel(run, cursor, ctx) {
+        // Structural comment recognition FIRST — a `//` / `<!-- -->`
+        // sequence is a comment in `.TopLevel` (a code-default body per
+        // §40.8 / a markup-context construct), not text.
+        if (emitComment(run, cursor, ctx)) return
+
         const recognized = recognizeContextEntryAt(cursor)
 
         if (recognized.kind == "sigil") {
+            flushTextRun(run, cursor, ctx)
             enterBlockContext(ctx, cursor, recognized.enters, recognized.sigil)
-            return recognized
+            return
         }
 
         if (recognized.kind == "markupTag") {
+            flushTextRun(run, cursor, ctx)
             enterMarkupTagContext(ctx, cursor)
-            return recognized
+            return
         }
 
-        // Ordinary top-level text — advance one char. (MK1.3 recognizes
-        // `//` line comments + `<!-- -->` HTML comments here.)
+        // Ordinary top-level text — open / continue the text run, advance.
+        beginTextRun(run, cursor)
         advance(cursor, 1)
-        return recognized
     }
 
     // -------------------------------------------------------------------
     // dispatchInLogicEscape — the `.InLogicEscape` state-child body
-    // (MK1.2 SUBSTANTIVE — brace-depth body scan + matching-close).
+    // (MK1.3 — brace-depth body scan + matching-close + block emit).
     //
     // The logic-escape body is JS; its actual lexing + parsing is the M1
     // JS-layer LexMode engine graph, which the MK4 seam delegates to. At
-    // MK1.2 the JS-layer parse-delegation is NOT wired — the delegated
-    // body is consumed as a SPAN (the DelegationFrame pushed at
-    // enterBlockContext is the substrate MK4 widens). This dispatch scans
-    // the body character by character, tracking ordinary braces against
-    // ctx.brackets, until the matching brace-depth-0 close.
+    // MK1.3 the JS-layer parse-delegation is NOT wired — the body is
+    // scanned character by character, tracking ordinary braces against
+    // ctx.brackets, until the matching brace-depth-0 close, at which
+    // point a LogicEscape block is emitted.
+    //
+    // `//` line comments inside a logic-escape body ARE recognized
+    // structurally (a logic body is code — `//` is a code comment, BS
+    // heuristic #6 eliminated). `<!-- -->` is NOT a comment in a logic
+    // body (it is not a markup-context construct — BS heuristic #7's
+    // `!topIsBraceContext()` gate is the BS's equivalent decision).
     //
     // A nested block-opener sigil inside the body (the charter Q1.C
     // <InLogicEscape rule=(.TopLevel | .InMarkupTag | .InSql)> contract
@@ -169,10 +317,22 @@ ${
     // is recognized and entered — the BlockContext stack handles the
     // nesting (the §51.0.Q.1 instance hierarchy).
     // -------------------------------------------------------------------
-    export function dispatchInLogicEscape(cursor, ctx) {
+    export function dispatchInLogicEscape(run, cursor, ctx) {
         // Matching close of this logic-escape context?
         if (isBlockContextClose(ctx, cursor)) {
-            closeBlockContext(ctx, cursor)
+            const frame = closeBlockContext(ctx, cursor)
+            emitContextBlock(ctx, frame, cursor.pos)
+            return
+        }
+
+        // A `//` line comment is a code comment inside a logic body.
+        // `<!-- -->` is NOT a comment here — restrict to the Line form.
+        // At MK1.3 a context body has no inner block-stream (the body
+        // sub-grammar is a later milestone), so the comment's extent is
+        // consumed as part of the logic body — no inner Comment block.
+        if (recognizeCommentForm(cursor) == "Line") {
+            const end = commentExtent(cursor)
+            advance(cursor, end - cursor.pos)
             return
         }
 
@@ -208,25 +368,24 @@ ${
 
     // -------------------------------------------------------------------
     // dispatchInForeignCode — the `.InForeignCode` state-child body
-    // (MK1.2 — the §23 opaque passthrough).
+    // (MK1.3 — the §23 opaque passthrough + block emit).
     //
     // Per §23 a foreign-code block passes through VERBATIM — no inner
-    // recognition. The body is opaque: no nested sigil is recognized, no
-    // `<ident` boundary is recognized. The ONLY structural recognition
-    // is the matching close — and even that is a pure brace-depth
-    // calculation: ordinary braces inside the foreign code are tracked
-    // against ctx.brackets (so the matching close is found) but are
-    // otherwise uninterpreted.
+    // recognition. The body is opaque: no nested sigil, no `<ident`, no
+    // comment is recognized. The ONLY structural recognition is the
+    // matching close — a pure brace-depth calculation. On close a
+    // ForeignCode block is emitted.
     // -------------------------------------------------------------------
-    export function dispatchInForeignCode(cursor, ctx) {
+    export function dispatchInForeignCode(run, cursor, ctx) {
         // Matching close of this foreign-code block?
         if (isBlockContextClose(ctx, cursor)) {
-            closeBlockContext(ctx, cursor)
+            const frame = closeBlockContext(ctx, cursor)
+            emitContextBlock(ctx, frame, cursor.pos)
             return
         }
 
         // Opaque body — track inner braces for the depth calculation; do
-        // NOT recognize sigils or `<ident` (§23 — verbatim passthrough).
+        // NOT recognize sigils / `<ident` / comments (§23 — verbatim).
         const here = peekChar(cursor, 0)
         if (here == openBrace()) {
             noteBraceOpen(ctx, cursor)
@@ -243,28 +402,33 @@ ${
     }
 
     // -------------------------------------------------------------------
-    // dispatchBraceDelimitedStub — the brace-depth-aware body shared by
-    // the `.InSql` / `.InCss` / `.InErrorEffect` / `.InMeta` / `.InTest`
-    // state-children at MK1.2.
+    // SKETCH-DEPTH SUB-CONTEXT DISPATCHERS (MK1.3).
     //
-    // These five contexts ARE brace-delimited (entered by a two-char
-    // sigil, closed by a matching brace). MK1.2's job for them is the
-    // CONTEXT BOUNDARY: enter on the sigil, track brace depth, close on
-    // the matching brace. The INNER sub-context grammar (the SQL
-    // tokenizer, the CSS tokenizer, the error-effect arm tokenizer, the
-    // meta logic-grammar, the test-block tokenizer) is MK1.3 — these
-    // dispatches stub the body as a brace-tracked span, exactly as
-    // .InLogicEscape captures its body as a span pending MK4.
+    // The .InCss / .InSql / .InErrorEffect / .InMeta / .InTest contexts
+    // each ARE brace-delimited (entered by a two-char sigil, closed by a
+    // matching brace). MK1.3 gives each a SKETCH-DEPTH body dispatcher: it
+    // recognizes the context's EXTENT (by brace depth) and its CLOSE, and
+    // emits the context block. The DEEP per-context grammar — a CSS
+    // tokenizer, a SQL tokenizer, the error-effect arm tokenizer, the
+    // meta logic-grammar, the test-block tokenizer — is a LATER milestone.
+    //
+    // At sketch depth the five dispatchers share the brace-tracked-extent
+    // shape (scanBraceDelimitedSketch). They are NAMED per-context so the
+    // engine's per-state-child dispatch is 1:1 with the BlockContext
+    // engine's state-children and the later-milestone deep grammars drop
+    // into the matching named dispatcher without restructuring.
     // -------------------------------------------------------------------
-    export function dispatchBraceDelimitedStub(cursor, ctx) {
-        // Matching close of this context?
+
+    // scanBraceDelimitedSketch — the shared sketch-depth body scan. Track
+    // inner braces against ctx.brackets; on the matching brace-depth-0
+    // close, close the context + emit its block.
+    export function scanBraceDelimitedSketch(cursor, ctx) {
         if (isBlockContextClose(ctx, cursor)) {
-            closeBlockContext(ctx, cursor)
+            const frame = closeBlockContext(ctx, cursor)
+            emitContextBlock(ctx, frame, cursor.pos)
             return
         }
 
-        // Body character — track inner braces for the depth calculation,
-        // then advance. (Inner sub-context grammar is MK1.3.)
         const here = peekChar(cursor, 0)
         if (here == openBrace()) {
             noteBraceOpen(ctx, cursor)
@@ -280,22 +444,52 @@ ${
         advance(cursor, 1)
     }
 
+    // dispatchInCss — the `.InCss` state-child body (sketch depth). The
+    // deep CSS sub-tokenizer engine is a later milestone.
+    export function dispatchInCss(run, cursor, ctx) {
+        scanBraceDelimitedSketch(cursor, ctx)
+    }
+
+    // dispatchInSql — the `.InSql` state-child body (sketch depth). The
+    // deep SQL sub-tokenizer engine is a later milestone.
+    export function dispatchInSql(run, cursor, ctx) {
+        scanBraceDelimitedSketch(cursor, ctx)
+    }
+
+    // dispatchInErrorEffect — the `.InErrorEffect` state-child body
+    // (sketch depth). The deep error-effect arm tokenizer is a later
+    // milestone.
+    export function dispatchInErrorEffect(run, cursor, ctx) {
+        scanBraceDelimitedSketch(cursor, ctx)
+    }
+
+    // dispatchInMeta — the `.InMeta` state-child body (sketch depth). A
+    // meta block's body is logic-grammar (charter Q1.B: ".InMeta → meta =
+    // logic-grammar; reuses the JS-layer graph") — the deep dispatcher
+    // delegates to the JS layer at a later milestone.
+    export function dispatchInMeta(run, cursor, ctx) {
+        scanBraceDelimitedSketch(cursor, ctx)
+    }
+
+    // dispatchInTest — the `.InTest` state-child body (sketch depth). The
+    // deep test-block tokenizer is a later milestone.
+    export function dispatchInTest(run, cursor, ctx) {
+        scanBraceDelimitedSketch(cursor, ctx)
+    }
+
     // -------------------------------------------------------------------
-    // dispatchInMarkupTag — the `.InMarkupTag` state-child body (MK1.2 —
-    // boundary-only).
+    // dispatchInMarkupTag — the `.InMarkupTag` state-child body (MK1.3 —
+    // boundary-only + Markup block emit).
     //
-    // MK1.2 recognizes + transitions on the markup-tag BOUNDARY; the
+    // MK1.3 recognizes + transitions on the markup-tag BOUNDARY; the
     // actual <tag> TREE (opener/closer pairing, attributes, TagFrame, the
-    // three closer forms) is MK2. At MK1.2 the dispatch consumes the rest
-    // of the tag-name run and then returns to the prior context — it does
-    // NOT build the tag tree and does NOT recurse into the tag body. This
-    // keeps the trampoline progressing and the .InMarkupTag boundary
-    // observable to MK1.2 tests; MK2 replaces this with the TagFrame
-    // engine.
+    // three closer forms) is MK2. At MK1.3 the dispatch consumes the rest
+    // of the tag-name run, emits a Markup block at the BOUNDARY
+    // granularity (the `<ident` opener run — divergence D-4 from the BS,
+    // which spans the whole element), and returns to the prior context.
     // -------------------------------------------------------------------
-    export function dispatchInMarkupTag(cursor, ctx) {
-        // Consume the tag-name run (the boundary's identifier). MK2 will
-        // instead tokenize the full opener (name + attributes + closer).
+    export function dispatchInMarkupTag(run, cursor, ctx) {
+        // Consume the tag-name run (the boundary's identifier).
         const here = peekChar(cursor, 0)
         if (isTagNameChar(here)) {
             advance(cursor, 1)
@@ -303,10 +497,11 @@ ${
         }
 
         // The tag-name run has ended — the boundary is fully recognized.
-        // MK1.2 returns to the prior context here (the <tag> body +
-        // closer pairing is MK2). Pop the .InMarkupTag frame and restore.
+        // Pop the .InMarkupTag frame, emit a Markup block spanning the
+        // `<ident` opener run, and restore the prior context.
         const frame = popBlockContextFrame(ctx)
         if (frame is not given) {
+            emitContextBlock(ctx, frame, cursor.pos)
             setBlockContext(ctx, frame.priorContext)
         } else {
             setBlockContext(ctx, BlockContext.TopLevel)
@@ -315,8 +510,9 @@ ${
 
     // isTagNameChar — CALCULATION (predicate). A character that may
     // continue a markup-tag name run: ASCII letter, ASCII digit, or `-`.
-    // MK2 owns the full tag-name grammar; MK1.2 needs only enough to
-    // consume the boundary identifier so the trampoline progresses.
+    // MK2 owns the full tag-name grammar; MK1.3 needs only enough to
+    // consume the boundary identifier so the trampoline progresses past
+    // it.
     export function isTagNameChar(ch) {
         if (ch == "") return false
         if (ch == "-") return true
@@ -342,23 +538,18 @@ ${
     // -------------------------------------------------------------------
     // parseMarkup — entry point. Pure fn over the source string
     // (calculation at the outermost layer; engine-shaped internals
-    // dispatch per BlockContext).
-    //
-    // MK1.2 returns ctx.nodes (the shared node sink). At MK1.2 no AST
-    // nodes are produced yet — the trampoline recognizes / consumes /
-    // transitions through context boundaries; node production lands as
-    // the per-context grammars fill in (MK1.3 + MK2/MK3). Tests at MK1.2
-    // observe transition behaviour via parseMarkupTrace.
+    // dispatch per BlockContext). Returns the typed block-stream
+    // (ctx.nodes).
     // -------------------------------------------------------------------
     export function parseMarkup(source) {
         return runMarkup(source).ctx.nodes
     }
 
     // parseMarkupTrace — like parseMarkup, but returns the full run
-    // record { ctx, contextTrace } so MK1.2 unit tests can observe the
+    // record { ctx, contextTrace } so unit tests can observe the
     // BlockContext transition sequence + the final ctx state (brackets /
-    // delegationStack / blockContextStack). The contextTrace is the
-    // @blockContext value recorded at the TOP of every trampoline
+    // delegationStack / blockContextStack / nodes). The contextTrace is
+    // the @blockContext value recorded at the TOP of every trampoline
     // iteration.
     export function parseMarkupTrace(source) {
         return runMarkup(source)
@@ -370,12 +561,26 @@ ${
     // The dispatch table mirrors the BlockContext engine's state-
     // children. The loop is a thin trampoline — the SAME shape as
     // lex.scrml: get the current state, dispatch the matching body, run
-    // the progress sentinel, bound the iteration count.
+    // the progress sentinel, bound the iteration count. MK1.3 threads a
+    // `run` text-accumulator object through the dispatchers + flushes any
+    // open text run at EOF.
+    //
+    // A context block is emitted ONLY when a context properly CLOSES (in
+    // the per-context dispatchers). An UNTERMINATED context emits NO
+    // block — its frame stays on ctx.blockContextStack as the MK4
+    // unterminated-body blame locus. This matches the BS oracle: the BS
+    // emits NO block for an unterminated context (it emits an E-CTX-003
+    // error instead — block-splitter.js E-CTX-003). The native layer's
+    // unterminated-context diagnostic is a later milestone; the frame
+    // persistence is the MK1.2 contract this dispatch preserves.
     // -------------------------------------------------------------------
     export function runMarkup(source) {
         const cursor = makeCursor(source)
         const ctx = makeParseContext()
         const contextTrace = []
+
+        // The text-run accumulator (see beginTextRun / flushTextRun).
+        const run = { at: not }
 
         // Safety bound — the same shape as lex.scrml: prevent an
         // infinite loop if a per-context body forgets to advance.
@@ -388,23 +593,23 @@ ${
             const beforePos = cursor.pos
 
             if (context == BlockContext.TopLevel) {
-                dispatchTopLevel(cursor, ctx)
+                dispatchTopLevel(run, cursor, ctx)
             } else if (context == BlockContext.InMarkupTag) {
-                dispatchInMarkupTag(cursor, ctx)
+                dispatchInMarkupTag(run, cursor, ctx)
             } else if (context == BlockContext.InLogicEscape) {
-                dispatchInLogicEscape(cursor, ctx)
+                dispatchInLogicEscape(run, cursor, ctx)
             } else if (context == BlockContext.InCss) {
-                dispatchBraceDelimitedStub(cursor, ctx)
+                dispatchInCss(run, cursor, ctx)
             } else if (context == BlockContext.InSql) {
-                dispatchBraceDelimitedStub(cursor, ctx)
+                dispatchInSql(run, cursor, ctx)
             } else if (context == BlockContext.InErrorEffect) {
-                dispatchBraceDelimitedStub(cursor, ctx)
+                dispatchInErrorEffect(run, cursor, ctx)
             } else if (context == BlockContext.InMeta) {
-                dispatchBraceDelimitedStub(cursor, ctx)
+                dispatchInMeta(run, cursor, ctx)
             } else if (context == BlockContext.InTest) {
-                dispatchBraceDelimitedStub(cursor, ctx)
+                dispatchInTest(run, cursor, ctx)
             } else if (context == BlockContext.InForeignCode) {
-                dispatchInForeignCode(cursor, ctx)
+                dispatchInForeignCode(run, cursor, ctx)
             } else {
                 // Defensive safety net for an unreachable future
                 // BlockContext variant — return to .TopLevel.
@@ -420,6 +625,11 @@ ${
             }
             iters = iters + 1
         }
+
+        // EOF — flush any open text run. (A context still open at EOF is
+        // an unterminated context — it emits NO block and its frame stays
+        // on ctx.blockContextStack as the MK4 blame locus; see the header.)
+        flushTextRun(run, cursor, ctx)
 
         return { ctx, contextTrace }
     }
