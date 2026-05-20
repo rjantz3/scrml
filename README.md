@@ -1,5 +1,7 @@
 # scrmlTS
 
+*/ˈskrɪmɛl/*
+
 The working compiler for **scrml** — a single-file, full-stack reactive web language.
 This is the TypeScript/JavaScript implementation that compiles `.scrml` source into
 HTML, CSS, client JS, and server route handlers in a single pass.
