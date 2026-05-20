@@ -13,6 +13,11 @@ editors/vscode/bun.lock
 # SEO-LAUNCH.md — local marketing draft; not tracked. 10 sessions stale at S32 wrap.
 docs/SEO-LAUNCH.md
 
+# scripts/bundle-size-benchmark.js output — regenerated on every run.
+# The curated, committed benchmark file is benchmarks/RESULTS.md; this is a
+# raw per-run dump that should never be tracked (S109 wrap hygiene).
+docs/m1-benchmark-results.md
+
 # Per-dispatch agent scratchpad — not tracked
 .tmp/
 
