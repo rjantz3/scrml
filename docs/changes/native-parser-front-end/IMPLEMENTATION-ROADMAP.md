@@ -224,6 +224,7 @@ within one quarter.
 |---|---|---|---|
 | K1 | `block-context.scrml`'s `.InMarkupTag` composite state-child forward-references `<engine for=BodyMode>` — `BodyMode` is MK3's type, not yet declared. The `.scrml` carries it for charter-Q1.C SHAPE fidelity; it is a single deliberate `.scrml` compile error (E-ENGINE-004). | MK1.1 | Expected — resolves when MK3 lands `BodyMode`. The `.js` shadow runs correctly (ANOMALY-2 shadow discipline). |
 | K2 | Pre-existing M1 bug: `lex-in-code.scrml` ↔ `lex-in-regex.scrml` circular import (E-IMPORT-002); `lex-in-code.scrml`'s aliased imports (`import { push as pushBracket }`) trip E-SCOPE-001 under the v0.3 compiler. Blocks ALL native-parser `.scrml` from compiling cleanly (verified identical on M1's untouched `lex.scrml`). The `.js` shadows are unaffected; the full test suite passes. | MK1.1 (pre-existing in M1) | M1 follow-up — NOT in the README ANOMALY list. Must be fixed before M6 (the native parser self-hosts its `.scrml` source at M6 — charter Q8). Non-blocking for M2-M4 / MK1-MK4 (the `.js` shadows execute). |
+| K3 | M1 lexer compound-assignment maximal-munch gap: `lex-in-code` lexes only 4 compound-assign operators (`+= -= *= /=`) as single tokens; the other 11 (`%= **= <<= >>= >>>= &= \|= ^= &&= \|\|= ??=`) lex as two adjacent tokens. M2.2 re-composes the 11 at the parse layer from source-adjacent token pairs — AST-equivalent to Acorn. | M2.2 | M1.x cleanup — the canonical fix is M1's lexer doing maximal-munch for the 11 + the corresponding `token.scrml` kinds. Non-blocking (the parse-layer re-composition is correct, verified vs Acorn). Sequence alongside M1.5. |
 
 ---
 
@@ -234,7 +235,7 @@ within one quarter.
 | M1 (lexer) | ✅ COMPLETE | — | S99-S103 | M1.1-M1.4; 7 LexMode state-children substantive |
 | M1.5 — expr-literals.js conformance flip | ⬜ pending | — | — | regex-token normalizer (native `RegexLit` vs Acorn's regex-token surface); minor polish, non-blocking M2 |
 | **M2.1** substrate + ParseMode + primary | ✅ landed S112 | scrml-js-codegen-engineer (worktree) | S112 | parse-mode + ast-expr + token-cursor + parse-expr (.scrml+.js) + parser-conformance-expr.test.js; +114 conformance tests (Tier 1+2 vs Acorn); full suite 16,327/0 |
-| M2.2 operators | ⬜ pending | — | — | depends M2.1 |
+| M2.2 operators | ✅ landed S112 | scrml-js-codegen-engineer (worktree) | S112 | precedence-climbing core — binary/logical/unary/update/assignment/conditional/sequence; +212 conformance tests (Tier 1+2 vs Acorn + Tier-4 structural); full suite 16,539/0 |
 | M2.3 call/member/arrow-heads | ⬜ pending | — | — | depends M2.2 |
 | M2.4 scrml-extension exprs | ⬜ pending | — | — | depends M2.3; closes Acorn-workaround failure modes |
 | **MK1.1** shared ctx + BlockContext skeleton | ✅ landed S112 | scrml-js-codegen-engineer (worktree) | S112 | parse-ctx + block-context + parse-markup (.scrml+.js); makeParseContext (node sink + delegationStack) + 9-variant BlockContext engine + trampoline; skeleton step, full suite 16,213/0 |

@@ -13,14 +13,21 @@
 //   first row: "code that runs depends on WHICH condition is currently
 //   active"). The token cursor's POSITION is state (token-cursor.scrml).
 //
-//   PARSING A PRIMARY EXPRESSION, once the ParseMode is fixed, is
-//   CALCULATION. Per DD §D1 OQ1: "the operational test classifies the
-//   LOCUS, and a calculation may contain state-shape subroutines." Given a
-//   confirmed token run in a known ParseMode, the primary-expression AST
-//   node is a pure function of the token run — no ambient context beyond
-//   the engine-routed mode. So every `parse*` function below is `fn`-shape
-//   (a pure calculation over the cursor's current view); the STATE is the
-//   cursor + the ParseMode engine those functions consult.
+//   PARSING AN EXPRESSION, once the ParseMode is fixed, is CALCULATION. Per
+//   DD §D1 OQ1: "the operational test classifies the LOCUS, and a calculation
+//   may contain state-shape subroutines." Given a confirmed token run in a
+//   known ParseMode, the Expr AST node is a pure function of the token run —
+//   no ambient context beyond the engine-routed mode. So every `parse*`
+//   function below is `fn`-shape (a pure calculation over the cursor's
+//   current view); the STATE is the cursor + the ParseMode engine those
+//   functions consult.
+//
+//   The M2.2 PRECEDENCE-CLIMBING CORE (parseBinary) is calculation by the
+//   same test: operator precedence + associativity are a fixed property of
+//   the operator-classification TABLES (BINARY_PRECEDENCE etc.) — pure data —
+//   and the climb over a known token run is a pure transformation. There is
+//   no "what condition is the climb in right now?" question: minPrec is a
+//   loop bound, not a state-engine variable.
 //
 //   This is the DD §D1 charter applied: state-shape (ParseMode engine +
 //   cursor) governs WHICH rule runs; the rule bodies are calculation. A
@@ -28,30 +35,25 @@
 //   "scattered context flags" anti-template §D1 rejects — hence ParseMode
 //   is a named engine, consulted/transitioned in named places only.
 //
-// SCOPE — M2.1 (this dispatch): PRIMARY EXPRESSIONS ONLY.
-//   parsePrimary dispatches:
-//     - number / string / template / regex / boolean literals (M1 LEXES
-//       these to tokens; M2.1 BUILDS the Expr AST nodes from those tokens)
-//     - identifiers
-//     - @-cells (ScrmlAt tokens) — §6.1 V5-strict reactive-cell access
-//     - bare variants (.X — §14.10) — M1 lexes `.ident` to a BareVariant
-//       token; M2.1 builds the BareVariant Expr node
-//     - parenthesized expressions ( expr )
-//     - array literals [ ... ] (incl. spread + holes)
-//     - object literals { ... } (key-value, shorthand, spread, computed key)
+// SCOPE — M2.1 + M2.2 (M2.2 = this dispatch).
+//   M2.1 — PRIMARY EXPRESSIONS: number / string / template / regex / boolean
+//     literals, identifiers, @-cells, bare variants, parenthesized exprs,
+//     array literals, object literals.
+//   M2.2 — OPERATOR EXPRESSIONS: binary operators with full JS precedence
+//     (the parseBinary precedence-climbing core — arithmetic, comparison,
+//     bitwise, instanceof, in); logical operators && / || / ?? (separate
+//     Logical node per ESTree); unary prefix ! - + ~ typeof void delete;
+//     update ++ / -- (prefix AND postfix); assignment = and every compound
+//     form; conditional ?: ; sequence , .
 //
 // EXTENSION POINTS — LATER M2 sub-steps. parseExpression below is the
-// single recursion seam. At M2.1 parseExpression == parsePrimary. The
-// later sub-steps REPLACE parseExpression's body, leaving parsePrimary
-// (and the array/object element recursion through parseExpression)
-// untouched:
-//   - M2.2 — operator expressions: parseExpression becomes the
-//     precedence-climbing core (binary / unary / update / assignment /
-//     conditional / sequence). The seam: parseExpression() calls down to
-//     parseUnary() ... parsePrimary().
-//   - M2.3 — call / member / arrow-head / function-expression: a
-//     parsePostfix layer wraps parsePrimary (member access, calls,
-//     optional chaining); arrow + function-expression heads.
+// single recursion seam (sequence-level at M2.2). parseAssignmentExpr is the
+// no-comma entry the element positions (array elements, object values,
+// spread args) call so a separating comma is not swallowed as a sequence.
+// parsePostfix is the M2.3 seam (== parsePrimary at M2.2):
+//   - M2.3 — call / member / arrow-head / function-expression: parsePostfix
+//     wraps parsePrimary with member access, calls, optional chaining, `new`;
+//     arrow + function-expression heads.
 //   - M2.4 — scrml-extension expression forms (D5 MUST ADD): `is` / `not` /
 //     `match expr {}` / `~` / `?{sql}` / `<#id>` / `render` / `lift` /
 //     `fail` / `::Variant`. These close the 5+ preprocessForAcorn
@@ -73,6 +75,8 @@ ${
         makeArray, makeArrayItem, makeArraySpread, makeArrayHole,
         makeObject, makeObjectKeyValue, makeObjectShorthand, makeObjectSpread,
         makeParen,
+        makeUnary, makeUpdate, makeBinary, makeLogical, makeAssignment,
+        makeConditional, makeSequence,
     } from "./ast-expr.scrml"
 
     // ---------------------------------------------------------------------
@@ -88,9 +92,9 @@ ${
     //   currentParseMode — the ParseMode engine's live variable (the
     //                      canonical `@parseMode`). parse-mode.scrml's
     //                      get/set/enter/exit helpers operate on this.
-    //   errors           — diagnostic accumulator. M2.1 records a
-    //                      structured { code, message, span } for each
-    //                      parse fault; the full error-recovery engine
+    //   errors           — diagnostic accumulator. Records a structured
+    //                      { code, message, span } for each parse fault;
+    //                      the full error-recovery engine
     //                      (error-recovery.scrml) wires in at M3.
     // ---------------------------------------------------------------------
     export function makeParseExprContext(tokens) {
@@ -103,24 +107,524 @@ ${
 
     // recordError — STATE write: append a structured diagnostic. Pure
     // accumulation (calculation per DD §D1 — "per-token emit + accumulator
-    // append is calculation"). M2.1 keeps a flat list; M3's error-recovery
+    // append is calculation"). M2.x keeps a flat list; M3's error-recovery
     // engine adds skipped-token accumulation + re-sync.
     export function recordError(ctx, code, message, span) {
         ctx.errors.push({ code, message, span })
     }
 
+    // =====================================================================
+    // M2.2 operator tables — classification DATA for the precedence-climbing
+    // core. A token kind maps to its operator role + (for binary operators)
+    // its binding precedence. JS precedence + associativity are reproduced
+    // here EXACTLY — the conformance check vs Acorn is the proof. Pure data
+    // (calculation per DD §D1): a fixed property of the operator, no state.
+    // =====================================================================
+
+    // BINARY_PRECEDENCE — non-logical binary operators, keyed by TokenKind,
+    // valued by binding precedence. HIGHER binds tighter. Logical operators
+    // (&& || ??) are NOT here — ESTree models them as a separate Logical
+    // node, so they live in LOGICAL_PRECEDENCE.
+    //
+    // ECMA-262 binding order, tight -> loose:
+    //   ** > {* / %} > {+ -} > {<< >> >>>} > {< <= > >= instanceof in}
+    //      > {== != === !==} > & > ^ > | > && > || > ??
+    const BINARY_PRECEDENCE = Object.freeze({
+        [TokenKind.BitOr]:                 4,
+        [TokenKind.BitXor]:                5,
+        [TokenKind.BitAnd]:                6,
+        [TokenKind.Equal]:                 7,
+        [TokenKind.NotEqual]:              7,
+        [TokenKind.StrictEqual]:           7,
+        [TokenKind.StrictNotEqual]:        7,
+        [TokenKind.LessThan]:              8,
+        [TokenKind.LessEqual]:             8,
+        [TokenKind.GreaterThan]:           8,
+        [TokenKind.GreaterEqual]:          8,
+        [TokenKind.KwInstanceof]:          8,
+        [TokenKind.KwIn]:                  8,
+        [TokenKind.BitShiftLeft]:          9,
+        [TokenKind.BitShiftRight]:         9,
+        [TokenKind.BitShiftRightUnsigned]: 9,
+        [TokenKind.Plus]:                  10,
+        [TokenKind.Minus]:                 10,
+        [TokenKind.Star]:                  11,
+        [TokenKind.Slash]:                 11,
+        [TokenKind.Percent]:               11,
+        [TokenKind.StarStar]:              12,
+    })
+
+    // LOGICAL_PRECEDENCE — the three short-circuit operators. ESTree
+    // node-kind: Logical (NOT Binary). ?? binds loosest; then ||; then &&.
+    // JS forbids mixing ?? with && / || without parentheses — enforced in
+    // parseBinary's climb loop.
+    const LOGICAL_PRECEDENCE = Object.freeze({
+        [TokenKind.NullishCoalesce]: 1,
+        [TokenKind.LogicalOr]:       2,
+        [TokenKind.LogicalAnd]:      3,
+    })
+
+    // BINARY_OP_TEXT — the operator string put on a Binary / Logical node.
+    // M1's tokens carry `.text`, but keyword operators (instanceof / in)
+    // carry the keyword text already, and re-composed compound tokens need
+    // a synthesized string — so this table is the single source.
+    const BINARY_OP_TEXT = Object.freeze({
+        [TokenKind.BitOr]:                 "|",
+        [TokenKind.BitXor]:                "^",
+        [TokenKind.BitAnd]:                "&",
+        [TokenKind.Equal]:                 "==",
+        [TokenKind.NotEqual]:              "!=",
+        [TokenKind.StrictEqual]:           "===",
+        [TokenKind.StrictNotEqual]:        "!==",
+        [TokenKind.LessThan]:              "<",
+        [TokenKind.LessEqual]:             "<=",
+        [TokenKind.GreaterThan]:           ">",
+        [TokenKind.GreaterEqual]:          ">=",
+        [TokenKind.KwInstanceof]:          "instanceof",
+        [TokenKind.KwIn]:                  "in",
+        [TokenKind.BitShiftLeft]:          "<<",
+        [TokenKind.BitShiftRight]:         ">>",
+        [TokenKind.BitShiftRightUnsigned]: ">>>",
+        [TokenKind.Plus]:                  "+",
+        [TokenKind.Minus]:                 "-",
+        [TokenKind.Star]:                  "*",
+        [TokenKind.Slash]:                 "/",
+        [TokenKind.Percent]:               "%",
+        [TokenKind.StarStar]:              "**",
+        [TokenKind.NullishCoalesce]:       "??",
+        [TokenKind.LogicalOr]:             "||",
+        [TokenKind.LogicalAnd]:            "&&",
+    })
+
+    // SIMPLE_ASSIGN_OPS — the four compound-assignment operators M1 lexes
+    // as a SINGLE token, plus plain `=`. Keyed by TokenKind, valued by the
+    // ESTree operator string.
+    const SIMPLE_ASSIGN_OPS = Object.freeze({
+        [TokenKind.Assign]:      "=",
+        [TokenKind.PlusAssign]:  "+=",
+        [TokenKind.MinusAssign]: "-=",
+        [TokenKind.StarAssign]:  "*=",
+        [TokenKind.SlashAssign]: "/=",
+    })
+
+    // TWO_TOKEN_ASSIGN_OPS — the eleven compound-assignment operators M1's
+    // lexer (lex-in-code) does NOT munch into one token: it emits the
+    // operator token then a separate `Assign`. The native parser
+    // re-composes them at the PARSE layer (matchAssignmentOperator), when
+    // the two tokens are SOURCE-ADJACENT. Adjacency matters: `a %= b` is
+    // valid but `a % = b` is two separate operators. Keyed by the leading
+    // token's kind, valued by the ESTree operator string.
+    //
+    // (M1 is frozen for the M2.2 dispatch — the parse-layer re-composition
+    // is AST-equivalent to Acorn either way. Documented as deferred-M1.x
+    // cleanup: the canonical fix is the lexer doing maximal munch for the
+    // eleven.)
+    const TWO_TOKEN_ASSIGN_OPS = Object.freeze({
+        [TokenKind.Percent]:               "%=",
+        [TokenKind.StarStar]:              "**=",
+        [TokenKind.BitShiftLeft]:          "<<=",
+        [TokenKind.BitShiftRight]:         ">>=",
+        [TokenKind.BitShiftRightUnsigned]: ">>>=",
+        [TokenKind.BitAnd]:                "&=",
+        [TokenKind.BitOr]:                 "|=",
+        [TokenKind.BitXor]:                "^=",
+        [TokenKind.LogicalAnd]:            "&&=",
+        [TokenKind.LogicalOr]:             "||=",
+        [TokenKind.NullishCoalesce]:       "??=",
+    })
+
+    // =====================================================================
+    // The expression-parser ladder. Each level handles one precedence band
+    // and recurses DOWN to the next. parseExpression is the single recursion
+    // seam the inner positions (array / object / template / paren) re-enter.
+    //
+    //   parseExpression     level 1   sequence ,
+    //   parseAssignmentExpr level 2   assignment = += ... (right-assoc)
+    //   parseConditional    level 3   ?: ternary (right-assoc)
+    //   parseBinary         levels 4-12 + logical — precedence-climbing core
+    //   parseUnary          prefix ! - + ~ typeof void delete, prefix ++/--
+    //   parseUpdate         postfix ++/--
+    //   parsePostfix        M2.3 seam (== parsePrimary at M2.2)
+    //   parsePrimary        primary expressions (M2.1)
+    // =====================================================================
+
     // ---------------------------------------------------------------------
     // parseExpression — the SINGLE RECURSION SEAM (see file header
-    // "EXTENSION POINTS"). At M2.1 an expression IS a primary expression.
-    // M2.2 replaces this body with the precedence-climbing operator core;
-    // parsePrimary and the array/object element recursion stay unchanged
-    // because they call through this seam.
+    // "EXTENSION POINTS"). At M2.2 an expression is a SEQUENCE-level
+    // expression (a comma operator binds loosest). The element positions
+    // do NOT call this — they call parseAssignmentExpr.
     //
     // Calculation: a pure fn over the cursor's current view (the ParseMode
     // engine routes which rule runs; this body is the rule).
     // ---------------------------------------------------------------------
     export function parseExpression(ctx) {
+        return parseSequence(ctx)
+    }
+
+    // ---------------------------------------------------------------------
+    // parseSequence — the comma operator: `a, b, c` -> a Sequence node with
+    // a flat `expressions[]`. A bare comma is the loosest-binding operator.
+    // The element positions (array / object / arguments) call
+    // parseAssignmentExpr instead, so a comma THERE separates rather than
+    // sequences.
+    // ---------------------------------------------------------------------
+    export function parseSequence(ctx) {
+        const cursor = ctx.cursor
+        const first = parseAssignmentExpr(ctx)
+
+        if (currentKind(cursor) != TokenKind.Comma) {
+            return first
+        }
+
+        const expressions = [first]
+        while (currentKind(cursor) == TokenKind.Comma) {
+            advance(cursor)   // consume the ,
+            const next = parseAssignmentExpr(ctx)
+            expressions.push(next)
+        }
+
+        const span = spanOf(first, expressions[expressions.length - 1])
+        return makeSequence(expressions, span)
+    }
+
+    // ---------------------------------------------------------------------
+    // parseAssignmentExpr — `=` and every compound-assignment form.
+    // Assignment is RIGHT-associative: `a = b = c` parses as `a = (b = c)`.
+    // The left side parses at conditional level; if an assignment operator
+    // follows, the right side recurses back into parseAssignmentExpr.
+    //
+    // This is the NO-COMMA entry point — element positions call it directly
+    // so a separating comma is not swallowed as a sequence.
+    // ---------------------------------------------------------------------
+    export function parseAssignmentExpr(ctx) {
+        const cursor = ctx.cursor
+        const left = parseConditional(ctx)
+
+        const assignInfo = matchAssignmentOperator(ctx)
+        if (assignInfo is not) {
+            return left
+        }
+
+        // Consume the operator token(s). A two-token compound (`%=` etc.)
+        // is two adjacent tokens; a simple operator is one.
+        advance(cursor)
+        if (assignInfo.twoToken) {
+            advance(cursor)   // consume the trailing Assign
+        }
+
+        const value = parseAssignmentExpr(ctx)   // right-assoc recursion
+        const span = spanOf(left, value)
+        return makeAssignment(assignInfo.op, left, value, span)
+    }
+
+    // ---------------------------------------------------------------------
+    // isTwoTokenAssignLead — is the cursor at the leading half of a `%=`,
+    // `**=`, `<<=`, ... ? True iff the current token is a
+    // TWO_TOKEN_ASSIGN_OPS key AND the immediately following token is a
+    // SOURCE-ADJACENT `Assign` (no gap between the operator's `span.end`
+    // and the `Assign`'s `span.start`). `a %= b` (adjacent) -> true;
+    // `a % = b` (gap) -> false (that is `%` then `=`).
+    //
+    // parseBinary calls this so it does NOT consume `%` / `**` / `<<` / ...
+    // as a binary operator when the token is actually the head of a
+    // compound assignment — the compound operator belongs to
+    // parseAssignmentExpr's layer.
+    // ---------------------------------------------------------------------
+    export function isTwoTokenAssignLead(ctx) {
+        const cursor = ctx.cursor
+        const kind = currentKind(cursor)
+
+        if (TWO_TOKEN_ASSIGN_OPS[kind] is not) {
+            return false
+        }
+        if (peekKind(cursor, 1) != TokenKind.Assign) {
+            return false
+        }
+        const here = current(cursor)
+        const next = peek(cursor, 1)
+        if (here is not || next is not) {
+            return false
+        }
+        if (here.span is not || next.span is not) {
+            return false
+        }
+        return here.span.end == next.span.start
+    }
+
+    // matchAssignmentOperator — recognize an assignment operator at the
+    // cursor. Returns { op, twoToken } or `not`. The four operators M1
+    // munches into one token (`+= -= *= /=`) plus `=` are SIMPLE_ASSIGN_OPS;
+    // the eleven M1 does NOT munch are re-composed from two adjacent tokens
+    // (see isTwoTokenAssignLead).
+    export function matchAssignmentOperator(ctx) {
+        const kind = currentKind(ctx.cursor)
+
+        const simple = SIMPLE_ASSIGN_OPS[kind]
+        if (simple is not not) {
+            return { op: simple, twoToken: false }
+        }
+
+        if (isTwoTokenAssignLead(ctx)) {
+            return { op: TWO_TOKEN_ASSIGN_OPS[kind], twoToken: true }
+        }
+
+        return not
+    }
+
+    // ---------------------------------------------------------------------
+    // parseConditional — ternary `test ? consequent : alternate`.
+    // Right-associative. The test parses at binary level; the branches at
+    // assignment level (so `a ? b : c = d` puts the assignment in the
+    // alternate, matching JS). A ternary is its own level between
+    // assignment and binary.
+    // ---------------------------------------------------------------------
+    export function parseConditional(ctx) {
+        const cursor = ctx.cursor
+        const test = parseBinary(ctx, 0)
+
+        if (currentKind(cursor) != TokenKind.Question) {
+            return test
+        }
+
+        advance(cursor)   // consume ?
+        const consequent = parseAssignmentExpr(ctx)
+
+        if (currentKind(cursor) != TokenKind.Colon) {
+            const here = current(cursor)
+            const span = here is not ? test.span : here.span
+            recordError(ctx, "E-EXPR-TERNARY-COLON", "expected ':' in conditional expression", span)
+            // Return the test so the caller can re-sync; the malformed
+            // ternary is not built.
+            return test
+        }
+        advance(cursor)   // consume :
+        const alternate = parseAssignmentExpr(ctx)
+
+        const span = spanOf(test, alternate)
+        return makeConditional(test, consequent, alternate, span)
+    }
+
+    // isUnparenthesizedLogical — is `node` a Logical node whose op is one
+    // of `ops`? A Paren node is NOT a Logical, so a parenthesized
+    // `(a ?? b)` returns false — exactly the ECMA-262 carve-out:
+    // parentheses make the ?? / && / || mix legal.
+    export function isUnparenthesizedLogical(node, ops) {
+        if (node is not) {
+            return false
+        }
+        if (node.kind != "Logical") {
+            return false
+        }
+        return ops.indexOf(node.op) != -1
+    }
+
+    // ---------------------------------------------------------------------
+    // parseBinary — the PRECEDENCE-CLIMBING CORE (binary + logical).
+    // minPrec is the minimum binding precedence this call will consume. The
+    // loop reads an operator, and if it binds at >= minPrec, recurses for
+    // the right operand at a precedence that enforces left-associativity
+    // (for **, right-associativity). Logical operators produce a Logical
+    // node; the arithmetic/comparison/bitwise operators produce a Binary
+    // node.
+    //
+    // JS forbids mixing ?? with && / || without parentheses (ECMA-262: ??
+    // and && / || are separate grammar productions). After building a
+    // Logical node, if a ?? has an un-parenthesized && / || operand — or a
+    // && / || has an un-parenthesized ?? operand — that is the illegal mix.
+    //
+    // Calculation: precedence is a fixed property of the operator tables;
+    // the climb over a known token run is a pure transformation.
+    // ---------------------------------------------------------------------
+    export function parseBinary(ctx, minPrec) {
+        const cursor = ctx.cursor
+        let left = parseUnary(ctx)
+
+        while (true) {
+            const kind = currentKind(cursor)
+            const binPrec = BINARY_PRECEDENCE[kind]
+            const logPrec = LOGICAL_PRECEDENCE[kind]
+
+            // Not an operator we climb, or it binds looser than the caller
+            // wants.
+            if (binPrec is not && logPrec is not) {
+                break
+            }
+            const prec = binPrec is not not ? binPrec : logPrec
+            if (prec < minPrec) {
+                break
+            }
+
+            // The operator token is also the LEADING half of a
+            // compound-assignment operator (`%` -> `%=`, `**` -> `**=`,
+            // `&&` -> `&&=`, ...). When an adjacent `Assign` follows, this
+            // is an assignment, NOT a binary op — stop the climb so
+            // parseAssignmentExpr's layer re-composes it.
+            if (isTwoTokenAssignLead(ctx)) {
+                break
+            }
+
+            const opTok = advance(cursor)   // consume the operator
+            const opText = BINARY_OP_TEXT[kind]
+
+            // ** is RIGHT-associative — recurse at the SAME precedence so
+            // the right operand can itself be a ** chain. All other binary
+            // operators are left-associative — recurse at prec+1 so an
+            // equal-precedence operator on the right is left for THIS
+            // loop's next iteration.
+            const rightMinPrec = (kind == TokenKind.StarStar) ? prec : prec + 1
+            const right = parseBinary(ctx, rightMinPrec)
+
+            const span = spanOf(left, right)
+            if (logPrec is not not) {
+                // ?? cannot be combined with && / || without parentheses.
+                if (kind == TokenKind.NullishCoalesce) {
+                    if (isUnparenthesizedLogical(left, ["&&", "||"])
+                        || isUnparenthesizedLogical(right, ["&&", "||"])) {
+                        recordError(ctx, "E-EXPR-NULLISH-MIX",
+                            "'??' cannot be combined with '&&' or '||' without parentheses",
+                            opTok.span)
+                    }
+                } else {
+                    // && / ||
+                    if (isUnparenthesizedLogical(left, ["??"])
+                        || isUnparenthesizedLogical(right, ["??"])) {
+                        recordError(ctx, "E-EXPR-NULLISH-MIX",
+                            "'&&' / '||' cannot be combined with '??' without parentheses",
+                            opTok.span)
+                    }
+                }
+                left = makeLogical(opText, left, right, span)
+            } else {
+                left = makeBinary(opText, left, right, span)
+            }
+        }
+
+        return left
+    }
+
+    // ---------------------------------------------------------------------
+    // parseUnary — prefix unary operators + prefix update operators.
+    // Prefix operators: ! - + ~ typeof void delete (Unary node) and prefix
+    // ++ / -- (Update node). All recurse into parseUnary so chains like
+    // `!-x` or `typeof !x` parse. When no prefix operator is present, falls
+    // through to parseUpdate (which handles postfix ++/--).
+    //
+    // JS rule: `**` may not have an un-parenthesized unary operator on its
+    // left (`-2 ** 2` is a SyntaxError). The check happens AFTER building
+    // the unary — if a `**` immediately follows, the reach over `**` is
+    // illegal.
+    // ---------------------------------------------------------------------
+    export function parseUnary(ctx) {
+        const cursor = ctx.cursor
+        const kind = currentKind(cursor)
+
+        // Prefix update operators ++ / --
+        if (kind == TokenKind.Increment || kind == TokenKind.Decrement) {
+            const opTok = advance(cursor)
+            const operand = parseUnary(ctx)
+            const opText = (kind == TokenKind.Increment) ? "++" : "--"
+            const span = makeSpan(opTok.span.start, endOf(operand), opTok.span.line, opTok.span.col)
+            return makeUpdate(opText, operand, true, span)
+        }
+
+        // Prefix unary operators
+        const unaryOpText = prefixUnaryOpText(kind)
+        if (unaryOpText is not not) {
+            const opTok = advance(cursor)
+            const operand = parseUnary(ctx)
+            const span = makeSpan(opTok.span.start, endOf(operand), opTok.span.line, opTok.span.col)
+
+            // `-2 ** 2` etc. — an un-parenthesized unary cannot be the left
+            // operand of **. ECMA-262 makes this a SyntaxError; Acorn
+            // rejects it.
+            if (currentKind(cursor) == TokenKind.StarStar) {
+                recordError(ctx, "E-EXPR-UNARY-EXPONENT",
+                    "unary operator '" + unaryOpText + "' cannot directly precede '**'; wrap the operand in parentheses",
+                    current(cursor).span)
+            }
+            return makeUnary(unaryOpText, operand, true, span)
+        }
+
+        return parseUpdate(ctx)
+    }
+
+    // prefixUnaryOpText — the ESTree operator string for a prefix unary op.
+    // Returns the operator string, or `not` when the token is not a prefix
+    // unary. Calculation — a fixed per-token-kind mapping.
+    export function prefixUnaryOpText(kind) {
+        if (kind == TokenKind.Bang)     { return "!" }
+        if (kind == TokenKind.Minus)    { return "-" }
+        if (kind == TokenKind.Plus)     { return "+" }
+        if (kind == TokenKind.BitNot)   { return "~" }
+        if (kind == TokenKind.KwTypeof) { return "typeof" }
+        if (kind == TokenKind.KwVoid)   { return "void" }
+        if (kind == TokenKind.KwDelete) { return "delete" }
+        return not
+    }
+
+    // ---------------------------------------------------------------------
+    // parseUpdate — postfix update operators ++ / --. Parses one
+    // postfix-core expression (parsePostfix — the M2.3 seam, == primary at
+    // M2.2), then consumes a trailing ++ / -- if present. Postfix update
+    // binds tighter than every prefix operator.
+    // ---------------------------------------------------------------------
+    export function parseUpdate(ctx) {
+        const cursor = ctx.cursor
+        const operand = parsePostfix(ctx)
+
+        const kind = currentKind(cursor)
+        if (kind == TokenKind.Increment || kind == TokenKind.Decrement) {
+            const opTok = advance(cursor)
+            const opText = (kind == TokenKind.Increment) ? "++" : "--"
+            const span = makeSpan(startOf(operand), opTok.span.end, lineOf(operand), colOf(operand))
+            return makeUpdate(opText, operand, false, span)
+        }
+
+        return operand
+    }
+
+    // ---------------------------------------------------------------------
+    // parsePostfix — the M2.3 SEAM (call / member / optional-chain / new).
+    // At M2.2 a postfix-core expression IS a primary expression. M2.3
+    // widens this to wrap parsePrimary with member access, calls, and
+    // optional chaining.
+    // ---------------------------------------------------------------------
+    export function parsePostfix(ctx) {
         return parsePrimary(ctx)
+    }
+
+    // ---------------------------------------------------------------------
+    // span helpers — node-span arithmetic. A binary / logical / sequence /
+    // conditional node's span covers from the start of its first child to
+    // the end of its last child. These read a node's span defensively (a
+    // malformed parse can yield a `not` child). Calculation — pure reads.
+    // ---------------------------------------------------------------------
+    export function startOf(node) {
+        if (node is not || node.span is not) {
+            return 0
+        }
+        return node.span.start
+    }
+    export function endOf(node) {
+        if (node is not || node.span is not) {
+            return 0
+        }
+        return node.span.end
+    }
+    export function lineOf(node) {
+        if (node is not || node.span is not) {
+            return 1
+        }
+        return node.span.line
+    }
+    export function colOf(node) {
+        if (node is not || node.span is not) {
+            return 1
+        }
+        return node.span.col
+    }
+    export function spanOf(leftNode, rightNode) {
+        return makeSpan(startOf(leftNode), endOf(rightNode), lineOf(leftNode), colOf(leftNode))
     }
 
     // ---------------------------------------------------------------------
@@ -129,10 +633,8 @@ ${
     // token run in a known ParseMode, the primary-expression node is a
     // pure function of the token run.
     //
-    // The dispatch order matters only where two kinds could both start a
-    // primary (none overlap at M2.1 — each TokenKind starts exactly one
-    // primary form). On an unrecognized token, records E-EXPR-UNEXPECTED
-    // and returns `not` so the caller can re-sync (M3 error-recovery).
+    // On an unrecognized token, records E-EXPR-UNEXPECTED and returns
+    // `not` so the caller can re-sync (M3 error-recovery).
     // ---------------------------------------------------------------------
     export function parsePrimary(ctx) {
         const cursor = ctx.cursor
@@ -167,7 +669,7 @@ ${
         }
 
         // --- Template literal — M1 emits TemplateChunk + [InterpStart ...
-        // InterpEnd TemplateChunk]*; M2.1 reassembles into a TemplateLit ---
+        // InterpEnd TemplateChunk]*; reassembled into a TemplateLit ---
         if (kind == TokenKind.TemplateChunk) {
             return parseTemplateLiteral(ctx)
         }
@@ -207,7 +709,7 @@ ${
         }
 
         // --- Unrecognized — record + return `not`. M3's error-recovery
-        // engine consumes the skipped tokens + re-syncs; M2.1 records the
+        // engine consumes the skipped tokens + re-syncs; M2.x records the
         // fault and stops, leaving the caller to decide. ---
         const here = current(cursor)
         const span = here is not ? makeSpan(0, 0, 1, 1) : here.span
@@ -218,12 +720,14 @@ ${
     // ---------------------------------------------------------------------
     // parseParenExpression — `( expr )`. Consumes the LParen, parses one
     // expression through the recursion seam (in .InExpression mode), then
-    // consumes the RParen. The grouping is kept as an explicit Paren node
-    // (ast-expr.scrml) so span-faithful diagnostics can point at the
-    // parens; conformance unwraps it (Acorn produces no paren node).
+    // consumes the RParen. The paren body parses at the FULL expression
+    // level (parseExpression — a sequence is legal inside parens: `(a, b)`).
+    // The grouping is kept as an explicit Paren node (ast-expr.scrml) so
+    // span-faithful diagnostics can point at the parens; conformance
+    // unwraps it (Acorn produces no paren node).
     //
     // M2.3 NOTE: `(` is also the head of an arrow function's parameter
-    // list. M2.1 parses `(...)` strictly as a grouped expression; the
+    // list. M2.x parses `(...)` strictly as a grouped expression; the
     // arrow-vs-paren disambiguation (bounded lookahead-with-commit per
     // DD OQ3) is M2.3 work — it slots in HERE, snapshotting the cursor
     // and committing to arrow or paren after the `=>` lookahead.
@@ -244,8 +748,8 @@ ${
     //   - an expression item (the common case)
     //   - a spread `...expr`
     //   - a hole (elision) — consecutive commas, e.g. `[1, , 3]`
-    // Parses in .InArrayLiteral mode; each element expression re-enters
-    // .InExpression through the recursion seam.
+    // Each element parses at ASSIGNMENT level (parseAssignmentExpr) — a
+    // comma SEPARATES elements; it must not be swallowed as a sequence.
     // ---------------------------------------------------------------------
     export function parseArrayLiteral(ctx) {
         const cursor = ctx.cursor
@@ -267,13 +771,13 @@ ${
             if (currentKind(cursor) == TokenKind.Ellipsis) {
                 advance(cursor)   // consume ...
                 const innerPrior = enterMode(ctx, ParseMode.InExpression)
-                const spreadExpr = parseExpression(ctx)
+                const spreadExpr = parseAssignmentExpr(ctx)
                 exitMode(ctx, innerPrior)
                 elements.push(makeArraySpread(spreadExpr))
             } else {
                 // Plain element expression.
                 const innerPrior = enterMode(ctx, ParseMode.InExpression)
-                const itemExpr = parseExpression(ctx)
+                const itemExpr = parseAssignmentExpr(ctx)
                 exitMode(ctx, innerPrior)
                 elements.push(makeArrayItem(itemExpr))
             }
@@ -303,7 +807,7 @@ ${
     //
     // M2.3 NOTE: object methods + getters/setters (`{ foo() {} }`,
     // `{ get x() {} }`) are M2.3/M4 — they need the function-body parser.
-    // M2.1 parses the data-property forms; a method shape records
+    // M2.x parses the data-property forms; a method shape records
     // E-EXPR-OBJECT-METHOD-UNSUPPORTED rather than mis-parsing it.
     // ---------------------------------------------------------------------
     export function parseObjectLiteral(ctx) {
@@ -317,7 +821,7 @@ ${
             if (currentKind(cursor) == TokenKind.Ellipsis) {
                 advance(cursor)   // consume ...
                 const innerPrior = enterMode(ctx, ParseMode.InExpression)
-                const spreadExpr = parseExpression(ctx)
+                const spreadExpr = parseAssignmentExpr(ctx)
                 exitMode(ctx, innerPrior)
                 properties.push(makeObjectSpread(spreadExpr))
             } else {
@@ -346,7 +850,8 @@ ${
 
     // parseObjectProperty — one non-spread object-literal property.
     // Returns a key-value or shorthand property, or `not` on a malformed
-    // (e.g. method-shaped) property.
+    // (e.g. method-shaped) property. A property VALUE parses at ASSIGNMENT
+    // level — a comma separates properties.
     export function parseObjectProperty(ctx) {
         const cursor = ctx.cursor
         const startKind = currentKind(cursor)
@@ -355,14 +860,14 @@ ${
         if (startKind == TokenKind.LBracket) {
             advance(cursor)   // consume [
             const keyPrior = enterMode(ctx, ParseMode.InExpression)
-            const keyExpr = parseExpression(ctx)
+            const keyExpr = parseAssignmentExpr(ctx)
             exitMode(ctx, keyPrior)
             expectRBracket(ctx, current(cursor))
             if (expectColon(ctx) == false) {
                 return not
             }
             const valuePrior = enterMode(ctx, ParseMode.InExpression)
-            const valueExpr = parseExpression(ctx)
+            const valueExpr = parseAssignmentExpr(ctx)
             exitMode(ctx, valuePrior)
             return makeObjectKeyValue(keyExpr, valueExpr, true)
         }
@@ -388,13 +893,13 @@ ${
         // What follows the key decides the property form:
         //   `:` -> key-value
         //   `,` or `}` -> shorthand (Ident keys only)
-        //   `(` -> a method — M2.3/M4, not supported at M2.1
+        //   `(` -> a method — M2.3/M4, not supported at M2.x
         const afterKind = currentKind(cursor)
 
         if (afterKind == TokenKind.Colon) {
             advance(cursor)   // consume :
             const valuePrior = enterMode(ctx, ParseMode.InExpression)
-            const valueExpr = parseExpression(ctx)
+            const valueExpr = parseAssignmentExpr(ctx)
             exitMode(ctx, valuePrior)
             return makeObjectKeyValue(keyNode, valueExpr, false)
         }
@@ -429,9 +934,9 @@ ${
     // includes the closing backtick (`cooked` does not). Per ECMA-262 a
     // TemplateLiteral has quasis.length == exprs.length + 1.
     //
-    // Each interpolation body is parsed through the recursion seam in
-    // .InExpression mode. M2.1's seam (parseExpression == parsePrimary)
-    // parses a primary; M2.2+ widens it transparently.
+    // Each interpolation body parses at the FULL expression level
+    // (parseExpression — `` `${a, b}` `` interpolates a sequence, per
+    // ECMA-262) in .InExpression mode.
     // ---------------------------------------------------------------------
     export function parseTemplateLiteral(ctx) {
         const cursor = ctx.cursor
@@ -562,15 +1067,16 @@ ${
     }
 
     // ---------------------------------------------------------------------
-    // parseExpr — the M2.1 ENTRY POINT. Takes M1's Token[] (the lex output)
-    // and returns { ast, errors }:
+    // parseExpr — the M2.1/M2.2 ENTRY POINT. Takes M1's Token[] (the lex
+    // output) and returns { ast, errors }:
     //   ast    — the parsed Expr node, or `not` when the input had no
-    //            parseable primary expression at its head.
+    //            parseable expression at its head.
     //   errors — the structured-diagnostic list (empty on a clean parse).
     //
-    // M2.1 parses ONE primary expression at the head of the token stream.
-    // The full statement-level parser is M3; the call/member/operator
-    // widening is M2.2-M2.4. The conformance harness
+    // M2.2 parses ONE expression at the head of the token stream — now an
+    // OPERATOR expression of any precedence. The full statement-level
+    // parser is M3; the call/member widening is M2.3; scrml-extension
+    // forms are M2.4. The conformance harness
     // (parser-conformance-expr.test.js) calls this entry point.
     // ---------------------------------------------------------------------
     export function parseExpr(tokens) {
