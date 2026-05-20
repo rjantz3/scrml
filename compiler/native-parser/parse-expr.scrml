@@ -35,7 +35,7 @@
 //   "scattered context flags" anti-template §D1 rejects — hence ParseMode
 //   is a named engine, consulted/transitioned in named places only.
 //
-// SCOPE — M2.1 + M2.2 (M2.2 = this dispatch).
+// SCOPE — M2.1 + M2.2 + M2.3 (M2.3 = this dispatch).
 //   M2.1 — PRIMARY EXPRESSIONS: number / string / template / regex / boolean
 //     literals, identifiers, @-cells, bare variants, parenthesized exprs,
 //     array literals, object literals.
@@ -45,19 +45,28 @@
 //     Logical node per ESTree); unary prefix ! - + ~ typeof void delete;
 //     update ++ / -- (prefix AND postfix); assignment = and every compound
 //     form; conditional ?: ; sequence , .
+//   M2.3 — CALL / MEMBER / POSTFIX / ARROW-HEAD / FUNCTION-EXPRESSION: call
+//     expressions (incl. argument spread `...x`); member access (dot +
+//     computed); optional chaining `?.`; `new`; tagged templates; arrow
+//     functions + function expressions — the HEAD (params + `async`) is
+//     parsed; a concise arrow body parses fully, and the BLOCK body of a
+//     block-body arrow / function expression is captured as a BlockStub
+//     that forward-references M3's statement parser (parseBlockStub — the
+//     documented M3 extension point); object methods / getters / setters.
 //
 // EXTENSION POINTS — LATER M2 sub-steps. parseExpression below is the
-// single recursion seam (sequence-level at M2.2). parseAssignmentExpr is the
+// single recursion seam (sequence-level). parseAssignmentExpr is the
 // no-comma entry the element positions (array elements, object values,
 // spread args) call so a separating comma is not swallowed as a sequence.
-// parsePostfix is the M2.3 seam (== parsePrimary at M2.2):
-//   - M2.3 — call / member / arrow-head / function-expression: parsePostfix
-//     wraps parsePrimary with member access, calls, optional chaining, `new`;
-//     arrow + function-expression heads.
+// parsePostfix is the M2.3 seam — it dispatches arrow / function-expression /
+// `new` heads, then parses one primary atom and runs the postfix chain
+// (calls / member access / optional chain / tagged template):
 //   - M2.4 — scrml-extension expression forms (D5 MUST ADD): `is` / `not` /
 //     `match expr {}` / `~` / `?{sql}` / `<#id>` / `render` / `lift` /
 //     `fail` / `::Variant`. These close the 5+ preprocessForAcorn
 //     Acorn-workaround failure modes (M2 gating criterion).
+//   - M3 — parseBlockStub is the seam: M3's statement parser re-enters the
+//     captured block-body token range and parses the statements in place.
 //
 // .scrml<->.js shadow discipline (README ANOMALY-2): this .scrml carries
 // the canonical Pillar 5b SHAPE; the 1:1 .js shadow is the executable
@@ -72,11 +81,14 @@ ${
     import {
         makeIdent, makeNumberLit, makeStringLit, makeBoolLit, makeRegexLit,
         makeTemplateLit, makeTemplateQuasi, makeAtCell, makeBareVariant,
+        makeThis, makeSuper,
         makeArray, makeArrayItem, makeArraySpread, makeArrayHole,
         makeObject, makeObjectKeyValue, makeObjectShorthand, makeObjectSpread,
-        makeParen,
+        makeObjectMethod, makeParen,
         makeUnary, makeUpdate, makeBinary, makeLogical, makeAssignment,
         makeConditional, makeSequence,
+        makeCall, makeNew, makeMember, makeTaggedTemplate, makeArrow, makeFunction,
+        makeRestElement, makeAssignmentPattern, makeBlockStub,
     } from "./ast-expr.scrml"
 
     // ---------------------------------------------------------------------
@@ -244,8 +256,9 @@ ${
     //   parseBinary         levels 4-12 + logical — precedence-climbing core
     //   parseUnary          prefix ! - + ~ typeof void delete, prefix ++/--
     //   parseUpdate         postfix ++/--
-    //   parsePostfix        M2.3 seam (== parsePrimary at M2.2)
-    //   parsePrimary        primary expressions (M2.1)
+    //   parsePostfix        M2.3 — arrow/function/new heads, atom + postfix chain
+    //   parsePostfixChain   M2.3 — call / member / optional-chain / tagged-template
+    //   parsePrimary        primary expressions (M2.1) + this/super atoms (M2.3)
     // =====================================================================
 
     // ---------------------------------------------------------------------
@@ -407,8 +420,9 @@ ${
     // isUnparenthesizedLogical — is `node` a Logical node whose op is one
     // of `ops`? A Paren node is NOT a Logical, so a parenthesized
     // `(a ?? b)` returns false — exactly the ECMA-262 carve-out:
-    // parentheses make the ?? / && / || mix legal.
-    export function isUnparenthesizedLogical(node, ops) {
+    // parentheses make the ?? / && / || mix legal. Private helper (not in
+    // any import list — mirrors the .js non-exported declaration).
+    function isUnparenthesizedLogical(node, ops) {
         if (node is not) {
             return false
         }
@@ -564,8 +578,8 @@ ${
 
     // ---------------------------------------------------------------------
     // parseUpdate — postfix update operators ++ / --. Parses one
-    // postfix-core expression (parsePostfix — the M2.3 seam, == primary at
-    // M2.2), then consumes a trailing ++ / -- if present. Postfix update
+    // postfix-core expression (parsePostfix — the M2.3 call/member/arrow
+    // layer), then consumes a trailing ++ / -- if present. Postfix update
     // binds tighter than every prefix operator.
     // ---------------------------------------------------------------------
     export function parseUpdate(ctx) {
@@ -583,14 +597,708 @@ ${
         return operand
     }
 
+    // =====================================================================
+    // M2.3 — call / member / postfix / arrow-head / function-expression.
+    //
+    // parsePostfix is the M2.3 SEAM (the M2.2 stub was `== parsePrimary`).
+    // It dispatches the heads that begin BEFORE a primary atom (arrow
+    // functions, function expressions, `new`), then for everything else
+    // parses one primary atom and runs the postfix chain (calls / member
+    // access / optional chaining / tagged templates) on top of it.
+    //
+    // Arrow-vs-paren disambiguation uses BOUNDED LOOKAHEAD-WITH-COMMIT
+    // (DD §D4 P3 / OQ3): scanArrowParens walks the token run counting
+    // bracket depth to find the matching `)` and peeks whether `=>` follows.
+    // No speculative full-parse, no rollback — a finite cursor scan then a
+    // single commit. (A parenthesized expression is never legally followed
+    // by `=>`, so "matching `)` then `=>`" is an unambiguous arrow signal.)
+    //
+    // The BLOCK body of a block-body arrow / function expression forward-
+    // references M3's statement parser: parseBlockStub captures the brace-
+    // delimited body's token range as a BlockStub node. M2.3 does NOT parse
+    // statements. parseBlockStub is the documented M3 extension point.
+    //
+    // Calculation per DD §D1: the ParseMode engine routes which rule runs;
+    // these bodies are the rules — pure transformations over the cursor's
+    // current view.
+    // =====================================================================
+
     // ---------------------------------------------------------------------
-    // parsePostfix — the M2.3 SEAM (call / member / optional-chain / new).
-    // At M2.2 a postfix-core expression IS a primary expression. M2.3
-    // widens this to wrap parsePrimary with member access, calls, and
-    // optional chaining.
+    // parsePostfix — the M2.3 seam.
     // ---------------------------------------------------------------------
     export function parsePostfix(ctx) {
-        return parsePrimary(ctx)
+        const cursor = ctx.cursor
+        const kind = currentKind(cursor)
+
+        // --- Function expression — `function name?(params) { ... }` ---
+        if (kind == TokenKind.KwFunction) {
+            return parseFunctionExpr(ctx, false)
+        }
+
+        // --- `async` head — async function expr, async arrow, or `async`
+        // used as a plain identifier. `async` is NOT a reserved word; M1
+        // always lexes it as KwAsync, so the parser decides the role by
+        // what follows. ---
+        if (kind == TokenKind.KwAsync) {
+            if (peekKind(cursor, 1) == TokenKind.KwFunction) {
+                advance(cursor)   // consume `async`
+                return parseFunctionExpr(ctx, true)
+            }
+            // `async ident =>` — async single-identifier-param arrow.
+            if (peekKind(cursor, 1) == TokenKind.Ident
+                && peekKind(cursor, 2) == TokenKind.Arrow) {
+                const asyncTok = advance(cursor)   // consume `async`
+                return parseSingleIdentArrow(ctx, true, asyncTok)
+            }
+            // `async ( params ) =>` — async parenthesized-param arrow.
+            if (peekKind(cursor, 1) == TokenKind.LParen && scanArrowParens(cursor, 1)) {
+                const asyncTok = advance(cursor)   // consume `async`
+                return parseParenArrow(ctx, true, asyncTok)
+            }
+            // Otherwise `async` is a plain identifier — emit it and run the
+            // postfix chain (so `async.then`, `async(x)` parse as a member /
+            // call on an identifier named `async`).
+            const asyncTok = advance(cursor)
+            return parsePostfixChain(ctx, makeIdent("async", asyncTok.span))
+        }
+
+        // --- `new` expression — handled at its own (member-level)
+        // precedence. ---
+        if (kind == TokenKind.KwNew) {
+            const newExpr = parseNewExpr(ctx)
+            // A `new` result can still take trailing `.x` / `[x]` / `(...)` —
+            // `new Foo().bar`, `new Foo()()`.
+            return parsePostfixChain(ctx, newExpr)
+        }
+
+        // --- `ident =>` — single-identifier-param arrow (no parens). ---
+        if (kind == TokenKind.Ident && peekKind(cursor, 1) == TokenKind.Arrow) {
+            return parseSingleIdentArrow(ctx, false, not)
+        }
+
+        // --- `( params ) =>` — parenthesized-param arrow. The bounded
+        // lookahead distinguishes this from a plain parenthesized
+        // expression. ---
+        if (kind == TokenKind.LParen && scanArrowParens(cursor, 0)) {
+            return parseParenArrow(ctx, false, not)
+        }
+
+        // --- Everything else: a primary atom + the postfix chain. ---
+        const atom = parsePrimary(ctx)
+        return parsePostfixChain(ctx, atom)
+    }
+
+    // ---------------------------------------------------------------------
+    // parsePostfixChain — apply member / call / optional-chain / tagged-
+    // template forms to an already-parsed `base` expression, left-
+    // associatively, until no postfix form follows. `base` may be a primary
+    // atom, a `new` result, or another chain result.
+    // ---------------------------------------------------------------------
+    export function parsePostfixChain(ctx, base) {
+        const cursor = ctx.cursor
+        let node = base
+
+        while (true) {
+            const kind = currentKind(cursor)
+
+            // `.property` — non-computed member access.
+            if (kind == TokenKind.Dot) {
+                advance(cursor)   // consume .
+                const prop = parseMemberProperty(ctx)
+                const span = makeSpan(startOf(node), endOf(prop), lineOf(node), colOf(node))
+                node = makeMember(node, prop, false, false, span)
+                continue
+            }
+
+            // `[expr]` — computed member access.
+            if (kind == TokenKind.LBracket) {
+                const open = advance(cursor)   // consume [
+                const innerPrior = enterMode(ctx, ParseMode.InExpression)
+                const prop = parseExpression(ctx)
+                exitMode(ctx, innerPrior)
+                const close = expectRBracket(ctx, open)
+                const span = makeSpan(startOf(node), close.end, lineOf(node), colOf(node))
+                node = makeMember(node, prop, true, false, span)
+                continue
+            }
+
+            // `(args)` — call expression.
+            if (kind == TokenKind.LParen) {
+                const callInfo = parseCallArguments(ctx)
+                const span = makeSpan(startOf(node), callInfo.endPos, lineOf(node), colOf(node))
+                node = makeCall(node, callInfo.args, false, span)
+                continue
+            }
+
+            // `?.` optional chain — `?.prop`, `?.[expr]`, `?.(args)`.
+            // isOptionalChainAhead handles both M1 lexings of `?.` (Question
+            // + adjacent Dot, and Question + adjacent BareVariant — see
+            // that fn).
+            if (kind == TokenKind.Question && isOptionalChainAhead(cursor)) {
+                advance(cursor)   // consume ?
+                const afterQuestion = current(cursor)
+
+                // `a?.b` — M1 lexed `.b` as one BareVariant token. The `?`
+                // is consumed; this BareVariant carries the property name.
+                if (afterQuestion is not not && afterQuestion.kind == TokenKind.BareVariant) {
+                    advance(cursor)   // consume the BareVariant `.prop`
+                    const prop = makeIdent(afterQuestion.name, afterQuestion.span)
+                    const span = makeSpan(startOf(node), endOf(prop), lineOf(node), colOf(node))
+                    node = makeMember(node, prop, false, true, span)
+                    continue
+                }
+
+                // Otherwise the `.` is a Dot token — consume it. M1 keeps
+                // `.` a Dot (not a BareVariant) after `?` only when the next
+                // char is NOT an identifier start — i.e. the `?.[expr]` and
+                // `?.(args)` forms.
+                advance(cursor)   // consume the Dot (the `?.` is now consumed)
+                const afterKind = currentKind(cursor)
+
+                if (afterKind == TokenKind.LBracket) {
+                    // `?.[expr]` — optional computed member.
+                    const open = advance(cursor)   // consume [
+                    const innerPrior = enterMode(ctx, ParseMode.InExpression)
+                    const prop = parseExpression(ctx)
+                    exitMode(ctx, innerPrior)
+                    const close = expectRBracket(ctx, open)
+                    const span = makeSpan(startOf(node), close.end, lineOf(node), colOf(node))
+                    node = makeMember(node, prop, true, true, span)
+                    continue
+                }
+                if (afterKind == TokenKind.LParen) {
+                    // `?.(args)` — optional call.
+                    const callInfo = parseCallArguments(ctx)
+                    const span = makeSpan(startOf(node), callInfo.endPos, lineOf(node), colOf(node))
+                    node = makeCall(node, callInfo.args, true, span)
+                    continue
+                }
+                // `?.prop` where `prop` is a keyword.
+                const prop = parseMemberProperty(ctx)
+                const span = makeSpan(startOf(node), endOf(prop), lineOf(node), colOf(node))
+                node = makeMember(node, prop, false, true, span)
+                continue
+            }
+
+            // Tagged template — `` tag`...` ``. A TemplateChunk immediately
+            // after an expression is the quasi of a tagged template (per
+            // ECMA-262 the MemberExpression / CallExpression is the tag).
+            if (kind == TokenKind.TemplateChunk) {
+                const quasi = parseTemplateLiteral(ctx)
+                const span = makeSpan(startOf(node), endOf(quasi), lineOf(node), colOf(node))
+                node = makeTaggedTemplate(node, quasi, span)
+                continue
+            }
+
+            break
+        }
+
+        return node
+    }
+
+    // ---------------------------------------------------------------------
+    // parseMemberProperty — the property name after `.` / `?.`. Accepts an
+    // identifier OR any keyword token (`obj.class`, `obj.if`, `obj.new` are
+    // legal — a keyword is a valid property name). The property is modelled
+    // as an Ident node (its text is the property name).
+    // ---------------------------------------------------------------------
+    export function parseMemberProperty(ctx) {
+        const cursor = ctx.cursor
+        const tok = current(cursor)
+
+        if (tok is not) {
+            recordError(ctx, "E-EXPR-MEMBER-NAME", "expected a property name after '.'", makeSpan(0, 0, 1, 1))
+            return makeIdent("", makeSpan(0, 0, 1, 1))
+        }
+
+        // An identifier, OR any keyword (keywords are valid property names).
+        if (tok.kind == TokenKind.Ident || isKeywordKind(tok.kind)) {
+            advance(cursor)
+            const name = identTextOf(tok)
+            return makeIdent(name, tok.span)
+        }
+
+        recordError(ctx, "E-EXPR-MEMBER-NAME", "expected a property name after '.'", tok.span)
+        return makeIdent("", tok.span)
+    }
+
+    // ---------------------------------------------------------------------
+    // parseCallArguments — `( arg, arg, ... )`; returns { args, endPos }.
+    // Each argument parses at ASSIGNMENT level (a comma separates
+    // arguments). A `...expr` argument is a spread (modelled with the
+    // array-element Spread shape, which maps to ESTree's SpreadElement —
+    // the same node ESTree uses for a call-argument spread).
+    // ---------------------------------------------------------------------
+    export function parseCallArguments(ctx) {
+        const cursor = ctx.cursor
+        const open = advance(cursor)   // consume (
+        const prior = enterMode(ctx, ParseMode.InArguments)
+        const args = []
+
+        while (atEnd(cursor) == false && currentKind(cursor) != TokenKind.RParen) {
+            if (currentKind(cursor) == TokenKind.Ellipsis) {
+                advance(cursor)   // consume ...
+                const innerPrior = enterMode(ctx, ParseMode.InExpression)
+                const spreadExpr = parseAssignmentExpr(ctx)
+                exitMode(ctx, innerPrior)
+                args.push(makeArraySpread(spreadExpr))
+            } else {
+                const innerPrior = enterMode(ctx, ParseMode.InExpression)
+                const argExpr = parseAssignmentExpr(ctx)
+                exitMode(ctx, innerPrior)
+                args.push(argExpr)
+            }
+
+            if (currentKind(cursor) == TokenKind.Comma) {
+                advance(cursor)   // consume the separator ,
+            } else {
+                break
+            }
+        }
+
+        exitMode(ctx, prior)
+        const close = expectRParen(ctx, open)
+        return { args, endPos: close.end }
+    }
+
+    // ---------------------------------------------------------------------
+    // parseNewExpr — `new Callee(args)` / `new Callee`. Per ECMA-262 the
+    // `new` callee is a MemberExpression (member access is part of the
+    // callee — `new a.b()` calls `a.b`), but a CallExpression is NOT (the
+    // first `(` after the callee is `new`'s argument list). A nested `new`
+    // (`new new X()`) recurses. Optional chaining is not legal inside a
+    // `new` callee — parseMemberOnlyChain stops at `?.`.
+    // ---------------------------------------------------------------------
+    export function parseNewExpr(ctx) {
+        const cursor = ctx.cursor
+        const newTok = advance(cursor)   // consume `new`
+
+        // The callee: a nested `new`, or a primary atom + a MEMBER-ONLY
+        // chain.
+        let callee = not
+        if (currentKind(cursor) == TokenKind.KwNew) {
+            callee = parseNewExpr(ctx)
+        } else {
+            const atom = parsePrimary(ctx)
+            callee = parseMemberOnlyChain(ctx, atom)
+        }
+
+        // Optional argument list. `new Foo()` -> args; `new Foo` -> [].
+        let args = []
+        let endPos = endOf(callee)
+        if (currentKind(cursor) == TokenKind.LParen) {
+            const callInfo = parseCallArguments(ctx)
+            args = callInfo.args
+            endPos = callInfo.endPos
+        }
+
+        const span = makeSpan(newTok.span.start, endPos, newTok.span.line, newTok.span.col)
+        return makeNew(callee, args, span)
+    }
+
+    // ---------------------------------------------------------------------
+    // parseMemberOnlyChain — member access without calls / optional chain.
+    // Used for a `new` callee: `.x` and `[x]` extend the callee, but `(`
+    // and `?.` do NOT (the `(` is `new`'s arguments; `?.` is illegal in a
+    // `new` callee).
+    // ---------------------------------------------------------------------
+    export function parseMemberOnlyChain(ctx, base) {
+        const cursor = ctx.cursor
+        let node = base
+
+        while (true) {
+            const kind = currentKind(cursor)
+
+            if (kind == TokenKind.Dot) {
+                advance(cursor)   // consume .
+                const prop = parseMemberProperty(ctx)
+                const span = makeSpan(startOf(node), endOf(prop), lineOf(node), colOf(node))
+                node = makeMember(node, prop, false, false, span)
+                continue
+            }
+
+            if (kind == TokenKind.LBracket) {
+                const open = advance(cursor)   // consume [
+                const innerPrior = enterMode(ctx, ParseMode.InExpression)
+                const prop = parseExpression(ctx)
+                exitMode(ctx, innerPrior)
+                const close = expectRBracket(ctx, open)
+                const span = makeSpan(startOf(node), close.end, lineOf(node), colOf(node))
+                node = makeMember(node, prop, true, false, span)
+                continue
+            }
+
+            break
+        }
+
+        return node
+    }
+
+    // ---------------------------------------------------------------------
+    // isOptionalChainAhead — is the cursor at a `?.` optional-chain
+    // operator? True iff the current token is Question AND it is
+    // SOURCE-ADJACENT to the next token AND that next token is one of:
+    //   - Dot          — the `?.[` / `?.(` forms, where M1 keeps `.` a Dot.
+    //   - BareVariant  — the `?.ident` form. M1's lexer treats `.ident`
+    //                    AFTER a `?` as a BareVariant token (`?` is a
+    //                    regex-permissive context per the M1
+    //                    `regexAllowedAfter` heuristic), so `a?.b` lexes as
+    //                    Ident Question BareVariant. The native parser
+    //                    RE-COMPOSES the `?.ident` form here at the parse
+    //                    layer (the same parse-layer re-composition pattern
+    //                    M2.2 uses for the two-token compound-assign
+    //                    operators — IMPLEMENTATION-ROADMAP §4.4 K3).
+    // A gap (`? .` with whitespace) means a ternary `?` then a member /
+    // bare-variant — NOT an optional chain.
+    // ---------------------------------------------------------------------
+    export function isOptionalChainAhead(cursor) {
+        if (currentKind(cursor) != TokenKind.Question) {
+            return false
+        }
+        const nextKind = peekKind(cursor, 1)
+        if (nextKind != TokenKind.Dot && nextKind != TokenKind.BareVariant) {
+            return false
+        }
+        const q = current(cursor)
+        const next = peek(cursor, 1)
+        if (q is not || next is not) {
+            return false
+        }
+        if (q.span is not || next.span is not) {
+            return false
+        }
+        return q.span.end == next.span.start
+    }
+
+    // ---------------------------------------------------------------------
+    // scanArrowParens — bounded lookahead: do the parens at offset `from`
+    // belong to an arrow function's parameter list? Walks forward from the
+    // `(` token at `cursor.idx + from`, counting bracket depth across all
+    // three bracket families (the param list can contain default-value
+    // expressions with any of them). When the matching `)` of the opening
+    // `(` is found, the token immediately after it is examined: an `=>`
+    // there is the unambiguous arrow signal. Pure cursor reads — no
+    // mutation, no token consumed.
+    // ---------------------------------------------------------------------
+    export function scanArrowParens(cursor, from) {
+        let i = from
+        if (peekKind(cursor, i) != TokenKind.LParen) {
+            return false
+        }
+        let depth = 0
+        // Bound the scan to the remaining token count so a malformed
+        // unbalanced input cannot loop forever.
+        const limit = cursor.tokens.length + 1
+        let steps = 0
+        while (steps < limit) {
+            const k = peekKind(cursor, i)
+            if (k == TokenKind.EOF) {
+                return false
+            }
+            if (k == TokenKind.LParen || k == TokenKind.LBracket || k == TokenKind.LBrace) {
+                depth = depth + 1
+            } else if (k == TokenKind.RParen || k == TokenKind.RBracket || k == TokenKind.RBrace) {
+                depth = depth - 1
+                if (depth == 0) {
+                    // The matching `)` of the opening `(` — peek what
+                    // follows.
+                    return peekKind(cursor, i + 1) == TokenKind.Arrow
+                }
+            }
+            i = i + 1
+            steps = steps + 1
+        }
+        return false
+    }
+
+    // ---------------------------------------------------------------------
+    // parseSingleIdentArrow — `ident => body` / `async ident => body`.
+    // `headStartTok` is the `async` token when async (for the head span
+    // start), or `not`. The single identifier is the sole parameter.
+    // ---------------------------------------------------------------------
+    export function parseSingleIdentArrow(ctx, isAsync, headStartTok) {
+        const cursor = ctx.cursor
+        const paramTok = advance(cursor)   // consume the identifier
+        const param = makeIdent(paramTok.name, paramTok.span)
+        return finishArrow(ctx, [param], isAsync, headStartTok ?? paramTok)
+    }
+
+    // ---------------------------------------------------------------------
+    // parseParenArrow — `( params ) => body` / `async ( params ) => body`.
+    // ---------------------------------------------------------------------
+    export function parseParenArrow(ctx, isAsync, headStartTok) {
+        const cursor = ctx.cursor
+        const open = current(cursor)
+        const params = parseParamList(ctx)
+        return finishArrow(ctx, params, isAsync, headStartTok ?? open)
+    }
+
+    // ---------------------------------------------------------------------
+    // finishArrow — consume `=>` and the body; build the Arrow node. The
+    // body is concise (an expression) UNLESS it opens with `{`, in which
+    // case it is a block body captured as a BlockStub (M3 parses the
+    // statements).
+    // ---------------------------------------------------------------------
+    export function finishArrow(ctx, params, isAsync, headStartTok) {
+        const cursor = ctx.cursor
+
+        if (currentKind(cursor) == TokenKind.Arrow) {
+            advance(cursor)   // consume =>
+        } else {
+            const here = current(cursor)
+            const span = here is not ? makeSpan(0, 0, 1, 1) : here.span
+            recordError(ctx, "E-EXPR-ARROW-EXPECTED", "expected '=>' in arrow function", span)
+        }
+
+        const body = parseArrowOrFunctionBody(ctx, true)
+        const startPos = (headStartTok is not || headStartTok.span is not)
+            ? startOf(body) : headStartTok.span.start
+        const startLine = (headStartTok is not || headStartTok.span is not)
+            ? lineOf(body) : headStartTok.span.line
+        const startCol = (headStartTok is not || headStartTok.span is not)
+            ? colOf(body) : headStartTok.span.col
+        const span = makeSpan(startPos, endOf(body), startLine, startCol)
+        return makeArrow(params, body, isAsync, span)
+    }
+
+    // ---------------------------------------------------------------------
+    // parseFunctionExpr — `function name?(params) { ... }`. `async` is
+    // consumed by the caller. The block body is a BlockStub (M3 parses the
+    // statements). A leading `*` (generator) is consumed if present so the
+    // head parse stays in sync — generator semantics are an M4 concern.
+    // ---------------------------------------------------------------------
+    export function parseFunctionExpr(ctx, isAsync) {
+        const cursor = ctx.cursor
+        const fnTok = advance(cursor)   // consume `function`
+
+        // A `function*` generator — consume the `*` so the head stays in
+        // sync.
+        if (currentKind(cursor) == TokenKind.Star) {
+            advance(cursor)
+        }
+
+        // Optional name — a function expression may be named or anonymous.
+        let name = not
+        if (currentKind(cursor) == TokenKind.Ident) {
+            const nameTok = advance(cursor)
+            name = nameTok.name
+        }
+
+        const params = parseParamList(ctx)
+        const body = parseArrowOrFunctionBody(ctx, false)
+        const span = makeSpan(fnTok.span.start, endOf(body), fnTok.span.line, fnTok.span.col)
+        return makeFunction(name, params, body, isAsync, span)
+    }
+
+    // ---------------------------------------------------------------------
+    // parseArrowOrFunctionBody — a concise expression body OR a BlockStub.
+    // `allowConcise` is true for arrows, false for function expressions
+    // (whose body is always a block). When the body opens with `{`, it is a
+    // block — captured as a BlockStub (M3's seam). Otherwise (arrows only)
+    // it is a concise expression body parsed at assignment level.
+    // ---------------------------------------------------------------------
+    export function parseArrowOrFunctionBody(ctx, allowConcise) {
+        const cursor = ctx.cursor
+
+        if (currentKind(cursor) == TokenKind.LBrace) {
+            return parseBlockStub(ctx)
+        }
+
+        if (allowConcise == false) {
+            const here = current(cursor)
+            const span = here is not ? makeSpan(0, 0, 1, 1) : here.span
+            recordError(ctx, "E-EXPR-FUNCTION-BODY", "expected '{' to open a function body", span)
+            // Build an empty block stub so the caller still gets a node.
+            return makeBlockStub([], cursor.idx, cursor.idx, span)
+        }
+
+        // Concise arrow body — an assignment-level expression. (A concise
+        // body is NOT a sequence — `x => a, b` is `(x => a), b`.)
+        const innerPrior = enterMode(ctx, ParseMode.InExpression)
+        const expr = parseAssignmentExpr(ctx)
+        exitMode(ctx, innerPrior)
+        return expr
+    }
+
+    // ---------------------------------------------------------------------
+    // parseBlockStub — capture a brace-delimited block body as a BlockStub.
+    // THE DOCUMENTED M3 EXTENSION POINT. M2.3 parses the HEAD of arrows +
+    // function expressions but does NOT parse statements. This walks the
+    // token run from the opening `{` to the matching `}`, counting
+    // LBrace/RBrace depth, and records the body's half-open token range
+    // [tokenStart, tokenEnd) + source span. M3's statement parser re-enters
+    // this range to parse the body in place.
+    //
+    // Brace counting is token-kind exact: a `}` that closes a template
+    // interpolation is a TemplateInterpEnd token (a distinct kind M1
+    // emits), NOT an RBrace — so an interpolation `${...}` inside the block
+    // does not perturb the count. Object literals inside the block
+    // contribute matched LBrace/RBrace pairs and net to zero.
+    // ---------------------------------------------------------------------
+    export function parseBlockStub(ctx) {
+        const cursor = ctx.cursor
+        const open = advance(cursor)   // consume the opening {
+        const tokenStart = cursor.idx  // first token INSIDE the block
+        let depth = 1
+        let closeTok = open
+
+        while (atEnd(cursor) == false && depth > 0) {
+            const kind = currentKind(cursor)
+            if (kind == TokenKind.LBrace) {
+                depth = depth + 1
+            } else if (kind == TokenKind.RBrace) {
+                depth = depth - 1
+                if (depth == 0) {
+                    closeTok = advance(cursor)   // consume the matching }
+                    break
+                }
+            }
+            advance(cursor)
+        }
+
+        if (depth > 0) {
+            recordError(ctx, "E-EXPR-UNCLOSED-BLOCK", "expected '}' to close a function body", open.span)
+        }
+
+        // The body token range is half-open: [tokenStart, tokenEnd).
+        // tokenEnd is the index of the closing `}` (the first token NOT
+        // part of the body).
+        const tokenEnd = (depth == 0) ? (cursor.idx - 1) : cursor.idx
+        const bodyTokens = cursor.tokens.slice(tokenStart, tokenEnd)
+        const span = makeSpan(open.span.start, closeTok.span.end, open.span.line, open.span.col)
+        return makeBlockStub(bodyTokens, tokenStart, tokenEnd, span)
+    }
+
+    // ---------------------------------------------------------------------
+    // parseParamList — `( param, param, ... )` for an arrow / function
+    // head. Consumes the parens. Each parameter is parsed by parseParam.
+    // ---------------------------------------------------------------------
+    export function parseParamList(ctx) {
+        const cursor = ctx.cursor
+
+        if (currentKind(cursor) != TokenKind.LParen) {
+            const here = current(cursor)
+            const span = here is not ? makeSpan(0, 0, 1, 1) : here.span
+            recordError(ctx, "E-EXPR-PARAM-LIST", "expected '(' to open a parameter list", span)
+            return []
+        }
+        const open = advance(cursor)   // consume (
+        const params = []
+
+        while (atEnd(cursor) == false && currentKind(cursor) != TokenKind.RParen) {
+            const param = parseParam(ctx)
+            if (param is not) {
+                break
+            }
+            params.push(param)
+
+            if (currentKind(cursor) == TokenKind.Comma) {
+                advance(cursor)   // consume the separator ,
+            } else {
+                break
+            }
+        }
+
+        expectRParen(ctx, open)
+        return params
+    }
+
+    // ---------------------------------------------------------------------
+    // parseParam — one arrow / function parameter. Forms handled:
+    //   ident                — a plain identifier parameter
+    //   ...ident             — a rest parameter (RestElement)
+    //   ident = expr         — a defaulted parameter (AssignmentPattern)
+    //   { ... } / [ ... ]    — a destructuring pattern. M2.3 parses the
+    //                          HEAD; the pattern is modelled with the
+    //                          object/array LITERAL node (a documented
+    //                          divergence from ESTree's ObjectPattern /
+    //                          ArrayPattern — full binding-pattern typing
+    //                          is an M4 concern).
+    // ---------------------------------------------------------------------
+    export function parseParam(ctx) {
+        const cursor = ctx.cursor
+        const kind = currentKind(cursor)
+
+        // Rest parameter — `...ident`.
+        if (kind == TokenKind.Ellipsis) {
+            const restTok = advance(cursor)   // consume ...
+            const target = parseParamTarget(ctx)
+            const span = makeSpan(restTok.span.start, endOf(target), restTok.span.line, restTok.span.col)
+            return makeRestElement(target, span)
+        }
+
+        const target = parseParamTarget(ctx)
+
+        // Defaulted parameter — `target = expr`.
+        if (currentKind(cursor) == TokenKind.Assign) {
+            advance(cursor)   // consume =
+            const innerPrior = enterMode(ctx, ParseMode.InExpression)
+            const defaultExpr = parseAssignmentExpr(ctx)
+            exitMode(ctx, innerPrior)
+            const span = makeSpan(startOf(target), endOf(defaultExpr), lineOf(target), colOf(target))
+            return makeAssignmentPattern(target, defaultExpr, span)
+        }
+
+        return target
+    }
+
+    // ---------------------------------------------------------------------
+    // parseParamTarget — the binding target of one parameter. An
+    // identifier, or a destructuring pattern (object / array). The pattern
+    // is parsed with parsePrimary (yielding an Object / Array literal node)
+    // — see parseParam's note on the documented M4-deferred ObjectPattern
+    // divergence.
+    // ---------------------------------------------------------------------
+    export function parseParamTarget(ctx) {
+        const cursor = ctx.cursor
+        const kind = currentKind(cursor)
+
+        if (kind == TokenKind.Ident) {
+            const tok = advance(cursor)
+            return makeIdent(tok.name, tok.span)
+        }
+
+        if (kind == TokenKind.LBrace || kind == TokenKind.LBracket) {
+            // Destructuring-pattern stand-in (M4 refines to a binding
+            // pattern).
+            return parsePrimary(ctx)
+        }
+
+        const here = current(cursor)
+        const span = here is not ? makeSpan(0, 0, 1, 1) : here.span
+        recordError(ctx, "E-EXPR-PARAM", "expected a parameter name", span)
+        return makeIdent("", span)
+    }
+
+    // ---------------------------------------------------------------------
+    // isKeywordKind — does a TokenKind name a JS keyword token? M1 lexes
+    // every keyword to its own `Kw*` TokenKind. A keyword is a valid
+    // property name after `.`, so parseMemberProperty accepts these. By
+    // convention every keyword TokenKind name begins with `Kw`.
+    // ---------------------------------------------------------------------
+    export function isKeywordKind(kind) {
+        if (typeof kind != "string") {
+            return false
+        }
+        return kind.indexOf("Kw") == 0
+    }
+
+    // ---------------------------------------------------------------------
+    // identTextOf — the identifier / keyword text of a token. An Ident
+    // token carries `.name`; a keyword token carries the keyword text in
+    // `.text`. Returns the property-name string for parseMemberProperty.
+    // ---------------------------------------------------------------------
+    export function identTextOf(tok) {
+        if (tok is not) {
+            return ""
+        }
+        if (tok.name is not not) {
+            return tok.name
+        }
+        if (tok.text is not not) {
+            return tok.text
+        }
+        return ""
     }
 
     // ---------------------------------------------------------------------
@@ -680,6 +1388,21 @@ ${
             return makeIdent(tok.name, tok.span)
         }
 
+        // --- `this` — keyword atom (M2.3) ---
+        if (kind == TokenKind.KwThis) {
+            const tok = advance(cursor)
+            return makeThis(tok.span)
+        }
+
+        // --- `super` — keyword atom (M2.3). Bare `super` is not a valid
+        // expression on its own, but parsePrimary returns the atom and the
+        // postfix chain shapes the legal `super.x` / `super[x]` / `super(...)`
+        // forms. ---
+        if (kind == TokenKind.KwSuper) {
+            const tok = advance(cursor)
+            return makeSuper(tok.span)
+        }
+
         // --- @-cell — M1 ScrmlAt token; .name is WITHOUT the leading @ ---
         if (kind == TokenKind.ScrmlAt) {
             const tok = advance(cursor)
@@ -727,10 +1450,12 @@ ${
     // unwraps it (Acorn produces no paren node).
     //
     // M2.3 NOTE: `(` is also the head of an arrow function's parameter
-    // list. M2.x parses `(...)` strictly as a grouped expression; the
-    // arrow-vs-paren disambiguation (bounded lookahead-with-commit per
-    // DD OQ3) is M2.3 work — it slots in HERE, snapshotting the cursor
-    // and committing to arrow or paren after the `=>` lookahead.
+    // list. The arrow-vs-paren disambiguation lives in parsePostfix —
+    // scanArrowParens does the bounded lookahead-with-commit (DD OQ3) and
+    // routes to parseParenArrow when `=>` follows the matching `)`. By the
+    // time parsePrimary dispatches a `(` to parseParenExpression, the input
+    // is KNOWN to be a grouped expression (not an arrow), so this function
+    // parses `(...)` strictly as the grouping.
     // ---------------------------------------------------------------------
     export function parseParenExpression(ctx) {
         const cursor = ctx.cursor
@@ -849,77 +1574,160 @@ ${
     }
 
     // parseObjectProperty — one non-spread object-literal property.
-    // Returns a key-value or shorthand property, or `not` on a malformed
-    // (e.g. method-shaped) property. A property VALUE parses at ASSIGNMENT
-    // level — a comma separates properties.
+    // Handles every non-spread property form: `key: value`, shorthand
+    // `{ x }`, methods `key() { ... }`, async methods `async key() { ... }`,
+    // and getters / setters `get key() { ... }` / `set key(v) { ... }`. A
+    // property VALUE parses at ASSIGNMENT level — a comma separates
+    // properties. M2.3 brings the method / getter / setter forms (the M2.2
+    // stub recorded E-EXPR-OBJECT-METHOD-UNSUPPORTED here).
     export function parseObjectProperty(ctx) {
         const cursor = ctx.cursor
-        const startKind = currentKind(cursor)
 
-        // Computed key [ expr ] : value
-        if (startKind == TokenKind.LBracket) {
-            advance(cursor)   // consume [
-            const keyPrior = enterMode(ctx, ParseMode.InExpression)
-            const keyExpr = parseAssignmentExpr(ctx)
-            exitMode(ctx, keyPrior)
-            expectRBracket(ctx, current(cursor))
-            if (expectColon(ctx) == false) {
-                return not
-            }
-            const valuePrior = enterMode(ctx, ParseMode.InExpression)
-            const valueExpr = parseAssignmentExpr(ctx)
-            exitMode(ctx, valuePrior)
-            return makeObjectKeyValue(keyExpr, valueExpr, true)
+        // --- `async` method prefix — `{ async foo() { ... } }`. `async`
+        // lexes as KwAsync; it is an async-method prefix only when a method
+        // follows. Otherwise `async` is itself a property key. ---
+        if (currentKind(cursor) == TokenKind.KwAsync && isMethodPrefixAhead(cursor)) {
+            advance(cursor)   // consume `async`
+            const keyInfo = parseObjectPropertyKey(ctx)
+            const fn = parseMethodTail(ctx, true)
+            return makeObjectMethod(keyInfo.key, fn, keyInfo.computed, "init")
         }
 
-        // Identifier / string / number key. Build the key Expr node.
-        let keyNode = not
-        if (startKind == TokenKind.Ident) {
-            const tok = advance(cursor)
-            keyNode = makeIdent(tok.name, tok.span)
-        } else if (startKind == TokenKind.StringLit) {
-            const tok = advance(cursor)
-            keyNode = makeStringLit(tok.cooked, tok.text, tok.span)
-        } else if (startKind == TokenKind.NumberLit) {
-            const tok = advance(cursor)
-            keyNode = makeNumberLit(tok.value, tok.text, tok.span)
-        } else {
+        // --- getter / setter — `{ get x() {} }` / `{ set x(v) {} }`.
+        // `get` / `set` lex as Ident; they are accessor prefixes only when
+        // a method-shaped key follows. `{ get: 1 }` is a plain property
+        // named `get`. ---
+        if (currentKind(cursor) == TokenKind.Ident) {
             const here = current(cursor)
-            const span = here is not ? makeSpan(0, 0, 1, 1) : here.span
-            recordError(ctx, "E-EXPR-OBJECT-KEY", "expected an object-literal property key", span)
+            const word = (here is not not) ? here.name : ""
+            if ((word == "get" || word == "set") && isMethodPrefixAhead(cursor)) {
+                advance(cursor)   // consume `get` / `set`
+                const keyInfo = parseObjectPropertyKey(ctx)
+                const fn = parseMethodTail(ctx, false)
+                return makeObjectMethod(keyInfo.key, fn, keyInfo.computed, word)
+            }
+        }
+
+        // --- Parse the property key (computed `[expr]` or simple). ---
+        const keyInfo = parseObjectPropertyKey(ctx)
+        if (keyInfo is not) {
             return not
         }
-
-        // What follows the key decides the property form:
-        //   `:` -> key-value
-        //   `,` or `}` -> shorthand (Ident keys only)
-        //   `(` -> a method — M2.3/M4, not supported at M2.x
+        const keyNode = keyInfo.key
+        const computed = keyInfo.computed
         const afterKind = currentKind(cursor)
 
+        // `key( ... ) { ... }` — a method.
+        if (afterKind == TokenKind.LParen) {
+            const fn = parseMethodTail(ctx, false)
+            return makeObjectMethod(keyNode, fn, computed, "init")
+        }
+
+        // `key: value` — a key-value property.
         if (afterKind == TokenKind.Colon) {
             advance(cursor)   // consume :
             const valuePrior = enterMode(ctx, ParseMode.InExpression)
             const valueExpr = parseAssignmentExpr(ctx)
             exitMode(ctx, valuePrior)
-            return makeObjectKeyValue(keyNode, valueExpr, false)
+            return makeObjectKeyValue(keyNode, valueExpr, computed)
         }
 
+        // `{ x }` / `{ x, ... }` — shorthand, legal only for an Ident key.
         if (afterKind == TokenKind.Comma || afterKind == TokenKind.RBrace) {
-            // Shorthand — legal only for an identifier key.
-            if (keyNode.kind != "Ident") {
+            if (computed || keyNode.kind != "Ident") {
                 recordError(ctx, "E-EXPR-OBJECT-SHORTHAND", "shorthand object property requires an identifier key", keyNode.span)
                 return not
             }
             return makeObjectShorthand(keyNode.name)
         }
 
-        if (afterKind == TokenKind.LParen) {
-            recordError(ctx, "E-EXPR-OBJECT-METHOD-UNSUPPORTED", "object-literal methods are parsed at M2.3 (function-body parser)", keyNode.span)
-            return not
-        }
-
         recordError(ctx, "E-EXPR-OBJECT-PROP", "malformed object-literal property", keyNode.span)
         return not
+    }
+
+    // ---------------------------------------------------------------------
+    // parseObjectPropertyKey — a `[expr]` computed key or a simple key.
+    // Returns { key, computed } or `not`. A simple key is an identifier,
+    // string, number literal, or keyword; a computed key is `[ expr ]`.
+    // ---------------------------------------------------------------------
+    export function parseObjectPropertyKey(ctx) {
+        const cursor = ctx.cursor
+        const kind = currentKind(cursor)
+
+        if (kind == TokenKind.LBracket) {
+            const open = advance(cursor)   // consume [
+            const keyPrior = enterMode(ctx, ParseMode.InExpression)
+            const keyExpr = parseAssignmentExpr(ctx)
+            exitMode(ctx, keyPrior)
+            expectRBracket(ctx, open)
+            return { key: keyExpr, computed: true }
+        }
+
+        if (kind == TokenKind.Ident) {
+            const tok = advance(cursor)
+            return { key: makeIdent(tok.name, tok.span), computed: false }
+        }
+        if (kind == TokenKind.StringLit) {
+            const tok = advance(cursor)
+            return { key: makeStringLit(tok.cooked, tok.text, tok.span), computed: false }
+        }
+        if (kind == TokenKind.NumberLit) {
+            const tok = advance(cursor)
+            return { key: makeNumberLit(tok.value, tok.text, tok.span), computed: false }
+        }
+        // A keyword used as a property key — `{ default: 1 }`, `{ if() {} }`.
+        if (isKeywordKind(kind)) {
+            const tok = advance(cursor)
+            return { key: makeIdent(identTextOf(tok), tok.span), computed: false }
+        }
+
+        const here = current(cursor)
+        const span = here is not ? makeSpan(0, 0, 1, 1) : here.span
+        recordError(ctx, "E-EXPR-OBJECT-KEY", "expected an object-literal property key", span)
+        return not
+    }
+
+    // ---------------------------------------------------------------------
+    // isMethodPrefixAhead — does a method (`key(...)`) follow the cursor?
+    // The cursor is at a candidate prefix word (`async` / `get` / `set`). A
+    // method follows iff the next token starts a property key (Ident /
+    // string / number / keyword / `[`) AND the token AFTER that key opens a
+    // parameter list `(` or is a computed-key `[`. This distinguishes
+    // `{ get x() {} }` (accessor) from `{ get: 1 }` (a property literally
+    // named `get`).
+    // ---------------------------------------------------------------------
+    export function isMethodPrefixAhead(cursor) {
+        const k1 = peekKind(cursor, 1)
+        // `prefix [computed]() {}` — the key is computed.
+        if (k1 == TokenKind.LBracket) {
+            return true
+        }
+        // `prefix name() {}` — the key is a simple name; `(` must follow.
+        const keyIsSimple = (k1 == TokenKind.Ident || k1 == TokenKind.StringLit
+            || k1 == TokenKind.NumberLit || isKeywordKind(k1))
+        if (keyIsSimple == false) {
+            return false
+        }
+        return peekKind(cursor, 2) == TokenKind.LParen
+    }
+
+    // ---------------------------------------------------------------------
+    // parseMethodTail — `( params ) { ... }` for an object method /
+    // accessor. Returns a Function node (no `function` keyword in the
+    // source, but the same node shape: params + block-stub body). The block
+    // body is a BlockStub (M3 parses the statements). `name` is `not` — an
+    // object method's name is its property key, carried by the enclosing
+    // ObjectProperty.
+    // ---------------------------------------------------------------------
+    export function parseMethodTail(ctx, isAsync) {
+        const cursor = ctx.cursor
+        const params = parseParamList(ctx)
+        const body = parseArrowOrFunctionBody(ctx, false)
+        const startPos = (params.length > 0) ? startOf(params[0]) : startOf(body)
+        const startLine = (params.length > 0) ? lineOf(params[0]) : lineOf(body)
+        const startCol = (params.length > 0) ? colOf(params[0]) : colOf(body)
+        const span = makeSpan(startPos, endOf(body), startLine, startCol)
+        return makeFunction(not, params, body, isAsync, span)
     }
 
     // ---------------------------------------------------------------------
@@ -1067,16 +1875,16 @@ ${
     }
 
     // ---------------------------------------------------------------------
-    // parseExpr — the M2.1/M2.2 ENTRY POINT. Takes M1's Token[] (the lex
+    // parseExpr — the M2.1-M2.3 ENTRY POINT. Takes M1's Token[] (the lex
     // output) and returns { ast, errors }:
     //   ast    — the parsed Expr node, or `not` when the input had no
     //            parseable expression at its head.
     //   errors — the structured-diagnostic list (empty on a clean parse).
     //
-    // M2.2 parses ONE expression at the head of the token stream — now an
-    // OPERATOR expression of any precedence. The full statement-level
-    // parser is M3; the call/member widening is M2.3; scrml-extension
-    // forms are M2.4. The conformance harness
+    // M2.3 parses ONE expression at the head of the token stream — now
+    // including call / member / optional-chain / `new` / tagged-template
+    // forms and arrow / function-expression HEADS. The full statement-level
+    // parser is M3; scrml-extension forms are M2.4. The conformance harness
     // (parser-conformance-expr.test.js) calls this entry point.
     // ---------------------------------------------------------------------
     export function parseExpr(tokens) {

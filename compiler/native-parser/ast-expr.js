@@ -15,6 +15,11 @@ export const ExprKind = Object.freeze({
     AtCell:      "AtCell",
     BareVariant: "BareVariant",
 
+    // Primary — keyword atoms (a member/call base; added at M2.3 because
+    // call/member parsing structurally needs a parseable receiver)
+    This:  "This",
+    Super: "Super",
+
     // Primary — composite
     Array:  "Array",
     Object: "Object",
@@ -30,11 +35,17 @@ export const ExprKind = Object.freeze({
     Sequence:    "Sequence",
 
     // Call / member / arrow / function (M2.3)
-    Call:     "Call",
-    New:      "New",
-    Member:   "Member",
-    Arrow:    "Arrow",
-    Function: "Function",
+    Call:           "Call",
+    New:            "New",
+    Member:         "Member",
+    TaggedTemplate: "TaggedTemplate",
+    Arrow:          "Arrow",
+    Function:       "Function",
+
+    // Pattern / body-stub support for arrow + function HEADS (M2.3)
+    RestElement:       "RestElement",
+    AssignmentPattern: "AssignmentPattern",
+    BlockStub:         "BlockStub",
 });
 
 export const ArrayElementKind = Object.freeze({
@@ -47,6 +58,7 @@ export const ObjectPropertyKind = Object.freeze({
     KeyValue:  "KeyValue",
     Shorthand: "Shorthand",
     Spread:    "Spread",
+    Method:    "Method",
 });
 
 // --- Primary-expression node constructors ---
@@ -87,6 +99,17 @@ export function makeBareVariant(name, span) {
     return { kind: ExprKind.BareVariant, name, span };
 }
 
+// makeThis — the `this` keyword atom. Carries only a span. M2.3.
+export function makeThis(span) {
+    return { kind: ExprKind.This, span };
+}
+
+// makeSuper — the `super` keyword atom. Valid only as the base of a member
+// access or a call (`super.x`, `super[x]`, `super(...)`). M2.3.
+export function makeSuper(span) {
+    return { kind: ExprKind.Super, span };
+}
+
 export function makeArray(elements, span) {
     return { kind: ExprKind.Array, elements, span };
 }
@@ -119,6 +142,13 @@ export function makeObjectShorthand(name) {
 }
 export function makeObjectSpread(expression) {
     return { kind: ObjectPropertyKind.Spread, expression };
+}
+// makeObjectMethod — an object-literal method `key() { ... }` (or a
+// getter / setter when `methodKind` is "get" / "set"). `value` is a
+// Function node carrying the method's params + block-stub body. `computed`
+// is true for a `[expr]` method key. M2.3.
+export function makeObjectMethod(key, value, computed, methodKind) {
+    return { kind: ObjectPropertyKind.Method, key, value, computed, methodKind };
 }
 
 // --- Operator / call / member node constructors (M2.2-M2.4 — catalog) ---
@@ -158,6 +188,33 @@ export function makeArrow(params, body, isAsync, span) {
 }
 export function makeFunction(name, params, body, isAsync, span) {
     return { kind: ExprKind.Function, name, params, body, isAsync, span };
+}
+
+// makeTaggedTemplate — tagged template `tag`...``. `tag` is the callee Expr;
+// `quasi` is the TemplateLit node. M2.3.
+export function makeTaggedTemplate(tag, quasi, span) {
+    return { kind: ExprKind.TaggedTemplate, tag, quasi, span };
+}
+
+// --- Parameter-pattern + body-stub constructors (M2.3) ---
+
+// makeRestElement — `...rest` in a parameter list (or array-pattern tail).
+export function makeRestElement(argument, span) {
+    return { kind: ExprKind.RestElement, argument, span };
+}
+// makeAssignmentPattern — a defaulted parameter `name = default`.
+export function makeAssignmentPattern(left, right, span) {
+    return { kind: ExprKind.AssignmentPattern, left, right, span };
+}
+// makeBlockStub — the BLOCK body of a block-body arrow / function expression.
+// M2.3 parses the HEAD of arrows + function expressions; the brace-delimited
+// statement body forward-references M3's statement parser. The stub captures
+// the body's token RANGE (tokenStart..tokenEnd, half-open indices into M1's
+// Token[]) + source span so M3 can re-enter and parse it in place. `tokens`
+// carries the raw skipped token slice so a smoke test / M3 hand-off has the
+// material without re-lexing. This is the documented M3 extension point.
+export function makeBlockStub(tokens, tokenStart, tokenEnd, span) {
+    return { kind: ExprKind.BlockStub, tokens, tokenStart, tokenEnd, span };
 }
 
 // --- isExpr — predicate ---

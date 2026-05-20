@@ -14,17 +14,18 @@
 //   the parser is currently in. The AST nodes this file constructs are the
 //   OUTPUT of the parse — pure values, not state.
 //
-// Status (M2.1): COMPILABLE skeleton. JS-escape carries the live tag-style
-// surface today. The `type Expr:enum = { ... }` declaration is preserved in
-// commented canonical form for the M5 swap-in to scrml-native tagged
-// variants. The M2.1 scope is PRIMARY EXPRESSIONS — the constructors for
-// primary-expression node kinds (Ident, NumberLit, StringLit, BoolLit,
-// RegexLit, TemplateLit, AtCell, BareVariant, Array, Object, Paren) are
-// substantive; the operator / call / member / arrow / function node-kind
-// constructors (Binary, Unary, Logical, Assignment, Conditional, Sequence,
-// Call, New, Member, Arrow, Function) are PRESENT in the enum + as
-// constructors so downstream M2.2-M2.4 dispatches build on a stable
-// catalog, but M2.1's parser only EMITS the primary-expression kinds.
+// Status (M2.1-M2.3): COMPILABLE skeleton. JS-escape carries the live
+// tag-style surface today. The `type Expr:enum = { ... }` declaration is
+// preserved in commented canonical form for the M5 swap-in to scrml-native
+// tagged variants. M2.1 emits the primary-expression kinds (Ident, NumberLit,
+// StringLit, BoolLit, RegexLit, TemplateLit, AtCell, BareVariant, Array,
+// Object, Paren); M2.2 emits the operator kinds (Binary, Unary, Update,
+// Logical, Assignment, Conditional, Sequence); M2.3 emits the call / member /
+// arrow / function kinds (Call, New, Member, TaggedTemplate, Arrow, Function)
+// plus the parameter-pattern + body-stub kinds (RestElement,
+// AssignmentPattern, BlockStub). M2.4 will emit the scrml-extension forms.
+// Every kind in the enum below has a substantive constructor; the parser
+// EMITS up to its current sub-step.
 //
 // DD §D3 cross-ref: the existing compiler/src/types/ast.ts defines an
 // ExprNode union (LitExpr / IdentExpr / BinaryExpr / UnaryExpr / CallExpr /
@@ -55,6 +56,10 @@ ${
     //       AtCell(name: string, span: Span),          // @cell per §6.1
     //       BareVariant(name: string, span: Span),     // .X per §14.10
     //
+    //       // --- Primary — keyword atoms (M2.3 — a member/call base) ---
+    //       This(span: Span),                          // `this`
+    //       Super(span: Span),                         // `super`
+    //
     //       // --- Primary — composite (M2.1) ---
     //       Array(elements: ArrayElement[], span: Span),
     //       Object(properties: ObjectProperty[], span: Span),
@@ -69,12 +74,18 @@ ${
     //       Conditional(test: Expr, consequent: Expr, alternate: Expr, span: Span),
     //       Sequence(expressions: Expr[], span: Span),
     //
-    //       // --- Call / member / arrow / function (M2.3) — catalog-only at M2.1 ---
+    //       // --- Call / member / arrow / function (M2.3) ---
     //       Call(callee: Expr, args: Expr[], optional: boolean, span: Span),
     //       New(callee: Expr, args: Expr[], span: Span),
     //       Member(object: Expr, property: Expr, computed: boolean, optional: boolean, span: Span),
-    //       Arrow(params: Pattern[], body: Expr, isAsync: boolean, span: Span),
-    //       Function(name: string | not, params: Pattern[], body: Stmt[], isAsync: boolean, span: Span),
+    //       TaggedTemplate(tag: Expr, quasi: Expr, span: Span),   // tag`...`
+    //       Arrow(params: Pattern[], body: Expr | BlockStub, isAsync: boolean, span: Span),
+    //       Function(name: string | not, params: Pattern[], body: BlockStub, isAsync: boolean, span: Span),
+    //
+    //       // --- Parameter-pattern + body-stub support (M2.3) ---
+    //       RestElement(argument: Expr, span: Span),              // ...rest param
+    //       AssignmentPattern(left: Expr, right: Expr, span: Span),// defaulted param
+    //       BlockStub(tokens: Token[], tokenStart: int, tokenEnd: int, span: Span),
     //   }
     //
     //   type ArrayElement:enum = {
@@ -87,6 +98,7 @@ ${
     //       KeyValue(key: Expr, value: Expr, computed: boolean),
     //       Shorthand(name: string),                   // { x }
     //       Spread(expression: Expr),                  // { ...rest }
+    //       Method(key: Expr, value: Expr, computed: boolean, methodKind: string),
     //   }
     //
     //   type TemplateQuasi:struct = { raw: string, cooked: string }
@@ -117,6 +129,11 @@ ${
         AtCell:      "AtCell",
         BareVariant: "BareVariant",
 
+        // Primary — keyword atoms (a member/call base; added at M2.3 because
+        // call/member parsing structurally needs a parseable receiver)
+        This:  "This",
+        Super: "Super",
+
         // Primary — composite
         Array:  "Array",
         Object: "Object",
@@ -132,11 +149,17 @@ ${
         Sequence:    "Sequence",
 
         // Call / member / arrow / function (M2.3)
-        Call:     "Call",
-        New:      "New",
-        Member:   "Member",
-        Arrow:    "Arrow",
-        Function: "Function",
+        Call:           "Call",
+        New:            "New",
+        Member:         "Member",
+        TaggedTemplate: "TaggedTemplate",
+        Arrow:          "Arrow",
+        Function:       "Function",
+
+        // Pattern / body-stub support for arrow + function HEADS (M2.3)
+        RestElement:       "RestElement",
+        AssignmentPattern: "AssignmentPattern",
+        BlockStub:         "BlockStub",
     })
 
     // ArrayElementKind — discriminator for array-literal element forms.
@@ -151,6 +174,7 @@ ${
         KeyValue:  "KeyValue",
         Shorthand: "Shorthand",
         Spread:    "Spread",
+        Method:    "Method",
     })
 
     // ---------------------------------------------------------------------
@@ -211,6 +235,17 @@ ${
         return { kind: ExprKind.BareVariant, name, span }
     }
 
+    // makeThis — the `this` keyword atom. Carries only a span. M2.3.
+    export function makeThis(span) {
+        return { kind: ExprKind.This, span }
+    }
+
+    // makeSuper — the `super` keyword atom. Valid only as the base of a
+    // member access or a call (`super.x`, `super[x]`, `super(...)`). M2.3.
+    export function makeSuper(span) {
+        return { kind: ExprKind.Super, span }
+    }
+
     // makeArray — array literal. `elements` is an array of array-element
     // values built via makeArrayItem / makeArraySpread / makeArrayHole.
     export function makeArray(elements, span) {
@@ -256,6 +291,13 @@ ${
     // makeObjectSpread — `{ ...rest }`.
     export function makeObjectSpread(expression) {
         return { kind: ObjectPropertyKind.Spread, expression }
+    }
+    // makeObjectMethod — an object-literal method `key() { ... }` (or a
+    // getter / setter when `methodKind` is "get" / "set"). `value` is a
+    // Function node carrying the method's params + block-stub body.
+    // `computed` is true for a `[expr]` method key. M2.3.
+    export function makeObjectMethod(key, value, computed, methodKind) {
+        return { kind: ObjectPropertyKind.Method, key, value, computed, methodKind }
     }
 
     // ---------------------------------------------------------------------
@@ -307,14 +349,43 @@ ${
     export function makeMember(object, property, computed, optional, span) {
         return { kind: ExprKind.Member, object, property, computed, optional, span }
     }
-    // makeArrow — arrow function. `body` is an Expr (concise) or a block
-    // forwarded to M3's statement parser. M2.3.
+    // makeArrow — arrow function. `body` is an Expr (concise body) or a
+    // BlockStub (block body — M3's statement parser re-enters the stub).
+    // `params` is a list of parameter-pattern nodes. M2.3.
     export function makeArrow(params, body, isAsync, span) {
         return { kind: ExprKind.Arrow, params, body, isAsync, span }
     }
-    // makeFunction — function expression. `body` is a Stmt[] from M3. M2.3.
+    // makeFunction — function expression. `body` is a BlockStub (M3 parses
+    // the statement body). `name` is `not` for an anonymous function. M2.3.
     export function makeFunction(name, params, body, isAsync, span) {
         return { kind: ExprKind.Function, name, params, body, isAsync, span }
+    }
+    // makeTaggedTemplate — tagged template `tag`...``. `tag` is the callee
+    // Expr; `quasi` is the TemplateLit node. M2.3.
+    export function makeTaggedTemplate(tag, quasi, span) {
+        return { kind: ExprKind.TaggedTemplate, tag, quasi, span }
+    }
+
+    // --- Parameter-pattern + body-stub constructors (M2.3) ---
+
+    // makeRestElement — `...rest` in a parameter list (or array-pattern tail).
+    export function makeRestElement(argument, span) {
+        return { kind: ExprKind.RestElement, argument, span }
+    }
+    // makeAssignmentPattern — a defaulted parameter `name = default`.
+    export function makeAssignmentPattern(left, right, span) {
+        return { kind: ExprKind.AssignmentPattern, left, right, span }
+    }
+    // makeBlockStub — the BLOCK body of a block-body arrow / function
+    // expression. M2.3 parses the HEAD of arrows + function expressions; the
+    // brace-delimited statement body forward-references M3's statement
+    // parser. The stub captures the body's token RANGE (tokenStart..tokenEnd,
+    // half-open indices into M1's Token[]) + source span so M3 can re-enter
+    // and parse it in place. `tokens` carries the raw skipped token slice so
+    // a smoke test / M3 hand-off has the material without re-lexing. This is
+    // the documented M3 extension point.
+    export function makeBlockStub(tokens, tokenStart, tokenEnd, span) {
+        return { kind: ExprKind.BlockStub, tokens, tokenStart, tokenEnd, span }
     }
 
     // ---------------------------------------------------------------------

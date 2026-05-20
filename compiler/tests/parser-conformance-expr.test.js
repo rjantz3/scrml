@@ -67,8 +67,51 @@ const ACORN_OPTS = {
 //   Paren       -> UNWRAPPED (Acorn produces no paren node)
 //   AtCell      -> ScrmlAtCell      (no ESTree equivalent — native-only)
 //   BareVariant -> ScrmlBareVariant (no ESTree equivalent — native-only)
+//
+// M2.3 additions (call / member / arrow / function):
+//   Call           -> CallExpression   { callee, arguments, optional }
+//   New            -> NewExpression    { callee, arguments }
+//   Member         -> MemberExpression { object, property, computed, optional }
+//   TaggedTemplate -> TaggedTemplateExpression { tag, quasi }
+//   Arrow          -> ArrowFunctionExpression  { params, body, async, expression }
+//   Function       -> FunctionExpression       { id, params, body, async }
+//   This           -> ThisExpression
+//   Super          -> Super
+//   RestElement    -> RestElement      { argument }
+//   AssignmentPattern -> AssignmentPattern { left, right }
+//   BlockStub      -> BlockStatement (a LEAF in the walk — M3 parses the
+//                     statement body; M2.3 only captures the token range)
+//   Object Method  -> Property { method, kind, computed, key, value }
+//
+// Optional chaining: ESTree wraps a call/member chain that contains ANY
+// optional `?.` link in exactly ONE outer ChainExpression. The native AST
+// instead carries an `optional` flag on each Member/Call node. The
+// normalizer re-creates the ESTree ChainExpression wrapper: when a
+// Member/Call's left-spine contains an optional link AND the node is not
+// itself the spine-child of another chain node, it is wrapped once.
 // -----------------------------------------------------------------------------
-function nativeToEstree(node) {
+
+// isCallOrMemberKind — a node kind that participates in a call/member chain.
+function isCallOrMemberKind(kind) {
+    return kind === ExprKind.Call || kind === ExprKind.Member;
+}
+
+// spineHasOptional — does the call/member left-spine of `node` contain an
+// optional `?.` link? Walks object (Member) / callee (Call) down the spine.
+function spineHasOptional(node) {
+    let cur = node;
+    while (cur !== undefined && cur !== null && isCallOrMemberKind(cur.kind)) {
+        if (cur.optional === true) return true;
+        cur = (cur.kind === ExprKind.Member) ? cur.object : cur.callee;
+    }
+    return false;
+}
+
+// nativeToEstree — normalize a native Expr to an ESTree-shaped node. The
+// optional second argument `insideChain` is true when this node is being
+// projected as the spine-child (object / callee) of an enclosing chain node;
+// it suppresses a redundant inner ChainExpression wrapper.
+function nativeToEstree(node, insideChain) {
     if (node === undefined || node === null) return null;
 
     if (node.kind === ExprKind.Ident) {
@@ -100,7 +143,9 @@ function nativeToEstree(node) {
         return {
             type: "TemplateLiteral",
             quasis,
-            expressions: node.exprs.map(nativeToEstree),
+            // Wrap the map callback so the array index is NOT forwarded as
+            // nativeToEstree's `insideChain` argument.
+            expressions: node.exprs.map((e) => nativeToEstree(e)),
         };
     }
     if (node.kind === ExprKind.Array) {
@@ -132,6 +177,21 @@ function nativeToEstree(node) {
                         computed: false,
                         key: id,
                         value: id,
+                    };
+                }
+                if (p.kind === ObjectPropertyKind.Method) {
+                    // A method's `kind` is "init" (plain method) or "get" /
+                    // "set" (accessor). Acorn marks a plain method
+                    // `method: true`; an accessor `method: false`.
+                    const isAccessor = p.methodKind === "get" || p.methodKind === "set";
+                    return {
+                        type: "Property",
+                        kind: p.methodKind,
+                        method: isAccessor === false,
+                        shorthand: false,
+                        computed: p.computed,
+                        key: nativeToEstree(p.key),
+                        value: nativeToEstree(p.value),
                     };
                 }
                 // KeyValue
@@ -218,12 +278,127 @@ function nativeToEstree(node) {
     if (node.kind === ExprKind.Sequence) {
         return {
             type: "SequenceExpression",
-            expressions: node.expressions.map(nativeToEstree),
+            expressions: node.expressions.map((e) => nativeToEstree(e)),
         };
+    }
+
+    // --- M2.3 call / member / arrow / function nodes ---
+
+    // This -> ThisExpression ; Super -> Super
+    if (node.kind === ExprKind.This)  return { type: "ThisExpression" };
+    if (node.kind === ExprKind.Super) return { type: "Super" };
+
+    // Member -> MemberExpression. The left-spine (object) is projected with
+    // insideChain propagated; a non-computed property is an Identifier; a
+    // computed property is the full key expression (a fresh chain root).
+    if (node.kind === ExprKind.Member) {
+        const plain = {
+            type: "MemberExpression",
+            object: nativeToEstree(node.object, true),
+            property: node.computed
+                ? nativeToEstree(node.property)
+                : { type: "Identifier", name: node.property.name },
+            computed: node.computed,
+            optional: node.optional === true,
+        };
+        if (insideChain !== true && spineHasOptional(node)) {
+            return { type: "ChainExpression", expression: plain };
+        }
+        return plain;
+    }
+
+    // Call -> CallExpression. The callee is the spine-child; arguments are
+    // fresh chain roots. A Spread-kinded argument becomes a SpreadElement.
+    if (node.kind === ExprKind.Call) {
+        const plain = {
+            type: "CallExpression",
+            callee: nativeToEstree(node.callee, true),
+            arguments: node.args.map((a) => callArgToEstree(a)),
+            optional: node.optional === true,
+        };
+        if (insideChain !== true && spineHasOptional(node)) {
+            return { type: "ChainExpression", expression: plain };
+        }
+        return plain;
+    }
+
+    // New -> NewExpression. (`new` is never part of an optional chain.)
+    if (node.kind === ExprKind.New) {
+        return {
+            type: "NewExpression",
+            callee: nativeToEstree(node.callee),
+            arguments: node.args.map((a) => callArgToEstree(a)),
+        };
+    }
+
+    // TaggedTemplate -> TaggedTemplateExpression
+    if (node.kind === ExprKind.TaggedTemplate) {
+        return {
+            type: "TaggedTemplateExpression",
+            tag: nativeToEstree(node.tag),
+            quasi: nativeToEstree(node.quasi),
+        };
+    }
+
+    // Arrow -> ArrowFunctionExpression. `expression` is true for a concise
+    // (expression) body, false for a block body.
+    if (node.kind === ExprKind.Arrow) {
+        const blockBody = node.body !== undefined && node.body !== null
+            && node.body.kind === ExprKind.BlockStub;
+        return {
+            type: "ArrowFunctionExpression",
+            params: node.params.map((p) => nativeToEstree(p)),
+            body: nativeToEstree(node.body),
+            async: node.isAsync === true,
+            expression: blockBody === false,
+        };
+    }
+
+    // Function -> FunctionExpression.
+    if (node.kind === ExprKind.Function) {
+        return {
+            type: "FunctionExpression",
+            id: (node.name === undefined || node.name === null)
+                ? null
+                : { type: "Identifier", name: node.name },
+            params: node.params.map((p) => nativeToEstree(p)),
+            body: nativeToEstree(node.body),
+            async: node.isAsync === true,
+        };
+    }
+
+    // RestElement / AssignmentPattern — parameter-pattern nodes.
+    if (node.kind === ExprKind.RestElement) {
+        return { type: "RestElement", argument: nativeToEstree(node.argument) };
+    }
+    if (node.kind === ExprKind.AssignmentPattern) {
+        return {
+            type: "AssignmentPattern",
+            left: nativeToEstree(node.left),
+            right: nativeToEstree(node.right),
+        };
+    }
+
+    // BlockStub -> BlockStatement. A LEAF in the conformance walk: M2.3 only
+    // captures the body's token range; M3's statement parser fills `body`.
+    // An empty block matches Acorn's empty BlockStatement; a non-empty block
+    // is exercised native-only (the walk does not descend a BlockStatement).
+    if (node.kind === ExprKind.BlockStub) {
+        return { type: "BlockStatement", body: [] };
     }
 
     // Unknown / not-yet-mapped — surface so the test fails the row.
     return { type: `Native:${node.kind}` };
+}
+
+// callArgToEstree — project one call / new argument. A native Spread-kinded
+// element (the array-element Spread shape, reused for call-argument spreads)
+// maps to ESTree's SpreadElement; a plain argument projects normally.
+function callArgToEstree(arg) {
+    if (arg !== undefined && arg !== null && arg.kind === ArrayElementKind.Spread) {
+        return { type: "SpreadElement", argument: nativeToEstree(arg.expression) };
+    }
+    return nativeToEstree(arg);
 }
 
 // -----------------------------------------------------------------------------
@@ -275,7 +450,34 @@ function nodeKindSequence(node, out) {
         nodeKindSequence(node.alternate, acc);
     } else if (node.type === "SequenceExpression") {
         for (const e of node.expressions) nodeKindSequence(e, acc);
+    } else if (node.type === "ChainExpression") {
+        nodeKindSequence(node.expression, acc);
+    } else if (node.type === "MemberExpression") {
+        nodeKindSequence(node.object, acc);
+        nodeKindSequence(node.property, acc);
+    } else if (node.type === "CallExpression" || node.type === "NewExpression") {
+        nodeKindSequence(node.callee, acc);
+        for (const a of node.arguments) nodeKindSequence(a, acc);
+    } else if (node.type === "TaggedTemplateExpression") {
+        nodeKindSequence(node.tag, acc);
+        nodeKindSequence(node.quasi, acc);
+    } else if (node.type === "ArrowFunctionExpression") {
+        for (const p of node.params) nodeKindSequence(p, acc);
+        nodeKindSequence(node.body, acc);
+    } else if (node.type === "FunctionExpression" || node.type === "FunctionDeclaration") {
+        if (node.id) nodeKindSequence(node.id, acc);
+        for (const p of node.params) nodeKindSequence(p, acc);
+        nodeKindSequence(node.body, acc);
+    } else if (node.type === "RestElement") {
+        nodeKindSequence(node.argument, acc);
+    } else if (node.type === "AssignmentPattern") {
+        nodeKindSequence(node.left, acc);
+        nodeKindSequence(node.right, acc);
     }
+    // BlockStatement is intentionally a LEAF: M2.3 stubs the statement body
+    // (M3 parses it), so the walk does not descend into it. Conformance
+    // corpus arrow / function cases with block bodies use EMPTY blocks so the
+    // native BlockStatement matches Acorn's empty BlockStatement exactly.
     return acc;
 }
 
@@ -309,6 +511,24 @@ function valueSequence(node, out) {
         // and prefix-vs-postfix (prefix flag) are all value divergences.
         const fix = (node.type === "UpdateExpression" && node.prefix === false) ? "post" : "pre";
         acc.push("op:" + node.operator + ":" + fix);
+    } else if (node.type === "MemberExpression") {
+        // The computed + optional flags are value-sensitive: `a.b` vs `a[b]`
+        // and `a.b` vs `a?.b` are divergences a bad parse would produce.
+        acc.push("member:computed=" + (node.computed === true)
+            + ":optional=" + (node.optional === true));
+    } else if (node.type === "CallExpression") {
+        acc.push("call:optional=" + (node.optional === true));
+    } else if (node.type === "NewExpression") {
+        acc.push("new");
+    } else if (node.type === "ThisExpression") {
+        acc.push("this");
+    } else if (node.type === "Super") {
+        acc.push("super");
+    } else if (node.type === "ArrowFunctionExpression") {
+        acc.push("arrow:async=" + (node.async === true)
+            + ":concise=" + (node.expression === true));
+    } else if (node.type === "FunctionExpression" || node.type === "FunctionDeclaration") {
+        acc.push("function:async=" + (node.async === true));
     }
 
     if (node.type === "ArrayExpression") {
@@ -337,7 +557,32 @@ function valueSequence(node, out) {
             valueSequence(node.quasis[i], acc);
             if (i < node.expressions.length) valueSequence(node.expressions[i], acc);
         }
+    } else if (node.type === "ChainExpression") {
+        valueSequence(node.expression, acc);
+    } else if (node.type === "MemberExpression") {
+        valueSequence(node.object, acc);
+        valueSequence(node.property, acc);
+    } else if (node.type === "CallExpression" || node.type === "NewExpression") {
+        valueSequence(node.callee, acc);
+        for (const a of node.arguments) valueSequence(a, acc);
+    } else if (node.type === "TaggedTemplateExpression") {
+        valueSequence(node.tag, acc);
+        valueSequence(node.quasi, acc);
+    } else if (node.type === "ArrowFunctionExpression") {
+        for (const p of node.params) valueSequence(p, acc);
+        valueSequence(node.body, acc);
+    } else if (node.type === "FunctionExpression" || node.type === "FunctionDeclaration") {
+        if (node.id) valueSequence(node.id, acc);
+        for (const p of node.params) valueSequence(p, acc);
+        valueSequence(node.body, acc);
+    } else if (node.type === "RestElement") {
+        valueSequence(node.argument, acc);
+    } else if (node.type === "AssignmentPattern") {
+        valueSequence(node.left, acc);
+        valueSequence(node.right, acc);
     }
+    // BlockStatement is a LEAF here (M3 parses the statement body) — see
+    // nodeKindSequence's matching note.
     return acc;
 }
 
@@ -794,6 +1039,435 @@ describe("M2.2 expression-parser — operator error paths (diagnostics, no throw
 });
 
 // -----------------------------------------------------------------------------
+// M2.3 call / member / postfix / arrow-head corpus. Every entry is a call /
+// member / computed-member / optional-chain / `new` / tagged-template /
+// arrow-head form with NO scrml extensions, so raw Acorn parses it and the
+// native-vs-Acorn Tier 1+2 diff is meaningful. Arrow / function block-body
+// cases use EMPTY blocks so the BlockStub-projected BlockStatement matches
+// Acorn's empty BlockStatement (M3 parses non-empty statement bodies — those
+// are exercised native-only further below).
+// -----------------------------------------------------------------------------
+const CALL_MEMBER_CORPUS = [
+    // --- call expressions ---
+    { name: "call — no args",                   src: "f()" },
+    { name: "call — one arg",                   src: "f(1)" },
+    { name: "call — many args",                 src: "f(a, b, c)" },
+    { name: "call — expression args",           src: "f(a + b, c * d)" },
+    { name: "call — spread arg",                src: "f(...xs)" },
+    { name: "call — spread among args",         src: "f(a, ...rest, z)" },
+    { name: "call — nested call arg",           src: "f(g(x))" },
+    { name: "call — chained calls",             src: "f()()" },
+    { name: "call — trailing comma",            src: "f(a, b,)" },
+
+    // --- member access — dot ---
+    { name: "member — single dot",              src: "a.b" },
+    { name: "member — dot chain",               src: "a.b.c.d" },
+    { name: "member — keyword property",        src: "obj.default" },
+    { name: "member — property named if",       src: "obj.if" },
+
+    // --- member access — computed ---
+    { name: "computed — numeric index",         src: "a[0]" },
+    { name: "computed — identifier index",      src: "a[i]" },
+    { name: "computed — expression index",      src: "a[i + 1]" },
+    { name: "computed — string index",          src: 'a["key"]' },
+    { name: "computed — nested computed",       src: "a[b[c]]" },
+    { name: "computed — chained computed",      src: "a[0][1]" },
+
+    // --- mixed member + call chains ---
+    { name: "chain — method call",              src: "obj.method()" },
+    { name: "chain — call then member",         src: "f().result" },
+    { name: "chain — fluent",                   src: "obj.a().b().c()" },
+    { name: "chain — computed then call",       src: "a[k]()" },
+    { name: "chain — call then computed",       src: "f()[0]" },
+    { name: "chain — member then computed",     src: "a.b[c].d" },
+
+    // --- optional chaining ---
+    { name: "optional — member",                src: "a?.b" },
+    { name: "optional — computed",              src: "a?.[0]" },
+    { name: "optional — call",                  src: "a?.()" },
+    { name: "optional — member chain",          src: "a?.b?.c" },
+    { name: "optional — then plain member",     src: "a?.b.c" },
+    { name: "optional — plain then optional",   src: "a.b?.c" },
+    { name: "optional — method call",           src: "obj?.method()" },
+    { name: "optional — call then member",      src: "f?.().x" },
+
+    // --- new expressions ---
+    { name: "new — no args",                    src: "new Foo()" },
+    { name: "new — with args",                  src: "new Foo(1, 2)" },
+    { name: "new — no parens",                  src: "new Foo" },
+    { name: "new — member callee",              src: "new a.b.C()" },
+    { name: "new — nested new",                 src: "new new X()" },
+    { name: "new — then member",                src: "new Foo().bar" },
+    { name: "new — then call",                  src: "new Foo()()" },
+    { name: "new — spread arg",                 src: "new Foo(...args)" },
+
+    // --- tagged templates ---
+    { name: "tagged — plain",                   src: "tag`hello`" },
+    { name: "tagged — interpolation",           src: "tag`a${x}b`" },
+    { name: "tagged — member tag",              src: "obj.tag`x`" },
+
+    // --- this / super ---
+    { name: "this — bare",                      src: "this" },
+    { name: "this — member",                    src: "this.value" },
+    { name: "this — method call",               src: "this.run()" },
+
+    // --- arrow functions — concise body (fully parsed) ---
+    { name: "arrow — single param",             src: "x => x" },
+    { name: "arrow — concise expr body",        src: "x => x + 1" },
+    { name: "arrow — no params",                src: "() => 1" },
+    { name: "arrow — two params",               src: "(a, b) => a + b" },
+    { name: "arrow — paren single param",       src: "(x) => x" },
+    { name: "arrow — default param",            src: "(a = 1) => a" },
+    { name: "arrow — rest param",               src: "(...rest) => rest" },
+    { name: "arrow — concise call body",        src: "x => f(x)" },
+    { name: "arrow — concise ternary body",     src: "x => x ? 1 : 2" },
+    { name: "arrow — returns object (paren)",   src: "x => ({ v: x })" },
+
+    // --- arrow functions — empty block body ---
+    { name: "arrow — empty block body",         src: "() => {}" },
+    { name: "arrow — param + empty block",      src: "(a) => {}" },
+
+    // --- async arrows ---
+    { name: "async arrow — single param",       src: "async x => x" },
+    { name: "async arrow — no params",          src: "async () => 1" },
+    { name: "async arrow — two params",         src: "async (a, b) => a" },
+    { name: "async arrow — empty block",        src: "async () => {}" },
+
+    // --- function expressions — empty block body ---
+    { name: "function expr — anonymous",        src: "function () {}" },
+    { name: "function expr — named",            src: "function f() {}" },
+    { name: "function expr — params",           src: "function f(a, b) {}" },
+    { name: "async function expr",              src: "async function () {}" },
+
+    // --- call / member interacting with operators + composites ---
+    { name: "member in binary",                 src: "a.b + c.d" },
+    { name: "call in binary",                   src: "f() * g()" },
+    { name: "member in array",                  src: "[a.b, c.d]" },
+    { name: "call as object value",             src: "{ result: f() }" },
+    { name: "postfix update on member",         src: "a.b++" },
+    { name: "prefix update on member",          src: "++a.b" },
+    { name: "typeof of a call",                 src: "typeof f()" },
+    { name: "delete of a member",               src: "delete a.b" },
+    { name: "call in template interp",          src: "`v=${f(x)}`" },
+    { name: "arrow as call argument",           src: "f(x => x)" },
+];
+
+describe("M2.3 expression-parser conformance — Tier 1 (node-kind sequence)", () => {
+    for (const c of CALL_MEMBER_CORPUS) {
+        test(`(tier1) ${c.name} — ${c.src}`, () => {
+            const a = parseWithAcorn(c.src);
+            const n = parseWithNative(c.src);
+
+            expect(a.ok).toBe(true);
+            expect(n.ok).toBe(true);
+            // A clean call / member / arrow input must report NO diagnostics.
+            expect(n.errors).toEqual([]);
+
+            const acornSeq = nodeKindSequence(a.ast);
+            const nativeSeq = nodeKindSequence(nativeToEstree(n.ast));
+            expect(nativeSeq).toEqual(acornSeq);
+        });
+    }
+});
+
+describe("M2.3 expression-parser conformance — Tier 2 (values + flags)", () => {
+    for (const c of CALL_MEMBER_CORPUS) {
+        test(`(tier2) ${c.name} — ${c.src}`, () => {
+            const a = parseWithAcorn(c.src);
+            const n = parseWithNative(c.src);
+
+            expect(a.ok).toBe(true);
+            expect(n.ok).toBe(true);
+
+            const acornVals = valueSequence(a.ast);
+            const nativeVals = valueSequence(nativeToEstree(n.ast));
+            expect(nativeVals).toEqual(acornVals);
+        });
+    }
+});
+
+// -----------------------------------------------------------------------------
+// M2.3 — call / member / arrow node-shape spot-checks against the native AST
+// directly. The conformance corpus proves Acorn-equivalence; these pin the
+// native enum SHAPE (kind, optional flag, child wiring, BlockStub seam).
+// -----------------------------------------------------------------------------
+describe("M2.3 expression-parser — call/member/arrow node shape (native AST)", () => {
+    test("call node — kind + callee + args", () => {
+        const n = parseWithNative("f(1, 2)");
+        expect(n.ok).toBe(true);
+        expect(n.errors).toEqual([]);
+        expect(n.ast.kind).toBe(ExprKind.Call);
+        expect(n.ast.optional).toBe(false);
+        expect(n.ast.callee.kind).toBe(ExprKind.Ident);
+        expect(n.ast.args.length).toBe(2);
+    });
+
+    test("member node — non-computed, property is an Ident", () => {
+        const n = parseWithNative("a.b");
+        expect(n.ok).toBe(true);
+        expect(n.ast.kind).toBe(ExprKind.Member);
+        expect(n.ast.computed).toBe(false);
+        expect(n.ast.optional).toBe(false);
+        expect(n.ast.property.kind).toBe(ExprKind.Ident);
+        expect(n.ast.property.name).toBe("b");
+    });
+
+    test("computed member node — computed flag true", () => {
+        const n = parseWithNative("a[i]");
+        expect(n.ok).toBe(true);
+        expect(n.ast.kind).toBe(ExprKind.Member);
+        expect(n.ast.computed).toBe(true);
+        expect(n.ast.property.kind).toBe(ExprKind.Ident);
+    });
+
+    test("optional member node — optional flag true", () => {
+        const n = parseWithNative("a?.b");
+        expect(n.ok).toBe(true);
+        expect(n.errors).toEqual([]);
+        expect(n.ast.kind).toBe(ExprKind.Member);
+        expect(n.ast.optional).toBe(true);
+        expect(n.ast.property.name).toBe("b");
+    });
+
+    test("optional call node — optional flag true", () => {
+        const n = parseWithNative("f?.()");
+        expect(n.ok).toBe(true);
+        expect(n.ast.kind).toBe(ExprKind.Call);
+        expect(n.ast.optional).toBe(true);
+    });
+
+    test("new node — callee + args", () => {
+        const n = parseWithNative("new Foo(1)");
+        expect(n.ok).toBe(true);
+        expect(n.ast.kind).toBe(ExprKind.New);
+        expect(n.ast.callee.kind).toBe(ExprKind.Ident);
+        expect(n.ast.args.length).toBe(1);
+    });
+
+    test("new without parens — empty args", () => {
+        const n = parseWithNative("new Foo");
+        expect(n.ok).toBe(true);
+        expect(n.ast.kind).toBe(ExprKind.New);
+        expect(n.ast.args.length).toBe(0);
+    });
+
+    test("tagged template node — tag + quasi", () => {
+        const n = parseWithNative("tag`hi`");
+        expect(n.ok).toBe(true);
+        expect(n.ast.kind).toBe(ExprKind.TaggedTemplate);
+        expect(n.ast.tag.kind).toBe(ExprKind.Ident);
+        expect(n.ast.quasi.kind).toBe(ExprKind.TemplateLit);
+    });
+
+    test("call chain is left-associative", () => {
+        // a.b() -> Call( callee = Member(a.b) ).
+        const n = parseWithNative("a.b()");
+        expect(n.ok).toBe(true);
+        expect(n.ast.kind).toBe(ExprKind.Call);
+        expect(n.ast.callee.kind).toBe(ExprKind.Member);
+        expect(n.ast.callee.object.kind).toBe(ExprKind.Ident);
+    });
+
+    test("arrow node — concise body is an Expr", () => {
+        const n = parseWithNative("x => x + 1");
+        expect(n.ok).toBe(true);
+        expect(n.errors).toEqual([]);
+        expect(n.ast.kind).toBe(ExprKind.Arrow);
+        expect(n.ast.isAsync).toBe(false);
+        expect(n.ast.params.length).toBe(1);
+        expect(n.ast.params[0].kind).toBe(ExprKind.Ident);
+        // The concise body is a normal expression node — NOT a BlockStub.
+        expect(n.ast.body.kind).toBe(ExprKind.Binary);
+    });
+
+    test("arrow node — block body is a BlockStub (M3 seam)", () => {
+        const n = parseWithNative("(a) => { return a + 1 }");
+        expect(n.ok).toBe(true);
+        expect(n.ast.kind).toBe(ExprKind.Arrow);
+        // The block body is captured as a BlockStub — M2.3 does NOT parse
+        // the statements; the stub carries the body's token range for M3.
+        expect(n.ast.body.kind).toBe(ExprKind.BlockStub);
+        expect(n.ast.body.tokenEnd).toBeGreaterThan(n.ast.body.tokenStart);
+        expect(Array.isArray(n.ast.body.tokens)).toBe(true);
+        expect(n.ast.body.tokens.length).toBeGreaterThan(0);
+    });
+
+    test("async arrow node — isAsync flag true", () => {
+        const n = parseWithNative("async x => x");
+        expect(n.ok).toBe(true);
+        expect(n.ast.kind).toBe(ExprKind.Arrow);
+        expect(n.ast.isAsync).toBe(true);
+    });
+
+    test("function expression node — name + params + BlockStub body", () => {
+        const n = parseWithNative("function f(a, b) {}");
+        expect(n.ok).toBe(true);
+        expect(n.errors).toEqual([]);
+        expect(n.ast.kind).toBe(ExprKind.Function);
+        expect(n.ast.name).toBe("f");
+        expect(n.ast.params.length).toBe(2);
+        expect(n.ast.body.kind).toBe(ExprKind.BlockStub);
+    });
+
+    test("anonymous function expression — name is not (absent)", () => {
+        const n = parseWithNative("function () {}");
+        expect(n.ok).toBe(true);
+        expect(n.ast.kind).toBe(ExprKind.Function);
+        // scrml has no null/undefined — an absent name is `not`, which the
+        // JS-host shadow surfaces as the constructor's `null` argument.
+        expect(n.ast.name == null).toBe(true);
+    });
+
+    test("rest parameter — RestElement node", () => {
+        const n = parseWithNative("(...rest) => rest");
+        expect(n.ok).toBe(true);
+        expect(n.ast.params[0].kind).toBe(ExprKind.RestElement);
+        expect(n.ast.params[0].argument.kind).toBe(ExprKind.Ident);
+    });
+
+    test("default parameter — AssignmentPattern node", () => {
+        const n = parseWithNative("(a = 1) => a");
+        expect(n.ok).toBe(true);
+        expect(n.ast.params[0].kind).toBe(ExprKind.AssignmentPattern);
+        expect(n.ast.params[0].left.kind).toBe(ExprKind.Ident);
+        expect(n.ast.params[0].right.kind).toBe(ExprKind.NumberLit);
+    });
+
+    test("object method — Method property with a Function value", () => {
+        const n = parseWithNative("{ run() {} }");
+        expect(n.ok).toBe(true);
+        expect(n.errors).toEqual([]);
+        expect(n.ast.properties[0].kind).toBe(ObjectPropertyKind.Method);
+        expect(n.ast.properties[0].methodKind).toBe("init");
+        expect(n.ast.properties[0].value.kind).toBe(ExprKind.Function);
+    });
+
+    test("object getter — methodKind is 'get'", () => {
+        const n = parseWithNative("{ get x() {} }");
+        expect(n.ok).toBe(true);
+        expect(n.ast.properties[0].kind).toBe(ObjectPropertyKind.Method);
+        expect(n.ast.properties[0].methodKind).toBe("get");
+    });
+
+    test("this atom — This node", () => {
+        const n = parseWithNative("this");
+        expect(n.ok).toBe(true);
+        expect(n.errors).toEqual([]);
+        expect(n.ast.kind).toBe(ExprKind.This);
+    });
+});
+
+// -----------------------------------------------------------------------------
+// M2.3 — the optional-chaining carve-out: a chain with ANY `?.` link projects
+// to a SINGLE outer ESTree ChainExpression (Acorn equivalence). These pin that
+// the conformance normalizer + the native `optional` flags reproduce it.
+// -----------------------------------------------------------------------------
+describe("M2.3 expression-parser — optional-chain ChainExpression wrapping", () => {
+    const chainCases = [
+        "a?.b", "a?.b.c", "a.b?.c", "a?.b?.c", "a?.()", "a?.[0]", "f?.().x",
+    ];
+    for (const src of chainCases) {
+        test(`chain wraps once vs Acorn — ${src}`, () => {
+            const a = parseWithAcorn(src);
+            const n = parseWithNative(src);
+            expect(a.ok).toBe(true);
+            expect(n.ok).toBe(true);
+            const acornSeq = nodeKindSequence(a.ast);
+            const nativeSeq = nodeKindSequence(nativeToEstree(n.ast));
+            // Acorn emits exactly one ChainExpression for a chain with a `?.`.
+            expect(acornSeq.filter((t) => t === "ChainExpression").length).toBe(1);
+            expect(nativeSeq).toEqual(acornSeq);
+        });
+    }
+
+    test("a non-optional chain produces NO ChainExpression", () => {
+        const n = parseWithNative("a.b.c()");
+        const seq = nodeKindSequence(nativeToEstree(n.ast));
+        expect(seq).not.toContain("ChainExpression");
+    });
+});
+
+// -----------------------------------------------------------------------------
+// M2.3 — block-body arrow / function expressions with NON-EMPTY bodies. The
+// body is a BlockStub (M3's statement parser fills it). These are native-only
+// (Acorn parses the statements; M2.3 does not — the BlockStub is the seam) and
+// verify the head parses cleanly and the stub captures the body token range.
+// -----------------------------------------------------------------------------
+describe("M2.3 expression-parser — block-body stub (M3 seam, native-only)", () => {
+    const blockBodyCases = [
+        { name: "arrow with return statement",      src: "x => { return x }" },
+        { name: "arrow with multiple statements",   src: "(a) => { let b = a; return b }" },
+        { name: "function expr with body",          src: "function f() { return 1 }" },
+        { name: "arrow body with nested object",    src: "() => { return { a: 1 } }" },
+        { name: "arrow body with nested block",     src: "() => { if (x) { return 1 } }" },
+    ];
+    for (const c of blockBodyCases) {
+        test(`head parses, body stubbed — ${c.name}`, () => {
+            const n = parseWithNative(c.src);
+            expect(n.ok).toBe(true);
+            expect(n.errors).toEqual([]);
+            const fnNode = n.ast;
+            expect(fnNode.kind === ExprKind.Arrow || fnNode.kind === ExprKind.Function).toBe(true);
+            // The body is a BlockStub — M2.3 does NOT parse the statements.
+            expect(fnNode.body.kind).toBe(ExprKind.BlockStub);
+            // The stub captures the body's token range + raw token slice.
+            expect(fnNode.body.tokenEnd).toBeGreaterThanOrEqual(fnNode.body.tokenStart);
+            expect(Array.isArray(fnNode.body.tokens)).toBe(true);
+            // The stub's token slice length matches its declared range.
+            expect(fnNode.body.tokens.length).toBe(fnNode.body.tokenEnd - fnNode.body.tokenStart);
+        });
+    }
+
+    test("nested-object braces inside a block body do not truncate the stub", () => {
+        // The `{ a: 1 }` inside the body has its own LBrace/RBrace pair; the
+        // stub's brace counter must net them to zero and capture the whole
+        // body up to the function's own closing brace.
+        const n = parseWithNative("() => { return { a: { b: 1 } } }");
+        expect(n.ok).toBe(true);
+        expect(n.errors).toEqual([]);
+        expect(n.ast.body.kind).toBe(ExprKind.BlockStub);
+        // The body's last token is the inner `}` of `{ b: 1 }` ... `}` `}` —
+        // the stub must include every interior token.
+        const lastTok = n.ast.body.tokens[n.ast.body.tokens.length - 1];
+        expect(lastTok).toBeDefined();
+    });
+});
+
+// -----------------------------------------------------------------------------
+// M2.3 — error paths. Malformed call / member / arrow forms record a
+// structured diagnostic and do NOT throw.
+// -----------------------------------------------------------------------------
+describe("M2.3 expression-parser — error paths (diagnostics, no throw)", () => {
+    test("unclosed call argument list records E-EXPR-UNCLOSED-PAREN", () => {
+        const n = parseWithNative("f(1, 2");
+        expect(n.ok).toBe(true);
+        const codes = n.errors.map((e) => e.code);
+        expect(codes).toContain("E-EXPR-UNCLOSED-PAREN");
+    });
+
+    test("unclosed computed member records E-EXPR-UNCLOSED-BRACKET", () => {
+        const n = parseWithNative("a[0");
+        expect(n.ok).toBe(true);
+        const codes = n.errors.map((e) => e.code);
+        expect(codes).toContain("E-EXPR-UNCLOSED-BRACKET");
+    });
+
+    test("member access with no property name records E-EXPR-MEMBER-NAME", () => {
+        const n = parseWithNative("a.");
+        expect(n.ok).toBe(true);
+        const codes = n.errors.map((e) => e.code);
+        expect(codes).toContain("E-EXPR-MEMBER-NAME");
+    });
+
+    test("unclosed block body records E-EXPR-UNCLOSED-BLOCK", () => {
+        const n = parseWithNative("() => { return 1");
+        expect(n.ok).toBe(true);
+        const codes = n.errors.map((e) => e.code);
+        expect(codes).toContain("E-EXPR-UNCLOSED-BLOCK");
+    });
+});
+
+// -----------------------------------------------------------------------------
 // Native-only primary-expression cases — scrml extensions M1 LEXES and M2.1
 // builds AST nodes for, but which Acorn has no equivalent for (DD §D6
 // documented divergence). Exercised against the native parser directly.
@@ -913,10 +1587,17 @@ describe("M2.1 expression-parser — error paths (diagnostics, no throw)", () =>
         expect(codes).toContain("E-EXPR-UNEXPECTED");
     });
 
-    test("object method shape records E-EXPR-OBJECT-METHOD-UNSUPPORTED (M2.3 deferral)", () => {
-        const n = parseWithNative("{foo(");
+    test("object methods now parse (M2.3 lifts the M2.2 deferral)", () => {
+        // M2.2 recorded E-EXPR-OBJECT-METHOD-UNSUPPORTED for the method
+        // shape; M2.3 parses object methods (function head + block-stub
+        // body). A complete method now parses with no diagnostic.
+        const n = parseWithNative("{ foo() {} }");
         expect(n.ok).toBe(true);
+        expect(n.errors).toEqual([]);
+        expect(n.ast.kind).toBe(ExprKind.Object);
+        expect(n.ast.properties[0].kind).toBe(ObjectPropertyKind.Method);
+        // The deferral diagnostic is retired — no code path emits it.
         const codes = n.errors.map((e) => e.code);
-        expect(codes).toContain("E-EXPR-OBJECT-METHOD-UNSUPPORTED");
+        expect(codes).not.toContain("E-EXPR-OBJECT-METHOD-UNSUPPORTED");
     });
 });
