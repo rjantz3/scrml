@@ -1,6 +1,7 @@
 # Quoted-Text Model — Investigation Plan
 
-**Status:** ACTIVE — investigation phase (go/no-go pending DD-3 + synthesis)
+**Status:** CLOSED — investigation complete. **Go/no-go: GO at scope (b), v0.4** (S111).
+Implementation track now lives in `IMPLEMENTATION-ROADMAP.md` (sibling).
 **Opened:** S110, 2026-05-20
 **Working name:** "quoted-text model" (rename freely)
 **Owner:** scrmlTS PA + the language designer
@@ -68,31 +69,62 @@ shipped a within-one-language code/text-default split; (b) IS that split. (a) ha
 whole-language prior art (Elm, F# Feliz). The debate weighs measured-friction (favors b)
 against coherence-and-precedent (favors a).
 
-### Phase 3 — Debate cluster — FRAMED; runs NEXT SESSION
-DD-2 handed the framing. **Debate question:** *"Should the quoted-text model apply to
-every markup body language-wide (scope a), or only to code-bearing bodies — engine
-state-children / match arms / `:`-shorthand — leaving plain markup free-text (scope b)?
-And does interpolation move inside the quoted string or stay a sibling value?"* — first
-clause carries Q-QT-2/4/5; second clause is Q-QT-1; Q-QT-3 rides as a short slice (its
-Option B — both `'`+`"` — reintroduces the Bug-2 surface; needs an explicit ruling).
-**Roster — all 4 staged in `.claude/agents/`:** `elm-expert` (scope a / Pillar-1
-carrier; argues Q-QT-1 sibling form), `jsx-expert` (scope b / free-text-for-prose
-defender; sharpest interpolation voice), `simplicity-defender` (80%-tax skeptic /
-smallest-coherent-version), `clojure-expert` (the homoiconic-mechanism voice — argues
-`bare = code, quote = data` on its own terms; syntax-quote precedent for Q-QT-1).
-**Timing:** the 3 newly-authored expert agents (elm/jsx/clojure) load as `subagent_type`s
-only at next session start (the harness caches agent definitions at startup). Phase 3
-runs NEXT SESSION — the framing is locked, nothing more to prep.
+### Phase 3 — Debate cluster — COMPLETE (S111)
+4-way debate run S111 via the `debate` skill: `elm-expert` (scope a / Pillar-1 carrier),
+`jsx-expert` (scope b / free-text-for-prose defender), `simplicity-defender` (80%-tax
+skeptic / smallest-coherent-version), `clojure-expert` (homoiconic-mechanism voice).
+`debate-judge` scored + recorded a design insight to `~/.claude/design-insights.md`.
+**Scorecard totals:** clojure 49.0 · jsx 47.5 · elm 46.5 · simplicity-defender 45.0.
+**Verdict on the three sub-questions:**
+- **Q-QT-3 (quote char) — SETTLED 4-0: `"` only.** Every expert independently rejected
+  the both-quotes option as a Bug-2 regression. Closed.
+- **Q-QT-1 (interpolation) — LEANS Option A (inside-the-string).** clojure-expert's
+  syntax-quote/unquote argument decisive; sibling form fragments a sentence + reinvents
+  JSX's `{' '}` seam. Couples to the scope outcome.
+- **Q-QT-6 (scope) — verdict WEIGHT favors scope (b), code-bearing-only.** No expert
+  disputed the friction data; the data justifies (b) on its own terms. Even
+  clojure-expert (lineage most favors uniformity) declined to let homoiconicity settle
+  scope, calling (b) "the Lisp bet correctly applied." elm-expert's (a) case is honest
+  but rests on coherence, not friction count. **Two caveats ride the (b) verdict:** (b)
+  is genuinely unprecedented (no within-one-language Camp-A/Camp-B split has shipped),
+  and (b) accepts one permanently-unfixable residual heuristic bug ("Broad-C" bare-`/`).
+**Design insight recorded:** mechanism vs scope are two separate decisions — friction
+data decides scope; teach-time simplicity is routinely mistaken for use-time simplicity.
 
-### Phase 4 — DD-3: Depth-of-fix
-After debates, on the chosen approach / finalists. Every compiler layer touched
-(BS inversion, tokenizer, ast-builder, codegen), the spec rewrite surface, the
-migration (corpus + samples + examples + self-host), auto-migration tooling
-feasibility, the estimate. Feeds the version-horizon decision.
+### Phase 4 — DD-3: Depth-of-fix — COMPLETE (S111)
+`scrml-deep-dive` (background). Output →
+`scrml-support/docs/deep-dives/quoted-text-model-depth-of-fix-2026-05-20.md` (812L).
+Priced BOTH scopes from live source. **Headline:**
+- **Scope (b) — ~120h midpoint (~80–167h range) → v0.4.** Bounded: ~45-file migration,
+  reliable codemod, hard cutover, `TextNode` survives (no snapshot storm), rides existing
+  infra (`STRUCTURAL_RAW_BODY_ELEMENTS`, template-literal machinery, `escapeHtmlText`).
+- **Scope (a) — ~255h midpoint (~176–338h range) → v1.0.** BS rewrite + 18-file
+  `TextNode`-deletion blast radius + unsized snapshot regeneration + ~893-file migration
+  + deprecation window. Must land before the post-v1.0 self-host rewrite — last cheap window.
+- **(a)-minus-(b) delta ≈ 135h** — what the designer buys: Pillar-1-made-literal, one
+  body grammar, "Broad-C" bug categorically impossible, whitespace fixed language-wide.
 
-### Phase 5 — Synthesis + go/no-go
-PA synthesizes; designer calls go/no-go with a real cost in hand. If go → becomes
-an implementation roadmap.
+**Key findings:** Q-DD1-A — (b) retires only ~0.5–1.5 of 12 BS heuristics (its real
+benefit is ~900–1200 LOC of re-tokenizer scaffolding deleted, NOT heuristics retired);
+(a) retires ~4 full + 3–4 shrink. Q-DD1-B — (b) SHRINKS the re-tokenizers (~50–75%), does
+NOT delete them; semantic parsing survives as a thin shim. Q-DD2-A — auto-HTML-escape is
+cheap (`escapeHtmlText` already exists + wired). Q-DD2-B — `TextNode` deletion touches 18
+files / 62 occurrences + unsized snapshot regen. **Material corrections to prior DDs:**
+migration corpus is 804 samples / 64 examples / 25 self-host (not "~275"), but (b)'s
+*actual* migration is only ~45 files (~20x asymmetry vs (a)'s ~893); the 5 BS classifier
+functions are NOT purely text-vs-code (also resolve markup-vs-state-decl) so DD-2's
+"delete the heuristic engine" framing is optimistic; BPP / function-body deferral is
+orthogonal — neither scope shrinks it.
+
+**New open questions surfaced — see register (Q-DD3-A..D).**
+
+### Phase 5 — Synthesis + go/no-go — CLOSED: GO (S111)
+All research phases complete (DD-1 need + DD-2 design + Phase-3 debate verdict + DD-3
+cost). **Designer ruling S111: GO at scope (b), v0.4.** The bounded option, not the
+maximal (a)/v1.0 one. The investigation is closed; the implementation track is in
+`IMPLEMENTATION-ROADMAP.md` (sibling) — locked design, 8-wave decomposition (~120h
+midpoint), Wave 0 pre-impl spike dispatched S111. Phase-5 go/no-go recorded verbatim in
+`scrml-support/user-voice-scrmlTS.md` Session 111.
 
 ## Open-questions register
 
@@ -100,19 +132,23 @@ The designer answers questions as they surface. Live register:
 
 | ID | Question | Status |
 |---|---|---|
-| Q-QT-1 | Interpolation — `${@x}` inside the quoted string vs a sibling value | DEBATE (Phase 3, clause 2) — the one genuinely-independent fork |
+| Q-QT-1 | Interpolation — `${@x}` inside the quoted string vs a sibling value | DEBATE VERDICT (S111) — LEANS Option A (inside-the-string); DD-3 costs both |
 | Q-QT-2 | Whitespace + multi-line text semantics | RESOLVED-BY-COUPLING — pairs deterministically with Q-QT-6; not a standalone fork |
-| Q-QT-3 | Quote char — `'` / `"` / both / backtick | DEBATE (short slice) — Option B (both) reintroduces the Bug-2 unpaired-quote surface |
+| Q-QT-3 | Quote char — `'` / `"` / both / backtick | SETTLED (S111 debate, 4-0) — `"` only; "both" rejected as a Bug-2 regression |
 | Q-QT-4 | `<pre>`/`<code>` subsumption | LARGELY RESOLVED-BY-COUPLING — pairs with scope; minor A-vs-C fork is a designer post-call |
 | Q-QT-5 | BS-layer inversion shape | RESOLVED-BY-COUPLING — implementation consequence of scope; → DD-3 detail |
-| Q-QT-6 | Scope — all-bodies (a) vs code-bearing-only (b) | DEBATE master fork (Phase 3); carries Q-QT-2/4/5 |
-| Q-QT-7 | Version horizon | open — after DD-3 |
+| Q-QT-6 | Scope — all-bodies (a) vs code-bearing-only (b) | DEBATE VERDICT (S111) — weight favors (b); 2 caveats; go/no-go after DD-3 |
+| Q-QT-7 | Version horizon | open — DD-3 IN FLIGHT (S111) |
 | Q-DD1-A | Per-scope heuristic-retirement count — how many of the 12 BS mechanisms does each scope variant retire? (the concrete depth-of-fix benefit figure) | open — DD-3 |
 | Q-DD1-B | Does scope (b) *delete* `engine-statechild-parser.ts` + `match-statechild-parser.ts`, or only shrink them? | open — DD-3 |
 | Q-DD1-C | Q-QT-2 (whitespace) and Q-QT-6 (scope) are COUPLED — a quoted string has unambiguous whitespace; a free-text `<p>` does not. Resolve together. | open — DD-2 |
 | Q-DD1-D | The quoted-text model may subsume `<pre>`/`<code>` *better* than they currently work (exact-whitespace string literal vs `<pre>`'s indentation leaks) — weigh in Q-QT-4. | open — DD-2 |
 | Q-DD1-E | Corpus-ouroboros — any migration tooling (DD-3) must not bake in current defensive shapes; the corpus is an artifact of the OLD model. | open — DD-3 |
-| Q-DD2-A/B/C | DD-2 sub-questions — codegen auto-HTML-escape fork / `TextNode`-deletion blast radius / migration strictness (see DD-2 §Open Questions) | open — DD-3 or mid-debate sub-deep-dive |
+| Q-DD2-A/B/C | DD-2 sub-questions — codegen auto-HTML-escape fork / `TextNode`-deletion blast radius / migration strictness | RESOLVED by DD-3 — auto-escape (cheap, `escapeHtmlText` exists); blast radius 18 files/62 occ; (b) hard-cutover / (a) deprecation-window |
+| Q-DD3-A | Snapshot-test corpus size (scope a only) — the (a) estimate's least-confident line (12–30h). `grep` `compiler/tests/` fixtures before any (a) go-decision. | open — pre-(a)-implementation scoping |
+| Q-DD3-B | The 5 BS classifier functions also resolve markup-vs-state-decl — they shrink, do not fully delete, even under (a). Implementation scoping should confirm how much survives. | open — implementation scoping |
+| Q-DD3-C | Mode-leak hardening (scope b) — the BS mode-flag depends on classifiers it does not retire to detect body boundaries; highest-variance line item (8–20h). A pre-impl spike would tighten the (b) estimate. | open — pre-(b)-implementation spike |
+| Q-DD3-D | BPP / function-body raw-text deferral is orthogonal — neither scope shrinks it. If the raw-text-deferral problem is wanted solved whole, BPP is a separate investigation. | open — separate investigation if pursued |
 
 New questions append here as the DDs surface them.
 
