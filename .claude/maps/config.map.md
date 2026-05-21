@@ -1,59 +1,50 @@
 # config.map.md
 # project: scrmlts
-# updated: 2026-05-21T09:04:37-06:00  commit: 092fa90a
-
-No `.env`, `.env.example`, or `.env.template` file exists in the repo
-(`.gitignore` lists `.env` / `.env.local` defensively, but no such file is present).
-No `scrml.config.*` / `.scrmlrc` project config file exists.
-There is no runtime application here — this is a compiler invoked by CLI flags.
-UNCHANGED since 87453fb (S113-S114 native-parser arc added no env vars or config files).
+# updated: 2026-05-21T15:00:00Z  commit: 67a17dc5
 
 ## Environment Variables
+No `.env.example` / `.env.template` in the repo. Env vars referenced in source:
 
-Only two environment variables are read anywhere in the codebase, both for
-dev/serve-port selection in the generated/served output. (The native-parser
-modules read no environment variables — grep-confirmed at 092fa90a.)
+SCRML_PORT — optional — dev/serve server port (read in commands/dev.js / serve.js)
+PORT       — optional — fallback server port
 
-SCRML_PORT — optional — dev server / compiler-server listen port.
-  Read in compiler/src/serve-client.js:57 (falls back to a DEFAULT_PORT) and
-  compiler/src/commands/serve.js:58 (falls back to 3100).
-PORT — optional — listen port baked into a *built production server*.
-  compiler/src/commands/build.js:297 emits `const PORT = parseInt(process.env.PORT ?? "<value>", 10)`
-  into the generated server.js. This is a variable of the *emitted artifact*,
-  not of the compiler itself.
+No secrets, API keys, or credential keys are configured anywhere in source.
 
-## Feature Flags
-
-No runtime feature-flag system. Compiler behavior is selected via CLI flags
-(see build.map.md "Compile / Dev options" for the full flag list:
---verbose, --convert-legacy-css, --embed-runtime, --emit-batch-plan,
---emit-reachability, --chunk-size-budget=N, --emit-machine-tests,
---debug-perf, --parser=scrml-native, --watch).
-
-`--parser=scrml-native` — M5-LIGHT observability flag (S114, M5.1). Accepted by
-`scrml compile` / `scrml dev`. Emits `I-PARSER-NATIVE-SHADOW` info diagnostic into
-`result.warnings` per compile; the live BS+TAB+BPP pipeline still runs. Only
-`scrml-native` is a valid value; other values error at argument-parse time.
+## Feature Flags (compiler options, not env)
+Passed to `compileScrml(options)` in compiler/src/api.js — recognized keys:
+parser              — "scrml-native" emits I-PARSER-NATIVE-SHADOW; any other value is a no-op
+emitPerRoute        — default false — per-route artifact splitter (SPEC §40.9.7)
+testMode            — default false — emit `<base>.test.js` from `~{}` blocks (SPEC §19.12.7)
+emitMachineTests    — default false — emit `.machine.test.js` (SPEC §51.13)
+debugPerf           — default false — `--debug-perf` PGO sub-stage instrumentation
+sourceMap           — default false — emit Source Map v3 .map files
+convertLegacyCss    — default false — pre-process `<style>` blocks to `#{…}`
+embedRuntime        — default false — inline runtime instead of separate file
+gather              — default true  — auto-gather transitive .scrml import closure (SPEC §21.7)
+gatherLimit         — default 5000  — GATHER_LIMIT cap; E-IMPORT-007 above
+mode                — "browser" | "library" (default "browser")
+chunkSizeBudgetBytes — `--chunk-size-budget=<bytes>`; default 100000 (W-CG-CHUNK-LARGE)
+compilerSettings.lintTailwindUnrecognizedClass — "warn" | "off" (default "warn")
+selfHostModules     — null — optional self-hosted pipeline-stage overrides
 
 ## Config Files
+### bunfig.toml
+[test] root: string — "compiler/tests/"
+[test] timeout: number — 10000 (ms)
 
-bunfig.toml — Bun test config.
-  [test] root = "compiler/tests/", timeout = <value> (ms)
+### package.json (root)
+type: "module" | private: true | workspaces: ["compiler"]
+bin.scrml → compiler/bin/scrml.js | engines.bun: ">=1.3.13"
 
-package.json (root) — workspace + scripts + bin + engines (Bun >= 1.3.13).
-compiler/package.json — compiler workspace member (acorn + astring deps).
-editors/vscode/package.json — VS Code extension manifest.
-e2e/playwright.config.ts, e2e/playwright.docs.config.ts — Playwright e2e configs.
+### compiler/package.json
+private sub-package; deps acorn + astring; devDep @happy-dom/global-registrator
 
-## Compiler Settings (in scrml *source*, not this codebase)
-
-SPEC §28 defines `html-content-model` and four lint-suppression settings
-(`lint.lifecycle-candidate`, `lint.match-rule-inert`, `lint.engine-initial-missing`,
-`lint.deprecated-machine`) — these are settings a `.scrml` *program* declares;
-they are not configuration of the scrmlts repo.
+## CI / Deployment Config
+No `.github/workflows`, `.gitlab-ci.yml`, `Jenkinsfile`, `Dockerfile`, or
+`docker-compose.*`. CI surface is the local git-hooks set (see build.map.md).
 
 ## Tags
-#scrmlts #map #config #env #m5-light
+#scrmlts #map #config #compiler-options
 
 ## Links
 - [primary.map.md](./primary.map.md)

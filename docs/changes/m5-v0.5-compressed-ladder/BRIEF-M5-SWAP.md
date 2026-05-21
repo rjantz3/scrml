@@ -35,9 +35,10 @@ compiler-source change to `api.js` + the native-parser seam + a SPEC §34
 amendment — follow the routing for "compiler-source bug fix / new feature" and
 "spec amendment".
 
-Map currency: maps reflect HEAD `<PA-FILLS-SHA>` as of `<PA-FILLS-DATE>`. If your
-work touches files modified after that point, treat map content as a hypothesis
-to verify via grep/Read against current source.
+Map currency: maps reflect HEAD `67a17dc5` as of `2026-05-21` (refreshed at S117
+OPEN specifically for this dispatch — they are current). If your work touches
+files modified after that point, treat map content as a hypothesis to verify via
+grep/Read against current source.
 
 Feedback: in your final report, state either "Maps consulted: [list]; load-bearing
 finding: <one sentence>" or "Maps consulted but not load-bearing".
@@ -46,7 +47,9 @@ finding: <one sentence>" or "Maps consulted but not load-bearing".
 
 # CRITICAL — STARTUP VERIFICATION + PATH DISCIPLINE
 
-Your worktree path is: `<PA-FILLS-ABSOLUTE-WORKTREE-PATH>`
+Your worktree is harness-allocated under
+`/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-<id>/`. The `pwd`
+output from startup-verification step 1 IS your `WORKTREE_ROOT` — use it.
 
 **S99 leak-history: this project has had path-discipline leaks where agent
 Write/Edit calls landed in the main checkout instead of the worktree. Do not be
@@ -54,10 +57,10 @@ the next incident.**
 
 ## Startup verification (BEFORE any other tool call)
 
-1. `pwd` — MUST equal the worktree path above AND start with
+1. `pwd` — output MUST start with
    `/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-`. If it is
-   under any other repo, STOP and report (S90 CWD-routing failure). Save as
-   `WORKTREE_ROOT`.
+   under any other repo (e.g. `scrml-support/.claude/worktrees/`), STOP and
+   report (S90 CWD-routing failure). Save the output as `WORKTREE_ROOT`.
 2. `git rev-parse --show-toplevel` — MUST equal `WORKTREE_ROOT`.
 3. `git merge main --no-edit` — worktrees branch from the session-start commit,
    not live `main` HEAD (S112). Merge `main` so you build on current truth.
