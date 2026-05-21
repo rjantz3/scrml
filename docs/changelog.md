@@ -2,7 +2,18 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-21 **S114 CLOSE — v0.4.0 release-cut**). Full `bun test` **17,842 pass / 173 skip / 1 todo / 0 fail / 732 files / ~52,800 expect**; pre-commit subset **13,358 pass / 92 skip / 1 todo / 0 fail / 694 files**. Native-parser front-end COMPLETE (JS chain M1-M4 + markup chain MK1-MK4); K-ledger 12-of-12 resolved (S113 + S114). v0.4.0 tag forthcoming.
+Current baseline (2026-05-21 **S115 CLOSE**). Full `bun test` **18,102 pass / 169 skip / 1 todo / 0 fail / 738 files / ~55,351 expect**. v0.4.0 stands (S114). M5/M6 compressed-MD-ladder in flight — v0.5 cut + v0.6 bridge units landed; M5-swap is the next milestone.
+
+### 2026-05-21 (S115 — M5/M6 compressed-ladder opened, Ext 1 complete, corpus audits)
+
+S115 ran the M5/M6 compressed-MD-ladder (DD #27) through its v0.5 cut and v0.6 bridge units, shipped the Ext 1 multi-batch CPS body-split COMPLETE (M1.1-M1.6), retracted the published "Living Compiler" article, audited + fixed all 12 dev.to articles, and ran a currency sweep of the scrml-support corpus. 20 commits on scrmlTS; tests 17,842 → 18,102 (+260), zero regressions.
+
+- **v0.5 compressed-MD-ladder cut.** F2 — `estreeType` retired, renamed `nativeKind`, dual-mode codegen kind-tests. F3 — native-parser `collectHoisted` analogue. F5+F6 — the PGO `has*` flags + `authConfig`/`middlewareConfig` extraction relocated out of `ast-builder.js` into a downstream PRECG stage in `api.js`. (F4 SpanTable / F9 switch-scanner — retirements realized at M6.)
+- **Ext 1 — multi-batch CPS body-split, COMPLETE (M1.1-M1.6).** `CPSSplit` type lift → body-DG builder (statement-grain, NEW `body-dg-builder.ts`) → multi-batch planner (NEW `cps-batch-planner.ts`) → per-batch monotonicity classifier → multi-stub emit + client-wrapper multi-await → SPEC §19.9.9 ratification. §34 +2: `E-CPS-MULTIBATCH-REORDER`, `E-CPS-MULTIBATCH-MACHINE-CROSSING`. +~130 tests.
+- **v0.6 native-parser bridge units.** F1 — markup attribute tokenizer (`attrs[]` + `tokenizedAttrs`). F7 — state / SQL / CSS native sub-parsers. F8 — `^{}` meta + `!{}` error-effect payloads (downstream dual-mode `isMetaKind`/`isErrorEffectKind`). +~100 conformance tests. The native parser stays non-adopter-visible until the M5 pipeline swap.
+- **Living Compiler retraction (draft) + dev.to article truthfulness audit + fix pass.** All 12 articles classified; 11 corrected — 8-article retracted-link scrub, de-versioned banners, per-article correction notes.
+- **scrml-support corpus currency sweep.** 3 stale-and-cited docs marked; the doc-currency convention (`status:` enum + `last-reviewed:`/`superseded-by:` + same-landing discipline) ratified into `pa.md`.
+- **Two compiler-concept deep-dives** — the code-import story (incl. a content-addressed `vendor:` design) and the build-story compiler model.
 
 ## v0.4.0 — 2026-05-21 (the post-v0.3.0 rollup)
 
