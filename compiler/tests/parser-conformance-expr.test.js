@@ -45,6 +45,10 @@ import {
     IsCheckOp, MatchArmPatternKind,
 } from "../native-parser/ast-expr.js";
 
+// M4.2 — function-param destructuring + arrow rest/default params now emit
+// REAL binding nodes (the K6 closure); the normalizer + a few native-shape
+// tests below recognize the BindingKind catalog.
+import { BindingKind } from "../native-parser/ast-stmt.js";
 const ACORN_OPTS = {
     ecmaVersion: 2025,
     sourceType:  "module",
@@ -370,15 +374,63 @@ function nativeToEstree(node, insideChain) {
         };
     }
 
-    // RestElement / AssignmentPattern — parameter-pattern nodes.
-    if (node.kind === ExprKind.RestElement) {
+    // RestElement / AssignmentPattern — parameter-pattern nodes. After M4.2
+    // (K6 closure) these may be EITHER the Expr-shape twins (the legacy form,
+    // retained for ast-expr nodes that still produce them) OR the binding-
+    // shape form (`bindingKind: "RestElement"` / `"AssignmentPattern"`)
+    // — function-parameter targets are now binding-shape. The normalizer
+    // accepts both surfaces.
+    if (node.kind === ExprKind.RestElement || node.bindingKind === "RestElement") {
         return { type: "RestElement", argument: nativeToEstree(node.argument) };
     }
-    if (node.kind === ExprKind.AssignmentPattern) {
+    if (node.kind === ExprKind.AssignmentPattern || node.bindingKind === "AssignmentPattern") {
         return {
             type: "AssignmentPattern",
             left: nativeToEstree(node.left),
             right: nativeToEstree(node.right),
+        };
+    }
+
+    // M4.2 — BindingIdent / ObjectPattern / ArrayPattern (the binding-shape
+    // catalog from ast-stmt). A function parameter that's a plain identifier
+    // is now a BindingIdent; a destructuring param is an ObjectPattern /
+    // ArrayPattern. The shapes project to ESTree's Identifier / ObjectPattern
+    // / ArrayPattern.
+    if (node.bindingKind === BindingKind.Ident) {
+        return { type: "Identifier", name: node.name };
+    }
+    if (node.bindingKind === BindingKind.ObjectPat) {
+        return {
+            type: "ObjectPattern",
+            properties: node.properties.map((p) => {
+                if (p.propertyKind === "Rest") {
+                    return { type: "RestElement", argument: nativeToEstree(p.argument) };
+                }
+                if (p.propertyKind === "Shorthand") {
+                    return {
+                        type: "Property", shorthand: true, computed: false, kind: "init",
+                        key: { type: "Identifier", name: p.name },
+                        value: nativeToEstree(p.value),
+                    };
+                }
+                return {
+                    type: "Property", shorthand: false, computed: p.computed === true, kind: "init",
+                    key: nativeToEstree(p.key),
+                    value: nativeToEstree(p.value),
+                };
+            }),
+        };
+    }
+    if (node.bindingKind === BindingKind.ArrayPat) {
+        return {
+            type: "ArrayPattern",
+            elements: node.elements.map((el) => {
+                if (el.elementKind === "Hole") return null;
+                if (el.elementKind === "Rest") {
+                    return { type: "RestElement", argument: nativeToEstree(el.argument) };
+                }
+                return nativeToEstree(el.value);
+            }),
         };
     }
 
@@ -1321,18 +1373,23 @@ describe("M2.3 expression-parser — call/member/arrow node shape (native AST)",
         expect(n.ast.name == null).toBe(true);
     });
 
-    test("rest parameter — RestElement node", () => {
+    test("rest parameter — RestElement binding node (M4.2 K6)", () => {
         const n = parseWithNative("(...rest) => rest");
         expect(n.ok).toBe(true);
-        expect(n.ast.params[0].kind).toBe(ExprKind.RestElement);
-        expect(n.ast.params[0].argument.kind).toBe(ExprKind.Ident);
+        // M4.2 — function-param RestElement is now a BINDING-shape node
+        // (`bindingKind: "RestElement"`), and its argument is a BindingIdent.
+        expect(n.ast.params[0].bindingKind).toBe("RestElement");
+        expect(n.ast.params[0].argument.bindingKind).toBe(BindingKind.Ident);
     });
 
-    test("default parameter — AssignmentPattern node", () => {
+    test("default parameter — AssignmentPattern binding node (M4.2 K6)", () => {
         const n = parseWithNative("(a = 1) => a");
         expect(n.ok).toBe(true);
-        expect(n.ast.params[0].kind).toBe(ExprKind.AssignmentPattern);
-        expect(n.ast.params[0].left.kind).toBe(ExprKind.Ident);
+        // M4.2 — function-param AssignmentPattern is now a BINDING-shape node
+        // (`bindingKind: "AssignmentPattern"`); its `left` is a BindingIdent;
+        // its `right` is still an Expr (the default-value expression).
+        expect(n.ast.params[0].bindingKind).toBe("AssignmentPattern");
+        expect(n.ast.params[0].left.bindingKind).toBe(BindingKind.Ident);
         expect(n.ast.params[0].right.kind).toBe(ExprKind.NumberLit);
     });
 

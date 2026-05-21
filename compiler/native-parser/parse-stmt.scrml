@@ -64,10 +64,10 @@
 //       - `return`, `break`, `continue` (the no-LineTerminator restricted
 //         production gates the optional argument / label);
 //       - labels + labeled statements (`label: stmt`).
-//     The classic `for`-head ambiguity (C-style vs for-in vs for-of) is
-//     resolved by a depth-0 scan of the head (forHeadKind) — the bounded-
-//     lookahead discipline (DD §D4 P3): a finite-token scan, single-direction
-//     commit, no general backtracking.
+//     The classic `for`-head ambiguity (C-style vs for-in vs for-of) was
+//     resolved in M3.2 by a depth-0 scan of the head (forHeadKind). M4.2
+//     replaced it with the `noIn` flag — the head parses naturally, the
+//     disambiguator is the trailing token; forHeadKind is GONE.
 //
 //   M3.3 — FUNCTIONS / CLASSES + IN-LINE BODIES (subsumes BPP) +
 //     IMPORT/EXPORT + TRY/THROW. Parses, per S98 DD §D5's MUST-PARSE
@@ -120,6 +120,22 @@
 //   is E-PARSER-OUT-OF-SUBSET (D5/OQ6 — surfaced to PA, scope NOT widened);
 //   `switch` specifically is also E-SWITCH-FORBIDDEN in scrml source (§17).
 //
+//   M4.2 — DESTRUCTURING UNIFICATION (K6) + `noIn` flag. parse-stmt's two
+//   changes at M4.2 close the K6 ESTree divergence carved out in M3.2:
+//     - the binding-pattern parser (parseBinding + parseObjectPattern +
+//       parseArrayPattern + helpers) MOVED to parse-expr.scrml so M2.3's
+//       parseParamTarget can call it directly (function-param destructuring
+//       no longer parses as Object/Array literal stand-ins). parse-stmt
+//       re-exports the four binding parsers for back-compat;
+//     - the for-head ambiguity (C-style vs for-in vs for-of) is now
+//       resolved by the M4.2 `noIn` flag instead of the M3.2 forHeadKind
+//       depth-scan: the head's init / LHS is parsed with noIn set (KwIn
+//       is not consumed by parseBinary), then the token at the cursor
+//       (`;` / `in` / `of`) tells us which form we're in. A non-decl
+//       destructuring LHS (`for ([a, b] of pairs)`) is converted to a
+//       binding pattern via toBindingPattern (the ESTree toAssignable
+//       transform). forHeadKind is GONE.
+//
 // EXTENSION POINTS. parseStatementList is the trampoline (the statement-list
 // loop); parseStatement is the per-statement dispatch. parseBlockStubBody is
 // the M2→M3 re-entry seam (M2.3/M2.4 left BlockStubs; M3.1 parses them).
@@ -149,6 +165,11 @@ ${
     import {
         parseExpression, parseAssignmentExpr, parsePostfix,
         parseParamList,
+        // M4.2 — binding-pattern parsing is hosted by parse-expr (the K6
+        // unification: parseParamTarget needs parseBinding too).
+        parseBinding, parseBindingIdent, parseObjectPattern, parseArrayPattern,
+        // M4.2 — `noIn` scope helpers (the for-head deferral closure).
+        enterNoInScope, exitNoInScope,
     } from "./parse-expr.scrml"
     import {
         VarDeclKind, MethodKind,
@@ -720,216 +741,18 @@ ${
     }
 
     // ====================================================================
-    // Binding patterns — declaration-target destructuring (S98 DD §D5).
+    // Binding patterns — declaration-target destructuring.
     //
-    // A declaration TARGET is an identifier or a destructuring pattern;
-    // patterns nest. These produce ast-stmt's binding nodes — NOT ast-expr's
-    // Object/Array literal nodes (a binding pattern is the left-of-`=`
-    // shape, not a value).
+    // HOSTED IN parse-expr.scrml AS OF M4.2 — the K6 unification.
+    // parseParamTarget (in parse-expr) needs parseBinding to emit a real
+    // binding node for a `{...}` / `[...]` parameter pattern. Since
+    // parse-stmt already imports from parse-expr, the binding parser
+    // lives there to avoid a circular import. parse-stmt re-exports the
+    // four binding parsers (back-compat with any external caller).
     // ====================================================================
 
-    // -- parseBinding — a binding TARGET (identifier or destructuring) --
-    export fn parseBinding(ctx) {
-        const cursor = ctx.cursor
-        const kind = currentKind(cursor)
-
-        if (kind == TokenKind.LBrace) {
-            return parseObjectPattern(ctx)
-        }
-        if (kind == TokenKind.LBracket) {
-            return parseArrayPattern(ctx)
-        }
-        return parseBindingIdent(ctx)
-    }
-
-    // -- parseBindingIdent — a plain identifier binding --
-    export fn parseBindingIdent(ctx) {
-        const cursor = ctx.cursor
-        if (currentKind(cursor) != TokenKind.Ident) {
-            recordError(ctx, "E-STMT-BINDING-NAME",
-                "expected an identifier in a binding position", spanHere(ctx))
-            return makeBindingIdent("", spanHere(ctx))
-        }
-        const tok = advance(cursor)
-        return makeBindingIdent(tok.name, tok.span)
-    }
-
-    // -- parseBindingTargetWithDefault — a binding target, opt defaulted --
-    // `target = default` -> an AssignmentPattern; a bare target -> target.
-    fn parseBindingTargetWithDefault(ctx) {
-        const cursor = ctx.cursor
-        const target = parseBinding(ctx)
-
-        if (currentKind(cursor) == TokenKind.Assign) {
-            advance(cursor)
-            const prior = enterMode(ctx, ParseMode.InExpression)
-            const dflt = parseAssignmentLevelExpr(ctx)
-            exitMode(ctx, prior)
-            const span = makeSpan(nodeStart(target), nodeEnd(dflt), nodeLine(target), nodeCol(target))
-            return makeAssignmentPattern(target, dflt, span)
-        }
-        return target
-    }
-
-    // -- parseObjectPattern — `{ a, b: c, d = 1, ...rest }` --
-    export fn parseObjectPattern(ctx) {
-        const cursor = ctx.cursor
-        const open = advance(cursor)
-        const properties = []
-
-        while (atEnd(cursor) == false && currentKind(cursor) != TokenKind.RBrace) {
-            if (currentKind(cursor) == TokenKind.Ellipsis) {
-                advance(cursor)
-                const restTarget = parseBinding(ctx)
-                properties.push(makeBindingPropertyRest(restTarget))
-            } else {
-                properties.push(parseObjectPatternProperty(ctx))
-            }
-
-            if (currentKind(cursor) == TokenKind.Comma) {
-                advance(cursor)
-                continue
-            }
-            break
-        }
-
-        let endSpan = open.span
-        if (currentKind(cursor) == TokenKind.RBrace) {
-            endSpan = advance(cursor).span
-        } else {
-            recordError(ctx, "E-STMT-UNCLOSED-PATTERN",
-                "expected '}' to close an object-destructuring pattern", open.span)
-        }
-
-        const span = makeSpan(open.span.start, endSpan.end, open.span.line, open.span.col)
-        return makeObjectPattern(properties, span)
-    }
-
-    // -- parseObjectPatternProperty — one `{ ... }` pattern property --
-    // Forms: `{ name }` / `{ name = default }` shorthand;
-    //        `{ key: target }` / `{ "k": target }` / `{ [expr]: target }`.
-    export fn parseObjectPatternProperty(ctx) {
-        const cursor = ctx.cursor
-        const kind = currentKind(cursor)
-
-        // Computed key — `[ expr ]: target` (always keyed).
-        if (kind == TokenKind.LBracket) {
-            advance(cursor)
-            const prior = enterMode(ctx, ParseMode.InExpression)
-            const keyExpr = parseAssignmentLevelExpr(ctx)
-            exitMode(ctx, prior)
-            if (currentKind(cursor) == TokenKind.RBracket) {
-                advance(cursor)
-            } else {
-                recordError(ctx, "E-STMT-UNCLOSED-COMPUTED-KEY",
-                    "expected ']' to close a computed pattern key", spanHere(ctx))
-            }
-            expectColon(ctx)
-            const valueTarget = parseBindingTargetWithDefault(ctx)
-            return makeBindingPropertyKeyValue(keyExpr, valueTarget, true)
-        }
-
-        // String / number literal key — always keyed.
-        if (kind == TokenKind.StringLit || kind == TokenKind.NumberLit) {
-            const keyTok = advance(cursor)
-            const keyExpr = literalKeyExpr(keyTok)
-            expectColon(ctx)
-            const valueTarget = parseBindingTargetWithDefault(ctx)
-            return makeBindingPropertyKeyValue(keyExpr, valueTarget, false)
-        }
-
-        // Identifier key. `name :` -> keyed; otherwise shorthand.
-        if (kind == TokenKind.Ident) {
-            const nameTok = advance(cursor)
-            if (currentKind(cursor) == TokenKind.Colon) {
-                advance(cursor)
-                const valueTarget = parseBindingTargetWithDefault(ctx)
-                const keyExpr = identKeyExpr(nameTok)
-                return makeBindingPropertyKeyValue(keyExpr, valueTarget, false)
-            }
-            let valueTarget = makeBindingIdent(nameTok.name, nameTok.span)
-            if (currentKind(cursor) == TokenKind.Assign) {
-                advance(cursor)
-                const prior = enterMode(ctx, ParseMode.InExpression)
-                const dflt = parseAssignmentLevelExpr(ctx)
-                exitMode(ctx, prior)
-                const apSpan = makeSpan(nameTok.span.start, nodeEnd(dflt), nameTok.span.line, nameTok.span.col)
-                valueTarget = makeAssignmentPattern(valueTarget, dflt, apSpan)
-            }
-            return makeBindingPropertyShorthand(nameTok.name, valueTarget)
-        }
-
-        recordError(ctx, "E-STMT-PATTERN-PROPERTY",
-            "expected a property name in an object-destructuring pattern", spanHere(ctx))
-        const placeholder = makeBindingIdent("", spanHere(ctx))
-        return makeBindingPropertyShorthand("", placeholder)
-    }
-
-    // expectColon — consume a `:` separator; record a diagnostic if absent.
-    fn expectColon(ctx) {
-        if (currentKind(ctx.cursor) == TokenKind.Colon) {
-            advance(ctx.cursor)
-            return
-        }
-        recordError(ctx, "E-STMT-PATTERN-COLON",
-            "expected ':' after a pattern property key", spanHere(ctx))
-    }
-
-    // identKeyExpr — a property-key node for an identifier-key token.
-    fn identKeyExpr(tok) {
-        return { kind: "Ident", name: tok.name, span: tok.span }
-    }
-
-    // literalKeyExpr — a property-key node for a string / number literal key.
-    fn literalKeyExpr(tok) {
-        if (tok.kind == TokenKind.StringLit) {
-            return { kind: "StringLit", value: tok.cooked, raw: tok.text, span: tok.span }
-        }
-        return { kind: "NumberLit", value: tok.value, raw: tok.text, span: tok.span }
-    }
-
-    // -- parseArrayPattern — `[ a, , b, c = 1, ...rest ]` --
-    export fn parseArrayPattern(ctx) {
-        const cursor = ctx.cursor
-        const open = advance(cursor)
-        const elements = []
-
-        while (atEnd(cursor) == false && currentKind(cursor) != TokenKind.RBracket) {
-            // Elision — a `,` with no element before it is a hole.
-            if (currentKind(cursor) == TokenKind.Comma) {
-                elements.push(makeBindingElementHole())
-                advance(cursor)
-                continue
-            }
-
-            // `...rest` — an array-pattern rest element (the last element).
-            if (currentKind(cursor) == TokenKind.Ellipsis) {
-                advance(cursor)
-                const restTarget = parseBinding(ctx)
-                elements.push(makeBindingElementRest(restTarget))
-                break
-            }
-
-            elements.push(makeBindingElementItem(parseBindingTargetWithDefault(ctx)))
-
-            if (currentKind(cursor) == TokenKind.Comma) {
-                advance(cursor)
-                continue
-            }
-            break
-        }
-
-        let endSpan = open.span
-        if (currentKind(cursor) == TokenKind.RBracket) {
-            endSpan = advance(cursor).span
-        } else {
-            recordError(ctx, "E-STMT-UNCLOSED-PATTERN",
-                "expected ']' to close an array-destructuring pattern", open.span)
-        }
-
-        const span = makeSpan(open.span.start, endSpan.end, open.span.line, open.span.col)
-        return makeArrayPattern(elements, span)
-    }
+    // Re-export from parse-expr (M4.2 hosting).
+    export { parseBinding, parseBindingIdent, parseObjectPattern, parseArrayPattern }
 
     // ====================================================================
     // Control-flow statements — M3.2.
@@ -1035,90 +858,97 @@ ${
     }
 
     // ====================================================================
-    // `for` — C-style, for-in, for-of. The for-head form is decided up
-    // front by a depth-0 scan (forHeadKind) — bounded lookahead, no
-    // backtracking (DD §D4 P3 discipline).
+    // `for` — C-style, for-in, for-of. M4.2 — refactored to use the `noIn`
+    // flag (see parse-expr.scrml's enterNoInScope / exitNoInScope). The
+    // classic JS for-head ambiguity (C-style vs for-in vs for-of) is now
+    // resolved by:
+    //   1. parse the init / LHS clause with noIn set — the `in` keyword is
+    //      NOT consumed as a binary operator (parseBinary's climber stops at
+    //      it when ctx.noIn is true), so the head parses up to the
+    //      disambiguator.
+    //   2. look at the token at the cursor:
+    //        `;` -> C-style; `in` -> for-in; `of` -> for-of.
+    // The M3.2 forHeadKind depth-scan is gone. Bounded lookahead is retained
+    // ONLY for the destructuring-LHS dispatch (see toBindingPattern): an
+    // Object/Array literal init that is followed by `in`/`of` is
+    // reinterpreted as a binding pattern (the K6-class non-declaration
+    // destructuring LHS) — the ESTree toAssignable transform.
     // ====================================================================
 
-    // forHeadKind — scan the `for` head from just after the `(` and classify
-    // it: "in" / "of" when a depth-0 `in` / `of` precedes any depth-0 `;`,
-    // else "c-style". The scan starts at cursor.idx (the caller positions the
-    // cursor just past the `(`) and reads tokens WITHOUT consuming them.
-    fn forHeadKind(ctx) {
-        const cursor = ctx.cursor
-        let i = cursor.idx
-        let depth = 0
-        const tokens = cursor.tokens
-
-        while (i < tokens.length) {
-            const tok = tokens[i]
-            if (tok is not || tok.kind == TokenKind.EOF) {
-                break
-            }
-            const k = tok.kind
-            if (k == TokenKind.LParen || k == TokenKind.LBracket || k == TokenKind.LBrace) {
-                depth = depth + 1
-            } else if (k == TokenKind.RParen || k == TokenKind.RBracket || k == TokenKind.RBrace) {
-                if (depth == 0) {
-                    break
-                }
-                depth = depth - 1
-            } else if (depth == 0) {
-                if (k == TokenKind.Semicolon) {
-                    return "c-style"
-                }
-                if (k == TokenKind.KwIn) {
-                    return "in"
-                }
-                if (k == TokenKind.KwOf) {
-                    return "of"
-                }
-            }
-            i = i + 1
+    // toBindingPattern — convert an Object/Array LITERAL expression (the
+    // shape parsePrimary produces for a top-level `{...}` / `[...]`) into
+    // the corresponding ObjectPattern / ArrayPattern binding shape. Used by
+    // the for-in/of head when the LHS parsed as an expression but the
+    // disambiguator (`in` / `of`) tells us it was meant as a binding pattern.
+    // The conversion is the ESTree-standard toAssignable transform.
+    fn toBindingPattern(node, ctx) {
+        if (node is not) {
+            return makeBindingIdent("", makeSpan(0, 0, 1, 1))
         }
-        return "c-style"
+        // Already a binding (a member expr / ident at expression level are
+        // NOT converted — a for-in LHS may be a member expression).
+        if (node.bindingKind is some) {
+            return node
+        }
+        if (node.kind == "Ident") {
+            return makeBindingIdent(node.name, node.span)
+        }
+        if (node.kind == "Array") {
+            const elements = []
+            for (const el of node.elements) {
+                if (el.kind == "Hole") {
+                    elements.push(makeBindingElementHole())
+                } else if (el.kind == "Spread") {
+                    elements.push(makeBindingElementRest(toBindingPattern(el.expression, ctx)))
+                } else {
+                    const inner = el.expression
+                    if (inner is some && inner.kind == "Assignment" && inner.op == "=") {
+                        const left = toBindingPattern(inner.target, ctx)
+                        const apSpan = inner.span
+                        elements.push(makeBindingElementItem(makeAssignmentPattern(left, inner.value, apSpan)))
+                    } else {
+                        elements.push(makeBindingElementItem(toBindingPattern(inner, ctx)))
+                    }
+                }
+            }
+            return makeArrayPattern(elements, node.span)
+        }
+        if (node.kind == "Object") {
+            const properties = []
+            for (const p of node.properties) {
+                if (p.kind == "Spread") {
+                    properties.push(makeBindingPropertyRest(toBindingPattern(p.expression, ctx)))
+                } else if (p.kind == "Shorthand") {
+                    properties.push(makeBindingPropertyShorthand(p.name,
+                        makeBindingIdent(p.name, p.span)))
+                } else if (p.kind == "KeyValue") {
+                    properties.push(makeBindingPropertyKeyValue(p.key,
+                        toBindingPattern(p.value, ctx), p.computed == true))
+                } else {
+                    recordError(ctx, "E-STMT-FOR-NONBINDABLE-LHS",
+                        "this property cannot appear in a for-in/of binding LHS",
+                        spanHere(ctx))
+                    properties.push(makeBindingPropertyShorthand("", makeBindingIdent("", spanHere(ctx))))
+                }
+            }
+            return makeObjectPattern(properties, node.span)
+        }
+        // A member expression / call / other expression — passed through.
+        return node
     }
 
-    // parseForBindingHead — the LEFT side of a for-in / for-of when it is a
-    // declaration (`for (let x of ...)`). Parses the `let`/`const`/`var`
-    // keyword + exactly ONE binding target (no initializer — JS forbids an
-    // initializer on a for-in/of binding) and returns a one-declarator
-    // VarDecl Stmt.
-    fn parseForBindingHead(ctx) {
+    // parseForCStyleVarHead — the C-style `for` init when it is a
+    // declaration. Parses a comma-separated declarator list but NOT the
+    // terminating `;` (the parseFor frame owns the head's `;` separators).
+    // M4.2 — declarator initializers parse in the no-In scope; the trailing
+    // disambiguator dispatch handles for-in/of vs C-style.
+    fn parseForCStyleVarHead(ctx, kwTok, declKind) {
         const cursor = ctx.cursor
-        const kwTok = advance(cursor)
-        const declKind = varDeclKindOf(kwTok.kind)
-
-        const target = parseBinding(ctx)
-        // An initializer on a for-in/of binding is a syntax error in modern
-        // JS — record a diagnostic and consume it so the parser proceeds.
-        if (currentKind(cursor) == TokenKind.Assign) {
-            recordError(ctx, "E-STMT-FOR-BINDING-INIT",
-                "a 'for-in' / 'for-of' binding may not have an initializer", spanHere(ctx))
-            advance(cursor)
-            const priorM = enterMode(ctx, ParseMode.InExpression)
-            parseAssignmentExpr(ctx)
-            exitMode(ctx, priorM)
-        }
-
-        const declarator = makeVarDeclarator(target, not,
-            makeSpan(nodeStart(target), nodeEnd(target), nodeLine(target), nodeCol(target)))
-        const span = makeSpan(kwTok.span.start, nodeEnd(target), kwTok.span.line, kwTok.span.col)
-        return makeVarDecl(declKind, [declarator], span)
-    }
-
-    // parseForCStyleVarHead — the C-style `for` init when it is a declaration
-    // (`for (let i = 0, j = 1; ...)`). Parses the keyword + a comma-separated
-    // declarator list but NOT the terminating `;` (parseFor owns the head's
-    // `;` separators). Mirrors parseVarDecl minus consumeSemicolon.
-    fn parseForCStyleVarHead(ctx) {
-        const cursor = ctx.cursor
-        const kwTok = advance(cursor)
-        const declKind = varDeclKindOf(kwTok.kind)
 
         const declarations = []
-        while (atEnd(cursor) == false) {
-            if (currentKind(cursor) == TokenKind.Semicolon) {
+        while (!atEnd(cursor)) {
+            const k = currentKind(cursor)
+            if (k == TokenKind.Semicolon || k == TokenKind.KwIn || k == TokenKind.KwOf) {
                 break
             }
             const declarator = parseVarDeclarator(ctx)
@@ -1141,28 +971,14 @@ ${
         return makeVarDecl(declKind, declarations, span)
     }
 
-    // parseForInOfLeftExpr — the LEFT side of a for-in / for-of when it is NOT
-    // a declaration (`for (x of xs)`, `for (obj.k in src)`). Parses a
-    // postfix-level expression — NOT a full binary expression — so the `in`
-    // operator is not consumed by parse-expr's binary climber. A
-    // destructuring LHS (`for ([a] of xs)`) parses as an array/object literal
-    // here; the conformance normalizer maps it to a pattern (the documented
-    // K6-class param/binding divergence — M4 unifies the two surfaces).
-    fn parseForInOfLeftExpr(ctx) {
-        const prior = enterMode(ctx, ParseMode.InExpression)
-        const left = parsePostfix(ctx)
-        exitMode(ctx, prior)
-        return left
-    }
-
     // -- parseFor — `for` C-style / for-in / for-of (incl. `for await`) --
+    // M4.2 — uses the noIn flag instead of the M3.2-era forHeadKind depth-
+    // scan. The head is parsed with noIn set; the disambiguator (`;` / `in`
+    // / `of`) is the next token at the cursor.
     export fn parseFor(ctx) {
         const cursor = ctx.cursor
         const kw = advance(cursor)
 
-        // `for await ( ... of ... )` — recognize the `await` keyword in the
-        // for head. The body's async context is M3.3's territory; M3.2 only
-        // records the flag.
         let isAwait = false
         if (currentKind(cursor) == TokenKind.KwAwait) {
             advance(cursor)
@@ -1171,80 +987,82 @@ ${
 
         expectLParen(ctx, "for")
 
-        const headKind = forHeadKind(ctx)
-
-        if (headKind == "in" || headKind == "of") {
-            return parseForInOf(ctx, kw, headKind, isAwait)
+        if (currentKind(cursor) == TokenKind.Semicolon) {
+            return finishForCStyle(ctx, kw, isAwait, not)
         }
-        return parseForCStyle(ctx, kw, isAwait)
+
+        // M4.2 — open the no-In scope for the init / LHS clause.
+        const noInPrior = enterNoInScope(ctx)
+
+        const initKind = currentKind(cursor)
+        let initIsDecl = false
+        let initNode = not
+
+        if (initKind == TokenKind.KwLet || initKind == TokenKind.KwConst
+            || initKind == TokenKind.KwVar) {
+            const kwTok = advance(cursor)
+            const declKind = varDeclKindOf(kwTok.kind)
+            initNode = parseForCStyleVarHead(ctx, kwTok, declKind)
+            initIsDecl = true
+        } else {
+            const priorM = enterMode(ctx, ParseMode.InExpression)
+            initNode = parseExpression(ctx)
+            exitMode(ctx, priorM)
+        }
+
+        // Close the no-In scope before parsing the RHS.
+        exitNoInScope(ctx, noInPrior)
+
+        const sep = currentKind(cursor)
+        if (sep == TokenKind.KwIn || sep == TokenKind.KwOf) {
+            return finishForInOf(ctx, kw, isAwait, initNode, initIsDecl, sep)
+        }
+        return finishForCStyle(ctx, kw, isAwait, initNode)
     }
 
-    // parseForInOf — finish a for-in / for-of after the head was classified.
-    // The cursor sits just past the `(`. `headKind` is "in" or "of".
-    fn parseForInOf(ctx, kw, headKind, isAwait) {
+    fn finishForInOf(ctx, kw, isAwait, initNode, initIsDecl, sepKind) {
         const cursor = ctx.cursor
 
-        // The left side — a declaration (`let`/`const`/`var` + one binding)
-        // or an assignment-target expression.
-        let left = not
-        const lk = currentKind(cursor)
-        if (lk == TokenKind.KwLet || lk == TokenKind.KwConst || lk == TokenKind.KwVar) {
-            left = parseForBindingHead(ctx)
-        } else {
-            left = parseForInOfLeftExpr(ctx)
-        }
-
-        // Consume the `in` / `of` operator keyword.
-        if (headKind == "in") {
-            if (currentKind(cursor) == TokenKind.KwIn) {
-                advance(cursor)
+        let left = initNode
+        if (initIsDecl == true) {
+            const decl = initNode
+            if (decl.declarations.length != 1) {
+                recordError(ctx, "E-STMT-FOR-DECL-COUNT",
+                    "a 'for-in' / 'for-of' declaration must declare exactly one binding",
+                    decl.span)
+            } else if (decl.declarations[0].init is some) {
+                recordError(ctx, "E-STMT-FOR-BINDING-INIT",
+                    "a 'for-in' / 'for-of' binding may not have an initializer",
+                    decl.declarations[0].span)
             }
-        } else if (currentKind(cursor) == TokenKind.KwOf) {
-            advance(cursor)
+        } else {
+            left = toBindingPattern(initNode, ctx)
         }
 
-        // The right side. for-in's right is a full expression; for-of's right
-        // is an assignment-level expression (a `,` there is NOT a sequence —
-        // ECMAScript's for-of grammar uses AssignmentExpression).
+        advance(cursor)
+
         const priorM = enterMode(ctx, ParseMode.InExpression)
-        const right = (headKind == "of") ? parseAssignmentExpr(ctx) : parseExpression(ctx)
+        const right = (sepKind == TokenKind.KwOf) ? parseAssignmentExpr(ctx) : parseExpression(ctx)
         exitMode(ctx, priorM)
 
         expectRParen(ctx, "for")
         const body = parseStatement(ctx)
 
         const span = makeSpan(kw.span.start, nodeEnd(body), kw.span.line, kw.span.col)
-        if (headKind == "in") {
+        if (sepKind == TokenKind.KwIn) {
             return makeForIn(left, right, body, span)
         }
         return makeForOf(left, right, body, isAwait, span)
     }
 
-    // parseForCStyle — finish a C-style `for (init; test; update) body`. The
-    // cursor sits just past the `(`. Any of the three clauses may be empty.
-    fn parseForCStyle(ctx, kw, isAwait) {
+    fn finishForCStyle(ctx, kw, isAwait, initNode) {
         const cursor = ctx.cursor
 
-        // `for await` is only legal on a for-of — a `for await (;;)` C-style
-        // is a syntax error.
         if (isAwait == true) {
             recordError(ctx, "E-STMT-FOR-AWAIT-CSTYLE",
                 "'for await' is only valid with a 'for-of' loop", kw.span)
         }
 
-        // The init clause — empty / a declaration / an expression.
-        let init = not
-        const initKind = currentKind(cursor)
-        if (initKind == TokenKind.Semicolon) {
-            // empty init
-        } else if (initKind == TokenKind.KwLet || initKind == TokenKind.KwConst
-                   || initKind == TokenKind.KwVar) {
-            init = parseForCStyleVarHead(ctx)
-        } else {
-            const priorM = enterMode(ctx, ParseMode.InExpression)
-            init = parseExpression(ctx)
-            exitMode(ctx, priorM)
-        }
         if (currentKind(cursor) == TokenKind.Semicolon) {
             advance(cursor)
         } else {
@@ -1252,7 +1070,6 @@ ${
                 "expected ';' after the 'for' init clause", spanHere(ctx))
         }
 
-        // The test clause — empty or an expression.
         let test = not
         if (currentKind(cursor) != TokenKind.Semicolon) {
             const priorM = enterMode(ctx, ParseMode.InExpression)
@@ -1266,7 +1083,6 @@ ${
                 "expected ';' after the 'for' test clause", spanHere(ctx))
         }
 
-        // The update clause — empty or an expression.
         let update = not
         if (currentKind(cursor) != TokenKind.RParen) {
             const priorM = enterMode(ctx, ParseMode.InExpression)
@@ -1278,7 +1094,7 @@ ${
         const body = parseStatement(ctx)
 
         const span = makeSpan(kw.span.start, nodeEnd(body), kw.span.line, kw.span.col)
-        return makeFor(init, test, update, body, span)
+        return makeFor(initNode, test, update, body, span)
     }
 
     // ====================================================================
@@ -1756,10 +1572,14 @@ ${
             return { key: keyExpr, computed: true, plainName: "" }
         }
 
-        // String / number literal name.
+        // String / number literal name. (literalKeyExpr moved to parse-expr
+        // at M4.2; inlined here — this is the only remaining call site.)
         if (kind == TokenKind.StringLit || kind == TokenKind.NumberLit) {
             const tok = advance(cursor)
-            return { key: literalKeyExpr(tok), computed: false, plainName: "" }
+            const keyExpr = (tok.kind == TokenKind.StringLit)
+                ? { kind: "StringLit", value: tok.cooked, raw: tok.text, span: tok.span }
+                : { kind: "NumberLit", value: tok.value, raw: tok.text, span: tok.span }
+            return { key: keyExpr, computed: false, plainName: "" }
         }
 
         // Private class fields `#name` are OUT of the M3.3 subset (DD §D5 —

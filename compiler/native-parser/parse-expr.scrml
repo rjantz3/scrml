@@ -63,6 +63,19 @@
 //     seam); `render name(args)` (§14.9); `lift expr` (§10); `fail
 //     Type::Variant(args)` (§19). These eliminate the 9 preprocessForAcorn
 //     Acorn-workaround classes (M2 gating criterion).
+//   M4.2 — DESTRUCTURING UNIFICATION (K6) + `noIn` flag. M2.3 left
+//     function-parameter `{...}` / `[...]` destructuring as Object/Array
+//     LITERAL stand-ins (a documented ESTree divergence). M4.2 hosts the
+//     binding-pattern parser (parseBinding / parseObjectPattern /
+//     parseArrayPattern + helpers — moved from parse-stmt to avoid a
+//     circular import) and routes parseParamTarget through it: a
+//     `{...}` / `[...]` parameter target is now a REAL binding node
+//     (BindingIdent / ObjectPattern / ArrayPattern). Function-param +
+//     for-in/of non-decl LHS + vardecl destructuring now share ONE
+//     binding-pattern surface. M4.2 also threads the `noIn` flag through
+//     the parseBinary climber: inside a `for` head's no-In context, the
+//     `in` keyword is the for-in disambiguator, not a binary operator —
+//     the M3.2 forHeadKind depth-scan is gone.
 //   M4.1 — ASYNC / GENERATOR OPERATOR EXPRESSIONS (D5 MUST PARSE): `await`
 //     as a unary-precedence operator inside an expression (`let x = await
 //     f()` — gated on `ctx.inAsync`); `yield` / `yield*` as an assignment-
@@ -113,6 +126,22 @@ ${
         makeIsPattern, makeMatchBinding, makeRender, makeLift, makeFail,
         makeAwait, makeYield,
     } from "./ast-expr.scrml"
+    // M4.2 — binding-pattern constructors (ast-stmt's BindingKind catalog,
+    // the declaration-target shapes M3.1 produces for vardecl destructuring).
+    // parseParamTarget calls parseBinding (now hosted in THIS file) so a
+    // function-parameter destructuring target is a real binding node, not
+    // an Object/Array literal stand-in. ast-stmt's makeRestElement /
+    // makeAssignmentPattern overlap names with ast-expr's Expr-shape twins;
+    // the binding-shape constructors are imported under aliases.
+    import {
+        makeBindingIdent,
+        makeObjectPattern, makeArrayPattern,
+        makeRestElement      as makeBindingRestElement,
+        makeAssignmentPattern as makeBindingAssignmentPattern,
+        makeBindingPropertyKeyValue, makeBindingPropertyShorthand,
+        makeBindingPropertyRest,
+        makeBindingElementItem, makeBindingElementHole, makeBindingElementRest,
+    } from "./ast-stmt.scrml"
 
     // ---------------------------------------------------------------------
     // makeParseExprContext — STATE constructor: collects the parser's
@@ -144,6 +173,14 @@ ${
     //   They mirror M3.4's `functionDepth` — a function-scoped slot
     //   saved+set+restored at function entry/exit (see enterFunctionScope).
     // ---------------------------------------------------------------------
+    //   noIn             — M4.2 NO-IN context flag. True iff the cursor
+    //                      is parsing a `for` head's init / LHS clause
+    //                      and the `in` keyword is the for-in disambig-
+    //                      uator, NOT a relational binary operator.
+    //                      parseBinary consults this to skip KwIn; sub-
+    //                      expression entry points (paren / array / object
+    //                      / call args / template `${}`) save+clear+restore
+    //                      it (the ECMA-262 no-In carve-out).
     export fn makeParseExprContext(tokens) {
         return {
             cursor:           makeTokenCursor(tokens),
@@ -151,6 +188,7 @@ ${
             errors:           [],
             inAsync:          false,
             inGenerator:      false,
+            noIn:             false,
         }
     }
 
@@ -182,6 +220,46 @@ ${
     export fn exitFunctionScope(ctx, prior) {
         ctx.inAsync = prior.inAsync
         ctx.inGenerator = prior.inGenerator
+    }
+
+    // spanHere — the span of the token at the cursor, or a zero span at
+    // EOF. Used by binding-pattern diagnostic-recording sites where no
+    // node span is available.
+    fn spanHere(ctx) {
+        const here = current(ctx.cursor)
+        if (here is not) {
+            return makeSpan(0, 0, 1, 1)
+        }
+        return here.span
+    }
+
+    // enterNoInScope / exitNoInScope — M4.2 `noIn` save+set+restore. The
+    // caller (parse-stmt's for-head parser) wraps init-clause parsing in
+    // this scope: enterNoInScope returns the prior value; exitNoInScope
+    // restores it. Nested sub-expressions (a paren / array element / etc.)
+    // REOPEN the `in` operator via withInAllowedSubExpr / restoreNoIn.
+    export fn enterNoInScope(ctx) {
+        const prior = ctx.noIn
+        ctx.noIn = true
+        return prior
+    }
+
+    export fn exitNoInScope(ctx, prior) {
+        ctx.noIn = prior
+    }
+
+    // withInAllowedSubExpr / restoreNoIn — save+clear+restore noIn for an
+    // inner expression that REOPENS the `in` operator (paren / array /
+    // object / call args / template `${}`). The classic ECMA-262 no-In
+    // carve-out: `for (let x = (a in b); ...)` is legal.
+    export fn withInAllowedSubExpr(ctx) {
+        const prior = ctx.noIn
+        ctx.noIn = false
+        return prior
+    }
+
+    export fn restoreNoIn(ctx, prior) {
+        ctx.noIn = prior
     }
 
     // =====================================================================
@@ -618,6 +696,14 @@ ${
             }
             const prec = binPrec is not not ? binPrec : logPrec
             if (prec < minPrec) {
+                break
+            }
+
+            // M4.2 — no-In context. Inside a `for` head's init / LHS
+            // clause the `in` keyword is the for-in disambiguator, not a
+            // relational binary operator. Stop the climb so the caller
+            // sees the unconsumed `in`.
+            if (kind == TokenKind.KwIn && ctx.noIn == true) {
                 break
             }
 
@@ -1534,38 +1620,38 @@ ${
 
     // ---------------------------------------------------------------------
     // parseParam — one arrow / function parameter. Forms handled:
-    //   ident                — a plain identifier parameter
-    //   ...ident             — a rest parameter (RestElement)
-    //   ident = expr         — a defaulted parameter (AssignmentPattern)
-    //   { ... } / [ ... ]    — a destructuring pattern. M2.3 parses the
-    //                          HEAD; the pattern is modelled with the
-    //                          object/array LITERAL node (a documented
-    //                          divergence from ESTree's ObjectPattern /
-    //                          ArrayPattern — full binding-pattern typing
-    //                          is an M4 concern).
+    //   ident                — a plain identifier parameter (BindingIdent)
+    //   ...target            — a rest parameter (binding-shape RestElement)
+    //   target = expr        — a defaulted parameter (binding-shape
+    //                          AssignmentPattern)
+    //   { ... } / [ ... ]    — a destructuring pattern (ObjectPattern /
+    //                          ArrayPattern — REAL binding nodes via
+    //                          parseBinding; M4.2 closed the K6 stand-in).
     // ---------------------------------------------------------------------
     export fn parseParam(ctx) {
         const cursor = ctx.cursor
         const kind = currentKind(cursor)
 
-        // Rest parameter — `...ident`.
+        // Rest parameter — `...target`. M4.2 — emits a BINDING-shape
+        // RestElement (`bindingKind: "RestElement"`).
         if (kind == TokenKind.Ellipsis) {
             const restTok = advance(cursor)   // consume ...
             const target = parseParamTarget(ctx)
             const span = makeSpan(restTok.span.start, endOf(target), restTok.span.line, restTok.span.col)
-            return makeRestElement(target, span)
+            return makeBindingRestElement(target, span)
         }
 
         const target = parseParamTarget(ctx)
 
-        // Defaulted parameter — `target = expr`.
+        // Defaulted parameter — `target = expr`. M4.2 — emits a BINDING-
+        // shape AssignmentPattern.
         if (currentKind(cursor) == TokenKind.Assign) {
             advance(cursor)   // consume =
             const innerPrior = enterMode(ctx, ParseMode.InExpression)
             const defaultExpr = parseAssignmentExpr(ctx)
             exitMode(ctx, innerPrior)
             const span = makeSpan(startOf(target), endOf(defaultExpr), lineOf(target), colOf(target))
-            return makeAssignmentPattern(target, defaultExpr, span)
+            return makeBindingAssignmentPattern(target, defaultExpr, span)
         }
 
         return target
@@ -1573,30 +1659,27 @@ ${
 
     // ---------------------------------------------------------------------
     // parseParamTarget — the binding target of one parameter. An
-    // identifier, or a destructuring pattern (object / array). The pattern
-    // is parsed with parsePrimary (yielding an Object / Array literal node)
-    // — see parseParam's note on the documented M4-deferred ObjectPattern
-    // divergence.
+    // identifier, or a destructuring pattern (object / array). M4.2 — K6
+    // closed: the pattern is parsed with parseBinding (REAL binding node,
+    // BindingIdent / ObjectPattern / ArrayPattern), no longer a literal
+    // stand-in.
     // ---------------------------------------------------------------------
     export fn parseParamTarget(ctx) {
         const cursor = ctx.cursor
         const kind = currentKind(cursor)
 
         if (kind == TokenKind.Ident) {
-            const tok = advance(cursor)
-            return makeIdent(tok.name, tok.span)
+            return parseBindingIdent(ctx)
         }
 
         if (kind == TokenKind.LBrace || kind == TokenKind.LBracket) {
-            // Destructuring-pattern stand-in (M4 refines to a binding
-            // pattern).
-            return parsePrimary(ctx)
+            return parseBinding(ctx)   // M4.2 — REAL binding node (K6 closed)
         }
 
         const here = current(cursor)
         const span = here is not ? makeSpan(0, 0, 1, 1) : here.span
         recordError(ctx, "E-EXPR-PARAM", "expected a parameter name", span)
-        return makeIdent("", span)
+        return makeBindingIdent("", span)
     }
 
     // ---------------------------------------------------------------------
@@ -2763,7 +2846,10 @@ ${
             advance(cursor)   // consume ${  (TemplateInterpStart)
 
             const interpPrior = enterMode(ctx, ParseMode.InExpression)
+            // M4.2 — `${...}` body is a no-In carve-out.
+            const inPrior = withInAllowedSubExpr(ctx)
             const interpExpr = parseExpression(ctx)
+            restoreNoIn(ctx, inPrior)
             exitMode(ctx, interpPrior)
             exprs.push(interpExpr)
 
@@ -2861,6 +2947,209 @@ ${
         const span = here is not ? makeSpan(0, 0, 1, 1) : here.span
         recordError(ctx, "E-EXPR-EXPECTED-COLON", "expected ':' in object-literal property", span)
         return false
+    }
+
+    // =====================================================================
+    // Binding patterns — declaration-target destructuring (S98 DD §D5;
+    // M3.1). A declaration TARGET is an identifier or a destructuring
+    // pattern; patterns nest. These produce ast-stmt's binding nodes
+    // (BindingIdent / ObjectPattern / ArrayPattern / AssignmentPattern /
+    // RestElement) — NOT ast-expr's Object/Array literal nodes.
+    //
+    // HOSTED HERE (NOT in parse-stmt) AS OF M4.2 — the K6 unification:
+    // parseParamTarget needs parseBinding to emit a real binding node for
+    // a `{...}` / `[...]` parameter pattern; parse-stmt already imports
+    // from parse-expr, so the binding parser lives here and parse-stmt
+    // re-imports. Otherwise unchanged from its M3.1 origin.
+    // =====================================================================
+
+    // parseBinding — a binding TARGET (identifier or destructuring).
+    export fn parseBinding(ctx) {
+        const cursor = ctx.cursor
+        const kind = currentKind(cursor)
+        if (kind == TokenKind.LBrace) {
+            return parseObjectPattern(ctx)
+        }
+        if (kind == TokenKind.LBracket) {
+            return parseArrayPattern(ctx)
+        }
+        return parseBindingIdent(ctx)
+    }
+
+    // parseBindingIdent — a plain identifier binding (the leaf of every
+    // binding pattern). A non-identifier here is a malformed target; a
+    // diagnostic is recorded and an empty-name BindingIdent returned (the
+    // parser's no-throw discipline).
+    export fn parseBindingIdent(ctx) {
+        const cursor = ctx.cursor
+        if (currentKind(cursor) != TokenKind.Ident) {
+            recordError(ctx, "E-STMT-BINDING-NAME",
+                "expected an identifier in a binding position", spanHere(ctx))
+            return makeBindingIdent("", spanHere(ctx))
+        }
+        const tok = advance(cursor)
+        return makeBindingIdent(tok.name, tok.span)
+    }
+
+    // parseBindingTargetWithDefault — a binding target, optionally
+    // defaulted. `target = default` -> AssignmentPattern; a bare target ->
+    // the target. Used inside object/array patterns.
+    fn parseBindingTargetWithDefault(ctx) {
+        const cursor = ctx.cursor
+        const target = parseBinding(ctx)
+        if (currentKind(cursor) == TokenKind.Assign) {
+            advance(cursor)   // consume =
+            const prior = enterMode(ctx, ParseMode.InExpression)
+            const dflt = parseAssignmentExpr(ctx)
+            exitMode(ctx, prior)
+            const span = makeSpan(startOf(target), endOf(dflt), lineOf(target), colOf(target))
+            return makeBindingAssignmentPattern(target, dflt, span)
+        }
+        return target
+    }
+
+    // parseObjectPattern — `{ a, b: c, d = 1, ...rest }`.
+    export fn parseObjectPattern(ctx) {
+        const cursor = ctx.cursor
+        const open = advance(cursor)   // consume {
+        const properties = []
+        while (atEnd(cursor) == false && currentKind(cursor) != TokenKind.RBrace) {
+            if (currentKind(cursor) == TokenKind.Ellipsis) {
+                advance(cursor)
+                const restTarget = parseBinding(ctx)
+                properties.push(makeBindingPropertyRest(restTarget))
+            } else {
+                properties.push(parseObjectPatternProperty(ctx))
+            }
+            if (currentKind(cursor) == TokenKind.Comma) {
+                advance(cursor)
+                continue
+            }
+            break
+        }
+        let endSpan = open.span
+        if (currentKind(cursor) == TokenKind.RBrace) {
+            endSpan = advance(cursor).span
+        } else {
+            recordError(ctx, "E-STMT-UNCLOSED-PATTERN",
+                "expected '}' to close an object-destructuring pattern", open.span)
+        }
+        const span = makeSpan(open.span.start, endSpan.end, open.span.line, open.span.col)
+        return makeObjectPattern(properties, span)
+    }
+
+    // parseObjectPatternProperty — one `{ ... }` pattern property.
+    export fn parseObjectPatternProperty(ctx) {
+        const cursor = ctx.cursor
+        const kind = currentKind(cursor)
+
+        if (kind == TokenKind.LBracket) {
+            advance(cursor)
+            const prior = enterMode(ctx, ParseMode.InExpression)
+            const keyExpr = parseAssignmentExpr(ctx)
+            exitMode(ctx, prior)
+            if (currentKind(cursor) == TokenKind.RBracket) {
+                advance(cursor)
+            } else {
+                recordError(ctx, "E-STMT-UNCLOSED-COMPUTED-KEY",
+                    "expected ']' to close a computed pattern key", spanHere(ctx))
+            }
+            expectBindingColon(ctx)
+            const valueTarget = parseBindingTargetWithDefault(ctx)
+            return makeBindingPropertyKeyValue(keyExpr, valueTarget, true)
+        }
+
+        if (kind == TokenKind.StringLit || kind == TokenKind.NumberLit) {
+            const keyTok = advance(cursor)
+            const keyExpr = bindingLiteralKeyExpr(keyTok)
+            expectBindingColon(ctx)
+            const valueTarget = parseBindingTargetWithDefault(ctx)
+            return makeBindingPropertyKeyValue(keyExpr, valueTarget, false)
+        }
+
+        if (kind == TokenKind.Ident) {
+            const nameTok = advance(cursor)
+            if (currentKind(cursor) == TokenKind.Colon) {
+                advance(cursor)
+                const valueTarget = parseBindingTargetWithDefault(ctx)
+                const keyExpr = bindingIdentKeyExpr(nameTok)
+                return makeBindingPropertyKeyValue(keyExpr, valueTarget, false)
+            }
+            let valueTarget = makeBindingIdent(nameTok.name, nameTok.span)
+            if (currentKind(cursor) == TokenKind.Assign) {
+                advance(cursor)
+                const prior = enterMode(ctx, ParseMode.InExpression)
+                const dflt = parseAssignmentExpr(ctx)
+                exitMode(ctx, prior)
+                const apSpan = makeSpan(nameTok.span.start, endOf(dflt), nameTok.span.line, nameTok.span.col)
+                valueTarget = makeBindingAssignmentPattern(valueTarget, dflt, apSpan)
+            }
+            return makeBindingPropertyShorthand(nameTok.name, valueTarget)
+        }
+
+        recordError(ctx, "E-STMT-PATTERN-PROPERTY",
+            "expected a property name in an object-destructuring pattern", spanHere(ctx))
+        const placeholder = makeBindingIdent("", spanHere(ctx))
+        return makeBindingPropertyShorthand("", placeholder)
+    }
+
+    // expectBindingColon — consume a `:` inside a binding pattern; record
+    // E-STMT-PATTERN-COLON if absent. (Renamed from parse-stmt's local
+    // `expectColon` to avoid a name collision with parse-expr's existing
+    // `expectColon` for object-literal properties.)
+    fn expectBindingColon(ctx) {
+        if (currentKind(ctx.cursor) == TokenKind.Colon) {
+            advance(ctx.cursor)
+            return
+        }
+        recordError(ctx, "E-STMT-PATTERN-COLON",
+            "expected ':' after a pattern property key", spanHere(ctx))
+    }
+
+    fn bindingIdentKeyExpr(tok) {
+        return { kind: "Ident", name: tok.name, span: tok.span }
+    }
+
+    fn bindingLiteralKeyExpr(tok) {
+        if (tok.kind == TokenKind.StringLit) {
+            return { kind: "StringLit", value: tok.cooked, raw: tok.text, span: tok.span }
+        }
+        return { kind: "NumberLit", value: tok.value, raw: tok.text, span: tok.span }
+    }
+
+    // parseArrayPattern — `[ a, , b, c = 1, ...rest ]`.
+    export fn parseArrayPattern(ctx) {
+        const cursor = ctx.cursor
+        const open = advance(cursor)
+        const elements = []
+        while (atEnd(cursor) == false && currentKind(cursor) != TokenKind.RBracket) {
+            if (currentKind(cursor) == TokenKind.Comma) {
+                elements.push(makeBindingElementHole())
+                advance(cursor)
+                continue
+            }
+            if (currentKind(cursor) == TokenKind.Ellipsis) {
+                advance(cursor)
+                const restTarget = parseBinding(ctx)
+                elements.push(makeBindingElementRest(restTarget))
+                break
+            }
+            elements.push(makeBindingElementItem(parseBindingTargetWithDefault(ctx)))
+            if (currentKind(cursor) == TokenKind.Comma) {
+                advance(cursor)
+                continue
+            }
+            break
+        }
+        let endSpan = open.span
+        if (currentKind(cursor) == TokenKind.RBracket) {
+            endSpan = advance(cursor).span
+        } else {
+            recordError(ctx, "E-STMT-UNCLOSED-PATTERN",
+                "expected ']' to close an array-destructuring pattern", open.span)
+        }
+        const span = makeSpan(open.span.start, endSpan.end, open.span.line, open.span.col)
+        return makeArrayPattern(elements, span)
     }
 
     // ---------------------------------------------------------------------

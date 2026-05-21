@@ -348,10 +348,14 @@ function nativeBindingToEstree(node) {
 
 // nativeForLeftToEstree — the LEFT side of a for-in / for-of. A declaration
 // form is a VarDecl Stmt (-> VariableDeclaration); a non-declaration form is
-// an assignment-target Expr (-> the normalized Expr node).
+// EITHER an assignment-target Expr (member expr / call / identifier) OR a
+// binding pattern (M4.2 K6 closure — `for ({a} of xs)` LHS is an
+// ObjectPattern, not an Object literal). The normalizer dispatches by the
+// node's discriminator: `bindingKind` -> binding pattern; else expression.
 function nativeForLeftToEstree(node) {
     if (node === undefined || node === null) return null;
     if (node.kind === StmtKind.VarDecl) return nativeStmtToEstree(node);
+    if (node.bindingKind !== undefined) return nativeBindingToEstree(node);
     return nativeExprToEstree(node);
 }
 
@@ -1050,10 +1054,9 @@ const ACORN_CORPUS = [
 //     M3.2 native parser parses it (a Return node), and `return` is exercised
 //     instead through BlockStub re-entry (a function body — where it is
 //     legal). See the "control-flow inside a re-entered body" describe block.
-//   - a for-in / for-of with a NON-declaration destructuring LHS
-//     (`for ([a] of xs)`) — the native parser parses the LHS as an
-//     array/object literal expression (the documented K6-class param/binding
-//     divergence); covered in a native-shape test, not the Acorn diff.
+//   - (M4.2 — K6 closed) a for-in / for-of with a NON-declaration
+//     destructuring LHS is now in-corpus; see the entries below for
+//     `for ({a} of items)` and `for ([a, b] of pairs)`.
 // -----------------------------------------------------------------------------
 const CONTROL_FLOW_CORPUS = [
     // --- if / else ---
@@ -1105,6 +1108,13 @@ const CONTROL_FLOW_CORPUS = [
     { name: "for-of — decl object pattern",    src: "for (const {a} of items) {}" },
     { name: "for-of — call as iterable",       src: "for (const x of items()) {}" },
     { name: "for await — of a stream",         src: "for await (const c of stream) { read(c); }" },
+
+    // --- M4.2 K6 — non-declaration destructuring LHS (parses as a real
+    // binding pattern; the K6-class M3.2 divergence is closed) ---
+    { name: "for-of — non-decl array pattern", src: "for ([a, b] of pairs) {}" },
+    { name: "for-of — non-decl object pattern", src: "for ({a} of items) {}" },
+    { name: "for-in — non-decl array pattern", src: "for ([a] in src) {}" },
+    { name: "for-in — non-decl object pattern", src: "for ({k} in src) {}" },
 
     // --- break / continue (unlabeled) ---
     { name: "break — inside a loop",           src: "while (a) { break; }" },
@@ -1754,11 +1764,41 @@ describe("M3.2 control-flow — native Stmt node shape", () => {
         expect(s.right.kind).toBe(ExprKind.Ident);
     });
 
-    test("for-in — non-declaration LHS is an Expr", () => {
+    test("for-in — non-declaration ident LHS is a BindingIdent (M4.2 K6)", () => {
         const r = parseWithNative("for (k in obj) {}");
         const s = r.body[0];
         expect(s.kind).toBe(StmtKind.ForIn);
-        expect(s.left.kind).toBe(ExprKind.Ident);
+        // M4.2 — non-declaration for-in/of LHS is converted to a binding
+        // shape (the K6 unification). A plain identifier LHS becomes a
+        // BindingIdent (`bindingKind: "Ident"`).
+        expect(s.left.bindingKind).toBe(BindingKind.Ident);
+        expect(s.left.name).toBe("k");
+    });
+
+    test("for-in — member-expression LHS stays an Expr (M4.2 K6)", () => {
+        const r = parseWithNative("for (o.k in src) {}");
+        const s = r.body[0];
+        expect(s.kind).toBe(StmtKind.ForIn);
+        // A member expression is a legal assignment-target expression for a
+        // for-in LHS; toBindingPattern leaves it as the expression node
+        // (ESTree treats it the same way).
+        expect(s.left.kind).toBe(ExprKind.Member);
+    });
+
+    test("for-of — non-declaration object-pattern LHS (M4.2 K6)", () => {
+        const r = parseWithNative("for ({a} of items) {}");
+        const s = r.body[0];
+        expect(s.kind).toBe(StmtKind.ForOf);
+        // M4.2 — non-declaration destructuring LHS is a REAL binding
+        // pattern (the K6 closure).
+        expect(s.left.bindingKind).toBe(BindingKind.ObjectPat);
+    });
+
+    test("for-of — non-declaration array-pattern LHS (M4.2 K6)", () => {
+        const r = parseWithNative("for ([a, b] of pairs) {}");
+        const s = r.body[0];
+        expect(s.kind).toBe(StmtKind.ForOf);
+        expect(s.left.bindingKind).toBe(BindingKind.ArrayPat);
     });
 
     test("for-of — ForOf node, isAwait false for a plain for-of", () => {
@@ -1878,6 +1918,111 @@ describe("M3.2 control-flow — `return` + control flow inside a re-entered body
         expect(a.ok).toBe(true);
         expect(nodeKindSequence(reEstree)).toEqual(nodeKindSequence(a.ast));
         expect(valueSequence(reEstree)).toEqual(valueSequence(a.ast));
+    });
+});
+
+// -----------------------------------------------------------------------------
+// M4.2 — `noIn` flag + destructuring unification. The for-head ambiguity is
+// resolved by parsing the init / LHS clause with ctx.noIn set; the `in`
+// keyword is suppressed by parseBinary while noIn is true (M3.2's forHeadKind
+// depth-scan is gone). Sub-expression groupings (paren / array / object /
+// call args / template `${}`) re-open the `in` operator via the no-In
+// carve-out helpers.
+// -----------------------------------------------------------------------------
+describe("M4.2 — noIn flag in `for` head", () => {
+    test("for-head `in` inside a paren is legal (`for (let i = (a in b); ...)`)", () => {
+        const r = parseWithNative("for (let i = (a in b); i < n; i++) {}");
+        expect(r.ok).toBe(true);
+        expect(r.errors).toEqual([]);
+        expect(r.body[0].kind).toBe(StmtKind.For);
+        // The init's declarator's init is a paren-wrapped BinaryExpression with
+        // operator "in" — confirming noIn was REOPENED inside the paren.
+        const initExpr = r.body[0].init.declarations[0].init;
+        expect(initExpr.kind).toBe(ExprKind.Paren);
+        expect(initExpr.expression.kind).toBe(ExprKind.Binary);
+        expect(initExpr.expression.op).toBe("in");
+    });
+
+    test("for-head `in` inside a call argument is legal (`for (let i = f(a in b); ...)`)", () => {
+        const r = parseWithNative("for (let i = f(a in b); i < n; i++) {}");
+        expect(r.ok).toBe(true);
+        expect(r.errors).toEqual([]);
+        const callArg = r.body[0].init.declarations[0].init.args[0];
+        expect(callArg.kind).toBe(ExprKind.Binary);
+        expect(callArg.op).toBe("in");
+    });
+
+    test("for-head `in` inside an array element is legal", () => {
+        const r = parseWithNative("for (let i = [a in b][0]; i < n; i++) {}");
+        expect(r.ok).toBe(true);
+        expect(r.errors).toEqual([]);
+        expect(r.body[0].kind).toBe(StmtKind.For);
+    });
+
+    test("for-in head dispatches on the trailing `in` (no depth-scan)", () => {
+        // The depth-scan-free dispatch: parseBinary stops the climb at `in`
+        // when noIn is set, and parseFor sees `in` next.
+        const r = parseWithNative("for (k in obj) {}");
+        expect(r.ok).toBe(true);
+        expect(r.body[0].kind).toBe(StmtKind.ForIn);
+    });
+
+    test("for-of head dispatches on the trailing `of`", () => {
+        const r = parseWithNative("for (x of xs) {}");
+        expect(r.ok).toBe(true);
+        expect(r.body[0].kind).toBe(StmtKind.ForOf);
+    });
+
+    test("non-decl destructuring LHS — for-of with object pattern", () => {
+        const r = parseWithNative("for ({a, b} of pairs) {}");
+        expect(r.ok).toBe(true);
+        expect(r.body[0].kind).toBe(StmtKind.ForOf);
+        // toBindingPattern converts the Object literal to an ObjectPattern.
+        expect(r.body[0].left.bindingKind).toBe(BindingKind.ObjectPat);
+    });
+
+    test("non-decl destructuring LHS — for-in with array pattern", () => {
+        const r = parseWithNative("for ([a, b] in src) {}");
+        expect(r.ok).toBe(true);
+        expect(r.body[0].kind).toBe(StmtKind.ForIn);
+        expect(r.body[0].left.bindingKind).toBe(BindingKind.ArrayPat);
+    });
+
+    test("non-decl member-expression LHS passes through (no toBindingPattern)", () => {
+        const r = parseWithNative("for (o.k in src) {}");
+        expect(r.ok).toBe(true);
+        expect(r.body[0].kind).toBe(StmtKind.ForIn);
+        // toBindingPattern leaves a member expression as the expression node.
+        expect(r.body[0].left.kind).toBe(ExprKind.Member);
+    });
+});
+
+describe("M4.2 — K6 destructuring unification (function params)", () => {
+    test("ident param is a BindingIdent (M4.2)", () => {
+        const e = scrmlNativeParseExpr(scrmlNativeLex("(x) => x"));
+        expect(e.errors).toEqual([]);
+        expect(e.ast.params[0].bindingKind).toBe(BindingKind.Ident);
+        expect(e.ast.params[0].name).toBe("x");
+    });
+
+    test("object-destructuring param is an ObjectPattern (M4.2 K6)", () => {
+        const e = scrmlNativeParseExpr(scrmlNativeLex("({a, b}) => a + b"));
+        expect(e.errors).toEqual([]);
+        // M4.2 — was an Object LITERAL stand-in pre-M4.2; now a real binding.
+        expect(e.ast.params[0].bindingKind).toBe(BindingKind.ObjectPat);
+    });
+
+    test("array-destructuring param is an ArrayPattern (M4.2 K6)", () => {
+        const e = scrmlNativeParseExpr(scrmlNativeLex("([a, b]) => a + b"));
+        expect(e.errors).toEqual([]);
+        expect(e.ast.params[0].bindingKind).toBe(BindingKind.ArrayPat);
+    });
+
+    test("destructuring param with a default — AssignmentPattern wrapping ObjectPattern", () => {
+        const e = scrmlNativeParseExpr(scrmlNativeLex("({a} = {}) => a"));
+        expect(e.errors).toEqual([]);
+        expect(e.ast.params[0].bindingKind).toBe("AssignmentPattern");
+        expect(e.ast.params[0].left.bindingKind).toBe(BindingKind.ObjectPat);
     });
 });
 
