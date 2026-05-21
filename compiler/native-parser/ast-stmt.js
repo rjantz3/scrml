@@ -7,11 +7,11 @@
 // canonical `type Stmt:enum` declaration in ast-stmt.scrml. Per S98 DD §D3
 // the Stmt enum is one struct per node-kind under a single enum discriminator.
 //
-// M3.1 EMITS: Block, ExprStmt, Empty, VarDecl. The remaining kinds are
-// declared HERE (the catalog is whole — a reviewer can name every statement
-// kind the M3 chain produces) but their constructors land at later sub-steps:
-//   - Control flow (If / While / DoWhile / For / ForIn / ForOf / Return /
-//     Break / Continue / Labeled) — M3.2.
+// M3.1 EMITS: Block, ExprStmt, Empty, VarDecl. M3.2 EMITS the control-flow
+// kinds (If / While / DoWhile / For / ForIn / ForOf / Return / Break /
+// Continue / Labeled). The remaining kinds are declared HERE (the catalog is
+// whole — a reviewer can name every statement kind the M3 chain produces)
+// but their constructors land at M3.3:
 //   - FunctionDecl / ClassDecl / Import / Export / Try / Throw — M3.3.
 // =============================================================================
 export const StmtKind = Object.freeze({
@@ -21,7 +21,7 @@ export const StmtKind = Object.freeze({
     Empty:    "Empty",     // `;`                    the empty statement
     VarDecl:  "VarDecl",   // `let`/`const`/`var` declaration
 
-    // --- M3.2 — control-flow statements (declared; constructors deferred) ---
+    // --- M3.2 — control-flow statements ---
     If:       "If",        // `if (test) cons else alt`
     While:    "While",     // `while (test) body`
     DoWhile:  "DoWhile",   // `do body while (test)`
@@ -125,6 +125,81 @@ export function makeVarDecl(declKind, declarations, span) {
 // makeBindingIdent / makeObjectPattern / makeArrayPattern.
 export function makeVarDeclarator(target, init, span) {
     return { target, init, span };
+}
+
+// =============================================================================
+// Control-flow statement node constructors — M3.2 (DD §D3 / §D5).
+//
+// Each is a plain JS object: a `kind` string tag (a StmtKind value) +
+// per-variant payload fields + a `span: Span`. Statement-position children
+// (`consequent` / `body` / loop bodies) are Stmt nodes; condition / argument
+// children are Expr nodes from ast-expr.
+// =============================================================================
+
+// makeIf — an `if (test) consequent else alternate` statement. `test` is an
+// Expr, `consequent` a Stmt. `alternate` is a Stmt or `null` (no `else`); an
+// `else if` chain is an If nested as the alternate — Acorn's IfStatement shape.
+export function makeIf(test, consequent, alternate, span) {
+    return { kind: StmtKind.If, test, consequent, alternate, span };
+}
+
+// makeWhile — a `while (test) body` loop. `test` is an Expr; `body` a Stmt.
+export function makeWhile(test, body, span) {
+    return { kind: StmtKind.While, test, body, span };
+}
+
+// makeDoWhile — a `do body while (test)` loop. The body runs once before the
+// first test. `body` is a Stmt; `test` an Expr.
+export function makeDoWhile(body, test, span) {
+    return { kind: StmtKind.DoWhile, body, test, span };
+}
+
+// makeFor — a C-style three-clause `for (init; test; update) body` loop. Each
+// of `init` / `test` / `update` is `null` when its clause is empty. `init` is
+// a VarDecl Stmt or an Expr; `test` / `update` are Exprs; `body` is a Stmt.
+export function makeFor(init, test, update, body, span) {
+    return { kind: StmtKind.For, init, test, update, body, span };
+}
+
+// makeForIn — a `for (left in right) body` loop. `left` is a VarDecl Stmt
+// (`for (let k in o)`) or an assignment-target Expr (`for (k in o)`); `right`
+// is the iterated-object Expr; `body` is a Stmt.
+export function makeForIn(left, right, body, span) {
+    return { kind: StmtKind.ForIn, left, right, body, span };
+}
+
+// makeForOf — a `for (left of right) body` loop. `left` / `right` / `body` as
+// for ForIn. `isAwait` is true for `for await (left of right)` — an M3.2
+// extension of the DD §D3 ForOf shape, mirroring Acorn's ForOfStatement
+// `await: boolean`. The body's `async` context itself is M3.3's territory;
+// M3.2 only recognizes the `await` keyword in the `for` head.
+export function makeForOf(left, right, body, isAwait, span) {
+    return { kind: StmtKind.ForOf, left, right, body, isAwait, span };
+}
+
+// makeReturn — a `return argument` statement. `argument` is an Expr, or
+// `null` for a bare `return` (a `return` followed by `;` / a newline / `}`).
+export function makeReturn(argument, span) {
+    return { kind: StmtKind.Return, argument, span };
+}
+
+// makeBreak — a `break` statement, optionally `break label`. `label` is the
+// label identifier text, or `null` for an unlabeled break.
+export function makeBreak(label, span) {
+    return { kind: StmtKind.Break, label, span };
+}
+
+// makeContinue — a `continue` statement, optionally `continue label`. `label`
+// is the label identifier text, or `null` for an unlabeled continue.
+export function makeContinue(label, span) {
+    return { kind: StmtKind.Continue, label, span };
+}
+
+// makeLabeled — a `label: body` labeled statement. `label` is the label
+// identifier text; `body` is the statement the label names (`break label` /
+// `continue label` target it).
+export function makeLabeled(label, body, span) {
+    return { kind: StmtKind.Labeled, label, body, span };
 }
 
 // =============================================================================

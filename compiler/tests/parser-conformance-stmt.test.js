@@ -221,12 +221,31 @@ function nativeBindingToEstree(node) {
     return { type: "UnknownBinding", bindingKind: node.bindingKind };
 }
 
+// nativeForLeftToEstree — the LEFT side of a for-in / for-of. A declaration
+// form is a VarDecl Stmt (-> VariableDeclaration); a non-declaration form is
+// an assignment-target Expr (-> the normalized Expr node).
+function nativeForLeftToEstree(node) {
+    if (node === undefined || node === null) return null;
+    if (node.kind === StmtKind.VarDecl) return nativeStmtToEstree(node);
+    return nativeExprToEstree(node);
+}
+
 // -----------------------------------------------------------------------------
 // nativeStmtToEstree — normalize a native Stmt node into an ESTree-shaped node.
-//   Block    -> BlockStatement     { body }
-//   ExprStmt -> ExpressionStatement { expression }
+//   Block    -> BlockStatement       { body }
+//   ExprStmt -> ExpressionStatement  { expression }
 //   Empty    -> EmptyStatement
-//   VarDecl  -> VariableDeclaration { kind, declarations:[VariableDeclarator] }
+//   VarDecl  -> VariableDeclaration  { kind, declarations:[VariableDeclarator] }
+//   If       -> IfStatement          { test, consequent, alternate }
+//   While    -> WhileStatement       { test, body }
+//   DoWhile  -> DoWhileStatement     { body, test }
+//   For      -> ForStatement         { init, test, update, body }
+//   ForIn    -> ForInStatement       { left, right, body }
+//   ForOf    -> ForOfStatement       { left, right, body, await }
+//   Return   -> ReturnStatement      { argument }
+//   Break    -> BreakStatement       { label }
+//   Continue -> ContinueStatement    { label }
+//   Labeled  -> LabeledStatement     { label, body }
 // -----------------------------------------------------------------------------
 function nativeStmtToEstree(node) {
     if (node === undefined || node === null) return null;
@@ -250,6 +269,89 @@ function nativeStmtToEstree(node) {
                 init: (d.init === undefined || d.init === null)
                     ? null : nativeExprToEstree(d.init),
             })),
+        };
+    }
+    if (node.kind === StmtKind.If) {
+        return {
+            type: "IfStatement",
+            test: nativeExprToEstree(node.test),
+            consequent: nativeStmtToEstree(node.consequent),
+            alternate: (node.alternate === undefined || node.alternate === null)
+                ? null : nativeStmtToEstree(node.alternate),
+        };
+    }
+    if (node.kind === StmtKind.While) {
+        return {
+            type: "WhileStatement",
+            test: nativeExprToEstree(node.test),
+            body: nativeStmtToEstree(node.body),
+        };
+    }
+    if (node.kind === StmtKind.DoWhile) {
+        return {
+            type: "DoWhileStatement",
+            body: nativeStmtToEstree(node.body),
+            test: nativeExprToEstree(node.test),
+        };
+    }
+    if (node.kind === StmtKind.For) {
+        const initIsDecl = node.init !== undefined && node.init !== null
+            && node.init.kind === StmtKind.VarDecl;
+        return {
+            type: "ForStatement",
+            init: (node.init === undefined || node.init === null)
+                ? null : (initIsDecl ? nativeStmtToEstree(node.init)
+                                     : nativeExprToEstree(node.init)),
+            test: (node.test === undefined || node.test === null)
+                ? null : nativeExprToEstree(node.test),
+            update: (node.update === undefined || node.update === null)
+                ? null : nativeExprToEstree(node.update),
+            body: nativeStmtToEstree(node.body),
+        };
+    }
+    if (node.kind === StmtKind.ForIn) {
+        return {
+            type: "ForInStatement",
+            left: nativeForLeftToEstree(node.left),
+            right: nativeExprToEstree(node.right),
+            body: nativeStmtToEstree(node.body),
+        };
+    }
+    if (node.kind === StmtKind.ForOf) {
+        return {
+            type: "ForOfStatement",
+            await: node.isAwait === true,
+            left: nativeForLeftToEstree(node.left),
+            right: nativeExprToEstree(node.right),
+            body: nativeStmtToEstree(node.body),
+        };
+    }
+    if (node.kind === StmtKind.Return) {
+        return {
+            type: "ReturnStatement",
+            argument: (node.argument === undefined || node.argument === null)
+                ? null : nativeExprToEstree(node.argument),
+        };
+    }
+    if (node.kind === StmtKind.Break) {
+        return {
+            type: "BreakStatement",
+            label: (node.label === undefined || node.label === null)
+                ? null : { type: "Identifier", name: node.label },
+        };
+    }
+    if (node.kind === StmtKind.Continue) {
+        return {
+            type: "ContinueStatement",
+            label: (node.label === undefined || node.label === null)
+                ? null : { type: "Identifier", name: node.label },
+        };
+    }
+    if (node.kind === StmtKind.Labeled) {
+        return {
+            type: "LabeledStatement",
+            label: { type: "Identifier", name: node.label },
+            body: nativeStmtToEstree(node.body),
         };
     }
     return { type: "UnknownStmt", kind: node.kind };
@@ -281,6 +383,32 @@ function nodeKindSequence(node, out) {
     } else if (node.type === "VariableDeclarator") {
         nodeKindSequence(node.id, acc);
         if (node.init) nodeKindSequence(node.init, acc);
+    } else if (node.type === "IfStatement") {
+        nodeKindSequence(node.test, acc);
+        nodeKindSequence(node.consequent, acc);
+        if (node.alternate) nodeKindSequence(node.alternate, acc);
+    } else if (node.type === "WhileStatement") {
+        nodeKindSequence(node.test, acc);
+        nodeKindSequence(node.body, acc);
+    } else if (node.type === "DoWhileStatement") {
+        nodeKindSequence(node.body, acc);
+        nodeKindSequence(node.test, acc);
+    } else if (node.type === "ForStatement") {
+        if (node.init) nodeKindSequence(node.init, acc);
+        if (node.test) nodeKindSequence(node.test, acc);
+        if (node.update) nodeKindSequence(node.update, acc);
+        nodeKindSequence(node.body, acc);
+    } else if (node.type === "ForInStatement" || node.type === "ForOfStatement") {
+        nodeKindSequence(node.left, acc);
+        nodeKindSequence(node.right, acc);
+        nodeKindSequence(node.body, acc);
+    } else if (node.type === "ReturnStatement") {
+        if (node.argument) nodeKindSequence(node.argument, acc);
+    } else if (node.type === "BreakStatement" || node.type === "ContinueStatement") {
+        if (node.label) nodeKindSequence(node.label, acc);
+    } else if (node.type === "LabeledStatement") {
+        nodeKindSequence(node.label, acc);
+        nodeKindSequence(node.body, acc);
     } else if (node.type === "ObjectPattern" || node.type === "ObjectExpression") {
         for (const p of node.properties) nodeKindSequence(p, acc);
     } else if (node.type === "ArrayPattern" || node.type === "ArrayExpression") {
@@ -337,6 +465,8 @@ function valueSequence(node, out) {
         acc.push("member:computed=" + (node.computed === true));
     } else if (node.type === "CallExpression") {
         acc.push("call");
+    } else if (node.type === "ForOfStatement") {
+        acc.push("forof:await=" + (node.await === true));
     }
 
     if (node.type === "Program" || node.type === "BlockStatement") {
@@ -348,6 +478,32 @@ function valueSequence(node, out) {
     } else if (node.type === "VariableDeclarator") {
         valueSequence(node.id, acc);
         if (node.init) valueSequence(node.init, acc);
+    } else if (node.type === "IfStatement") {
+        valueSequence(node.test, acc);
+        valueSequence(node.consequent, acc);
+        if (node.alternate) valueSequence(node.alternate, acc);
+    } else if (node.type === "WhileStatement") {
+        valueSequence(node.test, acc);
+        valueSequence(node.body, acc);
+    } else if (node.type === "DoWhileStatement") {
+        valueSequence(node.body, acc);
+        valueSequence(node.test, acc);
+    } else if (node.type === "ForStatement") {
+        if (node.init) valueSequence(node.init, acc);
+        if (node.test) valueSequence(node.test, acc);
+        if (node.update) valueSequence(node.update, acc);
+        valueSequence(node.body, acc);
+    } else if (node.type === "ForInStatement" || node.type === "ForOfStatement") {
+        valueSequence(node.left, acc);
+        valueSequence(node.right, acc);
+        valueSequence(node.body, acc);
+    } else if (node.type === "ReturnStatement") {
+        if (node.argument) valueSequence(node.argument, acc);
+    } else if (node.type === "BreakStatement" || node.type === "ContinueStatement") {
+        if (node.label) valueSequence(node.label, acc);
+    } else if (node.type === "LabeledStatement") {
+        valueSequence(node.label, acc);
+        valueSequence(node.body, acc);
     } else if (node.type === "ObjectPattern" || node.type === "ObjectExpression") {
         for (const p of node.properties) valueSequence(p, acc);
     } else if (node.type === "ArrayPattern" || node.type === "ArrayExpression") {
@@ -473,6 +629,91 @@ const ACORN_CORPUS = [
     { name: "program — empties between",       src: "foo(); ; bar();" },
 ];
 
+// -----------------------------------------------------------------------------
+// M3.2 control-flow micro-corpus. Every entry is a program built from M3.1
+// substrate statements PLUS M3.2 control-flow statements — so raw Acorn
+// (module mode) parses it and the native-vs-Acorn Tier 1+2 diff is meaningful.
+//
+// Excluded by design (NOT Acorn-comparable in this corpus):
+//   - a top-level `return` — Acorn rejects `return` outside a function; the
+//     M3.2 native parser parses it (a Return node), and `return` is exercised
+//     instead through BlockStub re-entry (a function body — where it is
+//     legal). See the "control-flow inside a re-entered body" describe block.
+//   - a for-in / for-of with a NON-declaration destructuring LHS
+//     (`for ([a] of xs)`) — the native parser parses the LHS as an
+//     array/object literal expression (the documented K6-class param/binding
+//     divergence); covered in a native-shape test, not the Acorn diff.
+// -----------------------------------------------------------------------------
+const CONTROL_FLOW_CORPUS = [
+    // --- if / else ---
+    { name: "if — no else, expr body",         src: "if (a) b;" },
+    { name: "if — no else, block body",        src: "if (a) { b(); }" },
+    { name: "if — with else",                  src: "if (a) b; else c;" },
+    { name: "if — block consequent + else",    src: "if (a) { x(); } else { y(); }" },
+    { name: "if — else if chain",              src: "if (a) p(); else if (b) q(); else r();" },
+    { name: "if — nested if in consequent",    src: "if (a) if (b) c();" },
+    { name: "if — empty-statement body",       src: "if (a) ;" },
+    { name: "if — comparison test",            src: "if (x < 10) tick();" },
+
+    // --- while ---
+    { name: "while — expr body",               src: "while (a) b;" },
+    { name: "while — block body",              src: "while (a) { step(); }" },
+    { name: "while — empty body",              src: "while (a) ;" },
+    { name: "while — comparison test",         src: "while (i < n) i++;" },
+    { name: "while — nested while",            src: "while (a) while (b) c();" },
+
+    // --- do-while ---
+    { name: "do-while — block body",           src: "do { foo(); } while (a);" },
+    { name: "do-while — expr body",            src: "do step(); while (more);" },
+    { name: "do-while — no trailing semi",     src: "do { foo(); } while (a)" },
+
+    // --- for — C-style ---
+    { name: "for — empty clauses",             src: "for (;;) {}" },
+    { name: "for — full three-clause",         src: "for (let i = 0; i < 10; i++) { use(i); }" },
+    { name: "for — var init",                  src: "for (var i = 0; i < n; i++) tick();" },
+    { name: "for — expr init",                 src: "for (i = 0; i < n; i++) {}" },
+    { name: "for — empty init",                src: "for (; i < n; i++) {}" },
+    { name: "for — empty test",                src: "for (let i = 0;; i++) {}" },
+    { name: "for — empty update",              src: "for (let i = 0; i < n;) {}" },
+    { name: "for — two declarators init",      src: "for (let i = 0, j = n; i < j; i++) {}" },
+    { name: "for — expr-stmt body",            src: "for (;;) doThing();" },
+    { name: "for — empty-statement body",      src: "for (;;) ;" },
+
+    // --- for-in ---
+    { name: "for-in — let binding",            src: "for (let k in obj) { use(k); }" },
+    { name: "for-in — const binding",          src: "for (const k in obj) log(k);" },
+    { name: "for-in — var binding",            src: "for (var k in obj) {}" },
+    { name: "for-in — non-decl ident LHS",     src: "for (k in obj) {}" },
+    { name: "for-in — member-access LHS",      src: "for (o.k in src) {}" },
+
+    // --- for-of ---
+    { name: "for-of — const binding",          src: "for (const x of xs) { take(x); }" },
+    { name: "for-of — let binding",            src: "for (let x of xs) use(x);" },
+    { name: "for-of — non-decl ident LHS",     src: "for (x of xs) {}" },
+    { name: "for-of — decl array pattern",     src: "for (const [a, b] of pairs) {}" },
+    { name: "for-of — decl object pattern",    src: "for (const {a} of items) {}" },
+    { name: "for-of — call as iterable",       src: "for (const x of items()) {}" },
+    { name: "for await — of a stream",         src: "for await (const c of stream) { read(c); }" },
+
+    // --- break / continue (unlabeled) ---
+    { name: "break — inside a loop",           src: "while (a) { break; }" },
+    { name: "continue — inside a loop",        src: "while (a) { continue; }" },
+    { name: "break — inside a for",            src: "for (;;) { if (done) break; }" },
+
+    // --- labels + labeled break / continue ---
+    { name: "labeled — for loop",              src: "outer: for (;;) {}" },
+    { name: "labeled — while loop",            src: "loop: while (a) {}" },
+    { name: "labeled — block statement",       src: "blk: { foo(); }" },
+    { name: "labeled break",                   src: "outer: for (;;) { break outer; }" },
+    { name: "labeled continue",                src: "loop: while (a) { continue loop; }" },
+    { name: "nested labels",                   src: "a: b: for (;;) { break a; }" },
+
+    // --- mixed control-flow programs ---
+    { name: "program — if then while",         src: "if (a) b(); while (c) d();" },
+    { name: "program — for then if",           src: "for (;;) {} if (a) b();" },
+    { name: "program — loop with decl + if",   src: "for (let i = 0; i < n; i++) { let v = at(i); if (v) use(v); }" },
+];
+
 describe("M3.1 statement-parser conformance — Tier 1 (node-kind sequence)", () => {
     for (const c of ACORN_CORPUS) {
         test(`(tier1) ${c.name} — ${c.src}`, () => {
@@ -494,6 +735,41 @@ describe("M3.1 statement-parser conformance — Tier 1 (node-kind sequence)", ()
 
 describe("M3.1 statement-parser conformance — Tier 2 (identifier / literal values)", () => {
     for (const c of ACORN_CORPUS) {
+        test(`(tier2) ${c.name} — ${c.src}`, () => {
+            const a = parseWithAcorn(c.src);
+            const n = parseWithNative(c.src);
+
+            expect(a.ok).toBe(true);
+            expect(n.ok).toBe(true);
+
+            const acornVals = valueSequence(a.ast);
+            const nativeVals = valueSequence(nativeProgramToEstree(n.body));
+            expect(nativeVals).toEqual(acornVals);
+        });
+    }
+});
+
+describe("M3.2 control-flow conformance — Tier 1 (node-kind sequence)", () => {
+    for (const c of CONTROL_FLOW_CORPUS) {
+        test(`(tier1) ${c.name} — ${c.src}`, () => {
+            const a = parseWithAcorn(c.src);
+            const n = parseWithNative(c.src);
+
+            expect(a.ok).toBe(true);
+            expect(n.ok).toBe(true);
+            // The native parser must report NO diagnostics on a clean
+            // M3.2-control-flow program.
+            expect(n.errors).toEqual([]);
+
+            const acornSeq = nodeKindSequence(a.ast);
+            const nativeSeq = nodeKindSequence(nativeProgramToEstree(n.body));
+            expect(nativeSeq).toEqual(acornSeq);
+        });
+    }
+});
+
+describe("M3.2 control-flow conformance — Tier 2 (identifier / literal / await values)", () => {
+    for (const c of CONTROL_FLOW_CORPUS) {
         test(`(tier2) ${c.name} — ${c.src}`, () => {
             const a = parseWithAcorn(c.src);
             const n = parseWithNative(c.src);
@@ -746,32 +1022,31 @@ describe("M3.1 statement-parser — BlockStub re-entry", () => {
 });
 
 // -----------------------------------------------------------------------------
-// M3.1 statement-parser — forward seams. M3.1 does NOT parse control-flow
-// (M3.2) or function/class declarations + import/export + try/throw (M3.3).
-// A statement that begins with one of those keyword leads records the
-// documented forward-seam diagnostic instead of mis-parsing it. This pins the
-// M3.2 / M3.3 boundary so a later sub-step (or a corpus file) surfaces the
-// seam cleanly.
+// M3.2 statement-parser — M3.3 forward seam. M3.2 parses control-flow; it does
+// NOT parse function/class declarations + import/export + try/throw (M3.3). A
+// statement that begins with one of those keyword leads records the documented
+// M3.3 forward-seam diagnostic instead of mis-parsing it — this pins the
+// M3.2 / M3.3 boundary so a later sub-step (or a corpus file) surfaces it
+// cleanly. The control-flow leads (`if`/`for`/`while`/...) that M3.1 forwarded
+// are now PARSED by M3.2 — see the control-flow conformance describe blocks.
 // -----------------------------------------------------------------------------
-describe("M3.1 statement-parser — M3.2 / M3.3 forward seams", () => {
-    test("an `if` lead records the M3.2 forward seam", () => {
+describe("M3.2 statement-parser — M3.3 forward seam (no longer M3.2)", () => {
+    test("an `if` lead is now parsed (no M3.2 forward seam)", () => {
         const r = parseWithNative("if (a) b;");
-        expect(r.errors.map((e) => e.code)).toContain("E-STMT-FORWARD-M3-2");
+        expect(r.errors).toEqual([]);
+        expect(r.body[0].kind).toBe(StmtKind.If);
     });
 
-    test("a `for` lead records the M3.2 forward seam", () => {
+    test("a `for` lead is now parsed (no M3.2 forward seam)", () => {
         const r = parseWithNative("for (;;) {}");
-        expect(r.errors.map((e) => e.code)).toContain("E-STMT-FORWARD-M3-2");
+        expect(r.errors).toEqual([]);
+        expect(r.body[0].kind).toBe(StmtKind.For);
     });
 
-    test("a `while` lead records the M3.2 forward seam", () => {
+    test("a `while` lead is now parsed (no M3.2 forward seam)", () => {
         const r = parseWithNative("while (a) b;");
-        expect(r.errors.map((e) => e.code)).toContain("E-STMT-FORWARD-M3-2");
-    });
-
-    test("a `return` lead records the M3.2 forward seam", () => {
-        const r = parseWithNative("return x;");
-        expect(r.errors.map((e) => e.code)).toContain("E-STMT-FORWARD-M3-2");
+        expect(r.errors).toEqual([]);
+        expect(r.body[0].kind).toBe(StmtKind.While);
     });
 
     test("a `function` declaration lead records the M3.3 forward seam", () => {
@@ -823,5 +1098,247 @@ describe("M3.1 statement-parser — error paths (diagnostics, no throw)", () => 
         const r = parseWithNative("let 5 = 1;");
         expect(r.ok).toBe(true);
         expect(r.errors.map((e) => e.code)).toContain("E-STMT-BINDING-NAME");
+    });
+});
+
+// -----------------------------------------------------------------------------
+// M3.2 control-flow — native Stmt node shape. Asserts the native control-flow
+// Stmt node shapes directly (not via the Acorn diff) — kind tags, the
+// optional-child shape (no-else If, bare Return/Break), the for-head form
+// classification, the labeled-statement label, the for-await flag.
+// -----------------------------------------------------------------------------
+describe("M3.2 control-flow — native Stmt node shape", () => {
+    test("if — no else has a `not` alternate", () => {
+        const r = parseWithNative("if (a) b();");
+        const s = r.body[0];
+        expect(s.kind).toBe(StmtKind.If);
+        expect(s.test.kind).toBe(ExprKind.Ident);
+        expect(s.consequent.kind).toBe(StmtKind.ExprStmt);
+        expect(s.alternate === null || s.alternate === undefined).toBe(true);
+    });
+
+    test("if — else if chain nests an If as the alternate", () => {
+        const r = parseWithNative("if (a) p(); else if (b) q(); else r();");
+        const outer = r.body[0];
+        expect(outer.kind).toBe(StmtKind.If);
+        expect(outer.alternate.kind).toBe(StmtKind.If);
+        expect(outer.alternate.alternate.kind).toBe(StmtKind.ExprStmt);
+    });
+
+    test("while — While node carries test + body", () => {
+        const r = parseWithNative("while (a) { step(); }");
+        const s = r.body[0];
+        expect(s.kind).toBe(StmtKind.While);
+        expect(s.body.kind).toBe(StmtKind.Block);
+    });
+
+    test("do-while — DoWhile node carries body + test", () => {
+        const r = parseWithNative("do { foo(); } while (a);");
+        const s = r.body[0];
+        expect(s.kind).toBe(StmtKind.DoWhile);
+        expect(s.body.kind).toBe(StmtKind.Block);
+        expect(s.test.kind).toBe(ExprKind.Ident);
+    });
+
+    test("for — C-style For node carries init/test/update/body", () => {
+        const r = parseWithNative("for (let i = 0; i < 10; i++) { use(i); }");
+        const s = r.body[0];
+        expect(s.kind).toBe(StmtKind.For);
+        expect(s.init.kind).toBe(StmtKind.VarDecl);
+        expect(s.test.kind).toBe(ExprKind.Binary);
+        expect(s.update.kind).toBe(ExprKind.Update);
+        expect(s.body.kind).toBe(StmtKind.Block);
+    });
+
+    test("for — empty clauses are `not`", () => {
+        const r = parseWithNative("for (;;) {}");
+        const s = r.body[0];
+        expect(s.kind).toBe(StmtKind.For);
+        expect(s.init === null || s.init === undefined).toBe(true);
+        expect(s.test === null || s.test === undefined).toBe(true);
+        expect(s.update === null || s.update === undefined).toBe(true);
+    });
+
+    test("for-in — ForIn node, declaration LHS is a VarDecl", () => {
+        const r = parseWithNative("for (let k in obj) {}");
+        const s = r.body[0];
+        expect(s.kind).toBe(StmtKind.ForIn);
+        expect(s.left.kind).toBe(StmtKind.VarDecl);
+        expect(s.left.declarations.length).toBe(1);
+        expect(s.right.kind).toBe(ExprKind.Ident);
+    });
+
+    test("for-in — non-declaration LHS is an Expr", () => {
+        const r = parseWithNative("for (k in obj) {}");
+        const s = r.body[0];
+        expect(s.kind).toBe(StmtKind.ForIn);
+        expect(s.left.kind).toBe(ExprKind.Ident);
+    });
+
+    test("for-of — ForOf node, isAwait false for a plain for-of", () => {
+        const r = parseWithNative("for (const x of xs) {}");
+        const s = r.body[0];
+        expect(s.kind).toBe(StmtKind.ForOf);
+        expect(s.left.kind).toBe(StmtKind.VarDecl);
+        expect(s.isAwait).toBe(false);
+    });
+
+    test("for await — ForOf node carries isAwait true", () => {
+        const r = parseWithNative("for await (const c of stream) {}");
+        const s = r.body[0];
+        expect(s.kind).toBe(StmtKind.ForOf);
+        expect(s.isAwait).toBe(true);
+    });
+
+    test("for-of — declaration array pattern LHS", () => {
+        const r = parseWithNative("for (const [a, b] of pairs) {}");
+        const s = r.body[0];
+        expect(s.kind).toBe(StmtKind.ForOf);
+        expect(s.left.kind).toBe(StmtKind.VarDecl);
+        expect(s.left.declarations[0].target.bindingKind).toBe(BindingKind.ArrayPat);
+    });
+
+    test("break — unlabeled break has a `not` label", () => {
+        const r = parseWithNative("while (a) { break; }");
+        const brk = r.body[0].body.body[0];
+        expect(brk.kind).toBe(StmtKind.Break);
+        expect(brk.label === null || brk.label === undefined).toBe(true);
+    });
+
+    test("continue — unlabeled continue has a `not` label", () => {
+        const r = parseWithNative("while (a) { continue; }");
+        const cont = r.body[0].body.body[0];
+        expect(cont.kind).toBe(StmtKind.Continue);
+        expect(cont.label === null || cont.label === undefined).toBe(true);
+    });
+
+    test("labeled break — Break node carries the label text", () => {
+        const r = parseWithNative("outer: for (;;) { break outer; }");
+        const labeled = r.body[0];
+        expect(labeled.kind).toBe(StmtKind.Labeled);
+        expect(labeled.label).toBe("outer");
+        const brk = labeled.body.body.body[0];
+        expect(brk.kind).toBe(StmtKind.Break);
+        expect(brk.label).toBe("outer");
+    });
+
+    test("labeled continue — Continue node carries the label text", () => {
+        const r = parseWithNative("loop: while (a) { continue loop; }");
+        const cont = r.body[0].body.body.body[0];
+        expect(cont.kind).toBe(StmtKind.Continue);
+        expect(cont.label).toBe("loop");
+    });
+
+    test("labeled statement — Labeled wraps the named statement", () => {
+        const r = parseWithNative("blk: { foo(); }");
+        const s = r.body[0];
+        expect(s.kind).toBe(StmtKind.Labeled);
+        expect(s.label).toBe("blk");
+        expect(s.body.kind).toBe(StmtKind.Block);
+    });
+
+    test("a `Type::Variant` lead is an ExprStmt, NOT a labeled statement", () => {
+        // `Color::Red` — two adjacent `:` tokens after the identifier. M3.2's
+        // label check requires the token after the `:` to NOT be a `:`.
+        const r = parseWithNative("Color::Red;");
+        expect(r.body[0].kind).toBe(StmtKind.ExprStmt);
+    });
+});
+
+// -----------------------------------------------------------------------------
+// M3.2 control-flow — `return` via BlockStub re-entry. A top-level `return` is
+// a SyntaxError (Acorn rejects it) — so `return` is exercised inside a
+// function body, where it is legal. The body is captured as a BlockStub by
+// M2.3 and re-parsed by M3.1's parseBlockStubBody (now M3.2-aware).
+// -----------------------------------------------------------------------------
+describe("M3.2 control-flow — `return` + control flow inside a re-entered body", () => {
+    test("bare return — Return node with a `not` argument", () => {
+        const e = scrmlNativeParseExpr(scrmlNativeLex("function f() { return; }"));
+        const re = parseBlockStubBody(e.ast.body);
+        expect(re.errors).toEqual([]);
+        expect(re.body[0].kind).toBe(StmtKind.Return);
+        expect(re.body[0].argument === null || re.body[0].argument === undefined).toBe(true);
+    });
+
+    test("return with an argument — Return node carries the Expr", () => {
+        const e = scrmlNativeParseExpr(scrmlNativeLex("function f() { return a + b; }"));
+        const re = parseBlockStubBody(e.ast.body);
+        expect(re.errors).toEqual([]);
+        expect(re.body[0].kind).toBe(StmtKind.Return);
+        expect(re.body[0].argument.kind).toBe(ExprKind.Binary);
+    });
+
+    test("a function body with a for loop + if re-enters cleanly", () => {
+        const e = scrmlNativeParseExpr(scrmlNativeLex(
+            "function f() { for (let i = 0; i < n; i++) { if (at(i)) return i; } }"));
+        const re = parseBlockStubBody(e.ast.body);
+        expect(re.errors).toEqual([]);
+        expect(re.body[0].kind).toBe(StmtKind.For);
+        const innerIf = re.body[0].body.body[0];
+        expect(innerIf.kind).toBe(StmtKind.If);
+        expect(innerIf.consequent.kind).toBe(StmtKind.Return);
+    });
+
+    test("a re-entered body with a while loop matches Acorn", () => {
+        // `function f() { let i = 0; while (i < n) { i++; } }` re-parsed by
+        // M3.2 must match Acorn on the body of the equivalent program.
+        const e = scrmlNativeParseExpr(scrmlNativeLex(
+            "function f() { let i = 0; while (i < n) { i++; } }"));
+        const re = parseBlockStubBody(e.ast.body);
+        expect(re.errors).toEqual([]);
+        const reEstree = { type: "Program", body: re.body.map(nativeStmtToEstree) };
+
+        const a = parseWithAcorn("let i = 0; while (i < n) { i++; }");
+        expect(a.ok).toBe(true);
+        expect(nodeKindSequence(reEstree)).toEqual(nodeKindSequence(a.ast));
+        expect(valueSequence(reEstree)).toEqual(valueSequence(a.ast));
+    });
+});
+
+// -----------------------------------------------------------------------------
+// M3.2 control-flow — error paths + subset bound. The parser records
+// structured diagnostics and does NOT throw. `switch` is outside the S98 D5
+// subset (and E-SWITCH-FORBIDDEN in scrml source per §17) — M3.2 does NOT add
+// it; it surfaces as an unparsed lead, not a silent scope widening.
+// -----------------------------------------------------------------------------
+describe("M3.2 control-flow — error paths (diagnostics, no throw)", () => {
+    test("a stray `else` records E-STMT-STRAY-ELSE", () => {
+        const r = parseWithNative("else b();");
+        expect(r.ok).toBe(true);
+        expect(r.errors.map((e) => e.code)).toContain("E-STMT-STRAY-ELSE");
+    });
+
+    test("an `if` head with no `(` records E-STMT-EXPECT-LPAREN", () => {
+        const r = parseWithNative("if a) b;");
+        expect(r.ok).toBe(true);
+        expect(r.errors.map((e) => e.code)).toContain("E-STMT-EXPECT-LPAREN");
+    });
+
+    test("a `for` head missing a `;` separator records E-STMT-FOR-SEMICOLON", () => {
+        const r = parseWithNative("for (let i = 0 i < n; i++) {}");
+        expect(r.ok).toBe(true);
+        expect(r.errors.map((e) => e.code)).toContain("E-STMT-FOR-SEMICOLON");
+    });
+
+    test("a for-in/of binding with an initializer records E-STMT-FOR-BINDING-INIT", () => {
+        const r = parseWithNative("for (let k = 1 in obj) {}");
+        expect(r.ok).toBe(true);
+        expect(r.errors.map((e) => e.code)).toContain("E-STMT-FOR-BINDING-INIT");
+    });
+
+    test("`for await` on a C-style head records E-STMT-FOR-AWAIT-CSTYLE", () => {
+        const r = parseWithNative("for await (;;) {}");
+        expect(r.ok).toBe(true);
+        expect(r.errors.map((e) => e.code)).toContain("E-STMT-FOR-AWAIT-CSTYLE");
+    });
+
+    test("`switch` is NOT in the M3.2 subset — it is not parsed as a switch", () => {
+        // `switch` is out of the S98 D5 subset; M3.2 does NOT widen scope to
+        // add it. The native parser produces NO `Switch` Stmt kind — the lead
+        // surfaces as an ordinary unparsed token, not a silent acceptance.
+        const r = parseWithNative("switch (x) {}");
+        expect(r.ok).toBe(true);
+        const kinds = r.body.map((s) => s.kind);
+        expect(kinds).not.toContain("Switch");
     });
 });

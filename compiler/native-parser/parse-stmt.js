@@ -2,7 +2,7 @@
 // See span.js header for the .scrml<->.js duplication rationale.
 // PILLAR 5b classification mirrors parse-stmt.scrml's header — see that file.
 //
-// SCOPE — M3.1 (the FIRST sub-step of M3, the JS statement parser).
+// SCOPE — M3.1 + M3.2 (the first two sub-steps of M3, the JS statement parser).
 //   M3.1: STATEMENT SUBSTRATE + DECLARATIONS + BLOCK/EXPRESSION STATEMENTS
 //   + BlockStub RE-ENTRY. Parses, per S98 DD §D5's MUST-PARSE list:
 //     - variable declarations `let` / `const` / `var`, INCLUDING object +
@@ -16,10 +16,21 @@
 //   bodies, as `BlockStub` Expr nodes capturing a token range. M3.1 re-parses
 //   any BlockStub's captured tokens into a real Stmt list.
 //
-//   NOT M3.1 (forward seams — see parse-stmt.scrml's header for the named
+//   M3.2: CONTROL-FLOW STATEMENTS. Parses, per S98 DD §D5's MUST-PARSE
+//   control-flow rows:
+//     - `if` / `else` (incl. `else if` chains);
+//     - `while`, `do`-`while`;
+//     - `for` (C-style three-clause), `for`-`in`, `for`-`of` (incl.
+//       `for await ... of`);
+//     - `return`, `break`, `continue` (the no-LineTerminator restricted
+//       production gates the optional argument / label);
+//     - labels + labeled statements (`label: stmt`).
+//   The classic `for`-head ambiguity (C-style vs for-in vs for-of) is
+//   resolved by forHeadKind — a depth-0 scan of the head (bounded lookahead,
+//   single-direction commit; DD §D4 P3 — no general backtracking).
+//
+//   NOT M3.2 (forward seams — see parse-stmt.scrml's header for the named
 //   sub-step that owns each):
-//     - control-flow statements (`if`/`while`/`for`/`return`/`break`/
-//       `continue`/labels) — M3.2;
 //     - function/class declarations + in-line bodies + `import`/`export` +
 //       `try`/`throw` — M3.3;
 //     - error-recovery engine integration + full conformance — M3.4.
@@ -37,13 +48,16 @@
 
 import {
     makeTokenCursor, current, currentKind, advance, atEnd,
+    peek, peekKind,
 } from "./token-cursor.js";
 import { TokenKind, makeEof } from "./token.js";
 import { makeSpan } from "./span.js";
 import {
     ParseMode, initialParseMode, setParseMode, enterMode, exitMode,
 } from "./parse-mode.js";
-import { parseExpression, parseAssignmentExpr } from "./parse-expr.js";
+import {
+    parseExpression, parseAssignmentExpr, parsePostfix,
+} from "./parse-expr.js";
 import {
     VarDeclKind,
     makeBlock, makeExprStmt, makeEmpty, makeVarDecl, makeVarDeclarator,
@@ -52,6 +66,8 @@ import {
     makeBindingPropertyKeyValue, makeBindingPropertyShorthand,
     makeBindingPropertyRest,
     makeBindingElementItem, makeBindingElementHole, makeBindingElementRest,
+    makeIf, makeWhile, makeDoWhile, makeFor, makeForIn, makeForOf,
+    makeReturn, makeBreak, makeContinue, makeLabeled,
 } from "./ast-stmt.js";
 
 // --- makeParseStmtContext — statement-parser context constructor ---
@@ -214,9 +230,11 @@ export function parseStatementList(ctx, terminatorKind) {
 
 // parseStatement — parse ONE statement; dispatch on the token kind at the
 // cursor. M3.1 dispatches the substrate forms (declarations, block, empty,
-// expression statement). Control-flow keyword leads (`if`/`for`/`while`/...)
-// are FORWARD SEAMS — M3.2 wires them; M3.1 records E-STMT-FORWARD-M3-2 so a
-// corpus file exercising one surfaces the seam rather than mis-parsing it.
+// expression statement). M3.2 dispatches the control-flow forms + labeled
+// statements. Declaration / module / legacy-error keyword leads
+// (`function`/`class`/`import`/`export`/`try`/`throw`) remain a FORWARD
+// SEAM — M3.3 wires them; M3.2 records E-STMT-FORWARD-M3-3 so a corpus file
+// exercising one surfaces the seam rather than mis-parsing it.
 export function parseStatement(ctx) {
     const cursor = ctx.cursor;
     const kind = currentKind(ctx.cursor);
@@ -240,15 +258,47 @@ export function parseStatement(ctx) {
         return parseVarDecl(ctx);
     }
 
-    // --- M3.2 forward seam — control-flow keyword leads ---
-    if (kind === TokenKind.KwIf || kind === TokenKind.KwElse
-        || kind === TokenKind.KwFor || kind === TokenKind.KwWhile
-        || kind === TokenKind.KwDoWhile || kind === TokenKind.KwReturn
-        || kind === TokenKind.KwBreak || kind === TokenKind.KwContinue) {
-        recordError(ctx, "E-STMT-FORWARD-M3-2",
-            "control-flow statements are parsed by M3.2 (not yet implemented)",
-            spanHere(ctx));
+    // --- M3.2 control-flow keyword leads ---
+    if (kind === TokenKind.KwIf) {
+        return parseIf(ctx);
+    }
+    if (kind === TokenKind.KwWhile) {
+        return parseWhile(ctx);
+    }
+    if (kind === TokenKind.KwDoWhile) {
+        return parseDoWhile(ctx);
+    }
+    if (kind === TokenKind.KwFor) {
+        return parseFor(ctx);
+    }
+    if (kind === TokenKind.KwReturn) {
+        return parseReturn(ctx);
+    }
+    if (kind === TokenKind.KwBreak) {
+        return parseBreak(ctx);
+    }
+    if (kind === TokenKind.KwContinue) {
+        return parseContinue(ctx);
+    }
+
+    // A stray `else` with no matching `if` — a syntax error. M3.2 records a
+    // diagnostic and consumes the keyword so the parser does not spin.
+    if (kind === TokenKind.KwElse) {
+        recordError(ctx, "E-STMT-STRAY-ELSE",
+            "'else' with no matching 'if'", spanHere(ctx));
+        advance(cursor);
         return null;
+    }
+
+    // A labeled statement — `label: stmt`. At statement position an
+    // identifier followed by a `:` is a label (no statement begins with an
+    // object literal). `Ident :: ...` is the `Type::Variant` form (two
+    // adjacent `:` tokens) — that is an expression statement, NOT a label, so
+    // the token after the `:` must NOT be another `:`.
+    if (kind === TokenKind.Ident
+        && peekKind(cursor, 1) === TokenKind.Colon
+        && peekKind(cursor, 2) !== TokenKind.Colon) {
+        return parseLabeledStatement(ctx);
     }
 
     // --- M3.3 forward seam — declaration / module / legacy-error leads ---
@@ -625,6 +675,468 @@ export function parseArrayPattern(ctx) {
 
     const span = makeSpan(open.span.start, endSpan.end, open.span.line, open.span.col);
     return makeArrayPattern(elements, span);
+}
+
+// =============================================================================
+// Control-flow statements — M3.2 (DD §D5 control-flow rows).
+//
+// if / else, while, do-while, for (C-style + for-in + for-of), return /
+// break / continue, and labeled statements. A control-flow body is a
+// statement POSITION — parseStatement parses it (a `{` body becomes a Block;
+// a single un-braced statement is the body directly). The parser records
+// structured diagnostics and never throws (the stage contract).
+// =============================================================================
+
+// expectLParen — consume a `(` that opens a control-flow head; record a
+// diagnostic if absent (the parser parses on — it does not throw).
+function expectLParen(ctx, ctxLabel) {
+    if (currentKind(ctx.cursor) === TokenKind.LParen) {
+        return advance(ctx.cursor);
+    }
+    recordError(ctx, "E-STMT-EXPECT-LPAREN",
+        "expected '(' after '" + ctxLabel + "'", spanHere(ctx));
+    return current(ctx.cursor);
+}
+
+// expectRParen — consume the `)` that closes a control-flow head; record a
+// diagnostic if absent.
+function expectRParen(ctx, ctxLabel) {
+    if (currentKind(ctx.cursor) === TokenKind.RParen) {
+        return advance(ctx.cursor);
+    }
+    recordError(ctx, "E-STMT-EXPECT-RPAREN",
+        "expected ')' to close the '" + ctxLabel + "' head", spanHere(ctx));
+    return current(ctx.cursor);
+}
+
+// parseParenCondition — parse the `( expr )` condition of an if / while /
+// do-while. The condition is a full (sequence-level) expression.
+function parseParenCondition(ctx, ctxLabel) {
+    expectLParen(ctx, ctxLabel);
+    const prior = enterMode(ctx, ParseMode.InExpression);
+    const test = parseExpression(ctx);
+    exitMode(ctx, prior);
+    expectRParen(ctx, ctxLabel);
+    return test;
+}
+
+// --- parseIf — an `if (test) consequent (else alternate)?` statement ---
+// `else if` is just an `else` whose alternate is itself an If — the recursion
+// through parseStatement builds the chain (Acorn's IfStatement shape: a
+// nested IfStatement as the alternate).
+export function parseIf(ctx) {
+    const cursor = ctx.cursor;
+    const kw = advance(cursor);   // consume `if`
+
+    const test = parseParenCondition(ctx, "if");
+    const consequent = parseStatement(ctx);
+
+    let alternate = null;
+    if (currentKind(cursor) === TokenKind.KwElse) {
+        advance(cursor);   // consume `else`
+        alternate = parseStatement(ctx);
+    }
+
+    const endNode = (alternate === null || alternate === undefined) ? consequent : alternate;
+    const span = makeSpan(kw.span.start, nodeEnd(endNode), kw.span.line, kw.span.col);
+    return makeIf(test, consequent, alternate, span);
+}
+
+// --- parseWhile — a `while (test) body` loop ---
+export function parseWhile(ctx) {
+    const cursor = ctx.cursor;
+    const kw = advance(cursor);   // consume `while`
+
+    const test = parseParenCondition(ctx, "while");
+    const body = parseStatement(ctx);
+
+    const span = makeSpan(kw.span.start, nodeEnd(body), kw.span.line, kw.span.col);
+    return makeWhile(test, body, span);
+}
+
+// --- parseDoWhile — a `do body while (test) ;` loop ---
+// ECMAScript inserts the trailing `;` of a do-while unconditionally — so the
+// `;` is consumed when present and never required when absent.
+export function parseDoWhile(ctx) {
+    const cursor = ctx.cursor;
+    const kw = advance(cursor);   // consume `do`
+
+    const body = parseStatement(ctx);
+
+    let endE = nodeEnd(body);
+    if (currentKind(cursor) === TokenKind.KwWhile) {
+        advance(cursor);   // consume `while`
+    } else {
+        recordError(ctx, "E-STMT-EXPECT-WHILE",
+            "expected 'while' after the body of a 'do' loop", spanHere(ctx));
+    }
+    const test = parseParenCondition(ctx, "do-while");
+    endE = nodeEnd(test);
+
+    // The do-while terminator `;` is optional (ECMAScript's special ASI rule).
+    if (currentKind(cursor) === TokenKind.Semicolon) {
+        endE = advance(cursor).span.end;
+    }
+
+    const span = makeSpan(kw.span.start, endE, kw.span.line, kw.span.col);
+    return makeDoWhile(body, test, span);
+}
+
+// =============================================================================
+// `for` — C-style, for-in, for-of. The for-head form is decided up front by a
+// depth-0 scan (forHeadKind) — bounded lookahead, single-direction commit, no
+// backtracking (DD §D4 P3 discipline). This is the load-bearing M3.2
+// disambiguation: the `in` operator is also a binary operator, so a for-in
+// head cannot be told apart from a C-style head by parsing the LHS first.
+// =============================================================================
+
+// forHeadKind — scan the `for` head from just after the `(` and classify it:
+// "in" / "of" when a depth-0 `in` / `of` keyword precedes any depth-0 `;`,
+// else "c-style". The scan starts at cursor.idx (the caller has positioned
+// the cursor just past the `(`) and reads tokens WITHOUT consuming them.
+// `depth` counts nested ( ) [ ] { } so a `;` / `in` inside a parenthesized
+// sub-expression (`for (let x = (a in b); ...)`) does not mis-classify.
+function forHeadKind(ctx) {
+    const cursor = ctx.cursor;
+    let i = cursor.idx;
+    let depth = 0;
+    const tokens = cursor.tokens;
+
+    while (i < tokens.length) {
+        const tok = tokens[i];
+        if (tok === undefined || tok === null || tok.kind === TokenKind.EOF) {
+            break;
+        }
+        const k = tok.kind;
+        if (k === TokenKind.LParen || k === TokenKind.LBracket || k === TokenKind.LBrace) {
+            depth = depth + 1;
+        } else if (k === TokenKind.RParen || k === TokenKind.RBracket || k === TokenKind.RBrace) {
+            // A depth-0 closer is the `)` that ends the for head — stop.
+            if (depth === 0) {
+                break;
+            }
+            depth = depth - 1;
+        } else if (depth === 0) {
+            if (k === TokenKind.Semicolon) {
+                return "c-style";
+            }
+            if (k === TokenKind.KwIn) {
+                return "in";
+            }
+            if (k === TokenKind.KwOf) {
+                return "of";
+            }
+        }
+        i = i + 1;
+    }
+    return "c-style";
+}
+
+// parseForBindingHead — the LEFT side of a for-in / for-of when it is a
+// declaration (`for (let x of xs)`). Parses the `let`/`const`/`var` keyword +
+// exactly ONE binding target (no initializer — JS forbids an initializer on a
+// for-in/of binding) and returns a one-declarator VarDecl Stmt.
+function parseForBindingHead(ctx) {
+    const cursor = ctx.cursor;
+    const kwTok = advance(cursor);   // consume let / const / var
+    const declKind = varDeclKindOf(kwTok.kind);
+
+    const target = parseBinding(ctx);
+    // An initializer on a for-in/of binding is a syntax error in modern JS —
+    // record a diagnostic and consume it so the parser proceeds.
+    if (currentKind(cursor) === TokenKind.Assign) {
+        recordError(ctx, "E-STMT-FOR-BINDING-INIT",
+            "a 'for-in' / 'for-of' binding may not have an initializer", spanHere(ctx));
+        advance(cursor);   // consume =
+        const priorM = enterMode(ctx, ParseMode.InExpression);
+        parseAssignmentExpr(ctx);
+        exitMode(ctx, priorM);
+    }
+
+    const declarator = makeVarDeclarator(target, null,
+        makeSpan(nodeStart(target), nodeEnd(target), nodeLine(target), nodeCol(target)));
+    const span = makeSpan(kwTok.span.start, nodeEnd(target), kwTok.span.line, kwTok.span.col);
+    return makeVarDecl(declKind, [declarator], span);
+}
+
+// parseForCStyleVarHead — the C-style `for` init when it is a declaration
+// (`for (let i = 0, j = 1; ...)`). Parses the keyword + a comma-separated
+// declarator list but NOT the terminating `;` (parseForCStyle owns the head's
+// `;` separators). Mirrors parseVarDecl minus consumeSemicolon.
+function parseForCStyleVarHead(ctx) {
+    const cursor = ctx.cursor;
+    const kwTok = advance(cursor);   // consume let / const / var
+    const declKind = varDeclKindOf(kwTok.kind);
+
+    const declarations = [];
+    while (atEnd(cursor) === false) {
+        if (currentKind(cursor) === TokenKind.Semicolon) {
+            break;
+        }
+        const declarator = parseVarDeclarator(ctx);
+        if (declarator === undefined || declarator === null) {
+            break;
+        }
+        declarations.push(declarator);
+        if (currentKind(cursor) === TokenKind.Comma) {
+            advance(cursor);   // consume the separator ,
+            continue;
+        }
+        break;
+    }
+
+    let endE = kwTok.span.end;
+    if (declarations.length > 0) {
+        endE = nodeEnd(declarations[declarations.length - 1]);
+    }
+    const span = makeSpan(kwTok.span.start, endE, kwTok.span.line, kwTok.span.col);
+    return makeVarDecl(declKind, declarations, span);
+}
+
+// parseForInOfLeftExpr — the LEFT side of a for-in / for-of when it is NOT a
+// declaration (`for (x of xs)`, `for (obj.k in src)`). Parses a postfix-level
+// expression — NOT a full binary expression — so the `in` operator is not
+// consumed by parse-expr's binary climber. A destructuring LHS (`for ([a] of
+// xs)`) parses as an array/object literal here; the conformance normalizer
+// maps it to a pattern (the documented K6-class param/binding divergence —
+// M4 unifies the two surfaces).
+function parseForInOfLeftExpr(ctx) {
+    const prior = enterMode(ctx, ParseMode.InExpression);
+    const left = parsePostfix(ctx);
+    exitMode(ctx, prior);
+    return left;
+}
+
+// --- parseFor — `for` C-style / for-in / for-of (incl. `for await`) ---
+export function parseFor(ctx) {
+    const cursor = ctx.cursor;
+    const kw = advance(cursor);   // consume `for`
+
+    // `for await ( ... of ... )` — recognize the `await` keyword in the for
+    // head. The body's async context is M3.3's territory; M3.2 only records
+    // the flag on the ForOf node.
+    let isAwait = false;
+    if (currentKind(cursor) === TokenKind.KwAwait) {
+        advance(cursor);   // consume `await`
+        isAwait = true;
+    }
+
+    expectLParen(ctx, "for");
+
+    const headKind = forHeadKind(ctx);
+
+    if (headKind === "in" || headKind === "of") {
+        return parseForInOf(ctx, kw, headKind, isAwait);
+    }
+    return parseForCStyle(ctx, kw, isAwait);
+}
+
+// parseForInOf — finish a for-in / for-of after the head was classified. The
+// cursor sits just past the `(`. `headKind` is "in" or "of".
+function parseForInOf(ctx, kw, headKind, isAwait) {
+    const cursor = ctx.cursor;
+
+    // The left side — a declaration (`let`/`const`/`var` + one binding) or an
+    // assignment-target expression.
+    let left = null;
+    const lk = currentKind(cursor);
+    if (lk === TokenKind.KwLet || lk === TokenKind.KwConst || lk === TokenKind.KwVar) {
+        left = parseForBindingHead(ctx);
+    } else {
+        left = parseForInOfLeftExpr(ctx);
+    }
+
+    // Consume the `in` / `of` operator keyword.
+    if (headKind === "in") {
+        if (currentKind(cursor) === TokenKind.KwIn) {
+            advance(cursor);   // consume `in`
+        }
+    } else if (currentKind(cursor) === TokenKind.KwOf) {
+        advance(cursor);   // consume `of`
+    }
+
+    // The right side. for-in's right is a full expression; for-of's right is
+    // an assignment-level expression (a `,` there is NOT a sequence —
+    // ECMAScript's for-of grammar uses AssignmentExpression for the iterable).
+    const priorM = enterMode(ctx, ParseMode.InExpression);
+    const right = (headKind === "of") ? parseAssignmentExpr(ctx) : parseExpression(ctx);
+    exitMode(ctx, priorM);
+
+    expectRParen(ctx, "for");
+    const body = parseStatement(ctx);
+
+    const span = makeSpan(kw.span.start, nodeEnd(body), kw.span.line, kw.span.col);
+    if (headKind === "in") {
+        return makeForIn(left, right, body, span);
+    }
+    return makeForOf(left, right, body, isAwait, span);
+}
+
+// parseForCStyle — finish a C-style `for (init; test; update) body`. The
+// cursor sits just past the `(`. Any of the three clauses may be empty.
+function parseForCStyle(ctx, kw, isAwait) {
+    const cursor = ctx.cursor;
+
+    // `for await` is only legal on a for-of — a `for await (;;)` C-style is a
+    // syntax error.
+    if (isAwait === true) {
+        recordError(ctx, "E-STMT-FOR-AWAIT-CSTYLE",
+            "'for await' is only valid with a 'for-of' loop", kw.span);
+    }
+
+    // The init clause — empty / a declaration / an expression.
+    let init = null;
+    const initKind = currentKind(cursor);
+    if (initKind === TokenKind.Semicolon) {
+        // empty init — leave `init` as null
+    } else if (initKind === TokenKind.KwLet || initKind === TokenKind.KwConst
+               || initKind === TokenKind.KwVar) {
+        init = parseForCStyleVarHead(ctx);
+    } else {
+        const priorM = enterMode(ctx, ParseMode.InExpression);
+        init = parseExpression(ctx);
+        exitMode(ctx, priorM);
+    }
+    if (currentKind(cursor) === TokenKind.Semicolon) {
+        advance(cursor);   // consume the init/test separator ;
+    } else {
+        recordError(ctx, "E-STMT-FOR-SEMICOLON",
+            "expected ';' after the 'for' init clause", spanHere(ctx));
+    }
+
+    // The test clause — empty or an expression.
+    let test = null;
+    if (currentKind(cursor) !== TokenKind.Semicolon) {
+        const priorM = enterMode(ctx, ParseMode.InExpression);
+        test = parseExpression(ctx);
+        exitMode(ctx, priorM);
+    }
+    if (currentKind(cursor) === TokenKind.Semicolon) {
+        advance(cursor);   // consume the test/update separator ;
+    } else {
+        recordError(ctx, "E-STMT-FOR-SEMICOLON",
+            "expected ';' after the 'for' test clause", spanHere(ctx));
+    }
+
+    // The update clause — empty or an expression.
+    let update = null;
+    if (currentKind(cursor) !== TokenKind.RParen) {
+        const priorM = enterMode(ctx, ParseMode.InExpression);
+        update = parseExpression(ctx);
+        exitMode(ctx, priorM);
+    }
+
+    expectRParen(ctx, "for");
+    const body = parseStatement(ctx);
+
+    const span = makeSpan(kw.span.start, nodeEnd(body), kw.span.line, kw.span.col);
+    return makeFor(init, test, update, body, span);
+}
+
+// =============================================================================
+// return / break / continue — the no-LineTerminator restricted production
+// gates the optional argument / label: an argument (return) or a label
+// (break / continue) is recognized only when it sits on the SAME source line
+// as the keyword. The lexer drops Newline tokens, so this reuses the
+// .span.line signal that ASI relies on.
+// =============================================================================
+
+// sameLineFollows — does the token at the cursor sit on the SAME source line
+// as `kwTok`, and is it NOT a `;` / `}` / EOF (the always-terminate tokens)?
+// The signal for "the optional argument / label is present".
+function sameLineFollows(ctx, kwTok) {
+    const cursor = ctx.cursor;
+    if (atEnd(cursor)) {
+        return false;
+    }
+    const k = currentKind(cursor);
+    if (k === TokenKind.Semicolon || k === TokenKind.RBrace) {
+        return false;
+    }
+    const here = current(cursor);
+    if (here === undefined || here === null) {
+        return false;
+    }
+    return lineOfToken(here) === lineOfToken(kwTok);
+}
+
+// --- parseReturn — a `return argument?` statement ---
+export function parseReturn(ctx) {
+    const cursor = ctx.cursor;
+    const kw = advance(cursor);   // consume `return`
+
+    let argument = null;
+    let endE = kw.span.end;
+    if (sameLineFollows(ctx, kw)) {
+        const priorM = enterMode(ctx, ParseMode.InExpression);
+        argument = parseExpression(ctx);
+        exitMode(ctx, priorM);
+        endE = nodeEnd(argument);
+    }
+
+    const prevTok = lastTokenBefore(ctx);
+    consumeSemicolon(ctx, prevTok);
+
+    const span = makeSpan(kw.span.start, endE, kw.span.line, kw.span.col);
+    return makeReturn(argument, span);
+}
+
+// optionalLabelName — the optional label of a `break` / `continue`: an
+// identifier on the SAME line as the keyword. Returns the label text or
+// `null`. Consumes the identifier token when present.
+function optionalLabelName(ctx, kwTok) {
+    const cursor = ctx.cursor;
+    if (sameLineFollows(ctx, kwTok) === false) {
+        return null;
+    }
+    if (currentKind(cursor) !== TokenKind.Ident) {
+        return null;
+    }
+    return advance(cursor).name;
+}
+
+// --- parseBreak — a `break label?` statement ---
+export function parseBreak(ctx) {
+    const cursor = ctx.cursor;
+    const kw = advance(cursor);   // consume `break`
+
+    const label = optionalLabelName(ctx, kw);
+    const prevTok = lastTokenBefore(ctx);
+    const endE = prevTok.span.end;
+    consumeSemicolon(ctx, prevTok);
+
+    const span = makeSpan(kw.span.start, endE, kw.span.line, kw.span.col);
+    return makeBreak(label, span);
+}
+
+// --- parseContinue — a `continue label?` statement ---
+export function parseContinue(ctx) {
+    const cursor = ctx.cursor;
+    const kw = advance(cursor);   // consume `continue`
+
+    const label = optionalLabelName(ctx, kw);
+    const prevTok = lastTokenBefore(ctx);
+    const endE = prevTok.span.end;
+    consumeSemicolon(ctx, prevTok);
+
+    const span = makeSpan(kw.span.start, endE, kw.span.line, kw.span.col);
+    return makeContinue(label, span);
+}
+
+// --- parseLabeledStatement — a `label: statement` ---
+// The caller (parseStatement) has confirmed `Ident :` (and that the token
+// after the `:` is not another `:` — that would be the `Type::Variant` form).
+// The labeled statement's body is the statement that follows the `:` —
+// parseStatement parses it (a label may name a loop / block / any statement;
+// `break label` / `continue label` target it).
+export function parseLabeledStatement(ctx) {
+    const cursor = ctx.cursor;
+    const nameTok = advance(cursor);   // consume the label identifier
+    advance(cursor);                   // consume the `:`
+
+    const body = parseStatement(ctx);
+    const span = makeSpan(nameTok.span.start, nodeEnd(body), nameTok.span.line, nameTok.span.col);
+    return makeLabeled(nameTok.name, body, span);
 }
 
 // =============================================================================

@@ -14,15 +14,17 @@
 //   the statement parser is currently in. The AST nodes this file
 //   constructs are the OUTPUT of the parse — pure values, not state.
 //
-// Status (M3.1): COMPILABLE skeleton. JS-escape carries the live tag-style
-// surface. The `type Stmt:enum = { ... }` declaration is preserved in
-// commented canonical form for the M5 swap-in to scrml-native tagged
-// variants. M3.1 emits the substrate kinds (Block, ExprStmt, Empty, VarDecl)
-// + the binding-pattern catalog (ObjectPattern / ArrayPattern /
-// AssignmentPattern / RestElement and the property/element forms). The
-// remaining Stmt kinds (control flow, FunctionDecl / ClassDecl / Import /
+// Status (M3.1 + M3.2): COMPILABLE skeleton. JS-escape carries the live
+// tag-style surface. The `type Stmt:enum = { ... }` declaration is preserved
+// in commented canonical form for the M5 swap-in to scrml-native tagged
+// variants. M3.1 emitted the substrate kinds (Block, ExprStmt, Empty,
+// VarDecl) + the binding-pattern catalog (ObjectPattern / ArrayPattern /
+// AssignmentPattern / RestElement and the property/element forms). M3.2 ADDS
+// the control-flow constructors (If / While / DoWhile / For / ForIn / ForOf
+// / Return / Break / Continue / Labeled) for the kinds M3.1 declared but
+// deferred. The remaining Stmt kinds (FunctionDecl / ClassDecl / Import /
 // Export / Try / Throw) are declared in the enum but their constructors land
-// at M3.2 (control flow) / M3.3 (declarations + module syntax + try/throw).
+// at M3.3 (declarations + module syntax + try/throw).
 //
 // DD §D3 cross-ref: the S98 DD §D3 `Stmt` enum sketch — ExprStmt / VarDecl /
 // If / For / Return / Block — is the design seed; M3.1 expands it to the
@@ -52,7 +54,8 @@ ${
     //       For(init: Stmt | Expr | not, test: Expr | not,
     //           update: Expr | not, body: Stmt, span: Span),
     //       ForIn(left: Stmt | Binding, right: Expr, body: Stmt, span: Span),
-    //       ForOf(left: Stmt | Binding, right: Expr, body: Stmt, span: Span),
+    //       ForOf(left: Stmt | Binding, right: Expr, body: Stmt,
+    //             isAwait: boolean, span: Span),   // isAwait — M3.2
     //       Return(argument: Expr | not, span: Span),
     //       Break(label: string | not, span: Span),
     //       Continue(label: string | not, span: Span),
@@ -107,8 +110,9 @@ ${
 
     // ---------------------------------------------------------------------
     // StmtKind — string-tag registry. Order mirrors the canonical enum.
-    // M3.1 EMITS Block / ExprStmt / Empty / VarDecl; the rest are declared
-    // for catalog completeness (constructors land M3.2 / M3.3).
+    // M3.1 EMITS Block / ExprStmt / Empty / VarDecl; M3.2 EMITS the
+    // control-flow kinds; the M3.3 kinds are declared for catalog
+    // completeness (constructors land M3.3).
     // ---------------------------------------------------------------------
     export const StmtKind = Object.freeze({
         // --- M3.1 — statement substrate ---
@@ -117,7 +121,7 @@ ${
         Empty:    "Empty",
         VarDecl:  "VarDecl",
 
-        // --- M3.2 — control-flow statements (declared; constructors deferred) ---
+        // --- M3.2 — control-flow statements ---
         If:       "If",
         While:    "While",
         DoWhile:  "DoWhile",
@@ -192,6 +196,70 @@ ${
     // makeVarDeclarator — one declarator: a binding target + optional init.
     export function makeVarDeclarator(target, init, span) {
         return { target, init, span }
+    }
+
+    // -- Control-flow statement node constructors (M3.2 — DD §D3 / §D5) --
+
+    // makeIf — an `if (test) consequent else alternate` statement. `alternate`
+    // is `not` for a no-else `if`; an `else if` chain nests an If as the
+    // alternate (Acorn's IfStatement shape).
+    export function makeIf(test, consequent, alternate, span) {
+        return { kind: StmtKind.If, test, consequent, alternate, span }
+    }
+
+    // makeWhile — a `while (test) body` loop.
+    export function makeWhile(test, body, span) {
+        return { kind: StmtKind.While, test, body, span }
+    }
+
+    // makeDoWhile — a `do body while (test)` loop (body runs once first).
+    export function makeDoWhile(body, test, span) {
+        return { kind: StmtKind.DoWhile, body, test, span }
+    }
+
+    // makeFor — a C-style three-clause `for (init; test; update) body` loop.
+    // Each of `init` / `test` / `update` is `not` when its clause is empty.
+    // `init` is a VarDecl Stmt or an Expr; `test` / `update` are Exprs.
+    export function makeFor(init, test, update, body, span) {
+        return { kind: StmtKind.For, init, test, update, body, span }
+    }
+
+    // makeForIn — a `for (left in right) body` loop. `left` is a VarDecl Stmt
+    // or an assignment-target Expr; `right` is the iterated object.
+    export function makeForIn(left, right, body, span) {
+        return { kind: StmtKind.ForIn, left, right, body, span }
+    }
+
+    // makeForOf — a `for (left of right) body` loop. `isAwait` is true for
+    // `for await (left of right)` (an M3.2 extension of the DD §D3 ForOf
+    // shape — mirrors Acorn's ForOfStatement `await: boolean`; the body
+    // `async` context is M3.3's territory).
+    export function makeForOf(left, right, body, isAwait, span) {
+        return { kind: StmtKind.ForOf, left, right, body, isAwait, span }
+    }
+
+    // makeReturn — a `return argument` statement. `argument` is `not` for a
+    // bare `return`.
+    export function makeReturn(argument, span) {
+        return { kind: StmtKind.Return, argument, span }
+    }
+
+    // makeBreak — a `break` (optionally `break label`). `label` is `not` for
+    // an unlabeled break.
+    export function makeBreak(label, span) {
+        return { kind: StmtKind.Break, label, span }
+    }
+
+    // makeContinue — a `continue` (optionally `continue label`). `label` is
+    // `not` for an unlabeled continue.
+    export function makeContinue(label, span) {
+        return { kind: StmtKind.Continue, label, span }
+    }
+
+    // makeLabeled — a `label: body` labeled statement. `label` is the label
+    // identifier text; `body` is the statement the label names.
+    export function makeLabeled(label, body, span) {
+        return { kind: StmtKind.Labeled, label, body, span }
     }
 
     // -- Binding-pattern node constructors (M3.1 — DD §D5) --
