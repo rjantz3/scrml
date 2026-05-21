@@ -49,6 +49,11 @@ import {
     dispatchTopLevel,
     dispatchInLogicEscape,
     isTagNameChar,
+    // MK2.2 — the tag-tree pairing surface.
+    emitMarkupElement,
+    closeMarkupElement,
+    handleCloser,
+    closeUnterminatedTags,
 } from "../native-parser/parse-markup.js";
 import { makeParseContext, delegationDepth } from "../native-parser/parse-ctx.js";
 import { makeCursor, isEof, advance } from "../native-parser/cursor.js";
@@ -76,7 +81,20 @@ import {
     popTagFrame,
     makeOpenExpectingChildrenFrame,
     makeOpenSelfClosedFrame,
+    // MK2.2 — the closer-form surface + the pairing/recovery helpers.
+    CloserForm,
+    recognizeCloserForm,
+    tokenizeCloser,
+    closeTagFrame,
+    closeSelfClosedFrame,
+    reportUnterminatedTags,
+    dispatchTagMismatchRecovery,
+    ensureDiagnostics,
+    makeDiagnostic,
+    pushDiagnostic,
 } from "../native-parser/tag-frame.js";
+// MK2.2 — the M1 ErrorRecovery engine (the mismatch dispatch re-syncs it).
+import { ErrorRecovery } from "../native-parser/error-recovery.js";
 
 // The MK1.3 conformance ORACLE — the current heuristic block-splitter
 // (compiler/src/block-splitter.js). The native markup block-stream is
@@ -810,15 +828,14 @@ describe("MK1.3 block-stream — typed blocks emitted by the trampoline", () => 
         expect(s).toEqual([]);
     });
 
-    test("a Markup block spans the FULL opener (MK2.1 — divergence D-4 narrowed)", () => {
-        // `<div> x` — MK2.1's dispatchInMarkupTag tokenizes the FULL
-        // opener `<div>` via recognizeOpener; the Markup block spans
-        // [0,5] (the whole `<div>`), not just the `<div` boundary run
-        // [0,4] that MK1.3's placeholder emitted. The whole-ELEMENT span
-        // (opener + children + closer) is MK2.2 — D-4 is narrowed, not
-        // yet closed.
+    test("a Markup block spans the whole ELEMENT (MK2.2 — D-4 closed)", () => {
+        // `<div> x` — `<div>` is an UNTERMINATED opener. MK2.2's
+        // opener/closer pairing recovers it at EOF as if `</>` closed it
+        // (closeUnterminatedTags); the Markup block spans the whole
+        // ELEMENT [0,7] — the opener + the recovered ` x` child — not the
+        // [0,5] opener-only span MK2.1 emitted. D-4 is CLOSED at MK2.2.
         const s = blockStream("<div> x");
-        expect(s[0]).toEqual({ kind: NativeBlockKind.Markup, start: 0, end: 5 });
+        expect(s[0]).toEqual({ kind: NativeBlockKind.Markup, start: 0, end: 7 });
     });
 });
 
@@ -872,19 +889,21 @@ describe("MK1.3 sub-context sketch dispatchers — extent + close recognition", 
 // tree on the conformance corpus. `compiler/src/block-splitter.js` is the
 // ORACLE.
 //
-// At MK1.3 the trampoline produces a FLAT block-stream; the BS produces a
-// tree. "Structural equivalence" at MK1.3 is checked as TOP-LEVEL block
-// equivalence: the native block-stream vs the BS's depth-0 `rootBlocks`,
-// compared on (kind, span). The corpus is split into two dispositions:
+// At MK1.3 the trampoline produced a FLAT block-stream; MK2.2's
+// opener/closer pairing produces the `<tag>` TREE. The corpus dispositions:
 //
 //   "conformance"  — clean files: only text / comment / brace-context
 //                    blocks at the top level, no top-level context
 //                    nesting. The native block-stream is asserted
-//                    structurally equal to the BS rootBlocks.
+//                    structurally equal to the BS rootBlocks (kind, span).
+//   "markup-tree"  — files exercising the <tag> tree. MK2.2 RESOLVED the
+//                    D-4 divergence: the native tree is asserted FULLY
+//                    equal to the BS block tree (kind, name, span — whole
+//                    element + nested children).
 //   "divergence-*" — files exercising a KNOWN, DOCUMENTED divergence
-//                    (D-2 SQL-at-top-level / D-3 foreign-code / D-4 the
-//                    <tag> tree). The divergence is recorded; the native
-//                    side is asserted internally correct.
+//                    (D-2 SQL-at-top-level / D-3 foreign-code). The
+//                    divergence is recorded; the native side is asserted
+//                    internally correct.
 // =============================================================================
 
 // The BS type-string -> native BlockKind mapping. The BS uses lowercase /
@@ -929,11 +948,40 @@ const MARKUP_BENCH_DISPOSITION = {
     "comments-line.scrml":       "conformance",
     "comments-html.scrml":       "conformance",
     "multi-context.scrml":       "conformance",
-    // Divergence-exercising files — see the D-2/D-3/D-4 notes in
-    // parse-markup.scrml's header.
-    "markup-tags.scrml":         "divergence-markup-tree",   // D-4
-    "foreign-code.scrml":        "divergence-foreign-code",  // D-3
+    // markup-tree — MK2.2 RESOLVED D-4: the native <tag> tree is now
+    // structurally equal to the BS block tree (whole-element spans +
+    // nested children). The disposition asserts FULL tree equivalence
+    // (was "divergence-markup-tree" — a divergence — at MK1.3/MK2.1).
+    "markup-tags.scrml":         "markup-tree",
+    // foreign-code — D-3 — the BS has no `_{` opener (still a divergence).
+    "foreign-code.scrml":        "divergence-foreign-code",
 };
+
+// markupTreeOf — render a native block-stream as a compact tree string
+// (the corpus-harness analogue of the MK2.2-section `markupTree` helper;
+// declared here so the harness — earlier in the file — can use it).
+function markupTreeOf(nodes) {
+    const fmt = (b) => {
+        if (b.kind === NativeBlockKind.Markup) {
+            return `${b.name}[${b.span.start},${b.span.end}]{${(b.children ?? []).map(fmt).join(",")}}`;
+        }
+        return `${b.kind}[${b.span.start},${b.span.end}]`;
+    };
+    return nodes.map(fmt).join(" ");
+}
+
+// bsTreeOf — render the BS block tree in the SAME compact shape, mapping
+// the BS lowercase type strings to native BlockKind tags.
+function bsTreeOf(bsBlocks) {
+    const fmt = (b) => {
+        if (b.type === "markup") {
+            return `${b.name}[${b.span.start},${b.span.end}]{${(b.children ?? []).map(fmt).join(",")}}`;
+        }
+        const kind = BS_TYPE_TO_NATIVE_KIND[b.type] ?? `BS:${b.type}`;
+        return `${kind}[${b.span.start},${b.span.end}]`;
+    };
+    return bsBlocks.map(fmt).join(" ");
+}
 
 describe("MK1.3 conformance — block-stream vs the BS block tree (corpus)", () => {
     const benchFiles = readdirSync(MARKUP_BENCH_DIR).filter((f) => f.endsWith(".scrml"));
@@ -968,29 +1016,20 @@ describe("MK1.3 conformance — block-stream vs the BS block tree (corpus)", () 
                     expect(bs.errors.length).toBe(0);
                     expect(native).toEqual(bs.blocks);
                 });
-            } else if (disposition === "divergence-markup-tree") {
-                // D-4 — the native MK1.3 layer emits `Markup` blocks at the
-                // `<ident` BOUNDARY granularity; the BS emits one `markup`
-                // block per ELEMENT (opener + children + closer). The
-                // <tag> tree is MK2. Record the divergence; assert the
-                // native side is internally coherent.
-                test(`(divergence D-4 — <tag> tree is MK2) native emits boundary-granular Markup blocks`, () => {
-                    const native = blockStream(source);
-                    // The native layer DOES recognize the markup-tag
-                    // boundaries — at least one Markup block is emitted.
-                    const markupBlocks = native.filter((b) => b.kind === NativeBlockKind.Markup);
-                    expect(markupBlocks.length).toBeGreaterThan(0);
-                    // Every Markup block spans a non-empty `<ident` run.
-                    for (const m of markupBlocks) {
-                        expect(m.end).toBeGreaterThan(m.start);
-                    }
-                    // DOCUMENTED DIVERGENCE: the BS top-level `markup` block
-                    // count differs from the native one (the BS spans whole
-                    // elements; the native spans boundaries). This is the
-                    // MK2-deferral — asserted as a divergence, not parity.
-                    const bs = bsTopLevelStream(source);
-                    const bsMarkup = bs.blocks.filter((b) => b.kind === NativeBlockKind.Markup);
-                    expect(bsMarkup.length).toBeGreaterThan(0);
+            } else if (disposition === "markup-tree") {
+                // MK2.2 — D-4 RESOLVED. The native <tag> tree is
+                // structurally equal to the BS block tree: whole-element
+                // spans (opener + children + closer) AND nested children.
+                // The conformance gate is full-tree equivalence on
+                // (kind, name, span) — the charter Q4.A MK2 gating.
+                test(`(markup-tree — D-4 resolved) native <tag> tree === BS block tree`, () => {
+                    const bs = splitBlocks("conformance.scrml", source);
+                    // The markup-tree corpus is hand-designed to compile
+                    // without BS errors.
+                    expect(bs.errors.length).toBe(0);
+                    const nativeTree = markupTreeOf(parseMarkup(source));
+                    const bsTree = bsTreeOf(bs.blocks);
+                    expect(nativeTree).toBe(bsTree);
                 });
             } else if (disposition === "divergence-foreign-code") {
                 // D-3 — the native layer recognizes `_{}` (§23) as a
@@ -1511,68 +1550,82 @@ describe("MK2.1 trampoline — TagFrame-driven .InMarkupTag dispatch", () => {
         expect(s).toEqual([{ kind: NativeBlockKind.Markup, start: 0, end: 16 }]);
     });
 
-    test("text on either side of an opener splits into Text blocks", () => {
-        // `a <span> b` — Text[0,2], Markup[2,8], Text[8,10].
+    test("text before a PAIRED element splits into a leading Text block", () => {
+        // `a <span></span>` — Text[0,2] then the `<span>` ELEMENT [2,15]
+        // (MK2.2 pairs the `</span>` closer). Leading text is a top-level
+        // sibling of the element; the element has no children.
+        const s = blockStream("a <span></span>");
+        expect(s).toEqual([
+            { kind: NativeBlockKind.Text,   start: 0,  end: 2 },
+            { kind: NativeBlockKind.Markup, start: 2,  end: 15 },
+        ]);
+    });
+
+    test("text on either side of an UNTERMINATED opener — the trailing text nests", () => {
+        // `a <span> b` — `<span>` is unterminated; MK2.2 recovers it at
+        // EOF (closeUnterminatedTags). Text[0,2] is a leading sibling;
+        // the `<span>` element spans [2,10] and the trailing ` b` text is
+        // its CHILD (the recovered element absorbs its body).
         const s = blockStream("a <span> b");
         expect(s).toEqual([
             { kind: NativeBlockKind.Text,   start: 0,  end: 2 },
-            { kind: NativeBlockKind.Markup, start: 2,  end: 8 },
-            { kind: NativeBlockKind.Text,   start: 8,  end: 10 },
+            { kind: NativeBlockKind.Markup, start: 2,  end: 10 },
         ]);
     });
 
-    test("two openers — one Markup block each (the tag tree is MK2.2)", () => {
-        // `<div><span>` — MK2.1 emits a Markup block per opener; the
-        // children + closer pairing (the tree) is MK2.2.
+    test("two unterminated openers — the inner nests under the outer (the tree)", () => {
+        // `<div><span>` — both unterminated; MK2.2 recovers both at EOF.
+        // The inner `<span>` recovers first, then the outer `<div>`'s
+        // recovery splice absorbs it — ONE top-level Markup block
+        // (`<div>` [0,11]) with `<span>` nested as its child.
         const s = blockStream("<div><span>");
-        expect(s).toEqual([
-            { kind: NativeBlockKind.Markup, start: 0,  end: 5 },
-            { kind: NativeBlockKind.Markup, start: 5,  end: 11 },
-        ]);
+        expect(s).toEqual([{ kind: NativeBlockKind.Markup, start: 0, end: 11 }]);
     });
 
-    test("a closer `</div>` is text to MK2.1 (closer recognition is MK2.2)", () => {
-        // `<div></div>` — MK2.1 recognizes the OPENER; the `</div>` closer
-        // is NOT yet recognized (MK2.2) — it accumulates as a Text block.
+    test("a `</div>` closer pairs with its opener — one whole-element block", () => {
+        // `<div></div>` — MK2.2 recognizes the `</div>` closer
+        // structurally + pairs it with the `<div>` opener: ONE Markup
+        // block spanning the whole ELEMENT [0,11].
         const s = blockStream("<div></div>");
-        expect(s).toEqual([
-            { kind: NativeBlockKind.Markup, start: 0,  end: 5 },
-            { kind: NativeBlockKind.Text,   start: 5,  end: 11 },
-        ]);
+        expect(s).toEqual([{ kind: NativeBlockKind.Markup, start: 0, end: 11 }]);
     });
 
-    test("the final tag-frame stack reflects the opener stream", () => {
-        // Every opener pushes a frame; closers (MK2.2) would pop. At MK2.1
-        // the stack after `<div><span><br/>` has all three frames.
-        const { ctx } = parseMarkupTrace("<div><span><br/>");
-        expect(tagFrameDepth(ctx)).toBe(3);
-        expect(ctx.tagFrameStack.map((f) => f.name)).toEqual(["div", "span", "br"]);
-        expect(ctx.tagFrameStack.map((f) => f.kind)).toEqual([
-            TagFrameKind.OpenExpectingChildren,
-            TagFrameKind.OpenExpectingChildren,
-            TagFrameKind.OpenSelfClosed,
-        ]);
+    test("the tag-frame stack drains as elements close", () => {
+        // `<div><span></span></div>` — a fully-paired tree. Every opener
+        // pushes a frame; every closer pops it. After a well-formed run
+        // the TagFrame stack is empty (depth 0).
+        const { ctx } = parseMarkupTrace("<div><span></span></div>");
+        expect(tagFrameDepth(ctx)).toBe(0);
+        // The block-stream is ONE top-level `<div>` element.
+        const s = blockStream("<div><span></span></div>");
+        expect(s).toEqual([{ kind: NativeBlockKind.Markup, start: 0, end: 24 }]);
     });
 
     test("a nested tag inside a logic escape is recognized — `${ <div> }`", () => {
         // The charter Q1.C contract permits a markup tag inside a logic
-        // body. The `<div>` opener inside `${ ... }` is recognized; its
-        // Markup block is emitted, then the LogicEscape block.
+        // body. The `<div>` opener inside `${ ... }` is recognized; it is
+        // unterminated within the logic body, so MK2.2 recovers it at the
+        // context close (recoverTagsInClosedContext) — a Markup block AND
+        // the LogicEscape block are both emitted, the LogicEscape block
+        // intact (not corrupted by the recovery splice).
         const s = blockStream("$" + "{" + " <div> }");
         const kinds = s.map((b) => b.kind);
         expect(kinds).toContain(NativeBlockKind.Markup);
         expect(kinds).toContain(NativeBlockKind.LogicEscape);
     });
 
-    test("an opener with a structural element — `<engine for=Phase>`", () => {
-        // The opener tokenizer + TagKind handle a structural-element opener;
-        // the Markup block spans the whole opener. (decl-vs-structural
-        // classification completion is MK2.3.)
-        const src = "<engine for=Phase>";
+    test("an opener with a structural element — `<engine for=Phase>...</>`", () => {
+        // The opener tokenizer + TagKind handle a structural-element
+        // opener; with a matching closer MK2.2 pairs the whole element.
+        // (decl-vs-structural classification completion is MK2.3.)
+        const src = "<engine for=Phase></>";
         const s = blockStream(src);
         expect(s).toEqual([{ kind: NativeBlockKind.Markup, start: 0, end: src.length }]);
-        const { ctx } = parseMarkupTrace(src);
-        expect(ctx.tagFrameStack[0].tagKind).toBe(TagKind.ScrmlStructural);
+        // The element's frame popped on close — the TagFrame stack is
+        // empty. The opener's TagKind is observed during the run; assert
+        // it via a fresh recognizeOpener of the opener.
+        const opened = recognizeOpenerFromLt("<engine for=Phase>");
+        expect(opened.frame.tagKind).toBe(TagKind.ScrmlStructural);
     });
 
     test("the trampoline halts on every opener shape (the termination guarantee)", () => {
@@ -1592,5 +1645,599 @@ describe("MK2.1 trampoline — TagFrame-driven .InMarkupTag dispatch", () => {
         expect(Array.isArray(s)).toBe(true);
         expect(s.length).toBe(1);
         expect(s[0].kind).toBe(NativeBlockKind.Markup);
+    });
+});
+
+// =============================================================================
+// MK2.2 — closer forms + tag-tree pairing + mismatch recovery.
+//
+// MK2.2's authoritative scope (roadmap §3.1, the MK2.2 row): the 3 closer
+// forms (`</>` inferred / `</name>` explicit / `/>` self-closing) recognized
+// STRUCTURALLY (a closed set — no `looksLikeCloser` bare-`/` heuristic); the
+// `TagFrame` rule= contract (opener pushes, closer pops — the stack IS the
+// depth count, eliminating BS heuristic #5 `scanCompoundBlockEnd`); a
+// mismatched `</name>` dispatching the M1 `ErrorRecovery` engine; the
+// `<tag>` tree as output. Charter dive Q1.F is the `TagFrame` engine sketch;
+// Q2.A #5 / #12 are the heuristic-elimination targets.
+// =============================================================================
+
+// markupTree — the native block-stream rendered as a compact tree string.
+// A Markup block is `name[start,end]{children}`; a leaf block is
+// `Kind[start,end]`. The cleanest shape for asserting the <tag> TREE.
+function markupTree(source) {
+    const fmt = (b) => {
+        if (b.kind === NativeBlockKind.Markup) {
+            const kids = (b.children ?? []).map(fmt).join(",");
+            return `${b.name}[${b.span.start},${b.span.end}]{${kids}}`;
+        }
+        return `${b.kind}[${b.span.start},${b.span.end}]`;
+    };
+    return parseMarkup(source).map(fmt).join(" ");
+}
+
+// runDiagnostics — the closer-grammar diagnostics a full run produced, as
+// `code@[start,end]` strings (the ctx.diagnostics sink).
+function runDiagnostics(source) {
+    const { ctx } = parseMarkupTrace(source);
+    return (ctx.diagnostics ?? []).map((d) => `${d.code}@[${d.span.start},${d.span.end}]`);
+}
+
+// closerFromCursor — tokenize a closer from a bare closer source. The
+// cursor starts at the closer's `<`; tokenizeCloser consumes the token.
+function closerFromCursor(source) {
+    const cursor = makeCursor(source);
+    return tokenizeCloser(cursor);
+}
+
+// =============================================================================
+// MK2.2 §23 — recognizeCloserForm: the closed-set structural recognition.
+// =============================================================================
+describe("MK2.2 recognizeCloserForm — the 3 closer forms, recognized structurally", () => {
+    test("`</>` is recognized as the inferred closer form", () => {
+        expect(recognizeCloserForm(makeCursor("</>"))).toBe(CloserForm.Inferred);
+    });
+
+    test("`</name>` is recognized as the explicit closer form", () => {
+        expect(recognizeCloserForm(makeCursor("</div>"))).toBe(CloserForm.Explicit);
+        expect(recognizeCloserForm(makeCursor("</section >"))).toBe(CloserForm.Explicit);
+    });
+
+    test("the `</>` test precedes the `</name>` test (prefix-superset order)", () => {
+        // `</>` starts with `</` — were the explicit test first, `</>`
+        // would mis-classify. recognizeCloserForm checks the 3-char `</>`
+        // FIRST. (The char after `</` in `</>` is `>`, not a name start,
+        // so the explicit test would actually reject it — but the order
+        // is still load-bearing for clarity + future-proofing.)
+        expect(recognizeCloserForm(makeCursor("</>"))).toBe(CloserForm.Inferred);
+    });
+
+    test("a non-closer `<` is not recognized — no bare-`/` `looksLikeCloser` guess", () => {
+        // BS heuristic #12 (`looksLikeCloser`) GUESSES whether a bare `/`
+        // is a mistyped closer. MK2.2 has NO such guess: a closer is
+        // EXACTLY `</>` / `</name>`. None of these is a closer.
+        expect(recognizeCloserForm(makeCursor("<div>"))).toBe(null);
+        expect(recognizeCloserForm(makeCursor("/ "))).toBe(null);
+        expect(recognizeCloserForm(makeCursor("a / b"))).toBe(null);
+        expect(recognizeCloserForm(makeCursor("</"))).toBe(null);   // `</` alone — no name, no `>`
+        expect(recognizeCloserForm(makeCursor("< /div>"))).toBe(null); // space — not `</`
+    });
+
+    test("recognizeCloserForm does not advance the cursor", () => {
+        const cursor = makeCursor("</div>");
+        recognizeCloserForm(cursor);
+        expect(cursor.pos).toBe(0);
+    });
+});
+
+// =============================================================================
+// MK2.2 §24 — tokenizeCloser: the one-pass closer tokenizer.
+// =============================================================================
+describe("MK2.2 tokenizeCloser — one-pass closer-token recognition", () => {
+    test("an inferred `</>` — form Inferred, empty name, span covers the 3 chars", () => {
+        const c = closerFromCursor("</>");
+        expect(c.ok).toBe(true);
+        expect(c.form).toBe(CloserForm.Inferred);
+        expect(c.name).toBe("");
+        expect(c.span.start).toBe(0);
+        expect(c.span.end).toBe(3);
+        expect(c.malformed).toBe(false);
+    });
+
+    test("an explicit `</div>` — form Explicit, name `div`, span covers `</div>`", () => {
+        const c = closerFromCursor("</div>");
+        expect(c.ok).toBe(true);
+        expect(c.form).toBe(CloserForm.Explicit);
+        expect(c.name).toBe("div");
+        expect(c.span.start).toBe(0);
+        expect(c.span.end).toBe(6);
+    });
+
+    test("an explicit closer tolerates whitespace before the `>` — `</div >`", () => {
+        const c = closerFromCursor("</div >");
+        expect(c.name).toBe("div");
+        expect(c.span.end).toBe(7);
+        expect(c.ok).toBe(true);
+    });
+
+    test("an explicit closer with a hyphenated name — `</my-widget>`", () => {
+        const c = closerFromCursor("</my-widget>");
+        expect(c.name).toBe("my-widget");
+        expect(c.span.end).toBe(12);
+    });
+
+    test("an unterminated explicit closer (EOF before `>`) is malformed", () => {
+        const c = closerFromCursor("</div");
+        expect(c.form).toBe(CloserForm.Explicit);
+        expect(c.name).toBe("div");
+        expect(c.malformed).toBe(true);
+        expect(c.ok).toBe(false);
+    });
+
+    test("tokenizeCloser advances the cursor past the closer token", () => {
+        const cursor = makeCursor("</span>rest");
+        tokenizeCloser(cursor);
+        expect(cursor.pos).toBe(7);   // one past the `>`
+    });
+
+    test("the closer span is file-absolute (the one-cursor invariant)", () => {
+        // A closer mid-source — its span is absolute, not 0-based.
+        const cursor = makeCursor("xxxx</p>");
+        advance(cursor, 4);
+        const c = tokenizeCloser(cursor);
+        expect(c.span.start).toBe(4);
+        expect(c.span.end).toBe(8);
+    });
+});
+
+// =============================================================================
+// MK2.2 §25 — closeTagFrame: the opener/closer pairing + mismatch.
+// =============================================================================
+describe("MK2.2 closeTagFrame — opener/closer pairing (the `.Open* -> .Closed` transition)", () => {
+    function ctxWithOpen(name, kind) {
+        const ctx = makeParseContext();
+        const frame = makeOpenExpectingChildrenFrame(name, kind ?? TagKind.Html, 0,
+            { start: 0, end: name.length + 2, line: 1, col: 1 });
+        pushTagFrame(ctx, frame);
+        return ctx;
+    }
+    function inferredCloserDesc() {
+        return { form: CloserForm.Inferred, name: "", span: { start: 10, end: 13, line: 1, col: 11 } };
+    }
+    function explicitCloserDesc(name) {
+        return { form: CloserForm.Explicit, name, span: { start: 10, end: 12 + name.length, line: 1, col: 11 } };
+    }
+
+    test("an inferred `</>` pops the innermost open tag regardless of name", () => {
+        const ctx = ctxWithOpen("section");
+        const r = closeTagFrame(ctx, inferredCloserDesc());
+        expect(r.ok).toBe(true);
+        expect(r.popped.name).toBe("section");
+        expect(r.code).toBe(null);
+        expect(tagFrameDepth(ctx)).toBe(0);
+    });
+
+    test("an explicit `</name>` pops when the name matches the open tag", () => {
+        const ctx = ctxWithOpen("div");
+        const r = closeTagFrame(ctx, explicitCloserDesc("div"));
+        expect(r.ok).toBe(true);
+        expect(r.popped.name).toBe("div");
+        expect(tagFrameDepth(ctx)).toBe(0);
+    });
+
+    test("a mismatched explicit `</name>` is E-MARKUP-002 — does NOT pop", () => {
+        const ctx = ctxWithOpen("div");
+        const r = closeTagFrame(ctx, explicitCloserDesc("span"));
+        expect(r.ok).toBe(false);
+        expect(r.code).toBe("E-MARKUP-002");
+        expect(r.popped).toBe(null);
+        // Recovery does NOT pop — the open `<div>` stays for a later
+        // correct closer / the EOF unterminated path.
+        expect(tagFrameDepth(ctx)).toBe(1);
+    });
+
+    test("a closer with no open tag is E-CTX-003 (a stray closer)", () => {
+        const ctx = makeParseContext();
+        const r = closeTagFrame(ctx, inferredCloserDesc());
+        expect(r.ok).toBe(false);
+        expect(r.code).toBe("E-CTX-003");
+        expect(r.popped).toBe(null);
+    });
+
+    test("the mismatch records an E-MARKUP-002 diagnostic at the closer span", () => {
+        const ctx = ctxWithOpen("div");
+        closeTagFrame(ctx, explicitCloserDesc("span"));
+        expect(ctx.diagnostics.length).toBe(1);
+        expect(ctx.diagnostics[0].code).toBe("E-MARKUP-002");
+        expect(ctx.diagnostics[0].span.start).toBe(10);
+    });
+
+    test("the stray closer records an E-CTX-003 diagnostic", () => {
+        const ctx = makeParseContext();
+        closeTagFrame(ctx, inferredCloserDesc());
+        expect(ctx.diagnostics.length).toBe(1);
+        expect(ctx.diagnostics[0].code).toBe("E-CTX-003");
+    });
+
+    test("a mismatch dispatches the ErrorRecovery engine — re-synchronized", () => {
+        // The recovery returns to .ParsingNormally after the panic-mode
+        // lifecycle (begin -> accumulate -> resync -> resume).
+        const ctx = ctxWithOpen("div");
+        closeTagFrame(ctx, explicitCloserDesc("span"));
+        expect(ctx.recovery.mode).toBe(ErrorRecovery.ParsingNormally);
+    });
+
+    test("dispatchTagMismatchRecovery drives the panic-mode lifecycle", () => {
+        const ctx = makeParseContext();
+        const rec = dispatchTagMismatchRecovery(ctx, explicitCloserDesc("x"));
+        // The lifecycle completed — back to .ParsingNormally, no leftover
+        // skipped tokens.
+        expect(rec.mode).toBe(ErrorRecovery.ParsingNormally);
+        expect(rec.skipped.length).toBe(0);
+    });
+
+    test("closeSelfClosedFrame pops an .OpenSelfClosed frame (the `/>` lifecycle)", () => {
+        const ctx = makeParseContext();
+        const frame = makeOpenSelfClosedFrame("br", TagKind.Html,
+            { start: 0, end: 5, line: 1, col: 1 });
+        pushTagFrame(ctx, frame);
+        const popped = closeSelfClosedFrame(ctx);
+        expect(popped).toBe(frame);
+        expect(tagFrameDepth(ctx)).toBe(0);
+    });
+
+    test("closeSelfClosedFrame is a no-op when the top frame is not self-closed", () => {
+        const ctx = ctxWithOpen("div");
+        expect(closeSelfClosedFrame(ctx)).toBe(null);
+        expect(tagFrameDepth(ctx)).toBe(1);   // the .OpenExpectingChildren frame stays
+    });
+});
+
+// =============================================================================
+// MK2.2 §26 — the trampoline produces the `<tag>` TREE (whole-element spans
+// + recursive-descent nesting).
+// =============================================================================
+describe("MK2.2 trampoline — the <tag> tree (opener/closer pairing end-to-end)", () => {
+    test("a paired `<div></div>` is ONE whole-element Markup block", () => {
+        expect(markupTree("<div></div>")).toBe("div[0,11]{}");
+    });
+
+    test("an explicit `</div>` closer closes its `<div>`", () => {
+        expect(markupTree("<div>x</div>")).toBe("div[0,12]{Text[5,6]}");
+    });
+
+    test("an inferred `</>` closer closes the innermost tag", () => {
+        expect(markupTree("<div>x</>")).toBe("div[0,9]{Text[5,6]}");
+    });
+
+    test("nested elements form a tree — children nest under their parent", () => {
+        expect(markupTree("<div><span></span></div>")).toBe("div[0,24]{span[5,18]{}}");
+    });
+
+    test("three-deep nesting", () => {
+        expect(markupTree("<a><b><c></c></b></a>")).toBe("a[0,21]{b[3,17]{c[6,13]{}}}");
+    });
+
+    test("sibling elements — two top-level Markup blocks", () => {
+        expect(markupTree("<p>1</p><p>2</p>")).toBe("p[0,8]{Text[3,4]} p[8,16]{Text[11,12]}");
+    });
+
+    test("a self-closing `<br/>` is a complete element at the opener", () => {
+        expect(markupTree("<br/>")).toBe("br[0,5]{}");
+    });
+
+    test("a self-closing element nests as a child", () => {
+        expect(markupTree("<div><br/></div>")).toBe("div[0,16]{br[5,10]{}}");
+    });
+
+    test("text + element children interleave under a parent", () => {
+        // `<ul>a<li>x</li>b</ul>` — `<li>` opener spans [5,9]; the `x`
+        // child Text is [9,10]; the `<li>` element is [5,15].
+        expect(markupTree("<ul>a<li>x</li>b</ul>"))
+            .toBe("ul[0,21]{Text[4,5],li[5,15]{Text[9,10]},Text[15,16]}");
+    });
+
+    test("a structural element pairs like any tag — `<engine>...</>`", () => {
+        // `<engine for=P>` is [0,14]; `<Idle>` opener [14,20]; the first
+        // `</>` [20,23] closes `<Idle>` — element [14,23].
+        expect(markupTree("<engine for=P><Idle></></>"))
+            .toBe("engine[0,26]{Idle[14,23]{}}");
+    });
+
+    test("the inferred closer matches the innermost — `<a><b></></>`", () => {
+        // The first `</>` closes `<b>`; the second closes `<a>`.
+        expect(markupTree("<a><b></></>")).toBe("a[0,12]{b[3,9]{}}");
+    });
+
+    test("a markup tag inside a logic escape is paired within the body", () => {
+        // `${ <div></div> }` — the `<div>` opens + pairs INSIDE the logic
+        // body; the LogicEscape block follows.
+        const s = parseMarkup("$" + "{" + " <div></div> }");
+        const kinds = s.map((b) => b.kind);
+        expect(kinds).toContain(NativeBlockKind.Markup);
+        expect(kinds).toContain(NativeBlockKind.LogicEscape);
+        // The <div> is fully paired — the tag-frame stack is empty.
+        const { ctx } = parseMarkupTrace("$" + "{" + " <div></div> }");
+        expect(tagFrameDepth(ctx)).toBe(0);
+    });
+
+    test("a well-formed tree drains the tag-frame stack to empty", () => {
+        const { ctx } = parseMarkupTrace("<div><p>a</p><p>b</p></div>");
+        expect(tagFrameDepth(ctx)).toBe(0);
+        expect((ctx.diagnostics ?? []).length).toBe(0);
+    });
+});
+
+// =============================================================================
+// MK2.2 §27 — mismatch + EOF recovery + the diagnostic sink.
+// =============================================================================
+describe("MK2.2 mismatch + EOF recovery — ErrorRecovery dispatch + diagnostics", () => {
+    test("a mismatched `</name>` produces an E-MARKUP-002 diagnostic", () => {
+        // `<div></span>` — the `</span>` does not match `<div>`.
+        const diags = runDiagnostics("<div></span>");
+        expect(diags).toContain("E-MARKUP-002@[5,12]");
+    });
+
+    test("a stray closer with no open tag produces an E-CTX-003 diagnostic", () => {
+        expect(runDiagnostics("</div>")).toEqual(["E-CTX-003@[0,6]"]);
+    });
+
+    test("an unterminated tag at EOF produces an E-CTX-001 diagnostic", () => {
+        // `<div>` — no closer. The opener span [0,5] is the blame locus.
+        expect(runDiagnostics("<div>")).toEqual(["E-CTX-001@[0,5]"]);
+    });
+
+    test("an unterminated tag at EOF is still emitted (recovered as `</>`)", () => {
+        // SPEC §4 (line 1072) — the BS emits the markup block even for an
+        // unterminated tag; MK2.2 matches (closeUnterminatedTags).
+        expect(markupTree("<div>")).toBe("div[0,5]{}");
+    });
+
+    test("an unterminated tag absorbs the text after it as a child", () => {
+        // `<div> tail` — `<div>` unterminated; the ` tail` text is its
+        // child, the element span runs to EOF.
+        expect(markupTree("<div> tail")).toBe("div[0,10]{Text[5,10]}");
+    });
+
+    test("a mismatched closer does not stop the parse — recovery resumes", () => {
+        // `<div></span><p></p>` — the `</span>` mismatches; recovery
+        // resumes; the `<p></p>` pairs cleanly.
+        const { ctx } = parseMarkupTrace("<div></span><p></p>");
+        const codes = (ctx.diagnostics ?? []).map((d) => d.code);
+        expect(codes).toContain("E-MARKUP-002");
+        // The `<p>` element was parsed AFTER the mismatch — recovery
+        // resumed normal parsing.
+        const names = ctx.tagFrameStack.map((f) => f.name);
+        // <div> stays open (its closer mismatched); <p> closed cleanly.
+        expect(names).toEqual([]);    // EOF drained <div>; <p> already popped
+    });
+
+    test("the recovery engine is .ParsingNormally after the run completes", () => {
+        const { ctx } = parseMarkupTrace("<div></span>");
+        expect(ctx.recovery.mode).toBe(ErrorRecovery.ParsingNormally);
+    });
+
+    test("multiple unterminated tags each get an E-CTX-001 diagnostic", () => {
+        // `<a><b>` — two unterminated tags; one diagnostic each.
+        const diags = runDiagnostics("<a><b>");
+        expect(diags.filter((d) => d.startsWith("E-CTX-001")).length).toBe(2);
+    });
+
+    test("reportUnterminatedTags records one diagnostic per open frame", () => {
+        const ctx = makeParseContext();
+        pushTagFrame(ctx, makeOpenExpectingChildrenFrame("a", TagKind.Html, 0,
+            { start: 0, end: 3, line: 1, col: 1 }));
+        pushTagFrame(ctx, makeOpenExpectingChildrenFrame("b", TagKind.Html, 1,
+            { start: 3, end: 6, line: 1, col: 4 }));
+        const count = reportUnterminatedTags(ctx);
+        expect(count).toBe(2);
+        expect(ctx.diagnostics.length).toBe(2);
+        expect(ctx.diagnostics.every((d) => d.code === "E-CTX-001")).toBe(true);
+    });
+
+    test("a well-formed tree produces NO diagnostics", () => {
+        expect(runDiagnostics("<div><p>x</p></div>")).toEqual([]);
+    });
+
+    test("the diagnostic sink is lazy-initialized — ensureDiagnostics + pushDiagnostic", () => {
+        const ctx = makeParseContext();
+        expect(ctx.diagnostics).toBe(undefined);
+        ensureDiagnostics(ctx);
+        expect(Array.isArray(ctx.diagnostics)).toBe(true);
+        pushDiagnostic(ctx, makeDiagnostic("E-CTX-001", "msg", { start: 0, end: 1 }));
+        expect(ctx.diagnostics.length).toBe(1);
+    });
+
+    test("a tag opened inside a logic escape cannot outlive it (context-scoped)", () => {
+        // `${ <div> }` — `<div>` unterminated within the logic body. The
+        // LogicEscape block must NOT be corrupted by the recovery splice.
+        const s = parseMarkup("$" + "{" + " <div> }");
+        const logic = s.filter((b) => b.kind === NativeBlockKind.LogicEscape);
+        expect(logic.length).toBe(1);
+        // The LogicEscape block spans the whole `${ ... }` — intact.
+        expect(logic[0].span.start).toBe(0);
+        expect(logic[0].span.end).toBe(10);
+    });
+
+    test("a closer inside a logic escape cannot cross the context boundary", () => {
+        // `<section>${ </section> }</section>` — the `</section>` INSIDE
+        // `${}` must NOT close the outer `<section>` (E-CTX-002 territory
+        // — the context-scoped floor blocks the cross-boundary close).
+        // The OUTER `</section>` (after the `}`) pairs the element.
+        const tree = markupTree("<section>$" + "{" + " </section> }</section>");
+        // ONE top-level <section> element — the inner `</section>` did not
+        // prematurely close it.
+        expect(tree.startsWith("section[0,")).toBe(true);
+        const { ctx } = parseMarkupTrace("<section>$" + "{" + " </section> }</section>");
+        expect(tagFrameDepth(ctx)).toBe(0);
+    });
+});
+
+// =============================================================================
+// MK2.2 §28 — heuristic elimination + block-tree conformance vs the BS oracle.
+//
+// Charter Q2.A: MK2.2 eliminates BS classifier heuristic #5
+// (`scanCompoundBlockEnd` — forward-scans for the matching `</>` by counting
+// nested pairs) — the TagFrame stack finds the match BY CONSTRUCTION. It also
+// confirms heuristic #12 (`looksLikeCloser` bare-`/`) does not exist (the
+// closer set is closed). One regression assertion per eliminated heuristic.
+// =============================================================================
+describe("MK2.2 heuristic elimination — BS #5 (scanCompoundBlockEnd) + #12 (looksLikeCloser)", () => {
+    test("#5 — the matching `</>` is found by stack discipline, not a forward scan", () => {
+        // `<a><a><a></></></>` — three same-named nested tags. The BS's
+        // scanCompoundBlockEnd counts nested pairs to find the matching
+        // close; MK2.2's TagFrame stack pops the innermost by
+        // construction — each `</>` closes exactly one frame.
+        expect(markupTree("<a><a><a></></></>")).toBe("a[0,18]{a[3,15]{a[6,12]{}}}");
+    });
+
+    test("#5 — deep nesting (10 levels) pairs correctly with no forward scan", () => {
+        let src = "";
+        for (let i = 0; i < 10; i++) src += "<x>";
+        for (let i = 0; i < 10; i++) src += "</>";
+        const { ctx } = parseMarkupTrace(src);
+        // Every opener paired with a closer — the stack drained to empty.
+        expect(tagFrameDepth(ctx)).toBe(0);
+        expect((ctx.diagnostics ?? []).length).toBe(0);
+        // The tree is 10 deep.
+        const tree = markupTree(src);
+        expect((tree.match(/x\[/g) ?? []).length).toBe(10);
+    });
+
+    test("#12 — a bare `/` in markup text is NOT a closer guess", () => {
+        // BS heuristic #12 (`looksLikeCloser`) fires E-SYNTAX-050 on a
+        // bare `/` it guesses is a mistyped closer. MK2.2 has no such
+        // guess — a `/` in text is text. `<p>a/b</p>` — the `/` is
+        // ordinary text content; no diagnostic.
+        expect(runDiagnostics("<p>a/b</p>")).toEqual([]);
+        expect(markupTree("<p>a/b</p>")).toBe("p[0,10]{Text[3,6]}");
+    });
+
+    test("#12 — only the closed set `</>` / `</name>` / `/>` closes a tag", () => {
+        // Each of these is a NON-closer; none triggers a closer guess.
+        for (const txt of ["/", "/ ", "< /x>", "</ >"]) {
+            expect(recognizeCloserForm(makeCursor(txt))).toBe(null);
+        }
+    });
+
+    test("conformance — the native <tag> tree matches the BS block tree (section/p/p)", () => {
+        // The BS oracle block tree for a paired element + its native
+        // counterpart must be structurally equal on (kind, span, name).
+        const src = "<section><p>a</p><p>b</p></section>";
+        const bs = splitBlocks("conf.scrml", src);
+        expect(bs.errors.length).toBe(0);
+
+        // Render the BS tree + the native tree in the same compact shape.
+        const bsFmt = (b) => {
+            if (b.type === "markup") {
+                return `${b.name}[${b.span.start},${b.span.end}]{${(b.children ?? []).map(bsFmt).join(",")}}`;
+            }
+            return `${BS_TYPE_TO_NATIVE_KIND[b.type] ?? b.type}[${b.span.start},${b.span.end}]`;
+        };
+        const bsTree = bs.blocks.map(bsFmt).join(" ");
+        expect(markupTree(src)).toBe(bsTree);
+    });
+
+    test("conformance — a nested tag tree matches the BS block tree", () => {
+        const src = "<div><ul><li>x</li></ul></div>";
+        const bs = splitBlocks("conf.scrml", src);
+        expect(bs.errors.length).toBe(0);
+        const bsFmt = (b) => {
+            if (b.type === "markup") {
+                return `${b.name}[${b.span.start},${b.span.end}]{${(b.children ?? []).map(bsFmt).join(",")}}`;
+            }
+            return `${BS_TYPE_TO_NATIVE_KIND[b.type] ?? b.type}[${b.span.start},${b.span.end}]`;
+        };
+        expect(markupTree(src)).toBe(bs.blocks.map(bsFmt).join(" "));
+    });
+
+    test("conformance — sibling elements match the BS top-level block sequence", () => {
+        const src = "<p>1</p><p>2</p><p>3</p>";
+        const bs = splitBlocks("conf.scrml", src);
+        expect(bs.errors.length).toBe(0);
+        const native = parseMarkup(src);
+        // Same count of top-level markup elements + same (name, span).
+        const bsMarkup = bs.blocks.filter((b) => b.type === "markup");
+        expect(native.length).toBe(bsMarkup.length);
+        for (let i = 0; i < native.length; i++) {
+            expect(native[i].name).toBe(bsMarkup[i].name);
+            expect(native[i].span.start).toBe(bsMarkup[i].span.start);
+            expect(native[i].span.end).toBe(bsMarkup[i].span.end);
+        }
+    });
+});
+
+// =============================================================================
+// MK2.2 §29 — the closer-form lifecycle helpers (emit + close — the
+// parse-markup-level pairing surface, direct-tested).
+// =============================================================================
+describe("MK2.2 closeMarkupElement / emitMarkupElement — the tree-emit helpers", () => {
+    test("emitMarkupElement appends a Markup block carrying name + children", () => {
+        const ctx = makeParseContext();
+        const frame = makeOpenExpectingChildrenFrame("div", TagKind.Html, 0,
+            { start: 0, end: 5, line: 1, col: 1 });
+        frame.opener = { span: { start: 0, end: 5, line: 1, col: 1 } };
+        emitMarkupElement(ctx, frame, 0, 11, []);
+        expect(ctx.nodes.length).toBe(1);
+        expect(ctx.nodes[0].kind).toBe(NativeBlockKind.Markup);
+        expect(ctx.nodes[0].name).toBe("div");
+        expect(ctx.nodes[0].children).toEqual([]);
+        expect(ctx.nodes[0].span.start).toBe(0);
+        expect(ctx.nodes[0].span.end).toBe(11);
+    });
+
+    test("closeMarkupElement splices the children out of the flat stream", () => {
+        const ctx = makeParseContext();
+        const frame = makeOpenExpectingChildrenFrame("ul", TagKind.Html, 0,
+            { start: 0, end: 4, line: 1, col: 1 });
+        frame.opener = { span: { start: 0, end: 4, line: 1, col: 1 } };
+        frame.childStartIndex = 0;
+        // Two child blocks emitted "since the opener".
+        ctx.nodes.push({ kind: NativeBlockKind.Text, span: { start: 4, end: 5 } });
+        ctx.nodes.push({ kind: NativeBlockKind.Text, span: { start: 5, end: 6 } });
+        closeMarkupElement(ctx, frame, CloserForm.Explicit, 11);
+        // The two Text blocks are now CHILDREN of one Markup block.
+        expect(ctx.nodes.length).toBe(1);
+        expect(ctx.nodes[0].kind).toBe(NativeBlockKind.Markup);
+        expect(ctx.nodes[0].children.length).toBe(2);
+        expect(ctx.nodes[0].closerForm).toBe(CloserForm.Explicit);
+    });
+
+    test("closeUnterminatedTags drains every still-open frame at EOF", () => {
+        const ctx = makeParseContext();
+        const outer = makeOpenExpectingChildrenFrame("a", TagKind.Html, 0,
+            { start: 0, end: 3, line: 1, col: 1 });
+        outer.opener = { span: { start: 0, end: 3, line: 1, col: 1 } };
+        outer.childStartIndex = 0;
+        pushTagFrame(ctx, outer);
+        closeUnterminatedTags(ctx, 3);
+        // The frame drained + a Markup block emitted + an E-CTX-001 logged.
+        expect(tagFrameDepth(ctx)).toBe(0);
+        expect(ctx.nodes.filter((n) => n.kind === NativeBlockKind.Markup).length).toBe(1);
+        expect((ctx.diagnostics ?? []).filter((d) => d.code === "E-CTX-001").length).toBe(1);
+    });
+
+    test("handleCloser returns false when no closer is at the cursor", () => {
+        const ctx = makeParseContext();
+        const cursor = makeCursor("<div>");
+        const run = { at: null };
+        expect(handleCloser(run, cursor, ctx)).toBe(false);
+        expect(cursor.pos).toBe(0);   // no closer — cursor untouched
+    });
+
+    test("handleCloser returns true + consumes the closer when one is present", () => {
+        // A `<div>` is open; the cursor is at a `</div>`.
+        const ctx = makeParseContext();
+        pushTagFrame(ctx, (() => {
+            const f = makeOpenExpectingChildrenFrame("div", TagKind.Html, 0,
+                { start: 0, end: 5, line: 1, col: 1 });
+            f.opener = { span: { start: 0, end: 5, line: 1, col: 1 } };
+            f.childStartIndex = 0;
+            return f;
+        })());
+        const cursor = makeCursor("</div>");
+        const run = { at: null };
+        expect(handleCloser(run, cursor, ctx)).toBe(true);
+        expect(cursor.pos).toBe(6);   // the `</div>` was consumed
+        expect(tagFrameDepth(ctx)).toBe(0);   // the frame popped
     });
 });

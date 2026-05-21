@@ -14,14 +14,33 @@
 // see the STRUCTURAL-ELEMENT REGISTRY section for the brief-vs-SPEC
 // discrepancy note); opener recognition (tokenizeOpener — the one-pass
 // `skipOpener` primitive, charter Q2.A #4 — + recognizeOpener which
-// computes TagKind + pushes the TagFrame). The 3 closer forms +
-// opener/closer PAIRING + mismatch recovery are MK2.2; the
-// TagKind-driven decl-vs-markup classification + punch-list P4/P5 are
-// MK2.3; BodyMode (§4.18) is MK3's engine.
+// computes TagKind + pushes the TagFrame).
+//
+// MK2.2 SCOPE (this amendment — the closer side of the <tag> tree): the
+// 3 closer forms — `</>` inferred / `</name>` explicit / `/>`
+// self-closing — recognized STRUCTURALLY (a closed set; no
+// `looksLikeCloser` bare-`/` guess); opener/closer PAIRING via the
+// TagFrame stack (closeTagFrame pops the matching frame — the
+// `.Open* -> .Closed` transition; this eliminates BS heuristic #5
+// `scanCompoundBlockEnd`); mismatch recovery (a mismatched `</name>`
+// dispatches the M1 ErrorRecovery engine + records the diagnostic). See
+// the MK2.2 section after recognizeOpener. The TagKind-driven
+// decl-vs-markup classification + punch-list P4/P5 are MK2.3; BodyMode
+// (§4.18) is MK3's engine.
 
-import { advance } from "./cursor.js";
+import { advance, peekChar, peekStr } from "./cursor.js";
 import { makeSpan } from "./span.js";
 import { isAsciiLetter } from "./block-context.js";
+// MK2.2 — the M1 ErrorRecovery engine. A mismatched `</name>` (or a
+// stray closer) dispatches the SAME panic-mode recovery the JS layer
+// uses, scoped to block grammar (see dispatchTagMismatchRecovery).
+import {
+    SyncToken,
+    beginRecovery,
+    accumulateSkipped,
+    markResync,
+    resumeNormal,
+} from "./error-recovery.js";
 
 // TagKind variant tags — all 4 per the .scrml's type declaration.
 // PURE DATA (calculation classification, per D1 OQ1): the four-way
@@ -508,4 +527,331 @@ export function recognizeOpener(ctx, cursor, ltAnchor) {
     // block at the opener's full span + observe `malformed`.
     frame.opener = opener;
     return frame;
+}
+
+// ===========================================================================
+// MK2.2 — THE 3 CLOSER FORMS + opener/closer PAIRING + mismatch recovery.
+//
+// MK2.1 landed the OPENER side (recognizeOpener pushes a TagFrame). MK2.2
+// lands the CLOSER side — the `.Open* -> .Closed` @tagFrame transition —
+// and the opener/closer PAIRING the stack discipline gives by construction
+// (the elimination of BS heuristic #5 `scanCompoundBlockEnd`, which
+// forward-scans for the matching `</>` by counting nested pairs; the
+// recursive-descent stack finds the match WITHOUT a separate scan).
+//
+// THE THREE FORMS (charter Q1.F; SPEC §4.4 + §4.14):
+//   - `</>`      inferred closer (SPEC §4.4.2) — closes the innermost open
+//                tag REGARDLESS of name.
+//   - `</name>`  explicit closer (SPEC §4.4.1) — closes the innermost open
+//                tag whose name is `name`; a non-matching name is
+//                E-MARKUP-002 (SPEC §4.4.1 normative).
+//   - `/>`       self-closing (SPEC §4.14 body form) — recognized at the
+//                OPENER by MK2.1's recognizeOpener (an .OpenSelfClosed
+//                frame). MK2.2 completes its lifecycle: an .OpenSelfClosed
+//                frame closes immediately (no separate closer token).
+//
+// Recognized STRUCTURALLY — a CLOSED SET. There is NO `looksLikeCloser`
+// bare-`/` heuristic (BS heuristic #12); a `/` that is not part of `</>`
+// / `</name>` / `/>` is not a closer.
+//
+// SPEC-CODE NOTE (load-bearing — corrects the MK2.2 brief): the brief
+// said a mismatched `</name>` is "E-CTX-001 panic-mode recovery". SPEC
+// §4.4.1 (line 397) + §34 (E-MARKUP-002, line 14928) are normative: an
+// explicit closer whose name does NOT match the innermost open tag is
+// E-MARKUP-002. E-CTX-001 (§34 line 14878) is "wrong closer for context
+// type"; SPEC §4 line 1072 uses E-CTX-001 for an UNTERMINATED tag (EOF
+// before the closer). So MK2.2 encodes: mismatched `</name>` ->
+// E-MARKUP-002; an EOF-unterminated tag -> E-CTX-001; a stray closer
+// with no open tag -> E-CTX-003. The brief's load-bearing instruction
+// (dispatch the ErrorRecovery engine — the same panic-mode the JS layer
+// uses, scoped to block grammar) is honored regardless of the code name.
+// ===========================================================================
+
+// CloserForm — PURE DATA tags. The closer forms whose lifecycle the
+// TagFrame engine completes. `Inferred` / `Explicit` are the two SPEC
+// §4.4 closer FORMS; `SelfClosing` is the §4.14 self-closing body form
+// (recognized at the opener — surfaced here for a uniform close API).
+export const CloserForm = Object.freeze({
+    Inferred:    "Inferred",
+    Explicit:    "Explicit",
+    SelfClosing: "SelfClosing",
+});
+
+// lessThanSlash — calculation. The two-character `</` closer prelude.
+export function lessThanSlash() {
+    return "<" + slash();
+}
+
+// inferredCloser — calculation. The three-character `</>` inferred-closer
+// token (SPEC §4.4.2). Assembled via slash() per the README ANOMALY-1
+// string-literal discipline (the `.scrml` shadow needs it; the `.js`
+// keeps the shape 1:1).
+export function inferredCloser() {
+    return "<" + slash() + closeAngle();
+}
+
+// recognizeCloserForm — calculation (pure fn over the cursor). Returns
+// the CloserForm a closer STARTING at the cursor would be, or null if no
+// closer opener is at the cursor. A CLOSED structural test — the
+// heuristic-elimination shape (no bare-`/` `looksLikeCloser` guess).
+//
+//   `</>`            -> CloserForm.Inferred  (checked FIRST — `</>` is a
+//                       prefix-superset start of `</`, so the 3-char
+//                       inferred test must precede the explicit test).
+//   `</` + name char -> CloserForm.Explicit  (an explicit `</name>`).
+//   anything else     -> null.
+//
+// Does NOT advance the cursor; does NOT decide whether the closer is
+// legal here (that is the trampoline's per-context dispatch — a closer
+// inside a `${ }` logic context is E-CTX-002, the trampoline's concern).
+export function recognizeCloserForm(cursor) {
+    if (peekStr(cursor, 3) === inferredCloser()) return CloserForm.Inferred;
+    if (peekStr(cursor, 2) === lessThanSlash()) {
+        // `</` followed by a tag-name start is an explicit `</name>`.
+        const afterSlash = peekChar(cursor, 2);
+        if (isTagNameStart(afterSlash)) return CloserForm.Explicit;
+    }
+    return null;
+}
+
+// tokenizeCloser — calculation at its own locus (a pure fn over the
+// shared cursor: it walks the cursor forward past the closer token and
+// returns a descriptor; it writes no engine state). The closer-side
+// analogue of tokenizeOpener.
+//
+// PARAMETERS:
+//   cursor — positioned at the `<` of a `</>` or `</name>` closer (the
+//            caller has verified recognizeCloserForm is non-null).
+//
+// The pass, by form:
+//   - Inferred `</>` — consume the three characters; span covers `</>`.
+//   - Explicit `</name>` — consume `</`, scan the tag-name run, skip
+//     trailing whitespace, then a `>` terminates. A missing `>` (EOF
+//     before it) is recorded `malformed`.
+//
+// Returns { ok, form, name, span, malformed } where `name` is "" for an
+// inferred closer and the closed tag's name for an explicit one. The
+// span is file-absolute (the one-cursor invariant — no offset math).
+export function tokenizeCloser(cursor) {
+    const source = cursor.source;
+    const len = source.length;
+    const startPos = cursor.pos;
+    const startLine = cursor.line;
+    const startCol = cursor.col;
+
+    const form = recognizeCloserForm(cursor);
+
+    if (form === CloserForm.Inferred) {
+        // `</>` — three characters, no name, always well-formed.
+        advance(cursor, 3);
+        return {
+            ok:        true,
+            form:      CloserForm.Inferred,
+            name:      "",
+            span:      makeSpan(startPos, cursor.pos, startLine, startCol),
+            malformed: false,
+        };
+    }
+
+    // CloserForm.Explicit — `</name>`. Consume the `</` prelude.
+    advance(cursor, 2);
+
+    // The tag-name run. recognizeCloserForm verified a name start follows.
+    const nameStart = cursor.pos;
+    const nameEnd = scanTagName(source, nameStart);
+    const name = source.substring(nameStart, nameEnd);
+    advance(cursor, nameEnd - nameStart);
+
+    // Optional whitespace before the `>` (e.g. `</div >`).
+    const afterWs = skipOpenerWhitespace(source, cursor.pos);
+    advance(cursor, afterWs - cursor.pos);
+
+    // The terminator `>`.
+    let malformed = false;
+    if (cursor.pos < len && source.charAt(cursor.pos) === closeAngle()) {
+        advance(cursor, 1);
+    } else {
+        // EOF (or a non-`>`) before the terminator — a malformed closer.
+        malformed = true;
+    }
+
+    return {
+        ok:        !malformed,
+        form:      CloserForm.Explicit,
+        name,
+        span:      makeSpan(startPos, cursor.pos, startLine, startCol),
+        malformed,
+    };
+}
+
+// ===========================================================================
+// THE DIAGNOSTIC SINK — the markup-layer error stream (MK2.2).
+//
+// MK2.2 is the first native-parser milestone that PRODUCES a structured
+// markup diagnostic — the closer-grammar diagnostics: a mismatched
+// explicit closer (E-MARKUP-002), a stray closer with nothing open
+// (E-CTX-003), an EOF-unterminated tag (E-CTX-001). M1/MK1 deferred the
+// markup diagnostic stream ("a later milestone" — parse-markup MK1.3
+// header); the closer-pairing milestone is where it must exist, because
+// a mismatch outcome MUST be observable (for conformance + downstream
+// stages). The sink is a `ctx.diagnostics` array — the same shape as the
+// `ctx.nodes` block sink (parse-ctx). It carries closer-grammar
+// diagnostics only at MK2.2; later milestones extend it.
+// ===========================================================================
+
+// ensureDiagnostics — STATE write (lazy init). Mirrors
+// ensureTagFrameStack — a parse context built before MK2.2 has no
+// diagnostics slot; this keeps the helpers total.
+export function ensureDiagnostics(ctx) {
+    if (ctx.diagnostics === undefined || ctx.diagnostics === null) {
+        ctx.diagnostics = [];
+    }
+}
+
+// makeDiagnostic — calculation (pure data builder). One structured
+// markup diagnostic: { code, message, span }.
+export function makeDiagnostic(code, message, span) {
+    return { code, message, span };
+}
+
+// pushDiagnostic — STATE write: append a diagnostic to ctx.diagnostics.
+export function pushDiagnostic(ctx, diagnostic) {
+    ensureDiagnostics(ctx);
+    ctx.diagnostics.push(diagnostic);
+}
+
+// ===========================================================================
+// THE ErrorRecovery DISPATCH — panic-mode recovery for a closer mismatch.
+//
+// On a mismatched `</name>` (or a stray closer), MK2.2 dispatches the M1
+// `ErrorRecovery` engine — the SAME engine + the SAME panic-mode
+// lifecycle (.ParsingNormally -> .AccumulatingSkipped -> .ReSynchronized)
+// the JS layer uses, scoped to block grammar. The closer that triggered
+// recovery is itself the re-sync token: a closer is a statement-boundary-
+// equivalent block-grammar token, so recovery accumulates the offending
+// closer as the skipped token and immediately re-synchronizes on it (the
+// `ClosingBrace` SyncToken — the closest block-grammar sync class). This
+// is the markup-layer analogue of the JS layer re-syncing on `;`.
+// ===========================================================================
+
+// dispatchTagMismatchRecovery — STATE write. Drive ctx.recovery through
+// the panic-mode lifecycle for a closer mismatch, accumulating `closer`
+// (the offending closer descriptor) as the skipped token and re-syncing
+// on it. Returns ctx.recovery (re-synchronized) so the caller can
+// observe the recovery outcome.
+export function dispatchTagMismatchRecovery(ctx, closer) {
+    beginRecovery(ctx.recovery);
+    accumulateSkipped(ctx.recovery, closer);
+    markResync(ctx.recovery, SyncToken.ClosingBrace);
+    // The closer is a single re-sync point — recovery completes here; the
+    // trampoline resumes normal parsing immediately after the closer.
+    resumeNormal(ctx.recovery);
+    return ctx.recovery;
+}
+
+// ===========================================================================
+// closeTagFrame — the MK2.2 closer-side entry point: the opener/closer
+// PAIRING. STATE transition at its own locus (it pops the matching
+// TagFrame — a @tagFrame `.Open* -> .Closed` transition — and, on a
+// mismatch, drives ErrorRecovery + the diagnostic sink).
+//
+// PARAMETERS:
+//   ctx    — the parse context (carries ctx.tagFrameStack +
+//            ctx.diagnostics + ctx.recovery).
+//   closer — the closer descriptor from tokenizeCloser (form + name +
+//            span). For a `/>` self-close the caller passes a synthetic
+//            descriptor { form: .SelfClosing, name, span } — see
+//            closeSelfClosedFrame.
+//
+// THE PAIRING LOGIC (charter Q1.F rule= contract):
+//   - `</>` inferred — pops the innermost open tag REGARDLESS of name.
+//     A non-empty stack pop always succeeds; an empty stack is a stray
+//     closer (E-CTX-003).
+//   - `</name>` explicit — the innermost open tag's name MUST be `name`.
+//     A match pops it. A mismatch is E-MARKUP-002: dispatch ErrorRecovery,
+//     record the diagnostic, and recover by NOT popping (the open tag
+//     stays — the mismatched closer is treated as skipped, the trampoline
+//     resumes; the open tag will be paired by a later correct closer or
+//     surface as unterminated at EOF). An empty stack is a stray closer
+//     (E-CTX-003).
+//
+// Returns { ok, popped, code } — `popped` is the closed TagFrame (null on
+// a mismatch / stray closer) and `code` is the diagnostic code (null on a
+// clean close). The `ok` flag is true only for a clean close.
+export function closeTagFrame(ctx, closer) {
+    ensureTagFrameStack(ctx);
+    const top = topTagFrame(ctx);
+
+    // A stray closer — the stack is empty, there is no open tag to close.
+    if (top === null) {
+        const code = "E-CTX-003";
+        pushDiagnostic(ctx, makeDiagnostic(
+            code,
+            "Closer with no matching open tag.",
+            closer.span,
+        ));
+        dispatchTagMismatchRecovery(ctx, closer);
+        return { ok: false, popped: null, code };
+    }
+
+    // An explicit `</name>` whose name does NOT match the innermost open
+    // tag — E-MARKUP-002. Dispatch ErrorRecovery; do NOT pop (recover by
+    // skipping the mismatched closer).
+    if (closer.form === CloserForm.Explicit && closer.name !== top.name) {
+        const code = "E-MARKUP-002";
+        pushDiagnostic(ctx, makeDiagnostic(
+            code,
+            "Explicit closer </" + closer.name + "> does not match the open tag <" + top.name + ">.",
+            closer.span,
+        ));
+        dispatchTagMismatchRecovery(ctx, closer);
+        return { ok: false, popped: null, code };
+    }
+
+    // A clean close — `</>` inferred (any name), `</name>` matching, or a
+    // `/>` self-close. Pop the matching frame: the `.Open* -> .Closed`
+    // @tagFrame transition.
+    const popped = popTagFrame(ctx);
+    return { ok: true, popped, code: null };
+}
+
+// closeSelfClosedFrame — STATE transition. The lifecycle completion for a
+// `/>` self-closing opener (SPEC §4.14). MK2.1's recognizeOpener pushes
+// an .OpenSelfClosed frame; a self-closed tag has no separate closer
+// token, so the frame closes IMMEDIATELY — at the opener. This pops the
+// just-pushed .OpenSelfClosed frame (the `.OpenSelfClosed -> .Closed`
+// @tagFrame transition per the Q1.F rule= contract). Returns the popped
+// frame, or null if the top frame was not an .OpenSelfClosed (defensive).
+export function closeSelfClosedFrame(ctx) {
+    ensureTagFrameStack(ctx);
+    const top = topTagFrame(ctx);
+    if (top === null) return null;
+    if (top.kind !== TagFrameKind.OpenSelfClosed) return null;
+    return popTagFrame(ctx);
+}
+
+// reportUnterminatedTags — STATE write. At EOF, every TagFrame still on
+// the stack is an unterminated tag (the opener was never paired with a
+// closer) — SPEC §4 (line 1072) E-CTX-001. One diagnostic per
+// still-open frame, blamed at the opener's span. Returns the count of
+// unterminated tags reported. The trampoline calls this once at EOF.
+export function reportUnterminatedTags(ctx) {
+    ensureTagFrameStack(ctx);
+    let count = 0;
+    let i = 0;
+    while (i < ctx.tagFrameStack.length) {
+        const frame = ctx.tagFrameStack[i];
+        // An .OpenSelfClosed frame on the stack at EOF means a self-close
+        // whose lifecycle was never completed by the trampoline — still
+        // an unterminated tag; blame the opener span. .OpenExpectingChildren
+        // is the ordinary unterminated case.
+        pushDiagnostic(ctx, makeDiagnostic(
+            "E-CTX-001",
+            "Unterminated tag <" + frame.name + "> — no closer before end of input.",
+            frame.span,
+        ));
+        count = count + 1;
+        i = i + 1;
+    }
+    return count;
 }

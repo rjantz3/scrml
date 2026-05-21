@@ -17,21 +17,26 @@
 // dispatchInSql / dispatchInErrorEffect / dispatchInMeta /
 // dispatchInTest) — extent + close recognition.
 //
-// MK2.1 SCOPE: dispatchInMarkupTag is substantive — recognizeOpener
-// (tag-frame.js) tokenizes the opener BODY (name + attributes + `>`) in
-// one pass, computes its TagKind, and pushes a TagFrame. The `Markup`
-// block now spans the full opener (D-4 below). enterMarkupTagContext
-// keeps its MK1.2 contract (consume the `<`, push the .InMarkupTag
-// frame); the opener tokenizer reads the frame's openSpan as the
-// opener-span anchor. The closer forms + opener/closer PAIRING are MK2.2.
+// MK2.2 SCOPE: the `<tag>` TREE — opener/closer PAIRING. dispatchInMarkupTag
+// recognizes the opener (recognizeOpener, MK2.1) but DEFERS the Markup
+// block for a non-self-closing tag; handleCloser recognizes the `</>` /
+// `</name>` closers structurally (tag-frame.js's recognizeCloserForm — a
+// closed set, no bare-`/` `looksLikeCloser` guess) and pairs them with
+// their open TagFrame. On a clean pop closeMarkupElement emits ONE Markup
+// block spanning the whole ELEMENT (opener + children + closer) with the
+// children nested — the tree. A self-closing `<ident ... />` is a
+// complete element at the opener. A mismatched `</name>` dispatches the
+// M1 ErrorRecovery engine (E-MARKUP-002); an unterminated tag at EOF is
+// recovered as an inferred `</>` (E-CTX-001 — closeUnterminatedTags).
 //
 // KNOWN + DOCUMENTED DIVERGENCES from the BS block tree (see the .scrml
 // header D-1..D-4): no inner `text` body-captures (the inner grammar is
 // later milestones / the compound-match raw-capture is the charter's
 // named improvement); SQL permitted from top level (charter Q1.C vs the
 // BS's §3.1 SQL-inside-Logic placement); `_{}` foreign-code recognized
-// (the BS has no `_{` opener); the `Markup` block spans the full OPENER
-// (MK2.1) — the whole-element span (children + closer) is MK2.2.
+// (the BS has no `_{` opener). D-4 is RESOLVED at MK2.2 — the native
+// `Markup` block now spans the whole element (opener + children +
+// closer), the same as the BS `markup` block.
 
 import { makeCursor, isEof, peekChar, peekStr, advance } from "./cursor.js";
 import { makeSpan } from "./span.js";
@@ -47,15 +52,29 @@ import {
     closeBlockContext,
     isBlockContextClose,
     popBlockContextFrame,
+    topBlockContextFrame,
     noteBraceOpen,
     noteBraceClose,
     recognizeCommentForm,
     commentExtent,
 } from "./block-context.js";
-// MK2.1 — the TagFrame <tag>-tree engine. The .InMarkupTag dispatcher
-// calls recognizeOpener to tokenize a `<ident ...>` opener in one pass,
-// compute its TagKind, and push a TagFrame.
-import { recognizeOpener } from "./tag-frame.js";
+// MK2.1/MK2.2 — the TagFrame <tag>-tree engine. MK2.1: recognizeOpener
+// tokenizes a `<ident ...>` opener in one pass + pushes a TagFrame.
+// MK2.2: recognizeCloserForm / tokenizeCloser recognize the `</>` /
+// `</name>` closers (a closed set); closeTagFrame / closeSelfClosedFrame
+// pop the matching frame (opener/closer pairing); reportUnterminatedTags
+// records the EOF E-CTX-001 diagnostics.
+import {
+    recognizeOpener,
+    TagFrameKind,
+    recognizeCloserForm,
+    tokenizeCloser,
+    closeTagFrame,
+    closeSelfClosedFrame,
+    tagFrameDepth,
+    popTagFrame,
+    reportUnterminatedTags,
+} from "./tag-frame.js";
 
 // blockKindForContext — calculation. Maps a BlockContext variant to the
 // BlockKind a closed context of that variant emits. The seven
@@ -173,26 +192,45 @@ export function emitContextBlock(ctx, frame, endPos) {
     ));
 }
 
-// dispatchTopLevel — the `.TopLevel` BlockContext state-child body (MK1.3 —
-// block-stream production + structural comments).
+// dispatchTopLevel — the `.TopLevel` BlockContext state-child body (MK2.2 —
+// block-stream production + structural comments + closer pairing).
 //
 // At each cursor position:
 //   - a `//` / `<!-- -->` comment -> flush the text run + emit a Comment
 //     block (structural recognition — BS heuristics #6/#7 eliminated);
+//   - a `</>` / `</name>` closer -> flush the text run + pair it with
+//     its open TagFrame (handleCloser — the tag-tree pairing, MK2.2);
 //   - a block-opener SIGIL -> flush the text run + enter the context;
 //   - a `<ident` boundary -> flush the text run + enter .InMarkupTag;
 //   - anything else -> accumulate into the open text run.
+//
+// Closer recognition runs BEFORE the context-entry recognition: a `</`
+// is not a `<ident` markup-tag opener (the char after `<` is `/`, not a
+// letter), so the two never collide — but handling closers explicitly
+// first keeps the dispatch readable and the closed-set recognition
+// (recognizeCloserForm) is the heuristic-elimination contract.
 export function dispatchTopLevel(run, cursor, ctx) {
     // Structural comment recognition FIRST — a `//` / `<!-- -->` sequence
     // is a comment in `.TopLevel` (a code-default body per §40.8 / a
     // markup-context construct), not text.
     if (emitComment(run, cursor, ctx)) return;
 
+    // A markup closer (`</>` / `</name>`) — pair it with its open
+    // TagFrame (the tag-tree pairing). Recognized structurally — a closed
+    // set (no bare-`/` `looksLikeCloser` guess).
+    if (handleCloser(run, cursor, ctx)) return;
+
     const recognized = recognizeContextEntryAt(cursor);
 
     if (recognized.kind === "sigil") {
         flushTextRun(run, cursor, ctx);
-        enterBlockContext(ctx, cursor, recognized.enters, recognized.sigil);
+        const frame = enterBlockContext(ctx, cursor, recognized.enters, recognized.sigil);
+        // MK2.2 — snapshot the tag-tree depth at context-open. A markup
+        // tag opened INSIDE this brace context cannot outlive it; on the
+        // context's close, recoverTagsInClosedContext recovers any
+        // TagFrame pushed since (see dispatchInLogicEscape's close
+        // branch). The snapshot is the floor.
+        stampTagDepthAtOpen(ctx, frame);
         return;
     }
 
@@ -209,6 +247,42 @@ export function dispatchTopLevel(run, cursor, ctx) {
     // Ordinary top-level text — open / continue the text run, advance.
     beginTextRun(run, cursor);
     advance(cursor, 1);
+}
+
+// stampTagDepthAtOpen — state write. Record the current tag-tree depth
+// on a freshly-entered BlockContext frame. MK2.2's context-scoped
+// tag-recovery floor: a TagFrame opened while this brace context is open
+// sits ABOVE this depth; on the context's close those frames are
+// unterminated-within-the-context and are recovered (a markup tag cannot
+// outlive its enclosing brace context).
+export function stampTagDepthAtOpen(ctx, frame) {
+    if (frame === null || frame === undefined) return;
+    frame.tagDepthAtOpen = tagFrameDepth(ctx);
+}
+
+// recoverTagsInClosedContext — state write. A brace context just closed;
+// recover every TagFrame opened SINCE it opened (above `tagDepthFloor`).
+// Each such tag is unterminated within the context — drain it innermost-
+// first, emitting its deferred Markup block ending at `closePos`. This
+// runs BEFORE the context block is emitted, so the recovered Markup
+// blocks precede (and are not spliced into) the context block.
+//
+// A tag opened inside a brace context that closes before the tag is a
+// genuine structural error; MK2.2 recovers it (the deferred Markup block
+// is still emitted). The closer-grammar diagnostic for it is the EOF /
+// mismatch path — the context-scoped recovery here is a span-correctness
+// measure, not a new diagnostic site.
+export function recoverTagsInClosedContext(ctx, tagDepthFloor, closePos) {
+    while (tagFrameDepth(ctx) > tagDepthFloor) {
+        const frame = popTagFrame(ctx);
+        if (frame === null) return;
+        if (frame.kind === TagFrameKind.OpenSelfClosed) {
+            emitMarkupElement(ctx, frame, frame.opener.span.start,
+                frame.opener.span.end, []);
+        } else {
+            closeMarkupElement(ctx, frame, null, closePos);
+        }
+    }
 }
 
 // dispatchInLogicEscape — the `.InLogicEscape` state-child body (MK1.3 —
@@ -230,10 +304,30 @@ export function dispatchTopLevel(run, cursor, ctx) {
 //
 // A nested block-opener sigil inside the body (charter Q1.C `<InLogicEscape
 // rule=(.TopLevel | .InMarkupTag | .InSql)>`) is recognized and entered.
+//
+// MK2.2 — closer recognition + tag-recovery are CONTEXT-SCOPED to this
+// logic body. A markup tag opened inside `${ ... }` (markup-as-value)
+// cannot CLOSE a tag opened outside it, and cannot OUTLIVE the logic
+// context. The .InLogicEscape BlockContext frame's `tagDepthAtOpen`
+// (stamped by stampTagDepthAtOpen at context-open) is the floor: only a
+// closer when a tag is open ABOVE the floor pairs; on the context's
+// close, recoverTagsInClosedContext recovers any tag still open above it.
 export function dispatchInLogicEscape(run, cursor, ctx) {
+    // The context-scoped tag floor — the tag-tree depth when THIS logic
+    // context opened. A TagFrame above it was opened inside this body.
+    const ctxFrame = topBlockContextFrame(ctx);
+    const tagFloor = (ctxFrame !== null && ctxFrame.tagDepthAtOpen !== undefined)
+        ? ctxFrame.tagDepthAtOpen
+        : 0;
+
     // Matching close `}` of this logic-escape context?
     if (isBlockContextClose(ctx, cursor)) {
         const frame = closeBlockContext(ctx, cursor);
+        // MK2.2 — recover any markup tag opened inside this logic body
+        // that is still open (a tag cannot outlive its brace context).
+        // BEFORE the context block is emitted, so the recovered Markup
+        // blocks precede it (and are not spliced into it).
+        recoverTagsInClosedContext(ctx, tagFloor, cursor.pos);
         emitContextBlock(ctx, frame, cursor.pos);
         return;
     }
@@ -246,10 +340,23 @@ export function dispatchInLogicEscape(run, cursor, ctx) {
         return;
     }
 
+    // A markup closer (`</>` / `</name>`) — but ONLY when a tag is open
+    // WITHIN this logic context (tagFrameDepth > the context-scoped
+    // floor). The charter Q1.C contract permits a markup tag inside a
+    // logic body (`${ <div> </div> }`); its matching closer must pair. A
+    // `</` in a logic body with no tag open INSIDE it is ordinary body
+    // content (§4.6 `<` suppression) — and a closer that would reach a
+    // tag opened OUTSIDE this `${}` cannot cross the context boundary
+    // (E-CTX-002 — a BlockContext-level concern, an MK2.3/MK4 seam, not
+    // MK2.2). The floor enforces both.
+    if (tagFrameDepth(ctx) > tagFloor && handleCloser(run, cursor, ctx)) return;
+
     // A nested context-entry boundary inside the body?
     const recognized = recognizeContextEntryAt(cursor);
     if (recognized.kind === "sigil") {
-        enterBlockContext(ctx, cursor, recognized.enters, recognized.sigil);
+        const nested = enterBlockContext(ctx, cursor, recognized.enters, recognized.sigil);
+        // MK2.2 — the nested context gets its own tag floor too.
+        stampTagDepthAtOpen(ctx, nested);
         return;
     }
     if (recognized.kind === "markupTag") {
@@ -381,27 +488,37 @@ export function dispatchInTest(run, cursor, ctx) {
     scanBraceDelimitedSketch(cursor, ctx);
 }
 
-// dispatchInMarkupTag — the `.InMarkupTag` state-child body (MK2.1 —
-// opener recognition + TagFrame push + Markup block emit).
+// dispatchInMarkupTag — the `.InMarkupTag` state-child body (MK2.2 —
+// opener recognition + TagFrame push + the tag-tree pairing seam).
 //
-// MK1.3's placeholder consumed the tag-name run char-by-char and emitted a
-// Markup block at BOUNDARY granularity (the `<ident` run). MK2.1 makes the
-// dispatch substantive: enterMarkupTagContext has consumed the `<` and
-// pushed the .InMarkupTag BlockContext frame (whose openSpan is the `<`'s
-// span). The cursor is now at the byte AFTER the `<`. The dispatch:
+// MK2.1 emitted a Markup block EAGERLY at the opener (boundary-then-opener
+// granularity). MK2.2 produces the `<tag>` TREE — a Markup block spans the
+// whole ELEMENT (opener + children + closer), and children nest under
+// their parent. To do that the Markup-block emission for a non-self-
+// closing opener is DEFERRED to the matching closer (closeMarkupElement);
+// the opener only RECORDS where the element's children begin.
+//
+// The dispatch (the cursor is at the byte AFTER the `<` —
+// enterMarkupTagContext consumed the `<` + pushed the .InMarkupTag
+// BlockContext frame whose openSpan is the `<`'s span):
 //   1. Pops the .InMarkupTag BlockContext frame — frame.openSpan is the
 //      `<`'s span, the opener-span anchor.
 //   2. Calls recognizeOpener (tag-frame.js) — tokenizes the opener BODY
 //      (name + attributes + `>`) from the cursor, anchored at the `<`,
 //      in one pass; computes the opener's TagKind; pushes a TagFrame.
-//   3. Emits a Markup block spanning the FULL opener (`<ident ...>`) —
-//      a real improvement over MK1.3's boundary granularity (see the
-//      .scrml header's updated D-4 note). The whole-ELEMENT span (opener
-//      + children + closer) is MK2.2.
+//   3a. SELF-CLOSING opener (`<ident ... />`) — a complete element at the
+//       opener. closeSelfClosedFrame completes the .OpenSelfClosed
+//       lifecycle (pops the frame); a Markup block is emitted spanning
+//       the opener (= the whole element — a self-closed tag has no
+//       children).
+//   3b. NON-SELF-CLOSING opener (`<ident ...>`) — the element awaits
+//       children + a matching closer. The Markup block is NOT emitted
+//       yet; the frame records `childStartIndex` (ctx.nodes.length right
+//       now) so closeMarkupElement can splice the children out on close.
 //   4. Restores @blockContext to the prior context.
 //
 // The TagFrame the opener pushed STAYS on ctx.tagFrameStack — that is the
-// open-tag stack MK2.2's closer-form recognizers pop against.
+// open-tag stack the closer recognizers (handleCloser) pop against.
 export function dispatchInMarkupTag(run, cursor, ctx) {
     // 1. Pop the .InMarkupTag BlockContext frame — its openSpan is the
     //    `<`'s span (the opener-span anchor). enterMarkupTagContext
@@ -417,11 +534,100 @@ export function dispatchInMarkupTag(run, cursor, ctx) {
     //    `<`'s span; it computes TagKind and pushes a TagFrame.
     const tagFrame = recognizeOpener(ctx, cursor, frame.openSpan);
 
-    // 3 + 4. Emit a Markup block spanning the FULL opener
-    //    (frame.openSpan.start is the `<`; tagFrame.opener.span.end is one
-    //    past the opener's `>`); restore the prior context.
-    emitContextBlock(ctx, frame, tagFrame.opener.span.end);
+    if (tagFrame.kind === TagFrameKind.OpenSelfClosed) {
+        // 3a. A self-closing `<ident ... />` — a complete element at the
+        //     opener. Complete the .OpenSelfClosed lifecycle (pop the
+        //     frame) and emit the whole-element Markup block (the opener
+        //     span IS the whole element — no children, no closer).
+        closeSelfClosedFrame(ctx);
+        emitMarkupElement(ctx, tagFrame, frame.openSpan.start,
+            tagFrame.opener.span.end, []);
+    } else {
+        // 3b. A non-self-closing `<ident ...>` — the element awaits
+        //     children + a matching closer. Defer the Markup block;
+        //     record where this element's children begin so the matching
+        //     closer can splice them out (the tag-tree pairing).
+        tagFrame.childStartIndex = ctx.nodes.length;
+    }
+
+    // 4. Restore @blockContext to the prior context.
     setBlockContext(ctx, frame.priorContext);
+}
+
+// emitMarkupElement — state write. Emit ONE Markup block for a complete
+// `<tag>` element, spanning [startPos, endPos] — the whole-element span
+// (opener + children + closer). `children` is the element's child-block
+// array (empty for a self-closing tag); it is carried as the Markup
+// block's `children` payload — the `<tag>` TREE (charter Q1.G output).
+export function emitMarkupElement(ctx, tagFrame, startPos, endPos, children) {
+    const k = blockKinds();
+    const block = makeBlockNode(
+        k.Markup,
+        makeSpan(startPos, endPos, tagFrame.opener.span.line, tagFrame.opener.span.col),
+        null,
+    );
+    // The tag-tree payload — the element's name, the child blocks, and
+    // the closer form that ended it (null for a self-closing element).
+    block.name = tagFrame.name;
+    block.children = children;
+    block.closerForm = tagFrame.closerForm ?? null;
+    appendBlock(ctx, block);
+}
+
+// closeMarkupElement — state write. The opener/closer PAIRING emit. The
+// closer has just popped `tagFrame` (an .OpenExpectingChildren frame)
+// off the TagFrame stack. The blocks emitted into ctx.nodes since the
+// opener (from tagFrame.childStartIndex to the end) ARE this element's
+// children — splice them out and nest them under one whole-element
+// Markup block spanning [opener.<, closerEnd].
+export function closeMarkupElement(ctx, tagFrame, closerForm, closerEnd) {
+    const startIndex = tagFrame.childStartIndex ?? ctx.nodes.length;
+    // Splice the children out of the flat node stream.
+    const children = ctx.nodes.splice(startIndex, ctx.nodes.length - startIndex);
+    tagFrame.closerForm = closerForm;
+    emitMarkupElement(ctx, tagFrame, tagFrame.opener.span.start, closerEnd, children);
+}
+
+// handleCloser — state write. Recognize + consume a closer at the
+// cursor and perform the opener/closer pairing. Returns true if a closer
+// was recognized + handled, false if no closer opener is at the cursor.
+//
+// The closer forms (`</>` / `</name>`) are recognized STRUCTURALLY by
+// tag-frame.js's recognizeCloserForm — a closed set, no `looksLikeCloser`
+// bare-`/` guess. The pairing:
+//   - tokenizeCloser consumes the closer token (the cursor advances past
+//     the `>`);
+//   - closeTagFrame pops the matching TagFrame (the `.Open* -> .Closed`
+//     transition) — on a clean pop, closeMarkupElement emits the
+//     whole-element Markup block with its children nested;
+//   - on a mismatch / stray closer closeTagFrame has already dispatched
+//     ErrorRecovery + recorded the diagnostic; the trampoline resumes
+//     (the closer is consumed — progress is guaranteed).
+//
+// The text run is flushed before the closer so the block-stream order is
+// children-then-(parent emitted on close).
+export function handleCloser(run, cursor, ctx) {
+    const form = recognizeCloserForm(cursor);
+    if (form === null) return false;
+
+    // A closer ends the current text run (the run is a child of the
+    // element being closed — flush it before the pairing splice).
+    flushTextRun(run, cursor, ctx);
+
+    // Consume the closer token — the cursor advances past the `>`.
+    const closer = tokenizeCloser(cursor);
+
+    // Pair the closer with its open TagFrame.
+    const result = closeTagFrame(ctx, closer);
+    if (result.ok && result.popped !== null) {
+        // A clean pop — emit the whole-element Markup block with the
+        // children (the blocks emitted since the opener) nested.
+        closeMarkupElement(ctx, result.popped, closer.form, closer.span.end);
+    }
+    // A mismatch / stray closer: closeTagFrame recorded the E-MARKUP-002
+    // / E-CTX-003 diagnostic + dispatched ErrorRecovery. The closer is
+    // consumed; the trampoline resumes (no Markup block — recovery).
+    return true;
 }
 
 // isTagNameChar — calculation (predicate). A character that may continue a
@@ -518,10 +724,52 @@ function runMarkup(source) {
         iters = iters + 1;
     }
 
-    // EOF — flush any open text run. (A context still open at EOF is an
-    // unterminated context — it emits NO block and its frame stays on
-    // ctx.blockContextStack as the MK4 blame locus; see the header.)
+    // EOF — flush any open text run. (A brace-delimited context still
+    // open at EOF is an unterminated context — it emits NO block and its
+    // frame stays on ctx.blockContextStack as the MK4 blame locus; see
+    // the header.)
     flushTextRun(run, cursor, ctx);
 
+    // MK2.2 — close out any unterminated `<tag>` elements. A TagFrame
+    // still on ctx.tagFrameStack at EOF is an unterminated tag (the
+    // opener was never paired with a closer): SPEC §4 line 1072 — the
+    // BS oracle emits E-CTX-001 against the opener AND still emits the
+    // markup block (closerForm `inferred`). closeUnterminatedTags does
+    // both — reportUnterminatedTags records one E-CTX-001 per open
+    // frame, and the deferred Markup blocks are emitted (recovery).
+    closeUnterminatedTags(ctx, cursor.pos);
+
     return { ctx, contextTrace };
+}
+
+// closeUnterminatedTags — state write. The EOF recovery for unterminated
+// `<tag>` elements (SPEC §4 line 1072). For each TagFrame still open at
+// EOF (innermost first): record an E-CTX-001 diagnostic against the
+// opener (reportUnterminatedTags does the recording) and emit the
+// deferred Markup block spanning [opener.<, EOF] with its accumulated
+// children. The element is recovered as if an inferred `</>` closed it
+// at end-of-input.
+export function closeUnterminatedTags(ctx, eofPos) {
+    // Record the E-CTX-001 diagnostics for every still-open frame.
+    reportUnterminatedTags(ctx);
+
+    // Drain the TagFrame stack innermost-first, emitting each deferred
+    // Markup block. A self-closed frame left on the stack at EOF (its
+    // lifecycle never completed) is also emitted as a (boundary) block.
+    let frame = popTagFrame(ctx);
+    while (frame !== null) {
+        if (frame.kind === TagFrameKind.OpenSelfClosed) {
+            // A self-closed opener whose lifecycle the trampoline never
+            // completed — emit the opener-span Markup block (no
+            // children, no closer).
+            emitMarkupElement(ctx, frame, frame.opener.span.start,
+                frame.opener.span.end, []);
+        } else {
+            // An .OpenExpectingChildren element — recover as if `</>`
+            // closed it at EOF; the children are the blocks emitted
+            // since the opener.
+            closeMarkupElement(ctx, frame, null, eofPos);
+        }
+        frame = popTagFrame(ctx);
+    }
 }
