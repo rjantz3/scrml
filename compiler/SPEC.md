@@ -11392,7 +11392,7 @@ When a server function is split across the client/server boundary (CPS — see �
 - The `< errorBoundary>` catches batch K's failure as a tagged scrml-error variant. The boundary's `fallback` markup (or a variant's `renders` clause) is displayed in place of the function's expected output.
 - Recovery from a non-tail batch failure is **idempotency-key replay** of batch K (A9 Ext 5; future scope, per S72 body-split integration ratification).
 
-The pathological multi-batch case — batch N depends on batch K's durable write across the client/server boundary AND K is non-tail — is **rejected at compile time** by the S4 reorder verdict (E-CPS-MULTIBATCH-REORDER, future code; pending Ext 1 multi-batch CPS landing). For all admissible cases, the existing §19 mechanisms (`?` propagation, `!{}` handler, `< errorBoundary>` markup) catch the failure surface; no new mechanism is required.
+The pathological multi-batch case — batch N depends on batch K's durable write across the client/server boundary AND K is non-tail — is **rejected at compile time** by the S3 reorder verdict (`E-CPS-MULTIBATCH-REORDER`, implemented in §19.9.9 — A9 Ext 1, S114). For all admissible cases, the existing §19 mechanisms (`?` propagation, `!{}` handler, `< errorBoundary>` markup) catch the failure surface; no new mechanism is required.
 
 A worked example illustrating "batch 1 commits stand on batch 2 failure; the developer's `< errorBoundary>` catches the error variant" is provided in §19.9.5.
 
@@ -11742,6 +11742,101 @@ These three codes operate at the parse layer; the fn-specific instance (§48.3.5
 **Generators (`yield` / `yield*` / `function*`).** NOT covered by this rule. Generators are a separate conversation (S114 user direction: *"Yield, might be a different conversation"*). The native parser at S114 preserves `yield` / `yield*` operators, the `function*` form, and object-literal generator-method shape. Their semantic policy is open per S114 carry-forward.
 
 **Cross-references.** §6 (PRIMER) — the error-model decomposition (body-split vs `!` vs `!{}`); §19.9.3, §19.9.5 (CPS canonical async surface); §42.1 (parallel "no null/undefined" rule shape); §48.3.5 (the `fn`-scope E-FN-005 — now the within-`fn` manifestation of this language-wide rule); §34 (catalog entries for the three new codes).
+
+#### 19.9.9 Multi-Batch CPS — Reorder + Static Reject
+
+**Added:** 2026-05-21 (S114, A9 Ext 1 — multi-batch CPS; ratifies the algorithm landed by sub-steps M1.1-M1.5).
+
+The A9 min-viable body-split (§19.9.5 Ext 4 + §19.9.6 Ext 5) splits a function body into **exactly one** server batch. Ext 1 extends the body-split to **N batches**: a body whose statements cross the client/server seam multiple times — server work, then client-observable work, then more server work — is compiled into multiple server stubs, each its own transactional envelope (§8.9), with the client wrapper sequencing the batches in dependency order. This section ratifies the multi-batch decision procedure and its two static-rejection diagnostics.
+
+Ext 1 is **per-function-scoped**. The body-DG and planner operate on one `function` body's statement list; cross-function (interprocedural) CPS is out of scope. Ext 1 does NOT enter `^{}` meta-block bodies (§22 — orthogonal surface) and introduces no source-level `async`/`await` (§19.9.8 — the emitted JS keeps the existing CPS wrapper shape; scrml source stays uncolored).
+
+##### 19.9.9.1 The body dependency graph (body-DG)
+
+The decision procedure is grounded in a **statement-grain dependency graph** built over the function body's statement list. This is distinct from the module-grain dependency graph of §31 — that DG's nodes are functions / reactives / queries / imports / metas; the body-DG's nodes are the **individual top-level statements of one function body**, one node per statement, identified by its index into the body.
+
+Each node carries a **tier**, derived from the §12 / §19.9.3 CPS-eligibility classification:
+
+- **`server`** — the statement runs on the server (own `?{}` SQL, server-function call, protected-field access, or other server-only resource).
+- **`reactive`** — the statement is a `state-decl` whose server-call initialiser makes it CPS-eligible; it runs server-side AND assigns a reactive cell. Reported distinctly so the planner recognises the seam-crossing statement; for batching purposes it is treated as server work.
+- **`client`** — every other statement (runs on the client).
+
+The body-DG carries directed edges under a **conservative, over-approximate** construction discipline. The edge direction convention is: `from` **depends on** `to` — `from` SHALL run after `to` in every valid schedule. A *missing* edge would let the planner reorder past a real dependency (unsound); a *spurious* edge only over-constrains the schedule (sub-optimal but sound). When statically ambiguous, the builder emits the edge. Five edge kinds:
+
+| Kind | Construction rule |
+|---|---|
+| `reads` | Statement `i` references an identifier assigned at statement `j`. |
+| `writes` | Statements `i` and `j` both assign the same reactive `@var` (write-write conflict). |
+| `awaits` | Statement `i` references a value produced by a server call at statement `j` (chained CPS). |
+| `invalidates` | Statement `j` is a `?{}` non-SELECT (INSERT / UPDATE / DELETE) and statement `i` is a `?{}` SELECT against the same table (conservative table-name match on the SQL string). |
+| `control-anchors` | Statement that is a control-flow head (`if` / `match` / `for` / `while` / `switch`) is fenced to its immediate source-order neighbours, so the planner never coalesces a server batch across a control-flow statement. |
+
+Body-DG construction is **observation, not transformation**: statement count and per-statement semantics are unchanged. This is what keeps the soundness predicate **S3 (monotonicity-preserving-ordering)** CLEAN — the edge set is the substrate the planner reorders against, and it is conservative by construction.
+
+##### 19.9.9.2 The multi-batch planning algorithm
+
+Given a tier-classified body-DG, the planner produces either a **multi-batch plan** or a **static rejection**, in five steps:
+
+1. **Topological sort.** Sort the body-DG by Kahn's algorithm. Every edge is an absolute "must-not-precede" ordering constraint. When more than one node is simultaneously ready (in-degree 0), the tie-break SHALL be the **lowest source index**. Source order is always a legal topological order of the conservative straight-line body-DG; the tie-break only ever deviates from source order when a DG edge forces it. A server-biased tie-break that hoisted an independent later server statement past an intervening client statement is explicitly NOT performed — it would collapse two batches into one and defeat the multi-batch shape.
+
+2. **Coalesce server runs into batches.** Walk the topological order; group contiguous server-tier (and reactive-tier) statements into a batch. A `client`-tier statement appearing between two server statements forces a **batch boundary** — the client statement must observe the earlier batch's commit before the later batch may start.
+
+3. **Cross-batch durable-write rejection.** Inspect every `writes` and `invalidates` edge whose two endpoints fall in **different** batches. A `writes` edge across batches is a reactive-cell write-write — **admissible** (the cell's value is marshalled forward as a parameter to the later stub). An `invalidates` edge across batches is an SQL-row-identity dependency — **irreducible**: the later batch's SELECT needs transactional consistency with the earlier batch's write, and splitting them across two server requests breaks that consistency envelope. Reject with **`E-CPS-MULTIBATCH-REORDER`**. (A dependency cycle discovered by step 1 is likewise reported as `E-CPS-MULTIBATCH-REORDER`, with the back-edge as the offending edge.)
+
+4. **Machine-crossing rejection.** Group every `<machine>` `.advance()` call by its receiver identifier. If two advances on the **same** machine receiver land in **different** batches, reject with **`E-CPS-MULTIBATCH-MACHINE-CROSSING`** — a transition chain that crosses a server batch boundary cannot guarantee the §51 allowed-from-state guard, because the intermediate state is not observable across two server requests. Two `.advance()` calls inside **one** batch's serial execution do NOT cross — the batch runs as a single server request, the guard sees the intermediate state, and the chain is observable exactly as written. The "batch boundary intervenes" condition is therefore intrinsic to the test — there is no within-batch false-positive surface.
+
+5. **Result.** With no rejection: return the batch list in source order, each batch a contiguous server run, plus the full topological schedule (server + client interleaved) so the emit stage can sequence the client wrapper's awaits.
+
+`awaits` edges and `reads` edges on non-reactive locals are NOT reject candidates: they are exactly the chained-CPS / parameter-forwarding pattern multi-batch CPS exists to support. The depended-upon value rides forward as a parameter to the later stub.
+
+##### 19.9.9.3 Per-batch monotonicity classification
+
+The §19.9.6 static monotonicity classifier is lifted from per-function to **per-batch**. Each batch in the plan is independently classified `monotone` or `non-monotone` by the §19.9.6 (a)-(f) criteria, and the §19.9.6 idempotency-key envelope is emitted **per batch** — a monotone batch in a function that also contains a non-monotone batch SHALL NOT pay the idempotency-key cost. This strictly refines §19.9.6 (finer grain, lower cost) without weakening replay safety (predicate **S5**): the classification of each batch is unchanged; only the granularity at which the verdict gates emission is finer.
+
+A per-batch monotonicity diagnostic (`D-CPS-MONOTONE`, `D-CPS-MACHINE-INTRINSIC-MONOTONE` — §19.9.6) carries a **`batchIndex`** field identifying which batch (0-based, source order) the verdict applies to, so multi-batch diagnostics are unambiguous.
+
+##### 19.9.9.4 Emission shape
+
+A single-batch (or non-CPS) function compiles **byte-identically to the pre-Ext-1 shape** — Ext 1 is inert below N = 2. A multi-batch function compiles to:
+
+- **N server stubs**, one per batch, each running only its batch's statements, each its own transactional envelope (§8.9). Each stub carries its own §19.9.5 Ext 4 `!`-wrap and — gated on the batch's own §19.9.9.3 verdict — its own §19.9.6 Ext 5 idempotency-key dedup.
+- **A client wrapper** that emits one `await` per batch in topological order, interleaving the client statements between the awaits per the planner's schedule. Each batch await is wrapped in its own `try`/`catch`, and a per-batch failure produces a tagged error envelope carrying the **batch index** and function name. An earlier batch's commit stands when a later batch fails — there is no cross-batch rollback (§19.6.7; predicate **S4** — each emitted stub is one server request, one transactional envelope; no 2PC / saga). The whole multi-batch wrapper body additionally sits inside an outer `try`/`catch` so a thrown interleaved client statement produces the same tagged-envelope shape (S4 parity with the single-batch path).
+
+Admissible cross-batch parameter forwarding marshals the depended-upon value as an additional parameter to the later stub; the value rides the wire as an ordinary request parameter.
+
+##### 19.9.9.5 Worked example
+
+```scrml
+<program db="postgres://app:pass@localhost/app" idempotency-store="auto">
+  ${ function checkout(cartId: number) {
+      // --- batch 0 (server): reserve inventory -------------------------
+      let reserved = ?{`UPDATE inventory SET held = held + 1
+                        WHERE cart_id = ${cartId} RETURNING held`}.get()
+
+      // --- client-observable work forces a batch boundary --------------
+      @reservationShown = reserved.held    // reactive write — client tier
+
+      // --- batch 1 (server): charge + record ---------------------------
+      ?{`INSERT INTO charges (cart_id, amount) VALUES (${cartId}, 4200)`}.run()
+  } }
+</program>
+```
+
+The body-DG classifies the two `?{}` statements `server`-tier and the `@reservationShown` assignment `client`-tier. The planner's topological sort keeps source order (no edge forces a deviation); the coalescer opens batch 0 at the `UPDATE`, closes it when the client `@reservationShown` write intervenes, and opens batch 1 at the `INSERT`. The two `?{}` statements touch **different** tables (`inventory`, `charges`), so no `invalidates` edge crosses the boundary — the plan is **admissible**: two batches. Batch 0's `UPDATE ... held = held + 1` reads the prior column value → **non-monotone** → batch 0 gets an idempotency-key envelope. Batch 1's `INSERT` with literal values → **monotone** → batch 1 does not. The compiler emits two server stubs and a client wrapper with two sequenced awaits.
+
+Had the second statement been a SELECT against `inventory` (the table batch 0 wrote), an `invalidates` edge would cross the batch boundary and the planner would reject the body with `E-CPS-MULTIBATCH-REORDER` — the developer keeps both `inventory` statements in one server run, or removes the intervening client statement.
+
+##### 19.9.9.6 Soundness
+
+Per the body-split soundness predicates **S1-S5** (body-split soundness design dive §3.4), all CLEAN at Ext 1's surface:
+
+- **S1 (atomicity)** — each batch is its own transactional envelope server-side; per-batch atomicity is preserved. Cross-batch atomicity is explicitly NOT promised — that IS the multi-batch shape (§19.6.7).
+- **S2 (deterministic replay)** — unchanged; the per-statement semantics inside each batch are identical to the unsplit form.
+- **S3 (monotonicity-preserving-ordering)** — the load-bearing predicate. The body-DG (§19.9.9.1) is conservative-over-approximate; the planner's topological sort respects every edge as an absolute constraint and uses the tie-break only to choose among already-legal orderings. Any topological sort of a data-dependency DAG is observationally equivalent at every observable cut point. CLEAN under the reorder verdict.
+- **S4 (failure-mode preservation)** — each emitted stub is `!`-wrapped (§19.9.5); per-batch and outer `try`/`catch` route every failure through the existing §19 error mechanisms; an earlier batch's commit stands on a later batch's failure (§19.6.7).
+- **S5 (replay safety)** — strengthened: per-batch idempotency-key classification (§19.9.9.3) is strictly finer-grain than the §19.9.6 per-function classification, lowering cost without weakening replay safety.
+
+**Cross-references.** §8.9 (per-handler transactional envelope — each batch is one); §12 / §19.9.3 (CPS eligibility / preservation — the tier classification source); §19.6.7 (multi-batch CPS granularity — `< errorBoundary>` catches per-batch; ratified here); §19.9.5 (Ext 4 auto-`!`-wrap — per-stub composition); §19.9.6 (Ext 5 static monotonicity + idempotency-key replay — lifted per-batch by §19.9.9.3); §19.9.7 (`.idempotent()` modifier — applies per-batch); §19.9.8 (no `async`/`await` — Ext 1 preserves the CPS wrapper envelope); §22 (`^{}` meta — orthogonal; Ext 1 does not enter meta bodies); §31 (module-grain dependency graph — the body-DG is a statement-grain sibling, not a replacement); §51.0.G (`<machine>` `.advance()` — the machine-crossing reject leg); §34 catalog (`E-CPS-MULTIBATCH-REORDER`, `E-CPS-MULTIBATCH-MACHINE-CROSSING`).
 
 ---
 
@@ -15146,6 +15241,8 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | D-CPS-IDEMPOTENT-OVERRIDE | §19.9.7 | `.idempotent()` modifier applied to a function whose batches the static classifier would have flagged non-monotone. Names the classifier's would-be verdict so the developer sees what they overrode. (Per A9 Ext 5, S76 dispatch overlay 2026-05-09.) | Diag (info) |
 | D-CPS-MONOTONE | §19.9.6 | Batch is monotone-by-classification — emitted at `--verbose` only to avoid noise. (Per A9 Ext 5, S76 dispatch overlay 2026-05-09.) | Diag (info) |
 | W-LEAK-010 | §19.9.6, §39.2.6 | The compiled `<program idempotency-store=>` resolves to a SQL backend (sqlite/postgres/mysql); the v0.2.0 helper at `compiler/runtime/idempotency.js` performs **lazy eviction only** — expired rows in `_scrml_idempotency_keys` are returned as misses but NOT deleted from disk. Over time the shadow table grows unbounded; query latency on the primary-key lookup degrades with index size; storage cost grows monotonically. Resolution: (a) configure `idempotency-store="redis"` (Redis has native `EXPIREAT` — no leak), (b) operationally schedule a periodic `DELETE FROM _scrml_idempotency_keys WHERE expires_at <= now()`, or (c) wait for the future-amendment background sweeper. The runtime helper file documents the gap inline at lines 27-29 + 74-77. (Memory-leak deep-dive refresh, S77 — `scrml-support/docs/deep-dives/memory-leak-detection-2026-05-10.md`.) | Info |
+| E-CPS-MULTIBATCH-REORDER | §19.9.9 | Multi-batch CPS planning found an irreducible cross-batch durable-write dependency: a `?{}` write in one server batch and a `?{}` SELECT against the same table in a later batch, with client-observable work forcing a batch boundary between them (the body-DG `invalidates` edge crosses the boundary). The later SELECT needs transactional consistency with the earlier write; splitting them across two server requests breaks that consistency envelope. Also fires on a genuine body-DG dependency cycle. Resolution: keep both same-table statements in one server run, or move the intervening client statement out from between them. (A9 Ext 1, S114; planner `compiler/src/cps-batch-planner.ts`.) | Error |
+| E-CPS-MULTIBATCH-MACHINE-CROSSING | §19.9.9 | Multi-batch CPS planning found a `<machine>` `.advance()` transition chain on the same machine receiver whose advances land in different server batches. A transition chain that crosses a server batch boundary cannot guarantee the §51 allowed-from-state guard — the intermediate state is not observable across two server requests. (Two advances inside one batch's serial execution do NOT fire this — see §19.9.9.2.) Resolution: keep all transitions of the machine in one server run. (A9 Ext 1, S114; planner `compiler/src/cps-batch-planner.ts`.) | Error |
 | E-IDLE-DUPLICATE | §51.0.R | An `<engine>` declares more than one `<onIdle>` element. Per §51.0.R, an engine has at most one event-timeout watchdog. Resolution: remove the duplicate or merge into one. (A5-6, S77.) | Error |
 | E-IDLE-INVALID-VARIANT | §51.0.R | `<onIdle to=.X/>` references a variant `X` not in the engine's `for=` enum, OR the `to=` attribute is missing or malformed. Resolution: correct the variant reference or add `.X` to the enum. (A5-6, S77.) | Error |
 | E-IDLE-MISPLACED | §51.0.R | `<onIdle>` appears inside a state-child body. Per §51.0.R, `<onIdle>` is engine-wide and must sit at engine-root scope (sibling of state-children). For per-state timer-fire-on-state-entry semantics use `<onTimeout>` (§51.0.M) instead. (A5-6, S77.) | Error |
