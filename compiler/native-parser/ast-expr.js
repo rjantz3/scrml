@@ -64,6 +64,17 @@ export const ExprKind = Object.freeze({
     // REMOVED the sibling `Await` kind — scrml has no `async`/`await` at the
     // language level; see parseUnary's E-AWAIT-NOT-IN-SCRML site.
     Yield: "Yield",                  // `yield expr` / `yield* expr` (§37 / D5)
+
+    // JS->markup seam: markup-as-value (MK4 — R1 spike §1.2 / Pillar 1).
+    // A `<tag>...</tag>` element appearing in JS expression position is a
+    // first-class value (`const c = <div/>`, `return <p>hi</p>`,
+    // `lift <wrapper>...</wrapper>`). The JS layer delegates BACK UP to the
+    // markup layer when parsePrimary's LessThan branch sees the value-following
+    // prev-token + the markup-opener char shape (parse-seam.js's
+    // markupValueAllowedAfter). The delegation produces a markup block-stream
+    // (the same shape parseMarkup produces at top level); MarkupValue wraps
+    // it as a single Expr-shaped operand.
+    MarkupValue: "MarkupValue",
 });
 
 export const ArrayElementKind = Object.freeze({
@@ -396,6 +407,21 @@ export function makeFail(variant, span) {
 // ESTree's YieldExpression.
 export function makeYield(argument, delegate, span) {
     return { kind: ExprKind.Yield, argument, delegate, span };
+}
+
+// --- makeMarkupValue — markup-as-value (MK4; R1 spike §1.2 / Pillar 1) ---
+// CALCULATION (pure data builder). One markup-as-value expression node — a
+// markup element appearing in JS expression position. `markup` is the typed
+// markup block-stream the markup layer produced (the same shape parseMarkup
+// returns at top level: an array of block nodes — typically ONE Markup block
+// when the markup-as-value is one element, but multiple if the markup-as-
+// value contained interleaved blocks). `span` is the JS-coordinate-space
+// span from the opening `<` to the closing `>` / `/>` / `</>`.
+//
+// The kind discriminates from any other Expr — downstream consumers (M5
+// codegen, NR) read `node.markup` as the markup payload to wire.
+export function makeMarkupValue(markup, span) {
+    return { kind: ExprKind.MarkupValue, markup, span };
 }
 
 // --- isExpr — predicate ---

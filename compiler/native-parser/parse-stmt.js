@@ -150,7 +150,15 @@ import {
 // parseFunctionBodyInline saves+sets+restores it around a function body —
 // the same shape as its functionDepth inc/dec. M4.3 retracted the sibling
 // `inAsync` slot (no source-level `async`/`await`).
-export function makeParseStmtContext(tokens) {
+// MK4 — `source` is OPTIONAL. When the statement-parser is invoked through
+// the markup->JS delegate-down direction (parse-markup.js's
+// parseLogicBodyBestEffort) on a logic-escape body slice, the body source
+// text is passed in so a nested markup-as-value (`<div/>` inside the body)
+// can be parsed back through the markup layer (R1 spike §1.2 JS->markup
+// delegate-up). When parseProgram is called without a source (the
+// conformance harness's parseProgram(tokens) one-arg entry), the JS->markup
+// path falls back to the token-range capture (a BlockStub-shape MarkupValue).
+export function makeParseStmtContext(tokens, source) {
     return {
         cursor:           makeTokenCursor(tokens),
         currentParseMode: initialParseMode(),
@@ -158,6 +166,7 @@ export function makeParseStmtContext(tokens) {
         recovery:         makeRecovery(),
         functionDepth:    0,
         inGenerator:      false,
+        source:           source ?? null,
     };
 }
 
@@ -2327,8 +2336,8 @@ export function reenterBlockStubs(node, asyncScope, genScope) {
 
 // parseStmt — parse ONE statement at the head of a token stream. Mirrors
 // parse-expr's parseExpr entry shape — returns { ast, errors }.
-export function parseStmt(tokens) {
-    const ctx = makeParseStmtContext(tokens);
+export function parseStmt(tokens, source) {
+    const ctx = makeParseStmtContext(tokens, source);
     const ast = parseStatement(ctx);
     return { ast, errors: ctx.errors };
 }
@@ -2336,8 +2345,8 @@ export function parseStmt(tokens) {
 // parseProgram — parse a whole token stream as a statement list (a program
 // body / a module body). Returns { body, errors } — `body` is the Stmt
 // array. This is the M3.1 top-level entry the conformance harness drives.
-export function parseProgram(tokens) {
-    const ctx = makeParseStmtContext(tokens);
+export function parseProgram(tokens, source) {
+    const ctx = makeParseStmtContext(tokens, source);
     const body = parseStatementList(ctx, undefined);
     return { body, errors: ctx.errors };
 }

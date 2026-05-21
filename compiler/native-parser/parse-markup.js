@@ -100,7 +100,16 @@ import {
 // parses ONE expression — a leftover token means the run was not all code).
 import { lex } from "./lex.js";
 import { makeParseExprContext, parseExpression } from "./parse-expr.js";
+import { parseProgram } from "./parse-stmt.js";
 import { atEnd } from "./token-cursor.js";
+// MK4 — the markup<->JS seam (R1 spike §3). The seam helpers centralize the
+// markup->JS delegate-down direction (the .InLogicEscape body's JS parse) +
+// the JS-layer `<`-vs-`LessThan` discriminator (markupValueAllowedAfter,
+// used by parse-expr.js's parsePrimary at the LessThan branch).
+import {
+    delegateLogicEscapeBody,
+    findBodyCloseOffset,
+} from "./parse-seam.js";
 
 // blockKindForContext — calculation. Maps a BlockContext variant to the
 // BlockKind a closed context of that variant emits. The seven
@@ -208,14 +217,127 @@ export function emitComment(run, cursor, ctx) {
 // emitContextBlock — state write. Emit a context block for a just-closed (or
 // unterminated) block context. `frame` is the BlockContext frame (carrying
 // openSpan); `endPos` is one past the context's last consumed character.
+//
+// MK4 — for an .InLogicEscape block, parse the body's JS source slice + attach
+// the resulting Stmt[] AST as `block.body` (R1 spike §3 — the seam contract's
+// markup->JS delegate-down direction produces a real JS AST, not just a span).
+// The body text is the source between the `${` (frame.openSpan.end) and the
+// matching `}` (endPos - 1). The parse is BEST-EFFORT: the JS-layer parser
+// runs over the slice and any diagnostics are forwarded via the seam helper
+// into ctx.diagnostics. A body containing markup-as-value (`${ <div/> }`) is
+// handled by parsePrimary's LessThan branch (parse-expr.js — the JS->markup
+// delegate-up direction), which calls back into the markup layer.
 export function emitContextBlock(ctx, frame, endPos) {
     const kind = blockKindForContext(frame.context);
     if (kind === null) return;
-    appendBlock(ctx, makeBlockNode(
+    const block = makeBlockNode(
         kind,
         makeSpan(frame.openSpan.start, endPos, frame.openSpan.line, frame.openSpan.col),
         null,
-    ));
+    );
+    // MK4 — for .InLogicEscape, attach the body's parsed JS AST. The body
+    // extent is [frame.openSpan.end, endPos - 1) (the `}` is one byte before
+    // endPos). The source slice is the body's verbatim text; lex + parseProgram
+    // builds the Stmt[] AST. An empty body parses to an empty body[]; a body
+    // containing a nested context is best-effort (the nested context's own
+    // block is emitted separately into ctx.nodes by the markup trampoline; the
+    // JS-layer parser sees the body text as-is and may surface its own
+    // diagnostics — that is the seam contract working).
+    if (frame.context === BlockContext.InLogicEscape) {
+        const bodyStart = frame.openSpan.end;
+        // For terminated bodies endPos points one past `}`; bodyEnd is endPos-1
+        // (the `}` byte). For an EOF-unterminated body endPos is cursor.pos at
+        // EOF — the closer never materialized, so the body extends to EOF.
+        const bodyEnd = (endPos > bodyStart) ? (endPos - 1) : bodyStart;
+        const sourceSlice = cursorSourceFromCtx(ctx);
+        if (sourceSlice !== null && bodyEnd >= bodyStart) {
+            const bodyText = sourceSlice.substring(bodyStart, bodyEnd);
+            block.bodyText = bodyText;
+            block.body = parseLogicBodyBestEffort(bodyText, ctx, bodyStart, frame.openSpan.line, frame.openSpan.col);
+        }
+    }
+    appendBlock(ctx, block);
+}
+
+// cursorSourceFromCtx — calculation. The markup trampoline's source string,
+// readable for the body-slice extraction in emitContextBlock. The trampoline
+// stores it on ctx.source at runMarkup-entry (the parseContext does not yet
+// carry it — the markup trampoline threads it explicitly). This helper is a
+// thin defensive read.
+function cursorSourceFromCtx(ctx) {
+    if (ctx === null || ctx === undefined) return null;
+    if (typeof ctx.source !== "string") return null;
+    return ctx.source;
+}
+
+// parseLogicBodyBestEffort — calculation + diagnostic forwarding. Lex +
+// parseProgram a logic-escape body's source slice. Diagnostics are forwarded
+// into ctx.diagnostics with the body's host-absolute start coordinates
+// attached as a delegation-context note (R1 spike §1.4 — cross-seam error
+// attribution). Best-effort: a body containing nested markup-as-value will
+// surface JS-layer diagnostics for the `<...>` shape until parse-expr's
+// LessThan discriminator (C3) is wired; that is the seam contract working,
+// not a regression.
+function parseLogicBodyBestEffort(bodyText, ctx, bodyAbsStart, bodyAbsLine, bodyAbsCol) {
+    if (bodyText === undefined || bodyText === null) return [];
+    if (bodyText.length === 0) return [];
+    const tokens = lex(bodyText);
+    // MK4 — pass bodyText as the source so the JS->markup delegate-up
+    // direction (parsePrimary's LessThan branch) can slice it to recognize
+    // a markup-as-value `<div/>` inside the logic-escape body. Without
+    // source the JS layer falls back to token-range capture (BlockStub
+    // shape); with it, the markup-as-value parses to a full Markup block.
+    const result = parseProgram(tokens, bodyText);
+    // The body's token spans are local to the slice; shift the top-level
+    // statement spans into the host coordinate space. (Deep shifts are
+    // deferred — downstream consumers (M5 codegen) read the body[] as the
+    // LogicEscape block's payload and re-derive spans as needed.)
+    const body = (result.body !== undefined && result.body !== null) ? result.body : [];
+    let i = 0;
+    while (i < body.length) {
+        const stmt = body[i];
+        if (stmt !== null && stmt !== undefined && stmt.span !== undefined && stmt.span !== null) {
+            stmt.span = shiftBodySpan(stmt.span, bodyAbsStart, bodyAbsLine, bodyAbsCol);
+        }
+        i = i + 1;
+    }
+    // Forward diagnostics — body-text-local to host-absolute.
+    if (result.errors !== undefined && result.errors !== null) {
+        let j = 0;
+        while (j < result.errors.length) {
+            const e = result.errors[j];
+            const absSpan = shiftBodySpan(e.span, bodyAbsStart, bodyAbsLine, bodyAbsCol);
+            const diag = makeDiagnostic(e.code, e.message, absSpan);
+            // R1 spike §1.4 — attach the active delegation frame so a
+            // downstream consumer (M5+) sees the attribution chain.
+            if (ctx !== null && ctx !== undefined && ctx.delegationStack !== undefined
+                && ctx.delegationStack.length > 0) {
+                diag.delegationFrame = ctx.delegationStack[ctx.delegationStack.length - 1];
+            }
+            pushDiagnostic(ctx, diag);
+            j = j + 1;
+        }
+    }
+    return body;
+}
+
+// shiftBodySpan — calculation (pure). Translate a body-local span (the
+// slice-local coordinate space the JS lexer/parser produced) into the host
+// source's coordinate space. The body's first byte maps to (bodyAbsStart,
+// bodyAbsLine, bodyAbsCol). Best-effort line/col shift: the body's later-line
+// columns start at column 1 of the host source (a perfect shift requires
+// anchor-line tracking — M5 scope).
+function shiftBodySpan(localSpan, bodyAbsStart, bodyAbsLine, bodyAbsCol) {
+    if (localSpan === undefined || localSpan === null) {
+        return makeSpan(bodyAbsStart, bodyAbsStart, bodyAbsLine, bodyAbsCol);
+    }
+    const start = bodyAbsStart + (localSpan.start ?? 0);
+    const end = bodyAbsStart + (localSpan.end ?? 0);
+    const localLine = localSpan.line ?? 1;
+    const localCol = localSpan.col ?? 1;
+    const hostLine = bodyAbsLine + (localLine - 1);
+    const hostCol = (localLine === 1) ? bodyAbsCol + (localCol - 1) : localCol;
+    return makeSpan(start, end, hostLine, hostCol);
 }
 
 // dispatchTopLevel — the `.TopLevel` BlockContext state-child body (MK2.2 —
@@ -945,6 +1067,12 @@ export function parseMarkupTrace(source) {
 function runMarkup(source) {
     const cursor = makeCursor(source);
     const ctx = makeParseContext();
+    // MK4 — thread the source onto the ctx so emitContextBlock can slice a
+    // logic-escape body's text for the markup->JS delegate-down direction
+    // (R1 spike §3 seam contract). The source is the SAME string the cursor
+    // walks; this is a read-only reference, not a copy (one buffer, one
+    // coordinate space — punch-list P2 one-cursor invariant).
+    ctx.source = source;
     const contextTrace = [];
 
     // The text-run accumulator (see beginTextRun / flushTextRun).

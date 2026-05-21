@@ -56,6 +56,26 @@ export function isKind(cursor, kind) {
     return currentKind(cursor) === kind;
 }
 
+// previous — calculation. The token immediately BEFORE the cursor's position
+// (the token most recently advance()'d past), or null if the cursor is at the
+// stream's head. Used by MK4 (R1 spike §1.2) — the JS->markup `<`-vs-`LessThan`
+// discriminator needs the immediately-preceding token's kind to apply
+// markupValueAllowedAfter (parse-seam.js).
+export function previous(cursor) {
+    if (cursor.idx <= 0) return null;
+    if (cursor.idx > cursor.tokens.length) return null;
+    return cursor.tokens[cursor.idx - 1];
+}
+
+// previousKind — calculation. The kind of the previous token, or undefined
+// if there is no previous (start-of-stream — the markup-value-allowed-after
+// predicate handles undefined as a value-following position).
+export function previousKind(cursor) {
+    const tok = previous(cursor);
+    if (tok === null) return undefined;
+    return tok.kind;
+}
+
 export function isKindAt(cursor, k, kind) {
     return peekKind(cursor, k) === kind;
 }

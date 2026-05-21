@@ -2350,3 +2350,225 @@ describe("M4.3 — async/await retraction (expression layer)", () => {
     });
 });
 
+
+// =============================================================================
+// MK4 — JS->markup delegate-up direction (R1 spike §1.2 / Pillar 1).
+//
+// parsePrimary's LessThan branch detects markup-as-value via
+// markupValueAllowedAfter (the prev-token discriminator) + a next-token
+// source-adjacent Ident shape check. The delegation produces a MarkupValue
+// ExprKind carrying the markup block-stream.
+//
+// SCOPE: this section exercises ONLY the JS-layer detection + the
+// MarkupValue construction. The markup-grammar conformance is the markup
+// suite's responsibility (parser-conformance-markup.test.js); MK4 §64-§65
+// in that file exercise the markup-value's interaction with the markup
+// layer.
+// =============================================================================
+import { makeParseExprContext as scrmlMakeParseExprContext, parseExpression as scrmlParseExpression, isMarkupValueAhead, parseMarkupValue } from "../native-parser/parse-expr.js";
+import { markupValueAllowedAfter } from "../native-parser/parse-seam.js";
+import { TokenKind as MK4TokenKind } from "../native-parser/token.js";
+import { previousKind } from "../native-parser/token-cursor.js";
+
+describe("MK4 §1 — markupValueAllowedAfter (the prev-token discriminator)", () => {
+    test("start-of-stream (undefined) is value-following", () => {
+        expect(markupValueAllowedAfter(undefined)).toBe(true);
+        expect(markupValueAllowedAfter(null)).toBe(true);
+    });
+
+    test("after `=` (Assign) is value-following", () => {
+        expect(markupValueAllowedAfter(MK4TokenKind.Assign)).toBe(true);
+    });
+
+    test("after `return` is value-following", () => {
+        expect(markupValueAllowedAfter(MK4TokenKind.KwReturn)).toBe(true);
+    });
+
+    test("after `lift` is value-following", () => {
+        expect(markupValueAllowedAfter(MK4TokenKind.KwLift)).toBe(true);
+    });
+
+    test("after `render` (SINGULAR — KwRender) is value-following", () => {
+        // R1 spike §1.2 sketched "renders" (plural); the real TokenKind
+        // catalog has KwRender (singular — the L3-locked canonical form).
+        // The plural is NOT in the discriminator set.
+        expect(markupValueAllowedAfter(MK4TokenKind.KwRender)).toBe(true);
+    });
+
+    test("after `(` `[` `,` `{` `;` `:` are value-following", () => {
+        expect(markupValueAllowedAfter(MK4TokenKind.LParen)).toBe(true);
+        expect(markupValueAllowedAfter(MK4TokenKind.LBracket)).toBe(true);
+        expect(markupValueAllowedAfter(MK4TokenKind.LBrace)).toBe(true);
+        expect(markupValueAllowedAfter(MK4TokenKind.Comma)).toBe(true);
+        expect(markupValueAllowedAfter(MK4TokenKind.Semicolon)).toBe(true);
+        expect(markupValueAllowedAfter(MK4TokenKind.Colon)).toBe(true);
+    });
+
+    test("after `=>` (Arrow) is value-following", () => {
+        expect(markupValueAllowedAfter(MK4TokenKind.Arrow)).toBe(true);
+    });
+
+    test("after binary operators are value-following", () => {
+        expect(markupValueAllowedAfter(MK4TokenKind.Plus)).toBe(true);
+        expect(markupValueAllowedAfter(MK4TokenKind.LogicalAnd)).toBe(true);
+        expect(markupValueAllowedAfter(MK4TokenKind.Question)).toBe(true);
+    });
+
+    test("after Ident / NumberLit / StringLit are NOT value-following", () => {
+        // A `<` after an Ident is less-than, not a markup opener.
+        expect(markupValueAllowedAfter(MK4TokenKind.Ident)).toBe(false);
+        expect(markupValueAllowedAfter(MK4TokenKind.NumberLit)).toBe(false);
+        expect(markupValueAllowedAfter(MK4TokenKind.StringLit)).toBe(false);
+        // Closing brackets are not value-following either.
+        expect(markupValueAllowedAfter(MK4TokenKind.RParen)).toBe(false);
+        expect(markupValueAllowedAfter(MK4TokenKind.RBracket)).toBe(false);
+    });
+});
+
+describe("MK4 §2 — isMarkupValueAhead (cursor-position discriminator)", () => {
+    test("`<div ...>` at stream head is markup-value-ahead", () => {
+        const src = "<div/>";
+        const tokens = scrmlNativeLex(src);
+        const ctx = scrmlMakeParseExprContext(tokens, src);
+        expect(isMarkupValueAhead(ctx)).toBe(true);
+    });
+
+    test("`x < y` (Ident, LessThan) is NOT markup-value-ahead", () => {
+        const src = "x < y";
+        const tokens = scrmlNativeLex(src);
+        const ctx = scrmlMakeParseExprContext(tokens, src);
+        // Walk past x to position the cursor at `<`.
+        ctx.cursor.idx = 1;
+        expect(isMarkupValueAhead(ctx)).toBe(false);
+    });
+
+    test("`< div` (space between < and ident) is NOT markup-value-ahead", () => {
+        const src = "< div/>";
+        const tokens = scrmlNativeLex(src);
+        const ctx = scrmlMakeParseExprContext(tokens, src);
+        // The next-token source-adjacency check fails: ` div` has a space.
+        expect(isMarkupValueAhead(ctx)).toBe(false);
+    });
+});
+
+describe("MK4 §3 — parseMarkupValue produces a MarkupValue node", () => {
+    test("`<div/>` parses to MarkupValue carrying the markup block-stream", () => {
+        const src = "<div/>";
+        const tokens = scrmlNativeLex(src);
+        const ctx = scrmlMakeParseExprContext(tokens, src);
+        const ast = scrmlParseExpression(ctx);
+        expect(ast.kind).toBe("MarkupValue");
+        expect(ast.span.start).toBe(0);
+        expect(ast.span.end).toBe(6);
+        expect(ctx.errors.length).toBe(0);
+        expect(Array.isArray(ast.markup)).toBe(true);
+        expect(ast.markup[0].kind).toBe("Markup");
+        expect(ast.markup[0].name).toBe("div");
+        expect(ast.markup[0].tagClass).toBe("SelfClose");
+    });
+
+    test("`<div>hello</div>` (paired) parses to MarkupValue", () => {
+        const src = "<div>hello</div>";
+        const tokens = scrmlNativeLex(src);
+        const ctx = scrmlMakeParseExprContext(tokens, src);
+        const ast = scrmlParseExpression(ctx);
+        expect(ast.kind).toBe("MarkupValue");
+        expect(ast.span.start).toBe(0);
+        expect(ast.span.end).toBe(16);
+        expect(ctx.errors.length).toBe(0);
+        expect(ast.markup[0].name).toBe("div");
+    });
+
+    test("`<Card/>` (capitalized — component) parses to MarkupValue", () => {
+        const src = "<Card/>";
+        const tokens = scrmlNativeLex(src);
+        const ctx = scrmlMakeParseExprContext(tokens, src);
+        const ast = scrmlParseExpression(ctx);
+        expect(ast.kind).toBe("MarkupValue");
+        expect(ast.markup[0].name).toBe("Card");
+    });
+
+    test("ctx.source absent: parseMarkupValue falls back to token-range capture (BlockStub shape)", () => {
+        const src = "<div/>";
+        const tokens = scrmlNativeLex(src);
+        const ctx = scrmlMakeParseExprContext(tokens);  // no source
+        const ast = scrmlParseExpression(ctx);
+        expect(ast.kind).toBe("MarkupValue");
+        // Token-range capture path: ast.markup is an OBJECT with kind "MarkupTokenRange".
+        expect(ast.markup.kind).toBe("MarkupTokenRange");
+        expect(Array.isArray(ast.markup.tokens)).toBe(true);
+    });
+});
+
+describe("MK4 §4 — markup-value in larger expression contexts", () => {
+    test("markup-as-value RHS of an assignment: `card = <div/>`", () => {
+        // The parser is a one-expression parser; here we parse the RHS alone.
+        const src = "<div/>";
+        const tokens = scrmlNativeLex(src);
+        const ctx = scrmlMakeParseExprContext(tokens, src);
+        const ast = scrmlParseExpression(ctx);
+        expect(ast.kind).toBe("MarkupValue");
+    });
+
+    test("`<wrapper>...</wrapper>` (paired with children) parses", () => {
+        const src = "<wrapper>x</wrapper>";
+        const tokens = scrmlNativeLex(src);
+        const ctx = scrmlMakeParseExprContext(tokens, src);
+        const ast = scrmlParseExpression(ctx);
+        expect(ast.kind).toBe("MarkupValue");
+        expect(ast.markup[0].name).toBe("wrapper");
+    });
+
+    test("`x < y` stays a binary expression (regression — discriminator works)", () => {
+        const src = "x < y";
+        const tokens = scrmlNativeLex(src);
+        const ctx = scrmlMakeParseExprContext(tokens, src);
+        const ast = scrmlParseExpression(ctx);
+        expect(ast.kind).toBe("Binary");
+        expect(ast.op).toBe("<");
+        expect(ctx.errors.length).toBe(0);
+    });
+});
+
+// =============================================================================
+// MK4 §5 — cross-seam error attribution (R1 spike §1.4 / punch-list P9).
+//
+// Diagnostics emitted from the markup layer while inside a JS->markup
+// delegation carry a `delegationFrame` field on the err record. The frame
+// records:
+//   - kind: "ElementValue" (matches the DelegationKind catalog —
+//     delegation-frame.js)
+//   - openSpan: the `<` token's span (the JS->markup boundary)
+//   - via: "JSToMarkup" (the delegation direction)
+//
+// A downstream consumer (M5+ codegen) reads `err.delegationFrame.openSpan`
+// so the diagnostic's blame chain reaches the JS-layer call site, not just
+// the markup-side parse failure.
+// =============================================================================
+describe("MK4 §5 — cross-seam error attribution (R1 spike §1.4)", () => {
+    test("a markup-as-value with a malformed inner ${} body attaches the JSToMarkup delegation frame", () => {
+        // The `${}` body inside the markup-value is parsed by the JS layer;
+        // a parse error there flows back through the markup layer and is
+        // forwarded into the JS-layer ctx.errors with the JS->markup
+        // delegation marker.
+        const src = "<div>${ broken syntax }</div>";
+        const tokens = scrmlNativeLex(src);
+        const ctx = scrmlMakeParseExprContext(tokens, src);
+        const ast = scrmlParseExpression(ctx);
+        expect(ast.kind).toBe("MarkupValue");
+        expect(ctx.errors.length).toBeGreaterThan(0);
+        const e = ctx.errors[0];
+        expect(e.delegationFrame).toBeDefined();
+        expect(e.delegationFrame.kind).toBe("ElementValue");
+        expect(e.delegationFrame.via).toBe("JSToMarkup");
+        expect(e.delegationFrame.openSpan.start).toBe(0);
+    });
+
+    test("a well-formed markup-as-value emits no errors", () => {
+        const src = "<div>hello</div>";
+        const tokens = scrmlNativeLex(src);
+        const ctx = scrmlMakeParseExprContext(tokens, src);
+        scrmlParseExpression(ctx);
+        expect(ctx.errors.length).toBe(0);
+    });
+});

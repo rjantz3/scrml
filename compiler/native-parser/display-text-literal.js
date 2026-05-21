@@ -71,7 +71,7 @@ import { makeSpan } from "./span.js";
 // scan walks the M1 token stream directly — TokenKind names the brace
 // tokens it counts.
 import { lex } from "./lex.js";
-import { parseExpr } from "./parse-expr.js";
+import { parseExpr, makeParseExprContext, parseExpression } from "./parse-expr.js";
 import { TokenKind } from "./token.js";
 
 // DisplayTextLiteral variant tags — all 3 per charter Q1.E.
@@ -438,20 +438,28 @@ export function scanInterpolation(cursor, ctx) {
 // parser's diagnostics are forwarded into `ctx.diagnostics` so a malformed
 // interpolation expression is one uniform diagnostic stream with the
 // literal-scan diagnostics.
+// MK4 — the interpolation body is the JS side of the §4.18.4 deep-stack
+// case (markup -> ${} logic -> "..." literal -> ${} interp -> JS). When the
+// JS layer encounters a `<` inside the interpolation body (a markup-as-value),
+// the JS->markup delegate-up direction (parse-expr.js's parsePrimary LessThan
+// branch) needs the BODY SOURCE TEXT so parseMarkupValue can slice it. The
+// body text IS the relevant source — pass it in via makeParseExprContext's
+// MK4 `source` slot.
 export function parseInterpolationBody(bodyText, ctx) {
     if (bodyText === undefined || bodyText === null) return null;
     if (bodyText.trim().length === 0) return null;
     const tokens = lex(bodyText);
-    const result = parseExpr(tokens);
-    if (result.errors !== undefined && result.errors !== null) {
+    const exprCtx = makeParseExprContext(tokens, bodyText);
+    const ast = parseExpression(exprCtx);
+    if (exprCtx.errors !== undefined && exprCtx.errors !== null) {
         let i = 0;
-        while (i < result.errors.length) {
-            const e = result.errors[i];
+        while (i < exprCtx.errors.length) {
+            const e = exprCtx.errors[i];
             pushDiagnostic(ctx, makeDiagnostic(e.code, e.message, e.span));
             i = i + 1;
         }
     }
-    return result.ast;
+    return ast;
 }
 
 // ===========================================================================

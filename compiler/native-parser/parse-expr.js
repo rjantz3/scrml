@@ -44,7 +44,7 @@
 // recognized as a binary operator, so the init clause parses to the for-in
 // disambiguator without consuming it (replacing M3.2's depth-scan workaround).
 
-import { makeTokenCursor, current, currentKind, peek, peekKind, advance, atEnd, snapshot, restore } from "./token-cursor.js";
+import { makeTokenCursor, current, currentKind, peek, peekKind, previousKind, advance, atEnd, snapshot, restore } from "./token-cursor.js";
 import { TokenKind } from "./token.js";
 import { makeSpan } from "./span.js";
 import { ParseMode, initialParseMode, getParseMode, setParseMode, enterMode, exitMode } from "./parse-mode.js";
@@ -63,7 +63,7 @@ import {
     makeNotValue, makeTilde, makeSql, makeInputStateRef, makeIsCheck,
     makeMatch, makeMatchArm, makeVariantPattern, makeWildcardPattern,
     makeIsPattern, makeMatchBinding, makeRender, makeLift, makeFail,
-    makeYield,
+    makeYield, makeMarkupValue,
 } from "./ast-expr.js";
 // M4.2 — binding-pattern constructors (ast-stmt's BindingKind catalog —
 // the declaration-target shapes M3.1 produces for vardecl destructuring).
@@ -83,6 +83,15 @@ import {
     makeBindingPropertyRest,
     makeBindingElementItem, makeBindingElementHole, makeBindingElementRest,
 } from "./ast-stmt.js";
+
+// MK4 — the JS->markup seam (R1 spike §1.2). markupValueAllowedAfter is the
+// prev-token discriminator for parsePrimary's LessThan branch (the twin of
+// M1's regexAllowedAfter). Lives in parse-seam.js (which also hosts the
+// markup->JS direction's body delegator); imported here for the discriminator
+// only — the actual markup delegation calls parseMarkup lazily (via dynamic
+// import to avoid the parse-markup -> parse-expr -> parse-markup cycle at
+// module-init time).
+import { markupValueAllowedAfter } from "./parse-seam.js";
 
 // --- makeParseExprContext — parser state constructor ---
 // M4.1 added an ASYNC/GENERATOR SCOPE pair (`inAsync` / `inGenerator`). M4.3
@@ -111,13 +120,22 @@ import {
 // sub-expressions that REOPEN the `in` operator (a paren / array element /
 // object value / call argument / template `${...}`) use
 // withInAllowedSubExpr / restoreNoIn to save+clear+restore the slot.
-export function makeParseExprContext(tokens) {
+// MK4 — `source` is an OPTIONAL slot threaded into the context to support
+// the JS->markup delegate-up direction (R1 spike §1.2). When parsePrimary's
+// LessThan branch detects a markup-value, it needs the source string to
+// slice the markup region and call parseMarkup. Existing callers (parseExpr
+// (tokens) one-arg, makeParseExprContext(tokens) one-arg) pass undefined
+// and the LessThan branch falls back to a token-range capture (the same
+// shape M2.3's BlockStub uses for function bodies). M5+ will route through
+// the shared ParseContext (parse-ctx.js) which carries source canonically.
+export function makeParseExprContext(tokens, source) {
     return {
         cursor:           makeTokenCursor(tokens),
         currentParseMode: initialParseMode(),
         errors:           [],
         inGenerator:      false,
         noIn:             false,
+        source:           source ?? null,
     };
 }
 
@@ -1644,6 +1662,23 @@ export function parsePrimary(ctx) {
         return parseInputStateRef(ctx);
     }
 
+    // MK4 — JS->markup delegate-up direction (R1 spike §1.2 / Pillar 1
+    // markup-as-value). A `<` in expression-head position that is preceded
+    // by a value-following token AND followed source-adjacent by an Ident
+    // is a markup-value opener — delegate to the markup layer.
+    //
+    // The discriminator (markupValueAllowedAfter — parse-seam.js) is the
+    // twin of M1's regexAllowedAfter: a bounded prev-token calculation, NOT
+    // backtracking (R1 spike §3.4). The next-char shape check is the
+    // source-adjacency rule: a `<` followed by a SPACE-then-Ident is not a
+    // markup opener (the markup grammar requires the name to begin
+    // immediately after the `<` — block-splitter.js line 1618 form, lifted
+    // verbatim into the native parser). The MarkupValue node carries the
+    // delegated markup block-stream.
+    if (kind === TokenKind.LessThan && isMarkupValueAhead(ctx)) {
+        return parseMarkupValue(ctx);
+    }
+
     // `::Variant` — a bare variant via the `::` alias (§14.4). S114 K5c —
     // `::` is now a single DoubleColon token; `::Variant` produces the same
     // BareVariant node `.Variant` produces (the `::` form is a pure alias).
@@ -1754,6 +1789,318 @@ export function parseInputStateRef(ctx) {
     const gt = advance(cursor);          // consume `>`
     const span = makeSpan(lt.span.start, gt.span.end, lt.span.line, lt.span.col);
     return makeInputStateRef(idTok.name, span);
+}
+
+// =============================================================================
+// MK4 — JS->markup delegate-up direction (R1 spike §1.2 / Pillar 1).
+//
+// A `<` at expression-head position opens a markup-value when ALL of:
+//   1. the prev-token is in the value-following set (markupValueAllowedAfter
+//      — parse-seam.js; the twin of M1's regexAllowedAfter);
+//   2. the NEXT token is an Ident and SOURCE-ADJACENT to the `<` (no
+//      whitespace between `<` and the name — the markup-opener shape that
+//      block-splitter.js line 1618 enforces verbatim into the native parser).
+//
+// `isMarkupValueAhead` answers both questions with bounded lookahead (1
+// token back + 1 token forward + a span-adjacency check). NOT backtracking
+// (R1 spike §3.4).
+//
+// `parseMarkupValue` performs the delegation. When `ctx.source` is set
+// (MK4: the optional 2nd arg to makeParseExprContext), the helper slices
+// the source between the `<` and the markup-element's close + calls
+// parseMarkup on the slice; the resulting block-stream is wrapped in a
+// MarkupValue node. When `ctx.source` is null (the existing parseExpr
+// (tokens)-only entry the conformance harness uses), the helper falls
+// back to a TOKEN-RANGE capture (the same shape M2.3's BlockStub uses
+// for function bodies) — a MarkupValue carrying the captured token range
+// + the JS-coordinate-space span; a later milestone re-parses the range
+// when the source is available. Either way the MarkupValue node carries
+// `node.span` in the JS coordinate space.
+// =============================================================================
+
+// isMarkupValueAhead — calculation (pure predicate). Bounded — 1 token back +
+// 1 token forward + 1 span-adjacency check.
+export function isMarkupValueAhead(ctx) {
+    const cursor = ctx.cursor;
+    if (currentKind(cursor) !== TokenKind.LessThan) return false;
+
+    // (1) The prev-token discriminator. markupValueAllowedAfter handles
+    // start-of-stream (`undefined`/`null`) as a value-following position.
+    if (!markupValueAllowedAfter(previousKind(cursor))) return false;
+
+    // (2) The NEXT token must be an Ident source-adjacent to the `<`. The
+    // markup grammar requires the tag name to begin IMMEDIATELY after the
+    // `<` (no whitespace) — `< div` is NOT a markup opener (it is a
+    // less-than followed by an ident, ungrammatical but not markup). A
+    // post-`<` UpperOrLower-letter check would equivalently work, but the
+    // token spans M1 records already give us source-adjacency for free.
+    const lt = current(cursor);
+    const next = peek(cursor, 1);
+    if (next === undefined || next === null) return false;
+    if (next.kind !== TokenKind.Ident) return false;
+    if (next.span === undefined || lt.span === undefined) return false;
+    if (next.span.start !== lt.span.end) return false;
+
+    return true;
+}
+
+// parseMarkupValue — STATE write (cursor advance) + calculation (the
+// MarkupValue node). Delegate the `<tag>...</tag>` element parse to the
+// markup layer; wrap the produced block-stream in a MarkupValue node.
+//
+// With ctx.source available: slice the source from the `<` to the
+// matching close (found by walking forward over the token stream + the
+// source — a TagFrame-depth balance, R1 spike §3.2 CloseCondition
+// .TagFrameBalanced). Run parseMarkup on the slice. The first Markup
+// block in the resulting stream is THIS element; subsequent blocks (if
+// any) are the same source's remainder — for a well-formed
+// markup-as-value the slice is the element alone and the stream has one
+// Markup block.
+//
+// Without ctx.source: fall back to a token-range MarkupValue carrying
+// the captured token range; the actual markup parse is deferred (the
+// same shape M2.3 uses for BlockStub function bodies).
+export function parseMarkupValue(ctx) {
+    const cursor = ctx.cursor;
+    const lt = current(cursor);                  // the `<` token (not yet consumed)
+    const ltSpan = lt.span;
+
+    if (ctx.source !== null && ctx.source !== undefined) {
+        // Source-available path — delegate to the markup layer via a slice.
+        const sliceStart = ltSpan.start;
+        const sliceTail = ctx.source.substring(sliceStart);
+        const trace = parseMarkupViaLazyRequire(sliceTail);
+        if (trace !== null && trace.ctx !== undefined && trace.ctx.nodes.length > 0) {
+            const firstBlock = trace.ctx.nodes[0];
+            if (firstBlock.span !== undefined && firstBlock.span !== null) {
+                const sliceCloseEnd = firstBlock.span.end;
+                const closeEnd = sliceStart + sliceCloseEnd;
+
+                // Shift the markup blocks' spans from slice-local to host-
+                // absolute (the slice's local-(0,1,1) maps to ltSpan.start).
+                // Only shift this element's block (trace.ctx.nodes[0]);
+                // deeper-block shifts are best-effort (the children's spans
+                // are slice-local — M5+ codegen re-derives them).
+                shiftMarkupBlockSpan(firstBlock, sliceStart, ltSpan.line, ltSpan.col);
+
+                // MK4 C6 — cross-seam error attribution (R1 spike §1.4).
+                // Forward the markup-layer diagnostics into the expression
+                // ctx's errors with the JS->markup delegation marker. The
+                // markup-side diagnostics have slice-local spans; shift them.
+                if (trace.ctx.diagnostics !== undefined && trace.ctx.diagnostics !== null) {
+                    let i = 0;
+                    while (i < trace.ctx.diagnostics.length) {
+                        const d = trace.ctx.diagnostics[i];
+                        const absSpan = shiftBodyLocalSpan(d.span, sliceStart, ltSpan.line, ltSpan.col);
+                        const err = { code: d.code, message: d.message, span: absSpan };
+                        // Mark the delegation provenance: a JSToMarkup
+                        // frame at this `<` boundary. Downstream M5+ reads
+                        // this so the diagnostic's blame chain is visible.
+                        err.delegationFrame = {
+                            kind: "ElementValue",
+                            openSpan: ltSpan,
+                            via: "JSToMarkup",
+                        };
+                        ctx.errors.push(err);
+                        i = i + 1;
+                    }
+                }
+
+                // Advance the JS-layer token cursor past every token whose
+                // start lies BEFORE closeEnd in the source.
+                advancePastSourcePos(cursor, closeEnd);
+                const span = makeSpan(ltSpan.start, closeEnd, ltSpan.line, ltSpan.col);
+                return makeMarkupValue(trace.ctx.nodes.slice(0, 1), span);
+            }
+        }
+        // No close found — fall through to the token-range capture path
+        // for recovery (the markup-as-value never closed; record a
+        // diagnostic and capture what we can).
+        recordError(ctx, "E-MARKUP-VALUE-UNCLOSED",
+            "markup-as-value never closes: no matching '/>' or '</...>' found",
+            ltSpan);
+    }
+
+
+    // Source-unavailable / unclosed path — token-range capture (the
+    // BlockStub-shape fallback). Walk forward, tracking `<...>` depth via
+    // token kinds; the close is the GreaterThan that follows a self-closing
+    // `/` OR a `</` `Ident` `>` triple OR a `</` `>` triple.
+    const tokenStart = cursor.idx;
+    const startSpan = ltSpan;
+    advance(cursor);                              // consume the leading `<`
+    let tagDepth = 1;
+    let endSpan = startSpan;
+    while (atEnd(cursor) === false && tagDepth > 0) {
+        const k = currentKind(cursor);
+        if (k === TokenKind.LessThan) {
+            // Nested `<...>` — increment depth iff the next token is an
+            // Ident source-adjacent to this `<` (a nested markup opener
+            // — same shape isMarkupValueAhead checks). If next is `/`,
+            // this is a closer.
+            const here = current(cursor);
+            const after = peek(cursor, 1);
+            if (after !== undefined && after !== null && after.kind === TokenKind.Slash) {
+                // `</...>` — a closer.
+                tagDepth = tagDepth - 1;
+                advance(cursor);                  // consume `<`
+                advance(cursor);                  // consume `/`
+                // Optional Ident before `>`.
+                if (currentKind(cursor) === TokenKind.Ident) advance(cursor);
+                if (currentKind(cursor) === TokenKind.GreaterThan) {
+                    endSpan = advance(cursor).span; // consume `>`
+                }
+                continue;
+            }
+            if (after !== undefined && after !== null && after.kind === TokenKind.Ident
+                && here.span !== undefined && after.span !== undefined
+                && after.span.start === here.span.end) {
+                tagDepth = tagDepth + 1;
+                advance(cursor);                  // consume `<`
+                continue;
+            }
+            // Bare `<` inside the markup-value — count as nothing (e.g. a
+            // less-than appearing inside a `${...}` body inside the markup).
+            advance(cursor);
+            continue;
+        }
+        if (k === TokenKind.Slash) {
+            const after = peek(cursor, 1);
+            if (after !== undefined && after !== null && after.kind === TokenKind.GreaterThan) {
+                // Self-closing `/>` — element ends here.
+                advance(cursor);                  // consume `/`
+                endSpan = advance(cursor).span;   // consume `>`
+                tagDepth = tagDepth - 1;
+                continue;
+            }
+        }
+        if (k === TokenKind.GreaterThan && tagDepth === 1) {
+            // End of opener `>` is NOT the close of the element if the
+            // element is not self-closing — the children + closer follow.
+            // Without source we cannot reliably distinguish; conservatively
+            // consume and continue (the closer's `</...>` form will hit
+            // the LessThan-then-Slash branch above).
+            advance(cursor);
+            continue;
+        }
+        advance(cursor);
+    }
+    const tokenEnd = cursor.idx;
+    const span = makeSpan(startSpan.start, endSpan.end, startSpan.line, startSpan.col);
+    // Token-range capture — the markup is the unparsed token range
+    // (the BlockStub shape). A downstream consumer can re-parse it when
+    // the source is available; downstream M5+ is the normal path.
+    const markup = { kind: "MarkupTokenRange", tokens: cursor.tokens.slice(tokenStart, tokenEnd), tokenStart, tokenEnd, span };
+    return makeMarkupValue(markup, span);
+}
+
+// shiftMarkupBlockSpan — STATE write. Shift this markup-block's span from
+// slice-local to host-absolute (MK4 C6). Only the top-level block's span is
+// adjusted (the deeper children carry slice-local spans which downstream M5+
+// codegen re-derives).
+function shiftMarkupBlockSpan(block, hostStart, hostLine, hostCol) {
+    if (block === null || block === undefined) return;
+    if (block.span === undefined || block.span === null) return;
+    const local = block.span;
+    block.span = {
+        start: hostStart + (local.start ?? 0),
+        end:   hostStart + (local.end ?? 0),
+        line:  hostLine,
+        col:   hostCol,
+    };
+}
+
+// shiftBodyLocalSpan — calculation (pure). Translate a body-local span into
+// the host coordinate space (MK4 C6 — same shape as the markup-layer's
+// shiftSpan in parse-markup.js). Used by parseMarkupValue to shift the
+// markup-layer's slice-local diagnostic spans into the JS-layer's host
+// coordinate space before pushing them into ctx.errors.
+function shiftBodyLocalSpan(localSpan, hostStart, hostLine, hostCol) {
+    if (localSpan === undefined || localSpan === null) {
+        return { start: hostStart, end: hostStart, line: hostLine, col: hostCol };
+    }
+    return {
+        start: hostStart + (localSpan.start ?? 0),
+        end:   hostStart + (localSpan.end ?? 0),
+        line:  hostLine + ((localSpan.line ?? 1) - 1),
+        col:   ((localSpan.line ?? 1) === 1) ? hostCol + ((localSpan.col ?? 1) - 1) : (localSpan.col ?? 1),
+    };
+}
+
+// findMarkupValueCloseEndFromSource — calculation (pure). Source-string
+// walk: starting at the `<` of a markup-value opener, scan forward to find
+// the element's close (a `/>` self-close OR the matching `</tag>` /
+// `</>`). Returns the file-absolute offset ONE PAST the close, or -1 if
+// no close is found.
+//
+// Mechanism: an outer TagFrame-depth count over the source. The walk does
+// NOT need full markup-grammar knowledge — only the structural recognizers
+// (the same closed-set recognition tag-frame.js uses): a `<ident` /
+// `<UPPER` opens a nested tag (depth + 1); a `/>` closes a self-closer
+// (depth - 1); a `</...>` closes a paired tag (depth - 1). String literals
+// inside the markup ARE counted as opaque — a `<` inside `"..."` is text,
+// not a tag opener (SPEC §4.18.3). This walk uses parseMarkup directly to
+// leverage the markup engine's structural recognition + then reads the
+// resulting first-block's span.
+function findMarkupValueCloseEndFromSource(source, startPos) {
+    const tail = source.substring(startPos);
+    const trace = parseMarkupViaLazyRequire(tail);
+    if (trace === null || trace.ctx === undefined) return -1;
+    const blocks = trace.ctx.nodes;
+    if (blocks === null || blocks.length === 0) return -1;
+    // The first block is THIS element — its span.end is the element's
+    // close-end, RELATIVE to the `tail` slice. Add startPos to get the
+    // absolute offset.
+    const first = blocks[0];
+    if (first === undefined || first === null || first.span === undefined) return -1;
+    return startPos + first.span.end;
+}
+
+// parseMarkupViaLazyRequire — calculation (the markup block-stream + the
+// markup-layer diagnostics). A lazy import of parse-markup.js to avoid the
+// parse-expr -> parse-markup import cycle at module-init (parse-markup
+// imports parseExpr; parse-expr importing parseMarkup at top-level would
+// deadlock the ESM module-init). The lazy require runs at first-call time,
+// after both modules are loaded.
+//
+// MK4 C6 — uses parseMarkupTrace (not parseMarkup) so the markup-layer's
+// ctx is accessible. The caller (parseMarkupValue) FORWARDS the markup-
+// layer diagnostics into the expression ctx's errors with the JS->markup
+// delegation marker attached (R1 spike §1.4 — cross-seam error attribution).
+let _parseMarkupTraceCached = null;
+function parseMarkupViaLazyRequire(source) {
+    if (_parseMarkupTraceCached === null) {
+        try {
+            // eslint-disable-next-line global-require
+            const mod = require("./parse-markup.js");
+            _parseMarkupTraceCached = mod.parseMarkupTrace;
+        } catch (e) {
+            return null;
+        }
+    }
+    if (typeof _parseMarkupTraceCached !== "function") return null;
+    const trace = _parseMarkupTraceCached(source);
+    if (trace === null || trace === undefined) return null;
+    return trace;  // { ctx, contextTrace } where ctx.nodes is the block stream
+}
+
+// advancePastSourcePos — STATE write (cursor.idx advance). Move the JS-
+// layer token cursor forward until every consumed token's span.end lies
+// AT OR BEFORE `targetSourcePos`. Used by parseMarkupValue's source-
+// available path: after the markup-layer consumed the element from the
+// source, the JS-layer's token cursor must be advanced past every token
+// whose source range was inside the markup-value's extent.
+function advancePastSourcePos(cursor, targetSourcePos) {
+    while (atEnd(cursor) === false) {
+        const tok = current(cursor);
+        if (tok === undefined || tok === null) break;
+        if (tok.span === undefined || tok.span === null) {
+            advance(cursor);
+            continue;
+        }
+        if (tok.span.end > targetSourcePos) break;
+        advance(cursor);
+    }
 }
 
 // --- isQualifiedVariantColonAhead — is the cursor at a leading `::Variant`? ---

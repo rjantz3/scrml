@@ -108,6 +108,27 @@ ${
         return currentKind(cursor) == kind
     }
 
+    // previous — calculation (read): the token immediately BEFORE the
+    // cursor's position (the one most recently advance()'d past), or `not`
+    // at start-of-stream. Added at MK4 (R1 spike §1.2) — the JS->markup
+    // `<`-vs-`LessThan` discriminator (markupValueAllowedAfter) needs the
+    // prev-token kind to decide whether a `<` opens a markup value.
+    export fn previous(cursor) {
+        if (cursor.idx <= 0) return not
+        if (cursor.idx > cursor.tokens.length) return not
+        return cursor.tokens[cursor.idx - 1]
+    }
+
+    // previousKind — calculation (read): the kind of the previous token,
+    // or `not` for start-of-stream. markupValueAllowedAfter treats `not` /
+    // undefined as a value-following position (start-of-body is a legal
+    // markup-value position).
+    export fn previousKind(cursor) {
+        const tok = previous(cursor)
+        if (tok is not) return not
+        return tok.kind
+    }
+
     // isKindAt — calculation (predicate): is the token at `idx + k` of `kind`?
     export fn isKindAt(cursor, k, kind) {
         return peekKind(cursor, k) == kind

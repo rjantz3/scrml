@@ -51,7 +51,7 @@ Markup layer:        MK1 → MK2 → MK3 → MK4 ─┘
 | **MK1** | Markup | Markup scanner — `BlockContext` engine + context-grid boundaries | 20-45h |
 | MK2 | Markup | `TagFrame` engine — `<tag>` tree, 3 closer forms, `TagKind` | 25-55h |
 | MK3 | Markup | `BodyMode` + `DisplayTextLiteral` — §4.18 native quoted-text | 18-38h |
-| MK4 | Markup | Markup↔JS seam; re-tokenizer scaffolding deletion | 27-46h (R1-tightened) |
+| MK4 | Markup | Markup↔JS seam; re-tokenizer scaffolding deletion | ✅ COMPLETE (S114) |
 | M5 | Both | Pipeline swap behind `--parser=scrml-native` + canary | 16-36h |
 | M6 | Both | Joint retirement — BS + Acorn + BPP deleted; flag retired | 12-28h |
 
@@ -279,6 +279,39 @@ JS-layer files (M*).
 
 ---
 
+### §3.5 MK4 — markup↔JS seam (✅ COMPLETE S114 — MK4.1 + MK4.2 + MK4.3)
+
+The R1 spike's seam contract (§3) is the load-bearing input. MK4 lands the
+markup→JS delegate-down + the JS→markup delegate-up + cross-seam error rules + the
+deep-nesting smoke test. The re-tokenizer scaffolding deletion (P10) at the
+native-parser level is a no-op verification (zero such imports in
+`compiler/native-parser/`); the actual `compiler/src/` deletion is M6 (joint
+retirement) per the dispatch's out-of-scope framing.
+
+| Sub-step | Scope | Estimate | Depends on |
+|---|---|---|---|
+| **MK4.1** | Seam implementation — both directions. C1: parse-seam.{scrml,js} substrate. C2: markup→JS delegate-down (LogicEscape body parses to Stmt[] via parseProgram; bodyText + body attached to the block). C3: JS→markup delegate-up (MarkupValue ExprKind + parsePrimary LessThan branch via markupValueAllowedAfter + parseMarkupValue). C4: §4.18.4 deep-stack (parseInterpolationBody source-aware; parseProgram(tokens, source) threaded so the JS layer in a logic-escape body can recognize markup-as-value). | 12-22h | M3, M4, MK3 |
+| **MK4.2** | Re-tokenizer scaffolding deletion verification. C5: grep'd native-parser/ for old-scaffolding imports — zero. The src/ deletions are M5/M6 (the dispatch's documented framing). | 0h (no-op) | MK4.1 |
+| **MK4.3** | Cross-seam error rules + deep-nesting smoke + conformance close. C6: parseMarkupValue forwards markup-layer diagnostics into the expression ctx.errors with a JSToMarkup delegation marker (`err.delegationFrame = { kind: "ElementValue", openSpan, via: "JSToMarkup" }`). The markup→JS direction's attribution was wired at C2 (`diag.delegationFrame` on every JS-layer error forwarded into ctx.diagnostics). C7: deep-nesting smoke (MK4 §65/§66 in parser-conformance-markup.test.js — peak delegation depth + zero diagnostics on the canonical worked example). C8: .scrml corpus promotion to Tier 1+2 strict left in its current SMOKE-only form — the histogram already dropped 90%+ as a side effect of C3+C4 (clean 3 → 535 of 1000; E-EXPR-UNEXPECTED 14858 → 1470); the explicit promotion is M5+ scope. | 3-6h | MK4.1 |
+
+**MK4 milestone gate (met S114):**
+- the seam contract (R1 spike §3) is honored — DelegationFrames push/pop on the
+  shared ctx.delegationStack across both directions;
+- §4.18.4 deep-stack parses end-to-end with zero diagnostics at delegation depth >= 5;
+- cross-seam error attribution is wired both directions (markup→JS via
+  diag.delegationFrame; JS→markup via err.delegationFrame.via = "JSToMarkup");
+- the re-tokenizer scaffolding deletion verification surfaced no anomaly — the
+  native parser is self-contained; the src/ deletions are M5/M6;
+- full suite 17,808 → 17,842 / 0 fail / 173 skip / 1 todo.
+
+**Carry-forward — R1 spike vs actual TokenKind discrepancy:** the R1 spike §1.2
+prev-token set sketched `renders` (plural). The actual `TokenKind` catalog has only
+`KwRender` (singular — the L3-locked canonical form; `token.scrml:201` / `:123`).
+`KwRender` is in the discriminator set; the plural "renders" is NOT. Surfaced as
+an MK4 anomaly + verified during C3.
+
+---
+
 ### §3.4 M4 — full bounded JS subset (DECOMPOSED S113 — DISPATCH-READY)
 
 **Decomposed S113** (PA, from S98 DD D5 the MUST-PARSE/MUST-ADD lists + D7 M4 gating +
@@ -321,8 +354,16 @@ gating; the parse-layer re-compositions are correct + verified).
   above. (Blocked-precondition OQ-2/R3 §4.18.1/§40.8 program-body mode was RESOLVED S111
   `78faa65` — `default-logic` is a distinct THIRD body-mode; MK2 honors all three modes.)
 - **MK3 — `BodyMode` + `DisplayTextLiteral`** — ✅ DECOMPOSED S113 into MK3.1 / MK3.2 / MK3.3; see §3.3 above.
-- **MK4 — markup↔JS seam.** Lift R1 spike §3 as the contract; punch-list P8/P9/P10/P11
-  (incl. the deep-nesting smoke test). Re-tokenizer scaffolding deleted. Needs M3/M4.
+- **MK4 — markup↔JS seam** — ✅ COMPLETE S114 (MK4.1 + MK4.2 + MK4.3 landed). The
+  markup↔JS seam contract per R1 spike §3 is honored: DelegationFrames push/pop on
+  ctx.delegationStack at every markup→JS body (LogicEscape MK1.2 substrate + MK4
+  body-parse); the JS→markup direction is wired in parsePrimary's LessThan branch via
+  markupValueAllowedAfter (R1 spike §1.2). §4.18.4 deep-stack reaches delegation depth
+  >= 5 with zero diagnostics (R1 spike P11 smoke). Cross-seam error attribution
+  (R1 spike §1.4 / P9) attaches the delegation frame to forwarded diagnostics in both
+  directions. Re-tokenizer scaffolding deletion is M5/M6 (the actual src/ files
+  `engine-statechild-parser.ts` + `body-pre-parser.ts` stay until the joint retirement
+  — the native-parser side has zero imports from them; MK4.2 was a verification step).
 - **M5 — pipeline swap behind `--parser=scrml-native`** + canary soak.
 - **M6 — joint retirement.** Delete BS + Acorn + BPP + re-tokenizer scaffolding; retire
   the flag; native parser self-hosts its own `.scrml` source (charter Q8).
@@ -406,6 +447,9 @@ within one quarter.
 | **M4.1** async / generator (await/yield operators, function*) | ✅ landed S113 | scrml-js-codegen-engineer (worktree) | S113 | await/yield/yield* as expression operators (`inAsync`/`inGenerator` ctx slots — NOT a ParseMode variant); `function*` expr + object-method generator wiring; Await/Yield promoted into `ast-expr` ExprKind; +106 tests; full suite 17,812/0. |
 | **M4.2** destructuring unification (K6) + noIn | ✅ landed S114 | scrml-js-codegen-engineer (worktree) | S114 | K6 — parseParamTarget builds REAL ObjectPattern/ArrayPattern binding nodes; toBindingPattern transform on non-decl for-in/of LHS; `noIn` flag threaded into M2's binary climber (parseBinary skips KwIn when noIn=true); +K9 (markup-layer circular import) resolved in flight. Full suite 17,831/0. |
 | **M4.3** full-corpus conformance + Tier 1-4 + residual D5 + async/await RETRACTION | ✅ landed S114 | scrml-token-and-ast-engineer (worktree) | S114 | **Thread A** — async/await RETRACTED at language level (E-ASYNC-NOT-IN-SCRML / E-AWAIT-NOT-IN-SCRML / E-FOR-AWAIT-NOT-IN-SCRML); `inAsync` ctx slot removed; `Await` ExprKind retired; generators (`yield`/`yield*`/`function*`) PRESERVED. **Thread B** — parser-conformance-corpus.test.js: bench corpus (12 fixtures) parses cleanly at raw source (preprocessForAcorn-NOT-NEEDED bound closed); .scrml corpus (~1000 files) smoke-passes (no-throw discipline). Bench async/await/null fixtures scrubbed. Full suite 17,786/0 (Thread A intermediate 17,769; Thread B final 17,786). **M4 MILESTONE COMPLETE.** |
-| MK4 / M5 / M6 | ⬜ pending | — | — | decompose when scheduled (§3) |
+| **MK4.1** seam implementation (C1-C4) | ✅ landed S114 | scrml-token-and-ast-engineer (worktree) | S114 | parse-seam.{scrml,js} substrate + LogicEscape body parses to Stmt[] (markup→JS delegate-down) + MarkupValue ExprKind + parsePrimary LessThan discriminator (JS→markup delegate-up) + §4.18.4 deep-stack via source-aware parseInterpolationBody. +6 MK4 §63 markup tests + +19 MK4 §1-§4 expr tests. |
+| **MK4.2** scaffolding-deletion verification (C5) | ✅ landed S114 (no-op) | scrml-token-and-ast-engineer (worktree) | S114 | grep'd compiler/native-parser/ for imports from compiler/src/parsers/* / body-pre-parser.* — ZERO. The native parser is self-contained; the src/ deletions are M5/M6 per the dispatch's framing. |
+| **MK4.3** cross-seam errors + deep-nesting smoke + conformance close (C6-C8) | ✅ landed S114 | scrml-token-and-ast-engineer (worktree) | S114 | cross-seam error attribution wired both directions (markup→JS via diag.delegationFrame; JS→markup via err.delegationFrame.via = "JSToMarkup"); +2 MK4 §5 expr tests; +5 MK4 §64-§65 + §66 markup tests covering the spike's punch-list P11 deep-nesting smoke. The .scrml corpus histogram dropped 90%+ as a side effect of C3+C4 — explicit Tier 1+2 promotion is M5+ scope. Full suite 17,808 → 17,842 / 0 fail / 173 skip / 1 todo. **MK4 MILESTONE COMPLETE.** |
+| M5 / M6 | ⬜ pending | — | — | M5 = pipeline swap behind `--parser=scrml-native`; M6 = joint retirement |
 
 **Legend:** ⬜ pending · ⏳ in flight · ✅ complete · 🟥 blocked
