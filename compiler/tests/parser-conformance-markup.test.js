@@ -70,7 +70,12 @@ import {
     scanCodeDefaultRunExtent,
     isValidCodeRun,
 } from "../native-parser/parse-markup.js";
-import { makeParseContext, delegationDepth } from "../native-parser/parse-ctx.js";
+import { makeParseContext } from "../native-parser/parse-ctx.js";
+// K9 (S114) — DelegationFrame surface moved to delegation-frame.js
+// (delegationDepth + topDelegationFrame; see the delegation-frame.js
+// header for the K9 cycle-break rationale). parse-ctx.js no longer
+// re-exports them — single source of truth.
+import { delegationDepth } from "../native-parser/delegation-frame.js";
 import { makeCursor, isEof, advance } from "../native-parser/cursor.js";
 import { depth as bracketDepth } from "../native-parser/bracket-stack.js";
 // MK2.1 — the TagFrame <tag>-tree engine + the TagKind calculation.
@@ -165,7 +170,7 @@ import { blockKinds } from "../native-parser/parse-ctx.js";
 // MK3.1 — the markup-tag dispatch + the TagFrame-stack helpers the
 // body-mode establishment + P7 tests drive.
 import { dispatchInMarkupTag } from "../native-parser/parse-markup.js";
-import { topDelegationFrame } from "../native-parser/parse-ctx.js";
+import { topDelegationFrame } from "../native-parser/delegation-frame.js";
 
 // The MK1.3 conformance ORACLE — the current heuristic block-splitter
 // (compiler/src/block-splitter.js). The native markup block-stream is
@@ -1444,10 +1449,24 @@ describe("MK2.1 opener-tokenizer scan helpers", () => {
         expect(tagFrameIsTagNameChar("")).toBe(false);
     });
 
-    test("parse-markup's isTagNameChar re-export is the same fn (single source)", () => {
-        // parse-markup.js re-exports isTagNameChar from tag-frame.js — MK2.1
-        // made tag-frame the canonical home of the tag-name grammar.
-        expect(isTagNameChar).toBe(tagFrameIsTagNameChar);
+    test("parse-markup's isTagNameChar matches tag-frame's (behavioral parity)", () => {
+        // parse-markup.js's isTagNameChar mirrors tag-frame.js's canonical
+        // predicate body 1:1 — K9 (S114) inlined the body in both .scrml
+        // and .js shadows because the prior aliased-re-export form
+        // (`export { isTagNameChar } from "./tag-frame.js"` in .js,
+        // `import { isTagNameChar as tagNameCharCanonical }` in .scrml)
+        // tripped E-SCOPE-001 in the v0.3 compiler (SPEC §21 — aliasing
+        // requires quoted-name imports). The single-source-of-truth
+        // property is now documented via comments at both sites + this
+        // behavioral parity test (function-identity check is no longer
+        // possible, but exhaustive char-class parity is).
+        const probe = [
+            "a", "z", "A", "Z", "0", "9", "-", "_", "+", " ", "\t",
+            "\n", "<", ">", "/", "=", '"', "'", "$", "!", "?", "", "ä",
+        ];
+        for (const ch of probe) {
+            expect(isTagNameChar(ch)).toBe(tagFrameIsTagNameChar(ch));
+        }
     });
 
     test("isOpenerWhitespace — space / tab / CR / LF", () => {

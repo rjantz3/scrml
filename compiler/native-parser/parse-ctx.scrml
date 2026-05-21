@@ -295,111 +295,21 @@ ${
     }
 
     // -------------------------------------------------------------------
-    // DelegationKind / CloseCondition tag tables — the canonical enum
-    // variants surfaced as values so MK1.2+ and MK4 can name them. These
-    // are data, not state.
+    // DelegationKind / CloseCondition tag tables + the DelegationFrame
+    // constructor + the delegationStack helpers (push / pop / top / depth /
+    // inDelegation) moved to delegation-frame.scrml at K9 (S114). The
+    // surface lived here originally; block-context.scrml's need to import
+    // it (for the §51.0.Q.1 inner-instance push at every open block-
+    // context that delegates to a JS layer) created a
+    // `block-context.scrml -> parse-ctx.scrml -> block-context.scrml`
+    // import cycle (E-IMPORT-002). Per the E-IMPORT-002 remedy the
+    // shared surface moved to a LEAF module (delegation-frame.scrml,
+    // zero native-parser imports) — mirrors K2's char-classify break
+    // (S113, commit 3f3418a). See delegation-frame.scrml's header for
+    // the full rationale.
+    //
+    // Consumers (block-context, the conformance harness, MK4) now import
+    // from "./delegation-frame.scrml" directly. parse-ctx.scrml does NOT
+    // re-export — there is exactly one source of truth.
     // -------------------------------------------------------------------
-
-    // delegationKinds — the seven DelegationKind variant tags.
-    export fn delegationKinds() {
-        return {
-            LogicEscape:   "LogicEscape",
-            FunctionBody:  "FunctionBody",
-            AttrExpr:      "AttrExpr",
-            ShorthandBody: "ShorthandBody",
-            MetaBody:      "MetaBody",
-            Interpolation: "Interpolation",
-            ElementValue:  "ElementValue",
-        }
-    }
-
-    // closeConditionKinds — the four CloseCondition variant tags. The
-    // payload-bearing ones (BraceDepth, TagFrameBalanced) carry their
-    // payload via the constructors below.
-    export fn closeConditionKinds() {
-        return {
-            BraceDepth:       "BraceDepth",
-            TagFrameBalanced: "TagFrameBalanced",
-            AttrTerminator:   "AttrTerminator",
-            ShorthandEol:     "ShorthandEol",
-        }
-    }
-
-    // -------------------------------------------------------------------
-    // CloseCondition constructors — CALCULATION (pure fns building a
-    // tagged data record). The payload-bearing variants carry their
-    // depth datum; the bare variants carry only the tag.
-    // -------------------------------------------------------------------
-
-    // closeOnBraceDepth — CloseCondition.BraceDepth(depthAtOpen). Close
-    // at the `}` that returns the BracketStack to depthAtOpen — M1's
-    // template-interp close mechanism.
-    export fn closeOnBraceDepth(depthAtOpen) {
-        return { kind: "BraceDepth", depthAtOpen }
-    }
-
-    // closeOnTagFrameBalanced — CloseCondition.TagFrameBalanced(...). The
-    // JS→markup direction's close datum (MK2 supplies the tag depth).
-    export fn closeOnTagFrameBalanced(tagDepthAtOpen) {
-        return { kind: "TagFrameBalanced", tagDepthAtOpen }
-    }
-
-    // closeOnAttrTerminator — CloseCondition.AttrTerminator (bare).
-    export fn closeOnAttrTerminator() {
-        return { kind: "AttrTerminator" }
-    }
-
-    // closeOnShorthandEol — CloseCondition.ShorthandEol (bare).
-    export fn closeOnShorthandEol() {
-        return { kind: "ShorthandEol" }
-    }
-
-    // -------------------------------------------------------------------
-    // makeDelegationFrame — CALCULATION (pure fn building the
-    // DelegationFrame data struct). One frame on ctx.delegationStack.
-    // -------------------------------------------------------------------
-    export fn makeDelegationFrame(kind, closeOn, openSpan, bodyMode) {
-        return { kind, closeOn, openSpan, bodyMode }
-    }
-
-    // -------------------------------------------------------------------
-    // delegationStack helpers — STATE writes / reads on
-    // ctx.delegationStack. The push/pop ARE the §51.0.Q.1 "outer enters
-    // composite → inner engine initializes / outer exits → inner engine
-    // suspends" events, exactly as M1's pushTemplateFrame / popTemplateFrame
-    // are for the template-interp inner engine. MK4 drives these for the
-    // real markup↔JS delegation; MK1.1 provides them as the substrate.
-    // -------------------------------------------------------------------
-
-    // pushDelegationFrame — STATE write: a delegation opens.
-    export fn pushDelegationFrame(ctx, frame) {
-        ctx.delegationStack.push(frame)
-    }
-
-    // popDelegationFrame — STATE write: a delegation closes. Returns the
-    // popped frame, or `not` if the stack was empty (caller dispatches
-    // ErrorRecovery — an unbalanced close).
-    export fn popDelegationFrame(ctx) {
-        if (ctx.delegationStack.length == 0) return not
-        return ctx.delegationStack.pop()
-    }
-
-    // topDelegationFrame — CALCULATION (peek). The frame whose close
-    // condition the cursor is currently watching for.
-    export fn topDelegationFrame(ctx) {
-        if (ctx.delegationStack.length == 0) return not
-        return ctx.delegationStack[ctx.delegationStack.length - 1]
-    }
-
-    // delegationDepth — CALCULATION (read). How many delegation frames
-    // are live. The R1 spike's deep-nesting smoke test (punch-list P11)
-    // asserts on this reaching 5+.
-    export fn delegationDepth(ctx) {
-        return ctx.delegationStack.length
-    }
-
-    // inDelegation — CALCULATION (predicate). Is any delegation live?
-    export fn inDelegation(ctx) {
-        return ctx.delegationStack.length > 0
-    }
 }

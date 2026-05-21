@@ -185,7 +185,13 @@ ${
         reportUnterminatedTags,
         classifyTagFrame,
     } from "./tag-frame.scrml"
-    import { isTagNameChar as tagNameCharCanonical } from "./tag-frame.scrml"
+    // K9 (S114) — the `isTagNameChar as tagNameCharCanonical` aliased
+    // import was the second E-SCOPE-001 trigger here (the v0.3 compiler
+    // binds unquoted-name `import {x}` literally; SPEC §21 only quoted-
+    // name `import {"X" as alias}` supports aliasing). Inlined below;
+    // the local isTagNameChar carries the predicate body directly (cf.
+    // tag-frame.scrml's isTagNameChar — kept 1:1 with the canonical
+    // tag-name grammar).
     // MK3.3 — the §4.18 code-default body dispatch. In a code-default body
     // (an engine state-child / match-arm / `:`-shorthand body —
     // currentBodyMode CodeDefault) a `"` begins a DisplayTextLiteral; a
@@ -1044,11 +1050,23 @@ ${
     // isTagNameChar — CALCULATION (predicate). A character that may
     // continue a markup-tag name run: ASCII letter, ASCII digit, or `-`.
     // MK2.1 made tag-frame.scrml the canonical home of the tag-name
-    // grammar; this is a thin delegation so existing importers of
-    // parse-markup.scrml's isTagNameChar (the MK1.2 conformance suite)
-    // keep a single source of truth.
+    // grammar; the canonical body lives in tag-frame.scrml's
+    // isTagNameChar. This file re-exports the predicate so existing
+    // importers (parser-conformance-markup.test.js, MK1.2 suite) keep
+    // a single binding. K9 (S114): the previous form re-exported via an
+    // aliased import (`import { isTagNameChar as tagNameCharCanonical }`)
+    // which tripped E-SCOPE-001 — the v0.3 compiler binds unquoted-name
+    // imports literally per SPEC §21. The body is INLINED here (held
+    // 1:1 with tag-frame.scrml's predicate); if the canonical grammar
+    // ever changes, update BOTH sites.
     export fn isTagNameChar(ch) {
-        return tagNameCharCanonical(ch)
+        if (ch == "") return false
+        if (ch == "-") return true
+        const c = ch.charCodeAt(0)
+        if (c >= 48 && c <= 57) return true
+        if (c >= 65 && c <= 90) return true
+        if (c >= 97 && c <= 122) return true
+        return false
     }
 
     // openBrace / closeBraceChar — CALCULATION (pure fns). The one-

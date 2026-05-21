@@ -117,19 +117,26 @@ ${
     import { LexMode } from "./lex-mode.scrml"
     import { peekChar, peekStr, advance } from "./cursor.scrml"
     import { makeSpan } from "./span.scrml"
+    // K9 (S114) — de-aliased per SPEC §21: the v0.3 compiler binds
+    // unquoted-name `import {x}` literally; aliasing requires the
+    // quoted-name form. Call sites below renamed: pushBracket -> push,
+    // popBracket -> pop, bracketDepth -> depth.
     import {
-        push as pushBracket,
-        pop as popBracket,
-        depth as bracketDepth,
+        push,
+        pop,
+        depth,
         BracketKind,
     } from "./bracket-stack.scrml"
+    // K9 (S114) — moved from "./parse-ctx.scrml" to break the
+    // block-context.scrml <-> parse-ctx.scrml circular import. See
+    // delegation-frame.scrml's header for the K9 rationale (mirrors K2).
     import {
         delegationKinds,
         closeOnBraceDepth,
         makeDelegationFrame,
         pushDelegationFrame,
         popDelegationFrame,
-    } from "./parse-ctx.scrml"
+    } from "./delegation-frame.scrml"
     // MK3.1 — the §4.18 BodyMode engine.
     //   - `BodyMode` (the enum) RESOLVES the `<engine for=BodyMode>`
     //     forward-reference inside the .InMarkupTag composite state-child
@@ -470,7 +477,7 @@ ${
             cursor.col,
         )
 
-        const depthAtOpen = bracketDepth(ctx.brackets)
+        const depthAtOpen = depth(ctx.brackets)
 
         // Consume the two sigil characters.
         advance(cursor, sigil.length)
@@ -478,7 +485,7 @@ ${
         // Push a Brace frame for the sigil's brace — inner braces nest
         // against this same stack so the matching close is a pure depth
         // calculation.
-        pushBracket(
+        push(
             ctx.brackets,
             BracketKind.Brace,
             makeSpan(openSpan.start + 1, openSpan.start + 2, openSpan.line, openSpan.col),
@@ -571,7 +578,7 @@ ${
         if (frame is not) return false
         if (frame.depthAtOpen < 0) return false
         if (peekChar(cursor, 0) != closingBrace()) return false
-        return bracketDepth(ctx.brackets) == frame.depthAtOpen + 1
+        return depth(ctx.brackets) == frame.depthAtOpen + 1
     }
 
     // closingBrace — CALCULATION (pure fn). The one-character closing
@@ -600,7 +607,7 @@ ${
 
         // Pop the sigil brace's frame — ctx.brackets depth returns to
         // frame.depthAtOpen.
-        popBracket(ctx.brackets)
+        pop(ctx.brackets)
 
         // Punch-list P3 — closing .InLogicEscape pops the DelegationFrame.
         if (frame.context == BlockContext.InLogicEscape) {
@@ -621,7 +628,7 @@ ${
     // noteBraceOpen — STATE write. Push a Brace frame for an ordinary
     // open brace in a block-context body.
     export fn noteBraceOpen(ctx, cursor) {
-        pushBracket(
+        push(
             ctx.brackets,
             BracketKind.Brace,
             makeSpan(cursor.pos, cursor.pos + 1, cursor.line, cursor.col),
@@ -632,7 +639,7 @@ ${
     // close brace in a block-context body (a close brace that is NOT the
     // context's matching close — isBlockContextClose returned false).
     export fn noteBraceClose(ctx) {
-        popBracket(ctx.brackets)
+        pop(ctx.brackets)
     }
 
     // =====================================================================

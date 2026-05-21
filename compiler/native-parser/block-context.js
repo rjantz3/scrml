@@ -29,19 +29,26 @@
 
 import { peekChar, peekStr, advance } from "./cursor.js";
 import { makeSpan } from "./span.js";
+// K9 (S114) — de-aliased to mirror the .scrml import form (SPEC §21:
+// unquoted-name `import {x}` binds literally; aliasing requires the
+// quoted-name form). Call sites below renamed: pushBracket -> push,
+// popBracket -> pop, bracketDepth -> depth.
 import {
-    push as pushBracket,
-    pop as popBracket,
-    depth as bracketDepth,
+    push,
+    pop,
+    depth,
     BracketKind,
 } from "./bracket-stack.js";
+// K9 (S114) — moved from "./parse-ctx.js" to break the
+// block-context.js <-> parse-ctx.js circular import. See
+// delegation-frame.js header for the K9 rationale (mirrors K2).
 import {
     delegationKinds,
     closeOnBraceDepth,
     makeDelegationFrame,
     pushDelegationFrame,
     popDelegationFrame,
-} from "./parse-ctx.js";
+} from "./delegation-frame.js";
 // MK3.1 — punch-list P7: thread the §4.18 body mode into every markup->JS
 // DelegationFrame. currentBodyMode reads the innermost open TagFrame's
 // bodyMode payload (a plain ctx data field — no tag-frame.js import, so
@@ -245,7 +252,7 @@ export function enterBlockContext(ctx, cursor, context, sigil) {
         cursor.col,
     );
 
-    const depthAtOpen = bracketDepth(ctx.brackets);
+    const depthAtOpen = depth(ctx.brackets);
 
     // Consume the two sigil characters.
     advance(cursor, sigil.length);
@@ -253,7 +260,7 @@ export function enterBlockContext(ctx, cursor, context, sigil) {
     // Push a Brace frame for the sigil's `{`. The `{` is a real brace; inner
     // `{`/`}` push/pop against this same stack so the matching close is a
     // pure depth calculation.
-    pushBracket(
+    push(
         ctx.brackets,
         BracketKind.Brace,
         makeSpan(openSpan.start + 1, openSpan.start + 2, openSpan.line, openSpan.col),
@@ -354,7 +361,7 @@ export function isBlockContextClose(ctx, cursor) {
     if (frame === null) return false;
     if (frame.depthAtOpen < 0) return false;
     if (peekChar(cursor, 0) !== closingBrace()) return false;
-    return bracketDepth(ctx.brackets) === frame.depthAtOpen + 1;
+    return depth(ctx.brackets) === frame.depthAtOpen + 1;
 }
 
 // closingBrace — calculation. The one-character closing brace string.
@@ -390,7 +397,7 @@ export function closeBlockContext(ctx, cursor) {
 
     // Pop the sigil `{`'s Brace frame — ctx.brackets depth returns to
     // frame.depthAtOpen.
-    popBracket(ctx.brackets);
+    pop(ctx.brackets);
 
     // Punch-list P3 — closing .InLogicEscape pops the DelegationFrame.
     if (frame.context === BlockContext.InLogicEscape) {
@@ -412,7 +419,7 @@ export function closeBlockContext(ctx, cursor) {
 // block-context body. The caller has already verified the char is `{` and
 // is NOT a block-opener sigil's `{`.
 export function noteBraceOpen(ctx, cursor) {
-    pushBracket(
+    push(
         ctx.brackets,
         BracketKind.Brace,
         makeSpan(cursor.pos, cursor.pos + 1, cursor.line, cursor.col),
@@ -423,7 +430,7 @@ export function noteBraceOpen(ctx, cursor) {
 // block-context body (a `}` that is NOT the context's matching close —
 // isBlockContextClose returned false for it).
 export function noteBraceClose(ctx) {
-    popBracket(ctx.brackets);
+    pop(ctx.brackets);
 }
 
 // ===========================================================================

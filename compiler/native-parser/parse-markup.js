@@ -884,10 +884,23 @@ export function handleCloser(run, cursor, ctx) {
 
 // isTagNameChar — calculation (predicate). A character that may continue a
 // markup-tag name run: ASCII letter, ASCII digit, or `-`. MK2.1 made
-// tag-frame.js the canonical home of the tag-name grammar; this is a
-// re-export so existing importers of parse-markup.js's isTagNameChar (the
-// MK1.2 conformance suite) keep a single source of truth.
-export { isTagNameChar } from "./tag-frame.js";
+// tag-frame.js the canonical home of the tag-name grammar; this file's
+// isTagNameChar mirrors that canonical body 1:1 so existing importers
+// (parser-conformance-markup.test.js, MK1.2 suite) keep a single
+// binding. K9 (S114): the .scrml form inlines the body (the previous
+// `import { isTagNameChar as tagNameCharCanonical }` aliased import
+// tripped E-SCOPE-001 — SPEC §21); the .js shadow inlines too so the
+// pair stays 1:1. If the canonical grammar ever changes, update BOTH
+// this file and tag-frame.js (.scrml + .js).
+export function isTagNameChar(ch) {
+    if (ch === "") return false;
+    if (ch === "-") return true;
+    const c = ch.charCodeAt(0);
+    if (c >= 48 && c <= 57) return true;
+    if (c >= 65 && c <= 90) return true;
+    if (c >= 97 && c <= 122) return true;
+    return false;
+}
 
 // openBrace / closeBraceChar — calculation. The one-character open / close
 // brace strings. Mirror the .scrml's String.fromCharCode form 1:1 — the
