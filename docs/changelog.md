@@ -2,7 +2,35 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-20 **S112 CLOSE** — the charter-B native-parser implementation arc opened: 6 sub-steps landed in one work-horse session — M2.1 + M2.2 + M2.3 (the JS expression parser: substrate / operators / call-member-arrow-heads) + MK1.1 + MK1.2 + MK1.3 (the markup BlockContext engine — COMPLETE) — all in `compiler/native-parser/`, shipped alongside the live pipeline; no `compiler/src/` changed). Full `bun test compiler/tests/` **16,840 pass / 169 skip / 1 todo / 0 fail / 730 files / 49,417 expect**; pre-commit subset **13,362 pass / 88 skip / 1 todo / 0 fail**. Delta vs S111 close (16,213 / 728 / 47,333): **+627 pass / +2 files / +2,084 expect / 0 fail / 0 regressions** — all +627 are native-parser conformance tests (M2.1 +114, M2.2 +212, M2.3 +191, MK1.2 +45, MK1.3 +65).
+Current baseline (2026-05-21 **S113 CLOSE** — the charter-B native-parser implementation arc run hard: 13 dispatches landed across one session — M2.4 (M2 ladder complete) + the MK2 ladder (MK2.1-MK2.3) + the M3 ladder (M3.1-M3.4) + the MK3 ladder (MK3.1-MK3.3) + the M1.x cleanup cluster (K2 resolved) + M4.1 — all in `compiler/native-parser/`, alongside the live pipeline; no `compiler/src/` changed. **Four milestones completed: M2, M3, MK2, MK3.**) Full `bun test` **17,812 pass / 169 skip / 1 todo / 0 fail / 731 files / 52,503 expect**; pre-commit subset **13,362 pass / 88 skip / 1 todo / 0 fail**. Delta vs S112 close (16,840 / 730 / 49,417): **+972 pass / +1 file / +3,086 expect / 0 fail / 0 regressions** — all native-parser conformance tests.
+
+### 2026-05-21 (S113 CLOSE — native-parser arc run hard: M2/M3/MK2/MK3 complete, M4.1 + K2; 13 dispatches)
+
+**Session shape.** A work-horse session — the charter-B native-parser implementation arc run across 5 parallel rounds + finishers. **13 dispatches landed, 0 regressions; four milestones completed — M2, M3, MK2, MK3.** Everything ships in `compiler/native-parser/` alongside the live pipeline (the BS + Acorn swap is M5/M6, far off); no `compiler/src/` changed. Full `bun test` 16,840 → **17,812 / 0 fail** (+972 conformance tests).
+
+**The JS chain — M1 → M2 → M3 complete, M4.1 landed.**
+- **M2.4** (`17e1099`) — JS scrml-extension expression forms (bare variants, the `is`-predicate family, `not`/`match`/`~`/`?{}`/`<#id>`/`render`/`lift`/`fail`/`::Variant`); the M2 gating met — a regression test per the 9 `preprocessForAcorn` Acorn-workaround classes. M2 ladder complete.
+- **M3.1** (`dcb61b8`) — statement-parser substrate: `ast-stmt` + `parse-stmt` + declarations + block/expr/empty statements + the `BlockStub` re-entry mechanism.
+- **M3.2** (`d0cffc5`) — control-flow statements (`if`/`while`/`for`/`for-in`/`for-of`/`return`/`break`/`continue`/labels).
+- **M3.3** (`3524e69b`) — functions/classes + in-line bodies (`body-pre-parser.ts` subsumed by construction) + import/export + try/throw. Found + fixed K7 — an M1-lexer prototype-pollution bug.
+- **M3.4** (`f113259d`) — ErrorRecovery-engine panic-mode resync + return-legality. **M3 milestone complete.**
+- **M4.1** (`905d8c51`) — async/generator: `await`/`yield`/`yield*` as expression operators (`inAsync`/`inGenerator` scope slots), `function*` wiring.
+
+**The markup chain — MK1 → MK2 → MK3 complete.**
+- **MK2.1** (`226797c`) — the `TagFrame` engine skeleton + opener recognition + the `TagKind` calc.
+- **MK2.2** (`86f818c`) — the 3 closer forms + tag-tree pairing + mismatch recovery; the D-4 `<tag>`-tree divergence resolved.
+- **MK2.3** (`e5ed5c7`) — `TagKind`-driven classification + punch-list P4/P5. **MK2 milestone complete** — all 5 BS classifier heuristics demonstrably eliminated.
+- **MK3.1** (`0ef46230`) — the `BodyMode` engine + the `DisplayTextLiteral` skeleton; resolved K1.
+- **MK3.2** (`060fd0be`) — `DisplayTextLiteral` literal scanning (`"..."` + escapes + verbatim whitespace).
+- **MK3.3** (`1a51286c`) — `${...}` interpolation + `E-UNQUOTED-DISPLAY-TEXT` (§4.18.7). **MK3 milestone complete** — SPEC §4.18 quoted-text natively implemented.
+
+**The M1.x cleanup cluster** (`3f3418a0`) — **K2 resolved**: the `lex-in-code`↔`lex-in-regex` circular import (the must-precede-M6 blocker) fixed via a new `char-classify` leaf module — the lex files compile 0-error (was 7). M1.5 found already-shipped (S102). The K2-gating sweep surfaced K9 (a markup-layer twin of K2) + K10 (a one-line `ast-expr.scrml` `!= not` defect).
+
+**The roadmap** (`docs/changes/native-parser-front-end/IMPLEMENTATION-ROADMAP.md`) — MK2/M3/MK3/M4 each decomposed into a per-sub-step §3.1-§3.4 section as its turn came; §5 progress tracker current; §4.4 K-ledger now K1-K10 (K1/K2/K7 resolved).
+
+**Process.** The `--no-verify` brief gap (two agents hit a coupled-code+test red-window bind) found + fixed — the dev brief now states a code change + its coupled test update are one logical unit. Five agent-caught charter/brief-vs-SPEC corrections (the Rule-4 verify-don't-assume discipline working). Zero path-discipline leaks across all 13 dispatches. One agent stall (MK2.1) — PA crash-recovery salvage.
+
+**Carry-forward to S114.** M4.2 (K6 destructuring unification + the for-head `noIn`) → M4.3 (full-corpus conformance) → MK4 (the markup↔JS seam) → M5 (pipeline swap) → M6 (retirement). Follow-up cleanups: K9 (markup-layer circular import — before M6), K10 (`ast-expr` `!= not` — after M4), K8 (`function`→`fn` refactor — unblocked now K2 is fixed), K3/K4/K5 (lexer maximal-munch — post-M4, parse-expr-coupled). Open: the SPEC §4.18.3/§4.18.4 escape-count editorial inconsistency; §29 vanilla-interop; the v0.4 release-cut.
 
 ### 2026-05-20 (S112 CLOSE — native-parser implementation arc opened: M2.1-M2.3 + MK1 (complete); root README restructure; incremental-components DD)
 
