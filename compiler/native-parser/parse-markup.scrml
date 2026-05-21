@@ -524,7 +524,7 @@ ${
         const result = scanDisplayTextLiteral(cursor, ctx)
         const node = result.node
         const k = blockKinds()
-        const block = makeBlockNode(k.DisplayTextLiteral, node.span, null)
+        const block = makeBlockNode(k.DisplayTextLiteral, node.span, not)
         block.literal = node
         appendBlock(ctx, block)
     }
@@ -600,7 +600,7 @@ ${
     // parseExpression consumes only the first).
     // -------------------------------------------------------------------
     export fn isValidCodeRun(runText) {
-        if (runText == undefined || runText == null) { return false }
+        if (runText is not) { return false }
         if (runText.trim().length == 0) { return false }
         const tokens = lex(runText)
         const exprCtx = makeParseExprContext(tokens)
