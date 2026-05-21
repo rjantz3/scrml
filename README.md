@@ -508,6 +508,16 @@ This isn't bundler-style single-letter renaming — the names are longer than `a
   *\* `_{}` foreign code and `import:host` are specified, not yet implemented; `vendor:` is a ratified design direction with its mechanism still under debate.*
 - **`<program>` root** — configure database connections, protection rules, HTML spec version, and program-wide settings from a single root element.
 
+### The Build Story
+
+> *Nominal — scrml's compiler model as designed. The build-story artifact and the per-`<program>` `compiler=` attribute are ratified design directions, not yet specified or implemented. `*` marks a claim not yet actual.*
+
+scrml's compiler has a build story. Compilation is a pure function of two inputs — your source and an explicit, committed **build story** that pins what "the compiler" is: a content-addressed Merkle closure over the compiler-proper's four components — compiler source, language tools, the standard library, and any vendored edge code — one root hash with the dependency edges between them *inside* the hash, plus a human-inspectable `build-story.lock` sidecar. Because every part — the compiler included — is identified by the hash of its content, customizing the compiler to your project and reproducing any build bit-for-bit\* stop being in tension: a tuned compiler is just a different pinned build story, and "pinned" is what makes it portable.
+
+A build story can be pinned per `<program>` — `<program compiler="…">`\* — and because nested `<program>` contexts are already isolated, shared-nothing compilation units, different parts of one application can be built by different compilers, each independently reproducible. This is deliberately not a live or hot-swappable compiler: every build story is static, read once before parsing begins; only *authorship* is customizable, never the running compile.
+
+<sub>\* The bit-for-bit guarantee requires a whole-compiler determinism audit not yet done. The build-story artifact and the `<program compiler=>` attribute are design directions under active deep-dive — the exact surface may change.</sub>
+
 ## Language Contexts
 
 scrml uses sigil-delimited contexts to separate concerns within a single file:
@@ -534,14 +544,6 @@ These features are fully designed in the [language spec](compiler/SPEC.md) but n
 | **WASM call-char sigils** | S23.3 | Single-character sigils (`r{}`, `c{}`, `z{}`) for invoking compiled WASM functions from Rust, C, Zig, etc. Paired with `extern` declarations for type-safe FFI. |
 | **Sidecar process declarations** | S23.4 | `use foreign:name { fn }` for declaring server-side sidecar processes (HTTP/socket services) that scrml routes to automatically. |
 | **`RemoteData` enum** | S13.5 | Built-in `Loading / Loaded(T) / Failed(Error)` enum for modeling async fetch state. Pattern-matchable with exhaustive checking. |
-
-## The Build Story
-
-> *Nominal — scrml's compiler model as designed. The build-story artifact is a ratified design direction; it is not yet specified or implemented. `*` marks a claim not yet actual.*
-
-scrml's compiler has a build story. Compilation is a pure function of two inputs — your source and an explicit, committed **build story**. The compiler-proper is a governed composite of four components — compiler source, language tools, the standard library, and any vendored edge code — and the build story pins all four as a **content-addressed Merkle closure**: one root hash with the dependency edges between components *inside* the hash, plus a human-inspectable `build-story.lock` sidecar. Because every part — including the compiler itself — is identified by the hash of its content, customizing the compiler to your project and reproducing any build bit-for-bit\* stop being in tension: a tuned compiler is just a different pinned build story, and "pinned" is what makes it portable. This is deliberately not a live or hot-swappable compiler — the build story is static, read once before parsing begins; only *authorship* is customizable, never the running compile.
-
-<sub>\* The bit-for-bit guarantee requires a whole-compiler determinism audit that has not yet been done.</sub>
 
 ## Examples
 
