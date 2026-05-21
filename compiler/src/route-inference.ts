@@ -18,9 +18,10 @@
  * }
  *
  * CPSSplit = {
- *   serverStmtIndices: number[],   // indices into the function body that run on server
+ *   serverBatches: CPSBatch[],     // server batches in source order (Ext 1 M1.1 — single batch)
  *   clientStmtIndices: number[],   // indices into the function body that run on client
  *   returnVarName: string | null,  // the name of the variable that receives the server result
+ *   // derived getter: serverStmtIndices — flattens every batch's indices (back-compat)
  * }
  *
  * EscalationReason =
@@ -71,6 +72,10 @@ import type {
 import type { ProtectAnalysis } from "./protect-analyzer.ts";
 import { exprNodeCollectCallees, emitStringFromTree, forEachIdentInExprNode } from "./expression-parser.ts";
 import type { ExprNode } from "./types/ast.ts";
+// Type-only import — `monotonicity-analyzer.ts` imports `CPSSplit` from this
+// module, so a value import would form a runtime cycle. `import type` is
+// erased at compile time and is cycle-safe.
+import type { MonotonicityVerdict } from "./monotonicity-analyzer.ts";
 import { collectChannelFunctionMap, collectChannelCellMap } from "./codegen/emit-channel.ts";
 
 // ---------------------------------------------------------------------------
@@ -84,21 +89,70 @@ export type EscalationReason =
   | { kind: "explicit-annotation"; span: Span };
 
 /**
+ * One server batch in a CPS split plan (Ext 1, M1.1).
+ *
+ * The A9 min-viable body-split (Ext 4 + Ext 5) produces exactly ONE batch per
+ * CPS-eligible function. Ext 1 (multi-batch CPS) lifts this to N batches — a
+ * body crossing the server seam multiple times. Each batch is independently
+ * `!`-typed (Ext 4 composition) and independently idempotency-keyed (Ext 5
+ * composition lifted to per-batch).
+ *
+ * At M1.1 every `CPSSplit` is constructed with exactly one batch (single-batch
+ * default — no behavior change). The multi-batch planner (M1.3) is the sub-step
+ * that populates `serverBatches` with more than one entry.
+ */
+export interface CPSBatch {
+  /** Indices into the function body that run on the server for this batch. */
+  indices: number[];
+  /**
+   * Per-batch static monotonicity verdict (SPEC §19.9.6, A9 Ext 5).
+   * Populated by Stage 5.5 (monotonicity-analyzer.ts). `undefined` until
+   * Stage 5.5 has run; at M1.1 the per-batch classifier lift is M1.4 — until
+   * then this stays `undefined` and the function-level `CPSSplit.monotonicity`
+   * is the consulted surface.
+   */
+  monotonicity?: MonotonicityVerdict;
+  /**
+   * Per-batch idempotency tag (Ext 5 composition lifted to per-batch via
+   * M1.4). Empty string until the per-batch idempotency-key lift populates it.
+   * `""` is a defined value (an empty tag), not absence — see SPEC §42.
+   */
+  idempotencyTag: string;
+}
+
+/**
  * CPS transformation split plan.
  * When applicable, the compiler splits the function at the server/client boundary.
+ *
+ * Ext 1, M1.1: the flat `serverStmtIndices: number[]` is lifted to
+ * `serverBatches: CPSBatch[]`. `serverStmtIndices` is preserved as a derived
+ * getter (flattens every batch's `indices`, sorted ascending) so existing
+ * callers — emit-functions.ts, emit-server.ts, monotonicity-analyzer.ts — keep
+ * working unchanged. At M1.1 `serverBatches` always holds exactly one batch.
  */
-export interface CPSSplit {
-  /** Indices into the function body that run on the server. */
-  serverStmtIndices: number[];
+export class CPSSplit {
+  /**
+   * Server batches in source order (Ext 1). At M1.1 this is always a
+   * single-element array; the multi-batch planner (M1.3) is what produces
+   * more than one entry.
+   */
+  serverBatches: CPSBatch[];
+
   /** Indices into the function body that run on the client. */
   clientStmtIndices: number[];
+
   /** The reactive variable name that receives the server result, or null. */
   returnVarName: string | null;
+
   /**
-   * Static monotonicity verdict for the server-stmt batch (SPEC §19.9.6,
-   * A9 Ext 5). Populated by Stage 5.5 (monotonicity-analyzer.ts) AFTER RI
-   * has built the cpsSplit. Undefined when Stage 5.5 has not run, OR when
-   * the function is a channel server-fn (channel-skip per §19.9.6 note).
+   * Function-level static monotonicity verdict (SPEC §19.9.6, A9 Ext 5).
+   * Populated by Stage 5.5 (monotonicity-analyzer.ts) AFTER RI has built the
+   * cpsSplit. Undefined when Stage 5.5 has not run, OR when the function is a
+   * channel server-fn (channel-skip per §19.9.6 note).
+   *
+   * Ext 1 M1.4 lifts monotonicity classification to per-batch
+   * (`CPSBatch.monotonicity`); this function-level field is retained for
+   * back-compat with current consumers until that lift lands.
    *
    * Consumed by: emit-functions.ts (client wrapper — emit Idempotency-Key
    * header iff "non-monotone"), emit-server.ts (server stub — emit dedup
@@ -106,7 +160,55 @@ export interface CPSSplit {
    * E-CPS-NONIDEM-NO-STORAGE iff "non-monotone" + resolved backend is
    * "none").
    */
-  monotonicity?: "monotone" | "non-monotone" | "machine-intrinsic";
+  monotonicity?: MonotonicityVerdict;
+
+  /**
+   * Construct a CPS split plan.
+   *
+   * @param serverBatches      server batches in source order. At M1.1 callers
+   *                           pass a single-element array.
+   * @param clientStmtIndices  indices into the body that run on the client.
+   * @param returnVarName      reactive var that receives the server result.
+   */
+  constructor(
+    serverBatches: CPSBatch[],
+    clientStmtIndices: number[],
+    returnVarName: string | null,
+  ) {
+    this.serverBatches = serverBatches;
+    this.clientStmtIndices = clientStmtIndices;
+    this.returnVarName = returnVarName;
+  }
+
+  /**
+   * Build a single-batch CPS split from a flat server-stmt index array — the
+   * Ext 4/Ext 5 (A9 min-viable) shape. This is the default construction path
+   * at M1.1; M1.3's planner constructs multi-batch plans directly.
+   */
+  static singleBatch(
+    serverStmtIndices: number[],
+    clientStmtIndices: number[],
+    returnVarName: string | null,
+  ): CPSSplit {
+    return new CPSSplit(
+      [{ indices: serverStmtIndices, idempotencyTag: "" }],
+      clientStmtIndices,
+      returnVarName,
+    );
+  }
+
+  /**
+   * Derived back-compat view: every server batch's indices flattened into one
+   * ascending-sorted array. Equals the pre-Ext-1 `serverStmtIndices` field for
+   * a single-batch split, so existing callers need no change.
+   */
+  get serverStmtIndices(): number[] {
+    const all: number[] = [];
+    for (const batch of this.serverBatches) {
+      for (const idx of batch.indices) all.push(idx);
+    }
+    return all.sort((a, b) => a - b);
+  }
 }
 
 /** A resolved route entry for a single function. */
@@ -2688,11 +2790,13 @@ export function runRI(input: RIInput): RIOutput {
           );
 
           if (cpsResult && cpsResult.eligible) {
-            cpsSplit = {
-              serverStmtIndices: cpsResult.serverStmtIndices,
-              clientStmtIndices: cpsResult.clientStmtIndices,
-              returnVarName: cpsResult.returnVarName,
-            };
+            // Ext 1 M1.1: single-batch construction (no behavior change).
+            // The multi-batch planner (M1.3) is what produces N>1 batches.
+            cpsSplit = CPSSplit.singleBatch(
+              cpsResult.serverStmtIndices,
+              cpsResult.clientStmtIndices,
+              cpsResult.returnVarName,
+            );
           } else {
             // Bug-5 follow-on to C18 (§38.4, S83 Wave 4A): channel-scoped
             // server functions writing to a channel-owned cell are spec-

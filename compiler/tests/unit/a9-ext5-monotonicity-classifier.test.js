@@ -7,6 +7,7 @@
 
 import { describe, test, expect } from "bun:test";
 import { classifyFunctionMonotonicityForTest } from "../../src/monotonicity-analyzer.ts";
+import { CPSSplit } from "../../src/route-inference.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -68,15 +69,15 @@ function makeFn(body, opts = {}) {
   };
 }
 
-/** Build a CPSSplit object covering all body indices as server-stmts. */
+/**
+ * Build a single-batch CPSSplit covering all body indices as server-stmts.
+ * Ext 1 M1.1: exercises the real class shape (CPSSplit.singleBatch) so the
+ * back-compat `serverStmtIndices` getter is verified by every classifier test.
+ */
 function makeCpsSplit(bodyLen, returnVarName = null) {
   const indices = [];
   for (let i = 0; i < bodyLen; i++) indices.push(i);
-  return {
-    serverStmtIndices: indices,
-    clientStmtIndices: [],
-    returnVarName,
-  };
+  return CPSSplit.singleBatch(indices, [], returnVarName);
 }
 
 // ---------------------------------------------------------------------------

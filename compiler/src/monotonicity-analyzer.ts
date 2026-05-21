@@ -79,8 +79,27 @@ export interface MonotonicityDiagnostic {
 
 /** Output of `analyzeMonotonicity`. */
 export interface MonotonicityAnalysis {
-  /** Per-function monotonicity verdict (only entries for functions with non-null cpsSplit). */
+  /**
+   * Per-function monotonicity verdict (only entries for functions with
+   * non-null cpsSplit).
+   *
+   * Ext 1 M1.1: this stays the function-level surface for back-compat with
+   * current consumers (api.js Stage 5.5 diagnostics + the verbose tally).
+   * The per-batch lift is M1.4 — at that sub-step `batchVerdicts` becomes the
+   * primary surface and `classifyFunctionMonotonicity` is split into a
+   * per-batch `classifyBatchMonotonicity` + a function-level wrapper.
+   */
   verdicts: Map<string /* functionNodeId */, MonotonicityVerdict>;
+  /**
+   * Per-batch monotonicity verdicts (Ext 1 M1.1 — multi-batch CPS shape).
+   * One verdict per `CPSSplit.serverBatches` entry, in source order.
+   *
+   * At M1.1 every CPS-eligible function has exactly one batch, so each value
+   * is a single-element array mirroring `verdicts` — no behavior change. The
+   * per-batch classifier (M1.4) is what produces multi-element arrays with
+   * independent per-batch verdicts.
+   */
+  batchVerdicts: Map<string /* functionNodeId */, MonotonicityVerdict[]>;
   /** Info-level diagnostics; `--verbose`-only for D-CPS-MONOTONE. */
   diagnostics: MonotonicityDiagnostic[];
 }
@@ -470,6 +489,7 @@ export function analyzeMonotonicity(
   functionIndex: FunctionPurityLookup | null = null,
 ): MonotonicityAnalysis {
   const verdicts = new Map<string, MonotonicityVerdict>();
+  const batchVerdicts = new Map<string, MonotonicityVerdict[]>();
   const diagnostics: MonotonicityDiagnostic[] = [];
 
   for (const [fnNodeId, route] of routeMap.functions) {
@@ -487,6 +507,14 @@ export function analyzeMonotonicity(
 
     const verdict = classifyFunctionMonotonicity(fnNode, route.cpsSplit, functionIndex);
     verdicts.set(fnNodeId, verdict);
+
+    // Ext 1 M1.1: per-batch verdict surface. At M1.1 every CPS-eligible
+    // function has exactly one server batch, so the per-batch array mirrors
+    // the function-level verdict — no behavior change. The per-batch
+    // classifier (M1.4) replaces this single-element mirror with independent
+    // per-batch classification.
+    const batchCount = route.cpsSplit.serverBatches.length;
+    batchVerdicts.set(fnNodeId, new Array(batchCount).fill(verdict));
 
     // Attach to cpsSplit for downstream codegen consumption.
     (route.cpsSplit as CPSSplit & { monotonicity?: MonotonicityVerdict }).monotonicity = verdict;
@@ -525,7 +553,7 @@ export function analyzeMonotonicity(
     // backend is "none".
   }
 
-  return { verdicts, diagnostics };
+  return { verdicts, batchVerdicts, diagnostics };
 }
 
 /**
