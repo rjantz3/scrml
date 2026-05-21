@@ -68,14 +68,51 @@ interface RouteEntry {
   functionName?: string;
 }
 
+/** A single CPS server batch (Ext 1 — multi-batch CPS). */
+interface CpsBatch {
+  indices: number[];
+  /** Per-batch monotonicity verdict (Ext 1 M1.4); populated by Stage 5.5. */
+  monotonicity?: "monotone" | "non-monotone" | "machine-intrinsic";
+}
+
 /** CPS split descriptor from RI stage. */
 interface CpsSplit {
   serverStmtIndices: number[];
   returnVarName?: string;
+  /**
+   * Function-level monotonicity verdict — the back-compat aggregate
+   * (Ext 1 M1.4 conservative max). Retained for consumers that want one
+   * answer per function.
+   */
+  monotonicity?: "monotone" | "non-monotone" | "machine-intrinsic";
+  /** Server batches in source order (Ext 1). Each carries its own verdict. */
+  serverBatches?: CpsBatch[];
 }
 
 /** A param node (either a string or a structured param). */
 type Param = string | { name?: string; [key: string]: unknown };
+
+/**
+ * Ext 1 M1.4 — per-batch idempotency-key gating (client wrapper side).
+ *
+ * Returns true iff the CPS client wrapper for this function must emit a
+ * per-invocation `Idempotency-Key` (SPEC §19.9.6). Mirror of emit-server.ts's
+ * `cpsNeedsIdempotencyDedup` — the verdict is per-batch, but the wrapper still
+ * issues one fetch, so it needs the key iff ANY batch is non-monotone.
+ *
+ * Falls back to the function-level verdict when batches carry no per-batch
+ * verdict (Stage 5.5 not run) — defensive; in the normal pipeline
+ * analyzeMonotonicity always populates `batch.monotonicity`.
+ */
+function cpsNeedsIdempotencyKey(cpsSplit: CpsSplit | undefined): boolean {
+  if (!cpsSplit) return false;
+  const batches = cpsSplit.serverBatches;
+  if (batches && batches.length > 0) {
+    if (batches.some((b) => b.monotonicity === "non-monotone")) return true;
+    if (batches.every((b) => b.monotonicity !== undefined)) return false;
+  }
+  return cpsSplit.monotonicity === "non-monotone";
+}
 
 /**
  * Emit fetch stubs, CPS wrappers, and client-boundary function bodies.
@@ -209,8 +246,16 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // configured store before executing the batch, returning the stored
     // result on key-hit. Monotone / machine-intrinsic batches and non-CPS
     // server functions skip key emission.
-    const cpsMonotonicity = route.cpsSplit?.monotonicity;
-    const emitIdempotencyKey = cpsMonotonicity === "non-monotone";
+    //
+    // Ext 1 M1.4: gated per-batch. The monotonicity classifier writes an
+    // independent verdict onto each `CPSBatch.monotonicity`. While the client
+    // wrapper still issues ONE fetch (M1.5 splits it into N fetches, one per
+    // batch), that single fetch carries every batch's work — so it needs the
+    // key iff ANY batch is non-monotone. This is identical to the prior
+    // function-level gate for single-batch functions (the conservative-max
+    // aggregate equals `some()` over batches), but makes the per-batch verdict
+    // the load-bearing surface so M1.5 can gate each fetch on its own batch.
+    const emitIdempotencyKey = cpsNeedsIdempotencyKey(route.cpsSplit);
     if (emitIdempotencyKey) {
       lines.push(`  // A9 Ext 5: idempotency key (non-monotone CPS batch)`);
       lines.push(`  const _scrml_idempotency_key = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2) + '-' + Date.now();`);

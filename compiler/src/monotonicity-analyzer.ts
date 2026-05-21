@@ -75,6 +75,15 @@ export interface MonotonicityDiagnostic {
   message: string;
   /** Function-node id whose batch produced the diagnostic. */
   functionNodeId: string;
+  /**
+   * Ext 1 M1.4 — index of the CPS batch (into `CPSSplit.serverBatches`) that
+   * produced this diagnostic. Per-batch diagnostics (D-CPS-MONOTONE,
+   * D-CPS-MACHINE-INTRINSIC-MONOTONE) carry the batch index so a multi-batch
+   * function can surface one diagnostic per batch. Function-wide diagnostics
+   * (D-CPS-IDEMPOTENT-OVERRIDE — the `.idempotent()` modifier dominates every
+   * batch) omit it.
+   */
+  batchIndex?: number;
 }
 
 /** Output of `analyzeMonotonicity`. */
@@ -83,21 +92,23 @@ export interface MonotonicityAnalysis {
    * Per-function monotonicity verdict (only entries for functions with
    * non-null cpsSplit).
    *
-   * Ext 1 M1.1: this stays the function-level surface for back-compat with
-   * current consumers (api.js Stage 5.5 diagnostics + the verbose tally).
-   * The per-batch lift is M1.4 — at that sub-step `batchVerdicts` becomes the
-   * primary surface and `classifyFunctionMonotonicity` is split into a
-   * per-batch `classifyBatchMonotonicity` + a function-level wrapper.
+   * Back-compat aggregate (Ext 1 M1.4): retained as the function-level
+   * surface for consumers that still want one answer per function — api.js
+   * Stage 5.5 diagnostics + the verbose tally, type-system.ts
+   * E-CPS-NONIDEM-NO-STORAGE. Aggregation is a conservative max over the
+   * per-batch verdicts: non-monotone dominates (see
+   * `classifyFunctionMonotonicity`).
    */
   verdicts: Map<string /* functionNodeId */, MonotonicityVerdict>;
   /**
-   * Per-batch monotonicity verdicts (Ext 1 M1.1 — multi-batch CPS shape).
-   * One verdict per `CPSSplit.serverBatches` entry, in source order.
+   * Per-batch monotonicity verdicts (Ext 1 — multi-batch CPS shape). One
+   * verdict per `CPSSplit.serverBatches` entry, in source order.
    *
-   * At M1.1 every CPS-eligible function has exactly one batch, so each value
-   * is a single-element array mirroring `verdicts` — no behavior change. The
-   * per-batch classifier (M1.4) is what produces multi-element arrays with
-   * independent per-batch verdicts.
+   * THE LOAD-BEARING SURFACE as of M1.4: each batch is classified
+   * independently by `classifyBatchMonotonicity`, so a monotone batch in a
+   * function with a non-monotone sibling no longer pays the idempotency-key
+   * tax. The same verdict is also written onto each `CPSBatch.monotonicity`
+   * for direct Stage 8 codegen consumption.
    */
   batchVerdicts: Map<string /* functionNodeId */, MonotonicityVerdict[]>;
   /** Info-level diagnostics; `--verbose`-only for D-CPS-MONOTONE. */
@@ -321,18 +332,26 @@ function isMachineAdvanceCall(stmt: ASTNode): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Per-function classification
+// Per-batch + per-function classification
 // ---------------------------------------------------------------------------
 
 /**
- * Classify a CPS-eligible function's server-stmt batch.
+ * Classify a SINGLE CPS server batch (Ext 1 M1.4 — per-batch lift).
  *
- * Algorithm (per SPEC §19.9.6):
+ * This is the per-batch core of the classifier. Where the pre-M1.4 shape
+ * classified an entire function's flattened server-stmt set as one verdict,
+ * Ext 1 multi-batch CPS gives each batch its own independent verdict — a
+ * monotone batch in an otherwise-non-monotone function no longer pays the
+ * idempotency-key tax (SPEC §19.9.6; soundness DD §B.4 — finer-grain, S5
+ * STRENGTHENED).
+ *
+ * Algorithm (per SPEC §19.9.6) — applied to ONE batch's `indices`:
  *   1. If the function-decl carries `.idempotent()` modifier (§19.9.7),
- *      verdict = "monotone" (developer assertion override).
+ *      verdict = "monotone" (developer assertion override — function-wide,
+ *      so it dominates every batch).
  *   2. If the entire batch is bounded by a single `<machine>` `.advance(.X)`
  *      call → verdict = "machine-intrinsic".
- *   3. Walk every server-stmt index; classify each per (a)-(e):
+ *   3. Walk every server-stmt index in this batch; classify each per (a)-(e):
  *        - SELECT-only / read-only → monotone
  *        - INSERT without auto-readback / non-deterministic RHS → monotone
  *        - UPDATE assignment-only-of-literals → monotone
@@ -340,24 +359,31 @@ function isMachineAdvanceCall(stmt: ASTNode): boolean {
  *        - pure-fn call (S81 D3) — bare-expr whose callee resolves to fn-kind
  *      Any non-monotone → batch verdict = "non-monotone".
  *   4. All-monotone → verdict = "monotone".
+ *
+ * @param fnNode          the enclosing function-decl AST node (read for the
+ *                        `idempotentModifier` flag + `body[]`).
+ * @param batchIndices    the body indices belonging to THIS batch
+ *                        (`CPSBatch.indices`), in any order.
+ * @param functionIndex   pure-fn lookup map (S81 D3); may be null.
  */
-function classifyFunctionMonotonicity(
+function classifyBatchMonotonicity(
   fnNode: ASTNode,
-  cpsSplit: CPSSplit,
+  batchIndices: number[],
   functionIndex: FunctionPurityLookup | null,
 ): MonotonicityVerdict {
-  // Step 1: .idempotent() override.
+  // Step 1: .idempotent() override (function-wide — every batch monotone).
   if (fnNode.idempotentModifier === true) {
     return "monotone";
   }
 
   const body = (fnNode.body as ASTNode[] | undefined) ?? [];
-  const serverStmts = cpsSplit.serverStmtIndices
+  const serverStmts = batchIndices
     .map((i) => body[i])
     .filter((s) => s !== undefined && s !== null);
 
   if (serverStmts.length === 0) {
-    // No server statements? Treat as monotone (vacuous; no replay risk).
+    // No server statements in this batch? Treat as monotone (vacuous; no
+    // replay risk).
     return "monotone";
   }
 
@@ -376,6 +402,54 @@ function classifyFunctionMonotonicity(
 
   // Step 4: all monotone.
   return "monotone";
+}
+
+/**
+ * Classify a CPS-eligible function as a whole — the function-level wrapper
+ * retained for back-compat (Ext 1 M1.4).
+ *
+ * Aggregates the per-batch verdicts (`classifyBatchMonotonicity`) into one
+ * function-level verdict for consumers that still want a single answer
+ * (api.js Stage 5.5 tally, type-system.ts E-CPS-NONIDEM-NO-STORAGE, the
+ * `classifyFunctionMonotonicityForTest` export). Aggregation rule — the
+ * function pays the idempotency-key tax iff ANY batch needs it:
+ *   - any batch "non-monotone" → function "non-monotone".
+ *   - else any batch "machine-intrinsic" → function "machine-intrinsic"
+ *     (the §51 intrinsic-monotone leg; still key-free).
+ *   - else → "monotone".
+ * This conservative max preserves the pre-M1.4 single-stub gating: while the
+ * function still emits one CPS stub (M1.5 splits it into N stubs), that stub
+ * serves every batch's work and must carry the key if any batch is unsafe.
+ */
+function classifyFunctionMonotonicity(
+  fnNode: ASTNode,
+  cpsSplit: CPSSplit,
+  functionIndex: FunctionPurityLookup | null,
+): MonotonicityVerdict {
+  // .idempotent() override short-circuits — every batch monotone.
+  if (fnNode.idempotentModifier === true) {
+    return "monotone";
+  }
+
+  const batches = cpsSplit.serverBatches;
+  if (batches.length === 0) {
+    // No batches → no server work → vacuously monotone.
+    return "monotone";
+  }
+
+  let sawMachineIntrinsic = false;
+  for (const batch of batches) {
+    const verdict = classifyBatchMonotonicity(fnNode, batch.indices, functionIndex);
+    if (verdict === "non-monotone") {
+      // Non-monotone dominates — the function pays the key tax.
+      return "non-monotone";
+    }
+    if (verdict === "machine-intrinsic") {
+      sawMachineIntrinsic = true;
+    }
+  }
+
+  return sawMachineIntrinsic ? "machine-intrinsic" : "monotone";
 }
 
 /**
@@ -505,52 +579,72 @@ export function analyzeMonotonicity(
     // Future: add an explicit `route.kind === "channel"` check when that
     // field exists on FunctionRoute.
 
-    const verdict = classifyFunctionMonotonicity(fnNode, route.cpsSplit, functionIndex);
-    verdicts.set(fnNodeId, verdict);
+    // Ext 1 M1.4: classify EACH batch independently. The per-batch verdict
+    // array is the load-bearing surface — downstream codegen gates the
+    // idempotency-key envelope per batch (a monotone batch in a function with
+    // a non-monotone sibling no longer pays the key tax).
+    const batches = route.cpsSplit.serverBatches;
+    const isIdempotentOverride = fnNode.idempotentModifier === true;
+    const perBatchVerdicts: MonotonicityVerdict[] = [];
 
-    // Ext 1 M1.1: per-batch verdict surface. At M1.1 every CPS-eligible
-    // function has exactly one server batch, so the per-batch array mirrors
-    // the function-level verdict — no behavior change. The per-batch
-    // classifier (M1.4) replaces this single-element mirror with independent
-    // per-batch classification.
-    const batchCount = route.cpsSplit.serverBatches.length;
-    batchVerdicts.set(fnNodeId, new Array(batchCount).fill(verdict));
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
+      const verdict = classifyBatchMonotonicity(fnNode, batch.indices, functionIndex);
+      perBatchVerdicts.push(verdict);
 
-    // Attach to cpsSplit for downstream codegen consumption.
-    (route.cpsSplit as CPSSplit & { monotonicity?: MonotonicityVerdict }).monotonicity = verdict;
+      // Populate the per-batch verdict on the CPSBatch itself — the planner
+      // (M1.3) emits `monotonicity` unset; M1.4 fills it here so Stage 8
+      // codegen can consult `batch.monotonicity` directly.
+      batch.monotonicity = verdict;
 
-    // Emit info-level diagnostics. D-CPS-MONOTONE is verbose-only (caller
-    // filters); we always emit so the consumer can decide.
-    if (verdict === "machine-intrinsic") {
-      diagnostics.push({
-        code: "D-CPS-MACHINE-INTRINSIC-MONOTONE",
-        message: "CPS batch bounded by a `<machine>` `.advance(.X)` transition; intrinsic-monotone by §51 allowed-from-states guard.",
-        functionNodeId: fnNodeId,
-      });
-    } else if (verdict === "monotone") {
-      // .idempotent() override case → fire D-CPS-IDEMPOTENT-OVERRIDE
-      // instead of D-CPS-MONOTONE. The override is an information
-      // diagnostic the developer reads to confirm what classifier verdict
-      // they're overriding. Naming the would-be verdict requires
-      // re-running the classifier WITHOUT the override; for v0.2.0 we
-      // emit the diagnostic without that detail.
-      if (fnNode.idempotentModifier === true) {
+      // Emit per-batch info-level diagnostics. D-CPS-MONOTONE is verbose-only
+      // (caller filters); we always emit so the consumer can decide.
+      if (verdict === "machine-intrinsic") {
         diagnostics.push({
-          code: "D-CPS-IDEMPOTENT-OVERRIDE",
-          message: "`.idempotent()` modifier is in effect at this function declaration; idempotency-key envelope is elided regardless of classifier verdict.",
+          code: "D-CPS-MACHINE-INTRINSIC-MONOTONE",
+          message: "CPS batch bounded by a `<machine>` `.advance(.X)` transition; intrinsic-monotone by §51 allowed-from-states guard.",
           functionNodeId: fnNodeId,
+          batchIndex,
         });
-      } else {
+      } else if (verdict === "monotone" && !isIdempotentOverride) {
+        // `.idempotent()` override fires ONE function-wide diagnostic below
+        // instead of per-batch D-CPS-MONOTONE — the modifier dominates every
+        // batch, so a per-batch diagnostic would be noise.
         diagnostics.push({
           code: "D-CPS-MONOTONE",
           message: "CPS batch is monotone-by-classification; idempotency-key envelope elided.",
           functionNodeId: fnNodeId,
+          batchIndex,
         });
       }
+      // Non-monotone batches don't fire info diagnostics; they may trigger
+      // E-CPS-NONIDEM-NO-STORAGE downstream (TS Stage 6) when the resolved
+      // backend is "none".
     }
-    // Non-monotone batches don't fire info diagnostics; they may trigger
-    // E-CPS-NONIDEM-NO-STORAGE downstream (TS Stage 6) when the resolved
-    // backend is "none".
+
+    batchVerdicts.set(fnNodeId, perBatchVerdicts);
+
+    // Function-level verdict — the back-compat aggregate (conservative max:
+    // non-monotone dominates). Retained for api.js Stage 5.5 tally +
+    // type-system.ts E-CPS-NONIDEM-NO-STORAGE.
+    const verdict = classifyFunctionMonotonicity(fnNode, route.cpsSplit, functionIndex);
+    verdicts.set(fnNodeId, verdict);
+
+    // Attach the function-level verdict to cpsSplit for downstream codegen
+    // consumption (back-compat — emit-server.ts / emit-functions.ts read it
+    // until M1.5's multi-stub emit consults `batch.monotonicity` per stub).
+    (route.cpsSplit as CPSSplit & { monotonicity?: MonotonicityVerdict }).monotonicity = verdict;
+
+    // `.idempotent()` override → one function-wide D-CPS-IDEMPOTENT-OVERRIDE.
+    // The override is an information diagnostic the developer reads to confirm
+    // what classifier verdict they're overriding.
+    if (isIdempotentOverride) {
+      diagnostics.push({
+        code: "D-CPS-IDEMPOTENT-OVERRIDE",
+        message: "`.idempotent()` modifier is in effect at this function declaration; idempotency-key envelope is elided regardless of classifier verdict.",
+        functionNodeId: fnNodeId,
+      });
+    }
   }
 
   return { verdicts, batchVerdicts, diagnostics };
@@ -567,4 +661,21 @@ export function classifyFunctionMonotonicityForTest(
   functionIndex: FunctionPurityLookup | null = null,
 ): MonotonicityVerdict {
   return classifyFunctionMonotonicity(fnNode, cpsSplit, functionIndex);
+}
+
+/**
+ * Convenience: classify a SINGLE CPS batch in isolation (Ext 1 M1.4). Used by
+ * the per-batch test corpus to verify the finer-grain classifier directly
+ * without building a full RouteMap.
+ *
+ * @param fnNode        the enclosing function-decl AST node.
+ * @param batchIndices  body indices belonging to the batch (`CPSBatch.indices`).
+ * @param functionIndex pure-fn lookup map (S81 D3); may be null.
+ */
+export function classifyBatchMonotonicityForTest(
+  fnNode: ASTNode,
+  batchIndices: number[],
+  functionIndex: FunctionPurityLookup | null = null,
+): MonotonicityVerdict {
+  return classifyBatchMonotonicity(fnNode, batchIndices, functionIndex);
 }

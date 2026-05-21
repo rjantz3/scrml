@@ -89,6 +89,43 @@ function parseCorsMaxAge(raw: string | null | undefined): number | null {
 }
 
 /**
+ * Ext 1 M1.4 — per-batch idempotency-key gating.
+ *
+ * Returns true iff the CPS stub for this route must emit the Ext 5
+ * idempotency-key dedup middleware (SPEC §19.9.6). The gate is per-batch: the
+ * monotonicity classifier (M1.4) writes an independent verdict onto each
+ * `CPSBatch.monotonicity`. While the function still emits ONE server stub
+ * (M1.5 splits it into N stubs, one per batch), that single stub serves every
+ * batch's work — so it needs the dedup layer iff ANY batch is non-monotone.
+ *
+ * This is observationally identical to the pre-M1.4 function-level gate
+ * (`cpsSplit.monotonicity === "non-monotone"`) for single-batch functions —
+ * `classifyFunctionMonotonicity`'s conservative-max aggregate is exactly this
+ * `some()` over batches. The change makes the per-batch verdict the
+ * load-bearing surface in codegen, so M1.5's multi-stub emit can gate each
+ * stub on its own `batch.monotonicity` with no further analyzer work.
+ *
+ * Falls back to the function-level verdict when batches carry no per-batch
+ * verdict (Stage 5.5 not run, or a non-CPS path) — defensive; in the normal
+ * pipeline analyzeMonotonicity always populates `batch.monotonicity`.
+ */
+function cpsNeedsIdempotencyDedup(
+  cpsSplit: { monotonicity?: string; serverBatches?: Array<{ monotonicity?: string }> } | null | undefined,
+): boolean {
+  if (!cpsSplit) return false;
+  const batches = cpsSplit.serverBatches;
+  if (Array.isArray(batches) && batches.length > 0) {
+    // Per-batch surface (M1.4). The single emitted stub needs dedup iff any
+    // batch is non-monotone.
+    if (batches.some((b) => b.monotonicity === "non-monotone")) return true;
+    // Every batch carries a verdict and none is non-monotone → no dedup.
+    if (batches.every((b) => b.monotonicity !== undefined)) return false;
+  }
+  // Defensive fallback — Stage 5.5 has not populated per-batch verdicts.
+  return cpsSplit.monotonicity === "non-monotone";
+}
+
+/**
  * Bug 3a (S87 follow-on, 2026-05-12) — DB scope collector for `_scrml_sql`
  * declaration emission.
  *
@@ -809,7 +846,9 @@ export function generateServerJs(
       // the stored response without re-executing the body. On key-miss:
       // execute the body, store key+result, return. Monotone /
       // machine-intrinsic batches and non-CPS functions skip this layer.
-      const _ext5Dedup = !!route.cpsSplit && route.cpsSplit.monotonicity === "non-monotone";
+      // Ext 1 M1.4: gated per-batch — the single stub needs dedup iff ANY
+      // batch is non-monotone (`cpsNeedsIdempotencyDedup`).
+      const _ext5Dedup = cpsNeedsIdempotencyDedup(route.cpsSplit);
       if (_ext5Dedup) {
         lines.push(`  // A9 Ext 5: idempotency-key dedup middleware (non-monotone CPS batch)`);
         lines.push(`  const _scrml_idem_key = _scrml_req.headers.get('Idempotency-Key');`);
@@ -1030,8 +1069,8 @@ export function generateServerJs(
       const _ext4WrapNonCsrf = !!cpsSplit;
       // A9 Ext 5 (§19.9.6): non-monotone CPS batches read the Idempotency-Key
       // header and consult the configured storage backend (mirror of CSRF
-      // path above).
-      const _ext5DedupNonCsrf = !!cpsSplit && cpsSplit.monotonicity === "non-monotone";
+      // path above). Ext 1 M1.4: gated per-batch (`cpsNeedsIdempotencyDedup`).
+      const _ext5DedupNonCsrf = cpsNeedsIdempotencyDedup(cpsSplit);
       if (_ext5DedupNonCsrf) {
         lines.push(`  // A9 Ext 5: idempotency-key dedup middleware (non-monotone CPS batch)`);
         lines.push(`  const _scrml_idem_key = _scrml_req.headers.get('Idempotency-Key');`);
