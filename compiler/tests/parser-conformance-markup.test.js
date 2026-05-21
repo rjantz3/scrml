@@ -16,6 +16,16 @@
 // mirroring parser-conformance-lexer.test.js's inline-micro-corpus +
 // direct-assertion structure, NOT a corpus diff.
 //
+// GROWTH NOTE — this file accumulates the markup-layer conformance
+// sections per sub-step (MK1.2 → MK1.3 → MK2.1 → MK2.2 → MK2.3); each
+// sub-step appends its own `#####`-banner section. The header above is
+// the MK1.2-vintage origin note. The sections below are, in order:
+// MK1.2 (context boundaries), MK1.3 (block-stream + comments + the
+// corpus harness), MK2.1 (the TagFrame engine + opener recognition +
+// TagKind), MK2.2 (the 3 closer forms + opener/closer pairing + mismatch
+// recovery), MK2.3 (the TagKind-driven classification + punch-list P4/P5
+// + the MK2 milestone close — §30-§36 at the file's end).
+//
 // The engine declaration (block-context.scrml's <engine for=BlockContext>)
 // is the canonical Pillar-5b SHAPE; the .js shadow is what runs and what
 // this test imports (README ANOMALY-2 shadow discipline).
@@ -92,9 +102,21 @@ import {
     ensureDiagnostics,
     makeDiagnostic,
     pushDiagnostic,
+    // MK2.3 — the TagKind-driven classification + punch-list P5.
+    TagClass,
+    isDeclSignalChar,
+    inspectAfterOpener,
+    classifyTag,
+    firstChildElementClass,
+    classifyTagFrame,
+    tagFrameBalancedAt,
 } from "../native-parser/tag-frame.js";
 // MK2.2 — the M1 ErrorRecovery engine (the mismatch dispatch re-syncs it).
 import { ErrorRecovery } from "../native-parser/error-recovery.js";
+// MK2.3 — punch-list P4: the JS-layer `<`-vs-LessThan discriminator
+// (markupValueAllowedAfter) + TokenKind for its prev-token assertions.
+import { markupValueAllowedAfter } from "../native-parser/lex-in-code.js";
+import { TokenKind } from "../native-parser/token.js";
 
 // The MK1.3 conformance ORACLE — the current heuristic block-splitter
 // (compiler/src/block-splitter.js). The native markup block-stream is
@@ -2239,5 +2261,480 @@ describe("MK2.2 closeMarkupElement / emitMarkupElement — the tree-emit helpers
         expect(handleCloser(run, cursor, ctx)).toBe(true);
         expect(cursor.pos).toBe(6);   // the `</div>` was consumed
         expect(tagFrameDepth(ctx)).toBe(0);   // the frame popped
+    });
+});
+
+// #############################################################################
+// MK2.3 — TagKind-driven classification completion + punch-list P4/P5 +
+// the MK2 milestone conformance close.
+//
+// Per IMPLEMENTATION-ROADMAP §3.1 (the MK2.3 row — the FINAL MK2 sub-step) +
+// charter dive Q1.F / Q2.A #1 / Q2.A #4: the grammar decides
+// decl-vs-markup-vs-structural from `TagKind` (computed at MK2.1) + what
+// FOLLOWS the opener's terminating `>`. This eliminates BS classifier
+// heuristics #1 (`isAfterTransitionArrow` — the backward `=>`/`()` scan)
+// and #4 (`classifyOpenerForCompoundScan` — the self-recursive opener
+// classifier). Punch-list P4 — `markupValueAllowedAfter`, the JS layer's
+// `<`-vs-LessThan discriminator. Punch-list P5 — `tagFrameBalancedAt`, the
+// CloseCondition.TagFrameBalanced predicate.
+//
+// MK2.3 closes the MK2 milestone gating criterion (charter Q4.A MK2): the
+// BS classifier heuristics demonstrably do NOT exist — one regression test
+// per Q2.A #1/#4 here, #5/#12 confirmed at MK2.2 §28.
+// #############################################################################
+
+// =============================================================================
+// MK2.3 §30 — inspectAfterOpener: the post-`>` inspection (closed, forward).
+// =============================================================================
+describe("MK2.3 inspectAfterOpener — the post-`>` decl/nested-tag inspector", () => {
+    test("a `=` after the `>` is a decl signal", () => {
+        // `<x> = 1` — the opener `>` is at offset 2; afterOpenerPos is 3.
+        expect(inspectAfterOpener("<x> = 1", 3).declSignal).toBe(true);
+    });
+
+    test("a `=` immediately after the `>` (no space) is a decl signal", () => {
+        expect(inspectAfterOpener("<x>=1", 3).declSignal).toBe(true);
+    });
+
+    test("a `==` after the `>` is NOT a decl signal (it is an equality op)", () => {
+        expect(inspectAfterOpener("<x> == 1", 3).declSignal).toBe(false);
+    });
+
+    test("a `=>` after the `>` is NOT a decl signal (it is an arrow)", () => {
+        // This is the heuristic-#1 shape: `<x> => ...` — the native parser
+        // does NOT treat the `=>` as a decl `=`. (The full heuristic-#1
+        // elimination is §36.)
+        expect(inspectAfterOpener("<x> => 1", 3).declSignal).toBe(false);
+    });
+
+    test("a `:` after the `>` is a decl signal (the `:`-shorthand body)", () => {
+        expect(inspectAfterOpener("<x>: 1", 3).declSignal).toBe(true);
+        expect(inspectAfterOpener("<x> : 1", 3).declSignal).toBe(true);
+    });
+
+    test("a nested `<ident` after the `>` is recorded at its offset", () => {
+        // `<x> <y>` — the nested `<y` opener's `<` is at offset 4.
+        expect(inspectAfterOpener("<x> <y>", 3).nestedTagAt).toBe(4);
+    });
+
+    test("plain text after the `>` — no decl signal, no nested tag", () => {
+        const r = inspectAfterOpener("<x>text", 3);
+        expect(r.declSignal).toBe(false);
+        expect(r.nestedTagAt).toBe(-1);
+    });
+
+    test("a `</` after the `>` is NOT a nested tag (no name start)", () => {
+        // `<x></>` — the `</` is a closer, not a `<ident` opener.
+        expect(inspectAfterOpener("<x></>", 3).nestedTagAt).toBe(-1);
+    });
+
+    test("isDeclSignalChar recognizes the `:` shorthand signal", () => {
+        expect(isDeclSignalChar(":")).toBe(true);
+        expect(isDeclSignalChar("=")).toBe(false);   // `=` needs a 2-char look
+        expect(isDeclSignalChar("x")).toBe(false);
+    });
+});
+
+// =============================================================================
+// MK2.3 §31 — classifyTag: the closed-rule four-way (five-way) classification.
+// =============================================================================
+describe("MK2.3 classifyTag — TagKind-driven decl/markup/structural classification", () => {
+    const noFollow = { declSignal: false, nestedTagAt: -1 };
+
+    test("a plain HTML opener with a text body is Markup", () => {
+        expect(classifyTag(TagKind.Html, false, noFollow, null)).toBe(TagClass.Markup);
+    });
+
+    test("a component opener with a text body is Markup", () => {
+        expect(classifyTag(TagKind.Component, false, noFollow, null)).toBe(TagClass.Markup);
+    });
+
+    test("a self-closing opener is SelfClose (regardless of TagKind)", () => {
+        expect(classifyTag(TagKind.Html, true, noFollow, null)).toBe(TagClass.SelfClose);
+        expect(classifyTag(TagKind.Component, true, noFollow, null)).toBe(TagClass.SelfClose);
+    });
+
+    test("a scrml-defined structural opener is Structural", () => {
+        expect(classifyTag(TagKind.ScrmlStructural, false, noFollow, null))
+            .toBe(TagClass.Structural);
+    });
+
+    test("a decl-signal (`=`/`:`) after the opener is Declaration", () => {
+        const declFollow = { declSignal: true, nestedTagAt: -1 };
+        expect(classifyTag(TagKind.StateOpener, false, declFollow, null))
+            .toBe(TagClass.Declaration);
+        expect(classifyTag(TagKind.Html, false, declFollow, null))
+            .toBe(TagClass.Declaration);
+    });
+
+    test("a nested first-child Declaration makes the opener Compound", () => {
+        expect(classifyTag(TagKind.Component, false, noFollow, TagClass.Declaration))
+            .toBe(TagClass.Compound);
+    });
+
+    test("a nested first-child Compound makes the opener Compound (recursively)", () => {
+        expect(classifyTag(TagKind.Component, false, noFollow, TagClass.Compound))
+            .toBe(TagClass.Compound);
+    });
+
+    test("a nested first-child Markup does NOT make the opener Compound", () => {
+        expect(classifyTag(TagKind.Component, false, noFollow, TagClass.Markup))
+            .toBe(TagClass.Markup);
+    });
+
+    test("priority — SelfClose beats every other classification", () => {
+        // A self-closing opener has no body, so neither decl nor compound
+        // can apply — SelfClose wins.
+        const declFollow = { declSignal: true, nestedTagAt: -1 };
+        expect(classifyTag(TagKind.Html, true, declFollow, TagClass.Declaration))
+            .toBe(TagClass.SelfClose);
+    });
+
+    test("priority — Structural beats a stray post-`>` decl signal", () => {
+        // `<engine ...> = ...` is a misuse — but a structural element's
+        // CLASS is its kind; NR validates structural-element placement.
+        const declFollow = { declSignal: true, nestedTagAt: -1 };
+        expect(classifyTag(TagKind.ScrmlStructural, false, declFollow, null))
+            .toBe(TagClass.Structural);
+    });
+
+    test("priority — Declaration beats Compound (a `<NAME> = <X>` is a decl)", () => {
+        // `<NAME> = <X>...` — the RHS opens with a tag, but the post-`>`
+        // `=` makes it a declaration, not a compound.
+        const declFollow = { declSignal: true, nestedTagAt: 6 };
+        expect(classifyTag(TagKind.StateOpener, false, declFollow, TagClass.Declaration))
+            .toBe(TagClass.Declaration);
+    });
+
+    test("a missing afterOpener descriptor falls through safely (defensive)", () => {
+        // classifyTag tolerates a null afterOpener — the decl test is
+        // skipped; an ordinary opener stays Markup.
+        expect(classifyTag(TagKind.Html, false, null, null)).toBe(TagClass.Markup);
+    });
+});
+
+// =============================================================================
+// MK2.3 §32 — firstChildElementClass + classifyTagFrame (the close-time entry).
+// =============================================================================
+describe("MK2.3 firstChildElementClass / classifyTagFrame — the close-time entry", () => {
+    test("firstChildElementClass — no markup child returns null", () => {
+        expect(firstChildElementClass([
+            { kind: NativeBlockKind.Text },
+            { kind: NativeBlockKind.Comment },
+        ])).toBe(null);
+    });
+
+    test("firstChildElementClass — the FIRST markup child's tagClass wins", () => {
+        expect(firstChildElementClass([
+            { kind: NativeBlockKind.Text },
+            { kind: NativeBlockKind.Markup, tagClass: TagClass.Declaration },
+            { kind: NativeBlockKind.Markup, tagClass: TagClass.Markup },
+        ])).toBe(TagClass.Declaration);
+    });
+
+    test("firstChildElementClass — an empty / null child list returns null", () => {
+        expect(firstChildElementClass([])).toBe(null);
+        expect(firstChildElementClass(null)).toBe(null);
+    });
+
+    test("classifyTagFrame — a leaf Html frame with no children is Markup", () => {
+        const frame = {
+            tagKind: TagKind.Html,
+            opener: { selfClosing: false },
+            afterOpener: { declSignal: false, nestedTagAt: -1 },
+        };
+        expect(classifyTagFrame(frame, [])).toBe(TagClass.Markup);
+    });
+
+    test("classifyTagFrame — a frame whose first child is a Declaration is Compound", () => {
+        const frame = {
+            tagKind: TagKind.Component,
+            opener: { selfClosing: false },
+            afterOpener: { declSignal: false, nestedTagAt: 8 },
+        };
+        const children = [{ kind: NativeBlockKind.Markup, tagClass: TagClass.Declaration }];
+        expect(classifyTagFrame(frame, children)).toBe(TagClass.Compound);
+    });
+
+    test("classifyTagFrame — a self-closing frame is SelfClose", () => {
+        const frame = {
+            tagKind: TagKind.Html,
+            opener: { selfClosing: true },
+            afterOpener: { declSignal: false, nestedTagAt: -1 },
+        };
+        expect(classifyTagFrame(frame, [])).toBe(TagClass.SelfClose);
+    });
+});
+
+// =============================================================================
+// MK2.3 §33 — end-to-end: the trampoline stamps TagClass on every Markup block.
+// =============================================================================
+describe("MK2.3 trampoline — TagClass stamped on the <tag> tree", () => {
+    // tagClassOf — the TagClass of the first top-level Markup block.
+    function tagClassOf(src) {
+        const blocks = parseMarkup(src);
+        const markup = blocks.find((b) => b.kind === NativeBlockKind.Markup);
+        return markup ? markup.tagClass : null;
+    }
+
+    test("a paired `<div></div>` is classified Markup", () => {
+        expect(tagClassOf("<div></div>")).toBe(TagClass.Markup);
+    });
+
+    test("a self-closing `<br/>` is classified SelfClose", () => {
+        expect(tagClassOf("<br/>")).toBe(TagClass.SelfClose);
+    });
+
+    test("a structural `<engine for=P></>` is classified Structural", () => {
+        expect(tagClassOf("<engine for=P></>")).toBe(TagClass.Structural);
+    });
+
+    test("a `<match>` element is classified Structural", () => {
+        expect(tagClassOf("<match for=T></>")).toBe(TagClass.Structural);
+    });
+
+    test("a component `<Counter></Counter>` is classified Markup", () => {
+        expect(tagClassOf("<Counter></Counter>")).toBe(TagClass.Markup);
+    });
+
+    test("every Markup block in a nested tree carries a tagClass", () => {
+        const blocks = parseMarkup("<div><span><p></p></span></div>");
+        const collect = (b, acc) => {
+            if (b.kind === NativeBlockKind.Markup) {
+                acc.push(b.tagClass);
+                for (const c of b.children ?? []) collect(c, acc);
+            }
+            return acc;
+        };
+        const classes = blocks.flatMap((b) => collect(b, []));
+        expect(classes.length).toBe(3);
+        expect(classes.every((c) => c === TagClass.Markup)).toBe(true);
+    });
+
+    test("a compound parent — the child's Declaration propagates up", () => {
+        // `<Parent><Child> = </></>` — the inner `<Child>` body opens with
+        // ` = ` => Child classifies Declaration; the parent reads the
+        // child's typed payload => Parent classifies Compound. The
+        // recursive-descent close order makes the child's tagClass
+        // available before the parent emits — NO recursion in the
+        // classifier (charter Q2.A #4 elimination).
+        const blocks = parseMarkup("<Parent><Child> = </></>");
+        expect(blocks[0].tagClass).toBe(TagClass.Compound);
+        expect(blocks[0].children[0].tagClass).toBe(TagClass.Declaration);
+    });
+
+    test("a self-closed child does NOT make the parent Compound", () => {
+        // `<Parent><br/></>` — the self-closed `<br/>` child is SelfClose,
+        // not Declaration/Compound, so the parent stays Markup.
+        expect(tagClassOf("<Parent><br/></>")).toBe(TagClass.Markup);
+    });
+
+    test("a self-closing element nested as a child carries SelfClose", () => {
+        const blocks = parseMarkup("<div><br/></div>");
+        expect(blocks[0].children[0].tagClass).toBe(TagClass.SelfClose);
+    });
+
+    test("an EOF-recovered unterminated tag is still classified", () => {
+        // `<div>` — unterminated; recovered at EOF. The recovered Markup
+        // block still routes through emitMarkupElement so it carries a
+        // tagClass.
+        expect(tagClassOf("<div>")).toBe(TagClass.Markup);
+    });
+});
+
+// =============================================================================
+// MK2.3 §34 — punch-list P4: markupValueAllowedAfter (the `<`-vs-LessThan
+// discriminator, the JS layer's InCode dispatch consumes it at MK4).
+// =============================================================================
+describe("MK2.3 P4 markupValueAllowedAfter — the `<`-opens-element discriminator", () => {
+    test("start-of-input — a `<` may open a top-level markup element", () => {
+        expect(markupValueAllowedAfter(null)).toBe(true);
+        expect(markupValueAllowedAfter(undefined)).toBe(true);
+    });
+
+    test("after a VALUE token a `<` is less-than (markup NOT allowed)", () => {
+        // A markup element is not a legal continuation of a completed
+        // value — these are the value-producing tokens.
+        for (const k of [TokenKind.Ident, TokenKind.NumberLit, TokenKind.StringLit,
+                         TokenKind.RegexLit, TokenKind.BoolLit, TokenKind.RParen,
+                         TokenKind.RBracket, TokenKind.RBrace, TokenKind.Increment,
+                         TokenKind.Decrement, TokenKind.KwThis, TokenKind.KwTrue,
+                         TokenKind.BareVariant, TokenKind.ScrmlAt]) {
+            expect(markupValueAllowedAfter(k)).toBe(false);
+        }
+    });
+
+    test("after a VALUE-EXPECTING token a `<` MAY open a markup element", () => {
+        // The R1 seam spike §1.2 prev-token set: `=`, `(`, `,`, `return`,
+        // `lift`, `render`, `=>`, `[`, binary operators — all positions
+        // where a value is expected.
+        for (const k of [TokenKind.Assign, TokenKind.LParen, TokenKind.Comma,
+                         TokenKind.KwReturn, TokenKind.KwLift, TokenKind.KwRender,
+                         TokenKind.Arrow, TokenKind.LBracket, TokenKind.Plus,
+                         TokenKind.Star, TokenKind.LogicalAnd, TokenKind.Colon]) {
+            expect(markupValueAllowedAfter(k)).toBe(true);
+        }
+    });
+
+    test("markupValueAllowedAfter is the twin of regexAllowedAfter", () => {
+        // Both partition the prev-token set into value-producing (false)
+        // vs value-expecting (true). The two are NOT required to agree on
+        // every token (they are separate primitives per R1 spike §1.2),
+        // but they agree on the load-bearing cases: after `=` / `(` / `,`
+        // a value is expected; after an Ident / `)` a value is complete.
+        expect(markupValueAllowedAfter(TokenKind.Assign)).toBe(true);
+        expect(markupValueAllowedAfter(TokenKind.Ident)).toBe(false);
+        expect(markupValueAllowedAfter(TokenKind.RParen)).toBe(false);
+    });
+});
+
+// =============================================================================
+// MK2.3 §35 — punch-list P5: tagFrameBalancedAt (the
+// CloseCondition.TagFrameBalanced predicate — the MK4 seam consumes it).
+// =============================================================================
+describe("MK2.3 P5 tagFrameBalancedAt — the TagFrame stack-depth close predicate", () => {
+    test("an empty stack is balanced at depth 0", () => {
+        const ctx = makeParseContext();
+        expect(tagFrameBalancedAt(ctx, 0)).toBe(true);
+    });
+
+    test("a stack with one open tag is balanced at depth 1, not depth 0", () => {
+        const ctx = makeParseContext();
+        pushTagFrame(ctx, makeOpenExpectingChildrenFrame("div", TagKind.Html, 0,
+            { start: 0, end: 5, line: 1, col: 1 }));
+        expect(tagFrameBalancedAt(ctx, 1)).toBe(true);
+        expect(tagFrameBalancedAt(ctx, 0)).toBe(false);
+    });
+
+    test("the predicate tracks the depth as tags push and pop", () => {
+        // A JS->markup `ElementValue` delegation opens at some
+        // tagDepthAtOpen; it must hand back when the stack RETURNS to it.
+        const ctx = makeParseContext();
+        const depthAtOpen = tagFrameDepth(ctx);   // 0
+        // A `<tag>` opens inside the delegation.
+        pushTagFrame(ctx, makeOpenExpectingChildrenFrame("a", TagKind.Html, 0,
+            { start: 0, end: 3, line: 1, col: 1 }));
+        // Not yet balanced — the element is still open.
+        expect(tagFrameBalancedAt(ctx, depthAtOpen)).toBe(false);
+        // The element closes — the stack returns to the open depth.
+        popTagFrame(ctx);
+        expect(tagFrameBalancedAt(ctx, depthAtOpen)).toBe(true);
+    });
+
+    test("tagFrameBalancedAt lazy-inits the stack (total against an MK1 ctx)", () => {
+        // A bare object with no tagFrameStack — the predicate must not
+        // throw (ensureTagFrameStack keeps it total).
+        const bare = {};
+        expect(tagFrameBalancedAt(bare, 0)).toBe(true);
+    });
+});
+
+// =============================================================================
+// MK2.3 §36 — the MK2 MILESTONE CLOSE: the BS classifier heuristics
+// demonstrably do NOT exist (charter Q4.A MK2 gating criterion).
+//
+// Charter Q2.A names the 5 BS classifier heuristics MK2 eliminates:
+//   #1 isAfterTransitionArrow       — a BACKWARD `=>`/`()` scan
+//   #2 peekTopLevelStateDeclSignal  — a peek-past-`>` (a classifier shape)
+//   #3 peekCompoundStateDeclSignal  — delegates to #4
+//   #4 classifyOpenerForCompoundScan — the SELF-RECURSIVE opener classifier
+//   #5 scanCompoundBlockEnd          — a forward nested-pair scan
+//   #12 looksLikeCloser             — the bare-`/` closer guess
+//
+// MK2.2 §28 eliminated #5 + confirmed #12 absent. MK2.3 eliminates #1 +
+// #4 (and, by the same TagKind-driven grammar, #2 + #3 — they are the
+// top-level / compound peek shapes #4 generalizes). One regression
+// assertion per heuristic; this section IS the MK2 milestone gating.
+// =============================================================================
+describe("MK2.3 MK2 milestone close — the 5 BS classifier heuristics are eliminated", () => {
+    test("#1 isAfterTransitionArrow — NO backward scan; `=>` is a forward operator", () => {
+        // The BS's isAfterTransitionArrow (block-splitter.js:276-303)
+        // scans BACKWARD from a `<` for the `name(...) =>` pattern to
+        // decide whether `<Target>` is a transition target. The native
+        // parser does NO backward scan: `=>` is a value-position
+        // prev-token, so the JS layer's FORWARD markupValueAllowedAfter
+        // discriminator says a `<` after `=>` MAY open a markup element.
+        expect(markupValueAllowedAfter(TokenKind.Arrow)).toBe(true);
+        // And the markup layer never inspects what is BEFORE a `<` — the
+        // post-`>` inspector (inspectAfterOpener) only looks FORWARD.
+        // A `<x> => ...` does not see the `=>` as a decl `=` (no
+        // backward-or-forward mis-read of the arrow).
+        expect(inspectAfterOpener("<x> => 1", 3).declSignal).toBe(false);
+    });
+
+    test("#2/#3 peek*StateDeclSignal — no peek-past-`>` guess; classifyTag computes", () => {
+        // peekTopLevelStateDeclSignal / peekCompoundStateDeclSignal
+        // (block-splitter.js:529-632) PEEK past `>` for a `=`/`:` to GUESS
+        // a state-decl. The native parser COMPUTES TagClass from the
+        // post-`>` facts (inspectAfterOpener) + a closed rule — the same
+        // grammar that subsumes #4. A `<x> = expr` opener computes
+        // Declaration; a `<x> markup` opener computes Markup.
+        const declFollow = inspectAfterOpener("<x> = 1", 3);
+        expect(classifyTag(TagKind.StateOpener, false, declFollow, null))
+            .toBe(TagClass.Declaration);
+        const markupFollow = inspectAfterOpener("<x>body", 3);
+        expect(classifyTag(TagKind.Html, false, markupFollow, null))
+            .toBe(TagClass.Markup);
+    });
+
+    test("#4 classifyOpenerForCompoundScan — NO self-recursion; typed-payload read", () => {
+        // The BS's classifyOpenerForCompoundScan (block-splitter.js:670-753)
+        // is SELF-RECURSIVE — it calls itself on the nested opener to
+        // decide compound-vs-markup. classifyTag does NOT recurse: it
+        // reads the first child's ALREADY-COMPUTED TagClass (the
+        // recursive-descent close order guarantees the child closed
+        // first). End-to-end: a `<Parent><Child> = </></>` classifies the
+        // parent Compound by reading the child's Declaration payload.
+        const blocks = parseMarkup("<Parent><Child> = </></>");
+        expect(blocks[0].tagClass).toBe(TagClass.Compound);
+        expect(blocks[0].children[0].tagClass).toBe(TagClass.Declaration);
+        // classifyTag itself takes the child class as a plain argument —
+        // there is no recursive call inside it.
+        expect(classifyTag(TagKind.Component, false,
+            { declSignal: false, nestedTagAt: 8 }, TagClass.Declaration))
+            .toBe(TagClass.Compound);
+    });
+
+    test("#5 scanCompoundBlockEnd — the matching closer is found by stack discipline", () => {
+        // (Re-affirmed from MK2.2 §28.) The BS's scanCompoundBlockEnd
+        // forward-scans for the matching `</>` by counting nested pairs;
+        // the native parser's TagFrame stack pops the innermost by
+        // construction.
+        expect(markupTree("<a><a><a></></></>")).toBe("a[0,18]{a[3,15]{a[6,12]{}}}");
+        const { ctx } = parseMarkupTrace("<x><x></></>");
+        expect(tagFrameDepth(ctx)).toBe(0);
+    });
+
+    test("#12 looksLikeCloser — a bare `/` in markup text is NOT a closer guess", () => {
+        // (Re-affirmed from MK2.2 §28.) The closer set is the closed set
+        // `</>` / `</name>` / `/>`; a bare `/` is text — no guess.
+        expect(runDiagnostics("<p>a/b</p>")).toEqual([]);
+        expect(recognizeCloserForm(makeCursor("/x"))).toBe(null);
+    });
+
+    test("MK2 gating — the native <tag> tree matches the BS block tree (full corpus)", () => {
+        // The MK2 milestone gating criterion (charter Q4.A): the tag-tree
+        // + closer-form output is equivalent to the BS block tree. Every
+        // markup-bench corpus file in the markup-tree disposition is
+        // asserted full-tree-equal in the MK1.3 conformance harness; this
+        // is a consolidated re-assertion across a representative set.
+        const corpus = [
+            "<div></div>",
+            "<div><p>a</p><p>b</p></div>",
+            "<section><ul><li>x</li><li>y</li></ul></section>",
+            "<a><b><c></c></b></a>",
+            "<div><br/><span>t</span></div>",
+        ];
+        for (const src of corpus) {
+            const bs = splitBlocks("conf.scrml", src);
+            expect(bs.errors.length).toBe(0);
+            const bsFmt = (b) => {
+                if (b.type === "markup") {
+                    return `${b.name}[${b.span.start},${b.span.end}]{${(b.children ?? []).map(bsFmt).join(",")}}`;
+                }
+                return `${BS_TYPE_TO_NATIVE_KIND[b.type] ?? b.type}[${b.span.start},${b.span.end}]`;
+            };
+            expect(markupTree(src)).toBe(bs.blocks.map(bsFmt).join(" "));
+        }
     });
 });

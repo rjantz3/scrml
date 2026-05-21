@@ -64,6 +64,11 @@ import {
 // `</name>` closers (a closed set); closeTagFrame / closeSelfClosedFrame
 // pop the matching frame (opener/closer pairing); reportUnterminatedTags
 // records the EOF E-CTX-001 diagnostics.
+// MK2.3 — classifyTagFrame is the TagKind-driven classification (charter
+// Q2.A #4 elimination): at frame-close the element's TagClass is computed
+// from TagKind + the post-`>` inspection + the first child's
+// already-computed TagClass and stamped on the Markup block (the typed
+// payload NR consumes downstream).
 import {
     recognizeOpener,
     TagFrameKind,
@@ -74,6 +79,7 @@ import {
     tagFrameDepth,
     popTagFrame,
     reportUnterminatedTags,
+    classifyTagFrame,
 } from "./tag-frame.js";
 
 // blockKindForContext — calculation. Maps a BlockContext variant to the
@@ -559,6 +565,16 @@ export function dispatchInMarkupTag(run, cursor, ctx) {
 // (opener + children + closer). `children` is the element's child-block
 // array (empty for a self-closing tag); it is carried as the Markup
 // block's `children` payload — the `<tag>` TREE (charter Q1.G output).
+//
+// MK2.3 — the SINGLE element-emit locus, so it is where the
+// TagKind-driven TagClass classification is stamped. classifyTagFrame
+// computes the element's TagClass from `tagFrame`'s TagKind + the
+// post-`>` inspection + `children`'s first-child TagClass (a
+// typed-payload read — the recursive-descent close order means a child's
+// TagClass is set before the parent emits). The Markup block carries
+// `.tagClass`; a parent element's classifyTagFrame reads its child's
+// `.tagClass` here, and NR (Stage 3.05) consumes it as the
+// authoritative-resolution input.
 export function emitMarkupElement(ctx, tagFrame, startPos, endPos, children) {
     const k = blockKinds();
     const block = makeBlockNode(
@@ -571,6 +587,11 @@ export function emitMarkupElement(ctx, tagFrame, startPos, endPos, children) {
     block.name = tagFrame.name;
     block.children = children;
     block.closerForm = tagFrame.closerForm ?? null;
+    // MK2.3 — the TagKind-driven TagClass (charter Q2.A #4 elimination).
+    // Stamped on EVERY Markup block (self-closing, paired, and
+    // EOF-/context-recovered paths all route through here), so a parent's
+    // classification reads this child's payload.
+    block.tagClass = classifyTagFrame(tagFrame, children);
     appendBlock(ctx, block);
 }
 

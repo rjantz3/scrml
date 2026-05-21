@@ -53,6 +53,24 @@ export const TagKind = Object.freeze({
     StateOpener:     "StateOpener",
 });
 
+// TagClass variant tags — all 5 per the .scrml's type declaration. PURE
+// DATA (calculation classification): MK2.3's TagKind-driven four-way
+// (five with Structural) classification of a recognized opener — is it
+// MARKUP, a state DECLARATION, a COMPOUND state-decl parent, a
+// SELF-CLOSED element, or a scrml-defined STRUCTURAL element? The
+// heuristic-elimination TYPE for charter Q2.A #4 (the BS's recursive
+// `classifyOpenerForCompoundScan`). ADVISORY per SPEC §4.3 — the
+// AUTHORITATIVE markup-vs-state resolution is NR's (Stage 3.05); the
+// native parser carries TagClass as a TagFrame payload, the same way it
+// carries TagKind. See the .scrml TagClass type for the full rationale.
+export const TagClass = Object.freeze({
+    Markup:      "Markup",
+    Declaration: "Declaration",
+    Compound:    "Compound",
+    SelfClose:   "SelfClose",
+    Structural:  "Structural",
+});
+
 // TagFrameKind — the 3 TagFrame variant tags (the engine's
 // state-children) surfaced as values. Distinct from the open-tag
 // DESCRIPTOR struct below — a closed open-tag frame carries its payload
@@ -394,12 +412,46 @@ export function ensureTagFrameStack(ctx) {
 }
 
 // tagFrameDepth — calculation (read). The tag-tree depth — how many tags
-// are open. Punch-list P5 (the TagFrame stack depth datum the
-// CloseCondition.TagFrameBalanced close-condition consumes) is exposed
-// via this read; MK2.3 wires P5's consumer.
+// are open. The raw stack-depth read; MK2.1 added it. Punch-list P5's
+// queryable stack-depth datum (see tagFrameBalancedAt below for the
+// CloseCondition-shaped accessor MK2.3 adds).
 export function tagFrameDepth(ctx) {
     ensureTagFrameStack(ctx);
     return ctx.tagFrameStack.length;
+}
+
+// ===========================================================================
+// PUNCH-LIST P5 (R1 seam spike §3.2 / §6 P5) — the TagFrame stack exposes
+// its depth as a queryable value for the
+// `CloseCondition.TagFrameBalanced(tagDepthAtOpen)` close datum.
+//
+// The JS->markup delegation direction (R1 spike §1.2 — a `<tag>...</>` as
+// an expression operand) pushes a DelegationFrame whose `closeOn` is
+// `CloseCondition.TagFrameBalanced(tagDepthAtOpen)`: the markup element +
+// all its children are consumed exactly when the TagFrame stack RETURNS to
+// the depth it had at the open. `tagFrameDepth` (above) is the raw depth
+// read; `tagFrameBalancedAt` is the CloseCondition-shaped PREDICATE —
+// "has the TagFrame stack returned to `tagDepthAtOpen`?". This mirrors how
+// M1's BracketStack exposes `depth(ctx.brackets)` and how block-context.js's
+// isBlockContextClose tests the brace-depth datum.
+//
+// FORWARD SEAM — the CONSUMER of this predicate is the MK4 markup<->JS seam
+// (it drives the JS->markup delegation handback — R1 spike §1.2 HANDBACK
+// step 2 + the `closeConditionKinds().TagFrameBalanced` close-condition in
+// parse-ctx.js). MK2.3 lands the accessor; MK4 wires it into the delegation
+// loop. It is a pure read — no engine write, no cursor advance.
+// ===========================================================================
+
+// tagFrameBalancedAt — calculation (predicate / read). Has the TagFrame
+// stack returned to `tagDepthAtOpen`? True exactly when the current
+// tag-tree depth EQUALS the depth recorded when a JS->markup `ElementValue`
+// delegation opened — i.e. the markup element and all its children have
+// been fully consumed and the delegation must hand back. The
+// CloseCondition.TagFrameBalanced(tagDepthAtOpen) datum's predicate; the
+// MK4 seam consumes it.
+export function tagFrameBalancedAt(ctx, tagDepthAtOpen) {
+    ensureTagFrameStack(ctx);
+    return ctx.tagFrameStack.length === tagDepthAtOpen;
 }
 
 // currentTagFrame — calculation (peek). The CURRENT @tagFrame variant
@@ -499,6 +551,13 @@ export function popTagFrame(ctx) {
 //
 // The closer side (MK2.2) and the decl-vs-markup classification
 // completion (MK2.3) consume this same frame; MK2.1 lands the push.
+//
+// MK2.3 amendment: recognizeOpener also stamps the post-`>` inspection
+// (`afterOpener` — inspectAfterOpener) onto the frame. The TagClass
+// classification (classifyTagFrame) runs at frame-CLOSE time — when the
+// element's first child's own TagClass is already known (recursive
+// descent closes children before the parent's closer), so the BS's
+// self-recursive classifier becomes a typed-payload READ.
 export function recognizeOpener(ctx, cursor, ltAnchor) {
     // 1. One-pass opener-body tokenization.
     const opener = tokenizeOpener(cursor, ltAnchor);
@@ -526,7 +585,239 @@ export function recognizeOpener(ctx, cursor, ltAnchor) {
     // Carry the tokenizer descriptor so the caller can emit the Markup
     // block at the opener's full span + observe `malformed`.
     frame.opener = opener;
+
+    // MK2.3 — stamp the post-`>` inspection. opener.span.end is one past
+    // the opener's terminating `>`; inspectAfterOpener reads the bytes
+    // there (a decl signal `=`/`:` or a nested `<ident`). The closed-rule
+    // TagClass (classifyTagFrame) consumes this at close.
+    frame.afterOpener = inspectAfterOpener(cursor.source, opener.span.end);
     return frame;
+}
+
+// ===========================================================================
+// MK2.3 — THE TagKind-DRIVEN CLASSIFICATION (charter Q1.F + Q2.A #4).
+//
+// The completion of the <tag>-tree work: the grammar decides
+// decl-vs-markup-vs-structural from `TagKind` (computed at MK2.1) + what
+// FOLLOWS the opener's terminating `>`. This is the elimination of BS
+// classifier heuristics #1 + #4:
+//
+//   #1 `isAfterTransitionArrow` (block-splitter.js:276-303) — a BACKWARD
+//      scan: from a `<`, scan backward past whitespace, expect `=>`, scan
+//      back through balanced `()`, expect an identifier — to decide
+//      whether `< Target>` after `name(...) =>` is a transition target.
+//      The native parser does NO backward scan: in a code-default body
+//      `name(...) => <Target>` is CODE, parsed by the JS-layer grammar;
+//      the `=>` is a JS operator the lexer tokenizes; `<Target>` is
+//      markup-as-value, recognized FORWARD by the JS layer's
+//      `markupValueAllowedAfter(lastKind)` discriminator (punch-list P4,
+//      lex-in-code.js — `Arrow` IS a value-position prev-token, so P4
+//      returns true). The backward heuristic scan is GONE.
+//
+//   #4 `classifyOpenerForCompoundScan` (block-splitter.js:670-753,
+//      SELF-RECURSIVE) — tokenize the opener (a balanced-attr scan), then
+//      inspect post-`>`: a `=` not part of `==`/`=>`, or a `:`, =>
+//      state-decl; post-`>` whitespace + a nested `<ident` whose OWN
+//      recursive classification is state-decl/compound => compound; else
+//      markup. classifyTag below replaces it: tokenizeOpener (MK2.1, the
+//      one-pass `skipOpener` primitive) does the tokenize; classifyTag
+//      does the closed-rule classification from `TagKind` +
+//      `inspectAfterOpener`'s post-`>` facts + the first child's
+//      ALREADY-COMPUTED `TagClass`. The SELF-RECURSION is gone — the BS
+//      recurses because it has no grammar + must decide whether to defer
+//      the body as raw text; the native parser parses the body in place
+//      via recursive descent (the TagFrame stack), so the nested opener
+//      is classified by the trampoline's natural descent and the parent
+//      reads its child's typed payload.
+//
+// ADVISORY per SPEC §4.3 (load-bearing) — see the .scrml TagClass type.
+// The native parser COMPUTES TagClass from a closed rule and carries it
+// as a TagFrame payload; NR (Stage 3.05) is the downstream AUTHORITATIVE
+// markup-vs-state resolver. The elimination is genuine: a closed
+// calculation + a typed payload, not a guess.
+// ===========================================================================
+
+// isDeclSignalChar — calculation (predicate). A `:` immediately after an
+// opener's `>` is a `:`-shorthand-body / state-decl signal (§4.14 / §6).
+// (`=` needs a two-char look — see inspectAfterOpener — so it is NOT a
+// single-char test.)
+export function isDeclSignalChar(ch) {
+    return ch === ":";
+}
+
+// inspectAfterOpener — calculation (pure fn over a source + the
+// one-past-`>` offset). Inspects the bytes immediately FOLLOWING an
+// opener's terminating `>` and returns the two facts the TagClass
+// calculation needs:
+//
+//   { declSignal, nestedTagAt }
+//
+//   declSignal  — true when, after skipping inline spaces/tabs, the next
+//                 char is a `=` that is NOT part of `==` or `=>` (a
+//                 state-DECLARATION assignment — `<NAME> = expr`), or is
+//                 a `:` (a `:`-shorthand body — `<NAME> : ...`). This is
+//                 heuristic #4's post-`>` `=`/`:` test
+//                 (block-splitter.js:723-730), done forward + closed.
+//   nestedTagAt — the offset of a nested `<ident` opener if, after
+//                 skipping ALL whitespace, the body opens with one; -1
+//                 otherwise. The COMPOUND-state shape signal (heuristic
+//                 #4's post-`>` whitespace + `<ident` test,
+//                 block-splitter.js:736-751) — but the native parser
+//                 does NOT recurse here: the nested tag is classified by
+//                 the trampoline's descent and the parent reads the
+//                 child's TagClass at close.
+//
+// A pure fn — no cursor, no engine write. Mirrors the no-offset-math
+// discipline: the inputs are a source string + an absolute offset.
+export function inspectAfterOpener(source, afterOpenerPos) {
+    const len = source.length;
+
+    // 1. The decl-signal test — skip inline spaces/tabs only (a
+    //    declaration `=`/`:` follows the `>` on the SAME shape, the
+    //    BS-#4 `source[r] === " " || "\t"` skip).
+    let r = afterOpenerPos;
+    while (r < len) {
+        const c = source.charAt(r);
+        if (c === " ") {
+            r = r + 1;
+        } else if (c === String.fromCharCode(9)) {
+            r = r + 1;
+        } else {
+            break;
+        }
+    }
+    let declSignal = false;
+    if (r < len) {
+        const c = source.charAt(r);
+        if (c === "=") {
+            // A `=` is a decl assignment UNLESS it is `==` or `=>`.
+            let nxt = "";
+            if (r + 1 < len) {
+                nxt = source.charAt(r + 1);
+            }
+            if (nxt !== "=" && nxt !== ">") {
+                declSignal = true;
+            }
+        } else if (isDeclSignalChar(c)) {
+            declSignal = true;
+        }
+    }
+
+    // 2. The nested-tag test — skip ALL whitespace (BS-#4 skips `\s`
+    //    before the nested `<ident` look). nestedTagAt is the nested
+    //    opener's `<` offset, or -1.
+    let s = afterOpenerPos;
+    while (s < len && isOpenerWhitespace(source.charAt(s))) {
+        s = s + 1;
+    }
+    let nestedTagAt = -1;
+    if (s + 1 < len && source.charAt(s) === "<") {
+        if (isTagNameStart(source.charAt(s + 1))) {
+            nestedTagAt = s;
+        }
+    }
+
+    return { declSignal, nestedTagAt };
+}
+
+// classifyTag — calculation (pure fn). The closed-rule TagClass of a
+// recognized opener. THE heuristic-elimination calculation for charter
+// Q2.A #4 — a closed classification from typed inputs, no recursive scan.
+//
+// PARAMETERS:
+//   tagKind         — the opener's TagKind (computed at MK2.1).
+//   selfClosing     — whether the opener is a `<ident ... />`.
+//   afterOpener     — the inspectAfterOpener descriptor (post-`>` facts:
+//                     declSignal + nestedTagAt).
+//   firstChildClass — the TagClass of the element's FIRST child element,
+//                     or null when the element has no child element (a
+//                     leaf, a text-only body, or a self-closing tag).
+//                     The trampoline supplies it at close time — the
+//                     child's TagClass is already computed (recursive
+//                     descent closes children before the parent), so
+//                     this is a typed-payload READ, NOT the BS's
+//                     recursive classifier call.
+//
+// The classification (priority order):
+//   1. selfClosing             → SelfClose   (§4.14 — a `/>` opener; no
+//                                             body, no closer).
+//   2. tagKind ScrmlStructural → Structural  (a scrml-defined structural
+//                                             element — SPEC §4.15 /
+//                                             §24.4; its kind IS its class).
+//   3. afterOpener.declSignal   → Declaration (a `<NAME> = expr` /
+//                                             `<NAME> : ...` shape —
+//                                             heuristic #4's `=`/`:`
+//                                             post-`>` test).
+//   4. a nested first-child tag whose own class is Declaration or
+//      Compound                 → Compound    (a compound state-decl
+//                                             parent — heuristic #4's
+//                                             recursive-compound test,
+//                                             replaced by the child's
+//                                             typed payload).
+//   5. otherwise                → Markup       (an ordinary markup
+//                                             element).
+//
+// Rationale for the priority order: SelfClose first — a `/>` opener has
+// no body so neither the decl nor the compound test can apply. Structural
+// before declSignal — `<engine ...> = ...` would be a misuse, but a
+// structural element's CLASS is its kind regardless of a stray post-`>`
+// `=`; NR validates structural-element placement. declSignal before the
+// compound test — `<NAME> = <X>...` is a declaration whose RHS happens to
+// open with a tag, not a compound.
+export function classifyTag(tagKind, selfClosing, afterOpener, firstChildClass) {
+    // 1. A self-closing `<ident ... />` — §4.14 self-closing form.
+    if (selfClosing) return TagClass.SelfClose;
+    // 2. A scrml-defined structural element — its TagKind IS its TagClass
+    //    (SPEC §4.15 / §24.4).
+    if (tagKind === TagKind.ScrmlStructural) return TagClass.Structural;
+    // 3. A state declaration — a `=` (not `==`/`=>`) or a `:` immediately
+    //    follows the opener's `>`.
+    if (afterOpener !== null && afterOpener !== undefined && afterOpener.declSignal) {
+        return TagClass.Declaration;
+    }
+    // 4. A compound state-decl parent — the body opens with a nested tag
+    //    whose OWN class is Declaration or Compound. The native parser
+    //    READS the child's already-computed TagClass; the BS RECURSED
+    //    here (classifyOpenerForCompoundScan calling itself).
+    if (firstChildClass === TagClass.Declaration) return TagClass.Compound;
+    if (firstChildClass === TagClass.Compound) return TagClass.Compound;
+    // 5. Otherwise — an ordinary markup element.
+    return TagClass.Markup;
+}
+
+// firstChildElementClass — calculation (pure fn over a child-block
+// array). The TagClass of the FIRST child block that is a markup element,
+// or null if no child block is a markup element (the children are text /
+// comments / context blocks, or there are none). The trampoline calls
+// this at frame-close to get classifyTag's `firstChildClass` argument — a
+// typed-payload read over the spliced child blocks (each Markup child
+// carries its own `.tagClass`).
+export function firstChildElementClass(children) {
+    if (children === null || children === undefined) return null;
+    let i = 0;
+    while (i < children.length) {
+        const child = children[i];
+        if (child !== null && child !== undefined &&
+            child.tagClass !== null && child.tagClass !== undefined) {
+            return child.tagClass;
+        }
+        i = i + 1;
+    }
+    return null;
+}
+
+// classifyTagFrame — calculation at its own locus. The frame-close
+// classification entry point: given a TagFrame (carrying tagKind +
+// afterOpener + opener.selfClosing) and the element's spliced child
+// blocks, compute + return the element's TagClass. The trampoline
+// (parse-markup's closeMarkupElement / emitMarkupElement) calls this and
+// stamps the result on the Markup block — the typed payload NR (Stage
+// 3.05) consumes downstream.
+export function classifyTagFrame(frame, children) {
+    const selfClosing = frame.opener !== null && frame.opener !== undefined &&
+        frame.opener.selfClosing;
+    const firstChildClass = firstChildElementClass(children);
+    return classifyTag(frame.tagKind, selfClosing, frame.afterOpener, firstChildClass);
 }
 
 // ===========================================================================

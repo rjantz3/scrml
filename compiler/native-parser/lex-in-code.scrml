@@ -383,6 +383,73 @@ ${
     }
 
     // ---------------------------------------------------------------------
+    // markupValueAllowedAfter — CALCULATION (PUNCH-LIST P4; R1 seam spike
+    // §1.2 / §6 P4). Given the most-recently-emitted token kind, may a `<`
+    // at the current cursor position OPEN A MARKUP ELEMENT (a `<tag>...</>`
+    // as a value — §4.18.2 markup-as-value / Pillar 1) rather than mean
+    // less-than?
+    //
+    // This is the JS layer's `<`-vs-LessThan discriminator. The R1 seam
+    // spike §1.2 names it the EXACT TWIN of regexAllowedAfter (above): a
+    // `<` opens a markup element exactly when the previous token is one
+    // after which a VALUE is expected — `=`, `(`, `,`, `return`, `lift`,
+    // `render`, `=>`, `[`, a binary operator, start-of-body — AND the
+    // character after the `<` is a letter/`_` (the markup-opener shape) or
+    // whitespace-then-letter (the state-opener shape; the second test is
+    // the JS-layer caller's, not this predicate's). It is BOUNDED
+    // prev-token lookahead, NOT backtracking and NOT a heuristic (S98 OQ3
+    // — the verdict the regex twin already established holds).
+    //
+    // Mechanism (the same partition regexAllowedAfter uses): a `<` is
+    // LessThan after a value or a closing bracket (a value-producing
+    // token); a `<` MAY open a markup element after everything else (an
+    // operator, an open bracket, a value-expecting keyword, or
+    // start-of-input). The predicate returns true in the markup-allowed
+    // positions. The full `<`-disambiguation also requires the next-char
+    // letter/whitespace test — that belongs to the JS-layer caller (§1.2),
+    // mirroring how the regex caller pairs regexAllowedAfter with its own
+    // `/`-content scan.
+    //
+    // FORWARD SEAM — the CONSUMER of this predicate is the MK4 markup<->JS
+    // seam: the JS layer's InCode dispatch consults it (parallel to the
+    // shipping regexAllowedAfter consult, ~line 542 / ~723 below) to
+    // decide whether a `<` begins a JS->markup `ElementValue` delegation.
+    // MK2.3 lands the predicate; MK4 wires the InCode-dispatch consult.
+    // dispatchInCode is therefore UNCHANGED at MK2.3 — this is an exported
+    // calculation with no caller yet inside this file.
+    // ---------------------------------------------------------------------
+    export function markupValueAllowedAfter(lastKind) {
+        // Start-of-input — a `<` here may open a top-level markup element.
+        if (lastKind is not) return true
+        // After a value or a closing bracket the `<` is less-than — a
+        // markup element is NOT a legal continuation of a completed value.
+        if (lastKind == TokenKind.Ident) return false
+        if (lastKind == TokenKind.NumberLit) return false
+        if (lastKind == TokenKind.StringLit) return false
+        if (lastKind == TokenKind.RegexLit) return false
+        if (lastKind == TokenKind.BoolLit) return false
+        if (lastKind == TokenKind.TemplateChunk) return false
+        if (lastKind == TokenKind.RParen) return false
+        if (lastKind == TokenKind.RBracket) return false
+        if (lastKind == TokenKind.RBrace) return false
+        if (lastKind == TokenKind.Increment) return false
+        if (lastKind == TokenKind.Decrement) return false
+        if (lastKind == TokenKind.KwThis) return false
+        if (lastKind == TokenKind.KwSuper) return false
+        if (lastKind == TokenKind.KwTrue) return false
+        if (lastKind == TokenKind.KwFalse) return false
+        if (lastKind == TokenKind.KwNull) return false
+        if (lastKind == TokenKind.KwUndefined) return false
+        if (lastKind == TokenKind.BareVariant) return false
+        if (lastKind == TokenKind.ScrmlAt) return false
+        // Everything else — an operator, an open bracket, a comma, a
+        // value-expecting keyword (return / lift / render / yield / await
+        // / ...), or `=>` — is a value position: a `<` here MAY open a
+        // markup element.
+        return true
+    }
+
+    // ---------------------------------------------------------------------
     // dispatchInCode — the per-character dispatch for InCode state.
     //
     // CALCULATION wrapper around STATE-writes to cursor + ctx.tokens. Each
