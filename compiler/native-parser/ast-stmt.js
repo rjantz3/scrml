@@ -49,6 +49,39 @@ export const VarDeclKind = Object.freeze({
     Var:   "var",
 });
 
+// ClassMemberKind — the discriminator for one class-body member (M3.3).
+//   Method   — a method definition (`name(params) { body }`, incl. a
+//              constructor, a static method, a get/set accessor, a
+//              generator/async method, a computed-name method).
+//   Property — a class field `name = init` / `name` (incl. static fields).
+// (M3.3 parses ESTree's MethodDefinition + PropertyDefinition class members;
+// the `kind` sub-field on a Method — "constructor"/"method"/"get"/"set" —
+// is carried separately, see MethodKind.)
+export const ClassMemberKind = Object.freeze({
+    Method:   "Method",
+    Property: "Property",
+});
+
+// MethodKind — the role of a class Method member (ESTree MethodDefinition
+// `kind`). A get/set accessor, the constructor, or a plain method.
+export const MethodKind = Object.freeze({
+    Constructor: "constructor",
+    Method:      "method",
+    Get:         "get",
+    Set:         "set",
+});
+
+// ImportSpecifierKind — one specifier of an `import` statement (M3.3).
+//   Named     — `import { a, b as c } from "m"` — one bound name (+ optional
+//               local alias).
+//   Default   — `import d from "m"` — the module's default binding.
+//   Namespace — `import * as ns from "m"` — the whole namespace object.
+export const ImportSpecifierKind = Object.freeze({
+    Named:     "Named",
+    Default:   "Default",
+    Namespace: "Namespace",
+});
+
 // BindingKind — the discriminator for a variable-declaration binding TARGET
 // (the left side of one declarator). M3.1 parses real binding patterns for
 // declaration targets per S98 DD §D5 ("destructuring patterns ...
@@ -200,6 +233,140 @@ export function makeContinue(label, span) {
 // `continue label` target it).
 export function makeLabeled(label, body, span) {
     return { kind: StmtKind.Labeled, label, body, span };
+}
+
+// =============================================================================
+// Declaration / module / legacy-error statement node constructors — M3.3
+// (DD §D3 / §D5 — the MUST-PARSE declaration + module + try/throw rows).
+//
+// Function/class declarations carry their body parsed IN-LINE — `body` is a
+// Stmt array, NOT a token-range stub. This is THE body-pre-parser subsumption:
+// M3 parses function bodies in-line, so `body-pre-parser.ts` deletes by
+// construction (DD §D7 M3 gating). `try`/`catch`/`finally`+`throw` are parsed
+// for legacy + JS-import inputs; a later stage (the typer) rejects them in
+// scrml source per primer §6 — scrml uses `fail`/`!{}` per SPEC §19.
+// =============================================================================
+
+// makeFunctionDecl — a `function name(params) { body }` declaration. `name`
+// is the function name (a declaration is always named). `params` is the
+// parameter array (the M2.3 param shapes — Ident / RestElement /
+// AssignmentPattern / destructuring stand-in). `body` is the function body's
+// Stmt array — parsed in-line (the BPP subsumption). `isAsync` is true for
+// `async function`; `isGenerator` is true for `function*`.
+export function makeFunctionDecl(name, params, body, isAsync, isGenerator, span) {
+    return { kind: StmtKind.FunctionDecl, name, params, body, isAsync, isGenerator, span };
+}
+
+// makeClassDecl — a `class Name extends Base { ... }` declaration. `name` is
+// the class name (a declaration is always named). `superClass` is the
+// extends-clause Expr, or `not` for a base class. `body` is a ClassMember
+// array (see makeMethodDef / makePropertyDef).
+export function makeClassDecl(name, superClass, body, span) {
+    return { kind: StmtKind.ClassDecl, name, superClass, body, span };
+}
+
+// makeImport — an `import ... from "source"` statement. `specifiers` is an
+// array of import-specifier objects (see makeImportNamed / makeImportDefault
+// / makeImportNamespace). `source` is the module-specifier string value. A
+// bare side-effect import `import "m"` has an empty `specifiers` array.
+export function makeImport(specifiers, source, span) {
+    return { kind: StmtKind.Import, specifiers, source, span };
+}
+
+// makeExport — an `export ...` statement. Three shapes ride one node:
+//   - `export <declaration>`     — `declaration` is the exported Stmt,
+//                                  `specifiers` is empty, `source` is `not`.
+//   - `export { a, b as c }`     — `declaration` is `not`, `specifiers` is the
+//      [from "m"]                  export-specifier list, `source` is the
+//                                  re-export module string or `not`.
+//   - `export default <expr>`    — `isDefault` is true, `declaration` carries
+//                                  the default value/decl.
+// `isDefault` is true for `export default`.
+export function makeExport(declaration, specifiers, source, isDefault, span) {
+    return { kind: StmtKind.Export, declaration, specifiers, source, isDefault, span };
+}
+
+// makeTry — a `try { block } catch (param) { } finally { }` statement.
+// `block` is the try-block Stmt (a Block). `handler` is a catch-clause object
+// (see makeCatchClause) or `not` for a `try`/`finally` with no catch.
+// `finalizer` is the finally-block Stmt (a Block) or `not`.
+export function makeTry(block, handler, finalizer, span) {
+    return { kind: StmtKind.Try, block, handler, finalizer, span };
+}
+
+// makeThrow — a `throw argument` statement. `argument` is the thrown-value
+// Expr. The no-LineTerminator restricted production applies — `throw` must be
+// followed on the SAME source line by its argument.
+export function makeThrow(argument, span) {
+    return { kind: StmtKind.Throw, argument, span };
+}
+
+// =============================================================================
+// Class-member node constructors — M3.3 (ESTree MethodDefinition +
+// PropertyDefinition). A class body is a ClassMember array.
+// =============================================================================
+
+// makeMethodDef — one method member of a class body. `key` is the method-name
+// node (an Ident / StringLit / NumberLit key Expr, or — when `computed` — any
+// Expr). `value` is the method's Function Expr node (params + in-line body).
+// `methodKind` is a MethodKind value ("constructor"/"method"/"get"/"set").
+// `isStatic` is true for a `static` method. `computed` is true for a
+// `[expr]`-named method.
+export function makeMethodDef(key, value, methodKind, isStatic, computed, span) {
+    return {
+        memberKind: ClassMemberKind.Method,
+        key, value, methodKind, isStatic, computed, span,
+    };
+}
+
+// makePropertyDef — one class-field member. `key` is the field-name node (as
+// for makeMethodDef). `value` is the field-initializer Expr, or `not` for an
+// uninitialized field (`name;`). `isStatic` is true for a `static` field.
+// `computed` is true for a `[expr]`-named field.
+export function makePropertyDef(key, value, isStatic, computed, span) {
+    return {
+        memberKind: ClassMemberKind.Property,
+        key, value, isStatic, computed, span,
+    };
+}
+
+// =============================================================================
+// Import-specifier node constructors — M3.3. One specifier of an `import`.
+// =============================================================================
+
+// makeImportNamed — a named import specifier `imported as local` (or just
+// `imported` when there is no alias). `imported` is the name exported by the
+// module; `local` is the name bound in this module (equal to `imported` for
+// an un-aliased specifier).
+export function makeImportNamed(imported, local, span) {
+    return { specifierKind: ImportSpecifierKind.Named, imported, local, span };
+}
+
+// makeImportDefault — the default-import specifier `import local from "m"`.
+// `local` is the name the module's default export is bound to.
+export function makeImportDefault(local, span) {
+    return { specifierKind: ImportSpecifierKind.Default, local, span };
+}
+
+// makeImportNamespace — the namespace-import specifier `import * as local`.
+// `local` is the name the whole module-namespace object is bound to.
+export function makeImportNamespace(local, span) {
+    return { specifierKind: ImportSpecifierKind.Namespace, local, span };
+}
+
+// makeExportSpecifier — one specifier of an `export { ... }` clause:
+// `local as exported` (or just `local` when there is no alias). `local` is
+// the name in this module; `exported` is the name the consumer sees.
+export function makeExportSpecifier(local, exported, span) {
+    return { local, exported, span };
+}
+
+// makeCatchClause — the `catch (param) { body }` clause of a `try`. `param`
+// is the caught-binding target (a binding node — Ident or destructuring
+// pattern), or `not` for the optional-catch-binding form `catch { }`. `body`
+// is the catch-block Stmt (a Block).
+export function makeCatchClause(param, body, span) {
+    return { param, body, span };
 }
 
 // =============================================================================

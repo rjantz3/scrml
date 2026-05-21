@@ -1,16 +1,24 @@
-// parser-conformance-stmt.test.js — statement-parser conformance suite (M3.1).
+// parser-conformance-stmt.test.js — statement-parser conformance suite
+// (M3.1 + M3.2 + M3.3).
 //
 // Per scrml-native-parser-design-2026-05-17.md §D6 + §D7 M3 gating:
 //   "Conformance Tier 1+2 PASS on the full statement subset ... Tier 1 —
 //    node-kind sequence ... Tier 2 — identifier / literal values."
 //
-// Scope (M3.1 — the FIRST sub-step of M3, the JS statement parser):
-//   STATEMENT SUBSTRATE — variable declarations let/const/var (incl. object
-//   + array destructuring binding patterns), expression statements (with
-//   automatic semicolon insertion), block statements { }, the empty
-//   statement ;. PLUS the BlockStub re-entry mechanism — M2.3/M2.4 left
-//   function/arrow/match-arm block bodies as BlockStub Expr nodes; M3.1
-//   re-parses them into a real Stmt list.
+// Scope (M3 — the JS statement parser):
+//   M3.1 — STATEMENT SUBSTRATE — variable declarations let/const/var (incl.
+//     object + array destructuring binding patterns), expression statements
+//     (with automatic semicolon insertion), block statements { }, the empty
+//     statement ;. PLUS the BlockStub re-entry mechanism — M2.3/M2.4 left
+//     function/arrow/match-arm block bodies as BlockStub Expr nodes; M3.1
+//     re-parses them into a real Stmt list.
+//   M3.2 — CONTROL FLOW — if/else, while, do-while, for (C-style/in/of),
+//     return/break/continue, labels.
+//   M3.3 — FUNCTIONS / CLASSES + IN-LINE BODIES + IMPORT/EXPORT + TRY/THROW —
+//     function declarations (incl. async / generator), class declarations
+//     (methods / fields / static / get/set / computed names), import/export,
+//     try/catch/finally + throw. Function/method bodies parse IN-LINE — the
+//     body-pre-parser subsumption. `await`/`yield` statement leads.
 //
 // The native statement parser (compiler/native-parser/parse-stmt.js) parses
 // a token stream as a program body. This test runs a micro-corpus through
@@ -20,15 +28,9 @@
 //   Tier 2 — identifier names + literal values at corresponding positions
 //            match.
 //
-// Control-flow statements (M3.2), function/class declarations + import/export
-// + try/throw (M3.3), and error-recovery integration (M3.4) are LATER
-// sub-steps — NOT exercised here (a corpus statement that begins with one of
-// those keyword leads records a forward-seam diagnostic by design).
-//
 // This file MIRRORS parser-conformance-expr.test.js's structure. The
 // statement-tree expression sub-grammar is M2's; the expression normalizer
-// below covers exactly the simple expression shapes the M3.1 corpus uses
-// (identifiers, literals, calls, member access, the small operator set).
+// below covers the expression shapes the M3.1-M3.3 corpus uses.
 
 import { describe, test, expect } from "bun:test";
 import * as acorn from "acorn";
@@ -37,7 +39,7 @@ import { lex as scrmlNativeLex } from "../native-parser/lex.js";
 import { parseProgram as scrmlNativeParseProgram } from "../native-parser/parse-stmt.js";
 import { parseBlockStubBody, reenterBlockStubs } from "../native-parser/parse-stmt.js";
 import { parseExpr as scrmlNativeParseExpr } from "../native-parser/parse-expr.js";
-import { StmtKind, BindingKind } from "../native-parser/ast-stmt.js";
+import { StmtKind, BindingKind, ClassMemberKind } from "../native-parser/ast-stmt.js";
 import { ExprKind } from "../native-parser/ast-expr.js";
 
 const ACORN_OPTS = {
@@ -155,10 +157,114 @@ function nativeExprToEstree(node) {
             optional: node.optional === true,
         };
     }
-    // Any expression shape the M3.1 corpus does not exercise — projected as a
-    // generic node so the walk still terminates. The M3.1 corpus is curated
-    // so this branch is not reached on a clean parse.
+    if (node.kind === ExprKind.New) {
+        return {
+            type: "NewExpression",
+            callee: nativeExprToEstree(node.callee),
+            arguments: (node.args ?? []).map(nativeExprToEstree),
+        };
+    }
+    if (node.kind === ExprKind.This) {
+        return { type: "ThisExpression" };
+    }
+    if (node.kind === ExprKind.Conditional) {
+        return {
+            type: "ConditionalExpression",
+            test: nativeExprToEstree(node.test),
+            consequent: nativeExprToEstree(node.consequent),
+            alternate: nativeExprToEstree(node.alternate),
+        };
+    }
+    // Function expressions (M2.3 head) — the body is a BlockStub. After M3.3
+    // tie-off the BlockStub carries `.parsedBody` (a Stmt array re-entered
+    // in-line); a function DECLARATION / class method value carries the body
+    // directly as a Stmt array. nativeFunctionBody normalizes both.
+    if (node.kind === ExprKind.Function) {
+        return {
+            type: "FunctionExpression",
+            id: (node.name === undefined || node.name === null || node.name === "")
+                ? null : { type: "Identifier", name: node.name },
+            async: node.isAsync === true,
+            generator: node.isGenerator === true,
+            params: (node.params ?? []).map(nativeParamToEstree),
+            body: nativeFunctionBody(node.body),
+        };
+    }
+    if (node.kind === ExprKind.Arrow) {
+        return {
+            type: "ArrowFunctionExpression",
+            async: node.isAsync === true,
+            params: (node.params ?? []).map(nativeParamToEstree),
+            body: nativeArrowBody(node.body),
+        };
+    }
+    // `await` / `yield` Expr-shaped nodes the M3.3 statement parser produces.
+    if (node.kind === "Await") {
+        return { type: "AwaitExpression", argument: nativeExprToEstree(node.argument) };
+    }
+    if (node.kind === "Yield") {
+        return {
+            type: "YieldExpression",
+            delegate: node.delegate === true,
+            argument: (node.argument === undefined || node.argument === null)
+                ? null : nativeExprToEstree(node.argument),
+        };
+    }
+    // Any expression shape the corpus does not exercise — projected as a
+    // generic node so the walk still terminates. The corpus is curated so
+    // this branch is not reached on a clean parse.
     return { type: "UnknownExpr", kind: node.kind };
+}
+
+// nativeParamToEstree — normalize one function / arrow / method parameter.
+// M2.3 parses params as a mix of Ident / RestElement / AssignmentPattern /
+// (destructuring stand-in — an Object/Array literal node, the K6 divergence).
+function nativeParamToEstree(node) {
+    if (node === undefined || node === null) return null;
+    if (node.kind === ExprKind.RestElement || node.bindingKind === "RestElement") {
+        return {
+            type: "RestElement",
+            argument: nativeParamToEstree(node.argument),
+        };
+    }
+    if (node.kind === ExprKind.AssignmentPattern || node.bindingKind === "AssignmentPattern") {
+        return {
+            type: "AssignmentPattern",
+            left: nativeParamToEstree(node.left),
+            right: nativeExprToEstree(node.right),
+        };
+    }
+    if (node.bindingKind !== undefined) return nativeBindingToEstree(node);
+    return nativeExprToEstree(node);
+}
+
+// nativeFunctionBody — the body of a function / method. M3.3-parsed function
+// declarations + class methods carry the body as a Stmt array (parsed
+// in-line); a M2.3 function-EXPRESSION carries a BlockStub whose `.parsedBody`
+// is set after M3.3's reenterBlockStubs tie-off. Either way -> a
+// BlockStatement.
+function nativeFunctionBody(body) {
+    if (Array.isArray(body)) {
+        return { type: "BlockStatement", body: body.map(nativeStmtToEstree) };
+    }
+    if (body !== undefined && body !== null && Array.isArray(body.parsedBody)) {
+        return { type: "BlockStatement", body: body.parsedBody.map(nativeStmtToEstree) };
+    }
+    // An un-re-entered BlockStub — empty (the corpus re-enters every body).
+    return { type: "BlockStatement", body: [] };
+}
+
+// nativeArrowBody — the body of an arrow. A concise body is an Expr; a block
+// body is a BlockStub (re-entered to `.parsedBody` by the M3.3 tie-off).
+function nativeArrowBody(body) {
+    if (body === undefined || body === null) return null;
+    if (body.kind === ExprKind.BlockStub || Array.isArray(body.parsedBody)) {
+        return nativeFunctionBody(body);
+    }
+    if (Array.isArray(body)) {
+        return nativeFunctionBody(body);
+    }
+    return nativeExprToEstree(body);   // concise expression body
 }
 
 // nativeBindingToEstree — normalize a native binding node (ast-stmt's binding
@@ -354,7 +460,166 @@ function nativeStmtToEstree(node) {
             body: nativeStmtToEstree(node.body),
         };
     }
+    // --- M3.3 declaration / module / legacy-error statements ---
+    if (node.kind === StmtKind.FunctionDecl) {
+        return {
+            type: "FunctionDeclaration",
+            id: (node.name === undefined || node.name === null || node.name === "")
+                ? null : { type: "Identifier", name: node.name },
+            async: node.isAsync === true,
+            generator: node.isGenerator === true,
+            params: (node.params ?? []).map(nativeParamToEstree),
+            body: nativeFunctionBody(node.body),
+        };
+    }
+    if (node.kind === StmtKind.ClassDecl) {
+        return {
+            type: "ClassDeclaration",
+            id: (node.name === undefined || node.name === null || node.name === "")
+                ? null : { type: "Identifier", name: node.name },
+            superClass: (node.superClass === undefined || node.superClass === null)
+                ? null : nativeExprToEstree(node.superClass),
+            body: {
+                type: "ClassBody",
+                body: (node.body ?? []).map(nativeClassMemberToEstree),
+            },
+        };
+    }
+    if (node.kind === StmtKind.Import) {
+        return {
+            type: "ImportDeclaration",
+            specifiers: (node.specifiers ?? []).map(nativeImportSpecifierToEstree),
+            source: { type: "Literal", value: node.source },
+        };
+    }
+    if (node.kind === StmtKind.Export) {
+        return nativeExportToEstree(node);
+    }
+    if (node.kind === StmtKind.Try) {
+        return {
+            type: "TryStatement",
+            block: nativeStmtToEstree(node.block),
+            handler: (node.handler === undefined || node.handler === null)
+                ? null : {
+                    type: "CatchClause",
+                    param: (node.handler.param === undefined || node.handler.param === null)
+                        ? null : nativeBindingToEstree(node.handler.param),
+                    body: nativeStmtToEstree(node.handler.body),
+                },
+            finalizer: (node.finalizer === undefined || node.finalizer === null)
+                ? null : nativeStmtToEstree(node.finalizer),
+        };
+    }
+    if (node.kind === StmtKind.Throw) {
+        return {
+            type: "ThrowStatement",
+            argument: (node.argument === undefined || node.argument === null)
+                ? null : nativeExprToEstree(node.argument),
+        };
+    }
     return { type: "UnknownStmt", kind: node.kind };
+}
+
+// nativeClassMemberToEstree — one class-body member. M3.3's Method ->
+// ESTree MethodDefinition; Property -> ESTree PropertyDefinition.
+function nativeClassMemberToEstree(m) {
+    if (m === undefined || m === null) return null;
+    if (m.memberKind === ClassMemberKind.Method) {
+        return {
+            type: "MethodDefinition",
+            kind: m.methodKind,
+            static: m.isStatic === true,
+            computed: m.computed === true,
+            key: nativeExprToEstree(m.key),
+            value: nativeExprToEstree(m.value),
+        };
+    }
+    return {
+        type: "PropertyDefinition",
+        static: m.isStatic === true,
+        computed: m.computed === true,
+        key: nativeExprToEstree(m.key),
+        value: (m.value === undefined || m.value === null)
+            ? null : nativeExprToEstree(m.value),
+    };
+}
+
+// nativeImportSpecifierToEstree — one import specifier. Named -> ESTree
+// ImportSpecifier; Default -> ImportDefaultSpecifier; Namespace ->
+// ImportNamespaceSpecifier.
+function nativeImportSpecifierToEstree(s) {
+    if (s === undefined || s === null) return null;
+    if (s.specifierKind === "Default") {
+        return {
+            type: "ImportDefaultSpecifier",
+            local: { type: "Identifier", name: s.local },
+        };
+    }
+    if (s.specifierKind === "Namespace") {
+        return {
+            type: "ImportNamespaceSpecifier",
+            local: { type: "Identifier", name: s.local },
+        };
+    }
+    return {
+        type: "ImportSpecifier",
+        imported: { type: "Identifier", name: s.imported },
+        local: { type: "Identifier", name: s.local },
+    };
+}
+
+// nativeExportToEstree — an `export` statement. M3.3's Export node rides
+// three ESTree shapes: ExportDefaultDeclaration (isDefault), ExportNamed-
+// Declaration (a declaration OR a specifier clause), ExportAllDeclaration
+// (a `*` re-export). The conformance corpus exercises the comparable
+// subset; the `export *` form keys off no specifiers + a source.
+function nativeExportToEstree(node) {
+    if (node.isDefault === true) {
+        return {
+            type: "ExportDefaultDeclaration",
+            declaration: exportedDeclToEstree(node.declaration),
+        };
+    }
+    // `export * [as ns] from "m"` — a source, no declaration; the namespace-
+    // alias form carries one Namespace specifier.
+    const hasSource = node.source !== undefined && node.source !== null;
+    const noDecl = node.declaration === undefined || node.declaration === null;
+    const specs = node.specifiers ?? [];
+    const isStarReexport = hasSource && noDecl
+        && (specs.length === 0
+            || (specs.length === 1 && specs[0].specifierKind === "Namespace"));
+    if (isStarReexport) {
+        const out = {
+            type: "ExportAllDeclaration",
+            source: { type: "Literal", value: node.source },
+            exported: null,
+        };
+        if (specs.length === 1) {
+            out.exported = { type: "Identifier", name: specs[0].local };
+        }
+        return out;
+    }
+    return {
+        type: "ExportNamedDeclaration",
+        declaration: noDecl ? null : exportedDeclToEstree(node.declaration),
+        specifiers: specs.map((s) => ({
+            type: "ExportSpecifier",
+            local: { type: "Identifier", name: s.local },
+            exported: { type: "Identifier", name: s.exported },
+        })),
+        source: hasSource ? { type: "Literal", value: node.source } : null,
+    };
+}
+
+// exportedDeclToEstree — the declaration carried by an `export <decl>` /
+// `export default <decl|expr>`. A Stmt -> nativeStmtToEstree; an Expr (the
+// `export default <expression>` form) -> nativeExprToEstree.
+function exportedDeclToEstree(decl) {
+    if (decl === undefined || decl === null) return null;
+    if (typeof decl.kind === "string" && StmtKind[decl.kind] !== undefined) {
+        return nativeStmtToEstree(decl);
+    }
+    return nativeExprToEstree(decl);
 }
 
 // nativeProgramToEstree — wrap a native program body (a Stmt array) as an
@@ -434,9 +699,67 @@ function nodeKindSequence(node, out) {
     } else if (node.type === "MemberExpression") {
         nodeKindSequence(node.object, acc);
         nodeKindSequence(node.property, acc);
-    } else if (node.type === "CallExpression") {
+    } else if (node.type === "CallExpression" || node.type === "NewExpression") {
         nodeKindSequence(node.callee, acc);
         for (const a of node.arguments) nodeKindSequence(a, acc);
+    } else if (node.type === "ConditionalExpression") {
+        nodeKindSequence(node.test, acc);
+        nodeKindSequence(node.consequent, acc);
+        nodeKindSequence(node.alternate, acc);
+    } else if (node.type === "AwaitExpression") {
+        nodeKindSequence(node.argument, acc);
+    } else if (node.type === "YieldExpression") {
+        if (node.argument) nodeKindSequence(node.argument, acc);
+    } else if (node.type === "FunctionDeclaration" || node.type === "FunctionExpression"
+               || node.type === "ArrowFunctionExpression") {
+        if (node.id) nodeKindSequence(node.id, acc);
+        for (const p of node.params) nodeKindSequence(p, acc);
+        nodeKindSequence(node.body, acc);
+    } else if (node.type === "ClassDeclaration" || node.type === "ClassExpression") {
+        if (node.id) nodeKindSequence(node.id, acc);
+        if (node.superClass) nodeKindSequence(node.superClass, acc);
+        nodeKindSequence(node.body, acc);
+    } else if (node.type === "ClassBody") {
+        for (const m of node.body) nodeKindSequence(m, acc);
+    } else if (node.type === "MethodDefinition" || node.type === "PropertyDefinition") {
+        if (!node.computed) {
+            // A non-computed key is an Identifier / Literal — emit it so the
+            // member-name nodes are part of the sequence (Acorn does the same).
+            nodeKindSequence(node.key, acc);
+        } else {
+            nodeKindSequence(node.key, acc);
+        }
+        if (node.value) nodeKindSequence(node.value, acc);
+    } else if (node.type === "ImportDeclaration") {
+        for (const s of node.specifiers) nodeKindSequence(s, acc);
+        nodeKindSequence(node.source, acc);
+    } else if (node.type === "ImportSpecifier") {
+        nodeKindSequence(node.imported, acc);
+        nodeKindSequence(node.local, acc);
+    } else if (node.type === "ImportDefaultSpecifier"
+               || node.type === "ImportNamespaceSpecifier") {
+        nodeKindSequence(node.local, acc);
+    } else if (node.type === "ExportNamedDeclaration") {
+        if (node.declaration) nodeKindSequence(node.declaration, acc);
+        for (const s of node.specifiers) nodeKindSequence(s, acc);
+        if (node.source) nodeKindSequence(node.source, acc);
+    } else if (node.type === "ExportSpecifier") {
+        nodeKindSequence(node.local, acc);
+        nodeKindSequence(node.exported, acc);
+    } else if (node.type === "ExportDefaultDeclaration") {
+        nodeKindSequence(node.declaration, acc);
+    } else if (node.type === "ExportAllDeclaration") {
+        if (node.exported) nodeKindSequence(node.exported, acc);
+        nodeKindSequence(node.source, acc);
+    } else if (node.type === "TryStatement") {
+        nodeKindSequence(node.block, acc);
+        if (node.handler) nodeKindSequence(node.handler, acc);
+        if (node.finalizer) nodeKindSequence(node.finalizer, acc);
+    } else if (node.type === "CatchClause") {
+        if (node.param) nodeKindSequence(node.param, acc);
+        nodeKindSequence(node.body, acc);
+    } else if (node.type === "ThrowStatement") {
+        nodeKindSequence(node.argument, acc);
     }
     return acc;
 }
@@ -465,8 +788,28 @@ function valueSequence(node, out) {
         acc.push("member:computed=" + (node.computed === true));
     } else if (node.type === "CallExpression") {
         acc.push("call");
+    } else if (node.type === "NewExpression") {
+        acc.push("new");
     } else if (node.type === "ForOfStatement") {
         acc.push("forof:await=" + (node.await === true));
+    } else if (node.type === "FunctionDeclaration" || node.type === "FunctionExpression") {
+        acc.push("fn:async=" + (node.async === true) + ":gen=" + (node.generator === true));
+    } else if (node.type === "ArrowFunctionExpression") {
+        acc.push("arrow:async=" + (node.async === true));
+    } else if (node.type === "MethodDefinition") {
+        acc.push("method:" + node.kind + ":static=" + (node.static === true)
+            + ":computed=" + (node.computed === true));
+    } else if (node.type === "PropertyDefinition") {
+        acc.push("field:static=" + (node.static === true)
+            + ":computed=" + (node.computed === true));
+    } else if (node.type === "YieldExpression") {
+        acc.push("yield:delegate=" + (node.delegate === true));
+    } else if (node.type === "AwaitExpression") {
+        acc.push("await");
+    } else if (node.type === "ImportDeclaration" || node.type === "ExportAllDeclaration") {
+        acc.push("source:" + JSON.stringify(node.source.value));
+    } else if (node.type === "ExportNamedDeclaration" && node.source) {
+        acc.push("source:" + JSON.stringify(node.source.value));
     }
 
     if (node.type === "Program" || node.type === "BlockStatement") {
@@ -527,9 +870,58 @@ function valueSequence(node, out) {
     } else if (node.type === "MemberExpression") {
         valueSequence(node.object, acc);
         valueSequence(node.property, acc);
-    } else if (node.type === "CallExpression") {
+    } else if (node.type === "CallExpression" || node.type === "NewExpression") {
         valueSequence(node.callee, acc);
         for (const a of node.arguments) valueSequence(a, acc);
+    } else if (node.type === "ConditionalExpression") {
+        valueSequence(node.test, acc);
+        valueSequence(node.consequent, acc);
+        valueSequence(node.alternate, acc);
+    } else if (node.type === "AwaitExpression") {
+        valueSequence(node.argument, acc);
+    } else if (node.type === "YieldExpression") {
+        if (node.argument) valueSequence(node.argument, acc);
+    } else if (node.type === "FunctionDeclaration" || node.type === "FunctionExpression"
+               || node.type === "ArrowFunctionExpression") {
+        if (node.id) valueSequence(node.id, acc);
+        for (const p of node.params) valueSequence(p, acc);
+        valueSequence(node.body, acc);
+    } else if (node.type === "ClassDeclaration" || node.type === "ClassExpression") {
+        if (node.id) valueSequence(node.id, acc);
+        if (node.superClass) valueSequence(node.superClass, acc);
+        valueSequence(node.body, acc);
+    } else if (node.type === "ClassBody") {
+        for (const m of node.body) valueSequence(m, acc);
+    } else if (node.type === "MethodDefinition" || node.type === "PropertyDefinition") {
+        valueSequence(node.key, acc);
+        if (node.value) valueSequence(node.value, acc);
+    } else if (node.type === "ImportDeclaration") {
+        for (const s of node.specifiers) valueSequence(s, acc);
+    } else if (node.type === "ImportSpecifier") {
+        valueSequence(node.imported, acc);
+        valueSequence(node.local, acc);
+    } else if (node.type === "ImportDefaultSpecifier"
+               || node.type === "ImportNamespaceSpecifier") {
+        valueSequence(node.local, acc);
+    } else if (node.type === "ExportNamedDeclaration") {
+        if (node.declaration) valueSequence(node.declaration, acc);
+        for (const s of node.specifiers) valueSequence(s, acc);
+    } else if (node.type === "ExportSpecifier") {
+        valueSequence(node.local, acc);
+        valueSequence(node.exported, acc);
+    } else if (node.type === "ExportDefaultDeclaration") {
+        valueSequence(node.declaration, acc);
+    } else if (node.type === "ExportAllDeclaration") {
+        if (node.exported) valueSequence(node.exported, acc);
+    } else if (node.type === "TryStatement") {
+        valueSequence(node.block, acc);
+        if (node.handler) valueSequence(node.handler, acc);
+        if (node.finalizer) valueSequence(node.finalizer, acc);
+    } else if (node.type === "CatchClause") {
+        if (node.param) valueSequence(node.param, acc);
+        valueSequence(node.body, acc);
+    } else if (node.type === "ThrowStatement") {
+        valueSequence(node.argument, acc);
     }
     return acc;
 }
@@ -714,6 +1106,102 @@ const CONTROL_FLOW_CORPUS = [
     { name: "program — loop with decl + if",   src: "for (let i = 0; i < n; i++) { let v = at(i); if (v) use(v); }" },
 ];
 
+// -----------------------------------------------------------------------------
+// M3.3 declaration / module / try-throw micro-corpus. Every entry is a program
+// built from M3.1 substrate + M3.3 declaration / module / legacy-error
+// statements — raw Acorn (module mode) parses it and the native-vs-Acorn
+// Tier 1+2 diff is meaningful.
+//
+// Curation notes (NOT Acorn-comparable, excluded by design):
+//   - `export { x }` with `x` undeclared — Acorn module-mode raises a
+//     SEMANTIC "Export 'x' is not defined" error (a binding check, not a
+//     syntax error). The native parser is a pure parser — no such check. So
+//     every `export {}` corpus entry DECLARES its names first.
+//   - private class fields `#name` — OUT of the D5 subset (roadmap K5 — M1
+//     has no `#` lex branch). Covered nowhere.
+//   - `await` / `yield` integrated INSIDE a larger expression — M4 (not M3.3).
+//     M3.3's `await`/`yield` are exercised as statement leads inside
+//     re-entered function bodies (the BlockStub re-entry describe block).
+// -----------------------------------------------------------------------------
+const DECL_MODULE_CORPUS = [
+    // --- function declarations ---
+    { name: "fn decl — no params",             src: "function f() {}" },
+    { name: "fn decl — one param",             src: "function id(x) { return x; }" },
+    { name: "fn decl — two params",            src: "function add(a, b) { return a + b; }" },
+    { name: "fn decl — default param",         src: "function g(x = 1) { return x; }" },
+    { name: "fn decl — rest param",            src: "function h(...xs) { return xs; }" },
+    { name: "fn decl — body with decl + stmt", src: "function f() { let x = 1; use(x); }" },
+    { name: "fn decl — nested fn decl",        src: "function outer() { function inner() {} return inner; }" },
+    { name: "fn decl — control flow in body",  src: "function f(n) { if (n) return 1; return 0; }" },
+    { name: "async fn decl",                   src: "async function load() { return 1; }" },
+    { name: "generator fn decl",               src: "function* gen() { return 1; }" },
+    { name: "async generator fn decl",         src: "async function* ag() { return 1; }" },
+
+    // --- class declarations ---
+    { name: "class — empty",                   src: "class C {}" },
+    { name: "class — extends",                 src: "class C extends Base {}" },
+    { name: "class — extends member-access",   src: "class C extends ns.Base {}" },
+    { name: "class — one method",              src: "class C { m() {} }" },
+    { name: "class — constructor",             src: "class C { constructor(x) { this.x = x; } }" },
+    { name: "class — two methods",             src: "class C { a() {} b() {} }" },
+    { name: "class — static method",           src: "class C { static make() {} }" },
+    { name: "class — getter",                  src: "class C { get v() { return 1; } }" },
+    { name: "class — setter",                  src: "class C { set v(n) {} }" },
+    { name: "class — get + set pair",          src: "class C { get v() { return 1; } set v(n) {} }" },
+    { name: "class — async method",            src: "class C { async load() {} }" },
+    { name: "class — generator method",        src: "class C { *gen() {} }" },
+    { name: "class — class field",             src: "class C { x = 1; }" },
+    { name: "class — uninitialized field",     src: "class C { x; }" },
+    { name: "class — static field",            src: "class C { static s = 2; }" },
+    { name: "class — computed method name",    src: "class C { ['m']() {} }" },
+    { name: "class — method named static",     src: "class C { static() {} }" },
+    { name: "class — method named get",        src: "class C { get() {} }" },
+    { name: "class — keyword method name",     src: "class C { if() {} }" },
+    { name: "class — full member mix",         src: "class P extends Q { constructor() {} static make() {} get v() { return 1; } m() {} f = 1; }" },
+
+    // --- import statements ---
+    { name: "import — default",                src: 'import d from "m";' },
+    { name: "import — namespace",              src: 'import * as ns from "m";' },
+    { name: "import — one named",              src: 'import { a } from "m";' },
+    { name: "import — two named",              src: 'import { a, b } from "m";' },
+    { name: "import — named alias",            src: 'import { a as x } from "m";' },
+    { name: "import — default + named",        src: 'import d, { a, b } from "m";' },
+    { name: "import — default + namespace",    src: 'import d, * as ns from "m";' },
+    { name: "import — side-effect",            src: 'import "side-effect";' },
+
+    // --- export statements ---
+    { name: "export — let decl",               src: "export let x = 1;" },
+    { name: "export — const decl",             src: "export const k = 9;" },
+    { name: "export — function decl",          src: "export function f() {}" },
+    { name: "export — async function decl",    src: "export async function af() {}" },
+    { name: "export — class decl",             src: "export class C {}" },
+    { name: "export — named clause",           src: "let a, b; export { a, b };" },
+    { name: "export — named alias",            src: "let a; export { a as x };" },
+    { name: "export — re-export named",        src: 'export { a, b } from "m";' },
+    { name: "export — re-export all",          src: 'export * from "m";' },
+    { name: "export — re-export namespace",    src: 'export * as ns from "m";' },
+    { name: "export default — expression",     src: "export default 42;" },
+    { name: "export default — function",       src: "export default function () {}" },
+    { name: "export default — named function", src: "export default function named() {}" },
+    { name: "export default — class",          src: "export default class {}" },
+
+    // --- try / catch / finally + throw ---
+    { name: "try-catch",                       src: "try { f(); } catch (e) { log(e); }" },
+    { name: "try-catch-finally",               src: "try { f(); } catch (e) {} finally { done(); }" },
+    { name: "try-finally (no catch)",          src: "try { f(); } finally { cleanup(); }" },
+    { name: "try — optional catch binding",    src: "try { f(); } catch { recover(); }" },
+    { name: "try — destructuring catch param", src: "try { f(); } catch ({ message }) { log(message); }" },
+    { name: "try — nested try in block",       src: "try { try { f(); } catch (e) {} } catch (e2) {}" },
+    { name: "throw — identifier",              src: "throw err;" },
+    { name: "throw — new expression",          src: "throw new Error('bad');" },
+    { name: "throw — inside a catch",          src: "try { f(); } catch (e) { throw e; }" },
+
+    // --- mixed declaration / module programs ---
+    { name: "program — import then function",  src: 'import d from "m"; function use() { return d; }' },
+    { name: "program — class then export",     src: "class C {} export const made = new C();" },
+    { name: "program — fn decl + try",         src: "function f() {} try { f(); } catch (e) {}" },
+];
+
 describe("M3.1 statement-parser conformance — Tier 1 (node-kind sequence)", () => {
     for (const c of ACORN_CORPUS) {
         test(`(tier1) ${c.name} — ${c.src}`, () => {
@@ -770,6 +1258,41 @@ describe("M3.2 control-flow conformance — Tier 1 (node-kind sequence)", () => 
 
 describe("M3.2 control-flow conformance — Tier 2 (identifier / literal / await values)", () => {
     for (const c of CONTROL_FLOW_CORPUS) {
+        test(`(tier2) ${c.name} — ${c.src}`, () => {
+            const a = parseWithAcorn(c.src);
+            const n = parseWithNative(c.src);
+
+            expect(a.ok).toBe(true);
+            expect(n.ok).toBe(true);
+
+            const acornVals = valueSequence(a.ast);
+            const nativeVals = valueSequence(nativeProgramToEstree(n.body));
+            expect(nativeVals).toEqual(acornVals);
+        });
+    }
+});
+
+describe("M3.3 decl/module/try conformance — Tier 1 (node-kind sequence)", () => {
+    for (const c of DECL_MODULE_CORPUS) {
+        test(`(tier1) ${c.name} — ${c.src}`, () => {
+            const a = parseWithAcorn(c.src);
+            const n = parseWithNative(c.src);
+
+            expect(a.ok).toBe(true);
+            expect(n.ok).toBe(true);
+            // The native parser must report NO diagnostics on a clean
+            // M3.3-declaration/module/try-throw program.
+            expect(n.errors).toEqual([]);
+
+            const acornSeq = nodeKindSequence(a.ast);
+            const nativeSeq = nodeKindSequence(nativeProgramToEstree(n.body));
+            expect(nativeSeq).toEqual(acornSeq);
+        });
+    }
+});
+
+describe("M3.3 decl/module/try conformance — Tier 2 (identifier / literal / flag values)", () => {
+    for (const c of DECL_MODULE_CORPUS) {
         test(`(tier2) ${c.name} — ${c.src}`, () => {
             const a = parseWithAcorn(c.src);
             const n = parseWithNative(c.src);
@@ -987,8 +1510,15 @@ describe("M3.1 statement-parser — BlockStub re-entry", () => {
     test("reenterBlockStubs deep-walk — attaches .parsedBody to every stub", () => {
         const e = scrmlNativeParseExpr(scrmlNativeLex("(a) => { let g = (b) => { foo(b); }; }"));
         const count = reenterBlockStubs(e.ast);
-        // Two stubs: the outer arrow body + the inner arrow body.
-        expect(count).toBe(2);
+        // Two stubs: the outer arrow body + the inner arrow body. M3.3 ties
+        // off the function-expression body seam — parseVarDeclarator eagerly
+        // re-enters a function/arrow initializer's BlockStub IN-LINE while
+        // re-parsing the outer body. So by the time the deep-walk descends to
+        // the inner arrow it already carries `.parsedBody` (idempotent skip)
+        // — the deep-walk counts only the 1 stub it actually re-entered.
+        // Both stubs end up re-entered (the assertions below) — the COUNT
+        // reflects M3.3's eager in-line tie-off, not lost work.
+        expect(count).toBe(1);
         expect(Array.isArray(e.ast.body.parsedBody)).toBe(true);
         expect(e.ast.body.parsedBody[0].kind).toBe(StmtKind.VarDecl);
 
@@ -1022,51 +1552,88 @@ describe("M3.1 statement-parser — BlockStub re-entry", () => {
 });
 
 // -----------------------------------------------------------------------------
-// M3.2 statement-parser — M3.3 forward seam. M3.2 parses control-flow; it does
-// NOT parse function/class declarations + import/export + try/throw (M3.3). A
-// statement that begins with one of those keyword leads records the documented
-// M3.3 forward-seam diagnostic instead of mis-parsing it — this pins the
-// M3.2 / M3.3 boundary so a later sub-step (or a corpus file) surfaces it
-// cleanly. The control-flow leads (`if`/`for`/`while`/...) that M3.1 forwarded
-// are now PARSED by M3.2 — see the control-flow conformance describe blocks.
+// Statement-parser — all D5 MUST-PARSE statement leads are now PARSED. M3.1
+// forwarded the control-flow leads to M3.2; M3.2 forwarded the
+// function/class/import/export/try/throw leads to M3.3 (the documented
+// E-STMT-FORWARD-M3-3 seam). M3.3 lands those — so the forward seam is now
+// CLOSED: no D5 statement lead records E-STMT-FORWARD-M3-3 any longer. This
+// describe block CONVERTS the M3.1/M3.2 forward-seam tests into
+// now-parsed assertions, pinning that the seam is closed.
 // -----------------------------------------------------------------------------
-describe("M3.2 statement-parser — M3.3 forward seam (no longer M3.2)", () => {
-    test("an `if` lead is now parsed (no M3.2 forward seam)", () => {
+describe("statement-parser — M3.3 closes the forward seam (all leads parsed)", () => {
+    test("an `if` lead is parsed (no forward seam)", () => {
         const r = parseWithNative("if (a) b;");
         expect(r.errors).toEqual([]);
         expect(r.body[0].kind).toBe(StmtKind.If);
     });
 
-    test("a `for` lead is now parsed (no M3.2 forward seam)", () => {
+    test("a `for` lead is parsed (no forward seam)", () => {
         const r = parseWithNative("for (;;) {}");
         expect(r.errors).toEqual([]);
         expect(r.body[0].kind).toBe(StmtKind.For);
     });
 
-    test("a `while` lead is now parsed (no M3.2 forward seam)", () => {
+    test("a `while` lead is parsed (no forward seam)", () => {
         const r = parseWithNative("while (a) b;");
         expect(r.errors).toEqual([]);
         expect(r.body[0].kind).toBe(StmtKind.While);
     });
 
-    test("a `function` declaration lead records the M3.3 forward seam", () => {
+    test("a `function` declaration lead is parsed by M3.3 (seam closed)", () => {
         const r = parseWithNative("function f() {}");
-        expect(r.errors.map((e) => e.code)).toContain("E-STMT-FORWARD-M3-3");
+        expect(r.errors).toEqual([]);
+        expect(r.errors.map((e) => e.code)).not.toContain("E-STMT-FORWARD-M3-3");
+        expect(r.body[0].kind).toBe(StmtKind.FunctionDecl);
     });
 
-    test("a `class` declaration lead records the M3.3 forward seam", () => {
+    test("a `class` declaration lead is parsed by M3.3 (seam closed)", () => {
         const r = parseWithNative("class C {}");
-        expect(r.errors.map((e) => e.code)).toContain("E-STMT-FORWARD-M3-3");
+        expect(r.errors).toEqual([]);
+        expect(r.errors.map((e) => e.code)).not.toContain("E-STMT-FORWARD-M3-3");
+        expect(r.body[0].kind).toBe(StmtKind.ClassDecl);
     });
 
-    test("an `import` lead records the M3.3 forward seam", () => {
+    test("an `import` lead is parsed by M3.3 (seam closed)", () => {
         const r = parseWithNative('import x from "m";');
-        expect(r.errors.map((e) => e.code)).toContain("E-STMT-FORWARD-M3-3");
+        expect(r.errors).toEqual([]);
+        expect(r.errors.map((e) => e.code)).not.toContain("E-STMT-FORWARD-M3-3");
+        expect(r.body[0].kind).toBe(StmtKind.Import);
     });
 
-    test("a `try` lead records the M3.3 forward seam", () => {
+    test("an `export` lead is parsed by M3.3 (seam closed)", () => {
+        const r = parseWithNative('export { a };');
+        expect(r.errors).toEqual([]);
+        expect(r.errors.map((e) => e.code)).not.toContain("E-STMT-FORWARD-M3-3");
+        expect(r.body[0].kind).toBe(StmtKind.Export);
+    });
+
+    test("a `try` lead is parsed by M3.3 (seam closed)", () => {
         const r = parseWithNative("try {} catch (e) {}");
-        expect(r.errors.map((e) => e.code)).toContain("E-STMT-FORWARD-M3-3");
+        expect(r.errors).toEqual([]);
+        expect(r.errors.map((e) => e.code)).not.toContain("E-STMT-FORWARD-M3-3");
+        expect(r.body[0].kind).toBe(StmtKind.Try);
+    });
+
+    test("a `throw` lead is parsed by M3.3 (seam closed)", () => {
+        const r = parseWithNative("throw e;");
+        expect(r.errors).toEqual([]);
+        expect(r.errors.map((e) => e.code)).not.toContain("E-STMT-FORWARD-M3-3");
+        expect(r.body[0].kind).toBe(StmtKind.Throw);
+    });
+
+    test("no D5 statement lead emits E-STMT-FORWARD-M3-3 any longer", () => {
+        // The forward-seam diagnostic code is fully retired by M3.3 — exercise
+        // every D5 declaration / module / legacy-error lead and confirm none
+        // records it.
+        const leads = [
+            "function f() {}", "async function g() {}", "function* h() {}",
+            "class C {}", 'import x from "m";', 'export { a };',
+            "export default 1;", "try {} finally {}", "throw e;",
+        ];
+        for (const src of leads) {
+            const r = parseWithNative(src);
+            expect(r.errors.map((e) => e.code)).not.toContain("E-STMT-FORWARD-M3-3");
+        }
     });
 });
 
@@ -1340,5 +1907,488 @@ describe("M3.2 control-flow — error paths (diagnostics, no throw)", () => {
         expect(r.ok).toBe(true);
         const kinds = r.body.map((s) => s.kind);
         expect(kinds).not.toContain("Switch");
+    });
+});
+
+// -----------------------------------------------------------------------------
+// M3.3 statement-parser — native AST shape (functions / classes / module /
+// try-throw). Asserts the native Stmt node shapes directly — kind tags,
+// async/generator flags, the in-line function body, class-member structure,
+// import/export specifier shapes, try/catch/finally structure.
+// -----------------------------------------------------------------------------
+describe("M3.3 statement-parser — function declarations (native shape)", () => {
+    test("function declaration — FunctionDecl node, in-line Stmt body", () => {
+        const r = parseWithNative("function f(x) { let y = x; return y; }");
+        expect(r.ok).toBe(true);
+        expect(r.errors).toEqual([]);
+        const fn = r.body[0];
+        expect(fn.kind).toBe(StmtKind.FunctionDecl);
+        expect(fn.name).toBe("f");
+        expect(fn.isAsync).toBe(false);
+        expect(fn.isGenerator).toBe(false);
+        // The body is a parsed Stmt ARRAY — NOT a BlockStub. This is the
+        // body-pre-parser subsumption (the body is parsed in-line).
+        expect(Array.isArray(fn.body)).toBe(true);
+        expect(fn.body.length).toBe(2);
+        expect(fn.body[0].kind).toBe(StmtKind.VarDecl);
+        expect(fn.body[1].kind).toBe(StmtKind.Return);
+    });
+
+    test("async function declaration — isAsync true", () => {
+        const r = parseWithNative("async function load() {}");
+        expect(r.errors).toEqual([]);
+        expect(r.body[0].kind).toBe(StmtKind.FunctionDecl);
+        expect(r.body[0].isAsync).toBe(true);
+        expect(r.body[0].isGenerator).toBe(false);
+    });
+
+    test("generator function declaration — isGenerator true", () => {
+        const r = parseWithNative("function* gen() {}");
+        expect(r.errors).toEqual([]);
+        expect(r.body[0].isGenerator).toBe(true);
+        expect(r.body[0].isAsync).toBe(false);
+    });
+
+    test("async generator declaration — both flags true", () => {
+        const r = parseWithNative("async function* ag() {}");
+        expect(r.errors).toEqual([]);
+        expect(r.body[0].isAsync).toBe(true);
+        expect(r.body[0].isGenerator).toBe(true);
+    });
+
+    test("nested function declaration re-parses in-line", () => {
+        const r = parseWithNative("function outer() { function inner() { return 1; } }");
+        expect(r.errors).toEqual([]);
+        const outer = r.body[0];
+        expect(outer.body[0].kind).toBe(StmtKind.FunctionDecl);
+        expect(outer.body[0].name).toBe("inner");
+        expect(outer.body[0].body[0].kind).toBe(StmtKind.Return);
+    });
+});
+
+describe("M3.3 statement-parser — class declarations (native shape)", () => {
+    test("class declaration — ClassDecl node", () => {
+        const r = parseWithNative("class C {}");
+        expect(r.errors).toEqual([]);
+        expect(r.body[0].kind).toBe(StmtKind.ClassDecl);
+        expect(r.body[0].name).toBe("C");
+        expect(r.body[0].superClass).toBe(null);
+        expect(r.body[0].body).toEqual([]);
+    });
+
+    test("class with extends — superClass populated", () => {
+        const r = parseWithNative("class C extends Base {}");
+        expect(r.errors).toEqual([]);
+        expect(r.body[0].superClass).not.toBe(null);
+        expect(r.body[0].superClass.kind).toBe(ExprKind.Ident);
+        expect(r.body[0].superClass.name).toBe("Base");
+    });
+
+    test("class method — Method member, in-line body", () => {
+        const r = parseWithNative("class C { m() { return 1; } }");
+        expect(r.errors).toEqual([]);
+        const m = r.body[0].body[0];
+        expect(m.memberKind).toBe(ClassMemberKind.Method);
+        expect(m.methodKind).toBe("method");
+        expect(m.isStatic).toBe(false);
+        expect(m.key.name).toBe("m");
+        // The method value is a Function whose body is a parsed Stmt array.
+        expect(m.value.kind).toBe("Function");
+        expect(Array.isArray(m.value.body)).toBe(true);
+        expect(m.value.body[0].kind).toBe(StmtKind.Return);
+    });
+
+    test("class constructor — methodKind constructor", () => {
+        const r = parseWithNative("class C { constructor(x) { this.x = x; } }");
+        expect(r.errors).toEqual([]);
+        const m = r.body[0].body[0];
+        expect(m.methodKind).toBe("constructor");
+    });
+
+    test("class static method — isStatic true", () => {
+        const r = parseWithNative("class C { static make() {} }");
+        expect(r.errors).toEqual([]);
+        expect(r.body[0].body[0].isStatic).toBe(true);
+        expect(r.body[0].body[0].key.name).toBe("make");
+    });
+
+    test("class getter / setter — methodKind get / set", () => {
+        const r = parseWithNative("class C { get v() { return 1; } set v(n) {} }");
+        expect(r.errors).toEqual([]);
+        expect(r.body[0].body[0].methodKind).toBe("get");
+        expect(r.body[0].body[1].methodKind).toBe("set");
+    });
+
+    test("class async / generator method — value flags", () => {
+        const r = parseWithNative("class C { async load() {} *gen() {} }");
+        expect(r.errors).toEqual([]);
+        expect(r.body[0].body[0].value.isAsync).toBe(true);
+        expect(r.body[0].body[1].value.isGenerator).toBe(true);
+    });
+
+    test("class field — Property member", () => {
+        const r = parseWithNative("class C { x = 1; }");
+        expect(r.errors).toEqual([]);
+        const f = r.body[0].body[0];
+        expect(f.memberKind).toBe(ClassMemberKind.Property);
+        expect(f.key.name).toBe("x");
+        expect(f.value.kind).toBe(ExprKind.NumberLit);
+    });
+
+    test("class uninitialized field — value is not", () => {
+        const r = parseWithNative("class C { x; }");
+        expect(r.errors).toEqual([]);
+        const f = r.body[0].body[0];
+        expect(f.memberKind).toBe(ClassMemberKind.Property);
+        expect(f.value === undefined || f.value === null).toBe(true);
+    });
+
+    test("class computed method name — computed true", () => {
+        const r = parseWithNative("class C { ['m']() {} }");
+        expect(r.errors).toEqual([]);
+        expect(r.body[0].body[0].computed).toBe(true);
+    });
+
+    test("a method named `static` is a method, not a static prefix", () => {
+        const r = parseWithNative("class C { static() {} }");
+        expect(r.errors).toEqual([]);
+        const m = r.body[0].body[0];
+        expect(m.isStatic).toBe(false);
+        expect(m.key.name).toBe("static");
+    });
+
+    test("a method named `get` is a method, not an accessor prefix", () => {
+        const r = parseWithNative("class C { get() { return 1; } }");
+        expect(r.errors).toEqual([]);
+        const m = r.body[0].body[0];
+        expect(m.methodKind).toBe("method");
+        expect(m.key.name).toBe("get");
+    });
+
+    test("an identifier named `constructor` lexes correctly (K7 — prototype pollution fixed)", () => {
+        // `constructor` is an Object.prototype member name — the M1 lexer's
+        // JS_KEYWORDS lookup must use an own-property guard or it mis-lexes.
+        const r = parseWithNative("class C { constructor() {} }");
+        expect(r.errors).toEqual([]);
+        expect(r.body[0].body[0].methodKind).toBe("constructor");
+        // The same name as a plain method-call identifier.
+        const r2 = parseWithNative("let obj = {}; obj.constructor;");
+        expect(r2.errors).toEqual([]);
+    });
+});
+
+describe("M3.3 statement-parser — import / export (native shape)", () => {
+    test("default import — ImportDefault specifier", () => {
+        const r = parseWithNative('import d from "m";');
+        expect(r.errors).toEqual([]);
+        const imp = r.body[0];
+        expect(imp.kind).toBe(StmtKind.Import);
+        expect(imp.source).toBe("m");
+        expect(imp.specifiers.length).toBe(1);
+        expect(imp.specifiers[0].specifierKind).toBe("Default");
+        expect(imp.specifiers[0].local).toBe("d");
+    });
+
+    test("namespace import — ImportNamespace specifier", () => {
+        const r = parseWithNative('import * as ns from "m";');
+        expect(r.errors).toEqual([]);
+        expect(r.body[0].specifiers[0].specifierKind).toBe("Namespace");
+        expect(r.body[0].specifiers[0].local).toBe("ns");
+    });
+
+    test("named imports with alias — ImportNamed specifiers", () => {
+        const r = parseWithNative('import { a, b as c } from "m";');
+        expect(r.errors).toEqual([]);
+        const specs = r.body[0].specifiers;
+        expect(specs.length).toBe(2);
+        expect(specs[0].specifierKind).toBe("Named");
+        expect(specs[0].imported).toBe("a");
+        expect(specs[0].local).toBe("a");
+        expect(specs[1].imported).toBe("b");
+        expect(specs[1].local).toBe("c");
+    });
+
+    test("side-effect import — empty specifier list", () => {
+        const r = parseWithNative('import "side-effect";');
+        expect(r.errors).toEqual([]);
+        expect(r.body[0].specifiers).toEqual([]);
+        expect(r.body[0].source).toBe("side-effect");
+    });
+
+    test("export declaration — declaration populated, not default", () => {
+        const r = parseWithNative("export const k = 1;");
+        expect(r.errors).toEqual([]);
+        const exp = r.body[0];
+        expect(exp.kind).toBe(StmtKind.Export);
+        expect(exp.isDefault).toBe(false);
+        expect(exp.declaration.kind).toBe(StmtKind.VarDecl);
+    });
+
+    test("export named clause — ExportSpecifier list", () => {
+        const r = parseWithNative("let a, b; export { a, b as c };");
+        expect(r.errors).toEqual([]);
+        const exp = r.body[1];
+        expect(exp.specifiers.length).toBe(2);
+        expect(exp.specifiers[0].local).toBe("a");
+        expect(exp.specifiers[1].local).toBe("b");
+        expect(exp.specifiers[1].exported).toBe("c");
+    });
+
+    test("re-export — source populated", () => {
+        const r = parseWithNative('export { a } from "m";');
+        expect(r.errors).toEqual([]);
+        expect(r.body[0].source).toBe("m");
+    });
+
+    test("export default — isDefault true", () => {
+        const r = parseWithNative("export default 42;");
+        expect(r.errors).toEqual([]);
+        expect(r.body[0].isDefault).toBe(true);
+    });
+
+    test("export default function — anonymous allowed", () => {
+        const r = parseWithNative("export default function () {}");
+        expect(r.errors).toEqual([]);
+        expect(r.body[0].isDefault).toBe(true);
+        expect(r.body[0].declaration.kind).toBe(StmtKind.FunctionDecl);
+        expect(r.body[0].declaration.name).toBe("");
+    });
+});
+
+describe("M3.3 statement-parser — try / catch / finally + throw (native shape)", () => {
+    test("try-catch — Try node, handler populated", () => {
+        const r = parseWithNative("try { f(); } catch (e) { log(e); }");
+        expect(r.errors).toEqual([]);
+        const t = r.body[0];
+        expect(t.kind).toBe(StmtKind.Try);
+        expect(t.block.kind).toBe(StmtKind.Block);
+        expect(t.handler).not.toBe(null);
+        expect(t.handler.param.bindingKind).toBe(BindingKind.Ident);
+        expect(t.handler.param.name).toBe("e");
+        expect(t.finalizer === undefined || t.finalizer === null).toBe(true);
+    });
+
+    test("try-catch-finally — handler + finalizer populated", () => {
+        const r = parseWithNative("try { f(); } catch (e) {} finally { done(); }");
+        expect(r.errors).toEqual([]);
+        const t = r.body[0];
+        expect(t.handler).not.toBe(null);
+        expect(t.finalizer).not.toBe(null);
+        expect(t.finalizer.kind).toBe(StmtKind.Block);
+    });
+
+    test("try-finally with no catch — handler is not", () => {
+        const r = parseWithNative("try { f(); } finally { cleanup(); }");
+        expect(r.errors).toEqual([]);
+        const t = r.body[0];
+        expect(t.handler === undefined || t.handler === null).toBe(true);
+        expect(t.finalizer).not.toBe(null);
+    });
+
+    test("optional catch binding — param is not", () => {
+        const r = parseWithNative("try { f(); } catch { recover(); }");
+        expect(r.errors).toEqual([]);
+        const t = r.body[0];
+        expect(t.handler).not.toBe(null);
+        expect(t.handler.param === undefined || t.handler.param === null).toBe(true);
+    });
+
+    test("destructuring catch param — ObjectPat binding", () => {
+        const r = parseWithNative("try { f(); } catch ({ message }) {}");
+        expect(r.errors).toEqual([]);
+        expect(r.body[0].handler.param.bindingKind).toBe(BindingKind.ObjectPat);
+    });
+
+    test("throw — Throw node, argument populated", () => {
+        const r = parseWithNative("throw err;");
+        expect(r.errors).toEqual([]);
+        const t = r.body[0];
+        expect(t.kind).toBe(StmtKind.Throw);
+        expect(t.argument.kind).toBe(ExprKind.Ident);
+        expect(t.argument.name).toBe("err");
+    });
+
+    test("throw new Error — argument is a New expression", () => {
+        const r = parseWithNative("throw new Error('bad');");
+        expect(r.errors).toEqual([]);
+        expect(r.body[0].argument.kind).toBe(ExprKind.New);
+    });
+});
+
+// -----------------------------------------------------------------------------
+// M3.3 statement-parser — the body-pre-parser subsumption. M3 parses function
+// bodies IN-LINE: a function-declaration body is a parsed Stmt array, NOT a
+// token-range stub. M3.3 also TIES OFF the function-expression body seam — a
+// function / arrow EXPRESSION at statement position has its M2.3 BlockStub
+// body re-entered in-line. This is what makes body-pre-parser.ts deletable.
+// -----------------------------------------------------------------------------
+describe("M3.3 statement-parser — BPP subsumption (function bodies in-line)", () => {
+    test("a function declaration body is a parsed Stmt array (no BlockStub)", () => {
+        const r = parseWithNative("function f() { let x = 1; g(x); }");
+        expect(r.errors).toEqual([]);
+        const body = r.body[0].body;
+        expect(Array.isArray(body)).toBe(true);
+        // No node in the body carries the BlockStub kind.
+        for (const stmt of body) {
+            expect(stmt.kind).not.toBe("BlockStub");
+        }
+        expect(body[0].kind).toBe(StmtKind.VarDecl);
+        expect(body[1].kind).toBe(StmtKind.ExprStmt);
+    });
+
+    test("a function-expression IIFE at statement position has its body re-entered", () => {
+        // M2.3 parses the function expression with a BlockStub body; M3.3's
+        // parseExprStatement tie-off reenters it -> .parsedBody set.
+        const r = parseWithNative("(function () { let a = 1; use(a); })();");
+        expect(r.errors).toEqual([]);
+        const exprStmt = r.body[0];
+        expect(exprStmt.kind).toBe(StmtKind.ExprStmt);
+        // The expression is a Call whose callee is a Paren-wrapped Function.
+        // Find the Function node and confirm its body is re-entered.
+        let found = null;
+        const visit = (n) => {
+            if (n === undefined || n === null || typeof n !== "object") return;
+            if (n.kind === ExprKind.Function) found = n;
+            for (const k of Object.keys(n)) {
+                const c = n[k];
+                if (Array.isArray(c)) c.forEach(visit);
+                else if (c && typeof c === "object") visit(c);
+            }
+        };
+        visit(exprStmt);
+        expect(found).not.toBe(null);
+        expect(Array.isArray(found.body.parsedBody)).toBe(true);
+        expect(found.body.parsedBody[0].kind).toBe(StmtKind.VarDecl);
+    });
+
+    test("a declarator-initializer function expression has its body re-entered", () => {
+        const r = parseWithNative("let g = function () { return 1; };");
+        expect(r.errors).toEqual([]);
+        const init = r.body[0].declarations[0].init;
+        expect(init.kind).toBe(ExprKind.Function);
+        expect(Array.isArray(init.body.parsedBody)).toBe(true);
+        expect(init.body.parsedBody[0].kind).toBe(StmtKind.Return);
+    });
+
+    test("an arrow declarator-initializer has its block body re-entered", () => {
+        const r = parseWithNative("let f = (x) => { return x; };");
+        expect(r.errors).toEqual([]);
+        const init = r.body[0].declarations[0].init;
+        expect(init.kind).toBe(ExprKind.Arrow);
+        expect(Array.isArray(init.body.parsedBody)).toBe(true);
+    });
+
+    test("await statement lead inside a re-entered function body", () => {
+        // `function g() { await fetch(); }` — the body re-enters; the
+        // `await x;` statement becomes an ExprStmt wrapping an Await node.
+        const r = parseWithNative("async function g() { await fetch(); }");
+        expect(r.errors).toEqual([]);
+        const body = r.body[0].body;
+        expect(body[0].kind).toBe(StmtKind.ExprStmt);
+        expect(body[0].expression.kind).toBe("Await");
+    });
+
+    test("yield + yield* statement leads inside a re-entered generator body", () => {
+        const r = parseWithNative("function* gen() { yield 1; yield* xs; }");
+        expect(r.errors).toEqual([]);
+        const body = r.body[0].body;
+        expect(body[0].expression.kind).toBe("Yield");
+        expect(body[0].expression.delegate).toBe(false);
+        expect(body[1].expression.kind).toBe("Yield");
+        expect(body[1].expression.delegate).toBe(true);
+    });
+
+    test("a bare `yield;` is a yield with no argument", () => {
+        const r = parseWithNative("function* gen() { yield; }");
+        expect(r.errors).toEqual([]);
+        const y = r.body[0].body[0].expression;
+        expect(y.kind).toBe("Yield");
+        expect(y.argument === undefined || y.argument === null).toBe(true);
+    });
+
+    test("the M3.3-parsed function body matches Acorn on the body statements", () => {
+        // `function f() { let x = 1; if (x) g(); }` re-parsed in-line must
+        // produce the same Stmt sequence as the standalone program.
+        const r = parseWithNative("function f() { let x = 1; if (x) g(); }");
+        expect(r.errors).toEqual([]);
+        const bodyEstree = { type: "Program", body: r.body[0].body.map(nativeStmtToEstree) };
+        const a = parseWithAcorn("let x = 1; if (x) g();");
+        expect(a.ok).toBe(true);
+        expect(nodeKindSequence(bodyEstree)).toEqual(nodeKindSequence(a.ast));
+        expect(valueSequence(bodyEstree)).toEqual(valueSequence(a.ast));
+    });
+});
+
+// -----------------------------------------------------------------------------
+// M3.3 statement-parser — error paths. The parser records structured
+// diagnostics and does NOT throw (the stage contract — diagnostics are
+// objects, not exceptions).
+// -----------------------------------------------------------------------------
+describe("M3.3 statement-parser — error paths (diagnostics, no throw)", () => {
+    test("a function declaration with no name records E-STMT-FUNCTION-NAME", () => {
+        const r = parseWithNative("function () {}");
+        expect(r.ok).toBe(true);
+        expect(r.errors.map((e) => e.code)).toContain("E-STMT-FUNCTION-NAME");
+    });
+
+    test("a class declaration with no name records E-STMT-CLASS-NAME", () => {
+        const r = parseWithNative("class {}");
+        expect(r.ok).toBe(true);
+        expect(r.errors.map((e) => e.code)).toContain("E-STMT-CLASS-NAME");
+    });
+
+    test("an unclosed function body records E-STMT-UNCLOSED-FUNCTION-BODY", () => {
+        const r = parseWithNative("function f() { g();");
+        expect(r.ok).toBe(true);
+        expect(r.errors.map((e) => e.code)).toContain("E-STMT-UNCLOSED-FUNCTION-BODY");
+    });
+
+    test("an unclosed class body records E-STMT-UNCLOSED-CLASS-BODY", () => {
+        const r = parseWithNative("class C { m() {}");
+        expect(r.ok).toBe(true);
+        expect(r.errors.map((e) => e.code)).toContain("E-STMT-UNCLOSED-CLASS-BODY");
+    });
+
+    test("a namespace import missing `as` records E-STMT-EXPECT-AS", () => {
+        const r = parseWithNative('import * ns from "m";');
+        expect(r.ok).toBe(true);
+        expect(r.errors.map((e) => e.code)).toContain("E-STMT-EXPECT-AS");
+    });
+
+    test("an import missing `from` records E-STMT-EXPECT-FROM", () => {
+        const r = parseWithNative('import { a } "m";');
+        expect(r.ok).toBe(true);
+        expect(r.errors.map((e) => e.code)).toContain("E-STMT-EXPECT-FROM");
+    });
+
+    test("an unclosed import clause records E-STMT-UNCLOSED-IMPORT", () => {
+        const r = parseWithNative('import { a, b from "m";');
+        expect(r.ok).toBe(true);
+        expect(r.errors.map((e) => e.code)).toContain("E-STMT-UNCLOSED-IMPORT");
+    });
+
+    test("a bare `try {}` with no catch / finally records E-STMT-TRY-NO-HANDLER", () => {
+        const r = parseWithNative("try { f(); }");
+        expect(r.ok).toBe(true);
+        expect(r.errors.map((e) => e.code)).toContain("E-STMT-TRY-NO-HANDLER");
+    });
+
+    test("a `throw` with nothing on its line records E-STMT-THROW-NO-ARGUMENT", () => {
+        const r = parseWithNative("throw\nx;");
+        expect(r.ok).toBe(true);
+        expect(r.errors.map((e) => e.code)).toContain("E-STMT-THROW-NO-ARGUMENT");
+    });
+
+    test("the parser does not throw on a malformed declaration program", () => {
+        // A pile of malformed declaration / module fragments — the parser
+        // must return structured diagnostics, never raise.
+        const sources = [
+            "function", "class extends", "import from", "export",
+            "try", "throw", "function* () {", "class C { get",
+        ];
+        for (const src of sources) {
+            const r = parseWithNative(src);
+            expect(r.ok).toBe(true);   // ok:true means "did not throw"
+        }
     });
 });

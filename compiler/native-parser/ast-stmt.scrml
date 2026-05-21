@@ -14,17 +14,18 @@
 //   the statement parser is currently in. The AST nodes this file
 //   constructs are the OUTPUT of the parse — pure values, not state.
 //
-// Status (M3.1 + M3.2): COMPILABLE skeleton. JS-escape carries the live
-// tag-style surface. The `type Stmt:enum = { ... }` declaration is preserved
-// in commented canonical form for the M5 swap-in to scrml-native tagged
-// variants. M3.1 emitted the substrate kinds (Block, ExprStmt, Empty,
+// Status (M3.1 + M3.2 + M3.3): COMPILABLE skeleton. JS-escape carries the
+// live tag-style surface. The `type Stmt:enum = { ... }` declaration is
+// preserved in commented canonical form for the M5 swap-in to scrml-native
+// tagged variants. M3.1 emitted the substrate kinds (Block, ExprStmt, Empty,
 // VarDecl) + the binding-pattern catalog (ObjectPattern / ArrayPattern /
 // AssignmentPattern / RestElement and the property/element forms). M3.2 ADDS
 // the control-flow constructors (If / While / DoWhile / For / ForIn / ForOf
-// / Return / Break / Continue / Labeled) for the kinds M3.1 declared but
-// deferred. The remaining Stmt kinds (FunctionDecl / ClassDecl / Import /
-// Export / Try / Throw) are declared in the enum but their constructors land
-// at M3.3 (declarations + module syntax + try/throw).
+// / Return / Break / Continue / Labeled). M3.3 ADDS the declaration / module
+// / legacy-error constructors (FunctionDecl / ClassDecl / Import / Export /
+// Try / Throw) + the class-member / import-specifier / export-specifier /
+// catch-clause sub-shapes. The Stmt enum is now whole — every kind the M3
+// chain produces has both an enum tag and a constructor.
 //
 // DD §D3 cross-ref: the S98 DD §D3 `Stmt` enum sketch — ExprStmt / VarDecl /
 // If / For / Return / Block — is the design seed; M3.1 expands it to the
@@ -99,6 +100,26 @@ ${
     //       Rest(argument: Binding),
     //   }
     //
+    //   // --- M3.3 class-member / module sub-shapes ---
+    //   type ClassMember:enum = {
+    //       Method(key: Expr, value: Expr, methodKind: MethodKind,
+    //              isStatic: boolean, computed: boolean, span: Span),
+    //       Property(key: Expr, value: Expr | not,
+    //                isStatic: boolean, computed: boolean, span: Span),
+    //   }
+    //   type MethodKind:enum = { Constructor, Method, Get, Set }
+    //   type ImportSpecifier:enum = {
+    //       Named(imported: string, local: string, span: Span),
+    //       Default(local: string, span: Span),
+    //       Namespace(local: string, span: Span),
+    //   }
+    //   type ExportSpecifier:struct = {
+    //       local: string, exported: string, span: Span,
+    //   }
+    //   type CatchClause:struct = {
+    //       param: Binding | not, body: Stmt, span: Span,
+    //   }
+    //
     // LIVE M3.1 SURFACE (JS host) — a Stmt node is a plain JS object with
     // `kind` as a string tag (one of the StmtKind variant names below).
     // Payload fields ride alongside `kind` per-variant. Every node carries
@@ -147,6 +168,31 @@ ${
         Let:   "let",
         Const: "const",
         Var:   "var",
+    })
+
+    // ClassMemberKind — discriminator for one class-body member (M3.3).
+    // Method (incl. constructor / static / get/set / generator / async /
+    // computed-name) or Property (a class field).
+    export const ClassMemberKind = Object.freeze({
+        Method:   "Method",
+        Property: "Property",
+    })
+
+    // MethodKind — the role of a class Method member (ESTree
+    // MethodDefinition `kind`): constructor / plain method / get/set accessor.
+    export const MethodKind = Object.freeze({
+        Constructor: "constructor",
+        Method:      "method",
+        Get:         "get",
+        Set:         "set",
+    })
+
+    // ImportSpecifierKind — one specifier of an `import` (M3.3): a Named
+    // import, the Default import, or the Namespace import.
+    export const ImportSpecifierKind = Object.freeze({
+        Named:     "Named",
+        Default:   "Default",
+        Namespace: "Namespace",
     })
 
     // BindingKind — discriminator for a variable-declaration binding TARGET.
@@ -260,6 +306,110 @@ ${
     // identifier text; `body` is the statement the label names.
     export function makeLabeled(label, body, span) {
         return { kind: StmtKind.Labeled, label, body, span }
+    }
+
+    // -- Declaration / module / legacy-error node constructors (M3.3) --
+    //
+    // Function/class declaration bodies are parsed IN-LINE — `body` is a Stmt
+    // array, NOT a token-range stub. This is THE body-pre-parser subsumption:
+    // M3 parses function bodies in-line so body-pre-parser.ts deletes by
+    // construction (DD §D7 M3 gating). `try`/`catch`/`finally`+`throw` are
+    // parsed for legacy + JS-import inputs; a later stage (the typer) rejects
+    // them in scrml source (scrml uses `fail`/`!{}` per SPEC §19).
+
+    // makeFunctionDecl — a `function name(params) { body }` declaration.
+    // `body` is the function body's Stmt array (parsed in-line). `isAsync` is
+    // true for `async function`; `isGenerator` is true for `function*`.
+    export function makeFunctionDecl(name, params, body, isAsync, isGenerator, span) {
+        return { kind: StmtKind.FunctionDecl, name, params, body, isAsync, isGenerator, span }
+    }
+
+    // makeClassDecl — a `class Name extends Base { ... }` declaration.
+    // `superClass` is the extends-clause Expr or `not`; `body` is a
+    // ClassMember array.
+    export function makeClassDecl(name, superClass, body, span) {
+        return { kind: StmtKind.ClassDecl, name, superClass, body, span }
+    }
+
+    // makeImport — an `import ... from "source"` statement. `specifiers` is an
+    // import-specifier array (empty for a bare `import "m"`); `source` is the
+    // module-specifier string value.
+    export function makeImport(specifiers, source, span) {
+        return { kind: StmtKind.Import, specifiers, source, span }
+    }
+
+    // makeExport — an `export ...` statement. `declaration` is the exported
+    // Stmt or `not`; `specifiers` is the export-specifier list (`export {}`);
+    // `source` is the re-export module string or `not`; `isDefault` is true
+    // for `export default`.
+    export function makeExport(declaration, specifiers, source, isDefault, span) {
+        return { kind: StmtKind.Export, declaration, specifiers, source, isDefault, span }
+    }
+
+    // makeTry — a `try { } catch (param) { } finally { }` statement. `block`
+    // is the try-block Stmt; `handler` is a catch-clause object or `not`;
+    // `finalizer` is the finally-block Stmt or `not`.
+    export function makeTry(block, handler, finalizer, span) {
+        return { kind: StmtKind.Try, block, handler, finalizer, span }
+    }
+
+    // makeThrow — a `throw argument` statement. `argument` is the thrown-value
+    // Expr (the no-LineTerminator restricted production gates it).
+    export function makeThrow(argument, span) {
+        return { kind: StmtKind.Throw, argument, span }
+    }
+
+    // -- Class-member node constructors (M3.3) --
+
+    // makeMethodDef — one method member of a class body. `key` is the
+    // method-name node; `value` is the method's Function Expr (params +
+    // in-line body); `methodKind` is a MethodKind value; `isStatic` /
+    // `computed` are booleans.
+    export function makeMethodDef(key, value, methodKind, isStatic, computed, span) {
+        return {
+            memberKind: ClassMemberKind.Method,
+            key, value, methodKind, isStatic, computed, span,
+        }
+    }
+
+    // makePropertyDef — one class-field member. `key` is the field-name node;
+    // `value` is the initializer Expr or `not`; `isStatic` / `computed` are
+    // booleans.
+    export function makePropertyDef(key, value, isStatic, computed, span) {
+        return {
+            memberKind: ClassMemberKind.Property,
+            key, value, isStatic, computed, span,
+        }
+    }
+
+    // -- Import-specifier / export-specifier / catch-clause constructors --
+
+    // makeImportNamed — a named import specifier `imported as local`.
+    export function makeImportNamed(imported, local, span) {
+        return { specifierKind: ImportSpecifierKind.Named, imported, local, span }
+    }
+
+    // makeImportDefault — the default-import specifier `import local`.
+    export function makeImportDefault(local, span) {
+        return { specifierKind: ImportSpecifierKind.Default, local, span }
+    }
+
+    // makeImportNamespace — the namespace-import specifier `import * as local`.
+    export function makeImportNamespace(local, span) {
+        return { specifierKind: ImportSpecifierKind.Namespace, local, span }
+    }
+
+    // makeExportSpecifier — one specifier of `export { ... }`: `local as
+    // exported`.
+    export function makeExportSpecifier(local, exported, span) {
+        return { local, exported, span }
+    }
+
+    // makeCatchClause — the `catch (param) { body }` clause of a `try`.
+    // `param` is the caught-binding target or `not` (optional-catch-binding);
+    // `body` is the catch-block Stmt.
+    export function makeCatchClause(param, body, span) {
+        return { param, body, span }
     }
 
     // -- Binding-pattern node constructors (M3.1 — DD §D5) --

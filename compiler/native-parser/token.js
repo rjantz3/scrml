@@ -183,10 +183,16 @@ export function makeToken(kind, text, span, payload) {
 }
 
 export function makeIdentOrKeyword(text, span) {
-    const kw = JS_KEYWORDS[text];
-    if (kw === undefined) {
+    // OWN-property guard — `JS_KEYWORDS` is a plain object, so a bare
+    // `JS_KEYWORDS[text]` for an identifier named `constructor` / `toString`
+    // / `valueOf` / `hasOwnProperty` / `__proto__` (etc.) would resolve to an
+    // inherited `Object.prototype` member instead of `undefined`, mis-lexing
+    // that identifier to a non-string `kind`. hasOwnProperty.call restricts
+    // the lookup to the keyword table's OWN entries.
+    if (Object.prototype.hasOwnProperty.call(JS_KEYWORDS, text) === false) {
         return makeToken(TokenKind.Ident, text, span, { name: text });
     }
+    const kw = JS_KEYWORDS[text];
     return makeToken(kw, text, span, {});
 }
 

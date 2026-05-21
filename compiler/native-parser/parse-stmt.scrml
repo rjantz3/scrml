@@ -23,7 +23,8 @@
 //   those functions consult. AST-node construction (the makeStmt* / makeBlock
 //   constructors) is calculation by DD §D1's named negative example.
 //
-// SCOPE — M3.1 + M3.2 (the first two sub-steps of M3, the statement parser).
+// SCOPE — M3.1 + M3.2 + M3.3 (the first three sub-steps of M3, the
+// statement parser).
 //   M3.1 — STATEMENT SUBSTRATE + DECLARATIONS + BLOCK/EXPRESSION STATEMENTS
 //     + BlockStub RE-ENTRY. Parses, per S98 DD §D5's MUST-PARSE list:
 //       - variable declarations `let` / `const` / `var`, INCLUDING object +
@@ -52,10 +53,32 @@
 //     lookahead discipline (DD §D4 P3): a finite-token scan, single-direction
 //     commit, no general backtracking.
 //
-//   NOT M3.2 — forward seams (the named sub-step that owns each):
-//     - function/class declarations + in-line bodies (the BPP subsumption) +
-//       `import`/`export` + `try`/`throw` — M3.3;
+//   M3.3 — FUNCTIONS / CLASSES + IN-LINE BODIES (subsumes BPP) +
+//     IMPORT/EXPORT + TRY/THROW. Parses, per S98 DD §D5's MUST-PARSE
+//     declaration + module + try/throw rows:
+//       - function declarations `function name(params) { body }`, INCLUDING
+//         `async function` and `function*` generators — the body is parsed
+//         IN-LINE via parseStatementList. THE body-pre-parser subsumption:
+//         M3 parses function bodies in-line so body-pre-parser.ts deletes
+//         by construction (DD §D7 M3 gating).
+//       - class declarations `class Name extends Base { ... }` — methods
+//         (constructor / static / get/set / async / generator /
+//         computed-name) + class fields; method bodies parsed in-line.
+//       - `import` / `export` — named / default / namespace / re-export.
+//       - `try` / `catch` / `finally` + `throw` — PARSED for legacy +
+//         JS-import inputs; per S98 D5 REJECTED from scrml SOURCE (a later
+//         stage — the typer — does the source-rejection; scrml uses
+//         `fail`/`!{}` per §19). The parser's job is to PARSE them.
+//     M3.3 also TIES OFF the function-expression body seam — a function /
+//     arrow EXPRESSION at statement position has its BlockStub body
+//     re-entered in-line via reenterBlockStubs. `await` / `yield` are
+//     recognized as statement-lead expression operators.
+//
+//   NOT M3.3 — forward seams (the named sub-step that owns each):
 //     - error-recovery engine integration + full conformance — M3.4.
+//     - `await` / `yield` integrated as operators at unary precedence INSIDE
+//       a larger expression (`let x = await f()`) — M4 (the full bounded JS
+//       subset). M3.3 recognizes the keywords at STATEMENT position only.
 //   A statement form outside the S98 D5 subset (`switch`, `with`, decorators)
 //   is E-PARSER-OUT-OF-SUBSET (D5/OQ6 — surfaced to PA, scope NOT widened);
 //   `switch` specifically is also E-SWITCH-FORBIDDEN in scrml source (§17).
@@ -85,9 +108,10 @@ ${
     } from "./parse-mode.scrml"
     import {
         parseExpression, parseAssignmentExpr, parsePostfix,
+        parseParamList,
     } from "./parse-expr.scrml"
     import {
-        VarDeclKind,
+        VarDeclKind, MethodKind,
         makeBlock, makeExprStmt, makeEmpty, makeVarDecl, makeVarDeclarator,
         makeBindingIdent, makeObjectPattern, makeArrayPattern,
         makeAssignmentPattern,
@@ -96,6 +120,10 @@ ${
         makeBindingElementItem, makeBindingElementHole, makeBindingElementRest,
         makeIf, makeWhile, makeDoWhile, makeFor, makeForIn, makeForOf,
         makeReturn, makeBreak, makeContinue, makeLabeled,
+        makeFunctionDecl, makeClassDecl, makeImport, makeExport, makeTry, makeThrow,
+        makeMethodDef, makePropertyDef,
+        makeImportNamed, makeImportDefault, makeImportNamespace,
+        makeExportSpecifier, makeCatchClause,
     } from "./ast-stmt.scrml"
 
     // -- makeParseStmtContext — statement-parser context constructor --
@@ -249,8 +277,8 @@ ${
 
     // parseStatement — parse ONE statement; dispatch on the token kind at
     // the cursor. M3.1 dispatches the substrate forms; M3.2 dispatches the
-    // control-flow forms + labeled statements; declaration / module / legacy-
-    // error keyword leads remain a FORWARD SEAM — M3.3 wires them.
+    // control-flow forms + labeled statements; M3.3 dispatches the
+    // declaration / module / legacy-error statement forms.
     export function parseStatement(ctx) {
         const cursor = ctx.cursor
         const kind = currentKind(ctx.cursor)
@@ -314,14 +342,58 @@ ${
             return parseLabeledStatement(ctx)
         }
 
-        // M3.3 forward seam — declaration / module / legacy-error leads.
-        if (kind == TokenKind.KwFunction || kind == TokenKind.KwClass
-            || kind == TokenKind.KwImport || kind == TokenKind.KwExport
-            || kind == TokenKind.KwTry || kind == TokenKind.KwThrow) {
-            recordError(ctx, "E-STMT-FORWARD-M3-3",
-                "function/class declarations, import/export and try/throw are parsed by M3.3 (not yet implemented)",
-                spanHere(ctx))
-            return not
+        // M3.3 declaration / module / legacy-error keyword leads.
+
+        // A function declaration — a bare `function` lead at statement
+        // position is always a DECLARATION (a function EXPRESSION must be
+        // parenthesized — ECMAScript's lookahead restriction). `function*`
+        // is a generator declaration.
+        if (kind == TokenKind.KwFunction) {
+            return parseFunctionDecl(ctx, false, false)
+        }
+
+        // An `async function` declaration. `async` is NOT a reserved word —
+        // M1 lexes it as KwAsync — so the parser decides the role by what
+        // follows. Any other `async` lead is an expression statement
+        // (parseExpression / M2.3's parsePostfix handles those).
+        if (kind == TokenKind.KwAsync && peekKind(cursor, 1) == TokenKind.KwFunction) {
+            advance(cursor)
+            return parseFunctionDecl(ctx, true, false)
+        }
+
+        // A class declaration.
+        if (kind == TokenKind.KwClass) {
+            return parseClassDecl(ctx, false)
+        }
+
+        // An `import` statement.
+        if (kind == TokenKind.KwImport) {
+            return parseImport(ctx)
+        }
+
+        // An `export` statement.
+        if (kind == TokenKind.KwExport) {
+            return parseExport(ctx)
+        }
+
+        // A `try` / `catch` / `finally` statement.
+        if (kind == TokenKind.KwTry) {
+            return parseTry(ctx)
+        }
+
+        // A `throw argument` statement.
+        if (kind == TokenKind.KwThrow) {
+            return parseThrow(ctx)
+        }
+
+        // An `await` / `yield` statement lead. M3.3 recognizes the keyword
+        // at STATEMENT position; integrating `await` / `yield` as operators
+        // inside a larger expression is M4 (see the file header).
+        if (kind == TokenKind.KwAwait) {
+            return parseAwaitStatement(ctx)
+        }
+        if (kind == TokenKind.KwYield) {
+            return parseYieldStatement(ctx)
         }
 
         return parseExprStatement(ctx)
@@ -360,11 +432,15 @@ ${
 
     // -- parseExprStatement — an expression statement `expr ;` --
     // Parses a full (sequence-level) expression in expression context, then
-    // the statement terminator (explicit `;` or ASI).
+    // the statement terminator (explicit `;` or ASI). M3.3 ties off the
+    // function-expression body seam here — a function / arrow expression in
+    // the statement's expression has its BlockStub body re-entered in-line.
     export function parseExprStatement(ctx) {
         const prior = enterMode(ctx, ParseMode.InExpression)
         const expr = parseExpression(ctx)
         exitMode(ctx, prior)
+
+        reenterBlockStubs(expr)
 
         const prevTok = lastTokenBefore(ctx)
         consumeSemicolon(ctx, prevTok)
@@ -436,6 +512,10 @@ ${
             const prior = enterMode(ctx, ParseMode.InExpression)
             init = parseAssignmentLevelExpr(ctx)
             exitMode(ctx, prior)
+            // M3.3 — tie off the function-expression body seam: a declarator
+            // initialized with a function / arrow expression gets its
+            // BlockStub body re-entered in-line.
+            reenterBlockStubs(init)
         }
 
         const endE = (init is not) ? nodeEnd(target) : nodeEnd(init)
@@ -1041,6 +1121,15 @@ ${
     }
 
     // -- parseReturn — a `return argument?` statement --
+    // RETURN-LEGALITY SEAM (M3.4). A `return` outside any function body is a
+    // JS SyntaxError. `currentParseMode` is a single slot, not a depth stack
+    // — a `return` inside a nested `{}` block inside a function sees
+    // `.InBlock`, not `.InFunctionBody` — so the single-slot mode cannot tell
+    // function-scope from program-scope across nested blocks. A correct check
+    // needs a function-scope DEPTH counter (new state machinery that does NOT
+    // fall naturally out of M3.3). M3.4 is the natural home — add a function-
+    // depth counter to the parse context, then emit E-STMT-RETURN-OUTSIDE-
+    // FUNCTION at depth 0. M3.3 parses a top-level `return` to a Return node.
     export function parseReturn(ctx) {
         const cursor = ctx.cursor
         const kw = advance(cursor)
@@ -1116,6 +1205,818 @@ ${
         const body = parseStatement(ctx)
         const span = makeSpan(nameTok.span.start, nodeEnd(body), nameTok.span.line, nameTok.span.col)
         return makeLabeled(nameTok.name, body, span)
+    }
+
+    // ====================================================================
+    // Functions / classes / import / export / try / throw — M3.3.
+    //
+    // Function + class declaration bodies are parsed IN-LINE — via the
+    // statement-list parser parseStatementList. THE body-pre-parser
+    // subsumption: M3 parses function bodies in-line so body-pre-parser.ts
+    // deletes by construction (DD §D7 M3 gating). The legacy error-flow forms
+    // `try`/`catch`/`finally`+`throw` are PARSED (for legacy + JS-import
+    // inputs); a later stage (the typer) rejects them in scrml source.
+    // ====================================================================
+
+    // parseFunctionBodyInline — parse a `{ stmt* }` function / method body
+    // IN-LINE into a Stmt array (the BPP subsumption — no BlockStub). The
+    // cursor must sit on the opening `{`. Returns { body, endPos }.
+    function parseFunctionBodyInline(ctx) {
+        const cursor = ctx.cursor
+
+        if (currentKind(cursor) != TokenKind.LBrace) {
+            recordError(ctx, "E-STMT-FUNCTION-BODY",
+                "expected '{' to open a function body", spanHere(ctx))
+            return { body: [], endPos: spanHere(ctx).end }
+        }
+        const open = advance(cursor)
+
+        const prior = enterMode(ctx, ParseMode.InFunctionBody)
+        const body = parseStatementList(ctx, TokenKind.RBrace)
+        exitMode(ctx, prior)
+
+        let endPos = open.span.end
+        if (currentKind(cursor) == TokenKind.RBrace) {
+            endPos = advance(cursor).span.end
+        } else {
+            recordError(ctx, "E-STMT-UNCLOSED-FUNCTION-BODY",
+                "expected '}' to close a function body", open.span)
+            const prevTok = lastTokenBefore(ctx)
+            if (prevTok is not not && prevTok.span is not not) {
+                endPos = prevTok.span.end
+            }
+        }
+        return { body, endPos }
+    }
+
+    // makeInlineFunction — a `Function`-kind Expr node whose body is a parsed
+    // Stmt array (the in-line body shape — distinct from M2.3's
+    // BlockStub-bodied function expressions). `name` is the function name or
+    // `not` (an anonymous method value).
+    function makeInlineFunction(name, params, body, isAsync, isGenerator, span) {
+        return { kind: "Function", name, params, body, isAsync, isGenerator, span }
+    }
+
+    // -- parseFunctionDecl — `function name(params) { body }` --
+    // `async` is consumed by the caller when present. Handles `function*`.
+    // The body is parsed IN-LINE via parseStatementList — the BPP
+    // subsumption. `allowAnonymous` is true ONLY for `export default
+    // function () {}`; a plain declaration always names.
+    export function parseFunctionDecl(ctx, isAsync, allowAnonymous) {
+        const cursor = ctx.cursor
+        const fnTok = advance(cursor)
+
+        let isGenerator = false
+        if (currentKind(cursor) == TokenKind.Star) {
+            advance(cursor)
+            isGenerator = true
+        }
+
+        let name = ""
+        if (currentKind(cursor) == TokenKind.Ident) {
+            name = advance(cursor).name
+        } else if (allowAnonymous != true) {
+            recordError(ctx, "E-STMT-FUNCTION-NAME",
+                "expected a name after 'function'", spanHere(ctx))
+        }
+
+        const params = parseParamList(ctx)
+        const inline = parseFunctionBodyInline(ctx)
+
+        const span = makeSpan(fnTok.span.start, inline.endPos, fnTok.span.line, fnTok.span.col)
+        return makeFunctionDecl(name, params, inline.body, isAsync, isGenerator, span)
+    }
+
+    // ====================================================================
+    // Class declarations — `class Name extends Base { members }`.
+    //
+    // A class body is a brace-delimited member list. Each member is a method
+    // definition or a class field. Methods carry `static` / `get` / `set` /
+    // `async` / `*` (generator) / a computed `[expr]` name; the body is
+    // parsed in-line. A `;` between members is an empty member (no node).
+    // ====================================================================
+
+    // -- parseClassDecl — a `class Name extends Base { ... }` declaration --
+    // `allowAnonymous` is true ONLY for `export default class {}`; a plain
+    // declaration always names.
+    export function parseClassDecl(ctx, allowAnonymous) {
+        const cursor = ctx.cursor
+        const kw = advance(cursor)
+
+        let name = ""
+        if (currentKind(cursor) == TokenKind.Ident) {
+            name = advance(cursor).name
+        } else if (allowAnonymous != true) {
+            recordError(ctx, "E-STMT-CLASS-NAME",
+                "expected a name after 'class'", spanHere(ctx))
+        }
+
+        // The optional `extends` clause — the superclass is a left-hand-side
+        // expression (parsePostfix covers the corpus forms).
+        let superClass = not
+        if (currentKind(cursor) == TokenKind.KwExtends) {
+            advance(cursor)
+            const prior = enterMode(ctx, ParseMode.InExpression)
+            superClass = parsePostfix(ctx)
+            exitMode(ctx, prior)
+            reenterBlockStubs(superClass)
+        }
+
+        const body = parseClassBody(ctx)
+
+        let endPos = (body.length > 0) ? nodeEnd(body[body.length - 1]) : kw.span.end
+        const prevTok = lastTokenBefore(ctx)
+        if (prevTok is not not && prevTok.span is not not && prevTok.span.end > endPos) {
+            endPos = prevTok.span.end
+        }
+        const span = makeSpan(kw.span.start, endPos, kw.span.line, kw.span.col)
+        return makeClassDecl(name, superClass, body, span)
+    }
+
+    // parseClassBody — the `{ member* }` body of a class. Returns a
+    // ClassMember array. A stray `;` between members is the empty class
+    // element (consumed, no node).
+    function parseClassBody(ctx) {
+        const cursor = ctx.cursor
+        const members = []
+
+        if (currentKind(cursor) != TokenKind.LBrace) {
+            recordError(ctx, "E-STMT-CLASS-BODY",
+                "expected '{' to open a class body", spanHere(ctx))
+            return members
+        }
+        advance(cursor)
+
+        while (atEnd(cursor) == false && currentKind(cursor) != TokenKind.RBrace) {
+            if (currentKind(cursor) == TokenKind.Semicolon) {
+                advance(cursor)
+                continue
+            }
+            const before = cursor.idx
+            const member = parseClassMember(ctx)
+            if (member is not not) {
+                members.push(member)
+            }
+            if (cursor.idx == before) {
+                advance(cursor)
+            }
+        }
+
+        if (currentKind(cursor) == TokenKind.RBrace) {
+            advance(cursor)
+        } else {
+            recordError(ctx, "E-STMT-UNCLOSED-CLASS-BODY",
+                "expected '}' to close a class body", spanHere(ctx))
+        }
+        return members
+    }
+
+    // parseClassMember — one member of a class body: a method definition or
+    // a class field. Recognizes `static` / `get` / `set` / `async` / `*`
+    // prefixes + computed `[expr]` names. The prefix keywords are CONTEXTUAL
+    // — each is a valid plain member name on its own.
+    function parseClassMember(ctx) {
+        const cursor = ctx.cursor
+        const startTok = current(cursor)
+        const startSpan = (startTok is not) ? spanHere(ctx) : startTok.span
+
+        // `static` prefix.
+        let isStatic = false
+        if (classMemberNameKind(cursor) == "static-prefix") {
+            advance(cursor)
+            isStatic = true
+        }
+
+        // `async` method prefix.
+        let isAsync = false
+        if (classMemberNameKind(cursor) == "async-prefix") {
+            advance(cursor)
+            isAsync = true
+        }
+
+        // `*` generator method prefix.
+        let isGenerator = false
+        if (currentKind(cursor) == TokenKind.Star) {
+            advance(cursor)
+            isGenerator = true
+        }
+
+        // `get` / `set` accessor prefix.
+        let methodKind = MethodKind.Method
+        const accessorKind = classMemberNameKind(cursor)
+        if (accessorKind == "get-prefix") {
+            advance(cursor)
+            methodKind = MethodKind.Get
+        } else if (accessorKind == "set-prefix") {
+            advance(cursor)
+            methodKind = MethodKind.Set
+        }
+
+        // The member name.
+        const nameInfo = parseClassMemberName(ctx)
+        const key = nameInfo.key
+        const computed = nameInfo.computed
+
+        // A `(` after the name -> a method. Anything else -> a class field.
+        if (currentKind(cursor) == TokenKind.LParen) {
+            const params = parseParamList(ctx)
+            const inline = parseFunctionBodyInline(ctx)
+            const valueSpan = makeSpan(startSpan.start, inline.endPos, startSpan.line, startSpan.col)
+            const value = makeInlineFunction(not, params, inline.body, isAsync, isGenerator, valueSpan)
+
+            let finalKind = methodKind
+            if (finalKind == MethodKind.Method && computed == false && isStatic == false
+                && nameInfo.plainName == "constructor") {
+                finalKind = MethodKind.Constructor
+            }
+            return makeMethodDef(key, value, finalKind, isStatic, computed, valueSpan)
+        }
+
+        // A class field — `name = init` / `name`.
+        if (methodKind != MethodKind.Method || isGenerator) {
+            recordError(ctx, "E-STMT-CLASS-MEMBER",
+                "expected '(' after a class method head", spanHere(ctx))
+        }
+        let value = not
+        if (currentKind(cursor) == TokenKind.Assign) {
+            advance(cursor)
+            const prior = enterMode(ctx, ParseMode.InExpression)
+            value = parseAssignmentExpr(ctx)
+            exitMode(ctx, prior)
+            reenterBlockStubs(value)
+        }
+        const prevTok = lastTokenBefore(ctx)
+        consumeSemicolon(ctx, prevTok)
+
+        let fieldEnd = (value is not) ? nodeEnd(key) : nodeEnd(value)
+        if (prevTok is not not && prevTok.span is not not && prevTok.span.end > fieldEnd) {
+            fieldEnd = prevTok.span.end
+        }
+        const fieldSpan = makeSpan(startSpan.start, fieldEnd, startSpan.line, startSpan.col)
+        return makePropertyDef(key, value, isStatic, computed, fieldSpan)
+    }
+
+    // classMemberNameKind — classify the token at the cursor as a contextual
+    // class-member PREFIX vs a member NAME. Returns "static-prefix" /
+    // "async-prefix" / "get-prefix" / "set-prefix" when the token is that
+    // keyword AND another member head follows; otherwise "name".
+    function classMemberNameKind(cursor) {
+        const k = currentKind(cursor)
+        let isContextualKw = ""
+        if (k == TokenKind.Ident) {
+            const tok = current(cursor)
+            const text = (tok is not) ? "" : tok.name
+            if (text == "static") { isContextualKw = "static-prefix" }
+            else if (text == "get") { isContextualKw = "get-prefix" }
+            else if (text == "set") { isContextualKw = "set-prefix" }
+        } else if (k == TokenKind.KwAsync) {
+            isContextualKw = "async-prefix"
+        }
+        if (isContextualKw == "") {
+            return "name"
+        }
+        if (memberHeadFollows(cursor, 1)) {
+            return isContextualKw
+        }
+        return "name"
+    }
+
+    // memberHeadFollows — does the token `k` positions ahead begin a
+    // class-member head? A member head starts with an identifier, a keyword
+    // usable as a member name, a string / number literal, a computed `[`,
+    // or a generator `*`.
+    function memberHeadFollows(cursor, k) {
+        const kind = peekKind(cursor, k)
+        if (kind is not) {
+            return false
+        }
+        return kind == TokenKind.Ident
+            || kind == TokenKind.StringLit
+            || kind == TokenKind.NumberLit
+            || kind == TokenKind.LBracket
+            || kind == TokenKind.Star
+            || isKeywordTokenKind(kind)
+    }
+
+    // isKeywordTokenKind — does a TokenKind name a JS keyword token? By
+    // convention every keyword TokenKind name begins with `Kw`.
+    function isKeywordTokenKind(kind) {
+        return typeof kind == "string" && kind.indexOf("Kw") == 0
+    }
+
+    // parseClassMemberName — the name of a class member. Returns
+    // { key, computed, plainName }.
+    function parseClassMemberName(ctx) {
+        const cursor = ctx.cursor
+        const kind = currentKind(cursor)
+
+        // Computed name — `[ expr ]`.
+        if (kind == TokenKind.LBracket) {
+            advance(cursor)
+            const prior = enterMode(ctx, ParseMode.InExpression)
+            const keyExpr = parseAssignmentExpr(ctx)
+            exitMode(ctx, prior)
+            if (currentKind(cursor) == TokenKind.RBracket) {
+                advance(cursor)
+            } else {
+                recordError(ctx, "E-STMT-UNCLOSED-COMPUTED-KEY",
+                    "expected ']' to close a computed member name", spanHere(ctx))
+            }
+            return { key: keyExpr, computed: true, plainName: "" }
+        }
+
+        // String / number literal name.
+        if (kind == TokenKind.StringLit || kind == TokenKind.NumberLit) {
+            const tok = advance(cursor)
+            return { key: literalKeyExpr(tok), computed: false, plainName: "" }
+        }
+
+        // Private class fields `#name` are OUT of the M3.3 subset (DD §D5 —
+        // only under `_{}` foreign-code; M1 has no `#` lex branch, roadmap
+        // K5). A `#name` member surfaces as a stray token.
+
+        // A plain identifier name, or a keyword used as a member name.
+        if (kind == TokenKind.Ident) {
+            const tok = advance(cursor)
+            return {
+                key: { kind: "Ident", name: tok.name, span: tok.span },
+                computed: false, plainName: tok.name,
+            }
+        }
+        if (isKeywordTokenKind(kind)) {
+            const tok = advance(cursor)
+            const text = (tok.text is not not) ? tok.text : ""
+            return {
+                key: { kind: "Ident", name: text, span: tok.span },
+                computed: false, plainName: text,
+            }
+        }
+
+        recordError(ctx, "E-STMT-CLASS-MEMBER-NAME",
+            "expected a class member name", spanHere(ctx))
+        return {
+            key: { kind: "Ident", name: "", span: spanHere(ctx) },
+            computed: false, plainName: "",
+        }
+    }
+
+    // ====================================================================
+    // import / export — ES module syntax (named / default / namespace /
+    // re-export). DD §D5: module-resolver, route-inference.
+    // ====================================================================
+
+    // expectModuleString — consume the `"..."` module-specifier string.
+    // Returns the cooked string value, or "" + a diagnostic.
+    function expectModuleString(ctx) {
+        const cursor = ctx.cursor
+        if (currentKind(cursor) == TokenKind.StringLit) {
+            const tok = advance(cursor)
+            return (tok.cooked is not not) ? tok.cooked : ""
+        }
+        recordError(ctx, "E-STMT-MODULE-SOURCE",
+            "expected a module-specifier string", spanHere(ctx))
+        return ""
+    }
+
+    // expectFromKeyword — consume the `from` keyword; diagnostic if absent.
+    function expectFromKeyword(ctx) {
+        if (currentKind(ctx.cursor) == TokenKind.KwFrom) {
+            advance(ctx.cursor)
+            return
+        }
+        recordError(ctx, "E-STMT-EXPECT-FROM",
+            "expected 'from' in an import / re-export", spanHere(ctx))
+    }
+
+    // importLocalName — consume an identifier that BINDS a name in this
+    // module. A keyword here is malformed; a diagnostic + "" is returned.
+    function importLocalName(ctx) {
+        const cursor = ctx.cursor
+        if (currentKind(cursor) == TokenKind.Ident) {
+            return advance(cursor).name
+        }
+        recordError(ctx, "E-STMT-IMPORT-NAME",
+            "expected an identifier in an import binding", spanHere(ctx))
+        return ""
+    }
+
+    // -- parseImport — an `import ... from "source"` statement --
+    export function parseImport(ctx) {
+        const cursor = ctx.cursor
+        const kw = advance(cursor)
+        const specifiers = []
+
+        // Bare side-effect import — `import "m";`.
+        if (currentKind(cursor) == TokenKind.StringLit) {
+            const source = expectModuleString(ctx)
+            const endPos = finishStatementTerminator(ctx, kw)
+            return makeImport(specifiers, source,
+                makeSpan(kw.span.start, endPos, kw.span.line, kw.span.col))
+        }
+
+        // A leading default-import binding — `import d ...`.
+        if (currentKind(cursor) == TokenKind.Ident) {
+            const localTok = current(cursor)
+            const local = importLocalName(ctx)
+            specifiers.push(makeImportDefault(local, localTok.span))
+            if (currentKind(cursor) == TokenKind.Comma) {
+                advance(cursor)
+            }
+        }
+
+        // A namespace import — `* as ns`.
+        if (currentKind(cursor) == TokenKind.Star) {
+            const starTok = advance(cursor)
+            if (currentKind(cursor) == TokenKind.KwAs) {
+                advance(cursor)
+            } else {
+                recordError(ctx, "E-STMT-EXPECT-AS",
+                    "expected 'as' in a namespace import", spanHere(ctx))
+            }
+            const local = importLocalName(ctx)
+            specifiers.push(makeImportNamespace(local, starTok.span))
+        } else if (currentKind(cursor) == TokenKind.LBrace) {
+            parseNamedImportSpecifiers(ctx, specifiers)
+        }
+
+        expectFromKeyword(ctx)
+        const source = expectModuleString(ctx)
+        const endPos = finishStatementTerminator(ctx, kw)
+        return makeImport(specifiers, source,
+            makeSpan(kw.span.start, endPos, kw.span.line, kw.span.col))
+    }
+
+    // parseNamedImportSpecifiers — the `{ a, b as c }` clause of an import.
+    // The cursor sits on the `{`. Appends ImportNamed specifiers to `out`.
+    function parseNamedImportSpecifiers(ctx, out) {
+        const cursor = ctx.cursor
+        advance(cursor)
+
+        while (atEnd(cursor) == false && currentKind(cursor) != TokenKind.RBrace) {
+            if (currentKind(cursor) != TokenKind.Ident) {
+                recordError(ctx, "E-STMT-IMPORT-NAME",
+                    "expected an imported name", spanHere(ctx))
+                break
+            }
+            const importedTok = advance(cursor)
+            const imported = importedTok.name
+            let local = imported
+            if (currentKind(cursor) == TokenKind.KwAs) {
+                advance(cursor)
+                local = importLocalName(ctx)
+            }
+            out.push(makeImportNamed(imported, local, importedTok.span))
+
+            if (currentKind(cursor) == TokenKind.Comma) {
+                advance(cursor)
+                continue
+            }
+            break
+        }
+
+        if (currentKind(cursor) == TokenKind.RBrace) {
+            advance(cursor)
+        } else {
+            recordError(ctx, "E-STMT-UNCLOSED-IMPORT",
+                "expected '}' to close an import clause", spanHere(ctx))
+        }
+    }
+
+    // -- parseExport — an `export ...` statement --
+    export function parseExport(ctx) {
+        const cursor = ctx.cursor
+        const kw = advance(cursor)
+
+        // `export default ...`.
+        if (currentKind(cursor) == TokenKind.KwDefault) {
+            advance(cursor)
+            return parseExportDefault(ctx, kw)
+        }
+
+        // `export * [as ns] from "m"`.
+        if (currentKind(cursor) == TokenKind.Star) {
+            advance(cursor)
+            let nsName = not
+            if (currentKind(cursor) == TokenKind.KwAs) {
+                advance(cursor)
+                if (currentKind(cursor) == TokenKind.Ident) {
+                    nsName = advance(cursor).name
+                } else {
+                    recordError(ctx, "E-STMT-EXPORT-NAME",
+                        "expected a namespace name after 'as'", spanHere(ctx))
+                }
+            }
+            expectFromKeyword(ctx)
+            const source = expectModuleString(ctx)
+            const endPos = finishStatementTerminator(ctx, kw)
+            const specs = []
+            if (nsName is not not) {
+                specs.push(makeImportNamespace(nsName, kw.span))
+            }
+            return makeExport(not, specs, source, false,
+                makeSpan(kw.span.start, endPos, kw.span.line, kw.span.col))
+        }
+
+        // `export { a, b as c } [from "m"]`.
+        if (currentKind(cursor) == TokenKind.LBrace) {
+            const specifiers = []
+            parseExportSpecifierClause(ctx, specifiers)
+            let source = not
+            if (currentKind(cursor) == TokenKind.KwFrom) {
+                advance(cursor)
+                source = expectModuleString(ctx)
+            }
+            const endPos = finishStatementTerminator(ctx, kw)
+            return makeExport(not, specifiers, source, false,
+                makeSpan(kw.span.start, endPos, kw.span.line, kw.span.col))
+        }
+
+        // `export <declaration>`.
+        const declaration = parseExportedDeclaration(ctx)
+        let endPos = nodeEnd(declaration)
+        const prevTok = lastTokenBefore(ctx)
+        if (prevTok is not not && prevTok.span is not not && prevTok.span.end > endPos) {
+            endPos = prevTok.span.end
+        }
+        return makeExport(declaration, [], not, false,
+            makeSpan(kw.span.start, endPos, kw.span.line, kw.span.col))
+    }
+
+    // parseExportDefault — the body of `export default ...`. A `function` /
+    // `async function` / `function*` / `class` lead is a declaration;
+    // anything else is an assignment-level expression.
+    function parseExportDefault(ctx, kw) {
+        const cursor = ctx.cursor
+        const k = currentKind(cursor)
+
+        let declaration = not
+        if (k == TokenKind.KwFunction) {
+            declaration = parseFunctionDecl(ctx, false, true)
+        } else if (k == TokenKind.KwAsync && peekKind(cursor, 1) == TokenKind.KwFunction) {
+            advance(cursor)
+            declaration = parseFunctionDecl(ctx, true, true)
+        } else if (k == TokenKind.KwClass) {
+            declaration = parseClassDecl(ctx, true)
+        } else {
+            const prior = enterMode(ctx, ParseMode.InExpression)
+            declaration = parseAssignmentExpr(ctx)
+            exitMode(ctx, prior)
+            reenterBlockStubs(declaration)
+            const prevTok = lastTokenBefore(ctx)
+            consumeSemicolon(ctx, prevTok)
+        }
+
+        let endPos = nodeEnd(declaration)
+        const prevTok = lastTokenBefore(ctx)
+        if (prevTok is not not && prevTok.span is not not && prevTok.span.end > endPos) {
+            endPos = prevTok.span.end
+        }
+        return makeExport(declaration, [], not, true,
+            makeSpan(kw.span.start, endPos, kw.span.line, kw.span.col))
+    }
+
+    // parseExportedDeclaration — the declaration after `export` (not
+    // `default`): a let/const/var, a function / async function / function*,
+    // or a class declaration.
+    function parseExportedDeclaration(ctx) {
+        const cursor = ctx.cursor
+        const k = currentKind(cursor)
+
+        if (k == TokenKind.KwLet || k == TokenKind.KwConst || k == TokenKind.KwVar) {
+            return parseVarDecl(ctx)
+        }
+        if (k == TokenKind.KwFunction) {
+            return parseFunctionDecl(ctx, false)
+        }
+        if (k == TokenKind.KwAsync && peekKind(cursor, 1) == TokenKind.KwFunction) {
+            advance(cursor)
+            return parseFunctionDecl(ctx, true)
+        }
+        if (k == TokenKind.KwClass) {
+            return parseClassDecl(ctx)
+        }
+
+        recordError(ctx, "E-STMT-EXPORT-DECL",
+            "expected a declaration after 'export'", spanHere(ctx))
+        return not
+    }
+
+    // parseExportSpecifierClause — the `{ a, b as c }` clause of an export.
+    // The cursor sits on the `{`. Appends ExportSpecifier objects to `out`.
+    function parseExportSpecifierClause(ctx, out) {
+        const cursor = ctx.cursor
+        advance(cursor)
+
+        while (atEnd(cursor) == false && currentKind(cursor) != TokenKind.RBrace) {
+            if (currentKind(cursor) != TokenKind.Ident) {
+                recordError(ctx, "E-STMT-EXPORT-NAME",
+                    "expected an exported name", spanHere(ctx))
+                break
+            }
+            const localTok = advance(cursor)
+            const local = localTok.name
+            let exported = local
+            if (currentKind(cursor) == TokenKind.KwAs) {
+                advance(cursor)
+                if (currentKind(cursor) == TokenKind.Ident) {
+                    exported = advance(cursor).name
+                } else {
+                    recordError(ctx, "E-STMT-EXPORT-NAME",
+                        "expected an exported name after 'as'", spanHere(ctx))
+                }
+            }
+            out.push(makeExportSpecifier(local, exported, localTok.span))
+
+            if (currentKind(cursor) == TokenKind.Comma) {
+                advance(cursor)
+                continue
+            }
+            break
+        }
+
+        if (currentKind(cursor) == TokenKind.RBrace) {
+            advance(cursor)
+        } else {
+            recordError(ctx, "E-STMT-UNCLOSED-EXPORT",
+                "expected '}' to close an export clause", spanHere(ctx))
+        }
+    }
+
+    // finishStatementTerminator — consume the statement terminator (explicit
+    // `;` or ASI) and return the byte offset of the last consumed token.
+    // Shared by the import / export statement parsers.
+    function finishStatementTerminator(ctx, kwTok) {
+        const prevTok = lastTokenBefore(ctx)
+        consumeSemicolon(ctx, prevTok)
+        if (prevTok is not not && prevTok.span is not not) {
+            return prevTok.span.end
+        }
+        return kwTok.span.end
+    }
+
+    // ====================================================================
+    // try / catch / finally + throw — the legacy JS error-flow forms.
+    // PARSED for legacy + JS-import inputs; per S98 D5 REJECTED from scrml
+    // SOURCE (a later stage — the typer — does the source-rejection; scrml
+    // uses `fail`/`!{}` per §19). The parser's job here is to PARSE them.
+    // ====================================================================
+
+    // -- parseTry — a `try { } catch (param) { } finally { }` statement --
+    // At least one of `catch` / `finally` must be present; M3.3 records a
+    // diagnostic for the bare form and still emits the Try node.
+    export function parseTry(ctx) {
+        const cursor = ctx.cursor
+        const kw = advance(cursor)
+
+        const block = parseBlock(ctx)
+
+        let handler = not
+        if (currentKind(cursor) == TokenKind.KwCatch) {
+            handler = parseCatchClause(ctx)
+        }
+
+        let finalizer = not
+        if (currentKind(cursor) == TokenKind.KwFinally) {
+            advance(cursor)
+            finalizer = parseBlock(ctx)
+        }
+
+        if (handler is not && finalizer is not) {
+            recordError(ctx, "E-STMT-TRY-NO-HANDLER",
+                "a 'try' needs a 'catch' or a 'finally'", kw.span)
+        }
+
+        let endE = nodeEnd(block)
+        if (finalizer is not not) {
+            endE = nodeEnd(finalizer)
+        } else if (handler is not not) {
+            endE = nodeEnd(handler)
+        }
+        const span = makeSpan(kw.span.start, endE, kw.span.line, kw.span.col)
+        return makeTry(block, handler, finalizer, span)
+    }
+
+    // parseCatchClause — a `catch (param) { body }` clause. The `(param)` is
+    // optional (ES2019 optional catch binding — `catch { }`). `param` is a
+    // binding target (an identifier or a destructuring pattern).
+    function parseCatchClause(ctx) {
+        const cursor = ctx.cursor
+        const kw = advance(cursor)
+
+        let param = not
+        if (currentKind(cursor) == TokenKind.LParen) {
+            advance(cursor)
+            param = parseBinding(ctx)
+            if (currentKind(cursor) == TokenKind.RParen) {
+                advance(cursor)
+            } else {
+                recordError(ctx, "E-STMT-EXPECT-RPAREN",
+                    "expected ')' to close the 'catch' binding", spanHere(ctx))
+            }
+        }
+
+        const body = parseBlock(ctx)
+        const span = makeSpan(kw.span.start, nodeEnd(body), kw.span.line, kw.span.col)
+        return makeCatchClause(param, body, span)
+    }
+
+    // -- parseThrow — a `throw argument` statement --
+    // The no-LineTerminator restricted production: a `throw` with nothing on
+    // its source line is a JS syntax error. M3.3 records a diagnostic for the
+    // no-argument form and still emits the Throw node.
+    export function parseThrow(ctx) {
+        const cursor = ctx.cursor
+        const kw = advance(cursor)
+
+        if (sameLineFollows(ctx, kw) == false) {
+            recordError(ctx, "E-STMT-THROW-NO-ARGUMENT",
+                "'throw' must be followed by an expression on the same line", kw.span)
+            const span = makeSpan(kw.span.start, kw.span.end, kw.span.line, kw.span.col)
+            return makeThrow(not, span)
+        }
+
+        const prior = enterMode(ctx, ParseMode.InExpression)
+        const argument = parseExpression(ctx)
+        exitMode(ctx, prior)
+        reenterBlockStubs(argument)
+
+        const prevTok = lastTokenBefore(ctx)
+        consumeSemicolon(ctx, prevTok)
+
+        const span = makeSpan(kw.span.start, nodeEnd(argument), kw.span.line, kw.span.col)
+        return makeThrow(argument, span)
+    }
+
+    // ====================================================================
+    // await / yield — recognized as STATEMENT-LEAD expression operators.
+    // M3.3's scope: `await x;` / `yield x;` at statement position (inside an
+    // async / generator function body). Integrating `await` / `yield` as
+    // operators at unary precedence INSIDE a larger expression is M4 — the
+    // full bounded JS subset (see the file header).
+    // ====================================================================
+
+    // makeAwaitExpr / makeYieldExpr — the await / yield Expr-shaped nodes
+    // M3.3 produces at statement position. These ride the parse-stmt layer
+    // (the M2 expression AST has no Await / Yield ExprKind — `await` /
+    // `yield` join the expression grammar at M4).
+    function makeAwaitExpr(argument, span) {
+        return { kind: "Await", argument, span }
+    }
+    function makeYieldExpr(argument, delegate, span) {
+        return { kind: "Yield", argument, delegate, span }
+    }
+
+    // -- parseAwaitStatement — an `await argument;` expression statement --
+    export function parseAwaitStatement(ctx) {
+        const cursor = ctx.cursor
+        const kw = advance(cursor)
+
+        const prior = enterMode(ctx, ParseMode.InExpression)
+        const argument = parsePostfix(ctx)
+        exitMode(ctx, prior)
+        reenterBlockStubs(argument)
+
+        const prevTok = lastTokenBefore(ctx)
+        consumeSemicolon(ctx, prevTok)
+
+        const exprSpan = makeSpan(kw.span.start, nodeEnd(argument), kw.span.line, kw.span.col)
+        const awaitExpr = makeAwaitExpr(argument, exprSpan)
+        return makeExprStmt(awaitExpr, exprSpan)
+    }
+
+    // -- parseYieldStatement — a `yield argument;` / `yield* argument;` /
+    // bare `yield;` expression statement --
+    // `yield*` (delegate) yields each value of an iterable. A bare `yield`
+    // (no same-line argument) yields `undefined`.
+    export function parseYieldStatement(ctx) {
+        const cursor = ctx.cursor
+        const kw = advance(cursor)
+
+        let delegate = false
+        if (currentKind(cursor) == TokenKind.Star) {
+            advance(cursor)
+            delegate = true
+        }
+
+        let argument = not
+        let endE = kw.span.end
+        if (delegate == true || sameLineFollows(ctx, kw)) {
+            const prior = enterMode(ctx, ParseMode.InExpression)
+            argument = parsePostfix(ctx)
+            exitMode(ctx, prior)
+            reenterBlockStubs(argument)
+            endE = nodeEnd(argument)
+        }
+
+        const prevTok = lastTokenBefore(ctx)
+        consumeSemicolon(ctx, prevTok)
+        if (prevTok is not not && prevTok.span is not not && prevTok.span.end > endE) {
+            endE = prevTok.span.end
+        }
+
+        const exprSpan = makeSpan(kw.span.start, endE, kw.span.line, kw.span.col)
+        const yieldExpr = makeYieldExpr(argument, delegate, exprSpan)
+        return makeExprStmt(yieldExpr, exprSpan)
     }
 
     // ====================================================================
