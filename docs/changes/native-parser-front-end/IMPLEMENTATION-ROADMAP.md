@@ -279,9 +279,44 @@ JS-layer files (M*).
 
 ---
 
+### §3.4 M4 — full bounded JS subset (DECOMPOSED S113 — DISPATCH-READY)
+
+**Decomposed S113** (PA, from S98 DD D5 the MUST-PARSE/MUST-ADD lists + D7 M4 gating +
+charter Q4.A/Q4.B). M4's turn in the JS chain — M3 (M3.1-M3.4) ✅ complete.
+
+**Goal (S98 D7 M4 gating):** all D5 MUST-PARSE + MUST-ADD covered; conformance Tier 1+2
+PASS on the FULL corpus, Tier 3 (spans) PASS-with-known-deltas, Tier 4 zero unexpected
+divergences. The `preprocessForAcorn` regex cascades + `parser-workarounds.js`
+`splitBareExprStatements`/`splitMergedStatements` are demonstrably NOT NEEDED.
+
+**Scope boundary:** M4 closes out the JS chain — the residual JS-subset coverage M2/M3
+deferred + the full-corpus conformance close. M4 does NOT touch the markup layer; MK4
+(the seam) follows M4.
+
+**What M2/M3 deferred to M4 (the inputs):** `await`/`yield` as OPERATORS inside
+expressions (M3.3 did statement-position only — needs the async/generator scope flag
+threaded through M2's expression grammar); the for-head `noIn` flag into M2's binary
+climber (M3.2 deferral); K6 — `parseParamTarget`'s literal-stand-in destructuring params
+→ real `ObjectPattern`/`ArrayPattern` binding nodes (unify with M3.1's vardecl binding
+patterns); generator `function*` flag full wiring (M2.3 deferral).
+
+**File ownership:** M4 EXTENDS `parse-expr` / `parse-stmt` / `parse-mode` / `ast-expr` /
+`ast-stmt` (the M2/M3 files); no new engine files. **NOT M4 scope — K3/K4/K5** (the M1
+lexer maximal-munch gaps): those are parse-expr-COUPLED (the lexer-side fix requires the
+matching `parse-expr` token-shape update), so they collide with every M4 sub-step —
+sequenced as a dedicated post-M4 dispatch, NOT folded into M4 (they do not affect M4's
+gating; the parse-layer re-compositions are correct + verified).
+
+| Sub-step | Scope | Est. | Depends |
+|---|---|---|---|
+| **M4.1** | **async / generator.** `await` / `yield` / `yield*` as OPERATORS inside expressions (unary-precedence — M3.3 did statement-position only) — the async/generator scope flag threaded through the M2 expression grammar (via `ParseMode` or a scope mechanism). `function*` generator-flag full wiring; `for await...of`. Touches `parse-expr` + `parse-mode` + `parse-stmt` + `ast-expr`. | 8-18h | M3 ✅ |
+| **M4.2** | **destructuring unification + `noIn`.** K6 — `parseParamTarget` builds REAL `ObjectPattern`/`ArrayPattern` binding nodes (the M3.1 `BindingKind` shape), unifying the two destructuring surfaces (function params + for-in/of non-declaration LHS were literal stand-ins). The `noIn` flag threaded into M2's binary climber (M3.2's for-head deferral — so a for-in head is unambiguous without the depth-scan workaround). | 8-18h | M4.1 |
+| **M4.3** | **full-corpus conformance + the tiers + residual D5.** Conformance Tier 1+2 PASS on the FULL corpus (every `.scrml` in samples / examples / stdlib / self-host); Tier 3 (spans) PASS-with-known-deltas; Tier 4 zero unexpected divergences. Any residual D5 MUST-PARSE gap the full corpus surfaces; the `E-PARSER-OUT-OF-SUBSET` protocol (D5/OQ6) for anything beyond the bound. Demonstrate the `preprocessForAcorn` regex cascades are NOT NEEDED. The M4 gating close. | 9-19h | M4.2 |
+
+---
+
 - **M3 — JS statement parser** — ✅ DECOMPOSED S113 into M3.1 / M3.2 / M3.3 / M3.4; see §3.2 above.
-- **M4 — full bounded JS subset.** All D5 MUST PARSE + MUST ADD; `preprocessForAcorn`
-  regex cascades NOT NEEDED. Gating: Tier 1+2 full corpus; Tier 3 spans PASS-with-deltas.
+- **M4 — full bounded JS subset** — ✅ DECOMPOSED S113 into M4.1 / M4.2 / M4.3; see §3.4 above.
 - **MK2 — `TagFrame` engine** — ✅ DECOMPOSED S113 into MK2.1 / MK2.2 / MK2.3; see §3.1
   above. (Blocked-precondition OQ-2/R3 §4.18.1/§40.8 program-body mode was RESOLVED S111
   `78faa65` — `default-logic` is a distinct THIRD body-mode; MK2 honors all three modes.)
@@ -364,6 +399,9 @@ within one quarter.
 | **MK3.1** BodyMode + DisplayTextLiteral skeleton + body-mode establishment + P7 | ✅ landed S113 | scrml-js-codegen-engineer (worktree) | S113 | body-mode + display-text-literal (skeleton) engine files; body-mode establishment (per §4.18.1's 3 code-bearing loci) + tag-frame `bodyMode` payload + P7 DelegationFrame threading + `DisplayTextLiteral` block kind; **K1 RESOLVED**; +36 tests; full suite 17,371/0. |
 | **MK3.2** DisplayTextLiteral literal scanning (non-interpolation) | ✅ landed S113 | scrml-js-codegen-engineer (worktree) | S113 | `scanDisplayTextLiteral` — `"..."` open/close, `\"`/`\\`/`\${` escapes, verbatim whitespace, the `{segments, exprs}` AST node, unterminated → E-CTX-001; +53 tests; full suite 17,609/0. (Surfaced a SPEC §4.18.3/§4.18.4 escape-count inconsistency — implemented the 3-escape union; see hand-off.) |
 | **MK3.3** ${...} interpolation + E-UNQUOTED-DISPLAY-TEXT + §4.18 conformance | ✅ landed S113 | scrml-js-codegen-engineer (worktree) | S113 | DisplayTextLiteral.InInterpolation (`${...}` delegates to the M2 expr parser; ONE `{segments, exprs}` node) + code-default-body dispatch + E-UNQUOTED-DISPLAY-TEXT (§4.18.7); +52 tests; full suite 17,706/0. **MK3 MILESTONE COMPLETE** (charter Q4.A gating met). |
-| M4 / MK4 / M5 / M6 | ⬜ pending | — | — | decompose when scheduled (§3) |
+| **M4.1** async / generator (await/yield operators, function*) | ⬜ pending | — | — | §3.4 — DISPATCH-READY |
+| M4.2 destructuring unification (K6) + noIn | ⬜ pending | — | — | §3.4 — depends M4.1 |
+| M4.3 full-corpus conformance + Tier 1-4 + residual D5 | ⬜ pending | — | — | §3.4 — depends M4.2 |
+| MK4 / M5 / M6 | ⬜ pending | — | — | decompose when scheduled (§3) |
 
 **Legend:** ⬜ pending · ⏳ in flight · ✅ complete · 🟥 blocked
