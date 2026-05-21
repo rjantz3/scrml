@@ -11716,6 +11716,33 @@ function upsertProfile(userId: number, email: string).idempotent() {
 
 **Cross-references.** §8.9.5 (`.nobatch()` — direct precedent shape); §19.9.6 (the static classifier this modifier overrides); §51.0.G (`<machine>`-bounded batches — the structural alternative; no `.idempotent()` needed when present).
 
+#### 19.9.8 No `async` / `await` — language-wide standing rule
+
+**Added:** 2026-05-21 (S114 ratification, user-voice append). Formalises the language-wide standing rule that the §48.3.5 (`fn`-scoped E-FN-005) instance was the partial expression of.
+
+**Canonical rule (S114 — strongest form).** scrml has **no `async` keyword** and **no `await` keyword.** They are NOT valid in scrml source — not on function declarations, not on arrow declarations, not in expression position, not at module top level, not anywhere. The token `async` is not a valid scrml modifier on any function form; the token `await` is not a valid scrml expression operator; the form `for await ... of` is not a valid scrml iteration form. User-voice S114 verbatim: *"I have intentionally left async/await out of the language, because I hate leaky abstractions and colored functions."*
+
+Parallel shape to other "what scrml is NOT" rules:
+- §42.1 — `null` / `undefined` do not exist in scrml source (S89 ABSOLUTE).
+- PRIMER §6 — try/catch is not in scrml's vocabulary.
+- Pillar 4 — one file type (no JS-escape pocket).
+- Pillar 5 — one grammar.
+
+**The canonical scrml async surface is the body-split / CPS mechanism** (§19.9.3 — CPS Preservation; §19.9.5 — Auto-`!`-Wrap of CPS Server Stubs; A9 / Insight 26 / S72 ratified). The compiler emits CPS stubs across the server boundary; developer-side code remains synchronous-looking and uncolored. Failures from network/server calls route through the existing `!`-typing + `!{}` call-site error handlers (§6 + §19.9) — the body-split is the async; `!`/`!{}` is the error model; they compose but are distinct.
+
+**The native parser fires three hard-error codes language-wide** (added by M4.3 S114 — see §34):
+- `E-ASYNC-NOT-IN-SCRML` — the `async` keyword appears on any function or arrow declaration.
+- `E-AWAIT-NOT-IN-SCRML` — the `await` keyword appears in any expression context.
+- `E-FOR-AWAIT-NOT-IN-SCRML` — the form `for await ... of` is parsed.
+
+These three codes operate at the parse layer; the fn-specific instance (§48.3.5 / E-FN-005) is preserved for diagnostic specificity inside `fn` bodies but is now subordinate to the language-wide rule of this section.
+
+**JS-host interop boundary.** When a JavaScript Promise crosses the boundary into a scrml variable (via `^{}` meta-block escape, `_{}` foreign-code block, server-function return type, or a `use foreign:` import), the body-split / CPS machinery handles the await-equivalent at the boundary — the scrml-side code reads the resolved value, no source-level `await` is needed. This mirrors the §42.9 null-normalisation pattern: the JS-side mechanism is bounded at the boundary; the scrml-side surface is uniform.
+
+**Generators (`yield` / `yield*` / `function*`).** NOT covered by this rule. Generators are a separate conversation (S114 user direction: *"Yield, might be a different conversation"*). The native parser at S114 preserves `yield` / `yield*` operators, the `function*` form, and object-literal generator-method shape. Their semantic policy is open per S114 carry-forward.
+
+**Cross-references.** §6 (PRIMER) — the error-model decomposition (body-split vs `!` vs `!{}`); §19.9.3, §19.9.5 (CPS canonical async surface); §42.1 (parallel "no null/undefined" rule shape); §48.3.5 (the `fn`-scope E-FN-005 — now the within-`fn` manifestation of this language-wide rule); §34 (catalog entries for the three new codes).
+
 ---
 
 ### 19.10 SQL Transactions
@@ -15034,7 +15061,10 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-FN-002 | §48.3.2 | DOM mutation call inside a `fn` body | Error |
 | E-FN-003 | §48.3.3 | Outer-scope variable mutation inside a `fn` body, or call to a non-`pure`, non-`fn` function | Error |
 | E-FN-004 | §48.3.4 | Non-deterministic call inside a `fn` body | Error |
-| E-FN-005 | §48.3.5 | `async` on a `fn` declaration, or `await` inside a `fn` body | Error |
+| E-FN-005 | §48.3.5 | `async` on a `fn` declaration, or `await` inside a `fn` body. The `fn`-scope manifestation of §19.9.8 (S114 — the language-wide rule). | Error |
+| E-ASYNC-NOT-IN-SCRML | §19.9.8 | The `async` keyword appears on any function or arrow declaration in scrml source. scrml has no `async`/`await` (S114 standing rule); the canonical async surface is the body-split / CPS (§19.9.3). (Catalog addition S114 M4.3 retraction; emitted at the native parser's expression / declaration heads — `compiler/native-parser/parse-stmt.js` + `parse-expr.js`.) | Error |
+| E-AWAIT-NOT-IN-SCRML | §19.9.8 | The `await` keyword appears in any expression context in scrml source. scrml has no `async`/`await` (S114 standing rule); the canonical async surface is the body-split / CPS (§19.9.3). (Catalog addition S114 M4.3 retraction; emitted in `parseUnary` at `compiler/native-parser/parse-expr.js`.) | Error |
+| E-FOR-AWAIT-NOT-IN-SCRML | §19.9.8 | The form `for await ... of` appears in scrml source. scrml has no `async`/`await` (S114 standing rule); the canonical async surface is the body-split / CPS (§19.9.3). (Catalog addition S114 M4.3 retraction; emitted in the for-statement parse path at `compiler/native-parser/parse-stmt.js`.) | Error |
 | ~~E-FN-006~~ | §48.4, §54.6.1 | **Retired 2026-04-20 (S32).** Relocated to E-STATE-COMPLETE (§54.6.1) — fires at every state literal's closing tag. | — |
 | E-STATE-COMPLETE | §54.6.1 | State literal reaches closing tag with declared field unassigned on some evaluation path | Error |
 | E-STATE-FIELD-MISSING | §54.6.2 | Read of a field declared on a different substate than the binding is narrowed to | Error |
@@ -20581,11 +20611,13 @@ fn buildSession(userId) {
 
 > E-FN-004: `fn` body calls `crypto.randomUUID()` at line N, which is non-deterministic. `fn` must be a pure function of its inputs. Generate the UUID outside `fn` and pass it as a parameter.
 
-#### 48.3.5 E-FN-005 — `async` / `await`
+#### 48.3.5 E-FN-005 — `async` / `await` (the `fn`-scope manifestation of §19.9.8)
 
-`fn` is always synchronous. The `async` keyword SHALL NOT appear on a `fn` declaration. `await` SHALL NOT appear inside a `fn` body.
+**S114 amendment (2026-05-21).** This section is now subordinate to §19.9.8 (the language-wide standing rule that scrml has no `async`/`await`). E-FN-005 is preserved as the diagnostic-specific code that fires when `async`/`await` appears inside a `fn` body — it offers `fn`-context-aware diagnostic detail. The broader-scope codes `E-ASYNC-NOT-IN-SCRML` / `E-AWAIT-NOT-IN-SCRML` / `E-FOR-AWAIT-NOT-IN-SCRML` (§19.9.8 + §34) fire at the parse layer on any occurrence anywhere in scrml source. Both diagnostic paths converge on the same canonical rule: scrml has no `async`/`await`.
 
-A `fn` that requires asynchronous data (e.g., a server call result) SHALL receive that data as a parameter at its call site, not perform the async operation internally.
+`fn` is always synchronous. The `async` keyword SHALL NOT appear on a `fn` declaration. `await` SHALL NOT appear inside a `fn` body. (Both are instances of §19.9.8 inside the `fn` context.)
+
+A `fn` that requires asynchronous data (e.g., a server call result) SHALL receive that data as a parameter at its call site, not perform the async operation internally. The call site itself uses the body-split / CPS mechanism (§19.9.3) — the canonical scrml async surface; no source-level `await` is required.
 
 ```scrml
 // Invalid — E-FN-005: async fn declaration
@@ -20596,7 +20628,7 @@ async fn buildProfile(id) {
 }
 ```
 
-> E-FN-005: `fn` declaration at line N is marked `async`. `fn` is always synchronous. Perform the `await` at the call site and pass the resolved value as a parameter to `fn`.
+> E-FN-005: `fn` declaration at line N is marked `async`. scrml has no `async`/`await` (§19.9.8). The canonical async surface is the body-split / CPS mechanism (§19.9.3) — call `fetchData(id)` from a body-split-eligible function context, not inside `fn`.
 
 ### 48.4 Return-Site Completeness — Relocated to §54
 

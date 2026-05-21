@@ -162,6 +162,26 @@ Pattern:
 
 **Errors-as-states is the canonical lifting:** at Tier 1+, the `!{}` handler at the call site does one thing — route each error variant into the right Phase variant. The error becomes a state in the Phase enum. `<isError>` + `<errorMsg>` cells are anti-patterns; the failure modes live in the type.
 
+### §6.1 No `async` / `await` (S114 — parallel rule to "no try/catch")
+
+**Added 2026-05-21 (S114 ratification, user-voice append).** scrml has **no `async` / `await` keywords** — language-wide standing rule. Public claim. Surface a retraction if anyone slips and uses it. Reasons (user-voice S114 verbatim): *"I hate leaky abstractions and colored functions."* The body-split / CPS mechanism (A9 / Insight 26 / S72 ratified) is scrml's canonical async surface — compiler-managed, uncolored at source.
+
+**Naming discipline — `!{}` is the ERROR context, NOT the async surface:**
+
+| Concern | Surface | Description |
+|---|---|---|
+| Async | **body-split / CPS** | Compiler CPS across server boundary. Uncolored at source. |
+| Failable signature | **`!`** on fn signature | Type-level "this can fail with ErrorType." |
+| Error handler | **`!{}`** at call site | Exhaustive error-variant handler. The error context. |
+
+These COMPOSE — body-split stubs are implicitly `!`-typed because network/server calls fail; their failures route through `!{}` — but they are DISTINCT mechanisms. Don't say "the `!`-body-split" — body-split is named for what it is; the `!`-typing is a consequence (failure-mode preservation), not the mechanism name.
+
+**SPEC status (S114).** SPEC §48.3.5 / E-FN-005 currently forbids async/await inside `fn` bodies only; the error message implies it's OK elsewhere. Promotion to language-wide is queued (see hand-off / master-list). The native parser (M4.3, S114) fires `E-ASYNC-NOT-IN-SCRML` / `E-AWAIT-NOT-IN-SCRML` / `E-FOR-AWAIT-NOT-IN-SCRML` at parse-time on any of these forms.
+
+**Generators (`yield` / `yield*` / `function*`) are NOT covered by this rule.** They are a separate conversation — preserved in the JS-subset bound at M4.3, semantic policy open per S114.
+
+**Trail.** User has stated the "no async/await" position on multiple prior occasions (see `scrml-support/docs/research/developer-ergonomics-report.md:127` — *"parallel by default, no async/await"*); S114 user-voice is the formal capture, not the origination.
+
 ---
 
 ## §7 Engines (Tier 2) — the centerpiece (§51)
