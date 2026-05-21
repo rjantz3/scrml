@@ -10,6 +10,13 @@ export const ParseMode = Object.freeze({
     InArguments:     "InArguments",
     InFunctionBody:  "InFunctionBody",
     InClassBody:     "InClassBody",
+    // InBlock — M3.1 statement-context variant. A `{ ... }` BLOCK statement
+    // (a brace-delimited statement list), as distinct from InObjectLiteral
+    // (a `{` that opens an object). The classic JS ambiguity — `{` at
+    // statement position opens a block; `{` at expression position opens an
+    // object literal — IS the condition-dependent dispatch ParseMode exists
+    // to carry. The statement parser enters .InBlock for a nested block.
+    InBlock:         "InBlock",
 });
 
 export function initialParseMode() {
@@ -41,6 +48,7 @@ export const LEGAL_TRANSITIONS = Object.freeze({
         InObjectLiteral: true,
         InFunctionBody:  true,
         InClassBody:     true,
+        InBlock:         true,
     }),
     InExpression: Object.freeze({
         TopLevel:        true,
@@ -64,10 +72,25 @@ export const LEGAL_TRANSITIONS = Object.freeze({
     InFunctionBody: Object.freeze({
         TopLevel:     true,
         InExpression: true,
+        InBlock:      true,
     }),
     InClassBody: Object.freeze({
         TopLevel:     true,
         InExpression: true,
+    }),
+    // InBlock — a block statement is a statement list. From inside a block
+    // the parser enters expression context for an expression statement, an
+    // inner block for a nested `{}`, a function/class body for a nested
+    // declaration; it returns to the prior statement context (TopLevel /
+    // InFunctionBody / InBlock) when the block closes.
+    InBlock: Object.freeze({
+        TopLevel:        true,
+        InExpression:    true,
+        InArrayLiteral:  true,
+        InObjectLiteral: true,
+        InFunctionBody:  true,
+        InClassBody:     true,
+        InBlock:         true,
     }),
 });
 

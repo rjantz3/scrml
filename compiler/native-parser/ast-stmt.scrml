@@ -1,0 +1,265 @@
+// ast-stmt.scrml — Stmt AST node catalog (DD §D3 type catalog).
+//
+// PILLAR 5b classification (DD §D1):
+//   The Stmt enum + its node constructors are PURE DATA + CALCULATION —
+//   identical classification to ast-expr.scrml. A Stmt node is a struct-
+//   typed discriminated-union value describing an already-parsed statement.
+//   It has NO ongoing identity, NO transitions, NO lifecycle, and there is
+//   NO sensible "what condition is this node in right now?" question. Per
+//   DD §D1 the negative example "AST node construction from already-
+//   confirmed parts (makeIfStmt) is a pure constructor — calculation"
+//   applies verbatim — and names a Stmt constructor explicitly.
+//
+//   What IS state (and lives in parse-mode.scrml, NOT here): the ParseMode
+//   the statement parser is currently in. The AST nodes this file
+//   constructs are the OUTPUT of the parse — pure values, not state.
+//
+// Status (M3.1): COMPILABLE skeleton. JS-escape carries the live tag-style
+// surface. The `type Stmt:enum = { ... }` declaration is preserved in
+// commented canonical form for the M5 swap-in to scrml-native tagged
+// variants. M3.1 emits the substrate kinds (Block, ExprStmt, Empty, VarDecl)
+// + the binding-pattern catalog (ObjectPattern / ArrayPattern /
+// AssignmentPattern / RestElement and the property/element forms). The
+// remaining Stmt kinds (control flow, FunctionDecl / ClassDecl / Import /
+// Export / Try / Throw) are declared in the enum but their constructors land
+// at M3.2 (control flow) / M3.3 (declarations + module syntax + try/throw).
+//
+// DD §D3 cross-ref: the S98 DD §D3 `Stmt` enum sketch — ExprStmt / VarDecl /
+// If / For / Return / Block — is the design seed; M3.1 expands it to the
+// full D5 MUST-PARSE statement surface. The native parser's Stmt enum is the
+// M5 swap-in target shape; the M3.x CONFORMANCE oracle is Acorn's ESTree
+// output (DD §D6). The native enum is intentionally MORE typed than
+// ESTree's `type: string` discriminator.
+
+${
+    // CANONICAL scrml-source shape (PILLAR 5b reference) — tagged-variant
+    // enum per DD §D3. PRESERVED in commented form pending the M5 swap-in
+    // (payload-bearing variants reach the limits of what the compiler
+    // accepts today; for M3.1 the live surface below is plain JS, mirroring
+    // ast-expr.scrml's concession).
+    //
+    //   type Stmt:enum = {
+    //       // --- M3.1 — statement substrate ---
+    //       Block(body: Stmt[], span: Span),
+    //       ExprStmt(expression: Expr, span: Span),
+    //       Empty(span: Span),
+    //       VarDecl(declKind: VarDeclKind, declarations: VarDeclarator[], span: Span),
+    //
+    //       // --- M3.2 — control-flow statements ---
+    //       If(test: Expr, consequent: Stmt, alternate: Stmt | not, span: Span),
+    //       While(test: Expr, body: Stmt, span: Span),
+    //       DoWhile(body: Stmt, test: Expr, span: Span),
+    //       For(init: Stmt | Expr | not, test: Expr | not,
+    //           update: Expr | not, body: Stmt, span: Span),
+    //       ForIn(left: Stmt | Binding, right: Expr, body: Stmt, span: Span),
+    //       ForOf(left: Stmt | Binding, right: Expr, body: Stmt, span: Span),
+    //       Return(argument: Expr | not, span: Span),
+    //       Break(label: string | not, span: Span),
+    //       Continue(label: string | not, span: Span),
+    //       Labeled(label: string, body: Stmt, span: Span),
+    //
+    //       // --- M3.3 — declarations + module syntax + legacy error flow ---
+    //       FunctionDecl(name: string, params: Pattern[], body: Stmt[],
+    //                    isAsync: boolean, isGenerator: boolean, span: Span),
+    //       ClassDecl(name: string, superClass: Expr | not,
+    //                 body: ClassMember[], span: Span),
+    //       Import(specifiers: ImportSpecifier[], source: string, span: Span),
+    //       Export(declaration: Stmt | not, specifiers: ExportSpecifier[],
+    //              source: string | not, span: Span),
+    //       Try(block: Stmt, handler: CatchClause | not,
+    //           finalizer: Stmt | not, span: Span),
+    //       Throw(argument: Expr, span: Span),
+    //   }
+    //
+    //   type VarDeclKind:enum = { Let, Const, Var }
+    //
+    //   type VarDeclarator:struct = {
+    //       target: Binding, init: Expr | not, span: Span,
+    //   }
+    //
+    //   // --- binding-pattern grammar (declaration targets — S98 DD §D5) ---
+    //   type Binding:enum = {
+    //       Ident(name: string, span: Span),
+    //       ObjectPat(properties: BindingProperty[], span: Span),
+    //       ArrayPat(elements: BindingElement[], span: Span),
+    //       AssignmentPattern(left: Binding, right: Expr, span: Span),
+    //       RestElement(argument: Binding, span: Span),
+    //   }
+    //   type BindingProperty:enum = {
+    //       KeyValue(key: Expr, value: Binding, computed: boolean),
+    //       Shorthand(name: string, value: Binding),
+    //       Rest(argument: Binding),
+    //   }
+    //   type BindingElement:enum = {
+    //       Item(value: Binding),
+    //       Hole,                                  // elision: [ , x ]
+    //       Rest(argument: Binding),
+    //   }
+    //
+    // LIVE M3.1 SURFACE (JS host) — a Stmt node is a plain JS object with
+    // `kind` as a string tag (one of the StmtKind variant names below).
+    // Payload fields ride alongside `kind` per-variant. Every node carries
+    // `span: Span` (reuses span.scrml's struct). Binding nodes carry a
+    // `bindingKind` tag rather than `kind` (they are not Stmt nodes).
+    //
+    // Pillar 5b note: kind-as-string-tag is a known M3.1 concession to the
+    // M5 self-host swap — identical to ast-expr.scrml's concession.
+
+    // ---------------------------------------------------------------------
+    // StmtKind — string-tag registry. Order mirrors the canonical enum.
+    // M3.1 EMITS Block / ExprStmt / Empty / VarDecl; the rest are declared
+    // for catalog completeness (constructors land M3.2 / M3.3).
+    // ---------------------------------------------------------------------
+    export const StmtKind = Object.freeze({
+        // --- M3.1 — statement substrate ---
+        Block:    "Block",
+        ExprStmt: "ExprStmt",
+        Empty:    "Empty",
+        VarDecl:  "VarDecl",
+
+        // --- M3.2 — control-flow statements (declared; constructors deferred) ---
+        If:       "If",
+        While:    "While",
+        DoWhile:  "DoWhile",
+        For:      "For",
+        ForIn:    "ForIn",
+        ForOf:    "ForOf",
+        Return:   "Return",
+        Break:    "Break",
+        Continue: "Continue",
+        Labeled:  "Labeled",
+
+        // --- M3.3 — declarations + module syntax + legacy error flow ---
+        FunctionDecl: "FunctionDecl",
+        ClassDecl:    "ClassDecl",
+        Import:       "Import",
+        Export:       "Export",
+        Try:          "Try",
+        Throw:        "Throw",
+    })
+
+    // VarDeclKind — the `let` / `const` / `var` declaration keyword (M3.1).
+    export const VarDeclKind = Object.freeze({
+        Let:   "let",
+        Const: "const",
+        Var:   "var",
+    })
+
+    // BindingKind — discriminator for a variable-declaration binding TARGET.
+    // M3.1 parses real binding patterns per S98 DD §D5.
+    export const BindingKind = Object.freeze({
+        Ident:     "Ident",
+        ObjectPat: "ObjectPat",
+        ArrayPat:  "ArrayPat",
+    })
+
+    // BindingPropertyKind — one property of an object-destructuring pattern.
+    export const BindingPropertyKind = Object.freeze({
+        KeyValue:  "KeyValue",
+        Shorthand: "Shorthand",
+        Rest:      "Rest",
+    })
+
+    // BindingElementKind — one element of an array-destructuring pattern.
+    export const BindingElementKind = Object.freeze({
+        Item: "Item",
+        Hole: "Hole",
+        Rest: "Rest",
+    })
+
+    // -- Statement node constructors (M3.1) --
+
+    // makeBlock — a block statement `{ stmt* }`.
+    export function makeBlock(body, span) {
+        return { kind: StmtKind.Block, body, span }
+    }
+
+    // makeExprStmt — an expression statement `expr ;`.
+    export function makeExprStmt(expression, span) {
+        return { kind: StmtKind.ExprStmt, expression, span }
+    }
+
+    // makeEmpty — the empty statement `;`.
+    export function makeEmpty(span) {
+        return { kind: StmtKind.Empty, span }
+    }
+
+    // makeVarDecl — a `let`/`const`/`var` declaration.
+    export function makeVarDecl(declKind, declarations, span) {
+        return { kind: StmtKind.VarDecl, declKind, declarations, span }
+    }
+
+    // makeVarDeclarator — one declarator: a binding target + optional init.
+    export function makeVarDeclarator(target, init, span) {
+        return { target, init, span }
+    }
+
+    // -- Binding-pattern node constructors (M3.1 — DD §D5) --
+
+    // makeBindingIdent — a plain identifier binding `x` (the pattern leaf).
+    export function makeBindingIdent(name, span) {
+        return { bindingKind: BindingKind.Ident, name, span }
+    }
+
+    // makeObjectPattern — `{ a, b: c, ...rest }` destructuring pattern.
+    export function makeObjectPattern(properties, span) {
+        return { bindingKind: BindingKind.ObjectPat, properties, span }
+    }
+
+    // makeArrayPattern — `[ a, , b, ...rest ]` destructuring pattern.
+    export function makeArrayPattern(elements, span) {
+        return { bindingKind: BindingKind.ArrayPat, elements, span }
+    }
+
+    // makeAssignmentPattern — a defaulted binding `target = default`.
+    export function makeAssignmentPattern(left, right, span) {
+        return { bindingKind: "AssignmentPattern", left, right, span }
+    }
+
+    // makeRestElement — a rest binding `...target`.
+    export function makeRestElement(argument, span) {
+        return { bindingKind: "RestElement", argument, span }
+    }
+
+    // -- object-pattern property constructors --
+
+    // makeBindingPropertyKeyValue — `{ key: target }`.
+    export function makeBindingPropertyKeyValue(key, value, computed) {
+        return { propertyKind: BindingPropertyKind.KeyValue, key, value, computed }
+    }
+
+    // makeBindingPropertyShorthand — `{ name }` (or `{ name = default }`).
+    export function makeBindingPropertyShorthand(name, value) {
+        return { propertyKind: BindingPropertyKind.Shorthand, name, value }
+    }
+
+    // makeBindingPropertyRest — `{ ...rest }`.
+    export function makeBindingPropertyRest(argument) {
+        return { propertyKind: BindingPropertyKind.Rest, argument }
+    }
+
+    // -- array-pattern element constructors --
+
+    // makeBindingElementItem — one positional element of an array pattern.
+    export function makeBindingElementItem(value) {
+        return { elementKind: BindingElementKind.Item, value }
+    }
+
+    // makeBindingElementHole — an elision slot `[ , x ]`.
+    export function makeBindingElementHole() {
+        return { elementKind: BindingElementKind.Hole }
+    }
+
+    // makeBindingElementRest — `[ ...rest ]`.
+    export function makeBindingElementRest(argument) {
+        return { elementKind: BindingElementKind.Rest, argument }
+    }
+
+    // -- isStmt — predicate --
+    export function isStmt(node) {
+        if (node is not) {
+            return false
+        }
+        return StmtKind[node.kind] is not not
+    }
+}

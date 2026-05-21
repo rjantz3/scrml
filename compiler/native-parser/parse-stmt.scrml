@@ -1,0 +1,724 @@
+// parse-stmt.scrml — the JS statement parser (DD §D2 + M3 milestone).
+//
+// The statement parser consumes M1's `lex(source): Token[]` output (through
+// token-cursor.scrml) and produces `Stmt` AST nodes (ast-stmt.scrml) per
+// S98 D3. It is the third composed-engines layer of the scrml-native parser
+// — M1 is the lexer, M2 the expression parser, M3 the statement parser.
+// M3 subsumes the legacy body-pre-parser (BPP).
+//
+// PILLAR 5b classification (DD §D1):
+//   The parser SUBSTRATE is engine-shaped STATE — identical classification
+//   to parse-expr.scrml. `ParseMode` (parse-mode.scrml) is the context
+//   engine; the statement parser dispatches per the active ParseMode (the
+//   §D1 operational test's first row: the `{`-at-statement-position vs
+//   `{`-at-expression-position ambiguity IS condition-dependent dispatch —
+//   .InBlock vs .InObjectLiteral). The token cursor's POSITION is state.
+//
+//   PARSING A STATEMENT, once the ParseMode is fixed, is CALCULATION. Per
+//   DD §D1 OQ1 the operational test classifies the LOCUS; a calculation may
+//   contain state-shape subroutines. Given a confirmed token run in a known
+//   ParseMode, the Stmt AST node is a pure function of the token run. So
+//   every `parse*` function below is `fn`-shape (a pure calculation over the
+//   cursor's current view); the STATE is the cursor + the ParseMode engine
+//   those functions consult. AST-node construction (the makeStmt* / makeBlock
+//   constructors) is calculation by DD §D1's named negative example.
+//
+// SCOPE — M3.1 (the FIRST sub-step of M3, the statement parser).
+//   M3.1 — STATEMENT SUBSTRATE + DECLARATIONS + BLOCK/EXPRESSION STATEMENTS
+//     + BlockStub RE-ENTRY. Parses, per S98 DD §D5's MUST-PARSE list:
+//       - variable declarations `let` / `const` / `var`, INCLUDING object +
+//         array destructuring patterns (real binding patterns — ast-stmt's
+//         binding catalog; §D5: "`collectBindingIdentifiers` walks these");
+//       - expression statements `expr ;` (with automatic semicolon insertion);
+//       - block statements `{ stmt* }`;
+//       - the empty statement `;`.
+//     M3.1 builds the BlockStub re-entry mechanism (parseBlockStubBody) —
+//     M2.3 left function/arrow block bodies, and M2.4 left match-arm block
+//     bodies, as `BlockStub` Expr nodes capturing a token range; M3.1
+//     re-parses any BlockStub's captured tokens into a real Stmt list. This
+//     is the load-bearing M3.1 mechanism.
+//
+//   NOT M3.1 — forward seams (the named sub-step that owns each):
+//     - control-flow statements (`if`/`while`/`for`/`return`/`break`/
+//       `continue`/labels) — M3.2;
+//     - function/class declarations + in-line bodies (the BPP subsumption) +
+//       `import`/`export` + `try`/`throw` — M3.3;
+//     - error-recovery engine integration + full conformance — M3.4.
+//   A statement form outside the S98 D5 subset (`switch`, `with`, decorators)
+//   is E-PARSER-OUT-OF-SUBSET (D5/OQ6 — surfaced to PA, scope NOT widened).
+//
+// EXTENSION POINTS. parseStatementList is the trampoline (the statement-list
+// loop); parseStatement is the per-statement dispatch. parseBlockStubBody is
+// the M2→M3 re-entry seam (M2.3/M2.4 left BlockStubs; M3.1 parses them).
+// parse-stmt shares ONE parser context object with parse-expr — the same
+// `{ cursor, currentParseMode, errors }` shape makeParseExprContext produces
+// — so parseExpression(ctx) runs directly on the statement parser's ctx with
+// no token-range copy (the R1 one-cursor discipline, within the JS layer).
+//
+// .scrml<->.js shadow discipline (README ANOMALY-2): this .scrml carries the
+// canonical Pillar 5b SHAPE; the 1:1 .js shadow is the executable surface
+// tests import. Verify via parser-conformance-stmt.test.js against the .js —
+// not by compiling the .scrml.
+
+${
+    import {
+        makeTokenCursor, current, currentKind, advance, atEnd,
+    } from "./token-cursor.scrml"
+    import { TokenKind, makeEof } from "./token.scrml"
+    import { makeSpan } from "./span.scrml"
+    import {
+        ParseMode, initialParseMode, setParseMode, enterMode, exitMode,
+    } from "./parse-mode.scrml"
+    import { parseExpression, parseAssignmentExpr } from "./parse-expr.scrml"
+    import {
+        VarDeclKind,
+        makeBlock, makeExprStmt, makeEmpty, makeVarDecl, makeVarDeclarator,
+        makeBindingIdent, makeObjectPattern, makeArrayPattern,
+        makeAssignmentPattern,
+        makeBindingPropertyKeyValue, makeBindingPropertyShorthand,
+        makeBindingPropertyRest,
+        makeBindingElementItem, makeBindingElementHole, makeBindingElementRest,
+    } from "./ast-stmt.scrml"
+
+    // -- makeParseStmtContext — statement-parser context constructor --
+    // Identical SHAPE to makeParseExprContext (parse-expr.scrml) — `cursor`
+    // + `currentParseMode` + `errors`. The shared shape lets
+    // parseExpression(ctx) run directly on this ctx; the cursor is the one
+    // cursor both layers walk.
+    export function makeParseStmtContext(tokens) {
+        return {
+            cursor:           makeTokenCursor(tokens),
+            currentParseMode: initialParseMode(),
+            errors:           [],
+        }
+    }
+
+    // recordError — push a structured diagnostic. Mirrors parse-expr's
+    // recordError exactly (the diagnostic stream is { code, message, span }).
+    export function recordError(ctx, code, message, span) {
+        ctx.errors.push({ code, message, span })
+    }
+
+    // spanHere — the span of the token at the cursor, or a safe zero span
+    // past EOF. Used for diagnostics where no node span is available.
+    function spanHere(ctx) {
+        const here = current(ctx.cursor)
+        if (here is not) {
+            return makeSpan(0, 0, 1, 1)
+        }
+        return here.span
+    }
+
+    // nodeStart / nodeEnd / nodeLine / nodeCol — defensive node-span reads
+    // (a malformed parse can yield a null child).
+    function nodeStart(node) {
+        if (node is not || node.span is not) {
+            return 0
+        }
+        return node.span.start
+    }
+    function nodeEnd(node) {
+        if (node is not || node.span is not) {
+            return 0
+        }
+        return node.span.end
+    }
+    function nodeLine(node) {
+        if (node is not || node.span is not) {
+            return 1
+        }
+        return node.span.line
+    }
+    function nodeCol(node) {
+        if (node is not || node.span is not) {
+            return 1
+        }
+        return node.span.col
+    }
+
+    // ====================================================================
+    // ASI — automatic semicolon insertion.
+    //
+    // The M1 lexer does NOT emit Newline / Whitespace tokens — so a parser
+    // cannot see a newline as a token. ECMAScript ASI inserts a `;` at the
+    // end of a statement when the next token (a) is on a LATER source line
+    // than the just-consumed token, (b) is `}`, or (c) is EOF. The lexer
+    // keeps a `.span.line` on every token — the line signal ASI needs.
+    // ====================================================================
+
+    // lineOfToken — the 1-based source line of a token (1 if absent).
+    function lineOfToken(tok) {
+        if (tok is not || tok.span is not) {
+            return 1
+        }
+        return tok.span.line
+    }
+
+    // canInsertSemicolon — is an ASI condition satisfied at the cursor,
+    // given the last token of the statement just parsed (`prevTok`)? True
+    // when the next token is `}`, is EOF, or sits on a later line.
+    export function canInsertSemicolon(ctx, prevTok) {
+        const cursor = ctx.cursor
+        if (atEnd(cursor)) {
+            return true
+        }
+        const kind = currentKind(cursor)
+        if (kind == TokenKind.RBrace) {
+            return true
+        }
+        const here = current(cursor)
+        if (here is not) {
+            return true
+        }
+        return lineOfToken(here) > lineOfToken(prevTok)
+    }
+
+    // consumeSemicolon — consume the statement terminator. An explicit `;`
+    // is consumed. Otherwise, if an ASI condition holds the boundary is
+    // accepted silently. If neither, a missing-terminator diagnostic is
+    // recorded (the parser does NOT throw) and the parser continues.
+    export function consumeSemicolon(ctx, prevTok) {
+        const cursor = ctx.cursor
+        if (currentKind(cursor) == TokenKind.Semicolon) {
+            advance(cursor)
+            return
+        }
+        if (canInsertSemicolon(ctx, prevTok)) {
+            return
+        }
+        recordError(ctx, "E-STMT-MISSING-SEMICOLON",
+            "expected ';' or a newline to end the statement", spanHere(ctx))
+    }
+
+    // lastTokenBefore — the token immediately before the cursor (the last
+    // token the parse consumed). The `prevTok` argument to consumeSemicolon.
+    function lastTokenBefore(ctx) {
+        const cursor = ctx.cursor
+        if (cursor.idx <= 0) {
+            return current(cursor)
+        }
+        return cursor.tokens[cursor.idx - 1]
+    }
+
+    // ====================================================================
+    // Statement-list parsing — the trampoline.
+    // ====================================================================
+
+    // parseStatementList — parse a run of statements until the cursor
+    // reaches a terminator token kind (RBrace for a block body) or EOF.
+    // Returns a Stmt array. A forward-progress guard forces one advance when
+    // parseStatement consumes nothing (M3.4 replaces it with the
+    // ErrorRecovery engine's panic-mode re-synchronization).
+    export function parseStatementList(ctx, terminatorKind) {
+        const cursor = ctx.cursor
+        const body = []
+
+        while (atEnd(cursor) == false) {
+            if (terminatorKind is not not && currentKind(cursor) == terminatorKind) {
+                break
+            }
+            const before = cursor.idx
+            const stmt = parseStatement(ctx)
+            if (stmt is not not) {
+                body.push(stmt)
+            }
+            if (cursor.idx == before) {
+                advance(cursor)
+            }
+        }
+        return body
+    }
+
+    // parseStatement — parse ONE statement; dispatch on the token kind at
+    // the cursor. M3.1 dispatches the substrate forms; control-flow and
+    // declaration keyword leads are FORWARD SEAMS — M3.2 / M3.3 wire them.
+    export function parseStatement(ctx) {
+        const cursor = ctx.cursor
+        const kind = currentKind(ctx.cursor)
+
+        if (kind == TokenKind.Semicolon) {
+            return parseEmptyStatement(ctx)
+        }
+
+        // A `{` at STATEMENT position always opens a block (an object
+        // literal is an expression-position `{` — the ParseMode engine
+        // carries the distinction; ECMAScript's lookahead restriction means
+        // no expression statement may begin with `{`).
+        if (kind == TokenKind.LBrace) {
+            return parseBlock(ctx)
+        }
+
+        if (kind == TokenKind.KwLet || kind == TokenKind.KwConst || kind == TokenKind.KwVar) {
+            return parseVarDecl(ctx)
+        }
+
+        // M3.2 forward seam — control-flow keyword leads.
+        if (kind == TokenKind.KwIf || kind == TokenKind.KwElse
+            || kind == TokenKind.KwFor || kind == TokenKind.KwWhile
+            || kind == TokenKind.KwDoWhile || kind == TokenKind.KwReturn
+            || kind == TokenKind.KwBreak || kind == TokenKind.KwContinue) {
+            recordError(ctx, "E-STMT-FORWARD-M3-2",
+                "control-flow statements are parsed by M3.2 (not yet implemented)",
+                spanHere(ctx))
+            return not
+        }
+
+        // M3.3 forward seam — declaration / module / legacy-error leads.
+        if (kind == TokenKind.KwFunction || kind == TokenKind.KwClass
+            || kind == TokenKind.KwImport || kind == TokenKind.KwExport
+            || kind == TokenKind.KwTry || kind == TokenKind.KwThrow) {
+            recordError(ctx, "E-STMT-FORWARD-M3-3",
+                "function/class declarations, import/export and try/throw are parsed by M3.3 (not yet implemented)",
+                spanHere(ctx))
+            return not
+        }
+
+        return parseExprStatement(ctx)
+    }
+
+    // -- parseEmptyStatement — a lone `;` --
+    export function parseEmptyStatement(ctx) {
+        const semi = advance(ctx.cursor)
+        return makeEmpty(semi.span)
+    }
+
+    // -- parseBlock — a block statement `{ stmt* }` --
+    // Enters .InBlock for the body, parses the statement list to the
+    // matching `}`, restores the prior ParseMode. A missing `}` records a
+    // diagnostic (the parser does not throw).
+    export function parseBlock(ctx) {
+        const cursor = ctx.cursor
+        const open = advance(cursor)
+
+        const prior = enterMode(ctx, ParseMode.InBlock)
+        const body = parseStatementList(ctx, TokenKind.RBrace)
+        exitMode(ctx, prior)
+
+        let endSpan = open.span
+        if (currentKind(cursor) == TokenKind.RBrace) {
+            const close = advance(cursor)
+            endSpan = close.span
+        } else {
+            recordError(ctx, "E-STMT-UNCLOSED-BLOCK",
+                "expected '}' to close a block statement", open.span)
+        }
+
+        const span = makeSpan(open.span.start, endSpan.end, open.span.line, open.span.col)
+        return makeBlock(body, span)
+    }
+
+    // -- parseExprStatement — an expression statement `expr ;` --
+    // Parses a full (sequence-level) expression in expression context, then
+    // the statement terminator (explicit `;` or ASI).
+    export function parseExprStatement(ctx) {
+        const prior = enterMode(ctx, ParseMode.InExpression)
+        const expr = parseExpression(ctx)
+        exitMode(ctx, prior)
+
+        const prevTok = lastTokenBefore(ctx)
+        consumeSemicolon(ctx, prevTok)
+
+        const startS = nodeStart(expr)
+        const endTok = prevTok
+        const endE = (endTok is not) ? nodeEnd(expr) : endTok.span.end
+        const span = makeSpan(startS, Math.max(endE, nodeEnd(expr)), nodeLine(expr), nodeCol(expr))
+        return makeExprStmt(expr, span)
+    }
+
+    // ====================================================================
+    // Variable declarations — `let` / `const` / `var`.
+    // ====================================================================
+
+    // -- parseVarDecl — a variable declaration --
+    //   var-decl ::= ('let' | 'const' | 'var') declarator (',' declarator)* ';'
+    export function parseVarDecl(ctx) {
+        const cursor = ctx.cursor
+        const kwTok = advance(cursor)
+        const declKind = varDeclKindOf(kwTok.kind)
+
+        const declarations = []
+        while (atEnd(cursor) == false) {
+            const declarator = parseVarDeclarator(ctx)
+            if (declarator is not) {
+                break
+            }
+            declarations.push(declarator)
+
+            if (currentKind(cursor) == TokenKind.Comma) {
+                advance(cursor)
+                continue
+            }
+            break
+        }
+
+        const prevTok = lastTokenBefore(ctx)
+        consumeSemicolon(ctx, prevTok)
+
+        let endE = kwTok.span.end
+        if (declarations.length > 0) {
+            endE = nodeEnd(declarations[declarations.length - 1])
+        }
+        const span = makeSpan(kwTok.span.start, endE, kwTok.span.line, kwTok.span.col)
+        return makeVarDecl(declKind, declarations, span)
+    }
+
+    // varDeclKindOf — the VarDeclKind for a declaration-keyword TokenKind.
+    function varDeclKindOf(tokenKind) {
+        if (tokenKind == TokenKind.KwConst) {
+            return VarDeclKind.Const
+        }
+        if (tokenKind == TokenKind.KwVar) {
+            return VarDeclKind.Var
+        }
+        return VarDeclKind.Let
+    }
+
+    // -- parseVarDeclarator — one declarator: a binding target + opt init --
+    //   declarator ::= binding ('=' assignment-expr)?
+    export function parseVarDeclarator(ctx) {
+        const cursor = ctx.cursor
+        const target = parseBinding(ctx)
+
+        let init = not
+        if (currentKind(cursor) == TokenKind.Assign) {
+            advance(cursor)
+            const prior = enterMode(ctx, ParseMode.InExpression)
+            init = parseAssignmentLevelExpr(ctx)
+            exitMode(ctx, prior)
+        }
+
+        const endE = (init is not) ? nodeEnd(target) : nodeEnd(init)
+        const span = makeSpan(nodeStart(target), endE, nodeLine(target), nodeCol(target))
+        return makeVarDeclarator(target, init, span)
+    }
+
+    // parseAssignmentLevelExpr — parse a NON-comma expression (a declarator
+    // initializer stops at a `,` because the comma is the declarator
+    // separator). parse-expr's parseAssignmentExpr is the element-position
+    // entry (it stops at a `,`) — imported at the file head and reused.
+    function parseAssignmentLevelExpr(ctx) {
+        return parseAssignmentExpr(ctx)
+    }
+
+    // ====================================================================
+    // Binding patterns — declaration-target destructuring (S98 DD §D5).
+    //
+    // A declaration TARGET is an identifier or a destructuring pattern;
+    // patterns nest. These produce ast-stmt's binding nodes — NOT ast-expr's
+    // Object/Array literal nodes (a binding pattern is the left-of-`=`
+    // shape, not a value).
+    // ====================================================================
+
+    // -- parseBinding — a binding TARGET (identifier or destructuring) --
+    export function parseBinding(ctx) {
+        const cursor = ctx.cursor
+        const kind = currentKind(cursor)
+
+        if (kind == TokenKind.LBrace) {
+            return parseObjectPattern(ctx)
+        }
+        if (kind == TokenKind.LBracket) {
+            return parseArrayPattern(ctx)
+        }
+        return parseBindingIdent(ctx)
+    }
+
+    // -- parseBindingIdent — a plain identifier binding --
+    export function parseBindingIdent(ctx) {
+        const cursor = ctx.cursor
+        if (currentKind(cursor) != TokenKind.Ident) {
+            recordError(ctx, "E-STMT-BINDING-NAME",
+                "expected an identifier in a binding position", spanHere(ctx))
+            return makeBindingIdent("", spanHere(ctx))
+        }
+        const tok = advance(cursor)
+        return makeBindingIdent(tok.name, tok.span)
+    }
+
+    // -- parseBindingTargetWithDefault — a binding target, opt defaulted --
+    // `target = default` -> an AssignmentPattern; a bare target -> target.
+    function parseBindingTargetWithDefault(ctx) {
+        const cursor = ctx.cursor
+        const target = parseBinding(ctx)
+
+        if (currentKind(cursor) == TokenKind.Assign) {
+            advance(cursor)
+            const prior = enterMode(ctx, ParseMode.InExpression)
+            const dflt = parseAssignmentLevelExpr(ctx)
+            exitMode(ctx, prior)
+            const span = makeSpan(nodeStart(target), nodeEnd(dflt), nodeLine(target), nodeCol(target))
+            return makeAssignmentPattern(target, dflt, span)
+        }
+        return target
+    }
+
+    // -- parseObjectPattern — `{ a, b: c, d = 1, ...rest }` --
+    export function parseObjectPattern(ctx) {
+        const cursor = ctx.cursor
+        const open = advance(cursor)
+        const properties = []
+
+        while (atEnd(cursor) == false && currentKind(cursor) != TokenKind.RBrace) {
+            if (currentKind(cursor) == TokenKind.Ellipsis) {
+                advance(cursor)
+                const restTarget = parseBinding(ctx)
+                properties.push(makeBindingPropertyRest(restTarget))
+            } else {
+                properties.push(parseObjectPatternProperty(ctx))
+            }
+
+            if (currentKind(cursor) == TokenKind.Comma) {
+                advance(cursor)
+                continue
+            }
+            break
+        }
+
+        let endSpan = open.span
+        if (currentKind(cursor) == TokenKind.RBrace) {
+            endSpan = advance(cursor).span
+        } else {
+            recordError(ctx, "E-STMT-UNCLOSED-PATTERN",
+                "expected '}' to close an object-destructuring pattern", open.span)
+        }
+
+        const span = makeSpan(open.span.start, endSpan.end, open.span.line, open.span.col)
+        return makeObjectPattern(properties, span)
+    }
+
+    // -- parseObjectPatternProperty — one `{ ... }` pattern property --
+    // Forms: `{ name }` / `{ name = default }` shorthand;
+    //        `{ key: target }` / `{ "k": target }` / `{ [expr]: target }`.
+    export function parseObjectPatternProperty(ctx) {
+        const cursor = ctx.cursor
+        const kind = currentKind(cursor)
+
+        // Computed key — `[ expr ]: target` (always keyed).
+        if (kind == TokenKind.LBracket) {
+            advance(cursor)
+            const prior = enterMode(ctx, ParseMode.InExpression)
+            const keyExpr = parseAssignmentLevelExpr(ctx)
+            exitMode(ctx, prior)
+            if (currentKind(cursor) == TokenKind.RBracket) {
+                advance(cursor)
+            } else {
+                recordError(ctx, "E-STMT-UNCLOSED-COMPUTED-KEY",
+                    "expected ']' to close a computed pattern key", spanHere(ctx))
+            }
+            expectColon(ctx)
+            const valueTarget = parseBindingTargetWithDefault(ctx)
+            return makeBindingPropertyKeyValue(keyExpr, valueTarget, true)
+        }
+
+        // String / number literal key — always keyed.
+        if (kind == TokenKind.StringLit || kind == TokenKind.NumberLit) {
+            const keyTok = advance(cursor)
+            const keyExpr = literalKeyExpr(keyTok)
+            expectColon(ctx)
+            const valueTarget = parseBindingTargetWithDefault(ctx)
+            return makeBindingPropertyKeyValue(keyExpr, valueTarget, false)
+        }
+
+        // Identifier key. `name :` -> keyed; otherwise shorthand.
+        if (kind == TokenKind.Ident) {
+            const nameTok = advance(cursor)
+            if (currentKind(cursor) == TokenKind.Colon) {
+                advance(cursor)
+                const valueTarget = parseBindingTargetWithDefault(ctx)
+                const keyExpr = identKeyExpr(nameTok)
+                return makeBindingPropertyKeyValue(keyExpr, valueTarget, false)
+            }
+            let valueTarget = makeBindingIdent(nameTok.name, nameTok.span)
+            if (currentKind(cursor) == TokenKind.Assign) {
+                advance(cursor)
+                const prior = enterMode(ctx, ParseMode.InExpression)
+                const dflt = parseAssignmentLevelExpr(ctx)
+                exitMode(ctx, prior)
+                const apSpan = makeSpan(nameTok.span.start, nodeEnd(dflt), nameTok.span.line, nameTok.span.col)
+                valueTarget = makeAssignmentPattern(valueTarget, dflt, apSpan)
+            }
+            return makeBindingPropertyShorthand(nameTok.name, valueTarget)
+        }
+
+        recordError(ctx, "E-STMT-PATTERN-PROPERTY",
+            "expected a property name in an object-destructuring pattern", spanHere(ctx))
+        const placeholder = makeBindingIdent("", spanHere(ctx))
+        return makeBindingPropertyShorthand("", placeholder)
+    }
+
+    // expectColon — consume a `:` separator; record a diagnostic if absent.
+    function expectColon(ctx) {
+        if (currentKind(ctx.cursor) == TokenKind.Colon) {
+            advance(ctx.cursor)
+            return
+        }
+        recordError(ctx, "E-STMT-PATTERN-COLON",
+            "expected ':' after a pattern property key", spanHere(ctx))
+    }
+
+    // identKeyExpr — a property-key node for an identifier-key token.
+    function identKeyExpr(tok) {
+        return { kind: "Ident", name: tok.name, span: tok.span }
+    }
+
+    // literalKeyExpr — a property-key node for a string / number literal key.
+    function literalKeyExpr(tok) {
+        if (tok.kind == TokenKind.StringLit) {
+            return { kind: "StringLit", value: tok.cooked, raw: tok.text, span: tok.span }
+        }
+        return { kind: "NumberLit", value: tok.value, raw: tok.text, span: tok.span }
+    }
+
+    // -- parseArrayPattern — `[ a, , b, c = 1, ...rest ]` --
+    export function parseArrayPattern(ctx) {
+        const cursor = ctx.cursor
+        const open = advance(cursor)
+        const elements = []
+
+        while (atEnd(cursor) == false && currentKind(cursor) != TokenKind.RBracket) {
+            // Elision — a `,` with no element before it is a hole.
+            if (currentKind(cursor) == TokenKind.Comma) {
+                elements.push(makeBindingElementHole())
+                advance(cursor)
+                continue
+            }
+
+            // `...rest` — an array-pattern rest element (the last element).
+            if (currentKind(cursor) == TokenKind.Ellipsis) {
+                advance(cursor)
+                const restTarget = parseBinding(ctx)
+                elements.push(makeBindingElementRest(restTarget))
+                break
+            }
+
+            elements.push(makeBindingElementItem(parseBindingTargetWithDefault(ctx)))
+
+            if (currentKind(cursor) == TokenKind.Comma) {
+                advance(cursor)
+                continue
+            }
+            break
+        }
+
+        let endSpan = open.span
+        if (currentKind(cursor) == TokenKind.RBracket) {
+            endSpan = advance(cursor).span
+        } else {
+            recordError(ctx, "E-STMT-UNCLOSED-PATTERN",
+                "expected ']' to close an array-destructuring pattern", open.span)
+        }
+
+        const span = makeSpan(open.span.start, endSpan.end, open.span.line, open.span.col)
+        return makeArrayPattern(elements, span)
+    }
+
+    // ====================================================================
+    // BlockStub re-entry — THE load-bearing M3.1 mechanism.
+    //
+    // M2.3 left function/arrow block bodies, and M2.4 left match-arm block
+    // bodies, as `BlockStub` Expr nodes. A BlockStub carries:
+    //   { kind:"BlockStub", tokens, tokenStart, tokenEnd, span }
+    // where `tokens` is the body token slice — half-open, NOT including the
+    // closing `}` and NOT including a trailing EOF token. parseBlockStubBody
+    // re-parses that slice into a real Stmt list.
+    //
+    // The token-cursor's `advance` clamps at tokens.length-1 and `atEnd`
+    // fires only on an EOF-kinded token — so the slice MUST get a synthetic
+    // EOF appended before cursoring, the same shape parseExpr relies on for
+    // a full lex stream.
+    // ====================================================================
+
+    // parseBlockStubBody — re-parse a BlockStub's captured token range into
+    // a Stmt array. The single, uniform re-entry point: arrow bodies,
+    // function-expr bodies, and match-arm block bodies all produce
+    // BlockStubs via the same parse-expr capture, so one re-entry function
+    // serves all three. Returns { body, errors }.
+    export function parseBlockStubBody(stub) {
+        const stubTokens = (stub is not || stub.tokens is not) ? [] : stub.tokens
+
+        // Append a synthetic EOF so the token-cursor terminates cleanly.
+        let eofPos = 0
+        let eofLine = 1
+        let eofCol = 1
+        if (stubTokens.length > 0) {
+            const last = stubTokens[stubTokens.length - 1]
+            if (last is not not && last.span is not not) {
+                eofPos = last.span.end
+                eofLine = last.span.line
+                eofCol = last.span.col
+            }
+        } else if (stub is not not && stub.span is not not) {
+            eofPos = stub.span.end
+            eofLine = stub.span.line
+            eofCol = stub.span.col
+        }
+
+        const tokensForCursor = stubTokens.concat([makeEof(eofPos, eofLine, eofCol)])
+        const ctx = makeParseStmtContext(tokensForCursor)
+        // A function/arrow/match-arm body is a statement list in
+        // function-body context — the ParseMode the body re-enters.
+        setParseMode(ctx, ParseMode.InFunctionBody)
+        const body = parseStatementList(ctx, not)
+        return { body, errors: ctx.errors }
+    }
+
+    // reenterBlockStubs — walk an Expr tree, re-parse every BlockStub in
+    // place, and attach the parsed statement list as `.parsedBody` on the
+    // BlockStub node. The deep variant — a parse-expr AST whose arrow /
+    // function / match bodies are all BlockStubs becomes a fully-parsed
+    // tree. Returns the count of stubs re-entered. Idempotent — a BlockStub
+    // already carrying `.parsedBody` is skipped.
+    export function reenterBlockStubs(node) {
+        let count = 0
+        if (node is not || typeof node != "object") {
+            return count
+        }
+
+        if (node.kind == "BlockStub") {
+            if (node.parsedBody is not) {
+                const result = parseBlockStubBody(node)
+                node.parsedBody = result.body
+                node.bodyErrors = result.errors
+                count = count + 1
+                for (const stmt of node.parsedBody) {
+                    count = count + reenterBlockStubs(stmt)
+                }
+            }
+            return count
+        }
+
+        // Generic structural walk — descend into every array / object child.
+        for (const key of Object.keys(node)) {
+            const child = node[key]
+            if (Array.isArray(child)) {
+                for (const el of child) {
+                    count = count + reenterBlockStubs(el)
+                }
+            } else if (child is not not && typeof child == "object") {
+                count = count + reenterBlockStubs(child)
+            }
+        }
+        return count
+    }
+
+    // ====================================================================
+    // Entry points.
+    // ====================================================================
+
+    // parseStmt — parse ONE statement at the head of a token stream.
+    // Mirrors parse-expr's parseExpr entry shape — returns { ast, errors }.
+    export function parseStmt(tokens) {
+        const ctx = makeParseStmtContext(tokens)
+        const ast = parseStatement(ctx)
+        return { ast, errors: ctx.errors }
+    }
+
+    // parseProgram — parse a whole token stream as a statement list (a
+    // program body / a module body). Returns { body, errors }. The M3.1
+    // top-level entry the conformance harness drives.
+    export function parseProgram(tokens) {
+        const ctx = makeParseStmtContext(tokens)
+        const body = parseStatementList(ctx, not)
+        return { body, errors: ctx.errors }
+    }
+}

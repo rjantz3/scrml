@@ -32,12 +32,12 @@
 //   in a known ParseMode, the primary-expression AST node is a pure
 //   function of the token run — calculation per DD §D1.
 //
-// Status (M2.1): canonical <engine> declaration LANDS at top-level. M2.1 is
-// the FIRST sub-step of M2 (the expression parser) — its scope is PRIMARY
-// EXPRESSIONS. The expression-relevant state-children carry substantive
-// rule= contracts; .InFunctionBody / .InClassBody are declared (D2 names
-// them composite state-children) but their bodies activate at M2.3 (call/
-// arrow/function-expression) and M3 (statement parser) respectively.
+// Status (M2.1 + M3.1): canonical <engine> declaration LANDS at top-level.
+// M2.1 (the FIRST sub-step of M2 — the expression parser) declared the
+// expression-relevant state-children with substantive rule= contracts. M3.1
+// (the FIRST sub-step of M3 — the statement parser) ADDS the .InBlock
+// statement-context state-child and activates .InFunctionBody. .InClassBody
+// remains declared-only (its body activates at M2.3+/M4).
 //
 //   - TopLevel        — the program-body / statement-position context.
 //   - InExpression    — an expression is being parsed (after `=`, `return`,
@@ -50,6 +50,12 @@
 //   - InFunctionBody  — a function/arrow block body — activates M3 (the
 //     statement parser subsumes BPP). D2 names it a composite state-child.
 //   - InClassBody     — a class body — activates M2.3+/M4.
+//   - InBlock         — a `{ ... }` BLOCK statement (a brace-delimited
+//                       statement list), as distinct from .InObjectLiteral
+//                       (a `{` that opens an object). Added at M3.1; the
+//                       classic statement-`{`-vs-expression-`{` ambiguity is
+//                       exactly the condition-dependent dispatch this engine
+//                       carries. Nested blocks stack .InBlock instances.
 //
 // As with M1's lex-mode.scrml, the JS-host LIVE SURFACE drives the
 // transition dispatch (the `currentParseMode` slot on the parse-context
@@ -72,6 +78,7 @@ ${
         InArguments,
         InFunctionBody,
         InClassBody,
+        InBlock,
     }
 }
 
@@ -90,23 +97,25 @@ ${
 // .InExpression via the outer engine's rule= without a nested instance);
 // M2.2+ may promote it if element-context evidence shows a need.
 <engine for=ParseMode initial=.TopLevel>
-    <TopLevel rule=(.InExpression | .InArrayLiteral | .InObjectLiteral | .InFunctionBody | .InClassBody)></>
+    <TopLevel rule=(.InExpression | .InArrayLiteral | .InObjectLiteral | .InFunctionBody | .InClassBody | .InBlock)></>
     <InExpression rule=(.TopLevel | .InExpression | .InArrayLiteral | .InObjectLiteral | .InArguments)></>
     <InArrayLiteral rule=(.InExpression | .TopLevel)></>
     <InObjectLiteral rule=(.InExpression | .TopLevel)>
         <engine for=ParseMode var=innerParseMode initial=.InExpression>
-            <TopLevel rule=(.InExpression | .InArrayLiteral | .InObjectLiteral | .InFunctionBody | .InClassBody)></>
+            <TopLevel rule=(.InExpression | .InArrayLiteral | .InObjectLiteral | .InFunctionBody | .InClassBody | .InBlock)></>
             <InExpression rule=(.TopLevel | .InExpression | .InArrayLiteral | .InObjectLiteral | .InArguments)></>
             <InArrayLiteral rule=(.InExpression | .TopLevel)></>
             <InObjectLiteral rule=(.InExpression | .TopLevel)></>
             <InArguments rule=(.InExpression | .TopLevel)></>
-            <InFunctionBody rule=(.TopLevel | .InExpression)></>
+            <InFunctionBody rule=(.TopLevel | .InExpression | .InBlock)></>
             <InClassBody rule=(.TopLevel | .InExpression)></>
+            <InBlock rule=(.TopLevel | .InExpression | .InArrayLiteral | .InObjectLiteral | .InFunctionBody | .InClassBody | .InBlock)></>
         </>
     </>
     <InArguments rule=(.InExpression | .TopLevel)></>
-    <InFunctionBody rule=(.TopLevel | .InExpression)></>
+    <InFunctionBody rule=(.TopLevel | .InExpression | .InBlock)></>
     <InClassBody rule=(.TopLevel | .InExpression)></>
+    <InBlock rule=(.TopLevel | .InExpression | .InArrayLiteral | .InObjectLiteral | .InFunctionBody | .InClassBody | .InBlock)></>
 </>
 
 ${
@@ -135,6 +144,9 @@ ${
         InArguments:     "InArguments",
         InFunctionBody:  "InFunctionBody",
         InClassBody:     "InClassBody",
+        // InBlock — M3.1 statement-context variant (a `{ ... }` block
+        // statement, distinct from .InObjectLiteral). See the file header.
+        InBlock:         "InBlock",
     })
 
     // initialParseMode — calculation (pure fn: returns the .Variant the
@@ -187,6 +199,7 @@ ${
             InObjectLiteral: true,
             InFunctionBody:  true,
             InClassBody:     true,
+            InBlock:         true,
         }),
         InExpression: Object.freeze({
             TopLevel:        true,
@@ -210,10 +223,20 @@ ${
         InFunctionBody: Object.freeze({
             TopLevel:     true,
             InExpression: true,
+            InBlock:      true,
         }),
         InClassBody: Object.freeze({
             TopLevel:     true,
             InExpression: true,
+        }),
+        InBlock: Object.freeze({
+            TopLevel:        true,
+            InExpression:    true,
+            InArrayLiteral:  true,
+            InObjectLiteral: true,
+            InFunctionBody:  true,
+            InClassBody:     true,
+            InBlock:         true,
         }),
     })
 
