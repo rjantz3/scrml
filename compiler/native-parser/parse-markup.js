@@ -110,6 +110,19 @@ import {
     delegateLogicEscapeBody,
     findBodyCloseOffset,
 } from "./parse-seam.js";
+// F7.a (v0.6) — the state-block payload shaper. A `< Ident ...>` element
+// is a Markup block whose opener carries TagKind.StateOpener; shapeStateBlock
+// derives the live `StateNode` / `StateConstructorDefNode` payload
+// (stateNodeKind / stateType / typedAttrs) from its tokenizedAttrs.
+import { shapeStateBlock } from "./parse-state-body.js";
+// F7.b (v0.6) — the SQL chained-call shaper. After a `?{...}` Sql block
+// closes, a `.method(args)` chain may trail it; shapeSqlBlock parses the
+// query body + consumes the trailing chain into the live `SQLNode` payload.
+import { shapeSqlBlock } from "./parse-sql-body.js";
+// F7.c (v0.6) — the CSS declaration/rule shaper. A `#{...}` Css block's
+// body is CSS; shapeCssBlock parses it into the live `CSSInlineNode`
+// `rules[]` payload (property rules / selector rules / at-rules).
+import { shapeCssBlock } from "./parse-css-body.js";
 
 // blockKindForContext — calculation. Maps a BlockContext variant to the
 // BlockKind a closed context of that variant emits. The seven
@@ -147,7 +160,48 @@ export function recognizeContextEntryAt(cursor) {
         return { kind: "markupTag", enters: BlockContext.InMarkupTag };
     }
 
+    // F7.a (v0.6) — a `< Ident`-shaped STATE-opener boundary (SPEC §4.3:
+    // a `<` then whitespace then a tag-name letter). The live BS routes
+    // this to a `state` block; the native parser enters .InMarkupTag and
+    // `tokenizeOpener` records `hadSpaceAfterLt` -> TagKind.StateOpener.
+    // (A `< /` is a closer — handleCloser runs before this in the
+    // dispatch, so the two never collide.)
+    if (here === "<" && isStateTagBoundaryAfterLt(cursor)) {
+        return { kind: "markupTag", enters: BlockContext.InMarkupTag };
+    }
+
     return { kind: "none" };
+}
+
+// isStateTagBoundaryAfterLt — calculation (predicate). The cursor is AT a
+// `<`. Look past the inter-`<`-and-name whitespace: a `< Ident` state
+// opener (SPEC §4.3) has at least one whitespace char then a tag-name
+// start letter. A `<` followed by whitespace then anything else (a bare
+// `< ` in free text, a `< 3` numeric) is NOT a tag boundary — it stays
+// free-text per §4.6.
+export function isStateTagBoundaryAfterLt(cursor) {
+    // The char after `<` must be whitespace (a `<ident` opener with NO
+    // space is handled by isMarkupTagOpener above — this branch is the
+    // space-bearing §4.3 form only).
+    let k = 1;
+    let ch = peekChar(cursor, k);
+    if (ch !== " " && ch !== "\t" && ch !== "\r" && ch !== "\n") return false;
+    // Skip the whitespace run.
+    while (ch === " " || ch === "\t" || ch === "\r" || ch === "\n") {
+        k = k + 1;
+        ch = peekChar(cursor, k);
+    }
+    // The first non-whitespace char must be a tag-name start letter.
+    return isAsciiTagNameStart(ch);
+}
+
+// isAsciiTagNameStart — calculation (predicate). The state-opener name's
+// first char — an ASCII letter (mirrors block-context.js's isAsciiLetter,
+// the same closed test isMarkupTagOpener uses).
+export function isAsciiTagNameStart(ch) {
+    if (ch === "" || ch === undefined || ch === null) return false;
+    const c = ch.charCodeAt(0);
+    return (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
 }
 
 // --- The TEXT-RUN accumulator -----------------------------------------------
@@ -227,7 +281,19 @@ export function emitComment(run, cursor, ctx) {
 // into ctx.diagnostics. A body containing markup-as-value (`${ <div/> }`) is
 // handled by parsePrimary's LessThan branch (parse-expr.js — the JS->markup
 // delegate-up direction), which calls back into the markup layer.
-export function emitContextBlock(ctx, frame, endPos) {
+//
+// F7.b/F7.c (v0.6) — for an .InSql / .InCss block the body's verbatim text
+// is captured as `block.bodyText` (the same slice extraction the
+// .InLogicEscape branch does) and the deep payload is shaped:
+//   .InCss — shapeCssBlock parses bodyText into `block.rules` (the live
+//            CSSInlineNode payload).
+//   .InSql — shapeSqlBlock parses bodyText into `block.query` + consumes
+//            the trailing `.method(args)` chain into `block.chainedCalls`.
+//            The chain bytes trail the closing `}`, so when a `cursor` is
+//            supplied (the brace-tracked-extent dispatch path) the cursor
+//            is advanced past the consumed chain — the chain bytes belong
+//            to the Sql block, not the enclosing TopLevel text run.
+export function emitContextBlock(ctx, frame, endPos, cursor) {
     const kind = blockKindForContext(frame.context);
     if (kind === null) return;
     const block = makeBlockNode(
@@ -256,6 +322,47 @@ export function emitContextBlock(ctx, frame, endPos) {
             block.body = parseLogicBodyBestEffort(bodyText, ctx, bodyStart, frame.openSpan.line, frame.openSpan.col);
         }
     }
+
+    // F7.c (v0.6) — a `#{...}` CSS block. Capture the verbatim body slice
+    // (the same [openSpan.end, endPos-1) extent the .InLogicEscape branch
+    // uses) and shape it into `block.rules` — the live CSSInlineNode payload.
+    if (frame.context === BlockContext.InCss) {
+        const bodyStart = frame.openSpan.end;
+        const bodyEnd = (endPos > bodyStart) ? (endPos - 1) : bodyStart;
+        const sourceSlice = cursorSourceFromCtx(ctx);
+        if (sourceSlice !== null && bodyEnd >= bodyStart) {
+            block.bodyText = sourceSlice.substring(bodyStart, bodyEnd);
+        } else {
+            block.bodyText = "";
+        }
+        shapeCssBlock(block);
+    }
+
+    // F7.b (v0.6) — a `?{...}` SQL block. Capture the verbatim body slice +
+    // shape it into `block.query` + the trailing `.method(args)` chain into
+    // `block.chainedCalls`. The chain bytes trail the closing `}` (endPos);
+    // when a live `cursor` is supplied, advance it past the consumed chain
+    // so the chain bytes are not re-scanned as enclosing TopLevel text.
+    if (frame.context === BlockContext.InSql) {
+        const bodyStart = frame.openSpan.end;
+        const bodyEnd = (endPos > bodyStart) ? (endPos - 1) : bodyStart;
+        const sourceSlice = cursorSourceFromCtx(ctx);
+        if (sourceSlice !== null && bodyEnd >= bodyStart) {
+            block.bodyText = sourceSlice.substring(bodyStart, bodyEnd);
+        } else {
+            block.bodyText = "";
+        }
+        const shaped = shapeSqlBlock(block, sourceSlice, endPos);
+        // Advance the cursor past the consumed `.method(args)` chain so the
+        // markup trampoline resumes AFTER the chain. Only when a cursor is
+        // supplied AND the chain extends past `}` (a chain-less Sql block
+        // leaves the cursor untouched).
+        if (cursor !== undefined && cursor !== null
+            && typeof shaped.chainEnd === "number" && shaped.chainEnd > cursor.pos) {
+            advance(cursor, shaped.chainEnd - cursor.pos);
+        }
+    }
+
     appendBlock(ctx, block);
 }
 
@@ -797,7 +904,10 @@ export function dispatchInForeignCode(run, cursor, ctx) {
 export function scanBraceDelimitedSketch(cursor, ctx) {
     if (isBlockContextClose(ctx, cursor)) {
         const frame = closeBlockContext(ctx, cursor);
-        emitContextBlock(ctx, frame, cursor.pos);
+        // F7.b — pass the cursor so an .InSql block's emitContextBlock can
+        // advance it past the trailing `.method(args)` chain (the chain
+        // bytes trail the `}` and belong to the Sql block).
+        emitContextBlock(ctx, frame, cursor.pos, cursor);
         return;
     }
 
@@ -954,6 +1064,18 @@ export function emitMarkupElement(ctx, tagFrame, startPos, endPos, children) {
     // still attribute-shaped.
     block.attrs = tagFrame.opener?.attrs ?? [];
     block.tokenizedAttrs = tagFrame.opener?.tokenizedAttrs ?? [];
+    // F7.a (v0.6) — carry the opener's TagKind onto the Markup block. The
+    // markup-vs-state discriminator: a `< Ident ...>` opener (space after
+    // `<` — SPEC §4.3) gets TagKind.StateOpener. The M5 swap reads this to
+    // route a StateOpener block to the live `state` / `state-constructor-def`
+    // node shape rather than `markup`.
+    block.tagKind = tagFrame.tagKind ?? null;
+    // F7.a — when the opener is a state opener, stamp the state payload
+    // (stateNodeKind / stateType / typedAttrs — the live StateNode /
+    // StateConstructorDefNode shape). A non-state Markup block is untouched.
+    if (block.tagKind === "StateOpener") {
+        shapeStateBlock(block);
+    }
     appendBlock(ctx, block);
 }
 

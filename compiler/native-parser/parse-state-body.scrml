@@ -1,0 +1,145 @@
+// parse-state-body.scrml — F7.a / v0.6 BRIDGE-FULL — the native-parser
+// analogue of the live pipeline's state-block payload shaping
+// (compiler/src/ast-builder.js `parseTypedAttributes` ~L1992 + the
+// `buildBlock` `case "state"` arm ~L11250).
+//
+// PILLAR 5b classification (DD §D1):
+//   shapeStateBlock / parseTypedAttrTokens / splitTypedAttr / isStateBlock
+//   are all CALCULATION (pure). They are folds over the native parser's
+//   already-produced ATTR_* token stream — read-only, no cursor, no engine,
+//   no lifecycle. shapeStateBlock writes the derived payload onto the
+//   passed Markup block the same way emitMarkupElement stamps `.attrs` —
+//   the WRITE is a payload stamp on a freshly-built struct, not a state
+//   transition. The spec's `fn` + struct primitives are sufficient; no
+//   missing primitive surfaced.
+//
+// PURPOSE — the state-block payload bridge:
+//   The downstream compiler stages consume a `StateNode` / a
+//   `StateConstructorDefNode` for a `< Ident ...>` element. The live
+//   pipeline builds them in `ast-builder.js` `case "state"`: a state opener
+//   carrying typed `name(type)` declarations is a state TYPE definition
+//   (`state-constructor-def`, §35.2); otherwise it is a state INSTANTIATION
+//   (`state`). The `stateType` is the opener name. When the M5 swap
+//   activates the native parser (v0.6) the same payload must be derivable
+//   from the native parser's Markup block; this module is that derivation.
+//
+// THE LIVE CONTRACT (transplant source — behavioral spec):
+//   parseTypedAttributes(attrTokens) returns { attrs, typedAttrs,
+//   hasTypedDecls }. typedAttrs[] is built from ATTR_TYPED_DECL tokens —
+//   each carries JSON `{ name, typeExpr }`; the builder peels a `= default`
+//   (text after the first `=`) and a trailing `?` optional marker, and a
+//   default value implies `optional`. hasTypedDecls is true iff any typed
+//   decl appeared. The node kind is `state-constructor-def` when
+//   hasTypedDecls, else `state`.
+//
+// THE NATIVE NODE-CATALOG ADAPTATION (Phase 0 — M5-divergence-ledger):
+//   The native parser has NO dedicated state BlockKind — a `< Ident ...>`
+//   element is a `Markup` block whose opener carries TagKind.StateOpener
+//   (tag-frame `tagKindFor`: a space after `<` returns StateOpener — the
+//   §4.3 advisory state-opener signal, the same `openerHadSpaceAfterLt`
+//   datum the live BS keys `case "state"` off). F1's
+//   `tokenizeAttributeRegion` already emits the ATTR_TYPED_DECL tokens for
+//   `name(type)` decls. F7.a is the SHAPING pass over `block.tokenizedAttrs`
+//   — it stamps `stateNodeKind` / `stateType` / `typedAttrs` onto the
+//   Markup block. `block.attrs` is left as the F1 AttrNode[] (the live
+//   state node's `attrs` field IS the non-typed attrs). No native<->live
+//   translation layer — the stamped fields ARE the live FileAST shape.
+//
+// Status (F7.a / v0.6): COMPILABLE. The `${...}` JS-escape block carries
+// the live surface; the .js shadow runs (README ANOMALY-2 — the shadow
+// discipline every native-parser file follows). No live-pipeline wiring at
+// v0.6 — exercised only by the native-parser conformance harness. The M5
+// swap-in activates it.
+
+${
+    // -----------------------------------------------------------------
+    // shapeStateBlock — CALCULATION. Given a Markup block whose opener
+    // TagKind is StateOpener, derive + stamp the state payload:
+    //   block.stateNodeKind — "state" | "state-constructor-def"
+    //   block.stateType     — the opener name
+    //   block.typedAttrs    — TypedAttrDecl[] (empty for a plain state)
+    // A non-state Markup block (or a missing block) is left untouched.
+    // -----------------------------------------------------------------
+    export fn shapeStateBlock(block) {
+        if (block is not) return block
+        if (block.kind != "Markup") return block
+
+        const tokens = Array.isArray(block.tokenizedAttrs) ? block.tokenizedAttrs : []
+        const typedAttrs = parseTypedAttrTokens(tokens)
+
+        block.stateType = typeof block.name == "string" ? block.name : ""
+        block.typedAttrs = typedAttrs
+        // §35.2 — a state opener carrying typed `name(type)` decls is a
+        // state TYPE declaration; otherwise a state INSTANTIATION.
+        block.stateNodeKind = typedAttrs.length > 0 ? "state-constructor-def" : "state"
+        return block
+    }
+
+    // -----------------------------------------------------------------
+    // isStateBlock — CALCULATION (pure predicate). True iff `block` is a
+    // Markup block the markup layer classified as a state opener (the
+    // §4.3 `< Ident ...>` space-after-`<` signal — TagKind.StateOpener).
+    // The read-side discriminator the M5 swap keys state-vs-markup
+    // routing off.
+    // -----------------------------------------------------------------
+    export fn isStateBlock(block) {
+        if (block is not) return false
+        if (block.kind != "Markup") return false
+        return block.tagKind == "StateOpener"
+    }
+
+    // -----------------------------------------------------------------
+    // parseTypedAttrTokens — CALCULATION (pure). Scan an ATTR_* token
+    // stream for ATTR_TYPED_DECL tokens and produce the TypedAttrDecl[]
+    // the live `parseTypedAttributes` produces. Each ATTR_TYPED_DECL
+    // token's `.text` is JSON `{ name, typeExpr }`.
+    // -----------------------------------------------------------------
+    export fn parseTypedAttrTokens(tokens) {
+        const typedAttrs = []
+        if (Array.isArray(tokens)) {
+            for (const tok of tokens) {
+                if (tok is not) continue
+                if (tok.kind != "ATTR_TYPED_DECL") continue
+                // The token text is compiler-controlled — F1's
+                // `tokenizeAttributeRegion` built it via `JSON.stringify`,
+                // so it is always well-formed `{ name, typeExpr }` JSON.
+                const parsed = JSON.parse(typeof tok.text == "string" ? tok.text : "{}")
+                const name = typeof parsed.name == "string" ? parsed.name : "?"
+                const rawTypeExpr = typeof parsed.typeExpr == "string" ? parsed.typeExpr : ""
+                const span = tok.span is some ? tok.span : not
+                typedAttrs.push(splitTypedAttr(name, rawTypeExpr, span))
+            }
+        }
+        return typedAttrs
+    }
+
+    // -----------------------------------------------------------------
+    // splitTypedAttr — CALCULATION (pure). Split a raw `name(type)`
+    // typeExpr into the TypedAttrDecl shape { name, typeExpr, optional,
+    // defaultValue, span }. Mirrors `parseTypedAttributes`'s inner block:
+    // an `=` peels the default; a trailing `?` peels the optional marker;
+    // a default value implies optional.
+    // -----------------------------------------------------------------
+    export fn splitTypedAttr(name, rawTypeExpr, span) {
+        @typeExpr = (typeof rawTypeExpr == "string" ? rawTypeExpr : "").trim()
+        @defaultValue = not
+
+        const eqIdx = @typeExpr.indexOf("=")
+        if (eqIdx != 0 - 1) {
+            @defaultValue = @typeExpr.slice(eqIdx + 1).trim()
+            @typeExpr = @typeExpr.slice(0, eqIdx).trim()
+        }
+
+        @optional = false
+        if (@typeExpr.endsWith("?")) {
+            @optional = true
+            @typeExpr = @typeExpr.slice(0, @typeExpr.length - 1).trim()
+        }
+        // A default value implies optional (live parity).
+        if (@defaultValue is some) {
+            @optional = true
+        }
+
+        return { name: name, typeExpr: @typeExpr, optional: @optional, defaultValue: @defaultValue, span: span }
+    }
+}

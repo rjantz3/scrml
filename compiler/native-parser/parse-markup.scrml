@@ -212,6 +212,14 @@ ${
     import { lex } from "./lex.scrml"
     import { makeParseExprContext, parseExpression } from "./parse-expr.scrml"
     import { atEnd } from "./token-cursor.scrml"
+    // F7.a/b/c (v0.6) — the state / SQL / CSS sub-parser payload shapers.
+    // shapeStateBlock derives the live StateNode payload from a
+    // StateOpener Markup block; shapeSqlBlock / shapeCssBlock derive the
+    // live SQLNode / CSSInlineNode payloads from a Sql / Css block's
+    // captured body text.
+    import { shapeStateBlock } from "./parse-state-body.scrml"
+    import { shapeSqlBlock } from "./parse-sql-body.scrml"
+    import { shapeCssBlock } from "./parse-css-body.scrml"
 
     // -------------------------------------------------------------------
     // blockKindForContext — CALCULATION (pure fn). Maps a BlockContext
@@ -268,7 +276,56 @@ ${
             return { kind: "markupTag", enters: BlockContext.InMarkupTag }
         }
 
+        // F7.a (v0.6) — a `< Ident`-shaped STATE-opener boundary (SPEC
+        // §4.3: a `<` then whitespace then a tag-name letter). The live
+        // BS routes this to a `state` block; the native parser enters
+        // .InMarkupTag and `tokenizeOpener` records `hadSpaceAfterLt` ->
+        // TagKind.StateOpener. (A `< /` is a closer — handleCloser runs
+        // before this in the dispatch, so the two never collide.)
+        if (here == "<" && isStateTagBoundaryAfterLt(cursor)) {
+            return { kind: "markupTag", enters: BlockContext.InMarkupTag }
+        }
+
         return { kind: "none" }
+    }
+
+    // -------------------------------------------------------------------
+    // isStateTagBoundaryAfterLt — CALCULATION (predicate). The cursor is
+    // AT a `<`. Look past the inter-`<`-and-name whitespace: a `< Ident`
+    // state opener (SPEC §4.3) has at least one whitespace char then a
+    // tag-name start letter. A `<` then whitespace then anything else (a
+    // bare `< ` in free text) is NOT a tag boundary — it stays free-text
+    // per §4.6.
+    // -------------------------------------------------------------------
+    export fn isStateTagBoundaryAfterLt(cursor) {
+        // The char after `<` must be whitespace (a `<ident` opener with
+        // NO space is handled by isMarkupTagOpener — this is the space-
+        // bearing §4.3 form only).
+        @k = 1
+        @ch = peekChar(cursor, @k)
+        if (@ch != " " && @ch != String.fromCharCode(9)
+            && @ch != String.fromCharCode(13) && @ch != String.fromCharCode(10)) {
+            return false
+        }
+        // Skip the whitespace run.
+        while (@ch == " " || @ch == String.fromCharCode(9)
+               || @ch == String.fromCharCode(13) || @ch == String.fromCharCode(10)) {
+            @k = @k + 1
+            @ch = peekChar(cursor, @k)
+        }
+        // The first non-whitespace char must be a tag-name start letter.
+        return isAsciiTagNameStart(@ch)
+    }
+
+    // -------------------------------------------------------------------
+    // isAsciiTagNameStart — CALCULATION (predicate). The state-opener
+    // name's first char — an ASCII letter (mirrors block-context's
+    // isAsciiLetter, the same closed test isMarkupTagOpener uses).
+    // -------------------------------------------------------------------
+    export fn isAsciiTagNameStart(ch) {
+        if (ch == "" || ch is not) return false
+        const c = ch.charCodeAt(0)
+        return (c >= 65 && c <= 90) || (c >= 97 && c <= 122)
     }
 
     // -------------------------------------------------------------------
@@ -351,15 +408,57 @@ ${
     // just-closed (or unterminated) block context. `frame` is the
     // BlockContext frame (carrying openSpan); `endPos` is the position
     // one past the context's last consumed character.
+    //
+    // F7.b/F7.c (v0.6) — for an .InSql / .InCss block the body's verbatim
+    // text is captured as `block.bodyText` (the slice between the sigil
+    // and the matching `}`) and the deep payload is shaped:
+    //   .InCss — shapeCssBlock parses bodyText into `block.rules`.
+    //   .InSql — shapeSqlBlock parses bodyText into `block.query` +
+    //            consumes the trailing `.method(args)` chain into
+    //            `block.chainedCalls`. The chain bytes trail the `}`, so
+    //            when a `cursor` is supplied the cursor is advanced past
+    //            the consumed chain.
     // -------------------------------------------------------------------
-    export fn emitContextBlock(ctx, frame, endPos) {
+    export fn emitContextBlock(ctx, frame, endPos, cursor) {
         const kind = blockKindForContext(frame.context)
         if (kind is not) return
-        appendBlock(ctx, makeBlockNode(
+        const block = makeBlockNode(
             kind,
             makeSpan(frame.openSpan.start, endPos, frame.openSpan.line, frame.openSpan.col),
             not,
-        ))
+        )
+
+        // F7.c — a `#{...}` CSS block. Capture the body slice
+        // [openSpan.end, endPos-1) + shape it into `block.rules`.
+        if (frame.context == BlockContext.InCss) {
+            const bodyStart = frame.openSpan.end
+            const bodyEnd = endPos > bodyStart ? endPos - 1 : bodyStart
+            if (typeof ctx.source == "string" && bodyEnd >= bodyStart) {
+                block.bodyText = ctx.source.substring(bodyStart, bodyEnd)
+            } else {
+                block.bodyText = ""
+            }
+            shapeCssBlock(block)
+        }
+
+        // F7.b — a `?{...}` SQL block. Capture the body slice + shape it
+        // into `block.query` + the trailing `.method(args)` chain. When a
+        // `cursor` is supplied, advance it past the consumed chain.
+        if (frame.context == BlockContext.InSql) {
+            const bodyStart = frame.openSpan.end
+            const bodyEnd = endPos > bodyStart ? endPos - 1 : bodyStart
+            if (typeof ctx.source == "string" && bodyEnd >= bodyStart) {
+                block.bodyText = ctx.source.substring(bodyStart, bodyEnd)
+            } else {
+                block.bodyText = ""
+            }
+            const shaped = shapeSqlBlock(block, ctx.source, endPos)
+            if (cursor is some && typeof shaped.chainEnd == "number" && shaped.chainEnd > cursor.pos) {
+                advance(cursor, shaped.chainEnd - cursor.pos)
+            }
+        }
+
+        appendBlock(ctx, block)
     }
 
     // -------------------------------------------------------------------
@@ -822,7 +921,9 @@ ${
     export fn scanBraceDelimitedSketch(cursor, ctx) {
         if (isBlockContextClose(ctx, cursor)) {
             const frame = closeBlockContext(ctx, cursor)
-            emitContextBlock(ctx, frame, cursor.pos)
+            // F7.b — pass the cursor so an .InSql block's emitContextBlock
+            // can advance it past the trailing `.method(args)` chain.
+            emitContextBlock(ctx, frame, cursor.pos, cursor)
             return
         }
 
@@ -999,6 +1100,18 @@ ${
         }
         block.attrs = openerAttrs
         block.tokenizedAttrs = openerTokenizedAttrs
+        // F7.a (v0.6) — carry the opener's TagKind onto the Markup block.
+        // The markup-vs-state discriminator: a `< Ident ...>` opener
+        // (space after `<` — SPEC §4.3) gets TagKind.StateOpener. The M5
+        // swap reads this to route a StateOpener block to the live
+        // `state` / `state-constructor-def` node shape.
+        block.tagKind = tagFrame.tagKind ?? not
+        // F7.a — when the opener is a state opener, stamp the state
+        // payload (stateNodeKind / stateType / typedAttrs — the live
+        // StateNode / StateConstructorDefNode shape).
+        if (block.tagKind == "StateOpener") {
+            shapeStateBlock(block)
+        }
         appendBlock(ctx, block)
     }
 

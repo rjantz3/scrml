@@ -178,6 +178,25 @@ import { blockKinds } from "../native-parser/parse-ctx.js";
 import { dispatchInMarkupTag } from "../native-parser/parse-markup.js";
 import { topDelegationFrame } from "../native-parser/delegation-frame.js";
 
+// F7.a/b/c (v0.6) — the state / SQL / CSS sub-parser surface (the
+// BRIDGE-FULL native sub-parsers the M5 swap activates).
+import {
+    shapeStateBlock,
+    isStateBlock,
+    parseTypedAttrTokens,
+    splitTypedAttr,
+} from "../native-parser/parse-state-body.js";
+import {
+    shapeSqlBlock,
+    extractSqlQuery,
+    scanChainedCalls,
+} from "../native-parser/parse-sql-body.js";
+import {
+    shapeCssBlock,
+    parseCssRules,
+    scanReactiveRefs,
+} from "../native-parser/parse-css-body.js";
+
 // The MK1.3 conformance ORACLE — the current heuristic block-splitter
 // (compiler/src/block-splitter.js). The native markup block-stream is
 // diffed against the BS block tree on the conformance corpus (charter
@@ -189,6 +208,12 @@ import { splitBlocks } from "../src/block-splitter.js";
 // the native `tokenizeAttributeRegion` token stream must match the live
 // `tokenizeAttributes` ATTR_* tokens 1:1 for the same opener source.
 import { tokenizeAttributes as liveTokenizeAttributes } from "../src/tokenizer.ts";
+
+// F7 (v0.6) — the live FileAST builder, imported as the PARITY oracle: the
+// native state / SQL / CSS sub-parser payloads must match the live
+// `buildAST` FileAST `state` / `state-constructor-def` / `sql` /
+// `css-inline` nodes for the same source.
+import { buildAST as liveBuildAST } from "../src/ast-builder.js";
 
 // peakDelegationDepth — drive the trampoline dispatch by dispatch (the
 // dispatch fns are exported) and record the HIGH-WATER delegationStack
@@ -4904,4 +4929,304 @@ describe("F1 attrs stamped on the Markup block (the M5-swap surface)", () => {
         expect(markup.attrs).toEqual([]);
         expect(markup.tokenizedAttrs).toEqual([]);
     });
+});
+
+// #############################################################################
+// F7 (v0.6) — the state / SQL / CSS native sub-parsers. The BRIDGE-FULL
+// payload-shaping additions: a state opener gets the live `StateNode` /
+// `StateConstructorDefNode` payload; a `?{...}` Sql block gets `query` +
+// `chainedCalls`; a `#{...}` Css block gets `rules`. Each section asserts
+// the native payload AND parity vs the live `buildAST` FileAST for the same
+// source.
+//
+// liveStateNodes / liveSqlNodes / liveCssNodes — pull the typed nodes out
+// of the live FileAST (the parity oracle).
+// #############################################################################
+
+function liveNodesOfKind(source, kind) {
+    const { ast } = liveBuildAST(splitBlocks("t.scrml", source));
+    const out = [];
+    const walk = (n) => {
+        if (n === null || n === undefined || typeof n !== "object") return;
+        if (n.kind === kind) out.push(n);
+        for (const k of Object.keys(n)) {
+            const v = n[k];
+            if (Array.isArray(v)) v.forEach(walk);
+            else if (v && typeof v === "object") walk(v);
+        }
+    };
+    walk(ast);
+    return out;
+}
+
+describe("F7.a — state block bodies (shapeStateBlock — SPEC §35.2)", () => {
+    test("a plain state instantiation gets stateNodeKind 'state'", () => {
+        const blocks = parseMarkup(`< card name="hi"></ card>`);
+        const card = blocks.find(b => b.kind === "Markup" && b.name === "card");
+        expect(card).toBeDefined();
+        expect(card.tagKind).toBe("StateOpener");
+        expect(card.stateNodeKind).toBe("state");
+        expect(card.stateType).toBe("card");
+        expect(card.typedAttrs).toEqual([]);
+    });
+
+    test("a state opener with `name(type)` decls gets 'state-constructor-def'", () => {
+        const blocks = parseMarkup(`< card name(string) count(number)></ card>`);
+        const card = blocks.find(b => b.kind === "Markup" && b.name === "card");
+        expect(card.stateNodeKind).toBe("state-constructor-def");
+        expect(card.stateType).toBe("card");
+        expect(card.typedAttrs).toHaveLength(2);
+        expect(card.typedAttrs[0]).toMatchObject({ name: "name", typeExpr: "string", optional: false });
+        expect(card.typedAttrs[1]).toMatchObject({ name: "count", typeExpr: "number", optional: false });
+    });
+
+    test("an ordinary markup element is NOT shaped as a state block", () => {
+        const blocks = parseMarkup(`<div class="x"></div>`);
+        const div = blocks.find(b => b.kind === "Markup" && b.name === "div");
+        expect(div.tagKind).toBe("Html");
+        expect(div.stateNodeKind).toBeUndefined();
+        expect(isStateBlock(div)).toBe(false);
+    });
+
+    test("isStateBlock recognizes a StateOpener Markup block", () => {
+        const blocks = parseMarkup(`< user id(string)></ user>`);
+        const user = blocks.find(b => b.kind === "Markup" && b.name === "user");
+        expect(isStateBlock(user)).toBe(true);
+    });
+
+    test("splitTypedAttr peels a `?` optional marker", () => {
+        expect(splitTypedAttr("age", "number?", null)).toMatchObject({
+            name: "age", typeExpr: "number", optional: true, defaultValue: null,
+        });
+    });
+
+    test("splitTypedAttr peels a `= default` and implies optional", () => {
+        expect(splitTypedAttr("count", "number = 0", null)).toMatchObject({
+            name: "count", typeExpr: "number", optional: true, defaultValue: "0",
+        });
+    });
+
+    test("parseTypedAttrTokens reads ATTR_TYPED_DECL tokens from a token stream", () => {
+        const o = openerAttrs(`< card name(string) age(number?)>`);
+        const typed = parseTypedAttrTokens(o.tokenizedAttrs);
+        expect(typed).toHaveLength(2);
+        expect(typed[0]).toMatchObject({ name: "name", typeExpr: "string", optional: false });
+        expect(typed[1]).toMatchObject({ name: "age", typeExpr: "number", optional: true });
+    });
+
+    // PARITY — the native typedAttrs / stateNodeKind / stateType match the
+    // live FileAST `state` / `state-constructor-def` node for the same source.
+    const STATE_PARITY_CASES = [
+        `< card name="hi"></ card>`,
+        `< card name(string) count(number)></ card>`,
+        `< card count(number=0)></ card>`,
+        `< profile bio(string?) age(number)></ profile>`,
+    ];
+    for (const src of STATE_PARITY_CASES) {
+        test(`state payload parity vs live buildAST — ${JSON.stringify(src)}`, () => {
+            const blocks = parseMarkup(src);
+            const native = blocks.find(b => b.kind === "Markup" && isStateBlock(b));
+            expect(native).toBeDefined();
+
+            const liveState = liveNodesOfKind(src, "state");
+            const liveCtor = liveNodesOfKind(src, "state-constructor-def");
+            const live = liveState.length > 0 ? liveState[0] : liveCtor[0];
+            expect(live).toBeDefined();
+
+            // Same node kind (state vs state-constructor-def).
+            expect(native.stateNodeKind).toBe(live.kind);
+            // Same state type.
+            expect(native.stateType).toBe(live.stateType);
+            // Same typedAttrs — name / typeExpr / optional / defaultValue.
+            const liveTyped = Array.isArray(live.typedAttrs) ? live.typedAttrs : [];
+            expect(native.typedAttrs.length).toBe(liveTyped.length);
+            for (let i = 0; i < liveTyped.length; i++) {
+                expect(native.typedAttrs[i].name).toBe(liveTyped[i].name);
+                expect(native.typedAttrs[i].typeExpr).toBe(liveTyped[i].typeExpr);
+                expect(native.typedAttrs[i].optional).toBe(liveTyped[i].optional);
+                expect(native.typedAttrs[i].defaultValue).toBe(liveTyped[i].defaultValue);
+            }
+        });
+    }
+});
+
+describe("F7.b — SQL chained-call grammar (shapeSqlBlock — §8.9)", () => {
+    test("a `?{...}` block gets query + an empty chain when no chain trails", () => {
+        const blocks = parseMarkup("?{ `SELECT 1` }");
+        const sqlBlock = blocks.find(b => b.kind === "Sql");
+        expect(sqlBlock).toBeDefined();
+        expect(sqlBlock.query).toBe("SELECT 1");
+        expect(sqlBlock.chainedCalls).toEqual([]);
+    });
+
+    test("a `.run()` chain trailing the `}` is consumed into chainedCalls", () => {
+        const blocks = parseMarkup("?{ `INSERT INTO t VALUES (1)` }.run()");
+        const sql = blocks.find(b => b.kind === "Sql");
+        expect(sql.query).toBe("INSERT INTO t VALUES (1)");
+        expect(sql.chainedCalls).toEqual([{ method: "run", args: "" }]);
+    });
+
+    test("a multi-link chain `.batch().all()` is consumed in order", () => {
+        const blocks = parseMarkup("?{ `SELECT * FROM t` }.batch().all()");
+        const sql = blocks.find(b => b.kind === "Sql");
+        expect(sql.chainedCalls).toEqual([
+            { method: "batch", args: "" },
+            { method: "all", args: "" },
+        ]);
+    });
+
+    test("a chain method with args captures the verbatim inter-paren text", () => {
+        const blocks = parseMarkup("?{ `SELECT 1` }.get(@id)");
+        const sql = blocks.find(b => b.kind === "Sql");
+        expect(sql.chainedCalls).toEqual([{ method: "get", args: "@id" }]);
+    });
+
+    test("`.nobatch()` is stripped from the chain and flags the node", () => {
+        const blocks = parseMarkup("?{ `SELECT 1` }.nobatch().all()");
+        const sql = blocks.find(b => b.kind === "Sql");
+        expect(sql.nobatch).toBe(true);
+        expect(sql.chainedCalls).toEqual([{ method: "all", args: "" }]);
+    });
+
+    test("the chain bytes are consumed — no stray Text block follows the Sql block", () => {
+        const blocks = parseMarkup("?{ `SELECT 1` }.run()");
+        const sqlIdx = blocks.findIndex(b => b.kind === "Sql");
+        // After the Sql block there must be no Text block carrying `.run()`.
+        const trailing = blocks.slice(sqlIdx + 1).filter(b => b.kind === "Text");
+        for (const t of trailing) {
+            expect(t.value === undefined || t.value.includes(".run") === false).toBe(true);
+        }
+    });
+
+    test("extractSqlQuery unwraps a backtick-delimited body", () => {
+        expect(extractSqlQuery("`SELECT 1`")).toBe("SELECT 1");
+        expect(extractSqlQuery("  `SELECT 2`  ")).toBe("SELECT 2");
+    });
+
+    test("scanChainedCalls reports the chain end offset", () => {
+        const src = "?{ `x` }.run().all()  rest";
+        const afterBrace = src.indexOf("}") + 1;
+        const r = scanChainedCalls(src, afterBrace);
+        expect(r.calls).toEqual([
+            { method: "run", args: "" },
+            { method: "all", args: "" },
+        ]);
+        expect(src.slice(r.end).trimStart()).toBe("rest");
+    });
+
+    // PARITY — the native query + chainedCalls + nobatch match the live
+    // FileAST `sql` node for the same source.
+    const SQL_PARITY_CASES = [
+        "?{ `SELECT 1` }.all()",
+        "?{ `SELECT * FROM users` }.get()",
+        "?{ `INSERT INTO t VALUES (1)` }.run()",
+        "?{ `SELECT 1` }.nobatch().all()",
+    ];
+    for (const src of SQL_PARITY_CASES) {
+        test(`SQL payload parity vs live buildAST — ${JSON.stringify(src)}`, () => {
+            const blocks = parseMarkup(src);
+            const native = blocks.find(b => b.kind === "Sql");
+            expect(native).toBeDefined();
+
+            // The live pipeline parses a top-level `?{...}` inside a logic
+            // context; wrap the source so buildAST sees a `sql` node.
+            const liveSql = liveNodesOfKind("${ " + src + " }", "sql");
+            expect(liveSql.length).toBeGreaterThan(0);
+            const live = liveSql[0];
+
+            expect(native.query).toBe(live.query);
+            expect(native.chainedCalls).toEqual(live.chainedCalls);
+            expect(native.nobatch === true).toBe(live.nobatch === true);
+        });
+    }
+});
+
+describe("F7.c — CSS declaration / rule structure (shapeCssBlock)", () => {
+    test("a `#{...}` block gets property rules", () => {
+        const blocks = parseMarkup("#{ color: red; font-size: 14px; }");
+        const css = blocks.find(b => b.kind === "Css");
+        expect(css).toBeDefined();
+        expect(css.rules).toHaveLength(2);
+        expect(css.rules[0]).toMatchObject({ prop: "color", value: "red" });
+        expect(css.rules[1]).toMatchObject({ prop: "font-size", value: "14px" });
+    });
+
+    test("a `@var` reactive ref is attached to the rule", () => {
+        const blocks = parseMarkup("#{ background: @theme; }");
+        const css = blocks.find(b => b.kind === "Css");
+        expect(css.rules[0].prop).toBe("background");
+        expect(css.rules[0].reactiveRefs).toEqual([{ name: "theme", expr: null }]);
+        expect(css.rules[0].isExpression).toBe(false);
+    });
+
+    test("an expression value flags isExpression + attaches the expr", () => {
+        const blocks = parseMarkup("#{ width: @base * 2; }");
+        const css = blocks.find(b => b.kind === "Css");
+        expect(css.rules[0].isExpression).toBe(true);
+        expect(css.rules[0].reactiveRefs[0]).toEqual({ name: "base", expr: "@base * 2" });
+    });
+
+    test("a selector rule carries its declarations", () => {
+        const blocks = parseMarkup("#{ .card { color: blue; padding: 8px; } }");
+        const css = blocks.find(b => b.kind === "Css");
+        expect(css.rules).toHaveLength(1);
+        expect(css.rules[0].selector).toBe(".card");
+        expect(css.rules[0].declarations).toHaveLength(2);
+        expect(css.rules[0].declarations[0]).toMatchObject({ prop: "color", value: "blue" });
+    });
+
+    test("an at-rule is captured verbatim", () => {
+        const blocks = parseMarkup("#{ @media (max-width: 600px) { color: red; } }");
+        const css = blocks.find(b => b.kind === "Css");
+        expect(css.rules).toHaveLength(1);
+        expect(css.rules[0].atRule).toContain("@media");
+    });
+
+    test("scanReactiveRefs dedupes by name in first-seen order", () => {
+        const r = scanReactiveRefs("@a @b @a");
+        expect(r.refs.map(x => x.name)).toEqual(["a", "b"]);
+    });
+
+    test("parseCssRules handles a bare element selector", () => {
+        const rules = parseCssRules("body { margin: 0; }");
+        expect(rules).toHaveLength(1);
+        expect(rules[0].selector).toBe("body");
+        expect(rules[0].declarations[0]).toMatchObject({ prop: "margin", value: "0" });
+    });
+
+    // PARITY — the native rules[] match the live FileAST `css-inline` node
+    // for the same source. The comparison normalizes spans away (the native
+    // spans are body-local; the live spans are host-absolute — M5-swap shift).
+    const CSS_PARITY_CASES = [
+        "#{ color: red; }",
+        "#{ color: red; background: blue; }",
+        "#{ background: @theme; }",
+        "#{ width: @base * 2; }",
+        "#{ .card { color: blue; } }",
+    ];
+    const stripSpans = (rule) => {
+        const out = {};
+        for (const k of Object.keys(rule)) {
+            if (k === "span") continue;
+            if (k === "declarations" && Array.isArray(rule[k])) {
+                out[k] = rule[k].map(stripSpans);
+            } else {
+                out[k] = rule[k];
+            }
+        }
+        return out;
+    };
+    for (const src of CSS_PARITY_CASES) {
+        test(`CSS payload parity vs live buildAST — ${JSON.stringify(src)}`, () => {
+            const blocks = parseMarkup(src);
+            const native = blocks.find(b => b.kind === "Css");
+            expect(native).toBeDefined();
+
+            const liveCss = liveNodesOfKind("${ " + src + " }", "css-inline");
+            expect(liveCss.length).toBeGreaterThan(0);
+            const live = liveCss[0];
+
+            expect(native.rules.map(stripSpans)).toEqual(live.rules.map(stripSpans));
+        });
+    }
 });
