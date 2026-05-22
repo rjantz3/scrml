@@ -1629,8 +1629,54 @@ ${
     }
 
     // ---------------------------------------------------------------------
+    // skipParamTypeAnnotation — consume a `: TypeExpr` parameter type.
+    // scrml allows a typed function parameter — `fn f(name: string)`. The
+    // native parser does not retain the type (a downstream-typer concern,
+    // exactly like skipReturnTypeAnnotation). Skips the annotation tokens up
+    // to the parameter boundary — a `,`, a `)`, or an `=` (a defaulted typed
+    // parameter `name: T = expr`) at nesting depth 0. `<>` `()` `{}` `[]`
+    // are tracked so a delimiter inside a nested type does not end the scan
+    // early. The cursor must sit ON the `:`.
+    // ---------------------------------------------------------------------
+    fn skipParamTypeAnnotation(ctx) {
+        const cursor = ctx.cursor
+        advance(cursor)   // consume the `:`
+        let angleDepth = 0
+        let parenDepth = 0
+        let braceDepth = 0
+        let bracketDepth = 0
+        while (atEnd(cursor) == false) {
+            const k = currentKind(cursor)
+            const atDepthZero = angleDepth == 0 && parenDepth == 0 && braceDepth == 0 && bracketDepth == 0
+            if (atDepthZero && (k == TokenKind.Comma || k == TokenKind.RParen || k == TokenKind.Assign)) {
+                return not
+            }
+            if (k == TokenKind.LParen) {
+                parenDepth = parenDepth + 1
+            } else if (k == TokenKind.RParen) {
+                parenDepth = parenDepth - 1
+            } else if (k == TokenKind.LBrace) {
+                braceDepth = braceDepth + 1
+            } else if (k == TokenKind.RBrace) {
+                braceDepth = braceDepth - 1
+            } else if (k == TokenKind.LBracket) {
+                bracketDepth = bracketDepth + 1
+            } else if (k == TokenKind.RBracket) {
+                bracketDepth = bracketDepth - 1
+            } else if (k == TokenKind.LessThan && parenDepth == 0) {
+                angleDepth = angleDepth + 1
+            } else if (k == TokenKind.GreaterThan && parenDepth == 0 && angleDepth > 0) {
+                angleDepth = angleDepth - 1
+            }
+            advance(cursor)
+        }
+        return not
+    }
+
+    // ---------------------------------------------------------------------
     // parseParam — one arrow / function parameter. Forms handled:
     //   ident                — a plain identifier parameter (BindingIdent)
+    //   ident : Type         — a typed parameter (the type is skipped)
     //   ...target            — a rest parameter (binding-shape RestElement)
     //   target = expr        — a defaulted parameter (binding-shape
     //                          AssignmentPattern)
@@ -1647,11 +1693,23 @@ ${
         if (kind == TokenKind.Ellipsis) {
             const restTok = advance(cursor)   // consume ...
             const target = parseParamTarget(ctx)
+            // A rest parameter may carry a type annotation — `...rest: T[]`.
+            if (currentKind(cursor) == TokenKind.Colon) {
+                skipParamTypeAnnotation(ctx)
+            }
             const span = makeSpan(restTok.span.start, endOf(target), restTok.span.line, restTok.span.col)
             return makeBindingRestElement(target, span)
         }
 
         const target = parseParamTarget(ctx)
+
+        // Typed parameter — `name: Type`. The `:` annotation is consumed and
+        // discarded (a downstream-typer concern). A defaulted typed parameter
+        // `name: T = expr` is handled by the `Assign` branch below — the
+        // annotation scan stops in front of the `=`.
+        if (currentKind(cursor) == TokenKind.Colon) {
+            skipParamTypeAnnotation(ctx)
+        }
 
         // Defaulted parameter — `target = expr`. M4.2 — emits a BINDING-
         // shape AssignmentPattern.

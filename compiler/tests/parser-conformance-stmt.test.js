@@ -2159,6 +2159,79 @@ describe("M3.3 statement-parser — function declarations (native shape)", () =>
     });
 });
 
+// -----------------------------------------------------------------------------
+// P4-5 — typed function parameters. scrml allows `fn f(name: type)` (the same
+// `:` annotation `let x: T` carries). The native param parser must consume the
+// `: TypeExpr` annotation; before the P4-5 fix it stopped on the `:` (neither
+// `=`/`,`/`)`), broke the param-list loop, and `expectRParen` fired a spurious
+// E-EXPR-UNCLOSED-PAREN — the first declaration then swallowed the whole body.
+// Regression anchor for the 6 trucking-dispatch card files (DIFF-hoist-count
+// sub-bucket H3).
+// -----------------------------------------------------------------------------
+describe("P4-5 statement-parser — typed function parameters", () => {
+    test("a single typed param parses cleanly — no spurious unclosed-paren", () => {
+        const r = parseWithNative("fn f(name: string) { return name; }");
+        expect(r.ok).toBe(true);
+        expect(r.errors).toEqual([]);
+        const fn = r.body[0];
+        expect(fn.kind).toBe(StmtKind.FunctionDecl);
+        expect(fn.params.length).toBe(1);
+    });
+
+    test("multiple typed params + a return-type annotation", () => {
+        const r = parseWithNative("fn add(a: number, b: number) -> number { return a + b; }");
+        expect(r.ok).toBe(true);
+        expect(r.errors).toEqual([]);
+        expect(r.body[0].params.length).toBe(2);
+    });
+
+    test("a defaulted typed param — `name: T = expr`", () => {
+        const r = parseWithNative("fn g(x: number = 1) { return x; }");
+        expect(r.ok).toBe(true);
+        expect(r.errors).toEqual([]);
+        const p = r.body[0].params[0];
+        expect(p.bindingKind).toBe("AssignmentPattern");
+    });
+
+    test("a typed param with a generic / refinement type does not end the scan early", () => {
+        const r = parseWithNative("fn h(xs: Array<number>, n: number(>0)) { return n; }");
+        expect(r.ok).toBe(true);
+        expect(r.errors).toEqual([]);
+        expect(r.body[0].params.length).toBe(2);
+    });
+
+    test("a body with multiple `export fn` declarations — every export parses", () => {
+        // The H3 card-file shape: 3 typed `export fn` decls in one body.
+        // Pre-fix, the first `export fn` swallowed the rest (exports=1).
+        const src = [
+            "export fn statusClasses(s: string) -> string { return s; }",
+            "export fn statusLabel(s: string) -> string { return s; }",
+            "export fn termsLabel(t: string) -> string { return t; }",
+        ].join("\n");
+        const r = parseWithNative(src);
+        expect(r.ok).toBe(true);
+        const exportDecls = r.body.filter((s) => s.kind === StmtKind.Export);
+        expect(exportDecls.length).toBe(3);
+        for (const ex of exportDecls) {
+            expect(ex.declaration.kind).toBe(StmtKind.FunctionDecl);
+        }
+    });
+
+    test("a long body with many typed-param decls is not truncated", () => {
+        // A boundary-fragility regression guard — a 30-declaration body must
+        // produce 30 top-level statements, not stop early.
+        const decls = [];
+        for (let i = 0; i < 30; i = i + 1) {
+            decls.push("fn f" + i + "(x: number) -> number { return x + " + i + "; }");
+        }
+        const r = parseWithNative(decls.join("\n"));
+        expect(r.ok).toBe(true);
+        expect(r.errors).toEqual([]);
+        expect(r.body.length).toBe(30);
+        expect(r.body[29].kind).toBe(StmtKind.FunctionDecl);
+    });
+});
+
 describe("M3.3 statement-parser — class declarations (native shape)", () => {
     test("class declaration — ClassDecl node", () => {
         const r = parseWithNative("class C {}");
