@@ -1517,18 +1517,26 @@ export function closeBraceChar() {
 //     the hoisted decls, exactly as the live pipeline does.
 //
 // SCOPE — this mirrors the THREE single-Text-block lift triggers
-// (`BARE_DECL_RE`, `TOPLEVEL_STATE_DECL_RE`, `TILDE_TOKEN_RE`). The two
+// (`BARE_DECL_RE`, `TOPLEVEL_STATE_DECL_RE`, `TILDE_TOKEN_RE`) PLUS the two
 // component-def PAIRING forms (`BARE_EXPORT_AT_END_RE` /
 // `BARE_DECL_NAME_EQ_AT_END_RE` — a `text` block paired with a FOLLOWING
-// markup block) are NOT done here: in the native parser a `const Name =
-// <markup>` decl is mis-segmented BEFORE this pass (a `<` opener is consumed
-// by the markup trampoline, never reaching a `Text` block), so the pairing
-// has no native `Text`-then-`Markup` shape to match. `TOPLEVEL_STATE_DECL_RE`
-// likewise rarely has a native `Text` block to match — a bare `<x> = 0` is
-// recognized as a `Markup` element opener by the trampoline; the state-decl
-// mis-segmentation is the P4-1 unit's concern. `TOPLEVEL_STATE_DECL_RE` is
-// still applied here for the case where a merged text run genuinely opens
-// with a `<x> =` shape.
+// markup block; P5-2).
+//
+// P5-2 CORRECTION — the pre-P5-2 pass-comment claimed the pairing forms had
+// "no native `Text`-then-`Markup` shape to match" because the `<` opener was
+// supposedly consumed before a `Text` block formed. That is WRONG: the native
+// trampoline DOES emit a `Text` block (`export ` / `const Name = `) followed
+// by a `Markup` block — the declarator keyword run flushes the text run at
+// the `<ident` boundary, exactly the live BS shape. `liftBareBlocks` simply
+// never ran the pairing pass. P5-2 adds it (`liftPairedExport` /
+// `liftPairedDeclEq`), mirroring `liftBareDeclarations`'s pairing branches
+// (ast-builder.js L807 / L1092).
+//
+// `TOPLEVEL_STATE_DECL_RE` rarely has a native `Text` block to match — a bare
+// `<x> = 0` is recognized as a `Markup` element opener by the trampoline; the
+// state-decl mis-segmentation is the P4-1 / P5-1 unit's concern.
+// `TOPLEVEL_STATE_DECL_RE` is still applied here for the case where a merged
+// text run genuinely opens with a `<x> =` shape.
 
 // BARE_DECL_RE — the canonical bare-declaration keyword set. A VERBATIM copy
 // of ast-builder.js's `BARE_DECL_RE` (L335) — the live oracle's recognition
@@ -1540,6 +1548,34 @@ const BARE_DECL_RE = /^\s*(?:export\s+)?(server\s+(?:fn|function)\s|type\s+\w|fn
 // compound state-decl).
 const TOPLEVEL_STATE_DECL_RE =
     /^\s*(?:export\s+)?(?:const\s+)?<\s*[A-Za-z_][A-Za-z0-9_]*[^>]*>\s*(?:[=:]|<[A-Za-z_])/;
+
+// BARE_EXPORT_AT_END_RE — VERBATIM copy of ast-builder.js L396. A `Text` block
+// whose TRAILING portion is a bare `export` keyword awaiting a `<markup>` RHS
+// — the P5-2 `export <channel ...>` / `export <Component ...>` pairing form.
+// The leading payload (comments / whitespace / a preceding state-decl) is
+// preserved verbatim as its own re-lifted text block.
+const BARE_EXPORT_AT_END_RE = /(^|\s)export\s*$/;
+
+// BARE_DECL_NAME_EQ_AT_END_RE — VERBATIM copy of ast-builder.js L430. A `Text`
+// block whose TRAILING portion is a const-or-let component-def header awaiting
+// its `<markup>` RHS: `const Name = ` / `let Name = ` / `export const Name = `
+// / `export let Name = `. The P5-2 `const Name = <markup>` Form-2 pairing.
+// Group 1 captures the leading prefix; group 2 captures the keyword + name +
+// `=` trailer. The binding name MUST start UPPERCASE — a lowercase
+// `const m = <main>...</>` is an ordinary const-decl whose init happens to be
+// markup, not a component-def (ast-builder.js L422 case discrimination).
+const BARE_DECL_NAME_EQ_AT_END_RE =
+    /^([\s\S]*?)((?:^|\s)(?:export\s+)?(?:const|let)\s+[A-Z][A-Za-z0-9_]*\s*=\s*)$/;
+
+// EXPORT_PREFIX_SPLIT_RE — splits a `BARE_EXPORT_AT_END_RE`-matching text
+// block into [prefix, `export` trailer]. Mirrors ast-builder.js L814 / L957.
+const EXPORT_PREFIX_SPLIT_RE = /^([\s\S]*?)((?:^|\s)export\s*)$/;
+
+// CHANNEL_NAME_ATTR_RE — extracts the string-literal `name="..."` attribute
+// value from a `<channel ...>` opener's raw text. The live oracle requires a
+// compile-time-stable string-literal name for a cross-file channel export
+// (E-CHANNEL-EXPORT-001); a reactive `name=@var` form yields no match.
+const CHANNEL_NAME_ATTR_RE = /\bname\s*=\s*"([^"]*)"/;
 
 // TILDE_TOKEN_RE — VERBATIM copy of ast-builder.js L385. A bare `~` token
 // (not adjacent to an identifier char) — the unambiguous logic-mode signal
@@ -1602,6 +1638,54 @@ function synthLiftedLogicBlock(textBlock, source, ctx) {
     return block;
 }
 
+// synthPairedLogicBlock — calculation. The P5-2 pairing analogue of
+// `synthLiftedLogicBlock`. Where `synthLiftedLogicBlock` slices a SINGLE Text
+// block's source span as the body, this builds a synthetic `LogicEscape` from
+// a CONSTRUCTED body text (the `export` / `const Name =` trailer spliced with
+// a following markup block's raw, or a synthetic channel-export decl). The
+// span is supplied by the caller — it covers `[trailerStart, markupEnd]` so
+// the synthetic logic node maps back into the host coordinate space.
+//
+//   bodyText — the constructed scrml statement source (e.g.
+//              `const Card = <div>...</>` or
+//              `export const _native_channel_export_1 = "topic"`).
+//   span     — the host-coordinate span the synthetic node spans.
+//   ctx      — the live parse-context (diagnostics forwarding).
+//
+// Mirrors the live `liftBareDeclarations` pairing branches, which build a
+// `${ ... }` raw and re-parse it (ast-builder.js L892 / L1121). The native
+// side parses `bodyText` directly — `parseLogicBodyBestEffort` is the same
+// parser path a real `${...}` LogicEscape body takes.
+function synthPairedLogicBlock(bodyText, span, ctx) {
+    const k = blockKinds();
+    const block = makeBlockNode(k.LogicEscape, span, null);
+    block.bodyText = bodyText;
+    const anchorLine = (span !== undefined && span !== null && typeof span.line === "number")
+        ? span.line : 1;
+    const anchorCol = (span !== undefined && span !== null && typeof span.col === "number")
+        ? span.col : 1;
+    const anchorStart = (span !== undefined && span !== null && typeof span.start === "number")
+        ? span.start : 0;
+    block.body = parseLogicBodyBestEffort(bodyText, ctx, anchorStart, anchorLine, anchorCol);
+    block._synthetic = true;
+    return block;
+}
+
+// synthPrefixTextBlock — calculation. A pairing pass that splits a Text block
+// into [prefix, decl-trailer] re-emits the prefix as its own Text block so the
+// prefix's own lift rules (BARE_DECL_RE / TOPLEVEL_STATE_DECL_RE / a preceding
+// state-decl) still fire. Mirrors ast-builder.js L817 / L1106 — the prefix
+// block reuses the original span's start, ending `prefixRaw.length` chars in.
+// Returns null when the prefix is empty (nothing to re-emit).
+function synthPrefixTextBlock(textBlock, prefixRaw) {
+    if (typeof prefixRaw !== "string" || prefixRaw.length === 0) return null;
+    const span = textBlock.span;
+    const newSpan = (span !== undefined && span !== null)
+        ? { ...span, end: span.start + prefixRaw.length }
+        : span;
+    return { ...textBlock, span: newSpan };
+}
+
 // liftBareBlocks — calculation (pure; returns a new array, no mutation). The
 // P4-2 post-pass. Walk a native `Block[]` and convert bare-declaration `Text`
 // blocks into synthetic `LogicEscape` blocks, mirroring the live
@@ -1624,12 +1708,23 @@ function synthLiftedLogicBlock(textBlock, source, ctx) {
 // The lift fires for a `Text` block ONLY when `parentType !== "markup"`. A
 // `Markup` / `state` block recurses its `children` with the propagated
 // `parentType`. Every other block kind passes through unchanged.
-export function liftBareBlocks(blocks, source, parentType, ctx) {
+//
+// P5-2 — the loop is an INDEX loop (not a `for...of`) so a pairing branch can
+// peek `blocks[i + 1]` for the FOLLOWING markup block and advance `i` past it
+// when it consumes it. `synthCounter` is a `{ next }` record threaded through
+// the recursion so channel-export helper names are file-unique (mirrors the
+// live `_p3aSynthCounter`). It defaults at the top call.
+export function liftBareBlocks(blocks, source, parentType, ctx, synthCounter) {
     const result = [];
     if (Array.isArray(blocks) === false) return result;
-    for (const block of blocks) {
+    const counter = (synthCounter !== undefined && synthCounter !== null)
+        ? synthCounter : { next: 0 };
+    let i = 0;
+    while (i < blocks.length) {
+        const block = blocks[i];
         if (block === undefined || block === null) {
             result.push(block);
+            i = i + 1;
             continue;
         }
 
@@ -1637,8 +1732,9 @@ export function liftBareBlocks(blocks, source, parentType, ctx) {
         // parentType "state" (the live oracle: `block.type === "state"` ->
         // `liftBareDeclarations(children, ..., "state")`).
         if (block.kind === "Markup" && isStateBlock(block)) {
-            const lifted = liftBareBlocks(block.children, source, "state", ctx);
+            const lifted = liftBareBlocks(block.children, source, "state", ctx, counter);
             result.push({ ...block, children: lifted });
+            i = i + 1;
             continue;
         }
 
@@ -1652,8 +1748,9 @@ export function liftBareBlocks(blocks, source, parentType, ctx) {
             const name = typeof block.name === "string" ? block.name : "";
             const isDeclSite = parentType !== "markup" && isProgramFamilyRoot(name);
             const childContext = isDeclSite ? "state" : "markup";
-            const lifted = liftBareBlocks(block.children, source, childContext, ctx);
+            const lifted = liftBareBlocks(block.children, source, childContext, ctx, counter);
             result.push({ ...block, children: lifted });
+            i = i + 1;
             continue;
         }
 
@@ -1662,16 +1759,60 @@ export function liftBareBlocks(blocks, source, parentType, ctx) {
         // match converts it to a synthetic LogicEscape block.
         if (block.kind === "Text" && parentType !== "markup") {
             const raw = sliceBlockRaw(source, block.span);
+
+            // P5-2 PAIRING FORMS — checked BEFORE the single-Text-block lifts.
+            // A `const Name = ` trailer also matches `BARE_DECL_RE`'s `const`
+            // term, so the pairing branch must run first; otherwise the
+            // single-block lift would synthesize a logic body of just the
+            // dangling `const Name = ` with no RHS.
+            const next = blocks[i + 1];
+            const hasMarkupNext = next !== undefined && next !== null
+                && next.kind === "Markup";
+
+            // BARE_EXPORT_AT_END_RE — a `Text` block ending with a bare
+            // `export` keyword paired with a FOLLOWING markup block. The
+            // `export <channel name="...">...</>` channel-export form (and a
+            // future `export <Component>` Form-1). Mirrors ast-builder.js
+            // L807 / L956 — the channel branch.
+            if (hasMarkupNext && BARE_EXPORT_AT_END_RE.test(raw)) {
+                const paired = liftPairedExport(block, next, raw, source, ctx, counter);
+                if (paired !== null) {
+                    for (const b of paired.blocks) result.push(b);
+                    // A successful export-pairing always consumes BOTH the
+                    // Text block and the following Markup block (the channel
+                    // markup is RETAINED in `paired.blocks`, but the input
+                    // index still advances past it so it is not re-processed).
+                    i = i + 2;
+                    continue;
+                }
+            }
+
+            // BARE_DECL_NAME_EQ_AT_END_RE — a `Text` block ending with a
+            // `(export )?(const|let) Name = ` component-def header paired with
+            // a FOLLOWING markup block. The `const Name = <markup>` Form-2.
+            // Mirrors ast-builder.js L1092.
+            if (hasMarkupNext) {
+                const m = raw.match(BARE_DECL_NAME_EQ_AT_END_RE);
+                if (m !== null) {
+                    const paired = liftPairedDeclEq(block, next, m, source, ctx, parentType, counter);
+                    for (const b of paired) result.push(b);
+                    i = i + 2; // the Text block + the consumed markup block
+                    continue;
+                }
+            }
+
             // BARE_DECL_RE — `type` / `export` / `import` / `fn` /
             // `server fn` / `let` / `const` decl keywords. Fires at any
             // declaration-site parent.
             if (BARE_DECL_RE.test(raw)) {
                 result.push(synthLiftedLogicBlock(block, source, ctx));
+                i = i + 1;
                 continue;
             }
             // TOPLEVEL_STATE_DECL_RE — a `<Ident ...>` opener then `=`/`:`.
             if (TOPLEVEL_STATE_DECL_RE.test(raw)) {
                 result.push(synthLiftedLogicBlock(block, source, ctx));
+                i = i + 1;
                 continue;
             }
             // TILDE_TOKEN_RE — a bare `~` pipeline token. The live oracle
@@ -1680,13 +1821,140 @@ export function liftBareBlocks(blocks, source, parentType, ctx) {
             // top-level — to avoid lifting prose markup that contains `~`.
             if (parentType === "state" && TILDE_TOKEN_RE.test(raw)) {
                 result.push(synthLiftedLogicBlock(block, source, ctx));
+                i = i + 1;
                 continue;
             }
         }
 
         result.push(block);
+        i = i + 1;
     }
     return result;
+}
+
+// liftPairedExport — calculation. The P5-2 `export <markup>` pairing pass. A
+// `Text` block whose trailing portion is a bare `export` keyword, paired with
+// a FOLLOWING `Markup` block. Mirrors `liftBareDeclarations`'s `export`
+// branches (ast-builder.js L807).
+//
+// CHANNEL case (`export <channel name="...">`) — the live oracle emits TWO
+// blocks: a synthetic `logic` block carrying the channel-export marker (so it
+// hoists as one `export`) PLUS the channel `Markup` block kept as-is
+// (ast-builder.js L1000 / L1019). The native side mirrors that: the synthetic
+// logic body is `export const <unique> = "<channelName>"` (a clean
+// `Export(VarDecl)` — no Form-1 desugar garbage), and the channel markup is
+// retained. The channel's own children are recursed here (it is an
+// `isProgramFamilyRoot` declaration site) since the caller advances PAST the
+// markup block and does not re-process it.
+//
+// Returns `{ blocks }`, or `null` when the pairing does not apply (the markup
+// is not a recognized export-paired element) so the caller falls through to
+// the other lift rules.
+function liftPairedExport(textBlock, markupBlock, raw, source, ctx, counter) {
+    const markupName = typeof markupBlock.name === "string" ? markupBlock.name : "";
+
+    // CHANNEL — `export <channel name="...">...</>` (SPEC §38.12.6).
+    if (markupName === "channel") {
+        const m = raw.match(EXPORT_PREFIX_SPLIT_RE);
+        const prefixRaw = m !== null ? m[1] : "";
+        const out = [];
+        // Re-emit + re-lift the pre-`export` prefix (comments / whitespace /
+        // a preceding state-decl) so its own lift rules still fire.
+        const prefixBlock = synthPrefixTextBlock(textBlock, prefixRaw);
+        if (prefixBlock !== null) {
+            const reLifted = liftBareBlocks([prefixBlock], source, "state", ctx, counter);
+            for (const b of reLifted) out.push(b);
+        }
+        // Extract the channel's string-literal `name="..."` attribute. A
+        // reactive `name=@var` form (no match) yields no compile-time-stable
+        // identity — the live oracle reports E-CHANNEL-EXPORT-001 and keeps
+        // the channel as a per-page (non-export) declaration. The native
+        // structural canary does not model that diagnostic; fall through to
+        // a no-pairing result so the channel markup is emitted unlifted.
+        const nameMatch = markupName === "channel"
+            ? sliceBlockRaw(source, markupBlock.span).match(CHANNEL_NAME_ATTR_RE)
+            : null;
+        if (nameMatch === null) return null;
+        const channelName = nameMatch[1];
+        // Synthesize the channel-export logic block. The body is a clean
+        // `export const <unique> = "<name>"` — it hoists as exactly one
+        // `Export`, mirroring the live oracle's synthetic helper-const
+        // (ast-builder.js L998). The span covers the `export` trailer.
+        counter.next = counter.next + 1;
+        const helperName = "_native_channel_export_" + counter.next;
+        const bodyText = "export const " + helperName + " = "
+            + JSON.stringify(channelName);
+        const span = textBlock.span;
+        const trailerStart = (span !== undefined && span !== null
+            && typeof span.start === "number")
+            ? span.start + prefixRaw.length : 0;
+        const synthSpan = (span !== undefined && span !== null)
+            ? { ...span, start: trailerStart, end: trailerStart + bodyText.length }
+            : span;
+        const synthLogic = synthPairedLogicBlock(bodyText, synthSpan, ctx);
+        synthLogic._channelExport = channelName;
+        out.push(synthLogic);
+        // Keep the channel markup block (the live oracle retains it tagged
+        // `_p3aIsExport`). The caller advances PAST this markup block, so its
+        // children are recursed here — `<channel>` is an `isProgramFamilyRoot`
+        // declaration site (childContext "state").
+        const channelChildren = liftBareBlocks(
+            markupBlock.children, source, "state", ctx, counter);
+        out.push({ ...markupBlock, children: channelChildren, _channelExport: channelName });
+        return { blocks: out };
+    }
+
+    // No other `export <markup>` form is recognized as a pairing here — a
+    // bare `export <Component>` Form-1 desugar (outer-attr splice into the
+    // body root, SPEC §21.2) is a separate, more involved pass; return null
+    // so the caller's other lift rules apply.
+    return null;
+}
+
+// liftPairedDeclEq — calculation. The P5-2 `const Name = <markup>` pairing
+// pass. A `Text` block whose trailing portion is a `(export )?(const|let)
+// Name = ` component-def header (`m` is the BARE_DECL_NAME_EQ_AT_END_RE
+// match — group 1 the prefix, group 2 the trailer), paired with a FOLLOWING
+// `Markup` block. Mirrors `liftBareDeclarations`'s Bug-2 branch
+// (ast-builder.js L1092).
+//
+// Unlike the channel case, this emits ONE synthetic `logic` block that
+// ABSORBS the markup block — its body is `(export )?(const|let) Name =
+// <markup-raw>`, a single `VarDecl` (or `Export(VarDecl)`) whose init is the
+// markup. The markup block is consumed (the caller advances `i` by 2). The
+// leading prefix is re-emitted + re-lifted as its own Text block.
+//
+// Returns the block array to splice into the result.
+function liftPairedDeclEq(textBlock, markupBlock, m, source, ctx, parentType, counter) {
+    const prefixRaw = m[1];
+    const trailerRaw = m[2];
+    const out = [];
+    // Re-emit + re-lift the prefix (a preceding `<count> = 0` state-decl, a
+    // `function f() {...}` bare-decl, etc.). The prefix's parentType is the
+    // SAME as this pass's parentType (ast-builder.js L1114).
+    const prefixBlock = synthPrefixTextBlock(textBlock, prefixRaw);
+    if (prefixBlock !== null) {
+        const reLifted = liftBareBlocks([prefixBlock], source, parentType, ctx, counter);
+        for (const b of reLifted) out.push(b);
+    }
+    // Build the synthetic logic body: the trimmed trailer (`(export )?
+    // (const|let) Name = `) spliced with the markup block's verbatim raw.
+    const markupRaw = sliceBlockRaw(source, markupBlock.span);
+    const bodyText = trailerRaw.replace(/^\s+/, "") + markupRaw;
+    // The synthetic node spans [trailerStart, markupEnd].
+    const tSpan = textBlock.span;
+    const mSpan = markupBlock.span;
+    const trailerStart = (tSpan !== undefined && tSpan !== null
+        && typeof tSpan.start === "number")
+        ? tSpan.start + prefixRaw.length : 0;
+    const markupEnd = (mSpan !== undefined && mSpan !== null
+        && typeof mSpan.end === "number")
+        ? mSpan.end : trailerStart + bodyText.length;
+    const synthSpan = (tSpan !== undefined && tSpan !== null)
+        ? { ...tSpan, start: trailerStart, end: markupEnd }
+        : tSpan;
+    out.push(synthPairedLogicBlock(bodyText, synthSpan, ctx));
+    return out;
 }
 
 // parseMarkup — entry point. Pure fn over the source string; the loop is a

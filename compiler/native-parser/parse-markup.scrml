@@ -1576,9 +1576,14 @@ ${
     //     `collectHoisted` + the live `logic` ASTNode see the decls.
     //
     // SCOPE — this mirrors the three single-Text-block lift triggers
-    // (`BARE_DECL_RE` / `TOPLEVEL_STATE_DECL_RE` / `TILDE_TOKEN_RE`). The
-    // two component-def PAIRING forms are out of P4-2 scope (a native
-    // `const Name = <markup>` decl is mis-segmented BEFORE this pass).
+    // (`BARE_DECL_RE` / `TOPLEVEL_STATE_DECL_RE` / `TILDE_TOKEN_RE`) PLUS
+    // the two component-def PAIRING forms (P5-2): `BARE_EXPORT_AT_END_RE`
+    // (`export <channel ...>`) and `BARE_DECL_NAME_EQ_AT_END_RE`
+    // (`(export )?(const|let) Name = <markup>`). A native parse DOES emit
+    // a `Text`-then-`Markup` shape for these — the declarator keyword run
+    // flushes the text run at the `<ident` boundary — so the pairing pass
+    // (`liftPairedExport` / `liftPairedDeclEq`) re-pairs them, mirroring
+    // `liftBareDeclarations`'s pairing branches.
     //
     // (live surface in parse-markup.js — the .scrml shape carries the
     // canonical Pillar 5b SHAPE; the .js shadow runs. The body-parse seam
@@ -1586,7 +1591,13 @@ ${
     // markup<->JS seam the `emitContextBlock` `.InLogicEscape` branch
     // rides; both run in the .js shadow only.)
     // -------------------------------------------------------------------
-    export fn liftBareBlocks(blocks, source, parentType, ctx) {
+    // P5-2 — `liftBareBlocks` delegates the two pairing forms to the
+    // internal `liftPairedExport` / `liftPairedDeclEq` helpers; those run
+    // in the .js shadow only (internal helpers — like `synthLiftedLogic
+    // Block` / `synthPairedLogicBlock` / `synthPrefixTextBlock` — are not
+    // carried in this SHAPE mirror, which holds only the `export fn`
+    // surface).
+    export fn liftBareBlocks(blocks, source, parentType, ctx, synthCounter) {
         // see parse-markup.js for the running shadow
     }
 
