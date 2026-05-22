@@ -1,10 +1,10 @@
 # domain.map.md
 # project: scrmlts
-# updated: 2026-05-21T15:00:00Z  commit: 67a17dc5
+# updated: 2026-05-21T21:30:00Z  commit: 26e82466
 
 The domain is the scrml COMPILER pipeline. scrml is a single-file, full-stack
 reactive web language; the compiler splits server from client, wires reactivity,
-routes HTTP, and emits HTML/CSS/JS. Normative authority: compiler/SPEC.md (57
+routes HTTP, and emits HTML/CSS/JS. Normative authority: compiler/SPEC.md (58
 sections) + compiler/PIPELINE.md. Per pa.md Rule 4, SPEC.md is normative.
 
 ## Core Concepts
@@ -18,6 +18,9 @@ selfHostModules    — optional overrides letting compiled-scrml modules replace
 Native parser      — the in-progress scrml-native composed-engines front-end
                      (compiler/native-parser/); replaces BS + Acorn + BPP + the
                      statechild re-tokenizers per charter B (S111).
+Build Story        — SPEC §58 (S118). An explicit, committed, content-addressed
+                     record of *what "the compiler" is* for a build — a Merkle
+                     closure. Spec-ahead: NO compiler implementation exists yet.
 
 ## Pipeline Stages — orchestrated by `compileScrml` in compiler/src/api.js
 The full chain (api.js stage labels in brackets):
@@ -52,31 +55,45 @@ The full chain (api.js stage labels in brackets):
   Stdlib bundling      — copy runtime shims into <out>/_scrml/*.js
   Output write loop    — F-COMPILE-001 Option A preserved source tree; per-route chunk writes
 
-## The M5 Pipeline-Swap Seam (load-bearing for the next dispatch)
-- Live front-end: BS (block-splitter.js, ~2055 LOC) + TAB (ast-builder.js,
-  ~12880 LOC + tokenizer.ts ~1607 LOC) + BPP + Acorn-driven `parseExprToNode`.
-  Output: `TABOutput { filePath, ast: FileAST, errors }`.
-- `--parser=scrml-native` at HEAD is OBSERVABILITY-ONLY: api.js:1835 emits a
-  single I-PARSER-NATIVE-SHADOW info diagnostic and changes NO pipeline behavior.
-  The native parser is NOT routed downstream.
-- The native parser today produces SEPARATE catalogs that do NOT form a FileAST:
-  lex.js → Token[]; parse-stmt.js parseProgram → Stmt[] (20 StmtKinds);
-  parse-expr.js → Expr (37 ExprKinds); parse-markup.js parseMarkup → flat
-  BlockNode[] (11 BlockKinds). No imports/exports/components/typeDecls/spans/
-  has*-flags/authConfig/middlewareConfig.
-- M5 swap scope is documented at compiler/native-parser/M5-ast-bridge-scoping.md
-  (the divergence inventory + cost estimate) and M5-divergence-ledger.md (what
-  the native parser parses cleanly today). The bridge to make a real swap
-  possible was cost-deferred at M5.1 close (estimated 70h+ / 80-120h).
-- Stage 3.004 (PRECG) was relocated S115 out of TAB precisely so a swapped-in
-  native parser does not have to learn codegen-optimizer caches: computePGOFlags
-  + computeProgramConfig run pipeline-agnostically against the top-level node
-  stream, whatever produced it.
+## The M5 Pipeline-Swap Seam (load-bearing for the C1 dispatch)
+- Live front-end: BS (block-splitter.js) + TAB (ast-builder.js + tokenizer.ts) + BPP
+  + Acorn-driven `parseExprToNode`. Output: `TABOutput { filePath, ast: FileAST, errors }`.
+- `--parser=scrml-native` at HEAD is OBSERVABILITY-ONLY: api.js:1835 emits a single
+  I-PARSER-NATIVE-SHADOW info diagnostic and changes NO pipeline behavior. The native
+  parser is NOT routed downstream.
+- The native parser produces SEPARATE catalogs (Token[], Stmt[] 20 kinds, Expr 40
+  ExprKinds, Block[]). The S118/S119 bridge layer translates them to the live FileAST:
+    - translate-stmt.js (R1)  — native Stmt[] → live LogicStatement[].
+    - translate-expr.js (A2)  — native Expr → live ExprNode.
+    - collect-hoisted.js (A3) — native Block[] → imports/exports/typeDecls/components/
+      machineDecls/channelDecls/hasProgramRoot; SYNTHESIZES the declaration node shapes.
+  The bridge is landed but not yet routed — the C1 dispatch composes it into a
+  `nativeParseFile` FileAST assembler and wires that into api.js's BS+TAB seam.
+- Still open at the C1 seam: a top-level ASTNode[] assembler (Block → ASTNode), the
+  `spans` table population, and the api.js wiring itself.
+- Stage 3.004 (PRECG) was relocated S115 out of TAB precisely so a swapped-in native
+  parser does not have to learn codegen-optimizer caches: computePGOFlags +
+  computeProgramConfig run pipeline-agnostically against the top-level node stream.
+- M5 swap scope: compiler/native-parser/M5-ast-bridge-scoping.md (divergence inventory
+  + cost estimate), M5-divergence-ledger.md (clean-parse coverage),
+  M5-SWAP-residual-decomposition.md (re-scoped residual unit decomposition).
+
+## v0.7 M5-swap progress (S117-S119)
+- R1 (S117) — statement-catalog bridge landed.
+- R4 (S117) — SPEC §34.1 native-parser parse-diagnostics catalog seeded (66 codes).
+- A2 (S118) — expression-catalog bridge landed.
+- F4 (S118) — SpanTable retired (zero-consumer dead structure).
+- B1-B7 (S118) — native-parser scrml-extension + core-keyword productions: B1 `?`
+  propagate, B2 `!{}` guarded-expr, B3 `~`-decl, B4 `lin`, B5 `type`, B6
+  `fn`/`server`/`pure` modifiers, B7 `throw`/`try` forbidden-vocab rejection.
+  §34.1 grew 66→79 diagnostic codes.
+- A3 (S119) — declaration/hoist synthesis landed; `typeDecls`/`components`/
+  `machineDecls` now synthesized by collect-hoisted.
 
 ## Native Parser Charter (charter B, S111)
 Replaces the WHOLE front-end — block-splitter, Acorn layer, BPP, statechild
-re-tokenizers. M-ladder: M1 (lexer, COMPLETE) → M2 (expr, in flight) →
-M3 (stmt) → M4 (full JS subset) → MK1-MK4 (markup) → M5 (pipeline swap behind
+re-tokenizers. M-ladder: M1 (lexer, COMPLETE) → M2 (expr) → M3 (stmt) →
+M4 (full JS subset) → MK1-MK4 (markup) → M5 (pipeline swap behind
 `--parser=scrml-native`) → M6 (joint retirement; BS+Acorn+BPP deleted).
 Composed-engines architecture: every state-shape construct points to an
 `<engine>` (Pillar 5b discipline). .scrml files carry canonical SHAPE; 1:1 .js
@@ -84,20 +101,28 @@ shadow files carry the executable surface (M4+ swap-in concession).
 
 ## Business Invariants
 - scrml SOURCE has no exceptions / no try-catch (§19.1) — values-not-exceptions.
+  The native parser's B7 production REJECTS `throw`/`try` with E-THROW-NOT-IN-SCRML /
+  E-TRY-NOT-IN-SCRML; translate-stmt.js treats `Throw`/`Try` as forbidden-vocab kinds.
 - `null` and `undefined` do not exist in scrml; both map to `not`. `""` / `0` /
   `false` / `[]` / `{}` are DEFINED values, not absence (memory S89, absolute).
 - Production builds are bit-identical with testMode disabled (§19.12.7 0-byte cost).
 - The native parser is NOT a port and NOT the v1.0 self-host; Acorn is the
   conformance ORACLE, never the design template.
+- §58 Build Story: given the same `(source, buildStory)` pair, any party can
+  reconstruct the exact compiler and produce a bit-identical artifact. No build axis
+  outside `(source, buildStory)` participates in artifact content. SPEC-AHEAD —
+  no implementation exists; §58.12 enumerates the unproven `*` guarantees.
 
 ## Aggregates / Key Modules
 api.js               — pipeline orchestrator; `compileScrml`
 codegen/index.ts     — Stage 8 sub-pipeline; `runCG` → ~55 emit-* modules
 reachability-solver.ts — Stage 7.6; delegates to reachability/component-1..5
 native-parser/lex.js — composed-engines lexer entry; 7 LexMode dispatchers
+native-parser/parse-stmt.js / parse-expr.js / parse-markup.js — the three parsers
+native-parser/{translate-stmt,translate-expr,collect-hoisted}.js — native→live bridge
 
 ## Tags
-#scrmlts #map #domain #pipeline #native-parser #m5-swap #compiler
+#scrmlts #map #domain #pipeline #native-parser #m5-swap #compiler #build-story
 
 ## Links
 - [primary.map.md](./primary.map.md)

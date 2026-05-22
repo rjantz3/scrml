@@ -1,6 +1,6 @@
 # test.map.md
 # project: scrmlts
-# updated: 2026-05-21T15:00:00Z  commit: 67a17dc5
+# updated: 2026-05-21T21:30:00Z  commit: 26e82466
 
 ## Test Framework
 Runner: bun test (Bun >=1.3.13 built-in; uses `bun:test` API)
@@ -10,8 +10,8 @@ Run all: `bun test compiler/tests/`  (preceded by `pretest` sample compilation)
 Run single: `bun test compiler/tests/unit/<file>.test.js`
 Run a name: `bun test compiler/tests/<file>.test.js -t "<test name>"`
 
-## Test Categories  (738 test files total)
-Unit:         compiler/tests/unit/**          — ~519 files
+## Test Categories  (728 .test.js files total)
+Unit:         compiler/tests/unit/**          — ~509 files
 Integration:  compiler/tests/integration/**   — ~75 files
 Conformance:  compiler/tests/conformance/**   — ~105 files (SPEC-section behavior)
 Browser:      compiler/tests/browser/**       — 12 files (happy-dom; excluded from pre-commit)
@@ -20,15 +20,20 @@ LSP:          compiler/tests/lsp/**           — 10 files
 Self-host:    compiler/tests/self-host/**     — 4 files
 E2E:          e2e/**                          — Playwright (separate runner)
 
-## Parser-Conformance Suite  (load-bearing for the M5 swap)
+## Parser-Conformance Suite  (load-bearing for the M5 swap / C1 dispatch)
 Top-level files at compiler/tests/:
   parser-conformance.test.js                  — overall harness
   parser-conformance-lexer.test.js            — native lexer vs Acorn (M1.x)
-  parser-conformance-expr.test.js             — native Expr AST vs Acorn (M2.x, 614+ tests)
-  parser-conformance-stmt.test.js             — native Stmt AST vs Acorn (M3.x, 499+ tests)
-  parser-conformance-markup.test.js           — native markup BlockNode tree (MKx)
-  parser-conformance-corpus.test.js           — bench corpus + ~900-file .scrml smoke pass
-  parser-conformance-collect-hoisted.test.js  — hoisted-collection extraction
+  parser-conformance-expr.test.js             — native Expr AST vs Acorn (M2.x)
+  parser-conformance-stmt.test.js             — native Stmt AST vs Acorn (M3.x)
+  parser-conformance-markup.test.js           — native markup Block tree (MKx)
+  parser-conformance-corpus.test.js           — bench corpus + .scrml smoke pass
+  parser-conformance-collect-hoisted.test.js  — collectHoisted hoist-synthesis (A3)
+Native-parser bridge unit tests (compiler/tests/unit/):
+  translate-stmt-bridge.test.js               — R1 native Stmt[] → live LogicStatement[]
+  translate-expr-bridge.test.js               — A2 native Expr → live ExprNode
+  native-parser-core-decl-keywords.test.js    — B4/B5/B6 lin/type/fn productions
+  native-parser-scrml-extension-exprs.test.js — B1/B2/B3/B7 ?/!{}/~/throw-try productions
 Support dir: compiler/tests/parser-conformance/ (parsers.js — Acorn-oracle adapter).
 These tests ARE the source of truth for native-parser pass/skip/fail status.
 
@@ -39,7 +44,7 @@ Browser tests are NOT in the pre-commit gate (run separately / in pre-push).
 ## Fixtures & Factories
 compiler/tests/fixtures/  — promote-match-canonical.scrml, promote-multi-file-app/
 compiler/tests/helpers/   — expr.ts (expression test helpers), extract-user-fns.js
-samples/compilation-tests/ — 318 test-case directories driven by pretest
+samples/compilation-tests/ — ~318 test-case directories driven by pretest
                              (compile-test-samples.sh); counted, not enumerated.
 
 ## Pattern

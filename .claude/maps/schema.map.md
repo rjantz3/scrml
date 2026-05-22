@@ -1,10 +1,11 @@
 # schema.map.md
 # project: scrmlts
-# updated: 2026-05-21T15:00:00Z  commit: 67a17dc5
+# updated: 2026-05-21T21:30:00Z  commit: 26e82466
 
 Authoritative AST type catalog: `compiler/src/types/ast.ts`. This is the contract
 the M5 native-parser swap must satisfy — native-parser output must be coercible to
-`FileAST` / `TABOutput` for the api.js BS+TAB seam.
+`FileAST` / `TABOutput` for the api.js BS+TAB seam. The native→live bridge layer
+(translate-stmt/translate-expr/collect-hoisted) implements that coercion.
 
 ## Pipeline I/O Types
 
@@ -81,7 +82,7 @@ CSSInlineNode [330] | StyleNode [339] | ErrorEffectNode [350] | MetaNode [359] |
 TransactionBlockNode [1282] | WhenEffectNode [1303] | WhenMessageNode [1317] |
 UploadCallNode [1328]
 
-## ExprNode union  [ast.ts:1939] — scrml's own expression AST
+## ExprNode union  [ast.ts:1939] — scrml's own expression AST (20 lowercase kinds)
 IdentExpr [1569] | LitExpr [1591] | ArrayExpr [1614] | ObjectExpr [1621] |
 SpreadExpr [1633] | UnaryExpr [1650] | BinaryExpr [1678] | AssignExpr [1700] |
 TernaryExpr [1712] | MemberExpr [1730] | IndexExpr [1741] | CallExpr [1751] |
@@ -98,21 +99,67 @@ CgFileOutput [206] — sourceFile, serverJs, clientJs, libraryJs, html, css, tes
 CgOutput [223] — outputs: Map<string,CgFileOutput>, errors, runtimeJs, runtimeFilename,
   chunks?, chunksManifest?
 
-## Native-parser AST (in-progress — divergent from FileAST)
-ast-expr.js — `Expr` AST, 37 ExprKind variants (M2.x).
-ast-stmt.js — `Stmt[]` from parseProgram(tokens,source), 20 StmtKind variants (M3.x).
-parse-markup.js — `BlockNode[]` from parseMarkup(source), 11 BlockKinds.
-token.js — TokenKind nested-by-category enum.
-These do NOT yet match FileAST; the M5-FULL bridge work translates them.
-See compiler/native-parser/M5-ast-bridge-scoping.md and M5-divergence-ledger.md.
+## Native-parser AST catalogs (compiler/native-parser/)
+
+### Token  [token.js] — lexer output
+TokenKind — Object.freeze enum; QuoteKind; JS_KEYWORDS frozen set.
+Factories: makeToken, makeIdentOrKeyword, makeEof.
+
+### Stmt catalog  [ast-stmt.js] — `Stmt[]` from parseProgram(tokens,source)
+StmtKind — 20 frozen variants: Block, ExprStmt, Empty, VarDecl, If, While, DoWhile,
+For, ForIn, ForOf, Return, Break, Continue, Labeled, FunctionDecl, ClassDecl, Import,
+Export, Try, Throw, LinDecl (B4 — `lin`), TypeDecl (B5 — `type`), TildeDecl (B3 — `~name = pipeline`).
+Sub-enums: VarDeclKind, ClassMemberKind, MethodKind, ImportSpecifierKind, BindingKind,
+BindingPropertyKind, BindingElementKind. ~45 make* node factories.
+
+### Expr catalog  [ast-expr.js] — native `Expr` from parseExpression
+ExprKind — 40 frozen variants. Primary: Ident, NumberLit, StringLit, BoolLit, RegexLit,
+TemplateLit, AtCell, BareVariant, This, Super, Array, Object, Paren. Operators: Unary,
+Update, Binary, Logical, Assignment, Conditional, Sequence. Call/member/fn: Call, New,
+Member, TaggedTemplate, Arrow, Function, RestElement, AssignmentPattern, BlockStub.
+scrml-extension forms: NotValue (`not`), Tilde (`~`), Sql (`?{...}`), InputStateRef
+(`<#id>`), IsCheck, Match (+ MatchArm/VariantPattern/WildcardPattern/IsPattern/
+MatchBinding), Render, Lift, Fail, Propagate (`?` — B1), GuardedExpr (`!{}` — B2),
+Yield, MarkupValue. Sub-enums: ArrayElementKind, ObjectPropertyKind, IsCheckOp,
+MatchArmPatternKind. ~60 make* node factories.
+
+### Block catalog  [parse-markup.js] — `Block[]` from parseMarkup(source)
+Each Block is `{ kind, span, commentForm, ...payload }`. Kinds include Markup (name,
+children, attrs, tagClass, tagKind, closerForm), LogicEscape (bodyText, body:Stmt[]),
+Meta (bodyText, body:Stmt[]), Text, Sql, Css.
+
+## Native→live FileAST bridge (S118/S119 — landed)
+translate-stmt.js  `translateStmtList(nativeBody, idGen)` — native Stmt[] →
+  live LogicStatement[] (PascalCase ESTree → lowercase scrml kinds; N×M structural).
+  `Throw`/`Try` are forbidden-vocabulary kinds it rejects.
+translate-expr.js  `translateExpr(nativeExpr)` / `translateExprList(nativeExprs)` —
+  native Expr (40 ExprKinds) → live ExprNode (20 kinds); kind-rename + fan-out/fan-in.
+collect-hoisted.js `collectHoisted(blocks, idGen, source)` → { imports, exports,
+  typeDecls, components, machineDecls, channelDecls, hasProgramRoot }. SYNTHESIZES
+  the live FileAST declaration node shapes from native shapes:
+    - machineDecls — a Markup block named "engine"/"machine" → a 14-field EngineDeclNode
+      (nested engines discovered by recursing `children`).
+    - components — a `const Upper = <markup>` VarDecl → a ComponentDefNode.
+    - typeDecls — a native TypeDecl Stmt → a TypeDeclNode; `export type` pushes BOTH
+      a typeDecl (`fromExport:true`) AND an export-decl, mirroring ast-builder.js:7297.
+  `hasProgramRoot(blocks)` — exported standalone; true iff a top-level Markup block is
+  named "program". Synthesized nodes extend live BaseNode (`id`+`span`); `id` is
+  allocated from a threaded-in `idGen` `{ next }` counter so the whole native→live
+  FileAST shares one id space. `source` (optional) lets engine `rulesRaw` be sliced;
+  omitted → `rulesRaw` "" (documented partial — the C1 `nativeParseFile` caller threads
+  source through).
+
+The C1 dispatch composes these three into a `nativeParseFile` FileAST assembler. It
+still needs: a top-level ASTNode[] assembler (Markup/Logic/State/Sql/Css block →
+ASTNode), spans table population, and the api.js BS+TAB seam wiring.
 
 ## Database Models
 No application DB schema — scrml is a compiler. SQLite *.db files at repo root and
-in examples/ are throwaway test fixtures (0-byte or test-generated). SQL schema in
-.scrml sources is the user-program domain, not a compiler model.
+in examples/ are throwaway test fixtures. SQL schema in .scrml sources is the
+user-program domain, not a compiler model.
 
 ## Tags
-#scrmlts #map #schema #ast #fileast #native-parser #codegen
+#scrmlts #map #schema #ast #fileast #native-parser #codegen #m5-swap #bridge
 
 ## Links
 - [primary.map.md](./primary.map.md)

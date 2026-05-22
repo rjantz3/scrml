@@ -1,6 +1,6 @@
 # error.map.md
 # project: scrmlts
-# updated: 2026-05-21T15:00:00Z  commit: 67a17dc5
+# updated: 2026-05-21T21:30:00Z  commit: 26e82466
 
 scrml's own language error model is values-not-exceptions (SPEC §19.1 — no
 try/catch, no exceptions in scrml SOURCE). The entries below are the COMPILER's
@@ -22,6 +22,23 @@ MetaEvalError — compiler/src/meta-eval.ts:49 — Stage 6.5 (Meta Eval)
 DGError       — compiler/src/dependency-graph.ts:233 — Stage 7 (Dependency Graph)
 CGError       — compiler/src/codegen/errors.ts:11 — Stage 8 (Code Generator); { code, message, span, severity }
 
+## Native-Parser Parse Diagnostics (SPEC §34.1)
+SPEC §34.1 catalogs the diagnostics emitted by the native parser
+(compiler/native-parser/) — the recursive-descent front-end that replaces the
+legacy block-splitter + Acorn pipeline at the M5 swap. As of HEAD this catalog
+holds 79 codes (S117 R4 seeded 66; S118 M5-swap Waves 1+2 appended 13). All are
+hard `E-` errors. They become adopter-visible only at the R5/C2 pipeline swap.
+New B-wave codes (S118):
+  E-STMT-LIN-NAME / E-STMT-LIN-INIT          — B4, `lin` declaration grammar
+  E-STMT-TYPE-NAME / E-STMT-TYPE-KIND / E-STMT-TYPE-UNCLOSED — B5, `type` declaration
+  E-STMT-FN-KEYWORD / E-STMT-FN-NAME / E-STMT-FN-ERROR       — B6, `fn`/`server`/`pure`
+  E-STMT-TILDE-NAME / E-STMT-TILDE-INIT      — B3, `~` tilde-declaration
+  E-EXPR-GUARDED-UNCLOSED                    — B2, `!{}` guarded-expression
+  E-THROW-NOT-IN-SCRML / E-TRY-NOT-IN-SCRML  — B7, forbidden-vocabulary rejection
+B1 (`?` propagate) added a production but no new code — a malformed ternary still
+surfaces E-EXPR-TERNARY-COLON. §34.1 is the surviving home of the parse-diagnostic
+family once M6 deletes the legacy pipeline.
+
 ## Runtime Error Classes (emitted INTO user output)
 compiler/src/runtime-template.js — scrml runtime error hierarchy embedded in
 generated apps, all extending `_ScrmlError`:
@@ -37,16 +54,18 @@ TimeoutError [2060] | ParseError [2068] | NotFoundError [2076] | ConflictError [
   to `result.errors` (CLI exits 1 on a non-empty errors array).
 - Per-stage try/catch in api.js wraps BS and the TS-promote capture hook only
   (2 catch sites); pipeline stages otherwise return diagnostics as values.
+- Native-parser modules record errors as VALUES — `recordError(ctx, code, message,
+  span)` in parse-stmt.js / parse-expr.js appends to a context error array; no throws.
 
-## Error Code Families (count of code-prefix references in compiler/src)
+## Error Code Families (host-side, count of code-prefix references in compiler/src)
 Spec-catalogued codes (SPEC §34 is normative). Highest-volume families:
-E-ENGINE (269) | E-TYPE (159) | E-DERIVED (106) | E-LIN (75) | E-FN (74) |
+E-TYPE (159) | E-ENGINE (118) | E-LIN (75) | E-FN (74) | E-DERIVED (106) |
 E-COMPONENT (71) | E-IMPORT (68) | E-META (64) | E-SCOPE (54) | E-CG (54) |
 E-TABLEFOR (53) | E-STATE (51) | E-SYNTAX (50) | E-CHANNEL (50) | E-AUTH (47) |
-E-CLOSURE (46) | E-PA (45) | E-MATCH (44) | E-CPS (40) | E-ATTR (40) |
-E-FORMFOR (37) | E-VARIANT (35) | E-TEST (35) | E-CONTRACT (35) | E-EQ (33) | …
-Warnings: W-CG (57) | W-LINT (55) | W-AUTH (54). Info: I-PARSER-NATIVE-SHADOW,
-I-MATCH-PROMOTABLE, I-ASYNC-USER-SOURCE, I-AUTH-REDIRECT-UNRESOLVED.
+E-CLOSURE (46) | E-PA (45) | E-MATCH (44) | E-CPS (40) | E-ATTR (40) | …
+Warnings: W-CG | W-LINT | W-AUTH | W-STORY (§58 — W-STORY-ON-TOP-LEVEL).
+Info: I-PARSER-NATIVE-SHADOW, I-MATCH-PROMOTABLE, I-ASYNC-USER-SOURCE,
+I-AUTH-REDIRECT-UNRESOLVED.
 
 ## Global Error Boundaries
 No host-side global error boundary — the compiler is a batch process; fatal
@@ -55,13 +74,13 @@ embed `_ScrmlError`-based runtime handling per SPEC §19.
 
 ## Unhandled Error Risks
 - api.js BS-stage catch (api.js:697) swallows non-BSError throws into a generic
-  E-BS-000 with no span — a native-parser crash under M5 routing would land here
-  without source attribution unless the swap brief adds a typed catch.
+  E-BS-000 with no span — a native-parser crash under M5/C1 routing would land
+  here without source attribution unless the swap brief adds a typed catch.
 - Lint pre-passes silently swallow unreadable-file errors (api.js:674) — by
   design; BS reports the real read error.
 
 ## Tags
-#scrmlts #map #error #diagnostics #pipeline
+#scrmlts #map #error #diagnostics #pipeline #native-parser
 
 ## Links
 - [primary.map.md](./primary.map.md)

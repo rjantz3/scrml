@@ -1,6 +1,6 @@
 # dependencies.map.md
 # project: scrmlts
-# updated: 2026-05-21T15:00:00Z  commit: 67a17dc5
+# updated: 2026-05-21T21:30:00Z  commit: 26e82466
 
 ## Runtime Dependencies (root package.json)
 vscode-languageserver@^9.0.1 — LSP server framework for lsp/server.js
@@ -19,7 +19,7 @@ marked@^14.1.3 — markdown renderer for docs:build
 
 ## Runtime / Toolchain
 Bun >=1.3.13 — required engine; test runner (`bun test`), bundler, package manager (bun.lock).
-No npm/pnpm lockfile; bun.lock is canonical.
+No npm/pnpm lockfile; bun.lock is canonical. package.json version: 0.6.0.
 
 ## Internal Module Graph (pipeline orchestration)
 api.js → block-splitter.js, ast-builder.js, compute-pgo-flags.ts, compute-program-config.ts,
@@ -35,19 +35,36 @@ codegen/index.ts → codegen/route-splitter.ts, codegen/ir.ts, codegen/source-ma
 reachability-solver.ts → reachability/{component-1..5, entry-points, gate-classifier, outer-fixpoint}.ts
 cli.js → commands/{compile, dev, build, migrate, promote, generate, init, serve}.js → api.js
 commands/build.js, commands/dev.js → api.js findOutputFiles
-native-parser/lex.js → lex-in-{code,single-string,double-string,template,line-comment,block-comment,regex}.js
-native-parser/parse-expr.js → ast-expr.js, parse-ctx.js, token-cursor.js, parse-mode.js
-native-parser/parse-stmt.js → ast-stmt.js, parse-expr.js, block-context.js
-native-parser/parse-markup.js → tag-frame.js, body-mode.js, display-text-literal.js, parse-seam.js
 
-## Native-parser ↔ live-pipeline relationship
-native-parser/ is the in-progress replacement front-end. At HEAD it is NOT wired into
-api.js's live pipeline — `--parser=scrml-native` only emits the I-PARSER-NATIVE-SHADOW
-info diagnostic (api.js:1835). The M5 swap dispatch routes native-parser output through
-the api.js BS+TAB seam. See M5-ast-bridge-scoping.md.
+## Native-parser Internal Module Graph
+lex.js → lex-mode.js, lex-in-{code,single-string,double-string,template,line-comment,block-comment,regex}.js,
+         char-classify.js
+parse-expr.js → ast-expr.js, token.js, token-cursor.js, parse-ctx.js, parse-mode.js
+parse-stmt.js → ast-stmt.js, ast-expr.js, parse-expr.js, token.js, parse-ctx.js, block-context.js, body-mode.js
+parse-markup.js → tag-frame.js, body-mode.js, display-text-literal.js, parse-seam.js,
+         parse-css-body.js, parse-sql-body.js, parse-state-body.js, parse-error-body.js, delegation-frame.js
+translate-stmt.js → ast-stmt.js, translate-expr.js (rides expression children through the expr bridge)
+translate-expr.js → ast-expr.js
+collect-hoisted.js → ast-stmt.js (reads StmtKind to classify Block-stream Stmt nodes)
+
+## Native-parser → live-pipeline bridge (C1 dispatch seam)
+The native parser produces SEPARATE catalogs (Token[], Stmt[], Expr, Block[]) that do
+NOT form a `FileAST`. The S118/S119 bridge layer is now landed:
+  - translate-stmt.js  `translateStmtList(nativeBody, idGen)` — R1; native Stmt[] →
+    live LogicStatement[] (PascalCase ESTree-shape → lowercase scrml kinds; N×M structural).
+  - translate-expr.js  `translateExpr(nativeExpr)` / `translateExprList(...)` — A2;
+    native Expr (40 ExprKinds) → live ExprNode (20 lowercase kinds).
+  - collect-hoisted.js `collectHoisted(blocks, idGen, source)` / `hasProgramRoot(blocks)` —
+    A3; native Block[] → { imports, exports, typeDecls, components, machineDecls,
+    channelDecls, hasProgramRoot }. Synthesizes EngineDeclNode/ComponentDefNode/
+    TypeDeclNode from native Markup/VarDecl/TypeDecl shapes.
+These three are OPTIONAL exit-shapers — `parseProgram`/`parseExpression`/`parseMarkup`
+stay pure. The C1 dispatch composes them into `nativeParseFile` and wires it into
+api.js's BS+TAB seam. At HEAD `--parser=scrml-native` is still observability-only
+(api.js:1835, I-PARSER-NATIVE-SHADOW) — the bridge exists but is NOT yet routed.
 
 ## Tags
-#scrmlts #map #dependencies #bun #acorn #native-parser
+#scrmlts #map #dependencies #bun #acorn #native-parser #m5-swap #bridge
 
 ## Links
 - [primary.map.md](./primary.map.md)
