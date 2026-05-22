@@ -45,3 +45,4 @@ playwright/.cache/
 # Tracked nowhere; rebuilt on demand. Landing page (docs/index.html) IS tracked.
 docs/articles/*/
 docs/articles/index.html
+.scratch-p42/
