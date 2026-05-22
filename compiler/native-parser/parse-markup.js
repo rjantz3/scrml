@@ -78,6 +78,7 @@ import {
     closeSelfClosedFrame,
     tagFrameDepth,
     popTagFrame,
+    topTagFrame,
     reportUnterminatedTags,
     classifyTagFrame,
 } from "./tag-frame.js";
@@ -229,6 +230,120 @@ export function isAsciiTagNameStart(ch) {
     if (ch === "" || ch === undefined || ch === null) return false;
     const c = ch.charCodeAt(0);
     return (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+}
+
+// P5-1 — STATE-DECL OPENER SUPPRESSION ---------------------------------------
+//
+// The native trampoline recognizes `<query debounced=300ms> = ""` (SPEC §6.2
+// Shape-1 state-decl) as a `<query>` MARKUP element opener — it enters
+// `.InMarkupTag` and consumes every following sibling as the element's
+// children, collapsing the whole `<program>` body into one unclosed
+// `Markup<query>` block. The LIVE pipeline does NOT: block-splitter.js's
+// `peekTopLevelStateDeclSignal` (L529) peeks past the opener's `>` for a
+// state-decl signal (`= expr` — not `==` / `=>` — or `: T`) and, when it
+// fires at a declaration site, emits the line as a `text` block instead of a
+// markup opener. `liftBareDeclarations`'s `TOPLEVEL_STATE_DECL_RE` then lifts
+// that text block into a synthetic `logic` node.
+//
+// `isStateDeclOpenerAt` is the native analogue of `peekTopLevelStateDeclSignal`
+// — a non-mutating cursor peek. The trampoline (`dispatchTopLevel`) consults it
+// at a `<ident` boundary: when the cursor sits at a declaration site (file
+// top-level OR a `<program>` / `<page>` / `<channel>` direct-child body) AND
+// the opener's `>` is followed by a state-decl signal, the markup-tag entry is
+// SUPPRESSED — the `<` falls through to the text-run accumulator and the
+// downstream `liftBareBlocks` `TOPLEVEL_STATE_DECL_RE` rule lifts it, exactly
+// as the live pipeline does.
+
+// isStateDeclOpenerAt — calculation (predicate, non-mutating cursor peek). The
+// cursor is AT a `<` that `isMarkupTagOpener` already accepted as a `<ident`
+// opener. Peek past the opener body to its `>`, then past horizontal
+// whitespace: a `=` (not `==` / `=>`) or a `:` is the state-decl signal (SPEC
+// §6.2 Shape 1 / §35.2 typed-decl). A `/>` self-closer or no signal -> false.
+// A VERBATIM port of block-splitter.js's `peekTopLevelStateDeclSignal` (L529)
+// — the live oracle's recognition. The opener-body scan mirrors that oracle's
+// brace / paren / string balancing so an attribute value containing `>` (a
+// `={ a > b }` expression attr, a quoted `">"`) does not end the scan early.
+export function isStateDeclOpenerAt(cursor) {
+    const src = cursor.source;
+    const len = src.length;
+    let p = cursor.pos + 1; // past `<`
+    // Read the tag-name identifier.
+    while (p < len && isTagNameChar(src.charAt(p))) p = p + 1;
+    if (p === cursor.pos + 1) return false; // no ident — not a `<ident` opener
+    // Skip the opener's attribute region up to its `>` — balance braces,
+    // parens, and quoted strings so a `>` inside an attr value is not the
+    // opener's close.
+    let braceDepth = 0;
+    let parenDepth = 0;
+    let inDouble = false;
+    let inSingle = false;
+    while (p < len) {
+        const c = src.charAt(p);
+        if (braceDepth > 0) {
+            if (c === "{") braceDepth = braceDepth + 1;
+            else if (c === "}") braceDepth = braceDepth - 1;
+            p = p + 1;
+            continue;
+        }
+        if (parenDepth > 0) {
+            if (c === "(") parenDepth = parenDepth + 1;
+            else if (c === ")") parenDepth = parenDepth - 1;
+            p = p + 1;
+            continue;
+        }
+        if (!inDouble && !inSingle) {
+            if (c === ">") { p = p + 1; break; }
+            // A `/>` self-closer is a markup leaf — never a state-decl.
+            if (c === "/" && p + 1 < len && src.charAt(p + 1) === ">") return false;
+            // A sigil-prefixed brace context (`${ ?{ #{ !{ ^{ ~{`) inside an
+            // attr value — enter brace-depth balancing.
+            if ((c === "$" || c === "?" || c === "#" || c === "!" || c === "^" || c === "~")
+                && p + 1 < len && src.charAt(p + 1) === "{") {
+                braceDepth = 1;
+                p = p + 2;
+                continue;
+            }
+            if (c === "{") { braceDepth = braceDepth + 1; p = p + 1; continue; }
+            if (c === "(") { parenDepth = parenDepth + 1; p = p + 1; continue; }
+            if (c === "\"") { inDouble = true; p = p + 1; continue; }
+            if (c === "'") { inSingle = true; p = p + 1; continue; }
+        } else if (inDouble && c === "\"") { inDouble = false; p = p + 1; continue; }
+        else if (inSingle && c === "'") { inSingle = false; p = p + 1; continue; }
+        else if (c === "\\") { p = p + 2; continue; }
+        p = p + 1;
+    }
+    if (p > len) return false; // ran past EOF — no `>`
+    // Skip HORIZONTAL whitespace only — a newline ends the statement, so a
+    // signal on the next line is NOT this opener's state-decl signal.
+    while (p < len && (src.charAt(p) === " " || src.charAt(p) === "\t")) p = p + 1;
+    if (p >= len) return false;
+    const sig = src.charAt(p);
+    if (sig === "=") {
+        const nxt = p + 1 < len ? src.charAt(p + 1) : "";
+        // `==` is comparison, `=>` is an arrow — neither is a decl signal.
+        if (nxt === "=" || nxt === ">") return false;
+        return true;
+    }
+    if (sig === ":") {
+        // A `:` after the opener is the §35.2 typed-state-decl signal.
+        return true;
+    }
+    return false;
+}
+
+// atStateDeclSite — calculation (predicate). Is the trampoline at a
+// declaration site — file top-level (no open TagFrame) OR a `<program>` /
+// `<page>` / `<channel>` direct-child body? Mirrors the live oracle's
+// `peekTopLevelStateDeclSignal` gate (block-splitter.js L1667 — fires when
+// `stack.length === 0 || isChannelBody || isProgramBody || isPageBody`) and
+// the `liftBareBlocks` `isProgramFamilyRoot` declaration-site set. A state-decl
+// opener inside ANY other markup element is prose — the suppression is gated
+// off so ordinary `<div> = …`-shaped prose markup is untouched.
+export function atStateDeclSite(ctx) {
+    const frame = topTagFrame(ctx);
+    if (frame === null || frame === undefined) return true; // file top-level
+    const name = typeof frame.name === "string" ? frame.name : "";
+    return isProgramFamilyRoot(name);
 }
 
 // --- The TEXT-RUN accumulator -----------------------------------------------
@@ -678,6 +793,20 @@ export function dispatchTopLevel(run, cursor, ctx) {
     }
 
     if (recognized.kind === "markupTag") {
+        // P5-1 — STATE-DECL OPENER SUPPRESSION. A `<query debounced=300ms> = ""`
+        // (SPEC §6.2 Shape-1 state-decl) at a declaration site is NOT a markup
+        // element — it is a state declaration the live pipeline emits as a
+        // `text` block (block-splitter.js `peekTopLevelStateDeclSignal`) and
+        // `liftBareBlocks`'s `TOPLEVEL_STATE_DECL_RE` lifts into a `logic`
+        // node. Suppress the markup-tag entry so the `<` falls through to the
+        // text-run accumulator; the lift pass then handles it. Gated on the
+        // declaration site (file top-level / `<program>` / `<page>` /
+        // `<channel>` body) so ordinary nested prose markup is untouched.
+        if (atStateDeclSite(ctx) && isStateDeclOpenerAt(cursor)) {
+            beginTextRun(run, cursor);
+            advance(cursor, 1);
+            return;
+        }
         flushTextRun(run, cursor, ctx);
         // enterMarkupTagContext consumes the `<` + transitions
         // @blockContext to .InMarkupTag; the NEXT trampoline iteration
