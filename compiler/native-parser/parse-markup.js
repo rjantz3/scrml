@@ -73,6 +73,7 @@ import {
     recognizeOpener,
     TagFrameKind,
     recognizeCloserForm,
+    CloserForm,
     tokenizeCloser,
     closeTagFrame,
     closeSelfClosedFrame,
@@ -344,6 +345,41 @@ export function atStateDeclSite(ctx) {
     if (frame === null || frame === undefined) return true; // file top-level
     const name = typeof frame.name === "string" ? frame.name : "";
     return isProgramFamilyRoot(name);
+}
+
+// peekTagNameLower — calculation. The cursor sits at a `<` markup-tag
+// opener; return the LOWERCASED tag name (the `isTagNameChar` run after
+// `<`), or "" when no name char follows. Used by the `<style>` recognizer
+// in dispatchTopLevel — peeking the name without consuming the opener.
+export function peekTagNameLower(cursor) {
+    let k = 1;
+    let name = "";
+    let ch = peekChar(cursor, k);
+    while (isTagNameChar(ch)) {
+        name = name + ch;
+        k = k + 1;
+        ch = peekChar(cursor, k);
+    }
+    return name.toLowerCase();
+}
+
+// scanPastStyleBlock — calculation. The cursor sits at a `<style` opener.
+// Return the offset just past the matching `</style>` closer (case-
+// insensitive), or the source length when no closer materializes (an
+// unterminated `<style>` runs to EOF — the live BS does the same: its
+// scan loop at block-splitter.js L1732-1738 terminates at `</style>` OR
+// `len`).
+export function scanPastStyleBlock(cursor) {
+    const src = cursor.source;
+    const len = src.length;
+    let p = cursor.pos;
+    while (p < len) {
+        if (src.charAt(p) === "<" && src.substr(p, 8).toLowerCase() === "</style>") {
+            return p + 8;
+        }
+        p = p + 1;
+    }
+    return len;
 }
 
 // --- The TEXT-RUN accumulator -----------------------------------------------
@@ -767,7 +803,30 @@ export function dispatchTopLevel(run, cursor, ctx) {
     // set (no bare-`/` `looksLikeCloser` guess). SUPPRESSED inside an
     // orphan-brace region — a `</>` there pairs with a `<tag>` opener
     // that is itself being treated as text (live BS L1530 / L1551).
-    if (!inOrphan && handleCloser(run, cursor, ctx)) return;
+    //
+    // P5-4 — STRAY ANONYMOUS-CLOSER SUPPRESSION. An anonymous `</>` with
+    // NOTHING open is a stray closer the live block-splitter keeps as
+    // ordinary TEXT (block-splitter.js L1535-1540: an empty-stack `</>`
+    // does `beginText()` + advances — it never pops). A NAMED `</name>`
+    // stray is treated differently by the live BS (L1567-1574: it is
+    // CONSUMED + discarded with an E-CTX-001, splitting the text run), and
+    // a `</name>` mismatch against an open frame POPS that frame
+    // (L1576-1587). So the gate is narrow: suppress handleCloser ONLY for
+    // an anonymous `</>` (`CloserForm.Inferred`) with an empty TagFrame
+    // stack — everything else still routes through handleCloser. Without
+    // the gate native consumes the stray `</>` as a closer (handleCloser
+    // returns true even on a stray closer — it dispatches recovery + a
+    // diagnostic, then advances past the `>`), SPLITTING the surrounding
+    // text run and emitting two `text` nodes where the live pipeline emits
+    // one (`phase3-for-arith-iterable-090`: a third `</>` after the tag
+    // tree has fully closed). The .InLogicEscape / .InMarkupTagBody closer
+    // paths carry the equivalent `tagFrameDepth > tagFloor` gate already.
+    if (!inOrphan) {
+        const strayAnonCloser =
+            tagFrameDepth(ctx) === 0 &&
+            recognizeCloserForm(cursor) === CloserForm.Inferred;
+        if (!strayAnonCloser && handleCloser(run, cursor, ctx)) return;
+    }
 
     // Inside an orphan-brace region every context-entry boundary (a `<`
     // markup/state opener, a `${ ?{ #{ ...` sigil) is raw text — skip the
@@ -805,6 +864,33 @@ export function dispatchTopLevel(run, cursor, ctx) {
         if (atStateDeclSite(ctx) && isStateDeclOpenerAt(cursor)) {
             beginTextRun(run, cursor);
             advance(cursor, 1);
+            return;
+        }
+        // P5-4 — `<style>` IS NOT A SCRML MARKUP ELEMENT. The live
+        // block-splitter rejects `<style>` with E-STYLE-001 (block-
+        // splitter.js L1721-1742: "<style> blocks are not supported in
+        // scrml. Use #{} for CSS.") — it records the diagnostic, scans
+        // past the whole `<style>...</style>` block, and emits NO node for
+        // it (the text runs before / after are flushed as two separate
+        // Text blocks). The native parser previously parsed `<style>` as
+        // an ordinary Markup element, emitting a phantom `markup<style>`
+        // subtree the live FileAST never carries (the D-void divergence
+        // family: `rust-state-machine`, `kanban-r11`, `recipe-book`,
+        // `gauntlet-r11-elixir-chat`). Mirror the live BS: flush the run
+        // (it ends at `<style>`), skip the whole block, record E-STYLE-001
+        // — and leave the run closed so a fresh Text run begins after.
+        if (peekTagNameLower(cursor) === "style") {
+            flushTextRun(run, cursor, ctx);
+            const styleStart = cursor.pos;
+            const styleLine = cursor.line;
+            const styleCol = cursor.col;
+            const styleEnd = scanPastStyleBlock(cursor);
+            advance(cursor, styleEnd - styleStart);
+            pushDiagnostic(ctx, makeDiagnostic(
+                "E-STYLE-001",
+                "<style> blocks are not supported in scrml. Use #{} for CSS.",
+                makeSpan(styleStart, cursor.pos, styleLine, styleCol),
+            ));
             return;
         }
         flushTextRun(run, cursor, ctx);
