@@ -524,6 +524,61 @@ function shiftBodySpan(localSpan, bodyAbsStart, bodyAbsLine, bodyAbsCol) {
     return makeSpan(start, end, hostLine, hostCol);
 }
 
+// --- P4-3 — the ORPHAN-BRACE counter ----------------------------------------
+//
+// `markupOrphanBraceDepth` / `handleOrphanBrace` are the native analogue of
+// the live block-splitter's `orphanBraceDepth` (block-splitter.js L223). A
+// bare `{` sitting directly in markup-child position (no preceding sigil) is
+// the body-opener of an inline control-flow / expression construct (`match`,
+// `for`, an `&&` ghost) — its body is one verbatim run the downstream lift
+// pass re-parses, NOT a markup subtree. While the counter is `> 0`,
+// dispatchTopLevel suppresses every structural recognizer (see its header).
+
+// markupOrphanBraceDepth — calculation (read). The current orphan-brace
+// nesting depth. The counter is lazily initialized on `ctx` — a ctx from an
+// older makeParseContext has no slot, so a missing slot reads as 0.
+export function markupOrphanBraceDepth(ctx) {
+    if (ctx === null || ctx === undefined) return 0;
+    const d = ctx.markupOrphanBraceDepth;
+    return (typeof d === "number" && d > 0) ? d : 0;
+}
+
+// handleOrphanBrace — state write. Recognize a bare `{` / `}` at the cursor
+// and maintain the orphan-brace counter. Returns true when a brace was
+// recognized + consumed (the `{` / `}` is accumulated as TEXT — it is
+// expression-body content, not a structural block boundary), false otherwise.
+//
+//   `{`  — opens (or nests) an orphan-brace region; the counter increments.
+//          A `${` / `?{` / ... is a SIGIL — its `{` is the second char of a
+//          two-char sigil, never the cursor char here (recognizeContextEntryAt
+//          runs the sigil path before any bare-`{` could be seen, and at
+//          depth 0 this helper is called first; a `{` whose PRECEDING char is
+//          a sigil sigil-char was already consumed by the sigil path). So a
+//          `{` reaching this helper is genuinely bare.
+//   `}`   — closes an orphan-brace region when the counter is `> 0`; the
+//          counter decrements. A `}` at depth 0 is NOT consumed here (it is a
+//          stray close brace — left to the existing fall-through text path,
+//          matching the live BS which records E-CTX-001 for it; the native
+//          layer's stray-`}` diagnostic is a later milestone, so depth-0 `}`
+//          simply falls through to text, the trampoline's current behaviour).
+export function handleOrphanBrace(run, cursor, ctx) {
+    const here = peekChar(cursor, 0);
+    if (here === openBrace()) {
+        const cur = markupOrphanBraceDepth(ctx);
+        ctx.markupOrphanBraceDepth = cur + 1;
+        beginTextRun(run, cursor);
+        advance(cursor, 1);
+        return true;
+    }
+    if (here === closeBraceChar() && markupOrphanBraceDepth(ctx) > 0) {
+        ctx.markupOrphanBraceDepth = markupOrphanBraceDepth(ctx) - 1;
+        beginTextRun(run, cursor);
+        advance(cursor, 1);
+        return true;
+    }
+    return false;
+}
+
 // dispatchTopLevel — the `.TopLevel` BlockContext state-child body (MK2.2 —
 // block-stream production + structural comments + closer pairing; MK3.3 —
 // the §4.18 code-default body branch).
@@ -547,15 +602,66 @@ function shiftBodySpan(localSpan, bodyAbsStart, bodyAbsLine, bodyAbsCol) {
 // first keeps the dispatch readable and the closed-set recognition
 // (recognizeCloserForm) is the heuristic-elimination contract.
 export function dispatchTopLevel(run, cursor, ctx) {
+    // P4-3 — the ORPHAN-BRACE suppression. A bare `{` at markup / top
+    // level (no preceding sigil) opens an orphan-brace region — the body
+    // of a bare control-flow / expression construct sitting directly in
+    // markup-child position: `match @s { ... }`, `for (x of @xs) { ... }`,
+    // an `&&` ghost `{@cond && <El>}`. The LIVE block-splitter tracks an
+    // `orphanBraceDepth` counter (block-splitter.js L223 / L1505) and,
+    // while it is `> 0`, treats EVERY structural construct inside the
+    // region as raw text — `<tag>` openers (L1619), `< Ident>` state
+    // openers (L1907), `</>` / `</name>` closers (L1530 / L1551), the
+    // sigil block-openers `${ ?{ #{ !{ ^{ ~{` (L1439), and `//` comments
+    // (L972) — because the region is one verbatim expression body the
+    // downstream lift pass re-parses, not a markup subtree.
+    //
+    // The native trampoline mirrors that counter on `ctx`. While
+    // `markupOrphanBraceDepth > 0` the recognizers below are SUPPRESSED:
+    // the `<` / `$` / `</` falls through to the text run, exactly as the
+    // live BS does. This is the P4-3 extension of the Phase-3 2a
+    // `<`-suppression (which covered the `.InLogicEscape` body) to the
+    // expression-position-in-markup variants the 2a fix did not reach.
+    //
+    // SCOPE — the orphan-brace mechanism is GATED OFF in a code-default
+    // body (an engine state-child / match-arm body — SPEC §4.18.1). A
+    // code-default body has its own `{`-bearing grammar (the §4.18 body
+    // dispatch) and is not the markup-child position the 7 D-matchexpr
+    // / T2 files exercise; suppressing there would be over-reach. All
+    // P4-3 target files are free-text markup body (`<div>` / `<ul>` /
+    // `<program>` children), where the live BS orphan-brace counter is
+    // the exact oracle.
+    //
+    // The counter is mutated ONLY by handleOrphanBrace — it recognizes a
+    // bare `{` / `}` and advances over it as text. A `${...}` (or any
+    // sigil) is a SIGIL, not a bare brace: its `{` never reaches this
+    // path (recognizeContextEntryAt consumes the two-char sigil and the
+    // inner `}` is handled by the sigil context's own dispatcher), so the
+    // counter is unaffected by a properly-nested `${}`.
+    const orphanActive = !isCodeDefault(currentBodyMode(ctx));
+    if (orphanActive && handleOrphanBrace(run, cursor, ctx)) return;
+    const inOrphan = orphanActive && markupOrphanBraceDepth(ctx) > 0;
+
     // Structural comment recognition FIRST — a `//` / `<!-- -->` sequence
     // is a comment in `.TopLevel` (a code-default body per §40.8 / a
-    // markup-context construct), not text.
-    if (emitComment(run, cursor, ctx)) return;
+    // markup-context construct), not text. SUPPRESSED inside an
+    // orphan-brace region (the live BS gates `//` on `orphanBraceDepth`).
+    if (!inOrphan && emitComment(run, cursor, ctx)) return;
 
     // A markup closer (`</>` / `</name>`) — pair it with its open
     // TagFrame (the tag-tree pairing). Recognized structurally — a closed
-    // set (no bare-`/` `looksLikeCloser` guess).
-    if (handleCloser(run, cursor, ctx)) return;
+    // set (no bare-`/` `looksLikeCloser` guess). SUPPRESSED inside an
+    // orphan-brace region — a `</>` there pairs with a `<tag>` opener
+    // that is itself being treated as text (live BS L1530 / L1551).
+    if (!inOrphan && handleCloser(run, cursor, ctx)) return;
+
+    // Inside an orphan-brace region every context-entry boundary (a `<`
+    // markup/state opener, a `${ ?{ #{ ...` sigil) is raw text — skip the
+    // recognizer entirely and fall through to the text-run accumulation.
+    if (inOrphan) {
+        beginTextRun(run, cursor);
+        advance(cursor, 1);
+        return;
+    }
 
     const recognized = recognizeContextEntryAt(cursor);
 
