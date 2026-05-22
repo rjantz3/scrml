@@ -89,6 +89,23 @@ ${
     export const STATE_FORM_KEYWORDS = ["db", "schema"]
 
     // -----------------------------------------------------------------
+    // ENGINE_FORM_KEYWORDS — the built-in scrml lifecycle keywords whose
+    // `<name>` element the native parser routes to an `engine-decl` ASTNode
+    // (via `collect-hoisted` `isEngineBlock` + `synthEngineDecl`), NOT to a
+    // `state` node. The live `_STATE_FORM_LIFECYCLE` set DOES include
+    // `engine`/`machine` — but only because the live `buildBlock` routes a
+    // `state`-classified `engine`/`machine` block through `case "state"`
+    // and then into engine-specific handling. The native parser has a
+    // DEDICATED `isEngineBlock` branch in `parse-file` `mapOneBlock`, so
+    // `isStateBlock` MUST NOT claim an `engine`/`machine` opener — otherwise
+    // the `isStateBlock` check (evaluated BEFORE `isEngineBlock`) swallows
+    // the engine and `synthStateNode` emits a spurious `state` node where
+    // the live pipeline emits `engine-decl` (M5 P4-1 — `< engine name=...>`
+    // space-form openers carry `TagKind.StateOpener`).
+    // -----------------------------------------------------------------
+    export const ENGINE_FORM_KEYWORDS = ["engine", "machine"]
+
+    // -----------------------------------------------------------------
     // isStateBlock — CALCULATION (pure predicate). True iff `block` is a
     // Markup block that synthesizes a live `state` / `state-constructor-def`
     // ASTNode. Two recognition paths, both depth-agnostic:
@@ -99,12 +116,18 @@ ${
     //      `_STATE_FORM_LIFECYCLE` name-set normalization, which catches a
     //      `<db>` regardless of opener form (so a nested `<db>` inside a
     //      `<program>` body becomes a `state` node, not `markup`).
+    // ENGINE EXCLUSION (M5 P4-1): an `engine`/`machine`-named block is NEVER
+    // a state block on EITHER path — it routes to `engine-decl` via
+    // `isEngineBlock`. The space-form `< engine ...>` opener carries
+    // `TagKind.StateOpener`, so path 1 would otherwise over-match it; the
+    // exclusion is checked FIRST, before either recognition path.
     // The read-side discriminator the M5 swap keys state-vs-markup
     // routing off.
     // -----------------------------------------------------------------
     export fn isStateBlock(block) {
         if (block is not) return false
         if (block.kind != "Markup") return false
+        if (ENGINE_FORM_KEYWORDS.includes(block.name)) return false
         if (block.tagKind == "StateOpener") return true
         return STATE_FORM_KEYWORDS.includes(block.name)
     }

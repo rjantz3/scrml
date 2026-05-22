@@ -98,6 +98,24 @@ export function shapeStateBlock(block) {
 export const STATE_FORM_KEYWORDS = Object.freeze(["db", "schema"]);
 
 // =============================================================================
+// ENGINE_FORM_KEYWORDS — the built-in scrml lifecycle keywords whose `<name>`
+// element the native parser routes to an `engine-decl` ASTNode (via
+// `collect-hoisted.js` `isEngineBlock` + `synthEngineDecl`), NOT to a `state`
+// node. The live builder's `_STATE_FORM_LIFECYCLE` set DOES include
+// `engine`/`machine` — but only because the live `buildBlock` routes a
+// `state`-classified `engine`/`machine` block through `case "state"` and then
+// into engine-specific handling. The native parser has a DEDICATED
+// `isEngineBlock` branch in `parse-file.js` `mapOneBlock`, so `isStateBlock`
+// MUST NOT claim an `engine`/`machine` opener — otherwise the `isStateBlock`
+// check (which `mapOneBlock` evaluates BEFORE `isEngineBlock`) swallows the
+// engine and `synthStateNode` produces a spurious `state` node where the live
+// pipeline produces `engine-decl` (the M5 `DIFF-deep-seq` D-misc `engine`-vs-
+// `state` over-match — `< engine name=...>` space-form openers carry
+// `TagKind.StateOpener` and were caught by the StateOpener recognition path).
+// =============================================================================
+export const ENGINE_FORM_KEYWORDS = Object.freeze(["engine", "machine"]);
+
+// =============================================================================
 // isStateBlock — calculation (pure predicate). True iff `block` is a Markup
 // block that synthesizes a live `state` / `state-constructor-def` ASTNode.
 // Two recognition paths, both depth-agnostic (a nested `<db>` inside a
@@ -108,14 +126,23 @@ export const STATE_FORM_KEYWORDS = Object.freeze(["db", "schema"]);
 //      no-space `<db ...>` form. The live builder's `_STATE_FORM_LIFECYCLE`
 //      name-set normalization (ast-builder.js `buildBlock`) routes these to
 //      a `state` node regardless of opener form; `STATE_FORM_KEYWORDS`
-//      mirrors that. (`engine` / `machine` are NOT here — they route to
-//      `engine-decl` via `isEngineBlock`.)
+//      mirrors that.
+// ENGINE EXCLUSION (M5 P4-1): an `engine`/`machine`-named block is NEVER a
+// state block on EITHER path — it routes to `engine-decl` via `isEngineBlock`.
+// The space-form `< engine ...>` opener carries `TagKind.StateOpener`, so the
+// StateOpener path (1) would otherwise over-match it; the exclusion is checked
+// FIRST, before either recognition path, so both the space-form and the
+// no-space `<engine>` form defer to the dedicated engine branch.
 // This is the read-side discriminator the M5 swap keys state-vs-markup
 // routing off.
 // =============================================================================
 export function isStateBlock(block) {
     if (block === undefined || block === null) return false;
     if (block.kind !== "Markup") return false;
+    // Engine/machine openers are an engine-decl, not a state node — exclude
+    // them on BOTH recognition paths (the space-form `< engine>` carries
+    // TagKind.StateOpener and would otherwise be claimed by path 1 below).
+    if (ENGINE_FORM_KEYWORDS.includes(block.name)) return false;
     if (block.tagKind === "StateOpener") return true;
     return STATE_FORM_KEYWORDS.includes(block.name);
 }

@@ -5309,6 +5309,99 @@ describe("F7.a — `<db>` / `<schema>` lifecycle-keyword state recognition", () 
     });
 });
 
+// =============================================================================
+// M5 P4-1 — engine-vs-state recognition correctness (back-half regression).
+//
+// The front-half synthStateNode unit added the `TagKind.StateOpener` path to
+// `isStateBlock`: a `< Ident ...>` space-after-`<` opener is a state block.
+// That path indiscriminately caught `< engine ...>` / `< machine ...>`
+// space-form openers — which carry `TagKind.StateOpener` exactly like
+// `< db>` — and `mapOneBlock` (which checks `isStateBlock` BEFORE
+// `isEngineBlock`) then routed them to `synthStateNode`, emitting a spurious
+// `state` node where the live pipeline emits `engine-decl`
+// (M5 `DIFF-deep-seq` D-misc `rust-dev-debate-dashboard`: deep-div was
+// `i=11 live=engine-decl native=state`).
+//
+// The P4-1 fix: `ENGINE_FORM_KEYWORDS` (`engine`/`machine`) is excluded in
+// `isStateBlock` BEFORE either recognition path, so engine/machine openers —
+// in EITHER opener form — defer to the dedicated `isEngineBlock` branch.
+// These tests pin the regression closed AND guard the front-half `< db>` /
+// `<db>` flips against over-correction.
+// =============================================================================
+describe("F7.a — M5 P4-1 engine-vs-state recognition correctness", () => {
+    test("REGRESSION — a space-form `< engine>` (TagKind.StateOpener) is NOT a state block", () => {
+        // The space after `<` makes `tagKindFor` return StateOpener — the same
+        // tagKind a `< db>` carries. Without the ENGINE_FORM_KEYWORDS exclusion
+        // the StateOpener path would over-match this and emit a spurious state.
+        const blocks = parseMarkup(`< engine for=Cart></engine>`);
+        const engine = blocks.find(b => b.kind === "Markup" && b.name === "engine");
+        expect(engine).toBeDefined();
+        expect(engine.tagKind).toBe("StateOpener");
+        expect(isStateBlock(engine)).toBe(false);
+    });
+
+    test("REGRESSION — a space-form `< machine>` (TagKind.StateOpener) is NOT a state block", () => {
+        const blocks = parseMarkup(`< machine for=Door></machine>`);
+        const machine = blocks.find(b => b.kind === "Markup" && b.name === "machine");
+        expect(machine).toBeDefined();
+        expect(machine.tagKind).toBe("StateOpener");
+        expect(isStateBlock(machine)).toBe(false);
+    });
+
+    test("a no-space `<engine>` (TagKind.ScrmlStructural) is also NOT a state block", () => {
+        // The exclusion is opener-form-agnostic — it fires on BOTH the space
+        // form (StateOpener) and the no-space form. `engine` is in the §4.15
+        // structural-element registry, so no-space `<engine>` is classified
+        // ScrmlStructural; the name-scoped exclusion still rejects it.
+        const blocks = parseMarkup(`<engine for=Cart></engine>`);
+        const engine = blocks.find(b => b.kind === "Markup" && b.name === "engine");
+        expect(engine.tagKind).toBe("ScrmlStructural");
+        expect(isStateBlock(engine)).toBe(false);
+    });
+
+    test("GUARD — a space-form `< db>` (TagKind.StateOpener) IS still a state block", () => {
+        // The front-half flip: the engine exclusion must NOT regress `< db>`.
+        const blocks = parseMarkup(`< db src="x.db" tables="t"></db>`);
+        const db = blocks.find(b => b.kind === "Markup" && b.name === "db");
+        expect(db.tagKind).toBe("StateOpener");
+        expect(isStateBlock(db)).toBe(true);
+        expect(db.stateNodeKind).toBe("state");
+        expect(db.stateType).toBe("db");
+    });
+
+    test("GUARD — a no-space `<db>` / `<schema>` IS still a state block", () => {
+        // The 27-file no-space-`<db>` front-half flip must not regress.
+        const dbBlocks = parseMarkup(`<db src="x.db"></db>`);
+        const db = dbBlocks.find(b => b.kind === "Markup" && b.name === "db");
+        expect(isStateBlock(db)).toBe(true);
+        const schemaBlocks = parseMarkup(`<schema></schema>`);
+        const schema = schemaBlocks.find(b => b.kind === "Markup" && b.name === "schema");
+        expect(isStateBlock(schema)).toBe(true);
+    });
+
+    test("GUARD — a space-form user state-constructor-def is still a state block", () => {
+        // `< Counter count(number)>` — a same-file user state TYPE declaration.
+        // The exclusion is name-scoped to engine/machine; a PascalCase user
+        // state opener is unaffected.
+        const blocks = parseMarkup(`< Counter count(number)>`);
+        const counter = blocks.find(b => b.kind === "Markup" && b.name === "Counter");
+        expect(counter).toBeDefined();
+        expect(counter.tagKind).toBe("StateOpener");
+        expect(isStateBlock(counter)).toBe(true);
+    });
+
+    test("an `< engine>` nested inside a `<program>` body is NOT a state block", () => {
+        // Depth-agnostic — the exclusion fires on a nested engine too.
+        const blocks = parseMarkup(`<program>\n< engine for=Cart></engine>\n</program>`);
+        const program = blocks.find(b => b.kind === "Markup" && b.name === "program");
+        expect(program).toBeDefined();
+        const engine = (program.children || []).find(
+            c => c.kind === "Markup" && c.name === "engine");
+        expect(engine).toBeDefined();
+        expect(isStateBlock(engine)).toBe(false);
+    });
+});
+
 describe("F7.b — SQL chained-call grammar (shapeSqlBlock — §8.9)", () => {
     test("a `?{...}` block gets query + an empty chain when no chain trails", () => {
         const blocks = parseMarkup("?{ `SELECT 1` }");
