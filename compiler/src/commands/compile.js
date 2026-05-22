@@ -56,11 +56,11 @@ Options:
   --convert-legacy-css    Convert <style> blocks to #{...}
   --mode <mode>           Output mode: browser (default) or library
   --self-host             Use compiled scrml modules (requires build-self-host.js)
-  --parser=scrml-native   Opt-in native-parser observability shadow (M5.1).
-                          The native parser runs alongside the live pipeline
-                          and surfaces an I-PARSER-NATIVE-SHADOW info diagnostic
-                          per compile. Downstream routing is M5-FULL scope (see
-                          compiler/native-parser/M5-ast-bridge-scoping.md).
+  --parser=scrml-native   Opt-in native-parser routing (M5-swap C2). When set,
+                          the per-file parse is driven by the native parser
+                          (nativeParseFile) instead of the live BS+TAB path;
+                          downstream stages run unchanged. Surfaces an
+                          I-PARSER-NATIVE-SHADOW info diagnostic per compile.
   --help, -h              Show this message
 
 Examples:
@@ -420,11 +420,11 @@ function runOnce(opts, selfHostModules = null) {
       // added output for the perf-focused invocation.
       log: (verbose || debugPerf) ? (msg) => console.log(c.dim(msg)) : () => {},
       selfHostModules,
-      // M5.1 (S114) — `--parser=scrml-native` value forwarded as an
-      // observability flag. At this milestone compileScrml emits an
-      // I-PARSER-NATIVE-SHADOW info diagnostic when set; downstream stages
-      // are NOT routed through the native parser (the bridge work was
-      // cost-deferred at M5.1). See compiler/native-parser/M5-ast-bridge-scoping.md.
+      // M5-swap C2 (v0.7) — `--parser=scrml-native` value forwarded. When set,
+      // compileScrml ROUTES the per-file parse through the native parser
+      // (nativeParseFile) instead of the live BS+TAB path and emits an
+      // I-PARSER-NATIVE-SHADOW routing-confirmation info diagnostic. The flag
+      // is strictly opt-in; the live pipeline is the unchanged default.
       parser,
     });
   } catch (err) {

@@ -12,6 +12,7 @@ import { resolve, extname, dirname, basename, join, relative } from "path";
 import { fileURLToPath } from "url";
 import { splitBlocks } from "./block-splitter.js";
 import { buildAST } from "./ast-builder.js";
+import { nativeParseFile } from "../native-parser/parse-file.js";
 import { computePGOFlags } from "./compute-pgo-flags.ts";
 import { computeProgramConfig } from "./compute-program-config.ts";
 import { runCE } from "./component-expander.ts";
@@ -467,16 +468,17 @@ export function compileScrml(options = {}) {
      */
     compilerSettings = {},
     /**
-     * M5.1 (S114) — `--parser=scrml-native` observability flag. When set to
-     * "scrml-native", an I-PARSER-NATIVE-SHADOW info diagnostic is appended
-     * to result.warnings noting the opt-in. The live BS+TAB+BPP pipeline
-     * still runs canonically; the native parser is NOT routed downstream at
-     * this milestone (the downstream-bridge work was cost-deferred at M5.1
-     * close — see compiler/native-parser/M5-ast-bridge-scoping.md). The
-     * flag is a no-op when null / undefined / any other value; only the
-     * literal "scrml-native" string fires the diagnostic. This shape lets
-     * the future M5-FULL (or MD-ladder) dispatch swap in real routing
-     * behind the same flag value without a second CLI plumbing pass.
+     * M5-swap C2 (v0.7) — `--parser=scrml-native` ROUTING flag. When set to
+     * the literal "scrml-native", the per-file parse is ROUTED through the
+     * native parser's `nativeParseFile` (compiler/native-parser/parse-file.js)
+     * instead of the live BS+TAB (`splitBlocks` + `buildAST`) path; since
+     * `nativeParseFile` returns the same `{ filePath, ast, errors }` shape,
+     * every downstream stage runs unchanged and pipeline-agnostic. An
+     * I-PARSER-NATIVE-SHADOW routing-confirmation info diagnostic is appended
+     * to result.warnings. The flag is STRICTLY OPT-IN — a no-op when null /
+     * undefined / any other value, in which case the live BS+TAB pipeline is
+     * the unchanged default. Pre-C2 (M5.1) the flag was observability-only;
+     * C2 swapped the no-op for real routing behind the same flag value.
      */
     parser = null,
   } = options;
@@ -708,9 +710,30 @@ export function compileScrml(options = {}) {
   // Stage 3: TAB (per-file)
   // When selfHostModules.buildAST is provided, use it instead of the JS original.
   // The self-hosted buildAST bundles its own tokenizer, so no tokenizer override is needed.
-  const _buildAST = selfHostModules?.buildAST
-    ? (bsResult) => selfHostModules.buildAST(bsResult)
-    : (bsResult) => buildAST(bsResult, selfHostModules?.tokenizer ?? null);
+  //
+  // M5-swap C2 (v0.7) — `--parser=scrml-native` ROUTING. When the opt-in flag
+  // is set, the per-file parse is driven by the native parser's
+  // `nativeParseFile` (compiler/native-parser/parse-file.js) INSTEAD of the
+  // live BS+TAB (`splitBlocks` + `buildAST`) path. `nativeParseFile` returns
+  // the SAME `{ filePath, ast: FileAST, errors }` shape `buildAST` returns, so
+  // it drops into `tabResults` and every downstream stage (PRECG / GCP1 /
+  // GCP3 / NR / RI / AG / CG) runs unchanged and pipeline-agnostic.
+  //   - BS still runs above (its `bsResults` feed the GCP1 raw-block-tree
+  //     check pass via `bsByTab`); the native path simply does not CONSUME
+  //     the BS block-stream — it re-parses from the file source directly.
+  //   - The flag is STRICTLY OPT-IN. `parser` defaults to `null`; for every
+  //     caller that does not pass "scrml-native" the live BS+TAB path is the
+  //     untouched default, which bounds this routing's blast radius.
+  //   - `nativeParseFile` needs `(filePath, source)`; both are recoverable
+  //     from the paired `bsResult` (`bsResult.filePath`) + `sourceByFile`.
+  const useNativeParser = parser === "scrml-native";
+  const _buildAST = useNativeParser
+    ? (bsResult) => nativeParseFile(
+        bsResult.filePath,
+        sourceByFile.get(bsResult.filePath) ?? "")
+    : selfHostModules?.buildAST
+      ? (bsResult) => selfHostModules.buildAST(bsResult)
+      : (bsResult) => buildAST(bsResult, selfHostModules?.tokenizer ?? null);
   const tabResults = [];
   // Keep bsResult alongside tabResult for the Gauntlet Phase 1 check pass
   // (some diagnostics need to inspect the raw block tree before TAB drops
@@ -1823,27 +1846,25 @@ export function compileScrml(options = {}) {
     }
   }
 
-  // M5.1 (S114) — `--parser=scrml-native` observability flag. When set, emit
-  // ONE I-PARSER-NATIVE-SHADOW info diagnostic per compile noting the opt-in
-  // and the milestone boundary. The native parser is NOT routed downstream
-  // at this milestone; the flag is observability-only. The downstream-bridge
-  // work that gates the full M5 pipeline swap (the MD ladder per
-  // compiler/native-parser/M5-ast-bridge-scoping.md) is a future dispatch.
-  // The diagnostic's presence in result.warnings is the evidence that the
-  // flag was recognized + threaded; future M5-FULL work swaps the no-op for
-  // real native-parser routing behind the same flag value.
+  // M5-swap C2 (v0.7) — `--parser=scrml-native` ROUTING CONFIRMATION. When the
+  // opt-in flag is set, emit ONE I-PARSER-NATIVE-SHADOW info diagnostic per
+  // compile confirming the per-file parse was ROUTED through the native
+  // parser's `nativeParseFile` (the TAB-stage `_buildAST` override above).
+  // Pre-C2 (M5.1) this flag was observability-only — the live BS+TAB pipeline
+  // still produced the FileAST; C2 swapped the no-op for real routing. The
+  // diagnostic's presence in result.warnings is the evidence the native
+  // pipeline produced the downstream FileAST for this compile.
   if (parser === "scrml-native") {
     allErrors.push({
       code: "I-PARSER-NATIVE-SHADOW",
       message:
         "I-PARSER-NATIVE-SHADOW: --parser=scrml-native flag recognized. " +
-        "At this milestone the flag is observability-only — the live " +
-        "BS+TAB+BPP pipeline still produces the FileAST consumed by " +
-        "downstream stages. The downstream-bridge work that gates the " +
-        "full pipeline swap was cost-deferred at M5.1 close (see " +
-        "compiler/native-parser/M5-ast-bridge-scoping.md). This " +
-        "diagnostic confirms the flag is wired end-to-end and is the " +
-        "stable surface a future MD-ladder dispatch lights up.",
+        "The per-file parse was ROUTED through the native parser " +
+        "(nativeParseFile, compiler/native-parser/parse-file.js) instead " +
+        "of the live BS+TAB path; the native parser produced the FileAST " +
+        "consumed by every downstream stage for this compile. The flag is " +
+        "strictly opt-in — callers that do not pass it use the unchanged " +
+        "live pipeline.",
       severity: "info",
       stage: "PARSER-FLAG",
       filePath: inputFiles[0] || "",
