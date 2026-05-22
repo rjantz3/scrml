@@ -655,6 +655,21 @@ export function parseStatement(ctx) {
     // implementation (parse-expr's parseUnary / parseYieldExpr). NO `KwAwait`
     // / `KwYield` branch is needed — parseExprStatement covers them.
 
+    // P5-11 — a V5-strict structural state-decl: `<NAME ...> = expr` (SPEC
+    // §6.2 Shape 1 / §35.2 typed). A `<` lexes as `LessThan`; without this
+    // arm a `<NAME> = expr` line falls through to parseExprStatement and
+    // parse-expr's `parseMarkupValue` over-consumes the rest of the `${...}`
+    // body as one markup blob. `structuralStateDeclLeadFollows` confirms the
+    // `<` IDENT opener whose `>` (or fused `>=`) is followed by a `=` / `:`
+    // decl signal — it declines for an ordinary markup-as-value `<div>...</>`
+    // (a markup tag's `>` is followed by content, not a decl signal), which
+    // then flows to parseExprStatement. This sits BEFORE the expression-
+    // statement fallthrough — the live oracle's `parseLogicBody` likewise
+    // dispatches `tryParseStructuralDecl` ahead of its bare-expr default.
+    if (kind === TokenKind.LessThan && structuralStateDeclLeadFollows(cursor)) {
+        return parseStructuralStateDecl(ctx);
+    }
+
     // Everything else is an expression statement.
     return parseExprStatement(ctx);
 }
@@ -2765,6 +2780,224 @@ export function parseTildeDecl(ctx) {
     const endE = (init === undefined || init === null) ? kw.span.end : nodeEnd(init);
     const span = makeSpan(kw.span.start, endE, kw.span.line, kw.span.col);
     return makeTildeDecl(name, init, span);
+}
+
+// =============================================================================
+// V5-strict structural state-decl at statement position — P5-11.
+//
+// SPEC §6.2 — inside a `${...}` logic body a `<NAME ...> = expr` line declares
+// a reactive state cell (Shape 1), `<NAME>: T = expr` the typed form (§35.2),
+// and `<NAME>=expr` the no-whitespace fused form. The live oracle recognizes
+// this at statement position via `parseLogicBody`'s `tryParseStructuralDecl`
+// (ast-builder.js:3696) — a `<` IDENT lead whose opener `>` (or fused `>=`) is
+// followed by a `=` (not `==` / `=>`) or a `:` decl signal.
+//
+// Without statement-position recognition the `<` lexes as `LessThan`, the
+// statement falls through to `parseExprStatement`, and `parseMarkupValue`
+// (parse-expr.js) — entered for a `<` IDENT — over-consumes the whole rest of
+// the body as one markup blob until the next `</>`. A following
+// `const Card = <div>...</>` component-def line is then swallowed into that
+// blob and never parses as its own `VarDecl` — so `collect-hoisted.js` never
+// registers the component (the P5-11 `components live=1 native=0` gap on the
+// `phase4-component-reactive-prop-056` / `-jsx-brace-ghost-057` corpus files).
+//
+// `structuralStateDeclLeadFollows` is the token-cursor analogue of the live
+// `scanStructuralDeclLookahead` recognizer (ast-builder.js:4080) and the
+// markup-layer's source-string `isStateDeclOpenerAt` (parse-markup.js:266):
+// peek past the `<` IDENT opener body — balancing `()` / `{}` / `[]` so an
+// attribute value containing `>` does not end the scan early — to the opener's
+// top-level `>` (or fused `>=`), then confirm the `=` / `:` decl signal.
+
+// structuralStateDeclLeadFollows — calculation (predicate, non-mutating
+// cursor peek). True when the cursor is at a `<` IDENT structural state-decl
+// opener. Declines (false) for an ordinary markup-as-value `<div>...</>` — a
+// markup tag's `>` is followed by tag content, not a `=` / `:` decl signal.
+export function structuralStateDeclLeadFollows(cursor) {
+    if (currentKind(cursor) !== TokenKind.LessThan) {
+        return false;
+    }
+    // peek(1) must be the cell-name identifier. A bare `<` followed by
+    // anything else (`</` closer, `<` NUMBER comparison) is not a decl opener.
+    if (peekKind(cursor, 1) !== TokenKind.Ident) {
+        return false;
+    }
+    // Scan the opener's attribute region from peek(2) to its top-level `>`.
+    // `()` / `{}` / `[]` are depth-tracked so a `>` inside an attribute value
+    // (`<x len(>=2)> = 0`, `<x props={a > b}> = 0`) is not mistaken for the
+    // opener's close. A bounded scan — a stray unbalanced `<` IDENT with no
+    // closing `>` declines rather than running away.
+    let parenDepth = 0;
+    let braceDepth = 0;
+    let bracketDepth = 0;
+    let scanIdx = 2;
+    while (true) {
+        const t = peek(cursor, scanIdx);
+        if (t === undefined || t === null || t.kind === TokenKind.EOF) {
+            return false; // ran off the end with no `>` — not a decl opener
+        }
+        const topLevel = (parenDepth === 0 && braceDepth === 0 && bracketDepth === 0);
+        if (topLevel) {
+            // Fused `>=` OPERATOR — the no-whitespace `<count>=0` form. Only
+            // valid with NO attribute region (scanIdx === 2): a fused `>=`
+            // after an attribute is a comparison, not a decl closer. The
+            // fused token IS both the opener close and the decl signal.
+            if (t.kind === TokenKind.GreaterEqual) {
+                return scanIdx === 2;
+            }
+            // Top-level `>` — the opener close. The token AFTER it is the
+            // decl signal: `=` (Shape 1 / typed RHS) or `:` (§35.2 typed).
+            if (t.kind === TokenKind.GreaterThan) {
+                const signal = peek(cursor, scanIdx + 1);
+                if (signal === undefined || signal === null) {
+                    return false;
+                }
+                // `=` — the Shape-1 / typed-RHS decl signal. `Assign` is
+                // exactly `=`; `==` / `===` lex as distinct Equal-family
+                // tokens and `=>` as `Arrow`, so a bare `Assign` here is
+                // unambiguously a decl signal, never a comparison / arrow.
+                if (signal.kind === TokenKind.Assign) {
+                    return true;
+                }
+                // `:` — the §35.2 typed-state-decl signal (`<x>: T = e`).
+                if (signal.kind === TokenKind.Colon) {
+                    return true;
+                }
+                // `>` followed by anything else is a markup tag close — the
+                // body / children follow. Not a state-decl.
+                return false;
+            }
+        }
+        // Depth tracking — `()` / `{}` / `[]` balance.
+        if (t.kind === TokenKind.LParen) parenDepth = parenDepth + 1;
+        else if (t.kind === TokenKind.RParen && parenDepth > 0) parenDepth = parenDepth - 1;
+        else if (t.kind === TokenKind.LBrace) braceDepth = braceDepth + 1;
+        else if (t.kind === TokenKind.RBrace && braceDepth > 0) braceDepth = braceDepth - 1;
+        else if (t.kind === TokenKind.LBracket) bracketDepth = bracketDepth + 1;
+        else if (t.kind === TokenKind.RBracket && bracketDepth > 0) bracketDepth = bracketDepth - 1;
+        scanIdx = scanIdx + 1;
+    }
+}
+
+// --- parseStructuralStateDecl — a `<NAME ...> = expr` structural state-decl ---
+//   structural-state-decl ::= '<' IDENT attr-region? ('>' | '>=') typeAnn? '=' expr
+//   typeAnn               ::= ':' <type-expression>     (§35.2)
+// SPEC §6.2. The caller (`parseStatement`) has confirmed the opener shape via
+// `structuralStateDeclLeadFollows`. The opener's attribute region (validators
+// / `default=` / `debounced=` / `server`) is consumed verbatim as raw token
+// text — its precise decomposition is the live ast-builder's A1a concern, not
+// the native parser's M5-swap remit; what matters here is consuming the decl
+// EXACTLY so a following statement (a `const Card = <markup>` component-def)
+// parses clean. The produced node carries `kind: "StateDecl"` — a logic-body
+// LogicStatement the canary does not recurse into; `translate-stmt.js` drops
+// it via its defensive `default` arm (state-decl translation is Tier A scope,
+// per the translate-stmt header). Mirrors the live `state-decl` shape.
+export function parseStructuralStateDecl(ctx) {
+    const cursor = ctx.cursor;
+    const open = advance(cursor);   // consume `<`
+
+    // The cell name — `structuralStateDeclLeadFollows` confirmed an Ident.
+    let name = "";
+    if (currentKind(cursor) === TokenKind.Ident) {
+        name = advance(cursor).name;
+    } else {
+        recordError(ctx, "E-STMT-STATE-DECL-NAME",
+            "expected a name after '<' in a structural state declaration",
+            spanHere(ctx));
+    }
+
+    // Consume the opener's attribute region up to its top-level `>` (or fused
+    // `>=`). The lead predicate already proved a closer exists — the same
+    // `()` / `{}` / `[]` balancing keeps an attribute-value `>` from ending
+    // the consume early. A fused `>=` is BOTH the close and the `=` signal.
+    let fusedGtEq = false;
+    {
+        let parenDepth = 0;
+        let braceDepth = 0;
+        let bracketDepth = 0;
+        while (atEnd(cursor) === false) {
+            const k = currentKind(cursor);
+            const topLevel = (parenDepth === 0 && braceDepth === 0 && bracketDepth === 0);
+            if (topLevel && k === TokenKind.GreaterEqual) {
+                advance(cursor);   // consume the fused `>=` (close + `=` signal)
+                fusedGtEq = true;
+                break;
+            }
+            if (topLevel && k === TokenKind.GreaterThan) {
+                advance(cursor);   // consume the opener close `>`
+                break;
+            }
+            if (k === TokenKind.LParen) parenDepth = parenDepth + 1;
+            else if (k === TokenKind.RParen && parenDepth > 0) parenDepth = parenDepth - 1;
+            else if (k === TokenKind.LBrace) braceDepth = braceDepth + 1;
+            else if (k === TokenKind.RBrace && braceDepth > 0) braceDepth = braceDepth - 1;
+            else if (k === TokenKind.LBracket) bracketDepth = bracketDepth + 1;
+            else if (k === TokenKind.RBracket && bracketDepth > 0) bracketDepth = bracketDepth - 1;
+            advance(cursor);
+        }
+    }
+
+    // §35.2 typed form — a `:` after the opener `>` introduces a type
+    // annotation that runs to the `=`. Consume the annotation tokens raw
+    // (`<type-expression>` decomposition is the type-system's concern).
+    let typeAnnotation = "";
+    if (fusedGtEq === false && currentKind(cursor) === TokenKind.Colon) {
+        advance(cursor);   // consume `:`
+        const annParts = [];
+        let parenDepth = 0;
+        let braceDepth = 0;
+        let bracketDepth = 0;
+        while (atEnd(cursor) === false) {
+            const k = currentKind(cursor);
+            const topLevel = (parenDepth === 0 && braceDepth === 0 && bracketDepth === 0);
+            if (topLevel && k === TokenKind.Assign) {
+                break;   // the `=` ends the annotation; the RHS follows
+            }
+            if (k === TokenKind.LParen) parenDepth = parenDepth + 1;
+            else if (k === TokenKind.RParen && parenDepth > 0) parenDepth = parenDepth - 1;
+            else if (k === TokenKind.LBrace) braceDepth = braceDepth + 1;
+            else if (k === TokenKind.RBrace && braceDepth > 0) braceDepth = braceDepth - 1;
+            else if (k === TokenKind.LBracket) bracketDepth = bracketDepth + 1;
+            else if (k === TokenKind.RBracket && bracketDepth > 0) bracketDepth = bracketDepth - 1;
+            const annTok = advance(cursor);
+            annParts.push(annTok.text === undefined || annTok.text === null ? "" : annTok.text);
+        }
+        typeAnnotation = annParts.join(" ");
+    }
+
+    // The initializer. The whitespace form has its `=` still at the cursor;
+    // the fused `>=` form already consumed its `=` signal. A missing `=`
+    // records a diagnostic and recovers (the node is still emitted).
+    let init = null;
+    if (fusedGtEq === true) {
+        const prior = enterMode(ctx, ParseMode.InExpression);
+        init = parseAssignmentLevelExpr(ctx);
+        exitMode(ctx, prior);
+        reenterBlockStubs(init);
+    } else if (currentKind(cursor) === TokenKind.Assign) {
+        advance(cursor);   // consume `=`
+        const prior = enterMode(ctx, ParseMode.InExpression);
+        init = parseAssignmentLevelExpr(ctx);
+        exitMode(ctx, prior);
+        reenterBlockStubs(init);
+    } else {
+        recordError(ctx, "E-STMT-STATE-DECL-INIT",
+            "a structural state declaration must have an initializer ('<name> = expr')",
+            spanHere(ctx));
+    }
+
+    const prevTok = lastTokenBefore(ctx);
+    consumeSemicolon(ctx, prevTok);
+
+    const endE = (init === undefined || init === null) ? open.span.end : nodeEnd(init);
+    const span = makeSpan(open.span.start, endE, open.span.line, open.span.col);
+    return {
+        kind: "StateDecl",
+        name,
+        typeAnnotation,
+        structuralForm: true,
+        init,
+        span,
+    };
 }
 
 // =============================================================================
