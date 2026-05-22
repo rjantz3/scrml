@@ -8,16 +8,18 @@
 // route-inference / dependency-graph / auth-graph / codegen).
 //
 // THE CONTRACT — parity with the live pipeline's `collectHoisted`
-// (compiler/src/ast-builder.js ~L12132 + the `hasProgramRoot` computation
-// ~L12296). This file's behavioral spec is "the native walker collects the
-// same file-level surface the live `buildAST` exposes on its FileAST" for
-// the surfaces the native parser PRODUCES at v0.5:
-//   - imports / exports — scanned from LogicEscape Stmt[] bodies;
+// (compiler/src/ast-builder.js ~L11903 + the `hasProgramRoot` computation
+// ~L11963). This file's behavioral spec is "the native walker collects the
+// same file-level surface the live `buildAST` exposes on its FileAST":
+//   - imports / exports — scanned from LogicEscape + Meta Stmt[] bodies;
 //   - channelDecls — Markup blocks named "channel";
-//   - hasProgramRoot — a top-level Markup block named "program".
-// typeDecls / components / machineDecls resolve EMPTY at v0.5 (no native
-// engine/type/component BlockKind — those land at v0.6 F7); the walker keeps
-// the slots so the v0.6 swap lights them up without a structural rewrite.
+//   - hasProgramRoot — a top-level Markup block named "program";
+//   - machineDecls — A3 synthesizes a 14-field EngineDeclNode from a native
+//     Markup block named "engine" / "machine" (incl. nested-engine recursion);
+//   - typeDecls — A3 synthesizes a TypeDeclNode from a native TypeDecl Stmt
+//     (`export type` lands in both typeDecls and exports);
+//   - components — A3 synthesizes a ComponentDefNode from a `const Upper =
+//     <markup>` VarDecl.
 //
 // SCOPE NOTE — the native parser is JS-only-plus-markup-seam at v0.5 (MK4).
 // A FULL .scrml file (markup + style + interleaved JS blocks) parses through
@@ -179,16 +181,18 @@ describe("F3 §3 — channelDecls + hasProgramRoot from the markup tree", () => 
 });
 
 // =============================================================================
-// F3 §4 — v0.5 divergence: typeDecls / components / machineDecls always empty.
-// The native parser has no engine/type/component BlockKind at this milestone
-// (M5-divergence-ledger.md). The walker keeps the slots; v0.6 F7 lights them.
+// F3 §4 — A3 (v0.7) declaration synthesis. The three formerly-empty
+// collections — typeDecls / components / machineDecls — are now SYNTHESIZED
+// from the native block-stream. A non-declaration input still resolves them
+// empty (the walker only collects what is genuinely a declaration).
 // =============================================================================
-describe("F3 §4 — typeDecls / components / machineDecls are empty at v0.5", () => {
-  test("the three v0.6-deferred collections resolve empty regardless of input", () => {
+describe("F3 §4 — typeDecls / components / machineDecls empty for non-decl input", () => {
+  test("non-declaration inputs resolve the three collections empty", () => {
     const inputs = [
       "<program><channel /></program>",
       '${\nimport { x } from "./m.js"\n}',
       "<div><span></span></div>",
+      "${\nconst x = 1\nconst y = 2\n}",
     ];
     for (const src of inputs) {
       const r = nativeSurface(src);
@@ -196,6 +200,239 @@ describe("F3 §4 — typeDecls / components / machineDecls are empty at v0.5", (
       expect(r.components).toEqual([]);
       expect(r.machineDecls).toEqual([]);
     }
+  });
+});
+
+// =============================================================================
+// F3 §7 — A3 machineDecls SYNTHESIS. A native `Markup` block named "engine"
+// (or the legacy "machine") is synthesized into a 14-field EngineDeclNode.
+// =============================================================================
+describe("F3 §7 — machineDecls engine synthesis", () => {
+  test("a top-level `<engine for=Type>` synthesizes one engine-decl", () => {
+    const r = nativeSurface("<engine for=DutyStatus></engine>");
+    expect(r.machineDecls.length).toBe(1);
+    const e = r.machineDecls[0];
+    expect(e.kind).toBe("engine-decl");
+    expect(e.governedType).toBe("DutyStatus");
+    // §51.0.C — varName auto-derives lowercase-first-char from the type.
+    expect(e.varName).toBe("dutyStatus");
+    expect(e.engineName).toBe("dutyStatus");
+    expect(e.varNameOverride).toBe(null);
+    expect(typeof e.id).toBe("number");
+  });
+
+  test("`var=NAME` override supersedes the §51.0.C auto-derived varName", () => {
+    const e = nativeSurface("<engine for=Foo var=myFoo></engine>").machineDecls[0];
+    expect(e.varName).toBe("myFoo");
+    expect(e.varNameOverride).toBe("myFoo");
+    expect(e.governedType).toBe("Foo");
+  });
+
+  test("legacy `name=NAME` is the variable name (back-compat)", () => {
+    const e = nativeSurface("<machine for=Foo name=duty></machine>").machineDecls[0];
+    expect(e.varName).toBe("duty");
+    expect(e.varNameOverride).toBe(null);
+  });
+
+  test("`initial=.X` (unquoted dotted) records the variant (dot-stripped)", () => {
+    const e = nativeSurface("<engine for=Foo initial=.OffDuty></engine>").machineDecls[0];
+    expect(e.initialVariant).toBe("OffDuty");
+  });
+
+  test("`initial=\".X\"` (quoted) records the variant (dot-stripped)", () => {
+    const e = nativeSurface('<engine for=Foo initial=".Start"></engine>').machineDecls[0];
+    expect(e.initialVariant).toBe("Start");
+  });
+
+  test("no `initial=` — initialVariant is null", () => {
+    const e = nativeSurface("<engine for=Foo></engine>").machineDecls[0];
+    expect(e.initialVariant).toBe(null);
+  });
+
+  test("the `pinned` bareword sets pinned true", () => {
+    const e = nativeSurface("<engine for=Foo pinned></engine>").machineDecls[0];
+    expect(e.pinned).toBe(true);
+  });
+
+  test("no `pinned` bareword — pinned is false", () => {
+    const e = nativeSurface("<engine for=Foo></engine>").machineDecls[0];
+    expect(e.pinned).toBe(false);
+  });
+
+  test("`derived=@x` records sourceVar with the `@` stripped (§51.9)", () => {
+    const e = nativeSurface("<engine for=Foo derived=@upstream></engine>").machineDecls[0];
+    expect(e.sourceVar).toBe("upstream");
+  });
+
+  test("no `derived=` — sourceVar is null", () => {
+    const e = nativeSurface("<engine for=Foo></engine>").machineDecls[0];
+    expect(e.sourceVar).toBe(null);
+  });
+
+  test("`<machine>` sets legacyMachineKeyword; `<engine>` does not", () => {
+    expect(
+      nativeSurface("<machine for=Foo></machine>").machineDecls[0].legacyMachineKeyword,
+    ).toBe(true);
+    expect(
+      nativeSurface("<engine for=Foo></engine>").machineDecls[0].legacyMachineKeyword,
+    ).toBe(false);
+  });
+
+  test("`< engine` (space after `<`) sets openerHadSpaceAfterLt", () => {
+    expect(
+      nativeSurface("< engine for=Foo></engine>").machineDecls[0].openerHadSpaceAfterLt,
+    ).toBe(true);
+    expect(
+      nativeSurface("<engine for=Foo></engine>").machineDecls[0].openerHadSpaceAfterLt,
+    ).toBe(false);
+  });
+
+  test("bodyChildren is the native children block array (walkable body)", () => {
+    const e = nativeSurface("<engine for=Foo>\n.A => .B\n</engine>").machineDecls[0];
+    expect(Array.isArray(e.bodyChildren)).toBe(true);
+    expect(e.bodyChildren.length).toBeGreaterThan(0);
+  });
+
+  test("rulesRaw is the engine body text when source is threaded through", () => {
+    const src = "<engine for=Foo>\n.A => .B\n</engine>";
+    const r = collectHoisted(parseMarkup(src), { next: 0 }, src);
+    expect(r.machineDecls[0].rulesRaw).toBe(".A => .B");
+  });
+
+  test("rulesRaw is \"\" when no source buffer is passed (documented partial)", () => {
+    const r = collectHoisted(parseMarkup("<engine for=Foo>\n.A => .B\n</engine>"));
+    expect(r.machineDecls[0].rulesRaw).toBe("");
+  });
+
+  test("a NESTED engine in a composite state-child is discovered", () => {
+    // The walker recurses `children`; a nested `<engine>` inside a composite
+    // state-child is found and synthesized as a separate engine-decl.
+    const r = nativeSurface(
+      "<engine for=Outer>\n<Stopped>\n<engine for=Inner></engine>\n</Stopped>\n</engine>",
+    );
+    expect(r.machineDecls.length).toBe(2);
+    const types = r.machineDecls.map((m) => m.governedType).sort();
+    expect(types).toEqual(["Inner", "Outer"]);
+    // The two synthesized engines carry distinct ids.
+    expect(r.machineDecls[0].id).not.toBe(r.machineDecls[1].id);
+  });
+
+  test("an engine nested in `<program>` children is discovered (recursion)", () => {
+    const r = nativeSurface(
+      "<program>\n<engine for=Foo></engine>\n</program>",
+    );
+    expect(r.machineDecls.length).toBe(1);
+    expect(r.hasProgramRoot).toBe(true);
+  });
+
+  test("isExported is false on synthesis (set later by export Form 1 detection)", () => {
+    const e = nativeSurface("<engine for=Foo></engine>").machineDecls[0];
+    expect(e.isExported).toBe(false);
+  });
+});
+
+// =============================================================================
+// F3 §8 — A3 components SYNTHESIS. A `const Upper = <markup>` declaration is
+// synthesized into a ComponentDefNode; a lowercase-initial const is not.
+// =============================================================================
+describe("F3 §8 — components synthesis", () => {
+  test("`const Card = <markup>` synthesizes one component-def", () => {
+    const r = nativeSurface('${\nconst Card = <div class="x">hi</div>\n}');
+    expect(r.components.length).toBe(1);
+    const c = r.components[0];
+    expect(c.kind).toBe("component-def");
+    expect(c.name).toBe("Card");
+    expect(typeof c.id).toBe("number");
+  });
+
+  test("component-def.raw is the markup template source slice", () => {
+    const r = nativeSurface('${\nconst Card = <div class="x">hi</div>\n}');
+    expect(r.components[0].raw).toBe('<div class="x">hi</div>');
+  });
+
+  test("a lowercase-initial const is NOT a component", () => {
+    const r = nativeSurface('${\nconst card = <div>hi</div>\n}');
+    expect(r.components).toEqual([]);
+  });
+
+  test("a non-markup const (numeric init) is NOT a component", () => {
+    const r = nativeSurface("${\nconst Total = 42\n}");
+    expect(r.components).toEqual([]);
+  });
+
+  test("a `let`/`var` markup decl is NOT a component (only `const`)", () => {
+    const r = nativeSurface("${\nlet Card = <div>hi</div>\n}");
+    expect(r.components).toEqual([]);
+  });
+
+  test("multiple component defs across one block are all collected", () => {
+    const r = nativeSurface(
+      "${\nconst Card = <div>a</div>\nconst Panel = <span>b</span>\n}",
+    );
+    expect(r.components.length).toBe(2);
+    expect(r.components.map((c) => c.name).sort()).toEqual(["Card", "Panel"]);
+  });
+});
+
+// =============================================================================
+// F3 §9 — A3 typeDecls SYNTHESIS. A native `TypeDecl` Stmt (B5) is
+// synthesized into a TypeDeclNode. An `export type` lands in BOTH typeDecls
+// (fromExport) and exports — mirroring the live ast-builder dual-push.
+// =============================================================================
+describe("F3 §9 — typeDecls synthesis", () => {
+  test("`type Name : kind = {...}` synthesizes one type-decl", () => {
+    const r = nativeSurface("${\ntype DutyStatus : enum = { OnDuty, OffDuty }\n}");
+    expect(r.typeDecls.length).toBe(1);
+    const t = r.typeDecls[0];
+    expect(t.kind).toBe("type-decl");
+    expect(t.name).toBe("DutyStatus");
+    expect(t.typeKind).toBe("enum");
+    expect(t.raw).toContain("OnDuty");
+    expect(typeof t.id).toBe("number");
+    expect(t.fromExport).toBe(false);
+  });
+
+  test("the `: kind` alias form (no body) synthesizes a type-decl", () => {
+    const r = nativeSurface("${\ntype Alias : number\n}");
+    expect(r.typeDecls.length).toBe(1);
+    expect(r.typeDecls[0].name).toBe("Alias");
+    expect(r.typeDecls[0].typeKind).toBe("number");
+  });
+
+  test("`export type` lands in BOTH typeDecls (fromExport) and exports", () => {
+    const r = nativeSurface('${\nexport type Status : enum = { A, B }\n}');
+    expect(r.typeDecls.length).toBe(1);
+    expect(r.typeDecls[0].name).toBe("Status");
+    expect(r.typeDecls[0].fromExport).toBe(true);
+    // The live ast-builder pushes a type-decl AND an export-decl.
+    expect(r.exports.length).toBe(1);
+    expect(r.exports[0].kind).toBe("Export");
+  });
+
+  test("a plain `export const` does NOT add a type-decl", () => {
+    const r = nativeSurface("${\nexport const x = 1\n}");
+    expect(r.typeDecls).toEqual([]);
+    expect(r.exports.length).toBe(1);
+  });
+
+  test("a type decl inside a `^{...}` Meta block is collected (F8 parsed body)", () => {
+    const r = nativeSurface("^{\ntype MStatus : struct = { x }\n}");
+    expect(r.typeDecls.length).toBe(1);
+    expect(r.typeDecls[0].name).toBe("MStatus");
+    expect(r.typeDecls[0].typeKind).toBe("struct");
+  });
+
+  test("an import inside a Meta block is collected (F8 parsed body)", () => {
+    const r = nativeSurface('^{\nimport { x } from "./m.js"\n}');
+    expect(r.imports.length).toBe(1);
+  });
+
+  test("multiple type decls across one block are all collected", () => {
+    const r = nativeSurface(
+      "${\ntype A : enum = { X }\ntype B : struct = { y }\n}",
+    );
+    expect(r.typeDecls.length).toBe(2);
+    expect(r.typeDecls.map((t) => t.name).sort()).toEqual(["A", "B"]);
   });
 });
 
@@ -227,6 +464,19 @@ describe("F3 §5 — native collectHoisted ↔ live collectHoisted parity (curat
       name: "import + export block",
       src: '${\nimport a from "./a.js"\nexport const x = 1\n}',
     },
+    // A3 — engine / type / component parity rows.
+    {
+      name: "program with one engine",
+      src: "<program>\n<engine for=DutyStatus></engine>\n</program>",
+    },
+    {
+      name: "type decl in a logic block",
+      src: "${\ntype Status : enum = { A, B }\n}",
+    },
+    {
+      name: "component def in a logic block",
+      src: '${\nconst Card = <div>hi</div>\n}',
+    },
   ];
 
   for (const row of PARITY_CORPUS) {
@@ -247,6 +497,14 @@ describe("F3 §5 — native collectHoisted ↔ live collectHoisted parity (curat
       const live = liveSurface(row.src);
       expect(native.imports.length).toBe(live.imports.length);
       expect(native.exports.length).toBe(live.exports.length);
+    });
+
+    test(`[parity] ${row.name} — machineDecls / typeDecls / components count agrees`, () => {
+      const native = nativeSurface(row.src);
+      const live = liveSurface(row.src);
+      expect(native.machineDecls.length).toBe(live.machineDecls.length);
+      expect(native.typeDecls.length).toBe(live.typeDecls.length);
+      expect(native.components.length).toBe(live.components.length);
     });
   }
 });
@@ -285,10 +543,20 @@ describe("F3 §6 — corpus exemplar audit (~20 .scrml files, no-throw + shape)"
       expect(Array.isArray(surface.machineDecls)).toBe(true);
       expect(Array.isArray(surface.channelDecls)).toBe(true);
       expect(typeof surface.hasProgramRoot).toBe("boolean");
-      // v0.5 divergence — the three deferred collections are empty.
-      expect(surface.typeDecls).toEqual([]);
-      expect(surface.components).toEqual([]);
-      expect(surface.machineDecls).toEqual([]);
+      // A3 — the three collections are now SYNTHESIZED; every entry is a
+      // well-formed declaration node (the kind tag + a numeric BaseNode id).
+      for (const e of surface.machineDecls) {
+        expect(e.kind).toBe("engine-decl");
+        expect(typeof e.id).toBe("number");
+      }
+      for (const t of surface.typeDecls) {
+        expect(t.kind).toBe("type-decl");
+        expect(typeof t.id).toBe("number");
+      }
+      for (const c of surface.components) {
+        expect(c.kind).toBe("component-def");
+        expect(typeof c.id).toBe("number");
+      }
     });
   }
 });
