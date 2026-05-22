@@ -2,7 +2,7 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-21 **S117 CLOSE**). Full `bun test` **18,173 pass / 169 skip / 1 todo / 0 fail / 739 files / 55,582 expect**. v0.4.0 stands (S114). M5-swap honestly re-decomposed — corrected total 96-160h; the pipeline swap is deferred to v0.7, v0.6 ships the non-routing units.
+Current baseline (2026-05-21 **S118**). Full `bun test` **18,278 pass / 169 skip / 1 todo / 0 fail**. **v0.5.0 + v0.6.0 cut (S118)** — the M5 native-parser retire/bridge work, released. The M5 *pipeline swap* itself — Tier B (native-parser feature completion: `?`/`!{}`/`~`-decl/`lin`/`fn`/`type`) + the `--parser=scrml-native` routing change — is **v0.7**.
 
 ### 2026-05-21 (S117 — build-story ratified, M5-swap re-decomposed, README live)
 
@@ -26,6 +26,15 @@ S115 ran the M5/M6 compressed-MD-ladder (DD #27) through its v0.5 cut and v0.6 b
 - **Living Compiler retraction (draft) + dev.to article truthfulness audit + fix pass.** All 12 articles classified; 11 corrected — 8-article retracted-link scrub, de-versioned banners, per-article correction notes.
 - **scrml-support corpus currency sweep.** 3 stale-and-cited docs marked; the doc-currency convention (`status:` enum + `last-reviewed:`/`superseded-by:` + same-landing discipline) ratified into `pa.md`.
 - **Two compiler-concept deep-dives** — the code-import story (incl. a content-addressed `vendor:` design) and the build-story compiler model.
+
+## v0.6.0 — 2026-05-21 (native-parser M5 — non-routing catalog units + Build Story SPEC)
+
+v0.6.0 cuts the M5 non-routing units — the catalog bridges and the §34 reconciliation that prepare the pipeline swap without performing it. The swap itself (Tier B native-parser feature completion + the `--parser=scrml-native` routing change) is **v0.7**. v0.6.0 also lands the Build Story SPEC section, spec-ahead-of-implementation. Cut at S118.
+
+- **M5 A2 — expression-catalog bridge** (`translate-expr.{js,scrml}`): native PascalCase `ExprKind` → the live lowercase `ExprNode` union `emit-expr.ts` dispatches (kind-rename + fan-out + fan-in + escape-hatch). Sibling to R1's statement-catalog bridge. +109 tests.
+- **M5 F4 — `SpanTable` retired** — zero-consumer dead structure; every node already carries its span inline via `node.span`. −4 existence-only tests; net-zero behavior.
+- **M5 R4 — SPEC §34.1** "Native-Parser Parse Diagnostics" — 66 native-parser parse-error codes catalogued (landed S117).
+- **SPEC §58 — Build Story.** Compilation as a pure function `compile(source, buildStory) → artifact`; the four-component compiler composite; the build-story artifact as a content-addressed Merkle closure (Approach B); the `[story]` manifest table; per-`<program>` build stories via the nested-only `story=` attribute; dialect islands; cross-`<program>` ABI invariance. §58.5.1-4 specify the closure node model, the canonical node-hash encoding, the line-based `build-story.lock` serialization, and verification. §34 +2 codes. **Nominal — spec-ahead-of-implementation** (no compiler implementation yet).
 
 ## v0.5.0 — 2026-05-21 (native-parser M5 — retire-class + downstream extraction + bridge-lights)
 
