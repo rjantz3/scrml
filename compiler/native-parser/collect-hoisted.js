@@ -141,17 +141,19 @@ export function collectHoisted(blocks, idGen, source) {
             } else if (block.kind === "LogicEscape") {
                 // live: a `logic` node hands pre-filtered imports/exports/
                 // typeDecls/components. The native LogicEscape carries the RAW
-                // parsed Stmt[] body; the walker filters it.
+                // parsed Stmt[] body; the walker filters it. `topLevel` true —
+                // the LogicEscape body is the direct statement list.
                 if (Array.isArray(block.body)) {
-                    walkStmts(block.body, block.bodyText, block.span);
+                    walkStmts(block.body, block.bodyText, block.span, true);
                 }
             } else if (block.kind === "Meta") {
                 // F8 (S115) — Meta blocks now carry a parsed `body` Stmt[].
                 // live `walkBodyNodes` walks `meta.body` for import/export/
                 // type/component-def. The native Meta body is the same Stmt[]
                 // shape as a LogicEscape body — scan it the same way.
+                // `topLevel` true — the Meta body is the direct statement list.
                 if (Array.isArray(block.body)) {
-                    walkStmts(block.body, block.bodyText, block.span);
+                    walkStmts(block.body, block.bodyText, block.span, true);
                 }
             }
             // "Sql" / "Css" / "ErrorEffect" / "Test" / "ForeignCode" / "Text"
@@ -161,19 +163,48 @@ export function collectHoisted(blocks, idGen, source) {
     }
 
     // walkStmts — scan a Stmt[] for the hoistable declaration kinds. Recurses
-    // FunctionDecl bodies — the live `walkBodyNodes` recursion (a nested
-    // `import` inside a function body is still hoisted). Block statements are
-    // recursed too (defensive parity with the live walker's structural reach).
+    // FunctionDecl + Block bodies for the structural-reach kinds, but NOT for
+    // `Import` collection (see the `topLevel` gate below).
     //
     //   blockText / blockSpan — the enclosing LogicEscape/Meta `bodyText` +
     //   `span`, threaded through so a synthesized `component-def.raw` can be
     //   sliced out of the source (the native VarDecl carries spans but not a
     //   raw string).
-    function walkStmts(stmtList, blockText, blockSpan) {
+    //   topLevel — true only for the DIRECT statement list of a LogicEscape /
+    //   Meta body; false for any nested FunctionDecl / Block recursion.
+    //
+    // IMPORT HOISTING — TOP-LEVEL ONLY (the live-pipeline contract). The live
+    // `logic` node hoists imports via a FLAT top-level filter over its body
+    // (`body.filter(n => n.kind === "import-decl")`, ast-builder.js:11344) —
+    // it does NOT recurse FunctionDecl bodies. An `import` inside a function
+    // body is illegal placement (E-IMPORT-003); the live parser never emits an
+    // `import-decl` node there, so the live `walkBodyNodes` recursion never
+    // finds one to hoist. The native parser DOES emit a `StmtKind.Import` Stmt
+    // inside a FunctionDecl body, so `walkStmts` must NOT hoist an `Import`
+    // discovered by the FunctionDecl / Block recursion — only a `topLevel`
+    // import lands in `FileAST.imports`.
+    function walkStmts(stmtList, blockText, blockSpan, topLevel) {
         for (const stmt of stmtList) {
             if (stmt === undefined || stmt === null) continue;
 
             if (stmt.kind === StmtKind.Import) {
+                // Top-level only — a nested import (inside a FunctionDecl /
+                // Block) is illegal placement and is not hoisted.
+                if (topLevel !== true) continue;
+                // Skip a DEGENERATE import — one with no module `source`. The
+                // native parser models a dynamic `import(...)` expression
+                // (e.g. `const { x } = await import("path")`) as a parse-error
+                // recovery `StmtKind.Import` with empty `specifiers` AND an
+                // empty `source`: `import` is consumed as a statement lead,
+                // then `expectFromKeyword` / `expectModuleString` both fail
+                // (parse-stmt.js:2050-2051). A dynamic-import EXPRESSION is not
+                // a static module import — the live pipeline (Acorn) parses it
+                // as an `ImportExpression` and never hoists it. A real static
+                // import — named, default, namespace, OR bare side-effect
+                // (`import "m"`) — always carries a non-empty `source`.
+                if (typeof stmt.source !== "string" || stmt.source.length === 0) {
+                    continue;
+                }
                 imports.push(stmt);
             } else if (stmt.kind === StmtKind.Export) {
                 exports.push(stmt);
@@ -199,13 +230,15 @@ export function collectHoisted(blocks, idGen, source) {
                 // declarator.
                 collectComponentDefs(stmt, blockText, blockSpan, stampId);
             } else if (stmt.kind === StmtKind.FunctionDecl) {
-                // live walkBodyNodes recurses `function-decl` bodies.
+                // live walkBodyNodes recurses `function-decl` bodies for the
+                // structural-reach kinds — but NOT for imports (`topLevel`
+                // false: a nested import is illegal placement, not hoisted).
                 if (Array.isArray(stmt.body)) {
-                    walkStmts(stmt.body, blockText, blockSpan);
+                    walkStmts(stmt.body, blockText, blockSpan, false);
                 }
             } else if (stmt.kind === StmtKind.Block) {
                 if (Array.isArray(stmt.body)) {
-                    walkStmts(stmt.body, blockText, blockSpan);
+                    walkStmts(stmt.body, blockText, blockSpan, false);
                 }
             }
         }

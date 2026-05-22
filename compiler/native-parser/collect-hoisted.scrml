@@ -52,7 +52,14 @@
 // all seven outputs:
 //     - imports / exports — scanned out of every LogicEscape + Meta block's
 //       parsed Stmt[] body (the live `logic` node hands these pre-filtered;
-//       the native body is the raw Stmt[], so the walker filters);
+//       the native body is the raw Stmt[], so the walker filters). Imports
+//       are hoisted TOP-LEVEL ONLY: the live `logic` node filters imports
+//       with a flat top-level scan (ast-builder.js:11344) — it does NOT
+//       recurse FunctionDecl bodies. An `import` inside a function body is
+//       illegal placement (E-IMPORT-003) and is not hoisted; a dynamic
+//       `import(...)` expression is parsed as a recovery `Import` Stmt with
+//       no module `source` and is likewise not hoisted (it is an
+//       expression, not a static module import);
 //     - channelDecls — Markup blocks with name "channel" (recurse children);
 //     - hasProgramRoot — a top-level Markup block with name "program";
 //     - machineDecls — a Markup block named "engine" / "machine", SYNTHESIZED

@@ -129,13 +129,49 @@ describe("F3 §2 — imports / exports from LogicEscape bodies", () => {
     expect(r.exports.length).toBe(2);
   });
 
-  test("import nested inside a function body is recursed (live walkBodyNodes parity)", () => {
+  // P4-6 (DIFF-hoist-count H1) — import-hoisting is TOP-LEVEL ONLY. The live
+  // `logic` node filters imports with a flat top-level scan
+  // (ast-builder.js:11344); it does NOT recurse FunctionDecl bodies. An
+  // `import` inside a function body is illegal placement (E-IMPORT-003) — the
+  // live parser never emits an `import-decl` there, so the live walker never
+  // hoists one. The native parser DOES emit a `StmtKind.Import` inside the
+  // FunctionDecl body, so `walkStmts` must NOT hoist it.
+  test("P4-6 — import nested inside a function body is NOT hoisted (E-IMPORT-003)", () => {
     const r = nativeSurface(
       '${\nfunction wrap() {\nimport { deep } from "./deep.js"\n}\n}',
     );
-    // The native StmtKind.FunctionDecl body is recursed — a nested import is
-    // still hoisted, matching the live walkBodyNodes recursion.
+    expect(r.imports.length).toBe(0);
+  });
+
+  // P4-6 — a dynamic `import(...)` EXPRESSION is not a static module import.
+  // scrml has no source-level `await` (E-AWAIT-NOT-IN-SCRML); the native
+  // parser models `const { x } = await import("path")` as a parse-error
+  // recovery `StmtKind.Import` with empty specifiers AND an empty `source`.
+  // The live pipeline (Acorn) parses it as an `ImportExpression` and never
+  // hoists it. `walkStmts` skips a degenerate Import with no module `source`.
+  test("P4-6 — a dynamic `await import(...)` expression is NOT hoisted", () => {
+    const r = nativeSurface(
+      '^{\nconst { resolve } = await import("path")\n}',
+    );
+    expect(r.imports.length).toBe(0);
+  });
+
+  // P4-6 GUARD — a legitimate top-level static import IS still hoisted; the
+  // top-level-only + non-degenerate gates must not regress the valid case.
+  test("P4-6 GUARD — a legitimate top-level import IS hoisted", () => {
+    const r = nativeSurface('${\nimport { Status } from "./helper.scrml"\n}');
     expect(r.imports.length).toBe(1);
+    expect(r.imports[0].kind).toBe("Import");
+    expect(r.imports[0].source).toBe("./helper.scrml");
+  });
+
+  // P4-6 GUARD — a bare side-effect import (`import "m"`, empty specifiers but
+  // a non-empty `source`) is a real import and IS hoisted — the degenerate
+  // gate keys on the missing `source`, not on empty specifiers.
+  test("P4-6 GUARD — a bare side-effect import IS hoisted", () => {
+    const r = nativeSurface('${\nimport "./side-effect.js"\n}');
+    expect(r.imports.length).toBe(1);
+    expect(r.imports[0].source).toBe("./side-effect.js");
   });
 
   test("a block with no module declarations collects nothing", () => {
