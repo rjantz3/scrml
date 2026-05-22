@@ -33,93 +33,70 @@ are the ideas any good?
 
 ## A Full App in One File
 
-A contact book that persists to a SQLite database **and** syncs live across
-every open browser tab — no API layer, no ORM, no WebSocket code, no separate
-validation schema:
+A contact book — a real database, server functions, list rendering — with no
+API layer, no ORM, and no route files. This is the shape of a scrml app:
 
 ```scrml
-<program db="contacts.db">
+// gate: skip — a full-stack app needs a database file beside it; shown for shape
+<program>
 
-<schema>
-    contacts {
-        name:  text req length(>=2)
-        email: text req email
+<db src="contacts.db" tables="contacts">
+
+  ${
+    <name>  = ""
+    <email> = ""
+
+    // persistContact runs the INSERT — the compiler runs it server-side.
+    function persistContact(name, email) {
+      ?{`INSERT INTO contacts (name, email) VALUES (${name}, ${email})`}.run()
     }
-</>
 
-// A <channel> is a WebSocket endpoint. State declared inside it
-// auto-syncs to every connected client — open this app in two tabs.
-<channel name="contacts" topic="all">
+    function addContact() {
+      persistContact(@name, @email)
+      reset(@name)
+      reset(@email)
+    }
+
+    server function loadContacts() {
+      lift ?{`SELECT name, email FROM contacts ORDER BY name`}.all()
+    }
+  }
+
+  <h1>Contacts</h1>
+
+  <form onsubmit=addContact()>
+    <input bind:value=@name  placeholder="Name"  required/>
+    <input bind:value=@email placeholder="Email" type="email" required/>
+    <button type="submit">Add Contact</button>
+  </form>
+
+  <ul>
     ${
-        <entries> = ?{select name, email from contacts order by id}.all()
-
-        server function publish(name, email) {
-            @entries = [...@entries, { name, email }]
-        }
+      for (let c of loadContacts()) {
+        lift <li>${c.name} — ${c.email}</li>
+      }
     }
-</>
-
-<entry>
-    <name  req length(>=2)> = <input placeholder="Name"/>
-    <email req email>       = <input type="email" placeholder="Email"/>
-</>
-
-<form onsubmit=submit()>
-    <entry><name/></>
-    <entry><email/></>
-    <errors of=@entry/>
-    <button type="submit" disabled=${not @entry.isValid}>Add Contact</>
-</form>
-
-<ul>
-    ${
-        for (let c of @entries) {
-            lift <li>${c.name} — ${c.email}</>
-        }
-    }
-</ul>
-
-function persist(name, email) {
-    ?{insert into contacts (name, email) values (${name}, ${email})}.run()
-}
-
-function submit() {
-    persist(@entry.name, @entry.email)   // runs server-side — it touches SQL
-    publish(@entry.name, @entry.email)   // broadcasts to every open tab
-    reset(@entry)
-}
+  </ul>
 
 </>
+
+</program>
 ```
 
-Open it in two tabs and add a contact in one — it shows up in the other
-instantly. Here is everything the compiler did that you did *not* write:
+Here is what the compiler does that you do *not* write:
 
-- **`<schema>` is the database.** The `contacts` block is the migration *and*
-  the source-level shared vocabulary. `req length(>=2)` lowers to `NOT NULL` +
-  `CHECK (length(name) >= 2)` at the DB layer — and the *same* `req
-  length(>=2)` on the `<name>` field below validates the form. One word, two
-  enforcement loci, guaranteed not to drift.
-- **`<channel>` is realtime, as a language primitive.** Declaring it emits a
-  WebSocket endpoint, a reconnecting client-side connection manager, and
-  pub/sub topic routing. State declared inside the channel body (`<entries>`)
-  auto-syncs to every connected client — `publish()` writes the cell, every tab
-  sees it. There is no `new WebSocket()` anywhere in your source.
-- **`<entry>` is a form that validates itself.** Each field declares a reactive
-  cell *together with* its input element. `@entry.isValid`, `@entry.errors`,
-  and the per-field `@entry.name.isValid` are auto-synthesized — reactive,
-  read-only. `<errors of=@entry/>` renders the active errors at the right
-  moment (the touched + submitted lifecycle is handled for you).
-- **The server boundary is inferred.** `persist()` touches SQL, so the compiler
-  runs it server-side — and generates the route, the `fetch` call, CSRF
-  tokens, parameterized queries, and serialization. You call it like a local
-  function, because in your source it *is* one.
-- **`reset(@entry)`** returns every field of the compound cell to its declared
-  initial value — one keyword, no per-field bookkeeping.
+- **`<db>` connects the database.** Inside it, `?{…}` blocks are SQL — the
+  compiler parameterizes and serializes them. `bind:value=@name` keeps each
+  input and its reactive cell in sync.
+- **The server boundary is inferred.** `persistContact` and `loadContacts`
+  touch SQL, so the compiler classifies them server-side — and generates the
+  route, the `fetch` call, CSRF tokens, parameterized queries, and
+  serialization. You call them like local functions, because in your source
+  they *are*.
+- **`reset(@name)`** returns a reactive cell to its declared initial value.
 
-That is the whole language in miniature: declare the shape, the compiler wires
-the rest. The sections below go deeper — starting with the one idea the entire
-language is built on.
+Declare the app; the compiler wires server, client, and data. The sections
+below go deeper — starting with the one idea the entire language is built on.
 
 ## Built around state machines
 
