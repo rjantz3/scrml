@@ -1,6 +1,6 @@
 # error.map.md
 # project: scrmlts
-# updated: 2026-05-22T00:00:00Z  commit: 5d2003dd
+# updated: 2026-05-23T00:00:00-06:00  commit: 136678e5
 
 scrml's own language error model is values-not-exceptions (SPEC §19.1 — no
 try/catch, no exceptions in scrml SOURCE). The entries below are the COMPILER's
@@ -27,7 +27,8 @@ SPEC §34.1 catalogs the diagnostics emitted by the native parser
 (compiler/native-parser/) — the recursive-descent front-end that replaces the
 legacy block-splitter + Acorn pipeline at the M5 swap. As of HEAD this catalog
 holds 81 codes: 79 hard `E-` errors + 2 info-level `I-NATIVE-BLOCK-*` codes
-(S117 R4 seeded 66; S118 B-waves appended 13; S119 C2 appended 2 info codes).
+(S117 R4 seeded 66; S118 B-waves appended 13; S119 C2 appended 2 info codes;
+S121 added no new §34.1 codes — the new W-* codes live in §34 stdlib-shim rows).
 B-wave error codes (S118):
   E-STMT-LIN-NAME / E-STMT-LIN-INIT          — B4, `lin` declaration grammar
   E-STMT-TYPE-NAME / E-STMT-TYPE-KIND / E-STMT-TYPE-UNCLOSED — B5, `type` declaration
@@ -46,6 +47,30 @@ compiler/native-parser/parse-file.js):
 Both are info-level (`severity:"info"`) — non-fatal, partition into `result.warnings`.
 §34.1 is the surviving home of the parse-diagnostic family once M6 deletes the
 legacy pipeline.
+
+## Stdlib-Shim Warnings (SPEC §34 — S121 Bug 8 + Wave 8-F)
+W-STDLIB-SHIM-MISSING       — SPEC §34 (S121 Bug 8 close) — emitted by api.js's
+                              `bundleStdlibForRun` when an adopter
+                              `import { ... } from "scrml:NAME"` references a
+                              stdlib module with no runtime shim at
+                              `compiler/runtime/stdlib/<name>.js`. The literal
+                              `scrml:NAME` survives the import-rewrite (per
+                              `rewriteStdlibImports`'s loud-failure-preserved
+                              contract) and the emitted JS will fail at runtime
+                              when Node's resolver rejects the `scrml:` scheme —
+                              surfaced at compile time as this warning so the gap
+                              is visible before deploy. Exception: the
+                              `scrml:compiler*` family is reclassified to
+                              W-STDLIB-COMPILER-DEFERRED per §41.17.
+W-STDLIB-COMPILER-DEFERRED  — SPEC §34 + §41.17 NEW (S121 Wave 8-F close) —
+                              emitted by `bundleStdlibForRun` for any name
+                              matching `name === "compiler" || name.startsWith("compiler/")`.
+                              Fires whether the thunk shim is on disk or not —
+                              the deferral is a property of the family surface.
+                              Each per-stage thunk also throws at call time with
+                              attribution naming the importing module, this catalog
+                              row, and the survey memo
+                              `docs/changes/bug-8-followup/scrml-compiler-shim-survey-s121-2026-05-22.md`.
 
 ## Runtime Error Classes (emitted INTO user output)
 compiler/src/runtime-template.js — scrml runtime error hierarchy embedded in
@@ -66,6 +91,8 @@ TimeoutError [2060] | ParseError [2068] | NotFoundError [2076] | ConflictError [
   span)` in parse-stmt.js / parse-expr.js appends to a context error array; no throws.
   `nativeParseFile` folds `ctx.diagnostics` (the markup-run parse-error stream) plus
   any synthesis-side `I-NATIVE-BLOCK-*` info diagnostics into its result `errors` array.
+- scrml:compiler thunk shims throw at call time with a multi-line attribution —
+  loud-failure-with-attribution, not silent breakage (Wave 8-F).
 
 ## Error Code Families (host-side, count of code-prefix references in compiler/src)
 Spec-catalogued codes (SPEC §34 is normative). Highest-volume families:
@@ -73,7 +100,9 @@ E-TYPE (159) | E-ENGINE (118) | E-LIN (75) | E-FN (74) | E-DERIVED (106) |
 E-COMPONENT (71) | E-IMPORT (68) | E-META (64) | E-SCOPE (54) | E-CG (54) |
 E-TABLEFOR (53) | E-STATE (51) | E-SYNTAX (50) | E-CHANNEL (50) | E-AUTH (47) |
 E-CLOSURE (46) | E-PA (45) | E-MATCH (44) | E-CPS (40) | E-ATTR (40) | …
-Warnings: W-CG | W-LINT | W-AUTH | W-STORY (§58 — W-STORY-ON-TOP-LEVEL).
+Warnings: W-CG | W-LINT | W-AUTH | W-STORY (§58 — W-STORY-ON-TOP-LEVEL) |
+  W-STDLIB-SHIM-MISSING (S121) | W-STDLIB-COMPILER-DEFERRED (S121) |
+  W-DEAD-FUNCTION (S121 Wave 10-P walker FP-class — surfaced by route-inference).
 Info: I-PARSER-NATIVE-SHADOW, I-NATIVE-BLOCK-DROPPED, I-NATIVE-BLOCK-UNMAPPED,
 I-MATCH-PROMOTABLE, I-ASYNC-USER-SOURCE, I-AUTH-REDIRECT-UNRESOLVED.
 
@@ -91,7 +120,7 @@ embed `_ScrmlError`-based runtime handling per SPEC §19.
   design; BS reports the real read error.
 
 ## Tags
-#scrmlts #map #error #diagnostics #pipeline #native-parser
+#scrmlts #map #error #diagnostics #pipeline #native-parser #stdlib-shims
 
 ## Links
 - [primary.map.md](./primary.map.md)

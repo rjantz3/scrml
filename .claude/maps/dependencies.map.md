@@ -1,6 +1,6 @@
 # dependencies.map.md
 # project: scrmlts
-# updated: 2026-05-22T00:00:00Z  commit: 5d2003dd
+# updated: 2026-05-23T00:00:00-06:00  commit: 136678e5
 
 ## Runtime Dependencies (root package.json)
 vscode-languageserver@^9.0.1 — LSP server framework for lsp/server.js
@@ -32,6 +32,9 @@ api.js → native-parser/parse-file.js (`nativeParseFile`) — C2 routing; consu
 api.js → validators/{post-ce-invariant, attribute-interpolation, attribute-allowlist, lint-try-catch, lint-async-user-source}.ts
 api.js → lint-ghost-patterns.js, lint-i-match-promotable.js, tailwind-classes.js,
          gauntlet-phase1-checks.js, gauntlet-phase3-eq-checks.js
+api.js → bundleStdlibForRun — copies compiler/runtime/stdlib/*.js into <out>/_scrml/;
+         emits W-STDLIB-SHIM-MISSING for missing shims AND W-STDLIB-COMPILER-DEFERRED
+         for any `compiler` or `compiler/*` name (S121 Bug 8 + Wave 8-F).
 code-generator.js → codegen/index.ts (runCG) → codegen/emit-*.ts (~55 emitters)
 codegen/index.ts → codegen/route-splitter.ts, codegen/ir.ts, codegen/source-map.ts, codegen/runtime-chunks.ts
 reachability-solver.ts → reachability/{component-1..5, entry-points, gate-classifier, outer-fixpoint}.ts
@@ -48,11 +51,27 @@ parse-markup.js → tag-frame.js, body-mode.js, display-text-literal.js, parse-s
 parse-file.js → parse-markup.js (`parseMarkupTrace`), collect-hoisted.js (`collectHoisted`,
          `isEngineBlock`, `synthEngineDecl`), translate-stmt.js (`translateStmtList`),
          parse-state-body.js (`isStateBlock`)
+         (S121 P5-7 added inline `isMatchBlock` + `synthMatchBlockNode` + helpers
+          `readForType` / `readOnExprRaw` / `collectArmsRaw` — no new external import.)
 translate-stmt.js → ast-stmt.js, translate-expr.js (rides expression children through the expr bridge)
 translate-expr.js → ast-expr.js
 collect-hoisted.js → ast-stmt.js (reads StmtKind to classify Block-stream Stmt nodes)
-tag-frame.js → (exports VOID_ELEMENTS / isVoidElementName — consumed by parse-markup self-close logic)
+tag-frame.js → (exports VOID_ELEMENTS / isVoidElementName + S121 Wave 6-A
+                isTagNameStart admits `_`)
 parse-state-body.js → (exports STATE_FORM_KEYWORDS / isStateBlock / shapeStateBlock)
+
+## Stdlib runtime shim layout (compiler/runtime/stdlib/) — S121 expanded
+Top-level (18): auth, crypto, data, host, store (pre-S121) +
+  S121 Bug 8 Wave 7: cron, format, fs, http, oauth, path, process, redis, regex,
+                     router, test, time, compiler (umbrella).
+Subdirectories:
+  oauth/ — discord, github, google, microsoft, pkce (5 providers, pre-S121).
+  compiler/ — 13 per-stage thunks for the scrml:compiler family (S121 Wave 8-F):
+              bs, tab, mod, ce, bpp, pa, ri, ts, mc, me, dg, cg, expr — each export
+              throws at call time with W-STDLIB-COMPILER-DEFERRED attribution.
+Catalog rows: W-STDLIB-SHIM-MISSING (SPEC §34, fires at bundle when `<shim>.js` absent
+  AND name is not in `scrml:compiler*` family); W-STDLIB-COMPILER-DEFERRED (SPEC §34
+  + NEW §41.17, fires for any `compiler` or `compiler/*` name regardless of shim presence).
 
 ## Native-parser → live-pipeline bridge + assembler (C1/C2 — landed and routed)
 The native parser produces SEPARATE catalogs (Token[], Stmt[], Expr, Block[]). The
@@ -65,13 +84,14 @@ bridge layer + assembler now compose them into a `FileAST` and the pipeline rout
     `isEngineBlock(block)` / `synthEngineDecl(block, stamp, source)` — A3; native Block[]
     → { imports, exports, typeDecls, components, machineDecls, channelDecls, hasProgramRoot }.
   - parse-file.js `nativeParseFile(filePath, source)` — C1; composes `parseMarkupTrace` +
-    the three bridges into the full live `FileAST` shape. Drop-in analogue of `buildAST`.
+    the three bridges into the full live `FileAST` shape. 12 synth* builders (S121 P5-7
+    added synthMatchBlockNode). Drop-in analogue of `buildAST`.
 The C1 assembler is wired into api.js's TAB seam (C2): `--parser=scrml-native` swaps
 `_buildAST` to `nativeParseFile` (api.js:729-736). Strictly opt-in — `parser` defaults
 to `null`; every other caller uses the untouched live BS+TAB path.
 
 ## Tags
-#scrmlts #map #dependencies #bun #acorn #native-parser #m5-swap #bridge
+#scrmlts #map #dependencies #bun #acorn #native-parser #m5-swap #bridge #stdlib-shims
 
 ## Links
 - [primary.map.md](./primary.map.md)

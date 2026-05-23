@@ -1,6 +1,6 @@
 # schema.map.md
 # project: scrmlts
-# updated: 2026-05-22T17:44:26-06:00  commit: a8904945
+# updated: 2026-05-23T00:00:00-06:00  commit: 136678e5
 
 Authoritative AST type catalog: `compiler/src/types/ast.ts`. This is the contract
 the M5 native-parser swap must satisfy — native-parser output must be coercible to
@@ -41,7 +41,9 @@ idempotencyStore / idempotencyTTL / batchInListCap / corsMaxAge / channelReconne
 
 ### ASTNode  [ast.ts:1407] — top-level / markup-child node union
 markup | text | comment | state | state-constructor-def | logic | sql |
-css-inline | style | error-effect | meta | LogicStatement
+css-inline | style | error-effect | meta | match-block | LogicStatement
+(match-block surfaces via parse-file.js `synthMatchBlockNode` — S121 P5-7; mirrors
+live ast-builder's inline match-block synthesis.)
 
 ### LogicStatement  [ast.ts:1358] — ~40-kind sub-union inside logic bodies
 let-decl | const-decl | tilde-decl | lin-decl | reactive-decl | reactive-debounced-decl |
@@ -82,6 +84,14 @@ StateNode [265] | StateConstructorDefNode [279] | LogicNode [294] | SQLNode [311
 CSSInlineNode [330] | StyleNode [339] | ErrorEffectNode [350] | MetaNode [359] |
 TransactionBlockNode [1282] | WhenEffectNode [1303] | WhenMessageNode [1317] |
 UploadCallNode [1328]
+
+### MatchBlockNode (synthesized inline by parse-file.js mapOneBlock — S121 P5-7)
+{ kind: "match-block", forType, onExprRaw, armsRaw, bodyChildren, span }
+- Native shape mirrors live ast-builder.js L10518-L10698 exactly on canary-visible
+  fields (forType, onExprRaw, armsRaw, span); `bodyChildren` is ADDITIVE
+  structural preservation (native parses arm patterns into Markup children where
+  live's BS treats them as STRUCTURAL_RAW_BODY_ELEMENTS raw-content).
+- Leaf in the deep walk (arm bodies are reachable via the live arm-promotion path).
 
 ## ExprNode union  [ast.ts:1939] — scrml's own expression AST (20 lowercase kinds)
 IdentExpr [1569] | LitExpr [1591] | ArrayExpr [1614] | ObjectExpr [1621] |
@@ -136,19 +146,23 @@ ForeignCode (`^^{}`). `parseMarkupTrace(source)` returns the full run record
 `{ ctx, contextTrace }`; `ctx.nodes` is the Block[], `ctx.diagnostics` the parse-error
 stream (lazily-created — `undefined` on a clean parse).
 
-## Native→live FileAST assembler (C1/C2 — landed and routed, S119)
+## Native→live FileAST assembler (C1/C2 — landed and routed, S119; S121 grew to 12 synths)
 parse-file.js `nativeParseFile(filePath, source)` → `{ filePath, ast: FileAST, errors }` —
 the drop-in analogue of `buildAST`. Pipeline:
   1. PARSE — `parseMarkupTrace(source)` → Block[] + ctx.diagnostics (folded into errors).
-  2. MAP — each Block → live ASTNode via `mapOneBlock` / 11 synth* builders. The
-     BlockKind→ASTNode map: Markup→markup, Text→text, Comment→comment, Sql→sql,
-     Css→css-inline, Meta→meta, ErrorEffect→error-effect, LogicEscape→logic.
-     A Markup block recognized as a STATE block (`isStateBlock`) → `state` /
-     `state-constructor-def`; recognized as an ENGINE block (`isEngineBlock`) →
-     `engine-decl` (DIFF-engine-in-nodes parity — also appears in machineDecls).
-     `DisplayTextLiteral` → `text` (D1 deferral — §4.18.6 escape pass deferred).
-     `Test` / `ForeignCode` → DROPPED with `I-NATIVE-BLOCK-DROPPED` info diag (D2).
-     An unrecognized kind → DROPPED with `I-NATIVE-BLOCK-UNMAPPED`.
+  2. MAP — each Block → live ASTNode via `mapOneBlock`. Routing in mapOneBlock:
+       - Markup recognized as MATCH (S121 P5-7, `isMatchBlock` — tag-name `match`) →
+         `match-block` (synthMatchBlockNode). Routed BEFORE state/engine to keep
+         `<engine for=Phase>` (tag-name=engine) in engine-decl.
+       - Markup recognized as STATE (`isStateBlock`) → `state` / `state-constructor-def`.
+       - Markup recognized as ENGINE (`isEngineBlock`) → `engine-decl` (DIFF-engine-in-nodes
+         parity — also appears in machineDecls).
+       - Other Markup → `markup` (synthMarkupNode).
+       - Text → `text`, Comment → `comment`, Sql → `sql`, Css → `css-inline`,
+         Meta → `meta`, ErrorEffect → `error-effect`, LogicEscape → `logic`.
+       - `DisplayTextLiteral` → `text` (D1 deferral — §4.18.6 escape pass deferred).
+       - `Test` / `ForeignCode` → DROPPED with `I-NATIVE-BLOCK-DROPPED` info diag (D2).
+       - Unrecognized → DROPPED with `I-NATIVE-BLOCK-UNMAPPED`.
   3. ASSEMBLE — `collectHoisted` folds the Block[] into the 7 hoisted file-level outputs.
   4. PRODUCE — the live `buildAST` literal; `authConfig`/`middlewareConfig` set to
      `null` (PRECG Stage 3.004 derives them downstream).
@@ -182,6 +196,11 @@ TypedAttrDecl: `{ name, typeExpr, optional, defaultValue, span }` — `parseType
   empty-paren `name()` tokens produce no TypedAttrDecl — prevents phantom
   `state-constructor-def` under attr over-scan.
 
+### Tag-name admission  [tag-frame.js / char-classify.js — S121 Wave 6-A]
+`isTagNameStart(ch)` now admits `[A-Za-z_]` (was `[A-Za-z]`). SPEC §4.1 mandates
+  ASCII letter OR underscore as the maximal-name start char — block-splitter.js:1617
+  was the existing oracle. Wave 6-A closes the gap; .scrml mirror updated.
+
 ### HTML void elements  [tag-frame.js — S119]
 `VOID_ELEMENTS` — frozen set (area, base, br, col, embed, hr, img, input, link, meta,
   source, track, wbr); copied 1:1 from block-splitter.js L72.
@@ -193,7 +212,7 @@ in examples/ are throwaway test fixtures. SQL schema in .scrml sources is the
 user-program domain, not a compiler model.
 
 ## Tags
-#scrmlts #map #schema #ast #fileast #native-parser #codegen #m5-swap #bridge
+#scrmlts #map #schema #ast #fileast #native-parser #codegen #m5-swap #bridge #match-block
 
 ## Links
 - [primary.map.md](./primary.map.md)

@@ -1,6 +1,6 @@
 # build.map.md
 # project: scrmlts
-# updated: 2026-05-22T00:00:00Z  commit: 5d2003dd
+# updated: 2026-05-23T00:00:00-06:00  commit: 136678e5
 
 ## Development Commands (root package.json scripts)
 compile        — `bun run compiler/src/cli.js compile` — compile scrml source
@@ -31,9 +31,10 @@ opt-in, default off).
 
 ## Build & Release
 No bundler step — scrml is run directly under Bun. Generated dist artifacts:
-compiler/dist/, compiler/native-parser/dist/, dist/, examples/dist/, samples/dist/.
-Native-parser dist rebuilt via scripts/rebuild-bs-dist.ts / rebuild-tab-dist.ts /
-rebuild-self-host-dist.ts. SPEC-INDEX regenerated via scripts/regen-spec-index.ts.
+compiler/dist/, compiler/native-parser/dist/, dist/, examples/dist/, samples/dist/,
+dashboard/dist/. Native-parser dist rebuilt via scripts/rebuild-bs-dist.ts /
+rebuild-tab-dist.ts / rebuild-self-host-dist.ts. SPEC-INDEX regenerated via
+scripts/regen-spec-index.ts.
 
 ## CI/CD Pipeline
 No hosted CI (`.github/workflows`, GitLab, Jenkins all absent). Quality gates are
