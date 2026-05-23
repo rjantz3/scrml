@@ -488,8 +488,8 @@ ${
     // body parses to `not`. The M2 parser's diagnostics are forwarded into
     // `ctx.diagnostics`.
     export fn parseInterpolationBody(bodyText, ctx) {
-        if (bodyText is not) { return null }
-        if (bodyText.trim().length == 0) { return null }
+        if (bodyText is not) { return not }
+        if (bodyText.trim().length == 0) { return not }
         const tokens = lex(bodyText)
         const result = parseExpr(tokens)
         if (result.errors is some) {
