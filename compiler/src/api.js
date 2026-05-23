@@ -251,12 +251,21 @@ export function collectStdlibSpecifiers(tabResults) {
  * at compile time and lets stdlib maintainers catch missing shims after a
  * new stdlib module lands.
  *
+ * The `scrml:compiler` family (umbrella + `compiler/<stage>` siblings) is
+ * special-cased per S121 Wave 7 Unit E (survey memo Option (d), formalized as
+ * KNOWN-DEFERRED). For any `scrml:compiler` or `scrml:compiler/*` name, the
+ * bundler emits `W-STDLIB-COMPILER-DEFERRED` (NOT `W-STDLIB-SHIM-MISSING`),
+ * whether the thunk shim is on disk or not — the deferral is a property of
+ * the surface, not a stdlib-author gap.
+ *
  * @param {Set<string>} names — bare stdlib names (from collectStdlibSpecifiers)
  * @param {string} outputDir — absolute path of the user's output directory
  * @param {(msg: string) => void} [log]
  * @param {object[]} [diagnostics] — optional diagnostics sink; pushed
- *   `W-STDLIB-SHIM-MISSING` entries for each name without a shim. Each entry
- *   matches the `allErrors`-array shape elsewhere in api.js.
+ *   `W-STDLIB-SHIM-MISSING` entries for each non-compiler name without a shim
+ *   AND `W-STDLIB-COMPILER-DEFERRED` entries for each `scrml:compiler*` name
+ *   referenced. Each entry matches the `allErrors`-array shape elsewhere in
+ *   api.js.
  * @returns {Set<string>} — the subset of names that were actually bundled
  */
 export function bundleStdlibForRun(names, outputDir, log, diagnostics) {
@@ -284,14 +293,51 @@ export function bundleStdlibForRun(names, outputDir, log, diagnostics) {
     }
   }
 
+  // `scrml:compiler` family — KNOWN-DEFERRED per S121 Wave 7 Unit E survey
+  // (docs/changes/bug-8-followup/scrml-compiler-shim-survey-s121-2026-05-22.md
+  // Option (d)). The umbrella shim + its 13 per-stage siblings ship a deferred
+  // thunk that throws at call time with W-STDLIB-COMPILER-DEFERRED attribution.
+  // ANY `scrml:compiler` or `scrml:compiler/*` import fires this warning at
+  // compile time, regardless of whether the thunk shim is on disk, so adopters
+  // see the deferral BEFORE deploy instead of at runtime via a thrown Error.
+  function isCompilerFamily(name) {
+    return name === "compiler" || name.startsWith("compiler/");
+  }
+  function emitCompilerDeferred(name) {
+    if (!Array.isArray(diagnostics)) return;
+    diagnostics.push({
+      code: "W-STDLIB-COMPILER-DEFERRED",
+      message:
+        `W-STDLIB-COMPILER-DEFERRED: scrml:${name} is currently deferred — `
+        + `the bundled shim is a thunk that throws at call time with attribution. `
+        + `The scrml:compiler family requires either an installable compiler package `
+        + `or a compile-time path-rewriter for the bundled shim; neither is in scope yet. `
+        + `For now, invoke the compiler via the CLI (\`scrml compile\`) or import directly `
+        + `from compiler/src/api.js. See `
+        + `docs/changes/bug-8-followup/scrml-compiler-shim-survey-s121-2026-05-22.md `
+        + `+ SPEC §34 (W-STDLIB-COMPILER-DEFERRED) + §41.17.`,
+      severity: "warning",
+      stage: "STDLIB-BUNDLE",
+      filePath: "",
+      line: 1,
+      column: 1,
+    });
+  }
+
   for (const name of names) {
+    const isCompiler = isCompilerFamily(name);
     const src = join(STDLIB_RUNTIME_DIR, `${name}.js`);
     if (!existsSync(src)) {
-      // No shim available. Emit a W-STDLIB-SHIM-MISSING warning so the gap is
-      // visible at compile time (the emitted JS still carries the literal
-      // `scrml:NAME` import, which fails loudly at runtime per
-      // `rewriteStdlibImports`'s loud-failure-preserved contract).
-      if (Array.isArray(diagnostics)) {
+      // No shim available. For the `scrml:compiler*` family, emit the
+      // DEFERRED-flavored warning (not SHIM-MISSING) — the absence is by
+      // design, not a stdlib-author gap. For every other name, emit the
+      // canonical W-STDLIB-SHIM-MISSING so the gap is visible at compile time
+      // (the emitted JS still carries the literal `scrml:NAME` import, which
+      // fails loudly at runtime per `rewriteStdlibImports`'s
+      // loud-failure-preserved contract).
+      if (isCompiler) {
+        emitCompilerDeferred(name);
+      } else if (Array.isArray(diagnostics)) {
         diagnostics.push({
           code: "W-STDLIB-SHIM-MISSING",
           message:
@@ -325,6 +371,15 @@ export function bundleStdlibForRun(names, outputDir, log, diagnostics) {
       const dstSub = join(stdlibOut, name);
       copyTree(subDir, dstSub);
       if (log) log(`  [STDLIB] Bundled scrml:${name}/* -> _scrml/${name}/`);
+    }
+
+    // For the `scrml:compiler*` family, also fire the DEFERRED warning even
+    // when the thunk shim IS on disk — the deferral is a property of the
+    // surface, not the shim's presence. Per the survey memo §4-5, every
+    // `scrml:compiler*` import is a compile-time signal that the adopter is
+    // reaching for a surface whose runtime is deliberately stubbed.
+    if (isCompiler) {
+      emitCompilerDeferred(name);
     }
   }
   return bundled;

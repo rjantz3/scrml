@@ -1,5 +1,5 @@
 /**
- * stdlib-shim-resolution — Bug #8 close (S121)
+ * stdlib-shim-resolution — Bug #8 close (S121) + Wave 8 Unit F extension (S121)
  *
  * Verifies the 13 stdlib runtime shims landed by Bug #8 dispatch resolve
  * correctly through the compiler's bundle + import-rewrite path AND that
@@ -12,6 +12,13 @@
  * scheme and the server module failed to load at runtime, returning 404
  * for server-fn endpoints.
  *
+ * Wave 8 Unit F extension (S121 follow-on): the scrml:compiler family
+ * (umbrella + 13 per-stage siblings) is KNOWN-DEFERRED per Wave 7 Unit E
+ * survey memo Option (d). The bundler reclassifies any `scrml:compiler` or
+ * `scrml:compiler/*` reference from W-STDLIB-SHIM-MISSING to a new
+ * W-STDLIB-COMPILER-DEFERRED warning that points at the deferral memo +
+ * the two viable resolution paths (CLI / direct compiler/src/ import).
+ *
  * Coverage:
  *   §1  Per-shim resolution (13 cases): each scrml:NAME import compiles +
  *       produces a server.js whose `from "scrml:NAME"` is rewritten to
@@ -23,6 +30,11 @@
  *       dashboard) compiles cleanly with no W-STDLIB-SHIM-MISSING warning
  *       — proves the dashboard's `scrml:fs` import resolves through the
  *       new shim.
+ *   §4  scrml:compiler family (Wave 8 Unit F): per-stage thunk shims
+ *       resolve to `_scrml/compiler/<stage>.js`; bundler emits
+ *       W-STDLIB-COMPILER-DEFERRED (NOT W-STDLIB-SHIM-MISSING) for every
+ *       scrml:compiler* name; the thunk imports throw at call time with
+ *       attribution.
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
@@ -237,5 +249,223 @@ describe("§3: dashboard load smoke", () => {
 
     // The fs shim landed at the expected output location.
     expect(existsSync(join(outDir, "_scrml/fs.js"))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §4. scrml:compiler family (Wave 8 Unit F — KNOWN-DEFERRED close).
+//
+// The umbrella scrml:compiler + its 13 per-stage siblings (bs, tab, mod, ce,
+// bpp, pa, ri, ts, mc, me, dg, cg, expr) ship deferred-thunk shims. The
+// bundler reclassifies any scrml:compiler / scrml:compiler/* reference to
+// W-STDLIB-COMPILER-DEFERRED (not W-STDLIB-SHIM-MISSING). The thunks throw
+// at call time with attribution to the survey memo.
+//
+// Ref docs/changes/bug-8-followup/scrml-compiler-shim-survey-s121-2026-05-22.md.
+// ---------------------------------------------------------------------------
+
+// Each entry: { stage subpath, one symbol from that stage's .scrml exports }.
+// Mirrors the surfaces declared in stdlib/compiler/<stage>.scrml — the test
+// asserts each stage's shim file exists AND one of its exports is a thunk.
+const COMPILER_FAMILY_MANIFEST = [
+  { stage: "bs", symbol: "splitBlocks" },
+  { stage: "tab", symbol: "buildAST" },
+  { stage: "mod", symbol: "resolveModules" },
+  { stage: "ce", symbol: "runCE" },
+  { stage: "bpp", symbol: "runBPP" },
+  { stage: "pa", symbol: "runPA" },
+  { stage: "ri", symbol: "runRI" },
+  { stage: "ts", symbol: "runTS" },
+  { stage: "mc", symbol: "runMetaChecker" },
+  { stage: "me", symbol: "runMetaEval" },
+  { stage: "dg", symbol: "runDG" },
+  { stage: "cg", symbol: "runCG" },
+  { stage: "expr", symbol: "parseExpression" },
+];
+
+describe("§4: scrml:compiler family — per-stage thunk shim resolution (13 cases)", () => {
+  for (const { stage, symbol } of COMPILER_FAMILY_MANIFEST) {
+    test(`scrml:compiler/${stage} → _scrml/compiler/${stage}.js rewrite + thunk shim exists`, () => {
+      const ROOT = join(TMP, `s4-compiler-${stage}`);
+      const src = fx(`s4-compiler-${stage}/app.scrml`, fixtureFor(symbol, `compiler/${stage}`));
+      const outDir = join(ROOT, "dist");
+
+      const result = compileScrml({
+        inputFiles: [src],
+        outputDir: outDir,
+        write: true,
+        log: () => {},
+      });
+
+      // Compilation must succeed (no fatal errors).
+      expect(result.errors).toEqual([]);
+
+      // The per-stage shim was copied to <outputDir>/_scrml/compiler/<stage>.js.
+      const shimPath = join(outDir, "_scrml", "compiler", `${stage}.js`);
+      expect(existsSync(shimPath)).toBe(true);
+
+      // The emitted server.js rewrites `scrml:compiler/<stage>` →
+      // `./_scrml/compiler/<stage>.js`. Literal scrml: scheme MUST NOT survive.
+      const serverJs = readFileSync(join(outDir, "app.server.js"), "utf8");
+      expect(serverJs).toContain(`from "./_scrml/compiler/${stage}.js"`);
+      expect(serverJs).not.toContain(`from "scrml:compiler/${stage}"`);
+
+      // No W-STDLIB-SHIM-MISSING for this name — the bundler reclassifies
+      // the compiler family to DEFERRED.
+      const shimMissingForThis = (result.warnings || []).filter(
+        (w) => w.code === "W-STDLIB-SHIM-MISSING" && w.message.includes(`scrml:compiler/${stage}`),
+      );
+      expect(shimMissingForThis).toEqual([]);
+
+      // A W-STDLIB-COMPILER-DEFERRED warning fired for this name.
+      const deferredForThis = (result.warnings || []).filter(
+        (w) =>
+          w.code === "W-STDLIB-COMPILER-DEFERRED"
+          && w.message.includes(`scrml:compiler/${stage}`),
+      );
+      expect(deferredForThis.length).toBeGreaterThanOrEqual(1);
+      expect(deferredForThis[0].severity).toBe("warning");
+    });
+  }
+
+  test("scrml:compiler/<stage> thunks throw at call time with attribution", async () => {
+    // Spot-check three diverse stages — the canonical thunk shape is
+    // identical across the family, so the contract is fully exercised by
+    // these representatives.
+    const cases = [
+      { stage: "bs", symbol: "splitBlocks" },
+      { stage: "pa", symbol: "runPA" },
+      { stage: "expr", symbol: "parseExpression" },
+    ];
+    for (const { stage, symbol } of cases) {
+      const mod = await import(`../../runtime/stdlib/compiler/${stage}.js`);
+      expect(typeof mod[symbol]).toBe("function");
+      let threw = false;
+      let msg = "";
+      try {
+        mod[symbol]();
+      } catch (e) {
+        threw = true;
+        msg = String(e?.message ?? e);
+      }
+      expect(threw).toBe(true);
+      expect(msg).toContain(`[scrml:compiler/${stage}]`);
+      expect(msg).toContain(symbol);
+      expect(msg).toContain("DEFERRED");
+      expect(msg).toContain("scrml-compiler-shim-survey-s121-2026-05-22.md");
+    }
+  });
+});
+
+describe("§5: scrml:compiler family — bundler reclassification + regression guards", () => {
+  test("bundleStdlibForRun emits W-STDLIB-COMPILER-DEFERRED (NOT W-STDLIB-SHIM-MISSING) for the umbrella", () => {
+    const outDir = join(TMP, "s5-umbrella-bundle");
+    mkdirSync(outDir, { recursive: true });
+
+    const diagnostics = [];
+    const names = new Set(["compiler"]);
+    const bundled = bundleStdlibForRun(names, outDir, null, diagnostics);
+
+    // Umbrella shim IS on disk (Bug 8 close) — it gets bundled.
+    expect(bundled.has("compiler")).toBe(true);
+
+    // The DEFERRED warning fired exactly once for the umbrella.
+    const deferred = diagnostics.filter((d) => d.code === "W-STDLIB-COMPILER-DEFERRED");
+    expect(deferred.length).toBe(1);
+    expect(deferred[0].severity).toBe("warning");
+    expect(deferred[0].message).toContain("scrml:compiler");
+    expect(deferred[0].message).toContain("DEFERRED");
+    expect(deferred[0].message).toContain("scrml-compiler-shim-survey-s121-2026-05-22.md");
+
+    // No SHIM-MISSING for the umbrella — reclassification is the whole point.
+    const missing = diagnostics.filter((d) => d.code === "W-STDLIB-SHIM-MISSING");
+    expect(missing).toEqual([]);
+  });
+
+  test("bundleStdlibForRun emits W-STDLIB-COMPILER-DEFERRED for each scrml:compiler/<stage> sibling", () => {
+    const outDir = join(TMP, "s5-siblings-bundle");
+    mkdirSync(outDir, { recursive: true });
+
+    const diagnostics = [];
+    const names = new Set(COMPILER_FAMILY_MANIFEST.map((c) => `compiler/${c.stage}`));
+    const bundled = bundleStdlibForRun(names, outDir, null, diagnostics);
+
+    // All 13 per-stage shims were bundled.
+    expect(bundled.size).toBe(13);
+
+    // One DEFERRED warning per stage; zero SHIM-MISSING.
+    const deferred = diagnostics.filter((d) => d.code === "W-STDLIB-COMPILER-DEFERRED");
+    expect(deferred.length).toBe(13);
+    const missing = diagnostics.filter((d) => d.code === "W-STDLIB-SHIM-MISSING");
+    expect(missing).toEqual([]);
+
+    for (const { stage } of COMPILER_FAMILY_MANIFEST) {
+      const forThis = deferred.filter((d) => d.message.includes(`scrml:compiler/${stage}`));
+      expect(forThis.length).toBe(1);
+      // The per-stage shim landed on disk too.
+      expect(existsSync(join(outDir, "_scrml", "compiler", `${stage}.js`))).toBe(true);
+    }
+  });
+
+  test("bundleStdlibForRun emits W-STDLIB-COMPILER-DEFERRED (not SHIM-MISSING) for a synthetic missing compiler/<stage>", () => {
+    // Regression guard: even if a scrml:compiler/<stage> name has no shim
+    // on disk, the warning is DEFERRED (the deferral is a property of the
+    // family, not of shim presence).
+    const outDir = join(TMP, "s5-missing-compiler-stage");
+    mkdirSync(outDir, { recursive: true });
+
+    const diagnostics = [];
+    // A compiler/<X> name with no shim file backing it.
+    const names = new Set(["compiler/nonexistent-stage-z"]);
+    const bundled = bundleStdlibForRun(names, outDir, null, diagnostics);
+
+    // Not bundled (no shim file).
+    expect(bundled.has("compiler/nonexistent-stage-z")).toBe(false);
+
+    // The warning is DEFERRED, NOT SHIM-MISSING.
+    const deferred = diagnostics.filter((d) => d.code === "W-STDLIB-COMPILER-DEFERRED");
+    expect(deferred.length).toBe(1);
+    expect(deferred[0].message).toContain("scrml:compiler/nonexistent-stage-z");
+    const missing = diagnostics.filter((d) => d.code === "W-STDLIB-SHIM-MISSING");
+    expect(missing).toEqual([]);
+  });
+
+  test("non-compiler stdlib names still emit W-STDLIB-SHIM-MISSING (regression guard)", () => {
+    // The compiler-family special-case MUST NOT change behavior for any
+    // other stdlib name. A synthetic non-compiler name with no shim fires
+    // SHIM-MISSING, not DEFERRED.
+    const outDir = join(TMP, "s5-non-compiler-missing");
+    mkdirSync(outDir, { recursive: true });
+
+    const diagnostics = [];
+    const names = new Set(["definitely-not-a-compiler-name-zzz"]);
+    const bundled = bundleStdlibForRun(names, outDir, null, diagnostics);
+
+    expect(bundled.size).toBe(0);
+
+    const missing = diagnostics.filter((d) => d.code === "W-STDLIB-SHIM-MISSING");
+    expect(missing.length).toBe(1);
+    expect(missing[0].message).toContain("scrml:definitely-not-a-compiler-name-zzz");
+    const deferred = diagnostics.filter((d) => d.code === "W-STDLIB-COMPILER-DEFERRED");
+    expect(deferred).toEqual([]);
+  });
+
+  test("a name starting with 'compiler' but NOT 'compiler' / 'compiler/' is NOT reclassified", () => {
+    // Edge case: a name like 'compilerish' must NOT match the family.
+    // The predicate is `name === "compiler" || name.startsWith("compiler/")`.
+    const outDir = join(TMP, "s5-edge-compilerish");
+    mkdirSync(outDir, { recursive: true });
+
+    const diagnostics = [];
+    const names = new Set(["compilerish-not-a-real-stage"]);
+    const bundled = bundleStdlibForRun(names, outDir, null, diagnostics);
+
+    expect(bundled.size).toBe(0);
+
+    // SHIM-MISSING fires (this name is NOT the compiler family).
+    const missing = diagnostics.filter((d) => d.code === "W-STDLIB-SHIM-MISSING");
+    expect(missing.length).toBe(1);
+    const deferred = diagnostics.filter((d) => d.code === "W-STDLIB-COMPILER-DEFERRED");
+    expect(deferred).toEqual([]);
   });
 });
