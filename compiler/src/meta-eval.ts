@@ -25,8 +25,14 @@
  *   E-META-EVAL-002  Re-parsing emitted code failed
  */
 
-import { splitBlocks } from "./block-splitter.js";
-import { buildAST } from "./ast-builder.js";
+// M6.1 (S122) — native-parser migration of the meta-emit re-parse path.
+// `splitBlocks` + `buildAST` were the live BS+TAB pair; `nativeParseFile` is
+// the C1 assembler that returns the same `{ filePath, ast: FileAST, errors }`
+// shape consumed below. The emit() output is scrml source (markup +
+// structural + logic), so the markup-led `nativeParseFile` is the right
+// entry — `parseMarkup` alone would skip the FileAST assembly + hoist + the
+// `<state>` / engine / match recognizers downstream meta-emit nodes rely on.
+import { nativeParseFile } from "../native-parser/parse-file.js";
 import { bodyUsesCompileTimeApis, bodyContainsNestedMeta, createReflect, buildFileTypeRegistry, collectMetaLocals, extractParamBindings } from "./meta-checker.ts";
 import { rewriteBunEval } from "./codegen/rewrite.ts";
 import { exprNodeContainsReactiveRef, emitStringFromTree } from "./expression-parser.ts";
@@ -363,20 +369,32 @@ function reparseEmitted(emittedCode: string, errors: MetaEvalError[], raw: boole
         .replaceAll("\\t", "\t")
         .replaceAll("\x00BACKSLASH\x00", "\\");
     }
-    const bsOutput = splitBlocks("__meta_emit__", normalized);
-    const tabOutput = buildAST(bsOutput);
+    // M6.1 (S122) — native-parser meta-emit re-parse. `nativeParseFile`
+    // returns the same `{ filePath, ast: FileAST, errors }` shape the old
+    // `splitBlocks + buildAST` pair did, so this is a drop-in for the
+    // synthesis path. Diagnostics from the native parser carry a `span`
+    // field; live diagnostics carried `tabSpan`. The defensive accessor
+    // below tries both before falling back to a synthetic span.
+    // Info-level `I-NATIVE-BLOCK-*` diagnostics from the assembler are
+    // non-fatal (per §34.1) and partition into the same W-/I-skip branch
+    // as the legacy W- codes.
+    const tabOutput = nativeParseFile("__meta_emit__", normalized);
 
     if (tabOutput.errors && tabOutput.errors.length > 0) {
       for (const e of tabOutput.errors) {
-        // Skip warnings (W- prefixed codes) — these are non-fatal advisory messages
-        // from the parser (e.g., W-PROGRAM-001 about missing <program> root)
+        // Skip warnings (W- prefixed codes) and native info-level codes
+        // (I- prefixed). These are non-fatal advisory messages from the
+        // parser (e.g., W-PROGRAM-001 about missing <program> root, or the
+        // native I-NATIVE-BLOCK-DROPPED / I-NATIVE-BLOCK-UNMAPPED codes).
         const code = (e as { code?: string }).code || "";
-        if (code.startsWith("W-")) continue;
+        if (code.startsWith("W-") || code.startsWith("I-")) continue;
 
         errors.push(new MetaEvalError(
           "E-META-EVAL-002",
           `Re-parsing emitted meta code failed: ${(e as { message?: string }).message || code}`,
-          (e as { tabSpan?: Span }).tabSpan || { file: "__meta_emit__", start: 0, end: 0, line: 1, col: 1 },
+          (e as { tabSpan?: Span }).tabSpan
+            || (e as { span?: Span }).span
+            || { file: "__meta_emit__", start: 0, end: 0, line: 1, col: 1 },
         ));
       }
     }

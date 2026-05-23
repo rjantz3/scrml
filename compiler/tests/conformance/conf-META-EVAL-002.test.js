@@ -5,8 +5,15 @@
  * block failed.
  *
  * Firing site: meta-eval.ts:375, 385 (reparseEmitted). When `emit(...)` in a
- * `^{}` meta block produces a string that the BS+TAB pipeline fails to parse,
- * each downstream parse error is mapped to a single E-META-EVAL-002.
+ * `^{}` meta block produces a string that the parser fails to parse, each
+ * downstream parse error is mapped to a single E-META-EVAL-002.
+ *
+ * S122 M6.1 — the firing pipeline is `nativeParseFile` (the C1 assembler)
+ * since reparseEmitted migrated off `splitBlocks`+`buildAST`. The native
+ * parser is intentionally more permissive than legacy BS+TAB for some
+ * malformed-attribute cases (no native E-ATTR-001 equivalent), so the
+ * exemplar input is an unclosed-tag form which fires E-CTX-001 under
+ * native and was equally rejected under legacy.
  */
 import { describe, test, expect } from "bun:test";
 import { resolve, dirname } from "path";
@@ -32,12 +39,15 @@ function compile(source, slug) {
 }
 
 describe("CONF-META-EVAL-002: meta-block emits invalid scrml", () => {
-  test('POS: meta block emits markup with an invalid attribute value fires E-META-EVAL-002', () => {
-    // emit("<p if=>broken</>") — the resulting attribute value is illegal,
-    // so the downstream BS+TAB re-parse raises an attribute-shape error
-    // which reparseEmitted surfaces as E-META-EVAL-002.
+  test('POS: meta block emits markup with an unclosed tag fires E-META-EVAL-002', () => {
+    // emit("<p>unclosed") — the markup has no closer, so the re-parse
+    // raises E-CTX-001 (native) / E-CTX-001-style (legacy) which
+    // reparseEmitted surfaces as E-META-EVAL-002. Pre-M6.1 this test
+    // exercised `<p if=>` (a malformed-attribute form); the native
+    // assembler is more permissive there. Unclosed-tag is rejected by
+    // both pipelines.
     const src = `^{
-    emit("<p if=>broken</>")
+    emit("<p>unclosed")
 }
 <p>x</>`;
     const { errors } = compile(src, "metaeval002-pos");

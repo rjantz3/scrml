@@ -776,4 +776,119 @@ describe("meta-eval", () => {
     expect(p).toBeDefined();
   });
 
+  // ---------------------------------------------------------------------------
+  // M6.1 (S122) — native-parser path regression coverage.
+  //
+  // reparseEmitted now routes through nativeParseFile (the C1 assembler from
+  // compiler/native-parser/parse-file.js) rather than the legacy
+  // splitBlocks+buildAST pair. These tests pin the post-migration behavior:
+  //   - emit() of a structural (state/markup-with-attributes) form re-parses
+  //     into a corresponding live ASTNode shape
+  //   - emit() that produces an unclosed-tag form surfaces as E-META-EVAL-002
+  //   - native I- info-codes (I-NATIVE-BLOCK-*) DO NOT surface as
+  //     E-META-EVAL-002 errors — they are filtered alongside W- codes
+  //   - emit() that produces a markup tree containing nested structural blocks
+  //     (e.g. <div><p>...</p></div>) parses with the children chain intact
+  // ---------------------------------------------------------------------------
+
+  test("§27 M6.1: emit() of valid markup re-parses cleanly via nativeParseFile", () => {
+    // A simple healthy markup form — proves the native path returns an
+    // ast.nodes array that reparseEmitted yields as-is. Pre-M6.1 this path
+    // ran through splitBlocks+buildAST; post-M6.1 it runs through the C1
+    // assembler. Same exemplar, same expected output shape.
+    const body = [
+      bareExpr('emit("<p class=hi>x</>")'),
+    ];
+    const typeRegistry = new Map();
+    const errors = [];
+
+    const result = evaluateMetaBlock(metaNode(body), typeRegistry, errors);
+
+    expect(errors).toHaveLength(0);
+    expect(result).not.toBeNull();
+    const p = result.find(n => n.kind === "markup" && n.tag === "p");
+    expect(p).toBeDefined();
+    // attribute survives the native assembler's mapBlocksToNodes path
+    const classAttr = p.attrs?.find(a => a.name === "class");
+    expect(classAttr).toBeDefined();
+  });
+
+  test("§28 M6.1: emit() of unclosed-tag form surfaces E-META-EVAL-002", () => {
+    // The native parser raises E-CTX-001 on an unclosed-tag form, and
+    // reparseEmitted maps that (anything not W-/I-prefixed) into a single
+    // E-META-EVAL-002 — the contract of the wrapper.
+    const body = [
+      bareExpr('emit("<p>unclosed")'),
+    ];
+    const typeRegistry = new Map();
+    const errors = [];
+
+    evaluateMetaBlock(metaNode(body), typeRegistry, errors);
+
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors.some(e => e.code === "E-META-EVAL-002")).toBe(true);
+    // The wrapper must NOT leak the raw native code (E-CTX-001) — every
+    // re-parse failure surfaces as the single contract code.
+    expect(errors.every(e => e.code === "E-META-EVAL-002")).toBe(true);
+  });
+
+  test("§29 M6.1: native I-NATIVE-BLOCK-* info codes do not become E-META-EVAL-002", () => {
+    // The native assembler logs I-NATIVE-BLOCK-DROPPED / I-NATIVE-BLOCK-UNMAPPED
+    // when a Test (_{...}) or ForeignCode (^^{...}) block has no live ASTNode
+    // (parse-file.js mapOneBlock). emit()ing such a form should NOT trip
+    // E-META-EVAL-002 — the I- code is non-fatal per §34.1 and the
+    // reparseEmitted filter must drop it alongside W- codes.
+    const body = [
+      bareExpr('emit("_{ test \\"noop\\" { } }<p>x</>")'),
+    ];
+    const typeRegistry = new Map();
+    const errors = [];
+
+    const result = evaluateMetaBlock(metaNode(body), typeRegistry, errors);
+
+    // No E-META-EVAL-002 from the I- info code path.
+    expect(errors.every(e => e.code !== "E-META-EVAL-002")).toBe(true);
+    expect(result).not.toBeNull();
+    // The healthy <p> markup is preserved even though the test block is dropped.
+    const p = result.find(n => n.kind === "markup" && n.tag === "p");
+    expect(p).toBeDefined();
+  });
+
+  test("§30 M6.1: emit() of nested markup preserves child chain via nativeParseFile", () => {
+    // Verifies that the native assembler's markup recognizer yields a
+    // children-bearing live markup node — proves the nodes->ASTNode mapping
+    // covers nested structure, not just top-level shells.
+    const body = [
+      bareExpr('emit("<div><span>inner</></>")'),
+    ];
+    const typeRegistry = new Map();
+    const errors = [];
+
+    const result = evaluateMetaBlock(metaNode(body), typeRegistry, errors);
+
+    expect(errors).toHaveLength(0);
+    const div = result.find(n => n.kind === "markup" && n.tag === "div");
+    expect(div).toBeDefined();
+    // children chain intact
+    const span = div.children?.find(c => c.kind === "markup" && c.tag === "span");
+    expect(span).toBeDefined();
+  });
+
+  test("§31 M6.1: reparseEmitted return shape — nodes array always returned", () => {
+    // Empty meta produces []. Healthy meta produces [...nodes]. Broken meta
+    // produces [] (the assembler returned no usable tree) but populates
+    // errors. The downstream processNodeList API depends on the [] vs
+    // non-empty distinction, so pin both.
+    const errorsHealthy = [];
+    const resultHealthy = reparseEmitted("<p>x</>", errorsHealthy);
+    expect(Array.isArray(resultHealthy)).toBe(true);
+    expect(resultHealthy.length).toBeGreaterThan(0);
+    expect(errorsHealthy).toHaveLength(0);
+
+    const errorsBroken = [];
+    const resultBroken = reparseEmitted("<p>unclosed", errorsBroken);
+    expect(Array.isArray(resultBroken)).toBe(true);
+    expect(errorsBroken.some(e => e.code === "E-META-EVAL-002")).toBe(true);
+  });
+
 });
