@@ -1,143 +1,155 @@
-# scrmlTS — Session 122 (OPEN)
+# scrmlTS — Session 122 (CLOSE)
 
 **Date:** 2026-05-23
 **Previous:** `handOffs/hand-off-124.md` (S121 CLOSE — rotated at S122 OPEN)
 **Machine:** single-machine (S100 directive holds)
-**HEAD at S122 OPEN:** `136678e5` (S121 wrap commit — pushed)
+**HEAD at S122 OPEN:** `136678e5` · **HEAD at S122 CLOSE:** this wrap commit
+**Wrap:** full 8-step. Push **authorized** ("wrap and push").
 
 ---
 
-## Session-start state
+## S122 net outcome
 
-| Item | Status |
+**Marathon ~10-hour session — 30+ commits across multiple parallel arcs.**
+
+For the full session narrative + per-unit detail see:
+- `master-list.md` §0 S122 CLOSE addendum (authoritative)
+- `docs/changelog.md` 2026-05-23 entry (cross-session audit trail)
+- `../scrml-support/user-voice-scrmlTS.md` Session 122 (user verbatim)
+
+**Three architectural arcs:**
+1. **M6 cutover plan + Wave 1 substantially landed** — 8-unit decomposition, ~80-130h revised total. M6.1/M6.3 landed (splitBlocks→nativeParseFile pattern). M6.4 STOP → M6.4a P2-Form1 synthesis + collect-hoisted shape fix. M6.2 STOP → M6.2a MarkupValue→MarkupNode bridge. M6.5 path-a proven no-op + regression-gated. M6.6 STOP → M6.6.b.1 SURVEY (path-b 40-80h → ~20-30h) + IMPL (`:`-shorthand recognizer + 540-line contract-derivation cookbook).
+2. **R4 expression-catalog continuation surveyed + 2 units landed** — `translateExpr` was built but never wired (A2 closed module, never wired integration); 15 one-line wraps in translate-stmt.js will unblock M6.2b. R4-U1 + R4-U2 landed; U3/U4/U5/U6 sequential.
+3. **MCP-in-scrml deep-dive (v0.4+ candidate filed)** — foldkit's MCP-DevTools-for-LLM-agents shtick mapped to scrml; scrml has more machine-readable static structure than foldkit exposes; v0 read-only MCP 40-80h, no M6 dependency.
+
+**Tests:** 19,907 pass / 0 fail / 175 skip / 1 todo across 754 files (full `bun run test`). Pre-commit gate (unit+integration+conformance) 14,033 pass / 0 fail / 92 skip / 1 todo across 713 files.
+
+---
+
+## State-as-of-close
+
+| Item | Value |
 |---|---|
-| scrmlTS origin sync | clean — 0/0 ahead/behind |
-| scrml-support origin sync | clean commits; 6 untracked items (pre-dating session) — see "Open questions" |
-| Inbox `handOffs/incoming/` | empty (only `read/` subdir) |
-| pkg.json version | 0.6.0 (matches latest tag) |
-| Tags newly fetched | v0.5.0 + v0.6.0 (were on remote, hadn't synced to this clone) |
-| Hook gate | **REGRESSED + RECOVERED PARTIALLY** — see "Open questions" |
-| `.claude/maps/` | watermark `a8904945` — **29+ commits stale, needs refresh** before any dev dispatch |
-| Worktrees | clean (per S121 wrap) |
-| pa.md authority | `../scrml-support/pa-scrmlTS.md` read in full |
-| PRIMER | `docs/PA-SCRML-PRIMER.md` read (§1-§13) |
-| SPEC-INDEX | `compiler/SPEC-INDEX.md` read |
-| Master-list §0 | LIVE dashboard read; §0.6 reflects S121 close |
-| User-voice | S120 + S121 entries read |
+| HEAD | this S122 wrap commit |
+| Tests (full `bun run test`) | 19,907 pass / 0 fail / 175 skip / 1 todo (754 files) |
+| Pre-commit gate | 14,033 pass / 0 fail / 92 skip / 1 todo (713 files) |
+| Native-parser canary strict-pass | 998/1000 held (S121 baseline retained through M6 Wave 1) |
+| pkg.json version | 0.6.0 (unchanged — no tag cut S122) |
+| scrmlTS origin sync | unpushed work — push authorized at wrap |
+| scrml-support origin sync | 3 new deep-dive docs + user-voice append + 6 untracked older items — push authorized at wrap |
+| Inbox `handOffs/incoming/` | empty (all messages moved to `read/`) |
+| Outbox sent | giti FYI-CLOSED on GITI-014 (`handOffs/incoming/2026-05-23-0810-scrmlTS-to-giti-giti-014-fix-landed.md` dropped in giti's inbox) |
+| Hook gate | Configuration B per pa.md S88 (pre-commit + pre-push installed; post-commit lost since session-open, machine-local-only artifact) |
+| `.claude/maps/` | watermark `136678e5` — needs S123 refresh |
+| Worktrees | clean (22 cleaned at this wrap per S83 §6b) |
 
 ---
 
-## Open questions to surface immediately
+## Wave-by-wave landings (chronological)
 
-### 1. POST-COMMIT HOOK LOST (Configuration B downgraded to A+pre-push)
+**Wave 12 close-out (3 units + GITI fix from S121 carry-forward):**
+- Unit X — native-parser-mirror @-sigil cleanup (`bb1f0b9c`)
+- Unit U — type-system tilde-decl reassignment fix (`d90298a2`)
+- Unit W — name-resolver + api.js imp.names → spec.local fix (leaked Unit W commits + `972a5c07` followup with BB rest + emit-expr.ts emitUnary recovery)
+- README server-keyword drop (`62612b44`)
 
-`core.hooksPath = .git/hooks` (Configuration B per pa.md S88), but `.git/hooks/` had only `.sample` files at session start. Re-installed `pre-commit` + `pre-push` via `./scripts/git-hooks/install.sh`. **`post-commit` is GONE** — it was machine-local-only and not source-controlled (scripts/git-hooks/ has no post-commit). The S121 hand-off claimed Configuration B was in place with all three hooks; the regression must have happened between S121 wrap and now.
+**S122 deep-dives + PRIMER:**
+- §48.3.3 SPEC-vs-impl divergence verdict ILLUSORY (`scrml-support/docs/deep-dives/spec-vs-impl-48-3-3-fn-body-cell-mutation-2026-05-23.md`)
+- Auto-state-cell synthesis investigation verdict B kill (`scrml-support/docs/deep-dives/auto-state-cell-synthesis-investigation-2026-05-23.md`)
+- MCP-DevTools-for-LLM-agents in scrml (`scrml-support/docs/deep-dives/scrml-mcp-llm-agent-surface-2026-05-23.md`)
+- M6 joint-retirement cutover plan (`scrml-support/docs/deep-dives/m6-joint-retirement-cutover-plan-2026-05-23.md`)
+- PRIMER §6.2 Match block-form Tier-1 subsection (`6c7ae920`)
 
-Impact: post-commit was the informational full-suite re-run on compiler changes. Loss is non-blocking (pre-commit is the load-bearing gate; pre-push runs full suite + TodoMVC quick check). User decides whether to restore by hand.
+**Wave 13:** Y (RI TRIGGER walker, `d8278c64`) + Z (E-NAME-COLLIDES-STATE did-you-mean, `bf7a6bb6`)
 
-### 2. scrml-support 6 untracked items (pre-dating this session)
+**Wave 14:** AA (W-LINT-013 scope-gate, `90ec1a9b`) + BB (compound-assign + `++`/`--`, `ccb39c94` Bug A leaked + `972a5c07`) + DD (GITI-014, `18b90f12`)
 
-```
-?? tools/
-?? voice/articles/2026-05-09-devto-openers-tier1.md
-?? voice/articles/2026-05-09-devto-reply-modularity-v2-POST.md
-?? voice/articles/2026-05-09-devto-reply-modularity-v2-slow-burn.md
-?? voice/articles/2026-05-09-devto-reply-modularity.md
-?? voice/articles/2026-05-09-devto-reply-modularity-v2-slow-burn.md
-?? voice/articles/2026-05-09-server-keyword-deprecation.md
-```
+**M6 Wave 1:** M6.1 (`52c6ec5a`) + M6.3 (`11e47dc0`) + M6.4 STOP (`9624baf0`) + M6.4a (`30327bd1`) + M6.2 STOP (`a30c2b17`) + M6.2a (`9d64ff4c`) + M6.5 path-a (`d982b7fb`) + M6.6 STOP (`32af3da8`) + M6.6.b.1 SURVEY (`dfae2dab`) + M6.6.b.1 IMPL (`f2d296c5`)
 
-Dated 2026-05-09 — predate S121 by 13 days. Per pa.md Rule 1 (no marketing work unless user raises) these are NOT for PA to dispose without user direction. Surface; await disposition.
+**R4 series:** Survey (`a15c86ff`) + R4-U1 (`2d2fe5bb`) + R4-U2 (`56bd0861`)
 
-### 3. Maps refresh required before any dev dispatch
-
-Per S121 hand-off carry-forward + pa.md maps-discipline protocol. Map watermark `a8904945`; HEAD `136678e5`. 29+ commits stale.
-
-### 4. Carry-forwards from S121 close (no action without user direction)
-
-- **Wave 12 candidates** (well-scoped, ready): Unit U (E-MU-001 `tag-frame.scrml` ~1-2h) + Unit V (auto-state-cell deep-dive ~3-5h survey) + Unit W (imp.names misuse residuals ~2-3h)
-- **SPEC-vs-impl §48.3.3 divergence** (deep-dive candidate) — Unit N surfaced it; spec says fn bodies may mutate local @-cells, compiler fires E-FN-003 anyway
-- **Sibling false-negative class** — RI TRIGGER detection on EXPR_NODE fields (Unit P added CALLEE; TRIGGER not extended)
-- **Bug 9** (dashboard async-not-awaited codegen) — defer to post-M6 per corpus-sweep PLAN
-- **Dashboard still broken at runtime** (Bug 9 / PLAN ledger)
-- **Pre-existing carry-forwards** (unchanged): dev.to article updates (Rule 1) · Living Compiler retraction stamp · scrml.dev canonicalization · SPEC-INDEX Quick-Lookup mini-index stale (S117 flag) · §29 vanilla-interop divergence · Generator policy (S114) · PRIMER match-block subsection update (now possible since P5-7) · MK4 lazy-require ESM cycle · §58 build-story determinism audit · `eb941333` stray commit (S119 P4-2-agent CWD slip — harmless)
+**Unit EE:** I-FN-PROMOTABLE (`a2eb9096`)
 
 ---
 
-## What landed S122 — by wave
+## Open threads / carry-forwards — surface at S123 OPEN
 
-**Wave 1 — dispatched 2026-05-23 ~04:40, both completed ~05:00:**
+**Immediately actionable (file-disjoint sequencing ready):**
 
-- **project-mapper** ✅ — incremental refresh `a8904945` → `136678e5`. 8 maps + primary updated; Task-Shape Routing section added to `primary.map.md` (8 task shapes mapped to 2-4-map reading orders). **Non-compliance flagged:** `.claude/maps/PHASE-4-TOUCH-POINTS.md` is a stale S33 (2026-04-20) artifact from the state-local-transition arc — not a standard map, recommend deref or delete. Pending PA disposition.
+1. **R4-U3** (~1.5h) — wire `translateExpr` at if/while/do-while condExpr sites. Sequential after R4-U2.
+2. **R4-U4** (~2h) — let-decl / const-decl / lin-decl / tilde-decl initExpr sites. UNBLOCKS the 12 prop-substitution test failures.
+3. **R4-U5** (~3h) — lift-expr (non-MV) / propagate-expr / guarded-expr / fail-expr sites.
+4. **R4-U6** (~1.5h) — re-apply M6.2 wip-patch + close M6.2b → bug-5 5/5.
+5. **M6.6.b.2** (~10-15h) — symbol-table consumer migration using b.1 cookbook (recipes + `colonShorthandBody` discriminator ready). Per b.1 SURVEY: preserve `engineMeta.stateChildren` shape; swap source-of-truth from `parseEngineStateChildren` to native-block walker. If shape-preservation works, b.3/b.4/b.5/b.6 collapse to M6.8 deletion + type relocation.
+6. **M6.4b** — deletion fold for ast-builder.js P2-Form1 site (was scoped 0-6h; converts to M6.8 deletion since M6.4a closed the native gap).
+7. **M6.7** Phase A flag flip + corpus-stale residual close — gated on M6.6.b.2-b.6 + M6.5 + R4 series + M6.4b all landed.
+8. **M6.8** Phase B legacy deletion — gated on M6.7 + soak time.
 
-- **scrml-deep-dive on §48.3.3** ✅ — **verdict: illusory divergence.** Under V5-strict (§6.1.3 + §6.2) there is no "local `@`-cell" code shape. The S121 Unit N commit body's claim ("bodies mutate ONLY locally-declared @-cells; could arguably stay fn") was a derivative-doc paraphrase error trusting JS-transliteration shape over SPEC. E-FN-003 IS scope-aware (non-@ check uses `localNames`; @-check unconditional fire is spec-correct per §48.3.3 outer-scope-mutation rule + §6.2 program-scope-only @-cells). The 4 functions don't compile cleanly as `function` either — `parse-markup.scrml` emits 9 E-NAME-COLLIDES-STATE fires today; file is SHAPE-only mirror per its own comment. **Recommended cleanup:** rewrite 4 + 14 sibling sites in `compiler/native-parser/parse-*.scrml` to drop `@`-sigils from local-only mutations (use plain `let p = 0; p = p+1`); then re-evaluate fn-vs-function per function. ~2-2.5h scrml-dev-pipeline dispatch. Doc: `scrml-support/docs/deep-dives/spec-vs-impl-48-3-3-fn-body-cell-mutation-2026-05-23.md`. **Rule 4 lesson banked.** **Adjacency questions noted (out of scope):** (a) Pillar-5b convention — should native-parser .scrml mirrors be SHAPE-only or compile-clean; (b) Did-you-mean diagnostic for E-NAME-COLLIDES-STATE on `let X` + `@X` co-occurrence.
+**Filed queued units (independent of M6 path):**
 
-**Implications for S121's queued Wave 12:**
-- Unit V (auto-state-cell deep-dive) scope likely NARROWS — the deep-dive surfaces evidence that "phantom state cell synthesis" is partly an artifact of corpus mis-use of `@`-sigils. Unit V may fold into / reframe around the cleanup.
-- Unit U (E-MU-001 tag-frame.scrml TILDE-DECL confusion) + Unit W (imp.names misuse at name-resolver + api.js) remain unchanged.
-- NEW Unit X (deep-dive recommended cleanup) — bounded ~2-2.5h, file-disjoint from U/V/W, dispatchable in parallel.
+- **V-kill (~3-4h)** — auto-state-cell kill. Verdict B ratified. Split ast-builder routing (`@x = expr` → `reactive-assign` not `state-decl`) + SYM PASS 3 E-STATE-UNDECLARED diagnostic + 4-case test fixture + corpus regression gate (must stay 0) + SPEC §6.1.1 + §34 amendments.
+- **Unit CC (~1-2h)** — Option-2 enforcement: parser/resolver-level rejection of bare `@x = expr` at default-logic body-top-level. Fires `E-WRITE-NOT-IN-LOGIC-CONTEXT`. SPEC §40.8 amendment clarifying auto-lift covers DECLARATIONS only.
+- **MCP-in-scrml v0** (~40-80h) — read-only MCP layer + `<program mcp>` opt-in attribute + 3 prioritized surfaces (engine subsystem / validity surface / chunks.json topology). v0.4+ candidate; no M6 dependency.
 
-**Sequencing — user picked A (2026-05-23 ~05:10):**
-- Unit X (native-parser-mirror cleanup) + Unit U (tag-frame TILDE-DECL) + Unit W (imp.names → spec.local at name-resolver + api.js) dispatched in parallel ~05:15.
-- Unit V re-scoped post-cleanup (narrower question; evidence from X cleanup will inform whether auto-state-cell synthesis exists / should be killed / should lint).
+**Inbox bug reports (5 logged, NOT triaged — per `feedback_adopter_bug_diligence`):**
 
-**User-surfaced mid-session items:**
-- **README server-keyword cleanup** (line 60 — `server function loadContacts()`). User asked "when can we get rid of the server keyword in the first example of the readme?" PA verified: NOW. `W-DEPRECATED-SERVER-MODIFIER` already fires on this pattern today (SQL body is a Trigger 1/2/3 escalation; warning fires "ONLY when at least one other trigger would escalate the function regardless"). Example also self-contradicts: line 91 already teaches inference. **Fold into Wave 12 wrap commit** unless user redirects.
-- **Dashboard work queued** — user noted "when we can we need to get to the testing dashboard." Per S121 hand-off the dashboard is broken at runtime (Bug 9 — `_scrml_fetch_*` async-not-awaited codegen class) and was filed defer-post-M6 per corpus-sweep PLAN timing rule. User raising it again may indicate priority shift OR a different angle (e.g., fix Bug 9 sooner, OR add a dashboard feature, OR something else). **Surface for direction after Wave 12 lands.**
-- **Context budget note:** user reported "26% ctx so far" at S122 OPEN; will signal wrap timing.
+- GITI-015 — is-some ternary with computed LHS (`.scrml` sidecar)
+- 6nz bugs L/M/N/O status + bug P — stop scope timers runtime chunker gap (`.scrml` sidecar)
+- GITI-017 — silent `not` corruption inside regex (`.scrml` sidecar)
+- 6nz bugs Q/R — Q-1 auto-lift no-init + R if unmount no-op (`.scrml` sidecars)
+- GITI-018 — multi-stdlib-import not rewritten (`.scrml` sidecar)
+- 6nz bugs S/T — bug T double-slash in string truncates and cascades (`.scrml` sidecar)
 
-**Wave 12 IN-FLIGHT STATE (mid-session snapshot 2026-05-23 ~05:50):**
+**TRIAGE BEFORE FIX-DISPATCH** per the new memory rule. Logging only at this stage.
 
-| Unit | Worktree | Branch | Status | Landing |
-|---|---|---|---|---|
-| X | agent-a70cac45c3e21dd80 | changes/s122-w12-native-parser-mirror-at-sigil-cleanup | ✅ done @ `46d759c9` | gate-blocked by W |
-| U | agent-a6aafec7a66348a9e | changes/unit-u-tilde-decl-mu-001 | ✅ done @ `c8e39a3b` (5 clean commits + 8 new tests) — **brief was wrong about site** (bug in type-system must-use-tracker, NOT parser); agent correctly re-routed | gate-blocked by W |
-| W | agent-a361fb7c70311fbb7 | worktree-agent-a361fb7c70311fbb7 | ⚠️ PATH-DISCIPLINE LEAK (incident #5) | partial in main, test failing |
+**Pre-existing carry-forwards (still queued, unchanged from S121):**
 
-**S99 path-discipline leak (incident #5) — Unit W:**
-- WIP startup commit landed in worktree (`262aaf54`) per F4 protocol
-- BUT subsequent edits + commits went to main (3 commits: `abdf4873`/`eb2275da`/`dd28a6a1`)
-- Test files (`aliased-imports-local-name.test.js`, `aliased-imports-cross-file.test.js`) authored in main, **untracked + uncommitted**
-- The unit test fails (specifiers[].length=1 expected, 0 received) — buildImportGraph not populating specifiers correctly
-- Either W is still mid-flight (will commit fix to make test pass) OR terminated with broken state
-- Per pa.md S99 recovery: "if clean, accept the landing and note the process violation" — NOT clean here; the gate IS failing
-- **Recovery decision pending W completion notification**
-
-**Blocker for X + U landings:** RESOLVED at 2026-05-23 ~05:55. W landed test commit `cbfefef2` mid-flight; gate passed. X landed at `bb1f0b9c`; U landed at `d90298a2`. Wave 12 X+U+W all in main; +20 tests across the wave; 0 regressions.
-
-**S99 path-discipline leak (incident #5 — Unit W) — POST-INCIDENT NOTES:**
-- Agent's final report claimed worktree path `/home/bryan/.../agent-a361fb7c70311fbb7` (correct) — startup verification passed
-- But all substantive edits + commits (4 of them, including the test commit `cbfefef2`) landed in main, not the worktree
-- Worktree contains only `262aaf54 WIP(Unit W): start at ...`
-- Hypothesis: agent's Edit/Write tool calls used main-path absolute paths instead of $WORKTREE_ROOT-rooted absolute paths (the S99 canonical leak shape)
-- Result clean (tests pass, code is correct) — per pa.md S99 recovery protocol "if clean, accept landing and note process violation." Noted.
-- Empirical record: S99 incident counter now at 5 in this session-arc post-S99. Platform-level fix (PreToolUse hook rejecting main-path edits from subagents) remains the load-bearing structural mitigation.
-
-**Wave 12 final tallies (X + U + W + README):**
-- 4 commits → main: `bb1f0b9c` (X), `d90298a2` (U), `cbfefef2`+`dd28a6a1`+`eb2275da`+`abdf4873` (W, 4 commits leaked), `62612b44` (README)
-- Tests: 13819 → 13928 (+109 from Wave 12 + W; 8 + 8 = 16 explicitly new). Hmm — count delta is higher than agent reports; some recount artifact.
-- 0 regressions throughout
-- Rule 5 brief-corrections at S122: at least 3 (Unit X scope narrowed, Unit U site re-routed, Unit Y dispatched as sibling-followon — agents-as-second-set-of-eyes pattern holds)
-
-**S122 — Wave 13 dispatches (2026-05-23 ~06:00 — in flight):**
-
-- **Unit V (auto-state-cell investigation, re-scoped)** — scrml-deep-dive — narrower bounded ~2-3h question: does compiler auto-synthesize phantom state cells from undeclared `@x = v` writes? Hypothesis A (auto-synth = SPEC divergence) vs B (errors out, no divergence) vs C (context-dependent) vs D (S121 framing was wrong). Empirical compile-a-test-file experiment settles A vs B. Doc target: `scrml-support/docs/deep-dives/auto-state-cell-synthesis-investigation-2026-05-23.md`.
-- **Unit Y (RI TRIGGER walker EXPR_NODE extension)** — scrml-dev-pipeline, isolation:worktree — sister to S121 Wave 10-P CALLEE walker fix. TRIGGER detection for §12.2 server-only resource access (SQL, protected fields, server-only stdlib) needs the same EXPR_NODE field recursion (condExpr/iterExpr/headerExpr/resultExpr/valueExpr/cStyleParts.*) that CALLEE collection got at S121. Bounded ~1-2h.
-
-**Mid-session done in S122:**
-- README first-example `server` keyword drop at `62612b44`
-- Wave 12 complete (X+U+W)
-- 2 new dispatches in flight (V + Y)
-- PRIMER match-block subsection (this session, in progress — text-only addition documenting §18.0.1 since P5-7 shipped FileAST synthesis at S121)
+- dev.to article updates (Rule 1 — only if user raises)
+- Living Compiler retraction stamp (pending user hand)
+- scrml.dev article canonicalization (not started)
+- SPEC-INDEX Quick-Lookup mini-index stale (S117 flag)
+- §29 vanilla-interop spec↔impl divergence (user has not ruled)
+- Generator (`yield` / `function*`) policy (S114)
+- MK4 lazy-require ESM cycle
+- §58 build-story determinism audit
+- `eb941333` stray commit (S119 P4-2-agent CWD slip — harmless)
+- Bug 9 (dashboard async-not-awaited codegen) — defer to post-M6 per corpus-sweep PLAN
+- Dashboard still broken at runtime (Bug 9)
+- "Pre-existing unrelated bug" surfaced in Wave 14 DD: `~snapshot = {...}` tilde-decl with reactive deps emits `let _scrml_tilde_3 = ~;` (raw tilde sigil leaked)
 
 ---
 
 ## Process incidents — S122
 
-(none yet)
+**S99 path-discipline counter +5 this session.** Most caught at agent-side; one (EE SPEC.md) caught by PA revert. Recurring shape: agent's branch base predates main HEAD landings; PA file-delta clobbers parallel-sibling work. Multiple instances (BB↔DD on emit-expr.ts, M6.6.b.1 IMPL↔M6.4a on parse-markup.js, EE↔U/W on type-system+api.js) — each recovered via manual additive-diff merge on top of main HEAD. **PreToolUse hook closing this surface is the highest-impact infrastructure investment outstanding.**
+
+**PA-side CWD slips post-agent-completion: 3-4 incidents.** The harness's CWD changes to the just-completed worktree; PA must explicitly `cd /home/bryan/scrmlMaster/scrmlTS` before every git op. Recurring; expected.
+
+**Pre-commit hook gate held throughout** — every commit ran the unit+integration+conformance suite; 0 fail on every landing.
+
+**Configuration B hook status — partial regression at S122 OPEN**: pre-commit + pre-push were uninstalled at session open. PA re-installed via `scripts/git-hooks/install.sh`. post-commit was machine-local-only artifact; lost permanently.
 
 ---
 
-## Memos written this session
+## Session-start checklist for S123 PA
 
-(none yet)
+1. Read `pa.md` pointer → `../scrml-support/pa-scrmlTS.md` IN FULL.
+2. Read `docs/PA-SCRML-PRIMER.md` IN FULL (§6.2 Match block-form is new this session).
+3. Read `compiler/SPEC-INDEX.md` IN FULL (§56.9 I-FN-PROMOTABLE new; §34 catalog updated).
+4. Read `master-list.md` §0 IN FULL — the S122 CLOSE addendum is the live delta.
+5. Read this `hand-off.md` (S122 CLOSE) — rotate to `handOffs/hand-off-125.md` at S123 OPEN.
+6. Read recent contentful user-voice — S122 entry covers the M6 cutover + R4 series + foldkit/MCP arc + Option 2 ratification + the new `feedback_adopter_bug_diligence` rule.
+7. Sync hygiene: `git fetch` scrmlTS + scrml-support. Both should be at-origin (push completed at S122 wrap).
+8. Maps refresh (watermark `136678e5` — many commits stale) before any S123 dev dispatch.
+9. **Triage gate at top of session:** if dispatching any of the 5 inbox bugs (GITI-015 / 6nz-LMNOP/P / GITI-017 / 6nz-QR/T / GITI-018), TRIAGE FIRST per `feedback_adopter_bug_diligence` — read repro, classify bug class, propose disposition. Brief carries the classification.
+10. Next-priority: R4-U3 + R4-U4 + R4-U5 + R4-U6 + M6.6.b.2 are the M6.2b-and-M6.7-unblockers; V-kill + Unit CC + Unit EE follow-up CLI subcommand + MCP-in-scrml v0 are the queued additive backlog. User picks.
+11. Report: caught up + next priority.
+
+---
+
+## Tags
+
+#session-122 #CLOSE #m6-cutover-plan-and-wave-1 #r4-expression-catalog-continuation
+#unit-ee-i-fn-promotable #mcp-in-scrml-deep-dive #foldkit-sidequest #option-2-ratification
+#adopter-bug-diligence-rule #19907-tests-0-fail #marathon-session-30-plus-commits
+#wrap-and-push-authorized

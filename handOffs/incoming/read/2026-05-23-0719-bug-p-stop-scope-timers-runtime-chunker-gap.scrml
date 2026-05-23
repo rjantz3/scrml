@@ -1,0 +1,32 @@
+// Bug P minimal repro — runtime chunker tree-shake gap.
+//
+// `_scrml_destroy_scope` (always-included `scope` chunk) calls
+// `_scrml_stop_scope_timers` (conditional `timers` chunk). When the
+// compile unit doesn't use any timer functions, the `timers` chunk is
+// tree-shaken from the emitted runtime, so any scope teardown throws
+//
+//     ReferenceError: _scrml_stop_scope_timers is not defined
+//
+// at runtime, killing all subsequent reactive effects.
+//
+// Detection: compile this file, then
+//
+//     grep -c "function _scrml_stop_scope_timers" dist/scrml-runtime.*.js
+//         → 0   (no definition)
+//     grep -c "_scrml_stop_scope_timers(" dist/scrml-runtime.*.js
+//         → 1   (the call site inside _scrml_destroy_scope)
+//
+// Runtime: open in browser, click `+` a couple of times → console
+// throws ReferenceError; reactive `@x` stops updating in the <div>.
+//
+// Tested against scrmlTS HEAD 18b90f12.
+
+<program>
+
+@x = 0
+function bump() { @x = @x + 1 }
+
+<div>${@x}</>
+<button onclick=bump()>+</>
+
+</program>

@@ -1,0 +1,31 @@
+// Bug Q-1 minimal repro — `<program>` body opening with `@cell` decl
+// loses module-level init emission for ALL `@cell` decls in the body.
+//
+// Detection: compile this file, then
+//
+//     grep '_scrml_init_set' dist/bug-q-1.client.js
+//         → no output (zero init lines)
+//     grep '_scrml_reactive_get("second").length' dist/bug-q-1.client.js
+//         → 2 hits: one at module top (the bare dependency probe), one
+//           inside the DOMContentLoaded handler.
+//
+// Runtime: the bare top-level probe `_scrml_reactive_get("second").length;`
+// runs at module load, reads `undefined` (no init), throws
+// "Cannot read properties of undefined (reading 'length')",
+// halting the rest of module init (including DOMContentLoaded wiring).
+//
+// Workaround: precede the @cell decls with a `function` or `type` decl,
+// OR wrap the @cell decls in an explicit `${ ... }` block (the form
+// W-PROGRAM-REDUNDANT-LOGIC currently tells adopters to remove).
+//
+// Compiler: scrmlTS HEAD 18b90f12.
+
+<program>
+
+@first = 0
+@second = []
+
+<div>first: ${@first}</>
+<div>second-len: ${@second.length}</>
+
+</program>

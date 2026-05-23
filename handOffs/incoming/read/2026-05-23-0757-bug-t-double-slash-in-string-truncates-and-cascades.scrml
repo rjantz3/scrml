@@ -1,0 +1,36 @@
+// Bug T minimal repro — `//` inside a string literal is treated as
+// comment-start by BS preprocessing. The string is truncated at the
+// `//`, the rest of the line is dropped, AND any subsequent `@cell`
+// module-level declarations are silently dropped from init emission.
+//
+// Detection:
+//
+//     scrml compile bug-t.scrml -o dist/
+//     grep '_scrml_init_set' dist/bug-t.client.js
+//         → 1 line (uri), value truncated to "file:"
+//     grep '"other"' dist/bug-t.client.js
+//         → no match (declaration eaten)
+//
+// Workaround: construct URLs with `//` via concatenation, avoiding
+// raw `//` in any string literal:
+//
+//     @uri = "file:" + String.fromCharCode(47) + String.fromCharCode(47) + "/path"
+//
+// Sibling of Bug L (BS brace-counter not string-aware). Likely the
+// same root cause class — BS preprocessing doesn't respect string-
+// literal boundaries on either `{`/`}` or `//`. Native-parser M6
+// likely closes both together.
+//
+// Compiler: scrmlTS HEAD 18b90f12.
+
+<program>
+
+function nop() { return 0 }
+
+@uri    = "file:///playground.scrml"
+@other  = "plain"
+
+<div>uri: ${@uri}</>
+<div>other: ${@other}</>
+
+</program>

@@ -1,0 +1,38 @@
+// Bug R minimal repro — `if=@derived` mounts on first true but
+// NEVER UNMOUNTS when the derived flips back to false. Toggling
+// the controlling state accumulates clones instead of alternating
+// which sibling is visible.
+//
+// Run: scrml dev this file. Open in browser. The page initially
+// shows "ON". Click `toggle` once: "OFF" appears NEXT TO "ON".
+// Click again: BOTH stay visible. Both `if=` siblings are mounted
+// forever once their condition has ever been true.
+//
+// Expected: alternation. Observed: monotonic accumulation.
+//
+// Adopter impact: any mode-badge / multi-state visibility-toggle
+// pattern using mutually-exclusive `if=@derivedReactive` siblings
+// produces "all states visible at once" after the user has touched
+// each one. Pattern is extremely common in vim-mode editors,
+// authentication UI (signed-in/signed-out), accordion-style toggles,
+// etc.
+//
+// Compiler: scrmlTS HEAD 18b90f12. (Workaround precondition: this
+// repro uses fn-first ordering to dodge Bug Q.)
+
+<program>
+
+function flip() { @on = !@on }
+
+@on = true
+
+const @isOn  = @on == true
+const @isOff = @on == false
+
+<div>
+    <span if=@isOn>ON</>
+    <span if=@isOff>OFF</>
+</>
+<button onclick=flip()>toggle</>
+
+</program>

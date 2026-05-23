@@ -1,0 +1,61 @@
+// Repro 11 — GITI-015: `is some` in TERNARY position is not lowered
+// when the LHS is a computed member access (`arr[i + 1] is some ?` etc.).
+// The token `is some` is emitted literally into the .js output,
+// producing invalid JS.
+//
+// Failure isolation:
+//
+//   x is some ? a : b                  ✅ lowers correctly (plain identifier)
+//   if (x is some) ...                 ✅ lowers correctly (if-predicate)
+//   if (arr[i] is some) ...            ✅ lowers correctly (if-predicate + computed)
+//   arr[i + 1] is some ? a : b         ❌ left literal — invalid JS
+//
+// To reproduce (scrmlTS @ cbfefef):
+//   bun run compiler/src/cli.js compile ui/repros/repro-11-is-some-ternary.scrml -o /tmp/r11 --mode library
+//   bun --check /tmp/r11/repro-11-is-some-ternary.js
+//     → error: Expected ";" but found "is"
+//
+// Surfaced while porting `parseSyncArgs` from sync.js to scrml in
+// giti S10 slice 9 dogfood — the natural translation of the JS
+// `args[i + 1] || null` idiom is `args[i + 1] is some ? args[i + 1] : not`,
+// which hit this case.
+//
+// Author-level workaround: hoist the computed access into a local
+//   const v = arr[i + 1]
+//   const result = v is some ? v : fb
+// or use an if-statement (but that doesn't help in expression position
+// — e.g. inside an object literal, function argument, or return).
+
+${
+    // v1 — return form. BROKEN.
+    export function v1(args, i) {
+        return args[i + 1] is some ? args[i + 1] : "fb"
+    }
+
+    // v2 — assignment form. BROKEN.
+    export function v2(args) {
+        let r = "x"
+        r = args[0] is some ? args[0] : "fb"
+        return r
+    }
+
+    // v3 — inside a for-loop. BROKEN.
+    export function v3(args) {
+        let r = "x"
+        for (let i = 0; i < args.length; i = i + 1) {
+            r = args[i + 1] is some ? args[i + 1] : "fb"
+        }
+        return r
+    }
+
+    // CONTROL — plain identifier form, this one is FINE.
+    export function control(x) {
+        return x is some ? "has" : "none"
+    }
+
+    // CONTROL — computed access in if-predicate, also FINE.
+    export function controlIfPred(args) {
+        if (args[0] is some) return "has"
+        return "none"
+    }
+}

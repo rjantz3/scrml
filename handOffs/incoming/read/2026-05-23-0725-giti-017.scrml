@@ -1,0 +1,65 @@
+// Repro 13 — GITI-017: scrml's `not` keyword substitution is applied
+// INSIDE regex literals, silently corrupting the regex source.
+//
+// SEVERITY: silent-corruption class (cf. scrmlTS S42 bug A5). Source
+// compiles clean, JS parses, runtime executes — the regex is just a
+// different regex than the author wrote.
+//
+// Two substitution rules observed, depending on what follows `not`
+// inside the regex source:
+//
+//   `not<whitespace>`  → `!`        (boolean-negation lowering)
+//   `not<non-space>`   → `null`     (absence-sentinel lowering)
+//
+// Examples (verified against scrmlTS @ cbfefef in --mode library):
+//
+//   Source                         Compiled
+//   ─────────────────────────      ───────────────────────────
+//   /not a jj repo/i           →   /!a jj repo/i
+//   /not in a git/i            →   /!in a git/i
+//   /bookmark.*not found/i     →   /bookmark.*!found/i
+//   /(not) a jj repo/i         →   /(null) a jj repo/i
+//   /not[ ]a jj repo/i         →   /null[ ]a jj repo/i
+//   /(?:not) a jj repo/i       →   /(?:null) a jj repo/i
+//
+// CORRECTLY preserved (no top-level `not` token in the regex source):
+//
+//   /n[o]t a jj repo/i         →   /n[o]t a jj repo/i  (char class breaks the lex)
+//   /nothing changed/i         →   /nothing changed/i  ("not" inside "nothing")
+//   /no jj repo/i              →   /no jj repo/i       ("no" alone)
+//
+// Hypothesis: the regex lexer doesn't fence off scrml keyword
+// substitution. The same path that lowers `x is not` → `x === null` and
+// boolean `not x` → `!x` is also running inside `/.../` bodies.
+//
+// Surfaced in giti S10 slice 12 (porting friendlyError from
+// src/engine/jj-cli.js — three patterns mangled, only one was caught by
+// the test suite; the other two would have shipped silently broken).
+
+${
+    // BROKEN — `not ` (whitespace after) substituted with `!`.
+    export function shouldMatchNotJjRepo(input) {
+        return /not a jj repo/i.test(input)
+    }
+
+    // BROKEN — same.
+    export function shouldMatchNotFound(input) {
+        return /bookmark.*not found/i.test(input)
+    }
+
+    // BROKEN — `(not)` substituted with `(null)`.
+    export function shouldMatchGroupedNot(input) {
+        return /(not) a jj repo/i.test(input)
+    }
+
+    // CONTROL — `nothing` preserved (no `not<terminator>` boundary).
+    export function shouldMatchNothing(input) {
+        return /nothing changed/i.test(input)
+    }
+
+    // WORKAROUND — char class around `o` splits the `not` token at the
+    // lexer level. Survives.
+    export function workaroundCharClass(input) {
+        return /n[o]t a jj repo/i.test(input)
+    }
+}

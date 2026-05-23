@@ -1,0 +1,41 @@
+// Repro 14 — GITI-018: only ONE `scrml:` stdlib import per file gets
+// rewritten to `./_scrml/X.js` in library-mode emit. Subsequent
+// `scrml:` imports are left as bare URLs that Bun cannot resolve.
+//
+// Failure isolation:
+//
+//   Single scrml: import       → rewritten ✅
+//   Multiple scrml: imports    → only the FIRST is rewritten; the
+//                                rest stay as `scrml:X` bare URLs ❌
+//   Comments before imports    → even the first stdlib import does
+//                                NOT get rewritten ❌
+//
+// Tested against scrmlTS @ cbfefef in `--mode library`.
+//
+// To reproduce:
+//   bun run compiler/src/cli.js compile repro.scrml -o /tmp/r --mode library
+//   head -8 /tmp/r/repro.js
+//     → import { resolve } from "./_scrml/path.js"          (rewritten)
+//     → import { existsSync } from "scrml:fs"               (NOT rewritten)
+//     → import { cwd } from "scrml:process"                 (NOT rewritten)
+//
+// Runtime:
+//   bun --check /tmp/r/repro.js
+//     → error: Cannot resolve invalid URL 'scrml:fs' ...
+//
+// Author workarounds (both used in giti S10 slice 14):
+//   (a) Keep ONE scrml: import (the "anchor") to trigger _scrml/ shim
+//       generation, then import the rest directly from `./_scrml/X.js`
+//       siblings the anchor produced. Reliable.
+//   (b) Don't put comments between `${` and the first scrml: import.
+
+${
+    // BROKEN — three scrml: imports. Only the first gets rewritten.
+    import { resolve } from "scrml:path"
+    import { existsSync } from "scrml:fs"
+    import { cwd } from "scrml:process"
+
+    export function probe() {
+        return resolve(cwd(), existsSync("/") ? "yes" : "no")
+    }
+}
