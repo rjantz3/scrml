@@ -754,3 +754,266 @@ describe("C1 §8 — §17.1.1 if-chain collapse", () => {
     expect(chain.id).toBe(chain.branches[0].element.id);
   });
 });
+
+// =============================================================================
+// C1 §9 — SPEC §18.0.1 match block-form synthesis (P5-7 / Wave 9 Unit J, S121).
+//
+// A `<match for=Type [on=expr]> ... </>` element is the Tier 1 case-analysis
+// container of the §17.0 ladder. The native assembler routes it to a dedicated
+// `match-block` ASTNode rather than a plain `markup` node — mirroring the live
+// pipeline (ast-builder.js L10688). Closes the final DIFF-deep-seq residual.
+//
+// THE LIVE SHAPE — `match-block` carries:
+//   { id, kind: "match-block", forType, onExprRaw, armsRaw, bodyChildren,
+//     span, openerHadSpaceAfterLt }
+// NO `children` field — the canary's deep walk follows `children` only, so
+// `match-block` is a LEAF in the deep node-kind sequence.
+// =============================================================================
+
+// firstMatchBlock — locate the first `match-block` ASTNode in a FileAST,
+// recursing into markup `children` + logic/meta `body`. `null` when none.
+function firstMatchBlock(ast) {
+  let found = null;
+  function walk(nodes) {
+    for (const n of nodes || []) {
+      if (found !== null) return;
+      if (n.kind === "match-block") { found = n; return; }
+      if (Array.isArray(n.children)) walk(n.children);
+      if (Array.isArray(n.body)) walk(n.body);
+    }
+  }
+  walk(ast.nodes);
+  return found;
+}
+
+describe("C1 §9 — SPEC §18.0.1 match block-form synthesis", () => {
+  test("`<match for=Phase>` with arms synthesizes a `match-block` node", () => {
+    // The minimal admit shape: `for=Phase` + one bare-body arm. The block-
+    // form is a markup-context construct, so it lives inside a markup
+    // wrapper (`<div>`); a top-level bare match would still parse but the
+    // wrapper exercises the `case "markup":` children-recursion path.
+    const src = [
+      "<div>",
+      "  <match for=Phase>",
+      "    <Idle><p>idle</p></>",
+      "    <_><p>else</p></>",
+      "  </match>",
+      "</div>",
+    ].join("\n");
+    const r = nativeParseFile("app.scrml", src);
+    const mb = firstMatchBlock(r.ast);
+    expect(mb).not.toBe(null);
+    expect(mb.kind).toBe("match-block");
+    expect(mb.forType).toBe("Phase");
+  });
+
+  test("`<match for=Phase on=@cell>` admits with the on-expression populated", () => {
+    // The `on=` attribute is OPTIONAL per §18.0.1 (auto-implied from a
+    // scoped `<engine for=Type>`), but when present it is captured verbatim
+    // into `onExprRaw`. The native attr tokenizer admits `on=@cell` as a
+    // `variable-ref` value; the synth slices the value span out of source.
+    const src = [
+      "<div>",
+      "  <match for=Phase on=@cell>",
+      "    <Idle><p>idle</p></>",
+      "    <_><p>else</p></>",
+      "  </match>",
+      "</div>",
+    ].join("\n");
+    const r = nativeParseFile("app.scrml", src);
+    const mb = firstMatchBlock(r.ast);
+    expect(mb).not.toBe(null);
+    expect(mb.forType).toBe("Phase");
+    expect(mb.onExprRaw).toBe("@cell");
+  });
+
+  test("`<match for=Phase>` (no on=) leaves `onExprRaw` null", () => {
+    // §18.0.1 auto-implies `on=` from a scoped engine. The block-form node
+    // does not synthesize a placeholder — `onExprRaw` is null when the
+    // author omitted `on=`. SYM PASS downstream fires E-MATCH-ON-REQUIRED
+    // when no engine is in scope.
+    const src = "<div><match for=Phase><Idle>x</></match></div>";
+    const r = nativeParseFile("app.scrml", src);
+    const mb = firstMatchBlock(r.ast);
+    expect(mb).not.toBe(null);
+    expect(mb.onExprRaw).toBe(null);
+  });
+
+  test("`<match>` (no for=) is still routed to match-block (forType=\"\")", () => {
+    // §18.0.1 REQUIRES `for=`, but a missing `for=` is a SEMANTIC error
+    // surfaced downstream — NOT a structural reason to skip the routing.
+    // The native assembler still synthesizes `match-block` with `forType:
+    // ""`, mirroring the live builder (ast-builder.js L10630). A future
+    // SYM PASS fires the diagnostic.
+    const src = "<div><match><Idle>x</></match></div>";
+    const r = nativeParseFile("app.scrml", src);
+    const mb = firstMatchBlock(r.ast);
+    expect(mb).not.toBe(null);
+    expect(mb.forType).toBe("");
+  });
+
+  test("the `match-block` node has NO `children` field — it is a deep-walk LEAF", () => {
+    // The canary's nodeKindSequence walks `children` only. To mirror live's
+    // shape (which has `bodyChildren` but no `children`), the native
+    // synthesizer must not emit a `children` field. The arm bodies are
+    // reachable via `bodyChildren` but invisible to the canary deep walk.
+    const src = [
+      "<div>",
+      "  <match for=Phase on=@p>",
+      "    <Idle><p>idle</p></>",
+      "    <_><p>else</p></>",
+      "  </match>",
+      "</div>",
+    ].join("\n");
+    const r = nativeParseFile("app.scrml", src);
+    const mb = firstMatchBlock(r.ast);
+    expect(mb).not.toBe(null);
+    expect("children" in mb).toBe(false);
+  });
+
+  test("`bodyChildren` carries the walkable arm-body block array", () => {
+    // The native parser already produces structured Markup children for
+    // each arm (`<Idle>`, `<_>`, etc.) — preserved verbatim on
+    // `bodyChildren`. The live pipeline carries this field but populates it
+    // with a single text block (live's BS treats match body as raw-content
+    // per STRUCTURAL_RAW_BODY_ELEMENTS); the native shape is fidelity-
+    // additive.
+    const src = [
+      "<div>",
+      "  <match for=Phase on=@p>",
+      "    <Idle><p>idle</p></>",
+      "    <_><p>else</p></>",
+      "  </match>",
+      "</div>",
+    ].join("\n");
+    const r = nativeParseFile("app.scrml", src);
+    const mb = firstMatchBlock(r.ast);
+    expect(mb).not.toBe(null);
+    expect(Array.isArray(mb.bodyChildren)).toBe(true);
+    expect(mb.bodyChildren.length).toBeGreaterThan(0);
+  });
+
+  test("`armsRaw` carries the body text (between opener-end and closer)", () => {
+    // `armsRaw` is the verbatim source slice between the opener `>` and the
+    // closer `</match>` — Phase 2's match-statechild-parser re-tokenizes it
+    // into a structured MatchArmEntry[]. The trimmed form is what live
+    // produces.
+    const src = [
+      "<div>",
+      "  <match for=Phase>",
+      "    <Idle>idle</>",
+      "    <_>else</>",
+      "  </match>",
+      "</div>",
+    ].join("\n");
+    const r = nativeParseFile("app.scrml", src);
+    const mb = firstMatchBlock(r.ast);
+    expect(mb).not.toBe(null);
+    expect(typeof mb.armsRaw).toBe("string");
+    // The arm openers should be visible in the captured body text.
+    expect(mb.armsRaw.includes("<Idle>")).toBe(true);
+    expect(mb.armsRaw.includes("<_>")).toBe(true);
+  });
+
+  test("the `_` wildcard arm (Wave 6-A `_` admit) is a recognized arm child", () => {
+    // Wave 6-A landed `_` as a tag-name-start per SPEC §4.1; this admit
+    // surfaces here as `<_>` arm children inside the match body. The native
+    // parser produces Markup blocks for them, preserved on bodyChildren.
+    const src = [
+      "<div>",
+      "  <match for=Phase>",
+      "    <_><p>fallback</p></>",
+      "  </match>",
+      "</div>",
+    ].join("\n");
+    const r = nativeParseFile("app.scrml", src);
+    const mb = firstMatchBlock(r.ast);
+    expect(mb).not.toBe(null);
+    // The `_` arm appears in armsRaw (the body slice).
+    expect(mb.armsRaw.includes("<_>")).toBe(true);
+    // And the bodyChildren block array includes a child for it.
+    const wildcardChild = mb.bodyChildren.find(
+      c => c && c.kind === "Markup" && c.name === "_");
+    expect(wildcardChild).toBeDefined();
+  });
+
+  test("DISCRIMINATION negative — `<engine for=Phase>` is NOT a match-block", () => {
+    // The discriminator is the tag NAME (`match` vs `engine`), not the
+    // `for=` attribute. An engine block sharing the `for=Phase` shape MUST
+    // route to engine-decl, not match-block. This guards the brief's
+    // explicit fence: `<engine>` blocks composing state-children must not
+    // be misclassified.
+    const src = "<engine for=Phase initial=.Idle>\n  <Idle/>\n</>";
+    const r = nativeParseFile("app.scrml", src);
+    expect(firstMatchBlock(r.ast)).toBe(null);
+    const eng = r.ast.nodes.find(n => n.kind === "engine-decl");
+    expect(eng).toBeDefined();
+    expect(eng.governedType).toBe("Phase");
+  });
+
+  test("DISCRIMINATION negative — a plain `<div for=Phase>` is NOT a match-block", () => {
+    // Belt-and-suspenders: the `for=` attribute alone never promotes a
+    // generic markup element to match-block. Only the literal tag name
+    // `match` triggers the routing.
+    const src = "<div for=Phase>not a match</div>";
+    const r = nativeParseFile("app.scrml", src);
+    expect(firstMatchBlock(r.ast)).toBe(null);
+    const div = r.ast.nodes.find(n => n.kind === "markup");
+    expect(div).toBeDefined();
+    expect(div.tag).toBe("div");
+  });
+
+  test("nested match block (inside a markup parent's children) synthesizes correctly", () => {
+    // The mapping is depth-agnostic — a `<match>` nested inside a `<div>`
+    // body resolves identically to a top-level one (the dispatch lives in
+    // `mapOneBlock`, which `synthMarkupNode` recurses into for children).
+    const src = [
+      "<div>",
+      "  <section>",
+      "    <match for=Phase on=@p>",
+      "      <Idle><p>idle</p></>",
+      "      <_><p>else</p></>",
+      "    </match>",
+      "  </section>",
+      "</div>",
+    ].join("\n");
+    const r = nativeParseFile("app.scrml", src);
+    const mb = firstMatchBlock(r.ast);
+    expect(mb).not.toBe(null);
+    expect(mb.kind).toBe("match-block");
+    expect(mb.forType).toBe("Phase");
+    expect(mb.onExprRaw).toBe("@p");
+  });
+
+  test("the `match-block` node draws a unique id from the shared idGen", () => {
+    // Every synthesized node draws from the single shared `idGen` counter.
+    // A match-block at index N has a distinct id from its siblings.
+    const src = [
+      "<div>",
+      "  <match for=Phase>",
+      "    <Idle>x</>",
+      "    <_>y</>",
+      "  </match>",
+      "</div>",
+    ].join("\n");
+    const r = nativeParseFile("app.scrml", src);
+    const mb = firstMatchBlock(r.ast);
+    expect(mb).not.toBe(null);
+    expect(typeof mb.id).toBe("number");
+    // Collect every numeric id reachable in the FileAST; match-block's id
+    // must be unique among them.
+    const ids = allIds(r.ast);
+    const sameId = ids.filter(i => i === mb.id);
+    expect(sameId.length).toBe(1);
+  });
+
+  test("`openerHadSpaceAfterLt` is false for the no-space form `<match>`", () => {
+    // The no-space `<match>` opener is TagKind.ScrmlStructural — NOT a
+    // StateOpener — so `openerHadSpaceAfterLt` is false.
+    const src = "<div><match for=Phase><Idle>x</></match></div>";
+    const r = nativeParseFile("app.scrml", src);
+    const mb = firstMatchBlock(r.ast);
+    expect(mb).not.toBe(null);
+    expect(mb.openerHadSpaceAfterLt).toBe(false);
+  });
+});

@@ -74,6 +74,23 @@
 //   independently folds the same engine into `machineDecls` — both pipelines
 //   carry the engine in `machineDecls` exactly once, so no double-count.
 //
+// THE MATCH-BLOCK DISCRIMINATION (SPEC §18.0.1 — P5-7 / Wave 9 Unit J, S121):
+//   A `<match for=Type [on=expr]> ... </>` element is the Tier 1 case-analysis
+//   container of the §17.0 ladder. The LIVE pipeline routes it to a dedicated
+//   `match-block` ASTNode (ast-builder.js L10688) — NOT a plain `markup` ASTNode.
+//   `isMatchBlock` is the read-side discriminator: a `Markup` block named
+//   "match" routes to `synthMatchBlockNode`. The synthesizer mirrors live's
+//   shape:
+//     { id, kind: "match-block", forType, onExprRaw, armsRaw, bodyChildren,
+//       span, openerHadSpaceAfterLt }
+//   NO `children` field — `match-block` is a LEAF in the canary's deep walk
+//   (which follows `children` only). The arm bodies are reachable via
+//   `bodyChildren` but not visible to the canary's deep-kind sequence.
+//   Routed BEFORE the state-block check in `mapOneBlock`, so a `< match>`
+//   opener (space-after-`<` — TagKind.StateOpener) is not mis-claimed by the
+//   state path. Both `<match>` (ScrmlStructural) and `< match>` (StateOpener)
+//   resolve here. Closes the final DIFF-deep-seq residual.
+//
 // THE IF-CHAIN COLLAPSE (§17.1.1 — M5 gap-ledger Phase 4, Unit P4-4):
 //   `if=` / `else-if=` / `else` attribute-conditional `markup` siblings are
 //   NOT independent ASTNodes. The LIVE pipeline runs `collapseIfChains`

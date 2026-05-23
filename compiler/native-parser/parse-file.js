@@ -210,6 +210,19 @@ function mapBlocksToNodes(blocks, idGen, source, errors) {
 function mapOneBlock(block, idGen, source, errors) {
     const kind = block.kind;
 
+    if (kind === "Markup" && isMatchBlock(block)) {
+        // Match block-form (SPEC §18.0.1, P5-7 / S121 Wave 9 Unit J — closes
+        // the final DIFF-deep-seq residual). A `<match for=Type [on=expr]> ...
+        // </>` element is the Tier 1 case-analysis container (§17.0 ladder).
+        // The LIVE pipeline routes it to a dedicated `match-block` ASTNode
+        // (ast-builder.js L10688-L10697); native must mirror that placement.
+        //
+        // Routed BEFORE the state-block check so a `< match>` opener (space
+        // after `<` — TagKind.StateOpener) is not mis-claimed by the state
+        // path. Both `<match>` (ScrmlStructural) and `< match>` (StateOpener)
+        // resolve here.
+        return synthMatchBlockNode(block, idGen, source);
+    }
     if (kind === "Markup" && isStateBlock(block)) {
         // A state block — either a `< Ident ...>` state opener
         // (TagKind.StateOpener — §4.3 space-after-`<`) OR a no-space
@@ -412,6 +425,185 @@ function synthStateNode(block, idGen, source, errors) {
 // deep follow-up could share ONE node instance across both collections.
 function synthEngineNode(block, idGen, source) {
     return synthEngineDecl(block, () => stampId(idGen), source);
+}
+
+// =============================================================================
+// MATCH BLOCK — SPEC §18.0.1 (P5-7 / Wave 9 Unit J, S121).
+//
+// A `<match for=Type [on=expr]> ... </>` element is the Tier 1 case-analysis
+// container of the §17.0 ladder. The LIVE pipeline emits it as a dedicated
+// `match-block` ASTNode (ast-builder.js L10688-L10697); native must mirror
+// that placement to close the final DIFF-deep-seq residual.
+//
+// THE LIVE SHAPE — `match-block` carries:
+//   { id, kind: "match-block", forType, onExprRaw, armsRaw, bodyChildren,
+//     span, openerHadSpaceAfterLt }
+// NO `children` field — the canary's `nodeKindSequence` walks `children` only,
+// so `match-block` is a LEAF in the deep walk (the arm bodies are reachable
+// via `bodyChildren` but not visible to the canary).
+//
+//   forType                — REQUIRED bareword type name (the `for=Type`
+//                            attribute). Empty string when absent (a parse-
+//                            time gap surfaced by SYM PASS downstream).
+//   onExprRaw              — the `on=expr` attribute value text, or `null`
+//                            when absent (SPEC §18.0.1 auto-implies on= from a
+//                            scoped `<engine for=Type>`).
+//   armsRaw                — the body text after the opener line, before the
+//                            closer. Phase 2 `match-statechild-parser` re-
+//                            tokenizes this into MatchArmEntry[].
+//   bodyChildren           — the walkable arm-body block array (the native
+//                            children, preserved verbatim). Mirrors live's
+//                            `bodyChildren` field (engine-decl precedent).
+//                            ADDITIVE field; deep walk does not see it.
+//   openerHadSpaceAfterLt  — true iff the opener was `< match` (a TagKind
+//                            StateOpener). Mirrors live's stamp.
+//
+// DISCRIMINATOR — `block.name === "match"`. The `<engine>` block has
+// `block.name === "engine"` — distinct, no collision. The `for=` attribute is
+// shared between match and engine but the tag name is the authoritative gate.
+// =============================================================================
+
+// isMatchBlock — calculation (predicate). True iff `block` is a native `Markup`
+// block named "match" — i.e. a `<match ...>` / `< match ...>` element. The
+// `<match>` element is the SPEC §18.0.1 block-form Tier 1 case-analysis
+// container; routed to `match-block` ASTNode in `mapOneBlock`.
+function isMatchBlock(block) {
+    if (block === undefined || block === null) return false;
+    if (block.kind !== "Markup") return false;
+    return block.name === "match";
+}
+
+// synthMatchBlockNode — SYNTHESIZE a live `MatchBlockNode` (ast-builder.js
+// L10688) from a native `Markup` block named "match". The native attrs already
+// carry `for=` and `on=` as parsed AttrNode values; bodyChildren is the native
+// children array (preserved verbatim for downstream walking).
+function synthMatchBlockNode(block, idGen, source) {
+    const attrs = Array.isArray(block.attrs) ? block.attrs : [];
+
+    // forType — the `for=Type` bareword. Native attribute tokenizer admits
+    // `for=Phase` as a `variable-ref` value (value.name === "Phase"); the
+    // quoted form `for="Phase"` lands as `string-literal` (value.value ===
+    // "Phase"). Recover the bare identifier from either shape; "" when the
+    // attribute is missing or unrecoverable (a parse-time gap surfaced
+    // downstream by SYM PASS — §18.0.1 REQUIRES `for=`).
+    const forType = readForType(attrs);
+
+    // onExprRaw — the `on=expr` attribute value text. The native attr value
+    // already carries a `span`; slice the source verbatim to capture the
+    // author's expression in its original syntactic form. `null` when `on=`
+    // is absent (per §18.0.1 the `on=` attribute is OPTIONAL — auto-implied
+    // when a scoped `<engine for=Type>` is in scope).
+    const onExprRaw = readOnExprRaw(attrs, source);
+
+    // armsRaw — the body text between the opener-end and the closer. Use the
+    // first-child / last-child spans to bracket the body range. When the
+    // block has no children (an empty body), armsRaw is "".
+    const armsRaw = collectArmsRaw(block, source);
+
+    // bodyChildren — the native children array, preserved verbatim. Mirrors
+    // live's `bodyChildren` field (the engine-decl precedent). ADDITIVE: the
+    // canary's deep walk only follows `children`, so leaving `bodyChildren`
+    // here does not contribute to the deep-kind sequence.
+    const bodyChildren = Array.isArray(block.children) ? block.children : [];
+
+    return {
+        id: stampId(idGen),
+        kind: "match-block",
+        forType,
+        onExprRaw,
+        armsRaw,
+        bodyChildren,
+        span: block.span !== undefined ? block.span : null,
+        // A `< match` opener (space after `<`) is classified TagKind.StateOpener
+        // by the native opener scanner; `<match>` is ScrmlStructural. Mirrors
+        // the engine-decl `openerHadSpaceAfterLt` stamp.
+        openerHadSpaceAfterLt: block.tagKind === "StateOpener",
+    };
+}
+
+// readForType — read the `for=` attribute as a bareword type identifier, or ""
+// when absent / unrecoverable. Both `variable-ref` (unquoted `for=Phase`) and
+// `string-literal` (quoted `for="Phase"`) attribute values yield the bare
+// identifier text.
+function readForType(attrs) {
+    for (const attr of attrs) {
+        if (attr === undefined || attr === null) continue;
+        if (attr.name !== "for") continue;
+        const value = attr.value;
+        if (value === undefined || value === null) return "";
+        if (value.kind === "variable-ref") {
+            return typeof value.name === "string" ? value.name : "";
+        }
+        if (value.kind === "string-literal") {
+            return typeof value.value === "string" ? value.value : "";
+        }
+        return "";
+    }
+    return "";
+}
+
+// readOnExprRaw — read the `on=` attribute value as its verbatim source slice,
+// or null when absent. The attr value's span (set by the tag-frame tokenizer)
+// brackets the source range; slicing recovers the author's expression in its
+// original syntactic form (`@phase`, `${expr}`, `"literal"`, etc.).
+function readOnExprRaw(attrs, source) {
+    for (const attr of attrs) {
+        if (attr === undefined || attr === null) continue;
+        if (attr.name !== "on") continue;
+        const value = attr.value;
+        if (value === undefined || value === null) return null;
+        // `absent` valued — the `on` bareword with no `=`. Treat as null
+        // (a parse-time degenerate; SYM PASS downstream surfaces it as
+        // E-MATCH-ON-REQUIRED when no scoped engine auto-implies it).
+        if (value.kind === "absent") return null;
+        // Span-slice the verbatim source. The value's span brackets the
+        // attribute value text — for `on=@phase` this is "@phase"; for
+        // `on=${expr}` this is "${expr}"; for `on="literal"` this is "literal"
+        // (the span excludes the surrounding quotes — that's the live shape).
+        const span = value.span;
+        if (span !== undefined && span !== null
+            && typeof span.start === "number" && typeof span.end === "number"
+            && typeof source === "string"
+            && span.start >= 0 && span.end <= source.length
+            && span.start <= span.end) {
+            return source.slice(span.start, span.end);
+        }
+        // Span unavailable — fall back to the typed-payload text.
+        if (value.kind === "variable-ref" && typeof value.name === "string") {
+            return value.name;
+        }
+        if (value.kind === "expr" && typeof value.raw === "string") {
+            return value.raw;
+        }
+        if (value.kind === "string-literal" && typeof value.value === "string") {
+            return value.value;
+        }
+        return null;
+    }
+    return null;
+}
+
+// collectArmsRaw — the body text of a match block (between the opener `>` and
+// the closer `</...>`). Bracketed by the first-child's span.start and the
+// last-child's span.end; "" when the block has no children. Trimmed of leading
+// / trailing whitespace to match live's `armsRaw.trim()`.
+function collectArmsRaw(block, source) {
+    const children = Array.isArray(block.children) ? block.children : [];
+    if (children.length === 0) return "";
+    if (typeof source !== "string") return "";
+    let lo = -1;
+    let hi = -1;
+    for (const child of children) {
+        if (child === undefined || child === null) continue;
+        const span = child.span;
+        if (span === undefined || span === null) continue;
+        if (typeof span.start !== "number" || typeof span.end !== "number") continue;
+        if (lo < 0 || span.start < lo) lo = span.start;
+        if (hi < 0 || span.end > hi) hi = span.end;
+    }
+    if (lo < 0 || hi < 0 || lo > hi) return "";
+    if (lo < 0 || hi > source.length) return "";
+    return source.slice(lo, hi).trim();
 }
 
 // synthTextNode — SYNTHESIZE a live `TextNode` (ast.ts:249) from a native
