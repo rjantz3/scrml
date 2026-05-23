@@ -664,16 +664,87 @@ describe("§5e — R4-U3 wired if/while/do-while condExpr sites", () => {
         expect(out[0].condExpr.kind).toBe("member");
     });
 
-    // Locking test: confirms R4-U4 scope (let-decl / const-decl initExpr) is
-    // STILL needed. When R4-U4 lands and initExpr becomes lowercase, this lock
-    // should be flipped to its closed-state assertion (mirroring the R4-U1 →
-    // R4-U2 → R4-U3 lock flip pattern).
-    test("LOCK: let-decl initExpr still leaks PascalCase Binary (R4-U4 NOT done)", () => {
+    // R4-U4 closed this LOCK; new LOCK at R4-U5 (lift-expr / propagate /
+    // guarded / fail expression-CHILD sites) lives in the §5f block below.
+    // The §5e LOCK was flipped from PascalCase `Binary` to lowercase `binary`
+    // when makeVarDeclNode started wrapping initExpr with translateExpr
+    // (mirroring the R4-U1 → R4-U2 → R4-U3 lock flip pattern).
+    test("let-decl initExpr Binary is now live `binary` (R4-U4 closed)", () => {
         const out = translate("let x = a + b;");
         expect(out[0].kind).toBe("let-decl");
         expect(out[0].initExpr).not.toBeNull();
-        // Should be PascalCase Binary until R4-U4 lands; flip to `binary` then.
-        expect(out[0].initExpr.kind).toBe("Binary");
+        // R4-U4: makeVarDeclNode now wraps with translateExpr; live lowercase `binary`.
+        expect(out[0].initExpr.kind).toBe("binary");
+    });
+});
+
+// =============================================================================
+// §5f — R4-U4: translateExpr wired at let-decl / const-decl / lin-decl /
+// tilde-decl initExpr sites. Closes the variable-declaration branch of the
+// R1 ride-through surface (bug-5 5b: M6.2b prop-substitution path leaked
+// PascalCase initExprs through let-decl / const-decl). The §5e LOCK that
+// asserted PascalCase Binary for let-decl was flipped above. The LOCK at the
+// end of this block guards an as-yet-unwired site (lift-expr.expr.exprNode
+// at a non-MarkupValue expression-CHILD position) so R4-U5 scope remains
+// visible.
+//
+// Coverage:
+//   - let-decl initExpr Binary  -> live `binary`
+//   - const-decl initExpr Member -> live `member`
+//   - lin-decl initExpr Call    -> live `call`
+//   - tilde-decl initExpr Object -> live `object`
+//   - LOCK: lift-expr.expr.exprNode at expression-CHILD (non-MV) position
+//     STILL leaks PascalCase Binary — R4-U5 territory.
+// =============================================================================
+describe("§5f — R4-U4 wired let/const/lin/tilde-decl initExpr sites", () => {
+    test("let-decl initExpr Binary is live `binary` (R4-U4)", () => {
+        const out = translate("let x = a + b;");
+        expect(out[0].kind).toBe("let-decl");
+        expect(out[0].initExpr).not.toBeNull();
+        // `a + b` is a Binary; R4-U4 brings live lowercase `binary`.
+        expect(out[0].initExpr.kind).toBe("binary");
+    });
+
+    test("const-decl initExpr Member is live `member` (R4-U4)", () => {
+        const out = translate("const y = obj.flag;");
+        expect(out[0].kind).toBe("const-decl");
+        expect(out[0].initExpr).not.toBeNull();
+        // `obj.flag` is a Member; R4-U4 brings live lowercase `member`.
+        expect(out[0].initExpr.kind).toBe("member");
+    });
+
+    test("lin-decl initExpr Call is live `call` (R4-U4)", () => {
+        const out = translate("lin q = compute();");
+        expect(out[0].kind).toBe("lin-decl");
+        expect(out[0].initExpr).not.toBeNull();
+        // `compute()` is a Call; R4-U4 brings live lowercase `call`.
+        expect(out[0].initExpr.kind).toBe("call");
+    });
+
+    test("tilde-decl initExpr Object is live `object` (R4-U4)", () => {
+        const out = translate("~snap = { count: 0 };");
+        expect(out[0].kind).toBe("tilde-decl");
+        expect(out[0].initExpr).not.toBeNull();
+        // `{ count: 0 }` is an Object; R4-U4 brings live lowercase `object`.
+        expect(out[0].initExpr.kind).toBe("object");
+    });
+
+    // Locking test: confirms R4-U5 scope (lift-expr / propagate-expr /
+    // guarded-expr / fail-expr expression-CHILD ride-throughs in
+    // translate-stmt.js) is STILL needed. `lift x + y;` produces a lift-expr
+    // whose `expr.exprNode` is the native Binary (non-MarkupValue path —
+    // M6.2a closed the MarkupValue path only). When R4-U5 lands and
+    // makeLiftExpr's exprNode slot becomes lowercase, flip this lock's
+    // assertion `"Binary"` -> `"binary"` and update the comment to point at
+    // the next R4 unit (or close the chain).
+    test("LOCK: lift-expr (non-MV) expr.exprNode still leaks PascalCase Binary (R4-U5 NOT done)", () => {
+        const out = translate("lift x + y;");
+        expect(out[0].kind).toBe("lift-expr");
+        expect(out[0].expr).not.toBeNull();
+        expect(out[0].expr.kind).toBe("expr");
+        expect(out[0].expr.exprNode).not.toBeNull();
+        // Should be PascalCase Binary until R4-U5 lands; flip to `binary` then.
+        expect(out[0].expr.exprNode.kind).toBe("Binary");
     });
 });
 

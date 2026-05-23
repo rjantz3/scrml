@@ -660,8 +660,15 @@ function makeVarDeclNode(declKind, declarator, counter) {
     };
     // `initExpr` is present only when the declarator HAS an initializer — the
     // live ast-builder omits it for an init-free `let x;`.
+    // R4-U4: wrap with translateExpr so emit-expr / type-system / dependency-
+    // graph / component-expander all receive a live lowercase ExprNode (the
+    // PascalCase native shape leaks otherwise — bug-5 5b: M6.2b prop
+    // substitution failure surface). The outer `if` already gates undefined/
+    // null, so the wrap is called unconditionally inside the guard (no
+    // defensive double-guard needed — contrast R4-U3's condExpr sites where
+    // the slot shape itself is nullable).
     if (init !== undefined && init !== null) {
-        node.initExpr = init;
+        node.initExpr = translateExpr(init);
     }
     return node;
 }
@@ -683,8 +690,9 @@ function makeLinDeclNode(stmt, counter) {
         init: "",
         span: spanOrZero(stmt.span),
     };
+    // R4-U4: wrap with translateExpr (parity with makeVarDeclNode above).
     if (stmt.init !== undefined && stmt.init !== null) {
-        node.initExpr = stmt.init;
+        node.initExpr = translateExpr(stmt.init);
     }
     return node;
 }
@@ -721,8 +729,9 @@ function makeTildeDeclNode(stmt, counter) {
         init: "",
         span: spanOrZero(stmt.span),
     };
+    // R4-U4: wrap with translateExpr (parity with makeVarDeclNode / makeLinDeclNode).
     if (stmt.init !== undefined && stmt.init !== null) {
-        node.initExpr = stmt.init;
+        node.initExpr = translateExpr(stmt.init);
     }
     return node;
 }
