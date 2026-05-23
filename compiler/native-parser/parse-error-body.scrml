@@ -54,7 +54,7 @@ ${
     // block with `block.bodyText` set, parse the body into `block.arms`
     // — the live ErrorEffectNode payload.
     // -----------------------------------------------------------------
-    export fn shapeErrorEffectBlock(block) {
+    export function shapeErrorEffectBlock(block) {
         if (block is not || block.kind != "ErrorEffect") return block
         const bodyText = typeof block.bodyText == "string" ? block.bodyText : ""
         block.arms = parseErrorArms(bodyText)
@@ -68,7 +68,7 @@ ${
     // `::Type(binding) -> handler` form. Mirrors the live `tokenizeError`
     // + `parseErrorTokens` pipeline fused into one character scan.
     // -----------------------------------------------------------------
-    export fn parseErrorArms(bodyText) {
+    export function parseErrorArms(bodyText) {
         const arms = []
         const src = typeof bodyText == "string" ? bodyText : ""
         const len = src.length
@@ -139,7 +139,7 @@ ${
     //   `_`        -> { pattern: "_", end }
     // Returns `not` (absent) when no pattern begins at `p`.
     // -----------------------------------------------------------------
-    fn scanErrorPattern(src, p) {
+    function scanErrorPattern(src, p) {
         const len = src.length
         if (p >= len) return not
 
@@ -184,7 +184,7 @@ ${
     //   `ident`   -> { binding: "ident", end }   (bare form)
     // Returns `not` (absent) when no binding begins at `p`.
     // -----------------------------------------------------------------
-    fn scanErrorBinding(src, p) {
+    function scanErrorBinding(src, p) {
         const len = src.length
         if (p >= len) return not
 
@@ -238,7 +238,7 @@ ${
     // depth 0, or end of body. A `|` inside a `{...}` / `(...)` / `[...]`
     // group, or inside a string, does NOT end the handler.
     // -----------------------------------------------------------------
-    fn scanErrorHandler(src, p) {
+    function scanErrorHandler(src, p) {
         const len = src.length
         @q = p
         @depth = 0
@@ -277,7 +277,7 @@ ${
     // return the offset one past the matching closing `quote`. Backslash
     // escapes are honored.
     // -----------------------------------------------------------------
-    fn skipErrorString(src, p, quote) {
+    function skipErrorString(src, p, quote) {
         const len = src.length
         @q = p + 1
         while (@q < len) {
@@ -298,7 +298,7 @@ ${
     // skipErrorWhitespace — CALCULATION. Return the offset of the first
     // non-whitespace character at or after `p`.
     // -----------------------------------------------------------------
-    fn skipErrorWhitespace(src, p) {
+    function skipErrorWhitespace(src, p) {
         const len = src.length
         @q = p
         while (@q < len && isErrorWhitespace(src.charAt(@q))) {

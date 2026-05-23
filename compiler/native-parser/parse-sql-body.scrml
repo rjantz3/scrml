@@ -58,7 +58,7 @@ ${
     // Returns { chainEnd } — the source offset where the trailing chain
     // ends (equal to `afterBrace` when no chain trails the block).
     // -----------------------------------------------------------------
-    export fn shapeSqlBlock(block, source, afterBrace) {
+    export function shapeSqlBlock(block, source, afterBrace) {
         if (block is not || block.kind != "Sql") {
             return { chainEnd: afterBrace }
         }
@@ -110,7 +110,7 @@ ${
     // Returns { calls: { method, args }[], end } — `end` is one past the
     // last consumed chain byte (equal to `start` when no chain present).
     // -----------------------------------------------------------------
-    export fn scanChainedCalls(source, start) {
+    export function scanChainedCalls(source, start) {
         const calls = []
         if (typeof source != "string") return { calls: calls, end: start is some ? start : 0 }
 

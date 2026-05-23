@@ -60,7 +60,7 @@ ${
     //   block.typedAttrs    — TypedAttrDecl[] (empty for a plain state)
     // A non-state Markup block (or a missing block) is left untouched.
     // -----------------------------------------------------------------
-    export fn shapeStateBlock(block) {
+    export function shapeStateBlock(block) {
         if (block is not) return block
         if (block.kind != "Markup") return block
 
@@ -148,7 +148,7 @@ ${
     //   phantom `state-constructor-def`. An empty-typeExpr decl is dropped
     //   here so `stateNodeKind` discrimination stays correct.
     // -----------------------------------------------------------------
-    export fn parseTypedAttrTokens(tokens) {
+    export function parseTypedAttrTokens(tokens) {
         const typedAttrs = []
         if (Array.isArray(tokens)) {
             for (const tok of tokens) {
@@ -179,7 +179,7 @@ ${
     // an `=` peels the default; a trailing `?` peels the optional marker;
     // a default value implies optional.
     // -----------------------------------------------------------------
-    export fn splitTypedAttr(name, rawTypeExpr, span) {
+    export function splitTypedAttr(name, rawTypeExpr, span) {
         @typeExpr = (typeof rawTypeExpr == "string" ? rawTypeExpr : "").trim()
         @defaultValue = not
 
