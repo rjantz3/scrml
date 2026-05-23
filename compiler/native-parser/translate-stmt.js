@@ -946,7 +946,10 @@ function makeIfStmt(stmt, counter) {
         kind: "if-stmt",
         consequent: branchToBody(stmt.consequent, counter) || [],
         alternate: branchToBody(stmt.alternate, counter),
-        condExpr: stmt.test === undefined ? null : stmt.test,
+        // R4-U3: wrap with translateExpr so emit-expr.ts switches receive a live
+        // lowercase ExprNode. The null-guard mirrors R4-U2's idiom; if syntax
+        // is always required, the undefined/null branch is defensive-only.
+        condExpr: stmt.test === undefined || stmt.test === null ? null : translateExpr(stmt.test),
         span: spanOrZero(stmt.span),
     };
 }
@@ -960,7 +963,8 @@ function makeWhileStmt(stmt, counter, label) {
         kind: "while-stmt",
         condition: "",
         body: branchToBody(stmt.body, counter) || [],
-        condExpr: stmt.test === undefined ? null : stmt.test,
+        // R4-U3: wrap with translateExpr (parity with makeIfStmt above).
+        condExpr: stmt.test === undefined || stmt.test === null ? null : translateExpr(stmt.test),
         span: spanOrZero(stmt.span),
     };
     if (label !== null && label !== undefined) {
@@ -980,7 +984,8 @@ function makeDoWhileStmt(stmt, counter, label) {
         kind: "do-while-stmt",
         condition: "",
         body: branchToBody(stmt.body, counter) || [],
-        condExpr: stmt.test === undefined ? null : stmt.test,
+        // R4-U3: wrap with translateExpr (parity with makeIfStmt above).
+        condExpr: stmt.test === undefined || stmt.test === null ? null : translateExpr(stmt.test),
         span: spanOrZero(stmt.span),
     };
     if (label !== null && label !== undefined) {

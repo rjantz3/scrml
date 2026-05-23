@@ -618,16 +618,62 @@ describe("§5d — R4-U2 wired for-stmt-family ride-through sites", () => {
         expect(out[0].cStyleParts.updateExpr.kind).toBe("assign");
     });
 
-    // Locking test: confirms R4-U3 scope (if/while/do-while condExpr) is STILL
-    // needed. When R4-U3 lands and condExpr becomes lowercase `binary`, this
-    // lock should be flipped to its closed-state assertion (mirroring the
-    // R4-U1 → R4-U2 lock flip pattern).
-    test("LOCK: if-stmt condExpr still leaks PascalCase Binary (R4-U3 NOT done)", () => {
+    // R4-U3 closed this LOCK; new LOCK at R4-U4 (let-decl initExpr) lives in
+    // the §5e block below. The §5d LOCK was flipped from PascalCase `Binary`
+    // to lowercase `binary` when makeIfStmt started wrapping condExpr with
+    // translateExpr (mirroring the R4-U1 → R4-U2 lock flip pattern).
+    test("if-stmt condExpr is now live `binary` (R4-U3 closed)", () => {
         const out = translate("if (x < 1) { use(x); }");
         expect(out[0].kind).toBe("if-stmt");
         expect(out[0].condExpr).not.toBeNull();
-        // Should be PascalCase Binary until R4-U3 lands; flip to `binary` then.
-        expect(out[0].condExpr.kind).toBe("Binary");
+        // R4-U3: makeIfStmt now wraps with translateExpr; live lowercase `binary`.
+        expect(out[0].condExpr.kind).toBe("binary");
+    });
+});
+
+// =============================================================================
+// §5e — R4-U3: translateExpr wired at if-stmt / while-stmt / do-while-stmt
+// condExpr sites. Closes the if/while/do-while branch of the R1 ride-through
+// surface (bug-5 5a: control-flow condExpr leaked PascalCase Exprs). The §5d
+// LOCK that asserted PascalCase Binary for if-stmt was flipped above. The
+// LOCK at the end of this block guards an as-yet-unwired site (let-decl
+// initExpr) so R4-U4 scope remains visible.
+// =============================================================================
+describe("§5e — R4-U3 wired if/while/do-while condExpr sites", () => {
+    test("if-stmt condExpr bare-identifier is live `ident` (R4-U3)", () => {
+        const out = translate("if (x) { use(x); }");
+        expect(out[0].kind).toBe("if-stmt");
+        expect(out[0].condExpr).not.toBeNull();
+        // `x` is an Ident; R4-U3 brings live lowercase `ident`.
+        expect(out[0].condExpr.kind).toBe("ident");
+    });
+
+    test("while-stmt condExpr Binary comparison is live `binary` (R4-U3)", () => {
+        const out = translate("while (a < b) { use(a); }");
+        expect(out[0].kind).toBe("while-stmt");
+        expect(out[0].condExpr).not.toBeNull();
+        // `a < b` is a Binary; R4-U3 brings live lowercase `binary`.
+        expect(out[0].condExpr.kind).toBe("binary");
+    });
+
+    test("do-while-stmt condExpr Member expression is live `member` (R4-U3)", () => {
+        const out = translate("do { tick(); } while (obj.flag);");
+        expect(out[0].kind).toBe("do-while-stmt");
+        expect(out[0].condExpr).not.toBeNull();
+        // `obj.flag` is a Member; R4-U3 brings live lowercase `member`.
+        expect(out[0].condExpr.kind).toBe("member");
+    });
+
+    // Locking test: confirms R4-U4 scope (let-decl / const-decl initExpr) is
+    // STILL needed. When R4-U4 lands and initExpr becomes lowercase, this lock
+    // should be flipped to its closed-state assertion (mirroring the R4-U1 →
+    // R4-U2 → R4-U3 lock flip pattern).
+    test("LOCK: let-decl initExpr still leaks PascalCase Binary (R4-U4 NOT done)", () => {
+        const out = translate("let x = a + b;");
+        expect(out[0].kind).toBe("let-decl");
+        expect(out[0].initExpr).not.toBeNull();
+        // Should be PascalCase Binary until R4-U4 lands; flip to `binary` then.
+        expect(out[0].initExpr.kind).toBe("Binary");
     });
 });
 
