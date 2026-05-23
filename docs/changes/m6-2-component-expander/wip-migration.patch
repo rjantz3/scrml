@@ -1,0 +1,231 @@
+diff --git a/compiler/src/component-expander.ts b/compiler/src/component-expander.ts
+index a134480a..b46d8550 100644
+--- a/compiler/src/component-expander.ts
++++ b/compiler/src/component-expander.ts
+@@ -42,8 +42,7 @@
+  * Parallelism: per-file — fully parallel across Bun workers.
+  */
+ 
+-import { splitBlocks } from "./block-splitter.js";
+-import { buildAST } from "./ast-builder.js";
++import { nativeParseFile } from "../native-parser/parse-file.js";
+ import { exprNodeMatchesIdent, exprNodeContainsCall, emitStringFromTree, parseExprToNode } from "./expression-parser.ts";
+ import type {
+   Span,
+@@ -556,6 +555,173 @@ function normalizeTokenizedRaw(raw: string): string {
+  * Complex nested component bodies (those with markup children containing logic
+  * blocks) are not supported and produce E-COMPONENT-021.
+  */
++/**
++ * Split a string at TOP-LEVEL commas (commas not inside `{}`/`()`/`[]`).
++ * Mirrors `splitAtTopLevelCommas` in ast-builder.js L2147 — the parsing
++ * dependency for parsePropsBlockRaw below.
++ */
++function splitAtTopLevelCommasCE(raw: string): string[] {
++  const parts: string[] = [];
++  let depth = 0;
++  let current = "";
++  for (const ch of raw) {
++    if (ch === "{" || ch === "(" || ch === "[") { depth++; current += ch; }
++    else if (ch === "}" || ch === ")" || ch === "]") { depth--; current += ch; }
++    else if (ch === "," && depth === 0) { parts.push(current); current = ""; }
++    else { current += ch; }
++  }
++  if (current.trim()) parts.push(current);
++  return parts;
++}
++
++/**
++ * Parse a raw props-block source string into a structured PropDecl[] array.
++ *
++ * Mirrors ast-builder.js `parsePropsBlock` (L2182), but local to CE so the
++ * M6.2 native-parser re-parse path produces the same downstream shape the
++ * legacy BS+TAB re-parse path produced. The native parser's tag-frame
++ * (tag-frame.js L885-889) emits `{ kind: "props-block", propsDecl: <raw> }`
++ * carrying the raw source string; the LIVE BS+TAB path emits PropDecl[].
++ * Component-expander downstream code (L671 `for (const decl of propsDecl)`,
++ * L756, L1818) walks a PropDecl[] — so the helper below upgrades the native
++ * string shape to the live PropDecl[] shape inside `reparseSynthesizedFile`.
++ *
++ * Errors are surfaced as CE-shaped `{ code, message, span }` records and
++ * folded into the result's `errors` array, identical to the live behavior.
++ */
++function parsePropsBlockRaw(
++  raw: string,
++  span: Span
++): { props: PropDecl[]; errors: Array<{ code: string; message: string; span: Span; severity?: string }> } {
++  const props: PropDecl[] = [];
++  const errors: Array<{ code: string; message: string; span: Span; severity?: string }> = [];
++  const parts = splitAtTopLevelCommasCE(raw);
++  for (const part of parts) {
++    const trimmed = part.trim();
++    if (!trimmed) continue;
++    let bindable = false;
++    let propText = trimmed;
++    if (propText.startsWith("bind ")) {
++      bindable = true;
++      propText = propText.slice(5).trim();
++    }
++    const match = propText.match(/^([A-Za-z_][A-Za-z0-9_]*)(\?)?\s*:\s*(.+)$/);
++    if (!match) {
++      errors.push({
++        code: "E-COMPONENT-019",
++        message: `E-COMPONENT-019: Invalid prop declaration \`${trimmed}\` in props block. ` +
++          `Expected format: \`name: type\`, \`name?: type\`, \`name: type = default\`, ` +
++          `\`bind name: type\` (bindable prop), or \`name: fn-signature\` (function prop).`,
++        span,
++      });
++      continue;
++    }
++    const name = match[1];
++    const optional = match[2] === "?";
++    let typeAndDefault = match[3].trim();
++    let defaultValue: string | null = null;
++    const eqMatch = typeAndDefault.match(/^(.+?)\s*=(?!=|>)\s*(.+)$/);
++    if (eqMatch) {
++      typeAndDefault = eqMatch[1].trim();
++      defaultValue = eqMatch[2].trim();
++    }
++    const isFunctionProp = typeAndDefault.includes("=>") || typeAndDefault.trim().startsWith("(");
++    props.push({
++      name,
++      type: typeAndDefault,
++      optional: optional || defaultValue !== null,
++      default: defaultValue,
++      bindable,
++      isFunctionProp,
++      isSnippet: false,
++      snippetParamType: null,
++    } as PropDecl);
++  }
++  return { props, errors };
++}
++
++/**
++ * Walk the FileAST and upgrade any `props-block` AttrValue carrying a
++ * string `propsDecl` (native shape) into one carrying a PropDecl[] (live
++ * shape). MUTATES the AttrValue in place — the native AttrValue is freshly
++ * synthesized per parse so the mutation is local to this call's tree.
++ */
++function upgradeNativePropsDeclsInFileAST(
++  ast: FileAST,
++  errors: Array<{ code: string; message: string; span: Span; severity?: string }>
++): void {
++  function visitMarkup(node: MarkupNode): void {
++    if (Array.isArray(node.attrs)) {
++      for (const attr of node.attrs) {
++        const val = attr?.value as AttrValue | undefined;
++        if (val && (val as { kind?: string }).kind === "props-block") {
++          const propsBlock = val as { kind: "props-block"; propsDecl: unknown; span: Span };
++          if (typeof propsBlock.propsDecl === "string") {
++            const parsed = parsePropsBlockRaw(propsBlock.propsDecl, propsBlock.span);
++            propsBlock.propsDecl = parsed.props;
++            for (const e of parsed.errors) errors.push(e);
++          }
++        }
++      }
++    }
++    if (Array.isArray(node.children)) {
++      for (const child of node.children) {
++        if (child && (child as { kind?: string }).kind === "markup") {
++          visitMarkup(child as MarkupNode);
++        }
++      }
++    }
++  }
++  for (const n of ast.nodes ?? []) {
++    if (n && (n as { kind?: string }).kind === "markup") {
++      visitMarkup(n as MarkupNode);
++    }
++  }
++}
++
++/**
++ * M6.2 — Re-parse a synthesized scrml source string into a `FileAST`-shaped
++ * result, replacing the legacy `splitBlocks` + `buildAST` round-trip.
++ *
++ * Background: component expansion synthesizes scrml source twice — once for
++ * component-def body re-parsing (parseComponentBody) and once for re-parsing
++ * a tokenized component reference inside a logic expression (walkLogicBody
++ * re-parse path). Both sites historically passed the synthesized source
++ * through `splitBlocks` then `buildAST`, producing a `{ filePath, ast, errors }`
++ * shape. The native parser's `nativeParseFile` is a drop-in replacement that
++ * returns the identical shape — see api.js:843-850 for the upstream TAB-stage
++ * routing precedent under `--parser=scrml-native`.
++ *
++ * Error-shape note: `buildAST` emits `TABErrorInfo` (carrying `tabSpan`);
++ * `nativeParseFile` emits diagnostics carrying `span` and optional `severity`.
++ * Callers that mapped `e.tabSpan` must now read `e.span`. Info-severity
++ * diagnostics (e.g. `I-NATIVE-BLOCK-DROPPED`) are emitted by the native
++ * assembler and should be filtered alongside warnings when checking for real
++ * parse failures.
++ *
++ * Shape adapter: the native parser emits `{ kind: "props-block",
++ * propsDecl: <raw-source-string> }` (tag-frame.js L885), whereas the live
++ * BS+TAB path emits `{ kind: "props-block", propsDecl: PropDecl[] }`.
++ * Component-expander downstream code walks PropDecl[]. The helper
++ * `upgradeNativePropsDeclsInFileAST` post-processes the native FileAST to
++ * parse any raw props-block string into PropDecl[], restoring shape parity
++ * with the legacy path. Any structural errors from prop parsing are folded
++ * into the helper's returned `errors` array.
++ */
++function reparseSynthesizedFile(
++  filePath: string,
++  source: string
++): { ast: FileAST; errors: Array<{ code: string; message: string; span: Span; severity?: string }> } {
++  const result = nativeParseFile(filePath, source) as {
++    filePath: string;
++    ast: FileAST;
++    errors: Array<{ code: string; message: string; span: Span; severity?: string }>;
++  };
++  const errors = result.errors ?? [];
++  upgradeNativePropsDeclsInFileAST(result.ast, errors);
++  return { ast: result.ast, errors };
++}
++
+ function parseComponentBody(
+   raw: string,
+   componentName: string,
+@@ -564,23 +730,24 @@ function parseComponentBody(
+   try {
+     const normalized = normalizeTokenizedRaw(raw);
+ 
+-    const bsOut = splitBlocks(filePath + "#" + componentName, normalized);
+-    const tabOut = buildAST(bsOut) as { ast: FileAST; errors: TABErrorInfo[] };
++    const reparsed = reparseSynthesizedFile(filePath + "#" + componentName, normalized);
+ 
+     // Collect ALL markup nodes from the parsed result (multi-root support)
+-    const markupNodes = tabOut.ast.nodes.filter(n => n && n.kind === "markup") as MarkupNode[];
++    const markupNodes = reparsed.ast.nodes.filter(n => n && n.kind === "markup") as MarkupNode[];
+ 
+-    // Filter out W-PROGRAM-001 and other warnings — they're expected for snippets
+-    const realErrors = tabOut.errors.filter(
+-      (e: TABErrorInfo) => e.severity !== "warning" && e.code !== "W-PROGRAM-001"
++    // Filter out W-PROGRAM-001, warnings, and native-parser info diagnostics
++    // — they're expected for snippets / multi-root fragments / dropped Test
++    // blocks and do not indicate parse failure.
++    const realErrors = reparsed.errors.filter(
++      (e) => e.severity !== "warning" && e.severity !== "info" && e.code !== "W-PROGRAM-001"
+     );
+ 
+     return {
+       nodes: markupNodes,
+-      errors: realErrors.map((e: TABErrorInfo) => ({
++      errors: realErrors.map((e) => ({
+         code: e.code,
+         message: e.message,
+-        span: e.tabSpan,
++        span: e.span,
+       })),
+     };
+   } catch (e) {
+@@ -2604,8 +2771,7 @@ function walkLogicBody(
+               .replace(/"\s*>/g, '">')
+               .replace(/\s*\/\s*>/g, "/>")
+               .replace(/([^"=])\s*>/g, "$1>");
+-            const bsResult = splitBlocks(filePath, normalized);
+-            const tabResult = buildAST(bsResult, null);
++            const tabResult = reparseSynthesizedFile(filePath, normalized);
+             const reparsedNodes = tabResult?.ast?.nodes ?? [];
+             // Find the first markup node that is a component reference.
+             // P3-FOLLOW note: this re-parse path runs on a freshly-constructed
