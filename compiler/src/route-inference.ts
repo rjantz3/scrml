@@ -1155,6 +1155,55 @@ export function walkBodyForTriggers(
       return;
     }
 
+    // S121 Wave 10 Unit P fix — collect callees from object-valued ExprNode
+    // fields that the array-only generic-fallback below would silently skip.
+    //
+    // Statement kinds that fall through to the generic recursion (if-stmt,
+    // while-stmt, for-stmt, match-stmt, switch-stmt, match-arm-inline,
+    // reactive-nested-assign, etc.) carry their primary expression payload
+    // in a SINGLE-OBJECT ExprNode field — `condExpr` / `iterExpr` /
+    // `headerExpr` / `resultExpr` / `valueExpr`. The array-fields-only
+    // recursion at the bottom of this function never visits these, so a
+    // call inside `if (helper(x))` or `while (helper())` was invisible to
+    // the call-graph walker. Result: helper appeared dead and
+    // W-DEAD-FUNCTION false-fired even though the source called it.
+    //
+    // The fix mirrors the existing string-field handling (let-decl /
+    // const-decl init, bare-expr expr) — extract callees from the ExprNode
+    // tree via exprNodeCollectCallees and push to the callees array. No
+    // trigger detection (server-only resource, protected-field-access) is
+    // added on these fields — that's an orthogonal class of false-negatives
+    // out of scope for this dispatch (callees-only mirrors the brief).
+    //
+    // Mirrors the sister-walker markupReferencedNames EXPR_NODE_FIELDS scan
+    // at L2597-2605 (closed S95 Bug 7 / Bug 4 markup-context callsites);
+    // mirrors the per-kind guarded-expr fix at L1143-1156 (S93 d437589a,
+    // closed the failable-call-in-let-init class).
+    const EXPR_NODE_CALLEE_FIELDS = [
+      "condExpr",    // if-stmt, if-expr, while-stmt
+      "iterExpr",    // for-stmt, for-expr
+      "headerExpr",  // switch-stmt, match-stmt, match-expr
+      "resultExpr",  // match-arm-inline
+      "valueExpr",   // reactive-nested-assign
+    ] as const;
+    for (const field of EXPR_NODE_CALLEE_FIELDS) {
+      const v = (node as any)[field];
+      if (v && typeof v === "object" && typeof v.kind === "string") {
+        callees.push(...exprNodeCollectCallees(v));
+      }
+    }
+    // for-stmt C-style header: cStyleParts = { initExpr, condExpr, updateExpr } —
+    // a nested object holding three ExprNodes. Scan each in turn.
+    const cParts = (node as any).cStyleParts;
+    if (cParts && typeof cParts === "object") {
+      for (const k of ["initExpr", "condExpr", "updateExpr"] as const) {
+        const en = cParts[k];
+        if (en && typeof en === "object" && typeof en.kind === "string") {
+          callees.push(...exprNodeCollectCallees(en));
+        }
+      }
+    }
+
     // For all other node kinds, recursively visit array fields.
     for (const key of Object.keys(node)) {
       if (key === "span" || key === "id") continue;

@@ -3567,3 +3567,559 @@ describe("§31 — Bug 4 / S87 Trio A: markup-context call detection through nes
     expect(wrapperDead).toHaveLength(1);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// §32 — Wave 10 Unit P (S121): walkBodyForTriggers must collect callees from
+// OBJECT-VALUED ExprNode fields on LogicStatement nodes that the array-only
+// generic-fallback recursion would otherwise skip.
+//
+// Sibling to §31 above — §31 covers the MARKUP-CONTEXT walker
+// (markupReferencedNames / walkMarkupContext); §32 covers the BODY-CALLEE
+// walker (walkBodyForTriggers) which feeds the inverseCallerMap that drives
+// W-DEAD-FUNCTION.
+//
+// The bug surfaced as 20 W-DEAD-FUNCTION false-positives on functions called
+// only from while/if conditions in the native-parser .scrml mirror files
+// (tag-frame.scrml, parse-expr.scrml, parse-stmt.scrml, parse-css-body.scrml,
+// parse-error-body.scrml — diagnosed in Unit O survey `9a1d6950`). The pattern:
+//   ${
+//     export fn outer(...) { while (helper(x)) { ... } }
+//     fn helper(...) { ... }
+//   }
+// `helper` was visible to collectFileFunctions (so it had an analysisMap
+// entry) but `outer.callees` did NOT include "helper" because the walker's
+// generic-fallback only recurses into ARRAY fields. The while-stmt's `body`
+// IS an array (recursed), but the call lives in `condExpr` which is a
+// SINGLE-OBJECT ExprNode field (skipped).
+//
+// Fix lives in `src/route-inference.ts` walkBodyForTriggers visitNode:
+// before the generic-fallback array recursion, scan
+// `condExpr|iterExpr|headerExpr|resultExpr|valueExpr` and
+// `cStyleParts.{init|cond|update}Expr` via `exprNodeCollectCallees`.
+// ---------------------------------------------------------------------------
+
+describe("§32 — Wave 10 Unit P: walkBodyForTriggers — callees from object-valued ExprNode fields", () => {
+  /**
+   * Build a `call` ExprNode invoking `name` with zero args (sufficient to
+   * register `name` as a callee via exprNodeCollectCallees).
+   */
+  function makeCallExpr(name) {
+    return {
+      kind: "call",
+      callee: { kind: "ident", name },
+      args: [],
+      optional: false,
+    };
+  }
+
+  /**
+   * Build an if-stmt with a `condExpr` populated as `helperName()` (a call
+   * ExprNode). The walker should extract `helperName` as a callee of the
+   * enclosing function.
+   */
+  function makeIfStmtCallingHelper(helperName, spanStart, file) {
+    return {
+      id: spanStart,
+      kind: "if-stmt",
+      condExpr: makeCallExpr(helperName),
+      consequent: [],
+      alternate: null,
+      span: span(spanStart, file),
+    };
+  }
+
+  test("helper called from if-stmt.condExpr inside outer fn body — does NOT fire W-DEAD-FUNCTION", () => {
+    const file = "/test/u-p-if.scrml";
+    const helperFn = makeFunctionDecl({
+      name: "helper",
+      body: [makeBareExpr("return true", 21, file)],
+      spanStart: 10,
+      file,
+    });
+    const outerFn = makeFunctionDecl({
+      name: "outer",
+      body: [makeIfStmtCallingHelper("helper", 71, file)],
+      spanStart: 60,
+      file,
+    });
+    // Outer must itself have a caller (or be exported) so its own dead-warn
+    // doesn't mask the test signal. Use an exported caller fn.
+    const callerFn = makeFunctionDecl({
+      name: "callerOfOuter",
+      body: [makeBareExpr("return outer()", 91, file)],
+      spanStart: 80,
+      file,
+    });
+    const exportDecl = {
+      id: 200,
+      kind: "export-decl",
+      raw: "export function callerOfOuter",
+      exportedName: "callerOfOuter",
+      exportKind: "function",
+      span: span(200, file),
+    };
+    const fileAST = {
+      filePath: file,
+      nodes: [{ id: 1, kind: "logic", body: [helperFn, outerFn, callerFn], span: span(0, file) }],
+      imports: [],
+      exports: [exportDecl],
+      components: [],
+      typeDecls: [],
+      spans: new Map(),
+    };
+    const { errors } = runRIClean([fileAST]);
+
+    const helperDead = errors.filter(e => e.code === "W-DEAD-FUNCTION" && e.message.includes("`helper`"));
+    expect(helperDead).toHaveLength(0);
+  });
+
+  test("helper called from while-stmt.condExpr inside outer fn body — does NOT fire W-DEAD-FUNCTION", () => {
+    const file = "/test/u-p-while.scrml";
+    const helperFn = makeFunctionDecl({
+      name: "shouldContinue",
+      body: [makeBareExpr("return false", 21, file)],
+      spanStart: 10,
+      file,
+    });
+    const whileStmt = {
+      id: 71,
+      kind: "while-stmt",
+      condExpr: makeCallExpr("shouldContinue"),
+      body: [],
+      span: span(71, file),
+    };
+    const outerFn = makeFunctionDecl({
+      name: "outer",
+      body: [whileStmt],
+      spanStart: 60,
+      file,
+    });
+    const callerFn = makeFunctionDecl({
+      name: "callerOfOuter",
+      body: [makeBareExpr("return outer()", 91, file)],
+      spanStart: 80,
+      file,
+    });
+    const exportDecl = {
+      id: 200,
+      kind: "export-decl",
+      raw: "export function callerOfOuter",
+      exportedName: "callerOfOuter",
+      exportKind: "function",
+      span: span(200, file),
+    };
+    const fileAST = {
+      filePath: file,
+      nodes: [{ id: 1, kind: "logic", body: [helperFn, outerFn, callerFn], span: span(0, file) }],
+      imports: [],
+      exports: [exportDecl],
+      components: [],
+      typeDecls: [],
+      spans: new Map(),
+    };
+    const { errors } = runRIClean([fileAST]);
+
+    const helperDead = errors.filter(e => e.code === "W-DEAD-FUNCTION" && e.message.includes("`shouldContinue`"));
+    expect(helperDead).toHaveLength(0);
+  });
+
+  test("helper called from for-stmt.iterExpr inside outer fn body — does NOT fire W-DEAD-FUNCTION", () => {
+    const file = "/test/u-p-for.scrml";
+    const helperFn = makeFunctionDecl({
+      name: "getItems",
+      body: [makeBareExpr("return []", 21, file)],
+      spanStart: 10,
+      file,
+    });
+    const forStmt = {
+      id: 71,
+      kind: "for-stmt",
+      variable: "x",
+      iterExpr: makeCallExpr("getItems"),
+      body: [],
+      span: span(71, file),
+    };
+    const outerFn = makeFunctionDecl({
+      name: "outer",
+      body: [forStmt],
+      spanStart: 60,
+      file,
+    });
+    const callerFn = makeFunctionDecl({
+      name: "callerOfOuter",
+      body: [makeBareExpr("return outer()", 91, file)],
+      spanStart: 80,
+      file,
+    });
+    const exportDecl = {
+      id: 200,
+      kind: "export-decl",
+      raw: "export function callerOfOuter",
+      exportedName: "callerOfOuter",
+      exportKind: "function",
+      span: span(200, file),
+    };
+    const fileAST = {
+      filePath: file,
+      nodes: [{ id: 1, kind: "logic", body: [helperFn, outerFn, callerFn], span: span(0, file) }],
+      imports: [],
+      exports: [exportDecl],
+      components: [],
+      typeDecls: [],
+      spans: new Map(),
+    };
+    const { errors } = runRIClean([fileAST]);
+
+    const helperDead = errors.filter(e => e.code === "W-DEAD-FUNCTION" && e.message.includes("`getItems`"));
+    expect(helperDead).toHaveLength(0);
+  });
+
+  test("helper called from match-stmt.headerExpr inside outer fn body — does NOT fire W-DEAD-FUNCTION", () => {
+    const file = "/test/u-p-match.scrml";
+    const helperFn = makeFunctionDecl({
+      name: "classifyKind",
+      body: [makeBareExpr("return .Unknown", 21, file)],
+      spanStart: 10,
+      file,
+    });
+    const matchStmt = {
+      id: 71,
+      kind: "match-stmt",
+      headerExpr: makeCallExpr("classifyKind"),
+      body: [],
+      span: span(71, file),
+    };
+    const outerFn = makeFunctionDecl({
+      name: "outer",
+      body: [matchStmt],
+      spanStart: 60,
+      file,
+    });
+    const callerFn = makeFunctionDecl({
+      name: "callerOfOuter",
+      body: [makeBareExpr("return outer()", 91, file)],
+      spanStart: 80,
+      file,
+    });
+    const exportDecl = {
+      id: 200,
+      kind: "export-decl",
+      raw: "export function callerOfOuter",
+      exportedName: "callerOfOuter",
+      exportKind: "function",
+      span: span(200, file),
+    };
+    const fileAST = {
+      filePath: file,
+      nodes: [{ id: 1, kind: "logic", body: [helperFn, outerFn, callerFn], span: span(0, file) }],
+      imports: [],
+      exports: [exportDecl],
+      components: [],
+      typeDecls: [],
+      spans: new Map(),
+    };
+    const { errors } = runRIClean([fileAST]);
+
+    const helperDead = errors.filter(e => e.code === "W-DEAD-FUNCTION" && e.message.includes("`classifyKind`"));
+    expect(helperDead).toHaveLength(0);
+  });
+
+  test("helper called from match-arm-inline.resultExpr inside outer fn body — does NOT fire W-DEAD-FUNCTION", () => {
+    const file = "/test/u-p-arm.scrml";
+    const helperFn = makeFunctionDecl({
+      name: "renderError",
+      body: [makeBareExpr("return \"err\"", 21, file)],
+      spanStart: 10,
+      file,
+    });
+    // match-stmt body contains a match-arm-inline whose resultExpr is helper().
+    const armInline = {
+      id: 72,
+      kind: "match-arm-inline",
+      test: ".Error",
+      result: "renderError ( )",
+      resultExpr: makeCallExpr("renderError"),
+      span: span(72, file),
+    };
+    const matchStmt = {
+      id: 71,
+      kind: "match-stmt",
+      headerExpr: { kind: "ident", name: "x" },
+      body: [armInline],
+      span: span(71, file),
+    };
+    const outerFn = makeFunctionDecl({
+      name: "outer",
+      body: [matchStmt],
+      params: ["x"],
+      spanStart: 60,
+      file,
+    });
+    const callerFn = makeFunctionDecl({
+      name: "callerOfOuter",
+      body: [makeBareExpr("return outer(1)", 91, file)],
+      spanStart: 80,
+      file,
+    });
+    const exportDecl = {
+      id: 200,
+      kind: "export-decl",
+      raw: "export function callerOfOuter",
+      exportedName: "callerOfOuter",
+      exportKind: "function",
+      span: span(200, file),
+    };
+    const fileAST = {
+      filePath: file,
+      nodes: [{ id: 1, kind: "logic", body: [helperFn, outerFn, callerFn], span: span(0, file) }],
+      imports: [],
+      exports: [exportDecl],
+      components: [],
+      typeDecls: [],
+      spans: new Map(),
+    };
+    const { errors } = runRIClean([fileAST]);
+
+    const helperDead = errors.filter(e => e.code === "W-DEAD-FUNCTION" && e.message.includes("`renderError`"));
+    expect(helperDead).toHaveLength(0);
+  });
+
+  test("helper called from for-stmt.cStyleParts.condExpr inside outer fn body — does NOT fire W-DEAD-FUNCTION", () => {
+    // C-style for-loop: for (let i = 0; checkBound(i); i = i + 1) { ... }
+    // checkBound is called from the condExpr inside cStyleParts.
+    const file = "/test/u-p-cstyle.scrml";
+    const helperFn = makeFunctionDecl({
+      name: "checkBound",
+      body: [makeBareExpr("return false", 21, file)],
+      spanStart: 10,
+      file,
+    });
+    const forStmt = {
+      id: 71,
+      kind: "for-stmt",
+      variable: null,
+      body: [],
+      cStyleParts: {
+        initExpr: { kind: "lit", value: 0, litType: "number", raw: "0" },
+        condExpr: makeCallExpr("checkBound"),
+        updateExpr: { kind: "lit", value: 1, litType: "number", raw: "1" },
+      },
+      span: span(71, file),
+    };
+    const outerFn = makeFunctionDecl({
+      name: "outer",
+      body: [forStmt],
+      spanStart: 60,
+      file,
+    });
+    const callerFn = makeFunctionDecl({
+      name: "callerOfOuter",
+      body: [makeBareExpr("return outer()", 91, file)],
+      spanStart: 80,
+      file,
+    });
+    const exportDecl = {
+      id: 200,
+      kind: "export-decl",
+      raw: "export function callerOfOuter",
+      exportedName: "callerOfOuter",
+      exportKind: "function",
+      span: span(200, file),
+    };
+    const fileAST = {
+      filePath: file,
+      nodes: [{ id: 1, kind: "logic", body: [helperFn, outerFn, callerFn], span: span(0, file) }],
+      imports: [],
+      exports: [exportDecl],
+      components: [],
+      typeDecls: [],
+      spans: new Map(),
+    };
+    const { errors } = runRIClean([fileAST]);
+
+    const helperDead = errors.filter(e => e.code === "W-DEAD-FUNCTION" && e.message.includes("`checkBound`"));
+    expect(helperDead).toHaveLength(0);
+  });
+
+  test("REGRESSION GUARD — fn declared but never called STILL fires W-DEAD-FUNCTION", () => {
+    // Critical false-negative guard: the new EXPR_NODE_FIELDS scan must NOT
+    // mask GENUINE dead functions. If `genuinelyDead` is declared with no
+    // callsite ANYWHERE (no body callee, no markup ref, no export), the
+    // warning SHALL still fire.
+    const file = "/test/u-p-guard.scrml";
+    const genuinelyDeadFn = makeFunctionDecl({
+      name: "genuinelyDead",
+      body: [makeBareExpr("return 42", 21, file)],
+      spanStart: 10,
+      file,
+    });
+    // A live, exported function in the same file — establishes that the
+    // analyzer is running and emitting warnings as expected. genuinelyDead
+    // is NOT called from anywhere.
+    const liveFn = makeFunctionDecl({
+      name: "live",
+      body: [makeBareExpr("return 1", 51, file)],
+      spanStart: 40,
+      file,
+    });
+    const exportDecl = {
+      id: 200,
+      kind: "export-decl",
+      raw: "export function live",
+      exportedName: "live",
+      exportKind: "function",
+      span: span(200, file),
+    };
+    const fileAST = {
+      filePath: file,
+      nodes: [{ id: 1, kind: "logic", body: [genuinelyDeadFn, liveFn], span: span(0, file) }],
+      imports: [],
+      exports: [exportDecl],
+      components: [],
+      typeDecls: [],
+      spans: new Map(),
+    };
+    const { errors } = runRIClean([fileAST]);
+
+    const dead = errors.filter(e => e.code === "W-DEAD-FUNCTION" && e.message.includes("`genuinelyDead`"));
+    expect(dead).toHaveLength(1);
+    // live fn is exported — should NOT fire.
+    const liveDead = errors.filter(e => e.code === "W-DEAD-FUNCTION" && e.message.includes("`live`"));
+    expect(liveDead).toHaveLength(0);
+  });
+
+  test("REGRESSION GUARD — synthetic genuinely-dead inner fn alongside live one (mixed file)", () => {
+    // Mirrors the realistic pattern: a file with N helper fns where M of them
+    // are referenced and (N - M) are truly dead. The fix must classify each
+    // correctly — no over-suppression, no over-firing.
+    const file = "/test/u-p-mixed.scrml";
+    const liveHelperFn = makeFunctionDecl({
+      name: "liveHelper",
+      body: [makeBareExpr("return true", 21, file)],
+      spanStart: 10,
+      file,
+    });
+    const deadHelperFn = makeFunctionDecl({
+      name: "deadHelper",
+      body: [makeBareExpr("return 0", 31, file)],
+      spanStart: 20,
+      file,
+    });
+    const outerFn = makeFunctionDecl({
+      name: "outer",
+      body: [
+        {
+          id: 71,
+          kind: "if-stmt",
+          condExpr: makeCallExpr("liveHelper"),
+          consequent: [],
+          alternate: null,
+          span: span(71, file),
+        },
+      ],
+      spanStart: 60,
+      file,
+    });
+    const callerFn = makeFunctionDecl({
+      name: "callerOfOuter",
+      body: [makeBareExpr("return outer()", 91, file)],
+      spanStart: 80,
+      file,
+    });
+    const exportDecl = {
+      id: 200,
+      kind: "export-decl",
+      raw: "export function callerOfOuter",
+      exportedName: "callerOfOuter",
+      exportKind: "function",
+      span: span(200, file),
+    };
+    const fileAST = {
+      filePath: file,
+      nodes: [{ id: 1, kind: "logic", body: [liveHelperFn, deadHelperFn, outerFn, callerFn], span: span(0, file) }],
+      imports: [],
+      exports: [exportDecl],
+      components: [],
+      typeDecls: [],
+      spans: new Map(),
+    };
+    const { errors } = runRIClean([fileAST]);
+
+    const liveDead = errors.filter(e => e.code === "W-DEAD-FUNCTION" && e.message.includes("`liveHelper`"));
+    expect(liveDead, "liveHelper is called from outer's if-stmt condExpr — must NOT fire").toHaveLength(0);
+
+    const trulyDead = errors.filter(e => e.code === "W-DEAD-FUNCTION" && e.message.includes("`deadHelper`"));
+    expect(trulyDead, "deadHelper has no callsite — SHOULD still fire").toHaveLength(1);
+  });
+
+  test("native-parser .scrml mirror shape (tag-frame-like) — body-callee callsite in while-condition closes the false-positive", () => {
+    // Structural reproducer of the tag-frame.scrml shape that drove
+    // 7 of the 20 Unit O W-DEAD-FUNCTION false-positives:
+    //   ${
+    //     export fn tokenizeAttributeRegion(...) {
+    //       while (p < end && isAttrWhitespace(source.charAt(p))) { p = p + 1 }
+    //     }
+    //     fn isAttrWhitespace(ch) { ... }
+    //   }
+    // The outer fn (exported) is alive; the inner fn (called only from the
+    // while condExpr) was previously flagged dead.
+    const file = "/test/u-p-tagframe-shape.scrml";
+    const isAttrWhitespaceFn = makeFunctionDecl({
+      name: "isAttrWhitespace",
+      body: [makeBareExpr("return ch == \" \"", 21, file)],
+      params: ["ch"],
+      spanStart: 10,
+      file,
+    });
+    // Build the while-stmt with condExpr = `isAttrWhitespace(ch)`-shaped
+    // call wrapped in a binary AND. The walker should descend through the
+    // binary and find the call.
+    const whileCondExpr = {
+      kind: "binary",
+      op: "&&",
+      left: { kind: "ident", name: "p_lt_end" }, // stand-in for p < end
+      right: {
+        kind: "call",
+        callee: { kind: "ident", name: "isAttrWhitespace" },
+        args: [{ kind: "ident", name: "ch" }],
+        optional: false,
+      },
+    };
+    const whileStmt = {
+      id: 81,
+      kind: "while-stmt",
+      condExpr: whileCondExpr,
+      body: [],
+      span: span(81, file),
+    };
+    const outerFn = makeFunctionDecl({
+      name: "tokenizeAttributeRegion",
+      params: ["source", "ch"],
+      body: [whileStmt],
+      spanStart: 70,
+      file,
+    });
+    const exportDecl = {
+      id: 200,
+      kind: "export-decl",
+      raw: "export function tokenizeAttributeRegion",
+      exportedName: "tokenizeAttributeRegion",
+      exportKind: "function",
+      span: span(200, file),
+    };
+    const fileAST = {
+      filePath: file,
+      nodes: [{ id: 1, kind: "logic", body: [isAttrWhitespaceFn, outerFn], span: span(0, file) }],
+      imports: [],
+      exports: [exportDecl],
+      components: [],
+      typeDecls: [],
+      spans: new Map(),
+    };
+    const { errors } = runRIClean([fileAST]);
+
+    const helperDead = errors.filter(e => e.code === "W-DEAD-FUNCTION" && e.message.includes("`isAttrWhitespace`"));
+    expect(helperDead, "isAttrWhitespace is called from tokenizeAttributeRegion's while-condExpr — must NOT fire").toHaveLength(0);
+  });
+});
