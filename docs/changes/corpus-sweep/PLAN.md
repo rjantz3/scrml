@@ -148,6 +148,22 @@ raw-content elements; only `</code>` closes a `<code>` element. **Fix at
 sweep time:** rewrite every `<code>x</>` to `<code>x</code>` (and same
 for `<pre>` if any) — trivial mechanical edit.
 
+C3. `compiler/self-host/bs.scrml` — 13 occurrences of literal `null`
+keyword. Native parser correctly rejects per the S89 axiom ("null does
+NOT EXIST IN SCRML! and never will!"); live's Acorn-based parser tolerates
+it through JS-grammar inheritance. Discovered at S121 Wave 7 Unit C as
+the actual cause of bs.scrml's DIFF-hoist-count divergence — the native
+parse-expr.js KwNull rejection cascades through panic-mode resync, which
+walks into the `type` parameter name in `function pushBraceContext(type, ...)`
+and triggers a spurious typeDecl recovery. Fix at sweep time: migrate
+every `null` → `not` per the S89 axiom + S89 wave 7.A precedent. Multi-line
+ternary cascades (e.g. `(parent != null) ? a : b`) will resolve cleanly
+once `null` is gone. **Side-task surfaced (separate dispatch):** parse-expr.js
+emits generic `E-EXPR-UNEXPECTED` on KwNull; a normative `E-NULL-FORBIDDEN`
+diagnostic + §34 row would be a strictly better adopter experience.
+Sequenced AFTER M6 + corpus migration so the diagnostic doesn't fire on
+in-tree self-host source still carrying `null`.
+
 ## Deliverables
 
 1. A sweep report — full compile + runtime matrix per artifact.
