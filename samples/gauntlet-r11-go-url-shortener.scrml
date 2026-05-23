@@ -24,11 +24,11 @@
     // Reactive state — these are the only things that re-render.
     // In Go I'd pass these as function arguments. Here the compiler
     // tracks them as a dependency graph — I can't inspect the graph.
-    @shortCode = ""
-    @longUrl = ""
-    @errorMsg = ""
-    @successMsg = ""
-    @urls = []
+    <shortCode> = ""
+    <longUrl> = ""
+    <errorMsg> = ""
+    <successMsg> = ""
+    <urls> = []
 
     // ============================================================
     // Helper functions for conditional rendering.

@@ -20,9 +20,9 @@
     // In scrml this is: @count = 0
     // The sigil-at-declaration model feels clean. No surprise here.
 
-    @count = 0
-    @running = true
-    @darkTheme = false
+    <count> = 0
+    <running> = true
+    <darkTheme> = false
 
     // History array: every tick appends @count so we can compute stats.
     // In Svelte: let history = $state([])
@@ -30,7 +30,7 @@
     // §6.5 says reactive array mutation is TODO. The spec says @items.push()
     // should work but is "content lost in truncation". We use reassignment
     // (@history = [...@history, @count]) to stay on safe ground.
-    @history = []
+    <history> = []
 
     // -------------------------------------------------------------------------
     // DERIVED REACTIVE VALUES (§6.6)

@@ -33,19 +33,19 @@ ${
 // Reactive state
 // ==========================================================================
 
-@recipes = []
-@selectedCategory = "All"
-@searchQuery = ""
-@editMode = false
-@editingId = not
-@loadError = not
-@saveError = not
+<recipes> = []
+<selectedCategory> = "All"
+<searchQuery> = ""
+<editMode> = false
+<editingId> = not
+<loadError> = not
+<saveError> = not
 
 // Form state for add / edit
-@formTitle = ""
-@formCategory = "Breakfast"
-@formIngredients = []
-@formNewIngredient = ""
+<formTitle> = ""
+<formCategory> = "Breakfast"
+<formIngredients> = []
+<formNewIngredient> = ""
 
 // Derived filtered list -- scrml's const @name (§6.6) maps to Svelte's $derived
 // Lazy pull: re-evaluates when @recipes, @searchQuery, or @selectedCategory changes

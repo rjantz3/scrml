@@ -4,13 +4,18 @@
 
 <program>
 
+// V-kill (S123) — module-level reactive state for the drag singleton.
+// Pre-V-kill these were auto-synthesised inside the useDraggable() body;
+// V-kill requires structural decls. Drag is a singleton (one active drag
+// at a time), so module-level is semantically correct.
+<isDragging> = false
+<dragX> = 0
+<dragY> = 0
+
 ${
   // useDraggable: Make an element draggable with automatic cleanup.
   // Returns reactive state { isDragging, x, y } that updates during drag.
   export function useDraggable(el) {
-    @isDragging = false
-    @dragX = 0
-    @dragY = 0
     let offsetX = 0
     let offsetY = 0
 

@@ -6,17 +6,17 @@
 < db src="./contacts.db" tables="contacts">
 
     // --- Reactive state ---
-    @searchTerm = ""
-    @showAddForm = false
-    @editingId = not
-    @confirmDeleteId = not
-    @saveError = ""
-    @formName = ""
-    @formEmail = ""
-    @formPhone = ""
-    @formCategory = "work"
-    @isSubmitting = false
-    @hasSearch = false
+    <searchTerm> = ""
+    <showAddForm> = false
+    <editingId> = not
+    <confirmDeleteId> = not
+    <saveError> = ""
+    <formName> = ""
+    <formEmail> = ""
+    <formPhone> = ""
+    <formCategory> = "work"
+    <isSubmitting> = false
+    <hasSearch> = false
 
     // --- Server functions ---
     ${

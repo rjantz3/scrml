@@ -35,12 +35,12 @@ type Question:struct = {
 // Reactive state — all client-side (§6.3)
 // =========================================================================
 
-@quizState = QuizState.NotStarted
+<quizState> = QuizState.NotStarted
 
-// FRICTION: No type annotation on @questions. TypeScript: @questions: Question[]
+// FRICTION: No type annotation on <questions>. TypeScript: <questions>: Question[]
 // Here the type is inferred from the literal array value. No way to say
 // "this must match Question struct" without explicit annotation syntax.
-@questions = [
+<questions> = [
     { text: "What is 2 + 2?", options: ["3", "4", "5", "6"], correctIndex: 1 },
     { text: "What is the capital of France?", options: ["Berlin", "Rome", "Paris", "Madrid"], correctIndex: 2 },
     { text: "What language runs in the browser?", options: ["Python", "Java", "Ruby", "JavaScript"], correctIndex: 3 },
@@ -48,11 +48,11 @@ type Question:struct = {
     { text: "Which symbol declares a reactive variable in scrml?", options: ["$", "#", "@", "^"], correctIndex: 2 }
 ]
 
-@currentIndex = 0
-@selectedAnswer = -1
-@score = 0
-@timerSeconds = 0
-@timerRunning = false
+<currentIndex> = 0
+<selectedAnswer> = -1
+<score> = 0
+<timerSeconds> = 0
+<timerRunning> = false
 
 // Derived reactive values (§6.6) — lazy pull with dirty flags
 // Re-evaluate when upstream @variables change, not at write time.
