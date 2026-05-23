@@ -1,42 +1,70 @@
 # non-compliance.report.md
 # project: scrmlts
-# generated: 2026-05-22T17:44:26-06:00
-# scan mode: INCREMENTAL_UPDATE (re-scan keyed on 5d2003dd..a8904945)
+# generated: 2026-05-23T09:52:00-06:00
+# scan mode: INCREMENTAL_UPDATE (re-scan keyed on 136678e5..c2d93544)
 
 ## Summary
 
-Total docs scanned: ~101 `.md` files (excluding node_modules, .git, .jj, .claude,
-  archive, handOffs, dist/build/target). docs/changes/ counted in aggregate.
-Compliant (mapped or out-of-scope reference): ~14
-Non-compliant: 5 categories (1 large aggregate + 4 named)
-Uncertain: 3
+Total docs scanned: ~110 `.md` files at the project-repo level (excluding node_modules,
+  .git, .jj, .claude, archive, handOffs, dist/build/target). docs/changes/ counted
+  in aggregate (now 111 dirs / 209 .md files — +30 dirs / +25 files since the prior
+  scan, all S122 dispatch process artifacts).
+Compliant (mapped or out-of-scope reference): ~15
+Non-compliant: 5 categories (1 large aggregate + 4 named) — UNCHANGED from prior scan.
+Uncertain: 3 — UNCHANGED.
 
-SPEC.md modification watermark: 2026-05-22 (current).
-The 5d2003dd→a8904945 range added two new `.md` files:
-  - `docs/changes/corpus-sweep/PLAN.md` — a planning doc for the corpus compilation +
-    runtime sweep (not yet executed, per its own front-matter). Falls into the
-    existing `docs/changes/**` aggregate category — a dispatch planning artifact,
-    current-dated, correctly located. No new non-compliance class.
-  - `docs/changes/m5-c2-gap-ledger/phase5-triage-2026-05-22.md` — the Phase 5
-    triage of the 51-gap residual; roots the P5 fix units; current-dated read-only
-    diagnostic tied to the live M5-swap arc. Same aggregate category as the prior
-    `investigation-2026-05-22.md`. No new non-compliance class.
-The categories below are unchanged from the prior scan; counts refreshed.
+SPEC.md modification watermark: 2026-05-23 (current). §56.9 NEW S122 — I-FN-PROMOTABLE
+sibling promotion lint section landed; §34 catalog row added in parallel. No prior
+spec sections invalidated by this addition (sibling pattern, not amendment).
+
+The 136678e5→c2d93544 range (30 commits, S122 marathon ~10h) added/modified:
+  - **NEW top-level reference doc**: `compiler/native-parser/M6.6-CONTRACT-DERIVATION.md`
+    (540L cookbook for M6.6.b.2..b.6 consumer migrations) — current-dated, located
+    correctly alongside the rest of native-parser/*.md references, describes the
+    LIVE M6.6.b.1 IMPL seam. IN-SCOPE / COMPLIANT.
+  - **Modified current-truth docs**: README.md (drop redundant `server` keyword from
+    first-example loadContacts), compiler/SPEC.md (+§56.9 I-FN-PROMOTABLE + §34 row +
+    cross-refs at §48 / §56), docs/PA-SCRML-PRIMER.md (+§6.2 Match block-form Tier 1
+    subsection — Wave 12 close + S121 P5-7 catchup), docs/changelog.md (S122 entry),
+    hand-off.md + master-list.md (PA wrap artifacts).
+  - **NEW process docs under docs/changes/**: 25 new files across 10 new dirs
+    (m66-b1-impl, m66-b1-native-contract-survey, m66-engine-statechild-adapter,
+    r4-expression-catalog-continuation-survey, r4-u1-wire-translate-expr-ride-throughs,
+    r4-u2-for-stmt-iter-cstyle, unit-u-tilde-decl-mu-001, w12-unit-y-ri-trigger-expr-node,
+    w14-unit-aa-w-lint-013-scope-gate, w14-unit-bb) plus continuations in existing
+    dirs (i-fn-promotable, m6-2-component-expander, m6-3-emit-match-native,
+    m6.1-meta-eval-native-migration, m6.2a-markupvalue-bridge, m6.4a). All fall into
+    the existing `docs/changes/**` aggregate category (dispatch planning + progress
+    artifacts, current-dated, correctly located). NO new non-compliance class.
+
+No newly-flagged stale-claim docs found in this delta. Specifically:
+  - Confirmed no docs still claim "translate-stmt-bridge unwired" / "translateExpr
+    unwired" — only the LIVE survey memo
+    `docs/changes/r4-expression-catalog-continuation-survey/progress.md` describes
+    the pre-R4-U1 state, and that's current-correct as a progress artifact bracketing
+    R4-U1/R4-U2 landings.
+  - Confirmed no docs claim "M6 Wave 1 not started" — all M6.x progress docs are
+    current-dated and reference the actual landings (`52c6ec5a`, `11e47dc0`, etc.).
+  - Confirmed no docs cite tests <19k as current state — `docs/changelog.md` mentions
+    the 13,773 → 19,907 transition as documented S122 history, which is correct.
+
+The categories below are UNCHANGED from the prior scan; counts refreshed where relevant.
 
 ## Non-compliant docs
 
-### docs/changes/** (181 files across ~80+ directories)
+### docs/changes/** (209 files across ~111 directories)
 **Reason:** location + name-heuristic (combo)
 **Detail:** Every directory under `docs/changes/` is a per-dispatch artifact set
-— `BRIEF.md`, `SCOPE.md`, `progress.md` for completed or in-flight work. The
-5d2003dd→a8904945 range added two more (see Summary above). The repo already
-acknowledges this whole class: `docs/curation/2026-05-05-changes-dir-disposition.md`
+— `BRIEF.md`, `SCOPE.md`, `progress.md` for completed or in-flight work. S122
+added ~25 new files across 10 new dirs (M6 Wave 1, R4-Ux, W12-W14 Unit dirs).
+The repo already acknowledges this whole class: `docs/curation/2026-05-05-changes-dir-disposition.md`
 is a standing curation matrix dispositioning these dirs to
-`scrml-support/archive/dispatches/`. The `m5-c2-gap-ledger/` dir and the new
-`corpus-sweep/` dir are LIVE in-flight arcs — keep until their work lands. The
-broader M5-swap dispatch dirs stay until M6 closes.
+`scrml-support/archive/dispatches/`. The `m5-c2-gap-ledger/`, `m6.*` dirs,
+`r4-*` dirs, and `w12-/w14-*` dirs are LIVE in-flight arcs — keep until their
+work lands. Broader M5/M6 dispatch dirs stay until M6 closes (post-M6.8 deletion).
 **Suggested disposition:** deref completed-arc dirs to scrml-support/archive/dispatches/;
-keep only actively-in-flight dirs (per the curation matrix).
+keep only actively-in-flight dirs (per the curation matrix). At this scale (209
+files), a batched deref after M6.8 close is cleaner than per-dir handling.
 
 ### docs/website/roadmap-from-v0.3-2026-05-14.md
 **Reason:** content-heuristic + name-heuristic
@@ -69,8 +97,9 @@ scope-c-findings-tracker.md may still be live — see Uncertain below.
 ### docs/curation/2026-05-05-changes-dir-disposition.md
 **Reason:** location + currency
 **Detail:** A curation matrix (S61) for the docs/changes/ deref. Its own snapshot
-("103 dirs total") is stale — docs/changes/ now has 181 tracked files. It is a
-process artifact, not a reference doc.
+("103 dirs total") is now stale by even more — docs/changes/ now has 209 tracked
+files / 111 dirs (was 181 / 80+ at prior scan; was 103 at original authoring).
+It is a process artifact, not a reference doc.
 **Suggested disposition:** deref to scrml-support/docs/ once the docs/changes/
 deref above is executed; or update the count and keep as the standing checklist.
 
@@ -102,16 +131,24 @@ reference pending a quick grep confirmation.
 
 ## Notes on compliant / in-scope docs (NOT flagged)
 - compiler/SPEC.md, SPEC-INDEX.md, PIPELINE.md — authoritative spec; mapped.
-  §34.1 holds 81 codes (C2 +2 info codes, stable through S120).
+  §34.1 holds 81 codes (C2 +2 info codes, stable through S122). §34 catalog grew
+  S121 (W-STDLIB-*) and S122 (I-FN-PROMOTABLE). §41.17 scrml:compiler family deferral.
+  §56.9 NEW S122 — I-FN-PROMOTABLE sibling promotion lint (Unit EE).
   §58 Build Story is spec-ahead but explicitly self-labels as a "Nominal section"
   with a §58.12 gap enumeration — honest spec-ahead, NOT non-compliant.
-- README.md — restructured S120 (Carson Gross review + honest-hero fix); still a
-  current reference doc. DESIGN.md, docs/tutorial.md, docs/changelog.md,
-  scrmlFormula.md, docs/PA-SCRML-PRIMER.md — current reference; in-scope.
+- README.md — restructured S120 (Carson Gross review + honest-hero fix); S122
+  edit dropped redundant `server` keyword from the first-example `loadContacts`;
+  still a current reference doc.
+- docs/PA-SCRML-PRIMER.md — NEW §6.2 Match block-form (Tier 1) subsection added
+  S122 (Wave 12 close + S121 P5-7 catchup); primer reference, in-scope.
+- DESIGN.md, docs/tutorial.md, docs/changelog.md, scrmlFormula.md — current reference;
+  in-scope.
 - compiler/native-parser/README.md, M5-ast-bridge-scoping.md,
   M5-divergence-ledger.md, M5-SWAP-residual-decomposition.md — current
-  native-parser reference; LOAD-BEARING for the M5-swap gap-ledger work; in-scope
-  (they describe current state + scoped future work honestly).
+  native-parser reference; LOAD-BEARING for the M5-swap gap-ledger work; in-scope.
+- **compiler/native-parser/M6.6-CONTRACT-DERIVATION.md** (NEW S122, 540L) — current
+  reference cookbook for the live M6.6.b.1 IMPL seam + the M6.6.b.2..b.6 consumer
+  migration path; located correctly alongside the M5-*.md siblings; IN-SCOPE.
 - compiler/src/codegen/README.md, compiler/tests/.../REGISTRY.md — current
   module-local reference; in-scope.
 
