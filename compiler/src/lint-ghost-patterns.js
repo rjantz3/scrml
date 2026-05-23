@@ -76,41 +76,8 @@ function makeDiag(source, match, ghost, correction, see, code) {
 }
 
 // ---------------------------------------------------------------------------
-// Logic-block exclusion
+// Helpers — context-aware range computation
 // ---------------------------------------------------------------------------
-
-/**
- * Build an array of [start, end] ranges that correspond to `${...}` logic
- * blocks in the source. Matches are brace-balanced. Content inside these
- * ranges should not trigger ghost-pattern detection (the user is writing JS
- * expression syntax inside a legitimate scrml logic interpolation).
- *
- * Also excludes `#{...}` CSS context blocks from some checks (per-pattern).
- *
- * @param {string} source
- * @returns {Array<[number, number]>}
- */
-function buildLogicRanges(source) {
-  const ranges = [];
-  let i = 0;
-  while (i < source.length) {
-    // Match ${ — logic interpolation start
-    if (source[i] === "$" && source[i + 1] === "{") {
-      const start = i;
-      i += 2;
-      let depth = 1;
-      while (i < source.length && depth > 0) {
-        if (source[i] === "{") depth++;
-        else if (source[i] === "}") depth--;
-        i++;
-      }
-      ranges.push([start, i]);
-    } else {
-      i++;
-    }
-  }
-  return ranges;
-}
 
 /**
  * Returns true if the given offset falls inside any of the provided ranges.
@@ -126,78 +93,198 @@ function inRange(offset, ranges) {
   return false;
 }
 
-// ---------------------------------------------------------------------------
-// CSS context detection
-// ---------------------------------------------------------------------------
-
 /**
- * Build ranges for `#{...}` CSS context blocks (brace-balanced).
- * Used to detect Svelte-style `${}` interpolations inside CSS values.
+ * Coordinated single-pass scanner that computes BOTH string-literal ranges and
+ * comment ranges in one walk. The coordination matters: `//` inside `"..."` is
+ * a string char (NOT a line comment), and `"..."` inside a `// ...` line is a
+ * comment char (NOT a string opener). Computing the two range sets in
+ * isolation produces phantom overlaps.
+ *
+ * Returns `{ stringRanges, commentRanges }`. Both are arrays of `[start, end)`
+ * half-open intervals.
+ *
+ * Rules:
+ *   - `"..."` / `'...'` are strings. `\` escapes the next char inside a string.
+ *     A bare `\n` terminates an unclosed string (matches `buildStringRanges`'
+ *     prior semantics).
+ *   - `// ... \n` is a line comment.
+ *   - `/* ... * /` (slash-star ... star-slash) is a block comment.
+ *   - Strings opened inside comments do NOT open a string range.
+ *   - Comments opened inside strings do NOT open a comment range.
+ *
+ * S121 Wave 11 Unit T fix:
+ *   Pre-fix, `buildStringRanges` + `buildCommentRanges` ran independently and
+ *   could produce phantom ranges. This coordinated pass is the load-bearing
+ *   primitive for the brace-counter context-awareness — the brace counters
+ *   use `skipRanges = stringRanges ∪ commentRanges` to decide whether a `{`
+ *   or `}` is a structural brace or a literal character inside a string /
+ *   comment.
  *
  * @param {string} source
- * @returns {Array<[number, number]>}
+ * @returns {{ stringRanges: Array<[number, number]>, commentRanges: Array<[number, number]> }}
  */
-function buildCssRanges(source) {
-  const ranges = [];
+function buildSkipRanges(source) {
+  const stringRanges = [];
+  const commentRanges = [];
   let i = 0;
   while (i < source.length) {
-    if (source[i] === "#" && source[i + 1] === "{") {
-      const start = i;
-      i += 2;
-      let depth = 1;
-      while (i < source.length && depth > 0) {
-        if (source[i] === "{") depth++;
-        else if (source[i] === "}") depth--;
-        i++;
-      }
-      ranges.push([start, i]);
-    } else {
-      i++;
-    }
-  }
-  return ranges;
-}
+    const c = source[i];
+    const c2 = source[i + 1];
 
-// ---------------------------------------------------------------------------
-// Comment-region detection
-// ---------------------------------------------------------------------------
-
-/**
- * Build ranges for `//` line comments and block comments (slash-star ... star-slash).
- * Used to exclude comment text from ghost-pattern detection — comment regions
- * per SPEC §27 are not parsed as code, so any framework-shaped text inside a
- * comment is documentation, not a real ghost.
- *
- * Edge cases:
- *  - `//` inside a string literal: the builder does not track string state, so
- *    a `//` inside a string opens a phantom "comment" range to end-of-line.
- *    Acceptable: false negatives on lint warnings are not failures, just
- *    reduced signal. The cost of over-exclusion is low.
- *  - Block comment with no closing marker: i advances past end-of-source and
- *    the outer `i < source.length` check terminates the loop cleanly.
- *
- * @param {string} source
- * @returns {Array<[number, number]>}
- */
-function buildCommentRanges(source) {
-  const ranges = [];
-  let i = 0;
-  while (i < source.length) {
-    // Line comment: // through end of line
-    if (source[i] === "/" && source[i + 1] === "/") {
+    // Line comment — `// ... \n`
+    if (c === "/" && c2 === "/") {
       const start = i;
       i += 2;
       while (i < source.length && source[i] !== "\n") i++;
-      ranges.push([start, i]);
+      // Half-open: end is the offset of the `\n` (excluded), or source.length
+      commentRanges.push([start, i]);
       continue;
     }
-    // Block comment: /* ... */
-    if (source[i] === "/" && source[i + 1] === "*") {
+
+    // Block comment — `/* ... */`
+    if (c === "/" && c2 === "*") {
       const start = i;
       i += 2;
       while (i < source.length - 1 && !(source[i] === "*" && source[i + 1] === "/")) i++;
-      i += 2; // consume the closing */
-      ranges.push([start, i]);
+      // Consume the closing `*/` (or run to end-of-source for unterminated)
+      i = Math.min(i + 2, source.length);
+      commentRanges.push([start, i]);
+      continue;
+    }
+
+    // String literal — `"..."` or `'...'`
+    if (c === '"' || c === "'") {
+      const quote = c;
+      const start = i;
+      i++;
+      while (i < source.length && source[i] !== quote) {
+        // `\` escapes the next char (including `\"`, `\\`, `\n` in raw form)
+        if (source[i] === "\\" && i + 1 < source.length) {
+          i += 2;
+          continue;
+        }
+        // Unterminated string — bail at end-of-line (matches prior semantics)
+        if (source[i] === "\n") break;
+        i++;
+      }
+      // Consume closing quote if present
+      if (i < source.length && source[i] === quote) i++;
+      stringRanges.push([start, i]);
+      continue;
+    }
+
+    i++;
+  }
+  return { stringRanges, commentRanges };
+}
+
+/**
+ * Build a sorted list of merged `[start, end)` skip-intervals — strings and
+ * comments combined. Used by the brace-matched range builders below to
+ * decide whether a `{` or `}` is structural or a literal char inside a
+ * string / comment.
+ *
+ * @param {{ stringRanges: Array<[number, number]>, commentRanges: Array<[number, number]> }} skip
+ * @returns {Array<[number, number]>}
+ */
+function mergeSkipRanges({ stringRanges, commentRanges }) {
+  const all = [...stringRanges, ...commentRanges].sort((a, b) => a[0] - b[0]);
+  const merged = [];
+  for (const r of all) {
+    const last = merged[merged.length - 1];
+    if (last && r[0] <= last[1]) {
+      last[1] = Math.max(last[1], r[1]);
+    } else {
+      merged.push([r[0], r[1]]);
+    }
+  }
+  return merged;
+}
+
+/**
+ * Returns the next offset >= `i` that is OUTSIDE any skip-range. If `i` is
+ * inside a skip-range, returns the range's `end` offset (the first offset
+ * after the range). Otherwise returns `i` unchanged.
+ *
+ * `skipMerged` MUST be sorted by start offset (use `mergeSkipRanges`).
+ *
+ * @param {number} i
+ * @param {Array<[number, number]>} skipMerged
+ * @returns {number}
+ */
+function skipPastRanges(i, skipMerged) {
+  // Linear scan is fine — skip-range counts are small relative to char-by-char
+  // scans, and the brace counters call this once per `{` / `}`.
+  for (const [start, end] of skipMerged) {
+    if (i < start) return i;
+    if (i < end) return end;
+  }
+  return i;
+}
+
+// ---------------------------------------------------------------------------
+// Brace-matched range builders — all context-aware via skipMerged
+// ---------------------------------------------------------------------------
+
+/**
+ * Walk source from `start` (just past a `prefix{` opener) collecting the
+ * closing `}` at depth 0, skipping any `{` / `}` chars that fall inside a
+ * string or comment range.
+ *
+ * Returns the offset JUST PAST the matching closer (or source.length when
+ * the source is unterminated — matches the naive builder's behavior).
+ *
+ * @param {string} source
+ * @param {number} start — offset AFTER the opening brace
+ * @param {Array<[number, number]>} skipMerged — sorted merged skip ranges
+ * @returns {number}
+ */
+function findMatchingClose(source, start, skipMerged) {
+  let depth = 1;
+  let i = start;
+  while (i < source.length && depth > 0) {
+    // If `i` is inside a skip range, leap past it
+    const skipped = skipPastRanges(i, skipMerged);
+    if (skipped !== i) {
+      i = skipped;
+      if (i >= source.length) break;
+      continue;
+    }
+    if (source[i] === "{") depth++;
+    else if (source[i] === "}") depth--;
+    i++;
+  }
+  return i;
+}
+
+/**
+ * Build an array of [start, end) ranges that correspond to `${...}` logic
+ * blocks in the source. Matches are brace-balanced. Content inside these
+ * ranges should not trigger ghost-pattern detection (the user is writing JS
+ * expression syntax inside a legitimate scrml logic interpolation).
+ *
+ * The scanner skips strings + comments so brace-literals inside `"{"` or
+ * `// {` don't confuse the depth counter (S121 Wave 11 Unit T fix —
+ * pre-fix, naive counting closed `${...}` blocks too early when string-
+ * embedded braces unbalanced the depth count).
+ *
+ * @param {string} source
+ * @param {Array<[number, number]>} skipMerged
+ * @returns {Array<[number, number]>}
+ */
+function buildLogicRanges(source, skipMerged) {
+  const ranges = [];
+  let i = 0;
+  while (i < source.length) {
+    // Don't open a logic range from inside a string / comment — phantom
+    // `${...}` text in a doc-comment is not a real logic block.
+    const skipped = skipPastRanges(i, skipMerged);
+    if (skipped !== i) { i = skipped; continue; }
+    if (source[i] === "$" && source[i + 1] === "{") {
+      const start = i;
+      const end = findMatchingClose(source, i + 2, skipMerged);
+      ranges.push([start, end]);
+      i = end;
       continue;
     }
     i++;
@@ -205,42 +292,63 @@ function buildCommentRanges(source) {
   return ranges;
 }
 
-// ---------------------------------------------------------------------------
-// Tilde-sigil detection
-// ---------------------------------------------------------------------------
+/**
+ * Build ranges for `#{...}` CSS context blocks (brace-balanced + context-
+ * aware). Used to detect Svelte-style `${}` interpolations inside CSS values.
+ *
+ * S121 Wave 11 Unit T fix — pre-fix, `#{` text inside a `// ... #{` comment
+ * opened a phantom CSS range that swallowed downstream `${...}` blocks,
+ * misfiring W-LINT-010 14 times across the native-parser .scrml mirrors.
+ *
+ * @param {string} source
+ * @param {Array<[number, number]>} skipMerged
+ * @returns {Array<[number, number]>}
+ */
+function buildCssRanges(source, skipMerged) {
+  const ranges = [];
+  let i = 0;
+  while (i < source.length) {
+    const skipped = skipPastRanges(i, skipMerged);
+    if (skipped !== i) { i = skipped; continue; }
+    if (source[i] === "#" && source[i + 1] === "{") {
+      const start = i;
+      const end = findMatchingClose(source, i + 2, skipMerged);
+      ranges.push([start, end]);
+      i = end;
+      continue;
+    }
+    i++;
+  }
+  return ranges;
+}
 
 /**
- * Build ranges for `~{...}` test-sigil blocks (brace-balanced).
+ * Build ranges for `~{...}` test-sigil blocks (brace-balanced + context-
+ * aware).
  *
  * Per SPEC §32, `~{}` is the inline-test sigil. Its body contains scrml code
  * (test declarations, assertions, reactive reads/writes) that should not
  * trigger ghost-pattern detection — `@count = 0` inside a test body is a
  * legitimate reactive assignment, not a Vue-style attribute shorthand.
  *
- * Mirrors `buildLogicRanges` / `buildCssRanges`: requires the sigil pair
- * (`~{`) to start a range, so a bare `~` elsewhere does not accidentally
- * open a phantom range.
- *
  * @param {string} source
+ * @param {Array<[number, number]>} skipMerged
  * @returns {Array<[number, number]>}
  */
-function buildTildeRanges(source) {
+function buildTildeRanges(source, skipMerged) {
   const ranges = [];
   let i = 0;
   while (i < source.length) {
+    const skipped = skipPastRanges(i, skipMerged);
+    if (skipped !== i) { i = skipped; continue; }
     if (source[i] === "~" && source[i + 1] === "{") {
       const start = i;
-      i += 2;
-      let depth = 1;
-      while (i < source.length && depth > 0) {
-        if (source[i] === "{") depth++;
-        else if (source[i] === "}") depth--;
-        i++;
-      }
-      ranges.push([start, i]);
-    } else {
-      i++;
+      const end = findMatchingClose(source, i + 2, skipMerged);
+      ranges.push([start, end]);
+      i = end;
+      continue;
     }
+    i++;
   }
   return ranges;
 }
@@ -252,17 +360,13 @@ function buildTildeRanges(source) {
  * shapes should not fire — `@cell = .Variant` reactive writes look
  * superficially like Vue `@click=` shorthand but are valid scrml.
  *
- * Brace-matching mirrors `buildLogicRanges` / `buildTildeRanges`: the
- * opener pair (the `(` and `{`) lock the range start; depth-counting walks
- * to the matching `}`. Does NOT handle braces inside string literals
- * (same caveat as the sibling builders).
- *
- * S96 Bug 9 fix.
+ * S96 Bug 9 fix; S121 Wave 11 Unit T context-aware refactor.
  *
  * @param {string} source
+ * @param {Array<[number, number]>} skipMerged
  * @returns {Array<[number, number]>}
  */
-function buildFunctionBodyRanges(source) {
+function buildFunctionBodyRanges(source, skipMerged) {
   const ranges = [];
   // Match `function NAME(...)` or `fn NAME(...) -> T` followed by `{`.
   // The return-type clause is optional (functions don't have it; `fn` does).
@@ -270,67 +374,12 @@ function buildFunctionBodyRanges(source) {
   let m;
   while ((m = re.exec(source)) !== null) {
     const start = m.index;
-    let i = m.index + m[0].length; // position after the opening `{`
-    let depth = 1;
-    while (i < source.length && depth > 0) {
-      if (source[i] === "{") depth++;
-      else if (source[i] === "}") depth--;
-      i++;
-    }
-    ranges.push([start, i]);
-  }
-  return ranges;
-}
-
-// ---------------------------------------------------------------------------
-// String-literal range detection
-// ---------------------------------------------------------------------------
-
-/**
- * Build ranges that correspond to single-quoted (`'...'`) and double-quoted
- * (`"..."`) string literals in the source. Used by W-LINT-024 to skip
- * `$ident` matches that fall inside a string-literal payload — a literal
- * `"$store"` is NOT a Svelte auto-subscribe ghost; it's just a string that
- * happens to contain a `$`-prefixed token.
- *
- * Honours `\` escape: `"a\"b"` is one continuous string range.
- *
- * Caveats (acceptable trade-offs, mirroring the comment-range builder):
- *  - Template literals (` `...` `) are NOT tracked. Adopters writing
- *    `` `${ ... $store ... }` `` will not have the lint suppressed inside
- *    the backtick body. False-positive cost is low — backtick template
- *    literals containing `$ident`-shaped text are rare in markup context.
- *  - Quoted-string detection runs against the FULL source, not only inside
- *    `${...}` logic blocks. A quoted string in markup-text position (e.g.
- *    a `<div title="some $store">`) would also suppress, which is the
- *    right behavior — that's an attribute value, not a Svelte ghost.
- *
- * @param {string} source
- * @returns {Array<[number, number]>}
- */
-function buildStringRanges(source) {
-  const ranges = [];
-  let i = 0;
-  while (i < source.length) {
-    const ch = source[i];
-    if (ch === '"' || ch === "'") {
-      const quote = ch;
-      const start = i;
-      i++;
-      while (i < source.length && source[i] !== quote) {
-        if (source[i] === "\\" && i + 1 < source.length) {
-          i += 2; // skip escaped character
-          continue;
-        }
-        if (source[i] === "\n") break; // unterminated; bail at line end
-        i++;
-      }
-      // Consume the closing quote (if present)
-      if (i < source.length && source[i] === quote) i++;
-      ranges.push([start, i]);
-      continue;
-    }
-    i++;
+    // Skip matches that fall inside a string / comment — `// fn foo() {` in
+    // a comment is documentation, not a function declaration.
+    if (inRange(start, skipMerged)) continue;
+    const afterOpen = m.index + m[0].length; // position after the opening `{`
+    const end = findMatchingClose(source, afterOpen, skipMerged);
+    ranges.push([start, end]);
   }
   return ranges;
 }
@@ -353,13 +402,22 @@ function buildStringRanges(source) {
  */
 const PATTERNS = [
   // Pattern 1: <style> block — unambiguous, no scrml meaning
+  //
+  // S121 Wave 11 Unit T fix: pre-fix `skipIf: null` fired on `<style>` inside
+  // doc-comments + string-literal diagnostic-message text. The native-parser
+  // .scrml mirror IS the source of the parser that rejects `<style>`, so
+  // every comment / string reference fired falsely (10 fires on
+  // parse-markup.scrml alone). Adding comment + string skip closes the
+  // mirror-class false positives while preserving signal on real `<style>`
+  // openers in adopter code.
   {
     regex: /<style\b/gi,
     ghost: "<style>",
     correction: "#{ css rules }",
     see: "§9",
     code: "W-LINT-001",
-    skipIf: null, // Never a valid scrml construct
+    skipIf: (offset, _logicRanges, _cssRanges, commentRanges, _tildeRanges, _functionBodyRanges, stringRanges) =>
+      inRange(offset, commentRanges) || inRange(offset, stringRanges),
   },
 
   // Pattern 2: oninput=${...} arrow that assigns to @var — ghost bind pattern
@@ -436,8 +494,19 @@ const PATTERNS = [
     correction: "<Comp prop=val>",
     see: "§5",
     code: "W-LINT-007",
-    skipIf: (offset, logicRanges, _cssRanges, commentRanges) =>
-      inRange(offset, logicRanges) || inRange(offset, commentRanges),
+    // S121 Wave 11 Unit T fix — add stringRanges to skip
+    // `prop={val}`-shaped text inside string literals (diagnostic-message
+    // strings discussing the JSX form). The function-body skip ALSO closes
+    // the structural false positive at parse-css-body.scrml:359 where
+    // `const seen = {}` (an object-literal assignment in v0.3 logic-default
+    // mode) was firing — once the brace-counter is context-aware, the
+    // outer `${...}` properly covers the function body and logicRanges
+    // suppresses the match.
+    skipIf: (offset, logicRanges, _cssRanges, commentRanges, _tildeRanges, functionBodyRanges, stringRanges) =>
+      inRange(offset, logicRanges) ||
+      inRange(offset, commentRanges) ||
+      inRange(offset, stringRanges) ||
+      inRange(offset, functionBodyRanges || []),
   },
 
   // Pattern 8: {cond && <El>} — React conditional rendering
@@ -461,16 +530,30 @@ const PATTERNS = [
 
   // Pattern 10: ${} interpolation INSIDE #{} CSS context — Svelte pattern
   // Matches: #{ ... ${ ... } ... } — the ${ inside CSS is the ghost
+  //
+  // S121 Wave 11 Unit T fix: pre-fix, `buildCssRanges` was a naive `#{`
+  // brace-counter that didn't skip strings / comments. A `#{` inside a
+  // doc-comment opened a phantom CSS range that swallowed dozens of real
+  // `${...}` blocks downstream — 14 false fires on parse-markup.scrml's
+  // comment-class .scrml mirror. The cssRanges builder is now context-aware
+  // (skips strings + comments via skipMerged); the skipIf below adds
+  // defense-in-depth by also skipping matches that fall inside a comment or
+  // string literal directly.
   {
     regex: /\$\{/g,
     ghost: "${} in CSS context",
     correction: "@var directly in #{}",
     see: "§9",
     code: "W-LINT-010",
-    skipIf: (offset, logicRanges, cssRanges) => {
-      // Only trigger if we're inside a #{} CSS block
-      if (!inRange(offset, cssRanges)) return true; // skip — not in CSS context
-      // Also skip if this ${ is a logic interpolation itself (nested ${} in CSS is the ghost)
+    skipIf: (offset, _logicRanges, cssRanges, commentRanges, _tildeRanges, _functionBodyRanges, stringRanges) => {
+      // Skip — not in CSS context (the lint's whole purpose is CSS-embedded
+      // `${...}` detection).
+      if (!inRange(offset, cssRanges)) return true;
+      // Defense-in-depth — even if a real `#{...}` CSS block contains a
+      // `${...}` inside a string/comment, the match is documentation, not a
+      // ghost.
+      if (inRange(offset, commentRanges)) return true;
+      if (inRange(offset, stringRanges)) return true;
       return false;
     },
   },
@@ -478,13 +561,20 @@ const PATTERNS = [
   // Pattern 11: Vue `:attr=` colon-prefixed attribute binding
   // Matches: whitespace + `:ident=` where no ident precedes the colon
   // (distinguishes from scrml's `class:name=@cond` which has `class` before `:`)
+  //
+  // S121 Wave 11 Unit T fix — pre-fix the skipIf only checked logicRanges,
+  // so `:attr=` text inside doc-comments and string-literal demonstrations
+  // of Vue syntax (parse-stmt.scrml mirror class) fired falsely.
   {
     regex: /\s:[a-z][a-zA-Z0-9-]*\s*=/g,
     ghost: ":attr=\"expr\"",
     correction: "attr=@var (or attr=\"literal\")",
     see: "§5",
     code: "W-LINT-011",
-    skipIf: (offset, logicRanges) => inRange(offset, logicRanges),
+    skipIf: (offset, logicRanges, _cssRanges, commentRanges, _tildeRanges, _functionBodyRanges, stringRanges) =>
+      inRange(offset, logicRanges) ||
+      inRange(offset, commentRanges) ||
+      inRange(offset, stringRanges),
   },
 
   // Pattern 12: Vue directives `v-if=`, `v-for=`, `v-model=`, `v-show=`,
@@ -885,12 +975,18 @@ const PATTERNS = [
 export function lintGhostPatterns(source, filePath) {
   if (!source || source.length === 0) return [];
 
-  const logicRanges = buildLogicRanges(source);
-  const cssRanges = buildCssRanges(source);
-  const commentRanges = buildCommentRanges(source);
-  const tildeRanges = buildTildeRanges(source);
-  const functionBodyRanges = buildFunctionBodyRanges(source);
-  const stringRanges = buildStringRanges(source);
+  // Compute string + comment ranges first, in a single coordinated pass so
+  // `//` inside a string isn't a phantom comment and `"..."` inside a `//`
+  // comment isn't a phantom string. The brace-matched range builders below
+  // consume the merged skip-range list to skip braces inside strings /
+  // comments (S121 Wave 11 Unit T fix).
+  const { stringRanges, commentRanges } = buildSkipRanges(source);
+  const skipMerged = mergeSkipRanges({ stringRanges, commentRanges });
+
+  const logicRanges = buildLogicRanges(source, skipMerged);
+  const cssRanges = buildCssRanges(source, skipMerged);
+  const tildeRanges = buildTildeRanges(source, skipMerged);
+  const functionBodyRanges = buildFunctionBodyRanges(source, skipMerged);
   const diagnostics = [];
 
   for (const pattern of PATTERNS) {
