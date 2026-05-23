@@ -735,6 +735,33 @@ describe("W-LINT-013: Vue @event= attribute shorthand", () => {
     const diags = lint('${ @count = 0 }');
     expect(hasCode(diags, "W-LINT-013")).toBe(false);
   });
+
+  // W14 Unit AA scope-gate regression tests — Vue `@event=` shorthand is
+  // exclusively a markup-element-opener attribute syntax. Bare `@var = expr`
+  // at statement position (SPEC §6.1.2 reactive write in v0.3 logic-default
+  // mode §40.8) and inside-opener-but-inside-logic-block writes must not fire.
+
+  test("W14-AA: does NOT fire on bare @counter = 5 at <program> body statement", () => {
+    // <program> body parses in default-logic mode (§40.8); `@counter = 5` is
+    // a legitimate reactive write per §6.1.2, not a Vue `@click="..."` ghost.
+    const source = '<program>\n  <counter> = 0\n  @counter = 5\n</>\n';
+    const diags = lint(source);
+    expect(hasCode(diags, "W-LINT-013")).toBe(false);
+  });
+
+  test("W14-AA: does NOT fire on bare @count = 0 at <page> body statement", () => {
+    const source = '<page>\n  <count> = 0\n  @count = 42\n</>\n';
+    const diags = lint(source);
+    expect(hasCode(diags, "W-LINT-013")).toBe(false);
+  });
+
+  test("W14-AA: does NOT fire on `oninput=${ @v = e.target.value }` inside opener", () => {
+    // Match is inside a tag-opener range, but ALSO inside a ${} logic block;
+    // the logic-range guard takes precedence and skips the match.
+    const source = '<input oninput=' + dollars(" @v = event.target.value ") + '>';
+    const diags = lint(source);
+    expect(hasCode(diags, "W-LINT-013")).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

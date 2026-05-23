@@ -384,6 +384,70 @@ function buildFunctionBodyRanges(source, skipMerged) {
   return ranges;
 }
 
+/**
+ * Build ranges that correspond to markup-element OPENING TAGS — the region
+ * spanning from `<TagName` through the closing `>` (or `/>`). These ranges
+ * are the ONLY place where `@click=`, `:class=`, `v-if=`, and friends are
+ * meaningful attribute shorthand syntax in other frameworks.
+ *
+ * W14 Unit AA fix (W-LINT-013): pre-fix, the Vue `@event=` lint scanned
+ * raw source via `/\s@[a-z]\w*\s*=(?!=)/g` and skipped only `${}`, `~{}`,
+ * comments, and `function/fn` bodies. But scrml v0.3 logic-default mode
+ * (SPEC §40.8) allows bare `@cell = expr` reactive writes at statement
+ * position inside `<program>` / `<page>` bodies — these false-fired as
+ * Vue ghosts (119 fires across 15 sample files, e.g. `quiz-app.scrml`,
+ * `recipe-book.scrml`). Gating W-LINT-013 to tag-opener ranges only fixes
+ * the false-positive class while preserving signal on real `<button
+ * @click="...">` adopter mistakes.
+ *
+ * Opener heuristic: `<` followed by `[A-Za-z]` (tag-name char) — excludes
+ * `</closer`, `<!doctype`, and `<x> = 0` state-cell decls (which match
+ * `<NAME>` but are themselves closed by `>` before any `@word=` content,
+ * so the range is effectively empty for lint purposes). String-attribute
+ * values (e.g. `<a href="https://x.com/?q=>foo">`) are honored via
+ * `skipPastRanges`, so a `>` inside an attribute string doesn't close the
+ * opener prematurely. A nested `<` (malformed markup) closes the current
+ * opener at that point.
+ *
+ * @param {string} source
+ * @param {Array<[number, number]>} skipMerged
+ * @returns {Array<[number, number]>}
+ */
+function buildTagOpenerRanges(source, skipMerged) {
+  const ranges = [];
+  let i = 0;
+  while (i < source.length) {
+    // Don't open a tag range from inside a string / comment.
+    const skipped = skipPastRanges(i, skipMerged);
+    if (skipped !== i) { i = skipped; continue; }
+    if (source[i] === "<") {
+      const next = source[i + 1];
+      // Only count `<Letter...` as a tag opener — skip `</closer`, `<!`,
+      // `<?`, and `<` followed by whitespace / operator.
+      if (next && /[A-Za-z]/.test(next)) {
+        const start = i;
+        let j = i + 1;
+        while (j < source.length) {
+          const sk = skipPastRanges(j, skipMerged);
+          if (sk !== j) { j = sk; continue; }
+          const ch = source[j];
+          if (ch === ">") { j++; break; }
+          // Self-closing `/>` ends the opener too.
+          if (ch === "/" && source[j + 1] === ">") { j += 2; break; }
+          // Nested `<` (malformed) — close opener here, restart at this `<`.
+          if (ch === "<") break;
+          j++;
+        }
+        ranges.push([start, j]);
+        i = j;
+        continue;
+      }
+    }
+    i++;
+  }
+  return ranges;
+}
+
 // ---------------------------------------------------------------------------
 // Pattern definitions
 // ---------------------------------------------------------------------------
@@ -396,9 +460,9 @@ function buildFunctionBodyRanges(source, skipMerged) {
  *   see         — spec section
  *   code        — W-LINT-NNN
  *   skipIf      — optional fn(offset, logicRanges, cssRanges, commentRanges,
- *                 tildeRanges, functionBodyRanges, stringRanges) -> bool
- *                 to skip match. Backwards compatible — patterns may use
- *                 shorter signatures.
+ *                 tildeRanges, functionBodyRanges, stringRanges,
+ *                 tagOpenerRanges) -> bool to skip match. Backwards compatible
+ *                 — patterns may use shorter signatures.
  */
 const PATTERNS = [
   // Pattern 1: <style> block — unambiguous, no scrml meaning
@@ -595,25 +659,36 @@ const PATTERNS = [
   // (`value=@count`), never as attribute NAMES. The trailing `(?!=)` negative
   // lookahead rejects `@var ==` (scrml equality per SPEC §45) so the lint
   // does not misfire on `assert @count == 0` or `if=(@x == 1)` expressions.
-  // Also skips comment regions (per SPEC §27) via commentRanges and `~{}`
-  // test-sigil bodies (per SPEC §32) via tildeRanges — `@count = 0` inside a
-  // `~{}` test block is a legitimate reactive assignment, not a Vue ghost.
+  //
+  // W14 Unit AA scope-gate (the tagOpenerRanges check at the bottom): Vue's
+  // `@click="..."` shorthand is *exclusively* an HTML markup-element attribute
+  // shorthand — it only appears between `<TagName` and the closing `>` of an
+  // opener. Bare `@var = expr` at statement position in scrml v0.3 logic-
+  // default mode (SPEC §6.1.2 + §40.8) is a legitimate reactive write, NOT a
+  // Vue ghost. Pre-fix, this lint fired 119 times on real samples (quiz-app,
+  // recipe-book, etc.) because the prior guards (logic / comment / tilde /
+  // function-body) didn't cover the `<program>` / `<page>` body case. The
+  // tag-opener gate is an ADDITIONAL skip — the existing guards stay
+  // because `${ @x = expr }` inside an opener (`oninput=${ @v = ev.target }`)
+  // is a legitimate reactive write inside a logic interp, not a Vue ghost.
+  //
+  // S96 Bug 9 fix — also skip function-body ranges. `@dragPhase = .Dragging`
+  // inside `function startDrag() { ... }` is a legitimate reactive write,
+  // not a Vue ghost. Function bodies in v0.3 logic-default mode live at
+  // file scope WITHOUT a wrapping `${...}`, so logicRanges doesn't cover
+  // them.
   {
     regex: /\s@[a-z][a-zA-Z0-9]*(?:\.[a-z]+)*\s*=(?!=)/g,
     ghost: "@click=\"handler\" (Vue event shorthand)",
     correction: "onclick=handler() (scrml uses standard on<event> attribute names)",
     see: "§5",
     code: "W-LINT-013",
-    // S96 Bug 9 fix — also skip function-body ranges. `@dragPhase = .Dragging`
-    // inside `function startDrag() { ... }` is a legitimate reactive write,
-    // not a Vue ghost. Function bodies in v0.3 logic-default mode live at
-    // file scope WITHOUT a wrapping `${...}`, so logicRanges doesn't cover
-    // them.
-    skipIf: (offset, logicRanges, _cssRanges, commentRanges, tildeRanges, functionBodyRanges) =>
+    skipIf: (offset, logicRanges, _cssRanges, commentRanges, tildeRanges, functionBodyRanges, _stringRanges, tagOpenerRanges) =>
       inRange(offset, logicRanges) ||
       inRange(offset, commentRanges) ||
       inRange(offset, tildeRanges) ||
-      inRange(offset, functionBodyRanges || []),
+      inRange(offset, functionBodyRanges || []) ||
+      !inRange(offset, tagOpenerRanges || []),
   },
 
   // Pattern 14: Svelte block directives `{#if ...}`, `{:else}`, `{/if}`,
@@ -987,6 +1062,7 @@ export function lintGhostPatterns(source, filePath) {
   const cssRanges = buildCssRanges(source, skipMerged);
   const tildeRanges = buildTildeRanges(source, skipMerged);
   const functionBodyRanges = buildFunctionBodyRanges(source, skipMerged);
+  const tagOpenerRanges = buildTagOpenerRanges(source, skipMerged);
   const diagnostics = [];
 
   for (const pattern of PATTERNS) {
@@ -996,7 +1072,7 @@ export function lintGhostPatterns(source, filePath) {
       const offset = match.index;
 
       // Apply false-positive guard
-      if (pattern.skipIf && pattern.skipIf(offset, logicRanges, cssRanges, commentRanges, tildeRanges, functionBodyRanges, stringRanges)) {
+      if (pattern.skipIf && pattern.skipIf(offset, logicRanges, cssRanges, commentRanges, tildeRanges, functionBodyRanges, stringRanges, tagOpenerRanges)) {
         continue;
       }
 
