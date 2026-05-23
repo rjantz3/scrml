@@ -12943,4 +12943,6 @@ export {
   resolveMachineBinding,
   parseMachineRules,
   // validateDerivedMachines already exported at its definition (§51.9)
+  // §48.x fn body checker — exported for I-FN-PROMOTABLE lint probe (§56.9)
+  checkFnBodyProhibitions,
 };

@@ -39,6 +39,7 @@ import { runSYMBatch } from "./symbol-table.ts";
 import { setBPPOverrides } from "./codegen/compat/parser-workarounds.js";
 import { lintGhostPatterns } from "./lint-ghost-patterns.js";
 import { runIMatchPromotable } from "./lint-i-match-promotable.js";
+import { runIFnPromotable } from "./lint-i-fn-promotable.js";
 import { findUnsupportedTailwindShapes, findUnrecognizedClasses } from "./tailwind-classes.js";
 import { runGauntletPhase1Checks } from "./gauntlet-phase1-checks.js";
 import { runGauntletPhase3EqChecks } from "./gauntlet-phase3-eq-checks.js";
@@ -1549,6 +1550,24 @@ export function compileScrml(options = {}) {
     } catch (e) {
       // Lint must not block compilation under any circumstance.
       if (verbose) log(`  [LINT] I-MATCH-PROMOTABLE pass threw: ${e?.message ?? String(e)}`);
+    }
+  }
+
+  // Stage 6.4b: I-FN-PROMOTABLE info-level lint (SPEC §56.9)
+  // Sibling to I-MATCH-PROMOTABLE — probes `function`-keyword declarations
+  // whose bodies would pass §48.3 fn-body constraints and surfaces the
+  // opportunity to rename to `fn` for the pure / state-factory contract.
+  // Non-fatal — diagnostics flow into allLintDiagnostics, never errors.
+  // CLI `bun scrml promote --fn` is a deferred follow-up (S122+).
+  if (Array.isArray(tsResult.files) && tsResult.files.length > 0) {
+    try {
+      const fnPromotableDiags = runIFnPromotable(tsResult.files, tsResult.stateTypeRegistry);
+      for (const d of fnPromotableDiags) {
+        allLintDiagnostics.push(d);
+        if (verbose) log(`  [LINT] ${d.filePath}:${d.line}:${d.column} ${d.code}: ${d.message}`);
+      }
+    } catch (e) {
+      if (verbose) log(`  [LINT] I-FN-PROMOTABLE pass threw: ${e?.message ?? String(e)}`);
     }
   }
 

@@ -15442,6 +15442,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-TABLEFOR-NO-PRIMARY-KEY | §41.16, §41.16.8 | The `selectable=@cell` attribute is set on `<tableFor for=T>`, but struct `T` has no field named `id` AND no `selectedBy="field"` override is provided. The selection surface needs a primary-key field to track which rows are selected. Resolution: add an `id` field to the struct, OR add `selectedBy="<some-other-field>"` to the `<tableFor>` element naming the PK field explicitly. (Stage TS; catalog addition S105 — tableFor SPEC entry) | Error |
 | E-TABLEFOR-SELECTABLE-CELL-WRONG-TYPE | §41.16, §41.16.8 | The cell referenced by `selectable=@cell` has a type other than `T[]` where `T` is the resolved primary-key field's type. (E.g., `selectable=@selectedIds` where `@selectedIds: string[]` but the PK field is `integer`.) Resolution: change the cell's declared type to match the PK field's type as an array (`T[]`), OR change the `selectedBy=` attribute to name a different PK field whose type matches the cell. (Stage TS; catalog addition S105 — tableFor SPEC entry) | Error |
 | I-MATCH-PROMOTABLE | §56 | Info-level lint surfaces an opportunity to promote an `if=` chain or `${ if (...) lift ... }` pattern over an enum-typed cell into a `<match for=Type on=@cell>` (Tier 1) block for structural exhaustiveness, OR into a `<engine for=Type>` (Tier 2) for full transition-validation. Run `bun scrml promote --match <file>[:line]` to mechanically lift the site. The lint is informational only; chains pre-S56 continue to compile cleanly. (Catalog addition S78 — reconciles SPEC §56 cross-ref claim. Emitted at `compiler/src/lint-promotable.ts` and consumed by `compiler/src/commands/promote.js`.) | Info |
+| I-FN-PROMOTABLE | §56.9 | Info-level lint surfaces an opportunity to promote a `function`-keyword declaration whose body satisfies the §48.3 fn-body prohibitions (no `?{}` SQL, no DOM mutation, no outer-scope mutation incl. no `@`-cell writes, no non-deterministic calls, no `async`/`await`, no `lift` past the fn boundary) to the `fn` shorthand (`fn` ≡ `pure function` per §48.11). The promotion is a one-keyword rename; after promotion the §48.3 prohibitions become *enforced invariants* at the declaration site — a future edit that would add a side effect surfaces E-FN-001..005 at compile time. The lint is structurally skipped for `async`/`server`/generator/failable/`handle()` functions (§56.9.1 skip-list). Sibling to `I-MATCH-PROMOTABLE` (§56.2); both surface declaration-site promotion opportunities along the tier ladder. The lint is informational only; declarations pre-S122 continue to compile cleanly. `bun scrml promote --fn` CLI verb is deferred follow-up (S122 Unit EE shipped detection only). (Catalog addition S122 Unit EE — emitted at `compiler/src/lint-i-fn-promotable.js`; consumed via `allLintDiagnostics` channel post-TS as Stage 6.4b in `compiler/src/api.js`.) | Info |
 | W-CG-001 | §6 | A top-level `state-decl` / `let-decl` / `const-decl` / SQL block / etc. inside a logic block was suppressed from the client output (server-only emit, or unused). The lint surfaces what was filtered + why so the developer can confirm it was intentional. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-reactive-wiring.ts:366`.) | Warning |
 | W-CG-UNDEFINED-INTERPOLATION | §42.5, §42.8 | A literal `undefined` JS-keyword was detected in compiled output (CG-level regression guard). scrml absence is canonically JS `null` per §42.5 / §42.8 — `not` codegens to `null`, never to `undefined`. The lint runs post-emission across the per-file compiled JS and fires on each line containing a bare `undefined` keyword outside the canonical idiom exemptions: paired `null && undefined` absence-detection check (§42.5/§42.8 canon — both must be checked to detect scrml absence under JS-host normalisation); `typeof X !== "undefined"` env-detection (canonical JS idiom in quoted form, not a value-keyword interpolation); comments; string literals; template-literal text; embedded runtime block (hand-written JS, masked via `// --- scrml reactive runtime ---` / `// --- end ---` markers). Resolution: the codegen site emitting the bare `undefined` should be migrated to `null` (per §42.8 "null over undefined" rationale). (Catalog addition S90 — M-7C-D-12 Track 3 ratified per OQ-5 (a); emitted at `compiler/src/codegen/lint-undefined-interpolation.ts`.) | Warning |
 | W-CG-CHUNK-EMPTY | §40.9.7, §40.9.11 | An entry-point produces zero non-empty chunks across all roles — every per-(role, tier) admission set is empty AND every chunk payload is the bare IIFE shell. Probable cause: a misconfigured `<page>` with no reactive cells / server fns / vendor units / admitted markup, OR a `<program>` body emptied by upstream stages. The build still completes; the per-route HTML still emits the role-bootstrap (which warns at runtime when the manifest lookup misses). Resolution: remove the empty entry point, OR add content to the `<page>` / `<program>` body. (Catalog addition S91 — A-4.7 per-route artifact splitter wave-close; emitted at `compiler/src/codegen/route-splitter.ts:emitPerRouteChunks` after per-EP iteration.) | Warning |
@@ -28776,11 +28777,111 @@ no concept of an initial state. The CLI may default to the first arm's variant a
 
 - §1 — tier ladder framing.
 - §18 — match block-form (`<match for=Type>`); `<X>` arm syntax; exhaustiveness.
-- §34 — `I-MATCH-PROMOTABLE` and `W-LIFECYCLE-CANDIDATE` catalog rows.
+- §34 — `I-MATCH-PROMOTABLE`, `I-FN-PROMOTABLE`, and `W-LIFECYCLE-CANDIDATE` catalog rows.
+- §48 — `fn` keyword (the promotion target of `I-FN-PROMOTABLE`, §56.9 below).
 - §51 — engine semantics (the Tier-2 destination of `--engine`).
 - Primer §11 — anti-patterns table; promotion-ergonomics is the canonical workflow that
   resolves the "if-else over enum cell" reflex.
 - Primer §13.8 — design center for promotion ergonomics.
+
+### 56.9 `I-FN-PROMOTABLE` — sibling promotion lint (`function` → `fn`)
+
+**Added:** S122 Unit EE, 2026-05-23. **Source:** user-surfaced design question
+(S122) — "is there a way to suggest promotion to `fn` if a function is promotable?".
+**Status:** initial ship — lint detection + diagnostic emission landed. CLI verb
+`bun scrml promote --fn` is a deferred follow-up (the rewrite is a one-keyword
+rename — `function` → `fn` — so the manual rewrite cost is low).
+
+`I-FN-PROMOTABLE` is the sibling of `I-MATCH-PROMOTABLE` (§56.2). Where `I-MATCH-
+PROMOTABLE` surfaces Tier-0 if-else → Tier-1 `<match>` promotion opportunities,
+`I-FN-PROMOTABLE` surfaces an analogous declaration-site promotion: a `function`
+keyword declaration whose body would pass §48.3 fn-body constraints can be
+promoted to `fn` (`fn` ≡ `pure function` per §48.11) for the pure / state-factory
+contract — and the §48.3 prohibitions the body already satisfies become
+*enforced invariants* at the declaration site after promotion.
+
+#### 56.9.1 Fire conditions
+
+The lint fires on a `function`-keyword declaration when ALL of:
+
+1. **Declaration is the long-form `function` keyword.** A declaration already
+   written `fn name(...)` does NOT fire (avoid double-lint).
+
+2. **Declaration is structurally fn-eligible** — the skip-list:
+   - NOT `async function` (§19.9.8: scrml has no `async`/`await`; even in the
+     stdlib carve-out, `async` functions cannot be promoted to `fn` because
+     `fn` is always synchronous per §48.3.5).
+   - NOT a generator (`function*`) — `fn` has no `fn*` form; `fn` returns
+     once and is synchronous.
+   - NOT `server function` — server functions are their own ergonomic surface
+     (§12.5); they ship over the wire with their own protect/route
+     considerations and are not target candidates for the pure-fn promotion.
+   - NOT failable (`function name!(...)`) — the `!` suffix is the failable
+     surface (§55 / §19.4); failable functions are not promotable to `fn`
+     because `fn` is implicitly infallible.
+   - NOT the `handle()` escape hatch (§39.3.1).
+
+3. **The body satisfies the §48.3 fn-body prohibitions.** Operationally, this
+   is verified by invoking the existing `checkFnBodyProhibitions` walker
+   (§48 implementation) against the candidate `function-decl` with a
+   discarded error sink. If the walker emits zero errors, the body is
+   fn-eligible. This includes all of:
+   - No `?{}` SQL access (E-FN-001).
+   - No DOM mutation calls (E-FN-002).
+   - No outer-scope variable mutation, including no writes to any `@`-cell
+     (E-FN-003; §48.3.3 — local mutation is permitted, outer mutation is not).
+   - No non-deterministic calls (E-FN-004).
+   - No `async`/`await` in the body (E-FN-005; §19.9.8 inside `fn` context).
+   - No `lift` past the fn boundary (E-FN-008).
+   - Calls only `fn`/`pure function` declarations (E-FN-003 §48.6.2).
+
+#### 56.9.2 Message shape
+
+Single message shape (the constraint is binary — the body either satisfies
+§48.3 or it does not):
+
+```
+Line N: I-FN-PROMOTABLE — `function name` body meets the `fn` body
+constraints (§48.3.3). Consider promoting to `fn name` for the pure /
+state-factory contract. `fn` is the ergonomic shorthand for `pure function`
+(§48.11); the §48.3 prohibitions you already satisfy become enforced
+invariants at the declaration site. See SPEC §56.
+```
+
+The diagnostic carries `ghost: "function NAME(...) with fn-eligible body"`
+and `correction: "rename keyword: function NAME → fn NAME"` so adopter-facing
+tooling can surface the rewrite path without parsing the message string.
+
+#### 56.9.3 Severity + pipeline placement
+
+`I-FN-PROMOTABLE` is severity `info` and is non-blocking. It flows into the
+`allLintDiagnostics` channel alongside `I-MATCH-PROMOTABLE`. The pass runs
+post-TS (after type resolution) as Stage 6.4b in the pipeline — sibling to
+the Stage 6.4 `I-MATCH-PROMOTABLE` pass — in `compiler/src/api.js`. The
+detector module is `compiler/src/lint-i-fn-promotable.js`.
+
+The lint never blocks compilation under any circumstance — the probe is
+defensively wrapped in `try/catch`, and any unexpected walker failure
+silently skips the candidate rather than escalating.
+
+#### 56.9.4 `bun scrml promote --fn` CLI surface (deferred)
+
+The lint surfaces the opportunity; the rewrite is a one-keyword rename
+(`function` → `fn`). A future `bun scrml promote --fn <file>[:line]`
+sub-command MAY ship to mechanically perform the rename in batch, mirroring
+the `--match` / `--engine` verbs (§56.5). Until then, adopters perform the
+rename manually — the cost is the keyword swap; no body restructuring is
+required (the body is already fn-eligible by the lint's fire condition).
+
+#### 56.9.5 Anti-patterns (when NOT to promote)
+
+The lint surfaces opportunities, not mandates. Adopters MAY choose to keep
+the long-form `function` keyword for documentary purposes — e.g., to signal
+"this function is intentionally written as a procedural-style helper even
+though it happens to satisfy fn-purity today" — or as a guard against a
+*future* edit that would add side effects, which would surface E-FN-001..005
+on the `fn` form but compile cleanly on the `function` form. Per the §1
+tier-ladder framing, promotion is *opt-in*; the lint is informational only.
 
 ---
 
