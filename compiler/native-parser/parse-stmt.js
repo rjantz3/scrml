@@ -780,13 +780,69 @@ function varDeclKindOf(tokenKind) {
 }
 
 // --- parseVarDeclarator — one declarator: a binding target + optional init ---
-//   declarator ::= binding ('=' assignment-expr)?
+//   declarator ::= binding (':' type-annotation)? ('=' assignment-expr)?
 // A `const` declarator without an initializer is a use-site error (a later
 // stage owns E-CONST-NO-INIT); M3.1 parses the shape and records a parse-level
 // note for the obviously-missing initializer only.
+//
+// W7-Unit-C — typed-decl `let x: T = expr` / `const x: T = expr` (SPEC §35.2.1,
+// §18 worked examples L9965, §19 L19790-92). Live's `collectTypeAnnotation`
+// (ast-builder.js:3366) consumes a `:` annotation between the binding and the
+// `=` / `,` / end-of-decl. Without this consume the cursor parks on `:` after
+// the binding name, parseVarDecl finishes the declarator (init=null), then
+// consumeSemicolon fails at `:` and the panic-mode resync walks forward token-
+// by-token. Because the resync skips through hard-keyword-less recovery (P5-9
+// made `type` a contextual Ident, not in STATEMENT_START_KINDS — see L347-352),
+// a following `type Name :kind = …` decl can be DEVOURED by the resync, so
+// `parseTypeDecl` is never re-entered and the corpus' typeDecl count goes
+// missing on the native side. The phase1-type-vs-const-annotation-012 file is
+// exactly this pattern.
 export function parseVarDeclarator(ctx) {
     const cursor = ctx.cursor;
     const target = parseBinding(ctx);
+
+    // Optional `:` type annotation. Token text is gathered raw — a precise
+    // type-expression decomposition is the type-system's concern (the live
+    // declarator carries `typeAnnotation` as a string blob; mirror that). The
+    // scan stops at the FIRST top-level `=` (the initializer signal), `,` (the
+    // declarator-list separator), or `;` (statement end). `()` / `{}` / `[]`
+    // depths gate the "top-level" test so an annotation like `Pair<(A,B)>` or
+    // `Record<{k:V}>` does not end the scan at an interior `,` / `=`.
+    let typeAnnotation = "";
+    if (currentKind(cursor) === TokenKind.Colon) {
+        advance(cursor);   // consume `:`
+        const annParts = [];
+        let parenDepth = 0;
+        let braceDepth = 0;
+        let bracketDepth = 0;
+        while (atEnd(cursor) === false) {
+            const k = currentKind(cursor);
+            const topLevel = (parenDepth === 0 && braceDepth === 0 && bracketDepth === 0);
+            if (topLevel && (k === TokenKind.Assign
+                || k === TokenKind.Comma
+                || k === TokenKind.Semicolon)) {
+                break;
+            }
+            if (k === TokenKind.LParen) parenDepth = parenDepth + 1;
+            else if (k === TokenKind.RParen) {
+                if (parenDepth === 0) break;
+                parenDepth = parenDepth - 1;
+            }
+            else if (k === TokenKind.LBrace) braceDepth = braceDepth + 1;
+            else if (k === TokenKind.RBrace) {
+                if (braceDepth === 0) break;
+                braceDepth = braceDepth - 1;
+            }
+            else if (k === TokenKind.LBracket) bracketDepth = bracketDepth + 1;
+            else if (k === TokenKind.RBracket) {
+                if (bracketDepth === 0) break;
+                bracketDepth = bracketDepth - 1;
+            }
+            const annTok = advance(cursor);
+            annParts.push(annTok.text === undefined || annTok.text === null ? "" : annTok.text);
+        }
+        typeAnnotation = annParts.join(" ").trim();
+    }
 
     let init = null;
     if (currentKind(cursor) === TokenKind.Assign) {
@@ -802,7 +858,11 @@ export function parseVarDeclarator(ctx) {
 
     const endE = (init === undefined || init === null) ? nodeEnd(target) : nodeEnd(init);
     const span = makeSpan(nodeStart(target), endE, nodeLine(target), nodeCol(target));
-    return makeVarDeclarator(target, init, span);
+    const declarator = makeVarDeclarator(target, init, span);
+    if (typeAnnotation.length > 0) {
+        declarator.typeAnnotation = typeAnnotation;
+    }
+    return declarator;
 }
 
 // parseAssignmentLevelExpr — parse a NON-comma expression (a declarator

@@ -1403,6 +1403,80 @@ describe("M3.1 statement-parser — native Stmt node shape", () => {
         expect(declarator.init.kind).toBe(ExprKind.NumberLit);
     });
 
+    // ------------------------------------------------------------------------
+    // W7 Unit C — typed-decl `let x: T = e` / `const x: T = e` annotation
+    // consume (SPEC §35.2.1, §18 L9965, §19 L19790-92). The native parser
+    // mirrors live's `collectTypeAnnotation` (ast-builder.js:3366) — without
+    // it the cursor parked on `:` after the binding, the declarator returned
+    // init=null, and the panic-mode resync devoured any following statement
+    // (the phase1-type-vs-const-annotation-012 gauntlet case).
+    // ------------------------------------------------------------------------
+
+    test("typed-decl — `const x: number = 5` consumes annotation, init parses", () => {
+        const r = parseWithNative("const x: number = 5;");
+        expect(r.body.length).toBe(1);
+        const decl = r.body[0];
+        expect(decl.kind).toBe(StmtKind.VarDecl);
+        expect(decl.declKind).toBe("const");
+        const declarator = decl.declarations[0];
+        expect(declarator.target.bindingKind).toBe(BindingKind.Ident);
+        expect(declarator.target.name).toBe("x");
+        expect(declarator.init).not.toBe(null);
+        expect(declarator.init.kind).toBe(ExprKind.NumberLit);
+        expect(declarator.typeAnnotation).toBe("number");
+        expect(r.errors.length).toBe(0);
+    });
+
+    test("typed-decl — `let v: MarioState | HealthRisk = e` union annotation", () => {
+        const r = parseWithNative("let v: MarioState | HealthRisk = e;");
+        const declarator = r.body[0].declarations[0];
+        expect(declarator.target.name).toBe("v");
+        expect(declarator.typeAnnotation).toBe("MarioState | HealthRisk");
+        expect(r.errors.length).toBe(0);
+    });
+
+    test("typed-decl — annotation followed by following `type` decl parses both", () => {
+        // The phase1-type-vs-const-annotation-012 shape: a typed const followed
+        // by a `type` decl in a `${}` body. Without the annotation consume the
+        // resync devoured the `type` line; with it both statements parse.
+        const r = parseWithNative("const limit: number = 5\ntype bound: enum = { A, B }\n");
+        expect(r.body.length).toBe(2);
+        expect(r.body[0].kind).toBe(StmtKind.VarDecl);
+        expect(r.body[1].kind).toBe(StmtKind.TypeDecl);
+        expect(r.body[1].name).toBe("bound");
+        expect(r.body[1].typeKind).toBe("enum");
+    });
+
+    test("typed-decl — annotation breaks at `,` for multi-declarator", () => {
+        const r = parseWithNative("let a: number = 1, b: string = \"x\";");
+        expect(r.body[0].declarations.length).toBe(2);
+        expect(r.body[0].declarations[0].typeAnnotation).toBe("number");
+        expect(r.body[0].declarations[1].typeAnnotation).toBe("string");
+        expect(r.body[0].declarations[0].init.kind).toBe(ExprKind.NumberLit);
+        expect(r.body[0].declarations[1].init.kind).toBe(ExprKind.StringLit);
+    });
+
+    test("typed-decl — annotation balances `()` so interior `=` does not end it", () => {
+        // `Pair<(A,B)>` style — interior commas / equality are nested.
+        const r = parseWithNative("let p: Pair(A, B) = mk();");
+        const declarator = r.body[0].declarations[0];
+        // The exact annotation text is space-separated tokens; the load-bearing
+        // assertion is the BALANCE — the `=` after `)` ends the annotation.
+        expect(declarator.typeAnnotation).toContain("Pair");
+        expect(declarator.typeAnnotation).toContain("A");
+        expect(declarator.typeAnnotation).toContain("B");
+        expect(declarator.init).not.toBe(null);
+    });
+
+    test("typed-decl — bare annotation with no `=` is allowed (init absent)", () => {
+        // `let x: T;` shape — declarator without initializer carries annotation.
+        const r = parseWithNative("let x: T;");
+        const declarator = r.body[0].declarations[0];
+        expect(declarator.target.name).toBe("x");
+        expect(declarator.typeAnnotation).toBe("T");
+        expect(declarator.init === null || declarator.init === undefined).toBe(true);
+    });
+
     test("object pattern — ObjectPat with shorthand + keyed + rest", () => {
         const r = parseWithNative("let {a, b: c, ...rest} = o;");
         const target = r.body[0].declarations[0].target;
