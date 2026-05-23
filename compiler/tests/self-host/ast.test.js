@@ -168,6 +168,7 @@ function stripIds(obj) {
     if (key === "authConfig") continue; // S115 (DD #27 / F6 / Pivot 2): authConfig extraction relocated OUT of JS ast-builder into the api.js PRECG pass (computeProgramConfig) — the JS buildAST no longer emits it; the self-host ast.scrml still does
     if (key === "middlewareConfig") continue; // S115 (DD #27 / F6 / Pivot 2): middlewareConfig extraction relocated OUT of JS ast-builder into the api.js PRECG pass (computeProgramConfig) — the JS buildAST no longer emits it; the self-host ast.scrml still does
     if (["_p3aExportName", "_p3aIsExport"].includes(key)) continue; // P3.A: JS ast-builder synthesizes export-tracking fields on function-decl shadow nodes; self-host doesn't yet
+    if (key === "_isReactiveAssign") continue; // V-kill (S123): JS ast-builder tags fn/function/${} body `@x = expr` state-decl emissions for SYM PASS 1 skip + PASS 3 E-STATE-UNDECLARED diagnostic; self-host translate-stmt.scrml doesn't yet emit the tag (pre-M6-self-host sweep)
     out[key] = stripIds(obj[key]);
   }
   return out;

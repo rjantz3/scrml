@@ -4921,21 +4921,82 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // Malformed — fall through to bare-expr
       }
 
-      // Simple reactive decl: @name = expr
-      // Phase A1a Step 4 — `shape: "plain"`, `structuralForm: false`, `isConst: false` for legacy @-form.
+      // V-kill (S123) — Simple reactive assignment / decl: @name = expr
+      //
+      // Pre-S123: this branch unconditionally emitted `state-decl`, silently
+      // synthesising a phantom cell from every `@name = expr` write. SPEC
+      // §6.1.1 + §6.2 normatively require declarations via the structural
+      // form `<name>`; the auto-synth path was undocumented, unauthorised, and
+      // corrupted the SYM PASS 1 cell-table whenever a later `@x = ...` write
+      // followed a prior `<x> = init` decl (Test 5/6 in DD §3).
+      //
+      // V-kill carve-out (deep-dive 2026-05-23 §6 + Approach-B follow-up):
+      //   - Default-logic auto-lift at `<program>` / `<page>` / `<channel>`
+      //     body-top (parentBlock._synthetic === true) → STAY legacy state-decl
+      //     without the marker. Per §40.8 default-logic mode lifts bare top-
+      //     level decls; Option-2 enforcement of bare `@x = expr` here is
+      //     Unit CC's territory and explicitly out of V-kill scope.
+      //   - Meta `^{...}` body (blockContext "meta") → STAY legacy state-decl
+      //     without the marker. BUG-META-6 (dependency-graph.ts:2675) and
+      //     meta-checker.ts:710 both treat synth state-decl-in-meta as runtime
+      //     @-writes; changing the shape would ripple through DG / meta-eval
+      //     / meta-checker.
+      //   - User-written `${...}` body OR fn / function body (blockContext
+      //     "logic" with parentBlock._synthetic !== true) → emit `state-decl`
+      //     tagged with `_isReactiveAssign: true`. SYM PASS 1 uses this flag
+      //     to SKIP cell-table registration (no phantom-synth, no clobber).
+      //     SYM PASS 3 fires E-STATE-UNDECLARED if `target` does not resolve
+      //     to a structurally-declared cell in scope. Downstream codegen
+      //     consumers (emit-functions.ts / emit-server.ts / emit-engine.ts /
+      //     ...) key off `kind === "state-decl"` AND the C5 `inFunctionBody`
+      //     context flag — they correctly treat tagged nodes as reassignments
+      //     today and continue to do so.
+      //
+      // Why mark-not-rename (Approach B vs DD §6 mechanical rename):
+      //   The DD §6 prescription assumed `reactive-assign` was already a node
+      //   kind. It is not — 73 downstream files reference `kind === "state-
+      //   decl"`, and the rename surfaced 111 test failures because codegen
+      //   uses state-decl as the canonical wire form for fn-body reassignment
+      //   (with C5 `inFunctionBody` flag steering the emit). Approach B
+      //   preserves the wire form and the codegen contract, achieving V-kill's
+      //   normative intent (no silent phantom-synth + E-STATE-UNDECLARED fires
+      //   on bare use) with the minimum surface change. The `ReactiveAssignNode`
+      //   type definition is retained in types/ast.ts for future use; the
+      //   parser does not currently emit it.
+      //
+      // Special case: SQL initializer (`@x = ?{...}.method()`) — KEEP the
+      // legacy state-decl shape unchanged. The SQL-init pattern is V5-strict
+      // valid declaration syntax (mirrors `let _ = ?{}.method()`), flows
+      // through the CPS-split pipeline in emit-functions.ts/emit-server.ts
+      // which key off `kind === "state-decl"`. Touching it here is outside
+      // V-kill scope. (SQL-init nodes are NOT tagged `_isReactiveAssign`.)
       if (peek().text === "=" && peek(1)?.text !== "=") {
         consume();
         // fix-cg-cps-return-sql-ref-placeholder: detect `@x = ?{...}.method()`.
-        // The bare `?{}` (no chained call) and `?{...}.all()/.get()/.run()` shapes
-        // both flow through here. Without this, safeParseExprToNode preprocesses
-        // the BLOCK_REF to `__scrml_sql_placeholder__` and emit-expr renders
-        // `/* sql-ref:-1 */` — broken in both server CPS and client init contexts.
+        // SQL-init keeps state-decl shape regardless of context.
         const _sqlInit = tryConsumeSqlInit();
         if (_sqlInit) {
           return { id: ++counter.next, kind: "state-decl", name, init: "", sqlNode: _sqlInit, shape: "plain", structuralForm: false, isConst: false, span: spanOf(startTok, peek()) };
         }
         const { expr, span } = collectExpr();
-        return { id: ++counter.next, kind: "state-decl", name, init: expr, initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0), shape: "plain", structuralForm: false, isConst: false, span: spanOf(startTok, peek()) };
+        // V-kill: tag fn/function/${} body emissions with _isReactiveAssign so
+        // SYM PASS 1 SKIPS registration (preventing phantom-synth + clobber)
+        // and SYM PASS 3 fires E-STATE-UNDECLARED on undeclared targets.
+        const isDefaultLogicLift = parentBlock && parentBlock._synthetic === true;
+        const isMetaContext = blockContext === "meta";
+        const isReactiveAssign = !isDefaultLogicLift && !isMetaContext;
+        return {
+          id: ++counter.next,
+          kind: "state-decl",
+          name,
+          init: expr,
+          initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0),
+          shape: "plain",
+          structuralForm: false,
+          isConst: false,
+          ...(isReactiveAssign ? { _isReactiveAssign: true } : {}),
+          span: spanOf(startTok, peek()),
+        };
       }
 
       // @set(@obj, "path", value) — explicit escape hatch

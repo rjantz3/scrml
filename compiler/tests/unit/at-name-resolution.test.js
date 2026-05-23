@@ -271,9 +271,16 @@ describe("§B3.7 discrimination — bare `count` (no `@`) is NOT B3-annotated", 
 // §B3.8 — function-scoped state cell: `@x` inside fn body resolves
 // ---------------------------------------------------------------------------
 
-describe("§B3.8 function-scoped — `@x` inside its declaring fn resolves", () => {
-  test("legacy `@x = 1` in fn body registers in fn scope; `@x + 1` resolves", () => {
+describe("§B3.8 function-scoped — `@x` inside its declaring fn resolves (V-kill rewrite)", () => {
+  test("`@x` reassignment + read in fn body resolves to file-scope structural decl", () => {
+    // V-kill (S123): pre-V-kill src was `function f() { @x = 1; return @x + 1 }`
+    // — exercising the auto-synth-from-write path where the bare write would
+    // silently register `@x` in fn scope. V-kill kills that path. The rewrite
+    // adds a structural `<x> = 0` at program top so `@x = 1` is a legal
+    // reassignment and `@x + 1` is a legal read. Both resolve to the file-
+    // scope structural record. See auto-state-cell-synthesis DD §6 / S123.
     const src = `<program>\${
+      <x> = 0
       function f() { @x = 1; return @x + 1 }
     }<p>x</p></program>`;
     const { sym, ast } = buildAndResolve(src);
@@ -282,10 +289,10 @@ describe("§B3.8 function-scoped — `@x` inside its declaring fn resolves", () 
     const atX = idents.filter(i => i.name === "@x");
     expect(atX.length).toBeGreaterThanOrEqual(1);
     for (const at of atX) {
-      // All @x references resolve to the function-scoped record (not file).
+      // All @x references resolve to the FILE-scoped structural decl.
       expect(at.resolved).not.toBeNull();
       expect(at.resolved.name).toBe("x");
-      expect(at.resolved.scope.kind).toBe("function");
+      expect(at.resolved.scope.kind).toBe("file");
     }
   });
 });

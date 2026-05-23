@@ -765,6 +765,31 @@ export interface ReactiveNestedAssignNode extends BaseNode {
 }
 
 /**
+ * V-kill (S123) — A bare reactive assignment: `@name = value` parsed inside
+ * a fn / function / user-written `${...}` body (NOT at `<program>` / `<page>`
+ * body-top under default-logic mode, where auto-lift to structural state-decl
+ * still applies per §40.8 — Unit CC territory).
+ *
+ * Replaces the pre-S123 behavior where ast-builder unconditionally emitted
+ * `state-decl` for every `@name = expr`, silently synthesising a phantom
+ * cell that SPEC §6.1.1 + §6.2 do not authorise.
+ *
+ * SYM PASS 3 (`resolveAtNameOnExprNode`) fires `E-STATE-UNDECLARED` when
+ * `target` (or any `@name` in `valueExpr`) does not resolve to a structurally
+ * declared state cell in scope. See deep-dive
+ * `scrml-support/docs/deep-dives/auto-state-cell-synthesis-investigation-2026-05-23.md`.
+ */
+export interface ReactiveAssignNode extends BaseNode {
+  kind: "reactive-assign";
+  /** Reactive variable name (without `@`). */
+  target: string;
+  /** Raw value expression text (mirrors `state-decl.init` shape for emit-* reuse). */
+  value: string;
+  /** Structured ExprNode form of the value. Populated by ast-builder. */
+  valueExpr?: ExprNode;
+}
+
+/**
  * A reactive array mutation: `@arr.push(item)`, `@arr.splice(0, 1)`, etc.
  * Triggers reactive update after the mutation.
  */
@@ -1365,6 +1390,7 @@ export type LogicStatement =
   | ReactiveNestedAssignNode
   | ReactiveArrayMutationNode
   | ReactiveExplicitSetNode
+  | ReactiveAssignNode
   | FunctionDeclNode
   | ComponentDefNode
   | IfStmtNode

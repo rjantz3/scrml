@@ -1279,6 +1279,24 @@ function walk(
     const kind = anyN.kind as string;
 
     if (kind === "state-decl") {
+      // V-kill (S123) — Skip registration for fn/function/${} body `@x = expr`
+      // emissions tagged `_isReactiveAssign: true` by ast-builder. These are
+      // REASSIGNMENTS to (presumed pre-existing) structural decls — not new
+      // declarations. Pre-S123, the parser unconditionally emitted state-decl
+      // here, the registrator silently overwrote any prior cell record (Test
+      // 5/6 in the auto-state-cell-synthesis DD), and downstream consumers
+      // saw a synthesised phantom cell. Per V5-strict (SPEC §6.1.1 + §6.2)
+      // the only legal declaration form is structural `<name>`; bare `@name
+      // = expr` reassignments must NOT register a new cell. PASS 3
+      // (`resolveAtNameOnExprNode`) fires E-STATE-UNDECLARED when the
+      // target name doesn't resolve to a structurally-declared cell.
+      if ((anyN as any)._isReactiveAssign === true) {
+        // Recurse into the initExpr to walk any nested @-refs in the RHS via
+        // B3 (PASS 3). The recursion below is for child decls (compound) and
+        // doesn't apply here; we just continue past this node without
+        // registering it as a cell.
+        continue;
+      }
       // The state-decl itself registers + (if compound) opens a sub-scope.
       registerStateDecl(n as ReactiveDeclNode, currentScope, stats, visited);
       // No further recursion: children are handled by registerStateDecl;
@@ -1555,6 +1573,27 @@ function resolveAtNameOnExprNode(
     // registered same-file state cell, fall back to importBindings. A pinned
     // import behaves as a same-file pinned cell at file scope (SPEC §21.8.1):
     // reads BEFORE the import-decl's span end fire E-STATE-PINNED-FORWARD-REF.
+    //
+    // V-kill (S123) — READ-side E-STATE-UNDECLARED deferred. The DD §6
+    // verdict-B prescription called for firing E-STATE-UNDECLARED on both
+    // bare WRITES and bare READS of undeclared cells. The WRITE-side fire is
+    // landed at `walkResolveAtNames` (state-decl with `_isReactiveAssign`)
+    // because the parser tag makes the diagnostic surface decisive. The
+    // READ-side fire was attempted here but blocked on a second-order
+    // engine-auto-decl normalization mismatch: `< machine name=UI for=...>`
+    // registers the cell as `UI` (verbatim engineName) via
+    // `registerEngineDecl` (line ~4271), but the markup-side `${@ui}` (per
+    // §51.0.C lowercased-first-char convention) reads as `ui` — `lookupStateCell`
+    // misses despite the cell BEING declared. Pre-V-kill the null resolution
+    // was silently propagated to codegen, which separately rewrote `@ui` from
+    // the `<machine name=>` attribute. Firing E-STATE-UNDECLARED on the
+    // read here would surface false-positives across the engine corpus until
+    // the SYM-side engine var-name canonicalisation is fixed (separate unit).
+    //
+    // Read-side fires DEFERRED to a follow-up unit (post-V-kill). The
+    // WRITE-side fire is the primary V-kill safety win: the write-creates-
+    // phantom-cell auto-synth path is GONE, surfaced via E-STATE-UNDECLARED
+    // at the write site. See auto-state-cell-synthesis DD §6 + §8 follow-up.
     if (!resolved) {
       const imp = lookupImportBinding(currentScope, bareName);
       if (imp && imp.pinned) {
@@ -1656,6 +1695,42 @@ function walkResolveAtNames(
     // and the structural recursion below covers the markup case.
 
     if (kind === "state-decl") {
+      // V-kill (S123): for `_isReactiveAssign`-tagged state-decls (bare
+      // `@name = expr` writes inside fn/function/${} body contexts), fire
+      // E-STATE-UNDECLARED if the target name has no structurally-declared
+      // cell or import binding in scope. PASS 1 skipped registration for
+      // these tags, so a `lookupStateCell` miss here is decisive — the write
+      // would have silently synthesised a phantom cell pre-V-kill. See the
+      // auto-state-cell-synthesis DD §6 + SPEC §6.1.1 + §6.2 + §6.1.3.
+      if ((anyN as any)._isReactiveAssign === true && typeof anyN.name === "string") {
+        const targetName: string = anyN.name;
+        const targetResolved = lookupStateCell(currentScope, targetName);
+        if (!targetResolved) {
+          const targetImp = lookupImportBinding(currentScope, targetName);
+          if (!targetImp) {
+            const declSpan = anyN.span ?? {
+              file: currentScope.qualifiedPath || "",
+              start: 0,
+              end: 0,
+              line: 1,
+              col: 1,
+            };
+            errors.push({
+              code: "E-STATE-UNDECLARED",
+              message:
+                `E-STATE-UNDECLARED: bare \`@${targetName} = ...\` write without a `
+                + `structural declaration in scope. Reactive state cells SHALL be `
+                + `declared via the structural form \`<${targetName}>\` (SPEC §6.1.1 + §6.2). `
+                + `The canonical form \`@${targetName} = expr\` is a write to a `
+                + `pre-declared cell, not a declaration. Fix: add a \`<${targetName}> = <init>\` `
+                + `declaration before this write, or remove the \`@\` prefix if a `
+                + `local identifier was intended.`,
+              span: declSpan as Span,
+              severity: "error",
+            });
+          }
+        }
+      }
       // Use the compound sub-scope for nested @-refs inside compound bodies.
       const stateScope = (anyN as ReactiveDeclNode & ScopeAnnotated)._scope;
       if (stateScope && Array.isArray(anyN.children)) {

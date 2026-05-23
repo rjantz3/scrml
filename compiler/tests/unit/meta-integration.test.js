@@ -132,12 +132,22 @@ describe("meta-integration §1: runtime ^{} → _scrml_meta_effect", () => {
 
 describe("meta-integration §2: runtime ^{} @var reads", () => {
   test("^{ const x = @count } rewrites @count to _scrml_reactive_get", () => {
-    const source = `@count = 0
-p "count: {@count}"
+    // V-kill (S123): wrapped the prior bare-fixture in `<program>` and moved
+    // the `<count> = 0` decl into an explicit `${...}` to avoid BS's default-
+    // logic auto-lift swallowing the trailing `p "..."` markup statement.
+    // Pre-V-kill the test's first line was `@count = 0` — a TEXT node that
+    // never declared a cell; the reactive ref inside ^{} silently resolved
+    // to null. The new fixture exercises the SAME meta-block codegen path
+    // (still rewrites @count to _scrml_reactive_get) but uses a legal
+    // structural decl. See auto-state-cell-synthesis DD §6 / S123.
+    const source = `<program>
+\${ <count> = 0 }
+<p>count: \${@count}</>
 ^{
   const x = @count
   console.log(x)
 }
+</>
 `;
     const { clientJs, errors } = compileSource(source, "meta-reactive-read.scrml");
 
@@ -154,11 +164,17 @@ p "count: {@count}"
   });
 
   test("@var read inside ^{} body — _scrml_reactive_get for variable appears in output", () => {
-    const source = `@value = "hello"
-p "value"
+    // V-kill (S123): same wrapping rationale as §2.1 above — pre-V-kill the
+    // `@value = "hello"` line was a TEXT node, never a real decl. Replaced
+    // with explicit `<program>` + `${ <value> = "hello" }` so the structural
+    // decl is unambiguous and the markup boundary stays clean.
+    const source = `<program>
+\${ <value> = "hello" }
+<p>\${@value}</>
 ^{
   console.log(@value)
 }
+</>
 `;
     const { clientJs, errors } = compileSource(source, "meta-reactive-in-body.scrml");
 
@@ -374,8 +390,11 @@ describe("meta-integration §7: ^{} alongside component definition", () => {
   });
 
   test("component definition does not suppress meta block scope tracking", () => {
+    // V-kill (S123): replaced pre-V-kill `@count = 0` (a TEXT node, not a
+    // decl) with `<count> = 0` structural decl. See §2 fixtures above for
+    // the same pattern.
     const source = `\${ const Badge = <span class="badge"/> }
-@count = 0
+<count> = 0
 <Badge/>
 ^{
   console.log(@count)

@@ -1955,6 +1955,12 @@ The structural form uses tag syntax. It appears in three distinct positions:
    </>
    ```
 
+**Declaration is structural-only (S123 V-kill).** A state cell SHALL be declared via the structural form. Bare `@x = expr` writes inside `fn`/`function` bodies or user-written `${...}` logic contexts without a prior `<x>` declaration in scope are **`E-STATE-UNDECLARED`** (compile error). The canonical form `@x = expr` is a WRITE to a pre-declared cell, not a declaration; the auto-synth path that silently promoted such writes into declarations pre-v0.next was undocumented, unauthorised, and corrupted the symbol table when a structural `<x> = init` decl coexisted with later `@x = ...` writes. See §6.1.2 for the canonical form's read/write contract and the auto-state-cell-synthesis deep-dive (`scrml-support/docs/deep-dives/auto-state-cell-synthesis-investigation-2026-05-23.md`) for the full rationale.
+
+The diagnostic exempts two narrow surfaces:
+- **Default-logic mode** (§40.8): at the body-top of `<program>` / `<page>` / `<channel>` (the BS-synthesised lift surface), bare top-level declarations auto-lift. Enforcement of V-kill semantics at this surface is a separate amendment (post-S123 follow-up).
+- **Meta `^{...}` body**: synthesised state-decl inside compile-time meta bodies represents runtime `@var` writes per BUG-META-6 and is consumed by dependency-graph / meta-checker as such; out of V-kill scope.
+
 #### 6.1.2 The Canonical Form — `@varname`
 
 The canonical form uses the `@` sigil. It appears in expression positions — inside `${ }` logic contexts and in attribute value positions.
@@ -1962,6 +1968,7 @@ The canonical form uses the `@` sigil. It appears in expression positions — in
 - **Read:** `@varname` evaluates to the cell's current value
 - **Write:** `@varname = newValue` sets the cell's value and triggers reactive updates
 - **Compound assignment:** `@varname += 1`, `@varname -= delta`, etc.
+- **NOT a declaration:** `@varname = expr` is a WRITE to a pre-declared cell. A structural `<varname>` declaration (§6.1.1) SHALL exist in scope; otherwise the write is `E-STATE-UNDECLARED` (per §6.1.1 V-kill statement). The compiler does NOT silently synthesise a cell from a bare write — that pre-v0.next auto-synth path was retired at S123.
 
 ```scrml
 ${ function increment() { @count = @count + 1 } }
@@ -15342,6 +15349,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-TYPE-080 | §19.7 | Non-exhaustive error handler: not all error variants covered | Error |
 | E-TAILWIND-001 | §26.4.1 | Invalid arbitrary value in Tailwind utility class (empty brackets, whitespace, malformed hex/unit/function, injection vector, unbalanced parens, malformed `var()` or `url()`) | Error |
 | E-NAME-COLLIDES-STATE | §6.1 | Local identifier declaration uses the same name as a registered state cell in scope. Local names cannot shadow state names. Example: `<count> = 0; ... let count = 5`. | Error |
+| E-STATE-UNDECLARED | §6.1.1, §6.1.2, §6.1.3 | S123 V-kill — bare `@name = expr` write inside a `fn`/`function`/user-written `${...}` body without a structural `<name>` declaration in scope. The canonical form `@name = expr` is a WRITE to a pre-declared cell, not a declaration; the auto-synth path (silent phantom-cell creation from bare writes) was retired at S123 per the auto-state-cell-synthesis deep-dive (`scrml-support/docs/deep-dives/auto-state-cell-synthesis-investigation-2026-05-23.md`). Exempts default-logic body-top auto-lift at `<program>`/`<page>`/`<channel>` (§40.8) and meta `^{...}` bodies (BUG-META-6 dependency) — both deferred to follow-up units. Fix: add `<name> = <init>` declaration before the write, or remove the `@` prefix if a local identifier was intended. Read-side fire (bare `@name` read with no decl) is DEFERRED to a post-V-kill follow-up unit pending SYM engine var-name canonicalisation (engine `< machine name=UI ...>` registers cell as `UI` verbatim, markup-side `@ui` per §51.0.C lowercased-first read misses lookup — out of V-kill scope). | Error |
 | E-DERIVED-WRITE | §6.6, §6.6.8 | Reassignment to a `const`-derived reactive cell. Derived cells are read-only; assignment is not permitted. Example: `const <displayName> = @name.toUpperCase(); @displayName = "x"`. Sibling: in-place mutation is `E-DERIVED-VALUE-MUTATE` (§6.6.18). (Renamed from `E-REACTIVE-002` in S59 lock L21.) | Error |
 | E-DERIVED-VALUE-MUTATE | §6.6.18 | In-place value-mutation of a `const`-derived reactive cell — array mutating methods on a derived array (`@filtered.push(x)`), property assignment / compound-assignment / `delete` on a derived object (`@formCopy.full = "x"`), or the same on an in-compound derived sub-cell. Derived cells are value-immutable from the developer's perspective; mutating one would be silently clobbered when the upstream dependencies next fire. Mutate the upstream cell instead. (S59 lock L21.) | Error |
 | E-STATE-PINNED-FORWARD-REF | §6.10 | Read of a `pinned` state declaration before its declaration site in source order. `pinned` opts the declaration out of hoisting; forward reads are therefore unsafe. | Error |

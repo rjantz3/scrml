@@ -127,12 +127,20 @@ describe("§B1.2 legacy @-form state-decl registers in same scope", () => {
 describe("§B1.3 function body creates child scope", () => {
   test("state-decl inside function body registers in function scope, NOT file scope", () => {
     const src = `<program>\${
+      <x> = 0
       function foo() { @x = 1 }
     }</program>`;
     const { ast, sym } = buildSymbolTable(src);
 
-    // x is in function scope, not file scope.
-    expect(sym.fileScope.stateCells.has("x")).toBe(false);
+    // V-kill (S123): `@x = 1` inside a function body is a REASSIGNMENT, not
+    // a declaration. The structural `<x> = 0` at program top is what
+    // registers `x` (in file scope, since the auto-lifted `${...}` body-top
+    // is default-logic mode per §40.8). The fn-body `@x = 1` is tagged
+    // `_isReactiveAssign: true` by ast-builder; SYM PASS 1 skips registration.
+    // Previously (pre-V-kill) the bare write would silently synth a phantom
+    // `x` cell in fn scope; that auto-synth path has been killed per the
+    // auto-state-cell-synthesis deep-dive 2026-05-23 §6.
+    expect(sym.fileScope.stateCells.has("x")).toBe(true);
 
     // Locate the function-decl node and verify its _scope annotation.
     const fnDecls = findKind(ast, "function-decl");
@@ -141,8 +149,10 @@ describe("§B1.3 function body creates child scope", () => {
     expect(fnScope).toBeDefined();
     expect(fnScope.kind).toBe("function");
     expect(fnScope.parent).toBe(sym.fileScope);
-    expect(fnScope.stateCells.has("x")).toBe(true);
-    expect(fnScope.stateCells.get("x").scope).toBe(fnScope);
+    // V-kill: fn scope is EMPTY of state cells — the `@x = 1` write does NOT
+    // register a fresh cell record. It will resolve via parent-chain to the
+    // file-scope `<x>` decl (covered by §B1.11 below).
+    expect(fnScope.stateCells.has("x")).toBe(false);
   });
 });
 
@@ -313,8 +323,16 @@ describe("§B1.10 defaultExpr presence captured", () => {
 
 describe("§B1.11 lookupStateCell walks parent chain", () => {
   test("file-scope cell visible from inside function body via parent walk", () => {
+    // V-kill (S123): replaced pre-V-kill src `function foo() { @y = 1 }` with
+    // a structural `<y> = 0` decl + an fn-body REASSIGN. The pre-V-kill src
+    // exercised the auto-synth-from-write path (a write to undeclared `@y`
+    // would silently register a phantom `y` cell in fn scope); V-kill kills
+    // that path. The new src exercises the same parent-chain walk: both
+    // `<count>` and `<y>` are file-scope cells visible from fn scope via
+    // `lookupStateCell`. See auto-state-cell-synthesis DD §6 / S123.
     const src = `<program>\${
       <count> = 0
+      <y> = 0
       function foo() { @y = 1 }
     }</program>`;
     const { ast, sym } = buildSymbolTable(src);
@@ -328,10 +346,11 @@ describe("§B1.11 lookupStateCell walks parent chain", () => {
     expect(countRec.name).toBe("count");
     expect(countRec.scope).toBe(sym.fileScope);
 
-    // `y` resolves locally (it's in fnScope).
+    // V-kill: `y` resolves to the FILE scope (structural decl), NOT a
+    // synthesised fn-scope record (the auto-synth has been killed).
     const yRec = lookupStateCell(fnScope, "y");
     expect(yRec).toBeDefined();
-    expect(yRec.scope).toBe(fnScope);
+    expect(yRec.scope).toBe(sym.fileScope);
   });
 
   test("lookupStateCell returns null for unregistered name", () => {
@@ -475,10 +494,18 @@ describe("§B1.15 re-entrancy invariant — post-B12 simulation (still future)",
 
 describe("SYM general invariants", () => {
   test("runSYM emits no errors at B1 (foundational pass)", () => {
+    // V-kill (S123): added `<x> = 0` structural decl so the fn-body `@x = 1`
+    // write is a legal reassignment. Pre-V-kill the bare `@x = 1` in the fn
+    // body auto-synthesised a phantom cell; that path has been killed per
+    // the auto-state-cell-synthesis deep-dive 2026-05-23 §6 (SYM PASS 1 now
+    // skips registration for `_isReactiveAssign`-tagged state-decls, and
+    // PASS 3 fires E-STATE-UNDECLARED on bare-write without prior structural
+    // decl).
     const src = `<program>\${
       <count> = 0
       <formRes><name>="" <email>="" </>
       const <doubled> = @count * 2
+      <x> = 0
       function foo() { @x = 1 }
     }</program>`;
     const { sym } = buildSymbolTable(src);
