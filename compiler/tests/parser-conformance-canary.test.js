@@ -17,11 +17,14 @@
 //     does not re-bucket a file that already has a top-level cause).
 
 import { describe, test, expect } from "bun:test";
+import { readFileSync } from "fs";
 
 import {
   nodeKindSequence,
   topKindSequence,
   diffFileASTs,
+  classifyDivergence,
+  sourceHasPhantomStateAdmission,
 } from "./parser-conformance/dual-pipeline-canary.js";
 
 // fakeFileAST — a minimal FileAST-shaped record for the diff. `diffFileASTs`
@@ -146,5 +149,110 @@ describe("dual-pipeline-canary — classifyDivergence-equivalent verdict logic",
     // top-level taxonomy, never reaching the deep-axis branches.
     expect(d.topSeqEqual).toBe(false);
     expect(verdictFromDiff(d)).toBe("(top-level class)");
+  });
+});
+
+// =============================================================================
+// Wave 6 Unit B — LIVE-PHANTOM class coverage. The new class credits native-
+// correctness when LIVE admits a `< Ident>` state opener at a position SPEC
+// §4.3 forbids (post-identifier non-terminator: `.` / `(` / `,` / `+` / `-` /
+// etc. — the operator chars of a less-than expression). Native correctly
+// rejects per P5-12b (`isStateTagBoundaryAfterLt`, S121); live's broad admit
+// causes a phantom state-with-children that swallows content.
+//
+// Sibling to LIVE-DEGENERATE — both credit native-correctness when LIVE is
+// the broken oracle, both `explained: true` (strict-pass-equivalent). The
+// class will go away at M6 when block-splitter.js is deleted.
+// =============================================================================
+describe("dual-pipeline-canary — sourceHasPhantomStateAdmission", () => {
+  test("detects `< p.foo)` — the bun-admin shape (less-than + property access)", () => {
+    const src = "const x = items.filter(p => p.q < p.threshold).length";
+    expect(sourceHasPhantomStateAdmission(src)).toBe(true);
+  });
+
+  test("detects `< n+1` (less-than + arithmetic)", () => {
+    const src = "if (x < n+1) { return 0 }";
+    expect(sourceHasPhantomStateAdmission(src)).toBe(true);
+  });
+
+  test("detects `< fn()` (less-than + call)", () => {
+    const src = "while (i < fn()) { i = i + 1 }";
+    expect(sourceHasPhantomStateAdmission(src)).toBe(true);
+  });
+
+  test("does NOT flag `< db src=...>` (legitimate state opener — `=` is a terminator)", () => {
+    const src = `< db src="./products.db">contents</db>`;
+    expect(sourceHasPhantomStateAdmission(src)).toBe(false);
+  });
+
+  test("does NOT flag `< engine>` (legitimate state opener — `>` is a terminator)", () => {
+    const src = "< engine>contents</engine>";
+    expect(sourceHasPhantomStateAdmission(src)).toBe(false);
+  });
+
+  test("does NOT flag `< engine name>` (legitimate state opener — ws is a terminator)", () => {
+    const src = "< engine name>contents</engine>";
+    expect(sourceHasPhantomStateAdmission(src)).toBe(false);
+  });
+
+  test("does NOT flag `<p>foo</p>` (no whitespace between `<` and ident — markup tag, not phantom shape)", () => {
+    const src = "<p>foo</p>";
+    expect(sourceHasPhantomStateAdmission(src)).toBe(false);
+  });
+
+  test("does NOT flag `< 3` (whitespace + non-letter — not a phantom site)", () => {
+    const src = "if (x < 3) { return 0 }";
+    expect(sourceHasPhantomStateAdmission(src)).toBe(false);
+  });
+
+  test("tolerates empty / non-string input", () => {
+    expect(sourceHasPhantomStateAdmission("")).toBe(false);
+    expect(sourceHasPhantomStateAdmission(null)).toBe(false);
+    expect(sourceHasPhantomStateAdmission(undefined)).toBe(false);
+  });
+
+  test("finds at least one phantom site mixed in with legitimate openers", () => {
+    const src =
+      "< db src=\"./x.db\">x</db>\n" +
+      "const y = a.filter(p => p.q < p.threshold).length";
+    expect(sourceHasPhantomStateAdmission(src)).toBe(true);
+  });
+});
+
+describe("dual-pipeline-canary — classifyDivergence LIVE-PHANTOM branch", () => {
+  // Synthetic-input cases. classifyDivergence calls both real pipelines, so
+  // these inputs need to produce the right shape end-to-end — not just match
+  // the predicate. The first case mirrors bun-admin's failure shape; the
+  // others lock the no-false-positive contract on legitimate openers.
+
+  test("a legitimate markup file (`<p>foo</p>`) classifies EXACT, NOT LIVE-PHANTOM", () => {
+    const src = "<p>foo</p>";
+    const v = classifyDivergence("test://exact.scrml", src);
+    expect(v.class).toBe("EXACT");
+    expect(v.explained).toBe(true);
+  });
+
+  test("a legitimate `< db>` state opener classifies EXACT, NOT LIVE-PHANTOM", () => {
+    // `< db src="...">` is the canonical SPEC §4.3 state opener — live and
+    // native both admit identically. NOT a phantom shape.
+    const src = `< db src="./x.db">contents</db>`;
+    const v = classifyDivergence("test://state-opener.scrml", src);
+    // Even if the file lands in some other class (DIFF-* / GAP-*), it MUST
+    // NOT be LIVE-PHANTOM — the source has no phantom admission site.
+    expect(v.class).not.toBe("LIVE-PHANTOM");
+  });
+
+  test("the real bun-admin corpus file classifies LIVE-PHANTOM (smoke — wires both pipelines + the predicate)", () => {
+    const path =
+      __dirname + "/../../samples/compilation-tests/gauntlet-r10-bun-admin.scrml";
+    const src = readFileSync(path, "utf8");
+    const v = classifyDivergence(path, src);
+    expect(v.class).toBe("LIVE-PHANTOM");
+    expect(v.explained).toBe(true);
+    // The first deep divergence must have liveKind === 'state' — the
+    // fingerprint gate that distinguishes LIVE-PHANTOM from a generic
+    // DIFF-deep-seq.
+    expect(v.detail.deepFirstDivergence).not.toBe(null);
+    expect(v.detail.deepFirstDivergence.liveKind).toBe("state");
   });
 });

@@ -67,6 +67,10 @@
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { nativeParseFile } from "../../native-parser/parse-file.js";
+import {
+  isStateTagBoundaryAfterLt,
+} from "../../native-parser/parse-markup.js";
+import { makeCursor } from "../../native-parser/cursor.js";
 
 // =============================================================================
 // runLivePipeline / runNativePipeline — drive one pipeline, return the
@@ -157,6 +161,75 @@ export function isLiveDegenerate(liveDeep, nativeDeep) {
   if (liveMarkup !== 0) return false;
   if (nativeMarkup < 1) return false;
   return nativeDeep.length >= 3 * Math.max(liveDeep.length, 1);
+}
+
+// =============================================================================
+// sourceHasPhantomStateAdmission — true iff the source contains at least one
+// `<` position that LIVE's BS+TAB pipeline admits as a `< Ident>` state-opener
+// (SPEC §4.3) but NATIVE's tightened predicate (`isStateTagBoundaryAfterLt`,
+// P5-12b S121) rejects.
+//
+// Live's rule (block-splitter.js L1908): `<` + at least one whitespace + an
+// ASCII letter (or `_`) — and live then opaquely consumes attributes until
+// `>` / EOF, with no post-identifier validation. P5-12b TIGHTENED native: the
+// first non-tag-name char after the identifier MUST be a tag-shape terminator
+// (` ` / `\t` / `\n` / `\r` / `>` / `/` / `=` / EOF). A `.`, `(`, `,`, `+`,
+// `-`, `*`, etc. proves this is a less-than expression (`< p.foo`, `< n+1`,
+// `< fn()`) — NOT a state opener.
+//
+// The detector walks the source and, at every `<`, checks both rules. A
+// position where live admits but native rejects is a "phantom admission
+// site": live will admit a state-frame native correctly rejects, the
+// downstream consequence being a phantom state-with-children that swallows
+// content and shows up in the canary as a deep-axis divergence with live's
+// first-divergence kind = `state`.
+//
+// The scan is unconditional — it does not parse string literals / comments
+// / regex / etc. That is the RIGHT contract: live's broad rule is ALSO
+// position-unconditional past the lexical level the BS pipeline already
+// gates on (BS does not enter free text inside ${} / logic bodies the way
+// the markup parser does — but a phantom `<` in a markup region is what
+// matters here, and live's broad rule will fire there too). The downstream
+// gate in classifyDivergence (`LIVE-PHANTOM` requires `DIFF-deep-seq` + a
+// live-side `state` at the first divergence) keeps the false-positive set
+// tight.
+// =============================================================================
+export function sourceHasPhantomStateAdmission(source) {
+  if (typeof source !== "string" || source.length === 0) return false;
+  const cursor = makeCursor(source);
+  const len = source.length;
+  for (let i = 0; i < len; i = i + 1) {
+    if (source.charAt(i) !== "<") continue;
+    // Live's broad admission shape: `<` + at least one whitespace + an
+    // ASCII letter (start of `readIdent`). A `<` with NO whitespace is the
+    // markup `<TAG>` form which both pipelines admit identically — not the
+    // phantom shape.
+    let j = i + 1;
+    if (j >= len) continue;
+    let ws = source.charAt(j);
+    if (ws !== " " && ws !== "\t" && ws !== "\n" && ws !== "\r") continue;
+    while (
+      j < len &&
+      (source.charAt(j) === " " || source.charAt(j) === "\t" ||
+       source.charAt(j) === "\n" || source.charAt(j) === "\r")
+    ) {
+      j = j + 1;
+    }
+    if (j >= len) continue;
+    const startChar = source.charAt(j);
+    // Live's `readIdent` keys on `[A-Za-z_]`; mirror that here.
+    const isIdentStart =
+      (startChar >= "A" && startChar <= "Z") ||
+      (startChar >= "a" && startChar <= "z") ||
+      startChar === "_";
+    if (isIdentStart === false) continue;
+    // Live admits — now check native's strict predicate from this `<`.
+    cursor.pos = i;
+    if (isStateTagBoundaryAfterLt(cursor) === false) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // =============================================================================
@@ -291,6 +364,29 @@ export function diffFileASTs(liveAst, nativeAst) {
 //                            broken side (a live `block-splitter.js`
 //                            content-drop defect), NOT a native gap.
 //                            `explained: true` — native is correct.
+//   - "LIVE-PHANTOM"       — the LIVE pipeline ADMITTED a `< Ident>` state
+//                            opener at a position the SPEC §4.3 grammar
+//                            forbids (post-identifier char is not a tag-shape
+//                            terminator: a `.` / `(` / `,` / `+` / `-` / `*`,
+//                            i.e. the operator chars of a less-than
+//                            expression). Native correctly REJECTS per
+//                            P5-12b's `isStateTagBoundaryAfterLt` tighten
+//                            (S121). Live's broad admit causes a phantom
+//                            state-with-children that swallows content; the
+//                            structural divergence surfaces as a deep-axis
+//                            diff with live's first-divergence kind = `state`.
+//                            The oracle is the broken side, NOT a native gap.
+//                            `explained: true` — native is correct.
+//
+//                            EXISTS BECAUSE OF: P5-12b (S121) tightened
+//                            native; the corpus-sweep PLAN (docs/changes/
+//                            corpus-sweep/PLAN.md) explicitly defers
+//                            live-side fixes until M6. WILL GO AWAY at M6
+//                            when block-splitter.js is deleted and the
+//                            native parser is the sole front-end — at that
+//                            point every "live admits / native rejects" gap
+//                            collapses (there is no live oracle to disagree
+//                            with).
 //   - "GAP-state-block"    — the live pipeline produced a `state` /
 //                            `state-constructor-def` node native rendered as
 //                            `markup` (the native parser has no `State`
@@ -359,6 +455,36 @@ export function classifyDivergence(filePath, source) {
     deepDiffIsOnlyDroppedTests(d.liveDeep, d.nativeDeep)
   ) {
     return { class: "DEFERRAL-test-block", explained: true, detail: d };
+  }
+
+  // LIVE-PHANTOM — the top-level diff is clean and the deep axis diverges
+  // SPECIFICALLY because LIVE admitted a `< Ident>` state opener at a
+  // position the SPEC §4.3 grammar forbids (a less-than expression: `< p.x`
+  // / `< n+1` / `< fn()`). Native correctly REJECTS per P5-12b
+  // (`isStateTagBoundaryAfterLt`, S121); live's broad admit causes a
+  // phantom state-with-children that swallows content.
+  //
+  // The TRIPLE gate keeps the false-positive set tight:
+  //   (a) the file would otherwise be `DIFF-deep-seq` (top clean, deep
+  //       diverges) — so a non-phantom cause already cleared `DIFF-hoist-
+  //       count` / `DIFF-top-seq` / `GAP-*` first;
+  //   (b) the source contains at least one phantom admission site
+  //       (`sourceHasPhantomStateAdmission`);
+  //   (c) live's first deep-axis divergence kind is `state` — the
+  //       fingerprint of "live admitted a state native didn't".
+  //
+  // This class CREDITS NATIVE-CORRECTNESS when the LIVE oracle is the
+  // broken pipeline. It exists because of P5-12b (S121) and the corpus-
+  // sweep PLAN's M6 deferral of live-side fixes; it WILL GO AWAY at M6
+  // when live is deleted.
+  if (
+    d.topSeqEqual && d.hoistEqual && d.programRootEqual &&
+    d.deepSeqEqual === false &&
+    d.deepFirstDivergence !== null && d.deepFirstDivergence !== undefined &&
+    d.deepFirstDivergence.liveKind === "state" &&
+    sourceHasPhantomStateAdmission(source)
+  ) {
+    return { class: "LIVE-PHANTOM", explained: true, detail: d };
   }
 
   // DIFF-deep-seq — the top-level diff is clean (today's `EXACT` criteria)
@@ -448,6 +574,17 @@ export function summarizeDetail(verdict) {
     return "live AST is degenerate (zero markup nodes) — live block-splitter " +
       "dropped all markup; native is correct (deep len live=" +
       (d.liveDeep ? d.liveDeep.length : "?") +
+      " native=" + (d.nativeDeep ? d.nativeDeep.length : "?") + ")";
+  }
+  if (verdict.class === "LIVE-PHANTOM") {
+    const fd = d.deepFirstDivergence;
+    const idx = fd ? fd.index : "?";
+    const nk = fd ? fd.nativeKind : "?";
+    return "live admitted phantom `< Ident>` state opener (post-ident " +
+      "non-terminator — SPEC §4.3 forbids); native correctly rejects per " +
+      "P5-12b (S121). First deep divergence at i=" + idx +
+      ": live=state native=" + nk +
+      " (deep len live=" + (d.liveDeep ? d.liveDeep.length : "?") +
       " native=" + (d.nativeDeep ? d.nativeDeep.length : "?") + ")";
   }
   const parts = [];
