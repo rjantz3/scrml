@@ -5470,17 +5470,46 @@ function annotateNodes(
       // the import into both `.server.js` and `.client.js` correctly.
       //
       // Bind each imported local name as `kind: "import"` so
-      // checkLogicExprIdents finds it via scopeChain.lookup(). The `names`
-      // array on the import-decl AST is populated by ast-builder.js —
-      // each entry is the local binding name (the import's `as`-alias if
-      // one was given, otherwise the bare imported name).
+      // checkLogicExprIdents finds it via scopeChain.lookup().
+      //
+      // Wave 11 Unit S (S121, 2026-05-22): the binding source is
+      // `n.specifiers[].local`, NOT `n.names[]`. Per ast-builder.js:7039-7057,
+      // `n.names[]` is populated with IMPORTED (source-side) names — its
+      // entry for `import { foo as fooAlias }` is `"foo"`, not `"fooAlias"`.
+      // `n.specifiers[]` is the structured `{imported, local, pinned}` array
+      // that the parser populates in parallel; `local` is the in-scope name
+      // (the `as`-alias when present, otherwise the bare imported name).
+      // For default imports (`import X from '...'`), the parser emits
+      // `names: [X]` with `isDefault: true` and NO specifiers — in that
+      // case the names array IS the local binding (default-import local
+      // names are unaliasable per ES syntax). Per SPEC §21 + §41 + the
+      // worked example at SPEC §38.12 line 17495 ("The local alias is the
+      // tag name written in the markup"), the alias is the canonical
+      // in-scope name; the imported (source-side) name is only consulted
+      // during module resolution (MOD's exportRegistry lookup).
       // ------------------------------------------------------------------
       case "import-decl":
       case "export-decl": {
-        if (n.kind === "import-decl" && Array.isArray(n.names)) {
-          for (const name of n.names as unknown[]) {
-            if (typeof name === "string" && name.length > 0) {
-              scopeChain.bind(name, { kind: "import", resolvedType: tAsIs() });
+        if (n.kind === "import-decl") {
+          // Wave 11 Unit S: prefer specifiers[].local — the canonical
+          // local-side binding. Fall back to names[] only when specifiers
+          // is absent (default imports — names IS the local binding;
+          // unaliasable per ES syntax).
+          const specs = (n as ASTNodeLike).specifiers as
+            Array<{ local?: unknown }> | undefined;
+          if (Array.isArray(specs) && specs.length > 0) {
+            for (const spec of specs) {
+              if (!spec || typeof spec.local !== "string" || spec.local.length === 0) continue;
+              scopeChain.bind(spec.local, { kind: "import", resolvedType: tAsIs() });
+            }
+          } else if (Array.isArray(n.names)) {
+            // Default-import fallback: `import X from "..."` produces
+            // `names: [X]` with no specifiers. Default-import locals are
+            // unaliasable, so the names entry IS the in-scope local.
+            for (const name of n.names as unknown[]) {
+              if (typeof name === "string" && name.length > 0) {
+                scopeChain.bind(name, { kind: "import", resolvedType: tAsIs() });
+              }
             }
           }
         }
