@@ -1,6 +1,44 @@
 import { emitExprField } from "../emit-expr.ts";
 
 // ---------------------------------------------------------------------------
+// M6.5 NO-OP-UNDER-NATIVE DISCLAIMER (commit 19957684, 2026-05-23)
+// ---------------------------------------------------------------------------
+// Every helper in this file (isLeakedComment, stripLeakedComments,
+// splitBareExprStatements, splitMergedStatements) is a LEGACY LIVE-PIPELINE
+// recovery routine for BPP-era boundary loss. When emit-logic.ts is fed by
+// the NATIVE parser (compiler/native-parser/, opt-in via parser:"scrml-native"
+// in compileScrml options), these helpers are FUNCTIONAL NO-OPS:
+//
+//   - emit-logic.ts:1174 (bare-expr) has a Phase 3 fast path on node.exprNode
+//     that returns at :1276 BEFORE the string fallback at :1278-1340 ever
+//     reaches stripLeakedComments / splitBareExprStatements / isLeakedComment.
+//   - emit-logic.ts:1391 (let-decl) and :1492 (const-decl) have Phase 3 fast
+//     paths on node.initExpr that return BEFORE the string fallback that
+//     would trigger splitMergedStatements.
+//   - splitMergedStatements has ZERO call sites in emit-logic.ts proper —
+//     the import on emit-logic.ts:5 is dead. It is still exported because
+//     compile.js:617 loads the self-host BPP module's version of it for the
+//     self-host pipeline contract, and bpp.test.js exercises it directly.
+//
+// Empirical verification: tests/integration/m6-5-parser-workarounds-noop-
+// under-native.test.js installs spies via setBPPOverrides() and confirms
+// ZERO invocations across a 6-file representative corpus under native
+// upstream (01/02/03/08/14/19). See plan §M6.5 in
+// /home/bryan/scrmlMaster/scrml-support/docs/deep-dives/
+// m6-joint-retirement-cutover-plan-2026-05-23.md.
+//
+// These helpers are retained until M6.8 deletion. M6.8 must:
+//   1. Confirm the live BS+TAB pipeline is fully retired (no caller passes
+//      a `null` parser AND reaches the bare-expr string-fallback branch).
+//   2. Delete this file, including the dead emit-logic.ts:5 import.
+//   3. Delete rewrite.ts:1283's call site in fixBlockBody (or convert
+//      fixBlockBody to a no-op alongside).
+//   4. Strip compile.js:613-621's BPP self-host module loader entry.
+//   5. Drop tests/self-host/bpp.test.js (or migrate any still-meaningful
+//      assertions into native-parser conformance tests).
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 // Self-host override support
 // When the self-hosted BPP module is available, its functions replace these.
 // Call setBPPOverrides(mod) before codegen to activate.
@@ -11,6 +49,13 @@ export function setBPPOverrides(mod) { _overrides = mod; }
 /**
  * Detect if a string looks like a leaked comment (natural language text).
  * These are `//` comments that the tokenizer included in expressions.
+ *
+ * M6.5 NO-OP-UNDER-NATIVE: The native parser's lex-in-line-comment.js /
+ * lex-in-block-comment.js partition comments out before they reach the Expr
+ * layer, so this predicate returns false for every native-upstream input.
+ * Empirically: zero invocations across the M6.5 representative corpus
+ * (see file header). Retained until M6.8 deletion.
+ *
  * @param {string} text
  * @returns {boolean}
  */
@@ -30,6 +75,13 @@ export function isLeakedComment(text) {
  * Strip leaked comment text from a bare-expr string.
  * The tokenizer sometimes includes `// comment` text as regular expression tokens.
  * This function detects natural language sequences and strips them.
+ *
+ * M6.5 NO-OP-UNDER-NATIVE: emit-logic.ts:1289 is the sole call site and is
+ * unreachable when node.exprNode is populated (which the native parser always
+ * does for bare-expr — translate-stmt.js:367 makeBareExpr). When invoked under
+ * a native-upstream input, returns the input unchanged. Empirically: zero
+ * invocations across the M6.5 representative corpus. Retained until M6.8.
+ *
  * @param {string} expr
  * @returns {string}
  */
@@ -64,6 +116,16 @@ export function stripLeakedComments(expr) {
  * Detection: After a closing `)` followed by whitespace and an identifier
  * that starts a new expression (not a operator like `.`, `+`, etc.), we
  * have a statement boundary.
+ *
+ * M6.5 NO-OP-UNDER-NATIVE: Two call sites in emit-logic.ts (:1306, :1318)
+ * sit downstream of the `node.exprNode` Phase 3 fast path at :1174, which
+ * the native parser always satisfies via translate-stmt.js:367 makeBareExpr
+ * (`exprNode: nativeExpr` populated for every bare-expr). One additional
+ * call site in rewrite.ts:1283 lives inside fixBlockBody, which operates on
+ * source-text bodies — not driven by native parser output. When invoked
+ * under a native-upstream input the helper returns `[trimmed-input]`
+ * (single-element array, no split). Empirically: zero invocations across
+ * the M6.5 representative corpus. Retained until M6.8.
  *
  * @param {string} expr
  * @returns {string[]}
@@ -189,6 +251,17 @@ export function splitBareExprStatements(expr) {
  * When the final value contains trailing bare expression statements
  * (e.g., `"" saveTodos()` or `expr.map(...) callback()`), they are
  * split out using splitBareExprStatements.
+ *
+ * M6.5 NO-OP-UNDER-NATIVE / DEAD IMPORT: This helper has ZERO call sites in
+ * emit-logic.ts proper. The import on emit-logic.ts:5 is dead. let-decl
+ * (:1391 fast path on initExpr) and const-decl (:1492 fast path on initExpr)
+ * never need this helper because the native parser surfaces a structured
+ * Expr the codegen can emit directly. Still exported because:
+ *   - compile.js:617 loads the self-host BPP module's version of it for the
+ *     self-host pipeline contract (selfHostModules.bpp.splitMergedStatements).
+ *   - bpp.test.js exercises it directly to lock the self-host contract.
+ * Empirically: zero invocations across the M6.5 representative corpus.
+ * Retained until M6.8.
  *
  * @param {string} firstName — the first variable name
  * @param {string} initStr — the concatenated init string
