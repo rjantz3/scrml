@@ -1,5 +1,83 @@
 # Progress: m6-2-component-expander
 
+## RE-STOP — S123 R4-U6 attempt (2026-05-23)
+
+### TL;DR
+
+R4-U6 re-applied the M6.2 wip-patch (10,127 bytes / +178/-12 in `component-expander.ts`) against the post-R4 branch (HEAD `2d72820d`, R4-U5 closes the R4 wrap surface; R4-U4 `385c17ea` wired translateExpr at let/const/lin/tilde-decl initExpr sites; M6.2a bridge `9d64ff4c` translates MarkupValue → live MarkupNode). The patch applied cleanly (`git apply --check` passed; +178/-12 exact ballpark from S122 STOP). **Bug-5 reached 5/5 — BUT bug-5 was ALSO 5/5 pre-patch on R4-U5 (R4 work + M6.2a + ancestral fixes already closed bug-5 on the LIVE path). The patch is not load-bearing for bug-5 closure.** Meanwhile **prop-sub regressed 13/13 → 8/13** (5 new failures, all genuine post-patch regressions confirmed via pre/post A/B). Per brief STOP-condition ("prop-sub tests regress below 13/13 either file"), I reverted the patch from the worktree and report.
+
+### Verified test deltas
+
+| Suite | Pre-patch (R4-U5) | Post-patch | Delta |
+| --- | --- | --- | --- |
+| `bug-5-nested-component-ce-phantom-dom.test.js` | **5/5 PASS** | 5/5 PASS | 0 |
+| `f-component-004-substituteProps-logic-block.test.js` | **6/6 PASS** | 4/6 (2 fail) | -2 |
+| `component-prop-substitution-call-ref.test.js` | **7/7 PASS** | 4/7 (3 fail) | -3 |
+| Full suite (unit+integration+conformance) | 13954/14047 pass, 0 fail | 13949/14047 pass, 5 fail | -5 |
+
+The 5 full-suite failures are exactly the 5 prop-sub failures — no other regressions.
+
+### The 5 specific failures
+
+All in component-prop-substitution / template / lambda surfaces — `substitutePropsInExprNode` not matching IdentExpr prop refs in the post-patch (native) ExprNode shape.
+
+1. **§1.1 `<li ondrop=dropOn(name)>` per-instance handler** — expected `_scrml_dropOn_3("zone-a")`, got `_scrml_dropOn_3(name)`. The prop ref `name` survives unsubstituted into the emitted handler.
+2. **§1.2 single-arg prop ref `announce(label)`** — expected `_scrml_announce_2("primary")`, got `_scrml_announce_2(label)`.
+3. **§1.3 multi-arg `track("click", label)`** — expected `_scrml_track_2("click", "primary")`, got `_scrml_track_2("click", label)`.
+4. **§3 lambda parameter `name` shadows outer `name` prop** — expected `errors.length ≤ 1`, got 26 errors (cascade including `E-COMPONENT-020: Component Wrapper is not defined`).
+5. **§5 template literal `` `Hello ${name}` `` interpolation rewrite** — expected substituted `"world"` in output, got literal `` "`Hello ${...}`" `` (interpolation dropped/escaped).
+
+### Likely cause
+
+The brief asserted: *"prop-sub tests should ALSO be 13/13 because component-expander now routes through nativeParseFile which has R4-wired ExprNode shapes."* This assertion is **false** for these 5 cases. The R4 wiring (U1–U5) converts native Expr → live ExprNode for `bare-expr`, `return-stmt`, `throw-stmt`, `for-stmt iterExpr / cStyleParts`, `if/while/do-while condExpr`, `let/const/lin/tilde-decl initExpr`, and `lift-expr (non-MV) / fail-expr / propagate-expr`. **Not yet wired** (or wired but shape-divergent): the expression shapes reached by `substitutePropsInExprNode` traversal — specifically:
+
+- **CallExpr.arguments** carrying `IdentExpr` prop refs — `substitutePropsInExprNode` finds an IdentExpr by `.kind === "IdentExpr"` and `.name === <propName>`. Under native, the shape arrives either with a different kind tag, a wrapped envelope (e.g., `MarkupValue` for interpolated templates), or `.name` lives on a sub-field. The walker walks but doesn't match, so no substitution happens. The literal IdentExpr survives into emit, where the prop name is read as an undeclared local at the emit site.
+- **Lambda bodies inside a logic block** (§3) — when a function/arrow body contains markup with prop references AND a parameter shadow, the post-patch path apparently fails to even resolve the outer component reference (`<Wrapper name="outer"/>` cascades to 26 errors including `E-COMPONENT-020: Wrapper is not defined`). This suggests the lambda body's re-parse path emits a FileAST that loses the surrounding component-def context, so the outer component table can't see `Wrapper` when expanding it elsewhere. Possible: `walkLogicBody` re-parse (site 2, L2607) produces a FileAST where the component declaration is dropped or marked differently under native than under LIVE.
+- **Template-literal interpolation rewrite** (§5) — backtick template `` `Hello ${name}` `` should rewrite `${name}` → `${"world"}` (a LitExpr after substitution). Post-patch output `` "`Hello ${...}`" `` looks like the template is being collapsed to a placeholder rather than walked. The native TemplateLiteralExpr → live form may produce a different children/quasis shape that `substitutePropsInExprNode`'s TemplateLit branch doesn't traverse, OR an emit-side branch is hitting an unrecognized kind and emitting placeholders.
+
+The common thread: **`substitutePropsInExprNode` traversal handles the LIVE ASTBuilder ExprNode shape, but post-migration the synthesized component-body's expression tree arrives from `nativeParseFile` with subtle shape differences in CallExpr.arguments, lambda body markup, and template-literal interpolations.** This is a downstream effect — R4 wired the OUTER expression slots into live ExprNode, but the INNER traversal (IdentExpr matching, lambda recursion, template-quasi walking) was tuned to the LIVE shape and the patch doesn't add equivalent reshaping for these sub-trees.
+
+### Reproduction record
+
+```
+$ git apply --check docs/changes/m6-2-component-expander/wip-migration.patch
+# (no output — clean)
+$ git apply docs/changes/m6-2-component-expander/wip-migration.patch
+# (no output — applied)
+$ git diff --stat
+#  compiler/src/component-expander.ts | 190 ++++++++++++++++++++++++++++++++++---
+#  1 file changed, 178 insertions(+), 12 deletions(-)
+$ bun test compiler/tests/integration/bug-5-nested-component-ce-phantom-dom.test.js
+# 5 pass / 0 fail
+$ bun test compiler/tests/unit/f-component-004-substituteProps-logic-block.test.js compiler/tests/unit/component-prop-substitution-call-ref.test.js
+# 8 pass / 5 fail
+$ bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance
+# 13949 pass / 5 fail
+# (the 5 fails == the 5 prop-sub fails above; no other regressions)
+# A/B: pre-patch state (component-expander.ts restored from ffa41f9d):
+#   bug-5: 5/5, prop-sub: 13/13, full: 13954 pass / 0 fail
+# Post-patch:
+#   bug-5: 5/5, prop-sub: 8/13, full: 13949 pass / 5 fail
+# Delta = +0 bug-5 (patch not load-bearing), -5 prop-sub (regression)
+```
+
+### Recommendation to PA
+
+The wip-patch is structurally correct (FileAST adapter, propsDecl unwrap, native parser drop-in shape) but the downstream substitution walker is shape-coupled to the LIVE ExprNode produced by `splitBlocks` + `buildAST`. **Three forward paths** in increasing scope:
+
+1. **R4-U6.b — extend substitution-walker shape-coverage** — add native-shape recognition to `substitutePropsInExprNode` (CallExpr.arguments traversal, lambda body markup-walk, template-literal quasi handling) so it matches IdentExpr regardless of native vs live source path. Smallest scope; isolates the fix to component-expander.ts; doesn't touch the native parser or bridges. Likely 4-8h. May reveal further shape gaps as it goes.
+2. **R4-U7 / further R4 units** — survey which native ExprNode sub-shapes still diverge from the live ASTBuilder shape downstream of the R4-wired slots, and add a second wave of translateExpr wiring at the sub-tree level. Larger; touches translate-expr.js + possibly translate-stmt.js for lift-expr.expr.node sub-fields. Likely 8-15h. Closes a class of issues, not just prop-sub.
+3. **M6.2-defer (re-affirmed)** — keep component-expander on the LIVE `splitBlocks` + `buildAST` path until M6.7's flag-flip cohort where bridge-parity gaps get attacked in bulk. The patch stays as a forensic artifact for the future surface owner. Tradeoff: 2-site splitBlocks consumer persists, but bug-5 is already closed on the LIVE path so there's no behavioral motivation for the migration right now — the original M6.2 motivation (close bug-5) was overtaken by R4-U1..U5 + M6.2a closing it independently.
+
+**The bug-5-was-already-5/5-pre-patch finding strongly favors (3)** as a near-term decision: M6.2 is no longer load-bearing for any user-visible behavior, just for the M6 Wave 1 surface-area-reduction goal. PA should re-prioritize M6.2 against the other pending units (M6.6.b.2..b.6, M6.7, M6.8) on the strength of surface-area-reduction motivation alone, and pick (1) or (2) only if R4-U6.b/R4-U7 are independently motivated by other M6 work.
+
+### Worktree state at STOP
+
+- Branch: `worktree-agent-aefd73d3595f2f135`
+- HEAD: `ffa41f9d WIP(r4-u6): start at ...` (the patch was applied → tested → reverted via `git reset --hard ffa41f9d`)
+- `git status` clean.
+- The wip-migration.patch file is **preserved at its original location** (`docs/changes/m6-2-component-expander/wip-migration.patch`) for future re-attempt.
+
 ## Plan
 
 Migrate two `splitBlocks` + `buildAST` re-parse sites in `compiler/src/component-expander.ts` to `nativeParseFile` from `compiler/native-parser/parse-file.js`.
