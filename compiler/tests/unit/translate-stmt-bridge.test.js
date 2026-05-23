@@ -556,17 +556,78 @@ describe("§5c — R4-U1 wired ride-through sites (translateExpr bridged)", () =
         expect(out[0].exprNode.kind).toBe("ident");
     });
 
-    // Locking test: confirms R4-U2 scope (for-stmt iterExpr) is STILL needed.
-    // If this assertion ever flips, R4-U2 has landed and this guard can be
-    // removed / inverted. The reverse direction would be a quiet test-silent
-    // regression of R4-U2's "what still needs doing" surface.
-    test("LOCK: for-of iterExpr still leaks PascalCase Ident (R4-U2 NOT done)", () => {
+    // R4-U2 inverted this lock — for-of iterExpr is NOW bridged. The assertion
+    // was flipped (PascalCase → lowercase) to capture the close of R4-U2's
+    // "what still needs doing" surface. The new R4-U3-scope lock lives in §5d.
+    test("for-of iterExpr is now live `ident` (R4-U2 closed)", () => {
         const out = translate("for (const x of items) { use(x); }");
         expect(out[0].kind).toBe("for-stmt");
         expect(out[0].iterExpr).not.toBeNull();
-        // Should be PascalCase Ident until R4-U2 lands; if this flips to "ident"
-        // then R4-U2 has shipped and the lock test should be removed.
-        expect(out[0].iterExpr.kind).toBe("Ident");
+        expect(out[0].iterExpr.kind).toBe("ident");
+    });
+});
+
+// =============================================================================
+// §5d — R4-U2: translateExpr wired at for-stmt iterExpr + cStyleParts.{init,
+// cond,update}Expr ride-throughs. The four for-statement family expression
+// sites surfaced in the R4 survey (Phase 3a). Asserts that the iterExpr /
+// cStyleParts ExprNode slots carry LIVE lowercase `ExprNode`, NOT native
+// PascalCase Exprs. The §5d block closes the for-iterable branch of bug-5
+// 5a (`for (let task of @tasks.filter(...))`). The LOCK at the end of this
+// block guards an as-yet-unwired site (if-stmt condExpr) so R4-U3 scope
+// remains explicit.
+// =============================================================================
+describe("§5d — R4-U2 wired for-stmt-family ride-through sites", () => {
+    test("for-of iterExpr Member-Call is live `call` (R4-U2)", () => {
+        // Mirrors the bug-5 5a shape: `for (const task of items.filter(p))`
+        const out = translate("for (const task of items.filter(p)) { use(task); }");
+        expect(out[0].kind).toBe("for-stmt");
+        expect(out[0].iterExpr).not.toBeNull();
+        // `items.filter(p)` parses as a Call (callee=Member); R4-U2 brings
+        // the live lowercase `call` kind to the slot.
+        expect(out[0].iterExpr.kind).toBe("call");
+    });
+
+    test("for-in iterExpr Ident is live `ident` (R4-U2)", () => {
+        const out = translate("for (const k in obj) { use(k); }");
+        expect(out[0].kind).toBe("for-stmt");
+        expect(out[0].forKind).toBe("in");
+        expect(out[0].iterExpr).not.toBeNull();
+        expect(out[0].iterExpr.kind).toBe("ident");
+    });
+
+    test("C-style for: cStyleParts.condExpr Binary is live `binary` (R4-U2)", () => {
+        // The init clause uses the Expr-form (i = 0) to avoid the VarDecl
+        // escape-hatch path; that path is documented as a separate downstream
+        // gap (declaration-form C-style init).
+        const out = translate("for (i = 0; i < 10; i = i + 1) { use(i); }");
+        expect(out[0].kind).toBe("for-stmt");
+        expect(out[0].cStyleParts).toBeDefined();
+        expect(out[0].cStyleParts.condExpr).not.toBeNull();
+        // `i < 10` is a Binary; R4-U2 brings live lowercase `binary`.
+        expect(out[0].cStyleParts.condExpr.kind).toBe("binary");
+    });
+
+    test("C-style for: cStyleParts.initExpr (Expr-form Assignment) and updateExpr (Assignment) are live (R4-U2)", () => {
+        const out = translate("for (i = 0; i < 10; i = i + 1) { use(i); }");
+        expect(out[0].cStyleParts.initExpr).not.toBeNull();
+        // `i = 0` is an Assignment; R4-U2 brings live lowercase `assign`.
+        expect(out[0].cStyleParts.initExpr.kind).toBe("assign");
+        expect(out[0].cStyleParts.updateExpr).not.toBeNull();
+        // `i = i + 1` is also an Assignment.
+        expect(out[0].cStyleParts.updateExpr.kind).toBe("assign");
+    });
+
+    // Locking test: confirms R4-U3 scope (if/while/do-while condExpr) is STILL
+    // needed. When R4-U3 lands and condExpr becomes lowercase `binary`, this
+    // lock should be flipped to its closed-state assertion (mirroring the
+    // R4-U1 → R4-U2 lock flip pattern).
+    test("LOCK: if-stmt condExpr still leaks PascalCase Binary (R4-U3 NOT done)", () => {
+        const out = translate("if (x < 1) { use(x); }");
+        expect(out[0].kind).toBe("if-stmt");
+        expect(out[0].condExpr).not.toBeNull();
+        // Should be PascalCase Binary until R4-U3 lands; flip to `binary` then.
+        expect(out[0].condExpr.kind).toBe("Binary");
     });
 });
 

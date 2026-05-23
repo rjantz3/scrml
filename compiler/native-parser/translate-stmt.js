@@ -27,15 +27,18 @@
 // (2) mirrors the established `collectHoisted` pure-fold pattern; (3) keeps R3
 // genuinely thin — R3 calls `translateStmtList(nativeBody)` and is done.
 //
-// THE EXPRESSION LAYER IS NOT TRANSLATED HERE. Per DD #27 F2 ("ESTree
-// decorations: RETIRE"), expression children ride through verbatim — a native
-// `Expr` node is left AS-IS in the live node's `*Expr` field (`initExpr`,
-// `condExpr`, `iterExpr`, `exprNode`, `headerExpr`). R1's scope is the
-// STATEMENT catalog only. (NOTE surfaced to PA: `emit-expr.ts` dispatches
-// LOWERCASE expr kinds — `ident` / `binary` / `call` — whereas `ast-expr.js`
-// produces PascalCase — `Ident` / `Binary` / `Call`. The F2-retire premise is
-// therefore incomplete; the expression catalog also needs reconciliation.
-// That is a separate unit, NOT R1.)
+// THE EXPRESSION LAYER. Per DD #27 F2 ("ESTree decorations: RETIRE"),
+// expression children originally rode through verbatim — a native `Expr` node
+// was left AS-IS in the live node's `*Expr` field (`initExpr`, `condExpr`,
+// `iterExpr`, `exprNode`, `headerExpr`). R1's scope is the STATEMENT catalog;
+// the expression bridge is `translate-expr.js` (A2). The R4 unit series
+// progressively wires `translateExpr` into each R1 ride-through site so the
+// native PascalCase `Ident`/`Binary`/`Call` is reconciled to the live
+// lowercase `ident`/`binary`/`call` before reaching the downstream emit-expr
+// lowercase-only switch (which previously silently emitted `""` for any
+// PascalCase Expr that reached it). R4-U1 (S122) wired bare-expr +
+// return-stmt + throw-stmt. R4-U2 wires for-stmt iterExpr + cStyleParts.
+// Remaining ride-throughs close under R4-U3..U5.
 //
 // THE FORBIDDEN-VOCABULARY KINDS — `Throw` / `Try`. scrml has no `throw` /
 // `try` (SPEC §19 — `fail`, not `throw`; `!{}`, not try/catch). The native
@@ -336,8 +339,13 @@ function appendTranslatedStmt(out, stmt, counter) {
 // objects also carry the legacy `init` / `expr` raw-string fields some
 // codegen arms still duck-type — those are reproduced for parity).
 //
-// Expression children (`initExpr`, `condExpr`, ...) carry the NATIVE `Expr`
-// node verbatim — R1 does not translate the expression layer (see header).
+// Expression children (`initExpr`, `condExpr`, ...) historically rode through
+// verbatim (the R1 deferral). R4 progressively wires `translateExpr` at each
+// ride-through site: R4-U1 closed bare-expr / return-stmt / throw-stmt; R4-U2
+// closes for-stmt iterExpr + cStyleParts triple. Remaining slots (if-stmt /
+// while-stmt / do-while-stmt condExpr; let/const/lin/tilde-decl initExpr;
+// lift-expr / propagate-expr / guarded-expr / fail-expr fields) ride through
+// until R4-U3..U5 land.
 // =============================================================================
 
 // stampId — allocate the next id from the shared counter (the live
@@ -986,8 +994,15 @@ function makeDoWhileStmt(stmt, counter, label) {
 // `cStyleParts` triple (ast.ts:994). The native `init` is a `VarDecl` Stmt OR
 // an Expr OR null; `test` / `update` are Exprs or null. The live `cStyleParts`
 // is `{ initExpr, condExpr, updateExpr }` — all ExprNode-typed. The native
-// `init`-as-VarDecl form has no direct ExprNode; it carries the VarDecl Stmt
-// verbatim on `initExpr` (the C-style for-loop emitter walks it structurally).
+// `init`-as-VarDecl declaration form (`for(let i=0; ...)`) has no direct
+// ExprNode — `translateExpr` folds the VarDecl Stmt to an `escape-hatch`
+// ExprNode (the default arm of translate-expr.js). This is a no-worse
+// outcome than PRE-R4-U2: the PascalCase VarDecl Stmt previously hit
+// `emit-expr.ts:emitExpr` default arm and emitted "" — the escape-hatch
+// path emits "" too. Declaration-form C-style is a SEPARATE downstream gap.
+// R4-U2 wires translateExpr at all 3 cStyleParts slots so the Expr-form
+// init (`for(i=0; ...)`) and the always-Expr test/update parts produce
+// live ExprNode-shaped values for the downstream consumer.
 function makeForStmtCStyle(stmt, counter, label) {
     const node = {
         id: stampId(counter),
@@ -995,9 +1010,9 @@ function makeForStmtCStyle(stmt, counter, label) {
         variable: null,
         body: branchToBody(stmt.body, counter) || [],
         cStyleParts: {
-            initExpr: stmt.init === undefined ? null : stmt.init,
-            condExpr: stmt.test === undefined ? null : stmt.test,
-            updateExpr: stmt.update === undefined ? null : stmt.update,
+            initExpr: stmt.init === undefined || stmt.init === null ? null : translateExpr(stmt.init),
+            condExpr: stmt.test === undefined || stmt.test === null ? null : translateExpr(stmt.test),
+            updateExpr: stmt.update === undefined || stmt.update === null ? null : translateExpr(stmt.update),
         },
         span: spanOrZero(stmt.span),
     };
@@ -1014,9 +1029,13 @@ function makeForStmtCStyle(stmt, counter, label) {
 //   - VarDecl left with a single declarator  -> translate that declarator's
 //     binding target (string or DestructurePattern)
 //   - non-declaration left (an Expr / pattern) -> best-effort identifier text
-// `iterExpr` carries the native `right` Expr verbatim. `forKind` records
-// "in" vs "of" (the native distinction; the live `for-stmt` is the unified
-// for kind — codegen reads `forKind` when it needs the JS surface form).
+// `iterExpr` carries the native `right` Expr bridged via translateExpr to a
+// live lowercase `ExprNode` (R4-U2). `forKind` records "in" vs "of" (the
+// native distinction; the live `for-stmt` is the unified for kind — codegen
+// reads `forKind` when it needs the JS surface form). The iterExpr bridge
+// is the load-bearing fix for `for (let task of @tasks.filter(...))` under
+// M6.2b: before R4-U2 a PascalCase Call/Member/Ident leaked through to
+// emit-control-flow.ts:358 emitExprField → emitExpr default arm → "".
 function makeForStmtInOf(stmt, counter, label) {
     let variable = null;
     const left = stmt.left;
@@ -1035,7 +1054,7 @@ function makeForStmtInOf(stmt, counter, label) {
         kind: "for-stmt",
         variable,
         body: branchToBody(stmt.body, counter) || [],
-        iterExpr: stmt.right === undefined ? null : stmt.right,
+        iterExpr: stmt.right === undefined || stmt.right === null ? null : translateExpr(stmt.right),
         forKind: (stmt.kind === StmtKind.ForIn) ? "in" : "of",
         span: spanOrZero(stmt.span),
     };
