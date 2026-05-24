@@ -46,3 +46,64 @@
 - **T0+35m** — Commit prep — pwd verified inside worktree, status clean save for new SCOPING + progress files.
 
 ## Status: COMPLETE
+
+---
+
+# Sub-unit B — Runtime helpers (separate dispatch — agent-a94b4df180fb008b4)
+
+**Worktree:** `/home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a94b4df180fb008b4`
+**Base after merge main:** `5b1afb9d` (S125 OPEN maps refresh)
+**Dispatch:** Sub-unit B — three thin runtime helpers in `compiler/runtime/stdlib/mcp.js`
+
+## Timeline
+
+- **T0** — Startup verification. pwd inside worktree confirmed; `git rev-parse --show-toplevel` matches. Initial HEAD was `329101db` (S123 close — older than main's S124).
+- **T0+1m** — `git merge main --no-edit` clean fast-forward to `5b1afb9d`.
+- **T0+2m** — `bun install` clean (117 pkgs / 204ms). `bun run pretest` compiled fixtures.
+- **T0+5m** — Baseline `bun run test`: 21044 pass / 1-2 fail (browser/e2e ECONNREFUSED flake, out-of-gate).
+- **T0+8m** — Mandated reads: SCOPING.md §3 Sub-unit B + §1 Tools 2/3/6, `compiler/runtime/stdlib/host.js` IN FULL (canonical template), `compiler/src/runtime-template.js:406` + `:849` (the two runtime read primitives), `compiler/src/api.js:272-380` (`bundleStdlibForRun` — confirmed shim is copied to `<outputDir>/_scrml/<name>.js`).
+- **T0+10m** — Architectural discovery: shims are independent ES modules; runtime helpers (`_scrml_reactive_get` / `_scrml_derived_get`) live in generated-code scope and are NOT exported. Bridge approach chosen: `install({ reactive_get, derived_get })` injector pattern. Sub-unit C / D boot code will call install once at MCP server start. This matches the "long-lived server wrap" precedent the SCOPING §1 Q4 names.
+- **T0+15m** — Authored `compiler/runtime/stdlib/mcp.js` (~330 LOC). Surface: `install`, `uninstall`, `loadSidecars(outputDir, { watch })`, `stopWatchers`, `getCurrentVariant`, `getFormStatus`, `getChannelState`, plus `_stateForTests` / `_resetForTests` introspection. Sidecar loader resolves outputDir from explicit param or falls back to `import.meta.url`-relative (`<outputDir>/_scrml/mcp.js` → up one dir). Missing / malformed sidecars degrade to `[]` (no throw).
+- **T0+18m** — fs.watch reload (SCOPING §5 Risk 5) IMPLEMENTED, opt-in via `loadSidecars(..., { watch: true })`. Default OFF so tests are deterministic and Sub-unit C / D can opt in explicitly. ~15 lines of code; well within the SCOPING budget for this risk. Not deferred.
+- **T0+22m** — Commit 1: `cd6ed588` — shim file (no consumers yet, additive, cannot break gate).
+- **T0+25m** — Authored `compiler/tests/unit/mcp-runtime-helpers.test.js` (~280 LOC). 25 tests across install/uninstall lifecycle, loadSidecars edge cases, the three helpers (happy path, normalization, unknown name, update propagation), and fs.watch opt-in reload. Mock runtime is a plain JS object — no SCRML runtime evaluation needed since helpers are pure consumers of injected refs.
+- **T0+27m** — `bun test compiler/tests/unit/mcp-runtime-helpers.test.js`: **25 pass / 0 fail / 54 expect() calls / 281ms.**
+- **T0+28m** — Commit 2: `9ae5603b` — tests.
+- **T0+30m** — Pre-commit gate: `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail` → **14071 pass / 0 fail / 88 skip / 1 todo / 46965 expect()** / 65.3s. Zero regressions.
+
+## Files Touched
+
+- `compiler/runtime/stdlib/mcp.js` (NEW, ~330 LOC)
+- `compiler/tests/unit/mcp-runtime-helpers.test.js` (NEW, ~280 LOC)
+
+## Helpers Landed
+
+- `getCurrentVariant(engineName)` — wraps `reactive_get`; normalizes `{variant,data}` records to tag string; honors `cellKey` override
+- `getFormStatus(formName)` — composes `{isValid, errors, touched, submitted, perField}` per §55.5-§55.7; uses pre-resolved keys from sidecar (no re-encoding); rolls up from per-field cells when no compound surface present
+- `getChannelState(channelName)` — composes `{name, topic, cellState}` from §38.4 auto-synced cells over `channels.json`
+
+## Sidecar Loader Approach
+
+`loadSidecars(outputDir, opts)`. Explicit outputDir parameter is preferred. When omitted, derives from `import.meta.url` (the shim's own location — `<outputDir>/_scrml/mcp.js` → `<outputDir>`). No new env var added; no api.js changes needed. Test harness passes an explicit tmp dir.
+
+## fs.watch Status
+
+IMPLEMENTED + opt-in. `loadSidecars(outputDir, { watch: true })` registers 3 fs.watch handles, one per sidecar; `change`/`rename` events trigger re-read + re-cache. Errors in mid-rewrite reads are swallowed (next read or next watch fires recovers). `stopWatchers()` exposes a shutdown hook for Sub-unit C's MCP-server-stop path. Verified with a real-FS test (200ms wait after rewrite).
+
+## Coordination Signal with Sub-unit A
+
+The helpers consume the sidecar shapes documented at SCOPING §3 Sub-unit A literally — pre-resolved keys, no re-encoding. The `forms.json` entry shape adds an optional `compoundKeys` object (with `isValidKey` / `errorsKey` / `touchedKey` / `submittedKey`) that the SCOPING line "[{ formName, fields: [...] }]" does not explicitly mention; I added it to the consumer because §55 forms have BOTH per-field AND compound auto-synthesized cells, and the compound shape is what Tool 3 `get_form_status` SCOPING §1 calls for. If Sub-unit A's final emitter omits `compoundKeys`, the helper rolls up from per-field; if A includes it, the helper uses it directly. Either shape works.
+
+The `engines.json` entry's optional `cellKey` field (for cases where the runtime state map's key differs from the engine's user-facing name) is similarly speculative — if A emits only `{name}`, the helper falls back to using name AS the key.
+
+## Stop Conditions — none triggered
+
+1. Sidecar loader path resolution — handled via `import.meta.url` fallback + explicit param. No api.js changes; no env var. **CLEAR.**
+2. `_scrml_reactive_get` / `_scrml_derived_get` shape — the existing helpers return what we need (raw stored value). No gap. **CLEAR.**
+3. Sub-unit A sidecar shape divergence — built against SCOPING §3 documented shapes; defensive fallback if A's final shape is leaner (described above under "Coordination Signal"). **CLEAR.**
+4. fs.watch complexity — ~15 lines, well under 2h work. Implemented, not deferred. **CLEAR.**
+5. Cross-file coordination need — install() bridge handles runtime ref injection. No changes to `compiler/src/api.js` or stdlib bundling logic — the existing `bundleStdlibForRun` copies the new file with zero change because `_scrml` family detection is by-file-presence in `compiler/runtime/stdlib/`. **CLEAR.**
+
+## Final SHA
+
+`9ae5603b`
