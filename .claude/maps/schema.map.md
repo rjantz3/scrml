@@ -1,6 +1,6 @@
 # schema.map.md
 # project: scrmlts
-# updated: 2026-05-23T00:00:00Z  commit: 73dd816c
+# updated: 2026-05-24T00:00:00Z  commit: dc073b94
 
 Authoritative AST type catalog: `compiler/src/types/ast.ts`. The M5 native-parser swap
 must produce output coercible to `FileAST` / `TABOutput`. As of C1/C2 (S119),
@@ -54,7 +54,7 @@ hasResetExpr / hasEqualityExpr / hasChunkedMarkupTag / hasForStmt: boolean  — 
 ### AttrValue  [ast.ts:42] — 6-variant union
 `StringLiteralAttrValue | VariableRefAttrValue | CallRefAttrValue | ExprAttrValue | PropsBlockAttrValue | AbsentAttrValue`
 
-### ReactiveAssignNode  [ast.ts:764] — NEW S123 V-kill
+### ReactiveAssignNode  [ast.ts:764] — S123 V-kill
 ```
 kind: "reactive-assign"
 target: string        — reactive variable name (without @)
@@ -66,12 +66,65 @@ Replaces pre-S123 phantom state-decl synthesis for bare `@name = expr` inside fn
 ### Declaration nodes
 `LetDeclNode [447] | ConstDeclNode [462] | TildeDeclNode [480] | LinDeclNode [492] | ReactiveDeclNode [503] | FunctionDeclNode [791] | ComponentDefNode [856] | EngineDeclNode [878] | TypeDeclNode [1235] | ImportDeclNode [1184] | ExportDeclNode [1216] | UseDeclNode [1202] | ChannelDeclNode [1263]`
 
+### FunctionDeclNode  [ast.ts:791] — relevant to MCP serverfns extraction
+`params: string[]` [ast.ts:821] (entries may carry `:`-typed annotations in source form); `isServer: boolean` [ast.ts:827] — canonical server-boundary marker the MCP serverfns extractor reads; `returnTypeAnnotation` (canonical, type-system.ts:3869) / `returnType` (forward-compat) read for return type.
+
 ### MatchBlockNode (synthesized by parse-file.js — S121 P5-7)
 `{ kind: "match-block", forType, onExprRaw, armsRaw, bodyChildren, span }`
 
 ## ExprNode union  [ast.ts:1939] — 20 lowercase kinds
 
 `IdentExpr | LitExpr | ArrayExpr | ObjectExpr | SpreadExpr | UnaryExpr | BinaryExpr | AssignExpr | TernaryExpr | MemberExpr | IndexExpr | CallExpr | NewExpr | LambdaExpr | CastExpr | MatchExpr | SqlRefExpr | InputStateRefExpr | EscapeHatchExpr | ResetExpr`
+
+## MCP Descriptor Shapes  [compiler/src/codegen/mcp-descriptors.ts — NEW S125]
+
+App-wide arrays emitted as JSON sidecars (`engines.json` / `forms.json` / `channels.json` / `serverfns.json`). Shapes ARE the API contract `scrml:mcp` runtime helpers (`compiler/runtime/stdlib/mcp.js`) consume. Authority: SCOPING §3 Sub-unit A. NOTE: the runtime shim's expected sidecar shape (mcp.js header) names some fields the extractor does not yet emit — `cellKey` (engines) and `compoundKeys` (forms) are READ defensively by the shim but NOT yet emitted by the extractor; the shim falls back gracefully (engineName-as-key; per-field rollup). This is a known v0 follow-on the MCP-V0.A-tests dispatch will exercise.
+
+### McpDescriptors  [mcp-descriptors.ts:851]
+`{ engines: EngineDescriptor[]; forms: FormDescriptor[]; channels: ChannelDescriptor[]; serverFns: ServerFnDescriptor[] }`
+
+### EngineDescriptor  [mcp-descriptors.ts:59] → engines.json
+```
+name: string                     — auto-declared var name (no @) or var= override
+type: string                     — governing enum type (for=Type)
+variants: EngineVariantDescriptor[]
+rules: Record<string, string[]>  — FROM-tag → legal-to set; single→[X], multi→[A,B], wildcard→["*"], absent/terminal/malformed→[]
+kind: "primary" | "derived"      — derived = §51.0.J derived=expr engine
+```
+
+### EngineVariantDescriptor  [mcp-descriptors.ts:52]
+`{ tag: string; fields: EngineVariantFieldDescriptor[] }`  (fields=[] for unit variants)
+
+### EngineVariantFieldDescriptor  [mcp-descriptors.ts:42]
+`{ name: string; type: string }`  (type = raw source-text annotation; normalized-type resolution deferred)
+
+### FormDescriptor  [mcp-descriptors.ts:103] → forms.json
+```
+formName: string
+errorsKey / isValidKey / touchedKey / submittedKey: string   — resolved compound-rollup keys
+fields: FormFieldDescriptor[]
+```
+
+### FormFieldDescriptor  [mcp-descriptors.ts:86]
+`{ name; qualifiedName; errorsKey; isValidKey; touchedKey: string }`  (resolved per-field §55.6/§55.9 keys; v0 = raw qualified names, encoding passthrough)
+
+### ChannelDescriptor  [mcp-descriptors.ts:128] → channels.json
+`{ name: string; topic: string; autoSyncedCells: ChannelAutoSyncedCell[] }`  (name defaults "channel"; topic defaults to name per §38.3)
+
+### ChannelAutoSyncedCell  [mcp-descriptors.ts:121]
+`{ name: string; key: string }`  (§38.4 V5-strict state-decl cells)
+
+### ServerFnDescriptor  [mcp-descriptors.ts:148] → serverfns.json
+```
+name: string
+params: ServerFnParamDescriptor[]
+returnType: string               — raw annotation or "unknown"
+file: string                     — absolute decl path (same-name disambiguation)
+dispatchable: false              — PERMANENT v0 marker (read-only enumeration, PA Q2)
+```
+
+### ServerFnParamDescriptor  [mcp-descriptors.ts:138]
+`{ name: string; type: string }`  (type = raw annotation or "unknown")
 
 ## Codegen I/O Types  [compiler/src/codegen/]
 
@@ -114,7 +167,7 @@ innerEngines: NestedEngineEntry[]; effectRaw: string | null
 onTransitionElements: OnTransitionEntry[]; payloadBindings: PayloadBinding[]
 onIdleElements: OnIdleEntry[]  — exported by symbol-table.ts; consumed by native-walker
 ```
-This shape is produced by `engine-statechild-walker.ts` (M6.6.b.2 primary path) or `engine-statechild-parser.ts` (legacy fallback for synthetic ASTs).
+Produced by `engine-statechild-walker.ts` (M6.6.b.2 primary path) or `engine-statechild-parser.ts` (legacy fallback for synthetic ASTs). `EngineRuleForm` kinds (`absent`/`single`/`multi`/`wildcard`/`legacy-arrow`/`parse-error`) are read by `mcp-descriptors.ts:buildRulesMap` to derive the engine `rules` map.
 
 ### SYMInput  [symbol-table.ts:855]
 `{ filePath, ast: FileAST, exportRegistry? }`
@@ -130,11 +183,31 @@ This shape is produced by `engine-statechild-walker.ts` (M6.6.b.2 primary path) 
 ### Token  [compiler/native-parser/token.js]
 `TokenKind` — Object.freeze enum; `CONTEXTUAL_KEYWORDS` = `{ "type": "type" }`.
 
-### Stmt catalog  [ast-stmt.js] — 20 frozen StmtKind variants
-Block, ExprStmt, Empty, VarDecl, If, While, DoWhile, For, ForIn, ForOf, Return, Break, Continue, Labeled, FunctionDecl, ClassDecl, Import, Export, Try, Throw, LinDecl, TypeDecl, TildeDecl.
+### Stmt catalog  [ast-stmt.js] — frozen StmtKind variants
+Block, ExprStmt, Empty, VarDecl, If, While, DoWhile, For, ForIn, ForOf, Return, Break, Continue, Labeled, FunctionDecl, ClassDecl, Import, Export, Try, Throw, LinDecl, TypeDecl, TildeDecl, **StateDecl** (M6.5.b.2, S125 — `StmtKind.StateDecl = "StateDecl"`; V5-strict structural reactive decl).
+
+#### Native StateDecl node shape  [parse-stmt.js:3223 `parseStructuralStateDecl`]
+```
+kind: "StateDecl"
+name: string
+typeAnnotation: string | null
+structuralForm: true
+isConst: boolean
+shape: "derived" (const) | "plain"
+defaultExprRaw: string | null    — from default= attr
+pinned: boolean                  — §6.10 bareword modifier
+server: boolean                  — §52 bareword modifier
+debouncedRaw / throttledRaw: string | null   — §6.13
+validators: [...]                — bareword (args:null) + call-form (name+args)
+init: <expr>                     — RHS of `= expr`
+span
+```
+Bridged to live `state-decl` by `translate-stmt.js:785 makeStateDeclNode` (StmtKind.StateDecl arm at translate-stmt.js:326). `server` → live `isServer`. PARTIAL: 6 of 8 productions (Shape 2 not yet emitted from `parseStructuralStateDecl`).
 
 ### Expr catalog  [ast-expr.js] — 40 frozen ExprKind variants
 Ident, NumberLit, StringLit, BoolLit, RegexLit, TemplateLit, AtCell, BareVariant, This, Super, Array, Object, Paren, Unary, Update, Binary, Logical, Assignment, Conditional, Sequence, Call, New, Member, TaggedTemplate, Arrow, Function, RestElement, AssignmentPattern, BlockStub; scrml-extension: NotValue, Tilde, Sql, InputStateRef, IsCheck, Match (+MatchArm/VariantPattern/WildcardPattern/IsPattern/MatchBinding), Render, Lift, Fail, Propagate, GuardedExpr, Yield, MarkupValue.
+
+Match-arm parsing (M6.5.b.1, S125): `parseMatchExpr` (parse-expr.js:2547) accepts `,` / `;` / **newline** as inter-arm separators (newline is the canonical corpus form); `parseMatchArmPattern` (parse-expr.js:2888) handles Dot+UpperIdent variant patterns (`.Done`).
 
 ### Block catalog  [parse-markup.js]
 BlockKinds: Markup, Text, Comment, Sql, Css, Meta, ErrorEffect, LogicEscape, DisplayTextLiteral, Test (`_{}`), ForeignCode (`^^{}`).
@@ -143,7 +216,7 @@ BlockKinds: Markup, Text, Comment, Sql, Css, Meta, ErrorEffect, LogicEscape, Dis
 No application DB schema — scrml is a compiler. SQLite *.db files are throwaway test fixtures.
 
 ## Tags
-#scrmlts #map #schema #ast #fileast #native-parser #codegen #m5-swap #bridge #match-block #v-kill #reactive-assign #symbol-table #runtime-chunks #engine-statechild-walker #m6-6-b2
+#scrmlts #map #schema #ast #fileast #native-parser #codegen #m5-swap #bridge #match-block #v-kill #reactive-assign #symbol-table #runtime-chunks #engine-statechild-walker #m6-6-b2 #m6-5-b2 #mcp-v0 #mcp-descriptors #s125
 
 ## Links
 - [primary.map.md](./primary.map.md)

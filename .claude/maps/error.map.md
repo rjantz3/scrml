@@ -1,6 +1,6 @@
 # error.map.md
 # project: scrmlts
-# updated: 2026-05-23T00:00:00Z  commit: 73dd816c
+# updated: 2026-05-24T00:00:00Z  commit: dc073b94
 
 scrml's own language error model is values-not-exceptions (SPEC §19.1 — no try/catch,
 no exceptions in scrml SOURCE). Entries below are the COMPILER's own (host-side,
@@ -24,9 +24,11 @@ JavaScript/TypeScript) diagnostic infrastructure.
 
 ## Native-Parser Parse Diagnostics (SPEC §34.1)
 
-81 codes: 79 hard `E-` errors + 2 info-level `I-NATIVE-BLOCK-*` codes. Stable through S124 — no new §34.1 codes landed in S124.
+81 codes: 79 hard `E-` errors + 2 info-level `I-NATIVE-BLOCK-*` codes. Stable through S125 — no new §34.1 codes landed in the M6.5.b.1/b.2 or MCP-V0.A/B work.
 
 B-wave codes (S118): E-STMT-LIN-* / E-STMT-TYPE-* / E-STMT-FN-* / E-STMT-TILDE-* / E-EXPR-GUARDED-UNCLOSED / E-THROW-NOT-IN-SCRML / E-TRY-NOT-IN-SCRML.
+
+Match-arm path (M6.5.b.1, S125): `E-EXPR-MATCH-BRACE` (parse-expr.js:2560) fires when `{` does not open the match arms — an existing code, exercised by the new newline-separator path (no new code introduced).
 
 FileAST-assembler info codes (S119 C2 — `nativeParseFile`):
 - `I-NATIVE-BLOCK-DROPPED` — BlockKind with no live ASTNode was dropped; severity: info → `result.warnings`
@@ -45,6 +47,15 @@ FileAST-assembler info codes (S119 C2 — `nativeParseFile`):
 |---|---|
 | `W-STDLIB-SHIM-MISSING` | bundleStdlibForRun: `scrml:NAME` has no runtime shim at `compiler/runtime/stdlib/<name>.js` |
 | `W-STDLIB-COMPILER-DEFERRED` | bundleStdlibForRun: any name matching `"compiler"` or `"compiler/..."` — fires regardless of shim presence |
+
+## MCP V0 Runtime-Shim Errors (S125 — NOT §34 diagnostic codes)
+
+`compiler/runtime/stdlib/mcp.js` runtime guards throw plain `Error` (not registered §34 codes) when the shim is misused. These surface inside the long-lived MCP server (Sub-unit C/D), not in the compile pipeline:
+- install() with no/invalid arg → `/install() requires a runtime object/`
+- READ helper before install() → `/runtime not connected/`
+- READ helper before loadSidecars() → `/engines.json not loaded/` (and forms/channels equivalents)
+
+The "E-MCP-RUNTIME-NOT-INSTALLED" / "E-MCP-NO-CHUNKS-MANIFEST" tokens appear only as SCOPING-doc labels and shim-header comments; they are NOT in the §34 catalog at HEAD.
 
 ## Promotion / Info Lints (SPEC §34 + §56)
 
@@ -76,7 +87,7 @@ All extend `_ScrmlError` (extends Error):
 | W-LINT | 24 | lint codes W-LINT-001..W-LINT-024 |
 | E-CG | 54 | codegen errors |
 
-Warning families: `W-CG-CHUNK-*`, `W-AUTH-*`, `W-LINT-*`, `W-ENGINE-*`, `W-DEPRECATED-*`, `W-STDLIB-*`, `W-DEAD-FUNCTION`, `W-PROGRAM-*`.
+Warning families: `W-CG-CHUNK-*`, `W-AUTH-*`, `W-LINT-*`, `W-ENGINE-*` (incl. `W-ENGINE-NON-EXHAUSTIVE` referenced by mcp-descriptors rules-map derivation), `W-DEPRECATED-*`, `W-STDLIB-*`, `W-DEAD-FUNCTION`, `W-PROGRAM-*`.
 Info families: `I-PARSER-NATIVE-SHADOW`, `I-NATIVE-BLOCK-*`, `I-MATCH-PROMOTABLE`, `I-FN-PROMOTABLE`, `I-ASYNC-USER-SOURCE`, `I-AUTH-REDIRECT-UNRESOLVED`.
 
 ## Error Handling Patterns
@@ -85,6 +96,7 @@ Info families: `I-PARSER-NATIVE-SHADOW`, `I-NATIVE-BLOCK-*`, `I-MATCH-PROMOTABLE
 - Diagnostic-stream partition — api.js: `isNonFatal(e)` routes W-*/I- prefixed or severity warning/info to `result.warnings`; everything else to `result.errors` (CLI exits 1 on non-empty errors). Tests asserting on W-/I- codes MUST use a cross-stream helper — `result.errors.filter(e => e.code === "W-...")` silently passes (S92 false-negative class).
 - Native-parser modules record errors as VALUES — `recordError(ctx, code, message, span)` appends to context error array; no throws.
 - Per-stage try/catch in api.js wraps BS and TS-promote capture hook only (2 catch sites).
+- MCP descriptor extractor (`codegen/mcp-descriptors.ts`) is total/non-throwing — defensive `Array.isArray` / `typeof` guards; malformed rules degrade to `[]`; never throws into the compile pipeline. The sidecar write loop in api.js writes JSON directly (no diagnostic class).
 
 ## Global Error Boundaries
 
@@ -94,9 +106,10 @@ No host-side global error boundary — compiler is a batch process; fatal errors
 
 - api.js BS-stage catch swallows non-BSError throws into a generic `E-BS-000` with no span.
 - `component-expander.ts` M6.2b live-path fallback (`sourceNeedsLiveFallback`) — errors on the legacy `splitBlocks`+`buildAST` path surface through the legacy CE diagnostic channel, not the native path.
+- MCP shim fs.watch reload errors (`_startWatcher`) are intentionally swallowed (console.warn-free) so an in-flight malformed sidecar rewrite cannot crash the MCP server — the cache stays stale until the next clean reload.
 
 ## Tags
-#scrmlts #map #error #diagnostics #pipeline #native-parser #stdlib-shims #i-fn-promotable #v-kill #unit-cc #e-state-undeclared #e-write-not-in-logic-context #m6-6-b2
+#scrmlts #map #error #diagnostics #pipeline #native-parser #stdlib-shims #i-fn-promotable #v-kill #unit-cc #e-state-undeclared #e-write-not-in-logic-context #m6-6-b2 #mcp-v0 #s125
 
 ## Links
 - [primary.map.md](./primary.map.md)

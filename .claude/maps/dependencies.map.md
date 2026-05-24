@@ -1,6 +1,6 @@
 # dependencies.map.md
 # project: scrmlts
-# updated: 2026-05-23T00:00:00Z  commit: 73dd816c
+# updated: 2026-05-24T00:00:00Z  commit: dc073b94
 
 ## Runtime Dependencies (root package.json)
 
@@ -32,6 +32,7 @@ api.js → block-splitter.js, ast-builder.js, compute-pgo-flags.ts, compute-prog
          idempotency-store-resolver.ts, type-system.ts, meta-checker.ts, meta-eval.ts,
          dependency-graph.ts, batch-planner.ts, reachability-solver.ts, auth-graph.ts,
          code-generator.js, module-resolver.js, name-resolver.ts, symbol-table.ts
+api.js → codegen/mcp-descriptors.ts (buildMcpDescriptors) — MCP-V0.A sidecar emission in output write loop (S125)
 api.js → native-parser/parse-file.js (nativeParseFile) — C2 routing behind --parser=scrml-native
 api.js → validators/{post-ce-invariant, attribute-interpolation, attribute-allowlist,
          lint-try-catch, lint-async-user-source}.ts
@@ -40,6 +41,8 @@ api.js → lint-ghost-patterns.js, lint-i-match-promotable.js, lint-i-fn-promota
 code-generator.js → codegen/index.ts (runCG) → codegen/emit-*.ts (~55 emitters)
 codegen/index.ts → codegen/route-splitter.ts, codegen/ir.ts, codegen/source-map.ts,
                    codegen/runtime-chunks.ts
+codegen/mcp-descriptors.ts → (no module imports; LOCAL mirrors of emit-engine/emit-channel/
+                   emit-synth-surface walk shapes to avoid circular import into the emit chain)
 reachability-solver.ts → reachability/{component-1..5, entry-points, gate-classifier,
                           outer-fixpoint}.ts
 cli.js → commands/{compile, dev, build, migrate, promote, generate, init, serve}.js → api.js
@@ -56,26 +59,27 @@ lex.js → lex-mode.js, lex-in-{code,single-string,double-string,template,
           line-comment,block-comment,regex}.js, char-classify.js
 parse-expr.js → ast-expr.js, token.js, token-cursor.js, parse-ctx.js, parse-mode.js
 parse-stmt.js → ast-stmt.js, ast-expr.js, parse-expr.js, token.js, parse-ctx.js,
-                block-context.js, body-mode.js
+                block-context.js, body-mode.js  (M6.5.b.2 structuralStateDeclLeadFollows predicates)
 parse-markup.js → tag-frame.js (M6.6.b.1.5 attr tokenizer extensions), body-mode.js,
                   display-text-literal.js, parse-seam.js, parse-css-body.js,
                   parse-sql-body.js, parse-state-body.js, parse-error-body.js,
                   delegation-frame.js
 parse-file.js → parse-markup.js, collect-hoisted.js, translate-stmt.js, parse-state-body.js
-translate-stmt.js → ast-stmt.js, translate-expr.js
+translate-stmt.js → ast-stmt.js, translate-expr.js  (M6.5.b.2 makeStateDeclNode StateDecl arm)
 translate-expr.js → ast-expr.js
 collect-hoisted.js → ast-stmt.js
 ```
 
 ## Stdlib Runtime Shim Layout (compiler/runtime/stdlib/)
 
-Top-level (18): auth, crypto, data, host, store, cron, format, fs, http, oauth, path, process, redis, regex, router, test, time, compiler (umbrella).
+Top-level (19): auth, crypto, data, host, store, cron, format, fs, http, oauth, path, process, redis, regex, router, test, time, compiler (umbrella), **mcp (NEW S125 — MCP-V0.B `scrml:mcp` runtime READ helpers; NOT yet wired into stdlib bundling allowlist; awaits Sub-unit C/D `<program mcp>` opt-in)**.
+mcp.js external imports: `node:fs` (readFileSync, watch), `node:path` (join), `node:url` (fileURLToPath) — Node built-ins only, no third-party deps.
 Subdirectories:
 - `oauth/` — discord, github, google, microsoft, pkce (5 providers).
 - `compiler/` — 13 per-stage thunks (bs, tab, mod, ce, bpp, pa, ri, ts, mc, me, dg, cg, expr) — each throws at call time with W-STDLIB-COMPILER-DEFERRED attribution.
 
 ## Tags
-#scrmlts #map #dependencies #bun #acorn #native-parser #m5-swap #bridge #stdlib-shims #m6-6-b2 #native-walker
+#scrmlts #map #dependencies #bun #acorn #native-parser #m5-swap #bridge #stdlib-shims #m6-6-b2 #native-walker #mcp-v0 #mcp-descriptors #s125
 
 ## Links
 - [primary.map.md](./primary.map.md)

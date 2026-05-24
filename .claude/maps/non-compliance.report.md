@@ -1,34 +1,35 @@
 # non-compliance.report.md
 # project: scrmlts
-# generated: 2026-05-23T00:00:00Z
-# scan mode: FULL_COLD_START
+# generated: 2026-05-24T00:00:00Z
+# scan mode: INCREMENTAL_UPDATE (delta scan 73dd816c → dc073b94)
 
 ## Summary
 
-Total docs scanned: ~295 `.md` files (excluding node_modules, .git, .jj, .claude, archive, handOffs, dist/build/target).
-Compliant: ~15 (core spec, READMEs, reference docs, progress artifacts — all correctly placed or in-scope).
-Non-compliant: 5 categories (same as prior scans — no new categories surfaced at HEAD).
+Total docs scanned (delta + carry-forward): ~297 `.md` files (excluding node_modules, .git, .jj, .claude, archive, handOffs, dist/build/target).
+Compliant: ~17 (core spec, READMEs, reference docs, in-flight + completed progress artifacts).
+Non-compliant: 5 categories (unchanged from prior scan — no new category surfaced at HEAD).
 Uncertain: 3 (unchanged).
 
-SPEC.md modification watermark: 2026-05-23 (current). Last additions: §6.1.1/§6.1.2 V-kill; §34 E-STATE-UNDECLARED + E-WRITE-NOT-IN-LOGIC-CONTEXT; §40.8 amendment. No prior sections invalidated.
+SPEC.md modification watermark: 2026-05-23 (current; unchanged across this delta — the 7 commits touched no SPEC.md section). The M6.5.b.1/b.2 + MCP-V0.A/B work introduced NO new §34/§34.1 diagnostic codes and NO spec sections.
 
-S124 changes (d570341d → 73dd816c — 5 commits in scope description, plus ~8 more commits from earlier that were part of the watermark delta):
-- NEW `docs/changes/mcp-v0-devtools-scoping/` — SCOPING + progress for MCP V0; in-flight process artifact; falls into docs/changes/** aggregate. NOT non-compliant by category — it's a current-dated scoping doc.
-- NEW `docs/changes/m65-b0-within-node-canary/progress.md` — current progress artifact.
-- MODIFIED `docs/changes/m65-path-b-adapter-scoping/` — SCOPING.md + progress.md + fixtures/ + tools/; active work; compliant placement.
-- NEW `docs/changes/m66-b1-5-attr-tokenizer-extension/progress.md` — compliant.
-- NEW `docs/changes/m66-b2-symbol-table-migration/progress.md` — compliant; M6.6.b.2 LANDED, eligible for deref post-session.
-- NEW `docs/changes/m66-b3-legacy-helper-migration/progress.md` — compliant; LANDED, eligible for deref.
-- MODIFIED `docs/changes/m67-phase-a-flag-flip/progress.md` — M6.7 STOP recorded; compliant.
-- MODIFIED `docs/changes/native-parser-front-end/IMPLEMENTATION-ROADMAP.md` — current reference; compliant.
-- No newly-flagged stale-claim docs. Specifically: M6.6.b.2 is now LANDED (not pending); MCP V0 SCOPING correctly self-identifies as planning-only.
+## Delta Scan (7 commits: 73dd816c → dc073b94)
 
-## Non-compliant docs
+Docs changed in this delta and their disposition:
+- MODIFIED `docs/changelog.md` — current changelog; compliant.
+- MODIFIED `docs/changes/m65-path-b-adapter-scoping/progress.md` — active SCOPING progress artifact; compliant placement (docs/changes/** aggregate).
+- NEW `docs/changes/mcp-v0-devtools-scoping/progress.md` — in-flight progress artifact for MCP V0; compliant.
+- MODIFIED `hand-off.md`, `master-list.md`, NEW `handOffs/hand-off-127.md` — project orchestration; handOffs/ is explicitly out-of-scope (not scanned for compliance); hand-off.md + master-list.md are in-scope orchestration, compliant.
 
-### docs/changes/** (~230+ files across ~120+ directories)
+**Compliance-status SHIFT worth flagging:** the prior report stated "MCP V0 SCOPING correctly self-identifies as planning-only." That is now PARTIALLY STALE in framing: MCP V0 is no longer planning-only. As of S125, Sub-unit A (`compiler/src/codegen/mcp-descriptors.ts` + api.js wiring) and Sub-unit B (`compiler/runtime/stdlib/mcp.js`) are IMPLEMENTED. The `docs/changes/mcp-v0-devtools-scoping/SCOPING.md` doc itself remains a valid forward-looking scoping reference for the still-pending Sub-units C/D — it is NOT non-compliant (it scopes work that is genuinely future: the 11-tool surface + MCP server boot). No action needed; recorded so a future scan does not re-flag SCOPING.md as "describes unimplemented features" when ~40% of it is now landed.
+
+No newly-flagged stale-claim docs in this delta. The new source surfaces (`mcp-descriptors.ts`, `mcp.js`, the M6.5.b.1/b.2 parser changes) are all backed by code grep-verifiable against the maps and have tests (Sub-unit B + M6.5.b.1/b.2) or pending tests (Sub-unit A — the next dispatch).
+
+## Non-compliant docs (carried forward — unchanged at HEAD)
+
+### docs/changes/** (~232+ files across ~122+ directories)
 **Reason:** location + name-heuristic (combo)
-**Detail:** Every directory under `docs/changes/` is a per-dispatch artifact set (BRIEF.md, SCOPE.md, progress.md for completed or in-flight work). S124 added new dirs: mcp-v0-devtools-scoping, m65-path-b-adapter-scoping (expanded), m65-b0-within-node-canary, m66-b1-5-attr-tokenizer-extension, m66-b2-symbol-table-migration, m66-b3-legacy-helper-migration, m67-phase-a-flag-flip. All fall into the same aggregate class as prior scans. The standing curation matrix at `docs/curation/2026-05-05-changes-dir-disposition.md` dispositions these to `scrml-support/archive/dispatches/`. Newly-completed dirs (M6.6.b.2, M6.6.b.3, M6.2b, V-kill, Unit CC, GITI-017, 6nz-Bug-P) are eligible for post-session deref.
-**Suggested disposition:** deref completed-arc dirs to scrml-support/archive/dispatches/; keep actively-in-flight dirs (m65-path-b-adapter-scoping, mcp-v0-devtools-scoping, m6.6.b.4+). At scale (~230+ files), a batched deref after M6.8 close is cleaner than per-dir handling.
+**Detail:** Every directory under `docs/changes/` is a per-dispatch artifact set (BRIEF.md, SCOPE.md, progress.md for completed or in-flight work). This delta added/modified: mcp-v0-devtools-scoping (progress), m65-path-b-adapter-scoping (progress). All fall into the same aggregate class as prior scans. The standing curation matrix at `docs/curation/2026-05-05-changes-dir-disposition.md` dispositions these to `scrml-support/archive/dispatches/`. Newly-completable arcs (MCP-V0.B, M6.5.b.1) are eligible for post-session deref once their parent milestone closes; m65-path-b-adapter-scoping + mcp-v0-devtools-scoping remain actively-in-flight (M6.5.b.2 PARTIAL; MCP Sub-units C/D pending) and should stay.
+**Suggested disposition:** deref completed-arc dirs to scrml-support/archive/dispatches/; keep actively-in-flight dirs. Batched deref after M6.8 + MCP-V0 close is cleaner than per-dir handling.
 
 ### docs/website/roadmap-from-v0.3-2026-05-14.md
 **Reason:** content-heuristic + name-heuristic
@@ -47,10 +48,10 @@ S124 changes (d570341d → 73dd816c — 5 commits in scope description, plus ~8 
 
 ### docs/curation/2026-05-05-changes-dir-disposition.md
 **Reason:** location + currency
-**Detail:** Curation matrix (S61) for the docs/changes/ deref. Snapshot count ("103 dirs total") is stale — docs/changes/ is now ~120+ dirs / 230+ .md files.
+**Detail:** Curation matrix (S61) for the docs/changes/ deref. Snapshot count ("103 dirs total") is stale — docs/changes/ is now ~122+ dirs / 232+ .md files.
 **Suggested disposition:** deref to scrml-support/docs/ once the docs/changes/ deref is executed; or update count and keep as standing checklist.
 
-## Uncertain docs (needs human review)
+## Uncertain docs (needs human review — carried forward)
 
 ### docs/known-gaps.md
 **Reason:** This doc explicitly catalogs spec-vs-implementation drift — by construction it describes things the compiler does NOT yet do. Looks non-compliant under grep cross-check but is the intentionally-maintained drift ledger.
@@ -62,7 +63,7 @@ S124 changes (d570341d → 73dd816c — 5 commits in scope description, plus ~8 
 
 ### docs/external-js.md  and  docs/lin.md
 **Reason:** Reference-shaped docs (external-js integration; `lin` token feature) but not cross-checked at scan time.
-**What to check:** Grep identifiers each cites against compiler/src. Both features resolve in source (`LinDeclNode` in ast.ts; `LinDecl` StmtKind in native parser as of B4; api.js handles .js imports) — recommend KEEP pending quick grep confirmation.
+**What to check:** Grep identifiers each cites against compiler/src. Both features resolve in source (`LinDeclNode` in ast.ts; `LinDecl` StmtKind in native parser; api.js handles .js imports) — recommend KEEP pending quick grep confirmation.
 
 ## Notes on compliant / in-scope docs (NOT flagged)
 
@@ -70,14 +71,15 @@ S124 changes (d570341d → 73dd816c — 5 commits in scope description, plus ~8 
 - `README.md`, `DESIGN.md`, `docs/tutorial.md`, `docs/changelog.md`, `scrmlFormula.md` — current reference.
 - `docs/PA-SCRML-PRIMER.md` — adopter-side primer; in-scope.
 - `compiler/native-parser/README.md`, `M5-ast-bridge-scoping.md`, `M5-divergence-ledger.md`, `M5-SWAP-residual-decomposition.md` — current native-parser reference; in-scope.
-- `compiler/native-parser/M6.6-CONTRACT-DERIVATION.md` (540L; updated M6.6.b.1.5) — current cookbook for M6.6.b.4..b.6; IN-SCOPE (active dispatch target).
+- `compiler/native-parser/M6.6-CONTRACT-DERIVATION.md` (540L) — current cookbook for M6.6.b.4..b.6; in-scope.
 - `docs/changes/native-parser-front-end/IMPLEMENTATION-ROADMAP.md` — current roadmap; updated M6.7 STOP; in-scope.
-- `docs/changes/mcp-v0-devtools-scoping/SCOPING.md` — current in-flight SCOPING; correctly self-labels as planning-only.
+- `docs/changes/mcp-v0-devtools-scoping/SCOPING.md` — forward-looking scoping for still-pending MCP Sub-units C/D; ~40% now landed (A+B); remains a valid forward reference — in-scope.
+- `docs/changes/m65-path-b-adapter-scoping/SCOPING.md` — active scoping for the M6.5.b adapter arc (b.2 PARTIAL); in-scope.
 - `compiler/src/codegen/README.md`, `compiler/tests/.../REGISTRY.md`, `compiler/tests/commands/migrate-program-shape-fixtures/README.md` — module-local reference; in-scope.
 - `hand-off.md`, `master-list.md`, `pa.md` — project orchestration; in-scope.
 
 ## Tags
-#non-compliance #project-mapper #cleanup #scrmlts
+#non-compliance #project-mapper #cleanup #scrmlts #mcp-v0 #s125
 
 ## Links
 - [primary.map.md](./primary.map.md)
