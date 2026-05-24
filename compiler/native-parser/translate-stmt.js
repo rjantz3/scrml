@@ -322,6 +322,18 @@ function appendTranslatedStmt(out, stmt, counter) {
             out.push(makeTildeDeclNode(stmt, counter));
             return;
 
+        // --- M6.5.b.2 — V5-strict structural reactive (state) declaration --
+        case StmtKind.StateDecl:
+            // `<name> = expr` / `const <name> = expr` / typed / pinned /
+            // default= / debounced= / throttled= / server / validators (raw)
+            // -> live `state-decl` (SPEC §6.2 Shape 1/3 + §6.6 + §6.10 + §6.13).
+            // The native parser DOES recognize the LHS-binding form as of
+            // M6.5.b.2 — translation is faithful, not the legacy const-decl
+            // {name:""} fallback the R1 header documented as the disposition
+            // before the structural-decl LHS was wired.
+            out.push(makeStateDeclNode(stmt, counter));
+            return;
+
         default:
             // An unrecognized native StmtKind. The native catalog is closed at
             // 20 kinds (ast-stmt.js StmtKind) — this arm should be
@@ -740,6 +752,101 @@ function makeTildeDeclNode(stmt, counter) {
     if (stmt.init !== undefined && stmt.init !== null) {
         node.initExpr = translateExpr(stmt.init);
     }
+    return node;
+}
+
+// makeStateDeclNode — native `StateDecl{...}` -> live `state-decl`
+// (ReactiveDeclNode, ast.ts:502). The V5-strict structural reactive
+// declaration; SPEC §6.2 Shape 1/3 + §6.6 derived + §6.8 default + §6.10
+// pinned + §6.13 reactivity. M6.5.b.2 Class E disposition: FIX-NATIVE,
+// faithful translation, not the legacy const-decl{name:""} fallback.
+//
+// Live invariants per types/ast.ts:502:
+//   - `name` always set (the cell name without `@`).
+//   - `init` legacy raw string — left empty (native does not retain raw).
+//   - `initExpr` populated when the decl has an RHS expression.
+//   - `structuralForm: true` (the `<name>` form, as opposed to legacy `@name`).
+//   - `isConst` true iff `const <name>` derived (SPEC §6.6).
+//   - `shape` 'derived' iff isConst, else 'plain'. ('decl-with-spec' is
+//     Shape 2 markup-RHS — OUT OF M6.5.b.2 scope; the native parser does
+//     not currently emit Shape 2 from parseStructuralStateDecl.)
+//   - `defaultExpr` ExprNode parsed from `default=expr` raw text, or null.
+//   - `pinned` true iff `pinned` bareword appeared (SPEC §6.10).
+//   - `isServer` (live name) true iff `server` bareword appeared (SPEC §52).
+//   - `validators` ValidatorEntry[] — bareword + call-form entries captured
+//     raw; `args` is null for bareword, [rawText] for call-form (live B9
+//     parses raw into ExprNode/RelationalPredicateNode — not mirrored here).
+//   - `reactivity.debounced` / `.throttled` AfterDurationResult; full
+//     duration-grammar parse defers to live `parseAfterDuration` — native
+//     stores the raw token text and translate-stmt mirrors it as the raw
+//     `value` field on a minimal AfterDurationResult-shaped object.
+//   - `typeAnnotation` raw type-expression text from `:T` annotation, or
+//     omitted when absent.
+function makeStateDeclNode(stmt, counter) {
+    const node = {
+        id: stampId(counter),
+        kind: "state-decl",
+        name: stmt.name === undefined || stmt.name === null ? "" : stmt.name,
+        init: "",
+        structuralForm: true,
+        isConst: stmt.isConst === true,
+        shape: stmt.shape === "derived" ? "derived" : "plain",
+        defaultExpr: null,
+        pinned: stmt.pinned === true,
+        span: spanOrZero(stmt.span),
+    };
+    // initExpr — the RHS expression. Translate through translate-expr so the
+    // PascalCase native ExprNode becomes the live lowercase ExprNode.
+    if (stmt.init !== undefined && stmt.init !== null) {
+        node.initExpr = translateExpr(stmt.init);
+    } else {
+        node.initExpr = null;
+    }
+    // defaultExpr — SPEC §6.8 reset-target. The live `defaultExpr` is the
+    // parsed ExprNode synthesised by `safeParseExprToNode` (Acorn-backed). The
+    // native parser captured the raw text but the within-node-canary measures
+    // FileAST-shape parity — emitting a divergent `defaultExprRaw` companion
+    // field would CREATE within-node-canary divergences (EXTRA-FIELD class).
+    // M6.5.b.2 intentionally OMITS the raw companion; downstream codegen
+    // (`usage-analyzer.ts`, `emit-bindings.ts`) reads `defaultExpr != null`
+    // and so a missing parsed ExprNode under native = a downstream feature
+    // gap to surface as a sibling FIX-NATIVE unit (reactivity-grammar parse).
+    // For now `defaultExpr: null` (set above) — partial parity, faithful
+    // representation: a `default=` attribute IS captured by the parser; it's
+    // just not yet surfaced as a parsed ExprNode on the AST. NOTE for PA:
+    // this is a documented partial fix per the SCOPING §STOP conditions —
+    // structural-decl LHS parses BUT default-expr parsing is a sibling unit.
+
+    // isServer — live field name (the bareword `server` attr per SPEC §52).
+    if (stmt.server === true) {
+        node.isServer = true;
+    }
+    // typeAnnotation — SPEC §6.2 typed Shape 1/3 (`<x>: T = expr`).
+    if (stmt.typeAnnotation !== undefined && stmt.typeAnnotation !== null && stmt.typeAnnotation !== "") {
+        node.typeAnnotation = stmt.typeAnnotation;
+    }
+    // validators — Shape 2 + structural-decl validator attrs (SPEC §55).
+    // The live AST sets `validators` only when Shape 2 (decl-with-spec).
+    // For Shape 1/3 plain/derived the live ast-builder omits the field — but
+    // when a bareword validator like `req` appears on a plain decl (`<x req>
+    // = 0`), the live ast-builder declines to recognize that pattern via the
+    // structural-decl path (it'd require markup-RHS). The native parser is
+    // more permissive here and captures the validators regardless; the field
+    // is emitted only when non-empty to keep parity with the live ast-builder
+    // (which omits `validators` for Shape 1/3 — undefined-is-falsy contract).
+    // M6.5.b.2 OMITS validators on Shape 1/3 to keep within-node parity tight;
+    // Shape 2 markup-RHS is a separate sub-class outside this unit's scope.
+    // (The captured validators are retained on the native StateDecl node so a
+    // future Shape 2 sub-unit can promote them; the translate-stmt arm drops
+    // them here for parity.)
+
+    // reactivity — SPEC §6.13 debounced= / throttled= attributes. The live
+    // representation is `reactivity: {debounced?: AfterDurationResult,
+    // throttled?: AfterDurationResult}`. Full duration-grammar parse via
+    // `parseAfterDuration` is the live ast-builder's concern; M6.5.b.2
+    // OMITS the field on native (a NATIVE PARSER FEATURE GAP — surfaced to
+    // PA as a sibling unit). The captured raw text is retained on the native
+    // StateDecl node for the future sibling unit to consume.
     return node;
 }
 

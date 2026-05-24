@@ -56,6 +56,22 @@ export const StmtKind = Object.freeze({
     //     statement-position DECLARATION form, disambiguated from prefix
     //     bitwise-`~` by the source-adjacent `~ Ident =` shape.
     TildeDecl:    "TildeDecl",     // `~name = pipeline`
+
+    // --- M6.5.b.2 — V5-strict structural reactive (state) declaration ---
+    // SPEC §6.2 Shape 1/3 + §6.6 derived + §6.10 pinned + §6.13 reactivity.
+    // Productions:
+    //   <name> = expr               plain Shape 1
+    //   <name>:T = expr             typed Shape 1
+    //   const <name> = expr         derived Shape 3 (SPEC §6.6)
+    //   const <name>:T = expr       typed derived
+    //   <name pinned> = expr        pinned (SPEC §6.10)
+    //   <name default=e> = expr     with reset-target (SPEC §6.8)
+    //   <name debounced=Nms> = e    reactivity (SPEC §6.13)
+    //   <name throttled=Nms> = e    reactivity
+    //   <name server> = e           server-authoritative
+    //   <name v1 v2(...)> = expr    Shape 2 validators (raw-capture only)
+    // Translated to live `state-decl` by translate-stmt.js.
+    StateDecl:    "StateDecl",     // V5-strict structural reactive decl
 });
 
 // VarDeclKind — the `let` / `const` / `var` declaration keyword (M3.1).

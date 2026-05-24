@@ -498,6 +498,23 @@ export function parseStatement(ctx) {
         return parseBlock(ctx);
     }
 
+    // M6.5.b.2 — `const <NAME ...> = expr` SPEC §6.6 derived state-decl form.
+    // The `const` keyword is followed by a `<` IDENT structural-decl opener;
+    // route into parseStructuralStateDecl with isConst=true BEFORE the generic
+    // `let`/`const`/`var` path (which would consume `const` and then fail on
+    // the `<` as a non-binding LHS, producing a const-decl{name:""}). Mirrors
+    // the live ast-builder.js:4828 dispatch.
+    if (kind === TokenKind.KwConst && peekKind(ctx.cursor, 1) === TokenKind.LessThan) {
+        // peek the rest of the lookahead from the perspective of the `<` —
+        // we need to advance past `const` first, OR use a separate predicate.
+        // Simpler: peek 2 tokens to confirm `<` IDENT, then run the existing
+        // structural lead predicate on a synthesised cursor view.
+        if (constStructuralStateDeclLeadFollows(ctx.cursor)) {
+            advance(ctx.cursor);   // consume `const`
+            return parseStructuralStateDecl(ctx, true);
+        }
+    }
+
     // A variable declaration — `let` / `const` / `var`.
     if (kind === TokenKind.KwLet || kind === TokenKind.KwConst || kind === TokenKind.KwVar) {
         return parseVarDecl(ctx);
@@ -667,7 +684,7 @@ export function parseStatement(ctx) {
     // statement fallthrough — the live oracle's `parseLogicBody` likewise
     // dispatches `tryParseStructuralDecl` ahead of its bare-expr default.
     if (kind === TokenKind.LessThan && structuralStateDeclLeadFollows(cursor)) {
-        return parseStructuralStateDecl(ctx);
+        return parseStructuralStateDecl(ctx, false);
     }
 
     // Everything else is an expression statement.
@@ -2868,6 +2885,61 @@ export function parseTildeDecl(ctx) {
 // attribute value containing `>` does not end the scan early — to the opener's
 // top-level `>` (or fused `>=`), then confirm the `=` / `:` decl signal.
 
+// constStructuralStateDeclLeadFollows — calculation (predicate, non-mutating
+// cursor peek). True when the cursor is at `const <` IDENT structural state-decl
+// opener — the SPEC §6.6 derived form `const <name> = expr`. Delegates to
+// `structuralStateDeclLeadFollows`'s scan logic but shifted +1 to account for
+// the leading `const` keyword. M6.5.b.2.
+export function constStructuralStateDeclLeadFollows(cursor) {
+    if (currentKind(cursor) !== TokenKind.KwConst) {
+        return false;
+    }
+    if (peekKind(cursor, 1) !== TokenKind.LessThan) {
+        return false;
+    }
+    if (peekKind(cursor, 2) !== TokenKind.Ident) {
+        return false;
+    }
+    // Same lookahead body as structuralStateDeclLeadFollows but starting at
+    // scanIdx = 3 (skip `const`, `<`, IDENT).
+    let parenDepth = 0;
+    let braceDepth = 0;
+    let bracketDepth = 0;
+    let scanIdx = 3;
+    while (true) {
+        const t = peek(cursor, scanIdx);
+        if (t === undefined || t === null || t.kind === TokenKind.EOF) {
+            return false;
+        }
+        const topLevel = (parenDepth === 0 && braceDepth === 0 && bracketDepth === 0);
+        if (topLevel) {
+            if (t.kind === TokenKind.GreaterEqual) {
+                return scanIdx === 3;
+            }
+            if (t.kind === TokenKind.GreaterThan) {
+                const signal = peek(cursor, scanIdx + 1);
+                if (signal === undefined || signal === null) {
+                    return false;
+                }
+                if (signal.kind === TokenKind.Assign) {
+                    return true;
+                }
+                if (signal.kind === TokenKind.Colon) {
+                    return true;
+                }
+                return false;
+            }
+        }
+        if (t.kind === TokenKind.LParen) parenDepth = parenDepth + 1;
+        else if (t.kind === TokenKind.RParen && parenDepth > 0) parenDepth = parenDepth - 1;
+        else if (t.kind === TokenKind.LBrace) braceDepth = braceDepth + 1;
+        else if (t.kind === TokenKind.RBrace && braceDepth > 0) braceDepth = braceDepth - 1;
+        else if (t.kind === TokenKind.LBracket) bracketDepth = bracketDepth + 1;
+        else if (t.kind === TokenKind.RBracket && bracketDepth > 0) bracketDepth = bracketDepth - 1;
+        scanIdx = scanIdx + 1;
+    }
+}
+
 // structuralStateDeclLeadFollows — calculation (predicate, non-mutating
 // cursor peek). True when the cursor is at a `<` IDENT structural state-decl
 // opener. Declines (false) for an ordinary markup-as-value `<div>...</>` — a
@@ -2942,17 +3014,28 @@ export function structuralStateDeclLeadFollows(cursor) {
 //   structural-state-decl ::= '<' IDENT attr-region? ('>' | '>=') typeAnn? '=' expr
 //   typeAnn               ::= ':' <type-expression>     (§35.2)
 // SPEC §6.2. The caller (`parseStatement`) has confirmed the opener shape via
-// `structuralStateDeclLeadFollows`. The opener's attribute region (validators
-// / `default=` / `debounced=` / `server`) is consumed verbatim as raw token
-// text — its precise decomposition is the live ast-builder's A1a concern, not
-// the native parser's M5-swap remit; what matters here is consuming the decl
-// EXACTLY so a following statement (a `const Card = <markup>` component-def)
-// parses clean. The produced node carries `kind: "StateDecl"` — a logic-body
-// LogicStatement the canary does not recurse into; `translate-stmt.js` drops
-// it via its defensive `default` arm (state-decl translation is Tier A scope,
-// per the translate-stmt header). Mirrors the live `state-decl` shape.
-export function parseStructuralStateDecl(ctx) {
+// `structuralStateDeclLeadFollows`. The opener's attribute region carries
+// structural-decl modifier attributes — `pinned` / `server` baretokens, the
+// `default=expr` (SPEC §6.8) reset-target, and the reactivity attributes
+// `debounced=DURATION` / `throttled=DURATION` (SPEC §6.13). They are captured
+// here as raw text + flags so translate-stmt can hoist them into the live
+// `state-decl` payload (initially the attr-region was consumed verbatim with
+// no decomposition — sufficient for the older "parse cleanly" target only).
+// Validators (SPEC §55) — bareword + call-form predicate attributes — are
+// also captured here as raw entries; full validator-arg parsing (B9-style
+// RelationalPredicateNode synthesis) is the live ast-builder's concern and
+// is NOT mirrored at the native layer in M6.5.b.2 scope.
+//
+// The `isConst` arg distinguishes the SPEC §6.6 derived form (`const <x> = expr`)
+// from the plain SPEC §6.2 Shape 1 form (`<x> = expr`). The live `shape` field
+// is derived as `"derived"` when isConst, else `"plain"`.
+//
+// The produced node carries `kind: "StateDecl"` — a logic-body LogicStatement
+// `translate-stmt.js` maps to the live `state-decl` LogicStatement (M6.5.b.2).
+// Mirrors the live `state-decl` shape (compiler/src/types/ast.ts:502).
+export function parseStructuralStateDecl(ctx, isConst) {
     const cursor = ctx.cursor;
+    const isConstFlag = isConst === true;
     const open = advance(cursor);   // consume `<`
 
     // The cell name — `structuralStateDeclLeadFollows` confirmed an Ident.
@@ -2969,7 +3052,24 @@ export function parseStructuralStateDecl(ctx) {
     // `>=`). The lead predicate already proved a closer exists — the same
     // `()` / `{}` / `[]` balancing keeps an attribute-value `>` from ending
     // the consume early. A fused `>=` is BOTH the close and the `=` signal.
+    //
+    // While consuming, RECOGNIZE the structural-decl attribute vocabulary:
+    //   - `pinned`     bareword (SPEC §6.10)
+    //   - `server`     bareword (SPEC §52 / §6.13 — opt-into-server-authoritative)
+    //   - `default=e`  reset-target expression (SPEC §6.8)
+    //   - `debounced=` / `throttled=`  reactivity attributes (SPEC §6.13)
+    //   - bareword IDENT (other) → validator entry (`req`, `email`, etc.)
+    //   - IDENT `(` args `)` → call-form validator (`length(>=2)`, `pattern(/.../)`)
+    // Unrecognized attribute shapes fall through into the consume loop as raw
+    // tokens — the parse still succeeds; only the recognized attrs surface on
+    // the AST node.
     let fusedGtEq = false;
+    let pinnedFlag = false;
+    let serverFlag = false;
+    let defaultExprRaw = null;
+    let debouncedRaw = null;
+    let throttledRaw = null;
+    const validators = [];
     {
         let parenDepth = 0;
         let braceDepth = 0;
@@ -2986,6 +3086,69 @@ export function parseStructuralStateDecl(ctx) {
                 advance(cursor);   // consume the opener close `>`
                 break;
             }
+            // ─── Attribute-region recognition (only at top level) ────────────
+            // A bareword IDENT (or hard-keyword `server` / `default` — the
+            // tokenizer lexes them as KwServer / KwDefault even at attribute
+            // position — see lex output table) followed by `=` is a NAMED
+            // attribute. A bareword IDENT followed by `(` is a CALL-FORM
+            // attribute (validator with args). A bareword IDENT followed by
+            // anything else is a BAREWORD attribute (pinned / server / a
+            // bareword validator like `req`).
+            //
+            // The recognized attribute names live in two token-kind buckets:
+            //   Ident-text:   pinned, debounced, throttled, req, length, ...
+            //   Hard-Kw text: server (KwServer), default (KwDefault)
+            // We collapse both via `isAttrNameToken` + a name-extractor.
+            if (topLevel && isAttrNameToken(k)) {
+                const idTok = current(cursor);
+                const idName = attrNameOf(idTok);
+                const nextK = peekKind(cursor, 1);
+                if (nextK === TokenKind.Assign) {
+                    // `name=expr` form. The recognized names are `default`,
+                    // `debounced`, `throttled`. Others fall through to raw
+                    // consume of the value, captured nowhere — preserves the
+                    // P5-11 "consume exactly" guarantee without recording an
+                    // unknown-attribute diagnostic (live ast-builder is also
+                    // lenient at the parse level).
+                    advance(cursor);   // consume the attr name token
+                    advance(cursor);   // consume `=`
+                    const raw = collectAttrValueRaw(ctx);
+                    if (idName === "default") {
+                        defaultExprRaw = raw;
+                    } else if (idName === "debounced") {
+                        debouncedRaw = raw;
+                    } else if (idName === "throttled") {
+                        throttledRaw = raw;
+                    }
+                    // unrecognized — silently dropped (raw text already consumed)
+                    continue;
+                }
+                if (nextK === TokenKind.LParen) {
+                    // Call-form attribute — `length(>=2)`, `pattern(/.../)`,
+                    // `min(0)`, etc. Capture the predicate name + raw args
+                    // text. Full B9-style sub-grammar parse (relational
+                    // predicate node synthesis) is the live ast-builder's
+                    // concern, NOT M6.5.b.2 scope.
+                    advance(cursor);   // consume attr-name token
+                    advance(cursor);   // consume `(`
+                    const argsRaw = collectBalancedParenContents(ctx);
+                    validators.push({ name: idName, args: argsRaw === null ? [] : [argsRaw] });
+                    continue;
+                }
+                // Bareword attribute — `pinned`, `server`, or a bareword
+                // validator (`req`, `email`, `numeric`, etc.).
+                advance(cursor);
+                if (idName === "pinned") {
+                    pinnedFlag = true;
+                } else if (idName === "server") {
+                    serverFlag = true;
+                } else {
+                    // bareword validator — args:null per AST-CONTRACTS §1.1
+                    validators.push({ name: idName, args: null });
+                }
+                continue;
+            }
+            // ─── Non-IDENT tokens inside attr region — depth-track + skip ────
             if (k === TokenKind.LParen) parenDepth = parenDepth + 1;
             else if (k === TokenKind.RParen && parenDepth > 0) parenDepth = parenDepth - 1;
             else if (k === TokenKind.LBrace) braceDepth = braceDepth + 1;
@@ -3050,14 +3213,143 @@ export function parseStructuralStateDecl(ctx) {
 
     const endE = (init === undefined || init === null) ? open.span.end : nodeEnd(init);
     const span = makeSpan(open.span.start, endE, open.span.line, open.span.col);
+    // Per AST-CONTRACTS §1.1 + types/ast.ts:502 ReactiveDeclNode:
+    //   shape: "derived" iff isConst === true, else "plain". A `decl-with-spec`
+    //   Shape 2 (markup-RHS) is OUT OF SCOPE for M6.5.b.2 (it's a separate
+    //   class of divergence — markup-RHS detection requires native markup-tag
+    //   recognition at the RHS position).
+    // The native StateDecl carries the SAME field names + value types as the
+    // live ReactiveDeclNode so translate-stmt.js can do a structural copy.
     return {
         kind: "StateDecl",
         name,
         typeAnnotation,
         structuralForm: true,
+        isConst: isConstFlag,
+        shape: isConstFlag ? "derived" : "plain",
+        defaultExprRaw,
+        pinned: pinnedFlag,
+        server: serverFlag,
+        debouncedRaw,
+        throttledRaw,
+        validators,
         init,
         span,
     };
+}
+
+// collectAttrValueRaw — consume an attribute value's raw text up to the next
+// attribute boundary (top-level `>`, EOF, or a bareword IDENT/KEYWORD that
+// signals the next attribute). Depth-tracks `()` / `{}` / `[]` so an attribute
+// value containing balanced delimiters is consumed in full. Returns the joined
+// raw text (may be empty). The cursor is left at the boundary token.
+//
+// Conservatively follows the live `default=` collector pattern at
+// ast-builder.js:4338 — the heuristic "IDENT/KEYWORD at top-level when an
+// expression token is not expected" boundaries the value. Used by `default=`,
+// `debounced=`, `throttled=`, and any other future named structural-decl attr.
+function collectAttrValueRaw(ctx) {
+    const cursor = ctx.cursor;
+    let parenDepth = 0;
+    let braceDepth = 0;
+    let bracketDepth = 0;
+    const parts = [];
+    let expectingExpr = true;
+    while (atEnd(cursor) === false) {
+        const tok = current(cursor);
+        const k = tok.kind;
+        const topLevel = (parenDepth === 0 && braceDepth === 0 && bracketDepth === 0);
+        if (topLevel && k === TokenKind.GreaterThan) break;
+        if (topLevel && k === TokenKind.GreaterEqual) break;
+        if (topLevel && !expectingExpr && k === TokenKind.Ident) {
+            // Unit suffix exception — `ms`/`s`/`m`/`h` immediately after a
+            // NUMBER or `}` is part of a duration literal, not the next
+            // attribute boundary. Mirrors the live `default=` collector
+            // (ast-builder.js:4466).
+            const nm = tok.name === undefined ? tok.text : tok.name;
+            const isUnit = (nm === "ms" || nm === "s" || nm === "m" || nm === "h");
+            const prev = parts.length > 0 ? parts[parts.length - 1] : null;
+            const prevIsNumOrCloseBrace = (prev !== null && (/^[0-9]/.test(prev) || prev === "}"));
+            if (!(isUnit && prevIsNumOrCloseBrace)) break;
+        }
+        if (k === TokenKind.LParen) { parenDepth = parenDepth + 1; expectingExpr = true; }
+        else if (k === TokenKind.RParen && parenDepth > 0) { parenDepth = parenDepth - 1; expectingExpr = false; }
+        else if (k === TokenKind.LBrace) { braceDepth = braceDepth + 1; expectingExpr = true; }
+        else if (k === TokenKind.RBrace && braceDepth > 0) { braceDepth = braceDepth - 1; expectingExpr = false; }
+        else if (k === TokenKind.LBracket) { bracketDepth = bracketDepth + 1; expectingExpr = true; }
+        else if (k === TokenKind.RBracket && bracketDepth > 0) { bracketDepth = bracketDepth - 1; expectingExpr = false; }
+        else if (k === TokenKind.Number || k === TokenKind.String || k === TokenKind.Ident) {
+            expectingExpr = false;
+        } else {
+            // operators / punctuation other than the depth-trackers — keep
+            // expectingExpr in the prior state. Setting it back to true is
+            // safest (the next token is most likely an operand of whatever
+            // operator we just consumed).
+            expectingExpr = true;
+        }
+        const partText = tok.text === undefined || tok.text === null ? "" : tok.text;
+        parts.push(partText);
+        advance(cursor);
+    }
+    return parts.length === 0 ? "" : parts.join(" ").trim();
+}
+
+// isAttrNameToken — true iff the token kind can appear as an attribute name
+// inside a structural-decl opener's attribute region. Most are Ident; the
+// hard-keyword tokens `KwDefault` (`default`), `KwServer` (`server`), and
+// (defensively) the contextual `KwPure` / `KwFn` / etc. appear here when used
+// as bareword attributes. The tokenizer lexes them as Kw* regardless of
+// position, so the attribute-region scanner must accept the full keyword
+// surface where it makes sense.
+function isAttrNameToken(kind) {
+    return (
+        kind === TokenKind.Ident ||
+        kind === TokenKind.KwDefault ||
+        kind === TokenKind.KwServer ||
+        kind === TokenKind.KwPure
+    );
+}
+
+// attrNameOf — extract the bareword name from an attribute-name token (Ident
+// or any hard-keyword listed in `isAttrNameToken`). For Ident the canonical
+// name field is `tok.name`; for Kw* tokens the bareword text lives on `tok.text`.
+function attrNameOf(tok) {
+    if (tok === undefined || tok === null) return "";
+    if (tok.kind === TokenKind.Ident) {
+        return tok.name === undefined || tok.name === null ? (tok.text === undefined ? "" : tok.text) : tok.name;
+    }
+    return tok.text === undefined || tok.text === null ? "" : tok.text;
+}
+
+// collectBalancedParenContents — consume tokens inside a `(` ... `)` pair
+// already past the opening `(`. Returns the joined raw text (may be empty if
+// the paren is closed immediately). Consumes the closing `)`. Depth-tracks
+// nested `()` / `{}` / `[]`.
+function collectBalancedParenContents(ctx) {
+    const cursor = ctx.cursor;
+    let parenDepth = 1;   // we're already INSIDE the outer `(`
+    let braceDepth = 0;
+    let bracketDepth = 0;
+    const parts = [];
+    while (atEnd(cursor) === false) {
+        const tok = current(cursor);
+        const k = tok.kind;
+        if (k === TokenKind.RParen) {
+            parenDepth = parenDepth - 1;
+            if (parenDepth === 0) {
+                advance(cursor);   // consume the closing `)`
+                break;
+            }
+        } else if (k === TokenKind.LParen) parenDepth = parenDepth + 1;
+        else if (k === TokenKind.LBrace) braceDepth = braceDepth + 1;
+        else if (k === TokenKind.RBrace && braceDepth > 0) braceDepth = braceDepth - 1;
+        else if (k === TokenKind.LBracket) bracketDepth = bracketDepth + 1;
+        else if (k === TokenKind.RBracket && bracketDepth > 0) bracketDepth = bracketDepth - 1;
+        const partText = tok.text === undefined || tok.text === null ? "" : tok.text;
+        parts.push(partText);
+        advance(cursor);
+    }
+    return parts.length === 0 ? "" : parts.join(" ").trim();
 }
 
 // =============================================================================
