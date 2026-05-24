@@ -1,0 +1,5 @@
+import { Foo } from "./bar.scrml"
+
+<program>
+    <p>hello</p>
+</program>

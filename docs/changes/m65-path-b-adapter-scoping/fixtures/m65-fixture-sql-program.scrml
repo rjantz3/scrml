@@ -1,0 +1,3 @@
+<program>
+    ?{ SELECT * FROM users }
+</program>

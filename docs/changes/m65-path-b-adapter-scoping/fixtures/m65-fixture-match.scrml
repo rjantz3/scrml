@@ -1,0 +1,11 @@
+<program>
+    type Tag:enum = { A, B }
+    <t> = .A
+
+    function step() {
+        match @t {
+            .A => @t = .B
+            .B => @t = .A
+        }
+    }
+</program>

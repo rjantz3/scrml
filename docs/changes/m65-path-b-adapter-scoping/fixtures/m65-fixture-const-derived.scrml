@@ -1,0 +1,4 @@
+<program>
+    <a> = 1
+    const <doubled> = @a * 2
+</program>

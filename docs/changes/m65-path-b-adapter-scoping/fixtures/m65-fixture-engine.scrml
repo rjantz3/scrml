@@ -1,0 +1,10 @@
+<program>
+    type MarioState:enum = { Small, Big, Fire, Cape }
+
+    <engine for=MarioState initial=.Small>
+        <Small rule=(.Big | .Fire | .Cape)></>
+        <Big   rule=(.Fire | .Cape | .Small)></>
+        <Fire  rule=.Small></>
+        <Cape  rule=.Small></>
+    </>
+</program>
