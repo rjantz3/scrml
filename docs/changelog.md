@@ -2,7 +2,31 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-24 **S126 CLOSE**). Full `bun run test` **21,217 pass / 0 fail / 174 skip / 1 todo across 771 files**; pre-commit gate (unit + integration + conformance) clean on every commit. Native-parser canary strict-pass **999/1000** (unchanged — no native-parser changes S126). S125 CLOSE baseline (pre-S126): 21,114 pass.
+Current baseline (2026-05-24 **S127 CLOSE**). Full `bun run test` **21,337 pass / 0 fail / 174 skip / 1 todo across 780 files**; pre-commit gate (unit + integration + conformance) clean on every commit. Native-parser canary strict-pass **1000/1001 (EXACT 964)** — held through all 9 S127 native-parser/shape units. S126 CLOSE baseline (pre-S127): 21,217 pass.
+
+### 2026-05-24 (S127 CLOSE — M6.5 path-b COMPLETE + M6.7 flip-harness diagnostic + M6.7 top-3+C2 pre-flip levers)
+
+A momentum session ("keep momentum until I stop you / do everything right"). **9 native-parser/shape units landed, 0 regressions, 0 path-discipline leaks across 8 worktree dispatches.** strict-pass EXACT held 964 every unit.
+
+**M6.5 path-b FIX/ADAPT COMPLETE:**
+
+- `0e0b4498` **M6.5.b.2.1** — newline-as-statement-separator boundary for consecutive bare state-decls (native `parseBinary` ctx-flag `atStateDeclStmtPos` + inline opener-shape lookahead; mirrors live Step 11.0b). +17 tests.
+- `319dbf26` **M6.5.b.3** — Rule-4 win: Phase-0 found the Class-C hoist-gap ALREADY CLOSED at HEAD (a prior `liftBareBlocks`+synthesis fixed it; the S125 SCOPING was stale). Landed a 14-test regression-lock, no source change.
+- `db2d4c28` **M6.5.b.4** — SECURITY (M6.7-STOP root cause): promote bare `?{}` statement → `kind:"sql"` (routes through `isServerOnlyNode`) + recursive `exprTreeContainsSqlRef` hardening for the chained form; native==live, server SQL no longer leaks to the client bundle. +10 tests.
+- `65621fab` **M6.5.b.5+b.6** — native→live FileAST shape (closerForm case, sourceText via non-mutating clone, _synthetic, _p3a) + span.file stamp in `parse-file.js` (native-path-only); within-node −48,022. +12 tests.
+
+**M6.7 flip-harness DIAGNOSTIC** (throwaway-worktree temp-flip default→native, full-suite run, discarded — main untouched): **845→567 deterministic failures (−33%), ZERO flaky.** Classified A=128 engine-bodyChildren (M6.6-expected) / B=2 / C=255 codegen-shape / D=142 parse-error / E=42 cascade. conformance/self-host/lsp = 0 (don't route the default parser).
+
+**M6.7 top-3 + C2-dominant pre-flip levers CLOSED:**
+
+- `cce66699` **M6.7-D1** — native `parsePrimary` accepts null/undefined literals (Phase-0 refuted the "arrows" bucket — the real cause); matches live `esTreeToExprNode`, `raw` provenance preserves E-SYNTAX-042; corpus `no statement begins here` 820→474. +23 tests.
+- `15f4a2f2` **M6.7-D2** — `server`/`pure` modifier on `function` (not just `fn`, the PRIMER §6 recipe form); `fnKind` set dynamically (§33.6 — `fn` and `function` stay distinct, not collapsed); all 82 server/pure-function corpus files clean. +28 tests.
+- `868a1cad` **M6.7-C1** — component-def `raw` uses the bodyText-relative span (was subtracting `blockSpan.start` → truncated `raw` + LHS leak → E-COMPONENT-020); same-file E-COMPONENT-020 19→0. +10 tests. Cross-file `export const` split to a follow-on.
+- `6f452eeb` **M6.7-C2** — native parses `server @var = expr` (§52.4 cell authority); the mount-hydrate "codegen divergence" was actually an upstream parse failure (codegen untouched). +6 tests; 4 other C2 sub-causes split to named follow-ons.
+
+**NOT flip-ready** — pre-flip remainder queued (C2-sql-loop-hoist, C2-tablefor-clientjs, C2-residual-audit, C2-reactivity-grammar, C1-followon cross-file-export-component, D3 `:>`-transition-arm, D4 object-literal-in-call-arg, C3-E cascade) → a full flip-harness re-measure → the default-flip (`api.js:604 parser=null`) is a user decision. M6.6 Class-A engine-bodyChildren (128) is separate M6.6 work.
+
+**Insight banked:** the within-node canary is *non-monotonic* for parse-completeness fixes (it rises when native parses more) — strict-pass EXACT is the per-unit correctness gate; the flip-harness re-measure is the definitive flip-readiness gate, not the within-node total. "Verify, don't trust the diagnostic bucket label" validated 4× (b.3/D1/C1/C2 all had imprecise/wrong labels caught by the mandatory Phase-0). Tag: NONE (pkg.json 0.6.0).
 
 ### 2026-05-24 (S126 CLOSE — adopter/MCP wave: 5 fixes + MCP-V0.C closed + Bug W CRITICAL + dashboard async-gap diagnosed; M6 arc teed up)
 
