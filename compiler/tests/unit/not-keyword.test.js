@@ -18,7 +18,16 @@ import { buildAST } from "../../src/ast-builder.js";
 import { rewriteNotKeyword, rewritePresenceGuard, rewriteExpr } from "../../src/codegen/rewrite.ts";
 import { resetVarCounter } from "../../src/codegen/var-counter.ts";
 import { emitLogicNode } from "../../src/codegen/emit-logic.ts";
+import { parseExprToNode, emitStringFromTree } from "../../src/expression-parser.ts";
 import { tNot, tPrimitive, tUnion, tUnknown, tAsIs, checkExhaustiveness, checkUnionExhaustiveness, isOptionalType, checkNotAssignment, checkNotReturn, BUILTIN_TYPES } from "../../src/type-system.ts";
+
+// GITI-017 residual (S125): round-trip an expression through preprocessForAcorn
+// (the SECOND `not`-lowering site, in expression-parser.ts). parseExprToNode
+// runs preprocess + acorn parse; emitStringFromTree renders the resulting node.
+function roundTripExpr(src) {
+  const node = parseExprToNode(src, "not-keyword.test.scrml", 0);
+  return emitStringFromTree(node);
+}
 
 function parse(source) {
   const bsOut = splitBlocks("test.scrml", source);
@@ -907,5 +916,84 @@ describe("§B GITI-017: regex-literal + comment awareness", () => {
   test("§B20 regression: bare `not` as value still rewrites to null", () => {
     const result = rewriteNotKeyword("let x = not");
     expect(result).toBe("let x = null");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §C: GITI-017 RESIDUAL — preprocessForAcorn regex fence (S125, 2026-05-24)
+// ---------------------------------------------------------------------------
+//
+// f181d60a (S124) fenced the CODEGEN `not`-lowering pass (rewriteNotKeyword,
+// covered by §B above). But scrml has a SECOND, separately-located `not `→`!`
+// boolean-negation lowering inside `preprocessForAcorn` (expression-parser.ts),
+// which had NO literal/comment fence. It corrupted regex-literal interiors at
+// PARSE time — BEFORE the codegen pass ran — so §B's coverage never caught it:
+//
+//   `/not a jj repo/i`        → `/!a jj repo/i`     (boolean-negation — was broken)
+//   `/bookmark.*not found/i`  → `/bookmark.*!found/i`  (boolean-negation — was broken)
+//
+// The PA-verified end-to-end symptom: `const re = /not a jj repo/i` emitted
+// `const re = /!a jj repo/i;` (silent corruption — valid JS, valid regex, wrong
+// pattern). S125 routes both `not` substitutions in preprocessForAcorn through
+// the SAME shared fence (rewriteCodeSegments). These tests exercise that path
+// via parseExprToNode → emitStringFromTree (round-trip through preprocessForAcorn).
+describe("§C GITI-017 residual: preprocessForAcorn regex fence", () => {
+  // Full repro-13 matrix — every regex literal must round-trip VERBATIM.
+
+  test("§C1 /not a jj repo/i preserved (boolean-negation — the residual bug)", () => {
+    expect(roundTripExpr("/not a jj repo/i")).toBe("/not a jj repo/i");
+  });
+
+  test("§C2 /bookmark.*not found/i preserved (boolean-negation — the residual bug)", () => {
+    expect(roundTripExpr("/bookmark.*not found/i")).toBe("/bookmark.*not found/i");
+  });
+
+  test("§C3 /(not) a jj repo/i preserved (absence-sentinel — must NOT regress)", () => {
+    expect(roundTripExpr("/(not) a jj repo/i")).toBe("/(not) a jj repo/i");
+  });
+
+  test("§C4 /nothing changed/i preserved (control — `not` inside `nothing`)", () => {
+    expect(roundTripExpr("/nothing changed/i")).toBe("/nothing changed/i");
+  });
+
+  test("§C5 /n[o]t a jj repo/i preserved (char-class workaround — must stay verbatim)", () => {
+    expect(roundTripExpr("/n[o]t a jj repo/i")).toBe("/n[o]t a jj repo/i");
+  });
+
+  // Regex appearing mid-expression (after `=`, after `(`) — fence must still fire.
+
+  test("§C6 regex after `=` in a larger expression preserved", () => {
+    // The `/` after `=` opens a regex; its `not ` body must survive.
+    expect(roundTripExpr("re = /not a jj repo/i")).toContain("/not a jj repo/i");
+  });
+
+  test("§C7 regex as a call argument preserved", () => {
+    expect(roundTripExpr("test(/not bar/i)")).toContain("/not bar/i");
+  });
+
+  // CODE-context `not` lowering MUST still work (the fix only fences literals).
+
+  test("§C8 code-context `not @x` still lowers to `!@x`", () => {
+    expect(roundTripExpr("not @x")).toBe("!@x");
+  });
+
+  test("§C9 code-context `not (a)` still lowers to negation (`!a`)", () => {
+    // `not (` prefix-negation form. The AST emitter drops the redundant parens
+    // around a single identifier, so `not (a)` normalizes to `!a` (same as the
+    // hand-written `!(a)` — verified equivalent below).
+    const out = roundTripExpr("not (a)");
+    expect(out).toBe("!a");
+    expect(roundTripExpr("!(a)")).toBe(out);
+  });
+
+  test("§C10 regex preserved AND surrounding code-context `not` still lowered", () => {
+    // The regex body is fenced; the trailing `not flag` outside it is lowered.
+    const out = roundTripExpr("test(/not bar/i) && not flag");
+    expect(out).toContain("/not bar/i");
+    expect(out).toContain("!flag");
+  });
+
+  test("§C11 `not` inside a string literal is preserved (string fence)", () => {
+    expect(roundTripExpr('"a not b"')).toBe('"a not b"');
   });
 });

@@ -16,6 +16,10 @@
 import * as acorn from "acorn";
 // @ts-ignore — astring ships its own types
 import { generate as astringGenerate } from "astring";
+// GITI-017 (S125): shared regex/comment/string fence. preprocessForAcorn's
+// `not `→`!` lowering must skip regex-literal / comment / string interiors or
+// it corrupts `/not a jj repo/i` → `/!a jj repo/i` (silent-corruption class).
+import { rewriteCodeSegments } from "./codegen/code-segments.ts";
 
 import type {
   ExprNode, ExprSpan,
@@ -1110,33 +1114,50 @@ function preprocessForAcorn(raw: string, opts?: { tildeActive?: boolean }): stri
     '__scrml_bare_variant_$1__'
   );
 
-  // Replace `not (expr)` prefix negation → `!(expr)`
-  s = s.replace(/(?<![A-Za-z0-9_$@])not\s*\(/g, "!(");
+  // §45.7 + §42 `not`-keyword lowering — boolean-negation forms.
+  //
+  // GITI-017 residual (S125, 2026-05-24): these two substitutions previously
+  // ran over the WHOLE string `s` with no literal/comment fence, corrupting the
+  // INTERIOR of regex literals: `/not a jj repo/i` → `/!a jj repo/i`,
+  // `/bookmark.*not found/i` → `/bookmark.*!found/i` (silent-corruption class —
+  // valid JS, valid regex, wrong pattern). The codegen sibling pass
+  // (rewriteNotKeyword in codegen/rewrite.ts) was fenced in S124 (f181d60a);
+  // this is the second, separately-located `not`-lowering site. Both now share
+  // the same regex/comment/string fence via rewriteCodeSegments — `not`
+  // substitutions apply ONLY to code regions; regex/comment/string interiors
+  // pass through verbatim. The char-class case `/n[o]t .../` and the
+  // absence-sentinel `/(not) .../` (no trailing whitespace → operator-form
+  // regex never matched) are likewise preserved.
+  s = rewriteCodeSegments(s, (code) => {
+    // Replace `not (expr)` prefix negation → `!(expr)`
+    code = code.replace(/(?<![A-Za-z0-9_$@])not\s*\(/g, "!(");
 
-  // §45.7 operator-form: `not <operand>` — unary boolean negation → `!<operand>`.
-  // Acorn does not know `not` is a unary operator, so without this rewrite it
-  // would parse `not @x` as Identifier `not` followed by trailing content `@x`,
-  // dropping the operand. By rewriting to `!@x` here, acorn produces a proper
-  // UnaryExpression `{ op: "!", argument: @x }` which esTreeToExprNode then
-  // converts to UnaryExpr correctly.
-  //
-  // The operand is matched conservatively: an optional `@` sigil, identifier
-  // chain (with dotted member access), AND optional bracket-indexing tail.
-  // Function-call parentheses are NOT consumed — JS unary `!` has lower
-  // precedence than function-call, so `!f(x)` parses as `!(f(x))`, which is
-  // the desired semantics. The same applies to method calls like `@x.method()`.
-  //
-  // Lookbehind `(?<![A-Za-z0-9_$@.])` ensures we don't match `not` when it is
-  // a member name (`obj.not foo` would have `.` before — excluded).
-  //
-  // The standalone-value form (`@x = not`, `return not`, `f(not)`, `[a, not, b]`)
-  // is NOT matched here because no operand-ident follows. It falls through to
-  // esTreeToExprNode which converts Identifier `not` → LitExpr { litType: "not" }
-  // (the §42 non-presence value form, which then emits as `null`).
-  s = s.replace(
-    /(?<![A-Za-z0-9_$@.])not\s+(@?[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*(?:\[[^\]]*\])*)/g,
-    "!$1"
-  );
+    // §45.7 operator-form: `not <operand>` — unary boolean negation → `!<operand>`.
+    // Acorn does not know `not` is a unary operator, so without this rewrite it
+    // would parse `not @x` as Identifier `not` followed by trailing content `@x`,
+    // dropping the operand. By rewriting to `!@x` here, acorn produces a proper
+    // UnaryExpression `{ op: "!", argument: @x }` which esTreeToExprNode then
+    // converts to UnaryExpr correctly.
+    //
+    // The operand is matched conservatively: an optional `@` sigil, identifier
+    // chain (with dotted member access), AND optional bracket-indexing tail.
+    // Function-call parentheses are NOT consumed — JS unary `!` has lower
+    // precedence than function-call, so `!f(x)` parses as `!(f(x))`, which is
+    // the desired semantics. The same applies to method calls like `@x.method()`.
+    //
+    // Lookbehind `(?<![A-Za-z0-9_$@.])` ensures we don't match `not` when it is
+    // a member name (`obj.not foo` would have `.` before — excluded).
+    //
+    // The standalone-value form (`@x = not`, `return not`, `f(not)`, `[a, not, b]`)
+    // is NOT matched here because no operand-ident follows. It falls through to
+    // esTreeToExprNode which converts Identifier `not` → LitExpr { litType: "not" }
+    // (the §42 non-presence value form, which then emits as `null`).
+    code = code.replace(
+      /(?<![A-Za-z0-9_$@.])not\s+(@?[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*(?:\[[^\]]*\])*)/g,
+      "!$1"
+    );
+    return code;
+  });
 
   // §14.9/§16.6: render name() → __scrml_render_name__()
   s = s.replace(
