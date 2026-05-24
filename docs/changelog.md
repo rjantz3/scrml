@@ -2,7 +2,23 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-23 **S124 CLOSE**). Full `bun run test` **21,045 pass / 0 fail / 170 skip / 1 todo across 759 files**; pre-commit gate (unit + integration + conformance) clean on every commit. Native-parser canary strict-pass **999/1000** (H-bs-tail signature from S121/S122 wave debugging finally closed via tangential bs.scrml null-migration). S123 CLOSE baseline (pre-S124): 19,933 pass.
+Current baseline (2026-05-24 **S125 CLOSE**). Full `bun run test` **21,114 pass / 0 fail / 170 skip / 1 todo across 761 files**; pre-commit gate (unit + integration + conformance) clean on every commit. Native-parser canary strict-pass **999/1000** (unchanged from S124). S124 CLOSE baseline (pre-S125): 21,045 pass.
+
+### 2026-05-24 (S125 CLOSE — 4-agent parallel wave: M6.5.b.1 closed + M6.5.b.2 partial + MCP-V0.B closed + MCP-V0.A partial)
+
+A compressed 4-agent parallel-wave session. **6 commits to scrmlTS.** **+69 tests, 0 regressions** (21,045 → 21,114 across 759 → 761 files). **Three agent stalls** handled per S89 §13.2 partial-recovery — all coherent work landed; **zero data loss**. **Two PARTIAL landings filed as named follow-ons** (MCP-V0.A-tests, M6.5.b.2.1). **Zero S99-class path-discipline incidents** across 4 worktree dispatches (counter remains 11). Allowlist rebase commit `8f4378ca` closed a false-green class the pre-commit gate doesn't catch (top-level `parser-conformance-*.test.js` files are excluded from the pre-commit subset; parser-shape-changing landings must re-run the within-node canary before wrap).
+
+- **M6.5.b.1 (`afbc566c`) — FIX-NATIVE match-arm newline separator — CLOSED.** parse-expr.js `parseMatchExpr` accepts newline as arm separator (in addition to `,`/`;`). 5-step incremental: inMatchArmBody ctx flag → peek/boundary helpers → separator dispatch → Dot+UpperIdent variant form → 16 unit tests + allowlist shrink (29 entries shrunk; 1 grew via deeper-leaf comparison). Closes one of two FIX-NATIVE bugs that collapse Mario's 781 within-node divergences. **+16 tests.**
+
+- **M6.5.b.2 (`cd82eeb9`) — FIX-NATIVE structural-decl `<ident>` LHS — PARTIAL (Option B).** Six of eight productions supported with 28 passing unit tests: `<x>=expr`, `<x>:T=expr`, `const <x>=expr`, `const <x>:T=expr`, `<x pinned>=expr`, `<x server>=expr`, plus raw-captured `<x default=>`, `<x debounced=>`, `<x throttled=>`, `<x req length(>=N)>=expr`. Three-layer fix: parse-stmt dispatcher + parseStructuralStateDecl extension + translate-stmt StateDecl arm + ast-stmt StmtKind.StateDecl. **Bug surfaced post-pre-commit-gate:** native `parseAssignmentLevelExpr` is JS-grammar-only; doesn't implement live ast-builder Phase A1a Step 11.0b boundary detection. Mario 3-line bare state-decls emit ONE greedy state-decl instead of N. Filed as **M6.5.b.2.1** follow-on (~2-4h). **+28 tests.**
+
+- **MCP-V0.B (`e40c9cc3`) — Runtime helpers — CLOSED.** `compiler/runtime/stdlib/mcp.js` (NEW ~430 LOC): install + uninstall + loadSidecars (with fs.watch opt-in) + stopWatchers + getCurrentVariant + getFormStatus + getChannelState. Sidecar loader resolves outputDir from explicit param or `import.meta.url` fallback. Cross-file contract for C/D: boot path MUST call `install({reactive_get, derived_get})` before any tool handler. **+25 tests.**
+
+- **MCP-V0.A (`fa25ac31`) — Descriptor sidecars — PARTIAL.** Extractor + api.js wiring complete (868 LOC `mcp-descriptors.ts` + 37 LOC api.js). 4 sidecars: engines.json (with cellKey + kind: primary|derived), forms.json (with compoundKeys), channels.json, serverfns.json (dispatchable:false). Emitted next to chunks.json, same `--emit-per-route` gating. **NOT landed:** unit + integration tests + degenerate SPA case. Filed as **MCP-V0.A-tests** follow-on. Blocks MCP-V0.C until landed.
+
+- **Maps refresh (`5b1afb9d`) — S125 OPEN.** Full cold-start; watermark advanced `d570341d → 73dd816c`. 10 maps written, 9 skipped. M6.6.b.2 walker + M6.6.b.3 migration + M6.5.b.0 within-node-classifier + M6.7 STOP ladder invariant captured.
+
+- **Allowlist rebase (`8f4378ca`) — S125 wrap.** Within-node canary failed 231 tests on full `bun run test` (top-level `parser-conformance-within-node.test.js` excluded from pre-commit gate). Pulled b.2's regen via deleted-branch reflog `f1ecd4b4`; bumped 20 fixtures' 25 per-class entries for b.1+b.2 combined divergence shifts (mostly SPAN-COORD on gauntlet-s19 match fixtures; Mario got 4 per-class bumps).
 
 ### 2026-05-23 (S124 CLOSE — M6 cutover heaviest gate closed + GITI-017 + 6nz-P + M6.5 path-b SCOPING + canary extension + Build-Story roughing + MCP V0 SCOPING)
 
