@@ -2273,15 +2273,26 @@ function parseNamedImportSpecifiers(ctx, out) {
     advance(cursor);   // consume {
 
     while (atEnd(cursor) === false && currentKind(cursor) !== TokenKind.RBrace) {
-        // The imported name — an identifier (or, e.g., a string-name form;
-        // M3.3 takes the identifier form, the corpus shape).
-        if (currentKind(cursor) !== TokenKind.Ident) {
+        // The imported name — an identifier OR a string-literal specifier.
+        // The quoted form (`import { "dispatch-board" as alias }`, SPEC
+        // §38.12.5 / §12821) names a module export that is NOT a valid JS
+        // identifier — kebab-case channel `name=` values. The STORED imported
+        // name is the UNQUOTED (cooked) form (SPEC §17561-§17562), matching the
+        // live oracle (ast-builder import path: names[]/specifiers[].imported
+        // carry the unquoted text). `local` defaults to the same cooked value
+        // when no `as` alias is given (live parity); the corpus always aliases.
+        const startKind = currentKind(cursor);
+        if (startKind !== TokenKind.Ident && startKind !== TokenKind.StringLit) {
             recordError(ctx, "E-STMT-IMPORT-NAME",
                 "expected an imported name", spanHere(ctx));
             break;
         }
         const importedTok = advance(cursor);
-        const imported = importedTok.name;
+        const imported = (startKind === TokenKind.StringLit)
+            ? ((importedTok.cooked !== undefined && importedTok.cooked !== null)
+                ? importedTok.cooked
+                : "")
+            : importedTok.name;
         let local = imported;
         if (currentKind(cursor) === TokenKind.KwAs) {
             advance(cursor);   // consume `as`

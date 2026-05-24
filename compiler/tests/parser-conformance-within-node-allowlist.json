@@ -479,12 +479,12 @@
     "SPAN-COORD": 237
   },
   "examples/23-trucking-dispatch/pages/dispatch/load-detail.scrml": {
-    "KIND-NAME": 32,
-    "FIELD-SHAPE": 188,
-    "MISSING-FIELD": 326,
-    "EXTRA-FIELD": 105,
-    "COUNT-LENGTH": 14,
-    "SPAN-COORD": 836
+    "KIND-NAME": 30,
+    "FIELD-SHAPE": 197,
+    "MISSING-FIELD": 318,
+    "EXTRA-FIELD": 97,
+    "COUNT-LENGTH": 7,
+    "SPAN-COORD": 904
   },
   "examples/23-trucking-dispatch/pages/dispatch/load-new.scrml": {
     "KIND-NAME": 29,
