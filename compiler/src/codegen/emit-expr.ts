@@ -568,6 +568,123 @@ function isTrivialIsLhs(left: ExprNode): boolean {
 //     the `__scrml_` prefix collision-shield.
 const IS_OP_IIFE_LOCAL = "__scrml_is_v";
 
+// ---------------------------------------------------------------------------
+// Bug W — precedence-aware paren insertion for the flat binary printer.
+//
+// Acorn parses `(2 + 3) * 4` into the structurally-correct tree
+// `Binary(*, Binary(+, 2, 3), 4)` but does NOT retain ParenthesizedExpression
+// nodes (no `preserveParens`). The `default` branch of `emitBinary` historically
+// concatenated `left op right` with no precedence guard, so the correct tree
+// printed as the precedence-WRONG flat JS `2 + 3 * 4` (14, not 20) — a silent
+// correctness bug with no diagnostic.
+//
+// The fix re-inserts parens around a child operand when the child binds looser
+// than (or, for associativity reasons, equal-and-wrong-side relative to) the
+// parent operator — exactly the parens Acorn discarded.
+//
+// JS multiplicative/additive/etc. precedence tiers (higher binds tighter),
+// mirroring the MDN operator-precedence table. Only the ops that reach the
+// `default` (flat) branch of emitBinary are consulted as PARENT ops; but the
+// table covers every BinaryExpr op so child lookups never miss.
+// ---------------------------------------------------------------------------
+const BINARY_PRECEDENCE: Record<BinaryExpr["op"], number> = {
+  "**": 14,
+  "*": 13, "/": 13, "%": 13,
+  "+": 12, "-": 12,
+  "<<": 11, ">>": 11, ">>>": 11,
+  "<": 10, "<=": 10, ">": 10, ">=": 10, "in": 10, "instanceof": 10,
+  // §45 equality lowers to a self-bracketed form / helper call, so it never
+  // reaches the flat branch — but JS `==`/`!=`/`===`/`!==` sit at tier 9.
+  "==": 9, "!=": 9,
+  "&": 8,
+  "^": 7,
+  "|": 6,
+  "&&": 5,
+  "||": 4, "??": 4,
+  // §42/§43 presence + enum-membership ops emit their own outer parens / IIFE,
+  // so they are self-bracketed as children and never need a precedence wrap.
+  // Assign them the lowest tier defensively (they are never used as a PARENT op
+  // in the flat branch).
+  "is": 3, "is-not": 3, "is-some": 3, "is-not-not": 3,
+};
+
+// `**` is the only right-associative binary operator in JS.
+const RIGHT_ASSOCIATIVE: ReadonlySet<BinaryExpr["op"]> = new Set(["**"]);
+
+/**
+ * A binary CHILD operand emits its own outer brackets when its operator is one
+ * of the special-cased forms in emitBinary (equality → `(a === b)` /
+ * `_scrml_structural_eq(...)`; `is`/`is-*` → `(...)` / IIFE call). Those are
+ * already self-contained primaries on the emitted side, so wrapping them again
+ * would produce redundant `((...))`. Only the `default`/flat-emit ops lack
+ * their own brackets and may therefore need a precedence wrap.
+ */
+function binaryOpEmitsFlat(op: BinaryExpr["op"]): boolean {
+  switch (op) {
+    case "==": case "!=":
+    case "is": case "is-not": case "is-some": case "is-not-not":
+      return false;
+    default:
+      return true;
+  }
+}
+
+/**
+ * Decide whether a binary operand (`child`) needs wrapping in parens given the
+ * parent flat operator (`parentOp`) and whether the child is the RIGHT operand.
+ *
+ * Rules:
+ *   - Only binary children whose own operator emits flat can mis-associate; all
+ *     other children (literals, idents, calls, self-bracketed equality/is forms,
+ *     etc.) already emit as self-contained primaries.
+ *   - Wrap when the child binds strictly looser than the parent: prec(child) < prec(parent).
+ *   - At equal precedence, left-associative parents keep their natural grouping
+ *     on the LEFT but must re-paren a same-precedence RIGHT child (e.g.
+ *     `a - (b - c)` ≠ `a - b - c`). Right-associative parents (`**`) mirror it:
+ *     re-paren a same-precedence LEFT child (`(2 ** 3) ** 2` ≠ `2 ** 3 ** 2`).
+ *   - ES2020: `??` may not be combined with a top-level `||`/`&&` operand, and
+ *     vice-versa, without explicit parens. Always wrap that mix regardless of
+ *     the numeric comparison.
+ */
+function binaryOperandNeedsParens(
+  child: ExprNode,
+  parentOp: BinaryExpr["op"],
+  isRightChild: boolean,
+): boolean {
+  if (child.kind !== "binary") return false;
+  const childOp = (child as BinaryExpr).op;
+
+  // Self-bracketed child forms (equality / is-*) never need a precedence wrap.
+  if (!binaryOpEmitsFlat(childOp)) return false;
+
+  // ES2020 nullish-coalescing mixing guard (same class as GITI-019, different
+  // site). `a ?? b || c`, `a || b ?? c`, `a ?? b && c`, `a && b ?? c` are all
+  // SyntaxErrors in JS without parens — force the wrap.
+  const parentIsCoalesce = parentOp === "??";
+  const childIsLogicalOr = childOp === "||" || childOp === "&&";
+  const parentIsLogicalOr = parentOp === "||" || parentOp === "&&";
+  const childIsCoalesce = childOp === "??";
+  if ((parentIsCoalesce && childIsLogicalOr) || (parentIsLogicalOr && childIsCoalesce)) {
+    return true;
+  }
+
+  const childPrec = BINARY_PRECEDENCE[childOp];
+  const parentPrec = BINARY_PRECEDENCE[parentOp];
+
+  if (childPrec < parentPrec) return true;
+  if (childPrec > parentPrec) return false;
+
+  // Equal precedence — associativity decides.
+  if (RIGHT_ASSOCIATIVE.has(parentOp)) {
+    // Right-associative: natural grouping is on the right, so a same-precedence
+    // LEFT child needs explicit parens.
+    return !isRightChild;
+  }
+  // Left-associative: natural grouping is on the left, so a same-precedence
+  // RIGHT child needs explicit parens.
+  return isRightChild;
+}
+
 function emitBinary(node: BinaryExpr, ctx: EmitExprContext): string {
   const left = emitExpr(node.left, ctx);
   const right = emitExpr(node.right, ctx);
@@ -681,8 +798,16 @@ function emitBinary(node: BinaryExpr, ctx: EmitExprContext): string {
       return `(function(__v){return (typeof __v === "object" && __v !== null && typeof __v.variant === "string" ? __v.variant : __v) === ${rhs};})(${left})`;
     }
 
-    default:
-      return `${left} ${node.op} ${right}`;
+    default: {
+      // Bug W — precedence-aware paren insertion. Acorn discarded the source
+      // grouping parens; re-insert them around any child operand that would
+      // otherwise mis-associate under JS operator precedence / associativity.
+      // (`==`/`!=`/`is*` never reach here — they return self-bracketed forms
+      // above — so this branch only handles the flat-emit operators.)
+      const lhs = binaryOperandNeedsParens(node.left, node.op, false) ? `(${left})` : left;
+      const rhs = binaryOperandNeedsParens(node.right, node.op, true) ? `(${right})` : right;
+      return `${lhs} ${node.op} ${rhs}`;
+    }
   }
 }
 
