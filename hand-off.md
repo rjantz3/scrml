@@ -1,88 +1,76 @@
-# scrmlTS — Session 128 (OPEN)
+# scrmlTS — Session 128 (CLOSE)
 
 **Date:** 2026-05-24
 **Previous:** `handOffs/hand-off-130.md` (S127 CLOSE)
 **Machine:** same as S127 (no switch).
-**HEAD at S128 OPEN:** `003ee3a8` (S127 wrap-docs commit).
-**pkg.json:** 0.6.0 (no tag).
+**HEAD at S128 OPEN:** `003ee3a8` · **HEAD at S128 CLOSE:** `d6b07839` (D7) + the wrap-docs commit on top.
+**pkg.json:** 0.6.0 (no tag this session).
+**Wrap:** full 8-step. **PUSH: authorized — scrmlTS (4 unit commits + wrap-docs) + scrml-support (user-voice S128) pushed at close.**
 
 ---
 
-## SESSION-OPEN STATE (verified at S128 OPEN)
+## S128 CLOSE SUMMARY — read first
 
-- **scrmlTS:** clean tree · `0/0` with `origin/main` (S127 C2 + wrap-docs already pushed) · HEAD `003ee3a8`.
-- **scrml-support:** `0/0` with origin (S127 user-voice push landed). Untracked: pre-existing 2026-05-09 voice-article drafts + `tools/` dir — NOT this session's concern.
-- **Hooks:** configuration B (local-rich `.git/hooks` — pre-commit + post-commit + pre-push installed). Leave as-is.
-- **Incoming messages:** none in `handOffs/incoming/`.
-- **Worktrees:** main only (S127 cleaned 8).
-- **S99 path-discipline counter:** 15 (zero new across S127's 8 dispatches).
+Continued the S127 "keep momentum until I stop you / do everything right" mode. **M6.7 pre-flip wave: 4 units processed** (1 STOP-empty + 3 real fixes), **0 regressions, 0 codegen touched.** Full `bun run test` **21,393 pass / 0 fail / 174 skip / 1 todo / 783 files** (+56 = the 3 new native-parser tests). strict-pass **EXACT held 964** every unit; within-node **1005/0**.
 
----
+**Landed (all S67 file-delta, PA-authored, EXACT-hold-gated, PA-dual-verified + independently re-probed):**
+- `b5bb8cfd` session-open hand-off rotation.
+- `b40ab415` **M6.7-D4** — STOP-and-report: **object-literal bucket EMPTY at HEAD** (5th consecutive stale bucket label). Native already had full object-literal parity (PA independently probed all 8 forms). NO parser fix; doc-only landing. **Carries the re-measured current corpus NSBH residual (293 fires / 110 files, down from D1's pre-D2 474) re-classified by upstream first-error-code** — the load-bearing payoff of the unit; re-slices the genuine D-class into D5/D6/D7/D8.
+- `1de4a17b` **M6.7-D3** — native `parseMatchArm` accepts `:>` colon-arrow separator. PA verified against MAIN ground truth that live accepts `:>` (tokenizer.ts:1054 first-class op; ast-builder isArmArrow treats `=>`/`:>`/`->` identically). Cluster was 7 sub-bugs; fixed dominant `:>` (12/24 files), filed D3a–D3f. Corpus NSBH 293→246.
+- `90c74222` **M6.7-D6** — native `parseNamedImportSpecifiers` accepts string-literal specifier (`import { "kebab-name" as alias }`, SPEC §38.12.5/§12821). Gap was UNIVERSAL to string-literal specifiers (the agent disproved the PA pre-check's "narrow variant" hypothesis via direct `parseProgram`). E-STMT-IMPORT-NAME 12 files → 0. Closing it unmasked downstream gaps in the same files (E-STMT-MISSING-SEMICOLON 7 / E-EXPR-PARAM 3 / E-EXPR-EXPECT-RPAREN 2 — filed).
+- `d6b07839` **M6.7-D7** — native parser handles the `given` presence-guard (§42.2.3 `given ident[,ident]* => { body }`). New `StmtKind.GivenGuard` + dispatch + bridge. D3b (given-in-match) SUBSUMED (one production). Corpus KwGiven 8→0.
 
-## GOVERNING DIRECTIVES (carry-forward — load-bearing on the M6 arc)
-
-1. **"Intentional & exacting through the rest of M6"** (S126 headline). One M6.5/M6.7 unit at a time (or genuinely-disjoint pairs only — NOT a fire-hose). Within-node canary re-run after EVERY parser-shape change (pre-commit gate EXCLUDES `parser-conformance-*` — the S125 false-green vector). Bash-edit + no-`cd` path-discipline in every M6 brief. Per-unit PA diff-review + dual-verify before each file-delta. M6.7 flag-flip ONLY after a full flip-harness re-measure. No premature M6.8 deletion.
-
-2. **"Keep momentum until I stop you / do everything right"** (S127 headline). Authorizes autonomous multi-unit waves (dispatch → dual-verify → land → dispatch next) with NO per-unit confirmation — BUT checkpoint at irreversible / decision boundaries (the M6.7 default-flip is a USER decision, NOT autonomous-land). "Do everything right" is co-equal with momentum: keep the exacting discipline at speed.
-
-3. **Verify-don't-trust-the-diagnostic-bucket-label** (validated 4× in S127: b.3 / D1 / C1 / C2 all had wrong/imprecise bucket labels). Every dev brief MUST mandate Phase-0 root-cause confirmation BEFORE the fix.
-
-4. **Don't reflexively flag an already-live-accepted form as a design/subset decision** (S127 PA self-correction). If the LIVE parser accepts a form, it is IN the language; native matching it is parity-COMPLETENESS, not subset expansion. Class-D ("live accepts, native rejects") is by definition completeness work.
+**✅ M6.7 D-class: D3/D6/D7 closed (+ D4 confirmed empty).** 7 levers now closed since the flip-harness last measured 567 (D1/D2/C1/C2 from S127 + D3/D6/D7 this session).
 
 ---
 
-## NEXT PRIORITY — M6.7 pre-flip remainder (the v0.7 critical path)
+## ⚠ NEXT-SESSION PRIORITY — flip-harness RE-MEASURE (recommended first action)
 
-Per S127 CLOSE: M6.5 path-b FIX/ADAPT is COMPLETE; M6.7 top-3 (D1+D2+C1) + C2-dominant are CLOSED. The remaining pre-flip work is the named follow-on units below, then a **full flip-harness RE-MEASURE** (the S127 diagnostic was 845→567 BEFORE D1/D2/C1/C2; the real post-fix count is unconfirmed), then the **default-flip decision (USER)**.
+We've closed 7 native-parser levers since the S127 flip-harness diagnostic measured **567** deterministic failures. **The honest current flip-failure count is unknown** — a fresh flip-harness re-measure (reversible: throwaway worktree, temp-flip `api.js:604` `parser=null`→native, full suite, classify A/B/C/D/E, discard; main untouched — the S127 pattern) is the highest-value next step. It gives the real flip-readiness signal AND re-slices the remaining D-class accurately (the corpus-NSBH proxy understates progress — see cascade-unmasking below). **The default-flip itself remains a USER decision.**
 
-**NAMED FOLLOW-ON UNITS** (from C2 Phase-0 decomposition + per-unit splits; recorded in `docs/changes/m67-phase-a-flag-flip/*.md`):
-- **M6.7-C2-sql-loop-hoist** — §8.10 N+1 loop-hoist scaffolding absent under native.
-- **M6.7-C2-tablefor-clientjs** — tableFor incidental clientJs/html length drift (needles match; likely benign — audit).
-- **M6.7-C2-residual-audit** — server-eq-helper (needle matches; likely zero real flips — confirm).
-- **M6.7-C2-reactivity-grammar** — `debounced=`/`throttled=` native parse gap.
-- **M6.7-C1-followon** — cross-file `export const Name = <markup>` component (synthExportDecl raw slice, off by opener-width; ALSO serves non-component exports — regression-guard those).
-- **M6.7-D3** — `:>` transition-arm (~42, from D1 split).
-- **M6.7-D4** — object-literal-in-call-arg (~32, from D1 split).
-- **C3/E cascade** (~76) — re-measure after the above; expected to largely collapse.
-- **M6.6 Class-A engine bodyChildren** (128) — SEPARATE M6.6 work (NOT flip-blockers; native parses engine state-child bodies as code-default → E-UNQUOTED-DISPLAY-TEXT + stub render; that's the M6.6 walker work, Decision E).
+## NAMED FOLLOW-ON UNITS (the M6.7 pre-flip remainder — re-slice after the re-measure)
+From the D4 re-measure (293/110, by upstream first-error-code) + D6/D7 unmaskings:
+- **function/fn param-list cluster** (E-EXPR-PARAM, ~20 fires / 12 first-error files) — the REAL cluster behind D7's mislabel (D7 was actually KwGiven, not E-EXPR-PARAM). lin params / multi-arg / `function(fn)`. Distinct native gap; **strongest next unit.**
+- **D5 markup-escape seam** (E-EXPR-UNEXPECTED, 18 files) — `${...}` expr-seam + `server {}` + `^{}` meta; PARTLY test-fixture-placeholder — TRIAGE genuine-vs-fixture first.
+- **D3a–D3f** (from the D3 split) — literal match arms (§18.16) · `given`-binding-in-match (D3b SUBSUMED by D7 — verify) · `not` standalone · `|` alternation · `if` guard · same-line space-sep arms.
+- **D6-unmasked in trucking-dispatch:** E-STMT-MISSING-SEMICOLON (7, likely cascade), E-EXPR-EXPECT-RPAREN (2, likely cascade) — re-measure to confirm cascade vs distinct.
+- await/async/throw/try-NOT-IN-SCRML (~11) — DELIBERATE rejections (live rejects too) → corpus-migration backlog, NOT parser-fix units.
+- **M6.6 Class-A engine bodyChildren** (128) — SEPARATE M6.6 work, NOT flip-blockers.
 
-**Path:** knock down C2-followons + D3 + D4 + C1-followon → full flip-harness RE-MEASURE → flip decision (USER) → M6.6 Class-A engine-bodyChildren → SOAK → M6.8 deletion → v0.7 cut.
-
-**Gates / canaries:**
-- Per-unit correctness gate = **strict-pass EXACT** (held 964 all of S127).
-- within-node canary is **NON-MONOTONIC** for parse-completeness fixes (rises when native parses MORE; falls on shape-normalize; flat on textual-raw). NOT the flip gate.
-- Definitive flip-readiness gate = **flip-harness re-measure** (test-failure count under native default), run in a THROWAWAY worktree (S127 pattern — temp-flip api.js:604 `parser=null`, full-suite, classify, discard; main never touched).
+**Cascade-unmasking reality (banked):** parse-completeness work peels layers — closing one error class promotes the next to first-position in the same files (D6 cleared 12 import fires but the 12 files still fail downstream). So corpus NSBH (293→~246) UNDERSTATES real progress; files go fully-clean only when all their layers peel. **The definitive flip-readiness gate is the flip-harness re-measure, NOT corpus NSBH.**
 
 ---
 
-## v0.7 critical path (post-S127)
-M6.7 pre-flip remainder (C2-followons + D3 + D4 + C1-followon, ~est 15-30h) → **full flip-harness re-measure** → flip decision (USER) → M6.6 Class-A engine-bodyChildren (~15-30h) → SOAK → M6.8 deletion (~12-20h) → v0.7 cut.
+## v0.7 critical path (post-S128)
+flip-harness RE-MEASURE → re-slice → remaining D-class units (function-param + D5 + D3a-f, ~est 15-30h) → flip decision (USER) → M6.6 Class-A engine-bodyChildren (~15-30h) → SOAK → M6.8 deletion (~12-20h) → v0.7 cut.
 
 ---
 
-## Pre-existing carry-forwards (from S126/S127 — still open)
-- **compiler-managed-async gap** (phantom `route.functionName` → A9-class transitive async-coloring; the dashboard/full-stack-runtime cluster; first-class deferred — do NOT blind-patch, all-3-layers-or-none).
-- **6nz-V** (MED, GENUINE — `class:NAME` on for-lift reused DOM nodes not re-evaluated; runtime path, not codegen).
-- **GITI-015** (LOW) · **6nz-U** (LOW, likely M6-subsumed) · **6nz-L/T** (M6-deferred).
-- **MCP-V0.D + .E** (parallel-eligible, NO M6 dep; Tool-7 needs A-side `serverFnNodeIds` on `serverfns.json`). MCP-V0.A+B+C CLOSED.
-- build-story arc (6 open Qs, M6-gated) · V-kill READ-side fire · dev.to articles · Living Compiler retraction (pending user stamp+publish) · §29 vanilla-interop (user decision pending) · Generator policy (S114 open) · `~snapshot` tilde raw-sigil · adopter corpus migration · v0.7 cut (gated on M6.7 flip + M6.8 deletion).
-- **versioning drift** — pkg.json 0.6.0 vs changelog; reconcile before any tag.
+## OPERATIONAL LEARNINGS BANKED (S128 — apply next session)
+1. **`compileScrml(..., {parser:"scrml-native"})` MASKS native parse failures** — `nativeParseFile` escape-hatches on parse error, so the hard error never surfaces in `result.errors`. PA's D3+D6 pre-checks via compileScrml falsely showed "ACCEPTS." **For native parse-gap detection use DIRECT `parseProgram(lex(src),src)` (JS bodies) or `nativeParseFile(path,src)` (full .scrml files) and inspect `.diagnostics`/`.errors`.** Match the entry-point to the input (parseProgram = JS-statement body; nativeParseFile = full file). Memory: [[feedback_native_parse_probe_method]].
+2. **A completed `isolation:worktree` agent DETERMINISTICALLY leaves PA Bash CWD in that agent's worktree** (D6→D6 tree, D7→D7 tree — not random slips). **At the start of EVERY post-completion landing sequence: `cd /home/bryan/scrmlMaster/scrmlTS` + verify `pwd`, AND use `git -C "$M"` for all git ops** (CWD-independent). No damage this session (caught via git -C + pwd checks) but it muddied two landings. Memory: [[feedback_cwd_slip_after_worktree_dispatch]].
+3. **The within-node allowlist regen LOOP has cross-file state/order artifacts** — a sequential `enumerateScrmlCorpus` loop computed raw counts that differed from the per-fixture canary for ~16 non-affected files (would have committed spurious allowlist changes). **The per-fixture within-node CANARY failure-list is ground truth for which fixtures a fix moved.** To land an allowlist change on main: run the canary with the committed allowlist + the fix → the FAILING fixtures are the moved set → splice ONLY those (the agent's regen'd values are valid if the fix is orthogonal to other landed units). NEVER full-regen (masks regressions) and NEVER trust a sequential regen loop's changed-set.
+4. **Parallel same-file source conflict:** once two units modify the same source file from a common base (D6+D7 both touched `parse-stmt.js`), wholesale `git checkout <branch> -- file` REVERTS the other. **Land the second via `git diff <base>..<branch> -- file | git apply`** (the D6/D7 regions were disjoint → applied clean). Verify both fixes coexist via grep after.
+5. **The D-class bucket labels keep being wrong/imprecise** (5 in a row: b.3/D1/C1/C2/D4 empty; D6 narrowing wrong; D7 was KwGiven not E-EXPR-PARAM). Every brief's mandated Phase-0-root-cause-confirmation caught it each time. KEEP MANDATING IT.
 
 ---
 
-## State-as-of-open
+## State-as-of-close
 | Item | Value |
 |---|---|
-| HEAD | `003ee3a8` |
+| HEAD | `d6b07839` (D7) + wrap-docs commit |
 | pkg.json | 0.6.0 (no tag) |
-| Full test (S127 close) | 21,337 pass / 0 fail / 174 skip / 1 todo / 780 files |
-| strict-pass canary | 1000/1001 (EXACT 964) |
-| within-node canary | ~95,351 (non-monotonic; not the flip gate) |
-| Worktrees | main only |
-| S99 path-discipline counter | 15 |
+| Full test | 21,393 pass / 0 fail / 174 skip / 1 todo / 783 files |
+| strict-pass canary | 1000/1001 (EXACT 964) — held all session |
+| within-node canary | 1005/0 (PARSE-FAILURE:0); aggregate ~95,077 (non-monotonic; not the flip gate) |
+| corpus NSBH | 293 (D4 re-measure) → ~246 (D3) → KwGiven 8→0 (D7); proxy understates (cascade-unmasking) |
+| Worktrees | main only (3 cleaned this session) |
+| scrmlTS origin | 4 unit commits + wrap-docs — PUSHED at close |
+| scrml-support origin | user-voice S128 — PUSHED at close |
+| S99 path-discipline counter | 15 (ZERO new agent leaks; 2 PA CWD-slips, deterministic post-agent-completion, recovered clean) |
 
-## Open questions to surface immediately
-- None blocking. Awaiting user direction on whether to open the M6.7 pre-flip remainder wave (next priority above) or pivot. Per S127 "keep momentum until I stop you," the default is to continue the M6.7 pre-flip wave unless redirected.
+## Pre-existing carry-forwards (unchanged from S127 — still open)
+compiler-managed-async gap (A9-class transitive async-coloring; dashboard/full-stack-runtime cluster — do NOT blind-patch) · 6nz-V (MED, GENUINE runtime class:NAME-on-for-lift) · GITI-015 (LOW) · 6nz-U (LOW, M6-subsumed) · 6nz-L/T (M6-deferred) · MCP-V0.D/E (parallel-eligible, no M6 dep; Tool-7 needs A-side serverFnNodeIds) · build-story arc (6 open Qs, M6-gated) · V-kill READ-side fire · §29 vanilla-interop (user decision pending) · Generator policy (S114 open) · dev.to articles · Living Compiler retraction · `~snapshot` tilde raw-sigil · adopter corpus migration · v0.7 cut (gated on M6.7 flip + M6.8 deletion) · **versioning drift (pkg.json 0.6.0 vs changelog — reconcile before any tag).**
 
 ## Tags
-#session-128 #OPEN #m6.7-pre-flip-remainder #intentional-exacting-through-m6 #keep-momentum #flip-decision-is-user
+#session-128 #CLOSE #m6.7-D-class #d4-empty #d3-colon-arrow #d6-string-import #d7-given-guard #7-levers-since-567 #flip-harness-remeasure-next #4-units-0-regressions #cascade-unmasking #compileScrml-probe-masks #cwd-slip-deterministic
