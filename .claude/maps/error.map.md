@@ -1,6 +1,6 @@
 # error.map.md
 # project: scrmlts
-# updated: 2026-05-24T00:00:00Z  commit: dc073b94
+# updated: 2026-05-24T00:00:00Z  commit: 3a909c1d
 
 scrml's own language error model is values-not-exceptions (SPEC §19.1 — no try/catch,
 no exceptions in scrml SOURCE). Entries below are the COMPILER's own (host-side,
@@ -24,11 +24,11 @@ JavaScript/TypeScript) diagnostic infrastructure.
 
 ## Native-Parser Parse Diagnostics (SPEC §34.1)
 
-81 codes: 79 hard `E-` errors + 2 info-level `I-NATIVE-BLOCK-*` codes. Stable through S125 — no new §34.1 codes landed in the M6.5.b.1/b.2 or MCP-V0.A/B work.
+81 codes: 79 hard `E-` errors + 2 info-level `I-NATIVE-BLOCK-*` codes. Stable through S127 — no new §34.1 codes landed in the S126/S127 codegen-correctness wave (Bug W / GITI-017/018/019 / 6nz-S) or the MCP-V0.A/B/C work.
 
 B-wave codes (S118): E-STMT-LIN-* / E-STMT-TYPE-* / E-STMT-FN-* / E-STMT-TILDE-* / E-EXPR-GUARDED-UNCLOSED / E-THROW-NOT-IN-SCRML / E-TRY-NOT-IN-SCRML.
 
-Match-arm path (M6.5.b.1, S125): `E-EXPR-MATCH-BRACE` (parse-expr.js:2560) fires when `{` does not open the match arms — an existing code, exercised by the new newline-separator path (no new code introduced).
+Match-arm path (M6.5.b.1, S125): `E-EXPR-MATCH-BRACE` (parse-expr.js:2560) fires when `{` does not open the match arms — an existing code, exercised by the newline-separator path (no new code introduced).
 
 FileAST-assembler info codes (S119 C2 — `nativeParseFile`):
 - `I-NATIVE-BLOCK-DROPPED` — BlockKind with no live ASTNode was dropped; severity: info → `result.warnings`
@@ -48,12 +48,23 @@ FileAST-assembler info codes (S119 C2 — `nativeParseFile`):
 | `W-STDLIB-SHIM-MISSING` | bundleStdlibForRun: `scrml:NAME` has no runtime shim at `compiler/runtime/stdlib/<name>.js` |
 | `W-STDLIB-COMPILER-DEFERRED` | bundleStdlibForRun: any name matching `"compiler"` or `"compiler/..."` — fires regardless of shim presence |
 
-## MCP V0 Runtime-Shim Errors (S125 — NOT §34 diagnostic codes)
+## Silent-Correctness Bugs CLOSED in the S126/S127 codegen wave
 
-`compiler/runtime/stdlib/mcp.js` runtime guards throw plain `Error` (not registered §34 codes) when the shim is misused. These surface inside the long-lived MCP server (Sub-unit C/D), not in the compile pipeline:
+These had NO diagnostic — emitted JS stayed syntactically valid but was semantically wrong. Each is now fixed at emit time (no new diagnostic code; correctness is enforced by the printer, not a check):
+- **Bug W** (codegen/emit-expr.ts `emitBinary`) — acorn drops `ParenthesizedExpression` nodes; the old flat `default` branch printed precedence-WRONG JS (`(2+3)*4` → `2 + 3 * 4` = 14 not 20). Now `binaryOperandNeedsParens` re-inserts the dropped grouping parens.
+- **GITI-017-residual** (code-segments.ts + expression-parser.ts) — the second `not`-lowering site (`preprocessForAcorn`) corrupted regex/comment/string interiors; now fenced via the shared `rewriteCodeSegments`.
+- **GITI-019** (codegen/emit-lift.js) — lift-loop text interp `String(expr ?? "")` was a SyntaxError when `expr` had a top-level `||`/`&&` (ES2020 `??`-mix rule); now parenthesized.
+- **6nz-S** (expression-parser.ts + codegen/rewrite.ts) — bare-`not`-negation rewrites used `\s*`, gluing across a statement boundary (`return not` → `return !`); now `[ \t]+`/`[ \t]*` + JS-reserved-keyword exclusion lookahead.
+
+## MCP V0 Runtime-Shim Errors (S127 — NOT §34 diagnostic codes)
+
+`compiler/runtime/stdlib/mcp.js` runtime guards throw plain `Error` (not registered §34 codes) when the shim is misused. These surface inside the long-lived MCP server (Sub-unit C, LANDED S127), not in the compile pipeline:
 - install() with no/invalid arg → `/install() requires a runtime object/`
 - READ helper before install() → `/runtime not connected/`
 - READ helper before loadSidecars() → `/engines.json not loaded/` (and forms/channels equivalents)
+- `startMcpServer` with no `config.outputDir` → `/startMcpServer requires config.outputDir/`
+
+Tool-resolver throw handling (Sub-unit C): `_registerOneTool` wraps every resolver call in try/catch and converts a thrown resolver into an `{ isError: true, content: [{type:"text", text: JSON.stringify({error: msg})}] }` MCP content response — a thrown handler would otherwise surface as a protocol-level JSON-RPC error and break the channel. `shutdownMcpServer` swallows transport-close errors (idempotent, safe on partial/double shutdown).
 
 The "E-MCP-RUNTIME-NOT-INSTALLED" / "E-MCP-NO-CHUNKS-MANIFEST" tokens appear only as SCOPING-doc labels and shim-header comments; they are NOT in the §34 catalog at HEAD.
 
@@ -97,19 +108,20 @@ Info families: `I-PARSER-NATIVE-SHADOW`, `I-NATIVE-BLOCK-*`, `I-MATCH-PROMOTABLE
 - Native-parser modules record errors as VALUES — `recordError(ctx, code, message, span)` appends to context error array; no throws.
 - Per-stage try/catch in api.js wraps BS and TS-promote capture hook only (2 catch sites).
 - MCP descriptor extractor (`codegen/mcp-descriptors.ts`) is total/non-throwing — defensive `Array.isArray` / `typeof` guards; malformed rules degrade to `[]`; never throws into the compile pipeline. The sidecar write loop in api.js writes JSON directly (no diagnostic class).
+- MCP server tool layer (`mcp.js` `_registerOneTool`) try/catches each resolver and converts throws to `isError` content responses (keeps JSON-RPC channel well-formed).
 
 ## Global Error Boundaries
 
-No host-side global error boundary — compiler is a batch process; fatal errors surface via `result.errors` and non-zero CLI exit. Generated apps embed `_ScrmlError`-based runtime handling per SPEC §19.
+No host-side global error boundary — compiler is a batch process; fatal errors surface via `result.errors` and non-zero CLI exit. Generated apps embed `_ScrmlError`-based runtime handling per SPEC §19. The MCP stdio server (Sub-unit C) has its own boundary: per-tool try/catch + idempotent `shutdownMcpServer`.
 
 ## Unhandled Error Risks
 
 - api.js BS-stage catch swallows non-BSError throws into a generic `E-BS-000` with no span.
 - `component-expander.ts` M6.2b live-path fallback (`sourceNeedsLiveFallback`) — errors on the legacy `splitBlocks`+`buildAST` path surface through the legacy CE diagnostic channel, not the native path.
-- MCP shim fs.watch reload errors (`_startWatcher`) are intentionally swallowed (console.warn-free) so an in-flight malformed sidecar rewrite cannot crash the MCP server — the cache stays stale until the next clean reload.
+- MCP shim fs.watch reload errors (`_startWatcher`) are intentionally swallowed so an in-flight malformed sidecar rewrite cannot crash the MCP server — the cache stays stale until the next clean reload.
 
 ## Tags
-#scrmlts #map #error #diagnostics #pipeline #native-parser #stdlib-shims #i-fn-promotable #v-kill #unit-cc #e-state-undeclared #e-write-not-in-logic-context #m6-6-b2 #mcp-v0 #s125
+#scrmlts #map #error #diagnostics #pipeline #native-parser #stdlib-shims #i-fn-promotable #v-kill #unit-cc #e-state-undeclared #e-write-not-in-logic-context #m6-6-b2 #mcp-v0 #mcp-server #bug-w #giti-019 #6nz-s #s127
 
 ## Links
 - [primary.map.md](./primary.map.md)

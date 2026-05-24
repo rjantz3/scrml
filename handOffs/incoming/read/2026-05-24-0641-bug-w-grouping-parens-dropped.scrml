@@ -1,0 +1,42 @@
+// Bug W minimal repro — CRITICAL silent correctness bug.
+//
+// Grouping parentheses around a binary expression are DROPPED in emit.
+// `(2 + 3) * 4` compiles to `2 + 3 * 4`, which JS evaluates as
+// `2 + (3 * 4)` = 14 instead of the correct `(2 + 3) * 4` = 20.
+//
+// The compiler discards the explicit grouping parens, so operator
+// precedence silently changes the result. Affects ALL parenthesized
+// binary sub-expressions, reactive or not:
+//   (1 + 2) * 3   -> 1 + 2 * 3   (7, want 9)
+//   (10 - 2) / 4  -> 10 - 2 / 4  (9.5, want 2)
+//   (@r + 1) % 3  -> @r + 1 % 3  (@r+1, want (@r+1)%3)
+//
+// No compile error, no warning. The arithmetic is just wrong at runtime.
+//
+// Tested against scrmlTS HEAD dc073b94.
+
+<program>
+${
+    @out = 0
+    function compute() {
+        @out = (2 + 3) * 4
+    }
+}
+
+<div>result: ${@out}</>
+<button onclick=compute()>compute</>
+</program>
+
+<!--
+Detection:
+  scrml compile bug-w.scrml -o dist/
+  grep 'reactive_set("out"' dist/bug-w.client.js
+Expected emit: _scrml_reactive_set("out", (2 + 3) * 4);   // = 20
+Actual emit:   _scrml_reactive_set("out", 2 + 3 * 4);      // = 14
+
+Runtime: click compute, result shows 14 (should be 20).
+
+This is the highest-severity bug we've filed — it silently produces
+wrong numbers with no diagnostic. Any adopter doing arithmetic with
+grouping parens is affected.
+-->

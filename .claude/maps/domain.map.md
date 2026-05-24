@@ -1,6 +1,6 @@
 # domain.map.md
 # project: scrmlts
-# updated: 2026-05-24T00:00:00Z  commit: dc073b94
+# updated: 2026-05-24T00:00:00Z  commit: 3a909c1d
 
 The domain is the scrml COMPILER pipeline. scrml is a single-file, full-stack reactive
 web language; the compiler splits server from client, wires reactivity, routes HTTP, and

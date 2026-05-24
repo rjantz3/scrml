@@ -1,6 +1,6 @@
 # schema.map.md
 # project: scrmlts
-# updated: 2026-05-24T00:00:00Z  commit: dc073b94
+# updated: 2026-05-24T00:00:00Z  commit: 3a909c1d
 
 Authoritative AST type catalog: `compiler/src/types/ast.ts`. The M5 native-parser swap
 must produce output coercible to `FileAST` / `TABOutput`. As of C1/C2 (S119),
@@ -76,16 +76,26 @@ Replaces pre-S123 phantom state-decl synthesis for bare `@name = expr` inside fn
 
 `IdentExpr | LitExpr | ArrayExpr | ObjectExpr | SpreadExpr | UnaryExpr | BinaryExpr | AssignExpr | TernaryExpr | MemberExpr | IndexExpr | CallExpr | NewExpr | LambdaExpr | CastExpr | MatchExpr | SqlRefExpr | InputStateRefExpr | EscapeHatchExpr | ResetExpr`
 
-## MCP Descriptor Shapes  [compiler/src/codegen/mcp-descriptors.ts — NEW S125]
+### BinaryExpr precedence printer  [codegen/emit-expr.ts — Bug W, S127]
+`emitBinary` (emit-expr.ts:688) now re-inserts the grouping parens Acorn dropped (Acorn keeps the tree's nesting but drops `ParenthesizedExpression` nodes, so the flat `default` branch previously printed `2 + 3 * 4` for the correctly-nested `(2 + 3) * 4` — a SILENT arithmetic-correctness bug, no diagnostic). Supporting tables:
+- `BINARY_PRECEDENCE` [emit-expr.ts:590] — `Record<BinaryExpr["op"], number>`; `**`=14 … `||`/`??`=4; self-bracketed `is`/`is-*`=3 (never used as a flat PARENT op).
+- `RIGHT_ASSOCIATIVE` [emit-expr.ts:612] — `Set(["**"])` (only right-assoc JS binary op).
+- `binaryOpEmitsFlat(op)` [emit-expr.ts:622] — false for `==`/`!=`/`is`/`is-not`/`is-some`/`is-not-not` (those emit their own outer parens / IIFE, so never need a precedence wrap).
+- `binaryOperandNeedsParens(child, parentOp, isRightChild)` [emit-expr.ts:649] — wrap when `prec(child) < prec(parent)`, or equal-precedence wrong-side, or the ES2020 `??`-mixed-with-`||`/`&&` SyntaxError class.
 
-App-wide arrays emitted as JSON sidecars (`engines.json` / `forms.json` / `channels.json` / `serverfns.json`). Shapes ARE the API contract `scrml:mcp` runtime helpers (`compiler/runtime/stdlib/mcp.js`) consume. Authority: SCOPING §3 Sub-unit A. NOTE: the runtime shim's expected sidecar shape (mcp.js header) names some fields the extractor does not yet emit — `cellKey` (engines) and `compoundKeys` (forms) are READ defensively by the shim but NOT yet emitted by the extractor; the shim falls back gracefully (engineName-as-key; per-field rollup). This is a known v0 follow-on the MCP-V0.A-tests dispatch will exercise.
+## MCP Descriptor Shapes  [compiler/src/codegen/mcp-descriptors.ts]
 
-### McpDescriptors  [mcp-descriptors.ts:851]
-`{ engines: EngineDescriptor[]; forms: FormDescriptor[]; channels: ChannelDescriptor[]; serverFns: ServerFnDescriptor[] }`
+App-wide arrays emitted as JSON sidecars (`engines.json` / `forms.json` / `channels.json` / `serverfns.json`). Shapes ARE the A↔B contract `scrml:mcp` runtime helpers (`compiler/runtime/stdlib/mcp.js`) consume. Authority: SCOPING §3 Sub-unit A. **A↔B contract fix (S127, commit 55325b10): the four compound-rollup keys are NOW nested under `FormDescriptor.compoundKeys` (was flat on the descriptor root — flattening left B unable to decode `submitted`), and `EngineDescriptor` NOW emits `cellKey` explicitly.** v0 ENCODING CAVEAT: the per-file §47 encoding context is built inside CG and not threaded to this post-CG extractor, so `cellKey` and the form keys are emitted as the raw (encoding-off) name; `cellKey === name` in default compile mode. Production-encoding pass-through is a documented follow-on.
+
+### McpDescriptors  [mcp-descriptors.ts:905]
+`{ engines: EngineDescriptor[]; forms: FormDescriptor[]; channels: ChannelDescriptor[]; serverFns: ServerFnDescriptor[] }`  (assembled by `buildMcpDescriptors` [mcp-descriptors.ts:915])
 
 ### EngineDescriptor  [mcp-descriptors.ts:59] → engines.json
 ```
 name: string                     — auto-declared var name (no @) or var= override
+cellKey: string                  — runtime-state key for the current-variant cell; read via
+                                   _scrml_reactive_get(cellKey). encodeKey-identity in default mode (===name).
+                                   (NEW S127 — read at mcp.js:249 as descriptor.cellKey || descriptor.name)
 type: string                     — governing enum type (for=Type)
 variants: EngineVariantDescriptor[]
 rules: Record<string, string[]>  — FROM-tag → legal-to set; single→[X], multi→[A,B], wildcard→["*"], absent/terminal/malformed→[]
@@ -98,23 +108,27 @@ kind: "primary" | "derived"      — derived = §51.0.J derived=expr engine
 ### EngineVariantFieldDescriptor  [mcp-descriptors.ts:42]
 `{ name: string; type: string }`  (type = raw source-text annotation; normalized-type resolution deferred)
 
-### FormDescriptor  [mcp-descriptors.ts:103] → forms.json
+### FormDescriptor  [mcp-descriptors.ts:134] → forms.json
 ```
 formName: string
-errorsKey / isValidKey / touchedKey / submittedKey: string   — resolved compound-rollup keys
+compoundKeys: FormCompoundKeys   — NEW S127: the 4 rollup keys NESTED (was flat). Read by
+                                   getFormStatus → descriptor.compoundKeys.{...} (mcp.js:311-323).
 fields: FormFieldDescriptor[]
 ```
 
-### FormFieldDescriptor  [mcp-descriptors.ts:86]
+### FormCompoundKeys  [mcp-descriptors.ts:123] — NEW S127
+`{ isValidKey; errorsKey; touchedKey; submittedKey: string }`  — resolved `<formName>.{isValid|errors|touched|submitted}` compound rollups. `submittedKey` is compound-ONLY (§55.7 — no per-field `submitted` surface); this is why flattening broke B.
+
+### FormFieldDescriptor  [mcp-descriptors.ts:98]
 `{ name; qualifiedName; errorsKey; isValidKey; touchedKey: string }`  (resolved per-field §55.6/§55.9 keys; v0 = raw qualified names, encoding passthrough)
 
-### ChannelDescriptor  [mcp-descriptors.ts:128] → channels.json
+### ChannelDescriptor  [mcp-descriptors.ts:154] → channels.json
 `{ name: string; topic: string; autoSyncedCells: ChannelAutoSyncedCell[] }`  (name defaults "channel"; topic defaults to name per §38.3)
 
-### ChannelAutoSyncedCell  [mcp-descriptors.ts:121]
+### ChannelAutoSyncedCell  [mcp-descriptors.ts:147]
 `{ name: string; key: string }`  (§38.4 V5-strict state-decl cells)
 
-### ServerFnDescriptor  [mcp-descriptors.ts:148] → serverfns.json
+### ServerFnDescriptor  [mcp-descriptors.ts:174] → serverfns.json
 ```
 name: string
 params: ServerFnParamDescriptor[]
@@ -123,7 +137,7 @@ file: string                     — absolute decl path (same-name disambiguatio
 dispatchable: false              — PERMANENT v0 marker (read-only enumeration, PA Q2)
 ```
 
-### ServerFnParamDescriptor  [mcp-descriptors.ts:138]
+### ServerFnParamDescriptor  [mcp-descriptors.ts:164]
 `{ name: string; type: string }`  (type = raw annotation or "unknown")
 
 ## Codegen I/O Types  [compiler/src/codegen/]
@@ -149,6 +163,12 @@ errors?: any[]; derivedNames?: Set<string>; dbVar?: string; skipPresenceGuard?: 
 Union of named runtime chunk keys ('core' | 'scope' | 'timers' | 'animation' | 'prefetch' | ...).
 `CHUNK_DEPENDENCIES: { scope: ['timers', 'animation'] }` — 6nz Bug P (S123).
 `applyChunkDependencies(chunks)` — fixed-point closure; called after detectRuntimeChunks.
+
+## Code-Segment Fence  [codegen/code-segments.ts — NEW S125, leaf module, no project imports]
+
+Shared regex-literal / comment / string-aware splitter for every scrml keyword-lowering text pass. Extracted so BOTH `rewrite.ts::rewriteNotKeyword` AND `expression-parser.ts::preprocessForAcorn` share one fence (the residual GITI-017 half — preprocessForAcorn had its own unfenced `not`-lowering). Leaf placement avoids the rewrite.ts ↔ expression-parser.ts import cycle.
+- `rewriteCodeSegments(expr, transform)` [code-segments.ts:67] — applies `transform` ONLY to code regions; string / regex / line-comment / block-comment interiors pass through verbatim. Re-exported from rewrite.ts.
+- `regexAllowedAfter(codeBefore)` [code-segments.ts:34] — regex-vs-division disambiguation via `REGEX_PERMISSIVE_KEYWORDS` set + trailing-punctuation check.
 
 ## Symbol Table Types  [compiler/src/symbol-table.ts]
 
@@ -216,7 +236,7 @@ BlockKinds: Markup, Text, Comment, Sql, Css, Meta, ErrorEffect, LogicEscape, Dis
 No application DB schema — scrml is a compiler. SQLite *.db files are throwaway test fixtures.
 
 ## Tags
-#scrmlts #map #schema #ast #fileast #native-parser #codegen #m5-swap #bridge #match-block #v-kill #reactive-assign #symbol-table #runtime-chunks #engine-statechild-walker #m6-6-b2 #m6-5-b2 #mcp-v0 #mcp-descriptors #s125
+#scrmlts #map #schema #ast #fileast #native-parser #codegen #m5-swap #bridge #match-block #v-kill #reactive-assign #symbol-table #runtime-chunks #engine-statechild-walker #m6-6-b2 #m6-5-b2 #mcp-v0 #mcp-descriptors #emit-binary #code-segments #s127
 
 ## Links
 - [primary.map.md](./primary.map.md)

@@ -1,9 +1,10 @@
 # dependencies.map.md
 # project: scrmlts
-# updated: 2026-05-24T00:00:00Z  commit: dc073b94
+# updated: 2026-05-24T00:00:00Z  commit: 3a909c1d
 
 ## Runtime Dependencies (root package.json)
 
+`@modelcontextprotocol/sdk@1.29.0` — **NEW (MCP-V0.C, S127)** — MCP TypeScript SDK; supplies `McpServer` (`@modelcontextprotocol/sdk/server/mcp.js`) + `StdioServerTransport` (`@modelcontextprotocol/sdk/server/stdio.js`). Imported LAZILY (dynamic `import()`) only inside `startMcpServer()` in `compiler/runtime/stdlib/mcp.js`; the B-helpers / tool resolvers do not require it to be present. `zod` is resolved at the same boot site (peer of the SDK; not a direct package.json entry).
 `vscode-languageserver@^9.0.1` — LSP server framework for lsp/server.js
 `vscode-languageserver-textdocument@^1.0.11` — text-document model for the LSP
 
@@ -32,7 +33,8 @@ api.js → block-splitter.js, ast-builder.js, compute-pgo-flags.ts, compute-prog
          idempotency-store-resolver.ts, type-system.ts, meta-checker.ts, meta-eval.ts,
          dependency-graph.ts, batch-planner.ts, reachability-solver.ts, auth-graph.ts,
          code-generator.js, module-resolver.js, name-resolver.ts, symbol-table.ts
-api.js → codegen/mcp-descriptors.ts (buildMcpDescriptors) — MCP-V0.A sidecar emission in output write loop (S125)
+api.js → codegen/mcp-descriptors.ts (buildMcpDescriptors) — MCP-V0.A sidecar emission in output write loop
+api.js → rewriteStdlibImports (api.js:462) — GITI-018: rewrites ALL `scrml:` import specifiers in --mode library (was first-only; leading-indentation `^([ \t]*)` capture group round-trips per-import indent)
 api.js → native-parser/parse-file.js (nativeParseFile) — C2 routing behind --parser=scrml-native
 api.js → validators/{post-ce-invariant, attribute-interpolation, attribute-allowlist,
          lint-try-catch, lint-async-user-source}.ts
@@ -41,6 +43,9 @@ api.js → lint-ghost-patterns.js, lint-i-match-promotable.js, lint-i-fn-promota
 code-generator.js → codegen/index.ts (runCG) → codegen/emit-*.ts (~55 emitters)
 codegen/index.ts → codegen/route-splitter.ts, codegen/ir.ts, codegen/source-map.ts,
                    codegen/runtime-chunks.ts
+codegen/emit-expr.ts → codegen/rewrite.js, codegen/emit-parse-variant.ts, codegen/emit-control-flow.ts
+codegen/rewrite.ts → codegen/code-segments.ts (NEW S125 — rewriteCodeSegments + regexAllowedAfter; rewrite.ts RE-EXPORTS both)
+expression-parser.ts → codegen/code-segments.ts (shared fence for preprocessForAcorn `not`-lowering — leaf placement avoids the rewrite.ts ↔ expression-parser.ts import cycle)
 codegen/mcp-descriptors.ts → (no module imports; LOCAL mirrors of emit-engine/emit-channel/
                    emit-synth-surface walk shapes to avoid circular import into the emit chain)
 reachability-solver.ts → reachability/{component-1..5, entry-points, gate-classifier,
@@ -69,17 +74,18 @@ translate-stmt.js → ast-stmt.js, translate-expr.js  (M6.5.b.2 makeStateDeclNod
 translate-expr.js → ast-expr.js
 collect-hoisted.js → ast-stmt.js
 ```
+(native-parser sources UNCHANGED since the prior watermark — content carried forward.)
 
 ## Stdlib Runtime Shim Layout (compiler/runtime/stdlib/)
 
-Top-level (19): auth, crypto, data, host, store, cron, format, fs, http, oauth, path, process, redis, regex, router, test, time, compiler (umbrella), **mcp (NEW S125 — MCP-V0.B `scrml:mcp` runtime READ helpers; NOT yet wired into stdlib bundling allowlist; awaits Sub-unit C/D `<program mcp>` opt-in)**.
-mcp.js external imports: `node:fs` (readFileSync, watch), `node:path` (join), `node:url` (fileURLToPath) — Node built-ins only, no third-party deps.
+Top-level (20): auth, crypto, data, host, store, cron, format, fs, http, oauth, path, process, redis, regex, router, test, time, compiler (umbrella), **mcp (MCP-V0.B/C — `scrml:mcp` runtime READ helpers + the full 11-tool MCP surface + `startMcpServer`/`shutdownMcpServer` boot over stdio, MCP-V0.C LANDED S127). The shim is NOT registered in the default stdlib bundling allowlist — it bundles only when an adopter opts in via `<program mcp>` (Sub-unit D, PENDING)**.
+mcp.js external imports: `node:fs` (readFileSync, watch), `node:path` (join), `node:url` (fileURLToPath) — Node built-ins, eager — PLUS lazy dynamic `import()` of `@modelcontextprotocol/sdk` (mcp.js / stdio submodules) + `zod`, resolved only at `startMcpServer()` boot time.
 Subdirectories:
 - `oauth/` — discord, github, google, microsoft, pkce (5 providers).
 - `compiler/` — 13 per-stage thunks (bs, tab, mod, ce, bpp, pa, ri, ts, mc, me, dg, cg, expr) — each throws at call time with W-STDLIB-COMPILER-DEFERRED attribution.
 
 ## Tags
-#scrmlts #map #dependencies #bun #acorn #native-parser #m5-swap #bridge #stdlib-shims #m6-6-b2 #native-walker #mcp-v0 #mcp-descriptors #s125
+#scrmlts #map #dependencies #bun #acorn #native-parser #m5-swap #bridge #stdlib-shims #m6-6-b2 #native-walker #mcp-v0 #mcp-descriptors #mcp-sdk #giti-018 #code-segments #s127
 
 ## Links
 - [primary.map.md](./primary.map.md)

@@ -1,0 +1,30 @@
+// GITI-019 minimal reproducer — see the accompanying .md for full write-up.
+//
+// A `for ... lift` per-item interpolation whose expression uses top-level `||`
+// (or `&&`) emits illegal JS: the auto `?? ""` coalesce wrap is not
+// parenthesized around the logical operand.
+//
+//   bun run compiler/src/cli.js compile <this file> -o /tmp/r15
+//   grep createTextNode /tmp/r15/*.client.js
+//     -> String(e.description || "(no message)" ?? "")
+//   node --check /tmp/r15/*.client.js
+//     -> SyntaxError: missing ) after argument list
+//
+// Correct emit: String((e.description || "(no message)") ?? "")
+// Compiler SHA at discovery: scrmlTS@dc073b94
+
+<program>
+
+${
+  @entries = [{ description: not }]
+}
+
+<ul>
+  ${
+    for (let e of @entries) {
+      lift <li>${e.description || "(no message)"}</li>
+    }
+  }
+</ul>
+
+</program>

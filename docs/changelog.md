@@ -2,7 +2,27 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-24 **S125 CLOSE**). Full `bun run test` **21,114 pass / 0 fail / 170 skip / 1 todo across 761 files**; pre-commit gate (unit + integration + conformance) clean on every commit. Native-parser canary strict-pass **999/1000** (unchanged from S124). S124 CLOSE baseline (pre-S125): 21,045 pass.
+Current baseline (2026-05-24 **S126 CLOSE**). Full `bun run test` **21,217 pass / 0 fail / 174 skip / 1 todo across 771 files**; pre-commit gate (unit + integration + conformance) clean on every commit. Native-parser canary strict-pass **999/1000** (unchanged — no native-parser changes S126). S125 CLOSE baseline (pre-S126): 21,114 pass.
+
+### 2026-05-24 (S126 CLOSE — adopter/MCP wave: 5 fixes + MCP-V0.C closed + Bug W CRITICAL + dashboard async-gap diagnosed; M6 arc teed up)
+
+Multi-agent wave (7 dev dispatches + 2 maps refreshes + 1 diagnose-STOP). **NO push** (user direction — both scrmlTS + scrml-support carry unpushed S126 commits).
+
+- **MCP-V0.A-tests + A↔B contract fix** (`55325b10`) — nested `FormDescriptor.compoundKeys` so `getFormStatus().submitted` decodes (was flat → undecodeable); engine `cellKey`; channel logic-body descent; 4 per-sidecar unit + 1 integration + 1 degenerate-SPA (+30). **MCP-V0.A CLOSED.**
+- **GITI-017-residual** (`3341f34d`) — fenced the 2nd `not`-lowering site (`preprocessForAcorn`) via new shared `codegen/code-segments.ts`; `/not …/` regex verbatim (+11). Silent-corruption class closed. (First notice was wrong → corrected; verified-before-notice discipline ratified.)
+- **GITI-019** (`fa665e9d`) — lift-loop interp parens before `?? ""` (+4).
+- **Bug W (CRITICAL, 6nz P0)** (`a91ad5de`) — precedence-aware `emitBinary`; grouping parens no longer silently dropped (`(2+3)*4` → 20, was 14) (+24).
+- **GITI-018** (`32c2fd39`) — `rewriteStdlibImports` rewrites ALL `scrml:` imports in `--mode library` (leading-indentation anchor, not "no /g") (+4).
+- **MCP-V0.C** (`be7a3ded`) — `scrml:mcp` stdlib + 11 read-only tools over stdio + `@modelcontextprotocol/sdk@1.29.0` (+24). **MCP-V0.C CLOSED.** D/E remain; Tool-7 ships degraded-honest (chunks.json lacks `serverFnNodeIds`).
+- **6nz-S** (`3a909c1d`) — `return not` no longer mis-lowers to `return !` (statement-glue) at both sites (+10).
+
+All 5 adopter/MCP fixes independently compile-verified + adopter-notified; 6nz verified-closed Bug W + Bug S + 6nz-P; **Bug V CONFIRMED GENUINE** (post-Bug-W; lift/reconcile runtime-path — `class:NAME` on for-lift reused DOM nodes not re-evaluated; queued MED).
+
+**Dashboard async-gap DIAGNOSED + DEFERRED (no fix):** phantom `route.functionName` in `scheduling.ts::hasServerCallees` → `serverFnNames` always empty → server-fn-calling client functions never get `async`/`await`. 3-layer fix (L3 = new transitive async-coloring subsystem); the corpus-sweep's underlying compiler gap. Deferred to A9-class async work; not blind-patched.
+
+**Infra:** pa.md S99 mitigation hardened — Bash-edit + no-`cd` (5 path-discipline near-incidents this session, all recovered, zero work lost). Mid-flight agent-mailbox prototyped (GITI-018 + 6nz-S polled clean). 8 worktrees cleaned.
+
+**M6 arc opens FRESH next session** under the user's exacting directive (one unit at a time / within-node canary per parser-shape change / flip-harness before M6.7 / no premature M6.8 deletion). First unit: **M6.5.b.2.1** — Class-E newline-as-statement-separator for consecutive bare state-decls in native `parse-stmt.js`.
 
 ### 2026-05-24 (S125 CLOSE — 4-agent parallel wave: M6.5.b.1 closed + M6.5.b.2 partial + MCP-V0.B closed + MCP-V0.A partial)
 

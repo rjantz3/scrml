@@ -1,0 +1,16 @@
+// GITI-017 re-verify reproducer — boolean-negation `not `→`!` STILL corrupts
+// inside regex literals at scrmlTS HEAD dc073b94 (fix f181d60a is partial).
+//
+//   bun run compiler/src/cli.js compile <this file> -o /tmp/p17
+//   grep "jj repo" /tmp/p17/*.client.js
+//     -> const re = /!a jj repo/i;   ← BROKEN (expected /not a jj repo/i)
+//
+// The absence-sentinel case /(not).../ is now fixed; the boolean-negation
+// case /not <space>.../ is not. See accompanying .md for the full matrix.
+
+${
+  export function pat() {
+    const re = /not a jj repo/i
+    return re.source
+  }
+}

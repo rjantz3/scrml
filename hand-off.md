@@ -1,102 +1,76 @@
-# scrmlTS — Session 125 (CLOSE)
+# scrmlTS — Session 126 (CLOSE)
 
-**Date:** 2026-05-24 (rollover from 2026-05-23 — session ran past midnight)
-**Previous:** `handOffs/hand-off-127.md` (S124 CLOSE — rotated at S125 OPEN)
-**Machine:** same as S124 (no machine switch)
-**HEAD at S125 OPEN:** `73dd816c` · **HEAD at S125 CLOSE:** `fa25ac31`
-**Wrap:** full 8-step. Push status: AUTHORIZED per user "push when done" direction.
-
----
-
-## S125 net outcome
-
-**Compressed 4-agent parallel-wave session. Five commits landed. Three agent stalls handled per S89 §13.2 partial-recovery. Two PARTIAL landings filed as named follow-ons. Zero S99 path-discipline incidents (counter remains 11).**
-
-### Commit ledger (chronological)
-
-| SHA | Title |
-|---|---|
-| `5b1afb9d` | chore(s125-open): maps refresh @d570341d→73dd816c |
-| `e40c9cc3` | feat(MCP-V0.B): runtime helpers — getCurrentVariant + getFormStatus + getChannelState |
-| `afbc566c` | feat(M6.5.b.1): FIX-NATIVE match-arm newline separator + 16 unit tests |
-| `cd82eeb9` | feat(M6.5.b.2): FIX-NATIVE structural-decl &lt;ident&gt; LHS — PARTIAL (Option B) |
-| `fa25ac31` | feat(MCP-V0.A): descriptor sidecars — PARTIAL (extractor + api.js wiring; tests follow-on) |
-| `8f4378ca` | fix(M6.5.b within-node canary): rebase allowlist for b.1+b.2 combined effect (231 false-fails closed; opt-in-flag-gating lesson) |
-
-### Tests
-
-| | Count |
-|---|---|
-| Full `bun run test` at S125 OPEN | 21,045 pass / 0 fail / 170 skip / 1 todo / 759 files |
-| Full `bun run test` at S125 CLOSE | **21,114 pass / 0 fail / 170 skip / 1 todo / 761 files** (after allowlist rebase) |
-| Delta | **+69 tests (16 b.1 + 28 b.2 + 25 B), 0 fail, 0 regressions** |
-| Pre-commit gate on all 5 commits | clean, no `--no-verify` used |
+**Date:** 2026-05-24
+**Previous:** `handOffs/hand-off-128.md` (S125 CLOSE)
+**Machine:** same as S125 (no machine switch).
+**HEAD at S126 OPEN:** `dc073b94` · **HEAD at S126 CLOSE:** `3a909c1d` (+ wrap-docs + maps-close commits).
+**Wrap:** full 8-step MINUS push. **PUSH STATUS: NONE — user direction "no push."**
 
 ---
 
-## State-as-of-close
+## S126 CLOSE SUMMARY — read first
+
+**Net:** ~10 commits. Full `bun run test` **21,217 pass / 0 fail / 174 skip / 1 todo / 771 files** (0 fail held). 5 adopter/MCP fixes landed + independently verified + adopter-notified; **MCP-V0.A + B + C CLOSED**; adopter queue drained to the M6-gated tail. Maps refreshed → `3a909c1d`. No tag (pkg.json 0.6.0).
+
+### ⚠ PUSH-PENDING — surface IMMEDIATELY at S127 OPEN (user said NO push S126)
+- **scrmlTS** — ~10 S126 commits UNPUSHED (`16042a30` maps-open → `3a909c1d` 6nz-S + the wrap-docs commit + the maps-close commit). At S126 OPEN scrmlTS was in sync (`0 0`); the entire S126 commit set is unpushed.
+- **scrml-support** — `pa-scrmlTS.md` (S99 mitigation hardening: Bash-edit + no-`cd`) + `user-voice-scrmlTS.md` (S126 append) UNPUSHED. (Pre-existing untracked drafts `tools/` + `voice/articles/2026-05-09-*` are NOT mine — left untouched.)
+- S127 OPEN must run cross-machine sync FIRST: `git -C <repo> fetch` + push these (with auth) OR confirm the no-push was intentional carry.
+
+### M6 ENTERS FRESH AT S127 — under the EXACTING directive
+First unit **M6.5.b.2.1** (Class-E newline-as-statement-separator for consecutive bare state-decls in native `compiler/native-parser/parse-stmt.js`; mirror live ast-builder Phase A1a Step 11.0b boundary detection; ~2-4h). Discipline (see §"S126 directive" below + pa.md S99 pt 5): one unit at a time / within-node canary re-run per parser-shape change / Bash-edit + no-`cd` brief / per-unit dual-verify / flip-harness before M6.7 / no premature M6.8 deletion. Maps current at `3a909c1d` (refresh if S127 HEAD moves before dispatch).
+
+### FOLLOW-UP TO VERIFY at S127
+MCP-C's `stdlib/mcp/index.scrml` uses `async function` in a `.scrml` stub (maps agent flagged; treated as compiler-internal-stub-exempt). Verify whether a stdlib `.scrml` stub with `async function` is spec-compliant — the no-async/await rule is language-wide; stubs may be JS-host-mode. Likely fine, unverified.
+
+### Bug-V update (post-wave 6nz confirmation)
+**6nz-V CONFIRMED GENUINE** (not a Bug-W artifact). Re-verified at `a91ad5de`: `@sel` updates but the `.sel` class stays frozen on the first item — `class:NAME` on a for-lift element is evaluated at create-time only, never re-evaluated when the reconciler reuses the DOM node. **Lift/reconcile RUNTIME path, NOT codegen** (emit is correctly per-item-scoped). Queued MED. 6nz verified-closed Bug W + Bug S + 6nz-P on their side.
+
+---
+
+---
+
+## S126 OPEN — session-start checklist status
+
+| Step | Status |
+|---|---|
+| Cross-machine sync (scrmlTS + scrml-support) | ✅ both `0 0` ahead/behind origin; scrmlTS tree clean; scrml-support has pre-existing untracked drafts only (`tools/`, `voice/articles/2026-05-09-*.md`) — NOT this session's work |
+| pa.md (→ `../scrml-support/pa-scrmlTS.md`) read IN FULL | ✅ |
+| PRIMER read IN FULL | ✅ (1002 lines) |
+| SPEC-INDEX read IN FULL | ✅ (379 lines) |
+| master-list §0 read IN FULL | ✅ (incl. §0.6 surfaced-divergences through recent sessions) |
+| hand-off.md (S125 CLOSE) read | ✅ |
+| recent user-voice read | ✅ (S122 + S123 contentful; user-voice current through S123) |
+| hand-off rotated → `handOffs/hand-off-128.md` | ✅ |
+| fresh hand-off.md created | ✅ this file |
+| Hook gate verified | ✅ config B (`.git/hooks/` has pre-commit + pre-push; post-commit still absent since S122) |
+| Inbox triage | ✅ `handOffs/incoming/` EMPTY |
+| Maps currency | ⚠️ watermark `73dd816c`, HEAD `dc073b94` = **7 commits stale** — refresh REQUIRED before first dev dispatch |
+
+---
+
+## State-as-of-open
 
 | Item | Value |
 |---|---|
-| HEAD | `8f4378ca` |
-| pkg.json version | 0.6.0 (unchanged) |
-| scrmlTS origin sync | **17 commits unpushed** (carry-forward 11 from S124 + 6 this session) — push AUTHORIZED |
-| scrml-support origin sync | **1 commit unpushed** (carry-forward from S124 build-story roughing) — push AUTHORIZED |
-| Hook gate | Configuration B (pre-commit + pre-push; post-commit still lost since S122) |
-| `.claude/maps/` | watermark `73dd816c` (S125 OPEN cold-start refresh committed as `5b1afb9d`); ~4 commits stale at CLOSE — refresh on S126 OPEN before next dev dispatch |
-| Worktrees | clean — all 3 stale worktrees cleaned at wrap step 6b |
-| Inbox | empty (no new messages during S125; no closures sent) |
-| Active arc | M6.5 path-b Wave 2 mid-flight (.b.1 closed; .b.2 PARTIAL with .b.2.1 follow-on; .b.3-.b.6 still queued) · MCP-V0 mid-flight (B closed; A PARTIAL with tests follow-on; C/D/E queued) |
+| HEAD | `dc073b94` (S125-close wrap commit) |
+| pkg.json version | 0.6.0 |
+| scrmlTS origin sync | in sync (`0 0`) |
+| scrml-support origin sync | in sync (`0 0`); untracked drafts pre-exist (dev.to articles 05-09 + `tools/`) |
+| Test baseline (S125 CLOSE) | 21,114 pass / 0 fail / 170 skip / 1 todo / 761 files (full `bun run test`) |
+| Worktrees | clean (all cleaned at S125 wrap) |
+| `.claude/maps/` | watermark `73dd816c` — 7 commits stale; refresh before dev dispatch |
+| S99 path-discipline counter | 11 |
+| Active arcs | M6.5 path-b Wave 2 (b.1 closed, b.2 PARTIAL) · MCP-V0 (B closed, A PARTIAL) |
 
 ---
 
-## S125 architectural arcs
-
-### 1. M6.5 path-b Wave 2 — 2 of 6 dispatched, 1 closed + 1 partial
-
-**M6.5.b.1 (`afbc566c`) — FIX-NATIVE match-arm newline separator — CLOSED.** parse-expr.js parseMatchExpr extended to accept newline as arm separator (in addition to `,` and `;`). 5-step incremental: inMatchArmBody ctx flag → peekStartsArmPattern + isAtArmBoundary helpers → parseMatchExpr separator dispatch → parseMatchArmPattern Dot+UpperIdent variant form → 16 unit tests + allowlist shrink (29 entries shrunk; 1 grew via deeper-leaf comparison). Agent stalled on response stream after 5.3h of work; all substantive work committed pre-stall. Landed via S67 file-delta.
-
-**M6.5.b.2 (`cd82eeb9`) — FIX-NATIVE structural-decl `<ident>` LHS — PARTIAL.** Six of eight productions supported with 28 passing unit tests. Three-layer fix: parse-stmt.js dispatcher (route `const <` to parseStructuralStateDecl) + parseStructuralStateDecl extension (attribute-region capture: pinned, server, default=, debounced=, throttled=, validators) + translate-stmt.js StateDecl arm + ast-stmt.js StmtKind.StateDecl. **Bug surfaced post-pre-commit-gate (pre-stall by agent):** native parseAssignmentLevelExpr is JS-grammar-only; doesn't implement live ast-builder Phase A1a Step 11.0b newline-as-statement-separator-for-state-decls boundary detection. Mario 3-line consecutive bare state-decls emit ONE state-decl with greedy initExpr instead of N. Different bug shape from pre-b.2 (which silently dropped all three); both wrong. Pre-commit gate is GREEN because `--parser=scrml-native` is opt-in. **Filed as M6.5.b.2.1 sub-unit follow-on (~2-4h).** Productions NOT supported: bare `<x>` (SPEC has no normative form), `<x>!` bang-pinned (SPEC normative is `<x pinned>`), `~ <x>` (SPEC §32 `~` is pipeline accumulator). Productions deferred for value-parse but raw-captured: defaultExpr, reactivity duration-grammar (sibling sub-units).
-
-### 2. MCP-V0 — 1 of 5 closed, 1 PARTIAL
-
-**MCP-V0.B (`e40c9cc3`) — Runtime helpers — CLOSED.** `compiler/runtime/stdlib/mcp.js` (NEW ~430 LOC) — install + uninstall + loadSidecars + stopWatchers + getCurrentVariant + getFormStatus + getChannelState. Sidecar loader resolves outputDir from explicit param or import.meta.url fallback; missing/malformed sidecars degrade to `[]`. fs.watch reload implemented (opt-in, persistent: false). 25 new unit tests pass. **Cross-file contract for C/D:** boot path MUST call install({reactive_get: _scrml_reactive_get, derived_get: _scrml_derived_get}) once before any tool handler invokes a helper (helpers throw attribution errors otherwise).
-
-**MCP-V0.A (`fa25ac31`) — Descriptor sidecars — PARTIAL.** Extractor + api.js wiring complete (868 LOC mcp-descriptors.ts + 37 LOC api.js). 4 sidecars: engines.json (with cellKey + kind: primary|derived), forms.json (with compoundKeys — the B-speculated optional field now load-bearing), channels.json, serverfns.json (dispatchable:false). Emitted next to chunks.json, same --emit-per-route gating. **NOT landed:** 4 per-sidecar unit tests + 1 integration test (multi-engine/form/channel/serverFn + resolved keys decode via B helpers) + degenerate SPA case test. **Filed as MCP-V0.A-tests follow-on (task #12).** Blocks MCP-V0.C until landed. Agent stalled (stream watchdog: 600s) after committing both substantive files BEFORE writing tests; PA-side recovery per S89 §13.2.
-
-### 3. Maps refresh (`5b1afb9d`)
-
-Full cold-start refresh at S125 OPEN. Watermark advanced d570341d → 73dd816c. 10 maps written, 9 skipped (not-applicable for compiler/language-toolchain shape). Substantive deltas: M6.6.b.2 walker landed, M6.6.b.3 transitive migration, M6.5.b.0 within-node-classifier + canary, M6.7 STOP ladder invariant recorded, corpus samples added.
-
----
-
-## Process incidents — three agent stalls handled
-
-**S99 path-discipline counter remains at 11 across 4 worktree dispatches this session.** The combination held: echo-pwd discipline aid + per-Edit absolute-path discipline + S112 git merge main startup step + S88 explicit isolation:"worktree". Zero leaks.
-
-**Three agent stalls, all gracefully recovered:**
-
-1. **MCP-V0.B (a94b4df180fb008b4) — CLEAN completion** — only stalled in the "summary streaming" phase well after final commit + clean exit. Reported FINAL_SHA + FILES_TOUCHED + STOP conditions + coordination signal. Full work landed.
-
-2. **M6.5.b.1 (a8bb97501fe5a8629) — STALL after 5.3h / 117 tool-uses, post-completion.** All 6 commits on branch; tests pass; allowlist coupled per S113. Recovery: standard S67 file-delta from worktree-branch tip.
-
-3. **MCP-V0.A (a03ab192db85596bb) — STALL at 600s no progress, mid-dispatch.** Extractor + api.js wiring committed (2 commits) before stall; tests not written. Recovery per S89 §13.2 partial: landed coherent portion + filed MCP-V0.A-tests follow-on.
-
-4. **M6.5.b.2 (ac5bb60eda1a55282) — COMPLETION + bug-surface, then STALL waiting on Edit-permission denial.** 5 commits landed. Agent surfaced a NEW STOP (boundary-detection bug post-pre-commit-gate) + 3-option PA recommendation. Recovery: landed Option B partial per user "wrap when what's going now is landed" direction + filed M6.5.b.2.1 follow-on.
-
-**Lesson:** the opt-in-gating of `--parser=scrml-native` continues to mask within-node regressions in the pre-commit gate. Both M6.7 STOP (S124) and now M6.5.b.2's boundary-detection bug surfaced ONLY when manually exercised under the opt-in flag. **The within-node canary at S125 OPEN was supposed to close this gap — and partially did, but it absorbs new bugs into the regenerated allowlist baseline rather than flagging them as regressions.** A future canary refinement should differentiate "improvement" (lower divergence) from "bug-shape-change" (same count, different cause).
-
----
-
-## Open threads / carry-forwards — surface at S126 OPEN
+## Open threads / carry-forwards (from S125 CLOSE — surface to user)
 
 ### M6.5 path-b Wave 2 (continuing)
-
 ```
-✅ M6.5.b.0 (S124)
-✅ M6.5.b.1 (S125 — afbc566c)
-🟡 M6.5.b.2 PARTIAL (S125 — cd82eeb9; .b.2.1 follow-on filed)
-⬜ M6.5.b.2.1 boundary-detection (~2-4h) — NEW from S125 b.2 dispatch
+✅ M6.5.b.0 (S124)   ✅ M6.5.b.1 (S125 afbc566c)   🟡 M6.5.b.2 PARTIAL (S125 cd82eeb9)
+⬜ M6.5.b.2.1 boundary-detection (~2-4h) — NEW from S125 b.2
 ⬜ M6.5.b.3 FIX-NATIVE hoist-gap recursion (~4-8h)
 ⬜ M6.5.b.4 FIX-NATIVE sql-ref envelope (~3-6h)
 ⬜ M6.5.b.5 ADAPT shape normalizer at api.js boundary (~3-6h)
@@ -105,103 +79,108 @@ Full cold-start refresh at S125 OPEN. Watermark advanced d570341d → 73dd816c. 
 ```
 
 ### MCP-V0 (continuing)
-
 ```
-✅ MCP-V0.B (S125 — e40c9cc3)
-🟡 MCP-V0.A PARTIAL (S125 — fa25ac31; tests follow-on filed as task #12)
-⬜ MCP-V0.A-tests follow-on (NEW from S125 A dispatch)
+✅ MCP-V0.B (S125 e40c9cc3)   🟡 MCP-V0.A PARTIAL (S125 fa25ac31; tests follow-on)
+⬜ MCP-V0.A-tests follow-on (NEW from S125 A; unblocks C)
 ⬜ MCP-V0.C scrml:mcp stdlib + 11 tools + MCP SDK (blocked by A-tests)
 ⬜ MCP-V0.D <program mcp> attr wiring (blocked by C)
 ⬜ MCP-V0.E E2E tests + adopter docs (blocked by D)
 ```
 
-### 4 queued adopter bugs (still queued post-MCP)
-
+### 4 queued adopter bugs (triaged per feedback_adopter_bug_diligence; gate = before fix-dispatch)
 1. **6nz-S** — `return not` + `const` mis-emit (HIGH, ~1-3h)
 2. **6nz-R** — `if=@derivedReactive` no-unmount (HIGH, ~2-4h)
 3. **GITI-018** — Multi-`scrml:` stdlib library-mode (HIGH blocker, ~2-4h)
 4. **GITI-015** — `is some` ternary + computed-member LHS (workaround exists, ~1-2h)
 
-### Build-story arc (still pending user refinement)
+### Build-story arc — 6 open Qs in `scrml-support/docs/build-story-research-roughing-2026-05-23.md` §4 (pending user refinement; gated on M6 cutover complete)
 
-6 open Qs in `scrml-support/docs/build-story-research-roughing-2026-05-23.md` §4.
-
-### Pre-existing carry-forwards (unchanged from S124)
-
-V-kill READ-side fire · dev.to article updates · Living Compiler retraction · scrml.dev canonicalization · SPEC-INDEX Quick-Lookup mini-index stale · §29 vanilla-interop divergence · Generator policy · MK4 lazy-require ESM cycle · Bug 9 dashboard async-not-awaited · Dashboard still broken at runtime · `~snapshot = {...}` tilde-decl emits raw tilde sigil · `eb941333` stray commit · Adopter corpus migration backlog.
-
----
-
-## v0.7 critical path (revised post-S125)
-
+### v0.7 critical path (post-S125)
 ```
-M6.5.b.2.1 boundary-fix (~2-4h)              NEW from S125
-M6.5 Wave 2 remaining (.b.3-.b.6) parallel-eligible (~11-22h)
-M6.5.b.7 closure (~2-3h)
-M6.7 Phase A flag flip re-dispatch (~3-6h)
-SOAK (≥1 session)
-M6.8 Phase B legacy deletion (~12-20h)
-v0.7 cut
+M6.5.b.2.1 (~2-4h) → M6.5 .b.3-.b.6 parallel (~11-22h) → .b.7 closure (~2-3h)
+→ M6.7 Phase A flag flip re-dispatch (~3-6h) → SOAK (≥1 session) → M6.8 deletion (~12-20h) → v0.7 cut
+Revised total ~45-90h. MCP-V0 parallel: A-tests + C + D + E (~40-60h).
 ```
 
-**Revised v0.7 estimate: ~45-90h.** S125 work consumed ~10-15h of the original 50-90h S124 estimate (b.1 + b.2 6-of-8 productions), but added M6.5.b.2.1 (~2-4h). Net push-out: <1h. The path is intact.
-
-**MCP-V0 in parallel:** A-tests follow-on + C + D + E ~40-60h. Parallel-eligible with M6.5 Wave 2 remaining work.
-
----
-
-## Notable structural findings (worth banking)
-
-1. **Opt-in-flag gating obscures regressions, REPEATEDLY.** M6.7 STOP (S124) and M6.5.b.2 boundary bug (S125) both surfaced ONLY when manually exercised under `--parser=scrml-native`. The pre-commit gate's silence on these is a false-green class. **The within-node canary absorbs new bugs into the regenerated allowlist baseline** instead of flagging them as regressions. Future canary refinement should differentiate improvement vs bug-shape-change.
-
-2. **Agent stall pattern is normalized.** 3 of 4 agents this session stalled mid- or post-completion. The S89 §13.2 partial-recovery protocol + S83 commit-discipline two-sided rule held: all coherent work landed; zero data loss. Two PARTIAL landings filed as named follow-ons.
-
-3. **Sub-unit coordination via SCOPING shape works.** B built against documented SCOPING §3 shapes with defensive fallbacks for two speculative fields (compoundKeys / cellKey). A's actual emitter INCLUDED both, making B's optimal-path active. **The "build to SCOPING + defensive fallback" pattern is reusable when dispatching paired sub-units.**
-
-4. **Edit-permission denial as STOP signal.** M6.5.b.2 agent's final action was an Edit denial (system-protected file), at which point the agent surfaced the bug + recommendation rather than retry. **Edit-permission gates can act as natural pause points** for agent-decisions that need user input — worth designing into briefs for ambiguous-decision moments.
+### Pre-existing carry-forwards (unchanged)
+V-kill READ-side fire · dev.to article updates · Living Compiler retraction (pending user stamp+publish) · scrml.dev canonicalization · SPEC-INDEX Quick-Lookup mini-index stale · §29 vanilla-interop divergence (user has not ruled) · Generator policy · MK4 lazy-require ESM cycle · Bug 9 dashboard async-not-awaited · Dashboard still broken at runtime · `~snapshot = {...}` tilde-decl emits raw tilde sigil · `eb941333` stray commit · Adopter corpus migration backlog · v0.4 release-cut (queued, unscheduled).
 
 ---
 
-## Wrap step status
-
-| Step | Status |
-|---|---|
-| 1. Hand-off | ✅ this file |
-| 2. Master-list | ⏳ S125 entry queued (next) |
-| 3. CHANGELOG | ⏳ S125 Recently Landed block queued (next) |
-| 4. Inbox/outbox | ✅ inbox empty; no closures this session |
-| 5. Test suite | ✅ 21,114 pass / 0 fail (allowlist rebase `8f4378ca` closed the false-fail gap) |
-| 6. Working tree | ⏳ verify clean after wrap-docs commit |
-| 6b. Worktree cleanup | ✅ all 3 stale worktrees cleaned |
-| 7. Push | ⏳ AUTHORIZED — 16 scrmlTS + 1 scrml-support commits |
-| 8. Meta-docs | ✅ no meta-doc state changes this session |
+## Structural lessons banked (recent — watch for recurrence)
+- **Opt-in-flag gating obscures regressions, REPEATEDLY** (M6.7 STOP S124 + M6.5.b.2 boundary bug S125). Pre-commit gate EXCLUDES top-level `parser-conformance-*.test.js`; parser-shape-changing landings must re-run within-node canary before wrap. The canary absorbs new bugs into the regenerated allowlist baseline rather than flagging them as regressions — future refinement should differentiate improvement vs bug-shape-change.
+- **Agent stall pattern normalized** — 3 of 4 S125 agents stalled; S89 §13.2 partial-recovery + S83 commit-discipline held, zero data loss.
 
 ---
 
-## Session-start checklist for S126 PA
-
-1. Cross-machine sync (per pa.md): `git fetch origin && git pull --rebase origin main` for BOTH scrmlTS + scrml-support before reading hand-off.
-2. Read `pa.md` pointer → `../scrml-support/pa-scrmlTS.md` IN FULL.
-3. Read `docs/PA-SCRML-PRIMER.md` IN FULL.
-4. Read `compiler/SPEC-INDEX.md` IN FULL.
-5. Read `master-list.md` §0 IN FULL — the S125 entry will be the live delta.
-6. Read this `hand-off.md` (S125 CLOSE) — rotate to `handOffs/hand-off-128.md` at S126 OPEN.
-7. Read recent contentful user-voice — S125 entries will be in `scrml-support/user-voice-scrmlTS.md` if any were appended at wrap.
-8. **Maps refresh** — watermark `73dd816c`; ~4 commits stale at CLOSE; refresh before any S126 dev dispatch.
-9. **Inbox triage gate**: empty as of S125 close.
-10. Next-priority candidates:
-    - **MCP-V0.A-tests follow-on** — small follow-on dispatch (~3-5h); unblocks MCP-V0.C
-    - **M6.5.b.2.1 boundary-detection follow-on** — ~2-4h; closes b.2 properly
-    - **M6.5.b.3-.b.6** — 4 parallel-eligible FIX-NATIVE + ADAPT dispatches (~11-22h)
-    - **MCP-V0.C/D/E** — 3-stage dependent chain after A-tests lands
-    - **4 queued adopter bugs** — still queued
-11. Report: caught up + next priority.
+## Next-priority candidates (for user direction)
+- **MCP-V0.A-tests follow-on** (~3-5h) — unblocks MCP-V0.C
+- **M6.5.b.2.1 boundary-detection** (~2-4h) — closes b.2 properly
+- **M6.5.b.3-.b.6** — 4 parallel-eligible dispatches (~11-22h)
+- **MCP-V0.C/D/E** — dependent chain after A-tests
+- **4 queued adopter bugs** — still queued
 
 ---
+
+## Cross-repo sends (S126)
+
+Closed a notice gap the S124 wrap left open (master-list S124 claimed "2 closure replies sent" — they were NOT actually in the sibling inboxes):
+- **→ giti** `2026-05-24-0606-scrmlTS-to-giti-giti-017-fix-landed.md` — GITI-017 regex-`not`-corruption fix (`f181d60a`, in HEAD `dc073b94`); action: revert char-class workaround + close.
+- **→ 6nz** `2026-05-24-0606-scrmlTS-to-6nz-bug-p-fix-landed.md` — bug-P chunker closure fix (`d570341d`, in HEAD `dc073b94`; covers `animation` chunk too per their "in case" flag); action: re-smoke p5/p6 + close. Re-noted Bug L still open (M6-subsumed).
+
+Both `needs: fyi`. No push of sibling repos by this PA — they pull on their own session-start.
+
+**Then 3 new messages arrived mid-session (0609-0613) — triaged + archived to read/:**
+- **GITI-017 reopened (PARTIAL).** giti re-verified at `dc073b94`: my 0606 fix-landed notice was WRONG. `f181d60a` fixed the absence-sentinel path (`(not)`→`(null)` ✅) but the boolean-negation `not `→`!` lowering STILL corrupts regex bodies (`/not a jj repo/i`→`/!a jj repo/i`). PA independently confirmed. **Correction notice sent** (`2026-05-24-0618-...giti-017-CORRECTION`). Root cause located: `rewriteNotKeyword` (rewrite.ts:620) got the regex/comment fence in f181d60a (absence path); the boolean-negation lowering fires in a branch that didn't. Fix = extend the same fence. Queued as GITI-017-residual (HIGH — silent corruption).
+- **6nz: P verified-CLOSED** (p5 18/18, p6 7/7 — my notice was correct), **Q migrated** (closed by Unit CC), **R RETRACTED** (was a Q artifact, not a standalone if= bug — PULL from queue), only **bug-S** left active (`return not`+const → `return !const`; hard parse fail, narrow, workaround `return null`). L+T deferred to M6.
+- **GITI-019 NEW (HIGH, UI-blocking giti).** `for…lift` interp with top-level `||`/`&&` emits illegal `a || b ?? ""` (missing parens; ES2020 `??`+`||` rule). Root cause: lift-loop text builder `createTextNode(String(expr ?? ""))` doesn't paren a LogicalExpression inner. Clean repro. Direct top-level interp unaffected (different emit path).
+
+### Queued adopter-bug list (triaged; gate = before fix-dispatch)
+**LANDED + verified this session:** GITI-017-residual (`3341f34d`) · GITI-019 (`fa665e9d`) · 6nz-P (S124, 6nz-verified). Fix-landed notices sent + PA-independently verified.
+**IN FLIGHT:** Bug W (CRITICAL — see ledger).
+**Still queued:**
+1. **GITI-018** (HIGH blocker — multi-`scrml:` stdlib library-mode; needs scoping)
+2. **6nz-S** (MED — `return not`+const mis-emit; needs locate-survey; workaround `return null`)
+3. **6nz-V** (MED — `class:NAME` on for-lift stale; **RE-VERIFY AFTER Bug W** — its repro is Bug-W-contaminated; emit IS reactive so symptom is subtler, likely per-iteration `it`-capture / reused-node re-subscribe)
+4. **6nz-U** (LOW — bare `/` after close-tag → E-SYNTAX-050; likely M6-subsumed)
+5. **GITI-015** (LOW — is some ternary + computed LHS; workaround exists)
+(6nz-P/Q CLOSED · 6nz-R RETRACTED · 6nz-L/T deferred-to-M6 · meta-effect-write-during-render: 6nz not-filing; `W-EFFECT-WRITE-DURING-RENDER` lint parked as candidate)
+
+## Maps (S126)
+Refreshed `73dd816c`→`dc073b94`, committed `16042a30`. NOTE: now ~4 commits stale (MCP/017/019 + Bug-W in flight) — refresh before next dev dispatch that touches mapped surfaces. The refresh SURFACED the A↔B contract gap (Rule-4 win: maps-vs-source beat A's false self-report).
+
+## S126 dispatch ledger
+**LANDED (S67 file-delta, PA-authored, hook-gated, 0 regressions each):**
+- `55325b10` MCP-V0.A-tests + A↔B form-contract fix (+30). **MCP-V0.A CLOSED → MCP-V0.C unblocked.** Nested compound keys (submitted decodes) + engine cellKey + channel logic-body descent bug also fixed.
+- `3341f34d` GITI-017-residual — 2nd not-lowering site (`expression-parser.ts::preprocessForAcorn`) fenced via shared `codegen/code-segments.ts` leaf module (+11). Verified `/not a jj repo/i` verbatim.
+- `fa665e9d` GITI-019 — `emit-lift.js` paren-wrap before `?? ""` (+4). Verified node --check pass. **PATH-DISCIPLINE INCIDENT #12** (Edit/Bash filesystem divergence leaked into main; S99 recovery; documented in commit body).
+
+- `a91ad5de` **Bug W (CRITICAL, 6nz P0)** — precedence-aware `emitBinary` in `codegen/emit-expr.ts` (Approach B, user-ratified over preserveParens). Fixes silent paren-drop `(2+3)*4`→`2+3*4` (+24). Verified `(2 + 3) * 4` = 20. No-double-paren confirmed (self-bracketed forms excluded). 6nz fix-landed notice sent + verified. **PATH-DISCIPLINE INCIDENT #13** (2nd consecutive — Edit/Bash divergence leaked to main; agent self-recovered; PA dual-verified main clean pre-landing).
+
+**WAVE STATUS (post-S126 adopter/MCP wave — supersedes any earlier in-flight bullets below):**
+- ✅ **MCP-V0.C LANDED** `be7a3ded` — 11 tools over stdio, SDK `@modelcontextprotocol/sdk@1.29.0` (MIT), +24. **MCP-V0.C CLOSED.** D/E remain (D: add `mcp` to stdlib bundling allowlist + inject `startMcpServer` on `<program mcp>`; Tool-7 shape gap: chunks.json has no `serverFnNodeIds` → `get_reachable_server_fns` degraded-honest, needs A-side nodeId). Incident #14 (cd-leak of bun-add into MAIN; agent reverted, PA dual-verified clean).
+- ✅ **GITI-018 LANDED** `32c2fd39` — `rewriteStdlibImports` now rewrites ALL `scrml:` imports in `--mode library` (root cause: `^import` anchor disallowed leading indentation, not the "no /g" guess). +4. **Mailbox prototype WORKED** (agent polled startup/commit/final, seed-only, `mail-ack: none`).
+- 🛑 **dashboard-async STOPPED (no fix, by design — bounded-brief working as intended).** Diagnosed a REAL pre-existing compiler bug (see TRACKED ITEM). Worktree a7ddf56d produced no landable work (diagnostic instrumentation reverted). Incident #15 (cwd-reset into MAIN for a compile/run command leaked diagnostic instrumentation to `scheduling.ts`; PA reverted to HEAD — nothing lost, no fix to preserve).
+- ⏳ **6nz-S (af913acc) STILL RUNNING** — `preprocessForAcorn` `return not` fix. Mailbox + Bash-edit. Land + independently verify when it returns; then send giti/6nz fix-landed notices for the wave.
+
+### NEW TRACKED ITEM — compiler-managed-async gap (phantom `route.functionName`)
+`scheduling.ts::hasServerCallees`/`isServerCallExpr` read `route.functionName` — a field that **does not exist** on `FunctionRoute` (only `functionNodeId`). So `serverFnNames` is **always empty** via the routeMap path → server-fn-calling CLIENT functions never get `async`/`await`. GITI-001 worked only as an independent post-emit string rewrite. **This is the corpus-sweep's underlying compiler gap** — full-stack runtime breakage (dashboard, ~certainly 03-contact-book `loadContacts`, the "≥6 runtime bugs"). 3-layer fix: L1 fix `serverFnNames` resolution (small, scheduling.ts — reuse `buildServerFnNames(fnNameMap)` pattern) · L2 auto-await plain `const`/`let`-decl + bare-expr server-fn inits (medium, emit-logic.ts; today only `!{}` guarded-expr auto-awaits) · L3 **transitive async-coloring across client functions = NEW SUBSYSTEM** (per-file client-call-graph fixpoint + await-insertion at every async-client-fn call site; broad blast radius). **DISPOSITION (agent rec + PA + user "get it right"): DEFER to dedicated A9-class async-coloring work; do NOT blind-patch; all-3-or-none (L1+L2 alone = half-fixed dashboard).** First-class item; anchors the post-M6 full-stack-runtime cluster. Refs: dashboard NOTES + corpus-sweep PLAN + GITI-001 `d23fd54` / GITI-005 `e585dba`.
+
+### S126 directive — INTENTIONAL & EXACTING THROUGH M6 (user, this session)
+User (verbatim): *"from here. lets be intentional and exacting through the rest of M6. Still parallel if safe. but let's get it right."* → M6 discipline: (1) one M6.5 unit at a time, or genuinely-disjoint pairs — NOT a fire-hose (the 5 path-discipline near-incidents this session scale with concurrency). (2) within-node canary re-run after EVERY parser-shape change (pre-commit gate EXCLUDES `parser-conformance-*`; S125 false-green lesson). (3) Bash-edit + no-`cd` mitigation in every M6 brief (pa.md S99 pt 5). (4) per-unit PA diff review + dual-verify before each file-delta. (5) M6.7 flag-flip: build the "what-breaks-if-flipped" within-node-shape diff harness BEFORE flipping (the S124 845-failure lesson). (6) no premature M6.8 deletion — parity RIGHT first. **WRAP user-voice TODO: append this directive verbatim.**
+- **GITI-018 (ab24dfdb)** — fix `rewriteStdlibImports` (api.js) to rewrite ALL `scrml:` imports in `--mode library` (one-shot bug) + leading-comment case. Pinned to that function; STOP if it balloons into shared api.js regions (MCP-C collision guard). Carries Bash-edit mitigation + mailbox.
+- **6nz-S (af913acc)** — tighten `preprocessForAcorn` `not\s+operand` rewrite (expression-parser.ts) so `return not` (+ keyword-following / cross-statement-boundary) doesn't mis-lower to `return !`. Builds on GITI-017 (`3341f34d`). Carries Bash-edit mitigation + mailbox.
+
+**S126 INFRA ADDS:** (1) **Bash-edit mitigation** ratified into pa.md S99 addendum point 5 — dev briefs instruct Bash-only edits on worktree-abs paths (the #12/#13 Edit/Bash-divergence fix); now in every new brief. (2) **Mid-flight mailbox prototype** — `.claude/agent-mail/<slug>.md` (gitignored, MAIN), agent polls at every commit/doc checkpoint, PA appends course-corrections. First live use on GITI-018 + 6nz-S. If it works, formalize in pa.md; if not, retire. (MCP-C + earlier dispatches predate it.)
+
+**WRAP TODO (don't miss):** append S126 to `user-voice-scrmlTS.md` — incl. the user's **Approach-B ratification for Bug W** (picked precedence-aware printer over preserveParens via AskUserQuestion) + the session's other contentful directives ("the MCP track / make sure bug fix notices are in the msgs", "fire C in parallel with W", the build-bench feasibility ask).
+
+**RECURRING INFRA SIGNAL:** path-discipline incidents #12 (GITI-019) + #13 (Bug W) were BOTH the Edit/Bash filesystem-divergence class, two consecutive dispatches. The deferred PreToolUse hook (reject subagent Write/Edit whose abs path is in main, not the active worktree) is now the highest-leverage infra fix outstanding — surface to user for v0.4+ prioritization.
+
+**Worktrees retained (clean at wrap):** ab36f664 (MCP-A) · a01d4c35 (017) · a6aa73fd (019) · a44e5c9c (Bug W) · a2939a2f (MCP-C, running).
+
+## Build-time bench (S126 — user asked feasibility; AWAITING decision)
+Native-parser speed vs BS+Acorn — never benchmarked (S119 open measurable, "worth before M6"). Findings: `--parser=scrml-native` at CLI runs native as an OBSERVABILITY SHADOW (compile.js:109 — legacy AST still canonical; S119 changelog says "routes" — DISAGREEMENT, verify before trusting). Single-file CLI `time` is Bun-startup-dominated (legacy 0.10s == native 0.10s). **Right bench = a parse-stage micro-harness** (BS+Acorn front-end vs native front-end, in-process, N iters over corpus, front-end-only timing) — doesn't exist yet (~1-2h). Caveats surfaced to user: total build delta likely small (front-end is 1 of ~10 shared stages; native's payoff is architectural not speed); parity-limited (native errors on trucking-dispatch/mario — cleanest corpus is the C2 999/1000 set). PA offered to build the harness (zero-collision); user has not yet said go/hold.
 
 ## Tags
-
-#session-125 #CLOSE #4-agent-parallel-wave #3-stalls-recovered #2-partial-landings
-#m65-b1-closed #m65-b2-partial-b21-followon #mcp-v0-b-closed #mcp-v0-a-partial-tests-followon
-#opt-in-gating-obscures-regressions-lesson #zero-path-discipline-incidents
-#push-authorized #wrap-complete
+#session-126 #OPEN #3-fixes-landed-verified #bug-w-critical-in-flight #mcp-v0-a-closed #path-discipline-incident-12 #notices-sent #mcp-c-next
