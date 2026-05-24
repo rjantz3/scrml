@@ -211,3 +211,54 @@ Three commits:
   allowlist update — verified by pre-commit gate).
 - Progress.md b.2 section appended via manual merge over b.1's landing.
 
+
+# M6.5.b.2.1 — newline-as-statement-separator boundary for consecutive structural state-decls
+
+- [start] Worktree: /home/bryan/scrmlMaster/scrmlTS/.claude/worktrees/agent-a14b40b6f589e6748
+- Startup verification PASSED: pwd under worktree prefix, toplevel==worktree, status clean, merged main 8cccc0f6, bun install ok, pretest populated dist.
+- Bug confirmed (native repro): `<coins>=0\n<lives>=3\n<gameOver>=false` parses to 1 StateDecl + 2 errors (greedy `<` relational over-consumption). Semicolon-separated control parses to 2/3 nodes correctly. `const <a>=1\nconst <b>=2` ALREADY parses to 2 nodes (const is a statement keyword the binary climb stops at). Bare-expr `foo()\n<y>=1` -> 1 node + 1 error (case 2 over-consumption).
+- Baselines captured:
+  - strict-pass canary: 1000/1001 (99.9%), histogram {"EXACT":964,"LIVE-DEGENERATE":12,"GAP-state-block":1,"LIVE-PHANTOM":1,"DEFERRAL-test-block":21,"LIVE-HOIST-MISCLASSIFY":2}
+  - within-node canary: 1001 files, 134122 total divergences, {"KIND-NAME":3456,"FIELD-SHAPE":14590,"MISSING-FIELD":42290,"EXTRA-FIELD":19047,"COUNT-LENGTH":1431,"SPAN-COORD":53308,"NESTED-SHAPE":0,"PARSE-FAILURE":0}
+- Mechanism chosen: (a) ctx-flag mirroring `noIn`/`inMatchArmBody`, inline opener-shape lookahead in parse-expr (mirroring inlined `peekStartsArmPattern`). No cross-module import (avoids the parse-stmt->parse-expr cycle).
+
+## M6.5.b.2.1 — LANDED (worktree branch; PA does S67 file-delta to main)
+
+### Mechanism (circular-import constraint)
+Chose **(a)** ctx-flag `atStateDeclStmtPos` + INLINE opener-shape lookahead in parse-expr.
+- parse-stmt.js -> imports from parse-expr.js (parse-expr is the lower layer), so parse-expr CANNOT import the `structuralStateDeclLeadFollows` predicate back without a cycle.
+- Mirrors the EXISTING precedent in the exact file: `noIn` / `inGenerator` / `inMatchArmBody` ctx-flags, and the inline `peekStartsArmPattern` (a parse-expr-local mirror of the live S27 startsArmPattern). The new `peekStartsStructuralStateDecl` is the parse-expr-local mirror of parse-stmt's `structuralStateDeclLeadFollows` (same `()`/`{}`/`[]` attr-region balancing + same fused-`>=` scanIdx===2 carve-out).
+- No cross-module restructuring; 2 source files touched (within STOP bounds).
+
+### Files touched
+- compiler/native-parser/parse-expr.js: add `atStateDeclStmtPos` ctx slot; extend `withInAllowedSubExpr`/`restoreNoIn` to clear+restore it inside grouped sub-exprs (so a `<` at depth>0 stays a comparison); add `peekStartsStructuralStateDecl` + `isAtStateDeclBoundary`; add the parseBinary climb-loop LessThan guard.
+- compiler/native-parser/parse-stmt.js: init `atStateDeclStmtPos:false` in makeParseStmtContext; set the flag (saved+restored) around (1) the state-decl initializer parse (both fused-`>=` and whitespace-`=` arms) and (2) parseExprStatement (case 2).
+- compiler/tests/unit/m65-b2-1-statedecl-boundary.test.js: NEW, 17 tests.
+- compiler/tests/parser-conformance-within-node-allowlist.json: rebaselined to current raw counts.
+
+### NOTE — .scrml self-host sources NOT touched
+parse-expr.scrml / parse-stmt.scrml lack even the M6.5.b.1 `inMatchArmBody` flag (the .scrml self-host is allowed to lag; .js is the M5/M6 active surface). This change follows that precedent — .js only. Follow-on to mirror into .scrml is deferred with the rest of the self-host parity backlog.
+
+### Verification
+- New unit tests: 17 pass / 0 fail.
+- Existing m65-b2-structural-state-decl.test.js: 28 pass / 0 fail (no regression).
+- Within-node canary: 1005 pass / 0 fail, PARSE-FAILURE 0. Allowlist rebaselined in the SAME commit.
+- Strict-pass canary: 1000/1001 (99.9%) HELD (identical to baseline; histogram unchanged).
+- Full `bun test compiler/tests/`: 21234 pass / 174 skip / 1 todo / 0 fail (3 consecutive clean runs; one earlier run showed a 2-fail flake in non-parser browser/timing tests — not reproducible).
+
+### Within-node histogram before -> after (corpus aggregate, total 134122 -> 137888)
+| Class | Before | After | Delta | Note |
+|---|---|---|---|---|
+| KIND-NAME | 3456 | 3393 | -63 | SHRINK — parse-correctness gain (consecutive decls now N nodes) |
+| COUNT-LENGTH | 1431 | 1319 | -112 | SHRINK — fewer wrong-length collapsed nodes |
+| EXTRA-FIELD | 19047 | 18373 | -674 | SHRINK |
+| FIELD-SHAPE | 14590 | 15068 | +478 | GROW — more correctly-separated nodes now diffed |
+| MISSING-FIELD | 42290 | 42576 | +286 | GROW — same comparison-surface effect |
+| SPAN-COORD | 53308 | 57159 | +3851 | GROW — each newly-separated decl has its own span vs live |
+| NESTED-SHAPE | 0 | 0 | 0 | |
+| PARSE-FAILURE | 0 | 0 | 0 | no new parse failures |
+
+The total GROWTH is the "more correct parse -> more comparison surface" artifact, NOT a regression. Evidence: native state-decl counts moved toward the live oracle (Mario 3->5 native vs 17 live; odin-filebrowser 1->12 vs 38; load-detail 1->12 vs 32) and native TOTAL node counts moved CLOSER to live (Mario 325->317 vs 318 live; odin 1251->1207; load-detail 1395->1351). The previously-greedy single state-decl carried a garbage init blob inflating node count; correct separation deflates total nodes toward live. The remaining native<live state-decl gap is markup-RHS Shape 2 decls, explicitly OUT OF SCOPE per parse-stmt.js (`decl-with-spec` Shape 2 comment).
+
+### STOP conditions
+None hit. Case (2) (bare-expr statement boundary) was covered by the SAME localized ctx-flag (no statement-loop architecture change). Mechanism stayed within 2 source files. No unexplained class regression.

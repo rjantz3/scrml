@@ -170,6 +170,14 @@ export function makeParseStmtContext(tokens, source) {
         recovery:         makeRecovery(),
         functionDepth:    0,
         inGenerator:      false,
+        // M6.5.b.2.1 — `atStateDeclStmtPos` is shared with the expr parser
+        // (parse-expr's makeParseExprContext carries the same slot). This
+        // statement-driven context (parseProgram / parseStatementList) is the
+        // primary bug path: it threads the SAME ctx into parseBinary, which
+        // reads the flag to stop the `<` climb at a newline-then-state-decl
+        // boundary. Initialized false here (mirroring `inGenerator`); set true
+        // only around a state-decl initializer / a bare expression statement.
+        atStateDeclStmtPos: false,
         source:           source ?? null,
     };
 }
@@ -731,7 +739,21 @@ export function parseBlock(ctx) {
 // fully-parsed body, not a token-range stub).
 export function parseExprStatement(ctx) {
     const prior = enterMode(ctx, ParseMode.InExpression);
+    // M6.5.b.2.1 — set `atStateDeclStmtPos` around the statement expression.
+    // This is the second statement-collector position (besides a state-decl
+    // initializer): a bare expression statement followed on the NEXT LINE by a
+    // `<NAME ...> =` state-decl opener (`foo()` newline `<y> = 1`) must NOT
+    // over-consume the `<` as a relational operator into the bare expression.
+    // parseBinary's LessThan guard reads this flag and STOPS at the boundary.
+    // Cleared inside any grouped sub-expression by withInAllowedSubExpr, so a
+    // `<` at nesting depth > 0 stays a comparison. Mirrors the universal
+    // statement-collector scope of the live ast-builder collectExpr Step
+    // 11.0b. Saved + restored (a nested parseExprStatement, e.g. inside a
+    // re-entered BlockStub, restores correctly).
+    const sdPrior = ctx.atStateDeclStmtPos;
+    ctx.atStateDeclStmtPos = true;
     const expr = parseExpression(ctx);
+    ctx.atStateDeclStmtPos = sdPrior;
     exitMode(ctx, prior);
 
     reenterBlockStubs(expr);   // M3.3 — tie off the function-expr body seam
@@ -3190,16 +3212,32 @@ export function parseStructuralStateDecl(ctx, isConst) {
     // The initializer. The whitespace form has its `=` still at the cursor;
     // the fused `>=` form already consumed its `=` signal. A missing `=`
     // records a diagnostic and recovers (the node is still emitted).
+    //
+    // M6.5.b.2.1 — set `atStateDeclStmtPos` around the initializer parse. This
+    // is one of the two statement-collector positions (the other is
+    // parseExprStatement) where a newline-then-`<NAME ...> =` sequence is a
+    // SIBLING state-decl boundary, NOT a relational `<` in the initializer.
+    // parseBinary's LessThan guard (isAtStateDeclBoundary) reads this flag and
+    // STOPS the climb at the boundary, leaving the sibling `<` for the
+    // enclosing statement loop. Without it, `<x> = 0` newline `<y> = 1`
+    // collapses to one StateDecl with a greedy garbage init. Saved + restored
+    // (not just set) so a NESTED state-decl-init context restores correctly.
     let init = null;
     if (fusedGtEq === true) {
         const prior = enterMode(ctx, ParseMode.InExpression);
+        const sdPrior = ctx.atStateDeclStmtPos;
+        ctx.atStateDeclStmtPos = true;
         init = parseAssignmentLevelExpr(ctx);
+        ctx.atStateDeclStmtPos = sdPrior;
         exitMode(ctx, prior);
         reenterBlockStubs(init);
     } else if (currentKind(cursor) === TokenKind.Assign) {
         advance(cursor);   // consume `=`
         const prior = enterMode(ctx, ParseMode.InExpression);
+        const sdPrior = ctx.atStateDeclStmtPos;
+        ctx.atStateDeclStmtPos = true;
         init = parseAssignmentLevelExpr(ctx);
+        ctx.atStateDeclStmtPos = sdPrior;
         exitMode(ctx, prior);
         reenterBlockStubs(init);
     } else {

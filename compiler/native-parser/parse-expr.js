@@ -152,6 +152,22 @@ export function makeParseExprContext(tokens, source) {
         // greedily concat to `.B.C` as member access). Mirrors the live
         // ast-builder's S27 startsArmPattern boundary detection.
         inMatchArmBody:   false,
+        // M6.5.b.2.1 — `atStateDeclStmtPos` is the "are we parsing an
+        // expression at logic-body STATEMENT position?" boolean. Set true by
+        // parse-stmt around (a) a structural state-decl initializer parse and
+        // (b) a bare expression-statement parse — the two statement-collector
+        // sites the live ast-builder's Step 11.0b (collectExpr) governs.
+        // parseBinary consults it: at a newline-crossed `<` that opens a
+        // state-decl shape (`<NAME ...> = ` / `const`-free; the const form is
+        // already a statement-keyword the climb stops at) it STOPS rather than
+        // consuming `<` as a relational operator and greedily swallowing the
+        // next-line sibling decl. Same orthogonal-to-ParseMode shape as `noIn`
+        // / `inMatchArmBody`; it is a question ABOUT the climb, not a rule-
+        // dispatch variant. Default false. CLEARED inside any grouped sub-
+        // expression (paren / array / object / call-arg / template) by
+        // withInAllowedSubExpr — a `<` at nesting depth > 0 is always a
+        // comparison, never a statement boundary.
+        atStateDeclStmtPos: false,
         source:           source ?? null,
     };
 }
@@ -199,14 +215,21 @@ export function exitNoInScope(ctx, prior) {
 // no-In scope governs the HEAD's top-level climb only; a grouped sub-expr
 // has its own scope. Used by parseParenExpression, parseArrayLiteral,
 // parseObjectLiteral, parseCallArguments, parseTemplateLiteral.
+// M6.5.b.2.1 — these also save+clear+restore `atStateDeclStmtPos`. A grouped
+// sub-expression is NEVER a statement-collector position: a `<` inside
+// `(...)` / `[...]` / `{...}` / call-args / a `${...}` template hole is a
+// comparison, never a state-decl statement boundary. The prior is now an
+// object carrying BOTH slots; callers treat it opaquely (save -> restore).
 export function withInAllowedSubExpr(ctx) {
-    const prior = ctx.noIn;
+    const prior = { noIn: ctx.noIn, atStateDeclStmtPos: ctx.atStateDeclStmtPos };
     ctx.noIn = false;
+    ctx.atStateDeclStmtPos = false;
     return prior;
 }
 
 export function restoreNoIn(ctx, prior) {
-    ctx.noIn = prior;
+    ctx.noIn = prior.noIn;
+    ctx.atStateDeclStmtPos = prior.atStateDeclStmtPos;
 }
 
 // --- enterFunctionScope / exitFunctionScope — generator scope save +
@@ -604,6 +627,25 @@ export function parseBinary(ctx, minPrec) {
         // KwOf is not a binary operator at all — for-of is a STATEMENT-level
         // construct dispatched by the for-head parser.)
         if (kind === TokenKind.KwIn && ctx.noIn === true) {
+            break;
+        }
+
+        // M6.5.b.2.1 — newline-as-statement-separator for structural state-
+        // decls. At logic-body STATEMENT position (ctx.atStateDeclStmtPos), a
+        // `<` that begins a new line AND opens a state-decl shape
+        // (`<NAME ...> = ` / `<NAME>= ` / `<NAME ...> :`) is a STATEMENT
+        // BOUNDARY, not a relational `<` operator. Without this, consecutive
+        // bare state-decls (`<x> = 0` newline `<y> = 1`) over-consume: the `<`
+        // at precedence 8 greedily swallows the next-line sibling decl into the
+        // first decl's initializer (1 garbage node instead of N). Mirror of the
+        // live ast-builder collectExpr Step 11.0b (ast-builder.js:2689-2725).
+        // isAtStateDeclBoundary gates on (flag set) AND (newline crossed) AND
+        // (opener shape) — so a same-line `<x> = a < b ? 1 : 2` comparison, a
+        // `+`-continued multi-line init, and a `< b >= c` non-opener all stay
+        // comparisons. The flag is cleared at nesting depth > 0 by
+        // withInAllowedSubExpr, so a `<` inside parens/brackets/braces/args is
+        // never a boundary.
+        if (kind === TokenKind.LessThan && isAtStateDeclBoundary(ctx)) {
             break;
         }
         const prec = binPrec !== undefined ? binPrec : logPrec;
@@ -2877,6 +2919,110 @@ export function isAtArmBoundary(ctx) {
     if (prev === 0 || curr === 0) return false;
     if (curr <= prev) return false;
     return peekStartsArmPattern(cursor);
+}
+
+// --- peekStartsStructuralStateDecl — does the token sequence at the cursor
+// LOOK LIKE a `<NAME ...> = ` / `<NAME ...> :` / fused `<NAME>= ` structural
+// state-decl opener? M6.5.b.2.1 — the parseBinary newline-as-separator guard
+// uses this (via isAtStateDeclBoundary) to STOP rather than consume the `<`
+// as a relational operator and greedily swallow a next-line sibling decl.
+//
+// This is the parse-expr-local mirror of parse-stmt's
+// `structuralStateDeclLeadFollows` (parse-stmt.js:2947). It CANNOT import that
+// predicate — parse-stmt imports parse-expr (parse-expr is the lower layer),
+// so an import back would be a cycle. The opener-shape scan is duplicated here
+// exactly (same `()`/`{}`/`[]` attr-region balancing, same fused-`>=`
+// scanIdx===2 carve-out, same `>` then `=`/`:` decl-signal confirmation) so
+// the two predicates agree on the shape. This is the SAME inline-mirror
+// pattern M6.5.b.1 used for `peekStartsArmPattern` (a parse-expr-local mirror
+// of the live ast-builder's S27 startsArmPattern).
+//
+// Cursor is positioned at the candidate `<` (LessThan). Returns false for an
+// ordinary markup-as-value `<div>...</>` (a markup tag's `>` is followed by
+// content, not a `=`/`:` decl signal) and for a multi-line comparison whose
+// `< NAME ...` does not close to a `>` + decl-signal (e.g. `a\n< b >= c` — the
+// `>=` after an attr-bearing-or-not region only counts when scanIdx===2,
+// matching the lead predicate, so `< b >= c` declines and stays a comparison).
+function peekStartsStructuralStateDecl(cursor) {
+    if (currentKind(cursor) !== TokenKind.LessThan) {
+        return false;
+    }
+    // peek(1) must be the cell-name identifier. A bare `<` followed by anything
+    // else (`</` closer, `<` NUMBER comparison) is not a decl opener.
+    if (peekKind(cursor, 1) !== TokenKind.Ident) {
+        return false;
+    }
+    // Scan the opener's attribute region from peek(2) to its top-level `>`.
+    // `()` / `{}` / `[]` are depth-tracked so a `>` inside an attribute value
+    // (`<x len(>=2)> = 0`, `<x props={a > b}> = 0`) is not mistaken for the
+    // opener's close. A bounded scan — a stray unbalanced `<` IDENT with no
+    // closing `>` declines rather than running away.
+    let parenDepth = 0;
+    let braceDepth = 0;
+    let bracketDepth = 0;
+    let scanIdx = 2;
+    while (true) {
+        const t = peek(cursor, scanIdx);
+        if (t === undefined || t === null || t.kind === TokenKind.EOF) {
+            return false; // ran off the end with no `>` — not a decl opener
+        }
+        const topLevel = (parenDepth === 0 && braceDepth === 0 && bracketDepth === 0);
+        if (topLevel) {
+            // Fused `>=` OPERATOR — the no-whitespace `<count>=0` form. Only
+            // valid with NO attribute region (scanIdx === 2): a fused `>=`
+            // after an attribute is a comparison, not a decl closer. This
+            // is the `>=`-fused edge guard — `a < b >= c` (scanIdx > 2)
+            // declines and stays a comparison.
+            if (t.kind === TokenKind.GreaterEqual) {
+                return scanIdx === 2;
+            }
+            // Top-level `>` — the opener close. The token AFTER it is the
+            // decl signal: `=` (Shape 1 / typed RHS) or `:` (§35.2 typed).
+            if (t.kind === TokenKind.GreaterThan) {
+                const signal = peek(cursor, scanIdx + 1);
+                if (signal === undefined || signal === null) {
+                    return false;
+                }
+                if (signal.kind === TokenKind.Assign) {
+                    return true;
+                }
+                if (signal.kind === TokenKind.Colon) {
+                    return true;
+                }
+                // `>` followed by anything else is a markup tag close — body /
+                // children follow. Not a state-decl.
+                return false;
+            }
+        }
+        if (t.kind === TokenKind.LParen) parenDepth = parenDepth + 1;
+        else if (t.kind === TokenKind.RParen && parenDepth > 0) parenDepth = parenDepth - 1;
+        else if (t.kind === TokenKind.LBrace) braceDepth = braceDepth + 1;
+        else if (t.kind === TokenKind.RBrace && braceDepth > 0) braceDepth = braceDepth - 1;
+        else if (t.kind === TokenKind.LBracket) bracketDepth = bracketDepth + 1;
+        else if (t.kind === TokenKind.RBracket && bracketDepth > 0) bracketDepth = bracketDepth - 1;
+        scanIdx = scanIdx + 1;
+    }
+}
+
+// --- isAtStateDeclBoundary — IS the cursor at a newline-then-state-decl-opener
+// boundary while parsing an expression at logic-body STATEMENT position?
+// M6.5.b.2.1 — consulted by the parseBinary climb-loop `<` guard to decide
+// whether to STOP rather than consume the `<` as a relational operator. Mirror
+// of isAtArmBoundary's three-conjunct shape:
+//   (a) atStateDeclStmtPos flag is set (we're at statement-collector position,
+//       NOT inside a grouped sub-expression — withInAllowedSubExpr clears it).
+//   (b) the current token (`<`) is on a LATER source line than the prev token
+//       (a newline crossed — the ASI-style boundary; a SAME-LINE `<` like
+//       `<x> = a < b ? 1 : 2` is suppressed and stays a comparison).
+//   (c) the upcoming sequence is a state-decl opener shape.
+function isAtStateDeclBoundary(ctx) {
+    if (ctx.atStateDeclStmtPos !== true) return false;
+    const cursor = ctx.cursor;
+    const prev = prevTokenLine(cursor);
+    const curr = currentTokenLine(cursor);
+    if (prev === 0 || curr === 0) return false;
+    if (curr <= prev) return false;
+    return peekStartsStructuralStateDecl(cursor);
 }
 
 // --- parseMatchArmPattern — the pattern of one match arm (§18.2) ---
