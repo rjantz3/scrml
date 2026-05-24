@@ -616,11 +616,15 @@ export function parseStatement(ctx) {
         return parseFunctionDecl(ctx, false);
     }
 
-    // M5-swap Wave 1 — a scrml `fn` declaration with optional `server` /
-    // `pure` modifiers (B6, SPEC §48 / §48.6.4). `fnDeclLeadFollows` confirms
-    // the `fn` / `server fn` / `pure fn` / `pure server fn` lead before
-    // committing — a bare `server` / `pure` not leading to `fn` falls through
-    // to the expression-statement arm (a rare bare identifier use).
+    // M5-swap Wave 1 (B6, SPEC §48 / §48.6.4) — a modifier-led function
+    // declaration with optional `server` / `pure` prefixes. M6.7-D2 extended
+    // this to the `function` keyword (§7 / §12 / §52): `fnDeclLeadFollows`
+    // confirms a `fn` / `server fn` / `pure fn` / `pure server fn` lead OR a
+    // `server function` / `pure function` / `pure server function` lead before
+    // committing. A bare `function` is handled by the KwFunction arm above; a
+    // bare `server` / `pure` not leading to `fn`/`function` falls through to the
+    // expression-statement arm (a rare bare identifier use). parseScrmlFunctionDecl
+    // reads which keyword follows to set the `fnKind` discriminator.
     if ((kind === TokenKind.KwFn || kind === TokenKind.KwServer || kind === TokenKind.KwPure)
         && fnDeclLeadFollows(cursor)) {
         return parseScrmlFunctionDecl(ctx, false);
@@ -1618,27 +1622,46 @@ export function parseFunctionDecl(ctx, isAsync, allowAnonymous) {
 // to add its own expression-position `!{}` production.
 // =============================================================================
 
-// fnDeclLeadFollows — does a scrml `fn`-declaration lead begin at the cursor?
-// True for a `fn` keyword, or a `server` / `pure` modifier keyword that leads
-// (directly or via the other modifier) to a `fn` keyword. The valid prefix
-// orders mirror the live ast-builder (ast-builder.js:5648-5666): `fn`,
-// `server fn`, `pure fn`, `pure server fn`.
+// isFnDeclKeyword — calculation (predicate): is `k` a function-declaration
+// keyword — `fn` (the scrml shorthand) or `function` (the general form)?
+// M6.7-D2 (§7 / §12 / §48 / §52) — the `server` / `pure` modifier prefix
+// attaches to BOTH `fn` AND `function`. A bare `function` lead is dispatched
+// earlier (parseStatement's KwFunction arm); this predicate is consulted only
+// for the MODIFIER-led path, where `server function` / `pure function` /
+// `pure server function` must be recognized as fn-decl leads, not fall through
+// to the expression-statement arm (the pre-D2 gap — native rejected the
+// PRIMER §6 `server function fetchItems()!` recipe live accepts).
+function isFnDeclKeyword(k) {
+    return k === TokenKind.KwFn || k === TokenKind.KwFunction;
+}
+
+// fnDeclLeadFollows — does a scrml function-declaration lead begin at the
+// cursor? True for a `fn` keyword, or a `server` / `pure` modifier keyword that
+// leads (directly or via the other modifier) to a `fn` OR `function` keyword.
+// The valid prefix orders mirror the live ast-builder (the `fn` shorthand path
+// ast-builder.js:5798-5817 + the general-`function` path ast-builder.js:8386-
+// 8400): `fn`, `server fn`, `pure fn`, `pure server fn`, AND `server function`,
+// `pure function`, `pure server function`. A BARE `function` is NOT a member —
+// it is handled by parseStatement's dedicated KwFunction arm (parseFunctionDecl);
+// this predicate gates only the modifier-led path. The `fnKind` discriminator
+// (`"fn"` vs `"function"`, §33.6: `fn ≡ pure function` but they remain distinct
+// fnKinds) is preserved by parseScrmlFunctionDecl reading which keyword follows.
 function fnDeclLeadFollows(cursor) {
     const k0 = currentKind(cursor);
     if (k0 === TokenKind.KwFn) {
         return true;
     }
     if (k0 === TokenKind.KwServer) {
-        // `server fn`
-        return peekKind(cursor, 1) === TokenKind.KwFn;
+        // `server fn` / `server function`
+        return isFnDeclKeyword(peekKind(cursor, 1));
     }
     if (k0 === TokenKind.KwPure) {
-        // `pure fn` or `pure server fn`
+        // `pure fn` / `pure function` / `pure server fn` / `pure server function`
         const k1 = peekKind(cursor, 1);
-        if (k1 === TokenKind.KwFn) {
+        if (isFnDeclKeyword(k1)) {
             return true;
         }
-        return k1 === TokenKind.KwServer && peekKind(cursor, 2) === TokenKind.KwFn;
+        return k1 === TokenKind.KwServer && isFnDeclKeyword(peekKind(cursor, 2));
     }
     return false;
 }
@@ -1680,16 +1703,29 @@ function skipReturnTypeAnnotation(ctx) {
     }
 }
 
-// --- parseScrmlFunctionDecl — a `[pure] [server] fn name(...) [!] { body }` ---
-// The B6 production. `allowAnonymous` mirrors `parseFunctionDecl` (true only
-// for `export default fn`). Consumes the modifier prefix, the `fn` keyword,
-// the name, the optional param list, the trailing `!` failable marker (+
-// optional `-> ErrorType`), an optional return-type annotation, and the
-// in-line body. Carries `fnKind:"fn"` + the modifier flags on the node.
+// --- parseScrmlFunctionDecl — a `[pure] [server] (fn|function) name(...) [!] { body }` ---
+// The B6 production, extended in M6.7-D2 to cover the `function` keyword form.
+// `allowAnonymous` mirrors `parseFunctionDecl` (true only for `export default`).
+// Consumes the modifier prefix, the `fn` OR `function` keyword (+ `function*`
+// generator), the name, the optional param list, the trailing `!` failable
+// marker (+ optional `-> ErrorType`), an optional return-type annotation, and
+// the in-line body.
+//
+// THE `fnKind` DISCRIMINATOR (§33.6 — `fn ≡ pure function`, but the two remain
+// DISTINCT fnKinds; do NOT collapse). The node carries `fnKind:"fn"` for the
+// `fn` shorthand and `fnKind:"function"` for the general `function` keyword,
+// matching the live ast-builder exactly: the `fn` shorthand path
+// (ast-builder.js:5964-5970 → `fnKind:"fn"`) vs the general-function path
+// (ast-builder.js:8548-8554 → `fnKind:"function"`). The modifier flags
+// (`isServer`/`isPure`) and the `!`/`-> ErrorType` suffix attach identically to
+// both forms. Pre-D2, native recognized the modifier prefix ONLY before `fn`,
+// so `server function` / `pure function` / `pure server function` (incl. the
+// PRIMER §6 recipe `server function fetchItems()! -> LoadError`) fell through to
+// the expression-statement arm and produced a spurious E-EXPR-UNEXPECTED cascade.
 export function parseScrmlFunctionDecl(ctx, allowAnonymous) {
     const cursor = ctx.cursor;
 
-    // --- modifier prefix --- (orders: fn / server fn / pure fn / pure server fn)
+    // --- modifier prefix --- (orders: [pure] [server] before fn|function)
     let isPure = false;
     let isServer = false;
     let leadTok = current(cursor);
@@ -1702,27 +1738,43 @@ export function parseScrmlFunctionDecl(ctx, allowAnonymous) {
         advance(cursor);   // consume `server`
     }
 
-    // --- the `fn` keyword ---
+    // --- the `fn` or `function` keyword --- `fnKind` discriminates the two
+    // (§33.6). A modifier-led decl ALWAYS has one of these next (fnDeclLeadFollows
+    // guaranteed it); the `else` is a defensive recovery arm.
     let fnTok = leadTok;
+    let fnKind = "fn";
     if (currentKind(cursor) === TokenKind.KwFn) {
         fnTok = advance(cursor);   // consume `fn`
+        fnKind = "fn";
+    } else if (currentKind(cursor) === TokenKind.KwFunction) {
+        fnTok = advance(cursor);   // consume `function`
+        fnKind = "function";
     } else {
         recordError(ctx, "E-STMT-FN-KEYWORD",
-            "expected 'fn' after a function modifier", spanHere(ctx));
+            "expected 'fn' or 'function' after a function modifier", spanHere(ctx));
     }
 
-    // --- the name --- (a `fn` declaration always names; `export default fn`
-    // may be anonymous).
+    // --- the `function*` generator marker --- (only the `function` keyword form
+    // accepts `*`; the `fn` shorthand has no generator form). Mirrors
+    // parseFunctionDecl's generator handling.
+    let isGenerator = false;
+    if (fnKind === "function" && currentKind(cursor) === TokenKind.Star) {
+        advance(cursor);   // consume `*`
+        isGenerator = true;
+    }
+
+    // --- the name --- (a declaration always names; `export default` may be
+    // anonymous).
     let name = "";
     if (currentKind(cursor) === TokenKind.Ident) {
         name = advance(cursor).name;
     } else if (allowAnonymous !== true) {
         recordError(ctx, "E-STMT-FN-NAME",
-            "expected a name after 'fn'", spanHere(ctx));
+            "expected a name after '" + fnKind + "'", spanHere(ctx));
     }
 
-    // --- the optional parameter list --- (a `fn` may declare no params; the
-    // param list is present only when a `(` follows the name).
+    // --- the optional parameter list --- (the param list is present only when
+    // a `(` follows the name; the `fn` shorthand may declare no params).
     let params = [];
     if (currentKind(cursor) === TokenKind.LParen) {
         params = parseParamList(ctx);
@@ -1761,12 +1813,12 @@ export function parseScrmlFunctionDecl(ctx, allowAnonymous) {
         skipReturnTypeAnnotation(ctx);
     }
 
-    // --- the in-line body ---
-    const inline = parseFunctionBodyInline(ctx, false, false);
+    // --- the in-line body --- (parsed in the function's own generator scope).
+    const inline = parseFunctionBodyInline(ctx, false, isGenerator);
 
     const span = makeSpan(fnTok.span.start, inline.endPos, fnTok.span.line, fnTok.span.col);
-    return makeFunctionDecl(name, params, inline.body, false, false, span, {
-        fnKind:   "fn",
+    return makeFunctionDecl(name, params, inline.body, false, isGenerator, span, {
+        fnKind,
         isServer,
         isPure,
         isPinned:  false,
