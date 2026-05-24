@@ -31,3 +31,32 @@ Base SHA after merge main: `404fc619` (the M6.7 STOP commit — the revert that 
 3. Within-node parity canary extension required FIRST (M6.5.b.0).
 4. M6.7 re-flip MUST gate on full `bun run test` clean under native parser, not just canary.
 5. Class A (engine bodyChildren) folds to M6.6 closure dispatch, not M6.5.b.
+
+---
+
+# M6.5.b.1 — FIX-NATIVE match-arm newline separator (S125+)
+
+Dispatch: M6.5.b.1
+Worktree: `.claude/worktrees/agent-a8bb97501fe5a8629`
+Base SHA after merge main: HEAD `5b1afb9d` (post the M6.5.b.0 + M6.6.b.3 + M6.7 STOP landings)
+
+## Step 0 — startup
+- `pwd` = worktree root; `git rev-parse --show-toplevel` matches.
+- `git merge main --no-edit` absorbed live HEAD; tree clean post-merge.
+- `bun install`, `bun run pretest` clean.
+- Baseline within-node canary: 1004 pass / 0 fail / 133054 total divergences across 1000 files.
+
+## Step 1 — Bug site located
+- `compiler/native-parser/parse-expr.js:2546-2557` — `parseMatchExpr` arm-list loop:
+  only `TokenKind.Comma` is consumed between arms. No semicolon support, no newline support.
+- `parseMatchArm:2569-2605` consumes the body via `parseAssignmentExpr` (concise form)
+  or `parseBlockStub` (block form). When body finishes on line N, next arm pattern
+  starts on line N+1 — ASI-style newline-between-arms is the canonical scrml form.
+
+## Step 2 — SPEC normative reference
+- §18.2 grammar `match-expr ::= 'match' expression '{' match-arm+ '}'` —
+  `match-arm+` with NO inter-arm separator token in the production.
+- §18.0.1 + §17 worked examples all use newline-separated arms.
+- The native parser already documented "newline- or comma-separated in practice" in
+  comment on line 2552 — only the comma branch was implemented.
+

@@ -143,6 +143,15 @@ export function makeParseExprContext(tokens, source) {
         errors:           [],
         inGenerator:      false,
         noIn:             false,
+        // M6.5.b.1 — `inMatchArmBody` is the "are we parsing the body of a
+        // match arm?" boolean. Set true at parseMatchArm entry around the
+        // body parse, saved+set+restored same shape as `noIn`. The postfix
+        // chain consults it to STOP at a newline-then-arm-pattern boundary
+        // (the canonical scrml match-arm form uses newline-as-separator;
+        // without this flag a body ending in `.B\n.C => ...` would
+        // greedily concat to `.B.C` as member access). Mirrors the live
+        // ast-builder's S27 startsArmPattern boundary detection.
+        inMatchArmBody:   false,
         source:           source ?? null,
     };
 }
@@ -930,6 +939,17 @@ export function parsePostfixChain(ctx, base) {
 
     while (true) {
         const kind = currentKind(cursor);
+
+        // M6.5.b.1 — when inside a match-arm body, STOP the postfix chain at
+        // a newline-then-arm-pattern boundary. Without this guard a body
+        // ending in `.B\n.C => ...` would greedy-consume `.C` as member
+        // access on `.B` (Bare `.B` lexed as BareVariant; following `.C`
+        // re-lexed as Dot+Ident because BareVariant disallows regex —
+        // resulting in `.B.C`). The arm-loop then sees garbage instead of
+        // the new arm. Mirrors live ast-builder's S27 boundary detection.
+        if (isAtArmBoundary(ctx)) {
+            return node;
+        }
 
         // `.property` — non-computed member access.
         if (kind === TokenKind.Dot) {
@@ -2542,17 +2562,40 @@ export function parseMatchExpr(ctx) {
     }
     const open = advance(cursor);   // consume `{`
 
+    // M6.5.b.1 — arm separator may be `,` (canonical comma form), `;` (semi
+    // alias — useful when arm bodies are statement-shaped), OR a newline
+    // (ASI-style — the canonical corpus form). SPEC §18.2's grammar
+    // `match-arm+` carries no inter-arm separator token; the corpus uses
+    // newline-as-separator throughout (see `examples/14-mario-state-machine.scrml`
+    // and friends). The newline branch relies on the body parser already
+    // having STOPPED at the boundary (the postfix-chain guard above), so
+    // the cursor is positioned at the start of the next arm pattern.
     const arms = [];
     while (atEnd(cursor) === false && currentKind(cursor) !== TokenKind.RBrace) {
+        // Track the cursor position pre-arm so we can detect zero-progress
+        // (would otherwise infinite-loop on a malformed arm).
+        const preArmIdx = cursor.idx;
         const arm = parseMatchArm(ctx);
         if (arm === undefined || arm === null) {
             break;
         }
         arms.push(arm);
-        // A `,` between arms is optional (arms are newline- or comma-
-        // separated in practice); consume it if present.
-        if (currentKind(cursor) === TokenKind.Comma) {
+
+        // Consume an explicit inter-arm separator if present.
+        const sepKind = currentKind(cursor);
+        if (sepKind === TokenKind.Comma || sepKind === TokenKind.Semicolon) {
             advance(cursor);
+        }
+        // Else: the newline-as-separator case is silent — the body parser
+        // (postfix-chain guard) stopped at the boundary; loop continues
+        // with the new arm pattern at the cursor. No diagnostic needed.
+
+        // Defensive infinite-loop guard. If parseMatchArm consumed zero
+        // tokens AND we didn't consume a separator, the arm-loop would
+        // spin forever — break to surface the malformed arm via the next
+        // expectRBrace's diagnostic.
+        if (cursor.idx === preArmIdx) {
+            break;
         }
     }
 
@@ -2592,12 +2635,22 @@ export function parseMatchArm(ctx) {
 
     // The arm body — a `{ ... }` block (BlockStub, M3 seam) or a concise
     // assignment-level expression.
+    //
+    // M6.5.b.1 — `inMatchArmBody` flag set AROUND the body parse (save +
+    // set + restore, mirroring the noIn pattern). The postfix-chain consults
+    // the flag (via isAtArmBoundary) to stop at a newline-then-arm-pattern
+    // boundary. Set ONLY for the concise expression body — a block body's
+    // contents are parsed as statements (M3 BlockStub) and explicitly
+    // delimited by `{` / `}`, so no newline-as-separator ambiguity arises.
     let body;
     if (currentKind(cursor) === TokenKind.LBrace) {
         body = parseBlockStub(ctx);
     } else {
         const bodyPrior = enterMode(ctx, ParseMode.InExpression);
+        const armBodyPrior = ctx.inMatchArmBody;
+        ctx.inMatchArmBody = true;
         body = parseAssignmentExpr(ctx);
+        ctx.inMatchArmBody = armBodyPrior;
         exitMode(ctx, bodyPrior);
     }
 
@@ -2623,6 +2676,207 @@ export function isArrowAliasAhead(cursor) {
         return false;
     }
     return m.span.end === g.span.start;
+}
+
+// --- isArmArrowAt — is the token at offset `k` a match-arm arrow (`=>` or
+// `->`)? `=>` lexes as a single Arrow token; `->` lexes as adjacent Minus +
+// GreaterThan (re-composed inline). Helper for peekStartsArmPattern.
+// M6.5.b.1 — used by the arm-list loop's newline-as-separator check.
+function isArmArrowAt(cursor, k) {
+    const kind = peekKind(cursor, k);
+    if (kind === TokenKind.Arrow) {
+        return true;
+    }
+    if (kind === TokenKind.Minus && peekKind(cursor, k + 1) === TokenKind.GreaterThan) {
+        const m = peek(cursor, k);
+        const g = peek(cursor, k + 1);
+        if (m === undefined || m === null || g === undefined || g === null) return false;
+        if (m.span === undefined || g.span === undefined) return false;
+        return m.span.end === g.span.start;
+    }
+    return false;
+}
+
+// --- peekStartsArmPattern — does the token sequence at the cursor LOOK LIKE
+// the start of a new match arm? Mirrors the live ast-builder's S27
+// `startsArmPattern` boundary detector. M6.5.b.1 — the body parser uses
+// this (via `ctx.inMatchArmBody`) to stop the postfix chain at a
+// newline-then-arm-pattern boundary; the arm-list loop uses it to confirm
+// the newline-as-separator decision.
+//
+// The patterns recognized (each followed by an `=>` / `->` arrow within a
+// bounded lookahead window):
+//   `.IDENT (...)?  =>`   — bare variant-pattern (BareVariant token)
+//   `::IDENT (...)? =>`   — `::` alias variant-pattern (DoubleColon + Ident)
+//   `else =>`             — wildcard
+//   `_ =>`                — wildcard alias (Ident named "_")
+//   `is .IDENT =>`        — is-pattern
+//   `not ... =>` (≤6 toks) — is-not arm (§42)
+//   `IDENT.IDENT(...)? =>` — qualified variant
+//   `IDENT::IDENT(...)? =>` — qualified variant (`::` alias)
+//
+// Bounded lookahead — at most 20 tokens to scan past a payload `(...)`
+// (matches the live's bound).
+export function peekStartsArmPattern(cursor) {
+    const kind = currentKind(cursor);
+
+    // `.IDENT(...)? => / ->` — BareVariant (with optional payload paren)
+    if (kind === TokenKind.BareVariant) {
+        let i = 1;
+        if (peekKind(cursor, i) === TokenKind.LParen) {
+            i = scanPastPayloadParen(cursor, i);
+            if (i === -1) return false;
+        }
+        return isArmArrowAt(cursor, i);
+    }
+
+    // `.IDENT(...)? => / ->` — Dot + uppercase Ident (the lexer chooses Dot
+    // form when the previous token disallows regex — common after a numeric
+    // RHS, an Ident RHS, a `}` block-body, etc.). Bare-variant arm patterns
+    // appearing at arm-boundary after such tokens take this branch.
+    if (kind === TokenKind.Dot) {
+        if (peekKind(cursor, 1) !== TokenKind.Ident) return false;
+        const idTok = peek(cursor, 1);
+        if (idTok === undefined || idTok === null) return false;
+        const name = idTok.name ?? "";
+        if (name.length === 0 || /^[A-Z]/.test(name) === false) return false;
+        let i = 2;
+        if (peekKind(cursor, i) === TokenKind.LParen) {
+            i = scanPastPayloadParen(cursor, i);
+            if (i === -1) return false;
+        }
+        return isArmArrowAt(cursor, i);
+    }
+
+    // `::IDENT(...)? => / ->` — DoubleColon + Ident (uppercase)
+    if (kind === TokenKind.DoubleColon) {
+        if (peekKind(cursor, 1) !== TokenKind.Ident) return false;
+        const idTok = peek(cursor, 1);
+        if (idTok === undefined || idTok === null) return false;
+        const name = idTok.name ?? "";
+        if (name.length === 0 || /^[A-Z]/.test(name) === false) return false;
+        let i = 2;
+        if (peekKind(cursor, i) === TokenKind.LParen) {
+            i = scanPastPayloadParen(cursor, i);
+            if (i === -1) return false;
+        }
+        return isArmArrowAt(cursor, i);
+    }
+
+    // `else => / ->`
+    if (kind === TokenKind.KwElse) {
+        return isArmArrowAt(cursor, 1);
+    }
+
+    // `_ =>` — Ident named `_`
+    if (kind === TokenKind.Ident) {
+        const here = current(cursor);
+        if (here !== undefined && here !== null && here.name === "_") {
+            return isArmArrowAt(cursor, 1);
+        }
+        // `IDENT.IDENT(...)? => / ->`  /  `IDENT::IDENT(...)? => / ->`
+        // qualified variant pattern. Require uppercase IDENT after . or ::
+        // to avoid common JS member-access false positives.
+        if (peekKind(cursor, 1) === TokenKind.Dot && peekKind(cursor, 2) === TokenKind.Ident) {
+            const tok2 = peek(cursor, 2);
+            if (tok2 !== undefined && tok2 !== null && /^[A-Z]/.test(tok2.name ?? "")) {
+                let i = 3;
+                if (peekKind(cursor, i) === TokenKind.LParen) {
+                    i = scanPastPayloadParen(cursor, i);
+                    if (i === -1) return false;
+                }
+                return isArmArrowAt(cursor, i);
+            }
+        }
+        if (peekKind(cursor, 1) === TokenKind.DoubleColon && peekKind(cursor, 2) === TokenKind.Ident) {
+            const tok2 = peek(cursor, 2);
+            if (tok2 !== undefined && tok2 !== null && /^[A-Z]/.test(tok2.name ?? "")) {
+                let i = 3;
+                if (peekKind(cursor, i) === TokenKind.LParen) {
+                    i = scanPastPayloadParen(cursor, i);
+                    if (i === -1) return false;
+                }
+                return isArmArrowAt(cursor, i);
+            }
+        }
+        return false;
+    }
+
+    // `is .IDENT =>`
+    if (kind === TokenKind.KwIs) {
+        if (peekKind(cursor, 1) !== TokenKind.BareVariant) return false;
+        return isArmArrowAt(cursor, 2);
+    }
+
+    // `not ... =>` within a bounded window (≤6 tokens). Mirrors live S27.
+    if (kind === TokenKind.KwNot) {
+        for (let i = 1; i < 6; i = i + 1) {
+            const k = peekKind(cursor, i);
+            if (k === TokenKind.EOF) return false;
+            if (k === TokenKind.LBrace) return false;
+            if (isArmArrowAt(cursor, i)) return true;
+        }
+        return false;
+    }
+
+    return false;
+}
+
+// --- scanPastPayloadParen — advance past a `(...)` payload, returning the
+// offset of the token AFTER the matching `)`. Returns -1 on unbalanced /
+// runaway. Bounded at 20 tokens (matches the live S27 helper).
+function scanPastPayloadParen(cursor, start) {
+    let depth = 1;
+    let i = start + 1;
+    while (i < start + 20) {
+        const k = peekKind(cursor, i);
+        if (k === TokenKind.EOF) return -1;
+        if (k === TokenKind.LParen) depth = depth + 1;
+        else if (k === TokenKind.RParen) {
+            depth = depth - 1;
+            if (depth === 0) return i + 1;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// --- prevTokenLine — the 1-based source line of the most-recently-advance'd
+// token (the token just before the cursor). Returns 0 if there is no
+// previous token (cursor at stream head). M6.5.b.1 — the postfix-chain
+// guard and the arm-list loop use this to detect the newline-as-separator
+// boundary.
+function prevTokenLine(cursor) {
+    if (cursor.idx <= 0) return 0;
+    const tok = cursor.tokens[cursor.idx - 1];
+    if (tok === undefined || tok === null || tok.span === undefined) return 0;
+    return tok.span.line;
+}
+
+// --- currentTokenLine — the 1-based source line of the current token.
+// Returns 0 at EOF. M6.5.b.1 — sister to prevTokenLine.
+function currentTokenLine(cursor) {
+    const tok = current(cursor);
+    if (tok === undefined || tok === null || tok.span === undefined) return 0;
+    return tok.span.line;
+}
+
+// --- isAtArmBoundary — IS the cursor at a newline-then-arm-pattern boundary
+// while inside a match-arm body? M6.5.b.1 — consulted by the postfix-chain
+// Dot/DoubleColon/BareVariant guards to decide whether to STOP rather than
+// greedy-consume into the next arm. Three conjuncts:
+//   (a) inMatchArmBody flag is set (we're inside an arm body)
+//   (b) current token is on a LATER source line than the prev token (newline
+//       between them — the ASI-style boundary)
+//   (c) the upcoming sequence looks like an arm pattern.
+export function isAtArmBoundary(ctx) {
+    if (ctx.inMatchArmBody !== true) return false;
+    const cursor = ctx.cursor;
+    const prev = prevTokenLine(cursor);
+    const curr = currentTokenLine(cursor);
+    if (prev === 0 || curr === 0) return false;
+    if (curr <= prev) return false;
+    return peekStartsArmPattern(cursor);
 }
 
 // --- parseMatchArmPattern — the pattern of one match arm (§18.2) ---
@@ -2668,6 +2922,27 @@ export function parseMatchArmPattern(ctx) {
         const endPos = (bindings === null) ? varTok.span.end : cursor.tokens[cursor.idx - 1].span.end;
         const span = makeSpan(varTok.span.start, endPos, varTok.span.line, varTok.span.col);
         return makeVariantPattern(null, varTok.name, bindings, span);
+    }
+
+    // M6.5.b.1 — Bare variant-pattern lexed as `Dot + Ident`. The lexer
+    // chooses Dot+Ident form (not BareVariant) when the PRIOR token
+    // disallows regex (`regexAllowedAfter` returns false) — common at
+    // arm-pattern position AFTER a previous arm body whose last token is a
+    // NumberLit/Ident/RBrace/etc. Without this branch, a multi-arm match
+    // with newline separators would mis-parse the second-and-later arm
+    // patterns (E-EXPR-MATCH-PATTERN regression on the canonical scrml
+    // newline-separated form).
+    if (kind === TokenKind.Dot
+        && peekKind(cursor, 1) === TokenKind.Ident) {
+        const idTok = peek(cursor, 1);
+        if (idTok !== undefined && idTok !== null && /^[A-Z]/.test(idTok.name ?? "")) {
+            const dotTok = advance(cursor);   // consume `.`
+            const varTok = advance(cursor);   // consume the variant Ident
+            const bindings = parseMatchBindingsOpt(ctx);
+            const endPos = (bindings === null) ? varTok.span.end : cursor.tokens[cursor.idx - 1].span.end;
+            const span = makeSpan(dotTok.span.start, endPos, dotTok.span.line, dotTok.span.col);
+            return makeVariantPattern(null, varTok.name, bindings, span);
+        }
     }
 
     // Leading `::Variant` — the bare-variant `::` alias in arm position.

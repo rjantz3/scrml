@@ -2270,6 +2270,164 @@ describe("M2.4 expression-parser — error paths (diagnostics, no throw)", () =>
 });
 
 // =============================================================================
+// M6.5.b.1 — match-arm separator forms.
+//
+// SPEC §18.2 grammar `match-expr ::= 'match' expression '{' match-arm+ '}'`
+// uses bare `match-arm+` with NO inter-arm separator token in the production.
+// The canonical corpus form is NEWLINE-as-separator (see worked examples in
+// §18.2 and `examples/14-mario-state-machine.scrml`). `,` and `;` are also
+// accepted (S125 scoping doc Class D). Mixing forms across one match is OK.
+//
+// Each test parses the match expression and asserts the structural arm count
+// matches the source. Diagnostics: zero for all canonical forms. Helper
+// `parseWithNative` already used by the M2.4 error-paths suite above.
+// =============================================================================
+describe("M6.5.b.1 — match-arm separator forms (comma / semi / newline / mixed)", () => {
+    test("comma-only separator — `.A => 1, .B => 2` parses 2 arms cleanly", () => {
+        const n = parseWithNative("match t { .A => 1, .B => 2 }");
+        expect(n.ok).toBe(true);
+        expect(n.errors).toEqual([]);
+        expect(n.ast.kind).toBe(ExprKind.Match);
+        expect(n.ast.arms.length).toBe(2);
+    });
+
+    test("semi-only separator — `.A => 1; .B => 2` parses 2 arms cleanly", () => {
+        const n = parseWithNative("match t { .A => 1; .B => 2 }");
+        expect(n.ok).toBe(true);
+        expect(n.errors).toEqual([]);
+        expect(n.ast.kind).toBe(ExprKind.Match);
+        expect(n.ast.arms.length).toBe(2);
+    });
+
+    test("newline-only separator (literal-body) — canonical scrml form parses 2 arms", () => {
+        const src = "match t {\n    .A => 1\n    .B => 2\n}";
+        const n = parseWithNative(src);
+        expect(n.ok).toBe(true);
+        expect(n.errors).toEqual([]);
+        expect(n.ast.kind).toBe(ExprKind.Match);
+        expect(n.ast.arms.length).toBe(2);
+    });
+
+    test("newline-only separator (reassign-body) — `.A => @t = .B` mario form", () => {
+        const src = "match @t {\n    .A => @t = .B\n    .B => @t = .A\n}";
+        const n = parseWithNative(src);
+        expect(n.ok).toBe(true);
+        expect(n.errors).toEqual([]);
+        expect(n.ast.kind).toBe(ExprKind.Match);
+        expect(n.ast.arms.length).toBe(2);
+    });
+
+    test("newline-only separator (block body) — `.A => { ... }` block-form arms", () => {
+        const src = "match t {\n    .A => { x = 1 }\n    .B => { x = 2 }\n}";
+        const n = parseWithNative(src);
+        expect(n.ok).toBe(true);
+        expect(n.errors).toEqual([]);
+        expect(n.ast.kind).toBe(ExprKind.Match);
+        expect(n.ast.arms.length).toBe(2);
+    });
+
+    test("mixed separators — comma then newline then comma — all 4 arms parse cleanly", () => {
+        const src = "match t {\n    .A => 1,\n    .B => 2\n    .C => 3, .D => 4\n}";
+        const n = parseWithNative(src);
+        expect(n.ok).toBe(true);
+        expect(n.errors).toEqual([]);
+        expect(n.ast.arms.length).toBe(4);
+    });
+
+    test("single-arm, no trailing separator, trailing newline only", () => {
+        const src = "match t { .A => 1\n}";
+        const n = parseWithNative(src);
+        expect(n.ok).toBe(true);
+        expect(n.errors).toEqual([]);
+        expect(n.ast.arms.length).toBe(1);
+    });
+
+    test("trailing comma on last arm — `.A => 1, .B => 2,` parses 2 arms cleanly", () => {
+        const n = parseWithNative("match t { .A => 1, .B => 2, }");
+        expect(n.ok).toBe(true);
+        expect(n.errors).toEqual([]);
+        expect(n.ast.arms.length).toBe(2);
+    });
+
+    test("trailing semi on last arm — `.A => 1; .B => 2;` parses 2 arms cleanly", () => {
+        const n = parseWithNative("match t { .A => 1; .B => 2; }");
+        expect(n.ok).toBe(true);
+        expect(n.errors).toEqual([]);
+        expect(n.ast.arms.length).toBe(2);
+    });
+
+    test("`else` wildcard with newline separator", () => {
+        const src = "match t {\n    .A => 1\n    else => 2\n}";
+        const n = parseWithNative(src);
+        expect(n.ok).toBe(true);
+        expect(n.errors).toEqual([]);
+        expect(n.ast.arms.length).toBe(2);
+    });
+
+    test("payload binding with newline separator — `.Pt(x, y) => ...`", () => {
+        const src = "match s {\n    .Pt(x, y) => x + y\n    .Origin => 0\n}";
+        const n = parseWithNative(src);
+        expect(n.ok).toBe(true);
+        expect(n.errors).toEqual([]);
+        expect(n.ast.arms.length).toBe(2);
+    });
+
+    test("qualified variant pattern with newline separator — `Type.V => ...`", () => {
+        const src = "match s {\n    Tag.A => 1\n    Tag.B => 2\n}";
+        const n = parseWithNative(src);
+        expect(n.ok).toBe(true);
+        expect(n.errors).toEqual([]);
+        expect(n.ast.arms.length).toBe(2);
+    });
+
+    test("`->` arrow alias also accepts newline separator", () => {
+        const src = "match t {\n    .A -> 1\n    .B -> 2\n}";
+        const n = parseWithNative(src);
+        expect(n.ok).toBe(true);
+        expect(n.errors).toEqual([]);
+        expect(n.ast.arms.length).toBe(2);
+        // The arrow form is recorded on the arm.
+        expect(n.ast.arms[0].separator).toBe("->");
+    });
+
+    test("empty arms (just `match t { }`) — zero arms, no error", () => {
+        // A match with no arms at all is structurally legal at parse time
+        // (later passes — exhaustiveness — will reject empty-arms). Parser
+        // produces an empty arms[] without firing E-EXPR-MATCH-PATTERN.
+        const n = parseWithNative("match t { }");
+        expect(n.ok).toBe(true);
+        expect(n.errors).toEqual([]);
+        expect(n.ast.arms.length).toBe(0);
+    });
+
+    test("preserves existing E-EXPR-MATCH-PATTERN on a NON-arm-shaped token between arms", () => {
+        // `.A => 1, 42` — the `42` after a comma is NOT an arm pattern
+        // (literal patterns are §18.16; the bare-number variant isn't
+        // wired in native yet). Should record E-EXPR-MATCH-PATTERN, not
+        // silently mis-parse. Confirms the separator extension didn't
+        // regress the pre-existing error path.
+        const n = parseWithNative("match t { .A => 1, 42 }");
+        expect(n.ok).toBe(true);
+        const codes = n.errors.map((e) => e.code);
+        expect(codes).toContain("E-EXPR-MATCH-PATTERN");
+    });
+
+    test("Dot+UpperIdent variant pattern (lexer Dot form) — `.A` after RBrace prev", () => {
+        // After a block body's `}`, the lexer chooses Dot+Ident for the
+        // next `.X` (regexAllowedAfter(RBrace)===false). The arm-pattern
+        // parser's Dot+UpperIdent branch handles this — without it the
+        // newline-separated case would E-EXPR-MATCH-PATTERN.
+        const src = "match t {\n    .A => { x = 1 }\n    .B => 2\n}";
+        const n = parseWithNative(src);
+        expect(n.ok).toBe(true);
+        expect(n.errors).toEqual([]);
+        expect(n.ast.arms.length).toBe(2);
+        // Confirm both arm patterns parsed as variant patterns named A/B
+        expect(n.ast.arms[1].pattern.variantName).toBe("B");
+    });
+});
+
+// =============================================================================
 // M4.3 — async / await RETRACTION (the language-level decision that scrml has
 // no `async` / `await`). The parser ENCOUNTERS the keyword forms (M1 still
 // lexes `async` / `await` as keywords for tooling-compatibility), but every
