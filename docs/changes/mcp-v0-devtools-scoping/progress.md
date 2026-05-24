@@ -123,12 +123,31 @@ The `engines.json` entry's optional `cellKey` field (for cases where the runtime
     (engines / forms / channels / serverFns). Source-of-truth wiring per
     SCOPING §3 Sub-unit A:
     - engines: AST walks `kind: "engine-decl"` + §51.0 variants/rules; emits
-      `cellKey` and `kind: "primary"|"derived"`.
+      `kind: "primary"|"derived"`.
+      **[CORRECTED S126 by MCP-V0.A-tests dispatch]** The original A landing did
+      NOT emit `cellKey`; it was added in the MCP-V0.A-tests contract fix so B's
+      `getCurrentVariant` (mcp.js:249 `descriptor.cellKey || descriptor.name`)
+      resolves production §47-encoded keys. Dev builds use identity encoding
+      (cellKey === name), production-encoding pass-through is a documented follow-on.
     - forms: emit-validators + emit-synth-surface + emit-form-for triangulation;
-      emits PRE-RESOLVED runtime keys per Sub-unit B coordination signal —
-      `compoundKeys` field included (the B-speculated optional field is now
-      load-bearing).
+      emits PRE-RESOLVED runtime keys.
+      **[CORRECTED S126 by MCP-V0.A-tests dispatch]** The original A landing
+      claimed "`compoundKeys` field included" — this was FALSE. A emitted the four
+      compound rollup keys FLAT on the descriptor root (`errorsKey`/`isValidKey`/
+      `touchedKey`/`submittedKey`), but B's `getFormStatus` reads them NESTED under
+      `descriptor.compoundKeys` (mcp.js:311-323). The flat shape left B's
+      `compoundKeys` undefined → per-field fallback → `submitted` (compound-only
+      per §55.7) UNDECODEABLE. The MCP-V0.A-tests fix NESTS the four keys under a
+      `compoundKeys: { isValidKey, errorsKey, touchedKey, submittedKey }` object,
+      matching B's documented read shape (mcp.js:279). B was NOT changed (it is
+      shipped + tested).
     - channels: emit-channel + §38.4 auto-synced walks; emits resolved cell keys.
+      **[CORRECTED S126 by MCP-V0.A-tests dispatch]** The original
+      `collectChannelAutoSyncedCells` walk only descended `node.children`, but
+      V5-strict channel cells are authored inside a `${ ... }` logic block whose
+      state-decls live in `logic.body` — so `autoSyncedCells` was ALWAYS `[]`. The
+      fix descends `body`/`bodyChildren` (deduped by cell name) so channel cells
+      surface for `getChannelState` decode.
     - serverfns: RI Stage 5 registry + TS Stage 6 signatures; `dispatchable: false`
       permanent v0 annotation.
 - `compiler/src/api.js` (+37 LOC)
@@ -138,18 +157,29 @@ The `engines.json` entry's optional `cellKey` field (for cases where the runtime
   - Degenerate-app case handled: empty `[]` emit unconditionally so every
     adopter app has predictable sidecar contracts.
 
-## NOT Landed (tests follow-on — M6.5-style sibling sub-unit)
+## Tests — LANDED S126 (MCP-V0.A-tests dispatch)
 
-- Per-sidecar unit tests (4 tests, one per sidecar — fixture compile +
-  assert JSON shape).
-- Cross-cutting integration test (multi-engine, multi-form, multi-channel,
-  2+ server fns fixture; all 4 sidecars present + valid JSON + resolved
-  keys decode at runtime via the B helpers).
-- Degenerate SPA case test (zero-page-zero-channel fixture).
+All six deferred tests landed in the MCP-V0.A-tests follow-on dispatch (see
+`docs/changes/mcp-v0-a-tests/progress.md`), alongside the A↔B contract fix:
 
-**Filed as MCP-V0.A-tests follow-on dispatch.** Per S125 user direction
-("wrap when what's going now is landed"), tests NOT dispatched this
-session. Blocks Sub-unit C until landed.
+- Per-sidecar unit tests (4) — `compiler/tests/unit/mcp-descriptors-{engines,
+  forms,channels,serverfns}.test.js`. Each compiles a focused fixture via the
+  real emit path + asserts the on-disk sidecar JSON shape.
+- Cross-cutting integration test — `compiler/tests/integration/
+  mcp-descriptors-runtime-integration.test.js`. 2-engine + 1-form + 2-channel +
+  3-server-fn fixture; all 4 sidecars present + valid; loadSidecars +
+  install(mock runtime keyed by resolved descriptor keys) decodes
+  getCurrentVariant / getFormStatus (incl. `submitted`) / getChannelState.
+- Degenerate SPA test — `compiler/tests/unit/mcp-descriptors-degenerate-spa.test.js`.
+  Zero-engine/form/channel/server-fn <program> → all four sidecars empty []; B
+  helpers degrade gracefully.
+- Shared helper — `compiler/tests/helpers/mcp-sidecar-compile.js` (real emit path).
+
+30 test cases, all passing. **Unblocks Sub-unit C.**
+
+The A↔B contract fix (form `compoundKeys` nesting, engine `cellKey` emit, channel
+auto-synced-cell collection) landed in the same dispatch — see the
+[CORRECTED S126] notes in the Landed section above.
 
 ## Process
 

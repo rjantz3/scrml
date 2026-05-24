@@ -57,8 +57,20 @@ export interface EngineVariantDescriptor {
 }
 
 export interface EngineDescriptor {
-  /** Auto-declared variable name (no `@` prefix), or `var=` override. */
+  /** Auto-declared variable name (no `@` prefix), or `var=` override. This is
+   *  the user-facing name the LLM agent / `get_engine(name)` tool looks up. */
   name: string;
+  /** Runtime-state key for the engine's current-variant cell — what
+   *  `scrml:mcp`'s `getCurrentVariant` reads via `_scrml_reactive_get(cellKey)`
+   *  (mcp.js:249 reads `descriptor.cellKey || descriptor.name`). In the default
+   *  (encoding-off) compile mode `encodeKey` is identity, so `cellKey === name`;
+   *  it is emitted explicitly so production per-file §47 encoding resolves the
+   *  state key correctly without the runtime re-implementing the scheme.
+   *  v0 LIMITATION: like the form keys, the per-file encoding context is
+   *  constructed inside CG and not threaded to this post-CG extractor, so the
+   *  emitted `cellKey` is the raw name. Production-encoding pass-through is a
+   *  documented follow-on (same posture as `collectFormDescriptors`). */
+  cellKey: string;
   /** Governing enum type (the `for=Type` attribute). */
   type: string;
   /** Variants of `type`, in declaration order. */
@@ -100,18 +112,32 @@ export interface FormFieldDescriptor {
   touchedKey: string;
 }
 
+/** The four compound-rollup keys for a form's auto-synthesized validity
+ *  surface (§55.5-§55.7). Nested under `FormDescriptor.compoundKeys` so the
+ *  `scrml:mcp` runtime helper reads them at the path it expects
+ *  (`getFormStatus` → `descriptor.compoundKeys.{...}`, mcp.js:311-323) AND so
+ *  they are unambiguously distinct from the per-field `errorsKey`/`isValidKey`/
+ *  `touchedKey` on `FormFieldDescriptor`. The `submittedKey` is compound-only
+ *  (§55.7 — there is no per-field `submitted` surface); flattening the compound
+ *  keys onto the descriptor root left B unable to decode `submitted`. */
+export interface FormCompoundKeys {
+  /** Resolved key for `<formName>.isValid` compound rollup. */
+  isValidKey: string;
+  /** Resolved key for `<formName>.errors` compound rollup. */
+  errorsKey: string;
+  /** Resolved key for `<formName>.touched` compound rollup. */
+  touchedKey: string;
+  /** Resolved key for `<formName>.submitted` (compound-only per §55.7). */
+  submittedKey: string;
+}
+
 export interface FormDescriptor {
   /** Compound state-decl name (e.g. `"signup"`). The form-status surface lives
    *  on `@<formName>` per §55.5. */
   formName: string;
-  /** Resolved key for `<formName>.errors` compound rollup. */
-  errorsKey: string;
-  /** Resolved key for `<formName>.isValid` compound rollup. */
-  isValidKey: string;
-  /** Resolved key for `<formName>.touched` compound rollup. */
-  touchedKey: string;
-  /** Resolved key for `<formName>.submitted`. */
-  submittedKey: string;
+  /** The four compound-rollup keys (isValid / errors / touched / submitted),
+   *  nested so `scrml:mcp`'s `getFormStatus` reads them directly. */
+  compoundKeys: FormCompoundKeys;
   /** Per-field descriptors for the validatable children (excludes
    *  compound-typed children, markup-typed children, and `derived` children
    *  per the §55.6 emission predicate mirrored from `emit-synth-surface.ts`). */
@@ -433,8 +459,16 @@ export function collectEngineDescriptors(tabResults: any[]): EngineDescriptor[] 
       // engines carry a `initialVariant` and direct-write semantics.
       const isDerived = meta.derivedExpr !== null && meta.derivedExpr !== undefined;
 
+      // `cellKey` — the runtime-state key B reads. `encodeKey` is identity in
+      // the default (encoding-off) compile mode, so cellKey === name; emitting
+      // it explicitly keeps the contract honest for production §47 encoding.
+      // Same v0 raw-name limitation as the form keys (encoding ctx is per-file,
+      // constructed inside CG, not threaded to this post-CG extractor).
+      const encodeKey: (k: string) => string = (k) => k;
+
       descriptors.push({
         name: varName,
+        cellKey: encodeKey(varName),
         type: governedType,
         variants,
         rules,
@@ -585,10 +619,12 @@ export function collectFormDescriptors(tabResults: any[]): FormDescriptor[] {
 
       descriptors.push({
         formName,
-        errorsKey: encodeKey(`${formName}.errors`),
-        isValidKey: encodeKey(`${formName}.isValid`),
-        touchedKey: encodeKey(`${formName}.touched`),
-        submittedKey: encodeKey(`${formName}.submitted`),
+        compoundKeys: {
+          isValidKey: encodeKey(`${formName}.isValid`),
+          errorsKey: encodeKey(`${formName}.errors`),
+          touchedKey: encodeKey(`${formName}.touched`),
+          submittedKey: encodeKey(`${formName}.submitted`),
+        },
         fields,
       });
     }
@@ -607,6 +643,12 @@ function collectChannelAutoSyncedCells(channelNode: any): ChannelAutoSyncedCell[
   const out: ChannelAutoSyncedCell[] = [];
   if (!channelNode || !Array.isArray(channelNode.children)) return out;
 
+  // Dedupe by cell name — a channel cannot host two same-named cells, and the
+  // same state-decl node can be reachable via more than one walk edge (the
+  // channel body's logic block is hoisted such that its decls surface in both
+  // the markup-children projection and the logic `body`). One entry per cell.
+  const seen = new Set<string>();
+
   function visit(list: any[]): void {
     if (!Array.isArray(list)) return;
     for (const node of list) {
@@ -619,13 +661,25 @@ function collectChannelAutoSyncedCells(channelNode: any): ChannelAutoSyncedCell[
       // do not match this predicate.
       if (node.kind === "state-decl" && typeof node.name === "string") {
         const cellName = node.name;
+        if (seen.has(cellName)) continue;
+        seen.add(cellName);
         out.push({ name: cellName, key: cellName });
         // Skip descent into child cells — auto-sync is per-cell rooted at
         // each top-level state-decl; nested compound children are referenced
         // via dotted paths through the parent.
         continue;
       }
+      // V5-strict channel cells are authored inside a `${ ... }` logic block
+      // in the channel body (the only canonical form — see the kickstarter
+      // real-time recipe + every channel test fixture). Those state-decls land
+      // in the logic node's `body`, NOT `children`, so we MUST descend `body`
+      // (and `bodyChildren`) as well or every channel's autoSyncedCells is
+      // permanently `[]`. Nested-logic locals (`let x = ...`) are
+      // LogicStatement-form and do NOT match the `state-decl` predicate above,
+      // so descending here does not over-collect non-synced locals (§38.4).
       if (Array.isArray(node.children)) visit(node.children);
+      if (Array.isArray(node.body)) visit(node.body);
+      if (Array.isArray(node.bodyChildren)) visit(node.bodyChildren);
     }
   }
   visit(channelNode.children);
