@@ -1888,6 +1888,34 @@ export function parsePrimary(ctx) {
         return makeNotValue(tok.span);
     }
 
+    // M6.7-D1 — `null` keyword atom. scrml SOURCE has no `null` (the absence
+    // value is `not`, §42), but the live/Acorn pipeline ACCEPTS `null` as a
+    // `Literal{value:null}` and maps it to `lit{raw:"null",value:null,
+    // litType:"not"}` (expression-parser.ts esTreeToExprNode); the gauntlet
+    // E-SYNTAX-042 detector then fires on the `raw:"null"` provenance in
+    // USER source while self-host / stdlib internals (which legitimately use
+    // JS-host `null`) pass. Native MUST match: capture `null` as the same
+    // NotValue absence atom but carry `raw:"null"` so the bridge preserves the
+    // source spelling. Without this arm the token fell through to
+    // E-EXPR-UNEXPECTED, which cascaded to the statement-level
+    // `no statement begins here` (the M6.7 native-flip cluster root cause).
+    if (kind === TokenKind.KwNull) {
+        const tok = advance(cursor);
+        return makeNotValue(tok.span, "null");
+    }
+
+    // M6.7-D1 — `undefined` keyword atom. Unlike `null`, `undefined` is NOT a
+    // literal in Acorn — it lexes as an `Identifier{name:"undefined"}`, which
+    // the live catalog maps to a plain `ident{name:"undefined"}` (NOT a lit).
+    // Native matches by emitting an Ident atom with name "undefined"; the
+    // bridge's translateIdent then produces the identical live shape. (The
+    // forbidden-token detector keys off the ident name "undefined" the same
+    // way the live path does.)
+    if (kind === TokenKind.KwUndefined) {
+        const tok = advance(cursor);
+        return makeIdent("undefined", tok.span);
+    }
+
     // `~` — the pipeline-accumulator atom (§32). M1 lexes a bare `~` as a
     // BitNot token; `~x` (bitwise-not) is consumed by parseUnary BEFORE the
     // cursor reaches parsePrimary — so a BitNot arriving HERE is the

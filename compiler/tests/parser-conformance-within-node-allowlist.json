@@ -1,11 +1,11 @@
 {
   "compiler/self-host/ast.scrml": {
-    "KIND-NAME": 70,
-    "FIELD-SHAPE": 136,
-    "MISSING-FIELD": 391,
-    "EXTRA-FIELD": 254,
-    "COUNT-LENGTH": 18,
-    "SPAN-COORD": 108
+    "KIND-NAME": 112,
+    "FIELD-SHAPE": 645,
+    "MISSING-FIELD": 580,
+    "EXTRA-FIELD": 382,
+    "COUNT-LENGTH": 27,
+    "SPAN-COORD": 3959
   },
   "compiler/self-host/bpp.scrml": {
     "KIND-NAME": 5,
@@ -32,12 +32,12 @@
     "SPAN-COORD": 14
   },
   "compiler/self-host/dg.scrml": {
-    "KIND-NAME": 14,
+    "KIND-NAME": 9,
     "FIELD-SHAPE": 129,
-    "MISSING-FIELD": 149,
-    "EXTRA-FIELD": 141,
-    "COUNT-LENGTH": 7,
-    "SPAN-COORD": 639
+    "MISSING-FIELD": 135,
+    "EXTRA-FIELD": 82,
+    "COUNT-LENGTH": 5,
+    "SPAN-COORD": 698
   },
   "compiler/self-host/meta-checker.scrml": {
     "KIND-NAME": 31,
@@ -64,12 +64,12 @@
     "SPAN-COORD": 26
   },
   "compiler/self-host/ri.scrml": {
-    "KIND-NAME": 70,
-    "FIELD-SHAPE": 187,
-    "MISSING-FIELD": 421,
-    "EXTRA-FIELD": 230,
-    "COUNT-LENGTH": 16,
-    "SPAN-COORD": 379
+    "KIND-NAME": 67,
+    "FIELD-SHAPE": 188,
+    "MISSING-FIELD": 386,
+    "EXTRA-FIELD": 220,
+    "COUNT-LENGTH": 17,
+    "SPAN-COORD": 397
   },
   "compiler/self-host/tab.scrml": {
     "KIND-NAME": 14,
@@ -81,11 +81,11 @@
   },
   "compiler/self-host/ts.scrml": {
     "KIND-NAME": 81,
-    "FIELD-SHAPE": 211,
-    "MISSING-FIELD": 653,
-    "EXTRA-FIELD": 377,
-    "COUNT-LENGTH": 32,
-    "SPAN-COORD": 171
+    "FIELD-SHAPE": 264,
+    "MISSING-FIELD": 569,
+    "EXTRA-FIELD": 325,
+    "COUNT-LENGTH": 35,
+    "SPAN-COORD": 198
   },
   "examples/01-hello.scrml": {
     "EXTRA-FIELD": 2,
@@ -3209,12 +3209,10 @@
     "SPAN-COORD": 8
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-null-forbidden-020.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 7,
-    "EXTRA-FIELD": 7,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 7
+    "FIELD-SHAPE": 2,
+    "MISSING-FIELD": 2,
+    "EXTRA-FIELD": 2,
+    "SPAN-COORD": 8
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-numeric-014.scrml": {
     "FIELD-SHAPE": 3,
@@ -3242,12 +3240,10 @@
     "SPAN-COORD": 20
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-eq-undefined-forbidden-021.scrml": {
-    "KIND-NAME": 2,
-    "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 6,
-    "EXTRA-FIELD": 8,
-    "COUNT-LENGTH": 1,
-    "SPAN-COORD": 7
+    "FIELD-SHAPE": 2,
+    "MISSING-FIELD": 2,
+    "EXTRA-FIELD": 2,
+    "SPAN-COORD": 8
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-fn-arg-expr-091.scrml": {
     "KIND-NAME": 1,

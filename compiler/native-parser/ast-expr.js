@@ -294,8 +294,16 @@ export function makeBlockStub(tokens, tokenStart, tokenEnd, span) {
 // makeNotValue — the `not` absence-value atom (§42). `not` is the single
 // absence sentinel; it is a VALUE, never a prefix operator (§42.10 —
 // `not (expr)` is E-TYPE-045, a typer concern, not a parse form).
-export function makeNotValue(span) {
-    return { kind: ExprKind.NotValue, span };
+export function makeNotValue(span, raw) {
+    // M6.7-D1 — `raw` carries the SOURCE spelling. The canonical `not`
+    // keyword defaults to "not". A JS-host `null` literal (self-host /
+    // stdlib internals — live/Acorn accepts `Literal{value:null}` and maps it
+    // to `lit{raw:"null",value:null,litType:"not"}`) reaches parsePrimary as a
+    // `KwNull` token and is captured as this same NotValue atom with
+    // `raw:"null"` so the bridge can preserve provenance for the live
+    // forbidden-token (E-SYNTAX-042) detector. `undefined` is NOT routed here
+    // (live maps it to a plain `ident`, not a lit) — see parsePrimary.
+    return { kind: ExprKind.NotValue, raw: (raw === undefined || raw === null) ? "not" : raw, span };
 }
 
 // makeTilde — the `~` pipeline-accumulator atom (§32). `~` is consumed by

@@ -181,7 +181,16 @@ export function translateExpr(nativeExpr) {
             // `"not"` litType to `null`). `raw` is "not" — the scrml canonical
             // keyword spelling (the user-source forbidden-token detector keys
             // off `raw: "null"` / `"undefined"`; "not" is the canonical form).
-            return makeLit("not", null, "not", nativeExpr.span);
+            // M6.7-D1 — pass the native `raw` spelling through. The canonical
+            // `not` keyword carries raw "not"; a JS-host `null` literal carries
+            // raw "null" (set by parsePrimary's KwNull arm). Both share
+            // `litType:"not"` + `value:null` — matching the live esTreeToExprNode
+            // mapping exactly (Literal{value:null} -> lit{raw,value:null,
+            // litType:"not"}). The raw preserves source provenance for the
+            // live E-SYNTAX-042 forbidden-token detector.
+            return makeLit(
+                (nativeExpr.raw === undefined || nativeExpr.raw === null) ? "not" : nativeExpr.raw,
+                null, "not", nativeExpr.span);
 
         // --- composite primary ---------------------------------------------
         case ExprKind.Array:
