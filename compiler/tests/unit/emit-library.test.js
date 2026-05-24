@@ -680,3 +680,109 @@ describe('emit-library §10: rewriteIsOperator rewrites enum checks in source-te
     expect(output).not.toContain('is .Done');
   });
 });
+
+// ---------------------------------------------------------------------------
+// §11 — GITI-018: rewriteStdlibImports rewrites EVERY scrml: import per file
+//
+// Regression: the rewriter's regex anchored `^import` with no allowance for
+// leading indentation. In library emit only the FIRST import is de-indented
+// to column 0; subsequent imports keep their source indentation, so they did
+// not match and stayed as bare `scrml:NAME` specifiers (Bun then fails with
+// `Cannot resolve invalid URL 'scrml:fs'`). A leading comment before the
+// imports also defeated even the first one. The fix tolerates leading
+// horizontal whitespace and round-trips it.
+// ---------------------------------------------------------------------------
+
+describe("emit-library §11: GITI-018 — all scrml: imports rewritten (not first-only)", () => {
+  test("indented + de-indented imports all rewrite (unit on rewriteStdlibImports)", async () => {
+    const { rewriteStdlibImports } = await import("../../src/api.js");
+    // Mirrors real library emit: first import at column 0, rest indented.
+    const jsCode =
+      'import { resolve } from "scrml:path"\n' +
+      '    import { existsSync } from "scrml:fs"\n' +
+      '    import { cwd } from "scrml:process"\n' +
+      '    export function probe() { return resolve(cwd(), existsSync("/")); }\n';
+    const bundled = new Set(["path", "fs", "process"]);
+    const out = rewriteStdlibImports(jsCode, "/out", "/out", bundled);
+
+    // All three rewritten — zero bare `scrml:` specifiers remain.
+    expect(out).not.toMatch(/scrml:/);
+    expect(out).toContain('"./_scrml/path.js"');
+    expect(out).toContain('"./_scrml/fs.js"');
+    expect(out).toContain('"./_scrml/process.js"');
+    // Indentation of the non-first imports is preserved.
+    expect(out).toContain('    import { existsSync } from "./_scrml/fs.js"');
+    expect(out).toContain('    import { cwd } from "./_scrml/process.js"');
+  });
+
+  test("leading comment before imports does not suppress rewriting", async () => {
+    const { rewriteStdlibImports } = await import("../../src/api.js");
+    const jsCode =
+      '// leading comment\n' +
+      '    import { resolve } from "scrml:path"\n' +
+      '    import { existsSync } from "scrml:fs"\n';
+    const bundled = new Set(["path", "fs"]);
+    const out = rewriteStdlibImports(jsCode, "/out", "/out", bundled);
+    expect(out).not.toMatch(/scrml:/);
+    expect(out).toContain('"./_scrml/path.js"');
+    expect(out).toContain('"./_scrml/fs.js"');
+  });
+
+  test("unbundled names are left bare (no shim available)", async () => {
+    const { rewriteStdlibImports } = await import("../../src/api.js");
+    const jsCode =
+      'import { resolve } from "scrml:path"\n' +
+      '    import { foo } from "scrml:notbundled"\n';
+    const bundled = new Set(["path"]); // notbundled deliberately absent
+    const out = rewriteStdlibImports(jsCode, "/out", "/out", bundled);
+    expect(out).toContain('"./_scrml/path.js"');
+    expect(out).toContain('"scrml:notbundled"'); // untouched — fails loudly at runtime by design
+  });
+
+  test("integration: 3-stdlib-import file compiles to disk with zero bare scrml: specifiers", async () => {
+    const { resolve } = await import("path");
+    const { mkdtempSync, writeFileSync, readFileSync, rmSync, readdirSync } = await import("fs");
+    const { tmpdir } = await import("os");
+    const { compileScrml } = await import("../../src/api.js");
+
+    const dir = mkdtempSync(resolve(tmpdir(), "giti-018-"));
+    try {
+      const srcPath = resolve(dir, "probe.scrml");
+      writeFileSync(
+        srcPath,
+        '${\n' +
+        '    import { resolve } from "scrml:path"\n' +
+        '    import { existsSync } from "scrml:fs"\n' +
+        '    import { cwd } from "scrml:process"\n' +
+        '    export function probe() {\n' +
+        '        return resolve(cwd(), existsSync("/") ? "yes" : "no")\n' +
+        '    }\n' +
+        '}\n',
+        "utf8",
+      );
+      const outDir = resolve(dir, "out");
+      const result = compileScrml({
+        inputFiles: [srcPath],
+        outputDir: outDir,
+        mode: "library",
+        write: true,
+      });
+      expect(result.errors).toHaveLength(0);
+
+      const emitted = readFileSync(resolve(outDir, "probe.js"), "utf8");
+      // No bare scrml: specifiers anywhere in the emitted module.
+      expect(emitted).not.toMatch(/scrml:/);
+      // All three shims rewritten to ./_scrml/*.js
+      expect(emitted).toContain('"./_scrml/path.js"');
+      expect(emitted).toContain('"./_scrml/fs.js"');
+      expect(emitted).toContain('"./_scrml/process.js"');
+      // The shim files were actually bundled.
+      const shims = readdirSync(resolve(outDir, "_scrml"));
+      expect(shims).toContain("path.js");
+      expect(shims).toContain("fs.js");
+      expect(shims).toContain("process.js");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

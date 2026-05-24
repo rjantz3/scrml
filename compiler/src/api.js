@@ -465,13 +465,18 @@ export function rewriteStdlibImports(jsCode, bundleDir, outputDir, bundled) {
   const outDir = resolve(outputDir);
   const stdlibAbs = join(outDir, "_scrml");
   return jsCode.replace(
-    /^(import\s+(?:\{[^}]*\}|[^\s]+)\s+from\s+)(["'])scrml:([A-Za-z0-9_-][A-Za-z0-9_/-]*)\2(;?)$/gm,
-    (match, prefix, quote, name, semi) => {
+    // GITI-018: tolerate leading indentation (only the FIRST library-mode
+    // import is de-indented to column 0; subsequent imports retain source
+    // indentation) and optional trailing whitespace. Capture group 1 is the
+    // leading indent so it round-trips; the backreference for the closing
+    // quote is now \3 because the indent group shifted the numbering.
+    /^([ \t]*)(import\s+(?:\{[^}]*\}|[^\s]+)\s+from\s+)(["'])scrml:([A-Za-z0-9_-][A-Za-z0-9_/-]*)\3([ \t]*;?[ \t]*)$/gm,
+    (match, indent, prefix, quote, name, semi) => {
       if (!bundled.has(name)) return match;
       const target = join(stdlibAbs, `${name}.js`);
       let rel = relative(writeDir, target);
       if (!rel.startsWith(".")) rel = "./" + rel;
-      return `${prefix}${quote}${rel}${quote}${semi}`;
+      return `${indent}${prefix}${quote}${rel}${quote}${semi}`;
     }
   );
 }
