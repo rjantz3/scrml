@@ -673,6 +673,16 @@ export function tokenizeOpener(cursor, ltAnchor) {
 //                  where `value` is the live 6-variant `AttrValue` union
 //                  (string-literal / variable-ref / call-ref / expr /
 //                  props-block / absent — `compiler/src/types/ast.ts`).
+//                  M6.6.b.1.5 extended the union with TWO additional
+//                  kinds for engine state-child rule values:
+//                    - `dotted-ident` (`rule=.Foo` — `text` = `.Foo`)
+//                    - `wildcard`     (`rule=*`    — `text` = `*`)
+//                  All value variants ALSO carry a `sourceText` field
+//                  (the verbatim source slice including any wrappers —
+//                  quotes for string-literal, `${...}` for expr-wrap,
+//                  etc.). Distinct from kind-specific fields like
+//                  `expr.raw` (unwrapped) and `string-literal.value`
+//                  (unquoted); `sourceText` recovers the original form.
 //
 // This is the DD #27 compression: the live pipeline runs `tokenizeAttributes`
 // THEN `parseAttributes` (two passes — tokenizer.ts + ast-builder.js). The
@@ -708,15 +718,66 @@ function isAttrWhitespace(ch) {
 // isAttrUnquotedValueStart — calculation (predicate). A char that may
 // begin an unquoted attribute VALUE — ASCII letter, ASCII digit, `_`, or
 // `@`. Mirrors the live `tokenizer.ts` unquoted-value gate
-// (`/[A-Za-z0-9_@]/`). NOTE — `.` and `-` are value CONTINUATION chars
-// only (not value starts), and a single-quote is NOT recognized at all
-// (live admits only double-quoted string values).
+// (`/[A-Za-z0-9_@]/`). NOTE — `-` is a value CONTINUATION char only (not
+// a value start), and a single-quote is NOT recognized at all (live admits
+// only double-quoted string values).
+//
+// M6.6.b.1.5 — extended to also admit `.` as a value-start (the
+// dotted-variant form `rule=.Foo`, §51.0.F) when followed by an uppercase
+// IdentStart or `_`. The uppercase-or-underscore lookahead disambiguates
+// from decimal-leading-dot literals (`.5` — a decimal continues with a
+// digit, never with uppercase-IdentStart). The caller's value-shape
+// dispatch routes a `.X`-form start into the dedicated dotted-ident
+// branch (NOT the unquoted-ident branch); see `isAttrDottedValueStart`
+// for the standalone predicate.
 function isAttrUnquotedValueStart(ch) {
     if (ch === "_" || ch === "@") return true;
     if (ch === "") return false;
     const c = ch.charCodeAt(0);
     if (c >= 48 && c <= 57) return true;
     return isAsciiLetter(ch);
+}
+
+// isAttrDottedValueStart — calculation (predicate). M6.6.b.1.5. The
+// two-char lookahead test for a dotted-variant value start: `.` followed
+// by uppercase ASCII letter or `_`. Examples: `.Foo`, `.SomeVariant`,
+// `._Private`. Rejects `.5` (decimal-leading-dot) because the second
+// char is a digit, not uppercase IdentStart. The dispatch site reads
+// `source.charAt(p)` AND `source.charAt(p+1)` then calls this with the
+// pair.
+function isAttrDottedValueStart(ch, next) {
+    if (ch !== ".") return false;
+    if (next === "_") return true;
+    if (next === "") return false;
+    const c = next.charCodeAt(0);
+    // Uppercase A-Z (65-90).
+    return c >= 65 && c <= 90;
+}
+
+// isAttrDottedValueChar — calculation (predicate). M6.6.b.1.5. A char
+// that may continue a dotted-variant value AFTER the leading `.X` —
+// IdentCont (letter/digit/underscore) OR `.` (for the `.X.history`
+// suffix per SPEC §51.0.N). Mirrors `parseRuleAttrValue`'s regex
+// `/^\.([A-Z][A-Za-z0-9_]*)(\.history)?$/` shape.
+function isAttrDottedValueChar(ch) {
+    if (ch === "") return false;
+    if (ch === "_" || ch === ".") return true;
+    const c = ch.charCodeAt(0);
+    if (c >= 48 && c <= 57) return true;
+    return isAsciiLetter(ch);
+}
+
+// isAttrWildcardValueStart — calculation (predicate). M6.6.b.1.5. The
+// standalone `*` value start (§51.0.F wildcard rule, `rule=*`). The
+// `*` is a value start ONLY when followed by inter-attribute whitespace,
+// `>` (opener close), `/` (self-close marker), or end-of-region — NOT
+// when followed by an IdentCont char (which would suggest a multi-char
+// form not in any spec). The caller passes the lookahead char (or `""`
+// at end-of-region).
+function isAttrWildcardValueStart(ch, next) {
+    if (ch !== "*") return false;
+    if (next === "" || next === ">" || next === "/") return true;
+    return isAttrWhitespace(next);
 }
 
 // isAttrNameStart — calculation (predicate). A char that may begin an
@@ -953,6 +1014,11 @@ export function tokenizeAttributeRegion(source, start, end, line, col, isStateOp
                         valStart, p, line, col);
                     value = {
                         kind: "expr", raw: str, refs: collectRefs(str),
+                        // M6.6.b.1.5 — verbatim source slice INCLUDING the
+                        // surrounding quotes. Distinct from `raw` (which is
+                        // the unwrapped expression text). Recovers the
+                        // legacy `ifExprRaw = "\"@a == b\""` form.
+                        sourceText: source.slice(valStart, p),
                         span: makeSpan(valStart, p, line, col),
                     };
                 } else {
@@ -960,6 +1026,10 @@ export function tokenizeAttributeRegion(source, start, end, line, col, isStateOp
                         valStart, p, line, col);
                     value = {
                         kind: "string-literal", value: str,
+                        // M6.6.b.1.5 — verbatim source slice INCLUDING the
+                        // surrounding double-quotes. Distinct from `value`
+                        // (the unquoted content).
+                        sourceText: source.slice(valStart, p),
                         span: makeSpan(valStart, p, line, col),
                     };
                 }
@@ -986,11 +1056,19 @@ export function tokenizeAttributeRegion(source, start, end, line, col, isStateOp
                 if (name === "props") {
                     value = {
                         kind: "props-block", propsDecl: block,
+                        // M6.6.b.1.5 — verbatim source slice INCLUDING
+                        // the `{...}` wrapper. Distinct from `propsDecl`
+                        // (the inner declaration text).
+                        sourceText: source.slice(valStart, p),
                         span: makeSpan(valStart, p, line, col),
                     };
                 } else {
                     value = {
                         kind: "expr", raw: block, refs: collectRefs(block),
+                        // M6.6.b.1.5 — verbatim source slice INCLUDING
+                        // the `{...}` wrapper. Distinct from `raw` (the
+                        // inner expression text).
+                        sourceText: source.slice(valStart, p),
                         span: makeSpan(valStart, p, line, col),
                     };
                 }
@@ -1010,6 +1088,10 @@ export function tokenizeAttributeRegion(source, start, end, line, col, isStateOp
                     valStart, p, line, col);
                 value = {
                     kind: "expr", raw: expr, refs: collectRefs(expr),
+                    // M6.6.b.1.5 — verbatim source slice (== `expr` here,
+                    // since no wrappers were stripped — kept for shape
+                    // uniformity across AttrValue variants).
+                    sourceText: source.slice(valStart, p),
                     span: makeSpan(valStart, p, line, col),
                 };
             } else if (vc === "(") {
@@ -1037,6 +1119,9 @@ export function tokenizeAttributeRegion(source, start, end, line, col, isStateOp
                     valStart, p, line, col);
                 value = {
                     kind: "expr", raw: expr, refs: collectRefs(expr),
+                    // M6.6.b.1.5 — verbatim source slice (== `expr` here,
+                    // since the parens are kept as part of `raw`).
+                    sourceText: source.slice(valStart, p),
                     span: makeSpan(valStart, p, line, col),
                 };
             } else if (vc === "[") {
@@ -1078,6 +1163,9 @@ export function tokenizeAttributeRegion(source, start, end, line, col, isStateOp
                     valStart, p, line, col);
                 value = {
                     kind: "expr", raw: expr, refs: collectRefs(expr),
+                    // M6.6.b.1.5 — verbatim source slice (== `expr` here,
+                    // since the brackets are kept as part of `raw`).
+                    sourceText: source.slice(valStart, p),
                     span: makeSpan(valStart, p, line, col),
                 };
             } else if (vc === "$" && p + 1 < end
@@ -1101,6 +1189,54 @@ export function tokenizeAttributeRegion(source, start, end, line, col, isStateOp
                     valStart, p, line, col);
                 value = {
                     kind: "expr", raw: expr, refs: collectRefs(expr),
+                    // M6.6.b.1.5 — verbatim source slice INCLUDING the
+                    // `${...}` wrapper. Distinct from `raw` (the inner
+                    // expression text). Recovers the legacy
+                    // `ifExprRaw = "${@a == b}"` form.
+                    sourceText: source.slice(valStart, p),
+                    span: makeSpan(valStart, p, line, col),
+                };
+            } else if (isAttrDottedValueStart(vc,
+                       p + 1 < end ? source.charAt(p + 1) : "")) {
+                // M6.6.b.1.5 — unquoted dotted-variant value (§51.0.F):
+                // `rule=.Foo`, `internal:rule=.Bar`, with optional
+                // `.history` suffix per §51.0.N (`.Foo.history`). The
+                // dispatch site routes here ONLY when the lookahead
+                // confirms uppercase-or-underscore after `.` —
+                // disambiguates from decimal-leading-dot literals (`.5`,
+                // which never hits this branch).
+                let text = ".";
+                p = p + 1; // consume `.`
+                while (p < end && isAttrDottedValueChar(source.charAt(p))) {
+                    text = text + source.charAt(p);
+                    p = p + 1;
+                }
+                valTok = makeAttrToken("ATTR_IDENT", text,
+                    valStart, p, line, col);
+                value = {
+                    kind: "dotted-ident", text,
+                    // M6.6.b.1.5 — verbatim source slice == `text` here,
+                    // since the dotted-ident form has no wrappers to
+                    // strip; kept for shape uniformity.
+                    sourceText: source.slice(valStart, p),
+                    span: makeSpan(valStart, p, line, col),
+                };
+            } else if (isAttrWildcardValueStart(vc,
+                       p + 1 < end ? source.charAt(p + 1) : "")) {
+                // M6.6.b.1.5 — standalone `*` wildcard value (§51.0.F):
+                // `rule=*`, `internal:rule=*`. The dispatch site routes
+                // here ONLY when the `*` is followed by whitespace, `>`,
+                // `/`, or end-of-region (an isolated `*` token). A
+                // multi-char form `*foo` falls through to the
+                // unrecognized-char branch (the standalone-only
+                // constraint).
+                p = p + 1; // consume `*`
+                valTok = makeAttrToken("ATTR_IDENT", "*",
+                    valStart, p, line, col);
+                value = {
+                    kind: "wildcard", text: "*",
+                    // M6.6.b.1.5 — verbatim source slice == "*" here.
+                    sourceText: source.slice(valStart, p),
                     span: makeSpan(valStart, p, line, col),
                 };
             } else if (isAttrUnquotedValueStart(vc)) {
@@ -1145,6 +1281,9 @@ export function tokenizeAttributeRegion(source, start, end, line, col, isStateOp
                     const argList = splitCallArgs(args);
                     value = {
                         kind: "call-ref", name: ident, args: argList,
+                        // M6.6.b.1.5 — verbatim source slice INCLUDING
+                        // the `(...)` arg-list wrapper.
+                        sourceText: source.slice(valStart, p),
                         span: makeSpan(valStart, p, line, col),
                     };
                 } else if (evHandler
@@ -1229,6 +1368,10 @@ export function tokenizeAttributeRegion(source, start, end, line, col, isStateOp
                         valStart, p, line, col);
                     value = {
                         kind: "expr", raw: trimmed, refs: collectRefs(trimmed),
+                        // M6.6.b.1.5 — verbatim source slice. May differ
+                        // from `raw` because trailing whitespace is
+                        // stripped in `raw` but kept in the source slice.
+                        sourceText: source.slice(valStart, p),
                         span: makeSpan(valStart, p, line, col),
                     };
                 } else {
@@ -1237,6 +1380,9 @@ export function tokenizeAttributeRegion(source, start, end, line, col, isStateOp
                         valStart, p, line, col);
                     value = {
                         kind: "variable-ref", name: ident,
+                        // M6.6.b.1.5 — verbatim source slice (== `name`
+                        // here, since variable-ref has no wrappers).
+                        sourceText: source.slice(valStart, p),
                         span: makeSpan(valStart, p, line, col),
                     };
                 }

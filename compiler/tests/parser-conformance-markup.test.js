@@ -6660,3 +6660,309 @@ describe("M6.6.b.1 parseMarkup — `:`-shorthand block payload + sibling-swallow
         expect(nodes[0].colonShorthandBody).toBe(null);
     });
 });
+
+// -----------------------------------------------------------------------------
+// M6.6.b.1.5 — Attr tokenizer extensions for engine state-child rule values.
+//
+// The M6.6.b.2 STOP doc (`docs/changes/m66-b2-symbol-table-migration/
+// progress.md`) empirically verified that the M6.6.b.1 cookbook's
+// `rule=.X` / `rule=*` / `if="..."` / `if=${...}` recipes were wrong
+// because the native attribute tokenizer:
+//   - did not admit `.` as an unquoted value-start (`rule=.X` produced
+//     `{kind: "absent"}` + `X` as a separate bare attribute);
+//   - silently dropped `*` via the unexpected-char skip branch
+//     (`rule=*` produced `{kind: "absent"}` with NO trace of `*`);
+//   - stripped both `"..."` quotes and `${...}` wrappers from `if=`
+//     values, losing source-form for legacy parity.
+//
+// M6.6.b.1.5 extends the tokenizer additively:
+//   - `.X` (where `X` is uppercase/underscore) becomes a `dotted-ident`
+//     value kind (`{kind: "dotted-ident", text: ".X"}`) — `text`
+//     preserves the leading dot to match `parseRuleAttrValue`'s input
+//     shape (§51.0.F single-target / §51.0.N `.history` suffix).
+//   - standalone `*` (followed by whitespace / `>` / `/` / EOR) becomes
+//     a `wildcard` value kind (`{kind: "wildcard", text: "*"}`).
+//   - every AttrValue gains a `sourceText` field: the verbatim source
+//     slice including any wrappers (quotes for string-literal, `${...}`
+//     for expr-wrap, etc.). Distinct from `expr.raw` (unwrapped) and
+//     `string-literal.value` (unquoted); recovers legacy `ifExprRaw`.
+//
+// Disambiguation discipline:
+//   - `attr=.5` (decimal-leading-dot) must NOT trip dotted-ident — the
+//     uppercase-or-underscore lookahead rejects it (the value falls
+//     through to the unrecognized-char branch as today).
+//   - `attr=*foo` must NOT trip wildcard — the standalone-only
+//     constraint (`*` followed by IdentCont is NOT a wildcard).
+// -----------------------------------------------------------------------------
+
+describe("M6.6.b.1.5 tokenizeAttributeRegion — `.X` dotted-ident value", () => {
+    test("`rule=.X` produces a dotted-ident value with leading dot preserved", () => {
+        const o = openerAttrs(`<A rule=.X>`);
+        expect(o.attrs).toHaveLength(1);
+        expect(o.attrs[0].name).toBe("rule");
+        expect(o.attrs[0].value.kind).toBe("dotted-ident");
+        expect(o.attrs[0].value.text).toBe(".X");
+        // Verbatim source slice — same as `text` for dotted-ident
+        // (no wrappers).
+        expect(o.attrs[0].value.sourceText).toBe(".X");
+    });
+
+    test("`rule=.SomeVariant` reads the full PascalCase identifier", () => {
+        const o = openerAttrs(`<A rule=.SomeVariant>`);
+        expect(o.attrs).toHaveLength(1);
+        expect(o.attrs[0].value.kind).toBe("dotted-ident");
+        expect(o.attrs[0].value.text).toBe(".SomeVariant");
+    });
+
+    test("`rule=.X.history` reads the `.history` suffix per SPEC §51.0.N", () => {
+        const o = openerAttrs(`<A rule=.Done.history>`);
+        expect(o.attrs).toHaveLength(1);
+        expect(o.attrs[0].value.kind).toBe("dotted-ident");
+        expect(o.attrs[0].value.text).toBe(".Done.history");
+    });
+
+    test("`rule=.X` does NOT spill the leading char as a separate bare attribute (the STOP doc Gap 1 regression)", () => {
+        // Pre-extension: the native tokenizer left `rule=` as absent then
+        // tokenized `X` as a bare attribute (adjacency-style). Post-
+        // extension: the `.X` is the rule value; no spurious `X` attr.
+        const o = openerAttrs(`<A rule=.B>`);
+        const attrNames = o.attrs.map((a) => a.name);
+        expect(attrNames).toEqual(["rule"]);
+        expect(o.attrs[0].value.text).toBe(".B");
+    });
+
+    test("`internal:rule=.X` works identically — `:` in attr name does not perturb dispatch", () => {
+        // The b.1 cookbook OQ #1 — verifies the colon in `internal:rule`
+        // is admitted as a name-continue char AND the value-side reads
+        // dotted-ident shape unchanged.
+        const o = openerAttrs(`<A internal:rule=.X>`);
+        expect(o.attrs).toHaveLength(1);
+        expect(o.attrs[0].name).toBe("internal:rule");
+        expect(o.attrs[0].value.kind).toBe("dotted-ident");
+        expect(o.attrs[0].value.text).toBe(".X");
+    });
+
+    test("`<A rule=.X effect=${cleanup()}>` — dotted-ident at attr boundary cleanly terminates", () => {
+        const o = openerAttrs(`<A rule=.X effect=${"${cleanup()}"}>`);
+        expect(o.attrs).toHaveLength(2);
+        expect(o.attrs[0].name).toBe("rule");
+        expect(o.attrs[0].value.kind).toBe("dotted-ident");
+        expect(o.attrs[0].value.text).toBe(".X");
+        expect(o.attrs[1].name).toBe("effect");
+        expect(o.attrs[1].value.kind).toBe("expr");
+        expect(o.attrs[1].value.raw).toBe("cleanup()");
+    });
+
+    test("`attr=.5` (decimal-leading-dot) does NOT trip the dotted-ident branch", () => {
+        // The uppercase-or-underscore lookahead constraint disambiguates
+        // from decimal literals. The `.5` falls through to the
+        // unrecognized-char branch — the value is `absent`, the `.5`
+        // is skipped as an unexpected char run.
+        const o = openerAttrs(`<X attr=.5>`);
+        expect(o.attrs).toHaveLength(1);
+        expect(o.attrs[0].name).toBe("attr");
+        // Pre-extension behavior preserved: value is absent.
+        expect(o.attrs[0].value.kind).toBe("absent");
+    });
+
+    test("`attr=.lowerCase` (lowercase-leading) does NOT trip the dotted-ident branch", () => {
+        // Only uppercase or underscore is admitted as the second char —
+        // mirrors `parseRuleAttrValue`'s `[A-Z][A-Za-z0-9_]*` PascalCase
+        // requirement. A lowercase-leading identifier after `.` is not
+        // a state-variant per SPEC §51.0.F.
+        //
+        // The dotted-ident gate correctly does NOT fire — `attr`'s value
+        // is `absent`. (The leftover `.foo` is consumed by the
+        // tokenizer's unexpected-char skip + the `foo` adjacency
+        // pattern; that's pre-existing tokenizer behavior unrelated to
+        // the new branch.)
+        const o = openerAttrs(`<X attr=.foo>`);
+        const attrValue = o.attrs.find((a) => a.name === "attr").value;
+        expect(attrValue.kind).toBe("absent");
+        // Specifically — NOT dotted-ident.
+        expect(attrValue.kind).not.toBe("dotted-ident");
+    });
+
+    test("`rule=._Private` (underscore-leading) IS admitted (parity with PascalCase)", () => {
+        // The dotted-value start admits `_` as the second char (parity
+        // with `parseRuleAttrValue`'s `[A-Z_]`-style identifier start).
+        const o = openerAttrs(`<A rule=._Private>`);
+        expect(o.attrs).toHaveLength(1);
+        expect(o.attrs[0].value.kind).toBe("dotted-ident");
+        expect(o.attrs[0].value.text).toBe("._Private");
+    });
+});
+
+describe("M6.6.b.1.5 tokenizeAttributeRegion — `*` wildcard value", () => {
+    test("`rule=*` produces a wildcard value", () => {
+        const o = openerAttrs(`<A rule=*>`);
+        expect(o.attrs).toHaveLength(1);
+        expect(o.attrs[0].name).toBe("rule");
+        expect(o.attrs[0].value.kind).toBe("wildcard");
+        expect(o.attrs[0].value.text).toBe("*");
+        expect(o.attrs[0].value.sourceText).toBe("*");
+    });
+
+    test("`rule=* effect=${cleanup()}` — wildcard at whitespace boundary cleanly terminates", () => {
+        // The STOP doc Gap 2 regression — pre-extension the `*` was
+        // silently consumed by the unexpected-char branch, `rule` was
+        // `absent`, and `effect=${cleanup()}` worked but lost the
+        // wildcard signal.
+        const o = openerAttrs(`<C rule=* effect=${"${cleanup()}"}>`);
+        expect(o.attrs).toHaveLength(2);
+        expect(o.attrs[0].name).toBe("rule");
+        expect(o.attrs[0].value.kind).toBe("wildcard");
+        expect(o.attrs[1].name).toBe("effect");
+        expect(o.attrs[1].value.kind).toBe("expr");
+        expect(o.attrs[1].value.raw).toBe("cleanup()");
+    });
+
+    test("`internal:rule=*` works identically (`:` in name does not perturb)", () => {
+        const o = openerAttrs(`<A internal:rule=*>`);
+        expect(o.attrs).toHaveLength(1);
+        expect(o.attrs[0].name).toBe("internal:rule");
+        expect(o.attrs[0].value.kind).toBe("wildcard");
+    });
+
+    test("`rule=*/>` (self-close marker after) — wildcard terminates at `/`", () => {
+        const o = openerAttrs(`<A rule=*/>`);
+        expect(o.attrs).toHaveLength(1);
+        expect(o.attrs[0].value.kind).toBe("wildcard");
+        expect(o.selfClosing).toBe(true);
+    });
+
+    test("`attr=*foo` (non-standalone `*`) does NOT trip the wildcard branch", () => {
+        // The standalone-only constraint — `*` followed by an IdentCont
+        // char is NOT a wildcard.
+        //
+        // The wildcard gate correctly does NOT fire — `attr`'s value is
+        // `absent`. (The leftover `*foo` is consumed by the tokenizer's
+        // unexpected-char skip + the `foo` adjacency pattern; that's
+        // pre-existing tokenizer behavior unrelated to the new branch.)
+        const o = openerAttrs(`<X attr=*foo>`);
+        const attrValue = o.attrs.find((a) => a.name === "attr").value;
+        expect(attrValue.kind).toBe("absent");
+        // Specifically — NOT wildcard.
+        expect(attrValue.kind).not.toBe("wildcard");
+    });
+
+    test("`rule=(.A | .B)` paren-form returns `expr` (NOT wildcard) with full source preserved", () => {
+        // The paren-form rule values stay as `expr` kind — they're
+        // depth-1 paren-balanced expressions. `parseRuleAttrValue`
+        // dispatches the multi-target shape from `value.raw` (which is
+        // the paren-wrapped text including the surrounding parens).
+        const o = openerAttrs(`<A rule=(.A | .B)>`);
+        expect(o.attrs).toHaveLength(1);
+        expect(o.attrs[0].value.kind).toBe("expr");
+        expect(o.attrs[0].value.raw).toBe("(.A | .B)");
+        expect(o.attrs[0].value.sourceText).toBe("(.A | .B)");
+    });
+});
+
+describe("M6.6.b.1.5 tokenizeAttributeRegion — `sourceText` verbatim slice on all value kinds", () => {
+    test("`string-literal` carries `sourceText` with the double-quotes included", () => {
+        const o = openerAttrs(`<div class="hero">`);
+        expect(o.attrs[0].value.kind).toBe("string-literal");
+        expect(o.attrs[0].value.value).toBe("hero");
+        // `sourceText` includes the surrounding `"` quotes — distinct
+        // from `value` (the unquoted content).
+        expect(o.attrs[0].value.sourceText).toBe(`"hero"`);
+    });
+
+    test("`if=\"...\"` (quoted expression) — `sourceText` recovers the legacy ifExprRaw quoted form", () => {
+        // The STOP doc Gap 5 — pre-extension, `if="@a == b"` stripped
+        // the quotes (value.raw was `@a == b`) which lost legacy
+        // `ifExprRaw = "\"@a == b\""` parity. `sourceText` recovers it.
+        const o = openerAttrs(`<section if="@a == b">`);
+        expect(o.attrs[0].value.kind).toBe("expr");
+        expect(o.attrs[0].value.raw).toBe("@a == b");
+        // The verbatim source slice INCLUDES the surrounding `"` quotes.
+        expect(o.attrs[0].value.sourceText).toBe(`"@a == b"`);
+    });
+
+    test("`if=${...}` (wrapper expression) — `sourceText` recovers the legacy ifExprRaw wrapped form", () => {
+        // The STOP doc Gap 6 — pre-extension, `if=${@a == b}` stripped
+        // the wrapper (value.raw was `@a == b`) which lost legacy
+        // `ifExprRaw = "${@a == b}"` parity. `sourceText` recovers it.
+        const o = openerAttrs(`<section if=${"${@a == b}"}>`);
+        expect(o.attrs[0].value.kind).toBe("expr");
+        expect(o.attrs[0].value.raw).toBe("@a == b");
+        // The verbatim source slice INCLUDES the `${...}` wrapper.
+        expect(o.attrs[0].value.sourceText).toBe("${@a == b}");
+    });
+
+    test("`expr` paren-form — `sourceText` equals `raw` (parens already preserved in raw)", () => {
+        const o = openerAttrs(`<section if=(@a && @b)>`);
+        expect(o.attrs[0].value.kind).toBe("expr");
+        expect(o.attrs[0].value.raw).toBe("(@a && @b)");
+        expect(o.attrs[0].value.sourceText).toBe("(@a && @b)");
+    });
+
+    test("`expr` `!`-negation — `sourceText` equals `raw` (no wrappers)", () => {
+        const o = openerAttrs(`<div if=!@hidden>`);
+        expect(o.attrs[0].value.kind).toBe("expr");
+        expect(o.attrs[0].value.raw).toBe("!@hidden");
+        expect(o.attrs[0].value.sourceText).toBe("!@hidden");
+    });
+
+    test("`call-ref` — `sourceText` includes the call's `(...)` arg-list wrapper", () => {
+        const o = openerAttrs(`<button onclick=save(@a, @b)>`);
+        expect(o.attrs[0].value.kind).toBe("call-ref");
+        expect(o.attrs[0].value.name).toBe("save");
+        // sourceText is the verbatim opener slice — `name(args)`.
+        expect(o.attrs[0].value.sourceText).toBe("save(@a, @b)");
+    });
+
+    test("`variable-ref` — `sourceText` equals `name`", () => {
+        const o = openerAttrs(`<input value=name>`);
+        expect(o.attrs[0].value.kind).toBe("variable-ref");
+        expect(o.attrs[0].value.name).toBe("name");
+        expect(o.attrs[0].value.sourceText).toBe("name");
+    });
+
+    test("`props-block` — `sourceText` includes the `{...}` brace wrapper", () => {
+        const o = openerAttrs(`<Card props={title: string}>`);
+        expect(o.attrs[0].value.kind).toBe("props-block");
+        expect(o.attrs[0].value.propsDecl).toBe("title: string");
+        expect(o.attrs[0].value.sourceText).toBe("{title: string}");
+    });
+
+    test("`expr` from brace-block (non-props) — `sourceText` includes `{...}` wrapper", () => {
+        const o = openerAttrs(`<div handler={fire(@e)}>`);
+        expect(o.attrs[0].value.kind).toBe("expr");
+        expect(o.attrs[0].value.raw).toBe("fire(@e)");
+        // The verbatim source includes the `{...}` brace wrapper —
+        // distinct from `raw` (which is the brace-stripped inner).
+        expect(o.attrs[0].value.sourceText).toBe("{fire(@e)}");
+    });
+
+    test("`absent` value does NOT carry `sourceText` (no value-region to slice)", () => {
+        // `absent` values are produced when the attribute has no `=` OR
+        // when the value-form is unrecognized. There's no value-region
+        // to slice; the absent value is the literal `{ kind: "absent" }`
+        // shape (no `sourceText` on that variant — keep the shape
+        // minimal so consumers can use it as a discriminator).
+        const o = openerAttrs(`<input disabled>`);
+        expect(o.attrs[0].value.kind).toBe("absent");
+        expect(o.attrs[0].value.sourceText).toBeUndefined();
+    });
+});
+
+describe("M6.6.b.1.5 tokenizeAttributeRegion — coexistence with `:`-shorthand body", () => {
+    test("`<Small rule=.Big : startGame()>` — dotted-ident attr + `:`-body coexist", () => {
+        const o = openerAttrs(`<Small rule=.Big : startGame()>`);
+        expect(o.attrs).toHaveLength(1);
+        expect(o.attrs[0].name).toBe("rule");
+        expect(o.attrs[0].value.kind).toBe("dotted-ident");
+        expect(o.attrs[0].value.text).toBe(".Big");
+        expect(o.colonShorthandBody).toBe("startGame()");
+    });
+
+    test("`<Wild rule=* : runWild()>` — wildcard attr + `:`-body coexist", () => {
+        const o = openerAttrs(`<Wild rule=* : runWild()>`);
+        expect(o.attrs).toHaveLength(1);
+        expect(o.attrs[0].name).toBe("rule");
+        expect(o.attrs[0].value.kind).toBe("wildcard");
+        expect(o.colonShorthandBody).toBe("runWild()");
+    });
+});

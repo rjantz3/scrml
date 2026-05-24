@@ -1011,15 +1011,59 @@ ${
 
     // isAttrUnquotedValueStart — CALCULATION (predicate). A char that may
     // begin an unquoted attribute VALUE — ASCII letter, digit, `_`, `@`.
-    // Mirrors the live unquoted-value gate (`/[A-Za-z0-9_@]/`). `.` / `-`
-    // are value CONTINUATION chars only; a single-quote is NOT recognized
+    // Mirrors the live unquoted-value gate (`/[A-Za-z0-9_@]/`). `-` is a
+    // value CONTINUATION char only; a single-quote is NOT recognized
     // (live admits only double-quoted string values).
+    //
+    // M6.6.b.1.5 — the caller's value-shape dispatch now ALSO routes a
+    // `.X`-form start through `isAttrDottedValueStart` (dotted-variant
+    // value for `rule=.Foo`) and a standalone `*` through
+    // `isAttrWildcardValueStart` (wildcard for `rule=*`) — see the
+    // standalone predicates below.
     fn isAttrUnquotedValueStart(ch) {
         if (ch == "_" || ch == "@") return true
         if (ch == "") return false
         const c = ch.charCodeAt(0)
         if (c >= 48 && c <= 57) return true
         return isAsciiLetter(ch)
+    }
+
+    // isAttrDottedValueStart — CALCULATION (predicate). M6.6.b.1.5.
+    // Two-char lookahead test for a dotted-variant value start: `.`
+    // followed by uppercase ASCII letter or `_`. Examples: `.Foo`,
+    // `.SomeVariant`, `._Private`. Rejects `.5` (decimal-leading-dot)
+    // because the second char is a digit, not uppercase IdentStart.
+    fn isAttrDottedValueStart(ch, next) {
+        if (ch != ".") return false
+        if (next == "_") return true
+        if (next == "") return false
+        const c = next.charCodeAt(0)
+        // Uppercase A-Z (65-90).
+        return c >= 65 && c <= 90
+    }
+
+    // isAttrDottedValueChar — CALCULATION (predicate). M6.6.b.1.5. A
+    // char that may continue a dotted-variant value AFTER the leading
+    // `.X` — IdentCont (letter / digit / underscore) OR `.` (for the
+    // `.X.history` suffix per SPEC §51.0.N). Mirrors
+    // parseRuleAttrValue's `/^\.([A-Z][A-Za-z0-9_]*)(\.history)?$/`.
+    fn isAttrDottedValueChar(ch) {
+        if (ch == "") return false
+        if (ch == "_" || ch == ".") return true
+        const c = ch.charCodeAt(0)
+        if (c >= 48 && c <= 57) return true
+        return isAsciiLetter(ch)
+    }
+
+    // isAttrWildcardValueStart — CALCULATION (predicate). M6.6.b.1.5.
+    // Standalone `*` value start (§51.0.F wildcard rule, `rule=*`). The
+    // `*` is a value start ONLY when followed by inter-attribute
+    // whitespace, `>` (opener close), `/` (self-close marker), or
+    // end-of-region — NOT when followed by an IdentCont char.
+    fn isAttrWildcardValueStart(ch, next) {
+        if (ch != "*") return false
+        if (next == "" || next == ">" || next == "/") return true
+        return isAttrWhitespace(next)
     }
 
     // isEventHandlerAttrName — CALCULATION (predicate). Mirrors the live
@@ -1327,9 +1371,14 @@ ${
                 q = q + 1
             }
             if (name == "if") {
-                return { next: q, token: makeAttrToken("ATTR_EXPR", str, valStart, q, line, col), value: { kind: "expr", raw: str, refs: collectRefs(str), span: makeSpan(valStart, q, line, col) } }
+                // M6.6.b.1.5 — `sourceText` carries the verbatim source
+                // slice INCLUDING the surrounding quotes (recovers the
+                // legacy `ifExprRaw = "\"@a == b\""` form).
+                return { next: q, token: makeAttrToken("ATTR_EXPR", str, valStart, q, line, col), value: { kind: "expr", raw: str, refs: collectRefs(str), sourceText: source.slice(valStart, q), span: makeSpan(valStart, q, line, col) } }
             }
-            return { next: q, token: makeAttrToken("ATTR_STRING", str, valStart, q, line, col), value: { kind: "string-literal", value: str, span: makeSpan(valStart, q, line, col) } }
+            // M6.6.b.1.5 — `sourceText` carries the verbatim slice
+            // INCLUDING the surrounding double-quotes.
+            return { next: q, token: makeAttrToken("ATTR_STRING", str, valStart, q, line, col), value: { kind: "string-literal", value: str, sourceText: source.slice(valStart, q), span: makeSpan(valStart, q, line, col) } }
         }
 
         // Brace-block value: `props={...}` is a typed props declaration
@@ -1354,9 +1403,13 @@ ${
                 q = q + 1
             }
             if (name == "props") {
-                return { next: q, token: makeAttrToken("ATTR_BLOCK", block, valStart, q, line, col), value: { kind: "props-block", propsDecl: block, span: makeSpan(valStart, q, line, col) } }
+                // M6.6.b.1.5 — `sourceText` carries the `{...}` wrapper
+                // INCLUDED; `propsDecl` is the inner.
+                return { next: q, token: makeAttrToken("ATTR_BLOCK", block, valStart, q, line, col), value: { kind: "props-block", propsDecl: block, sourceText: source.slice(valStart, q), span: makeSpan(valStart, q, line, col) } }
             }
-            return { next: q, token: makeAttrToken("ATTR_BLOCK", block, valStart, q, line, col), value: { kind: "expr", raw: block, refs: collectRefs(block), span: makeSpan(valStart, q, line, col) } }
+            // M6.6.b.1.5 — `sourceText` carries the `{...}` wrapper
+            // INCLUDED; `raw` is the inner expression text.
+            return { next: q, token: makeAttrToken("ATTR_BLOCK", block, valStart, q, line, col), value: { kind: "expr", raw: block, refs: collectRefs(block), sourceText: source.slice(valStart, q), span: makeSpan(valStart, q, line, col) } }
         }
 
         // Unquoted negation expression: `!@var`, `!!@var`, `!obj.prop`.
@@ -1369,7 +1422,8 @@ ${
                 expr = expr + ec
                 q = q + 1
             }
-            return { next: q, token: makeAttrToken("ATTR_EXPR", expr, valStart, q, line, col), value: { kind: "expr", raw: expr, refs: collectRefs(expr), span: makeSpan(valStart, q, line, col) } }
+            // M6.6.b.1.5 — `sourceText` (== `expr` here; no wrappers).
+            return { next: q, token: makeAttrToken("ATTR_EXPR", expr, valStart, q, line, col), value: { kind: "expr", raw: expr, refs: collectRefs(expr), sourceText: source.slice(valStart, q), span: makeSpan(valStart, q, line, col) } }
         }
 
         // Parenthesized expression: `if=(@a && @b)`.
@@ -1392,7 +1446,8 @@ ${
                 expr = expr + ec
                 q = q + 1
             }
-            return { next: q, token: makeAttrToken("ATTR_EXPR", expr, valStart, q, line, col), value: { kind: "expr", raw: expr, refs: collectRefs(expr), span: makeSpan(valStart, q, line, col) } }
+            // M6.6.b.1.5 — `sourceText` (== `expr`; parens already in raw).
+            return { next: q, token: makeAttrToken("ATTR_EXPR", expr, valStart, q, line, col), value: { kind: "expr", raw: expr, refs: collectRefs(expr), sourceText: source.slice(valStart, q), span: makeSpan(valStart, q, line, col) } }
         }
 
         // §41.14 — array-literal value: `pick=["a","b"]` (string-aware).
@@ -1429,7 +1484,8 @@ ${
                 expr = expr + ec
                 q = q + 1
             }
-            return { next: q, token: makeAttrToken("ATTR_EXPR", expr, valStart, q, line, col), value: { kind: "expr", raw: expr, refs: collectRefs(expr), span: makeSpan(valStart, q, line, col) } }
+            // M6.6.b.1.5 — `sourceText` (== `expr`; brackets in raw).
+            return { next: q, token: makeAttrToken("ATTR_EXPR", expr, valStart, q, line, col), value: { kind: "expr", raw: expr, refs: collectRefs(expr), sourceText: source.slice(valStart, q), span: makeSpan(valStart, q, line, col) } }
         }
 
         // Inline expression: `${() => fn()}`, `${a ? b : c}`.
@@ -1451,7 +1507,35 @@ ${
                 expr = expr + ec
                 q = q + 1
             }
-            return { next: q, token: makeAttrToken("ATTR_EXPR", expr, valStart, q, line, col), value: { kind: "expr", raw: expr, refs: collectRefs(expr), span: makeSpan(valStart, q, line, col) } }
+            // M6.6.b.1.5 — `sourceText` INCLUDES the `${...}` wrapper
+            // (recovers legacy `ifExprRaw = "${@a == b}"` form).
+            return { next: q, token: makeAttrToken("ATTR_EXPR", expr, valStart, q, line, col), value: { kind: "expr", raw: expr, refs: collectRefs(expr), sourceText: source.slice(valStart, q), span: makeSpan(valStart, q, line, col) } }
+        }
+
+        // M6.6.b.1.5 — unquoted dotted-variant value (§51.0.F):
+        // `rule=.Foo`, `internal:rule=.Bar`, with optional `.history`
+        // suffix per §51.0.N. Disambiguated from decimal-leading-dot
+        // (`.5`) via the uppercase-or-underscore lookahead.
+        let nextCh = ""
+        if (p + 1 < end) {
+            nextCh = source.charAt(p + 1)
+        }
+        if (isAttrDottedValueStart(vc, nextCh)) {
+            let q = p + 1
+            let text = "."
+            while (q < end && isAttrDottedValueChar(source.charAt(q))) {
+                text = text + source.charAt(q)
+                q = q + 1
+            }
+            return { next: q, token: makeAttrToken("ATTR_IDENT", text, valStart, q, line, col), value: { kind: "dotted-ident", text, sourceText: source.slice(valStart, q), span: makeSpan(valStart, q, line, col) } }
+        }
+
+        // M6.6.b.1.5 — standalone `*` wildcard value (§51.0.F):
+        // `rule=*`, `internal:rule=*`. Disambiguated from multi-char
+        // forms (`*foo`) via the standalone-only constraint.
+        if (isAttrWildcardValueStart(vc, nextCh)) {
+            const q = p + 1
+            return { next: q, token: makeAttrToken("ATTR_IDENT", "*", valStart, q, line, col), value: { kind: "wildcard", text: "*", sourceText: source.slice(valStart, q), span: makeSpan(valStart, q, line, col) } }
         }
 
         // Unquoted ident-or-call / bare event-handler continuation.
@@ -1516,7 +1600,8 @@ ${
                 q = q + 1
             }
             const argList = splitCallArgs(args)
-            return { next: q, token: makeAttrToken("ATTR_CALL", JSON.stringify({ name: ident, args }), valStart, q, line, col), value: { kind: "call-ref", name: ident, args: argList, span: makeSpan(valStart, q, line, col) } }
+            // M6.6.b.1.5 — `sourceText` INCLUDES the call's `(...)` wrapper.
+            return { next: q, token: makeAttrToken("ATTR_CALL", JSON.stringify({ name: ident, args }), valStart, q, line, col), value: { kind: "call-ref", name: ident, args: argList, sourceText: source.slice(valStart, q), span: makeSpan(valStart, q, line, col) } }
         }
 
         // SPEC §5.2.3 bare-form event handler — `onclick=@x = .A` /
@@ -1524,11 +1609,14 @@ ${
         if (evHandler && attrBareExprContinuation(source, q, end)) {
             const bareResult = readBareHandlerExpr(source, q, end, ident)
             const trimmed = bareResult.expr.replace(/\s+$/, "")
-            return { next: bareResult.next, token: makeAttrToken("ATTR_EXPR", trimmed, valStart, bareResult.next, line, col), value: { kind: "expr", raw: trimmed, refs: collectRefs(trimmed), span: makeSpan(valStart, bareResult.next, line, col) } }
+            // M6.6.b.1.5 — `sourceText` from the verbatim slice (may
+            // include trailing whitespace stripped from `raw`/trimmed).
+            return { next: bareResult.next, token: makeAttrToken("ATTR_EXPR", trimmed, valStart, bareResult.next, line, col), value: { kind: "expr", raw: trimmed, refs: collectRefs(trimmed), sourceText: source.slice(valStart, bareResult.next), span: makeSpan(valStart, bareResult.next, line, col) } }
         }
 
         // A bare identifier value — a variable reference.
-        return { next: q, token: makeAttrToken("ATTR_IDENT", ident, valStart, q, line, col), value: { kind: "variable-ref", name: ident, span: makeSpan(valStart, q, line, col) } }
+        // M6.6.b.1.5 — `sourceText` (== `ident`; no wrappers).
+        return { next: q, token: makeAttrToken("ATTR_IDENT", ident, valStart, q, line, col), value: { kind: "variable-ref", name: ident, sourceText: source.slice(valStart, q), span: makeSpan(valStart, q, line, col) } }
     }
 
     // readBareHandlerExpr — CALCULATION. Reads the RHS of a SPEC §5.2.3

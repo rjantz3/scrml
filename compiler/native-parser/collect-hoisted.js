@@ -735,12 +735,15 @@ function readSourceVar(attrs) {
 }
 
 // readInitial — §51.0.E — the `initial=.X` variant name (the `.`-stripped
-// variant), or null. Two source forms are recovered:
+// variant), or null. Source forms recovered:
 //   1. Quoted — `initial=".X"` — a clean `string-literal` attribute value.
-//   2. Unquoted — `initial=.X` — the native attribute tokenizer does NOT
-//      admit `.` as an unquoted-value start, so `initial` resolves to an
-//      `absent` value and the variant name `X` appears as the immediately
-//      following bare attribute. Recover it from that adjacency.
+//   2. Unquoted dotted — `initial=.X` — M6.6.b.1.5 added `dotted-ident`
+//      kind; the leading dot is stripped from `value.text`.
+//   3. Unquoted bare — `initial=X` (no dot) — `variable-ref` kind.
+//   4. Legacy adjacency fallback (pre-M6.6.b.1.5 spillover form) —
+//      `initial` resolved to `absent` + the variant name `X` appeared as
+//      the immediately following bare attribute. Kept defensively for
+//      any pipeline producing the old shape.
 function readInitial(attrs) {
     for (let i = 0; i < attrs.length; i++) {
         const attr = attrs[i];
@@ -752,12 +755,17 @@ function readInitial(attrs) {
         if (value.kind === "string-literal") {
             return stripLeadingDot(value.value);
         }
-        // A variable-ref value (`initial=X` without the `.`).
+        // Form 2 (M6.6.b.1.5) — unquoted dotted-variant value
+        // (`initial=.X`). `text` includes the leading dot per
+        // parseRuleAttrValue's input shape; strip for the variant name.
+        if (value.kind === "dotted-ident") {
+            return stripLeadingDot(value.text);
+        }
+        // Form 3 — a variable-ref value (`initial=X` without the `.`).
         if (value.kind === "variable-ref") {
             return stripLeadingDot(value.name);
         }
-        // Form 2 — `initial` is absent-valued; the variant is the next bare
-        // attribute (the unquoted `initial=.X` tokenizer split).
+        // Form 4 — legacy adjacency fallback (pre-extension spillover).
         if (value.kind === "absent" && i + 1 < attrs.length) {
             const next = attrs[i + 1];
             if (next !== undefined && next !== null
