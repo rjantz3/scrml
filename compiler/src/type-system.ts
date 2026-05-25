@@ -2059,6 +2059,177 @@ function buildTypeRegistry(
 }
 
 // ---------------------------------------------------------------------------
+// §14.3 — Lifecycle annotation registry (E-TYPE-001 access-before-transition)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-field lifecycle specification — the pre-transition type (`A`) and the
+ * post-transition type (`B`) parsed out of a `(A -> B)` annotation.
+ *
+ * The struct-field's RESOLVED type (in the main typeRegistry) is `postType` —
+ * that preserves the existing consumer contract (formFor / schemaFor / tableFor /
+ * checkStructFieldAccess all see the post-transition type for shape mapping).
+ *
+ * The pre-transition information lives in a side registry so per-access
+ * transition-state checks (E-TYPE-001) can fire without rippling new variants
+ * through the ResolvedType discriminated union. Per SPEC §14.3 line 7106:
+ * "accessing the field before it has transitioned is a type error (E-TYPE-001)."
+ *
+ * Landing 1 (HU-1 Q2=b, 2026-05-25) scope: struct fields only. Landing 2
+ * extends to non-engine cell positions (Shape 1, fn parameters, schema fields,
+ * channel cells) per HU-1 Q1=c.
+ */
+interface LifecycleFieldSpec {
+  preType: ResolvedType;
+  postType: ResolvedType;
+}
+
+type LifecycleRegistry = Map<string, Map<string, LifecycleFieldSpec>>;
+
+/**
+ * Build a per-struct lifecycle-field registry from raw type-decl bodies.
+ *
+ * Walks the same `decl.raw` source `buildTypeRegistry` parses, but extracts
+ * ONLY the lifecycle-annotated fields (those whose type expression is wrapped
+ * `(A -> B)`). Non-lifecycle fields are absent from the inner map — a struct
+ * with no lifecycle fields gets a `Map<>` entry (sparse-population is fine).
+ *
+ * @param typeDecls    — same input as `buildTypeRegistry`
+ * @param typeRegistry — the already-built type registry (for resolving A and B)
+ */
+function buildLifecycleRegistry(
+  typeDecls: ASTNodeLike[],
+  typeRegistry: Map<string, ResolvedType>,
+): LifecycleRegistry {
+  const registry: LifecycleRegistry = new Map();
+
+  for (const decl of typeDecls) {
+    if (!decl.name) continue;
+    // Lifecycle annotation is only defined on struct fields in §14.3.
+    // (Landing 2 will extend to error fields, schema fields, etc.; held for now.)
+    if (decl.typeKind !== "struct") continue;
+
+    const raw = (decl.raw as string) ?? "";
+    if (!raw) continue;
+
+    const lifecycleFields = extractLifecycleFields(raw, typeRegistry);
+    if (lifecycleFields.size > 0) {
+      registry.set(decl.name as string, lifecycleFields);
+    }
+  }
+
+  return registry;
+}
+
+/**
+ * Walk a struct body source string and extract lifecycle-annotated fields.
+ *
+ * Recognises the form `fieldName: (A -> B)` (whitespace tolerant). Returns
+ * a map of fieldName → {preType, postType} for each lifecycle field detected.
+ *
+ * Disambiguation from §53 predicates: lifecycle is recognised by the literal
+ * `->` token at the TOP LEVEL of the parenthesised expression. Predicate
+ * annotations `(!A && !B)` do not contain `->`, so the disambiguation is
+ * lexical and reliable.
+ */
+function extractLifecycleFields(
+  raw: string,
+  typeRegistry: Map<string, ResolvedType>,
+): Map<string, LifecycleFieldSpec> {
+  const out = new Map<string, LifecycleFieldSpec>();
+
+  // Strip outer braces if present (mirrors parseStructBody).
+  let body = raw.trim();
+  if (body.startsWith("{")) body = body.slice(1);
+  if (body.endsWith("}")) body = body.slice(0, -1);
+  body = body.trim();
+  if (!body) return out;
+
+  const lines = splitTopLevel(body, [",", "\n"]);
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    const colonIdx = trimmed.indexOf(":");
+    if (colonIdx === -1) continue;
+
+    const fieldName = trimmed.slice(0, colonIdx).trim();
+    const typeExpr = trimmed.slice(colonIdx + 1).trim();
+
+    if (!fieldName || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(fieldName)) continue;
+
+    // Detect `(A -> B)` form. Must be paren-wrapped AND contain top-level `->`.
+    if (!typeExpr.startsWith("(") || !typeExpr.endsWith(")")) continue;
+
+    const inner = typeExpr.slice(1, -1);
+    // The arrow must be at the TOP LEVEL of the inner expression. Use a
+    // depth-aware scan so `(A -> B)` is recognised but `(!a(b -> c) && d)`
+    // (hypothetical nested arrow inside a sub-expression) is not.
+    const arrow = findTopLevelArrow(inner);
+    if (arrow === null) continue;
+
+    const preExpr = inner.slice(0, arrow.idx).trim();
+    const postExpr = inner.slice(arrow.idx + arrow.len).trim();
+    if (!preExpr || !postExpr) continue;
+
+    const preType = resolveTypeExpr(preExpr, typeRegistry);
+    const postType = resolveTypeExpr(postExpr, typeRegistry);
+
+    out.set(fieldName, { preType, postType });
+  }
+
+  return out;
+}
+
+/**
+ * Find the index of a top-level `->` (or `- >` with intervening whitespace —
+ * the parser tokenises `->` with a space inserted before the `>` in some
+ * paths) inside a parenthesised lifecycle inner expression. Returns
+ * `{ idx, len }` where `idx` is the start position of `-` and `len` is the
+ * total length of the arrow span (2 for `->`, 3+ for `- >` with whitespace).
+ * Returns null if no top-level arrow exists. Depth-aware: arrows nested
+ * inside parentheses or brackets do not count.
+ */
+function findTopLevelArrow(s: string): { idx: number; len: number } | null {
+  let depth = 0;
+  for (let i = 0; i < s.length - 1; i++) {
+    const c = s[i];
+    if (c === "(" || c === "[" || c === "{") { depth++; continue; }
+    if (c === ")" || c === "]" || c === "}") { depth--; continue; }
+    if (depth !== 0) continue;
+    if (c !== "-") continue;
+    // After the `-`, skip whitespace, then expect `>`.
+    let j = i + 1;
+    while (j < s.length && (s[j] === " " || s[j] === "\t")) j++;
+    if (j < s.length && s[j] === ">") {
+      return { idx: i, len: (j - i) + 1 };
+    }
+  }
+  return null;
+}
+
+/**
+ * Format a ResolvedType for a diagnostic message (compact human label).
+ * Used by E-TYPE-001 lifecycle messages so adopters see the actual pre/post
+ * type names rather than internal `{kind: "primitive", name: "string"}` JSON.
+ */
+function formatTypeForDiagnostic(t: ResolvedType | null | undefined): string {
+  if (!t || typeof t !== "object") return "unknown";
+  switch (t.kind) {
+    case "primitive": return (t as PrimitiveType).name;
+    case "not":       return "not";
+    case "asIs":      return "asIs";
+    case "unknown":   return "unknown";
+    case "struct":    return (t as StructType).name;
+    case "enum":      return (t as EnumType).name;
+    case "array":     return formatTypeForDiagnostic((t as ArrayType).element) + "[]";
+    case "union":     return (t as UnionType).members.map(formatTypeForDiagnostic).join(" | ");
+    default:          return t.kind;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // State type registry (§35)
 // ---------------------------------------------------------------------------
 
@@ -11753,6 +11924,11 @@ function processFile(
     }
   }
 
+  // §14.3 — Build the per-file lifecycle registry. Empty if no struct type
+  // declares any `(A -> B)` lifecycle annotation; the runLifecycleAccessCheck
+  // call below short-circuits on empty.
+  const lifecycleRegistry = buildLifecycleRegistry(typeDecls, typeRegistry);
+
   // TS-B Step 1.5: Build the state type registry.
   const stateTypeRegistry = buildStateTypeRegistry();
 
@@ -11807,6 +11983,26 @@ function processFile(
     stateTypeRegistry,
     machineRegistry,
   );
+
+  // §14.3 — Per-access lifecycle transition-state check (E-TYPE-001 fire).
+  // Runs after annotation so the AST shape is stable; short-circuits when no
+  // struct type in this file (or its imports) declares a lifecycle field.
+  //
+  // Landing 1 (HU-1 Q2=b, 2026-05-25): struct-field-only scope. Landing 2
+  // extends to non-engine cell positions (Shape 1, fn parameters, schema
+  // fields, channel cells) per HU-1 Q1=c.
+  {
+    const lifecycleTopNodes = (fileAST.nodes as ASTNodeLike[] | undefined)
+      ?? ((fileAST.ast as FileAST | undefined)?.nodes as ASTNodeLike[] | undefined)
+      ?? [];
+    runLifecycleAccessCheck(
+      lifecycleTopNodes,
+      typeRegistry,
+      lifecycleRegistry,
+      errors,
+      fileSpan,
+    );
+  }
 
   // §51.9 — After annotation, collect the reactive → machine bindings that
   // `annotateNodes` attached to state-decl nodes and validate every
@@ -12886,6 +13082,474 @@ function checkFunctionBodyStateCompleteness(
 }
 
 // ---------------------------------------------------------------------------
+// §14.3 — Per-access lifecycle transition-state checker (E-TYPE-001 fire)
+// ---------------------------------------------------------------------------
+
+/**
+ * Walk a statement body and fire `E-TYPE-001` at any access site that reads
+ * a lifecycle-annotated struct field BEFORE the field has transitioned (per
+ * SPEC §14.3 line 7106).
+ *
+ * Per-binding transition tracking:
+ *   - State-instantiation (`let u = < User>`) starts every lifecycle field
+ *     in the PRE state. Attribute-style initialization (`< User passwordHash="x">`)
+ *     advances the named field to POST.
+ *   - Positional binding (`let u: User = (...)` per §14.11) starts every
+ *     lifecycle field in POST — the positional initialiser provides values
+ *     for every field, and the value-position of a lifecycle field carries
+ *     the B-shape literal by construction.
+ *   - Assignment `u.fieldName = expr` transitions the field to POST (Landing 1
+ *     simple transition-marker per HU-1 Q3 carry-forward; more elaborate
+ *     transition-marker semantics — e.g. validator-passage transitions — are
+ *     Landing 2 design work).
+ *   - Reading `u.fieldName` in any non-write position while the field is in
+ *     PRE state fires E-TYPE-001.
+ *
+ * Statement ordering: walks `body` in source order. Within a single statement,
+ * writes are processed BEFORE reads so the canonical `u.field = u.field + 1`
+ * shape (rare but possible) sees the read against the pre-write state.
+ *
+ * Out-of-scope for Landing 1:
+ *   - Branch-sensitive analysis (if/else may or may not transition; this checker
+ *     conservatively treats any structural write as a definite transition).
+ *   - Loops with per-iteration transition variance (the field is "post" after
+ *     first iter's write; we treat that as post for all subsequent reads).
+ *   - Cross-fn parameter passing of lifecycle-tracked values (Landing 2 + the
+ *     fn-return Q3-followup transition-marker design work).
+ *   - Aliasing: `let v = u; v.field = ...` does NOT transition `u.field`.
+ *     (Same conservative shape as checkFunctionBodyStateCompleteness.)
+ *
+ * @param body                 — statement array to walk
+ * @param structInstances      — map of bindingName → structTypeName (callers
+ *                                pre-populate from `let x = < TypeName>` or
+ *                                from type-annotation lookups)
+ * @param lifecycleRegistry    — per-struct lifecycle field specs (from
+ *                                `buildLifecycleRegistry`)
+ * @param errors               — error accumulator; receives E-TYPE-001 per
+ *                                pre-transition access
+ * @param fileSpan             — fallback span when statement-level span is absent
+ * @param initialFieldStates   — optional caller-provided per-binding initial
+ *                                states (binding → field → "pre"|"post").
+ *                                Defaults: every lifecycle field in every
+ *                                tracked binding starts "pre". Callers can
+ *                                pre-seed POST for positional-binding cases.
+ */
+function checkLifecycleFieldAccess(
+  body: ASTNodeLike[],
+  structInstances: Map<string, string>,
+  lifecycleRegistry: LifecycleRegistry,
+  errors: TSError[],
+  fileSpan: Span,
+  initialFieldStates?: Map<string, Map<string, "pre" | "post">>,
+): void {
+  if (!Array.isArray(body) || body.length === 0) return;
+  if (lifecycleRegistry.size === 0) return;
+  if (structInstances.size === 0) return;
+
+  // Per-binding transition state: bindingName → fieldName → "pre" | "post"
+  const fieldStates = new Map<string, Map<string, "pre" | "post">>();
+
+  // Initialise: every lifecycle field of every tracked binding starts "pre"
+  // unless the caller seeded otherwise.
+  for (const [bindingName, structName] of structInstances) {
+    const lifecycleFields = lifecycleRegistry.get(structName);
+    if (!lifecycleFields || lifecycleFields.size === 0) continue;
+    const perField = new Map<string, "pre" | "post">();
+    const seed = initialFieldStates?.get(bindingName);
+    for (const fieldName of lifecycleFields.keys()) {
+      const seeded = seed?.get(fieldName);
+      perField.set(fieldName, seeded ?? "pre");
+    }
+    fieldStates.set(bindingName, perField);
+  }
+
+  if (fieldStates.size === 0) return; // No tracked bindings have lifecycle fields.
+
+  // Write detector: `bindingName.fieldName = expr`. Must NOT match `==`, `=>`,
+  // `<=`, `>=`, `!=`. Mirrors the conservative shape in
+  // checkFunctionBodyStateCompleteness:12811.
+  const FIELD_WRITE_RE = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\.\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)(?!>)/g;
+
+  // Read detector: ANY `bindingName.fieldName` that is NOT the LHS of a write
+  // (i.e., not immediately followed by `=` in a non-comparison context). Built
+  // by walking matches and discarding ones that the write detector also matched.
+  const FIELD_REF_RE = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\.\s*([A-Za-z_$][A-Za-z0-9_$]*)\b/g;
+
+  /**
+   * Extract `(bindingName, fieldName, isWrite, matchIndex)` triples from a
+   * source-text fragment, in source order. Writes are detected via
+   * `FIELD_WRITE_RE`; remaining `obj.field` references are reads.
+   */
+  function extractAccesses(
+    text: string,
+  ): Array<{ binding: string; field: string; isWrite: boolean; idx: number }> {
+    const result: Array<{ binding: string; field: string; isWrite: boolean; idx: number }> = [];
+    const writeIndices = new Set<number>();
+
+    FIELD_WRITE_RE.lastIndex = 0;
+    let wm: RegExpExecArray | null;
+    while ((wm = FIELD_WRITE_RE.exec(text)) !== null) {
+      const binding = wm[1];
+      const field = wm[2];
+      writeIndices.add(wm.index);
+      result.push({ binding, field, isWrite: true, idx: wm.index });
+    }
+
+    FIELD_REF_RE.lastIndex = 0;
+    let rm: RegExpExecArray | null;
+    while ((rm = FIELD_REF_RE.exec(text)) !== null) {
+      // Skip if this `obj.field` is the LHS of a write we already recorded.
+      if (writeIndices.has(rm.index)) continue;
+      result.push({ binding: rm[1], field: rm[2], isWrite: false, idx: rm.index });
+    }
+
+    // Sort by source index so writes-and-reads on the same statement are
+    // processed in left-to-right order.
+    result.sort((a, b) => a.idx - b.idx);
+    return result;
+  }
+
+  /**
+   * Extract every text fragment in a statement node that may contain field
+   * accesses. Mirrors the field-capture surface in
+   * checkFnBodyProhibitions:12222 (nodeText) — covers `value`, `expr`, `text`,
+   * `raw`, `init` (let-decl initialiser), plus structured `exprNode`/`initExpr`
+   * reconstruction.
+   *
+   * Deduplicates identical fragments — the parser sometimes populates both
+   * `value` and `expr` with the same string (or `exprNode` reconstructs the
+   * same text the parser also stored as `value`). Without dedup, every read
+   * fires twice.
+   *
+   * For let-decl with an `escape-hatch` initExpr (the parser falls back to a
+   * raw-text escape-hatch when an expression isn't structurally parsed, e.g.
+   * the V5-strict `< User>\n...` shape where subsequent statements get
+   * subsumed into the initialiser's raw text), this captures the full raw
+   * body — including subsequent assignments and reads that the parser
+   * couldn't separate. The checker then walks that combined text normally.
+   */
+  function statementText(node: ASTNodeLike): string {
+    const seen = new Set<string>();
+    const nodeAny = node as Record<string, unknown>;
+    const exprNodeField = nodeAny.exprNode ?? nodeAny.initExpr;
+    if (exprNodeField && typeof exprNodeField === "object" && (exprNodeField as { kind?: string }).kind) {
+      try {
+        seen.add(emitStringFromTree(exprNodeField as import("./types/ast.ts").ExprNode));
+      } catch { /* fall through */ }
+    }
+    if (typeof node.value === "string") seen.add(node.value);
+    if (typeof node.expr === "string") seen.add(node.expr);
+    if (typeof node.text === "string") seen.add(node.text);
+    if (typeof node.raw === "string") seen.add(node.raw);
+    if (typeof node.init === "string") seen.add(node.init);
+    return Array.from(seen).join(" ");
+  }
+
+  function walk(nodes: ASTNodeLike[]): void {
+    for (const stmt of nodes) {
+      if (!stmt || typeof stmt !== "object") continue;
+      // Nested fns have own scope — track them separately. For Landing 1 we
+      // conservatively SKIP nested fn bodies (they need their own structInstances
+      // collection; Landing 2 can extend the walker if needed).
+      if (stmt.kind === "function-decl") continue;
+
+      const stmtSpan = (stmt.span ?? fileSpan) as Span;
+      const text = statementText(stmt);
+
+      if (text) {
+        const accesses = extractAccesses(text);
+        for (const acc of accesses) {
+          const perField = fieldStates.get(acc.binding);
+          if (!perField) continue; // binding not tracked / has no lifecycle fields
+          if (!perField.has(acc.field)) continue; // field not lifecycle-annotated
+
+          if (acc.isWrite) {
+            // Transition to POST. Landing 1 treats any structural write as a
+            // valid transition-marker; refinements (validator-passage, marker
+            // fn calls) are Landing 2 sub-question Q3 work.
+            perField.set(acc.field, "post");
+          } else {
+            // Read. Fire E-TYPE-001 if pre-transition.
+            if (perField.get(acc.field) === "pre") {
+              const structName = structInstances.get(acc.binding) ?? "<unknown>";
+              const lifecycleFields = lifecycleRegistry.get(structName);
+              const spec = lifecycleFields?.get(acc.field);
+              const preLabel = formatTypeForDiagnostic(spec?.preType ?? tNot());
+              const postLabel = formatTypeForDiagnostic(spec?.postType ?? tAsIs());
+              errors.push(new TSError(
+                "E-TYPE-001",
+                `E-TYPE-001: field \`${acc.field}\` of \`${structName}\` is accessed before its lifecycle transition.\n` +
+                `  Binding: \`${acc.binding}\`. Field declared with lifecycle annotation \`(${preLabel} -> ${postLabel})\`.\n` +
+                `  At this access, the field is still in its pre-transition state (\`${preLabel}\`); reading it as \`${postLabel}\` is invalid.\n` +
+                `  Resolution: assign \`${acc.binding}.${acc.field} = <${postLabel}-value>\` to transition the field before this read.\n` +
+                `  See SPEC §14.3.`,
+                stmtSpan,
+              ));
+            }
+            // If already "post", no diagnostic; the read is valid.
+          }
+        }
+      }
+
+      // Recurse into child node arrays (same surface as
+      // checkFunctionBodyStateCompleteness:13032).
+      if (Array.isArray(stmt.body)) walk(stmt.body as ASTNodeLike[]);
+      if (Array.isArray(stmt.children)) walk(stmt.children as ASTNodeLike[]);
+      if (Array.isArray(stmt.consequent)) walk(stmt.consequent as ASTNodeLike[]);
+      if (Array.isArray(stmt.alternate)) walk(stmt.alternate as ASTNodeLike[]);
+      if (Array.isArray(stmt.then)) walk(stmt.then as ASTNodeLike[]);
+      if (Array.isArray(stmt.else)) walk(stmt.else as ASTNodeLike[]);
+      if (Array.isArray(stmt.arms)) {
+        for (const arm of stmt.arms as ASTNodeLike[]) {
+          if (Array.isArray(arm.body)) walk(arm.body as ASTNodeLike[]);
+        }
+      }
+    }
+  }
+
+  walk(body);
+}
+
+// ---------------------------------------------------------------------------
+// §14.3 — File-level lifecycle access check driver (TS-stage integration)
+// ---------------------------------------------------------------------------
+
+/**
+ * Pipeline-facing wrapper for `checkLifecycleFieldAccess`.
+ *
+ * Walks the file's body looking for scopes that may contain lifecycle-tracked
+ * struct bindings; per-scope, collects the bindings (matching the same shapes
+ * `checkFunctionBodyStateCompleteness` recognises) and invokes the access
+ * checker against that scope's body.
+ *
+ * Scopes walked:
+ *   - The file's top-level nodes (covers `${...}` body-top logic and bare
+ *     statements that lift into default-logic mode)
+ *   - Every `function-decl` body (covers both `fn` and non-`fn` function forms)
+ *
+ * Per the conservative Landing 1 design, nested-fn boundaries are scope
+ * boundaries — bindings in an outer scope are NOT carried into an inner fn.
+ * (Landing 2 may extend if cross-fn lifecycle tracking proves desirable.)
+ *
+ * @param topNodes          — top-level fileAST.nodes
+ * @param typeRegistry      — for struct-type resolution
+ * @param lifecycleRegistry — per-struct lifecycle field specs
+ * @param errors            — error accumulator; receives E-TYPE-001 fires
+ * @param fileSpan          — fallback span
+ */
+function runLifecycleAccessCheck(
+  topNodes: ASTNodeLike[],
+  typeRegistry: Map<string, ResolvedType>,
+  lifecycleRegistry: LifecycleRegistry,
+  errors: TSError[],
+  fileSpan: Span,
+): void {
+  if (!Array.isArray(topNodes) || topNodes.length === 0) return;
+  if (lifecycleRegistry.size === 0) return;
+
+  /**
+   * Reconstruct the source-text initializer for a let/const/variable decl.
+   * Tries (in order): `node.init` (parser-canonical for let-decl), the raw
+   * field of `node.initExpr` if it's an escape-hatch ExprNode (the parser's
+   * fallback when the RHS isn't structurally parsed — common for
+   * `let u = < User>` followed by unseparated subsequent statements),
+   * `emitStringFromTree(initExpr)` for structurally-parsed initialisers, and
+   * finally `node.value` (older AST shapes).
+   */
+  function readInitText(node: ASTNodeLike): string {
+    if (typeof node.init === "string") return node.init;
+    const nodeAny = node as Record<string, unknown>;
+    const initExpr = nodeAny.initExpr as { kind?: string; raw?: string } | undefined;
+    if (initExpr && typeof initExpr === "object") {
+      if (typeof initExpr.raw === "string") return initExpr.raw;
+      if (initExpr.kind) {
+        try {
+          return emitStringFromTree(initExpr as unknown as import("./types/ast.ts").ExprNode);
+        } catch { /* fall through */ }
+      }
+    }
+    if (typeof node.value === "string") return node.value;
+    return "";
+  }
+
+  /**
+   * Collect struct-typed bindings from a flat statement body. Mirrors the
+   * collector in checkFunctionBodyStateCompleteness — same shapes recognised.
+   *
+   * Output: bindingName → structTypeName, restricted to struct types known to
+   * the lifecycleRegistry (skipping types without lifecycle fields keeps the
+   * downstream walk cheap).
+   *
+   * Also returns initialFieldStates: for each binding, fields that have an
+   * INITIAL B-shape value (provided at construction) start in "post" state.
+   * Landing 1 detects this via `< Type field="value">` attribute-style
+   * initialization and via let-decl typeAnnotation + positional binding.
+   */
+  function collectStructBindings(nodes: ASTNodeLike[]): {
+    structInstances: Map<string, string>;
+    initialFieldStates: Map<string, Map<string, "pre" | "post">>;
+  } {
+    const structInstances = new Map<string, string>();
+    const initialFieldStates = new Map<string, Map<string, "pre" | "post">>();
+
+    for (const stmt of nodes) {
+      if (!stmt || typeof stmt !== "object") continue;
+      if (stmt.kind === "function-decl") continue; // nested scope
+
+      // Path 1: structured state-instantiation node.
+      if (stmt.kind === "state-instantiation" || stmt.kind === "state-init") {
+        const varName = stmt.name as string | undefined;
+        const typeName = (stmt.stateType ?? stmt.typeName ?? stmt.type) as string | undefined;
+        if (varName && typeName && lifecycleRegistry.has(typeName)) {
+          structInstances.set(varName, typeName);
+          // Attribute-style initialization: look for `<Name field="value">` in raw
+          // text (via stmt.attrs or stmt.fields if available).
+          recordInitialFromAttrs(stmt, typeName, varName, initialFieldStates);
+        }
+      }
+
+      // Path 2: let/const/variable decl with stateType / instanceOf hint.
+      if (
+        stmt.kind === "let-decl" ||
+        stmt.kind === "const-decl" ||
+        stmt.kind === "variable-decl"
+      ) {
+        const varName = stmt.name as string | undefined;
+        const stateTypeName = (stmt.stateType ?? stmt.instanceOf) as string | undefined;
+        // Source-text candidates for heuristic match: prefer init (parser-canonical
+        // for let-decl) → initExpr.raw (escape-hatch wraps the unparseable RHS) →
+        // value (fallback for older AST shapes).
+        const initText = readInitText(stmt);
+        if (varName && stateTypeName && lifecycleRegistry.has(stateTypeName)) {
+          structInstances.set(varName, stateTypeName);
+          recordInitialFromAttrs(stmt, stateTypeName, varName, initialFieldStates);
+        } else if (varName && initText) {
+          // Heuristic: init text matches `< TypeName>` or `< TypeName ...>` pattern.
+          const stateMatch = /^\s*<\s*([A-Z][A-Za-z0-9_]*)\b/.exec(initText);
+          if (stateMatch && lifecycleRegistry.has(stateMatch[1])) {
+            structInstances.set(varName, stateMatch[1]);
+            recordInitialFromAttrText(initText, stateMatch[1], varName, initialFieldStates);
+          }
+        }
+
+        // Path 3: typed let-decl with positional binding `let u: User = ("alice", ...)`.
+        // The presence of a type annotation + tuple-shaped value means EVERY
+        // lifecycle field is constructed with a value — start them all in "post".
+        if (varName && stmt.typeAnnotation && initText) {
+          const annot = (stmt.typeAnnotation as string).trim();
+          if (lifecycleRegistry.has(annot) && /^\s*\(/.test(initText)) {
+            structInstances.set(varName, annot);
+            const lifecycleFields = lifecycleRegistry.get(annot)!;
+            const perField = new Map<string, "pre" | "post">();
+            for (const fieldName of lifecycleFields.keys()) perField.set(fieldName, "post");
+            initialFieldStates.set(varName, perField);
+          }
+        }
+      }
+    }
+
+    return { structInstances, initialFieldStates };
+  }
+
+  /**
+   * Look at a state-instantiation node's attrs/fields list and seed
+   * post-transition state for fields that were initialized at construction.
+   */
+  function recordInitialFromAttrs(
+    stmt: ASTNodeLike,
+    typeName: string,
+    bindingName: string,
+    initialFieldStates: Map<string, Map<string, "pre" | "post">>,
+  ): void {
+    const lifecycleFields = lifecycleRegistry.get(typeName);
+    if (!lifecycleFields) return;
+    const stmtAny = stmt as Record<string, unknown>;
+    const attrs = (stmtAny.attrs ?? stmtAny.attributes ?? stmtAny.fields) as
+      | Array<{ name?: string; key?: string }>
+      | undefined;
+    if (!Array.isArray(attrs)) return;
+    const perField = initialFieldStates.get(bindingName) ?? new Map<string, "pre" | "post">();
+    for (const attr of attrs) {
+      const attrName = (attr.name ?? attr.key) as string | undefined;
+      if (attrName && lifecycleFields.has(attrName)) {
+        perField.set(attrName, "post");
+      }
+    }
+    if (perField.size > 0) initialFieldStates.set(bindingName, perField);
+  }
+
+  /**
+   * Parse `< TypeName attr="value" attr2="value">` raw text and record
+   * field-initialisation positions as post-transition.
+   *
+   * Conservative: only recognises bare-identifier attribute names; whitespace
+   * tolerant; ignores attributes whose name isn't a lifecycle field.
+   */
+  function recordInitialFromAttrText(
+    text: string,
+    typeName: string,
+    bindingName: string,
+    initialFieldStates: Map<string, Map<string, "pre" | "post">>,
+  ): void {
+    const lifecycleFields = lifecycleRegistry.get(typeName);
+    if (!lifecycleFields) return;
+    // Match `attrName=`. Quoted values, bare references, all count.
+    const ATTR_RE = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*=/g;
+    let m: RegExpExecArray | null;
+    const perField = initialFieldStates.get(bindingName) ?? new Map<string, "pre" | "post">();
+    while ((m = ATTR_RE.exec(text)) !== null) {
+      const attrName = m[1];
+      if (lifecycleFields.has(attrName)) {
+        perField.set(attrName, "post");
+      }
+    }
+    if (perField.size > 0) initialFieldStates.set(bindingName, perField);
+  }
+
+  /**
+   * Run the lifecycle access check at one scope (top-level OR fn body).
+   */
+  function checkScope(body: ASTNodeLike[]): void {
+    const { structInstances, initialFieldStates } = collectStructBindings(body);
+    if (structInstances.size === 0) return;
+    checkLifecycleFieldAccess(
+      body, structInstances, lifecycleRegistry, errors, fileSpan, initialFieldStates,
+    );
+  }
+
+  /**
+   * Walk the AST collecting every function-decl scope and the top-level scope.
+   * Run the check at each.
+   */
+  function collectScopes(nodes: ASTNodeLike[]): void {
+    for (const node of nodes) {
+      if (!node || typeof node !== "object") continue;
+      if (node.kind === "function-decl") {
+        const fnBody = node.body as ASTNodeLike[] | undefined;
+        if (Array.isArray(fnBody)) {
+          checkScope(fnBody);
+        }
+        // Don't recurse into the fn body for further scope-collection — the
+        // fn body's own scope is its boundary; nested fns will be discovered
+        // by checkScope's recursion via the walker inside checkLifecycleFieldAccess.
+        continue;
+      }
+      // Other body-bearing nodes — recurse to find nested function-decls.
+      const body = node.body as ASTNodeLike[] | undefined;
+      if (Array.isArray(body)) collectScopes(body);
+      const children = node.children as ASTNodeLike[] | undefined;
+      if (Array.isArray(children)) collectScopes(children);
+    }
+  }
+
+  // Top-level scope.
+  checkScope(topNodes);
+
+  // Nested function-decl scopes.
+  collectScopes(topNodes);
+}
+
+// ---------------------------------------------------------------------------
 // Exports for testing and downstream use
 // ---------------------------------------------------------------------------
 
@@ -12895,11 +13559,13 @@ export {
   initCap,
   mapSqliteType,
   buildTypeRegistry,
+  buildLifecycleRegistry,
   generateDbTypes,
   parseStructBody,
   parseEnumBody,
   resolveTypeExpr,
   checkStructFieldAccess,
+  checkLifecycleFieldAccess,
   checkEnumExhaustiveness,
   checkUnionExhaustiveness,
   checkSubstateExhaustiveness,
