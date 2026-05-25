@@ -454,6 +454,92 @@ No NEW methodology rule from Q6. Q6 re-validates [[feedback_grep_fire_sites_befo
 
 This is now a banked META-observation: PA's option-list framings should triangulate across SPEC + PRIMER + kickstarter + compiler code + native-parser source. When PA only triangulates 2-3 of those, an authority that already agrees with the canon can be missed — making the closure look like more migration than it actually is.
 
+## HU-2 (continued) — Q7 closure: §39.12 schema placement after v0.3
+
+### Question + user direction
+
+Q7 (F-019, 1b, LB): SPEC-internal contradiction on `<schema>` placement. §39.2 prose + §39.3 normative said "alongside, not inside" `<program>`; §39.2 worked example + §40.8 v0.3 ratification say INSIDE. Three positions in the same SPEC.
+
+**User direction (verbatim):** *"a"*
+
+### Authority triangulation (PA Phase-0 verification)
+
+Per [[feedback_grep_fire_sites_before_claiming_coverage]] — grep'd compiler-source for E-SCHEMA-003 fire site. **No fire site found.** F-019 is purely SPEC-text contradiction, NOT code-vs-spec; compiler doesn't currently enforce nesting either way. Q7 is doc-only either direction — no compiler-code risk.
+
+Authority counts:
+- §39.2 prose + §39.3 normative — say OUTSIDE (pre-v0.3 text never refreshed)
+- §39.2 worked example + §40.8 v0.3 ratification + §39.2-line-17661 implicit-coupling — say INSIDE
+- Compiler code — silent (no enforcement)
+
+4 authorities favor INSIDE; 2 (same prose passage in two forms) favor OUTSIDE.
+
+### Q7 RATIFICATION — (a) `<schema>` inside `<program>` as immediate child
+
+**Decision:** `<schema>` lives as an immediate child of `<program>` (post-v0.3 canon). §39 prose rewrites to match the worked example + v0.3 ratification.
+
+**Concrete amendments:**
+
+**Amendment Q7-1 — SPEC §39.2 line 17621 prose:**
+
+```
+// BEFORE
+A `< schema>` block appears at the top level of a file, alongside (not inside)
+`< db>` blocks. It does not require the `src=` or `tables=` attributes of `< db>`
+because the database path is read from `<program db="...">`.
+
+// AFTER
+A `<schema>` block appears as an immediate child of the `<program>` root, alongside
+(not nested inside) `<db>` / `<page>` / other program children. It does not require
+the `src=` or `tables=` attributes of `<db>` because the database path is read from
+the enclosing `<program db="...">`.
+```
+
+**Amendment Q7-2 — SPEC §39.3 normative line 17663:**
+
+```
+// BEFORE
+A `< schema>` block SHALL appear at file top-level only. A `< schema>` block
+nested inside any other block SHALL be a compile error (E-SCHEMA-003).
+
+// AFTER
+A `<schema>` block SHALL appear as an immediate child of the `<program>` root.
+A `<schema>` block nested inside any other block (logic context, component body,
+`<page>`, `<db>`, etc.) SHALL be a compile error (E-SCHEMA-003).
+```
+
+**Amendment Q7-3 — §34 E-SCHEMA-003 catalog row (line 15621):**
+
+```
+// BEFORE
+| E-SCHEMA-003 | §39.12 | A `< schema>` block is nested inside another block
+(logic context, component body, etc.). Schemas are file-level declarations only. | Error |
+
+// AFTER
+| E-SCHEMA-003 | §39.12 | A `<schema>` block is nested inside any block other than the
+`<program>` root (logic context, component body, `<page>`, `<db>`, etc.). Schemas are
+immediate children of `<program>` only. | Error |
+```
+
+**Amendment Q7-4 — §39.2 worked example:** UNCHANGED. The example at lines 17626-17652 already shows the (a) form. No migration needed for the canonical example.
+
+**Amendment Q7-5 — (deferred to Phase 2 implementation work, not Phase 2 doc amendment):** The compiler currently does NOT enforce E-SCHEMA-003. Per Rule 4 (SPEC normative; compiler implements), the catalog row mandates an enforcement code path. If post-amendment audit confirms E-SCHEMA-003 has no fire site, a compiler-source patch is needed to add the check. **Out of HU-2 scope; flagged as Phase 2 implementation follow-on.**
+
+### Cohesion validation (per [[feedback_cohesion_and_falls_under_fingers]])
+
+Per the design-evaluation lens ratified at Q5.B:
+- (a) puts `<schema>` where the database it describes belongs — inside the program that uses it. Cohesive with `<page>`, `<db>`, server functions, `<channel>`, etc., which all live inside `<program>` per v0.3.
+- (b) would make `<schema>` a structural orphan at file root, requiring a v0.3 exception clause. Non-cohesive.
+
+(a) is the design-cohesion answer; (b) was the lowest-touch-from-stale-prose answer (and would have CAUSED more rewrites, not fewer). Per the banked rule: lowest-touch is NOT automatically the right answer; cohesion + falls-under-fingers wins.
+
+### Findings closed by Q7
+
+- **F-019 (1b, LB)** — RATIFIED. SPEC §39 prose rewrites to match worked example + v0.3 ratification; E-SCHEMA-003 catalog row updates.
+
+### Carry-forward from Q7 (Phase 2 implementation follow-on)
+
+- **E-SCHEMA-003 enforcement.** Compiler currently silent; Phase 2 implementation adds the nesting check. Out of HU-2 ratification scope but flagged so it doesn't drop on the floor.
+
 ### Banked S129 methodology rule (NEW from this exchange)
 
 **Bidirectional hole-detection in canon-anchored audits.** Phase 1b's hole-detection only fired on "canon claims X / SPEC silent on X" — it missed the inverse "SPEC ratifies X / canon silent on X." Both directions are signal. Future audit dispatches must include both checks. F-023 was the precedent that surfaced this: SPEC §14.3 ratifies lifecycle annotation as a load-bearing feature; PRIMER + kickstarter never mention it; Phase 1b's audit missed the gap entirely. (Memory to be banked separately if not already covered by [[feedback_triage_genuine_needs_spec_crosscheck]] — that's a sibling but distinct rule.)
