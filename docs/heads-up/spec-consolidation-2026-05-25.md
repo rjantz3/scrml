@@ -377,6 +377,83 @@ Now that `server` is a bare flag attribute alongside `pinned` + validators, comp
 
 - **[[feedback_cohesion_and_falls_under_fingers]]** — design-evaluation lens. Weight cohesion (fits existing patterns) + falls-under-fingers (muscle-memory-friendly) heavily; lowest-touch option is NOT automatically the right answer. PA must surface non-cohesive options as such and offer the cohesive alternative explicitly, even if PA initially leaned the lowest-touch direction.
 
+## HU-2 (continued) — Q6 closure: PIPELINE.md `deriveEngineVarName` catches up to SPEC
+
+### Question + user direction
+
+Q6 (PIPELINE.md `deriveEngineVarName` "Machine" suffix-strip drift from SPEC §51.0.C). PA presented as mechanical confirmation; direction determined by Rule 4 (SPEC + PRIMER are the canon).
+
+**User direction (verbatim):** *"Q6 go"*
+
+### Authority triangulation (PA Phase-0 verification)
+
+PA grep'd ALL four authorities before locking — per banked rule [[feedback_grep_fire_sites_before_claiming_coverage]]:
+
+| Authority | Says | Status |
+|---|---|---|
+| SPEC §51.0.C table | `MarioMachine` → `marioMachine` (literal lowercase-first; **suffix kept**) | post-S123 canon |
+| PRIMER B14 | corroborates SPEC | aligned |
+| **Compiler code `symbol-table.ts:4234`** | `return typeName[0]!.toLowerCase() + typeName.slice(1);` | **literal lowercase-first, no strip** |
+| PIPELINE.md line 822-830 + line 34 | strips `Machine` suffix | THE ONLY OUTLIER |
+
+**3 of 4 authorities agree (SPEC + PRIMER + compiler code).** PIPELINE.md drift caught. This is a **doc-only fix; zero compiler-code risk** — the compiler already does the SPEC-canonical thing.
+
+This triangulation also validates the [[feedback_grep_fire_sites_before_claiming_coverage]] rule a second time this session: without the grep, PA would have framed Q6 as "PIPELINE catches up to SPEC" but missed that the compiler-code authority was already on SPEC's side.
+
+### Q6 RATIFICATION — PIPELINE.md catches up to SPEC + compiler
+
+**Decision:** PIPELINE.md amends in two sites.
+
+**Amendment Q6-1 — PIPELINE.md line 822-826 algorithm:**
+
+```
+// BEFORE
+deriveEngineVarName(typeName: string, varAttr: string | null) -> string:
+  if varAttr is non-null:
+    return varAttr   # explicit override
+  let stripped = typeName.endsWith("Machine") ? typeName.slice(0, -7) : typeName
+  return stripped[0].toLowerCase() + stripped.slice(1)
+
+// AFTER (catches up to SPEC §51.0.C + compiler `symbol-table.ts:4234`)
+deriveEngineVarName(typeName: string, varAttr: string | null) -> string:
+  if varAttr is non-null:
+    return varAttr   # explicit override
+  return typeName[0].toLowerCase() + typeName.slice(1)   # literal lowercase-first; legacy `Machine` suffix KEPT per §51.0.C
+```
+
+**Amendment Q6-2 — PIPELINE.md line 34 descriptive prose:**
+
+```
+// BEFORE
+**Stage 3.05 NR:** auto-declared engine variable resolution; auto-derived variable name (lowercase first run, strip trailing "Machine"); ...
+
+// AFTER
+**Stage 3.05 NR:** auto-declared engine variable resolution; auto-derived variable name (lowercase first run; legacy `Machine` suffix kept per §51.0.C); ...
+```
+
+**Amendment Q6-3 — PIPELINE.md line 829-830 example update:**
+
+```
+// BEFORE
+Examples: `<engine for=PhaseState>` declares `phaseState`; `<engine for=MarioMachine>`
+          declares `mario` (suffix stripped); `<engine for=AppMachine var=app>` declares `app`.
+
+// AFTER
+Examples: `<engine for=PhaseState>` declares `phaseState`; `<engine for=MarioMachine>`
+          declares `marioMachine` (legacy suffix KEPT per §51.0.C — new code prefers names
+          that don't end in `Machine`); `<engine for=AppMachine var=app>` declares `app`.
+```
+
+### Findings closed by Q6
+
+- **F-021 (1b, LB)** — RATIFIED. PIPELINE.md drift from SPEC + compiler. Doc-only fix; zero compiler-code change.
+
+### Banked methodology from Q6
+
+No NEW methodology rule from Q6. Q6 re-validates [[feedback_grep_fire_sites_before_claiming_coverage]] — the grep across compiler-source surfaced that the compiler ALREADY matches SPEC. Direction-confirmation becomes "PIPELINE-doc catches up to SPEC + compiler-code" rather than the weaker "PIPELINE catches up to SPEC" PA initially framed.
+
+This is now a banked META-observation: PA's option-list framings should triangulate across SPEC + PRIMER + kickstarter + compiler code + native-parser source. When PA only triangulates 2-3 of those, an authority that already agrees with the canon can be missed — making the closure look like more migration than it actually is.
+
 ### Banked S129 methodology rule (NEW from this exchange)
 
 **Bidirectional hole-detection in canon-anchored audits.** Phase 1b's hole-detection only fired on "canon claims X / SPEC silent on X" — it missed the inverse "SPEC ratifies X / canon silent on X." Both directions are signal. Future audit dispatches must include both checks. F-023 was the precedent that surfaced this: SPEC §14.3 ratifies lifecycle annotation as a load-bearing feature; PRIMER + kickstarter never mention it; Phase 1b's audit missed the gap entirely. (Memory to be banked separately if not already covered by [[feedback_triage_genuine_needs_spec_crosscheck]] — that's a sibling but distinct rule.)
