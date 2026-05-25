@@ -110,3 +110,39 @@ This is the single load-bearing prior commitment this DD must address: any `<eac
 **User-voice signal (elevator-pitch.md line 144):** "If scrml added keyed iteration, transitions, and file routing, I would switch for new projects."
 Iteration is on record as a name-axis ergonomics surface.
 
+
+## Phase 2 — Prior art research complete
+
+**8 systems surveyed via WebSearch:**
+
+1. **Svelte 5** — `{#each items as item, index (key)} ... {:else} ... {/each}`. Item destructure + index + optional key + optional else. Block-delimited (`{#each}` / `{/each}`); else is `{:else}` sub-form. Snippets compose. Index is positional, key is parenthesized at end.
+2. **Vue 3** — `v-for="(user, index) in users" :key="user.id"` directive. Always paired with `v-if=":else"` companion directive for empty-state. Key on `<template>` wrapper, not children (Vue 3 breaking change from Vue 2). Index second positional.
+3. **Solid** — `<For each={items} fallback={<div>None</div>}>{(item, i) => <li>{item}</li>}</For>`. Function-body render-prop. `each` attribute. `fallback` attribute. `i` is an Accessor (signal). Identity-keyed by default (no key= attr; reuses by reference identity).
+4. **React/JSX** — `{items.map((item, i) => <li key={item.id}>...</li>)}`. JS-native, no language-level construct. Key is per-element attribute. No empty-state primitive — devs write `{items.length === 0 ? <Empty/> : ...}` separately.
+5. **Marko** — `<for|item, index| of=array>...</for>`. Tag parameters syntax (`|item, index|`). `of=` attribute carries the source. Cannot inline-else; uses separate `<if>`.
+6. **Angular** — `@for (item of items; track item.id) { ... } @empty { ... }`. Block syntax (Angular 17+). `track` is MANDATORY (compiler enforces). `@empty` block-form companion. Implicit variables `$index`, `$first`, `$last`, `$odd`, `$even`, `$count`.
+7. **Astro** — `{items.map(item => <li>...</li>)}`. JSX-native, no language-level construct. Fragment is `<>...</>`. Multiple siblings allowed without wrapper.
+8. **HEEx (Phoenix LiveView)** — TWO forms: classic `<%= for x <- items do %>` AND `:for` attribute (`<li :for={x <- @items} :key={x.id}>...</li>`). `:key` for diffing. Streams primitive for large lists.
+9. **Lit** — `${items.map(item => html\`<li>${item}</li>\`)}` (default) OR `${repeat(items, item => item.id, item => html\`...\`)}` directive. `repeat` is the key-enabled mode. Documented trade-off: `map()` for simple, `repeat()` for stateful DOM / diffing-critical.
+10. **Imba** — `for user in users` with significant whitespace; auto-flattens inside tag bodies. No `<for>` tag; the for keyword IS the iteration mechanism inside tag declarations.
+11. **Elm** — `List.map (\item -> li [] [text item.name]) items`. Functional pattern; no template-level construct. Map is the only mechanism. Empty-list handling via prior `case List.length items of 0 -> empty | _ -> ...` or `List.isEmpty` check.
+12. **Vento** — `{{ for item of items }}...{{ /for }}`. Mustache-style closer (`{{ /for }}`). Single-tag-form, unified delimiters with all other constructs.
+
+## Classification axes from prior art
+
+| Axis | Options observed | Comments |
+|---|---|---|
+| Form | block-delimited (`{#each}/{/each}`, `<for>/</for>`, `@for{}`), attribute-form (Vue v-for, HEEx :for), JS-native (React/Astro), function-body (Solid render-prop) | scrml's current form: JS-native inside `${}` |
+| Item binding | positional `as item, i` (Svelte/Vue), tag-param `|item, i|` (Marko), function args `(item, i) =>` (Solid/React/Lit), closure capture (Elm/Imba), explicit decl in for-head (scrml current) | scrml uses for-head decl |
+| Key | trailing `(key)` (Svelte), `:key` attr (Vue/HEEx), `track expr` (Angular), `key=` attr (React), keyFn 2nd arg (Lit `repeat`), identity (Solid), explicit clause `key expr` (scrml current §17.4b) | scrml is unique in `key` clause position |
+| Empty handling | `{:else}` (Svelte), `@empty` block (Angular), `fallback=` attr (Solid), separate-if (React/Vue/Elm/Astro), `else { lift }` (scrml current §17.4a) | scrml shares Svelte's else-block shape |
+| Multi-child body | block-form natural (all block-delimited systems), wrapper needed (React/JSX/Astro fragments), single-element implicit (Solid render-prop) | scrml currently requires single-`lift`-per-iter as multiple lifts append to accumulator |
+
+## Key prior-art lessons
+
+- **Angular's mandatory `track`** is a 2026-era language-design move — making the most common bug (missing key) a compile-time error. Heavier than scrml's W-KEY-001 lint approach.
+- **Solid's `fallback=` attr** is the lightest empty-state surface — no separate sub-block, just an attribute. Composes naturally with attribute-driven structural elements.
+- **HEEx's `:for` attribute** is a hybrid: structural-element-attribute that decorates an existing element rather than wrapping it. Lower ceremony than wrapping with a separate `<each>`.
+- **Marko's tag parameters `|item, index|`** are notable for binding-via-pipe-delimiters rather than `as`-keyword — but rarely copied; the `as` keyword is dominant.
+- **Lit's two-mode default** (`map()` for simple, `repeat()` for keyed) is closest to scrml's current accidental two-mode (with-key vs without-key); the user-choice surface is identical.
+
