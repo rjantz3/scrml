@@ -5390,7 +5390,6 @@ The content of a `${ }` logic context is JavaScript, passed to the Bun runtime. 
 - Markup-as-expression syntax (Section 7.4)
 - SQL contexts `?{ }` (Section 8)
 - The `@variable` reactive sigil (Section 6)
-- `bun.eval()` for compile-time evaluation (Section 29)
 
 ### 7.3 Function Declaration Forms
 
@@ -5504,7 +5503,7 @@ const VERSION = "v0.3.0"
 
 - `${expr}` in markup-body position SHALL evaluate `expr` and display its string value at render time.
 - When `expr` references one or more reactive cells (`@x` access), the interpolation site SHALL re-render whenever any referenced cell changes — the standard reactive subscription contract (cross-ref §6.1 V5-strict access).
-- When `expr` references NO reactive cells AND the expression collapses to a compile-time-known constant value (literal, `const`-bound to a literal, simple arithmetic on constants, `bun.eval()`-produced literal per §30.2), the compiler MAY inline the string value directly into the emitted HTML at that position. This is a permitted optimization — the rendered output is observationally equivalent.
+- When `expr` references NO reactive cells AND the expression collapses to a compile-time-known constant value (literal, `const`-bound to a literal, simple arithmetic on constants), the compiler MAY inline the string value directly into the emitted HTML at that position. This is a permitted optimization — the rendered output is observationally equivalent.
 - When `expr` references NO reactive cells AND does NOT collapse to a compile-time constant (e.g., `${Date.now()}`, `${Math.random()}`, `${someJsLibCall()}`), the compiler SHALL emit a one-shot evaluation at module initialization that writes the result to the interpolation site. The site SHALL NOT re-evaluate after initial render.
 - The reactive case (deps present) and the non-reactive non-constant case (deps absent, expression not foldable) SHALL be observationally distinguished only by whether subsequent state changes trigger re-render — both produce the value at module init.
 - When `expr` does NOT resolve in scope, the compiler SHALL emit `E-NAME-NOT-FOUND` (or the applicable lookup-failure diagnostic per the resolver's normal contract). Interpolation does NOT bypass normal name resolution.
@@ -5548,7 +5547,7 @@ The `~` accumulator inside `${...}` follows §32 semantics. The final `~` refere
 - §6.1 — V5-strict access (reactive cell read form)
 - §7.4 / §7.4.1 — markup-AS-expression (the reverse direction)
 - §7.6 — file-level scope (const-in-markup-interpolation rule, line ~5349)
-- §22 — meta blocks (`bun.eval()` compile-time evaluation; folds into the constant case)
+- §22 — meta blocks (`reflect` / `emit` / `emit.raw` compile-time evaluation per Approach C; folds into the constant case)
 - §32 — `~` accumulator (interpolation-body tilde semantics)
 - §42 — absence value (`null` / `undefined` / `not` coercion behavior)
 
@@ -13214,7 +13213,6 @@ following API patterns and references no runtime-only values:
 - `reflect(TypeName)` calls
 - `emit(...)` calls
 - `emit.raw(...)` calls
-- `bun.eval(...)` calls
 
 The compiler SHALL evaluate compile-time meta blocks during compilation and inline the result.
 Compile-time meta blocks have access to the type registry via `reflect()` (see §22.4.2).
@@ -13740,7 +13738,7 @@ executes at program run time. These phases SHALL NOT be mixed in a single `^{}` 
 **Normative statements:**
 
 - A `^{}` block SHALL NOT reference both compile-time API patterns (e.g., `reflect()`,
-  `bun.eval()`) and runtime-only values in the same block.
+  `emit()`, `emit.raw()`) and runtime-only values in the same block.
 - The compiler SHALL reject any `^{}` block that mixes compile-time and runtime access
   patterns (E-META-005).
 - `reflect(expr)` is the single programmer-facing API for type reflection. The compiler
@@ -13824,6 +13822,8 @@ Where:
 ### 22.12 Approach C — what scrml-native fully describes
 
 **Added 2026-05-21 (S114 ratification — full ratify per user-voice S114).** The S114 `^{}` runtime-semantics expressiveness deep-dive (`scrml-support/docs/deep-dives/meta-block-runtime-semantics-expressiveness-2026-05-21.md`) answered the load-bearing question: **scrml-native fully describes runtime semantics** via the §22.5.1 `meta` API (8 original members + 4 timer primitives added S114 = 12 closed primitives). Compile-time meta is closed via `emit` / `emit.raw` / `reflect` (3 primitives, already specced). The general-developer `^{}` body parser SHALL accept only scrml-native + this enumerated primitive set; JS-host ambient globals (`bun`, `process`, `setInterval`, `fetch`, etc.) are NOT in the META_BUILTINS set and trigger `E-META-001`.
+
+**S130 Approach C extension (per HU-2 Q4 ratification — F-003):** Approach C extends transitively to `${}` markup interpolation. JS-host ambient globals (`bun`, `process`, `setInterval`, `fetch`, etc.) and arbitrary JS-host-eval surfaces (`bun.eval`, etc.) are NOT permitted in `${}` either; the meta surface for `${}` is the same enumerated primitive set as `^{}`. The former §30.2 user-facing `bun.eval()` inside `${}` surface RETIRES per this extension (see §30 retirement note); `bun.eval()` remains as a compiler-internal mechanism (§30.1) only.
 
 **The single named carve-out for self-host bootstrap** is the `import:host` file-top declaration form (§21.3.1). It is NOT an `^{}` body extension; it is a separate declaration form, manifest-gated by §22.13. The native parser does NOT carry an embedded JS-expression parser for `^{}` bodies under Approach C — `^{}` parses as scrml-native, full stop.
 
@@ -14725,7 +14725,7 @@ The `html-content-model` setting controls enforcement of the HTML content model 
 
 ---
 
-## 30. Compile-Time Evaluation — `bun.eval()`
+## 30. Compile-Time Evaluation — `bun.eval()` (compiler-internal only post-S130 Approach C subsumption)
 
 ### 30.1 Scope of Use
 
@@ -14738,21 +14738,16 @@ The compiler (itself a Bun program) uses `bun.eval()` during compilation for:
 
 Generated output SHALL NOT contain `bun.eval()` calls. `bun.eval()` is compile-time only.
 
-### 30.2 `bun.eval()` Inside `${ }` Markup Interpolations
-
-`bun.eval()` MAY be used inside a `${ }` markup interpolation as a compile-time constant:
-
-```scrml
-<footer>© ${ bun.eval("new Date().getFullYear()") }</>
-```
-
-- The compiler SHALL recognize a `bun.eval()` call inside a `${ }` block, evaluate it at compile time, and substitute the result as a literal in the compiled output.
-- The result is inlined as a constant. The generated HTML SHALL contain the literal value (e.g., `2026`), not a JavaScript expression.
-- If `bun.eval()` throws at compile time, this SHALL be a compile error (E-EVAL-001) with the eval error message included.
-
-### 30.3 Security
-
-`bun.eval()` executes arbitrary JavaScript at compile time in the context of the compiler process. The developer is responsible for ensuring that compile-time `bun.eval()` calls do not execute untrusted code.
+**Note (S130 Approach C subsumption per HU-2 Q4 ratification — F-003):** as of S130,
+`bun.eval()` is **compiler-internal only**. The prior `${ }` markup-interpolation
+surface (former §30.2) is RETIRED per Approach C extension (see §22.12). The prior
+user-facing security note (former §30.3) is RETIRED with §30.2 (no remaining
+user-facing surface). User-facing compile-time evaluation uses `^{ ... }` meta
+blocks with the closed META_BUILTINS primitive set (`reflect` / `emit` / `emit.raw`
+per §22.4). For the former `<footer>© ${ bun.eval("new Date().getFullYear()") }</>`
+pattern, the canonical replacement (per Q3 ratification) is the runtime stdlib
+helper `import { currentYear } from "scrml:time"; ... ${ currentYear() }` —
+implementation pending; tracked as a Phase 2 follow-on.
 
 ---
 
@@ -15215,7 +15210,6 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-COMPONENT-011 | §15.10 | Extra prop at call site not declared in `props` block | Error |
 | E-COMPONENT-012 | §15.10 | Same prop in both `props` block and bare attribute | Error |
 | E-NAME-001 | §15.6 | Component name collides with built-in HTML element name | Error |
-| E-EVAL-001 | §30.2 | `bun.eval()` call threw at compile time | Error |
 | E-TILDE-001 | §32.5 | `~` referenced but not initialized in current scope | Error |
 | E-TILDE-002 | §32.5 | `~` initialized but not consumed before scope exit or reinitialization | Error |
 | E-LIN-001 | §35.5 | `lin` variable not consumed before scope exit | Error |
