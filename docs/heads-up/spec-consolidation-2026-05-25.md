@@ -263,6 +263,120 @@ Beyond the §34 catalog row, F-003 (a) requires compiler-source cleanup at 8 sit
 
 - **state-dynamics-design DD extension question** (DD at `scrml-support/docs/deep-dives/state-dynamics-design-2026-04-08.md` — `status: active` since 2026-04-08). The DD asks "should `(A to B)` lifecycle annotations extend beyond struct fields to enum-state-cells, or do engines/Tier-2 subsume that use case?" Lifecycle annotation is foundational; the extension question is "did we accidentally narrow scrml's type-system in ratification?" PA recommends: read the DD in full + the debate sibling DD before HU-3 ratifies.
 
+## HU-2 (continued) — Q5 closure: V-kill cluster ratified
+
+### Question + user direction
+
+Q5 (V-kill cluster final ratification — 4 LOAD-BEARING findings on one cluster close). PA presented three sub-decisions for the cluster: Q5.0 cluster direction, Q5.A §7.5 production location, Q5.B §52.4.1 server-authority form.
+
+**User direction (verbatim):**
+> *"yes, b, explain this. I keep thinking that we have gotten rid of that ugly word"*
+> *"b. I am really trying to build a language that is cohesive and instinctive once it falls under your fingers."*
+
+### Q5.0 RATIFIED — V-kill cluster direction (yes)
+
+V-kill canon wins. Amend §7.5 + §52.4.1 + ~30 worked examples per S123 V-kill ratification. Mechanical per Rule 4 (pre-V-kill text never refreshed; V-kill is post-ratification canon).
+
+### Q5.A RATIFIED — (b) move §7.5 production to §6.1
+
+The `state-decl` production moves out of §7.5 ("Type Annotation Grammar") into §6.1 alongside the V-kill normative statements. §7.5 retains only type-expr / param-decl / return-type productions (the ones that actually belong in "Type Annotation Grammar"). §6.1's V-kill cluster gains the production as its formal grammar carrier.
+
+### Q5.B RATIFIED — (b) `<cards server>: T = []` bare-attribute form
+
+`server` becomes a **bare flag attribute inside the decl tag**, parallel to `<userId pinned>` (per F-013 closure direction) and consistent with V5-strict Shape 2 validator-on-decl pattern (`<userName req length(>=2)> = <input/>`). The prefix-modifier shape (`server <cards>`) was rejected because it broke the V5-strict "modifiers go inside the tag" pattern — non-cohesive seam.
+
+**User-voice anchor (verbatim):** *"I am really trying to build a language that is cohesive and instinctive once it falls under your fingers."* Banked as methodology rule [[feedback_cohesion_and_falls_under_fingers]] — design-evaluation lens for all future HU decisions: weight cohesion (fits existing patterns) + falls-under-fingers (muscle-memory-friendly) heavily; lowest-touch option is NOT automatically the right answer.
+
+PA's initial Q5.B lean was (a) prefix — based on lowest-touch-from-existing-SPEC-text reasoning. Wrong by the cohesion criterion. Revised lean to (b) bare-attribute when user surfaced the cohesion concern; user ratified (b) with the design-intent quote.
+
+### Sibling clarification banked (the "ugly word" reaction)
+
+User's reaction *"I keep thinking that we have gotten rid of that ugly word"* surfaced a real partial-memory state. Clarified for the record:
+
+- **`server function` modifier (function-modifier form)** — RETIRED per Insight 26 (2026-05-08, S72 body-split / auto-`!`-wrap CPS ratification). Plain `function foo() {...}` with compiler-managed body-split handles client/server split transparently; explicit `server function` declaration became redundant. This is the `server` the user remembers retiring.
+- **`server` modifier on state cells (cell-authority form)** — CANONICAL per SPEC §52.4. Declares cell authority (compiler synthesizes fetch-on-mount, optimistic update on writes, rollback on server-error). Not on the deprecation track. Survives this Q5.B as a bare attribute inside the V-kill structural tag.
+
+Same word, two distinct semantics, only the function-modifier got retired. Worth recording so future user-confusion doesn't recur.
+
+### Concrete amendments — direction + target explicit (post-Q5 ratification)
+
+**Amendment A1 — §7.5 line 5564 grammar production:**
+RETIRES from §7.5 (per Q5.A b). Production relocates to §6.1.
+
+**Amendment A2 — §6.1 V-kill section gains the grammar production (new location per Q5.A b):**
+
+```ebnf
+state-decl   ::= '<' identifier ws (decl-attr ws)* '>' [ws ':' ws type-expr] ws '=' ws expr
+decl-attr    ::= 'pinned' | 'server' | validator-attr     // bare flag attrs inside the tag
+                                                          // (per Q5.B b — `server` joins the modifier family)
+validator-attr ::= /* per §55.1 universal-core predicate vocabulary */
+```
+
+(Refinement: the exact grammar-production wording is heads-up Phase 2 amendment work; the SHAPE is locked here. Specifically: `server` joins `pinned` and validator-attrs as a bare flag attribute legal inside the V-kill structural tag.)
+
+**Amendment A3 — §7.5 worked examples lines 5594-5597:**
+
+```scrml
+// BEFORE
+@count: number = 0
+@items: string[] = []
+@selected: string? = not
+
+// AFTER
+<count>: number = 0
+<items>: string[] = []
+<selected>: string? = not
+```
+
+**Amendment A4 — §52.4.1 line 26367 grammar production:**
+RETIRES. The production folds into §6.1 (per A2). §52.4.1 retains the semantic description of the `server` attribute (fetch-on-mount, optimistic update, rollback, SSR pre-render); no longer needs its own grammar production.
+
+**Amendment A5 — §52 worked examples:**
+
+```scrml
+// BEFORE
+server @cards = []
+server @currentUser = not
+
+// AFTER
+<cards server> = []
+<currentUser server> = not
+```
+
+(Type annotation form composes: `<cards server>: Card[] = []`.)
+
+**Amendment A6 — SPEC-wide ~30 worked example mechanical sweep** (per F-008 audit enumeration):
+Sweep rule:
+- `^@x = v` at line-start with NO preceding `<x>` decl in same example → convert to `<x> = v`
+- `^@x = v` at line-start WITH preceding `<x>` decl → keep (it's a write)
+- `^@x = v` inside function body → keep (it's a write)
+- `^server @x = v` at line-start → convert to `<x server> = v` (per Q5.B b)
+
+Audit site enumeration in `docs/audits/spec-consolidation-inventory-2026-05-24.md` F-008.
+
+### Findings closed by Q5
+
+- **F-001 (1a, LB)** — RATIFIED. §7.5 grammar production amended + relocated to §6.1.
+- **F-009 (1b, LB)** — RATIFIED. Same surface as F-001; corroboration close.
+- **F-008 (1a, LB)** — RATIFIED. ~30-site mechanical sweep authorized.
+- **F-016 (1a, LB)** — RATIFIED. §52.4.1 grammar retires; semantic prose preserved; worked examples migrate to bare-attribute form.
+
+### Carry-forward sub-questions for HU-3 (composition with other modifiers — surfaced by Q5.B b ratification)
+
+Now that `server` is a bare flag attribute alongside `pinned` + validators, composition questions surface:
+
+- **Q5.B.1 — server + pinned composition.** `<cards server pinned> = []` — does the pinned semantics apply to the placeholder OR the fetched value? Edge case worth heads-up resolution before adopter samples exercise it.
+- **Q5.B.2 — server + validators composition.** `<cards server req length(>=1)> = []` — at which point does the validator run? Options:
+  - (a) On client-side optimistic update only (server is trusted)
+  - (b) On server-fetch + on client-side write (defense-in-depth)
+  - (c) On client-side write + AFTER server fetch confirms (both points)
+  Audit / DD likely needed before HU-3 ratifies.
+- **Q5.B.3 — Tier 1 `< Type authority="server" table="...">` vs Tier 2 `<x server>` relationship.** Per §52 the two tiers have distinct semantics (type-level vs instance-level). Q5.B (b) ratification doesn't change Tier 1; Tier 1 remains `<TypeName authority="server" ...>`. But the keyword overlap (`server` in two distinct positions) carries a documentation burden — heads-up may want to clarify the Tier-1 vs Tier-2 distinction in PRIMER + kickstarter post-F-023/044 catch-up.
+
+### Banked methodology from Q5
+
+- **[[feedback_cohesion_and_falls_under_fingers]]** — design-evaluation lens. Weight cohesion (fits existing patterns) + falls-under-fingers (muscle-memory-friendly) heavily; lowest-touch option is NOT automatically the right answer. PA must surface non-cohesive options as such and offer the cohesive alternative explicitly, even if PA initially leaned the lowest-touch direction.
+
 ### Banked S129 methodology rule (NEW from this exchange)
 
 **Bidirectional hole-detection in canon-anchored audits.** Phase 1b's hole-detection only fired on "canon claims X / SPEC silent on X" — it missed the inverse "SPEC ratifies X / canon silent on X." Both directions are signal. Future audit dispatches must include both checks. F-023 was the precedent that surfaced this: SPEC §14.3 ratifies lifecycle annotation as a load-bearing feature; PRIMER + kickstarter never mention it; Phase 1b's audit missed the gap entirely. (Memory to be banked separately if not already covered by [[feedback_triage_genuine_needs_spec_crosscheck]] — that's a sibling but distinct rule.)
