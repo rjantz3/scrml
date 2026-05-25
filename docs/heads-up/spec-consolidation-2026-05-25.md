@@ -190,6 +190,75 @@ Syntax-overload concern legitimate. Return-type and lifecycle are static-vs-temp
 - **F-024 (HU-2 NEW)** — RATIFIED. Lifecycle-annotation syntax disambiguates from return-type. Locked: `(A to B)`. `->` remains return-type-only.
 - **F-023 (HU-2 NEW, was Q9 from HU-1 close)** — RATIFIED direction (a): PRIMER + kickstarter catch up to SPEC on lifecycle annotation. Flagship-section scope, not footnote. Uses post-F-024 syntax `(A to B)`.
 
+## HU-2 (continued) — Q4 closure: E-EVAL-001 retires
+
+### Question + user direction
+
+Q4 (from HU-2 batch surface): E-EVAL-001 residual disposition under F-003 (a). PA's initial recommendation in the HU-2 batch was (a) keep-as-compiler-internal — based on speculation that E-EVAL-001 "covers" compiler-internal `bun.eval()` failures per §30.1.
+
+**User (verbatim):**
+> *"lets look at 4"*
+> *"do the grep"*
+
+### Grep-verified facts (Phase-0-equivalent verification)
+
+PA grep'd `compiler/src/` for E-EVAL-001 fire sites:
+
+- **Exactly ONE fire site:** `compiler/src/codegen/rewrite.ts:510-512`
+- **Fire condition:** wraps user-written `${ bun.eval(...) }` throws per §30.2 recognition
+- **Compiler-internal `bun.eval()` use (§30.1 — constant evaluation, type helpers, SQLite at compile time):** propagates as JS-exception through stage-boundary handlers; NOT via E-EVAL-001. E-EVAL-001 was never a compiler-internal code.
+
+**Post-F-003 (a) — which retires §30.2 entirely — E-EVAL-001 has zero remaining fire paths.** The rewrite.ts:510-512 block becomes dead code.
+
+**PA's initial (a) recommendation was wrong** — based on speculation, not grep. Banked methodology rule: [[feedback_grep_fire_sites_before_claiming_coverage]] (NEW from this exchange).
+
+### Q4 RATIFICATION — disposition (b): retire E-EVAL-001 entirely
+
+**Decision:**
+- §34 line 15218: drop the E-EVAL-001 catalog row
+- `compiler/src/codegen/rewrite.ts:510-512`: drop the `recordError(... "E-EVAL-001" ...)` block (dead code post-F-003 (a))
+- Any test files asserting on E-EVAL-001 fire: drop or migrate
+- No replacement error code; compiler-internal `bun.eval()` failures continue propagating via existing JS-exception → stage-boundary handler machinery (no dedicated code needed)
+
+### §34 sibling-cascade audit (concurrent verification per Q4 grep)
+
+User asked for cascade check before closing Q4: are there OTHER §34 codes that die when F-003 (a) lands?
+
+**Answer: only E-EVAL-001 dies.** PA grep'd §34 for §30-referencing rows + bun.eval-mentioning rows + §22.4 + dead-fire-site candidates:
+
+- **E-META-EVAL-001 (§22.4)** — NOT dead. Fires at `compiler/src/meta-eval.ts:447` when `^{}` body evaluation throws. Approach C keeps `^{}` body parsing scrml-native + 3 compile-time primitives (reflect / emit / emit.raw); those CAN throw, this code stays alive.
+- **E-META-EVAL-002 (§22.4)** — NOT dead. Same locus; fires when `emit`/`emit.raw` produces code that re-parses unsuccessfully. Stays alive.
+- **E-EVAL-001 (§30.2)** — DEAD per above.
+
+No hidden siblings. The §34 cascade is exactly one row.
+
+### F-003 (a) source-cascade scope (NEW surfaced during Q4 grep — for Phase 2 amendment work)
+
+Beyond the §34 catalog row, F-003 (a) requires compiler-source cleanup at 8 sites. Mechanical sed-style; surfacing scope here so Phase 2 amendment work captures it cleanly:
+
+| File:Line | Change |
+|---|---|
+| `compiler/src/codegen/rewrite.ts:488-512` | Retire the entire `Evaluate bun.eval("...") calls at compile time` function (DEAD post-F-003 (a)) |
+| `compiler/src/meta-checker.ts:15` | Doc-comment: drop `bun.eval` from `(reflect, bun.eval, emit) execute at compile time` |
+| `compiler/src/meta-checker.ts:179` | Remove the `\bbun\s*\.\s*eval\s*\(` regex from the compile-time-API recognizer |
+| `compiler/src/meta-checker.ts:1622` | Error message: drop `bun.eval` from `compile-time APIs (reflect, emit, bun.eval)` list |
+| `compiler/src/meta-checker.ts:1656` | Same family error message |
+| `compiler/src/codegen/constant-folder.ts:13` | Doc-comment phrasing update |
+| `compiler/src/codegen/collect.ts:446` | Drop bun.eval from compile-time-only escapes list |
+| `compiler/src/tokenizer.ts:719` | Update comment reference |
+| `compiler/src/codegen/emit-html.ts:1693` | Remove `!inlined.includes("bun.eval")` filter (the filter has nothing to filter once bun.eval recognition retires) |
+| `compiler/src/codegen/emit-html.ts:1707, 1712` | Comment block update |
+
+### Findings closed by Q4
+
+- **Q4 / F-003-cascade E-EVAL-001** — RATIFIED (b) retire. §34 row drops; rewrite.ts:510-512 fire site retires; no replacement code.
+
+### Banked methodology from Q4
+
+- **[[feedback_grep_fire_sites_before_claiming_coverage]]** — when PA's option-list claims "X covers Y" or "X fires on Z," PA MUST grep actual fire sites first. Don't speculate about coverage from spec text or memory. 5-minute grep cost; days-of-rework cost when an option-list ratifies a wrong reading. Sibling to [[feedback_bidirectional_hole_detection]] from same session — both are "verify before reasoning about behavior" rules.
+
+---
+
 ### Open from HU-2 lifecycle thread (carry to HU-3)
 
 - **state-dynamics-design DD extension question** (DD at `scrml-support/docs/deep-dives/state-dynamics-design-2026-04-08.md` — `status: active` since 2026-04-08). The DD asks "should `(A to B)` lifecycle annotations extend beyond struct fields to enum-state-cells, or do engines/Tier-2 subsume that use case?" Lifecycle annotation is foundational; the extension question is "did we accidentally narrow scrml's type-system in ratification?" PA recommends: read the DD in full + the debate sibling DD before HU-3 ratifies.
