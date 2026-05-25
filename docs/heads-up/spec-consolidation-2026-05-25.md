@@ -540,6 +540,79 @@ Per the design-evaluation lens ratified at Q5.B:
 
 - **E-SCHEMA-003 enforcement.** Compiler currently silent; Phase 2 implementation adds the nesting check. Out of HU-2 ratification scope but flagged so it doesn't drop on the floor.
 
+## HU-2 (continued) — Q8 closure: §55.5 predictability wins
+
+### Question + user direction
+
+Q8 (F-018, 1b, LB): SPEC §55.5 has two readings co-existing — first sentence reads conditionally ("ANY field with validators → synth"); the no-validator clause reads unconditionally ("predictability over namespace savings"). PIPELINE Stage 6.7 invariants only describe the validator-bearing case explicitly.
+
+**User direction (verbatim):** *"a it is"* — predictability wins.
+
+### Authority triangulation (PA Phase-0 verification)
+
+Per [[feedback_grep_fire_sites_before_claiming_coverage]] — grep'd compiler-source for synth-cell behavior on no-validator compounds:
+
+| Authority | Says |
+|---|---|
+| SPEC §55.5 first sentence | gating reading (validator-bearing → synth) |
+| **SPEC §55.5 no-validator clause** | **predictability reading (always synth, trivially true if no validators)** |
+| PIPELINE Stage 6.7 invariants | only documents validator-bearing case (incomplete; doesn't contradict predictability, just silent) |
+| **COMPILER CODE `symbol-table.ts:3356`** | VERBATIM: *"Synthesis is UNCONDITIONAL for compound parents — even no-validator compounds"* |
+| `emit-synth-surface.ts:44` | "Per-field trivial defaults (errors=[], isValid=true) for no-validator fields" |
+| `emit-client.ts:619-620` | "even compounds with no validator-bearing fields get the surface with trivially-true isValid + empty errors" |
+| `symbol-table.ts:3583` | "Predictability over selectivity (audit §1.1...)" |
+
+The compiler ALREADY implements the predictability behavior. SPEC §55.5 no-validator clause is the load-bearing canon. PIPELINE Stage 6.7 invariants are INCOMPLETE (only document the validator-bearing case) but don't contradict — same drift pattern as Q6 / Q7.
+
+### Q8 RATIFICATION — (a) predictability wins
+
+**Decision:** SPEC §55.5 predictability rule is canonical. PIPELINE Stage 6.7 invariants extend to explicitly document the no-validator-compound case. Zero compiler-code change (compiler already does this).
+
+**Concrete amendments:**
+
+**Amendment Q8-1 — SPEC §55.5 first-sentence prose** (clarification, not semantic change):
+
+```
+// BEFORE
+When a compound state declaration contains ANY field with validators, the
+compiler auto-synthesizes a reactive validity surface accessible at the
+compound level.
+
+// AFTER
+The compiler auto-synthesizes a reactive validity surface accessible at the
+compound level for EVERY compound state declaration. When the compound
+contains validator-bearing fields, the surface tracks their results; when
+it carries no validators, the surface is trivially-true / empty (predictability
+over namespace savings — see no-validator-compounds clause below).
+```
+
+**Amendment Q8-2 — PIPELINE Stage 6.7 invariants (line 1981-1990 area):** EXTEND to cover no-validator case explicitly.
+
+```
+// ADDITION TO INVARIANTS
+- For every compound state-cell carrying ANY validator-bearing field: a
+  SynthCellEntry is created with level: 'compound', parentCompoundId: null,
+  and per-field SynthCellEntry records for ALL fields (including no-validator
+  fields — trivial defaults isValid: true / errors: []).
+- For every compound state-cell with NO validator-bearing fields: a
+  SynthCellEntry is ALSO created with level: 'compound' and trivially-true
+  isValid / empty errors. (Predictability per SPEC §55.5; matches
+  compiler/src/symbol-table.ts:3356 "Synthesis is UNCONDITIONAL for compound
+  parents.")
+```
+
+**Amendment Q8-3 — Compiler code:** UNCHANGED. The compiler already implements the predictability rule per the grep evidence.
+
+### Findings closed by Q8
+
+- **F-018 (1b, LB)** — RATIFIED. SPEC §55.5 first-sentence prose clarified; PIPELINE Stage 6.7 invariants extended; zero compiler-code change.
+
+### Banked methodology from Q8
+
+No NEW methodology rule. Q8 re-validates [[feedback_grep_fire_sites_before_claiming_coverage]] for the THIRD time this session (after Q6 + Q7) — the compiler code keeps being the authority that already-aligns with SPEC's canonical reading; PIPELINE prose drifts.
+
+**Pattern recognition (worth banking as observation):** In HU-2, four consecutive load-bearing findings (Q5 V-kill cluster's compiler-already-aligned + Q6 deriveEngineVarName + Q7 E-SCHEMA-003 / no fire + Q8 §55.5) ALL turned out to be PIPELINE / SPEC prose drift from already-correct compiler behavior. The compiler is more spec-canonical than the documentation around it. Phase 2 amendment work is predominantly doc-text editing, NOT code-change work. This empirical observation should shape Phase 2 sequencing — doc amendments are cheap; code-changes (when actually needed) are dispatch-shaped.
+
 ### Banked S129 methodology rule (NEW from this exchange)
 
 **Bidirectional hole-detection in canon-anchored audits.** Phase 1b's hole-detection only fired on "canon claims X / SPEC silent on X" — it missed the inverse "SPEC ratifies X / canon silent on X." Both directions are signal. Future audit dispatches must include both checks. F-023 was the precedent that surfaced this: SPEC §14.3 ratifies lifecycle annotation as a load-bearing feature; PRIMER + kickstarter never mention it; Phase 1b's audit missed the gap entirely. (Memory to be banked separately if not already covered by [[feedback_triage_genuine_needs_spec_crosscheck]] — that's a sibling but distinct rule.)
