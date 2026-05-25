@@ -14,7 +14,7 @@
 
 | Severity | Open | Closed-this-arc | Notes |
 |---|---|---|---|
-| HIGH | 4 | (rotate out below) | E-TYPE-001 lifecycle fire (in-impl S130) · compiler-managed-async (deferred A9-class) · §29 vanilla-interop (open user decision) · 6nz-V class:NAME on for-lift (GENUINE) |
+| HIGH | 3 | E-TYPE-001 lifecycle fire (S130 Landing 1 SHIPPED) | compiler-managed-async (deferred A9-class) · §29 vanilla-interop (open user decision) · 6nz-V class:NAME on for-lift (GENUINE) |
 | MED | 7 | (rotate out below) | Bug 1 Tailwind residuals · V-kill READ-side fire · E-SCHEMA-003 enforcement · MCP V0 partial-impl deferrals · `~snapshot` raw-sigil · Generator policy · L19 multi-statement-handler |
 | LOW | 4 | (rotate out below) | Bug 4 bare-`/` · GITI-015 · §11-folded-citation sweep · `bun scrml promote --engine` Tier-1→2 deferred |
 | Nominal (spec-ahead-of-impl) | 7 | — | Build Story §58 · `import:host` §21.3.1 · Quoted-text §4.18 compiler fire · `_{}` foreign code · WASM call-char sigils · Sidecar process decls · RemoteData enum |
@@ -22,16 +22,6 @@
 ---
 
 ## §1 HIGH — adopter-visible / silent-wrong-output
-
-### Bug 8 — E-TYPE-001 lifecycle access-before-transition fire — `in-impl` (S130)
-
-**SPEC §14.3** ratifies `E-TYPE-001` on access-before-transition for lifecycle-annotated fields. The compiler at `compiler/src/type-system.ts:1444` resolves `(A -> B)` to type B (the value-after-transition type) but does NOT track per-access transition state. The fire promised in §14.3 line 7106 is **unimplemented**. The mutability-contracts article publish-twin already acknowledges this with a status banner.
-
-- **Workaround (adopter-side):** treat lifecycle-annotated struct fields as `T | not` and check via `is some` / `is not` for now. The promised compile-time fire will land per Landing 1 below.
-- **Reproducer:** any struct with a `(A to B)` field accessed before transition. Example: `type User:struct = { name: string, hash: (not -> string) }`; `let u = User{name:"a"}; print(u.hash)` should fire E-TYPE-001 but doesn't.
-- **Status:** **Lifecycle Landing 1 in flight (S130).** Agent dispatch implementing per-access transition-state tracking + new tests at `compiler/tests/unit/type-system-lifecycle.test.js`. Closes upon land. Authority: lifecycle DD at `scrml-support/docs/deep-dives/lifecycle-annotation-extension-and-flagship-scope-2026-05-25.md` + HU-1 at `docs/heads-up/lifecycle-annotation-extension-2026-05-25.md` Q2 ratification.
-
----
 
 ### Bug 9 — Compiler-managed async transitive coloring (A9-class) — `deferred`
 
@@ -218,8 +208,8 @@ S130 lifecycle DD + HU-1 ratified `(A to B)` extension scope to non-engine cells
 
 | Landing | Scope | Status |
 |---|---|---|
-| 1 | E-TYPE-001 fire (per-access transition-state tracking in `type-system.ts:1444`) | **IN-IMPL S130** (see Bug 8) |
-| 2 | Approach C extension to fn params + fn return + schema fields + channel cells + `->` → `to` glyph migration + new §14.X subsection + `E-TYPE-LIFECYCLE-ON-ENGINE-CELL` engine-cell rejection | queued post-Landing 1 |
+| 1 | E-TYPE-001 fire (per-access transition-state tracking in `type-system.ts`) | **SHIPPED S130** (`1feaedc9`) — see §7 rotation |
+| 2 | Approach C extension to fn params + fn return + schema fields + channel cells + `->` → `to` glyph migration + new §14.X subsection + `E-TYPE-LIFECYCLE-ON-ENGINE-CELL` engine-cell rejection | queued (next dispatch) |
 | 3 | PRIMER + kickstarter flagship section (per F-023) | queued post-Landing 2 |
 
 Authority: lifecycle DD at `scrml-support/docs/deep-dives/lifecycle-annotation-extension-and-flagship-scope-2026-05-25.md`; HU-1 at `docs/heads-up/lifecycle-annotation-extension-2026-05-25.md`.
@@ -238,6 +228,9 @@ Authority: lifecycle DD at `scrml-support/docs/deep-dives/lifecycle-annotation-e
 ## §7 Closed in S110-S130 (rotation; will rotate out next refresh)
 
 **S130:**
+- **Bug 8 (HIGH) — E-TYPE-001 lifecycle access-before-transition fire** — Landing 1 SHIPPED (`1feaedc9`). Per-access transition-state tracking implemented in `compiler/src/type-system.ts` (+666 LOC + design pick β symbol-table side-table mirroring `checkFunctionBodyStateCompleteness` precedent). +33 new tests (27 unit / 6 integration) / +50 expect() calls. Closes the ~6+ week SPEC §14.3 line 7106 spec-vs-impl gap that the mutability-contracts article publish-twin's status banner had been acknowledging. Diagnostic message names binding + field name + struct type + pre-state type + post-state type + resolution path + SPEC anchor. Landing 2 (extension to non-engine cell positions + `->` → `to` glyph migration + engine-cell rejection diagnostic) queued.
+- **Phase 2 Cluster A — V-kill SPEC sweep** — A1-A6 all 6 amendments landed (`b0244869`). Grammar production relocated to §6.1.5; §52.4.1 grammar folds in; ~90 worked-example sites migrated SPEC-wide. Closes F-001 / F-008 / F-009 / F-016 (1a/1b LB).
+- **Phase 2 Cluster B-code — Approach C source-cascade** — 9 of 10 sites cleaned (`35262911`). Site 1 (`rewriteBunEval` function retirement) DEFERRED pending three prerequisite sub-tasks (META_BUILTINS purge → 5 meta-eval call drops → Pass 4 drop + test retire). Agent's Phase-0 root-cause confirmation caught the brief's "zero callers" assumption was wrong (7 active callers); banked-rule earning its keep. Closes F-002 / F-003 / F-009 (1a) / F-010 (compiler half).
 - **F-021 PIPELINE `deriveEngineVarName`** — PIPELINE doc-only fix per HU-2 Q6 ratification. Compiler already aligned with SPEC §51.0.C.
 - **F-019 `<schema>` placement** — SPEC §39 prose rewrite per HU-2 Q7 ratification (no longer documents "alongside not inside"; immediate child of `<program>`). E-SCHEMA-003 catalog row updated. (Compiler-side enforcement still open — see Bug 13.)
 - **F-018 §55.5 validity surface predictability** — SPEC + PIPELINE prose alignment per HU-2 Q8. Compiler already implements unconditional synthesis.
