@@ -37,7 +37,7 @@ A contact book — a real database, server functions, list rendering — with no
 API layer, no ORM, and no route files. This is the shape of a scrml app:
 
 ```scrml
-// gate: skip — a full-stack app needs a database file beside it; shown for shape
+// a full-stack app needs a database file beside it; shown for shape
 <program>
 
 <db src="contacts.db" tables="contacts">
@@ -71,11 +71,10 @@ API layer, no ORM, and no route files. This is the shape of a scrml app:
   </form>
 
   <ul>
-    ${
-      for (let c of loadContacts()) {
-        lift <li>${c.name} — ${c.email}</li>
-      }
-    }
+    <each in=loadContacts()>
+      <li>${@.name} — ${@.email}</li>
+      <empty>No contacts yet.</>
+    </each>
   </ul>
 
 </>
@@ -397,7 +396,7 @@ scrml is ~10-14x faster to build than Vite at v0.3.0 (was 8-12x at v0.2.x).
 scrml has built-in runtime type validation. The type annotation IS the validation schema — no separate schema library, no `z.object()` wrappers, no `z.infer<typeof>` indirection.
 
 ```scrml
-// gate: skip — illustrative fragments (no <program> wrapper; not standalone-runnable)
+// illustrative fragments (no <program> wrapper; not standalone-runnable)
 <price: number(>0 && <10000)>      = userInput
 <email: string(email)>             = formValue
 <password: string(.length > 7 && .length < 255)> = rawInput
@@ -429,7 +428,7 @@ Boundary checks emit a single synchronous predicate test; on failure the compile
 A struct type drives the form, the schema, and the table — no schema duplication, no model-to-DTO translation, no view-model boilerplate. The same predicates that validate the values also derive the right HTML form controls and the right SQL column types.
 
 ```scrml
-// gate: skip — illustrative; shows the three call-sites against one struct type
+// illustrative; shows the three call-sites against one struct type
 import { formFor, schemaFor, tableFor } from "scrml:data"
 
 type Contact:struct = {
@@ -628,15 +627,13 @@ The [`examples/`](examples/) directory contains curated examples that show what 
 - [Spec Quick-Lookup](compiler/SPEC-INDEX.md) — find any section fast
 - [Pipeline Contracts](compiler/PIPELINE.md) — stage-by-stage compiler pipeline
 
-> **Note on code snippets.** This README's ```scrml fenced examples are
-> compile-gated on every release-tag push (`v0.X.Y`) — they must compile
-> clean and lint clean against the tagged compiler. Snippets in the
-> tutorial, articles, and reference pages are NOT gated and may use
-> in-flight syntax, intentional fragments, or pre-v0.X authoring shapes;
-> treat those as illustrative, not always-runnable, at any given commit.
-> Snippets here marked with a leading `// gate: skip` comment are
-> intentionally illustrative fragments (e.g., they show a state-decl
-> shape without a full `<program>` wrapper).
+> **Note on code snippets.** All `scrml` fenced examples in this README are
+> ***nominal*** — they show the language as designed, not necessarily what
+> the compiler accepts at this exact commit. The compiler is actively
+> catching up to the nominal state (see the [dev's note](#a-note-from-the-developer)
+> above); some snippets may not compile clean against any given commit.
+> Treat them as the canonical shape of what the language is meant to be.
+> For per-feature spec-vs-impl drift see [`docs/known-gaps.md`](./docs/known-gaps.md).
 
 ## scrmlTS
 
