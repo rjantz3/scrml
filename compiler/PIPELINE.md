@@ -1981,10 +1981,18 @@ positioned in the pipeline narrative AFTER Stage 6.5 (META) because DG (Stage 7)
 - Invariants:
   - For every cell with one or more validators: a `SynthCellEntry` is created with
     `level: 'field'` (when the cell is a field of a compound) or `level: 'compound'`.
-  - For every compound carrying validator-bearing fields: a rollup `SynthCellEntry` is created
-    with `level: 'compound'` and `parentCompoundId: null`. The compound's `isValid` is the
-    AND of its fields' `isValid`; its `errors` is the concatenated array of field errors;
-    `touched` and `submitted` are derived from any-field-touched / any-field-submitted.
+  - For every compound state-cell carrying ANY validator-bearing field: a rollup
+    `SynthCellEntry` is created with `level: 'compound'` and `parentCompoundId: null`,
+    plus per-field `SynthCellEntry` records for ALL fields (including no-validator
+    fields — trivial defaults `isValid: true` / `errors: []`). The compound's
+    `isValid` is the AND of its fields' `isValid`; its `errors` is the concatenated
+    array of field errors; `touched` and `submitted` are derived from any-field-
+    touched / any-field-submitted.
+  - For every compound state-cell with NO validator-bearing fields: a
+    `SynthCellEntry` is ALSO created with `level: 'compound'` and trivially-true
+    `isValid` / empty `errors`. (Predictability per SPEC §55.5; matches
+    `compiler/src/symbol-table.ts:3356` "Synthesis is UNCONDITIONAL for compound
+    parents." Added S130 phase-2 E per Q8 ratification.)
   - Reads against `@cell.isValid` / `@cell.errors` / `@cell.touched` / `@cell.submitted`
     resolve at TS to the synth-cell node; the resolved type is taken from the `SynthCellEntry`
     (ResolvedType variants `validity-surface` `level: 'compound' | 'field'`).

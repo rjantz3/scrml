@@ -28264,9 +28264,11 @@ Schema columns retain SQL-mirror vocabulary (`not null`, `unique`, `references`,
 
 ### 55.5 Auto-synthesized validity surface — compound-level (L11)
 
-When a compound state declaration contains ANY field with validators, the compiler
-auto-synthesizes a reactive validity surface accessible at the compound level. No
-authoring required.
+The compiler auto-synthesizes a reactive validity surface accessible at the
+compound level for EVERY compound state declaration. When the compound contains
+validator-bearing fields, the surface tracks their results; when it carries no
+validators, the surface is trivially-true / empty (predictability over namespace
+savings — see no-validator-compounds clause below). No authoring required.
 
 **Synthesized properties on a compound `@signup`:**
 
