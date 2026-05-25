@@ -1,308 +1,162 @@
-# scrmlTS — Session 129 (CLOSE)
+# scrmlTS — Session 130 (CLOSE)
 
-**Date:** 2026-05-24 (OPEN) → 2026-05-25 (CLOSE)
-**Previous:** `handOffs/hand-off-131.md` (S128 CLOSE)
-**Machine:** same as S128 (no switch).
-**HEAD at S129 OPEN:** `63aff3b4` (S128 wrap commit).
-**HEAD at S129 CLOSE:** `1b8317bd` (Q8 close) — will advance to wrap-docs commit on the chore(s129-close).
-**pkg.json:** 0.6.0 (no tag).
-**Push state at close:** scrmlTS unpushed (S129 has 10+ commits ahead of origin); scrml-support unpushed (user-voice S129 appended). **NOT PUSHED** — user said "wrap" without push verb; per pa.md default-no-push without explicit push authorization.
+**Date:** 2026-05-25 (OPEN) → 2026-05-25 (CLOSE; same-day marathon)
+**Previous:** `handOffs/hand-off-132.md` (S129 CLOSE — grammar-lockdown plan + 3 audits + HU-2 batch + D8a-i parser fix)
+**Machine:** same as S129.
+**HEAD at S130 OPEN:** `110cbf64` (S129-CLOSE chore — hand-off rotation that was untracked all S129).
+**HEAD at S130 CLOSE:** will advance one wrap-commit chain (this hand-off + master-list + changelog + user-voice).
+**pkg.json:** 0.6.0 (no tag cut this session).
+**Push state at close:** scrmlTS PUSHED at wrap (will retry with whatever rebase needed); scrml-support PUSHED at wrap.
 
----
-
-## S129 CLOSE SUMMARY — read first
-
-A pivotal session. PA was about to dispatch a D8c parser-fix that would have ADDED a contradiction back into scrml. User pulled the brakes hard and ratified a 4-phase grammar-lockdown plan. **3 audits ran (Phase 1a + 1b + 1c). HU-2 Phase-2 batch fully closed (6 questions + 2 in-session-surfaced findings ratified).** Plus the D8a-i parser fix landed before the brakes-pull.
-
-**Substantive ratifications closed:**
-- F-001 / F-009 / F-008 / F-016 (V-kill cluster — 4 LB closed on Q5)
-- F-021 (PIPELINE deriveEngineVarName — Q6)
-- F-019 (§39.12 schema placement — Q7)
-- F-018 (§55.5 validity surface predictability — Q8)
-- F-003 + F-002 + F-009-1a + F-010 (Approach C bun.eval cascade — HU-1 close)
-- E-EVAL-001 retire (Q4 — F-003 source-cascade clean-up)
-- F-023 + F-024 (NEW — lifecycle annotation flagship catch-up + `to` contextual keyword)
-- D8a-i parser fix landed (commits `6b6e3086` + `7d2ef528`)
-
-**Tests at close:** **21,414 pass / 0 fail / 170 skip / 1 todo / 784 files.** strict-pass EXACT held 964. Within-node 1005/0. Zero regressions across any HU-2 commit.
-
-**Banked methodology (7 new memory files):** amendment-direction-and-target-explicit · triage-genuine-needs-spec-crosscheck · no-greek-chars-in-options · bidirectional-hole-detection · grep-fire-sites-before-claiming-coverage · cohesion-and-falls-under-fingers · plus banked observation (3x re-validated): PIPELINE/SPEC prose drift from already-correct compiler behavior is the dominant Phase 2 work shape.
-
-**Audit deliverables (3 docs landed in main):**
-- `docs/audits/spec-consolidation-inventory-2026-05-24.md` — Phase 1a (17 findings, 5 LB)
-- `docs/audits/spec-corroboration-canons-pipeline-2026-05-24.md` — Phase 1b (22 findings, 11 LB)
-- `docs/audits/spec-feature-canon-coverage-2026-05-25.md` — Phase 1c (26 GAP findings, 11 LB)
-
-**Heads-up running log:** `docs/heads-up/spec-consolidation-2026-05-25.md` — HU-1 + HU-2 ratifications + Phase 2 amendment scope per ratification.
+**Mid-session push happened too** — README mid-session push at `3814c738` went public for the user to fix a repetition (the `36d76ab2` external commit on origin). Local rebased clean post-push.
 
 ---
 
-## S129 OPEN STATE
+## S130 CLOSE SUMMARY — read first
 
-Session opened clean under the still-governing S127 directive ("keep momentum until I stop you / do everything right") + the S126 M6 register ("intentional and exacting through M6").
+A marathon session. Started under "Phase 2 amendment work" from S129 grammar-lockdown carry-forward; expanded into a multi-arc work-block covering Phase 2 (4 clusters), README pivot, 3-DD parallel batch (lifecycle + iteration + MCP V0.D impl), 2 HU sessions, dev.to publication checklist + retraction stamp, known-gaps comprehensive refresh, Q3 RE-RATIFICATION (catch of previous-PA spelling error), and README hero migration to ratified iteration surface.
 
-**Session-start protocol completed read-only:** pa.md · PRIMER §1-§13.5 · SPEC-INDEX (full) · master-list §0.1-§0.6 · S128 CLOSE hand-off · last 3 sessions of user-voice (S126/S127/S128) · inbox (empty) · hooks (configuration B, all 3 installed) · cross-machine sync (both repos clean).
+**Substantive landings (chronological; ~20 commits):**
 
----
-
-## S129 LANDING — flip-harness RE-MEASURE (reversible diagnostic; main untouched)
-
-**Method.** Single throwaway-worktree isolation:worktree agent (`agent-aa6c735c7844b9c1c`). Bash-edit + no-`cd` discipline per S126. Single-line temp-flip at `compiler/src/api.js:604` (`parser = null` → `parser = "scrml-native"`); full `bun run test`; classify failing-file first-error into A/B/C/D/E per S127 scheme; discard. Main HEAD `63aff3b4` unchanged. Worktree cleaned post-report (`git worktree remove --force` + `branch -D`).
-
-**Headline.**
-
-| Measurement | Pass | Fail | vs S127 |
+| # | What | Commit | Closes |
 |---|---|---|---|
-| Baseline (no flip) at HEAD `63aff3b4` | 21,397 | 0 | — |
-| Under flip (default = scrml-native) | ~21,138 | **429** | **−138 / −24% vs 567** |
+| 1 | Phase 2 Cluster C (PIPELINE deriveEngineVarName) | `05e239ba` | F-021 (1b LB) |
+| 2 | Phase 2 Cluster D (§39 schema placement) | `76149424` | F-019 (1b LB) |
+| 3 | Phase 2 Cluster E (§55.5 validity surface predictability) | `5c9bca73` | F-018 (1b LB) |
+| 4 | Phase 2 Cluster B-doc (Approach C SPEC subsumption) | `86a1f815` | F-002 / F-003 / F-009 (1a) / F-010 / Q4 |
+| 5 | README MCP + L22 + V-kill + quality-wins refresh | `3814c738` | **PUSHED PUBLIC mid-session** |
+| 6 | 3 parallel DDs batch — Lifecycle (919L) + Iteration (1028L) + MCP V0.D impl shipped | DD progress + `2b51da82` | Lifecycle DD + Iteration DD + MCP V0.A+B+C+**D** sub-units |
+| 7 | Lifecycle HU-1 (7 questions ratified) | `fca1d401` | Lifecycle HU 7-of-7 |
+| 8 | dev.to publication checklist + retraction stamp | `ee0d048e` | S117/S118/S129 article-update-package carry-forward |
+| 9 | known-gaps comprehensive refresh (76→246 LOC) | `9cdec3c1` | user-flagged "incomplete + inaccurate" |
+| 10 | Phase 2 Cluster B-code (Approach C source-cascade) | `35262911` | F-002/F-003/F-009/F-010 compiler half — 9-of-10 sites; Site 1 DEFERRED |
+| 11 | Phase 2 Cluster A (V-kill SPEC sweep A1-A6 + ~90 sites) | `b0244869` | F-001 / F-008 / F-009 / F-016 (1a/1b LB) |
+| 12 | Lifecycle Landing 1 (E-TYPE-001 access-before-transition fire) | `1feaedc9` | Bug 8 (HIGH) — closes the ~6+ week SPEC §14.3 spec-vs-impl gap |
+| 13 | known-gaps rotation (Bug 8 → §7 closed) | `d92c7c6a` | tracks Landing 1 ship |
+| 14 | Iteration HU-1 (8 questions ratified; 5-landing scope) | `40115bad` | Iteration HU 8-of-8 incl. user spit-ball `<each of=N>` |
+| 15 | Q3 RE-RATIFICATION (actual §4.14 form `<li : @.name>`) | `2e9d56ec` | Catches previous-PA's S129 spelling error |
+| 16 | README nominal-framing + hero `<each>` migration | `1d161fd9` | user direction to loosen gating mandate |
+| (17+) | Wrap chain | (this chain) | session bookkeeping |
 
-The 7 native-parser levers closed since S127 (D1+D2+C1+C2 from S127; D3+D6+D7 from S128 + D4-empty confirmation) moved the count from 567 → 429.
+(Post-mid-session-push commits 6-16 were rebased onto `36d76ab2` for the wrap push — original SHAs were `35262911 / b0244869 / 1feaedc9 / d92c7c6a / 40115bad / 2e9d56ec / 1d161fd9` and after rebase advanced as `e451a37f / dca7d56e / 5bc1a2e4 / d2b05c4a / [iteration-HU + Q3 + README]`. The SHAs in the table are the IDs from before-rebase; consult `git log origin/main` for post-rebase IDs.)
 
-**Classification — file count of distinct first-fail-per-file (heuristic, by upstream first-error code):**
+**Tests at close:** **21,462 pass / 0 fail / 170 skip / 1 todo / 787 files** (+48 vs S129 baseline 21,414).
 
-| Bucket | Files | Top first-error codes | M6.7-blocker? |
-|---|---|---|---|
-| A — engine bodyChildren | 13 | engine-assert-drift (8) · E-EXPR-UNEXPECTED (4) · E-STMT-MISSING-SEMICOLON (1) | NO — M6.6 work |
-| B — within-node | 0 | (canary GREEN under allowlist) | NO |
-| C — codegen-shape (DOMINANT) | 68 | assert-drift (6) · E-TYPE-020 (6) · E-SCOPE-001 (5) · E-CTX-001 (5) · W-TRY-CATCH-IN-SCRML-SOURCE (4) · E-COMPONENT-020 (3) | YES |
-| D — parse-error | 37 | **E-EXPR-UNEXPECTED (23/37 = 62%)** · E-EXPR-UNCLOSED-BLOCK (4) · E-EXPR-UNCLOSED-BRACE (3) · E-STMT-MISSING-SEMICOLON (3) · E-UNQUOTED-DISPLAY-TEXT (2) | YES |
-| E — cascade downstream | 325 fails / ~82 files | (same upstream classes) | closes with upstream |
-| **Total fails** | **429** | **118 first-fails** (A+B+C+D real work) + 325 cascade | |
+**Banked methodology (2 new memory files):**
+- `feedback_show_code_to_reason_about.md` — load-bearing HU questions get worked code examples, not snippets. User direction at iteration HU-1 Q5.
+- `feedback_dd_brief_read_session_log.md` — DD briefs about prior-session ratifications READ the JSONL session log, not just carry-forward summaries. Two S130 precedents: iteration DD missed `@.` + Q3 RE-RATIFICATION caught the §4.14 spelling error.
 
-**Densest single-unit lever.** **D8 — E-EXPR-UNEXPECTED cluster (23 of 37 D-files).** A targeted D8 unit on this single error code could close ~62% of D-bucket. Triage genuine-vs-fixture FIRST (S128 D5 lesson — partly test-fixture-placeholder).
-
-**Caveats from the diagnostic (banked operational signal):**
-
-1. **Bun summary line missing under flip** — `promote-match.test.js` mocks `process.exit` via throw; under flip-default the native parser causes more failures in that file, and the cleanup path corrupts bun's final-summary printer. Counts derived from `(fail)` line count + at-anchors. Suite ran to completion (files alphabetically after promote-match had at-anchors). Not measurement-blocking. Worth filing as a small follow-on.
-2. **`engine-body-render.test.js` (20 fails — largest single file) borderline A vs C.** Classifier put it in C because filename doesn't match engine-name whitelist, but first error is `E-UNQUOTED-DISPLAY-TEXT`. If reclassified A, A=14/C=67 (cosmetic — doesn't change the dominant-lever picture).
-3. **A=13 vs S127's A=128 is NOT directly comparable.** S127 used M6.6-expectation-set; this agent's classifier used a strict engine-name whitelist. Use the trend signal (still A-class residual present + small), not the raw delta.
-4. **Within-node + parser-conformance-corpus + parser-conformance-canary all GREEN under flip** (allowlist-gated; budget held).
-5. **TodoMVC baseline noise** — first baseline run had 2 fails due to `benchmarks/todomvc/dist/` being gitignored + not built by `pretest`. Second run clean. Small recommendation: `pretest` could build todomvc dist explicitly; out-of-scope here.
-
-**File-level recovery aids** (live only on the throwaway worktree, gone post-cleanup): `/tmp/s129-baseline.log`, `/tmp/s129-baseline2.log`, `/tmp/s129-stderr-raw.log`, `/tmp/s129-classification.tsv`. The TSV had per-file bucket+first-err+fail-count. If a future dispatch needs the per-file granularity again, re-run the harness — cost is ~20-25 min.
-
----
-
-## S129 LANDING — D8 fixture-triage (read-only, no source touched, worktree auto-cleaned)
-
-**Method.** Read-only isolation:worktree diagnostic (`agent-a76940cb28037d8db`). For each of the 23 D8-candidate test files: extract scrml source(s) under test, probe both live (`compileScrml({parser:null})`) AND native (direct `nativeParseFile` / `parseProgram` — NOT compileScrml's escape-hatch path), classify file into GENUINE-PARSE-GAP / FIXTURE-PLACEHOLDER / CASCADE-ONLY / UNCERTAIN, and decompose GENUINE bucket into sub-forms with minimal reproducers.
-
-**Headline re-classification (the 23 files / 83 fails):**
-
-| Classification | Files | Notes |
-|---|---|---|
-| **GENUINE-PARSE-GAP** | **10** | 9 distinct sub-forms (D8a–D8i below) |
-| FIXTURE-PLACEHOLDER (metadata-tag) | 1 | unit-cc-write-at-body-top — native doesn't emit `_isUnitCCWrite` AST flag (parser-side metadata-tagging gap, not parse-gap) |
-| CASCADE-ONLY | 12 | Native PARSES but downstream-pass divergence (codegen-shape / enum-variant-table / attr-scope / struct-field-extraction / stdlib-gather). Re-routes to C-bucket. |
-| UNCERTAIN | 0 | — |
-
-**LOAD-BEARING CLASSIFIER-LABEL DRIFT confirmed** (pa.md Rule 4 / S128 ops learning #5 in action). Of the 10 GENUINE files, **7 had a DIFFERENT first-error than the classifier's "E-EXPR-UNEXPECTED" label** on re-probe (E-STMT-FUNCTION-BODY, E-STMT-MISSING-SEMICOLON, E-EXPR-PARAM, E-AWAIT-NOT-IN-SCRML, etc.). E-EXPR-UNEXPECTED was usually the SECOND cascading error, not the first. The S129 re-measure's classifier-buckets are HEURISTIC — re-probe codes are authoritative. (NB: this means D-bucket total of 37 from the re-measure may have similar drift in the 14 non-D8 files — worth treating that count as ±5.)
-
-**CASCADE BUCKET IS LOAD-BEARING TOO** — 12/23 files (52%) had no native parse-error at all; their fails are downstream-pass divergence (codegen-shape assertions, enum-variant table not populated by native, native `@x` not recognized as reactive-ref in attribute values, struct-field hoisting missing constraint-modifiers, stdlib gather re-entering host-fence parse). **These are NOT D-class** — they're C-class (codegen-shape) or M6.5-path-a adapter territory. The re-measure's D=37 should be re-categorized to D≈22-25 (after pulling CASCADE out) and C≈80-83 (after adding CASCADE in).
-
-### GENUINE sub-form decomposition (9 sub-forms — these ARE D-class)
-
-| Sub-form | Files | Re-probed fails | Shape | Density |
-|---|---|---|---|---|
-| **D8a — function param/return type annotation `(x: T) -> T`** | 4 (cross-file-components, fn-implicit-return, tilde-carry-forward, tilde-gaps-567) | ~30 | MULTI-FORM (param-type / return-arrow / fn-shorthand variants — splits into D8a-i / -ii / -iii) | **LARGEST** |
-| **D8b — `^{}` host-fence opaque-passthrough (no JS mode switch)** | 2 (compiler-api, stdlib-shim-resolution) | ~16 | SINGLE-FORM | **HIGHEST SINGLE-UNIT LEVERAGE** — closes stdlib/compiler family |
-| D8i — markup-literal as RHS `const x = <markup/>` at file-top | 1 (c22-bare-variant-codegen) | 5 | SINGLE-FORM | medium |
-| D8c — typed-reactive-decl `@x: T = value` | overlaps D8a | ≥1 | SINGLE-FORM; may auto-close with D8a | small (and composed) |
-| D8d — statement-boundary after `const x = [array]\n<y> = ...` | 1 (bug-5) | 1 | SINGLE-FORM | small |
-| D8e — failable return marker `function f() ! T { ... }` | 1 (form-for-stdlib-runtime) | 1 | SINGLE-FORM; minimal repro includes D8a | small |
-| D8f — scrml keyword as JS identifier (`fn`/`lin`/...) | 1 (arrow-object-literal-body subset) | 1-2 | SINGLE-FORM (keyword-list parity) | small |
-| D8g — structured `<match for=T on=expr>...</match>` statechild block | 1 (match-block-phase2) | 1 | SINGLE-FORM but HIGH-COMPLEXITY (S107 Phase 2 parity required) | small files / large work |
-| D8h — `when message.type == X { }` worker-message handler | 1 (program-documentary-attrs) | 1 | SINGLE-FORM | small |
-
-**Total GENUINE fails ≈ 56-58** (of the 83 originally bucketed as D8 by the heuristic classifier). The 25-27 remainder is the 12 CASCADE files + 1 FIXTURE-PLACEHOLDER.
-
-## S129 LANDING — D8a-i function return-type annotation FIX (PA-authored, S67 file-delta)
-
-**HEAD:** `7d2ef528` (was `63aff3b4` at S129 open).
-
-**Method.** Single isolation:worktree agent (`agent-acd69aa6d7bd2d5ec`). Phase-0 root-cause confirmation MANDATED + executed (caught PA hypothesis error: `TokenKind.Arrow` is `=>` not `->`; correct gate is `arrowFollows` predicate consuming `Minus`+`GreaterThan` per the sibling parseScrmlFunctionDecl pattern). SPEC §14 line 5590 anchored. Fix landed in BOTH `parse-stmt.js` AND `parse-stmt.scrml` mirror per S115. Coupled code+test commit per S113. Within-node canary spliced per-fixture per S128 ops #3 (no full-regen). S99 path-discipline: zero leaks; counter still at 15.
-
-**Landed (S67 file-delta — 2 PA-authored commits):**
-- **`6b6e3086`** fix(M6.7-D8a-i) — native `parseFunctionDecl` accepts `-> ReturnType` (parse-stmt.js +10 / parse-stmt.scrml +10 / new test m67-d8a-i-function-return-type.test.js +183L / +17 assertions across 4 blocks).
-- **`7d2ef528`** test(M6.7-D8a-i) — within-node allowlist splice (13 fixtures moved; net -16 lines: 75 removed / 59 added; counts moved in both directions per expected splice pattern — some UP where the parsed function-body now exposes more spans/fields, some DOWN where formerly-divergent fields now match).
-
-**Gates held:**
-- Pre-commit hook PASSED both commits **without `--no-verify`**. One transient: PA's main checkout was missing `@modelcontextprotocol/sdk` (S126 added the dep but main hadn't `bun install`ed since). Ran install + retried clean. **Banked: post-S126 every machine needs `bun install` before first commit since MCP-V0.C added the SDK dep.**
-- Post-commit hook PASSED both (full suite + TodoMVC validation green).
-- strict-pass EXACT held at **964** every step.
-- within-node canary post-splice: 1005 pass / 0 fail.
-- Full `bun test` on main post-landing: **21,414 pass / 0 fail / 170 skip / 1 todo / 784 files** (+21 vs S128 baseline 21,393).
-
-**4 D8a-i candidate files all PASS post-fix:** cross-file-components (13/13), fn-implicit-return-e2e (5/5), tilde-carry-forward (5/5), tilde-gaps-567 (11/11).
-
-**Worktree cleaned post-landing** per S83 standing rule. Main-only.
-
-**S129 banked operational signal (D8a-i Phase-0 catch):** PA hypotheses referencing token-kind names from memory MUST grep sibling call-sites before encoding into a dispatch brief. PA's `TokenKind.Arrow` suggestion would have silently failed (gate never fires — `->` is two tokens, not `Arrow` which is `=>`). The Phase-0 mandate caught it. Incident #6 of the D-class label-drift series; the rule "MANDATE Phase 0" continues to earn its keep.
+**S99 path-discipline counter:** holds at **15** — zero leaks across 4 worktree dispatches this session (Phase 2 Cluster A + B-code + Lifecycle Landing 1 + MCP V0.D).
 
 ---
 
----
+## S130 substantive arcs (full detail)
 
-## ⚠ S129 INFLECTION — BRAKES PULLED ON M6.7 PARSER-FIX WORK; GRAMMAR-CONSOLIDATION PLAN ENGAGED
+### Arc 1 — Phase 2 grammar-lockdown amendments (HU-2 ratifications)
 
-**Trigger.** PA's D8c framing offered "SPEC amendment + corpus migration" as Option 2 without naming the DIRECTION of the amendment or the migration TARGET. User correctly identified this as the exact ambiguity-trap that could drift the language into unusability if mis-interpreted. Same shape as the S94 designer-card buried-axis incident and the S88 corpus-ouroboros stated-intent-vs-corpus pattern.
+Closed 5 of the 5 HU-2 amendment clusters (C/D/E/B-doc/B-code + A). All ratified S129; landed S130.
 
-**User-voice S129 (verbatim, paraphrasable but record verbatim into next user-voice append):**
-> "the option here is incredibly ambigous. I could misinterpret and suddenly, the langauge that I care deeply about starts to drift into unusability. the reason for the long prose at this time is that I have been biding my time. I figured we would get flipped to the native parser, and they I would start to bring up the issues that I have. I think maybe, I tried to move too fast. We're hitting the brakes hard. we are going to form a plan to solidify the grammer of this language. we need a source of truth with no contradictions. that means spec and canonical examples. once the semantics and syntax is locked in with no ambigutiy. then we will re-evaluate further refactor."
->
-> "first, inventory, we need to know EVERY contradiction, ambiguity, and hole in the spec. once we have a spec that can be considered the un-equivical source of truth. we will likely to a heads up coding session or more. we will work-over every example, we will add examples as needed. once that is done, and we have confirmed that there is example code that corroborates the spec (100% coverage). then we will look at next steps."
+**Cluster sequence:** C (PIPELINE) → D (§39 schema) → E (§55.5 validity) → B-doc (SPEC text for Approach C cascade) → B-code (compiler-source cascade) → A (V-kill SPEC sweep).
 
-**Plan ratified S129:**
-- **Phase 1a — SPEC.md inventory** ✅ **LANDED `b3859770`.** 17 findings / 5 LB / 5 MED / 7 LOW. SPEC.md sequential walk; doc `docs/audits/spec-consolidation-inventory-2026-05-24.md` (577L).
-- **Phase 1b — canon-anchored corroboration + PIPELINE.md + SPEC re-pass** ✅ **LANDED `1ac874f2`.** 22 findings / 18 substantive / 11 LB / 5 MED / 2 LOW. Canon-anchored projection out to SPEC; doc `docs/audits/spec-corroboration-canons-pipeline-2026-05-24.md` (625L). Pre-commit hook PASSED both commits; worktrees cleaned per S83.
+**Banked observation re-validated 4x in HU-2 + extended 2x in Phase 2 execution (now 6x):** PIPELINE / SPEC prose drift from already-correct compiler behavior is the dominant Phase 2 work shape. Compiler is more spec-canonical than the documentation around it. Phase 2 amendment work is predominantly doc-text editing.
 
----
+**Cluster B-code subtlety surfaced:** brief assumed "zero callers" of `rewriteBunEval` per Q4 grep verification claim. Agent's mandatory Phase-0 root-cause confirmation found **7 active callers**. Site 1 DEFERRED with 3 prerequisite sub-tasks (META_BUILTINS purge → 5 meta-eval call drops → Pass 4 drop + test retire). [[feedback_cookbook_vs_empirical]] earning its keep.
 
-## S129 CROSS-AUDIT SYNTHESIS — phase-1a × phase-1b
+**Cluster A subtlety surfaced:** §50.3.4 `@x = computeValue()` example illustrates "assignment as expression" with NO surrounding declaration context. Would otherwise fire `E-STATE-UNDECLARED` under post-V-kill canon. Migrated to add prose note ("the `<x>` cell is assumed declared elsewhere — §6.1.5") — cleanest fix for an example whose narrative purpose IS the WRITE-expression semantics.
 
-**Total combined LOAD-BEARING findings: ~15** (5 from 1a + 11 from 1b − 1 strong-overlap on V-kill §7.5).
+### Arc 2 — README mid-session push (gating loosened + hero migration)
 
-### Strong corroboration (both audits independently surfaced the same surface)
+Two README touches this session:
 
-| Finding | 1a | 1b | Theme |
-|---|---|---|---|
-| SPEC §7.5 grammar `state-decl ::= '@' identifier ...` violates V-kill (S123) | F-001 (LB) | F-009 (LB) | V-kill compliance |
+1. **Mid-session push** (`3814c738`) — MCP + L22 type-derived family + V-kill enforcement strengthen + quality-wins callout. PUSHED public mid-session per "I want that public as soon as possible." User externally added `36d76ab2 Fix repetition in LLM Agent Integration section` on origin between then and the wrap-time push.
+2. **Wrap-pivot README** (`1d161fd9`) — user direction: *"I have decided to loose a prior mandate on the code examples in the readme. can we make the code, more scrml-y as of all of these decisions. and just be honest that they are NOMINAL examples and the compiler is in progress."*
+   - Gating note loosened to NOMINAL-honest framing
+   - Contact-book hero iteration migrated `${for/lift}` → `<each in=loadContacts()>` + `<empty>` + `@.` per S130 iteration HU-1
+   - `// gate: skip` mechanical prefixes dropped (3 sites; framing notes preserved)
 
-The V-kill §7.5 finding is **HIGH-CONFIDENCE** — independent anchors converged. This is also the surface that triggered the brakes-pull (D8c).
+**Carry-forward:** lifecycle annotation `(A to B)` demonstration in README is held for Lifecycle Landing 3 (PRIMER + kickstarter flagship per F-023) where prose explanation accompanies; not just example mutation.
 
-### Phase 1a unique (SPEC-anchored walk caught these; canon walk didn't)
+### Arc 3 — 3-DD parallel batch (Lifecycle + Iteration + MCP V0.D)
 
-- **§52.4.1 sibling V-kill at server-authority** (F-016, LB) — pairs with §7.5
-- **SPEC-wide ~30 worked example sites of pre-V-kill `@varname = init`** (F-008, LB) — mechanical example-migration corollary
-- **§22.4 `bun.eval()` list** (F-002, LB) — Approach C META_BUILTINS closure
-- **§30.2 `${}` interpolation Approach C subsumption** (F-003, LB, **GENUINE DESIGN QUESTION**) — `^{}` was closed by S114; `${}` was silent. Heads-up decides α (subsume) or β (carve-out).
-- **§3.1 Contexts table HOLE** (F-004, MED) — missing `^{}` / `_{}` / `!{}`
-- **§4.15 structural-elements registry incomplete** (F-011, MED)
-- **SPEC-INDEX.md channel placement stale** (F-012, MED) — flagged for Phase 1b
-- **Structural cleanup batch (LOW × 7):** F-005 TOC stops at §54 · F-006 §49 H1 · F-007 §53 H2 subsections · F-009 §7.2 cross-ref §29→§30 broken · F-014 §40 H4 numbered §39.x (11 sites) · F-015 §39 H4 mixed §38.x/§39.x · F-017 §52 deprecated `< TypeName>` space-form
+User direction: *"lets go on all of the prepped DDs"*. Dispatched 3 agents in parallel:
 
-### Phase 1b unique (canon-anchored projection caught these; SPEC walk didn't — including LB SPEC-internal contradictions Phase 1a missed)
+**Lifecycle DD** (`scrml-deep-dive`, no isolation per pa.md S88 exception): 919L deep-dive at `scrml-support/docs/deep-dives/lifecycle-annotation-extension-and-flagship-scope-2026-05-25.md`. **PA lean Approach C** — extend `(A to B)` to non-engine cell positions; carve out engine cells explicitly. 7 HU questions surfaced (4 with PA lean; 3 GENUINE DESIGN QUESTION). Critical compiler-gap finding: `type-system.ts:1444` resolves `(A -> B)` to type B but doesn't track per-access transition state — E-TYPE-001 fire promised in SPEC §14.3 line 7106 was unimplemented.
 
-- **SPEC §55.5 internal contradiction on validity-surface synthesis trigger** (F-018, LB) — PIPELINE + PRIMER pick opposite sides. **Phase 1a's sequential walk missed this entirely.**
-- **SPEC §39.12 E-SCHEMA-003 contradicts §39.2 + §40.8 worked examples** on `<schema>` placement (F-019, LB) — **Phase 1a missed this.**
-- **SPEC §6.11 stub uses singular `error: string`** vs auto-synth `errors: ValidationError[]` (F-005, MED) — **Phase 1a missed this.**
-- **Kickstarter v2 stale wave** — channels file-level F-001 LB · `@debounced(N)` retired keyword F-002 + F-022 LB · `<x> pinned` wrong shape F-013 LB · rule= arrow form F-004 · `<*>` example shorthand F-007 · `< db>` with `protect=` F-020 · missing no-async/await F-003
-- **PRIMER §6.2 code-default body bare prose** (F-014, LB) — S111 quoted-text model requires `"..."` display-text literal. **Recency-as-staleness:** PRIMER §6.2 was ADDED S122, one week after S111 ratification, and ALREADY drifted.
-- **PRIMER §2 Pillar 5b ("Reach discipline", S98) absent from SPEC** (F-010, MED) — direction is SPEC catches up to canon
-- **PIPELINE.md NR `deriveEngineVarName` strips "Machine" suffix** (F-021, LB) — SPEC §51.0.C explicit literal-no-strip + PRIMER B14 corroborates SPEC; PIPELINE is wrong
-- **PIPELINE Stage 7.6 RS status internal inconsistency** (F-011, MED) — "INACTIVE" at 4 sites vs A-2.7 says "wired"
-- **PIPELINE retired AST kinds in passive voice** (F-012, LOW)
+**Iteration DD** (`scrml-deep-dive`, no isolation): 1028L deep-dive at `scrml-support/docs/deep-dives/iteration-design-surface-2026-05-25.md`. NO PA lean (explicitly user-deliberative). 8 HU questions surfaced starting with designer-card-shaped Q1. 3 viable candidates (Approach A status-quo / B/D `<each>` element / E `each=` attribute). Designer-card option for veto kept. **DD MISSED key S129 ratifications** (`@.` sigil + `<ul for=>` parent attribute proposal + `$` body-mode proposal) — caught at iteration HU-1 Q2 surface time; banked as the DD-brief-authoring extension rule.
 
-### Heads-up agenda — proposed clustering for Phase 2 work
+**MCP V0.D impl** (`scrml-js-codegen-engineer`, isolation:worktree with full F4+S99+S126 disciplines): `<program mcp>` attribute wiring + auto-install per SCOPING §3.D. 7 files / +638 LOC / +14 tests / 0 regressions. Build-mode detection finding: no canonical dev-vs-production hook in compiler today; implemented as RUNTIME NODE_ENV gate in generated `_server.js` per pa.md Rule 3 (minimum-viable correct); revisit when §58 Build Story implementation lands.
 
-Cluster A (V-kill compliance — mechanical, 4 PRs of work):
-1. SPEC §7.5 grammar (1a F-001 / 1b F-009) — STRONG CORROBORATION
-2. SPEC §52.4.1 server-authority grammar (1a F-016)
-3. SPEC-wide ~30 example migrations (1a F-008)
-4. Kickstarter `<x> pinned` shape (1b F-013) — sibling adopter-doc fix
+**MCP V0 status now: A+B+C+D shipped; E (E2E + adopter docs + fixture multi-page app) queued ~10-12h per SCOPING §3.E.**
 
-Cluster B (Approach C `bun.eval()` — 1 design decision + cascade):
-1. **§30.2 `${}` Approach C subsumption** (1a F-003) — **GENUINE DESIGN QUESTION; everything downstream depends on this**
-2. §22.4 list (1a F-002)
-3. §7.2 list (1a F-010)
-Once F-003 is decided, B2 + B3 mechanical-fix.
+### Arc 4 — Lifecycle HU-1 (all 7 questions ratified; 3-landing scope)
 
-Cluster C (validity surface — SPEC-internal + canon drift):
-1. SPEC §55.5 synthesis trigger contradiction (1b F-018)
-2. SPEC §6.11 stub `error` vs `errors[]` (1b F-005)
+| Q | Ratified |
+|---|---|
+| Q1 (cluster direction) | c — extend non-engine; carve out engine |
+| Q2 (sequencing) | b — fire first (Landing 1), then extend (Landing 2) |
+| Q3 (fn-return lifecycle) | a — extend (transition-marker mechanism Landing 2 sub-Q) |
+| Q4 (schema-field placement) | a — §14.X canonical; §39 cross-refs |
+| Q5 (engine-cell rejection code) | a — new `E-TYPE-LIFECYCLE-ON-ENGINE-CELL` |
+| Q6 (SPEC section placement) | a — new §14.X "Lifecycle Annotation" subsection |
+| Q7 (channel-cell extension) | a — extend (channel cells in Approach C scope) |
 
-Cluster D (schema/program shape):
-1. SPEC §39.12 E-SCHEMA-003 vs §39.2 + §40.8 (1b F-019) — heads-up decides which direction `<schema>` placement goes
+Phase 2 scope = 3 landings: Landing 1 (E-TYPE-001 fire — SHIPPED) → Landing 2 (Approach C extension SPEC) → Landing 3 (PRIMER + kickstarter flagship per F-023).
 
-Cluster E (quoted-text model + bodies):
-1. PRIMER §6.2 code-default bare-prose drift (1b F-014)
-2. §3.1 Contexts table HOLE (1a F-004)
-3. §40.8 default-logic body-mode silent in canons (1b F-008)
+### Arc 5 — Iteration HU-1 (all 8 questions ratified; 5-landing scope; user spit-ball adopted)
 
-Cluster F (engine surface):
-1. PIPELINE NR `deriveEngineVarName` (1b F-021)
-2. SPEC §51.0.D cross-file mount clarity (1b F-016)
-3. Kickstarter rule= arrow form scattered (1b F-004)
+| Q | Ratified |
+|---|---|
+| Q1 (designer-card) | a — ship structural-markup-first surface |
+| Q2 (element vs attribute) | a — element `<each>` (S129 pre-ratification confirmed) |
+| Q3 (`:`-shorthand body) | RE-RATIFIED — **actual §4.14 form `<li : @.name>`** (caught previous-PA spelling error) |
+| Q4 (empty-state) | a — `<empty>` sub-element |
+| Q5 (key= requirement) | d — inferred + W-EACH-KEY-001 lint (post-worked-example surface) |
+| Q6 (binding + index) | **b+** — user spit-ball — `<each in=>` + `<each of=N>` two constructs sharing same machinery |
+| Q7 (promotion ladder) | a — Tier 0 → Tier 1 + CLI + eventual sunset |
+| Q8 (kickstarter amend) | a — positive-statement rewrite with design-evolution story |
 
-Cluster G (kickstarter wholesale refresh — multi-finding adopter doc):
-1. `@debounced(N)` retired (1b F-002 + F-022)
-2. Channels file-level stale (1b F-001)
-3. `<*>` example shorthand not real (1b F-007)
-4. `< db>` `protect=` (1b F-020)
-5. Missing no-async/await rule (1b F-003)
-6. Add Pillar 5b mention (or remove from PRIMER) (1b F-010)
+**User spit-ball ratified:** `<each of=N>` count-iteration sibling to `<each in=@items>` collection-iteration. Semantic rule: `@.` is always "the current iteration value" — item in `in=`, index in `of=`. Avoids the `Array.from({length: N})` workaround for count-iteration.
 
-Cluster H (structural cleanup batch — sed-style mechanical):
-1. TOC + heading-level + renumber-leftover sweep (1a F-005/F-006/F-007/F-009/F-014/F-015/F-017)
-2. SPEC-INDEX channel placement (1a F-012)
-3. §4.15 structural-elements registry consolidation (1a F-011)
-4. PIPELINE retired AST kinds passive-voice (1b F-012)
+**Phase 2 scope = 5 landings:**
+1. Compiler-source impl (isolation:worktree dispatch)
+2. SPEC amendment (NEW §17.X + §17.4 marked Tier 0 + §56 promotion extended)
+3. `bun scrml promote --each` CLI subcommand
+4. PRIMER + kickstarter F-NEW catch-up
+5. Corpus migration (113 sites; gradual via CLI; W-EACH-PROMOTABLE info → warning → error → parser-strip sunset)
 
-Cluster I (PIPELINE consistency):
-1. PIPELINE Stage 7.6 RS status (1b F-011)
-2. PIPELINE §55.5 synthesis trigger (1b F-018 — pairs with Cluster C1)
+### Arc 6 — Q3 RE-RATIFICATION (the catch)
 
-### Banked S129 cross-audit observations
+User flagged previous-PA's S129 `<li>:@.name</>` claim: *"the only thing Im hazy about is the colon, the last pa referenced the syntax as if it was ratified but it reads like type anotation to me."*
 
-- **Phase 1a's sequential walk missed 3 SPEC-internal contradictions Phase 1b caught** (F-005, F-018, F-019). Sequential reading creates attention budget that skips over internal cross-section contradictions if both sides are in the same "currently-reading" frame. The canon-anchored projection naturally cross-references because it consults SPEC at multiple sites per claim.
-- **Phase 1b's canon-anchor naturally missed structural drift inside SPEC** (TOC, heading levels, renumber leftovers) — 7 LOW + 2 MED. Sequential walk catches these mechanically.
-- **The parallel-fire was clearly worth the cost.** Combined coverage > either alone.
-- **Recency-as-staleness pattern** banked: PRIMER §6.2 was added S122, drifted from SPEC §4.18 (S111) ONE WEEK later. New entries to canon docs are NOT automatically aligned to recent SPEC ratifications. Hand-authored canon entries need a "what ratifications must I conform to?" pre-write checklist.
-- **Phase 2 — heads-up coding session(s).** User + PA work through findings item-by-item, ratify each, produce SPEC amendments + canonical-example additions. Iterative; may span multiple sessions.
-- **Phase 3 — 100% example coverage.** Every SPEC section corroborated by canonical example code (samples/ + examples/). Add/migrate as needed.
-- **Phase 4 — lock + re-evaluate.** Confirm SPEC = unequivocal source of truth. Then evaluate next steps (M6.7 D-class likely resumes with the consolidated SPEC as the GENUINE/LEGACY arbiter).
+PA pulled SPEC §4.14 to verify. The previous PA at S129 had conflated three ideas (user's `$` body-mode spit-ball + actual §4.14 `:`-shorthand + a new body-prefix `:` shape) and written `<li>:@.name</>` claiming "already ratified per §4.14." The shape written wasn't §4.14 (which puts `:` INSIDE the opener with mandatory whitespace, NO closer).
 
-**Standing pause until Phase 4 complete:**
-- M6.7 D-class parser-fix dispatches PAUSED. No D8c / D8e / D8f / D8g / D8h / D8i / D8a-ii / D8a-iii dispatches until grammar lockdown lands.
-- D8a-i (commits `6b6e3086` + `7d2ef528`) stays landed — pure parser-completeness, didn't touch any SPEC-ambiguous surface.
-- Flip-harness re-measure & D8 triage findings preserved in `/tmp/s129-*.{log,tsv}` + this hand-off (audit doc consumes them as Phase-1a cross-evidence).
+**RE-RATIFIED to actual §4.14 form `<li : @.name>`.** Phase 2 scope SIMPLIFIED — Landing 1 leverages existing §4.14 mechanism (no new body-shorthand grammar needed); Landing 2 SPEC amendment just adds `<each>` body to §4.14's "loci where `:`-shorthand is legal" list per §4.14 line 983.
 
-**Banked S129 methodology rule (load-bearing for next-session PA + future dispatches):**
-> When PA proposes a SPEC amendment + corpus migration, both the **direction of the amendment** (which SPEC text changes to what) and the **migration target** (which form replaces the deprecated one) MUST be named explicitly. No "amendment + migration" framing without those two specifics. Same family as S94 (designer-card framing — surface the load-bearing axis, don't bury it under a flat list) and S88 (corpus-ouroboros — stated intent vs corpus is migration, not deliberation). The S129 D8c framing was the precedent: "SPEC amendment + corpus migration" with no direction named could be read as either (α) consolidate to V5-strict (right answer) or (β) re-permit legacy `@x: T = v` and add a contradiction (drift). The user pulled the brakes.
+**Banked NEW memory rule** [[feedback_dd_brief_read_session_log]] — even within-session PA-recall claims need SPEC verification.
 
-**Banked S129 methodology rule (triage cross-check discipline):**
-> Triage classifier "GENUINE-PARSE-GAP" labels MUST be PA-SPEC-cross-checked before any fix dispatch. The triage agent reads source + probes live; it does NOT cross-check against ratification order. Two examples this session — D8b `^{}` host-fence (live accepts legacy `^{ await import(...) }`; SPEC §22.12 ratifies scrml-only-inside-`^{}` per S114 Approach C; native correctly enforces) and D8c `@x: T = v` typed reactive-decl (live accepts; SPEC §14 line 5564 grammar production says it's a decl; §6.1 V5-strict + §34 V-kill (S123) ratify `<x>` as the structural-decl form and `@x = v` as a write to a pre-declared cell; native correctly enforces V-kill). Pattern: live often tolerates both canonical AND legacy; the native parser is the canonical-enforcer; "live accepts / native rejects" can mean (a) real parser-completeness gap OR (b) native correctly enforcing post-ratification SPEC against a legacy form. Disambiguation requires SPEC + ratification + canonical-canon (kickstarter/PRIMER) cross-check, NOT just "live-accepts."
+### Arc 7 — dev.to publication checklist + retraction stamp
 
----
+User direction: *"I have also let the forward facing articles on dev.to get really stale, I believe we have already scoped the changes and retractions (living compiler) I want to get that done."*
 
-### NEXT-DECISION — surfaced to USER (deprecated — superseded by S129 grammar-consolidation plan above)
+Verified in-repo state: 12 dev.to articles all have S115 audit-recommended fixes applied (Living Compiler links scrubbed; version-currency messaging-language; mutability-contracts FIX-WITH-ANNOTATION; tier-ladder status banner clean). Retraction draft at `docs/articles/living-compiler-retraction-devto-2026-05-21.md` is publication-ready.
 
-**S129 D-class progress (now PAUSED):** S128 close baseline 429 fails-under-flip → D8a-i closes ~30 → est ~399 remaining. M6.7 D-class **paused** pending grammar lockdown.
+Built `docs/articles/dev-to-publish-checklist-2026-05-25.md` (14 platform actions: STEP 1 publish retraction → STEP 2 banner-prepend on original → STEP 3 paste-replace bodies for 12 articles). Surfaced retraction draft for final read-and-stamp; user stamped (`d` "Stamped — publish as-is"). Adopter platform actions are now in user's hands.
 
-**Recommended ordering (pa.md Rule 3 right-answer, density-per-effort) — UPDATED post-D8a-i landing:**
+### Arc 8 — known-gaps.md comprehensive refresh
 
-1. ~~**D8b — `^{}` host-fence opaque-passthrough.**~~ **DEFERRED per S129 reclassification — see banked lesson below.** Not a parser fix; SPEC §22.12 + §21.3.1 ratify scrml-only inside `^{}`. Stdlib migration to `import:host` (~10-20h multi-stage) → post-M6.
-2. ~~**D8a-i — function param type annotation.**~~ **DONE S129** (`6b6e3086` + `7d2ef528`).
-3. **NEXT: D8c — typed reactive-decl `@x: T = v`** (per triage, may have AUTO-CLOSED with D8a-i since D8c's repro re-uses param-type machinery; needs re-probe to confirm). If still failing, small fix similar to D8a-i shape. ~1 fail. Phase-0 SPEC-cross-check needed.
-4. **OR D8e — failable return marker `function f() ! T {...}`.** 1 fail. Small fix; repro included D8a annotation (which now parses), so D8e may surface as a clean residual.
-5. **OR D8i — markup-literal RHS `const x = <markup/>`.** 5 fails, SINGLE-FORM. Probably more involved (RHS-of-assignment expression-parser extension to recognize markup-literal).
-3. **D8i — markup-literal RHS `const x = <markup/>`.** 5 fails, SINGLE-FORM.
-4. **Singleton trickle (D8d / D8e / D8f / D8h).** 1-2 fails each, SINGLE-FORM each.
-5. **DEFER D8g — match-block structured statechild.** SINGLE-FILE (1 fail) but HIGH-COMPLEXITY work (S107 Phase 2 parity). Wrong size for a quick D-class unit — file as larger structural sub-project.
-6. **Re-route the 12 CASCADE files out of D-class** — they're C-bucket / M6.5-path-a adapter work, separate concern.
-7. **File unit-cc-write-at-body-top as parser-side metadata-tagging gap** (not D-class; native parser doesn't emit AST metadata flags symbol-table.ts PASS-N reads).
+User flagged: *"I don't think the known-gaps.md is a complete and accurate reference."* Confirmed — last updated S109 (2026-05-19, ~7 sessions stale); only tracked 2 open gaps (Bug 1 Tailwind residuals + Bug 4 bare-`/`).
 
-**Banked operational learning (carry forward):**
-- (S129 finding) **Classifier-label drift confirmed** on 7 of 10 files — E-EXPR-UNEXPECTED was usually the second cascading error, not the first. Heuristic bucketing is necessary-but-not-sufficient; re-probe with direct entry-points before any "D-class fix" dispatch.
-- (S129 finding) **CASCADE-bucket sizing matters** — 12/23 files (52%) had no parse error at all under native. Pure-parse-gap units must be triaged out of the headline D-count or the count is misleading.
-- (S129 finding — D8b PA Phase-0 catch) **Triage classifier doesn't cross-check against SPEC.** D8b ("`^{}` host-fence opaque-passthrough", 16 fails) was classified GENUINE-PARSE-GAP by the triage agent because live PARSES (BS extracts `^{}` body, Acorn handles `await import`). But SPEC §22.12 + §21.3.1 + S114 ratification ("Approach C") are unambiguous: **`^{}` body MUST NOT contain dynamic `await import(...)` calls** — that path is closed by M6 (joint retirement of BS + Acorn + BPP + JS-parser-in-`^{}`-body). The 14 stdlib/compiler/*.scrml files using the legacy `^{ await import(...) }` pattern are MIGRATION TARGETS (move to `import:host` per §21.3.1), NOT parser-fix targets. Native's rejection of `await` inside `^{}` is *correct enforcement*. **`import:host` is SPEC-only — zero references in `compiler/native-parser/` or `compiler/src/`; not implemented anywhere.** So Option-α "implement `import:host` + migrate stdlib" is a multi-stage ~10-20h work item (wrong size for a D8 sub-form unit). PA recommendation: **defer D8b entirely, pivot to D8a-i**. Pa.md Rule 3 + Rule 4 + the "stated intent vs corpus → migration not deliberation" S88 memory ([[feedback_stated_intent_vs_corpus_migration]]) all converge on this.
-- (S129 banked lesson) **Every GENUINE classification from the triage agent MUST be SPEC-cross-checked by PA before dispatch.** The agent reads source + probes — it doesn't read SPEC for each sub-form's design intent. PA must apply the same Phase-0-root-cause-confirmation discipline that mandated against re-measure bucket labels. D8a (function param/return type annotation) was independently SPEC-verified as canonical per §14 + §48 — that one IS genuine. D8c-i (the others) need spot-checks before dispatch.
-
----
-
-## Carry-forward state (unchanged from S128 CLOSE — see hand-off-131 §"Pre-existing carry-forwards" for the full list)
-
-compiler-managed-async gap (A9-class) · 6nz-V (MED, GENUINE) · GITI-015 · 6nz-U / 6nz-L/T · MCP-V0.D/E · build-story arc (M6-gated) · V-kill READ fire · §29 vanilla-interop · Generator policy (S114 open) · dev.to articles · Living Compiler retraction · `~snapshot` · adopter corpus migration · **versioning drift pkg.json 0.6.0 vs changelog** (reconcile before any tag) · v0.7 cut (gated on M6.7 flip + M6.8 deletion).
-
----
-
-## Operational learnings carried from S128 (apply this session)
-
-1. `compileScrml(parser:scrml-native)` MASKS native parse failures (escape-hatch) — use direct `parseProgram` (JS bodies) / `nativeParseFile` (full .scrml) and inspect `.diagnostics`/`.errors`. [[feedback_native_parse_probe_method]]
-2. Completed `isolation:worktree` agent DETERMINISTICALLY leaves PA Bash CWD in its worktree — at start of EVERY post-completion landing sequence: `cd /home/bryan-maclee/scrmlMaster/scrmlTS` + verify `pwd`, AND `git -C "$M"` for all git ops. [[feedback_cwd_slip_after_worktree_dispatch]]
-3. The within-node regen LOOP has cross-file state/order artifacts — the per-fixture CANARY failure-list is ground truth. Splice ONLY moved fixtures. NEVER full-regen. NEVER trust a sequential regen loop's changed-set.
-4. Parallel same-file landings (e.g., two units both touching `parse-stmt.js`) need `git diff base..branch -- file | git apply`, NOT wholesale `git checkout <branch> -- file` (the second wholesale checkout REVERTS the first). Verify both fixes coexist via grep after.
-5. **D-class bucket labels keep being wrong/imprecise** (5 in a row at S128: b.3/D1/C1/C2/D4 empty; D6 narrowing wrong; D7 was KwGiven not E-EXPR-PARAM). Every brief's Phase-0 root-cause confirmation caught it each time. KEEP MANDATING IT.
+Comprehensive refresh: 76 → 246 LOC. New structure: at-a-glance counts (HIGH 4 / MED 7 / LOW 4 / Nominal 7) + per-gap workarounds + reproducer pointers + §7 rotation section for S110-S130 closures. Now reflects:
+- E-TYPE-001 lifecycle fire (in-impl S130 — rotated to closed after Lifecycle Landing 1 shipped)
+- compiler-managed-async A9-class gap (deferred)
+- §29 vanilla-interop SPEC drift (open user decision)
+- 6nz-V (GENUINE)
+- Bug 1 Tailwind preflight-blocked residuals
+- V-kill READ-side fire (deferred)
+- E-SCHEMA-003 enforcement (spec'd no-fire)
+- MCP V0 partial-impl + 3 deferred items
+- 7 Nominal sections (Build Story §58, import:host, quoted-text fire, _{}, WASM sigils, sidecars, RemoteData)
+- All recent bug closures rotated through §7
 
 ---
 
@@ -310,50 +164,74 @@ compiler-managed-async gap (A9-class) · 6nz-V (MED, GENUINE) · GITI-015 · 6nz
 
 | Item | Value |
 |---|---|
-| HEAD at S129 CLOSE | `1b8317bd` (Q8 close) + chore(s129-close) wrap commit |
+| HEAD | (will advance through wrap-commit chain) |
 | pkg.json | 0.6.0 (no tag) |
-| Full test (S129 CLOSE) | **21,414 pass / 0 fail / 170 skip / 1 todo / 784 files** (+21 vs S128 baseline; D8a-i +17 tests + within-node splice +4) |
-| strict-pass canary | EXACT 964 (held across all D8a-i + audit landings) |
-| within-node canary | 1005 pass / 0 fail (allowlist held + spliced 13 fixtures on D8a-i landing) |
-| Worktrees | main only (all 4 dispatch worktrees cleaned post-landing per S83) |
-| scrmlTS origin | **unpushed** — 10+ commits ahead from S129 work |
-| scrml-support origin | **unpushed** — user-voice S129 appended (multiple times throughout session) |
-| Inbox | empty (no incoming messages this session) |
+| Tests (S130 CLOSE) | **21,462 pass / 0 fail / 170 skip / 1 todo / 787 files** (+48 from S129 baseline 21,414) |
+| Worktrees | main only |
+| Working tree | (after wrap-commits) clean |
+| scrmlTS push state | PUSHED (or will be by wrap-end) |
+| scrml-support push state | PUSHED at wrap (was 3 commits ahead pre-wrap; user-voice S130 append + 2 DD outputs landed at wrap) |
 | Hooks | configuration B (pre-commit + post-commit + pre-push); pre-commit PASSED on every commit |
-| S99 path-discipline counter | 15 (zero new agent leaks across 4 dispatches: flip-harness re-measure + D8 triage + D8a-i fix + 3 audits) |
-| Push state | **NOT PUSHED** — user said "wrap" without push verb; default-no-push per pa.md |
+| S99 path-discipline counter | **15** (zero new leaks across 4 worktree dispatches this session) |
+
+## Open carry-forward (sequenced by priority)
+
+### Highest priority (ready to dispatch)
+
+1. **Lifecycle Landing 2** — Approach C extension SPEC + tests. NEW §14.X subsection covering Shape 1 cells + fn params + fn return + schema fields + channel cells; `->` → `to` glyph migration per S129 F-024 (folds in); `E-TYPE-LIFECYCLE-ON-ENGINE-CELL` engine-cell rejection diagnostic; §39 cross-ref to §14.X with SQL-shape addendum; worked examples per extension position. Open Phase 2 sub-Q: fn-return transition-marker mechanism (α/β/γ/δ candidates).
+2. **Iteration Landing 1** — compiler-source impl per iteration HU-1 ratifications. `<each>` element + `@.` sigil + `<empty>` + `key=` inference + `<each of=N>` count form + `as name` override + `:`-shorthand body composition (leverages existing §4.14 — just adds `<each>` to locus list per Q3 RE-RATIFICATION) + W-EACH-PROMOTABLE + W-EACH-KEY-001 + new §34 catalog rows.
+3. **MCP V0.E** — E2E + adopter docs + fixture multi-page app per SCOPING §3.E (~10-12h).
+4. **Phase 2 Cluster B-code Site 1** retirement sub-task arc (META_BUILTINS purge → 5 meta-eval call drops → Pass 4 drop + bun-eval.test.js retire).
+
+### High priority (ratification-ready; dispatch after above)
+
+5. **Lifecycle Landing 3** — PRIMER + kickstarter flagship section per F-023 (after Landing 2 prose stable). Substantial doc-authoring; ~25-40h spread across sessions.
+6. **Iteration Landing 2** — SPEC amendment (NEW §17.X + §17.4 marked Tier 0 + §56 promotion extended).
+7. **Iteration Landing 3** — `bun scrml promote --each` CLI subcommand.
+8. **Iteration Landing 4** — PRIMER + kickstarter F-NEW catch-up.
+9. **Iteration Landing 5** — Corpus migration (113 sites; gradual via CLI).
+
+### Carry-forward (deferred / needs user direction)
+
+- **dev.to publication platform actions** — user holds the 14-action checklist; PA awaits post-completion note
+- **Lifecycle HU follow-on** — Q3 fn-return transition-marker mechanism (α/β/γ/δ candidates from Landing 2 design surface)
+- **state-dynamics-design DD other open Qs** (status: active since 2026-04-08; beyond the extension question Lifecycle HU-1 closed)
+- **L19 multi-statement-handler relaxation** — HU follow-on; sibling iteration-adjacent
+- **`$(param){...}` fn shorthand** — separate logic-context-thinness; not iteration. Carry forward for a future HU on logic-context density.
+- **`<if>` half of "no markup tags" kickstarter rule** — not amended in iteration HU-1
+- **Phase 2 Cluster A Q5.B sub-questions** (server+pinned composition / server+validators firing point / Tier-1 vs Tier-2 doc overlap) — HU-3
+- **Phase 1c 8-cluster catch-up** (H-O — 26 GAP findings F-025-F-055 from S129; 11 LB)
+- **E-SCHEMA-003 enforcement** (compiler-side; spec'd no-fire per Q7 HU-2 follow-on)
+- **versioning drift** reconcile (pkg.json 0.6.0 vs changelog) before any tag cut
+- **§29 vanilla-interop** open user decision (retire vs implement)
+- **`~snapshot`** raw-sigil design
+- **Generator policy** (S114 open)
+- **6nz-V** (GENUINE class:NAME-on-for-lift runtime path; MED)
+- **GITI-015** (LOW)
+- **6nz-U / 6nz-L/T** (queued)
+- **Build Story §58** (Nominal; M6-gated; ~90-200h impl arc)
+- **`import:host` §21.3.1** (Nominal; self-host bootstrap migration territory)
+- **Quoted-text §4.18 compiler fire** (Nominal; Waves 2+ with native parser)
+- **Compiler-managed-async A9-class gap** (deferred per S126)
+
+## Operational learnings carried from S130 (apply next session)
+
+1. **Read .claude session JSONL for verbatim user proposals when authoring DD briefs about prior-session ratifications.** Carry-forwards are summaries; brief-authoring abstracts past verbatim shapes. [[feedback_dd_brief_read_session_log]] — banked S130.
+2. **Surface worked code examples (multi-line realistic adopter scenarios) for load-bearing HU questions, not tiny syntax snippets.** User direction at iteration HU-1 Q5: *"show me this in use before I decide."* [[feedback_show_code_to_reason_about]] — banked S130.
+3. **Within-session PA-recall claims of "X is ratified per Y" need SPEC verification before encoding into downstream amendment work.** S129 PA's "ratified per §4.14" claim about `<li>:@.name</>` was spelling-wrong; my S130 DD brief inherited the claim without SPEC-cross-checking. Rule 4 extends to within-session derived-recall.
+4. **Phase 2 amendment work is predominantly doc-text editing, not code-change.** 6x re-validated (HU-2 Q5/Q6/Q7/Q8 + Phase 2 Cluster A + B-code SPEC half). PIPELINE / SPEC prose drift from already-correct compiler behavior is the dominant work shape.
+5. **3-agent parallel-dispatch with file-disjoint scope works cleanly.** S130 ran 3 agents in parallel (Lifecycle DD + Iteration DD + MCP V0.D impl) + later 3 more (Cluster A + Cluster B-code + Lifecycle Landing 1). All landed clean; zero path-discipline leaks; one agent (B-code) correctly Phase-0-STOP'd on brief premise error. Pattern proven for high-throughput sessions.
 
 ## NEXT-SESSION PRIORITY
 
-The grammar-lockdown is in Phase 2. The HU-2 batch closed all 6 ratification questions; **Phase 2 amendment work is the next actionable wave** — predominantly doc-text editing (per the banked observation that PIPELINE/SPEC drift from compiler is the dominant work shape). Specifically:
+1. **Lifecycle Landing 2** (Approach C extension SPEC + tests) — naturally next after Landing 1 ship
+2. **Iteration Landing 1** (compiler-source impl) — file-disjoint with Lifecycle Landing 2; can parallel-dispatch
+3. **MCP V0.E** (E2E + adopter docs + fixture multi-page app) — can parallel-dispatch with both above
+4. **Phase 2 Cluster B-code Site 1** retirement sub-task arc — file-disjoint with all above; smaller scope
+5. Wrap items: dev.to platform action user-completion-note pickup (if user has executed); Lifecycle Landing 3 + Iteration Landings 2/3/4/5 sequenced after their predecessors
 
-1. **Phase 2 amendment dispatches** for the 6 LOAD-BEARING HU-2 ratifications: §7.5 grammar relocate to §6.1 + V-kill structural form + ~30 worked-example sweep + §52.4.1 grammar retirement + §52 examples migration; §22.4 list amendment + §30 retirement + §7.2 list amendment + §22.12 explicit clause + 8-site source-cascade cleanup; PIPELINE deriveEngineVarName fix; §39 prose update + E-SCHEMA-003 catalog row; §55.5 prose clarification + PIPELINE Stage 6.7 invariants extension.
-2. **PRIMER + kickstarter F-023 catch-up** — flagship lifecycle annotation section + Phase 1c 8-cluster (H-O) catch-up. Substantial doc-authoring work (~25-40h spread across multiple sessions).
-3. **HU-3 design questions queued:** iteration design surface (8-14h deep-dive + 2-3 HU sub-sessions); L19 multi-statement-handler relaxation; state-dynamics-design DD extension question; Q5.B sub-questions (server+pinned / server+validators / Tier1 vs Tier2 doc overlap).
-4. **Compiler-implementation follow-ons:** E-SCHEMA-003 enforcement (currently no fire site).
-5. **Versioning drift** reconcile (pkg.json 0.6.0 vs changelog) before any tag cut.
-
-## Carry-forward state — combined HU-3+ queue + S128 pre-existing
-
-**S129 new carry-forwards:**
-- Iteration deep-dive (`<each>` + `@` bare + `:`-shorthand template body + multi-child + empty + key + composition; 8-14h deep-dive + 2-3 HU sub-sessions)
-- L19 multi-statement-handler relaxation (HU follow-on, small)
-- state-dynamics-design DD `status: active` extension question (does `(A to B)` extend to enum-state-cells?)
-- Q5.B sub-questions (server+pinned composition, server+validators firing point, Tier 1 vs Tier 2 doc overlap)
-- Phase 1c 8-cluster catch-up (H-O — 26 GAP findings F-025-F-055; 11 LB)
-- F-003 source-cascade Phase 2 amendment work (8 compiler-source sites)
-- E-SCHEMA-003 compiler-side enforcement (no current fire site)
-- versioning drift reconcile (pkg.json 0.6.0 vs changelog)
-
-**Pre-existing from S128 (still open):**
-compiler-managed-async gap (A9-class transitive async-coloring; dashboard cluster) · 6nz-V (MED, GENUINE runtime class:NAME-on-for-lift) · GITI-015 (LOW) · 6nz-U / 6nz-L/T · MCP-V0.D/E · build-story arc (6 open Qs, M6-gated) · V-kill READ-side fire · §29 vanilla-interop · Generator policy (S114 open) · dev.to articles · Living Compiler retraction · `~snapshot` raw-sigil · adopter corpus migration · v0.7 cut (gated on M6.7 flip + M6.8 deletion).
-
-**M6.7 D-class progress paused at S129 brakes-pull:** S128 close 429 fails-under-flip → D8a-i closed ~30 → est ~399 remaining. M6.7 D-class parser-fix dispatches paused; D-class resumes post-grammar-lockdown with the consolidated SPEC as the GENUINE/LEGACY arbiter.
-
-## v0.7 critical path (post-S129)
-
-Phase 2 amendment work (HU-2 ratifications + PRIMER/kickstarter catch-up + Phase 1c clusters; ~25-40h spread across sessions) → HU-3+ design ratifications (iteration + L19 + state-dynamics extension + Q5.B sub-Qs) → resume M6.7 D-class with consolidated SPEC → flip-harness re-measure → flip decision (USER) → M6.6 + SOAK + M6.8 deletion → v0.7 cut.
+3-4 parallel dispatch candidates exist (1+2+3+4 are all file-disjoint). Same momentum-rhythm as S130 mid-session.
 
 ## Tags
 
-#session-129 #CLOSE #STOP-validated #grammar-consolidation #3-audits-landed #HU-2-batch-closed #6-LB-findings-ratified #lifecycle-annotation-flagship #V-kill-cluster #cohesion-and-falls-under-fingers #to-contextual-keyword #D8a-i-parser-fix #21414-tests #not-pushed #intentional-and-exacting
+#session-130 #CLOSE #marathon #phase-2-amendment-arc-complete #3-dd-parallel-batch-landed #lifecycle-landing-1-ships-e-type-001-fire #iteration-HU-1-closed #user-spit-ball-each-of-N-ratified #Q3-RE-RATIFICATION #readme-nominal-framing #known-gaps-refresh #devto-checklist-published #21462-tests #pushed

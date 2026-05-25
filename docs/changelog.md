@@ -2,7 +2,95 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-25 **S129 CLOSE**). Full `bun run test` **21,414 pass / 0 fail / 170 skip / 1 todo across 784 files**; pre-commit gate (unit + integration + conformance) clean on every commit. Native-parser canary strict-pass **1000/1001 (EXACT 964)** — held through the D8a-i parser-fix landing. Prior baseline (S128 CLOSE): 21,393 pass.
+Current baseline (2026-05-25 **S130 CLOSE**). Full `bun run test` **21,462 pass / 0 fail / 170 skip / 1 todo across 787 files**; pre-commit gate (unit + integration + conformance) clean on every commit. Prior baseline (S129 CLOSE): 21,414 pass.
+
+### 2026-05-25 (S130 CLOSE — Phase 2 amendment arc complete + 3-DD parallel batch + Lifecycle Landing 1 ships E-TYPE-001 fire + Iteration HU-1 closed + Q3 RE-RATIFICATION + README nominal-framing)
+
+A marathon session under the S129 grammar-lockdown carry-forward. Started "Phase 2 amendment work"; expanded into a multi-arc work-block covering Phase 2 (all 5 HU-2 amendment clusters landed), README mid-session push, 3-DD parallel batch (lifecycle + iteration + MCP V0.D impl), 2 HU sessions ratifying 15 design decisions total, dev.to publication checklist + retraction stamp, known-gaps comprehensive refresh, Q3 RE-RATIFICATION (catch of previous-PA spelling error on `:`-shorthand body form), and README hero migration to ratified iteration surface.
+
+**Phase 2 amendment clusters (HU-2 ratifications fully landed):**
+
+- `05e239ba` **Cluster C — PIPELINE `deriveEngineVarName`** F-021 doc-only fix; compiler already aligned with SPEC §51.0.C.
+- `76149424` **Cluster D — §39 schema placement** F-019; `<schema>` is immediate child of `<program>`; §39.2 prose + §39.3 normative + §34 E-SCHEMA-003 catalog row + cascade §39.12 internal-table all updated.
+- `5c9bca73` **Cluster E — §55.5 validity surface predictability** F-018; SPEC §55.5 first paragraph clarified (UNCONDITIONAL synthesis for compound parents per `symbol-table.ts:3356`); PIPELINE Stage 6.7 invariants extended.
+- `86a1f815` **Cluster B-doc — Approach C SPEC subsumption** F-002 / F-003 / F-009 (1a) / F-010 + Q4; `bun.eval()` retires as user-facing surface; §22.4 + §30 + §7.2 + §22.12 + §34 amendments + 3 cascade sites; E-EVAL-001 catalog row dropped.
+- `35262911` **Cluster B-code — Approach C source-cascade** 9-of-10 sites cleaned (rewrite.ts dead-code retire deferred; meta-checker.ts ×4 + sibling ExprNode-path; constant-folder.ts + collect.ts + tokenizer.ts + emit-html.ts retirements). Site 1 (`rewriteBunEval` function retirement) DEFERRED — agent's Phase-0 root-cause confirmation found 7 active callers (brief premise wrong); 3 prerequisite sub-tasks queued (META_BUILTINS purge → 5 meta-eval call drops → Pass 4 drop + bun-eval.test.js retire). [[feedback_cookbook_vs_empirical]] earning its keep.
+- `b0244869` **Cluster A — V-kill SPEC sweep** A1-A6 all 6 amendments; grammar production relocated §7.5 → §6.1.5; §52.4.1 grammar retires (folds into §6.1.5 with `server` joining bare-attribute family per Q5.B b ratification); ~90 worked-example sites migrated SPEC-wide. Closes F-001 / F-008 / F-009 / F-016 (LB).
+
+**Banked observation re-validated 6x now** (HU-2 Q5/Q6/Q7/Q8 + Phase 2 Cluster A + B-code SPEC half): PIPELINE / SPEC prose drift from already-correct compiler behavior is the dominant Phase 2 work shape. Compiler is more spec-canonical than the documentation around it.
+
+**README mid-session public push:**
+
+- `3814c738` **README MCP + L22 type-derived family + V-kill enforcement strengthen + quality-wins callout.** PUSHED PUBLIC per user direction *"I want that public as soon as possible."* User externally added `36d76ab2 Fix repetition in LLM Agent Integration section` on origin between mid-session and wrap-time; wrap-push rebased clean. 4 new substantive subsections + cross-refs to `docs/known-gaps.md`.
+
+**3-DD parallel-dispatch batch** (user direction: *"lets go on all of the prepped DDs"*):
+
+- **Lifecycle DD** (`scrml-deep-dive`, 919L at `scrml-support/docs/deep-dives/lifecycle-annotation-extension-and-flagship-scope-2026-05-25.md`) — PA-lean Approach C; 7 HU questions; critical compiler-gap finding: `type-system.ts:1444` resolves `(A -> B)` to type B but doesn't track per-access transition state — E-TYPE-001 fire promised in SPEC §14.3 line 7106 was unimplemented.
+- **Iteration DD** (`scrml-deep-dive`, 1028L at `scrml-support/docs/deep-dives/iteration-design-surface-2026-05-25.md`) — NO PA lean (explicitly user-deliberative); 8 HU questions starting with designer-card-shaped Q1. **DD MISSED key S129 ratifications** (`@.` sigil + `<ul for=>` parent attribute + `$` body-mode); user caught at HU-1 Q2 surface time; required mid-HU grep of S129 JSONL.
+- `2b51da82` **MCP V0.D impl** — `<program mcp>` attribute wiring + auto-install per SCOPING §3.D. 7 files / +638 LOC / +14 tests / 0 regressions. Build-mode finding: no canonical dev-vs-production hook in compiler today; implemented as RUNTIME NODE_ENV gate per pa.md Rule 3 (minimum-viable correct); revisit at §58 Build Story impl. **MCP V0 status now: A+B+C+D shipped; E queued.**
+
+**Lifecycle HU-1** (`fca1d401` — all 7 questions ratified; 3-landing scope):
+
+Q1=c extend non-engine carve out engine · Q2=b fire-first sequencing · Q3=a extend fn-return lifecycle (transition-marker mechanism Landing 2 sub-Q) · Q4=a §14.X canonical placement · Q5=a new E-TYPE-LIFECYCLE-ON-ENGINE-CELL · Q6=a new §14.X subsection · Q7=a extend channel cells. Phase 2 scope = 3 landings: Landing 1 (fire — SHIPPED) → Landing 2 (extension SPEC) → Landing 3 (PRIMER + kickstarter flagship per F-023).
+
+**Lifecycle Landing 1 SHIPPED** (`1feaedc9`):
+
+- Per-access transition-state tracking implemented in `compiler/src/type-system.ts:1444` per HU-1 Q2 sequencing ratification. +666 LOC type-system.ts. New `compiler/tests/unit/type-system-lifecycle.test.js` (+27 tests / 55 expect()) + `compiler/tests/integration/lifecycle-access-pipeline.test.js` (+6 tests / 16 expect()). Design pick: (β) symbol-table side-table with per-binding state map (mirrors `checkFunctionBodyStateCompleteness` precedent at type-system.ts:12761). Adopter-readable diagnostic: names binding + field name + struct type + pre-state + post-state + resolution path + SPEC §14.3 anchor. Closes **Bug 8 (HIGH)** in known-gaps — the ~6+ week SPEC §14.3 spec-vs-impl gap that the mutability-contracts article publish-twin's status banner had been acknowledging. Deferred for Landing 2: branch-sensitive path analysis · aliasing tracking · cross-fn lifecycle parameter passing · extension to non-engine cell positions · `->` → `to` glyph migration · engine-cell rejection diagnostic.
+
+**Iteration HU-1** (`40115bad` + Q3 RE-RATIFICATION at `2e9d56ec` — all 8 questions ratified; 5-landing scope):
+
+Q1=a ship structural-markup-first surface · Q2=a element `<each>` (S129 pre-ratification confirmed) · **Q3=RE-RATIFIED actual §4.14 form `<li : @.name>`** (caught previous-PA's S129 spelling error — `<li>:@.name</>` was claimed-but-not-§4.14 per the actual SPEC text where `:` is INSIDE the opener with mandatory whitespace, NO closer) · Q4=a `<empty>` sub-element · Q5=d inferred + W-EACH-KEY-001 lint (post-worked-example surface per user direction *"show me this in use before I decide"*) · **Q6=b+ user spit-ball ratified — `<each in=>` collection + `<each of=N>` count, two constructs sharing same machinery; `@.` is always "current iteration value"** · Q7=a Tier 0→1 ladder + CLI + eventual sunset · Q8=a positive-statement kickstarter rewrite.
+
+**Iteration Phase 2 scope = 5 landings:**
+1. Compiler-source impl (`<each>` + `@.` + `<empty>` + `key=` inference + `<each of=N>` + `as name` override + `:`-shorthand body composition via existing §4.14 + W-EACH-PROMOTABLE + W-EACH-KEY-001 + §34 catalog rows)
+2. SPEC amendment (NEW §17.X + §17.4 marked Tier 0 + §56 promotion extended)
+3. `bun scrml promote --each` CLI subcommand
+4. PRIMER + kickstarter F-NEW catch-up
+5. Corpus migration (113 sites; gradual via CLI; W-EACH-PROMOTABLE info → warning → error → parser-strip sunset)
+
+**dev.to publication package** (`ee0d048e`):
+
+Closes S117/S118/S129 article-update-package carry-forward. Verified in-repo state: 12 dev.to articles have S115 audit-recommended fixes applied (Living Compiler links scrubbed; version-currency messaging-language; mutability-contracts FIX-WITH-ANNOTATION; tier-ladder status banner clean). Retraction draft (`docs/articles/living-compiler-retraction-devto-2026-05-21.md`) publication-ready. Built `docs/articles/dev-to-publish-checklist-2026-05-25.md` — 14 platform actions (STEP 1 publish retraction → STEP 2 banner-prepend on original → STEP 3 paste-replace bodies for 12 articles). Retraction stamped at HU surface time. Adopter platform actions in user's hands awaiting post-completion note.
+
+**known-gaps comprehensive refresh** (`9cdec3c1` + `d92c7c6a`):
+
+User flagged: *"I don't think the known-gaps.md is a complete and accurate reference."* Confirmed — last updated S109 (2026-05-19); only tracked 2 open gaps. Comprehensive refresh: 76 → 246 LOC. New structure: at-a-glance counts (HIGH 4 / MED 7 / LOW 4 / Nominal 7) + per-gap workarounds + reproducer pointers + §7 rotation section for S110-S130 closures. Bug 8 rotation `d92c7c6a` (E-TYPE-001 lifecycle fire → §7 closed) post-Lifecycle-Landing-1-ship; HIGH count drops 4 → 3.
+
+**README wrap-pivot** (`1d161fd9`):
+
+User direction: *"I have decided to loose a prior mandate on the code examples in the readme. can we make the code, more scrml-y as of all of these decisions. and just be honest that they are NOMINAL examples and the compiler is in progress."* Loosened the per-release-tag compile-gating mandate. Replaced gating note with NOMINAL-honest framing. Migrated contact-book hero iteration from `${for/lift}` → `<each in=loadContacts()>` + `<empty>` + `@.` per the just-ratified S130 iteration HU-1 canonical surface. Dropped `// gate: skip` mechanical prefixes (3 sites).
+
+**Banked methodology rules (2 new memory files + Rule 4 within-session extension):**
+
+- `feedback_show_code_to_reason_about.md` (NEW) — load-bearing HU questions get worked code examples (multi-line realistic adopter scenarios across edge cases), not tiny syntax snippets. User direction at iteration HU-1 Q5: *"show me this in use before I decide. code I can reason about. not a tiny syntax snippet."* Reserve for substantive design ratifications.
+- `feedback_dd_brief_read_session_log.md` (NEW) — when authoring DD briefs about prior-session ratifications, READ the JSONL session log (`~/.claude/projects/-home-bryan-maclee-scrmlMaster-scrmlTS/<session-uuid>.jsonl`) not just the carry-forward summary. Two S130 precedents: iteration DD missed `@.` + Q3 RE-RATIFICATION caught §4.14 spelling error.
+- Pa.md Rule 4 extension: within-session PA-recall claims of "X is ratified per Y" need SPEC verification before encoding into downstream amendment work. The S129 PA's "ratified per §4.14" claim about `<li>:@.name</>` was spelling-wrong; S130 DD brief inherited without cross-checking. Q3 RE-RATIFICATION catch was the trigger.
+
+**State at close:**
+
+| Item | Value |
+|---|---|
+| HEAD | (will advance through this wrap-commit chain) |
+| pkg.json | 0.6.0 (no tag) |
+| Full test | **21,462 pass / 0 fail / 170 skip / 1 todo / 787 files** (+48 from S129 baseline 21,414) |
+| Worktrees | main only |
+| S99 path-discipline counter | **15** (zero new leaks across 4 worktree dispatches: Phase 2 Cluster A + B-code + Lifecycle Landing 1 + MCP V0.D) |
+| Push state | PUSHED at wrap (scrmlTS rebased onto user's external README touch-up `36d76ab2`; scrml-support pushed with user-voice S130 + 2 DD outputs) |
+
+**Carry-forward (sequenced):**
+1. Lifecycle Landing 2 (Approach C extension SPEC + tests)
+2. Iteration Landing 1 (compiler-source impl)
+3. MCP V0.E (E2E + adopter docs + fixture)
+4. Phase 2 Cluster B-code Site 1 retirement sub-task arc
+5. Lifecycle Landing 3 (PRIMER + kickstarter flagship per F-023)
+6. Iteration Landings 2/3/4/5 sequenced
+7. dev.to platform actions (user's queue; PA awaits completion note)
+
+Items 1-4 are file-disjoint and can parallel-dispatch. Same momentum-rhythm as S130 mid-session.
+
+Tag: NONE.
+
+---
 
 ### 2026-05-25 (S129 CLOSE — STOP + grammar consolidation; 3 audits + HU-2 batch + D8a-i parser fix)
 
