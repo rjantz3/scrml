@@ -14,14 +14,37 @@
 
 | Severity | Open | Closed-this-arc | Notes |
 |---|---|---|---|
-| HIGH | 2 | E-TYPE-001 lifecycle fire (S130 Landing 1 SHIPPED) · §29 vanilla-interop framing-corrected (S132 — §2.1 false present-tense claim removed; §29 marked Nominal; NOT retired) · **E-FN-003 attributed-markup-return in `fn` (RESOLVED S133 `dbef4f4d`)** · **Bug 17 E-META-001 runtime-meta scoping gap (RESOLVED S134 `6c6c0073`)** | compiler-managed-async (deferred A9-class) · 6nz-V class:NAME on for-lift (GENUINE) |
-| MED | 7 | Bug 15 `~snapshot` codegen leak (S131 SHIPPED) · E-SCHEMA-003 enforcement (S133 SHIPPED `afbcb47a`) | Bug 1 Tailwind residuals · V-kill READ-side fire · MCP V0 partial-impl deferrals · Generator policy · L19 multi-statement-handler · **A5 refinement-type freeze extension (DEFERRED with adoption-watch trigger, S134)** · §6.6.18 alias-escape gap (A4 queued S134) |
+| HIGH | 3 | E-TYPE-001 lifecycle fire (S130 Landing 1 SHIPPED) · §29 vanilla-interop framing-corrected (S132 — §2.1 false present-tense claim removed; §29 marked Nominal; NOT retired) · **E-FN-003 attributed-markup-return in `fn` (RESOLVED S133 `dbef4f4d`)** · **Bug 17 E-META-001 runtime-meta scoping gap (RESOLVED S134 `6c6c0073`)** · **§6.6.18 alias-escape gap A4 LANDED S134 `b719a3d2`** | compiler-managed-async (deferred A9-class) · 6nz-V class:NAME on for-lift (GENUINE) · **Shape 1 per-access lifecycle tracker missing-impl (NEW S134 — Q6 prerequisite)** |
+| MED | 6 | Bug 15 `~snapshot` codegen leak (S131 SHIPPED) · E-SCHEMA-003 enforcement (S133 SHIPPED `afbcb47a`) | Bug 1 Tailwind residuals · V-kill READ-side fire · MCP V0 partial-impl deferrals · Generator policy · L19 multi-statement-handler · **A5 refinement-type freeze extension (DEFERRED with adoption-watch trigger, S134)** |
 | LOW | 4 | (rotate out below) | Bug 4 bare-`/` · GITI-015 · §11-folded-citation sweep · `bun scrml promote --engine` Tier-1→2 deferred |
 | Nominal (spec-ahead-of-impl) | 7 | — | Build Story §58 · `import:host` §21.3.1 · Quoted-text §4.18 compiler fire · `_{}` foreign code · WASM call-char sigils · Sidecar process decls · RemoteData enum |
 
 ---
 
 ## §1 HIGH — adopter-visible / silent-wrong-output
+
+### Bug 19 — Shape 1 plain reactive cell per-access lifecycle tracker — `NEW S134; HIGH; impl missing` (Q6 prerequisite)
+
+**Surfaced S134 Q6 dispatch Phase-0 STOP** (`docs/changes/q6-reset-lifecycle-2026-05-26/progress.md`). SPEC §14.12.3 + §14.12.10 (bullet 1) normatively promise per-access lifecycle transition tracking on **Shape 1 plain reactive cells** (`<state>: (not to User) = not`-style decls). The impl tracker today (`compiler/src/type-system.ts` `checkLifecycleFieldAccess`) covers struct-field positions (`User.passwordHash`-style) and fn-return positions (per §14.12.6 hybrid) only — `state-decl` (Shape 1 reactive cell decl) AST nodes are NOT in the tracker's scope.
+
+**Empirically verified by Q6 Phase-0 reproducer:**
+
+```scrml
+<state>: (not to User) = not
+@state.name   // SHOULD fire E-TYPE-001 per §14.12.10 normative bullet 1; ACTUAL: no fire
+```
+
+- **Severity rationale:** HIGH. SPEC §14.12 promises a tracker that doesn't exist for one of the six normatively-supported positions. Adopters writing `<state>: (not to T) = not` get the type-resolution + carve-out (correct) but no pre-transition access enforcement (silently wrong). Exactly the spec-vs-impl drift class Rule 4 is built to catch.
+- **Workaround:** wrap state in a single-field struct: `type Holder:struct = { val: (not to User) }; <state>: Holder = { val: not }`. The struct-field tracker DOES fire correctly. Verbose but functional.
+- **Reproducer (1-liner):** any `<x>: (A to B) = pre-typed-value` decl followed by `@x.field` access — should fire `E-TYPE-001`, doesn't.
+- **Resolution path — B-prereq dispatch (queued S134; pre-Q6-impl):**
+  - **Scope:** extend `collectStructBindings` (`type-system.ts:13698`) to recognize `state-decl` AST nodes — OR — author a parallel `state-decl` lifecycle tracker pass. Must cover BOTH the struct-typed Shape 1 case (`<u>: User = ...` with lifecycle on `User.passwordHash`) AND the cell-value-typed Shape 1 case (`<state>: (not to User) = not`) — Q6 Phase-0 verified `collectStructBindings`-extension alone won't cover both.
+  - **Estimate:** ~20-30h compiler-source via `scrml-js-codegen-engineer` (isolation:worktree). Unblocks Q6-narrow impl (~10-20h).
+  - **Tests:** +N regression-guard covering the 1-liner reproducer + sibling cases (assigning to pre-type satisfies; assigning to post-type triggers).
+- **Composition:** §6.8.3 (the symmetric-reset interaction landed S134 SPEC-only) DEPENDS on this tracker — `reset(@cell)` can't revert per-access state on a tracker that doesn't observe per-access state for Shape 1. §6.8.3 stands as the design contract; impl waits for B-prereq.
+- **Cross-refs:** SPEC §14.12.3 (extension scope table — Shape 1 listed YES), §14.12.10 (normative statement promising the fire), §6.8.3 (the dependent reset semantic landed S134), Q6 Phase-0 progress.md at `docs/changes/q6-reset-lifecycle-2026-05-26/progress.md`. Authority: const-deep-freeze HU/DD/debate arc S134.
+
+---
 
 ### Bug 17 — E-META-001 only fires in compile-time meta blocks; runtime blocks silently accept JS-host globals — `RESOLVED S134 (commit 6c6c0073)` (was HIGH)
 
@@ -240,18 +263,20 @@ SPEC §4.18 landed Wave 1 S111 — the code-default body mode + `"..."` display-
 
 ---
 
-## §5 Lifecycle annotation surface — COMPLETE (arc closed S134)
+## §5 Lifecycle annotation surface — DOC arc closed; IMPL has a remaining gap (S134 finding)
 
-S130 lifecycle DD + HU-1 ratified `(A to B)` extension scope to non-engine cells (Approach C); 3 landings, all SHIPPED:
+S130 lifecycle DD + HU-1 ratified `(A to B)` extension scope to non-engine cells (Approach C); 4 landings shipped, ONE prerequisite-impl gap surfaced S134:
 
 | Landing | Scope | Status |
 |---|---|---|
-| 1 | E-TYPE-001 fire (per-access transition-state tracking in `type-system.ts`) | **SHIPPED S130** (`1feaedc9`) — see §7 rotation |
-| 2 | Approach C extension to fn params + fn return + schema fields + channel cells + `->` → `to` glyph migration + new §14.12 subsection + `E-TYPE-LIFECYCLE-ON-ENGINE-CELL` engine-cell rejection | **SHIPPED S130** (SPEC §14.12 normative; engine-cell carve-out + `W-LIFECYCLE-LEGACY-ARROW` + §34 catalog rows) |
+| 1 | E-TYPE-001 fire (per-access transition-state tracking for **struct fields**) | **SHIPPED S130** (`1feaedc9`) — see §7 rotation |
+| 2 | Approach C SPEC extension to fn params + fn return + schema fields + channel cells + Shape 1 + `->` → `to` glyph migration + new §14.12 subsection + `E-TYPE-LIFECYCLE-ON-ENGINE-CELL` engine-cell rejection | **SPEC SHIPPED S130** (§14.12 normative; engine-cell carve-out + `W-LIFECYCLE-LEGACY-ARROW` + §34 catalog rows). ⚠️ **Shape 1 per-access tracker NOT implemented** — surfaced S134 Q6 Phase-0 STOP; filed as Bug 19 in §1 HIGH. |
 | 2.5 | S131 HU-2 fn-return hybrid mechanism (presence-progression discrimination-IS-transition + variant-progression explicit `transition()`); SPEC §14.12.6 + §14.12.6.1–6.4; `E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED` | **SHIPPED S131** |
 | 3 | PRIMER + kickstarter flagship section (per F-023) — `(A to B)` canon-corroboration | **SHIPPED S134** — PRIMER §6.5 + kickstarter §3.2 + §7 anti-pattern table rows (1 engine-cell, 1 legacy-glyph, 1 over-applied-`transition()`) |
+| 4 (S134 const-deep-freeze Q6 ratification) | SPEC §6.8.3 — `reset(@cell)` × lifecycle interaction (symmetric reset reverts per-access transition state per pre-type membership) + §14.12.10 cross-ref bullet | **SPEC SHIPPED S134** (this session). ⚠️ **Impl DEFERRED** — depends on Bug 19 (Shape 1 tracker prerequisite). |
+| **B-prereq (NEW S134; queued)** | Shape 1 per-access lifecycle tracker — covers `state-decl` AST nodes (both struct-typed Shape 1 with lifecycle in struct-field, and cell-value-typed Shape 1 with lifecycle in cell type) | **QUEUED** — ~20-30h compiler-source via `scrml-js-codegen-engineer`. Unblocks Q6-narrow impl (~10-20h). |
 
-Authority: lifecycle DD at `scrml-support/docs/deep-dives/lifecycle-annotation-extension-and-flagship-scope-2026-05-25.md`; HU-1 at `docs/heads-up/lifecycle-annotation-extension-2026-05-25.md`; SPEC §14.12 normative spec.
+Authority: lifecycle DD at `scrml-support/docs/deep-dives/lifecycle-annotation-extension-and-flagship-scope-2026-05-25.md`; HU-1 at `docs/heads-up/lifecycle-annotation-extension-2026-05-25.md`; const-deep-freeze HU at `docs/heads-up/const-deep-freeze-2026-05-26.md` (Q6 ratification + Bug 19 surfacing); SPEC §14.12 + §6.8.3 normative spec.
 
 ---
 

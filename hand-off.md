@@ -71,6 +71,49 @@
 
 ---
 
+## ✅ S134 Fire #5 — Q6 (reset × lifecycle) — SPEC LANDED + Bug 19 SURFACED + impl DEFERRED
+
+**Commits (main, this PA-direct landing):**
+- (this commit) — SPEC §6.8.3 NEW subsection + §14.12.10 cross-ref bullet (symmetric reset semantic per ratified verdict) + Bug 19 NEW HIGH known-gap (Shape 1 per-access lifecycle tracker missing-impl) + HU Q6 status updates + Q6 progress.md forensic artifact pulled from agent worktree
+
+**Q6 agent (a587bef3011558e9f):** Phase-0 STOP — correctly halted before any code edit. Empirically verified the load-bearing finding: SPEC §14.12.3 + §14.12.10 (bullet 1) normatively promise per-access lifecycle tracking on Shape 1 reactive cells, but the impl tracker (`compiler/src/type-system.ts:13447` `checkLifecycleFieldAccess`) covers struct-field + fn-return loci ONLY. Shape 1 `state-decl` AST nodes are not in the tracker's scope. Reproducer (verified):
+
+```scrml
+<state>: (not to User) = not
+@state.name   // SHOULD fire E-TYPE-001; ACTUAL: no fire
+```
+
+**4 options surfaced by Phase-0 STOP report:**
+- A — scope-expand Q6 (~30-50h single dispatch)
+- B — split (Shape 1 prereq ~20-30h → Q6-narrow ~10-20h)
+- C — spec-only now (lock the design; defer impl)
+- D — probed: `collectStructBindings` extension insufficient alone
+
+**User ratification: C now + B-deferred** (this commit).
+
+### What landed this fire
+
+1. **SPEC §6.8.3 NEW subsection** (~45 lines) — "Interaction with lifecycle annotation `(A to B)`" — symmetric-reset semantic + worked examples for presence-progression + variant-progression + `default=` matching pre-type vs post-type + impl-deferred note pointing at Bug 19.
+2. **SPEC §14.12.10 NEW bullet** — `reset(@cell)` × lifecycle cross-ref. Notes SPEC-ahead-of-impl status.
+3. **SPEC §14.12.9 cross-refs updated** — §6.8.3 + S134 HU added.
+4. **SPEC §6.8.2 cross-refs updated** — §14.12 cross-ref added.
+5. **Bug 19 NEW HIGH** in `docs/known-gaps.md` §1 — Shape 1 per-access lifecycle tracker missing-impl. Full entry with reproducer, workaround (single-field struct wrap), resolution path (B-prereq dispatch ~20-30h), composition note (§6.8.3 depends on this).
+6. **§5 Lifecycle annotation surface** in `docs/known-gaps.md` rewritten — no longer "COMPLETE arc closed"; reflects the SPEC-shipped-but-Shape-1-tracker-missing-impl reality. NEW Landing 4 (Q6 SPEC) + B-prereq row added to the landings table.
+7. **HU Q6 status updated** — RATIFIED (a) symmetric reset; Phase-0 STOP outcome documented; B-prereq + Q6-narrow split path queued.
+8. **§0 inventory** — HIGH count 2 → 3 (added Bug 19); MED count 7 → 6 (rotated §6.6.18 alias-escape gap to A4 LANDED per `b719a3d2`).
+9. **Q6 progress.md** (forensic) — pulled from agent worktree at `docs/changes/q6-reset-lifecycle-2026-05-26/progress.md`.
+
+### Banked rule reinforced
+
+`feedback_cookbook_vs_empirical` — three sessions in a row (S130/S133/S134) where Phase-0 STOP gates caught cookbook-derived briefs. The Q6 brief assumed the Shape 1 tracker existed; empirical verification revealed it doesn't. Rule continues to earn its keep — every dev-agent dispatch's Phase-0 reproducer-verify discipline is preventing partial-correctness landings.
+
+### Carry-forward dispatches (re-sequenced post-S134)
+
+- **B-prereq — Shape 1 per-access lifecycle tracker** (~20-30h compiler-source via `scrml-js-codegen-engineer`, isolation:worktree). Brief: extend `collectStructBindings` to recognize `state-decl` AST nodes, AND/OR author a parallel `state-decl` lifecycle tracker pass. Must cover BOTH struct-typed Shape 1 (`<u>: User = ...` with lifecycle on `User.passwordHash`) AND cell-value-typed Shape 1 (`<state>: (not to User) = not`). Closes Bug 19 HIGH.
+- **Q6-narrow — reset×lifecycle impl** (~10-20h, blocked-on B-prereq). Brief: type-system tracker observes reset-path writes + type-checks resulting value against pre-type + reverts per-access state per §6.8.3 ratified semantic. Tests cover presence-progression + variant-progression + `default=` composition + negative controls.
+
+---
+
 ## ✅ S134 Fire #3 — `const <state>` deep-freeze HU → DD → Debate → Ratification — CLOSED
 
 Full arc landed in S134. HU `docs/heads-up/const-deep-freeze-2026-05-26.md` (status: ratified) · DD `scrml-support/docs/deep-dives/const-deep-freeze-2026-05-26.md` (1296L) · debate-insight `~/.claude/design-insights.md` (PA/user ratification block appended).

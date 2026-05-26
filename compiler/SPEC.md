@@ -5171,7 +5171,54 @@ reset(@compound)          // reset all fields of a compound cell
 - §6.2 — Three RHS shapes (which cells support `default=`)
 - §6.3 — Compound state (compound reset semantics; §6.3.5 grounds multi-level)
 - §6.13 — Reactivity attributes (`debounced=` / `throttled=`); reset cancels pending timed writes.
+- §14.12 — Lifecycle annotation; reset reverts per-access transition state per §6.8.3.
 - §34 — E-RESERVED-IDENTIFIER, E-RESET-NO-ARG, E-RESET-INVALID-TARGET
+
+#### 6.8.3 Interaction with lifecycle annotation (`(A to B)`)
+
+**Added 2026-05-26 (S134 — const-deep-freeze HU-Q6 ratification; debate-judge insight at `~/.claude/design-insights.md`).** Closes the orthogonal `reset × lifecycle` interaction gap surfaced during the S134 const-deep-freeze HU/DD/debate arc.
+
+When `reset(@cell)` is called on a cell whose type carries a lifecycle annotation `(A to B)` (§14.12), the type-system SHALL revert the cell's per-access transition state based on the resulting written value:
+
+- If the written value (the `default=` expression result, or the re-evaluated init expression result) satisfies the pre-type `A`, the per-access transition state SHALL be reverted to `pre`. Subsequent reads of the cell fire `E-TYPE-001` per §14.12 until the cell is written again with a post-type value.
+- If the written value satisfies the post-type `B`, the per-access transition state SHALL remain (or be set to) `post`. The cell is effectively transitioned by the reset.
+- If the written value satisfies neither `A` nor `B`, the reset is a type error per existing §14.12 constraints; no new diagnostic.
+
+The cancel-then-apply ordering from §6.8.2 (debounced/throttled interaction precedent) extends to lifecycle: the per-access state revert SHALL apply AFTER the reset value is written, so subsequent reads observe the correct (reset-driven) state.
+
+**Worked example — presence-progression `(not to T)`:**
+
+```scrml
+<state>: (not to User) = not
+@state = someUser                    // transition fires; per-access: pre → post
+print(@state.name)                   // OK (post-transitioned)
+reset(@state)                        // writes `not`; satisfies pre-type → per-access reverts to pre
+print(@state.name)                   // E-TYPE-001 (pre-transition again)
+```
+
+**Composition with `default=` (matching pre-type — common case):**
+
+```scrml
+<state default=.Idle>: (.Idle to .Active) = .Idle
+@state = .Active                     // transition: pre → post
+reset(@state)                        // writes default (.Idle); pre-type → revert to pre
+```
+
+**Composition with `default=` (matching post-type — unusual but legal):**
+
+```scrml
+<state default=.Active>: (.Idle to .Active) = .Idle
+@state = .Active                     // transition: pre → post
+reset(@state)                        // writes default (.Active); post-type → stays post
+```
+
+**Implementation note (impl-deferred S134).** §14.12.10 normatively specifies per-access transition tracking on Shape 1 plain reactive cells, but the impl tracker today (`compiler/src/type-system.ts` `checkLifecycleFieldAccess`) covers struct-field and fn-return loci only — the Shape 1 per-access tracker is missing. §6.8.3 therefore lands as SPEC-ahead-of-impl; the Q6 impl wave is gated on the Shape 1 tracker prerequisite (filed in `docs/known-gaps.md`). The §6.8.3 semantic stands as the design contract for that future impl.
+
+**Cross-references:**
+- §14.12 — Lifecycle annotation surface (the per-access tracking framework this section interacts with)
+- §14.12.10 — Normative statements (this section's reciprocal cross-ref bullet)
+- §6.8.2 — Reset semantics this section extends
+- `~/.claude/design-insights.md` — S134 const-deep-freeze ratification block
 
 ---
 
@@ -8144,8 +8191,10 @@ The interaction with `broadcast()` calls (§38.9 — `E-CHANNEL-004`) is unchang
 - §39 — schema; §14.12.7 + §39's SQL-shape addendum apply.
 - §48 — function parameters; the extension extends to fn-param position.
 - §51.0 — engines; engine cells are CARVED OUT (§14.12.4).
+- §6.8.3 — `reset(@cell)` × lifecycle interaction (symmetric reset reverts per-access transition state when written value satisfies the pre-type). (S134.)
 - §34 — error catalog entries `E-TYPE-001` (per-access fire), `E-TYPE-LIFECYCLE-ON-ENGINE-CELL` (carve-out), `E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED` (variant-progression missing-`transition()`), `W-LIFECYCLE-LEGACY-ARROW` (glyph deprecation).
 - `docs/heads-up/lifecycle-annotation-extension-2026-05-25.md` — S130 HU-1 ratifications (7 of 7 closed).
+- `docs/heads-up/const-deep-freeze-2026-05-26.md` — S134 HU-Q6 ratification (this section's reset-interaction semantic).
 
 #### 14.12.10 Normative statements
 
@@ -8154,6 +8203,7 @@ The interaction with `broadcast()` calls (§38.9 — `E-CHANNEL-004`) is unchang
 - Lifecycle annotation SHALL be permitted at the positions enumerated in §14.12.3 (struct fields, Shape 1 plain reactive cells, function parameters, function returns, schema fields, channel cells).
 - Lifecycle annotation on engine cells SHALL be rejected via `E-TYPE-LIFECYCLE-ON-ENGINE-CELL`. The classification of a state-decl as an engine cell SHALL be unambiguous via sibling `<engine>` declaration metadata (`engineMeta.varName` and explicit `var=` overrides).
 - Per-access transition-state tracking SHALL fire `E-TYPE-001` at every read of a lifecycle-annotated location whose local transition state is `pre`. The tracker semantics are normatively specified by the Landing 1 implementation at `compiler/src/type-system.ts` (the `checkLifecycleFieldAccess` walker + the lifecycle-registry build pass).
+- `reset(@cell)` on a lifecycle-annotated cell SHALL revert per-access transition state per §6.8.3. The reset value's type membership (pre-type `A` vs post-type `B`) determines whether the cell observes a `pre` or `post` state after the reset. (Added S134 — const-deep-freeze HU-Q6 ratification; SPEC-ahead-of-impl pending the Shape 1 per-access tracker prerequisite filed in `docs/known-gaps.md`.)
 - Function-return position lifecycle annotation SHALL be fully tracked per the hybrid mechanism in §14.12.6: presence-progression `(not to T)` returns are transitioned by DISCRIMINATION (via `given` / `if-is-not` early-return / `match`); variant-progression `(.VariantA to .VariantB)` returns are transitioned by an explicit `transition(u)` call. Variant-progression accesses without `transition()` SHALL fire `E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED`. The `transition()` built-in SHALL be compile-time-only (zero runtime cost) and SHALL be silently no-op on values that do not carry a lifecycle annotation.
 - Schema-field lifecycle annotation SHALL inherit semantics from this section; downstream SQL-shape consequences (DDL emission, migration, NULL-vs-NOT-NULL) are documented at §39's SQL-shape addendum cross-referencing this section.
 - Channel-cell lifecycle annotation SHALL inherit semantics from this section; per-client transition state is local to each client and SHALL NOT auto-synchronise across the channel sync layer.
