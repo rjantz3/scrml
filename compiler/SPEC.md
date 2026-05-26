@@ -5244,10 +5244,64 @@ The compiler applies a lint rule: reads of a `pinned` declaration before its dec
 
 The `pinned` keyword itself embodies the lint policy principle (S55): "lint rules teach people the scrml way; turning them off is the developer's prerogative." `pinned` is the per-declaration form of "force the lint to error on me."
 
+#### 6.10.6 Composition with the `server` Modifier
+
+**Added 2026-05-25 (S131 HU-3 Q5.B.1 ratification).** Cross-attribute composition rule for `<x server pinned>` declarations.
+
+A V-kill structural decl MAY carry both the `server` flag (§52.4 — Tier 2 server-authoritative cell) and the `pinned` flag (§6.10) at once:
+
+```scrml
+<cards server pinned>: Card[] = []
+<currentUser server pinned> = not
+```
+
+**Normative composition rule.** When both `server` and `pinned` appear on the same decl, the `pinned` semantic applies to the **PLACEHOLDER** value — the right-hand-side expression that the compiler displays on the client before the server-fetch completes (§52.4.3). Specifically:
+
+- The placeholder is initialized exactly at its source position, same as any §6.10.2 pinned cell.
+- `reset(@cells)` SHALL NOT restore the placeholder; the pinned-on-placeholder rule prevents placeholder re-installation through the reset path.
+- The server-fetched value, once it arrives, is **normal-reactive** thereafter — writes propagate through optimistic-update + server-write + rollback per §52.4.2, and downstream reactive dependencies fire normally.
+- Forward references to `@cells` from source positions before the decl site remain `E-STATE-PINNED-FORWARD-REF` per §6.10.2 — the `pinned` semantic is preserved for the placeholder lifecycle, even though the eventually-fetched value participates in normal reactive flow.
+
+The placeholder pinning composes the static-surface invariant of `pinned` (§6.10 — identity-stable, hoisting-exempt) with the dynamic-surface invariant of `server` (§52.4 — fetch-on-mount, optimistic update). Neither modifier's semantic is overloaded; they apply to non-overlapping aspects of the cell's lifecycle.
+
+**Operational interpretation.** "Skip the placeholder reset — only the real data matters." Common case for cache hydration / on-mount data-load patterns where the empty placeholder is a startup artifact rather than adopter-meaningful state. Adopters who want `reset(@cells)` to restore the empty initial value omit `pinned`.
+
+**Worked example.**
+
+```scrml
+<program db="sqlite:./shop.db">
+
+    <cards server pinned>: Card[] = []     // placeholder pinned
+
+    server function loadCards() {
+        return ?{`SELECT * FROM cards`}.all()
+    }
+
+    function addCard(c) {
+        @cards = [...@cards, c]            // optimistic update + server write
+    }
+
+    function clearLocalCache() {
+        reset(@cards)                      // NO-OP for the placeholder restoration;
+                                           // cell continues to hold the last-fetched server value
+    }
+
+</program>
+```
+
+Timeline:
+1. Module init: `@cards` initialized to `[]` placeholder (pinned).
+2. Mount: compiler-generated `loadCards()` fetch fires; `@cards` reassigned to fetched array on resolve.
+3. Subsequent writes through `addCard()`: normal optimistic-update + server-write per §52.4.2.
+4. `clearLocalCache()`: `reset(@cards)` does NOT restore `[]` — the placeholder lifecycle ended at step 2 per the pinned-on-placeholder rule. To restore the empty state, the adopter writes `@cards = []` explicitly, or omits `pinned` from the decl.
+
 **Cross-references:**
 - §6.9 — Hoisting model (the default behavior `pinned` overrides)
 - §21 — Module and Import System (import `pinned` semantics)
 - §51 — State Transition Rules / `<engine>` (engine `pinned` semantics)
+- §52.4 — `server` modifier semantics (Tier 2 instance-level authority — composition rule in §6.10.6)
+- §52.4.3 — placeholder semantics (the value `pinned` applies to under §6.10.6)
+- §55.16 — validator firing on `server` cells (composition with §6.10.6)
 - §34 — E-STATE-PINNED-FORWARD-REF
 
 ---
@@ -7104,6 +7158,89 @@ Per §13.3, the compiler detects that `fetchUsers()` and `fetchMetrics()` are in
 - Optimistic update state SHOULD be carried as variant payloads (e.g., `Saving(optimisticData)`), not as separate boolean flags.
 - Each independent server call SHOULD have its own enum state variable. Parallel calls transition independently.
 - Future compiler sugar (e.g., a `loading` keyword) MAY desugar to this enum pattern. Any such sugar MUST preserve the enum's impossible-state guarantee and variant payload capability.
+
+### 13.6 Generators — Full Language Vocabulary
+
+**Added 2026-05-25 (S131 HU-4 Q-W3-3 ratification).** Defines the canonical policy for `function*` / `yield` / `yield*` in scrml source.
+
+**Normative claim.** `function*` (generator function declarations), `yield` (single-value generator-suspension expression), and `yield*` (delegating generator expression) are **FULL LANGUAGE VOCABULARY** in scrml. Generators MAY be used in any function position where a regular `function` declaration is admissible — file-scope declarations, `${ }` logic-context declarations, function-expression positions, and the existing §37 `server function*` server-sent-events surface. The S114 "no `async` / `await`" rule (§19.9.8) does NOT extend to generators.
+
+**Rationale — why generators are admitted while `async`/`await` is not.** The leaky-abstraction concern that motivated the language-wide `async`/`await` prohibition (§19.9.8, user-voice S114: *"I hate leaky abstractions and colored functions"*) does NOT apply equally to generators:
+
+- **`async`/`await` is VIRAL.** A function that `await`s must be marked `async`; every caller of that function must itself `await` the result; the function-coloring propagates up the call stack indefinitely. The coloring is unavoidable — no caller-side workaround lets a non-async function consume an async function's result without re-coloring itself. This is the leaky-abstraction shape: the implementation detail (this call talks to the server) propagates as a type-system constraint across every reachable caller.
+- **Generators are LOCAL.** A function that `yield`s is a generator (syntactically marked `*`), but callers consume the generator via plain iteration (`for...of`, `Array.from(...)`, manual `.next()` calls, spread `[...gen()]`). The caller writes ordinary code; there is no "must be a generator to call a generator" coloring rule. Generator-ness TERMINATES at the function boundary on the consumer side.
+
+The local-not-viral property is what earns generators the full-vocabulary disposition. The compiler-managed CPS / body-split mechanism (§19.9.3) covers the async surface that `async`/`await` would otherwise cover; generators serve a different surface — synchronous-from-caller-perspective stream production — and don't compete with the body-split.
+
+**Cohesion with §37 SSE generators.** The existing `server function*` Server-Sent-Events surface (§37) is the load-bearing prior-art use case for generators in scrml. §37 is preserved unchanged; restricting generators to "SSE only" would have forced SSE to a different mechanism with no cohesion gain. The §37 SSE-specific compilation path (the GET route with `text/event-stream` content type and per-yield SSE event emission) is one specific consumer of the generator vocabulary; non-SSE generator use cases compile through the JavaScript-host generator emission path with no scrml-specific machinery.
+
+**Worked example — non-SSE generator (Fibonacci-style).**
+
+```scrml
+${
+    function* fibonacci() {
+        let a = 0
+        let b = 1
+        while (true) {
+            yield a
+            let next = a + b
+            a = b
+            b = next
+        }
+    }
+
+    function takeN(gen, n) {
+        let out = []
+        let iter = gen.next()
+        for (let i = 0; i < n; i++) {
+            if (iter.done) break
+            out.push(iter.value)
+            iter = gen.next()
+        }
+        return out
+    }
+
+    function showFirstTen() {
+        let gen = fibonacci()
+        let first10 = takeN(gen, 10)
+        // first10 == [0, 1, 1, 2, 3, 5, 8, 13, 21, 34]
+        return first10
+    }
+}
+```
+
+The caller `takeN` is NOT a generator — it consumes the generator via ordinary `.next()` iteration. There is no "viral" propagation up the call stack; `showFirstTen` is also not a generator and calls `takeN` synchronously. The local-not-viral property is concrete in the code shape.
+
+**Worked example — chunked iteration over a large derived collection.**
+
+```scrml
+${
+    function* chunkArray(arr, size) {
+        for (let i = 0; i < arr.length; i += size) {
+            yield arr.slice(i, i + size)
+        }
+    }
+
+    function processInChunks(items) {
+        for (chunk of chunkArray(items, 100)) {
+            handleChunk(chunk)        // synchronous caller; for...of consumes generator inline
+        }
+    }
+}
+```
+
+Again no async coloring; `chunkArray` is a generator, but `processInChunks` consumes it via `for...of` and remains an ordinary synchronous function.
+
+**Cross-reference — `server function*` SSE.** The `server function*` declaration form (§37) is the existing scrml-specific generator surface. It compiles to a Server-Sent Events GET route per §37.3 + per §37.4 event-shape rules; each `yield` emits one SSE event to all connected clients. This subsection does NOT change §37's semantics; it merely establishes that non-SSE generator use cases are equally admissible (compiling through the JavaScript-host generator emission path, no SSE machinery generated).
+
+**`yield`-inside-non-generator is `E-SSE-001`.** The existing diagnostic (§37.9 — see also §34) fires when `yield` appears inside a function that is not a generator. The diagnostic name reflects its original SSE-scoped context; it applies uniformly to all generator surfaces.
+
+**Sibling-rule cross-reference — §19.9.8 (no `async`/`await`).** The asymmetry between the generator policy (admitted) and the `async`/`await` policy (forbidden) is what this subsection's "viral vs local" rationale rests on. §19.9.8's earlier "Generators... NOT covered by this rule. ... open per S114 carry-forward" note is **closed by this section** — the policy is no longer open; generators are full vocabulary per the S131 HU-4 Q-W3-3 ratification.
+
+**Cross-references:**
+- §19.9.8 — `async`/`await` language-wide standing rule (the rule that does NOT extend to generators).
+- §37 — `server function*` Server-Sent Events (the load-bearing existing generator surface).
+- §48 — The `fn` keyword (NB: `fn` is a pure-function form; generator semantics are orthogonal — see §48.3 body prohibitions for the `fn`-specific constraints, which apply uniformly whether the body is a generator or not. A `fn` that is also a generator is admissible under both this section and §48's purity contract, provided the body satisfies §48.3.)
 
 ---
 
@@ -11945,9 +12082,9 @@ These three codes operate at the parse layer; the fn-specific instance (§48.3.5
 
 **JS-host interop boundary.** When a JavaScript Promise crosses the boundary into a scrml variable (via `^{}` meta-block escape, `_{}` foreign-code block, server-function return type, or a `use foreign:` import), the body-split / CPS machinery handles the await-equivalent at the boundary — the scrml-side code reads the resolved value, no source-level `await` is needed. This mirrors the §42.9 null-normalisation pattern: the JS-side mechanism is bounded at the boundary; the scrml-side surface is uniform.
 
-**Generators (`yield` / `yield*` / `function*`).** NOT covered by this rule. Generators are a separate conversation (S114 user direction: *"Yield, might be a different conversation"*). The native parser at S114 preserves `yield` / `yield*` operators, the `function*` form, and object-literal generator-method shape. Their semantic policy is open per S114 carry-forward.
+**Generators (`yield` / `yield*` / `function*`).** NOT covered by this rule. Generators are full language vocabulary in scrml — ratified S131 HU-4 Q-W3-3; normative policy at §13.6. The native parser preserves `yield` / `yield*` operators, the `function*` form, and object-literal generator-method shape. The asymmetry — generators admitted while `async`/`await` is forbidden — is justified by the local-not-viral property of generator-ness: a generator's coloring terminates at the function boundary on the consumer side (callers consume via plain iteration without re-coloring themselves), whereas `async`/`await` propagates the coloring up the call stack indefinitely. See §13.6 for the full rationale.
 
-**Cross-references.** §6 (PRIMER) — the error-model decomposition (body-split vs `!` vs `!{}`); §19.9.3, §19.9.5 (CPS canonical async surface); §42.1 (parallel "no null/undefined" rule shape); §48.3.5 (the `fn`-scope E-FN-005 — now the within-`fn` manifestation of this language-wide rule); §34 (catalog entries for the three new codes).
+**Cross-references.** §6 (PRIMER) — the error-model decomposition (body-split vs `!` vs `!{}`); §13.6 (generators — sibling-rule asymmetry rationale); §19.9.3, §19.9.5 (CPS canonical async surface); §37 (SSE generators — the existing load-bearing generator surface); §42.1 (parallel "no null/undefined" rule shape); §48.3.5 (the `fn`-scope E-FN-005 — now the within-`fn` manifestation of this language-wide rule); §34 (catalog entries for the three new codes).
 
 #### 19.9.9 Multi-Batch CPS — Reorder + Static Reject
 
@@ -27002,6 +27139,99 @@ mechanism M1).
   `onserver:*`, `onclient:*`, `class:*`, `style:*`) are accepted on
   every element regardless of the per-element schema.
 
+### 52.14 Tier 1 vs Tier 2 — Canonical Reach-For Rule
+
+**Added 2026-05-25 (S131 HU-3 Q5.B.3 ratification).** Disambiguates the two canonical surfaces for declaring server authority.
+
+§52 defines two distinct authority-declaration surfaces:
+
+| Tier | Surface | Authority scope |
+|---|---|---|
+| **Tier 1** (§52.3) | `<TypeName authority="server" table="...">` on a state type declaration | Type-shared — every cell of this type, across every file in the program, shares the contract |
+| **Tier 2** (§52.4) | `<x server>` bare-attribute on a V-kill structural decl (§6.1.5) | Per-cell — exactly this one cell carries the contract |
+
+Both tiers are first-class canonical surfaces. Neither is "advanced" or "deferred"; they cover different authority scopes.
+
+**The distinguishing reach-for question.** *"Do I want this server-authority on one cell, or across all cells of this type?"*
+
+- **One-cell** (per-instance) → reach for **Tier 2** (`<x server>` bare-attribute on the decl).
+- **All-cells-of-this-type** (type-shared, cross-file) → reach for **Tier 1** (type-level `authority="server"` declaration).
+
+This decomposition follows the same shape as scrml's other type-vs-instance binary distinctions (refinement-types-on-cells vs schema-column-validators per §55.3/§55.4; struct-as-type vs struct-instance via positional binding per §14.11): the type-level surface carries a contract that every instance inherits; the instance-level surface carries a contract scoped exactly to the cell it adorns.
+
+**Tier 2 — canonical for per-cell server authority.** When the adopter has one specific cell that should be server-authoritative — a singleton dashboard counter, a per-page configuration scalar, a current-user-profile cell, a top-of-feed cache — Tier 2 is the canonical reach. The bare-attribute composes naturally with the V5-strict structural decl (`<currentUser server>` reads identically to `<currentUser pinned>`), no separate type declaration required. The decl-site reads as "this cell here, server-authoritative." Common case.
+
+**Tier 1 — canonical for type-shared cross-file server contracts.** When the adopter has a state type (struct) whose every instance is database-backed — typically a row-type that maps to a table, where multiple program-scoped cells of that type appear across files — Tier 1 is the canonical reach. The `<Card authority="server" table="cards">` declaration carries the contract once; every `<Card> @anything` instance across the program inherits it. The type-level surface reads as "every cell of this type is server-authoritative against the named table."
+
+**Worked example per tier.**
+
+```scrml
+// ─── Tier 2 — per-cell server authority ──────────────────────────────────
+//
+//   One specific cell. Tier 2 bare-attribute is the canonical reach.
+
+<program db="sqlite:./app.db">
+
+    <currentUserId server>: number = 0       // singleton, server-authoritative
+    <cartItemCount server>: number = 0       // independent singleton
+    <draftMessage>: string = ""              // client-local for comparison
+
+    server function loadCurrentUser() {
+        return ?{`SELECT id FROM users WHERE session = ${@sessionToken}`}.get().id
+    }
+
+</program>
+```
+
+```scrml
+// ─── Tier 1 — type-shared cross-file server contract ─────────────────────
+//
+//   Every cell of type Card is server-authoritative against the `cards` table.
+//   The contract is declared once on the type; every instance inherits.
+
+<program db="sqlite:./app.db">
+
+    ${
+        type Column:enum = { Todo, InProgress, Done }
+
+        <Card authority="server" table="cards">
+            id: number
+            title: string
+            description: string
+            column: Column
+            position: number
+        </>
+    }
+
+    <Card> @cards               // server-authoritative — inherits from type
+    <Card> @archivedCards       // also server-authoritative — same type, same contract
+    <Card> @templateCards       // and again
+
+    server function loadCards() {
+        return ?{`SELECT * FROM cards`}.all()
+    }
+
+</program>
+```
+
+The Tier 2 example has three independent singleton cells — the right reach when each cell is its own concern. The Tier 1 example has three cells that all share the `Card`-against-`cards` contract — the right reach when the contract is the type, not the cell.
+
+**What NOT to do.**
+
+- Don't reach for Tier 1 to express a single-cell singleton. The `<TypeName authority="server" table="...">` ceremony is overhead with no payoff when only one instance exists. Tier 2 reads cleaner.
+- Don't reach for Tier 2 by writing the same `<x server>` decl across multiple files that ought to share a type contract. When three files all declare `<orders server>` against the same table, the right shape is one `<Order authority="server" table="orders">` type and three `<Order>` instances.
+- Don't mix tiers on the same conceptual entity. Either the type carries the contract (Tier 1) or each cell carries its own (Tier 2); a single cell SHALL NOT have both `<x server>` AND `<XType authority="server">` applied to its declared type — that conflict surfaces as `E-AUTH-004` per §52.3.4.
+
+**Composition with other §52 surfaces.** Both tiers compose identically with the rest of §52 — both fire `E-AUTH-001` on client-local-`?{}` access, both fire `E-AUTH-002` on server-derived-from-local initial values, both pre-render in SSR per §52.8, both generate the §52.6 sync infrastructure. The tier choice governs only the AUTHORITY SCOPE (per-cell vs type-shared); the runtime + compiler-emitted machinery is uniform.
+
+**Cross-references:**
+- §52.3 — Tier 1 (type-level authority) full normative treatment.
+- §52.4 — Tier 2 (instance-level authority) full normative treatment.
+- §52.5 — Authority Rules Summary Table (both tiers' rows are uniform).
+- §6.1.5 — V-kill state-decl grammar (the `server` decl-attr that Tier 2 uses).
+- §6.10.6 — `pinned` + `server` composition (Tier 2 only — `pinned` is per-decl, not per-type).
+- §55.16 — Validator firing on `server` cells (composition with both tiers).
+
 ---
 
 
@@ -28824,6 +29054,8 @@ type-level invariant equivalent.
 | Use system / `scrml:data` / registerMessages / messageFor | §41 |
 | Error codes index | §34 |
 | Reactive dependency graph (cross-field machinery) | §31 |
+| Validator composition with `server` modifier (placeholder + fetch firing) | §55.16 |
+| `server` modifier cell-authority semantics | §52.4 |
 
 **Error codes introduced or referenced by §55** (each is added to §34's table; see §3.6
 of the original D2 brief for the canonical listing):
@@ -28855,6 +29087,82 @@ of the original D2 brief for the canonical listing):
 
 The full normative definitions (severity, trigger, fix recommendation, example) live in
 the relevant sections; §34 indexes them.
+
+### 55.16 Composition with the `server` Modifier
+
+**Added 2026-05-25 (S131 HU-3 Q5.B.2 ratification).** Validator firing rule for `<x server>` cells.
+
+A V-kill structural decl MAY carry validator-attrs (§55.1 universal-core vocabulary) alongside the `server` flag (§52.4 — Tier 2 server-authoritative cell):
+
+```scrml
+<cards server req length(>=1)>: Card[] = []
+<username server req length(>=2)> = ""
+```
+
+**Normative firing rule.** The validator chain on a `<x server>` cell SHALL run at BOTH points:
+
+1. **At placeholder mount.** When the decl is mounted, the placeholder value (the RHS expression — see §52.4.3) runs through the validator chain immediately. `@x.isValid` and `@x.errors` reflect the placeholder's validity per the standard §55.2 + §55.5 + §55.6 rules.
+
+2. **At server-fetch arrival.** When the compiler-generated fetch (§52.4.2 step 1) resolves and `@x` is reassigned to the fetched value, the validator chain runs again over the fetched value. `@x.isValid` and `@x.errors` update accordingly.
+
+Subsequent writes — whether through assignment in client code or through optimistic-update / rollback per §52.4.2 — re-validate per the existing §55.2 reactive-recompute rule. No special composition; the standard cell-value-change → validator-rerun pipeline applies once the cell is past its initial placeholder lifecycle.
+
+**Rationale.** This rule treats the validator chain as a **STATE OBSERVATION**, not a **GATE on fetch**. The placeholder runs validators because the placeholder IS a value the cell inhabits; observers reading `@x.isValid` during the mount-to-fetch window should see the truthful current state of `@x`, not a deferred reading. The "placeholder is invalid until fetch" surface IS adopter-meaningful: `@x.isValid` provides the "data not yet present" signal that drives loading indicators / spinners without requiring a sibling `<loading>` cell or a `RemoteData`-enum wrapper.
+
+Two rejected alternatives:
+- "Fetch-only firing" — would hide the load-bearing "data not yet present" signal. Adopters would need to author `<loading>` cells alongside every `<x server req>` decl to recover the same UI state, defeating the auto-synth validity surface's reach.
+- "Every-read firing" — would re-run validators in render loops, which conflicts with §55.2's reactive-recompute discipline (recompute on cell-value change, not on read).
+
+**Composition with `pinned` (§6.10.6).** When `<x server pinned>` carries validators (`<cards server pinned req length(>=1)>: Card[] = []`), the firing rule above stands unchanged — validators run at placeholder mount AND at fetch arrival. The `pinned` semantic (§6.10.6) only governs whether `reset(@x)` restores the placeholder; it does NOT suppress validator firing on the placeholder. Adopters who want the placeholder treated as "valid by construction" must either author validators that admit the placeholder shape (e.g., `length(>=0)` rather than `length(>=1)`) or omit the validator that fails the placeholder; there is no `server-only` validator scope modifier.
+
+**Worked example — isValid transitions across mount → fetch → write.**
+
+```scrml
+<program db="sqlite:./shop.db">
+
+    <cards server req length(>=1)>: Card[] = []
+
+    server function loadCards() {
+        return ?{`SELECT * FROM cards`}.all()
+    }
+
+    function addCard(c) {
+        @cards = [...@cards, c]
+    }
+
+    function removeAll() {
+        @cards = []
+    }
+
+    <div>
+        ${ if (@cards.isValid) {
+            lift <ul>${ for (card of @cards) {
+                lift <li>${card.title}</>
+            } }</>
+        } else {
+            lift <p>Loading or empty: ${@cards.errors[0]}</>
+        } }
+    </>
+
+</program>
+```
+
+Timeline of `@cards.isValid` and `@cards.errors[0]`:
+
+| Phase | `@cards` value | `@cards.isValid` | `@cards.errors[0]` |
+|---|---|---|---|
+| Module init (placeholder mount) | `[]` (placeholder) | `false` | `.LengthFailed(>=1)` |
+| Mount: `loadCards()` returns `[{title: "A"}, {title: "B"}]` | `[{...}, {...}]` | `true` | none |
+| `addCard({title: "C"})` (optimistic + server-write) | `[A, B, C]` | `true` | none |
+| `removeAll()` writes `[]` (post-fetch — no longer placeholder) | `[]` | `false` | `.LengthFailed(>=1)` |
+
+Note that `removeAll()` triggers the same firing rule as any §55.2 reactive-recompute — the post-fetch lifecycle is identical to a non-`server` cell from §55's perspective.
+
+**Cross-references:**
+- §52.4 — `server` modifier semantics (Tier 2 instance-level authority).
+- §52.4.3 — placeholder semantics.
+- §6.10.6 — `pinned` + `server` composition (the placeholder-pinning rule that this subsection notes does NOT suppress validator firing).
+- §55.2 / §55.5 / §55.6 — standard validator firing + auto-synth surface rules (which apply to the fetched-value lifecycle).
 
 ---
 
