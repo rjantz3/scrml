@@ -138,7 +138,7 @@ What just landed:
 - **`const <visible> = match @filter {...}`** is a derived cell. The compiler recomputes it when `@filter` or `@tasks` changes. It's exhaustive: leaving out `.Done` is `E-MATCH-NOT-EXHAUSTIVE`. Add a fourth filter variant later and the compiler tells you every site that needs updating.
 - **`<each in=@visible key=@.id>`** is the structural iteration form — keyed DOM reconciliation, `@.` is the current item, `<empty>` is the zero-items state. The Stage 1 `${for / lift}` form still compiles fine; `<each>` is the structural commitment.
 
-### A note from the developer
+### A note from the dev
 
 This document describes the ***nominal*** language at the time of any version release. It does not describe what the compiler is perfectly capable of doing. I am working full-bore to get the compiler as close to the nominal state as possible. I am just one guy.
 
