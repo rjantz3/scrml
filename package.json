@@ -1,7 +1,7 @@
 {
   "name": "scrmlts",
   "version": "0.6.1",
-  "description": "scrml — a single-file, full-stack reactive web language. The compiler splits server from client, wires reactivity, routes HTTP, and emits plain HTML/CSS/JS.",
+  "description": "A complete compiler for the web.",
   "type": "module",
   "private": true,
   "license": "MIT",
