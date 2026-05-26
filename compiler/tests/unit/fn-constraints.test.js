@@ -18,6 +18,10 @@
 
 import { describe, test, expect } from "bun:test";
 import { runTS } from "../../src/type-system.js";
+// §8b S133 fix tests — end-to-end compileScrml path (markup false-positive regression)
+import { resolve, dirname } from "path";
+import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
+import { compileScrml } from "../../src/api.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -669,6 +673,107 @@ describe("§8: E-FN-003 — outer-scope variable mutation inside fn", () => {
     const errors = getFnErrors([fnDecl]);
 
     expect(errors.some(e => e.code === "E-FN-003")).toBe(false);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// §8b  E-FN-003 — markup-attribute false-positive (S133 fix)
+// ---------------------------------------------------------------------------
+//
+// Bug 12 (queued S132, fixed S133): `${ fn badge(x) { return <span class="b">${x}</span> } }`
+// false-fired E-FN-003 because checkOuterScopeMutation's text-heuristic
+// (ASSIGN_RE) read attribute serializations like `class="b"` and `href={x}`
+// as outer-scope assignments. Broader than first reported — also fires on
+// `let m = <span class="c">...` (not just `return`) and on brace-attrs
+// (`<a href={x}>`).
+//
+// Fix: skip the heuristic when the statement's serialized text starts with
+// `<` (markup-shaped). Real outer-scope writes inside fn live on their own
+// bare-expr / assignment statement and reach checkOuterScopeMutation
+// independently — see the negative control below.
+//
+// These tests exercise the END-TO-END compileScrml path (the §8 tests
+// above use synthetic AST nodes and don't exercise the text-heuristic).
+
+describe("§8b: E-FN-003 — markup-attribute false-positive (S133 fix)", () => {
+  const testDir = dirname(new URL(import.meta.url).pathname);
+  let tmpCounter = 0;
+
+  function compileWholeScrml(source, testName = `s133-efn003-${++tmpCounter}`) {
+    const tmpDir = resolve(testDir, `_tmp_${testName}`);
+    const tmpInput = resolve(tmpDir, `${testName}.scrml`);
+    mkdirSync(tmpDir, { recursive: true });
+    writeFileSync(tmpInput, source);
+    try {
+      const result = compileScrml({
+        inputFiles: [tmpInput],
+        write: false,
+        outputDir: resolve(tmpDir, "out"),
+      });
+      return {
+        errors: result.errors ?? [],
+        fnErrors: (result.errors ?? []).filter(e => e.code?.startsWith("E-FN")),
+      };
+    } finally {
+      if (existsSync(tmpInput)) rmSync(tmpInput);
+      if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }
+
+  test("fn returning attributed markup (string attr) does NOT trigger E-FN-003 (S133 fix)", () => {
+    const src = `\${
+    fn badge(x) {
+        return <span class="b">\${x}</span>
+    }
+}
+<p>\${badge("hi")}</>`;
+    const { fnErrors } = compileWholeScrml(src, "s133-string-attr");
+    const efn003 = fnErrors.filter(e => e.code === "E-FN-003");
+    expect(efn003).toHaveLength(0);
+  });
+
+  test("let-bound attributed markup inside fn does NOT trigger E-FN-003 (S133 fix)", () => {
+    const src = `\${
+    fn render(x) {
+        let m = <span class="c">\${x}</span>
+        return m
+    }
+}
+<p>\${render("hi")}</>`;
+    const { fnErrors } = compileWholeScrml(src, "s133-let-decl-markup");
+    const efn003 = fnErrors.filter(e => e.code === "E-FN-003");
+    expect(efn003).toHaveLength(0);
+  });
+
+  test("fn returning markup with brace-attribute does NOT trigger E-FN-003 (S133 fix)", () => {
+    const src = `\${
+    fn link(x) {
+        return <a href={x}>click</a>
+    }
+}
+<p>\${link("/home")}</>`;
+    const { fnErrors } = compileWholeScrml(src, "s133-brace-attr");
+    const efn003 = fnErrors.filter(e => e.code === "E-FN-003");
+    expect(efn003).toHaveLength(0);
+  });
+
+  test("fn with real outer-scope write alongside attributed markup STILL triggers E-FN-003 (S133 negative control)", () => {
+    const src = `\${
+    let counter = 0
+    fn bump(x) {
+        counter = counter + 1
+        return <span class="b">\${x}</span>
+    }
+}
+<p>\${bump("hi")}</>`;
+    const { fnErrors } = compileWholeScrml(src, "s133-neg-control");
+    const efn003 = fnErrors.filter(e => e.code === "E-FN-003");
+    // The fix MUST NOT over-suppress purity enforcement. Real writes still fire.
+    expect(efn003.length).toBeGreaterThanOrEqual(1);
+    // And the fire is on `counter` (the real write), NOT on `class` (the false-positive).
+    expect(efn003.some(e => e.message.includes("counter"))).toBe(true);
+    expect(efn003.some(e => e.message.includes("`class`"))).toBe(false);
   });
 });
 

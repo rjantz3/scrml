@@ -12796,6 +12796,20 @@ function checkFnBodyProhibitions(
       }
       return;
     }
+    // S133 fix (Bug 12 / E-FN-003) — false-positive on attributed-markup
+    // return / let-decl inside fn body. When the statement value is markup
+    // (escape-hatch raw text starting with `<`), the heuristic regex below
+    // misreads attribute serializations like `class="b"` or `href={x}` as
+    // outer-scope assignments. Markup-returning fn is canonical (PRIMER §6.4
+    // sub-shape 4, kickstarter §11.11). The text heuristic is unreliable on
+    // markup serializations — skip it. Real outer-scope writes inside fn live
+    // on their own bare-expr / assignment statement and reach this function
+    // separately (see negative-control test fn-constraints.test.js §8b).
+    // Reactive @-cell writes are caught by the structured exprNode path at
+    // ~line 13035, independent of this heuristic.
+    if (txt && /^\s*</.test(txt)) {
+      return;
+    }
     // Heuristic text check for assignment patterns
     if (txt) {
       const match = ASSIGN_RE.exec(txt);
