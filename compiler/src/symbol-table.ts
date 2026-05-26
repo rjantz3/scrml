@@ -796,6 +796,50 @@ export const PER_FIELD_SYNTH_PROPERTIES: readonly SynthProperty[] = [
 ] as const;
 
 /**
+ * A4 (S134) — Alias-provenance record for E-DERIVED-VALUE-MUTATE (L21) extension.
+ *
+ * Records that a local `let` / `const` binding holds a reference to (some path
+ * into) a `const`-derived reactive cell. Created during `walkRegisterLocalAliases`
+ * (sister pass to B2's `walkLocalDeclsForCollisions`), consulted during PASS 6
+ * when a mutation form's leaf-ident is NOT `@`-prefixed.
+ *
+ * Per SPEC §6.6.18, in-place mutation of a `const`-derived cell is forbidden
+ * regardless of whether the mutation lands through a direct `@cell.foo = x` path
+ * or through an aliased binding (`let local = @cell; local.foo = x`).
+ *
+ * Chain-break rules (init shapes that do NOT produce an alias record):
+ *   - spread (`[...@cell]` / `{...@cell}`) — NEW value
+ *   - object/array literals — NEW container
+ *   - binary/unary/logical/conditional — NEW value
+ *   - function-call results — chain-break (conservative)
+ *   - method-call returns — chain-break (`.filter` etc. return new arrays)
+ *
+ * See SPEC §6.6.18 normative "Forms NOT covered (legal): Local copies are mutable"
+ * — spread-copy is the spec's canonical chain-break example.
+ */
+export interface AliasRecord {
+  /** Name of the derived cell this binding aliases (no `@` prefix). For
+   *  `let local = @derived`, this is `"derived"`. For transitive
+   *  `let b = a` where `a` aliases `@d`, this is `"d"` (the transitive chain
+   *  is flattened at registration time). */
+  cellName: string;
+  /** Path segments from the cell down to the aliased value.
+   *  - Whole-cell alias (`let local = @cell`) → `[]`.
+   *  - Static-path alias (`let h = @v.a.b`) → `["a", "b"]`.
+   *  - Indexed alias (`let item = @d[0]`) → `["[…]"]` (computed-index sentinel
+   *    matching `firePropertyAssign`'s tail format). The sentinel cannot
+   *    resolve to a named compound sub-cell — it forces fallback to the BASE
+   *    cell record, which is what we want for L21 firing. */
+  pathTail: string[];
+  /** The original derived cell's `StateCellRecord` — for diagnostic context
+   *  (resolving qualifiedPath, declNode for span anchor). */
+  cellRecord: StateCellRecord;
+  /** Source decl node (let-decl / const-decl) — used for diagnostic
+   *  anchoring (alias declaration site). */
+  declNode: any;
+}
+
+/**
  * A single lexical scope. Forms a tree via `parent` back-pointers.
  *
  * Scopes are constructed top-down by the SYM walker:
@@ -832,6 +876,15 @@ export interface Scope {
    *  (functions don't extend the dotted path). For a compound scope, the
    *  parent record's `qualifiedPath` followed by `.` (e.g., `"signup."`). */
   qualifiedPath: string;
+  /** A4 (S134) — Per-scope map of LOCAL binding names to alias-provenance
+   *  records for `const`-derived cells. Populated by
+   *  `walkRegisterLocalAliases` (sister to B2's collision walker); consumed
+   *  by PASS 6 (the L21 walker) when a mutation form's leaf-ident is NOT
+   *  `@`-prefixed. Keyed by the LOCAL `let` / `const` binding name in this
+   *  scope. Empty map on most scopes; populated only when the function /
+   *  block body declares aliases of derived cells. Closes the
+   *  §6.6.18 alias-escape gap per the const-deep-freeze DD (2026-05-26). */
+  localAliases: Map<string, AliasRecord>;
 }
 
 /**
@@ -970,6 +1023,7 @@ function createScope(
     stateCells: new Map(),
     importBindings: new Map(),
     qualifiedPath,
+    localAliases: new Map(),
   };
 }
 
@@ -1504,6 +1558,385 @@ function walkLocalDeclsForCollisions(
     }
     if (kind === "lift-expr" && anyN.expr && anyN.expr.kind === "markup" && anyN.expr.node) {
       walkLocalDeclsForCollisions([anyN.expr.node], currentScope, visited, errors);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// B2.c: A4 (S134) — Alias-provenance registration walker
+// ---------------------------------------------------------------------------
+//
+// Sister pass to B2's `walkLocalDeclsForCollisions`. Visits the same four
+// local-decl kinds (`let-decl`, `const-decl`, `tilde-decl`, `lin-decl`) —
+// but instead of firing collision diagnostics, registers ALIAS RECORDS for
+// bindings whose init expression resolves (transitively) to a path into a
+// `const`-derived reactive cell.
+//
+// Per SPEC §6.6.18 + the S134 const-deep-freeze DD ratification: a
+// `const <name>` cell is **value-immutable from the developer's perspective**;
+// the current L21 walker (PASS 6) catches direct `@cell.foo = x` writes but
+// MISSES writes through local aliases (`let local = @cell; local.foo = x`).
+// This walker populates `Scope.localAliases` so PASS 6 can extend its
+// receiver-path check to cover aliased mutation forms.
+//
+// Chain-break rules (per SPEC §6.6.18 "Forms NOT covered (legal)" and per
+// the DD §5.1 / §6 implementation sketch):
+//   - Spread (`[...@cell]` / `{...@cell}`) → NEW value; no alias record.
+//   - Object literal field (`{ x: @cell }`) → NEW container; no record on `w`.
+//     Note: `w.x` aliases `@cell` via the JS heap, but our static analysis
+//     conservatively chain-breaks at the object literal — the property
+//     write would target `w.x.foo`, not `w.foo`, and tracking through the
+//     literal field IS technically possible but introduces aliasing of
+//     a single property which we choose not to model in this pass.
+//   - Array literal (`[@cell]`) → NEW container; same reasoning as object.
+//   - Binary / unary / logical / conditional / call → NEW value; no record.
+//   - Method-call return (e.g., `@cell.filter(x => x)`) → call shape; no record.
+//
+// Forward propagation (init shapes that DO produce an alias record):
+//   - `{kind: "ident", name: "@<cell>"}` — direct alias of derived cell.
+//   - `{kind: "member", object: <chain rooted at @cell>}` — path alias.
+//   - `{kind: "index", object: <chain rooted at @cell>}` — indexed alias
+//     (computed index produces a sentinel `[…]` in pathTail; static-index
+//     could be statically resolved but per the brief we conservatively
+//     treat all index accesses as opaque).
+//   - `{kind: "ident", name: "<localName>"}` where `<localName>` is already
+//     in `localAliases` (transitive — flattened to the original cell).
+//
+// Destructuring:
+//   - `let { a, b } = @cell` (object destructure) — each `bindName` becomes
+//     an alias with `pathTail = [..rhsTail, fieldName]`. JS-spec semantics:
+//     the bound name references the same heap object as the property.
+//   - `let { ...rest } = @cell` — rest is a NEW object (Object.assign-style
+//     shallow copy in JS spec); treat as chain-break (matches `{...@cell}`
+//     spread per spec).
+//   - `let [first, second] = @cell` (array destructure) — each element becomes
+//     an alias with `pathTail = [..rhsTail, "[…]"]` (computed-index sentinel).
+//   - `let [...rest] = @cell` — rest collects remaining elements into a NEW
+//     array (Array.from-style shallow copy); treat as chain-break.
+//   - Renamed (`let { a: aliased } = @cell`) — uses `bindName` not `fieldName`
+//     as the local key.
+//   - Nested destructure patterns — recurse; each nested binding gets a
+//     pathTail rooted at the same cell.
+//
+// Function/closure boundary (per the brief — conservative chain-break):
+//   - When an alias is passed AS AN ARGUMENT to a function call, the call
+//     site doesn't propagate alias status into the callee. Parameters are
+//     treated as fresh locals (no alias record).
+//   - Closures (arrow functions) that DIRECTLY reference `@cell.foo = y`
+//     inside their body are caught by the existing L21 walker's PASS 6
+//     descent. No alias-tracking change needed for that case.
+//
+// Pass ordering: runs AFTER PASS 1 (state-cell registration) so
+// `lookupStateCell` resolves correctly. Runs BEFORE PASS 6 (L21 walker) so
+// `localAliases` is populated when the walker consults it. Sister-pass
+// placement after B2 collision walker is correct — both passes consume
+// PASS 1's scope annotations, so they run back-to-back.
+
+/**
+ * If `initExpr` is a chain rooted at an `@<cell>` ident, return the
+ * `[cellName, ...pathSegments]` array. Returns `null` if the chain doesn't
+ * root at an `@`-prefixed ident or if a non-static index segment appears
+ * mid-chain (which makes the path unresolvable).
+ *
+ * Mirrors `buildReceiverPath` (line ~2510 post-scaffolding) but operates on
+ * a single ExprNode rather than a mutation form's receiver. Index segments
+ * are represented as `"[…]"` sentinels in the returned path — matching the
+ * existing `firePropertyAssign` tail format for consistency.
+ */
+function pathFromAtCellChain(initExpr: any): string[] | null {
+  if (!initExpr || typeof initExpr !== "object") return null;
+  // Walk from outermost down to the leaf, collecting segments in
+  // outer-to-inner order, then reverse to get inner-to-outer (cell-to-leaf).
+  const segments: string[] = [];
+  let cur: any = initExpr;
+  while (cur && typeof cur === "object") {
+    if (cur.kind === "ident") {
+      if (typeof cur.name !== "string" || !cur.name.startsWith("@")) return null;
+      const cellName = cur.name.slice(1);
+      if (!cellName) return null;
+      segments.reverse();
+      return [cellName, ...segments];
+    }
+    if (cur.kind === "member") {
+      if (typeof cur.property === "string") segments.push(cur.property);
+      else return null; // dynamic property — unusual; defensive null.
+      cur = cur.object;
+      continue;
+    }
+    if (cur.kind === "index") {
+      // Computed-index — emit sentinel + descend.
+      segments.push("[…]");
+      cur = cur.object;
+      continue;
+    }
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Resolve a local binding name in the current scope chain to its
+ * `AliasRecord`, if any. Walks parents — aliases registered in an enclosing
+ * function scope are visible in nested scopes (matching JS lexical
+ * scoping). Returns null on miss.
+ *
+ * Used for two cases:
+ *   1. Transitive alias detection (`let b = a` where `a` is already an
+ *      alias of `@d` → `b` inherits `a`'s record).
+ *   2. PASS 6 leaf-ident check (when the mutation's leaf isn't `@`-prefixed,
+ *      consult this lookup).
+ */
+function lookupLocalAlias(scope: Scope | null, name: string): AliasRecord | null {
+  let cur: Scope | null = scope;
+  while (cur) {
+    const hit = cur.localAliases.get(name);
+    if (hit) return hit;
+    cur = cur.parent;
+  }
+  return null;
+}
+
+/**
+ * Try to derive an `AliasRecord` from a `let-decl` / `const-decl` init
+ * expression. Returns `{cellName, pathTail, cellRecord}` if the init resolves
+ * to a path into a `const`-derived cell; otherwise `null`.
+ *
+ * Three init shapes produce a record:
+ *   (1) `@<cell>` chain (direct / member / index) where `<cell>` is registered
+ *       as `const`-derived (`record.isConst === true`).
+ *   (2) Bare ident that resolves to an existing alias (transitive — inherit
+ *       the alias's cellName + pathTail).
+ *   (3) Destructuring property (handled by caller via `extractAliasFromDestructureRhs`).
+ *
+ * All other init shapes (literals, operators, calls, spreads) return null
+ * per the chain-break rules in the header comment.
+ */
+function tryDeriveAliasFromInit(
+  initExpr: any,
+  scope: Scope,
+): { cellName: string; pathTail: string[]; cellRecord: StateCellRecord } | null {
+  if (!initExpr || typeof initExpr !== "object") return null;
+
+  // Case (1): chain rooted at `@<cell>`.
+  const chainPath = pathFromAtCellChain(initExpr);
+  if (chainPath && chainPath.length >= 1) {
+    const [cellName, ...pathTail] = chainPath;
+    const rec = lookupStateCell(scope, cellName);
+    if (rec && rec.isConst) {
+      return { cellName, pathTail, cellRecord: rec };
+    }
+    // Non-derived cell — no alias record (the mutation rules are about
+    // const-derived cells specifically per §6.6.18).
+    return null;
+  }
+
+  // Case (2): transitive — bare ident that's already an alias.
+  if (initExpr.kind === "ident" && typeof initExpr.name === "string"
+      && !initExpr.name.startsWith("@")) {
+    const transRec = lookupLocalAlias(scope, initExpr.name);
+    if (transRec) {
+      return {
+        cellName: transRec.cellName,
+        pathTail: [...transRec.pathTail],
+        cellRecord: transRec.cellRecord,
+      };
+    }
+    return null;
+  }
+
+  // All other init kinds (array, object, binary, unary, call, lit, arrow, etc.) → chain break.
+  return null;
+}
+
+/**
+ * Walk a destructure pattern's properties/elements, registering an alias
+ * record per binding. Recurses into nested patterns. `rhsAlias` provides
+ * the cellName + pathTail that the RHS resolves to; each binding extends
+ * that path with the field-name (object) or index-sentinel (array).
+ */
+function registerDestructureAliases(
+  pattern: any,
+  rhsAlias: { cellName: string; pathTail: string[]; cellRecord: StateCellRecord },
+  declNode: any,
+  scope: Scope,
+): void {
+  if (!pattern || typeof pattern !== "object") return;
+
+  if (pattern.kind === "destructure-object") {
+    for (const prop of pattern.properties ?? []) {
+      if (!prop || typeof prop !== "object") continue;
+      if (prop.kind === "name" && typeof prop.fieldName === "string"
+          && typeof prop.bindName === "string") {
+        scope.localAliases.set(prop.bindName, {
+          cellName: rhsAlias.cellName,
+          pathTail: [...rhsAlias.pathTail, prop.fieldName],
+          cellRecord: rhsAlias.cellRecord,
+          declNode,
+        });
+      } else if (prop.kind === "nested" && typeof prop.fieldName === "string"
+                 && prop.pattern) {
+        registerDestructureAliases(
+          prop.pattern,
+          {
+            cellName: rhsAlias.cellName,
+            pathTail: [...rhsAlias.pathTail, prop.fieldName],
+            cellRecord: rhsAlias.cellRecord,
+          },
+          declNode,
+          scope,
+        );
+      }
+    }
+    // Rest (`{ ...rest }`) is a NEW object per JS spec — chain-break; no
+    // record. Matches `{...@cell}` spread which is documented legal.
+    return;
+  }
+
+  if (pattern.kind === "destructure-array") {
+    const elements = pattern.elements ?? [];
+    for (let i = 0; i < elements.length; i++) {
+      const el = elements[i];
+      if (!el || typeof el !== "object") continue;
+      if (el.kind === "name" && typeof el.name === "string") {
+        // Array destructure binds each element to the same heap reference
+        // as @cell[i]; use computed-index sentinel since static index
+        // resolution isn't currently modeled in the L21 receiver-path
+        // mechanism.
+        scope.localAliases.set(el.name, {
+          cellName: rhsAlias.cellName,
+          pathTail: [...rhsAlias.pathTail, "[…]"],
+          cellRecord: rhsAlias.cellRecord,
+          declNode,
+        });
+      } else if (el.kind === "nested" && el.pattern) {
+        registerDestructureAliases(
+          el.pattern,
+          {
+            cellName: rhsAlias.cellName,
+            pathTail: [...rhsAlias.pathTail, "[…]"],
+            cellRecord: rhsAlias.cellRecord,
+          },
+          declNode,
+          scope,
+        );
+      }
+      // el.kind === "hole" — empty slot, no binding.
+    }
+    // Rest (`[...rest]`) — NEW array per JS spec; chain-break.
+    return;
+  }
+}
+
+/**
+ * Process a single local-decl node, registering an alias record into
+ * `scope.localAliases` if the init expression resolves to a derived-cell path.
+ *
+ * `tilde-decl` / `lin-decl` use simple-name patterns (`name: string`); only
+ * `let-decl` and `const-decl` carry destructuring patterns. We handle the
+ * destructure cases for the latter two; for the former two, we only consider
+ * the simple-name case.
+ */
+function registerAliasForDecl(decl: any, scope: Scope): void {
+  if (!decl || typeof decl !== "object") return;
+  const initExpr = decl.initExpr;
+  if (!initExpr) return;
+
+  // Simple name (string) — direct binding.
+  if (typeof decl.name === "string") {
+    const alias = tryDeriveAliasFromInit(initExpr, scope);
+    if (alias) {
+      scope.localAliases.set(decl.name, {
+        cellName: alias.cellName,
+        pathTail: alias.pathTail,
+        cellRecord: alias.cellRecord,
+        declNode: decl,
+      });
+    }
+    return;
+  }
+
+  // Destructuring pattern (let / const only).
+  if (decl.name && typeof decl.name === "object"
+      && (decl.name.kind === "destructure-object" || decl.name.kind === "destructure-array")) {
+    const rhsAlias = tryDeriveAliasFromInit(initExpr, scope);
+    if (rhsAlias) {
+      registerDestructureAliases(decl.name, rhsAlias, decl, scope);
+    }
+  }
+}
+
+/**
+ * Walk the AST tree, registering alias records on each `let-decl` /
+ * `const-decl` / `tilde-decl` / `lin-decl` whose init expression resolves
+ * to a path into a `const`-derived cell. Mirrors the recursion shape of
+ * `walkLocalDeclsForCollisions` (B2) — same scope-traversal pattern, same
+ * scope-introducing-node handling (function-decl, compound state-decl,
+ * engine-decl bodies, lift-exprs).
+ *
+ * Pass dependencies: PASS 1 (state-cell registration) must run first so
+ * `lookupStateCell` resolves correctly. No diagnostics fired here —
+ * registration only. PASS 6 (L21 walker) consumes `localAliases` via
+ * `lookupLocalAlias`.
+ */
+function walkRegisterLocalAliases(
+  nodes: ASTNode[] | undefined,
+  currentScope: Scope,
+  visited: WeakSet<object>,
+): void {
+  if (!nodes) return;
+  for (const n of nodes) {
+    if (!n || typeof n !== "object") continue;
+    if (visited.has(n)) continue;
+    visited.add(n);
+    const anyN = n as any;
+    const kind = anyN.kind as string;
+
+    // Register the alias FIRST (the init expression's resolution depends on
+    // the CURRENT scope; nested decls inside if/for/match bodies are
+    // registered as the walk descends).
+    if (
+      kind === "let-decl"
+      || kind === "const-decl"
+      || kind === "tilde-decl"
+      || kind === "lin-decl"
+    ) {
+      registerAliasForDecl(anyN, currentScope);
+      // No early-continue — local-decl bodies may carry if-/for-/match-as-
+      // expression children; generic-recursion fallthrough handles them.
+    }
+
+    if (kind === "state-decl") {
+      // State-decls don't participate in alias-binding; descend into compound
+      // sub-scope only for nested local-decls inside compound bodies (rare
+      // but legal — `<form>${ const <derived> = @form.x }<:/>` style).
+      const stateScope = (anyN as ReactiveDeclNode & ScopeAnnotated)._scope;
+      if (stateScope && Array.isArray(anyN.children)) {
+        walkRegisterLocalAliases(anyN.children, stateScope, visited);
+      }
+      continue;
+    }
+
+    if (kind === "function-decl") {
+      const fnScope = (anyN as ScopeAnnotated)._scope ?? currentScope;
+      walkRegisterLocalAliases(anyN.body, fnScope, visited);
+      continue;
+    }
+
+    // Generic recursion — mirror B2 shape.
+    if (Array.isArray(anyN.children)) walkRegisterLocalAliases(anyN.children, currentScope, visited);
+    if (Array.isArray(anyN.body)) walkRegisterLocalAliases(anyN.body, currentScope, visited);
+    if (Array.isArray(anyN.consequent)) walkRegisterLocalAliases(anyN.consequent, currentScope, visited);
+    if (Array.isArray(anyN.alternate)) walkRegisterLocalAliases(anyN.alternate, currentScope, visited);
+    if (Array.isArray(anyN.arms)) {
+      for (const arm of anyN.arms) {
+        if (arm && Array.isArray(arm.body)) walkRegisterLocalAliases(arm.body, currentScope, visited);
+      }
+    }
+    if (kind === "engine-decl" && Array.isArray(anyN.bodyChildren)) {
+      walkRegisterLocalAliases(anyN.bodyChildren, currentScope, visited);
+    }
+    if (kind === "lift-expr" && anyN.expr && anyN.expr.kind === "markup" && anyN.expr.node) {
+      walkRegisterLocalAliases([anyN.expr.node], currentScope, visited);
     }
   }
 }
@@ -2582,6 +3015,162 @@ function fireDelete(
 }
 
 /**
+ * A4 (S134) — Alias-aware variant of `buildReceiverPath`. When the chain's
+ * leaf ident is NOT `@`-prefixed, consult `Scope.localAliases`. If the leaf
+ * binding is an alias of a `const`-derived cell, return the alias-expanded
+ * receiver path: `[alias.cellName, ...alias.pathTail, ...memberSegments]`,
+ * along with the AliasRecord for diagnostic enrichment.
+ *
+ * Returns `null` when:
+ *   - The chain doesn't terminate in an ident (defensive)
+ *   - The leaf is `@`-prefixed (caller should use `buildReceiverPath` for this
+ *     case — the standard path is canonical and doesn't need alias enrichment)
+ *   - The leaf is a non-aliased local (legitimately not a derived-cell write)
+ *
+ * Per SPEC §6.6.18 + the S134 const-deep-freeze DD: aliased writes through
+ * `let local = @derived; local.foo = x` must fire `E-DERIVED-VALUE-MUTATE`
+ * just as direct `@derived.foo = x` writes do.
+ */
+function buildReceiverPathViaAlias(
+  chainRoot: any,
+  scope: Scope,
+): { path: string[]; alias: AliasRecord; localLeafName: string } | null {
+  const leaf = leafIdentInChain(chainRoot);
+  if (!leaf || typeof leaf.name !== "string") return null;
+  // If the leaf is `@`-prefixed, caller should use the standard `buildReceiverPath`.
+  if (leaf.name.startsWith("@")) return null;
+  const alias = lookupLocalAlias(scope, leaf.name);
+  if (!alias) return null;
+  // collectMemberPath returns null on computed-index segments. For our purposes
+  // (alias-expansion), a computed index in the receiver chain still resolves
+  // to the BASE alias cell — the index just adds a `[…]` sentinel that
+  // doesn't change which derived cell we're firing on. Walk a custom variant
+  // that emits sentinels for `index` segments instead of bailing.
+  const segments: string[] = [];
+  let cur: any = chainRoot;
+  while (cur && typeof cur === "object") {
+    if (cur.kind === "ident") break;
+    if (cur.kind === "member") {
+      if (typeof cur.property === "string") segments.push(cur.property);
+      cur = cur.object;
+      continue;
+    }
+    if (cur.kind === "index") {
+      segments.push("[…]");
+      cur = cur.object;
+      continue;
+    }
+    return null;
+  }
+  segments.reverse();
+  return {
+    path: [alias.cellName, ...alias.pathTail, ...segments],
+    alias,
+    localLeafName: leaf.name,
+  };
+}
+
+/**
+ * Build a human-readable alias-chain description for diagnostic messages.
+ * For a binding `let local = @derived`, returns `"local <- @derived"`.
+ * For a path-aliased binding `let h = @v.a`, returns `"h <- @v.a"`.
+ */
+function formatAliasChain(localLeafName: string, alias: AliasRecord): string {
+  const cellRef = formatReceiver([alias.cellName, ...alias.pathTail]);
+  return `\`${localLeafName}\` <- \`${cellRef}\``;
+}
+
+/**
+ * Alias-aware variant of `fireMethodCall`. Includes the alias chain in the
+ * diagnostic message + adjusts the fix-recommendation to mention spread-copy
+ * as the legal escape hatch (per SPEC §6.6.18 "Local copies are mutable").
+ */
+function fireMethodCallViaAlias(
+  errors: SYMDiagnostic[],
+  receiverPath: string[],
+  localLeafName: string,
+  alias: AliasRecord,
+  method: string,
+  span: Span,
+): void {
+  const ref = formatReceiver(receiverPath);
+  const chain = formatAliasChain(localLeafName, alias);
+  errors.push({
+    code: "E-DERIVED-VALUE-MUTATE",
+    message:
+      `E-DERIVED-VALUE-MUTATE: in-place mutation of derived cell \`${ref}\` `
+      + `via alias \`${localLeafName}.${method}(...)\`. Alias chain: ${chain}. `
+      + `\`${ref}\` is \`const\`-derived; mutating its value through any alias `
+      + `is forbidden — the mutation would be silently clobbered the next time `
+      + `upstream dependencies fire (SPEC §6.6.18 + §34). `
+      + `Fix: mutate the upstream cell instead, or declare a separate mutable `
+      + `cell for independent storage. To make a local mutable copy, use `
+      + `\`let ${localLeafName} = [...${ref}]\` — spread breaks the alias chain.`,
+    span,
+    severity: "error",
+  });
+}
+
+/**
+ * Alias-aware variant of `firePropertyAssign`.
+ */
+function firePropertyAssignViaAlias(
+  errors: SYMDiagnostic[],
+  receiverPath: string[],
+  localLeafName: string,
+  alias: AliasRecord,
+  op: string,
+  pathTail: string[],
+  span: Span,
+): void {
+  const ref = formatReceiver(receiverPath);
+  const chain = formatAliasChain(localLeafName, alias);
+  const tailDesc = pathTail.length > 0 ? `.${pathTail.join(".")}` : "";
+  errors.push({
+    code: "E-DERIVED-VALUE-MUTATE",
+    message:
+      `E-DERIVED-VALUE-MUTATE: in-place mutation of derived cell \`${ref}\` `
+      + `via alias property write \`${localLeafName}${tailDesc} ${op} ...\`. `
+      + `Alias chain: ${chain}. `
+      + `\`${ref}\` is \`const\`-derived; mutating its value through any alias `
+      + `is forbidden — the mutation would be silently clobbered the next time `
+      + `upstream dependencies fire (SPEC §6.6.18 + §34). `
+      + `Fix: mutate the upstream cell instead, or declare a separate mutable `
+      + `cell for independent storage. To make a local mutable copy, use `
+      + `\`let ${localLeafName} = {...${ref}}\` (object) or `
+      + `\`let ${localLeafName} = [...${ref}]\` (array) — spread breaks the alias chain.`,
+    span,
+    severity: "error",
+  });
+}
+
+/**
+ * Alias-aware variant of `fireDelete`.
+ */
+function fireDeleteViaAlias(
+  errors: SYMDiagnostic[],
+  receiverPath: string[],
+  localLeafName: string,
+  alias: AliasRecord,
+  span: Span,
+): void {
+  const ref = formatReceiver(receiverPath);
+  const chain = formatAliasChain(localLeafName, alias);
+  errors.push({
+    code: "E-DERIVED-VALUE-MUTATE",
+    message:
+      `E-DERIVED-VALUE-MUTATE: in-place mutation of derived cell \`${ref}\` `
+      + `via alias \`delete ${localLeafName}.<prop>\`. Alias chain: ${chain}. `
+      + `\`${ref}\` is \`const\`-derived; deleting properties of its value through `
+      + `any alias is forbidden — the deletion would be silently clobbered the `
+      + `next time upstream dependencies fire (SPEC §6.6.18 + §34). `
+      + `Fix: mutate the upstream cell instead, or declare a separate mutable cell.`,
+    span,
+    severity: "error",
+  });
+}
+
+/**
  * Scan path prefixes longest→shortest, looking for a registered StateCell
  * record. The deepest registered record on the prefix is the leaf cell
  * (handles single-segment `["copy"]` and compound-nav
@@ -2678,6 +3267,35 @@ function checkExprNodeForMutations(
           const fired = scanPrefixesAndFireAssign(fullPath, n, scope, errors, containerSpan);
           // (no-op when not derived; scan returns boolean for future use)
           void fired;
+        } else {
+          // A4 (S134) — Alias-aware fallback. The leaf-ident is NOT `@`-prefixed;
+          // consult `Scope.localAliases`. If the leaf is an alias of a
+          // `const`-derived cell, expand the receiver path and fire the
+          // alias-variant diagnostic. Per SPEC §6.6.18 + the const-deep-freeze
+          // DD ratification (S134) — aliased writes must fire just as direct
+          // `@cell.foo = x` writes do.
+          const aliasResult = buildReceiverPathViaAlias(n.target.object, scope);
+          if (aliasResult) {
+            const hit = findDeepestRegisteredOnPrefix(scope, aliasResult.path);
+            if (hit && hit.record.isConst) {
+              // Compute tail (segments AFTER matched cell + final assign property).
+              const tail: string[] = aliasResult.path.slice(hit.path.length);
+              if (n.target.kind === "member" && typeof n.target.property === "string") {
+                tail.push(n.target.property);
+              } else if (n.target.kind === "index") {
+                tail.push("[…]");
+              }
+              firePropertyAssignViaAlias(
+                errors,
+                hit.path,
+                aliasResult.localLeafName,
+                aliasResult.alias,
+                n.op,
+                tail,
+                containerSpan,
+              );
+            }
+          }
         }
       }
     }
@@ -2691,6 +3309,22 @@ function checkExprNodeForMutations(
         if (hit && hit.record.isConst) {
           fireMethodCall(errors, hit.path, n.callee.property, containerSpan);
         }
+      } else {
+        // A4 (S134) — Alias-aware fallback for method-call mutation form.
+        const aliasResult = buildReceiverPathViaAlias(n.callee.object, scope);
+        if (aliasResult) {
+          const hit = findDeepestRegisteredOnPrefix(scope, aliasResult.path);
+          if (hit && hit.record.isConst) {
+            fireMethodCallViaAlias(
+              errors,
+              hit.path,
+              aliasResult.localLeafName,
+              aliasResult.alias,
+              n.callee.property,
+              containerSpan,
+            );
+          }
+        }
       }
     }
     if (k === "unary" && n.op === "delete" && n.argument
@@ -2702,6 +3336,21 @@ function checkExprNodeForMutations(
         const hit = findDeepestRegisteredOnPrefix(scope, fullPath);
         if (hit && hit.record.isConst) {
           fireDelete(errors, hit.path, containerSpan);
+        }
+      } else {
+        // A4 (S134) — Alias-aware fallback for delete form.
+        const aliasResult = buildReceiverPathViaAlias(n.argument.object, scope);
+        if (aliasResult) {
+          const hit = findDeepestRegisteredOnPrefix(scope, aliasResult.path);
+          if (hit && hit.record.isConst) {
+            fireDeleteViaAlias(
+              errors,
+              hit.path,
+              aliasResult.localLeafName,
+              aliasResult.alias,
+              containerSpan,
+            );
+          }
         }
       }
     }
@@ -8919,6 +9568,16 @@ export function runSYM(input: SYMInput): SYMResult {
   // we descend without re-creating scopes).
   const visited2 = new WeakSet<object>();
   walkLocalDeclsForCollisions(ast.nodes, fileScope, visited2, errors);
+
+  // PASS 2.c (A4 S134): Register alias-provenance records for local bindings
+  // whose init expression resolves to a path into a `const`-derived cell.
+  // Closes the §6.6.18 alias-escape gap (const-deep-freeze DD ratification).
+  // Populates `Scope.localAliases`; PASS 6 consults it via `lookupLocalAlias`.
+  // Runs AFTER PASS 2 so the alias-tracking pass sees no false negatives from
+  // shadowing (PASS 2 fires E-NAME-COLLIDES-STATE before any alias decision
+  // is made), and BEFORE PASS 6 so the L21 walker sees a populated map.
+  const visited2c = new WeakSet<object>();
+  walkRegisterLocalAliases(ast.nodes, fileScope, visited2c);
 
   // PASS 2.b (B4): E-IMPORT-PINNED-INVALID best-effort fire. For every
   // pinned import-binding registered at file scope, look up the source
