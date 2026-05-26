@@ -431,6 +431,178 @@ const Field = <div props={
 
 ---
 
+## §6.5 Lifecycle annotation — `(A to B)` (§14.12)
+
+**Added 2026-05-26 (S134 — Lifecycle Landing 3; closes F-023 from S130 HU-1 ratification. Type-system surface ratified S130 — SPEC §14.12; per-access tracker shipped S130 Landing 1; extension scope + glyph migration shipped S130 Landing 2; fn-return hybrid shipped S131 HU-2.)**
+
+A lifecycle annotation `(A to B)` on a type position declares that the location starts holding a value of type `A` and transitions to type `B`. The compiler tracks per-access transition state and fires `E-TYPE-001` at any read of the location before it has transitioned.
+
+```scrml
+type User:struct = {
+    id: number,
+    email: string,
+    passwordHash: (not to string)        // starts absent; transitions to string after hashing
+}
+
+const u: User = { id: 1, email: "a@b.com", passwordHash: not }
+print(u.passwordHash)                     // E-TYPE-001 — pre-transition access
+
+u.passwordHash = hashPassword(rawPassword)
+print(u.passwordHash)                     // OK — post-transition access
+```
+
+The annotation is a **type-system** mechanism, NOT a state-machine. For variant-graph progression with explicit `from` / `to` declarations, use an engine (§7 / Tier 2). Engines and lifecycle annotations are complementary; the engine-cell carve-out below preserves the separation.
+
+### The canonical glyph — `to` (contextual keyword)
+
+`to` inside the parenthesised lifecycle expression is a **contextual keyword**, parallel to `from` in `import` declarations (§21.3). Outside this position, `to` remains usable as an identifier, attribute name, struct field, etc.
+
+```scrml
+passwordHash: (not to string)            // canonical (S130 — HU-1)
+passwordHash: (not -> string)            // legacy — accepted; surfaces W-LIFECYCLE-LEGACY-ARROW
+```
+
+The legacy `->` glyph is RECOGNISED during the deprecation window and surfaces an info-level lint `W-LIFECYCLE-LEGACY-ARROW`. Both forms parse and resolve identically during the window. New code SHALL use `to`; existing samples MAY migrate at convenience. End-of-window timing promotes `W-LIFECYCLE-LEGACY-ARROW` → `E-LIFECYCLE-LEGACY-ARROW` (reserved; not yet emitted).
+
+**Disambiguation from JS arrow `=>`:** the JS arrow function `(x) => expr` uses `=>` in EXPRESSION position; the lifecycle annotation uses `to` (or legacy `->`) in TYPE position. No glyph collision.
+
+**Disambiguation from `fn` return arrow `->`:** the `fn` signature `fn name() -> ReturnType` uses `->` as a STRUCTURAL SEPARATOR in the function signature grammar — NOT a lifecycle annotation. The lifecycle annotation appears INSIDE a parenthesised type expression in the return type slot (e.g., `fn loadUser(id: number) -> (not to User)`).
+
+### Permitted positions — the teachable rule
+
+**"Lifecycle annotation goes anywhere a type goes, except engine cells."** (S130 — HU-1 Q1=c.)
+
+| Position | Permitted? | Worked example |
+|---|---|---|
+| Struct field | YES | `passwordHash: (not to string)` |
+| Shape 1 plain reactive cell | YES | `<status>: (Idle to Active) = .Idle` |
+| Function parameter | YES | `fn process(u: (not to User))` |
+| Function return | YES (hybrid; §6.5 below) | `server fn loadUser(id: number) -> (not to User)` |
+| Schema field | YES | (cross-ref §14.12.7) |
+| Channel cell | YES | (cross-ref §14.12.8) |
+| **Engine cell** | **NO** — fires `E-TYPE-LIFECYCLE-ON-ENGINE-CELL` | (see carve-out below) |
+
+### Engine-cell carve-out (the critical exception)
+
+A cell that is the **auto-declared variable of an `<engine>` declaration** (or any `var=` override) is an **engine cell** and SHALL NOT carry a lifecycle annotation. Engines own variant-graph progression via `rule=` / `initial=` / `<onTransition>`; a lifecycle annotation on an engine cell would create a second, redundant progression mechanism on the same surface.
+
+```scrml
+type Phase:enum = { Idle, Loading, Done }
+
+<engine for=Phase initial=.Idle>
+  <Idle    rule=.Loading>: "idle"
+  <Loading rule=.Done>:    "loading"
+  <Done>:                  "done"
+</>
+
+<phase>: (Idle to Done) = .Idle           // E-TYPE-LIFECYCLE-ON-ENGINE-CELL
+                                          // `@phase` is the engine's auto-declared cell;
+                                          // engine `rule=` already owns the progression.
+```
+
+For value-shape progression on a cell that is NOT an engine cell, declare as a plain Shape 1 reactive cell:
+
+```scrml
+type Phase:enum = { Idle, Loading, Done }
+
+<phase>: (Idle to Done) = .Idle           // Shape 1 plain reactive cell — lifecycle permitted.
+                                          // No engine declaration exists for `phase`.
+@phase = .Done                            // legal — transition fires; subsequent reads pass.
+```
+
+The carve-out is detected at type-resolution: a state-decl is classified as an engine cell iff a sibling `<engine>` declaration's `engineMeta.varName` (or `var=` override) matches the state-decl's name. Unambiguous — engine declarations are syntactic constructs, not user-named conventions.
+
+### Function-return position — the hybrid mechanism (§14.12.6)
+
+Lifecycle on function-return type is fully tracked end-to-end. The transition mechanism splits by the lifecycle's pre-type:
+
+| Lifecycle shape | Pre-type | Transition mechanism |
+|---|---|---|
+| **Presence-progression** | `not` (e.g., `(not to T)`) | **Discrimination IS transition** — `given u = expr {}`, `if (u is not) return`, OR `match u { ... }` AUTO-MARKS |
+| **Variant-progression** | An enum variant (e.g., `(.A to .B)`) | **Explicit `transition(u)`** — call the `transition()` built-in after discriminating the source variant |
+
+**Presence-progression — discrimination IS transition:**
+
+```scrml
+server fn loadUser(id: number) -> (not to User) {
+    const row = ?{ select * from users where id = ${id} }.get()
+    return row     // returns `User | not`; lifecycle declares the post-transition contract
+}
+
+const u = loadUser(42)
+
+// Form 1 — given presence-guard (§42.2.3)
+given u => {
+    print(u.name)                         // OK — discrimination = transition
+}
+
+// Form 2 — if-is-not early-return
+if (u is not) return
+print(u.name)                             // OK — narrowed + transitioned
+
+// Form 3 — match
+match u {
+    not => handleAbsence()
+    given u => { print(u.name) }          // OK — arm discriminates + transitions
+}
+
+// Pre-transition access — fires E-TYPE-001
+const u2 = loadUser(42)
+print(u2.name)                            // E-TYPE-001 — u2 was not discriminated
+```
+
+**Variant-progression — explicit `transition(u)`:**
+
+```scrml
+type Article:enum = {
+    Draft(body: string),
+    Published(body: string, publishedAt: number)
+}
+
+server fn publish(id: number) -> (.Draft to .Published) {
+    const a = ?{ select * from articles where id = ${id} }.get()
+    return a as .Published                // callee transitions; returns Published-shape
+}
+
+const a = publish(42)
+
+if (a is .Draft) {
+    transition(a)                         // explicit per-access transition signal
+    print(a.publishedAt)                  // OK — post-transition access of B-shape field
+}
+
+// Missing-transition — fires E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED
+if (a is .Draft) {
+    print(a.publishedAt)                  // accessed .Published-shape field after
+                                          // discriminating .Draft without transition()
+}
+```
+
+**Why the asymmetry?** Presence-discrimination (`is not` / `is some` / `given` / `match`) is already a first-class scrml primitive (§42); reusing it as the transition marker keeps the adopter mental model unified. A variant tag like `.Draft` is a positive shape — discriminating it proves the SOURCE variant but does NOT inherently prove the callee advanced the lifecycle. The explicit `transition()` call provides the per-access signal the type-system needs to gate post-transition field access.
+
+### `transition()` semantics
+
+- **Compile-time only.** Zero runtime cost; emitted as no code.
+- **One argument** — an identifier binding whose type carries a lifecycle annotation.
+- **Single transition per scope.** Subsequent calls on the same binding in the same scope are silent no-ops.
+- **Scope-local.** Aliasing (`let b = a; transition(b)`) does NOT transition `a`.
+- **Out-of-place use** — `transition()` on a value with no lifecycle annotation is silently no-op (no diagnostic). Keeps the keyword cheap to use defensively in generic helper code.
+
+### Multi-variant chains `(A to B to C)` — RESERVED
+
+The hybrid mechanism specifies the binary case. Multi-variant chains — `(.Draft to .Review to .Published)` — are RESERVED for a future SPEC amendment. A planned `markTransitioned(u, .Variant)` form (per HU-2 (d), explicitly NOT implemented at the v0.6.0 surface per pa.md Rule 3 YAGNI) would target a specific intermediate variant. Until that amendment lands, lifecycle annotations are restricted to two-state pre→post pairs; a three-token annotation is REJECTED by the type-system resolver.
+
+### Cross-references
+
+- §14.12 — normative spec (canonical home; promoted from §14.3 sub-content at S130)
+- §6.2 (PRIMER) — Shape 1 plain reactive cells (the §6.2-shape position that receives the annotation)
+- §7 (PRIMER) — engines (the engine-cell carve-out target)
+- §42.2.3 — `given` presence-guard (form 1 of presence-progression discrimination)
+- `compiler/src/type-system.ts:1444` — Landing 1 per-access tracker (S130 `1feaedc9`)
+- `bun scrml migrate --lifecycle` is NOT yet a CLI verb; `->` → `to` migration is manual during the deprecation window.
+
+---
+
 ## §7 Engines (Tier 2) — the centerpiece (§51)
 
 Engines are the v0.next centerpiece. Singleton-by-design (one declaration mounts the singleton; cross-file mount via `<EngineName/>`). Components are the multi-instance vehicle (Move 20 — components and engines are distinct, do not collapse).

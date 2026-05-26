@@ -227,17 +227,18 @@ SPEC §4.18 landed Wave 1 S111 — the code-default body mode + `"..."` display-
 
 ---
 
-## §5 Lifecycle annotation surface — partial-implementation status
+## §5 Lifecycle annotation surface — COMPLETE (arc closed S134)
 
-S130 lifecycle DD + HU-1 ratified `(A to B)` extension scope to non-engine cells (Approach C); 3 landings planned:
+S130 lifecycle DD + HU-1 ratified `(A to B)` extension scope to non-engine cells (Approach C); 3 landings, all SHIPPED:
 
 | Landing | Scope | Status |
 |---|---|---|
 | 1 | E-TYPE-001 fire (per-access transition-state tracking in `type-system.ts`) | **SHIPPED S130** (`1feaedc9`) — see §7 rotation |
-| 2 | Approach C extension to fn params + fn return + schema fields + channel cells + `->` → `to` glyph migration + new §14.X subsection + `E-TYPE-LIFECYCLE-ON-ENGINE-CELL` engine-cell rejection | queued (next dispatch) |
-| 3 | PRIMER + kickstarter flagship section (per F-023) | queued post-Landing 2 |
+| 2 | Approach C extension to fn params + fn return + schema fields + channel cells + `->` → `to` glyph migration + new §14.12 subsection + `E-TYPE-LIFECYCLE-ON-ENGINE-CELL` engine-cell rejection | **SHIPPED S130** (SPEC §14.12 normative; engine-cell carve-out + `W-LIFECYCLE-LEGACY-ARROW` + §34 catalog rows) |
+| 2.5 | S131 HU-2 fn-return hybrid mechanism (presence-progression discrimination-IS-transition + variant-progression explicit `transition()`); SPEC §14.12.6 + §14.12.6.1–6.4; `E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED` | **SHIPPED S131** |
+| 3 | PRIMER + kickstarter flagship section (per F-023) — `(A to B)` canon-corroboration | **SHIPPED S134** — PRIMER §6.5 + kickstarter §3.2 + §7 anti-pattern table rows (1 engine-cell, 1 legacy-glyph, 1 over-applied-`transition()`) |
 
-Authority: lifecycle DD at `scrml-support/docs/deep-dives/lifecycle-annotation-extension-and-flagship-scope-2026-05-25.md`; HU-1 at `docs/heads-up/lifecycle-annotation-extension-2026-05-25.md`.
+Authority: lifecycle DD at `scrml-support/docs/deep-dives/lifecycle-annotation-extension-and-flagship-scope-2026-05-25.md`; HU-1 at `docs/heads-up/lifecycle-annotation-extension-2026-05-25.md`; SPEC §14.12 normative spec.
 
 ---
 

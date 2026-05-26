@@ -238,6 +238,80 @@ ${
 
 Without `default=`, `reset()` re-evaluates the init expression at reset time.
 
+### 3.2 Lifecycle annotation `(A to B)` — the per-access transition contract
+
+A lifecycle annotation on a type position says: "this location starts as type `A` and transitions to type `B`. The compiler will refuse reads until the transition has happened." This is how scrml encodes "value must be set before use" — at the type system layer, with zero runtime cost.
+
+```scrml
+type User:struct = {
+    id: number,
+    email: string,
+    passwordHash: (not to string)        // starts absent; transitions to string after hashing
+}
+
+const u: User = { id: 1, email: "a@b.com", passwordHash: not }
+print(u.passwordHash)                     // E-TYPE-001 — pre-transition access
+
+u.passwordHash = hashPassword(rawPw)
+print(u.passwordHash)                     // OK — transitioned
+```
+
+The canonical glyph is `to` — a contextual keyword inside the parens (parallel to `from` in `import`). The legacy `->` glyph still parses but lints `W-LIFECYCLE-LEGACY-ARROW`. Use `to` in new code.
+
+**Where it goes — the teachable rule:** "Lifecycle annotation goes anywhere a type goes, EXCEPT engine cells."
+
+| Position | Permitted | Example |
+|---|---|---|
+| Struct field | YES | `passwordHash: (not to string)` |
+| Shape 1 reactive cell | YES | `<status>: (Idle to Active) = .Idle` |
+| Function parameter | YES | `fn process(u: (not to User))` |
+| Function return | YES | `server fn loadUser(id: number) -> (not to User)` |
+| Schema field | YES | (see §11.6) |
+| Channel cell | YES | (see §11.3) |
+| **Engine cell** | **NO** — fires `E-TYPE-LIFECYCLE-ON-ENGINE-CELL` | (engines own progression via `rule=`) |
+
+The engine-cell carve-out matters: engines (§4) own variant-graph progression via `rule=` / `initial=` / `<onTransition>`. Putting a lifecycle annotation on an engine's auto-declared cell would create a redundant second progression mechanism on the same surface — rejected.
+
+```scrml
+type Phase:enum = { Idle, Loading, Done }
+
+<engine for=Phase initial=.Idle> ... </>
+
+<phase>: (Idle to Done) = .Idle          // E-TYPE-LIFECYCLE-ON-ENGINE-CELL — engine owns @phase
+```
+
+For value-shape progression on a cell that is NOT an engine cell, declare as Shape 1:
+
+```scrml
+<status>: (Idle to Active) = .Idle       // legal — no engine claims `status`
+@status = .Active                        // transitions; subsequent reads pass
+```
+
+**Function-return lifecycle — two flavors:**
+
+```scrml
+// Presence-progression (not to T) — discrimination IS transition
+server fn loadUser(id: number) -> (not to User) { ... }
+
+const u = loadUser(42)
+given u => { print(u.name) }              // OK — `given` discriminates AND transitions
+
+// Variant-progression (.A to .B) — explicit transition()
+server fn publish(id: number) -> (.Draft to .Published) { ... }
+
+const a = publish(42)
+if (a is .Draft) {
+    transition(a)                         // explicit per-access transition signal
+    print(a.publishedAt)                  // OK
+}
+```
+
+The `transition()` built-in is compile-time-only — zero runtime cost. It exists because variant tags (`.Draft`) prove the source variant but not that the callee advanced the lifecycle; the explicit call provides the per-access signal.
+
+**Multi-variant chains `(A to B to C)` are RESERVED** — not yet implementable. Use a two-state pair, or use an engine (§4) for variant-graph progression.
+
+See SPEC §14.12 for the full normative specification.
+
 ---
 
 ## 4. Engines — the centerpiece of v0.next
@@ -714,6 +788,9 @@ If your instinct from another framework fires, stop and use the scrml form. Thes
 | `<onEnter>` / `<onLeave>` lifecycle elements | XState, RxJS | Use `<onTransition from=X>` (entering) or `<onTransition to=Y>` (leaving) — one concept (§4.4). |
 | `match=@x` attribute for cross-field validation | (extrapolated) | Use `eq(@x)` predicate. `<confirm req eq(@signup.password)>`. There's no `match=` attribute (collides with `<match>` block) (§6.1). |
 | `not null` / `unique` on a state cell | SQL muscle memory | Schema vocabulary stays in `<schema>`. State cells use `req`, `length(>=N)`, `eq(...)`, etc. — the shared core. Schema also accepts the shared core (additive). |
+| `<phase>: (Idle to Done) = .Idle` next to `<engine for=Phase initial=.Idle>` over the same cell | (extrapolation) | **Engine cells reject lifecycle annotation** (`E-TYPE-LIFECYCLE-ON-ENGINE-CELL`). Engines own variant-graph progression via `rule=`. For lifecycle on a NON-engine cell, declare as plain Shape 1. For variant-graph state, use the engine — don't put a lifecycle annotation on its auto-declared variable (§3.2). |
+| `(A -> B)` lifecycle annotation in new code | legacy glyph | Use `to`: `(A to B)`. The `->` glyph is accepted during the deprecation window and surfaces `W-LIFECYCLE-LEGACY-ARROW`. `to` is the canonical (§3.2). |
+| `transition(u)` on every assignment defensively | over-application | `transition()` is for **variant-progression** `(.A to .B)` returns after discrimination. **Presence-progression** `(not to T)` discriminates via `given` / `if-is-not` / `match` — the act of discriminating IS the transition; an additional `transition()` is redundant (§3.2). |
 
 **If you don't see your case in the table, default to the canonical shape from §2.** Do not invent syntax.
 
