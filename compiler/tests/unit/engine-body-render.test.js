@@ -141,7 +141,9 @@ describe("Phase A10 Phase 3 §2 — single state-child with text body", () => {
     expect(errors).toEqual([]);
     // Section header present (S108 — extended to cover match-block body
     // render emission alongside engine body render; shared section header).
-    expect(clientJs).toMatch(/\/\/ --- engine( \+ match)? body render/);
+    // S130 HU-1 iteration Landing 1 — extended further to optionally
+    // cover each-block body render.
+    expect(clientJs).toMatch(/\/\/ --- engine( \+ match)?( \+ each)? body render/);
     // Idle render fn returns text
     expect(clientJs).toMatch(/function _scrml_engine_phase_render_Idle\(\) {/);
     // Loading also gets a render fn (returns "" since body is empty);

@@ -742,16 +742,65 @@ REGISTRY.set("column", {
 });
 
 // ---------------------------------------------------------------------------
-// <empty> — empty-state slot for tableFor (SPEC §41.16.9, S105).
+// <empty> — empty-state slot for tableFor (SPEC §41.16.9, S105) AND for
+// <each> (S130 — iteration Landing 1; per HU-1 Q4 ratification, `<empty>`
+// is the canonical empty-state sub-element form for `<each in=...>` and
+// `<each of=N>`).
 //
-// Recognized inside `<tableFor>` elements; provides fallback content rendered
-// inside an auto-wrapped `<tr><td colspan=N>...</td></tr>` when rows.length == 0.
+// Recognized inside `<tableFor>` (renders inside an auto-wrapped
+// `<tr><td colspan=N>...</td></tr>` when rows.length == 0), and inside
+// `<each>` (renders when the iterated collection is empty or the count
+// is 0). Outside those parent loci, `<empty>` is a structural-element
+// misplacement (E-STRUCTURAL-ELEMENT-MISPLACED).
 // ---------------------------------------------------------------------------
 
 REGISTRY.set("empty", {
   tag: "empty",
   attributes: new Map([
     ...GLOBAL_ATTRIBUTES,
+  ]),
+  isVoid: false,
+  rendersToDom: false,
+});
+
+// ---------------------------------------------------------------------------
+// <each> — structural-element iteration (SPEC §17.X NEW per S130 HU-1
+// ratifications; Phase 2 Landing 1 of 5).
+//
+// Two shapes (per Q6 ratification):
+//   <each in=@collection [as name] [key=expr]>...</>   — collection iteration
+//   <each of=N           [as name] [key=expr]>...</>   — count iteration
+//
+// `@.` is the contextual sigil for "the current iteration value" (current
+// item in `in=` form; current index in `of=` form). The optional `as name`
+// override binds the current iteration value to a meaningful name (aliased
+// with `@.` inside the body) for nested-iteration disambiguation or
+// readability.
+//
+// `key=` is the diff-keying expression. When omitted, the compiler infers
+// from item shape: items with a `.id` field auto-infer `key=@.id`; otherwise
+// emits W-EACH-KEY-001 info-lint. Override via explicit `key=expr` or
+// suppress via `key=__index__`. For `<each of=N>` the default is `key=@.`
+// (the index — stable positional).
+//
+// Body composition leverages SPEC §4.14 `:`-shorthand body (Q3
+// RE-RATIFICATION — no new body-shorthand mechanism). Single-expression
+// per-item bodies use `<li : @.name>` (with `:` INSIDE the opener,
+// mandatory whitespace before, no closer); multi-element bodies use
+// bare-body form.
+//
+// rendersToDom: false — codegen replaces this node with the synthesized
+// iteration markup; nothing renders FROM the `<each>` tag itself.
+// ---------------------------------------------------------------------------
+
+REGISTRY.set("each", {
+  tag: "each",
+  attributes: new Map([
+    ...GLOBAL_ATTRIBUTES,
+    ["in",   attr("string")],   // collection-iteration source (one-of-required with `of=`)
+    ["of",   attr("string")],   // count-iteration source (one-of-required with `in=`)
+    ["as",   attr("string")],   // optional iteration-variable override
+    ["key",  attr("string")],   // optional diff-key override; absent → inferred
   ]),
   isVoid: false,
   rendersToDom: false,

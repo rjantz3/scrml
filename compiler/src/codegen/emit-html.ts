@@ -1880,6 +1880,32 @@ export function generateHtml(
       }
       return;
     }
+
+    // S130 HU-1 iteration Landing 1 — each-block mount slot
+    // (SPEC §17.X NEW).
+    //
+    // Mirrors the engine-decl / match-block cases above. Each-blocks
+    // have a `<div data-scrml-each-mount="each_<id>">` mount slot at
+    // their source position; the dispatcher emitted by
+    // emit-each.ts:emitEachBodyRenderForFile (called from emit-client.ts)
+    // writes the rendered iteration into the slot on subscription fire.
+    //
+    // Tree-shake: when the each-block has no template + no empty, the
+    // mount helper returns "" and nothing emits.
+    if ((node as any).kind === "each-block") {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { emitEachMountHtml } = require("./emit-each.ts") as {
+        emitEachMountHtml: (node: any, ctx: any) => string;
+      };
+      const liveCtx = ctxOrErrors && typeof ctxOrErrors === "object" && "fileAST" in ctxOrErrors
+        ? (ctxOrErrors as CompileContext)
+        : null;
+      if (liveCtx) {
+        const html = emitEachMountHtml(node, liveCtx);
+        if (html) parts.push(html);
+      }
+      return;
+    }
   }
 
   // §36 Phase 2.B (S89): E-INPUT-005 duplicate input-state-id-within-scope check.

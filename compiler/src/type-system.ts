@@ -6533,6 +6533,56 @@ function annotateNodes(
       }
 
       // ------------------------------------------------------------------
+      // S130 HU-1 iteration Landing 1 — each-block (SPEC §17.X NEW).
+      //
+      // Mirrors for-stmt scope-plumbing above: push a fresh `each-scope`,
+      // bind the iteration variable name (the `as name` override per HU-1
+      // Q6, or the default "_scrml_each_item" when no override is given),
+      // walk templateChildren AND emptyChild, pop.
+      //
+      // Per HU-1 Q6, `as name` binds the per-item iteration value to
+      // `name` in body scope. Without this scope push, `${contact.name}`
+      // inside `<each in=@contacts as contact>` body fires
+      // E-SCOPE-001 on `contact`.
+      //
+      // The `@.` contextual sigil is rewritten at codegen-time (not at TS
+      // time), so the TS pass doesn't need to bind it — but it does need
+      // to NOT flag bare-ident references to the override name.
+      //
+      // Conservative: also bind a synthetic `_scrml_each_item` name when
+      // no `as` override is given, in case TS encounters a logic body
+      // that references the contextual default. (Today the rewriteContextualSigil
+      // step in emit-each.ts converts `@.` to the iter var name; the
+      // default is `_scrml_each_item`. If body code can reference the
+      // default without rewriting, we should bind it; otherwise the bind
+      // is harmless because `_`-prefixed names are skipped by the
+      // E-SCOPE-001 walker anyway.)
+      // ------------------------------------------------------------------
+      case "each-block": {
+        scopeChain.push(`each:${nodeKey(n)}`);
+        const asName = (n as Record<string, unknown>).asName;
+        if (typeof asName === "string" && asName.length > 0) {
+          scopeChain.bind(asName, { kind: "variable", resolvedType: tAsIs() });
+        }
+        // Walk templateChildren (per-item body) AND emptyChild (empty-state
+        // body). The empty-state body does NOT see the `as` binding (it's
+        // outside the per-item scope) but for simplicity we walk both within
+        // the same scope — the binding is `asIs` so it doesn't constrain
+        // type checks for empty-state idents, and empty-state bodies
+        // typically don't reference the iter var anyway. Future refinement
+        // can split the scopes if a real false-positive surfaces.
+        const tplChildren = (n as Record<string, unknown>).templateChildren as ASTNodeLike[] | undefined;
+        if (Array.isArray(tplChildren)) {
+          for (const child of tplChildren) visitNode(child);
+        }
+        const emptyChild = (n as Record<string, unknown>).emptyChild as ASTNodeLike | null | undefined;
+        if (emptyChild) visitNode(emptyChild);
+        scopeChain.pop();
+        resolvedType = tAsIs();
+        break;
+      }
+
+      // ------------------------------------------------------------------
       // Engine declaration — Phase A10 body-walk re-enablement (S81).
       //
       // Pre-A10, engine state-child bodies were stored only as `rulesRaw:

@@ -1922,7 +1922,11 @@ describe("§35 State Type Registry", () => {
       //   markup tree). <column> and <empty> are tableFor child slots — also
       //   non-DOM (consumed by the type-system pass; expanded into <th>/<td>
       //   markup at expansion time).
-      const nonDomElements = new Set(["program", "errorboundary", "errors", "auth", "formfor", "tablefor", "column", "empty"]);
+      // S130 HU-1 iteration Landing 1: <each in=|of=> is structural iteration —
+      //   non-DOM (codegen replaces it with the synthesized reconciling-list
+      //   subscriber + per-item factory). <empty> is also a legal sub-element
+      //   inside <each> (per Q4 ratification).
+      const nonDomElements = new Set(["program", "errorboundary", "errors", "auth", "formfor", "tablefor", "column", "empty", "each"]);
       for (const [name, st] of reg) {
         if (nonDomElements.has(name)) {
           expect(st.isHtml).toBe(false);

@@ -367,12 +367,41 @@ ELEMENT_ATTR_REGISTRY.set("column", {
 });
 
 // ---------------------------------------------------------------------------
-// <empty> — empty-state slot inside tableFor (SPEC §41.16.9, S105).
+// <empty> — empty-state slot inside tableFor (SPEC §41.16.9, S105) AND
+// inside <each> (S130 — iteration Landing 1; per HU-1 Q4 ratification).
 // No attributes — body content is the entire payload.
 // ---------------------------------------------------------------------------
 
 ELEMENT_ATTR_REGISTRY.set("empty", {
   allowedAttrs: new Map([]),
+});
+
+// ---------------------------------------------------------------------------
+// <each> — structural-element iteration (SPEC §17.X per S130 HU-1
+// ratifications; Phase 2 Landing 1 of 5).
+//
+// Two shapes per Q6 ratification:
+//   <each in=@cell [as name] [key=expr]>...</>   — collection iteration
+//   <each of=N     [as name] [key=expr]>...</>   — count iteration
+//
+// All attribute values are bare scrml-native references / literals — no
+// `${...}` interpolation. The `in=` source is a reactive expression (the
+// codegen subscribes to its dependencies); the `of=` source is an integer
+// expression (constant or `@cell` for runtime count). `as=` is the optional
+// iteration-variable name override; `key=` overrides inferred diff-keying.
+//
+// Per Q3 RE-RATIFICATION, body composition leverages existing SPEC §4.14
+// `:`-shorthand mechanism — per-item element openers admit `:`-shorthand
+// body for single-expression bodies (`<li : @.name>`).
+// ---------------------------------------------------------------------------
+
+ELEMENT_ATTR_REGISTRY.set("each", {
+  allowedAttrs: new Map([
+    ["in",   attrSpec({ supportsInterpolation: false })],   // collection-iteration source
+    ["of",   attrSpec({ supportsInterpolation: false })],   // count-iteration source
+    ["as",   attrSpec({ supportsInterpolation: false })],   // iteration-variable name override
+    ["key",  attrSpec({ supportsInterpolation: false })],   // diff-key override
+  ]),
 });
 
 // ---------------------------------------------------------------------------

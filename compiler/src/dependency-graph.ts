@@ -2568,6 +2568,56 @@ export function runDG(input: DGInput): DGOutput {
       // engine-cell registration at line 1147-1154, the cell is registered as
       // a generic `reactive` DG node from `engineMeta.varName`; the engine's
       // structural read is invisible to the rest of the markup-sweep machinery.
+      // S130 HU-1 iteration Landing 1 — each-block credits the @-cells
+      // referenced in its in= / of= / key= opener attributes AND in its
+      // bodyRaw fallback. Without this, an each-block over @contacts
+      // (`<each in=@contacts>...</each>`) false-fires E-DG-002 on
+      // @contacts because the structural read sits in an opener attr
+      // that the generic markup-walk doesn't see (the body itself uses
+      // the `as name` binding, not the cell sigil — and the `<each>`
+      // node was BS-captured raw, so the opener attrs were never tokenized
+      // by the normal attribute pipeline).
+      if ((node as Record<string, unknown>).kind === "each-block") {
+        const eachAny = node as Record<string, unknown>;
+        // Scan opener-attr raw values for @cellName refs.
+        for (const key of ["inExprRaw", "ofExprRaw", "keyExprRaw"]) {
+          const raw = eachAny[key];
+          if (typeof raw === "string" && raw.length > 0) {
+            const atRefs = raw.match(/@([A-Za-z_$][A-Za-z0-9_$]*)/g);
+            if (atRefs) {
+              for (const ref of atRefs) {
+                const cellName = ref.slice(1);
+                // Skip `@.` contextual sigil (single dot, no ident).
+                if (!cellName) continue;
+                creditReader(cellName);
+                if (markupContextEmitEdges && node.span) {
+                  emitMarkupReadEdge(node.span, cellName);
+                }
+              }
+            }
+          }
+        }
+        // bodyRaw fallback — scan for direct @cell refs (the `as name`
+        // override doesn't generate @-refs, but free `@cell` refs inside
+        // the per-item template body do).
+        const bodyRaw = eachAny.bodyRaw;
+        if (typeof bodyRaw === "string" && bodyRaw.length > 0) {
+          const atRefs = bodyRaw.match(/@([A-Za-z_$][A-Za-z0-9_$]*)/g);
+          if (atRefs) {
+            for (const ref of atRefs) {
+              const cellName = ref.slice(1);
+              if (!cellName) continue;
+              creditReader(cellName);
+              if (markupContextEmitEdges && node.span) {
+                emitMarkupReadEdge(node.span, cellName);
+              }
+            }
+          }
+        }
+        // Body walking continues via the generic markup-walk on
+        // bodyChildren / templateChildren (handled by the outer recursion).
+      }
+
       if (node.kind === "engine-decl") {
         const eAny = node as Record<string, unknown>;
         const record = eAny._record as Record<string, unknown> | undefined;

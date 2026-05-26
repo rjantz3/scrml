@@ -41,6 +41,8 @@ import { setBPPOverrides } from "./codegen/compat/parser-workarounds.js";
 import { lintGhostPatterns } from "./lint-ghost-patterns.js";
 import { runIMatchPromotable } from "./lint-i-match-promotable.js";
 import { runIFnPromotable } from "./lint-i-fn-promotable.js";
+import { runWEachPromotable } from "./lint-w-each-promotable.js";
+import { runWEachKey } from "./lint-w-each-key.js";
 import { findUnsupportedTailwindShapes, findUnrecognizedClasses } from "./tailwind-classes.js";
 import { runGauntletPhase1Checks } from "./gauntlet-phase1-checks.js";
 import { runGauntletPhase3EqChecks } from "./gauntlet-phase3-eq-checks.js";
@@ -1635,6 +1637,40 @@ export function compileScrml(options = {}) {
       }
     } catch (e) {
       if (verbose) log(`  [LINT] I-FN-PROMOTABLE pass threw: ${e?.message ?? String(e)}`);
+    }
+  }
+
+  // Stage 6.4c: W-EACH-PROMOTABLE info-level lint (SPEC §17.X NEW per S130 HU-1)
+  // Sibling to I-MATCH-PROMOTABLE — surfaces `${ for (...) { lift ... } }`
+  // Tier-0 iteration sites that are mechanically promotable to the Tier-1
+  // `<each in=@cell>...</each>` structural form. Non-fatal — diagnostics flow
+  // into allLintDiagnostics. CLI `bun scrml promote --each` is Landing 3.
+  if (Array.isArray(tsResult.files) && tsResult.files.length > 0) {
+    try {
+      const eachPromotableDiags = runWEachPromotable(tsResult.files);
+      for (const d of eachPromotableDiags) {
+        allLintDiagnostics.push(d);
+        if (verbose) log(`  [LINT] ${d.filePath}:${d.line}:${d.column} ${d.code}: ${d.message}`);
+      }
+    } catch (e) {
+      if (verbose) log(`  [LINT] W-EACH-PROMOTABLE pass threw: ${e?.message ?? String(e)}`);
+    }
+  }
+
+  // Stage 6.4d: W-EACH-KEY-001 info-level lint (SPEC §17.X NEW per S130 HU-1)
+  // Surfaces `<each in=@cell>` sites where the per-item identity isn't
+  // inferable (items lack a `.id` field) AND no explicit `key=expr` is given.
+  // The lint message names three legitimate causes + the explicit override
+  // and `key=__index__` suppress sentinel per HU-1 Q5 ratification.
+  if (Array.isArray(tsResult.files) && tsResult.files.length > 0) {
+    try {
+      const eachKeyDiags = runWEachKey(tsResult.files, tsResult.stateTypeRegistry);
+      for (const d of eachKeyDiags) {
+        allLintDiagnostics.push(d);
+        if (verbose) log(`  [LINT] ${d.filePath}:${d.line}:${d.column} ${d.code}: ${d.message}`);
+      }
+    } catch (e) {
+      if (verbose) log(`  [LINT] W-EACH-KEY-001 pass threw: ${e?.message ?? String(e)}`);
     }
   }
 

@@ -10946,6 +10946,276 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         };
       }
 
+      // ----------------------------------------------------------------
+      // Each block-form (SPEC §17.X NEW per S130 HU-1 ratifications;
+      // iteration Landing 1 of 5).
+      //
+      // BS captures <each in=|of=>...</each> as a structural raw-body
+      // markup block (block-splitter.js STRUCTURAL_RAW_BODY_ELEMENTS).
+      // Mirrors match-block dispatch above — extract header (one of
+      // in=/of= required, as= + key= optional), capture body children
+      // (per-item template + optional <empty> sub-element).
+      //
+      // Body composition leverages SPEC §4.14 `:`-shorthand mechanism
+      // (Q3 RE-RATIFICATION — no new body-shorthand). Per-item element
+      // openers admit `:`-shorthand for single-expression bodies
+      // (`<li : @.name>`).
+      //
+      // Phase 1 (THIS LANDING): produce the each-block AST node carrying
+      // the iter shape (in/of), the iter expression, the optional as=
+      // name override, the optional key= expression, the body children
+      // (walkable AST), the optional `<empty>` sub-element body, and
+      // span info.
+      if (block.name === "each") {
+        const eachRaw = (block.raw || "").trim();
+
+        // Brace-aware opener-end finder (mirrors match-block).
+        function _findEachOpenerEnd(s) {
+          let depth = 0;
+          let inDQ = false;
+          let inSQ = false;
+          for (let i = 0; i < s.length; i++) {
+            const c = s[i];
+            if (inDQ) { if (c === '"') inDQ = false; else if (c === "\\") i++; continue; }
+            if (inSQ) { if (c === "'") inSQ = false; else if (c === "\\") i++; continue; }
+            if (c === '"') { inDQ = true; continue; }
+            if (c === "'") { inSQ = true; continue; }
+            if (c === "{") { depth++; continue; }
+            if (c === "}") { if (depth > 0) depth--; continue; }
+            if (c === ">" && depth === 0) return i;
+          }
+          return -1;
+        }
+
+        const firstLineEnd = _findEachOpenerEnd(eachRaw);
+        const headerLine = firstLineEnd >= 0
+          ? eachRaw.slice(0, firstLineEnd)
+          : eachRaw.split("\n")[0];
+        let header = headerLine;
+        const eachIdx = header.indexOf("each");
+        if (eachIdx >= 0) header = header.slice(eachIdx + "each".length).trim();
+        header = header.replace(/[/>]+\s*$/, "").trim();
+
+        // Attribute capture — `in=expr`, `of=expr`, `as=name`, `key=expr`.
+        // Each value runs from after the `=` to the next standalone attribute
+        // boundary (whitespace + ident + `=`) or end-of-header. Conservative
+        // shape — single-token captures common (`in=@items`, `of=10`, `as=item`).
+        // Bracket/brace-balancing handles `in=@items.filter(x => x > 0)` etc.
+        function _captureAttrValue(header, attrName) {
+          const pat = new RegExp(`\\b${attrName}\\s*=`);
+          const m = header.match(pat);
+          if (!m) return null;
+          const startAfterEq = m.index + m[0].length;
+          const afterEq = header.slice(startAfterEq);
+          // Trim leading whitespace
+          let i = 0;
+          while (i < afterEq.length && /\s/.test(afterEq[i])) i++;
+          let end = afterEq.length;
+          let depth = 0;
+          let parenDepth = 0;
+          let bracketDepth = 0;
+          let inDQ = false;
+          let inSQ = false;
+          for (let j = i; j < afterEq.length; j++) {
+            const c = afterEq[j];
+            if (inDQ) { if (c === '"') inDQ = false; else if (c === "\\") j++; continue; }
+            if (inSQ) { if (c === "'") inSQ = false; else if (c === "\\") j++; continue; }
+            if (c === '"') { inDQ = true; continue; }
+            if (c === "'") { inSQ = true; continue; }
+            if (c === "{") { depth++; continue; }
+            if (c === "}") { if (depth > 0) depth--; continue; }
+            if (c === "(") { parenDepth++; continue; }
+            if (c === ")") { if (parenDepth > 0) parenDepth--; continue; }
+            if (c === "[") { bracketDepth++; continue; }
+            if (c === "]") { if (bracketDepth > 0) bracketDepth--; continue; }
+            // Attribute boundary: whitespace at zero-depth followed by
+            // ident-start char + ... + `=`. Also stop at standalone `as`
+            // keyword (whitespace + `as` + whitespace + ident) per the
+            // S130 HU-1 `<each ... as name>` shape — `as name` is a
+            // bareword-value attribute, no `=` separator.
+            if (depth === 0 && parenDepth === 0 && bracketDepth === 0 && /\s/.test(c)) {
+              let k = j;
+              while (k < afterEq.length && /\s/.test(afterEq[k])) k++;
+              if (k < afterEq.length && /[A-Za-z_$]/.test(afterEq[k])) {
+                let l = k;
+                while (l < afterEq.length && /[A-Za-z0-9_$:-]/.test(afterEq[l])) l++;
+                // Check for `as` followed by whitespace + ident (standalone
+                // `as` keyword form) — boundary for in=/of=/key= captures.
+                const word = afterEq.slice(k, l);
+                if (word === "as" && l < afterEq.length && /\s/.test(afterEq[l])) {
+                  let m = l;
+                  while (m < afterEq.length && /\s/.test(afterEq[m])) m++;
+                  if (m < afterEq.length && /[A-Za-z_$]/.test(afterEq[m])) {
+                    end = j;
+                    break;
+                  }
+                }
+                while (l < afterEq.length && /\s/.test(afterEq[l])) l++;
+                if (afterEq[l] === "=") {
+                  end = j;
+                  break;
+                }
+              }
+            }
+          }
+          const val = afterEq.slice(i, end).trim();
+          return val === "" ? null : val;
+        }
+
+        const inExprRaw = _captureAttrValue(header, "in");
+        const ofExprRaw = _captureAttrValue(header, "of");
+        const keyExprRaw = _captureAttrValue(header, "key");
+
+        // `as name` — whitespace-separated bareword (no `=` between `as`
+        // and the variable name) per HU-1 Q6 canonical form
+        // (`<each in=@items as item>`). Capture the next bareword
+        // identifier after the `as` keyword. Conservative — `as` must be
+        // a standalone word followed by an identifier; embedded `as`
+        // inside in= / key= values is not affected because those values
+        // were already captured by _captureAttrValue (which is depth-aware).
+        let asName = null;
+        const asMatch = header.match(/\bas\s+([A-Za-z_$][A-Za-z0-9_$]*)\b/);
+        if (asMatch) {
+          // Guard: avoid matching the `as` keyword appearing INSIDE an
+          // earlier attribute value (e.g. `in=foo as bar`). Check that
+          // the matched `as` index isn't inside an attribute value already
+          // captured above. The captured values' positions:
+          //   inPos  = header.indexOf("in=")
+          //   ofPos  = header.indexOf("of=")
+          //   keyPos = header.indexOf("key=")
+          // If the `as` match index falls between any of those and the
+          // corresponding value's end, skip (it's inside that value).
+          const asPos = asMatch.index;
+          let inside = false;
+          for (const prefix of ["in", "of", "key"]) {
+            const p = new RegExp(`\\b${prefix}\\s*=`);
+            const m = header.match(p);
+            if (!m) continue;
+            const valStart = m.index + m[0].length;
+            // Find the length of the captured value (conservative — use
+            // _captureAttrValue's same scanner).
+            const val = _captureAttrValue(header, prefix);
+            if (val === null) continue;
+            // _captureAttrValue trims leading whitespace then returns the
+            // value; the end-of-value position is valStart + leading-ws
+            // + val.length. Conservative bound: scan from valStart to find
+            // val's end by looking for the val substring after valStart.
+            const valEndIdx = header.indexOf(val, valStart);
+            if (valEndIdx < 0) continue;
+            const valEnd = valEndIdx + val.length;
+            if (asPos >= valStart && asPos < valEnd) {
+              inside = true;
+              break;
+            }
+          }
+          if (!inside) asName = asMatch[1];
+        }
+
+        // iterShape: "in" (collection iteration) | "of" (count iteration).
+        // Exactly one of in=/of= is required at the type-system layer;
+        // ast-builder records what was present and downstream PASS / TS
+        // surfaces missing-or-both as E-EACH-ITER-SHAPE (added §34 row at
+        // step 9 of this dispatch). Both-present and both-absent are both
+        // structurally captured here; we don't fire from ast-builder.
+        let iterShape = null;
+        if (inExprRaw && !ofExprRaw) iterShape = "in";
+        else if (ofExprRaw && !inExprRaw) iterShape = "of";
+        else if (inExprRaw && ofExprRaw) iterShape = "in"; // tie-break to in= for downstream walks; PASS surfaces conflict
+        else iterShape = null; // neither — PASS surfaces missing
+
+        // Capture body children — walkable AST mirror of the body content.
+        // The block-splitter raw-body capture (STRUCTURAL_RAW_BODY_ELEMENTS)
+        // collapsed the body to a single text child to avoid `:`-shorthand
+        // shape-confusion at BS-time. To get walkable per-item template
+        // children + the optional <empty> sub-element, we re-`splitBlocks`
+        // the body text in markup mode (where bare `<li : @.name>` openers
+        // are tolerated downstream — the `:`-shorthand resolution happens
+        // at SYM/codegen time for the per-item element opener).
+        //
+        // Unlike match-statechild-parser (which tokenizes armsRaw with a
+        // custom arm-shape grammar), <each>'s body is plain markup with a
+        // designated `<empty>` sub-element — re-`splitBlocks` is the
+        // cleanest path. Errors from the recursive parse are discarded
+        // (the `:`-shorthand body on per-item openers may surface
+        // E-CTX-003-shape diagnostics that PASS / codegen resolve
+        // correctly).
+        const bodyChildren = [];
+        // First, pull the raw body text from block.children (BS raw-body
+        // capture concatenates the body into a single text child).
+        let _bodyRawForReparse = "";
+        if (Array.isArray(block.children)) {
+          for (const child of block.children) {
+            if (child && typeof child === "object" && typeof child.raw === "string") {
+              _bodyRawForReparse += child.raw;
+            }
+          }
+        }
+        if (_bodyRawForReparse) {
+          // Use the BS factory to re-split the body text. Sub-block-splitter
+          // errors are discarded; the body's structural meaning (<empty> +
+          // per-item template) survives because the BS scanner handles
+          // arbitrary markup, and the `:`-shorthand pattern on per-item
+          // openers is captured as a markup child whose `raw` text the
+          // downstream resolver inspects.
+          const _subBs = _splitBlocksForP2Form1(filePath, _bodyRawForReparse);
+          const _subErrors = [];
+          for (const subBlock of _subBs.blocks) {
+            const subNode = buildBlock(subBlock, filePath, "markup", counter, _subErrors);
+            if (subNode) bodyChildren.push(subNode);
+          }
+          // _subErrors intentionally discarded — see comment block above.
+        }
+
+        // Identify the optional <empty> sub-element. Per HU-1 Q4 ratification,
+        // `<empty>...</empty>` is the canonical empty-state form inside <each>.
+        // Find the first markup child whose tag name is "empty"; capture it
+        // separately so codegen can route the empty-branch render distinctly
+        // from the per-item template. The remaining children (the
+        // per-item template) stay in `templateChildren`.
+        let emptyChild = null;
+        const templateChildren = [];
+        for (const child of bodyChildren) {
+          if (child && child.kind === "markup" && (child.tag || child.name) === "empty" && emptyChild === null) {
+            emptyChild = child;
+          } else {
+            templateChildren.push(child);
+          }
+        }
+
+        // Capture raw body text as a fallback for downstream consumers that
+        // want the verbatim source (mirrors match-block.armsRaw). The body
+        // text excludes the `</each>` closer.
+        let bodyRaw = "";
+        if (Array.isArray(block.children)) {
+          for (const child of block.children) {
+            if (child && typeof child === "object" && typeof child.raw === "string") {
+              bodyRaw += child.raw;
+            }
+          }
+        }
+        if (!bodyRaw && firstLineEnd >= 0) {
+          bodyRaw = eachRaw.slice(firstLineEnd + 1);
+          bodyRaw = bodyRaw.replace(/<\s*\/\s*(?:each)?\s*>\s*$/, "");
+        }
+        bodyRaw = bodyRaw.trim();
+
+        return {
+          id: ++counter.next,
+          kind: "each-block",
+          iterShape,         // "in" | "of" | null
+          inExprRaw,         // raw text after `in=` (null when shape is "of")
+          ofExprRaw,         // raw text after `of=` (null when shape is "in")
+          asName,            // bareword iteration-variable name (optional)
+          keyExprRaw,        // raw text after `key=` (optional; null → inferred)
+          bodyChildren,      // full walkable AST mirror of block.children (includes <empty>)
+          templateChildren,  // bodyChildren minus the <empty> sub-element (the per-item template)
+          emptyChild,        // the <empty> sub-element node, or null when absent
+          bodyRaw,           // raw body text fallback (matches match-block.armsRaw shape)
+          span,
+          openerHadSpaceAfterLt: block.openerHadSpaceAfterLt === true,
+        };
+      }
+
       const attrTokens = tokenizeAttributes(
         block.raw,
         block.span.start,

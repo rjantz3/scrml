@@ -733,7 +733,12 @@ export function runCG(input: CgInput): CgOutput {
         // its source position when its body has any non-empty arm; gate
         // HTML generation on engine-only files too. emit-html.ts:emitNode
         // dispatches engine-decl to emit-engine.ts:emitEngineMountHtml.
-        n.kind === "engine-decl"
+        n.kind === "engine-decl" ||
+        // S130 HU-1 iteration Landing 1 — each-block emits a mount slot
+        // mirror of engine-decl + match-block. Gate HTML generation on
+        // each-block presence so iteration-only files (no markup, no
+        // engine) still produce the mount placeholder.
+        n.kind === "each-block"
       )
     );
     const htmlBody: string | null = hasRenderableContent

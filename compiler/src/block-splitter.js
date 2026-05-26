@@ -125,6 +125,15 @@ const RAW_CONTENT_ELEMENTS = new Set([
 
 const STRUCTURAL_RAW_BODY_ELEMENTS = new Set([
   "match",
+  // S130 HU-1 iteration Landing 1 — <each in=|of=> is the Tier-1 structural
+  // iteration container; per Q3 RE-RATIFICATION its body admits §4.14
+  // `:`-shorthand on per-item element openers (`<li : @.name>`). The opener
+  // has no closer because `:`-shorthand IS the body terminator — same
+  // shape-confusion the match-block-form fix addressed at S107 Phase 2.
+  // Capturing the body raw lets the each-block dispatch in ast-builder.js
+  // walk the body without firing E-CTX-003 on opener-without-closer
+  // `:`-shorthand children.
+  "each",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -154,6 +163,11 @@ const COMPOUND_LIFT_EXEMPT_TAGS = new Set([
   // a `type=markup name=match` block that ast-builder.js dispatches into a
   // structured `match-block` AST node (Phase 1).
   "match",
+  // S130 HU-1 iteration Landing 1 — same reasoning as `match` above.
+  // `<each in=@cell>...</each>` is a Tier 1 structural-iteration container,
+  // not a compound state-decl. Without the exemption the auto-lift heuristic
+  // would mis-classify the opener and capture the body as opaque text.
+  "each",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -1779,12 +1793,43 @@ export function splitBlocks(filePath, source) {
           const contentStartCol = curCol;
           const closeNeedle = `</${lowerTagName}>`;
           const closeLen = closeNeedle.length;
+          // S130 — depth-tracking for nested same-kind structural raw-body
+          // openers. Without this, `<each in=@groups>...<each in=@items>...
+          // </each>...</each>` mis-matches: the outer scan finds the FIRST
+          // `</each>` (the inner closer) and treats it as the outer closer,
+          // leaving the outer body unclosed and dropping surrounding markup.
+          // Same-kind nesting is legal per HU-1 Q6 (the canonical "nested
+          // iteration with override for outer access" example in
+          // docs/heads-up/iteration-design-2026-05-25.md). The depth-tracker
+          // counts nested same-kind openers and only treats a `</tag>` as
+          // the outer closer when nestDepth has dropped to 0.
+          const openNeedlePrefix = `<${lowerTagName}`;
+          let nestDepth = 0;
           while (pos < len) {
             if (
               source[pos] === "<" &&
               source.slice(pos, pos + closeLen).toLowerCase() === closeNeedle
             ) {
-              break;
+              if (nestDepth === 0) break;
+              nestDepth--;
+              // Skip past the inner closer so we don't re-scan it as the outer.
+              for (let _k = 0; _k < closeLen; _k++) step();
+              continue;
+            }
+            // Detect a nested same-kind opener: `<tagname` followed by a
+            // boundary character (`>`, `/`, or whitespace). Attribute-bearing
+            // openers like `<each in=@x>` are recognized by the whitespace boundary.
+            if (
+              source[pos] === "<" &&
+              source.slice(pos, pos + openNeedlePrefix.length).toLowerCase() === openNeedlePrefix
+            ) {
+              const after = source[pos + openNeedlePrefix.length];
+              if (after === ">" || after === "/" || after === " " || after === "\t" || after === "\n" || after === "\r") {
+                nestDepth++;
+                // Skip past the opener prefix so we don't re-detect it.
+                for (let _k = 0; _k < openNeedlePrefix.length; _k++) step();
+                continue;
+              }
             }
             step();
           }

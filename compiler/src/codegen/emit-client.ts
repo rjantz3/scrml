@@ -1142,10 +1142,21 @@ export function generateClientJs(ctx: CompileContext): string {
     emitMatchBodyRenderForFile: (fileAST: any, ctx: any) => { renderFunctions: string[]; dispatchers: string[] };
   };
   const matchBodyRender = clientStage(ctx, "emit-match-body-render", () => emitMatchBodyRenderForFile(fileAST, ctx));
-  const allRenderFns = [...c12BodyRender.renderFunctions, ...c14BodyRender.renderFunctions, ...matchBodyRender.renderFunctions];
-  const allDispatchers = [...c12BodyRender.dispatchers, ...c14BodyRender.dispatchers, ...matchBodyRender.dispatchers];
+
+  // S130 HU-1 iteration Landing 1 — each-block body render (SPEC §17.X NEW).
+  // Mirrors C12/C14 engine body-render + S108 Phase 3 match-block. Same
+  // tree-shake invariant: when no each-block has any template + empty
+  // content, returns empty arrays and no emission happens.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { emitEachBodyRenderForFile } = require("./emit-each.ts") as {
+    emitEachBodyRenderForFile: (fileAST: any, ctx: any) => { renderFunctions: string[]; dispatchers: string[] };
+  };
+  const eachBodyRender = clientStage(ctx, "emit-each-body-render", () => emitEachBodyRenderForFile(fileAST, ctx));
+
+  const allRenderFns = [...c12BodyRender.renderFunctions, ...c14BodyRender.renderFunctions, ...matchBodyRender.renderFunctions, ...eachBodyRender.renderFunctions];
+  const allDispatchers = [...c12BodyRender.dispatchers, ...c14BodyRender.dispatchers, ...matchBodyRender.dispatchers, ...eachBodyRender.dispatchers];
   if (allRenderFns.length > 0 || allDispatchers.length > 0) {
-    lines.push("// --- engine + match body render (Phase A10, §51.0.D + §18.0.1) ---");
+    lines.push("// --- engine + match + each body render (Phase A10, §51.0.D + §18.0.1 + §17.X) ---");
     for (const fn of allRenderFns) {
       lines.push(fn);
       lines.push("");
