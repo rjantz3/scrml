@@ -272,6 +272,9 @@ The V5-strict access model (§1.6) applies differently in each context locus. Th
 | Attribute value position | Not applicable | `=@x` after `=` (direct binding); `="${@x}"` in interpolated string | Bare strings without `@` are literal values |
 | Engine state-child tag | `<Variant ...>...</>` — declares/renders the engine state body for that variant | The engine variable is read by the compiler to select the active variant; writes via `.advance()` or direct assignment to the engine variable | Match-by-name to enum variants |
 | Compound state body | `<field> = init` — declares a field within the compound cell | `@parent.field` — reads the field; `@parent.field = val` — writes | Within the compound block, field declarations use structural form; access from outside uses canonical dot-path |
+| `<each>` body scope (S130 HU-1) | Not applicable (no declaration at this locus) | `@.` — "the current iteration value" contextual sigil; `@.field` — field of the current item | In `<each in=@items>` → `@.` is the current item; in `<each of=N>` → `@.` is the current index (0..N-1). Optional `as name` binds a meaningful alias; `name` and `@.` are aliases in the body scope. Cross-ref §17.7.3 for full semantic; `@.` outside an `<each>` body is `E-SYNTAX-064` |
+
+**S130 amendment (2026-05-25) — `@.` contextual sigil (iteration arc Landing 2).** The `@.` form added to the table above is a CONTEXTUAL SIGIL — not a reserved identifier. It resolves only inside an `<each>` body scope (§17.7). The sigil extension is V5-strict-compatible: `@` continues to be the canonical state-access sigil per §6.1; `@.` extends it to "the value in the current iteration scope" without introducing a new reserved name (the DD-eliminated `@it` Approach C was eliminated because a reserved name violates the V5-strict rule that bare names are local identifiers only — a sigil avoids that violation because sigils are not identifiers). Full semantic + override-via-`as`-clause + member-access form: §17.7.3.
 
 **S111 amendment (2026-05-20) — code-default body loci (quoted-text model, scope b).** Engine state-child bodies, match block-form arm bodies, and `:`-shorthand bodies are **code-default-body loci**: in those bodies a bare run is code and display text is an explicit `"..."` display-text literal. This is a body-mode property distinct from the per-context access-form table above (the V5-strict `@`-sigil rule is unchanged in those bodies). The canonical definition of the code-default body mode and the display-text literal is §4.18; this note records the locus list for navigation. Plain-markup bodies (`<p>`, `<h1>`, HTML/component elements) stay free-text — unchanged. The `<program>` / `<page>` body is a distinct **third** body-mode (`default-logic`), owned by §40.8 — it is neither free-text nor code-default, and the §4.18 split does not classify it.
 
@@ -283,6 +286,7 @@ The V5-strict access model (§1.6) applies differently in each context locus. Th
 - §6.4 — Render-by-tag semantics: when `<varname/>` in markup is valid vs. E-CELL-NO-RENDER-SPEC
 - §1.4 — Markup-as-first-class-value: the pillar underlying Shape 2 and markup-typed derived cells
 - §4.18 — Code-default body mode and the display-text literal (S111 — quoted-text model)
+- §17.7 — Iteration (`<each>`); §17.7.3 — the `@.` contextual sigil semantic (S130 HU-1 iteration arc)
 
 ---
 
@@ -9737,9 +9741,11 @@ ${ loadItems() }
 
 **SPEC ISSUE:** Whether bare expressions re-execute on every reactive re-render or only on initial mount is tracked in SPEC-ISSUE-009. The current spec position is: bare expression = once on mount. Re-execution on dependency change is inferred from the dependency graph.
 
-### 17.4 Iteration
+### 17.4 Iteration — Tier 0 (`${ for/lift }`)
 
-Iteration is performed using `${ }` + `lift`. There is no dedicated `for=` attribute.
+**Status (S130 HU-1 iteration arc):** This is the **Tier 0** iteration form. Tier 1 (the canonical structural-element `<each>` form per §17.7) is the post-promotion target; this Tier-0 form remains valid and continues to compile cleanly. The Tier ladder for iteration mirrors the §17.0 case-analysis Tier ladder: Tier 0 (this section) is imperative-shaped logic-context iteration; Tier 1 (§17.7) is structural-markup-shaped iteration. The compiler emits the **`W-EACH-PROMOTABLE` info-lint** (§34) on Tier-0 sites that are mechanically promotable to Tier 1; the lint is informational only — adopters MAY remain on Tier 0 indefinitely.
+
+Tier-0 iteration is performed using `${ }` + `lift`. There is no dedicated `for=` attribute at Tier 0.
 
 ```scrml
 <ul>${
@@ -9750,6 +9756,8 @@ Iteration is performed using `${ }` + `lift`. There is no dedicated `for=` attri
 ```
 
 The slight verbosity of this form is accepted for clarity. Keeping iteration out of element attributes keeps element tags clean.
+
+**Promotion to Tier 1.** The mechanical promotion path is `bun scrml promote --each <file>[:line]` (§56.10, Landing 3 of the S130 HU-1 5-landing arc — PENDING). The lift rewrites `${ for (let x of @items) { lift <markup/> } }` → `<each in=@items><markup/></each>`; the per-item template carries forward verbatim; `:`-shorthand body application (§4.14) is automatic where the per-item template is single-expression-shaped (e.g. `<li>${item.name}</>` → `<li : @.name>`). Both Tier 0 and Tier 1 remain valid after promotion; the lift is additive, not deprecating. The sunset path (info → warning → error → parser-strip) mirrors the `<machine>` deprecation precedent — gradual; no hard v1.0 deadline. (Cross-ref §17.7 for the Tier-1 canonical form.)
 
 ### 17.4a `else` Block on `for/lift` — Empty State Rendering
 
@@ -9794,6 +9802,8 @@ ${ for (let card of @cards key card.id) {
     lift <p>No cards yet.</>;
 } }
 ```
+
+**Tier 0 / Tier 1 disposition (S130 HU-1).** The `key` clause in this section carries forward as the **Tier 0** surface — explicit, per-loop, syntactic. The Tier 1 (§17.7) `<each>` form replaces this manual surface with the **inferred `key=`** mechanism (§17.7.5) — auto-infer from item-type `.id` field; `W-EACH-KEY-001` info-lint when inference fails. Tier 1 inference is the post-promotion answer; promotion via `bun scrml promote --each` (§56.10) — see §17.4's promotion paragraph above. The `<each of=N>` form additionally defaults to `key=@.` (the index itself; never fires the lint) per §17.7.5.
 
 ### 17.5 Discrimination on type or value — use `match` or `engine`
 
@@ -10113,6 +10123,380 @@ ${
 ```
 
 The if-as-expression produces `label`. The subsequent `lift <p>` is a separate accumulation lift targeting `<div>`. The two `lift` calls are in different modes: the if-as-expression `lift` is value-lift mode (produces `label`); the `lift <p>` is accumulation mode (appends to `<div>`). The compiler distinguishes by context (§10.7).
+
+### 17.7 Iteration (`<each>`)
+
+**Added:** 2026-05-25 (S130 HU-1 ratification → S131 Landing 1 codegen impl at commit `23db318c` → Landing 2 SPEC catch-up — this subsection). The `<each>` structural element is Tier 1 of the iteration Tier ladder; Tier 0 (`${ for/lift }`) remains valid at §17.4 with the `W-EACH-PROMOTABLE` info-lint nudging promotion.
+
+**HU-1 ratification chain.** The eight HU-1 questions (`docs/heads-up/iteration-design-2026-05-25.md`) ratified: Q1 (a) — ship a structural-markup-first iteration surface; Q2 element-shape `<each>` (already ratified S129); Q3 `:`-shorthand body via existing §4.14 mechanism (no new body-shorthand introduced); Q4 (a) — `<empty>...</empty>` sub-element; Q5 (d) — inferred `key=` with `W-EACH-KEY-001` info-lint; Q6 (b+) — `@.` contextual sigil + optional `as name` override + separate `<each of=N>` for count-iteration; Q7 (a) — Tier 0 → Tier 1 ladder + `bun scrml promote --each` CLI; Q8 (a) — kickstarter amendment (Landing 4 scope).
+
+#### 17.7.1 Overview — Tier 1 of the iteration Tier ladder
+
+The iteration Tier ladder is a sibling of the §17.0 case-analysis Tier ladder. Two tiers are defined for iteration in v0.next:
+
+| Tier | Form | Discoverability | Notes |
+|---|---|---|---|
+| **Tier 0 — §17.4** | `${ for/lift }` logic-context iteration | Imperative; reads as JS | Stays valid; `W-EACH-PROMOTABLE` info-lint (§34) nudges promotion |
+| **Tier 1 — this section** | `<each in=@items>...</each>` (collection) and `<each of=N>...</each>` (count) | Structural; reads as markup tree | Canonical; composes with `<empty>`, `:`-shorthand body, `@.`, `as name`, inferred `key=` |
+
+**The promotion moment is the mechanical lift.** A Tier-0 `${ for (let x of @items) { lift <markup/> } }` site promotes to Tier 1 via `bun scrml promote --each <file>[:line]` (§56.10) — the per-item template carries forward, the wrapper changes from `${...lift...}` to `<each in=@items>...</each>`. Both tiers remain valid after promotion; the lift is additive, not deprecating (the corpus 113-site migration is gradual per the §17.4 `W-EACH-PROMOTABLE` sunset path).
+
+**Pillar alignment.**
+- **Pillar 1 (markup-as-value):** iteration joins `<match>` / `<engine>` / `<channel>` / `<schema>` as a markup-tree structural element — the per-item template is itself markup, not a logic-context lift.
+- **Pillar 3 (compiler owns the wiring):** the runtime resolves `@cell` to a reactive `_scrml_reactive_get(...)` subscription; `_scrml_reconcile_list` does keyed DOM-diff; `@.` resolves to the per-iteration value without adopter ceremony.
+- **Pillar 5 (all scrml should be scrml):** no per-element mini-DSL — `<each>` composes the existing `:`-shorthand body (§4.14), the existing `<empty>` plain-markup sub-element pattern, and the existing `@`-sigil access principle (§6.1) via the contextual `@.` form.
+
+**Cross-references at section close:** §17.7.7.
+
+#### 17.7.2 The four canonical shapes
+
+`<each>` admits four canonical shapes, distinguished by `in=` vs `of=` and by single-expression vs multi-element body.
+
+**Shape 1 — collection iteration; single-expression body via §4.14 `:`-shorthand:**
+
+```scrml
+<each in=@contacts>
+    <li : @.name>
+    <empty>No contacts yet.</>
+</each>
+```
+
+The per-item element `<li>` uses §4.14 `:`-shorthand (`:` INSIDE the opener; mandatory whitespace before; no closer on the shorthand-bodied element). `@.` is "the current item" (per §17.7.3). `<empty>` is the optional empty-state sub-element (per §17.7.4).
+
+**Shape 2 — collection iteration with meaningful naming; multi-element body bare-form:**
+
+```scrml
+<each in=@reservationConflicts as conflict>
+    <div class="conflict-card">
+        <h3>${conflict.summary}</h3>
+        <p>between ${conflict.partyA.name} and ${conflict.partyB.name}</p>
+    </div>
+</each>
+```
+
+The `as conflict` clause binds the meaningful name `conflict` to the current item (§17.7.3 override semantics). Body interpolation uses bare-form `${...}` because the body is multi-element rather than single-expression.
+
+**Shape 3 — count iteration; single-expression body via §4.14:**
+
+```scrml
+<each of=10>
+    <li : "Slot " + @.>
+</each>
+```
+
+`<each of=N>` iterates `N` times. `@.` here is "the current index" (0..N-1) — per §17.7.3, in `of=` form `@.` is the index because there is no collection item to refer to.
+
+**Shape 4 — count iteration with naming + multi-element body:**
+
+```scrml
+<each of=@daysLeft as day>
+    <li>
+        Day ${day + 1}
+        <button onclick=removeDay(day)>×</button>
+    </li>
+    <empty>Trip is over.</>
+</each>
+```
+
+The `as day` clause renames the per-iteration index for readability. Composes with `<empty>` for the `N == 0` case.
+
+**Nested iteration with `as` override for outer access:**
+
+```scrml
+<each in=@rows as row>
+    <tr>
+        <each in=@row.cells>
+            <td>${@.value} of ${row.label}</td>
+        </each>
+    </tr>
+</each>
+```
+
+The outer `as row` makes the outer item addressable as `row` inside nested scopes; the inner `<each>` uses bare `@.` (the inner item is the current `@.`); both work because `as` only ALIASES — `@.` still resolves to the innermost scope.
+
+**Mixing `:`-shorthand and bare-body within a single `<each>` is legal** — only the per-item element opener chooses its body form per §4.14. The two example bodies below are both well-formed:
+
+```scrml
+<ul>
+    <each in=@tags>
+        <span : @.name>          <!-- :-shorthand body -->
+    </each>
+</ul>
+
+<ul>
+    <each in=@tags>
+        <span class="tag">${@.name}</span>   <!-- bare-body -->
+    </each>
+</ul>
+```
+
+**Normative statements:**
+
+- An `<each>` opener SHALL carry exactly one of `in=expr` or `of=expr` (`E-EACH-ITER-SHAPE` — §34, queued).
+- The body of `<each>` SHALL contain at least one per-item template element OR the `<empty>` sub-element (or both). An `<each>` with no body content is `E-EACH-EMPTY-BODY` (§34, queued).
+- The `as name` clause is OPTIONAL. When present, it binds the current iteration value to the named identifier in the body scope (per §17.7.3).
+- The `key=expr` attribute is OPTIONAL. When absent, the compiler attempts inference (per §17.7.5).
+- Per-item element openers MAY use §4.14 `:`-shorthand body when the per-item rendering is a single expression. The `:`-shorthand grammar is §4.14 verbatim — no `<each>`-specific extension.
+
+#### 17.7.3 The `@.` contextual sigil — "the current iteration value"
+
+**Semantic rule:** **`@.` is always "the current iteration value."** The two `<each>` forms instantiate this rule differently:
+
+- In `<each in=@items>`: `@.` = the current item (the element at the current iteration position).
+- In `<each of=N>`: `@.` = the current index (0..N-1; there is no separate item).
+
+This is a contextual sigil — its meaning is fixed by the enclosing `<each>` body scope. Outside an `<each>` body, `@.` is `E-SYNTAX-064` (queued — "the `@.` contextual sigil is only legal inside an `<each>` body scope").
+
+**Override via `as name` clause:**
+
+```scrml
+<each in=@items as item>
+    <li>${item.name} — also @. = current item</li>
+</each>
+```
+
+When `as name` is present, both `name` (the bound identifier) AND `@.` (the contextual sigil) refer to the current iteration value. They are ALIASES inside the body — both forms are legal:
+
+- `<li>${item.name}</li>` — uses the `as`-bound name
+- `<li>${@.name}</li>` — uses the contextual sigil
+
+The two forms produce identical codegen. Choose whichever reads better in context (the worked examples in §17.7.2 demonstrate both choices).
+
+**Why `@.` over `@it` or another reserved name:** the `@.` form is a SIGIL for "current scope," not a reserved variable name. `@` is the canonical state-access sigil per §6.1 / §3.4; `@.` extends it to "the value in the current iteration scope" without introducing a new reserved identifier. The DD-eliminated `@it` Approach C (per `docs/deep-dives/iteration-design-surface-2026-05-25.md`) was eliminated because a reserved name violates the V5-strict access principle (bare names are local identifiers only — §6.1); a sigil avoids the violation because sigils are not identifiers.
+
+**Member access on `@.`:** `@.field` resolves to the field of the current item:
+
+```scrml
+<each in=@contacts>
+    <li>${@.firstName} ${@.lastName} — <a href=@.email>${@.email}</a></li>
+</each>
+```
+
+Per the V5-strict access model (§6.1), `@.field` parses as `(@.).field` — the sigil binds tighter than member access. Chained access (`@.address.city`) is legal.
+
+**Normative statements:**
+
+- `@.` SHALL resolve to the current iteration value of the most-locally-enclosing `<each>` body scope. For `<each in=expr>`, the value is the current item; for `<each of=expr>`, the value is the current index (a number 0..N-1).
+- `@.` outside any `<each>` body scope SHALL be `E-SYNTAX-064` (§34, queued — "the `@.` contextual sigil is only legal inside an `<each>` body scope").
+- When `as name` is declared on the enclosing `<each>` opener, `name` and `@.` SHALL both resolve to the current iteration value (aliases). The bound `name` is a local identifier per §6.1 — it does not require the `@` sigil because it is NOT registered state.
+- Nested `<each>` scopes resolve `@.` to the INNERMOST scope's current value. Outer scopes must use the `as name` form to remain addressable inside nested bodies.
+
+#### 17.7.4 The `<empty>` sub-element — empty-state rendering
+
+**Status:** S130 HU-1 Q4 ratification — the empty-state surface is the `<empty>...</empty>` sub-element inside `<each>`. Composes with the structural-element family (sibling pattern to `<onTransition>` / `<onTimeout>` inside `<engine>`).
+
+**Form:**
+
+```scrml
+<each in=@items>
+    <li : @.name>
+    <empty>No items yet.</>
+</each>
+```
+
+**Semantic rule.** The `<empty>` body renders when:
+
+- In `<each in=expr>`: the iterated collection is empty (`expr.length === 0` OR `expr is not`).
+- In `<each of=N>`: the iteration count is zero (`N === 0` OR `N is not`).
+
+When the empty-state condition does NOT hold, the `<empty>` body is NOT rendered. When the condition DOES hold, the per-item template is NOT rendered (the empty branch displaces the iteration).
+
+**Body shape.** `<empty>` is a plain-markup element — its body is a **free-text body** (§4.18, not code-default). Use bare markup, plain text, or interpolations of OUTER `@cell` references (the empty branch is outside the iteration scope; `@.` is NOT in scope inside `<empty>` because there is no current iteration value).
+
+```scrml
+<each in=@items>
+    <li : @.name>
+    <empty>
+        <p>No items match your search "${@searchQuery}".</p>
+        <button onclick=clearSearch()>Reset</button>
+    </empty>
+</each>
+```
+
+**Composition with `:`-shorthand.** `<empty>` MAY use §4.14 `:`-shorthand:
+
+```scrml
+<each in=@items>
+    <li : @.name>
+    <empty : "Nothing here yet.">
+</each>
+```
+
+**Normative statements:**
+
+- The `<empty>` sub-element SHALL render when the enclosing `<each>`'s iteration source is empty (collection `.length === 0` / `not`; count `=== 0` / `not`).
+- An `<each>` body MAY contain at most ONE `<empty>` sub-element. Multiple `<empty>` sub-elements within the same `<each>` body is `E-EACH-EMPTY-DUPLICATE` (§34, queued).
+- The `<empty>` body SHALL NOT reference `@.` (the contextual sigil is not in scope — the empty branch executes when no item exists). Use of `@.` inside `<empty>` is `E-SYNTAX-064` per §17.7.3.
+- An `<each>` MAY omit `<empty>` entirely. When omitted and the iteration source is empty, the `<each>` renders nothing (no DOM element produced for the iteration; no error).
+
+#### 17.7.5 `key=` inference + the `W-EACH-KEY-001` info-lint
+
+**Status:** S130 HU-1 Q5 ratification (d) — `key=` is INFERRED from item shape. The compiler:
+
+- If items have a `.id` field → auto-infer `key=@.id` (silent + correct; zero diagnostic).
+- If items don't have an inferable identity → emit `W-EACH-KEY-001` info-lint naming the three legitimate causes (per §17.7.5.b).
+- Adopter override via explicit `key=expr` at any time.
+- Adopter suppress via `key=__index__` (the canonical sentinel for "positional fallback is intentional").
+
+**Form A — adopter overrides via `key=expr`:**
+
+```scrml
+<each in=@contacts key=@.email>
+    <li : @.name>
+</each>
+```
+
+The expression is evaluated once per iteration and SHALL produce a value that is unique within the collection. Type: any value that is a usable Map key (numbers, strings, booleans, symbols; objects compared by reference).
+
+**Form B — adopter suppresses lint via `key=__index__`:**
+
+```scrml
+<each in=@orderedSteps key=__index__>
+    <li : @.label>
+</each>
+```
+
+`__index__` is a reserved sentinel string meaning "use positional keying intentionally." The compiler emits NO diagnostic for this form (the adopter has acknowledged the positional fallback). Runtime keying uses the iteration index. The exact string `__index__` is required — variant spellings (`__INDEX__`, `_index_`, `__idx__`) are `E-EACH-KEY-SENTINEL` (§34, queued).
+
+**Form C — inference: items with `.id`:**
+
+```scrml
+type Contact:struct = { id: string, name: string, email: string }
+<contacts>: Contact[] = []
+
+<each in=@contacts>
+    <li : @.name>
+</each>
+```
+
+No `key=` attribute on the opener. The compiler reads the declared type of `@contacts` (here `Contact[]`); the element type `Contact` has an `id` field; the compiler infers `key=@.id` silently. No `W-EACH-KEY-001` fires. The runtime uses `item.id` for keyed reconciliation.
+
+**Form D — inference fallback: items without `.id`:**
+
+```scrml
+type Tag:struct = { name: string, color: string }
+<tags>: Tag[] = []
+
+<each in=@tags>
+    <li : @.name>
+</each>
+```
+
+The element type `Tag` has no `id` field. The compiler emits `W-EACH-KEY-001` info-lint naming three legitimate causes (per §17.7.5.b):
+
+1. **The list is order-stable** — positional keying is appropriate; suppress with `key=__index__`.
+2. **Items carry stable identity in a different field** — provide explicit `key=` (e.g., `key=@.name` if names are unique, `key=@.color` if colors are unique).
+3. **Positional fallback is intentional** — suppress with `key=__index__`.
+
+Runtime keying falls back to positional (the index) when inference fails. Correctness is preserved; the lint is informational only.
+
+**Special case — `<each of=N>` form:**
+
+`<each of=N>` defaults to `key=@.` (the index itself). This is structurally-correct positional keying — the index IS the stable identity of the iteration step. `W-EACH-KEY-001` is NEVER fired on `<each of=N>` (the index is always a defined value).
+
+```scrml
+<each of=@daysLeft>
+    <li : "Day " + (@. + 1)>
+</each>
+```
+
+The compiler emits `key=i` codegen automatically; no lint fires.
+
+##### 17.7.5.a `W-EACH-KEY-001` fire conditions
+
+`W-EACH-KEY-001` is the info-level lint surfaced when the inference-or-explicit-override resolution fails to produce a key. Fire conditions:
+
+1. `<each in=@cell>` with NO explicit `key=` attribute.
+2. AND the source `@cell`'s declared type resolves (via type-system) to an array of a struct that has NO `.id` field.
+3. AND `as name` is NOT used to introduce an item type with a stable identity hint.
+
+The message names the three causes per §17.7.5.b. The adopter chooses the appropriate fix per their data model.
+
+##### 17.7.5.b `W-EACH-KEY-001` message shape (normative)
+
+```
+W-EACH-KEY-001: `<each in=@tags>` has no inferable per-item key — items don't expose a `.id` field
+and no explicit `key=expr` was given. Three legitimate causes:
+
+  (a) The list is order-stable — positional keying is appropriate. Suppress this lint with:
+      `<each in=@tags key=__index__>`
+
+  (b) Items carry stable identity in a different field. Provide explicit:
+      `<each in=@tags key=@.name>` (or whichever field is unique)
+
+  (c) Positional fallback is intentional. Suppress this lint with:
+      `<each in=@tags key=__index__>`
+
+Runtime keying falls back to positional (the index). Correctness is preserved; this lint is informational.
+```
+
+**Normative statements:**
+
+- The compiler SHALL attempt key inference at the `<each>` declaration site by inspecting the declared element type of the iteration source.
+- If the element type is a struct with an `id` field, the compiler SHALL silently infer `key=@.id`. No `W-EACH-KEY-001` fires.
+- If the element type has no inferable `.id` AND no explicit `key=expr` is provided AND `key=__index__` was NOT used, the compiler SHALL emit `W-EACH-KEY-001` (§34) at info severity.
+- An explicit `key=__index__` SHALL suppress `W-EACH-KEY-001` and emit positional codegen.
+- An explicit `key=expr` (where `expr` is any other expression) SHALL suppress `W-EACH-KEY-001` and emit `expr`-based codegen.
+- The `<each of=N>` form SHALL default to `key=@.` (the index itself) and SHALL NOT fire `W-EACH-KEY-001`.
+
+#### 17.7.6 `:`-shorthand body composition — leverages §4.14, no new mechanism
+
+Per HU-1 Q3 RE-RATIFICATION, `<each>` introduces NO new body-shorthand mechanism. The per-item element opener's single-expression body uses the existing §4.14 `:`-shorthand grammar — `<each>` simply ADDS its per-item element openers to the set of loci where §4.14 is legal (per §4.14 line 983: "Other state-types and HTML elements MAY accept `:`-shorthand where doing so is meaningful").
+
+**§4.14 form recap.** A `:`-shorthand body opens with a single `:` token preceded by mandatory whitespace following the last attribute (or the tag name if there are no attributes), and runs through to the `>` that terminates the opener. NO closer (`</>`, `</tag>`, `/>`) is allowed.
+
+```scrml
+<li : @.name>            <!-- canonical :-shorthand: `:` inside opener; mandatory space before; no closer -->
+<li:@.name>              <!-- E-PARSE-001: no whitespace before `:` -->
+<li : @.name></>         <!-- E-CLOSER-001: closer present on :-shorthand body -->
+<li : @.name; @.email>   <!-- E-MULTI-STATEMENT-HANDLER: :-shorthand allows ONE expression -->
+```
+
+**Inside `<each>`:**
+
+```scrml
+<each in=@contacts>
+    <li : @.name>                                       <!-- valid §4.14 :-shorthand body -->
+    <a href=@.url : @.title>                            <!-- valid; attrs precede the `:` -->
+    <span class="badge" : @.status.toUpperCase()>       <!-- valid; method-call expression -->
+    <empty : "No contacts yet.">                        <!-- valid; <empty> also accepts :-shorthand -->
+</each>
+```
+
+**Mixing per-item shapes is legal.** A single `<each>` body may use any mix of bare-body, `:`-shorthand, and self-closing per-item elements:
+
+```scrml
+<each in=@records as record>
+    <h2 : record.title>                                 <!-- :-shorthand body -->
+    <p class="meta">
+        ${record.author} — ${formatDate(record.date)}   <!-- bare-body with interpolation -->
+    </p>
+    <hr/>                                               <!-- self-closing -->
+</each>
+```
+
+**Cross-reference §4.14 for the full body-grammar definition.** The S111 quoted-text-model amendment (`<X : "display text">` as a `"..."` display-text literal) applies to `:`-shorthand bodies inside `<each>` AS-IS — `<each>` introduces no exception. The Wave-0 spike (`scrml-support/archive/changes/quoted-text-model/SPIKE-bs-mode-flag.md` §4.7) confirms `:`-shorthand bodies are within-body sub-modes, not stack frames; the same applies inside `<each>`.
+
+**Normative statements:**
+
+- The per-item element opener inside `<each>` SHALL admit §4.14 `:`-shorthand body when the per-item rendering is a single expression. No `<each>`-specific extension to the §4.14 grammar is introduced.
+- The §4.14 closer-presence rule, mandatory-whitespace-before-`:` rule, single-expression rule, and multi-statement rejection apply IDENTICALLY inside `<each>` body scope.
+- The `<empty>` sub-element MAY also use §4.14 `:`-shorthand. (`<empty>` is a plain-markup element whose body is free-text — the `:`-shorthand bound display-text literal applies per §4.18.)
+- Mixing per-item shapes (bare-body / `:`-shorthand / self-closing) within a single `<each>` body is legal. Each per-item element opener chooses its body form independently.
+
+#### 17.7.7 Cross-references
+
+- **§17.0** — case-analysis Tier ladder (the SIBLING ladder pattern this iteration ladder mirrors).
+- **§17.4** — Tier 0 iteration form (`${ for/lift }`) — stays valid; `W-EACH-PROMOTABLE` (§34) info-lint nudges promotion to Tier 1.
+- **§17.4b** — Tier 0 `key` clause (carries forward as the Tier-0 surface; the Tier-1 `key=` inference at §17.7.5 is the post-promotion answer).
+- **§4.14** — `:`-shorthand body universal grammar (the per-item body-shorthand at §17.7.6 leverages this verbatim; no new mechanism).
+- **§4.18** — code-default vs free-text body modes (§17.7.6 cross-refs the S111 quoted-text model; `<each>` per-item bodies inherit the code-default classification of their parent element kind).
+- **§3.4** — V5-strict per-locus access table; `@.` contextual sigil row (§17.7.3 contextual semantic; full row at §3.4).
+- **§6.1** — V5-strict access principle (the foundational `@`-sigil rule that `@.` extends).
+- **§34** — `W-EACH-PROMOTABLE` (Tier-0-to-Tier-1 promotion nudge) and `W-EACH-KEY-001` (key-inference fallback advisory) catalog rows.
+- **§51.0.I** — engine state-child `:`-shorthand (sibling §4.14-accepting locus; pattern precedent for §17.7.6).
+- **§18.0.1** — match block-form arm-body `:`-shorthand (sibling §4.14-accepting locus).
+- **§56** — `bun scrml promote --each` CLI extension (§56.10, Landing 3 of the S130 HU-1 5-landing arc; the mechanical Tier-0 → Tier-1 lift).
 
 ---
 
@@ -29443,6 +29827,127 @@ though it happens to satisfy fn-purity today" — or as a guard against a
 *future* edit that would add side effects, which would surface E-FN-001..005
 on the `fn` form but compile cleanly on the `function` form. Per the §1
 tier-ladder framing, promotion is *opt-in*; the lint is informational only.
+
+### 56.10 `--each` mode (Tier 0→1 iteration sibling)
+
+**Added:** 2026-05-25 (S130 HU-1 Q7 ratification — Tier 0 → Tier 1 iteration ladder + mechanical CLI promotion). **Status:** SPEC-only landing — the `--each` CLI verb implementation is Landing 3 of the S130 HU-1 5-landing iteration arc (compiler-source dispatch PENDING at SPEC-write time; surface specified here so the surrounding text refers to a stable verb shape).
+
+Same span-rewrite shape as `--match` (§56.5) and `--engine` (§56.6), different transformation. Pairs with the `W-EACH-PROMOTABLE` info-lint (§34). Input: a `${ for (let x of @items) { lift <markup/> } }` Tier-0 iteration site (§17.4) whose iterable is a reactive `@cell` reference and whose body contains at least one `lift` of a markup expression. Output: an `<each in=@items>...</each>` Tier-1 structural-element iteration (§17.7).
+
+#### 56.10.1 Verb shape
+
+```
+scrml promote --each   <file>[:line]   # ${ for/lift } → <each>          (Tier 0→1 lift)
+scrml promote --dry-run --each <f>     # preview unified diff
+scrml promote --each   <dir>           # recurse all .scrml files
+```
+
+`--each` is mutually exclusive with `--match` and `--engine` in a single invocation. The CLI inherits the file-walk, include/exclude, dry-run, and check-mode conventions from `bun scrml migrate` and the sibling `--match` / `--engine` modes per §56.5. The verb is registered alongside the existing promotion modes because the *semantics* are uniform: lift a valid Tier-N form to a valid Tier-(N+1) form (both forms remain valid after the lift; no deprecation cycle in this dispatch).
+
+#### 56.10.2 Per-loop rewrite rules
+
+| Source iteration shape | Target `<each>` form |
+|---|---|
+| `${ for (let x of @cell) { lift <markup/> } }` | `<each in=@cell as x><markup/></each>` |
+| `${ for (let x of @cell key x.id) { lift <markup/> } }` | `<each in=@cell as x key=x.id><markup/></each>` |
+| `${ for (let x of @cell) { lift <markup/> } else { lift <empty-markup/> } }` | `<each in=@cell as x><markup/><empty><empty-markup/></empty></each>` |
+| `${ for (let i = 0; i < N; i++) { lift <markup/> } }` (rare imperative count-loop) | `<each of=N as i><markup/></each>` |
+| Iterable that is NOT an `@cell` ref (literal array, function-call result) | SKIPPED — `<each in=>` requires an `@cell` for reactivity. The site is reported in per-file output with skip-reason "iterable is not an `@cell` reference." |
+| Body contains MULTIPLE lift statements | SKIPPED — `<each>` per-item template is a single markup expression per iteration; multi-lift bodies need manual restructuring. |
+| Body contains a `${...}` interpolation referencing the iter variable | The interpolation is preserved verbatim into the `<each>` body; `as x` makes `x` legal inside the `${...}` interpolation by §17.7.3 alias semantics. |
+
+#### 56.10.3 `:`-shorthand application (single-expression template)
+
+When the per-item template is a single-expression-shaped markup element (e.g., `<li>${x.name}</>`, `<span>${x.label}</span>`), the CLI MAY apply §4.14 `:`-shorthand on the per-item element opener (§17.7.6):
+
+| Source | Target (without shorthand) | Target (with shorthand) |
+|---|---|---|
+| `${ for (let item of @contacts) { lift <li>${item.name}</> } }` | `<each in=@contacts as item><li>${item.name}</li></each>` | `<each in=@contacts><li : @.name></each>` |
+
+The shorthand form is denser; the bare-body form preserves the original variable name (`item`) and may be easier to read in nested contexts. The CLI defaults to bare-body for fidelity-preservation; an opt-in flag `--shorthand` requests the shorthand form when applicable. Heuristic for "applicable":
+
+- Per-item template is a SINGLE markup element (no siblings, no surrounding text).
+- The element body is a SINGLE `${...}` interpolation OR a single bare display-text run.
+- The interpolation expression contains EXACTLY ONE reference to the iter variable.
+
+When the heuristic fails, the CLI defaults to bare-body even with `--shorthand` (the heuristic ensures the shorthand form remains structurally-equivalent to the original).
+
+#### 56.10.4 `key=` inference (S130 HU-1 Q5)
+
+The CLI applies the same `key=` inference rule as §17.7.5:
+
+- If the iter variable's type has an `.id` field → infer `key=item.id` (silent; no diagnostic).
+- If no inferable identity → emit the rewritten `<each>` WITHOUT a `key=` attribute; the subsequent `W-EACH-KEY-001` info-lint (§17.7.5.a) fires on the next compile and names the three legitimate causes per §17.7.5.b.
+
+The CLI does NOT auto-insert `key=__index__` — that sentinel is reserved for adopter-explicit acknowledgment of positional fallback (§17.7.5). Auto-inserting it would defeat the lint's teaching role.
+
+#### 56.10.5 `<empty>` sub-element synthesis
+
+When the source `${ for/lift }` site uses the §17.4a `else { lift }` empty-state form, the CLI synthesizes the corresponding `<empty>` sub-element (§17.7.4) automatically. The else-body markup is preserved verbatim into the `<empty>` body.
+
+```
+SOURCE
+${ for (let item of @items) {
+    lift <li>${item.name}</>;
+} else {
+    lift <li class="empty">No items yet.</>;
+} }
+
+PROMOTED
+<each in=@items as item>
+    <li>${item.name}</li>
+    <empty>
+        <li class="empty">No items yet.</li>
+    </empty>
+</each>
+```
+
+When the source has no `else` clause, the CLI emits the `<each>` without `<empty>` (the empty-state path is silently no-op per §17.7.4 — no DOM produced).
+
+#### 56.10.6 Idempotency + skip-and-report
+
+Re-running `bun scrml promote --each` on already-promoted code is a no-op — the verb detects existing `<each>` structural elements and leaves them untouched. Files containing a mix of promoted and not-yet-promoted iteration sites are handled site-by-site.
+
+Sites that are non-promotable (literal-array iterables, function-call iterables, multi-lift bodies, side-effect statements in the loop body) are skipped and reported in the per-file output with a one-line reason per skipped site. Mirrors the `--match` skip-and-report behavior per §56.5.3.
+
+#### 56.10.7 Formatting + comment preservation (normative)
+
+Same rule as `--match` per §56.5.4: the transformation MUST preserve, verbatim, all source content outside the rewritten iteration site — comments, whitespace, indentation, and surrounding markup. Inside the rewritten iteration, comments attached to the loop body are preserved into the corresponding `<each>` body location.
+
+#### 56.10.8 Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | N sites promoted cleanly, OR no promotable sites found (informational). |
+| 1 | File not parseable, OR I/O failure during write. |
+| 2 | Ambiguous site needing human disambiguation (during stub phase: emitted unconditionally with the implementation-pending notice). |
+
+Same exit-code shape as `--match` per §56.5.5.
+
+#### 56.10.9 Status — Landing 3 PENDING
+
+The `--each` CLI verb is the Landing 3 dispatch of the S130 HU-1 5-landing iteration arc:
+
+| Landing | Scope | Status |
+|---|---|---|
+| 1 | Compiler-source impl — `<each>` parser, codegen, lint sources (`emit-each.ts`, `ast-builder.js`, `lint-w-each-promotable.js`, `lint-w-each-key.js`) | LANDED S131 commit `23db318c` |
+| 2 | SPEC amendment — §17.7 NEW + §17.4 Tier-0 framing + §3.4 row + this §56.10 | LANDED S131 (this dispatch) |
+| 3 | `--each` CLI verb impl + tests | PENDING |
+| 4 | PRIMER + kickstarter v2 catch-up (Q8 ratification) | PENDING |
+| 5 | Corpus migration — 113 corpus iteration sites via CLI | GRADUAL (begins post-Landing-3) |
+
+Per §56.5 conventions, the `bun scrml promote --each --help` text MUST surface the current implementation status (the surface specified here is normative; the CLI is allowed to STUB the action with a "Landing 3 implementation pending; see SPEC §56.10" message until Landing 3 ships).
+
+#### 56.10.10 Cross-references
+
+- §17.4 — Tier 0 iteration form (`${ for/lift }`) — the source for `--each` promotion.
+- §17.7 — Tier 1 iteration form (`<each>`) — the target for `--each` promotion.
+- §17.7.4 — `<empty>` sub-element synthesis from §17.4a `else { lift }` empty-state.
+- §17.7.5 — `key=` inference at Tier 1 (the post-promotion answer).
+- §17.7.6 — `:`-shorthand body composition (the `--shorthand` flag's heuristic origin).
+- §4.14 — `:`-shorthand body universal grammar.
+- §34 — `W-EACH-PROMOTABLE` info-lint (the surfacing pair to this CLI).
+- §56.5 — `--match` CLI (the verb pattern this `--each` extension mirrors).
 
 ---
 
