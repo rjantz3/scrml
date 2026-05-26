@@ -15,7 +15,7 @@
 | Severity | Open | Closed-this-arc | Notes |
 |---|---|---|---|
 | HIGH | 2 | E-TYPE-001 lifecycle fire (S130 Landing 1 SHIPPED) · §29 vanilla-interop framing-corrected (S132 — §2.1 false present-tense claim removed; §29 marked Nominal; NOT retired) · **E-FN-003 attributed-markup-return in `fn` (RESOLVED S133 `dbef4f4d`)** · **Bug 17 E-META-001 runtime-meta scoping gap (RESOLVED S134 `6c6c0073`)** | compiler-managed-async (deferred A9-class) · 6nz-V class:NAME on for-lift (GENUINE) |
-| MED | 6 | Bug 15 `~snapshot` codegen leak (S131 SHIPPED) | Bug 1 Tailwind residuals · V-kill READ-side fire · E-SCHEMA-003 enforcement · MCP V0 partial-impl deferrals · Generator policy · L19 multi-statement-handler |
+| MED | 7 | Bug 15 `~snapshot` codegen leak (S131 SHIPPED) · E-SCHEMA-003 enforcement (S133 SHIPPED `afbcb47a`) | Bug 1 Tailwind residuals · V-kill READ-side fire · MCP V0 partial-impl deferrals · Generator policy · L19 multi-statement-handler · **A5 refinement-type freeze extension (DEFERRED with adoption-watch trigger, S134)** · §6.6.18 alias-escape gap (A4 queued S134) |
 | LOW | 4 | (rotate out below) | Bug 4 bare-`/` · GITI-015 · §11-folded-citation sweep · `bun scrml promote --engine` Tier-1→2 deferred |
 | Nominal (spec-ahead-of-impl) | 7 | — | Build Story §58 · `import:host` §21.3.1 · Quoted-text §4.18 compiler fire · `_{}` foreign code · WASM call-char sigils · Sidecar process decls · RemoteData enum |
 
@@ -88,6 +88,19 @@ A `fn` that returned (or `let`-bound) markup carrying ANY attribute (`class`, `i
 ---
 
 ## §2 MED — silent acceptance / incomplete surfaces
+
+### A5 refinement-type freeze extension — `DEFERRED with adoption-watch trigger` (S134)
+
+The `const <state>` deep-freeze debate (S134) ratified a **sequenced** verdict: A4 (close the L21 walker alias-escape gap) lands NOW; A5 (refinement-type `object(frozen(deep))` extension that emits `Object.freeze` at the JS-host boundary) DEFERS until adopter friction confirms the boundary-zone enforcement is needed.
+
+- **Reproducer (theoretical, not yet adopter-reported):** a scrml object handed across a JS-host boundary (`_{}` foreign code, Web Worker `postMessage`, MCP tool output) can be mutated by the receiving JS code; scrml's L21 compile-time check doesn't survive the boundary because the receiver is JS and doesn't run the scrml compiler.
+- **Workaround:** adopters who need defense-in-depth at the JS-host boundary can manually `Object.freeze(...)` before passing values across; the stdlib could expose a `deepFreeze` utility if friction surfaces.
+- **Watch trigger:** **≥2 adopter reports of JS-host boundary mutation post-A4** re-opens the A5 dispatch. On trigger, the design approach is the DD's A5 specification (refinement-type predicate extension; emits `Object.freeze` only at the boundary zone; reuses existing §53 three-zone enforcement).
+- **What does NOT trigger A5:** internal alias-escape (closed by A4). A3 (Vue-style cell-decl modifier) is permanently rejected per the debate — zero expert votes; creates a parallel classification path beside §53 that the design rule explicitly rejects.
+- **Authority:** debate insight at `~/.claude/design-insights.md` ("const <state> deep-freeze — roc-expert vs clojure-expert vs simplicity-defender vs security-expert — 2026-05-26"). HU at `docs/heads-up/const-deep-freeze-2026-05-26.md` (status: ratified). DD at `scrml-support/docs/deep-dives/const-deep-freeze-2026-05-26.md` (1296L).
+
+---
+
 
 ### Bug 1 — Tailwind arbitrary-value classes — `partial-impl` (remaining: ring-offset + gradient + safelist + string-shaped)
 

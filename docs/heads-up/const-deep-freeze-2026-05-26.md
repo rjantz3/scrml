@@ -1,11 +1,42 @@
 ---
-status: in-progress
+status: ratified
 started: 2026-05-26
+ratified: 2026-05-26
 session: S134
-phase: HU resolutions per question
-dd-source: scrml-support/docs/deep-dives/const-deep-freeze-2026-05-26.md (dispatched S134, agent `a22280161ec52b7fd`, BG)
-findings-total: 6 (PA-drafted; Q6 added S134 after the running DD launched)
-findings-closed: 0
+phase: closed — debate + ratification complete
+dd-source: scrml-support/docs/deep-dives/const-deep-freeze-2026-05-26.md
+debate-insight: ~/.claude/design-insights.md (entry: "const <state> deep-freeze — roc-expert vs clojure-expert vs simplicity-defender vs security-expert — 2026-05-26")
+findings-total: 6
+findings-closed: 6 (Q1-Q6 ratified per sequenced verdict)
+---
+
+## ✅ RATIFICATION (S134, 2026-05-26)
+
+**Sequenced verdict:** A4 now · A5 conditional on adoption signal · A3 permanently dead · Q6 orthogonal landing.
+
+**Per-question ratifications:**
+
+| HU-Q | Ratification |
+|---|---|
+| Q1 — alias-escape real? | YES — empirically verified by DD (5 reproducers; `symbol-table.ts:2456` walker gates on `leaf.name.startsWith('@')`). A4 closes it. |
+| Q2 — manual depth-control knob? | **CONDITIONAL** — A5 (refinement-type `object(frozen(deep))`) does NOT ship at v0.7. Adoption-watch trigger filed: ≥2 adopter reports of JS-host boundary mutation post-A4 re-opens. A3 (cell-decl modifier) permanently dead. |
+| Q3 — `freeze=` on non-derived cells? | **MOOT** — A3 dead; A5 conditional. If A5 ever fires, applies anywhere a refinement-type predicate goes per existing §53 rules. |
+| Q4 — extend L21 alias-chain tracking? | **YES (A4)** — queued for next compiler-source dispatch. ~30-60h via `scrml-js-codegen-engineer`. Bug-fix-shaped, not feature-shaped. |
+| Q5 — composition with §14.12 + refinement types? | **DEFERRED to A5 if/when triggered.** If A5 ships, integrates into refinement (two surfaces — lifecycle + refinement). If A5 stays deferred, the question doesn't activate. |
+| Q6 — `reset(@cell)` × lifecycle annotation? | **YES (a) symmetric reset.** §6.8 + §14.12 amendment + tracker reverts per-access state on `_scrml_reset_*` writes that match pre-type. ~10-20h. Lands independently. Queued as separate dispatch brief. |
+
+**Carry-forward dispatches:**
+
+1. **A4 — L21 walker alias-tracking extension.** Brief: extend `compiler/src/symbol-table.ts:2456` to track alias provenance through `let` / `const` bindings of derived cells; any write through an alias of a const-derived cell fires `E-DERIVED-VALUE-MUTATE`. Provenance model needs spec before implementation per roc-expert's honest-trade-off flag. ~30-60h via `scrml-js-codegen-engineer` (isolation:worktree). Closes the empirical gap from DD §3.
+2. **Q6 — reset×lifecycle SPEC amendment + impl.** Brief: §6.8 + §14.12 normatively specify symmetric reset; type-system tracker listens for `_scrml_reset_*` writes; +5-8 regression tests covering presence-progression reset, variant-progression reset, default= interaction. ~10-20h via `scrml-js-codegen-engineer` (isolation:worktree).
+3. **A5 — adoption-watch trigger.** Filed in `docs/known-gaps.md` MED bucket. Watch condition: ≥2 adopter reports of JS-host boundary mutation post-A4. On trigger, scope the refinement-type `object(frozen(deep))` extension per the DD's A5 specification + clojure-expert's integration approach.
+
+**Design-rule banked (from debate-judge insight):**
+
+> When a language already has a mechanism that tracks value provenance across trust zones for other constraint types, adding a new constraint that needs the same trust-zone awareness should extend that mechanism rather than introduce a parallel runtime modifier.
+
+This is the rule that future PA / DD work on "should X be a modifier or a refinement extension" must consult.
+
 ---
 
 # `const <state>` Deep-Freeze — Heads-Up Resolutions
