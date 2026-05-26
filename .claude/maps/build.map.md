@@ -1,6 +1,6 @@
 # build.map.md
 # project: scrmlts
-# updated: 2026-05-24T00:00:00Z  commit: 3a909c1d
+# updated: 2026-05-26T00:00:00Z  commit: c2d3f7ae
 
 ## Development Commands (root package.json scripts)
 
@@ -20,26 +20,28 @@
 | `e2e:docs` | `playwright test --config=e2e/playwright.docs.config.ts` |
 | `e2e:install` | `playwright install chromium firefox webkit` |
 
+(Scripts UNCHANGED since the prior watermark.)
+
 ## CLI Subcommands (compiler/src/cli.js)
 
 | Subcommand | What it does |
 |---|---|
 | `scrml compile <file\|dir>` | compile scrml source |
 | `scrml dev <file\|dir>` | dev server with watch |
-| `scrml build <dir>` | production build |
+| `scrml build <dir>` | production build; **MCP-V0.D: injects `scrml:mcp` boot import into `_server.js` when source carries `<program mcp>` (dev-only NODE_ENV gate or always)** |
 | `scrml migrate <file\|dir>` | source migration tooling |
-| `scrml promote` | if-chain → match / fn → engine promotion |
+| `scrml promote --match\|--engine <file\|dir>` | if-chain → `<match>` / `<match>` → `<engine>` promotion. **NB: `--each` (Tier-0 `${for/lift}` → Tier-1 `<each>`, SPEC §56.10) is SPEC'd but NOT yet implemented — Iteration Landing 3 is PENDING. The promote CLI help itself notes "impl pending".** |
 | `scrml generate / init / serve` | scaffolding + static serving |
 
-Flags: `--no-gather`, `--test`, `--emit-per-route`, `--chunk-size-budget=<bytes>`, `--debug-perf`, `--timing`, `--parser=scrml-native` (C2 routing — opt-in native parser).
+Flags (cli.js, sorted): `--check`, `--chunk-size-budget=<bytes>`, `--convert-legacy-css`, `--debug-perf`, `--dry-run`, `--embed-runtime`, `--emit-batch-plan`, `--emit-machine-tests`, `--emit-reachability`, `--engine`, `--exclude`, `--include`, `--match`, `--minify`, `--no-default-excludes`, `--output`/`--output-dir`, `--parser=scrml-native` (C2 routing — opt-in native parser), `--port`, `--verbose`, `--version`, `--watch`. (No new CLI flag this delta — `<program mcp>` is an in-source markup attribute, not a CLI flag.)
 
 ## Build & Release
 
-No bundler step — scrml runs directly under Bun. Generated dist artifacts: `compiler/dist/`, `compiler/native-parser/dist/`, `compiler/self-host/dist/`, `stdlib/*/dist/`, `samples/dist/`. Native-parser dist rebuilt via `scripts/rebuild-bs-dist.ts` / `rebuild-tab-dist.ts` / `rebuild-self-host-dist.ts`. SPEC-INDEX regenerated via `scripts/regen-spec-index.ts`.
+No bundler step — scrml runs directly under Bun. Generated dist artifacts: `compiler/dist/`, `compiler/native-parser/dist/`, `compiler/self-host/dist/`, `stdlib/*/dist/`, `samples/dist/`. Native-parser dist rebuilt via `scripts/rebuild-bs-dist.ts` / `rebuild-tab-dist.ts` / `rebuild-self-host-dist.ts`. SPEC-INDEX regenerated via `scripts/regen-spec-index.ts` (re-run at S131 for §17.7 + §3.4 additions).
 
 ## CI/CD Pipeline
 
-No hosted CI (`.github/workflows`, GitLab, Jenkins all absent). Quality gates are local git hooks; install via `bash scripts/git-hooks/install.sh`.
+No hosted CI. `.github/` contains ONLY `FUNDING.yml` (no `workflows/`); GitLab + Jenkins absent. Quality gates are local git hooks; install via `bash scripts/git-hooks/install.sh`.
 
 ### Pre-commit hook  [scripts/git-hooks/pre-commit]
 Warns on direct commits to `main`. Runs `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail` (browser tests excluded). Non-zero test exit blocks the commit. Never bypass with `--no-verify` without explicit user authorization (pa.md Rule 0).
@@ -56,7 +58,7 @@ Runs the full test suite + gauntlet quick check. README gate (extract-readme-scr
 No Dockerfile / docker-compose. Not containerized.
 
 ## Tags
-#scrmlts #map #build #bun #git-hooks #cli
+#scrmlts #map #build #bun #git-hooks #cli #mcp-program-attr #promote-each-pending #s131
 
 ## Links
 - [primary.map.md](./primary.map.md)

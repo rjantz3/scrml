@@ -1,6 +1,6 @@
 # test.map.md
 # project: scrmlts
-# updated: 2026-05-24T00:00:00Z  commit: 3a909c1d
+# updated: 2026-05-26T00:00:00Z  commit: c2d3f7ae
 
 ## Test Framework
 
@@ -11,16 +11,16 @@ Run all: `bun test compiler/tests/` (preceded by `pretest` sample compilation)
 Run single: `bun test compiler/tests/unit/<file>.test.js`
 Run by name: `bun test compiler/tests/<file>.test.js -t "<test name>"`
 
-## Volume (HEAD 3a909c1d — S127)
+## Volume (HEAD c2d3f7ae — S131)
 
-757 .test.js files under `compiler/tests/`. (The prior watermark map reported 761 unit/integration counts that did not match the filesystem; counts below are re-derived from the tree at HEAD.) S127 ADDED 11 test files (5 unit mcp-descriptors-*, 1 unit not-return-statement-glue, 2 integration mcp-*, 1 integration bug-w, 1 integration giti-019) + 1 unit helper (`helpers/mcp-sidecar-compile.js`); MODIFIED `unit/emit-library.test.js` (+106L, GITI-018), `unit/not-keyword.test.js`, `unit/lift-li-text-template.test.js`, `unit/match-arm-inline-markup-payload.test.js`.
+780 .test.js/.test.ts files under `compiler/tests/` (was 757 at the prior watermark; +23 net). Major new-test clusters this delta: iteration (each-block), lifecycle annotation (3 landings), ~snapshot codegen fix, MCP-V0.D/E, native-parser M6.5/M6.7 D-class parity.
 
 ## Test Categories
 
 | Category | Glob | Count |
 |---|---|---|
-| Unit | `compiler/tests/unit/**` | 529 |
-| Integration | `compiler/tests/integration/**` | 81 |
+| Unit | `compiler/tests/unit/**` | 545 |
+| Integration | `compiler/tests/integration/**` | 88 |
 | Conformance | `compiler/tests/conformance/**` | 105 |
 | Browser | `compiler/tests/browser/**` | 12 |
 | Commands | `compiler/tests/commands/**` | 6 |
@@ -29,73 +29,95 @@ Run by name: `bun test compiler/tests/<file>.test.js -t "<test name>"`
 | Top-level parser-conformance | `compiler/tests/*.test.js` | 10 |
 | E2E | `e2e/**` | Playwright (separate runner) |
 
-## Parser-Conformance Suite (load-bearing for M5 swap / C1+C2 / M6 Wave 1)
+## S131 NEW Test Files — Iteration (`<each>`)
+
+| File | What it tests |
+|---|---|
+| `unit/each-block.test.js` | each-block codegen — `<each in=>` / `<each of=N>` mount HTML + body render; `@.` sigil; `as name` alias; `<empty>` sub-element; key= inference + W-EACH-KEY-001; nested each-blocks |
+| `integration/bug-17-tailwind-lift-iteration-scan.test.js` | tailwind class scan across lift/iteration sites |
+
+## S130-S131 NEW Test Files — Lifecycle Annotation
+
+| File | What it tests |
+|---|---|
+| `unit/type-system-lifecycle.test.js` | Landing 1 — `(A to B)` registry build + E-TYPE-001 access-before-transition |
+| `unit/type-system-lifecycle-landing-2.test.js` | Landing 2 — E-TYPE-LIFECYCLE-ON-ENGINE-CELL + `->`→`to` glyph migration + W-LIFECYCLE-LEGACY-ARROW |
+| `unit/type-system-lifecycle-landing-2-5.test.js` | Landing 2.5 — fn-return transition-marker; E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED |
+| `integration/lifecycle-access-pipeline.test.js` | Landing 1 end-to-end through compileScrml |
+| `integration/lifecycle-landing-2-pipeline.test.js` | Landing 2 end-to-end |
+| `integration/lifecycle-landing-2-5-pipeline.test.js` | Landing 2.5 end-to-end |
+
+## S131 NEW Test Files — ~snapshot codegen fix (Bug 15)
+
+| File | What it tests |
+|---|---|
+| `integration/tilde-snapshot-codegen-fix.test.js` | orphan `~` sigil no longer leaks into emitted JS (bare-expr Phase 3 fast-path skip + emitIdent defensive fallback) |
+
+## S130-S131 NEW Test Files — MCP-V0.D/E
+
+| File | What it tests |
+|---|---|
+| `integration/mcp-program-attr.test.js` | MCP-V0.D — `<program mcp>` opt-in: auto-`emitPerRoute`, mcpAutoActivated/mcpMode surface, dev-only vs always boot gate |
+| `integration/mcp-v0-e2e.test.js` | MCP-V0.E — end-to-end over a real compiled multi-page app fixture; series-complete close |
+
+## S127-S129 NEW Test Files — Native-parser M6.5/M6.7 D-class
+
+| File | What it tests |
+|---|---|
+| `unit/m65-b2-1-statedecl-boundary.test.js` | M6.5.b.2.1 — newline-as-stmt-separator for consecutive structural state-decls |
+| `unit/m65-b3-hoist-gap.test.js` | M6.5.b.3 — hoist-recursion regression-lock (Class C gap already CLOSED) |
+| `unit/m65-b4-sql-promotion.test.js` + `integration/m65-b4-sql-leak.test.js` | M6.5.b.4 — bare `?{}` → kind:"sql" (server-SQL-to-client leak fix) |
+| `unit/m65-b56-shape-span-normalize.test.js` | M6.5.b.5/b.6 — native→live FileAST shape (Class F) + span.file (Class G) |
+| `unit/m67-c1-component-parity.test.js` | M6.7-C1 — native component-def raw bodyText-relative span (same-file E-COMPONENT-020) |
+| `unit/m67-c2-codegen-output-parity.test.js` | M6.7-C2 — native `server @var = expr` codegen parity (mount-hydrate flip) |
+| `unit/m67-d1-arrow-callarg-parse.test.js` | M6.7-D1 — parsePrimary accepts null/undefined |
+| `unit/m67-d2-server-function-parse.test.js` | M6.7-D2 — server/pure modifier on `function` |
+| `unit/m67-d3-match-arm-parse.test.js` | M6.7-D3 — parseMatchArm accepts `:>` colon-arrow |
+| `unit/m67-d6-string-import-parse.test.js` | M6.7-D6 — parseNamedImportSpecifiers accepts string-literal specifier |
+| `unit/m67-d7-given-form-parse.test.js` | M6.7-D7 — `given` presence-guard (§42.2.3) |
+| `unit/m67-d8a-i-function-return-type.test.js` | M6.7-D8a-i — parseFunctionDecl accepts `-> ReturnType` annotation |
+
+## Parser-Conformance Suite (load-bearing for M5 swap / C1+C2 / M6)
 
 Top-level files at `compiler/tests/`:
 
 | File | What it tests |
 |---|---|
-| `parser-conformance-lexer.test.js` | native lexer vs Acorn (M1.x) |
-| `parser-conformance-expr.test.js` | native Expr AST vs Acorn (M2.x); +16 M6.5.b.1 match-arm tests — newline/comma/semi separators + Dot+UpperIdent variant patterns |
-| `parser-conformance-stmt.test.js` | native Stmt AST vs Acorn (M3.x) |
-| `parser-conformance-markup.test.js` | native markup Block tree; M6.6.b.1.5 attr tokenizer assertions |
+| `parser-conformance-lexer.test.js` | native lexer vs Acorn |
+| `parser-conformance-expr.test.js` | native Expr AST vs Acorn; M6.5.b.1 match-arm + M6.7-D3 `:>` |
+| `parser-conformance-stmt.test.js` | native Stmt AST vs Acorn |
+| `parser-conformance-markup.test.js` | native markup Block tree |
 | `parser-conformance-corpus.test.js` | bench corpus + .scrml smoke pass |
-| `parser-conformance-canary.test.js` | dual-pipeline-canary harness; M6.7 STOP — canary closed |
-| `parser-conformance-collect-hoisted.test.js` | collectHoisted hoist-synthesis (A3); M6.4a expanded |
+| `parser-conformance-canary.test.js` | dual-pipeline canary; M6.7 STOP — flag flip reverted; C/D-class fixes landed |
+| `parser-conformance-collect-hoisted.test.js` | collectHoisted hoist-synthesis (A3) |
 | `parser-conformance-parse-file.test.js` | `nativeParseFile` FileAST assembler (C1) |
-| `parser-conformance-within-node.test.js` | M6.5.b.0 within-node parity 7-class classifier; allowlist `parser-conformance-within-node-allowlist.json` (rebased S125 for M6.5.b.1+b.2) |
+| `parser-conformance-within-node.test.js` | within-node parity 7-class classifier; allowlist rebased (M6.5/M6.7 D-class moved ~13 fixtures by parseFunctionDecl fix) |
 
-## S127 NEW Test Files
+## S127 Test Files — MCP-V0.A descriptor-extractor (still load-bearing)
 
-### MCP-V0.A descriptor-extractor unit suite (`compiler/tests/unit/`)
-| File | describe root | What it tests |
-|---|---|---|
-| `mcp-descriptors-engines.test.js` | "MCP-V0.A engines.json extractor" | `collectEngineDescriptors` — variants, rules map, `cellKey`, primary vs derived |
-| `mcp-descriptors-forms.test.js` | "MCP-V0.A forms.json extractor" | `collectFormDescriptors` — nested `compoundKeys` (S127 A↔B fix), per-field descriptors |
-| `mcp-descriptors-channels.test.js` | "MCP-V0.A channels.json extractor" | `collectChannelDescriptors` — name/topic defaults, §38.4 auto-synced cells, logic-body descent |
-| `mcp-descriptors-serverfns.test.js` | "MCP-V0.A serverfns.json extractor" | `collectServerFnDescriptors` — isServer filter, params/returnType, `dispatchable:false`, file dedupe |
-| `mcp-descriptors-degenerate-spa.test.js` | "MCP-V0.A degenerate-SPA sidecars" | empty/degenerate app → well-formed empty sidecars |
-
-### Other S127 new test files
-| File | describe root | What it tests |
-|---|---|---|
-| `integration/mcp-descriptors-runtime-integration.test.js` | "MCP-V0 integration — sidecar emission" | compileScrml emits sidecars → fed into B-landed runtime helpers end-to-end |
-| `integration/mcp-server-tools.test.js` | "MCP-V0.C — fixture emits clean sidecars" | the 11-tool surface over a real compiled fixture (Sub-unit C) |
-| `integration/bug-w-binary-precedence-parens.test.js` | "Bug W §1: emitBinary re-inserts dropped grouping parens (printer)" | precedence-paren re-insertion correctness |
-| `integration/giti-019-lift-loop-coalesce-parens.test.js` | "GITI-019 §1: lift-loop interpolation with \|\| emits valid JS" | `?? ""` coalesce-guard parenthesization |
-| `unit/not-return-statement-glue.test.js` | "§1 `return not` does not glue to the next statement" | 6nz-S `[ \t]+` + keyword-exclusion guards (both lowering sites) |
+| File | What it tests |
+|---|---|
+| `unit/mcp-descriptors-engines.test.js` | `collectEngineDescriptors` — variants, rules map, cellKey, primary vs derived |
+| `unit/mcp-descriptors-forms.test.js` | `collectFormDescriptors` — nested compoundKeys, per-field descriptors |
+| `unit/mcp-descriptors-channels.test.js` | `collectChannelDescriptors` — name/topic defaults, §38.4 cells |
+| `unit/mcp-descriptors-serverfns.test.js` | `collectServerFnDescriptors` — isServer filter, dispatchable:false, file dedupe |
+| `unit/mcp-descriptors-degenerate-spa.test.js` | empty/degenerate app → well-formed empty sidecars |
+| `unit/mcp-runtime-helpers.test.js` | MCP-V0.B shim — install/loadSidecars/getCurrentVariant/getFormStatus/getChannelState |
+| `integration/mcp-descriptors-runtime-integration.test.js` | compileScrml emits sidecars → fed into B runtime helpers end-to-end |
+| `integration/mcp-server-tools.test.js` | the 11-tool surface over a real compiled fixture (Sub-unit C) |
+| `integration/bug-w-binary-precedence-parens.test.js` | Bug W precedence-paren re-insertion |
+| `integration/giti-019-lift-loop-coalesce-parens.test.js` | GITI-019 `?? ""` coalesce-guard parenthesization |
+| `unit/not-return-statement-glue.test.js` | 6nz-S `[ \t]+` + keyword-exclusion (`return not` no longer glues) |
 
 ### S127 helper
-`compiler/tests/helpers/mcp-sidecar-compile.js` — `makeSidecarTmpRoot(label)` / `cleanupSidecarTmpRoot(root)` / `compileAndReadSidecars(source, tmpRoot)`: drives `compileScrml()` on inline source into a tmp dir and reads back the emitted engines/forms/channels/serverfns .json sidecars. Backbone of the MCP-V0.A unit + integration suites.
+`compiler/tests/helpers/mcp-sidecar-compile.js` — `makeSidecarTmpRoot(label)` / `cleanupSidecarTmpRoot(root)` / `compileAndReadSidecars(source, tmpRoot)`: drives `compileScrml()` on inline source into a tmp dir and reads back emitted .json sidecars. Backbone of the MCP-V0.A + .D/.E suites.
 
-### S127 modified test files
-| File | Change |
-|---|---|
-| `unit/emit-library.test.js` (+106L) | GITI-018 — all `scrml:` imports rewritten in `--mode library` (was first-only); leading-indentation round-trip |
-| `unit/not-keyword.test.js` | extended for 6nz-S standalone-`not` / keyword-exclusion |
-| `unit/lift-li-text-template.test.js` | GITI-019 coalesce-paren expectation update |
-| `unit/match-arm-inline-markup-payload.test.js` | minor expectation update |
-
-## S125 Test Files (still load-bearing)
+## S123-S125 Test Files (still load-bearing)
 
 | File | What it tests |
 |---|---|
-| `unit/mcp-runtime-helpers.test.js` (~485L) | MCP-V0.B `scrml:mcp` runtime shim — install/uninstall lifecycle, loadSidecars reader, getCurrentVariant/getFormStatus/getChannelState READ helpers (against hand-written sidecar fixtures). Now COMPLEMENTED by the S127 extractor suites that drive the real `compileScrml` → sidecar → helper path. |
-| `unit/m65-b2-structural-state-decl.test.js` (~298L) | M6.5.b.2 structural state-decl `<ident>` LHS — parse-stmt dispatch + attribute region + typed Shape 1 + translate-stmt → live state-decl |
-
-mcp-runtime-helpers pattern (carried into the S127 suites): `_resetForTests()` in before/afterEach for module-state isolation; sidecar JSON to per-test tmp dir; mock runtime `{reactive_get, derived_get}` via `install()`; asserts helpers throw `/runtime not connected/` before install and `/engines.json not loaded/` before loadSidecars; `{variant,data}` records normalize to tag string; `cellKey` override honored.
-
-## S124 Test Files (still load-bearing)
-
-| File | What it tests |
-|---|---|
-| `parser-conformance-within-node.test.js` | M6.5.b.0 — within-node divergence classifier |
-| `unit/m66-b2-engine-statechild-walker.test.js` | M6.6.b.2 + M6.6.b.3 — native-walker vs legacy `parseEngineStateChildren` structural equality |
-
-## S123 Test Files (still load-bearing)
-
-| File | What it tests |
-|---|---|
+| `unit/m65-b2-structural-state-decl.test.js` | M6.5.b.2 structural state-decl `<ident>` LHS |
+| `unit/m66-b2-engine-statechild-walker.test.js` | M6.6.b.2/b.3 native-walker vs legacy structural equality |
 | `unit/v-kill-state-undeclared.test.js` | E-STATE-UNDECLARED (V-kill) |
 | `unit/unit-cc-write-at-body-top.test.js` | E-WRITE-NOT-IN-LOGIC-CONTEXT (Unit CC) |
 | `unit/runtime-chunk-dependencies.test.js` | `applyChunkDependencies` (6nz Bug P) |
@@ -109,19 +131,19 @@ Browser tests are NOT in the pre-commit gate (run separately / in pre-push).
 
 | Path | Contents |
 |---|---|
-| `compiler/tests/fixtures/` | promote-match-canonical.scrml, promote-multi-file-app/ |
-| `compiler/tests/helpers/` | expr.ts (ExprNode test helpers), extract-user-fns.js, mcp-sidecar-compile.js (S127) |
-| `compiler/tests/parser-conformance-within-node-allowlist.json` | M6.5.b.0 within-node parity allowlist (rebased S125 for M6.5.b.1+b.2; +8 entries at HEAD) |
+| `compiler/tests/fixtures/` | promote-match-canonical.scrml, promote-multi-file-app/, MCP-V0.E multi-page app fixture |
+| `compiler/tests/helpers/` | expr.ts, extract-user-fns.js, mcp-sidecar-compile.js |
+| `compiler/tests/parser-conformance-within-node-allowlist.json` | within-node parity allowlist (rebased; M6.5/M6.7 D-class) |
 | `samples/compilation-tests/` | ~318 test-case directories driven by pretest (counted, not enumerated) |
 
 ## Pattern
 
-Tests use `bun:test` (`describe` / `test` / `expect`). Compiler tests drive `compileScrml()` from `compiler/src/api.js` and assert on `result.errors` / `result.warnings` / `result.outputs`. Diagnostic-stream partition rule (S92/S93): W-* / I-* + severity warning/info → `result.warnings`; tests asserting on W-/I- codes MUST use a cross-stream helper, not `result.errors.filter`. `E-STATE-UNDECLARED` + `E-WRITE-NOT-IN-LOGIC-CONTEXT` ARE errors → assert on `result.errors` normally.
+Tests use `bun:test` (`describe` / `test` / `expect`). Compiler tests drive `compileScrml()` from `compiler/src/api.js` and assert on `result.errors` / `result.warnings` / `result.outputs`. Diagnostic-stream partition rule (S92/S93): W-* / I-* + severity warning/info → `result.warnings`; tests asserting on W-/I- codes MUST use a cross-stream helper. `E-TYPE-001` + lifecycle/E-TYPE-LIFECYCLE-* + E-STATE-UNDECLARED + E-WRITE-NOT-IN-LOGIC-CONTEXT ARE errors → assert on `result.errors`; `W-EACH-*` + `W-LIFECYCLE-LEGACY-ARROW` are warnings → assert on `result.warnings`.
 
-Parser-conformance tests diff native-parser output against the Acorn oracle. The dual-pipeline canary diffs `nativeParseFile` FileAST against live `buildAST` FileAST; the within-node classifier tests at the sub-node field level. MCP descriptor tests (S127) drive `compileScrml` via `compileAndReadSidecars(source, tmpRoot)` and assert on the emitted .json shapes; runtime-shim tests import the shim module directly, fake the runtime via `install({...})`, point `loadSidecars()` at a tmp dir, and `_resetForTests()` between cases.
+Parser-conformance tests diff native-parser output against the Acorn oracle. The dual-pipeline canary diffs `nativeParseFile` FileAST against live `buildAST` FileAST. MCP tests drive `compileScrml` via `compileAndReadSidecars(source, tmpRoot)` and assert on emitted .json shapes; runtime-shim tests import the shim module directly, fake the runtime via `install({...})`, point `loadSidecars()` at a tmp dir, and `_resetForTests()` between cases.
 
 ## Tags
-#scrmlts #map #test #bun-test #parser-conformance #native-parser #dual-pipeline-canary #m6-wave1 #m6-6-b2 #m6-5-b1 #m6-5-b2 #v-kill #unit-cc #mcp-v0 #mcp-descriptors #mcp-server #bug-w #giti-018 #giti-019 #6nz-s #s127
+#scrmlts #map #test #bun-test #parser-conformance #native-parser #m6-wave1 #m6-7-dclass #iteration #each #lifecycle #snapshot-fix #mcp-v0 #mcp-program-attr #v-kill #unit-cc #s131
 
 ## Links
 - [primary.map.md](./primary.map.md)
