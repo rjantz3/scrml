@@ -169,7 +169,7 @@ Now it's real: SQLite, server-backed, auth-gated, multi-device sync, with a load
     users {
         id:           integer primary key
         email:        text req email
-        passwordHash: (not to string)
+        passwordHash: (not to string) protect
     }
     tasks {
         id:           integer primary key
@@ -182,16 +182,19 @@ Now it's real: SQLite, server-backed, auth-gated, multi-device sync, with a load
 ${
     type Filter:enum = { All, Active, Done }
     type Phase:enum  = { Loading, Empty, Editing, Saving, Saved, ErrorState(msg: string) }
-    type LoadError:enum = { Network(msg: string), Unauthorized }
+    type LoadError:enum = { Network(msg: string) }
+    type User:struct = { id: number, email: string }
+
+    fn isActive(t) -> boolean {
+        return t.completed_at is not
+    }
 
     function loadTasks()! -> LoadError {
-        const me = @session.userId is not ? fail LoadError::Unauthorized : @session.userId
-        return ?{`SELECT id, text, completed_at FROM tasks WHERE user_id = ${me} ORDER BY id`}.all()
+        return ?{`SELECT id, text, completed_at FROM tasks WHERE user_id = ${@user.id} ORDER BY id`}.all()
     }
 
     function createTask(text: string(.length >= 1))! -> LoadError {
-        const me = @session.userId is not ? fail LoadError::Unauthorized : @session.userId
-        return ?{`INSERT INTO tasks (user_id, text, completed_at) VALUES (${me}, ${text}, ${not}) RETURNING *`}.get()
+        return ?{`INSERT INTO tasks (user_id, text, completed_at) VALUES (${@user.id}, ${text}, ${not}) RETURNING *`}.get()
     }
 
     function toggle(id) {
@@ -203,15 +206,16 @@ ${
     function submit() {
         @phase = .Saving
         createTask(@newTask) !{
-            | ::Network msg  -> { @phase = .ErrorState(msg); return }
-            | ::Unauthorized -> { navigate("/login");        return }
+            | ::Network msg -> { @phase = .ErrorState(msg); return }
         }
         reset(@newTask)
         @phase = .Saved
     }
 }
 
-<channel name="tasks" topic="user-${@session.userId}">
+<user server>: User = @session.user
+
+<channel name="tasks" topic="user-${@user.id}">
     <tasks> = []
 </>
 
@@ -220,8 +224,15 @@ ${
 
 const <visible> = match @filter {
     .All    => @tasks
-    .Active => @tasks.filter(t => t.completed_at is not)
-    .Done   => @tasks.filter(t => t.completed_at is some)
+    .Active => @tasks.filter(isActive)
+    .Done   => @tasks.filter(t => !isActive(t))
+}
+
+~{
+    test "isActive identifies open tasks" {
+        assert isActive({ id: 1, text: "open", completed_at: not })
+        assert !isActive({ id: 2, text: "done", completed_at: 1706745600000 })
+    }
 }
 
 <auth role="User">
@@ -232,8 +243,7 @@ const <visible> = match @filter {
         Loading your tasks…
         <onTransition to=.Loading>${
             @tasks = loadTasks() !{
-                | ::Network msg  -> { @phase = .ErrorState(msg); return }
-                | ::Unauthorized -> { navigate("/login");        return }
+                | ::Network msg -> { @phase = .ErrorState(msg); return }
             }
             @phase = @tasks.length == 0 ? .Empty : .Editing
         }</>
@@ -297,11 +307,13 @@ What the compiler did that you did NOT write:
 
 - **Route handlers** for `loadTasks` / `createTask` / `toggle`. They touch SQL, so the compiler classified them server-side — and generated the routes, the client-side `fetch` calls, the CSRF tokens, parameterized queries, and serialization. You call them like local functions because in your source they ARE.
 - **The schema → DDL pipeline.** The `<schema>` block becomes both the `CREATE TABLE` statement on first run AND a diff on every subsequent compile. New columns? Migration emitted. Removed columns? Surfaced for review.
-- **The WebSocket plumbing.** `<channel name="tasks" topic="user-${...}">` emits the Bun upgrade route, a client-side reconnect manager, and pub/sub routing. State declared inside the channel body (`<tasks> = []`) auto-syncs across every connected device of the same user.
-- **Per-role chunk splitting.** `<auth role="User">` tells the compiler that anonymous visitors will never reach this subtree. They get a strictly smaller initial bundle — the components and server functions inside the gate aren't downloaded for them.
+- **Server-side pinning.** `<user server>: User = @session.user` declares a reactive cell that lives **only** on the server — the entire identity object never crosses to the browser. The `passwordHash` field is further marked `protect` in the schema, so the compiler also strips it from the type the client sees: even server-fn responses that include a user row will have the field excluded. Reading `@user.passwordHash` on the client is a compile error.
+- **The WebSocket plumbing.** `<channel name="tasks" topic="user-${@user.id}">` emits the Bun upgrade route, a client-side reconnect manager, and pub/sub routing. State declared inside the channel body (`<tasks> = []`) auto-syncs across every connected device subscribed to the same topic.
+- **Per-role chunk splitting.** `<auth role="User">` tells the compiler that anonymous visitors will never reach this subtree. They get a strictly smaller initial bundle — the components and server functions inside the gate aren't downloaded for them. The auth gate also lets the server-fn functions trust `@user` is some without per-call presence checks — the `Unauthorized` error variant collapses to a single `Network` variant on `LoadError`.
 - **The validity surface.** `<newTask req length(>=1)> = <input/>` produces `@newTask.isValid` / `.errors` / `.touched` as reactive read-only cells. `<errors of=@newTask/>` renders them at the right time. The SAME predicates fire on the server boundary, in the HTML form attributes the compiler emits (`required minlength="1"`), and in the database CHECK constraints.
 - **The lifecycle gate.** `completed_at: (not to timestamp)` means the column starts unset and transitions when a value is written. Reads of `t.completed_at` are checked per-access — before the row has been completed, the read is `not`, and the compiler refuses to treat it as a timestamp. The compiler tracks the transition state symbolically. Zero runtime cost.
 - **The engine's exhaustiveness check.** Adding a seventh variant to `Phase` forces the compiler to demand a UI block + a transition source for it. You cannot ship a state with no UI.
+- **The `~{}` inline test.** `~{ test "..." { assert ... } }` is a first-class context next to the code it verifies. The test runs against the live compile in dev; the entire `~{}` block is stripped from production builds, so the production bundle never sees the test code. Pure `fn` helpers (like `isActive` above) are the most natural targets — no mocks needed, no test harness to wire up.
 
 That's the centerpiece. The rest of this README is the surface around it.
 
