@@ -14,7 +14,7 @@
 
 | Severity | Open | Closed-this-arc | Notes |
 |---|---|---|---|
-| HIGH | 3 | E-TYPE-001 lifecycle fire (S130 Landing 1 SHIPPED) | compiler-managed-async (deferred A9-class) · §29 vanilla-interop (open user decision) · 6nz-V class:NAME on for-lift (GENUINE) |
+| HIGH | 2 | E-TYPE-001 lifecycle fire (S130 Landing 1 SHIPPED) · §29 vanilla-interop framing-corrected (S132 — §2.1 false present-tense claim removed; §29 marked Nominal; NOT retired) | compiler-managed-async (deferred A9-class) · 6nz-V class:NAME on for-lift (GENUINE) |
 | MED | 6 | Bug 15 `~snapshot` codegen leak (S131 SHIPPED) | Bug 1 Tailwind residuals · V-kill READ-side fire · E-SCHEMA-003 enforcement · MCP V0 partial-impl deferrals · Generator policy · L19 multi-statement-handler |
 | LOW | 4 | (rotate out below) | Bug 4 bare-`/` · GITI-015 · §11-folded-citation sweep · `bun scrml promote --engine` Tier-1→2 deferred |
 | Nominal (spec-ahead-of-impl) | 7 | — | Build Story §58 · `import:host` §21.3.1 · Quoted-text §4.18 compiler fire · `_{}` foreign code · WASM call-char sigils · Sidecar process decls · RemoteData enum |
@@ -33,13 +33,13 @@ When a client function calls a server function, the client function should be au
 
 ---
 
-### Bug 10 — §29 vanilla-interop — SPEC vs implementation drift — `open user decision`
+### Bug 10 — §29 vanilla-interop — SPEC vs implementation drift — `Nominal / framing-corrected S132`
 
-**SPEC §2.1 + §29** normatively state plain `.js`/`.html`/`.css` files "are valid alongside `.scrml` files; the compiler processes `.scrml` files and integrates or passes through the rest." Verified S110: the compiler does NOT do this. A pure-vanilla file is rejected (`Cannot find file or directory`); a mixed-project build compiles the `.scrml` and silently DROPS the vanilla files (not copied to dist).
+**Originally (S110):** SPEC §2.1 + §29 asserted in the present tense that plain `.js`/`.html`/`.css` files "are valid alongside `.scrml` files; the compiler processes `.scrml` files and integrates or passes through the rest." Verified S110 the compiler did NOT do this — a pure-vanilla file is rejected (`Cannot find file or directory`); a mixed-project build compiles the `.scrml` and silently DROPS the vanilla files (not copied to dist). The bug was the FALSE present-tense CLAIM, not a missing feature.
 
 - **Workaround:** keep all source in `.scrml`; for vanilla CSS use `#{}` blocks; for vanilla JS use `${}` blocks or `import` from `.js` modules (which IS live + load-bearing per §21).
 - **Reproducer:** any project with a `.js` or `.html` file alongside `.scrml`.
-- **Status:** open user decision — retire §2.1's "passes through the rest" clause + §29 (spec catches down to Pillar 4 "one file type"), OR implement it (make the spec true; restore the incremental-adoption ramp). Surfaced S110; not yet ratified. Distinct from §21 vanilla-`.js`-import (which IS live).
+- **Status:** **Nominal / framing-corrected S132.** Ratified option (c): the §2.1 false present-tense pass-through claim is REMOVED (reframed to explicit Nominal-future + S132 amendment note), and §29 is MARKED Nominal/spec-ahead-of-implementation (KEPT in SPEC, NOT retired — reaffirms S131 Q-W3-4 defer; re-trigger ≥2 adopter friction reports). NOT "RESOLVED-by-implementation": the feature is still NOT implemented; the spec now honestly says so. Vanilla-JS interop today is via §21 import (live + distinct from §29). The spec no longer makes a false claim, so this is no longer a spec-vs-impl drift — it is correctly-framed-as-Nominal.
 
 ---
 

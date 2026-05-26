@@ -518,6 +518,8 @@ DD output feeds future HU. Queue with `~snapshot` + state-dynamics-design DD as 
 
 **Re-trigger condition:** ≥2 adopter friction reports requesting first-class vanilla interop re-opens the disposition.
 
+**S132 follow-on (this decision STANDS):** the SPEC text was reframed to explicit Nominal per option (c) — §2.1's false present-tense pass-through claim removed, §29 prepended with a Nominal/spec-ahead banner (KEPT, NOT retired), §47.5 ×3 mislabeled `§29`→`§21`, known-gaps Bug 10 marked framing-corrected. The defer disposition is reaffirmed, not changed.
+
 ### HU-4 SESSION CLOSE — Wave 3 batch closed
 
 | Q | Topic | Ratified |

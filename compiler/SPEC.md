@@ -106,7 +106,7 @@ scrml is a compiled language that takes `.scrml` source files and produces HTML,
 
 ### 1.1 Design Principles
 
-- **One file type.** `.scrml` is the only source format. Logic, markup, and style intermingle in a single file. The compiler decomposes them.
+- **One file type.** `.scrml` is the only source format. Logic, markup, and style intermingle in a single file. The compiler decomposes them. (Vanilla file pass-through — §29 — is a Nominal/spec-ahead future intent, not yet implemented; one-file-type is the present-day reality.)
 - **Progressive detail.** Standard behavior is implicit. A developer spells out specifics only when non-standard behavior is required. Simple things SHALL look simple.
 - **Types are the primary unit of work.** A type carries validation rules, rendering intent, and behavioral rules.
 - **State is a first-class type.** State implies a side effect: a render update, a database write, or an external API call. A trivial in-memory variable that is rendered to the user MAY be reactive without being a state object. A server-persisted value IS state and SHALL be declared inside a state block.
@@ -186,7 +186,9 @@ scrml has TWO access forms for reactive state cells:
 
 ### 2.1 Source Files
 
-The scrml compiler SHALL recognize `.scrml` files as source input. Plain `.js`, `.html`, and `.css` files are valid alongside `.scrml` files; the compiler processes `.scrml` files and integrates or passes through the rest.
+The scrml compiler SHALL recognize `.scrml` files as source input and processes them today. Vanilla pass-through of plain `.js`, `.html`, and `.css` files alongside `.scrml` is a **Nominal / spec-ahead-of-implementation** intent (§29) — it is NOT yet implemented. Vanilla JavaScript is consumed today by importing named bindings from `.js` modules via the JS module import system (§21).
+
+> **S132 amendment.** The prior wording of this clause ("the compiler processes `.scrml` files and integrates or passes through the rest") asserted pass-through in the present tense, but the compiler does not perform it. The claim is reframed to explicit Nominal-future per ratified option (c) (S132; reaffirms S131 Q-W3-4 defer). §29 retains the documented future intent; §21 is the live vanilla-JS interop mechanism today.
 
 ### 2.2 Output
 
@@ -13765,7 +13767,7 @@ Files that use `import:host` MAY also use `^{}` blocks. `import:host` replaces t
 
 **Interaction with §29 (vanilla-interop) / §23 (`use foreign:`):**
 
-`import:host` is distinct from `use foreign:` (§23 — runtime-evaluated foreign-code block) and from §29 vanilla-interop (currently in spec-vs-impl divergence — disposition pending per S110 carry). `import:host` is compile-time named-bindings; `use foreign:` is runtime opaque-block. The three mechanisms compose without overlap.
+`import:host` is distinct from `use foreign:` (§23 — runtime-evaluated foreign-code block) and from §29 vanilla-interop (Nominal/spec-ahead — disposition: defer per S131 Q-W3-4 / reframed S132; not yet implemented). `import:host` is compile-time named-bindings; `use foreign:` is runtime opaque-block. The three mechanisms compose without overlap.
 
 ### 21.4 Re-export
 
@@ -15560,10 +15562,12 @@ The `html-content-model` setting controls enforcement of the HTML content model 
 
 ## 29. Vanilla File Interop
 
-- `.js`, `.html`, and `.css` files MAY exist alongside `.scrml` files with no ceremony.
-- The compiler processes `.scrml` files and integrates or passes through the rest.
-- Progressive adoption of scrml is supported: an existing project MAY introduce `.scrml` files incrementally.
-- The JS module import system (Section 21) is the mechanism for referencing vanilla files from scrml source.
+> **§29 — NOMINAL / spec-ahead-of-implementation (S132).** Vanilla file pass-through is NOT yet implemented; this section describes intended future behavior. Disposition: **defer** (S131 Q-W3-4) — re-trigger on ≥2 adopter friction reports. Vanilla JS interop today is via the §21 import system. The clauses below use "will / is intended to" and SHALL NOT be read as present-tense compiler behavior.
+
+- `.js`, `.html`, and `.css` files are intended to be able to exist alongside `.scrml` files with no ceremony.
+- The compiler will process `.scrml` files and integrate or pass through the rest.
+- Progressive adoption of scrml is intended to be supported: an existing project will be able to introduce `.scrml` files incrementally.
+- The JS module import system (Section 21) is the live mechanism for referencing vanilla files from scrml source today; the pass-through behavior above is the spec-ahead extension to that surface.
 
 ---
 
@@ -21422,14 +21426,14 @@ Encoded names apply to ALL JavaScript variable names in compiled output:
 Encoded names do NOT apply to:
 - CSS class names (governed by existing CSS scoping rules, §9)
 - HTML element names and attribute names
-- Export names in library mode (§29 public module boundary uses developer-chosen names; internal bindings use encoded names)
-- Import names from vanilla JS modules (§29)
+- Export names in library mode (§21 public module boundary uses developer-chosen names; internal bindings use encoded names)
+- Import names from vanilla JS modules (§21)
 
 **Normative statements:**
 
 - CG SHALL apply encoded names to every JavaScript variable binding it emits.
 - CG SHALL NOT apply encoded names to CSS class names, HTML element names, HTML attribute names, or public export identifiers.
-- The public module boundary (§29) SHALL use developer-chosen names for exported identifiers. Internal bindings behind that boundary SHALL use encoded names.
+- The public module boundary (§21) SHALL use developer-chosen names for exported identifiers. Internal bindings behind that boundary SHALL use encoded names.
 
 **Cross-reference — test-mode `test-bind` dispatch hook (§19.12.6 / §19.12.7).** When `output.testMode` is enabled, every server-function call site emits a guarded dispatch keyed by the §47-encoded name of the called server function. A `test-bind` declaration inside an enclosing `~{}` block populates a scope-local dispatch table under those same encoded keys; the call-site dispatch consults the table before forwarding to production. The encoded-name surface defined by §47.1–§47.4 is the SOLE keying mechanism — `test-bind` introduces no new naming scheme. When `output.testMode` is disabled (release builds), the dispatch hook is dead-code-eliminated; the production binary is bit-identical to a compilation that contained no `test-bind` declarations. See §19.12.6 (declaration syntax), §19.12.7 (dispatch contract + 0-byte production guarantee), and §34 row `E-TEST-006` (fail-fast on unbound server-fn in active test-bind context).
 
