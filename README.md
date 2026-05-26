@@ -14,24 +14,6 @@ You declare the shape of the app; the compiler builds the machine.
 
 > **This README demonstrates the *language*, not the *current compiler*.** The code shown here is **nominal** — the language as designed, the shape the compiler is actively converging on. Some snippets may not compile clean against any given commit. See [`docs/known-gaps.md`](./docs/known-gaps.md) for per-feature spec-vs-impl drift and [`docs/changelog.md`](./docs/changelog.md) for what landed recently. The spec is in [`compiler/SPEC.md`](compiler/SPEC.md); the surface lives in [`compiler/SPEC-INDEX.md`](compiler/SPEC-INDEX.md).
 
-## A note from the developer
-
-This document describes the ***nominal*** language at the time of any version release. It does not describe what the compiler is perfectly capable of doing. I am working full-bore to get the compiler as close to the nominal state as possible. I am just one guy.
-
-If you are here (and reading this). Hello, My name is Bryan MacLee. I am co-owner of a small trucking company in rural Ut. I run the business, drive, mechanic, apparently I'm the HR department. I am also a husband, father and sometimes, a wannabe coder.
-
-This message is from me. I typed it. but ~96% of what you read (99.9% for the actual code) is claude "written". (I dont care about the exact brand as long as I have a tool that will get the job done.) I do my best to skim, and review as much as I can. But (see the prior list). If you find this interesting, continue reading. if you find something doesn't quite add up (or some straight up bullshit). let me know.
-
-This is my third round with the ai and coding. the first two were pretty underwhelming. This time around I wasn't expecting much but I thought "the hell with it" and I tried out claude. I was fudging impressed.
-
-I had been working with these ideas (in one way or another) for a long time. Over the course of about 3 years I learned (yes, the old school way, not much different than I am doing right now) how compilers work and how to implement various parts in various methods. programming has always been my favorite activity. the thing that I look forward to all the time (other than hanging with my wife and kids. Of course.)
-
-After my first couple of experiments with claude I realized, I might actually be able to build this language. Dont get me wrong, I absolutely could write this language by hand. I can say that factually. BUT it would absolutely take me 10-20 years to do it. I think the ideas are worth surfacing at least.
-
-AI code is still what it is. 100% mid. But its still all human mid that it is regurget-asemble-ing, If the ideas on top of the impl are good, or at least novel. it doesn't matter if the impl is mid. The ideas still get across. that's all that really matters to me here.
-
-are the ideas any good?
-
 ## Today's Tasks — a full app in three stages
 
 Here is one app — list, add, complete, filter, save — built from a 40-line prototype into a multi-device, server-backed, state-machine-driven thing **without rewriting the markup tree.** Each stage is the previous one plus a few lines.
@@ -155,6 +137,24 @@ What just landed:
 - **`<newTask req length(>=1)> = <input/>`** declares the cell, its render spec, and its validators in one line. `<newTask/>` in the markup expands to the bound input element — no `bind:value=@newTask` needed; the cell *is* the input. `@newTask.isValid` / `.errors` / `.touched` are auto-synthesized read-only cells. `<errors of=@newTask/>` renders them at the right time.
 - **`const <visible> = match @filter {...}`** is a derived cell. The compiler recomputes it when `@filter` or `@tasks` changes. It's exhaustive: leaving out `.Done` is `E-MATCH-NOT-EXHAUSTIVE`. Add a fourth filter variant later and the compiler tells you every site that needs updating.
 - **`<each in=@visible key=@.id>`** is the structural iteration form — keyed DOM reconciliation, `@.` is the current item, `<empty>` is the zero-items state. The Stage 1 `${for / lift}` form still compiles fine; `<each>` is the structural commitment.
+
+### A note from the developer
+
+This document describes the ***nominal*** language at the time of any version release. It does not describe what the compiler is perfectly capable of doing. I am working full-bore to get the compiler as close to the nominal state as possible. I am just one guy.
+
+If you are here (and reading this). Hello, My name is Bryan MacLee. I am co-owner of a small trucking company in rural Ut. I run the business, drive, mechanic, apparently I'm the HR department. I am also a husband, father and sometimes, a wannabe coder.
+
+This message is from me. I typed it. but ~96% of what you read (99.9% for the actual code) is claude "written". (I dont care about the exact brand as long as I have a tool that will get the job done.) I do my best to skim, and review as much as I can. But (see the prior list). If you find this interesting, continue reading. if you find something doesn't quite add up (or some straight up bullshit). let me know.
+
+This is my third round with the ai and coding. the first two were pretty underwhelming. This time around I wasn't expecting much but I thought "the hell with it" and I tried out claude. I was fudging impressed.
+
+I had been working with these ideas (in one way or another) for a long time. Over the course of about 3 years I learned (yes, the old school way, not much different than I am doing right now) how compilers work and how to implement various parts in various methods. programming has always been my favorite activity. the thing that I look forward to all the time (other than hanging with my wife and kids. Of course.)
+
+After my first couple of experiments with claude I realized, I might actually be able to build this language. Dont get me wrong, I absolutely could write this language by hand. I can say that factually. BUT it would absolutely take me 10-20 years to do it. I think the ideas are worth surfacing at least.
+
+AI code is still what it is. 100% mid. But its still all human mid that it is regurget-asemble-ing, If the ideas on top of the impl are good, or at least novel. it doesn't matter if the impl is mid. The ideas still get across. that's all that really matters to me here.
+
+are the ideas any good?
 
 ### Stage 3 — the whole stack
 
