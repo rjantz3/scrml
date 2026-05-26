@@ -266,6 +266,71 @@ The `bun scrml promote --match <file>[:line]` CLI lifts block-form to engine for
 
 ---
 
+## §6.3 Iteration (Tier 1) — `<each>` (§17.7)
+
+**Added 2026-05-26 (S131 — primer subsection added after the iteration arc shipped end-to-end: codegen Landing 1 `emit-each.ts` at commit `23db318c`, SPEC §17.7 Landing 2, and the `@.` sigil / `<empty>` / inferred `key=` surface).**
+
+The structural rung of the iteration Tier ladder — the SIBLING of §6.2 match block-form. Two tiers coexist; this is the **Tier-1 structural form**, where the per-item template is markup (Pillar 1), not a logic-context lift.
+
+```scrml
+type Contact:struct = { id: string, name: string, email: string }
+
+<contacts>: Contact[] = []
+
+<ul>
+    <each in=@contacts key=@.id>
+        <li : @.name>
+        <empty>No contacts yet.</>
+    </each>
+</ul>
+```
+
+**What it gives you:**
+
+- **Two iteration shapes.** `<each in=@coll>` iterates a reactive collection; `<each of=N>` iterates `N` times (count form). Exactly one of `in=` / `of=` per opener.
+- **The `@.` contextual sigil (§3.4 / §17.7.3)** — `@.` is always "the current iteration value." In `in=` form it's the current item (`@.name`, `@.email` are field access); in `of=` form it's the current index (`0..N-1`). It is a SIGIL, not a reserved name — `@` is the state-access sigil per §6.1, and `@.` extends it to the current iteration scope (the DD-eliminated `@it` reserved-name approach would have violated V5-strict; a sigil does not). `@.` outside an `<each>` body is `E-SYNTAX-064` (queued — see Implementation status).
+- **Optional `as name` alias** — `<each in=@items as item>` binds the meaningful name `item` to the current value. `item` and `@.` are ALIASES in the body; `${item.name}` and `${@.name}` produce identical codegen. The bound name needs NO `@` sigil because it is a local binding, not registered state. `as` is the mechanism for keeping an OUTER item addressable inside a nested `<each>` (the inner `@.` always resolves to the innermost scope).
+- **The `<empty>` sub-element (§17.7.4)** — optional empty-state fallback rendered when the collection is empty (`.length === 0` / `is not`) or the count is `0`. Plain free-text body; `@.` is NOT in scope inside `<empty>` (there is no current item). At most one `<empty>` per `<each>`. May use `:`-shorthand: `<empty : "Nothing here.">`.
+- **`:`-shorthand body via §4.14, no new mechanism (§17.7.6)** — a single-expression per-item template uses the existing §4.14 `:`-shorthand verbatim: `<li : @.name>` (`:` inside the opener, mandatory space before, no closer). Mixing `:`-shorthand / bare-body / self-closing per-item elements in one `<each>` is legal; each opener picks its body form. The bare-body form uses ordinary `${...}` interpolation: `<span class="tag">${@.name}</span>`.
+- **Inferred `key=` (§17.7.5)** — the DESIGN intent is auto-inference from the item type's `.id` field (silent + correct, keyed DOM reconciliation). When inference can't resolve an identity, the `W-EACH-KEY-001` info-lint fires and names three legitimate fixes: (a) order-stable list → suppress with `key=__index__`; (b) identity lives in another field → `key=@.email`; (c) positional fallback is intentional → `key=__index__`. Override anytime with explicit `key=expr`. `<each of=N>` defaults to `key=@.` (the index) and NEVER lints. **Landing-1 caveat:** the `.id` type-introspection is conservative — in the common pipeline path the lint fires even when the struct has an `id` field, so the reliable silencer today is explicit `key=@.id`. The lint is informational; correctness (positional fallback) is preserved regardless.
+
+**The four canonical shapes (§17.7.2):**
+
+```scrml
+<each in=@contacts>                      <!-- 1. collection + :-shorthand body -->
+    <li : @.name>
+</each>
+
+<each in=@conflicts as conflict>         <!-- 2. collection + as-name + multi-element body -->
+    <div>
+        <h3>${conflict.summary}</h3>
+        <p>${conflict.partyA} vs ${conflict.partyB}</p>
+    </div>
+</each>
+
+<each of=10>                             <!-- 3. count + :-shorthand; @. is the index -->
+    <li : "Slot " + @.>
+</each>
+
+<each of=@daysLeft as day>               <!-- 4. count + as-name + multi-element body -->
+    <li>Day ${day + 1}</li>
+    <empty>Trip is over.</>
+</each>
+```
+
+**Promotion path: Tier 0 → Tier 1.** The Tier-0 iteration form is the logic-context `${ for (let x of @items) { lift <markup/> } }` (§17.4); it stays valid and compiles cleanly. The `W-EACH-PROMOTABLE` info-lint surfaces promotable Tier-0 sites (fires when a `for`-stmt iterates a reactive `@cell` AND the body contains a `lift`); the message names the suggested `<each in=@cell as x>...</each>` target. The mechanical lift is `bun scrml promote --each <file>[:line]` (§56.10) — wrapper swaps from `${...lift...}` to `<each in=@cell>...</each>`, the per-item template carries forward, single-expression bodies auto-apply `:`-shorthand. Additive, not deprecating; mirrors the §6.2 `bun scrml promote --match` ergonomics.
+
+**Implementation status (as of S131):**
+
+- **Codegen LANDED** — `compiler/src/codegen/emit-each.ts` emits the mount slot + per-each render fn + `_scrml_reconcile_list` keyed diff + `_scrml_effect_static` reactive subscription. All four shapes + `<empty>` + `as name` + `:`-shorthand + explicit `key=` compile today (24 unit tests, `compiler/tests/unit/each-block.test.js`). Landing-1 attribute-interpolation on per-item openers is best-effort (literal string attrs copy; complex interpolation-bearing attrs defer) — keep per-item element attributes simple, or push dynamic values into the body expression.
+- **Lints LANDED** — `W-EACH-PROMOTABLE` (`lint-w-each-promotable.js`) + `W-EACH-KEY-001` (`lint-w-each-key.js`), both info-severity, both with §34 catalog rows.
+- **`bun scrml promote --each` — Landing 3 PENDING** (SPEC §56.10 is honest SPEC-ahead; the CLI help prints "impl pending"). Don't tell adopters to run it expecting a rewrite yet.
+- **Queued diagnostics NOT yet emitted** — `E-SYNTAX-064` (`@.` outside `<each>`), `E-EACH-ITER-SHAPE` (neither/both `in=`/`of=`), `E-EACH-EMPTY-BODY`, `E-EACH-EMPTY-DUPLICATE`, `E-EACH-KEY-SENTINEL` are specified (§17.7 / §34) but not wired. The §34 native-parser catalog (81 codes) is unchanged by iteration — these are host-side TS/lint codes.
+
+**Cross-references:** §17.7 (normative), §3.4 (`@.` per-locus row), §17.4 (Tier-0 form + `W-EACH-PROMOTABLE`), §4.14 (`:`-shorthand grammar), §56.10 (`promote --each` CLI), §6.2 (the sibling match Tier ladder), §13.8 (promotion-ergonomics design center).
+
+---
+
 ## §7 Engines (Tier 2) — the centerpiece (§51)
 
 Engines are the v0.next centerpiece. Singleton-by-design (one declaration mounts the singleton; cross-file mount via `<EngineName/>`). Components are the multi-instance vehicle (Move 20 — components and engines are distinct, do not collapse).
@@ -581,6 +646,7 @@ What LLMs reflexively reach for + the scrml form:
 | Engine instantiated inside a component body | components are multi-instance, engines are singleton — they don't compose | E-COMPONENT-ENGINE-SCOPE; declare the engine at file/program scope and mount via `<EngineName/>` |
 | `@derivedArr.push(x)` / `@derivedObj.foo = x` on a `const`-derived cell | derived cells are value-immutable from the developer's perspective; the mutation would be silently clobbered next time upstream deps fire | E-DERIVED-VALUE-MUTATE (§6.6.18); mutate the upstream cell instead (`@items = [...@items, x]`) or declare a separate mutable cell |
 | `if (@phase == .Idle) { ... } else if (@phase == .Loading) { ... }` over an enum-typed cell | works, but loses Tier-1 structural-exhaustiveness guarantees and forfeits future-variant-add catching at the discrimination site | I-MATCH-PROMOTABLE (§13.8, SPEC §56) info-level lint surfaces the opportunity; run `bun scrml promote --match <file>[:line]` to mechanically lift to `<match for=Type on=@phase> <Idle>...</> <Loading>...</> </>` |
+| `items.map(...)` / `${ for (let x of @items) { lift <li/> } }` to render a list | the `for/lift` form is the valid Tier-0 iteration shape but reads as imperative logic; the Tier-1 structural form is more discoverable and composes with `<empty>` + inferred `key=` | `W-EACH-PROMOTABLE` (§6.3, SPEC §17.7 / §34) info-lint surfaces the opportunity; lift to `<each in=@items key=@.id>...</each>` (with `<empty>` for the zero-items case). `bun scrml promote --each` is the mechanical lift (SPEC §56.10) — **Landing 3 PENDING**, lift by hand for now |
 
 ---
 

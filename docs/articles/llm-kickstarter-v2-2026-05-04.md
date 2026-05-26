@@ -684,9 +684,9 @@ If your instinct from another framework fires, stop and use the scrml form. Thes
 | `<onEnter>` / `<onLeave>` lifecycle elements inside engines | (XState, others) | Use `<onTransition from=X>` (entering) or `<onTransition to=Y>` (leaving). One concept. |
 | `<chrome>` / `<*>` template construct inside engines | (invented) | **Snippets.** Define a snippet, call it in each state-child body. |
 | `{#if cond}…{/if}` | Svelte | `<element if=cond>...</element>` — `if=` is an **attribute**, not a tag. Or `${if (cond) { lift ... }}` in a logic block. |
-| `{#each items as item}…{/each}` | Svelte | `${ for (let item of items) { lift <li>...</li> } }` |
-| `<for each= in=>` or `<if test=>` markup tags | (invented) | **There are no `<for>` or `<if>` markup tags.** Iteration and branching use `${ ... lift ... }` and `if=` attributes. |
-| `items.map(item => …)` in JSX | React | `${ for (let item of items) { lift <…> } }` |
+| `{#each items as item}…{/each}` | Svelte | **`<each in=@items key=@.id>...</each>`** (Tier 1, §11.10) — `@.` is the current item; `<empty>` handles the zero-items case. The Tier-0 form `${ for (let item of @items) { lift <li>...</li> } }` also compiles (`W-EACH-PROMOTABLE` nudges the lift). |
+| `<for each= in=>` / `<if test=>` markup tags | (invented) | **The iteration tag is `<each>`, not `<for>`; there is no `<if>` tag.** Iterate with `<each in=@coll>...</each>` (Tier 1, §11.10) or `${ ... lift ... }` (Tier 0); branch with the `if=` attribute or `${ if (...) { lift ... } }`. |
+| `items.map(item => …)` in JSX | React | **`<each in=@items key=@.id>...</each>`** (Tier 1, §11.10). The Tier-0 `${ for (let item of @items) { lift <…> } }` form also compiles. |
 | `bind:value={x}` | Svelte | `bind:value=@x` (no braces; `@` sigil required because it is an expression-position read of state) |
 | `v-model="x"` | Vue | `bind:value=@x` |
 | `on:click={fn}`, `@click="fn"`, `onClick={fn}` | Svelte/Vue/React | `onclick=fn()` (bare call, parens included) |
@@ -1145,6 +1145,65 @@ function login() {
   // Referencing `ticket` again here would be E-LIN-002.
 }
 ```
+
+---
+
+### 11.10 Iteration recipe — `<each>` over a list (Tier 1)
+
+When you need to render a list, reach for the **Tier-1 `<each>` structural element** — NOT `.map()`, NOT `${ for (...) { lift ... } }`. `<each>` reads as a markup tree, composes with `<empty>` for the zero-items case, and gets keyed DOM reconciliation for free. (The `${for/lift}` form is the valid Tier-0 fallback — see the anti-pattern table and the promotion note below.)
+
+```scrml
+<program>
+
+type Contact:struct = { id: string, name: string, email: string }
+
+<contacts>: Contact[] = []
+
+server function loadContacts() {
+  lift ?{`SELECT id, name, email FROM contacts ORDER BY name`}.all()
+}
+
+server function deleteContact(id) {
+  ?{`DELETE FROM contacts WHERE id = ${id}`}.run()
+}
+
+<ul class="list-none p-0">
+  <each in=@contacts key=@.id>
+    <li>
+      <span>${@.name}</span>
+      <span class="text-slate-600">${@.email}</span>
+    </li>
+    <empty>
+      <li class="text-slate-500">No contacts yet.</li>
+    </empty>
+  </each>
+</ul>
+
+</program>
+```
+
+The single-expression rows can drop to `:`-shorthand, and the count form uses `of=`:
+
+```scrml
+<each in=@tags key=@.id>
+  <li : @.name>                <!-- :-shorthand body; @. is the current item -->
+  <empty : "No tags.">         <!-- <empty> also takes :-shorthand -->
+</each>
+
+<each of=10>                   <!-- count form: iterate 10 times -->
+  <li : "Slot " + @.>          <!-- in of= form, @. is the index 0..N-1 -->
+</each>
+```
+
+Notes:
+
+- **`@.` is "the current iteration value."** In `<each in=@coll>` it is the current item (`@.name`, `@.email`); in `<each of=N>` it is the current index. It is a SIGIL (an extension of the `@` state-access sigil), not a reserved variable name. `@.` outside an `<each>` body is reserved for `E-SYNTAX-064` (queued; not yet emitted).
+- **`as name` is optional sugar.** `<each in=@conflicts as conflict>` lets you write `${conflict.summary}`; `conflict` and `@.` are aliases. Use `as` to keep an OUTER item addressable inside a NESTED `<each>` (the inner `@.` always means the innermost item). The `as`-bound name takes NO `@` sigil — it is a local binding, not state.
+- **`<empty>` is the empty-state branch** — rendered when the collection is empty (or the count is `0`). One per `<each>`. Its body is plain markup; `@.` is NOT in scope there (there is no current item). It can reference OUTER `@cell`s (e.g. `${@searchQuery}`).
+- **`key=` keys the reconciliation.** Pass `key=@.id` (or any unique field, e.g. `key=@.email`). The compiler emits the `W-EACH-KEY-001` info-lint when no key is given and it can't infer one from the item's `.id` field — it names three fixes (provide `key=@.field`, or suppress with `key=__index__` for an order-stable list). Today the lint is conservative and fires even when the struct HAS an `id` field, so write `key=@.id` explicitly to keep it quiet. `<each of=N>` defaults to `key=@.` and never lints. The lint is informational; the list still renders correctly (positional fallback).
+- **Keep per-item element attributes simple.** Codegen handles `:`-shorthand and bare `${...}` bodies well; interpolation-bearing per-item ATTRIBUTES are best-effort in the current Landing — push dynamic values into the body expression rather than a complex attribute when you can.
+- **There is no `<for>` tag.** Iteration is `<each>` (Tier 1) or `${ for (...) { lift ... } }` (Tier 0). Branching is the `if=` attribute or `${ if (...) { lift ... } }` — there is no `<if>` tag either.
+- **Promotion.** If you already have a Tier-0 `${ for (let c of @contacts) { lift <li>${c.name}</li> } }` site, the compiler surfaces `W-EACH-PROMOTABLE` naming the `<each in=@contacts as c>...</each>` target. `bun scrml promote --each <file>[:line]` is the mechanical lift (SPEC §56.10) — but it is **Landing 3 PENDING**, so do the lift by hand for now. Both tiers compile cleanly; promotion is additive, never required.
 
 ---
 
