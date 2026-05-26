@@ -7887,7 +7887,7 @@ The migration to `to` is folded into the S130 Landing 2 amendment; new code SHAL
 
 **Disambiguation from JS arrow function `=>`:** the JS arrow function syntax `(x) => expr` is distinct from the lifecycle annotation — the arrow function uses `=>` (equals-greater-than) and appears in expression position; the lifecycle annotation appears in TYPE position and uses `to` (or legacy `->`, hyphen-greater-than). The two glyphs do not collide.
 
-**Disambiguation from `fn` return-type arrow (§48):** the `fn` signature uses `->` in return-type position (`fn name() -> ReturnType { ... }`). That `->` is a structural separator in the function signature grammar, NOT a lifecycle annotation. Lifecycle annotations on function returns are SCOPED OUT of the S130 landing — see §14.12.6.
+**Disambiguation from `fn` return-type arrow (§48):** the `fn` signature uses `->` in return-type position (`fn name() -> ReturnType { ... }`). That `->` is a structural separator in the function signature grammar, NOT a lifecycle annotation. Lifecycle annotations on function returns are NORMATIVELY supported via the hybrid mechanism — see §14.12.6.
 
 #### 14.12.3 Extension scope (S130 — HU-1 Q1=c)
 
@@ -7898,11 +7898,12 @@ Lifecycle annotation `(A to B)` is permitted at every typed location EXCEPT engi
 | Struct field | YES | `passwordHash: (not to string)` | §14.3 (original locus) |
 | Shape 1 plain reactive cell | YES | `<status>: (Idle to Active) = .Idle` | §6.2 (Shape 1) |
 | Function parameter | YES | `fn process(u: (not to User))` | §48 |
+| Function return | YES | `server fn loadUser(id: number) -> (not to User)` | §14.12.6 (S131 — HU-2 hybrid) |
 | Schema field | YES | (cross-ref §39 §14.12.7) | §39 |
 | Channel cell | YES | (cross-ref §38 §14.12.8) | §38 |
 | Engine cell | **NO** — fires E-TYPE-LIFECYCLE-ON-ENGINE-CELL | (see §14.12.4) | §51.0 |
 
-Each position's semantics — when the compiler considers the transition fired — inherits from the per-access transition-state tracker in `compiler/src/type-system.ts` (Landing 1). For struct fields, transition fires on `instance.field = value` where `value` is type B-shaped. For Shape 1 reactive cells, transition fires on `@cell = value` where the cell's initial value is A-shaped and the written value is B-shaped. Function-parameter and schema-field transition semantics follow the same per-access tracker shape.
+Each position's semantics — when the compiler considers the transition fired — inherits from the per-access transition-state tracker in `compiler/src/type-system.ts` (Landing 1). For struct fields, transition fires on `instance.field = value` where `value` is type B-shaped. For Shape 1 reactive cells, transition fires on `@cell = value` where the cell's initial value is A-shaped and the written value is B-shaped. Function-parameter and schema-field transition semantics follow the same per-access tracker shape. Function-return position uses the hybrid transition-marker mechanism — discrimination IS transition for presence-progression `(not to T)` returns, explicit `transition()` for variant-progression `(.VariantA to .VariantB)` returns — per §14.12.6.
 
 #### 14.12.4 Engine-cell carve-out
 
@@ -7951,13 +7952,136 @@ During the deprecation window for the legacy `->` glyph, the compiler SHALL emit
 
 The end-of-window timing is gated on adoption-corpus migration (NOT scoped here). Adopters MAY mechanically migrate via `scrml-migrate` (separate tool dispatch, not part of S130 Landing 2).
 
-#### 14.12.6 Function-return position — NOTE (deferred to HU follow-on)
+#### 14.12.6 Function-return position — hybrid mechanism (S131 — HU-2)
 
-Lifecycle annotation on **function-return type position** is NOT YET ratified for the v0.6.0 surface. The S130 HU-1 Q3 ratification extends lifecycle conceptually to fn-return position (Q3=a), but the **transition-marker mechanism** — what counts as the transition signal for a returned value — is an OPEN sub-question with multiple candidates (explicit caller-side transition; validator-passage transition; assignment-to-typed-binding transition; explicit marker function). The mechanism choice has implications for ergonomics, typestate-flavored output contracts, and validator composition (§55).
+**Added:** 2026-05-25 (S131 — HU-2 hybrid `(e) + (a)` ratification; supersedes the prior "deferred" NOTE landed at S130 Landing 2). Authority: `docs/heads-up/lifecycle-annotation-extension-2026-05-25.md` HU-2.
 
-This SPEC subsection therefore omits worked examples for fn-return position. A separate HU follow-on resolves the transition-marker mechanism + a subsequent SPEC amendment lands fn-return semantics.
+Lifecycle annotation on **function-return type position** is NORMATIVELY supported and end-to-end implemented. The transition-marker mechanism is a **hybrid** of two distinct sub-mechanisms, selected by the lifecycle annotation's pre-type:
 
-In the interim, function-return positions accept the lifecycle annotation syntactically (the type-system resolver returns type B), but per-access transition-state tracking on returned values is NOT YET implemented. Adopters who write `fn loadUser() -> (not to User)` see the post-transition type at use sites; the per-access fire semantics will land with the transition-marker mechanism ratification.
+| Lifecycle shape | Pre-type | Transition mechanism |
+|---|---|---|
+| Presence-progression | `not` (e.g., `(not to T)`) | **Discrimination IS transition** — `given u = expr {}`, `if (u is not)` early-return, OR `match u { ... }` AUTO-MARKS the transition |
+| Variant-progression | An enum variant (e.g., `(.VariantA to .VariantB)`) | **Explicit `transition(u)`** — call the `transition()` built-in after discriminating the source variant |
+
+**Why the split?** Presence-progression already has a canonical scrml shape for discrimination — `is not` / `is some` / `given` / `match` (§42). The act of writing `given u = loadUser() {}` already SAYS "I have proven this is present." Requiring a separate marker call would be redundant ceremony — it would duplicate the type-narrowing the compiler already performed. Variant-progression has no such cohesive shape (the source enum's discriminator IS its variant tag, not a presence test), so an explicit caller-side `transition(u)` provides the per-access transition signal.
+
+**The `transition()` built-in** is a compile-time-only marker. It produces zero runtime code; the compiler tracks per-access transition state symbolically. Calling `transition(u)` on a binding whose type is NOT a lifecycle-annotated value is silently elided (no diagnostic). Calling `transition(u)` on a presence-progression value is legal but redundant (the discrimination already transitioned it); the compiler MAY emit `W-LIFECYCLE-REDUNDANT-TRANSITION` (RESERVED, not yet emitted).
+
+##### 14.12.6.1 Presence-progression — `(not to T)` — discrimination IS transition
+
+The callee declares a `(not to T)` return type. The caller receives a value typed as `T | not`; the per-access tracker considers the value **pre-transitioned** until the adopter discriminates it via any of three canonical forms.
+
+**Server-fn declaration:**
+
+```scrml
+server fn loadUser(id: number) -> (not to User) {
+    const row = ?{ select * from users where id = ${id} }.get()
+    return row     // returns `User | not`; lifecycle declares the post-transition contract
+}
+```
+
+**Caller form 1 — `given` presence-guard (§42.2.3):**
+
+```scrml
+const u = loadUser(42)
+
+given u => {
+    // INSIDE this block: u is typed as User AND lifecycle-transitioned.
+    // The act of discriminating proves presence; the lifecycle transition is implicit.
+    print(u.name)        // OK — post-transition access
+    print(u.email)
+}
+// OUTSIDE: u remains `User | not`. Direct access fires E-TYPE-001.
+```
+
+**Caller form 2 — `if (u is not)` early-return:**
+
+```scrml
+const u = loadUser(42)
+if (u is not) return     // discrimination: the `not` arm exits
+// After the early-return discrimination, u is narrowed to User
+// AND lifecycle-transitioned. Subsequent access passes.
+print(u.name)            // OK — post-transition access
+```
+
+**Caller form 3 — `match u { ... }` (§18):**
+
+```scrml
+const u = loadUser(42)
+
+match u {
+    not => handleAbsence()         // the `not` arm — u is `not`
+    given u => {
+        // INSIDE this arm: u is typed as User AND lifecycle-transitioned.
+        print(u.name)               // OK — post-transition access
+    }
+}
+```
+
+In all three forms, the act of discriminating the `not` variant IS the transition marker. No `transition()` call is required (and is redundant if written). The cohesion rationale: presence-discrimination is a first-class scrml primitive (§42); reusing it as the transition marker keeps adopter mental model unified.
+
+**Pre-transition access — fires E-TYPE-001:**
+
+```scrml
+const u = loadUser(42)
+print(u.name)                 // E-TYPE-001 — u was not discriminated; still pre-transition
+```
+
+##### 14.12.6.2 Variant-progression — `(.VariantA to .VariantB)` — explicit `transition()`
+
+The callee declares a variant-graph progression where the source type is one variant of an enum and the post-transition type is another variant of the same enum (or related enum). The caller MUST call `transition(u)` after discriminating the source variant to advance the per-access lifecycle state.
+
+**Worked example — Article lifecycle:**
+
+```scrml
+type Article:enum = {
+    Draft(body: string),
+    Published(body: string, publishedAt: number)
+}
+
+server fn publish(id: number) -> (.Draft to .Published) {
+    const a = ?{ select * from articles where id = ${id} }.get()
+    return a as .Published    // callee transitions; returns Published-shape
+}
+
+const a = publish(42)
+
+if (a is .Draft) {
+    // SOURCE variant discriminated. The lifecycle says (.Draft to .Published);
+    // calling transition() advances per-access state.
+    transition(a)
+    print(a.publishedAt)       // OK — post-transition access of B-shape field
+}
+```
+
+**Missing-transition fires `E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED`:**
+
+```scrml
+const a = publish(42)
+
+if (a is .Draft) {
+    print(a.publishedAt)       // E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED:
+                                //   accessed .Published-shape field `publishedAt`
+                                //   after discriminating .Draft but without
+                                //   calling transition(a).
+}
+```
+
+The diagnostic message names the missing call and suggests `transition(<var>)` immediately after the discrimination.
+
+**Why the asymmetry with presence-progression?** A variant tag like `.Draft` is a positive shape (the value HAS this variant), not an absence/presence test. Discriminating `.Draft` proves the source variant; it does NOT inherently prove the lifecycle transition has happened (the callee may or may not have advanced it). The explicit `transition()` call provides the per-access signal the type-system needs to gate post-transition field access.
+
+##### 14.12.6.3 `transition()` semantics
+
+- **Signature**: `transition(value)` — takes one argument; the argument MUST be a binding (an identifier) whose type carries a lifecycle annotation. The compiler tracks the binding's per-access transition state.
+- **Compile-time only**: zero runtime cost. The compiler emits no code for the call; subsequent reads against the post-transition type pass; pre-transition reads (before the call, or outside the block where the call was made) continue to fire.
+- **Single transition per scope**: a binding's transition state is `pre` until `transition()` is called (or until presence-discrimination fires the implicit transition). Subsequent `transition()` calls on the same binding are silently no-ops.
+- **Scope-local**: `transition()` advances the binding's state in the current scope. Aliasing (`let b = a; transition(b)`) does NOT transition `a`. (Same conservative shape as the rest of the lifecycle access tracker.)
+- **Out-of-place use**: `transition()` called on a value with no lifecycle annotation is a silent no-op (no diagnostic). This keeps the keyword cheap to use defensively in generic helper code; the type-system surface remains tight.
+
+##### 14.12.6.4 Forward-pluggable: multi-variant chains `(A to B to C)`
+
+The hybrid mechanism specifies the binary case. Multi-variant lifecycle chains — `(.Draft to .Review to .Published)` — are RESERVED for a future SPEC amendment. A planned `markTransitioned(u, .Variant)` form (per HU-2 (d), explicitly NOT implemented at the v0.6.0 surface per pa.md Rule 3 YAGNI) would target a specific intermediate variant within the chain. Until that amendment lands, lifecycle annotations are restricted to two-state pre→post pairs; a `(.Draft to .Review to .Published)` annotation at the v0.6.0 surface SHALL be REJECTED by the type-system resolver (the lifecycle registry parses left-to-right and the third token after the second `to` is a parse error in this position).
 
 #### 14.12.7 Schema-field lifecycle (cross-ref §39)
 
@@ -7999,17 +8123,17 @@ The interaction with `broadcast()` calls (§38.9 — `E-CHANNEL-004`) is unchang
 - §39 — schema; §14.12.7 + §39's SQL-shape addendum apply.
 - §48 — function parameters; the extension extends to fn-param position.
 - §51.0 — engines; engine cells are CARVED OUT (§14.12.4).
-- §34 — error catalog entries `E-TYPE-001` (per-access fire), `E-TYPE-LIFECYCLE-ON-ENGINE-CELL` (carve-out), `W-LIFECYCLE-LEGACY-ARROW` (glyph deprecation).
+- §34 — error catalog entries `E-TYPE-001` (per-access fire), `E-TYPE-LIFECYCLE-ON-ENGINE-CELL` (carve-out), `E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED` (variant-progression missing-`transition()`), `W-LIFECYCLE-LEGACY-ARROW` (glyph deprecation).
 - `docs/heads-up/lifecycle-annotation-extension-2026-05-25.md` — S130 HU-1 ratifications (7 of 7 closed).
 
 #### 14.12.10 Normative statements
 
 - The canonical glyph for the lifecycle annotation SHALL be `to`. The token `to` SHALL be reserved as a contextual keyword inside the parenthesised lifecycle expression (`(A to B)`); elsewhere `to` is not reserved.
 - The legacy glyph `->` SHALL parse and resolve identically during the deprecation window; the compiler SHALL emit `W-LIFECYCLE-LEGACY-ARROW` at every legacy-glyph occurrence.
-- Lifecycle annotation SHALL be permitted at the positions enumerated in §14.12.3 (struct fields, Shape 1 plain reactive cells, function parameters, schema fields, channel cells).
+- Lifecycle annotation SHALL be permitted at the positions enumerated in §14.12.3 (struct fields, Shape 1 plain reactive cells, function parameters, function returns, schema fields, channel cells).
 - Lifecycle annotation on engine cells SHALL be rejected via `E-TYPE-LIFECYCLE-ON-ENGINE-CELL`. The classification of a state-decl as an engine cell SHALL be unambiguous via sibling `<engine>` declaration metadata (`engineMeta.varName` and explicit `var=` overrides).
 - Per-access transition-state tracking SHALL fire `E-TYPE-001` at every read of a lifecycle-annotated location whose local transition state is `pre`. The tracker semantics are normatively specified by the Landing 1 implementation at `compiler/src/type-system.ts` (the `checkLifecycleFieldAccess` walker + the lifecycle-registry build pass).
-- Function-return position lifecycle annotation SHALL be SYNTACTICALLY accepted; per-access transition-state tracking for returned values is deferred to a follow-on HU + SPEC amendment that ratifies the transition-marker mechanism.
+- Function-return position lifecycle annotation SHALL be fully tracked per the hybrid mechanism in §14.12.6: presence-progression `(not to T)` returns are transitioned by DISCRIMINATION (via `given` / `if-is-not` early-return / `match`); variant-progression `(.VariantA to .VariantB)` returns are transitioned by an explicit `transition(u)` call. Variant-progression accesses without `transition()` SHALL fire `E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED`. The `transition()` built-in SHALL be compile-time-only (zero runtime cost) and SHALL be silently no-op on values that do not carry a lifecycle annotation.
 - Schema-field lifecycle annotation SHALL inherit semantics from this section; downstream SQL-shape consequences (DDL emission, migration, NULL-vs-NOT-NULL) are documented at §39's SQL-shape addendum cross-referencing this section.
 - Channel-cell lifecycle annotation SHALL inherit semantics from this section; per-client transition state is local to each client and SHALL NOT auto-synchronise across the channel sync layer.
 
@@ -15846,6 +15970,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-TYPE-062 | §18.17 | `is` operator applied to a non-enum-typed operand | Error |
 | E-TYPE-063 | §18.17 | Unknown variant name in `is` expression | Error |
 | E-TYPE-LIFECYCLE-ON-ENGINE-CELL | §14.12.4 | Lifecycle annotation `(A to B)` declared on an engine cell (the auto-declared variable of an `<engine>` declaration, including any `var=` override). Engines own variant-graph progression via `rule=` / `initial=` / `<onTransition>` (§51.0); a lifecycle annotation on the same cell would create a second, redundant progression mechanism. Resolution: for variant-graph state, use the engine. For value-shape progression, declare as a plain reactive cell (not an engine cell). (S130 — HU-1 Q5=a, Lifecycle Landing 2.) | Error |
+| E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED | §14.12.6.2 | A variant-progression lifecycle-annotated value (e.g., `(.Draft to .Published)`) is accessed at a post-transition variant field after the source-variant discrimination, but without an intervening `transition(<var>)` call. The hybrid mechanism (§14.12.6) requires explicit `transition()` for variant-progression cases (the discrimination-IS-transition rule applies only to presence-progression `(not to T)` per §14.12.6.1). Resolution: call `transition(<var>)` immediately after the discriminating `if (<var> is .SourceVariant) {}` / `match` arm, before accessing post-transition fields. (S131 — HU-2 hybrid, Lifecycle Landing 2.5.) | Error |
 | W-LIFECYCLE-LEGACY-ARROW | §14.12.5 | A lifecycle annotation uses the legacy `->` glyph instead of the canonical `to` keyword. Both forms parse and resolve identically during the deprecation window; the canonical form is `to` (a contextual keyword inside the parenthesised lifecycle expression, parallel to `from` in `import` declarations). Resolution: rewrite `(A -> B)` as `(A to B)`. New code SHALL use `to`; existing samples MAY migrate at convenience. The end-of-window timing promotes this to `E-LIFECYCLE-LEGACY-ARROW` (reserved; not yet emitted). (S130 — Lifecycle Landing 2 + S129 HU-2 F-024.) | Info |
 | E-FOREIGN-001 | §23.2 | Level mismatch between `_{}` opener and closer | Error |
 | E-FOREIGN-002 | §23.2 | `_{}` block reaches end-of-file without a matching closer | Error |

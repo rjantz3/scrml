@@ -3657,6 +3657,13 @@ const LOGIC_SCOPE_GLOBAL_ALLOWLIST: ReadonlySet<string> = new Set([
   // codegen pipeline to _scrml_replay(...). Allowlisted here so the
   // scope-check pass doesn't flag it as an undeclared identifier.
   "replay",
+  // §14.12.6.3 — transition() built-in. Compile-time-only marker for
+  // lifecycle-annotated value progression (per S131 — HU-2 hybrid). The
+  // function emits no runtime code; the type-system walker
+  // (checkLifecycleBindingAccess) consumes it symbolically to advance
+  // per-binding transition state. Allowlisted here so the scope-check
+  // pass does not flag bare `transition(u)` calls as undeclared.
+  "transition",
   // §38.6 — channel built-ins. Auto-injected as locals in server functions
   // declared inside a `<channel>` body (codegen-time injection, see
   // emit-server.ts emitBroadcastInjection). Allowlisted here so the
@@ -12271,6 +12278,28 @@ function processFile(
     );
   }
 
+  // §14.12.6 — Function-return position per-binding lifecycle check
+  // (S131 — HU-2 hybrid). Runs after struct-field check; collects the
+  // per-file fn-return lifecycle map (functions whose returnTypeAnnotation
+  // is `(A to B)`), then walks scopes tracking bindings whose initialiser
+  // calls one of those functions. Fires E-TYPE-001 (presence-progression
+  // pre-discrimination) and E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED
+  // (variant-progression missing `transition()`).
+  {
+    const lifecycleTopNodes = (fileAST.nodes as ASTNodeLike[] | undefined)
+      ?? ((fileAST.ast as FileAST | undefined)?.nodes as ASTNodeLike[] | undefined)
+      ?? [];
+    const fnReturnLifecycleMap = buildFnReturnLifecycleMap(lifecycleTopNodes, typeRegistry);
+    if (fnReturnLifecycleMap.size > 0) {
+      runLifecycleBindingAccessCheck(
+        lifecycleTopNodes,
+        fnReturnLifecycleMap,
+        errors,
+        fileSpan,
+      );
+    }
+  }
+
   // §51.9 — After annotation, collect the reactive → machine bindings that
   // `annotateNodes` attached to state-decl nodes and validate every
   // derived machine's source-var reference + exhaustiveness (E-ENGINE-018).
@@ -13816,6 +13845,648 @@ function runLifecycleAccessCheck(
   collectScopes(topNodes);
 }
 
+
+// ---------------------------------------------------------------------------
+// §14.12.6 — Function-return position lifecycle (S131 — HU-2 hybrid)
+// ---------------------------------------------------------------------------
+//
+// The hybrid mechanism (per SPEC §14.12.6):
+//   - Presence-progression `(not to T)` — DISCRIMINATION IS TRANSITION.
+//     `given u => {}`, `if (u is not) return`, or `match u { not =>, given u => }`
+//     auto-marks the lifecycle transition. The discriminator IS the marker.
+//   - Variant-progression `(.VariantA to .VariantB)` — explicit `transition(u)`.
+//     After discriminating the source variant (`if (a is .Draft)` / match-arm),
+//     the adopter MUST call `transition(a)` to advance the per-access state.
+//
+// Two infrastructure pieces:
+//   1. `buildFnReturnLifecycleMap` — collects fn-name → lifecycle annotation
+//      info from function-decl returnTypeAnnotation values. Built once at TS
+//      pass start (paralleling `buildLifecycleRegistry` for struct fields).
+//   2. `checkLifecycleBindingAccess` — walks bodies to track per-binding
+//      transition state for bindings whose RHS is a call to a fn with a
+//      lifecycle-annotated return. Fires `E-TYPE-001` (presence pre-transition)
+//      and `E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED` (variant missing-marker).
+
+/**
+ * Per-function lifecycle return-type specification.
+ *
+ * `kind: "presence"` — annotation form `(not to T)`. The pre-state is "not";
+ * the post-state is the resolved post-type. Discrimination is the transition
+ * marker (no `transition()` call required).
+ *
+ * `kind: "variant"` — annotation form `(.VariantA to .VariantB)`. The pre-state
+ * is the source variant name (without the leading dot); the post-state is the
+ * post-variant name. Explicit `transition()` is required after discriminating
+ * the source variant; `E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED` fires on
+ * post-shape field access without `transition()`.
+ */
+interface FnReturnLifecycleSpec {
+  kind: "presence" | "variant";
+  preType: ResolvedType;
+  postType: ResolvedType;
+  // For variant-progression: the bare source/post variant names (no leading dot)
+  // used by the walker to match `if (x is .Source)` discrimination patterns.
+  // Empty strings for presence-progression.
+  preVariantName: string;
+  postVariantName: string;
+}
+
+type FnReturnLifecycleMap = Map<string, FnReturnLifecycleSpec>;
+
+/**
+ * Build the per-file fn-return lifecycle map.
+ *
+ * Walks function-decl nodes (top-level + nested via recursion); collects every
+ * function whose returnTypeAnnotation is a lifecycle form `(A to B)` (canonical
+ * or legacy `->`). Classifies the form as "presence" or "variant" and resolves
+ * the pre/post types via `resolveTypeExpr`.
+ *
+ * Note: this function does NOT emit `W-LIFECYCLE-LEGACY-ARROW` — that lint is
+ * emitted by `buildLifecycleRegistry` at struct-field sites. fn-return legacy
+ * glyph use will surface the lint via `resolveTypeExpr`'s call paths if and
+ * when needed (deferred — Landing 2 surfaces the lint at struct-field; fn-return
+ * lint emission is a follow-on if real adopters write `(not -> User)` returns).
+ */
+function buildFnReturnLifecycleMap(
+  topNodes: ASTNodeLike[],
+  typeRegistry: Map<string, ResolvedType>,
+): FnReturnLifecycleMap {
+  const map: FnReturnLifecycleMap = new Map();
+
+  function visit(nodes: ASTNodeLike[]): void {
+    for (const n of nodes) {
+      if (!n || typeof n !== "object") continue;
+      if (n.kind === "function-decl" && typeof n.name === "string") {
+        const returnAnnot = (n as ASTNodeLike).returnTypeAnnotation as string | undefined;
+        if (returnAnnot) {
+          const spec = parseLifecycleReturnAnnotation(returnAnnot, typeRegistry);
+          if (spec) map.set(n.name, spec);
+        }
+      }
+      // Recurse into common child-bearing fields to find nested function-decls.
+      for (const key of ["body", "children", "consequent", "alternate", "then", "else"]) {
+        const val = (n as Record<string, unknown>)[key];
+        if (Array.isArray(val)) visit(val as ASTNodeLike[]);
+      }
+    }
+  }
+
+  visit(topNodes);
+  return map;
+}
+
+/**
+ * Parse a return-type annotation string for a lifecycle form. Returns the
+ * spec when the annotation is `(A to B)` or `(A -> B)`; null otherwise.
+ *
+ * Classification: if the pre-expression is `not`, it's presence-progression.
+ * If the pre-expression starts with `.` and references a variant, it's
+ * variant-progression. Anything else (e.g., `(string to number)`) classifies
+ * as variant-progression by default (covers the general "value-shape
+ * progression" case where neither variant nor presence pattern applies).
+ */
+function parseLifecycleReturnAnnotation(
+  annotation: string,
+  typeRegistry: Map<string, ResolvedType>,
+): FnReturnLifecycleSpec | null {
+  const trimmed = annotation.trim();
+  if (!trimmed.startsWith("(") || !trimmed.endsWith(")")) return null;
+  const inner = trimmed.slice(1, -1);
+  const arrow = findTopLevelArrow(inner);
+  if (arrow === null) return null;
+
+  const preExpr = inner.slice(0, arrow.idx).trim();
+  const postExpr = inner.slice(arrow.idx + arrow.len).trim();
+  if (!preExpr || !postExpr) return null;
+
+  // Classify by pre-shape.
+  if (preExpr === "not") {
+    return {
+      kind: "presence",
+      preType: resolveTypeExpr(preExpr, typeRegistry),
+      postType: resolveTypeExpr(postExpr, typeRegistry),
+      preVariantName: "",
+      postVariantName: "",
+    };
+  }
+  // Variant-progression: `.VariantName` pre + `.VariantName` post (the same
+  // enum's source and post variants). Strip leading dots; the walker matches
+  // these against `if (x is .Variant)` patterns and `match x { .Variant => }`
+  // arm tests.
+  const preVariant = (preExpr.startsWith(".") ? preExpr.slice(1) : preExpr).trim();
+  const postVariant = (postExpr.startsWith(".") ? postExpr.slice(1) : postExpr).trim();
+  return {
+    kind: "variant",
+    preType: resolveTypeExpr(preExpr, typeRegistry),
+    postType: resolveTypeExpr(postExpr, typeRegistry),
+    preVariantName: preVariant,
+    postVariantName: postVariant,
+  };
+}
+
+/**
+ * Walk a statement body and fire lifecycle diagnostics on bindings whose RHS
+ * is a call to a fn with a lifecycle-annotated return type.
+ *
+ * Per-binding transition state (presence-progression `(not to T)`):
+ *   - Binding starts in "pre" — `const u = loadUser(42)` where `loadUser`
+ *     returns `(not to User)`.
+ *   - Discrimination forms (any one promotes to "post" inside their scope):
+ *       a. `given u => { ... }` — INSIDE the body, u is "post". The given
+ *          form may carry multiple variables (`given u, v => {}`) — each is
+ *          promoted independently.
+ *       b. `if (u is not) return` — the `is not` check that exits early
+ *          promotes u to "post" in the OUTER scope for subsequent statements.
+ *       c. `match u { not => ..., given u => ... }` — INSIDE the `given u`
+ *          arm body, u is "post".
+ *   - Pre-transition access fires `E-TYPE-001`.
+ *
+ * Per-binding transition state (variant-progression `(.A to .B)`):
+ *   - Binding starts in "pre" — `const a = publish(42)` where `publish`
+ *     returns `(.Draft to .Published)`.
+ *   - Source-variant discrimination form: `if (a is .Draft) { ... }`. INSIDE
+ *     the consequent body, accessing post-variant fields without `transition(a)`
+ *     fires `E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED`.
+ *   - Explicit `transition(a)` call advances the binding to "post" — subsequent
+ *     reads of post-shape fields pass within the discrimination scope.
+ *
+ * Scope-local: this walker is shape-conservative (matches the rest of the
+ * lifecycle access tracker). Aliasing (`let b = a; transition(b)`) does NOT
+ * transition `a`. Cross-fn boundaries are scope boundaries — nested fn bodies
+ * are NOT consulted by the outer walk.
+ */
+function checkLifecycleBindingAccess(
+  body: ASTNodeLike[],
+  bindings: Map<string, FnReturnLifecycleSpec>,
+  errors: TSError[],
+  fileSpan: Span,
+): void {
+  if (!Array.isArray(body) || body.length === 0) return;
+  if (bindings.size === 0) return;
+
+  // Per-binding state: name → "pre" | "post" — current transition state in
+  // this scope. Initialized to "pre" for every tracked binding.
+  const states = new Map<string, "pre" | "post">();
+  for (const name of bindings.keys()) states.set(name, "pre");
+
+  // Detect `transition(<bindingName>)` calls. Whitespace-tolerant; the call
+  // must reference one of our tracked bindings AS the SOLE argument.
+  // `transition(a)`, `transition(  a  )` — yes. `transition(foo(a))` — no.
+  // The exact text-shape matters because we extract from raw statement text.
+  const TRANSITION_CALL_RE = /\btransition\s*\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\)/g;
+
+  // Detect `<bindingName>.<fieldName>` field access. Bind-scoped — only tracked
+  // bindings count.
+  const FIELD_ACCESS_RE = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\.\s*([A-Za-z_$][A-Za-z0-9_$]*)\b/g;
+
+  // Detect `<bindingName>.<fieldName> = ...` writes (distinguish from reads).
+  const FIELD_WRITE_RE = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\.\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)(?!>)/g;
+
+  // Detect `<bindingName> is not` shape — single-binding is-not check.
+  // Used to detect `if (u is not)` early-return discrimination.
+  function isIsNotCheckOf(condition: string, bindingName: string): boolean {
+    if (!condition) return false;
+    const re = new RegExp(`\\b${escapeRe(bindingName)}\\b\\s+is\\s+not\\b`);
+    return re.test(condition);
+  }
+
+  // Detect `<bindingName> is .<VariantName>` — used for variant-progression
+  // source discrimination in if-stmt conditions.
+  function isIsVariantCheckOf(condition: string, bindingName: string, variantName: string): boolean {
+    if (!condition) return false;
+    const re = new RegExp(
+      `\\b${escapeRe(bindingName)}\\b\\s+is\\s+\\.\\s*${escapeRe(variantName)}\\b`,
+    );
+    return re.test(condition);
+  }
+
+  function escapeRe(s: string): string {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function statementText(node: ASTNodeLike): string {
+    const seen = new Set<string>();
+    if (typeof node.value === "string") seen.add(node.value);
+    if (typeof node.expr === "string") seen.add(node.expr);
+    if (typeof node.text === "string") seen.add(node.text);
+    if (typeof node.raw === "string") seen.add(node.raw);
+    if (typeof node.init === "string") seen.add(node.init);
+    if (typeof node.condition === "string") seen.add(node.condition);
+    return Array.from(seen).join(" ");
+  }
+
+  // Detect whether a body block contains a top-level `return` or `fail`
+  // statement — used to identify the early-return shape `if (u is not) { return }`.
+  function bodyHasEarlyReturn(b: ASTNodeLike[]): boolean {
+    if (!Array.isArray(b)) return false;
+    for (const stmt of b) {
+      if (!stmt || typeof stmt !== "object") continue;
+      const k = stmt.kind;
+      if (k === "return-stmt" || k === "return" || k === "fail-stmt" || k === "throw-stmt") return true;
+      // Bare-text statement that mentions `return` or `fail` keyword at start
+      // (handles ast-builder's fallback to escape-hatch text for bare returns
+      // inside if-bodies).
+      const t = statementText(stmt).trim();
+      if (/^(return|fail)\b/.test(t)) return true;
+    }
+    return false;
+  }
+
+  // Check a statement's TEXT for accesses + transition() calls. `localStates`
+  // is the per-scope state map (may be the outer `states` or a cloned inner
+  // state for nested scopes). Returns the (possibly mutated) localStates.
+  // Fires diagnostics into `errors`.
+  function processStatementText(
+    text: string,
+    localStates: Map<string, "pre" | "post">,
+    span: Span,
+    activeVariantDiscrim: Map<string, string> | null,
+  ): void {
+    if (!text) return;
+
+    // Pass 1: discover transition() calls — advance state.
+    TRANSITION_CALL_RE.lastIndex = 0;
+    let tm: RegExpExecArray | null;
+    while ((tm = TRANSITION_CALL_RE.exec(text)) !== null) {
+      const argName = tm[1];
+      if (localStates.has(argName)) {
+        localStates.set(argName, "post");
+      }
+      // out-of-place use: silent no-op per §14.12.6.3
+    }
+
+    // Pass 2: detect writes (used to suppress write-LHS as reads).
+    const writePositions = new Set<number>();
+    FIELD_WRITE_RE.lastIndex = 0;
+    let wm: RegExpExecArray | null;
+    while ((wm = FIELD_WRITE_RE.exec(text)) !== null) {
+      writePositions.add(wm.index);
+    }
+
+    // Pass 3: detect field accesses; fire on pre-transition reads + variant-not-transitioned reads.
+    FIELD_ACCESS_RE.lastIndex = 0;
+    let am: RegExpExecArray | null;
+    while ((am = FIELD_ACCESS_RE.exec(text)) !== null) {
+      const binding = am[1];
+      const field = am[2];
+      if (writePositions.has(am.index)) continue; // skip LHS-of-write
+
+      const spec = bindings.get(binding);
+      if (!spec) continue; // not a lifecycle binding
+
+      const state = localStates.get(binding);
+      if (state !== "pre") continue; // already transitioned — read is OK
+
+      if (spec.kind === "presence") {
+        // E-TYPE-001 — pre-transition presence-progression access
+        const preLabel = formatTypeForDiagnostic(spec.preType);
+        const postLabel = formatTypeForDiagnostic(spec.postType);
+        errors.push(new TSError(
+          "E-TYPE-001",
+          `E-TYPE-001: binding \`${binding}\` has lifecycle annotation \`(${preLabel} to ${postLabel})\` ` +
+          `(from a function return) and is accessed before its lifecycle transition.\n` +
+          `  Field \`${field}\` reads the post-transition (\`${postLabel}\`) shape; at this access, ` +
+          `the binding is still in the pre-transition state (\`${preLabel}\`).\n` +
+          `  Resolution: discriminate the binding via \`given ${binding} => { ... }\`, ` +
+          `\`if (${binding} is not) return\` early-return, or \`match ${binding} { not => ..., given ${binding} => ... }\` ` +
+          `before this read. See SPEC §14.12.6.1.`,
+          span,
+        ));
+      } else {
+        // Variant-progression. Two sub-cases:
+        //   (a) The binding is inside a source-variant discrimination scope
+        //       (activeVariantDiscrim has the binding). No transition() called
+        //       yet (state === "pre"). Fire E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED.
+        //   (b) The binding is NOT inside a discrimination scope. Fire
+        //       E-TYPE-001 — the post-shape field is being accessed without
+        //       even discriminating the source variant.
+        if (activeVariantDiscrim?.has(binding)) {
+          errors.push(new TSError(
+            "E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED",
+            `E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED: binding \`${binding}\` has variant-progression ` +
+            `lifecycle annotation \`(.${spec.preVariantName} to .${spec.postVariantName})\` (from a function return). ` +
+            `Field \`${field}\` is on the post-transition variant (\`.${spec.postVariantName}\`); ` +
+            `the source variant (\`.${spec.preVariantName}\`) was discriminated but \`transition(${binding})\` ` +
+            `has not been called yet.\n` +
+            `  Resolution: insert \`transition(${binding})\` immediately after the \`if (${binding} is .${spec.preVariantName})\` ` +
+            `discrimination, before this read. See SPEC §14.12.6.2.`,
+            span,
+          ));
+        } else {
+          const preLabel = formatTypeForDiagnostic(spec.preType);
+          const postLabel = formatTypeForDiagnostic(spec.postType);
+          errors.push(new TSError(
+            "E-TYPE-001",
+            `E-TYPE-001: binding \`${binding}\` has lifecycle annotation \`(${preLabel} to ${postLabel})\` ` +
+            `(from a function return) and is accessed before its lifecycle transition.\n` +
+            `  Field \`${field}\` reads the post-transition (\`${postLabel}\`) shape; at this access, ` +
+            `the binding is still in the pre-transition state (\`${preLabel}\`).\n` +
+            `  Resolution: discriminate the source variant via \`if (${binding} is .${spec.preVariantName})\`, ` +
+            `then call \`transition(${binding})\` before this read. See SPEC §14.12.6.2.`,
+            span,
+          ));
+        }
+      }
+    }
+  }
+
+  // Recursive walker. `localStates` is the current scope's state; the walker
+  // mutates it for transition() calls and writes-of-discriminations. Branches
+  // (if/else) and nested scopes (given-guard / match-arms) get cloned state
+  // to avoid leaking inner transitions outward.
+  //
+  // `activeVariantDiscrim` is a per-scope map of binding → source-variant
+  // name; populated when a variant-progression binding is currently inside
+  // its `if (x is .Source)` discrimination scope.
+  function walk(
+    nodes: ASTNodeLike[],
+    localStates: Map<string, "pre" | "post">,
+    activeVariantDiscrim: Map<string, string>,
+  ): void {
+    for (const stmt of nodes) {
+      if (!stmt || typeof stmt !== "object") continue;
+      if (stmt.kind === "function-decl") continue; // nested scope
+
+      const stmtSpan = (stmt.span ?? fileSpan) as Span;
+
+      // Special: given-guard — inside body, listed variables promote to "post".
+      if (stmt.kind === "given-guard") {
+        const variables = (stmt.variables as string[] | undefined) ?? [];
+        const givenBody = (stmt.body as ASTNodeLike[] | undefined) ?? [];
+        const innerStates = new Map(localStates);
+        for (const v of variables) {
+          if (innerStates.has(v)) innerStates.set(v, "post");
+        }
+        walk(givenBody, innerStates, activeVariantDiscrim);
+        // Per S131 HU-2 (e) ratification, given-guard CONTAINS the
+        // discrimination — outer scope state is not advanced (the binding
+        // could still be `not` outside the block).
+        continue;
+      }
+
+      // Special: if-stmt — examine the condition for discrimination patterns.
+      if (stmt.kind === "if-stmt") {
+        const condition = ((stmt.condition as string | undefined) ?? "").trim();
+        const consequent = (stmt.consequent as ASTNodeLike[] | undefined) ?? [];
+        const alternate = (stmt.alternate as ASTNodeLike[] | undefined) ?? [];
+
+        // (1) Presence-progression early-return shape: `if (u is not) return`.
+        // After the if-stmt, u is post in the outer scope. We detect this by
+        // checking whether the consequent body has an early-return AND the
+        // condition is `<u> is not` for some tracked presence binding.
+        let promotedOnEarlyReturn: string[] = [];
+        for (const [binding, spec] of bindings) {
+          if (spec.kind !== "presence") continue;
+          if (localStates.get(binding) !== "pre") continue;
+          if (!isIsNotCheckOf(condition, binding)) continue;
+          if (!bodyHasEarlyReturn(consequent)) continue;
+          promotedOnEarlyReturn.push(binding);
+        }
+
+        // (2) Variant-progression source-discrimination: `if (a is .Source) { ... }`.
+        // Inside the consequent body, mark `a` as having an active source
+        // discrimination — so post-shape field access without transition()
+        // fires E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED.
+        const innerDiscrim = new Map(activeVariantDiscrim);
+        for (const [binding, spec] of bindings) {
+          if (spec.kind !== "variant") continue;
+          if (!isIsVariantCheckOf(condition, binding, spec.preVariantName)) continue;
+          innerDiscrim.set(binding, spec.preVariantName);
+        }
+
+        // Walk consequent body with inner state + discrim context.
+        const innerStates = new Map(localStates);
+        walk(consequent, innerStates, innerDiscrim);
+
+        // Walk alternate body with the original state (no discrimination active).
+        if (alternate.length > 0) {
+          const altStates = new Map(localStates);
+          walk(alternate, altStates, activeVariantDiscrim);
+        }
+
+        // Apply early-return promotions to the outer scope.
+        for (const b of promotedOnEarlyReturn) localStates.set(b, "post");
+
+        // Also process the if-stmt's text for transition() calls in the
+        // condition (rare but possible — `if (transition(u), u is some) {}`).
+        processStatementText(condition, localStates, stmtSpan, activeVariantDiscrim);
+        continue;
+      }
+
+      // Special: match-stmt / match-expr — analyse arms for `given <bindingName>`
+      // and `<bindingName> is .Variant` patterns.
+      if (stmt.kind === "match-stmt" || stmt.kind === "match-expr") {
+        const header = ((stmt.header as string | undefined) ?? "").trim();
+        // Identify the matched-on binding (strip leading `@` if present).
+        const matchedName = header.replace(/^@/, "").trim();
+
+        const arms = (stmt.body as ASTNodeLike[] | undefined)
+          ?? (stmt.arms as ASTNodeLike[] | undefined)
+          ?? [];
+
+        for (const arm of arms) {
+          if (!arm || typeof arm !== "object") continue;
+          const armStates = new Map(localStates);
+          const armDiscrim = new Map(activeVariantDiscrim);
+
+          // The match-arm-block / match-arm-inline shape carries variant name
+          // information via `variant` / `test` fields. Inspect to determine
+          // whether the arm body should see the matched binding as "post".
+          const isGivenArm = checkArmHasGivenPattern(arm, matchedName);
+          const armVariantName = extractArmVariantName(arm);
+
+          // Presence-progression `given u` inside `match u { ... }` — inside
+          // the arm body, u is "post".
+          if (matchedName && armStates.has(matchedName) && isGivenArm) {
+            const spec = bindings.get(matchedName);
+            if (spec?.kind === "presence") {
+              armStates.set(matchedName, "post");
+            }
+          }
+
+          // Variant-progression source-discrim inside `match a { .Source => }`
+          // — mark active discrimination for this arm.
+          if (matchedName && bindings.has(matchedName) && armVariantName) {
+            const spec = bindings.get(matchedName);
+            if (spec?.kind === "variant" && armVariantName === spec.preVariantName) {
+              armDiscrim.set(matchedName, spec.preVariantName);
+            }
+          }
+
+          // Walk the arm body (handles match-arm-block) or process inline text
+          // (handles match-arm-inline result expressions).
+          const armBody = (arm.body as ASTNodeLike[] | undefined) ?? [];
+          if (armBody.length > 0) {
+            walk(armBody, armStates, armDiscrim);
+          }
+          // Inline match-arm: arm.result is the expression string.
+          const inlineResult = (arm as ASTNodeLike).result as string | undefined;
+          if (typeof inlineResult === "string" && inlineResult.length > 0) {
+            processStatementText(inlineResult, armStates, stmtSpan, armDiscrim);
+          }
+        }
+
+        // Also process header for accesses (rare but possible).
+        processStatementText(header, localStates, stmtSpan, activeVariantDiscrim);
+        continue;
+      }
+
+      // Default case: process statement text + recurse into common child fields.
+      const text = statementText(stmt);
+      if (text) processStatementText(text, localStates, stmtSpan, activeVariantDiscrim);
+
+      // Recurse — same shape as checkLifecycleFieldAccess. Branches use
+      // cloned state to prevent inner transitions leaking outward.
+      for (const key of ["body", "children", "consequent", "alternate", "then", "else"]) {
+        const val = (stmt as Record<string, unknown>)[key];
+        if (Array.isArray(val)) {
+          const inner = new Map(localStates);
+          walk(val as ASTNodeLike[], inner, activeVariantDiscrim);
+        }
+      }
+    }
+  }
+
+  /**
+   * Returns true when the match-arm carries the `given <bindingName>` pattern
+   * (or just `given <bindingName>` in inline form). Used for presence-progression
+   * recognition in match arms.
+   */
+  function checkArmHasGivenPattern(arm: ASTNodeLike, bindingName: string): boolean {
+    if (!bindingName) return false;
+    // match-arm-block: AST builder produces { kind, variant, isWildcard, isNotArm, body, ... }
+    // The `given x => { ... }` arm shape isn't explicitly tagged in the AST today;
+    // check `arm.test` / `arm.variant` for an exact "given <name>" / similar form.
+    // Inline arms carry `test` (e.g., `.Variant` text or `given <name>`).
+    const test = ((arm as ASTNodeLike).test as string | undefined) ?? "";
+    const variant = ((arm as ASTNodeLike).variant as string | undefined) ?? "";
+    if (typeof test === "string" && new RegExp(`\\bgiven\\s+${escapeRe(bindingName)}\\b`).test(test)) {
+      return true;
+    }
+    if (typeof variant === "string" && new RegExp(`\\bgiven\\s+${escapeRe(bindingName)}\\b`).test(variant)) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Extract the variant-name (without leading dot) from a match-arm when the
+   * arm pattern is `. VariantName` / `. VariantName(...)`. Returns "" if the
+   * arm is `not`, wildcard, `else`, or a non-variant pattern.
+   */
+  function extractArmVariantName(arm: ASTNodeLike): string {
+    // match-arm-block stores variant name in `variant` (e.g., "Variant" or "__not__").
+    // match-arm-inline stores it in `test` (e.g., ".Variant(b)").
+    const variant = (arm as ASTNodeLike).variant as string | undefined;
+    if (typeof variant === "string" && variant && variant !== "__not__"
+        && !((arm as ASTNodeLike).isWildcard) && !((arm as ASTNodeLike).isNotArm)) {
+      // Strip leading dot if present.
+      return variant.startsWith(".") ? variant.slice(1) : variant;
+    }
+    const test = (arm as ASTNodeLike).test as string | undefined;
+    if (typeof test === "string" && test.startsWith(".")) {
+      // ".VariantName(...)" — strip dot, strip any payload parens.
+      const noDot = test.slice(1);
+      const parenIdx = noDot.indexOf("(");
+      return parenIdx > 0 ? noDot.slice(0, parenIdx).trim() : noDot.trim();
+    }
+    return "";
+  }
+
+  walk(body, states, new Map());
+}
+
+/**
+ * Pipeline-facing wrapper for `checkLifecycleBindingAccess`.
+ *
+ * Walks the file's scopes (top-level + every function-decl body) collecting
+ * let/const bindings whose initialiser is a call to a function in the fn-return
+ * lifecycle map. Invokes the access-check at each scope with the per-scope
+ * binding set.
+ */
+function runLifecycleBindingAccessCheck(
+  topNodes: ASTNodeLike[],
+  fnReturnMap: FnReturnLifecycleMap,
+  errors: TSError[],
+  fileSpan: Span,
+): void {
+  if (!Array.isArray(topNodes) || topNodes.length === 0) return;
+  if (fnReturnMap.size === 0) return;
+
+  /**
+   * Match patterns:
+   *   - `<fnName>(...)` — direct call
+   *   - `await <fnName>(...)` — never appears in scrml (no async/await per S114),
+   *     but tolerate defensive parsing
+   * Returns the callee name when the initialiser appears to call one of the
+   * tracked lifecycle-return functions; null otherwise.
+   */
+  function extractInitCallee(initText: string): string | null {
+    if (!initText) return null;
+    // Strip leading `await ` (not legal in scrml but harmless to tolerate).
+    const trimmed = initText.trim().replace(/^await\s+/, "");
+    const match = /^([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/.exec(trimmed);
+    return match ? match[1] : null;
+  }
+
+  /**
+   * Collect let/const bindings in a body whose initializer is a call to a
+   * fn in fnReturnMap. Returns the binding map for that scope.
+   */
+  function collectFnReturnBindings(nodes: ASTNodeLike[]): Map<string, FnReturnLifecycleSpec> {
+    const collected = new Map<string, FnReturnLifecycleSpec>();
+    for (const stmt of nodes) {
+      if (!stmt || typeof stmt !== "object") continue;
+      if (stmt.kind === "function-decl") continue; // nested scope
+      if (stmt.kind !== "let-decl" && stmt.kind !== "const-decl"
+          && stmt.kind !== "variable-decl") continue;
+
+      const varName = stmt.name as string | undefined;
+      if (!varName) continue;
+
+      // Read initializer text via the same shape as the struct walker's helper.
+      let initText = "";
+      if (typeof stmt.init === "string") initText = stmt.init;
+      else {
+        const nodeAny = stmt as Record<string, unknown>;
+        const initExpr = nodeAny.initExpr as { raw?: string; kind?: string } | undefined;
+        if (initExpr && typeof initExpr.raw === "string") initText = initExpr.raw;
+        else if (typeof stmt.value === "string") initText = stmt.value;
+      }
+
+      const callee = extractInitCallee(initText);
+      if (callee && fnReturnMap.has(callee)) {
+        collected.set(varName, fnReturnMap.get(callee)!);
+      }
+    }
+    return collected;
+  }
+
+  function checkScope(body: ASTNodeLike[]): void {
+    const bindings = collectFnReturnBindings(body);
+    if (bindings.size === 0) return;
+    checkLifecycleBindingAccess(body, bindings, errors, fileSpan);
+  }
+
+  function collectScopes(nodes: ASTNodeLike[]): void {
+    for (const node of nodes) {
+      if (!node || typeof node !== "object") continue;
+      if (node.kind === "function-decl") {
+        const fnBody = node.body as ASTNodeLike[] | undefined;
+        if (Array.isArray(fnBody)) checkScope(fnBody);
+        continue;
+      }
+      const body = node.body as ASTNodeLike[] | undefined;
+      if (Array.isArray(body)) collectScopes(body);
+      const children = node.children as ASTNodeLike[] | undefined;
+      if (Array.isArray(children)) collectScopes(children);
+    }
+  }
+
+  checkScope(topNodes);
+  collectScopes(topNodes);
+}
+
 // ---------------------------------------------------------------------------
 // Exports for testing and downstream use
 // ---------------------------------------------------------------------------
@@ -13834,6 +14505,9 @@ export {
   resolveTypeExpr,
   checkStructFieldAccess,
   checkLifecycleFieldAccess,
+  buildFnReturnLifecycleMap,
+  checkLifecycleBindingAccess,
+  runLifecycleBindingAccessCheck,
   checkEnumExhaustiveness,
   checkUnionExhaustiveness,
   checkSubstateExhaustiveness,

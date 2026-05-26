@@ -937,6 +937,25 @@ function emitIndex(node: IndexExpr, ctx: EmitExprContext): string {
 }
 
 function emitCall(node: CallExpr, ctx: EmitExprContext): string {
+  // §14.12.6.3 (S131 — HU-2 hybrid) — `transition(<ident>)` is a compile-time-
+  // only marker for lifecycle progression. The type-system walker consumes it
+  // symbolically (per checkLifecycleBindingAccess); codegen emits ZERO runtime
+  // code. Shape match: CallExpr { callee: IdentExpr("transition"), args: [IdentExpr] }
+  // — single bare-identifier argument. Complex argument shapes
+  // (`transition(foo.bar)`, `transition(foo())`) are not recognised here and
+  // fall through to the standard call-emission path; they would surface as
+  // runtime-undefined `transition is not defined` calls in adopter code, which
+  // is the correct error surface (the type-system surface forbids these shapes,
+  // and the runtime-undefined error is the loudest possible signal).
+  if (
+    node.callee.kind === "ident" &&
+    (node.callee as IdentExpr).name === "transition" &&
+    node.args.length === 1 &&
+    node.args[0] && node.args[0].kind === "ident"
+  ) {
+    return "";
+  }
+
   // §41.13 parseVariant — call-site annotated by TS pass with parseVariantEnum.
   // Dispatch to the monomorphized parser emitter (emit-parse-variant.ts).
   if (isParseVariantCall(node)) {

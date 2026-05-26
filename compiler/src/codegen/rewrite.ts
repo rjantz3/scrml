@@ -344,6 +344,44 @@ export function rewriteNavigateCalls(expr: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// rewriteTransitionCalls (§14.12.6 — S131 HU-2 hybrid)
+// ---------------------------------------------------------------------------
+
+/**
+ * §14.12.6.3 — `transition(<binding>)` is a compile-time-only marker for
+ * lifecycle-annotated value progression. The type-system walker
+ * (`checkLifecycleBindingAccess` in type-system.ts) consumes it symbolically
+ * to advance per-binding transition state; the call MUST emit zero runtime
+ * code.
+ *
+ * This pass strips every `transition(<ident>)` call from the rewritten
+ * expression text. The shape is a function-call with a single bare-identifier
+ * argument; complex argument forms (`transition(foo.bar)`, `transition(x +
+ * y)`) are NOT recognised because the type-system surface restricts the
+ * argument to a simple binding identifier (per §14.12.6.3).
+ *
+ * Behaviour:
+ *   - `transition(x)` → `` (empty string at the call site; the statement
+ *     position becomes empty — surrounding statement-separator semicolons or
+ *     newlines remain intact)
+ *   - `transition(  x  )` → `` (whitespace-tolerant)
+ *   - `transition(x.y)` / `transition(x, y)` / `transition(foo(z))` —
+ *     NOT MATCHED — the simple-ident regex declines, the call survives. This
+ *     is a safe fall-through (the type-system surface forbids these shapes;
+ *     a non-ident argument would be a programmer error rather than a hidden
+ *     semantic). If a future SPEC amendment broadens the argument shape, this
+ *     pass extends correspondingly.
+ *
+ * MUST run BEFORE rewriteReactiveRefs so the bare identifier inside the call
+ * isn't first rewritten to a `_scrml_reactive_get(...)` form (which would
+ * defeat the simple-ident match).
+ */
+export function rewriteTransitionCalls(expr: string): string {
+  if (!expr || typeof expr !== "string" || !expr.includes("transition")) return expr;
+  return expr.replace(/\btransition\s*\(\s*[A-Za-z_$][A-Za-z0-9_$]*\s*\)\s*;?/g, "");
+}
+
+// ---------------------------------------------------------------------------
 // rewriteReplayCalls
 // ---------------------------------------------------------------------------
 
@@ -1996,6 +2034,10 @@ const clientPasses: RewritePass[] = [
   // Pass 9.5: early struct construction strip — ensures `@var` inside `Type { ...@var }` is
   // visible to rewriteReactiveRefs (the AST parser chokes on `Identifier {` prefix).
   (s, _ctx) => rewriteStructConstruction(s),
+  // Pass 9.65: §14.12.6.3 transition() compile-time strip — `transition(<ident>)`
+  // calls have ZERO runtime semantics; this pass removes them entirely. Must
+  // run BEFORE rewriteReactiveRefs so the bare-ident arg isn't rewritten.
+  (s, _ctx) => rewriteTransitionCalls(s),
   // Pass 9.7: §51.14 replay primitive — rewrite `replay(@target, @log[, n])` →
   // `_scrml_replay("target", _scrml_reactive_get("log"), n?)`. MUST run
   // before rewriteReactiveRefs so the first @-ref is still literal at
@@ -2057,6 +2099,10 @@ const serverPasses: RewritePass[] = [
   (s, _ctx) => rewriteEnumToEnum(s),
   // Pass 6.5: early struct construction strip (same reason as client pass 9.5)
   (s, _ctx) => rewriteStructConstruction(s),
+  // Pass 6.7: §14.12.6.3 transition() compile-time strip — same purpose as
+  // the client-side rewriteTransitionCalls (must run BEFORE the reactive-ref
+  // rewrites to preserve the bare-ident arg match).
+  (s, _ctx) => rewriteTransitionCalls(s),
   // Pass 7: server-side reactive refs (different from client rewriteReactiveRefs)
   (s, _ctx) => rewriteServerReactiveRefs(s),
   // Pass 8: SQL with server dbVar
