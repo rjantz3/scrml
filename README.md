@@ -163,13 +163,13 @@ Now it's real: SQLite, server-backed, auth-gated, multi-device sync, with a load
 ```scrml
 <program>
 
-<db src="tasks.db">
+<db src="tasks.db" protect="passwordHash" tables="users">
 
 <schema>
     users {
         id:           integer primary key
         email:        text req email
-        passwordHash: (not to string) protect
+        passwordHash: (not to string)
     }
     tasks {
         id:           integer primary key
@@ -213,7 +213,7 @@ ${
     }
 }
 
-<user server>: User = @session.user
+<user>: User = not        // populated from the session token at boot; see `scrml:auth.verifyJwt` for the canonical flow
 
 <channel name="tasks" topic="user-${@user.id}">
     <tasks> = []
@@ -307,9 +307,9 @@ What the compiler did that you did NOT write:
 
 - **Route handlers** for `loadTasks` / `createTask` / `toggle`. They touch SQL, so the compiler classified them server-side — and generated the routes, the client-side `fetch` calls, the CSRF tokens, parameterized queries, and serialization. You call them like local functions because in your source they ARE.
 - **The schema → DDL pipeline.** The `<schema>` block becomes both the `CREATE TABLE` statement on first run AND a diff on every subsequent compile. New columns? Migration emitted. Removed columns? Surfaced for review.
-- **Server-side pinning.** `<user server>: User = @session.user` declares a reactive cell that lives **only** on the server — the entire identity object never crosses to the browser. The `passwordHash` field is further marked `protect` in the schema, so the compiler also strips it from the type the client sees: even server-fn responses that include a user row will have the field excluded. Reading `@user.passwordHash` on the client is a compile error.
+- **Field-level data isolation.** `<db src="tasks.db" protect="passwordHash" tables="users">` tells the compiler that `passwordHash` is server-only — the compiler strips the field from the type the client sees, so server-fn responses that include a user row exclude the field, and reading `@user.passwordHash` on the client is a compile error (`E-PROTECT-001`).
 - **The WebSocket plumbing.** `<channel name="tasks" topic="user-${@user.id}">` emits the Bun upgrade route, a client-side reconnect manager, and pub/sub routing. State declared inside the channel body (`<tasks> = []`) auto-syncs across every connected device subscribed to the same topic.
-- **Per-role chunk splitting.** `<auth role="User">` tells the compiler that anonymous visitors will never reach this subtree. They get a strictly smaller initial bundle — the components and server functions inside the gate aren't downloaded for them. The auth gate also lets the server-fn functions trust `@user` is some without per-call presence checks — the `Unauthorized` error variant collapses to a single `Network` variant on `LoadError`.
+- **Per-role chunk splitting.** `<auth role="User">` tells the compiler that anonymous visitors will never reach this subtree. They get a strictly smaller initial bundle — the components and server functions inside the gate aren't downloaded for them at all. The project's auth flow populates `<user>` from the session token at boot (the canonical recipe lives at `scrml:auth.verifyJwt` — see §11.2); the server functions inside the gate reference `@user.id` directly because by the time they run, the gate's role predicate has matched.
 - **The validity surface.** `<newTask req length(>=1)> = <input/>` produces `@newTask.isValid` / `.errors` / `.touched` as reactive read-only cells. `<errors of=@newTask/>` renders them at the right time. The SAME predicates fire on the server boundary, in the HTML form attributes the compiler emits (`required minlength="1"`), and in the database CHECK constraints.
 - **The lifecycle gate.** `completed_at: (not to timestamp)` means the column starts unset and transitions when a value is written. Reads of `t.completed_at` are checked per-access — before the row has been completed, the read is `not`, and the compiler refuses to treat it as a timestamp. The compiler tracks the transition state symbolically. Zero runtime cost.
 - **The engine's exhaustiveness check.** Adding a seventh variant to `Phase` forces the compiler to demand a UI block + a transition source for it. You cannot ship a state with no UI.
@@ -476,6 +476,16 @@ Because the name carries the type, runtime `reflect()` can recover the full type
 
 This isn't bundler-style single-letter renaming — the names are longer than `a`, `b`, `c`. The wins are different: collision-free across scopes, type-introspectable at runtime, and protected fields can never leak into a client-side encoded name (the client schema view excludes them by construction, verified again at emit).
 
+### The Build Story
+
+> *Nominal — scrml's compiler model as designed. Specified in [SPEC §58](compiler/SPEC.md); compiler implementation pending. `*` marks a claim not yet actual.*
+
+scrml's compiler has a build story. Compilation is a pure function of two inputs — your source and an explicit, committed **build story** that pins what "the compiler" is: a content-addressed Merkle closure over the compiler-proper's four components — compiler source, language tools, the standard library, and any vendored edge code — one root hash with the dependency edges between them *inside* the hash, plus a human-inspectable `build-story.lock` sidecar. Because every part — the compiler included — is identified by the hash of its content, customizing the compiler to your project and reproducing any build bit-for-bit\* stop being in tension: a tuned compiler is just a different pinned build story, and "pinned" is what makes it portable.
+
+A build story can be pinned per `<program>` — `<program story="…">`\* — and because nested `<program>` contexts are already isolated, shared-nothing compilation units, different parts of one application can be built by different compilers, each independently reproducible. This is deliberately not a live or hot-swappable compiler: every build story is static, read once before parsing begins; only *authorship* is customizable, never the running compile.
+
+<sub>\* The bit-for-bit guarantee requires a whole-compiler determinism audit not yet done. The build-story artifact and the `<program story=>` attribute are specified in SPEC §58 but not yet implemented in the compiler.</sub>
+
 ### Server/Client
 
 - **Auto-split via whole-program inference.** The compiler walks the call graph and infers what runs where. Functions that touch SQL, `protect=` fields, `Bun.*` APIs, `process.*`, `scrml:auth`/`scrml:crypto`/`scrml:fs`/`scrml:store`/`scrml:redis`/`scrml:cron`/`scrml:oauth` (server-only stdlib modules) are classified server-side automatically. Caller-context propagates the classification through transitive call chains (Insight 26 Trigger 5). The `server` keyword still parses but is redundant when inference can prove server-classification — `W-DEPRECATED-SERVER-MODIFIER` fires at redundant uses; `W → E → parser-strip` deprecation cycle follows `<machine>` precedent and lands in v0.3.0. **Dead, never-called functions are warned (`W-DEAD-FUNCTION`) and tree-shaken.**
@@ -560,16 +570,6 @@ A short selection of silent-failure classes closed in v0.6.x:
 - **Default-logic body-top writes surface loudly** — bare `@x = expr` at `<program>` body top fires `E-WRITE-NOT-IN-LOGIC-CONTEXT` instead of silently no-op'ing (Bug Q via S123 Unit CC).
 
 The compiler is actively hardening; see [`docs/changelog.md`](./docs/changelog.md) for the full landing log.
-
-### The Build Story
-
-> *Nominal — scrml's compiler model as designed. Specified in [SPEC §58](compiler/SPEC.md); compiler implementation pending. `*` marks a claim not yet actual.*
-
-scrml's compiler has a build story. Compilation is a pure function of two inputs — your source and an explicit, committed **build story** that pins what "the compiler" is: a content-addressed Merkle closure over the compiler-proper's four components — compiler source, language tools, the standard library, and any vendored edge code — one root hash with the dependency edges between them *inside* the hash, plus a human-inspectable `build-story.lock` sidecar. Because every part — the compiler included — is identified by the hash of its content, customizing the compiler to your project and reproducing any build bit-for-bit\* stop being in tension: a tuned compiler is just a different pinned build story, and "pinned" is what makes it portable.
-
-A build story can be pinned per `<program>` — `<program story="…">`\* — and because nested `<program>` contexts are already isolated, shared-nothing compilation units, different parts of one application can be built by different compilers, each independently reproducible. This is deliberately not a live or hot-swappable compiler: every build story is static, read once before parsing begins; only *authorship* is customizable, never the running compile.
-
-<sub>\* The bit-for-bit guarantee requires a whole-compiler determinism audit not yet done. The build-story artifact and the `<program story=>` attribute are specified in SPEC §58 but not yet implemented in the compiler.</sub>
 
 ## Language Contexts
 
