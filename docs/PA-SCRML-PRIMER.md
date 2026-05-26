@@ -331,6 +331,106 @@ type Contact:struct = { id: string, name: string, email: string }
 
 ---
 
+## §6.4 Producing markup from logic — the one-shot-lift idioms
+
+**Added 2026-05-26 (S132 — folds in the `one-shot-lift-ergonomics-2026-05-26` DD idiom catalog (HU-Q2). The DD asked whether a new `$(param){…}` shorthand was needed for "one-shot parameterized logic that lifts markup"; the verdict was MOSTLY-(A): scrml already expresses every sub-shape with existing primitives, so no new sigil was added. This subsection is the canonical "how scrml produces markup from logic" reference. The companion §10.4 staleness fix shipped the same session.)**
+
+> **The teachable rule (read this first).** *`lift` lives only in anonymous `${}` blocks. A function that produces markup `return`s it — it never `lift`s. To name a reusable markup value, use `const <x> = <markup>` (reactive) or a `snippet` prop (parameterized). To branch inline, use a ternary or `if=`.*
+
+**The anchor fact — the reflex shape does NOT compile.** The pattern your training-data muscle memory reaches for — *"declare a one-shot named function inside a `${}` block and `lift` markup out of it"* — is rejected by the compiler:
+
+```scrml
+<ul>${
+    function buildRows(items) {           // ← a bare `function`
+        for (item of items) {
+            lift <li>${item.name}</li>    // ← Error E-SYNTAX-002
+        }
+    }
+    buildRows(@contacts)
+}</ul>
+```
+
+> `E-SYNTAX-002`: `lift` is not valid inside a standard `function` body. A `function` returns markup as a value; the caller lifts the returned value, or you refactor into a component.
+
+This is **why the shape always felt like ceremony** — its lift-bearing form is forbidden outright. There is nothing to "simplify": the construct never existed. (A `fn` body — distinct from a bare `function` — *does* permit `lift` to its local `~`, returned via `return ~`; see §48.5 and the corrected §10.4. But you rarely need even that — the five idioms below cover the real cases.)
+
+**The five sub-shapes.** "One-shot parameterized logic that produces markup in child/logic-block position" decomposes into five cases; none needs the forbidden shape. Each example below compiles against the live compiler.
+
+**(1) Iteration → `<each>` (Tier 1) or `${ for … lift }` (Tier 0).** Rendering a collection is the original motivating case, and §6.3 already ate it. Reach for the structural `<each>`:
+
+```scrml
+type Contact:struct = { id: string, name: string }
+<contacts>: Contact[] = []
+
+<ul>
+    <each in=@contacts key=@.id>
+        <li : @.name>
+        <empty>No contacts yet.</>
+    </each>
+</ul>
+```
+
+The Tier-0 logic form stays valid and compiles cleanly (`W-EACH-PROMOTABLE` nudges the lift): `<ul>${ for (c of @contacts) { lift <li>${c.name}</li> } }</ul>`.
+
+**(2) Conditional / branch → ternary, `if=`, or a named `const`.** Pick by complexity. Inline single-use → ternary markup-as-value:
+
+```scrml
+<div>${ @user.admin ? <span>Admin</span> : <span>User</span> }</div>
+```
+
+Show-or-hide a single element → the `if=` attribute: `<span if=@user.admin>Admin</span>`. Name it / reuse it / make it reactive → a markup-typed derived cell (§6.6.17):
+
+```scrml
+const <badge> = @user.admin ? <span>Admin</span> : <span>User</span>
+<div>${@badge}</div>
+```
+
+**(3) Computed value → markup → a derived cell, then interpolate.** When the markup is "some text built from an expression," compute the value first and interpolate it — no block, no lift:
+
+```scrml
+<price> = 19.99
+const <formatted> = "$" + @price.toFixed(2)
+<strong>${@formatted}</strong>
+```
+
+(Or inline it where it's used once — `<strong>${"$" + @price.toFixed(2)}</strong>` — via §7.4.2 inline interpolation.)
+
+**(4) One-shot helper that feeds markup → `fn name(args) -> T { return … }`, then `${ name(args) }`.** This is the canonical existing idiom — it's all over the corpus (e.g. trucking-dispatch `messages.scrml` `fn senderLabel(role, email) -> string`). A `fn` does pure computation and `return`s a value; the markup interpolates the call:
+
+```scrml
+${
+    fn senderLabel(role, email) -> string {
+        return role == "driver" ? "Driver" : email
+    }
+    lift <span>${senderLabel(@role, @email)}</span>
+}
+```
+
+**(5) Parameterized markup fragment reused across call sites → a `snippet` prop (§14.9) + `render` + a `{ (p) => <markup> }` lambda (§16.6).** This IS scrml's "named parameterized markup fragment." Declare the slot as a parametric `snippet` on a component, `render` it in the body, and fill it with a lambda at the call site:
+
+```scrml
+const Field = <div props={
+    label: string,
+    control: snippet(name: string)
+}>
+    <label>${label}</label>
+    ${render control(label)}
+</div>
+
+<userName> = "Ada"
+
+<Field
+    label=@userName
+    control={ (n) => <strong>${n}</strong> }
+/>
+```
+
+**Why this is the whole answer (cross-framework).** The consensus across Svelte 5 (`{#snippet}` + `{@render}`), SolidJS (helper-fn-returns-JSX vs component), React (ternary vs render-prop), and Vue 3 (ternary-for-simple, computed-for-complex) is exactly scrml's existing family: ternary for simple branches, derived `const` for computed values, a `fn`-returns-value for helpers, a parametric `snippet` for reused fragments. scrml is not missing a member — there was never a residual for a `$(param){}` shorthand to fill.
+
+**Cross-references:** §10.4 (the corrected `lift`-in-`function`-vs-`fn` rule), §48.5 (`lift` inside `fn`), §14.9 (`snippet` type) + §16.6 (parametric snippet lambda at the call site), §6.6.17 (markup-typed derived cell), §17.7 (`<each>`) + §6.3 (the iteration subsection), §7.4.2 (inline interpolation).
+
+---
+
 ## §7 Engines (Tier 2) — the centerpiece (§51)
 
 Engines are the v0.next centerpiece. Singleton-by-design (one declaration mounts the singleton; cross-file mount via `<EngineName/>`). Components are the multi-instance vehicle (Move 20 — components and engines are distinct, do not collapse).

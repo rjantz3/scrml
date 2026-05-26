@@ -6432,14 +6432,19 @@ Both forms are equivalent. The chain form appends the argument to the `lift` acc
 
 ### 10.4 Valid Use Sites for `lift`
 
-`lift` is valid ONLY in anonymous logic contexts — that is, bare `${ }` blocks that are not the body of a named function declaration.
+`lift` is valid in anonymous logic contexts — that is, bare `${ }` blocks — and, with a scope restriction, inside `fn` bodies. It is NOT valid inside a bare `function` body.
 
-Named function forms (`function name() { ... }` and `fn name { ... }`) are NOT valid lift sites. A named function returns markup as a return value. The caller is responsible for lifting the returned value if needed. This restriction exists because named functions may be called from any context; there is no statically knowable parent context into which a `lift` inside a named function could accumulate.
+A bare `function name() { ... }` form is NOT a valid lift site. A `function` returns markup as a return value; the caller is responsible for lifting the returned value if needed. This restriction exists because a `function` may be called from any context, so there is no statically knowable parent context into which a `lift` inside it could accumulate.
+
+A `fn name(...) { ... }` body, by contrast, **does** permit `lift`: it accumulates into a `~` accumulator local to the `fn` body, which the `fn` then returns explicitly with `return ~`. This is the subject of §48.5 (`lift` Inside `fn`) — `lift` inside a `fn` hoists to the `fn`-body scope only, never past the `fn` boundary (E-FN-008). E-SYNTAX-002 therefore fires on a bare `function` body, **not** on a `fn` body. See §48.5 and §48.6.
+
+> **S132 amendment (2026-05-26).** The prior wording of this section asserted that `lift` inside *both* `function name() {}` and `fn name {}` is E-SYNTAX-002. That was stale: §48.5 (added later) permits `lift` inside a `fn` body, and the compiler implements §48.5 — E-SYNTAX-002 fires on a bare `function` body only. The normative text, bullets, and worked examples are corrected here to scope E-SYNTAX-002 to bare `function` and to cross-ref §48.5/§48.6. The parallel stale claims in §49.6.2, §49.7, and §49.12.1 (each citing this section) are corrected in the same amendment. Ratified S132 (HU-Q3), `one-shot-lift-ergonomics-2026-05-26` DD §1 of the two-tangential-findings list. §48.5 itself was already correct and is unchanged.
 
 **Normative statements:**
 
-- `lift` SHALL be valid only inside an anonymous `${ }` logic context (including the arm bodies of an if-as-expression, which are anonymous `${}` contexts).
-- `lift` inside a named function (`function name() { ... }` or `fn name { ... }`) SHALL be a compile error (E-SYNTAX-002).
+- `lift` SHALL be valid inside an anonymous `${ }` logic context (including the arm bodies of an if-as-expression, which are anonymous `${}` contexts).
+- `lift` SHALL also be valid inside a `fn` body, where it accumulates into the `fn` body's local `~` (§48.5); the `fn` returns the accumulated value with `return ~`. A `lift` inside a `fn` that targets a `~` initialized outside the `fn` boundary SHALL be E-FN-008 (§48.5.2).
+- `lift` inside a bare `function name() { ... }` body SHALL be a compile error (E-SYNTAX-002). E-SYNTAX-002 is scoped to bare `function` bodies and SHALL NOT fire on a `fn` body (§48.5, §48.6).
 - In value-lift mode (§17.6), `lift` SHALL appear at most once on any execution path through an arm body. If a single arm body contains two or more reachable `lift` statements on the same execution path, the compiler SHALL emit E-LIFT-002.
 - In accumulation mode, `lift` MAY appear multiple times in a single logic block; each call appends one item. In value-lift mode, `lift` is a single-result designator, not an accumulator.
 - The compiler SHALL track all `lift` calls within a logic block and accumulate them into a typed array (accumulation mode only).
@@ -6459,7 +6464,7 @@ Named function forms (`function name() { ... }` and `fn name { ... }`) are NOT v
 </>
 ```
 
-**Worked example — invalid (`lift` inside named function):**
+**Worked example — invalid (`lift` inside a bare `function` body):**
 ```scrml
 <ul>${
     function buildRows(items) {
@@ -6470,7 +6475,21 @@ Named function forms (`function name() { ... }` and `fn name { ... }`) are NOT v
     buildRows(data);
 </>
 ```
-Error E-SYNTAX-002: `lift` is not valid inside a named function. Named functions return markup as a value. Restructure to return the element and lift the return value at the call site, or use an anonymous logic context.
+Error E-SYNTAX-002: `lift` is not valid inside a bare `function` body. A `function` returns markup as a value. Restructure to `return` the element and lift the return value at the call site, or use an anonymous logic context. (To accumulate-and-return from a named callable, use a `fn` body, which permits `lift` to its local `~` — §48.5.)
+
+**Worked example — valid (`lift` inside a `fn` body):**
+```scrml
+<ul>${
+    fn buildRows(items) {
+        for (item of items) {
+            lift <li>${item.name}</>;   // OK — accumulates into fn-body `~`
+        }
+        return ~;                       // fn returns the accumulated list
+    }
+    lift buildRows(data);               // caller lifts the returned value
+</>
+```
+`lift` inside a `fn` body accumulates into a `~` local to that body (§48.5); the `fn` returns it with `return ~`, and the caller lifts the returned value in the anonymous `${ }` context. E-SYNTAX-002 does NOT fire here.
 
 **Worked example — invalid (wrong closer):**
 ```scrml
@@ -22682,8 +22701,9 @@ of `~` is still required.
 - Each `lift` call inside a loop body SHALL append one value to the `~` accumulator of the
   enclosing anonymous logic context.
 
-- `lift` inside a loop body inside a named function (`function` or `fn`) SHALL be a compile
-  error (E-SYNTAX-002), consistent with §10.4.
+- `lift` inside a loop body inside a bare `function` SHALL be a compile error (E-SYNTAX-002),
+  consistent with §10.4. Inside a `fn` body the loop's `lift` accumulates into the `fn`-body
+  `~` (§48.5) and is valid; E-SYNTAX-002 does NOT fire on a `fn` (§10.4, §48.6).
 
 - The ordering guarantee of §10.5.1 applies: the accumulation order of `lift` is the runtime
   execution order. Values lifted from earlier iterations appear before values lifted from
@@ -22704,7 +22724,7 @@ calls (E-FN-004), and async/await (E-FN-005) are all forbidden.
 `break` and `continue` inside a `fn` body target only loops that are also inside the `fn`
 body (§49.4.3, E-LOOP-005).
 
-`lift` inside a `while` loop inside a `fn` body is E-SYNTAX-002, consistent with §10.4.
+`lift` inside a `while` loop inside a `fn` body accumulates into the `fn`-body `~` (§48.5) and is valid — it is NOT E-SYNTAX-002. E-SYNTAX-002 is scoped to bare `function` bodies (§10.4, §48.6). The same `lift` inside a `while` loop inside a bare `function` IS E-SYNTAX-002.
 
 ---
 
@@ -23075,8 +23095,9 @@ and consume `~` after the loop. See §49.6.
 
 `lift` inside `while` and `do...while` behaves identically to `lift` inside `for...of`.
 Values accumulate into the `~` accumulator of the enclosing anonymous logic context. The
-`lift` is not valid inside named functions (E-SYNTAX-002), which includes `fn` bodies (§48).
-See §49.6 for the complete specification.
+`lift` is not valid inside a bare `function` body (E-SYNTAX-002); inside a `fn` body it
+accumulates into the `fn`-body `~` and is valid (§48.5, §48.6). See §49.6 for the complete
+specification.
 
 ### 49.12.2 Interaction with §32 (`~`)
 

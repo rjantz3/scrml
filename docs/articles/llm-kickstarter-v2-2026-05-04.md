@@ -687,6 +687,7 @@ If your instinct from another framework fires, stop and use the scrml form. Thes
 | `{#each items as item}…{/each}` | Svelte | **`<each in=@items key=@.id>...</each>`** (Tier 1, §11.10) — `@.` is the current item; `<empty>` handles the zero-items case. The Tier-0 form `${ for (let item of @items) { lift <li>...</li> } }` also compiles (`W-EACH-PROMOTABLE` nudges the lift). |
 | `<for each= in=>` / `<if test=>` markup tags | (invented) | **The iteration tag is `<each>`, not `<for>`; there is no `<if>` tag.** Iterate with `<each in=@coll>...</each>` (Tier 1, §11.10) or `${ ... lift ... }` (Tier 0); branch with the `if=` attribute or `${ if (...) { lift ... } }`. |
 | `items.map(item => …)` in JSX | React | **`<each in=@items key=@.id>...</each>`** (Tier 1, §11.10). The Tier-0 `${ for (let item of @items) { lift <…> } }` form also compiles. |
+| `${ function name(p){ … lift <markup/> } }` — a one-shot named function that `lift`s markup | (training-data muscle memory) | **That does NOT compile — `E-SYNTAX-002` (`lift` is illegal in a bare `function` body).** A `function` `return`s markup; it never `lift`s. Use the idiom for your case (§11.11): iteration → `<each>` / `${for…lift}`; conditional → ternary / `if=` / `const <badge>`; computed → `const <x> = expr` + `${@x}`; helper → `fn name(p) -> T { return … }` + `${name(args)}`; reused fragment → `snippet` prop + `render` + `{ (p) => <markup> }`. |
 | `bind:value={x}` | Svelte | `bind:value=@x` (no braces; `@` sigil required because it is an expression-position read of state) |
 | `v-model="x"` | Vue | `bind:value=@x` |
 | `on:click={fn}`, `@click="fn"`, `onClick={fn}` | Svelte/Vue/React | `onclick=fn()` (bare call, parens included) |
@@ -1204,6 +1205,51 @@ Notes:
 - **Keep per-item element attributes simple.** Codegen handles `:`-shorthand and bare `${...}` bodies well; interpolation-bearing per-item ATTRIBUTES are best-effort in the current Landing — push dynamic values into the body expression rather than a complex attribute when you can.
 - **There is no `<for>` tag.** Iteration is `<each>` (Tier 1) or `${ for (...) { lift ... } }` (Tier 0). Branching is the `if=` attribute or `${ if (...) { lift ... } }` — there is no `<if>` tag either.
 - **Promotion.** If you already have a Tier-0 `${ for (let c of @contacts) { lift <li>${c.name}</li> } }` site, the compiler surfaces `W-EACH-PROMOTABLE` naming the `<each in=@contacts as c>...</each>` target. `bun scrml promote --each <file>[:line]` is the mechanical lift (SPEC §56.10) — but it is **Landing 3 PENDING**, so do the lift by hand for now. Both tiers compile cleanly; promotion is additive, never required.
+
+---
+
+### 11.11 Producing markup from logic — the one-shot-lift idioms
+
+**The rule:** *`lift` lives only in anonymous `${}` blocks. A function that produces markup `return`s it — it never `lift`s. To name a reusable markup value, use `const <x> = <markup>` (reactive) or a `snippet` prop (parameterized). To branch inline, use a ternary or `if=`.*
+
+Your strongest reflex here is wrong: *"declare a one-shot named function inside `${}` and `lift` markup out of it."* **It does not compile** — `${ function name(p){ … lift <markup/> } }` is rejected with `E-SYNTAX-002` (`lift` is illegal inside a bare `function` body). A `function` `return`s markup; it never `lift`s. (A `fn` body — distinct from a bare `function` — does permit `lift` to its local `~`, returned via `return ~`; but the five idioms below usually mean you don't need even that.)
+
+"One-shot parameterized logic that emits markup" decomposes into five cases — match yours and use the existing form:
+
+| Your case | Use this | Section |
+|---|---|---|
+| Render a list / collection | `<each in=@items key=@.id>…<empty>…</empty></each>` (Tier 1); `${ for (x of @items) { lift <…/> } }` also compiles (Tier 0) | §11.10 |
+| Branch inline, single use | ternary markup-as-value: `${ @cond ? <a/> : <b/> }` | §6 |
+| Show / hide one element | `if=` attribute: `<span if=@cond>…</span>` | §7 table |
+| Name / reuse / make-reactive a branch | markup-typed derived: `const <badge> = @cond ? <a/> : <b/>` then `${@badge}` | §3.1 |
+| Build text from an expression | derived cell: `const <fmt> = "$" + @price.toFixed(2)` then `${@fmt}` (or inline `${expr}`) | §3.1 |
+| One-shot helper that feeds markup | `fn name(args) -> T { return … }` then `${ name(args) }` | §4.6, §12 |
+| Parameterized fragment reused 2–3× | `snippet`-typed prop + `render` + `{ (p) => <markup> }` lambda at the call site | §12 |
+
+A compiled example of the helper form (case 4) and the parameterized-fragment form (case 5):
+
+```scrml
+${
+    fn senderLabel(role, email) -> string {
+        return role == "driver" ? "Driver" : email
+    }
+    lift <span>${senderLabel(@role, @email)}</span>
+}
+```
+
+```scrml
+const Field = <div props={
+    label: string,
+    control: snippet(name: string)
+}>
+    <label>${label}</label>
+    ${render control(label)}
+</div>
+
+<Field label="Name" control={ (n) => <strong>${n}</strong> } />
+```
+
+There is no `$(param){}` shorthand and you do not need one — the consensus across Svelte / Solid / React / Vue (ternary-for-simple, derived-for-computed, helper-fn-for-logic, snippet-for-parameterized) is exactly this family.
 
 ---
 
