@@ -1,4 +1,4 @@
-# scrmlTS — Session 134 (OPEN)
+# scrmlTS — Session 134 (CLOSE)
 
 **Date:** 2026-05-26
 **Previous:** `handOffs/hand-off-136.md` (S133 CLOSE — Bug 12 / DD workflow audit / v0.6.1 release / E-SCHEMA-003 enforce / META_BUILTINS narrow / Bug 17 banked / positioning cascade).
@@ -166,28 +166,99 @@ Full arc landed in S134. HU `docs/heads-up/const-deep-freeze-2026-05-26.md` (sta
 3. **DD Rec #14 (BRIEF.md archival)** — operationalize going forward? Adds ~30s per dispatch; closes the measurement gap. Adopt or defer.
 4. **Stale `handOffs/incoming/dist/`** (2026-04-22 pre-S43 bugI repros) — archive or leave? Not blocking.
 
-## State as of MID-SESSION (post-Fire #1)
+## ✅ STATE AS OF S134 CLOSE
 
 | Item | Value |
 |---|---|
-| HEAD scrmlTS | `ff2b4955` (Fire #1 landed; NOT pushed yet — surfacing push decision to user) |
-| HEAD scrml-support | `9c41cad` (unchanged from S133 close) |
-| scrmlTS push state | **ahead origin/main by 2 commits** (Fire #1 + known-gaps update) — push-pending |
-| pkg.json | 0.6.1 (no change) |
-| Tests | 21,618 pass / 0 fail / 170 skip / 1 todo / 795 files (full-suite gate post-Fire #1) |
-| Worktrees | `worktree-agent-ac6ac78136357f89c` retained per S83 (cleanup at wrap) |
-| Inbox | empty |
-| S99 path-discipline counter | 17 (advanced 16 → 17 on Fire #1; zero leaks) |
-| PA auto-memory | 41 rule files; status: current as of 2026-05-26 |
-| Maps watermark | `c2d3f7ae` (still stale; Fire #1 touched `meta-checker.ts` — refresh before next compiler-source dispatch OR pin to explicit post-watermark list in brief) |
+| HEAD scrmlTS | `fd58893e` (B-prereq LANDED) + wrap-docs commit pending |
+| HEAD scrml-support | `9c41cad` + DD landing earlier in S134 session pushed; verify at wrap |
+| scrmlTS push state | (verify at wrap; all S134 work either already pushed at milestones or pending the wrap-push) |
+| pkg.json | 0.6.1 (unchanged from S133) |
+| Tests | **21,701 pass / 0 fail / 170 skip / 1 todo / 798 files** (+116 from S133 baseline 21,585; 0 regressions) |
+| Worktrees | TBD post-wrap cleanup — 5 S134 worktrees to clean (Bug 17, Iter L3, A4, Q6 STOP, B-prereq) |
+| Inbox | empty (one stale `dist/` dir from 2026-04-22 — pre-S43 vintage; not actionable) |
+| S99 path-discipline counter | 20 (advanced 16 → 20 across 4 compiler-source dispatches: Bug 17 +1, A4 +1, Q6 STOP +0, B-prereq +1; zero leaks) |
+| PA auto-memory | 41 rule files; all carry `status: current` + `last-reviewed: 2026-05-26` per S133 sweep |
+| Maps watermark | `c2d3f7ae` (S132). STALE for S135 compiler-source dispatches — S134 landed 2 substantial type-system extensions + 1 symbol-table extension. **Refresh `project-mapper` before next compiler-source dispatch.** |
 
-## S133 memory rules banked (cross-session reminders)
+## S134 commit ledger
+
+**scrmlTS (substantive landings, all PUSHED at milestones):**
+| SHA | Fire | Subject |
+|---|---|---|
+| `6c6c0073` | #1 | Bug 17 (a) — E-META-001 extends to runtime `^{}` (Approach A; new `JS_HOST_FORBIDDEN` walker; +33 tests) |
+| `ff2b4955` | #1 docs | known-gaps Bug 17 → RESOLVED |
+| `406c260e` | #2 | Lifecycle Landing 3 — PRIMER §6.5 + kickstarter §3.2 + anti-patterns (F-023 closed) |
+| `95fd7e69` | polish | meta.runtime=false diagnostic gets §22.5 / §22.7 §-anchor |
+| `7ef130e1` | README | Today's Tasks tier journey + benchmarks-out + Terms glossary + V5-strict label dropped |
+| `6d69fa04` | README | Known limitations and gaps section |
+| `b150e519` | README | Stage 3 fixes — protect= + `<user server>` + `~{}` inline test |
+| (spec-align) | README | spec-alignment fixes (protect on `<db>` opener not schema column; user-as-state) |
+| `cbc7f24d` | README | dev-note move to right above Stage 3 (content intact) |
+| `1650c385` | README | dev-note heading "developer" → "dev" |
+| `41687253` | Iter L3 | `bun scrml promote --each` CLI per SPEC §56.10 (33 tests) |
+| `8fffdeed` | const-deep-freeze | ratification block + HU/known-gaps/hand-off update |
+| `b719a3d2` | A4 | L21 walker alias-tracking extension (+659L symbol-table.ts +476L tests; 25 tests) |
+| `e99f6763` | Q6 SPEC | §6.8.3 NEW + §14.12.10 cross-ref + Bug 19 NEW HIGH + Q6 progress.md forensic |
+| `fd58893e` | B-prereq | Shape 1 lifecycle tracker (+671L type-system.ts +621L tests; 25 tests; Bug 19 RESOLVED) |
+| (this wrap) | S134 close | hand-off + master-list §0.6 + changelog + known-gaps Bug 19 RESOLVED |
+
+**scrml-support (1 substantive landing):**
+- DD `scrml-support/docs/deep-dives/const-deep-freeze-2026-05-26.md` (1296L; 5-expert synthesis; recommended debate; PUSHED at landing)
+
+## S134 Carry-forward (the next-session-ready dispatch queue)
+
+### TOP-OF-QUEUE: Q6-narrow impl (UNBLOCKED by B-prereq)
+
+**Where:** SPEC §6.8.3 specifies the symmetric-reset semantic; B-prereq tracker observes writes uniformly via `checkLifecycleBindingAccess` + the new state-decl recognition. Q6-narrow extends the walker to recognize reset-path writes + routes through `classifyWriteAgainstSpec` to revert per-access state.
+
+**Brief shape:**
+- Read SPEC §6.8.3 in full
+- Read `compiler/src/type-system.ts` post-B-prereq state (around `checkLifecycleBindingAccess` + `classifyWriteAgainstSpec`)
+- Identify where the walker observes writes; add reset-write recognition
+- Verify behavior across 3 sub-cases: presence-progression `(not to T)` reset to `not` → reverts to pre; variant-progression `(.A to .B)` reset to `.A` → reverts to pre; reset to post-type-shaped value → stays post
+- ~10-20h via `scrml-js-codegen-engineer` (isolation:worktree)
+
+### Other S135 candidates (per priority)
+
+- **A5 adoption-watch** — if ≥2 adopter reports of JS-host boundary mutation surface, re-open A5 (refinement-type freeze extension) dispatch. Per ratified design rule.
+- **B-prereq orthogonal deferred limitations** (3 small follow-ups, all surfaced in `docs/changes/b-prereq-shape1-lifecycle-tracker-2026-05-26/progress.md`):
+  1. Tokenizer whitespace around `.` in lifecycle annotations (`(.Draft to .Published)` → `(.Draft to.Published)` at AST level)
+  2. Top-level `let-decl` inside `${...}` blocks doesn't fire the new tracker (pre-existing gap; state-decls hoist, let-decls don't)
+  3. Qualified-enum form `(Article.Draft to Article.Published)` variant-name stripping
+- **C-deferred surfaces** (S133 carry-forward): `W-LOGIC-MARKUP-SWALLOWED` candidate + E-SCHEMA-001/002 extension to `checkSchemaPlacement`
+- **DD Rec #7** — S115 frontmatter on 58 unadopted older deep-dives (~3-4h)
+- **DD Rec #14** — post-dispatch BRIEF.md archival to `docs/changes/<id>/BRIEF.md` (~30s/dispatch)
+- **DD Rec #15** — run a gauntlet round (no gauntlets since 2026-04-26)
+- **Phase-1c clusters H-N** (HU-6 ratified S131; BG-fireable, multi-cluster)
+- **Maps refresh** — `project-mapper` watermark stale (`c2d3f7ae` S132). Refresh before next compiler-source dispatch.
+
+## Open questions to surface immediately at S135 OPEN
+
+1. **Fire Q6-narrow** — paste-ready brief in HU + this hand-off carry-forward. Or pick a different priority.
+2. **Maps refresh** — recommended before any compiler-source dispatch. Adopt as session-open ritual or only when load-bearing.
+3. **A5 adoption-watch** — no action; just standing as long as the trigger doesn't fire.
+
+## S134 memory rules banked / reinforced (cross-session reminders)
+
+- `feedback_cookbook_vs_empirical` (S124 banked; S130/S133 prior, S134 third in a row) — REINFORCED. Q6 brief assumed Shape 1 tracker existed; empirical reproducer-verify (`<state>: (not to User) = not; @state.name` — no fire) caught it. Three Phase-0 STOPs across three sessions all rooted in cookbook-derived briefs. Rule has earned permanent keep.
+- **Design-rule banked (from debate insight, `~/.claude/design-insights.md`):** "When a language already has a mechanism that tracks value provenance across trust zones for other constraint types, adding a new constraint that needs the same trust-zone awareness should extend that mechanism rather than introduce a parallel runtime modifier." Governs future "modifier vs refinement-extension" disputes.
+
+## Methodology lessons of the session
+
+1. **HU → DD → Debate → Ratification → Impl is the canonical heavyweight design loop.** S134 ran the full thing end-to-end on const-deep-freeze in one session. Each phase landed cleanly; each phase's output fed the next. The judge's "no scorecard; sequenced verdict instead" was the right call — 2-2 split + security's reframe meant winner-picking would have lost information.
+2. **Phase-0 STOP is the load-bearing dev-agent discipline.** Q6 STOP correctly halted before any code edit; surfaced the actual gap (Bug 19 — Shape 1 tracker missing) instead of producing a partial-correctness landing. The cookbook-vs-empirical rule applies AT BRIEF TIME — PA must not assume; agent must verify.
+3. **Adoption-threshold deferral works.** A5 (refinement-type freeze extension) didn't ship — but it has a watch-trigger condition + the design rule is settled + B-prereq's tracker provides the substrate. When/if adopter friction surfaces, the dispatch is straightforward.
+4. **PA-direct landings between agent dispatches.** Q6 SPEC was small enough for PA-direct (no agent needed); B-prereq, A4, Bug 17 (a), Iter L3 needed agents. Don't dispatch when the work is bounded + PA can author cleanly.
+5. **Push-auth discipline (incident + recovery).** PA rolled push into commit chain at one point ("wait. i didnt say push" intervention); cleanly recovered via `TaskStop` on the in-flight pre-push gate. Reinforces: "Confirm with the user before any push" — even when the session has had several authorized pushes already, each new push is its own auth.
+
+## S133 memory rules (cross-session reminders, preserved)
 
 - [[feedback_spelling_typo_flag]] — 1-liner format `typo | corrected?` / `word ~> meant?` for surface-English mistakes (extends Rule 5 shoot-straight)
-- [[feedback_verify_before_claim]] — `find`/`ls`/`grep` before claiming non-existence; S132 BRIEFING-ANTI-PATTERNS myth was caught here
-- [[feedback_restate_prerequisites_not_conclusions]] — deferred-work brief authoring: restate the prereq list, never copy intermediate conclusions as starting facts (S130+S133 back-to-back partial-correctness Phase-0 STOPs)
+- [[feedback_verify_before_claim]] — `find`/`ls`/`grep` before claiming non-existence
+- [[feedback_restate_prerequisites_not_conclusions]] — deferred-work brief authoring: restate the prereq list
 
 ---
 
 ## Tags
-#session-134 #OPEN #bug-17-ready-to-fire
+#session-134 #CLOSE #const-deep-freeze-arc-complete #q6-narrow-unblocked #a5-adoption-watch
