@@ -58,6 +58,19 @@ mkdir -p /home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/gauntlet-r2
 All 4 persona files must exist. BRIEF.md must exist. Both required-read files
 must exist. `bun` must be available.
 
+**Also verify persona auto-resolution at YOUR session start.** Claude Code's
+harness caches `.claude/agents/` definitions when a session opens. The 4
+personas (`scrml-dev-react`, `scrml-dev-go`, `scrml-dev-svelte`, `scrml-dev-pascal`)
+MUST appear in your available-agents list. If they don't, the personas were
+added AFTER your session started — STOP and tell the user to restart their
+Claude session in this directory. The gauntlet cannot proceed without
+persona resolution.
+
+You can verify by trying a 1-shot resolution ping (no work, just check the
+agent type resolves) BEFORE the full 4-dev parallel dispatch. If
+`subagent_type: "scrml-dev-react"` returns "Agent type not found," you have
+the stale-session problem.
+
 ---
 
 ## Step 2 — Dispatch 4 devs in PARALLEL (one message, 4 Agent calls)
