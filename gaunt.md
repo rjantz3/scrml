@@ -1,7 +1,7 @@
-# gaunt.md — R24 gauntlet runner (fresh-Claude entry point)
+# gaunt.md — gauntlet runner (fresh-Claude entry point)
 
 **You are a FRESH Claude instance in the scrmlTS repo. You have just been told
-"read gaunt.md."** You are the **gauntlet-r24 runner** — an orchestrator that
+"read gaunt.md."** You are the **gauntlet runner** — an orchestrator that
 spawns dev-agent personas in parallel, overseers their output, and writes a
 round report.
 
@@ -14,29 +14,35 @@ scope.
 **DO read these (in order) to know what to do:**
 
 1. This file (`gaunt.md`) — your runbook.
-2. `/home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/gauntlet-r24/BRIEF.md`
-   — the shared dev brief. You will reference its path in dispatch prompts; you do
-   NOT need to read it in full yourself (the devs read it). You SHOULD skim its
-   top section so you understand what the round is testing — but not in full.
+2. The current round's `BRIEF.md` — the shared dev brief. Path under
+   §"Round identity" below. You will reference its path in dispatch prompts;
+   you do NOT need to read it in full yourself (the devs read it). You SHOULD
+   skim its top section so you understand what the round is testing.
 
 That's it. ~2 reads.
+
+**Prior-round context (recoverable in 30 sec if you need it):**
+- Most recent completed round + findings: `scrml-support/docs/gauntlets/gauntlet-r{N}-report.md` (look at the latest sibling of `gauntlet-r{N}/` dirs).
+- R24 (2026-05-27) closed with canon-clear health YELLOW-drifting-RED + 8 compiler-bug candidates filed into `scrmlTS/docs/known-gaps.md` Bugs 28-34 + R24-BUG-4 cross-ref.
 
 ---
 
 ## Round identity
 
-- **Round:** R24
-- **Date initiated:** 2026-05-27 (or whatever today is — date the report from the
-  current real-world date)
-- **Purpose:** DD Rec #15 — empirically test whether adopter dev agents reading
-  the post-S130 canon (Phase-1c cluster clear) write correct scrml on a substantive
-  app (Help-Desk Ticketing).
-- **Personas:** 4 — React, Go, Svelte, Pascal/multi-language pragmatist.
-- **Dispatch shape:** 4 devs in PARALLEL (single message, 4 Agent calls),
-  then 4 overseers in PARALLEL after all devs complete.
-- **Output dir:** `/home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/gauntlet-r24/`
-- **Report dir:** `/home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/`
-  (gauntlet-r24-report.md lands here, sibling to BRIEF.md's containing dir)
+**Active round:** R25 (Help-Desk Ticketing was R24 — done; R25's task is in the BRIEF.md at the path below.)
+
+- **Round number:** R25
+- **Date initiated:** date the report from the current real-world date
+- **Purpose:** see the BRIEF.md ("Round purpose" section at the top)
+- **Personas:** see the BRIEF.md ("Personas" section); default scrml-dev-{react,go,svelte,pascal} unless BRIEF.md overrides
+- **Dispatch shape:** N devs in PARALLEL (single message, N Agent calls),
+  then N overseers in PARALLEL after all devs complete
+- **Output dir:** `/home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/gauntlet-r25/`
+- **Report file:** `/home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/gauntlet-r25-report.md`
+- **BRIEF.md:** `/home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/gauntlet-r25/BRIEF.md`
+
+If the BRIEF.md path above doesn't exist, STOP and tell the user PA hasn't
+authored the R25 brief yet — runner can't proceed without it.
 
 ---
 
@@ -48,63 +54,86 @@ Run these checks (one Bash batch). If anything fails, STOP and report to user:
 cd /home/bryan-maclee/scrmlMaster/scrmlTS
 pwd
 ls -la .claude/agents/scrml-dev-{react,go,svelte,pascal}.md
-ls /home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/gauntlet-r24/BRIEF.md
+ls /home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/gauntlet-r25/BRIEF.md
 ls /home/bryan-maclee/scrmlMaster/scrmlTS/docs/articles/llm-kickstarter-v2-2026-05-04.md
 ls /home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/BRIEFING-ANTI-PATTERNS.md
 bun --version
-mkdir -p /home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/gauntlet-r24/dist
+mkdir -p /home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/gauntlet-r25/dist
 ```
 
-All 4 persona files must exist. BRIEF.md must exist. Both required-read files
-must exist. `bun` must be available.
+All persona files for the round must exist (check whatever personas the BRIEF.md
+names). BRIEF.md must exist. Both required-read files must exist. `bun` must
+be available.
 
 **Also verify persona auto-resolution at YOUR session start.** Claude Code's
-harness caches `.claude/agents/` definitions when a session opens. The 4
-personas (`scrml-dev-react`, `scrml-dev-go`, `scrml-dev-svelte`, `scrml-dev-pascal`)
-MUST appear in your available-agents list. If they don't, the personas were
-added AFTER your session started — STOP and tell the user to restart their
-Claude session in this directory. The gauntlet cannot proceed without
-persona resolution.
+harness caches `.claude/agents/` definitions when a session opens. The personas
+the BRIEF.md names MUST appear in your available-agents list. If they don't, the
+personas were added AFTER your session started — STOP and tell the user to
+restart their Claude session in this directory. The gauntlet cannot proceed
+without persona resolution.
 
 You can verify by trying a 1-shot resolution ping (no work, just check the
-agent type resolves) BEFORE the full 4-dev parallel dispatch. If
+agent type resolves) BEFORE the full N-dev parallel dispatch. If
 `subagent_type: "scrml-dev-react"` returns "Agent type not found," you have
 the stale-session problem.
 
 ---
 
-## Step 2 — Dispatch 4 devs in PARALLEL (one message, 4 Agent calls)
+## Step 2 — Dispatch N devs in PARALLEL (one message, N Agent calls)
 
-**CRITICAL:** put all 4 Agent calls in a SINGLE message so they run concurrently.
+**CRITICAL:** put all N Agent calls in a SINGLE message so they run concurrently.
 Use `run_in_background: true` on each so they don't block. Do NOT use
-`isolation: "worktree"` — gauntlet devs write into a sandbox dir under
-scrml-support, not into scrmlTS source, so no worktree isolation is needed.
+`isolation: "worktree"`.
+
+**CRITICAL DISPATCH-SHAPE CHANGE (S136 / R24-meta-finding):** background
+sub-agents may lack Write permission to the `scrml-support/` tree under the
+current allow-list. R24 saw 3 of 4 devs fail Write to the brief's mandated
+path. The runner is now the **single point of disk authority** for the final
+.scrml output:
+
+- **Devs iterate against `/tmp/`** for compile testing (filesystem-permissive).
+- **Devs RETURN their final scrml content in the result message**, wrapped in
+  unambiguous markers.
+- **Runner extracts the content** between markers and writes the final file
+  to the canonical path (`scrml-support/docs/gauntlets/gauntlet-r25/dev-<N>-<persona>.scrml`).
+- This sequence is independent of allow-list state on the dev side.
 
 The dispatch prompt for each dev is the same shape — only the persona-specific
 fields change:
 
 ```
-You are dev-<N>-<persona> in gauntlet R24.
+You are dev-<N>-<persona> in gauntlet R25.
 
 Your single shared assignment brief is at:
-  /home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/gauntlet-r24/BRIEF.md
+  /home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/gauntlet-r25/BRIEF.md
 
 Read it IN FULL. Then read the required-reads it lists IN FULL, IN ORDER:
   1. /home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/BRIEFING-ANTI-PATTERNS.md
   2. /home/bryan-maclee/scrmlMaster/scrmlTS/docs/articles/llm-kickstarter-v2-2026-05-04.md
-  3. /home/bryan-maclee/scrmlMaster/scrmlTS/docs/PA-SCRML-PRIMER.md (§6.2 + §6.3)
+  3. /home/bryan-maclee/scrmlMaster/scrmlTS/docs/PA-SCRML-PRIMER.md (sections the BRIEF.md identifies)
 
-Then write your output file:
-  /home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/gauntlet-r24/dev-<N>-<persona>.scrml
+DISPATCH-SHAPE NOTE (S136 hardening): you may NOT be able to Write into
+scrml-support/ from a sub-agent context. So:
 
-Compile per the brief's compile command. Iterate until it compiles OR the friction
-report explicitly explains the failure with the compiler diagnostic.
+  - Use `/tmp/dev-<N>-<persona>-iter-N.scrml` for your compile-test iterations.
+  - Use the BRIEF.md's compile command, BUT redirect `-o /tmp/dev-<N>-dist/`
+    for your iterations (not the gauntlet round's dist/).
+  - Iterate as needed. When done (PASS or stuck), return your FINAL content
+    inline in your result message using the exact markers below.
+  - DO NOT attempt to Write to scrml-support/docs/gauntlets/gauntlet-r25/.
+    The runner writes that file from your returned content.
 
-Append the friction-report HTML comment block at the END of your .scrml file
-per the format in BRIEF.md.
+Append the friction-report HTML comment block at the END of your scrml per
+the format in BRIEF.md.
 
-Your final report back to the runner should include:
-  - FINAL_PATH: <abspath to your .scrml>
+Final-result format — your reply message MUST contain this exact block, with
+nothing else allowed between the markers:
+
+===SCRML-START===
+<entire .scrml file content, including the friction-report HTML comment block>
+===SCRML-END===
+
+After the SCRML-END marker, include your summary:
   - COMPILE_STATUS: PASS | FAIL <error-code>
   - ITERATIONS_TO_PASS: <N>
   - FRICTION_ITEM_COUNT: <N>
@@ -112,192 +141,147 @@ Your final report back to the runner should include:
   - SELF_RATED_SCORE: <1-100, your honest estimate per the brief's rubric>
   - WOULD_USE_IT_SCORE: <1-10>
 
-Per the persona's authoring rule: NEVER invent scrml syntax. When uncertain, re-read
-the canon. The canon is the only authority.
+Per the persona's authoring rule: NEVER invent scrml syntax. When uncertain,
+re-read the canon. The canon is the only authority.
 ```
 
 For each dispatch, substitute:
-- `<N>` = 1, 2, 3, or 4
-- `<persona>` = react | go | svelte | pascal
-- `subagent_type` = scrml-dev-react | scrml-dev-go | scrml-dev-svelte | scrml-dev-pascal
+- `<N>` = 1, 2, 3, ...
+- `<persona>` = whichever persona BRIEF.md names for that dev slot
+- `subagent_type` = `scrml-dev-<persona>` (e.g., `scrml-dev-react`)
 
-Agent call shape (one example — replicate 4 times with above substitutions):
+Agent call shape (one example — replicate N times with above substitutions):
 
 ```
 Agent({
   subagent_type: "scrml-dev-react",
-  description: "R24 dev-1 React",
+  description: "R25 dev-1 React",
   prompt: <the prompt above with N=1 / persona=react>,
   run_in_background: true
 })
 ```
 
-**4 Agent calls, ONE message.** The runtime parallelizes them.
+**N Agent calls, ONE message.** The runtime parallelizes them.
+
+---
+
+## Step 2.5 — Extract content + write final files (runner-side)
+
+As each dev returns (notification arrives), do this BEFORE moving on:
+
+1. **Extract** the content between `===SCRML-START===` and `===SCRML-END===`
+   markers from the dev's result message. The extracted block IS the .scrml
+   file content verbatim.
+2. **Write** the extracted content to the canonical path:
+   `/home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/gauntlet-r25/dev-<N>-<persona>.scrml`
+3. **Record** the dev's summary fields (COMPILE_STATUS, ITERATIONS_TO_PASS, etc.)
+   for later aggregation.
+
+If a dev's result lacks the SCRML-START/SCRML-END markers (or the content
+between them is empty / malformed): re-dispatch ONCE with an explicit
+reminder of the marker requirement. If the second attempt also lacks
+markers, mark that dev FAILED-NO-CONTENT and continue with the others.
+
+If a dev returns marker-wrapped content that contains HTML entities (`&lt;`,
+`&gt;`, `&amp;`, `&quot;`, `&#39;`) — these are encoding-artifact from the
+result transport, NOT in the dev's source. Decode before writing:
+- `&lt;` → `<`
+- `&gt;` → `>`
+- `&amp;` → `&`
+- `&quot;` → `"`
+- `&#39;` → `'`
+
+The runner becomes the single point of disk authority — the dev never writes
+to the gauntlet output dir, only to /tmp.
 
 ---
 
 ## Step 3 — Monitor + wait for completion
 
-You will receive notifications as each background dev completes. Do not poll. When
-all 4 have completed, proceed to Step 4. If any dev crashes (API error / OOM /
-timeout):
+You will receive notifications as each background dev completes. Do not poll.
+For each completion, execute Step 2.5 (extract + write). When ALL N have
+completed (and you've written their files), proceed to Step 4.
 
-- Read the partial output dir to see what they wrote.
-- If a partial .scrml exists with substantive content, treat it as their final
-  output (note the crash in the report).
-- If nothing usable exists, re-dispatch ONCE with the same prompt. If the second
-  attempt also crashes, mark that dev FAILED and continue with the other 3.
+If any dev crashes (API error / OOM / timeout):
+- Check if a partial /tmp/dev-<N>-* file exists with substantive content;
+  if so, treat as final output (note the crash in the report).
+- If nothing usable exists, re-dispatch ONCE with the same prompt. If the
+  second attempt also crashes, mark that dev FAILED and continue with the
+  others.
 
 ---
 
-## Step 4 — Dispatch 4 overseers in PARALLEL (one message, 4 Agent calls)
+## Step 4 — Dispatch N overseers in PARALLEL (one message, N Agent calls)
 
-For each dev that produced a final .scrml file, dispatch a gauntlet-overseer.
-The overseer compiles independently and classifies — its verdict supersedes
-the dev's self-report.
+For each dev that produced a final .scrml file (now written by the runner),
+dispatch a gauntlet-overseer. The overseer compiles independently and
+classifies — its verdict supersedes the dev's self-report.
 
 Overseer dispatch prompt shape:
 
 ```
-Verify dev-<N>-<persona>'s gauntlet R24 result.
+Verify dev-<N>-<persona>'s gauntlet R25 result.
 
-Source: /home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/gauntlet-r24/dev-<N>-<persona>.scrml
+Source: /home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/gauntlet-r25/dev-<N>-<persona>.scrml
 Dev's self-reported verdict: <COMPILE_STATUS the dev returned>
 
 Run the canonical compile command:
   cd /home/bryan-maclee/scrmlMaster/scrmlTS
   bun run compiler/src/cli.js compile \
-      /home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/gauntlet-r24/dev-<N>-<persona>.scrml \
-      -o /home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/gauntlet-r24/dist/
+      /home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/gauntlet-r25/dev-<N>-<persona>.scrml \
+      -o /home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/gauntlet-r25/dist/
+
+ALSO verify the emitted client JS passes `node --check`:
+  for f in /home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/gauntlet-r25/dist/dev-<N>-<persona>*.client.js; do
+    node --check "$f" || echo "node --check FAILED: $f"
+  done
 
 Then classify per your standard protocol:
-  - PASS: source uses valid scrml; compiler produces clean output.
+  - PASS: source uses valid scrml; compiler exits 0 AND emitted JS passes node --check.
   - DEV ERROR: source uses invalid scrml (React-style JSX, retired syntax,
     invented constructs); compiler correctly rejected it.
   - COMPILER BUG: source uses valid scrml per current canon (kickstarter v2 +
     SPEC); compiler crashed or produced bad output. File reproducer evidence.
-  - PARTIAL: compiled but emitted JS has issues (mangled names, missing wiring,
-    bare function references). Inspect dist/ output.
+  - PARTIAL: compiled exit-0 but emitted JS has issues — mangled names, raw
+    `or`/`and` tokens, `_result = return;` statements, etc. (R24 surfaced
+    several of these patterns; see known-gaps Bugs 28-34 for the canonical
+    list.) Inspect dist/ output.
 
 Report back:
   - OVERSEER_VERDICT: PASS | DEV-ERROR | COMPILER-BUG | PARTIAL
   - COMPILE_OUTPUT: <full output of the compile command, tail -50>
+  - NODE_CHECK_OUTPUT: <pass/fail per dist file>
   - DIST_FILES: <ls of dist/ files produced for this dev>
   - DISAGREEMENT_WITH_DEV: <yes/no — did your verdict differ from the dev's self-report?>
   - SUSPECTED_COMPILER_BUGS: <list any compiler-bug candidates you identified>
   - ANTI-PATTERN_TRAPS_IN_SOURCE: <count of forbidden constructs found in the dev's source>
 ```
 
-For each overseer dispatch, substitute `<N>` and `<persona>` per dev. 4 Agent
-calls in ONE message; `subagent_type: "gauntlet-overseer"` for all 4;
+For each overseer dispatch, substitute `<N>` and `<persona>` per dev. N Agent
+calls in ONE message; `subagent_type: "gauntlet-overseer"` for all N;
 `run_in_background: true`.
 
 ---
 
 ## Step 5 — Aggregate + write the round report
 
-After all 4 overseers complete, write the report to:
+After all N overseers complete, write the report to:
 
-  `/home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/gauntlet-r24-report.md`
+  `/home/bryan-maclee/scrmlMaster/scrml-support/docs/gauntlets/gauntlet-r25-report.md`
 
-Format (model on prior round reports at `scrml-support/docs/gauntlets/gauntlet-r1{3,4,7,8,9}-report.md`):
+Format (model on prior round reports at `scrml-support/docs/gauntlets/gauntlet-r{13,14,17,18,19,24}-report.md` — especially r24 for the most recent shape).
 
-```markdown
-# Gauntlet R24 — Help-Desk Ticketing — Report
+The report includes (mirroring R24 structure):
 
-**Date:** YYYY-MM-DD
-**Round purpose:** DD Rec #15 — Phase-1c canon clear empirical test.
-**Personas:** React / Go / Svelte / Pascal-multi-language-pragmatist
-**Task:** Help-Desk Ticketing System (see BRIEF.md in gauntlet-r24/ dir).
-
-## Verdict at a glance
-
-| Dev | Compile | Iterations | Friction items | Anti-pattern traps | Self-score | Overseer verdict | Disagrees? |
-|-----|---------|------------|----------------|--------------------|------------|------------------|------------|
-| dev-1-react | PASS/FAIL | N | N | N | N/100 | PASS/DEV-ERROR/COMPILER-BUG/PARTIAL | yes/no |
-| dev-2-go | ... | ... | ... | ... | ... | ... | ... |
-| dev-3-svelte | ... | ... | ... | ... | ... | ... | ... |
-| dev-4-pascal | ... | ... | ... | ... | ... | ... | ... |
-
-## Per-dev summary
-
-### dev-1-react
-- Output: `scrml-support/docs/gauntlets/gauntlet-r24/dev-1-react.scrml`
-- Compile: PASS/FAIL <error-code>
-- Iterations to PASS: N
-- 3 most severe friction items:
-  - <quote from friction report>
-- Overseer notes: <quote from overseer's analysis>
-- Would-use-it: N/10
-- Critical canon gap surfaced (if any): <description>
-
-(Repeat for dev-2, dev-3, dev-4.)
-
-## Aggregated friction themes
-
-Group friction items across all 4 devs by what feature drew them:
-
-| Feature | Hits | Severity distribution | Canon-section gap? |
-|---------|------|----------------------|---------------------|
-| `<each in=>` iteration | <count> | BLOCKER:N HIGH:N MED:N LOW:N | <yes/no, which section> |
-| `(A to B)` lifecycle annotation | ... | ... | ... |
-| `schemaFor` / `formFor` / `tableFor` (L22 family) | ... | ... | ... |
-| `<engine>` Tier-2 | ... | ... | ... |
-| `!{}` + `<errorBoundary>` | ... | ... | ... |
-| `<onTimeout>` SLA | ... | ... | ... |
-| Validators + `<errors of=>` | ... | ... | ... |
-| reset(@cell) × lifecycle | ... | ... | ... |
-| Quoted-text model | ... | ... | ... |
-
-## Anti-pattern trap report
-
-How well did the kickstarter + anti-patterns catch each forbidden construct
-BEFORE the dev wrote it?
-
-| Forbidden construct | Devs who reached for it | Caught by canon | Caught only by compiler |
-|---------------------|-------------------------|------------------|--------------------------|
-| `null` / `undefined` | N | N | N |
-| `===` / `!==` | N | N | N |
-| `try` / `catch` | N | N | N |
-| `async` / `await` | N | N | N |
-| `::Variant` | N | N | N |
-| `for...lift` (when `<each>` was right) | N | N | N |
-| `@variable` decl form | N | N | N |
-| `<style>` tag | N | N | N |
-
-## Compiler bugs surfaced (if any)
-
-For each `COMPILER-BUG` verdict from an overseer, file a known-gaps candidate:
-
-- **R24-BUG-N:** <description> (dev-<N>; SEVERITY; reproducer at dev-<N>-<persona>.scrml line X)
-  - Compile output: <error>
-  - Source is valid scrml per <canon section reference>
-  - Suggested classification: <category>
-
-## Post-S130 canon-clear health rating
-
-Roll up the per-dev "Post-S130 canon-clear specific feedback" sections:
-
-- **Iteration Landing (PRIMER §6.3 `<each>`):** N/4 clear, N/4 partial, N/4 absent. Themes: <summarize>
-- **Lifecycle annotation (PRIMER §6.5 / kickstarter §3.2 `(A to B)`):** N/4 clear, ...
-- **L22 type-as-arg family (Cluster H):** N/4 clear, ...
-- **Engines as Tier-2:** N/4 clear, ...
-- **Error model (`!{}` + `<errorBoundary>`):** N/4 clear, ...
-- **Quoted-text model:** N/4 clear, ...
-
-## Overall round verdict + recommendations
-
-- **Canon clear health:** GREEN / YELLOW / RED — <one-paragraph synthesis>
-- **Top 3 canon gaps to close before R25:** <list>
-- **Top 3 compiler bugs to file (if any):** <list>
-- **Persona-specific lessons:** <one bullet per persona>
-- **Next-round candidate task shape:** <suggest something to test the remaining
-  unexercised surface — e.g., real-time chat for channels/SSE; multi-user
-  collaboration for `@shared` retirement etc>
-
-## Tags
-#gauntlet-r24 #dd-rec-15 #post-s130-canon-clear-test #help-desk-ticketing
-```
+- **Round-execution friction** (any dispatch-infrastructure issues this round)
+- **Verdict at a glance** (per-dev table)
+- **Per-dev summary** (output path / compile / iterations / 3 most severe friction / overseer notes / would-use-it / critical canon gap)
+- **Aggregated friction themes** (cross-dev frequency analysis)
+- **Anti-pattern trap report** (how well canon caught each forbidden construct)
+- **Compiler bugs surfaced** (per overseer COMPILER-BUG verdict, with reproducer)
+- **Post-Sxxx canon-clear health rating** (per-surface clear/partial/absent rollup)
+- **Overall round verdict + recommendations** (GREEN/YELLOW/RED + top 3 canon gaps + top 3 compiler bugs + persona lessons + next-round candidate shape)
+- **Tags** (round number, theme, any signal tags)
 
 Write the report file. That's the deliverable — the user will read it.
 
@@ -308,12 +292,12 @@ Write the report file. That's the deliverable — the user will read it.
 Send a single text message back to the user:
 
 ```
-Gauntlet R24 complete.
+Gauntlet R25 complete.
 
-Report: scrml-support/docs/gauntlets/gauntlet-r24-report.md
+Report: scrml-support/docs/gauntlets/gauntlet-r25-report.md
 
-Devs: N/4 PASS compile, M/4 FAIL.
-Compiler bugs surfaced: K (see report §"Compiler bugs surfaced").
+Devs: N/M PASS compile, K/M FAIL.
+Compiler bugs surfaced: J (see report §"Compiler bugs surfaced").
 Canon clear health: GREEN/YELLOW/RED.
 Anti-pattern traps: X total across devs; Y caught by canon, Z caught only by compiler.
 
@@ -337,18 +321,22 @@ and decide next steps.
 
 1. **NO session-start protocol.** Do not read pa.md, hand-off.md, master-list.md,
    user-voice. You are not the project PA.
-2. **NO `isolation: "worktree"`** on dev or overseer dispatches. Gauntlet devs
-   write into sandbox dir; overseers read-and-compile. No worktree needed.
-3. **NO commits.** This run produces artifacts in `scrml-support/docs/gauntlets/gauntlet-r24/`
-   and a report at `scrml-support/docs/gauntlets/gauntlet-r24-report.md`. Whether
-   to commit those is the user's call — the runner does NOT commit (unless the
-   user explicitly asks for a commit after they've read the report).
+2. **NO `isolation: "worktree"`** on dev or overseer dispatches.
+3. **NO commits.** This run produces artifacts; whether to commit them is the
+   user's call — the runner does NOT commit (unless the user explicitly asks
+   for a commit after they've read the report).
 4. **NO writes to compiler source.** If a dev or overseer surfaces a compiler bug,
    the report DOCUMENTS it. Fixing is a separate compiler-source dispatch by the
    project PA, not by this runner.
-5. **PARALLEL dispatch is mandatory.** 4 devs in ONE message; 4 overseers in ONE
-   message. Sequential dispatch wastes wall-clock time.
+5. **PARALLEL dispatch is mandatory.** All devs in ONE message; all overseers in
+   ONE message. Sequential dispatch wastes wall-clock time.
 6. **Trust the overseer over the dev self-report.** When `DISAGREEMENT_WITH_DEV: yes`,
    the overseer's verdict is the report's verdict.
-7. **If 3+ devs FAIL compile**, the round is a CANON-CLEAR HEALTH RED signal.
+7. **You (runner) are the single point of disk authority for the gauntlet output
+   dir.** Devs iterate in /tmp; devs return content in result messages; you
+   write the canonical files. This sidesteps the S136 dispatch-permission gap.
+8. **Always run `node --check` on emitted client JS** during overseer phase.
+   R24 surfaced multiple cases of compile-exit-0 + invalid-JS output (Bugs 28,
+   29, 31, 32). Compile-exit-0 alone is NOT a PASS signal.
+9. **If 3+ devs FAIL compile**, the round is a CANON-CLEAR HEALTH RED signal.
    Surface this in the report's overall verdict prominently.

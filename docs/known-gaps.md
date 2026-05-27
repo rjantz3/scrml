@@ -6,7 +6,7 @@
 >
 > **Per-gap status:** `spec'd` = SPEC normative + compiler does nothing · `partial-impl` = some sub-units shipped, others pending · `scoping` = SCOPING.md authored, OQs open · `in-impl` = implementation arc actively in flight · `deferred` = ratified to defer pending a precondition · `blocked` = waiting on something else · `nominal` = SPEC-only Nominal section (deliberately spec-ahead-of-implementation per author)
 >
-> Updated 2026-05-25 (S130 — comprehensive refresh post-S110-S130; supersedes prior S109 ledger; previously-closed S107-S109 items rotated out).
+> Updated 2026-05-27 (S136 — R24 gauntlet bug-candidate intake; +7 net entries + 1 cross-ref escalation; previously S135 close).
 
 ---
 
@@ -14,9 +14,9 @@
 
 | Severity | Open | Closed-this-arc | Notes |
 |---|---|---|---|
-| HIGH | 2 | E-TYPE-001 lifecycle fire (S130 Landing 1 SHIPPED) · §29 vanilla-interop framing-corrected (S132) · **E-FN-003 (RESOLVED S133 `dbef4f4d`)** · **Bug 17 E-META-001 runtime-meta (RESOLVED S134 `6c6c0073`)** · **§6.6.18 alias-escape A4 LANDED S134 `b719a3d2`** · **Bug 19 Shape 1 lifecycle tracker LANDED S134 `fd58893e` (B-prereq)** · **§6.8.3 reset × lifecycle impl LANDED S135 `2ffe4f6a` (Q6-narrow; SPEC-ahead-of-impl bullet CLOSED)** · **Structural-in-logic-body silent-swallow class CLOSED S135 `ab0d13a3` (E-STRUCTURAL-ELEMENT-MISPLACED fires for `<schema>`/`<engine>`/`<channel>`/`<page>`/`<auth>`/`<errors>`/`<onTransition>`/`<onTimeout>`/`<onIdle>` in `${...}` bodies; +19 tests)** | compiler-managed-async (deferred A9-class) · 6nz-V class:NAME on for-lift (GENUINE) |
-| MED | 6 | Bug 15 `~snapshot` codegen leak (S131 SHIPPED) · E-SCHEMA-003 enforcement (S133 SHIPPED `afbcb47a`) | Bug 1 Tailwind residuals · V-kill READ-side fire · MCP V0 partial-impl deferrals · Generator policy · L19 multi-statement-handler · **A5 refinement-type freeze extension (DEFERRED with adoption-watch trigger, S134)** |
-| LOW | 11 | (rotate out below) | Bug 4 bare-`/` · GITI-015 · §11-folded-citation sweep · `bun scrml promote --engine` Tier-1→2 deferred · **Bug 21 Q6-narrow deep multi-level reset heuristic (S135)** · **Bug 22 Q6-narrow cross-cell `default=` classification heuristic (S135)** · **Bug 23 W-LIFECYCLE-LEGACY-ARROW Shape 1 emission gap (S135)** · **Bug 24 qualified-form discrim regex tolerance (S135)** · **Bug 25 transition() deeper-expression regex tolerance (S135)** · **Bug 26 `${...}` inside `function` body E-SCOPE-001 (S135)** · **Bug 27 tryParseStructuralDecl extra lookahead cleanup (S135)** |
+| HIGH | 4 | E-TYPE-001 lifecycle fire (S130 Landing 1 SHIPPED) · §29 vanilla-interop framing-corrected (S132) · **E-FN-003 (RESOLVED S133 `dbef4f4d`)** · **Bug 17 E-META-001 runtime-meta (RESOLVED S134 `6c6c0073`)** · **§6.6.18 alias-escape A4 LANDED S134 `b719a3d2`** · **Bug 19 Shape 1 lifecycle tracker LANDED S134 `fd58893e` (B-prereq)** · **§6.8.3 reset × lifecycle impl LANDED S135 `2ffe4f6a` (Q6-narrow; SPEC-ahead-of-impl bullet CLOSED)** · **Structural-in-logic-body silent-swallow class CLOSED S135 `ab0d13a3` (E-STRUCTURAL-ELEMENT-MISPLACED fires for `<schema>`/`<engine>`/`<channel>`/`<page>`/`<auth>`/`<errors>`/`<onTransition>`/`<onTimeout>`/`<onIdle>` in `${...}` bodies; +19 tests)** | compiler-managed-async (deferred A9-class) · 6nz-V class:NAME on for-lift (GENUINE) · **Bug 28 `or`/`and` codegen lowering (NEW S136 R24)** · **Bug 29 `!{}` `{ return }` arm codegen (NEW S136 R24)** · R24-BUG-4 `<match>` `</>` Phase 5 (cross-ref escalation, SCOPING-tracked) |
+| MED | 9 | Bug 15 `~snapshot` codegen leak (S131 SHIPPED) · E-SCHEMA-003 enforcement (S133 SHIPPED `afbcb47a`) | Bug 1 Tailwind residuals · V-kill READ-side fire · MCP V0 partial-impl deferrals · Generator policy · L19 multi-statement-handler · **A5 refinement-type freeze extension (DEFERRED with adoption-watch trigger, S134)** · **Bug 30 linter scans HTML comments (NEW S136 R24)** · **Bug 31 if-as-expression in !{} result binding (NEW S136 R24)** · **Bug 32 `@.` not lowered inside tableFor column slot (NEW S136 R24)** |
+| LOW | 13 | (rotate out below) | Bug 4 bare-`/` · GITI-015 · §11-folded-citation sweep · `bun scrml promote --engine` Tier-1→2 deferred · **Bug 21 Q6-narrow deep multi-level reset heuristic (S135)** · **Bug 22 Q6-narrow cross-cell `default=` classification heuristic (S135)** · **Bug 23 W-LIFECYCLE-LEGACY-ARROW Shape 1 emission gap (S135)** · **Bug 24 qualified-form discrim regex tolerance (S135)** · **Bug 25 transition() deeper-expression regex tolerance (S135)** · **Bug 26 `${...}` inside `function` body E-SCOPE-001 (S135)** · **Bug 27 tryParseStructuralDecl extra lookahead cleanup (S135)** · **Bug 33 W-LINT-011 false positive on `:let=` (NEW S136 R24)** · **Bug 34 Shape-2 compound markup-init missing 2nd arg (NEW S136 R24)** |
 | Nominal (spec-ahead-of-impl) | 7 | — | Build Story §58 · `import:host` §21.3.1 · Quoted-text §4.18 compiler fire · `_{}` foreign code · WASM call-char sigils · Sidecar process decls · RemoteData enum |
 
 ---
@@ -126,6 +126,42 @@ A `fn` that returned (or `let`-bound) markup carrying ANY attribute (`class`, `i
 
 ---
 
+### Bug 28 — `or` / `and` boolean operators not lowered to `||` / `&&` in derived-cell codegen — `HIGH` (S136 R24)
+
+A `const <derived> = arr.filter(t => cond1 or cond2 and cond3)` style derived cell compiles with exit 0 but emits raw `or` / `and` tokens into the client JS, producing `SyntaxError: Unexpected identifier 'or'` when the runtime loads the chunk. Surfaced by both dev-1-react and dev-4-pascal in gauntlet R24; confirmed independently by 2 overseers.
+
+- **Reproducer:** `const <visibleTickets> = @tickets.filter(t => (@statusFilter is .All or t.status == @statusFilter) and (@searchTerm == "" or t.title.includes(@searchTerm)))` inside a `.scrml` file; compile exits 0; `node --check dist/*.client.js` reports `SyntaxError`. Full reproducer in `scrml-support/docs/gauntlets/gauntlet-r24/dev-1-react.scrml` + `dev-4-pascal.scrml`.
+- **Spec reference:** SPEC §45 (equality semantics) + §7 (logic contexts) — `or` / `and` are scrml's word-form boolean operators, must lower to JS `||` / `&&`.
+- **Current behavior:** derived-cell expression translator emits identifiers verbatim.
+- **Expected behavior:** `or` → `||`, `and` → `&&` (word→symbol lowering at the codegen boundary).
+- **Suggested fix scope:** likely single-file — codegen translation table for derived-cell expressions (probably in `compiler/src/codegen/emit-expr.ts` or sibling). Highest blast radius of all R24 findings; affects every derived cell with mixed boolean operators.
+- **Cross-refs:** R24-BUG-1 in `scrml-support/docs/gauntlets/gauntlet-r24-report.md` §"Compiler bugs surfaced".
+
+---
+
+### Bug 29 — `!{}` handler `{ return }` arm codegen emits `_result = return;` (invalid JS) — `HIGH` (S136 R24)
+
+Any `failableCall() !{ | .Variant -> { return } }` no-op arm body (the canonical "early-return-on-error" idiom per PRIMER §6) compiles with exit 0 but emits `let _scrml__scrml_result_46 = return;` into the client JS, failing `node --check`. Surfaced 8 times in dev-1-react's output alone.
+
+- **Reproducer:** `function load() { const rows = fetchItems() !{ | ::Network msg -> { @phase = .Error(msg); return } | ::Empty -> { @phase = .Empty; return } }; @phase = .Success(rows.length) }` — every `return` in the arm body becomes a `let _result = return;` literal.
+- **Spec reference:** SPEC §19.4 (inline handler contract).
+- **Current behavior:** error-handler arm lowering binds the entire arm body to a `_result` let, even when the body's terminal statement is `return` (which is a statement, not an expression).
+- **Expected behavior:** treat `return` (or `throw`, `break`, `continue`) as a terminating statement; do not bind to `_result`; the parent context already has the early-return semantics.
+- **Suggested fix scope:** codegen — error-handler arm lowering; teach the arm-body emitter to detect terminating statements and skip the `_result = ...` wrap. Affects every error-handler arm with a no-op body (the dominant adopter shape).
+- **Cross-refs:** R24-BUG-2 in `scrml-support/docs/gauntlets/gauntlet-r24-report.md`.
+
+---
+
+### R24-BUG-4 (cross-ref) — `<match>` block-form `</>` closer rejected with E-CTX-001 — `Phase 5 SCOPING-tracked; HIGH adopter impact`
+
+dev-3-svelte (R24) wrote fully spec-compliant source per SPEC §4.4.2 (`</>` SHALL close innermost open tag — no exceptions) for the `<match for=Type on=val>...</>` block-form. Compiler rejected with `E-CTX-001: Unclosed <match> structural element. Expected explicit close tag '</match>'. The '</>' unambiguous-closer form is not yet supported for <match> at Phase 2 baseline.` PRIMER §6.2 + worked examples use `</>`; the gap is compiler-side, not source-side. dev-3 was the best-case adopter in R24 and got killed by this gap alone.
+
+- **Tracker:** `docs/changes/match-block-form-scoping/SCOPING.md` Phase 5 (already filed; not a new bug entry).
+- **R24 escalation:** elevate to HIGH adopter-impact priority — the canon-correct closer was rejected on the cleanest dev's first attempt. Land the Phase 5 work OR update PRIMER §6.2 to show `</match>` as the canon closer until Phase 5 ships.
+- **Cross-refs:** R24-BUG-4 in `scrml-support/docs/gauntlets/gauntlet-r24-report.md`.
+
+---
+
 ## §2 MED — silent acceptance / incomplete surfaces
 
 ### A5 refinement-type freeze extension — `DEFERRED with adoption-watch trigger` (S134)
@@ -201,6 +237,45 @@ L19 forbids multi-statement event handlers (`onclick=` must be a single expressi
 
 - **Workaround:** wrap multi-statement handlers in a named function (`function handle() { ... }; <button onclick=handle()>`).
 - **Status:** open HU follow-on; small enough to fold into iteration HU or its own sub-session.
+
+---
+
+### Bug 30 — Linter scans content inside `<!-- -->` HTML comment blocks — `MED` (S136 R24)
+
+The lint pass fires `W-LINT-001` / `W-LINT-005` / `W-LINT-007` / `W-LINT-011` / `W-LINT-014` / `W-LINT-022` on text appearing inside HTML comment blocks (`<!-- ... -->`). Surfaced by dev-2, dev-3, dev-4 overseers in R24 — every dev's friction-report comment block (which contains anti-pattern words like `===`, `<style>`, `.map()`, `{#if}` for comparison purposes) tripped multiple lints.
+
+- **Reproducer:** any `.scrml` file containing `<!-- comment with === or .map() text -->`; lints fire on the comment-internal content.
+- **Spec reference:** SPEC §27 — comment content is opaque to all stages.
+- **Current behavior:** linter walks text without comment-region awareness.
+- **Expected behavior:** skip lint scanning inside `<!-- -->` regions.
+- **Suggested fix scope:** linter — add comment-region awareness to the lint scanner. Single-file fix in lint pass.
+- **Cross-refs:** R24-BUG-3 in `scrml-support/docs/gauntlets/gauntlet-r24-report.md`.
+
+---
+
+### Bug 31 — `if`-statement-as-expression in `!{}` result binding produces invalid JS — `MED` (S136 R24)
+
+A function body containing `if (cond) return` immediately followed by a `failableCall() !{...}` causes codegen to bind the entire sequence as `let _result = if (cond) { return fn(); }` — an `if` statement in expression position, which is a JS SyntaxError. Narrow but adopter-encounterable.
+
+- **Reproducer:** dev-1-react's `function load() { if (!@searchTerm) return; const r = fetchItems() !{ ... }; }` surfaces this.
+- **Spec reference:** SPEC §19.4 (failable function + handler contract) + §17 (control flow).
+- **Current behavior:** codegen wraps the early-return `if` into the `_result` binding.
+- **Expected behavior:** treat the early-return `if` as a separate statement; the `_result` binding scope begins AFTER it.
+- **Suggested fix scope:** codegen — result-binding scope semantics in failable-handler-result lowering.
+- **Cross-refs:** R24-BUG-5 in `scrml-support/docs/gauntlets/gauntlet-r24-report.md`.
+
+---
+
+### Bug 32 — `@.` iteration sigil not lowered inside `<tableFor>` column slot body — `MED` (S136 R24)
+
+A `<column field="status" :let={(row) => <span>${@.status}...}/>` inside a `<tableFor for=T rows=@cell>` block emits `@ . status` unlowered into the client JS — the iteration-scope binding doesn't reach into the L22 column slot. Surfaced by dev-1-react overseer.
+
+- **Reproducer:** dev-1-react's `tableFor` column slot uses `${@.}` to access the per-row binding; emitted JS contains literal `@` token.
+- **Spec reference:** SPEC §17 (`@.` iteration semantics) + §41.16.3 (`tableFor` column slot grammar).
+- **Current behavior:** iteration-scope binding pass doesn't recognize the L22 column slot as an iteration locus.
+- **Expected behavior:** `@.` inside `<column :let={(row) => ...}>` lowers to the iteration-bound row.
+- **Suggested fix scope:** codegen — iteration-scope binding inside L22 column slot context.
+- **Cross-refs:** R24-BUG-6 in `scrml-support/docs/gauntlets/gauntlet-r24-report.md`.
 
 ---
 
@@ -306,6 +381,31 @@ A `${...}` block placed inside a bare `function name() { ... }` body emits an un
 - **Workaround:** none needed — current behavior is correct; only the lookahead cost is wasted.
 - **Status:** filed S135 in structural-in-logic progress.md as a cleanup opportunity. Not a bug. Extend on parser-performance signal.
 - **Cross-refs:** `docs/changes/structural-in-logic-body-2026-05-26/progress.md`.
+
+---
+
+### Bug 33 — W-LINT-011 false positive on `:let={}` slot-binding shape — `LOW` (S136 R24)
+
+`W-LINT-011` flags `:let={(row) => ...}` (the canonical `<column>` slot-binding shape per SPEC §41.16.3 + §16.6) as Vue-style `:`-prefixed binding. The pattern-matcher distinguishes `:let=` insufficiently from `:disabled=` / `:value=` etc.
+
+- **Workaround:** none — lint is noise; valid syntax.
+- **Status:** lint noise only; doesn't block compile.
+- **Spec reference:** SPEC §41.16.3 + §16.6 (`tableFor` column slot grammar with `:let=` row binding).
+- **Suggested fix scope:** linter — narrow the `:VAR=` Vue-shape pattern to exclude `:let=` (and any other reserved scrml `:`-prefixed slot-binding forms).
+- **Cross-refs:** R24-BUG-7 in `scrml-support/docs/gauntlets/gauntlet-r24-report.md`.
+
+---
+
+### Bug 34 — Shape-2 compound markup-init emits empty 2nd arg to `_scrml_reactive_set` — `LOW` (S136 R24)
+
+A Shape-2 compound state cell like `<form><title>= <input type="text"/></form>` (compound with markup init on a field) emits `_scrml_reactive_set("newTicketForm.title", )` — the 2nd argument is empty. Surfaced by dev-4-pascal overseer.
+
+- **Reproducer:** in dev-4-pascal.scrml — Shape-2 compound `<newTicketForm>` with markup-init fields.
+- **Spec reference:** SPEC §6.2 Shape 2 (decl-coupled-with-render-spec) — the init value should be the bind-source for the input.
+- **Current behavior:** Shape-2 compound init handler doesn't pass the render-spec init value through.
+- **Expected behavior:** the markup init value is the bind-source; emit `_scrml_reactive_set("newTicketForm.title", "")` (or the appropriate init).
+- **Suggested fix scope:** codegen — Shape-2 compound init handler.
+- **Cross-refs:** R24-BUG-8 in `scrml-support/docs/gauntlets/gauntlet-r24-report.md`.
 
 ---
 

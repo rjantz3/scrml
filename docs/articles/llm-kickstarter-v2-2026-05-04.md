@@ -717,13 +717,17 @@ ${
 }
 
 // 2. formFor — type-driven form generation; FLAGSHIP (scrml.dev demo)
-<formFor SignupForm onsubmit=handleSignup/>
+//    Canonical attribute form: for=TypeName (NOT bare positional)
+<formFor for=SignupForm onsubmit=handleSignup/>
   <!-- The compiler synthesizes: <email req>, <password req length(>=8)>, <age req>,
        a submit button, the validity surface, the error-rendering elements,
        and the bind:value plumbing. ONE LINE. -->
 </>
 
 // 3. schemaFor — type-driven SQL schema (DDL) generation
+//    Function-call form (NOT markup-element) — different shape from formFor/tableFor
+//    because the output is a DDL string, not markup. Use inside <schema> blocks
+//    via ${...} interpolation per SPEC §41.15.
 ${
   ^{
     const ddl = schemaFor(SignupForm)
@@ -732,8 +736,32 @@ ${
 }
 
 // 4. tableFor — type-driven admin-UI table for a record collection
-<tableFor SignupForm rows=@users editable={ age: false }/>
+//    Canonical attribute form: for=TypeName (NOT bare positional)
+<tableFor for=SignupForm rows=@users/>
 ```
+
+**`pick=` / `omit=` / `partial=true` field-set transforms (§41.14.5 / §41.15.4 / §41.16.5).** Every L22 family member supports the same field-set vocabulary for selecting which struct fields participate in the synthesized output. The canonical form is **a string-literal array** (`pick=["email", "password"]`) — NOT bare identifiers. Bare identifiers fall through to scope resolution and fire `E-SCOPE-001` because the field names aren't declared identifiers in the surrounding scope:
+
+```scrml
+type Signup:struct = { email: string, password: string, age: int(>=18), referredBy: string | not }
+
+// formFor — pick a subset of fields, omit the rest
+<formFor for=Signup onsubmit=submitFn pick=["email", "password"]/>
+
+// formFor — omit one field (everything else stays)
+<formFor for=Signup onsubmit=submitFn omit=["referredBy"]/>
+
+// formFor — make picked fields optional (relaxes req validators for the form's validity surface)
+<formFor for=Signup onsubmit=submitFn pick=["email", "password"] partial=true/>
+
+// tableFor — pick visible columns
+<tableFor for=Signup rows=@users pick=["email", "age"]/>
+
+// schemaFor — function-call form uses an object literal (different shape from markup-element form)
+${ const ddl = schemaFor(Signup, { pick: ["email", "password"] }) }
+```
+
+**Anti-pattern** — bare-identifier pick lists like `pick=[email, password]` are NOT canonical and fire `E-SCOPE-001` per field. Quote each field name. `pick=` and `omit=` are mutually exclusive on the same call (`E-FORMFOR-PICK-OMIT-CONFLICT` / `E-TABLEFOR-PICK-OMIT-CONFLICT` / `E-SCHEMAFOR-PICK-OMIT-CONFLICT`). Field names not present on the struct fire `E-FORMFOR-PICK-INVALID-FIELD` (or the equivalent for the other family members).
 
 `parseVariant` shipped S65; `formFor` shipped S102; `schemaFor` shipped S104; `tableFor` shipped S105. All four are imported from `scrml:data`. Per-field customization (slot-based for `formFor`/`tableFor`, attribute-based for `schemaFor`) is documented in SPEC §41.13-§41.16.
 

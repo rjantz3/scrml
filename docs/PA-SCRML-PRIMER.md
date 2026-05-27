@@ -544,6 +544,38 @@ type Phase:enum = { Idle, Loading, Done }
 
 The carve-out is detected at type-resolution: a state-decl is classified as an engine cell iff a sibling `<engine>` declaration's `engineMeta.varName` (or `var=` override) matches the state-decl's name. Unambiguous — engine declarations are syntactic constructs, not user-named conventions.
 
+**Subtlety — struct fields whose TYPE is engine-driven are NOT engine cells (R24 surface).** The carve-out applies to the engine's auto-declared variable. A struct field that happens to have the same type as an engine's variant enum is a struct field, not an engine cell — and lifecycle annotation on that field is LEGAL. The struct field's lifecycle is a type-system contract on the struct value's history; it is INDEPENDENT of the engine's variant-graph progression.
+
+```scrml
+type TicketStatus:enum = { Open, InProgress, Resolved, Closed }
+
+type Ticket:struct = {
+    id: int,
+    title: string,
+    status: TicketStatus (Open to Closed),     // LEGAL — struct field, NOT an engine cell
+    resolvedAt: (not to timestamp),            // LEGAL — orthogonal lifecycle on a different field
+    createdAt: timestamp
+}
+
+<engine for=TicketStatus initial=.Open>
+  <Open    rule=.InProgress>:     "open"
+  <InProgress rule=[.Resolved, .Open]>: "in progress"
+  <Resolved rule=.Closed>:        "resolved"
+  <Closed>:                        "closed"
+</>
+
+// `<status>: TicketStatus = .Open` would be an ENGINE CELL (sibling matches engine's auto-declared name).
+// Annotating it with `(Open to Closed)` fires E-TYPE-LIFECYCLE-ON-ENGINE-CELL.
+// But `status: TicketStatus (Open to Closed)` INSIDE the `Ticket` struct is a struct FIELD, not the
+// engine's auto-declared cell — the annotation is legal per §14.12.
+
+let t: Ticket = { id: 1, title: "x", status: .Open, resolvedAt: not, createdAt: Date.now() }
+// At construction: t.status starts at pre-type (Open); read of t.status is legal because struct
+// fields use construction-time discrimination, not the engine's runtime progression.
+```
+
+The point of separation: the **engine** owns the runtime-mutable variant cell (the auto-declared variable). The **struct field** owns a type-system contract on what variant a struct VALUE carries through its lifetime. Two different concerns; the carve-out only forbids them collapsing onto the same cell. If you find yourself wanting both — engine-driven runtime progression AND struct-field lifecycle on the same logical state — that's a hint to factor the struct field's lifecycle into a sibling cell (use the engine's variant progression for the runtime state; let the struct value be a snapshot).
+
 ### Function-return position — the hybrid mechanism (§14.12.6)
 
 Lifecycle on function-return type is fully tracked end-to-end. The transition mechanism splits by the lifecycle's pre-type:
