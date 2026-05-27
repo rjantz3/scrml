@@ -2514,6 +2514,18 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       const isTerminatorStmt = (stmt: string): boolean =>
         /^(?:return|throw|break|continue)(?:[\s;]|$)/.test(stmt);
 
+      // R25-Bug-38 — single-line statement-shape detection. After
+      // `rewriteBlockBody`, reactive writes / engine writes / `navigate` calls
+      // arrive as bare function-call statements (e.g. `_scrml_reactive_set(
+      // "x", "missing")`). These are side-effect statements, NOT value-
+      // producing expressions; the `${resultVar} = ...` wrap is semantically
+      // wrong for them. Detection on a known prefix list keeps this surgical
+      // — bare-call arm bodies like `| _ -> computeFallback(e)` continue to
+      // route through the value-shape wrap (per existing negative-control
+      // tests in error-handler-terminator-arms.test.js §8).
+      const isStatementShapeStmt = (stmt: string): boolean =>
+        /^(?:_scrml_reactive_set\s*\(|_scrml_engine_[a-zA-Z_$][a-zA-Z0-9_$]*\s*\(|_scrml_navigate\s*\(|_scrml_register_cleanup\s*\(|_scrml_effect\s*\(|_scrml_init_set\s*\()/.test(stmt);
+
       const emitArmAssign = (armBody: string): string[] => {
         const trimmed = armBody.trim();
         // M-7C-D-12 Track 3: empty-body arm produces `resultVar = null;` (was `= undefined;`)
@@ -2537,6 +2549,30 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         const stmts = splitTopLevelStmts(trimmed);
         if (stmts.length > 0 && isTerminatorStmt(stmts[stmts.length - 1])) {
           return stmts.map((s) => `    ${s};`);
+        }
+        // R25-Bug-38 (known-gaps Bug 38): when the arm body is multi-statement
+        // (more than one top-level `;`-separated stmt), it MUST be statement-
+        // shaped. `rewriteBlockBody` joins reactive writes with "; " (no
+        // newline), so a `{ @x = "v"; @y = 0 }` body arrives here as a SINGLE-
+        // LINE string of two `_scrml_reactive_set(...)` calls. The legacy
+        // wrap `${resultVar} = _scrml_reactive_set(...); _scrml_reactive_set
+        // (...);` is valid JS but semantically wrong — `_result` ends up
+        // bound to the FIRST reactive_set's return value (a side-effect
+        // discard) instead of left holding the failed-call's tagged-object.
+        // Emit each statement directly so all side-effects fire and `_result`
+        // remains the failed-call value for downstream consumers (e.g. the
+        // `var r = _result;` trailing wire-up in the `let r = call() !{...}`
+        // workaround form).
+        if (stmts.length > 1) {
+          return stmts.map((s) => `    ${s};`);
+        }
+        // R25-Bug-38: single-statement arm where the stmt is a known
+        // statement-shape side-effect call (reactive write, engine write,
+        // navigate, effect/cleanup registration). The single-line collapsed
+        // adopter form `| ::Variant -> @x = 1` arrives here as a single
+        // `_scrml_reactive_set("x", 1)` statement; emit it bare, no wrap.
+        if (stmts.length === 1 && isStatementShapeStmt(stmts[0])) {
+          return [`    ${stmts[0]};`];
         }
         const bare = trimmed.replace(/;\s*$/, "");
         return [`    ${resultVar} = ${bare};`];

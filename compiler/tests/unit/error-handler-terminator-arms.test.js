@@ -211,43 +211,54 @@ describe("R24-BUG-2 §6: arm body ending with `continue`", () => {
 });
 
 // ---------------------------------------------------------------------------
-// §7: Mid-body conditional early-return — value-producing tail (wrap stays)
+// §7: Mixed multi-statement bodies (no terminator) — UPDATED for R25-Bug-38
 //
-// Per dispatch brief: "Arm body with non-terminating early-return:
-//   `{ if (cond) return; @x = 5 }` — the terminal statement here is
-//   `@x = 5`, NOT `return`, so the `_result` wrap should stay."
+// PRE-R25-Bug-38 (pre-S136-R25): the §7 expectations asserted that any non-
+// terminator-tail single-line body kept the `_result = <bare>;` wrap. That
+// shape was the R25-Bug-38 BUG — multi-stmt reactive-write bodies emitted as
+// `_result = _scrml_reactive_set("x", "v"); _scrml_reactive_set("y", 0);`,
+// a corrupt shape where the first reactive_set's return-value bound to
+// _result (a meaningless side-effect discard) and the second emitted as a
+// bare statement (semantically correct only by accident).
 //
-// We don't assert the whole emit is valid JS (the `if`-as-RHS shape is a
-// SEPARATE pre-existing latent bug, out of scope for R24-BUG-2). What we
-// verify is the strip behavior: when the last top-level stmt is NOT a
-// terminator, the `_result = ...` wrap is NOT stripped.
+// POST-R25-Bug-38: arm bodies with MORE THAN ONE top-level statement emit
+// each statement as a bare stmt (no `_result =` wrap). Single-statement
+// bodies whose statement is a known side-effect call (reactive write, engine
+// write, navigate, effect/cleanup register, init-set) ALSO emit as bare
+// stmts. Single-statement value-producing bodies (`"fallback"` /
+// `computeFallback(e)`) STILL wrap — see §8 negative-control.
 // ---------------------------------------------------------------------------
 
-describe("R24-BUG-2 §7: mid-body return — wrap stays when tail is value-producing", () => {
-  test("`{ helper(); @x = 5 }` last stmt is `@x = 5` (reactive set) — wrap NOT stripped", () => {
+describe("R24-BUG-2 §7: mixed multi-statement bodies — R25-Bug-38 emit-as-statements", () => {
+  test("`{ helper(); @x = 5 }` — multi-stmt body emits both as bare statements (no wrap)", () => {
     const node = makeGuardedExpr(
       makeBareExpr("riskyOp()"),
       [makeArm("_", "e", "{ helper(); @x = 5 }")]
     );
     const result = resetAndRun(() => emitLogicNode(node));
-    // Wrap MUST stay: there must be at least one `_scrml_<name>_<N> = ...` line
-    // inside the arm body (the wrap was not stripped). The exact RHS of that
-    // wrap depends on rewriteBlockBody's `; ` join order; what matters is that
-    // a wrap exists at all — i.e. the strip branch did NOT fire for this body.
-    expect(result).toMatch(/_scrml_\w+_\d+\s*=\s*[^=]/);
-    // And `_scrml_reactive_set("x", 5)` must be emitted somewhere in the body
-    // (whether inside the wrap RHS or as a trailing stmt; both are valid).
+    // The arm body has > 1 top-level statement → each emits as a bare stmt.
+    // The R25-Bug-38 corrupt wrap (`_result = helper(); _scrml_reactive_set(...);`)
+    // must NOT appear. We assert the LACK of a wrap matching the arm body shape
+    // (`_result = helper();` or `_result = _scrml_reactive_set("x", 5);`).
+    expect(result).not.toMatch(/_scrml_\w+_\d+\s*=\s*helper\(\)\s*;/);
+    expect(result).not.toMatch(/_scrml_\w+_\d+\s*=\s*_scrml_reactive_set\("x", 5\)/);
+    // Both statements emit as bare side-effects.
+    expect(result).toContain("helper();");
     expect(result).toContain('_scrml_reactive_set("x", 5)');
   });
 
-  test("`{ if (cond) @x = 1 else @x = 2 }` — no terminator, wrap NOT stripped", () => {
-    // This shape has no terminator anywhere; the wrap must stay.
+  test("`{ @x = 99 }` — single-stmt reactive write emits as bare stmt (no wrap)", () => {
+    // R25-Bug-38: a SINGLE reactive-write stmt is statement-shaped, NOT a
+    // value to bind to _result. The canonical adopter shape `| .V -> @x = 1`
+    // (no braces, single side-effect) routes through the same emitArmAssign
+    // path; the wrap was the bug.
     const node = makeGuardedExpr(
       makeBareExpr("riskyOp()"),
       [makeArm("_", "e", "{ @x = 99 }")]
     );
     const result = resetAndRun(() => emitLogicNode(node));
-    expect(result).toMatch(/_scrml_\w+_\d+\s*=\s*_scrml_reactive_set\("x", 99\)/);
+    expect(result).not.toMatch(/_scrml_\w+_\d+\s*=\s*_scrml_reactive_set\("x", 99\)/);
+    expect(result).toContain('_scrml_reactive_set("x", 99)');
   });
 });
 
