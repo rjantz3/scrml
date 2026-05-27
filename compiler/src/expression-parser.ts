@@ -1177,6 +1177,41 @@ function preprocessForAcorn(raw: string, opts?: { tildeActive?: boolean }): stri
     return code;
   });
 
+  // R24-BUG-1 (S136 codegen lowering) — word-form boolean operators.
+  //
+  // scrml admits `or` / `and` as word-form boolean operators in expression
+  // position (alongside JS-form `||` / `&&`). Acorn does not know these are
+  // operators — `a or b` parses as Identifier `a` followed by trailing content
+  // `or b`, which falls through to the string-rewrite fallback and leaks the
+  // raw `or` / `and` tokens into emitted JS (`SyntaxError: Unexpected
+  // identifier 'or'` at runtime). Surfaced in gauntlet R24 by 2 of 4 devs.
+  //
+  // Lowering both `or`→`||` and `and`→`&&` BEFORE acorn parses lets the
+  // standard LogicalExpression path produce a `BinaryExpr { op: "||"|"&&" }`
+  // node — emitBinary's `default` branch then emits the proper JS operator.
+  //
+  // Lookbehind `(?<![A-Za-z0-9_$@.])` excludes:
+  //   - identifier-substring matches (`orange`, `xor`, `vendor`, `border`,
+  //     `Author`, `brand`, `andrew`, `random`, `demand`, `operator`)
+  //   - member-access (`obj.or`, `this.and`)
+  //   - decorator/sigil-attached (`@or`)
+  // Lookahead `(?![A-Za-z0-9_$])` excludes identifier-tail matches.
+  // Fenced via rewriteCodeSegments (same shape as the `not` precedent above)
+  // so the substitution applies only to code regions; regex/comment/string
+  // literal interiors pass through verbatim — `/orange or apple/i` stays a
+  // literal regex pattern; the comment `// a or b` stays prose.
+  //
+  // Trade-off: `let and = 5` / `let or = 5` would also rewrite — these are
+  // valid JS identifier names. Matching the `not` precedent's accepted
+  // trade-off (`let not = 5` similarly breaks). Bare `and`/`or` as identifier
+  // names in scrml source is vanishingly rare and never appears in the
+  // current test/sample/stdlib corpus.
+  s = rewriteCodeSegments(s, (code) => {
+    code = code.replace(/(?<![A-Za-z0-9_$@.])or(?![A-Za-z0-9_$])/g, "||");
+    code = code.replace(/(?<![A-Za-z0-9_$@.])and(?![A-Za-z0-9_$])/g, "&&");
+    return code;
+  });
+
   // §14.9/§16.6: render name() → __scrml_render_name__()
   s = s.replace(
     /(?<![A-Za-z0-9_$])render\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g,

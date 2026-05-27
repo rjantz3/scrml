@@ -598,6 +598,45 @@ export function rewritePresenceGuard(expr: string): string {
   return `if (${varName} !== null && ${varName} !== undefined) {${body}}`;
 }
 
+// rewriteBooleanKeywords (R24-BUG-1 — S136)
+// ---------------------------------------------------------------------------
+
+/**
+ * Rewrite scrml word-form boolean operators `or` / `and` to JavaScript
+ * `||` / `&&`. Companion to the preprocessForAcorn rewrite at
+ * `expression-parser.ts` — that one covers the AST emission path; this one
+ * covers the string-rewrite fallback (and emit-event-wiring.ts callers of
+ * `rewriteReactiveRefs`).
+ *
+ * Why two sites: when an expression contains `is`, `match`, `?{`, or `::`,
+ * `rewriteReactiveRefsAST` bails (expression-parser.ts ~L541) and the
+ * pipeline falls through to the regex-based passes here. The AST-side fix
+ * never sees those expressions; without this companion pass `or` / `and`
+ * tokens leak into emitted JS (SyntaxError at runtime). Surfaced in gauntlet
+ * R24 by 2 of 4 devs — the `<visibleTickets>` derived cell with mixed
+ * `is .Variant` + `or` + `and` is the canonical reproducer.
+ *
+ * Lookbehind `(?<![A-Za-z0-9_$@.])` and lookahead `(?![A-Za-z0-9_$])` match
+ * the existing `not`-keyword precedent (rewriteNotKeyword below). Excludes
+ * identifier-substring matches (`orange`, `xor`, `vendor`, `andrew`,
+ * `random`, `operator`), member-access (`obj.or`), and decorator/sigil
+ * prefixes (`@or`).
+ *
+ * Fenced via `rewriteCodeSegments` (same shape as `rewriteNotKeyword`) so
+ * the substitution applies only to code regions; regex/comment/string
+ * literal interiors pass through verbatim.
+ */
+export function rewriteBooleanKeywords(expr: string): string {
+  if (!expr || typeof expr !== "string") return expr;
+  // Fast-path: no `or` or `and` substring → no work to do.
+  if (!expr.includes("or") && !expr.includes("and")) return expr;
+  return rewriteCodeSegments(expr, (code) => {
+    code = code.replace(/(?<![A-Za-z0-9_$@.])or(?![A-Za-z0-9_$])/g, "||");
+    code = code.replace(/(?<![A-Za-z0-9_$@.])and(?![A-Za-z0-9_$])/g, "&&");
+    return code;
+  });
+}
+
 // rewriteNotKeyword
 // ---------------------------------------------------------------------------
 
@@ -2004,6 +2043,11 @@ const clientPasses: RewritePass[] = [
   (s, ctx) => ctx.skipPresenceGuard ? s : rewritePresenceGuard(s),
   // Pass 2
   (s, ctx) => rewriteNotKeyword(s, ctx.errors),
+  // Pass 2.5 (R24-BUG-1, S136) — word-form boolean operators `or`/`and` → `||`/`&&`.
+  // Runs RIGHT AFTER rewriteNotKeyword (the sibling word-form keyword lowering)
+  // and BEFORE rewriteReactiveRefs so `@or` / `@and` sigil prefixes are still
+  // intact at match time (lookbehind excludes them defensively too).
+  (s, _ctx) => rewriteBooleanKeywords(s),
   // Pass 3
   (s, ctx) => rewriteRenderKeyword(s, ctx.errors),
   // Pass 4 (retired S133 — `bun.eval()` user-facing surface retired per SPEC §22.12 + §30.1; META_BUILTINS gating + isServerOnlyNode `SERVER_CONTEXT_META_PATTERNS` make the rewrite unreachable)
@@ -2075,6 +2119,9 @@ const serverPasses: RewritePass[] = [
   (s, ctx) => ctx.skipPresenceGuard ? s : rewritePresenceGuard(s),
   // Pass 2
   (s, _ctx) => rewriteNotKeyword(s),
+  // Pass 2.5 (R24-BUG-1, S136) — word-form boolean operators `or`/`and` → `||`/`&&`.
+  // Same shape as client Pass 2.5; runs before reactive-ref rewriting.
+  (s, _ctx) => rewriteBooleanKeywords(s),
   // Pass 3
   (s, _ctx) => rewriteWorkerRefs(s),
   // Pass 4
