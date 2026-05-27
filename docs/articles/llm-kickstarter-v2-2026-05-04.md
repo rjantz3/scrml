@@ -1626,6 +1626,184 @@ const Field = <div props={
 
 There is no `$(param){}` shorthand and you do not need one — the consensus across Svelte / Solid / React / Vue (ternary-for-simple, derived-for-computed, helper-fn-for-logic, snippet-for-parameterized) is exactly this family.
 
+### 11.12 Self-host idiom cluster — `lift` + `~` + `while` + assignment-as-expression (§10 + §32 + §49 + §50)
+
+These four features compose into the canonical scrml pipeline pattern — the one that powers the self-host compiler's own parser, formatter, and codegen. Adopters who write regex iteration, accumulator pipelines, or state-machine loops use this cluster directly.
+
+**`lift` — markup is a value (§10).** `lift` accumulates markup into the implicit `~` accumulator of the enclosing logic context. The accumulated markup becomes a sibling child of the surrounding markup tree at lift-completion. `lift` is NOT JSX `.map()` — it doesn't return an array; it ACCUMULATES into context-bound state.
+
+```scrml
+<ul>
+  ${
+    for (let item of @items) {
+      lift <li>${item.name}</li>      // each iteration appends a <li> to the surrounding <ul>
+    }
+  }
+</ul>
+```
+
+**The `~` accumulator (§32).** Bound implicitly inside logic contexts that accumulate markup-or-data. The pipeline pattern: `lift expr` writes to `~`; subsequent expressions can `consume ~` to read+drain. `~name = expr` is the EXPLICIT-named accumulator form (use sparingly — it usually means you wanted `const <name> = expr` for derived reactive state, NOT a pipeline accumulator).
+
+```scrml
+${
+  function tokenize(input) {
+    while ((m = TOKEN_RE.exec(input)) is some) {     // §49 while + §50 assign-as-expr + §42 is some
+      lift { kind: m[1], value: m[2] }              // §10 lift into ~ — accumulates tokens
+    }
+    return ~                                        // §32 consume the accumulator
+  }
+}
+```
+
+That single function uses ALL FOUR features. This is the self-host parser's primary idiom — one canonical shape for "iterate-and-collect" pipelines.
+
+**`while` loops + `break` / `continue` + labels (§49).** The canonical regex-iteration form is `while ((m = re.exec(str)) is some) { ... }`. Adopters who default to `for (item of items)` and never reach for `while` miss the regex/state-machine surface entirely.
+
+```scrml
+${
+  function findFirstMatch(input, patterns) {
+    outer: while (true) {
+      for (let p of patterns) {
+        const m = p.exec(input)
+        if (m is some) {
+          if (m[0].length < 3) continue outer    // labeled continue restarts the outer while
+          return m
+        }
+      }
+      break                                        // exit when no pattern matched
+    }
+    return not
+  }
+}
+```
+
+`break` / `continue` accept optional labels (`outer:` / `inner:`). The `E-LOOP-*` family of error codes (§49.x) guards illegal label targets, bare `break` outside loops, etc.
+
+**Assignment-as-expression (§50).** `(x = expr)` is a value-producing expression. Required for the canonical `while ((m = re.exec(str)) is some)` pattern — the assignment must produce the new value for the loop guard to check. Use **double parens** to disambiguate from declaration syntax (`while ((x = expr))` works; `while (x = expr)` may fire `W-ASSIGN-001` advisory).
+
+```scrml
+let line = ""
+while ((line = readLine()) is some) {              // double-paren assignment-as-expr
+  if (line.startsWith("#")) continue
+  lift parseRow(line)
+}
+return ~
+```
+
+**Why these four together?** They're the self-host compiler's core pipeline vocabulary. scrml's own parser uses `while` + assignment-as-expr to consume tokens; its codegen uses `lift` + `~` to accumulate JS source. Adopters writing similar pipelines (CSV/JSON parsers, custom tokenizers, transform-pipelines) should reach for this cluster rather than JS-style `let result = []; for(...) result.push(x); return result`.
+
+**Anti-pattern.** `~name = expr` for derived reactive state is the canonical mis-reach (§13 traps). If you want a reactive cell whose value derives from other cells, write `const <name> = expr` — `~` is for in-block accumulation pipelines, not reactive state.
+
+See SPEC §10 for `lift`; §32 for `~` accumulator; §49 for `while`/`break`/`continue`/labels; §50 for assignment-as-expression.
+
+### 11.13 Compute-isolation recipe — workers, sidecars, SSE (§43 + §46 + §37)
+
+Three first-class scrml primitives for compute that needs isolation from the main thread:
+
+- **Worker** — nested `<program>` for CPU-intensive work (image processing, parsing large blobs). Restart-never default.
+- **Sidecar** — nested `<program type="sidecar">` for long-running auxiliary processes (background queues, watcher daemons). Restart-on-error default.
+- **SSE (Server-Sent Events)** — `server function*` for one-way server-push streams (live counters, progress bars, real-time feeds). HTTP-based; simpler than `<channel>` for one-way data.
+
+#### Workers — nested `<program>` for CPU isolation (§43 + §46)
+
+```scrml
+<program>
+  <imageProcessor>
+    <#name="processor">
+    <program restart="never">
+      // This inner <program> runs in a Worker — full scrml semantics, isolated from main.
+      ${
+        server function compressImage(blob: Blob, quality: int) {
+          // ... heavy compression work ...
+          return processedBlob
+        }
+      }
+    </program>
+  </imageProcessor>
+
+  // Call into the worker via RPC:
+  ${
+    function uploadAndCompress(file) {
+      const compressed = <#processor>.compressImage(file, 80)   // §43.5 RPC syntax
+      uploadFile(compressed)
+    }
+  }
+</program>
+```
+
+**Key shape:** the inner `<program>` is a complete scrml subprogram — own engines, own state, own server fns. Shared-nothing isolation; no state crosses the boundary (use RPC). The outer references the inner via `<#name>.method()` syntax.
+
+**Supervision (§46) — `restart=` + lifecycle hooks.** Workers default to `restart="never"`. Use `restart="on-error"` for sidecars + `restart="always"` for daemon-style processes. Configure max-restart-per-window via `max-restarts="3" within="1m"`.
+
+```scrml
+<imageProcessor restart="never" autostart="false">
+<sidecar restart="on-error" max-restarts="3" within="5m">
+```
+
+**Lifecycle events — `when ... from <#name>`** (§46). Listen for worker-lifecycle changes from outside the worker:
+
+```scrml
+${
+  when started from <#processor> {
+    @workerReady = true
+  }
+  when crashed(err) from <#processor> {
+    fail WorkerError::Crashed(err)
+  }
+}
+```
+
+#### Sidecars — nested `<program type="sidecar">` for auxiliary processes
+
+```scrml
+<background>
+  <#name="indexer">
+  <program type="sidecar" restart="on-error" autostart="true">
+    ${
+      server function indexNewDocs() {
+        // ... runs periodically; restarted-on-error per supervisor config ...
+      }
+    }
+  </program>
+</background>
+```
+
+Sidecars are workers with different supervision defaults (restart-on-error vs restart-never) + the `type="sidecar"` attribute makes the intent explicit. Same RPC + lifecycle-event surface as workers.
+
+#### SSE — `server function*` for one-way server push (§37)
+
+When you need the SERVER to push updates to the CLIENT without bidirectional channel overhead (live counters, progress bars, log streams), use a `server function*` generator. The compiler emits a `text/event-stream` GET route + an `EventSource`-based client stub.
+
+```scrml
+<program>
+  ${
+    server function* liveCount() {
+      let n = 0
+      while (true) {
+        yield { count: n }
+        n = n + 1
+        sleep(1000)
+      }
+    }
+  }
+
+  <p>Live counter: ${liveCount().count}</p>     // client auto-subscribes
+</program>
+```
+
+**SSE vs `<channel>` choice point:**
+
+| Need | Use |
+|---|---|
+| One-way server → client push | **SSE** (`server function*`) — lighter, HTTP-native, auto-reconnect |
+| Two-way / multi-client broadcast | **`<channel>`** (file-level WebSocket) — see §11.3 |
+| File-level state shared across all clients | **`<channel>`** — channels own the shared-state |
+| Per-client computed stream | **SSE** — each client gets its own generator instance |
+
+**Limits.** SSE composes three primitives (`server`, `function*`, `yield`) — see SPEC §37 + §13 for the generator policy. `function*` (without `server`) for client-side iterators is a separate surface; server-side generator semantics are tighter (no infinite memory growth; the runtime backpressure-paces yield).
+
+See SPEC §43 for nested `<program>`; §46 for worker lifecycle + supervision; §37 for SSE `server function*`; §13 for generator policy.
+
 ---
 
 ## 12. Components — the multi-instance vehicle
