@@ -149,9 +149,9 @@
   "examples/09-error-handling.scrml": {
     "KIND-NAME": 3,
     "FIELD-SHAPE": 17,
-    "MISSING-FIELD": 35,
+    "MISSING-FIELD": 37,
     "EXTRA-FIELD": 19,
-    "COUNT-LENGTH": 2,
+    "COUNT-LENGTH": 3,
     "SPAN-COORD": 68
   },
   "examples/10-inline-tests.scrml": {
@@ -1484,9 +1484,9 @@
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-inside-error-arm-017.scrml": {
     "KIND-NAME": 2,
     "FIELD-SHAPE": 8,
-    "MISSING-FIELD": 17,
+    "MISSING-FIELD": 18,
     "EXTRA-FIELD": 12,
-    "COUNT-LENGTH": 2,
+    "COUNT-LENGTH": 3,
     "SPAN-COORD": 10
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-inside-fn-007.scrml": {
@@ -1830,7 +1830,7 @@
     "FIELD-SHAPE": 7,
     "MISSING-FIELD": 17,
     "EXTRA-FIELD": 13,
-    "COUNT-LENGTH": 2,
+    "COUNT-LENGTH": 3,
     "SPAN-COORD": 8
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-inside-fn-005.scrml": {
