@@ -162,6 +162,25 @@ Pattern:
 
 **Errors-as-states is the canonical lifting:** at Tier 1+, the `!{}` handler at the call site does one thing — route each error variant into the right Phase variant. The error becomes a state in the Phase enum. `<isError>` + `<errorMsg>` cells are anti-patterns; the failure modes live in the type.
 
+**`<errorBoundary>` for render-fallback (§19.11; S135 cluster J catch-up, F-032).** When an `!{}` handler can't recover at the call site — or when a sub-component throws an uncaught error during render — `<errorBoundary>` provides the render-fallback. It scopes to its body subtree:
+
+```scrml
+<errorBoundary renders=.Fallback>
+    <UserList users=@users/>
+    <ContactList contacts=@contacts/>
+</errorBoundary>
+
+<errorBoundary.Fallback>
+    Something went wrong loading this section. <button onclick=reset>Try again</>
+</>
+```
+
+`renders=.Fallback` names which variant of the boundary's enum to render when an error escapes the body subtree. The boundary's enum is auto-synthesized (variants: `.Ok` for normal render, `.Fallback` for error). Multiple boundaries can nest — error propagates UP until a boundary catches it. The boundary does NOT swallow the error; the diagnostic + stack trace are routed to scrml's logging surface.
+
+**Implicit per-handler transactions (§19.10.5).** Inside an `!{}` handler arm, scrml wraps the SQL writes the arm performs in an implicit transaction. If the handler arm fails (re-throws OR a downstream `!{}` doesn't catch), the SQL writes ROLL BACK automatically. This is the canonical safety property — adopters get atomic-rollback semantics without `BEGIN`/`COMMIT` ceremony. Per-handler-tx is opt-OUT (annotation `@nosql-tx` on the handler arm) for the rare case you want to commit-on-error.
+
+**Body-split / CPS (§19.9.3 — footnote).** Server-function calls inside non-top-level positions (inside `if` branches, inside `match` arms, inside loop bodies) are compiled-to-CPS — the compiler splits the function body at server-call boundaries and routes the continuation through a stub. Multi-batch CPS (§19.9.9, S114 Ext 1) extends this to multi-server-call sequences. Adopters never write the CPS form — it's compiler-managed; the source stays uncolored. Failures route through `!{}` handlers naturally; the CPS plumbing is invisible.
+
 **Function forms — `function` / `fn` / `server function` / `pure` (§48 + §33; S135 cluster M catch-up, F-049 + F-039).**
 
 scrml has FOUR function-declaration shapes:

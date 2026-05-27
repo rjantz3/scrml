@@ -613,6 +613,67 @@ type Playback:enum = { Paused, Running, Buffering }
 
 See SPEC §51.0.Q for hierarchy / nested engines; §54 for nested substate grammar + state-local transitions + field narrowing + terminal states.
 
+### 4.12 Temporal engine surfaces — `<onTimeout>` + `<onIdle>` + computed delays + named timers (§51.0.M + §51.0.R)
+
+Engines have a temporal vocabulary for "fire a transition after N ms." Two scopes — per-state and engine-wide — plus computed delays and cancellable named timers.
+
+**`<onTimeout after=DURATION to=.Variant/>`** — per-state-child timer. Self-closing. Lives inside a state-child body; fires after the duration if that state is still current. The `to=` target is validated against the state-child's `rule=` (must be in set, or `rule=*`).
+
+```scrml
+type Phase:enum = { Idle, Loading, Loaded, TimedOut }
+
+<engine for=Phase initial=.Idle>
+  <Idle rule=.Loading>
+    <button onclick=${@phase = .Loading}>Load</>
+  </>
+
+  <Loading rule=(.Loaded | .TimedOut)>
+    <onTimeout after=5s to=.TimedOut/>      <!-- auto-transition after 5s -->
+    "Loading…"
+  </>
+
+  <Loaded>Done.</>
+  <TimedOut>Timed out — try again.</>
+</>
+```
+
+DURATION accepts `Nms` / `Ns` / `Nm` / `Nh`. Reset-on-reentry per §51.12.4 — re-entering a state with an `<onTimeout>` restarts the timer. Multiple `<onTimeout>` per state-child are legal (each fires independently).
+
+**`<onIdle after=DURATION to=.Variant/>`** — engine-wide idle watchdog. Self-closing. Engine-root scope only (`E-IDLE-MISPLACED` inside a state-child body). One per engine maximum (`E-IDLE-DUPLICATE`). Armed at module-init; **RESET on every successful transition** (any direct write OR advance). Fires after N ms of silence. The watchdog write goes through the standard write path — subject to the current state's `rule=` validation (the engine still respects its own transition contract).
+
+```scrml
+<engine for=SessionState initial=.Active>
+  <onIdle after=15m to=.LoggedOut/>            <!-- 15 min of silence → log out -->
+
+  <Active rule=.LoggedOut>${@user/}'s dashboard</>
+  <LoggedOut>Session expired. <button onclick=${@session = .Active}>Resume</></>
+</>
+```
+
+**Computed-delay form (§51.12.3.1) — `after=${expr}<unit>`** — accepts any non-negative-number expression. Negative/NaN clamps to 0; the runtime applies `Math.round`. Works on both `<onTimeout>` (engine) and `<onIdle>`:
+
+```scrml
+<onTimeout after=${@retryDelayMs}ms to=.Retrying/>
+<onIdle after=${@sessionTimeoutMin}m to=.LoggedOut/>
+```
+
+Static literals retain their constant-fold path (zero runtime overhead). Computed-form rules opt out of JSON-encoded chained auto-rearm (multi-step computed→computed chains require user-driven writes — single-step works fine).
+
+**Named timers + `cancelTimer("name")` (S79; §51.0.M.1)** — optional `name=IDENT` attribute on `<onTimeout>` makes the timer addressable. The `cancelTimer("name")` builtin cancels a specific named timer; useful for "user took action, cancel the auto-redirect" patterns.
+
+```scrml
+<Saving rule=(.Saved | .Error)>
+  <onTimeout name="autoRedirect" after=3s to=.Saved/>
+  <button onclick=cancelTimer("autoRedirect")>Wait — stay on this screen</>
+</>
+```
+
+`name=` must match `/^[A-Za-z_][A-Za-z0-9_]*$/`. Unknown names are runtime no-ops (matches `clearTimeout(undefined)` browser semantics). v1 limitation: `cancelTimer()` works inline in event-handler call-ref attributes (`onclick=cancelTimer("X")`) only; expression-form (`onclick=${ cancelTimer("X") }`) falls through to ordinary emission and runtime-fails.
+
+**Tree-shake.** Engines with zero `<onTimeout>` / `<onIdle>` declarations elide the timer machinery entirely — no runtime cost on engines that don't use it.
+
+See SPEC §51.0.M for `<onTimeout>`; §51.0.R for `<onIdle>`; §51.12 for the timer runtime backbone; §51.12.3.1 for computed-delay; §51.0.M.1 for named timers.
+
 ---
 
 ## 5. The auto-await rule — your strongest instinct will be wrong
@@ -795,6 +856,58 @@ ${
 }
 <button onclick=startOver()>Sign up another</button>
 ```
+
+### 6.8 Error handling beyond validators — `<errorBoundary>` + per-handler transactions (§19)
+
+The validator surface above (§6.1-§6.7) covers FORM-DATA errors (the user's input is invalid). For OPERATIONAL errors — a server function fails, a SQL query errors, a render-time exception escapes — scrml has two distinct mechanisms.
+
+**(1) `fail` / `!{}` at the call site (§19.3-§19.5).** A failable function declares its error type and surfaces failures with `fail`. The call site MUST exhaustively handle them via `!{}`.
+
+```scrml
+type LoadError:enum = { Network(msg: string), Empty, Unauthorized }
+
+server function loadDashboard()! -> LoadError {
+    const rows = ?{`SELECT * FROM dashboard WHERE user_id = ${@currentUser.id}`}.all()
+    if (rows.length == 0) fail LoadError::Empty
+    return rows
+}
+
+${
+  const rows = loadDashboard() !{
+    | ::Network msg     -> { @phase = .Error(msg); return }
+    | ::Empty           -> { @phase = .Empty;       return }
+    | ::Unauthorized    -> { navigate("/login", .Hard); return }
+  }
+  @phase = .Loaded(rows)
+}
+```
+
+Variants are exhaustive — missing one fires `E-FAIL-NOT-EXHAUSTIVE`. Variants surface in the engine's enum as states (the errors-as-states pattern from §11.5 loading recipe).
+
+**(2) `<errorBoundary>` for render-time fallback (§19.11).** When an error escapes the body subtree at render time — e.g., a server fn throws inside a deeply-nested component, or a derived expression fails on bad upstream data — `<errorBoundary>` catches it:
+
+```scrml
+<errorBoundary renders=.Fallback>
+    <Dashboard/>
+    <RecentActivity/>
+    <ChatPanel/>
+</errorBoundary>
+
+<errorBoundary.Fallback>
+    <div class="error">
+        Couldn't load this section. The error has been logged.
+        <button onclick=${@_boundary.retry()}>Try again</>
+    </div>
+</>
+```
+
+`renders=.Fallback` names which auto-synthesized variant to render when an error propagates from the body. Boundaries nest — errors bubble UP until caught. The boundary does NOT swallow the error; it's routed to scrml's logging surface for diagnosis. `@_boundary.retry()` is an auto-synthesized control to re-mount the body subtree (re-runs the failing path with fresh state).
+
+**Implicit per-handler transactions (§19.10.5).** Inside an `!{}` handler arm, any SQL writes the arm performs are wrapped in an implicit transaction. If the arm fails (re-throws OR a downstream `!{}` doesn't catch), the writes ROLL BACK automatically. Atomic-rollback semantics without `BEGIN`/`COMMIT` ceremony — the canonical safety property. To opt-OUT (commit-on-error), annotate the handler arm with `@nosql-tx`.
+
+**Body-split / CPS — compiler-managed (§19.9; one-line cross-ref).** Server-function calls inside non-top-level positions (inside `if`, `match`, loop bodies) compile-to-CPS — the compiler splits the function body at server-call boundaries. Multi-batch CPS (§19.9.9, S114 Ext 1) extends this. Adopters never write the CPS form; it's invisible at source. Failures route through `!{}` naturally.
+
+**`test-bind` for failure-injection in tests (§19.12, S74).** The `test-bind <serverFnName> = <handler>` declaration replaces a server-fn call with a test-supplied handler at compile time. Zero runtime cost (production binary unchanged). Use for testing error-path branches without touching the database.
 
 ---
 
