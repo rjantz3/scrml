@@ -314,6 +314,27 @@ See SPEC §14.12 for the full normative specification.
 
 ---
 
+### 3.3 Function forms — `function` / `fn` / `server function` / `pure` (§48 + §33)
+
+scrml has FOUR function-declaration shapes, each with distinct semantics. Pick the one that matches your intent; the compiler enforces the discipline.
+
+| Form | Where it can fire side effects | What the compiler enforces | Example |
+|---|---|---|---|
+| `function` | client-side: DOM writes, state mutation, event handlers, transition triggers | nothing extra — the workhorse form | `function handleClick() { @count = @count + 1 }` |
+| `fn` (= `pure function`) | nowhere — body is pure (§33.6 S32: `fn` ≡ `pure function`) | no SQL, no DOM, no outer-scope mutation, no non-determinism (`Date.now()`, `Math.random()`), no async; must return a value at every path | `fn double(n: int) -> int { return n * 2 }` |
+| `server function` | server-side: SQL, file I/O, env vars; auto-bound to a route | server-only resources allowed; client call is compiled to a fetch | `server function loadUsers() { return ?{`SELECT * FROM users`}.all() }` |
+| `pure function` | nowhere — synonym for `fn`; explicit form | identical to `fn`; `pure fn` is REDUNDANT and fires `W-PURE-REDUNDANT` | `pure function double(n: int) -> int { return n * 2 }` |
+
+**Reach discipline (Pillar 5b):** when computing a value with no side effects, use `fn`. The discipline is signal: the call site reads as "this is a calculation, not a state machine." `function` is the escape hatch for impure work — event handlers, complex DOM-coupled logic, transitions.
+
+**Mutual recursion + hoisting (§48.6.4, S98):** `fn` declarations at file scope hoist exactly like `function`. Mutual recursion is supported without forward-ref ceremony: `fn isEven(n) -> bool { return n == 0 ? true : isOdd(n - 1) }` next to `fn isOdd(n) -> bool { ... isEven(n - 1) ... }` compiles clean. The `pinned fn` modifier opts a `fn` OUT of hoisting (forward-ref becomes `E-STATE-PINNED-FORWARD-REF`).
+
+**`lift` inside `fn` — `E-SYNTAX-002`.** A `fn` cannot `lift` markup; it must `return` it (markup is a value per Pillar 1). Reach for `function` (or `${ ... lift ... }` in a logic block) when you need to lift.
+
+See SPEC §48 for the full `fn` discipline; §33 for `pure` keyword semantics; §6.1 of the PA primer for the fn-vs-function decision matrix.
+
+---
+
 ## 4. Engines — the centerpiece of v0.next
 
 An **engine** is scrml's name for a state machine that owns part of (or all of) your UI. Engines are how the language makes the north star (UI as a fully-handled state machine) load-bearing rather than aspirational.
@@ -548,6 +569,49 @@ ${
 - Initial value computed from source at engine-init time. Compile-error if the derived expression has no defined value for the source's `initial=` state.
 - Chained derivation legal (`A → B → C`). Cycles caught at compile time.
 - For plain (non-engine) derived state, use `const <derived> = expr` from §3.1 — `derived=` is engine-only.
+
+### 4.11 Nested substates — engines inside engines (§51.0.Q + §54)
+
+When a state-child has its own internal state machine — a composite state — declare an `<engine>` inside its body. The outer state-child becomes a **composite state-child**; the inner engine has full engine semantics (own `for=`, `initial=`, state-children).
+
+```scrml
+type Mode:enum  = { Idle, Playing }
+type Playback:enum = { Paused, Running, Buffering }
+
+<engine for=Mode initial=.Idle>
+
+  <Idle rule=.Playing>
+    <button onclick=${@mode = .Playing}>Start</>
+  </>
+
+  <Playing rule=.Idle history>                     // composite state-child + history attribute
+    <engine for=Playback initial=.Paused>
+      <Paused rule=.Running>
+        <button onclick=${@playback = .Running}>Play</>
+      </>
+      <Running rule=.Paused|.Buffering>
+        <button onclick=${@playback = .Paused}>Pause</>
+        <onTimeout after=200ms to=.Buffering/>
+      </>
+      <Buffering rule=.Running/>
+    </>
+    <button onclick=${@mode = .Idle}>Stop</>
+  </>
+
+</>
+```
+
+**Lifecycle coupling.** The inner engine is initialized on outer state-child entry; suspended on outer exit. **Singleton invariant** preserved: outer × 1 = 1 inner instance (per the Machine Cohesion footnote, §51.0.K).
+
+**`history` attribute.** On a composite state-child means: "on outer re-entry, restore the inner engine's last state (instead of starting at inner `initial=`)." Shallow only. Tree-shakeable when no engine declares it. Target form: `rule=.Playing.history` or `@mode = .Playing.history` (vs bare `.Playing` which restarts inner from `initial=`).
+
+**`internal:rule=`** prefix on a composite state-child: alternative to canonical `rule=`. Internal transitions DON'T exit/re-enter the composite (inner-engine lifecycle preserved; no history-write/read; composite `<onTransition>` doesn't fire). Both can coexist on the same composite.
+
+**Parent-rule cascade dispatch:** writes to the outer engine's variable from inside a composite are validated against the COMPOSITE outer state-child's `rule=`. Writes to the inner-engine variable from inside inner state-children validated against inner state-child's `rule=`. Standard §51.0.F mechanic applied per-variable.
+
+**Where engines can NOT live.** Component bodies (`E-COMPONENT-ENGINE-SCOPE`); function/snippet bodies. Engines live at file scope OR inside another engine's state-child body — nowhere else. The Pillar 5 reason: no per-kind mini-DSLs (avoiding `<region>`/`<sub-engine>` keyword surface preserves tooling-uniformity — CLI promotion + migration stay context-blind).
+
+See SPEC §51.0.Q for hierarchy / nested engines; §54 for nested substate grammar + state-local transitions + field narrowing + terminal states.
 
 ---
 
@@ -1187,6 +1251,28 @@ ${
 
 For multi-file apps, `import`/`export` works for **types, helper functions, AND components** across `.scrml` files. A file with only `${ export ... }` blocks (no markup, no CSS) is auto-detected as a **pure-type file** and emits no HTML/CSS — only a JS module.
 
+**Two export forms for components (§21.2 — S135 cluster M catch-up, F-034):**
+
+```scrml
+// Form 1 — structural component definition (the component-as-state-tree form)
+export <UserCard props={ user: User }>
+  <div class="card">
+    <h2>${@user.name}</h2>
+    <p>${@user.email}</p>
+  </>
+</>
+
+// Form 2 — expression-position component (the const-binding form)
+export const <userCard> = <article props={ user: User }>
+  <h2>${@user.name}</h2>
+  <p>${@user.email}</p>
+</article>
+```
+
+Both forms compile to the same module export. **Form 1** reads as "this file IS this component" and is the canonical shape for top-level component-per-file organization. **Form 2** is for component-as-value (passed to other components, stored in a registry, dispatched by computation). The import side is the same: `import { UserCard } from './user-card.scrml'`.
+
+**Pure-type files** (auto-detected): if a `.scrml` file contains only `${ ... export type / export const fn / export function ... }` blocks and no markup or `#{}` CSS, the compiler emits ONLY a JS module — no HTML, no CSS, no SSR scaffold. Useful for shared type definitions (`type User:struct = {...}`), helper functions, and constants. The detection is automatic; no manifest entry needed.
+
 ### 11.8 Middleware — `<program>` attrs + `handle()`
 
 Most apps need ZERO middleware code. The common 80% is single attributes on `<program>`:
@@ -1407,6 +1493,7 @@ ${
 - **`navigate(path, .Hard)` is the 302 server-redirect mode** (§20). Default mode `.Soft` is client-side route swap; `.Hard` forces a server redirect (useful post-login, post-logout, etc.).
 - **Tailwind utility classes work** (§26), including variant prefixes (`hover:`, `md:`, `dark:`) and arbitrary values (`grid-cols-[1fr_2fr]`, `bg-[#1a1a1a]`). Unrecognized classes fire `W-TAILWIND-UNRECOGNIZED-CLASS` lint — typos surface at compile time, not silent.
 - **`I-MATCH-PROMOTABLE` info-lint nudges Tier-0 lift** (§56). When you write `if (@phase == .X) … else if (@phase == .Y) …` chains, the lint suggests a `<match for=Phase on=@phase>` block. The `bun scrml promote --match <file>[:line]` CLI does the mechanical rewrite for you — state-children body content carries forward verbatim; the wrapper swap is the commitment moment.
+- **`pure fn` is REDUNDANT** (§33.6, S32 ratification — `fn` ≡ `pure function`). Either form works, but writing `pure fn` or `pure function` when `fn` alone suffices fires `W-PURE-REDUNDANT`. Use plain `fn` for pure compute; reach for the explicit `pure function` form only when emphasizing purity at the declaration site is editorially worth the extra keyword.
 
 ---
 

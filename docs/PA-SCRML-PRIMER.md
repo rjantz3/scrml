@@ -162,6 +162,19 @@ Pattern:
 
 **Errors-as-states is the canonical lifting:** at Tier 1+, the `!{}` handler at the call site does one thing — route each error variant into the right Phase variant. The error becomes a state in the Phase enum. `<isError>` + `<errorMsg>` cells are anti-patterns; the failure modes live in the type.
 
+**Function forms — `function` / `fn` / `server function` / `pure` (§48 + §33; S135 cluster M catch-up, F-049 + F-039).**
+
+scrml has FOUR function-declaration shapes:
+
+- **`function`** — the workhorse; client-side; can fire any side effects (DOM, state mutation, event handlers).
+- **`fn`** — pure (§33.6 S32: `fn` ≡ `pure function`); body prohibitions: no SQL, no DOM, no outer-scope mutation, no non-determinism (`Date.now()`/`Math.random()`), no async, must return at every path. `lift` inside `fn` is `E-SYNTAX-002` — `fn` returns markup, never lifts.
+- **`server function`** — server-side; can use SQL, file I/O, env vars; auto-bound to a route (§12 inference); client call compiles to a fetch.
+- **`pure function`** — synonym for `fn`. Explicit form. `pure fn` is REDUNDANT and fires `W-PURE-REDUNDANT`.
+
+**Mutual recursion + hoisting (§48.6.4, S98)** — `fn` declarations at file scope hoist exactly like `function`; mutual recursion works without forward-ref ceremony. `pinned fn` opts out (forward-ref becomes `E-STATE-PINNED-FORWARD-REF`).
+
+**Reach discipline (Pillar 5b)** — when computing a value with no side effects, reach for `fn`. The call site reads as "this is a calculation, not a state machine." `function` is the impure-work escape hatch.
+
 ### §6.1 No `async` / `await` (S114 — parallel rule to "no try/catch")
 
 **Added 2026-05-21 (S114 ratification, user-voice append).** scrml has **no `async` / `await` keywords** — language-wide standing rule. Public claim. Surface a retraction if anyone slips and uses it. Reasons (user-voice S114 verbatim): *"I hate leaky abstractions and colored functions."* The body-split / CPS mechanism (A9 / Insight 26 / S72 ratified) is scrml's canonical async surface — compiler-managed, uncolored at source.
