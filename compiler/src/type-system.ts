@@ -13532,16 +13532,31 @@ function checkLifecycleFieldAccess(
    * Extract `(bindingName, fieldName, isWrite, matchIndex)` triples from a
    * source-text fragment, in source order. Writes are detected via
    * `FIELD_WRITE_RE`; remaining `obj.field` references are reads.
+   *
+   * Q6-narrow (S134) — when called from a context that has already scanned
+   * the text for `reset()` calls, pass `excludeSpans` to suppress phantom
+   * read matches inside reset call text (e.g., `reset(@u.field)` shouldn't
+   * be matched as a read of `u.field`).
    */
   function extractAccesses(
     text: string,
+    excludeSpans?: Array<{ start: number; end: number }>,
   ): Array<{ binding: string; field: string; isWrite: boolean; idx: number }> {
     const result: Array<{ binding: string; field: string; isWrite: boolean; idx: number }> = [];
     const writeIndices = new Set<number>();
 
+    function inExcludeSpan(idx: number): boolean {
+      if (!excludeSpans) return false;
+      for (const s of excludeSpans) {
+        if (idx >= s.start && idx < s.end) return true;
+      }
+      return false;
+    }
+
     FIELD_WRITE_RE.lastIndex = 0;
     let wm: RegExpExecArray | null;
     while ((wm = FIELD_WRITE_RE.exec(text)) !== null) {
+      if (inExcludeSpan(wm.index)) continue;
       const binding = wm[1];
       const field = wm[2];
       writeIndices.add(wm.index);
@@ -13553,6 +13568,7 @@ function checkLifecycleFieldAccess(
     while ((rm = FIELD_REF_RE.exec(text)) !== null) {
       // Skip if this `obj.field` is the LHS of a write we already recorded.
       if (writeIndices.has(rm.index)) continue;
+      if (inExcludeSpan(rm.index)) continue;
       result.push({ binding: rm[1], field: rm[2], isWrite: false, idx: rm.index });
     }
 
@@ -13598,6 +13614,120 @@ function checkLifecycleFieldAccess(
     return Array.from(seen).join(" ");
   }
 
+  // Q6-narrow (S134) — §6.8.3: reset-target extraction + state revert helpers.
+  //
+  // A reset-expr target is an ExprNode rooted at an `@<cell>` reactive ref.
+  // The grammar:
+  //   reset(@cell)               → target.kind = "ident", name = "cell" (with `@` prefix-marker)
+  //   reset(@cell.field)         → target.kind = "member", object = ident(cell), property = ident(field)
+  //   reset(@cell.a.b)           → nested member chain
+  // The parser strips `@` from the cell IdentExpr.name, surfacing it via the
+  // structured `kind === "reactive-ref"` discriminant OR via the `name`
+  // containing the bare cell name (depending on the parse path). We accept
+  // both forms — extract the rightmost member chain root, taking the cell name
+  // and the dotted field path.
+  function extractResetTarget(target: { kind?: string; name?: string; object?: unknown; property?: unknown }): { cell: string | null; fieldPath: string[] } {
+    const fieldPath: string[] = [];
+    // Walk down the member chain, collecting property names.
+    let node: { kind?: string; name?: string; object?: unknown; property?: unknown } | null = target;
+    while (node && node.kind === "member") {
+      const prop = node.property as { kind?: string; name?: string } | undefined;
+      if (prop && typeof prop.name === "string") fieldPath.unshift(prop.name);
+      node = (node.object as { kind?: string; name?: string; object?: unknown; property?: unknown } | undefined) ?? null;
+    }
+    // The root should be an IdentExpr / ReactiveRef carrying the cell name.
+    // The parser commonly emits `@cell` as a reactive-ref node with `name` set
+    // to the bare cell name, or as an IdentExpr where the `@` is part of the
+    // surrounding parsing context. Accept either via the `name` field.
+    if (node && typeof node.name === "string") {
+      // Strip leading `@` if present in the name (defensive).
+      const cellName = node.name.startsWith("@") ? node.name.slice(1) : node.name;
+      return { cell: cellName, fieldPath };
+    }
+    return { cell: null, fieldPath };
+  }
+
+  /**
+   * Handle a structured reset-expr against the struct-field tracker.
+   *
+   * Decision logic:
+   *   - target = bare `@cell`: reset every lifecycle field of `cell` to its
+   *     initial state (per §6.8.2 "every field of the compound").
+   *   - target = `@cell.field`: reset that single field to its initial state.
+   *   - target = `@cell.a.b...`: Q6-narrow conservatively handles the first
+   *     field segment (`a`); deeper nesting is filed as follow-up.
+   */
+  function handleResetExpr(target: { kind?: string; name?: string; object?: unknown; property?: unknown }): void {
+    const { cell, fieldPath } = extractResetTarget(target);
+    if (!cell) return;
+    applyResetToCellField(cell, fieldPath);
+  }
+
+  /**
+   * Text-based fallback for the struct-field tracker. Matches `reset(@cell)` /
+   * `reset(@cell.field)` shapes in bare-expr text and applies the same revert
+   * logic as the structured handler. Covers escape-hatch text paths where the
+   * parser didn't produce a structured `reset-expr` exprNode.
+   *
+   * Returns the matched span list so the caller can suppress phantom read
+   * matches inside the reset call text when invoking `extractAccesses`.
+   */
+  function handleResetTextMatches(bareText: string): Array<{ start: number; end: number }> {
+    const spans: Array<{ start: number; end: number }> = [];
+    const RESET_CALL_RE = /\breset\s*\(\s*@([A-Za-z_$][A-Za-z0-9_$]*)((?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*)\s*\)/g;
+    let m: RegExpExecArray | null;
+    while ((m = RESET_CALL_RE.exec(bareText)) !== null) {
+      const cell = m[1];
+      const pathPart = m[2] ?? "";
+      const fieldPath = pathPart
+        ? pathPart.split(".").map(s => s.trim()).filter(Boolean)
+        : [];
+      applyResetToCellField(cell, fieldPath);
+      spans.push({ start: m.index, end: m.index + m[0].length });
+    }
+    return spans;
+  }
+
+  /**
+   * Apply the reset-revert semantic to a (cell, fieldPath) target. The reset
+   * value for a struct field without `default=` is the field's init expression
+   * value (per §6.8.2); since `initialFieldStates` is pre-computed via
+   * seedInitialFromObjectLiteral (init value → "pre"/"post"), the reset
+   * REVERT IS the initial state. For each affected field:
+   *   - If the initial state was "post" (field initialised to a B-shape value):
+   *     state stays / is set to "post" (reset re-applies the post-shape value).
+   *   - If the initial state was "pre" OR absent (field initialised to `not`):
+   *     state reverts to "pre" — subsequent reads re-fire E-TYPE-001 per §14.12.
+   */
+  function applyResetToCellField(cell: string, fieldPath: string[]): void {
+    const structName = structInstances.get(cell);
+    if (!structName) return;
+    const lifecycleFields = lifecycleRegistry.get(structName);
+    if (!lifecycleFields) return;
+    const perField = fieldStates.get(cell);
+    if (!perField) return;
+    const initialPerField = initialFieldStates?.get(cell);
+
+    function resetOne(fieldName: string): void {
+      if (!lifecycleFields!.has(fieldName)) return;
+      // The reset target: initial state if recorded, else "pre" (the walker's
+      // default for un-recorded lifecycle fields).
+      const seeded = initialPerField?.get(fieldName);
+      perField!.set(fieldName, seeded ?? "pre");
+    }
+
+    if (fieldPath.length === 0) {
+      // reset(@cell) — whole-compound reset; revert every lifecycle field.
+      for (const fieldName of lifecycleFields.keys()) resetOne(fieldName);
+    } else {
+      // reset(@cell.field[...]) — single-field reset; revert just the named field.
+      // Q6-narrow conservatively uses fieldPath[0] (the first segment after the
+      // cell) — adequate for the canonical multi-level case where the leaf is
+      // one struct hop away. Deeper-nesting reset is filed as follow-up.
+      resetOne(fieldPath[0]);
+    }
+  }
+
   function walk(nodes: ASTNodeLike[]): void {
     for (const stmt of nodes) {
       if (!stmt || typeof stmt !== "object") continue;
@@ -13632,10 +13762,54 @@ function checkLifecycleFieldAccess(
         continue;
       }
 
+      // Q6-narrow (S134) — §6.8.3: structured reset-expr recognition.
+      // `reset(@u.passwordHash)` parses to a `bare-expr` whose `exprNode` is
+      // `{ kind: "reset-expr", target: ExprNode }`. The target ExprNode is a
+      // MemberExpr / IdentExpr chain rooted at `@u`. We extract the cell name
+      // and dotted field path from the target.
+      //
+      // For each (cell, field-path) target:
+      //   - `reset(@u)` (no field path) — iterate every lifecycle field of `u`,
+      //     reset each to its initial state (per §6.8.2 "applies the rule above
+      //     to every field of the compound in declaration order").
+      //   - `reset(@u.passwordHash)` (single field) — reset just that field
+      //     to its initial state (per §6.8.2 multi-level + B22 ratification).
+      //   - `reset(@u.foo.bar)` (multi-level into nested compound) — Q6-narrow
+      //     conservatively handles the FIRST field; deeper nesting is rare
+      //     and currently out of B-prereq's struct-field tracker depth-scope.
+      //
+      // The "initial state" of a field is `initialFieldStates[cell][field]`
+      // (built by seedInitialFromObjectLiteral / recordInitialFromAttrs/Text
+      // at collection time). For fields without `default=` (struct fields
+      // don't carry `default=` at the field-decl level), this is correctly
+      // the field's init expression classification — see §6.8.1 + §6.8.2.
+      // `resetSpans` accumulates positions of any `reset(@cell.field)` text
+      // matches found by the text-based fallback; passed to extractAccesses
+      // below to suppress phantom read fires inside reset call text.
+      let resetSpans: Array<{ start: number; end: number }> = [];
+
+      if (stmt.kind === "bare-expr") {
+        const exprNode = (stmt as Record<string, unknown>).exprNode as
+          { kind?: string; target?: { kind?: string; name?: string; object?: unknown; property?: unknown } }
+          | undefined;
+        if (exprNode && exprNode.kind === "reset-expr" && exprNode.target) {
+          handleResetExpr(exprNode.target);
+          continue;
+        }
+        // Text-based fallback: scan the bare-expr text for `reset(@cell.field)`.
+        // Covers cases where the parser didn't structurally produce a reset-expr
+        // (e.g., escape-hatch raw text). Whitespace-tolerant; matches V5-strict
+        // canonical shapes.
+        const bareText = statementText(stmt);
+        if (bareText && /\breset\s*\(/.test(bareText)) {
+          resetSpans = handleResetTextMatches(bareText);
+        }
+      }
+
       const text = statementText(stmt);
 
       if (text) {
-        const accesses = extractAccesses(text);
+        const accesses = extractAccesses(text, resetSpans.length > 0 ? resetSpans : undefined);
         for (const acc of accesses) {
           const perField = fieldStates.get(acc.binding);
           if (!perField) continue; // binding not tracked / has no lifecycle fields
@@ -14319,6 +14493,24 @@ function checkLifecycleBindingAccess(
    * canonical form for cell access; messages reflect that.
    */
   bindingSourceLabel?: string,
+  /**
+   * Q6-narrow (S134) — §6.8.3: per-binding pre-computed reset value classification.
+   * Built by the cell-value-typed Shape 1 tracker from each cell's `default=`
+   * attribute expression (or, when absent, the cell's init expression). The
+   * walker consults this map on every `reset(@cell)` / `reset(@cell.field)`
+   * call to determine whether the reset reverts state to "pre" (when the
+   * reset value satisfies the pre-type) or maintains/sets "post" (when the
+   * reset value satisfies the post-type). `null` entries mean the reset
+   * value is unclassifiable; the state is left unchanged. Bindings absent
+   * from this map see reset calls as no-ops (the walker preserves current
+   * state — the fn-return tracker does not use reset semantics).
+   *
+   * Cancel-then-apply ordering (§6.8.3 + §6.8.2): the state update applies
+   * AFTER the reset value is conceptually written; the walker's per-statement
+   * sequence handles this implicitly (reset Pass runs before transition + read
+   * passes; subsequent statements observe the post-reset state).
+   */
+  resetValueStates?: Map<string, "pre" | "post" | null>,
 ): void {
   if (!Array.isArray(body) || body.length === 0) return;
   if (bindings.size === 0) return;
@@ -14337,6 +14529,20 @@ function checkLifecycleBindingAccess(
   // `transition(a)`, `transition(  a  )` — yes. `transition(foo(a))` — no.
   // The exact text-shape matters because we extract from raw statement text.
   const TRANSITION_CALL_RE = /\btransition\s*\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\)/g;
+
+  // Q6-narrow (S134) — §6.8.3: detect `reset(@<cellName>)` and
+  // `reset(@<cellName>.<field>.<field>...)` calls in statement text. The
+  // leading `@` distinguishes V5-strict cell access from a bare identifier;
+  // the optional dotted path supports the §6.8.2 multi-level compound-nav
+  // target form. The walker's resetValueStates map (param 7) carries the
+  // per-cell pre-computed reset value classification, which the Pass 0 logic
+  // applies on every match.
+  //
+  // Whitespace-tolerant: `reset(@state)`, `reset(  @state  )`, `reset(@u . field)`.
+  // The pattern intentionally allows whitespace inside the dotted path so
+  // synthetic AST text from the parser (which may insert whitespace around
+  // `.` tokens) still matches.
+  const RESET_CALL_RE = /\breset\s*\(\s*@([A-Za-z_$][A-Za-z0-9_$]*)((?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*)\s*\)/g;
 
   // Detect `<bindingName>.<fieldName>` field access. Bind-scoped — only tracked
   // bindings count.
@@ -14460,6 +14666,46 @@ function checkLifecycleBindingAccess(
   ): void {
     if (!text) return;
 
+    // Q6-narrow (S134) — Pass 0: discover `reset(@<cell>)` / `reset(@<cell>.<f>...)`
+    // calls. Applies the per-cell pre-computed reset-value classification from
+    // `resetValueStates` to update `localStates`. Also records the matched
+    // text spans so Pass 3 (FIELD_ACCESS_RE) can SKIP positions inside reset
+    // call text — without this, `reset(@phase.publishedAt)` would FIELD_ACCESS_RE-
+    // match `phase.publishedAt` as a phantom read, mis-firing
+    // E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED.
+    //
+    // Cancel-then-apply ordering (§6.8.3 + §6.8.2): the state update applies
+    // AFTER the conceptual write of the reset value. Within this Pass we
+    // perform that update directly; subsequent Passes / statements observe
+    // the post-reset state. Multi-call statements (`reset(@a); reset(@b)`)
+    // process in left-to-right textual order via the global regex.
+    //
+    // For the fn-return tracker (no reset semantics), resetValueStates is
+    // undefined; the Pass is effectively a no-op on every match (still records
+    // suppression spans, but the state update branch is gated on
+    // resetValueStates).
+    const resetSpans: Array<{ start: number; end: number }> = [];
+    RESET_CALL_RE.lastIndex = 0;
+    let rm: RegExpExecArray | null;
+    while ((rm = RESET_CALL_RE.exec(text)) !== null) {
+      const cellName = rm[1];
+      // const fieldPath = rm[2]; // currently unused at this tracker level —
+      // the multi-level field reset is handled by the struct-field tracker;
+      // the cell-value tracker treats `reset(@cell.field)` and `reset(@cell)`
+      // identically (any reset of the cell as a whole reverts/maintains the
+      // CELL's per-access transition state).
+      resetSpans.push({ start: rm.index, end: rm.index + rm[0].length });
+      if (resetValueStates && localStates.has(cellName)) {
+        const newState = resetValueStates.get(cellName);
+        if (newState !== undefined && newState !== null) {
+          localStates.set(cellName, newState);
+        }
+      }
+      // If `resetValueStates` is undefined OR the cell isn't tracked OR
+      // the classification is null: leave state unchanged. The reset span
+      // is still recorded so Pass 3 suppresses the phantom read match.
+    }
+
     // Pass 1: discover transition() calls — advance state.
     TRANSITION_CALL_RE.lastIndex = 0;
     let tm: RegExpExecArray | null;
@@ -14486,6 +14732,14 @@ function checkLifecycleBindingAccess(
       const binding = am[1];
       const field = am[2];
       if (writePositions.has(am.index)) continue; // skip LHS-of-write
+
+      // Q6-narrow (S134): skip matches inside reset() call text. Without this,
+      // `reset(@u.field)` would match `u.field` as a phantom read.
+      let insideReset = false;
+      for (const rsp of resetSpans) {
+        if (am.index >= rsp.start && am.index < rsp.end) { insideReset = true; break; }
+      }
+      if (insideReset) continue;
 
       const spec = bindings.get(binding);
       if (!spec) continue; // not a lifecycle binding
@@ -14966,8 +15220,8 @@ function buildCellValueLifecycleMap(
   topNodes: ASTNodeLike[],
   typeRegistry: Map<string, ResolvedType>,
   engineCellNames: Set<string>,
-): Map<string, FnReturnLifecycleSpec & { initIsPostType: boolean }> {
-  const map = new Map<string, FnReturnLifecycleSpec & { initIsPostType: boolean }>();
+): Map<string, FnReturnLifecycleSpec & { initIsPostType: boolean; resetState: "pre" | "post" | null }> {
+  const map = new Map<string, FnReturnLifecycleSpec & { initIsPostType: boolean; resetState: "pre" | "post" | null }>();
 
   function isLifecycleAnnotation(typeExpr: string): boolean {
     const trimmed = typeExpr.trim();
@@ -14997,7 +15251,18 @@ function buildCellValueLifecycleMap(
             //   init `.B` / `Foo.B` → post.
             const initText = readNodeInitText(n);
             const initIsPostType = isInitOfPostType(initText, spec);
-            map.set(cellName, { ...spec, initIsPostType });
+
+            // Q6-narrow (S134) — §6.8.3: compute the reset-value classification.
+            // §6.8.1 semantics: if `default=<expr>` is present, the reset writes
+            // that expression's value; else, the reset re-evaluates the init
+            // expression. Either way the value's TYPE membership (pre vs post)
+            // is static for type-system purposes, so we classify at map-build
+            // time and the walker consults the result on every reset call.
+            const defaultText = readDefaultExprText(n);
+            const resetValueText = defaultText.length > 0 ? defaultText : initText;
+            const resetState = classifyResetValueAgainstSpec(resetValueText, spec);
+
+            map.set(cellName, { ...spec, initIsPostType, resetState });
           }
         }
       }
@@ -15011,6 +15276,82 @@ function buildCellValueLifecycleMap(
 
   visit(topNodes);
   return map;
+}
+
+/**
+ * Q6-narrow (S134) — read the `default=<expr>` attribute text from a
+ * state-decl node. Returns the empty string when no default= attribute is
+ * present. The parser stores the parsed expression on `node.defaultExpr`
+ * (ast-builder.js:4167) — a parsed ExprNode tree; we serialise back to
+ * text via `emitStringFromTree` for the classification heuristic.
+ *
+ * S89 (and S86 corpus-ouroboros) reminder: `default=not` is canonical scrml
+ * for "reset to absence." `default=null` / `default=undefined` are rejected
+ * by the parser via E-SYNTAX-042; this function only ever sees scrml-canonical
+ * forms in well-formed input.
+ */
+function readDefaultExprText(node: ASTNodeLike): string {
+  const defaultExpr = (node as Record<string, unknown>).defaultExpr as
+    { kind?: string; raw?: string } | null | undefined;
+  if (!defaultExpr || typeof defaultExpr !== "object") return "";
+  // Prefer raw text when available (matches the init-text extraction shape).
+  if (typeof defaultExpr.raw === "string" && defaultExpr.raw.length > 0) {
+    return defaultExpr.raw;
+  }
+  if (defaultExpr.kind) {
+    try {
+      return emitStringFromTree(defaultExpr as unknown as import("./types/ast.ts").ExprNode);
+    } catch { /* fall through */ }
+  }
+  return "";
+}
+
+/**
+ * Q6-narrow (S134) — classify a reset-value expression text against a
+ * lifecycle spec.
+ *
+ * Returns:
+ *   - "pre"  when the value satisfies the pre-type (revert per-access state)
+ *   - "post" when the value satisfies the post-type (transition / maintain)
+ *   - null   when unclassifiable (state left unchanged)
+ *
+ * Presence-progression `(not to T)`:
+ *   - value `not` → "pre" (canonical absence; §6.8.1 / §42)
+ *   - value anything else → "post" (any defined value transitions the cell)
+ *
+ * Variant-progression `(.A to .B)` (qualified or bare-dot form):
+ *   - value matches post-variant name → "post"
+ *   - value matches pre-variant name → "pre"
+ *   - otherwise: null (unclassifiable; let the walker leave state alone)
+ *
+ * Mirrors the `classifyWriteAgainstSpec` shape inside checkLifecycleBindingAccess
+ * (line ~14385); kept at module scope so buildCellValueLifecycleMap can call
+ * it without closure dependency.
+ */
+function classifyResetValueAgainstSpec(
+  valueText: string,
+  spec: FnReturnLifecycleSpec,
+): "pre" | "post" | null {
+  const t = valueText.trim();
+  if (!t) return null;
+  if (spec.kind === "presence") {
+    return t === "not" ? "pre" : "post";
+  }
+  // Variant-progression. Match `.<VariantName>` or `<EnumName>.<VariantName>`.
+  function esc(s: string): string {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+  const postName = spec.postVariantName;
+  const preName = spec.preVariantName;
+  if (postName) {
+    const postRe = new RegExp(`(?:^|\\.)\\s*${esc(postName)}\\b`);
+    if (postRe.test(t)) return "post";
+  }
+  if (preName) {
+    const preRe = new RegExp(`(?:^|\\.)\\s*${esc(preName)}\\b`);
+    if (preRe.test(t)) return "pre";
+  }
+  return null;
 }
 
 /**
@@ -15087,28 +15428,32 @@ function isInitOfPostType(
  */
 function runCellValueLifecycleAccessCheck(
   topNodes: ASTNodeLike[],
-  cellMap: Map<string, FnReturnLifecycleSpec & { initIsPostType: boolean }>,
+  cellMap: Map<string, FnReturnLifecycleSpec & { initIsPostType: boolean; resetState: "pre" | "post" | null }>,
   errors: TSError[],
   fileSpan: Span,
 ): void {
   if (!Array.isArray(topNodes) || topNodes.length === 0) return;
   if (cellMap.size === 0) return;
 
-  // Strip the initIsPostType discriminator out of the carrier and build
-  // the per-binding initial-state seed (only init-post bindings need
-  // explicit seeding; rest default to "pre" in the walker).
+  // Strip the discriminator fields out of the carrier and build the
+  // per-binding initial-state seed (only init-post bindings need explicit
+  // seeding; rest default to "pre" in the walker). Q6-narrow (S134) also
+  // derives the resetValueStates map carrying each cell's pre-computed
+  // reset-value classification, consulted by the walker on every reset() call.
   const bindings = new Map<string, FnReturnLifecycleSpec>();
   const initialStates = new Map<string, "pre" | "post">();
+  const resetValueStates = new Map<string, "pre" | "post" | null>();
   for (const [name, spec] of cellMap) {
-    const { initIsPostType, ...rest } = spec;
+    const { initIsPostType, resetState, ...rest } = spec;
     bindings.set(name, rest);
     if (initIsPostType) initialStates.set(name, "post");
+    resetValueStates.set(name, resetState);
   }
 
   const sourceLabel = "on a Shape 1 reactive cell";
 
   function checkScope(body: ASTNodeLike[]): void {
-    checkLifecycleBindingAccess(body, bindings, errors, fileSpan, initialStates, sourceLabel);
+    checkLifecycleBindingAccess(body, bindings, errors, fileSpan, initialStates, sourceLabel, resetValueStates);
   }
 
   function collectScopes(nodes: ASTNodeLike[]): void {
