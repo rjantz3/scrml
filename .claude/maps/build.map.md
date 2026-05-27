@@ -1,6 +1,6 @@
 # build.map.md
 # project: scrmlts
-# updated: 2026-05-26T00:00:00Z  commit: c2d3f7ae
+# updated: 2026-05-26T00:00:00Z  commit: 3a660c7c
 
 ## Development Commands (root package.json scripts)
 
@@ -30,14 +30,21 @@
 | `scrml dev <file\|dir>` | dev server with watch |
 | `scrml build <dir>` | production build; **MCP-V0.D: injects `scrml:mcp` boot import into `_server.js` when source carries `<program mcp>` (dev-only NODE_ENV gate or always)** |
 | `scrml migrate <file\|dir>` | source migration tooling |
-| `scrml promote --match\|--engine <file\|dir>` | if-chain → `<match>` / `<match>` → `<engine>` promotion. **NB: `--each` (Tier-0 `${for/lift}` → Tier-1 `<each>`, SPEC §56.10) is SPEC'd but NOT yet implemented — Iteration Landing 3 is PENDING. The promote CLI help itself notes "impl pending".** |
+| `scrml promote --match <file\|dir>` | if-chain → `<match>` promotion. SHIPPED S66. |
+| `scrml promote --each <file\|dir>` | **LANDED S134 (Iteration Landing 3, §56.10)** — Tier-0 `${ for/lift }` → Tier-1 `<each>` promotion; `--shorthand` flag applies `:`-shorthand for single-expression-body sites; `--dry-run`, `--check`, `--exclude` all supported. `--engine` (Tier C) is still deferred stub. |
 | `scrml generate / init / serve` | scaffolding + static serving |
 
-Flags (cli.js, sorted): `--check`, `--chunk-size-budget=<bytes>`, `--convert-legacy-css`, `--debug-perf`, `--dry-run`, `--embed-runtime`, `--emit-batch-plan`, `--emit-machine-tests`, `--emit-reachability`, `--engine`, `--exclude`, `--include`, `--match`, `--minify`, `--no-default-excludes`, `--output`/`--output-dir`, `--parser=scrml-native` (C2 routing — opt-in native parser), `--port`, `--verbose`, `--version`, `--watch`. (No new CLI flag this delta — `<program mcp>` is an in-source markup attribute, not a CLI flag.)
+### `scrml promote --each` detail (LANDED S134)
+
+`applyEachRewrite(sourceText, sites, targetLine, opts)` — descending-offset rewrite loop (mirrors `--match`'s applyMatchRewrite shape). `rewriteOneIteration(source, site, opts)` — single Tier-0 site rewrite. `promoteEachOnFile(filePath, targetLine, opts, cwd)` — file-level driver. `--shorthand` flag: when the per-item template is single-expression-shaped (e.g. `<li>${item.name}</>`) the rewrite auto-applies `:`-shorthand → `<li : @.name>`.
+
+Exit codes: `0` = success/no sites, `1` = error, `2` = ambiguous site or `--engine` stub.
+
+Flags (cli.js, sorted): `--check`, `--chunk-size-budget=<bytes>`, `--convert-legacy-css`, `--debug-perf`, `--dry-run`, `--each`, `--embed-runtime`, `--emit-batch-plan`, `--emit-machine-tests`, `--emit-reachability`, `--engine`, `--exclude`, `--include`, `--match`, `--minify`, `--no-default-excludes`, `--output`/`--output-dir`, `--parser=scrml-native` (C2 routing — opt-in native parser), `--port`, `--shorthand` (`--each` only), `--verbose`, `--version`, `--watch`.
 
 ## Build & Release
 
-No bundler step — scrml runs directly under Bun. Generated dist artifacts: `compiler/dist/`, `compiler/native-parser/dist/`, `compiler/self-host/dist/`, `stdlib/*/dist/`, `samples/dist/`. Native-parser dist rebuilt via `scripts/rebuild-bs-dist.ts` / `rebuild-tab-dist.ts` / `rebuild-self-host-dist.ts`. SPEC-INDEX regenerated via `scripts/regen-spec-index.ts` (re-run at S131 for §17.7 + §3.4 additions).
+No bundler step — scrml runs directly under Bun. Generated dist artifacts: `compiler/dist/`, `compiler/native-parser/dist/`, `compiler/self-host/dist/`, `stdlib/*/dist/`, `samples/dist/`. Native-parser dist rebuilt via `scripts/rebuild-bs-dist.ts` / `rebuild-tab-dist.ts` / `rebuild-self-host-dist.ts`. SPEC-INDEX regenerated via `scripts/regen-spec-index.ts` (re-run at S131 for §17.7 + §3.4 additions; SPEC.md now 30552 lines).
 
 ## CI/CD Pipeline
 
@@ -58,7 +65,7 @@ Runs the full test suite + gauntlet quick check. README gate (extract-readme-scr
 No Dockerfile / docker-compose. Not containerized.
 
 ## Tags
-#scrmlts #map #build #bun #git-hooks #cli #mcp-program-attr #promote-each-pending #s131
+#scrmlts #map #build #bun #git-hooks #cli #mcp-program-attr #promote-each-landed #iteration-landing-3 #s131 #s134
 
 ## Links
 - [primary.map.md](./primary.map.md)

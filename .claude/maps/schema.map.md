@@ -1,6 +1,6 @@
 # schema.map.md
 # project: scrmlts
-# updated: 2026-05-26T00:00:00Z  commit: c2d3f7ae
+# updated: 2026-05-26T00:00:00Z  commit: 3a660c7c
 
 Authoritative AST type catalog: `compiler/src/types/ast.ts`. The M5 native-parser swap
 must produce output coercible to `FileAST` / `TABOutput`. As of C1/C2 (S119),
@@ -103,6 +103,32 @@ Replaces pre-S123 phantom state-decl synthesis for bare `@name = expr` inside fn
 ### LifecycleRegistry  [type-system.ts:2094]
 `Map<string, Map<string, LifecycleFieldSpec>>`  — outer key = struct/type name; inner key = field name. Sparse: only lifecycle-annotated fields populate the inner map; a struct with no lifecycle fields gets an empty `Map<>` entry. Built by `buildLifecycleFieldRegistry` (type-system.ts:2097) via `extractLifecycleFields` (type-system.ts:2161 — struct-body extractor). `checkLifecycleFieldAccess` walks statement text (Pass 1: discover `transition()` calls → advance state; Pass 2: flag post-shape field access without `transition()`) and fires E-TYPE-001. `transition()` (§14.12.6.3) is a compile-time-only marker — required after discriminating to a post-variant before post-shape field access.
 
+### Shape 1 per-access lifecycle tracker  [type-system.ts:14916 — NEW S134, B-prereq Bug 19 HIGH]
+
+`runCellValueLifecycleAccessCheck` (type-system.ts:15088) — pipeline-facing wrapper; called from the main TS pass at type-system.ts:12337. Closes Bug 19 HIGH: SPEC §14.12.10 promises per-access tracking on Shape 1 plain reactive cells (`<state>: (A to B) = init`); pre-S134 impl covered struct-field + fn-return loci only.
+
+Key internals:
+- `collectCellValueTypedLifecycleBindings` (type-system.ts:14947) — recursive collector for `state-decl` AST nodes with lifecycle-annotated types; scoped to file-scope cells.
+- Per-scope walk: for each lifecycle-annotated reactive cell, mirrors the struct-field two-pass approach — `transition()` calls via `@cell = B-shaped-value` advance the per-access state; post-transition field accesses before transition fire E-TYPE-001.
+- Source label in diagnostics: `"on a Shape 1 reactive cell"` (distinguishes from struct-field fires).
+- Engine-cell name set (Sub-Pass 2.a) — built to exclude engine-cell positions from Shape 1 tracking (engines own variant-graph via `rule=`; lifecycle annotation there is E-TYPE-LIFECYCLE-ON-ENGINE-CELL).
+
+§6.8.3 (`reset × lifecycle` interaction) lands as SPEC-ahead-of-impl: the normative contract (reset reverts per-access state based on written-value type membership) requires the Shape 1 tracker as a prerequisite. B-prereq is now in place; §6.8.3 impl is a subsequent dispatch.
+
+## Alias Types  [compiler/src/symbol-table.ts — NEW S134, A4]
+
+### AliasRecord  [symbol-table.ts:820]
+```
+cellName: string        — derived cell name aliased (no @ prefix)
+pathTail: string[]      — path segments from cell to aliased value ([] = whole-cell alias;
+                          ["a","b"] = static-path; ["[…]"] = computed-index sentinel)
+cellRecord: StateCellRecord   — for diagnostic context (qualifiedPath, declNode span)
+declNode: any           — let-decl / const-decl source node (alias declaration site)
+```
+Produced by `walkRegisterLocalAliases` (symbol-table.ts:1881) — PASS 2.c (S134 A4). Stored in `Scope.aliasProvenanceRecords` (per-scope map). Consumed by PASS 6 L21 walker (`rejectWritesToDerivedVars`) when a mutation form's leaf-ident is NOT `@`-prefixed (alias-mutation path). Closes the §6.6.18 alias-escape gap: `let local = @cell; local.foo = x` now fires E-DERIVED-VALUE-MUTATE.
+
+Chain-break rules (init shapes that do NOT produce an AliasRecord): spread, object/array literals, binary/unary/logical/conditional expressions, function-call results, method-call returns (`.filter` etc. return new arrays).
+
 ## BinaryExpr precedence printer  [codegen/emit-expr.ts — Bug W, S127]
 `emitBinary` (emit-expr.ts ~688) re-inserts the grouping parens Acorn dropped (Acorn keeps tree nesting but drops `ParenthesizedExpression` nodes — a SILENT arithmetic-correctness bug). Supporting tables:
 - `BINARY_PRECEDENCE` — `Record<BinaryExpr["op"], number>`; `**`=14 … `||`/`??`=4; self-bracketed `is`/`is-*`=3.
@@ -110,7 +136,21 @@ Replaces pre-S123 phantom state-decl synthesis for bare `@name = expr` inside fn
 - `binaryOpEmitsFlat(op)` — false for `==`/`!=`/`is`/`is-not`/`is-some`/`is-not-not` (those emit own outer parens / IIFE).
 - `binaryOperandNeedsParens(child, parentOp, isRightChild)` — wrap when `prec(child) < prec(parent)`, or equal-precedence wrong-side, or ES2020 `??`-mixed-with-`||`/`&&` SyntaxError class.
 
-NEW S131 emit-expr.ts:277 — orphan-`~` defensive fallback in emitIdent (`name === "~"` → emits `null /* ~ orphaned — codegen-fallback */`); complements the emit-logic.ts:bare-expr orphan-skip (~snapshot Bug 15).
+S131 emit-expr.ts:277 — orphan-`~` defensive fallback in emitIdent (`name === "~"` → emits `null /* ~ orphaned — codegen-fallback */`); complements the emit-logic.ts:bare-expr orphan-skip (~snapshot Bug 15).
+
+## Meta-Checker Types  [compiler/src/meta-checker.ts — CHANGED S133-S134]
+
+### META_BUILTINS  [meta-checker.ts:127]
+`Set<string>` — identifiers available in `^{}` meta contexts that SHALL NOT trigger E-META-001 (compile-time primitives: `emit`, `reflect`, `meta`, `compiler`, `console`, `Math`, `JSON`, `Date`, `RegExp`, `structuredClone`, `Object`, `Array`, `String`, `Number`, `Boolean`, and timer/interval forms). **S133 narrow**: `bun.eval()` user-facing surface REMOVED from META_BUILTINS (it is Approach C §22.12 forbidden via `JS_HOST_FORBIDDEN`). `META_BUILTINS` membership is now purely compile-time API suppression for E-META-001/E-META-005.
+
+### JS_HOST_FORBIDDEN  [meta-checker.ts:188 — NEW S134, Bug 17]
+`Set<string>` — JS-host ambient globals categorically forbidden inside `^{}` blocks (§22.12 categorical enforcement). Distinct from `META_BUILTINS`:
+- `META_BUILTINS` gates compile-time runtime-variable enforcement (§22.4).
+- `JS_HOST_FORBIDDEN` gates the categorical §22.12 constraint regardless of compile-time vs runtime classification.
+
+Members include: `bun`, `process`, `setInterval`, `clearInterval`, `setTimeout`, `clearTimeout`, `fetch`, `WebSocket`, `XMLHttpRequest`, `window`, `document`, `navigator`, `location`, `history`, `localStorage`, `sessionStorage`, `indexedDB`, `crypto` (Web Crypto API — not `meta.crypto`), and additional JS-runtime-only surfaces. Belt-and-suspenders: if an identifier is in BOTH sets, `META_BUILTINS.has(id)` wins (no overlap in practice today).
+
+`checkJsHostGlobals` (meta-checker.ts:1168) — walker invoked from the main meta checker; recursively walks `^{}` bodies (stopping at nested `^{}` which have their own check) and fires E-META-001 for any `JS_HOST_FORBIDDEN` identifier encountered.
 
 ## MCP Descriptor Shapes  [compiler/src/codegen/mcp-descriptors.ts — 922L]
 
@@ -183,9 +223,9 @@ Shared regex-literal / comment / string-aware splitter for every scrml keyword-l
 - `rewriteCodeSegments(expr, transform)` — applies `transform` ONLY to code regions. Re-exported from rewrite.ts.
 - `regexAllowedAfter(codeBefore)` — regex-vs-division disambiguation via `REGEX_PERMISSIVE_KEYWORDS`.
 
-`rewrite.ts` also carries (S131) the `~snapshot` bare-`~`-replacement helper — word-boundary-aware (`(?<![A-Za-z0-9_$])~(?![A-Za-z0-9_$])`) so `~` is replaced by the tilde var only when standalone.
+`rewrite.ts` (2304 LOC) also carries the `~snapshot` bare-`~`-replacement helper — word-boundary-aware (`(?<![A-Za-z0-9_$])~(?![A-Za-z0-9_$])`) so `~` is replaced by the tilde var only when standalone.
 
-## Symbol Table Types  [compiler/src/symbol-table.ts — 9786 LOC]
+## Symbol Table Types  [compiler/src/symbol-table.ts — 10445 LOC]
 
 ### ScopeKind
 `"file" | "function" | "engine" | "component" | "compound" | "field"`
@@ -204,10 +244,13 @@ onIdleElements: OnIdleEntry[]
 ```
 Produced by `engine-statechild-walker.ts` (M6.6.b.2 primary path) or `engine-statechild-parser.ts` (legacy fallback). `EngineRuleForm` kinds (`absent`/`single`/`multi`/`wildcard`/`legacy-arrow`/`parse-error`) are read by `mcp-descriptors.ts:buildRulesMap`.
 
+### AliasRecord  [symbol-table.ts:820 — NEW S134, A4]
+See "Alias Types" section above.
+
 ### SYMInput / SYMResult / Scope
 `SYMInput { filePath, ast: FileAST, exportRegistry? }`
 `SYMResult { filePath, errors: SYMDiagnostic[], fileScope: Scope, stats: SYMStats }`
-`Scope { kind: ScopeKind; parent: Scope | null; file: string; stateCells: Map<...>; importBindings: Map<...>; children: Scope[] }`
+`Scope { kind: ScopeKind; parent: Scope | null; file: string; stateCells: Map<...>; importBindings: Map<...>; children: Scope[]; aliasProvenanceRecords: Map<string, AliasRecord> }`
 
 ## Native-parser AST Catalogs
 
@@ -240,7 +283,7 @@ BlockKinds: Markup, Text, Comment, Sql, Css, Meta, ErrorEffect, LogicEscape, Dis
 No application DB schema — scrml is a compiler. SQLite *.db files are throwaway test fixtures.
 
 ## Tags
-#scrmlts #map #schema #ast #fileast #native-parser #codegen #m5-swap #bridge #each-block #iteration #lifecycle #lifecycle-registry #reactive-assign #symbol-table #mcp-v0 #mcp-descriptors #emit-binary #code-segments #snapshot-fix #s131
+#scrmlts #map #schema #ast #fileast #native-parser #codegen #m5-swap #bridge #each-block #iteration #lifecycle #lifecycle-registry #lifecycle-shape1-tracker #alias-record #alias-escape #reactive-assign #symbol-table #mcp-v0 #mcp-descriptors #emit-binary #code-segments #snapshot-fix #js-host-forbidden #meta-builtins-narrow #s131 #s133 #s134
 
 ## Links
 - [primary.map.md](./primary.map.md)
