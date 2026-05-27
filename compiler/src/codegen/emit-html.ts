@@ -55,6 +55,23 @@ const BIND_VALID_TAGS: Record<string, Set<string>> = {
 // Lifecycle elements that emit no HTML — handled by emit-reactive-wiring.js
 const LIFECYCLE_SILENT_TAGS = new Set(["timer", "poll"]);
 
+// R25-Bug-41 (S138, 2026-05-27) — Server-side-only state-block types whose body
+// content MUST NOT appear in the HTML render-tree. `<schema>` (SPEC §39) and
+// `<seeds>` (per block-splitter `COMPOUND_LIFT_EXEMPT_TAGS` document-root list)
+// produce DDL / seed-data artifacts via dedicated compiler passes (schemaFor
+// walker, migration diff, seed runner). Their raw body text is NOT HTML and
+// MUST be suppressed at the markup-walker. Without this guard the state-kind
+// branch in `emitNode` walks raw text children into the HTML body — the R25
+// dev-2-elixir reproducer dumped `cards { id integer primary key, title text
+// not null }` as visible prose in the rendered page.
+//
+// `<db>` / `<engine>` / `<machine>` are NOT in this set:
+//   * `<db>` bodies are canonically `${ ... }` logic contexts (declarations
+//     only — no DOM emission from the markup-walker).
+//   * `<engine>` / `<machine>` route upstream to `engine-decl` AST shape
+//     (handled at emit-html.ts:1830) before the state-kind branch sees them.
+const SERVER_ONLY_STATE_TYPES = new Set(["schema", "seeds"]);
+
 /**
  * Phase 2b of if/show split: detect whether an if= element's subtree is
  * "clean" — i.e., contains no nested wiring (no events, no reactive
@@ -576,6 +593,17 @@ export function generateHtml(
     }
 
     if (node.kind === "state") {
+      // R25-Bug-41 (S138) — server-side-only state-block types (`<schema>`,
+      // `<seeds>`) MUST NOT walk their children into the HTML body. The schema
+      // block contains raw DDL text per §39.2 (`schema-block ::= '< schema>'
+      // table-declaration* closer`); without this guard the text-kind branch
+      // dumps every column declaration into the rendered page as prose. The
+      // schema's actual DDL is emitted via the schemaFor walker + migration
+      // diff path — server-only, never the HTML render-tree.
+      const stateType = (node as any).stateType ?? "";
+      if (SERVER_ONLY_STATE_TYPES.has(stateType)) {
+        return;
+      }
       for (const child of node.children ?? []) {
         emitNode(child);
       }
