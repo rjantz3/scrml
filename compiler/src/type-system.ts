@@ -14438,11 +14438,37 @@ function parseLifecycleReturnAnnotation(
     };
   }
   // Variant-progression: `.VariantName` pre + `.VariantName` post (the same
-  // enum's source and post variants). Strip leading dots; the walker matches
-  // these against `if (x is .Variant)` patterns and `match x { .Variant => }`
-  // arm tests.
-  const preVariant = (preExpr.startsWith(".") ? preExpr.slice(1) : preExpr).trim();
-  const postVariant = (postExpr.startsWith(".") ? postExpr.slice(1) : postExpr).trim();
+  // enum's source and post variants). Strip BOTH the leading `.` (bare-dot
+  // form per §14.10 bare-variant inference) AND the `EnumName.` prefix
+  // (qualified form per §18.5) so the walker matches against the canonical
+  // discrimination forms `if (x is .Variant)` / `match x { .Variant => }`
+  // regardless of which annotation source-form was written. The two forms
+  // yield the SAME bare variant name:
+  //   `.Draft`         → `Draft`
+  //   `Article.Draft`  → `Draft`
+  // (S135 — Fix #3: source-form qualified-enum variant lifecycle annotation
+  // on Shape 1 cells; orthogonal #3 follow-up to S134 B-prereq.)
+  const extractBareVariant = (expr: string): string => {
+    const t = expr.trim();
+    if (t.startsWith(".")) return t.slice(1).trim();
+    // Qualified-enum form `EnumName.VariantName` — take the segment after
+    // the last `.`. Only applies if the shape is `<IDENT>.<IDENT>` with no
+    // intervening parens/spaces (multi-level qualifications like
+    // `Module.Enum.Variant` are reserved for a future SPEC amendment per
+    // §14.12.6.4; today the qualified form is single-level).
+    const lastDot = t.lastIndexOf(".");
+    if (lastDot > 0 && lastDot < t.length - 1) {
+      const head = t.slice(0, lastDot);
+      const tail = t.slice(lastDot + 1);
+      if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(head) &&
+          /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(tail)) {
+        return tail.trim();
+      }
+    }
+    return t;
+  };
+  const preVariant = extractBareVariant(preExpr);
+  const postVariant = extractBareVariant(postExpr);
   return {
     kind: "variant",
     preType: resolveTypeExpr(preExpr, typeRegistry),
@@ -14541,7 +14567,12 @@ function checkLifecycleBindingAccess(
   // must reference one of our tracked bindings AS the SOLE argument.
   // `transition(a)`, `transition(  a  )` — yes. `transition(foo(a))` — no.
   // The exact text-shape matters because we extract from raw statement text.
-  const TRANSITION_CALL_RE = /\btransition\s*\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\)/g;
+  // Optional `@` sigil prefix tolerates the V5-strict source form `transition(@phase)`
+  // for Shape 1 reactive cells; the captured group is the bare binding name
+  // (`@` stripped) so it lines up with the bindings-map keys.
+  // (S135 — Fix #3 companion: source-form transition() recognition for Shape 1
+  // cells; orthogonal #3 follow-up to S134 B-prereq.)
+  const TRANSITION_CALL_RE = /\btransition\s*\(\s*@?([A-Za-z_$][A-Za-z0-9_$]*)\s*\)/g;
 
   // Q6-narrow (S134) — §6.8.3: detect `reset(@<cellName>)` and
   // `reset(@<cellName>.<field>.<field>...)` calls in statement text. The
@@ -14802,8 +14833,15 @@ function checkLifecycleBindingAccess(
             span,
           ));
         } else {
-          const preLabel = formatTypeForDiagnostic(spec.preType);
-          const postLabel = formatTypeForDiagnostic(spec.postType);
+          // Variant-progression diagnostic — preType/postType may be unresolvable
+          // (variant payload-structs are not registered as top-level types), so
+          // formatTypeForDiagnostic() would yield `asIs`. Prefer the variant-name
+          // form `.<VariantName>` for the lifecycle-annotation label, matching the
+          // E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED branch above. (S135 — Fix #3.b
+          // companion to qualified-enum stripping; orthogonal #3 follow-up to S134
+          // B-prereq.)
+          const preLabel = spec.preVariantName ? `.${spec.preVariantName}` : formatTypeForDiagnostic(spec.preType);
+          const postLabel = spec.postVariantName ? `.${spec.postVariantName}` : formatTypeForDiagnostic(spec.postType);
           errors.push(new TSError(
             "E-TYPE-001",
             `E-TYPE-001: binding \`${binding}\` has lifecycle annotation \`(${preLabel} to ${postLabel})\` ` +
