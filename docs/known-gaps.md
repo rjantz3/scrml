@@ -186,7 +186,7 @@ Tests: 14,746 pass / 9 fail (pre-fix; 9 = my new regression test's pre-fix expec
 
 **SIDE EFFECT — Bug 39 also RESOLVED.** The orphan `CreateError` / `MoveError` / `ArchiveError` IDENTs from the failed parse were being treated as reactive-display expressions on a `_scrml_logic_N` slot (the phantom `el.textContent = CreateError` wiring). With Bug 36 fixed, the IDENTs are properly absorbed as errorType annotations and the phantom wiring vanishes. All 4 R25 devs: 0 phantom wirings post-fix.
 
-**SPEC self-inconsistency surfaced (DEFERRED follow-up):** §19.4.1 grammar `'!' ('-> error-type)? block` is incomplete vs §41.14 normative `! ErrorType` examples. Recommend §19.4.1 grammar amendment: `'!' ('-> error-type | error-type)? block` to ratify the bare form. Spec-only follow-up.
+**SPEC self-inconsistency CLOSED S137:** §19.4.1 grammar amendment landed — `failable-fn ::= 'function' identifier '(' param-list ')' '!' (('->' error-type) | error-type)? block`. Bare form ratified as equivalent to arrow form. §19.4.4 normative statements updated to enumerate both forms. Closes the deferred follow-up surfaced by R25-Bug-36 dispatch agent's investigation (commit `e1269844`).
 
 **PA brief hypothesis correction:** the brief named `?{}` as suspected root cause and `emit-server.ts` / `emit-logic.ts` as suspect files. Agent's grep-driven triage ("statement boundary not detected" string → expression-parser.ts:1975 emit site → debug trace through safeParseExprToNode → parseLogicBody → orphan IDENT as bare-expr) found the bug in the PARSER, not codegen. Same shape as R24-BUG-2 dispatch's correction — brief heuristics drift; grep on smoking-gun strings is the load-bearing tool. Banking.
 

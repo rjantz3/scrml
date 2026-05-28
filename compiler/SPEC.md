@@ -12136,16 +12136,23 @@ fail PaymentError::ExpiredCard
 #### 19.4.1 Syntax
 
 ```
-failable-fn ::= 'function' identifier '(' param-list ')' '!' ('->' error-type)? block
+failable-fn ::= 'function' identifier '(' param-list ')' '!' (('->' error-type) | error-type)? block
 ```
+
+**S137 amendment** (2026-05-27): the bare-form `! ErrorType` alternative was ratified to bring §19.4.1 grammar into agreement with §41.14's normative examples (which canon-show `server function persistSignup(values: Signup) ! SignupError { ... }`). The arrow-form `! -> ErrorType` and the bare-form `! ErrorType` are EQUIVALENT; both declare the function's error type explicitly. Implementation: `compiler/src/ast-builder.js` function-decl handler + `compiler/native-parser/parse-stmt.js` `parseScrmlFunctionDecl` both recognize bare-form post-S136 commit `e1269844` (R25-Bug-36 fix). Spec grammar amendment lands the syntax officially; closes the self-inconsistency surfaced by the R25-Bug-36 dispatch agent's investigation.
 
 **Syntax:**
 
 ```scrml
-// Explicit error type
+// Explicit error type — arrow form
 function processPayment(amount, customerId)! -> PaymentError {
     if (amount <= 0) fail PaymentError::InvalidAmount("Must be positive")
     // ... success path
+}
+
+// Explicit error type — bare form (S137 ratification; equivalent to arrow form; §41.14 canon-shown)
+function processPayment(amount, customerId)! PaymentError {
+    if (amount <= 0) fail PaymentError::InvalidAmount("Must be positive")
 }
 
 // Default error type (uses built-in Error enum)
@@ -12175,11 +12182,12 @@ Failing to handle the result of a `!` function call in any of these ways SHALL b
 
 #### 19.4.4 Normative Statements
 
-- The `!` modifier SHALL appear after the parameter list and before `->` (if present) in a function declaration.
+- The `!` modifier SHALL appear after the parameter list and before the optional error-type annotation in a function declaration.
+- The error type annotation after `!` MAY be declared with the arrow form (`! -> ErrorType`) or the bare form (`! ErrorType`) — the two forms are EQUIVALENT; both declare the function's error enum type explicitly (S137 amendment).
 - A function with `!` SHALL accept `fail` statements in its body. A function without `!` SHALL NOT accept `fail` statements (E-ERROR-001).
 - The caller of a `!` function SHALL handle the result via match, `?`, `!{}`, or `< errorBoundary>`. An unhandled `!` function call SHALL be a compile error (E-ERROR-002).
 - The `!` modifier SHALL be part of the function's type signature. It is visible to the type system and participates in type checking.
-- `server` and `!` modifiers MAY coexist: `server function loadUser(id)! -> UserError { ... }`.
+- `server` and `!` modifiers MAY coexist: `server function loadUser(id)! -> UserError { ... }` (arrow form) or `server function loadUser(id)! UserError { ... }` (bare form).
 - `pure` (§33) and `!` modifiers MAY coexist: `pure function validate(x)! -> ValidationError { ... }`. A `pure` failable function SHALL NOT have side effects but MAY produce error values.
 
 ---
