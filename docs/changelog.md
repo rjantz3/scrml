@@ -2,7 +2,7 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-28 **S138 CLOSE**). Full suite **22,024 pass / 0 fail / 219 skip / 1 todo across 820 files**. Net delta from S138 OPEN baseline 21,960: +64. S138 closed 10 bugs (5 HIGH + 1 MED via Bug 50 redux + 4 LOW); 2 NEW filed (Bug 51 MED Shape 2 auto-lift OPEN; Bug 55 HIGH closed same session as Bug 9 L2). v0.6.2 cut + tag + push at mid-session. pa.md S138 R26 doctrine extended bidirectional (cross-source-sweep + sibling-fix-unmask sub-rules banked via Bug 50 redux + Bug 9 L1 attempt precedents). Canon-clear health: **GREEN** throughout. HIGH=1 remaining (6nz-V class:NAME on for-lift; GENUINE) · MED=7 (+ Bug 51 NEW) · LOW=12 · Nominal=7.
+Current baseline (2026-05-28 **v0.6.3 cut at S139**). Full suite **22,024 pass / 0 fail / 219 skip / 1 todo across 820 files** (unchanged from S138 CLOSE — v0.6.3 is a release-only cut, no test surface changes between v0.6.2 and v0.6.3). v0.6.3 = S138 post-v0.6.2 bug bundle: 5 HIGH (R24-BUG-4, Bug 9 L1+L2 paired with Bug 55, Bug 50 redux, Bug 52, Bug 53) + 4 LOW (33, 24, 23, 25) closed. pa.md S138 R26 doctrine extended bidirectional. Canon-clear health: **GREEN**. HIGH=1 remaining (6nz-V class:NAME on for-lift; GENUINE) · MED=7 (+ Bug 51 NEW) · LOW=12 · Nominal=7.
 
 ### 2026-05-28 (S138 CLOSE — 10 bugs closed (5 HIGH + 4 LOW + 1 MED redux) + Bug 9 L1+L2 paired-fix close + v0.6.2 release + pa.md R26 doctrine bidirectional extension)
 
@@ -774,6 +774,35 @@ S115 ran the M5/M6 compressed-MD-ladder (DD #27) through its v0.5 cut and v0.6 b
 - **Living Compiler retraction (draft) + dev.to article truthfulness audit + fix pass.** All 12 articles classified; 11 corrected — 8-article retracted-link scrub, de-versioned banners, per-article correction notes.
 - **scrml-support corpus currency sweep.** 3 stale-and-cited docs marked; the doc-currency convention (`status:` enum + `last-reviewed:`/`superseded-by:` + same-landing discipline) ratified into `pa.md`.
 - **Two compiler-concept deep-dives** — the code-import story (incl. a content-addressed `vendor:` design) and the build-story compiler model.
+
+## v0.6.3 — 2026-05-28 (patch — S138 post-v0.6.2 bug bundle: 5 HIGH + 4 LOW + Bug 9 L1+L2 paired-fix close + pa.md S138 R26 doctrine bidirectional extension)
+
+v0.6.3 cuts the S138 post-v0.6.2 bug-fix bundle. Marathon session closed 10 bugs total against the v0.6.2 baseline — 5 HIGH (the long-deferred Bug 9 compiler-managed-async resolved via L1+L2 paired-fix; R24-BUG-4 generic `</>` closer for STRUCTURAL_RAW_BODY_ELEMENTS; Bug 52 + Bug 53 R24 match-shape bugs; Bug 50 redux precedent) + 4 LOW (R24-related lint + lifecycle + transition closures). pa.md S138 R26 empirical-verification doctrine extended BIDIRECTIONAL — forward (verify before claim-CLOSED) was the v0.6.2 ratification; reverse (verify before claim-OPEN / dispatching fix) banked S138 with cross-source-sweep + sibling-fix-unmask sub-rules. Canon-clear health: **GREEN**. Per S94 bump-on-tag convention. Cut at S139.
+
+**HIGH bugs closed (5):**
+
+- **Bug 9 L1+L2 + Bug 55 paired close** (S138 `a4a0f2d2`). The long-deferred compiler-managed-async HIGH (filed S126; 3-layer framing's "not blind-patched" doctrine). L1 = direct-caller compiler-managed-async detection extended for awaited-state writes; R26 sweep at L1-only intermediate state unmasked NEW Bug 55 (CPS planner shape gate) — designed Bug 55 fix as L2; combined PA-direct fix recovers all canonical cases plus the unmasked surface. The 3-layer framing's "not blind-patched" warning was empirically validated. Bug 9 L3 transitive coloring deferred per the 3-layer framing; §8 tripwire test in `compiler-managed-async-bug-9-and-55.test.js` flags when L3 lands. **Banks the methodology: multi-layer framings walk to safe close via R26 at intermediate states; L1-only sweep reveals L2 as next layer's surface.**
+- **R24-BUG-4 — generic `</>` closer for STRUCTURAL_RAW_BODY_ELEMENTS** (S138 `adc0a70f` via worktree agent dispatch). Class-level fix covering `<match>` + `<each>` + sibling structural elements. +479/-58L. SCOPING-tracked Phase 5 BS-gate close. Clean landing; BRIEF.md archived at `docs/changes/r24-bug-4-...2026-05-28/BRIEF.md` per S136 addendum.
+- **Bug 52 — bare-variant `on=.Variant` in match `resolveOnExpr`** (S138 `a30d86d1`). PA-direct surgical. The Bug 50 redux trigger — Bug 52 R26 dual-verify on R24 dev-3-svelte revealed Bug 50's symptom firing, reversing the Bug 50 NOT-REPRODUCED closure.
+- **Bug 53 — match shorthand markup body routing** (S138 `f05d04d2`). Markup-shorthand match arm body routes through `nativeParseFile` (markup) instead of `parseExprToNode` (expr). CLASS-CLOSE paired with Bug 52.
+- **Bug 50 redux — synth-arrow fallback-string path skip `rewritePresenceGuard`** (S138 `c89f1176`). PA-direct surgical. **The Bug 50 redux is the precedent for the new R26 reverse-direction sub-rules** — my initial NOT-REPRODUCED closure at `3a482076` was REVERSED at `cc93c031` (same session) when Bug 52 R26 dual-verify on dev-3-svelte R24 source showed the symptom firing. Three closure-reasoning errors banked: (1) swept R25 only (actual fire-site was R24); (2) trusted bug report's source attribution without cross-checking described reproducer pattern; (3) missed sibling-fix unmask possibility (R24-BUG-4 BS-closer fix `adc0a70f` had unmasked Bug 50 on dev-3-svelte). The redux IS the empirical-canary-applied-to-reverse-direction: NOT-REPRODUCED claim was itself a "regression test passes but empirical fails" pattern in the meta-axis (PA classification quality).
+
+**LOW bugs closed (4):**
+
+- **Bug 33 — W-LINT-011 `:let=` negative-lookahead** (S138 `5ec84589`). scrml-reserved slot-binding form (`<column :let={(row) => ...}/>` per SPEC §16.6) silenced.
+- **Bug 24 — qualified-form discrim regex tolerance** in `checkLifecycleBindingAccess` (S138 `aa0395a7`). PA-direct surgical.
+- **Bug 23 — W-LIFECYCLE-LEGACY-ARROW emit on Shape 1 cells with legacy `->` glyph** (S138 `61391c75`). Shape 1 lifecycle-annotation cell using legacy `->` (`<status>: (Idle -> Active) = .Idle`) now lints W-LIFECYCLE-LEGACY-ARROW per SPEC §14.12 deprecation window.
+- **Bug 25 — `transition()` dotted-path argument** (S138 `5160afad`). PA-direct surgical close.
+
+**pa.md addendum ratified (cross-machine two-party-exchange contract):**
+
+- **S138 R26 doctrine extended BIDIRECTIONAL** (scrml-support `dbb47c3`). Forward direction (v0.6.2 ratification): verify BEFORE claim-CLOSED — regression tests passing ≠ empirical reproducer passing; if a fix's tests pass but R26 against real source still shows the symptom, the gap is structural — file new bug for upstream class. Reverse direction (S138 NEW): verify BEFORE claim-OPEN / dispatching fix — bug filed against observed symptom MUST be empirically re-verified on real source against current baseline; if symptom can't be reproduced, classify NOT-REPRODUCED + close. Two new sub-rules banked S138 via the Bug 50 redux: (1) **cross-source sweep** — sweep MULTIPLE adopter sources, not just the bug's named source (attribution may be wrong; symptom may have moved between sources; sibling fix may unmask on a different source); (2) **sibling-fix-unmask check** — before classifying NOT-REPRODUCED, check if any recently-landed fix could have changed what compiles through to the affected codegen path (closing a BS-gate or parser-gate may unmask downstream codegen bugs on sources that previously didn't compile that far).
+
+**Methodology bank (S138 durable):**
+
+- **PA-direct velocity track parallel to agent-dispatch arc-fix track.** S138 closed 4 LOW + 4 HIGH bugs PA-direct (each ~20-30 LOC surgical fix). Agent-dispatch reserves for class-level fixes (R24-BUG-4 had +479/-58L). Both tracks valuable; pick per shape.
+- **Brief-hypothesis vs empirical-grep methodology.** Look at concrete emitted JS + grep for symptom BEFORE scoping fixes. Bug 9 / 52 / 53 / 50 all benefited.
+- **22 commits since v0.6.2** (`1270994e..988682f7`).
 
 ## v0.6.2 — 2026-05-28 (patch — R24/R25 gauntlet bug-fix cluster + R26 doctrine + pa.md S138/S139 addendums + SPEC §19.4.1 bare `! ErrorType` + SPEC §45.9 word-form `or`/`and`)
 
