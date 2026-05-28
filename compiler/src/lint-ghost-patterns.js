@@ -131,6 +131,27 @@ function buildSkipRanges(source) {
     const c = source[i];
     const c2 = source[i + 1];
 
+    // HTML/markup comment — `<!-- ... -->`
+    // SPEC §4.7 (S87/S88 amendment): the BS layer treats `<!-- -->` spans as
+    // opaque raw content; this pre-BS lint pass must do the same so adopters
+    // can document anti-patterns (e.g. friction-report `<!-- React uses === for
+    // strict equality -->`) without W-LINT-* false fires (R24 Bug 30).
+    //
+    // Per HTML 5 §13.1.6 (and our `parseHtmlComment` infrastructure), comments
+    // do NOT nest — the FIRST `-->` closes the comment regardless of any inner
+    // `<!--`. Unterminated comments run to end-of-source. The whole `<!--...-->`
+    // span is added to `commentRanges` so every existing `inRange(offset,
+    // commentRanges)` skipIf in the PATTERNS table gains HTML-comment awareness.
+    if (c === "<" && c2 === "!" && source[i + 2] === "-" && source[i + 3] === "-") {
+      const start = i;
+      i += 4;
+      while (i < source.length - 2 && !(source[i] === "-" && source[i + 1] === "-" && source[i + 2] === ">")) i++;
+      // Consume the closing `-->` (or run to end-of-source for unterminated)
+      i = Math.min(i + 3, source.length);
+      commentRanges.push([start, i]);
+      continue;
+    }
+
     // Line comment — `// ... \n`
     if (c === "/" && c2 === "/") {
       const start = i;
@@ -502,7 +523,7 @@ const PATTERNS = [
     correction: 'class:name=@cond or class="name"',
     see: "§5",
     code: "W-LINT-003",
-    skipIf: (offset, logicRanges) => inRange(offset, logicRanges),
+    skipIf: (offset, logicRanges, _cssRanges, commentRanges) => inRange(offset, logicRanges) || inRange(offset, commentRanges),
   },
 
   // Pattern 4: onChange=, onSubmit= (camelCase events)
@@ -513,7 +534,7 @@ const PATTERNS = [
     correction: "onchange=handler()",
     see: "§5",
     code: "W-LINT-004",
-    skipIf: (offset, logicRanges) => inRange(offset, logicRanges),
+    skipIf: (offset, logicRanges, _cssRanges, commentRanges) => inRange(offset, logicRanges) || inRange(offset, commentRanges),
   },
 
   // Pattern 5: value={expr} where { is NOT preceded by $ — JSX attribute braces
@@ -525,7 +546,7 @@ const PATTERNS = [
     correction: "value=@state",
     see: "§5",
     code: "W-LINT-005",
-    skipIf: (offset, logicRanges) => inRange(offset, logicRanges),
+    skipIf: (offset, logicRanges, _cssRanges, commentRanges) => inRange(offset, logicRanges) || inRange(offset, commentRanges),
   },
 
   // Pattern 6: for (item of @items) — JS for-of loop in markup context
@@ -536,7 +557,7 @@ const PATTERNS = [
     correction: "for @items / lift item /",
     see: "§10",
     code: "W-LINT-006",
-    skipIf: (offset, logicRanges) => inRange(offset, logicRanges),
+    skipIf: (offset, logicRanges, _cssRanges, commentRanges) => inRange(offset, logicRanges) || inRange(offset, commentRanges),
   },
 
   // Pattern 7: <Comp prop={val}> — JSX attribute braces on component props
@@ -581,7 +602,7 @@ const PATTERNS = [
     correction: "<El if=@cond>",
     see: "§17",
     code: "W-LINT-008",
-    skipIf: (offset, logicRanges) => inRange(offset, logicRanges),
+    skipIf: (offset, logicRanges, _cssRanges, commentRanges) => inRange(offset, logicRanges) || inRange(offset, commentRanges),
   },
 
   // Pattern 9: onClick=, onDblClick= etc. (camelCase click events)
@@ -650,7 +671,7 @@ const PATTERNS = [
     correction: "scrml uses if=@cond, for @items, bind:value=@x, onclick=fn(), class:name=@cond",
     see: "§5, §10, §17",
     code: "W-LINT-012",
-    skipIf: (offset, logicRanges) => inRange(offset, logicRanges),
+    skipIf: (offset, logicRanges, _cssRanges, commentRanges) => inRange(offset, logicRanges) || inRange(offset, commentRanges),
   },
 
   // Pattern 13: Vue `@event=` attribute shorthand (e.g., `@click="fn"`,
@@ -699,7 +720,7 @@ const PATTERNS = [
     correction: "scrml uses <el if=@cond>, for @items / lift ... /, or match + <:arms/>",
     see: "§10, §17",
     code: "W-LINT-014",
-    skipIf: (offset, logicRanges) => inRange(offset, logicRanges),
+    skipIf: (offset, logicRanges, _cssRanges, commentRanges) => inRange(offset, logicRanges) || inRange(offset, commentRanges),
   },
 
   // Pattern 15: Svelte raw-HTML directive `{@html expr}`.
@@ -709,7 +730,7 @@ const PATTERNS = [
     correction: "scrml uses ${ rawHtml() } inside markup; no dedicated @html directive",
     see: "§5",
     code: "W-LINT-015",
-    skipIf: (offset, logicRanges) => inRange(offset, logicRanges),
+    skipIf: (offset, logicRanges, _cssRanges, commentRanges) => inRange(offset, logicRanges) || inRange(offset, commentRanges),
   },
 
   // Pattern 17: React hooks — useState, useEffect, useRef, useMemo, useCallback,
