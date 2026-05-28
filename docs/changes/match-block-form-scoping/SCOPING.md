@@ -223,6 +223,16 @@ Five-phase impl arc. Each phase is independently testable + ships value; can be 
 
 ### Phase 5 — Sample fixtures + integration tests + docs — ~2-3h
 
+**Status update S138 (2026-05-28):** the BS-level closer-support gap that escalated this Phase to HIGH adopter-impact priority (R24-BUG-4 — `<match>` `</>` rejected with E-CTX-001) is **RESOLVED at `adc0a70f`**. Class-level fix in `compiler/src/block-splitter.js` — generic tag-stack scanner replaces the same-kind nestDepth tracker; both `<match>` AND `<each>` `</>` close paths supported. 23 new regression tests in `compiler/tests/unit/structural-body-closer-r24-bug-4.test.js`. PA-verified R26 dev-3-svelte clean (E-CTX-001 + E-CTX-003 ZERO). See `docs/known-gaps.md` R24-BUG-4 entry + `docs/changes/r24-bug-4-match-each-generic-closer-2026-05-28/BRIEF.md`.
+
+**R26 verification surfaced 2 NEW HIGH Phase-3 codegen gaps** (filed as Bug 52 + Bug 53 in known-gaps; not in this SCOPING's original Phase 3 scope):
+- Bug 52 — `<match for=Type on=.BareVariant>` codegen doesn't lower bare-variant in `on=` value
+- Bug 53 — `<match>` `:`-shorthand arm body emits raw markup as textContent
+
+These were PRE-EXISTING Phase 3 gaps MASKED by the BS-level closer rejection. Closing Phase 5's BS gate exposed them. Separate codegen-side dispatches required.
+
+**Remaining Phase 5 work** (deferred — not blocking; the BS-closer gap was the load-bearing piece):
+
 **Goal:** real-world adopter-facing validation + close out.
 
 **Sub-steps:**
