@@ -78,23 +78,21 @@ Now filter (All / Active / Done). You could add `<activeOnly> = false`, but the 
 
 ${
     type Filter:enum = { All, Active, Done }
-}
 
-<tasks> = [
-    { id: 1, text: "Buy milk",      done: false },
-    { id: 2, text: "Walk the dog",  done: true  },
-    { id: 3, text: "Write README",  done: false }
-]
-<newTask req length(>=1)> = <input placeholder="What needs doing?"/>
-<filter>: Filter = .All
+    <tasks> = [
+        { id: 1, text: "Buy milk",      done: false },
+        { id: 2, text: "Walk the dog",  done: true  },
+        { id: 3, text: "Write README",  done: false }
+    ]
+    <newTask req length(>=1)> = <input placeholder="What needs doing?"/>
+    <filter>: Filter = .All
 
-const <visible> = match @filter {
-    .All    => @tasks
-    .Active => @tasks.filter(t => !t.done)
-    .Done   => @tasks.filter(t => t.done)
-}
+    const <visible> = match @filter {
+        .All    => @tasks
+        .Active => @tasks.filter(t => !t.done)
+        .Done   => @tasks.filter(t => t.done)
+    }
 
-${
     function addTask() {
         @tasks = [...@tasks, { id: @tasks.length + 1, text: @newTask, done: false }]
         reset(@newTask)
@@ -120,8 +118,8 @@ ${
 </nav>
 
 <each in=@visible key=@.id>
-    <li class:done=@.done>
-        <input type="checkbox" checked=@.done onchange=${toggle(@.id)}/>
+    <li class:done=${@.done}>
+        <input type="checkbox" checked=${@.done} onchange=${toggle(@.id)}/>
         ${@.text}
     </li>
     <empty>Nothing left.</>
@@ -159,9 +157,12 @@ are the ideas any good?
 Now it's real: SQLite, server-backed, auth-gated, multi-device sync, with a load-state state machine.
 
 ```scrml
+// gate: skip
+// illustrative end-to-end demo — requires a `tasks.db` file + a `Role:enum`
+// in scope; the compile-time DB / auth-role checks need a real project context.
 <program>
 
-<db src="tasks.db" protect="passwordHash" tables="users">
+<db src="tasks.db" protect="passwordHash" tables="users"/>
 
 <schema>
     users {
@@ -439,6 +440,7 @@ Boundary checks emit a single synchronous predicate test; on failure the compile
 A struct type drives the form, the schema, and the table — no schema duplication, no model-to-DTO translation, no view-model boilerplate. The same predicates that validate the values also derive the right HTML form controls and the right SQL column types.
 
 ```scrml
+// gate: skip
 // illustrative; shows the three call-sites against one struct type
 import { formFor, schemaFor, tableFor } from "scrml:data"
 
