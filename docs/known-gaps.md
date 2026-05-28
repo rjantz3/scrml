@@ -15,7 +15,7 @@
 | Severity | Open | Closed-this-arc | Notes |
 |---|---|---|---|
 | HIGH | 3 | E-TYPE-001 lifecycle fire (S130 Landing 1 SHIPPED) · §29 vanilla-interop framing-corrected (S132) · **E-FN-003 (RESOLVED S133 `dbef4f4d`)** · **Bug 17 E-META-001 runtime-meta (RESOLVED S134 `6c6c0073`)** · **§6.6.18 alias-escape A4 LANDED S134 `b719a3d2`** · **Bug 19 Shape 1 lifecycle tracker LANDED S134 `fd58893e` (B-prereq)** · **§6.8.3 reset × lifecycle impl LANDED S135 `2ffe4f6a` (Q6-narrow; SPEC-ahead-of-impl bullet CLOSED)** · **Structural-in-logic-body silent-swallow class CLOSED S135 `ab0d13a3` (E-STRUCTURAL-ELEMENT-MISPLACED fires for `<schema>`/`<engine>`/`<channel>`/`<page>`/`<auth>`/`<errors>`/`<onTransition>`/`<onTimeout>`/`<onIdle>` in `${...}` bodies; +19 tests)** · **Bug 28 `or`/`and` codegen lowering RESOLVED S136 `89008e97` (R24-BUG-1; 2-site fix + 42-test regression; HELD 4/4 R25)** · **Bug 29 narrow `{ return }` arm RESOLVED S136 `c7e81962` (R24-BUG-2; +18 regression tests; broader case Bug 38 RESOLVED S137 `933d1ad3`)** · **Bug 36 `! ErrorType` bare-form parse-gap RESOLVED S136 `e1269844` (was CRITICAL R25; 3-site fix ast-builder + native-parser + 12-test regression; spec §41.14 bare-form ratification)** · **Bug 39 phantom enum→textContent wiring RESOLVED-AS-SIDE-EFFECT-OF-BUG-36 S136 `e1269844` (was HIGH R25; was a symptom of Bug 36's orphan-IDENT)** · **Bug 37 `<each in=@x.filter(c=>...)>` arrow truncation RESOLVED S137 `1ce963d0` (R25; ast-builder `_findEachOpenerEnd` paren/bracket-aware; +12 tests; Shape A — accept inline arrow)** · **Bug 38 `!{}` arm body codegen broader case RESOLVED S137 `933d1ad3` (R25; emit-logic.ts `emitArmAssign` extended with multi-stmt + single-stmt-side-effect branches; +18 tests; closes R24-Bug-29-family deeper shapes; codegen scope correct; FULL EMPIRICAL CLOSE via Bug 49 fix `076d53e5`)** · **Bug 40 `:`-shorthand inside `<each>` item body RESOLVED S137 `50d38095` (R25; SPEC §4.14 BS-level compliance gap; three-file fix block-splitter + ast-builder + emit-each; `<empty :>` sub-case closed same-root; +20 tests)** · **Bug 41 `<schema>` HTML body-text leak RESOLVED S137 `ebeba766` (R25; emit-html.ts `SERVER_ONLY_STATE_TYPES` exclusion for `schema`+`seeds`; +18 tests; sibling structural-elements verified clean upstream)** · **Bug 49 BS-level stmt-boundary `!{...}` content drop RESOLVED S137 `076d53e5` (R26-surfaced; UPSTREAM of Bug 38; tokenizer.ts `tryEmitSyntheticErrorEffectBlock` helper; closes both bare-call + const-binding shapes; +12 tests + PA-verified empirical R26 clean on all 4 R25 devs)** | compiler-managed-async (deferred A9-class) · 6nz-V class:NAME on for-lift (GENUINE) · R24-BUG-4 `<match>` `</>` Phase 5 (cross-ref escalation, SCOPING-tracked) |
-| MED | 11 | Bug 15 `~snapshot` codegen leak (S131 SHIPPED) · E-SCHEMA-003 enforcement (S133 SHIPPED `afbcb47a`) · **Bug 42 `?{}` SQL in `server function*` SSE generator RESOLVED S137 `480aded4` (3 coupled root causes upstream of brief hypothesis — ast-builder BARE_DECL_RE + synthetic-logic-block child-population class-level gap + yield-stmt parse/emit + while/do-while boundary threading; +12 tests + PA-verified R26 empirical clean on dev-1+dev-2+dev-4)** · **Bug 35 rewriteIsPredicates space-padded-dot AST-path completeness RESOLVED S137 `5cb993c2` (compiler-internal — adopter behavior unchanged; +15/-6L matchIsPredicateSuffix regex tolerance mirroring rewriteIsOperator; +16 tests; SALVAGED PA-DIRECT after agent crash per S89 partial-recovery rule)** | Bug 1 Tailwind residuals · V-kill READ-side fire · MCP V0 partial-impl deferrals · Generator policy · L19 multi-statement-handler · **A5 refinement-type freeze extension (DEFERRED with adoption-watch trigger, S134)** · **Bug 30 linter scans HTML comments (NEW S136 R24; R25 confirmed via Bug 43 cross-ref)** · **Bug 31 if-as-expression in !{} result binding (NEW S136 R24)** · **Bug 32 `@.` not lowered inside tableFor column slot (NEW S136 R24)** · **Bug 44 W-LINT-007 false-positive on `fallback={<markup/>}` SPEC §19.6 canonical errorBoundary shape (NEW S136 R25; composes with R24 step-3b)** |
+| MED | 9 | Bug 15 `~snapshot` codegen leak (S131 SHIPPED) · E-SCHEMA-003 enforcement (S133 SHIPPED `afbcb47a`) · **Bug 42 `?{}` SQL in `server function*` SSE generator RESOLVED S137 `480aded4` (3 coupled root causes upstream of brief hypothesis — ast-builder BARE_DECL_RE + synthetic-logic-block child-population class-level gap + yield-stmt parse/emit + while/do-while boundary threading; +12 tests + PA-verified R26 empirical clean on dev-1+dev-2+dev-4)** · **Bug 35 rewriteIsPredicates space-padded-dot AST-path completeness RESOLVED S137 `5cb993c2` (compiler-internal — adopter behavior unchanged; +15/-6L matchIsPredicateSuffix regex tolerance mirroring rewriteIsOperator; +16 tests; SALVAGED PA-DIRECT after agent crash per S89 partial-recovery rule)** · **Bug 30 + Bug 43 linter HTML comment opacity RESOLVED S137 `5199a435` (PA hypothesis correct; +37/-8L `buildSkipRanges` + 8 patterns extended to skip on `commentRanges`; SPEC §27 + §4.7 doctrine; +19 tests; PA-verified R26 dual-verify clean on all 4 R24 devs: 32→3 fires, -29 in-comment false-positives silenced, 3 outside-comment fires preserved exactly as predicted)** | Bug 1 Tailwind residuals · V-kill READ-side fire · MCP V0 partial-impl deferrals · Generator policy · L19 multi-statement-handler · **A5 refinement-type freeze extension (DEFERRED with adoption-watch trigger, S134)** · **Bug 31 if-as-expression in !{} result binding (NEW S136 R24)** · **Bug 32 `@.` not lowered inside tableFor column slot (NEW S136 R24)** · **Bug 44 W-LINT-007 false-positive on `fallback={<markup/>}` SPEC §19.6 canonical errorBoundary shape (NEW S136 R25; composes with R24 step-3b)** |
 | LOW | 16 | (rotate out below) | Bug 4 bare-`/` · GITI-015 · §11-folded-citation sweep · `bun scrml promote --engine` Tier-1→2 deferred · **Bug 21 Q6-narrow deep multi-level reset heuristic (S135)** · **Bug 22 Q6-narrow cross-cell `default=` classification heuristic (S135)** · **Bug 23 W-LIFECYCLE-LEGACY-ARROW Shape 1 emission gap (S135)** · **Bug 24 qualified-form discrim regex tolerance (S135)** · **Bug 25 transition() deeper-expression regex tolerance (S135)** · **Bug 26 `${...}` inside `function` body E-SCOPE-001 (S135)** · **Bug 27 tryParseStructuralDecl extra lookahead cleanup (S135)** · **Bug 33 W-LINT-011 false positive on `:let=` (NEW S136 R24)** · **Bug 34 Shape-2 compound markup-init missing 2nd arg (NEW S136 R24)** · **Bug 45 `int` ghost type → asIs fallthrough → confusing E-SCHEMAFOR-NO-SQL-MAPPING (NEW S136 R25; 4/4 devs reached from canon)** · **Bug 46 tableFor `sortable=`/`selectable=` not implemented (NEW S136 R25; W-ATTR-001 forwarded as plain HTML)** · **Bug 48 latent paren/bracket-depth gap in sibling `<match>`/`<machine>`/`<engine>` opener finders (NEW S137; surfaced by Bug 37 fix; not adopter-fired today)** |
 | Nominal (spec-ahead-of-impl) | 7 | — | Build Story §58 · `import:host` §21.3.1 · Quoted-text §4.18 compiler fire · `_{}` foreign code · WASM call-char sigils · Sidecar process decls · RemoteData enum |
 
@@ -511,16 +511,37 @@ L19 forbids multi-statement event handlers (`onclick=` must be a single expressi
 
 ---
 
-### Bug 30 — Linter scans content inside `<!-- -->` HTML comment blocks — `MED` (S136 R24)
+### Bug 30 — Linter scans content inside `<!-- -->` HTML comment blocks — `RESOLVED S137 (commit 5199a435)` (was MED; R24; R25 confirmed via Bug 43)
 
-The lint pass fires `W-LINT-001` / `W-LINT-005` / `W-LINT-007` / `W-LINT-011` / `W-LINT-014` / `W-LINT-022` on text appearing inside HTML comment blocks (`<!-- ... -->`). Surfaced by dev-2, dev-3, dev-4 overseers in R24 — every dev's friction-report comment block (which contains anti-pattern words like `===`, `<style>`, `.map()`, `{#if}` for comparison purposes) tripped multiple lints.
+Original symptom: the lint pass fired `W-LINT-001` / `W-LINT-003` / `W-LINT-004` / `W-LINT-005` / `W-LINT-007` / `W-LINT-008` / `W-LINT-011` / `W-LINT-014` / `W-LINT-016` / `W-LINT-022` on text appearing inside HTML comment blocks (`<!-- ... -->`). Surfaced by dev-2/3/4 overseers in R24 (R25 confirmed via Bug 43 cross-ref): every dev's `<!-- FRICTION REPORT -->` block (containing anti-pattern words like `===`, `<style>`, `.map()`, `{#if}` for comparison) tripped multiple lints.
 
-- **Reproducer:** any `.scrml` file containing `<!-- comment with === or .map() text -->`; lints fire on the comment-internal content.
-- **Spec reference:** SPEC §27 — comment content is opaque to all stages.
-- **Current behavior:** linter walks text without comment-region awareness.
-- **Expected behavior:** skip lint scanning inside `<!-- -->` regions.
-- **Suggested fix scope:** linter — add comment-region awareness to the lint scanner. Single-file fix in lint pass.
-- **Cross-refs:** R24-BUG-3 in `scrml-support/docs/gauntlets/gauntlet-r24-report.md`.
+**Fix (S137 `5199a435`):** PA hypothesis was CORRECT (2 of 9 dispatches this session). Two-layer fix in `compiler/src/lint-ghost-patterns.js` (+37/-8L):
+
+1. **`buildSkipRanges()` extended** to recognize `<!-- ... -->` HTML/markup comment spans (HTML 5 non-nesting; unterminated runs to EOF). Every existing `skipIf` that already checked `commentRanges` becomes HTML-comment-aware for free.
+2. **8 patterns that previously skipped ONLY on `logicRanges`** (W-LINT-003 / 004 / 005 / 006 / 008 / 012 / 014 / 015) extended to ALSO skip on `commentRanges` — SPEC §27 applies categorically across all comment shapes (`//`, `/* */`, `<!-- -->`).
+
+Doctrine basis: SPEC §27 (comments do not carry code) + SPEC §4.7 (S87/S88 amendment authorizes BS-layer to treat `<!-- ... -->` spans as opaque raw content; the pre-BS lint pass MUST do the same).
+
+**Regression test:** `compiler/tests/unit/lint-html-comment-region-r24-bug-30.test.js` +328L (NEW; 19 tests): minimal repro · multi-line · adjacent comments · empty `<!-- -->` · unterminated · HTML non-nesting · per-code regression for 7 R24-confirmed codes · negative control · R24 friction-report composite shape.
+
+**PA-VERIFIED R26 EMPIRICAL** (PA-captured pre-fix baseline at `961c88c0`, post-fix verified at landing `5199a435`):
+
+| Dev | Pre-fix | Post-fix | Delta | Outside-comment fires preserved |
+|---|---|---|---|---|
+| dev-1-react | 15 | 0 | -15 | (none — all 15 were in comment) |
+| dev-2-go | 3 | 1 | -2 | line 305 W-LINT-011 preserved |
+| dev-3-svelte | 10 | 0 | -10 | (none — all 10 were in comment) |
+| dev-4-pascal | 4 | 2 | -2 | lines 265 + 268 W-LINT-011 preserved |
+| **Total** | **32** | **3** | **-29** | (3 outside-comment fires preserved exactly as predicted) |
+
+Both agent + PA ran R26 independently. PA-captured pre-fix baseline at `/tmp/r26-bug30-baseline-summary.txt` predicted per-dev deltas which matched post-fix counts exactly. Banked as a reusable PA workflow for lint-pass / scan-based fixes: capture in-condition vs out-of-condition counts pre-fix; the delta IS the empirical verification surface.
+
+**Deferred (banked):**
+- SPEC-INDEX.md row "comments → §27 (13421-13441)" appears stale per agent inspection (line range maps to §20.3 nav content). Worth a `bun run scripts/regen-spec-index.ts` in a future maintenance pass.
+- Outside-comment W-LINT-011 fires that survived post-fix (dev-2 line 305, dev-4 lines 265/268) are real signal or a separate false-positive class; NOT investigated.
+
+- **Spec reference:** SPEC §27 (comments do not carry code); SPEC §4.7 BS-layer raw-content doctrine (S87/S88 amendment).
+- **Cross-refs:** R24-BUG-3 in `gauntlet-r24-report.md`; R25 Bug 43 cross-ref (duplicate); agent dispatch BRIEF.md at `docs/changes/r24-bug-30-linter-html-comment-2026-05-27/BRIEF.md`.
 
 ---
 
@@ -619,12 +640,12 @@ SSE handler emit sample (dev-1 `activityLog`): properly synthesized as `async fu
 
 ---
 
-### Bug 43 — Linter scans HTML comment content — `DUPLICATE OF BUG 30 (S136 R24)` — `MED`
+### Bug 43 — Linter scans HTML comment content — `RESOLVED-AS-DUPLICATE-OF-BUG-30 S137 (commit 5199a435)` (was MED; R24; R25 confirming evidence)
 
-R25 surfaced this independently (dev-3 / overseer-3). Already filed as Bug 30 in S136 R24 intake. No new entry needed; cross-reference for the R25 confirming evidence:
+R25 surfaced this independently (dev-3 / overseer-3). Already filed as Bug 30 in S136 R24 intake. **RESOLVED in same commit as Bug 30** (`5199a435`, S137) — single fix to `buildSkipRanges()` + `commentRanges` skip extension closes both. dev-3-svelte's friction-report empirically verified clean post-fix (10 → 0 false-positives, 0 outside-comment fires affected).
 
-- **R25 confirming evidence:** dev-3-svelte's friction report — 14 W-TAILWIND-UNRECOGNIZED-CLASS / W-LINT-007 / W-LINT-004 / W-LINT-014 fires were all on text inside `<!-- FRICTION REPORT -->` comment block; dev's "remove class attributes" workaround was a response to false signal.
-- **Cross-refs:** Bug 30 (S136 R24 entry; primary record); Bug 43 in `gauntlet-r25-report.md` (R25 confirming cross-dev evidence).
+- **R25 confirming evidence (now CLOSED):** dev-3-svelte's friction report had 14 W-TAILWIND-UNRECOGNIZED-CLASS / W-LINT-007 / W-LINT-004 / W-LINT-014 fires all on text inside `<!-- FRICTION REPORT -->` comment block. Post-fix: 10 → 0 (PA R26 dual-verify).
+- **Cross-refs:** Bug 30 (RESOLVED S137 `5199a435`); Bug 43 in `gauntlet-r25-report.md`.
 
 ---
 
