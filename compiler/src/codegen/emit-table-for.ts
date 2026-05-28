@@ -286,6 +286,163 @@ function bareExprNode(raw: string, refs: string[], span: unknown): unknown {
   };
 }
 
+// ---------------------------------------------------------------------------
+// `@.` iteration-sigil rewriter for column slot bodies (Bug 32 fix).
+//
+// §17.7 ratification: `@.` is the contextual iteration-value sigil — inside
+// a `<tableFor>` synth for-loop body, `@.` refers to the current row.
+// Adopters reach for `@.` because that's the iteration sigil they learned
+// for `<each>`; tableFor IS an iteration locus (it iterates rows), so the
+// substitution belongs here too.
+//
+// SPEC §41.16.10 line 20512 reserves the IMPLICIT `@row` magic variable
+// for v1.next — that reservation is about not having to write `:let={...}`.
+// It does NOT reject `@.` lowering inside the synth for-loop body, which
+// is a separate (and pre-existing) iteration sigil.
+//
+// Mirror of emit-each.ts's `rewriteContextualSigil` (text-level regex pass)
+// applied to the slot body's bare-expr nodes + attribute expression text.
+// ---------------------------------------------------------------------------
+
+/**
+ * Rewrite `@.field` → `<rowVar>.field` and bare `@.` → `<rowVar>` in
+ * expression text. Conservative regex — does not touch `@cell` (no dot)
+ * or anything inside string literals beyond what the upstream tokenizer
+ * already split out.
+ */
+function rewriteAtDotInExprText(text: string, rowVar: string): string {
+  if (!text || typeof text !== "string") return text;
+  // The BS tokenizer space-pads `.` operators (`@.status` → `@ . status`) for
+  // expression readability. Normalize space-around-dot before applying the
+  // sigil rewrite — mirrors emit-each.ts line 259 `.replace(/\s*\.\s*/g, ".")`
+  // and the Bug 35 rewriteIsPredicates regex tolerance pattern.
+  //
+  // We rewrite both `@<ws>.<ws>field` and `@.field` forms. Member-name
+  // matching is greedy; bare `@.` (no member name) becomes the bare rowVar.
+  return text
+    .replace(/@\s*\.\s*([A-Za-z_$][A-Za-z0-9_$]*)/g, (_m, member) => `${rowVar}.${member}`)
+    .replace(/@\s*\.\s*(?![A-Za-z_$])/g, rowVar);
+}
+
+/**
+ * Walk a column slot body's children recursively and rewrite all `@.`
+ * occurrences in bare-expr nodes (the `${@.field}` interpolation shape),
+ * attribute string-literal values (interpolated text), attribute `expr`
+ * values, and attribute `call-ref` args. Returns a NEW children array
+ * with rewritten nodes; the original input is not mutated.
+ *
+ * The walker re-parses rewritten `bare-expr` / attr-`expr` raw text into
+ * a fresh `exprNode` so downstream consumers (rewriter passes, emit-html
+ * attribute pipeline, emit-lift bare-expr pipeline) see the rewritten
+ * tree consistently.
+ */
+function rewriteAtDotInSlotBody(
+  children: unknown[],
+  rowVar: string,
+): unknown[] {
+  if (!Array.isArray(children) || children.length === 0) return children;
+  return children.map(child => rewriteAtDotInNode(child, rowVar));
+}
+
+function rewriteAtDotInNode(node: unknown, rowVar: string): unknown {
+  if (!node || typeof node !== "object") return node;
+  const n = node as Record<string, unknown>;
+  const kind = n.kind as string | undefined;
+
+  // bare-expr — the `${@.field}` interpolation site. Rewrite the raw
+  // expression text + re-parse exprNode.
+  if (kind === "bare-expr") {
+    const exprRaw = typeof n.expr === "string" ? n.expr : "";
+    const rewrittenRaw = rewriteAtDotInExprText(exprRaw, rowVar);
+    if (rewrittenRaw === exprRaw) return node;
+    let rewrittenExprNode: unknown;
+    try {
+      rewrittenExprNode = parseExprToNode(rewrittenRaw, "<tableFor-synth>", 0);
+    } catch {
+      rewrittenExprNode = { kind: "escape-hatch", span: n.span, nativeKind: "SkippedExpr", raw: rewrittenRaw };
+    }
+    return { ...n, expr: rewrittenRaw, exprNode: rewrittenExprNode };
+  }
+
+  // logic wrapper — recurse into body.
+  if (kind === "logic") {
+    const body = Array.isArray(n.body) ? (n.body as unknown[]) : [];
+    return { ...n, body: body.map(b => rewriteAtDotInNode(b, rowVar)) };
+  }
+
+  // markup — recurse into attrs + children. Both `attrs` and `attributes`
+  // mirror the same array (ast-builder duplicates the reference for
+  // backward-compat with two callsites).
+  if (kind === "markup") {
+    const attrs = Array.isArray(n.attrs) ? (n.attrs as unknown[]) : (Array.isArray(n.attributes) ? (n.attributes as unknown[]) : []);
+    const rewrittenAttrs = attrs.map(a => rewriteAtDotInAttr(a, rowVar));
+    const kids = Array.isArray(n.children) ? (n.children as unknown[]) : [];
+    const rewrittenKids = kids.map(c => rewriteAtDotInNode(c, rowVar));
+    return { ...n, attrs: rewrittenAttrs, attributes: rewrittenAttrs, children: rewrittenKids };
+  }
+
+  // text / other — no @. text content (text is plain string; @. only
+  // appears inside ${...} interpolations which become bare-expr).
+  // Recurse into known child-bearing shapes defensively.
+  if (Array.isArray(n.children)) {
+    const kids = n.children as unknown[];
+    return { ...n, children: kids.map(c => rewriteAtDotInNode(c, rowVar)) };
+  }
+  if (Array.isArray(n.body)) {
+    const body = n.body as unknown[];
+    return { ...n, body: body.map(b => rewriteAtDotInNode(b, rowVar)) };
+  }
+  return node;
+}
+
+function rewriteAtDotInAttr(attr: unknown, rowVar: string): unknown {
+  if (!attr || typeof attr !== "object") return attr;
+  const a = attr as Record<string, unknown>;
+  const val = a.value as Record<string, unknown> | undefined;
+  if (!val || typeof val !== "object") return attr;
+  const vKind = val.kind as string | undefined;
+
+  // string-literal — may contain `${@.X}` interpolation text. Rewrite raw.
+  if (vKind === "string-literal") {
+    const raw = typeof val.value === "string" ? val.value : "";
+    const rewritten = rewriteAtDotInExprText(raw, rowVar);
+    if (rewritten === raw) return attr;
+    return { ...a, value: { ...val, value: rewritten } };
+  }
+
+  // expr — interpolated expression. Rewrite raw + refs + re-parse exprNode.
+  if (vKind === "expr") {
+    const raw = typeof val.raw === "string" ? val.raw : "";
+    const rewritten = rewriteAtDotInExprText(raw, rowVar);
+    if (rewritten === raw) return attr;
+    let rewrittenExprNode: unknown;
+    try {
+      rewrittenExprNode = parseExprToNode(rewritten, "<tableFor-synth>", 0);
+    } catch {
+      rewrittenExprNode = { kind: "escape-hatch", span: val.span, nativeKind: "SkippedExpr", raw: rewritten };
+    }
+    return { ...a, value: { ...val, raw: rewritten, exprNode: rewrittenExprNode } };
+  }
+
+  // call-ref — rewrite each arg string.
+  if (vKind === "call-ref") {
+    const args = Array.isArray(val.args) ? (val.args as unknown[]) : [];
+    let changed = false;
+    const rewrittenArgs = args.map(a0 => {
+      const argStr = typeof a0 === "string" ? a0 : "";
+      const r = rewriteAtDotInExprText(argStr, rowVar);
+      if (r !== argStr) changed = true;
+      return r;
+    });
+    if (!changed) return attr;
+    return { ...a, value: { ...val, args: rewrittenArgs } };
+  }
+
+  // variable-ref — `attr=@var` bare ident. `@.` would be `@. ` parse error
+  // upstream; not a fire site.
+  return attr;
+}
+
 /**
  * Build a `for (row of <rowsExpr>) { lift <tr>... }` iteration block.
  *
@@ -539,9 +696,16 @@ function buildBodyCell(
   if (col.slotBody && col.slotBody.length > 0) {
     // Slot body — adopter-authored markup. The for-loop's binding parameter
     // is named `<rowBindingName>`, which is what the adopter sees in their
-    // `${row.field}` / `${user.name}` interpolations. The slot body is emitted
-    // verbatim (we trust the adopter's identifier choice).
-    children = col.slotBody;
+    // `${row.field}` / `${user.name}` interpolations.
+    //
+    // Bug 32 fix: the adopter MAY also reach for `@.field` — that's the
+    // canonical iteration sigil they learned for `<each>`, and tableFor IS
+    // an iteration locus (it iterates rows). We rewrite `@.field` →
+    // `<rowBindingName>.field` and bare `@.` → `<rowBindingName>` in the
+    // slot body so both forms compose. Adopters who use `${row.field}`
+    // directly are unaffected (the rewriter is a no-op on text without
+    // `@.`).
+    children = rewriteAtDotInSlotBody(col.slotBody, rowBindingName);
   } else {
     // Default cell — `${<rowBindingName>.<fieldName>}` bare interpolation.
     children = [
