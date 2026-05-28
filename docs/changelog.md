@@ -2,7 +2,70 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-28 **v0.6.2 cut at S138**). Full suite **21,960 pass / 0 fail / 219 skip / 1 todo across 815 files**. Net delta from S136 close 21,831: +129 (+18 Bug 38 +18 Bug 41 +20 Bug 40 +12 Bug 37 +12 Bug 49 +12 Bug 42 +16 Bug 35 +19 Bug 30/43 +23 Bug 44 +12 Bug 31 +13 Bug 32 - 64 inferred from ast.test.js describe.skip conversion + various within-node rebumps; rough). R25 HIGH cluster CLOSED end-to-end + EMPIRICALLY VERIFIED via R26 doctrine. MED tail closed: Bug 42 / 35 / 30 / 43 / 44 / 31 / 32 (7 MED bugs). pa.md S138 (R26 doctrine) + S139 (`full wrap` discriminator) addendums ratified. SPEC §19.4.1 amendment (bare `! ErrorType` ratified equivalent to arrow form). Canon-clear health: **GREEN** (RED → YELLOW → GREEN over session). HIGH=3 (only compiler-managed-async + 6nz-V class:NAME + R24-BUG-4 `<match>` `</>` Phase 5 remain) · MED=7 · LOW=16 · Nominal=7.
+Current baseline (2026-05-28 **S138 CLOSE**). Full suite **22,024 pass / 0 fail / 219 skip / 1 todo across 820 files**. Net delta from S138 OPEN baseline 21,960: +64. S138 closed 10 bugs (5 HIGH + 1 MED via Bug 50 redux + 4 LOW); 2 NEW filed (Bug 51 MED Shape 2 auto-lift OPEN; Bug 55 HIGH closed same session as Bug 9 L2). v0.6.2 cut + tag + push at mid-session. pa.md S138 R26 doctrine extended bidirectional (cross-source-sweep + sibling-fix-unmask sub-rules banked via Bug 50 redux + Bug 9 L1 attempt precedents). Canon-clear health: **GREEN** throughout. HIGH=1 remaining (6nz-V class:NAME on for-lift; GENUINE) · MED=7 (+ Bug 51 NEW) · LOW=12 · Nominal=7.
+
+### 2026-05-28 (S138 CLOSE — 10 bugs closed (5 HIGH + 4 LOW + 1 MED redux) + Bug 9 L1+L2 paired-fix close + v0.6.2 release + pa.md R26 doctrine bidirectional extension)
+
+Marathon session — 10 bugs closed total; 1 worktree-isolated agent dispatch (R24-BUG-4 clean); 8 PA-direct surgical fixes; v0.6.2 release cut + tag + push; pa.md S138 R26 doctrine extended bidirectional (cross-source-sweep + sibling-fix-unmask sub-rules banked from Bug 50 redux + Bug 9 L1 attempt precedents). 22 commits.
+
+**v0.6.2 release at mid-session:** `1270994e` release commit + `0a02e0d7` README compile-gate fix + tag `v0.6.2` pushed to origin. R24/R25 CRITICAL bundle per S136 patch landscape. See v0.6.2 release block below for full release notes.
+
+**R24/R25 HIGH cluster** (paired-fix arc):
+
+- **R24-BUG-4** `<match>` + `<each>` `</>` generic closer RESOLVED `adc0a70f` (CLASS-LEVEL — closes both `<match>` AND `<each>` `</>` paths in one fix; agent-dispatched scrml-js-codegen-engineer worktree-isolated; +479/-58L `block-splitter.js` generic tag-stack scanner replaces same-kind nestDepth; +23 tests in NEW `structural-body-closer-r24-bug-4.test.js`; PA-verified R26 dev-3-svelte clean E-CTX-001/003; SURFACED 2 NEW HIGH downstream Phase-3 codegen gaps Bug 52 + 53 previously MASKED by BS-level rejection).
+
+- **Bug 52** `<match for=Type on=.BareVariant>` codegen no bare-variant lowering RESOLVED `a30d86d1` (PA-direct +18L `emit-match.ts:resolveOnExpr` 5th branch + 276L NEW regression test 8 tests; mirrors canonical bare-variant lowering at `emit-expr.ts:emitIdent`; PA-verified R26 dev-3-svelte `_dispatch("High")` post-fix).
+
+- **Bug 53** `<match>` `:`-shorthand arm body emits raw markup as textContent RESOLVED `f05d04d2` (PA-direct surgical +46/-18L `emit-match.ts` shorthand-branch markup-start detection routes through `nativeParseFile` instead of `parseExprToNode`; +280L NEW regression test 8 tests; CLASS-CLOSE with Bug 52 — full match codegen surface R24 exercised now closed; PA-verified R26 dev-3-svelte zero `textContent = <` patterns + `node --check` PASS).
+
+- **Bug 50** `<tableFor>` synthetic onchange handler emits raw if-stmt inside object-literal property value — **REDUX precedent**: NOT-REPRODUCED `3a482076` (R25 sweep clean) → REVERSED `cc93c031` (R24 dev-3-svelte caught the symptom; bug entry's "dev-1-react" attribution was right for R24 not R25) → reclassified HIGH → RESOLVED `c89f1176` (PA-direct surgical +31L `emit-event-wiring.ts` Case B `rewriteExprArrowBody` for fallback-string path + 233L NEW regression test 7 tests; mirrors Bug C 6nz `emit-expr.ts:emitEscapeHatch` precedent; PA-verified R26 BOTH R24 dev-3-svelte AND R24 dev-1-react `node --check` PASS).
+
+**Bug 9 — Compiler-managed async transitive coloring — DEFERRED-ARC RESOLUTION via L1+L2 paired-fix:**
+
+- **Bug 9 L1** (direct-caller portion) + **Bug 55 L2** (CPS planner shape gate) — RESOLVED at `a4a0f2d2`. The deferred-arc resolution worked as follows:
+  - L1 attempted PA-direct: populate `functionName: record.fnNode.name ?? null` in `route-inference.ts:3018+`. Isolated regression tests (6 tests) PASSED.
+  - R26 empirical sweep on 8 gauntlet sources: L1-alone REGRESSED 5/8 from `node --check` PASS to FAIL.
+  - Unmasked downstream shape: statement-shape stmts (guarded-expr / if-stmt / etc.) emitted as Promise.all array literal elements → SyntaxError.
+  - Filed Bug 55 NEW HIGH (`e4e7d6c8`) with empirical sweep evidence + 3-layer-framing reaffirmation.
+  - Designed Bug 55 fix as L2: `isStatementShapeStmt` guard in `scheduling.ts` group-building step forces statement-shape stmts to size-1 groups. 6 stmt kinds covered: guarded-expr / if-stmt / while-stmt / do-while-stmt / for-stmt / return-stmt.
+  - Combined L1+L2: R26 sweep recovers all 5 previously-regressing sources; 7/8 PASS post-fix (baseline-equivalent; 1 FAIL is unrelated pre-existing on R24 dev-4-pascal).
+  - +370L NEW `compiler-managed-async-bug-9-and-55.test.js` 8 tests + 3 existing tests updated to accept new async-prefix emission shape.
+  - L3 (transitive async coloring across client fn graphs) still deferred per original 3-layer framing; §8 of new test file is the L3 tripwire.
+  - **Methodology meta-validation**: pa.md S138 R26 doctrine PAID OFF SPECTACULARLY. The original Bug 9 filing's deferral framing ("not blind-patched") was structurally correct. S138 worked the integration via the R26 sweep at intermediate L1-only state, revealing the next layer's bug as the surface to attack.
+
+**4 LOW PA-direct surgical fixes** (the velocity track parallel to arc-fix track):
+
+- **Bug 33** W-LINT-011 `:let=` false positive RESOLVED `5ec84589` (PA-direct surgical 1-char regex change — negative lookahead `(?!let\b)` excludes scrml-reserved slot-binding form; +3 regression tests; surfaced separate Bug 54 candidate for `:let=` attribute-registry wire-up).
+
+- **Bug 24** qualified-form discrim regex tolerance RESOLVED `aa0395a7` (PA-direct surgical regex extension `is\s+(?:[A-Z][A-Za-z0-9_$]*)?\s*\.\s*VariantName` accepts both bare-dot `is .Draft` and qualified `is Article.Draft`; +4 regression tests; mirrors `classifyWriteAgainstSpec` parallel — read-side asymmetry closed).
+
+- **Bug 23** W-LIFECYCLE-LEGACY-ARROW Shape 1 emission gap RESOLVED `61391c75` (PA-direct surgical +27L `buildCellValueLifecycleMap` per-cell emission of W-LIFECYCLE-LEGACY-ARROW when `findTopLevelArrow` detects glyph = "arrow"; mirrors struct-field equivalent at `extractLifecycleFields`).
+
+- **Bug 25** `transition()` deeper-expression regex tolerance RESOLVED `5160afad` (PA-direct surgical regex extension `(?:\s*\.\s*<ident>)*` trailing path support; mirrors RESET_CALL_RE Q6-narrow pattern; array-index form deferred per filing).
+
+**pa.md addendums extended cross-machine** (`dbb47c3` in scrml-support):
+
+- **S138 R26 doctrine bidirectional + sub-rules ratified.** The doctrine applies forward (verify before claim-CLOSED) AND reverse (verify before claim-OPEN). Sub-rules added S138:
+  - **Cross-source sweep**: bug's named source may be wrong; sweep MULTIPLE sources; match the described reproducer pattern to source content (Bug 50 redux precedent).
+  - **Sibling-fix unmask check**: recently-landed fixes may CHANGE codegen reachability; re-verify AFTER the unmasking fix, not before (R24-BUG-4 unmasked Bug 50 on dev-3-svelte; Bug 9 L1 unmasked Bug 55 — same shape).
+
+**Methodology banks (S138 durable):**
+
+- **R26 doctrine bidirectional** — forward + reverse direction; cross-source + sibling-fix sub-rules.
+- **The Bug 50 redux precedent** — same-session NOT-REPRODUCED → REVERSED → RESOLVED; PA classification quality follows the empirical-canary pattern.
+- **The Bug 9 deferred-arc resolution via paired-fix** — multi-layer framings can be walked to safe close via R26 at intermediate states (L1-only sweep revealed L2 bug as the surface to attack).
+- **PA-direct velocity track parallel to agent-dispatch arc-fix track** — 4 LOW + 4 HIGH PA-direct surgical fixes this session (each ~20-30 LOC); reserves agent dispatch for class-level fixes (R24-BUG-4 +479/-58L).
+- **Brief-hypothesis vs empirical-grep track record** — look at actual emit + grep for symptom BEFORE scoping fixes (Bug 9 / 52 / 53 / 50 all benefited).
+
+**Process health (S138):** S99 path-discipline counter held at 20 (1 worktree dispatch + 8 PA-direct fixes; zero leaks). Zero `--no-verify` violations. 1 R26 reverse-direction misclassification (Bug 50 NOT-REPRODUCED → REVERSED same-session; banked as the precedent for the cross-source-sweep + sibling-fix-unmask sub-rules).
+
+**Worktree cleanup at wrap step 6b:** main only (R24-BUG-4 worktree cleaned at landing).
+
+**Push state: PUSHED at wrap per user `full wrap and push` directive.**
+
+---
+
+ Net delta from S136 close 21,831: +129 (+18 Bug 38 +18 Bug 41 +20 Bug 40 +12 Bug 37 +12 Bug 49 +12 Bug 42 +16 Bug 35 +19 Bug 30/43 +23 Bug 44 +12 Bug 31 +13 Bug 32 - 64 inferred from ast.test.js describe.skip conversion + various within-node rebumps; rough). R25 HIGH cluster CLOSED end-to-end + EMPIRICALLY VERIFIED via R26 doctrine. MED tail closed: Bug 42 / 35 / 30 / 43 / 44 / 31 / 32 (7 MED bugs). pa.md S138 (R26 doctrine) + S139 (`full wrap` discriminator) addendums ratified. SPEC §19.4.1 amendment (bare `! ErrorType` ratified equivalent to arrow form). Canon-clear health: **GREEN** (RED → YELLOW → GREEN over session). HIGH=3 (only compiler-managed-async + 6nz-V class:NAME + R24-BUG-4 `<match>` `</>` Phase 5 remain) · MED=7 · LOW=16 · Nominal=7.
 
 PRIOR baseline (2026-05-27 **S136 CLOSE**). Full suite **21,831 pass / 3 fail / 170 skip / 1 todo across 804 files** (3 fails were within-node allowlist-baseline drift on error-arm fixtures from cumulative parser-shape shifts; S125 lesson firing again; carried forward to S137 for allowlist rebump — landed `050e20e8` + bulk `4e55412d`; NOT regressions). Net new test files: boolean-keywords-lowering.test.js + error-handler-terminator-arms.test.js + r25-bug-36-bare-error-type.test.js. Full delta from S135 baseline 21,762: +69 (+42 R24-BUG-1 / +18 R24-BUG-2 / +12 R25-Bug-36 - the 3 within-node fails).
 

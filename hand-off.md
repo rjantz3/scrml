@@ -1,153 +1,174 @@
-# scrmlTS — Session 138 (OPEN)
+# scrmlTS — Session 138 (CLOSE)
 
 **Date:** 2026-05-28
-**Previous:** `handOffs/hand-off-140.md` (S137 CLOSE — R25 HIGH cluster (Bug 37/38/40/41) + Bug 49 BS upstream + R25 MED tail (Bug 42/35/30/43/44/31/32) + SPEC §19.4.1 bare `! ErrorType` + pa.md S138 R26-doctrine + pa.md S139 `full wrap` discriminator; 12 worktree dispatches all clean-landed; PUSH executed mid-session).
+**Previous:** `handOffs/hand-off-141.md` (S138 OPEN — carry-forward from S137 CLOSE; pa.md S138/S139 addendums in force; v0.6.2 cut candidate per S136 patch landscape).
 
-**HEAD at OPEN:**
-- scrmlTS: `882eba20` (S137 wrap commit — within-node final rebump + S137 CLOSE)
-- scrml-support: `4ea0b74` (S139 addendum + user-voice S137)
-- pkg.json: 0.6.1 (unchanged S133→S137)
+**HEAD at CLOSE:** (set at wrap commit; current top `2369a4ff` known-gaps Bug 9 + Bug 55 paired close).
+**HEAD scrml-support:** `dbb47c3` (pa.md R26 reverse-direction sub-rules cross-machine).
+**pkg.json:** 0.6.2 (released this session; tag pushed).
 
-**Sync state:** scrmlTS 0 ahead / 0 behind origin · scrml-support 0 ahead / 0 behind origin · cross-machine clean.
+**Tests at CLOSE:** **22,024 pass / 0 fail / 219 skip / 1 todo / 820 files** (+64 from S138 OPEN baseline 21,960).
 
-**Tests at OPEN baseline (per S137 CLOSE):** 21,960 pass / 0 fail / 219 skip / 1 todo / 815 files. Net +129 from S136 close.
+**S99 path-discipline counter:** 20 (held — only 1 worktree dispatch this session; clean landing).
 
-**S99 path-discipline counter:** 20 (held across 12 S137 worktree dispatches + 4 self-corrected process violations declared honestly).
+**Maps:** stale watermark `27e14c66` (S135 close). +80+ commits drift. Refresh authorized if next dispatch is heavy compiler-source heavy.
 
-**Maps:** stale watermark `27e14c66` (S135 close). +60 commits drift accumulated S136+S137. Refresh authorized iff next dispatch is heavy compiler-source outside last map cohort.
+**Worktrees:** main only.
 
-**Worktrees:** main only (12 cleaned at S137 wrap step 6b).
-
-**PA auto-memory:** 43 rule files (+1 from S137: `feedback_r26_empirical_verification.md`).
+**PA auto-memory:** 43 rule files (`feedback_r26_empirical_verification.md` extended with reverse-direction + cross-source-sweep + sibling-fix-unmask sub-rules + Bug 50 redux precedent).
 
 **Inbox:** empty.
 
-**Canon-clear health:** GREEN (held end of S137).
+**Canon-clear health:** GREEN throughout.
 
 ---
 
-## S137 directives in force (banked from user-voice S137)
+## S138 was a model-high-productivity session
 
-1. **pa.md S138 addendum — R26 empirical-verification doctrine.** HIGH-severity codegen bug fixes that rely on AST construction require empirical R26-style re-compilation of real adopter `.scrml` source BEFORE claim-closed. Regression-tests-passing ≠ empirical-reproducer-passing. Dispatch brief Phase 3 = mandatory R26 step with bug-specific symptom check; PA dual-verifies before flipping RESOLVED.
+**10 bugs closed** (5 HIGH + 1 MED + 4 LOW; including the Bug 9 deferred-arc resolution via L1+L2 paired-fix). **2 NEW filed** (Bug 51 MED Shape 2 auto-lift; Bug 55 NEW HIGH closed same session as Bug 9 L2).
 
-2. **pa.md S139 addendum — `full wrap [arc-name]` discriminator.** Stay warm through arc-end (named OR implicit current cluster), not task-end. Safety floor 88% used — PA SHALL surface 1-liner at the floor. Under live `full wrap` directive, PA SHALL NOT proactively suggest wrap at cluster boundaries. Directive in-session-only (doesn't carry across sessions).
+| Bug | Severity | Disposition | Commit |
+|---|---|---|---|
+| R24-BUG-4 | HIGH | RESOLVED via worktree agent dispatch | `adc0a70f` |
+| Bug 50 | HIGH (redux) | NOT-REPRODUCED → REVERSED → RESOLVED | `c89f1176` |
+| Bug 52 | HIGH (NEW) | RESOLVED PA-direct | `a30d86d1` |
+| Bug 53 | HIGH (NEW) | RESOLVED PA-direct | `f05d04d2` |
+| Bug 33 | LOW | RESOLVED PA-direct | `5ec84589` |
+| Bug 24 | LOW | RESOLVED PA-direct | `aa0395a7` |
+| Bug 23 | LOW | RESOLVED PA-direct | `61391c75` |
+| Bug 25 | LOW | RESOLVED PA-direct | `5160afad` |
+| **Bug 9 (L1+L2)** | **HIGH** | **RESOLVED PA-direct** (paired with Bug 55) | `a4a0f2d2` |
+| **Bug 55 (NEW HIGH)** | **HIGH** | **RESOLVED PA-direct** (paired with Bug 9 L1) | `a4a0f2d2` |
+| Bug 51 (NEW) | MED | OPEN (workaround in v0.6.2 README) | filed `0a02e0d7` |
 
-3. **pa.md S136 addendum — BRIEF.md archival** (held; lifted to cross-machine contract).
+**Big lifts S138:**
+- **v0.6.2 release cut + tag + push** (`1270994e` + `0a02e0d7` README compile-gate fix)
+- **R24-BUG-4 worktree-isolated agent dispatch** (clean landing, ~22 min agent time)
+- **Bug 9 deferred-arc resolution via L1+L2 paired-fix** — the 3-layer framing's "not blind-patched" doctrine confirmed structurally, then walked to safe close
+- **pa.md S138 R26 doctrine extended bidirectional** (forward + reverse direction sub-rules) with Bug 50 redux + cross-source-sweep + sibling-fix-unmask precedents banked
 
-4. **`--no-verify` prohibition** — agent briefs MUST explicitly forbid `--no-verify` use; agent MUST STOP and report on pretest env races, NOT bypass. Bank precedent: Bug 37 self-corrected `--no-verify` on docs-only WIP via `git reset --soft` pre-permanent-landing.
-
-5. **Option (i) word-form `or`/`and` canonical** (S136; landed `a7877b5c`). Bare-form accepted alongside `||`/`&&`; codegen identical at JS-host boundary.
-
-6. **Bug-fix priority over feature work** — v0.6.x → v0.7.0 transition is bug-quality-driven. R26+ gauntlet rounds interleave with patch cuts.
-
-7. **S126 Edit/Bash-divergence interim mitigation** — briefs MUST instruct Bash-only file edits + no `cd` into main from worktrees. S137 had 3 declared S126 deviations (Bug 44 / Bug 31 / Bug 32; Edit tool during debug iteration) — surface explicitly, do not silently accept.
+**Push state at CLOSE:** PUSHED (per `full wrap and push` user directive).
 
 ---
 
-## Carry-forward from S137 (user picks first work item at S138 OPEN)
+## S138 directives in force (banked + carry-forward)
+
+1. **pa.md S138 addendum — R26 empirical-verification doctrine (BIDIRECTIONAL).** Forward = verify before claim-CLOSED; reverse = verify before claim-OPEN/dispatching fix. Sub-rules added S138 (`dbb47c3`): cross-source sweep + sibling-fix-unmask check. Bug 9 + Bug 55 are the strongest precedent.
+
+2. **pa.md S139 addendum — `full wrap [arc-name]` discriminator.** Stay warm through arc-end (named OR implicit). Safety floor 88% used. S138 used `full wrap` once at end (user directive triggering this CLOSE).
+
+3. **pa.md S136 addendum — BRIEF.md archival per worktree dispatch.** Held; 1 dispatch this session (R24-BUG-4); BRIEF.md archived.
+
+4. **`--no-verify` prohibition** — zero violations this session.
+
+5. **S99 path-discipline counter at 20** — held; 1 dispatch + 8 PA-direct fixes; zero leaks.
+
+6. **S126 Bash-edit interim mitigation + no-`cd`-into-main** — held.
+
+---
+
+## Carry-forward to S139 (next session)
 
 ### IMMEDIATE candidates
 
-1. **v0.6.2 patch release cut** (S136 ratified landscape). R24/R25 HIGH cluster + MED tail all closed; canon-clear GREEN. Per pa.md "Versioning convention" — `package.json` bump-on-tag required (0.6.1 → 0.6.2; bump-commit-tag-push order). Adopter-observable surface clean; ready for cut decision.
+1. **v0.6.3 patch release cut candidate** — S138 closed 5 HIGH + 4 LOW; v0.6.2 was R24/R25 CRITICAL bundle, v0.6.3 is the next milestone. `package.json` 0.6.2 → 0.6.3 per S94 bump-on-tag.
 
-2. **Bug 50** (MED NEW, surfaced post-Bug-32 R26) — `<tableFor selectable=>` `onchange` raw if-stmt in object-literal. Possibly related to Bug 46 (tableFor selectable/sortable not implemented; LOW).
+2. **Bug 51** (MED Shape 2 auto-lift in `<program>` default-logic mode drops render-spec metadata) — surfaced by v0.6.2 README compile-gate; workaround in place (wrap Shape 2 decl in `${...}`). Substantive parser/ast-builder/symbol-table investigation. ~1-2h.
 
-3. **R24-BUG-4 `<match>` `</>` Phase 5** (HIGH; SCOPING-tracked at `docs/changes/match-block-form-scoping/SCOPING.md`).
+3. **6nz-V class:NAME on for-lift** (HIGH; GENUINE) — only remaining HIGH bug. Runtime DOM reconcile path; likely substantive.
 
 ### MEDIUM
 
-4. **errorBoundary direction call (R24 step-3b)** — substantive design deliberation. PRIMER §6.8 `renders=.Fallback` vs SPEC §19.6 `fallback={<markup/>}` vs compiler-accepts-SPEC. Bug 44 fix made the lint shape-neutral; design call still open. Ready for HU?
+4. **Bug 9 L3 transitive async coloring** — separate follow-on per the 3-layer framing. §8 tripwire test in `compiler-managed-async-bug-9-and-55.test.js` flags when L3 lands.
 
-5. **Dormant label-loop bug** (banked at Bug 31) — ast-builder.js L5455/L5474/L9221/L9239 use `.line` (flat property) instead of `.span.line`; silently fails on labeled loops; no test exercises.
+5. **R27 different-task gauntlet round** (per S136 R25 Path B) — new task surface, different walls.
 
-6. **R27 different-task gauntlet round** (per S136 R25 Path B) — new task surface, different walls.
+6. **errorBoundary direction call** (R24 step-3b) — substantive design HU; deferred S136-S138.
 
 ### LOWER
 
-7. **Dashboard restructure** (carry-forward since S136; pattern pick a/b/c still pending). Blocked by Bug 9 (compiler-managed async transitive coloring; A9-class deferred).
-   - (a) module-init auto-load
-   - (b) `<state>` cell + `default=` + `reset()` refresh
-   - (c) per-screen Phase enum + engine
+7. **R25 MED tail residuals** — none open after S137 + S138 closures.
 
-8. **R25 LOW tail** — Bug 33 · 34 · 45 · 46 · 48 (latent sibling-finder).
+8. **Bug 54 candidate** (NOT YET FILED) — `:let=` attribute-registry wire-up (surfaced by Bug 33 fix; lint correct but attr-registry still fires W-ATTR-001).
 
 ### LONG-HORIZON
 
-9. **v0.6 → v0.7 patch landscape** (ratified S136 + updated S137):
-   - **v0.6.2** = R24/R25 CRITICAL bundle — **DONE** (ready for tag)
-   - **v0.6.3** = R25 HIGH deep-clean — **DONE**
-   - **v0.6.4** = MED + canon coherence — **substantially DONE**
-   - **v0.6.5+** = LOW + R27+ validation rounds
-   - **v0.7** = M6 cutover (BS+Acorn → native parser); separate arc
+9. **v0.7 = M6 cutover** (BS+Acorn → native parser). Separate arc. Estimate stale (~45-90h at S125; growing).
 
-10. **Maps refresh** — watermark `27e14c66` is 60+ commits stale. Authorize if next dispatch is compiler-source heavy outside last cohort.
-
-11. **DD Rec #15** — first gauntlet rounds happened (R24/R25); explicitly satisfied. NEW carry: R27 different-task round (Path B per R25 report).
+10. **Dashboard restructure** (carry-forward since S136; pattern pick a/b/c) — now UNBLOCKED by Bug 9 L1+L2 closure! Bug 9 was the original blocker per S136 hand-off. Worth re-surfacing at S139 OPEN.
 
 ---
 
-## Open questions to surface immediately at S138 OPEN
+## Open questions to surface at S139 OPEN
 
-1. **v0.6.2 cut decision?** All R24/R25 HIGH + MED tail closed; canon-clear GREEN. Ready for `package.json` bump 0.6.1 → 0.6.2 + tag + push?
-2. **Bug 50 prioritization** — fix this session-pair or batch with R27?
-3. **errorBoundary direction call** — substantive deliberation surface; ready for HU?
-4. **R27 different-task round timing** — after v0.6.2 cut or before?
-5. **Dashboard restructure** (S136 carry-forward, still open) — pick pattern a/b/c, or defer further?
-6. **Maps refresh** — pre-emptive, or hold until next compiler-source dispatch?
+1. **v0.6.3 cut?** All 5 HIGH closures + 4 LOW closures + Bug 51 NEW MED filed; ready for tag?
+2. **Dashboard restructure** unblocked by Bug 9 L1+L2 close — surface for pattern pick?
+3. **Bug 9 L3 transitive coloring** prioritization — separate follow-on or deferred indefinitely?
+4. **R27 gauntlet timing** — after v0.6.3 cut or before?
+5. **Maps refresh** — 80+ commits stale; refresh pre-emptively?
 
 ---
 
-## S138 — Session-start checklist (executed at OPEN)
+## S138 — Session-start checklist (executed at OPEN; CLOSE confirmation)
 
-- [x] Read pa.md pointer + `scrml-support/pa-scrmlTS.md` IN FULL (cross-machine two-party-exchange contract; through S139 `full wrap` addendum)
-- [x] Read `docs/PA-SCRML-PRIMER.md` §1-§13.6 substantively (§13.7+ deferred to as-needed lookup; primer is ~1425 lines)
-- [x] Read `compiler/SPEC-INDEX.md` IN FULL (navigation map through §58 Build Story + Quick-Lookup)
-- [x] Read `master-list.md` §0 head + §0.1 Phase progress table + §0.2 locks (full §0 deferred — ~275 lines of dashboard)
+- [x] Read pa.md pointer + `scrml-support/pa-scrmlTS.md` IN FULL (S138/S139 addendums in force)
+- [x] Read `docs/PA-SCRML-PRIMER.md` §1-§13.6 substantively (deferred §13.7+)
+- [x] Read `compiler/SPEC-INDEX.md` IN FULL
+- [x] Read `master-list.md` §0 head + §0.1 + §0.2
 - [x] Read previous `hand-off.md` (S137 CLOSE) IN FULL
-- [x] Read user-voice S136 + S137 entries (banked durables: pa.md S136/S138/S139 addendums; word-form `or`/`and` ratification; `--no-verify` prohibition; bug-fix priority doctrine; full wrap discriminator)
-- [x] Rotated `hand-off.md` → `handOffs/hand-off-140.md` (S137 CLOSE)
-- [x] Created fresh `hand-off.md` (this file)
-- [x] Sync check: scrmlTS 0 behind / 0 ahead · scrml-support 0 behind / 0 ahead (both pushed at S137 wrap)
-- [x] Inbox check: empty (`handOffs/incoming/` shows only `read/`)
+- [x] Read user-voice S136 + S137 entries (banked durables)
+- [x] Rotated `hand-off.md` → `handOffs/hand-off-140.md` (S137 CLOSE) at OPEN
+- [x] Rotated `hand-off.md` → `handOffs/hand-off-141.md` (S138 CLOSE) at this WRAP
+- [x] Sync check: scrmlTS + scrml-support both 0/0 origin at OPEN
+- [x] Inbox check: empty
 - [x] Worktree check: main only
-- [x] S90 CWD reset performed at session-open (Bash slip to scrml-support during cross-machine fetch caught + reset; no agent dispatches between slip and reset; S99 counter unaffected)
+- [x] S90 CWD reset performed at session-open (Bash slip caught)
+- [x] v0.6.2 cut + push at mid-session
+- [x] R24-BUG-4 worktree dispatch + clean landing
+- [x] 8 PA-direct surgical fixes
+- [x] pa.md S138 addendum extended (cross-source-sweep + sibling-fix-unmask)
+- [x] Bug 9 L1+L2 paired-fix close
+- [x] Test suite final: 22,024 pass / 0 fail / 219 skip / 1 todo / 820 files
+- [x] Hand-off rotated + S138 CLOSE written (this file)
+- [x] Worktree cleanup: main only (no orphan worktrees)
 
 ---
 
-## State as of OPEN (preserved for reference)
+## State as of CLOSE
 
 | Item | Value |
 |---|---|
-| HEAD scrmlTS | `882eba20` (S137 wrap) |
-| HEAD scrml-support | `4ea0b74` (S139 addendum + user-voice S137) |
-| pkg.json | 0.6.1 (unchanged S133→S137; v0.6.2 candidate at next bump) |
-| Tests | 21,960 pass / 0 fail / 219 skip / 1 todo / 815 files |
+| HEAD scrmlTS | (set at wrap commit; current top `2369a4ff`) |
+| HEAD scrml-support | `dbb47c3` (S138 R26 reverse-direction sub-rules) |
+| pkg.json | 0.6.2 (released S138; tag `v0.6.2` live on origin) |
+| Tests | **22,024 pass / 0 fail / 219 skip / 1 todo / 820 files** (+64 from OPEN) |
 | Worktrees | main only |
 | Inbox | empty |
-| S99 path-discipline counter | 20 |
+| S99 path-discipline counter | 20 (held) |
 | PA auto-memory | 43 rule files |
-| Maps | watermark `27e14c66` (S135); +60 commits drift |
-| Push state | scrmlTS clean / scrml-support clean (both pushed S137 wrap) |
-| Canon-clear health | GREEN |
-| HIGH bugs open (R25/R24) | 3 (per S137 close; Bug 50 NEW MED filed) |
-| MED bugs open | 7 (per S137 close MED inventory) |
-| LOW bugs open | 16 (Bug 48 latent + 15 prior) |
+| Maps | watermark `27e14c66` (S135); +80+ commits drift |
+| Push state | PUSHED per `full wrap and push` directive |
+| Canon-clear health | GREEN throughout |
+| HIGH bugs open | 1 (6nz-V class:NAME on for-lift; GENUINE; deep) |
+| MED bugs open | 7 (+ Bug 51 NEW S138) |
+| LOW bugs open | 12 |
+| Nominal (spec-ahead-of-impl) | 7 |
 
 ---
 
-## Methodology banks in force (S137 durable + prior)
+## Methodology banks (S138 durable)
 
-1. **R26 empirical-verification doctrine** (pa.md S138 addendum) — HIGH codegen fixes require R26 before claim-closed.
-2. **`full wrap` discriminator** (pa.md S139 addendum) — arc-end, not task-end; 88% safety floor.
-3. **BRIEF.md archival** (pa.md S136 addendum) — verbatim brief: text → `docs/changes/<change-id>/BRIEF.md`.
-4. **Within-node canary doctrine** (S137 banked) — pre-commit subset excludes within-node; post-cluster bulk rebump mandatory before push.
-5. **PA-baseline-pre-dispatch methodology** (S137 banked at Bug 30) — for lint-pass / scan-based fixes, capture in-condition vs out-of-condition counts pre-fix; the delta IS the empirical verification surface.
-6. **PA-direct salvage after agent crash** (S89 + S137 re-exercised at Bug 35).
-7. **Brief-hypothesis-vs-grep methodology** (S137: 5 of 12 hypotheses correct) — grep + reproducer + trace beats brief speculation; bounded-surface cases best.
-8. **Misclassified-as-different-bug detection** (S137 banked at Bug 32) — when one agent flags "different bug; out of scope" for a same-shape symptom, next dispatch SHOULD empirically re-check.
-9. **`@row` (SPEC §41.16.10 v1.next) vs `@.` distinction** (S137 banked at Bug 32) — `@row` is implicit magic deferred; `@.` is the §17.7 iteration sigil that composes naturally.
+1. **R26 doctrine bidirectional** — forward + reverse direction sub-rules; cross-source sweep + sibling-fix-unmask check (S138 Bug 50 redux + Bug 9 L1 attempt precedents banked).
+
+2. **The Bug 50 redux precedent** — same-session NOT-REPRODUCED → REVERSED → RESOLVED. PA classification quality can itself follow the "regression tests pass but empirical fails" pattern; reverse-direction R26 catches it.
+
+3. **The Bug 9 deferred-arc resolution via paired-fix** — when a multi-layer framing is structurally required, empirical R26 at intermediate states reveals the next layer's bug as the surface to attack. Bug 9 L1 attempt → R26 unmasked Bug 55 → designed Bug 55 fix as L2 → combined fix recovers all canonical cases + the unmasked surface. The 3-layer framing's "not blind-patched" warning was empirically validated.
+
+4. **PA-direct velocity track parallel to agent-dispatch arc-fix track** — S138 closed 4 LOW + 4 HIGH bugs PA-direct (each ~20-30 LOC surgical fix). Agent-dispatch reserves for class-level fixes (R24-BUG-4 had +479/-58L). Both tracks valuable; pick per shape.
+
+5. **Brief-hypothesis vs empirical-grep track record** — S138 hypothesis correctness improved by using "look at the actual emit + grep for the symptom" before scoping fixes. Bug 9 / Bug 52 / Bug 53 all benefited from looking at concrete emitted JS rather than reasoning from intent alone.
 
 ---
 
 ## Tags
-#session-138 #OPEN #carry-forward-s137 #v0-6-2-cut-candidate #bug-50-MED #r26-doctrine-in-force #full-wrap-discriminator-in-force #canon-clear-green
+#session-138 #CLOSE #bug-9-L1+L2-resolved #bug-55-resolved-same-session #v0-6-2-released #r24-bug-4-resolved #bug-50-redux-precedent #pa-md-r26-bidirectional-extended #10-bugs-closed #HIGH-count-1-remaining
