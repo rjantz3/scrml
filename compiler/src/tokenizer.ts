@@ -1040,6 +1040,148 @@ export function tokenizeLogic(content: string, baseOffset: number, baseLine: num
     tokens.push(makeToken('REGEX', raw, start, absOff(), l, c));
   }
 
+  /**
+   * Bug 49 (S138) — synthesize a synthetic `error-effect` BLOCK_REF when
+   * `!{...}` is encountered inside content tokenizeLogic is re-tokenizing
+   * from scratch (i.e. with no pre-split children at this position).
+   *
+   * Under v0.3 default-logic-mode, bare top-level function declarations at
+   * `<program>` / `<page>` / `<channel>` direct-child positions auto-lift via
+   * `liftBareDeclarations` (ast-builder.js) into a synthetic `${...}` logic
+   * block whose `children: []` array carries no BS-side `!{...}` child —
+   * because block-splitter's orphan-brace mode disables sigil-recognition
+   * inside function-decl bodies (see block-splitter.js scanAttributes /
+   * orphanBraceDepth gating).
+   *
+   * When buildBlock(case "logic") re-tokenizes that lifted body, the inner
+   * `!{...}` arm-handler block would otherwise be lexed as PUNCT `!` + PUNCT
+   * `{` + interior tokens + PUNCT `}`. collectExpr (ast-builder.js:2479) then
+   * greedily consumes those into the const/let/bare-call RHS, acorn parses
+   * only the call (`risky()`) as the expression, and the trailing
+   * `! { | ::Variant -> { ... } }` content trips the "statement boundary not
+   * detected" warning at expression-parser.ts:2010 — arm bodies never reach
+   * the AST and are silently dropped.
+   *
+   * Scope (S138):
+   *   - This recognizer handles `!{` only — the canon-shown surface (PRIMER §6
+   *     + kickstarter §error-handling). Sister sigils (`${`, `#{`, `^{`, `~{`)
+   *     would each need their own composition checks before adding here.
+   *   - Recognition is unconditional once `!` + `{` are seen here: the `!{`
+   *     digraph has no overload in scrml — it is unambiguously the error-
+   *     handler context opener (§19.5). At this point in tokenizeLogic, we
+   *     are necessarily at a code position (strings / line comments / block
+   *     comments are consumed by readString / readLineComment /
+   *     readBlockComment before reaching the dispatch).
+   *   - Inside the scanned body, we skip string + comment runs so braces
+   *     embedded in handler-arm string literals (`@msg = "}"`) don't fool
+   *     the brace-depth scanner.
+   *
+   * Returns true when a synthetic BLOCK_REF was emitted (caller `continue`s
+   * the main loop); false when `!{` is not at this position OR scanning hit
+   * EOF before finding the matching close (caller falls through to normal
+   * tokenization so downstream stages can surface a recoverable diagnostic
+   * rather than silently dropping content).
+   */
+  function tryEmitSyntheticErrorEffectBlock(): boolean {
+    if (ch() !== "!" || ch(1) !== "{") return false;
+    const blockStart = absOff();
+    const blockStartLine = line;
+    const blockStartCol = col;
+    const startPos = pos;
+    // Scan forward from `!{` (cursor at `!`) to the matching `}`, tracking
+    // brace nesting and skipping string + comment runs. Mirrors the discipline
+    // of block-splitter.js's brace-context scanner.
+    let scan = pos + 2; // past `!{`
+    let depth = 1;
+    while (scan < content.length) {
+      const c = content[scan];
+      const c2 = scan + 1 < content.length ? content[scan + 1] : "";
+      // Line comment `// ...`
+      if (c === "/" && c2 === "/") {
+        scan += 2;
+        while (scan < content.length && content[scan] !== "\n") scan++;
+        continue;
+      }
+      // Block comment `/* ... */`
+      if (c === "/" && c2 === "*") {
+        scan += 2;
+        while (scan + 1 < content.length && !(content[scan] === "*" && content[scan + 1] === "/")) scan++;
+        if (scan + 1 < content.length) scan += 2;
+        continue;
+      }
+      // Double-quoted string
+      if (c === '"') {
+        scan++;
+        while (scan < content.length && content[scan] !== '"') {
+          if (content[scan] === "\\" && scan + 1 < content.length) { scan += 2; continue; }
+          scan++;
+        }
+        if (scan < content.length) scan++; // closing quote
+        continue;
+      }
+      // Single-quoted string
+      if (c === "'") {
+        scan++;
+        while (scan < content.length && content[scan] !== "'") {
+          if (content[scan] === "\\" && scan + 1 < content.length) { scan += 2; continue; }
+          scan++;
+        }
+        if (scan < content.length) scan++;
+        continue;
+      }
+      // Backtick template literal — consume the whole template (including any
+      // nested `${...}` interpolations) as one balanced unit. Inside an
+      // interpolation, brace depth is tracked locally.
+      if (c === "`") {
+        scan++;
+        while (scan < content.length && content[scan] !== "`") {
+          if (content[scan] === "\\" && scan + 1 < content.length) { scan += 2; continue; }
+          if (content[scan] === "$" && content[scan + 1] === "{") {
+            scan += 2;
+            let bd = 1;
+            while (scan < content.length && bd > 0) {
+              if (content[scan] === "{") bd++;
+              else if (content[scan] === "}") bd--;
+              scan++;
+            }
+            continue;
+          }
+          scan++;
+        }
+        if (scan < content.length) scan++; // closing backtick
+        continue;
+      }
+      // Brace depth
+      if (c === "{") { depth++; scan++; continue; }
+      if (c === "}") {
+        depth--;
+        scan++;
+        if (depth === 0) {
+          const blockEnd = baseOffset + scan;
+          const blockRaw = content.slice(startPos, scan);
+          const childBlock: Block = {
+            type: "error-effect",
+            raw: blockRaw,
+            span: { start: blockStart, end: blockEnd },
+            children: [],
+          };
+          // Advance the tokenizer cursor to `scan` (post matching `}`).
+          advance(scan - startPos);
+          const tok: Token = makeToken("BLOCK_REF", blockRaw, blockStart, absOff(), blockStartLine, blockStartCol);
+          tok.block = childBlock;
+          tokens.push(tok);
+          return true;
+        }
+        continue;
+      }
+      scan++;
+    }
+    // EOF before matching close — fall through to normal tokenization so the
+    // downstream parser surfaces a recovery diagnostic.
+    return false;
+  }
+
+
 
   // Multi-char operators (longest first)
   // W14-BB: added "++" and "--" for postfix update on @x reactive vars
@@ -1073,6 +1215,16 @@ export function tokenizeLogic(content: string, baseOffset: number, baseLine: num
       tok.block = child;
       tokens.push(tok);
       continue;
+    }
+
+    // Bug 49 (S138) — synthesize an error-effect BLOCK_REF for `!{...}`
+    // appearing inside content without a pre-split BS child here. See
+    // tryEmitSyntheticErrorEffectBlock above for full rationale. Recognizing
+    // `!{...}` at tokenize-time produces a BLOCK_REF that ast-builder.js's
+    // collectExpr (L2512) breaks at and the outer parseLogicBody /
+    // parseRecursiveBody (L3653 / L7257) wraps as a guarded-expr.
+    if (ch() === "!" && ch(1) === "{") {
+      if (tryEmitSyntheticErrorEffectBlock()) continue;
     }
 
     const c0 = ch();
