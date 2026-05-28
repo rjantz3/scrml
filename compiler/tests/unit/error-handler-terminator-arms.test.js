@@ -406,7 +406,9 @@ describe("R24-BUG-2 §10: end-to-end — R24 reproducer compiles to valid JS at 
     // avoids fighting unrelated R24 bugs elsewhere in the output. We assert
     // the slice is parseable by `new Function`. Use depth-tracked brace
     // matching because the function body contains nested `if`-arm blocks.
-    const fnHeaderRe = /function\s+_scrml_attempt_\d+\s*\([^)]*\)\s*\{/;
+    // S138 Bug 9 L1 — accept optional `async` prefix since the function
+    // now correctly emits as `async function` (calls tryMove server fn).
+    const fnHeaderRe = /(?:async\s+)?function\s+_scrml_attempt_\d+\s*\([^)]*\)\s*\{/;
     const headerMatch = clientJs.match(fnHeaderRe);
     expect(headerMatch).not.toBeNull();
     const start = headerMatch.index;

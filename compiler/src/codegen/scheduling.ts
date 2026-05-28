@@ -423,6 +423,36 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
     }
   }
 
+  // S138 Bug 55 — certain stmt kinds emit MULTI-STATEMENT output that
+  // CANNOT live inside a `Promise.all([...])` parallelization batch (a JS
+  // array-literal element MUST be an expression, not a statement).
+  //
+  //   guarded-expr   — failable call + error handler emits as
+  //                    `let X = await ...; if(...){...}` (multi-stmt)
+  //   if-stmt        — `if(cond){...} else {...}` is statement-shape
+  //   while-stmt     — `while(cond){...}` is statement-shape
+  //   for-stmt       — `for(...) {...}` is statement-shape
+  //   return-stmt    — `return X;` is statement-shape (also bare returns)
+  //
+  // Surfaced by Bug 9 L1 attempt — populating route.functionName made
+  // client wrappers async, which triggered parallelization, which lifted
+  // the broken shapes into adopter-visible territory. The shapes were
+  // always wrong but silent pre-async (no Promise.all batching triggered).
+  //
+  // Fix: treat these kinds as "group boundaries." Each such stmt ALWAYS
+  // gets its own size-1 group → routed through the single-stmt emission
+  // path at line 492+ which emits `code` verbatim at function-body top-
+  // level (where multi-stmt + statement-shape is fine).
+  function isStatementShapeStmt(stmt: ASTNode): boolean {
+    const k = (stmt as ASTNode).kind;
+    return k === "guarded-expr" ||
+           k === "if-stmt" ||
+           k === "while-stmt" ||
+           k === "do-while-stmt" ||
+           k === "for-stmt" ||
+           k === "return-stmt";
+  }
+
   // Group independent statements (those with no inter-dependencies among the group)
   const visited = new Set<number>();
   let i = 0;
@@ -433,8 +463,15 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
     const group: number[] = [i];
     visited.add(i);
 
+    // S138 Bug 55 — if the seed stmt is statement-shape, the group stays
+    // size-1 (single-stmt emission path).
+    const seedIsStatementShape = isStatementShapeStmt(body[i] as ASTNode);
+
     for (let j = i + 1; j < body.length; j++) {
       if (visited.has(j)) continue;
+      // S138 Bug 55 — statement-shape stmts never join multi-stmt groups
+      // (their statement-shape emission can't be an array literal element).
+      if (seedIsStatementShape || isStatementShapeStmt(body[j] as ASTNode)) continue;
       // Check if j is independent of all current group members
       let independent = true;
       for (const gi of group) {

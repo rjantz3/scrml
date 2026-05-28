@@ -541,7 +541,13 @@ describe("R24-Bug-31 §12: empirical R24 dev-1-react shape", () => {
     expect(check.ok).toBe(true);
     // The fetched call must emit, AND the early-return must be a separate
     // statement (NOT absorbed into the result binding's initializer).
-    expect(clientJs).toMatch(/let _scrml_\w*result\w*\s*=\s*_scrml_fetch_addComment/);
+    //
+    // S138 Bug 9 L1 update — with `functionName` now populated in
+    // route-inference.ts, `postComment()` is correctly emitted as
+    // `async function` and the server call site gets the `await` prefix
+    // per pillar SPEC §1 + §13.2 "compiler owns async wiring." Updated
+    // regex to accept the optional `await` between `=` and the fetch call.
+    expect(clientJs).toMatch(/let _scrml_\w*result\w*\s*=\s*(?:await\s+)?_scrml_fetch_addComment/);
     rmSync(tmp, { recursive: true, force: true });
   });
 });

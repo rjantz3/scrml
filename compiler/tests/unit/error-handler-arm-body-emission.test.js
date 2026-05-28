@@ -468,8 +468,12 @@ describe("R25-Bug-38 §12: end-to-end — emitted function is node-parseable", (
     expect(result.errors).toHaveLength(0);
 
     const clientJs = readFileSync(join(outDir, "r25-bug-38-parse.client.js"), "utf8");
-    // Slice the _scrml_attempt_N function body and parse via new Function
-    const fnHeaderRe = /function\s+_scrml_attempt_\d+\s*\([^)]*\)\s*\{/;
+    // Slice the _scrml_attempt_N function body and parse via new Function.
+    // S138 Bug 9 L1 — accept optional `async` prefix; the L1 fix populates
+    // route.functionName so transitive client-callers correctly emit as
+    // `async function` when calling server fns. The body still parses;
+    // outer `async` keyword is fine inside `new Function` wrap.
+    const fnHeaderRe = /(?:async\s+)?function\s+_scrml_attempt_\d+\s*\([^)]*\)\s*\{/;
     const headerMatch = clientJs.match(fnHeaderRe);
     expect(headerMatch).not.toBeNull();
     const start = headerMatch.index;

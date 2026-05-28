@@ -3017,6 +3017,32 @@ export function runRI(input: RIInput): RIOutput {
 
     functions.set(fnNodeId, {
       functionNodeId: fnNodeId,
+      // S138 Bug 9 L1 — populate the `functionName` field that
+      // `scheduling.ts::hasServerCallees` reads to build `serverFnNames`.
+      // Pre-fix this field was structurally declared in the route-map
+      // type but never set, so `serverFnNames` was ALWAYS empty and
+      // transitive client-callers were never auto-async-and-awaited.
+      // Per pillar SPEC §1 + §13.2 "compiler owns async wiring."
+      //
+      // S138 R26 EMPIRICAL ARC — Bug 9 L1 alone unmasked Bug 55
+      // (CPS planner guarded-expr-in-Promise.all shape gap): once L1
+      // makes a wrapper async, the CPS planner triggers parallelization,
+      // and any `let X = call() !{handler}` (failable-with-handler) in
+      // the body emits as multi-statement output inside the Promise.all
+      // array literal — JS SyntaxError. Pre-L1, the wrapper wasn't
+      // async, so parallelization didn't trigger and the broken shape
+      // stayed sequential (silent).
+      //
+      // Bug 55 fix landed THIS COMMIT (scheduling.ts:isGuardedExprStmt
+      // guard) — guarded-expr stmts now stay in size-1 groups (single-
+      // stmt emission path; multi-statement output OK at function body
+      // top-level). L1 + Bug 55 together SAFE on the R24/R25 empirical
+      // sweep: all PASSING sources stay PASSING; Bug 9 direct-caller
+      // case (canonical) now correctly emits async/await.
+      //
+      // L3 (transitive async coloring across client fn graphs) remains
+      // a separate follow-on — Bug 9 entry tracks the partial-close.
+      functionName: record.fnNode.name ?? null,
       boundary,
       escalationReasons: deduped,
       generatedRouteName,
