@@ -187,6 +187,389 @@ function isComponentName(name) {
 }
 
 // ---------------------------------------------------------------------------
+// R24-BUG-4 / S138 — Generic `</>` closer support for STRUCTURAL_RAW_BODY_ELEMENTS
+//
+// Per SPEC §4.4.2: "`</>` SHALL close the innermost open markup tag or state
+// block at the current position in the context stack." This applies uniformly,
+// including to `<match>` + `<each>` structural raw-body elements.
+//
+// The pre-S138 depth tracker tracked same-kind nesting only (nested `<match>`
+// inside `<match>` etc.) — sufficient for `</match>` / `</each>` explicit
+// closers but blind to `</>` generic closers, because `</>` can close ANY
+// open tag (arm-child or outer container).
+//
+// `findStructuralBodyEnd` runs a generic tag-stack scanner over the raw body:
+// - skip-zones: `${...}` interpolation (brace-counted), `"..."` / `'...'`
+//   strings, `<!-- -->` HTML comments, `//` to EOL + `/* */` scrml comments
+// - tag-stack: push on each non-self-closing, non-`:`-shorthand opener;
+//   pop on `</tagname>` / `</>`
+// - outer-closer detection: when the stack is empty (all arm-children
+//   balanced) AND we hit either `</tagname>` (matching the outer kind) OR
+//   `</>`, that IS the outer closer
+//
+// Closer forms returned:
+//   "explicit" — `</tagname>` matching the outer raw-body kind
+//   "generic"  — `</>` (the S138 new path)
+//   "inferred" — EOF hit without an outer-closer match (E-CTX-001 fallback)
+//
+// Same-kind nesting (HU-1 Q6 — nested `<each>` inside `<each>`) is naturally
+// handled: a nested `<each>` opener pushes onto the stack like any other
+// non-self-close tag; the matching `</each>` (or `</>`) pops it.
+//
+// `:`-shorthand detection — `<TagName : expr>` or `<TagName attr : expr>`:
+// the colon shorthand body terminates at the next sibling/outer-closer; no
+// balanced closer is needed. We detect via the same boundary-`:` scan the
+// rest of BS uses (whitespace-surrounded `:` inside the opener attribute
+// surface). Such openers are depth-neutral — do NOT push.
+//
+// Self-closing — `<TagName/>` or `<TagName attrs/>`: depth-neutral; do NOT
+// push. Detected by terminating-`/>` on the opener.
+// ---------------------------------------------------------------------------
+
+/**
+ * Skip past a `${...}` interpolation block from position `startPos` (which
+ * SHALL be the `$` byte). Returns the position immediately after the matching
+ * `}`. The scan brace-counts so nested `{...}` blocks balance.
+ *
+ * Inside `${...}`, `"..."` and `'...'` strings are also tracked so that
+ * literal braces inside strings do NOT affect the brace counter.
+ *
+ * If EOF is hit before the matching `}`, returns `source.length` (caller
+ * handles as "consumed to EOF").
+ */
+function skipDollarBrace(source, startPos) {
+  const len = source.length;
+  // expects source[startPos] === "$" && source[startPos+1] === "{"
+  let i = startPos + 2;
+  let depth = 1;
+  let inDq = false;
+  let inSq = false;
+  while (i < len) {
+    const c = source[i];
+    if (inDq) {
+      if (c === "\\" && i + 1 < len) { i += 2; continue; }
+      if (c === '"') inDq = false;
+      i++; continue;
+    }
+    if (inSq) {
+      if (c === "\\" && i + 1 < len) { i += 2; continue; }
+      if (c === "'") inSq = false;
+      i++; continue;
+    }
+    if (c === '"') { inDq = true; i++; continue; }
+    if (c === "'") { inSq = true; i++; continue; }
+    if (c === "{") { depth++; i++; continue; }
+    if (c === "}") {
+      depth--;
+      i++;
+      if (depth === 0) return i;
+      continue;
+    }
+    i++;
+  }
+  return len;
+}
+
+/**
+ * Skip past a quoted string starting at `startPos` (which SHALL be the
+ * opening quote). Returns the position immediately after the matching
+ * close quote. Handles `\"` / `\\` escapes.
+ */
+function skipQuotedString(source, startPos) {
+  const len = source.length;
+  const quote = source[startPos];
+  let i = startPos + 1;
+  while (i < len) {
+    const c = source[i];
+    if (c === "\\" && i + 1 < len) { i += 2; continue; }
+    if (c === quote) return i + 1;
+    i++;
+  }
+  return len;
+}
+
+/**
+ * Skip past an HTML comment `<!-- ... -->` starting at `startPos` (which
+ * SHALL be the `<` byte; caller has confirmed `<!--` prefix). Returns the
+ * position immediately after the closing `-->`.
+ */
+function skipHtmlComment(source, startPos) {
+  const len = source.length;
+  let i = startPos + 4; // past `<!--`
+  while (i < len) {
+    if (source[i] === "-" && source[i + 1] === "-" && source[i + 2] === ">") {
+      return i + 3;
+    }
+    i++;
+  }
+  return len;
+}
+
+/**
+ * Skip past a `//` line comment starting at `startPos` (the first `/`).
+ * Returns position immediately after the EOL (or EOF).
+ */
+function skipLineComment(source, startPos) {
+  const len = source.length;
+  let i = startPos + 2;
+  while (i < len && source[i] !== "\n") i++;
+  return i; // leave the `\n` for the outer scanner's line-tracker
+}
+
+/**
+ * Skip past a `/* ... *\/` block comment starting at `startPos` (the first
+ * `/`). Returns position immediately after the closing `*\/`.
+ */
+function skipBlockComment(source, startPos) {
+  const len = source.length;
+  let i = startPos + 2;
+  while (i < len) {
+    if (source[i] === "*" && source[i + 1] === "/") return i + 2;
+    i++;
+  }
+  return len;
+}
+
+/**
+ * Read the lowercased tag name starting at `nameStart` (the first
+ * post-`<` or post-`</` byte). Returns `{ name, nameEnd }` where `nameEnd`
+ * is the position immediately after the last name byte. Returns name=""
+ * if no identifier-shaped byte sequence is present.
+ */
+function readTagName(source, nameStart) {
+  const len = source.length;
+  let i = nameStart;
+  // First char: ASCII letter or `_`
+  if (i >= len) return { name: "", nameEnd: i };
+  const c0 = source.charCodeAt(i);
+  const isAlpha = (c0 >= 65 && c0 <= 90) || (c0 >= 97 && c0 <= 122) || c0 === 95;
+  if (!isAlpha) return { name: "", nameEnd: i };
+  i++;
+  while (i < len) {
+    const cc = source.charCodeAt(i);
+    const ok = (cc >= 65 && cc <= 90) ||   // A-Z
+               (cc >= 97 && cc <= 122) ||  // a-z
+               (cc >= 48 && cc <= 57) ||   // 0-9
+               cc === 95 || cc === 45;     // _ -
+    if (!ok) break;
+    i++;
+  }
+  return { name: source.slice(nameStart, i).toLowerCase(), nameEnd: i };
+}
+
+/**
+ * Scan the opener body from position `openerNameEnd` (just past the tag
+ * name) to find the opener's terminating `>` (or `/>` self-close).
+ *
+ * Returns `{ openerEnd, isSelfClosing, isColonShorthand }`:
+ *   - openerEnd: position immediately after the `>` byte
+ *   - isSelfClosing: true if the opener ended with `/>`
+ *   - isColonShorthand: true if the opener body contained a `:`-shorthand
+ *     introducer
+ *
+ * SPEC §4.14 `:`-shorthand recognition (mirrors `scanAttributes` in the
+ * main scanner):
+ *   - depth-0 `:` (not inside parens/brackets/braces/strings)
+ *   - whitespace immediately before the `:` (distinguishes from namespace
+ *     attribute prefixes like `bind:value` / `class:active`)
+ *   - next char is NOT `:` (avoid `::` Phase-3 syntax)
+ *
+ * Paren / bracket / brace tracking: a `>` inside `(...)` / `[...]` / `{...}`
+ * is content, not the opener terminator. Similarly a `:` inside any of
+ * those is NOT shorthand-marker — e.g., `<Ready(count: int)> : "ready"`
+ * has the type-annotation `:` inside `(...)` which is depth-positive.
+ *
+ * If EOF is reached, returns `{ openerEnd: len, isSelfClosing: false,
+ * isColonShorthand: false }` — caller treats as malformed.
+ */
+function scanOpenerBody(source, openerNameEnd) {
+  const len = source.length;
+  let i = openerNameEnd;
+  let isSelfClosing = false;
+  let isColonShorthand = false;
+  let inDq = false;
+  let inSq = false;
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  let braceDepth = 0;
+  while (i < len) {
+    const c = source[i];
+    // String tracking.
+    if (inDq) {
+      if (c === "\\" && i + 1 < len) { i += 2; continue; }
+      if (c === '"') inDq = false;
+      i++; continue;
+    }
+    if (inSq) {
+      if (c === "\\" && i + 1 < len) { i += 2; continue; }
+      if (c === "'") inSq = false;
+      i++; continue;
+    }
+    if (c === '"') { inDq = true; i++; continue; }
+    if (c === "'") { inSq = true; i++; continue; }
+    // Paren / bracket / brace depth — `>` and `:` inside these are content.
+    if (parenDepth > 0 || bracketDepth > 0 || braceDepth > 0) {
+      if (c === "(") parenDepth++;
+      else if (c === ")") parenDepth--;
+      else if (c === "[") bracketDepth++;
+      else if (c === "]") bracketDepth--;
+      else if (c === "{") braceDepth++;
+      else if (c === "}") braceDepth--;
+      i++; continue;
+    }
+    if (c === "(") { parenDepth++; i++; continue; }
+    if (c === "[") { bracketDepth++; i++; continue; }
+    // Sigil-prefixed brace openers + bare `{` open brace.
+    if (c === "{" ||
+        ((c === "$" || c === "?" || c === "#" || c === "!" || c === "^" || c === "~") &&
+         source[i + 1] === "{")) {
+      braceDepth++;
+      if (c !== "{") i++; // skip the sigil char; the `{` is consumed next iteration
+      i++;
+      continue;
+    }
+    // SPEC §4.14 `:`-shorthand introducer at depth-0.
+    if (c === ":" && source[i + 1] !== ":") {
+      const prev = i > openerNameEnd ? source[i - 1] : "";
+      const prevSpace = prev === " " || prev === "\t" || prev === "\n" || prev === "\r";
+      if (prevSpace) {
+        isColonShorthand = true;
+      }
+    }
+    if (c === "/" && source[i + 1] === ">") {
+      isSelfClosing = true;
+      return { openerEnd: i + 2, isSelfClosing, isColonShorthand };
+    }
+    if (c === ">") {
+      return { openerEnd: i + 1, isSelfClosing, isColonShorthand };
+    }
+    i++;
+  }
+  return { openerEnd: len, isSelfClosing, isColonShorthand };
+}
+
+/**
+ * Generic tag-stack scanner for STRUCTURAL_RAW_BODY_ELEMENTS bodies. Starts
+ * at `startPos` (immediately after the outer opener's `>`) and runs until
+ * one of:
+ *   - the outer `</tagname>` is encountered with the stack empty
+ *     → returns `{ contentEnd: pos, closerForm: "explicit", closerLen }`
+ *   - `</>` is encountered with the stack empty
+ *     → returns `{ contentEnd: pos, closerForm: "generic", closerLen: 3 }`
+ *   - EOF
+ *     → returns `{ contentEnd: len, closerForm: "inferred", closerLen: 0 }`
+ *
+ * `outerTagName` is the lowercased tag name of the outer raw-body element
+ * (e.g., "match" / "each"). The scanner skips `${...}` interpolation
+ * blocks, `"..."` / `'...'` strings, `<!-- -->` HTML comments, `//` line
+ * comments, and `/* *\/` block comments — `<` characters inside any of
+ * those do NOT affect the tag-stack.
+ *
+ * Returned `contentEnd` is the position of the byte BEFORE the closer (or
+ * `len` if EOF). Caller advances past the closer of length `closerLen`.
+ */
+function findStructuralBodyEnd(source, startPos, outerTagName) {
+  const len = source.length;
+  // Stack of open tag names (lowercased) AT THE BODY LEVEL — does not
+  // include the outer raw-body element itself.
+  const tagStack = [];
+  let i = startPos;
+  while (i < len) {
+    const c = source[i];
+    // Skip zones — check before any `<` interpretation.
+    if (c === "$" && source[i + 1] === "{") {
+      i = skipDollarBrace(source, i);
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      i = skipQuotedString(source, i);
+      continue;
+    }
+    if (c === "/" && source[i + 1] === "/") {
+      i = skipLineComment(source, i);
+      continue;
+    }
+    if (c === "/" && source[i + 1] === "*") {
+      i = skipBlockComment(source, i);
+      continue;
+    }
+    if (c !== "<") {
+      i++;
+      continue;
+    }
+    // c === "<" — disambiguate.
+    // HTML comment `<!-- -->`:
+    if (source[i + 1] === "!" && source[i + 2] === "-" && source[i + 3] === "-") {
+      i = skipHtmlComment(source, i);
+      continue;
+    }
+    // Closer `</...>`:
+    if (source[i + 1] === "/") {
+      // Generic `</>`:
+      if (source[i + 2] === ">") {
+        if (tagStack.length === 0) {
+          // Outer closer — generic form.
+          return { contentEnd: i, closerForm: "generic", closerLen: 3 };
+        }
+        tagStack.pop();
+        i += 3;
+        continue;
+      }
+      // Explicit `</tagname>`:
+      const { name: closerName, nameEnd: closerNameEnd } = readTagName(source, i + 2);
+      if (closerName === "" || source[closerNameEnd] !== ">") {
+        // Malformed closer — skip the `<` and continue. Downstream
+        // re-parse will surface the real error.
+        i++;
+        continue;
+      }
+      if (tagStack.length === 0 && closerName === outerTagName) {
+        // Outer closer — explicit form.
+        const closerLen = closerNameEnd + 1 - i;
+        return { contentEnd: i, closerForm: "explicit", closerLen };
+      }
+      // Pop the matching tag from the stack (best-effort — if stack-top
+      // doesn't match we still pop, letting downstream re-parse surface
+      // the real diagnostic).
+      if (tagStack.length > 0) {
+        tagStack.pop();
+      }
+      i = closerNameEnd + 1;
+      continue;
+    }
+    // Opener `<tagname...>` — read the tag name.
+    const { name: openerName, nameEnd: openerNameEnd } = readTagName(source, i + 1);
+    if (openerName === "") {
+      // Not an opener (e.g., bare `<` in code-default body). Advance one.
+      i++;
+      continue;
+    }
+    // Scan the opener body to find `>` or `/>` and detect `:`-shorthand.
+    const { openerEnd, isSelfClosing, isColonShorthand } = scanOpenerBody(source, openerNameEnd);
+    let isAfterCloseColonShorthand = false;
+    if (!isSelfClosing && !isColonShorthand) {
+      // Match-arm-style after-`>` colon `:`-shorthand: `<Variant> : expr` or
+      // `<Variant>: expr`. Per match-statechild-parser convention (parallel
+      // to the SPEC §18.0.1 worked examples), if the next non-horizontal-
+      // whitespace char after `>` (on the same logical line up to the next
+      // newline that introduces an arm-opener) is `:`, treat the opener as
+      // shorthand-bodied — depth-neutral.
+      let peek = openerEnd;
+      while (peek < len && (source[peek] === " " || source[peek] === "\t")) peek++;
+      if (peek < len && source[peek] === ":") {
+        isAfterCloseColonShorthand = true;
+      }
+    }
+    if (!isSelfClosing && !isColonShorthand && !isAfterCloseColonShorthand) {
+      // Non-self-close, non-shorthand opener — pushes onto the stack.
+      tagStack.push(openerName);
+    }
+    i = openerEnd;
+  }
+  return { contentEnd: len, closerForm: "inferred", closerLen: 0 };
+}
+
+// ---------------------------------------------------------------------------
 // Main scanner
 // ---------------------------------------------------------------------------
 
@@ -1896,66 +2279,41 @@ export function splitBlocks(filePath, source) {
           });
         } else if (!isComp && STRUCTURAL_RAW_BODY_ELEMENTS.has(lowerTagName)) {
           // S107 Phase 2 — SPEC §18.0.1 match block-form structural raw-body.
-          // Body captured as single text run; closer is `</tagname>` (explicit).
-          // The `</>` unambiguous-closer form is NOT supported for structural
-          // raw-body at Phase 2 baseline because depth-tracking is required to
-          // disambiguate it from arm-children `</>` closers (each `<Variant>...
-          // </>` arm body uses `</>` as its closer; the OUTERMOST `</>` would
-          // be the match closer). `:`-shorthand arms have no closer, breaking
-          // naive depth-tracking. Phase 5 may add `</>` support via the
-          // match-statechild-parser informing BS of arm-shape boundaries; for
-          // now adopters must write `</match>` explicitly to close a match
-          // block. Error message points to the requirement.
+          // S138 Phase 5 (R24-BUG-4) — `</>` generic closer now supported per
+          // SPEC §4.4.2 ("`</>` SHALL close the innermost open tag").
+          //
+          // Body captured as single text run; closer is one of:
+          //   `</tagname>` — explicit close (S107 Phase 2 baseline)
+          //   `</>`        — generic close (S138 Phase 5, R24-BUG-4)
+          //   inferred     — EOF reached without a matching closer (E-CTX-001)
+          //
+          // The body-end scan uses a generic tag-stack (findStructuralBodyEnd
+          // — module-scope helper) that pushes on each non-self-close,
+          // non-`:`-shorthand opener and pops on `</tagname>` / `</>` arm-
+          // children closers. When the stack is empty AND we hit either a
+          // matching `</outerKind>` or a `</>`, that IS the outer closer.
+          //
+          // Skip zones during scan: `${...}` interpolation blocks (brace-
+          // counted), `"..."` / `'...'` strings, `<!-- -->` HTML comments,
+          // `//` line comments, and `/* */` block comments — `<` characters
+          // inside any of those do NOT affect the depth counter.
+          //
+          // Same-kind nesting (HU-1 Q6 — nested `<each>` inside `<each>`)
+          // continues to work — a nested same-kind opener pushes like any
+          // other tag; the matching `</each>` (or `</>`) pops it; the outer
+          // closer is only recognized when stack is empty.
           //
           // The match-statechild-parser at SYM-time re-tokenizes the captured
           // body content to recognize arm shapes (self-closing / bare-body /
-          // `:`-shorthand) and arm-closer forms — that's where `</>` IS
-          // accepted as an arm-closer per scrml convention.
+          // `:`-shorthand) and arm-closer forms.
           const contentStart = pos;
           const contentStartLine = curLine;
           const contentStartCol = curCol;
-          const closeNeedle = `</${lowerTagName}>`;
-          const closeLen = closeNeedle.length;
-          // S130 — depth-tracking for nested same-kind structural raw-body
-          // openers. Without this, `<each in=@groups>...<each in=@items>...
-          // </each>...</each>` mis-matches: the outer scan finds the FIRST
-          // `</each>` (the inner closer) and treats it as the outer closer,
-          // leaving the outer body unclosed and dropping surrounding markup.
-          // Same-kind nesting is legal per HU-1 Q6 (the canonical "nested
-          // iteration with override for outer access" example in
-          // docs/heads-up/iteration-design-2026-05-25.md). The depth-tracker
-          // counts nested same-kind openers and only treats a `</tag>` as
-          // the outer closer when nestDepth has dropped to 0.
-          const openNeedlePrefix = `<${lowerTagName}`;
-          let nestDepth = 0;
-          while (pos < len) {
-            if (
-              source[pos] === "<" &&
-              source.slice(pos, pos + closeLen).toLowerCase() === closeNeedle
-            ) {
-              if (nestDepth === 0) break;
-              nestDepth--;
-              // Skip past the inner closer so we don't re-scan it as the outer.
-              for (let _k = 0; _k < closeLen; _k++) step();
-              continue;
-            }
-            // Detect a nested same-kind opener: `<tagname` followed by a
-            // boundary character (`>`, `/`, or whitespace). Attribute-bearing
-            // openers like `<each in=@x>` are recognized by the whitespace boundary.
-            if (
-              source[pos] === "<" &&
-              source.slice(pos, pos + openNeedlePrefix.length).toLowerCase() === openNeedlePrefix
-            ) {
-              const after = source[pos + openNeedlePrefix.length];
-              if (after === ">" || after === "/" || after === " " || after === "\t" || after === "\n" || after === "\r") {
-                nestDepth++;
-                // Skip past the opener prefix so we don't re-detect it.
-                for (let _k = 0; _k < openNeedlePrefix.length; _k++) step();
-                continue;
-              }
-            }
-            step();
-          }
+          const scanResult = findStructuralBodyEnd(source, pos, lowerTagName);
+          // Advance the position-tracker (with line/col updates) up to
+          // contentEnd — we walk one char at a time via step() so the
+          // existing line/col machinery stays consistent.
+          while (pos < scanResult.contentEnd) step();
           const contentEnd = pos;
           const children = [];
           if (contentEnd > contentStart) {
@@ -1975,13 +2333,18 @@ export function splitBlocks(filePath, source) {
               isComponent: false,
             });
           }
-          let closerForm = "explicit";
-          if (pos < len) {
-            advance(closeLen);
+          let closerForm;
+          if (scanResult.closerForm === "explicit") {
+            advance(scanResult.closerLen);
+            closerForm = "explicit";
+          } else if (scanResult.closerForm === "generic") {
+            advance(scanResult.closerLen); // 3 — `</>`
+            closerForm = "generic";
           } else {
+            // "inferred" — EOF reached without a matching closer.
             errors.push(new BSError(
               "E-CTX-001",
-              `Unclosed <${tagName}> structural element. Expected explicit close tag '${closeNeedle}'. The '</>' unambiguous-closer form is not yet supported for <${tagName}> at Phase 2 baseline (see docs/changes/match-block-form-scoping/SCOPING.md §5 Phase 5).`,
+              `Unclosed <${tagName}> structural element. Expected '</${lowerTagName}>' or '</>'.`,
               { start: curPos, end: pos, line: curLine, col: curCol }
             ));
             closerForm = "inferred";
