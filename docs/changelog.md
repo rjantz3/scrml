@@ -2,7 +2,7 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-Current baseline (2026-05-27 **S137 CLOSE**). Full suite **21,960 pass / 0 fail / 219 skip / 1 todo across 815 files**. Net delta from S136 close 21,831: +129 (+18 Bug 38 +18 Bug 41 +20 Bug 40 +12 Bug 37 +12 Bug 49 +12 Bug 42 +16 Bug 35 +19 Bug 30/43 +23 Bug 44 +12 Bug 31 +13 Bug 32 - 64 inferred from ast.test.js describe.skip conversion + various within-node rebumps; rough). R25 HIGH cluster CLOSED end-to-end + EMPIRICALLY VERIFIED via R26 doctrine. MED tail closed: Bug 42 / 35 / 30 / 43 / 44 / 31 / 32 (7 MED bugs). pa.md S138 (R26 doctrine) + S139 (`full wrap` discriminator) addendums ratified. SPEC §19.4.1 amendment (bare `! ErrorType` ratified equivalent to arrow form). Canon-clear health: **GREEN** (RED → YELLOW → GREEN over session). HIGH=3 (only compiler-managed-async + 6nz-V class:NAME + R24-BUG-4 `<match>` `</>` Phase 5 remain) · MED=7 · LOW=16 · Nominal=7.
+Current baseline (2026-05-28 **v0.6.2 cut at S138**). Full suite **21,960 pass / 0 fail / 219 skip / 1 todo across 815 files**. Net delta from S136 close 21,831: +129 (+18 Bug 38 +18 Bug 41 +20 Bug 40 +12 Bug 37 +12 Bug 49 +12 Bug 42 +16 Bug 35 +19 Bug 30/43 +23 Bug 44 +12 Bug 31 +13 Bug 32 - 64 inferred from ast.test.js describe.skip conversion + various within-node rebumps; rough). R25 HIGH cluster CLOSED end-to-end + EMPIRICALLY VERIFIED via R26 doctrine. MED tail closed: Bug 42 / 35 / 30 / 43 / 44 / 31 / 32 (7 MED bugs). pa.md S138 (R26 doctrine) + S139 (`full wrap` discriminator) addendums ratified. SPEC §19.4.1 amendment (bare `! ErrorType` ratified equivalent to arrow form). Canon-clear health: **GREEN** (RED → YELLOW → GREEN over session). HIGH=3 (only compiler-managed-async + 6nz-V class:NAME + R24-BUG-4 `<match>` `</>` Phase 5 remain) · MED=7 · LOW=16 · Nominal=7.
 
 PRIOR baseline (2026-05-27 **S136 CLOSE**). Full suite **21,831 pass / 3 fail / 170 skip / 1 todo across 804 files** (3 fails were within-node allowlist-baseline drift on error-arm fixtures from cumulative parser-shape shifts; S125 lesson firing again; carried forward to S137 for allowlist rebump — landed `050e20e8` + bulk `4e55412d`; NOT regressions). Net new test files: boolean-keywords-lowering.test.js + error-handler-terminator-arms.test.js + r25-bug-36-bare-error-type.test.js. Full delta from S135 baseline 21,762: +69 (+42 R24-BUG-1 / +18 R24-BUG-2 / +12 R25-Bug-36 - the 3 within-node fails).
 
@@ -711,6 +711,66 @@ S115 ran the M5/M6 compressed-MD-ladder (DD #27) through its v0.5 cut and v0.6 b
 - **Living Compiler retraction (draft) + dev.to article truthfulness audit + fix pass.** All 12 articles classified; 11 corrected — 8-article retracted-link scrub, de-versioned banners, per-article correction notes.
 - **scrml-support corpus currency sweep.** 3 stale-and-cited docs marked; the doc-currency convention (`status:` enum + `last-reviewed:`/`superseded-by:` + same-landing discipline) ratified into `pa.md`.
 - **Two compiler-concept deep-dives** — the code-import story (incl. a content-addressed `vendor:` design) and the build-story compiler model.
+
+## v0.6.2 — 2026-05-28 (patch — R24/R25 gauntlet bug-fix cluster + R26 doctrine + pa.md S138/S139 addendums + SPEC §19.4.1 bare `! ErrorType` + SPEC §45.9 word-form `or`/`and`)
+
+v0.6.2 cuts a bug-fix patch covering the R24 + R25 gauntlet rounds end-to-end — 5 R25 HIGH bugs closed (including one BS-level upstream class — Bug 49) plus 7 R25 MED tail bugs closed. R26 empirical-verification doctrine surfaced and ratified to cross-machine pa.md contract; `full wrap` discriminator ratified as third wrap-discriminator. SPEC §19.4.1 amendment (bare `! ErrorType` equivalent to arrow form). SPEC §45.9 word-form `or`/`and` canonical alongside `||`/`&&`. Canon-clear health: **GREEN**. Per S94 bump-on-tag convention. Per S136 patch landscape ratification: v0.6.2 = R24/R25 CRITICAL bundle. Cut at S138.
+
+**R25 HIGH cluster CLOSED + EMPIRICALLY VERIFIED via R26 doctrine (5 bugs):**
+
+- **Bug 38 — `!{}` arm body codegen broader case** (S137 `933d1ad3`). `emit-logic.ts` `emitArmAssign` extended with multi-stmt + single-stmt-side-effect branches. +18 tests. Codegen structurally correct on its scope; **EMPIRICALLY INCOMPLETE per Bug 49 surface** — the BS-layer upstream gap was distinct.
+- **Bug 41 — `<schema>` HTML body-text leak** (S137 `ebeba766`). `emit-html.ts` `SERVER_ONLY_STATE_TYPES` exclusion for `schema`+`seeds`. +18 tests. Sibling structural-elements cross-verified clean upstream; brief's broader-list hypothesis NARROWED to surgical 2-element exclusion.
+- **Bug 40 — `:`-shorthand inside `<each>` item body** (S137 `50d38095`). ROOT CAUSE UPSTREAM OF EXPECTED — SPEC §4.14 BS-level compliance gap in `block-splitter.js` `scanAttributes`. Three-file fix (block-splitter + ast-builder + emit-each); `<empty :>` sub-case closed same-root. +20 tests.
+- **Bug 37 — `<each in=@x.filter(c=>...)>` arrow truncation** (S137 `1ce963d0`). ROOT CAUSE DOWNSTREAM OF EXPECTED — bug was in `ast-builder.js` `_findEachOpenerEnd` braces-quotes-only depth tracking, NOT block-splitter. +19/-2L single-file fix. +12 tests. Latent sibling-finder class Bug 48 filed.
+- **Bug 49 — BS-level statement-boundary `!{}` content drop** (S137 `076d53e5`; NEW R26-surfaced upstream of Bug 38). `tokenizer.ts` `tryEmitSyntheticErrorEffectBlock` helper closes both bare-call AND const-binding shapes empirically. +12 tests. **SCOPE EXPANSION:** Bug 38 + Bug 49 together close the full call-site `!{...}` arm-body emission space.
+
+**R25 MED tail closed (7 bugs):**
+
+- **Bug 42 — `?{}` SQL in `server function*` SSE generator** (S137 `480aded4`). 3 coupled root causes upstream of brief hypothesis: ast-builder `BARE_DECL_RE` missed `function*`/`fn*` + synthetic-logic-block child-population class-level gap + yield-stmt parse/emit + while/do-while boundary threading. +12 tests. PA-verified R26 empirical clean.
+- **Bug 35 — `rewriteIsPredicates` space-padded-dot AST-path completeness** (S137 `5cb993c2`). R24-BUG-1 triage finding; compiler-internal — adopter behavior unchanged. +15/-6L regex tolerance mirroring `rewriteIsOperator`. +16 tests. **SALVAGED PA-DIRECT after agent crash** per S89 partial-recovery rule.
+- **Bug 30 + Bug 43 — linter HTML comment opacity** (S137 `5199a435`). PA hypothesis CORRECT; +37/-8L `buildSkipRanges` + 8 patterns extended to skip on `commentRanges`. SPEC §27 + §4.7 doctrine. +19 tests. 29 in-comment false-positives silenced; outside-comment fires preserved exactly.
+- **Bug 44 — W-LINT-007 false-positive on `fallback={<markup/>}`** (S137 `98f82970`). R25 SPEC §19.6 canonical errorBoundary shape. PA hypothesis CORRECT (markup-valued-attribute exemption). +47/-3L `isMarkupValuedBracedAttr` helper + skipIf extension. SPEC §1.4 markup-as-value pillar. +23 tests. All R25 fallback false-positives silenced.
+- **Bug 31 — `if`-as-expression in `!{}` result binding** (S137 `8f4f4ce3`). R24-BUG-5; root cause UPSTREAM of codegen — bare `return` greedy-consumed next-line expression then parseRecursiveBody wrapped if-stmt as `guarded-expr.guardedNode`. Fix = JS ASI for `return` per ECMA-262 §11.9.1 in ast-builder.js +63L. +12 tests. Dormant label-loop bug surfaced as deferred follow-up.
+- **Bug 32 — `@.` iteration sigil in `<tableFor>` column slot** (S137 `68bfb4a4`). R24-BUG-6; PA hypothesis CORRECT (Site 1 expander-time rewrite). +170/-3L `rewriteAtDot*` helpers in `emit-table-for.ts` mirroring `emit-each` pattern. +13 tests. **CLASS-CLOSE — Bug 31 dispatch agent's deferred dev-1 line-438 finding was MISCLASSIFIED as `<each>` body but actually inside `<tableFor>` column slot; this fix closes BOTH surfaces as single class.**
+
+**R24 / R25 prior cluster (S136 — ride-along in this patch cut):**
+
+- **R24-BUG-1 (Bug 28) — `or` / `and` boolean operators lower to `||` / `&&`** (S136 `89008e97`). HIGH-severity codegen drift: word-form boolean ops were emitted verbatim into JS → `SyntaxError: Unexpected identifier 'or'` at runtime. Two-site fix at `expression-parser.ts:preprocessForAcorn` + `codegen/rewrite.ts:rewriteBooleanKeywords` Pass 2.5. Mirrors `not` rewrite precedent. +42 tests.
+- **R24-BUG-2 (Bug 29 narrow) — `!{}` handler `{ return }` arm body codegen** (S136 `c7e81962`). `failableCall() !{ | .Variant -> { return } }` no-op arm body emitted invalid `let _scrml_result = return;`. Single-site fix in `emit-logic.ts:emitArmAssign` (terminator-tail detection). +18 tests.
+- **R25-Bug-36 + Bug 39 SIDE-EFFECT — `! ErrorType` bare-form parse-gap** (S136 `e1269844`). CRITICAL: server-fn body silently dropped on `! ErrorType { ... }` shape (4/4 R25 devs reached for the bare form per SPEC §41.14 normative examples). Three-site fix: `ast-builder.js` function-decl + fn-shorthand + `native-parser/parse-stmt.js:parseScrmlFunctionDecl` (parity). Bug 39 closed as SIDE-EFFECT (phantom orphan-IDENT wiring vanishes by construction). +12 tests.
+
+**SPEC amendments:**
+
+- **§19.4.1 — bare `! ErrorType` ratified equivalent to arrow form** (S137 `e4dec9bc`). Closes Bug 36 deferred follow-up. §19.4.1 grammar + amendment note + bare-form example + §19.4.4 normative statement. SPEC-INDEX regenerated.
+- **§45.9 — word-form `or` / `and` canonical alongside symbol-form** (S136 `a7877b5c`). 65L normative SPEC entry: surface table + two-site codegen story + 5 SHALL/MAY statements + accepted trade-offs (`obj . or` rewrite + `let and = 5` collision — same shape as `not` precedent). PRIMER §9.5.1 NEW + kickstarter §7.1 NEW.
+
+**pa.md addendums ratified (cross-machine two-party-exchange contract):**
+
+- **S138 — R26 empirical-verification doctrine** (S137 scrml-support `f737ba8`). HIGH-severity compiler bugs whose fix touches codegen but relies on AST construction require empirical R26-style re-compilation of real adopter `.scrml` source BEFORE claim-closed. Regression tests that synthesize AST + run codegen MISS upstream BS/parser/tokenizer-level bugs (Bug 38 vs Bug 49 precedent). Operational checklist: dispatch-brief Phase 3 mandate + bug-specific symptom check + PA dual-verify + bug-filing pattern when empirical-R26-fails-but-tests-pass.
+- **S139 — `full wrap [arc-name]` discriminator** (S137 scrml-support `4ea0b74`). Stay warm through arc-end (named OR implicit current cluster), not task-end. Safety floor 88% used. Suspends proactive cluster-boundary wrap-suggestions under live directive. Proven out on first use this session via `full wrap R25 MED tail` arc directive landing Bug 31 + Bug 32 as a single warm-context absorption.
+- **S136 — BRIEF.md archival per `isolation: "worktree"` dispatch** (S136 scrml-support `e687618`). Immediately after any `Agent({prompt: BRIEF_TEXT, isolation: "worktree", ...})` returns the agent ID, PA SHALL write the verbatim `prompt:` text to `docs/changes/<change-id>/BRIEF.md` via Bash heredoc. Closes the paste-into-Agent measurement gap.
+
+**Methodology banks (S137 durable):**
+
+- **Brief-hypothesis vs grep track record:** 5 of 12 dispatches PA hypothesis correct. Correct cases share "lint/regex narrowing with concrete SPEC anchor + bounded surface." Wrong-direction cases were broader-surface codegen / parser / multi-pass — grep + reproducer + trace caught the wrong direction within budget on all 7.
+- **Within-node canary doctrine:** pre-commit subset excludes within-node parity test; post-cluster bulk rebump mandatory before push.
+- **PA-baseline-pre-dispatch methodology:** for lint-pass / scan-based fixes, capture in-condition vs out-of-condition counts pre-fix; the delta IS the empirical verification surface.
+
+**Process health:**
+
+- S99 path-discipline counter held at 20 across all dispatches (4 R24/R25 + 12 S137 worktree dispatches; zero leaks).
+- 1 self-corrected `--no-verify` (Bug 37 on docs-only WIP; reset --soft pre-permanent-landing). 1 S136 `--no-verify` process violation (R24-BUG-2) banked as banned pattern for future briefs.
+- 4 S126 deviations (Bug 44 / 31 / 32 / 35) — Edit tool used during debug iteration; declared honestly.
+
+**Other landings since v0.6.1 (rides-along in this patch):**
+
+- pa.md drift fixes + PRIMER agent-name fix (S133).
+- PA workflow infrastructure audit (`pa-workflow-systems-audit-2026-05-26.md`) — defense-in-depth GREEN (S133).
+- Master-list §0 dashboard + changelog discipline maintained through S134-S137.
+
+Tests: 21,960 pass / 0 fail / 219 skip / 1 todo across 815 files (+372 net from v0.6.1 baseline 21,588; covers ~5 sessions of work).
+
+92 commits since v0.6.1 (`c5a27b73..b2e0298b`).
 
 ## v0.6.1 — 2026-05-26 (patch — Bug W critical + Bug 15 + E-FN-003 + iteration/lifecycle/MCP-V0 feature bundle)
 
