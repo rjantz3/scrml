@@ -509,25 +509,53 @@ function buildMatchArms(
     // function calls — anything `${expr}` accepts inside markup.
     let body: any[] = [];
     if (entry.bodyForm === "shorthand" && entry.bodyRaw && entry.bodyRaw.trim().length > 0) {
-      try {
-        const filePath = (fileAST?.filePath as string | undefined) ?? `<match:${matchBlock.id}:${tag}>`;
-        const exprNode = parseExprToNode(entry.bodyRaw, filePath, 0);
-        // Synthesize `logic` > `bare-expr` AST node so generateHtml's
-        // existing interpolation handling fires unchanged.
-        const span = matchBlock.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
-        body = [{
-          kind: "logic",
-          body: [{
-            kind: "bare-expr",
-            exprNode,
-            expr: entry.bodyRaw.trim(),
+      const trimmed = entry.bodyRaw.trim();
+      // S138 Bug 53 — markup-as-value `:`-shorthand body (e.g., `<Idle> : <p>Idle</p>`)
+      // routes through the bare-body markup parser instead of parseExprToNode.
+      // parseExprToNode treats markup tokens (`<p>`, `</p>`) as JS-expression
+      // input — acorn rejects them, the EscapeHatchExpr falls through to
+      // emitEscapeHatch's verbatim emit, and `generateHtml > bare-expr`
+      // ultimately produces `el.textContent = <p>Idle</p>;` — invalid JS.
+      // SPEC §4.18 / §1.4 markup-as-value pillar says markup is a first-class
+      // value; the `:`-shorthand body's single-expression discipline admits
+      // markup as one of those values. Detection: trimmed body starts with
+      // `<` followed by a tag-name char (letter / `_`) — distinguishes from
+      // less-than comparison (which has `<` followed by space / digit /
+      // identifier-starting-with-`@`).
+      const looksLikeMarkupStart = /^<[A-Za-z_]/.test(trimmed);
+      if (looksLikeMarkupStart) {
+        // Route through bare-body markup parser. Same shape as the bare-body
+        // arm-body branch below.
+        try {
+          const synthLabel = `<match:${matchBlock.id}:${tag}>`;
+          const synthResult = nativeParseFile(synthLabel, trimmed);
+          if (synthResult && Array.isArray(synthResult.ast?.nodes)) {
+            body = synthResult.ast.nodes;
+          }
+        } catch (_e) {
+          // Defensive — leave body empty on parse failure.
+        }
+      } else {
+        try {
+          const filePath = (fileAST?.filePath as string | undefined) ?? `<match:${matchBlock.id}:${tag}>`;
+          const exprNode = parseExprToNode(entry.bodyRaw, filePath, 0);
+          // Synthesize `logic` > `bare-expr` AST node so generateHtml's
+          // existing interpolation handling fires unchanged.
+          const span = matchBlock.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+          body = [{
+            kind: "logic",
+            body: [{
+              kind: "bare-expr",
+              exprNode,
+              expr: entry.bodyRaw.trim(),
+              span,
+            }],
             span,
-          }],
-          span,
-        }];
-      } catch (_e) {
-        // Defensive — leave body empty on parse failure; SYM PASS 20 surfaces
-        // an explicit diagnostic at adopter side.
+          }];
+        } catch (_e) {
+          // Defensive — leave body empty on parse failure; SYM PASS 20 surfaces
+          // an explicit diagnostic at adopter side.
+        }
       }
     } else if (entry.bodyForm !== "self-closing" && entry.bodyRaw && entry.bodyRaw.trim().length > 0) {
       // bare-body: re-parse as markup fragment (Phase 3 path).
