@@ -631,13 +631,22 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string): string {
 /**
  * Emit a while statement, optionally with a label prefix.
  */
-export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean }): string {
+export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; boundary?: "client" | "server" }): string {
+  // R25-Bug-42 (S138): thread `boundary` through to the body emission so
+  // SQL-bearing statements (`yield ?{...}`, `return ?{...}`, etc.) inside a
+  // `while` body parse-time-attached sqlNode are emitted via the server
+  // case "sql" path when the enclosing function-decl ran the server-boundary
+  // emit (emit-server.ts SSE handler + non-SSE handler). Pre-fix, the loop
+  // body always saw boundary=undefined, defaulting opts to client-mode
+  // inside emit-logic.ts case "yield-stmt" / "return-stmt" sqlNode branches —
+  // which emitted `yield null; // SQL — client cannot evaluate _scrml_sql`
+  // inside SSE generator bodies.
   const lines: string[] = [];
-  const _whileCtx: EmitExprContext = { mode: "client" };
+  const _whileCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client" };
   const condition = emitExprField(node.condExpr, node.condition ?? "true", _whileCtx);
   const label = node.label ? `${node.label}: ` : "";
   lines.push(`${label}while (${condition}) {`);
-  for (const code of emitLogicBody(node.body ?? [], { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody } as any)) {
+  for (const code of emitLogicBody(node.body ?? [], { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary } as any)) {
     lines.push(`  ${code}`);
   }
   lines.push(`}`);
@@ -651,13 +660,15 @@ export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; i
 /**
  * Emit a do-while statement.
  */
-export function emitDoWhileStmt(node: any): string {
+export function emitDoWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; boundary?: "client" | "server" }): string {
+  // R25-Bug-42 (S138): thread `boundary` through to body emission. See
+  // emitWhileStmt comment above.
   const lines: string[] = [];
-  const _doWhileCtx: EmitExprContext = { mode: "client" };
+  const _doWhileCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client" };
   const condition = emitExprField(node.condExpr, node.condition ?? "true", _doWhileCtx);
   const label = node.label ? `${node.label}: ` : "";
   lines.push(`${label}do {`);
-  for (const code of emitLogicBody(node.body ?? [])) {
+  for (const code of emitLogicBody(node.body ?? [], { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary } as any)) {
     lines.push(`  ${code}`);
   }
   lines.push(`} while (${condition});`);

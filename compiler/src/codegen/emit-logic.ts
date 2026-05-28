@@ -485,7 +485,16 @@ export function rewriteReflectForRuntime(code: string): string {
  */
 function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
   return {
-    mode: "client",
+    // R25-Bug-42 (S138): honor opts.boundary so server-mode contexts (e.g.
+    // inside SSE generator bodies, server function bodies, channel-owned
+    // server fns) emit `@cell` references via the server reactive-ref
+    // rewriter (`_scrml_body["cell"]`) rather than the client-side
+    // `_scrml_reactive_get("cell")`. Pre-fix, the hardcoded "client" mode
+    // caused SQL template params (`?{`SELECT ... ${@cursor}`}`) inside
+    // server-bound function bodies to interpolate the client helper, which
+    // throws at runtime on the server and triggers E-CG-006 in post-emission
+    // scanning of client.js when the same fn is also visible there.
+    mode: opts.boundary === "server" ? "server" : "client",
     derivedNames: opts.derivedNames ?? null,
     tildeVar: opts.tildeContext?.var ?? null,
     dbVar: opts.dbVar,
@@ -2124,6 +2133,37 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       return _wrapReturnWithCheck(emitExprField(node.exprNode, retExpr, _makeExprCtx(opts)));
     }
 
+    case "yield-stmt": {
+      // SPEC §37 SSE `server function*` + general generator support (§13).
+      // R25-Bug-42 (S138): yield ?{...} bodies attach a structured sqlNode at
+      // parse time (see ast-builder.js yield handlers ~line 5546 + ~9279).
+      // When sqlNode is present, recurse into case "sql" to produce the
+      // tagged-template form, strip the trailing ";" so the result wraps
+      // cleanly as the operand of `yield`. Mirrors return-stmt sqlNode shape.
+      //
+      // Server-boundary gating mirrors return-stmt (S93 cg-006 fix Layer 2):
+      // `_scrml_sql` is server-only (E-CG-006). Emit a defensive comment +
+      // `yield null;` on the client boundary so the JS still parses and the
+      // diagnostic is visible at inspection; the post-emission scan still
+      // fires E-CG-006 for anything that slipped through.
+      if (node.sqlNode && node.sqlNode.kind === "sql") {
+        if (opts.boundary === "server") {
+          const sqlStmt = emitLogicNode(node.sqlNode, opts);
+          const sqlExpr = sqlStmt.replace(/;s*$/, "");
+          return `yield ${sqlExpr};`;
+        }
+        return `yield null; // SQL — client cannot evaluate _scrml_sql (E-CG-006); RI should classify this fn as server-bound.`;
+      }
+      // Bare `yield;` — empty expr.
+      const yExpr: string = (node.expr ?? "").trim();
+      if (!yExpr && !node.exprNode) return "yield;";
+      // `yield <expr>;` — emit via the expression pipeline.
+      if (node.exprNode) {
+        return `yield ${emitExpr(node.exprNode, _makeExprCtx(opts))};`;
+      }
+      return `yield ${emitExprField(node.exprNode, yExpr, _makeExprCtx(opts))};`;
+    }
+
     case "if-stmt":
       // Thread opts when tilde context or continueBehavior is active so nested nodes
       // (e.g. continue-stmt inside if-body inside reactive-for) receive the flags.
@@ -2151,10 +2191,15 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       if (opts.tildeContext) {
         return _emitWhileStmtWithTilde(node, opts);
       }
-      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody });
+      // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
+      // statements inside the loop body emit via the server case "sql" path
+      // when the enclosing fn is server-bound.
+      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary });
 
     case "do-while-stmt":
-      return emitDoWhileStmt(node);
+      // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
+      // statements inside the loop body emit via the server case "sql" path.
+      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary });
 
     case "break-stmt":
       return emitBreakStmt(node);

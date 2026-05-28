@@ -389,7 +389,13 @@ function preprocessWorkerAndStateRefs(raw) {
  * are declaration shapes — because BS merges sibling text fragments into a
  * single block and the lift gates on the LEADING content.
  */
-const BARE_DECL_RE = /^\s*(?:export\s+)?(server\s+(?:fn|function)\s|type\s+\w|fn\s+\w|function\s+\w|let\s+[A-Za-z_]|const\s+[A-Za-z_]|import\s+[{a-zA-Z_*"'])/;
+// R25-Bug-42 (S138): admit `function*` / `fn*` (no whitespace before the `*`)
+// so generator-function-decl shapes at <program>/<page>/<channel> direct-child
+// position lift into the synthetic \`\${...}\` logic block per SPEC §40.8.
+// Pre-fix, BARE_DECL_RE required \s after function/fn — `server function*`
+// missed the gate and emitted as raw text (never parsed as function-decl,
+// no server.js handler synthesized, all body contents silently dropped).
+const BARE_DECL_RE = /^\s*(?:export\s+)?(server\s+(?:fn|function)[*\s]|type\s+\w|fn[*\s]\w?|function[*\s]\w?|let\s+[A-Za-z_]|const\s+[A-Za-z_]|import\s+[{a-zA-Z_*"'])/;
 
 /**
  * Phase A1a Step 11.0d — top-level structural state-decl pattern.
@@ -5537,6 +5543,71 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       };
     }
 
+    // YIELD: SPEC §37 SSE `server function*` per-event yields + general
+    // generator support (SPEC §13 generator carve-out per S114). `yield <expr>`
+    // is a statement-position emission of one SSE event when inside a
+    // `server function*` body, or a generic generator-yield in any
+    // `function*` body.
+    //
+    // R25-Bug-42 (S138): pre-fix the bare-expr default path saw the `yield`
+    // KEYWORD then halted at the trailing BLOCK_REF (`?{...}` or other sigil),
+    // emitting `yield` as a standalone bare-expr and the BLOCK_REF as a
+    // separate sibling statement. Result: `yield ?{\`...\`}.all()` codegen
+    // produced `yield; await _scrml_sql\`...\`;` — generator emitted
+    // `undefined` per event, SQL value discarded.
+    //
+    // Mirrors the `return ?{...}` SQL-aware handler (line ~5500) — when the
+    // immediate next non-comment token is a SQL BLOCK_REF, build the child
+    // SQL node, consume trailing .method() chain, and attach as `sqlNode` on
+    // the yield-stmt. emit-logic `case "yield-stmt"` routes through
+    // `case "sql"` when sqlNode is present.
+    if (tok.kind === "KEYWORD" && tok.text === "yield") {
+      const startTok = consume();
+      let lookAhead = 0;
+      while (peek(lookAhead).kind === "COMMENT") lookAhead++;
+      const next = peek(lookAhead);
+      // Bare `yield;` — generator returns undefined to .next() consumer.
+      if (!next || next.kind === "EOF" || (next.kind === "PUNCT" && (next.text === ";" || next.text === "}"))) {
+        if (peek().kind === "PUNCT" && peek().text === ";") consume();
+        return {
+          id: ++counter.next,
+          kind: "yield-stmt",
+          expr: "",
+          span: spanOf(startTok, peek()),
+        };
+      }
+      // `yield ?{...}.method()` — SQL BLOCK_REF + optional chained call.
+      // Attach as structured sqlNode so emit-logic routes through case "sql".
+      if (next.kind === "BLOCK_REF" && next.block && next.block.type === "sql") {
+        for (let _i = 0; _i < lookAhead; _i++) consume();
+        const refTok = consume();
+        const childNode = buildBlock(refTok.block, filePath, parentBlock.type, counter, errors);
+        if (childNode && childNode.kind === "sql") {
+          consumeSqlChainedCalls(childNode);
+          if (peek().kind === "PUNCT" && peek().text === ";") consume();
+          return {
+            id: ++counter.next,
+            kind: "yield-stmt",
+            // raw `?{...}` source intentionally NOT stored in `expr` — mirrors
+            // return-stmt sqlNode shape (empty expr matches the bare-yield shape).
+            expr: "",
+            sqlNode: childNode,
+            span: spanOf(startTok, peek()),
+          };
+        }
+        // Defensive: child wasn't SQL — fall through to legacy expression path.
+      }
+      // General `yield <expr>` — collect the expression, parse to ExprNode.
+      const { expr: yieldExpr } = collectExpr();
+      return {
+        id: ++counter.next,
+        kind: "yield-stmt",
+        expr: yieldExpr.trim(),
+        exprNode: safeParseExprToNode(yieldExpr.trim(), spanOf(startTok, peek())?.start ?? 0),
+        span: spanOf(startTok, peek()),
+      };
+    }
+
     // THROW: scrml §19 Appendix B replaces `throw` with `fail`. Reject at parse time.
     if (tok.kind === "KEYWORD" && tok.text === "throw") {
       const startTok = consume();
@@ -9206,6 +9277,60 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       continue;
     }
 
+    // YIELD STATEMENT: SPEC §37 SSE per-event yield + general generator
+    // support (SPEC §13 generator carve-out per S114). Mirror of the parseOne
+    // Statement `yield` handler (line ~5546); needed here because parseLogic
+    // Body's main loop is the file-top-level / synthetic-logic-block dispatch
+    // (separate from parseRecursiveBody → parseOneStatement which handles
+    // nested function bodies). R25-Bug-42 (S138): without this, `yield ?{...}.method()`
+    // at the top level of a synthetic-${-wrapped logic block emitted as
+    // `yield;` + standalone SQL statement, discarding the SQL value.
+    if (tok.kind === "KEYWORD" && tok.text === "yield") {
+      const startTok = consume();
+      let yieldLookAhead = 0;
+      while (peek(yieldLookAhead).kind === "COMMENT") yieldLookAhead++;
+      const yieldNext = peek(yieldLookAhead);
+      // Bare `yield;` — generator returns undefined.
+      if (!yieldNext || yieldNext.kind === "EOF" || (yieldNext.kind === "PUNCT" && (yieldNext.text === ";" || yieldNext.text === "}"))) {
+        if (peek().kind === "PUNCT" && peek().text === ";") consume();
+        nodes.push({
+          id: ++counter.next,
+          kind: "yield-stmt",
+          expr: "",
+          span: spanOf(startTok, peek()),
+        });
+        continue;
+      }
+      // `yield ?{...}.method()` — attach structured sqlNode.
+      if (yieldNext.kind === "BLOCK_REF" && yieldNext.block && yieldNext.block.type === "sql") {
+        for (let _i = 0; _i < yieldLookAhead; _i++) consume();
+        const refTok = consume();
+        const childNode = buildBlock(refTok.block, filePath, parentBlock.type, counter, errors);
+        if (childNode && childNode.kind === "sql") {
+          consumeSqlChainedCalls(childNode);
+          if (peek().kind === "PUNCT" && peek().text === ";") consume();
+          nodes.push({
+            id: ++counter.next,
+            kind: "yield-stmt",
+            expr: "",
+            sqlNode: childNode,
+            span: spanOf(startTok, peek()),
+          });
+          continue;
+        }
+      }
+      // General `yield <expr>`.
+      const { expr: yieldExpr } = collectExpr();
+      nodes.push({
+        id: ++counter.next,
+        kind: "yield-stmt",
+        expr: yieldExpr.trim(),
+        exprNode: safeParseExprToNode(yieldExpr.trim(), spanOf(startTok, peek())?.start ?? 0),
+        span: spanOf(startTok, peek()),
+      });
+      continue;
+    }
+
     // THROW STATEMENT: §19 Appendix B replaces `throw` with `fail`.
     if (tok.kind === "KEYWORD" && tok.text === "throw") {
       const startTok = consume();
@@ -12059,8 +12184,69 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       const bodyLine = block.span.line;
       const bodyCol = block.span.col + prefixLen;
 
-      const tokens = tokenizeLogic(bodyRaw, bodyOffset, bodyLine, bodyCol, block.children);
-      const body = parseLogicBody(tokens, filePath, block.children, block, counter, errors, "logic");
+      // R25-Bug-42 (S138): synthetic logic blocks created by liftBareDeclarations
+      // (file lines ~999/1099/1222/1248/1275/1307/1335) are wrapped in `${...}`
+      // AFTER BS has already run, so their child block array is empty even when
+      // the wrapped text contains brace-delimited sigil blocks (`?{...}` /
+      // `!{...}` / `#{...}` / etc.). Without children, tokenizeLogic emits raw
+      // PUNCT tokens for `?` and `{` — the SQL-aware parseOneStatement return-
+      // stmt handler (line ~5500) requires a BLOCK_REF of type "sql" to attach
+      // a structured sqlNode. The result: `server function getX() { return ?{...}.all() }`
+      // at file top-level emits raw `? { \`...\` } . all ( );` tokens in
+      // server.js — invalid JS, security-equivalent to E-CG-006 silently fired.
+      //
+      // Fix: when this is a synthetic logic block AND its children array is empty
+      // AND the wrapped body contains a brace-delimited sigil opener, re-run
+      // splitBlocks on the wrapped `${bodyRaw}` to derive the proper children.
+      // splitBlocks's brace-context detection (line ~1351) creates the nested
+      // sql / error-effect / etc. children correctly when wrapped in a logic
+      // frame. We then adjust each child's span by block.span.start so the
+      // span offsets align with the bodyOffset tokenizeLogic uses.
+      //
+      // Cross-refs: R25-Bug-42 docs/changes/r25-bug-42-server-fn-star-sql-2026-05-27/;
+      // SPEC §13 `?{}` query expressions; SPEC §37 SSE `server function*`;
+      // SPEC §40.8 default-logic-mode.
+      let _liveChildren = block.children;
+      if (block._synthetic === true && (!_liveChildren || _liveChildren.length === 0)) {
+        const _hasSigilBlock = /[\$?#!\^~](?:=*\{)/.test(bodyRaw);
+        if (_hasSigilBlock) {
+          const _wrappedSrc = "${" + bodyRaw + "}";
+          const _subResult = _splitBlocksForP2Form1(filePath, _wrappedSrc);
+          // Expect a single top-level logic block whose children carry the
+          // brace-delimited sigil blocks. Defensive: only adopt children when
+          // the result matches the expected shape.
+          const _innerLogic = (_subResult && Array.isArray(_subResult.blocks))
+            ? _subResult.blocks.find((b) => b && b.type === "logic")
+            : null;
+          if (_innerLogic && Array.isArray(_innerLogic.children) && _innerLogic.children.length > 0) {
+            // Adjust spans: splitBlocks's spans are relative to _wrappedSrc
+            // (whose byte 0 we treat as block.span.start). After the +block.span.start
+            // shift, child.span.start = bodyOffset + relativePositionInBodyRaw,
+            // which is what tokenizeLogic expects (it computes
+            // relStart = child.span.start - bodyOffset).
+            const _shift = block.span.start;
+            function _shiftSpans(n) {
+              if (!n || typeof n !== "object") return;
+              if (n.span && typeof n.span.start === "number") {
+                n.span = {
+                  ...n.span,
+                  start: n.span.start + _shift,
+                  end: n.span.end + _shift,
+                };
+              }
+              if (Array.isArray(n.children)) for (const c of n.children) _shiftSpans(c);
+            }
+            for (const c of _innerLogic.children) _shiftSpans(c);
+            _liveChildren = _innerLogic.children;
+            // Also mirror onto the block so downstream consumers (parseLogicBody
+            // receives the same array as its childBlocks param) see the children.
+            block.children = _liveChildren;
+          }
+        }
+      }
+
+      const tokens = tokenizeLogic(bodyRaw, bodyOffset, bodyLine, bodyCol, _liveChildren);
+      const body = parseLogicBody(tokens, filePath, _liveChildren, block, counter, errors, "logic");
 
       // Hoist imports and exports from the body
       const imports = body.filter(n => n.kind === "import-decl");
