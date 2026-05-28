@@ -469,6 +469,48 @@ function buildTagOpenerRanges(source, skipMerged) {
   return ranges;
 }
 
+
+/**
+ * Returns true if the brace at `braceOffset` opens a markup-valued braced
+ * attribute — i.e. the first non-whitespace character after the `{` is `<`
+ * followed by a tag-name character (letter). This is the canonical scrml
+ * "markup-as-value" shape for braced attributes (§1.4 markup-as-first-class-
+ * value pillar), most visibly used by `<errorBoundary fallback={<markup/>}>`
+ * (SPEC §19.6.2).
+ *
+ * W-LINT-007's purpose is catching JSX SCALAR braced attributes
+ * (`prop={value}`, `prop={expr}`). A braced value whose value-side starts
+ * with `<TagName` is markup-as-value, NOT a JSX scalar. R25 Bug 44 closes
+ * the false-positive class for this shape — the only currently-canonical
+ * SPEC site is `<errorBoundary fallback={<markup/>}>` (7 instances in
+ * SPEC.md), but the rule is value-shape-based (not element-/attribute-
+ * specific) so future canonical `<Comp slot={<m/>}>` shapes (markup as
+ * component prop value) get the exemption for free.
+ *
+ * Scalar value shapes that MUST still fire: `{value}`, `{fn()}`,
+ * `{a + b}`, `{(e) => ...}`, `{!x}`, `{[1,2]}`, `{ {k: v} }`, etc.
+ * Whitespace between `{` and `<` is permitted. The opening tag does not
+ * need to be closed inside the pattern's offset window — the cheap peek
+ * is sufficient to discriminate markup-as-value from scalar.
+ *
+ * @param {string} source
+ * @param {number} braceOffset — offset of the `{` in source
+ * @returns {boolean}
+ */
+function isMarkupValuedBracedAttr(source, braceOffset) {
+  // Walk past the `{` and any whitespace.
+  let i = braceOffset + 1;
+  while (i < source.length && (source[i] === " " || source[i] === "\t" || source[i] === "\n" || source[i] === "\r")) i++;
+  // Markup-as-value shape: `<` followed by a tag-name char (letter — covers
+  // both lowercase HTML/lifecycle tags `<div` and PascalCase user tags
+  // `<Fallback`). `</closer`, `<!doctype`, `<?xml`, etc. do not match — but
+  // those aren't valid markup-value shapes anyway.
+  if (source[i] !== "<") return false;
+  const next = source[i + 1];
+  if (!next || !/[A-Za-z]/.test(next)) return false;
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // Pattern definitions
 // ---------------------------------------------------------------------------
@@ -482,7 +524,7 @@ function buildTagOpenerRanges(source, skipMerged) {
  *   code        — W-LINT-NNN
  *   skipIf      — optional fn(offset, logicRanges, cssRanges, commentRanges,
  *                 tildeRanges, functionBodyRanges, stringRanges,
- *                 tagOpenerRanges) -> bool to skip match. Backwards compatible
+ *                 tagOpenerRanges, source, matchEnd) -> bool to skip match. Backwards compatible
  *                 — patterns may use shorter signatures.
  */
 const PATTERNS = [
@@ -587,11 +629,25 @@ const PATTERNS = [
     // mode) was firing — once the brace-counter is context-aware, the
     // outer `${...}` properly covers the function body and logicRanges
     // suppresses the match.
-    skipIf: (offset, logicRanges, _cssRanges, commentRanges, _tildeRanges, functionBodyRanges, stringRanges) =>
+    //
+    // R25 Bug 44 fix — exempt markup-valued braced attributes, the canonical
+    // scrml shape per §1.4 (markup-as-first-class-value) for passing markup
+    // through a braced attribute slot. The only currently-canonical SPEC
+    // site is `<errorBoundary fallback={<markup/>}>` (SPEC §19.6.2 — 7
+    // instances in SPEC.md), but the rule is value-shape-based (peek the
+    // first non-whitespace char after `{` for `<TagName`), not element- or
+    // attribute-specific, so future canonical `<Comp slot={<m/>}>` shapes
+    // (markup-as-value as a component prop) get the exemption for free.
+    // Scalar braced values like `{value}`, `{fn()}`, `{(e) => ...}` STILL
+    // fire — `isMarkupValuedBracedAttr` returns false for any value-side
+    // that doesn't start with `<` + tag-name char. The regex's last char
+    // is the `{`, so `braceOffset = matchEnd - 1`.
+    skipIf: (offset, logicRanges, _cssRanges, commentRanges, _tildeRanges, functionBodyRanges, stringRanges, _tagOpenerRanges, source, matchEnd) =>
       inRange(offset, logicRanges) ||
       inRange(offset, commentRanges) ||
       inRange(offset, stringRanges) ||
-      inRange(offset, functionBodyRanges || []),
+      inRange(offset, functionBodyRanges || []) ||
+      (source !== undefined && matchEnd !== undefined && isMarkupValuedBracedAttr(source, matchEnd - 1)),
   },
 
   // Pattern 8: {cond && <El>} — React conditional rendering
@@ -1093,7 +1149,7 @@ export function lintGhostPatterns(source, filePath) {
       const offset = match.index;
 
       // Apply false-positive guard
-      if (pattern.skipIf && pattern.skipIf(offset, logicRanges, cssRanges, commentRanges, tildeRanges, functionBodyRanges, stringRanges, tagOpenerRanges)) {
+      if (pattern.skipIf && pattern.skipIf(offset, logicRanges, cssRanges, commentRanges, tildeRanges, functionBodyRanges, stringRanges, tagOpenerRanges, source, offset + match[0].length)) {
         continue;
       }
 
