@@ -238,6 +238,24 @@ function resolveOnExpr(
         variantSubscribeName: rootCell,
       };
     }
+    // S138 Bug 52 — bare-variant `.Variant` form (§14.10 / §18.0.3 lowering).
+    // Mirrors the canonical bare-variant lowering at `emit-expr.ts:emitIdent`
+    // (lines 291-303): unit variants store as bare string tags at runtime
+    // (`Phase.Idle === "Idle"`), so `.High` lowers to `"High"`. The dispatch
+    // helper's `_tag` extraction handles string `_v` directly:
+    //   `_tag = (typeof _v === "object" ...) ? _v.variant : _v`
+    // → for the string form, `_tag = _v = "High"` matches the `_tag === "High"`
+    // dispatch branch. No reactive subscription — constant `on=` is a
+    // shape-degenerate case (always dispatches to one branch) that adopters
+    // typically wouldn't write deliberately, but the form is syntactically
+    // legal per SPEC §18.0.1 and the compiler must produce valid output.
+    const bareVariantMatch = innerExpr.match(/^\.([A-Z][A-Za-z0-9_$]*)$/);
+    if (bareVariantMatch) {
+      return {
+        variantExprAccessor: JSON.stringify(bareVariantMatch[1]),
+        variantSubscribeName: null,
+      };
+    }
     // Fall-through: complex expression → Shape B effect mode.
     return {
       variantExprAccessor: innerExpr,
