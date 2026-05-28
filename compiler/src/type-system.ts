@@ -12345,6 +12345,8 @@ function processFile(
       lifecycleTopNodes,
       typeRegistry,
       cellEngineCellNames,
+      errors,    // S138 Bug 23 — wire errors[] for W-LIFECYCLE-LEGACY-ARROW emission on Shape 1 cells
+      fileSpan,
     );
     if (cellValueMap.size > 0) {
       runCellValueLifecycleAccessCheck(
@@ -15286,6 +15288,8 @@ function buildCellValueLifecycleMap(
   topNodes: ASTNodeLike[],
   typeRegistry: Map<string, ResolvedType>,
   engineCellNames: Set<string>,
+  errors?: TSError[],
+  fileSpan?: Span,
 ): Map<string, FnReturnLifecycleSpec & { initIsPostType: boolean; resetState: "pre" | "post" | null }> {
   const map = new Map<string, FnReturnLifecycleSpec & { initIsPostType: boolean; resetState: "pre" | "post" | null }>();
 
@@ -15308,6 +15312,30 @@ function buildCellValueLifecycleMap(
         const typeAnnotation = (n as ASTNodeLike).typeAnnotation as string | undefined;
         if (typeAnnotation && !engineCellNames.has(cellName)
             && isLifecycleAnnotation(typeAnnotation)) {
+          // S138 Bug 23 — emit W-LIFECYCLE-LEGACY-ARROW for Shape 1 cells using
+          // legacy `->` glyph. Mirrors the struct-field emission at
+          // extractLifecycleFields lines 2212-2225. SPEC §14.12.5 — the lint
+          // is info-level migration nudge; both glyphs parse identically during
+          // the deprecation window, but new code SHALL use `to`.
+          if (errors && fileSpan) {
+            const trimmed = typeAnnotation.trim();
+            const inner = trimmed.slice(1, -1);
+            const arrowDetect = findTopLevelArrow(inner);
+            if (arrowDetect && arrowDetect.glyph === "arrow") {
+              const preExpr = inner.slice(0, arrowDetect.idx).trim();
+              const postExpr = inner.slice(arrowDetect.idx + arrowDetect.len).trim();
+              errors.push(new TSError(
+                "W-LIFECYCLE-LEGACY-ARROW",
+                `W-LIFECYCLE-LEGACY-ARROW: Lifecycle annotation on Shape 1 reactive cell '${cellName}' ` +
+                `uses the legacy '->' glyph. The canonical form is the 'to' keyword: ` +
+                `\`(${preExpr} to ${postExpr})\`. Both forms parse identically during ` +
+                `the deprecation window; new code SHALL use 'to' (a contextual keyword ` +
+                `parallel to 'from' in 'import' declarations). See SPEC §14.12.5.`,
+                fileSpan,
+                "info",
+              ));
+            }
+          }
           const spec = parseLifecycleReturnAnnotation(typeAnnotation, typeRegistry);
           if (spec) {
             // Inspect init expression to determine initial transition state.
