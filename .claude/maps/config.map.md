@@ -1,70 +1,57 @@
 # config.map.md
 # project: scrmlts
-# updated: 2026-05-26T00:00:00Z  commit: c2d3f7ae
+# updated: 2026-05-28T00:00:00Z  commit: 1fed5588
 
 ## Environment Variables
 
-No `.env.example` / `.env.template` in the repo. Env vars referenced in source:
+`SCRML_PORT` — optional — compiler dev/serve server port (default: 3100); read in `compiler/src/commands/serve.js` and `compiler/src/serve-client.js`
+`PORT` — optional — production server port (default: 3000); emitted into generated server output by `compiler/src/commands/build.js`
+`NODE_ENV` — optional — `"production"` disables MCP boot in generated output; also used by PGO dev-assertions path in `compute-program-config.ts`
+`SCRML_MCP_WATCH` — optional — `"1"` enables MCP watch mode in generated server output; emitted by `compiler/src/commands/build.js`
 
-| Key | Required | Description |
-|---|---|---|
-| `SCRML_PORT` | optional | dev/serve server port (commands/dev.js, serve.js, serve-client.js) |
-| `PORT` | optional | fallback server port in build-adapter emit (commands/build.js) |
-| `NODE_ENV` | optional | read by the MCP-V0.D generated `_server.js` boot gate — when `<program mcp>` mode is "dev-only", MCP boot is skipped if `NODE_ENV === "production"` (runtime check, not compile-time) |
-
-No secrets, API keys, or credential keys are configured in source.
-
-## Feature Flags (compiler options passed to `compileScrml(options)`)
-
-| Flag | Default | Description |
-|---|---|---|
-| `parser` | `null` | `"scrml-native"` routes per-file TAB through `nativeParseFile` (C2); any other value uses live BS+TAB path |
-| `emitPerRoute` | `false` | per-route artifact splitter (SPEC §40.9.7). **NB: auto-flipped to `true` when `<program mcp>` is present (MCP-V0.D) so the descriptor sidecars + chunks.json emit.** |
-| `testMode` | `false` | emit `<base>.test.js` from `~{}` blocks (SPEC §19.12.7) |
-| `emitMachineTests` | `false` | emit `.machine.test.js` (SPEC §51.13) |
-| `debugPerf` | `false` | `--debug-perf` PGO sub-stage instrumentation |
-| `sourceMap` | `false` | emit Source Map v3 .map files |
-| `convertLegacyCss` | `false` | pre-process `<style>` blocks to `#{…}` |
-| `embedRuntime` | `false` | inline runtime instead of separate file |
-| `gather` | `true` | auto-gather transitive .scrml import closure (SPEC §21.7) |
-| `gatherLimit` | `5000` | GATHER_LIMIT cap; E-IMPORT-007 fires above |
-| `mode` | `"browser"` | `"browser"` \| `"library"` |
-| `chunkSizeBudgetBytes` | `100000` | `--chunk-size-budget=<bytes>`; W-CG-CHUNK-LARGE |
-| `compilerSettings.lintTailwindUnrecognizedClass` | `"warn"` | `"warn"` \| `"off"` |
-| `selfHostModules` | `null` | optional self-hosted pipeline-stage overrides |
-
-### Derived program config (NOT a compileScrml option — extracted from `<program>` markup)
-
-`ProgramConfig` (compute-program-config.ts) carries `authConfig`, `middlewareConfig`, and (NEW S130-S131) **`mcpConfig: McpConfig | null`**:
-
-| Struct | Field | Description |
-|---|---|---|
-| `McpConfig` | `mode: "dev-only" \| "always"` | MCP-V0.D — present when `<program mcp>` is in the markup. `mcp` bare-present (`<program mcp>` / `<program mcp="">`) → "dev-only" (boolean-attribute idiom); `<program mcp="always">` → "always". When non-null, api.js auto-flips `emitPerRoute:true` and surfaces `mcpAutoActivated`/`mcpMode` on the result; null → zero compile-time effect (zero opt-out cost). |
+No `.env.example` or `.env.template` file exists in this repo. The compiler reads minimal env vars; adopter apps use `<program>` attributes for configuration.
 
 ## Config Files
 
-### bunfig.toml
-```
-[test] root = "compiler/tests/"
-[test] timeout = 10000
-```
-
-### package.json (root)
-`type: "module"` / `private: true` / `workspaces: ["compiler"]`
-`bin.scrml → compiler/bin/scrml.js` / `engines.bun: ">=1.3.13"` / version `0.6.0`
+### bunfig.toml (root)
+`[test].root`: `"compiler/tests/"` — Bun test root
+`[test].timeout`: `10000` — per-test timeout ms
 
 ### compiler/package.json
-Private sub-package; deps: acorn, astring; devDep: @happy-dom/global-registrator.
+`name`: `"compiler"`, `version`: `"0.2.0"` — compiler sub-package identity
+Dependencies: `acorn@^8.16.0`, `astring@^1.9.0`
 
-## CI / Deployment Config
+### package.json (root)
+`name`: `"scrmlts"`, `version`: `"0.6.6"` — current release
+`engines.bun`: `">=1.3.13"` — minimum Bun version
+`bin.scrml`: `"compiler/bin/scrml.js"` — CLI entry
+`workspaces`: `["compiler"]` — monorepo workspace
 
-No `.github/workflows`, `.gitlab-ci.yml`, `Jenkinsfile`, `Dockerfile`, or `docker-compose.*`. `.github/` holds only `FUNDING.yml`. Quality gates are local git hooks (see build.map.md).
+## compileScrml() Options (programmatic config)
+
+Key options passed to `compileScrml(options)` in `compiler/src/api.js`:
+`inputFiles` — array of .scrml file paths
+`outputDir` — output directory
+`verbose` — boolean; per-stage timing to log
+`testMode` — boolean; emit `<base>.test.js` from `~{}` blocks (SPEC §19.12.7; dead-code-eliminated in production)
+`parser` — `"scrml-native"` to opt-in to native parser (M5 flag; default null = BS+Acorn path)
+`embedRuntime` — boolean; inline runtime vs separate file
+`emitBatchPlan` — boolean; emit Stage 7.5 BatchPlan as JSON
+`emitReachability` — boolean; emit `<base>.reachability.json`
+`emitMachineTests` — boolean; emit `<base>.machine.test.js` per source
+`debugPerf` — boolean; sub-stage timing for CG/RS/DG
+`selfHostModules` — object; overrides for individual pipeline stages (splitBlocks, buildAST, runDG, runMetaChecker, bpp, tokenizer) for self-host integration testing
+
+## Feature Flags
+
+`lintTailwindUnrecognizedClass` — in compilerSettings; default `"warn"`; `"off"` suppresses W-TAILWIND-UNRECOGNIZED-CLASS
+`lint.lifecycle-candidate`, `lint.match-rule-inert`, `lint.engine-initial-missing`, `lint.deprecated-machine` — per-project lint suppression configs (SPEC §28)
 
 ## Tags
-#scrmlts #map #config #compiler-options #mcp-program-attr #s131
+#scrmlts #map #config #environment #compiler-options
 
 ## Links
 - [primary.map.md](./primary.map.md)
+- [build.map.md](./build.map.md)
 - [master-list.md](../../master-list.md)
 - [pa.md](../../pa.md)
-- [build.map.md](./build.map.md)
