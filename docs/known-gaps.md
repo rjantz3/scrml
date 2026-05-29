@@ -1030,7 +1030,7 @@ The R25 BRIEF feature 8 references `<tableFor for=Card rows=@cards pick=[...] so
 
 ---
 
-### Bug 51 — Shape 2 + render-by-tag empirically broken end-to-end at codegen — `PARTIAL-RESOLVED S139` (was MED — 2 of 3 sub-bugs closed)
+### Bug 51 — Shape 2 + render-by-tag empirically broken end-to-end at codegen — `RESOLVED S139` (was MED — all 3 sub-bugs closed)
 
 **S139 investigation surfaced a wider scope than the original entry described.** Shape 2 `<userName req length(>=2)> = <input/>` + render-by-tag use-site `<userName/>` was empirically broken in THREE distinct ways, none of which had adopter-test coverage (no Shape 2 sample in `samples/` or `examples/`; existing unit/integration tests only checked AST shape, not the emitted JS / HTML):
 
@@ -1040,8 +1040,8 @@ The R25 BRIEF feature 8 references `<tableFor for=Card rows=@cards pick=[...] so
 **Bug 51-B — Shape 2 empty-string init produces empty-arg `_scrml_reactive_set` emit. RESOLVED S139 `5640148e`.**
 `ast-builder.js:4169` sets `init: ""` (raw empty string) for Shape 2 markup-RHS decls. emit-logic.ts:1971 does `const initStr = node.init ?? "null"`. `??` doesn't fire on empty string. initStr stays `""`. The downstream emit produces `_scrml_reactive_set("userName", )` with an empty argument (legal JS per ES2017 trailing-comma; runtime sets cell to `undefined`). Fix: emit-logic.ts treats `initStr === "" && !initExpr` as missing-init sentinel → falls back to `"null"` (the canonical scrml absence per §42.5).
 
-**Bug 51-C — Auto-lift at top of `<program>` body drops the markup RHS. STILL OPEN.**
-At top-level of `<program>` body, BS splits the Shape 2 decl into a text block (LHS only — `<userName req length(>=2)> = `) AND a sibling markup block (the `<input/>` RHS). The auto-lift captures only the LHS — the parser produces a Shape 1 plain cell with no renderSpec, and the use-site fires `E-CELL-NO-RENDER-SPEC` at SYM. Fix requires BS to gobble the markup RHS into the text block at `peekTopLevelStateDeclSignal` time. Substantive separate scope; not addressed S139. **Workaround:** wrap the Shape 2 decl in an explicit `${...}` block inside `<program>` body. The `W-PROGRAM-REDUNDANT-LOGIC` lint will fire informational-only; compile succeeds; Bug 51-A and 51-B fixes mean the workaround now PRODUCES CORRECT END-TO-END EMIT (pre-S139 the workaround compiled clean but emit was broken).
+**Bug 51-C — Auto-lift at top of `<program>` body drops the markup RHS. RESOLVED S139 `da4ffd1a`.**
+At top-level of `<program>` body, BS split the Shape 2 decl into a text block (LHS only — `<userName req length(>=2)> = `) AND a sibling markup block (the `<input/>` RHS). The auto-lift captured only the LHS — the parser produced a Shape 1 plain cell with no renderSpec, and the use-site fired `E-CELL-NO-RENDER-SPEC` at SYM. Fix: new BS scanner `scanShape12DeclEnd()` (`block-splitter.js`) scans the WHOLE Shape 2 decl span (LHS opener + `=`/`:` + markup RHS) and emits the entire span as a single text block, mirroring the compound-state-decl path (`scanCompoundBlockEnd`). For Shape 1 expression-RHS and Shape 3 multi-line `match {…}` derived, the scanner returns -1 and the existing per-char text accumulation handles them (regression-guarded — pre-flip-to-FIX, a wrong scanner draft truncated multi-line expression-RHS at end-of-line, breaking match-arm-rhs-bare-variant-unmask test §2.1). The pre-existing text accumulation (e.g. `const ` prefix before `<NAME>`) is preserved by anchoring the gobbled block at `textStart` when set, so `const <derived> = expr` Shape 3 forms keep their `const` prefix in the same text block (required by ast-builder.js's TOPLEVEL_STATE_DECL_RE lift regex).
 
 - **Reproducer (now working with workaround):**
   ```scrml
