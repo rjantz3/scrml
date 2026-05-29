@@ -10,7 +10,7 @@
 **HEAD scrml-support:** `dbb47c3` (unchanged).
 **pkg.json:** 0.6.7 (tag `v0.6.7` — pushed at close).
 
-**Tests at CLOSE:** pre-commit subset 15,101 pass / 0 fail / 88 skip / 1 todo; browser 248 pass / 0 fail; full suite via pre-push gate (count in §State-as-of-CLOSE).
+**Tests at CLOSE:** full suite **22,097 pass / 0 fail / 219 skip / 1 todo across 828 files** (65,025 expect() calls); pre-commit subset 15,101/0/88/1; browser 248/0.
 
 **S99 path-discipline counter:** 20 (HELD — 5 worktree dispatches this session, zero leaks; the 1 Bug-61-v1 crash was an API 500, not a path-discipline incident).
 **Worktrees at CLOSE:** cleaned (see cleanup note) — main only.
@@ -156,7 +156,7 @@ scrmlTS HEAD `f8aac7db`, **+7 unpushed**: c4d5ef96 maps · 73162ef9 dispatch-art
 | v0.6.7 tag | `18de30ba` (pushed at close) |
 | HEAD scrml-support | `dbb47c3` (unchanged) |
 | pkg.json | 0.6.7 |
-| Tests (CLOSE) | pre-commit subset 15,101/0/88/1 (15,190 across 783 files) · browser 248/0 · full suite via pre-push gate |
+| Tests (CLOSE) | full suite 22,097 pass / 0 fail / 219 skip / 1 todo across 828 files (65,025 expect()) · pre-commit subset 15,101/0/88/1 · browser 248/0 |
 | Worktrees | main only (4 agent worktrees cleaned at close: a339f6c8/a47bb67a/a647b42c/aaa1bc62 + crashed a0744d0c) |
 | Inbox | empty |
 | S99 path-discipline counter | 20 (HELD — 5 dispatches, 0 leaks) |
