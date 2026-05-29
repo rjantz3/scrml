@@ -689,6 +689,35 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
         break;
       }
 
+      // each-block — Tier-1 `<each>` iteration (SPEC §17.X). emit-each.ts's
+      // emitEachBodyRenderForFile ALWAYS emits a `_scrml_reconcile_list(...)`
+      // call site (keyed list reconciliation) plus a `_scrml_effect_static(...)`
+      // dispatcher that re-runs the render on dep change. Those helpers live in
+      // the `reconciliation` and `deep_reactive` chunks respectively. Without
+      // this case the chunk-walk had NO `each-block` discriminator, so a file
+      // whose ONLY iteration is `<each>` (no Tier-0 `${for…lift}`, which is the
+      // sole other `reconciliation` trigger at `case "for-stmt"` above) shipped
+      // a client bundle that CALLS `_scrml_reconcile_list` but a runtime bundle
+      // that never DEFINES it → ReferenceError on first `_scrml_each_render_N()`
+      // (Bug 57, HIGH silent-miscompile). Compile exits 0 and `node --check`
+      // passes because the call site is syntactically valid; the gap is purely
+      // tree-shaking. Both chunks are unconditional: `_scrml_reconcile_list`
+      // because every non-empty each emits the call, and `_scrml_effect_static`
+      // (in `deep_reactive`) because an `of=N`/`in=N` over a snapshot literal
+      // with no `@`-state decl would otherwise lose the dispatcher helper too.
+      case "each-block": {
+        chunks.add("reconciliation"); // _scrml_reconcile_list + _scrml_lis
+        chunks.add("deep_reactive");  // _scrml_effect_static dispatcher
+        // The each-block node carries its walkable AST in bodyChildren /
+        // templateChildren / emptyChild — NOT in `children`/`body` — so the
+        // outer walkNodes/walkBody recursion does not descend into it. Recurse
+        // explicitly so chunk-requiring shapes inside the per-item template
+        // (lift-expr, nested `<each>`, nested `${for…lift}`, bind: directives)
+        // are still detected for chunk-gating.
+        if (Array.isArray(node.bodyChildren)) walkNodes(node.bodyChildren);
+        break;
+      }
+
       // meta — ^{} runtime meta blocks use _scrml_meta_effect
       case "meta":
         chunks.add("meta");
