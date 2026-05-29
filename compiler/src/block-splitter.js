@@ -1071,6 +1071,161 @@ export function splitBlocks(filePath, source) {
   }
 
   // ---------------------------------------------------------------------------
+  // S139 Bug 51-C — Shape 1/2 state-decl span end scanner
+  //
+  // After `peekTopLevelStateDeclSignal` confirms a top-level state-decl, this
+  // helper scans the WHOLE decl span — LHS opener + `=`/`:`-RHS — and returns
+  // the position just past the end. Caller gobbles `[pos, endPos)` as a single
+  // text block (mirroring the compound-decl path at scanCompoundBlockEnd /
+  // line 2174-2200).
+  //
+  // Why this exists: pre-S139, the BS path after the peek did `beginText() +
+  // step()` and let char-by-char text accumulation continue. That works for
+  // Shape 1 expression-RHS (`<count> = 0` — no `<` in RHS), but BREAKS for
+  // Shape 2 markup-RHS (`<userName req length(>=2)> = <input type="text"/>`)
+  // — the `<input>` opener triggers the markup-opener path, becoming a
+  // sibling block. The LHS-only text gets auto-lifted, parser sees `<userName
+  // ... > = ` with no RHS → produces Shape 1 plain cell with no renderSpec →
+  // SYM fires E-CELL-NO-RENDER-SPEC on the use-site (Bug 51-C reproducer).
+  //
+  // Returns -1 if the RHS scan fails (unterminated markup, malformed shape).
+  // Caller falls back to existing per-char text accumulation in that case.
+  function scanShape12DeclEnd() {
+    let p = pos + 1; // past '<'
+    // Step 1: skip LHS identifier
+    while (p < len && /[A-Za-z0-9_\-]/.test(source[p])) p++;
+    if (p === pos + 1) return -1;
+    // Step 2: skip attributes up to `>` (mirror peekTopLevelStateDeclSignal)
+    let braceDepth = 0;
+    let parenDepth = 0;
+    let inDouble = false;
+    let inSingle = false;
+    while (p < len) {
+      const c = source[p];
+      if (braceDepth > 0) {
+        if (c === "{") braceDepth++;
+        else if (c === "}") braceDepth--;
+        p++;
+        continue;
+      }
+      if (parenDepth > 0) {
+        if (c === "(") parenDepth++;
+        else if (c === ")") parenDepth--;
+        p++;
+        continue;
+      }
+      if (!inDouble && !inSingle) {
+        if (c === ">") { p++; break; }
+        if (c === "/" && p + 1 < len && source[p + 1] === ">") return -1;
+        if ((c === "$" || c === "?" || c === "#" || c === "!" || c === "^" || c === "~") && p + 1 < len && source[p + 1] === "{") {
+          braceDepth = 1; p += 2; continue;
+        }
+        if (c === "{") { braceDepth++; p++; continue; }
+        if (c === "(") { parenDepth++; p++; continue; }
+        if (c === '"') { inDouble = true; p++; continue; }
+        if (c === "'") { inSingle = true; p++; continue; }
+      } else if (inDouble && c === '"') { inDouble = false; p++; continue; }
+      else if (inSingle && c === "'") { inSingle = false; p++; continue; }
+      else if (c === "\\") { p += 2; continue; }
+      p++;
+    }
+    if (p > len) return -1;
+    // Step 3: skip horizontal whitespace (not newlines)
+    while (p < len && (source[p] === " " || source[p] === "\t")) p++;
+    // Step 4: skip `: TypeAnnotation` if present (typed-decl form)
+    if (p < len && source[p] === ":") {
+      p++;
+      // Skip type expression — bounded by `=` or newline. Conservative: stop
+      // on `=` (the RHS sentinel) or `\n` (decl boundary). Type expressions
+      // are simple identifier sequences in canonical use; richer forms are
+      // bounded by the caller's existing TOPLEVEL_STATE_DECL_RE.
+      while (p < len && source[p] !== "=" && source[p] !== "\n") p++;
+    }
+    if (p >= len) return p;
+    if (source[p] !== "=") return -1;
+    p++; // consume `=`
+    // Step 5: skip whitespace before RHS (allow newlines — Shape 2 RHS may be
+    // on the next line under v0.3 default-logic-mode formatting)
+    while (p < len && (source[p] === " " || source[p] === "\t")) p++;
+    if (p >= len) return p;
+    // Step 6: scan RHS
+    if (source[p] === "<") {
+      // Shape 2 — markup RHS. Scan one balanced markup element.
+      p++; // consume `<`
+      let d = 1; // tag depth (1 = inside the opening tag's attrs)
+      let inDoubleR = false;
+      let inSingleR = false;
+      while (p < len) {
+        const c = source[p];
+        if (inDoubleR) {
+          if (c === "\\") { p += 2; continue; }
+          if (c === '"') inDoubleR = false;
+          p++;
+          continue;
+        }
+        if (inSingleR) {
+          if (c === "\\") { p += 2; continue; }
+          if (c === "'") inSingleR = false;
+          p++;
+          continue;
+        }
+        if (c === '"') { inDoubleR = true; p++; continue; }
+        if (c === "'") { inSingleR = true; p++; continue; }
+        if (c === "/" && p + 1 < len && source[p + 1] === ">") {
+          // self-closing — `<input/>` shape
+          p += 2;
+          d--;
+          if (d === 0) return p;
+          continue;
+        }
+        if (c === ">") {
+          p++;
+          // Note: a tag-opener's `>` does NOT decrement d (we wait for
+          // either matching close `</X>` or self-close `/>`). But under our
+          // single-element scan, we entered with d=1 already (inside the
+          // opener's attrs). The `>` closes the opener's attrs; for non-
+          // self-closing, we then need a matching `</X>` to terminate. d
+          // is bumped on `<X` and decremented on `</X>` and `/>` only.
+          continue;
+        }
+        if (c === "<") {
+          // Look ahead: closer `</...>` or nested opener `<X...>`?
+          if (p + 1 < len && source[p + 1] === "/") {
+            // closer
+            p += 2;
+            // Scan to matching `>`, then decrement d
+            while (p < len && source[p] !== ">" && source[p] !== "\n") p++;
+            if (p >= len || source[p] !== ">") return -1;
+            p++;
+            d--;
+            if (d === 0) return p;
+            continue;
+          }
+          if (p + 1 < len && /[A-Za-z_]/.test(source[p + 1])) {
+            // nested opener
+            d++;
+            p++;
+            continue;
+          }
+          // `<` followed by something else — treat as content
+          p++;
+          continue;
+        }
+        p++;
+      }
+      return -1; // unterminated
+    }
+    // Expression RHS (Shape 1 or Shape 3 derived). Return -1 to let the
+    // legacy per-char text accumulation handle it. Expression RHS may span
+    // multiple lines (`const <display> = match @phase { ... multi-line ... }`)
+    // — scanning to end-of-line truncates the body and breaks the match/etc.
+    // recognition downstream. Legacy accumulation continues char-by-char
+    // until something special (markup-opener, comment, etc.) interrupts —
+    // which doesn't happen inside a balanced expression body.
+    return -1;
+  }
+
+  // ---------------------------------------------------------------------------
   // Bug-3 (S101) — Variant C compound state-decl peek
   //
   // SPEC §6.3.2 (Tier 2 ad-hoc compound): the parent opener `<NAME>` is
@@ -2154,8 +2309,46 @@ export function splitBlocks(filePath, source) {
         const isProgramBody = tf && tf.type === "markup" && tf.name === "program";
         const isPageBody = tf && tf.type === "markup" && tf.name === "page";
         if ((stack.length === 0 || isChannelBody || isProgramBody || isPageBody) && peekTopLevelStateDeclSignal()) {
-          // Don't flush text; don't step. Let the default raw-content path
-          // accumulate the entire `<NAME [attrs]> = expr` line as text.
+          // S139 Bug 51-C — scan the WHOLE Shape 1/2 decl span and gobble it
+          // as a single text block. Pre-S139, this branch did beginText() +
+          // step() + continue, letting per-char text accumulation continue.
+          // That works for Shape 1 expression-RHS (`<count> = 0` — no `<` in
+          // RHS) but BREAKS for Shape 2 markup-RHS (`<userName req> =
+          // <input/>`): the `<input>` opener hits the markup-opener path on
+          // the next loop iteration and becomes a sibling block, leaving the
+          // auto-lift to wrap LHS-only → parser produces Shape 1 plain cell
+          // with no renderSpec → SYM fires E-CELL-NO-RENDER-SPEC on the use-
+          // site. The scan helper handles both forms and emits the full span
+          // as ONE text block (mirroring the compound-decl path below).
+          // Fall back to legacy per-char accumulation if the scan fails.
+          const endPos = scanShape12DeclEnd();
+          if (endPos > pos) {
+            // If text has already been accumulating (e.g. `const ` or `export
+            // const ` prefix before `<NAME>`), INCLUDE it in the gobbled block.
+            // The ast-builder lift regex TOPLEVEL_STATE_DECL_RE requires the
+            // optional `const ` prefix to be in the SAME text block as the
+            // opener; flushing then pushing would split them and break the lift.
+            const blockStart = (textStart !== -1) ? textStart : pos;
+            const blockStartLine = (textStart !== -1) ? textStartLine : curLine;
+            const blockStartCol = (textStart !== -1) ? textStartCol : curCol;
+            while (pos < endPos) step();
+            targetChildren().push({
+              type: "text",
+              raw: source.slice(blockStart, pos),
+              span: { start: blockStart, end: pos, line: blockStartLine, col: blockStartCol },
+              depth: depth(),
+              children: [],
+              name: null,
+              closerForm: null,
+              isComponent: false,
+            });
+            textStart = -1;
+            inDoubleQuote = false;
+            inSingleQuote = false;
+            continue;
+          }
+          // Legacy fallback (Shape 1 still works via per-char accumulation
+          // since there's no `<` in the RHS to confuse the markup-opener path).
           beginText();
           step(); // consume '<' so we don't loop on it
           continue;

@@ -135,11 +135,11 @@ describe("Bug 51-B §2: Shape 2 cell init produces valid JS (not empty-arg react
 });
 
 // ---------------------------------------------------------------------------
-// §3: Bug 51-C — auto-lift gap still open (regression-guard for the workaround)
+// §3: Bug 51-C — auto-lift now ALSO works (RESOLVED S139 same session)
 // ---------------------------------------------------------------------------
 
-describe("Bug 51-C §3: auto-lift gap STILL OPEN (workaround via explicit `${...}` wrap)", () => {
-  test("workaround: explicit `${...}` wrap produces correct emit + HTML expansion", () => {
+describe("Bug 51-C §3: auto-lift at top-level of `<program>` body (BS-gobble fix)", () => {
+  test("`${...}` wrap form produces correct emit + HTML expansion (regression-guard for §1+§2)", () => {
     const src = `<program>\${ <userName req length(>=2)> = <input type="text"/> }<userName/></program>\n`;
     const { html, clientJs, errors } = compileSource("bug-51-c-workaround.scrml", src);
     expect(errors.length).toBe(0);
@@ -147,18 +147,56 @@ describe("Bug 51-C §3: auto-lift gap STILL OPEN (workaround via explicit `${...
     expect(clientJs).toMatch(/_scrml_reactive_set\("userName", null\)/);
   });
 
-  test("auto-lift (NO `${...}` wrap) — STILL BROKEN (BS gobble fix is Bug 51-C follow-up)", () => {
-    // This test memorializes the open gap. It asserts the EXPECTED CURRENT FAILURE
-    // — when Bug 51-C lands, this test will flip and assert success instead.
+  test("auto-lift (NO `${...}` wrap) — now FIXED via BS scanShape12DeclEnd gobble", () => {
+    // Pre-S139 (Bug 51-C original gap): BS split the Shape 2 decl into a text
+    // block (LHS only) and a sibling markup block (the RHS). Auto-lift wrapped
+    // only the LHS → parser produced Shape 1 plain cell with no renderSpec →
+    // SYM fired E-CELL-NO-RENDER-SPEC on the use-site. Post-S139 (this fix):
+    // BS scans the WHOLE Shape 2 decl span (LHS + `=` + markup RHS) via
+    // scanShape12DeclEnd() and gobbles it as a single text block, mirroring
+    // the compound-state-decl path at the same BS layer. The auto-lift now
+    // sees the full decl → parser produces shape:"decl-with-spec" with the
+    // renderSpec → SYM classifies as `bindable` → use-site expands cleanly.
     const src = `<program>\n<userName req length(>=2)> = <input type="text"/>\n<form>\n    <userName/>\n</form>\n</>\n`;
-    const { errors } = compileSource("bug-51-c-autolift.scrml", src);
-    // Pre-fix: SYM fires E-CELL-NO-RENDER-SPEC because BS splits the Shape 2
-    // decl into a text block (LHS only) and a sibling markup block (the RHS).
-    // The auto-lift captures only the LHS — the parser produces a Shape 1 plain
-    // cell with no renderSpec, and the use-site fires the render-spec error.
-    const hasRenderSpecError = errors.some(e =>
-      typeof e?.code === "string" && e.code === "E-CELL-NO-RENDER-SPEC"
-    );
-    expect(hasRenderSpecError).toBe(true);
+    const { html, clientJs, errors } = compileSource("bug-51-c-autolift.scrml", src);
+    expect(errors.length).toBe(0);
+    // The use-site `<userName/>` should expand to the bound input.
+    expect(html).toMatch(/<input type="text"/);
+    expect(html).toMatch(/required/);
+    expect(html).toMatch(/minlength="2"/);
+    expect(html).toMatch(/data-scrml-render-by-tag=/);
+    // client.js wires the bind:value loop and inits cell to scrml-absence (null).
+    expect(clientJs).toMatch(/_scrml_reactive_set\("userName", null\)/);
+    expect(clientJs).toMatch(/addEventListener\("input"/);
+  });
+
+  test("Shape 1 auto-lift continues to work (regression-guard — no regression from the BS scanner)", () => {
+    // The scanner returns -1 for non-markup-RHS shapes, falling back to legacy
+    // per-char text accumulation. This test guards that Shape 1 still lifts
+    // correctly through the legacy path.
+    const src = `<program>\n<count> = 0\n<div>\${'$'}{@count}</div>\n</>\n`.replace(/\$\{'\$'\}/g, "$");
+    const { clientJs, errors } = compileSource("bug-51-c-shape-1.scrml", src);
+    expect(errors.length).toBe(0);
+    expect(clientJs).toMatch(/_scrml_reactive_set\("count", 0\)/);
+  });
+
+  test("Shape 3 `const <derived> = match {...}` multi-line expression-RHS continues to work", () => {
+    // The scanner returns -1 for non-markup-RHS shapes (Shape 1 expression OR
+    // Shape 3 derived with multi-line body) — legacy per-char text accumulation
+    // handles the multi-line body. Pre-flip-to-FIX, my initial scanner scanned
+    // expression-RHS to end-of-line, which truncated `match { ... }` bodies.
+    const src = `type Status:enum = { Idle, Loading }
+
+<program>
+    <phase>: Status = .Idle
+    const <display> = match @phase {
+        .Idle => .Loading
+        .Loading => .Idle
+    }
+    <div>\${'$'}{@display}</div>
+</program>`.replace(/\$\{'\$'\}/g, "$");
+    const { clientJs, errors } = compileSource("bug-51-c-shape-3-multiline.scrml", src);
+    expect(errors.length).toBe(0);
+    expect(clientJs).toMatch(/_scrml_derived_declare\("display"/);
   });
 });
