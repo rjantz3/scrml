@@ -4,14 +4,14 @@
 **Previous:** `handOffs/hand-off-144.md` (S140 CLOSE — Bug-51-class audit + 4-HIGH fix wave + v0.6.7 cut).
 **Next-session pickup:** rotate THIS file → `handOffs/hand-off-145.md` at S142 OPEN.
 
-**S141 in one line:** opened clean on v0.6.7 → ran gauntlet **R27** (Expense-Approval, 5 personas): the S140 fix-wave (Bug 57/58/59/61) HELD 5/5; R27 surfaced a fresh batch of the compile-clean-but-invalid-JS class → **v0.6.8** fixed C1/C2/C5/C3; the **emitted-JS parse-gate invariant was ratified (A+D), built, and cut as v0.6.9** — its first run caught ~16 pre-existing invalid-JS artifacts in `examples/` (C10 HIGH / C11 MED). Bug 46 resolved; 2 heads-up docs → historical; known-gaps Bug-61 currency-fixed at OPEN. Both cuts pushed.
+**S141 in one line:** opened clean on v0.6.7 → ran gauntlet **R27** (Expense-Approval, 5 personas): the S140 fix-wave (Bug 57/58/59/61) HELD 5/5; R27 surfaced a fresh batch of the compile-clean-but-invalid-JS class → **v0.6.8** fixed C1/C2/C5/C3; the **emitted-JS parse-gate invariant was ratified (A+D), built, and cut as v0.6.9** — its first run caught ~16 pre-existing invalid-JS artifacts in `examples/` (C10 HIGH / C11 MED). Bug 46 resolved; 2 heads-up docs → historical; known-gaps Bug-61 currency-fixed at OPEN. Then under the `full wrap` directive: the **gate-found fix-wave PARTIAL** — drove the gate's invalid-JS surface (forced gate-on) **37→8** (agent STALLED at 8-remaining), landed the gate-OFF-safe codegen batch + cut **v0.6.10**; gate-flip + remaining 8 carry-forward. **Three cuts pushed (v0.6.8 / v0.6.9 / v0.6.10).**
 
-**HEAD at CLOSE:** `130f347f` (release v0.6.9). **HEAD at OPEN was** `feab1207` (v0.6.7).
-**Tags pushed this session:** `v0.6.8` (`a4f79b2d`, R27 fix-wave C1/C2/C3/C5) + `v0.6.9` (`130f347f`, emitted-JS parse-gate).
+**HEAD at CLOSE:** `36eca00a` (release v0.6.10). **HEAD at OPEN was** `feab1207` (v0.6.7).
+**Tags pushed this session:** `v0.6.8` (`a4f79b2d`, R27 fix-wave C1/C2/C3/C5) + `v0.6.9` (`130f347f`, emitted-JS parse-gate) + `v0.6.10` (`36eca00a`, gate-found codegen fixes PARTIAL).
 **HEAD scrml-support:** `2ec6480` (pushed — gauntlet-r27 BRIEF/5-devs/OVERSEER-REPORT/report + deep-dive doc + user-voice S141). **NOTE: r24/r25 gauntlet files STILL untracked** (carry-forward decision).
-**pkg.json:** 0.6.9.
+**pkg.json:** 0.6.10.
 
-**Tests at CLOSE:** full suite **22,121 pass / 0 fail / 219 skip** (~830 files; +13 from the gate tests over the v0.6.8 22,108 baseline; pre-push full-suite gate green at BOTH cuts).
+**Tests at CLOSE:** full suite **22,129 pass / 0 fail / 219 skip** (~832 files; pre-push full-suite gate green at ALL THREE cuts).
 
 **S99 path-discipline counter:** 20 (HELD — 2 worktree dispatches [fix-wave `ad9c089e` + gate `a477e98f`], zero leaks; dev-4 svelte crash was API-socket, not path-discipline).
 **Worktrees at CLOSE:** main only (cleaned fix-wave + gate worktrees + stale `ab53994a` leftover).
@@ -19,6 +19,20 @@
 **PA auto-memory:** 43 rule files.
 
 **Both repos 0/0 with origin at CLOSE.**
+
+---
+
+## S141 CONTINUATION — `full wrap the gate-found fix-wave` (user directive, post-CLOSE)
+
+User invoked `full wrap [arc]` to push on warm-context through the gate-found fix-wave, then wrap at ITS arc-end. **ARC = close the ~16 gate-found invalid-JS artifacts (C10 compound-`if=(is some && != "")` truncation HIGH + C11 `server{`-leak MED + ~4 others) → flip `validateEmit` default-ON + wire `--validate-emit` CLI → cut (v0.6.10 candidate) → wrap.**
+
+**OUTCOME — PARTIAL (agent STALLED at 8-remaining; LANDED + cut v0.6.10).** Agent `ab2914bfb23c81da7` found the brief's premise stale (C10/C11 trucking-dispatch already closed by v0.6.7-9; `examples/` had only 4, all fixed) and that the REAL gate-default-ON surface was **~37 invalid-JS fixtures across many codegen subsystems**. It drove gate-on failures **37→8** via 7 codegen fixes, then **stalled** (watchdog, 600s no-progress) mid-fixing an in-flight guarded-expr `emit-logic.ts` change that regressed 3 `emit-logic-s19` tests.
+
+**LANDED (user "land + cut + wrap"):** file-delta'd the committed batch (15 files, branch tip `33d163d8`; the in-flight regression DISCARDED) → commit `bf63e096` → PA-verified gate-OFF-safe (emit-logic-s19 152/0, self-host parity 142/0, full suite 22,129/0) → **cut v0.6.10** (`36eca00a`, pkg.json 0.6.9→0.6.10, tag pushed). Gate STAYS flag-gated (`validateEmit` default OFF — NOT flipped; 8 gate-on failures remain). Worktree cleaned.
+
+**CARRY-FORWARD S142 (the gate-found fix-wave's remaining 8 + flip):** `!{}` inline-catch (§19.4.3) + R25-Bug-49 nested `!{}` · each-block `as name` index alias · match-arm-block named-binding (Bug 6.5.1) · `<onTransition>` structural-element filter/HTML · self-host meta-checker + module-resolver (2) · the test-context fix the agent died on (3 `emit-logic-s19` tests expect `return` without `insideFunctionBody` — they should pass the flag). Close these → **flip `validateEmit` default-ON** + wire `--validate-emit`/`--no-validate-emit` CLI in cli.js + update SPEC §2.2.1. Fresh dispatch (the partial is already in main; start from current HEAD).
+
+**BUDGET note:** session was very heavy (R27 + 3 cuts + 2 wraps + 4 agent arcs). The gate-found fix-wave correctly grew ~2-3× beyond estimate (it's "fix the compiler's whole invalid-JS surface so the gate flips on"); 8-remaining is the right next-session arc.
 
 ---
 
