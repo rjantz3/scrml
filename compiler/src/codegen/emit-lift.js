@@ -1,4 +1,5 @@
 import { emitExprField } from "./emit-expr.ts";
+import { rewriteExprArrowBody } from "./rewrite.js";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { emitLogicNode } from "./emit-logic.js";
 import { genVar } from "./var-counter.ts";
@@ -503,6 +504,19 @@ function emitSetAttrs(elVar, attrs) {
       // wins, restore the bare-call shape. Escape-hatch for "needs event"
       // is `onclick=${(e) => fn(e)}` (§5.2.2 expression form).
       const handlerSource = attr.value;
+      // S140 Bug 59 — string-form sibling of the AST `val.kind==="expr"` fix
+      // below (~L760). A synth arrow-string handler `(evt) => { … }` routed
+      // through `emitExprField` here falls into Pass 1 `rewritePresenceGuard`,
+      // which rewrites it to `if (evt !== null && evt !== undefined) { … }` —
+      // no longer callable, so the `function(event) { … }` wrapper applies and
+      // `evt` becomes a free var. Mirror the Bug-50 (S138) fix: when the
+      // non-interpolated source is an arrow/function-expression, use
+      // `rewriteExprArrowBody` (skips presence-guard). The `${…}` interpolation
+      // branch keeps its part-splitting escape-hatch behavior unchanged.
+      const isSynthCallableHandlerSource =
+        typeof handlerSource === "string" &&
+        (/^\s*function\s*\(/.test(handlerSource) ||
+          /^\s*(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>/.test(handlerSource));
       // The value may be a function call like "toggleTodo(todo.id)" or just a name
       const handlerExpr = handlerSource.includes('${') || /\$\s*\{/.test(handlerSource)
         ? (() => {
@@ -510,7 +524,9 @@ function emitSetAttrs(elVar, attrs) {
             parseLiftContentParts(handlerSource, parts);
             return parts.map(p => p.type === "expr" ? emitExprField(null, p.value, { mode: "client" }) : p.value).join("");
           })()
-        : emitExprField(null, handlerSource, { mode: "client" });
+        : isSynthCallableHandlerSource
+          ? rewriteExprArrowBody(handlerSource)
+          : emitExprField(null, handlerSource, { mode: "client" });
       // S96 Bug 11+12 fix — when handlerExpr is already a callable (arrow
       // function `(x) => ...` / `x => ...` / function expression
       // `function(...) {...}`), emit it DIRECTLY as the handler. The
@@ -742,7 +758,30 @@ export function emitCreateElementFromMarkup(node, lines) {
       const raw = val.raw ?? val.propsDecl ?? "";
       if (/^on[a-z]/.test(name)) {
         const eventName = name.replace(/^on/, "");
-        const rewritten = emitExprField(val.exprNode, raw, { mode: "client" });
+        // S140 Bug 59 — when this onevent value is a synth arrow-string with
+        // NO structured exprNode (the emit-table-for per-row checkbox onchange
+        // builds `{ kind:"expr", raw:"(evt) => { … }" }` directly), routing the
+        // raw string through `emitExprField` falls into `rewriteExprWithDerived`
+        // → Pass 1 `rewritePresenceGuard`, which matches `( ident ) => { body }`
+        // as a §42 presence-guard and rewrites it to `if (evt !== null && evt
+        // !== undefined) { body }`. That `if`-statement is no longer callable,
+        // so the `function(event) { … }` wrapper below applies and `evt`
+        // becomes a free var → `ReferenceError: evt is not defined` at runtime
+        // (silent miscompile; `node --check` passes). This is the per-row
+        // RESIDUAL of Bug 50 (RESOLVED S138 `c89f1176`), which patched only the
+        // delegated master-checkbox path in emit-event-wiring.ts. Mirror that
+        // fix here: when there is no structured exprNode AND the source is an
+        // arrow/function-expression, use `rewriteExprArrowBody` (skips Pass 1
+        // presence-guard). When `val.exprNode` IS present, the structured
+        // emitExprField → emitLambda path already handles arrows correctly.
+        const isSynthCallableSource =
+          !val.exprNode &&
+          typeof raw === "string" &&
+          (/^\s*function\s*\(/.test(raw) ||
+            /^\s*(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>/.test(raw));
+        const rewritten = isSynthCallableSource
+          ? rewriteExprArrowBody(raw)
+          : emitExprField(val.exprNode, raw, { mode: "client" });
         // S96 Bug 11+12 fix — if the expression IS a callable (arrow
         // function or function expression), use it directly per SPEC §5.2.2:
         //   `onclick=${(e) => fn(e, arg)}` — `${}` expression used as-is.
