@@ -2,10 +2,10 @@
   "compiler/self-host/ast.scrml": {
     "COUNT-LENGTH": 27,
     "EXTRA-FIELD": 382,
-    "FIELD-SHAPE": 645,
+    "FIELD-SHAPE": 650,
     "KIND-NAME": 112,
     "MISSING-FIELD": 581,
-    "SPAN-COORD": 4039
+    "SPAN-COORD": 4044
   },
   "compiler/self-host/bpp.scrml": {
     "COUNT-LENGTH": 2,
@@ -34,17 +34,17 @@
   "compiler/self-host/dg.scrml": {
     "COUNT-LENGTH": 5,
     "EXTRA-FIELD": 82,
-    "FIELD-SHAPE": 129,
+    "FIELD-SHAPE": 130,
     "KIND-NAME": 9,
     "MISSING-FIELD": 136,
-    "SPAN-COORD": 698
+    "SPAN-COORD": 715
   },
   "compiler/self-host/meta-checker.scrml": {
     "COUNT-LENGTH": 9,
     "EXTRA-FIELD": 101,
     "FIELD-SHAPE": 98,
     "KIND-NAME": 31,
-    "MISSING-FIELD": 293,
+    "MISSING-FIELD": 294,
     "SPAN-COORD": 73
   },
   "compiler/self-host/module-resolver.scrml": {
@@ -66,10 +66,10 @@
   "compiler/self-host/ri.scrml": {
     "COUNT-LENGTH": 17,
     "EXTRA-FIELD": 220,
-    "FIELD-SHAPE": 188,
+    "FIELD-SHAPE": 190,
     "KIND-NAME": 67,
     "MISSING-FIELD": 387,
-    "SPAN-COORD": 397
+    "SPAN-COORD": 420
   },
   "compiler/self-host/tab.scrml": {
     "COUNT-LENGTH": 17,
@@ -84,7 +84,7 @@
     "EXTRA-FIELD": 325,
     "FIELD-SHAPE": 264,
     "KIND-NAME": 81,
-    "MISSING-FIELD": 570,
+    "MISSING-FIELD": 571,
     "SPAN-COORD": 198
   },
   "examples/01-hello.scrml": {
@@ -3564,7 +3564,7 @@
     "FIELD-SHAPE": 4,
     "KIND-NAME": 1,
     "MISSING-FIELD": 6,
-    "SPAN-COORD": 7
+    "SPAN-COORD": 12
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-method-call-sql-088.scrml": {
     "EXTRA-FIELD": 6,
@@ -3673,7 +3673,7 @@
     "FIELD-SHAPE": 4,
     "KIND-NAME": 1,
     "MISSING-FIELD": 7,
-    "SPAN-COORD": 10
+    "SPAN-COORD": 12
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-optchain-method-call-039.scrml": {
     "COUNT-LENGTH": 1,
@@ -3681,7 +3681,7 @@
     "FIELD-SHAPE": 3,
     "KIND-NAME": 1,
     "MISSING-FIELD": 6,
-    "SPAN-COORD": 5
+    "SPAN-COORD": 7
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-optchain-property-037.scrml": {
     "COUNT-LENGTH": 1,
@@ -3689,7 +3689,7 @@
     "FIELD-SHAPE": 4,
     "KIND-NAME": 1,
     "MISSING-FIELD": 6,
-    "SPAN-COORD": 8
+    "SPAN-COORD": 9
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-optchain-reactive-038.scrml": {
     "COUNT-LENGTH": 1,
@@ -3697,7 +3697,7 @@
     "FIELD-SHAPE": 4,
     "KIND-NAME": 1,
     "MISSING-FIELD": 5,
-    "SPAN-COORD": 6
+    "SPAN-COORD": 8
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-paren-grouping-arith-100.scrml": {
     "EXTRA-FIELD": 2,
@@ -6455,7 +6455,7 @@
     "EXTRA-FIELD": 101,
     "FIELD-SHAPE": 98,
     "KIND-NAME": 31,
-    "MISSING-FIELD": 293,
+    "MISSING-FIELD": 294,
     "SPAN-COORD": 73
   },
   "stdlib/compiler/mod.scrml": {
@@ -6612,10 +6612,10 @@
   "stdlib/http/index.scrml": {
     "COUNT-LENGTH": 4,
     "EXTRA-FIELD": 121,
-    "FIELD-SHAPE": 91,
-    "KIND-NAME": 30,
-    "MISSING-FIELD": 348,
-    "SPAN-COORD": 220
+    "FIELD-SHAPE": 92,
+    "KIND-NAME": 31,
+    "MISSING-FIELD": 352,
+    "SPAN-COORD": 239
   },
   "stdlib/mcp/index.scrml": {
     "COUNT-LENGTH": 2,
