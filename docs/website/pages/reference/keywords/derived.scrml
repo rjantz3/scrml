@@ -241,7 +241,7 @@ const &lt;greeting&gt; = "Hello, " + @user.name</code></pre>
             <li>
                 <strong>Reactivity attributes are forbidden.</strong>
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">debounced=</code>
-                /
+                &#47;
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">throttled=</code>
                 on a derived cell is
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-DEBOUNCED-WITH-DERIVED</code>.

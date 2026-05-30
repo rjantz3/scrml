@@ -267,9 +267,9 @@
                 <strong>Client bundle.</strong>
                 The reactive runtime for
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@newName</code>
-                /
+                &#47;
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@newEmail</code>
-                /
+                &#47;
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@newPhone</code>,
                 the
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;errors&gt;</code>
@@ -302,7 +302,7 @@
                 </a>
                 &mdash; deeper coverage of the
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code>
-                /
+                &#47;
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">is some</code>
                 surface this tutorial touched on lightly.
             </li>

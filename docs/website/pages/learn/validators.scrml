@@ -258,9 +258,9 @@
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@signup.isValid</code>
             AND each field carries its own
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@signup.email.isValid</code>
-            /
+            &#47;
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.password.isValid</code>
-            /
+            &#47;
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.age.isValid</code>.
             All synthesised at compile time. None of these properties
             were declared by you.
@@ -378,7 +378,7 @@
                    class="font-mono text-blue-700 hover:text-blue-900 underline">
                     req
                 </a>
-                /
+                &#47;
                 <a href="/reference/keywords/is-some"
                    class="font-mono text-blue-700 hover:text-blue-900 underline">
                     is some

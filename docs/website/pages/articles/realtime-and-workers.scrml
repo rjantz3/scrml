@@ -251,9 +251,9 @@
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code>
             sets the supervision strategy (
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">"always"</code>
-            /
+            &#47;
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">"never"</code>
-            /
+            &#47;
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">"on-error"</code>).
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">max-restarts=N</code>
             and
