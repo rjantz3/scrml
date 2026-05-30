@@ -46,3 +46,4 @@ playwright/.cache/
 docs/articles/*/
 docs/articles/index.html
 .scratch-p42/
+scratch/
