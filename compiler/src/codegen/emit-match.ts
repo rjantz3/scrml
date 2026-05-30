@@ -69,6 +69,13 @@ interface MatchBlockAstNode {
   armsRaw: string;
   bodyChildren?: any[];
   span: any;
+  /** R28-1 (S143) — set by collectMatchBlocks when this match-block is
+   *  nested inside an `<each>` body scope: the enclosing each's current-
+   *  iteration variable (`asName` or the synthetic `_scrml_each_item`).
+   *  Used by resolveOnExpr to lower an `on=@.field` sigil to the iter var,
+   *  matching the `on=alias.field` form per SPEC §17.7.3 (identical
+   *  codegen). Null/absent when the match-block is not inside an each. */
+  enclosingEachIterVar?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -81,29 +88,61 @@ interface MatchBlockAstNode {
  * other match-blocks (nested case-analysis is legal per §18.0.1 — the
  * cross-cutting concern is that an inner match-block consumes its OWN
  * `on=` cell independent of the outer match-block's cell).
+ *
+ * R28-1 (S143) — the walker also threads the enclosing `<each>` body's
+ * current-iteration variable: when it descends into an each-block's
+ * `templateChildren` (the per-item template — the iter-scoped child set),
+ * it carries the each's iter var (`asName` or the synthetic
+ * `_scrml_each_item`) and stamps it onto every match-block found beneath.
+ * resolveOnExpr then lowers an `on=@.field` sigil to that iter var (SPEC
+ * §17.7.3 — `@.field` and `alias.field` produce identical codegen). The
+ * `<empty>` sub-element body is NOT iter-scoped, so it descends with a
+ * null iter var. Nested `<each>` scopes resolve to the INNERMOST scope
+ * automatically (each descent overrides the carried iter var).
  */
 function collectMatchBlocks(fileAST: any): MatchBlockAstNode[] {
   const found: MatchBlockAstNode[] = [];
   const seen = new WeakSet<object>();
-  function walk(node: any): void {
+  function walk(node: any, eachIterVar: string | null): void {
     if (!node || typeof node !== "object") return;
     if (seen.has(node)) return;
     seen.add(node);
     if (Array.isArray(node)) {
-      for (const n of node) walk(n);
+      for (const n of node) walk(n, eachIterVar);
       return;
     }
     if (node.kind === "match-block") {
+      // Stamp the enclosing each's iter var (null when not inside an each)
+      // so resolveOnExpr can lower an `on=@.field` sigil. Always set it
+      // (idempotent across re-walks).
+      (node as MatchBlockAstNode).enclosingEachIterVar = eachIterVar;
       found.push(node as MatchBlockAstNode);
       // Recurse into bodyChildren so nested match-blocks inside arm bodies
-      // surface too.
-      if (Array.isArray(node.bodyChildren)) walk(node.bodyChildren);
+      // surface too. Arm bodies are NOT a new iteration scope, so the
+      // enclosing each iter var carries through unchanged.
+      if (Array.isArray(node.bodyChildren)) walk(node.bodyChildren, eachIterVar);
       return;
+    }
+    // R28-1 — entering an each-block: its per-item template (templateChildren)
+    // is the iter-scoped child set; the iter var is `asName` or the synthetic
+    // `_scrml_each_item` (mirrors emit-each.ts iterVarName resolution). The
+    // <empty> body (emptyChild) is NOT iter-scoped. Visit templateChildren
+    // FIRST so the iter-var stamp wins (templateChildren shares node refs
+    // with bodyChildren; the `seen` set blocks the later bodyChildren re-walk).
+    if (node.kind === "each-block") {
+      const innerIterVar = (typeof node.asName === "string" && node.asName.length > 0)
+        ? node.asName
+        : "_scrml_each_item";
+      if (Array.isArray(node.templateChildren)) walk(node.templateChildren, innerIterVar);
+      if (node.emptyChild) walk(node.emptyChild, null);
+      // Fall through to the generic descent for any other container fields
+      // (bodyChildren is now seen-guarded; descend with the OUTER iter var so
+      // a match-block reachable only via a non-template field still resolves).
     }
     // Recurse into known container fields. Mirror engine-decl + match-block
     // descent shape — children / body / bodyChildren / nodes / arms.
     for (const key of ["children", "body", "bodyChildren", "nodes", "arms"]) {
-      if (Array.isArray(node[key])) walk(node[key]);
+      if (Array.isArray(node[key])) walk(node[key], eachIterVar);
     }
   }
   // The pipeline passes the OUTER file-result object whose AST nodes live
@@ -185,6 +224,41 @@ interface OnExprResolution {
 }
 
 /**
+ * Rewrite the `@.` contextual iteration sigil to the enclosing `<each>`'s
+ * current-iteration variable inside an `on=` expression's raw text.
+ *
+ * R28-1 (S143) — a block-form `<match for=T on=@.field>` nested inside an
+ * `<each ... as alias>` body. Per SPEC §17.7.3 the `@.field` form and the
+ * `as`-bound `alias.field` form are ALIASES that "produce identical codegen";
+ * the match `on=` lowering must therefore resolve `@.field` to the same
+ * iter-var member-access that the `alias.field` form already produces.
+ * Without this, the raw `@.` survives into the module-scope dispatcher call
+ * (`_scrml_match_match_NNN_dispatch(@.field)`) — invalid JS, gate-caught by
+ * E-CODEGEN-INVALID-JS.
+ *
+ * Mirror of emit-table-for.ts:rewriteAtDotInExprText (Bug 32 prior art) and
+ * emit-each.ts:rewriteContextualSigil — `@.field` -> `<iterVar>.field`,
+ * bare `@.` -> `<iterVar>`. The BS tokenizer space-pads `.` operators
+ * (`@.status` -> `@ . status`); the regex tolerates surrounding whitespace.
+ * Conservative — does not touch `@cell` (no dot follows the sigil).
+ *
+ * NOTE (R28-1 surfaced, OUT OF SCOPE): the match dispatcher is emitted at
+ * MODULE scope, not per-iteration inside the each render fn — so referencing
+ * the loop var (whether via `@.field` lowered here or via the author-written
+ * `alias.field`) produces a module-scope reference that is not the live
+ * per-item value. This lowering closes the parse-gate fire and achieves the
+ * SPEC-mandated "identical codegen" parity with the `alias.field` form; the
+ * deeper per-item-match-inside-each runtime-correctness gap is pre-existing
+ * and identical for BOTH forms (see report).
+ */
+function rewriteAtDotInOnExpr(text: string, iterVar: string): string {
+  if (!text || typeof text !== "string") return text;
+  return text
+    .replace(/@\s*\.\s*([A-Za-z_$][A-Za-z0-9_$]*)/g, (_m, member) => `${iterVar}.${member}`)
+    .replace(/@\s*\.\s*(?![A-Za-z_$])/g, iterVar);
+}
+
+/**
  * Resolve a match-block's `on=` expression text to:
  *   - the JS accessor expression for the helper's effect-mode dispatcher
  *   - the reactive cell name for the helper's subscribe-mode dispatcher
@@ -201,7 +275,17 @@ function resolveOnExpr(
 ): OnExprResolution | null {
   // Explicit on= form.
   if (matchBlock.onExprRaw) {
-    const expr = matchBlock.onExprRaw.trim();
+    // R28-1 (S143) — when this match-block sits inside an `<each>` body,
+    // lower the `@.` contextual iteration sigil to the each's iter var
+    // FIRST, so the remaining branch logic sees a plain identifier member-
+    // access (`alias.field`) — identical to the author-written
+    // `on=alias.field` form (SPEC §17.7.3). Outside an each, iterVar is
+    // null/absent and the raw text passes through unchanged.
+    const _eachIterVar = matchBlock.enclosingEachIterVar;
+    const _onRaw = (typeof _eachIterVar === "string" && _eachIterVar.length > 0)
+      ? rewriteAtDotInOnExpr(matchBlock.onExprRaw, _eachIterVar)
+      : matchBlock.onExprRaw;
+    const expr = _onRaw.trim();
     // Bare cell ref `@ident` — Shape A subscribe.
     const cellRefMatch = expr.match(/^@([A-Za-z_$][A-Za-z0-9_$]*)$/);
     if (cellRefMatch) {
