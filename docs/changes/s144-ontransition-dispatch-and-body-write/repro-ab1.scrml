@@ -1,0 +1,11 @@
+<program>
+type Mode:enum = { Nav, Edit }
+<transitions> = 0
+function toggle() { if (@mode == Mode.Nav) { @mode = .Edit } else { @mode = .Nav } }
+<engine for=Mode initial=.Nav>
+  <Nav  rule=.Edit />
+  <Edit rule=.Nav />
+  <onTransition from=.Nav to=.Edit>${ @transitions = @transitions + 1 }</onTransition>
+</engine>
+<div><button onclick=toggle()>toggle</button><span>${@mode}</span><span>${@transitions}</span></div>
+</program>

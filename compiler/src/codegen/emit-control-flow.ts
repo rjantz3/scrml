@@ -143,6 +143,29 @@ interface IfOpts {
    * body for the broadcast lowering to fire.
    */
   channelOwnedCells?: Set<string> | null;
+  /**
+   * S144 Cluster E / Bug-AB Defect 1 — engine + machine context threaded
+   * through `if (…) { … }` bodies so a nested `@engineVar = .X` direct write
+   * or `@engineVar.advance(.X)` call routes through the canonical engine
+   * dispatch (`_scrml_engine_direct_set` / `_scrml_engine_advance` +
+   * `__scrml_engine_<var>_fire_hooks`) instead of emitting a bare
+   * `_scrml_reactive_set` / a method call on the variant-string value.
+   *
+   * Mirrors the field set the match-arm-block path already forwards
+   * (rewriteBlockBody → EngineRewriteCtx). Without these, an engine
+   * transition triggered from a free program-scope `function` body whose
+   * write sits inside an if/else never fires its `<onTransition>` handlers.
+   * (S144 landing: merged with the GITI-020 boundary/channelOwnedCells fields
+   * above — both A+B and Bug-AB extend this same IfOpts; `boundary` is shared.)
+   */
+  engineBindings?: Map<string, import("./emit-engine.ts").EngineBindingInfo> | null;
+  engineVarNames?: Set<string> | null;
+  enginesWithHooks?: Set<string> | null;
+  enginesWithOnTimeout?: Set<string> | null;
+  enginesWithIdleWatchdog?: Set<string> | null;
+  enginesWithInternalRules?: Set<string> | null;
+  enginesWithHistory?: Set<string> | null;
+  machineBindings?: Map<string, MachineBindingInfo> | null;
 }
 
 // §51.5 — Machine binding info for transition guard emission in rewriteBlockBody
@@ -264,6 +287,19 @@ export function emitIfStmt(node: any, opts: IfOpts = {}): string {
     // `@cell = expr` on the server boundary reaches the broadcast-wire arm.
     boundary: opts.boundary,
     channelOwnedCells: opts.channelOwnedCells,
+    // S144 Cluster E / Bug-AB Defect 1 — forward engine + machine context so
+    // a nested `@engineVar = .X` / `@engineVar.advance(.X)` inside the if/else
+    // body dispatches through the engine helpers (fire_hooks) rather than a
+    // bare reactive_set. Tree-shaken: undefined fields are simply ignored by
+    // the downstream emitLogicNode opt-consumers.
+    ...(opts.engineBindings ? { engineBindings: opts.engineBindings } : {}),
+    ...(opts.engineVarNames ? { engineVarNames: opts.engineVarNames } : {}),
+    ...(opts.enginesWithHooks ? { enginesWithHooks: opts.enginesWithHooks } : {}),
+    ...(opts.enginesWithOnTimeout ? { enginesWithOnTimeout: opts.enginesWithOnTimeout } : {}),
+    ...(opts.enginesWithIdleWatchdog ? { enginesWithIdleWatchdog: opts.enginesWithIdleWatchdog } : {}),
+    ...(opts.enginesWithInternalRules ? { enginesWithInternalRules: opts.enginesWithInternalRules } : {}),
+    ...(opts.enginesWithHistory ? { enginesWithHistory: opts.enginesWithHistory } : {}),
+    ...(opts.machineBindings ? { machineBindings: opts.machineBindings } : {}),
   };
 
   if (hasFragmentedLiftBody(consequent)) {

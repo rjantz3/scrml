@@ -1395,6 +1395,17 @@ function walk(
   currentScope: Scope,
   stats: SYMStats,
   visited: WeakSet<object>,
+  // S144 Cluster E / Bug-AB Defect 2 — true when descending inside an
+  // `<engine>` body (bodyChildren / state-child markup / onTransition /
+  // effect logic). Inside an engine body a bare `@x = expr` parses as a
+  // non-structural `state-decl` (structuralForm:false) — but per §51.0 +
+  // V5-strict (§6.1.1/§6.2) it is a WRITE, not a declaration. Registering it
+  // synthesises a phantom cell that (a) collides with the engine's own auto-
+  // declared variable on a self-write → phantom E-ENGINE-VAR-DUPLICATE, and
+  // (b) shadows a top-level cell written there + read elsewhere → false
+  // E-DG-002. When this flag is set, non-structural state-decl writes are
+  // walked-through (RHS @-refs still visited) but NOT registered.
+  inEngineBody: boolean = false,
 ): void {
   if (!nodes) return;
   for (const n of nodes) {
@@ -1423,6 +1434,25 @@ function walk(
         // registering it as a cell.
         continue;
       }
+      // S144 Cluster E / Bug-AB Defect 2 — inside an `<engine>` body, a bare
+      // `@x = expr` parses as a non-structural state-decl (structuralForm:
+      // false, not a derived `<x> = expr` form). These are onTransition /
+      // effect WRITES, not declarations (the only legal decl form is the
+      // top-level structural `<name>` per V5-strict §6.1.1/§6.2; the ast-
+      // builder builds engine bodyChildren in markup context (ast-builder.ts
+      // ~L12073) so the V-kill `_isReactiveAssign` tag is not applied here).
+      // Skip registration so we don't synthesise a phantom cell (which causes
+      // the phantom E-ENGINE-VAR-DUPLICATE on a self-write + the false
+      // E-DG-002 on a cross-state read). Derived structural decls
+      // (`shape === "derived"`) and structural `<x> = init` decls
+      // (structuralForm:true) still register normally.
+      if (
+        inEngineBody &&
+        (anyN as any).structuralForm === false &&
+        (anyN as any).shape !== "derived"
+      ) {
+        continue;
+      }
       // The state-decl itself registers + (if compound) opens a sub-scope.
       registerStateDecl(n as ReactiveDeclNode, currentScope, stats, visited);
       // No further recursion: children are handled by registerStateDecl;
@@ -1441,20 +1471,20 @@ function walk(
         writable: true,
       });
       stats.totalScopes++;
-      walk(anyN.body, fnScope, stats, visited);
+      walk(anyN.body, fnScope, stats, visited, inEngineBody);
       continue;
     }
 
     // Recurse into common AST containers. Mirrors NR's recursion shape.
     // The `visited` WeakSet guards against `block`/`parent` back-refs that
     // some BS-derived nodes carry (mirroring the test helper's findKind walk).
-    if (Array.isArray(anyN.children)) walk(anyN.children, currentScope, stats, visited);
-    if (Array.isArray(anyN.body)) walk(anyN.body, currentScope, stats, visited);
-    if (Array.isArray(anyN.consequent)) walk(anyN.consequent, currentScope, stats, visited);
-    if (Array.isArray(anyN.alternate)) walk(anyN.alternate, currentScope, stats, visited);
+    if (Array.isArray(anyN.children)) walk(anyN.children, currentScope, stats, visited, inEngineBody);
+    if (Array.isArray(anyN.body)) walk(anyN.body, currentScope, stats, visited, inEngineBody);
+    if (Array.isArray(anyN.consequent)) walk(anyN.consequent, currentScope, stats, visited, inEngineBody);
+    if (Array.isArray(anyN.alternate)) walk(anyN.alternate, currentScope, stats, visited, inEngineBody);
     if (Array.isArray(anyN.arms)) {
       for (const arm of anyN.arms) {
-        if (arm && Array.isArray(arm.body)) walk(arm.body, currentScope, stats, visited);
+        if (arm && Array.isArray(arm.body)) walk(arm.body, currentScope, stats, visited, inEngineBody);
       }
     }
     // Phase A10 (S78) — descend into engine-decl.bodyChildren so any state-
@@ -1466,14 +1496,17 @@ function walk(
     // Most engine bodies introduce no decls; this is mostly for completeness
     // + scope-chain extension consistency with PASSes 2/3/5/6/13/14.
     if (kind === "engine-decl" && Array.isArray(anyN.bodyChildren)) {
-      walk(anyN.bodyChildren, currentScope, stats, visited);
+      // S144 Cluster E / Bug-AB Defect 2 — descend with inEngineBody=true so
+      // non-structural `@x = expr` writes in onTransition/effect bodies are
+      // walked-through (RHS visited) but NOT registered as phantom cells.
+      walk(anyN.bodyChildren, currentScope, stats, visited, true);
     }
     // P3-FOLLOW alignment: lift-expr carries a markup tree under expr.node.
     // B1 doesn't have state-cell concerns inside lift-exprs (markup is the
     // value, not a decl-site), but mirroring NR's recursion shape avoids
     // surprises if a downstream B-step extends the walker.
     if (kind === "lift-expr" && anyN.expr && anyN.expr.kind === "markup" && anyN.expr.node) {
-      walk([anyN.expr.node], currentScope, stats, visited);
+      walk([anyN.expr.node], currentScope, stats, visited, inEngineBody);
     }
   }
 }

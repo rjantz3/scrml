@@ -1,0 +1,11 @@
+<program>
+type Phase:enum = { Loading, Ready }
+<count> = 0
+<engine for=Phase initial=.Loading>
+    <Loading rule=.Ready>
+        Loading…
+        <onTransition to=.Loading>${ @count = 42; @phase = .Ready }</>
+    </>
+    <Ready>Ready: ${@count}</>
+</engine>
+</program>

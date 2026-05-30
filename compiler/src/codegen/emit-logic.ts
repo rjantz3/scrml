@@ -2335,7 +2335,29 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // inside if/else body sees outer lets (Bug B + F).
       // C5: thread insideFunctionBody too so nested state-decls don't leak
       // _scrml_init_set sidecars when we're inside a function body.
-      return emitIfStmt(node, { derivedNames: opts.derivedNames, synthCellKeys: opts.synthCellKeys, declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells });
+      // S144 Cluster E / Bug-AB Defect 1: also thread engine + machine
+      // context so a nested `@engineVar = .X` / `@engineVar.advance(.X)`
+      // inside the if/else body dispatches through the engine helpers
+      // (fire_hooks) instead of a bare reactive_set / method-on-value. This is
+      // the program-scope `function` analogue of the match-arm-block fix.
+      // (GITI-020: boundary + channelOwnedCells also threaded so a server-side
+      // channel-cell write nested in if/else reaches the broadcast-wire arm.)
+      return emitIfStmt(node, {
+        derivedNames: opts.derivedNames,
+        synthCellKeys: opts.synthCellKeys,
+        declaredNames: opts.declaredNames,
+        insideFunctionBody: opts.insideFunctionBody,
+        boundary: opts.boundary,
+        channelOwnedCells: opts.channelOwnedCells,
+        ...(opts.engineBindings ? { engineBindings: opts.engineBindings } : {}),
+        ...(opts.engineVarNames ? { engineVarNames: opts.engineVarNames } : {}),
+        ...(opts.enginesWithHooks ? { enginesWithHooks: opts.enginesWithHooks } : {}),
+        ...(opts.enginesWithOnTimeout ? { enginesWithOnTimeout: opts.enginesWithOnTimeout } : {}),
+        ...(opts.enginesWithIdleWatchdog ? { enginesWithIdleWatchdog: opts.enginesWithIdleWatchdog } : {}),
+        ...(opts.enginesWithInternalRules ? { enginesWithInternalRules: opts.enginesWithInternalRules } : {}),
+        ...(opts.enginesWithHistory ? { enginesWithHistory: opts.enginesWithHistory } : {}),
+        ...(opts.machineBindings ? { machineBindings: opts.machineBindings } : {}),
+      } as any);
 
     case "for-stmt":
       // §32 array accumulator: when tilde context is active, switch to array-mode before
