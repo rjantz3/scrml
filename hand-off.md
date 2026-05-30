@@ -29,7 +29,25 @@
 
 **Design call:** R28-8 (bare-variant inference object-literal/==RHS — extend §14.10 vs fix kickstarter §4.8 overclaim; overseer split).
 
-**Open R28 decisions for user:** (a) fix-wave now? which bugs/order? (lean: R28-2/Bug-54 + R28-6 + R28-1 + R28-3, then R28-7 after scope call) · (b) R28-7 severity + v1.0/v1.next scope · (c) R28-8 extend-vs-canon-fix · (d) commit + push auth for the R28 artifacts + known-gaps + hand-off.
+**R28 round COMMITTED + PUSHED** (S143, user-authorized): scrmlTS `eda211f2` (known-gaps §R28 + hand-off + rotation) + scrml-support `9951aef` (gauntlet-r28 round + r24/r25 backfill). Both 0/0 with origin (scrmlTS pre-push full suite 22153/0 + TodoMVC PASS).
+
+### ✅ S143 FIX-WAVE LANDED (4 parallel isolation:worktree dispatches, user-authorized) + canon-fix R28-C1
+**All 4 fixes landed + PA R26-verified; full suite 22180/0 (+27 tests), within-node canary 1005/0.** Each landed via S67 file-delta with the S142 branch-tip-vs-FINAL_SHA coherence check (all coherent) + per-fix PA R26 re-verify. R28-2 needed a **3-way patch of type-system.ts** (R28-6 had landed first + touched the same file; disjoint regions — merged clean, both verified intact).
+- **R28-3** `051ce984` — block-splitter `skipTriviaForCompoundScan` (`//`/`/* */` trivia in compound-auto-lift scan; SPEC §27.1). +5 tests.
+- **R28-6** `0ecfab98` — type-system: fire E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED on reactive-assignment RHS reads. **Agent corrected the brief's root cause** (the `.get()` was a red herring; the gap was the state-decl RHS read-scan). +6 tests.
+- **R28-1** `e6fb2f3d` — emit-match: lower `on=@.field` → `iterVar.field` inside `<each as>` (closes the GATE-FIRE only). +10 tests.
+- **R28-2** `0dbef110` — tableFor `<column>` row-access both ways (`:let` via §16.6 re-parse + `@row` → loop-local). **Bug 54 un-deferred + CLOSED.** +6 tests.
+- **R28-C1** (PA-direct, pending this commit) — SPEC §14.12.6 + PRIMER §6.5: 6 broken `server fn loadUser/publish ...?{}` worked examples → `server function` (was E-FN-001; corrected example now compiles).
+
+**Process notes (banked, shoot-straight):** R28-6 agent self-caught + amended a `--no-verify` on a doc-only commit (load-bearing commits always gated; no bypass remains). R28-1 agent used the Edit tool for one walker edit then inode-verified no-leak (S126 minor deviation, self-verified clean). R28-1 + R28-2 agents both independently flagged sibling-landing index state (S119 awareness) — handled.
+
+**NEW follow-ups surfaced by the fix-wave (filed known-gaps §R28):** **R28-1b** (HIGH-suspected) — the block-form `<match on=>` dispatcher is emitted at MODULE scope → wrong per-item value for match-on-loop-var inside `<each>` (affects BOTH `@.` and `alias.field`; R28-1 closed only the gate-fire; this is the deeper runtime gap; "node-check-clean ≠ correct" class; needs happy-dom runtime confirm before fix-dispatch). **R28-2b** (LOW) — tokenizer strips leading `:` on `:let` (tokenizer.ts:763); R28-2 worked around via the `let` alias; verbatim `:let` needs a tokenizer dispatch.
+
+**known-gaps §0 now: HIGH 5→2** (R28-1/2/3/6 RESOLVED; OPEN: R28-7 decision-pending + R28-1b NEW) · MED 11 · LOW 14→15 (R28-2b) · Nominal 7.
+
+**Worktrees:** 4 agent worktrees CLEANED at fix-wave close (work landed in main).
+
+**STILL QUEUED:** **R28-7 severity/scope DECISION** (schemaFor/tableFor `T | not` L22 mapping — v1.0 fix vs v1.next; PA lean fix-now, 5/5 adopter signal) · **R28-8 DECISION** (extend §14.10 inference vs fix kickstarter §4.8 overclaim) · **R28-1b** runtime-confirm + fix-dispatch · **R28-2b** tokenizer dispatch · R28-C2 kickstarter drift bundle (canon-maintenance) · errorBoundary version cut (deferred from S142 — now ALSO the R28 fix-wave landed, so a v0.6.12/v0.7.0 cut bundles errorBoundary + the 4 R28 fixes) · maps refresh (now ~17 commits stale).
 
 ---
 

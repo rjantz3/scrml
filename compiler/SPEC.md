@@ -7974,7 +7974,7 @@ Lifecycle annotation `(A to B)` is permitted at every typed location EXCEPT engi
 | Struct field | YES | `passwordHash: (not to string)` | §14.3 (original locus) |
 | Shape 1 plain reactive cell | YES | `<status>: (Idle to Active) = .Idle` | §6.2 (Shape 1) |
 | Function parameter | YES | `fn process(u: (not to User))` | §48 |
-| Function return | YES | `server fn loadUser(id: number) -> (not to User)` | §14.12.6 (S131 — HU-2 hybrid) |
+| Function return | YES | `server function loadUser(id: number) -> (not to User)` | §14.12.6 (S131 — HU-2 hybrid) |
 | Schema field | YES | (cross-ref §39 §14.12.7) | §39 |
 | Channel cell | YES | (cross-ref §38 §14.12.8) | §38 |
 | Engine cell | **NO** — fires E-TYPE-LIFECYCLE-ON-ENGINE-CELL | (see §14.12.4) | §51.0 |
@@ -8050,7 +8050,7 @@ The callee declares a `(not to T)` return type. The caller receives a value type
 **Server-fn declaration:**
 
 ```scrml
-server fn loadUser(id: number) -> (not to User) {
+server function loadUser(id: number) -> (not to User) {
     const row = ?{ select * from users where id = ${id} }.get()
     return row     // returns `User | not`; lifecycle declares the post-transition contract
 }
@@ -8115,7 +8115,7 @@ type Article:enum = {
     Published(body: string, publishedAt: number)
 }
 
-server fn publish(id: number) -> (.Draft to .Published) {
+server function publish(id: number) -> (.Draft to .Published) {
     const a = ?{ select * from articles where id = ${id} }.get()
     return a as .Published    // callee transitions; returns Published-shape
 }

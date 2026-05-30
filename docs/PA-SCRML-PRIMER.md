@@ -511,7 +511,7 @@ The legacy `->` glyph is RECOGNISED during the deprecation window and surfaces a
 | Struct field | YES | `passwordHash: (not to string)` |
 | Shape 1 plain reactive cell | YES | `<status>: (Idle to Active) = .Idle` |
 | Function parameter | YES | `fn process(u: (not to User))` |
-| Function return | YES (hybrid; §6.5 below) | `server fn loadUser(id: number) -> (not to User)` |
+| Function return | YES (hybrid; §6.5 below) | `server function loadUser(id: number) -> (not to User)` |
 | Schema field | YES | (cross-ref §14.12.7) |
 | Channel cell | YES | (cross-ref §14.12.8) |
 | **Engine cell** | **NO** — fires `E-TYPE-LIFECYCLE-ON-ENGINE-CELL` | (see carve-out below) |
@@ -590,7 +590,7 @@ Lifecycle on function-return type is fully tracked end-to-end. The transition me
 **Presence-progression — discrimination IS transition:**
 
 ```scrml
-server fn loadUser(id: number) -> (not to User) {
+server function loadUser(id: number) -> (not to User) {
     const row = ?{ select * from users where id = ${id} }.get()
     return row     // returns `User | not`; lifecycle declares the post-transition contract
 }
@@ -625,7 +625,7 @@ type Article:enum = {
     Published(body: string, publishedAt: number)
 }
 
-server fn publish(id: number) -> (.Draft to .Published) {
+server function publish(id: number) -> (.Draft to .Published) {
     const a = ?{ select * from articles where id = ${id} }.get()
     return a as .Published                // callee transitions; returns Published-shape
 }
