@@ -5507,7 +5507,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       let label = null;
       // If next token is an identifier on the same line, it's a label target
       const nextBreak = peek();
-      if (nextBreak.kind === "IDENT" && nextBreak.line === startTok.line) {
+      if (nextBreak.kind === "IDENT" && nextBreak.span?.line != null && startTok.span?.line != null && nextBreak.span.line === startTok.span.line) {
         label = consume().text;
       }
       // consume optional trailing semicolon
@@ -5526,7 +5526,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       let label = null;
       // If next token is an identifier on the same line, it's a label target
       const nextCont = peek();
-      if (nextCont.kind === "IDENT" && nextCont.line === startTok.line) {
+      if (nextCont.kind === "IDENT" && nextCont.span?.line != null && startTok.span?.line != null && nextCont.span.line === startTok.span.line) {
         label = consume().text;
       }
       // consume optional trailing semicolon
@@ -9286,7 +9286,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       const startTok = consume();
       let label = null;
       const nextBreak = peek();
-      if (nextBreak.kind === "IDENT" && nextBreak.line === startTok.line) {
+      if (nextBreak.kind === "IDENT" && nextBreak.span?.line != null && startTok.span?.line != null && nextBreak.span.line === startTok.span.line) {
         label = consume().text;
       }
       if (peek().kind === "PUNCT" && peek().text === ";") consume();
@@ -9304,7 +9304,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       const startTok = consume();
       let label = null;
       const nextCont = peek();
-      if (nextCont.kind === "IDENT" && nextCont.line === startTok.line) {
+      if (nextCont.kind === "IDENT" && nextCont.span?.line != null && startTok.span?.line != null && nextCont.span.line === startTok.span.line) {
         label = consume().text;
       }
       if (peek().kind === "PUNCT" && peek().text === ";") consume();
