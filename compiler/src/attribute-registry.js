@@ -363,6 +363,11 @@ ELEMENT_ATTR_REGISTRY.set("column", {
     ["align",     attrSpec({ supportsInterpolation: false })],
     ["class",     attrSpec({ supportsInterpolation: false })],
     [":let",      attrSpec({ supportsInterpolation: false })],
+    // The tokenizer drops the leading `:` at attribute-start position, so the
+    // canonical `:let={(row) => ...}` reaches the validator as `let`. Recognize
+    // both so the consumed parametric-slot attribute does NOT fire a spurious
+    // W-ATTR-001 / leak to rendered HTML (Bug R28-2 / un-defer Bug 54).
+    ["let",       attrSpec({ supportsInterpolation: false })],
   ]),
 });
 

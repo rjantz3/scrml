@@ -10770,6 +10770,90 @@ function _ffGetAttrRawValue(
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// tableFor :let={(row) => <markup>} parametric-slot re-parse (Bug R28-2 /
+// un-defer Bug 54).
+//
+// The leading-colon :let attribute reaches the column walk as name "let"
+// (the tokenizer drops the leading colon at attribute-start position) carrying
+// an expr value whose raw text is the arrow (<param>) => <markup> per
+// SPEC 16.6. The arrow BODY markup is NOT parsed into AST by the attribute
+// pipeline (it is opaque expr text), so the slot body was previously lost and
+// the column fell through to default-render (W-ATTR-001 on let=).
+//
+// We re-parse the arrow body markup into slot-body AST nodes via the same
+// splitBlocks + buildAST machinery the component-expander uses for snippet-prop
+// lambdas (16.6). The returned nodes become the column slotBody; the lambda
+// head first ident becomes the row-binding name.
+// ---------------------------------------------------------------------------
+
+/** Lazy-loaded BS + TAB handles (avoid a static codegen <-> type-system cycle). */
+let _letReparseHandles: {
+  splitBlocks: (filePath: string, source: string) => unknown;
+  buildAST: (bs: unknown) => { ast?: { nodes?: unknown[] }; errors?: unknown[] };
+} | null = null;
+function _loadLetReparseHandles(): NonNullable<typeof _letReparseHandles> {
+  if (_letReparseHandles) return _letReparseHandles;
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const bsMod = require("./block-splitter.js") as { splitBlocks: (f: string, src: string) => unknown };
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const tabMod = require("./ast-builder.js") as { buildAST: (bs: unknown) => { ast?: { nodes?: unknown[] }; errors?: unknown[] } };
+  _letReparseHandles = { splitBlocks: bsMod.splitBlocks, buildAST: tabMod.buildAST };
+  return _letReparseHandles;
+}
+
+/**
+ * Parse a :let attribute (<param>) => <markup> arrow value into a row-binding
+ * name + re-parsed slot-body markup AST nodes.
+ *
+ * Returns null when the raw text is not an arrow-with-markup-body shape (the
+ * caller then falls back to the children-bearing slot form). Re-parse errors
+ * (other than the expected bare-fragment W-PROGRAM-001) yield null as well, so
+ * a malformed :let body degrades to default-render rather than crashing the
+ * compile.
+ */
+function _parseColumnLetArrow(
+  rawLet: string,
+  filePath: string,
+): { rowBindingName: string; slotBody: unknown[] } | null {
+  if (!rawLet || typeof rawLet !== "string") return null;
+  // Match (<param>) => <body> OR bare <param> => <body>. The body is the
+  // remaining text (which SHOULD be markup for a column slot).
+  const m = rawLet.match(/^\s*\(?\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\)?\s*=>\s*([\s\S]+)$/);
+  if (!m) return null;
+  const rowBindingName = m[1];
+  let body = m[2].trim();
+  // Strip a single wrapping brace block if the adopter wrote
+  // (row) => { <markup> } (rare; the canonical form is unbraced).
+  if (body.startsWith("{") && body.endsWith("}")) {
+    body = body.slice(1, -1).trim();
+  }
+  if (!body) return null;
+  // The body must look like markup (an angle-bracket element) for a column
+  // slot. A non-markup body is not a valid column slot per 41.16.3; fall back
+  // (caller default-renders) rather than re-parse a non-markup fragment.
+  if (!body.startsWith("<")) return null;
+  try {
+    const { splitBlocks, buildAST } = _loadLetReparseHandles();
+    const bs = splitBlocks(filePath + "#col-let", body);
+    const tab = buildAST(bs);
+    const nodes = (tab.ast?.nodes ?? []) as unknown[];
+    const markupNodes = nodes.filter(
+      (n) => n && typeof n === "object" && (n as { kind?: string }).kind === "markup",
+    );
+    // Real errors only (drop the expected bare-fragment W-PROGRAM-001 + any
+    // warning/info diagnostics, mirroring component-expander parseComponentBody).
+    const tabErrors = (tab.errors ?? []) as Array<{ code?: string; severity?: string }>;
+    const realErrors = tabErrors.filter(
+      (e) => e && e.severity !== "warning" && e.severity !== "info" && e.code !== "W-PROGRAM-001",
+    );
+    if (realErrors.length > 0 || markupNodes.length === 0) return null;
+    return { rowBindingName, slotBody: markupNodes };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Parse an array-literal attribute (`pick=["a", "b"]` or `omit=["c"]`) into
  * the list of bare field-name strings. Returns null on a non-array shape.
@@ -12064,18 +12148,32 @@ function _processTableForNode(
     const sortableAttr = _ffGetAttrRawValue(colAttrs, "sortable");
     const alignAttr = _ffGetAttrRawValue(colAttrs, "align");
     const classAttr = _ffGetAttrRawValue(colAttrs, "class");
-    const letAttr = _ffGetAttrRawValue(colAttrs, ":let");
+    // §41.16.3 / §16.6 — the `:let={(row) => <markup>}` parametric-slot form.
+    // The tokenizer drops the leading `:` at attribute-start position, so the
+    // attribute reaches us as name "let" (we also accept ":let" for forward-
+    // compat if the tokenizer is later taught to preserve the colon).
+    const letAttr = _ffGetAttrRawValue(colAttrs, ":let") ?? _ffGetAttrRawValue(colAttrs, "let");
 
-    // :let="(row) => ..." — extract binding name from the lambda head. v1.0
-    // syntax accepted: `(name) => ...` OR bare `name` (no parens). We pull the
-    // first ident from the value.
+    // Default row binding + (for the `:let` arrow form) the re-parsed slot body.
     let rowBindingName = "row";
+    let letSlotBody: unknown[] | null = null;
     if (letAttr && letAttr.rawValue) {
-      // Strip leading "(" if present; pull first ident.
-      let s = letAttr.rawValue.trim();
-      if (s.startsWith("(")) s = s.slice(1).trim();
-      const m = s.match(/^([A-Za-z_$][A-Za-z0-9_$]*)/);
-      if (m) rowBindingName = m[1];
+      // Prefer the full `(<param>) => <markup>` arrow form (§16.6): it carries
+      // BOTH the binding name AND the slot-body markup (which the attribute
+      // pipeline left as opaque expr text). Re-parse the arrow body into AST.
+      const parsedLet = _parseColumnLetArrow(letAttr.rawValue, span.file);
+      if (parsedLet) {
+        rowBindingName = parsedLet.rowBindingName;
+        letSlotBody = parsedLet.slotBody;
+      } else {
+        // No markup body (e.g. `:let={(row)}` head-only, or the children-bearing
+        // form supplies the body) — extract just the binding name. Strip a
+        // leading "(" if present; pull the first ident.
+        let s = letAttr.rawValue.trim();
+        if (s.startsWith("(")) s = s.slice(1).trim();
+        const m = s.match(/^([A-Za-z_$][A-Za-z0-9_$]*)/);
+        if (m) rowBindingName = m[1];
+      }
     }
     // Sortable is a boolean-flag attribute — present means true.
     const sortable = !!(sortableAttr && (
@@ -12091,7 +12189,10 @@ function _processTableForNode(
 
     columnOverrides.set(fieldName, {
       headerText: headerAttr?.rawValue || null,
-      slotBody: (colNode.children as unknown[] | undefined) ?? [],
+      // The `:let={(row) => <markup>}` arrow body (re-parsed above) takes
+      // precedence; otherwise the children-bearing `<column>...</column>` form
+      // supplies the slot body.
+      slotBody: letSlotBody ?? ((colNode.children as unknown[] | undefined) ?? []),
       rowBindingName,
       sortable,
       align,

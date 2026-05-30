@@ -304,24 +304,46 @@ function bareExprNode(raw: string, refs: string[], span: unknown): unknown {
 // applied to the slot body's bare-expr nodes + attribute expression text.
 // ---------------------------------------------------------------------------
 
+/** Escape a string for safe inclusion in a RegExp pattern. */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 /**
- * Rewrite `@.field` → `<rowVar>.field` and bare `@.` → `<rowVar>` in
- * expression text. Conservative regex — does not touch `@cell` (no dot)
- * or anything inside string literals beyond what the upstream tokenizer
- * already split out.
+ * Rewrite the per-row sigils inside a column slot body expression to the
+ * loop-local row variable. Two distinct rewrites:
+ *
+ *   1. The contextual iteration sigil (at-dot): at-dot field becomes
+ *      rowVar.field; bare at-dot becomes rowVar (Bug 32 / S137).
+ *   2. The explicit per-row reference (at-rowVar, e.g. at-row or at-row.status)
+ *      becomes the bare rowVar (Bug R28-2 / un-defer Bug 54).
+ *
+ * Why rewrite #2: the SPEC 41.16.3 row binding (row, or the adopter-chosen
+ * :let name) is a plain loop local inside the synth for-loop body, NOT a
+ * reactive cell. An adopter writing the at-row.status form would otherwise
+ * lower to _scrml_reactive_get("row").status (a nonexistent cell). Stripping
+ * the leading at from the EXACT row-binding name resolves it to the loop
+ * local, matching the plain row.status form. A genuine at-cell reference (any
+ * ident other than the row binding) is left untouched.
+ *
+ * Conservative regex pass. The BS tokenizer space-pads dot operators; the
+ * regexes tolerate the space-around-dot form (mirrors emit-each.ts dot
+ * normalization + the Bug 35 rewriteIsPredicates tolerance pattern).
  */
 function rewriteAtDotInExprText(text: string, rowVar: string): string {
   if (!text || typeof text !== "string") return text;
-  // The BS tokenizer space-pads `.` operators (`@.status` → `@ . status`) for
-  // expression readability. Normalize space-around-dot before applying the
-  // sigil rewrite — mirrors emit-each.ts line 259 `.replace(/\s*\.\s*/g, ".")`
-  // and the Bug 35 rewriteIsPredicates regex tolerance pattern.
-  //
-  // We rewrite both `@<ws>.<ws>field` and `@.field` forms. Member-name
-  // matching is greedy; bare `@.` (no member name) becomes the bare rowVar.
-  return text
+  // 1. at-dot field -> rowVar.field; bare at-dot -> rowVar. Member-name match
+  //    is greedy; bare at-dot (no member name) becomes the bare rowVar.
+  let out = text
     .replace(/@\s*\.\s*([A-Za-z_$][A-Za-z0-9_$]*)/g, (_m, member) => `${rowVar}.${member}`)
     .replace(/@\s*\.\s*(?![A-Za-z_$])/g, rowVar);
+  // 2. Explicit at-rowVar -> rowVar (Bug R28-2 / Bug 54). Only the EXACT
+  //    row-binding name is stripped; the trailing-ident negative lookahead
+  //    ensures at-rowItem (a different cell) is NOT matched when rowVar is
+  //    "row". The .field member tail (if any) is preserved by the boundary.
+  const rowVarRe = new RegExp(`@(${escapeRegExp(rowVar)})(?![A-Za-z0-9_$])`, "g");
+  out = out.replace(rowVarRe, "$1");
+  return out;
 }
 
 /**

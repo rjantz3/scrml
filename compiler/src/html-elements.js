@@ -736,6 +736,9 @@ REGISTRY.set("column", {
     ["sortable",  attr("boolean")],        // optional flag
     ["align",     attr("string")],         // optional "left"|"right"|"center"
     [":let",      attr("string")],         // optional row-binding lambda
+    // Tokenizer strips the leading `:`; the canonical `:let={...}` arrives as
+    // `let` (Bug R28-2 / un-defer Bug 54). Recognize both forms.
+    ["let",       attr("string")],
   ]),
   isVoid: false,
   rendersToDom: false,
