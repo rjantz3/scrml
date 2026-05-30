@@ -879,6 +879,47 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         }
       }
     } else {
+      // S144 Cluster D (Bug AA) — W-MATCH-VALUE-UNUSED.
+      // This else-branch is the PLAIN-`function` path: fnKind !== "fn" AND no
+      // return-type annotation (the `fn`/return-typed path is handled above via
+      // emitFnShortcutBody). A plain `function` has NO implicit return (§48.11 /
+      // §7.3); scheduleStatements emits each statement with no implicit return.
+      // When the LAST statement is a value-producing `match` written WITHOUT a
+      // `return`, codegen lowers it to `(function(){...returns...})()` and then
+      // throws the IIFE value away — the function silently falls through to
+      // `undefined` with no diagnostic. That fall-through is spec-correct, but
+      // the discarded value is almost always a mistake. Surface it as a warning.
+      //
+      // Guardrails (must NOT warn):
+      //   - `return match` -> last stmt is `return-stmt`, not `match-stmt`.
+      //   - `fn` / return-typed `function` -> never reach this else-branch.
+      //   - side-effect-only match (all arms are `match-arm-block` statement
+      //     blocks) -> not value-producing; no value is discarded.
+      //   - a match that is not the last statement -> only the tail is checked.
+      const _lastStmt = body.length > 0 ? body[body.length - 1] : null;
+      if (_lastStmt && (_lastStmt as ASTNode).kind === "match-stmt") {
+        const _matchArms = ((_lastStmt as { body?: ASTNode[] }).body ?? []) as ASTNode[];
+        // Value-producing iff at least one arm is an inline arm carrying a
+        // non-empty value `result`. Block-bodied arms produce no value.
+        const _producesValue = _matchArms.some(a =>
+          a && (a as ASTNode).kind === "match-arm-inline" &&
+          typeof (a as { result?: unknown }).result === "string" &&
+          ((a as { result?: string }).result as string).trim().length > 0,
+        );
+        if (_producesValue) {
+          const _warnSpan = ((fnNode.span as ASTNode) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as Parameters<typeof CGError>[2];
+          errors.push(new CGError(
+            "W-MATCH-VALUE-UNUSED",
+            `W-MATCH-VALUE-UNUSED: the last statement of plain \`function ${name}\` is a \`match\` ` +
+            `that produces a value, but the value is not returned and is discarded — a plain ` +
+            `\`function\` has no implicit return (§48.11), so the function falls through to ` +
+            `\`undefined\`. Add \`return\` before the \`match\`, or declare \`fn ${name}\` / a ` +
+            `return-typed \`function\` (both carry tail-expression implicit return).`,
+            _warnSpan,
+            "warning",
+          ));
+        }
+      }
       // S89 §13.2 Sub-Phase B Step 3 — thread calleeMap + exportRegistry so
       // the auto-await classifier inside scheduleStatements covers stdlib
       // Promise<T> callees alongside server functions.

@@ -8528,6 +8528,38 @@ function checkMatchDiagnostics(
   const span = (node.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
   const extracted = extractArmsFromMatchNode(node);
 
+  // S144 Cluster D (Bug Y) — stray comma arm-separator (E-MATCH-ARM-SEPARATOR).
+  // §18.2 grammar is `match-arm+`: arms are juxtaposed (one per line), with NO
+  // comma separator — the only arm separator is the `=>`/`->` arrow within an
+  // arm. When source writes `.A => x, .B => y`, the AST builder folds the stray
+  // trailing `,` INTO the first arm's `result` (`match-arm-inline.result` ends
+  // `"x" ,`, resultExpr.kind === "escape-hatch"). Detect it here at the typer
+  // layer (covers BOTH the markup `${match}` path AND the `let/const = match`
+  // decl path with ONE detection) and fire a clean, source-anchored error that
+  // REPLACES the generic E-CODEGEN-INVALID-JS the comma would otherwise surface
+  // from codegen (codegen separately sanitizes the comma so the emitted JS still
+  // parses — see emit-control-flow.ts:matchArmInlineToMatchArm). We reject the
+  // comma rather than widen the grammar: one canonical separator (cohesion).
+  {
+    const armBody = (node as { body?: ASTNodeLike[] }).body ?? [];
+    for (const arm of armBody) {
+      if (!arm || typeof arm !== "object") continue;
+      if ((arm as ASTNodeLike).kind !== "match-arm-inline") continue;
+      const result = (arm as { result?: unknown }).result;
+      if (typeof result !== "string") continue;
+      // A legitimate arm result never ends with a bare top-level trailing comma.
+      if (!/,\s*$/.test(result)) continue;
+      const armSpan = ((arm as { span?: Span }).span ?? span) as Span;
+      const test = String((arm as { test?: unknown }).test ?? "").trim().slice(0, 40);
+      errors.push(new TSError(
+        "E-MATCH-ARM-SEPARATOR",
+        "E-MATCH-ARM-SEPARATOR: `match` arm `" + test + " => …` is followed by a `,`. " +
+        "Match arms are separated by newlines, not commas (§18.2) — there is no comma separator " +
+        "between arms. Remove the trailing `,` and place each arm on its own line.",
+        armSpan,
+      ));
+    }
+  }
 
   for (const guard of extracted.guardArms) {
     const trimmed = guard.armText.trim().slice(0, 60).replace(/\s+/g, " ");

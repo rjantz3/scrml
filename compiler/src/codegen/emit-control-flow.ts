@@ -1014,7 +1014,16 @@ export function parseMatchArm(rawTrimmed: string): MatchArm | null {
  */
 export function matchArmInlineToMatchArm(node: any): MatchArm | null {
   const test: string = node.test ?? "";
-  const result: string = node.result ?? "";
+  // S144 Cluster D (Bug Y) — strip a stray trailing comma arm-separator.
+  // §18.2 has NO comma separator between arms; when source writes `.A => x,`
+  // the AST builder folds the `,` into this arm's `result` (`"x" ,`). Left
+  // intact it emits invalid JS (`return "x" ,;`) which the validate-emit gate
+  // reports as the GENERIC E-CODEGEN-INVALID-JS. The typer already fires the
+  // clean source-anchored E-MATCH-ARM-SEPARATOR (type-system.ts) — that error
+  // is what fails the build. Here we only sanitize so the never-meant-to-ship
+  // emitted JS still PARSES, leaving E-MATCH-ARM-SEPARATOR as the sole
+  // diagnostic the developer sees (no duplicate generic invalid-JS report).
+  const result: string = String(node.result ?? "").replace(/,\s*$/, "");
   const binding: string | null = node.binding ?? null;
 
   // Determine arm kind from test pattern
