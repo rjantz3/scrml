@@ -1260,3 +1260,151 @@ describe("brace-in-string bug fix (BS-BRACE-IN-STRING)", () => {
     expect(result.blocks[0].raw).toBe(src);
   });
 });
+
+// ---------------------------------------------------------------------------
+// S144 Bug X (6nz, HIGH) — `//` inside a string literal must NOT be treated as
+// a line comment inside a brace context. Pre-fix, the `//` in e.g.
+// "https://example.com" was mis-read as a line comment, eating the rest of the
+// line (incl. closing braces) → spurious E-CTX-003 "Unclosed logic/program".
+// The comment scanner must be string-literal-aware (and block-comment-aware so
+// apostrophes in `/* */` prose are not mis-read as string openers either),
+// while a REAL `//` comment OUTSIDE a string is still stripped.
+// ---------------------------------------------------------------------------
+describe("S144 Bug X — `//` inside string literal is content, not a comment", () => {
+  test("https:// URL in a double-quoted string does not break the logic block", () => {
+    const r = splitBlocks("test.scrml", '${ <url> = "https://example.com/docs" }');
+    expect(r.errors).toHaveLength(0);
+    expect(r.blocks).toHaveLength(1);
+    expect(r.blocks[0].type).toBe("logic");
+    // The whole logic block raw is preserved including the URL.
+    expect(r.blocks[0].raw).toBe('${ <url> = "https://example.com/docs" }');
+  });
+
+  test("http:// URL in a single-quoted string does not break the logic block", () => {
+    const r = splitBlocks("test.scrml", "${ const u = 'http://example.com' }");
+    expect(r.errors).toHaveLength(0);
+    expect(r.blocks).toHaveLength(1);
+    expect(r.blocks[0].type).toBe("logic");
+  });
+
+  test("bare ` // ` mid-string with a following object-literal brace stays balanced", () => {
+    const src = '${ function make() { const x = { id: 1, note: "see // here" }; return x.note } }';
+    const r = splitBlocks("test.scrml", src);
+    expect(r.errors).toHaveLength(0);
+    expect(r.blocks).toHaveLength(1);
+    expect(r.blocks[0].type).toBe("logic");
+    expect(r.blocks[0].raw).toBe(src);
+  });
+
+  test("trailing `//` at end of a string is content, not a comment", () => {
+    const r = splitBlocks("test.scrml", '${ const s = "ends with //" }');
+    expect(r.errors).toHaveLength(0);
+    expect(r.blocks).toHaveLength(1);
+    expect(r.blocks[0].type).toBe("logic");
+  });
+
+  test("`//` inside a string in a ${...} markup interpolation does not break it", () => {
+    const r = splitBlocks("test.scrml", '<div>${ "https://x.io" }</div>');
+    expect(r.errors).toHaveLength(0);
+    expect(r.blocks).toHaveLength(1);
+    expect(r.blocks[0].type).toBe("markup");
+    expect(r.blocks[0].name).toBe("div");
+    // The logic child carries the string verbatim.
+    const logic = r.blocks[0].children.find((c) => c.type === "logic");
+    expect(logic).toBeDefined();
+    expect(logic.raw).toContain("https://x.io");
+  });
+
+  test("escaped quote inside a string does not end the string early (then `//` is content)", () => {
+    // The \" must not close the string; the // after it is still inside the string.
+    const src = '${ const s = "a \\" b // still in string" }';
+    const r = splitBlocks("test.scrml", src);
+    expect(r.errors).toHaveLength(0);
+    expect(r.blocks).toHaveLength(1);
+    expect(r.blocks[0].type).toBe("logic");
+  });
+
+  test("REGRESSION GUARD: a real `//` comment OUTSIDE a string is still stripped", () => {
+    // Inside a brace context, `// not a close` on its own (no surrounding string)
+    // is still a comment — block stays "logic" and the trailing `}` still closes it.
+    const r = splitBlocks("test.scrml", "${ // not a close\nlet x = 1; }");
+    expect(r.errors).toHaveLength(0);
+    expect(r.blocks).toHaveLength(1);
+    expect(r.blocks[0].type).toBe("logic");
+  });
+
+  test("REGRESSION GUARD: `//` comment containing a quote still strips the whole line", () => {
+    // The apostrophe inside the comment must NOT start a string (S109/Bug 2 hazard).
+    const r = splitBlocks("test.scrml", "${ // it's a comment with a \" quote\nlet x = 1 }");
+    expect(r.errors).toHaveLength(0);
+    expect(r.blocks).toHaveLength(1);
+    expect(r.blocks[0].type).toBe("logic");
+  });
+
+  test("REGRESSION GUARD: apostrophe inside a `/* */` block comment is not a string opener", () => {
+    // Mirrors the stdlib/host/index.scrml JSDoc shape (`the thunk's Promise`).
+    const r = splitBlocks("test.scrml", "${\n  /* the thunk's Promise value */\n  function f() { return 1 }\n}");
+    expect(r.errors).toHaveLength(0);
+    expect(r.blocks).toHaveLength(1);
+    expect(r.blocks[0].type).toBe("logic");
+  });
+
+  test("`/* */` block comment INSIDE a string is preserved as content (not consumed as a comment)", () => {
+    // Regression-guard for the brief's note: `/* */` inside a string never triggered
+    // the bug; ensure the new block-comment skip does not over-reach into strings.
+    const src = '${ const s = "has /* not a comment */ inside" }';
+    const r = splitBlocks("test.scrml", src);
+    expect(r.errors).toHaveLength(0);
+    expect(r.blocks).toHaveLength(1);
+    expect(r.blocks[0].type).toBe("logic");
+    expect(r.blocks[0].raw).toBe(src);
+  });
+
+  test("REGEX SAFETY: regex literal with quotes followed by a REAL // comment stays logic", () => {
+    // /"[^"]*"/g contains quote chars that are NOT string delimiters; the trailing
+    // `// strip strings` IS a real comment. Must not be eaten as in-string content,
+    // and the block must still close (line-scoped, regex-tolerant heuristic).
+    const r = splitBlocks("test.scrml", '${ s.replace(/"[^"]*"/g, "") // strip strings\nreturn s }');
+    expect(r.errors).toHaveLength(0);
+    expect(r.blocks).toHaveLength(1);
+    expect(r.blocks[0].type).toBe("logic");
+  });
+
+  test("REGEX SAFETY: matches the stdlib meta-checker normalizeExpr regex chain shape", () => {
+    // Mirrors stdlib/compiler/meta-checker.scrml lines ~231-235 (the regression that
+    // caught the over-eager full-string-skip approach during S144 development).
+    // Built char-by-char to avoid quote/backslash escaping headaches in the test.
+    const DQ = String.fromCharCode(34); // "
+    const SQ = String.fromCharCode(39); // '
+    const BT = String.fromCharCode(96); // `
+    const lines = [
+      "${",
+      "  let s = expr.replace(/" + BT + "[^" + BT + "]*" + BT + "/g, " + DQ + DQ + ")",
+      "    .replace(/" + DQ + "[^" + DQ + "]*" + DQ + "/g, " + DQ + DQ + ")           // double-quoted strings",
+      "    .replace(/" + SQ + "[^" + SQ + "]*" + SQ + "/g, " + DQ + DQ + ")           // single-quoted strings",
+      "  return s",
+      "}",
+    ];
+    const src = lines.join("\n");
+    const r = splitBlocks("test.scrml", src);
+    expect(r.errors).toHaveLength(0);
+    expect(r.blocks).toHaveLength(1);
+    expect(r.blocks[0].type).toBe("logic");
+  });
+
+  test("full Bug X reproducer shape (program + url decl + fn with mid-string //) splits cleanly", () => {
+    const src = [
+      "<program>",
+      "${",
+      '  <url> = "https://example.com/docs"',
+      '  function make() { const x = { id: 1, note: "see // here" }; return x.note }',
+      "}",
+      "<div>${@url} — ${make()}</div>",
+      "</program>",
+    ].join("\n");
+    const r = splitBlocks("test.scrml", src);
+    expect(r.errors).toHaveLength(0);
+    const program = r.blocks.find((b) => b.type === "markup" && b.name === "program");
+    expect(program).toBeDefined();
+  });
+});

@@ -317,6 +317,51 @@ function skipLineComment(source, startPos) {
 }
 
 /**
+ * S144 Bug X (6nz, HIGH) — decide whether the `//` at `slashPos` falls INSIDE
+ * a `"..."` or `'...'` string literal on its current source line.
+ *
+ * The block-splitter cannot afford full JS string-state tracking (regex
+ * literals, template interpolation, etc. — see the §4.6 note in the main
+ * loop), so this check is deliberately LINE-SCOPED and narrow: it rescans the
+ * current physical line from its start up to `slashPos`, tracking double- and
+ * single-quote parity with backslash-escape handling. If a quote of either
+ * kind is still open at `slashPos`, the `//` is string content (NOT a
+ * comment). This fixes the everyday `"https://..."` / bare-` // `-in-string
+ * case without the over-reach of full string skipping (which mis-reads a
+ * quote inside a regex like the double-quote class, or apostrophes in
+ * block-comment prose).
+ *
+ * Returns the open quote char (`"`/`'`) if inside a string at `slashPos`, else
+ * null. Caller is responsible for only invoking this in brace-delimited
+ * contexts (where string literals are a real concept).
+ */
+function openStringQuoteAt(source, slashPos) {
+  // Find the start of the current physical line.
+  let lineStart = slashPos;
+  while (lineStart > 0 && source[lineStart - 1] !== "\n") lineStart--;
+  let inDouble = false;
+  let inSingle = false;
+  for (let i = lineStart; i < slashPos; i++) {
+    const ch = source[i];
+    if (inDouble) {
+      if (ch === "\\") { i++; continue; }
+      if (ch === '"') inDouble = false;
+      continue;
+    }
+    if (inSingle) {
+      if (ch === "\\") { i++; continue; }
+      if (ch === "'") inSingle = false;
+      continue;
+    }
+    if (ch === '"') { inDouble = true; continue; }
+    if (ch === "'") { inSingle = true; continue; }
+  }
+  if (inDouble) return '"';
+  if (inSingle) return "'";
+  return null;
+}
+
+/**
  * Skip past a `/* ... *\/` block comment starting at `startPos` (the first
  * `/`). Returns position immediately after the closing `*\/`.
  */
@@ -1665,6 +1710,32 @@ export function splitBlocks(filePath, source) {
     // distinct because the lift pass expects ONE TEXT BLOCK.
     // -----------------------------------------------------------------------
     if (c === "/" && ch(1) === "/" && !inDoubleQuote && !inSingleQuote && !(orphanBraceDepth > 0 && !topIsBraceContext())) {
+      // S144 Bug X (6nz, HIGH): inside a brace-delimited context, a `//` that
+      // falls INSIDE a `"..."` / `'...'` string literal on the current line is
+      // string CONTENT, not a line comment. Pre-S144 it was mis-read as a
+      // comment, eating the rest of the line — incl. a trailing object-literal
+      // `}` — and unwinding brace/context depth → spurious E-CTX-003 'Unclosed
+      // logic/program' (e.g. the `//` in `"https://example.com"`). The
+      // top-level inDoubleQuote/inSingleQuote flags are dead (S109/Bug 2 retired
+      // markup-text string tracking), so we use a line-scoped, regex-safe check
+      // (openStringQuoteAt) rather than full string-state tracking. When inside
+      // a string we consume up to the matching close quote as raw content and
+      // resume normal scanning — the `}` after the string is then seen normally.
+      if (topIsBraceContext()) {
+        const openQ = openStringQuoteAt(source, curPos);
+        if (openQ) {
+          beginText();
+          step(); step(); // consume the `//` as string content
+          while (pos < len) {
+            const sc = source[pos];
+            if (sc === "\\" && pos + 1 < len) { step(); step(); continue; }
+            if (sc === openQ) { step(); break; } // consume the closing quote
+            if (sc === "\n") break; // unterminated on this line — stop, recover
+            step();
+          }
+          continue;
+        }
+      }
       flushText();
       const commentStart = curPos;
       const commentStartLine = curLine;
