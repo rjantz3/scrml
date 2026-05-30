@@ -831,6 +831,25 @@ export function generateServerJs(
       lines.push(`    lastEventId: _scrml_req.headers.get('Last-Event-ID') ?? null,`);
       lines.push(`  };`);
 
+      // GITI-025 (giti inbound 2026-05-30): bind each `server function*`
+      // parameter from `route.query`. The client EventSource stub
+      // (emit-functions.ts SSE branch) encodes call args into the URL query
+      // string using the param name verbatim (`?from=5`); here the handler
+      // reads them back so the generator body's free references (e.g. `from`
+      // in `for (let i = from; ...)`) resolve. Without this, the param is an
+      // unbound identifier → ReferenceError → swallowed by the stream catch →
+      // silent EMPTY stream. Query values arrive as STRINGS; emit a coercion
+      // that recovers numbers/booleans while preserving genuine strings, so
+      // `countdown(5)` counts numerically (§37.4 / §37.11 worked example).
+      // Mirrors the non-SSE path's `const X = _scrml_body[...]` binding, but
+      // sourced from `route.query` (SSE is a GET stream — no JSON body).
+      for (const _pName of fnParamNames) {
+        // Absence is canonical JS `null` per SPEC §42.5/§42.8 (W-CG-UNDEFINED-
+        // INTERPOLATION). The `=== null || === undefined` presence check is the
+        // exempt paired form (route.query[k] is `undefined` for an absent key).
+        lines.push(`  const ${_pName} = (() => { const _v = route.query[${JSON.stringify(_pName)}]; if (_v === null || _v === undefined) return null; if (_v === 'true') return true; if (_v === 'false') return false; if (_v !== '' && !Number.isNaN(Number(_v))) return Number(_v); return _v; })();`);
+      }
+
       if (authMiddlewareEntry) {
         lines.push(`  // Auth check for SSE endpoint (compiler-generated)`);
         lines.push(`  const _scrml_authResult = _scrml_auth_check(_scrml_req);`);

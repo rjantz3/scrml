@@ -1517,6 +1517,129 @@ export function generateClientJs(ctx: CompileContext): string {
       clientCode = parts.join("");
     }
     });
+
+    // GITI-026 (giti inbound 2026-05-30): SSE reactive binding `@cell = gen()`.
+    // The naive emit is `_scrml_reactive_set("cell", _scrml_sse_X(args))` plus a
+    // `_scrml_init_set("cell", () => _scrml_sse_X(args))` reset thunk — both of
+    // which STORE the returned EventSource object in the cell and pass NO
+    // message callback, so stream events never reach the cell (it is forever
+    // the EventSource). The fetch await-IIFE wrap above is WRONG for streams
+    // (an EventSource is not awaitable and produces many values over time).
+    // Instead: seed the cell to absence and SUBSCRIBE via the stub's trailing
+    // message callback, routing every event to `_scrml_reactive_set`.
+    //   reactive_set(N, sse_X(args))      -> reactive_set(N, undefined);
+    //                                         sse_X(args, d => reactive_set(N, d));
+    //   init_set(N, () => sse_X(args))    -> init_set(N, () => {
+    //                                          sse_X(args, d => reactive_set(N, d));
+    //                                          return null; });
+    // (null is the canonical JS absence representation — §42.5/§42.8; the render
+    // path treats null/undefined identically as `not`.)
+    clientStage(ctx, "post-sse-reactive-bind", () => {
+    for (const [, mangledName] of fnNameMap) {
+      if (!/^_scrml_sse_/.test(mangledName)) continue;
+      const callPrefix = `${mangledName}(`;
+
+      // Generic walker: find `<setHead>"NAME", <valuePrefix><callPrefix>ARGS)<tail>`
+      // and rebuild it via `build(nameArg, args)`. setHead/valuePrefix/tail let
+      // us share the paren-matching logic between the reactive_set and init_set
+      // forms.
+      const rewriteForm = (
+        setHead: string,
+        valuePrefix: string,
+        build: (nameArg: string, args: string) => string,
+      ): void => {
+        let i = 0;
+        const out: string[] = [];
+        while (i < clientCode.length) {
+          const setIdx = clientCode.indexOf(setHead, i);
+          if (setIdx < 0) { out.push(clientCode.slice(i)); break; }
+          // Find the comma separating NAME from the value (depth-aware).
+          let depth = 1;
+          let j = setIdx + setHead.length;
+          while (j < clientCode.length && depth > 0) {
+            if (clientCode[j] === "," && depth === 1) break;
+            if (clientCode[j] === "(") depth++;
+            else if (clientCode[j] === ")") depth--;
+            j++;
+          }
+          if (j >= clientCode.length || clientCode[j] !== ",") {
+            out.push(clientCode.slice(i, setIdx + setHead.length));
+            i = setIdx + setHead.length;
+            continue;
+          }
+          const nameArg = clientCode.slice(setIdx + setHead.length, j);
+          let valStart = j + 1;
+          while (valStart < clientCode.length && /\s/.test(clientCode[valStart])) valStart++;
+          // Value must begin with the (optional) prefix then the sse-stub call.
+          if (clientCode.slice(valStart, valStart + valuePrefix.length) !== valuePrefix) {
+            out.push(clientCode.slice(i, setIdx + setHead.length));
+            i = setIdx + setHead.length;
+            continue;
+          }
+          let callStart = valStart + valuePrefix.length;
+          while (callStart < clientCode.length && /\s/.test(clientCode[callStart])) callStart++;
+          if (clientCode.slice(callStart, callStart + callPrefix.length) !== callPrefix) {
+            out.push(clientCode.slice(i, setIdx + setHead.length));
+            i = setIdx + setHead.length;
+            continue;
+          }
+          // Walk the stub call args to its matching `)`.
+          let cdepth = 1;
+          let k = callStart + callPrefix.length;
+          while (k < clientCode.length && cdepth > 0) {
+            if (clientCode[k] === "(") cdepth++;
+            else if (clientCode[k] === ")") cdepth--;
+            if (cdepth === 0) break;
+            k++;
+          }
+          if (k >= clientCode.length) {
+            out.push(clientCode.slice(i, setIdx + setHead.length));
+            i = setIdx + setHead.length;
+            continue;
+          }
+          // After the stub-call close, consume the rest of the outer set call
+          // (the closing `)` of reactive_set/init_set, plus — for init_set — the
+          // arrow-body close) and the trailing `;`.
+          let outerClose = k + 1;
+          // valuePrefix carries any `() => ` arrow head; the arrow body here is a
+          // single expression, so the next non-space char is the outer `)`.
+          while (outerClose < clientCode.length && /\s/.test(clientCode[outerClose])) outerClose++;
+          if (clientCode[outerClose] !== ")") {
+            out.push(clientCode.slice(i, setIdx + setHead.length));
+            i = setIdx + setHead.length;
+            continue;
+          }
+          let stmtEnd = outerClose + 1;
+          if (clientCode[stmtEnd] === ";") stmtEnd++;
+          const args = clientCode.slice(callStart + callPrefix.length, k);
+          out.push(clientCode.slice(i, setIdx));
+          out.push(build(nameArg, args));
+          i = stmtEnd;
+        }
+        clientCode = out.join("");
+      };
+
+      const subscribe = (nameArg: string, args: string): string => {
+        const callArgs = args.trim().length > 0
+          ? `${args}, (_scrml_d) => _scrml_reactive_set(${nameArg}, _scrml_d)`
+          : `(_scrml_d) => _scrml_reactive_set(${nameArg}, _scrml_d)`;
+        return `${mangledName}(${callArgs})`;
+      };
+
+      // Form 1: the init-time `_scrml_reactive_set("N", sse_X(args));`. Seed the
+      // cell to absence — canonical JS `null` per SPEC §42.5/§42.8 (the runtime
+      // treats null/undefined identically; `null` avoids W-CG-UNDEFINED-INTERP).
+      rewriteForm("_scrml_reactive_set(", "", (nameArg, args) =>
+        `_scrml_reactive_set(${nameArg}, null);\n${subscribe(nameArg, args)};`,
+      );
+      // Form 2: the reset thunk `_scrml_init_set("N", () => sse_X(args));` —
+      // re-subscribe (side-effect) and return absence (null) so reset re-seeds
+      // the cell rather than storing the EventSource object.
+      rewriteForm("_scrml_init_set(", "() =>", (nameArg, args) =>
+        `_scrml_init_set(${nameArg}, () => { ${subscribe(nameArg, args)}; return null; });`,
+      );
+    }
+    });
   }
 
   // GITI-003 (giti inbound 2026-04-20): prune imports that are only used by

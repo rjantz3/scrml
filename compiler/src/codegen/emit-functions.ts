@@ -54,6 +54,51 @@ function emitClientParamChecks(
   return out;
 }
 
+/**
+ * GITI-026 — static collector for §37.4.2 named-event names yielded by a
+ * `server function*` generator. Walks the function node looking for
+ * `yield <objectLiteral>` where the object literal has a `props` entry with
+ * key `"event"` and a STRING-LITERAL value. Returns the de-duplicated set of
+ * such literal event names.
+ *
+ * The client SSE stub registers an `addEventListener("<name>", …)` for each
+ * collected name so that named SSE frames (which the browser does NOT deliver
+ * to `onmessage`) still reach the bound reactive cell. Dynamic / non-literal
+ * event names cannot be statically determined and are not wired — that is the
+ * documented facet limitation (the bare-yield `onmessage` path is unaffected).
+ */
+function collectSSEEventNames(fnNode: ASTNode): string[] {
+  const names = new Set<string>();
+  const seen = new WeakSet<object>();
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    if (seen.has(node as object)) return;
+    seen.add(node as object);
+    const n = node as Record<string, unknown>;
+    const kind = (n.kind ?? n.type) as string | undefined;
+    if (kind === "yield-stmt" || kind === "yield") {
+      const exprNode = n.exprNode as Record<string, unknown> | undefined;
+      if (exprNode && (exprNode.kind === "object") && Array.isArray(exprNode.props)) {
+        for (const prop of exprNode.props as Array<Record<string, unknown>>) {
+          if (prop && prop.kind === "prop" && prop.key === "event" && prop.computed !== true) {
+            const val = prop.value as Record<string, unknown> | undefined;
+            if (val && val.kind === "lit" && val.litType === "string" && typeof val.value === "string") {
+              names.add(val.value as string);
+            }
+          }
+        }
+      }
+    }
+    for (const key in n) {
+      const v = n[key];
+      if (Array.isArray(v)) for (const c of v) visit(c);
+      else if (v && typeof v === "object") visit(v);
+    }
+  };
+  visit(fnNode);
+  return [...names];
+}
+
 /** A loosely-typed AST node from the pipeline. */
 type ASTNode = Record<string, unknown>;
 
@@ -456,14 +501,67 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       serverFnStubs.set(name, sseStubName);
       fnNameMap.set(name, sseStubName);
 
-      lines.push(`function ${sseStubName}(_scrml_onMessage, _scrml_onEvent) {`);
-      lines.push(`  const _scrml_es = new EventSource(${JSON.stringify(path)});`);
+      // GITI-025 (giti inbound 2026-05-30) — client half. The SSE stub used to
+      // hard-wire its signature to `(_scrml_onMessage, _scrml_onEvent)` and open
+      // a query-less EventSource, so a call like `countdown(5)` dropped its arg
+      // into the onMessage slot and the server never received `from`. Compute
+      // the function's declared param names (same :Type-stripping as the non-SSE
+      // path's `paramName()`), make them the LEADING stub parameters, and encode
+      // them into the EventSource URL query string. The query KEY names are the
+      // param names verbatim so they line up with the server handler's
+      // `route.query[<name>]` reads (emit-server.ts SSE branch).
+      const sseParams = (fnNode.params as Param[]) ?? [];
+      const sseParamNames = sseParams.map((p: Param, i: number) => paramName(p, i));
+
+      // GITI-026 (giti inbound 2026-05-30) — named-event facet. A generator
+      // yielding the §37.4.2 `{ event, data }` named form emits `event:<name>`
+      // SSE frames, which a browser delivers ONLY to
+      // `addEventListener("<name>", …)` — never to `onmessage`. Statically
+      // collect the literal event names yielded in this generator's body so we
+      // can register a listener for each. (Dynamic / non-literal event names are
+      // not statically determinable; those frames are not wired — reported as a
+      // known facet limitation.)
+      const sseEventNames = collectSSEEventNames(fnNode);
+
+      // §37.10: callback FIRST in the user-visible contract, but the GITI-026
+      // call-site rewrite (emit-client.ts) appends the per-event callback AFTER
+      // the user's positional args. Keep params leading, callback trailing.
+      const sseSig = [...sseParamNames, "_scrml_onMessage"].join(", ");
+      lines.push(`function ${sseStubName}(${sseSig}) {`);
+      if (sseParamNames.length > 0) {
+        // Build the query string from the bound params. Skip `undefined` args so
+        // an unsupplied optional param doesn't serialize as the string
+        // "undefined" on the server side.
+        lines.push(`  const _scrml_qs = new URLSearchParams();`);
+        for (const _pn of sseParamNames) {
+          // Skip absent args (paired null/undefined check — the lint-exempt form
+        // per §42.5/§42.8) so an unsupplied optional param isn't serialized as
+        // the string "undefined"/"null" on the wire.
+        lines.push(`  if (${_pn} !== null && ${_pn} !== undefined) _scrml_qs.set(${JSON.stringify(_pn)}, String(${_pn}));`);
+        }
+        lines.push(`  const _scrml_q = _scrml_qs.toString();`);
+        lines.push(`  const _scrml_es = new EventSource(${JSON.stringify(path)} + (_scrml_q ? '?' + _scrml_q : ''));`);
+      } else {
+        lines.push(`  const _scrml_es = new EventSource(${JSON.stringify(path)});`);
+      }
       lines.push(`  _scrml_es.onmessage = function(_scrml_e) {`);
       lines.push(`    try {`);
       lines.push(`      const _scrml_data = JSON.parse(_scrml_e.data);`);
       lines.push(`      if (typeof _scrml_onMessage === 'function') _scrml_onMessage(_scrml_data);`);
       lines.push(`    } catch (_scrml_err) { /* malformed SSE data */ }`);
       lines.push(`  };`);
+      // GITI-026: named-event listeners (§37.4.2). Each statically-known event
+      // name gets its own addEventListener routing parsed `data` to the same
+      // callback as bare yields, so a reactive cell bound to the stream updates
+      // for both unnamed and named frames.
+      for (const _evName of sseEventNames) {
+        lines.push(`  _scrml_es.addEventListener(${JSON.stringify(_evName)}, function(_scrml_e) {`);
+        lines.push(`    try {`);
+        lines.push(`      const _scrml_data = JSON.parse(_scrml_e.data);`);
+        lines.push(`      if (typeof _scrml_onMessage === 'function') _scrml_onMessage(_scrml_data);`);
+        lines.push(`    } catch (_scrml_err) { /* malformed SSE data */ }`);
+        lines.push(`  });`);
+      }
       lines.push(`  _scrml_es.onerror = function() { /* EventSource auto-reconnects */ };`);
       lines.push(`  // Auto-cleanup: close EventSource when scope is destroyed (§36.5)`);
       lines.push(`  if (typeof _scrml_cleanup_register === 'function') {`);
