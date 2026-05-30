@@ -274,6 +274,18 @@ export interface RoleEnum {
  *     (`crossRefRedirects`). Per OQ-1 two-tier severity ratification
  *     (03-contact-book-auth-redirect-SCOPING §5).
  *
+ *   - `W-AUTH-CONTENT-NOT-GATED` — WARNING-level (security footgun): an
+ *     `<auth role="X">` element is present in the compilation. The gate
+ *     controls only JS mount/behavior (and only under --emit-per-route),
+ *     NOT served HTML content — the gated markup is emitted verbatim into
+ *     the HTML payload and is visible to ALL viewers regardless of role.
+ *     The warning fires once per `<auth role=>` site (anchored at the gate
+ *     span) so authors do not mistake the gate for content secrecy. The
+ *     message is honest in BOTH modes: --emit-per-route does NOT fix the
+ *     content leak (it only role-splits JS behavior). Sensitive gating MUST
+ *     be enforced server-side. Fires from A-3.5b (`flagContentNotGated`).
+ *     (Catalog addition — GITI-027 part A; §34 + §40.9.5 cross-ref.)
+ *
  * A-3.1 NEVER emits diagnostics — enumeration is best-effort. Malformed
  * gates are recorded in `AuthGraph.gates` with `role: null` and surfaced
  * by A-3.3 during classification. A-3.4 may emit `I-AUTH-REDIRECT-UNRESOLVED`
@@ -289,6 +301,7 @@ export interface AuthGraphDiagnostic {
     | "E-AUTH-GRAPH-004"
     | "I-AUTH-REDIRECT-UNRESOLVED"
     | "W-AUTH-LOGIN-MISSING"
+    | "W-AUTH-CONTENT-NOT-GATED"
     | "W-AUTH-PAGE-INFERRED";
   severity: "error" | "warning" | "info";
   message: string;

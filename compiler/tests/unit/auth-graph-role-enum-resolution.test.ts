@@ -36,6 +36,14 @@ function nid(): number {
   return nextId++;
 }
 
+// A-3.5b (GITI-027 part A) adds an orthogonal W-AUTH-CONTENT-NOT-GATED
+// security lint that fires for every `<auth role="X">` site. These tests
+// exercise A-3.2 role-enum RESOLUTION diagnostics specifically, so they
+// filter out the content lint before asserting on the resolution surface.
+function resolutionErrors<T extends { code: string }>(errors: T[]): T[] {
+  return errors.filter((e) => e.code !== "W-AUTH-CONTENT-NOT-GATED");
+}
+
 function attr(name: string, valueStr: string | null): AttrNode {
   if (valueStr === null) {
     return { name, value: { kind: "absent" }, span: SPAN };
@@ -135,7 +143,7 @@ describe("§1 (b) reference-based discovery — single enum match", () => {
 
     const { graph, errors } = runAuthGraph([f], null);
 
-    expect(errors).toHaveLength(0);
+    expect(resolutionErrors(errors)).toHaveLength(0);
     expect(graph.roleEnum).not.toBeNull();
     expect(graph.roleEnum!.name).toBe("UserRole");
     expect(graph.roleEnum!.variants).toEqual(["Anonymous", "User", "Admin"]);
@@ -165,7 +173,7 @@ describe("§1 (b) reference-based discovery — single enum match", () => {
 
     const { graph, errors } = runAuthGraph([entryFile, subFile], null);
 
-    expect(errors).toHaveLength(0);
+    expect(resolutionErrors(errors)).toHaveLength(0);
     expect(graph.roleEnum).not.toBeNull();
     expect(graph.roleEnum!.name).toBe("UserRole");
   });
@@ -201,7 +209,7 @@ describe("§2 (b) multi-match → (c) entry-file-program-scope reconciliation", 
 
     const { graph, errors } = runAuthGraph([entryFile, permFile], null);
 
-    expect(errors).toHaveLength(0);
+    expect(resolutionErrors(errors)).toHaveLength(0);
     expect(graph.roleEnum).not.toBeNull();
     expect(graph.roleEnum!.name).toBe("UserRole");
     expect(graph.roleEnum!.filePath).toBe("/abs/entry.scrml");
@@ -285,11 +293,15 @@ describe("§4 ambiguity — (b) multi-match + (c) no-reconcile → E-AUTH-GRAPH-
       null,
     );
 
-    expect(errors).toHaveLength(1);
-    expect(errors[0]!.code).toBe("E-AUTH-GRAPH-002");
-    expect(errors[0]!.message).toContain("UserRole");
-    expect(errors[0]!.message).toContain("Permission");
-    expect(errors[0]!.message).toContain("(b)+(c) discovery dual rule");
+    // A-3.5b content lint also fires for the `<auth role="Admin">` site;
+    // assert on the A-3.2 resolution error specifically.
+    const resErrs = resolutionErrors(errors);
+    expect(resErrs).toHaveLength(1);
+    expect(resErrs[0]!.code).toBe("E-AUTH-GRAPH-002");
+    expect(resErrs[0]!.message).toContain("UserRole");
+    expect(resErrs[0]!.message).toContain("Permission");
+    expect(resErrs[0]!.message).toContain("(b)+(c) discovery dual rule");
+    expect(errors.some((e) => e!.code === "W-AUTH-CONTENT-NOT-GATED")).toBe(true);
     expect(graph.roleEnum).toBeNull();
   });
 });
@@ -360,10 +372,14 @@ describe("§5 no-enum handling (A-3.2.b)", () => {
 
     const { graph, errors } = runAuthGraph([f], null);
 
-    expect(errors).toHaveLength(1);
-    expect(errors[0]!.code).toBe("E-AUTH-GRAPH-002");
-    expect(errors[0]!.message).toContain("no `:enum` is declared at app scope");
-    expect(errors[0]!.filePath).toBe("/abs/gated.scrml");
+    // A-3.5b content lint also fires for the `<auth role="...">` site;
+    // assert on the A-3.2 resolution error specifically.
+    const resErrs = resolutionErrors(errors);
+    expect(resErrs).toHaveLength(1);
+    expect(resErrs[0]!.code).toBe("E-AUTH-GRAPH-002");
+    expect(resErrs[0]!.message).toContain("no `:enum` is declared at app scope");
+    expect(resErrs[0]!.filePath).toBe("/abs/gated.scrml");
+    expect(errors.some((e) => e!.code === "W-AUTH-CONTENT-NOT-GATED")).toBe(true);
     expect(graph.roleEnum).toBeNull();
   });
 });

@@ -368,8 +368,14 @@ describe("§5 aggregate cases", () => {
 
     // A-3.2: `<auth role="admin">` references "admin" but no enum is
     // declared → E-AUTH-GRAPH-002 fires (per dispatch brief A-3.2.b).
-    expect(errors).toHaveLength(1);
-    expect(errors[0]!.code).toBe("E-AUTH-GRAPH-002");
+    // A-3.5b (GITI-027 part A): the same `<auth role="admin">` site also
+    // fires one W-AUTH-CONTENT-NOT-GATED warning (content-not-gated footgun).
+    expect(errors).toHaveLength(2);
+    const codes = errors.map(e => e!.code);
+    expect(codes).toContain("E-AUTH-GRAPH-002");
+    expect(codes).toContain("W-AUTH-CONTENT-NOT-GATED");
+    const contentLint = errors.find(e => e!.code === "W-AUTH-CONTENT-NOT-GATED")!;
+    expect(contentLint.severity).toBe("warning");
     expect(graph.roleEnum).toBeNull();
 
     // Gate enumeration is unaffected by the A-3.2 diagnostic.

@@ -191,6 +191,17 @@ export function runAuthGraph(
   // diagnostics for any redirect path not present in RouteMap.pages.
   crossRefRedirects(gates, routeMap, redirectTargets, errors);
 
+  // A-3.5b (GITI-027 part A) — content-not-gated security lint. Runs after
+  // enumeration so every `<auth role="X">` site is visible. Fires one
+  // W-AUTH-CONTENT-NOT-GATED warning per auth-role-block gate, anchored at
+  // the gate span. The lint surfaces the footgun that `<auth role=>` gates
+  // only JS mount/behaviour (and only under --emit-per-route) and NEVER
+  // withholds served HTML content — the gated markup ships verbatim in the
+  // HTML payload, visible to all viewers regardless of role. Honest in BOTH
+  // modes: per-route does NOT close the content leak. Content secrecy MUST
+  // be enforced server-side. (SPEC §34 catalog + §40.9.5 cross-ref.)
+  flagContentNotGated(gates, errors);
+
   const graph: AuthGraph = {
     gates,
     roleEnum,
@@ -563,6 +574,70 @@ function crossRefRedirects(
         `or author one at the redirect path manually. (SPEC §40.1.1.)`,
       span: firstRedirectGate.span,
       filePath: firstRedirectGate.filePath,
+    });
+  }
+}
+
+/**
+ * A-3.5b — content-not-gated security lint (GITI-027 part A).
+ *
+ * Fires one `W-AUTH-CONTENT-NOT-GATED` WARNING per `<auth role="X">` site.
+ *
+ * The footgun: `<auth role=>` is currently a JS-chunk-splitting optimization,
+ * NOT a content-visibility control. `emit-html.ts` emits the `<auth>` element
+ * as a passthrough literal and renders all of its children as static markup
+ * into the served HTML payload. The reachability solver DOES compute per-role
+ * visibility, but that verdict is consumed ONLY by the route-splitter to scope
+ * JS mount sets — HTML emission never consults it. Consequently:
+ *
+ *   - DEFAULT mode (no --emit-per-route): the gate is a complete no-op for
+ *     content; the gated markup + handlers ship to every viewer.
+ *   - PER-ROUTE mode: JS mount is role-split, BUT the served HTML still
+ *     carries the gated markup verbatim — only behaviour is withheld, not
+ *     content.
+ *
+ * In BOTH modes the gated markup leaks. The message is therefore honest in
+ * both: it does NOT claim --emit-per-route fixes the leak, and it directs
+ * adopters to enforce sensitive gating server-side rather than relying on
+ * `<auth role>` for content secrecy.
+ *
+ * Severity is WARNING (not info) — this is a security-relevant footgun and an
+ * info lint is too quiet to surface it. The lint fires for any auth-role-block
+ * gate that names a `role=` value (a real content gate); a check-only `<auth
+ * check=>` with no `role=` is out of scope for this content-secrecy warning.
+ *
+ * @param gates  — enumerated gates from A-3.1.
+ * @param errors — diagnostic stream; appended in-place.
+ */
+function flagContentNotGated(
+  gates: Map<MarkupNodeId, AuthGate>,
+  errors: AuthGraphDiagnostic[],
+): void {
+  for (const gate of gates.values()) {
+    // Only `<auth role="X">` blocks render content children that leak into
+    // the served HTML. Program/page/channel auth are request-boundary gates,
+    // not content-subtree gates, and are out of scope for this lint.
+    if (gate.siteKind !== "auth-role-block") continue;
+    // A role-naming gate is the content-secrecy footgun. A bare `<auth>` or
+    // a check-only `<auth check=>` (no role=) is handled by E-AUTH-GRAPH-004
+    // / W-AUTH-RUNTIME-FALLBACK and is not this lint's concern.
+    if (gate.role == null) continue;
+
+    errors.push({
+      code: "W-AUTH-CONTENT-NOT-GATED",
+      severity: "warning",
+      message:
+        `<auth role="${gate.role}"> gates only JS mount/behaviour (and only ` +
+        `under --emit-per-route), NOT served HTML content. The gated markup ` +
+        `is emitted verbatim into the HTML payload and is visible to ALL ` +
+        `viewers regardless of role — including under --emit-per-route, which ` +
+        `role-splits JS behaviour but does NOT withhold HTML content. Do not ` +
+        `rely on \`<auth role>\` for content secrecy; enforce sensitive ` +
+        `gating server-side (e.g. branch in a server-fn / page loader on the ` +
+        `authenticated role and omit the sensitive markup from the response). ` +
+        `(SPEC §34, §40.9.5.)`,
+      span: gate.span,
+      filePath: gate.filePath,
     });
   }
 }
