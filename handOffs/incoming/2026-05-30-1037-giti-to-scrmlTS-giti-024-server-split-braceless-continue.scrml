@@ -1,0 +1,44 @@
+// repro-20 / GITI-024 — in the server-split emit path, a brace-less
+// `if (cond) continue` followed by an identifier-led statement swallows the
+// next statement's leading identifier as a `continue <label>` and orphans the
+// rest, producing invalid JS. Caught by v0.7.0's --validate-emit gate
+// (E-CODEGEN-INVALID-JS); was a silent latent bug on v0.6.7 (gate-less).
+//
+// compiled against scrmlTS@v0.7.0 (4c9079d2)
+//   bun run ../scrmlTS/compiler/src/cli.js compile ui/repros/repro-20-*.scrml -o /tmp/out --mode library
+//   -> error [E-CODEGEN-INVALID-JS] (or --no-validate-emit to inspect)
+//
+// EXPECTED (.server.js):          ACTUAL (.server.js):
+//   continue;                       continue out;        // <-- "out" eaten as label
+//   out.push(line);                 . push ( line );     // <-- orphaned receiver
+//
+// TRIGGER REQUIRES ALL THREE:
+//   1. a `scrml:fs` (or `scrml:path`/`scrml:process`) import — this classifies
+//      the function server-side and emits a `.server.js` artifact, even though
+//      the function is a plain `export function` (NOT a `server function`);
+//   2. a brace-less `if (cond) continue` (single-statement body, no `{}`);
+//   3. the next statement begins with an identifier (`out.push(...)`).
+//
+// NOT TRIGGERED in the main/client emit path — brace-less continue is fine
+// there. This is the server-fn body emitter, same subsystem as the GITI-020/
+// 021/022 fix (8e7f18fe). Bracing the continue (`{ continue }`) is a clean
+// source-side workaround.
+//
+// SECONDARY OBSERVATION: a library-mode file whose only exports are plain
+// `export function`s should arguably not emit a `.server.js` HTTP-handler
+// wrapper at all (CSRF / _scrml_body / Response boilerplate around a pure
+// function). The wrapper is never imported; it only became visible because the
+// gate parses it.
+
+${
+  import { readFileSync } from "scrml:fs"
+
+  export function readLines(path) {
+    const out = []
+    for (const line of readFileSync(path, "utf8").split("\n")) {
+      if (line == "skip") continue
+      out.push(line)
+    }
+    return out
+  }
+}
