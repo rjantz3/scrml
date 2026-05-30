@@ -1,0 +1,14 @@
+// Bug Z — the identifier-rename pass rewrites a user function-name SUBSTRING
+// that appears inside a STRING LITERAL.
+// Expected: @label renders the literal text "handleKey(e)".
+// Actual:   @label renders "_scrml_handleKey_NN(e)" — the substring `handleKey`
+//           inside the string was mangled to the internal symbol name.
+// compiled against scrmlTS@v0.6.7
+<program>
+${
+  function handleKey() { return 1 }
+  <label> = "handleKey(e)"
+}
+<p class="lbl">${@label}</p>
+<button onclick=handleKey()>x</button>
+</program>

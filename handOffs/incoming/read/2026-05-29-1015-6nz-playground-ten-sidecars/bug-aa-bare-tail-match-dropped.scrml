@@ -1,0 +1,15 @@
+// Bug AA — a bare (non-returned) tail `match` in a plain `function` is dropped.
+// Expected: bare()/withReturn() both render "CA" (m == .A).
+// Actual:   bare() renders "" — its match compiled to a value-discarding IIFE
+//           `(function(){...})()` with no outer return; function returns undefined.
+//           `return match` (withReturn) and `fn ... -> T` both emit correctly.
+// compiled against scrmlTS@v0.6.7
+<program>
+${
+  type M:enum = { A, B }
+  <cell>: M = .A
+  function bare()       {        match @cell { .A => "CA" .B => "CB" } }
+  function withReturn() { return match @cell { .A => "CA" .B => "CB" } }
+}
+<div><span class="bare">${bare()}</span> | <span class="ret">${withReturn()}</span></div>
+</program>

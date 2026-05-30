@@ -1,0 +1,11 @@
+// Bug Y — comma-separated `match` arms compile exit-0 but emit invalid JS.
+// Expected: either accept commas (and emit valid JS) OR reject with a diagnostic.
+// Actual:   exit 0, no diagnostic; emit is `... return "AA" ,;` -> node --check fails.
+// compiled against scrmlTS@v0.6.7
+<program>
+${
+  type M:enum = { A, B }
+  <m>: M = .A
+}
+<div>${match @m { .A => "AA", .B => "BB" }}</div>
+</program>

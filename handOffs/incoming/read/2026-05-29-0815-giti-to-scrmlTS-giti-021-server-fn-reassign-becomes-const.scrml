@@ -1,0 +1,57 @@
+// repro-17 / GITI-021 — local reassignment mis-emitted as a `const` declaration.
+//
+// compiled against scrmlTS@v0.6.7 / 18de30ba
+//   bun run ../scrmlTS/compiler/src/cli.js compile ui/repros/repro-17-*.scrml -o ui/dist
+//   node --check ui/dist/repro-17-*.server.js   # PASSES — silent miscompile
+//
+// INDISPUTABLE CASE (server fn `pick`): an explicit `let label` followed by a
+// reassignment `label = ...` inside an `if` block. By every language's rules
+// this is a reassignment of the outer binding.
+//
+//   EXPECTED:                       ACTUAL (ui/dist/...server.js):
+//     let label = "default";          let label = "default";
+//     if (flag) { label = "chosen"; } if (flag) { const label = "chosen"; }  <-- shadows
+//     return label;  // "chosen"      return label;  // ALWAYS "default"
+//
+// node --check passes; the write is silently dropped at runtime. Same-scope
+// reassignment instead yields `let x` + `const x` -> redeclaration SyntaxError.
+//
+// BROADER IMPACT: the idiomatic scrml form (bare `id = v` first-declares,
+// later `id = v` reassigns) is mis-emitted as `const` on EVERY assignment in
+// BOTH client and server functions — the compiler does not dedupe the
+// declaration against an already-bound identifier. The explicit-`let` form
+// happens to emit correctly in CLIENT functions but NOT in server functions.
+//
+// This breaks the conditional-default idiom (`let x = default; if (c) x = y`),
+// one of the most common control-flow shapes. Found via ui/live.scrml on the
+// first realistic channel server function.
+
+<program>
+
+${
+  // server fn — explicit `let` + reassignment in a block: INDISPUTABLE bug.
+  server function pick(flag) {
+    let label = "default"
+    if (flag) {
+      label = "chosen"
+    }
+    return label
+  }
+
+  // control: same logic in a plain (client) function emits CORRECTLY.
+  function pickClient(flag) {
+    let label = "default"
+    if (flag) {
+      label = "chosen"
+    }
+    return label
+  }
+
+  @out = pick(true)
+}
+
+<div>
+  <p>${@out}</>
+</div>
+
+</program>

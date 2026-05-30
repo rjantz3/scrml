@@ -1,0 +1,28 @@
+// Question AB — does <onTransition> fire on a bare `@engineVar = .Variant`
+// write from a program-scope function?
+// Observed: clicking toggle() flips @mode Nav<->Edit (raw `${@mode}` updates),
+//   but @transitions stays 0 — onTransition never fires. The emitted handler
+//   table `__scrml_transitions_mode` is EMPTY {}, and toggle() emits a plain
+//   `_scrml_reactive_set("mode","Edit")` that bypasses the engine dispatcher.
+// Q: is a different transition trigger required (and if so, what is the
+//    canonical adopter form), or is this a codegen gap?
+// compiled against scrmlTS@v0.6.7
+<program>
+type Mode:enum = { Nav, Edit }
+<transitions> = 0
+function toggle() {
+  if (@mode == Mode.Nav) { @mode = .Edit } else { @mode = .Nav }
+}
+<engine for=Mode initial=.Nav>
+  <Nav  rule=.Edit />
+  <Edit rule=.Nav />
+  <onTransition from=.Nav to=.Edit>
+    ${ @transitions = @transitions + 1 }
+  </onTransition>
+</engine>
+<div>
+  <button class="tg" onclick=toggle()>toggle</button>
+  <span class="raw">${@mode}</span>
+  <span class="tr">${@transitions}</span>
+</div>
+</program>

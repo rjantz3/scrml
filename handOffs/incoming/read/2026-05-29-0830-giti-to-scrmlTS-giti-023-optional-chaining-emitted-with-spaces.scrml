@@ -1,0 +1,42 @@
+// repro-19 / GITI-023 — user-written optional chaining `?.` is emitted as
+// `? . ` (with spaces), producing invalid JS. The compiler exits 0 ("Compiled
+// 1 file") but the emitted bundle fails to parse.
+//
+// compiled against scrmlTS@v0.6.7 / 18de30ba
+//   bun run ../scrmlTS/compiler/src/cli.js compile ui/repros/repro-19-*.scrml -o ui/dist
+//   node --check ui/dist/repro-19-*.server.js   # FAILS to parse, though compile exited 0
+//
+// EXPECTED:                    ACTUAL (emitted):
+//   return o?.a;                 return o ? . a;            // SyntaxError
+//   o?.fn()                      o ? . function ( )         // name also corrupted
+//   o?.[0]                       o ? . [ 0 ]
+//
+// Affects BOTH client and server wherever `?.` appears (server fn body,
+// client fn, ${...} interpolation). The compiler's OWN emitted code uses `?.`
+// correctly (e.g. `cookieHeader.match(/.../)?.[1]`), so the defect is in the
+// USER-expression path. Likely a lexer collision: scrml's postfix `?`
+// (error-propagation, §19) plus `.` consumes the `?.` digraph as `?` `.`
+// instead of recognizing optional chaining.
+//
+// Controls that emit CORRECTLY (so it is specifically the `?.` digraph):
+//   ternary  n > 0 ? "pos" : "neg"   -> fine
+//   nullish  o ?? "d"                -> fine
+//
+// Either support `?.` as optional chaining or reject it with a clean E-* error;
+// silently emitting unparseable JS at exit-0 is the bug (giti's compile-on-serve
+// gates on exit code, so it would serve a page that crashes at load).
+
+<program>
+
+${
+  server function f(o) {
+    return o?.a?.b
+  }
+  @v = f({})
+}
+
+<div>
+  <p>${@v}</>
+</div>
+
+</program>

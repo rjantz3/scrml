@@ -1,0 +1,12 @@
+// Bug AC — <#id> read of a §36 input-state emits an UNDEFINED identifier.
+// Expected: ${<#cursor>.x} renders the cursor x (and ideally re-renders on move).
+// Actual:   pageerror "_scrml_input_cursor_ is not defined" on first reactive
+//           eval; .x/.y render empty. Compiles exit-0, node --check OK.
+// compiled against scrmlTS@v0.6.7
+<mouse id="cursor"/>
+<program>
+<div class="pad" style="width:400px;height:300px">
+  <span class="mx">${<#cursor>.x}</span>
+  <span class="my">${<#cursor>.y}</span>
+</div>
+</program>

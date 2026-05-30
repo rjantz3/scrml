@@ -1,0 +1,42 @@
+// repro-18 / GITI-022 — in a server function, an uninitialized `let x` followed
+// by `x = <expr>` is merged into a single broken declaration `let x = x = <expr>`,
+// which throws `ReferenceError: Cannot access 'x' before initialization` (TDZ
+// self-reference) at runtime. node --check passes -> silent miscompile.
+//
+// compiled against scrmlTS@v0.6.7 / 18de30ba
+//   bun run ../scrmlTS/compiler/src/cli.js compile ui/repros/repro-18-*.scrml -o ui/dist
+//   node --check ui/dist/repro-18-*.server.js   # PASSES
+//
+// EXPECTED (server fn `f`):       ACTUAL (ui/dist/...server.js):
+//   let x;                          let x = x = 1;   // <-- TDZ ReferenceError
+//   x = 1;                          return x;
+//   return x;
+//
+// SERVER-FUNCTION-SPECIFIC: the identical body in a client/plain function emits
+// correctly as `let x; x = 1;`. Same subsystem as GITI-021 — the server-fn
+// statement-lowering path mishandles assignments the client path gets right.
+
+<program>
+
+${
+  server function f() {
+    let x
+    x = 1
+    return x
+  }
+
+  // control: client fn emits `let x; x = 1;` correctly.
+  function fClient() {
+    let x
+    x = 1
+    return x
+  }
+
+  @v = f()
+}
+
+<div>
+  <p>${@v}</>
+</div>
+
+</program>

@@ -1,0 +1,43 @@
+// repro-16 / GITI-020 — channel-cell write nested in ANY block mis-lowers to
+// the CLIENT reactive path (_scrml_reactive_set / _scrml_init_set) instead of
+// the channel broadcast({__type:"__sync"}) path.
+//
+// compiled against scrmlTS@v0.6.7 / 18de30ba
+//   bun run ../scrmlTS/compiler/src/cli.js compile ui/repros/repro-16-*.scrml -o ui/dist
+//
+// TRIGGER (precise): block nesting, NOT the early return. The broadcast
+// transform only rewrites @cell writes that are direct children of the
+// server-function body. A write inside an if/for/while block falls through to
+// the client lowering. The `return` is incidental.
+//
+// EXPECTED: every @msg write inside the channel server function lowers to
+//   broadcast({ __type: "__sync", __key: "msg", __val: ... })
+//
+// ACTUAL (repro-16-*.server.js):
+//   - the `if`-nested write  -> _scrml_reactive_set("msg", ...) + _scrml_init_set(...)
+//   - the tail write         -> broadcast({ __type: "__sync", ... })   (correct)
+//   _scrml_reactive_set / _scrml_init_set are CLIENT primitives — never
+//   defined/imported in the .server.js bundle. node --check passes; the
+//   branch throws `ReferenceError: _scrml_reactive_set is not defined` at
+//   runtime AND never broadcasts the conditional state to clients.
+
+<program>
+
+<channel name="probe" topic="t">
+  ${
+    <msg> = "idle"
+
+    server function setMsg(bad) {
+      if (bad) {
+        @msg = "conditional"   // <-- MIS-LOWERED to client reactive_set (return removed: still wrong)
+      }
+      @msg = "tail"            // <-- correctly lowered to broadcast(__sync)
+    }
+  }
+</>
+
+<div>
+  <p>${@msg}</>
+</div>
+
+</program>

@@ -1,0 +1,15 @@
+// Bug X — `//` (incl. URLs) inside a string literal breaks the parser.
+// Expected: compiles; @url renders the literal URL text.
+// Actual:   E-CTX-003 "Unclosed 'logic'/'program'" — the comment scanner
+//           treats `//` inside the string as a line comment.
+// compiled against scrmlTS@v0.6.7
+<program>
+${
+  <url> = "https://example.com/docs"
+  function make() {
+    const x = { id: 1, note: "see // here" }
+    return x.note
+  }
+}
+<div>${@url} — ${make()}</div>
+</program>
