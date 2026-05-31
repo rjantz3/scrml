@@ -41,6 +41,7 @@ import { rewriteExpr, rewriteServerExpr, rewriteExprArrowBody, rewriteServerExpr
 import { emitParseVariantCall, isParseVariantCall } from "./emit-parse-variant.ts";
 import { emitMatchExpr as emitStructuredMatchExpr } from "./emit-control-flow.ts";
 import { SYNTH_PROPERTY_NAMES } from "../symbol-table.ts";
+import { srcmapMark } from "./srcmap-provenance.ts";
 
 // ---------------------------------------------------------------------------
 // EmitExprContext — threaded through every emit call
@@ -273,14 +274,16 @@ function emitIdent(node: IdentExpr, ctx: EmitExprContext): string {
   // Reactive reference: @varName
   if (name.startsWith("@")) {
     const bare = name.slice(1);
+    // B1 use-site provenance marker (no-op unless sourceMap mode).
+    const _m = srcmapMark(node.span, bare);
     if (ctx.mode === "server") {
-      return `_scrml_body["${bare}"]`;
+      return `${_m}_scrml_body["${bare}"]`;
     }
     // Client mode — check derived vs reactive
     if (ctx.derivedNames && ctx.derivedNames.has(bare)) {
-      return `_scrml_derived_get("${bare}")`;
+      return `${_m}_scrml_derived_get("${bare}")`;
     }
-    return `_scrml_reactive_get("${bare}")`;
+    return `${_m}_scrml_reactive_get("${bare}")`;
   }
 
   // Tilde accumulator: ~
@@ -412,16 +415,18 @@ function emitUnary(node: UnaryExpr, ctx: EmitExprContext): string {
     const target = node.argument;
     if (target.kind === "ident" && typeof target.name === "string" && target.name.startsWith("@")) {
       const bare = target.name.slice(1);
+      // B1 use-site provenance marker (no-op unless sourceMap mode).
+      const _m = srcmapMark(node.span, bare);
       if (ctx.mode === "server") {
         // Server boundary: @x is `_scrml_body["x"]` (a plain assignment lvalue).
         // Postfix on a member expression IS valid JS, so emit as-is.
-        return `_scrml_body["${bare}"]${node.op}`;
+        return `${_m}_scrml_body["${bare}"]${node.op}`;
       }
       const sign = node.op === "++" ? "+" : "-";
       const getter = ctx.derivedNames?.has(bare)
         ? `_scrml_derived_get("${bare}")`
         : `_scrml_reactive_get("${bare}")`;
-      return `_scrml_reactive_set("${bare}", ${getter} ${sign} 1)`;
+      return `${_m}_scrml_reactive_set("${bare}", ${getter} ${sign} 1)`;
     }
   }
   const arg = emitExpr(node.argument, ctx);
@@ -875,7 +880,7 @@ function emitAssign(node: AssignExpr, ctx: EmitExprContext): string {
   if (target.kind === "ident" && target.name.startsWith("@")) {
     const bare = target.name.slice(1);
     if (ctx.mode === "server") {
-      return `_scrml_body["${bare}"] ${node.op} ${value}`;
+      return `${srcmapMark(node.span, bare)}_scrml_body["${bare}"] ${node.op} ${value}`;
     }
     // §51.0.F (Option A comprehensive engine-routing) — when the LHS is an
     // engine-bound `@<name>` AND we're at expression position, dispatch
@@ -940,14 +945,14 @@ function emitAssign(node: AssignExpr, ctx: EmitExprContext): string {
       return `(function(){\n  const __scrml_engine_v = ${valueExprForGuard};\n${indented}\n  return __scrml_engine_v;\n})()`;
     }
     if (node.op === "=") {
-      return `_scrml_reactive_set("${bare}", ${value})`;
+      return `${srcmapMark(node.span, bare)}_scrml_reactive_set("${bare}", ${value})`;
     }
     // Compound assignment: @x += 1 → _scrml_reactive_set("x", _scrml_reactive_get("x") + 1)
     const baseOp = node.op.slice(0, -1); // "+=" → "+"
     const getter = ctx.derivedNames?.has(bare)
       ? `_scrml_derived_get("${bare}")`
       : `_scrml_reactive_get("${bare}")`;
-    return `_scrml_reactive_set("${bare}", ${getter} ${baseOp} ${value})`;
+    return `${srcmapMark(node.span, bare)}_scrml_reactive_set("${bare}", ${getter} ${baseOp} ${value})`;
   }
 
   const lhs = emitExpr(target, ctx);

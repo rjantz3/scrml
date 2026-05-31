@@ -49,6 +49,7 @@ import { CGError } from "./errors.ts";
  */
 const RUNTIME_FILENAME_PLACEHOLDER = "__SCRML_RUNTIME_FILENAME_PLACEHOLDER__";
 import { resetVarCounter } from "./var-counter.ts";
+import { enableSrcmapProvenance, disableSrcmapProvenance } from "./srcmap-provenance.ts";
 import { escapeHtmlAttr } from "./utils.ts";
 import { generateHtml, augmentHtmlForChunks } from "./emit-html.ts";
 import { generateCss } from "./emit-css.ts";
@@ -62,7 +63,8 @@ import { analyzeAll } from "./analyze.ts";
 import { generateTestJs } from "./emit-test.ts";
 import { generateMachineTestJs } from "./emit-machine-property-tests.ts";
 import { generateWorkerJs } from "./emit-worker.ts";
-import { SourceMapBuilder, appendSourceMappingUrl } from "./source-map.ts";
+import { appendSourceMappingUrl } from "./source-map.ts";
+import { buildSourceMap } from "./build-source-map.ts";
 import { EncodingContext } from "./type-encoding.ts";
 import { collectDerivedVarNames, collectSynthCellKeys } from "./reactive-deps.ts";
 import { collectTopLevelLogicStatements } from "./collect.ts";
@@ -317,6 +319,15 @@ export function runCG(input: CgInput): CgOutput {
   const clientEmitTotals: Map<string, number> | null = debugPerf ? new Map() : null;
 
   resetVarCounter();
+
+  // B1 use-site source-map provenance (source-map-use-site-spans-b1-2026-05-31).
+  // Marker emission is a module-level gate so the ~50 EmitExprContext build sites
+  // need no threading. Set ONLY for a sourceMap compile so all non-sourceMap
+  // output (the default — entire test corpus) stays byte-identical and pays no
+  // scan/strip cost. Set unconditionally each compile so a prior sourceMap run
+  // can never leak the enabled flag into a later non-sourceMap run.
+  if (sourceMap) enableSrcmapProvenance();
+  else disableSrcmapProvenance();
 
   // §51.5.1 (S28 slice 3) — clear the machine-codegen error buffer before
   // this compile. Entries accumulated during emitTransitionGuard are drained
@@ -643,13 +654,19 @@ export function runCG(input: CgInput): CgOutput {
       const base = basename(filePath, ".scrml");
       if (sourceMap) {
         const sourceBasename = `${base}.scrml`;
+        // source-map-real-provenance-js-2026-05-31 — real per-line provenance
+        // (was: addMapping(i, 0, 0) mapping every output line to source 0:0).
+        // The per-file source string rides on the TAB result as `_sourceText`
+        // (threaded in api.js via sourceByFile); byte-offset->line/col is exact
+        // and sourcesContent is embedded. Falls back to "" only for harnesses
+        // that bypass the full pipeline (map is then honestly all-synthetic
+        // rather than a fake 0:0).
+        const fileSource: string = (fileAST as any)?._sourceText ?? "";
         if (serverJs) {
           const serverMapFile = `${base}.server.js.map`;
-          const serverMapBuilder = new SourceMapBuilder(sourceBasename);
-          const serverLines = serverJs.split("\n");
-          for (let i = 0; i < serverLines.length; i++) {
-            serverMapBuilder.addMapping(i, 0, 0);
-          }
+          const { builder: serverMapBuilder, cleanedJs: serverClean } =
+            buildSourceMap(serverJs, sourceBasename, fileSource, nodes);
+          serverJs = serverClean; // ship the marker-stripped JS
           serverJsMap = serverMapBuilder.generate(`${base}.server.js`);
           serverJs = appendSourceMappingUrl(serverJs, serverMapFile);
         }
@@ -929,25 +946,30 @@ export function runCG(input: CgInput): CgOutput {
 
     if (sourceMap) {
       const sourceBasename = `${base}.scrml`;
+      // source-map-real-provenance-js-2026-05-31 — real per-line provenance
+      // (was: addMapping(i, 0, 0) mapping every output line to source 0:0).
+      // buildSourceMap correlates each generated line with the .scrml author
+      // construct that produced it, recovers author names into the `names`
+      // field, embeds sourcesContent, and categorizes synthetic boilerplate
+      // lines explicitly (never a fake 0:0). The per-file source rides on the
+      // TAB result as `_sourceText` (threaded in api.js via sourceByFile);
+      // falls back to "" only for harnesses that bypass the full pipeline.
+      const fileSource: string = (fileAST as any)?._sourceText ?? "";
 
       if (clientJs) {
         const clientMapFile = `${base}.client.js.map`;
-        const clientMapBuilder = new SourceMapBuilder(sourceBasename);
-        const clientLines = clientJs.split("\n");
-        for (let i = 0; i < clientLines.length; i++) {
-          clientMapBuilder.addMapping(i, 0, 0);
-        }
+        const { builder: clientMapBuilder, cleanedJs: clientClean } =
+          buildSourceMap(clientJs, sourceBasename, fileSource, nodes);
+        clientJs = clientClean; // ship the marker-stripped JS
         clientJsMap = clientMapBuilder.generate(`${base}.client.js`);
         clientJs = appendSourceMappingUrl(clientJs, clientMapFile);
       }
 
       if (serverJs) {
         const serverMapFile = `${base}.server.js.map`;
-        const serverMapBuilder = new SourceMapBuilder(sourceBasename);
-        const serverLines = serverJs.split("\n");
-        for (let i = 0; i < serverLines.length; i++) {
-          serverMapBuilder.addMapping(i, 0, 0);
-        }
+        const { builder: serverMapBuilder, cleanedJs: serverClean } =
+          buildSourceMap(serverJs, sourceBasename, fileSource, nodes);
+        serverJs = serverClean; // ship the marker-stripped JS
         serverJsMap = serverMapBuilder.generate(`${base}.server.js`);
         serverJs = appendSourceMappingUrl(serverJs, serverMapFile);
       }
