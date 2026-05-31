@@ -29,6 +29,7 @@ import { runMetaChecker } from "./meta-checker.ts";
 import { runDG } from "./dependency-graph.ts";
 import { runBatchPlanner, serializeBatchPlan } from "./batch-planner.ts";
 import { runReachabilitySolver, serializeReachabilityRecord } from "./reachability-solver.ts";
+import { buildEngineGraphJson } from "./engine-graph.ts";
 import { runAuthGraph } from "./auth-graph.ts";
 import { serializeChunksManifest } from "./codegen/route-splitter.ts";
 import { buildMcpDescriptors } from "./codegen/mcp-descriptors.ts";
@@ -2351,6 +2352,14 @@ export function compileScrml(options = {}) {
     // Stage 7.6 — A-2.1 scaffold. The record is empty until A-2.2+.
     reachabilityRecord: rsResult.record,
     reachabilityRecordJson: () => serializeReachabilityRecord(rsResult.record),
+    // Engine "what-comes-next" static sidecar (engine-graph-sidecar-2026-05-31).
+    // Lazy projection of the engine state-machine metadata codegen already
+    // resolves (`_record.engineMeta` on each engine-decl in `metaFiles`) into a
+    // deterministic graph JSON. Written to `<base>.engine-graph.json` by
+    // commands/compile.js under `--emit-engine-graph`. Honest-empty
+    // (`{ "engines": [] }`) when the file declares no engines. The function form
+    // mirrors `reachabilityRecordJson` / `batchPlanJson` — no cost unless called.
+    engineGraphJson: () => buildEngineGraphJson(metaFiles),
     // Stage 7.55 — A-3.5 wire (S91). The AuthGraph is the per-gate
     // classification surface consumed by RS Component 4 and (future)
     // A-4 per-role chunk emission. Surfaced on the return so integration

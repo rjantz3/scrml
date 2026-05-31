@@ -52,6 +52,7 @@ Options (compile / dev):
   --embed-runtime         Embed runtime inline instead of writing a separate file
   --emit-batch-plan       Print the Stage 7.5 BatchPlan as JSON
   --emit-reachability     Emit <base>.reachability.json (Stage 7.6 / SPEC §40.9)
+  --emit-engine-graph     Emit <base>.engine-graph.json (engine what-comes-next graph, SPEC §51.0)
   --chunk-size-budget=N   Soft size budget (bytes) for W-CG-CHUNK-LARGE (default 100000)
   --emit-machine-tests    Emit <base>.machine.test.js for each source (§51.13)
   --debug-perf            Sub-stage timing for CG / RS / DG (PGO instrumentation)

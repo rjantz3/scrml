@@ -1,0 +1,11 @@
+# BRIEF — engine-graph-sidecar-2026-05-31 (archived per S136)
+
+**Dispatched:** S149, 2026-05-31 · **Agent:** scrml-js-codegen-engineer · **isolation:** worktree · **background:** true · **model:** opus
+**Base HEAD:** `25e89cbb` (main) · standalone (does NOT inherit any sibling branch)
+**Parallel sibling:** B1 source-map use-site dispatch (`source-map-use-site-spans-b1-2026-05-31`, agent ade3) — DISJOINT file region (B1=emit-expr/build-source-map/source-map; this=engine-graph.ts/api.js/compile.js/cli.js/emit-machines[read]/symbol-table[read]). Only landing-overlap = additive insertions in api.js + compile.js (engineGraphJson vs sourceMap threading, different lines) — cherry-pickable at file-delta.
+
+**Scope (PA decision, surfaced as veto-check):** static compile-time sidecar `<base>.engine-graph.json` via `--emit-engine-graph`, mirroring `--emit-reachability` EXACTLY. Projects each engine's variants + initialState + transitions (wildcard-marked) + per-state next[] + lifecycle/effect flags from `EngineMetadata` (symbol-table.ts:398) — pure data-exposure, no new analysis, no SPEC change, no runtime change, no index.ts touch. The C1-static-website "what-comes-next" feed. Runtime query helper (__scrml_engine_next_states for C2a-live) explicitly deferred.
+
+---
+
+(Full verbatim Agent() prompt for change-id engine-graph-sidecar-2026-05-31. Mirror --emit-reachability: builder module compiler/src/engine-graph.ts exporting buildEngineGraphJson; api.js engineGraphJson:opts.emitEngineGraph?...:null threaded through result; compile.js --emit-engine-graph writes <base>.engine-graph.json; cli.js flag registration; unit + integration(mario) tests. Per-engine JSON: varName/forType/initialState/variants/transitions[{from,to,wildcard}]/states[{tag,next,hasEffect,lifecycle}]. Deterministic/bit-stable. No-engine file = honest-empty. OUT OF SCOPE: index.ts, runtime table emission, source-maps, website, SPEC text, runtime query helper. Full S99/S126 path-discipline + S83 commit-discipline + S138 R26 (mario empirical: valid JSON / real variants / initialState matches initial= / known edge correct / honest-empty / byte-deterministic) blocks included — identical boilerplate to the source-map BRIEF.md siblings.)

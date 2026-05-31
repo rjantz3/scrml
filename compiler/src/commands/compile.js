@@ -95,6 +95,7 @@ function parseArgs(args) {
   let selfHost = false;
   let emitBatchPlan = false;
   let emitReachability = false;
+  let emitEngineGraph = false;
   let emitPerRoute = false;
   // Q-OPEN-5 — `--chunk-size-budget=<bytes>` CLI flag value. When
   // undefined, compileScrml / runCG / emitPerRouteChunks all fall back
@@ -266,7 +267,7 @@ function parseArgs(args) {
     }
   }
 
-  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, watchMode, mode, selfHost, emitBatchPlan, emitReachability, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit };
+  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, watchMode, mode, selfHost, emitBatchPlan, emitReachability, emitEngineGraph, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit };
 }
 
 // ---------------------------------------------------------------------------
@@ -396,7 +397,7 @@ function formatLintDiagnostic(diag, cwd) {
  * @returns {{ success: boolean }}
  */
 function runOnce(opts, selfHostModules = null) {
-  const { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, mode, emitBatchPlan, emitReachability, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit } = opts;
+  const { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, mode, emitBatchPlan, emitReachability, emitEngineGraph, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit } = opts;
   const cwd = process.cwd();
 
   if (verbose) {
@@ -561,6 +562,24 @@ function runOnce(opts, selfHostModules = null) {
       const dest = join(destDir, `${base}.reachability.json`);
       writeFileSync(dest, json);
       if (verbose) console.log(c.dim(`  [RS] Wrote reachability JSON: ${base}.reachability.json`));
+    }
+  }
+
+  // engine-graph-sidecar-2026-05-31 — write <base>.engine-graph.json next to
+  // each compiled output. Static compile-time projection of the engine
+  // state-machine metadata (what-comes-next graph) for the self-demo website's
+  // pre-computed-static view. Mirrors the --emit-reachability write loop;
+  // emission lives here (not inside compileScrml) so the flag is a CLI-only
+  // surface and the api.js write loop stays single-purpose. Honest-empty
+  // (`{ "engines": [] }`) for files with no engines — never an error.
+  if (emitEngineGraph && typeof result.engineGraphJson === "function") {
+    const json = result.engineGraphJson();
+    const destDir = result.outputDir;
+    for (const f of inputFiles) {
+      const base = basename(f, ".scrml");
+      const dest = join(destDir, `${base}.engine-graph.json`);
+      writeFileSync(dest, json);
+      if (verbose) console.log(c.dim(`  [EG] Wrote engine-graph JSON: ${base}.engine-graph.json`));
     }
   }
 
