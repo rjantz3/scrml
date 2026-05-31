@@ -148,8 +148,8 @@ server function fetchItems()! -> LoadError {
 
 function load() {
     const rows = fetchItems() !{
-        | ::Network msg -> { @phase = .Error(msg); return }
-        | ::Empty       -> { @phase = .Empty;       return }
+        | ::Network msg :> { @phase = .Error(msg); return }
+        | ::Empty       :> { @phase = .Empty;       return }
     }
     @phase = .Success(rows.length)
 }
@@ -158,7 +158,7 @@ function load() {
 Pattern:
 - `function name(args) ! ErrorType { ... }` declares failable
 - `fail .Variant(args)` surfaces the error
-- `let x = call() !{ | ::Variant arg -> { ... } }` exhaustive call-site handler
+- `let x = call() !{ | ::Variant arg :> { ... } }` exhaustive call-site handler
 
 **Errors-as-states is the canonical lifting:** at Tier 1+, the `!{}` handler at the call site does one thing — route each error variant into the right Phase variant. The error becomes a state in the Phase enum. `<isError>` + `<errorMsg>` cells are anti-patterns; the failure modes live in the type.
 
@@ -265,11 +265,11 @@ type Phase:enum = { Idle, Loading, Error(msg: string), Empty, Success(count: int
 
 ```scrml
 const <label> = match @phase {
-    .Idle               -> "Idle"
-    .Loading            -> "Loading"
-    .Error(msg)         -> "Error: " + msg
-    .Empty              -> "No rows"
-    .Success(count)     -> count + " rows"
+    .Idle               :> "Idle"
+    .Loading            :> "Loading"
+    .Error(msg)         :> "Error: " + msg
+    .Empty              :> "No rows"
+    .Success(count)     :> count + " rows"
 }
 ```
 
@@ -679,8 +679,8 @@ type Phase:enum = { Idle, Loading, Error(msg: string), Empty, Success(count: int
 function load() {
     @phase = .Loading
     const result = fetchItems() !{
-        | ::Network msg -> { @phase = .Error(msg); return }
-        | ::Empty       -> { @phase = .Empty;       return }
+        | ::Network msg :> { @phase = .Error(msg); return }
+        | ::Empty       :> { @phase = .Empty;       return }
     }
     @phase = .Success(result.length)
 }

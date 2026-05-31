@@ -548,9 +548,9 @@ ${
 }
 
 <engine for=Health derived=match @marioState {
-  .Small | .Big => .Healthy
-  .Fire | .Cape => .AtRisk
-  _              => .Critical
+  .Small | .Big :> .Healthy
+  .Fire | .Cape :> .AtRisk
+  _              :> .Critical
 }>
   <Healthy/>
   <AtRisk>
@@ -991,9 +991,9 @@ server function loadDashboard()! -> LoadError {
 
 ${
   const rows = loadDashboard() !{
-    | ::Network msg     -> { @phase = .Error(msg); return }
-    | ::Empty           -> { @phase = .Empty;       return }
-    | ::Unauthorized    -> { navigate("/login", .Hard); return }
+    | ::Network msg     :> { @phase = .Error(msg); return }
+    | ::Empty           :> { @phase = .Empty;       return }
+    | ::Unauthorized    :> { navigate("/login", .Hard); return }
   }
   @phase = .Loaded(rows)
 }
@@ -1044,7 +1044,7 @@ If your instinct from another framework fires, stop and use the scrml form. Thes
 | `await x()` | JS/TS | bare `x()` — compiler auto-awaits server fns (§5 above) |
 | State machine via `if @phase === 'loading'` chains | (any) | **An engine.** `<engine for=PhaseEnum initial=.Loading>...</>` — read §4 |
 | Many booleans gating UI (`@isLoggedIn`, `@isLoading`, `@isError`, …) | (any) | **An engine** over an enum. The compiler will lint `W-LIFECYCLE-CANDIDATE` and suggest. |
-| `match @x { .V => { lift <Comp> } }` to render component per state | (looks obvious) | An **engine** — state-children replace this pattern entirely |
+| `match @x { .V :> { lift <Comp> } }` to render component per state | (looks obvious) | An **engine** — state-children replace this pattern entirely |
 | `<MarioMachine/>` use-site for a same-file engine | (older scrml) | The engine renders **at its declaration position**. Use-site only exists for cross-file imports. |
 | `.tryAdvance(.X)` or `@x.advanceIfValid(.Y)` | (invented) | Use `if (@marioState == .Small) @marioState = .Big`. Silent no-op on invalid is forbidden. |
 | `<onEnter>` / `<onLeave>` lifecycle elements inside engines | (XState, others) | Use `<onTransition from=X>` (entering) or `<onTransition to=Y>` (leaving). One concept. |
@@ -1076,7 +1076,7 @@ If your instinct from another framework fires, stop and use the scrml form. Thes
 | `onclick=fn(); @x = .Y` (multi-statement inline) | JS/Vue/Svelte | Name the function: `function startOver() { fn(); @x = .Y }` then `onclick=startOver()` (§6.7). |
 | `function reset() { ... }` defined locally | (training-data muscle memory) | `reset` is a reserved language keyword. Pick another name. Use `reset(@cell)` to reset state to its declared default (§6.6). |
 | `<MyEngine/>` for a same-file engine | (over-eager-mount) | Same-file engines render at declaration position. `<EngineName/>` use-site is for cross-file mounts only (§4.2). |
-| `derived=@source` expecting auto variant-name matching | (anticipated shorthand) | `derived=expr` accepts any reactive expression of the engine's type. Use a `match` block: `derived=match @source { .A | .B => .X, _ => .Y }` (§4.10). |
+| `derived=@source` expecting auto variant-name matching | (anticipated shorthand) | `derived=expr` accepts any reactive expression of the engine's type. Use a `match` block: `derived=match @source { .A | .B :> .X, _ :> .Y }` (§4.10). |
 | `<onEnter>` / `<onLeave>` lifecycle elements | XState, RxJS | Use `<onTransition from=X>` (entering) or `<onTransition to=Y>` (leaving) — one concept (§4.4). |
 | `match=@x` attribute for cross-field validation | (extrapolated) | Use `eq(@x)` predicate. `<confirm req eq(@signup.password)>`. There's no `match=` attribute (collides with `<match>` block) (§6.1). |
 | `not null` / `unique` on a state cell | SQL muscle memory | Schema vocabulary stays in `<schema>`. State cells use `req`, `length(>=N)`, `eq(...)`, etc. — the shared core. Schema also accepts the shared core (additive). |
