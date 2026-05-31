@@ -161,6 +161,8 @@ function parseArgs(args) {
       emitBatchPlan = true;
     } else if (arg === "--emit-reachability") {
       emitReachability = true;
+    } else if (arg === "--emit-engine-graph") {
+      emitEngineGraph = true;
     } else if (arg === "--emit-per-route") {
       // S91 A-4.1 — opt-in per-route artifact splitter (SPEC §40.9.7).
       // Default-off during A-4 wave development per OQ-A4-F; default-on
