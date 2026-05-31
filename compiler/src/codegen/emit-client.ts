@@ -12,7 +12,7 @@ import { emitBindings } from "./emit-bindings.ts";
 import { emitReactiveWiring } from "./emit-reactive-wiring.ts";
 import { filterChannelImportSpecifiers } from "./emit-channel.ts";
 import { emitEventWiring } from "./emit-event-wiring.ts";
-import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEngineMountsForFile, emitEngineHookFiringFunctionsForFile, emitEngineInitialArmsForFile, emitEngineBodyRenderForFile, emitDerivedEngineBodyRenderForFile } from "./emit-engine.ts";
+import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEngineMountsForFile, emitEngineHookFiringFunctionsForFile, emitEngineInitialArmsForFile, emitEngineOpenerEffectsForFile, emitEngineBodyRenderForFile, emitDerivedEngineBodyRenderForFile } from "./emit-engine.ts";
 import { setVariantFieldsForFile } from "./emit-control-flow.ts";
 import { setVariantFieldsForRewriter } from "./rewrite.js";
 import { EncodingContext, emitDecodeTable, emitRuntimeReflect } from "./type-encoding.ts";
@@ -1341,6 +1341,23 @@ export function generateClientJs(ctx: CompileContext): string {
     lines.push("");
     lines.push("// --- engine onTimeout initial-arms (compiler-generated, §51.0.M) ---");
     for (const line of engineInitArmLines) lines.push(line);
+  }
+
+  // §51.0.H Form 3 (S148, Insight 33 Fork C1) — boot-only opener effect=.
+  // Emitted AFTER the onTimeout/onIdle initial-arms (ordering ruling ii): the
+  // variant cell inits (emitEngineSubstrate), the <onIdle> watchdog arms
+  // (engineInitArmLines above), THEN the opener effect fires here \u2014 LAST
+  // among the module-init engine steps. Boot-only: emitted on the module-init
+  // path exactly once; re-entering initial= later does NOT re-run it. Any
+  // cross-variant write inside it is an ordinary transition that resets the
+  // watchdog per §51.0.R rule 2 (falls out of the standard write rewrite \u2014
+  // no watchdog reset is special-cased for the boot edge). Tree-shake: empty
+  // when no engine declares an opener effect=.
+  const engineOpenerEffectLines = clientStage(ctx, "emit-engine-opener-effects", () => emitEngineOpenerEffectsForFile(fileAST));
+  if (engineOpenerEffectLines.length > 0) {
+    lines.push("");
+    lines.push("// --- engine opener effect= boot-init effects (compiler-generated, §51.0.H Form 3) ---");
+    for (const line of engineOpenerEffectLines) lines.push(line);
   }
 
   // Emit ref= and bind:/class: directive wiring

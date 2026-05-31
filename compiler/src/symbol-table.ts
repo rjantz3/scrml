@@ -385,6 +385,18 @@ export interface EngineMetadata {
    *  `engine-decl.rulesRaw` via `scanForOnIdleEntries`. */
   idleWatchdog?: OnIdleEntry | null;
 
+  /** §51.0.H Form 3 (S148, Insight 33 Fork C1) — boot-only OPENER `effect=`
+   *  raw logic body, mirroring `engine-decl.openerEffect`. The effect of the
+   *  implicit init→`initial=` transition (Elm init+Cmd), run ONCE at
+   *  module-init. `null` when the opener declares no `effect=`. Populated by
+   *  PASS 10.A (makeEngineRecord) directly from the parser field. DISTINCT
+   *  slot from the per-state-child `effect=` (which lives in
+   *  `stateChildren[i].effectRaw`). Codegen (emit-engine.ts) lowers it as a
+   *  module-init fire AFTER the onIdle arm (ordering ruling ii); B16
+   *  (walkDerivedEngineDeclRejections) fires E-ENGINE-EFFECT-ON-DERIVED when it
+   *  is non-null on a derived engine (ruling iii). */
+  openerEffect?: string | null;
+
   // ---- B15 fields (PASS 11 — engine state-child exhaustiveness + rule= typer) ----
 
   /** §51.0.B + §51.0.F — list of state-child entries parsed out of
@@ -5056,6 +5068,15 @@ function makeEngineRecord(
       : { kind: "legacy-source-var", varName: engineDecl.sourceVar })
     : null;
 
+  // §51.0.H Form 3 (S148, Insight 33 Fork C1) — boot-only opener `effect=`.
+  // The parser captures the raw logic body (no `${}` wrapper) into
+  // `engine-decl.openerEffect`, or null when absent. Lift it onto engineMeta
+  // verbatim; codegen + B16 derived-rejection consume it.
+  const openerEffect: string | null =
+    typeof engineDecl.openerEffect === "string" && engineDecl.openerEffect.length > 0
+      ? engineDecl.openerEffect
+      : null;
+
   const engineMeta: EngineMetadata = {
     forType,
     variants: [], // B14 leaves empty; B15 populates from the type system.
@@ -5064,6 +5085,7 @@ function makeEngineRecord(
     varName,
     isExported,
     isPinned,
+    openerEffect,
     // A7 forward-compat fields (declared B14):
     parentEngine: null,
     innerEngines: [],
@@ -6525,6 +6547,40 @@ function fireDerivedEngineNoInitial(
 }
 
 /**
+ * Fire `E-ENGINE-EFFECT-ON-DERIVED` on a derived engine whose OPENER declares
+ * a boot-only `effect=` (§51.0.H Form 3, S148, Insight 33 Fork C1 edge-ruling
+ * iii + §34 catalog row). A derived engine has no implicit init→`initial=`
+ * edge (its initial value is COMPUTED from `derived=expr`, not entered) and
+ * its variable is read-only (`E-DERIVED-ENGINE-NO-WRITE`), so a boot effect
+ * has nothing coherent to do. Distinct from the per-state-child `effect=`,
+ * which remains LEGAL on a derived engine (it fires on derived state changes).
+ */
+function fireEngineEffectOnDerived(
+  engineDecl: any,
+  varName: string,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  const span: SYMDiagnostic["span"] = engineDecl.span ?? {
+    file: filePath, start: 0, end: 0, line: 1, col: 1,
+  };
+  errors.push({
+    code: "E-ENGINE-EFFECT-ON-DERIVED",
+    message:
+      `E-ENGINE-EFFECT-ON-DERIVED: derived engine \`@${varName}\` declares a ` +
+      `boot-only opener \`effect=\` (§51.0.H Form 3). A derived engine has no ` +
+      `init\u2192\`initial=\` edge \u2014 its initial value is computed from the ` +
+      `\`derived=\` expression, not entered \u2014 and its variable is read-only ` +
+      `(E-DERIVED-ENGINE-NO-WRITE), so a boot effect has nothing to do. ` +
+      `Resolution: use a mount-time \`\${}\` effect at the enclosing scope, or a ` +
+      `non-derived engine. (State-child \`effect=\` on a derived engine remains ` +
+      `legal per §51.0.J.)`,
+    span,
+    severity: "error",
+  });
+}
+
+/**
  * Fire `E-DERIVED-ENGINE-NO-RULES` on a derived engine whose body contains
  * authored transition rules. Per SPEC §51.0.J line 20406 + §34 catalog row.
  */
@@ -6624,6 +6680,15 @@ export function walkDerivedEngineDeclRejections(
       // Skip non-derived engines (B15 owns those rules).
       if (dExpr === null || dExpr === undefined) {
         return;
+      }
+      // §51.0.H Form 3 ruling (iii), S148 — E-ENGINE-EFFECT-ON-DERIVED.
+      // Fires for ANY derived engine (BOTH the legacy-source-var `derived=@x`
+      // form AND the Move-14 inline-match form) whose OPENER declares a
+      // boot-only `effect=`. Placed BEFORE the legacy-source-var early-return
+      // below so the legacy form is covered too. Independent of NO-INITIAL /
+      // NO-RULES (those only apply to the inline-match form).
+      if (typeof meta.openerEffect === "string" && meta.openerEffect.length > 0) {
+        fireEngineEffectOnDerived(node, meta.varName ?? "", errors, filePath);
       }
       // Skip legacy §51.9 derived/projection machines — they are governed
       // by `E-ENGINE-017` (writes) and §51.9 projection-rule semantics

@@ -86,7 +86,7 @@ function _wrapDeepReactive(rewrittenExpr: string, rawExpr: string, initExpr?: an
 // Types
 // ---------------------------------------------------------------------------
 
-interface EmitLogicOpts {
+export interface EmitLogicOpts {
   derivedNames?: Set<string> | null;
   /**
    * Bug 61 — dotted synth-cell keys (`collectSynthCellKeys(fileAST)`). Threaded

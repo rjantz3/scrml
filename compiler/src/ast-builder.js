@@ -11972,6 +11972,51 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // mis-matches (mirrors the `historyAttr` regex tightening landed
         // S70 post-A5-3-SHIP for the SPEC §51.0.N `.Variant.history` shape).
         const pinnedMatch = /(?:^|\s)pinned(?=\s|>|\/|$)/.test(header);
+        // §51.0.H Form 3 (S148, Insight 33 Fork C1) — `effect=${...}` on the
+        // ENGINE OPENER (NOT a state-child): the boot-only init effect, the
+        // effect of the implicit init→`initial=` transition (Elm init+Cmd).
+        // DISTINCT slot from the state-child `effect=` (§51.0.H Form 1): same
+        // attribute name, different host (opener vs state-child), different
+        // trigger (construction vs leaving-a-state). Captured here as RAW logic
+        // body text (the substring between `${` and the matching `}`, WITHOUT
+        // the `${` `}` wrapper) so codegen can lower it via `rewriteExpr`, the
+        // same as the state-child effectRaw. `null` when absent.
+        //
+        // Brace-AND-string-aware scan: the effect body may contain `"}"` or
+        // `'}'` string literals, so a naive depth-only scan would terminate
+        // early. Mirrors `_findOpenerEnd`'s string-skip discipline (the
+        // engine-statechild-parser effectRaw scan is depth-only, which is
+        // adequate there because state-child openers are short; the opener
+        // effect body is a full logic block, so it gets the stronger scan).
+        let openerEffect = null;
+        const openerEffectIdx = header.search(/(?:^|\s)effect\s*=\s*\$\{/);
+        if (openerEffectIdx >= 0) {
+          const dollarBrace = header.indexOf("${", openerEffectIdx);
+          if (dollarBrace >= 0) {
+            let j = dollarBrace + 2;
+            let braceDepth = 1;
+            let inDQ = false;
+            let inSQ = false;
+            while (j < header.length && braceDepth > 0) {
+              const ch = header[j];
+              if (inDQ) { if (ch === '"') inDQ = false; else if (ch === "\\") j++; j++; continue; }
+              if (inSQ) { if (ch === "'") inSQ = false; else if (ch === "\\") j++; j++; continue; }
+              if (ch === '"') { inDQ = true; j++; continue; }
+              if (ch === "'") { inSQ = true; j++; continue; }
+              if (ch === "{") { braceDepth++; j++; continue; }
+              if (ch === "}") { braceDepth--; if (braceDepth === 0) break; j++; continue; }
+              j++;
+            }
+            if (braceDepth === 0) {
+              // The inner expression text between `${` and the matching `}`.
+              openerEffect = header.slice(dollarBrace + 2, j).trim();
+              if (openerEffect.length === 0) openerEffect = null;
+            }
+            // Unbalanced braces → openerEffect stays null (best-effort capture;
+            // downstream rewriteExpr would surface a parse error if the malformed
+            // text reached codegen, but a null here keeps the AST clean).
+          }
+        }
         // §51.0.P (S67 ratification, struck 2026-05-08) — `parallel` bareword
         // on file-scope `<engine>` was naming sugar over §51.4 multi-engine
         // pattern. Closed retroactively per parallel-disposition deep-dive
@@ -12191,6 +12236,13 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           varName,
           varNameOverride,
           initialVariant,
+          // §51.0.H Form 3 (S148, Insight 33 Fork C1) — boot-only opener
+          // `effect=${...}` raw logic body, or null when absent. SYM
+          // (makeEngineRecord) lifts this onto engineMeta.openerEffect;
+          // codegen (emit-engine.ts) lowers it as a module-init fire AFTER the
+          // onIdle arm (ordering ruling ii); B16 fires E-ENGINE-EFFECT-ON-
+          // DERIVED when it is non-null on a derived engine (ruling iii).
+          openerEffect,
           pinned,
           // §51.0.P (S68 ratification, STRUCK 2026-05-08): the `parallelAttr`
           // field on engine-decl nodes was removed alongside the spec strike.

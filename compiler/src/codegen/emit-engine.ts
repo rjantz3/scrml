@@ -1111,6 +1111,158 @@ export function emitEngineInitialArmsForFile(fileAST: any): string[] {
   return lines;
 }
 
+/**
+ * §51.0.H Form 3 (S148, Insight 33 Fork C1) — Re-parse the raw opener
+ * `effect=` body into a walkable statement list and lower it through the
+ * STANDARD logic-emission path (`emitLogicBody`) with full engine-aware opts.
+ *
+ * WHY a re-parse (not `rewriteHookExprText`): the parser captures the opener
+ * effect as RAW TEXT (`engine-decl.openerEffect`). `rewriteHookExprText`
+ * (the `rewriteExpr` pipeline) is SINGLE-EXPRESSION — it collapses a
+ * multi-statement body to its first statement and lowers `@engineVar = .X`
+ * to a bare `_scrml_reactive_set` (bypassing the engine transition machinery:
+ * no `rule=` validation, no onIdle-watchdog reset, no hook firing). The boot
+ * effect is realistically multi-statement (the README Stage-3 flagship is) and
+ * MAY perform a cross-variant engine write (`@phase = .Editing`). To get both
+ * multi-statement support AND correct `_scrml_engine_direct_set` routing, we
+ * wrap the body in a `${...}` logic block, re-run BS+TAB to produce real AST
+ * statements (this also re-splits any nested `!{}` failable handler — the
+ * canonical errors-as-states shape in the flagship), and lower via
+ * `emitLogicBody` with the file's `engineBindings` threaded. This mirrors
+ * `emit-logic.ts:_emitNestedGuardedArmBody`.
+ *
+ * Boot-only / ordering: emitted on the module-init path AFTER the onIdle arm
+ * (ruling ii). A cross-variant write inside it is an ORDINARY transition: the
+ * `_scrml_engine_direct_set` lowering resets the watchdog per §51.0.R rule 2
+ * with NO special-casing here. The boot effect's own implicit
+ * init\u2192`initial=` edge does NOT reset the watchdog because we emit NO
+ * transition for it \u2014 the variant cell was already set to `initial=` by
+ * `emitEngineVariantCellInit`, and the onIdle arm already happened.
+ *
+ * Returns an empty array when the engine declares no opener `effect=`
+ * (tree-shake — parity with the onIdle / onTimeout tree-shake invariants).
+ */
+export function emitEngineOpenerEffect(
+  meta: EngineMetadata,
+  emitOpts: import("./emit-logic.ts").EmitLogicOpts,
+): string[] {
+  const lines: string[] = [];
+  const openerEffect = meta.openerEffect;
+  if (typeof openerEffect !== "string" || openerEffect.length === 0) {
+    return lines; // tree-shake: no opener effect on this engine.
+  }
+
+  // Re-parse the raw body through BS+TAB so multi-statement bodies + nested
+  // `!{}` failable handlers become real AST statements.
+  let stmts: any[] | null = null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const bs = require("../block-splitter.js") as { runBlockSplitter: (i: { filePath: string; source: string }) => any };
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const tab = require("../ast-builder.js") as { buildAST: (bsOut: any) => any };
+    const wrapped = "${\n" + openerEffect + "\n}";
+    const bsOut = bs.runBlockSplitter({ filePath: "__opener_effect__.scrml", source: wrapped });
+    const built = tab.buildAST(bsOut);
+    const nodes: any[] = built?.ast?.nodes ?? [];
+    for (const n of nodes) {
+      if (n?.kind === "logic" && Array.isArray(n.body) && n.body.length > 0) { stmts = n.body; break; }
+      if (Array.isArray(n?.body) && n.body.length > 0) { stmts = n.body; break; }
+      if (Array.isArray(n?.children) && n.children.length > 0) { stmts = n.children; break; }
+    }
+  } catch (_e) {
+    stmts = null;
+  }
+
+  lines.push(
+    `// §51.0.H Form 3 opener effect= (boot-only init effect): ${meta.varName} (${meta.forType})`,
+  );
+
+  // Wrap in an IIFE so any local `let`/`const` declared inside the effect body
+  // does not leak into module scope, and so the boot effect is a single
+  // self-contained module-init statement. Boot-only: emitted on the module-init
+  // path exactly once; NOT inside any per-arm re-entry handler, so re-entering
+  // `initial=` later does NOT re-run it.
+  lines.push(`(function () {`);
+  if (stmts) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const logic = require("./emit-logic.ts") as { emitLogicBody: (nodes: any[], opts: any) => string[] };
+    const emitted = logic.emitLogicBody(stmts, { ...emitOpts, boundary: "client" });
+    for (const l of emitted) {
+      lines.push(`  ${l}`);
+    }
+  } else {
+    // Defensive fallback — re-parse failed. Fall back to the single-expression
+    // rewrite so a simple body still emits (and a malformed multi-statement
+    // body surfaces a loud downstream JS parse error rather than silently
+    // dropping the effect).
+    const lowered = rewriteHookExprText(openerEffect);
+    lines.push(`  ${lowered};`);
+  }
+  lines.push(`})();`);
+  return lines;
+}
+
+/**
+ * §51.0.H Form 3 (S148) — Emit the boot-only opener `effect=` for every
+ * in-scope non-derived engine in the file. Sibling to
+ * `emitEngineInitialArmsForFile`. Empty when no engine declares an opener
+ * `effect=` (tree-shake).
+ *
+ * Builds the file-level engine-aware emit opts ONCE (engineBindings,
+ * engineVarNames, enginesWith* sets) so the re-parsed effect-body statements
+ * lower with full engine-write awareness (`@engineVar = .X` →
+ * `_scrml_engine_direct_set`).
+ *
+ * Called by `emit-client.ts` AFTER `emitEngineInitialArmsForFile` so the
+ * ordering is: variant cell init (emitEngineSubstrate) \u2192 onIdle/onTimeout
+ * arm (emitEngineInitialArmsForFile) \u2192 boot effect (HERE). Per ruling (ii)
+ * the boot effect fires LAST among the module-init engine steps.
+ *
+ * Derived engines are excluded by `collectC12EngineDecls` (they are not C12
+ * substrate engines); they also reject E-ENGINE-EFFECT-ON-DERIVED at SYM, so
+ * a derived engine never reaches this emitter with a non-null openerEffect.
+ */
+export function emitEngineOpenerEffectsForFile(fileAST: any): string[] {
+  const decls = collectC12EngineDecls(fileAST);
+  if (decls.length === 0) return [];
+  // Only build the (non-trivial) engine-aware opts if at least one engine
+  // actually declares an opener effect (tree-shake the opts construction too).
+  const hasAnyOpenerEffect = decls.some(
+    (d) => typeof d._record?.engineMeta?.openerEffect === "string"
+      && d._record!.engineMeta!.openerEffect!.length > 0,
+  );
+  if (!hasAnyOpenerEffect) return [];
+
+  // Build file-level engine-aware emit opts ONCE. Mirrors the opts assembly in
+  // emit-reactive-wiring.ts so engine writes inside the effect body route to
+  // `_scrml_engine_direct_set` with the correct rule= / watchdog / hook args.
+  const engineBindings = buildEngineBindingsMap(fileAST);
+  const engineVarNames = collectEngineVarNames(fileAST);
+  const enginesWithHooks = collectEnginesWithHooks(fileAST);
+  const enginesWithOnTimeout = collectEnginesWithOnTimeout(fileAST);
+  const enginesWithIdleWatchdog = collectEnginesWithIdleWatchdog(fileAST);
+  const enginesWithInternalRules = collectEnginesWithInternalRules(fileAST);
+  const enginesWithHistory = collectEnginesWithHistory(fileAST);
+  const emitOpts = {
+    boundary: "client" as const,
+    ...(engineBindings ? { engineBindings } : {}),
+    ...(engineVarNames.size > 0 ? { engineVarNames } : {}),
+    ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}),
+    ...(enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}),
+    ...(enginesWithIdleWatchdog.size > 0 ? { enginesWithIdleWatchdog } : {}),
+    ...(enginesWithInternalRules.size > 0 ? { enginesWithInternalRules } : {}),
+    ...(enginesWithHistory.size > 0 ? { enginesWithHistory } : {}),
+  };
+
+  const lines: string[] = [];
+  for (const decl of decls) {
+    const meta = decl._record!.engineMeta!;
+    const effectLines = emitEngineOpenerEffect(meta, emitOpts);
+    for (const l of effectLines) lines.push(l);
+  }
+  return lines;
+}
+
 // ---------------------------------------------------------------------------
 // Top-level emission — orchestrates all engines in a file
 // ---------------------------------------------------------------------------
