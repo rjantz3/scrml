@@ -22,17 +22,17 @@
 
   function next() {
     match @currentStep {
-      .Info        => { @currentStep = Step::Preferences }
-      .Preferences => { @currentStep = Step::Confirm }
-      .Confirm     => { }
+      .Info        :> { @currentStep = Step::Preferences }
+      .Preferences :> { @currentStep = Step::Confirm }
+      .Confirm     :> { }
     }
   }
 
   function back() {
     match @currentStep {
-      .Info        => { }
-      .Preferences => { @currentStep = Step::Info }
-      .Confirm     => { @currentStep = Step::Preferences }
+      .Info        :> { }
+      .Preferences :> { @currentStep = Step::Info }
+      .Confirm     :> { @currentStep = Step::Preferences }
     }
   }
 

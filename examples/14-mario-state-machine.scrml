@@ -65,18 +65,18 @@
     function eatPowerUp(powerUp: PowerUp) {
         if (@gameOver) { return }
         match powerUp {
-            .Mushroom(n) => {
+            .Mushroom(n) :> {
                 @coins = @coins + n
                 @marioState = match @marioState {
                     .Small => MarioState::Big
                     else   => @marioState
                 }
             }
-            .Flower(n) => {
+            .Flower(n) :> {
                 @coins = @coins + n
                 @marioState = .Fire
             }
-            .Feather(n) => {
+            .Feather(n) :> {
                 @coins = @coins + n
                 @marioState = .Cape
             }
@@ -108,8 +108,8 @@
     // like turning a HealthRisk variant into its banner label.
     fn riskBanner(risk: HealthRisk) -> string {
         match risk {
-            .AtRisk => "ONE HIT AND YOU LOSE A LIFE!"
-            .Safe   => "POWERED UP — YOU CAN ABSORB A HIT"
+            .AtRisk :> "ONE HIT AND YOU LOSE A LIFE!"
+            .Safe   :> "POWERED UP — YOU CAN ABSORB A HIT"
         }
     }
 

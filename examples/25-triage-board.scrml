@@ -67,8 +67,8 @@
     // PURE — is the given task the one currently being dragged?
     fn isDraggingTask(id: number, phase: DragPhase, currentId: number) -> boolean {
         match phase {
-            .Dragging => currentId == id
-            .Idle     => false
+            .Dragging :> currentId == id
+            .Idle     :> false
         }
     }
 

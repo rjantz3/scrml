@@ -100,16 +100,16 @@
     }
     ${
       match @state {
-        .NotAsked     => { lift <p class="hint">Press Reload to fetch contacts.</p> }
-        .Loading      => { lift <p class="loading">Loading…</p> }
-        .Ready(rows)  => {
+        .NotAsked     :> { lift <p class="hint">Press Reload to fetch contacts.</p> }
+        .Loading      :> { lift <p class="loading">Loading…</p> }
+        .Ready(rows)  :> {
           lift <ul class="rows">
             ${ for (let r of rows) {
               lift <li>${r.name} <span class="email">${r.email}</span></li>
             } }
           </ul>
         }
-        .Failed(msg)  => {
+        .Failed(msg)  :> {
           lift <div class="error">
             <p>Failed: ${msg}</p>
             <button onclick=load()>Retry</button>

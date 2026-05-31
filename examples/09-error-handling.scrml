@@ -52,18 +52,18 @@ ${
         // validate() is failable — handle each variant. Each arm returns
         // (early-exit on validation failure). Success continues to submit.
         let validated = validate() !{
-            | .EmptyName        => { @sending = false; return }
-            | .EmptyEmail       => { @sending = false; return }
-            | .InvalidEmail(e)  => { @sending = false; return }
-            | .SubmitFailed(_)  => { @sending = false; return }
+            | .EmptyName        :> { @sending = false; return }
+            | .EmptyEmail       :> { @sending = false; return }
+            | .InvalidEmail(e)  :> { @sending = false; return }
+            | .SubmitFailed(_)  :> { @sending = false; return }
         }
 
         // submit() is also failable. Each error arm early-exits with status.
         let result = submit(@name, @email, @body) !{
-            | .SubmitFailed(e)  => { @sending = false; return }
-            | .EmptyName        => { @sending = false; return }
-            | .EmptyEmail       => { @sending = false; return }
-            | .InvalidEmail(_)  => { @sending = false; return }
+            | .SubmitFailed(e)  :> { @sending = false; return }
+            | .EmptyName        :> { @sending = false; return }
+            | .EmptyEmail       :> { @sending = false; return }
+            | .InvalidEmail(_)  :> { @sending = false; return }
         }
 
         @sending   = false

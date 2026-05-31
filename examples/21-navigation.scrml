@@ -92,9 +92,9 @@
     }
     <main class="view">
       ${ match @currentView {
-        .Home     => { lift <h1>Home</h1> }
-        .Profile  => { lift <h1>Profile</h1> }
-        .Settings => { lift <h1>Settings</h1> }
+        .Home     :> { lift <h1>Home</h1> }
+        .Profile  :> { lift <h1>Profile</h1> }
+        .Settings :> { lift <h1>Settings</h1> }
       } }
 
       <p class="hint">
