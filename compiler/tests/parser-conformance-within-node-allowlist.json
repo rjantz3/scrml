@@ -1243,17 +1243,17 @@
   },
   "samples/compilation-tests/error-001-basic.scrml": {
     "EXTRA-FIELD": 2,
-    "MISSING-FIELD": 4,
+    "MISSING-FIELD": 6,
     "SPAN-COORD": 2
   },
   "samples/compilation-tests/error-002-multiple-arms.scrml": {
     "EXTRA-FIELD": 2,
-    "MISSING-FIELD": 6,
+    "MISSING-FIELD": 10,
     "SPAN-COORD": 4
   },
   "samples/compilation-tests/error-003-wildcard.scrml": {
     "EXTRA-FIELD": 2,
-    "MISSING-FIELD": 3,
+    "MISSING-FIELD": 4,
     "SPAN-COORD": 1
   },
   "samples/compilation-tests/error-004-in-logic.scrml": {
@@ -1265,7 +1265,7 @@
   },
   "samples/compilation-tests/error-005-typed.scrml": {
     "EXTRA-FIELD": 2,
-    "MISSING-FIELD": 5,
+    "MISSING-FIELD": 8,
     "SPAN-COORD": 3
   },
   "samples/compilation-tests/func-001-basic.scrml": {
@@ -4294,7 +4294,7 @@
   "samples/compilation-tests/gauntlet-s20-error-test/error-effect-typed-001.scrml": {
     "EXTRA-FIELD": 2,
     "FIELD-SHAPE": 3,
-    "MISSING-FIELD": 5,
+    "MISSING-FIELD": 8,
     "SPAN-COORD": 3
   },
   "samples/compilation-tests/gauntlet-s20-error-test/fail-basic-001.scrml": {
