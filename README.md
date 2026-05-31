@@ -236,16 +236,15 @@ const <visible> = match @filter {
 
 <auth role="User">
 
-<engine for=Phase initial=.Loading>
+<engine for=Phase initial=.Loading effect=${
+    @tasks = loadTasks() !{
+        | ::Network msg :> { @phase = .ErrorState(msg); return }
+    }
+    @phase = @tasks.length == 0 ? .Empty : .Editing
+}>
 
     <Loading rule=(.Empty | .Editing | .ErrorState)>
         Loading your tasks…
-        <onTransition to=.Loading>${
-            @tasks = loadTasks() !{
-                | ::Network msg -> { @phase = .ErrorState(msg); return }
-            }
-            @phase = @tasks.length == 0 ? .Empty : .Editing
-        }</>
     </>
 
     <Empty rule=.Saving>

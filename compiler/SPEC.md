@@ -16363,6 +16363,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-ENGINE-INVALID-TRANSITION | §51.0.F, §51.0.G | Direct write to engine variable or `.advance()` violates the from-state's `rule=` contract. Statically rejected when from-state is known; runtime-thrown otherwise. **v0.3 Option-d carve-out:** self-writes (target equals current variant) are NO-OPS, NOT violations — see §51.0.F.1 + W-ENGINE-SELF-WRITE-DETECTED. | Runtime |
 | W-ENGINE-SELF-WRITE-DETECTED | §51.0.F.1 | (v0.3, info-level) The compiler has detected an engine self-write — `@var = .CurrentVariant` or `@var.advance(.CurrentVariant)` where `.CurrentVariant` either matches the enclosing state-child tag (STRICT — inside-state-child fire) OR is a declared variant of the engine and the write site is outside any state-child body (CONSERVATIVE — outside-state-child fire). Per §51.0.F.1, self-writes are runtime NO-OPS: no `<onTransition>` fires, no history capture (§51.0.N), no timer rearm (§51.0.M), no idle-watchdog reset (§51.0.R), no subscriber notification. If the no-op-when-already-in-state behavior is INTENTIONAL (e.g., a defensive `set(.Current)` reachable from multiple variants), the lint is informational only — no action required. If a state change was expected unconditionally, verify the write target or guard the call site. Suppression: rephrase the write target via a derived cell (avoid the literal `.Variant` form), or remove the write entirely. Joins the small `W-PROGRAM-SPA-INFERRED` / `I-MATCH-PROMOTABLE` / `D-BATCH-001` family of synthesis-pattern info lints (Insight 30 closure precedent). (Catalog addition v0.3 Option-d synthesis 2026-05-12; emitted at `compiler/src/symbol-table.ts` PASS 16 fire-site #10 + PASS 12.B `walkEngineSelfWriteOutside`.) | Info |
 | E-ENGINE-EFFECT-AMBIGUOUS | §51.0.H | `effect=` attribute used on a state-child whose `rule=` is multi-target. Use `<onTransition>` element child(ren) instead — `effect=` requires a single-target rule. | Error |
+| E-ENGINE-EFFECT-ON-DERIVED | §51.0.H, §51.0.J | `effect=` used on the opener of a `derived=` engine (the boot init effect, §51.0.H Form 3). A derived engine has no init→`initial=` edge (its initial value is computed from `derived=expr`, not entered) and its variable is read-only (`E-DERIVED-ENGINE-NO-WRITE`), so a boot effect has nothing to do. Resolution: use a mount-time `${}` effect at the enclosing scope, or a non-derived engine. (Catalog addition S148 — Insight 33 Fork C1 edge-case ruling iii. NB: state-child `effect=` on a derived engine remains LEGAL per §51.0.J — fires on derived state changes.) | Error |
 | E-ONTRANSITION-NO-TARGET | §51.0.H | An `<onTransition>` element appears with neither `to=.Variant` nor `from=.Variant`. The handler has no trigger (per the §51.0.H attribute table, exactly one of `to=` / `from=` MUST appear — `to=` fires when leaving toward `.Variant`; `from=` fires when arriving from `.Variant`). Add `to=.Variant` (outgoing) or `from=.Variant` (incoming). (Catalog addition S74 — A1b B17.3.) | Error |
 | E-ENGINE-VAR-DUPLICATE | §51.0.C | Separate declaration of the engine's auto-declared variable (e.g., `<marioState> = .Small` while `<engine for=MarioState ...>` also exists in scope). The engine OWNS its variable; use `var=` on the engine to override the auto-derived name. | Error |
 | W-ENGINE-INITIAL-MISSING | §51.0.E | `initial=` omitted on a non-derived `<engine>`. Compiler defaults to the first state-child's variant. Add `initial=.Variant` to silence the warning. | Warning |
@@ -23924,7 +23925,7 @@ body's own, not inherited by nested plain markup.
 #### 51.0.B Engine declaration syntax
 
 ```scrml
-<engine for=Type [initial=.Variant] [derived=expr] [pinned] [var=name]>
+<engine for=Type [initial=.Variant] [derived=expr] [pinned] [var=name] [effect=expr]>
   <Variant1 [rule=...] [effect=...]>...</>
   <Variant2 [rule=...]>...</>
   ...
@@ -23940,6 +23941,7 @@ body's own, not inherited by nested plain markup.
 | `derived=expr` | mutually exclusive with `initial=` | Engine value computed from a reactive expression — see §51.0.J. |
 | `pinned` | optional | Opt-out from hoisting per §6.10. Covers BOTH the engine identifier AND the auto-declared variable. |
 | `var=identifier` | optional | Override the auto-derived variable name (§51.0.C). Use for disambiguation when the auto-name collides. |
+| `effect=${...}` | optional; non-derived only | **Boot-only init effect (S148, §51.0.H Form 3).** A logic-context expression that runs ONCE at module-init as the effect of the implicit init→`initial=` transition (Elm `init`+`Cmd`). Writes to the engine variable inside it are checked against `.<initial>.rule`. Forbidden on `derived=` engines — `E-ENGINE-EFFECT-ON-DERIVED` (§51.0.J). Distinct slot from the state-child `effect=` (§51.0.H Form 1). |
 
 **State-children** are tags inside the body, named after variants of `Type`. Each
 state-child may carry:
@@ -24470,6 +24472,27 @@ benefit from seeing at compile time without being blocked: `W-PROGRAM-SPA-INFERR
 (§8.6). All four are the same synthesis-pattern shape: language absorbs the common-case
 behavior; lint surfaces the inference at compile time so adopters can verify intent.
 
+**Self-WRITE (no-op) vs self-TARGET `<onTransition>` (error) vs construction (opener
+`effect=`) — the `.SameState` trichotomy (S148, Insight 33).** Three superficially similar
+`.SameState` shapes have three different dispositions, and the discriminator is always
+*whether a real entry occurs*:
+
+- A self-WRITE `@<var> = .Loading` from inside `<Loading>` re-asserts the current variant
+  — `current === target`, NOT a real transition — and fires nothing (this section).
+- A self-TARGET `<onTransition to=.Loading>` inside `<Loading>` is a hard
+  `E-ENGINE-INVALID-TRANSITION`: `to=` means "fire on LEAVING toward `.Loading`", and
+  there is no `.Loading → .Loading` edge. Do NOT reach for it to express "do something on
+  entering `Loading`" — that intent is the construction case below.
+- **Construction** — booting INTO `.Loading` when it is the `initial=` state — IS a real
+  entry, the one entry the from/to model cannot express (no incoming edge). Its effect is
+  the **opener `effect=`** (§51.0.H Form 3), not a self-target handler.
+
+The symmetry the runtime already encodes: `_scrml_engine_history_capture_on_exit`
+(§51.0.N) treats `current === target` as "not a real exit" and skips the history write —
+the exit-side mirror of this section's no-op-on-self-write. "Re-asserting where you are"
+fires nothing on either side; "arriving" (construction via the opener `effect=`, or a
+genuine cross-state edge) is what fires.
+
 #### 51.0.G `.advance(.X)` — explicit, throws-on-failure transition (Move 13)
 
 The auto-declared engine variable provides a method-style transition API:
@@ -24538,8 +24561,83 @@ ambiguous (which target triggers it?) — `E-ENGINE-EFFECT-AMBIGUOUS` (§34).
 fire when LEAVING that state.** To-side semantics achieved via `<onTransition from=X>`
 placed in the TARGET state-child. Single concept; bidirectional via from/to.
 
-**Skipped (intentional):** `<onEnter>` / `<onLeave>` lifecycle elements. The from/to
-bidirectionality covers both directions without doubling the surface.
+**Form 3 — `effect=` on the `<engine>` opener (boot-only init effect, S148, Insight 33):**
+
+The from/to model covers every edge in the *running* transition graph but is structurally
+blind to exactly one moment: **construction** — the boot into `initial=`, which has no
+incoming edge, so no `<onTransition>` of either direction fires. `effect=` on the
+`<engine>` opener fills that gap. It is the effect of the **implicit init→`initial=`
+transition**, co-located with the engine declaration exactly as Elm co-locates
+`init : flags -> (Model, Cmd)`.
+
+```scrml
+<engine for=Phase initial=.Loading effect=${
+    // runs ONCE on boot into .Loading — the implicit init→.Loading edge's effect
+    @tasks = loadTasks() !{
+        | ::Network msg :> { @phase = .ErrorState(msg); return }
+    }
+    @phase = @tasks.length == 0 ? .Empty : .Editing   // checked against .Loading.rule
+}>
+    <Loading rule=(.Empty | .Editing | .ErrorState)> : "Loading your tasks…"
+    <Empty   rule=.Saving>                            : "No tasks yet."
+    <Editing rule=.Saving>                            : "${@tasks.length} tasks"
+    <Saving  rule=(.Saved | .ErrorState)>             : "Saving…"
+    <Saved   rule=.Editing>                           : "Saved."
+    <ErrorState msg rule=.Loading>                    : "${msg}"
+</>
+```
+
+**Semantics:**
+
+- **Boot-only.** Fires exactly ONCE, at module-init, as the implicit init→`initial=`
+  edge's effect. It does NOT re-fire on a later transition back into `initial=` (Elm
+  `init` semantics — later `.X rule=.<initial>` edges carry their own `effect=` /
+  `<onTransition>`). This is a *distinct slot* from the state-child `effect=` (Form 1):
+  same attribute name, different host (opener vs state-child) and different trigger
+  (construction vs leaving-a-state).
+- **Writes are statically checked.** The from-state of the implicit edge is statically
+  the `initial=` variant, so a `@<engineVar> = .X` write inside the opener `effect=` is
+  compile-time-validated against `.<initial>.rule` exactly as an in-state-child-body
+  write is (§51.0.F). In the example, `.Empty` / `.Editing` / `.ErrorState` are all in
+  `.Loading.rule`, so the writes are legal.
+- **`E-ENGINE-EFFECT-AMBIGUOUS` does not apply.** That code guards a state-child `effect=`
+  against a multi-target `rule=`. The opener has no `rule=`; its single edge is
+  init→`initial=`. `once` / `if=` are likewise not applicable (a single boot fire).
+
+**Edge-case rulings (S148, user-ratified):**
+
+- **(i) `<errorBoundary>` does NOT catch a boot-effect throw.** The opener `effect=` runs
+  at module-init in **logic context**, not render context. `<errorBoundary>` (§19.6) is a
+  render-context catch (a `!`-call in markup, or a sub-component throwing during render).
+  A boot effect's failable calls SHALL route their typed `!` failures through the effect's
+  OWN `!{}` handler into the engine's error variant (the errors-as-states lift — the
+  `::Network msg :> { @phase = .ErrorState(msg) }` arm above is the canonical shape). A
+  non-`!` host throw that escapes the boot effect routes to the §19.6.8 host-JS backstop
+  (logged loudly to scrml's logging surface), NOT to an enclosing boundary's `fallback=`.
+- **(ii) Ordering vs `<onIdle>` (§51.0.R).** Both touch module-init. Order: the engine
+  variant cell initializes into `initial=`; the `<onIdle>` watchdog arms (module-init =
+  the "first event", full duration — §51.0.R); THEN the opener `effect=` fires. The boot
+  effect's own init→`initial=` edge does NOT itself reset the watchdog (arming already
+  happened at module-init). Any **cross-variant** write the boot effect performs (e.g.
+  `@phase = .Editing`) is a real transition and resets the watchdog per §51.0.R rule 2.
+- **(iii) Forbidden on a `derived=` engine.** `effect=` on a `derived=` engine opener is
+  `E-ENGINE-EFFECT-ON-DERIVED` (§34, §51.0.J). A derived engine has no init→`initial=`
+  edge (its initial value is *computed*, not entered) and forbids writes to its variable
+  (`E-DERIVED-ENGINE-NO-WRITE`), so a boot effect has nothing coherent to do. Use a plain
+  mount-time `${}` effect at the enclosing scope, or a non-derived engine, instead.
+
+**Skipped (intentional) — with the one construction-boundary exception above (amended
+S148):** `<onEnter>` / `<onLeave>` lifecycle elements remain unshipped. The from/to
+bidirectionality covers both directions of every *transition-plane* edge without doubling
+the surface — that rationale stands. The single moment from/to cannot reach is the
+**construction boundary** (boot into `initial=`), and it is served by Form 3 (opener
+`effect=`) above, NOT by a new entry element. A general `<onEnter>`
+(fire-on-entry-regardless-of-source) is HELD pending a witnessed requirement: a state with
+≥2 in-edges AND a shared entry effect in real adopter code. In a closed-edge engine "any
+source" is always re-expressible as named-effect-per-edge, so the general hook trades that
+per-edge intentionality (Pillar 6) for ergonomics the corpus has not yet asked for
+(Insight 33, S144). Sub-shape (a) on-initial-mount is witnessed (the README Stage-3
+flagship); sub-shape (b) on-enter-from-any-source is not.
 
 **Co-existence:** a single state-child MAY have BOTH an `effect=` attribute (for the
 common single-target case) and additional `<onTransition>` children (for less common
@@ -24611,6 +24709,7 @@ state is FUNCTION of an upstream source rather than authored.
 | `initial=` on the engine | REJECTED — `E-DERIVED-ENGINE-NO-INITIAL` (§34). Initial value computed from `derived=expr` at engine-init time. |
 | Direct writes to the auto-declared variable | REJECTED — `E-DERIVED-ENGINE-NO-WRITE` (§34). The variable is read-only. |
 | `<onTransition>` and `effect=` on state-children | LEGAL — fire on derived state changes (the value changed; transition is real, just initiated by source-cell update, not user code). |
+| `effect=` on the engine OPENER (boot init effect, §51.0.H Form 3) | REJECTED — `E-ENGINE-EFFECT-ON-DERIVED` (§34). A derived engine has no init→`initial=` edge (its initial value is computed from `derived=expr`, not entered) and its variable is read-only, so a boot effect has nothing coherent to do. Use a mount-time `${}` effect at the enclosing scope, or a non-derived engine, instead. (Contrast: state-child `effect=` above remains legal.) |
 | Initial-value absent | If `derived=expr` returns scrml-absence (`not`) when the source is in its `initial=` state — `E-DERIVED-ENGINE-INITIAL-ABSENT` (§34). (Code renamed S90 from `E-DERIVED-ENGINE-INITIAL-UNDEFINED` per M-7C-D-12 Track 4 / OQ-6; the runtime condition is scrml-absence per §42, not JS-host `undefined`.) |
 | Chained derivation (A → B → C) | LEGAL. Cycle detection at compile time → `E-DERIVED-ENGINE-CIRCULAR` (§34). |
 | `pinned` interaction | Moot — no writes possible; hoisting opt-out applies only to the identifier, not the value. Document and continue (open-Q §7.6 resolution). |
@@ -25317,7 +25416,12 @@ fires `@phase = Phase.Idle`.
 **Semantics:**
 
 1. **Armed at module-init** alongside the engine variant cell. Module-init counts as the
-   "first event" — the timer arms with the full duration remaining.
+   "first event" — the timer arms with the full duration remaining. **Ordering vs an
+   opener `effect=` (§51.0.H Form 3, S148):** the variant cell initializes into `initial=`,
+   the `<onIdle>` watchdog arms here, and THEN the opener `effect=` boot effect fires. The
+   boot effect's own implicit init→`initial=` edge does NOT itself reset the watchdog (the
+   arming already happened); any *cross-variant* write the boot effect performs is a real
+   transition and resets the watchdog per rule 2 below.
 2. **Reset on every successful transition** — any `_scrml_engine_direct_set` or
    `_scrml_engine_advance` commit triggers reset (clear + re-arm).
 3. **rule=-honoring fire (sub-A1).** When the watchdog fires, the resulting transition
