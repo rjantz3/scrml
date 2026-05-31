@@ -50,10 +50,6 @@
 
         <ul class="space-y-2 text-slate-700">
             <li>
-                Engine runtime codegen (A1c Wave 4) — the spec + parser are
-                in; emission is in flight.
-            </li>
-            <li>
                 Self-host. The scrml compiler will eventually be written in
                 scrml. That's a post-v1.0 effort.
             </li>

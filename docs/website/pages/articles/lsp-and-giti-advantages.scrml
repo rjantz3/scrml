@@ -119,7 +119,7 @@ c&#111;nst total = computeTotal(|    -- cursor here, signature popup shows:
             <li>struct field types from <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;state&gt;</code> blocks</li>
             <li>enum variant payload shape</li>
         </ul>
-        <p class="text-slate-700 leading-relaxed my-4">This isn't novel by itself. Every LSP does hover. The differentiator is what's <em>in</em> the hover. The "boundary" badge is impossible in TypeScript LSP, because TS doesn't have a server&#47;client boundary concept. That's a scrml compile-time invariant the compiler enforces (SPEC §11 protected fields, §12 route inference). Showing it in hover means a dev never has to wonder "is this function safe to call from client code?". The LSP tells them on mouse-over.</p>
+        <p class="text-slate-700 leading-relaxed my-4">This isn't novel by itself. Every LSP does hover. The differentiator is what's <em>in</em> the hover. The "boundary" badge is impossible in TypeScript LSP, because TS doesn't have a server&#47;client boundary concept. That's a scrml compile-time invariant the compiler enforces (SPEC §52 protected fields, §12 route inference). Showing it in hover means a dev never has to wonder "is this function safe to call from client code?". The LSP tells them on mouse-over.</p>
 
         <h3 class="text-xl font-semibold text-slate-900 mt-8 mb-3">Document symbols with semantic meaning</h3>
 

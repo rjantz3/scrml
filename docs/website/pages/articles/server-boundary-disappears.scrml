@@ -157,7 +157,7 @@ ${
 
         <p class="text-slate-700 leading-relaxed my-4">Server-side concerns don't disappear. They just stop being plumbing.</p>
         <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
-            <li><strong>Auth.</strong> Still your job. The <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">s&#101;rver</code> annotation is described in the spec as a security escape hatch precisely because compile-time inference of "what touches protected data" is not always sufficient on its own (§11.4). Annotate auth-touching functions with <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">s&#101;rver</code> explicitly.</li>
+            <li><strong>Auth.</strong> Still your job. The <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">s&#101;rver</code> annotation is described in the spec as a security escape hatch precisely because compile-time inference of "what touches protected data" is not always sufficient on its own (§52). Annotate auth-touching functions with <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">s&#101;rver</code> explicitly.</li>
             <li><strong>Rate limiting.</strong> A <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program ratelimit="100&#47;min"&gt;</code> attribute generates a sliding-window limiter (§39.2.4). Tune the rate to your business; the mechanism is built in.</li>
             <li><strong>Input validation against business rules.</strong> Predicates handle shape and range. Business rules ("this user can submit at most 3 of these per day") are still business logic. They live inside the <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">s&#101;rver f&#110;</code>. They benefit from running where the data lives.</li>
         </ul>
@@ -180,31 +180,6 @@ ${
             <li><strong>scrml on GitHub:</strong> <a href="https://github.com/bryanmaclee/scrmlTS" class="text-blue-700 hover:text-blue-900 underline">github.com&#47;bryanmaclee&#47;scrmlTS</a>. The working compiler, examples, spec, benchmarks.</li>
         </ul>
         <p class="text-slate-700 leading-relaxed my-4">&lt;!--</p>
-
-        <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">Internal verification trail (private — agent-only, not for publish)</h2>
-
-        <p class="text-slate-700 leading-relaxed my-4">This block is an HTML comment so it does not render on dev.to.</p>
-        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
-            <li>Bio: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;home&#47;bryan&#47;scrmlMaster&#47;scrml-support&#47;voice&#47;user-bio.md</code> (v1, signed off 2026-04-27; project memory marks BAKED 2026-04-28).</li>
-            <li>Private draft &#47; verification log: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;home&#47;bryan&#47;scrmlMaster&#47;scrml-support&#47;voice&#47;articles&#47;s&#101;rver-boundary-disappears-draft-2026-04-28.md</code>.</li>
-            <li>Companion published: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">why-programming-f&#111;r-the-browser-needs-a-different-kind-of-language-devto-2026-04-27.md</code> (the six-feature overview this piece zooms in on).</li>
-            <li>Companion published: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">npm-myth-devto-2026-04-28.md</code> (CSRF mint-on-403 prior framing; soft-rephrased here per spec validation).</li>
-            <li>Companion published: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lsp-and-giti-advantages-devto-2026-04-28.md</code> (verification log structure pattern).</li>
-            <li>Agent: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;home&#47;bryan&#47;.claude&#47;agents&#47;scrml-voice-author.md</code> (article mode, gate cleared per project memory bio-baked 2026-04-28).</li>
-            <li>SPEC: <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&#47;home&#47;bryan&#47;scrmlMaster&#47;scrmlTS&#47;compiler&#47;SPEC.md</code> (§11, §12, §13, §39, §52, §53 cited).</li>
-        </ul>
-        <p class="text-slate-700 leading-relaxed my-4"><strong>Spec validation summary:</strong></p>
-        <ul class="list-disc list-outside ml-6 space-y-2 text-slate-700 my-4">
-            <li>✅ <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">s&#101;rver f&#110;</code> syntax current (§11.4 lines 5443-5447, grammar line 15163).</li>
-            <li>✅ Boundary security at compile time: E-PROTECT-001&#47;002, E-ROUTE-002, E-AUTH-001, E-CONTRACT-001 all spec-defined and ship.</li>
-            <li>✅ Auto-generated fetch + route handler (§12.3, §12.5, §13.2).</li>
-            <li>✅ Predicate enforcement at server boundary (§53.9.4, verbatim normative).</li>
-            <li>✅ Schema-level argument typing across boundary (route analysis runs before codegen, §12.4).</li>
-            <li>⚠️ "CSRF mint-on-403" (npm-myth's shortcut) softened to enumerate the four spec-confirmed components (§39.2.3): mint server fn, meta-tag injection, request interceptor, server-side validator returning 403. The spec does not normatively define a client-side retry-with-fresh-token loop.</li>
-            <li>⚠️ "Tree-shake server-only code from client bundle" softened. Spec normatively documents this for SSE generators (§13.2.6) and channel handlers (§38.8) and protect= fields (§52). For general <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">s&#101;rver f&#110;</code>, the partition follows from §12.3 (route handler is server-side, client gets fetch call) but the spec does not have a single global "tree-shake" claim. Article wording: "the function body is emitted to the server output only; the client gets a fetch stub."</li>
-        </ul>
-        <p class="text-slate-700 leading-relaxed my-4"><strong>Forbidden territory check (bio §6):</strong> all clear. React hobble-through disclosure used in opener (bio-attested). Framework-fatigue narrative avoided (article is structural, not autobiographical-recovery). User-attested motivations only ("obsessed with performance", "do it right, the first time", "compiler is the dev's best friend").</p>
-        <p class="text-slate-700 leading-relaxed my-4">--&gt;</p>
 
     </article>
 
