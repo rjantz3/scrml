@@ -1,6 +1,6 @@
 # domain.map.md
 # project: scrmlts
-# updated: 2026-05-30T00:00:00Z  commit: 948d3f2f
+# updated: 2026-05-31T05:32:43-06:00  commit: 09f74bee
 
 The domain is the scrml COMPILER pipeline. scrml is a single-file, full-stack reactive web
 language compiled by this TypeScript/JS toolchain running on Bun. The compiler converts `.scrml`
@@ -39,6 +39,8 @@ source files into `*.server.js` + `*.client.js` + `*.html` + `*.css` outputs.
 | tableFor | Type-driven table rendering (§41 family) — `emit-table-for.ts` |
 | native-parser | In-progress scrml-native replacement for BS+TAB; `compiler/native-parser/`; activated via `--parser=scrml-native` |
 | library mode | Compile mode that emits ES module exports JS + server JS without HTML/runtime (SPEC §12.6); `emit-library.ts`; suppresses `.server.js` for body-content-escalated fns |
+| arm separator `:>` | Canonical match / `!{}`-handler arm separator (SPEC §18.2 / §34, S147); `=>` and `->` are deprecated aliases; all three parse, build, and emit identically during the deprecation window |
+| W-MATCH-ARROW-LEGACY | Info-level diagnostic emitted at every match arm or `!{}`-handler arm using a deprecated `=>` or `->` separator; suggests `bun scrml migrate --fix` for AST-driven rewrite |
 
 ## Business Invariants (from SPEC + code)
 - `null` and `undefined` do NOT exist in scrml source; both → `not` (SPEC §42; `W-ABSENCE-IN-SCRML-SOURCE`)
@@ -49,9 +51,11 @@ source files into `*.server.js` + `*.client.js` + `*.html` + `*.css` outputs.
 - `async`/`await` are forbidden in scrml source (E-ASYNC-NOT-IN-SCRML, E-AWAIT-NOT-IN-SCRML); CPS is the canonical async surface
 - `switch`/`try`/`throw` are forbidden scrml vocabulary (E-SWITCH-FORBIDDEN, E-THROW-NOT-IN-SCRML, E-TRY-NOT-IN-SCRML)
 - Engine state-children are canonical state-machine representations; nested engines are permitted
+- Match / `!{}`-handler arm separator is `:>`; `=>` / `->` are deprecated aliases — new code SHALL use `:>` (SPEC §18.2 / §34)
 
 ## Domain Events / Diagnostic Codes (key runtime lifecycle)
 W-AUTH-CONTENT-NOT-GATED — emitted when `<auth role>` is used without content gating (GITI-027A)
+W-MATCH-ARROW-LEGACY — emitted (info-level) at every match / `!{}`-handler arm using deprecated `=>` or `->` separator (S147, SPEC §18.2 / §34)
 I-MATCH-PROMOTABLE — info diagnostic suggesting match → engine promotion (§56)
 I-FN-PROMOTABLE — info diagnostic suggesting function promotion
 
@@ -72,7 +76,7 @@ I-FN-PROMOTABLE — info diagnostic suggesting function promotion
 | CG | compiler/src/code-generator.js + compiler/src/codegen/ |
 
 ## Tags
-#scrmlts #map #domain #compiler #pipeline #reactive #state-machine #scrml
+#scrmlts #map #domain #compiler #pipeline #reactive #state-machine #scrml #match-arrow
 
 ## Links
 - [primary.map.md](./primary.map.md)

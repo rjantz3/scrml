@@ -1,6 +1,6 @@
 # error.map.md
 # project: scrmlts
-# updated: 2026-05-30T00:00:00Z  commit: 948d3f2f
+# updated: 2026-05-31T05:32:43-06:00  commit: 09f74bee
 
 scrml's own language error model is values-not-exceptions (SPEC §19.1 — no try/catch, no throw).
 The compiler itself surfaces structured CGError objects to the caller; it never throws on bad input.
@@ -13,7 +13,7 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 - All other codes → result.errors (fatal, CLI exits 1)
 - Cross-stream helper required when asserting on W-*/I-* codes in tests (see diagnostic-stream-partition memory note)
 
-## Error Code Families (373 distinct codes in compiler source)
+## Error Code Families (374 distinct codes in compiler source)
 
 | Family | Count | Description |
 |--------|-------|-------------|
@@ -31,7 +31,7 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 | E-CTRL-* | 6 | Control flow errors |
 | E-CTX-* | 2 | Context errors (E-CTX-001: unclosed block; E-CTX-003: shorthand confusion) |
 | E-DERIVED-* | 7 | Derived-value errors (circular-dep, engine-no-initial/rules/write, value-mutate) |
-| E-DG-* | 2 | Dependency graph errors |
+| E-DG-* | 2 | Dependency graph errors — E-DG-002 false-positive fix: credits lambda-body @var reads + `<match on=@cell>` block-form headers [dependency-graph.ts] |
 | E-ENGINE-* | ~20 | Engine declaration errors |
 | E-ERRORS-* | 2 | `<errors>` element validation (E-ERRORS-001, E-ERRORS-002) |
 | E-EXPR-* | 30 | Native-parser expression grammar codes (§34.1) |
@@ -41,12 +41,12 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 | E-INPUT-* | 5 | Input element errors |
 | E-LIFECYCLE-* | ~12 | Lifecycle hook errors |
 | E-LIN-* | 2 | Linear-type errors |
-| E-MATCH-* | ~6 | Pattern match errors |
+| E-MATCH-* | ~6 | Pattern match errors (E-MATCH-ARM-SEPARATOR: stray-comma arm separator §18.2) |
 | E-META-* | 7 | Meta check/eval errors |
 | E-MW-* | ~6 | Middleware errors |
 | E-NAME-* | 1 | Name collision with reserved identifier |
+| E-PA-* | ~7 | protect-analyzer errors — E-PA-002 false-positive fix: `extractCreateTableStatements` now generic cycle-safe deep-walk (not just `node.children`); finds CREATE TABLE in `body`/`?{}` under fn-decl bodies + top-level `${}` logic blocks [protect-analyzer.ts] |
 | E-PARSEVARIANT-* | ~3 | parseVariant API errors |
-| E-PROTECT-* | ~3 | protect= attribute errors |
 | E-REPLAY-* | 3 | Engine replay errors |
 | E-RESET-* | 1 | Reset target errors |
 | E-RI-* | ~3 | Route inference errors |
@@ -72,7 +72,7 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 | W-EQ-* | 1 | Equality warnings |
 | W-LIFECYCLE-* | 5 | Lifecycle warnings |
 | W-LINT-001..024 | 24 | Ghost-pattern lint warnings [lint-ghost-patterns.js] |
-| W-MATCH-* | 5 | Match warnings (W-MATCH-RULE-INERT, W-MATCH-VALUE-UNUSED) |
+| W-MATCH-* | 6 | Match warnings — NEW: W-MATCH-ARROW-LEGACY (S147): info-level, arm-context-scoped, fires in `checkMatchDiagnostics` + `!{}`-handler-arm path (type-system.ts); W-MATCH-RULE-INERT; W-MATCH-VALUE-UNUSED |
 | W-PROGRAM-* | 4 | Program-level warnings |
 | W-PURE-REDUNDANT | 1 | Redundant `pure` modifier |
 | W-STDLIB-* | 2 | stdlib shim/compiler-deferred warnings |
@@ -84,10 +84,26 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 | I-MATCH-PROMOTABLE | 1 | Info: match eligible for engine promotion (§56) |
 | I-PARSER-NATIVE-SHADOW | 1 | Info: native parser shadows live-pipeline result |
 
-## Key New Codes This Cycle (since watermark 9ab7aa38)
+## Key New Codes This Cycle (since watermark 948d3f2f)
+- W-MATCH-ARROW-LEGACY — S147; info-level; fires at every `match` arm and `!{}`-handler arm whose `armArrow` glyph is `=>` or `->` (deprecated aliases); canonical separator is `:>`; message includes `bun scrml migrate --fix` suggestion; shared helper `matchArrowLegacyMessage()` in type-system.ts:8551; fires from both `checkMatchDiagnostics` (match-arm path) and the `!{}`-handler-arm walk [type-system.ts:6022, 8630]
 - W-AUTH-CONTENT-NOT-GATED — GITI-027A; `<auth role="X">` is NOT a content gate; fires once per auth-role site [auth-graph.ts:627]
 - W-MATCH-VALUE-UNUSED — S144 Bug Y; unused match discriminant value
 - E-MATCH-ARM-SEPARATOR — S144 Bug AA; malformed match arm separator
+
+## E-PA-002 Fix Note (S147 R28-4)
+`extractCreateTableStatements` in protect-analyzer.ts was rewritten to a generic cycle-safe
+depth-first walk over all child-bearing fields (`body`, `children`, `consequent`, `alternate`,
+`arms`, etc.), replacing the prior `node.children`-only descent. Max depth cap: 64.
+CREATE TABLE inside a `?{}` block nested in a fn-decl body or top-level `${}` logic block
+is now found, preventing spurious E-PA-002.
+
+## E-DG-002 Fix Note (S147 R28-1d)
+Two false-positive classes fixed in dependency-graph.ts:
+- SB1: `@var` reads inside lambda bodies (`.map`/`.filter`/`.reduce` callbacks) are now credited
+  via local `collectLambdaBodyReactiveRefs()` — the shared `forEachIdentInExprNode` intentionally
+  stops at lambda scope boundaries (lin-capture tracking); DG descends locally for reader-credit.
+- SB2: block-form `<match on=@cell>` headers — `onExprRaw` + `armsRaw` string fields are now
+  scanned for `@ident` refs and credited to `reactiveVarReaders`.
 
 ## Error Handling Patterns
 - All compile errors returned as CGError[] in result.errors or result.warnings
@@ -102,7 +118,7 @@ errorBoundary compile support: `compiler/src/codegen/emit-error-boundary.ts` (32
 fallback markup + per-variant renders; paired with host-JS try/catch backstop (§19.6.8 C-hybrid).
 
 ## Tags
-#scrmlts #map #error #diagnostics #CGError #compiler
+#scrmlts #map #error #diagnostics #CGError #compiler #W-MATCH-ARROW-LEGACY #E-PA-002 #E-DG-002
 
 ## Links
 - [primary.map.md](./primary.map.md)

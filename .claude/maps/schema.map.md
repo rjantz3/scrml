@@ -1,6 +1,6 @@
 # schema.map.md
 # project: scrmlts
-# updated: 2026-05-30T00:00:00Z  commit: 948d3f2f
+# updated: 2026-05-31T05:32:43-06:00  commit: 09f74bee
 
 Authoritative AST type source: `compiler/src/types/ast.ts` (1983 lines, TypeScript).
 IR types: `compiler/src/codegen/ir.ts` (253 lines).
@@ -87,6 +87,19 @@ name: string; path: string; exports: string[]
 
 ---
 
+## Match / Error-Handler Arm Node Fields (S147 addition)  [compiler/src/ast-builder.js]
+
+Match arm nodes (`match-arm-inline`, `match-arm-block`) and `!{}`-handler arm objects now carry:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| armArrow | `":>"` \| `"=>"` \| `"->"` \| undefined | The arm separator glyph as written in source; set by `matchArrowGlyphAt()` at parse time; used by W-MATCH-ARROW-LEGACY emission in type-system.ts and by `rewriteMatchArmArrows()` in migrate.js |
+
+`->` arms are now STRUCTURED (were bare-expr). `->` stays as two PUNCT tokens at the lexer
+level to protect the `fn ... -> ReturnType` return-arrow path.
+
+---
+
 ## Expression Node Types  [compiler/src/types/ast.ts:1577+]
 
 ### ExprNode (union)
@@ -133,6 +146,22 @@ Everything else → result.errors (CLI exits 1).
 
 ---
 
+## Protect-Analyzer PA Types  [compiler/src/protect-analyzer.ts]
+
+### ColumnDef (exported)
+name: string; sqlType: string; nullable: boolean; isPrimaryKey: boolean
+
+### TableTypeView (exported)
+tableName: string; fullSchema: ColumnDef[]; clientSchema: ColumnDef[]; protectedFields: Set<string>
+
+### DBTypeViews (exported)
+stateBlockId: string; dbPath: string; tables: Map<string, TableTypeView>
+
+### ProtectAnalysis (exported)
+views: Map<string, DBTypeViews>
+
+---
+
 ## Type-System Internal Types  [compiler/src/type-system.ts — selected]
 
 ResolvedType (union): PrimitiveType | StructType | EnumType | ArrayType | UnionType | AsIsType |
@@ -145,7 +174,7 @@ LinState: "unconsumed" | "consumed"
 TildeState: "uninitialized" | "initialized"
 
 ## Tags
-#scrmlts #map #schema #ast #types #compiler #ir
+#scrmlts #map #schema #ast #types #compiler #ir #protect-analyzer #match-arm
 
 ## Links
 - [primary.map.md](./primary.map.md)

@@ -1,6 +1,6 @@
 # dependencies.map.md
 # project: scrmlts
-# updated: 2026-05-30T00:00:00Z  commit: 948d3f2f
+# updated: 2026-05-31T05:32:43-06:00  commit: 09f74bee
 
 ## Runtime Dependencies (root package.json — v0.7.0)
 @modelcontextprotocol/sdk@1.29.0 — MCP server SDK for scrml MCP integration
@@ -38,6 +38,7 @@ bun>=1.3.13 — required runtime; no Node support (Bun-specific APIs used throug
 | type-system.ts | types/ast.ts, dependency-graph.ts, protect-analyzer.ts |
 | reachability/*.ts | types/reachability.ts, types/ast.ts |
 | native-parser/*.js | (self-contained; no compiler/src imports) |
+| commands/migrate.js | api.js (compileScrml), block-splitter.js, ast-builder.js (buildAST — for rewriteMatchArmArrows AST-driven walk) |
 
 ## Tags
 #scrmlts #map #dependencies #bun #acorn #lsp #mcp

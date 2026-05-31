@@ -1,6 +1,6 @@
 # structure.map.md
 # project: scrmlts
-# updated: 2026-05-30T00:00:00Z  commit: 948d3f2f
+# updated: 2026-05-31T05:32:43-06:00  commit: 09f74bee
 
 ## Entry Points
 compiler/bin/scrml.js — CLI binary registered as `scrml`; thin Bun launcher
@@ -50,13 +50,20 @@ scripts/  — maintenance scripts: regen-spec-index.ts, compile-test-samples.sh,
 editors/  — editor extension stubs (VS Code etc.)
 scratch/  — throwaway working files
 
+## Key S147 Source Changes
+- compiler/src/ast-builder.js — added `matchArrowGlyphAt()` helper; glyph-preservation (`armArrow` field) across all match-arm (`match-arm-inline`, `match-arm-block`) and `!{}`-handler-arm sites; `:>` is canonical arm separator; `=>` / `->` are deprecated aliases that still parse; `->` arms are now STRUCTURED (were bare-expr); `->` stays two PUNCT tokens to protect the `fn ... -> ReturnType` path
+- compiler/src/commands/migrate.js — added `rewriteMatchArmArrows()` export (AST-driven, not regex); `--fix` flag added to migrate subcommand; rewrites `=>`/`->` arm separators → `:>` at recorded arm-span offsets only; safe: never touches lambda arrows or fn-return arrows
+- compiler/src/dependency-graph.ts — E-DG-002 false-positive fix: credits lambda-body `@var` reads (SB1) + `<match on=@cell>` block-form headers (SB2) to `reactiveVarReaders`
+- compiler/src/protect-analyzer.ts — `extractCreateTableStatements` rewritten as generic cycle-safe depth-first walk (max depth 64); finds CREATE TABLE in `body`/`?{}` under fn-decl bodies and top-level `${}` logic blocks; fixes spurious E-PA-002 (R28-4)
+- compiler/src/type-system.ts — added `W-MATCH-ARROW-LEGACY` emission (info-level) in `checkMatchDiagnostics` (match-arm path) and `!{}`-handler-arm walk; shared message builder `matchArrowLegacyMessage()`
+
 ## Ignored / Generated Paths
 node_modules/, compiler/node_modules/, dist/, compiler/dist/, compiler/native-parser/dist/,
 compiler/self-host/dist/, stdlib/*/dist/, .git/, handOffs/,
 benchmarks/todomvc-react/, benchmarks/todomvc-vue/, benchmarks/todomvc-svelte/
 
 ## Tags
-#scrmlts #map #structure #compiler #cli #bun
+#scrmlts #map #structure #compiler #cli #bun #match-arrow #migrate
 
 ## Links
 - [primary.map.md](./primary.map.md)
