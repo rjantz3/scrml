@@ -104,11 +104,11 @@
         </p>
 
         <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;schema&gt;
-  &lt;users&gt;
-    id:        int req
-    email:     string req
-    bio:       string is some
-  &lt;/users&gt;
+  users &#123;
+    id:    integer req
+    email: string req
+    bio:   string is some
+  &#125;
 &lt;/schema&gt;</code></pre>
 
         // ───────────────────────────────────────────────────────────

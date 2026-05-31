@@ -223,10 +223,16 @@
 
         <p class="text-slate-700 leading-relaxed">
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lift</code>
-            is valid <strong>only</strong> in anonymous
+            is valid in anonymous
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${ }</code>
-            logic contexts &mdash; bare blocks that are NOT the body
-            of a named function. Per &sect;10.4:
+            logic blocks and in
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">fn</code>
+            bodies (where it accumulates into the fn's
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">~</code>,
+            returned via <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">return ~</code>).
+            It is NOT valid in a bare
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">function</code>
+            body. Per &sect;10.4 + &sect;48.5:
         </p>
 
         <ul class="space-y-2 text-slate-700">
@@ -240,9 +246,15 @@
                 callers lift the return if needed.
             </li>
             <li>
-                Same for the
-                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">fn name &#123; ... &#125;</code>
-                form.
+                A <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">fn name &#123; ... &#125;</code>
+                body, by contrast, DOES permit
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lift</code>
+                &mdash; it accumulates into the fn's
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">~</code>
+                and is returned via
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">return ~</code>
+                (&sect;48.5). E-SYNTAX-002 fires only on a bare
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">function</code>.
             </li>
             <li>
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">lift</code>

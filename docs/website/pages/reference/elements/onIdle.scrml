@@ -107,35 +107,35 @@
         </h2>
 
         <p class="text-slate-700 leading-relaxed mb-3">
-            Session-idle detection. The user clicking refresh transitions
-            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Active &rarr; .Active</code>,
-            which counts as a successful transition and resets the watchdog.
-            After 5 minutes without any transition, the engine moves to
-            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Idle</code>.
+            Session-idle detection. After 5 minutes with no variant-changing
+            transition, the watchdog moves the engine to
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Idle</code>;
+            from there, clicking <strong>Resume</strong> transitions
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Idle &rarr; .Active</code>
+            (a real transition, which re-arms the watchdog).
         </p>
 
         <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>${
   type Phase:enum = { Active, Idle }
-  function refresh() { @phase = .Active }
+  function resume() { @phase = .Active }
 }
 
 &lt;engine for=Phase initial=.Active&gt;
   &lt;Active rule=.Idle&gt;
-    &lt;button onclick=refresh()&gt;I&apos;m here&lt;/button&gt;
+    Working&hellip;
   &lt;/&gt;
-  &lt;Idle/&gt;
+  &lt;Idle rule=.Active&gt;
+    &lt;button onclick=resume()&gt;Resume&lt;/button&gt;
+  &lt;/&gt;
   &lt;onIdle after=5m to=.Idle/&gt;
 &lt;/&gt;</code></pre>
 
         <p class="text-slate-700 leading-relaxed mt-3">
             Module-init counts as the first event &mdash; the watchdog arms
-            with the full 5 minutes. Each transition (including the
-            self-write to
-            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.Active</code>
-            from
-            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">refresh()</code>)
-            resets to a fresh 5 minutes. After 5 minutes of no transitions,
-            the watchdog fires
+            with the full 5 minutes. Every successful (variant-changing)
+            transition resets it to a fresh 5 minutes; a self-write to the
+            current variant is a no-op (&sect;51.0.F.1) and does NOT reset it.
+            After 5 minutes of no transitions, the watchdog fires
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">@phase = .Idle</code>.
         </p>
 

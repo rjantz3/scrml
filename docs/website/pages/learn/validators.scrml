@@ -183,7 +183,7 @@
             decl:
         </p>
 
-        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;username: string req length(&gt;=3 &amp;&amp; &lt;=20) pattern(/^[a-z0-9_]+$/)&gt; = ""
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;username: string req length(&gt;=3, &lt;=20) pattern(/^[a-z0-9_]+$/)&gt; = ""
 &lt;age:      number req gte(13) lte(120)&gt;                            = 0</code></pre>
 
         <p class="text-slate-700 leading-relaxed mt-3">
@@ -234,11 +234,11 @@
             if ANY field's validators fail.
         </p>
 
-        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;signup&gt; = &#123;
-  email:    "" : string req
-  password: "" : string req length(&gt;=8)
-  age:      0  : number req gte(13)
-&#125;
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>&lt;signup&gt;
+  &lt;email:    string req&gt;             = ""
+  &lt;password: string req length(&gt;=8)&gt; = ""
+  &lt;age:      number req gte(13)&gt;      = 0
+&lt;/&gt;
 
 &lt;form&gt;
   &lt;input bind:value=@signup.email    placeholder="Email"&gt;
@@ -285,12 +285,12 @@
 
         <p class="text-slate-700 leading-relaxed mt-3">
             For project-level messages (shared across many fields),
-            register a catalogue via the
-            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">^&#123;&#125;</code>
-            meta context's
+            register a catalogue via
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">scrml:data</code>'s
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">registerMessages</code>
-            API (&sect;41.12). The compiler resolves per-field at
-            compile time.
+            API (&sect;41.12) &mdash; import it and call it from a top-level
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">${ }</code>
+            block. The compiler resolves per-field at compile time.
         </p>
 
         // ───────────────────────────────────────────────────────────

@@ -146,7 +146,7 @@
                 feature. The compiler fires
                 <a href="/reference/errors/W-MATCH-RULE-INERT"
                    class="font-mono text-xs text-amber-700 underline">W-MATCH-RULE-INERT</a>
-                as an info lint nudging toward promotion. Per SPEC
+                as a warning nudging toward promotion. Per SPEC
                 &sect;18.0.2.
             </li>
             <li>

@@ -98,10 +98,10 @@
                     &lt;schema&gt;
                 </a> &mdash; Declarative DB schema. SQL-mirror canonical plus additive shared-core validators; migration diff at compile time.
             </li>
-            <li class="text-slate-500">
-                <span class="font-mono">&lt;onTimeout&gt;</span>,
-                <span class="font-mono">&lt;onIdle&gt;</span>
-                &mdash; queued for the Day-30 build-out.
+            <li>
+                <a href="/reference/elements/onTimeout" class="text-blue-700 hover:text-blue-900 underline"><span class="font-mono">&lt;onTimeout&gt;</span></a>,
+                <a href="/reference/elements/onIdle" class="text-blue-700 hover:text-blue-900 underline"><span class="font-mono">&lt;onIdle&gt;</span></a>
+                &mdash; engine temporal surface (per-state timeout + engine-wide idle watchdog).
             </li>
         </ul>
 
@@ -152,7 +152,7 @@
 
         <ul class="space-y-1 text-slate-700 font-mono text-sm">
             <li class="text-slate-500">
-                fn, function, lift, lin, pinned, derived, is, not, req, pure, &tilde;, reset, fail, server, default
+                fn, function, lift, lin, pinned, is, not, req, pure, &tilde;, reset, fail, server, default
             </li>
         </ul>
 
@@ -191,9 +191,9 @@
                 edge cases, related features, availability, spec link.
             </li>
             <li>
-                <strong>Worked examples compile.</strong> Every example
-                on a reference page is a real scrml file that runs
-                against the current compiler.
+                <strong>Worked examples are real scrml.</strong> Examples
+                target the current compiler and the canonical language shape;
+                where a feature's runtime is still landing, the page says so.
             </li>
             <li>
                 <strong>SPEC.md is the authority.</strong> When a
