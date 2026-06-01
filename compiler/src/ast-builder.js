@@ -3647,6 +3647,16 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         }
       } else if (t.text === ',' && atTopLevel()) {
         break; // stop at top-level comma (defensive — see docstring)
+      } else if (t.text === '<' && atTopLevel()) {
+        // S152 — stop at a top-level `<`. The scrml type-expr grammar (§7.5:
+        // primitive-type | identifier | type-expr '[]' | type-expr '|' |
+        // type-expr '?') has NO top-level `<` — there is no angle-bracket
+        // generic syntax. A `<` here is therefore NOT part of the type; it is
+        // the boundary of the annotation (e.g. a no-RHS state-decl `<x>: T[]`
+        // followed by a sibling decl `<y>` or a compound close `</...>`).
+        // Stopping here keeps the type string clean (`T[]`, not `T[]</state>`)
+        // so the no-RHS array-default detection (Shape 4) sees a trailing `[]`.
+        break;
       } else {
         parts.push(t.text);
         consume();
@@ -4166,9 +4176,67 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         i = cursorBeforeConsume;
         return null;
       }
-      // Now expect `=`. If not present, decline (don't silently parse a
-      // typed-decl with no RHS — that's not in scope).
+      // ─── S152 Shape 4 — typed-decl with no `=` (no RHS) ───
+      // SPEC §6.2 Shape 4: a typed-array decl (`<todos>: Todo[]`) MAY omit the
+      // RHS and defaults to `[]` (a DEFINED empty array per §42.1.1). A NON-array
+      // typed decl with no RHS is E-DECL-NEEDS-INITIALIZER (§34) — closing the
+      // silent-`undefined` hole where the decl was previously dropped to an
+      // html-fragment with no init and no diagnostic.
       if (peek().kind !== "PUNCT" || peek().text !== "=") {
+        // Array type annotation ends in `[]` (refinement-type predicate forms
+        // like `string(pattern(...))` are NON-array; their bracket-bearing args
+        // are parenthesised, never a trailing `[]`).
+        const isArrayType = /\[\s*\]\s*$/.test(typeAnnotation);
+        if (isArrayType) {
+          // Synthesize the `[]` default. Build the node directly here — the
+          // standard dispatch below expects a `=` to have been consumed and an
+          // RHS to collect; the no-RHS array form has neither.
+          const declSpan = spanOf(startTok, peek());
+          const arrSpan = declSpan
+            ? { file: filePath, start: declSpan.start, end: declSpan.end, line: declSpan.line, col: declSpan.col }
+            : { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+          const node = {
+            id: ++counter.next,
+            kind: "state-decl",
+            name,
+            init: "[]",
+            initExpr: { kind: "array", span: arrSpan, elements: [] },
+            structuralForm: true,
+            isConst: !!isConst,
+            shape: "plain",
+            defaultExpr: scan.defaultExprRaw
+              ? safeParseExprToNode(scan.defaultExprRaw, scan.defaultExprSpan?.start ?? 0)
+              : null,
+            pinned: !!scan.pinned,
+            ...(scan.server ? { isServer: true } : {}),
+            typeAnnotation,
+            span: declSpan,
+          };
+          // S79 reactivity attrs (debounced=/throttled=) compose with Shape 4.
+          let _reactivity;
+          if (scan.debouncedRaw !== null && scan.debouncedRaw !== undefined) {
+            _reactivity = _reactivity || {};
+            _reactivity.debounced = parseAfterDuration(scan.debouncedRaw);
+          }
+          if (scan.throttledRaw !== null && scan.throttledRaw !== undefined) {
+            _reactivity = _reactivity || {};
+            _reactivity.throttled = parseAfterDuration(scan.throttledRaw);
+          }
+          if (_reactivity) node.reactivity = _reactivity;
+          if (scan.validators && scan.validators.length > 0) {
+            decorateValidatorsWithExprNodes(scan.validators, filePath);
+            node.validators = scan.validators;
+          }
+          return node;
+        }
+        // Non-array typed decl with no RHS — fire E-DECL-NEEDS-INITIALIZER and
+        // decline (return null). The decl is surfaced as an error; declining
+        // prevents a half-built node from reaching downstream stages.
+        errors.push(new TABError(
+          "E-DECL-NEEDS-INITIALIZER",
+          `State-cell declaration \`<${name}>: ${typeAnnotation}\` has a non-array type annotation but no initializer. Only typed-array declarations (\`<${name}>: T[]\`) default to \`[]\`; non-array typed cells require an explicit initializer (e.g. \`<${name}>: ${typeAnnotation} = ...\`).`,
+          spanOf(startTok, peek()) || { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+        ));
         i = cursorBeforeConsume;
         return null;
       }

@@ -2047,9 +2047,9 @@ validator-attr   ::= /* per §55.1 universal-core predicate vocabulary */
   - `validator-attr` — any predicate from §55.1 universal-core vocabulary (`req`, `length(>=N)`, `pattern(...)`, etc.). Validators contribute to the auto-synthesized validity surface (§55).
 - `'>'`: closing of the opening tag.
 - `[ ws ':' ws type-expr ]`: optional type annotation; `type-expr` per §7.5.
-- `ws '=' ws expr`: required initializer.
+- `ws '=' ws expr`: initializer. REQUIRED for all shapes EXCEPT the typed-array no-RHS form (Shape 4, §6.2): a declaration whose type annotation is an array type (`T[]`) MAY omit the `= expr` entirely and defaults to `[]`.
 
-**RHS shapes:** the `expr` is one of three forms (§6.2): plain expression (Shape 1), bindable markup (Shape 2 — render-spec coupling), or `const`-prefixed derived expression (Shape 3 — read-only).
+**RHS shapes:** the `expr` is one of three forms (§6.2): plain expression (Shape 1), bindable markup (Shape 2 — render-spec coupling), or `const`-prefixed derived expression (Shape 3 — read-only). A fourth shape (Shape 4) omits the RHS for an array-typed cell and defaults to `[]`; a non-array typed cell with no RHS is **E-DECL-NEEDS-INITIALIZER** (§6.2, §34).
 
 **Attribute composition:** decl-attrs compose freely. `<cards server>` and `<cards server pinned>` and `<userName req length(>=2)>` are all legal. Cross-attribute interaction rules (e.g., `server + validators` evaluation timing) are open carry-forward items for the heads-up follow-up (HU-3 Q5.B.1/2).
 
@@ -2116,13 +2116,36 @@ const <badge>     = <span class="badge">${@userName}</span>    // markup-typed d
 - `<doubled/>` in markup is **E-CELL-NO-RENDER-SPEC** for numeric/string derived cells — use `${@doubled}`.
 - For markup-typed derived cells (`const <badge> = <span>...`), `${@badge}` expands the markup value at read time. This is the markup-as-value pillar (§1.4) applied to derived cells.
 
+#### Shape 4 — Typed Array, No RHS (`[]` Default)
+
+**Added S152, 2026-06-01.** A state-cell declaration whose type annotation is an array type (`T[]`) MAY omit the right-hand-side initializer entirely. The cell initializes to the empty array `[]`.
+
+```scrml
+<todos>: Todo[]          // sugar for: <todos>: Todo[] = []
+<tags>:  string[]        // initializes to []
+```
+
+- The no-RHS form `<name>: T[]` is exact sugar for `<name>: T[] = []`. The compiler synthesizes the `[]` initializer; the explicit `= []` form remains valid and compiles identically.
+- `[]` is a DEFINED value — an `Array<T>` of length zero (§42.1.1) — categorically distinct from absence (`not`). A no-RHS array cell `is some`; it is NOT `not`.
+- `@todos` reads the array. `<each in=@todos>` over a freshly-declared no-RHS array cell renders an empty list; a subsequent reactive write (`@todos = [...]`) populates it.
+- This shape carries no render-spec; `<todos/>` in markup is **E-CELL-NO-RENDER-SPEC** (same as Shape 1).
+- `default=` / `reset(@cell)` (§6.8): when `default=` is absent, `reset(@todos)` re-evaluates the (synthesized) init expression and writes `[]` — consistent with §6.8.1. The explicit `default=` attribute composes normally.
+
+**Non-array typed declaration with no RHS is an error.** A state-cell declaration whose type annotation is a NON-array type (`int`, `string`, a struct type, etc.) and which has no RHS is **E-DECL-NEEDS-INITIALIZER** (compile error; see §34). Only the array case has a canonical zero-value default. Scalar and struct zero-value defaults (`int`→`0`, `string`→`""`, etc.) are NOT synthesized — those declarations require an explicit initializer. (Whether scalar/struct zero-defaults should be added is a separate open design question; this subsection does NOT decide it.)
+
+```scrml
+<count>: int             // E-DECL-NEEDS-INITIALIZER — write `<count>: int = 0`
+<name>:  string          // E-DECL-NEEDS-INITIALIZER — write `<name>: string = ""`
+```
+
 **Cross-references:**
 - §6.1 — The two access forms
 - §6.4 — Render-by-tag semantics (full rules for when `<varname/>` is legal)
 - §6.6 — Derived values: `const <x>` (top-level and in-compound form)
 - §6.8 — The `default=` attribute and `reset(@cell)` keyword (optional attribute on any shape)
 - §6.11 — Auto-synthesized validity surface (from Shape 2 validators)
-- §34 — E-CELL-NO-RENDER-SPEC, E-CELL-RENDER-SPEC-NOT-BINDABLE, E-DERIVED-WRITE
+- §34 — E-CELL-NO-RENDER-SPEC, E-CELL-RENDER-SPEC-NOT-BINDABLE, E-DERIVED-WRITE, E-DECL-NEEDS-INITIALIZER
+- §42.1.1 — `[]` is a DEFINED value, distinct from absence (`not`); grounds the Shape 4 default
 
 ---
 
@@ -16211,6 +16234,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-REACTIVE-003 | §6.6.9 | Reading a `const <name>` derived value inside a server-escalated function | Error |
 | E-REACTIVE-004 | §6.6.5 | `flush()` called inside a derived expression | Error |
 | E-REACTIVE-005 | §6.6.10 | Circular dependency in the derived reactive graph | Error |
+| E-DECL-NEEDS-INITIALIZER | §6.2 | A state-cell declaration carries a NON-array type annotation (`<x>: int`, `<x>: string`, `<x>: SomeStruct`) but no right-hand-side initializer. Only the typed-array form (`<x>: T[]`) has a canonical zero-value default (`[]`, Shape 4 §6.2); non-array typed cells require an explicit initializer. Resolution: write `<x>: int = 0` / `<x>: string = ""` / etc. Scalar and struct zero-value defaults are deliberately NOT synthesized (separate open design question). Closes the silent-`undefined` hole where a no-RHS typed decl was previously dropped to an `html-fragment` with no init and no diagnostic. (S152 — typed-array-no-rhs-default.) **Fires:** emitted by TAB (`compiler/src/ast-builder.js` `tryParseStructuralDecl`) at the declaration span. | Error |
 | E-LIFT-001 | §10.5.2 | Concurrent `lift` calls in same logic block | Error |
 | E-PA-001 | §11.5 | `src=` file does not exist | Error |
 | E-PA-003 | §11.5 | Bun SQLite schema introspection failed | Error |
