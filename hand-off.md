@@ -1,72 +1,56 @@
-# scrmlTS — Session 149 (CLOSE)
+# scrmlTS — Session 150 (CLOSE)
 
 **Date:** 2026-05-31
-**Previous:** `handOffs/hand-off-153.md` (S149 OPEN / S148-carry).
-**Next-session pickup:** rotate THIS file → `handOffs/hand-off-154.md` at S150 OPEN.
+**Previous:** `handOffs/hand-off-154.md` (S149 CLOSE).
+**Next-session pickup:** rotate THIS file → `handOffs/hand-off-155.md` at S151 OPEN.
 
 ---
 
-## 🏁 S149 CLOSE
+## 🏁 S150 CLOSE
 
-- **HEAD scrmlTS:** `fe705c09` — **div 0/2, UNPUSHED** (push-pending; see Open questions).
-  - `efae995b` engine-graph sidecar · `1108d45a` source-map B2+B1 · `8765462a` engine-graph CLI-flag fix · `fe705c09` tier-rung Approach-A ratification (§17.0.1 + SPEC-INDEX).
-  - (NOTE: `efae995b` + `1108d45a` were PUSHED earlier this session at 0/0; then 2 more commits landed → now 0/2 again. The push covered the first two; flag-fix + A-ratification are the unpushed pair.)
-- **scrml-support:** div 0/0 with origin, but **DD artifact `docs/deep-dives/tier-ladder-intermediate-rung-2026-05-31.md` is UNTRACKED** — commit at wrap-finalize (see below).
-- **Tests:** full `bun run test` **22,448 pass / 0 fail** / 861 files (S148 baseline was 22,376; +72 from source-map + engine-graph suites). within-node: part of the suite, green.
-- **known-gaps §0 (needs the wrap edit — see TODO below):** HIGH 0 · MED 14 (+source-map-attr-relative-span if filed; or keep as carry) · LOW 14 · Nominal 7.
+- **HEAD scrmlTS:** `addfd205` — **div 0/0 with origin (PUSHED).** Clean tree (except this hand-off + the wrap-doc commit in flight).
+  - This session's pushes: (a) S149 backlog `8765462a`/`fe705c09`/`bd90f66e` (scrmlTS was 0/3) + scrml-support `0e15055` DD (was 0/1) — pushed early-session on "push both"; (b) `addfd205` srcmap fix — pushed via "wrap and push".
+- **scrml-support:** div 0/0 with origin (the S149 DD pushed early-session). This session only appended user-voice S150 (uncommitted in scrml-support — see wrap note below).
+- **Tests:** full `bun run test` **22,450 pass / 0 fail / 220 skip / 1 todo / 861 files** (S149 baseline 22,448; +2 srcmap regression tests).
+- **known-gaps §0:** HIGH 0 · MED 12 · LOW ~15 (srcmap-attr line-lie RESOLVED; srcmap-offset-threading NEW) · Nominal 7.
 - **Worktrees:** main only. **Inbox:** empty.
 
-### FOUR ARCS THIS SESSION
-1. **F1+F2 provenance debate** (S148-carried first action) — 3 experts + judge. **F2 settled 3-0 by convergence** (standards-hybrid: Source Map v3 + names for JS, CSS maps, data-scrml-span for HTML). **F1 = C1-static launch + C2a fast-follow** (user call). Design insight banked to `~/.claude/design-insights.md`.
-2. **Source-map real provenance SHIPPED** (`1108d45a`, B2+B1 as one reviewed unit) — killed the `addMapping(i,0,0)` lying stub; real Source Map v3 + names + use-site spans. The S148 deep-dive crux, closed.
-3. **Engine-graph sidecar SHIPPED** (`efae995b` + flag-fix `8765462a`) — `--emit-engine-graph` → `.engine-graph.json`, the C1 "what-comes-next" feed.
-4. **Tier-rung DD → ratified Approach A** (`fe705c09`) — SPEC §17.0.1: existing lints ARE the advisory rung; no fourth tier.
-Plus: **C1 self-demo website spike** (live-edit viewer, local /tmp, not committed).
+### THE SESSION (one arc)
+**Source-map attr-expr line-lie RESOLVED** (`addfd205`) — the only substantive work. The S149-carried "located, bounded, PA-direct" task turned out to be **mis-diagnosed** (Rule 4): the hand-off's `emit-event-wiring.ts:1243` root cause never fires on mario (no if-chains). Empirical instrumented tracing found TWO classes — ~40 ast-builder `safeParseExprToNode(…,0)` fragment-relative sites + a distinct wrong-absolute-offset B1 class (object-props / worker `if=` / reactive-assigns). PA surfaced the corrected scope via AskUserQuestion; user chose **honest-synthetic now + queue full fix**. Fix = validate-at-resolution in `build-source-map.ts` (drop any named mapping whose offset resolves to a line not containing the identifier). Offset-source-agnostic, contained to the source-map-only path, no AST mutation, zero footprint when maps off. **Empirical: LINE-WRONG 40→0; col-drift 39 KEPT unchanged (purely subtractive); named 103→63; mario 6 line-0 → 0; maps valid JSON + node --check clean.** +2 regression tests.
 
 ---
 
-## ⭐ S150 FIRST ACTIONS (priority order)
+## ⭐ S151 FIRST ACTIONS (carry-forward, priority order)
 
-1. **FINISH THE S149 WRAP** (if not completed before session close):
-   - `git -C ../scrml-support add docs/deep-dives/tier-ladder-intermediate-rung-2026-05-31.md && commit` (DD artifact — UNTRACKED at this hand-off write).
-   - known-gaps §0 header update for S149 (source-map provenance RESOLVED the S148 source-map-stub MED; engine-graph shipped; NEW carry: srcmap-attr-relative-span — see task below).
-   - master-list §0 S149 CLOSE addendum.
-   - **PUSH** scrmlTS (0/2) + scrml-support (1 after DD commit) — **user authorized commit this session but push was a SEPARATE gate; confirm before pushing.**
+1. **C1 self-demo website — build into the repo.** The largest ratified-for-go carry. The S149 spike (`/tmp/c1-demo/viewer.html` + `/tmp/c1-serve.js` — may be gone by S151; rebuild from the spec) proved: editable scrml → server-side recompile → live app + folded output + engine boxes, hover-linked via real `.js.map`. Layout: live+boxes left 60%, editable source+output right 40%, fixed live pane. Build into `docs/website/` properly (decide: keep harness chrome plain-JS, or rebuild as a scrml app per the dogfood thesis). **Per S146 — serve in browser for user BEFORE any push.** The F1=C1-static launch increment. NOTE: with the S150 fix, the C1 viewer's hover-provenance no longer points reads at the comment line — but col-precision awaits the offset-threading arc (#2).
 
-2. **SOURCE-MAP ATTR-EXPR RELATIVE-SPAN FIX (located, not fixed — task #3).** The B1 use-site work has a **6-hit / 3-name residual** (gameOver×2, healthRisk×3, lives×1): `if=`/`show=` markup-attribute-expr + interpolation reads record FRAGMENT-RELATIVE span offsets (`@gameOver`→`start=1`/`2`, `healthRisk`→`13`) instead of absolute file offsets → map to comment line 0. **ROOT CAUSE LOCATED:** `compiler/src/codegen/emit-event-wiring.ts:1243` — `parseExprToNode(branch.condition.raw, "<if-chain-branch>", 0)` passes base-offset `0`; the condition is re-parsed in its own coordinate system. **FIX:** thread the attribute value's ABSOLUTE base offset instead of `0` (same shape likely covers the interpolation-read path). **DO PA-DIRECT** — two background agents tasked with this died on the socket-death pattern (see below); it's a located, bounded edit; PA has commit auth. Acceptance: all 6 line-0 hits resolve to real use lines + zero line-0 source-kind mappings (re-emit C1 mario artifacts + decode the map). BRIEF + correction archived `docs/changes/srcmap-attr-expr-relative-span-2026-05-31/BRIEF.md`.
+2. **srcmap offset-threading full-fix (the queued half — NEW LOW).** Thread the real absolute base offset through the offset-0 parse sites (~40 ast-builder `safeParseExprToNode(…,0)` + the wrong-absolute-offset B1 root in object-props/worker-if/reactive-assigns) so the now-DROPPED use-site reads gain CORRECT col-precise provenance, and the 39 col-drift mappings become col-accurate. Infra exists (`collectExpr` returns absolute spans; `parseExprToNode`/`safeParseExprToNode` accept an offset). Regression surface: span field read by other passes + tests assert near spans → run full suite. Matters most when C1 needs full bidirectional provenance. BRIEF + landing note archived `docs/changes/srcmap-attr-expr-relative-span-2026-05-31/BRIEF.md`.
 
-3. **C1 self-demo website — build into the repo.** The spike (`/tmp/c1-demo/viewer.html` + `/tmp/c1-serve.js`) proved: editable scrml → server-side recompile → live app + folded output + engine boxes, hover-linked via real `.js.map`. Layout: live+boxes left 60%, editable source+output right 40%, fixed-height live pane. Next: build it into `docs/website/` properly (decide: keep the harness chrome plain-JS, or rebuild as a scrml app per the dogfood thesis). Per S146, serve in browser for user before any push. (The spike is the C1 increment of the F1=C1-static launch.)
+3. **Tier-2 ceiling primitive** (event-payload-transition) — the highest-leverage *language* arc the S149 tier-rung DD surfaced (the real case-analysis friction lives at the Tier-2 ceiling, not the 0→1 step). A design arc, not ratified-for-go; would need a deliberation.
 
-## ⚠️ BACKGROUND-AGENT INSTABILITY THIS SESSION (watch at S150)
-**Three background-agent deaths, two with identical signature** (socket closed / stream watchdog no-recover, ~10-68 min stall, zero commits):
-- srcmap-attr-fix agent (`af748054`) — stalled ~68min at startup, 0 work; stopped + worktree removed (nothing lost).
-- tier-rung DD agent (`ad4d1077`) — "no progress 600s, watchdog did not recover"; 0 artifact; PA ran the DD directly instead.
-Both salvage-checked clean (0 commits, 0 diffs, no leak). **Lesson:** when background dispatch is dying, PA-direct the work (research + bounded edits) rather than re-dispatching into a flaky channel. The engine-graph + finish-agent dispatches earlier in the session DID complete — so it's intermittent, not total. Verify dispatch health before relying on it at S150.
+## Carry-forward backlog → S151
 
-## 🟢 S149 OPEN — session-start state (for the record)
-- Opened from S148 CLOSE (`25e89cbb`), clean, 0/0. PA mis-read `scrmlTS/pa.md` as corrupted at open (it's the deliberate S96 pointer → `../scrml-support/pa-scrmlTS.md`); recovered, banked to memory `reference_pa_md_is_s96_pointer`. Tool-output buffered late several times this session — not corruption.
+**From S150 (NEW):**
+- srcmap offset-threading full-fix (task #2 above — col-precise correct provenance; the queued half of the S150 ratification).
 
-## Carry-forward backlog → S150
-
-**From S149 (NEW):**
-- **srcmap attr-expr relative-span fix** (task #3 above; located at emit-event-wiring.ts:1243; PA-direct).
-- **C1 website build-into-repo** (task above; the F1=C1-static launch increment).
-- **engine-graph multi-file write-loop bug** (banked in `8765462a` commit body): `engineGraphJson()` builds an all-files graph; the compile.js write loop writes that same JSON to EVERY per-file `<base>.engine-graph.json` → multi-file compile gives each file the whole-project graph. Single-file correct. Reachability shares the identical pre-existing loop shape. LOW; sidecar multi-file scoping fix.
-- **C2a playground** (F1 fast-follow, ratified): the spike proves local live-edit is free; deployed-static needs the WASM/self-host path. Gated behind a CLI-conformance corpus (kill divergence risk). Next milestone after C1-static.
+**Still open (carried):**
+- **engine-graph multi-file write-loop bug** (LOW): `engineGraphJson()` builds an all-files graph; the compile.js write loop writes that same JSON to EVERY per-file `<base>.engine-graph.json`. Single-file correct. Reachability shares the loop shape.
+- **C2a playground** (F1 fast-follow, ratified): spike proves local live-edit free; deployed-static needs the WASM/self-host path. Gated behind a CLI-conformance corpus. Next milestone after C1-static.
 - **Phase 2 provenance** (F2 standards-hybrid, ratified but unbuilt): CSS source maps + HTML `data-scrml-span` correlation. Deferred until C1 needs them.
+- **2 S148 findings:** `derived=match` arms not covered by match-`:>` tooling (triage). `migrate.js` Migration-2 `<machine>`→`<engine>` rewrites inside comment/string context (tool bug — add comment/string skip).
+- **Open MEDs:** C4 object-literal lifecycle E-TYPE-001 · C6 formFor-in-engine · R28-8 bare-variant-into-object-literal (design call) · `:`-shorthand-state-body fragility (S145 — KEEP+make-robust, so it's a BUG to fix) · Bug 60 render-by-tag nested-compound.
+- **Ratified-but-gated arcs:** D-runtime arc (027B-D server-render-time role-gating) · native-parser M6 joint-retirement (complete front-end, shadow-only, parity 1005/0 — the flip-to-default decision).
+- **Hygiene:** 12 non-compliance deref candidates · within-node allowlist staleness · **maps refresh** (watermark `09f74bee`, now stale for S149 source-map + engine-graph + S150 build-source-map codegen landings — refresh before next compiler-source dispatch).
 
-**S148-carried (still open):**
-- **3 S148 findings:** source-map stub → **RESOLVED this session** (the B2+B1 arc). `derived=match` arms not covered by match-`:>` tooling (triage). `migrate.js` Migration-2 `<machine>`→`<engine>` rewrites inside comment/string context (tool bug — add comment/string skip; confirmed reproducible S149).
-- **Open MEDs:** C4 object-literal lifecycle E-TYPE-001 · C6 formFor-in-engine · R28-8 bare-variant-into-object-literal (design call) · `:`-shorthand-state-body fragility (S145) · Bug 60 render-by-tag nested-compound.
-- **Ratified-but-gated arcs:** D-runtime arc (027B) · **Tier-2 ceiling primitive** (the event-payload-transition primitive — the tier-rung DD found THIS is where the real case-analysis friction lives; the highest-leverage language arc surfaced this session) · native-parser M6 joint-retirement (complete front-end, shadow-only, parity-green 1005/0 — the flip to default is the v0.next-ish decision; see below).
-- **Hygiene:** 12 non-compliance deref candidates · within-node allowlist staleness · maps refresh (watermark `09f74bee`, now stale for S149 source-map + engine-graph codegen landings — refresh before next compiler-source dispatch).
+## NATIVE-PARSER STATUS (current, keep)
+Native parser is a **COMPLETE front-end** (charter B, ~37,300 LOC, 38 modules w/ .scrml mirrors). M1-M4 + MK1-MK4 done; K-ledger 12/12 (S114). Runs as **opt-in shadow** via `--parser=scrml-native` (M5.1); DEFAULT is still legacy live path. Parity 1005/0. Remaining arc: **M6 joint-retirement** (delete legacy front-end behind a soak-gated flag-flip) — dormant since ~S128.
 
-## NATIVE-PARSER STATUS (corrected S149 — the S148 hand-off one-liner was stale)
-The S148/earlier hand-offs carried "native parser M2.4 + MK2" — **STALE S103-era language.** Actual: the native parser is a **COMPLETE front-end** (charter B, ~37,300 LOC, 38 modules w/ .scrml mirrors). M1-M4 (JS chain) + MK1-MK4 (markup chain) done; K-ledger closed 12/12 at S114. It runs as an **opt-in shadow** via `--parser=scrml-native` (M5.1); the DEFAULT is still the legacy live path (block-splitter + Acorn + BPP). Parity canaries green (within-node 1005/0, allowlist-baselined). The remaining arc is **M6 joint-retirement** (delete the legacy front-end behind a soak-gated flag-flip) — dormant since ~S128; S143-S149 were all fixes/features/website. It sits complete-and-shadowing, waiting on a decision to drive M6 + flip to default.
-
-## pa.md directives in force
-- Commit auth GRANTED this session (verified PA-reviewed compiler work); **push is a SEPARATE gate — not yet given for the 0/2.** S136 BRIEF.md archival · S138 R26 doctrine · S147 branch-leak coherence · S126 Bash-edit + no-cd-into-main · S83 commit-discipline + verify-git-state · S67 file-delta · S146 show-visual-work-before-push (honored: C1 viewer served before any website push).
-- Rules: R1 no-marketing · R2 not-a-toy · R3 right-beats-easy · R4 SPEC-normative (fired this session — caught the §17.0.1-doesn't-exist miss at ratification) · R5 shoot-straight.
+## pa.md directives — S150 observations
+- **Rule 4 fired** (caught the mis-located root cause before acting; corrected via empirical tracing + AskUserQuestion).
+- **`feedback_dont_preclassify_fix_as_surgical` confirmed again** — the "bounded PA-direct" hand-off framing was wrong; the real fix surface was broad; scope surfaced to user not assumed.
+- **S146 show-visual-work-before-push** — N/A this session (no UI work; srcmap is internal). Applies to S151 C1 website.
+- Commit auth GRANTED this session (PA-reviewed srcmap fix); push GRANTED ("wrap and push"). Both consumed.
+- Rules R1-R5 in force; S136 BRIEF archival (landing note added), S138 R26 (empirical-first applied — instrumented + corpus-verified before claiming closed), S147 branch-leak coherence (held).
 
 ## Tags
-#session-149 #CLOSE #source-map-provenance #engine-graph #tier-rung-ratified-A #C1-spike #carry-srcmap-attr-fix #carry-C1-build #carry-tier2-ceiling-primitive #push-pending #background-agent-instability #known-gaps-HIGH-0
+#session-150 #CLOSE #source-map-line-lie-RESOLVED #honest-synthetic #rule-4-fired #root-cause-corrected #carry-C1-website #carry-srcmap-offset-threading #carry-tier2-ceiling-primitive #pushed-all-0-0 #known-gaps-HIGH-0
