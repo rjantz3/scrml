@@ -1325,11 +1325,13 @@ Notes:
 
 For per-role markup variance — show this UI to admins, that UI to regular users — use the `<auth role="X">` first-class element (S91, A-3 AuthGraph). The compiler builds a per-route per-role chunk closure; only the matching role's content ships to each user. Cross-ref the auth recipe above for the JWT pattern + state declarations.
 
-### 11.3 Real-time recipe — file-level `<channel>`
+### 11.3 Real-time recipe — `<channel>` inside `<program>`
 
-Channels are **file-level** in v0.next (NOT inside `<program>`). They auto-create a WebSocket endpoint and auto-declare their variable. State declared inside a channel body syncs across every connected client. **No `@shared` modifier exists in v0.next; the synchronization comes from being declared inside a channel body.**
+Channels live **inside `<program>`** in v0.3 — a sibling of `<page>` (reversed from the earlier file-level placement per Insight 30 / S87). A `<channel>` placed outside `<program>` in a file that *has* a `<program>` fires `E-CHANNEL-OUTSIDE-PROGRAM`; a file-top `<channel>` is canonical only in a pure-channel module file that has no `<program>` (§38.12.6). They auto-create a WebSocket endpoint and auto-declare their variable. State declared inside a channel body syncs across every connected client. **No `@shared` modifier exists in v0.next; the synchronization comes from being declared inside a channel body.**
 
 ```scrml
+<program>
+
 <channel name="chat" topic="lobby">
   <messages> = []                              // synced across all clients
 
@@ -1337,8 +1339,6 @@ Channels are **file-level** in v0.next (NOT inside `<program>`). They auto-creat
     @messages = [...@messages, { author, body, ts: Date.now() }]
   }
 </>
-
-<program>
 
 ${
   <username> = ""
@@ -1366,7 +1366,7 @@ ${
 ```
 
 Notes:
-- `<channel>` lives at file level, alongside `<program>`. Not inside it.
+- `<channel>` lives **inside `<program>`** (a sibling of `<page>` declarations). A file-level `<channel>` is canonical only in a pure-channel module file with no `<program>` (§38.12.6).
 - `<messages> = []` declares a channel-scoped reactive variable. It is auto-synced to every connected client.
 - Read it as `@messages` from anywhere in the file (including inside `<program>`).
 - Server functions inside the channel body see `broadcast(data)` and `disconnect()` auto-injected.
@@ -1826,6 +1826,8 @@ Sidecars are workers with different supervision defaults (restart-on-error vs re
 When you need the SERVER to push updates to the CLIENT without bidirectional channel overhead (live counters, progress bars, log streams), use a `server function*` generator. The compiler emits a `text/event-stream` GET route + an `EventSource`-based client stub.
 
 ```scrml
+import { sleep } from 'scrml:time'
+
 <program>
   ${
     server function* liveCount() {
