@@ -9646,10 +9646,43 @@ has more than 2 reactive boolean cells gating the same UI region, the compiler e
 `W-LIFECYCLE-CANDIDATE` suggesting promotion to Tier 1 (`<match>`) or Tier 2 (`<engine>`).
 The lint teaches; turning it off is the developer's prerogative.
 
+#### 17.0.1 The advisory step between Tier 0 and Tier 1 — no fourth tier
+
+The jump from Tier 0 (no exhaustiveness) to Tier 1 (full structural exhaustiveness) is not a
+cliff the author crosses unaided. scrml already provides a **non-blocking advisory rung** that
+sits between them — composed of existing mechanisms, not a separate tier:
+
+- **`I-MATCH-PROMOTABLE` (§56):** fires on an `if`/`else` chain over an enum-typed `@cell`
+  where every branch is `@cell is .Variant` / `@cell == .Variant`. It names missing variants
+  (the §56.3 "near-miss" message) — i.e. it gives Tier-1's completeness *feedback* without
+  Tier-1's structural *commitment*. Info-level; the prototype keeps compiling.
+- **`bun scrml promote --match` (§56):** performs the mechanical Tier-0 → Tier-1 lift once the
+  author is ready to commit. State-children carry forward verbatim.
+- **`W-LIFECYCLE-CANDIDATE` (above):** the boolean-cell-accretion nudge that points at the
+  ladder before an enum type even exists.
+
+Together these ARE the intermediate rung: advisory exhaustiveness without restructuring. This
+is the same shape the broader ecosystem converges on — e.g. TypeScript's
+`switch-exhaustiveness-check` is a non-blocking advisory lint, structurally identical to
+`I-MATCH-PROMOTABLE`; no surveyed language offers a *syntactic* soft-exhaustiveness tier
+distinct from a lint.
+
+**No fourth tier is added.** A dedicated intermediate-rung syntax was proposed and rejected at
+S64 (debate-04) on a corpus-zero basis (since recognized as the corpus-ouroboros — pa.md
+Rule 2). The question was re-evaluated S149 on pure-DX merits with corpus-zero discounted
+(`scrml-support/docs/deep-dives/tier-ladder-intermediate-rung-2026-05-31.md`): an empirical
+witnessed-friction probe across 82 adopter files found the 3-rung ladder is actively used
+(74 structured `<match>`/`<engine>` uses, not corpus-zero) and that the genuine friction lives
+at the **Tier-2 ceiling** (a missing event-payload-transition primitive) and in lifecycle
+`transition()` mechanics (§14.12.6) — *not* at the Tier 0 → 1 step. The advisory rung above
+already serves that step. Ratified S149 (Approach A): recognize the advisory step; add no new
+tier; redirect design energy at the Tier-2 ceiling.
+
 **Cross-references:**
 - §1.5 — North star + the tier ladder (overview)
 - §18 — Tier 1: `<match for=Type>` block-form (structural exhaustiveness)
 - §51 — Tier 2: `<engine for=Type>` (full state machine commitment)
+- §56 — `I-MATCH-PROMOTABLE` + `bun scrml promote --match` (the advisory rung)
 - §34 — W-LIFECYCLE-CANDIDATE (lint code definition)
 
 ---
