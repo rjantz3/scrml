@@ -585,3 +585,164 @@ describe("each-block §14 — DG credit", () => {
     expect(dgWarnings).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// §15 — Landing 2: per-item body interactivity (SPEC §17.7.2 Shape 4 +
+//       §17.7.3). Event handlers, class: bindings, and ${}/@.field attribute
+//       interpolation on per-item element openers — Landing 1 dropped these
+//       as inert literal `setAttribute(name, "")` / literalized strings.
+// ---------------------------------------------------------------------------
+
+describe("each-block §15 — per-item body interactivity (Landing 2)", () => {
+  test("class:NAME=@.field emits a classList.toggle on the per-item element", () => {
+    const src = `<program>
+<items> = [{id: "a", done: false}]
+
+<each in=@items key=@.id>
+    <li class:done=@.done>row</li>
+</each>
+
+</program>`;
+    const { errors, clientJs } = compileToOutputs(src, "l2-class");
+    expect(errors).toEqual([]);
+    // class:done lowers to a classList.toggle keyed on the iteration value's
+    // field — NOT an inert setAttribute("class:done", "").
+    expect(clientJs).toContain('.classList.toggle("done", !!(_scrml_each_item.done));');
+    expect(clientJs).not.toContain('setAttribute("class:done"');
+  });
+
+  test("onclick=fn(@.id) emits a real addEventListener calling the handler with the item field", () => {
+    const src = `<program>
+<items> = [{id: "a"}]
+function pick(id) {
+    @items = @items
+}
+
+<each in=@items key=@.id>
+    <li onclick=pick(@.id)>row</li>
+</each>
+
+</program>`;
+    const { errors, clientJs } = compileToOutputs(src, "l2-onclick");
+    expect(errors).toEqual([]);
+    // onclick lowers to addEventListener("click", ...) — NOT inert
+    // setAttribute("onclick", "").
+    expect(clientJs).toMatch(/\.addEventListener\("click", function\(event\) \{ /);
+    // The handler is invoked with the rewritten item field (@.id -> iter var).
+    // The handler name is rewritten to the emitted fn name (_scrml_pick_N).
+    expect(clientJs).toMatch(/_scrml_pick_\d+\(_scrml_each_item\.id\);/);
+    expect(clientJs).not.toContain('setAttribute("onclick"');
+  });
+
+  test("on:NAME namespaced event form lowers to addEventListener on the event name", () => {
+    const src = `<program>
+<items> = [{id: "a"}]
+function handle(id) {
+    @items = @items
+}
+
+<each in=@items key=@.id>
+    <li on:dblclick=handle(@.id)>row</li>
+</each>
+
+</program>`;
+    const { errors, clientJs } = compileToOutputs(src, "l2-on-ns");
+    expect(errors).toEqual([]);
+    expect(clientJs).toMatch(/\.addEventListener\("dblclick", function\(event\) \{ /);
+    expect(clientJs).not.toContain('setAttribute("on:dblclick"');
+  });
+
+  test("data-x=${@.id} attribute interpolation emits the VALUE, not the literal source string", () => {
+    const src = `<program>
+<items> = [{id: "a"}]
+
+<each in=@items key=@.id>
+    <li data-id=\${@.id}>row</li>
+</each>
+
+</program>`;
+    const { errors, clientJs } = compileToOutputs(src, "l2-interp");
+    expect(errors).toEqual([]);
+    // The ${@.id} interpolation lowers to setAttribute("data-id", String(<expr>))
+    // where <expr> is the iter-var field — NOT the literalized source string
+    // "_scrml_each_item.id" (the Landing 1 bug) and NOT "@.id".
+    expect(clientJs).toContain('.setAttribute("data-id", String(_scrml_each_item.id));');
+    expect(clientJs).not.toContain('setAttribute("data-id", "_scrml_each_item.id")');
+    expect(clientJs).not.toContain('setAttribute("data-id", "@.id")');
+  });
+
+  test("@.field bare attribute value (no ${}) emits the VALUE — SPEC §17.7.3 href=@.email", () => {
+    const src = `<program>
+<items> = [{id: "a", email: "x@y.z"}]
+
+<each in=@items key=@.id>
+    <a href=@.email>link</a>
+</each>
+
+</program>`;
+    const { errors, clientJs } = compileToOutputs(src, "l2-bare-at");
+    expect(errors).toEqual([]);
+    // No false E-SCOPE-001 on the bare @. in attribute position (Locus 1).
+    expect(errors).toEqual([]);
+    // href=@.email lowers to the value, not a literal.
+    expect(clientJs).toContain('.setAttribute("href", String(_scrml_each_item.email));');
+  });
+
+  test("class:/onclick/${} compose on a single per-item opener (the reproducer)", () => {
+    const src = `<program>
+type Item:struct = { id: string, name: string, done: boolean }
+<items>: Item[] = [{id: "a", name: "Alpha", done: false}]
+function toggle(id) {
+    @items = @items.map(x => x.id == id ? {...x, done: !x.done} : x)
+}
+
+<ul>
+    <each in=@items key=@.id>
+        <li class:done=@.done onclick=toggle(@.id) data-id=\${@.id}>
+            \${@.name}
+        </li>
+    </each>
+</ul>
+
+</program>`;
+    const { errors, clientJs } = compileToOutputs(src, "l2-compose");
+    // The whole reproducer compiles with no errors (was E-SCOPE-001 pre-fix).
+    expect(errors).toEqual([]);
+    expect(clientJs).toContain('.classList.toggle("done", !!(_scrml_each_item.done));');
+    expect(clientJs).toMatch(/_scrml_toggle_\d+\(_scrml_each_item\.id\);/);
+    expect(clientJs).toContain('.setAttribute("data-id", String(_scrml_each_item.id));');
+    expect(clientJs).toContain("String(_scrml_each_item.name)");
+  });
+
+  test("literal string attrs still copy verbatim (no regression)", () => {
+    const src = `<program>
+<items> = [{id: "a"}]
+
+<each in=@items key=@.id>
+    <li title="static label">row</li>
+</each>
+
+</program>`;
+    const { errors, clientJs } = compileToOutputs(src, "l2-literal");
+    expect(errors).toEqual([]);
+    expect(clientJs).toContain('.setAttribute("title", "static label");');
+  });
+
+  test("of= count form: @. index resolves in attribute position", () => {
+    const src = `<program>
+function clk(i) {
+    let x = i
+}
+
+<each of=3>
+    <li onclick=clk(@.) data-i=\${@.}>slot</li>
+</each>
+
+</program>`;
+    const { errors, clientJs } = compileToOutputs(src, "l2-of-index");
+    expect(errors).toEqual([]);
+    // @. (the index) rewrites to the iter var in both handler arg + interp.
+    expect(clientJs).toMatch(/\.addEventListener\("click", function\(event\) \{ _scrml_clk_\d+\(_scrml_each_item\); \}\)/);
+    expect(clientJs).toContain('.setAttribute("data-i", String(_scrml_each_item));');
+  });
+});

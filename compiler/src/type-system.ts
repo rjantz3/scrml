@@ -6902,6 +6902,26 @@ function annotateNodes(
     visitNode(node);
   }
 
+  /**
+   * S130 HU-1 iteration Landing 2 (SPEC §17.7.3) — true when the current
+   * scope (or any enclosing scope) is an `<each>` body scope. The each-block
+   * case (see `case "each-block"`) pushes a scope labelled `each:<nodeKey>`
+   * before walking templateChildren; the `@.` contextual sigil is only legal
+   * inside such a scope. Walks the live `scopeChain.current` parent chain so a
+   * nested markup attribute reached during the each-body walk sees the each
+   * scope above it.
+   */
+  function inEachBodyScope(): boolean {
+    let scope: Scope | null = scopeChain.current;
+    while (scope !== null) {
+      if (typeof scope.label === "string" && scope.label.startsWith("each:")) {
+        return true;
+      }
+      scope = scope.parent;
+    }
+    return false;
+  }
+
   function visitAttr(attr: ASTNodeLike, parent: ASTNodeLike): void {
     if (!attr || !attr.value) return;
 
@@ -6912,6 +6932,21 @@ function annotateNodes(
 
     if (value.kind === "variable-ref") {
       const name = value.name as string;
+      // S130 HU-1 iteration Landing 2 (SPEC §17.7.3) — the `@.` contextual
+      // sigil ("the current iteration value") is legal in attribute-value
+      // position inside an `<each>` body scope. The BS/ast-builder parses
+      // `class:done=@.done` as a variable-ref whose `name` is `@.done`; the
+      // base-name slice below would yield `@` and fire a false E-SCOPE-001.
+      // SPEC §17.7.3 (`<a href=@.email>`) + the §3.4 each-body-scope row make
+      // `@.`/`@.field` resolve inside the `<each>` body — including on per-item
+      // element attribute values. The sigil is rewritten to the iteration
+      // variable at codegen (emit-each.ts:rewriteContextualSigil); the TS pass
+      // only needs to NOT flag it. `@.` OUTSIDE an each body remains
+      // E-SYNTAX-064 territory (§17.7.3); here we gate the skip on actually
+      // being inside an each-body scope.
+      if ((name === "@." || name.startsWith("@.")) && inEachBodyScope()) {
+        return;
+      }
       // For dotted access like @todos.length, resolve the base name (@todos)
       const baseName = name.includes(".") ? name.slice(0, name.indexOf(".")) : name;
       const entry = scopeChain.lookup(baseName);

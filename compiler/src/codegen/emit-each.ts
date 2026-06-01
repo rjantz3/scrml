@@ -205,18 +205,23 @@ function renderTemplateChildToJs(
     const elVar = `_scrml_el_${nextLocalId()}`;
     lines.push(`${indent}const ${elVar} = document.createElement(${JSON.stringify(tagName)});`);
 
-    // Apply known attributes (best-effort). For Landing-1, copy literal
-    // string-valued attributes; defer interpolation-bearing attrs to a
-    // future enhancement. Attribute rewrite for `@.` substitution lands
-    // identically to body-text rewrite.
+    // S130 HU-1 iteration Landing 2 — per-item element attribute codegen.
+    //
+    // Landing 1 copied EVERY attribute as an inert literal string
+    // (`setAttribute(name, "")`), which silently dropped event handlers
+    // (no addEventListener), `class:` bindings (no classList toggle), and
+    // literalized `${...}` interpolations to the source text. Landing 2
+    // emits real per-item wiring on the freshly-created element, mirroring
+    // the lowering shapes the top-level codegen produces (emit-bindings.ts
+    // class: toggle, emit-event-wiring.ts addEventListener) but INLINE on
+    // `elVar` — the per-item factory builds DOM imperatively, so there is no
+    // static-HTML placeholder + querySelector handoff. The each render fn
+    // re-runs on collection change via `_scrml_effect_static`, so each item's
+    // class:/interpolation re-evaluates against its current value per render
+    // (same re-dispatch model the per-item match-block already uses).
     const attrs: any[] = (child as any).attributes ?? (child as any).attrs ?? [];
     for (const attr of attrs) {
-      if (!attr || typeof attr !== "object") continue;
-      const aName = String(attr.name ?? "");
-      if (!aName) continue;
-      const aValRaw = String(attr.value?.value ?? attr.value?.raw ?? attr.raw ?? "");
-      const rewrittenVal = rewriteContextualSigil(aValRaw, iterVarName);
-      lines.push(`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${JSON.stringify(rewrittenVal)});`);
+      renderTemplateAttrToJs(attr, iterVarName, _iterIdxName, elVar, lines, indent);
     }
 
     if (isShorthand && shorthandExpr !== null) {
@@ -325,6 +330,182 @@ function renderTemplateChildToJs(
   // Other node kinds — defer to a runtime-error hint so adopters see the
   // missing case (rather than silent skip).
   lines.push(`${indent}// each: unhandled template child kind="${(child as any).kind}"`);
+}
+
+// ---------------------------------------------------------------------------
+// Per-item element attribute codegen (S130 HU-1 iteration Landing 2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Rewrite an attribute / handler-arg expression string into JS valid in the
+ * each per-item factory scope (where `iterVarName` is bound):
+ *   - `@.field` / `@.`  → `<iterVar>.field` / `<iterVar>` (SPEC §17.7.3 sigil)
+ *   - bare `@cell`      → `_scrml_reactive_get("cell")` (file-scope reactive read)
+ *
+ * The BS tokenizer space-pads `.` operators in some positions
+ * (`@.id` → `@ . id`); normalize the contextual-sigil dot before lowering so
+ * `rewriteContextualSigil` (which matches `@.ident` without interior
+ * whitespace) fires. Order matters: lower `@.` FIRST so `rewriteAtCellAccess`
+ * does not mis-consume the contextual sigil's `@`.
+ */
+function rewriteIterValueExpr(text: string, iterVarName: string): string {
+  if (!text || typeof text !== "string") return text;
+  let expr = text.replace(/@\s*\.\s*/g, "@.");
+  expr = rewriteContextualSigil(expr, iterVarName);
+  expr = rewriteAtCellAccess(expr);
+  return expr;
+}
+
+/**
+ * Detect the DOM event name for an event-handler attribute, or null when the
+ * attribute is not an event handler.
+ *   - `onclick`     → "click"   (canonical §5.2.2 form)
+ *   - `on:dblclick` → "dblclick" (namespaced §5.2.3 form)
+ * Conservative: `on` alone (no event suffix) and `on-...` are not events.
+ */
+function eventNameForAttr(aName: string): string | null {
+  if (aName.startsWith("on:")) {
+    const ev = aName.slice(3);
+    return ev.length > 0 ? ev : null;
+  }
+  if (aName.startsWith("on") && aName.length > 2) {
+    // Exclude bind:/class: false hits (they never start with "on") and the
+    // bare `on` directive. `onclick` → "click".
+    return aName.slice(2);
+  }
+  return null;
+}
+
+/**
+ * Lower one per-item element attribute to inline JS on the freshly-created
+ * element `elVar`. Handles the four attribute classes that Landing 1 dropped:
+ *   1. `class:NAME=expr`  → `elVar.classList.toggle("NAME", !!(expr))`
+ *   2. event handlers     → `elVar.addEventListener(ev, fn)`
+ *   3. `${...}` / `@.x`   → `elVar.setAttribute("name", String(expr))`
+ *   4. literal strings    → `elVar.setAttribute("name", "literal")`
+ * plus a defensive comment for directive attrs Landing 2 still defers
+ * (`bind:`, `ref=`, `transition:` — these need the reactive-binding registry
+ * + static-HTML placeholder model that the per-item factory does not share).
+ *
+ * `@.`/`@.field` and bare `@cell` are rewritten to the factory-scope binding
+ * via `rewriteIterValueExpr`. The render fn re-runs on collection change
+ * (`_scrml_effect_static`), so per-item class:/interpolation re-evaluate.
+ */
+function renderTemplateAttrToJs(
+  attr: any,
+  iterVarName: string,
+  iterIdxName: string,
+  elVar: string,
+  lines: string[],
+  indent: string,
+): void {
+  if (!attr || typeof attr !== "object") return;
+  const aName = String(attr.name ?? "");
+  if (!aName) return;
+  const val = attr.value;
+  const valKind = val && typeof val === "object" ? String(val.kind ?? "") : "";
+
+  // ---- (1) class:NAME — conditional classList toggle ----------------------
+  if (aName.startsWith("class:")) {
+    const className = aName.slice("class:".length);
+    if (!className) return;
+    // Resolve the condition expression across the value kinds:
+    //   variable-ref @.done  → `<iterVar>.done`
+    //   call-ref isOk()      → `isOk()` (args rewritten)
+    //   expr (@.n == 1)      → the raw expr (rewritten)
+    //   string-literal "x"   → degenerate; treat as a constant truthy string
+    let cond: string;
+    if (valKind === "variable-ref") {
+      cond = rewriteIterValueExpr(String(val.name ?? ""), iterVarName);
+    } else if (valKind === "call-ref") {
+      cond = `${String(val.name ?? "")}(${serializeCallArgs(val, iterVarName)})`;
+      cond = rewriteIterValueExpr(cond, iterVarName);
+    } else if (valKind === "expr") {
+      cond = rewriteIterValueExpr(String(val.raw ?? ""), iterVarName);
+    } else if (valKind === "string-literal") {
+      cond = JSON.stringify(String(val.value ?? ""));
+    } else {
+      cond = "false";
+    }
+    if (!cond) cond = "false";
+    lines.push(`${indent}${elVar}.classList.toggle(${JSON.stringify(className)}, !!(${cond}));`);
+    return;
+  }
+
+  // ---- (2) event handlers — inline addEventListener -----------------------
+  const ev = eventNameForAttr(aName);
+  if (ev !== null) {
+    let handlerBody: string;
+    if (valKind === "call-ref") {
+      const fnName = String(val.name ?? "");
+      handlerBody = `${fnName}(${serializeCallArgs(val, iterVarName)});`;
+    } else if (valKind === "expr") {
+      // `${...}` form — could be an arrow/lambda or a call expression. Emit
+      // the rewritten expression and invoke it if it is a function reference;
+      // for a bare call expression the rewrite already produces a statement.
+      const body = rewriteIterValueExpr(String(val.raw ?? ""), iterVarName);
+      handlerBody = `${body};`;
+    } else if (valKind === "variable-ref") {
+      // `onclick=@handler` — reference a reactive/handler cell. Rewrite then
+      // invoke with the event.
+      const ref = rewriteIterValueExpr(String(val.name ?? ""), iterVarName);
+      handlerBody = `${ref}(event);`;
+    } else {
+      handlerBody = "/* each: unsupported event handler shape */";
+    }
+    lines.push(`${indent}${elVar}.addEventListener(${JSON.stringify(ev)}, function(event) { ${handlerBody} });`);
+    return;
+  }
+
+  // ---- bind: / ref= / transition: — deferred (needs reactive registry) ----
+  if (aName.startsWith("bind:") || aName === "ref" || aName.startsWith("transition:") ||
+      aName.startsWith("in:") || aName.startsWith("out:")) {
+    lines.push(`${indent}// each: per-item directive attr "${aName}" deferred (Landing 2 scope: class:/events/interpolation/literals)`);
+    return;
+  }
+
+  // ---- (3) ${...} interpolation / @.field value → setAttribute value ------
+  if (valKind === "expr") {
+    const expr = rewriteIterValueExpr(String(val.raw ?? ""), iterVarName);
+    lines.push(`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, String(${expr}));`);
+    return;
+  }
+  if (valKind === "variable-ref") {
+    const expr = rewriteIterValueExpr(String(val.name ?? ""), iterVarName);
+    lines.push(`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, String(${expr}));`);
+    return;
+  }
+  if (valKind === "call-ref") {
+    const expr = rewriteIterValueExpr(`${String(val.name ?? "")}(${serializeCallArgs(val, iterVarName)})`, iterVarName);
+    lines.push(`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, String(${expr}));`);
+    return;
+  }
+
+  // ---- (4) literal string / absent (bareword) attr ------------------------
+  if (valKind === "string-literal") {
+    lines.push(`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${JSON.stringify(String(val.value ?? ""))});`);
+    return;
+  }
+  if (valKind === "absent" || val == null) {
+    // Bareword attribute (e.g. `disabled`): presence-only.
+    lines.push(`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, "");`);
+    return;
+  }
+
+  // Unknown value kind — defensive literal copy with a hint.
+  lines.push(`${indent}// each: per-item attr "${aName}" unhandled value kind="${valKind}"`);
+}
+
+/**
+ * Serialize a call-ref attribute value's arguments into a comma-joined JS
+ * argument list, rewriting `@.`/`@cell` to the factory-scope binding. Each arg
+ * is a raw expression string from the parser (e.g. "@.id", "userId", "9.99").
+ */
+function serializeCallArgs(callRef: any, iterVarName: string): string {
+  const args: any[] = Array.isArray(callRef?.args) ? callRef.args : [];
+  return args
+    .map((a) => rewriteIterValueExpr(String(a ?? ""), iterVarName))
+    .join(", ");
 }
 
 // ---------------------------------------------------------------------------
