@@ -1,0 +1,16 @@
+<program>
+type Phase:enum = { Loading, Browsing }
+type Todo:struct = { id: string, name: string }
+<todos>: Todo[] = [{ id: "1", name: "alpha" }, { id: "2", name: "beta" }]
+<phase>: Phase = .Loading
+<match for=Phase on=@phase>
+  <Loading>
+    <button onclick=${@phase = .Browsing}>Go</button>
+  </>
+  <Browsing>
+    <each in=@todos as t key=t.id>
+      <li>${t.name}</li>
+    </each>
+  </>
+</match>
+</program>

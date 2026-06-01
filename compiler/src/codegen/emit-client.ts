@@ -981,6 +981,34 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
         break;
       }
 
+      // match-block — Tier-1 `<match for=Type on=...>` block form (SPEC
+      // §18.0.1). each-in-block-form-match (S153): an `<each>` inside a match
+      // arm body lives in `armsRaw` raw text (the match body is a structural
+      // raw-body element — BS does NOT descend, so the each is NOT a walkable
+      // node here at chunk-detect time, which runs BEFORE emit-match attaches
+      // the lifted each-blocks to bodyChildren). Without this case the
+      // arm-render code emitted by emit-each (via the buildMatchArms each-block
+      // re-parse) calls `_scrml_reconcile_list` / `_scrml_effect_static` /
+      // `_scrml_remount_each` against a runtime that tree-shook them out →
+      // ReferenceError once the arm mounts (compile-clean, node --check-clean —
+      // identical failure class to the engine-arm each the engine-decl case
+      // above handles). Cheap raw-text probe gates the chunk add to arms that
+      // actually contain an each. Both chunks are unconditional once an each is
+      // present (every non-empty each emits the `_scrml_reconcile_list` call +
+      // the `_scrml_effect_static` registration), mirroring the each-block case.
+      case "match-block": {
+        const armsRaw = (node as any).armsRaw;
+        if (typeof armsRaw === "string" && /<\s*each\b/.test(armsRaw)) {
+          chunks.add("reconciliation"); // _scrml_reconcile_list + _scrml_remount_each + _scrml_each_renderers
+          chunks.add("deep_reactive");  // _scrml_effect_static
+        }
+        // Defensive: if buildMatchArms already attached the lifted each-blocks
+        // to bodyChildren (re-run ordering), descend so any OTHER chunk-
+        // requiring shape inside them gates too.
+        if (Array.isArray((node as any).bodyChildren)) walkNodes((node as any).bodyChildren);
+        break;
+      }
+
       // match-stmt with enum arms — uses _scrml_structural_eq for enum comparison
       case "match-stmt": {
         const arms: any[] = node.arms ?? [];

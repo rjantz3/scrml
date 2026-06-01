@@ -499,6 +499,19 @@ function buildMatchArms(
 ): import("./emit-variant-guard.ts").VariantArm[] | null {
   if (!matchBlock.armsRaw || typeof matchBlock.armsRaw !== "string") return null;
 
+  // Memoize on the match-block node. buildMatchArms runs once per HTML-mount
+  // pass (emitMatchMountHtml) AND once per client-render pass
+  // (emitMatchBodyRenderForFile) over the SAME node references walked from
+  // ctx.fileAST. The each-in-arm fix (below) re-parses arm bodies into real
+  // `each-block` nodes whose `id` drives both the `<div data-scrml-each-mount=
+  // "each_<id>">` slot AND the `_scrml_each_render_<id>` fn name — those ids
+  // MUST be identical across passes, and the each-block nodes MUST be the SAME
+  // object refs that get attached to matchBlock.bodyChildren (so emit-each's
+  // collectEachBlocks(fileAST) finds them). Caching on the node guarantees both.
+  if (Array.isArray((matchBlock as any).__scrmlCachedArms)) {
+    return (matchBlock as any).__scrmlCachedArms;
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { parseMatchArms } = require("../match-statechild-parser.ts") as {
     parseMatchArms: (armsRaw: string) => {
@@ -530,6 +543,24 @@ function buildMatchArms(
   const { nativeParseFile } = require("../../native-parser/parse-file.js") as {
     nativeParseFile: (filePath: string, src: string) => { filePath: string; ast: any; errors: any[] };
   };
+  // each-in-block-form-match (S153) — when an arm body contains an `<each>`,
+  // `nativeParseFile` produces a generic `markup` node (tag "each"), NOT the
+  // `each-block` AST node that emit-each + generateHtml's each-block branch
+  // require: the each-block transform lives in `buildAST` (ast-builder.js), not
+  // in the native parser. The legacy BS+TAB path DOES apply that transform, so
+  // for each-bearing arm bodies we re-parse via splitBlocks+buildAST (this is
+  // exactly the pre-M6.3 synthesis route, scoped to the each case). Without it
+  // the each renders as a LITERAL `<each>` string and its `${@.name}` lowers to
+  // an unscoped logic binding → `el.textContent = .name;` (invalid JS,
+  // E-CODEGEN-INVALID-JS).
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { splitBlocks } = require("../block-splitter.js") as {
+    splitBlocks: (filePath: string, src: string) => any;
+  };
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { buildAST } = require("../ast-builder.js") as {
+    buildAST: (bsOutput: any) => { filePath: string; ast: any; errors: any[] };
+  };
   // S108 Phase 4 — `:`-shorthand body codegen uses parseExprToNode directly
   // to treat the bodyRaw as an expression (not as markup). The synthesized
   // logic-node + bare-expr shape routes through generateHtml's existing
@@ -543,6 +574,10 @@ function buildMatchArms(
   const result = parseMatchArms(matchBlock.armsRaw);
   const variantFields = resolveVariantFields(matchBlock.forType, fileAST);
   const arms: import("./emit-variant-guard.ts").VariantArm[] = [];
+  // each-in-block-form-match (S153) — each-block nodes lifted out of arm bodies
+  // during the bare-body re-parse, attached to matchBlock.bodyChildren after the
+  // loop so emit-each's collectEachBlocks(fileAST) emits their render fns.
+  const collectedEachBlocks: any[] = [];
 
   for (const entry of result.arms) {
     // Wildcard arm `<_>` — S109 Match block-form Phase 5: explicit render.
@@ -647,9 +682,33 @@ function buildMatchArms(
       try {
         const synthSrc = entry.bodyRaw;
         const synthLabel = `<match:${matchBlock.id}:${tag}>`;
-        const synthResult = nativeParseFile(synthLabel, synthSrc);
-        if (synthResult && Array.isArray(synthResult.ast?.nodes)) {
-          body = synthResult.ast.nodes;
+        // each-in-block-form-match (S153) — when the arm body contains an
+        // `<each>`, route through splitBlocks+buildAST so the each-block
+        // transform runs (nativeParseFile yields a generic markup tag="each"
+        // that generateHtml renders as literal text + leaks `${@.}`). Cheap
+        // pre-check on the raw text gates the heavier re-parse to the each case
+        // only — every other arm body keeps the M6.3 native-parser route.
+        if (/<\s*each\b/.test(synthSrc)) {
+          const bsOutput = splitBlocks(synthLabel, synthSrc);
+          const tabResult = buildAST(bsOutput);
+          const tabNodes = tabResult?.ast?.nodes;
+          if (Array.isArray(tabNodes)) {
+            // Re-stamp each-block ids (and any nested each-block ids) to a
+            // globally-unique namespace derived from the match-block id + arm
+            // tag, so the `each_<id>` mount-attr / render-fn name cannot collide
+            // with a file-level each-block. `restampEachBlockIds` mutates in
+            // place and returns the each-blocks it found (for fileAST
+            // attachment). The bare match.id alone is not enough — multiple
+            // arms could each hold an each, so we mix in a per-arm offset.
+            const found = restampEachBlockIds(tabNodes, matchBlock.id, tag);
+            collectedEachBlocks.push(...found);
+            body = tabNodes;
+          }
+        } else {
+          const synthResult = nativeParseFile(synthLabel, synthSrc);
+          if (synthResult && Array.isArray(synthResult.ast?.nodes)) {
+            body = synthResult.ast.nodes;
+          }
         }
       } catch (_e) {
         // Defensive: same recovery shape as the shorthand path.
@@ -676,7 +735,80 @@ function buildMatchArms(
       arms.push({ tag, payloadBindings, body });
     }
   }
+
+  // each-in-block-form-match (S153) — attach the lifted each-block nodes to the
+  // match-block's bodyChildren so emit-each's collectEachBlocks(fileAST) walks
+  // them and emits each render fn + registry entry. The match-block IS in
+  // fileAST and collectEachBlocks recurses into bodyChildren; the SAME node
+  // refs render the mount div (generateHtml each-block branch, via arm.body)
+  // and the render fn (emit-each), so the `each_<id>` ids line up. Idempotent:
+  // we only append refs not already present (memoization makes this run once,
+  // but guard anyway). The arm body is NOT an iteration scope, so the each's
+  // own `@.` correctly binds to the each's own iter var.
+  if (collectedEachBlocks.length > 0) {
+    if (!Array.isArray((matchBlock as any).bodyChildren)) {
+      (matchBlock as any).bodyChildren = [];
+    }
+    const bc = (matchBlock as any).bodyChildren as any[];
+    for (const eb of collectedEachBlocks) {
+      if (!bc.includes(eb)) bc.push(eb);
+    }
+  }
+
+  // Cache so the second pass (HTML-mount vs client-render) reuses the same
+  // each-block node refs + ids.
+  (matchBlock as any).__scrmlCachedArms = arms;
   return arms;
+}
+
+// ---------------------------------------------------------------------------
+// each-in-block-form-match (S153) — id re-stamping for arm-body each-blocks
+// ---------------------------------------------------------------------------
+
+/**
+ * Re-stamp every `each-block` node's `id` (recursively, including nested
+ * each-blocks) under a namespace derived from the enclosing match-block id and
+ * arm tag, so the `each_<id>` mount-attr / render-fn name is globally unique
+ * and cannot collide with a file-level each-block id (which comes from the
+ * ast-builder's per-file counter and could overlap with the arm-fragment's
+ * fresh counter). Mutates in place; returns the each-block nodes found (in
+ * document order) for fileAST attachment.
+ *
+ * The id scheme: `matchId * 1_000_000 + armHash * 1000 + localIndex`. matchId
+ * is unique per match-block in the file; armHash disambiguates arms within one
+ * match; localIndex disambiguates multiple / nested each-blocks within one arm.
+ * The 1e6 / 1e3 bases keep the components non-overlapping for realistic node
+ * counts (< 1000 each-blocks per arm, < 1000 arms per match).
+ */
+function restampEachBlockIds(nodes: any[], matchId: number, armTag: string): any[] {
+  const found: any[] = [];
+  let local = 0;
+  let armHash = 0;
+  for (let i = 0; i < armTag.length; i++) {
+    armHash = (armHash * 31 + armTag.charCodeAt(i)) % 1000;
+  }
+  const seen = new WeakSet<object>();
+  function walk(node: any): void {
+    if (!node || typeof node !== "object") return;
+    if (seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (const n of node) walk(n);
+      return;
+    }
+    if (node.kind === "each-block") {
+      node.id = matchId * 1_000_000 + armHash * 1000 + local;
+      local += 1;
+      found.push(node);
+    }
+    for (const key of ["children", "body", "bodyChildren", "nodes", "arms", "templateChildren", "emptyChild"]) {
+      const v = node[key];
+      if (Array.isArray(v)) walk(v);
+      else if (v && typeof v === "object") walk(v);
+    }
+  }
+  walk(nodes);
+  return found;
 }
 
 // ---------------------------------------------------------------------------
