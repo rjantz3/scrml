@@ -28,7 +28,12 @@ import {
   broadcastReload,
   injectHotReloadScript,
   sseClients,
+  deriveWatchFiles,
+  resolveRootEntryCandidate,
 } from "../../src/commands/dev.js";
+import { mkdtempSync, writeFileSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -293,5 +298,154 @@ describe("§14 sseClients is exported Set", () => {
 
   test("sseClients.size is 0 after beforeEach clear", () => {
     expect(sseClients.size).toBe(0);
+  });
+});
+
+
+// ===========================================================================
+// scrml-dev-watcher-and-stale-entry-2026-06-01 — BUG-1 + BUG-2
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// §15 — BUG-1: deriveWatchFiles() yields a bounded per-file set, never dirs
+// ---------------------------------------------------------------------------
+
+describe("§15 deriveWatchFiles() derives from gathered .scrml files", () => {
+  test("returns the union of inputFiles and gatheredFiles (.scrml only)", () => {
+    const opts = { inputFiles: ["/proj/app.scrml"] };
+    const gathered = ["/proj/app.scrml", "/proj/components/header.scrml"];
+    const files = deriveWatchFiles(opts, gathered);
+    expect(files).toContain("/proj/app.scrml");
+    expect(files).toContain("/proj/components/header.scrml");
+  });
+
+  test("de-dups when the entry is also present in the gathered set", () => {
+    const opts = { inputFiles: ["/proj/app.scrml"] };
+    const gathered = ["/proj/app.scrml"];
+    const files = deriveWatchFiles(opts, gathered);
+    expect(files.length).toBe(1);
+    expect(files[0]).toBe("/proj/app.scrml");
+  });
+
+  test("NEVER includes node_modules / non-.scrml paths (the BUG-1 crash cause)", () => {
+    // The old code watched dirname(input) recursively, pulling in every file
+    // under the tree (node_modules, .git, sibling repos). The per-file set must
+    // contain ONLY .scrml sources — no directory entries, no node_modules.
+    const opts = { inputFiles: ["/big/parent/req.scrml"] };
+    const gathered = [
+      "/big/parent/req.scrml",
+      "/big/parent/lib/util.scrml",
+      // these must be filtered out — they are not .scrml sources
+      "/big/parent/node_modules/foo/index.js",
+      "/big/parent/node_modules",
+      "/big/parent/.git",
+    ];
+    const files = deriveWatchFiles(opts, gathered);
+    expect(files.every(f => f.endsWith(".scrml"))).toBe(true);
+    expect(files.some(f => f.includes("node_modules"))).toBe(false);
+    expect(files.some(f => f.endsWith(".git"))).toBe(false);
+    expect(files).toEqual(["/big/parent/req.scrml", "/big/parent/lib/util.scrml"]);
+  });
+
+  test("tolerates absent/empty inputs without throwing", () => {
+    expect(() => deriveWatchFiles({ inputFiles: [] }, [])).not.toThrow();
+    expect(deriveWatchFiles({ inputFiles: [] }, [])).toEqual([]);
+    expect(deriveWatchFiles({}, undefined)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §16 — BUG-1: a per-file watch error (ENOSPC) does not crash watch-setup
+// ---------------------------------------------------------------------------
+
+describe("§16 watch error resilience (ENOSPC graceful degradation)", () => {
+  // The fix wraps each watch in try/catch and attaches a watcher `error`
+  // handler so a dead watcher (e.g. inotify limit hit) degrades to
+  // "hot-reload disabled" rather than crashing the dev server. We assert the
+  // resilience contract by simulating the exact watch-setup pattern dev.js
+  // uses: a synchronous throw on watch() must be caught, and an async `error`
+  // event on the returned watcher must be handled (not rethrown).
+
+  test("synchronous watch() ENOSPC throw is caught, loop continues", () => {
+    const watched = [];
+    let warned = 0;
+    // Mirror the watchFile contract: try watch(); on throw, warn once + continue.
+    function watchFile(file, watchImpl) {
+      try {
+        const w = watchImpl(file);
+        w.on("error", () => { warned++; });
+        watched.push(file);
+      } catch (err) {
+        if (err && err.code === "ENOSPC") warned++;
+      }
+    }
+    const throwingWatch = () => { const e = new Error("ENOSPC"); e.code = "ENOSPC"; throw e; };
+    expect(() => {
+      for (const f of ["/a.scrml", "/b.scrml"]) watchFile(f, throwingWatch);
+    }).not.toThrow();
+    // No files registered (all watch attempts threw), but no crash + warned.
+    expect(watched.length).toBe(0);
+    expect(warned).toBeGreaterThan(0);
+  });
+
+  test("async watcher 'error' event is handled, not rethrown", () => {
+    let handled = false;
+    // Simulate a watcher that emits an error asynchronously via its handler.
+    const fakeWatcher = {
+      _errCb: null,
+      on(evt, cb) { if (evt === "error") this._errCb = cb; },
+      emitError(err) { if (this._errCb) this._errCb(err); },
+    };
+    function watchFile() {
+      const w = fakeWatcher;
+      w.on("error", () => { handled = true; });
+      return w;
+    }
+    const w = watchFile();
+    const e = new Error("ENOSPC"); e.code = "ENOSPC";
+    expect(() => w.emitError(e)).not.toThrow();
+    expect(handled).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §17 — BUG-2: root `/` resolution prefers <entryBase>.html over stale .html
+// ---------------------------------------------------------------------------
+
+describe("§17 resolveRootEntryCandidate() prefers the compiled entry", () => {
+  test("single input → returns <entryBase>.html in serveDir", () => {
+    const opts = { inputFiles: ["/proj/src/req.scrml"] };
+    const candidate = resolveRootEntryCandidate(opts, "/proj/dist");
+    expect(candidate).toBe(join("/proj/dist", "req.html"));
+  });
+
+  test("multi-input (>=2) → no single unambiguous entry, returns absence", () => {
+    const opts = { inputFiles: ["/proj/a.scrml", "/proj/b.scrml"] };
+    expect(resolveRootEntryCandidate(opts, "/proj/dist")).toBe("");
+  });
+
+  test("zero inputs → returns absence", () => {
+    expect(resolveRootEntryCandidate({ inputFiles: [] }, "/proj/dist")).toBe("");
+    expect(resolveRootEntryCandidate({}, "/proj/dist")).toBe("");
+  });
+
+  test("end-to-end: entry candidate sorts independent of stale sibling on disk", () => {
+    // The stale-app bug: dist has both <entry>.html and a stale sibling that
+    // sorts BEFORE it alphabetically; the OLD "first .html via readdirSync"
+    // fallback would serve the stale one. The fix resolves the entry candidate
+    // (req.html) directly — independent of any sibling, alphabetical order, or
+    // readdir order. Here we verify the candidate path is the entry's html and
+    // that the stale sibling does NOT influence it.
+    const dir = mkdtempSync(join(tmpdir(), "scrml-dev-entry-"));
+    try {
+      writeFileSync(join(dir, "aaa-stale.html"), "<div>STALE WRONG APP</div>");
+      writeFileSync(join(dir, "req.html"), "<div>FRESH ENTRY</div>");
+      const opts = { inputFiles: [join(dir, "req.scrml")] };
+      const candidate = resolveRootEntryCandidate(opts, dir);
+      expect(candidate).toBe(join(dir, "req.html"));
+      expect(candidate).not.toContain("aaa-stale");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

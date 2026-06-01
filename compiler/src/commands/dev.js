@@ -16,7 +16,7 @@
  */
 
 import { statSync, readdirSync, watch } from "fs";
-import { resolve, dirname, join } from "path";
+import { resolve, dirname, join, basename } from "path";
 import { compileScrml, scanDirectory, findOutputFiles } from "../api.js";
 
 // ---------------------------------------------------------------------------
@@ -369,6 +369,73 @@ export function injectHotReloadScript(html) {
 }
 
 /**
+ * Derive the bounded set of source files to watch for hot-reload.
+ *
+ * BUG-1 fix (scrml-dev-watcher-and-stale-entry-2026-06-01): the previous
+ * implementation watched `dirname(inputFile)` recursively. When `scrml dev`
+ * is run from a large parent directory, `fs.watch(dir, {recursive:true})`
+ * registers an inotify watch for EVERY file in that tree — `node_modules`,
+ * sibling repos, `.git`, `.claude/worktrees` — blowing
+ * `fs.inotify.max_user_watches` and crashing the dev server with an
+ * unhandled `ENOSPC` error.
+ *
+ * Instead we watch the bounded set of gathered `.scrml` source files
+ * DIRECTLY (one `fs.watch` per real source). This is bounded by source count
+ * and never touches `node_modules` or sibling directories. `fs.watch` has no
+ * ignore-pattern support, so per-file watching is the robust way to exclude
+ * non-source files — a recursive dir-watch cannot exclude subdirs.
+ *
+ * Documented limitation: a BRAND-NEW top-level `.scrml` file added to a
+ * directory is not auto-detected until the next recompile/restart (the
+ * recursive dir-watch that the old code used WAS the bug). The re-gather on
+ * recompile (see scheduleRecompile) still extends the set when an existing
+ * watched source adds a NEW import.
+ *
+ * @param {{ inputFiles: string[] }} opts
+ * @param {string[]} gatheredFiles  Full transitive .scrml closure from compileScrml().gatheredFiles
+ * @returns {string[]} de-duped absolute `.scrml` file paths
+ */
+export function deriveWatchFiles(opts, gatheredFiles) {
+  const set = new Set();
+  for (const f of opts.inputFiles || []) {
+    if (typeof f === "string" && f.endsWith(".scrml")) set.add(resolve(f));
+  }
+  for (const f of gatheredFiles || []) {
+    if (typeof f === "string" && f.endsWith(".scrml")) set.add(resolve(f));
+  }
+  return [...set];
+}
+
+/**
+ * Resolve the preferred root-`/` entry HTML candidate.
+ *
+ * BUG-2 fix (scrml-dev-watcher-and-stale-entry-2026-06-01): for root `/`,
+ * static resolution looks for `index.html`; when the compiled entry is not
+ * `index.html` (e.g. `scrml dev req.scrml` → `req.html`), resolution used to
+ * fall through to "first .html file in dist root", which serves a STALE app
+ * when `dist/` contains leftover output from a prior `scrml dev` of a
+ * DIFFERENT source (`scrml dev` does not clean its output dir).
+ *
+ * When dev compiles a SINGLE input file, that file's `<basename>.html` is the
+ * canonical index. We prefer it ahead of the "first .html" fallback. For
+ * multi-input / directory dev mode (>=2 input files) there is no single
+ * unambiguous entry, so we return absence and keep the existing fallback.
+ *
+ * @param {{ inputFiles: string[] }} opts
+ * @param {string} serveDir
+ * @returns {string} absolute path to `<entryBase>.html`, or "" when there is
+ *                   no single unambiguous entry.
+ */
+export function resolveRootEntryCandidate(opts, serveDir) {
+  const inputs = opts.inputFiles || [];
+  if (inputs.length !== 1) return "";
+  const entry = inputs[0];
+  if (typeof entry !== "string" || !entry.endsWith(".scrml")) return "";
+  const base = basename(entry, ".scrml");
+  return join(serveDir, `${base}.html`);
+}
+
+/**
  * Build the Bun.serve() config object including WebSocket support when channels exist.
  *
  * Called initially and after each recompile to update routes/ws handlers.
@@ -466,10 +533,32 @@ function buildServeConfig(opts, serveDir) {
         } catch { /* not found */ }
       }
 
-      // If requesting / and index.html doesn't exist, serve the first
-      // .html file found — handles the common single-file project case
-      // where the output is app.html instead of index.html.
+      // Root-only HTML resolution.
+      //
+      // BUG-2 fix (scrml-dev-watcher-and-stale-entry-2026-06-01): PREFER the
+      // compiled entry `<entryBase>.html` for the single-input case BEFORE the
+      // "first .html in dist root" fallback. `scrml dev` does not clean its
+      // output dir, so a leftover `test.html` from a prior session can sit
+      // beside a fresh `req.html`; the old "first .html" scan would serve the
+      // STALE app. When dev compiles a single input file, that file's `.html`
+      // is the canonical index.
       if (pathname === "/") {
+        const entryCandidate = resolveRootEntryCandidate(opts, serveDir);
+        if (entryCandidate) {
+          try {
+            if (statSync(entryCandidate).isFile()) {
+              const file = Bun.file(entryCandidate);
+              const html = await file.text();
+              return new Response(injectHotReloadScript(html), {
+                headers: { "Content-Type": "text/html; charset=utf-8" },
+              });
+            }
+          } catch { /* entry not emitted yet — fall through to scan */ }
+        }
+
+        // Fallback: serve the first .html file found — handles directory /
+        // multi-input dev mode where there is no single unambiguous entry,
+        // and the common single-file case when the entry candidate is absent.
         try {
           const entries = readdirSync(serveDir);
           const htmlFile = entries.find(e => e.endsWith(".html"));
@@ -533,19 +622,56 @@ export async function runDev(args) {
   console.log(`[dev] Serving ${serveDir} at http://localhost:${opts.port}`);
   console.log(`[dev] Watching for changes... (Ctrl+C to stop)\n`);
 
-  // Watch loop with 100ms debounce
-  // W2 §21.7 / B5: dirsToWatch is recomputed after each runOnce so the
-  // auto-gather closure (which may pull in files from sibling directories)
-  // is fully covered by the watcher. Initial set seeded from explicit
-  // inputFiles; on each recompile dirsToWatch is updated to also include the
-  // dirs of any GATHERED files (the keys of result.outputs).
-  const dirsToWatch = new Set(opts.inputFiles.map(f => dirname(f)));
-  // W2 §21.7 / B5: extend with directories of any gathered files outside the
-  // entry's directory tree (e.g. sibling components/ pulled in by import).
-  for (const f of gatheredOut.files) {
-    dirsToWatch.add(dirname(f));
-  }
+  // BUG-1 fix (scrml-dev-watcher-and-stale-entry-2026-06-01): watch the
+  // bounded set of gathered `.scrml` source files DIRECTLY (one fs.watch per
+  // real source) instead of `fs.watch(dirname(input), {recursive:true})`.
+  //
+  // The recursive dir-watch registered an inotify watch for every file in the
+  // entry's directory tree — including `node_modules`, sibling repos, `.git`,
+  // and `.claude/worktrees` when run from a large parent directory — blowing
+  // `fs.inotify.max_user_watches` and crashing the server with an unhandled
+  // ENOSPC. Per-file watching is bounded by source count and never touches
+  // those trees (fs.watch has no ignore-pattern support, so per-file is the
+  // robust exclusion mechanism).
+  //
+  // `watchedFiles` tracks which absolute source paths already have a live
+  // watch so the re-gather pass can add watches for NEW imports without
+  // double-watching existing ones.
+  const watchedFiles = new Set();
+  // Warn at most once about the watch limit so a degraded watcher does not
+  // spam the console on every failed watch attempt.
+  let watchLimitWarned = false;
   let debounceTimer = null;
+
+  /**
+   * Start watching a single source file. Wrapped so a watch failure (e.g.
+   * ENOSPC at the inotify limit) degrades gracefully — the dev server keeps
+   * serving with hot-reload disabled rather than crashing.
+   *
+   * @param {string} file absolute `.scrml` path
+   */
+  function watchFile(file) {
+    if (watchedFiles.has(file)) return;
+    const warnLimit = (err) => {
+      if (watchLimitWarned) return;
+      watchLimitWarned = true;
+      if (err && err.code === "ENOSPC") {
+        console.error(`[dev] file-watch limit hit (fs.inotify.max_user_watches) — hot-reload disabled; raise the limit with: sudo sysctl fs.inotify.max_user_watches=524288`);
+      } else {
+        console.error(`[dev] file watch failed (${err && err.message ? err.message : err}) — hot-reload may be degraded; server still serving`);
+      }
+    };
+    try {
+      const w = watch(file, (eventType, filename) => scheduleRecompile(eventType, filename || file));
+      // A watcher `error` event (e.g. ENOSPC, file removed) must NEVER crash
+      // the server. Warn once and keep serving.
+      w.on("error", (err) => warnLimit(err));
+      watchedFiles.add(file);
+    } catch (err) {
+      // Synchronous watch() failure (also ENOSPC on some platforms).
+      warnLimit(err);
+    }
+  }
 
   function scheduleRecompile(eventType, filename) {
     if (filename && !filename.endsWith(".scrml")) return;
@@ -554,15 +680,11 @@ export async function runDev(args) {
       console.log(`[dev] Change detected — recompiling...`);
       const recomputeGathered = { files: [] };
       const { success, outputDir: recompileOutputDir } = runOnce(opts, recomputeGathered);
-      // W2 B5: extend dirsToWatch in case a recompile pulled in NEW imports.
-      for (const f of recomputeGathered.files) {
-        if (!dirsToWatch.has(dirname(f))) {
-          dirsToWatch.add(dirname(f));
-          // Note: we do not start a NEW watch on the new dir — the next
-          // `scrml dev` start will pick it up. This is acceptable because
-          // adding cross-dir imports is rare; existing watchers cover the
-          // common case. Future enhancement: dynamically watch new dirs.
-        }
+      // BUG-1 fix: a recompile may have pulled in NEW imports. Because we now
+      // watch individual files (not dirs), we can start watches on the newly
+      // gathered sources immediately — no restart needed.
+      for (const f of deriveWatchFiles(opts, recomputeGathered.files)) {
+        watchFile(f);
       }
       if (success) {
         // Reload server routes to pick up any changes to server functions.
@@ -587,8 +709,9 @@ export async function runDev(args) {
     }, 100);
   }
 
-  for (const dir of dirsToWatch) {
-    watch(dir, { recursive: true }, scheduleRecompile);
+  // Start a watch on each gathered source file (entry + transitive imports).
+  for (const file of deriveWatchFiles(opts, gatheredOut.files)) {
+    watchFile(file);
   }
 
   // Keep process alive (server already does this, but be explicit)
