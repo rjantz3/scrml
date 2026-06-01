@@ -119,6 +119,7 @@ export const RUNTIME_CHUNK_ORDER = [
   'prefetch',
   'mount',
   'vendor-ref',
+  'modules',
   'meta',
   'transitions',
   'errors',
@@ -202,6 +203,7 @@ const CHUNK_MARKERS: Record<NonCoreChunkName, string> = {
   // non-empty `vendorUnitNames` set (i.e. atom-emitter.ts emits
   // `_scrml_vendor_require(...)` calls in at least one chunk).
   "vendor-ref":   "§41 vendor-unit reference registry (chunk: 'vendor-ref')",
+  modules:        "§21.3 cross-file module registry (chunk: 'modules')",
   meta:           '§22.5 meta.emit() runtime',
   transitions:    'Transition CSS injection',
   errors:         '§19 Built-in error types',

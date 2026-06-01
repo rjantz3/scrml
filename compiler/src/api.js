@@ -1817,6 +1817,18 @@ export function compileScrml(options = {}) {
   collectErrors("RS", rsResult.errors);
 
   // Stage 8: CG (all files)
+  // known-gaps-#6 (S152) — compute the dist output base dir from the
+  // compile-unit source set BEFORE runCG so codegen can derive a stable,
+  // identical dist-relative `_scrml_modules` registry key on both the
+  // importer + exporter sides of the cross-file client module-loading
+  // lowering (Approach B, §21.3). Mirrors the write-phase computation at
+  // `computeOutputBaseDir([...cgResult.outputs.keys()])` — same source paths
+  // (one output per input file), so the key matches the on-disk dist layout.
+  const cgSourcePaths = metaFiles
+    .map((f) => f.filePath || f.ast?.filePath)
+    .filter(Boolean);
+  const cgOutputBaseDir = computeOutputBaseDir(cgSourcePaths);
+
   // When selfHostModules.runCG is provided, use it instead of the JS original.
   const _runCG = selfHostModules?.runCG ?? runCG;
   const cgResult = stage("CG", () => _runCG({
@@ -1838,6 +1850,12 @@ export function compileScrml(options = {}) {
     // engine mount sites (`<engineVarName/>` resolving to `category: "engine"`)
     // and emit the §21.8 mount-position marker per SPEC §51.0.D.
     exportRegistry: moduleResult.exportRegistry,
+    // known-gaps-#6 (S152) — pass MOD importGraph + dist outputBaseDir so the
+    // cross-file _scrml_modules lowering (Approach B, §21.3) can identify
+    // exporter files, derive identical registry keys, and emit topo-ordered
+    // dependency <script> tags.
+    importGraph: moduleResult.importGraph,
+    outputBaseDir: cgOutputBaseDir,
     // A-2.1 — pass Stage 7.6 ReachabilityRecord. Empty at A-2.1; consumed
     // by A-4 codegen wave once A-2.2..A-2.7 land the closure analysis.
     reachabilityRecord: rsResult.record,

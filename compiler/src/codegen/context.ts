@@ -85,6 +85,32 @@ export interface CompileContext {
    */
   exportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean }>> | null;
   /**
+   * known-gaps-#6 (S152) — MOD's `importGraph` plumbed into codegen so the
+   * cross-file client module-loading lowering (Approach B, §21.3) can:
+   *   (a) on the EXPORTER side, ask "is THIS file imported by another .scrml in
+   *       the compile unit?" (scan for any import whose `absSource` === this
+   *       file) — gates the `_scrml_modules[...] = {...}` registration footer;
+   *   (b) on the IMPORTER side, resolve each local `.scrml` import's absolute
+   *       path (`absSource`) so the registry key is derived identically on both
+   *       sides (see `moduleRegistryKey` in emit-client.ts).
+   *
+   * Shape mirrors `module-resolver.js` `buildImportGraph` output:
+   * `Map<absPath, { imports: Array<{ names, specifiers, absSource }> }>`.
+   * Null when no MOD result is available (test harnesses that bypass MOD) — the
+   * exporter footer + importer-key derivation both degrade gracefully (the
+   * importer falls back to the path-relative `.client.js` key).
+   */
+  importGraph?: Map<string, { imports: Array<{ names: string[]; specifiers?: Array<{ imported: string; local: string }>; absSource: string }> }> | null;
+  /**
+   * known-gaps-#6 (S152) — the dist-output base directory, computed in api.js
+   * via `computeOutputBaseDir(sourcePaths)` and threaded into codegen so the
+   * exporter footer + importer read derive the SAME dist-relative
+   * `_scrml_modules` key from absolute paths (handles subdir / shell `upToRoot`
+   * nesting — the key is a stable identifier, NOT a URL). Null for harnesses
+   * that bypass the write phase; the key derivation falls back to basename.
+   */
+  outputBaseDir?: string | null;
+  /**
    * S89 A-2.1 — Reachability Solver output (PIPELINE Stage 7.6 / SPEC §40.9).
    *
    * Populated by `runReachabilitySolver` in `api.js` between Stage 7.5 (BP)
@@ -221,6 +247,11 @@ export function makeCompileContext(partial: Partial<CompileContext> & { fileAST:
     // bypass the full pipeline; the C15 cross-file mount walker short-circuits
     // when null.
     exportRegistry: partial.exportRegistry ?? null,
+    // known-gaps-#6 (S152) — MOD importGraph + dist outputBaseDir for the
+    // cross-file _scrml_modules lowering. Default null/basename-fallback for
+    // harnesses that bypass MOD / the write phase.
+    importGraph: partial.importGraph ?? null,
+    outputBaseDir: partial.outputBaseDir ?? null,
     // A-2.1 — Reachability Solver record. Defaults to a fresh empty record
     // so downstream consumers (A-4 codegen wave) can read the shape without
     // a null-guard; A-2.2+ replaces this with the actual closure analysis.

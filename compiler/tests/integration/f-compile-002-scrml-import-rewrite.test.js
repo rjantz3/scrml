@@ -155,7 +155,14 @@ h1 "client-import"
     expect(existsSync(clientPath)).toBe(true);
 
     const client = readFileSync(clientPath, "utf8");
-    expect(client).toMatch(/from\s+["']\.\/helper\.client\.js["']/);
+    // known-gaps-#6 (S152, Approach B): a local `.scrml` import lowers to a
+    // `_scrml_modules` registry read, NOT a bare ES import (which would
+    // SyntaxError in the classic <script> the client.js is loaded as). The
+    // stable key is the dist-relative `.client.js` path — both files sit in
+    // `src/`, so the key is `helper.client.js`.
+    expect(client).toMatch(/const \{ greet \} = _scrml_modules\["helper\.client\.js"\];/);
+    // No bare ES import/export for the cross-file `.scrml` dependency.
+    expect(client).not.toMatch(/^\s*import\s/m);
     expect(client).not.toMatch(/from\s+["']\.\/helper\.scrml["']/);
   });
 });

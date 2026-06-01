@@ -1784,6 +1784,39 @@ function _scrml_vendor_require(unit) {
 }
 
 // ---------------------------------------------------------------------------
+// §21.3 cross-file module registry (chunk: 'modules')
+// ---------------------------------------------------------------------------
+//
+// Sibling to \`_scrml_stdlib\` (the \`scrml:NAME\` stdlib registry). scrml
+// loads every \`.client.js\` as a CLASSIC (non-module) <script>, so a bare ES
+// \`import { x } from "./dep.client.js"\` would SyntaxError at parse time and
+// poison the whole script body. Instead, each dependency \`.client.js\` ends
+// with a registration footer
+//   \`_scrml_modules["<dist-relative-key>"] = { publicName: emittedName, ... };\`
+// and each importing \`.client.js\` rewrites its \`import\` to a registry read
+//   \`const { x } = _scrml_modules["<dist-relative-key>"];\`
+// The dependency <script>s are emitted BEFORE the importing entry's <script>
+// (topological order, deps first — see index.ts), so every dependency has
+// registered before any importer reads. A missing/late registration fails
+// LOUDLY: \`_scrml_modules["x"]\` is \`undefined\` and the destructuring read
+// throws a clear TypeError (vs a silent shared-global last-wins collision).
+//
+// Forward note (A-4): when the per-route artifact splitter (\`emitPerRoute\`)
+// turns on, A-4 chunk payloads register their exports into this SAME registry
+// — one loader, not two parallel ones. The registry shape (keyed exports
+// object) is A-4-compatible by construction.
+//
+// Tree-shake (chunk: 'modules'): \`detectRuntimeChunks\` activates this chunk
+// only when the compile unit has a cross-file local \`.scrml\` import OR a file
+// imported by another \`.scrml\`. Single-file apps never carry it. The
+// idempotent \`(typeof ... !== "undefined")\` guard mirrors \`_SCRML_MOUNTS\` /
+// \`_SCRML_VENDOR_REFS\` so any future shared-runtime double-load is safe.
+
+var _scrml_modules = (typeof _scrml_modules !== "undefined")
+  ? _scrml_modules
+  : {};
+
+// ---------------------------------------------------------------------------
 // §22.5 meta.emit() runtime — insert HTML at a ^{} block's DOM position
 // ---------------------------------------------------------------------------
 

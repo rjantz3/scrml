@@ -166,10 +166,18 @@ describe("cross-file channel import — JS-emit suppression", () => {
 
     const consumerOut = result.outputs?.get(consumer);
     if (consumerOut?.clientJs) {
-      // Component imports must still appear in client.js (component logic
-      // can be referenced at the JS level).
-      const importMatches = consumerOut.clientJs.match(/import\s*\{[^}]*Widget[^}]*\}\s*from/);
-      expect(importMatches).not.toBeNull();
+      // known-gaps-#6 (S152, Approach B): a non-channel cross-file `.scrml`
+      // import must STILL be emitted (no over-suppression) — but it now lowers
+      // to a `_scrml_modules` registry READ, not a bare ES import (which would
+      // SyntaxError in the classic <script> the client.js loads as). The stable
+      // key is the dist-relative `.client.js` path: the widget sits at
+      // `c/components/widget.scrml`, so the key is `components/widget.client.js`.
+      const registryRead = consumerOut.clientJs.match(
+        /const \{[^}]*Widget[^}]*\} = _scrml_modules\["components\/widget\.client\.js"\];/,
+      );
+      expect(registryRead).not.toBeNull();
+      // And there must be NO bare ES import for the cross-file `.scrml` dep.
+      expect(consumerOut.clientJs).not.toMatch(/^\s*import\s*\{[^}]*Widget/m);
     }
   });
 });

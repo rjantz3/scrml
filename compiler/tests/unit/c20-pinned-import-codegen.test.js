@@ -16,15 +16,26 @@
  *   compile-time validation (B4 implements E-STATE-PINNED-FORWARD-REF
  *   source-position rule + E-IMPORT-PINNED-INVALID best-effort). The runtime
  *   ordering implicit in §6.10.4's "initialized at import position" wording
- *   is satisfied by ES module loader hoisting — every `import` statement
- *   the codegen emits is statically hoisted to module-init time, before any
- *   importing-module body code runs. Cross-file forward-ref cycles cannot
- *   occur in scrml because circular imports are forbidden at MOD (E-IMPORT-002).
+ *   is satisfied by emission ordering — the import lowering is placed at the
+ *   top of the file body, and (for the CLIENT path) the dependency
+ *   `.client.js` <script>s load BEFORE the importing entry (topo order,
+ *   deps-first; see index.ts). Cross-file forward-ref cycles cannot occur in
+ *   scrml because circular imports are forbidden at MOD (E-IMPORT-002).
  *
- *   Therefore: pinned imports compile to the SAME ES `import` declaration
- *   shape as non-pinned imports. The `pinned: true` flag does NOT need to
- *   alter codegen output. These tests lock that contract: the flag is
- *   parsed and validated upstream but emits no runtime difference.
+ *   Therefore: pinned imports compile to the SAME shape as non-pinned imports.
+ *   The `pinned: true` flag does NOT alter codegen output. These tests lock
+ *   that contract: the flag is parsed/validated upstream but emits no runtime
+ *   difference.
+ *
+ *   known-gaps-#6 (S152, Approach B) UPDATE — the CLIENT path no longer emits
+ *   a bare ES `import` for a local `.scrml` dependency. The client.js loads as
+ *   a CLASSIC (non-module) <script>, where a bare ES import SyntaxErrors and
+ *   poisons the whole script body. Local `.scrml` imports now lower to a
+ *   `_scrml_modules` registry read (`const { x } = _scrml_modules["<key>"];`),
+ *   mirroring the `scrml:` → `_scrml_stdlib` lowering. The pinned-is-inert
+ *   invariant is UNCHANGED: pinned + non-pinned still emit the identical
+ *   registry-read shape. The SERVER path (§C20.4) is UNAFFECTED — `.server.js`
+ *   is loaded as a real ES/CJS module, so it keeps the ES `import` form.
  *
  * Test scope (C20):
  *
@@ -137,11 +148,17 @@ describe("§C20.1 pinned import emits as standard ES import (client)", () => {
     const ctx = makeTestCtx(fileAST);
     const clientJs = generateClientJs(ctx);
 
-    // .scrml → .client.js rewrite (per §G in cross-file-import-export.test.js)
-    expect(clientJs).toContain('import { appPhase } from "./engines.client.js"');
-    // The `pinned` keyword MUST NOT appear in the emitted JS — it is a
-    // compile-time-only modifier (§21.8.1; not part of ES module syntax)
-    expect(clientJs).not.toMatch(/import\s*\{[^}]*\bpinned\b/);
+    // known-gaps-#6 (S152, Approach B): a local `.scrml` import lowers to a
+    // `_scrml_modules` registry READ, NOT a bare ES import (the client.js loads
+    // as a CLASSIC <script>; an ES import there SyntaxErrors). The `pinned`
+    // flag remains codegen-inert — it produces the SAME shape as non-pinned
+    // (see §C20.1.2 control). Fallback key (no importGraph in test ctx):
+    // `./engines.scrml` → `engines.client.js`.
+    expect(clientJs).toContain('const { appPhase } = _scrml_modules["engines.client.js"];');
+    // No bare ES import for the cross-file `.scrml` dependency.
+    expect(clientJs).not.toMatch(/^\s*import\s/m);
+    // The `pinned` keyword MUST NOT appear in the emitted JS.
+    expect(clientJs).not.toMatch(/\bpinned\b/);
   });
 
   test("§C20.1.2 single non-pinned named import → identical shape to pinned", () => {
@@ -153,7 +170,7 @@ describe("§C20.1 pinned import emits as standard ES import (client)", () => {
     const ctx = makeTestCtx(fileAST);
     const clientJs = generateClientJs(ctx);
 
-    expect(clientJs).toContain('import { appPhase } from "./engines.client.js"');
+    expect(clientJs).toContain('const { appPhase } = _scrml_modules["engines.client.js"];');
   });
 
   test("§C20.1.3 pinned + non-pinned imports of same name in distinct files emit identically", () => {
@@ -171,14 +188,15 @@ describe("§C20.1 pinned import emits as standard ES import (client)", () => {
     const pinnedJs = generateClientJs(makeTestCtx(pinnedAST));
     const plainJs = generateClientJs(makeTestCtx(plainAST));
 
-    // Extract just the import line for comparison.
-    const importLineRe = /^import\s+\{[^}]*\}\s+from\s+"\.\/m\.client\.js";?$/m;
-    const pinnedImport = pinnedJs.match(importLineRe);
-    const plainImport = plainJs.match(importLineRe);
+    // Extract just the registry-read line for comparison (known-gaps-#6).
+    const readLineRe = /^const \{[^}]*\} = _scrml_modules\["m\.client\.js"\];$/m;
+    const pinnedRead = pinnedJs.match(readLineRe);
+    const plainRead = plainJs.match(readLineRe);
 
-    expect(pinnedImport).not.toBeNull();
-    expect(plainImport).not.toBeNull();
-    expect(pinnedImport[0]).toBe(plainImport[0]);
+    expect(pinnedRead).not.toBeNull();
+    expect(plainRead).not.toBeNull();
+    // pinned is codegen-inert: identical emitted shape.
+    expect(pinnedRead[0]).toBe(plainRead[0]);
   });
 
   test("§C20.1.4 aliased pinned import (`{ X as Y pinned }`) emits canonical `imported as local` ES form", () => {
@@ -198,7 +216,10 @@ describe("§C20.1 pinned import emits as standard ES import (client)", () => {
     const ctx = makeTestCtx(fileAST);
     const clientJs = generateClientJs(ctx);
 
-    expect(clientJs).toContain('import { foo as bar } from "./m.client.js"');
+    // known-gaps-#6 (S152): aliased local `.scrml` import → registry read with
+    // a `{ imported: local }` destructure rename. `./m.scrml` → `m.client.js`.
+    expect(clientJs).toContain('const { foo: bar } = _scrml_modules["m.client.js"];');
+    expect(clientJs).not.toMatch(/^\s*import\s/m);
     expect(clientJs).not.toContain("pinned");
   });
 });
@@ -224,7 +245,9 @@ describe("§C20.2 mixed pinned + non-pinned specifiers preserved (client)", () =
     const ctx = makeTestCtx(fileAST);
     const clientJs = generateClientJs(ctx);
 
-    expect(clientJs).toContain('import { a, b, c } from "./m.client.js"');
+    // known-gaps-#6 (S152): all three specifiers preserved in the registry read.
+    expect(clientJs).toContain('const { a, b, c } = _scrml_modules["m.client.js"];');
+    expect(clientJs).not.toMatch(/^\s*import\s/m);
     // No `pinned` keyword bleeds into emitted JS.
     expect(clientJs).not.toContain("pinned");
   });
@@ -240,7 +263,8 @@ describe("§C20.2 mixed pinned + non-pinned specifiers preserved (client)", () =
     const ctx = makeTestCtx(fileAST);
     const clientJs = generateClientJs(ctx);
 
-    expect(clientJs).toContain('import { x, y } from "./m.client.js"');
+    expect(clientJs).toContain('const { x, y } = _scrml_modules["m.client.js"];');
+    expect(clientJs).not.toMatch(/^\s*import\s/m);
     expect(clientJs).not.toContain("pinned");
   });
 
@@ -288,7 +312,9 @@ describe("§C20.3 pinned engine import (M18) emits identically to non-pinned", (
     const ctx = makeTestCtx(fileAST);
     const clientJs = generateClientJs(ctx);
 
-    expect(clientJs).toContain('import { Phase, appPhase } from "./engines.client.js"');
+    // known-gaps-#6 (S152): both specifiers preserved in the registry read.
+    expect(clientJs).toContain('const { Phase, appPhase } = _scrml_modules["engines.client.js"];');
+    expect(clientJs).not.toMatch(/^\s*import\s/m);
     expect(clientJs).not.toContain("pinned");
   });
 
@@ -305,10 +331,10 @@ describe("§C20.3 pinned engine import (M18) emits identically to non-pinned", (
     const pinnedJs = generateClientJs(makeTestCtx(pinnedAST));
     const plainJs = generateClientJs(makeTestCtx(plainAST));
 
-    // Both must contain the standard ES import shape.
-    const expectedImport = 'import { appPhase } from "./engines.client.js"';
-    expect(pinnedJs).toContain(expectedImport);
-    expect(plainJs).toContain(expectedImport);
+    // known-gaps-#6 (S152): both lower to the SAME registry read (pinned-inert).
+    const expectedRead = 'const { appPhase } = _scrml_modules["engines.client.js"];';
+    expect(pinnedJs).toContain(expectedRead);
+    expect(plainJs).toContain(expectedRead);
   });
 });
 
@@ -384,20 +410,24 @@ describe("§C20.5 `pinned` keyword does NOT leak into emitted output", () => {
     const clientJs = generateClientJs(ctx);
 
     expect(clientJs).not.toMatch(/\bpinned\b/);
-    // Sanity: every import was emitted.
-    expect(clientJs).toContain('import { a1, a2 } from "./a.client.js"');
-    expect(clientJs).toContain('import { b1 } from "./b.client.js"');
-    // scrml: client imports lower to a destructuring read from the
-    // _scrml_stdlib registry (Bug 18 S95).
+    // Sanity: every import was emitted. known-gaps-#6 (S152): local `.scrml`
+    // imports lower to `_scrml_modules` registry reads; `scrml:` to _scrml_stdlib.
+    expect(clientJs).toContain('const { a1, a2 } = _scrml_modules["a.client.js"];');
+    expect(clientJs).toContain('const { b1 } = _scrml_modules["b.client.js"];');
     expect(clientJs).toContain('const { hash } = _scrml_stdlib.crypto;');
+    // No bare ES import survives for the cross-file `.scrml` dependencies.
+    expect(clientJs).not.toMatch(/^\s*import\s/m);
   });
 
-  test("§C20.5.3 ES module hoisting: pinned imports appear above runtime body", () => {
-    // The emitted client JS places imports above any logic-emitted body code.
-    // ES modules hoist all imports to module-init regardless, but scrml's
-    // emitter additionally orders them at the top of the file's text. This
-    // ordering is the lexical surface of the implicit ES-module-loader hoist
-    // that satisfies §6.10.4's "initialized at import position" semantic.
+  test("§C20.5.3 registry-read ordering: pinned imports appear above runtime body", () => {
+    // known-gaps-#6 (S152): the client.js loads as a CLASSIC <script>, so the
+    // ES-module-loader-hoisting premise no longer applies — a local `.scrml`
+    // import lowers to a `_scrml_modules` registry READ. The emitter still
+    // orders that read at the top of the file's text (right after the runtime
+    // preamble), which — combined with the dependency `.client.js` <script>s
+    // being emitted BEFORE the entry's (topo order, deps-first; see index.ts) —
+    // is the lexical surface that satisfies §6.10.4's "initialized at import
+    // position" semantic in the classic-script model.
     const fileAST = makeFileAST(
       "/app/app.scrml",
       [makeImportDecl("./engines.scrml", [{ local: "appPhase", pinned: true }])],
@@ -405,15 +435,15 @@ describe("§C20.5 `pinned` keyword does NOT leak into emitted output", () => {
     const ctx = makeTestCtx(fileAST);
     const clientJs = generateClientJs(ctx);
 
-    // The import line exists.
-    const importIdx = clientJs.indexOf('import { appPhase } from "./engines.client.js"');
-    expect(importIdx).toBeGreaterThan(-1);
+    // The registry-read line exists.
+    const readIdx = clientJs.indexOf('const { appPhase } = _scrml_modules["engines.client.js"];');
+    expect(readIdx).toBeGreaterThan(-1);
 
-    // The end-of-runtime marker comes BEFORE the import (runtime preamble
-    // is positioned above the user's imports per emit-client.ts:489-515 order:
-    // runtime → "// --- end scrml reactive runtime ---" → imports).
+    // The end-of-runtime marker comes BEFORE the read (runtime preamble is
+    // positioned above the user's imports: runtime → "// --- end scrml reactive
+    // runtime ---" → import lowering).
     const runtimeEndIdx = clientJs.indexOf("// --- end scrml reactive runtime ---");
     expect(runtimeEndIdx).toBeGreaterThan(-1);
-    expect(importIdx).toBeGreaterThan(runtimeEndIdx);
+    expect(readIdx).toBeGreaterThan(runtimeEndIdx);
   });
 });

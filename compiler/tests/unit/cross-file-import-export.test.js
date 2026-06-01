@@ -347,8 +347,15 @@ describe("§G  .scrml import rewritten to .client.js", () => {
     const ctx = makeTestCtx(fileAST);
     const clientJs = generateClientJs(ctx);
 
-    expect(clientJs).toContain('import { TaskStatus } from "./types.client.js"');
-    expect(clientJs).not.toContain('import { TaskStatus } from "./types.scrml"');
+    // known-gaps-#6 (S152, Approach B): local `.scrml` imports lower to a
+    // `_scrml_modules` registry read (classic-script-safe), NOT a bare ES
+    // import (which would SyntaxError in a non-module <script> and poison the
+    // whole client.js body). The stable key is the dist-relative `.client.js`
+    // path; with no importGraph in the test ctx, the importer falls back to the
+    // specifier-derived key `types.client.js`.
+    expect(clientJs).toContain('const { TaskStatus } = _scrml_modules["types.client.js"];');
+    expect(clientJs).not.toContain('import { TaskStatus }');
+    expect(clientJs).not.toContain('./types.scrml');
   });
 
   test("§G2  ../shared/types.scrml import is also rewritten correctly", () => {
@@ -375,7 +382,10 @@ describe("§G  .scrml import rewritten to .client.js", () => {
     const ctx = makeTestCtx(fileAST);
     const clientJs = generateClientJs(ctx);
 
-    expect(clientJs).toContain('import { UserRole } from "../shared/types.client.js"');
+    // known-gaps-#6 (S152): registry-read lowering. Fallback key from the
+    // specifier `../shared/types.scrml` → `../shared/types.client.js`.
+    expect(clientJs).toContain('const { UserRole } = _scrml_modules["../shared/types.client.js"];');
+    expect(clientJs).not.toContain('import { UserRole }');
     expect(clientJs).not.toContain('../shared/types.scrml');
   });
 });
@@ -597,8 +607,10 @@ describe("§J  multiple stdlib imports emit correctly", () => {
     // stdlib import lowers to _scrml_stdlib destructure (Bug 18 S95).
     expect(clientJs).toContain('const { hash } = _scrml_stdlib.crypto;');
     expect(clientJs).not.toContain('import { hash } from "scrml:crypto"');
-    // local .scrml import is rewritten to .client.js
-    expect(clientJs).toContain('import { UserRole } from "./types.client.js"');
+    // known-gaps-#6 (S152): local .scrml import lowers to a registry read
+    // (coexists with the stdlib `_scrml_stdlib` destructure above).
+    expect(clientJs).toContain('const { UserRole } = _scrml_modules["types.client.js"];');
+    expect(clientJs).not.toContain('import { UserRole }');
     // original .scrml path must not appear
     expect(clientJs).not.toContain('./types.scrml');
   });

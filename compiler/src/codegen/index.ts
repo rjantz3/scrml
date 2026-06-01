@@ -19,7 +19,7 @@
 
 import { scanClassesFromHtml, getAllUsedCSS } from "../tailwind-classes.js";
 import { collectClassNamesFromAst } from "./collect-class-names.ts";
-import { basename } from "path";
+import { basename, dirname, relative } from "path";
 import { RUNTIME_FILENAME } from "../runtime-template.js";
 import { assembleRuntime } from "./runtime-chunks.ts";
 import { fnv1aHash } from "./fnv1a-hash.ts";
@@ -147,6 +147,22 @@ export interface CgInput {
    */
   exportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean }>> | null;
   /**
+   * known-gaps-#6 (S152) — MOD's `importGraph` (per-file imports with resolved
+   * `absSource` edges). Threaded into per-file `CompileContext.importGraph` so
+   * the cross-file `_scrml_modules` lowering (Approach B, §21.3) can identify
+   * exporter files (imported by another .scrml) + derive registry keys from
+   * absolute paths on both sides. Also drives the topological dependency
+   * `<script>` ordering in the per-entry HTML.
+   */
+  importGraph?: Map<string, { imports: Array<{ names: string[]; specifiers?: Array<{ imported: string; local: string }>; absSource: string }> }> | null;
+  /**
+   * known-gaps-#6 (S152) — dist output base directory (api.js
+   * `computeOutputBaseDir(sourcePaths)`). Threaded so the cross-file
+   * `_scrml_modules` key is derived as a stable dist-relative path on both the
+   * importer + exporter sides. Optional; basename-fallback when absent.
+   */
+  outputBaseDir?: string | null;
+  /**
    * S89 A-2.1 — Stage 7.6 Reachability Solver output (SPEC §40.9).
    * Threaded into per-file `CompileContext.reachabilityRecord` so the
    * A-4 codegen wave can consume per-entry-point per-role ChunkPlans.
@@ -249,6 +265,150 @@ export interface CgOutput {
 }
 
 /**
+ * known-gaps-#6 (S152, Approach B) — compute the ordered dependency
+ * `<script src>` paths for an entry's HTML.
+ *
+ * scrml loads `.client.js` as CLASSIC <script>s, so a page that imports from
+ * another `.scrml` needs the dependency `.client.js` files loaded BEFORE its
+ * own (so each dependency's `_scrml_modules[...] = {...}` footer registers
+ * before the importer's `const { x } = _scrml_modules[...]` read runs).
+ *
+ * Returns the dependency `.client.js` paths in TOPOLOGICAL order (deps first),
+ * de-duplicated, each relative to the entry HTML's dist directory (so the
+ * `<script src>` resolves regardless of how deeply the entry / dep are nested
+ * in the output tree). Empty when the file has no transitive `.scrml` deps or
+ * the importGraph is unavailable.
+ *
+ * The DFS post-order over the importGraph yields deps-before-importer ordering;
+ * circular imports cannot occur (forbidden at MOD, E-IMPORT-002), so the
+ * `visiting` guard is a defensive backstop, not a load-bearing cycle-breaker.
+ */
+function computeDependencyClientScripts(
+  entryFilePath: string,
+  importGraph: Map<string, { imports: Array<{ source?: string; absSource: string }> }> | null,
+  outputBaseDir: string | null,
+): string[] {
+  if (!importGraph || !entryFilePath) return [];
+
+  // Dist dir of the entry HTML — `<script src>` paths are relative to it.
+  const entryDistDir = outputBaseDir
+    ? dirname(relative(outputBaseDir, entryFilePath))
+    : "";
+
+  const ordered: string[] = []; // absolute .scrml dep paths, deps-first
+  const done = new Set<string>();
+  const visiting = new Set<string>();
+
+  const visit = (absScrml: string): void => {
+    if (done.has(absScrml) || visiting.has(absScrml)) return;
+    visiting.add(absScrml);
+    const entry = importGraph.get(absScrml);
+    if (entry && Array.isArray(entry.imports)) {
+      for (const imp of entry.imports) {
+        // Only LOCAL relative `.scrml` dependencies participate in the
+        // `_scrml_modules` registry + get a dependency <script>. Stdlib
+        // (`scrml:NAME`) imports resolve via the `_scrml_stdlib` registry +
+        // the bundled `_scrml/<name>.js` shim (NOT a `.client.js`); `vendor:`
+        // imports resolve against the vendor dir; `.js` imports via the
+        // bundler. Filtering on the SOURCE specifier (not the resolved
+        // `absSource`, which ends in `.scrml` for stdlib too) prevents a
+        // dangling `<script src=".../stdlib/<name>/index.client.js">` 404.
+        const src = imp.source;
+        const isLocalScrml =
+          typeof src === "string" &&
+          (src.startsWith("./") || src.startsWith("../")) &&
+          src.endsWith(".scrml") &&
+          typeof imp.absSource === "string" &&
+          imp.absSource.endsWith(".scrml");
+        if (isLocalScrml) {
+          visit(imp.absSource);
+        }
+      }
+    }
+    visiting.delete(absScrml);
+    if (!done.has(absScrml)) {
+      done.add(absScrml);
+      // Exclude the entry itself — its own <script> is emitted separately.
+      if (absScrml !== entryFilePath) ordered.push(absScrml);
+    }
+  };
+  visit(entryFilePath);
+
+  // Map each dep's absolute .scrml path to a `<script src>` relative to the
+  // entry HTML's dist dir. Both the dep + entry dist paths are
+  // `relative(outputBaseDir, ...)`, so the inter-file relative path is stable
+  // regardless of nesting depth (handles the shell-composition `upToRoot` case
+  // by construction). Fallback (no outputBaseDir): basename siblings.
+  return ordered.map((depAbs) => {
+    const depClient = depAbs.replace(/\.scrml$/, ".client.js");
+    if (!outputBaseDir) return basename(depClient);
+    const depDist = relative(outputBaseDir, depClient);
+    // Relative path from the entry HTML's dist dir to the dep's dist file,
+    // POSIX-normalized. A same-dir sibling yields a bare basename (matching the
+    // entry's own `<script src="${base}.client.js">` form); a nested dep yields
+    // `sub/dep.client.js` or `../dep.client.js`.
+    const rel = relative(entryDistDir, depDist).split(/[\\/]/).join("/");
+    return rel;
+  });
+}
+
+/**
+ * known-gaps-#6 (S152) — does this file participate in cross-file local
+ * `.scrml` linking? True when it imports a local relative `.scrml` (an importer
+ * that emits `_scrml_modules` registry reads) OR is imported by another `.scrml`
+ * (an exporter that emits a registration footer). Used to gate the per-file
+ * IIFE wrap that scopes the file's top-level `const`/`function` declarations so
+ * they do not collide in the SHARED global lexical environment of classic
+ * <script>s (two scripts each declaring top-level `const X` → "Identifier 'X'
+ * has already been declared"). Single-file apps are NOT linked → not wrapped
+ * (zero behavior change).
+ */
+function isCrossFileLinked(
+  filePath: string,
+  importGraph: Map<string, { imports: Array<{ source?: string; absSource: string }> }> | null,
+): boolean {
+  if (!importGraph || !filePath) return false;
+  // (a) this file imports a local relative `.scrml`?
+  const own = importGraph.get(filePath);
+  if (own && Array.isArray(own.imports)) {
+    for (const imp of own.imports) {
+      const src = imp.source;
+      if (typeof src === "string" && (src.startsWith("./") || src.startsWith("../")) && src.endsWith(".scrml")) {
+        return true;
+      }
+    }
+  }
+  // (b) this file is imported by another `.scrml`?
+  for (const [, entry] of importGraph) {
+    if (!entry || !Array.isArray(entry.imports)) continue;
+    for (const imp of entry.imports) {
+      if (imp.absSource === filePath) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * known-gaps-#6 (S152) — wrap a cross-file-linked file's client.js BODY in an
+ * IIFE so its top-level `const`/`function` declarations are local (not in the
+ * shared global lexical env). The `_scrml_modules[key] = {...}` footer + the
+ * runtime shared-global ASSIGNMENTS (e.g. `_scrml_lift_target = ...`) still
+ * reach the global registry/runtime (assignments, not declarations, escape the
+ * IIFE). The `// Requires: <runtime>` header line is preserved OUTSIDE the IIFE
+ * (it is a comment the dev server reads to wire the runtime <script>).
+ */
+function wrapClientBodyInIife(clientJs: string): string {
+  const reqPrefix = "// Requires: ";
+  const nl = clientJs.indexOf("\n");
+  if (clientJs.startsWith(reqPrefix) && nl !== -1) {
+    const header = clientJs.slice(0, nl + 1);
+    const body = clientJs.slice(nl + 1);
+    return `${header}(function() {\n${body}\n})();\n`;
+  }
+  return `(function() {\n${clientJs}\n})();\n`;
+}
+
+/**
  * Run the Code Generator (CG, Stage 8).
  */
 export function runCG(input: CgInput): CgOutput {
@@ -266,6 +426,8 @@ export function runCG(input: CgInput): CgOutput {
     batchPlan = null,
     batchPlannerErrors = [],
     exportRegistry: exportRegistryInput = null,
+    importGraph: importGraphInput = null,
+    outputBaseDir: cgOutputBaseDir = null,
     reachabilityRecord: reachabilityRecordInput = null,
     emitPerRoute = false,
     chunkSizeBudgetBytes,
@@ -725,6 +887,12 @@ export function runCG(input: CgInput): CgOutput {
       // C15 — propagate MOD exportRegistry per-file so emit-engine.ts can
       // discriminate cross-file engine mount sites from local components / HTML.
       exportRegistry: exportRegistryInput,
+      // known-gaps-#6 (S152) — propagate MOD importGraph + dist outputBaseDir
+      // so emit-client's cross-file _scrml_modules footer/read derive a stable,
+      // identical dist-relative registry key on both the exporter + importer
+      // sides. outputBaseDir is computed below from the compile-unit source set.
+      importGraph: importGraphInput,
+      outputBaseDir: cgOutputBaseDir,
       // A-2.1 — propagate Stage 7.6 ReachabilityRecord per-file; A-4 codegen
       // will consume per-entry-point per-role ChunkPlans. Empty until A-2.2+.
       reachabilityRecord: reachabilityRecordInput,
@@ -844,6 +1012,24 @@ export function runCG(input: CgInput): CgOutput {
       }
     }
 
+    // known-gaps-#6 (S152, Approach B) — IIFE-wrap the client.js body for files
+    // that participate in cross-file local `.scrml` linking, so their top-level
+    // `const`/`function` declarations do not collide in the SHARED global
+    // lexical environment of classic <script>s (exporter `const UserRole` vs an
+    // importer's `const { UserRole } = _scrml_modules[...]` → redeclaration
+    // error). The `_scrml_modules[...] = {...}` footer + runtime shared-global
+    // assignments still escape the IIFE. Single-file apps are NOT wrapped (zero
+    // behavior change). Gated on `!embedRuntime`: the registry (`_scrml_modules`)
+    // lives in the SHARED runtime file (external mode), so wrapping only the
+    // per-file body keeps the registry global. In embed mode the runtime is
+    // inlined per file (each file would carry its own `_scrml_modules`), so
+    // cross-file linking is structurally a no-op there regardless — wrapping
+    // the embedded runtime would only further isolate it; leave embed mode
+    // unwrapped (the default `compile` path is external mode).
+    if (clientJs && !embedRuntime && isCrossFileLinked(filePath, importGraphInput)) {
+      clientJs = wrapClientBodyInIife(clientJs);
+    }
+
     const base = basename(filePath, ".scrml");
 
     // §40.7 — extract documentary attributes from the top-level <program>
@@ -934,6 +1120,17 @@ export function runCG(input: CgInput): CgOutput {
         docParts.push(`<script src="${RUNTIME_FILENAME_PLACEHOLDER}"></script>`);
       }
       if (clientJs) {
+        // known-gaps-#6 (S152, Approach B) — emit the transitive `.scrml`
+        // dependency `.client.js` <script>s BEFORE the entry's own, in
+        // topological (deps-first) order. Each dependency's
+        // `_scrml_modules[...] = {...}` footer must register before the entry's
+        // `const { x } = _scrml_modules[...]` read runs (classic-script eval is
+        // sequential top-to-bottom over the document's <script>s). Empty for
+        // single-file / leaf pages with no cross-file `.scrml` deps.
+        const depScripts = computeDependencyClientScripts(filePath, importGraphInput, cgOutputBaseDir);
+        for (const depSrc of depScripts) {
+          docParts.push(`<script src="${depSrc}"></script>`);
+        }
         docParts.push(`<script src="${base}.client.js"></script>`);
       }
       docParts.push("</body>");

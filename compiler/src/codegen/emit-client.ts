@@ -1,4 +1,5 @@
 import { SCRML_RUNTIME } from "../runtime-template.js";
+import { relative, basename } from "path";
 import { exprNodeContainsCall } from "../expression-parser.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
@@ -35,6 +36,164 @@ interface TypeDecl {
   name?: string;
   variants?: EnumVariant[];
   raw?: string;
+}
+
+// ---------------------------------------------------------------------------
+// known-gaps-#6 (S152) — cross-file CLIENT module-loading (Approach B, §21.3)
+//
+// scrml loads every `.client.js` as a CLASSIC (non-module) <script>, so a bare
+// ES `import { x } from "./dep.client.js"` SyntaxErrors at parse time and
+// poisons the whole script body (zero client code runs). Approach B mirrors the
+// already-shipped `_scrml_stdlib` registry: each dependency `.client.js` ends
+// with a registration footer `_scrml_modules["<key>"] = { name: emitted, ... }`
+// and each importer rewrites `import` to `const { x } = _scrml_modules["<key>"]`.
+// The importer + exporter MUST agree on the key — both derive it identically
+// from the dependency's ABSOLUTE path via `moduleRegistryKey`.
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive the stable `_scrml_modules` registry key for a dependency `.scrml`
+ * file from its ABSOLUTE source path. The key is a dist-RELATIVE `.client.js`
+ * path (POSIX `/` separators), e.g. `"types.client.js"` or
+ * `"components/load-card.client.js"`. It is a stable IDENTIFIER, not a URL —
+ * it survives the shell-composition `upToRoot` rewrite because the importer +
+ * exporter both compute the SAME dist-relative path from absolute paths,
+ * regardless of how deeply nested either page sits in the output tree.
+ *
+ * Open Q #2 (RESOLVED) — path-relative now; a future content-addressed FNV-1a
+ * hash-key could unify with A-4's content-addressing (`fnv1a-hash.ts`), but
+ * path-relative matches auto-gather's `absSource` resolution and is simplest.
+ *
+ * Falls back to the basename when `outputBaseDir` is unavailable (test
+ * harnesses that bypass the write phase) — both sides degrade identically.
+ */
+function moduleRegistryKey(absScrmlPath: string, outputBaseDir: string | null | undefined): string {
+  if (typeof absScrmlPath !== "string" || absScrmlPath.length === 0) return "";
+  let rel: string;
+  if (outputBaseDir) {
+    rel = relative(outputBaseDir, absScrmlPath);
+    // `relative` may emit `..` segments if a dep sits OUTSIDE the base dir;
+    // fall back to the basename in that degenerate case so both sides still
+    // agree on a clean key (the dist write would also flatten such a file).
+    if (rel.startsWith("..")) rel = basename(absScrmlPath);
+  } else {
+    rel = basename(absScrmlPath);
+  }
+  // Normalize separators to POSIX and rewrite the `.scrml` suffix to
+  // `.client.js` (the artifact the importer loads).
+  rel = rel.split(/[\\/]/).join("/");
+  return rel.replace(/\.scrml$/, ".client.js");
+}
+
+/**
+ * Resolve the absolute source path of a local `.scrml` import from the current
+ * file's importGraph entry, matching on the raw import specifier. Returns null
+ * when no importGraph is threaded (test harnesses) or no matching edge exists —
+ * the importer then falls back to a path-relative key derived from the
+ * specifier itself (preserving pre-#6 same-dir behavior).
+ */
+function resolveLocalImportAbsSource(
+  filePath: string,
+  source: string,
+  importGraph: CompileContext["importGraph"],
+): string | null {
+  if (!importGraph) return null;
+  const entry = importGraph.get(filePath);
+  if (!entry || !Array.isArray(entry.imports)) return null;
+  for (const imp of entry.imports) {
+    if ((imp as any).source === source && typeof imp.absSource === "string") {
+      return imp.absSource;
+    }
+  }
+  return null;
+}
+
+/**
+ * Build the exporter registration footer for a dependency `.client.js`.
+ *
+ * Returns the `_scrml_modules["<key>"] = { publicName: emittedName, ... };`
+ * line(s) for THIS file when it is imported by another `.scrml` in the compile
+ * unit, or an empty array otherwise. Public names come from `exportRegistry`;
+ * emitted (possibly-mangled) names come from `fnNameMap` for fn/function
+ * exports, and the un-mangled public name directly for everything else
+ * (enums/variant objects/components/consts are emitted under their public name).
+ *
+ * The footer is emitted AFTER all function/enum/const decls so every referenced
+ * binding is already declared. The `post-fn-name-mangle` pass does NOT corrupt
+ * it: property KEYS are followed by `:` (outside the mangle lookahead char
+ * class) and VALUES are already the final emitted names.
+ */
+function buildModuleRegistryFooter(
+  ctx: CompileContext,
+  fnNameMap: Map<string, string>,
+  emittedLines: string[],
+): string[] {
+  const filePath: string = (ctx.fileAST as any)?.filePath;
+  const importGraph = ctx.importGraph ?? null;
+  const exportRegistry = ctx.exportRegistry ?? null;
+  if (!filePath || !importGraph || !exportRegistry) return [];
+
+  // Is THIS file imported by another .scrml in the compile unit? Scan every
+  // file's import edges for one whose resolved absSource === this file.
+  let isImportedByAnother = false;
+  for (const [, entry] of importGraph) {
+    if (!entry || !Array.isArray(entry.imports)) continue;
+    for (const imp of entry.imports) {
+      if (imp.absSource === filePath) { isImportedByAnother = true; break; }
+    }
+    if (isImportedByAnother) break;
+  }
+  if (!isImportedByAnother) return [];
+
+  const exports = exportRegistry.get(filePath);
+  const key = moduleRegistryKey(filePath, ctx.outputBaseDir);
+
+  // Register only exports that have a REAL emitted client-side JS binding.
+  // fn/function exports are mangled (bridge via fnNameMap); enums emit a
+  // `const <Name> = Object.freeze(...)` variant object; value consts emit a
+  // top-level `const`/`let`/`var <name>`. Type-only exports (pure structs) +
+  // cross-file COMPONENTS (resolved at markup-mount time, not via a JS value)
+  // + ENGINES + channels have NO client-side JS binding — registering them
+  // would reference an undeclared identifier and throw at footer eval, poisoning
+  // the whole script. We probe the already-emitted lines for a top-level
+  // declaration of the export's emitted name; only declared bindings register.
+  //
+  // The footer is ALWAYS emitted (even when no name registers → `= {}`) for an
+  // imported file, so the importer's `const { x } = _scrml_modules[key]` reads
+  // an object (yielding `undefined` for markup/type-only names — harmless) and
+  // never destructures `undefined` (which WOULD throw).
+  const declaredBinding = (emittedName: string): boolean => {
+    // Match a top-level declaration of `emittedName`: `function NAME`,
+    // `const NAME`, `let NAME`, or `var NAME` (optionally `async function`),
+    // allowing leading indentation. `emittedLines` is the pre-join line array,
+    // so we test each line independently. Backslashes are doubled so the
+    // RegExp source receives literal `\\s` / `\\b` metacharacters (a TS
+    // template literal would otherwise collapse `\s` to `s`).
+    const reDecl = new RegExp(
+      `^\\s*(?:async\\s+)?(?:function|const|let|var)\\s+${escapeRegex(emittedName)}\\b`,
+    );
+    for (const line of emittedLines) {
+      if (reDecl.test(line)) return true;
+    }
+    return false;
+  };
+
+  const pairs: string[] = [];
+  if (exports) {
+    for (const [publicName, info] of exports) {
+      // Channels are inlined at the consumer site by CHX, never registered.
+      if ((info as any)?.category === "channel" || (info as any)?.kind === "channel") continue;
+      const emitted = fnNameMap.get(publicName) ?? publicName;
+      if (!declaredBinding(emitted)) continue; // no client-side JS binding → skip
+      pairs.push(`${publicName}: ${emitted}`);
+    }
+  }
+
+  return [
+    "// --- cross-file module registry footer (known-gaps-#6, §21.3) ---",
+    `_scrml_modules[${JSON.stringify(key)}] = { ${pairs.join(", ")} };`,
+    "",
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -340,6 +499,39 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
         }
       }
     }
+  }
+
+  // known-gaps-#6 (S152) — `modules` chunk (the §21.3 _scrml_modules registry).
+  // Activate when this file participates in cross-file local `.scrml` linking,
+  // i.e. it EITHER imports a local `.scrml` (an importer that emits a registry
+  // read) OR is imported by another `.scrml` in the compile unit (an exporter
+  // that emits a registration footer). Single-file apps + leaf pages with no
+  // cross-file local imports never carry the registry. The compile-unit-wide
+  // chunk union (index.ts) guarantees the runtime ships the chunk whenever ANY
+  // file lights it up, so importer + exporter always share one registry.
+  {
+    const filePath: string = (ctx.fileAST as any)?.filePath ?? (fileAST as any)?.filePath;
+    const importGraph = ctx.importGraph ?? null;
+    let crossFileLocal = false;
+    // (a) this file imports a local `.scrml`?
+    for (const stmt of allImportsForStdlib) {
+      if (
+        (stmt.kind === "import-decl" || stmt.kind === "use-decl") &&
+        typeof stmt.source === "string" &&
+        stmt.source.endsWith(".scrml")
+      ) { crossFileLocal = true; break; }
+    }
+    // (b) this file is imported by another `.scrml`?
+    if (!crossFileLocal && importGraph && filePath) {
+      for (const [, entry] of importGraph) {
+        if (!entry || !Array.isArray(entry.imports)) continue;
+        for (const imp of entry.imports) {
+          if (imp.absSource === filePath) { crossFileLocal = true; break; }
+        }
+        if (crossFileLocal) break;
+      }
+    }
+    if (crossFileLocal) chunks.add("modules");
   }
 
   // PGO P3.B (S102) — fused iterative ExprNode probe with structural skip.
@@ -1048,10 +1240,41 @@ export function generateClientJs(ctx: CompileContext): string {
         continue;
       }
       let jsSource: string = stmt.source;
-      // Rewrite local .scrml imports to point to the compiled browser JS output.
+      // known-gaps-#6 (S152) — local `.scrml` imports lower to a registry read
+      // from `_scrml_modules`, EXACTLY mirroring the `scrml:` branch above. A
+      // bare ES `import` would SyntaxError in a classic <script> and poison the
+      // whole client.js body. The dependency `.client.js` registers its exports
+      // via the footer emitted by `buildModuleRegistryFooter` (below), loaded as
+      // a <script> BEFORE this entry (topo order, deps-first — see index.ts), so
+      // the registry is populated before this read runs.
+      //
+      // Stable key: derived from the dep's ABSOLUTE path (importGraph absSource)
+      // via `moduleRegistryKey` — identical to the exporter side regardless of
+      // subdir / shell `upToRoot` nesting. Falls back to the path-relative
+      // specifier-derived key when the importGraph is absent (test harnesses).
       if (jsSource.endsWith(".scrml")) {
-        jsSource = jsSource.replace(/\.scrml$/, ".client.js");
+        const absSource = resolveLocalImportAbsSource(filePath, stmt.source, ctx.importGraph ?? null);
+        const moduleKey = absSource !== null
+          ? moduleRegistryKey(absSource, ctx.outputBaseDir)
+          // Fallback: rewrite the specifier itself to a path-relative key.
+          : stmt.source.replace(/^\.\//, "").split(/[\\/]/).join("/").replace(/\.scrml$/, ".client.js");
+        if (stmt.isDefault) {
+          // Open Q #3 — no client-side default `.scrml` export exists today;
+          // implemented defensively. `default` is the exporter-side key.
+          const name: string = stmt.names.join(", ");
+          lines.push(`const ${name} = _scrml_modules[${JSON.stringify(moduleKey)}].default;`);
+          continue;
+        }
+        const keptLocal = filterChannelImportSpecifiers(stmt, filePath, ctx.exportRegistry ?? null);
+        if (keptLocal.length === 0) continue; // All specifiers are channels — inlined by CHX.
+        const destructuredLocal = keptLocal
+          .map((s) => (s.imported === s.local ? s.imported : `${s.imported}: ${s.local}`))
+          .join(", ");
+        lines.push(`const { ${destructuredLocal} } = _scrml_modules[${JSON.stringify(moduleKey)}];`);
+        continue;
       }
+      // Non-`.scrml` local imports (`.js` helpers, etc.) keep ES `import` form —
+      // these resolve via the bundler / runtime, not the classic-script registry.
       if (stmt.isDefault) {
         const names: string = stmt.names.join(", ");
         lines.push(`import ${names} from ${JSON.stringify(jsSource)};`);
@@ -1327,6 +1550,16 @@ export function generateClientJs(ctx: CompileContext): string {
   // Emit fetch stubs, CPS wrappers, and client-boundary function bodies
   const { lines: fnLines, fnNameMap } = clientStage(ctx, "emit-functions", () => emitFunctions(ctx));
   for (const line of fnLines) lines.push(line);
+
+  // known-gaps-#6 (S152) — cross-file module registry footer (Approach B,
+  // §21.3). Emitted AFTER all fn/enum/const decls so every exported binding is
+  // already declared. Empty for files NOT imported by another .scrml in the
+  // compile unit (single-file apps, leaf pages) — the 'modules' runtime chunk
+  // tree-shakes out in that case (see detectRuntimeChunks). The `post-fn-name-
+  // mangle` pass below does NOT corrupt this footer: property keys are followed
+  // by `:` (outside the mangle lookahead) and values are the final emitted names.
+  const moduleFooterLines = clientStage(ctx, "emit-module-registry-footer", () => buildModuleRegistryFooter(ctx, fnNameMap, lines));
+  for (const line of moduleFooterLines) lines.push(line);
 
   // Emit top-level logic statements and CSS variable bridge
   const reactiveLines = clientStage(ctx, "emit-reactive-wiring", () => emitReactiveWiring(ctx));

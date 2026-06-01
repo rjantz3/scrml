@@ -237,7 +237,12 @@ describe("runtime size", () => {
     expect(minimal.length).toBeLessThan(SCRML_RUNTIME.length * 0.30);
   });
 
-  test("RUNTIME_CHUNK_ORDER has 26 chunks", () => {
+  test("RUNTIME_CHUNK_ORDER has 27 chunks", () => {
+    // 27 chunks post-known-gaps-#6 (S152): 'modules' chunk added for the
+    // §21.3 cross-file _scrml_modules registry (Approach B). Sibling to the
+    // _scrml_stdlib registry; activated per-compile-unit by detectRuntimeChunks
+    // when a local .scrml import/export crosses a file boundary.
+    //
     // 26 chunks post-Bug 18 S95: 4 'stdlib-<name>' chunks added for the
     // _scrml_stdlib registry — one per hand-written shim under
     // compiler/runtime/stdlib/ (auth, crypto, data, host). Each chunk
@@ -264,6 +269,6 @@ describe("runtime size", () => {
     //   18 chunks post-C13: 'engine' chunk for §51.0.F + §51.0.G engine
     //   state-machine runtime hooks.
     //   17 chunks post-C10: 'messages' chunk for §55.10.
-    expect(RUNTIME_CHUNK_ORDER.length).toBe(26);
+    expect(RUNTIME_CHUNK_ORDER.length).toBe(27);
   });
 });
