@@ -1,74 +1,58 @@
-# scrmlTS — Session 151 (CLOSE)
+# scrmlTS — Session 152 (CLOSE)
 
 **Date:** 2026-06-01
-**Previous:** `handOffs/hand-off-155.md` (= S150 CLOSE, the reference for this session).
-**Next-session pickup:** rotate THIS file → `handOffs/hand-off-156.md` at S152 OPEN.
+**Previous:** `handOffs/hand-off-156.md` (= S151 CLOSE).
+**Next-session pickup:** rotate THIS file → `handOffs/hand-off-157.md` at S153 OPEN.
 
 ---
 
-## 🏁 S151 CLOSE (wrap + push). Three landings + a self-demo-website milestone + MCP-dogfood research.
+## 🏁 S152 CLOSE — dogfood-driven fix arc: 5 fixes shipped, HIGH back to 0, 1 grammar feature, 3 design ratifications
 
-**Numbering note (one-time):** a prior "S151" was started erroneously (zero work). This real session reclaimed S151. The S150 CLOSE is preserved at `handOffs/hand-off-155.md` (byte-identical to the committed reference). Resolved at OPEN; ignore henceforth.
+The whole session was **dogfooding the language by writing a real todo app** (`masterScrml/req.scrml` + `req2.scrml` — the scrml rendering of Teej's CLI todo). That exercise surfaced and closed a chain of real gaps. The C1-self-demo thesis ("real usage surfaces real gaps") proved itself.
 
 ## State as of CLOSE
-- **HEAD scrmlTS:** the S151 wrap commit (this commit) — pushed origin **0/0**. Session commits: `543e07fe` canon-fix(R28-C2) · `cce289b4` C4/R28-5 lifecycle · `c66af6b2` C1 self-demo website inc1 · + this wrap commit.
-- **scrml-support:** user-voice S151 appended (as-we-go) — committed + pushed **0/0**.
-- **Cross-machine:** scrmlTS + scrml-support both **0/0** with origin.
-- **Tests:** full `bun run test` **22,456 pass / 0 fail / 224 skip / 1 todo / 862 files** (S150 baseline 22,450/220/861; +6 pass +4 skip = C4's +10 cases [6 active / 4 skip]; 0 regressions; pre-push gate passed end-to-end, NO `--no-verify`).
-- **known-gaps §0:** HIGH 0 · MED 11 (C4/R28-5 RESOLVED) · LOW ~17 (+given-guard +srcmap-offset-threading carried) · Nominal 7. PLUS 7 NEW C1-dogfood bug-candidates filed needs-PA-confirm (see below) — NOT yet severity-counted pending confirm.
-- **Worktrees:** NONE — both dispatch worktrees (C4 `wf_96f76c79-096-2`, C1 `wf_5d5afd3c-972-2`) cleaned at wrap step 6b (work landed via file-delta). `git worktree list` = main only.
-- **Inbox:** empty. **Outbox:** none sent this session.
+- **HEAD scrmlTS:** the each-init crash fix `25a1c243` + the wrap commit (this). Session commits ahead of the S151 base `bf2e02e7`: `9c192c73` (#7 each-body) · `b08f44df` (known-gaps) · `efc23ecf` (dev-server fixes) · `5082ff3c` (#6 modules) · `893872e3` (inline-`?{}`) · `46f9bb55` (Shape 4) · `25a1c243` (each-init crash) · + wrap. **Pushed origin 0/0** (pre-push gate green, NO `--no-verify`).
+- **scrml-support:** pa.md `---` convention + #6 deep-dive (`bdeaf9d`) pushed; + user-voice S152 (this wrap) pushed. **0/0.**
+- **Tests:** full `bun run test` — see CHANGELOG (pre-push gate count). Pre-commit subset was 15,5xx / 0 fail through the session; browser tier 294/0.
+- **known-gaps §0:** **HIGH 0** (all S152 HIGHs resolved). NEW this session: **#6 RESOLVED**, **inline-`?{}`-in-branch RESOLVED**, **each-render-before-cell-init crash RESOLVED**, **Shape 4 shipped**, **scrml-dev fixes shipped**, **#7 each-body shipped**. NEW open: **engine-gated-`<each>`-populate (MED)**, **A-4 atom-emitter bare-import follow-up**, **scalar/struct zero-default open Q**, plus the lint false-positives (W-DEAD-FUNCTION on match-arm-only-called fns; I-FN-PROMOTABLE on SQL fns).
+- **Worktrees:** cleaned at wrap (all 6 dispatch worktrees landed via file-delta). `git worktree list` = main only.
+- **Inbox:** empty. **Outbox:** none sent.
 
-## 🔬 S151 EXECUTION LOG
+## 🔬 S152 EXECUTION LOG (the dogfood chain)
 
-### Session start
-Reclaimed S151 from a void-started prior. Read pa.md + pa-scrmlTS.md (full, 1068L), SPEC-INDEX (full, 385L), PRIMER, master-list §0, user-voice S141–S150. Both repos 0/0, inbox empty, worktrees clean at OPEN.
+**Arc 0 — req.scrml / req2.scrml (Teej comparison).** User pointed at `masterScrml/req.md` (TJ DeVries' CLI todo language: first-class `database`, Ecto-style queries, `provide` capability injection, tagged-error `match Int.parse`, `match Runtime.args` dispatch). Wrote `req.scrml` (the scrml rendering) + `req2.scrml` (full-engine variation: `Phase = {Loading,Browsing,Failed(msg)}` + boot-effect + payload-variant + command-router-in-Browsing). The design insight surfaced: the **engine is the PHASE**, the command-`match` is a router inside Browsing (not engine state). Writing it two ways surfaced the whole bug chain below.
 
-### Arc 1 — C1 self-demo website, increment 1 (the milestone) — LANDED `c66af6b2`
-The S148-ratified compile-transparent self-demo scrml.dev viewer, built into `docs/website-viewer/` (21 files), via a BG workflow (Design → Build[worktree] → Verify). **It works and the provenance is REAL** (the credibility crux): the committed `.js.map` + `.client.js` + engine-graph are **byte-identical to an independent regeneration** from `examples/14-mario-state-machine.scrml`; verify VLQ-decoded the map with its own decoder — hover src-line 69 (`@coins = @coins + n`) → JS line 52, bidirectional, line-honest, synthetic lines excluded. **Not a 0:0 stub.**
-- **Layout (S151 revision, captured user-voice):** site-left-60% (live mario iframe) + right-40% STACKED — scrml source (top) / engine "what-comes-next" diagram (middle, engine-conditional) / tabbed JS·HTML·CSS output (bottom). Provenance links vertically.
-- **Decisions ratified (3× AskUserQuestion):** showcase-only (live-edit deferred to C2a) · shell built AS a scrml app (full dogfood) · first-cut = viewer + flagships + dashboard then iterate.
-- **TWO deviations the next PA must know:** (1) path is `docs/website-viewer/` (SIBLING), NOT nested `docs/website/viewer/` — a nested viewer gets swept into the 97-page-site compile by `scrml dev docs/website/` and regresses it; sibling keeps the 97-page site **provably untouched** (verify: zero `compiler/src` + zero `docs/website` edits). (2) Serve via `docs/website-viewer/scripts/serve.sh` (it symlinks the precomputed `/data`; bare `scrml dev` 404s the artifacts — `scrml dev` has no static-asset/public-dir convention).
-- **SERVE-BEFORE-PUSH (S146) OVERRIDE:** the user did NOT eyeball it in a browser; they explicitly directed "commit C1" on the verification (build-agent Puppeteer-verified + verify's byte-identical adversarial check). PA flagged the hold; user overrode. `serve.sh` remains available to eyeball live anytime (it's inc1, iterable). Logged user-voice.
-- **inc2 (next):** the other 3 engine-heavy flagships + full dashboard live-embed + KB-nav + PE-layer toggle; live-pane↔source hover (postMessage across the iframe); HTML/CSS-tab provenance (Phase-2); col-precise highlights (srcmap offset-threading). Open forks parked for owner: engine-graph multi-file write-loop bug (inc1 sidesteps via single-file compile; inc2's multi-file flagship `23-trucking-dispatch/hos` needs it fixed) · live-pane mount mechanism (iframe chosen; bidirectional hover needs postMessage) · dashboard live-embed.
+**Arc 1 — dogfood reverse-R26 sweep (7 candidates classified).** #6 confirmed HIGH; #7 confirmed broader; inline-object-fn-return + `for=`-in-fn-string confirmed; no-`--sourceMap` LOW; 2 NOT-REPRODUCED minimal; W-DEAD-FUNCTION/I-FN-PROMOTABLE confirmed cosmetic.
 
-### Arc 2 — C4/R28-5 object-literal lifecycle E-TYPE-001 dormancy — RESOLVED `cce289b4`
-Function-local `const u: User = {…}` object-literal bindings skipped the lifecycle tracker (pre-transition field read compiled clean = silent safety gap). Root: `collectStructBindings` (type-system.ts) had JSX + positional-tuple enrollment paths but no `{`-object-literal branch (unlike working sibling `collectStateDeclStructBindings`). Fix (+22/-1): Path 4 reusing the existing `seedInitialFromObjectLiteral`; enrollment-only, gated on `lifecycleRegistry` (no over-fire), carve-outs preserved. +10 tests. reproduce→fix→verify BG workflow; independently verified. **Disclosure (NEW LOW filed):** the struct-field walker doesn't honor `given (u.field is not not)` guard discrimination — PRE-EXISTING (JSX form behaves identically), NOT introduced by C4; test asserts parity.
+**Shipped fixes (all R26-verified, file-delta landed, pushed):**
+1. **#7 — `<each>` body interactivity** `9c192c73`. `@.` resolves in attr-value (type-system.ts `inEachBodyScope`); `class:`→classList.toggle, handlers→addEventListener, `${}`→value (emit-each.ts). +18 tests.
+2. **scrml dev fixes** `efc23ecf`. Per-file watcher (no inotify-ENOSPC crash — was recursively watching node_modules/sibling-repos) + graceful watch-error degradation + root-`/` entry-preference (no stale-sibling serve). **This + #6 were the actual "nothing renders" the user hit.**
+3. **#6 — cross-file CLIENT module-loading** `5082ff3c` (Approach B per deep-dive). `_scrml_modules` registry + exporter footer + importer registry-read + topo-ordered dep `<script>` + IIFE-wrap of cross-file-linked bodies (collision fix). Deep-dive: `scrml-support/docs/deep-dives/client-cross-file-module-loading-2026-06-01.md` (verdict B; A-4-reuse ruled out). +7 tests incl. happy-dom multi-file.
+4. **inline `?{}` in conditional branch** `893872e3`. `isServerTriggerStatement`/`analyzeCPSEligibility` recurse into control-flow bodies → inline `?{}` in a `match` arm / `if` branch is a CPS server boundary. Coupled fix: match-stmt server-emit was **leaking `_scrml_sql` into client.js** (E-CG-006) — async-IIFE-wrap + `_scrml_body` marshalled reads; zero SQL in client now. +12 tests.
+5. **SPEC §6.2 Shape 4 — typed-array no-RHS → `[]`** `46f9bb55`. `<x>: T[]` (no RHS) → `[]` (defined, `is some` not `not`); non-array typed-no-RHS → NEW `E-DECL-NEEDS-INITIALIZER`; closes the no-init-undefined hole. Root was front-end (no-RHS decl fell through to html-fragment). +15 tests. (Scalar/struct zero-defaults OUT — open Q.)
+6. **each-render-before-cell-init crash** `25a1c243` (HIGH). The `<each>` render fired at module-init BEFORE the cell-init → `_scrml_reconcile_list(undefined)` crash; affected ANY no-`<empty>` `<each>` over a same-program cell (compile-clean, runtime-dead). Fix: defer each-dispatchers after reactiveLines (ordering) + `!_items`/`Array.isArray` guards. **#7-test blind spot: all existing each-tests had `<empty>` (whose `!_items` guard masked it); unit each-tests are emit-string-only.** NEW happy-dom test in real module-init order. +90 tests net.
 
-### Arc 3 — R28-C2 kickstarter canon-fix — LANDED `543e07fe` (PA-direct)
-§11.3 real-time recipe: `<channel>` was a sibling of `<program>` (fires E-CHANNEL-OUTSIDE-PROGRAM per SPEC §38.1 / Insight 30) → moved inside `<program>`; PA compile-verified the fixed recipe exit-0 clean. §11.13 SSE: added `import { sleep } from 'scrml:time'`. **R28-C1 found STALE-open** — the `server fn`→`server function` flagship fix already landed S144 `44d61a19` (reverse-direction caught it; no action). **Parked (not safe-mechanical):** `print()` (~15 SPEC+kickstarter sites; NOT a defined builtin — canon-wide decision needed on the right idiom / JS-host passthrough) + `< db>` leading-space (markdown-display-vs-copy-paste tension).
+**Design ratifications (durable — in user-voice S152 + pa.md):**
+- **`---` answer-delimiter convention** → pa.md (committed `bdeaf9d`). Tail below the last `---` = answers to PA's pending questions.
+- **DQ-2 conceded** — reassignment-canonical stands; arrays do NOT have mutation-method reactivity (push/pop/shift don't signal per §6.5 DQ-2; the user conceded the proxy-reactive-array direction). No DQ-2 reopen.
+- **Shape 4 ratified** ("1 cool") — typed-array `[]`-default; scalar zero-defaults left open.
 
-### Arc 4 — MCP dogfood research (delivered; decisions QUEUED, nothing built)
-Grounded against code: **MCP V0 is SHIPPED** — `<program mcp>` activates an 11-tool read-only stdio MCP server (`compiler/runtime/stdlib/mcp.js`); 8 topology tools work, 3 live-state tools (currentVariant/form-status/channel-state) are SHIPPED-BUT-BROKEN (= **Bug 14**, no server-side `globalThis._scrml_reactive_get` stash). The S122 "DevTools-for-agents" candidate is NOT unbuilt — its v0 tier IS that shipped MCP V0 (framing-corrected). The genuinely-NEW C1↔MCP work = a "site-as-corpus" MCP (engineReachableStates / provenanceFor / corpusStatus over the site's own artifacts; ~half free reads of already-emitted JSON). **Staging (queued, NOT built):** the `<program mcp>` flip on `docs/website-viewer/app.scrml` → a small **inc2** (tiny + reproduces Bug 14 on a public app); the corpus-MCP → its **own arc** after inc1. `docs/website-viewer/app.scrml` is a bare `<program>` today (flip-ready). Awaiting user ratify.
+## ⚠️ CARRY-FORWARD / OPEN (S153)
+1. **engine-gated-`<each>`-populate (NEW MED — the immediate req2 blocker).** An `<each>` whose mount lives inside an engine state-child (req2's `Browsing`) doesn't track its source-cell dep: at module-init the engine is in `initial=` (`Loading`), the each-mount isn't in the DOM, the each-render hits `if (!_mount) return;` BEFORE reading `@cell` → `_scrml_effect_static` records no dep → never re-fires → list never populates. req2 mounts clean (no crash) but stays empty. **Fix: read the source cell BEFORE the `!_mount` early-return (always track the dep), OR re-run each dispatchers on engine variant-swap.** This is the next fix to make req2 actually work end-to-end.
+2. **A-4 atom-emitter bare-import follow-up.** Same bare-`import`-in-classic-script class as #6, gated on `emitPerRoute` (default-OFF). Blocks A-4 default-on until it registers into `_scrml_modules`.
+3. **Body-split conditional-tier (A9 Ext 3) — the remaining CPS debt.** The inline-`?{}` fix closed single-boundary-in-branch; STILL deferred: multi-server-batch across a branch (server-call-in-arm + server-call-after-match = the "shared reload tail") + `!{}`-handler+server-call in one arm body (both → E-CODEGEN-INVALID-JS today; workaround: one server boundary per arm, extract the rest to named fns). `cps-conditional-classifier.ts` / `cps-loop-planner.ts` still absent (Ext 3/Ext 2 unbuilt). This is where "compiler owns the wiring" carries the most debt — well-characterized now by the req2 dogfood.
+4. **scalar/struct zero-default open Q** — should `<x>: int` default to `0`, `<x>: string` to `""`? (Shape 4 did array-only; this is the deliberate-defer.)
+5. **predicate-fields standing question** (S151) — user's "exept" reading; enum-subset `oneOf([.A,.B])` gap.
+6. **W-DEAD-FUNCTION false-positive** on fns called only from `match`-arm bodies (RI under-counts arm-body calls; cosmetic — they emit+wire). **I-FN-PROMOTABLE** mis-fires on SQL-bearing `function`s (suggests `fn` though `fn` forbids SQL). Both cosmetic.
+7. **Carried from S151 (untouched this session):** C1 inc2 (3 flagships + dashboard + KB-nav + PE-toggle); MCP `<program mcp>` flip; R28-8 §14.10 inference impl; `print()` canon decision + `< db>` spacing; srcmap offset-threading; engine-graph multi-file write-loop; given-guard discrimination; `:`-shorthand BS fragility; tier-2 ceiling DD; **maps refresh** (now ~26 commits stale).
 
-### Arc 5 — R28-8 RATIFIED (extend §14.10); predicate-fields question PARKED
-- **R28-8 ratified** (condition "only drawback is extra work" PA-verified against §14.10): extend the bare-variant inference position-list to typed object-literal fields + `is some`-narrowed `==` RHS — same rule + same E-VARIANT-AMBIGUOUS union-guard at more positions, graceful qualify-fallback, no new ambiguity. Becomes an IMPL arc; makes kickstarter §4.8 correct. NOT yet implemented.
-- **Predicate-fields standing question PARKED** (awaiting clarification — "exept" = except vs accept): grounded — struct field TYPES carry refinement predicates broadly (§53; `email: string(pattern(...))` etc.); the open edge = subset-restricting an enum field via `oneOf([.A,.B])` (not clearly spec'd, possible gap). User to confirm reading before any design call.
-
-## 🐛 7 C1-DOGFOOD BUG-CANDIDATES (build-surfaced, NEEDS PA-CONFIRM before fix-dispatch — reverse-direction R26)
-Filed in known-gaps §S151. Two significant:
-1. **#6 (potential HIGH, looks new):** cross-file client-side `fn`/component imports break at runtime — page emits ES `import` in `client.js` but HTML loads it via non-`module` `<script>` → "Cannot use import statement outside a module", no client code runs. Blocks cross-file client composition; forced inlining in C1. **Highest-value — confirm + likely fix-dispatch first.**
-2. **#7 (overlaps known caveat):** Tier-1 `<each>` body drops attribute `${}` interp / `class:` bindings / event handlers (literal-string emit). PRIMER §6.3 documents the attribute-interp half as a Landing-1 caveat; the class:/handler-drop may be broader. Forced Tier-0 `${for…lift}` in C1.
-3–7 (lower): no `--sourceMap` CLI flag (API-only) · inline-object/`->{}` return-type miscompile (E-SCOPE-001 on keys + E-CODEGEN-INVALID-JS) · inline-object-string-in-reactive-write E-SCOPE-001 · multi-statement `when` body → invalid JS · `for=` substring in fn-string → E-FN-003. Plus minors (bare `/`→E-SYNTAX-050, nested `<each in=@.field>`, W-DEAD-FUNCTION RI false-positive on a `.then`-called fn).
-
-## Open questions / S152 priorities (CARRY-FORWARD)
-1. **C1 inc2** — 3 more flagships + full dashboard live-embed + KB-nav + PE-layer toggle + postMessage live-pane↔source hover. (Serve `serve.sh` for a browser look anytime.)
-2. **Confirm + fix #6** (cross-file client imports → non-module script) — the highest-value dogfood finding; likely HIGH once confirmed.
-3. **Confirm #7** scope (is the class:/handler-drop broader than the documented `<each>` Landing-1 attribute-interp caveat?).
-4. **MCP dogfood** — ratify the `<program mcp>` flip (inc2) + the corpus-MCP arc; Bug 14 (3 broken live-state tools) is the real fix it surfaces.
-5. **R28-8 impl arc** (extend §14.10 inference — ratified, unbuilt).
-6. **Predicate-fields question** — get the user's reading, then decide (enum-subset `oneOf` gap?).
-7. **`print()` canon-wide decision** (~15 sites; what idiom / JS-host passthrough?) + `< db>` markdown-spacing careful sweep.
-8. Carried LOWs: srcmap offset-threading (col-precision) · engine-graph multi-file write-loop · given-guard struct-field discrimination · the C1 punch-list (x_scrml_kinds off-by-N, stale `docs/website/viewer/` header comments, intentional inline duplication).
-9. Carried from earlier: `:`-shorthand-state-body block-splitter fragility (S145, keep+fix); C6 formFor-in-engine; R28-1c `<each>` same-key reactivity; tier-2 ceiling primitive DD; bank the C1 F1/F2 verdict to scrml-support/design-insights (only in user-voice + hand-offs today); maps refresh (stale for S149+S150+S151 codegen).
+## req.scrml / req2.scrml status (masterScrml/, scratch comparison files — NOT repo content)
+- **req.scrml** — the USER's WIP hack (OR-arm dead-code + `listTodos` defined in a match-arm + `raw` undefined). Does NOT compile (E-RI-002 / E-SCOPE-001 / E-CODEGEN-INVALID-JS) — those are the user's experimental edits, NOT compiler bugs.
+- **req2.scrml** — PA's corrected full-engine baseline. **Compiles clean** (extract-to-fn structure: one server boundary per arm, internal reload). MOUNTS without crash post-each-init-fix. **Does NOT yet populate the list** (carry-forward #1 — engine-gated-each dep gap). So: compile-green + mount-clean + list-empty pending #1.
 
 ## pa.md directives in force
-- Rules R1–R5. Working-style S147 (largest fully-ratified-for-go target, autonomous, park-on-input-needed). `full wrap` discriminator (S139) + 88% floor available.
-- This session: 3 PA commits + wrap, branch-leak coherence held (ahead == PA-authored throughout); C1 serve-before-push OVERRIDDEN by explicit user "commit C1" (logged). Standing: `--no-verify` prohibition (held — full pre-push gate passed) · S88 explicit isolation:worktree (held, 2 worktree dispatches, 0 leaks) · S99 path-discipline · S147 branch-leak coherence (held) · S136 BRIEF.md archival (BG-workflow scripts persist the briefs on disk) · S138 R26 (C4 reproduce-gated + verified; #6/#7 await reverse-direction confirm) · S90 CWD gate · S94 bump-on-tag (NONE — no tag this session).
-
-## Notes for next PA
-- **pre-existing untracked in scrml-support** (`voice/articles/*devto*.md` + `tools/`) are NOT this session's work — left untracked; only `user-voice-scrmlTS.md` was committed.
-- C4 + C1 dispatched as BG workflows; the persisted scripts are at `…/workflows/scripts/c4-objlit-lifecycle-fix-*.js` + `c1-website-build-inc1-*.js` (serve as BRIEF.md-equivalent forensic record).
+- Rules R1–R5. Working-style S147 (largest fully-ratified-for-go target, autonomous, park-on-input). `---` answer-delimiter convention (S152, NEW). `full wrap`/88% floor (S139) available.
+- Held this session: 6 isolation:worktree dispatches (all clean-landed, 0 path-discipline leaks — the S100 hook rejected 1 Edit on the #6 agent → switched to Bash); S147 branch-leak coherence held (ahead==PA-authored throughout); S136 BRIEF.md archival on all 6; S138 R26 on every fix; S90 CWD gate before every dispatch; `--no-verify` prohibition held (full pre-push gate passed). No release tag (S94 N/A).
 
 ## Tags
-#session-151 #CLOSE #c1-self-demo-website-inc1 #real-provenance-byte-identical #c4-objlit-lifecycle-resolved #r28-c2-canon #mcp-dogfood-research #r28-8-ratified #serve-before-push-overridden #7-dogfood-bug-candidates #known-gaps-HIGH-0
+#session-152 #CLOSE #dogfood-fix-chain #each-body-7 #scrml-dev-fixes #6-cross-file-modules #inline-sql-in-branch #shape-4-array-default #each-init-crash-resolved #HIGH-back-to-0 #engine-gated-each-MED #dq-2-conceded #delimiter-convention #req-req2-teej-comparison
