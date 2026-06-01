@@ -773,9 +773,9 @@ function resolveKeyFnBody(
  * Each-block render shape (in= form):
  *
  *   function _scrml_each_render_N() {
+ *     const items = _scrml_reactive_get("contacts");   // dep-read FIRST (S153)
  *     const mount = document.querySelector('[data-scrml-each-mount="each_N"]');
- *     if (!mount) return;
- *     const items = _scrml_reactive_get("contacts");
+ *     if (!mount) return;                               // dep already tracked
  *     // Empty-state path: <empty> sub-element fires when items.length === 0.
  *     if (!items || items.length === 0) {
  *       mount.replaceChildren();
@@ -796,6 +796,7 @@ function resolveKeyFnBody(
  *       }
  *     );
  *   }
+ *   _scrml_each_renderers["each_N"] = _scrml_each_render_N;   // arm-entry remount (S153)
  *   _scrml_each_render_N();
  *   _scrml_effect_static(_scrml_each_render_N);
  *
@@ -826,10 +827,18 @@ export function emitEachBodyRenderForFile(
 
     const fnLines: string[] = [];
     fnLines.push(`function ${renderFnName}() {`);
-    fnLines.push(`  const _mount = document.querySelector('[data-scrml-each-mount="each_${node.id}"]');`);
-    fnLines.push(`  if (!_mount) return;`);
 
-    // Resolve the iteration source.
+    // Resolve the iteration source FIRST — BEFORE querying the mount.
+    //
+    // engine-gated-each-populate (S153): the `_scrml_reactive_get(...)` dep-read
+    // MUST execute on the first `_scrml_effect_static` run regardless of whether
+    // the mount is present in the DOM. When this each lives inside a NON-`initial=`
+    // engine arm, the each-mount div is absent at module-init (the engine renders
+    // only the `initial=` arm), so a mount-first `if (!_mount) return;` short-
+    // circuits BEFORE the cell read → ZERO deps tracked → the effect is permanently
+    // subscribed to nothing and never re-fires when the arm later mounts.
+    // Reading `_items` first establishes the dep edge unconditionally; we query the
+    // mount AFTER and bail (dep already tracked) if it is not yet in the DOM.
     let itemsExpr: string;
     let lengthRef: string;
     if (node.iterShape === "in") {
@@ -853,7 +862,13 @@ export function emitEachBodyRenderForFile(
       continue;
     }
 
+    // Dep-establishing read FIRST (see comment above).
     fnLines.push(`  const _items = ${itemsExpr};`);
+    // Now query the mount; if it is not in the DOM yet (non-initial engine arm
+    // pre-entry), bail — the dep above is already tracked, so a later arm-entry
+    // remount (via `_scrml_remount_each`) will re-run this fn with the mount present.
+    fnLines.push(`  const _mount = document.querySelector('[data-scrml-each-mount="each_${node.id}"]');`);
+    fnLines.push(`  if (!_mount) return;`);
 
     // Empty-state path (when `<empty>` sub-element is present).
     if (node.emptyChild) {
@@ -916,6 +931,15 @@ export function emitEachBodyRenderForFile(
     // Dispatcher: initial render + reactive subscription.
     // `_scrml_effect_static` re-runs the render on dep change; the
     // reactive-get inside the render establishes the dep edge.
+    //
+    // engine-gated-each-populate (S153): also register the renderer in the global
+    // `_scrml_each_renderers` map keyed by the mount id. This lets the engine
+    // dispatcher (and any other dynamic-HTML insertion site) re-invoke the
+    // renderer when the each-mount enters the DOM on arm-entry — see
+    // `_scrml_remount_each` in the runtime. The dep edge was already established
+    // by the dep-first read at module-init (Part A), so re-running here re-renders
+    // with the now-present mount without re-subscribing.
+    dispatchers.push(`_scrml_each_renderers[${JSON.stringify(`each_${node.id}`)}] = ${renderFnName};`);
     dispatchers.push(`${renderFnName}();`);
     dispatchers.push(`_scrml_effect_static(${renderFnName});`);
   }

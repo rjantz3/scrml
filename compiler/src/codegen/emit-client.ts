@@ -965,6 +965,19 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
         if (!isLegacyMachine && engineMeta && engineMeta.derivedExpr != null) {
           chunks.add("derived");
         }
+        // engine-gated-each-populate (S153) — descend into the engine's arm
+        // bodies. The engine-decl node carries its state-child arm markup in
+        // `bodyChildren` (NOT `children`/`body`), so the outer walkNodes/walkBody
+        // recursion does NOT reach it (same gap the each-block case handles
+        // explicitly above). Without this descent, a chunk-requiring shape inside
+        // a NON-`initial=` engine arm — most importantly an `<each>` — is never
+        // visited, so its `reconciliation` / `deep_reactive` chunks are
+        // tree-shaken out while the emitted arm-render code STILL calls
+        // `_scrml_reconcile_list` / `_scrml_effect_static` / `_scrml_remount_each`
+        // → runtime ReferenceError once the arm mounts (compile-clean,
+        // `node --check`-clean: the call sites are syntactically valid, the gap
+        // is purely tree-shaking). Recurse so those nested shapes gate correctly.
+        if (Array.isArray((node as any).bodyChildren)) walkNodes((node as any).bodyChildren);
         break;
       }
 

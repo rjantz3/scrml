@@ -731,6 +731,23 @@ export function emitVariantGuardedRender(
   }
   const renderFunctionsJs = renderFnLines.join("\n\n");
 
+  // engine-gated-each-populate (S153) — does ANY arm's render output contain an
+  // each-mount? An <each> inside a NON-initial arm renders its mount div as part
+  // of the arm's render-fn HTML string (`<div data-scrml-each-mount="each_N">`).
+  // That mount is absent from the DOM until the arm is entered; the each render
+  // fn registered itself in `_scrml_each_renderers` at module-init but bailed
+  // (mount absent) after establishing its reactive dep. So after the dispatcher
+  // writes an arm's innerHTML + wires it, we must call `_scrml_remount_each(_mount)`
+  // to walk the freshly-mounted subtree and invoke the renderer(s) for any
+  // each-mount now present (nested eaches included — querySelectorAll matches at
+  // any depth). Detecting via the emitted render HTML is robust to arbitrary
+  // nesting AND self-gates the runtime helper: an each-mount in the render output
+  // means an <each> exists in the file, which forces the `reconciliation` runtime
+  // chunk (where `_scrml_remount_each` lives) to ship — so the call is never
+  // emitted against an absent helper. Covers BOTH the engine dispatcher AND the
+  // block-form `<match>` dispatcher (this helper is shared by both).
+  const hasEachMount = renderFunctionsJs.includes("data-scrml-each-mount");
+
   // ---------------- Per-arm wire functions ----------------
   // Phase A10 (S78, 2026-05-10) — for each arm, emit a wire function that
   // takes the mount root (the new innerHTML's owning element after the
@@ -895,6 +912,11 @@ export function emitVariantGuardedRender(
     dispatcherLines.push(`  ${head} (_tag === ${JSON.stringify(arm.tag)}) {`);
     dispatcherLines.push(`    _mount.innerHTML = ${fnName}(${args});`);
     dispatcherLines.push(`    ${disposeVar} = ${wireFnName}(${wireArgs});`);
+    // engine-gated-each-populate (S153) — populate each-mounts in the freshly
+    // mounted arm subtree. See the `hasEachMount` comment above.
+    if (hasEachMount) {
+      dispatcherLines.push(`    _scrml_remount_each(_mount);`);
+    }
     // A5-7 Wave 2.4 (§51.0.Q.1, Bug #2) — postMountJs injection point.
     // The engine consumer populates this for composite arms with inner-
     // engine init / history-restore logic. Branch-uniform skip when arm
@@ -925,6 +947,11 @@ export function emitVariantGuardedRender(
     }
     dispatcherLines.push(`    _mount.innerHTML = ${dfnName}();`);
     dispatcherLines.push(`    ${disposeVar} = ${dwireFnName}(_mount);`);
+    // engine-gated-each-populate (S153) — populate each-mounts in the wildcard
+    // arm subtree too. See the `hasEachMount` comment above.
+    if (hasEachMount) {
+      dispatcherLines.push(`    _scrml_remount_each(_mount);`);
+    }
     dispatcherLines.push(`  }`);
   }
   // No default branch when defaultArmTag is unset — when _tag does not match

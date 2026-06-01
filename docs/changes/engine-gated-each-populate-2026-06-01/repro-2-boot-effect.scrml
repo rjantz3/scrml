@@ -1,0 +1,15 @@
+<program>
+type Phase:enum = { Loading, Browsing }
+type Todo:struct = { id: string, name: string }
+<todos>: Todo[] = []
+<engine for=Phase initial=.Loading effect=${@todos = [{ id: "1", name: "alpha" }, { id: "2", name: "beta" }]; @phase = .Browsing}>
+  <Loading rule=.Browsing>
+    Loading...
+  </>
+  <Browsing rule=.Loading>
+    <each in=@todos key=@.id>
+      <li>${@.name}</li>
+    </each>
+  </>
+</>
+</program>

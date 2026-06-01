@@ -1444,6 +1444,38 @@ function _scrml_lis(arr) {
   return result;
 }
 
+// ---------------------------------------------------------------------------
+// engine-gated-each-populate (S153) — each-renderer registry + arm-entry remount.
+//
+// An <each> whose mount lives inside a NON-\`initial=\` engine arm is absent from
+// the DOM at module-init (the engine renders only the \`initial=\` arm). The each
+// render fn (\`_scrml_each_render_N\`) registers itself here at module-init keyed
+// by its mount id (\`each_N\`). When an arm later mounts (engine dispatcher writes
+// the arm's innerHTML), \`_scrml_remount_each(armRoot)\` walks the freshly-inserted
+// subtree and re-invokes the renderer for every each-mount it finds. The render
+// fn's reactive dep was already established at module-init (the dep-first read in
+// emit-each.ts runs even when the mount is absent), so re-invoking here renders
+// the now-present mount WITHOUT re-subscribing — calling the render fn directly
+// (not its \`_scrml_effect_static\` wrapper) means no new dep edge / no leak. This
+// also makes re-entry (Loading->Browsing->Loading->Browsing) idempotent: each
+// entry re-renders from the live cell; ongoing mutations while the arm is visible
+// re-render via the existing effect subscription.
+//
+// querySelectorAll handles nested eaches (an each several levels deep inside the
+// arm body is matched the same as a top-level one). Reusable by any dynamic-HTML
+// insertion site (engine arm-entry today; match-block dispatch is a follow-up).
+const _scrml_each_renderers = {};
+
+function _scrml_remount_each(root) {
+  if (!root || typeof root.querySelectorAll !== "function") return;
+  const _mounts = root.querySelectorAll('[data-scrml-each-mount]');
+  for (const _el of _mounts) {
+    const _id = _el.getAttribute("data-scrml-each-mount");
+    const _fn = _scrml_each_renderers[_id];
+    if (typeof _fn === "function") _fn();
+  }
+}
+
 function _scrml_deep_set(obj, path, value) {
   if (!path || path.length === 0) return value;
   const result = Array.isArray(obj) ? [...obj] : { ...obj };
