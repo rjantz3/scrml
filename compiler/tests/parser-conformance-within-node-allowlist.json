@@ -192,7 +192,7 @@
     "EXTRA-FIELD": 105,
     "FIELD-SHAPE": 66,
     "KIND-NAME": 33,
-    "MISSING-FIELD": 182,
+    "MISSING-FIELD": 186,
     "SPAN-COORD": 129
   },
   "examples/15-channel-chat.scrml": {
@@ -570,7 +570,7 @@
     "EXTRA-FIELD": 86,
     "FIELD-SHAPE": 58,
     "KIND-NAME": 26,
-    "MISSING-FIELD": 138,
+    "MISSING-FIELD": 140,
     "SPAN-COORD": 155
   },
   "examples/26-type-derived-schema.scrml": {
@@ -1150,7 +1150,7 @@
     "EXTRA-FIELD": 117,
     "FIELD-SHAPE": 37,
     "KIND-NAME": 28,
-    "MISSING-FIELD": 94,
+    "MISSING-FIELD": 96,
     "SPAN-COORD": 23
   },
   "samples/compilation-tests/engine-006-ontimeout-computed.scrml": {
@@ -1158,7 +1158,7 @@
     "EXTRA-FIELD": 101,
     "FIELD-SHAPE": 35,
     "KIND-NAME": 24,
-    "MISSING-FIELD": 73,
+    "MISSING-FIELD": 75,
     "SPAN-COORD": 23
   },
   "samples/compilation-tests/engine-007-cancel-timer.scrml": {
@@ -1166,7 +1166,7 @@
     "EXTRA-FIELD": 177,
     "FIELD-SHAPE": 49,
     "KIND-NAME": 36,
-    "MISSING-FIELD": 146,
+    "MISSING-FIELD": 148,
     "SPAN-COORD": 31
   },
   "samples/compilation-tests/engine-008-onidle-watchdog.scrml": {
@@ -1174,7 +1174,7 @@
     "EXTRA-FIELD": 95,
     "FIELD-SHAPE": 37,
     "KIND-NAME": 26,
-    "MISSING-FIELD": 107,
+    "MISSING-FIELD": 109,
     "SPAN-COORD": 33
   },
   "samples/compilation-tests/engine-009-hierarchy-basic.scrml": {
@@ -1182,7 +1182,7 @@
     "EXTRA-FIELD": 108,
     "FIELD-SHAPE": 39,
     "KIND-NAME": 29,
-    "MISSING-FIELD": 100,
+    "MISSING-FIELD": 103,
     "SPAN-COORD": 25
   },
   "samples/compilation-tests/engine-010-history.scrml": {
@@ -1190,7 +1190,7 @@
     "EXTRA-FIELD": 108,
     "FIELD-SHAPE": 39,
     "KIND-NAME": 29,
-    "MISSING-FIELD": 102,
+    "MISSING-FIELD": 105,
     "SPAN-COORD": 27
   },
   "samples/compilation-tests/engine-011-internal-rule.scrml": {
@@ -1198,7 +1198,7 @@
     "EXTRA-FIELD": 103,
     "FIELD-SHAPE": 44,
     "KIND-NAME": 37,
-    "MISSING-FIELD": 84,
+    "MISSING-FIELD": 87,
     "SPAN-COORD": 21
   },
   "samples/compilation-tests/engine-012-hierarchy-cascade.scrml": {
@@ -1206,7 +1206,7 @@
     "EXTRA-FIELD": 176,
     "FIELD-SHAPE": 60,
     "KIND-NAME": 49,
-    "MISSING-FIELD": 143,
+    "MISSING-FIELD": 146,
     "SPAN-COORD": 46
   },
   "samples/compilation-tests/engine-013-payload-binding-bare.scrml": {
@@ -1214,7 +1214,7 @@
     "EXTRA-FIELD": 97,
     "FIELD-SHAPE": 30,
     "KIND-NAME": 22,
-    "MISSING-FIELD": 81,
+    "MISSING-FIELD": 83,
     "SPAN-COORD": 26
   },
   "samples/compilation-tests/engine-014-payload-binding-paren.scrml": {
@@ -1222,7 +1222,7 @@
     "EXTRA-FIELD": 97,
     "FIELD-SHAPE": 32,
     "KIND-NAME": 24,
-    "MISSING-FIELD": 87,
+    "MISSING-FIELD": 89,
     "SPAN-COORD": 32
   },
   "samples/compilation-tests/engine-modern-001-basic.scrml": {
@@ -1230,7 +1230,7 @@
     "EXTRA-FIELD": 65,
     "FIELD-SHAPE": 27,
     "KIND-NAME": 20,
-    "MISSING-FIELD": 64,
+    "MISSING-FIELD": 66,
     "SPAN-COORD": 17
   },
   "samples/compilation-tests/engine-modern-002-effects.scrml": {
@@ -1238,7 +1238,7 @@
     "EXTRA-FIELD": 125,
     "FIELD-SHAPE": 45,
     "KIND-NAME": 34,
-    "MISSING-FIELD": 126,
+    "MISSING-FIELD": 128,
     "SPAN-COORD": 35
   },
   "samples/compilation-tests/error-001-basic.scrml": {
@@ -5025,7 +5025,7 @@
     "EXTRA-FIELD": 68,
     "FIELD-SHAPE": 28,
     "KIND-NAME": 21,
-    "MISSING-FIELD": 78,
+    "MISSING-FIELD": 80,
     "SPAN-COORD": 98
   },
   "samples/compilation-tests/machine-basic.scrml": {
@@ -5033,7 +5033,7 @@
     "EXTRA-FIELD": 97,
     "FIELD-SHAPE": 39,
     "KIND-NAME": 28,
-    "MISSING-FIELD": 98,
+    "MISSING-FIELD": 100,
     "SPAN-COORD": 21
   },
   "samples/compilation-tests/match-001-nested-with-call.scrml": {
@@ -6318,7 +6318,7 @@
     "EXTRA-FIELD": 63,
     "FIELD-SHAPE": 47,
     "KIND-NAME": 26,
-    "MISSING-FIELD": 204,
+    "MISSING-FIELD": 212,
     "SPAN-COORD": 114
   },
   "samples/rust-dev-lin-lift-edge-cases.scrml": {

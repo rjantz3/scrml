@@ -948,6 +948,22 @@ export interface EngineDeclNode extends BaseNode {
   varNameOverride: string | null;
   /** §51.0.E — non-null iff `initial=.X` was present. */
   initialVariant: string | null;
+  /**
+   * §51.0.S.2.2 (S154 — #14 event-payload-transition) — the raw enum-type
+   * identifier from the `accepts=MsgType` engine-OPENER attribute, or null
+   * when absent. Declares the message vocabulary the engine's `(state ×
+   * message)` arms dispatch on (the per-state message-arm exhaustiveness is
+   * checked against this type's variant set, §51.0.S).
+   *
+   * PARSER (batch 1) RECORDS the identifier verbatim. The typer (batch 2)
+   * resolves it to a declared `:enum` — non-resolution fires
+   * `E-ENGINE-ACCEPTS-NOT-ENUM` (§34); a state-child message-arm with no
+   * `accepts=` fires `E-ENGINE-MSG-WITHOUT-ACCEPTS` (§34). OPTIONAL field for
+   * backward compatibility — engine-decls synthesized directly (not via
+   * ast-builder) leave it `undefined`; consumers guard with a null/undefined
+   * check.
+   */
+  acceptsType?: string | null;
   /** §51.0.B + §6.10 — true iff `pinned` bareword was present. */
   pinned: boolean;
   /** Set later by export Form 1 detection in `liftBareDeclarations`. */

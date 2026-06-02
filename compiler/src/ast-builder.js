@@ -12048,6 +12048,16 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         //   pinned         — bareword modifier (§51.0.B + §6.10)
         const varMatch = header.match(new RegExp(`\\bvar\\s*=\\s*(${IDENT.source})\\b`));
         const initialMatch = header.match(new RegExp(`\\binitial\\s*=\\s*\\.(${IDENT.source})\\b`));
+        // §51.0.S.2.2 (S154 — #14 event-payload-transition, PARSER batch 1) —
+        // `accepts=MsgType` engine-OPENER attribute. Value is a bare enum-type
+        // identifier (e.g. `accepts=DragMsg`) declaring the message vocabulary
+        // the engine's `(state × message)` arms dispatch on. Captured here as
+        // RECOGNITION ONLY — the parser records the raw identifier string; the
+        // typer (BATCH 2) resolves it to a declared `:enum` (E-ENGINE-ACCEPTS-
+        // NOT-ENUM) and checks per-state message-arm exhaustiveness. `null`
+        // when absent. The IDENT (not `\.IDENT`) shape mirrors `for=Type` /
+        // `var=NAME`: the value is a TYPE identifier, not a `.Variant` literal.
+        const acceptsMatch = header.match(new RegExp(`\\baccepts\\s*=\\s*(${IDENT.source})\\b`));
         // `pinned` as a bareword (not `pinned=`). Standalone-token
         // requirement (preceded by whitespace, followed by whitespace / `>`
         // / `/` / end) — defense-in-depth against `.X.pinned`-style
@@ -12198,6 +12208,10 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // the type's variant set + emits W-ENGINE-INITIAL-MISSING if absent.
         const initialVariant = initialMatch ? initialMatch[1] : null;
 
+        // §51.0.S.2.2 (S154) — record accepts=MsgType. PARSER batch 1 RECORDS
+        // the raw enum-type identifier; BATCH 2 (typer) resolves + validates.
+        const acceptsType = acceptsMatch ? acceptsMatch[1] : null;
+
         // §51.0.B + §6.10 — `pinned` bareword modifier.
         const pinned = pinnedMatch === true;
 
@@ -12318,6 +12332,12 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           varName,
           varNameOverride,
           initialVariant,
+          // §51.0.S.2.2 (S154 — #14 event-payload-transition, PARSER batch 1):
+          //   acceptsType — non-null raw enum-type identifier iff `accepts=Type`
+          //                 was present on the opener; null otherwise. BATCH 2
+          //                 (typer) resolves to a declared `:enum` and runs
+          //                 per-state message-arm exhaustiveness.
+          acceptsType,
           // §51.0.H Form 3 (S148, Insight 33 Fork C1) — boot-only opener
           // `effect=${...}` raw logic body, or null when absent. SYM
           // (makeEngineRecord) lifts this onto engineMeta.openerEffect;

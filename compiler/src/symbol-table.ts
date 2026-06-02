@@ -469,6 +469,65 @@ export type PayloadBinding =
   | { kind: "named"; field: string; name: string };
 
 /**
+ * §51.0.S.2.3 (S154 — #14 event-payload-transition, PARSER batch 1) — a single
+ * `(state × message)` arm parsed out of an engine state-child body. Arms take
+ * the JS-style match-arm shape `| .Variant(binding) :> body` (leading `|`,
+ * dotted bare-variant pattern, S147 arm-arrow, value-return body), reusing the
+ * §18 match arm grammar (the message vocabulary is an ordinary `:enum`,
+ * §51.0.S.2.1).
+ *
+ * PARSER batch 1 RECOGNIZES the arm and stamps its structural fields; it does
+ * NOT validate. The typer (batch 2) consumes these entries for `.advance`
+ * two-plane resolution, message-arm exhaustiveness (E-ENGINE-MSG-ARM-NOT-
+ * EXHAUSTIVE), the no-`accepts=` case (E-ENGINE-MSG-WITHOUT-ACCEPTS), and the
+ * unknown-message case (E-ENGINE-MSG-UNKNOWN). Codegen (batch 3) consumes them
+ * for message dispatch.
+ *
+ * Field names mirror `MatchArmEntry` (match-statechild-parser.ts) where they
+ * apply so downstream consumers see one arm representation.
+ */
+export interface MessageArmEntry {
+  /** PascalCase message-variant ident (no leading dot), OR `"_"` for the
+   *  `| _ :>` wildcard arm (§51.0.S.2.4 "explicitly ignore the rest"). */
+  variantName: string;
+  /** TRUE iff `variantName === "_"` (wildcard arm). */
+  isWildcard: boolean;
+  /** Raw text inside the pattern's `(...)` payload-binding list (e.g. `"col"`
+   *  for `.Drop(col)`), or empty string when the message variant is a unit
+   *  variant (`.End`). */
+  payloadBindingsRaw: string;
+  /** Structured payload bindings parsed from `payloadBindingsRaw` via the
+   *  shared `parsePayloadBindings` helper — `{kind:"positional",name}` /
+   *  `{kind:"named",field,name}` (§51.0.B.1 / §18.7). Empty for unit
+   *  variants. Reuses the same `PayloadBinding[]` shape state-child opener
+   *  bindings use, so batch 2 binds message-payload fields identically. */
+  payloadBindings: PayloadBinding[];
+  /** The arm-arrow glyph the source used (S147): `":>"` canonical, `"=>"` /
+   *  `"->"` deprecated aliases. Recorded so batch 2 can fire the
+   *  W-MATCH-ARROW-LEGACY info lint at deprecated-alias message arms,
+   *  mirroring the match / `!{}`-handler / `given`-guard arm-arrow convention
+   *  (§18.2). */
+  armArrow: ":>" | "=>" | "->";
+  /** The arm body verbatim — either a bare target expression (`.Dragging(id)`)
+   *  or a block `{ effect-statements; .Target }` (§51.0.S.2.3). Captured as
+   *  raw text WITHOUT the surrounding `{ }` stripped (a `{`-led body is
+   *  recorded with its braces so batch 2/3 see the block boundary; a bare
+   *  target expression is recorded verbatim). Trimmed of surrounding
+   *  whitespace. */
+  bodyRaw: string;
+  /** TRUE iff `bodyRaw` is a brace-delimited block `{ ... }` (effects + final
+   *  target); FALSE iff `bodyRaw` is a bare target expression. Mirrors the
+   *  §51.0.S.2.3 "bare target expression OR block" body discrimination. */
+  isBlockBody: boolean;
+  /** Local byte offset of the arm's leading `|` within the state-child
+   *  `bodyRaw` this arm was parsed from. */
+  spanStart: number;
+  /** Local byte offset just past the arm body within the state-child
+   *  `bodyRaw`. */
+  spanEnd: number;
+}
+
+/**
  * A5-2 (§51.0.M) — a `<onTimeout after=DURATION to=.Variant/>` self-closing
  * structural element parsed out of an engine state-child body. The `after`
  * attribute is captured as the raw literal-or-computed-expression string
@@ -683,6 +742,26 @@ export interface EngineStateChildEntry {
    *  `E-ENGINE-PAYLOAD-RESERVED-COLLISION` in PASS 11 by examining the
    *  variant's declared payload field names. */
   payloadBindings: PayloadBinding[];
+
+  // ---- §51.0.S NEW (S154 — #14 event-payload-transition, PARSER batch 1) ----
+
+  /** §51.0.S.2.3 — the leading contiguous `(state × message)` arms declared
+   *  inside this state-child body (`| .Variant(binding) :> body`). Empty array
+   *  when this state-child declares no message arms.
+   *
+   *  Body-separation rule (PARSER batch 1): the leading contiguous run of
+   *  `|`-arms (after the body's leading whitespace) forms the message-dispatch
+   *  table; scanning stops at the first non-`|` content, which remains the
+   *  state-child's RENDER body (still carried verbatim in `bodyRaw`). The arms
+   *  are captured UNCONDITIONALLY — even when the engine opener has no
+   *  `accepts=` (the no-`accepts=` case is E-ENGINE-MSG-WITHOUT-ACCEPTS, a
+   *  BATCH-2 typer check, NOT a parse error).
+   *
+   *  BATCH 2 (typer) consumes these for `.advance` two-plane resolution +
+   *  per-state message-arm exhaustiveness; BATCH 3 (codegen) for message
+   *  dispatch. NOT consumed by the codegen `EngineStateChildEntry` mirror in
+   *  `codegen/emit-engine.ts` until batch 3 wires it. */
+  messageArms: MessageArmEntry[];
 }
 
 /**

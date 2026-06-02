@@ -71,6 +71,7 @@ import type {
   NestedEngineEntry,
   OnTransitionEntry,
   PayloadBinding,
+  MessageArmEntry,
 } from "./symbol-table";
 
 /**
@@ -1760,6 +1761,260 @@ function findStateChildCloser(rulesRaw: string, from: number, tag: string): numb
 }
 
 /**
+ * §51.0.S.2.3 (S154 — #14 event-payload-transition, PARSER batch 1) — parse
+ * the leading `(state × message)` arms out of an engine state-child `bodyRaw`.
+ *
+ * Arm grammar (the JS-style match arm shape, §51.0.S.2.3 reusing §18):
+ *
+ *     | .Variant(binding) :> body
+ *     | .End             :> .Idle
+ *     | .Drop(col)       :> { @tasks = taskMovedTo(@tasks, id, col); .Idle }
+ *     | _                :> @<engineVar>          (wildcard, §51.0.S.2.4)
+ *
+ * Body-separation rule: the leading CONTIGUOUS run of `|`-arms (after the
+ * body's leading whitespace) forms the message-dispatch table; scanning stops
+ * at the first non-`|` content at the top level, which is the state-child's
+ * RENDER body. Returns the parsed arms PLUS `renderBodyStart` — the byte
+ * offset within `bodyRaw` where the (possibly-empty) render body begins.
+ *
+ * **Why a dedicated parser (not `parseMatchArms`)?** `parseMatchArms`
+ * (match-statechild-parser.ts) parses the TAG-shaped block-form match arm
+ * `<Variant> : body`. §51.0.S.2.3's message arm is the leading-`|` JS-style
+ * shape `| .Variant(binding) :> body` — a genuinely different syntactic shape.
+ * This parser MIRRORS `parseMatchArms`' discipline (balanced string/brace/
+ * paren scanning; payload-binding extraction via the shared
+ * `parsePayloadBindings`; the S147 `:>`/`=>`/`->` arm-arrow set) but recognizes
+ * the leading-`|` form. RECOGNITION ONLY — no validation (batch 2 typer).
+ *
+ * @param bodyRaw — the raw text of a state-child body (the bare-body region
+ *   between the state-child opener `>` and its `</>` closer).
+ * @returns `{ arms, renderBodyStart }`
+ */
+export function parseMessageArms(
+  bodyRaw: string,
+): { arms: MessageArmEntry[]; renderBodyStart: number } {
+  const arms: MessageArmEntry[] = [];
+  if (typeof bodyRaw !== "string" || !bodyRaw) {
+    return { arms, renderBodyStart: 0 };
+  }
+
+  const len = bodyRaw.length;
+  let pos = 0;
+
+  // Skip leading whitespace + comments to reach the first arm candidate. The
+  // arm region is the leading contiguous `|`-run; if the first non-trivia char
+  // is not `|`, there are no message arms and the whole body is render body.
+  function skipTrivia(at: number): number {
+    let p = at;
+    for (;;) {
+      while (p < len && /\s/.test(bodyRaw[p]!)) p++;
+      const sk = skipCommentOrString(bodyRaw, p);
+      if (sk !== p) { p = sk; continue; }
+      break;
+    }
+    return p;
+  }
+
+  // Detect an arm-arrow glyph at `at`. Returns the glyph + its length, or null.
+  // S147 set: `:>` / `=>` (1 char each at the string level) and `->` (2 chars).
+  function arrowAt(at: number): { glyph: ":>" | "=>" | "->"; len: number } | null {
+    const two = bodyRaw.slice(at, at + 2);
+    if (two === ":>") return { glyph: ":>", len: 2 };
+    if (two === "=>") return { glyph: "=>", len: 2 };
+    if (two === "->") return { glyph: "->", len: 2 };
+    return null;
+  }
+
+  pos = skipTrivia(pos);
+  // If nothing starts with `|`, there is no message-arm table.
+  if (pos >= len || bodyRaw[pos] !== "|") {
+    return { arms, renderBodyStart: 0 };
+  }
+
+  // `renderBodyStart` defaults to "end of arm region"; updated after each arm.
+  let renderBodyStart = pos;
+
+  while (pos < len) {
+    const triviaStart = skipTrivia(pos);
+    if (triviaStart >= len || bodyRaw[triviaStart] !== "|") {
+      // No further arm — the arm region ends here. The render body (if any)
+      // starts at the first non-arm content.
+      renderBodyStart = triviaStart;
+      break;
+    }
+    const armStart = triviaStart;
+    let p = triviaStart + 1; // consume `|`
+    while (p < len && /\s/.test(bodyRaw[p]!)) p++;
+
+    // -- Pattern --------------------------------------------------------------
+    // Wildcard `_` OR a (possibly qualified) variant pattern `.Variant` /
+    // `MsgType.Variant`. Capture the leaf variant name (last dotted segment).
+    let variantName = "";
+    let isWildcard = false;
+    if (bodyRaw[p] === "_" && !/[A-Za-z0-9_$]/.test(bodyRaw[p + 1] ?? "")) {
+      isWildcard = true;
+      variantName = "_";
+      p += 1;
+    } else {
+      // Leading `.` for the bare-variant form (§51.0.S worked examples use
+      // `.Variant`); a qualified `MsgType.Variant` is also accepted.
+      if (bodyRaw[p] === ".") p += 1;
+      const patStart = p;
+      while (p < len && /[A-Za-z0-9_$.]/.test(bodyRaw[p]!)) p++;
+      const patText = bodyRaw.slice(patStart, p);
+      // Leaf segment (the variant ident) — last component of a dotted path.
+      const dotIdx = patText.lastIndexOf(".");
+      variantName = dotIdx >= 0 ? patText.slice(dotIdx + 1) : patText;
+    }
+
+    // -- Payload bindings `(...)` ---------------------------------------------
+    let payloadBindingsRaw = "";
+    let payloadBindings: PayloadBinding[] = [];
+    {
+      let q = p;
+      while (q < len && /\s/.test(bodyRaw[q]!)) q++;
+      if (q < len && bodyRaw[q] === "(") {
+        // Balanced paren scan (string-aware) — mirrors scanForOnTimeoutEntries.
+        let depth = 1;
+        let r = q + 1;
+        let inDQ = false;
+        let inSQ = false;
+        const innerStart = r;
+        while (r < len && depth > 0) {
+          const c = bodyRaw[r]!;
+          if (inDQ) { if (c === '"') inDQ = false; else if (c === "\\") r++; r++; continue; }
+          if (inSQ) { if (c === "'") inSQ = false; else if (c === "\\") r++; r++; continue; }
+          if (c === '"') { inDQ = true; r++; continue; }
+          if (c === "'") { inSQ = true; r++; continue; }
+          if (c === "(") { depth++; r++; continue; }
+          if (c === ")") { depth--; if (depth === 0) break; r++; continue; }
+          r++;
+        }
+        if (depth === 0) {
+          payloadBindingsRaw = bodyRaw.slice(innerStart, r).trim();
+          // Reuse the shared §51.0.B.1 / §18.7 binding parser. It expects the
+          // attribute-substring shape; feeding it `(inner)` exercises the
+          // parenthesized-form branch and yields one representation.
+          payloadBindings = parsePayloadBindings(`(${payloadBindingsRaw})`);
+          p = r + 1; // past `)`
+        }
+      } else {
+        p = q;
+      }
+    }
+
+    // -- Arm arrow `:>` / `=>` / `->` -----------------------------------------
+    while (p < len && /\s/.test(bodyRaw[p]!)) p++;
+    const arrow = arrowAt(p);
+    if (!arrow) {
+      // Malformed arm (no arm-arrow). Recognition-only: stop the arm scan; the
+      // remainder becomes render body. Batch 2 surfaces structure diagnostics.
+      renderBodyStart = armStart;
+      break;
+    }
+    p += arrow.len;
+    while (p < len && /\s/.test(bodyRaw[p]!)) p++;
+
+    // -- Arm body — block `{ ... }` OR bare target expression -----------------
+    let bodyText = "";
+    let isBlockBody = false;
+    if (p < len && bodyRaw[p] === "{") {
+      // Balanced brace scan (string-aware) — capture WITH braces.
+      isBlockBody = true;
+      let depth = 1;
+      let r = p + 1;
+      let inDQ = false;
+      let inSQ = false;
+      let inTick = false;
+      while (r < len && depth > 0) {
+        const c = bodyRaw[r]!;
+        if (inDQ) { if (c === '"') inDQ = false; else if (c === "\\") r++; r++; continue; }
+        if (inSQ) { if (c === "'") inSQ = false; else if (c === "\\") r++; r++; continue; }
+        if (inTick) { if (c === "`") inTick = false; else if (c === "\\") r++; r++; continue; }
+        if (c === '"') { inDQ = true; r++; continue; }
+        if (c === "'") { inSQ = true; r++; continue; }
+        if (c === "`") { inTick = true; r++; continue; }
+        if (c === "{") { depth++; r++; continue; }
+        if (c === "}") { depth--; if (depth === 0) break; r++; continue; }
+        r++;
+      }
+      if (depth === 0) {
+        bodyText = bodyRaw.slice(p, r + 1).trim(); // include `{` .. `}`
+        p = r + 1;
+      } else {
+        // Unbalanced — capture to EOF (best-effort; batch 2 surfaces).
+        bodyText = bodyRaw.slice(p).trim();
+        p = len;
+      }
+    } else {
+      // Bare target expression — terminated by the next top-level `|` arm
+      // separator OR end-of-body. Top-level = not inside (), [], {}, or a
+      // string. (A `|` inside an expression — bitwise-or — is at depth > 0 or
+      // would be inside parens in practice; we track depth to be safe.)
+      const exprStart = p;
+      let depth = 0;
+      let inDQ = false;
+      let inSQ = false;
+      let inTick = false;
+      while (p < len) {
+        const c = bodyRaw[p]!;
+        if (inDQ) { if (c === '"') inDQ = false; else if (c === "\\") p++; p++; continue; }
+        if (inSQ) { if (c === "'") inSQ = false; else if (c === "\\") p++; p++; continue; }
+        if (inTick) { if (c === "`") inTick = false; else if (c === "\\") p++; p++; continue; }
+        if (c === '"') { inDQ = true; p++; continue; }
+        if (c === "'") { inSQ = true; p++; continue; }
+        if (c === "`") { inTick = true; p++; continue; }
+        if (c === "(" || c === "[" || c === "{") { depth++; p++; continue; }
+        if (c === ")" || c === "]" || c === "}") { if (depth > 0) depth--; p++; continue; }
+        if (depth === 0 && c === "|") {
+          // A `||` logical-or is NOT an arm separator; only a lone `|` that
+          // begins the next arm. Peek: an arm `|` is followed (after trivia)
+          // by `.`, `_`, or an identifier-start. A `||` is two `|`.
+          if (bodyRaw[p + 1] === "|") { p += 2; continue; }
+          break;
+        }
+        if (depth === 0 && c === "\n") {
+          // Newline ends a bare-expression arm only if the next non-trivia
+          // char begins another arm OR is non-arm render content. A bare
+          // target expression is single-line by convention; break and let the
+          // arm loop re-evaluate at the newline boundary.
+          break;
+        }
+        p++;
+      }
+      bodyText = bodyRaw.slice(exprStart, p).trim();
+    }
+
+    arms.push({
+      variantName,
+      isWildcard,
+      payloadBindingsRaw,
+      payloadBindings,
+      armArrow: arrow.glyph,
+      bodyRaw: bodyText,
+      isBlockBody,
+      spanStart: armStart,
+      spanEnd: p,
+    });
+    renderBodyStart = p;
+    // Advance the outer cursor past this arm. Guard against a non-advancing
+    // iteration (defensive — every successful arm advances `p` past the arm
+    // body, but a degenerate parse must still terminate the loop).
+    if (p <= pos) { pos = p + 1; } else { pos = p; }
+  }
+
+  // Trim trailing whitespace from the render-body start (point it at the first
+  // non-whitespace render content, or `len` when only whitespace remains).
+  {
+    let r = renderBodyStart;
+    while (r < len && /\s/.test(bodyRaw[r]!)) r++;
+    renderBodyStart = r;
+  }
+
+  return { arms, renderBodyStart };
+}
+
+/**
  * Parse engine `rulesRaw` body into a list of state-child entries.
  *
  * Returns an empty array if the body is empty or appears to be in the
@@ -1994,6 +2249,19 @@ export function parseEngineStateChildren(rulesRaw: string): EngineStateChildEntr
 
     const bodyRaw = rulesRaw.slice(bodyStart, bodyEnd);
 
+    // §51.0.S.2.3 (S154 — #14 event-payload-transition, PARSER batch 1) —
+    // recognize the leading `(state × message)` arms inside the state-child
+    // body. Only the bare-body form can host arms; `:`-shorthand bodies are
+    // single-expression render bodies and self-close has no body. The arms are
+    // captured UNCONDITIONALLY (no `accepts=` cross-check here — that is the
+    // BATCH-2 typer's E-ENGINE-MSG-WITHOUT-ACCEPTS). `renderBodyStart` marks
+    // where the post-arm render body begins; `bodyRaw` is retained verbatim
+    // (including the arm region) so existing consumers are unchanged — batch 2/3
+    // slice the render body via `renderBodyStart` when they need it.
+    const messageArms: MessageArmEntry[] = (isColonShorthand || isSelfClose)
+      ? []
+      : parseMessageArms(bodyRaw).arms;
+
     // §51.0.Q.1 (A5-2 sub-step 7) — scan body for nested <engine> declarations
     // FIRST (so their body regions can be excluded from the <onTimeout> +
     // <onTransition> scans). Skipped entirely for `:`-shorthand and
@@ -2081,6 +2349,8 @@ export function parseEngineStateChildren(rulesRaw: string): EngineStateChildEntr
       onTransitionElements,
       // ---- B1 NEW (§51.0.B.1) ----
       payloadBindings,
+      // ---- §51.0.S NEW (S154 — #14 event-payload-transition) ----
+      messageArms,
     });
     i = nextI;
   }

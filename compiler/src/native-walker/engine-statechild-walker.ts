@@ -498,6 +498,16 @@ function walkOneStateChild(
     effectRaw: readExprValue(attrs, "effect"),
     onTransitionElements,
     payloadBindings: readPayloadBindings(attrs),
+    // §51.0.S (S154 — #14 event-payload-transition, PARSER batch 1) —
+    // shape-parity placeholder. The native walker does NOT yet recognize the
+    // `(state × message)` arm form (that recognition is part of the M5-swap
+    // precondition arc, sequenced separately — the native parser leaves arm
+    // text as generic body content). Emitting an empty array preserves the
+    // live `EngineStateChildEntry` shape contract this walker is bound to so
+    // the dual-pipeline parity test deep-equals against the legacy parser for
+    // arm-free state-children (both sides emit `[]`). When M5 wires native arm
+    // walking, this placeholder becomes the real recognition call.
+    messageArms: [],
   };
 }
 
