@@ -1114,7 +1114,10 @@ function findOnTransitionCloser(bodyRaw: string, from: number): number {
         const openerEnd = findOpenerEnd(bodyRaw, i + 1);
         if (openerEnd < 0) return -1;
         const isSelfClose = bodyRaw[openerEnd - 1] === "/";
-        if (!isSelfClose && !VOID_ELEMENTS_LC.has(tagName)) {
+        // §4.14 `:`-shorthand openers are self-terminating (no closer) — do
+        // NOT push them onto lowerDepth, exactly like void / self-closing.
+        const isColonShorthand = isColonShorthandOpener(bodyRaw, j, openerEnd);
+        if (!isSelfClose && !isColonShorthand && !VOID_ELEMENTS_LC.has(tagName)) {
           lowerDepth++;
         }
         i = openerEnd + 1;
@@ -1284,7 +1287,10 @@ function findEngineCloser(bodyRaw: string, from: number): number {
         const oe = findOpenerEnd(bodyRaw, i + 1);
         if (oe < 0) return -1;
         const isSelfClose = bodyRaw[oe - 1] === "/";
-        if (!isSelfClose && !VOID_ELEMENTS_LC.has(tagName)) {
+        // §4.14 `:`-shorthand openers are self-terminating (no closer) — do
+        // NOT push them onto lowerDepth, exactly like void / self-closing.
+        const isColonShorthand = isColonShorthandOpener(bodyRaw, j, oe);
+        if (!isSelfClose && !isColonShorthand && !VOID_ELEMENTS_LC.has(tagName)) {
           lowerDepth++;
         }
         i = oe + 1;
@@ -1466,6 +1472,102 @@ function findOpenerEnd(s: string, open: number): number {
 }
 
 /**
+ * §4.14 `:`-shorthand opener detection (closer-finder support).
+ *
+ * A §4.14 `:`-shorthand child element (`<span : @label>`, `<li : @.name>`)
+ * is a NON-void lowercase opener that has NO closer — its single-expression
+ * body runs from the post-attribute `:` body-introducer through to the `>`
+ * that terminates the opener (§4.14 line 979), and the closer-presence
+ * override (§4.14 line 982) FORBIDS any `</tag>` / `</>` closer. It is
+ * therefore SELF-TERMINATING, exactly like a void element (`<br>`) or a
+ * self-closing tag (`<span/>`).
+ *
+ * The closer-finders below (`findStateChildCloser`, `findEngineCloser`,
+ * `findOnTransitionCloser`) push non-void, non-self-closing lowercase
+ * openers onto a `lowerDepth` counter, expecting a later closer to pop them.
+ * A `:`-shorthand opener has no closer, so pushing it would leave an
+ * unbalanced phantom opener that the enclosing structural `</>` later pops
+ * against — corrupting depth accounting and making the real state-child /
+ * engine / onTransition closer un-findable (→ E-ENGINE-STATE-CHILD-MISSING).
+ * This predicate lets the closer-finders SKIP the push for `:`-shorthand
+ * openers, mirroring the existing void-element + self-close exclusions.
+ *
+ * **Attribute-aware detection.** Returns `true` iff the opener inner-text
+ * (the characters between `<` and the terminating `>`, exclusive) contains a
+ * top-level (depth-0, non-string) `:` body-introducer that is preceded by at
+ * least one whitespace character. Per §4.14 line 983 the mandatory leading
+ * whitespace is the disambiguator: the `:`-shorthand body-introducer is
+ * whitespace-preceded, whereas attribute-name namespace separators
+ * (`bind:value`, `on:click`, `class:active`, `onserver:msg`) glue the `:`
+ * directly to the identifier (no preceding whitespace). Colons inside
+ * attribute VALUES (`style="color: red"`, `href="http://x"`, `title="a:b"`)
+ * are skipped via string tracking; colons inside `${...}` interpolations
+ * (`onclick=${a ? b : c}` — ternary) are skipped via brace tracking.
+ *
+ * `tagNameEnd` is the index in `s` ONE PAST the opener's tag name (so the
+ * scan starts at the attribute region — we never inspect the tag name
+ * itself). `openerEnd` is the index of the opener's terminating `>` (as
+ * returned by `findOpenerEnd`). The scan is `[tagNameEnd, openerEnd)`.
+ */
+function isColonShorthandOpener(s: string, tagNameEnd: number, openerEnd: number): boolean {
+  let i = tagNameEnd;
+  let parenDepth = 0;
+  let braceDepth = 0;
+  let bracketDepth = 0;
+  // The character immediately before the candidate `:` must be whitespace
+  // (§4.14 line 983). We track the previous non-skipped character so the
+  // whitespace-precedence check works across the depth-0 scan.
+  let prevChar = "";
+  while (i < openerEnd) {
+    const c = s[i]!;
+    // String literals (single / double quote) — honor backslash escape so an
+    // escaped quote inside the value doesn't terminate it early.
+    if (c === '"' || c === "'") {
+      const quote = c;
+      i++;
+      while (i < openerEnd) {
+        const sc = s[i]!;
+        if (sc === "\\") { i += 2; continue; }
+        if (sc === quote) { i++; break; }
+        i++;
+      }
+      prevChar = quote;
+      continue;
+    }
+    // `${...}` logic-context interpolation — consume a balanced brace block so
+    // a ternary `:` (`${a ? b : c}`) inside it is not mistaken for the body-
+    // introducer.
+    if (c === "$" && s[i + 1] === "{") {
+      i += 2;
+      let depth = 1;
+      while (i < openerEnd && depth > 0) {
+        const c2 = s[i]!;
+        if (c2 === "{") depth++;
+        else if (c2 === "}") depth--;
+        i++;
+      }
+      prevChar = "}";
+      continue;
+    }
+    if (c === "(") { parenDepth++; prevChar = c; i++; continue; }
+    if (c === ")") { if (parenDepth > 0) parenDepth--; prevChar = c; i++; continue; }
+    if (c === "[") { bracketDepth++; prevChar = c; i++; continue; }
+    if (c === "]") { if (bracketDepth > 0) bracketDepth--; prevChar = c; i++; continue; }
+    if (c === "{") { braceDepth++; prevChar = c; i++; continue; }
+    if (c === "}") { if (braceDepth > 0) braceDepth--; prevChar = c; i++; continue; }
+    // Top-level `:` preceded by whitespace → the `:`-shorthand body-introducer.
+    if (c === ":" && parenDepth === 0 && braceDepth === 0 && bracketDepth === 0) {
+      if (prevChar === " " || prevChar === "\t" || prevChar === "\n" || prevChar === "\r") {
+        return true;
+      }
+    }
+    prevChar = c;
+    i++;
+  }
+  return false;
+}
+
+/**
  * Find the matching closer for an opener tag whose name is `tag` starting
  * AT or AFTER index `from` in `rulesRaw`. Recognizes:
  *   - `</>`           — generic closer (most common)
@@ -1638,7 +1740,14 @@ function findStateChildCloser(rulesRaw: string, from: number, tag: string): numb
         const openerEnd = findOpenerEnd(rulesRaw, i + 1);
         if (openerEnd < 0) return -1;
         const isSelfClose = rulesRaw[openerEnd - 1] === "/";
-        if (!isSelfClose && !VOID_ELEMENTS_LC.has(tagName)) {
+        // §4.14 `:`-shorthand openers are self-terminating (no closer) — do
+        // NOT push them onto lowerDepth, exactly like void / self-closing.
+        // This is the primary bug site: a `<span : @label>` child inside an
+        // engine state-child body was pushed but never popped, corrupting the
+        // depth counter so the real state-child `</>` was consumed against the
+        // phantom opener (→ E-ENGINE-STATE-CHILD-MISSING).
+        const isColonShorthand = isColonShorthandOpener(rulesRaw, j, openerEnd);
+        if (!isSelfClose && !isColonShorthand && !VOID_ELEMENTS_LC.has(tagName)) {
           lowerDepth++;
         }
         i = openerEnd + 1;

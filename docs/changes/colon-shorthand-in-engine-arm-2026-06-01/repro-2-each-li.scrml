@@ -1,0 +1,22 @@
+// repro-2-each-li — the dogfood case that surfaced this bug.
+//
+// A `:`-shorthand `<li : @.name>` child inside an `<each>` inside the
+// `<Browsing>` engine arm. Pre-fix → E-ENGINE-STATE-CHILD-MISSING for
+// .Browsing (the `:`-shorthand `<li>` opener was pushed onto the closer-
+// finder's lowerDepth stack but never popped, corrupting depth accounting).
+// Post-fix the engine parses and the <each> renders @.name per row.
+<program>
+type Phase:enum = { Loading, Browsing }
+type Todo:struct = { id: string, name: string }
+<todos>: Todo[] = [{ id: "1", name: "alpha" }, { id: "2", name: "beta" }]
+<engine for=Phase initial=.Loading>
+  <Loading rule=.Browsing>
+    <button onclick=${@phase = .Browsing}>Go</button>
+  </>
+  <Browsing rule=.Loading>
+    <each in=@todos key=@.id>
+      <li : @.name>
+    </each>
+  </>
+</>
+</program>

@@ -1,0 +1,21 @@
+// repro-1-simple — §4.14 `:`-shorthand child element inside an engine arm.
+//
+// THE BUG (pre-fix): a `:`-shorthand lowercase child element (`<span : @label>`)
+// nested inside an `<engine>` state-child body broke state-child closer-pairing
+// → E-ENGINE-STATE-CHILD-MISSING for the affected variant (.Running here).
+//
+// The same `<span : @label>` is VALID at top-level (see the <program> body
+// below) — it only broke inside an engine arm. Post-fix, BOTH compile.
+<program>
+type Phase:enum = { Idle, Running }
+<label> = "hi"
+<engine for=Phase initial=.Idle>
+  <Idle rule=.Running>
+    <button onclick=${@phase = .Running}>Start</button>
+  </>
+  <Running rule=.Idle>
+    <span : @label>
+  </>
+</>
+<span : @label>
+</program>
