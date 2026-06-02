@@ -7919,6 +7919,11 @@ applyMushroom(.Small)                   // bare variant — parameter type fixes
 - §6.2 — three RHS shapes (the `: T = .V` form composes with bare-variant inference).
 - §18.0.3 — bare-variant inference in match arm patterns (the same rule applied at match-arm grammar).
 - §51.0.B — engine `initial=.Variant` is the canonical bare-variant locus.
+- §51.0.G.1 — `.advance(arg)` two-candidate-enum resolution (S154). NOTE: when an engine
+  declares `accepts=MsgType`, the `.advance(arg)` argument position has TWO candidate enums
+  (the `for=` state enum AND the `accepts=` message enum), so resolution there is a NEW rule
+  specific to `.advance` (§51.0.G.1), NOT this single-position §14.10 mechanism. §14.10 itself
+  is unchanged: it still resolves a bare `.Variant` against exactly ONE position type.
 
 **Error code:** `E-VARIANT-AMBIGUOUS` (§34) — bare variant reference where the position type is ambiguous (union type with multiple enums sharing the variant name, or no type context at all).
 
@@ -10891,6 +10896,12 @@ expression) is `E-UNQUOTED-DISPLAY-TEXT` (§4.18.7).
     a display-text `:`-shorthand body is a `"..."` display-text literal.
 - **Exhaustiveness** — the compiler verifies every variant of `Type` has a matching
   state-child OR a wildcard `<_>` catch-all is present. Otherwise: `E-MATCH-NOT-EXHAUSTIVE`.
+  **Enum-subset narrowing (S154, §53.15).** When the matched-on value's declared type is an
+  enum-subset refinement (`Type oneOf([…])` / `notIn([…])`, §53.15.1), the block-form
+  exhaustiveness check reads the SUBSET variant set, identically to the JS-style form
+  (§18.8.1): a `<match>` covering exactly the subset's variants is exhaustive (no `<_>`
+  required); a state-child naming an excluded variant is a dead arm
+  (`E-MATCH-SUBSET-DEAD-ARM`); a vacuous `<_>` over a fully-covered subset fires `W-MATCH-001`.
 
 **Output category:** the block-form emits MARKUP. Use it inside markup contexts (component
 bodies, `<page>`, anywhere a tag is legal). Use the JS-style form (§18.1+) inside
@@ -11234,7 +11245,10 @@ that variant.
 **Redundant `else`:** When all variants of the matched type are already covered by explicit
 arms, an `else` arm is unreachable. The compiler SHALL emit a warning (W-MATCH-001:
 unreachable default arm) and SHALL NOT emit E-TYPE-020. A redundant `else` arm is a
-warning, not an error.
+warning, not an error. **Enum-subset note (S154, §53.15):** when the matched value's declared
+type is an enum-subset refinement (`oneOf([…])` / `notIn([…])`), "all variants of the matched
+type" means the SUBSET variant set (§18.8.1); W-MATCH-001 therefore fires on a vacuous
+`else`/`_` once the explicit arms cover the subset.
 
 **Normative statements:**
 
@@ -11382,6 +11396,54 @@ present.
 - An `else` arm covers all remaining variants for the purpose of exhaustiveness.
 - Duplicate variant arms (two arms for the same variant) SHALL be a compile error
   (E-TYPE-023: duplicate match arm). The second arm is unreachable.
+
+**Enum-subset refinement narrows the variant set (Option A — S154, §53.15).** When the
+matched value's **declared type** is an enum-subset refinement `EnumType oneOf([.V1,…,.Vk])`
+(or `notIn([…])`, §53.15.1), the variant set `V` used by the exhaustiveness check denotes the
+**subset's variant set** `V_sub`, NOT the base enum's full set. A `match` covering exactly
+`V_sub` is exhaustive; `else`/`_` is unnecessary. `partial match` (§18.18) over a subset value
+remains legal (a subset-of-the-subset).
+
+```scrml
+type Post:struct = { role: Role oneOf([.Admin, .Editor]) }   // Role = { Admin, Editor, Viewer }
+
+fn label(p: Post) string {
+  match p.role {
+    .Admin  => "Admin"
+    .Editor => "Editor"
+    // no .Viewer arm, no else — STILL exhaustive (Option A); a .Viewer arm is DEAD.
+  }
+}
+```
+
+**SF-1 — dead-arm / vacuous-else disposition (S154 ratified hybrid):**
+
+- A **concrete dead variant arm** (e.g. a `.Viewer` arm over a `oneOf([.Admin,.Editor])`-typed
+  value) names an IMPOSSIBLE case → **compile ERROR: E-MATCH-SUBSET-DEAD-ARM** (§34). The
+  message SHALL name the excluded variant + the subset. This is NOT E-TYPE-023: E-TYPE-023's
+  scope is exactly "two arms name the SAME variant" (a duplicate); a dead subset arm names an
+  EXCLUDED variant ONCE — a distinct condition. Reusing E-TYPE-023 would emit a
+  factually-false "duplicate arm" message.
+- A **vacuous `else`/`_`** (all subset variants already covered, so the wildcard can never
+  fire) → **WARNING: W-MATCH-001** (unreachable default arm, §18.6). Because this amendment
+  redefines "all variants of the matched type" to mean the subset set, W-MATCH-001 auto-fires
+  on a vacuous `else` over a subset-typed value; no new warning is needed.
+
+**Edge cases the exhaustiveness pass reads `V` from the matched value's DECLARED type
+(never from a flow-narrowed type):**
+
+- (i) a NESTED match (a `match` inside an arm, over a still-subset-typed value) reads `V` from
+  that inner value's declared subset;
+- (ii) a match on a **derived `const` cell** whose declared type carries the subset refinement
+  reads `V` from that cell's declared type;
+- (iii) the **bound-value** case (the matched expression bound to a name) reads `V` from the
+  binding's declared type.
+
+**Intra-arm value-narrowing is NOT introduced.** scrml has no general flow-narrowing construct
+(`given` is machine-rule-only, §4.11.4), so inside a match arm the matched value retains its
+*declared* type; there is no automatic singleton-subset narrowing of the bound value. Option A
+narrows only the exhaustiveness SET, not the value's type. (Engine `for=` over a subset-refined
+enum is deferred — §53.15.7.)
 
 #### 18.8.2 Match over Union Types (`A | B | not`)
 
@@ -16412,6 +16474,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-MATCH-EFFECT-FORBIDDEN | §18.0.2 | `effect=` attribute used on a state-child inside a `<match>` block. Effects presuppose transitions; transitions don't occur in match. Use `<engine>` (Tier 2). | Error |
 | E-MATCH-ONTRANSITION-FORBIDDEN | §18.0.2 | `<onTransition>` element used inside a `<match>` block. Transition handlers are engine-only. Use `<engine>` (Tier 2). | Error |
 | E-MATCH-NOT-EXHAUSTIVE | §18.0.1 | Block-form `<match for=Type>` is missing variants of `Type` and has no wildcard `<_>` catch-all. Add the missing variants or add `<_>`. | Error |
+| E-MATCH-SUBSET-DEAD-ARM | §18.8.1, §53.15 | A concrete arm names a variant that is excluded by the matched value's enum-subset refinement type (`oneOf([…])` / `notIn([…])`) — the arm is dead (the variant can never inhabit the value). The message names the excluded variant + the subset. Distinct from E-TYPE-023 (duplicate arm names the SAME variant twice); a dead subset arm names an excluded variant once. (Catalog addition S154 — §53.15 enum-subset refinement, SF-1.) | Error |
 | E-MATCH-ON-REQUIRED | §18.0.1 | (Catalog addition S107 — Phase 2 of match block-form impl arc.) Block-form `<match for=Type>` is missing the `on=expr` attribute AND no `<engine for=Type>` for the same `Type` is in scope (auto-implied `on=` per §18.0.1 line 9578-9580 requires a same-type engine for the most-local-semantics-friendly resolution). Add `on=expr` to the `<match>` opener or declare a compatible `<engine>` in scope. | Error |
 | E-MATCH-ARM-SEPARATOR | §18.2 | A `match` arm is followed by a `,` separator. Match arms are juxtaposed (`match-arm+` per §18.2 grammar); the ONLY arm separator is the arm body's terminating `:>`-introduced arm boundary (the deprecated `=>`/`->` aliases behave identically) — arms are written one per line (newline-separated). A trailing `,` after an arm body is invalid. Resolution: remove the `,` (`.A :> x, .B :> y` → `.A :> x` / `.B :> y` on separate lines). Replaces the generic E-CODEGEN-INVALID-JS that the stray comma would otherwise surface from codegen. (Catalog addition S144 Cluster D — Bug Y; emitted by TS at `compiler/src/type-system.ts:checkMatchDiagnostics`.) | Error |
 | W-MATCH-ARROW-LEGACY | §18.2 | A `match` arm (or `!{}` error-handler arm, §19) uses a deprecated arm separator — `=>` or `->` — instead of the canonical `:>`. All three forms parse, build, and emit identically during the deprecation window; the canonical separator is `:>`. The lint is ARM-CONTEXT-SCOPED: `=>` remains fully valid as the arrow-function glyph and `->` as the `fn` return-type separator / legacy `<machine>` event-arrow — only the match / handler arm-separator position fires. Resolution: rewrite `<pattern> => <body>` / `<pattern> -> <body>` as `<pattern> :> <body>`, or run `bun scrml migrate --fix` (AST-driven; MUST NOT be a text replace, since `=>` is also the arrow-function glyph). New code SHALL use `:>`; existing samples MAY migrate at convenience. The end-of-window timing promotes this to `E-MATCH-ARROW-LEGACY` (reserved; not yet emitted). (S145 — `match-arrow-colon-canonical` deep-dive; user-voice S145; mirrors the W-LIFECYCLE-LEGACY-ARROW `->`→`to` template.) | Info |
@@ -16442,6 +16505,10 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-ENGINE-PAYLOAD-ON-UNIT-VARIANT | §51.0.B.1 | Payload-binding attributes appear on an engine state-child whose variant is a unit variant (no payload fields per §14.4). Unit variants have no fields to bind; the bindings are a developer mistake (typically a payload field was removed from the variant declaration but the bindings on the state-child were not updated). Either add fields to the variant declaration (`Variant(field:type, ...)` per §14.4) or remove the binding attributes from the state-child opener. (Catalog addition S98 — §51.0.B.1 amendment.) | Error |
 | E-ENGINE-PAYLOAD-ARITY-MISMATCH | §51.0.B.1 | The number of payload-binding attributes on an engine state-child does not match the variant's payload field count (per §14.4). In the bare-attribute and positional-parenthesized forms, all fields MUST be bound; too few or too many bindings fire this code. Also fires when the bare-attribute or named form contains mixed positional + named bindings within the same state-child opener (the §18.7 mixed-form prohibition extends to this locus). Distinct from §18.7's `E-TYPE-021` because the diagnostic surface differs (state-child attribute list vs match arm pattern); in the parenthesized form `E-TYPE-021` fires for arity / mixed-form (per §18.7 inheritance) and `E-ENGINE-PAYLOAD-ARITY-MISMATCH` is reserved for the attribute-list-based forms. Resolution: list all payload field bindings in declaration order, OR use the named form to bind a subset by field name. (Catalog addition S98 — §51.0.B.1 amendment.) | Error |
 | E-ENGINE-PAYLOAD-RESERVED-COLLISION | §51.0.B.1 | A payload-binding name on an engine state-child collides with a reserved state-child attribute name (`rule`, `effect`, `history`, `internal:rule` — per §51.0.B / §51.0.F / §51.0.H / §51.0.N / §51.0.O). The reserved attribute interpretation takes precedence in the bare-attribute form, so the bareword would be consumed as the reserved attribute and the payload field would silently fail to bind. Resolution: either rename the payload field at its enum variant declaration site (§14.4), OR use the parenthesized form's positional binding with a non-colliding local name (`<Variant(rule_local)>` — binds the field positionally to a local that does not shadow the reserved name). (Catalog addition S98 — §51.0.B.1 amendment.) | Error |
+| E-ENGINE-ACCEPTS-NOT-ENUM | §51.0.S | `accepts=` opener attribute value does not resolve to a declared `:enum` type. (Catalog addition S154 — §51.0.S event-payload-transition.) | Error |
+| E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE | §51.0.S | A state declares `(state × message)` arms but does not cover every `accepts=` MsgType variant and has no `| _ :>` wildcard (mirrors E-MATCH-NOT-EXHAUSTIVE). (Catalog addition S154 — §51.0.S.) | Error |
+| E-ENGINE-MSG-UNKNOWN | §51.0.S, §51.0.G.1 | `.advance(.X)` where `.X` (literal bare-variant) is a variant of NEITHER the `for=` state enum NOR the `accepts=` message enum. (Catalog addition S154 — §51.0.S.) | Error |
+| E-ENGINE-MSG-WITHOUT-ACCEPTS | §51.0.S | A state-child declares a `(state × message)` arm but the engine opener has no `accepts=` declaration. (Catalog addition S154 — §51.0.S.) | Error |
 | E-VALIDATOR-CIRCULAR-DEP | §55.11 | Two or more validators reference each other via cross-field predicate args (e.g., `<a eq(@b)>` and `<b eq(@a)>`). The validator dependency graph is a DAG; cycles are forbidden. | Error |
 | E-DERIVED-WITH-VALIDATORS | §55.14 | Validators applied to a derived cell (`const <x ...>`). Derived cells are read-only; validators imply gating which is incoherent on a computed value. Use a refinement type instead (`const <x>: number(>=0) = ...`). | Error |
 | E-DEBOUNCED-WITH-DERIVED | §6.13 | A `debounced=` (or `throttled=`) reactivity attribute is applied to a derived cell (`const <x debounced=300ms> = expr`). Derived cells are read-only; debounce/throttle is a write-side wrapper; combining the two is meaningless. Resolution: debounce the upstream source instead (`<source debounced=300ms> = @raw; const <doubled> = @source * 2`). (Catalog addition S79 — debounce/throttle Approach B clean-cut.) | Error |
@@ -20452,6 +20519,16 @@ The function-call form is canonical. A markup-element form (`<schemaFor for=User
   // — which §39.5.8 lowers to TEXT NOT NULL CHECK (status IN (...)).
   ```
 
+- **Enum-subset refinement override (S154, §53.15).** When a bare-variant enum field's declared type carries an enum-subset refinement (`Role oneOf([.Admin, .Editor])` / `notIn([…])`), the lowering SHALL emit only the SUBSET variant names — NOT all base-enum variants — because the refinement is strictly more specific than the base enum's full set:
+
+  ```scrml
+  type Post:struct = { role: Role oneOf([.Admin, .Editor]) req }   // Role = { Admin, Editor, Viewer }
+  // schemaFor(Post) MUST emit:  role: text req oneOf(['Admin', 'Editor'])
+  //   → §39.5.8:  TEXT NOT NULL CHECK (role IN ('Admin', 'Editor'))   (subset wins, NOT all 3)
+  ```
+
+  This rides the existing `oneOf([…]) → CHECK (col IN (…))` lowering once fed the subset; honoring the subset is MANDATORY per the L4 "define type once → schema derives" promise. A NULLABLE subset (`Role oneOf([.A,.B]) | not`) lowers to the §41.15.8a nullable form MINUS `req`, carrying the subset CHECK. (The variant-literal `.Admin` mechanically lowers to the string `'Admin'` exactly as a bare enum field does — no new mini-DSL.)
+
 - A struct field whose declared type is a payload-bearing enum (one or more variants with payload, e.g., `Result:enum = { Ok(int), Err(string) }`) SHALL emit `E-SCHEMAFOR-VARIANT-PAYLOAD-ENUM-V1` at the type-system stage. Payload enums require either a JSON column (deferred to v1.next) or a separate-table join (out of scope for schemaFor entirely); v1.0 rejects to surface the design tension explicitly rather than silently throw away payload data.
 
 - Variant additions to an enum-typed field SHALL trigger a `CHECK` constraint alteration in the migration diff (cross-ref §39.6.3 — SQLite may require a full-table rebuild). The friction is intrinsic to closing the L4 loop with correctness over migration-stability; surfaced explicitly in the migration emission and the v0.4 changelog.
@@ -23985,7 +24062,7 @@ body's own, not inherited by nested plain markup.
 #### 51.0.B Engine declaration syntax
 
 ```scrml
-<engine for=Type [initial=.Variant] [derived=expr] [pinned] [var=name] [effect=expr]>
+<engine for=Type [initial=.Variant] [derived=expr] [pinned] [var=name] [effect=expr] [accepts=MsgType]>
   <Variant1 [rule=...] [effect=...]>...</>
   <Variant2 [rule=...]>...</>
   ...
@@ -24002,6 +24079,7 @@ body's own, not inherited by nested plain markup.
 | `pinned` | optional | Opt-out from hoisting per §6.10. Covers BOTH the engine identifier AND the auto-declared variable. |
 | `var=identifier` | optional | Override the auto-derived variable name (§51.0.C). Use for disambiguation when the auto-name collides. |
 | `effect=${...}` | optional; non-derived only | **Boot-only init effect (S148, §51.0.H Form 3).** A logic-context expression that runs ONCE at module-init as the effect of the implicit init→`initial=` transition (Elm `init`+`Cmd`). Writes to the engine variable inside it are checked against `.<initial>.rule`. Forbidden on `derived=` engines — `E-ENGINE-EFFECT-ON-DERIVED` (§51.0.J). Distinct slot from the state-child `effect=` (§51.0.H Form 1). |
+| `accepts=MsgType` | optional; non-derived | **Engine message vocabulary (S154, §51.0.S).** An enum type identifier declaring the message vocabulary the engine's `(state × message)` arms dispatch on (the type checked per-state for message-arm exhaustiveness, §51.0.S). Its value MUST resolve to a declared `:enum` type — otherwise `E-ENGINE-ACCEPTS-NOT-ENUM` (§34). A state-child that declares a `(state × message)` arm while the opener has no `accepts=` fires `E-ENGINE-MSG-WITHOUT-ACCEPTS` (§34). See §51.0.S. |
 
 **State-children** are tags inside the body, named after variants of `Type`. Each
 state-child may carry:
@@ -24580,6 +24658,47 @@ if (@marioState == .Small) @marioState = .Big       // explicit-conditional inte
 ```
 
 This makes the gating condition visible at the call site.
+
+##### 51.0.G.1 `.advance` argument resolution — state plane vs message plane (S154)
+
+**Added 2026-06-02 (S154).** When the engine declares `accepts=MsgType` (§51.0.B / §51.0.S),
+`.advance(arg)` becomes polymorphic over the argument's enum. The argument may be either a
+**state-enum** variant (the existing direct loud transition) or a **message-enum** variant (a
+new dispatch through the current state's `(state × message)` arms, §51.0.S):
+
+| `.advance(arg)` where arg is… | Behavior |
+|---|---|
+| a **state-enum** variant (`DragPhase.Dragging(id)`) | the existing §51.0.G direct loud transition — set the cell to that variant, validated against the from-state `rule=`. |
+| a **message-enum** variant (`DragMsg.Drop(col)`) | dispatch through the current state's `(state × message)` arm (§51.0.S); the arm's resolved target becomes the transition, validated against `rule=`. |
+
+This is a NEW resolution rule specific to `.advance` — NOT a reuse of §14.10 bare-variant
+inference. §14.10 resolves a bare `.Variant` against exactly ONE position type; the
+`.advance(arg)` position has TWO candidate enums (the engine's `for=` state enum AND its
+`accepts=` message enum), so the resolution is specified here (§14.10 carries only a cross-ref
+note pointing here).
+
+**Normative — `.advance` argument resolution.** Given `@<engineVar>.advance(arg)` where the
+engine declares `for=S` and optionally `accepts=M`:
+
+1. If `arg` is a literal bare-variant `.V`: resolve `.V` against `S` and against `M`.
+   - matches exactly one enum → dispatch that plane (`S` → §51.0.F direct loud transition;
+     `M` → §51.0.S arm dispatch).
+   - matches BOTH (a variant name shared by `S` and `M`) → **E-VARIANT-AMBIGUOUS** (§14.10);
+     require qualification (`.advance(DragMsg.Idle)` / `.advance(DragPhase.Idle)`).
+   - matches NEITHER → **E-ENGINE-MSG-UNKNOWN** (§34).
+2. If `arg` is a qualified variant (`DragMsg.Drop(col)` / `DragPhase.Big`): dispatch the named
+   enum's plane directly (no ambiguity).
+3. If `arg` is a non-literal expression (a variable / call): its STATIC type MUST resolve to
+   exactly one of `S` or `M`. A union-typed argument (`S | M`, or any type not statically
+   resolvable to a single plane) is **FORBIDDEN — E-VARIANT-AMBIGUOUS**. The compiler SHALL
+   NOT runtime-tag-dispatch; the plane MUST be statically decidable.
+
+When the engine declares NO `accepts=`, `.advance(arg)` resolves against `S` only — its
+behavior is exactly the pre-S154 §51.0.G direct-transition form, unchanged.
+
+A message-arm whose resolved target violates the from-state `rule=` throws
+`E-ENGINE-INVALID-TRANSITION` (compile-time when the from-state is statically known, runtime
+otherwise) — identical to a direct write. There is no message-specific target-invalid code.
 
 #### 51.0.H `effect=` attribute and `<onTransition>` element (Move 14)
 
@@ -25520,8 +25639,297 @@ useful; lint surface deferred.
 - §51.12 — legacy `<machine>` temporal transitions; runtime backbone shared.
 - §51.12.3.1 — computed-delay form (`${expr}<unit>`) applies to `<onIdle>` `after=` too.
 - §51.0.F — `rule=` contract (the watchdog fire defers to per sub-A1).
+- §51.0.S — engine message dispatch (`accepts=` + `(state × message)` arms).
 - §34 — `E-IDLE-DUPLICATE`, `E-IDLE-INVALID-VARIANT`, `E-IDLE-MISPLACED`,
   `E-ENGINE-INVALID-TRANSITION`.
+
+**Handled-message reset (S154 ratification).** A handled engine message (§51.0.S — an
+`.advance(.MsgVariant)` that hits a `(state × message)` arm) RESETS the idle watchdog, EVEN
+when the arm resolves the SAME state. This is the single point where message dispatch diverges
+from the §51.0.F.1 self-WRITE no-op: a self-write is the program re-asserting state with no
+event, whereas a handled message IS an event (activity). The `<onIdle>` watchdog fires "after N
+ms of silence" — a handled message is not silence, so it counts as a reset-triggering event
+regardless of whether the resolved target differs from the current state. (A self-WRITE
+`@var = .Current` / `.advance(.CurrentStateVariant)` still does NOT reset, per §51.0.F.1.)
+
+#### 51.0.S Event-payload transitions / engine message dispatch (S154)
+
+**Added 2026-06-02 (S154).** Authority: #14 deep-dive
+`event-payload-transition-primitive-2026-06-02.md` (Approach E, ratified S154). Scope is
+**singleton client-side engines** (§51.0.K). Per-instance engines and server-boundary
+transitions are NAMED SIBLING ARCS, not this primitive (§51.0.S.6).
+
+##### 51.0.S.0 The two cases — the payload-slot decomposition
+
+Whether an event-driven transition needs new machinery depends on ONE thing: **can the
+target variant absorb the event payload?**
+
+- **Simple case — the target variant HAS a payload slot.** `Idle → Dragging(id)`: the event
+  data lands in the target's payload slot. Already expressible (§51.0.S.1); no new primitive.
+- **Complex case — the target is a unit variant (no payload slot) but the transition still
+  needs event data for its effect.** `Dragging → Idle` with `@tasks = taskMovedTo(@tasks, id,
+  col)`: `.Idle` has no slot for `col`, so there is nowhere to put the event payload. This is
+  the case the message dispatch (§51.0.S.2) serves: the message variant `.Drop(col)` carries
+  the event payload into the `(state × message)` arm, where both `id` (from state) and `col`
+  (from message) are in scope.
+
+The boundary between the two surfaces is the presence/absence of a payload slot on the target
+variant — not a stylistic split.
+
+##### 51.0.S.1 Simple case — bare payload-carrying transition (clarification)
+
+A direct write or `.advance` to a payload-bearing variant populates that variant's payload
+from the expression:
+
+```scrml
+type DragPhase:enum = { Idle, Dragging(id: number) }
+
+<engine for=DragPhase initial=.Idle>
+  <Idle         rule=.Dragging></>
+  <Dragging(id) rule=.Idle></>          <!-- id bound per §51.0.B.1 when in .Dragging -->
+</>
+
+<li draggable=true
+    ondragstart=@dragPhase = .Dragging(task.id)   <!-- quiet direct write (§50.15 + §14.10 + §51.0.F) -->
+    ondragend=@dragPhase = .Idle>${task.title}</li>
+```
+
+This composes from shipped features: assignment-as-expression (§50.15), bare-variant
+inference (§14.10), payload binding (§51.0.B.1), bare-form single-expression handlers
+(§5.2.3), `rule=` validation (§51.0.F). The `.advance` form
+`@dragPhase.advance(.Dragging(task.id))` is the loud variant (§51.0.G).
+
+NOTE (deferred): when the payload is `event.target.value` / `event.dataTransfer.*` rather than
+a loop variable, §5.2.1 requires the `${(e) => fn(e, …)}` closure; exposing `event` as an
+implicit single-expression-scoped local is a separate §5.2.3 micro-amendment, NOT part of this
+section (see §51.0.S.7 deferred log).
+
+##### 51.0.S.2 Complex case — engine message dispatch (the new primitive)
+
+###### 51.0.S.2.1 The message enum is an ordinary `:enum` (Pillar 5)
+
+There is no new `event` keyword. The message vocabulary is a normal scrml enum (§14.4), with
+payload variants per §14.4 / §18.7:
+
+```scrml
+type DragPhase:enum = { Idle, Dragging(id: number) }
+type DragMsg:enum   = { Start(id: number), Drop(col: string), End }
+```
+
+The engine does not learn a bespoke event sub-DSL; it `match`es on an ordinary enum, reusing
+match (§18.0.1) + payload-binding (§18.7 / §51.0.B.1) grammar verbatim.
+
+###### 51.0.S.2.2 The engine declares its message type — `accepts=MsgType`
+
+```scrml
+<engine for=DragPhase initial=.Idle accepts=DragMsg>
+  …
+</>
+```
+
+`accepts=` is an engine-OPENER attribute (joins `for=` / `initial=` / `var=` / `derived=` /
+`effect=`, §51.0.B). Its value is an enum type identifier; it declares the message vocabulary
+the engine's `(state × message)` arms dispatch on, and is what the compiler checks per-state
+arm exhaustiveness against. If the value does not resolve to a declared `:enum` type,
+`E-ENGINE-ACCEPTS-NOT-ENUM` (§34) fires.
+
+The attribute is `accepts=`, NOT `on=`: `on=` is already taken — §18.0.1 defines
+`<match for=Type on=expr>` where `on=` is the matched-on VALUE expression. `<engine>` and
+`<match>` are structurally twinned, so reusing `on=` for a different value-kind (an enum TYPE)
+on the twin element would be a live collision.
+
+###### 51.0.S.2.3 The `(state × message)` arm form — reuses match grammar
+
+Inside a state-child body, a message-arm reacts to a message variant. It reuses the §18.0.1
+match block-form arm grammar (`| .Variant(binding) :> body`) verbatim; payload binding follows
+§18.7 / §51.0.B.1; the arm-body block shape `{ statement* expression? }` matches §18.2:
+
+```scrml
+<engine for=DragPhase initial=.Idle accepts=DragMsg>
+
+  <Idle rule=.Dragging>
+    | .Start(id) :> .Dragging(id)              <!-- (Idle × Start) → Dragging, carrying id -->
+  </>
+
+  <Dragging(id) rule=.Idle>                     <!-- id bound from the .Dragging payload (§51.0.B.1) -->
+    | .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); .Idle }   <!-- id (state) + col (msg) in scope -->
+    | .End       :> .Idle
+  </>
+
+</>
+```
+
+A message-arm body is either a bare target expression (`.Dragging(id)` — the arm's final
+expression is the new state) or a block `{ effect-statements; .Target }` (run effects, then
+the final expression is the resolved target). This mirrors the `match expr { .V :> value }`
+value-return shape (§18), where the "value" a message-arm returns is the target state.
+
+A state-child that declares a `(state × message)` arm while the engine opener has NO `accepts=`
+fires `E-ENGINE-MSG-WITHOUT-ACCEPTS` (§34).
+
+###### 51.0.S.2.4 Exhaustiveness (reuses match semantics)
+
+Per-state message-arms are a `match` over `MsgType`; standard scrml match exhaustiveness (§18)
+applies. The teachable shape is **opt in per-state; once you declare one arm, cover the set**:
+
+- A state that declares ANY message-arms MUST cover every `MsgType` variant OR carry a
+  `| _ :>` wildcard. Non-exhaustive → **E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE** (§34; sibling of
+  `E-MATCH-NOT-EXHAUSTIVE`).
+- A state that declares NO message-arms ignores all messages while in that state (a message
+  dispatched in that state is a no-op, §51.0.S.2.6). This is the "this state doesn't react to
+  messages" case, NOT an exhaustiveness violation.
+- `| _ :> @<engineVar>` (stay in the current state — a self-target no-op per §51.0.F.1) is the
+  canonical "explicitly ignore the rest" escape hatch.
+
+This gives the Rust `match (state, event)` compile-safety WITHOUT a full N×M grid: a state opts
+out by declaring no arms, and opts into partial coverage via `| _ :>`.
+
+###### 51.0.S.2.5 Dispatch rides `.advance` — no `.send` verb
+
+Message dispatch rides the existing `.advance()` method (§51.0.G / §51.0.G.1); scrml does NOT
+gain a `.send()` verb (`.send` is already taken — `<#name>.send()` is worker / nested-program
+dispatch). The full `.advance` argument-resolution rule (state plane vs message plane, the
+ambiguity / unknown / forbidden-union cases) is normative at **§51.0.G.1**.
+
+```scrml
+<li draggable=true
+    ondragstart=@dragPhase.advance(.Start(task.id))   <!-- message dispatch (loud) -->
+    ondragend=@dragPhase.advance(.End)>${task.title}</li>
+<ul ondrop=@dragPhase.advance(.Drop(col))>…</ul>
+```
+
+The quiet `=` form needs no message analog: `@dragPhase = .Drop(col)` is a TYPE ERROR (a
+`DragMsg` value cannot inhabit a `DragPhase` cell), so the quiet `@x = .V` form is structurally
+restricted to STATE variants; messages MUST go through `.advance`. The full surface is exactly
+three forms, no new verb:
+
+- `@x = .StateVariant` — quiet direct set (state variants only).
+- `@x.advance(.StateVariant)` — loud direct set.
+- `@x.advance(.MsgVariant)` — loud message dispatch (through arms).
+
+Because per-state message-arms are exhaustiveness-checked (§51.0.S.2.4), `.advance(.Msg)`
+cannot hit an unhandled-message runtime surprise: an unhandled message in a state WITH arms is
+a COMPILE error, and a state with NO arms no-ops (§51.0.S.2.6).
+
+###### 51.0.S.2.6 No-op when a state has no arm for a message
+
+A message dispatched while in a state that declares no arm for it (only possible when the state
+declares NO message-arms — the partial case is a compile error per §51.0.S.2.4) is a runtime
+no-op. This mirrors XState's "unhandled events ignored" default and §51.0.F.1's no-op
+intuition. A state that reacts to SOME messages and ignores the rest uses `| _ :> @<engineVar>`.
+
+###### 51.0.S.2.7 `rule=` is still the transition contract
+
+A message-arm's resolved target is validated against the from-state's `rule=` exactly as a
+direct write / `.advance` (§51.0.F). Messages are a TYPED way to compute target + effect; they
+do NOT launder an illegal transition. A message-arm resolving an illegal target is
+`E-ENGINE-INVALID-TRANSITION` (compile-time when the from-state is static, runtime otherwise) —
+identical to a direct write. There is NO message-specific target-invalid code.
+
+##### 51.0.S.3 Transition machinery + reset semantics
+
+The §51.0.F.1 real-transition-vs-self-write discriminator extends to message dispatch,
+splitting "the arm body" from "the state-change machinery":
+
+**The matched arm body ALWAYS runs.** The effect statements are the message's PURPOSE; they
+run whenever the message is handled, regardless of whether the resolved target differs from the
+current state. (A `.Tick` in `.Playing` doing `{ @score = @score + 1; .Playing }` MUST
+increment — the same-state target does not suppress the effect.)
+
+**The state-change machinery fires iff the arm's resolved target ≠ current state** (reusing
+§51.0.F.1):
+
+| Machinery | arm target ≠ current (real transition) | arm target = current (self-target) |
+|---|---|---|
+| arm body / effect | runs | **runs** (the effect is the message's purpose) |
+| `<onTransition>` (§51.0.H) | fire | no-op (§51.0.F.1) |
+| history capture (§51.0.N) | captured | no-op (§51.0.F.1) |
+| `<onTimeout>` clear/rearm (§51.0.M) | clear-on-exit + rearm-on-entry | no exit/entry → unchanged |
+| `<onIdle>` watchdog reset (§51.0.R) | **reset** | **reset** (handled message is an event — §51.0.R handled-message reset) |
+
+The one divergence from §51.0.F.1 is the `<onIdle>` watchdog: a self-targeting MESSAGE resets
+the idle watchdog even on a same-state arm (a handled message is activity, not silence), where
+a self-WRITE does not. This divergence is ratified and specified at §51.0.R.
+
+##### 51.0.S.4 New §34 error codes
+
+| Code | Severity | Fires when |
+|---|---|---|
+| `E-ENGINE-ACCEPTS-NOT-ENUM` | Error | `accepts=` opener attribute value does not resolve to a declared `:enum` type |
+| `E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE` | Error | a state declares message-arms but does not cover every `accepts=` MsgType variant and has no `| _ :>` wildcard (mirrors `E-MATCH-NOT-EXHAUSTIVE`) |
+| `E-ENGINE-MSG-UNKNOWN` | Error | `.advance(.X)` where `.X` (literal bare-variant) is a variant of NEITHER the `for=` state enum NOR the `accepts=` message enum |
+| `E-ENGINE-MSG-WITHOUT-ACCEPTS` | Error | a state-child declares a `(state × message)` arm but the engine opener has no `accepts=` declaration |
+
+**Reused (no new code):** `E-VARIANT-AMBIGUOUS` (§14.10) — the state/message name-collision
+case (§51.0.G.1 step 1) AND the union-typed-argument case (§51.0.G.1 step 3).
+`E-ENGINE-INVALID-TRANSITION` (§51.0.F) — the illegal-target case.
+
+##### 51.0.S.5 Scope
+
+**Covers:** singleton client-side engines — the engine self-describes BOTH the transition graph
+(`rule=`) AND the event→transition map (the `(state × message)` arms), closing the
+state-vs-logic axiom for the complex case.
+
+**Does NOT cover (named sibling arcs, NOT this primitive):**
+
+- **Per-instance engines** — engines are singleton-by-design (§51.0.K). Per-card / per-instance
+  machines need their own arc (placeholder `<engine for=T per=@expr>`); UNSCOPED.
+- **Server-boundary transitions** — a transition that fires `onclick=setStatus(...)` → server
+  fn → DB, never touching the engine cell, needs the CPS/body-split server-transition story
+  (cross-ref `cps-state-machine-server-transitions-2026-04-06.md`).
+
+##### 51.0.S.6 Worked example — end-to-end
+
+```scrml
+type DragPhase:enum = { Idle, Dragging(id: number) }
+type DragMsg:enum   = { Start(id: number), Drop(col: string), End }
+
+<engine for=DragPhase initial=.Idle accepts=DragMsg>
+  <Idle rule=.Dragging>
+    | .Start(id) :> .Dragging(id)
+  </>
+  <Dragging(id) rule=.Idle>
+    | .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); .Idle }
+    | .End       :> .Idle
+  </>
+</>
+
+<ul class="board">
+  <each in=@columns as col>
+    <li class="column" ondrop=@dragPhase.advance(.Drop(col.id))>
+      <each in=col.tasks as task>
+        <li draggable=true
+            ondragstart=@dragPhase.advance(.Start(task.id))
+            ondragend=@dragPhase.advance(.End)>${task.title}</li>
+      </each>
+    </li>
+  </each>
+</ul>
+```
+
+The pre-E `dropOn(toColumn)` function — gate + `taskMovedTo` + two manual writes — disappears:
+the gate is the `(Dragging × Drop)` arm's existence, the transform is the arm body, the
+transition is the arm's `.Idle` target, and `id` comes from the `.Dragging(id)` state binding.
+The engine owns the whole thing.
+
+##### 51.0.S.7 Deferred-complexity log
+
+- Per-instance engines arc (`<engine for=T per=@expr>`) — UNSCOPED.
+- Server-boundary transitions arc — CPS/body-split story.
+- `event`-in-bare-handler micro-amendment (§5.2.3 — expose `event` as an implicit
+  single-expression local; §51.0.S.1).
+- Multi-message-in-one-tick / queueing — out of scope (synchronous single-dispatch, matching
+  direct-write).
+
+##### 51.0.S.8 Cross-references
+
+- §51.0.B / §51.0.B.1 — engine opener attributes; state-child payload binding.
+- §51.0.G / §51.0.G.1 — `.advance` transition API; argument-plane resolution.
+- §51.0.F / §51.0.F.1 — `rule=` contract; self-write no-op discriminator.
+- §51.0.R — `<onIdle>` watchdog; handled-message reset.
+- §18.0.1 / §18.2 / §18.7 — match block-form arm grammar; arm body shape; payload binding.
+- §14.4 / §14.10 — enum declaration; bare-variant inference (and its NON-reuse for `.advance`).
+- §34 — the four new codes above; the two reuses.
 
 ---
 
@@ -28706,6 +29114,10 @@ elide the check when the caller's constraint implies the callee's.
 | `number(>0 && <10000)` | `number(>0 && <100)` | Yes — caller's range exceeds callee's |
 | `number` (unconstrained) | `number(>0 && <10000)` | Yes — boundary check at call site |
 | `number(>0 && <10000)` | `number(>0 && <10000)` | No — same constraint |
+| `Role oneOf([.Admin])` | `Role oneOf([.Admin,.Editor])` | No — caller's subset ⊆ callee's subset (enum-subset widen, §53.15.3) |
+| `Role oneOf([.Admin,.Editor])` | `Role oneOf([.Admin])` | Yes — caller's subset exceeds callee's (narrow → membership check) |
+| `Role` (full enum) | `Role oneOf([.Admin,.Editor])` | Yes — boundary narrow into the subset at the call site |
+| `Role oneOf([.Admin,.Editor])` | `Role` (full enum) | No — subset value widens freely to the base enum (§53.15.3) |
 
 ### §53.9.3 Return Type Constraints
 
@@ -29207,6 +29619,178 @@ The importing file's `typeRegistry` SHALL include any imported stdlib types afte
 
 ---
 
+## §53.15 Enum-variant subset refinement
+
+**Added 2026-06-02 (S154).** Authority: (d)-A deep-dive
+`enum-subset-refinement-exhaustiveness-2026-06-02.md` (PA-disposition; Ada/SPARK §5.4 the
+spine; Rust pattern-types RFC corroboration). An enum-typed field / cell / param / return MAY
+be refined to a SUBSET of its variants via the existing set-membership refinement vocabulary
+(`oneOf([…])` / `notIn([…])`, §55.1); the subset NARROWS `match` exhaustiveness (Option A); it
+is ADDITIVE to subset-as-new-enum (defining a narrower `:enum` stays an option, §53.15.6).
+
+### §53.15.1 Syntax + decidability
+
+An enum-typed position MAY carry a subset refinement using the §55.1 set-membership vocabulary
+in refinement-type position:
+
+```scrml
+type Role:enum = { Admin, Editor, Viewer }
+
+type Post:struct = {
+  title: string req,
+  role:  Role oneOf([.Admin, .Editor]),     // subset refinement on a struct field
+}
+
+<currentRole>: Role notIn([.Viewer]) = .Admin    // complement form — equivalent subset {Admin,Editor}
+fn assignRole() Role oneOf([.Admin, .Editor]) { … }   // subset return type
+fn promote(r: Role oneOf([.Editor]))           { … }   // subset parameter type
+```
+
+`oneOf([.V1,…])` and `notIn([.Vx,…])` over an enum type denote a **statically-decidable
+membership predicate** (the variant set is fully known at compile time). It is therefore a
+textbook §53 refinement and slots into the §53.4 three-zone model directly. Variant-literal
+args (`.Admin`) are the canonical adopter form; schemaFor lowers them to string args
+(`'Admin'`) at the SQL locus (§41.15.6 / §53.15.3).
+
+**Enumerated only — NO range form.** `oneOf(.Admin .. .Editor)` (a range over variants) is
+FORBIDDEN: scrml `oneOf` over an enum is an explicit enumerated set, and a range form
+reintroduces the SPARK RPP02 union-evolution hazard (a newly-added neighbor variant silently
+absorbed into a range). The enumerated form is precisely what shields subset sites from
+base-enum churn (§53.15.2.2). A range form in enum-subset position SHALL be rejected.
+
+### §53.15.2 Three-zone enforcement (§53.4)
+
+| Zone | Enum-subset case | Compiler action |
+|---|---|---|
+| **Static** | a literal variant, or a tighter/equal subset, assigned in (`{ role: .Admin }` → `oneOf([.Admin,.Editor])`). | Decidable: `.Admin ∈ {.Admin,.Editor}` → OK, no check. `{ role: .Viewer }` → `.Viewer ∉ subset` → **compile error** (E-CONTRACT-001, §53.15.5). |
+| **Boundary** | a full-`Role` value from DB / network / `parseVariant` / user input narrowed to the subset. | Runtime membership check emitted at the assignment site (§53.4.5) → E-CONTRACT-001-RT on violation. |
+| **Trusted** | a value already proven `∈ subset` in scope, not re-sourced. | No check. |
+
+```scrml
+const ok  = Post { title: "x", role: .Admin }    // static: OK, no runtime check
+const bad = Post { title: "x", role: .Viewer }   // static: COMPILE ERROR (.Viewer ∉ subset)
+
+server function loadPost(id: number) Post {
+  const row = ?{`SELECT title, role FROM posts WHERE id = ${id}`}.one()
+  return Post { title: row.title, role: row.role }   // boundary: runtime check → E-CONTRACT-001-RT if .Viewer
+}
+```
+
+### §53.15.3 Refinement-flow — widen free, narrow checked (§53.5.1)
+
+The numeric subtype law (T-PRED-3/4) transposes to enum-variant sets:
+
+| Flow | Direction | Rule | Check? |
+|---|---|---|---|
+| subset value → full-enum param (`fn handle(r: Role)`) | widen | T-PRED-3 (subset ⊂ base) | NO |
+| subset value → narrower-or-equal subset | widen/equal | T-PRED-4 (P1 ⇒ P2) | NO if provable |
+| full-enum value → subset param/field | narrow | boundary | YES (runtime membership) |
+| `oneOf([.Admin])` → `oneOf([.Admin,.Editor])` | widen | T-PRED-4 | NO |
+
+**Exhaustiveness does NOT survive a widening boundary.** When a subset value flows into
+`fn handle(r: Role)` (param declared as the FULL base), inside `handle` a `match r` MUST cover
+ALL variants — the narrowing is a property of the *declared type at the use site*, NOT a
+value-flow taint. This matches Ada (a `Weekday` seen as `Day` inside a `Day` param) and TS.
+Return types and reactive derived `const` cells follow the same three-zone rule; validators as
+attributes on derived cells stay rejected per E-DERIVED-WITH-VALIDATORS (§55.14) — the
+refinement TYPE is the sanctioned channel.
+
+### §53.15.4 Match exhaustiveness narrows to the subset (Option A)
+
+When the matched value's declared type is an enum-subset refinement, `match` exhaustiveness is
+computed against the SUBSET variant set, not the base enum's full set. The normative statement
+lives at **§18.8.1** (JS-style match) and **§18.0.1** (block-form `<match for=>`); §53.15
+defers to those sections for the exhaustiveness pass. Summary:
+
+```scrml
+type Post:struct = { role: Role oneOf([.Admin, .Editor]) }
+
+fn label(p: Post) string {
+  match p.role {
+    .Admin  => "Admin"
+    .Editor => "Editor"
+    // no .Viewer arm, no else — STILL exhaustive (Option A); a .Viewer arm is DEAD.
+  }
+}
+```
+
+- A `match` covering exactly the subset's variants is exhaustive; `else`/`_` is unnecessary
+  (a vacuous `else` over a fully-covered subset fires **W-MATCH-001**, §18.6).
+- A concrete arm naming a variant excluded by the subset is a dead arm →
+  **E-MATCH-SUBSET-DEAD-ARM** (§18.8.1; the message names the excluded variant + the subset).
+- **Intra-arm value-narrowing is NOT introduced.** scrml has no general flow-narrowing
+  construct (`given` is machine-rule-only, §4.11.4), so inside a match arm the matched value
+  retains its *declared* type; Option A narrows only the exhaustiveness SET, not the value.
+  See §18.8.1 for the nested-match / derived-cell / bound-value edge cases.
+
+### §53.15.5 Variant-evolution propagation; composition; error codes
+
+**Variant evolution (the union-evolution win):**
+
+- **Add a variant to the BASE enum** (`Role` gains `.Auditor`): the subset
+  `oneOf([.Admin,.Editor])` is UNCHANGED → subset-typed matches stay exhaustive (no churn).
+  Full-`Role` matches ARE forced to add `.Auditor` (existing §18.8.1, unchanged). The subset
+  SHIELDS subset-typed sites from base churn — the inverse of the RPP02 hazard, because the
+  subset is explicit, not a range.
+- **Add a variant to the SUBSET** (`oneOf([.Admin,.Editor,.Auditor])`): subset-typed matches go
+  non-exhaustive → E-MATCH-NOT-EXHAUSTIVE / E-TYPE-020 forces the arm. Correct.
+
+**Composition — `not`/nullable:** `Role oneOf([.A,.B]) | not` — the type-side composes (`match`
+exhaustive on `.Admin`, `.Editor`, `.None` per §18.8.2); the schema-side lowers
+nullable-MINUS-`req` with the subset CHECK (§41.15.6 / §41.15.8a).
+
+**Composition — payload-bearing variants:** an `oneOf([.Ok,.Err])` over a payload enum is valid
+at the type / match / validator loci (membership is decidable on the tag, independent of
+payload; arms bind payload as usual). schemaFor STILL rejects payload-enum SQL-lowering
+(E-SCHEMAFOR-VARIANT-PAYLOAD-ENUM-V1) — the rejection is about the payload, orthogonal to the
+subset.
+
+**Error codes (new / reused):**
+
+| Code | Severity | Status | Fires when |
+|---|---|---|---|
+| `E-CONTRACT-001` | Error | REUSE (§53.4 refinement family) | static-zone: a known out-of-subset variant literal assigned to a subset position (message names the excluded variant + the subset) |
+| `E-CONTRACT-001-RT` | Error (runtime) | REUSE | boundary-zone: a runtime value violates the subset |
+| `E-MATCH-SUBSET-DEAD-ARM` | Error | NEW (SF-1) | a concrete dead variant arm over a subset-typed value (E-TYPE-023 is duplicate-arm-only, does NOT fit) |
+| `W-MATCH-001` | Warning | REUSE (SF-1) | a vacuous `else`/`_` over a fully-covered subset-typed value (auto-fires once §18.8.1 reads the subset set; §18.6 note) |
+
+§53.6.1 already mandates that refinement-position violations emit E-CONTRACT-001 / -RT; the
+static + boundary out-of-subset cases REUSE that family (a dedicated code would fracture the
+refinement family). Discoverability is handled by the message body naming the excluded variant
++ subset.
+
+### §53.15.6 The teachable rule (subset-refine vs new enum)
+
+> **Reach for a subset refinement (`Role oneOf([.Admin,.Editor])`) when the variants are the
+> SAME concept and you want one value to flow both ways** — a `Post.role` is still a `Role`,
+> assignable to any `fn handle(r: Role)` and sharable with a DB `role` column. The subset is a
+> *view* on a shared enum: define once, narrow contextually, widen freely. **Reach for a NEW
+> enum (`type PostRole:enum = { Admin, Editor }`) when the subset is a distinct domain concept
+> that should NOT be interchangeable** — when widening to the parent is a category error, the
+> two evolve independently, or you want a hard wall. Rule of thumb: *same concept, contextual
+> restriction → subset; different concept, hard boundary → new enum.*
+
+### §53.15.7 Deferred
+
+- **OQ-3 — engine `for=` subset.** Whether `<engine for=>` may name a subset-refined enum
+  (state-child completeness narrowing to the subset) is DEFERRED to its own engine-locus
+  amendment pass. No blocker found (E-ENGINE-004 admits enum types; a subset refinement of an
+  enum is still an enum type), but it is OUT OF SCOPE here.
+
+### §53.15.8 Cross-references
+
+- §53.4 — three-zone refinement model (static / boundary / trusted).
+- §53.5.1 — refinement-flow law (T-PRED-3/4 widen-free/narrow-checked).
+- §53.6.1 — refinement-position E-CONTRACT-001 / -RT mandate.
+- §18.8.1 / §18.0.1 — match exhaustiveness reads the refined (subset) variant set; dead-arm /
+  vacuous-else dispositions.
+- §18.6 — W-MATCH-001 (unreachable default) over a subset-refined type.
+- §41.15.6 — schemaFor emits the SUBSET CHECK for a subset-refined enum field.
+- §53.9.2 — caller/callee constraint matching (enum-subset widen/narrow row).
+- §55.1 / §55.9 — `oneOf` validator vocabulary; `.OneOfFailed(set)` payload = the subset.
+
+---
+
 ## 54. Nested Substates and State-Local Transitions
 
 **Added 2026-04-20 (S32).** Ratifies Insight 21 (scrml-support/design-insights.md) — Flavor A+B
@@ -29554,6 +30138,20 @@ Validators on Shape-1 plain cells and Shape-2 form-coupled cells fire identicall
 Shape-3 derived cells they are REJECTED — see §55.10.
 
 **Universal-core is closed at fourteen.** The vocabulary above is the complete universal-core surface; new predicate names do NOT enter §55.1 lightly. External schema-validation libraries (zod, valibot, arktype, effect-schema) are NOT first-class predicates here. Adopters bridge them at runtime via `stdlib/data/validate.scrml`'s existing `custom(fn)` slot — see the "Bridging external schema libraries" documented section there. Per design-insight 28 (2026-05-09) and the §53.14.4 synonym-detection precondition: a curated `scrml:zod` or `scrml:standard-schema` stdlib export was closed as a synonym for `custom(fn)` (the bridge's semantics are absorbed by an existing primitive in 5 lines of source). Bridged validators give up cross-locus consistency (no DDL-level enforcement, no HTML-attr inference) — the trade-offs are documented at the `custom(fn)` site.
+
+**Enum-subset refinement — confirmation (S154, §53.15; no normative change).** When `oneOf([…])`
+/ `notIn([…])` over an enum type is used as an enum-subset REFINEMENT (§53.15) rather than (or
+in addition to) a state-cell validator, the three loci agree on the same membership predicate
+over the same SUBSET:
+
+| Locus | Subset form | Enforcement | Failure |
+|---|---|---|---|
+| State-cell validator (§55.2) | `<role oneOf([.Admin,.Editor])>` | reactive gate (cell may transiently hold any value while typing) | `.OneOfFailed([.Admin,.Editor])` → `errors`; `isValid` false |
+| Struct-field / refinement type (§53.15) | `role: Role oneOf([.Admin,.Editor])` | §53.4 three-zone (the cell CANNOT hold out-of-subset) | `E-CONTRACT-001` / `E-CONTRACT-001-RT` |
+| Schema column (§39.5.7 / §41.15.6) | `text req oneOf(['Admin','Editor'])` | INSERT / UPDATE | SQL `CHECK` |
+
+The `.OneOfFailed(set)` payload (§55.9) carries the SUBSET, not the base enum — confirmed by
+the existing spec; §53.15 introduces no change to the validity surface.
 
 ### 55.2 Validators on state-cell declarations (L4)
 
