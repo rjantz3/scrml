@@ -1,114 +1,207 @@
-# scrmlTS — Session 154 (CLOSE)
+# scrmlTS — Session 155 (CLOSE)
 
 **Date:** 2026-06-02
-**Previous:** `handOffs/hand-off-158.md` (= S153 CLOSE).
-**Next-session pickup:** rotate THIS file → `handOffs/hand-off-159.md` at next OPEN.
+**Previous:** `handOffs/hand-off-159.md` (= S154 CLOSE — full S154 detail lives there).
+**Next-session pickup:** rotate THIS file → `handOffs/hand-off-160.md` at next OPEN.
 
 ---
 
-## 🏁 S154 CLOSE — spec design+landing arc: #14 event-payload-transition + (d)-A enum-subset refinement LANDED normative; C1 website extracted to scrml-site
+## 🏁 S155 CLOSE — #14 event-payload-transition IMPLEMENTED (3/3 batches) + Profile-B thin-start validated
 
-A **design + spec-landing** session — **implementation is the NEXT arc** (see 🎯 NEXT-SESSION PICKUP below). Resolved the S153-parked design questions (a/b/c/d), ran 2 deep-dives, designed→reviewed→revised→**landed 2 spec amendments into SPEC.md (now normative)**, extracted the C1 website to its own `scrml-site` repo, refreshed maps, triaged an adopter bug, floated a sub-session process proposal. Full as-we-go detail in the IN FLIGHT / STOCK-TAKING / DESIGN DECISIONS sections below.
+**Arc:** the #14 event-payload-transition primitive (Approach E, §51.0.S/§51.0.G.1, spec landed S154) is **fully implemented end-to-end** — parser → typer → codegen + runtime — across 3 dispatched-and-landed batches, each S67 file-delta'd + the codegen batch dual-R26-verified. Plus a scandir warm-up fix. Session run as the **first live Profile-B (thin-start) test** of the S154 sub-session proposal.
 
 ### Sync / repo state at CLOSE
-- **scrmlTS:** clean, `origin/main` **0/0** (PUSHED this wrap). 3 substantive PA commits + wrap commit: `b840e377` (remove docs/website-viewer → scrml-site) · `a13ce1ad` (maps refresh) · `ce78f9d8` (spec landing #14+(d)-A) · wrap (hand-off/master-list/changelog/hand-off-158).
-- **scrml-support:** clean, **0/0** (PUSHED). `9ce3077` (#14 DD+draft+review + (d)-A DD + user-voice rulings) · `9d57b69` ((d)-A draft rev2 + review) · + wrap user-voice append (website-executed + sub-session proposal).
-- **scrml-site:** NEW sibling repo (master `f9fe388`, local-only — **GitHub remote PENDING USER**, GCM headless). Own PA.
-- **Inbox:** empty (master website-signal + scrml-site scandir-bug archived to `incoming/read/`). **Outbox:** website-split→master, scandir-reply→scrml-site.
-- **Tests at close:** full `bun run test` **22,582 pass / 0 fail / 224 skip / 1 todo / 873 files** (vs S153 22,586/220 — −4 pass/+4 skip flux, 0 fail; SPEC-text+docs only).
-- **Maps:** fresh (`a13ce1ad`); the spec landing is SPEC-text so maps still current for source work. Infra: 4 maps carry old header hashes (content fine; re-stamp at next FULL_COLD_START).
-- **Version:** on top of v0.7.0 (pkg.json unchanged; NO tag cut — spec-text + extraction).
-- **known-gaps:** HIGH **0**. 2 specs landed-normative (impl pending). scandir bug NEW (queued).
-- **Worktrees:** main only (landing worktree cleaned).
+- **scrmlTS:** clean, `origin/main` **0/0** (all PUSHED). Commits this session: `096951c4` (scandir) · `6e859b3e` (api.test worktree-false-fire fix) · `6667b664` (#14 batch-1 parser) · `c6f323f0` (#14 batch-2 typer) · `a9ce4c3a` (#14 batch-3 codegen+runtime) + this wrap commit.
+- **scrml-support:** pulled to 0/0 at OPEN (other-machine S154 work); NO writes this session → no push needed.
+- **Inbox:** scrml-site lift-list fyi processed → `incoming/read/` (filed as Bug 64). Outbox: none (scrml-site landing-notice HELD per user — repo not on this machine).
+- **Tests at close:** full `bun run test` **22,672 pass / 0 fail / 220 skip / 1 todo / 878 files** (vs S154 22,582 — +90 = #14 batch tests: parser 18 + typer 39 + codegen 18 + browser 9 + misc). within-node allowlist rebumped ONCE (batch-1 acceptsType, MISSING-FIELD only).
+- **known-gaps:** HIGH **0→1** (Bug 62, below), MED **12→14** (Bug 63 + Bug 64). All three are S155 #14-arc / adopter follow-ups — NONE is a #14 regression.
+- **Version:** on top of v0.7.0 (pkg.json unchanged; no tag cut — feature impl, no release).
+- **Worktrees:** all 3 #14 landing worktrees cleaned at wrap (agent-a74231d.../a0f3d80b.../ad41c7b2...). Main only.
 
-### 🎯 NEXT-SESSION PICKUP — the #14 + (d)-A IMPLEMENTATION arc (+ scandir fix)
-**Both amendments are LANDED + NORMATIVE in SPEC.md (§51.0.S, §51.0.G.1, §53.15, §18.8.1, §41.15.6, §53.9.2 + 5 §34 codes). Implementation NOT started.** Multi-batch (smaller-batches rule):
-- **#14 impl:** (1) parser — `accepts=` opener attr + `(state×message)` arm recognition; (2) typer/SYM — `.advance` two-enum plane resolution (§51.0.G.1) + `(state×message)` exhaustiveness + 4 codes; (3) codegen + runtime — message dispatch (arm → effect + transition).
-- **(d)-A impl:** type-system variant-literal `oneOf`/`notIn` in refinement position + §53.4 three-zone solver extension + §18.8.1 exhaustiveness reads the refined variant set + schemaFor subset-CHECK lowering + `E-MATCH-SUBSET-DEAD-ARM`.
-- **+ conformance tests** per new normative statement; **+ R26 empirical verify** (HIGH codegen, S138).
-- **+ scandir fix** (clean quick win): `compiler/src/api.js` `scanDirectory.walk` — skip `node_modules`/`.git`/`dist`/dot-dirs + `lstatSync` (don't follow symlinked dirs); +test; reply landing-notice → `scrml-site/handOffs/incoming/`.
-- **Impl contract (read these):** `scrml-support/archive/spec-drafts/event-payload-transition-primitive-S154-DRAFT.md` (rev2) + `enum-subset-refinement-S154-DRAFT.md` (rev2) + their `-REVIEW.md`; the landed §51.0.S / §51.0.G.1 / §53.15 in SPEC.md.
-- **★ FIRST PROFILE-B TEST:** the user floated thin-start for execution arcs (user-voice S154 sub-session proposal). Next session: TRY opening thin (a pa-core-equivalent + this hand-off + the named landed-spec sections + the 2 spec drafts) instead of the full ~25% start. If it holds → RATIFY + write `pa-core.md` + amend pa.md with the Profile A/B split.
+### 🎯 #14 STATUS — PRIMITIVE COMPLETE; 2 orthogonal follow-ups gate full canonical usage
+- **DONE (verified):** `accepts=MsgType` opener attr (parser+typer), `(state × message)` arm recognition (parser), `.advance` two-plane resolution §51.0.G.1 (typer), exhaustiveness + the 4 §34 codes (typer), message-dispatch codegen + runtime (`_scrml_engine_dispatch_message`, §51.0.S.3 machinery incl. the §51.0.R same-state onIdle-reset divergence), arm-target `rule=` validation. happy-dom 9/9 + agent R26 + **PA independent R26** all green on the §51.0.S.6 fixture.
+- **Bug 62 (HIGH, NEW):** `.advance` inside an `<each>`-render event handler → E-CODEGEN-INVALID-JS (each-render path doesn't thread engine ctx; raw `@` sigil). PRE-EXISTING, affects state-plane `.advance` too. Blocks the LITERAL §51.0.S.6 each-nested drop-handlers (fixture works around with plain handlers). **Next: focused each-render-ctx engine-threading dispatch.**
+- **Bug 63 (MED, NEW):** markup-attr `.advance(.X)` not bare-variant-type-checked (pre-existing general markup-attr gap; runtime works, static typo-check absent).
+- These two close the "#14 fully usable at its canonical call site" picture — but are orthogonal pre-existing gaps, not #14 deficiencies.
 
-### Agent-name drift (carry-forward)
-pa.md says canonical dev-agent = `scrml-js-codegen-engineer` (S133 rename) but THIS machine only loads `scrml-dev-pipeline` — the rename didn't propagate here. Used `scrml-dev-pipeline` (works; model:opus explicit). Fix: rename the agent file on this machine OR stage via master (propagates next session).
+### ★ PROFILE-B VERDICT (the experiment) — HELD; recommend RATIFY + write pa-core.md
+- Ran the entire session thin: read pa.md + hand-off + user-voice S154 + git sync + the NAMED landed-spec sections only. SKIPPED full PRIMER / master-list §0 / rest of SPEC-INDEX. Start cost ≈ the proposal's target (~5-8% vs ~25%).
+- **It held through all 3 dispatches + landings + a deliberate off-scope curve-ball.** Each batch needed a real PA-side context-sweep (locate fire sites, name the pattern-to-mirror) BEFORE the brief — which IS the proposal's "brief carries the context-sweep" condition, and it worked.
+- **FINDINGS to bank for `pa-core.md`:**
+  1. Profile B is safe for EXECUTION arcs where spec is landed + the brief carries the per-batch context-sweep (fire sites + pattern-to-mirror + maps currency).
+  2. **Thin sessions should PARK off-scope design tangents on contact** (capture as DD-candidate + defer), not engage them at length. The build-story curve-ball was deferred correctly but engaged more verbosely than a scoped session ideally should — park faster/terser.
+  3. The maps were genuinely load-bearing (resolved the legacy-BS+TAB vs native parser-path fork that the thin reads didn't carry) — every batch agent reported them load-bearing.
+  4. Standing-autonomy grant (review→land→push→R26→wrap, surface only on failure) makes thin execution sessions run unattended — the user's "engage only if parallel-session info surfaces" model.
+- **If ratified:** write `pa-core.md` (~100L: 5 Rules + dispatch checklist + wrap def + sync/push discipline) + amend pa.md with the Profile A/B split.
 
 ---
 
-## (as-we-go detail below — superseded-by-the-CLOSE-header-above where they overlap)
+## (as-we-go detail below)
 
-## S154 OPEN — caught up (session-start record)
+## S155 — PROFILE-B TEST SESSION (thin start, ratify-pending S154 proposal)
 
-Session-start checklist complete.
+This session is the **first live test of the S154 sub-session / tiered-session-start
+proposal** (user-voice S154). Opened **Profile B (thin)**: read pa.md (full) + hand-off (full)
++ user-voice S154 + git sync + the NAMED landed-spec sections — **SKIPPED** full PRIMER /
+master-list §0 / rest of SPEC-INDEX. Cost so far ≈ the ~5-8% the proposal targets, vs ~25%
+full. **If Profile B holds through this arc → RATIFY + write `pa-core.md` + amend pa.md with
+the Profile A/B split.** User chose Profile B + work order "scandir fix, then #14/(d)-A."
 
-### Sync / repo state at OPEN
-- **scrmlTS:** clean, `origin/main` **0/0**. HEAD `c665714c` (= S153 CLOSE wrap).
-- **scrml-support:** was BEHIND by 2 (s152 commits pushed from other machine: `bdeaf9d` pa.md `---` answer-delimiter + cross-file-module-loading DD; `49fba96` user-voice s152). **Pulled --rebase → 0/0, clean** (fast-forward, untracked voice/articles + tools/ left intact). The pa.md `---` delimiter convention is NOW in the local copy.
-- **Worktrees:** main only.
-- **Inbox:** `handOffs/incoming/` empty. **Outbox:** none.
-- **Tests (S153 close baseline):** full `bun run test` 22,586 pass / 0 fail / 220 skip / 1 todo / 873 files. within-node canary 0 PARSE-FAILURE.
-- **known-gaps (S153 close):** HIGH 0 · MED ~12 · LOW ~20 · Nominal 7.
-- **Maps:** `.claude/maps/` at `efcd5536`; now **3 codegen commits stale** (`3429b385` each-in-match · `c89c1cb1` colon-shorthand · `e6870f25` each-enclosing-scope). REFRESH before any compiler-source dispatch (maps-discipline protocol).
-- **Version:** on top of v0.7.0 (pkg.json unchanged; no tag cut pending).
+### Sync / repo state
+- **scrmlTS:** clean, `origin/main` **0/0**. HEAD `096951c4` (scandir fix, PUSHED).
+- **scrml-support:** was 3 behind (other-machine S154 deep-dives/drafts/user-voice). Pulled
+  `--rebase` → **0/0** clean.
+- **Hooks:** config B (pre-commit + post-commit + pre-push). Untouched.
+- **Inbox:** empty. **Worktrees:** one live — `agent-a74231d101722b005` (#14 parser batch, in
+  flight; retain until landed).
 
-### New since last session (the pulled s152 scrml-support commits)
-- **pa.md `---` answer-delimiter convention (S152, now in force):** everything BELOW the last `---` on its own line in a user message = answers to PA's pending questions; everything ABOVE = the new substance. Optional `A:` prefix on the answer block. Honor both.
-- **cross-file-module-loading DD** landed at `scrml-support/docs/deep-dives/client-cross-file-module-loading-2026-06-01.md` (614L) — relates to carry-forward #6 (cross-file client imports → non-module `<script>`). Not yet read in full; read if that thread is picked up.
+## DONE this session
 
-## DESIGN DECISIONS — S154 PROGRESS (a/b/c RULED → user-voice; d in-discussion)
-**Rulings appended to user-voice S154 (durable; UNCOMMITTED in scrml-support, push pending). NOT yet in SPEC/impl — spec-amendment + codegen dispatches pending.**
-- **(a) #2c `:`-shorthand on lowercase HTML element — RULED: render it; reject on void elements.** `<span : @label>` → `<span>${@label}</span>` (per §4.14 line 980; mirrors `<li : @.name>`). Void elements (`<input>`/`<br>`/`<img>`/`<hr>`) REJECT (no content model — "where meaningful" §4.14 L997; new reject code). Kills S153 #2c empty-span+E-DG-002. Impl = codegen-emission fix mirroring `<each>` per-item path + void guard.
-- **(b) #2d `:`-placement discrepancy — RULED: `:` INSIDE the opener (§4.14 universal form) canonical everywhere.** §51.0.I's `<Variant> : expr` (`:` after `>`) NOT canonical — §51.0.I + engine-state-child impl reconcile TO inside-opener. **2 micro-grammar sub-Qs FLAGGED (user example `<span :@thing />`):** (1) no-space-after-`:` (`:@thing`) vs current mandatory-whitespace — confirm; (2) self-close `/>` alongside `:`-shorthand vs E-CLOSER-001 — confirm. Resolve before spec reconciliation.
-- **(c) #2 no-RHS typed-decl default — RULED: canonical empty where one exists, else `not`.** int/number→0, float→0, string→"", bool→false, T[]→[] (Shape 4), map/obj→{} (§42.1.1 DEFINED values); struct/enum/opaque→`not`. EXTENDS S152 Shape 4; SUPERSEDES E-DECL-NEEDS-INITIALIZER. **Impl sub-Qs to confirm:** exact table (enum→`not`); `not`-init engages §42/§14.12 lifecycle (`<x>: User` no-RHS ≈ `(not to User)`, E-TYPE-001 on pre-transition read); E-DECL-NEEDS-INITIALIZER fate.
-- **(d) #9 predicate fields / enum-subset — IN DISCUSSION S154.** Spec-grounded (Rule 4): predicates DO apply to non-enum fields (§53/§39.5.7/§55); enum fields are inherently closed-set (§14.3.2 L7440); `oneOf([.A,.B])` subset IS in the §53 refinement vocab + shown as a §55 state-cell validator (L29544) + lowers to SQL CHECK IN (§39). The §53.13.2 "subset of target constraint" open-Q is constraint-ARITHMETIC (unrelated). Real open edges = (i) explicit normative worked-example + STATIC-enforcement statement for enum-SUBSET on a struct FIELD-type (reject `role: .Viewer` at construction); (ii) cross-loci composition — does schemaFor honor the subset vs auto-oneOf(all)? does validity surface fire .OneOfFailed? — the L4 "define once derive everywhere" needs the subset to flow. NOT a missing primitive; a confirm+document+verify-enforcement task. Awaiting user's reading (except vs accept) + direction.
+### scandir fix — LANDED + PUSHED (`096951c4`)
+`compiler/src/api.js` `scanDirectory.walk`: skips `node_modules`/`dist`/dot-dirs + `lstatSync`
+(no symlink-follow) + try/catch. +2 unit tests (`api.test.js` §5). Fixes the scrml-site
+`scrml dev <dir>` compile-storm (walked bun-linked dep trees). Pre-commit + pre-push green
+(15512 / 0). PA-direct edit (user-authorized).
+- **scrml-site landing-notice: HELD** (user directive). **scrml-site does NOT exist on this
+  machine** (local-only on the other machine, no GitHub remote → can't git-sync here). The S140
+  sibling-path check caught it before writing a phantom inbox. User carries the notice
+  ("scandir fixed @096951c4") to the scrml-site PA on the other machine.
 
-## IN FLIGHT (S154)
-- **#14 event-payload-transition primitive DD — COMPLETED** (background `scrml-deep-dive` a8b2e5ea2cbdf9493; 723L). File: `scrml-support/docs/deep-dives/event-payload-transition-primitive-2026-06-02.md` (status:current; **UNCOMMITTED in scrml-support, push pending**). **Headline:** witnessed-need MET. Narrow symptom (Tier-0 `if (@engineCell == .V)` gating) = 1 site (gold). BROAD symptom ("event-time payload trapped in a `function` because the engine can't consume it") ≈ 19 sites. Strongest sibling: `23-trucking-dispatch/.../hos.scrml` — DriverStatus engine declares a `rule=` contract (L71-76) then HAND-DUPLICATES it as 8 `if (cur==X && newStatus==Y)` lines (L144-153) because the transition is event-driven across a server boundary + never touches the engine cell. scrml has BOTH wire ends (variants carry payloads §51.0.B.1 consume-side; payload-variant direct-write §51.0.H Form 3 produce-side) but NO bridge for an EVENT payload to drive the transition. **5 approaches.** Prior art unanimous (Elm `update` / XState `send`+`on:` / SCXML `_event.data` / Rust `match (state,event)` / Redux): typed message + (state×event) dispatch; NONE binds machine to DOM → **eliminates Approach B** (the gold-site author's literal `<onTransition on=event>`). **Recommends a DEBATE** (bimodal dev signal: ecosystem-pragmatists React/Svelte/Vue/Solid want lightest markup write A/D; state-machine traditions Rust/Elixir/TS want typed (state×event) dispatch E/C). **DD PA-lean: Approach E** (hybrid — bare write for simple case + a message-arm the engine `match`es on, message = ordinary scrml enum; only one satisfying both clusters; reuses shipped match §18.0.1 + payload-binding §18.7 = Pillar-5-clean; A/D as baseline E preserves). **Honesty flags:** dev signal SYNTHESIZED not live-polled (14 dev agents live in scrml8 workspace, NOT scrmlMaster — S149 fallback); narrow witness n=1, broad n≈19 is the load-bearing case. **Suggested debate dispatch** via `@debate-curator` (forge `xstate-statecharts-expert` + `elm-architecture-expert` + `rust-state-machine-expert`; A vs D vs E, C as E-maximalist, B as eliminated foil). **DD's PA-action-requested:** live-poll the 14 scrml8 dev agents to confirm the bimodal signal (cross-workspace + staging friction — surfaced to user, not auto-done). **PA READ DD IN FULL (S154).** PA assessment: DD sound; B correctly dead (tree-decoupling problem); **E is the principled synthesis** — the mechanical WHY is the payload-slot argument (simple case = target variant HAS a payload slot → bare write A; complex case = target is a unit variant but the transition needs event data → a message variant carries it into the `(state × msg)` arm). **PA leans DISPOSITION-over-debate** (the DD's prior-art table already did the comparative work a debate would re-litigate; the "bimodal dev signal" is synthesized + E dissolves it; forging 3 experts is real cost). **Critical scoping caveat:** E collapses SINGLETON-engine event-transition glue (gold site + simple per-element); the **17-site per-instance move cluster needs per-instance engines `<engine for=T per=@expr>`** (singleton wall §51.0.K — separate arc) and the **trucking server-boundary site needs the CPS/body-split server-transition story** (Q4) — so E does NOT collapse all ~19; don't oversell. **Residual sub-Qs any E spec must answer:** Q3 (does `.send` reset timers/idle/history per §51.0.F.1 trichotomy?), Q4 (server-boundary), Q5 (per-instance interaction), + `.send` vs `.advance` cohesion (avoid a 2nd transition method if mergeable). **→ E RATIFIED S154 (disposition, not debate) + SPEC DRAFT WRITTEN** at `scrml-support/archive/spec-drafts/event-payload-transition-primitive-S154-DRAFT.md` (UNCOMMITTED). **`.advance`-ride RESOLVED = YES, no `.send` verb:** `.advance(arg)` polymorphic over arg's enum — state-variant → existing §51.0.G direct loud transition; message-variant → NEW dispatch through `(state × message)` arms; disambiguated by enum type via §14.10 (name-collisions handled by existing E-VARIANT-AMBIGUOUS); quiet `@x=.V` stays state-only (a message can't inhabit a state cell → type error). **Q3 RESOLVED:** arm body ALWAYS runs (it's the message's purpose); state-change machinery (onTransition/history/timer) fires iff arm target ≠ current per §51.0.F.1; ONE flagged sub-call = handled-message resets `<onIdle>` watchdog even same-state (a message is activity, not silence — recommend YES). Proposed: new §51.0.S + `on=MsgType` opener attr + 5 new §34 codes. Scope = singleton client-side; per-instance + server-boundary = sibling arcs (NOT this primitive — don't oversell "~19 sites"). **NEXT: scrml-language-design-reviewer gate** → ratify 7 open sub-Qs (idle divergence / `on=` naming / `event`-in-bare-handler / section slot / arm-block grammar) → land §51.0.S + §34 + §51.0.G amendment. **→ SENT TO REVIEWER S154** (background `scrml-language-design-reviewer`; review → `archive/spec-drafts/event-payload-transition-primitive-S154-REVIEW.md`; charged to challenge the `.advance`-overload-rides-§14.10 soundness [the load-bearing claim], Q3 idle-divergence, exhaustiveness two-tier model, 5 new §34 codes, + verify all spec cites). **→ REVIEWER RETURNED S154: VERDICT READY-WITH-CHANGES** (review at `archive/spec-drafts/event-payload-transition-primitive-S154-REVIEW.md`). Design holds (E faithful; `.advance`-ride is the CORRECT resolution). **2 BLOCKING + 2 REQUIRED changes before landing:** (B1) **the `.advance` disambiguation does NOT ride §14.10** — §14.10 resolves a bare variant against exactly ONE position type; the draft's TWO-candidate-enum (state `for=` + message `accepts=`) "try-state-else-message" is a NEW rule. The OUTCOME (collision→E-VARIANT-AMBIGUOUS) is right but the MECHANISM must be written EXPLICITLY (cleanest home: a §51.0.G amendment + a cross-ref note in §14.10). The draft over-claimed §14.10 reuse — that was the load-bearing soundness claim, now correctly grounded. (B2) **runtime-value union-typed `.advance(x)` arg (`x: State|Msg`) is undefined** — FORBID it with a code (don't runtime-tag-dispatch). (R3) **`on=` COLLIDES** with §18.0.1 `<match for=Type on=expr>` (where `on=` is the matched VALUE) — rename to **`accepts=`**. BONUS the reviewer found: **`.send` is ALREADY taken by `<#name>.send()` worker/nested-program dispatch** — independently vindicates the `.advance`-ride over the DD's `.send` sketch; draft should cite it. (R4) **`E-ENGINE-MSG-ARM-TARGET-INVALID` double-fires** with existing `E-ENGINE-INVALID-TRANSITION` for the static literal case — DROP the new code (reuse-over-invention) OR add a disjointness clause. **Cleared correct:** arm-body block shape matches §18.2; quiet-vs-`.advance` split sound; §51.0.S right slot; two-tier exhaustiveness coherent (1 teachability refinement); scope honest. **Landing touches §51.0.S + §51.0.G + §51.0.B table + §51.0.R + §34** (not just §51.0.S). **NEXT: PA revise draft per the 4 changes** (PA sub-picks: B2 → forbid via ambiguity code; R4 → drop the redundant code) → re-verify → then SPEC.md landing (compiler-repo work).
-- **(d)-A enum-subset-refinement-exhaustiveness DD — COMPLETED** (background `scrml-deep-dive` abaf7e5185e65e41f; file `scrml-support/docs/deep-dives/enum-subset-refinement-exhaustiveness-2026-06-02.md`, status:current, UNCOMMITTED). **Headline: PA-disposition, NOT debate** — the headline feature is ratified + the mechanics are settled by **Ada/SPARK** (case Legality Rule 7/4 is the EXACT template: subtype-narrowed coverage, out-of-subtype choice illegal, runtime Constraint_Error) + the existing §53.4 SPARK three-zone surface + §55.1 oneOf/`.OneOfFailed` (already in spec). Enforcement: out-of-subset literal = compile error (static zone); narrowed-from-base = runtime check (boundary zone); proven = free (trusted zone). Flow: subset→base free (widen), base→subset checked (narrow); exhaustiveness-narrowing does NOT survive a widening fn-param boundary (matches Ada/TS). Exhaustiveness amends §18.8.1 `V ⊆ A` so V = subset. Cross-loci: schemaFor MUST override §41.15.6 full-enum auto-lowering with the subset CHECK. **ONE genuinely contested sub-fork SF-1:** dead-arm / vacuous-`else` disposition — hard ERROR (Ada) vs WARNING (TS); DD recommends hybrid (concrete dead variant arm = error; vacuous `else` = warning). 9/10 sub-forks settled by prior-art. Empirical bar soft (coherence/correctness feature, not bleeding-friction). **→ SF-1 RATIFIED S154 (hybrid): concrete dead-variant arm = compile ERROR (Ada case-Legality-Rule-7); vacuous `else`/`_` wildcard = WARNING (TS-unreachable).** That was the only contested fork — (d)-A design now FULLY closed + spec-draftable. **NEXT: draft the (d)-A spec** (same ratify→draft→reviewer flow as #14) — TEED UP, pending user greenlight (user gave "ratify SF-1" but not yet "draft it"; offered as next step). Minor OQs to fold into that draft: error-code-reuse + `notIn` symmetry. (Rust pattern-types RFC independently arrives at the identical model — strong corroboration.)
+## IN FLIGHT
 
-## S154 STOCK-TAKING + OPEN DECISIONS (added late-session)
-- **#14 draft REVISED to rev 2** (all 4 reviewer changes applied: explicit `.advance` dispatch rule = §51.0.G amendment not §14.10-reuse; runtime-union arg forbidden→E-VARIANT-AMBIGUOUS; `on=`→`accepts=`; redundant `E-ENGINE-MSG-ARM-TARGET-INVALID` dropped→reuse E-ENGINE-INVALID-TRANSITION). **scrml-support pile PUSHED** (`9ce3077`, 0/0): 2 DDs + #14 draft-rev2 + review + user-voice S154. Pre-existing untracked `tools/` + `voice/articles/*` (NOT this session's — from another machine) left untouched.
-- **(d)-A spec draft = DRAFTED + SENT TO REVIEWER** (`archive/spec-drafts/enum-subset-refinement-S154-DRAFT.md`, UNCOMMITTED). Encodes: NEW §53.15 (enum-subset refinement, 3-zone enforcement, widen-free/narrow-checked, no-range-per-RPP02); §18.8.1 amendment (V=subset; SF-1 hybrid = concrete dead arm ERROR / vacuous else WARNING `W-MATCH-VACUOUS-ELSE`); §41.15.6 schemaFor subset-override; §55 confirm (.OneOfFailed already correct); notIn included (OQ-4); E-CONTRACT-001 reused for static out-of-subset (OQ-2 reuse-over-invention). Dispatched to background `scrml-language-design-reviewer` (af13c341443cb0e32; review → `enum-subset-refinement-S154-REVIEW.md`; charged to verify the §18.8.1 amendment + E-TYPE-023-reuse-scope + 3-zone enum-membership + verify cites). **→ REVIEWER RETURNED READY-WITH-CHANGES; rev2 APPLIED + PUSHED (`9d57b69`).** The catch: **E-TYPE-023 is duplicate-arm-ONLY (L11383), does NOT cover refinement-unreachable arms** → MINT `E-MATCH-SUBSET-DEAD-ARM` (not the reuse the draft hedged). Also: reuse existing `W-MATCH-001` for vacuous-else (not a new warning); STRUCK the DD's intra-arm-singleton-narrowing claim (**scrml has NO general flow-narrowing — `given` is machine-rule-only §4.11.4**; match arms do NOT narrow the matched value's type — a genuine language fact); named the match edge cases (nested / derived-cell / bound-value); KEPT E-CONTRACT-001 reuse (§53.6.1 L28518 already mandates it). §18.8.1 amendment confirmed SOUND. **Both #14 + (d)-A specs now drafted + reviewer-passed-with-changes + rev2 + pushed — READY for SPEC.md LANDING (compiler-repo work).**
-- **SPEC LANDING DISPATCHED (S154, background worktree, agent `a5f4dd13d143e1c0b`)** — lands BOTH reviewer-passed amendments into `compiler/SPEC.md` + §34 + regen SPEC-INDEX (SPEC-text only, NO compiler source; brief at `docs/changes/s154-spec-landing-event-payload-enum-subset/BRIEF.md`). On return: PA file-delta review (diff agent's SPEC.md vs the 2 drafts) → commit to main (user authorized "I commit them"). THEN #14 implementation is the next build dispatch (parser `accepts=` + `.advance` dispatch + `(state×msg)` arm codegen) + conformance tests for the new normative statements (separate follow-on). **AGENT-NAME DRIFT (flag):** pa.md says canonical dev-agent = `scrml-js-codegen-engineer` (S133 rename) but THIS machine only loads `scrml-dev-pipeline` (the pre-rename name) — the rename didn't propagate here. Used `scrml-dev-pipeline` (works; repo-calibrated; model:opus explicit). Follow-up: rename the agent file on this machine OR confirm via master/agent-staging (agent-file edits propagate next session). **→ LANDED + COMMITTED S154 (`ce78f9d8`).** Agent forked from `c665714c` (stale base, PRE website-removal+maps) → `git diff main..branch` showed website-viewer "added" + maps "reverted" = STALE-BASE, NOT agent work; S67 file-delta SKIPPED them, pulled ONLY compiler/SPEC.md + SPEC-INDEX.md + progress.md (+ BRIEF.md from main). Verified: §51.0.S present, 5 new §34 codes present (collision-free), `accepts=`×24, §18.8.1 subset-narrowing text present; SPEC files untouched by my 2 prior commits (clean apply); pre-commit 15600/0. **scrmlTS now 0/3 ahead** (b840e377 + a13ce1ad + ce78f9d8; ALL push-pending). **§51.0.S + §53.15 are now NORMATIVE.** Landing worktree `agent-a5f4dd13d143e1c0b` RETAINED until wrap (S67 forensic). **#14 + (d)-A IMPLEMENTATION is the next arc** (multi-batch per smaller-batches rule: (1) parser `accepts=` + `(state×msg)` arm recognition; (2) typer `.advance` two-enum plane resolution + (state×msg) exhaustiveness + the 5 codes; (3) codegen + runtime message-dispatch; (d)-A: type-system variant-literal `oneOf` in refinement position + 3-zone solver + exhaustiveness refined-set read + schemaFor subset lowering; + conformance tests per normative statement). NOT dispatched yet — see wrap recommendation.
+### #14 event-payload-transition — PARSER batch (batch 1 of 3) — LANDED ✅
+- **Agent:** `scrml-js-codegen-engineer` a74231d101722b005 (FINAL_SHA 973af58b). BRIEF at
+  `docs/changes/s155-14-parser-accepts-message-arms/BRIEF.md`.
+- **Landed via S67 file-delta — 2 PA commits:** `6e859b3e` (api.test.js worktree-false-fire
+  fix — see below) + `6667b664` (#14 parser: `accepts=` capture in ast-builder.js →
+  `EngineDeclNode.acceptsType`; `parseMessageArms` in engine-statechild-parser.ts → leading
+  contiguous `|`-arms = dispatch table, render body via `renderBodyStart`; `MessageArmEntry` +
+  `EngineStateChildEntry.messageArms` in symbol-table.ts; native-walker `[]` shape-parity
+  placeholder). **Recognition→AST only**; +18 tests (engine-message-arms.test.js); within-node
+  allowlist rebumped (MISSING-FIELD only, acceptsType). Full suite **22606/0/220**.
+- **Review verdict PASS:** S147 coherence 0/2 (no leak), scope discipline clean, parseMessageArms
+  correct (balanced scans, `||`-vs-arm handled, reuses parsePayloadBindings), allowlist rebump
+  canary-clean (only MISSING-FIELD, +3 = nested-engine fixtures).
+- **api.test.js fix (`6e859b3e`):** my S155 scandir test (`096951c4`) checked `f.includes("/.claude/")`
+  which false-fires in ANY worktree (worktrees live under `.claude/worktrees/`); broke this
+  dispatch's pre-commit + would break every future worktree dispatch. Agent caught + fixed
+  (scope to FIXTURE_DIR-rooted decoys). Landed.
+- **Worktree `agent-a74231d101722b005` RETAINED until wrap** (S67 forensic).
+- **PUSH:** 6e859b3e + 6667b664 PUSHED (origin).
 
-## NEW INCOMING — scrml-site bug (TRIAGED S154, not yet fixed)
-- **`scrml dev <dir>` scanDirectory descends into node_modules symlinks → compile-storm / no-listen** (`2026-06-02-0617-scrml-site-to-scrmlTS-scandir-node_modules-bug.md`, in incoming/ UNREAD-archived-pending-fix). **TRIAGE: CONFIRMED real bug, HIGH adopter-value, LOW-risk fix, NOT currently blocking.** Root cause (report pinpoints it): `compiler/src/api.js` `scanDirectory.walk` (~L86) — no `node_modules`/`.git`/`dist`/dot-dir skip + `statSync` follows symlinks → walks `bun link`ed dep repos. Fix = skip those dirs + `lstatSync` (don't follow symlinked dirs); pure-additive (those dirs hold no routable `.scrml`). Mirrors the BUG-1 watcher fix (`commands/dev.js deriveWatchFiles`); the GATHER path wasn't covered. Directly affects the S154-ratified `bun link` dependency model (scrml-site is the first consumer). scrml-site UNBLOCKED via workaround (serve.sh passes explicit files, not `scrml dev .`). **Needs a reply to scrml-site + a fix dispatch (clean quick win — good first item for the next code session, alongside #14 impl).**
-- **MAPS REFRESH DONE** — `project-mapper` (a5bf716305eddf319) refreshed `.claude/maps/` efcd5536→HEAD `c665714c`; primary/structure/domain/error/test maps re-stamped + a Task-Shape-Routing section prioritizing "compiler-source bug fix"/"codegen". Non-compliance clean (7 delta docs all compliant). **Surfaced for code work:** (1) `54d54d4d` engine-gated-each symbols (`_scrml_each_renderers`/`_scrml_remount_each`, dep-first read, emit-variant-guard + runtime-template) now mapped; (2) native-parser-no-structural-`<each>`/`<match>`-promotion = hard M5-swap precondition (witnessed 2×); (3) **infra finding:** `dependencies/schema/config/build.map.md` carry OLD header hashes (content untouched by S153 so not re-stamped per incremental routing) — re-stamp all headers at next FULL_COLD_START.
-- **per= (per-instance engines) — user asked "did we land anywhere": NO.** Current SPEC is explicit (§51 ~L24796): "If you want per-instance state machines, use plain reactive cells" — engines are singleton-by-design (§51.0.K). `per=` is ONLY a placeholder the #14 DD used to NAME the unscoped sibling arc; NOT ratified, NOT designed, no DD. Gauntlet personas r25/r28 flagged per-instance as real friction ("what WOULD move me to 8+ = per-instance state machines"). Status: KNOWN-FRICTION / UNSCOPED future arc; needs its own DD (a meaty change to singleton-by-design). The #14 primitive does NOT cover it (the 17-site move cluster).
-- **WEBSITE-EXTRACTION proposal (user, S154 — OPEN, undecided):** take the C1 self-demo website arc OUT of scrmlTS into its own scrmlMaster repo, so a separate PA owns it while scrmlTS focuses purely on the language. PA read: SOUND + fits the per-repo-PA ecosystem model (scrmlTS/scrml-support/scrml/giti/6nz each have a PA) + the "scrmlTS = pure language" focus. It's a MASTER-COORDINATION move (new repo + new PA + agent staging + move `docs/website-viewer/` out + the C1 carry-forwards). Key setup decisions: (a) website repo consumes scrmlTS as a published/bun-linked DEPENDENCY (cleanest dogfood = real adopter install experience) vs vendoring the compiler — recommend dependency; (b) test-dashboard + examples STAY in scrmlTS (they're test assets) — website imports/references them cross-repo. **→ MSG SENT TO MASTER S154** (user "draft the website split msg to master"): `/home/bryan/scrmlMaster/handOffs/incoming/2026-06-02-0516-scrmlTS-to-master-website-split.md` (needs:action — repo-name + dependency-vs-vendor [PA rec: dependency] + move docs/website-viewer/ + stage a website PA; full C1 carry-forward context embedded for the new PA). Master reads it in its own session; user can amend the msg before then. **→ DONE S154:** master actioned (reply `2026-06-02-0535-master-to-scrmlTS-remove-website-viewer.md`, now in `incoming/read/`) — created **`scrml-site`** (commit `f9fe388`; name=`scrml-site`; **DEPENDENCY model** confirmed by user, NOT vendor; test assets dashboard+examples/ stay in scrmlTS, referenced cross-repo). scrmlTS verified the 21 files **byte-identical** in scrml-site → **removed `docs/website-viewer/` (commit `b840e377`)** + maps committed (`a13ce1ad`). inc2 website forks MIGRATED to `scrml-site/hand-off.md` (dropped from scrmlTS — see autonomous-ready below). **scrml-site GitHub remote PENDING USER** (GCM can't prompt headlessly — not blocking). Standing cross-repo notify: scrmlTS codegen output-shape changes → drop a notice in `scrml-site/handOffs/incoming/`. **scrmlTS now 0/2 ahead** (b840e377 + a13ce1ad; push-pending for wrap).
-- **LOC snapshot (S154, raw `wc -l`):** compiler/src ≈ **157k** LOC .ts/.js (the pa.md "~24,739" repo-layout figure is BADLY STALE — 150 sessions of growth; biggest single file ast-builder.js 13.7k; codegen dir is the largest subdir, 65 files). Native parser (already in tree as shadow): ~36k .js + ~20k .scrml self-host mirror. **M6 going-live is NOT a net LOC shrink:** it DELETES ~6-9k of legacy front-end glue — block-splitter.js (~2.1-2.9k) + BPP/body-pre-parser.ts (354) + engine/match-statechild re-tokenizer (~2k) + the Acorn-parse path in expression-parser.ts (the ExprNode infra STAYS — 26 src consumers) + the `acorn` npm dependency + ~40 retiring test/canary files — but the native parser that replaces it is LARGER + more capable (real diagnostics + self-host path) and is already carried. M6 plan frames it as a MIGRATION (~70-130h, ~20 hard-bound sites in ~12 src files), not a clean deletion. The win is correctness/capability + dropping acorn, NOT LOC reduction.
+### #14 batch 2 (TYPER/SYM) — LANDED + PUSHED ✅ (`c6f323f0`)
+- Agent a0f3d80b7c1378c79 (FINAL_SHA 50bcea8a). BRIEF at `docs/changes/s155-14-typer-advance-exhaustiveness/`.
+- symbol-table.ts: `EngineMetadata.acceptsType`/`messageVariants`; Step-1.5 resolves `accepts=`
+  → E-ENGINE-ACCEPTS-NOT-ENUM; per-state loop fires E-ENGINE-MSG-WITHOUT-ACCEPTS +
+  E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE (mirrors E-MATCH-NOT-EXHAUSTIVE) + W-MATCH-ARROW-LEGACY (info).
+  type-system.ts: `MachineType.acceptsMessageType`; `cellMessageEnums` map; `resolveAdvanceArgTwoPlane`
+  (§51.0.G.1 — accepts-less engines verified no-op). Reuses E-VARIANT-AMBIGUOUS. +39 tests. Full 22645/0.
+- Review PASS (verified diffs): no codegen/SPEC/allowlist touched; makeEngineRecord reads
+  batch-1's `engineDecl.acceptsType` (no re-parse); accepts-less no-op confirmed in code.
+- **KNOWN FOLLOW-UP (pre-existing, NOT introduced):** markup-attribute `.advance(...)` (the
+  canonical §51.0.S call site, e.g. `ondrop=@x.advance(.Drop(col))`) is NOT bare-variant-checked
+  for ANY bare variant today; two-plane resolution wired the logic-block/fn-body path only.
+  #14 compile-safety at the markup site needs that general gap wired SEPARATELY (record at wrap).
+  Runtime works regardless (batch 3).
 
-## AUTONOMOUS-READY NEXT PRIORITIES (S147 working-style: largest fully-ratified target, park-on-input-needed)
-1. **#2f native-parser each/match promotion** — HARD M5-swap precondition, witnessed TWICE in S153 (each-in-match fix `3429b385` + component-each fix `e6870f25` both route AROUND the gap via the legacy BS+TAB path). When the native parser becomes default (M5-swap), it MUST promote `<each>`/`<match>` to structural each-block/match-block nodes or ALL each/match break. Larger. Adjacent untested: each³, each-in-snippet, each-in-match-arm-in-each.
-2. ~~C1 self-demo website inc2~~ — **MOVED to the `scrml-site` repo (S154 extraction); NO LONGER scrmlTS work.** Its own PA owns inc2 (3 flagships + dashboard embed + KB-nav + PE-toggle + postMessage provenance + Phase-2 HTML/CSS provenance + parked forks). serve-before-push (S146) is now scrml-site's gate.
-3. **#14 tier-2 ceiling DD** — event-payload-transition primitive; S149 DD named this the highest-leverage language arc (the real case-analysis friction is at the Tier-2 ceiling, not the 0→1 step).
-4. **maps refresh** — 3 codegen commits stale; cheap; do before any compiler-source dispatch.
+### #14 batch 3 (CODEGEN + RUNTIME) — LANDED + DUAL-R26-VERIFIED ✅ (`a9ce4c3a`)
+- Agent ad41c7b23993fcdd2 (FINAL_SHA e06d998a). BRIEF at `docs/changes/s155-14-codegen-message-dispatch/`.
+- Runtime: NEW `_scrml_engine_dispatch_message` (sibling helper) — looks up the (current-state ×
+  message) arm, runs the body (effects ALWAYS), resolves target, DELEGATES the transition to
+  `_scrml_engine_advance` (reuses all §51.0.F.1 machinery; zero dup); force-resets `<onIdle>` on a
+  same-state arm (§51.0.R divergence); no-arm = no-op (§51.0.S.2.6).
+- Codegen: per-state `__scrml_engine_<var>_msg_arms` table; arm-body lowering reuses the
+  `emitEngineOpenerEffect` re-parse path (arm bodies are LOGIC+target, not markup — justified
+  deviation from the brief's emit-match suggestion); plane STAMPED at codegen (msg-variant ∈
+  messageVariants); arm-target rule= static leg (E-ENGINE-INVALID-TRANSITION, conservative) +
+  runtime leg (delegated advance). ctx threaded additively through 7 emit-* files.
+- **Review PASS (verified diffs, not narrative):** main 0/0 no leak, branch-tip==FINAL_SHA, scope
+  clean (NO SPEC/parser/typer/native/allowlist), the "null fallback" is host-JS payload-binding
+  (legit per §42 host-JS exclusion, not a scrml null), arm-target check conservative (self-target
+  always legal, only literal targets static-checked → no over-fire), within-node UNCHANGED.
+- **PA independent R26 (S138 dual-verify) GREEN:** compile exit 0, node --check OK on both emitted
+  files, `_scrml_engine_dispatch_message` ×3 calls + runtime def, `_msg_arms` table ×4, arm body
+  emits `_scrml_reactive_set("tasks", taskMovedTo(...))` + `_scrml_reactive_set("dragPhase","Idle")`
+  (effect→transition). All R26 warnings benign (W-TAILWIND on fixture class names + W-PROGRAM style nits).
+- **Pushed** `a9ce4c3a` (pre-push full suite + TodoMVC gauntlet PASS).
+- **Surfaced 2 pre-existing follow-ups → Bug 62 (HIGH, each-render-ctx) + Bug 63 (MED, markup-attr type-check).**
 
-## OTHER CARRY-FORWARD (from S153 §CARRY-FORWARD)
-- **Body-split/CPS debt (well-characterized):** Ext 3 (conditional-tier, `cps-conditional-classifier.ts` absent) + Ext 2 (loop-aware, `cps-loop-planner.ts` absent). S152 inline-`?{}` fix closed single-boundary-in-branch; STILL deferred = multi-server-batch across a branch ("shared reload tail") + `!{}`-handler+server-call in one arm body (both → E-CODEGEN-INVALID-JS; workaround: one server boundary per arm, extract rest to named fns).
-- #4 A-4 atom-emitter bare-import follow-up (gated on `emitPerRoute`, default-OFF).
-- #5 W-DEAD-FUNCTION FP on fns called only from match-arm bodies; I-FN-PROMOTABLE mis-fires on SQL-bearing `function`s. Both cosmetic lint FPs.
-- #6 C1 cross-file client imports → non-module `<script>` (see new cross-file-module-loading DD).
-- #7 MCP `<program mcp>` flip (queued C1 inc2 + corpus-MCP own arc; MCP V0 SHIPPED; 3 live-state tools broken = Bug 14).
-- #8 R28-8 §14.10 bare-variant-inference impl (RATIFIED S151 — typed object-literal fields + `is some`-narrowed `==` RHS; impl-pending; no new semantic-ambiguity class).
-- #10 `print()` canon decision + `< db>` spacing. #11 srcmap offset-threading full-fix (col-precise; NEW LOW). #12 given-guard struct-field discrimination (LOW). #13 engine-graph multi-file write-loop (LOW). #15 `:`-shorthand BS fragility (parser).
+### DD CANDIDATE (user-floated S155 — capture at wrap)
+- **"Self-tree-shaking compiler as a build-story minimal-closure (post-self-host)."** User idea:
+  amend the dependency/distribution friction via custom build stories — when shipping a library,
+  have the compiler tree-shake ITSELF. Strong form = once self-hosted, the compiler IS a scrml
+  program → scrml's own chunk-DCE (§47) applies reflexively, scoped to the lib's feature usage;
+  the §58 build-story Merkle closure then references a minimal compiler sub-closure. Fork: scrml's
+  static-compile model means a lib ships source (consumer compiles; shaking at final-app-build is
+  strictly better) OR precompiled JS (no compiler at consume-time) — so "lib ships a tree-shaken
+  compiler" has teeth only in the §58 PROVENANCE sense. Caveat: tree-shaken compiler must produce
+  byte-identical output (the §58 determinism gap). Intersects §58 + §47 + self-host roadmap +
+  distribution model → deep-dive shaped, Profile-A. (PA §58 knowledge here = SPEC-INDEX summary +
+  DD titles, NOT a full §58 read.) Confirm-pending: user's "dependency code issue" = the bun-link
+  full-toolchain-as-dependency friction (scandir was a symptom)? — asked, awaiting reply.
 
-## req.scrml / req2.scrml (masterScrml/ — scratch, NOT repo content)
-- **req2.scrml** — PA's corrected full-engine baseline; **renders end-to-end** as of S153 (was list-empty pre-S153 #1 fix).
-- **req.scrml** — USER WIP hack; does NOT compile (user's experimental edits, not compiler bugs).
+## NEXT (the #14 + (d)-A implementation arc — multi-batch, smaller-batches rule)
+1. **#14 batch 2 — typer/SYM:** `.advance` two-enum plane resolution (§51.0.G.1) + `(state×msg)`
+   exhaustiveness + the 4 §34 codes (E-ENGINE-ACCEPTS-NOT-ENUM / -MSG-ARM-NOT-EXHAUSTIVE /
+   -MSG-UNKNOWN / -MSG-WITHOUT-ACCEPTS). Gated on batch 1 landing.
+2. **#14 batch 3 — codegen + runtime:** message dispatch (arm → effect + transition). HIGH
+   codegen → **R26 empirical verify mandatory** (S138).
+3. **(d)-A impl:** type-system variant-literal `oneOf`/`notIn` in refinement position + §53.4
+   three-zone solver + §18.8.1 exhaustiveness reads refined set + schemaFor subset lowering +
+   `E-MATCH-SUBSET-DEAD-ARM`. Spec landed normative (§53.15, §18.8.1).
+4. **+ conformance tests** per new normative statement.
 
-## pa.md directives in force (verified at open)
-- Rules R1–R5 (no marketing / full-production fidelity / right-answer-beats-easy / SPEC-normative / shoot-straight).
-- `---` answer-delimiter convention (S152) — tail below last `---` = answers to pending Qs.
-- Working-style S147: largest fully-ratified high-priority target, autonomous, park-on-input-needed.
-- `full wrap` / 88% safety floor (S139) available; `wrap` / `wrap and push` / `wrap, no push` discriminators.
-- Every `isolation:worktree` dispatch: S88 explicit `isolation` param · F4 startup-verification block · S99/S126 Bash-edit + no-`cd`-into-main · S136 BRIEF.md archival · S138 R26 empirical verify (HIGH codegen) · S147 branch-leak coherence check · S90 CWD gate before dispatch · maps-discipline brief block (S82).
-- `--no-verify` prohibited on commit AND push without explicit auth (richer-hooks setup: pre-push = full suite + TodoMVC gauntlet).
-- Canonical compiler-source dev-agent: `scrml-js-codegen-engineer`.
+## PARKED (Profile-A design session needed — NOT this thin session)
+- **(a)/(b)/(c) S154 design rulings** still need spec-amendment + codegen:
+  - (a) `:`-shorthand renders on non-void HTML elements; void elements reject (new code).
+  - (b) `:` inside-opener canonical everywhere; §51.0.I reconciles to it. **2 unruled
+    micro-grammar sub-Qs:** no-space-after-`:` (`:@thing`); self-close `/>` + `:`-shorthand vs
+    E-CLOSER-001. **Need ruling before spec work.**
+  - (c) no-RHS typed-decl → canonical empty (int→0, string→"", bool→false, []→[], {}→{}) else
+    `not`; supersedes E-DECL-NEEDS-INITIALIZER. **3 impl sub-Qs:** exact table (enum→not);
+    `not`-init lifecycle (§42/§14.12); E-DECL-NEEDS-INITIALIZER fate.
+  - These are design-adjacent (unruled sub-Qs need fluency) → Profile A.
 
-## Open questions to surface immediately (next-session pickup)
-- The 4 DESIGN DECISIONS AWAITING USER above (a/b/c/d) — these gate certain `:`-shorthand + default + predicate threads.
-- Which next priority to pursue (autonomous-ready list above) — no commit/push authorization given yet this session.
+## NEW INCOMING — scrml-site lift-list finding (S155, fyi, QUEUED — not fixed)
+- **`2026-06-02-0838-scrml-site-...-liftlist-index-key-stale-content.md`** (moved to
+  `incoming/read/`). **`needs: fyi`, NOT a blocker** (scrml-site shipped a workaround). Tier-0
+  `for ... lift` lists with no `id` field key by **array index**; on in-place cell replace
+  (`@x = newArray`), `_scrml_reconcile_list` reuses index-matched DOM nodes + patches only
+  REACTIVE bindings — but per-item interpolated text (`${ln.n}${ln.text}`) is emitted
+  **create-time-static** → goes **stale** (class:/if= toggles update fine; only text stale).
+  Workaround: route through `[]` (clear→refill = full recreate). **Triage:** per "don't
+  soft-classify bugs," the (b) interpretation (interpolated per-item content emitted static
+  when the node can be reused = codegen gap) is the live possibility, NOT just a doc gap.
+  ALSO flags a tension: the `<each>` escape hatch (their lint suggests it) drops event/class/`${}`
+  wiring (their friction #7) → neither stock path serves a hover-wired list that must re-render.
+  **DISPOSITION (user-accepted): QUEUE as known-gap/triage item; batch with the next lift/each
+  codegen touch (highest-churn area); do NOT chase mid-#14-arc.** TODO: formal entry in
+  `docs/known-gaps.md` at wrap. (Provenance: scrml-site repo not on this machine; message
+  synced/placed onto this filesystem.)
+
+## OTHER CARRY-FORWARD (from S154 — see hand-off-159.md for full)
+- **#2f native-parser each/match structural promotion** — HARD M5-swap precondition.
+- Body-split/CPS debt (Ext 2/3 absent). #4 atom-emitter follow-up. #5 lint FPs. #6 cross-file
+  client imports (DD landed). #7 MCP flip. #8 §14.10 bare-variant impl (ratified S151). #10
+  print() canon. #11 srcmap col-precise. #12/#13 LOW. #15 `:`-shorthand BS fragility.
+- **per= (per-instance engines):** NOT landed; placeholder name only; needs its own DD.
+- **6NZ caps stray** still present at `scrmlMaster/6NZ/` (non-git; S140 said migrate). Minor.
+
+## pa.md directives in force (Profile-B verified subset)
+- Rules R1–R5. `---` answer-delimiter (S152). Working-style S147 (largest ratified target,
+  autonomous, park-on-input). `full wrap` / 88% floor (S139).
+- Dispatch discipline: S88 explicit isolation · F4 startup-verify · S99/S126 Bash-edit +
+  no-`cd`-into-main · S136 BRIEF.md · S138 R26 (HIGH codegen) · S147 branch-leak coherence ·
+  S90 CWD gate · S82 maps-block. `--no-verify` forbidden (commit + push) w/o auth.
+- Canonical dev-agent `scrml-js-codegen-engineer` — **loads correctly this session** (S154
+  drift resolved; the rename propagated to global `~/.claude/agents/`).
+
+## Open questions to surface
+- **#14 parser landing commit auth** — needed when agent a74231d returns ("start the parser
+  batch" authorized dispatch, not yet the main-commit).
+- Continue batches 2/3 under Profile B, or switch to Profile A when (a)/(b)/(c) design work
+  starts?
 
 ## Tags
-#session-154 #OPEN #caught-up #scrml-support-pulled #colon-delimiter-convention-in-force #4-design-Qs-awaiting-user #maps-3-stale
+#session-155 #OPEN #profile-b-test #scandir-fixed-pushed #14-parser-batch-dispatched #thin-start
