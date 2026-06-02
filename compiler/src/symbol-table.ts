@@ -423,6 +423,28 @@ export interface EngineMetadata {
    *  Codegen (`collectEngineHooks`, emit-engine.ts) consumes this IN ADDITION
    *  to per-child `onTransitionElements`. */
   engineOnTransitions?: OnTransitionEntry[];
+
+  // ---- §51.0.S NEW (S154 — #14 event-payload-transition, TYPER batch 2) ----
+
+  /** §51.0.S.2.2 — the RAW `accepts=MsgType` enum-type identifier from the
+   *  engine opener, mirroring `engine-decl.acceptsType`, or `null` when the
+   *  opener declares no `accepts=`. POPULATED by PASS 10.A (makeEngineRecord)
+   *  directly from the parser field (verbatim, no resolution — exactly as
+   *  `forType` is captured raw before B15 resolves `variants`).
+   *
+   *  PASS 11 resolves it against `fileAst.typeDecls`: non-resolution (unknown
+   *  type, or a non-`:enum` type) fires `E-ENGINE-ACCEPTS-NOT-ENUM` (§34).
+   *  Codegen (batch 3) keys message dispatch on the resolved variant set. */
+  acceptsType?: string | null;
+
+  /** §51.0.S.2.4 — the resolved `accepts=` message-enum's variant names,
+   *  populated by PASS 11 (B15) AFTER `acceptsType` resolves to a declared
+   *  `:enum` (mirror of `variants` for the state enum). Empty array when the
+   *  engine has no `accepts=` OR the type is unresolved/non-enum (in which case
+   *  `E-ENGINE-ACCEPTS-NOT-ENUM` already fired). The per-state message-arm
+   *  exhaustiveness check (E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE) checks each state's
+   *  `messageArms` cover this set. */
+  messageVariants?: string[];
 }
 
 /** §51.0.F three target-only forms — the `rule=` shape recognized by B15.
@@ -5156,6 +5178,16 @@ function makeEngineRecord(
       ? engineDecl.openerEffect
       : null;
 
+  // §51.0.S.2.2 (S154 — #14 event-payload-transition) — RAW `accepts=MsgType`
+  // identifier. Captured verbatim here (PASS 10.A); PASS 11 (B15) resolves it
+  // against `fileAst.typeDecls` and fires E-ENGINE-ACCEPTS-NOT-ENUM on a
+  // non-enum / unknown type, exactly as `forType`/`variants` split across the
+  // two passes. `null` when the opener declared no `accepts=`.
+  const acceptsType: string | null =
+    typeof engineDecl.acceptsType === "string" && engineDecl.acceptsType.length > 0
+      ? engineDecl.acceptsType
+      : null;
+
   const engineMeta: EngineMetadata = {
     forType,
     variants: [], // B14 leaves empty; B15 populates from the type system.
@@ -5165,6 +5197,10 @@ function makeEngineRecord(
     isExported,
     isPinned,
     openerEffect,
+    // §51.0.S (S154 — #14): RAW accepts= identifier; resolved variant set
+    // populated by PASS 11.
+    acceptsType,
+    messageVariants: [],
     // A7 forward-compat fields (declared B14):
     parentEngine: null,
     innerEngines: [],
@@ -5873,6 +5909,43 @@ export function validateEngineStateChildrenAndRules(
   }
   meta.variants = variants;
 
+  // Step 1.5 (§51.0.S.2.2, S154 — #14 event-payload-transition) — resolve the
+  // `accepts=MsgType` opener attribute to a declared `:enum` and populate
+  // `meta.messageVariants`. `meta.acceptsType` is the RAW identifier captured
+  // verbatim by PASS 10.A (makeEngineRecord). Resolution mirrors the
+  // state-enum split: `forType` raw → `variants` resolved here. Non-resolution
+  // (unknown type, or a type that is not an `:enum`) fires
+  // E-ENGINE-ACCEPTS-NOT-ENUM (§34); `getEnumVariantsFromTypeDecls` returns
+  // null for BOTH the unknown-type and non-enum cases, which is exactly the
+  // distinguisher this code needs (both fire the same code).
+  const acceptsType: string | null =
+    typeof meta.acceptsType === "string" && meta.acceptsType.length > 0
+      ? meta.acceptsType
+      : null;
+  let messageVariants: string[] = [];
+  if (acceptsType !== null) {
+    const msgLookup = getEnumVariantsFromTypeDecls(fileAst.typeDecls, acceptsType);
+    if (Array.isArray(msgLookup)) {
+      messageVariants = msgLookup;
+    } else {
+      // Unknown type OR a non-enum type — both surface E-ENGINE-ACCEPTS-NOT-ENUM.
+      fireB15Diagnostic(
+        errors,
+        "E-ENGINE-ACCEPTS-NOT-ENUM",
+        `E-ENGINE-ACCEPTS-NOT-ENUM: \`<engine for=${forType}>\` declares ` +
+        `\`accepts=${acceptsType}\` but \`${acceptsType}\` does not resolve to a declared ` +
+        `\`:enum\` type. Per SPEC §51.0.S.2.2, the \`accepts=\` message vocabulary must be an ` +
+        `enum type (the type the engine's \`(state \u00d7 message)\` arms dispatch on). Declare ` +
+        `\`type ${acceptsType}:enum = { ... }\` or correct the type reference.`,
+        engineDecl,
+        filePath,
+        "error",
+      );
+    }
+  }
+  meta.messageVariants = messageVariants;
+  const messageVariantSet = new Set(messageVariants);
+
   // If we have no variants (unknown type, struct type, or import), we
   // can't validate against the variant set. Skip steps 2 + 4 + 5 (which
   // depend on knowing the variants). Still parse state-children for
@@ -6375,6 +6448,105 @@ export function validateEngineStateChildrenAndRules(
           }
         }
       }
+    }
+  }
+
+  // ----------------------------------------------------------------------
+  // §51.0.S (S154 — #14 event-payload-transition, TYPER batch 2) — per-state
+  // `(state × message)` message-arm validation. Three diagnostics:
+  //
+  //   - E-ENGINE-MSG-WITHOUT-ACCEPTS — a state-child declares any message-arm
+  //     while the engine opener has no `accepts=` (§51.0.S.2.3).
+  //   - E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE — a state declares ANY message-arms but
+  //     does not cover every `accepts=` MsgType variant and has no `| _ :>`
+  //     wildcard (§51.0.S.2.4; sibling of E-MATCH-NOT-EXHAUSTIVE — mirrors the
+  //     match-block exhaustiveness logic at validateMatchBlock, line ~10440).
+  //   - W-MATCH-ARROW-LEGACY — info-level lint at any message-arm written with
+  //     a deprecated `=>` / `->` separator (§18.2 / S147); mirrors the
+  //     match / `!{}`-handler arm-arrow convention.
+  //
+  // A state with ZERO message-arms ignores all messages while in that state
+  // (a runtime no-op, §51.0.S.2.6) — NOT a violation. `messageArms` is
+  // populated by the live-pipeline state-child parser (`parseEngineStateChildren`);
+  // the native walker leaves it empty pending batch-1/native wiring (batch-3
+  // note), so this validation is a no-op on native-pipeline engine-decls today.
+  //
+  // `acceptsType` / `messageVariants` were resolved at Step 1.5 above.
+  // ----------------------------------------------------------------------
+  for (const sc of stateChildren) {
+    const arms = Array.isArray(sc.messageArms) ? sc.messageArms : [];
+    if (arms.length === 0) continue; // no arms → ignores messages, not a violation.
+
+    // -- W-MATCH-ARROW-LEGACY (info) -- fire per deprecated-alias arm.
+    // Pushed directly (severity "info") because `fireB15Diagnostic` only
+    // emits error/warning; W-/I- codes ride result.warnings (§34 Info rows).
+    for (const arm of arms) {
+      if (arm.armArrow === "=>" || arm.armArrow === "->") {
+        const span: SYMDiagnostic["span"] = engineDecl?.span ?? {
+          file: filePath, start: 0, end: 0, line: 1, col: 1,
+        };
+        const armLabel = arm.isWildcard ? "_" : `.${arm.variantName}`;
+        errors.push({
+          code: "W-MATCH-ARROW-LEGACY",
+          message:
+            `W-MATCH-ARROW-LEGACY: message-arm \`| ${armLabel} ${arm.armArrow}\` in ` +
+            `state-child \`<${sc.tag}>\` uses the deprecated \`${arm.armArrow}\` separator. ` +
+            `The canonical engine message-arm / match arm separator is \`:>\` (SPEC §18.2 / ` +
+            `§51.0.S.2.3). Run \`bun scrml migrate --fix\` for an AST-driven rewrite. ` +
+            `\`${arm.armArrow}\` still parses during the deprecation window.`,
+          span,
+          severity: "info",
+        });
+      }
+    }
+
+    // -- E-ENGINE-MSG-WITHOUT-ACCEPTS -- arms present but no `accepts=`.
+    if (acceptsType === null) {
+      fireB15Diagnostic(
+        errors,
+        "E-ENGINE-MSG-WITHOUT-ACCEPTS",
+        `E-ENGINE-MSG-WITHOUT-ACCEPTS: state-child \`<${sc.tag}>\` declares a ` +
+        `\`(state × message)\` message-arm but \`<engine for=${forType}>\` has no ` +
+        `\`accepts=\` declaration. Per SPEC §51.0.S.2.3, a message-arm reacts to a variant ` +
+        `of the engine's message enum, which must be declared via \`accepts=MsgType\` on the ` +
+        `engine opener. Add \`accepts=MsgType\` (an \`:enum\` of the messages this engine ` +
+        `dispatches on) or remove the message-arm(s).`,
+        engineDecl,
+        filePath,
+        "error",
+      );
+      // No accepts= → exhaustiveness is undecidable; the missing-accepts error
+      // is the actionable diagnostic. Skip the exhaustiveness check for this
+      // state to avoid a noisy follow-on.
+      continue;
+    }
+
+    // -- E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE -- (mirror E-MATCH-NOT-EXHAUSTIVE).
+    // Only checkable when the message-enum variant set resolved. If it did not
+    // (E-ENGINE-ACCEPTS-NOT-ENUM already fired at Step 1.5), skip silently to
+    // avoid doubling diagnostics on the same root cause.
+    if (messageVariants.length === 0) continue;
+    const hasWildcard = arms.some((a) => a.isWildcard);
+    if (hasWildcard) continue; // `| _ :>` covers the rest (§51.0.S.2.4).
+    const armVariantSet = new Set(
+      arms.filter((a) => !a.isWildcard).map((a) => a.variantName),
+    );
+    const missing = messageVariants.filter((v) => !armVariantSet.has(v));
+    if (missing.length > 0) {
+      fireB15Diagnostic(
+        errors,
+        "E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE",
+        `E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE: state-child \`<${sc.tag}>\` in ` +
+        `\`<engine for=${forType} accepts=${acceptsType}>\` declares message-arm(s) but does ` +
+        `not cover every \`${acceptsType}\` variant. Missing arm(s) for: ` +
+        `${missing.map((v) => `.${v}`).join(", ")}. Per SPEC §51.0.S.2.4, once a state declares ` +
+        `any message-arm it must cover the full message set OR carry a \`| _ :>\` wildcard. ` +
+        `Add the missing arm(s), or add \`| _ :> @${meta.varName}\` to explicitly ignore the rest ` +
+        `(stay in the current state).`,
+        engineDecl,
+        filePath,
+        "error",
+      );
     }
   }
 

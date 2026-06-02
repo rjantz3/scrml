@@ -382,6 +382,17 @@ interface MachineType {
   // declared reactives — resolution happens in the caller's post-pass
   // since @-decl registration isn't complete at buildMachineRegistry time.
   auditTarget?: string | null;
+  // §51.0.S.2.2 (S154 — #14 event-payload-transition) — RAW `accepts=MsgType`
+  // enum-type identifier from the engine opener, mirroring
+  // `engine-decl.acceptsType`, or `null`/`undefined` when the opener declares
+  // no `accepts=`. Used by the `.advance` two-plane argument resolution
+  // (§51.0.G.1): when set, a bare-variant `.advance(arg)` resolves against
+  // BOTH the `for=` state enum (`governedTypeName`) AND this message enum.
+  // SYM PASS 11 owns the E-ENGINE-ACCEPTS-NOT-ENUM resolution check; this
+  // field stays RAW (the type-system side resolves it via `typeRegistry`
+  // only when present, and is a no-op when null — accepts-less engines keep
+  // the pre-S154 §51.0.G single-plane behavior).
+  acceptsMessageType?: string | null;
 }
 
 // §51.3.2 (S22) — Resolved payload binding in a machine rule.
@@ -2613,6 +2624,14 @@ function buildMachineRegistry(
     let rulesRaw = (decl.rulesRaw as string) || "";
     const span = (decl.span as Span) || fileSpan;
     const sourceVar = (decl.sourceVar as string | null | undefined) ?? null;
+    // §51.0.S.2.2 (S154 — #14): RAW `accepts=MsgType` identifier (or null).
+    // Threaded onto every MachineType the loop registers so `.advance`
+    // two-plane resolution (§51.0.G.1) can find the message enum. SYM owns
+    // the E-ENGINE-ACCEPTS-NOT-ENUM resolution diagnostic.
+    const acceptsMessageType =
+      typeof decl.acceptsType === "string" && (decl.acceptsType as string).length > 0
+        ? (decl.acceptsType as string)
+        : null;
 
     // §51.11 (S24) — extract optional `audit @name` clause from the rules
     // body. Matches a top-level line of exactly `audit @Identifier`. Strip
@@ -2711,6 +2730,7 @@ function buildMachineRegistry(
           sourceVar,
           projectedVarName: engineNameToProjectedVar(name),
           auditTarget,
+          acceptsMessageType,
         });
         continue;
       }
@@ -2745,6 +2765,7 @@ function buildMachineRegistry(
         // lose the leading capital.
         projectedVarName: engineNameToProjectedVar(name),
         auditTarget,
+        acceptsMessageType,
       });
       continue;
     }
@@ -2759,6 +2780,7 @@ function buildMachineRegistry(
         governedType: govType,
         rules: [],
         auditTarget,
+        acceptsMessageType,
       });
       continue;
     }
@@ -2784,6 +2806,7 @@ function buildMachineRegistry(
       governedType: govType,
       rules,
       auditTarget,
+      acceptsMessageType,
     });
   }
 
@@ -4209,6 +4232,27 @@ function annotateNodes(
   // function declarations (lambdas / inline `fn` shorthand) naturally.
   // Null at the top means "no enclosing fn return type" (top-level code).
   const enclosingFnReturnTypeStack: Array<ResolvedType | null> = [];
+
+  // §51.0.G.1 (S154 — #14 event-payload-transition) — engine-cell → message
+  // enum map, keyed by the engine's auto-declared variable name (sans `@`).
+  // Populated from `machineRegistry`: each MachineType carries the RAW
+  // `accepts=MsgType` identifier (`acceptsMessageType`); resolve it against
+  // the file's `typeRegistry`, recording ONLY entries whose `accepts=` resolves
+  // to a declared `:enum`. This is the message PLANE for `.advance(arg)`
+  // two-plane resolution. Engines WITHOUT `accepts=` (or whose `accepts=` does
+  // not resolve to an enum — SYM already fired E-ENGINE-ACCEPTS-NOT-ENUM) are
+  // ABSENT from this map, so `.advance` falls back to the pre-S154 §51.0.G
+  // single-plane (state-enum-only) behavior, unchanged.
+  const cellMessageEnums = new Map<string, EnumType>();
+  for (const machine of machineRegistry.values()) {
+    const msgTypeName = machine.acceptsMessageType;
+    if (typeof msgTypeName !== "string" || msgTypeName.length === 0) continue;
+    if (typeof machine.name !== "string" || machine.name.length === 0) continue;
+    const resolved = typeRegistry.get(msgTypeName);
+    if (resolved && resolved.kind === "enum") {
+      cellMessageEnums.set(machine.name, resolved as EnumType);
+    }
+  }
 
   // S84 v0.2.4 #5-followon (Gap B.3/B.4) — pre-collect function signatures
   // (param types + return type) so the call-arg and return-stmt bare-variant
@@ -5752,7 +5796,10 @@ function annotateNodes(
             // shapes: `@cell = .V` (AssignExpr root) or `@cell.advance(.V)`
             // (CallExpr root with member callee). The cell's enum/union type
             // supplies the contextType per §14.10 normative position #2.
-            inferReactiveSiteBareVariants(beExprNode, scopeChain, beSpan, errors);
+            // §51.0.G.1 (S154 — #14): `cellMessageEnums` enables `.advance`
+            // two-plane resolution for accepts-bearing engines; accepts-less
+            // engines stay on the §14.10 single-plane path (no-op here).
+            inferReactiveSiteBareVariants(beExprNode, scopeChain, beSpan, errors, cellMessageEnums);
             // S84 v0.2.4 #5 — bare-variant inference at binary-comparison
             // positions inside a bare-expr (e.g. an `if` condition that the
             // parser surfaces as bare-expr, or a free-standing comparison
@@ -7650,6 +7697,7 @@ function inferReactiveSiteBareVariants(
   scopeChain: ScopeChain,
   span: Span,
   errors: TSError[],
+  cellMessageEnums?: Map<string, EnumType>,
 ): void {
   if (!exprNode || typeof exprNode !== "object") return;
   const root = exprNode as { kind?: string } & Record<string, unknown>;
@@ -7685,7 +7733,7 @@ function inferReactiveSiteBareVariants(
   // object is a reactive `@cell` ident.
   if (root.kind === "call") {
     const callee = root.callee as
-      | { kind?: string; object?: { kind?: string; name?: string } }
+      | { kind?: string; object?: { kind?: string; name?: string }; property?: string }
       | undefined;
     if (
       callee &&
@@ -7695,9 +7743,34 @@ function inferReactiveSiteBareVariants(
       typeof callee.object.name === "string" &&
       callee.object.name.startsWith("@")
     ) {
-      const ctx = resolveReactiveCellType(callee.object.name);
+      const cellRef = callee.object.name;
+      const ctx = resolveReactiveCellType(cellRef);
+      const args = Array.isArray(root.args) ? (root.args as unknown[]) : [];
+
+      // §51.0.G.1 (S154 — #14 event-payload-transition) — `.advance(arg)`
+      // two-plane resolution. When the receiver engine declares
+      // `accepts=M` (resolved message enum, keyed by the engine var name
+      // sans `@`), `.advance(arg)` resolves the argument against BOTH the
+      // `for=S` state enum AND the `accepts=M` message enum. This is a NEW
+      // rule specific to `.advance` (§51.0.G.1) — NOT a §14.10 reuse.
+      //
+      // Accepts-less engines (no entry in `cellMessageEnums`) fall through
+      // to the pre-S154 single-plane `inferBareVariantsInExpr` walk below,
+      // unchanged. The two-plane path runs ONLY for `advance` (the
+      // message-dispatch verb, §51.0.S.2.5) and ONLY when a message enum
+      // exists for the receiver cell.
+      const msgEnum =
+        callee.property === "advance" && cellMessageEnums
+          ? cellMessageEnums.get(cellRef.slice(1)) // strip leading `@`
+          : undefined;
+      if (msgEnum && ctx && ctx.kind === "enum") {
+        for (const arg of args) {
+          resolveAdvanceArgTwoPlane(arg, ctx as EnumType, msgEnum, scopeChain, span, errors);
+        }
+        return;
+      }
+
       if (ctx) {
-        const args = Array.isArray(root.args) ? (root.args as unknown[]) : [];
         for (const arg of args) {
           inferBareVariantsInExpr(arg, ctx, span, errors);
         }
@@ -7707,6 +7780,214 @@ function inferReactiveSiteBareVariants(
   }
 
   // No matching shape — silent fall-through.
+}
+
+/**
+ * §51.0.G.1 (S154 — #14 event-payload-transition) — `.advance(arg)` argument
+ * resolution across the STATE plane (`S`, the engine's `for=` enum) and the
+ * MESSAGE plane (`M`, the engine's `accepts=` enum). This is a NEW resolution
+ * rule specific to `.advance`, NOT a reuse of §14.10's single-position
+ * bare-variant inference (the `.advance` position has TWO candidate enums; the
+ * §14.10 NOTE points here explicitly).
+ *
+ * Normative algorithm (§51.0.G.1):
+ *
+ *   1. Literal bare-variant `.V`: resolve `.V` against `S` and against `M`.
+ *      - in exactly one plane → that plane (silent — the dispatch plane is
+ *        codegen's, batch 3's concern; the typer only validates resolvability).
+ *      - in BOTH (a shared variant name) → E-VARIANT-AMBIGUOUS (§14.10 reuse);
+ *        require qualification (`.advance(M.V)` / `.advance(S.V)`).
+ *      - in NEITHER → E-ENGINE-MSG-UNKNOWN (§34).
+ *   2. Qualified variant (`M.V` / `S.V`): dispatch the named enum's plane
+ *      directly (no ambiguity). Validate the variant exists in that named enum.
+ *   3. Non-literal expr (var / call): its STATIC type MUST resolve to exactly
+ *      one of `S` or `M`. A union-typed argument (or a type not statically
+ *      resolvable to a single plane) is FORBIDDEN — E-VARIANT-AMBIGUOUS. The
+ *      compiler SHALL NOT runtime-tag-dispatch.
+ *
+ * On a clean literal-bare resolution, the resolved bare-variant ident is
+ * stamped `_bareVariantInferredAtBinaryExpr = true` (the existing skip flag
+ * `inferBareVariantsInExpr` honors) so any downstream §14.10 walker that would
+ * otherwise re-fire E-TYPE-063 / E-VARIANT-AMBIGUOUS against ONLY the state
+ * enum defers — the two-plane resolution is authoritative here.
+ */
+function resolveAdvanceArgTwoPlane(
+  arg: unknown,
+  stateEnum: EnumType,
+  msgEnum: EnumType,
+  scopeChain: ScopeChain,
+  span: Span,
+  errors: TSError[],
+): void {
+  if (!arg || typeof arg !== "object") return;
+  const a = arg as { kind?: string; name?: string } & Record<string, unknown>;
+
+  const hasVariant = (e: EnumType, v: string): boolean =>
+    (e.variants ?? []).some((x) => x.name === v);
+
+  // Unwrap a payload call `.V(args)` / `Enum.V(args)` to its callee. The
+  // variant identity lives on the callee; payload args are validated elsewhere
+  // (§51.0.B.1 / §18.7 named/positional binding).
+  let head: { kind?: string; name?: string } & Record<string, unknown> = a;
+  if (a.kind === "call" && a.callee && typeof a.callee === "object") {
+    head = a.callee as { kind?: string; name?: string } & Record<string, unknown>;
+  }
+
+  // Rule 2 — qualified variant `Enum.V` (MemberExpr with an ident object).
+  if (
+    head.kind === "member" &&
+    head.object &&
+    typeof head.object === "object" &&
+    (head.object as { kind?: string }).kind === "ident" &&
+    typeof (head.object as { name?: string }).name === "string" &&
+    typeof head.property === "string"
+  ) {
+    const enumName = (head.object as { name: string }).name;
+    const variant = head.property as string;
+    // Only treat as a qualified VARIANT reference when the object names one of
+    // the two candidate enums (else it's a normal member access — `obj.field`
+    // — not in scope for advance-arg plane resolution; leave it alone).
+    if (enumName === stateEnum.name) {
+      if (!hasVariant(stateEnum, variant)) {
+        errors.push(new TSError(
+          "E-TYPE-063",
+          `E-TYPE-063: \`.${variant}\` is not a declared variant of enum \`${stateEnum.name}\`. ` +
+          `Known variants: ${(stateEnum.variants ?? []).map((v) => "." + v.name).join(", ") || "(none)"}. ` +
+          `Check for a typo or add the variant to the enum declaration (§42).`,
+          span,
+        ));
+      }
+      return;
+    }
+    if (enumName === msgEnum.name) {
+      if (!hasVariant(msgEnum, variant)) {
+        errors.push(new TSError(
+          "E-TYPE-063",
+          `E-TYPE-063: \`.${variant}\` is not a declared variant of message enum \`${msgEnum.name}\`. ` +
+          `Known variants: ${(msgEnum.variants ?? []).map((v) => "." + v.name).join(", ") || "(none)"}. ` +
+          `Check for a typo or add the variant to the enum declaration (§42).`,
+          span,
+        ));
+      }
+      return;
+    }
+    // Object is neither candidate enum — not an advance-plane variant ref.
+    return;
+  }
+
+  // Rule 1 — literal bare-variant `.V` (IdentExpr with a leading-dot name).
+  if (
+    head.kind === "ident" &&
+    typeof head.name === "string" &&
+    head.name.length >= 2 &&
+    head.name[0] === "." &&
+    /^[A-Z][A-Za-z0-9_]*$/.test(head.name.slice(1))
+  ) {
+    const variant = head.name.slice(1);
+    const inState = hasVariant(stateEnum, variant);
+    const inMsg = hasVariant(msgEnum, variant);
+
+    if (inState && inMsg) {
+      errors.push(new TSError(
+        "E-VARIANT-AMBIGUOUS",
+        `E-VARIANT-AMBIGUOUS: \`.advance(.${variant})\` is ambiguous — \`.${variant}\` is a ` +
+        `variant of BOTH the state enum \`${stateEnum.name}\` AND the message enum ` +
+        `\`${msgEnum.name}\`. Per SPEC §51.0.G.1, qualify the variant to pick the plane: ` +
+        `\`.advance(${stateEnum.name}.${variant})\` (direct state transition) or ` +
+        `\`.advance(${msgEnum.name}.${variant})\` (message dispatch).`,
+        span,
+      ));
+      // Stamp so the §14.10 single-plane walker doesn't double-fire.
+      (head as Record<string, unknown>)._bareVariantInferredAtBinaryExpr = true;
+      return;
+    }
+    if (!inState && !inMsg) {
+      errors.push(new TSError(
+        "E-ENGINE-MSG-UNKNOWN",
+        `E-ENGINE-MSG-UNKNOWN: \`.advance(.${variant})\` — \`.${variant}\` is a variant of ` +
+        `NEITHER the \`for=\` state enum \`${stateEnum.name}\` ` +
+        `(${(stateEnum.variants ?? []).map((v) => "." + v.name).join(", ") || "(none)"}) NOR the ` +
+        `\`accepts=\` message enum \`${msgEnum.name}\` ` +
+        `(${(msgEnum.variants ?? []).map((v) => "." + v.name).join(", ") || "(none)"}). ` +
+        `Per SPEC §51.0.G.1, \`.advance\` takes a state variant (direct transition) or a ` +
+        `message variant (dispatch). Check for a typo or add the variant to the appropriate enum.`,
+        span,
+      ));
+      (head as Record<string, unknown>)._bareVariantInferredAtBinaryExpr = true;
+      return;
+    }
+    // Exactly one plane — unambiguous resolution. Silent; stamp so the
+    // §14.10 single-plane walker (which only knows the state enum) does not
+    // re-fire E-TYPE-063 for a message-plane variant.
+    (head as Record<string, unknown>)._bareVariantInferredAtBinaryExpr = true;
+    return;
+  }
+
+  // Rule 3 — non-literal expression (variable / other call). Its STATIC type
+  // MUST resolve to exactly one of S or M. A reactive/local ident is looked up
+  // in scope; a union or statically-unresolvable type is FORBIDDEN.
+  if (head.kind === "ident" && typeof head.name === "string") {
+    // (Bare-variant idents were handled by Rule 1 above; this is a plain
+    // variable / binding reference, e.g. `.advance(msg)`.)
+    const ref = head.name;
+    const entry = scopeChain.lookup(ref) as
+      | { resolvedType?: ResolvedType }
+      | undefined;
+    const rt = entry?.resolvedType;
+    if (!rt) {
+      // Statically unresolvable — the plane cannot be decided. FORBIDDEN.
+      errors.push(new TSError(
+        "E-VARIANT-AMBIGUOUS",
+        `E-VARIANT-AMBIGUOUS: \`.advance(${ref})\` — the argument's static type cannot be ` +
+        `resolved to exactly one of the state enum \`${stateEnum.name}\` or the message enum ` +
+        `\`${msgEnum.name}\`. Per SPEC §51.0.G.1, the \`.advance\` plane MUST be statically ` +
+        `decidable; the compiler does not runtime-tag-dispatch. Pass a value of a single ` +
+        `concrete enum type, or qualify a literal variant (\`.advance(${msgEnum.name}.Variant)\`).`,
+        span,
+      ));
+      return;
+    }
+    if (rt.kind === "enum") {
+      const en = (rt as EnumType).name;
+      if (en === stateEnum.name || en === msgEnum.name) return; // single plane — OK.
+      // An enum that is NEITHER plane — type mismatch; FORBIDDEN.
+      errors.push(new TSError(
+        "E-VARIANT-AMBIGUOUS",
+        `E-VARIANT-AMBIGUOUS: \`.advance(${ref})\` — argument has enum type \`${en}\`, which is ` +
+        `neither the state enum \`${stateEnum.name}\` nor the message enum \`${msgEnum.name}\`. ` +
+        `Per SPEC §51.0.G.1, \`.advance\` accepts a value of the \`for=\` or \`accepts=\` enum only.`,
+        span,
+      ));
+      return;
+    }
+    if (rt.kind === "union") {
+      // A union argument — even `S | M` — is FORBIDDEN (no runtime dispatch).
+      errors.push(new TSError(
+        "E-VARIANT-AMBIGUOUS",
+        `E-VARIANT-AMBIGUOUS: \`.advance(${ref})\` — argument has a union type; the dispatch ` +
+        `plane (state \`${stateEnum.name}\` vs message \`${msgEnum.name}\`) is not statically ` +
+        `decidable. Per SPEC §51.0.G.1, a union-typed (\`S | M\`) \`.advance\` argument is ` +
+        `forbidden — the compiler SHALL NOT runtime-tag-dispatch. Pass a value of a single ` +
+        `concrete enum type.`,
+        span,
+      ));
+      return;
+    }
+    // Any other static type (primitive / struct / asIs / unknown) is not a
+    // valid advance argument; FORBIDDEN per §51.0.G.1's single-plane rule.
+    errors.push(new TSError(
+      "E-VARIANT-AMBIGUOUS",
+      `E-VARIANT-AMBIGUOUS: \`.advance(${ref})\` — argument's static type (\`${rt.kind}\`) does ` +
+      `not resolve to the state enum \`${stateEnum.name}\` or the message enum \`${msgEnum.name}\`. ` +
+      `Per SPEC §51.0.G.1, \`.advance\` requires an argument whose plane is statically decidable.`,
+      span,
+    ));
+    return;
+  }
+
+  // Any other arg shape (literal, etc.) — not a recognized advance argument;
+  // leave it to the existing diagnostic pipeline (e.g., rule= validation,
+  // E-TYPE checks). Silent fall-through.
 }
 
 /**
