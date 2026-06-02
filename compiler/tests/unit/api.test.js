@@ -180,10 +180,16 @@ describe("scanDirectory", () => {
       writeFileSync(join(d, "decoy.scrml"), 'p "should not be found"\n');
     }
     const files = scanDirectory(FIXTURE_DIR);
-    expect(files.some(f => f.includes("node_modules"))).toBe(false);
-    expect(files.some(f => f.includes(`${sep}dist${sep}`))).toBe(false);
-    expect(files.some(f => f.includes(`${sep}.git${sep}`))).toBe(false);
-    expect(files.some(f => f.includes(`${sep}.claude${sep}`))).toBe(false);
+    // Assert the decoy files UNDER each skip-dir of FIXTURE_DIR are not found.
+    // Scope the check to FIXTURE_DIR-rooted paths: a bare `f.includes(sep + ".claude" + sep)`
+    // false-fires when the test itself runs from a worktree located under a
+    // `.claude/` ancestor (the project's agent worktrees live at
+    // `.claude/worktrees/agent-*`), where every returned absolute path contains
+    // `/.claude/` regardless of scanDirectory's behavior. (S155 robustness fix.)
+    for (const skip of ["node_modules", "dist", ".git", ".claude"]) {
+      const skipRoot = join(FIXTURE_DIR, skip) + sep;
+      expect(files.some(f => f.startsWith(skipRoot))).toBe(false);
+    }
     // Real source still found.
     expect(files.some(f => f.endsWith("hello.scrml"))).toBe(true);
   });
