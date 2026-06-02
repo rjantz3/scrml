@@ -1,6 +1,6 @@
 # error.map.md
 # project: scrmlts
-# updated: 2026-06-01T00:00:00-06:00  commit: 4e1f9492
+# updated: 2026-06-02T03:40:05-06:00  commit: c665714c
 
 scrml's own language error model is values-not-exceptions (SPEC §19.1 — no try/catch, no throw).
 The compiler itself surfaces structured CGError objects to the caller; it never throws on bad input.
@@ -25,16 +25,18 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 | E-CG-* | ~15 | Code generator errors (E-CG-001..015) |
 | E-CHANNEL-* | ~10 | Channel declaration errors |
 | E-CLOSURE-* | 2 | Closure scope errors |
+| E-CODEGEN-INVALID-JS | 1 | Emitted-JS parse-gate invariant (default-ON, S142): emitted JS fails `node --check`. S153 closed two false-fire classes: `<each>` w/ `@.` sigil in a block-form `<match>` arm (3429b385) + `<each>` in a component body (e6870f25) — both previously leaked unscoped `.name` / `@ . id` into emitted JS |
 | E-COMPONENT-* | ~15 | Component definition/usage errors |
 | E-CONTRACT-* | 4 | Server-fn contract errors |
 | E-CPS-* | 6 | CPS async planner errors (idempotency, multibatch reorder/machine-crossing) |
 | E-CTRL-* | 6 | Control flow errors |
 | E-CTX-* | 2 | Context errors (E-CTX-001: unclosed block; E-CTX-003: shorthand confusion) |
-| E-DECL-NEEDS-INITIALIZER | 1 | NEW (S152) — non-array typed-decl with no RHS; only `T[]` typed-array decls may omit RHS (default `[]` per §6.2 Shape 4) [ast-builder.js:4236] |
+| E-DECL-NEEDS-INITIALIZER | 1 | (S152) — non-array typed-decl with no RHS; only `T[]` typed-array decls may omit RHS (default `[]` per §6.2 Shape 4) [ast-builder.js:4236] |
 | E-DERIVED-* | 7 | Derived-value errors (circular-dep, engine-no-initial/rules/write, value-mutate) |
 | E-DG-* | 2 | Dependency graph errors — E-DG-002 false-positive fix: credits lambda-body @var reads + `<match on=@cell>` block-form headers [dependency-graph.ts] |
 | E-EACH-ITER-SHAPE | 1 | Each iteration shape errors: missing-or-both `of`/`in` attrs [ast-builder.js] |
 | E-ENGINE-* | ~20 | Engine declaration errors (incl. E-ENGINE-010: `given` guard in type-level transitions block) |
+| E-ENGINE-STATE-CHILD-MISSING | 1 | Engine state-child closer un-findable. S153 (c89c1cb1) closed the `:`-shorthand-child false-fire class: a `<tag : expr>` child inside an engine arm pushed a phantom unbalanced opener onto `lowerDepth` that absorbed the state-child `</>`. Fixed via attr-aware `isColonShorthandOpener` in all 3 closer-finders [engine-statechild-parser.ts] |
 | E-ERRORS-* | 2 | `<errors>` element validation (E-ERRORS-001, E-ERRORS-002) |
 | E-EXPR-* | 30 | Native-parser expression grammar codes (§34.1) |
 | E-FORMFOR-* | 8 | formFor type validation errors |
@@ -52,6 +54,7 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 | E-REPLAY-* | 3 | Engine replay errors |
 | E-RESET-* | 1 | Reset target errors |
 | E-RI-* | ~3 | Route inference errors |
+| E-SCOPE-001 | 1 | Identifier out of scope (e.g. `key=@.id` outside an each item scope). S153 (e6870f25) closed the `<each>`-in-component-body false-fire: `substituteProps` now covers each-block string fields so `@.id` resolves in the component-expanded body |
 | E-SQL-* | ~8 | SQL context errors |
 | E-STMT-* | 43 | Native-parser statement grammar codes (§34.1) |
 | E-SWITCH-FORBIDDEN | 1 | `switch` keyword in scrml source |
@@ -87,11 +90,12 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 | I-MATCH-PROMOTABLE | 1 | Info: match eligible for engine promotion (§56) |
 | I-PARSER-NATIVE-SHADOW | 1 | Info: native parser shadows live-pipeline result |
 
-## Key New / Changed Codes Since Watermark 09f74bee (S148-S152)
+## Key New / Changed Codes Since Watermark 09f74bee (S148-S153)
 
 - E-DECL-NEEDS-INITIALIZER — S152 §6.2 Shape 4; fires when a non-array typed-cell decl has no RHS initializer; message includes the correct `<name>: T = ...` form as correction hint [ast-builder.js:4236]
 - W-EACH-PROMOTABLE — S130 HU-1; info-level; `${ for (let x of @cell) { lift ... } }` is promotable to `<each>` tier-1 form; fired in Stage 6.4c lint pass [lint-w-each-promotable.js:205]
 - W-EACH-KEY-001 — S130 HU-1; info-level; `<each in=@cell>` items have no inferable `.id` key; fired in Stage 6.4d lint pass [lint-w-each-key.js:210]
+- NO new error codes in S153 — the sweep CLOSED false-fire classes on three existing codes (E-CODEGEN-INVALID-JS, E-ENGINE-STATE-CHILD-MISSING, E-SCOPE-001); see Fix Notes below
 
 ## Fix Notes
 
@@ -120,6 +124,43 @@ AFTER the render fn (module-init order). The bare `_scrml_reconcile_list(_mount,
 threw `TypeError: ...newItems.length`. Fix: guard `if (!_items) { _mount.replaceChildren(); return; }`
 before reconcile; `_scrml_effect_static` subscription re-runs the fn once cell-init fires.
 
+### `<each>`-in-dynamic-context sweep (S153) — every place an `<each>` lives inside a dynamic mount
+
+**engine-gated `<each>` never populates (54d54d4d, the req2 blocker)** — an `<each>` whose mount
+lives in a non-`initial=` engine arm is absent from the DOM at module-init; the render hit
+`if (!_mount) return;` BEFORE reading `@cell` → `_scrml_effect_static`'s one-shot dep pass recorded
+no dependency → never re-fired. Three coupled codegen modes: (A) `emit-each.ts` reads `_items`
+BEFORE the `!_mount` early-return (always tracks the dep); (B) `emit-variant-guard.ts` + runtime —
+`_scrml_each_renderers` registry + `_scrml_remount_each(root)` helper the arm-swap dispatcher calls
+after innerHTML+wire; (C) `emit-client.ts` `detectRuntimeChunks` descends into engine `bodyChildren`
+(was tree-shaking the reconcile/effect chunks out → ReferenceError).
+
+**`<each>` in a block-form `<match>` arm emits invalid JS (3429b385, was E-CODEGEN-INVALID-JS)** —
+match arms are raw text (`armsRaw`); `emit-match` re-parsed via `nativeParseFile` → a generic
+`markup tag="each"`, NOT an `each-block` (the each-block transform lives in `buildAST`, not the
+native parser) → rendered inline with `@.` unscoped (`.name` leak). Fix: each-bearing arms re-parse
+via `splitBlocks`+`buildAST`; `restampEachBlockIds` namespaces ids; lifted each-blocks attach to
+`matchBlock.bodyChildren` so `collectEachBlocks` emits the render fn with the `@.` rewrite;
+`__scrmlCachedArms` memoizes across the two passes. The S152 #1 "covers block-form match" claim was
+aspirational (hook wired but each-in-match never compiled) — now real.
+
+**`:`-shorthand child inside an engine arm breaks state-child parsing (c89c1cb1, was
+E-ENGINE-STATE-CHILD-MISSING)** — a §4.14 `:`-shorthand child (`<li : @.name>`) inside an engine
+state-child broke closer-pairing (valid at top-level; only broke in an engine arm). The 3
+closer-finders in `engine-statechild-parser.ts` pushed non-void lowercase openers onto `lowerDepth`;
+a `:`-shorthand opener has no closer → the phantom unbalanced opener absorbed the state-child `</>`.
+Fix: attr-aware `isColonShorthandOpener` (whitespace-preceded depth-0 non-string `:`; tracks
+string/paren/brace/bracket/`${}` so `bind:`/`on:`/`style="x:y"`/`${a?b:c}` aren't mis-detected)
+wired into all 3 finders, mirroring the void/self-close exclusions.
+
+**`<each>` over an enclosing-scope binding (e6870f25, was E-SCOPE-001 / E-CODEGEN-INVALID-JS)** —
+two bugs, one root (file-scope each emission can't see enclosing scope): (A) nested `<each>` (the
+`as` pattern) — the inner each was lifted to module-scope reading `group.items` (undefined) →
+ReferenceError; fix = inline emission in the outer factory via shared `emitEachReconcileLines`.
+(B) `<each>` in a component body — `@.id` E-SCOPE-001 + `.name` leak; 3 roots in
+`component-expander.ts` (native parser doesn't promote each/match → legacy `splitBlocks`+`buildAST`
+re-parse fallback; `substituteProps` missed each-block string fields; tokenized `@ . id` collapse).
+
 ## Error Handling Patterns
 - All compile errors returned as CGError[] in result.errors or result.warnings
 - Caller checks result.errors.length to determine if compilation succeeded
@@ -133,7 +174,7 @@ errorBoundary compile support: `compiler/src/codegen/emit-error-boundary.ts` (32
 fallback markup + per-variant renders; paired with host-JS try/catch backstop (§19.6.8 C-hybrid).
 
 ## Tags
-#scrmlts #map #error #diagnostics #CGError #compiler #W-MATCH-ARROW-LEGACY #E-PA-002 #E-DG-002 #E-DECL-NEEDS-INITIALIZER #W-EACH #source-map #s152
+#scrmlts #map #error #diagnostics #CGError #compiler #W-MATCH-ARROW-LEGACY #E-PA-002 #E-DG-002 #E-DECL-NEEDS-INITIALIZER #E-CODEGEN-INVALID-JS #E-ENGINE-STATE-CHILD-MISSING #E-SCOPE-001 #W-EACH #each-in-dynamic-context #source-map #s152 #s153
 
 ## Links
 - [primary.map.md](./primary.map.md)
