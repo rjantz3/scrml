@@ -192,7 +192,7 @@
     "EXTRA-FIELD": 105,
     "FIELD-SHAPE": 66,
     "KIND-NAME": 33,
-    "MISSING-FIELD": 186,
+    "MISSING-FIELD": 188,
     "SPAN-COORD": 129
   },
   "examples/15-channel-chat.scrml": {
@@ -4803,7 +4803,7 @@
     "EXTRA-FIELD": 17,
     "FIELD-SHAPE": 33,
     "KIND-NAME": 5,
-    "MISSING-FIELD": 105,
+    "MISSING-FIELD": 107,
     "SPAN-COORD": 258
   },
   "samples/compilation-tests/helpers/dnd-setup.scrml": {
@@ -5071,7 +5071,7 @@
     "COUNT-LENGTH": 3,
     "EXTRA-FIELD": 5,
     "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 4,
+    "MISSING-FIELD": 5,
     "SPAN-COORD": 8
   },
   "samples/compilation-tests/meta-001-basic.scrml": {

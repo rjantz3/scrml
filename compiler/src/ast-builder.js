@@ -4355,11 +4355,52 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // NO `=` after — the scan declines (no `=` found) and we never reach here.
     }
 
+    // Bug 71 (S157) — derived `const <x> = match @cell { ... }` exhaustiveness.
+    //
+    // A derived state-cell whose RHS is a value-return `match` is the structural
+    // sibling of the let-decl / const-decl / return-stmt match-as-expr hooks
+    // (above; ast-builder.js:4985/5095/5744). Those hooks build a STRUCTURAL
+    // match-expr (parseOneMatchAsExpr → header + parsed `match-arm-inline` body)
+    // that the typer visits → checkMatchDiagnostics → exhaustiveness (E-TYPE-020).
+    // Without the hook here, the derived RHS collapses to the ExprNode-form
+    // match-expr (`rawArms: string[]` from safeParseExprToNode on `init`), which
+    // the typer's exhaustiveness path never visits — a missing enum variant was
+    // silently accepted.
+    //
+    // The derived cell is REACTIVE: emit-logic.ts (shape:"derived") builds its
+    // `_scrml_derived_declare` recompute + `_scrml_derived_subscribe` dep edges
+    // from `node.initExpr` / `node.init`. We MUST NOT perturb that path or the
+    // cell stops recomputing on `@cell` change. So we DUAL-PARSE the same token
+    // range: `collectExpr()` first (yielding `init` / `initExpr` byte-identical
+    // to the pre-fix path — the reactive emit is unchanged), then RESET the
+    // cursor and run `parseOneMatchAsExpr` to build a STRUCTURAL `matchExpr` that
+    // rides alongside as a pure typer side-field (annotateNodes' state-decl
+    // walker visits it for exhaustiveness; codegen ignores it). Both consume the
+    // identical token span (a well-formed `match … { … }` ends at the same `}`),
+    // so the post-RHS token stream (next sibling decl, etc.) is unaffected.
+    const _rhsForMatchHook = peek();
+    const _rhsForMatchHook1 = peek(1);
+    const _rhsIsMatch = (
+      _rhsForMatchHook && _rhsForMatchHook.kind === "KEYWORD" &&
+      (_rhsForMatchHook.text === "match" ||
+        (_rhsForMatchHook.text === "partial" && _rhsForMatchHook1?.text === "match"))
+    );
+    const _cursorBeforeRhs = i;
+
     // Collect the RHS expression (stops at `;`, unbalanced `}`, STMT_KEYWORDS,
     // BLOCK_REF, or EOF — same boundary rules as the legacy `@NAME = init` path).
     // Phase A1a Step 11.0a — when this call is recursive inside a compound
     // body, also stop at the next sibling-decl opener or compound close.
     const { expr } = collectExpr(null, inCompoundBody ? { compoundBody: true } : null);
+
+    // Bug 71 (S157) — build the structural match-expr side-field for the typer.
+    // Done AFTER collectExpr so `init` / `initExpr` (and thus the reactive emit)
+    // are exactly as before; we then rewind and re-parse the match structurally.
+    let _derivedMatchExpr = null;
+    if (_rhsIsMatch) {
+      i = _cursorBeforeRhs;
+      _derivedMatchExpr = parseOneMatchAsExpr(startTok);
+    }
 
     // Phase A1a Step 4 — `shape` discriminant per AST-CONTRACTS-AND-DECOMPOSITION
     // §1.1. Step 5 adds `validators` field when present (Shape 1/3 with validators
@@ -4394,6 +4435,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     }
     if (typeAnnotation) {
       node.typeAnnotation = typeAnnotation;
+    }
+    // Bug 71 (S157) — attach the structural match-expr side-field (built above
+    // from the same token range) so the typer's state-decl walker can route a
+    // derived `const <x> = match @cell { ... }` through checkMatchDiagnostics
+    // (exhaustiveness — E-TYPE-020). Pure side-field: the reactive derived-cell
+    // emit (emit-logic.ts shape:"derived") reads `node.init` / `node.initExpr`,
+    // which are unchanged, so recompute + dep-subscribe wiring are untouched.
+    if (_derivedMatchExpr) {
+      node.matchExpr = _derivedMatchExpr;
     }
     return node;
   }

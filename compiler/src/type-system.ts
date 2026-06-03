@@ -6132,6 +6132,22 @@ function annotateNodes(
             }
           }
         }
+        // Bug 71 (S157) — derived `const <x> = match @cell { ... }`. The AST
+        // builder attaches a STRUCTURAL match-expr side-field (`matchExpr`,
+        // built from the same token range as the reactive `init`/`initExpr`)
+        // for the derived-state-decl form. Visiting it routes through
+        // `case "match-expr"` → checkMatchDiagnostics → exhaustiveness
+        // (E-TYPE-020), giving the derived `const <x> = match` form the SAME
+        // enforcement the `let x = match` / `const x = match` / `return match`
+        // forms already have. Without this visit, a missing enum variant in a
+        // value-return derived-cell match was silently accepted (the reactive
+        // `initExpr` is the ExprNode `rawArms` shape the exhaustiveness path
+        // never visits). The reactive recompute + dep-subscribe emit read
+        // `init`/`initExpr` (unchanged), so codegen is unaffected.
+        const stateMatchExpr = (n as { matchExpr?: ASTNodeLike }).matchExpr;
+        if (stateMatchExpr && typeof stateMatchExpr === "object") {
+          visitNode(stateMatchExpr);
+        }
         break;
       }
 
