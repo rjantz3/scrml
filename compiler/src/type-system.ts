@@ -8815,6 +8815,11 @@ interface EnumExhaustivenessResult {
   missing: string[];
   unreachableWildcard: boolean;
   duplicateArms: string[];
+  // §53.15.4 / SF-1 — arms naming a base-enum variant that is EXCLUDED by the
+  // matched value's enum-subset refinement (`oneOf` / `notIn`). Each such arm is
+  // dead (the variant can never inhabit the value) → E-MATCH-SUBSET-DEAD-ARM.
+  // Empty unless a `subsetVariants` set was supplied to checkEnumExhaustiveness.
+  deadArms: string[];
 }
 
 interface UnionExhaustivenessResult {
@@ -8828,10 +8833,17 @@ interface UnionExhaustivenessResult {
 function checkEnumExhaustiveness(
   enumType: EnumType,
   armPatterns: ArmPattern[],
+  subsetVariants?: Set<string>,
 ): EnumExhaustivenessResult {
-  const allVariants = new Set((enumType.variants ?? []).map(v => v.name));
+  // §53.15.4 (Option A) — when the matched value's declared type is an
+  // enum-subset refinement, the exhaustiveness SET is the subset's variants,
+  // NOT the base enum's full set. `baseVariants` is the full set (used only to
+  // classify a dead arm — a variant that IS in the base but NOT in the subset).
+  const baseVariants = new Set((enumType.variants ?? []).map(v => v.name));
+  const allVariants = subsetVariants ?? baseVariants;
   const coveredVariants = new Set<string>();
   const duplicateArms: string[] = [];
+  const deadArms: string[] = [];
   let hasWildcard = false;
 
   for (const pattern of armPatterns) {
@@ -8841,6 +8853,16 @@ function checkEnumExhaustiveness(
     }
     if (pattern.kind === "variant") {
       const name = pattern.variantName!;
+      // SF-1 dead-arm: a concrete arm naming a base variant excluded by the
+      // subset. Classified BEFORE the cover/duplicate bookkeeping so a dead arm
+      // is reported as dead (not as a missing-arm or duplicate side-effect). A
+      // variant that is neither in the base nor the subset is a typo handled
+      // elsewhere (E-TYPE-063); only a genuine base member EXCLUDED by the
+      // subset is a dead arm.
+      if (subsetVariants && !subsetVariants.has(name) && baseVariants.has(name)) {
+        deadArms.push(name);
+        continue;
+      }
       if (coveredVariants.has(name)) {
         duplicateArms.push(name);
       } else {
@@ -8855,7 +8877,7 @@ function checkEnumExhaustiveness(
 
   const unreachableWildcard = hasWildcard && coveredVariants.size >= allVariants.size;
 
-  return { missing, unreachableWildcard, duplicateArms };
+  return { missing, unreachableWildcard, duplicateArms, deadArms };
 }
 
 /**
@@ -8900,7 +8922,8 @@ function checkSubstateExhaustiveness(
 
   const unreachableWildcard = hasWildcard && coveredSubstates.size >= allSubstates.size;
 
-  return { missing, unreachableWildcard, duplicateArms };
+  // §54.4 substate matches carry no enum-subset narrowing; deadArms is always [].
+  return { missing, unreachableWildcard, duplicateArms, deadArms: [] };
 }
 
 /**
@@ -9437,6 +9460,31 @@ function checkMatchDiagnostics(
     (subjectType as StateType).substates !== undefined &&
     (subjectType as StateType).substates!.size > 0;
 
+  // §18.8.1 / §53.15.4 (Option A) — when the matched value's DECLARED type is an
+  // enum-subset refinement (`Enum oneOf([…])` / `notIn([…])`), exhaustiveness is
+  // computed against the SUBSET variant set, not the base enum's full set. The
+  // declared type now arrives as a `PredicatedType` (baseType === "enum",
+  // batch 1); unwrap to the base enum and thread `subsetVariants` so the checker
+  // narrows. This handles the §18.8.1 edge cases (nested match / derived-cell /
+  // bound-value) for free — they ALL read this same declared `resolvedType` off
+  // the scope entry; Option A never reads a flow-narrowed type.
+  if (
+    subjectType.kind === "predicated" &&
+    (subjectType as PredicatedType).baseType === "enum" &&
+    (subjectType as PredicatedType).enumBase
+  ) {
+    const pred = subjectType as PredicatedType;
+    checkExhaustiveness(
+      { arms: extracted.armPatterns } as unknown as ASTNodeLike,
+      pred.enumBase as EnumType,
+      span,
+      errors,
+      isPartial,
+      pred.subsetVariants,
+    );
+    return;
+  }
+
   if (subjectType.kind === "enum" || subjectType.kind === "union" || isSubstatedState) {
     checkExhaustiveness(
       { arms: extracted.armPatterns } as unknown as ASTNodeLike,
@@ -9457,6 +9505,10 @@ function checkExhaustiveness(
   matchSpan: Span,
   errors: TSError[],
   isPartial: boolean = false,
+  // §18.8.1 / §53.15.4 (Option A) — when present, the matched value's declared
+  // type is an enum-subset refinement; exhaustiveness narrows to this set and
+  // arms naming excluded base variants are dead (E-MATCH-SUBSET-DEAD-ARM).
+  subsetVariants?: Set<string>,
 ): void {
   const arms = (matchNode.arms as ASTNodeLike[] | undefined) ?? [];
   const armPatterns: ArmPattern[] = arms.map(arm => {
@@ -9468,8 +9520,31 @@ function checkExhaustiveness(
   });
 
   if (subjectType.kind === "enum") {
-    const { missing, unreachableWildcard, duplicateArms } =
-      checkEnumExhaustiveness(subjectType as EnumType, armPatterns);
+    const enumName = (subjectType as EnumType).name;
+    const { missing, unreachableWildcard, duplicateArms, deadArms } =
+      checkEnumExhaustiveness(subjectType as EnumType, armPatterns, subsetVariants);
+
+    // §53.15.4 — when narrowing to a subset, build the `oneOf([…])` rendering
+    // once so the dead-arm / missing-arm / wildcard messages can name it.
+    const subsetRender =
+      subsetVariants
+        ? `${enumName} oneOf([${[...subsetVariants].map(v => `.${v}`).join(", ")}])`
+        : null;
+
+    // SF-1 dead-arm — a concrete arm names a variant excluded by the subset.
+    // DISTINCT from E-TYPE-023 (duplicate arm names the SAME variant twice):
+    // a dead subset arm names an EXCLUDED variant once. The message names the
+    // excluded variant + the subset (§53.15.5).
+    for (const variantName of deadArms) {
+      errors.push(new TSError(
+        "E-MATCH-SUBSET-DEAD-ARM",
+        `E-MATCH-SUBSET-DEAD-ARM: match arm \`.${variantName}\` is dead — the matched value's ` +
+        `enum-subset refinement type \`${subsetRender ?? enumName}\` excludes \`.${variantName}\`, ` +
+        `so that variant can never inhabit the value (§18.8.1 / §53.15). ` +
+        `Remove the \`.${variantName}\` arm.`,
+        matchSpan,
+      ));
+    }
 
     for (const variantName of duplicateArms) {
       errors.push(new TSError(
@@ -9483,9 +9558,13 @@ function checkExhaustiveness(
     if (missing.length > 0 && !isPartial) {
       errors.push(new TSError(
         "E-TYPE-020",
-        `E-TYPE-020: Non-exhaustive match over enum type \`${(subjectType as EnumType).name}\`. ` +
-        `Missing variants: ${missing.map(v => `::${v}`).join(", ")}. ` +
-        `Add arms for the missing variants, or add an \`else\` arm to handle them all.`,
+        subsetRender
+          ? `E-TYPE-020: Non-exhaustive match over enum-subset type \`${subsetRender}\`. ` +
+            `Missing variants: ${missing.map(v => `::${v}`).join(", ")}. ` +
+            `Add arms for the missing subset variants, or add an \`else\` arm to handle them all.`
+          : `E-TYPE-020: Non-exhaustive match over enum type \`${enumName}\`. ` +
+            `Missing variants: ${missing.map(v => `::${v}`).join(", ")}. ` +
+            `Add arms for the missing variants, or add an \`else\` arm to handle them all.`,
         matchSpan,
       ));
     }
@@ -9493,7 +9572,7 @@ function checkExhaustiveness(
     if (isPartial && missing.length === 0 && !unreachableWildcard) {
       errors.push(new TSError(
         "W-MATCH-003",
-        `W-MATCH-003: \`partial\` is unnecessary — all variants of \`${(subjectType as EnumType).name}\` are explicitly covered. ` +
+        `W-MATCH-003: \`partial\` is unnecessary — all variants of \`${subsetRender ?? enumName}\` are explicitly covered. ` +
         `Remove \`partial\` to use standard exhaustive match, which will catch future variant additions.`,
         matchSpan,
         "warning",
@@ -9503,7 +9582,7 @@ function checkExhaustiveness(
     if (unreachableWildcard) {
       errors.push(new TSError(
         "W-MATCH-001",
-        `W-MATCH-001: Wildcard \`_\` arm is unreachable. All variants of \`${(subjectType as EnumType).name}\` ` +
+        `W-MATCH-001: Wildcard \`_\` arm is unreachable. All variants of \`${subsetRender ?? enumName}\` ` +
         `are already covered by explicit arms. Remove the \`_\` arm.`,
         matchSpan,
         "warning",

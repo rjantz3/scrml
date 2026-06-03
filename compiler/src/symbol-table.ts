@@ -169,6 +169,11 @@ import { resolveModulePath } from "./module-resolver.js";
 import { parseMatchArms, extractEnumVariants } from "./match-statechild-parser.ts";
 import type { MatchArmEntry, MatchArmAttr } from "./match-statechild-parser.ts";
 
+// S156 (d)-A batch 2 — shared enum-subset refinement recognizer (§53.15.1).
+// PASS 20 block-form `<match>` exhaustiveness narrows to the subset when the
+// `on=expr` value's declared type is an enum-subset refinement (§18.0.1).
+import { parseEnumSubsetAnnotation } from "./enum-subset-refinement.ts";
+
 // Unit CC (S123 — companion to V-kill): per-file exemption list for the
 // E-WRITE-NOT-IN-LOGIC-CONTEXT diagnostic. The 110-ish-file pre-S123 corpus
 // uses bare `@x = expr` at `<program>` / `<page>` body-top — a pattern that
@@ -10409,8 +10414,80 @@ function walkValidateMatchBlocks(
   const engineGovernedTypes: Set<string> = new Set();
   collectEngineGovernedTypes(nodes, engineGovernedTypes, new WeakSet<object>());
 
+  // S156 (d)-A batch 2 — build a subset-cell registry (§18.0.1 / §53.15.4).
+  // A cell / let / const declared with an enum-subset refinement annotation
+  // (`Role oneOf([…])` / `notIn([…])`) narrows the block-form `<match>`
+  // exhaustiveness set when it is the `on=expr` value. This is a string-based
+  // pass with no type-system ScopeChain, so the subset is recovered from the
+  // raw `typeAnnotation` text via the SHARED recognizer (the same one the
+  // type-system resolver uses), keyed by both the bare and `@`-prefixed name.
+  const subsetCellRegistry: Map<string, SubsetCellInfo> = new Map();
+  collectSubsetCells(nodes, subsetCellRegistry, enumRegistry, new WeakSet<object>());
+
   // Walk the AST tree, visiting every match-block node.
-  walkMatchBlockNodes(nodes, errors, filePath, visited, enumRegistry, engineGovernedTypes);
+  walkMatchBlockNodes(nodes, errors, filePath, visited, enumRegistry, engineGovernedTypes, subsetCellRegistry);
+}
+
+// S156 (d)-A batch 2 — a cell / let / const whose declared type is an
+// enum-subset refinement. `subset` is the RESOLVED positive IN-SET (notIn
+// already complemented by the shared recognizer); `subsetRender` is the
+// `Enum oneOf([…])` rendering for diagnostics.
+interface SubsetCellInfo {
+  baseEnum: string;
+  subset: Set<string>;
+  subsetRender: string;
+}
+
+// Walk every decl node (state-decl / let-decl / const-decl) and, when its
+// `typeAnnotation` is a valid enum-subset refinement over a known enum, record
+// the cell under both its bare name and `@name` (block-form `on=@cell` carries
+// the `@`; a JS-style member root would not — direct cell refs are the §18.0.1
+// canonical case). Range-form / empty / malformed annotations are skipped here
+// (the decl-site type-system pass already lowered them to E-CONTRACT-002).
+function collectSubsetCells(
+  nodes: any,
+  registry: Map<string, SubsetCellInfo>,
+  enumRegistry: Map<string, string[]>,
+  visited: WeakSet<object>,
+): void {
+  if (!nodes) return;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) collectSubsetCells(n, registry, enumRegistry, visited);
+    return;
+  }
+  if (typeof nodes !== "object") return;
+  if (visited.has(nodes)) return;
+  visited.add(nodes);
+
+  const node = nodes as any;
+  const kind = node.kind;
+  if (
+    (kind === "state-decl" || kind === "let-decl" || kind === "const-decl") &&
+    typeof node.name === "string" && node.name.length > 0 &&
+    typeof node.typeAnnotation === "string" && node.typeAnnotation.length > 0
+  ) {
+    const parsed = parseEnumSubsetAnnotation(
+      node.typeAnnotation,
+      (enumName) => enumRegistry.get(enumName) ?? null,
+    );
+    if (parsed && parsed.kind === "subset") {
+      const subset = new Set(parsed.variants);
+      const subsetRender =
+        `${parsed.baseEnum} oneOf([${[...subset].map(v => `.${v}`).join(", ")}])`;
+      const info: SubsetCellInfo = { baseEnum: parsed.baseEnum, subset, subsetRender };
+      registry.set(node.name, info);
+      registry.set(`@${node.name}`, info);
+    }
+  }
+
+  for (const key of ["body", "children", "defChildren", "consequent", "alternate"]) {
+    if (Array.isArray(node[key])) collectSubsetCells(node[key], registry, enumRegistry, visited);
+  }
+  if (Array.isArray(node.arms)) {
+    for (const arm of node.arms) {
+      if (arm && Array.isArray(arm.body)) collectSubsetCells(arm.body, registry, enumRegistry, visited);
+    }
+  }
 }
 
 function collectEnumTypes(
@@ -10482,10 +10559,11 @@ function walkMatchBlockNodes(
   visited: WeakSet<object>,
   enumRegistry: Map<string, string[]>,
   engineGovernedTypes: Set<string>,
+  subsetCellRegistry: Map<string, SubsetCellInfo>,
 ): void {
   if (!nodes) return;
   if (Array.isArray(nodes)) {
-    for (const n of nodes) walkMatchBlockNodes(n, errors, filePath, visited, enumRegistry, engineGovernedTypes);
+    for (const n of nodes) walkMatchBlockNodes(n, errors, filePath, visited, enumRegistry, engineGovernedTypes, subsetCellRegistry);
     return;
   }
   if (typeof nodes !== "object") return;
@@ -10494,15 +10572,15 @@ function walkMatchBlockNodes(
 
   const node = nodes as any;
   if (node.kind === "match-block") {
-    validateMatchBlock(node, errors, filePath, enumRegistry, engineGovernedTypes);
+    validateMatchBlock(node, errors, filePath, enumRegistry, engineGovernedTypes, subsetCellRegistry);
   }
 
   for (const key of ["body", "children", "defChildren", "consequent", "alternate"]) {
-    if (Array.isArray(node[key])) walkMatchBlockNodes(node[key], errors, filePath, visited, enumRegistry, engineGovernedTypes);
+    if (Array.isArray(node[key])) walkMatchBlockNodes(node[key], errors, filePath, visited, enumRegistry, engineGovernedTypes, subsetCellRegistry);
   }
   if (Array.isArray(node.arms)) {
     for (const arm of node.arms) {
-      if (arm && Array.isArray(arm.body)) walkMatchBlockNodes(arm.body, errors, filePath, visited, enumRegistry, engineGovernedTypes);
+      if (arm && Array.isArray(arm.body)) walkMatchBlockNodes(arm.body, errors, filePath, visited, enumRegistry, engineGovernedTypes, subsetCellRegistry);
     }
   }
 }
@@ -10513,6 +10591,7 @@ function validateMatchBlock(
   filePath: string,
   enumRegistry: Map<string, string[]>,
   engineGovernedTypes: Set<string>,
+  subsetCellRegistry: Map<string, SubsetCellInfo>,
 ): void {
   const blockSpan: SYMDiagnostic["span"] = matchBlock.span ?? {
     file: filePath, start: 0, end: 0, line: 1, col: 1,
@@ -10548,13 +10627,82 @@ function validateMatchBlock(
   }
   const arms: MatchArmEntry[] = parseResult.arms;
 
-  // E-MATCH-NOT-EXHAUSTIVE — every variant of for=Type must have a matching
-  // arm OR a `<_>` wildcard arm must be present (SPEC §18.0.1 line 9593-9594).
+  // S156 (d)-A batch 2 (§18.0.1 / §53.15.4) — when the `on=expr` value's
+  // DECLARED type is an enum-subset refinement, the block-form exhaustiveness
+  // check reads the SUBSET variant set, identically to the JS-style form
+  // (§18.8.1). `forType` stays the BASE enum (arm-tag inference); the subset
+  // comes from the matched-ON value's declared type. A direct `on=@cell`
+  // reference is the §18.0.1 canonical case; member/computed `on=` falls
+  // through to the full-enum check (subset reach is a declared-cell property).
+  const subsetInfo: SubsetCellInfo | undefined =
+    onExprRaw !== null ? subsetCellRegistry.get(onExprRaw.trim()) : undefined;
+
+  // E-MATCH-NOT-EXHAUSTIVE — every variant of the matched type must have a
+  // matching arm OR a `<_>` wildcard arm must be present (SPEC §18.0.1 line
+  // 9593-9594). The "matched type" is the subset when `on=` is subset-typed,
+  // else the full `for=Type` enum.
   const hasWildcard = arms.some((a) => a.isWildcard);
-  if (!hasWildcard && forType) {
+  const concreteArmVariants = arms.filter((a) => !a.isWildcard).map((a) => a.variantName);
+  const armVariantSet = new Set(concreteArmVariants);
+
+  if (subsetInfo) {
+    // SF-1 dead-arm — a concrete arm names a base-enum variant EXCLUDED by the
+    // subset. DISTINCT from a duplicate arm; the variant can never inhabit the
+    // value. Message names the excluded variant + the subset (§53.15.5).
+    const baseVariants = new Set(enumRegistry.get(subsetInfo.baseEnum) ?? []);
+    const seenDead = new Set<string>();
+    for (const v of concreteArmVariants) {
+      if (typeof v !== "string" || v.length === 0) continue;
+      if (!subsetInfo.subset.has(v) && baseVariants.has(v) && !seenDead.has(v)) {
+        seenDead.add(v);
+        errors.push({
+          code: "E-MATCH-SUBSET-DEAD-ARM",
+          message:
+            `E-MATCH-SUBSET-DEAD-ARM: match arm \`<${v}>\` is dead — the matched value's ` +
+            `enum-subset refinement type \`${subsetInfo.subsetRender}\` excludes \`.${v}\`, ` +
+            `so that variant can never inhabit the value (§18.0.1 / §53.15). ` +
+            `Remove the \`<${v}>\` arm.`,
+          span: blockSpan,
+          severity: "error",
+        });
+      }
+    }
+
+    if (hasWildcard) {
+      // W-MATCH-001 (vacuous `<_>`) — a wildcard over a fully-covered subset is
+      // unreachable (§18.6, redefined to the subset set per §53.15.4).
+      const subsetMissing = [...subsetInfo.subset].filter((v) => !armVariantSet.has(v));
+      if (subsetMissing.length === 0) {
+        errors.push({
+          code: "W-MATCH-001",
+          message:
+            `W-MATCH-001: Wildcard \`<_>\` arm is unreachable. All variants of the ` +
+            `enum-subset refinement type \`${subsetInfo.subsetRender}\` are already covered ` +
+            `by explicit arms. Remove the \`<_>\` arm. (SPEC §18.6 / §53.15.4.)`,
+          span: blockSpan,
+          severity: "warning",
+        });
+      }
+    } else {
+      // E-MATCH-NOT-EXHAUSTIVE — narrowed to the subset.
+      const missingVariants = [...subsetInfo.subset].filter((v) => !armVariantSet.has(v));
+      if (missingVariants.length > 0) {
+        errors.push({
+          code: "E-MATCH-NOT-EXHAUSTIVE",
+          message:
+            `E-MATCH-NOT-EXHAUSTIVE: \`<match for=${forType} on=${onExprRaw}>\` is missing arm(s) ` +
+            `for subset variant(s): ${missingVariants.map((v) => `.${v}`).join(", ")} ` +
+            `(the matched value's declared type narrows to \`${subsetInfo.subsetRender}\`). ` +
+            `Add the missing arm(s) or include a wildcard \`<_>...</_>\` catch-all. ` +
+            `(SPEC §18.0.1 / §53.15.4 + §34.)`,
+          span: blockSpan,
+          severity: "error",
+        });
+      }
+    }
+  } else if (!hasWildcard && forType) {
     const expectedVariants = enumRegistry.get(forType);
     if (expectedVariants) {
-      const armVariantSet = new Set(arms.filter((a) => !a.isWildcard).map((a) => a.variantName));
       const missingVariants = expectedVariants.filter((v) => !armVariantSet.has(v));
       if (missingVariants.length > 0) {
         errors.push({
