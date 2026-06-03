@@ -1,10 +1,10 @@
 # schema.map.md
 # project: scrmlts
-# updated: 2026-06-02T21:33:23-06:00  commit: 57edc794
+# updated: 2026-06-03T21:31:18Z  commit: 97fe2199
 
 Authoritative AST type source: `compiler/src/types/ast.ts` (1983L+, TypeScript).
 IR types: `compiler/src/codegen/ir.ts` (253 lines).
-Type-system internals: `compiler/src/type-system.ts` (17070L — internal interfaces, not exported).
+Type-system internals: `compiler/src/type-system.ts` (17374L — internal interfaces, not exported).
 Symbol-table exports: `compiler/src/symbol-table.ts` (11280L — `MessageArmEntry`, `PayloadBinding`, `EngineStateChildEntry`).
 Enum-subset shared recognizer: `compiler/src/enum-subset-refinement.ts` (143L — `EnumSubsetParse`, `parseEnumSubsetAnnotation`).
 
@@ -56,6 +56,7 @@ kind: "lin-decl"; name: string; typeAnnotation?: string; init: ExprNode
 
 ### ReactiveDeclNode extends BaseNode
 kind: "reactive-decl"; name: string; typeAnnotation?: string; init?: ExprNode; renderSpec?: RenderSpecNode; ... +12 more fields
+**S157 Bug 71 addition:** `matchExpr?: any` — structural match-expr side-field for derived `const <x> = match @cell { ... }` reactive cells; set by ast-builder.js dual-parse hook; used by the typer's exhaustiveness pass (`checkMatchDiagnostics`); ignored by codegen (the `init`/`initExpr` reactive emit path is unchanged).
 
 ### FunctionDeclNode extends BaseNode
 kind: "function-decl"; name: string; params: FunctionParam[]; returnType?: string; body: LogicStatement[]; modifier: "fn"|"server"|"pure"|"function"|null; errorType?: string; ... +5 more fields
@@ -180,9 +181,29 @@ kind: "predicated"; baseType: string; predicate: PredicateExpr
 **S156 (d)-A addition:** `kind: "variant-set"` — enum-subset boundary check; fields: `variantMode?: "oneOf"|"notIn"`, `variants?: string[]` (resolved IN-SET). Lowered to `(["A","B"].includes(v))` by `predicateToJsExpr()`.
 
 MachineType: states: Map<string, VariantDef>; initial: string; derived?: ResolvedType; ... +5 more fields
+**S155 addition:** MachineType carries `cellMessageEnums?: Map<string, string>` — maps engine var name → the `acceptsType` enum name for `.advance` two-plane resolution (§51.0.G.1); threaded through `annotateNodes` so markup event-handler attr checking (Bug 63 S157) can gate on whether a `.advance` arg belongs to the message plane.
 
 LinState: "unconsumed" | "consumed"
 TildeState: "uninitialized" | "initialized"
+
+---
+
+## Emit-Each Internal Types  [compiler/src/codegen/emit-each.ts — S156-S158]
+
+### EachEngineCtx  [emit-each.ts:73]
+engineRewriteCtx: EngineRewriteCtx | null — for assign form (`@engine = .X`); passed to `rewriteBlockBody`
+engineExprCtxExtras: Record<string, unknown> — for advance form (`.advance(.X)`); spread into `emitExprField` ctx
+engineVarNames: Set<string> | null — cheap gate before parse/write-guard routing; null when no engines in file
+
+Built once per file by `buildEachEngineCtx(fileAST)` at the top of `emitEachBodyRenderForFile`.
+Exported; re-used by emit-lift.js `buildLiftEngineCtx`/`buildLiftEngineCtxFromExtras` (Bug 65, S157).
+
+### EachReconcileCtx  [emit-each.ts:961]
+mountVar: string — the `_scrml_reconcile_list` container var (the `_scrml_resolve_item` target)
+keyVar: string — the per-item create-time key local (captured as `item?.id != null ? item.id : _scrml_idx`)
+iterVar: string — the iteration variable name (matched by `maybeWrapEachPerItemEffect`)
+
+**S158 (Bug 64/R28-1c):** Module-level stack `_eachReconcileCtxStack: EachReconcileCtx[]`. `pushEachReconcileCtx` is called inside `emitEachReconcileLines` after the `_scrml_reconcile_list(...)` call; `popEachReconcileCtx` after the createFn body. Sibling shape in emit-lift.js: `_scrml_lift_reconcile_ctx_stack` with `pushLiftReconcileCtx`/`popLiftReconcileCtx`.
 
 ---
 
@@ -221,7 +242,7 @@ Whitespace-tolerant parser for `"EnumName oneOf([.A,.B])"` / `"notIn([.C])"` ann
 ---
 
 ## Tags
-#scrmlts #map #schema #ast #types #compiler #ir #protect-analyzer #match-arm #enum-subset #message-dispatch #predicated-type #s154 #s155 #s156
+#scrmlts #map #schema #ast #types #compiler #ir #protect-analyzer #match-arm #enum-subset #message-dispatch #predicated-type #each-reconcile-ctx #each-engine-ctx #s154 #s155 #s156 #s157 #s158 #bug64 #bug71 #r28-1c
 
 ## Links
 - [primary.map.md](./primary.map.md)

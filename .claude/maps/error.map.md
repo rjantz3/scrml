@@ -1,6 +1,6 @@
 # error.map.md
 # project: scrmlts
-# updated: 2026-06-02T21:33:23-06:00  commit: 57edc794
+# updated: 2026-06-03T21:31:18Z  commit: 97fe2199
 
 scrml's own language error model is values-not-exceptions (SPEC §19.1 — no try/catch, no throw).
 The compiler itself surfaces structured CGError objects to the caller; it never throws on bad input.
@@ -25,7 +25,7 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 | E-CG-* | ~15 | Code generator errors (E-CG-001..015) |
 | E-CHANNEL-* | ~10 | Channel declaration errors |
 | E-CLOSURE-* | 2 | Closure scope errors |
-| E-CODEGEN-INVALID-JS | 1 | Emitted-JS parse-gate invariant (default-ON, S142): emitted JS fails `node --check`. S153 closed two false-fire classes: `<each>` w/ `@.` sigil in a block-form `<match>` arm (3429b385) + `<each>` in a component body (e6870f25) — both previously leaked unscoped `.name` / `@ . id` into emitted JS |
+| E-CODEGEN-INVALID-JS | 1 | Emitted-JS parse-gate invariant (default-ON, S142): emitted JS fails `node --check`. S153 closed two false-fire classes; S157 Bug 70: gate SUPPRESSED when compilation already has a prior fatal error (api.js `hasPriorFatalError` check) — codegen-of-invalid-source after an E-SYNTAX-064 is EXPECTED, not a compiler defect |
 | E-COMPONENT-* | ~15 | Component definition/usage errors |
 | E-CONTRACT-* | 4 | Server-fn contract errors: E-CONTRACT-001 (static literal fails predicate), E-CONTRACT-001-RT (runtime boundary), E-CONTRACT-002 (named shape not in registry; also: enum-subset error marker at decl-site, S156), E-CONTRACT-003 (predicate refs external reactive var) |
 | E-CPS-* | 6 | CPS async planner errors (idempotency, multibatch reorder/machine-crossing) |
@@ -33,7 +33,7 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 | E-CTX-* | 2 | Context errors (E-CTX-001: unclosed block; E-CTX-003: shorthand confusion) |
 | E-DECL-NEEDS-INITIALIZER | 1 | (S152) — non-array typed-decl with no RHS; only `T[]` typed-array decls may omit RHS (default `[]` per §6.2 Shape 4) [ast-builder.js:4236] |
 | E-DERIVED-* | 7 | Derived-value errors (circular-dep, engine-no-initial/rules/write, value-mutate) |
-| E-DG-* | 2 | Dependency graph errors — E-DG-002 false-positive fix: credits lambda-body @var reads + `<match on=@cell>` block-form headers [dependency-graph.ts] |
+| E-DG-* | 2 | Dependency graph errors — E-DG-002 false-positive fix: credits lambda-body @var reads + `<match on=@cell>` block-form headers [dependency-graph.ts]; Bug 60 (S157): render-by-tag tag-name structural-read credit added (cells consumed ONLY through render-by-tag no longer fire E-DG-002) |
 | E-EACH-ITER-SHAPE | 1 | Each iteration shape errors: missing-or-both `of`/`in` attrs [ast-builder.js] |
 | E-ENGINE-* | ~20 | Engine declaration errors (incl. E-ENGINE-010: `given` guard in type-level transitions block); +4 NEW S154-S155 codes (see Key New Codes below) |
 | E-ENGINE-ACCEPTS-NOT-ENUM | 1 | **(S154-S155 NEW)** `<engine for=T accepts=MsgType>` — `MsgType` is not a declared `:enum` type (or is absent from typeDecls). Fired at SYM PASS 11 in symbol-table.ts [symbol-table.ts:5939] |
@@ -63,10 +63,11 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 | E-SQL-* | ~8 | SQL context errors |
 | E-STMT-* | 43 | Native-parser statement grammar codes (§34.1) |
 | E-SWITCH-FORBIDDEN | 1 | `switch` keyword in scrml source |
-| E-SYNTAX-* | ~10 | Syntax errors (E-SYNTAX-042..044: null/undefined in source) |
+| E-SYNTAX-* | ~11 | Syntax errors (E-SYNTAX-042..044: null/undefined in source; **E-SYNTAX-064 NEW S157**: `@.` contextual sigil used outside an `<each>` body scope — replaces the false E-SCOPE-001 / confusing E-CODEGEN-INVALID-JS on that class) |
+| E-SYNTAX-064 | 1 | **(S157 NEW/PROMOTED)** `@.` or `@.field` used outside an `<each>` body scope (§17.7.3). Fired at two sites: (1) TS markup-attr-value walk when `value.name` starts with `@.` and `!inEachBodyScope()` [type-system.ts:7434]; (2) TS `visitAttr` for variable-ref attr values [type-system.ts:6643]. Replaces the cascade to E-SCOPE-001 or E-CODEGEN-INVALID-JS on the same class. |
 | E-TEST-* | 6 | Test block errors (E-TEST-001..006) |
 | E-TIMEOUT-* | 2 | Engine timeout errors |
-| E-TYPE-* | ~20 | Type system errors (E-TYPE-001 dormancy fix for object-literal lifecycle, S151 C4) |
+| E-TYPE-* | ~20 | Type system errors (E-TYPE-001 dormancy fix for object-literal lifecycle, S151 C4); **E-TYPE-063** used by Bug 63 (S157) for invalid `.advance(.V)` variant at markup handler-attr position |
 | E-USE-* | ~5 | `use` declaration errors |
 | E-VALIDATOR-* | ~5 | Validator circular-dep / inline-dynamic |
 | E-WRITE-NOT-IN-LOGIC-CONTEXT | 1 | Write attempt outside logic context |
@@ -95,7 +96,7 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 | I-MATCH-PROMOTABLE | 1 | Info: match eligible for engine promotion (§56) |
 | I-PARSER-NATIVE-SHADOW | 1 | Info: native parser shadows live-pipeline result |
 
-## Key New / Changed Codes Since Watermark c665714c (S154-S156)
+## Key New / Changed Codes Since Watermark c665714c (S154-S158)
 
 ### S154 — #14 event-payload-transition (parser batch 1)
 No new diagnostics; existing codes extended. `accepts=MsgType` is recorded verbatim on the AST; the typer batch 2 (S155) owns the resolution diagnostic.
@@ -110,6 +111,16 @@ No new diagnostics; existing codes extended. `accepts=MsgType` is recorded verba
 - **E-MATCH-SUBSET-DEAD-ARM** — dead arm inside a `<match>` on a subset-refined cell. Batch 2: type-system.ts (type-resolution path, both match loci). Batch 4: symbol-table.ts PASS 20 (string-based path, constructor-form + member-access). Both fire independently when the matched cell's type has `subsetVariants`. Fatal.
 - **E-CONTRACT-002** (extended use) — enum-subset refinement error markers (range form, empty list, malformed entries) lower to E-CONTRACT-002 at declaration time via `checkEnumSubsetErrorMarkers()` in type-system.ts. Reuses the contract family rather than introducing a dedicated code.
 - Bug 62 fix: NO new error code. The root cause was silent wrong-JS generation (`.advance(.X)` lowered without engine-ctx → stale JS); the fix is in emit-each.ts codegen path, not diagnostic emission.
+
+### S157 — match-exhaustiveness arc + multi-bug pass
+- **E-SYNTAX-064** (promoted from implicit to explicit) — `@.` contextual sigil outside an `<each>` body scope. Previously fell through to confusing E-SCOPE-001 (base-name `@` unresolved) or E-CODEGEN-INVALID-JS (downstream JS parse failure). Now fires E-SYNTAX-064 explicitly at the TS pass (two sites in type-system.ts). Fatal.
+- **Bug 70** (no new code) — E-CODEGEN-INVALID-JS gate in api.js: suppressed when a prior fatal error already exists (`hasPriorFatalError` check). No new diagnostic; changes when the existing gate fires.
+- **Bug 63** (no new code) — markup event-handler attribute `.advance(.V)` variant checking extended to use existing E-TYPE-063 (invalid variant in two-plane resolution). Same code family as the statement-path check.
+- Bug 65/72/60/71/67 fixes: NO new error codes. Bug 65 = silent miscompile (fix is engine-ctx threading in emit-lift.js). Bug 72 = E-CODEGEN-INVALID-JS (now prevented at codegen rather than detected post-emit). Bug 60 = missing render-by-tag expansion (no diagnostic path). Bug 71/67 = missing exhaustiveness (now correctly fires E-TYPE-020 via the existing match exhaustiveness path).
+
+### S158 — Bug 64 / R28-1c per-item content reactivity + Bug 72 completion
+- Bug 64/R28-1c: NO new error codes. The failure mode was stale content (no compiler error). Fix is purely codegen + runtime (EachReconcileCtx stack + _scrml_resolve_item).
+- Bug 72 completion: see S157 — fully closed between S157 (ast-builder bare-@ branch) and the runtime-template / emit-each changes landing here.
 
 ## Fix Notes
 
@@ -181,8 +192,51 @@ collects all file-scope engines with message arms + their message-variant sets, 
 `engineRewriteCtx`. This ctx is threaded through all `renderTemplateAttrToJs` / `renderTemplateChildToJs`
 / `emitEachReconcileLines` calls; `emitEngineHandlerBody(preRewritten, ctx)` intercepts (A) call-ref
 `.advance(.X)` forms and (B) assign-ref `@engine = .X` forms and routes both to the correct plane.
-**Bug 65 (next arc):** the identical gap exists at `emit-lift.js` (~line 529) — that file has no
-engine-ctx threading; emit-each.ts is the exact template to mirror.
+
+### Bug 65 — `${for…lift}` engine-ctx threading (S157 — CLOSED)
+`emit-lift.js` — the IDENTICAL gap as Bug 62 in the Tier-0 path. `buildLiftEngineCtx(fileAST)`
+delegates to `buildEachEngineCtx` via `require()`. `buildLiftEngineCtxFromExtras(extras)` is a thin
+re-pack adapter that uses engine extras already threaded via emit-logic opts (no AST re-walk).
+`tryLowerLiftEngineHandler(rawHandlerText, engineCtx)` delegates to `emitEngineHandlerBody` (emit-each).
+`emit-logic.ts` for-stmt case threads all engine extras (previously silently dropped) into `emitForStmt`.
+The failure mode (pre-fix) was a SILENT miscompile: `_scrml_reactive_get("phase").advance("Active")`
+→ `.advance` on a bare string → `TypeError` on click. `node --check` passed. `compileScrml()` exits 0.
+
+### Bug 60 — render-by-tag nested compound field expansion (S157 — CLOSED)
+`emit-html.ts` — `<signupForm><userName/></>` where `userName` is a field of a compound-parent
+`signupForm` cell. Bare `lookupStateCell(tag)` returned undefined for the nested field because
+compound-parent cells register their children under qualified paths (`signupForm.userName`), not
+bare names. Fix: `enclosingCompoundStack: string[]` tracks the active compound wrapper tag during
+the markup walk; fallback `lookupQualifiedStateCell(fileScope, [enclosing, tag])` resolves nested
+fields. `dependency-graph.ts`: render-by-tag tag names (lowercase, matching `reactiveVarNodeIds`)
+now credit the cell as a reader for E-DG-002 purposes.
+
+### Bug 72 — nested `<each>` inside Tier-0 `${for…lift}` (S158 — CLOSED)
+`emit-lift.js` + `ast-builder.js` — A `<each>` child of lifted markup arrives as generic `markup`
+node (ast-builder's `parseLiftTag` never promotes to `each-block`). Pre-fix: rendered as literal
+`<each>` DOM tag + inner `@.` leaked raw → E-CODEGEN-INVALID-JS. Two parts:
+(1) `ast-builder.js` `_parseLiftAttrValue`: bare `PUNCT "@"` token now collected as balanced
+`@...` token run → `{kind:"expr"}` value; keeps the lift on the structured `{kind:"markup"}` path.
+(2) `emit-lift.js` `tryEmitNestedLiftEach`: routes `{kind:"markup", tag:"each"}` child through
+`emitNestedEachFromMarkup` (emit-each.ts) → inline reconcile JS. Inner `@.` correctly lowers to
+the inner each's iter var (§17.7.3 innermost-scope-wins).
+
+### Bug 64 / R28-1c — per-item content reactivity on reconcile (S158 — CLOSED)
+`_scrml_reconcile_list` reuses DOM nodes for same-key items (B2 fast-path bail). Per-item TEXT
+and class: bindings that closed over the create-time iter var showed STALE content on array-replace
+/ reorder. Fix has three layers:
+(1) **Runtime** (`runtime-template.js`): `_scrml_reconcile_list` builds `container._scrml_item_by_key`
+key→item Map on every pass; calls `_scrml_trigger(container, "_scrml_items")` (skip first pass) to
+re-fire per-item effects. `_scrml_resolve_item(container, key)` tracks `(container, "_scrml_items")`,
+returns live item via `_scrml_deep_reactive` or `null`.
+(2) **Tier-1** (`emit-each.ts`): `EachReconcileCtx` stack; `maybeWrapEachPerItemEffect(lines, iterVar, indent)`:
+when a reconcile ctx is active for the iter var, wraps binding body in a `_scrml_effect` that
+calls `_scrml_resolve_item` + null-guard before running the body.
+(3) **Tier-0** (`emit-lift.js`, `emit-control-flow.ts`): `_scrml_lift_reconcile_ctx_stack` +
+`pushLiftReconcileCtx`/`popLiftReconcileCtx` wired into the `for`-loop `createFn` body. Key
+captured as `item?.id != null ? item.id : _scrml_idx` (mirrors `_scrml_reconcile_list` keyFn).
+`maybeWrapLiftPerItemEffect` wraps per-item bindings identically. Both tiers end on ONE live-keyed
+per-item binding shape.
 
 ### (d)-A enum-subset refinement (S156, 4 batches)
 **Batch 1 (type-system.ts):** `parseEnumSubsetRefinement()` calls the shared `parseEnumSubsetAnnotation()`
@@ -219,7 +273,7 @@ errorBoundary compile support: `compiler/src/codegen/emit-error-boundary.ts` (32
 fallback markup + per-variant renders; paired with host-JS try/catch backstop (§19.6.8 C-hybrid).
 
 ## Tags
-#scrmlts #map #error #diagnostics #CGError #compiler #W-MATCH-ARROW-LEGACY #E-PA-002 #E-DG-002 #E-DECL-NEEDS-INITIALIZER #E-CODEGEN-INVALID-JS #E-ENGINE-STATE-CHILD-MISSING #E-SCOPE-001 #E-ENGINE-ACCEPTS-NOT-ENUM #E-ENGINE-MSG #E-MATCH-SUBSET-DEAD-ARM #W-EACH #each-in-dynamic-context #source-map #enum-subset #message-dispatch #bug62 #s152 #s153 #s154 #s155 #s156
+#scrmlts #map #error #diagnostics #CGError #compiler #W-MATCH-ARROW-LEGACY #E-PA-002 #E-DG-002 #E-DECL-NEEDS-INITIALIZER #E-CODEGEN-INVALID-JS #E-ENGINE-STATE-CHILD-MISSING #E-SCOPE-001 #E-ENGINE-ACCEPTS-NOT-ENUM #E-ENGINE-MSG #E-MATCH-SUBSET-DEAD-ARM #E-SYNTAX-064 #W-EACH #each-in-dynamic-context #source-map #enum-subset #message-dispatch #bug60 #bug62 #bug63 #bug64 #bug65 #bug70 #bug71 #bug72 #r28-1c #per-item-reactivity #s152 #s153 #s154 #s155 #s156 #s157 #s158
 
 ## Links
 - [primary.map.md](./primary.map.md)

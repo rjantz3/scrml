@@ -1,6 +1,6 @@
 # domain.map.md
 # project: scrmlts
-# updated: 2026-06-02T21:33:23-06:00  commit: 57edc794
+# updated: 2026-06-03T21:31:18Z  commit: 97fe2199
 
 The domain is the scrml COMPILER pipeline. scrml is a single-file, full-stack reactive web
 language compiled by this TypeScript/JS toolchain running on Bun. The compiler converts `.scrml`
@@ -19,7 +19,7 @@ source files into `*.server.js` + `*.client.js` + `*.html` + `*.css` outputs.
 | CE (Component Expander) | Stage 3.2: expands component references via same-file + cross-file registries — `component-expander.ts`; re-parses synthesized component bodies, falling back to legacy `splitBlocks`+`buildAST` when the body contains `<each>`/`<match>` (S153) |
 | PA (Pre-Analysis) | Stage 4: structural validation, attribute allowlists — `attribute-registry.js` + validators/ |
 | RI (Route Inference) | Stage 5: infers server routes from page structure — `route-inference.ts` |
-| TS (Type System) | Stage 6: type checking, validity surface synthesis, engine type verification — `type-system.ts` (17070L) |
+| TS (Type System) | Stage 6: type checking, validity surface synthesis, engine type verification — `type-system.ts` (17374L) |
 | META (Meta Check+Eval) | Stage 6.5: validates phase separation, evaluates `^{}` compile-time blocks — `meta-checker.ts` + `meta-eval.ts` |
 | VSS (Validity Surface Synthesis) | Stage 6.7: synthesizes `@x.isValid` / `@x.errors` / `@x.touched` / `@x.submitted` accessor cells |
 | DG (Dependency Graph) | Stage 7: builds reactive dependency DAG, detects cycles — `dependency-graph.ts` |
@@ -49,7 +49,11 @@ source files into `*.server.js` + `*.client.js` + `*.html` + `*.css` outputs.
 | `_scrml_each_renderers` / `_scrml_remount_each` | (S153): runtime registry + remount helper in runtime-template.js. An `<each>` whose mount lives in a non-`initial=` engine arm is absent from the DOM at module-init; its render fn registers itself keyed `each_${id}`; when the arm later mounts, the variant-swap dispatcher (emit-variant-guard.ts) calls `_scrml_remount_each(armRoot)` which `querySelectorAll('[data-scrml-each-mount]')` and re-invokes each registered renderer directly (no new dep edge). Idempotent across engine re-entry |
 | each-in-block-form-match | (S153): each-bearing `<match>` arms re-parse via `splitBlocks`+`buildAST` (native parser leaves a generic `markup tag="each"`); lifted each-blocks attach to `matchBlock.bodyChildren`; `restampEachBlockIds` namespaces ids; `__scrmlCachedArms` memoizes across passes — emit-match.ts |
 | each-over-enclosing-scope | (S153): nested `<each>` (the `as` pattern) emits inline in the outer factory via shared `emitEachReconcileLines` (was lifted to module-scope reading undefined enclosing var → ReferenceError); each-in-component-body fixed via the 3 component-expander roots |
-| `<each>` engine-ctx threading (Bug 62) | (S156): `buildEachEngineCtx(fileAST)` in emit-each.ts collects per-file engine metadata once (engines with message arms, message-variant sets) and threads `EachEngineCtx` through every per-item template attr/child lowering so `@engine.advance(.X)` / `@engine = .X` inside `<each>` templates lower correctly to the state or message plane. **Bug 65 (next arc):** the identical gap exists at the Tier-0 `${for…lift}` path in `emit-lift.js` (~line 529) — that file has NO engine-ctx threading yet; emit-each.ts is the template to mirror |
+| `<each>` engine-ctx threading (Bug 62) | (S156): `buildEachEngineCtx(fileAST)` in emit-each.ts collects per-file engine metadata once (engines with message arms, message-variant sets) and threads `EachEngineCtx` through every per-item template attr/child lowering so `@engine.advance(.X)` / `@engine = .X` inside `<each>` templates lower correctly to the state or message plane. Bug 65 (S157) is the SAME fix applied at the Tier-0 `${for…lift}` path in emit-lift.js — CLOSED (see below). |
+| `${for…lift}` engine-ctx threading (Bug 65) | (S157 — CLOSED): `buildLiftEngineCtx(fileAST)` + `buildLiftEngineCtxFromExtras(extras)` in emit-lift.js delegate to `buildEachEngineCtx` (emit-each.ts) so both tiers share one implementation. Engine extras are threaded via emit-logic opts into `emitForStmt` → `emitConsolidatedLift` / `emitCreateElementFromMarkup`. Also: `tryLowerLiftEngineHandler` delegates to `emitEngineHandlerBody` (emit-each) — no duplicated `.advance` logic. |
+| per-item content reactivity (Bug 64 / R28-1c) | (S158 — CLOSED): `_scrml_reconcile_list` reuses DOM nodes for same-key items; per-item TEXT + class: bindings that close over the create-time iter var showed STALE content on array-replace/reorder. Fix: `EachReconcileCtx` stack in emit-each.ts + `_scrml_lift_reconcile_ctx_stack` in emit-lift.js + control-flow.ts push of ctx inside `createFn`. `maybeWrapEachPerItemEffect`/`maybeWrapLiftPerItemEffect` wrap per-item bindings in a live-keyed `_scrml_effect` that calls `_scrml_resolve_item(mount, keyVar)` to get the CURRENT item for the node's create-time key. `_scrml_resolve_item` in runtime-template.js tracks `(container, "_scrml_items")` so `_scrml_trigger(container, "_scrml_items")` (fired by `_scrml_reconcile_list` on each pass after first) re-fires these effects; field reads through `_scrml_deep_reactive` proxy subscribe to field-level mutations. |
+| nested `<each>` in Tier-0 lift (Bug 72) | (S158 — CLOSED): a `<each>` child of lifted markup arrives at codegen as a generic `markup` node (ast-builder's `parseLiftTag` never promotes to `each-block`). Pre-fix: rendered as literal `<each>` DOM tag + inner `@.` leaked raw → E-CODEGEN-INVALID-JS. Fix: `tryEmitNestedLiftEach` in emit-lift.js routes through `emitNestedEachFromMarkup` (emit-each.ts). Also: `_parseLiftAttrValue` in ast-builder.js now handles `PUNCT "@"` token by collecting the balanced `@...` token run as an `{kind:"expr"}` value, keeping the lift on the structured markup path. |
+| render-by-tag nested compound (Bug 60) | (S157 — CLOSED): `<signupForm><userName/></>` — self-tag `<userName/>` failed lookup because bare `lookupStateCell` can't see it; it lives under the compound parent namespace. Fix: `enclosingCompoundStack: string[]` in emit-html.ts tracks the active compound wrapper tag; fallback `lookupQualifiedStateCell(fileScope, [enclosing, tag])` resolves the nested field and emits the render-by-tag expansion. Dependency-graph.ts structural-read credit added for render-by-tag tag names (E-DG-002 false-positive cleared). |
 | `given` guard | §42.2.3 presence guard: `given ident [, ident]* => { body }`; produces `kind: "given-guard"` AST node; standalone form `:>` ratified S148 as Insight-33 extension |
 | formFor | Type-driven form generation from struct definition (§41.14) — `emit-form-for.ts` |
 | schemaFor | Type-driven schema emission (§41 family) — `emit-schema-for.ts`; S156 (d)-A batch 3 adds enum-subset `CHECK IN` lowering (§41.15.6 + §41.15.8a): a `Role oneOf([.Admin,.Editor])` field column emits `CHECK (col IN ('Admin','Editor'))` in declaration order |
@@ -62,6 +66,10 @@ source files into `*.server.js` + `*.client.js` + `*.html` + `*.css` outputs.
 | enum-subset refinement (§53.15.1) | `Role oneOf([.Admin,.Editor])` / `Role notIn([.Guest])` type annotation form (S156 (d)-A); parsed by shared `parseEnumSubsetAnnotation()` in `enum-subset-refinement.ts`; materialized as `PredicatedType` with `subsetVariants: Set<string>` (already complemented for `notIn`) in type-system.ts; three consumers: (1) match exhaustiveness narrowed to subset variants (§18.8.1 / §18.0.1); (2) `["A","B"].includes(v)` boundary check codegen in emit-predicates.ts; (3) `CHECK IN` subset in schemaFor emit-schema-for.ts. Range form `.A .. .B` is explicitly forbidden (reintroduces SPARK RPP02 union-evolution hazard) |
 | `E-MATCH-SUBSET-DEAD-ARM` | Dead arm diagnostic (S156 (d)-A): a `<match>` arm names a variant outside the declared subset — it can never be reached. Emitted by both type-system.ts (full type-resolution pass) and symbol-table.ts PASS 20 (string-based exhaustiveness pass via shared recognizer) |
 | `_scrml_engine_dispatch_message` | Runtime helper (S155, runtime-template.js): resolves `(state × message)` dispatch table; calls per-state arm fn (receives `stateData, msgData`); routes result to `_scrml_engine_advance`; implements §51.0.R handled-message idle-reset |
+| `_scrml_reconcile_list` key→item map | (S158): `container._scrml_item_by_key: Map<key, item>` built on EVERY reconcile pass (including fast-path B2 same-order bail); `_scrml_trigger(container, "_scrml_items")` re-fires per-item effects after map rebuild. This is the runtime side of Bug 64 / R28-1c. |
+| `_scrml_resolve_item(container, key)` | (S158, runtime-template.js): reads `container._scrml_item_by_key`, tracks `(container, "_scrml_items")` via `_scrml_track`, returns live item wrapped in `_scrml_deep_reactive` (null when key gone — canonical absence §42.5). Used by live-keyed per-item effects emitted by `maybeWrapEachPerItemEffect` / `maybeWrapLiftPerItemEffect`. |
+| match-as-expression exhaustiveness (S157) | `const x = match @cell { ... }` (let/const/return positions) now hooks into the exhaustiveness pass: ast-builder.js dual-parse inserts a structural `matchExpr` side-field; type-system.ts `checkMatchDiagnostics` runs on it (E-TYPE-020). Also: derived `const <x> = match @cell { ... }` reactive cell (Bug 71). |
+| E-SYNTAX-064 / redundant-CODEGEN suppression | (S157): `@.` outside an `<each>` body scope now fires E-SYNTAX-064 (both the attr-walk site in the TS pass and the markup-attr-value walk site) instead of leaking to E-CODEGEN-INVALID-JS. api.js suppresses E-CODEGEN-INVALID-JS when compilation already has a prior fatal error (Bug 70). |
 
 ## Business Invariants (from SPEC + code)
 - `null` and `undefined` do NOT exist in scrml source; both → `not` (SPEC §42; `W-ABSENCE-IN-SCRML-SOURCE`)
@@ -76,8 +84,11 @@ source files into `*.server.js` + `*.client.js` + `*.html` + `*.css` outputs.
 - Typed-array decl with no RHS defaults to `[]` (§6.2 Shape 4); non-array typed decl with no RHS is E-DECL-NEEDS-INITIALIZER
 - An `<each>`/`<match>` body render must remain reachable from the file's runtime-chunk walk even when the mount lives only inside an engine/match arm `bodyChildren` (S153 — else the reconcile/effect chunks are tree-shaken → ReferenceError)
 - The each render's reactive dependency must be recorded at module-init regardless of mount presence (read `_items` before the `!_mount` early-return) so a later arm-mount re-render has a live subscription (S153)
-- An `<each>` template's event handlers that contain `.advance(.X)` or `@engine = .X` MUST go through the engine-ctx lowering path (`emitEngineHandlerBody`) in emit-each.ts — direct lowering without ctx produces stale `undefined`-call JS (Bug 62 root cause)
+- An `<each>` template's event handlers that contain `.advance(.X)` or `@engine = .X` MUST go through the engine-ctx lowering path (`emitEngineHandlerBody`) in emit-each.ts — direct lowering without ctx produces stale `undefined`-call JS (Bug 62 root cause; Bug 65 was the same gap in emit-lift.js — CLOSED S157)
 - `oneOf`/`notIn` enum-subset refinements: range form `.A .. .B` is forbidden (§53.15.1); the argument must be an explicit enumerated set; `notIn` is complemented to positive IN-SET at resolution time (both loci read the same positive set)
+- Per-item TEXT / class: / attr bindings in both Tier-1 `<each>` and Tier-0 `${for…lift}` MUST be wrapped in a live-keyed `_scrml_effect` via `maybeWrapEachPerItemEffect` / `maybeWrapLiftPerItemEffect` so same-key reconcile (array-replace, reorder) does not show stale content (Bug 64 / R28-1c — CLOSED S158)
+- `_scrml_resolve_item(container, key)` returns `null` (NOT `undefined`) when the key is gone — canonical compiled-output absence is `null` per SPEC §42.5; the W-CG-UNDEFINED-INTERPOLATION lint forbids `undefined` in emitted JS
+- E-CODEGEN-INVALID-JS is SUPPRESSED when the compilation already has a prior fatal error (Bug 70); the gate's contract is "emits valid JS for VALID source" — firing it on top of an earlier error is misleading
 
 ## Domain Events / Diagnostic Codes (key runtime lifecycle)
 W-AUTH-CONTENT-NOT-GATED — emitted when `<auth role>` is used without content gating (GITI-027A)
@@ -85,12 +96,13 @@ W-MATCH-ARROW-LEGACY — emitted (info-level) at every match / `!{}`-handler arm
 W-EACH-PROMOTABLE — emitted (info-level) at `${ for (let x of @cell) { lift ... } }` sites eligible for `<each>` promotion (S130 HU-1, Stage 6.4c)
 W-EACH-KEY-001 — emitted (info-level) at `<each in=@cell>` sites where items have no inferable `.id` key (S130 HU-1, Stage 6.4d)
 E-DECL-NEEDS-INITIALIZER — emitted at non-array typed-decl with no RHS (S152 §6.2 Shape 4)
-E-ENGINE-STATE-CHILD-MISSING — engine state-child closer un-findable; S153 fixed the `:`-shorthand-child phantom-opener class
+E-ENGINE-STATE-CHILD-MISSING — engine state-child closer un-findable; S153 fixed the `:`-shorthand-child false-fire class
 E-ENGINE-ACCEPTS-NOT-ENUM — (S155) `<engine for=T>` declares `accepts=MsgType` but `MsgType` is absent or non-`:enum` [symbol-table.ts SYM PASS 11]
 E-ENGINE-MSG-WITHOUT-ACCEPTS — (S155) a state-child declares a message arm (`| .Variant :>`) but the engine has no `accepts=` [symbol-table.ts PASS 20]
 E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE — (S155) a state declares message arms but the set does not cover all `accepts=` enum variants and has no wildcard arm [symbol-table.ts PASS 20]
 E-ENGINE-MSG-UNKNOWN — (S155) `.advance(.X)` targets a variant that is in NEITHER the state-transition plane NOR the message-dispatch plane [type-system.ts]
-E-MATCH-SUBSET-DEAD-ARM — (S156 (d)-A batch 2+4) a match arm names a variant excluded by the matched value's `oneOf`/`notIn` subset refinement — it is unreachable [type-system.ts + symbol-table.ts PASS 20 (constructor-form + member-access)]
+E-MATCH-SUBSET-DEAD-ARM — (S156 (d)-A batch 2+4) a match arm names a variant excluded by the matched cell's `oneOf`/`notIn` subset refinement — it is unreachable [type-system.ts + symbol-table.ts PASS 20]
+E-SYNTAX-064 — (S157 Bug 70/73) `@.` contextual sigil used outside an `<each>` body scope; fired at both the TS attr-walk site and the markup-attr-value walk site [type-system.ts:6643 + 7434]
 I-MATCH-PROMOTABLE — info diagnostic suggesting match → engine promotion (§56)
 I-FN-PROMOTABLE — info diagnostic suggesting function promotion
 
@@ -114,25 +126,31 @@ I-FN-PROMOTABLE — info diagnostic suggesting function promotion
 | Enum-subset shared recognizer | compiler/src/enum-subset-refinement.ts (143L NEW, S156) |
 | Sidecar | compiler/src/engine-graph.ts (--emit-engine-graph, S149) |
 
-## Codegen `<each>` / `<match>` Emit Map (S152-S156 — read before any each/match or engine codegen)
+## Codegen `<each>` / `<match>` Emit Map (S152-S158 — read before any each/match or engine codegen)
 
 | File | Role |
 |------|------|
-| compiler/src/codegen/emit-each.ts (1345L) | Tier-1 `<each>` render fns; `collectEachBlocks`, `emitEachBodyRenderForFile`, `emitEachMountHtml`, shared `emitEachReconcileLines`; dep-first read + `_scrml_each_renderers` registration (S153); Bug 62 (S156): `buildEachEngineCtx` + `EachEngineCtx` threading so `.advance(.X)`/`@engine=.X` in per-item templates lower correctly |
-| compiler/src/codegen/emit-lift.js (1861L) | Tier-0 `${for…lift}` path — **NOT updated for engine-ctx threading (Bug 65 next arc)**; emit-each.ts is the pattern template for the fix |
+| compiler/src/codegen/emit-each.ts (1634L) | Tier-1 `<each>` render fns; `collectEachBlocks`, `emitEachBodyRenderForFile`, `emitEachMountHtml`, shared `emitEachReconcileLines`; dep-first read + `_scrml_each_renderers` registration (S153); Bug 62 (S156): `buildEachEngineCtx` + `EachEngineCtx` threading; Bug 64 (S158): `EachReconcileCtx` stack + `maybeWrapEachPerItemEffect` + `pushEachReconcileCtx`/`popEachReconcileCtx`/`currentEachReconcileCtx` for live-keyed per-item TEXT/class: bindings; `emitNestedEachFromMarkup` (exported, used by emit-lift.js Bug 72) |
+| compiler/src/codegen/emit-lift.js (2205L) | Tier-0 `${for…lift}` path; Bug 65 (S157): engine-ctx threading via `buildLiftEngineCtx`/`buildLiftEngineCtxFromExtras`/`tryLowerLiftEngineHandler`; Bug 64 (S158): `pushLiftReconcileCtx`/`popLiftReconcileCtx` + `maybeWrapLiftPerItemEffect`; Bug 72 (S158): `tryEmitNestedLiftEach` routes nested `<each>` through `emitNestedEachFromMarkup` |
+| compiler/src/codegen/emit-control-flow.ts (2013L) | Tier-0 for-loop `createFn` key capture + `pushLiftReconcileCtx`/`popLiftReconcileCtx` (Bug 64 S158); engine-ctx threading into `emitConsolidatedLift`/`emitLiftExpr`/`emitIfStmtWithContainer`/`emitForStmtWithContainer` |
 | compiler/src/codegen/emit-match.ts | block-form `<match>` arm emission; each-bearing arms re-parse via splitBlocks+buildAST; `restampEachBlockIds`, `__scrmlCachedArms` (S153) |
-| compiler/src/codegen/emit-engine.ts (4398L) | Engine substrate codegen; S155: `emitEngineMessageArmTable()`, `engineMessageArmTableName()`, `engineHasMessageArms()`, `collectEnginesWithMessageArms()`, `collectEngineMessageVariants()` |
+| compiler/src/codegen/emit-engine.ts (4398L) | Engine substrate codegen; S155: `emitEngineMessageArmTable()`, `engineMessageArmTableName()`, `engineHasMessageArms()`, `collectEnginesWithMessageArms()`, `collectEngineMessageVariants()` exported for threading into emit-each and emit-event-wiring; `parseEnumVariantFieldsForType()` resolves payload-binding field names at codegen time |
+| compiler/src/codegen/emit-html.ts (2432L) | HTML emit; Bug 60 (S157): `enclosingCompoundStack` + `lookupQualifiedStateCell` fallback for render-by-tag inside compound wrappers |
 | compiler/src/codegen/emit-variant-guard.ts | shared engine/match arm-swap dispatcher; calls `_scrml_remount_each` after arm innerHTML+wire (S153) |
-| compiler/src/codegen/emit-client.ts | `detectRuntimeChunks` descends into engine + each-block `bodyChildren` so reconcile/effect/remount chunks survive tree-shaking (S153) |
+| compiler/src/codegen/emit-client.ts (2427L) | `detectRuntimeChunks` descends into engine + each-block `bodyChildren` so reconcile/effect/remount chunks survive tree-shaking (S153) |
 | compiler/src/codegen/emit-predicates.ts (518L) | §53 predicate boundary-check codegen; S156 (d)-A: `kind: "variant-set"` case emits `(["A","B"].includes(v))` |
 | compiler/src/codegen/emit-schema-for.ts (516L) | schemaFor SQL DDL emission; S156 (d)-A batch 3: enum-subset `predicated` type emits `CHECK IN (ordered subset names)` |
-| compiler/src/runtime-template.js | `_scrml_each_renderers` registry + `_scrml_remount_each` helper (S153); `_scrml_engine_dispatch_message` (S155); `_scrml_reconcile_list`, `_scrml_effect_static`, `_scrml_modules` |
+| compiler/src/codegen/emit-logic.ts (3884L) | Bug 65 (S157): `for-stmt` case now threads all engine extras (engineBindings, engineVarNames, enginesWithHooks, enginesWithOnTimeout, enginesWithIdleWatchdog, enginesWithInternalRules, enginesWithHistory, enginesWithMessageArms, engineMessageVariants) into `emitForStmt` |
+| compiler/src/runtime-template.js (3760L) | `_scrml_each_renderers` registry + `_scrml_remount_each` helper (S153); `_scrml_engine_dispatch_message` (S155); `_scrml_reconcile_list` + `container._scrml_item_by_key` key→item map + `_scrml_trigger(container, "_scrml_items")` (Bug 64 S158); `_scrml_resolve_item(container, key)` returns live item via `_scrml_deep_reactive` or null (Bug 64 S158); `_scrml_effect_static`, `_scrml_modules` |
+| compiler/src/dependency-graph.ts (3354L) | Bug 60 (S157): render-by-tag structural-read credit for E-DG-002 (markup tag name matches reactive var → `creditReader`) |
 | compiler/src/component-expander.ts | each-in-component-body: legacy re-parse fallback + substituteProps each-block string fields + tokenized-sigil collapse (S153) |
 | compiler/src/engine-statechild-parser.ts (2418L) | `:`-shorthand-child closer-pairing fix (S153); `accepts=` + message-arm lexer `parseMessageArms()` (S154) |
 | compiler/src/enum-subset-refinement.ts (143L NEW) | Shared pure `parseEnumSubsetAnnotation()` recognizer; used by type-system.ts + symbol-table.ts to agree on the §53.15.1 grammar |
+| compiler/src/ast-builder.js (13897L) | Bug 72 (S158): `_parseLiftAttrValue` bare-`@` branch collects `@.` token run as expr value; Bug 71 (S157): derived `const <x> = match` dual-parse hook; Bug 67 (S157): `return match` hook |
+| compiler/src/type-system.ts (17374L) | Bug 63 (S157): markup event-handler attr `.advance` two-plane checking; Bug 70/73: E-SYNTAX-064 emitted for `@.` outside each body scope; Bug 67/71: match-as-expr exhaustiveness wired |
 
 ## Tags
-#scrmlts #map #domain #compiler #pipeline #reactive #state-machine #scrml #match-arrow #engine-graph #source-map #cross-file-modules #each #each-in-dynamic-context #engine-statechild #enum-subset #message-dispatch #bug62 #bug65 #s149 #s151 #s152 #s153 #s154 #s155 #s156
+#scrmlts #map #domain #compiler #pipeline #reactive #state-machine #scrml #match-arrow #engine-graph #source-map #cross-file-modules #each #each-in-dynamic-context #engine-statechild #enum-subset #message-dispatch #bug60 #bug62 #bug63 #bug64 #bug65 #bug70 #bug71 #bug72 #r28-1c #per-item-reactivity #live-keyed #s149 #s151 #s152 #s153 #s154 #s155 #s156 #s157 #s158
 
 ## Links
 - [primary.map.md](./primary.map.md)
