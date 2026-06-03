@@ -12412,6 +12412,50 @@ function _schemaForFieldTypePortionIsOptional(clauseRaw: string): boolean {
   return /\?\s*$/.test(typePortion.trim());
 }
 
+/**
+ * §53.15 / §41.15.6 — recover an enum-subset refinement type from a struct
+ * field's raw clause when the struct-body resolver dropped the field to `asIs`.
+ *
+ * The struct-body resolver lowers a field carrying ANY trailing validator
+ * predicate to `asIs` (e.g. `role: Role oneOf([.Admin, .Editor]) req` — the
+ * trailing `req` defeats `parseEnumSubsetRefinement`'s end-anchor). The bare
+ * leading-token recovery then captures only `Role` and re-resolves to the FULL
+ * base enum — silently DISCARDING the subset (a §41.15.6 violation: the schema
+ * would emit `oneOf([all 3 variants])` instead of the declared subset).
+ *
+ * This isolates the enum-subset TYPE PORTION (`Base oneOf([...])` /
+ * `Base notIn([...])`) — everything up to and including the matched close paren
+ * of the subset operator — then runs the canonical `parseEnumSubsetRefinement`
+ * recognizer on it. Returns the subset `PredicatedType` (carrying
+ * `subsetVariants`) when the leading token is `<Ident> (oneOf|notIn) (`, else
+ * null (caller falls through to the bare leading-token recovery).
+ *
+ * `?` / `| not` nullability is NOT recovered here — the caller composes it via
+ * `_schemaForFieldTypePortionIsOptional` / the explicit union path exactly as
+ * for the primitive recovery.
+ */
+function _schemaForRecoverEnumSubset(
+  clauseRaw: string,
+  typeRegistry: Map<string, ResolvedType>,
+): PredicatedType | null {
+  const head = /^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s+(oneOf|notIn)\s*\(/.exec(clauseRaw);
+  if (!head) return null;
+  // Depth-aware scan for the matched close paren of the subset operator.
+  const openIdx = clauseRaw.indexOf("(", head.index + head[0].length - 1);
+  let depth = 0;
+  let closeIdx = -1;
+  for (let i = openIdx; i < clauseRaw.length; i++) {
+    if (clauseRaw[i] === "(") depth++;
+    else if (clauseRaw[i] === ")") {
+      depth--;
+      if (depth === 0) { closeIdx = i; break; }
+    }
+  }
+  if (closeIdx === -1) return null;
+  const typePortion = clauseRaw.slice(0, closeIdx + 1).trim();
+  return parseEnumSubsetRefinement(typePortion, typeRegistry);
+}
+
 function _processSchemaForCallInSchemaContext(
   call: { args?: unknown[]; span?: Span } & Record<string, unknown>,
   typeRegistry: Map<string, ResolvedType>,
@@ -12546,20 +12590,63 @@ function _processSchemaForCallInSchemaContext(
       //   - user-declared enum/struct types referenced as field types
       //     (`role: UserRole req` → "asIs" → "UserRole" → typeRegistry enum)
       const clauseRaw = rawClauses.get(fieldName) ?? "";
-      const m = clauseRaw.match(/^([A-Za-z_$][A-Za-z0-9_$]*)/);
-      if (m) {
-        const tokenName = m[1];
-        const resolved = typeRegistry.get(tokenName);
-        if (resolved) {
-          fieldType = resolved;
-          // §5721 `T?` sugar — postfix `?` desugars to `T | not`. The struct-
-          // body resolver drops the trailing `?` (clause lowered to `asIs`,
-          // raw recovered as the bare leading token), so the nullability is
-          // lost by this point. Re-synthesize the `[T, not]` union when the
-          // raw clause's type-portion ends in `?` (e.g. `string ?` → string?)
-          // so it rides the SAME nullable path as the explicit `T | not` form.
-          if (_schemaForFieldTypePortionIsOptional(clauseRaw)) {
-            fieldType = { kind: "union", members: [resolved, { kind: "not" }] };
+      // §53.15 / §41.15.6 — FIRST try the enum-subset recovery. A field typed
+      // `role: Role oneOf([.Admin, .Editor]) req` is dropped to `asIs` (the
+      // trailing `req` defeats the resolver's end-anchored recognizer); the
+      // bare leading-token recovery below would capture only `Role` and re-
+      // resolve to the FULL base enum, silently discarding the subset. Recover
+      // the subset `PredicatedType` so `classifyFieldForSql` emits the subset
+      // CHECK, not all base variants.
+      const recoveredSubset = _schemaForRecoverEnumSubset(clauseRaw, typeRegistry);
+      if (recoveredSubset) {
+        fieldType = recoveredSubset;
+        // §41.15.8a — compose `| not` / `T?` nullability around the subset so
+        // a `Role oneOf([.A,.B]) | not req` rides the nullable subset path.
+        if (_schemaForFieldTypePortionIsOptional(clauseRaw) || / \|\s*not\b/.test(clauseRaw)) {
+          fieldType = { kind: "union", members: [recoveredSubset, { kind: "not" }] };
+        }
+      } else {
+        const m = clauseRaw.match(/^([A-Za-z_$][A-Za-z0-9_$]*)/);
+        if (m) {
+          const tokenName = m[1];
+          const resolved = typeRegistry.get(tokenName);
+          if (resolved) {
+            fieldType = resolved;
+            // §5721 `T?` sugar — postfix `?` desugars to `T | not`. The struct-
+            // body resolver drops the trailing `?` (clause lowered to `asIs`,
+            // raw recovered as the bare leading token), so the nullability is
+            // lost by this point. Re-synthesize the `[T, not]` union when the
+            // raw clause's type-portion ends in `?` (e.g. `string ?` → string?)
+            // so it rides the SAME nullable path as the explicit `T | not` form.
+            if (_schemaForFieldTypePortionIsOptional(clauseRaw)) {
+              fieldType = { kind: "union", members: [resolved, { kind: "not" }] };
+            }
+          }
+        }
+      }
+    }
+    // §41.15.8a conflict case — a nullable subset that ALSO carries `req`
+    // (`Role oneOf([.A,.B]) req | not`). `resolveTypeExpr` splits on the
+    // top-level `|` FIRST, so the non-`not` member is resolved as a standalone
+    // type-expr whose trailing `req` defeats the end-anchored subset recognizer
+    // → that member lands as `asIs`. The struct field is therefore a
+    // `[asIs, not]` union (NOT a bare `asIs`), so the recovery above does not
+    // fire. Reconstitute the subset member from the raw clause so the field
+    // rides the nullable-subset path (nullable wins → `req` dropped downstream).
+    {
+      const uft = fieldType as { kind?: string; members?: unknown[] } | null;
+      if (uft && uft.kind === "union" && Array.isArray(uft.members)) {
+        const hasNot = uft.members.some(
+          m => m && typeof m === "object" && (m as { kind?: string }).kind === "not",
+        );
+        const baseMember = uft.members.find(
+          m => !(m && typeof m === "object" && (m as { kind?: string }).kind === "not"),
+        ) as { kind?: string } | undefined;
+        if (hasNot && baseMember && (baseMember.kind === "asIs" || baseMember.kind === "unknown")) {
+          const clauseRaw = rawClauses.get(fieldName) ?? "";
+          const recovered = _schemaForRecoverEnumSubset(clauseRaw, typeRegistry);
+          if (recovered) {
+            fieldType = { kind: "union", members: [recovered, { kind: "not" }] };
           }
         }
       }
@@ -12615,6 +12702,11 @@ function _processSchemaForCallInSchemaContext(
     const nullable = (mapping.kind === "ok" || mapping.kind === "bare-enum")
       ? !!mapping.nullable
       : false;
+    // §53.15 / §41.15.6 — the bare-enum set came from an enum-SUBSET refinement
+    // type (`Role oneOf([.Admin, .Editor])`), NOT a full-enum field. The
+    // lowerer drops the variant-literal `oneOf`/`notIn` clause and emits the
+    // string-literal subset form from `bareVariantNames`.
+    const enumSubsetRefinement = mapping.kind === "bare-enum" && !!mapping.enumSubset;
 
     includedFields.push({
       name: fieldName,
@@ -12622,6 +12714,7 @@ function _processSchemaForCallInSchemaContext(
       validators,
       bareVariantNames,
       nullable,
+      enumSubsetRefinement,
     });
   }
 

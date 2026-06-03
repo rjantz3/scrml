@@ -113,6 +113,15 @@ export interface SchemaForFieldInfo {
    * validator (which would otherwise produce `NOT NULL`) from this field.
    */
   nullable?: boolean;
+  /**
+   * True when `bareVariantNames` came from a §53.15 enum-subset REFINEMENT
+   * type (`Role oneOf([.Admin, .Editor])` / `notIn([...])`) — NOT a full-enum
+   * field. The user-authored `oneOf`/`notIn` clause that the struct body
+   * carries holds variant LITERALS (`.Admin`) which do NOT lower to valid SQL;
+   * the emitter drops that clause and emits the §41.15.6 string-literal form
+   * (`oneOf(['Admin', 'Editor'])`) from `bareVariantNames` instead.
+   */
+  enumSubsetRefinement?: boolean;
 }
 
 /**
@@ -193,8 +202,36 @@ export type SqlMappingResult =
   | { kind: "ok"; columnType: SchemaColumnType; nullable?: boolean }
   | { kind: "nested-struct" }
   | { kind: "payload-enum"; enumName: string }
-  | { kind: "bare-enum"; enumName: string; variants: string[]; nullable?: boolean }
+  | { kind: "bare-enum"; enumName: string; variants: string[]; nullable?: boolean; enumSubset?: boolean }
   | { kind: "no-mapping"; typeKind: string };
+
+/**
+ * §41.13 / §53.15.5 — is any variant in this enum payload-bearing?
+ *
+ * A variant carries payload when `variant.payload` is a non-empty Map (the
+ * `parseVariant` shape) — or a non-empty array/object for shape-tolerance.
+ * Unit variants have `payload === null` (or an empty Map). Used by BOTH the
+ * full-enum field path and the enum-subset refinement path: a payload-bearing
+ * enum subset STILL rejects SQL lowering (the rejection is about the payload,
+ * orthogonal to the subset — §53.15.5).
+ */
+function enumHasPayloadVariant(
+  variants: Array<{ name?: string; payload?: unknown }>,
+): boolean {
+  for (const v of variants) {
+    const pl = (v as { payload?: unknown }).payload;
+    if (pl && typeof pl === "object") {
+      if (pl instanceof Map) {
+        if (pl.size > 0) return true;
+      } else if (Array.isArray(pl)) {
+        if (pl.length > 0) return true;
+      } else if (Object.keys(pl as Record<string, unknown>).length > 0) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
 /**
  * Classify a struct-field's resolved type against the v1.0 SQL-mapping table.
@@ -218,26 +255,8 @@ export function classifyFieldForSql(fieldType: unknown): SqlMappingResult {
   if (t.kind === "enum") {
     const enumName = t.name ?? "<unnamed-enum>";
     const variants = Array.isArray(t.variants) ? t.variants : [];
-    // Payload-bearing detection: a variant with a non-null `payload` Map of
-    // non-zero size is payload-bearing. Per type-system.ts §41.13's parseVariant
-    // shape: `variant.payload` is `Map<string, ResolvedType>` for payload-
-    // bearing variants and `null` (or empty Map) for unit variants.
-    let isPayloadBearing = false;
-    for (const v of variants) {
-      const pl = (v as { payload?: unknown }).payload;
-      if (pl && typeof pl === "object") {
-        if (pl instanceof Map) {
-          if (pl.size > 0) { isPayloadBearing = true; break; }
-        } else if (Array.isArray(pl) && pl.length > 0) {
-          isPayloadBearing = true;
-          break;
-        } else if (typeof pl === "object" && Object.keys(pl as Record<string, unknown>).length > 0) {
-          isPayloadBearing = true;
-          break;
-        }
-      }
-    }
-    if (isPayloadBearing) {
+    // Payload-bearing enums reject SQL lowering (E-SCHEMAFOR-VARIANT-PAYLOAD-ENUM-V1).
+    if (enumHasPayloadVariant(variants)) {
       return { kind: "payload-enum", enumName };
     }
     const names: string[] = variants
@@ -253,8 +272,43 @@ export function classifyFieldForSql(fieldType: unknown): SqlMappingResult {
     return { kind: "no-mapping", typeKind: `primitive:${t.name ?? "<unknown>"}` };
   }
 
-  // Predicated — fall through to baseType.
+  // Predicated — an inline-predicate or enum-subset refinement (§53.15).
   if (t.kind === "predicated") {
+    const pt = fieldType as {
+      baseType?: string;
+      enumBase?: { name?: string; variants?: Array<{ name?: string; payload?: unknown }> };
+      subsetVariants?: Set<string>;
+    };
+    // §53.15 / §41.15.6 — enum-subset refinement (`Role oneOf([.A,.B])` /
+    // `notIn([...])`). The field's declared type carries an explicit IN-SET
+    // variant set (`subsetVariants`, materialized batch-1 — already complemented
+    // for `notIn`). Lower to `oneOf([SUBSET names])` — NOT all base-enum
+    // variants — per the L4 "define type once → schema derives" promise. This
+    // rides the bare-enum emission path; the only difference vs a full-enum
+    // field is the variant set is the subset.
+    if (pt.baseType === "enum" && pt.subsetVariants) {
+      const enumName = pt.enumBase?.name ?? "<unnamed-enum>";
+      // §53.15.5 — a payload-bearing enum subset STILL rejects SQL lowering;
+      // the rejection is about the payload, orthogonal to the subset.
+      const baseVariants = Array.isArray(pt.enumBase?.variants) ? pt.enumBase!.variants! : [];
+      if (enumHasPayloadVariant(baseVariants)) {
+        return { kind: "payload-enum", enumName };
+      }
+      // Preserve the base-enum declaration order in the emitted CHECK set for
+      // a stable, readable DDL (the subset set is membership-unordered).
+      const subset = pt.subsetVariants;
+      const ordered = baseVariants
+        .map(v => (v?.name ?? "") as string)
+        .filter(n => n.length > 0 && subset.has(n));
+      const names = ordered.length > 0 ? ordered : Array.from(subset);
+      // `enumSubset` signals the bare-enum names came from a §53.15 SUBSET
+      // refinement (not a full-enum field). The walker uses it to strip the
+      // user-authored variant-LITERAL `oneOf`/`notIn` clause from the parsed
+      // validators so the §41.15.6 string-literal form (`oneOf(['Admin',...])`)
+      // is emitted instead of the verbatim `.Admin` variant-literal text.
+      return { kind: "bare-enum", enumName, variants: names, enumSubset: true };
+    }
+    // Non-enum inline predicate — fall through to the primitive base type.
     const cm = mapPrimitiveToColumnType(t.baseType);
     if (cm) return { kind: "ok", columnType: cm };
     return { kind: "no-mapping", typeKind: `predicated:${t.baseType ?? "<unknown>"}` };
@@ -278,7 +332,7 @@ export function classifyFieldForSql(fieldType: unknown): SqlMappingResult {
         return { kind: "ok", columnType: inner.columnType, nullable: true };
       }
       if (inner.kind === "bare-enum") {
-        return { kind: "bare-enum", enumName: inner.enumName, variants: inner.variants, nullable: true };
+        return { kind: "bare-enum", enumName: inner.enumName, variants: inner.variants, nullable: true, enumSubset: inner.enumSubset };
       }
     }
     return { kind: "no-mapping", typeKind: "union" };
@@ -402,11 +456,20 @@ export function lowerFieldToSharedCore(field: SchemaForFieldInfo): string {
   const seenNames = new Set<string>();
   for (const v of field.validators) {
     if (field.nullable && v.name === "req") continue;  // nullable column — no NOT NULL
+    // §53.15 / §41.15.6 — a field whose declared TYPE is an enum-subset
+    // refinement carries the `oneOf`/`notIn` clause as variant LITERALS
+    // (`oneOf([.Admin, .Editor])`). Those `.Admin` literals do NOT lower to
+    // valid SQL (`CHECK (col IN (.Admin, ...))` is malformed). Drop the
+    // refinement clause here; the §41.15.6 string-literal form is injected
+    // below from `bareVariantNames` (already the subset, in string form).
+    if (field.enumSubsetRefinement && (v.name === "oneOf" || v.name === "notIn")) continue;
     parts.push(renderValidator(v));
     seenNames.add(v.name);
   }
   // Enum-lowering injection per §41.15.6 — only when user did not provide
-  // their own oneOf/notIn narrowing.
+  // their own oneOf/notIn narrowing (or when the field is an enum-subset
+  // refinement, whose variant-literal clause we dropped above so the
+  // string-literal subset form fires here instead).
   // Per SPEC §39.5.8 worked example (line 17090): the SQL-side lowering uses
   // single-quoted string literals — `CHECK (col IN ('Pending', 'Active', ...))`.
   // schema-differ's stripArrayLiteral passes the verbatim contents through
