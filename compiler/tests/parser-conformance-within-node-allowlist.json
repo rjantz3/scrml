@@ -1979,16 +1979,16 @@
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-match-arms-012.scrml": {
     "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 8,
+    "EXTRA-FIELD": 9,
     "FIELD-SHAPE": 14,
-    "MISSING-FIELD": 22,
+    "MISSING-FIELD": 23,
     "SPAN-COORD": 24
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-match-arms-asymmetric-013.scrml": {
     "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 7,
+    "EXTRA-FIELD": 8,
     "FIELD-SHAPE": 12,
-    "MISSING-FIELD": 18,
+    "MISSING-FIELD": 19,
     "SPAN-COORD": 21
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-lin-not-consumed-002.scrml": {
@@ -5704,10 +5704,10 @@
   },
   "samples/compilation-tests/test-008-test-enum.scrml": {
     "COUNT-LENGTH": 2,
-    "EXTRA-FIELD": 5,
+    "EXTRA-FIELD": 6,
     "FIELD-SHAPE": 6,
     "KIND-NAME": 1,
-    "MISSING-FIELD": 7,
+    "MISSING-FIELD": 8,
     "SPAN-COORD": 7
   },
   "samples/compilation-tests/test-009-test-reactive.scrml": {
@@ -5936,10 +5936,10 @@
   },
   "samples/gauntlet-r11/rust-state-machine.scrml": {
     "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 56,
+    "EXTRA-FIELD": 58,
     "FIELD-SHAPE": 52,
     "KIND-NAME": 20,
-    "MISSING-FIELD": 219,
+    "MISSING-FIELD": 221,
     "SPAN-COORD": 197
   },
   "samples/gauntlet-r13/bun-sql-operations.scrml": {
@@ -6261,10 +6261,10 @@
   },
   "samples/kanban-r11.scrml": {
     "COUNT-LENGTH": 6,
-    "EXTRA-FIELD": 101,
+    "EXTRA-FIELD": 102,
     "FIELD-SHAPE": 79,
     "KIND-NAME": 38,
-    "MISSING-FIELD": 327,
+    "MISSING-FIELD": 328,
     "SPAN-COORD": 223
   },
   "samples/login.scrml": {

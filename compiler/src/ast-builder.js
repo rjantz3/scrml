@@ -5727,6 +5727,29 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         }
         // Defensive: child wasn't SQL — fall through to legacy path.
       }
+      // Bug 67 (S157) — match-as-expression at return position:
+      //   `return match expr { .A => "a" .B => "b" }`
+      // Mirror the let-decl / const-decl match-as-expr hooks (above): build a
+      // STRUCTURAL match-expr node (header + body) via parseOneMatchAsExpr and
+      // attach it as `matchExpr` so the typer's return-stmt walker can route it
+      // through checkMatchDiagnostics (§18.8.1 exhaustiveness — E-TYPE-020).
+      // Without this, the value collapses to an ExprNode-form match-expr (the
+      // `rawArms: string[]` shape from safeParseExprToNode), which the typer's
+      // exhaustiveness path never visits — a missing variant was silently
+      // accepted. Codegen routes `return match` through `node.matchExpr` too
+      // (emit-logic case "return-stmt" — emitMatchExpr, the shared IIFE form),
+      // so the structural node is the single source of truth for both the typer,
+      // the linear-analysis walker (E-LIN-003), AND codegen.
+      if (peek().kind === "KEYWORD" && (peek().text === "match" || (peek().text === "partial" && peek(1)?.text === "match"))) {
+        const matchNode = parseOneMatchAsExpr(startTok);
+        return {
+          id: ++counter.next,
+          kind: "return-stmt",
+          expr: "",
+          matchExpr: matchNode,
+          span: spanOf(startTok, peek()),
+        };
+      }
       const { expr, span } = collectExpr();
       return {
         id: ++counter.next,

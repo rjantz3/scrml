@@ -2292,6 +2292,16 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         // emit-client.ts still fires E-CG-006 if anything else slipped through.
         return `return null; // SQL — client cannot evaluate _scrml_sql (E-CG-006); RI should classify this fn as server-bound.`;
       }
+      // Bug 67 (S157) — `return match expr { ... }`. The AST builder attaches a
+      // STRUCTURAL match-expr node as `matchExpr` (mirroring the let-decl /
+      // const-decl match-as-expr hook) so the typer can route it through the
+      // exhaustiveness check (E-TYPE-020). Emit it via the shared expression-form
+      // match emitter (the same IIFE the `return match` exprNode path used before
+      // this fix — clean `if (cond) return X` per arm), wrapped with the
+      // return-type boundary check for refinement-typed returns.
+      if (node.matchExpr) {
+        return _wrapReturnWithCheck(emitMatchExpr(node.matchExpr, opts));
+      }
       // Phase 3 fast path: when exprNode is present, skip all string splitting
       if (node.exprNode) {
         return _wrapReturnWithCheck(emitExpr(node.exprNode, _makeExprCtx(opts)));

@@ -6896,6 +6896,18 @@ function annotateNodes(
       // ------------------------------------------------------------------
       case "return-stmt": {
         const retSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+        // Bug 67 (S157) — `return match expr { ... }`. The AST builder attaches a
+        // STRUCTURAL match-expr node (header + body) as `matchExpr` for the
+        // match-as-expression return form (mirroring the let-decl / const-decl
+        // `matchExpr` hook). Visiting it routes through `case "match-expr"` →
+        // checkMatchDiagnostics → exhaustiveness (E-TYPE-020), giving the
+        // `return match` form the SAME enforcement the `let x = match` form
+        // already has. Without this visit, a missing enum variant in a
+        // value-return match was silently accepted.
+        const retMatchExpr = (n as { matchExpr?: ASTNodeLike }).matchExpr;
+        if (retMatchExpr && typeof retMatchExpr === "object") {
+          visitNode(retMatchExpr);
+        }
         const retExprNode = (n as Record<string, unknown>).exprNode;
         if (retExprNode) {
           checkLogicExprIdents(retExprNode, retSpan, scopeChain, typeRegistry, errors, undefined, fnAllDeclared);
@@ -10868,6 +10880,24 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
         if (isDeferred) {
           currentDeferredDepth = prevDepth;
           currentDeferredCtx = prevCtx;
+        }
+        break;
+      }
+
+      case "return-stmt": {
+        // Bug 67 (S157) — `return match expr { ... }`. The AST builder now
+        // attaches a STRUCTURAL match-expr node as `matchExpr` (instead of the
+        // ExprNode-form `rawArms` match-expr previously stored on `exprNode`).
+        // Route it through walkNode so the `case "match-expr"` branch-parallel
+        // linear analysis (E-LIN-003 asymmetric-arm detection) runs over the
+        // structured arms — preserving the lin enforcement the `rawArms` form
+        // had via scanNodeExprNodesForLin's match-expr branch. Without this, a
+        // `return match` consuming a lin var in some arms but not others would
+        // no longer fire E-LIN-003 (and a symmetric consume would cascade a
+        // spurious E-LIN-001).
+        const retMatch = (node as { matchExpr?: ASTNodeLike }).matchExpr;
+        if (retMatch && typeof retMatch === "object") {
+          walkNode(retMatch, lt, tt, loop);
         }
         break;
       }
