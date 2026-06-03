@@ -25,7 +25,7 @@
 // ---------------------------------------------------------------------------
 
 interface PredicateExpr {
-  kind: "comparison" | "property" | "named-shape" | "and" | "or" | "not" | "error";
+  kind: "comparison" | "property" | "named-shape" | "and" | "or" | "not" | "error" | "variant-set";
   op?: string;
   value?: number | string;
   prop?: string;
@@ -35,6 +35,12 @@ interface PredicateExpr {
   operand?: PredicateExpr;
   message?: string;
   hasExternalRef?: boolean;
+  // §53.15 enum-subset refinement — variant-set membership over an enum base.
+  // `variants` is the RESOLVED IN-SET variant names (notIn already complemented
+  // at type-resolution time). Enum variants lower to plain strings at runtime,
+  // so the boundary membership check is a string `.includes`.
+  variantMode?: "oneOf" | "notIn";
+  variants?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -125,6 +131,17 @@ export function predicateToJsExpr(pred: PredicateExpr, valueExpr: string): strin
       return `(!(${inner}))`;
     }
 
+    case "variant-set": {
+      // §53.15.2 boundary check — enum-subset membership. Enum variants lower
+      // to plain strings at runtime (see the `Role_toEnum` table emitted in
+      // emit-enums), so the check is a string-array `.includes`. `variants` is
+      // the resolved IN-SET (notIn was complemented at type-resolution time),
+      // so the test is uniformly positive regardless of surface form.
+      const set = Array.isArray(pred.variants) ? pred.variants : [];
+      const literal = JSON.stringify(set);
+      return `(${literal}.includes(${valueExpr}))`;
+    }
+
     case "error":
     default:
       // Malformed predicate — TS would have reported this.
@@ -160,6 +177,11 @@ function predicateToDisplayString(pred: PredicateExpr): string {
     }
     case "not":
       return `!(${predicateToDisplayString(pred.operand!)})`;
+    case "variant-set": {
+      const set = Array.isArray(pred.variants) ? pred.variants : [];
+      // §53.15 — display as the canonical positive subset form.
+      return `oneOf([${set.map(v => "." + v).join(", ")}])`;
+    }
     default:
       return "(error)";
   }

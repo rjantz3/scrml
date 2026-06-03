@@ -310,7 +310,7 @@ interface RefBindingType {
 // Predicate expression — recursive representation of the boolean expression
 // inside the outer parens of a predicated type annotation.
 interface PredicateExpr {
-  kind: "comparison" | "property" | "named-shape" | "and" | "or" | "not" | "error";
+  kind: "comparison" | "property" | "named-shape" | "and" | "or" | "not" | "error" | "variant-set";
   op?: string;               // comparison / property
   value?: number | string;   // comparison / property
   prop?: string;             // property
@@ -320,13 +320,27 @@ interface PredicateExpr {
   operand?: PredicateExpr;   // not
   message?: string;          // error
   hasExternalRef?: boolean;  // set when predicate references @identifier
+  // §53.15 enum-subset refinement — variant-set membership over an enum base.
+  // `variantMode` records the SURFACE form (`oneOf`/`notIn`); `variants` is the
+  // RESOLVED subset variant set (notIn already complemented against the base
+  // enum's full variant list at resolution time, so downstream consumers read
+  // a single positive membership set regardless of surface form).
+  variantMode?: "oneOf" | "notIn";
+  variants?: string[];       // variant-set — the resolved IN-SET variant names
 }
 
 interface PredicatedType {
   kind: "predicated";
-  baseType: "number" | "string" | "boolean" | "integer";
+  baseType: "number" | "string" | "boolean" | "integer" | "enum";
   predicate: PredicateExpr;
   label: string | null;
+  // §53.15 enum-subset refinement — populated when baseType === "enum".
+  // `enumBase` is the full base enum the subset refines; `subsetVariants` is
+  // the explicit IN-SET variant-name set (the load-bearing materialization
+  // batch 2 exhaustiveness + batch 3 schemaFor read). For `notIn`, this is
+  // `base_variants \ excluded`.
+  enumBase?: EnumType;
+  subsetVariants?: Set<string>;
 }
 
 type ResolvedType =
@@ -589,6 +603,47 @@ function tPredicated(
   label: string | null = null,
 ): PredicatedType {
   return { kind: "predicated", baseType, predicate, label };
+}
+
+/**
+ * §53.15 — Enum-variant subset refinement constructor.
+ *
+ * A `PredicatedType` over an `EnumType` carrying the explicit IN-SET variant
+ * names (`subsetVariants`). For `oneOf`, the set IS the listed variants; for
+ * `notIn`, the set is `base_variants \ excluded` (complemented here so every
+ * downstream consumer reads a single positive membership set).
+ *
+ * This materialization is the load-bearing batch-1 deliverable: batch 2 reads
+ * `subsetVariants` for narrowed `match` exhaustiveness (§18.8.1 / §18.0.1) and
+ * batch 3 reads it for the schemaFor SUBSET CHECK (§41.15.6).
+ */
+function tEnumSubset(
+  enumBase: EnumType,
+  mode: "oneOf" | "notIn",
+  listed: string[],
+  label: string | null = null,
+): PredicatedType {
+  const baseNames = (enumBase.variants ?? []).map(v => v.name);
+  const subset: Set<string> =
+    mode === "oneOf"
+      ? new Set(listed)
+      : new Set(baseNames.filter(n => !listed.includes(n)));
+  const predicate: PredicateExpr = {
+    kind: "variant-set",
+    variantMode: mode,
+    // The predicate carries the RESOLVED in-set variants so the runtime
+    // boundary check (emit-predicates.ts) is a single membership test
+    // regardless of surface form.
+    variants: Array.from(subset),
+  };
+  return {
+    kind: "predicated",
+    baseType: "enum",
+    predicate,
+    label,
+    enumBase,
+    subsetVariants: subset,
+  };
 }
 
 // §14.9 — snippet constructor
@@ -1454,6 +1509,159 @@ function parseEnumBody(
 }
 
 // ---------------------------------------------------------------------------
+// §53.15 — Enum-variant subset refinement recognizer
+// ---------------------------------------------------------------------------
+
+/**
+ * Recognize an enum-subset refinement type expression of the form
+ *   `<EnumName> oneOf([.V1, .V2, ...])`  or
+ *   `<EnumName> notIn([.Vx, ...])`
+ * where `<EnumName>` resolves to an `EnumType` in `typeRegistry`.
+ *
+ * The type-expr string arrives whitespace-variable from BS/TAB normalization
+ * (empirically `Role oneOf ( [ . Admin , . Editor ] )` for struct fields,
+ * `Role oneOf([. Editor])` for params). This recognizer is whitespace-tolerant:
+ * it strips ALL whitespace before matching the subset shape, so every spacing
+ * variant collapses to one canonical form.
+ *
+ * Return values:
+ *   - null                         — not an enum-subset refinement (caller falls
+ *                                     through to the existing §53 / named-type paths).
+ *   - PredicatedType (valid subset) — `baseType: "enum"`, `subsetVariants` set.
+ *   - PredicatedType (error marker) — `predicate.kind === "error"` carrying a
+ *                                     message; emitted for the §53.15.1 range form
+ *                                     `oneOf(.A .. .B)` (RPP02 hazard) and for an
+ *                                     empty / malformed variant list. Decl-site
+ *                                     annotators (which have span + errors) lower
+ *                                     this marker to E-CONTRACT-002.
+ *
+ * Optional `label` is captured from a trailing `[label]` for parity with the
+ * §53 inline-predicate label channel.
+ */
+function parseEnumSubsetRefinement(
+  expr: string,
+  typeRegistry: Map<string, ResolvedType>,
+): PredicatedType | null {
+  // Match `<Ident> <oneOf|notIn> (...rest...)` with arbitrary whitespace.
+  // The base must be a single capitalised identifier; oneOf/notIn is the
+  // §55.1 set-membership keyword; the args live in the parenthesised tail.
+  const m = /^([A-Za-z_][A-Za-z0-9_]*)\s+(oneOf|notIn)\s*\((.*)\)\s*(?:\[\s*([A-Za-z_][A-Za-z0-9_]*)\s*\])?\s*$/s.exec(
+    expr.trim(),
+  );
+  if (!m) return null;
+
+  const baseName = m[1];
+  const mode = m[2] as "oneOf" | "notIn";
+  const argInner = m[3];
+  const label = m[4] ?? null;
+
+  // The base must resolve to an enum. If it doesn't, this is NOT an enum-subset
+  // refinement — return null so a `number oneOf(...)` style mis-write falls
+  // through to the existing path (which treats `oneOf` as a non-enum token).
+  const baseType = typeRegistry.get(baseName);
+  if (!baseType || baseType.kind !== "enum") return null;
+  const enumBase = baseType as EnumType;
+
+  // Collapse all whitespace so spacing variants (`. Admin` vs `.Admin`) and the
+  // optional `[...]` array wrapper both normalise.
+  const compact = argInner.replace(/\s+/g, "");
+
+  // §53.15.1 — NO range form. `oneOf(.A .. .B)` reintroduces the SPARK RPP02
+  // union-evolution hazard. Reject (decl-site lowers to E-CONTRACT-002).
+  if (compact.includes("..")) {
+    return {
+      kind: "predicated",
+      baseType: "enum",
+      predicate: {
+        kind: "error",
+        message:
+          `Range form \`${baseName} ${mode}(.A .. .B)\` is not permitted in enum-subset ` +
+          `refinement position. \`${mode}\` over an enum is an EXPLICIT enumerated set ` +
+          `(\`${baseName} ${mode}([.A, .B])\`); a range form reintroduces the union-evolution ` +
+          `hazard a newly-added neighbour variant is silently absorbed (§53.15.1).`,
+      },
+      label,
+      enumBase,
+    };
+  }
+
+  // Strip an optional `[...]` array-literal wrapper, then split on commas.
+  let listBody = compact;
+  if (listBody.startsWith("[") && listBody.endsWith("]")) {
+    listBody = listBody.slice(1, -1);
+  }
+
+  // Empty subset list — `oneOf([])` / `notIn([])` are malformed in this position.
+  if (listBody.length === 0) {
+    return {
+      kind: "predicated",
+      baseType: "enum",
+      predicate: {
+        kind: "error",
+        message:
+          `Empty variant set in \`${baseName} ${mode}([])\`. An enum-subset refinement ` +
+          `must list at least one variant (§53.15.1).`,
+      },
+      label,
+      enumBase,
+    };
+  }
+
+  // Each entry must be `.VariantName`. Strip the leading dot; reject any entry
+  // that is not a bare `.Variant`.
+  const listed: string[] = [];
+  for (const rawEntry of listBody.split(",")) {
+    const entry = rawEntry.trim();
+    if (entry.length === 0) continue;
+    if (entry[0] !== "." || !/^\.[A-Za-z_][A-Za-z0-9_]*$/.test(entry)) {
+      return {
+        kind: "predicated",
+        baseType: "enum",
+        predicate: {
+          kind: "error",
+          message:
+            `Malformed variant \`${entry}\` in \`${baseName} ${mode}(...)\`. ` +
+            `Enum-subset refinement args must be bare variant literals (\`.Admin\`) (§53.15.1).`,
+        },
+        label,
+        enumBase,
+      };
+    }
+    listed.push(entry.slice(1));
+  }
+
+  return tEnumSubset(enumBase, mode, listed, label);
+}
+
+/**
+ * §53.15.1 — Lower an enum-subset refinement ERROR MARKER to a diagnostic.
+ *
+ * `parseEnumSubsetRefinement` is span-free (it runs deep inside `resolveTypeExpr`'s
+ * recursive call graph, which threads no error accumulator). When it detects a
+ * range form (`oneOf(.A .. .B)`), an empty list, or a malformed entry, it
+ * materialises a `PredicatedType` with `baseType: "enum"` and a `predicate.kind
+ * === "error"` carrying the message. Decl-site annotators (which DO have span +
+ * errors) call this helper to lower that marker to **E-CONTRACT-002** — the
+ * refinement family's "unrecognised refinement construct" code (§53.15.5 minted
+ * no dedicated range-form code; reusing E-CONTRACT-002 keeps the contract family
+ * cohesive). No-op for valid subsets and non-enum predicated types.
+ */
+function maybeRejectEnumSubsetMarker(
+  type: ResolvedType,
+  span: Span,
+  errors: TSError[],
+): void {
+  if (type.kind !== "predicated") return;
+  const pt = type as PredicatedType;
+  if (pt.baseType !== "enum" || pt.predicate.kind !== "error") return;
+  errors.push(new TSError(
+    "E-CONTRACT-002",
+    `E-CONTRACT-002: ${pt.predicate.message ?? "Invalid enum-subset refinement."}`,
+    span,
+  ));
+}
+
+// ---------------------------------------------------------------------------
 // Type expression resolver
 // ---------------------------------------------------------------------------
 
@@ -1501,6 +1709,17 @@ function resolveTypeExpr(expr: string, typeRegistry: Map<string, ResolvedType>):
   // Negation: !type — conservative: treat as asIs.
   if (trimmed.startsWith("!")) {
     return tAsIs();
+  }
+
+  // §53.15 — Enum-variant subset refinement: `EnumName oneOf([.V, ...])` /
+  // `EnumName notIn([.V, ...])`. Recognised BEFORE the §53 inline-predicate
+  // block because the base is an enum identifier, not a `PRED_BASES` primitive,
+  // and the args are variant literals rather than numeric/string predicates.
+  // The recognizer returns null when the leading token is not a registered
+  // enum, so `number oneOf(...)`-style mis-writes fall through unchanged.
+  {
+    const enumSubset = parseEnumSubsetRefinement(trimmed, typeRegistry);
+    if (enumSubset) return enumSubset;
   }
 
   // §53 — Inline predicate type: base-type(predicate-expr) or base-type(predicate-expr)[label]
@@ -1851,6 +2070,22 @@ function predicateImplies(source: PredicateExpr, target: PredicateExpr): boolean
       return !!(target.left && target.right &&
         (predicateImplies(source, target.left) || predicateImplies(source, target.right)));
 
+    case "variant-set":
+      // §53.15.3 / §53.9.2 — enum-subset widening. The source subset implies
+      // the target subset iff the source's IN-SET variants are all members of
+      // the target's IN-SET variants (source ⊆ target). This covers the
+      // widen-free rows:
+      //   `oneOf([.Admin])` → `oneOf([.Admin,.Editor])`  ({Admin} ⊆ {Admin,Editor}) → implies (T-PRED-4)
+      //   `oneOf([.Admin,.Editor])` → `oneOf([.Admin])`  (NOT ⊆)                     → does NOT imply (narrow → check)
+      // The full-enum → subset case is NOT a `predicated` source (the source is
+      // a bare EnumType, not a PredicatedType), so it never reaches here — it
+      // classifies as `boundary` in classifyPredicateZone. Correct (narrow).
+      if (source.kind === "variant-set" && Array.isArray(source.variants) && Array.isArray(target.variants)) {
+        const targetSet = new Set(target.variants);
+        return source.variants.every(v => targetSet.has(v));
+      }
+      return false;
+
     default:
       return false;
   }
@@ -1871,7 +2106,29 @@ function classifyPredicateZone(
   sourceInfo: SourceInfo,
   span: Span,
   errors: TSError[],
+  initExpr?: unknown,
 ): "static" | "trusted" | "boundary" {
+  // §53.15.2 — Enum-subset refinement zones. The base-enum predicate machinery
+  // is value-keyed (number/string); a variant-set membership predicate is
+  // decided over variant NAMES, so it gets its own zone classification:
+  //
+  //   - bare-variant literal init (`= .Admin`)         → STATIC. The membership
+  //     decision (and any E-CONTRACT-001 for an out-of-subset variant) is owned
+  //     by `inferBareVariantsInExpr`, which runs at the same decl site; we do
+  //     NOT re-emit here, we only report the zone (no runtime check).
+  //   - source is itself an enum-subset that ⊆ target  → TRUSTED (widen, T-PRED-4).
+  //   - everything else (full-enum value, DB/network/parseVariant, unconstrained)
+  //     → BOUNDARY. A runtime membership check is emitted (E-CONTRACT-001-RT).
+  if (targetType.baseType === "enum" && targetType.predicate.kind === "variant-set") {
+    if (isBareVariantInit(initExpr)) return "static";
+    if (sourceInfo.kind === "predicated") {
+      return predicateImplies(sourceInfo.predType.predicate, targetType.predicate)
+        ? "trusted"
+        : "boundary";
+    }
+    return "boundary";
+  }
+
   switch (sourceInfo.kind) {
     case "literal":
       // T-PRED-1: evaluate predicate against literal at compile time
@@ -1893,6 +2150,21 @@ function classifyPredicateZone(
       // T-PRED-2: no compile-time proof → emit runtime boundary check
       return "boundary";
   }
+}
+
+/**
+ * §53.15.2 — Is the init expression a bare-variant literal (`.Admin`)?
+ *
+ * A bare-variant init at an enum-subset position is statically decidable, so
+ * it classifies as the STATIC zone (no runtime membership check). The shape is
+ * an `IdentExpr` whose `name` begins with `.` followed by an uppercase letter
+ * (the S66 placeholder-unmask convention; see `inferBareVariantsInExpr`).
+ */
+function isBareVariantInit(initExpr: unknown): boolean {
+  if (!initExpr || typeof initExpr !== "object") return false;
+  const node = initExpr as { kind?: string; name?: string };
+  if (node.kind !== "ident" || typeof node.name !== "string") return false;
+  return /^\.[A-Z][A-Za-z0-9_]*$/.test(node.name);
 }
 
 /**
@@ -5057,6 +5329,10 @@ function annotateNodes(
                 if (resolved && resolved.kind !== "asIs") {
                   paramResolvedType = resolved;
                 }
+                // §53.15.1 — range-form / malformed enum-subset refinement in a
+                // parameter type (`fn promote(r: Role oneOf(.A .. .B))`).
+                const paramSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+                maybeRejectEnumSubsetMarker(resolved, paramSpan, errors);
               }
               const paramEntry: ScopeEntry = { kind: "variable", resolvedType: paramResolvedType };
               if (paramIsLin) paramEntry.isLin = true;
@@ -5264,6 +5540,17 @@ function annotateNodes(
           resolvedType = typeRegistry.get(n.name as string)!;
           // Bind the type name in the current scope.
           scopeChain.bind(n.name as string, { kind: "type", resolvedType });
+          // §53.15.1 — struct-field range-form / malformed enum-subset
+          // rejection. A field declared `role: Role oneOf(.A .. .B)` resolved
+          // to a `PredicatedType` error marker (parseEnumSubsetRefinement is
+          // span-free); the type-decl site has span + errors, so it lowers any
+          // such field marker to E-CONTRACT-002 once, at declaration time.
+          if (resolvedType.kind === "struct") {
+            const declSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+            for (const fieldType of (resolvedType as StructType).fields.values()) {
+              maybeRejectEnumSubsetMarker(fieldType, declSpan, errors);
+            }
+          }
         } else {
           resolvedType = tAsIs();
         }
@@ -5291,12 +5578,14 @@ function annotateNodes(
           if (letAnnoType.kind === "predicated") {
             resolvedType = letAnnoType;
             const letDeclSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+            // §53.15.1 — range-form / malformed enum-subset refinement marker.
+            maybeRejectEnumSubsetMarker(letAnnoType, letDeclSpan, errors);
             const letInitExpr = (n as any).initExpr;
             let letSourceInfo: SourceInfo = letInitExpr ? classifyLiteralFromExprNode(letInitExpr) : extractInitLiteral((n as ASTNodeLike).init);
             // B21 §53.4 — upgrade unconstrained-ident SourceInfo via scope lookup
             // so T-PRED-4 trusted-zone elision is reachable from real code.
             letSourceInfo = upgradeSourceInfoForPredicatedIdent(letSourceInfo, letInitExpr, scopeChain);
-            const letZone = classifyPredicateZone(letAnnoType, letSourceInfo, letDeclSpan, errors);
+            const letZone = classifyPredicateZone(letAnnoType, letSourceInfo, letDeclSpan, errors, letInitExpr);
             // B21 §53.4 — record three-zone classification on every predicated decl
             // (was: boundary-only). Static and trusted classifications are now
             // annotated for downstream consumers (A1c codegen / IDE tooling /
@@ -5537,12 +5826,14 @@ function annotateNodes(
           if (reactAnnoType.kind === "predicated") {
             resolvedType = reactAnnoType;
             const reactDeclSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+            // §53.15.1 — range-form / malformed enum-subset refinement marker.
+            maybeRejectEnumSubsetMarker(reactAnnoType, reactDeclSpan, errors);
             const reactInitExpr = (n as any).initExpr;
             let reactSourceInfo: SourceInfo = reactInitExpr ? classifyLiteralFromExprNode(reactInitExpr) : extractInitLiteral((n as ASTNodeLike).init);
             // B21 §53.4 — upgrade unconstrained-ident SourceInfo via scope lookup
             // so T-PRED-4 trusted-zone elision is reachable from real code.
             reactSourceInfo = upgradeSourceInfoForPredicatedIdent(reactSourceInfo, reactInitExpr, scopeChain);
-            const reactZone = classifyPredicateZone(reactAnnoType, reactSourceInfo, reactDeclSpan, errors);
+            const reactZone = classifyPredicateZone(reactAnnoType, reactSourceInfo, reactDeclSpan, errors, reactInitExpr);
             // B21 §53.4 — record three-zone classification on every predicated decl.
             // A1c codegen continues to gate runtime check emission on
             // `zone === "boundary"` (additive, non-breaking).
@@ -5621,7 +5912,14 @@ function annotateNodes(
                 prior.kind === "reactive" &&
                 prior.resolvedType &&
                 (prior.resolvedType.kind === "enum" ||
-                  prior.resolvedType.kind === "union")
+                  prior.resolvedType.kind === "union" ||
+                  // §53.15 — a subset-refined enum cell (`<currentRole>: Role
+                  // notIn([.Viewer])`) carries a predicated-over-enum type; a
+                  // later bare-variant reassignment (`@currentRole = .Admin`)
+                  // resolves against the SUBSET (membership re-checked → static
+                  // E-CONTRACT-001 if out-of-subset), not the bare base enum.
+                  (prior.resolvedType.kind === "predicated" &&
+                    (prior.resolvedType as PredicatedType).baseType === "enum"))
               ) {
                 bvCtxType = prior.resolvedType;
               }
@@ -7460,6 +7758,62 @@ function inferBareVariantsInExpr(
         `where the type is fixed by the surrounding declaration.`,
         span,
       ));
+      return;
+    }
+
+    // §53.15.2 Static zone — enum-subset refinement context. A bare variant
+    // assigned at a subset position is decidable: it must (a) be a real variant
+    // of the base enum (else E-TYPE-063, like the plain-enum path) and (b) be
+    // IN the subset (else E-CONTRACT-001, the static out-of-subset case — the
+    // message names the excluded variant + the subset, per §53.15.5).
+    if (contextType.kind === "predicated" && (contextType as PredicatedType).baseType === "enum") {
+      const predType = contextType as PredicatedType;
+      const enumBase = predType.enumBase;
+      const subset = predType.subsetVariants;
+      // Defensive: a range-form / malformed subset materialised as an error
+      // marker (predicate.kind === "error") and carries no subsetVariants. The
+      // decl-site annotator lowers that to E-CONTRACT-002; here we fall back to
+      // the bare base-enum existence check so we don't double-fire.
+      if (!enumBase || !subset) {
+        if (enumBase) {
+          const has = (enumBase.variants ?? []).some(v => v.name === variantName);
+          if (!has) {
+            const known = (enumBase.variants ?? []).map(v => "." + v.name).join(", ");
+            errors.push(new TSError(
+              "E-TYPE-063",
+              `E-TYPE-063: \`.${variantName}\` is not a declared variant of enum ` +
+              `\`${enumBase.name}\`. Known variants: ${known || "(none)"}. ` +
+              `Check for a typo or add the variant to the enum declaration (§42).`,
+              span,
+            ));
+          }
+        }
+        return;
+      }
+      const isVariant = (enumBase.variants ?? []).some(v => v.name === variantName);
+      if (!isVariant) {
+        const known = (enumBase.variants ?? []).map(v => "." + v.name).join(", ");
+        errors.push(new TSError(
+          "E-TYPE-063",
+          `E-TYPE-063: \`.${variantName}\` is not a declared variant of enum ` +
+          `\`${enumBase.name}\`. Known variants: ${known || "(none)"}. ` +
+          `Check for a typo or add the variant to the enum declaration (§42).`,
+          span,
+        ));
+        return;
+      }
+      if (!subset.has(variantName)) {
+        const subsetList = Array.from(subset).map(v => "." + v).join(", ");
+        errors.push(new TSError(
+          "E-CONTRACT-001",
+          `E-CONTRACT-001: Value constraint violated. ` +
+          `\`.${variantName}\` is not in the subset \`${enumBase.name} oneOf([${subsetList}])\`. ` +
+          `Variant \`.${variantName}\` is a declared member of enum \`${enumBase.name}\` but is ` +
+          `excluded by this position's subset refinement (§53.15.2). ` +
+          `Use one of: ${subsetList}.`,
+          span,
+        ));
+      }
       return;
     }
 

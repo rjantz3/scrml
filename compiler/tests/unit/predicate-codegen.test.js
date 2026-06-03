@@ -704,3 +704,42 @@ describe("§30 deriveHtmlAttrs — integer base type", () => {
     expect(attrs["type"]).toBe("number");
   });
 });
+
+// ---------------------------------------------------------------------------
+// §31 (d)-A batch 1 — predicateToJsExpr variant-set membership (§53.15.2)
+//
+// Enum variants lower to plain strings at runtime, so an enum-subset boundary
+// check is a string-array `.includes`. `variants` is the resolved IN-SET
+// (notIn already complemented at type-resolution time).
+// ---------------------------------------------------------------------------
+
+describe("§31 predicateToJsExpr — enum-subset variant-set (§53.15.2)", () => {
+  test("variant-set → `[...].includes(valueExpr)` membership test", () => {
+    const pred = { kind: "variant-set", variantMode: "oneOf", variants: ["Admin", "Editor"] };
+    const js = predicateToJsExpr(pred, "_v");
+    expect(js).toBe(`(["Admin","Editor"].includes(_v))`);
+  });
+
+  test("emitted membership expression is valid, parseable JS that evaluates correctly", () => {
+    const pred = { kind: "variant-set", variantMode: "oneOf", variants: ["Admin", "Editor"] };
+    const js = predicateToJsExpr(pred, "_v");
+    // eslint-disable-next-line no-new-func
+    const fn = new Function("_v", `return ${js};`);
+    expect(fn("Admin")).toBe(true);
+    expect(fn("Editor")).toBe(true);
+    expect(fn("Viewer")).toBe(false);
+  });
+
+  test("emitRuntimeCheck over a variant-set emits an E-CONTRACT-001-RT membership guard", () => {
+    const pred = { kind: "variant-set", variantMode: "oneOf", variants: ["Admin", "Editor"] };
+    const lines = emitRuntimeCheck(pred, "_chk_role", "role", null, "narrow:1");
+    const code = lines.join("\n");
+    expect(code).toContain("E-CONTRACT-001-RT");
+    expect(code).toContain(`["Admin","Editor"].includes(_chk_role)`);
+    // Display string is the canonical positive subset form.
+    expect(code).toContain("oneOf([.Admin, .Editor])");
+    // The whole guard must be valid JS.
+    // eslint-disable-next-line no-new-func
+    expect(() => new Function("_chk_role", code)).not.toThrow();
+  });
+});
