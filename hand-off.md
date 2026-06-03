@@ -1,80 +1,72 @@
-# scrmlTS — Session 157 (CLOSE)
+# scrmlTS — Session 158 (CLOSE)
 
-**Date:** 2026-06-03 (opened 2026-06-02)
-**Previous:** `handOffs/hand-off-161.md` (= S156 CLOSE).
-**Next-session pickup:** rotate THIS file → `handOffs/hand-off-162.md` at next OPEN.
+**Date:** 2026-06-03
+**Previous:** `handOffs/hand-off-162.md` (= S157 CLOSE).
+**Next-session pickup:** rotate THIS file → `handOffs/hand-off-163.md` at next OPEN.
+**Profile:** opened **A (FULL)** ("read pa.md and start session"; no signal → default A). User then: "A" (continue the bug-fix arc, autonomous) → "Bug 64 ruling" → "(b) Codegen fix" → "(A) Hybrid" → "Wrap + push".
 
 ---
 
-## 🏁 S157 CLOSE — autonomous bug-fix pass: 6 bugs RESOLVED (match-exhaustiveness arc COMPLETE) + maps refresh
+## 🏁 S158 CLOSE — 3 bugs RESOLVED (autonomous arc + 1 design ruling) + crash-recovery + Phase-0-gate
 
-Opened **Profile A (FULL)** ("read pa.md and start session"; no profile signal → default A). User then directed: **"refresh maps then start bug 65"**, then **"continue fixing bugs autonomously"** + **"go ahead"** (commit auth). Ran an autonomous bug-fix pass: 6 bugs resolved, each via `scrml-js-codegen-engineer` (isolation:worktree, bg) → S67 file-delta → PA-authored commit → PA independent dual-verify (S138). Every landing additive-diff-verified (S147 coherence + no prior-fix revert) + regression-guarded against the other landed bugs.
+Ran an autonomous bug-fix arc under a standing commit-auth grant (S157-mode): each bug R26-reverse-verified before dispatch → `scrml-js-codegen-engineer` (isolation:worktree, bg) → S67 file-delta → PA-authored commit → PA independent dual-R26 (S138) + S147 coherence. One bug (64) carried a design fork → user ruling → Phase-0-survey-STOP → ratified hybrid → implementation.
 
 ### Sync / repo state at CLOSE
-- **scrmlTS:** clean, HEAD `e9924b4e`, `origin/main` **0/7** (7 PA commits — **PUSH PENDING**, no push authorized).
-  - `358581a8` (maps refresh + hand-off rotation) · `e2ca4978` (Bug 63) · `63fcba72` (Bug 65) · `8226d304` (Bug 68) · `f28d8128` (Bug 67) · `fe4ca941` (Bug 71) · `e9924b4e` (Bug 70).
-- **scrml-support:** clean, `origin/main` **0/0** (no writes this session; user-voice not appended — no durable language directive, only process/execution directives).
-- **Tests at close:** full `bun run test` **22,810 pass / 0 fail / 220 skip / 1 todo** (S156 baseline 22,753; **+57** = Bug63 +9 / Bug65 +18 / Bug68 +8 / Bug67 +6 / Bug71 +9 / Bug70 +7; 0 regression). *(confirm final count from the wrap test run — see test-suite line.)*
-- **Hooks:** config B (pre-commit + post-commit + pre-push). Untouched. The S100 path-discipline hook FIRED correctly during Bug 68 (denied a `--no-verify`) + Bug 70 (rejected a Write-tool call in a worktree) — held the line.
-- **Inbox:** EMPTY. **Worktrees:** cleaned at wrap (see §6b) — main only.
-- **Version:** on top of v0.7.0 (pkg.json unchanged; no tag — bug-fix pass).
+- **scrmlTS:** clean, HEAD `af3175e2`, `origin/main` **0/3** at wrap-start (3 PA commits) — **pushed this wrap** (see push line). `3707e212` (Bug 72) · `55cf3259` (Bug 60) · `af3175e2` (Bug 64 + R28-1c) · + the wrap commit.
+- **scrml-support:** clean, **0/0** + user-voice S158 append (Bug 64 design ratification) — pushed this wrap.
+- **Tests at close:** `bun run test` **22,846 pass / 0 fail / 220 skip / 1 todo** (23,067 tests / 897 files) — S157 baseline 22,810; **+36** (Bug72 +10 / Bug60 +15 / Bug64 +11); 0 regression.
+- **Hooks:** config B (pre-commit + post-commit + pre-push). Untouched. S100 path-discipline hook held.
+- **Inbox:** EMPTY. **Worktrees:** cleaned at each landing — main only.
+- **Version:** on top of v0.7.0 (pkg.json unchanged; no tag — bug-fix arc).
+- **Maps:** STALE (reflect `57edc794`; this session's 3 bug fixes + S157's landed after). **Refresh before the next compiler-source dispatch** — esp. emit-each/emit-lift/emit-control-flow (Bug 72 + Bug 64 reshaped them) + emit-html/dependency-graph (Bug 60) + runtime-template.js (Bug 64).
 
 ### known-gaps §0 state at CLOSE
-- **HIGH 0.** **MED 14** (was 17 at S156 open): −Bug 63/65/67/68 (resolved) −Bug 71 (filed+resolved same session, net 0) +Bug 70 (resolved this session) +Bug 72 (new). Net pre-existing −4, +Bug 72 new = 14.
-- **Resolved this session:** Bug 63 · 65 · 67 · 68 · 70 · 71 (6).
-- **Filed this session:** Bug 70 (reclassified from the Bug-65 agent's surfacing) · Bug 71 (surfaced by Bug 67, filed+resolved) · Bug 72 (surfaced by Bug 70, OPEN).
-
-### Maps — REFRESHED this session
-- `.claude/maps/` regenerated to HEAD `57edc794` (`358581a8` commit) via incremental project-mapper. primary.map.md gained a Bug-65 routing block (load-bearing — the Bug 65 agent confirmed it). Maps are now ~7 commits stale again (the 6 bug fixes landed after the refresh); refresh before the next compiler-source dispatch.
+- **HIGH 0. MED 10** (was 14 at S158 open: −Bug 72 −Bug 60 −Bug 64 −R28-1c; all RESOLVED). No new gaps filed (sibling-gap #1 NOT-REPRODUCED; #2 = follow-up candidate, not filed).
 
 ---
 
-## DONE this session (S157) — the 6 bugs
+## DONE this session (S158)
 
-1. **Bug 63 (MED) RESOLVED `e2ca4978`** — markup event-handler `.advance(.V)` now bare-variant type-checked. Localized hookup in `type-system.ts annotateNodes case "markup"`: each `on*` handler attr → `handlerAttrToExprNode()` normalizer → the SAME `inferReactiveSiteBareVariants(..., cellMessageEnums)` call (line 6116 template). Covers plain / `<each>` / engine-state-child / `${}` interp positions. +9 tests. State plane → E-TYPE-063; message plane → E-ENGINE-MSG-UNKNOWN.
+1. **Bug 72 (MED) RESOLVED `3707e212`** — nested `<each>` inside a Tier-0 `${for…lift}` body now lowers the inner `@.` (was `E-CODEGEN-INVALID-JS`). TWO roots: (1) codegen — promote the generic markup `<each>` via NEW shared `emit-each.ts` helpers (`eachBlockFromMarkupNode`/`emitNestedEachFromMarkup`) + thread `scopeVar` through `emitForStmt`/`emitConsolidatedLift`/`IfOpts`/`emit-lift.js`; (2) parser — NEW `PUNCT "@"` branch in `ast-builder.js _parseLiftAttrValue` for bare-`@.` attr values. +10 tests. **Crash-recovery:** first dispatch (aaf169de) wrote validated helpers then socket-died pre-test (NO leak — verified); WIP captured as a patch + transplanted by a continuation agent (807d70af). Per S140 (re-dispatch beats PA surgery).
 
-2. **Bug 65 (MED) RESOLVED `63fcba72`** — Tier-0 `${for…lift}` engine `.advance`/`@engine=.X` now lower per-item. TRUE root was upstream: `emit-logic.ts:2385` for-stmt dispatch DROPPED engine extras (if-stmt threaded them). Fixed by threading + sharing the Bug 62 helper (`buildEachEngineCtx`/`emitEngineHandlerBody` EXPORTED from emit-each.ts, no fork). Tree-shaken. +12 unit +6 happy-dom. Surfaced Bug 70.
+2. **Bug 60 (MED) RESOLVED `55cf3259`** — render-by-tag nested-compound-field (`<signupForm><userName/></signupForm>`) now expands (was literal browser-ignored tags + no input + spurious E-DG-002). R26 **reverse-verified at HEAD before dispatch** (S138 — S140 agent-evidence never PA-re-run). TWO files: (1) `emit-html.ts` — `enclosingCompoundStack` + transparent compound-wrapper + `lookupQualifiedStateCell` fallback keyed on `qualifiedPath`; (2) `dependency-graph.ts` — render-by-tag structural-read credit clears E-DG-002. +15 tests. Wrapper-emission: transparent (spec-grounded §6.3.5). Bonus: also clears a pre-existing top-level render-by-tag-only E-DG-002 false-fire. Process: agent self-caught 1 `--no-verify` slip (soft-reset + re-gated).
 
-3. **Bug 68 (MED) RESOLVED `8226d304`** — positional-payload enum (`Ok(int)`) now materialized in `parseEnumBody` (+ `getAllVariantInfo`). Root: required a `:` to record a payload field → positional → size-0 Map → misclassified bare. Synthesizes `_<i>` keys. **CLASS-LEVEL** — also closed the tableFor `E-TABLEFOR-VARIANT-PAYLOAD-ENUM-V1` sibling + a constructor payload-drop (`data:{}`→`data:{_0}`). +8 tests.
+3. **Bug 64 + R28-1c (MED) RESOLVED `af3175e2`** — per-item interpolated content not reactive on reconcile node-reuse (Tier-0 `${for…lift}` + Tier-1 `<each>`). **DESIGN RULING arc:** PA built empirical repro → showed the static-text/reactive-toggle asymmetry + corrected the S155 framing (the `<each>`-drops-wiring #7 tension was largely stale) → user ruled **(b) codegen fix** → dispatched with a **Phase-0-survey-STOP gate** → agent characterized both cases (array-replace + field-mutation), prototyped 4 approaches, STOPped (the fix needs a reconcile-runtime assist + binding-model shift) → PA surfaced → user ratified **(A) Hybrid** → Phase-1 implementation. The fix (universal keyed-list model): per-item bindings read the CURRENT item from the LIVE collection BY KEY (not a create-time snapshot) via a reconcile `key→item` map (`_scrml_resolve_item` + `container._scrml_item_by_key` in `runtime-template.js`) + live-keyed `_scrml_effect`s in `emit-lift.js`/`emit-each.ts`/`emit-control-flow.ts`. Node-reuse + Fast-path-B2 PRESERVED (TodoMVC 39/0). **CLASS-LEVEL — also closes R28-1c (Tier-1 field-mutation) + the Tier-1-class-not-reactive latent gap + unifies Tier-0/Tier-1 binding.** +11 tests (9 happy-dom + 2 unit) + 4 coupled emit-shape assertion updates (all semantic invariants preserved). keyFn-call count reduced N/pass (was 2N/3N).
 
-4. **Bug 67 (MED) RESOLVED `f28d8128`** — `return match expr {...}` in a fn body now exhaustiveness-checked. PARSER gap: the return-stmt builder lacked the match-as-expr hook the let-decl/const-decl builders had. Added it (`return-stmt.matchExpr` structural side-field via `parseOneMatchAsExpr`); typer visits it; E-LIN-003 linear-analysis re-routed; emit via shared `emitMatchExpr` IIFE (same JS shape). +6 tests; within-node allowlist bumped (5 fixtures, M5-out-of-scope). Surfaced Bug 71.
-
-5. **Bug 71 (MED) RESOLVED `fe4ca941`** — derived `const <x> = match` (+ plain `<x> = match`) now exhaustiveness-checked. Sibling of Bug 67 in the structural-decl builder. DUAL-PARSE (collectExpr → reactive emit byte-identical, then rewind + parseOneMatchAsExpr → typer-only structural side-field). Codegen parity proven (`_scrml_derived_subscribe` dep edge intact). CLASS-LEVEL (also plain `<x> = match` init-time). +9 tests. **CLOSES the match-exhaustiveness arc.**
-
-6. **Bug 70 (MED) RESOLVED `e9924b4e`** — `@.` outside `<each>` now fires `E-SYNTAX-064` (was leaking to confusing E-CODEGEN-INVALID-JS). PA **Rule-4 re-diagnosis**: the Bug-65 agent framed it as a Tier-0 `@.`-lowering gap; that's spec-wrong (`@.` is `<each>`-only §17.7.3). Wired E-SYNTAX-064 at 2 loci (`visitAttr` else-fire + `lift-expr` subtree scan; `inEachBodyScope()` was the gate). **§34 row for E-SYNTAX-064 was MISSING — ADDED** (Rule-4 spec-paired); §17.7.3 prose flipped queued→wired. Companion `api.js` fix: suppress redundant E-CODEGEN-INVALID-JS when a prior fatal error exists. +7 tests. Surfaced Bug 72.
-
-**Match-exhaustiveness arc COMPLETE** — `let x = match` (in-fn) ✓ / `return match` (Bug 67) ✓ / `<match for=T>` block-form ✓ / JS-style `match` statement ✓ / derived `const <x> = match` + plain `<x> = match` (Bug 71) ✓.
+### NEW sibling-gaps surfaced this session
+- **Bug 64 #1 — NOT-REPRODUCED (not filed):** agent claimed `${@cell=x}` write inside a `function foo()` body lowers to an empty body. PA R26-verified at HEAD `af3175e2` — `function inc(){ @count=@count+1 }` + `function setTo(n){ @count=n }` BOTH emit correct `_scrml_reactive_set(...)` bodies. The claim doesn't hold for the common shape; likely agent-test-harness-specific. If a narrower shape matters, the agent's exact repro is needed.
+- **Bug 64 #2 — FOLLOW-UP CANDIDATE (not filed):** per-item event handlers still close over the create-time item, not the live one (`onclick=fn(@.id)` on a reordered reused node fires with the stale value). Display bindings are now live-keyed; handler-live-keying is the natural next axis using the SAME `_scrml_resolve_item` plumbing. Worth a future dispatch (smaller than Bug 64 now that the plumbing exists).
+- **Bug 72 → `_parseLiftAttrValue`** may still bail OTHER uncovered attr-value token-kinds (leading unary op, template-literal-led) to string-fallback; audit candidate (no confirmed reproducer).
+- **Bug 60 →** nested PREDICATE-typed / ENUM-`<select>`-typed render-by-tag fields may key `reactiveTypeMap`/`enumVarMap` by bare-leaf vs dotted in `emit-bindings.ts`; deferred edge (validators-lower-to-HTML-attrs case unaffected).
 
 ---
 
-## OPEN QUESTIONS TO SURFACE IMMEDIATELY (S157 CLOSE)
+## OPEN QUESTIONS TO SURFACE IMMEDIATELY (S158 CLOSE)
 
-1. **PUSH PENDING — 7 scrmlTS commits unpushed** (`358581a8`..`e9924b4e`). All coherence-verified (0/7, no leak). No push authorized this session. Push? (pre-push runs the full+TodoMVC gate ~5min.) Cross-machine: the other machine won't have these until pushed.
-2. **Bug 64 (MED, QUEUED) — needs an (a)-vs-(b) DESIGN confirmation before fix.** Tier-0 `for…lift` index-keyed list reuses DOM nodes on in-place replace → per-item interpolated text goes STALE while `class:`/`if=` toggles DO update (the "sneaky split"). (a) intended index-semantics → doc/lint note; (b) codegen gap (per-item interpolated text should be reactive like the toggles) → fix. The split LEANS (b) (the inconsistency is the tell; "don't soft-classify bugs"), but the disposition explicitly says confirm before fix. NEEDS: happy-dom repro of the split + user ruling on (a)-vs-(b). The next clean bug to tackle once the fork is resolved.
-3. **Bug 72 (MED, NEW, OPEN)** — nested `<each>` INSIDE a Tier-0 `${for…lift}` body: the LEGITIMATE nested-each `@.` isn't codegen-rewritten in the lift-embedded position → E-CODEGEN-INVALID-JS. Distinct from Bug 70 (diagnostic); this is a codegen-lowering gap. `emit-each.ts` iter-scope rewriting is the locus. Surfaced by the Bug 70 agent, stash-baseline-verified PRE-EXISTING.
-4. **SPEC-INDEX regen pending** — Bug 70 added a §34 E-SYNTAX-064 row (+~1 line, shifts §34+ ranges). Within the index's ±drift tolerance, but regen via `bun scripts/regen-spec-index.ts` at convenience for surgical accuracy.
+1. **PARKED — Profile-A design session for the S154 (a)/(b)/(c) rulings (spec+codegen still pending — NOT touched S155-S158):**
+   - **(a) `:`-shorthand renders on non-void HTML; void rejects.** RATIFIED S154; **no open sub-Qs — ready to spec** (§4.14 line 997 + new void-reject §34 code) + codegen.
+   - **(b) `:` inside-opener canonical everywhere.** RATIFIED S154; **2 unruled micro-grammar sub-Qs** (no-space `:@thing`; self-close `/>` + `:`-shorthand vs E-CLOSER-001).
+   - **(c) no-RHS typed-decl → canonical empty else `not`.** RATIFIED S154; **3 impl sub-Qs** (exact empty table incl. enum→`not`; `not`-init lifecycle §42/§14.12; E-DECL-NEEDS-INITIALIZER fate).
+2. **Bug 64 sibling-gap #2 (live-keyed event handlers)** — the next clean codegen item; same `_scrml_resolve_item` plumbing. NOT filed; surface as a candidate.
+3. **DD candidate (S155, parked) — UNANSWERED across S155/S156/S157/S158:** self-tree-shaking compiler build-story (§58+§47+self-host). Is "the whole dependency code issue" = the `bun link` full-toolchain friction?
+4. **scrml-site notice sent** this wrap (Bug 64 = their report RESOLVED + each/lift codegen output-shape changed → their `[]`-clear workaround removable). Watch for their reply.
+5. **Maps refresh** overdue (5 commits stale across this session's codegen reshaping).
 
----
-
-## CARRY-FORWARD (from S156 — design work + backlog)
-- **PARKED — Profile-A design session** for the S154 (a)/(b)/(c) rulings still needing spec+codegen:
-  - **(a) `:`-shorthand renders on non-void HTML; void rejects.** RATIFIED S154; no open sub-Qs — ready to spec (§4.14 line 997 + new void-reject §34 code) + codegen (mirror `<each>` per-item path + void guard).
-  - **(b) `:` inside-opener canonical everywhere.** RATIFIED S154; **2 unruled micro-grammar sub-Qs** (no-space-after-`:` `:@thing`; self-close `/>` + `:`-shorthand vs E-CLOSER-001).
-  - **(c) no-RHS typed-decl → canonical empty else `not`.** RATIFIED S154; **3 impl sub-Qs** (exact table incl. enum→`not`; `not`-init lifecycle §42/§14.12; E-DECL-NEEDS-INITIALIZER fate).
-- **DD candidate (S155, parked):** self-tree-shaking compiler build-story (§58+§47+self-host). Confirm-pending: is "the whole dependency code issue" = the `bun link` full-toolchain-as-dependency friction? (user never answered S155/S156/S157).
-- **Bug backlog (all MED):** Bug 64 (design-fork, above) · Bug 72 (above) · Bug 60 (render-by-tag nested-compound-field) · prior MED tail (see known-gaps §0).
-- **#2f native-parser each/match structural promotion** — HARD M5-swap precondition (the within-node allowlist bumps from Bug 67/71 document the current intentional live-vs-native divergence; native MUST gain the match-as-expr + each-promotion hooks before it becomes default).
-- Other S154 carry: body-split/CPS debt · #5 lint FPs · #6 cross-file client imports · #7 MCP flip · per= per-instance engines (needs DD) · 6NZ caps stray.
+## CARRY-FORWARD (backlog)
+- Bug backlog (MED 10): Bug 1 Tailwind residuals · V-kill READ-side · MCP V0 deferrals · Generator policy · L19 multi-statement-handler · A5 freeze-extension (adoption-watch) · R28-1d (bare-`<program>` drops `<each>`, needs-confirm) · R28-4/R28-8 · C4/C6 lifecycle · Bug 14 MCP-partial · prior LOW tail.
+- #2f native-parser each/match structural promotion (M5-swap precondition; within-node allowlist bumps document the live-vs-native divergence).
+- S154 carry: body-split/CPS debt · #5 lint FPs · #6 cross-file client imports · #7 MCP flip · per= per-instance engines (needs DD) · 6NZ caps stray.
 
 ## pa.md directives in force
-- Rules R1–R5. `---` answer-delimiter (S152). Profile A/B (S156). `full wrap` / 88% floor (S139). Working-style: largest ratified target, autonomous, park-on-input, surface only on real failure (S147/S155 — exercised heavily this session).
-- Dispatch discipline ALL held this session: S88 explicit isolation · F4 startup-verify · **S112 merge-startup** (used on Bug 68/67/71/70 — worktree base = session-start `57edc794`; merging local main kept file-deltas additive, no prior-fix reverts) · S99/S126 Bash-edit + no-`cd` · S136 BRIEF.md archival (all 6 archived) · S138 R26/dual-verify (every landing) · S147 branch-leak coherence + additive-diff check (every landing) · S82 maps-block. `--no-verify` forbidden (held — hook denied one attempt).
-- Canonical dev-agent `scrml-js-codegen-engineer` (loads on this machine).
+- Rules R1–R5. `---` answer-delimiter (S152). Profile A/B (S156). `full wrap` / 88% floor (S139). Working-style: largest ratified target, autonomous, park-on-input, surface only on real failure / needed design ruling.
+- Dispatch discipline ALL held: S88 explicit isolation · F4 startup-verify · **S112 merge-startup** (Bug 64 — built on Bug72/60 landings it edits; the merge ff'd cleanly) · S99/S126 Bash-edit + no-`cd` · S136 BRIEF.md archival (all dispatches) · S138 R26/dual-verify (every landing; reverse-direction on Bug 60 + the sibling-gap-#1 NOT-REPRODUCED) · S147 branch-leak coherence + additive-diff (every landing; the stale-base cases on Bug 60 + Bug 64 handled via explicit-pathspec file-delta). `--no-verify` forbidden (Bug 60 agent self-caught a slip).
+- **Phase-0-survey-STOP gate** (NEW pattern this session, worked well on Bug 64) — for a meaty/perf-sensitive/architecturally-uncertain fix, brief the agent to survey + STOP-and-report before the heavy edit; PA reviews + greenlights or escalates the design call to the user.
+- Canonical dev-agent `scrml-js-codegen-engineer` (loads on this machine). **SendMessage agent-resume is NOT available in this environment** — a Phase-0-STOPped agent is continued via a FRESH dispatch carrying the analysis (Bug 64 Phase-1 precedent).
 
-## Process notes (S157)
-- **S112 worktree-base-staleness was the load-bearing landing discipline.** Worktrees branch from session-start `57edc794`, NOT live HEAD. Mid-session dispatches (Bug 68 onward) needed a `git merge main` startup step to inherit prior landings — else the file-delta would revert them. Briefed explicitly; held clean on all 4 merge-startup dispatches (verified via additive-diff + prior-fix-presence greps at each landing).
-- **Every agent surfaced sibling gaps transparently (Rule 5):** Bug 65→70, Bug 67→71, Bug 68→tableFor(closed)+stale-comment, Bug 70→72, Bug 71→plain-`<x>=match`(closed-in-scope). The "surface, don't silently fix-or-skip" discipline held.
-- **PA Rule-4 catch on Bug 70:** corrected the Bug-65 agent's spec-incorrect "lowering" framing to the spec-faithful E-SYNTAX-064 wiring before dispatch.
+## Process notes (S158)
+- **Crash-recovery (Bug 72):** background-agent socket-death is real (S149 class recurred). Recovery = verify-no-leak → capture WIP as a patch → re-dispatch continuation. Held clean.
+- **R26 reverse-direction earned its keep twice:** Bug 60 (verified the S140 agent-evidence still reproduced before dispatch) + Bug 64 sibling-gap #1 (verified the agent's claim did NOT reproduce → not filed). Both directions of the doctrine fired.
+- **Stale-base (S112):** the harness branches worktrees from session-start `1a72c81c`, NOT live HEAD. Bug 60 (disjoint files → harmless) + Bug 64 (overlapping files → explicit merge-startup in the brief; ff'd cleanly). Always explicit-pathspec file-delta to avoid reverting prior landings.
 
 ## Tags
-#session-157 #CLOSE #profile-a-full-start #autonomous-bug-pass #6-bugs-resolved #match-exhaustiveness-arc-complete #push-pending #bug64-design-fork #bug72-open
+#session-158 #CLOSE #profile-a-full-start #autonomous-bug-arc #3-bugs-resolved #bug64-design-ruling #phase-0-stop-gate #crash-recovery #r26-reverse-direction #pushed
