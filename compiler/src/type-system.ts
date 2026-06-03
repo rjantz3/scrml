@@ -73,6 +73,7 @@
 
 import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode } from "./expression-parser.ts";
+import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 
 // ---------------------------------------------------------------------------
 // Engine state-child grammar metadata (S81 Phase A10 follow-on)
@@ -4972,6 +4973,46 @@ function annotateNodes(
           }
         }
 
+        // Bug 63 (§51.0.G.1 / §14.10) — bare-variant `.advance(.V)` checking at
+        // markup EVENT-HANDLER ATTRIBUTE positions (`onclick=@phase.advance(.V)`).
+        // The §14.10 / §51.0.G.1 two-plane check is wired into the bare-expr
+        // STATEMENT path (function bodies / `${...}` logic blocks) at line ~6116
+        // via `inferReactiveSiteBareVariants`, but NOT into markup-attr handler
+        // values — so a typo'd/invalid variant in `onclick=@phase.advance(.Bogus)`
+        // compiled clean (the static-check sibling of the codegen Bug 62/65).
+        //
+        // Handler-attr values reach this markup walk in two shapes:
+        //   1. Bare form (`onclick=@phase.advance(.V)`) → a `call-ref` value
+        //      with `name: "@cell.method"` + `argExprNodes: ExprNode[]`. We
+        //      synthesize the equivalent `call`-rooted ExprNode (member callee
+        //      over a `@`-cell ident) so `inferReactiveSiteBareVariants` sees the
+        //      same shape it gets from a parsed `${...}` / fn-body expression.
+        //   2. Interpolation form (`onclick=${@phase.advance(.V)}` /
+        //      `onclick=${@phase = .V}`) → an `expr` value carrying a real
+        //      `exprNode` (assign/call root). We pass that ExprNode straight
+        //      through.
+        // Both routes invoke the SAME `inferReactiveSiteBareVariants` — so the
+        // markup-attr position runs the identical two-plane resolution: state
+        // plane → E-TYPE-063 on an invalid variant; message plane (via
+        // `cellMessageEnums`) for `accepts=`-bearing engines. Non-`.advance`
+        // handlers (`onclick=fn(@.id)`, `onclick=${@plainCell = 5}`) fall through
+        // the helper's shape guards untouched.
+        if (Array.isArray(attrs)) {
+          for (const attr of attrs) {
+            if (!attr || typeof attr.name !== "string") continue;
+            if (!isEventHandlerAttrName(attr.name)) continue;
+            const handlerExpr = handlerAttrToExprNode(attr.value);
+            if (!handlerExpr) continue;
+            const hSpan = (
+              (attr.value as { span?: Span } | undefined)?.span
+              ?? (attr.span as Span | undefined)
+              ?? (n.span as Span | undefined)
+              ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }
+            ) as Span;
+            inferReactiveSiteBareVariants(handlerExpr, scopeChain, hSpan, errors, cellMessageEnums);
+          }
+        }
+
         // §35 Attribute validation
         // P3-FOLLOW: route on NR's resolvedCategory (authoritative), not the legacy
         // isComponent boolean. State-type validation skips user-component nodes —
@@ -8079,6 +8120,71 @@ function inferBareVariantsWithStructNav(
   // Any other contextType (enum / union / asIs / null / primitive) — the
   // flat walker is sufficient. There's no per-position refinement.
   inferBareVariantsInExpr(exprNode, contextType, span, errors);
+}
+
+/**
+ * Bug 63 — normalize a markup event-handler ATTRIBUTE VALUE into the
+ * `call`/`assign`-rooted ExprNode shape that `inferReactiveSiteBareVariants`
+ * consumes (so the markup-attr handler position runs the SAME §51.0.G.1 /
+ * §14.10 two-plane `.advance` check as a fn-body / `${...}` bare-expr).
+ *
+ * Two value shapes arrive at the markup walk for an `on*` handler:
+ *
+ *   1. Bare form (`onclick=@phase.advance(.V)`) → a `call-ref` value:
+ *        { kind: "call-ref", name: "@phase.advance",
+ *          args: [".V"], argExprNodes: [ExprNode] }
+ *      We synthesize the equivalent `call`-rooted ExprNode the helper expects:
+ *        { kind: "call",
+ *          callee: { kind: "member",
+ *                    object: { kind: "ident", name: "@phase" },
+ *                    property: "advance" },
+ *          args: argExprNodes }
+ *      The callee string splits on its LAST `.` into the `@cell` object name and
+ *      the method name. We synthesize ONLY when the object is a `@`-prefixed
+ *      reactive cell ident and parsed `argExprNodes` are present — every other
+ *      `call-ref` (plain `fn(@.id)`, a non-`@` receiver, an arg-less handler)
+ *      yields `null` and is left to the existing diagnostic pipeline.
+ *
+ *   2. Interpolation form (`onclick=${@phase.advance(.V)}` / `${@phase = .V}`)
+ *      → an `expr` value carrying a real parsed `exprNode` (assign / call root).
+ *      We return that ExprNode directly — `inferReactiveSiteBareVariants`
+ *      already handles both roots.
+ *
+ * Returns `null` for any unrecognized shape (silent — non-handler positions and
+ * non-`.advance` handlers never reach here as anything the helper acts on).
+ */
+function handlerAttrToExprNode(value: unknown): unknown {
+  if (!value || typeof value !== "object") return null;
+  const v = value as { kind?: string } & Record<string, unknown>;
+
+  // Interpolation form — already-parsed ExprNode.
+  if (v.kind === "expr") {
+    const exprNode = v.exprNode;
+    return exprNode && typeof exprNode === "object" ? exprNode : null;
+  }
+
+  // Bare form — synthesize a `call`-rooted ExprNode from the `call-ref`.
+  if (v.kind === "call-ref") {
+    const calleeName = typeof v.name === "string" ? v.name : "";
+    const dotIdx = calleeName.lastIndexOf(".");
+    // Require `@cell.method` — a leading `@` object and a non-empty method.
+    if (dotIdx <= 0 || !calleeName.startsWith("@")) return null;
+    const objectName = calleeName.slice(0, dotIdx);
+    const methodName = calleeName.slice(dotIdx + 1);
+    if (objectName.length < 2 || methodName.length === 0) return null;
+    const args = Array.isArray(v.argExprNodes) ? (v.argExprNodes as unknown[]) : [];
+    return {
+      kind: "call",
+      callee: {
+        kind: "member",
+        object: { kind: "ident", name: objectName },
+        property: methodName,
+      },
+      args,
+    };
+  }
+
+  return null;
 }
 
 /**
