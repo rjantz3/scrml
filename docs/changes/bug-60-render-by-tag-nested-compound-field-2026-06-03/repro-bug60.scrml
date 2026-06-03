@@ -1,0 +1,11 @@
+<signupForm>
+    <userName req length(>=2)> = <input type="text"/>
+    <email req email>          = <input type="email"/>
+</>
+
+<div>
+  <signupForm>
+    <userName/>
+    <email/>
+  </signupForm>
+</div>

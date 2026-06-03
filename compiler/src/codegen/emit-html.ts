@@ -13,7 +13,7 @@ import { isFlatDeclarationBlock, renderFlatDeclarationAsInlineStyle } from "./em
 // `<userName/>` to its decl record; getCellKind surfaces B5's `_cellKind` annotation
 // (`"bindable"` for Shape 2 with bindable RHS — the only legal use kind that survives
 // B6's diagnostic walker).
-import { lookupStateCell, getCellKind } from "../symbol-table.ts";
+import { lookupStateCell, lookupQualifiedStateCell, getCellKind } from "../symbol-table.ts";
 // A1c C16 — §53.7.1 HTML attr generation for refinement-typed bindable cells.
 // `parsePredicateAnnotation` extracts the predicate from a typeAnnotation string;
 // `deriveHtmlAttrs` maps the predicate to native HTML validation attributes.
@@ -615,6 +615,20 @@ export function generateHtml(
   }
   const boundaryStack: ActiveBoundary[] = [];
 
+  // Bug 60 (S157) — the active compound-parent wrapper nesting stack. When the
+  // markup walker enters a BLOCK element whose tag resolves (via lookupStateCell
+  // → getCellKind) to a `compound-parent` cell, it pushes that cell's name so a
+  // nested self-tag `<field/>` child can resolve to the QUALIFIED leaf record
+  // (`signupForm.userName`) via lookupQualifiedStateCell rather than failing the
+  // bare-leaf lookup. The compound parent has no render-spec of its own, so the
+  // wrapper element is TRANSPARENT — it emits no DOM element; its children's
+  // render-by-tag expansions are emitted directly at the wrapper's DOM position
+  // (SPEC §6.3.5:2209 — the structural form at the nested level). SPEC is silent
+  // on whether `<signupForm>` block-wrappers emit a DOM element; the transparent
+  // choice follows from the compound parent being render-spec-less (E-CELL-NO-
+  // RENDER-SPEC is the SELF-tag `<x/>` rule per §34:16466, NOT the block-wrapper).
+  const enclosingCompoundStack: string[] = [];
+
   // Build the full variant -> renders JS-expr map ONCE (every enum's renders,
   // flattened by variant name). A boundary's catchable variants are not known
   // statically here, so we offer ALL declared renders; the runtime dispatch
@@ -833,6 +847,54 @@ export function generateHtml(
 
         parts.push("</div>");
         return;
+      }
+
+      // ---------------------------------------------------------------------
+      // Bug 60 (S157) — Compound-parent wrapper transparency (SPEC §6.3.5:2209).
+      //
+      // A BLOCK-form `<signupForm>...</signupForm>` whose tag resolves to a
+      // registered `compound-parent` cell is a NAMESPACE wrapper, not a render-
+      // spec element. Per §6.3.5 line 2209 the nested structural form
+      // `<formRes><name/></>` is valid render-by-tag for `name` "at the nested
+      // level" — i.e. the nested `<name/>` self-tag children expand to their
+      // OWN render-spec, keyed on the qualified cell path. The compound parent
+      // itself has NO render-spec (E-CELL-NO-RENDER-SPEC is the SELF-tag `<x/>`
+      // rule per §34:16466 — it does NOT fire on the block-wrapper form), so it
+      // emits NO DOM element of its own: the wrapper is TRANSPARENT. We push the
+      // compound name onto `enclosingCompoundStack` for the duration of the
+      // child walk so the render-by-tag self-tag block (below) can resolve each
+      // `<field/>` child via lookupQualifiedStateCell and expand it bound to the
+      // qualified runtime cell (`signupForm.userName`). Children that are NOT
+      // recognised compound fields fall through unchanged (the bare render-by-
+      // tag / literal-tag paths still apply within the namespace).
+      //
+      // Self-closing `<compound/>` form is NOT a namespace wrapper (no body);
+      // it routes through the normal render-by-tag block below, where a compound
+      // parent has cellKind "compound-parent" (not "bindable") and correctly
+      // does NOT expand — surfacing E-CELL-NO-RENDER-SPEC upstream at B6.
+      if (
+        !isSelfClosing &&
+        fileScope &&
+        /^[a-z]/.test(tag) &&
+        !VOID_ELEMENTS.has(tag) &&
+        !LIFECYCLE_SILENT_TAGS.has(tag) &&
+        !INPUT_STATE_TAGS.has(tag) &&
+        !REQUEST_TAGS.has(tag) &&
+        !TIMEOUT_TAGS.has(tag) &&
+        tag !== "channel" &&
+        tag !== "errorBoundary" && tag !== "errorboundary" &&
+        tag !== "program" && tag !== "errors"
+      ) {
+        const wrapperDecl = lookupStateCell(fileScope, tag);
+        const wrapperKind = wrapperDecl ? getCellKind(wrapperDecl.declNode as any) : undefined;
+        if (wrapperDecl && wrapperKind === "compound-parent") {
+          enclosingCompoundStack.push(tag);
+          for (const child of children) {
+            emitNode(child);
+          }
+          enclosingCompoundStack.pop();
+          return;
+        }
       }
 
       // ---------------------------------------------------------------------
@@ -1400,9 +1462,24 @@ export function generateHtml(
         tag !== "errorBoundary" && tag !== "errorboundary" &&
         tag !== "program"
       ) {
-        const decl = lookupStateCell(fileScope, tag);
+        // Bug 60 (S157) — resolve the tag to its cell record. Bare lookup first
+        // (top-level Shape-2 cell); if that fails AND we're inside a compound-
+        // parent wrapper (`enclosingCompoundStack`), descend into the compound
+        // sub-scope via lookupQualifiedStateCell so a NESTED field self-tag
+        // (`<userName/>` inside `<signupForm>...</>`) resolves to its qualified
+        // leaf record (`signupForm.userName`) — SPEC §6.3.5:2209 + §6.4.2. The
+        // bind key (`cellNameForBind`) is the record's `qualifiedPath`, which is
+        // `tag` for top-level cells and the dotted path for nested fields; the
+        // C4 wiring keys `_scrml_reactive_get/set` on it (emit-bindings.ts:697),
+        // matching the §55 flat dotted runtime cell already emitted by SYM.
+        let decl = lookupStateCell(fileScope, tag);
+        if (!decl && enclosingCompoundStack.length > 0) {
+          const enclosing = enclosingCompoundStack[enclosingCompoundStack.length - 1];
+          decl = lookupQualifiedStateCell(fileScope, [enclosing, tag]);
+        }
         const cellKind = decl ? getCellKind(decl.declNode as any) : undefined;
         if (decl && cellKind === "bindable") {
+          const cellNameForBind: string = decl.qualifiedPath ?? tag;
           const renderSpecRoot: any = (decl.declNode as any).renderSpec?.element;
           if (renderSpecRoot && renderSpecRoot.kind === "markup") {
             const renderById = genVar("render_by_tag");
@@ -1439,7 +1516,7 @@ export function generateHtml(
               registry.addLogicBinding({
                 kind: "render-by-tag",
                 placeholderId: renderById,
-                cellName: tag,
+                cellName: cellNameForBind,
                 renderSpecTag: renderSpecRoot.tag,
                 renderSpecAttrs: baseAttrs,
                 declValidators: (decl.declNode as any).validators ?? [],

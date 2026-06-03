@@ -2504,6 +2504,33 @@ export function runDG(input: DGInput): DGOutput {
       }
       // Check attribute values on markup nodes
       if (node.kind === "markup") {
+        // Bug 60 (S157) — render-by-tag structural-read credit (E-DG-002).
+        //
+        // A markup tag that matches a declared reactive var name IS a render-by-
+        // tag use site (SPEC §6.4): a self-tag `<userName/>` (Shape-2 bindable)
+        // or a BLOCK-form `<signupForm>...</signupForm>` namespace wrapper for a
+        // compound parent (§6.3.5). In both shapes the tag NAME is the cell's
+        // structural consumption — it is invisible to the @-ref / attr scans
+        // (the tag is not an `@`-sigil read), so without this credit E-DG-002
+        // false-fires on a cell consumed ONLY through render-by-tag. This mirrors
+        // the each-block / engine-cell / match-block structural-read credits
+        // already in this sweep. The compound parent is registered under its bare
+        // name (`signupForm`); the wrapper tag matches it and clears the warning
+        // once the nested fields render through the wrapper. Lowercase-only (the
+        // render-by-tag legal-tag set; PascalCase is component territory).
+        const rbtTag = ((node as Record<string, unknown>).tag ??
+          (node as Record<string, unknown>).tagName) as string | undefined;
+        if (
+          typeof rbtTag === "string" &&
+          rbtTag.length > 0 &&
+          /^[a-z]/.test(rbtTag) &&
+          reactiveVarNodeIds.has(rbtTag)
+        ) {
+          creditReader(rbtTag);
+          if (markupContextEmitEdges && node.span) {
+            emitMarkupReadEdge(node.span, rbtTag);
+          }
+        }
         const attrs = (node as Record<string, unknown>).attrs;
         if (Array.isArray(attrs)) {
           for (const attr of attrs) {
