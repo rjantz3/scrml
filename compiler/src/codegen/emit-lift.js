@@ -72,6 +72,87 @@ function maybeWrapLiftPerItemEffect(bodyLines) {
 }
 
 // ---------------------------------------------------------------------------
+// Bug 73 (sibling-gap #2 of Bug 64) — Tier-0 per-item EVENT HANDLER live-keying.
+//
+// SIBLING of the Tier-1 fix in emit-each.ts. A per-item handler emitted inside a
+// `${for…lift}` reconcile factory closes over the CREATE-TIME loop var
+// (`function(event) { pick(it.name) }` / `addEventListener(ev, <arrow over it>)`).
+// On a same-key reconcile `_scrml_reconcile_list` REUSES the DOM node, so the
+// handler fires with the STALE create-time snapshot while the display binding
+// (Bug 64) already shows live data. Fix: when the handler READS the loop var,
+// re-resolve the live item by the node's create-time key AT FIRE TIME.
+//
+// Two handler shapes:
+//   (a) function-body  — `function(event) { <body reading iterVar> }`. Prepend
+//       `let <iterVar> = _scrml_resolve_item(<wrapper>, <key>); if (...===null)
+//       return;` so the body's `<iterVar>.field` reads hit the LIVE item.
+//   (b) callable-direct — `addEventListener(ev, <arrowText>)`. A SEPARATELY
+//       defined arrow keeps its create-time closure; a runtime "rebind" does
+//       nothing. So the arrow text is INLINED inside a wrapper whose `let
+//       <iterVar>` lexically shadows the arrow's FREE `<iterVar>` reference:
+//       `function(event) { let <iterVar> = _scrml_resolve_item(...); if (...)
+//       return; (<arrowText>)(event); }`.
+//
+// The iter-scope token scan (shared `iterScopeReferencedInHandler` from
+// emit-each.ts) gates BOTH: a global handler (`onclick=swap()`) or a literal-only
+// body stays plain. Like the Tier-1 handler wrap, this does NOT use
+// `_scrml_effect` — a handler has no subscription; it re-resolves only on fire.
+// ---------------------------------------------------------------------------
+
+// Shared iter-scope token scan (string/regex-literal-blanked `\b<iterVar>\b`),
+// loaded from emit-each.ts via require() to stay init-order safe (same pattern
+// as buildEachEngineCtx / emitNestedEachFromMarkup above). Falls back to a
+// conservative plain word-boundary scan if the export is unavailable.
+function _liftIterScopeReferenced(handlerBody, iterVarName) {
+  if (!iterVarName) return false;
+  const each = require("./emit-each.ts");
+  if (each && typeof each.iterScopeReferencedInHandler === "function") {
+    return each.iterScopeReferencedInHandler(handlerBody, iterVarName);
+  }
+  // Fallback (no literal blanking) — only reached if the export went missing.
+  const esc = iterVarName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp("\\b" + esc + "\\b").test(handlerBody);
+}
+
+/**
+ * Tier-0 function-body per-item handler wrap (shape (a)). Returns the fire-time
+ * re-resolution prelude + `handlerBody` when a reconcile ctx is active and the
+ * body reads the loop var; otherwise returns `handlerBody` unchanged.
+ *
+ * @param {string} handlerBody — JS statements forming the listener body
+ * @returns {string}
+ */
+export function maybeWrapLiftPerItemHandler(handlerBody) {
+  const ctx = currentLiftReconcileCtx();
+  if (!ctx) return handlerBody;
+  if (!_liftIterScopeReferenced(handlerBody, ctx.iterVar)) return handlerBody;
+  return `let ${ctx.iterVar} = _scrml_resolve_item(${ctx.wrapperVar}, ${ctx.keyVar}); if (${ctx.iterVar} === null) return; ${handlerBody}`;
+}
+
+/**
+ * Tier-0 callable-direct per-item handler wrap (shape (b)). Given a callable
+ * `arrowText` that would otherwise be emitted as the listener directly, return
+ * the FULL `function(event) { ... }` listener body (a string, NOT including the
+ * `addEventListener(...)` call) that INLINES the arrow so the wrapper's `let
+ * <iterVar>` lexically provides the binding the arrow's free `<iterVar>`
+ * reference resolves to. Returns null when no wrap applies (caller emits the
+ * arrow directly as before — byte-identical to pre-fix).
+ *
+ * Edge: if the arrow declares its own param named identically to `<iterVar>`,
+ * the param shadows our `let` (the wrap then has no live-keying effect — a
+ * harmless miss; documented, not special-cased).
+ *
+ * @param {string} arrowText — the callable handler expression text
+ * @returns {string|null} — the wrapper body, or null if no wrap applies
+ */
+export function maybeWrapLiftCallableHandler(arrowText) {
+  const ctx = currentLiftReconcileCtx();
+  if (!ctx) return null;
+  if (!_liftIterScopeReferenced(arrowText, ctx.iterVar)) return null;
+  return `function(event) { let ${ctx.iterVar} = _scrml_resolve_item(${ctx.wrapperVar}, ${ctx.keyVar}); if (${ctx.iterVar} === null) return; (${arrowText})(event); }`;
+}
+
+// ---------------------------------------------------------------------------
 // Bug 65 (S157) — Tier-0 `${for…lift}` engine-transition handler lowering.
 //
 // SIBLING of Bug 62 (the Tier-1 `<each>` fix in emit-each.ts). A lifted event
@@ -734,7 +815,9 @@ function emitSetAttrs(elVar, attrs, engineCtx = null) {
       // (engine-free file) skips this — byte-identical to pre-fix.
       const engineLoweredAttr = tryLowerLiftEngineHandler(String(attr.value ?? "").trim(), engineCtx);
       if (engineLoweredAttr !== null) {
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${engineLoweredAttr}; });`);
+        // Bug 73 — per-item handler live-keying (see helper above). Wrap the
+        // inner body so the handler re-resolves the live item at fire time.
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredAttr};`)} });`);
         continue;
       }
       // SPEC §5.2.2 normative: `onclick=fn()` SHALL emit
@@ -785,9 +868,18 @@ function emitSetAttrs(elVar, attrs, engineCtx = null) {
         /^function\s*\(/.test(trimmedHandler) ||
         /^(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>/.test(trimmedHandler);
       if (isCallable) {
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${handlerExpr});`);
+        // Bug 73 — callable-direct per-item handler (string-AST path). Inline the
+        // arrow inside a re-resolving wrapper (lexical shadow) so it fires against
+        // the LIVE item; null → emit the arrow directly (byte-identical to pre-fix).
+        const _shadowH = maybeWrapLiftCallableHandler(handlerExpr);
+        if (_shadowH !== null) {
+          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${_shadowH});`);
+        } else {
+          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${handlerExpr});`);
+        }
       } else {
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${handlerExpr}; });`);
+        // Bug 73 — per-item handler live-keying. Re-resolve the live item at fire time.
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${maybeWrapLiftPerItemHandler(`${handlerExpr};`)} });`);
       }
     } else {
       // Check if the value contains interpolation (compact or tokenizer-spaced)
@@ -997,7 +1089,10 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
       const rewritten = emitExprField(val.exprNode, varName, { mode: "client" });
       if (/^on[a-z]/.test(name)) {
         const eventName = name.replace(/^on/, "");
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${rewritten}(event); });`);
+        // Bug 73 — per-item handler live-keying. A bare cell ref (`onclick=@cell`)
+        // does not read the item (the iter-scope scan gates it out → stays plain);
+        // an item-held handler (`onclick=@.handler`) re-resolves the live item.
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten}(event);`)} });`);
       } else {
         lines.push(`${elVar}.setAttribute(${JSON.stringify(name)}, ${rewritten});`);
       }
@@ -1021,10 +1116,14 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         const callTextForEngine = `${val.name}(${(val.args || []).map((a) => String(a).trim()).join(", ")})`;
         const engineLoweredCall = tryLowerLiftEngineHandler(callTextForEngine, engineCtx);
         if (engineLoweredCall !== null) {
-          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${engineLoweredCall}; });`);
+          // Bug 73 — per-item handler live-keying (see helper above). Wrap the
+        // inner body so the handler re-resolves the live item at fire time.
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredCall};`)} });`);
         } else {
         const callExpr = `${rewrittenName}(${rewrittenArgs})`;
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${callExpr}; });`);
+        // Bug 73 — per-item handler live-keying (see helper above). Wrap the
+        // inner body so the handler re-resolves the live item at fire time.
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${maybeWrapLiftPerItemHandler(`${callExpr};`)} });`);
         }
       } else {
         const callExpr = `${rewrittenName}(${rewrittenArgs})`;
@@ -1048,7 +1147,9 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         // (engine-free file) skips this — byte-identical to pre-fix.
         const engineLoweredExpr = tryLowerLiftEngineHandler(String(raw).trim(), engineCtx);
         if (engineLoweredExpr !== null) {
-          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${engineLoweredExpr}; });`);
+          // Bug 73 — per-item handler live-keying (see helper above). Wrap the
+        // inner body so the handler re-resolves the live item at fire time.
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredExpr};`)} });`);
           continue;
         }
         // S140 Bug 59 — when this onevent value is a synth arrow-string with
@@ -1087,9 +1188,20 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
           /^function\s*\(/.test(trimmedExpr) ||
           /^(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>/.test(trimmedExpr);
         if (isCallable) {
-          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${rewritten});`);
+          // Bug 73 — callable-direct per-item handler: a separately-defined arrow
+          // keeps its create-time closure, so a runtime "rebind" does nothing. The
+          // helper INLINES the arrow inside a wrapper whose `let <iterVar>` lexically
+          // provides the binding the arrow's free `<iterVar>` reference resolves to.
+          // Returns null (→ emit the arrow directly, byte-identical) when no wrap applies.
+          const _shadow = maybeWrapLiftCallableHandler(rewritten);
+          if (_shadow !== null) {
+            lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${_shadow});`);
+          } else {
+            lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${rewritten});`);
+          }
         } else {
-          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${rewritten}; });`);
+          // Bug 73 — function-body per-item handler: re-resolve the live item at fire time.
+          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} });`);
         }
       } else {
         const rewritten = emitExprField(val.exprNode, raw, { mode: "client" });
@@ -1935,7 +2047,8 @@ export function emitConsolidatedLift(body, opts = {}) {
                 const rewritten = emitExprField(logicChild.exprNode, logicChild.expr ?? "", { mode: "client" });
                 if (/^on[a-z]/.test(attrName)) {
                   const eventName = attrName.replace(/^on/, "");
-                  lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${rewritten}; });`);
+                  // Bug 73 — per-item handler live-keying (BLOCK_REF-split attr path).
+                  lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} });`);
                 } else {
                   lines.push(`${elVar}.setAttribute(${JSON.stringify(attrName)}, String(${rewritten} ?? ""));`);
                 }

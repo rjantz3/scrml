@@ -752,7 +752,12 @@ function clk(i) {
     const { errors, clientJs } = compileToOutputs(src, "l2-of-index");
     expect(errors).toEqual([]);
     // @. (the index) rewrites to the iter var in both handler arg + interp.
-    expect(clientJs).toMatch(/\.addEventListener\("click", function\(event\) \{ _scrml_clk_\d+\(_scrml_each_item\); \}\)/);
+    // Bug 73 (S159) — the per-item handler is now LIVE-KEYED: it re-resolves the
+    // current item by its create-time key at fire time (prepended prelude +
+    // null-guard) before reading the iter var, so a same-key reconcile fires the
+    // handler with live data, not the create-time snapshot. The iter-var read in
+    // the handler arg is preserved (it now resolves to the re-bound `let`).
+    expect(clientJs).toMatch(/\.addEventListener\("click", function\(event\) \{ let _scrml_each_item = _scrml_resolve_item\(_mount, _scrml_each_key_\d+\); if \(_scrml_each_item === null\) return; _scrml_clk_\d+\(_scrml_each_item\); \}\)/);
     expect(clientJs).toContain('.setAttribute("data-i", String(_scrml_each_item));');
   });
 });

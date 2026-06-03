@@ -660,7 +660,13 @@ function renderTemplateAttrToJs(
     } else {
       handlerBody = "/* each: unsupported event handler shape */";
     }
-    lines.push(`${indent}${elVar}.addEventListener(${JSON.stringify(ev)}, function(event) { ${handlerBody} });`);
+    // Bug 73 — per-item handler live-keying. If a reconcile ctx is active and
+    // the handler reads the iter var, prepend a fire-time re-resolution prelude
+    // so the handler runs against the LIVE item (not the create-time snapshot)
+    // on same-key reconcile / in-place field mutation. Global handlers and
+    // literal-only bodies stay plain (gated by the iter-scope token scan).
+    const wrappedHandlerBody = maybeWrapEachPerItemHandler(handlerBody, iterVarName);
+    lines.push(`${indent}${elVar}.addEventListener(${JSON.stringify(ev)}, function(event) { ${wrappedHandlerBody} });`);
     return;
   }
 
@@ -996,6 +1002,108 @@ function maybeWrapEachPerItemEffect(bodyLines: string[], iterVarName: string, in
   for (const l of bodyLines) out.push("  " + l);
   out.push(`${indent}});`);
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Bug 73 (sibling-gap #2 of Bug 64) — per-item EVENT HANDLER live-keying.
+//
+// A per-item handler emitted inside a reconcile factory closes over the
+// CREATE-TIME iter var (`function(event) { fn(<iterVar>.field) }`). On a
+// same-key reconcile (array-replace with a new same-key object / in-place field
+// mutation) `_scrml_reconcile_list` REUSES the DOM node, so the handler keeps
+// firing with the STALE create-time snapshot while the display binding (Bug 64)
+// already shows live data. Fix: when the handler READS the iter var, prepend a
+// fire-time re-resolution prelude (`let <iterVar> = _scrml_resolve_item(<mount>,
+// <keyVar>); if (<iterVar> === null) return;`) so the handler body's
+// `<iterVar>.field` reads hit the LIVE item at click time.
+//
+// Distinct from the DISPLAY effect helper above: a handler is NOT wrapped in
+// `_scrml_effect` (it has no reactive subscription — it re-resolves only when
+// the user fires it). The prelude is plain statements inside the existing
+// `function(event) { ... }` listener body.
+// ---------------------------------------------------------------------------
+
+/**
+ * Blank the CONTENTS of string / template / regex literals in `code` so a
+ * subsequent identifier token-scan does not match an iter-var name that only
+ * appears inside a literal (e.g. `log("it works")` must not match iterVar
+ * `it`). Quotes/backticks/slashes are preserved as structure; only the bytes
+ * between delimiters are replaced with spaces (length-preserving). This is a
+ * lightweight lexer adequate for the handler-body strings codegen produces;
+ * it is intentionally conservative (an unterminated literal blanks to EOL/EOF,
+ * which is safe — over-blanking can only DROP a match, never invent one).
+ */
+function blankStringAndRegexLiterals(code: string): string {
+  const out = code.split("");
+  let i = 0;
+  const n = code.length;
+  // `prevSignificant` decides whether a `/` opens a regex (after `(`, `,`, `=`,
+  // `return`, operators) or is division (after an ident / `)` / `]`). For the
+  // scan's purpose a false "regex" only blanks more, so we keep it simple.
+  let prevSignificant = "";
+  while (i < n) {
+    const ch = code[i];
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const quote = ch;
+      i++;
+      while (i < n) {
+        if (code[i] === "\\") { out[i] = " "; out[i + 1] = " "; i += 2; continue; }
+        if (code[i] === quote) break;
+        out[i] = " ";
+        i++;
+      }
+      // leave the closing quote (if present) in place
+      prevSignificant = quote;
+      i++;
+      continue;
+    }
+    if (ch === "/" && /[(,=:;{[!&|?+\-*%^~<>]/.test(prevSignificant === "" ? "(" : prevSignificant)) {
+      // Regex literal start (best-effort). Blank until the unescaped closing `/`.
+      i++;
+      while (i < n) {
+        if (code[i] === "\\") { out[i] = " "; out[i + 1] = " "; i += 2; continue; }
+        if (code[i] === "/") break;
+        out[i] = " ";
+        i++;
+      }
+      prevSignificant = "/";
+      i++;
+      continue;
+    }
+    if (!/\s/.test(ch)) prevSignificant = ch;
+    i++;
+  }
+  return out.join("");
+}
+
+function _escapeForRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Does `handlerBody` reference the iter var as a free identifier (outside string
+ * / regex literal content)? Used to gate per-item handler re-resolution: only
+ * handlers that READ the item need the live-keyed prelude; a global handler
+ * (`onclick=reorder()`) or a literal-only body must stay plain.
+ */
+export function iterScopeReferencedInHandler(handlerBody: string, iterVarName: string): boolean {
+  if (!iterVarName) return false;
+  const blanked = blankStringAndRegexLiterals(handlerBody);
+  return new RegExp("\\b" + _escapeForRegex(iterVarName) + "\\b").test(blanked);
+}
+
+/**
+ * Tier-1 per-item handler wrap. When a reconcile ctx is active, its `iterVar`
+ * matches `iterVarName`, and `handlerBody` reads the iter var, return the
+ * fire-time re-resolution prelude + body; otherwise return `handlerBody`
+ * unchanged. The prelude SHADOWS the create-time closure binding with a `let`
+ * so the body's `<iterVar>.field` reads resolve to the LIVE item.
+ */
+function maybeWrapEachPerItemHandler(handlerBody: string, iterVarName: string): string {
+  const ctx = currentEachReconcileCtx();
+  if (!ctx || ctx.iterVar !== iterVarName) return handlerBody;
+  if (!iterScopeReferencedInHandler(handlerBody, iterVarName)) return handlerBody;
+  return `let ${ctx.iterVar} = _scrml_resolve_item(${ctx.mountVar}, ${ctx.keyVar}); if (${ctx.iterVar} === null) return; ${handlerBody}`;
 }
 
 // ---------------------------------------------------------------------------
