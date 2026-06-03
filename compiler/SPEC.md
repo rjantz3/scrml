@@ -10527,7 +10527,7 @@ The outer `as row` makes the outer item addressable as `row` inside nested scope
 - In `<each in=@items>`: `@.` = the current item (the element at the current iteration position).
 - In `<each of=N>`: `@.` = the current index (0..N-1; there is no separate item).
 
-This is a contextual sigil — its meaning is fixed by the enclosing `<each>` body scope. Outside an `<each>` body, `@.` is `E-SYNTAX-064` (queued — "the `@.` contextual sigil is only legal inside an `<each>` body scope").
+This is a contextual sigil — its meaning is fixed by the enclosing `<each>` body scope. Outside an `<each>` body, `@.` is `E-SYNTAX-064` (wired S157 Bug 70 — "the `@.` contextual sigil is only legal inside an `<each>` body scope"; see §34 catalog row).
 
 **Override via `as name` clause:**
 
@@ -10559,7 +10559,7 @@ Per the V5-strict access model (§6.1), `@.field` parses as `(@.).field` — the
 **Normative statements:**
 
 - `@.` SHALL resolve to the current iteration value of the most-locally-enclosing `<each>` body scope. For `<each in=expr>`, the value is the current item; for `<each of=expr>`, the value is the current index (a number 0..N-1).
-- `@.` outside any `<each>` body scope SHALL be `E-SYNTAX-064` (§34, queued — "the `@.` contextual sigil is only legal inside an `<each>` body scope").
+- `@.` outside any `<each>` body scope SHALL be `E-SYNTAX-064` (§34, wired S157 Bug 70 — "the `@.` contextual sigil is only legal inside an `<each>` body scope").
 - When `as name` is declared on the enclosing `<each>` opener, `name` and `@.` SHALL both resolve to the current iteration value (aliases). The bound `name` is a local identifier per §6.1 — it does not require the `@` sigil because it is NOT registered state.
 - Nested `<each>` scopes resolve `@.` to the INNERMOST scope's current value. Outer scopes must use the `as name` form to remain addressable inside nested bodies.
 
@@ -16683,6 +16683,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-SYNTAX-042 | §17.6, §45 | `null` or `undefined` appears in a scrml value position. scrml's absence sentinel is `not`; `null`/`undefined` are not valid scrml literals. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase3-eq-checks.js:519, 613`.) | Error |
 | E-SYNTAX-043 | §17.6 | `(x) =>` presence-guard syntax used — replaced by `given x =>`. The old form is removed from the language. (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js:5002, 7661`.) | Error |
 | E-SYNTAX-044 | §17.6 | Property path in `given` position (e.g., `given obj.field =>`) — reserved; not yet supported in v1. `given` accepts only simple identifiers. (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js:4440, 7573`.) | Error |
+| E-SYNTAX-064 | §17.7.3, §3.4 | The `@.` contextual iteration sigil ("the current iteration value" / `@.field` for a field of the current item) appears OUTSIDE any `<each>` body scope, where it has no referent. Fires at every reachable `@.`-bearing position outside an each-body: an attribute value (`<li title=@.name>` / `class:done=@.done`), a Tier-0 `${for (it of @items) { lift ... }}` handler-call arg (`onclick=ping(@.id)`), and a Tier-0 lifted interpolation (`lift <li>${@.name}</li>`). A Tier-0 `${for...lift}` is NOT an `<each>` body scope — use the bare loop variable (`it.field`) there; in a `<each>` element use `@.` inside the body or bind an alias with `as name` (`<each in=@items as item>` → `item.field`). Replaces the prior confusing leak (raw `@.` reaching codegen → `E-CODEGEN-INVALID-JS`) and the misleading `E-SCOPE-001` on the base `@` token. (Catalog addition S157 Bug 70 — wired the previously-queued code; emitted at `compiler/src/type-system.ts` visitAttr + lift-expr scan.) | Error |
 | E-BATCH-001 | §8.9.3, §19.10.5 | Explicit `transaction { }` block composed with an implicit per-handler transaction. The two cannot compose. Resolution: `.nobatch()` the outer calls, or wrap the whole handler in the explicit `transaction { }`. (Catalog addition S78 audit; emitted at `compiler/src/batch-planner.ts:677`.) | Error |
 | E-BATCH-002 | §8.10 | Batched `IN (...)` parameter count exceeds `SQLITE_MAX_VARIABLE_NUMBER` (32766) and chunking is not statically applicable (e.g., hoisted-loop form). Runtime over-limit also throws this code. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-control-flow.ts:373`.) | Error |
 | W-BATCH-001 | §8.9.3 | Explicit `?{BEGIN}` inside a handler suppresses the implicit per-handler transaction envelope. Use `transaction { }` or `.nobatch()` for clarity. (Catalog addition S78 audit; emitted at `compiler/src/batch-planner.ts:660`.) | Warning |

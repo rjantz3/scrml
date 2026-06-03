@@ -1966,7 +1966,24 @@ export function compileScrml(options = {}) {
     // fix-wave; always-on waits for that surface to close. See the
     // `validateEmit` option doc + progress.md for the surfaced backlog.
     // -------------------------------------------------------------------------
-    if (validateEmit && cgResult.outputs) {
+    // Bug 70 (§2.2.1 / §17.7.3) — suppress the emitted-JS parse gate when the
+    // compile already has a FATAL error from an earlier stage. The gate's
+    // contract is "the compiler emits VALID JS for VALID source" — its
+    // diagnostic literally says "This is a compiler defect ... please report
+    // it." When the source is already invalid (e.g. `@.` used outside an
+    // `<each>` body → E-SYNTAX-064 at TS), codegen-of-invalid-source producing
+    // a non-parsing artifact is EXPECTED, not a compiler defect; firing
+    // E-CODEGEN-INVALID-JS on top of the real (already-surfaced) error is
+    // actively misleading. The build still fails (the prior fatal error fails
+    // it) and no artifacts are written. We use the same fatal/non-fatal
+    // partition as the final result split below (`isNonFatal`): only W-/I-
+    // prefixes and warning/info severities are non-fatal.
+    const hasPriorFatalError = allErrors.some((e) =>
+      !(e.code?.startsWith("W-")
+        || e.code?.startsWith("I-")
+        || e.severity === "warning"
+        || e.severity === "info"));
+    if (validateEmit && !hasPriorFatalError && cgResult.outputs) {
       const gateArtifacts = [];
       const pushArtifact = (sourceFile, artifact, contents) => {
         if (typeof contents === "string" && contents.length > 0) {

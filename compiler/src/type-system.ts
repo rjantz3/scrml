@@ -6621,6 +6621,31 @@ function annotateNodes(
         // For lift with embedded markup (lift-expr with kind === "markup"), the markup
         // node is visited via the default recursion below; partial match inside markup
         // is caught by the markup case above.
+        //
+        // Bug 70 (§17.7.3) — the embedded markup subtree is NOT walked by the
+        // standard `markup` visitor branch (the default recursion at the bottom
+        // of visitNode descends only ARRAY-valued keys; a lift-expr's `expr` is
+        // an object), so a Tier-0 `@.` inside the lifted markup — a handler-call
+        // arg (`lift <li onclick=ping(@.id)>`) or an interpolation
+        // (`lift <li>${@.name}</li>`) — would leak straight to codegen and
+        // surface the confusing E-CODEGEN-INVALID-JS. A Tier-0 `${for...lift}`
+        // is NOT an `<each>` body scope (the for-stmt pushes a `for:` scope, not
+        // `each:`), so `@.` here has no referent. Scan the lifted subtree for
+        // `@.` tokens and fire the spec'd E-SYNTAX-064 once per distinct sigil.
+        // Skip when inside an `<each>` body (a Tier-1 `<each>` may contain a
+        // lift; there `@.` is legal and rewritten at codegen).
+        if (!inEachBodyScope() && liftExpr && (liftExpr.kind === "markup" || (liftExpr as { node?: unknown }).node)) {
+          const liftMarkup = (liftExpr as { node?: unknown }).node ?? liftExpr;
+          const atDotTokens = markupSubtreeAtDotTokens(liftMarkup);
+          const liftSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+          for (const tok of atDotTokens) {
+            errors.push(new TSError(
+              "E-SYNTAX-064",
+              atDotEachOnlyMessage(tok),
+              liftSpan,
+            ));
+          }
+        }
         resolvedType = tAsIs();
         break;
       }
@@ -7392,7 +7417,24 @@ function annotateNodes(
       // only needs to NOT flag it. `@.` OUTSIDE an each body remains
       // E-SYNTAX-064 territory (§17.7.3); here we gate the skip on actually
       // being inside an each-body scope.
-      if ((name === "@." || name.startsWith("@.")) && inEachBodyScope()) {
+      if (name === "@." || name.startsWith("@.")) {
+        if (inEachBodyScope()) {
+          return;
+        }
+        // §17.7.3 — `@.` is the `<each>`-only contextual iteration sigil. Here
+        // it appears in an attribute value OUTSIDE any `<each>` body scope (e.g.
+        // a Tier-0 `${for...lift}` uses the bare loop variable, not `@.`). Fire
+        // the spec'd E-SYNTAX-064 instead of letting the raw `@.` leak to
+        // codegen as a confusing E-CODEGEN-INVALID-JS, or fall through to a
+        // misleading E-SCOPE-001 on the base `@` token.
+        const atDotSpan = (value.span ?? attr.span ?? parent?.span ?? {
+          file: filePath, start: 0, end: 0, line: 1, col: 1,
+        }) as Span;
+        errors.push(new TSError(
+          "E-SYNTAX-064",
+          atDotEachOnlyMessage(name, attr.name as string),
+          atDotSpan,
+        ));
         return;
       }
       // For dotted access like @todos.length, resolve the base name (@todos)
@@ -8166,6 +8208,98 @@ function inferBareVariantsWithStructNav(
   // Any other contextType (enum / union / asIs / null / primitive) — the
   // flat walker is sufficient. There's no per-position refinement.
   inferBareVariantsInExpr(exprNode, contextType, span, errors);
+}
+
+/**
+ * Bug 70 (§17.7.3) — the canonical E-SYNTAX-064 message. `@.` is the
+ * `<each>`-only contextual iteration sigil; outside an `<each>` body scope it
+ * has no referent. Fired at every `@.`-bearing position the compiler can reach
+ * outside an each-body (attribute value, lift-embedded markup handler / text).
+ * Suggests the Tier-0 alternative (the bare loop variable) and the Tier-1
+ * `as name` alias so the adopter has a concrete fix in either iteration form.
+ */
+function atDotEachOnlyMessage(sigilText: string, where?: string): string {
+  const at = where ? ` in attribute \`${where}\`` : "";
+  return (
+    `E-SYNTAX-064: the \`@.\` contextual sigil (\`${sigilText}\`)${at} is only ` +
+    `legal inside an \`<each>\` body scope — it names "the current iteration ` +
+    `value" and has no referent here. In a Tier-0 \`\${for (it of @items) { ` +
+    `lift ... }}\` form, use the bare loop variable (e.g. \`it.field\`) instead ` +
+    `of \`@.field\`. In a \`<each>\` element, either use \`@.\` inside the body or ` +
+    `bind an alias with \`as name\` (\`<each in=@items as item>\` → \`item.field\`). ` +
+    `See SPEC §17.7.3.`
+  );
+}
+
+/**
+ * Bug 70 (§17.7.3) — recursively collect every `@.`-rooted token text that
+ * appears anywhere in a markup subtree (attribute values + child text /
+ * interpolations + lift-embedded markup). Used by the `lift-expr` visitor case,
+ * whose embedded markup (`lift <li ...>...`) is NOT walked by the standard
+ * `markup` visitor branch (the default recursion descends only ARRAY-valued
+ * keys; a lift-expr's `expr` is an object), so a Tier-0 `@.` in a handler-call
+ * arg (`onclick=ping(@.id)`) or an interpolation (`${@.name}`) would otherwise
+ * leak straight to codegen.
+ *
+ * Detection is text-based on purpose: any expression containing `@.` fails to
+ * parse as JS and bails to an opaque `escape-hatch` ExprNode carrying the raw
+ * source, so `forEachIdentInExprNode` never surfaces it. We scan node strings
+ * for the literal `@.` token (a `@` immediately followed by `.`). Returns the
+ * distinct sigil snippets found (e.g. `@.id`, `@.name`) so the caller can fire
+ * one diagnostic per site; an empty array means the subtree is `@.`-free.
+ */
+function markupSubtreeAtDotTokens(node: unknown): string[] {
+  const found: string[] = [];
+  const seen = new Set<string>();
+  // `@.` reaches us in two textual forms: tight (`@.id`, from a handler-call
+  // arg / attribute value) and tokenized-with-spaces (`@ . name`, from a
+  // block-splitter interpolation bare-expr). Match both and normalise the
+  // captured snippet to the canonical `@.field` for the diagnostic message.
+  const atDotRe = /@\s*\.\s*([A-Za-z_$][\w$]*)?/g;
+  const scanString = (s: string): void => {
+    let m: RegExpExecArray | null;
+    atDotRe.lastIndex = 0;
+    while ((m = atDotRe.exec(s)) !== null) {
+      const field = m[1] ?? "";
+      const tok = field ? `@.${field}` : "@.";
+      if (!seen.has(tok)) {
+        seen.add(tok);
+        found.push(tok);
+      }
+    }
+  };
+  const walk = (v: unknown): void => {
+    if (v === null || v === undefined) return;
+    if (typeof v === "string") {
+      // Cheap pre-filter: only scan strings that contain an `@` followed
+      // (eventually) by a `.` — covers both `@.id` and the spaced `@ . name`.
+      if (/@\s*\./.test(v)) scanString(v);
+      return;
+    }
+    if (Array.isArray(v)) {
+      for (const el of v) walk(el);
+      return;
+    }
+    if (typeof v === "object") {
+      // STOP at a nested `<each>` boundary: `@.` inside a nested each-block
+      // (e.g. a Tier-0 `${for...lift}` whose lifted markup contains a
+      // `<each in=row.cells>` using `@.`) IS legal — it resolves to the inner
+      // each's iteration value. Descending into it would falsely flag the
+      // legitimate inner sigil. The standard `markup`/`each-block` visitor
+      // branches own the inner subtree (where `inEachBodyScope()` is true).
+      const vk = v as { kind?: unknown; tag?: unknown };
+      if (vk.kind === "each-block" || (vk.kind === "markup" && vk.tag === "each")) {
+        return;
+      }
+      for (const key of Object.keys(v as Record<string, unknown>)) {
+        // `span` carries only positional ints — never source text.
+        if (key === "span") continue;
+        walk((v as Record<string, unknown>)[key]);
+      }
+    }
+  };
+  walk(node);
+  return found;
 }
 
 /**
