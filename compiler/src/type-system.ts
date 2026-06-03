@@ -72,7 +72,7 @@
  */
 
 import { getElementShape, getAllElementNames } from "./html-elements.js";
-import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree } from "./expression-parser.ts";
+import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode } from "./expression-parser.ts";
 
 // ---------------------------------------------------------------------------
 // Engine state-child grammar metadata (S81 Phase A10 follow-on)
@@ -5699,11 +5699,27 @@ function annotateNodes(
             if (letAnnot) {
               inferBareVariantsWithStructNav(initExprForScope, resolvedType, letSpan, errors);
             } else {
-              // No annotation case — pass null as contextType to fire the
-              // no-type-context diagnostic on any bare variant. This matches
-              // §14.10 line 7174 ("bare variants ARE NOT supported in
-              // expression positions where no type context exists").
-              inferBareVariantsInExpr(initExprForScope, null, letSpan, errors);
+              // S156 (d)-A batch 4, Deliverable (b) — struct-CONSTRUCTOR form.
+              // `const bad = Post { role: .V }` has no `:Type` annotation, so
+              // letAnnot is absent; recover the struct context from the RAW
+              // init text and run the field-typed descent (E-CONTRACT-001 on an
+              // out-of-subset variant; E-TYPE-063 / E-VARIANT-AMBIGUOUS on a
+              // plain-enum typo). Falls through to the null-context path below
+              // for every non-constructor shape (call / comparison / non-struct).
+              const handledAsCtor = inferBareVariantsForStructConstructor(
+                (n as ASTNodeLike).init as string | undefined,
+                typeRegistry,
+                filePath,
+                letSpan,
+                errors,
+              );
+              if (!handledAsCtor) {
+                // No annotation case — pass null as contextType to fire the
+                // no-type-context diagnostic on any bare variant. This matches
+                // §14.10 line 7174 ("bare variants ARE NOT supported in
+                // expression positions where no type context exists").
+                inferBareVariantsInExpr(initExprForScope, null, letSpan, errors);
+              }
             }
           }
         }
@@ -7942,6 +7958,52 @@ function inferBareVariantsInExpr(
  * Bare-variant resolution at each leaf ident is done by the same helper
  * `resolveBareVariantAgainstType` extracted from `inferBareVariantsInExpr`
  * — single source of diagnostic wording, identical semantics.
+ */
+function inferBareVariantsForStructConstructor(
+  rawInit: string | undefined,
+  typeRegistry: Map<string, ResolvedType>,
+  filePath: string,
+  span: Span,
+  errors: TSError[],
+): boolean {
+  if (!rawInit || typeof rawInit !== "string") return false;
+  const trimmed = rawInit.trim();
+  // The block-splitter spaces tokens (`Post { title : "x" , role : . Viewer }`),
+  // so the recogniser is whitespace-tolerant. Match a leading PascalCase
+  // identifier followed by a single brace-delimited group spanning to the end.
+  const m = /^([A-Z][A-Za-z0-9_]*)\s*(\{[\s\S]*\})\s*$/.exec(trimmed);
+  if (!m) return false;
+  const typeName = m[1];
+  const braceBody = m[2];
+
+  // The type name must resolve to a STRUCT. Enum / union / primitive / unknown
+  // type names are not constructor forms — fall through.
+  const resolved = resolveTypeExpr(typeName, typeRegistry);
+  if (!resolved || resolved.kind !== "struct") return false;
+
+  // Re-parse the brace body as an object-literal ExprNode. The body retains the
+  // bare-variant placeholders (`. Viewer` etc.) which the object-literal parser
+  // lowers to `{ kind:"ident", name:".Viewer" }` value nodes — the same shape
+  // `inferBareVariantsWithStructNav` consumes for the annotated form.
+  const objNode = parseExprToNode(braceBody, filePath, span.start ?? 0);
+  if (!objNode || (objNode as { kind?: string }).kind !== "object") return false;
+
+  // Descend with the struct type — per-field subset / variant enforcement.
+  inferBareVariantsWithStructNav(objNode, resolved, span, errors);
+  return true;
+}
+
+/**
+ * S156 (d)-A batch 4, Deliverable (b) — struct-CONSTRUCTOR form bare-variant
+ * inference. `TypeName { field: value }` (§14.3 struct construction; §53.15.2
+ * worked example) does NOT reach the annotated object-literal descent because
+ * (1) acorn drops the brace body (initExpr collapses to the bare `TypeName`
+ * ident) and (2) the const-decl carries no `:Type` annotation, so the
+ * `letAnnot`-driven struct-nav path never runs. `inferBareVariantsForStructConstructor`
+ * (above) recovers the form from the RAW init text, resolves the struct, and
+ * runs the SAME `inferBareVariantsWithStructNav` descent the annotated form uses
+ * — so out-of-subset variants fire E-CONTRACT-001 and plain-enum typos fire
+ * E-TYPE-063 / E-VARIANT-AMBIGUOUS, identically to `const bad: Post = { … }`.
  */
 function inferBareVariantsWithStructNav(
   exprNode: unknown,

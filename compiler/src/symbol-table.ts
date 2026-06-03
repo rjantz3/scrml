@@ -10424,8 +10424,19 @@ function walkValidateMatchBlocks(
   const subsetCellRegistry: Map<string, SubsetCellInfo> = new Map();
   collectSubsetCells(nodes, subsetCellRegistry, enumRegistry, new WeakSet<object>());
 
+  // S156 (d)-A batch 4, Deliverable (c) — member-access `on=@p.role` subset
+  // reach. `structFieldSubsets` maps struct-type -> (field -> subset);
+  // `cellStructTypes` maps a struct-typed cell -> its struct type. Together
+  // they let validateMatchBlock resolve a single-level member access
+  // (`@post.role`) to the field's subset, narrowing exhaustiveness identically
+  // to the top-level cell-subset case.
+  const structFieldSubsets: Map<string, Map<string, SubsetCellInfo>> = new Map();
+  collectStructFieldSubsets(nodes, structFieldSubsets, enumRegistry, new WeakSet<object>());
+  const cellStructTypes: Map<string, string> = new Map();
+  collectCellStructTypes(nodes, cellStructTypes, structFieldSubsets, new WeakSet<object>());
+
   // Walk the AST tree, visiting every match-block node.
-  walkMatchBlockNodes(nodes, errors, filePath, visited, enumRegistry, engineGovernedTypes, subsetCellRegistry);
+  walkMatchBlockNodes(nodes, errors, filePath, visited, enumRegistry, engineGovernedTypes, subsetCellRegistry, cellStructTypes, structFieldSubsets);
 }
 
 // S156 (d)-A batch 2 — a cell / let / const whose declared type is an
@@ -10444,6 +10455,206 @@ interface SubsetCellInfo {
 // the `@`; a JS-style member root would not — direct cell refs are the §18.0.1
 // canonical case). Range-form / empty / malformed annotations are skipped here
 // (the decl-site type-system pass already lowered them to E-CONTRACT-002).
+// S156 (d)-A batch 4, Deliverable (c) — member-access `on=@p.role` block-form
+// subset reach (§18.0.1 / §53.15.4).
+//
+// batch 2's `collectSubsetCells` keys a subset only by a top-level CELL name
+// (`@currentRole` / `currentRole`). A member-access match subject
+// `<match for=Role on=@post.role>` — where `post: Post` and
+// `Post.role: Role oneOf([…])` — is a STRUCT-FIELD subset, not a cell subset,
+// so it fell through to the full-enum exhaustiveness check (E-MATCH-NOT-EXHAUSTIVE
+// fired even when the arms covered exactly the field's subset).
+//
+// These two collectors give `validateMatchBlock` the data to resolve a
+// single-level member access `@cell.field`:
+//
+//   1. `collectCellStructTypes` — cell-name → struct-type-name, for every
+//      decl whose `typeAnnotation` is a bare registered struct identifier.
+//      Keyed under both `cell` and `@cell` (the `on=` form carries the `@`).
+//   2. `collectStructFieldSubsets` — struct-type-name → (field-name →
+//      SubsetCellInfo) for every `:struct` type-decl field whose annotation is
+//      a valid enum-subset refinement (parsed by the SHARED recognizer, so the
+//      cell-locus and field-locus agree on whitespace tolerance + notIn
+//      complement + range-form rejection).
+//
+// The SYM pass is string-based (no scope chain); these collectors mirror
+// `collectSubsetCells` / `collectEnumTypes` exactly — same traversal keys, same
+// shared recognizer — so the field-locus subset reach has identical semantics
+// to the cell-locus one.
+
+/**
+ * Split a struct-body raw string (`{ a : T , b : U oneOf(...) }`) into
+ * `[fieldName, annotation]` pairs. Top-level comma is the field separator;
+ * commas nested inside `(...)`, `[...]`, `{...}`, or `<...>` are part of a
+ * field's annotation. The FIRST top-level `:` in each field splits name from
+ * annotation. Whitespace-tolerant (the block-splitter spaces all tokens).
+ */
+function splitStructFields(raw: string): Array<{ name: string; annotation: string }> {
+  const out: Array<{ name: string; annotation: string }> = [];
+  let body = raw.trim();
+  if (body.startsWith("{") && body.endsWith("}")) body = body.slice(1, -1);
+
+  // Split on top-level commas.
+  const fields: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    if (ch === "(" || ch === "[" || ch === "{" || ch === "<") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}" || ch === ">") { if (depth > 0) depth--; }
+    else if (ch === "," && depth === 0) {
+      fields.push(body.slice(start, i));
+      start = i + 1;
+    }
+  }
+  fields.push(body.slice(start));
+
+  for (const field of fields) {
+    const trimmed = field.trim();
+    if (trimmed.length === 0) continue;
+    // First top-level `:` splits field name from annotation. (Field names are
+    // bare identifiers; `:` cannot appear inside a name, so the first `:` at
+    // depth 0 is the separator. A nested `:` would be inside a paren/bracket.)
+    let d = 0;
+    let colonIdx = -1;
+    for (let i = 0; i < trimmed.length; i++) {
+      const ch = trimmed[i];
+      if (ch === "(" || ch === "[" || ch === "{" || ch === "<") d++;
+      else if (ch === ")" || ch === "]" || ch === "}" || ch === ">") { if (d > 0) d--; }
+      else if (ch === ":" && d === 0) { colonIdx = i; break; }
+    }
+    if (colonIdx === -1) continue;
+    const name = trimmed.slice(0, colonIdx).trim();
+    const annotation = trimmed.slice(colonIdx + 1).trim();
+    if (name.length === 0 || annotation.length === 0) continue;
+    out.push({ name, annotation });
+  }
+  return out;
+}
+
+// Walk every `:struct` type-decl and record, per struct type, the fields whose
+// annotation is a valid enum-subset refinement → SubsetCellInfo. `notIn`
+// complement / range-form rejection / whitespace tolerance all come from the
+// shared recognizer.
+function collectStructFieldSubsets(
+  nodes: any,
+  registry: Map<string, Map<string, SubsetCellInfo>>,
+  enumRegistry: Map<string, string[]>,
+  visited: WeakSet<object>,
+): void {
+  if (!nodes) return;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) collectStructFieldSubsets(n, registry, enumRegistry, visited);
+    return;
+  }
+  if (typeof nodes !== "object") return;
+  if (visited.has(nodes)) return;
+  visited.add(nodes);
+
+  const node = nodes as any;
+  if (
+    node.kind === "type-decl" && node.typeKind === "struct" &&
+    typeof node.name === "string" && node.name.length > 0 &&
+    typeof node.raw === "string"
+  ) {
+    const fieldMap = new Map<string, SubsetCellInfo>();
+    for (const { name, annotation } of splitStructFields(node.raw)) {
+      const parsed = parseEnumSubsetAnnotation(
+        annotation,
+        (enumName) => enumRegistry.get(enumName) ?? null,
+      );
+      if (parsed && parsed.kind === "subset") {
+        const subset = new Set(parsed.variants);
+        const subsetRender =
+          `${parsed.baseEnum} oneOf([${[...subset].map(v => `.${v}`).join(", ")}])`;
+        fieldMap.set(name, { baseEnum: parsed.baseEnum, subset, subsetRender });
+      }
+    }
+    if (fieldMap.size > 0) registry.set(node.name, fieldMap);
+  }
+
+  for (const key of ["body", "children", "defChildren", "consequent", "alternate"]) {
+    if (Array.isArray(node[key])) collectStructFieldSubsets(node[key], registry, enumRegistry, visited);
+  }
+  if (Array.isArray(node.arms)) {
+    for (const arm of node.arms) {
+      if (arm && Array.isArray(arm.body)) collectStructFieldSubsets(arm.body, registry, enumRegistry, visited);
+    }
+  }
+}
+
+// Walk every decl and record cell-name → struct-type-name when the decl's
+// `typeAnnotation` is a bare registered struct identifier. Keyed under both
+// `cell` and `@cell` (block-form `on=@cell.field` carries the `@`).
+function collectCellStructTypes(
+  nodes: any,
+  registry: Map<string, string>,
+  structFieldSubsets: Map<string, Map<string, SubsetCellInfo>>,
+  visited: WeakSet<object>,
+): void {
+  if (!nodes) return;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) collectCellStructTypes(n, registry, structFieldSubsets, visited);
+    return;
+  }
+  if (typeof nodes !== "object") return;
+  if (visited.has(nodes)) return;
+  visited.add(nodes);
+
+  const node = nodes as any;
+  const kind = node.kind;
+  if (
+    (kind === "state-decl" || kind === "let-decl" || kind === "const-decl") &&
+    typeof node.name === "string" && node.name.length > 0 &&
+    typeof node.typeAnnotation === "string"
+  ) {
+    const ann = node.typeAnnotation.trim();
+    // Only a bare struct-type identifier maps a cell to a struct. (Composite
+    // annotations — unions, arrays, optionals — do not name a single struct
+    // field-bearing type for member-access subset reach; skip them.)
+    if (/^[A-Z][A-Za-z0-9_]*$/.test(ann) && structFieldSubsets.has(ann)) {
+      registry.set(node.name, ann);
+      registry.set(`@${node.name}`, ann);
+    }
+  }
+
+  for (const key of ["body", "children", "defChildren", "consequent", "alternate"]) {
+    if (Array.isArray(node[key])) collectCellStructTypes(node[key], registry, structFieldSubsets, visited);
+  }
+  if (Array.isArray(node.arms)) {
+    for (const arm of node.arms) {
+      if (arm && Array.isArray(arm.body)) collectCellStructTypes(arm.body, registry, structFieldSubsets, visited);
+    }
+  }
+}
+
+/**
+ * Resolve a block-form `on=` subject to a struct-field subset, when the subject
+ * is a single-level member access `@cell.field` (or `cell.field`) over a
+ * struct-typed cell. Returns the field's SubsetCellInfo or undefined.
+ *
+ * Only a SINGLE dot is resolved (`@post.role`); deeper chains (`@a.b.c`) and
+ * computed/index access fall through to the full-enum check — the subset reach
+ * is a declared single-field property, consistent with the cell-locus case.
+ */
+function resolveMemberAccessSubset(
+  onExprRaw: string,
+  cellStructTypes: Map<string, string>,
+  structFieldSubsets: Map<string, Map<string, SubsetCellInfo>>,
+): SubsetCellInfo | undefined {
+  const trimmed = onExprRaw.trim();
+  // Match `@cell.field` or `cell.field` — exactly one dot, no parens/brackets.
+  const m = /^(@?[A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)$/.exec(trimmed);
+  if (!m) return undefined;
+  const cellRef = m[1];
+  const fieldName = m[2];
+  const structName = cellStructTypes.get(cellRef);
+  if (!structName) return undefined;
+  const fields = structFieldSubsets.get(structName);
+  if (!fields) return undefined;
+  return fields.get(fieldName);
+}
+
 function collectSubsetCells(
   nodes: any,
   registry: Map<string, SubsetCellInfo>,
@@ -10560,10 +10771,12 @@ function walkMatchBlockNodes(
   enumRegistry: Map<string, string[]>,
   engineGovernedTypes: Set<string>,
   subsetCellRegistry: Map<string, SubsetCellInfo>,
+  cellStructTypes: Map<string, string>,
+  structFieldSubsets: Map<string, Map<string, SubsetCellInfo>>,
 ): void {
   if (!nodes) return;
   if (Array.isArray(nodes)) {
-    for (const n of nodes) walkMatchBlockNodes(n, errors, filePath, visited, enumRegistry, engineGovernedTypes, subsetCellRegistry);
+    for (const n of nodes) walkMatchBlockNodes(n, errors, filePath, visited, enumRegistry, engineGovernedTypes, subsetCellRegistry, cellStructTypes, structFieldSubsets);
     return;
   }
   if (typeof nodes !== "object") return;
@@ -10572,15 +10785,15 @@ function walkMatchBlockNodes(
 
   const node = nodes as any;
   if (node.kind === "match-block") {
-    validateMatchBlock(node, errors, filePath, enumRegistry, engineGovernedTypes, subsetCellRegistry);
+    validateMatchBlock(node, errors, filePath, enumRegistry, engineGovernedTypes, subsetCellRegistry, cellStructTypes, structFieldSubsets);
   }
 
   for (const key of ["body", "children", "defChildren", "consequent", "alternate"]) {
-    if (Array.isArray(node[key])) walkMatchBlockNodes(node[key], errors, filePath, visited, enumRegistry, engineGovernedTypes, subsetCellRegistry);
+    if (Array.isArray(node[key])) walkMatchBlockNodes(node[key], errors, filePath, visited, enumRegistry, engineGovernedTypes, subsetCellRegistry, cellStructTypes, structFieldSubsets);
   }
   if (Array.isArray(node.arms)) {
     for (const arm of node.arms) {
-      if (arm && Array.isArray(arm.body)) walkMatchBlockNodes(arm.body, errors, filePath, visited, enumRegistry, engineGovernedTypes, subsetCellRegistry);
+      if (arm && Array.isArray(arm.body)) walkMatchBlockNodes(arm.body, errors, filePath, visited, enumRegistry, engineGovernedTypes, subsetCellRegistry, cellStructTypes, structFieldSubsets);
     }
   }
 }
@@ -10592,6 +10805,8 @@ function validateMatchBlock(
   enumRegistry: Map<string, string[]>,
   engineGovernedTypes: Set<string>,
   subsetCellRegistry: Map<string, SubsetCellInfo>,
+  cellStructTypes: Map<string, string>,
+  structFieldSubsets: Map<string, Map<string, SubsetCellInfo>>,
 ): void {
   const blockSpan: SYMDiagnostic["span"] = matchBlock.span ?? {
     file: filePath, start: 0, end: 0, line: 1, col: 1,
@@ -10634,8 +10849,17 @@ function validateMatchBlock(
   // comes from the matched-ON value's declared type. A direct `on=@cell`
   // reference is the §18.0.1 canonical case; member/computed `on=` falls
   // through to the full-enum check (subset reach is a declared-cell property).
+  // First: a direct `on=@cell` reference to a subset-typed cell (§18.0.1
+  // canonical case, batch 2). Then (batch 4, Deliverable (c)): a single-level
+  // member access `on=@cell.field` over a struct-typed cell whose field is
+  // subset-refined — resolve the field's subset so exhaustiveness narrows
+  // identically. Member/computed access deeper than one field still falls
+  // through to the full-enum check.
   const subsetInfo: SubsetCellInfo | undefined =
-    onExprRaw !== null ? subsetCellRegistry.get(onExprRaw.trim()) : undefined;
+    onExprRaw !== null
+      ? (subsetCellRegistry.get(onExprRaw.trim())
+          ?? resolveMemberAccessSubset(onExprRaw, cellStructTypes, structFieldSubsets))
+      : undefined;
 
   // E-MATCH-NOT-EXHAUSTIVE — every variant of the matched type must have a
   // matching arm OR a `<_>` wildcard arm must be present (SPEC §18.0.1 line

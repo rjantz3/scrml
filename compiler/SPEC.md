@@ -11407,7 +11407,7 @@ remains legal (a subset-of-the-subset).
 ```scrml
 type Post:struct = { role: Role oneOf([.Admin, .Editor]) }   // Role = { Admin, Editor, Viewer }
 
-fn label(p: Post) string {
+fn label(p: Post) -> string {
   match p.role {
     .Admin  => "Admin"
     .Editor => "Editor"
@@ -29642,7 +29642,7 @@ type Post:struct = {
 }
 
 <currentRole>: Role notIn([.Viewer]) = .Admin    // complement form — equivalent subset {Admin,Editor}
-fn assignRole() Role oneOf([.Admin, .Editor]) { … }   // subset return type
+fn assignRole() -> Role oneOf([.Admin, .Editor]) { … }   // subset return type
 fn promote(r: Role oneOf([.Editor]))           { … }   // subset parameter type
 ```
 
@@ -29705,7 +29705,7 @@ defers to those sections for the exhaustiveness pass. Summary:
 ```scrml
 type Post:struct = { role: Role oneOf([.Admin, .Editor]) }
 
-fn label(p: Post) string {
+fn label(p: Post) -> string {
   match p.role {
     .Admin  => "Admin"
     .Editor => "Editor"
