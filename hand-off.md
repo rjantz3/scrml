@@ -1,4 +1,4 @@
-# scrmlTS — Session 162 (IN PROGRESS)
+# scrmlTS — Session 162 (CLOSE)
 
 **Date:** 2026-06-04
 **Previous:** `handOffs/hand-off-166.md` (= S161 CLOSE).
@@ -7,16 +7,21 @@
 
 ---
 
-## 🏁 S162 MID-SESSION STATE — #2f EACH-PROMOTION ARC CLOSED + PUSHED · swap-grind triage in flight
+## 🏁 S162 CLOSE — #2f EACH-PROMOTION ARC CLOSED + PUSHED · swap reframed (6 families, not 199 files) · F3 same-line match arms landed
 
-The native-parser-swap strategic line (direction-a, S161). #2f each-promotion CLOSED end-to-end + PUSHED. Re-measure reframed the swap. Now grinding the long tail (triage in flight).
+The native-parser-swap strategic line (direction-a, S161). **(1)** #2f each-promotion CLOSED end-to-end (3 units + MK2.1 + SPEC recon) + PUSHED. **(2)** Flip re-measure corrected the S161 "70%" → **~31%** (each was the real broken structural element; match was already done). **(3)** Swap-grind triage REFRAMED the remaining ~790 flip-fails as **~6 parser-FAMILIES, not 199 files** (true swap-work ≈6 fixes; F1 engine arm-body dominant at ~168). **(4)** F3 (same-line match arms, family F3) landed. **(5)** F8 await-in-`^{}` ruled (migrate stdlib). **NEXT-SESSION OPENER: F1 (engine arm-body, ~168, L-sized) — survey-then-fix.**
 
-### Sync / repo state
-- **scrmlTS:** origin **0/0** (PUSHED this session). HEAD `e5b673dc`. On v0.7.0 (pkg.json unchanged; no tag — parity-closer work, not a release cut).
-- **scrml-support:** 0/0 at open; no writes yet this session (LOW + user-voice append pending at wrap).
-- **Worktrees:** main only (all 3 dispatch worktrees + the re-measure throwaway worktree cleaned at their resolutions).
-- **Inbox:** EMPTY.
-- **Hooks:** config B. S100 path-discipline hook FIRED correctly (rejected a unit-C agent Write → agent switched to Bash-edit per S126; no main leak). Pre-push full suite + TodoMVC PASSED (the 2 known parity-timing flakes did not trip).
+### Sync / repo state at CLOSE
+- **scrmlTS:** **7 PA commits this session** (`810ce386` session-start · `39b1424a` unit A · `178cc5dc` unit B+MK2.1 · `d99403b1` unit C · `e5b673dc` SPEC recon · `2af1e3dd` F3 · + this wrap commit). PUSHED this wrap → origin **0/0**.
+- **scrml-support:** S162 user-voice append (F8 ruling + the swap reframe) — committed + pushed this wrap. (0/0 at open.)
+- **Tests at close:** full `bun test compiler/tests/` **22,986 pass / 0 fail / 220 skip / 1 todo across 906 files** (23,207 ran; +65 from S161's ~22,921 = #2f's +44 each tests + F3's +21). 0 fail = no regression. NB the native-parser-swap parity tests are LIVE-default → flip-gated (exercise native only at the eventual swap); the ~790 flip-fails are measured separately via the throwaway-worktree flip harness, NOT in this default-parser count.
+- **Worktrees:** main only (all 4 dispatch worktrees + the re-measure throwaway worktree cleaned at their resolutions). **Inbox:** EMPTY at open + close.
+- **Version:** on top of **v0.7.0** (pkg.json unchanged; no tag — parity-closer + bug-fix work, not a release cut).
+- **Maps:** STALE — reflect `9f01f6cd`; HEAD is now 7 commits ahead, incl. native-parser changes (parse-file.js / tag-frame.js / lex-in-code.js / parse-expr.js) + emit-each.ts + SPEC. **REFRESH before the F1 dispatch** (F1 is `parse-state-body.js` + markup classification — the maps cover native-parser thinly; the F3/triage findings supersede for the expr-parser, but F1's locus needs fresh coverage).
+- **Hooks:** config B. S100 path-discipline hook FIRED correctly (rejected a unit-C agent Write → agent switched to Bash-edit per S126; no main leak). The F3 agent had an S126 #16 `cd <main> && $(pwd)` leak → self-recovered → PA-verified main clean (git diff HEAD empty). Pre-push gate PASSED (the 2 known parity-timing flakes did not trip).
+
+### known-gaps §0 state at CLOSE
+- **HIGH 0** (holds since S139). **MED 9** (unchanged — the swap-family gaps are tracked under the native-parser-swap arc, not the MED bug backlog). **LOW** +3 NEW this session: `.scrml`-mirror feature-staleness (the big F3 finding — supersedes/absorbs the is-given predicate-drift LOW), native is-pattern-arm gap (`is .Ok => 1`, both same-line+newline), native if-as-expr gap. (The SPEC §4.15/§24.4 registry-gap LOW CLOSED via `e5b673dc`.)
 
 ### #2f each-promotion arc — DONE + PUSHED (6 PA commits)
 - `810ce386` — session-start (rotate hand-off-166 + fresh hand-off).
@@ -51,10 +56,10 @@ The "KNOWN-RESOLVED" buckets (Bug 71/58/4) are NOT unported fixes — they fail 
 ### F8 — USER RULING (S162, durable design directive — append to user-voice at wrap)
 **The await-in-`^{}` tension ("live tolerates legacy / native canonical-enforcer"): user ruled → MIGRATE THE STDLIB OFF `await import()`. Native stays the STRICT canonical enforcer (no `await`, anywhere, incl. compile-time `^{}` meta). The stdlib bootstrap's `await import()` is MIGRATION BACKLOG, not a reason to relax native.** Aligns with the no-async/await public-claim (await = forbidden vocabulary). F8 disposition = the stdlib migration (its own backlog task), NOT a native-parser relax. (User AskUserQuestion S162.)
 
-### F3 — IN FLIGHT (the warm-up; user picked "start smaller" over the L-sized F1)
-`scrml-js-codegen-engineer` worktree dispatch `af8e2f77509278bf3`, Phase-0-STOP gated. Fix same-line match-arm boundary detection in `parse-expr.js` `isAtArmBoundary` (currently newline-only). Design-sensitive (uppercase-`.Variant`/`else`/`_`/`given` at brace-depth = new arm; lowercase `.field` = member-access continuation) → the agent surveys + STOPs if non-clean. Scope: parse-expr.js + `.scrml` mirror + tests; if-as-expr is a noted separate follow-up. Brief: `docs/changes/native-match-arm-same-line-2026-06-04/BRIEF.md`.
+### F3 — DONE + LANDED `2af1e3dd` (the warm-up; user picked "start smaller" over the L-sized F1)
+Fixed same-line match-arm boundary in `parse-expr.js` `isAtArmBoundary`: dropped the redundant NEWLINE gate → boundary = `inMatchArmBody` + `peekStartsArmPattern` (arrow-anchored + uppercase-gated, so lowercase `.field` member-access continuation is NOT mis-classified). Phase-0-STOP PROCEEDED (clean local extension). Verified (R26): same-line `=>`/`:>`/`->` parse; PROPER fixture (with enum) native client.js BYTE-IDENTICAL to default; `E-EXPR-MATCH-PATTERN` count 0; member-access/object-literal/nested-match controls preserved. within-node GREEN (match-001 arm-count mismatch GONE corpus-wide; +FIELD-SHAPE/SPAN-COORD on newly-parsed arm nodes, S161-tolerated). +21 tests. **NO `.scrml` mirror change** — see the staleness finding above (the function to mirror doesn't exist in the stale `.scrml`).
 
-**NEXT after F3:** F1 (engine arm-body, the ~168 gate) — recommend re-measuring after F1 (count should drop steeply, validates whether F2-F9 estimates hold). Then F2/F4/F5 etc. F8 = the stdlib migration (per ruling).
+**NEXT-SESSION OPENER — F1 (engine arm-body, the ~168 gate, L-sized).** Locus: `compiler/native-parser/parse-state-body.js` + the markup-classification path. The bug: native fires spurious `E-UNQUOTED-DISPLAY-TEXT` on `<engine>` state-child arm bodies + DROPS the whole engine (+ each-inside-arm content). Almost certainly a Phase-0-survey-STOP dispatch (most complex native surface: state-children + arm bodies + nested each/match + §4.18 code-default body mode). **Refresh maps first** (F1 locus needs fresh coverage). **Re-measure the flip AFTER F1** (count should drop steeply — validates F2-F9 estimates). Then F2 (SQL `?{}` in server-fn, ~58) / F4 (formFor, ~32) / F5 (`const @name`, ~20) / F6+F9 / F7 (diagnostics). F8 = the stdlib `await import()` migration (per the S162 ruling — its own backlog task).
 
 ---
 
