@@ -2062,9 +2062,9 @@ validator-attr   ::= /* per §55.1 universal-core predicate vocabulary */
   - `validator-attr` — any predicate from §55.1 universal-core vocabulary (`req`, `length(>=N)`, `pattern(...)`, etc.). Validators contribute to the auto-synthesized validity surface (§55).
 - `'>'`: closing of the opening tag.
 - `[ ws ':' ws type-expr ]`: optional type annotation; `type-expr` per §7.5.
-- `ws '=' ws expr`: initializer. REQUIRED for all shapes EXCEPT the typed-array no-RHS form (Shape 4, §6.2): a declaration whose type annotation is an array type (`T[]`) MAY omit the `= expr` entirely and defaults to `[]`.
+- `ws '=' ws expr`: initializer. REQUIRED for all shapes EXCEPT a typed no-RHS cell (Shape 4, §6.2): a declaration with a type annotation MAY omit the `= expr` entirely and defaults to the type's canonical empty (e.g. `int`→`0`, `string`→`""`, `T[]`→`[]`), or to `not` (with an implicit `(not to T)` lifecycle, §14.12) where the type has no canonical empty.
 
-**RHS shapes:** the `expr` is one of three forms (§6.2): plain expression (Shape 1), bindable markup (Shape 2 — render-spec coupling), or `const`-prefixed derived expression (Shape 3 — read-only). A fourth shape (Shape 4) omits the RHS for an array-typed cell and defaults to `[]`; a non-array typed cell with no RHS is **E-DECL-NEEDS-INITIALIZER** (§6.2, §34).
+**RHS shapes:** the `expr` is one of three forms (§6.2): plain expression (Shape 1), bindable markup (Shape 2 — render-spec coupling), or `const`-prefixed derived expression (Shape 3 — read-only). A fourth shape (Shape 4) omits the RHS for any typed cell: it defaults to the type's canonical empty where one exists, or `not` (with an implicit `(not to T)` lifecycle, §14.12) where it does not (§6.2 Shape 4).
 
 **Attribute composition:** decl-attrs compose freely. `<cards server>` and `<cards server pinned>` and `<userName req length(>=2)>` are all legal. Cross-attribute interaction rules (e.g., `server + validators` evaluation timing) are open carry-forward items for the heads-up follow-up (HU-3 Q5.B.1/2).
 
@@ -2131,27 +2131,49 @@ const <badge>     = <span class="badge">${@userName}</span>    // markup-typed d
 - `<doubled/>` in markup is **E-CELL-NO-RENDER-SPEC** for numeric/string derived cells — use `${@doubled}`.
 - For markup-typed derived cells (`const <badge> = <span>...`), `${@badge}` expands the markup value at read time. This is the markup-as-value pillar (§1.4) applied to derived cells.
 
-#### Shape 4 — Typed Array, No RHS (`[]` Default)
+#### Shape 4 — Typed Declaration, No RHS (Canonical-Empty / `not` Default)
 
-**Added S152, 2026-06-01.** A state-cell declaration whose type annotation is an array type (`T[]`) MAY omit the right-hand-side initializer entirely. The cell initializes to the empty array `[]`.
+**Added S152 (typed-array form); generalized S160 (2026-06-03 — all typed cells).** A state-cell declaration with a type annotation and no right-hand-side initializer (`<x>: T`) MAY omit the `= expr`. The cell initializes to **the type's canonical empty/zero DEFINED value where one exists; to `not` (with an implicit `(not to T)` lifecycle, §14.12) where the type is a bare `T` with no canonical empty; to `not` (with NO lifecycle) where the type already admits absence (`T | not` / `T?`).**
 
-```scrml
-<todos>: Todo[]          // sugar for: <todos>: Todo[] = []
-<tags>:  string[]        // initializes to []
-```
+**Canonical-empty types (the DEFINED-empty set, §42.1.1):**
 
-- The no-RHS form `<name>: T[]` is exact sugar for `<name>: T[] = []`. The compiler synthesizes the `[]` initializer; the explicit `= []` form remains valid and compiles identically.
-- `[]` is a DEFINED value — an `Array<T>` of length zero (§42.1.1) — categorically distinct from absence (`not`). A no-RHS array cell `is some`; it is NOT `not`.
-- `@todos` reads the array. `<each in=@todos>` over a freshly-declared no-RHS array cell renders an empty list; a subsequent reactive write (`@todos = [...]`) populates it.
-- This shape carries no render-spec; `<todos/>` in markup is **E-CELL-NO-RENDER-SPEC** (same as Shape 1).
-- `default=` / `reset(@cell)` (§6.8): when `default=` is absent, `reset(@todos)` re-evaluates the (synthesized) init expression and writes `[]` — consistent with §6.8.1. The explicit `default=` attribute composes normally.
-
-**Non-array typed declaration with no RHS is an error.** A state-cell declaration whose type annotation is a NON-array type (`int`, `string`, a struct type, etc.) and which has no RHS is **E-DECL-NEEDS-INITIALIZER** (compile error; see §34). Only the array case has a canonical zero-value default. Scalar and struct zero-value defaults (`int`→`0`, `string`→`""`, etc.) are NOT synthesized — those declarations require an explicit initializer. (Whether scalar/struct zero-defaults should be added is a separate open design question; this subsection does NOT decide it.)
+| Type | Canonical empty |
+|---|---|
+| `int` / `integer` | `0` |
+| `number` | `0` |
+| `bool` / `boolean` | `false` |
+| `string` | `""` |
+| `T[]` (array) | `[]` |
 
 ```scrml
-<count>: int             // E-DECL-NEEDS-INITIALIZER — write `<count>: int = 0`
-<name>:  string          // E-DECL-NEEDS-INITIALIZER — write `<name>: string = ""`
+<count>: int             // → 0   (sugar for <count>: int = 0)
+<name>:  string          // → ""
+<active>: bool           // → false
+<todos>: Todo[]          // → []  (unchanged from S152)
 ```
+
+- `<name>: T` is exact sugar for `<name>: T = <canonical-empty-of-T>`; the explicit form remains valid and compiles identically. A canonical-empty cell `is some` (§9.4/§42.2.5) — `""`/`0`/`false`/`[]` are DEFINED values (§42.1.1), NOT absence.
+- **`date` / `timestamp`** (registered string-shaped primitives) have no meaningful canonical empty → `not` (next bullet). scrml has no `float`/`real` type and no anonymous record/map annotation type — every record-shaped cell is a named `:struct`, which has required fields and therefore no canonical empty → `not`.
+
+**No-canonical-empty types → `not`.** A bare `T` with no canonical empty — a named `:struct` (`{}` does not inhabit its required fields), an `:enum` (the compiler must not pick a default variant — engines choose the start via `initial=`, §51.0.E), `date`/`timestamp`, an opaque/custom/`lin` type — initializes to **`not`** and the cell acquires an **implicit `(not to T)` lifecycle** (§14.12):
+
+```scrml
+<user>: User             // → not; implicitly (not to User) — read-before-assign fires E-TYPE-001
+<phase>: Phase           // enum → not; implicitly (not to Phase)
+```
+
+The cell starts absent (`pre`); a read before a `T`-shaped value is assigned fires **E-TYPE-001** (§14.12 per-access tracker). It transitions to `post` on EITHER a `T`-shaped assignment (§14.12.3) OR a presence-discrimination (`given` / `if (x is not) return` / `match`, §14.12.6.1). The E-TYPE-001 message on such a cell names that the `(not to T)` lifecycle was synthesized from the no-RHS declaration. *(struct → `not` not recursive zero-fill; enum → `not` not auto-first-variant.)*
+
+**Union / optional types → `not`, no lifecycle.** A type that already admits absence (`T | not`, `T?`) has `not` as a member — `not` inhabits the type. `<x>: User | not` / `<x>: string?` defaults to `not` with NO implicit lifecycle; reads do not fire E-TYPE-001 (the cell legitimately holds `not`). This is the most common no-RHS shape (every optional cell), and is DISTINCT from the bare-`T` case above (where `not` does not inhabit `T`, so the lifecycle is engaged).
+
+**Lifecycle-annotated no-RHS `<x>: (A to B)`** — if A is `not`, synthesize `not` (as above); if A is a non-`not` type/variant, **error** (require explicit init — the compiler must not pick the pre-type's value).
+
+**Refinement-typed no-RHS `<x>: number(>0)`** — synthesize the base canonical-empty and check it against the predicate: if it SATISFIES (`number(>=0)` → `0`), use it; if it VIOLATES (`number(>0)` → `0` fails `>0`), it is a **hard error** — a refined type with no predicate-satisfying canonical empty cannot be auto-defaulted; require an explicit initializer (`E-REFINEMENT-NO-DEFAULT`, §53/§34). The check is compile-time (the §53 predicate is statically evaluated on the literal canonical-empty).
+
+- This shape carries no render-spec; `<x/>` in markup is **E-CELL-NO-RENDER-SPEC** (same as Shape 1).
+- `default=` / `reset(@cell)` (§6.8): absent `default=` → `reset` re-evaluates the synthesized init (the canonical-empty, or `not`). For a `not`-init bare-`T` cell, `reset` reverts the lifecycle per-access state to `pre` per §6.8.3 (re-fires E-TYPE-001 until re-assigned). The explicit `default=` attribute composes normally.
+
+*(A `const`-derived cell still requires an expression — `const <x>: T` with no RHS is a derived-with-no-expression error, NOT covered by this shape. An untyped no-RHS `<x>` — no type AND no RHS — is a separate construct, not governed here.)*
 
 **Cross-references:**
 - §6.1 — The two access forms
@@ -2159,8 +2181,9 @@ const <badge>     = <span class="badge">${@userName}</span>    // markup-typed d
 - §6.6 — Derived values: `const <x>` (top-level and in-compound form)
 - §6.8 — The `default=` attribute and `reset(@cell)` keyword (optional attribute on any shape)
 - §6.11 — Auto-synthesized validity surface (from Shape 2 validators)
-- §34 — E-CELL-NO-RENDER-SPEC, E-CELL-RENDER-SPEC-NOT-BINDABLE, E-DERIVED-WRITE, E-DECL-NEEDS-INITIALIZER
-- §42.1.1 — `[]` is a DEFINED value, distinct from absence (`not`); grounds the Shape 4 default
+- §34 — E-CELL-NO-RENDER-SPEC, E-CELL-RENDER-SPEC-NOT-BINDABLE, E-DERIVED-WRITE, E-REFINEMENT-NO-DEFAULT (refinement-typed no-RHS whose canonical empty violates the predicate)
+- §42.1.1 — `""`/`0`/`false`/`[]` are DEFINED values, distinct from absence (`not`); grounds the Shape 4 canonical-empty defaults
+- §14.12 — implicit `(not to T)` lifecycle on a bare-`T` no-canonical-empty no-RHS cell
 
 ---
 
@@ -5242,6 +5265,8 @@ reset(@state)                        // writes `not`; satisfies pre-type → per
 print(@state.name)                   // E-TYPE-001 (pre-transition again)
 ```
 
+**No-RHS implicit-`(not to T)` cell (Shape 4, §6.2).** For a no-RHS typed cell that defaulted to `not` with an *implicit* `(not to T)` lifecycle (`<user>: User` with no `= …`), the "re-evaluated init expression result" above is the SYNTHESIZED `not` (there is no written init expression). It satisfies the pre-type, so `reset(@user)` reverts the per-access state to `pre` exactly as for an explicit `<user>: (not to User) = not`. The implicit and explicit forms behave identically under reset.
+
 **Composition with `default=` (matching pre-type — common case):**
 
 ```scrml
@@ -8041,6 +8066,8 @@ Lifecycle annotation `(A to B)` is permitted at every typed location EXCEPT engi
 | Engine cell | **NO** — fires E-TYPE-LIFECYCLE-ON-ENGINE-CELL | (see §14.12.4) | §51.0 |
 
 Each position's semantics — when the compiler considers the transition fired — inherits from the per-access transition-state tracker in `compiler/src/type-system.ts` (Landing 1). For struct fields, transition fires on `instance.field = value` where `value` is type B-shaped. For Shape 1 reactive cells, transition fires on `@cell = value` where the cell's initial value is A-shaped and the written value is B-shaped. Function-parameter and schema-field transition semantics follow the same per-access tracker shape. Function-return position uses the hybrid transition-marker mechanism — discrimination IS transition for presence-progression `(not to T)` returns, explicit `transition()` for variant-progression `(.VariantA to .VariantB)` returns — per §14.12.6.
+
+**Shape 1 presence-progression — assignment OR discrimination (S160).** A Shape 1 reactive cell carrying an implicit OR explicit **`(not to T)`** annotation (pre-type `not`) transitions to `post` on EITHER a `T`-shaped assignment (`@cell = value`, the base mechanism above) OR a presence-discrimination on the cell (`given c => …`, `if (@cell is not) return`, `match @cell { … }` — the §14.12.6.1 presence-progression mechanism, reused at the Shape-1 cell locus). This unifies the Shape-1 cell and the function-return cases for presence-progression: discrimination IS transition wherever the pre-type is `not`. **Implicit `(not to T)` (Shape 4, §6.2):** a no-RHS typed cell whose type has no canonical empty (a bare `:struct` / `:enum` / opaque type) initializes to `not` and acquires this `(not to T)` annotation *implicitly* — the developer wrote no annotation, so the E-TYPE-001 message fired on a pre-transition read of such a cell SHALL name that the lifecycle was synthesized from the no-RHS declaration.
 
 #### 14.12.4 Engine-cell carve-out
 
@@ -16311,7 +16338,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-REACTIVE-003 | §6.6.9 | Reading a `const <name>` derived value inside a server-escalated function | Error |
 | E-REACTIVE-004 | §6.6.5 | `flush()` called inside a derived expression | Error |
 | E-REACTIVE-005 | §6.6.10 | Circular dependency in the derived reactive graph | Error |
-| E-DECL-NEEDS-INITIALIZER | §6.2 | A state-cell declaration carries a NON-array type annotation (`<x>: int`, `<x>: string`, `<x>: SomeStruct`) but no right-hand-side initializer. Only the typed-array form (`<x>: T[]`) has a canonical zero-value default (`[]`, Shape 4 §6.2); non-array typed cells require an explicit initializer. Resolution: write `<x>: int = 0` / `<x>: string = ""` / etc. Scalar and struct zero-value defaults are deliberately NOT synthesized (separate open design question). Closes the silent-`undefined` hole where a no-RHS typed decl was previously dropped to an `html-fragment` with no init and no diagnostic. (S152 — typed-array-no-rhs-default.) **Fires:** emitted by TAB (`compiler/src/ast-builder.js` `tryParseStructuralDecl`) at the declaration span. | Error |
+| E-REFINEMENT-NO-DEFAULT | §6.2, §53 | A refinement-typed state-cell declaration with no RHS (Shape 4, §6.2) whose base canonical-empty VIOLATES the refinement predicate — e.g. `<x>: number(>0)` (the canonical empty `0` fails `>0`). A refined type with no predicate-satisfying canonical empty cannot be auto-defaulted. Resolution: provide an explicit initializer (`<x>: number(>0) = 1`). Refinement types whose canonical empty SATISFIES the predicate (`number(>=0)` → `0`) get the canonical empty with no error. The check is compile-time (the §53 predicate is statically evaluated on the literal canonical-empty). (S160 — Shape 4 generalization. SUPERSEDES E-DECL-NEEDS-INITIALIZER, which is RETIRED: every other no-RHS typed decl now resolves to a canonical empty or `not` per §6.2 Shape 4.) | Error |
 | E-LIFT-001 | §10.5.2 | Concurrent `lift` calls in same logic block | Error |
 | E-PA-001 | §11.5 | `src=` file does not exist | Error |
 | E-PA-003 | §11.5 | Bun SQLite schema introspection failed | Error |
