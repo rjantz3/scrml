@@ -230,10 +230,25 @@ export function translateExpr(nativeExpr) {
                                translateExpr(nativeExpr.alternate), nativeExpr.span);
 
         // --- call / member / new -------------------------------------------
-        case ExprKind.Call:
+        case ExprKind.Call: {
+            // §6.8.2 — `reset(<target>)` is a language KEYWORD expression, not
+            // an ordinary call. When the callee is the BARE identifier `reset`
+            // (NOT a member call like `obj.reset(x)`), lift it into a
+            // structurally-distinct live `reset-expr` node so the downstream
+            // passes that already exist (B22 target validation, usage-analyzer
+            // reset-chunk pull, emit-expr.ts:emitResetExpr lowering to
+            // `_scrml_reset(...)`) recognise the construct WITHOUT re-checking
+            // the magic name — byte-identical to the live
+            // expression-parser.ts:1727 production. Produced as a plain `call`
+            // otherwise, the type-system scope-check flags `reset` as an
+            // undeclared identifier (spurious E-SCOPE-001).
+            if (isBareResetCallee(nativeExpr.callee)) {
+                return translateResetCall(nativeExpr);
+            }
             return makeCall(translateExpr(nativeExpr.callee),
                             translateArgList(nativeExpr.args),
                             nativeExpr.optional === true, nativeExpr.span);
+        }
         case ExprKind.New:
             return makeNew(translateExpr(nativeExpr.callee),
                            translateArgList(nativeExpr.args), nativeExpr.span);
@@ -608,6 +623,97 @@ function makeTernary(condition, consequent, alternate, span) {
 // makeCall — a live `CallExpr` (ast.ts:1751).
 function makeCall(callee, args, optional, span) {
     return { kind: "call", callee, args, optional, span: spanOrZero(span) };
+}
+
+// --- reset(@cell) keyword expression (§6.8.2) --------------------------------
+
+// isBareResetCallee — true when a native call's callee is the BARE identifier
+// `reset` (NOT a member call like `obj.reset(x)`). Mirrors the live gate at
+// expression-parser.ts:1727 (`callee.type === "Identifier" && calleeName ===
+// "reset"`): the live acorn parser sees `reset` as a plain Identifier and the
+// reset-expr production keys off the callee NAME string, NOT a token-kind
+// reservation. The native parser likewise produces a plain `Ident` callee for
+// `reset(...)`; this predicate is the native mirror of that name check.
+function isBareResetCallee(callee) {
+    return callee !== undefined && callee !== null
+        && callee.kind === ExprKind.Ident
+        && identText(callee.name) === "reset";
+}
+
+// translateResetCall — native `reset(<args>)` call -> live `reset-expr` node
+// (ast.ts:1961 `ResetExpr` { kind, span, target, diagnostic? }). Byte-identical
+// to the live production at expression-parser.ts:1727-1785; the SAME three
+// §6.8.2 arg shapes:
+//   - exactly one non-spread argument  -> clean reset-expr (the happy path;
+//     `reset(@cell)` / `reset(@compound)` / `reset(@compound.field)` — the
+//     target ExprNode shape is validated by B22 downstream, lowered by
+//     emit-expr.ts:case "reset-expr" to `_scrml_reset(...)`).
+//   - zero arguments                   -> reset-expr with a synthetic `not`
+//     target + E-RESET-NO-ARG diagnostic (§34); the ast-builder wrapper /
+//     bridge surfaces the diagnostic field as a fatal diagnostic.
+//   - multi-arg or spread              -> reset-expr keeping the first
+//     non-spread argument as the target + an arity-specific E-RESET-NO-ARG.
+// The `target` is the TRANSLATED argument ExprNode (`@cell` -> live `ident`
+// name "@cell"; `@compound.field` -> live `member` rooted at that ident) —
+// exactly the shapes emit-expr.ts:emitResetExpr walks.
+function translateResetCall(nativeExpr) {
+    const span = spanOrZero(nativeExpr.span);
+    const rawArgs = Array.isArray(nativeExpr.args) ? nativeExpr.args : [];
+    // A native call-arg spread is the array-element `Spread` wrapper
+    // (`{ kind: "Spread", expression }`, parse-expr.js parseCallArguments) —
+    // mirror the live `a.type === "SpreadElement"` check.
+    const hasSpread = rawArgs.some(a => a !== undefined && a !== null && a.kind === "Spread");
+    const nonSpreadArgs = rawArgs.filter(a => a !== undefined && a !== null && a.kind !== "Spread");
+
+    // Zero-arg form: synthesize a canonical absence-literal target (§42 — a
+    // `lit { litType: "not" }`, NOT `null`/`undefined`) so the node carries a
+    // valid target shape; the diagnostic prevents further codegen.
+    if (rawArgs.length === 0) {
+        return {
+            kind: "reset-expr",
+            span,
+            target: makeLit("not", null, "not", span),
+            diagnostic: {
+                code: "E-RESET-NO-ARG",
+                message:
+                    "E-RESET-NO-ARG: `reset()` called with no argument. The `reset` keyword "
+                    + "requires an explicit cell argument: `reset(@cell)` or "
+                    + "`reset(@compound.field)` (§6.8.2).",
+            },
+        };
+    }
+
+    // Multi-arg or spread form: keep the first non-spread argument as the
+    // target so B22 can still typecheck a target shape; emit E-RESET-NO-ARG
+    // with an arity-specific message (single error code).
+    if (rawArgs.length > 1 || hasSpread) {
+        const firstArg = nonSpreadArgs.length > 0 ? nonSpreadArgs[0] : undefined;
+        const target = firstArg !== undefined
+            ? translateExpr(firstArg)
+            : makeLit("not", null, "not", span);
+        const detail = hasSpread
+            ? "spread arguments are not permitted"
+            : "expected exactly one argument, got " + rawArgs.length;
+        return {
+            kind: "reset-expr",
+            span,
+            target,
+            diagnostic: {
+                code: "E-RESET-NO-ARG",
+                message:
+                    "E-RESET-NO-ARG: `reset(...)` " + detail + ". The `reset` keyword "
+                    + "requires exactly one cell argument: `reset(@cell)` or "
+                    + "`reset(@compound.field)` (§6.8.2).",
+            },
+        };
+    }
+
+    // Happy path: exactly one non-spread argument.
+    return {
+        kind: "reset-expr",
+        span,
+        target: translateExpr(rawArgs[0]),
+    };
 }
 
 // makeNew — a live `NewExpr` (ast.ts:1761). `NewExpr` has no `optional` field

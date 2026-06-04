@@ -324,6 +324,74 @@ describe("§5 — call / member / new", () => {
 });
 
 // =============================================================================
+describe("§5b — reset(@cell) keyword expression (§6.8.2 — B1)", () => {
+    // Native produces a plain `call` for `reset(...)` (callee is a bare
+    // Ident "reset"); the bridge MUST lift the bare-`reset`-callee form into a
+    // live `reset-expr` node — byte-identical to the live expression-parser.ts
+    // production at :1727-1785 — so the EXISTING codegen (emit-expr.ts:case
+    // "reset-expr" → `_scrml_reset(...)`) + usage-analyzer reset-chunk pull +
+    // B22 target validation work unchanged. Producing a plain `call` instead
+    // is the S139 allowlist-trap miscompile: scope-check fires a spurious
+    // E-SCOPE-001 and codegen emits a bare undefined `reset(...)` call.
+
+    test("reset(@cell) lifts to a reset-expr whose target is the @-ident", () => {
+        const out = translate("reset(@count)");
+        expect(out.kind).toBe("reset-expr");
+        expect(out.target.kind).toBe("ident");
+        expect(out.target.name).toBe("@count");
+        // happy path: no parse-time diagnostic
+        expect(out.diagnostic).toBeUndefined();
+    });
+
+    test("reset(@compound.field) lifts to a reset-expr with a member target", () => {
+        const out = translate("reset(@compound.field)");
+        expect(out.kind).toBe("reset-expr");
+        expect(out.target.kind).toBe("member");
+        expect(out.target.property).toBe("field");
+        expect(out.target.object.kind).toBe("ident");
+        expect(out.target.object.name).toBe("@compound");
+        expect(out.diagnostic).toBeUndefined();
+    });
+
+    test("reset() lifts to a reset-expr with a synthetic not target + E-RESET-NO-ARG", () => {
+        const out = translate("reset()");
+        expect(out.kind).toBe("reset-expr");
+        expect(out.target.kind).toBe("lit");
+        expect(out.target.litType).toBe("not");
+        expect(out.target.value).toBeNull();
+        expect(out.diagnostic).toBeDefined();
+        expect(out.diagnostic.code).toBe("E-RESET-NO-ARG");
+    });
+
+    test("reset(@a, @b) keeps the first arg as target + E-RESET-NO-ARG arity message", () => {
+        const out = translate("reset(@a, @b)");
+        expect(out.kind).toBe("reset-expr");
+        expect(out.target.kind).toBe("ident");
+        expect(out.target.name).toBe("@a");
+        expect(out.diagnostic).toBeDefined();
+        expect(out.diagnostic.code).toBe("E-RESET-NO-ARG");
+        expect(out.diagnostic.message).toContain("got 2");
+    });
+
+    test("a MEMBER call obj.reset(@x) stays a plain call — NOT a reset-expr", () => {
+        // The keyword form is the BARE-callee `reset(...)` only; a method call
+        // `obj.reset(x)` is an ordinary call (live gates on a bare Identifier
+        // callee — expression-parser.ts:1727). Mis-lifting it would break real
+        // method calls named `reset`.
+        const out = translate("obj.reset(@x)");
+        expect(out.kind).toBe("call");
+        expect(out.callee.kind).toBe("member");
+        expect(out.callee.property).toBe("reset");
+    });
+
+    test("the reset-expr carries a span", () => {
+        const out = translate("reset(@count)");
+        expect(out.span).toBeDefined();
+        expect(typeof out.span.start).toBe("number");
+    });
+});
+
+// =============================================================================
 describe("§6 — arrow / function fan-in (both → lambda)", () => {
     test("Arrow expression-body translates to lambda fnStyle arrow", () => {
         const out = translate("(a) => a + 1");
