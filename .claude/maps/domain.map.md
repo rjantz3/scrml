@@ -194,9 +194,11 @@ swap-prep backlog.
 | Family | ~Count | Size | Locus (native file) | Status |
 |--------|--------|------|---------------------|--------|
 | ~~F1 engine substrate-drop~~ | ~~~168~~ | — | parse-file.js / collect-hoisted.js | **CLOSED S163** (machineDecls instance-share fix; 6 sub-features byte-identical) |
-| **B2 §51.0.S message-arm** | ~20 | L-subset | `synthEngineDecl` (zero `accepts=` handling) + `native-walker/engine-statechild-walker.ts:516` (hard-codes `messageArms: []`) | **THE NEXT DISPATCH** — `E-ENGINE-ACCEPTS-NOT-ENUM` (4) + `E-ENGINE-MSG-UNKNOWN` (3) + engine-message-dispatch conf/browser; mirror live `parseMessageArms()` in `engine-statechild-parser.ts` (S154) |
+| ~~F1-narrow + B2 §51.0.S message-arm~~ | ~~~20~~ | — | `parse-markup.js` (arm-region recognition) + `native-walker/engine-statechild-walker.ts:516` + `collect-hoisted.js synthEngineDecl` | **LANDED S164 `7cbad5dd`** — parser-level: native `engineMeta` (acceptsType/messageArms/arm-counts) byte-identical; within-node 1005/0; E-UNQUOTED 2→0. NOTE: full-fixture emit-R26 PENDS the exprNode family below (the fixture's `@x.advance(...)` handler hits the exprNode gap, not a message-arm flaw). |
+| **native attr-value `exprNode` population** | LARGE | L (cross-cutting ~162 files) | `compiler/native-parser/tag-frame.js` attr-value construction (~L1079/1095/1125/1130/1153) | **THE NEXT DISPATCH** — native builds attr values `{kind:"expr"\|"variable-ref", raw, refs, sourceText, span}` WITHOUT `exprNode`; live `ast-builder.js:1834/1857/1878/2217` sets `exprNode: safeParseExprToNodeGlobal(raw,...)`. `emit-html.ts` reads `val.exprNode` (handlers @1735, `if=` @1718, bindings @1756, body @1015) → absent on native → string-fallback → raw `@x.advance(...)` → `E-CODEGEN-INVALID-JS`. Consumed across emit-html/event-wiring/control-flow/match/bindings/form-for/table-for/variant-guard. Likely kills the `E-CODEGEN-INVALID-JS` (18) + handler-cluster of the 674. |
 | mario PowerUp payload-enum | ~few | — | native enum-body capture | NEW S163 — native captures only `["Mushroom"]` (drops payload variants), mis-emits `PowerUp.Flower(3)` as `"Flower"(3)`; payload-bearing-enum native gap (mario residual 133 diff-lines) |
 | `effect=` opener (§51.0.H Form 3) | small | S | `synthEngineDecl` (no openerEffect read) | OPEN — small separate gap |
+| nested-engine `acceptsType` pairing | benign | — | nested engine-decl synth | WATCH (S164) — native stamps `acceptsType:null` on PRE-EXISTING-mis-paired nested engine-decls (4 hierarchy fixtures +2 EXTRA-FIELD, benign within-node rebump); top-level matches live; possibly tied to S163 machineDecls/bodyChildren nesting |
 | F2 SQL `?{}` in server-fn | ~58 | — | `parse-sql-body.js` | OPEN — drops SQL body in top-level server fns |
 | F3 if-as-expr residual | small | — | `parse-expr.js` | same-line match arms DONE S162; if-as-expr residual (LOW) |
 | F4 formFor expansion | ~32 | — | native parse → bridge → form pass | OPEN — drops field-markup expansion |
@@ -210,12 +212,18 @@ families): `E-CODEGEN-INVALID-JS` (18, downstream invalid JS), `E-TYPE-063` (15)
 (native bare-variant resolution gap), `E-TYPE-001` (14) + `E-TYPE-020` (14) (lifecycle / exhaustiveness),
 `E-MATCH-NOT-EXHAUSTIVE` (7) + `E-MATCH-SUBSET-DEAD-ARM` (4) (match family).
 
-**B2 (NEXT) detail:** §51.0.S engine message dispatch — `accepts=MsgType` opener attr + `(state × message)`
-arm form. Native `synthEngineDecl` has ZERO `accepts=` handling (acceptsType undefined vs live null);
-`native-walker/engine-statechild-walker.ts:516` hard-codes `messageArms: []`. The LIVE pattern to mirror is
-`engine-statechild-parser.ts parseMessageArms()` (landed S154/S155 #14: `accepts=MsgType` capture +
-`(state × message)` arm recognition → `EngineStateChildEntry.messageArms`). Affects `engine-message-dispatch-s6.scrml`
-+ the conf/browser `engine-message-dispatch-s155` tests. See structure.map.md "Native-Parser File Table".
+**NEXT-DISPATCH detail — native attr-value `exprNode` population (the cross-cutting R26 blocker):** native's
+`tag-frame.js` builds markup attribute values (`onclick=@x.advance(...)`, `if=@cond`, `bind:`, props) as
+`{kind:"expr"|"variable-ref", raw, refs, sourceText, span}` but NEVER sets `exprNode`. Live `ast-builder.js`
+sets `exprNode: safeParseExprToNodeGlobal(raw, filePath, span.start, errors)` at every attr-value site
+(1834 variable-ref / 1857 expr / 1878 expr / 2217 variable-ref). `emit-html.ts` reads `val.exprNode` for
+event handlers (1735 `handlerExprNode`), `if=`/`show=` (1718/1756 `condExprNode`), body (1015 `bodyExprNode`),
+and the field is consumed across `emit-event-wiring`/`emit-control-flow`/`emit-match`/`emit-bindings`/
+`emit-form-for`/`emit-table-for`/`emit-variant-guard`. Absent → string-fallback → e.g. `.advance` undetected →
+raw `@` emitted → `E-CODEGEN-INVALID-JS`. Cross-cutting (~162 corpus files). The fix: native attr-value
+construction parses + stamps `exprNode` mirroring ast-builder.js. R26 on its own fixture (any
+`onclick=@x.method()` handler), and re-verify `engine-message-dispatch-s6.scrml` full-fixture R26 closes once
+BOTH this + the S164 message-arm landing are present. See structure.map.md "Native-Parser File Table".
 
 ## Tags
 #scrmlts #map #domain #compiler #pipeline #reactive #state-machine #scrml #match-arrow #engine-graph #source-map #cross-file-modules #each #each-in-dynamic-context #engine-statechild #enum-subset #message-dispatch #bug60 #bug62 #bug63 #bug64 #bug65 #bug70 #bug71 #bug72 #bug73 #r28-1c #per-item-reactivity #live-keyed #colon-shorthand-html #s149 #s151 #s152 #s153 #s154 #s155 #s156 #s157 #s158 #s159 #native-parser #native-parser-swap #each-promotion #match-promotion #flip-failure-families #f1-engine-substrate-closed #b2-message-arm-next #engine-substrate-fix #machinedecls-instance-share #s160 #s161 #s162 #s163 #s164
