@@ -27,7 +27,7 @@
 //   are deletion-only follow-ons that retire the unused legacy paths.
 // =============================================================================
 
-import { parseRuleAttrValue } from "../engine-statechild-parser.ts";
+import { parseRuleAttrValue, parseMessageArms } from "../engine-statechild-parser.ts";
 import { isEngineBlock } from "../../native-parser/collect-hoisted.js";
 import type {
   EngineStateChildEntry,
@@ -485,10 +485,15 @@ function walkOneStateChild(
 
   const rawOffset = (child.span ? child.span.start : 0) - rulesRawStart;
 
+  // §51.0.S (S154) — the verbatim state-child body. Sliced ONCE; reused for
+  // both the `bodyRaw` field and the `messageArms` parse below (the live call
+  // site at engine-statechild-parser.ts:2321-2334 does the same).
+  const bodyRaw = readBodyRaw(child, source);
+
   return {
     tag: child.name ?? "",
     rule: readRule(attrs, "rule"),
-    bodyRaw: readBodyRaw(child, source),
+    bodyRaw,
     isColonShorthand,
     // S160 (S154 ruling (b)) — the native parser is inside-opener-only; it never
     // produces the legacy after-`>` placement, so this is always false here.
@@ -504,16 +509,18 @@ function walkOneStateChild(
     effectRaw: readExprValue(attrs, "effect"),
     onTransitionElements,
     payloadBindings: readPayloadBindings(attrs),
-    // §51.0.S (S154 — #14 event-payload-transition, PARSER batch 1) —
-    // shape-parity placeholder. The native walker does NOT yet recognize the
-    // `(state × message)` arm form (that recognition is part of the M5-swap
-    // precondition arc, sequenced separately — the native parser leaves arm
-    // text as generic body content). Emitting an empty array preserves the
-    // live `EngineStateChildEntry` shape contract this walker is bound to so
-    // the dual-pipeline parity test deep-equals against the legacy parser for
-    // arm-free state-children (both sides emit `[]`). When M5 wires native arm
-    // walking, this placeholder becomes the real recognition call.
-    messageArms: [],
+    // §51.0.S.2.3 (S154 — #14 event-payload-transition) — the leading
+    // `(state × message)` arms in the state-child body. Only the bare-body
+    // form can host arms; `:`-shorthand bodies are single-expression render
+    // bodies and self-close has no body — both yield `[]`, the exact mirror
+    // of the live call site (engine-statechild-parser.ts:2332-2334). The
+    // arms are captured UNCONDITIONALLY (no `accepts=` cross-check here —
+    // that is the typer's E-ENGINE-MSG-WITHOUT-ACCEPTS). `bodyRaw` is the
+    // same verbatim body the F1-narrow markup recognition consumed; the
+    // native and live parsers feed `parseMessageArms` byte-identical input.
+    messageArms: (isColonShorthand || isSelfClose)
+      ? []
+      : parseMessageArms(bodyRaw).arms,
   };
 }
 

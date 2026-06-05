@@ -858,3 +858,118 @@ describe("M6.6.b.3 walker — walkOnIdleEntries", () => {
     expect(walkOnIdleEntries({ kind: "Markup", children: [] }, "")).toEqual([]);
   });
 });
+
+// =============================================================================
+// §51.0.S (S154 #14 event-payload-transition) — native MESSAGE-ARM recognition.
+//
+// Two coupled facts this dispatch (native-f1narrow-b2-msgarm) wires:
+//   1. F1-narrow — the native markup layer recognizes the leading-`|` arm
+//      region in an engine state-child code-default body WITHOUT firing a
+//      spurious E-UNQUOTED-DISPLAY-TEXT (parse-markup.js `dispatchCodeDefault
+//      Body` + `scanMessageArmRegionExtent`).
+//   2. B2 — `walkOneStateChild` populates `messageArms` via `parseMessageArms`
+//      (was the `[]` shape-parity placeholder) AND `synthEngineDecl` stamps
+//      `acceptsType` on the engine-decl (collect-hoisted.js).
+//
+// The dual-pipeline parity assertion proves the native walker's `messageArms`
+// are structurally identical to the legacy `parseEngineStateChildren` arms for
+// the same body.
+// =============================================================================
+describe("M6.6.b.2 walker — §51.0.S message arms (F1-narrow + B2)", () => {
+  const MSG_SRC = `<program>
+    type DragPhase:enum = { Idle, Dragging(id: number) }
+    type DragMsg:enum   = { Start(id: number), Drop(col: string), End }
+    <tasks> = []
+    <engine for=DragPhase initial=.Idle accepts=DragMsg>
+      <Idle rule=.Dragging>
+        | .Start(id) :> .Dragging(id)
+        | _          :> @dragPhase
+      </>
+      <Dragging(id) rule=.Idle>
+        | .Drop(col) :> { @tasks = @tasks; .Idle }
+        | .End       :> .Idle
+        | _          :> @dragPhase
+      </>
+    </engine>
+  </program>`;
+
+  test("F1-narrow — native parse of the arm region fires NO E-UNQUOTED-DISPLAY-TEXT", () => {
+    const result = nativeParseFile("/m66-b2/msg.scrml", MSG_SRC);
+    const errs = Array.isArray(result.errors) ? result.errors : [];
+    const unquoted = errs.filter(
+      (d) => d && d.code === "E-UNQUOTED-DISPLAY-TEXT",
+    );
+    expect(unquoted).toEqual([]);
+  });
+
+  test("F1-narrow is SCOPED — bare prose in a RENDER body (no leading `|`) STILL fires E-UNQUOTED", () => {
+    // Negative control: the arm-region recognition must NOT globally suppress
+    // E-UNQUOTED in code-default bodies. A state-child body that is bare prose
+    // (no leading-`|` arm) is render content; per the S163 §4.18 ruling it must
+    // still fire E-UNQUOTED-DISPLAY-TEXT. Proves the fix recognizes ONLY the
+    // leading-`|` arm region, not all code-default prose.
+    const src = `<program>
+      type M:enum = { A }
+      <engine for=M>
+        <A>
+          bare prose here
+        </>
+      </engine>
+    </program>`;
+    const result = nativeParseFile("/m66-b2/prose.scrml", src);
+    const errs = Array.isArray(result.errors) ? result.errors : [];
+    const codes = errs.map((d) => d && d.code);
+    expect(codes).toContain("E-UNQUOTED-DISPLAY-TEXT");
+  });
+
+  test("B2 — synthEngineDecl stamps acceptsType from accepts= (null-when-absent parity)", () => {
+    const result = nativeParseFile("/m66-b2/msg.scrml", MSG_SRC);
+    const engineDecl = findEngineDecl(result.ast);
+    expect(engineDecl).not.toBeNull();
+    // Present + equal to the bare enum-type ident (mirrors live
+    // ast-builder.js:12622 `acceptsMatch ? acceptsMatch[1] : null`).
+    expect("acceptsType" in engineDecl).toBe(true);
+    expect(engineDecl.acceptsType).toBe("DragMsg");
+  });
+
+  test("B2 — walker populates messageArms; structural parity with legacy parser", () => {
+    const { legacy, native } = dualWalk(MSG_SRC);
+    expect(native).toHaveLength(legacy.length);
+    expect(native).toHaveLength(2);
+
+    // Idle: 2 arms (`.Start(id)` + `_` wildcard).
+    expect(native[0].tag).toBe("Idle");
+    expect(native[0].messageArms).toHaveLength(2);
+    expect(native[0].messageArms[0].variantName).toBe("Start");
+    expect(native[0].messageArms[0].isWildcard).toBe(false);
+    expect(native[0].messageArms[0].armArrow).toBe(":>");
+    expect(native[0].messageArms[0].isBlockBody).toBe(false);
+    expect(native[0].messageArms[1].variantName).toBe("_");
+    expect(native[0].messageArms[1].isWildcard).toBe(true);
+
+    // Dragging: 3 arms (`.Drop(col)` block-body + `.End` + `_`).
+    expect(native[1].tag).toBe("Dragging");
+    expect(native[1].messageArms).toHaveLength(3);
+    expect(native[1].messageArms[0].variantName).toBe("Drop");
+    expect(native[1].messageArms[0].isBlockBody).toBe(true);
+    expect(native[1].messageArms[1].variantName).toBe("End");
+    expect(native[1].messageArms[2].isWildcard).toBe(true);
+
+    // Full structural parity vs legacy (rawOffset-stripped) — messageArms
+    // included (stripRawOffsetRecursive does not touch them).
+    expect(stripRawOffsetRecursive(native)).toEqual(stripRawOffsetRecursive(legacy));
+  });
+
+  test("B2 — arm-free state-children still emit messageArms: [] (no regression)", () => {
+    const src = `<program>
+      type Size = .Small | .Big;
+      <engine for=Size>
+        <Small rule=.Big>grow()</>
+        <Big>shrink()</>
+      </engine>
+    </program>`;
+    const { native } = dualWalk(src);
+    expect(native[0].messageArms).toEqual([]);
+    expect(native[1].messageArms).toEqual([]);
+  });
+});

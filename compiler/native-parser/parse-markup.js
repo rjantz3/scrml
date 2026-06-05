@@ -1100,11 +1100,190 @@ export function dispatchCodeDefaultBody(run, cursor, ctx) {
         return;
     }
 
+    // §51.0.S (S154 — #14 event-payload-transition) — the leading
+    // `(state × message)` arm region. A code-default body that is an engine
+    // state-child / match-arm body MAY open with a contiguous run of
+    // leading-`|` arms (`| .Variant(bind) :> target` / `| _ :> @engineVar`).
+    // The arm region is NOT bare prose — it is a known §51.0.S construct the
+    // native→live walker re-parses via `parseMessageArms`
+    // (engine-statechild-parser.ts). The MARKUP layer's job here is only to
+    // CONSUME the arm region verbatim (so its leading `|` + arm-arrow `:>`
+    // + bare-target syntax does NOT reach the M2 expression validator and
+    // mis-fire E-UNQUOTED-DISPLAY-TEXT); the walker reads the same span back
+    // out as `bodyRaw` and parses the arms structurally.
+    //
+    // The recognition MIRRORS the live `parseMessageArms` leading-`|` rule:
+    // the arm region is the leading contiguous `|`-run; if the first
+    // non-trivia char is not `|` (already true here — the cursor is at a
+    // non-whitespace, non-`"` char), or the `|` does not form a real arm (no
+    // arm-arrow), there is no arm region and the body is render content.
+    // A render body AFTER the arm region keeps normal code-default treatment
+    // (bare display text THERE still correctly fires E-UNQUOTED — §4.18).
+    if (peekChar(cursor, 0) === "|") {
+        const armEnd = scanMessageArmRegionExtent(cursor);
+        if (armEnd > cursor.pos) {
+            // Consume the whole arm region verbatim — NO block emitted, NO
+            // diagnostic. The walker re-parses it from `bodyRaw`.
+            advance(cursor, armEnd - cursor.pos);
+            return;
+        }
+    }
+
     // Any other non-whitespace run is a candidate CODE run. Scan its
     // extent (to the next body-structural boundary) and validate it as
     // code via the M2 expression parser. A run that is NOT valid code is
     // bare prose — E-UNQUOTED-DISPLAY-TEXT (SPEC §4.18.7).
     emitCodeDefaultRun(cursor, ctx);
+}
+
+// scanMessageArmRegionExtent — calculation. The cursor is AT a `|` in a
+// code-default body. Return the END offset of the leading contiguous
+// `(state × message)` arm region (SPEC §51.0.S), or `cursor.pos` (no
+// advance) when the `|` does not begin a real arm.
+//
+// This MIRRORS the live `parseMessageArms` scan (engine-statechild-
+// parser.ts:1824) at the EXTENT level only — it recognizes the region's
+// bounds so the markup layer can consume it verbatim; the structural arm
+// parse (variant / payload bindings / arm body) is the walker's job.
+//
+// An arm is `| pattern (payload)? arrow body` where:
+//   - pattern — `_` wildcard OR `.Variant` / `MsgType.Variant`;
+//   - payload — an optional balanced `( ... )` (string-aware);
+//   - arrow   — `:>` / `=>` / `->` (the S147 arm-arrow set);
+//   - body    — a balanced `{ ... }` block (string-aware) OR a bare target
+//               expression terminated by the next top-level `|` (NOT `||`)
+//               / the body end.
+// The scan stops at the first `|` that has no arm-arrow (malformed / the
+// arm region has ended and render content follows); the bytes BEFORE that
+// `|` are the arm region. A `|` with no following arm at all returns
+// `cursor.pos` (no arm region — the body is render content).
+function scanMessageArmRegionExtent(cursor) {
+    const src = cursor.source;
+    const len = src.length;
+    const start = cursor.pos;
+
+    // Skip leading whitespace to the first arm candidate.
+    function skipWs(at) {
+        let p = at;
+        while (p < len && isBodyWhitespace(src.charAt(p))) p++;
+        return p;
+    }
+    // An arm-arrow glyph (`:>` / `=>` / `->`) at `at`? Return its length or 0.
+    function arrowLenAt(at) {
+        const two = src.substring(at, at + 2);
+        if (two === ":>" || two === "=>" || two === "->") return 2;
+        return 0;
+    }
+
+    let pos = skipWs(start);
+    if (pos >= len || src.charAt(pos) !== "|") return start;
+
+    // `regionEnd` tracks the end of the LAST recognized arm; it is the
+    // returned extent. It only advances when a full arm is recognized.
+    let regionEnd = start;
+
+    while (pos < len) {
+        const armStart = skipWs(pos);
+        if (armStart >= len || src.charAt(armStart) !== "|") break;
+        let p = armStart + 1; // consume `|`
+        p = skipWs(p);
+
+        // -- Pattern: `_` wildcard OR `.Variant` / `MsgType.Variant`. -------
+        if (src.charAt(p) === "_" && !/[A-Za-z0-9_$]/.test(src.charAt(p + 1) || "")) {
+            p += 1;
+        } else {
+            if (src.charAt(p) === ".") p += 1;
+            while (p < len && /[A-Za-z0-9_$.]/.test(src.charAt(p))) p++;
+        }
+
+        // -- Optional payload bindings `( ... )` (balanced, string-aware). --
+        {
+            let q = skipWs(p);
+            if (q < len && src.charAt(q) === "(") {
+                let depth = 1;
+                let r = q + 1;
+                let inDQ = false;
+                let inSQ = false;
+                while (r < len && depth > 0) {
+                    const c = src.charAt(r);
+                    if (inDQ) { if (c === '"') inDQ = false; else if (c === "\\") r++; r++; continue; }
+                    if (inSQ) { if (c === "'") inSQ = false; else if (c === "\\") r++; r++; continue; }
+                    if (c === '"') { inDQ = true; r++; continue; }
+                    if (c === "'") { inSQ = true; r++; continue; }
+                    if (c === "(") { depth++; r++; continue; }
+                    if (c === ")") { depth--; if (depth === 0) break; r++; continue; }
+                    r++;
+                }
+                if (depth === 0) p = r + 1; else p = q;
+            } else {
+                p = q;
+            }
+        }
+
+        // -- Arm arrow `:>` / `=>` / `->`. ----------------------------------
+        p = skipWs(p);
+        const arrowLen = arrowLenAt(p);
+        if (arrowLen === 0) {
+            // Malformed arm (no arm-arrow) — the arm region ends BEFORE this
+            // `|`. Stop; the render body (if any) starts here.
+            break;
+        }
+        p += arrowLen;
+        p = skipWs(p);
+
+        // -- Arm body: `{ ... }` block OR bare target expression. -----------
+        if (p < len && src.charAt(p) === "{") {
+            let depth = 1;
+            let r = p + 1;
+            let inDQ = false;
+            let inSQ = false;
+            let inTick = false;
+            while (r < len && depth > 0) {
+                const c = src.charAt(r);
+                if (inDQ) { if (c === '"') inDQ = false; else if (c === "\\") r++; r++; continue; }
+                if (inSQ) { if (c === "'") inSQ = false; else if (c === "\\") r++; r++; continue; }
+                if (inTick) { if (c === "`") inTick = false; else if (c === "\\") r++; r++; continue; }
+                if (c === '"') { inDQ = true; r++; continue; }
+                if (c === "'") { inSQ = true; r++; continue; }
+                if (c === "`") { inTick = true; r++; continue; }
+                if (c === "{") { depth++; r++; continue; }
+                if (c === "}") { depth--; if (depth === 0) break; r++; continue; }
+                r++;
+            }
+            p = depth === 0 ? r + 1 : len; // include `{` .. `}`, or to EOF
+        } else {
+            // Bare target — terminated by the next top-level `|` (NOT `||`),
+            // a top-level newline, or the body end.
+            let depth = 0;
+            let inDQ = false;
+            let inSQ = false;
+            let inTick = false;
+            while (p < len) {
+                const c = src.charAt(p);
+                if (inDQ) { if (c === '"') inDQ = false; else if (c === "\\") p++; p++; continue; }
+                if (inSQ) { if (c === "'") inSQ = false; else if (c === "\\") p++; p++; continue; }
+                if (inTick) { if (c === "`") inTick = false; else if (c === "\\") p++; p++; continue; }
+                if (c === '"') { inDQ = true; p++; continue; }
+                if (c === "'") { inSQ = true; p++; continue; }
+                if (c === "`") { inTick = true; p++; continue; }
+                if (c === "(" || c === "[" || c === "{") { depth++; p++; continue; }
+                if (c === ")" || c === "]" || c === "}") { if (depth > 0) depth--; p++; continue; }
+                if (depth === 0 && c === "|") {
+                    if (src.charAt(p + 1) === "|") { p += 2; continue; } // `||` is not a separator
+                    break;
+                }
+                if (depth === 0 && c === "\n") break;
+                p++;
+            }
+        }
+
+        // A full arm was recognized — extend the region to its end and
+        // continue scanning for the next arm.
+        regionEnd = p;
+        pos = p;
+    }
+
+    return regionEnd;
 }
 
 // isBodyWhitespace — calculation (predicate). A space / tab / carriage

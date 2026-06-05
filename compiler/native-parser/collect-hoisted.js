@@ -393,6 +393,12 @@ export function synthEngineDecl(block, stamp, source) {
     const attrs = Array.isArray(block.attrs) ? block.attrs : [];
 
     const governedType = readAttrName(attrs, "for");
+    // §51.0.S.2.2 (S154 — #14 event-payload-transition) — the `accepts=MsgType`
+    // raw enum-type identifier, or null when absent. Mirrors the live
+    // ast-builder.js:12622 (`acceptsType = acceptsMatch ? acceptsMatch[1] : null`);
+    // the typer (symbol-table.ts PASS 11) resolves + validates it against the
+    // declared enum + drives message-arm exhaustiveness (S155).
+    const acceptsType = readAttrName(attrs, "accepts");
     const varOverride = readAttrName(attrs, "var");
     const legacyName = readAttrName(attrs, "name");
     const sourceVar = readSourceVar(attrs);
@@ -432,6 +438,9 @@ export function synthEngineDecl(block, stamp, source) {
         kind: "engine-decl",
         engineName,
         governedType: governedType !== null ? governedType : "",
+        // §51.0.S.2.2 — null when the opener declares no `accepts=` (live
+        // parity: ast-builder.js:12622 sets null-when-absent, NOT undefined).
+        acceptsType,
         rulesRaw,
         bodyChildren,
         sourceVar,
