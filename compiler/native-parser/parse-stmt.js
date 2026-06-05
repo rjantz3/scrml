@@ -2867,6 +2867,7 @@ function typeBodyText(ctx) {
     const cursor = ctx.cursor;
     const open = advance(cursor);   // consume `{`
     const parts = [];
+    const partLines = [];
     let depth = 1;
     while (atEnd(cursor) === false && depth > 0) {
         const k = currentKind(cursor);
@@ -2879,14 +2880,38 @@ function typeBodyText(ctx) {
                 break;
             }
         }
-        parts.push(advance(cursor).text);
+        const tok = advance(cursor);
+        parts.push(tok.text);
+        partLines.push(lineOfToken(tok));
     }
     if (depth > 0) {
         recordError(ctx, "E-STMT-TYPE-UNCLOSED-BODY",
             "expected '}' to close a type-declaration body", open.span);
     }
-    const inner = parts.join(" ").trim();
+    // Join with the SAME line-aware rule the live ast-builder uses
+    // (`joinWithNewlines` in ast-builder.js): a token on a LATER source line
+    // than its predecessor is separated by a newline, not a space. The
+    // type-system `parseStructBody` / `parseEnumBody` consumers split the
+    // body on `,` OR `\n` (NOT spaces) — so a newline-separated struct body
+    // (no trailing commas; the canonical V5 shape) MUST keep its `\n`s or all
+    // fields after the first collapse into one field clause (silent
+    // miscompile: tableFor/formFor/schemaFor drop every field but the first).
+    const inner = joinWithNewlines(parts, partLines).trim();
     return "{ " + inner + " }";
+}
+
+// --- joinWithNewlines — line-aware token join (mirrors ast-builder.js) ---
+// Insert a newline between two tokens that came from different source lines,
+// a single space otherwise. This preserves the field-separator information the
+// downstream struct/enum body parsers rely on.
+function joinWithNewlines(parts, partLines) {
+    if (parts.length === 0) return "";
+    let result = parts[0];
+    for (let i = 1; i < parts.length; i++) {
+        const sep = (partLines[i] > partLines[i - 1]) ? "\n" : " ";
+        result += sep + parts[i];
+    }
+    return result;
 }
 
 // --- typeAliasText — reconstruct an inline `type` alias-expression raw text ---
