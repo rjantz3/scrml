@@ -189,10 +189,10 @@
   },
   "examples/14-mario-state-machine.scrml": {
     "COUNT-LENGTH": 2,
-    "EXTRA-FIELD": 105,
-    "FIELD-SHAPE": 66,
-    "KIND-NAME": 33,
-    "MISSING-FIELD": 188,
+    "EXTRA-FIELD": 37,
+    "FIELD-SHAPE": 38,
+    "KIND-NAME": 13,
+    "MISSING-FIELD": 128,
     "SPAN-COORD": 129
   },
   "examples/15-channel-chat.scrml": {
@@ -505,10 +505,10 @@
   },
   "examples/23-trucking-dispatch/pages/driver/hos.scrml": {
     "COUNT-LENGTH": 5,
-    "EXTRA-FIELD": 154,
-    "FIELD-SHAPE": 171,
-    "KIND-NAME": 49,
-    "MISSING-FIELD": 360,
+    "EXTRA-FIELD": 88,
+    "FIELD-SHAPE": 145,
+    "KIND-NAME": 31,
+    "MISSING-FIELD": 302,
     "SPAN-COORD": 731
   },
   "examples/23-trucking-dispatch/pages/driver/load-detail.scrml": {
@@ -567,10 +567,10 @@
   },
   "examples/25-triage-board.scrml": {
     "COUNT-LENGTH": 4,
-    "EXTRA-FIELD": 86,
-    "FIELD-SHAPE": 58,
-    "KIND-NAME": 26,
-    "MISSING-FIELD": 140,
+    "EXTRA-FIELD": 52,
+    "FIELD-SHAPE": 44,
+    "KIND-NAME": 16,
+    "MISSING-FIELD": 110,
     "SPAN-COORD": 155
   },
   "examples/26-type-derived-schema.scrml": {
@@ -1147,99 +1147,99 @@
   },
   "samples/compilation-tests/engine-005-ontimeout-basic.scrml": {
     "COUNT-LENGTH": 5,
-    "EXTRA-FIELD": 117,
-    "FIELD-SHAPE": 37,
-    "KIND-NAME": 28,
-    "MISSING-FIELD": 96,
+    "EXTRA-FIELD": 51,
+    "FIELD-SHAPE": 11,
+    "KIND-NAME": 10,
+    "MISSING-FIELD": 38,
     "SPAN-COORD": 23
   },
   "samples/compilation-tests/engine-006-ontimeout-computed.scrml": {
     "COUNT-LENGTH": 5,
-    "EXTRA-FIELD": 101,
-    "FIELD-SHAPE": 35,
-    "KIND-NAME": 24,
-    "MISSING-FIELD": 75,
+    "EXTRA-FIELD": 51,
+    "FIELD-SHAPE": 15,
+    "KIND-NAME": 10,
+    "MISSING-FIELD": 31,
     "SPAN-COORD": 23
   },
   "samples/compilation-tests/engine-007-cancel-timer.scrml": {
     "COUNT-LENGTH": 11,
-    "EXTRA-FIELD": 177,
-    "FIELD-SHAPE": 49,
-    "KIND-NAME": 36,
-    "MISSING-FIELD": 148,
+    "EXTRA-FIELD": 85,
+    "FIELD-SHAPE": 23,
+    "KIND-NAME": 12,
+    "MISSING-FIELD": 64,
     "SPAN-COORD": 31
   },
   "samples/compilation-tests/engine-008-onidle-watchdog.scrml": {
     "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 95,
-    "FIELD-SHAPE": 37,
-    "KIND-NAME": 26,
-    "MISSING-FIELD": 109,
+    "EXTRA-FIELD": 11,
+    "FIELD-SHAPE": 7,
+    "KIND-NAME": 4,
+    "MISSING-FIELD": 37,
     "SPAN-COORD": 33
   },
   "samples/compilation-tests/engine-009-hierarchy-basic.scrml": {
     "COUNT-LENGTH": 3,
-    "EXTRA-FIELD": 108,
-    "FIELD-SHAPE": 39,
-    "KIND-NAME": 29,
-    "MISSING-FIELD": 103,
+    "EXTRA-FIELD": 40,
+    "FIELD-SHAPE": 9,
+    "KIND-NAME": 8,
+    "MISSING-FIELD": 37,
     "SPAN-COORD": 25
   },
   "samples/compilation-tests/engine-010-history.scrml": {
     "COUNT-LENGTH": 5,
-    "EXTRA-FIELD": 108,
-    "FIELD-SHAPE": 39,
-    "KIND-NAME": 29,
-    "MISSING-FIELD": 105,
+    "EXTRA-FIELD": 40,
+    "FIELD-SHAPE": 9,
+    "KIND-NAME": 8,
+    "MISSING-FIELD": 39,
     "SPAN-COORD": 27
   },
   "samples/compilation-tests/engine-011-internal-rule.scrml": {
     "COUNT-LENGTH": 3,
-    "EXTRA-FIELD": 103,
-    "FIELD-SHAPE": 44,
-    "KIND-NAME": 37,
-    "MISSING-FIELD": 87,
+    "EXTRA-FIELD": 44,
+    "FIELD-SHAPE": 11,
+    "KIND-NAME": 10,
+    "MISSING-FIELD": 30,
     "SPAN-COORD": 21
   },
   "samples/compilation-tests/engine-012-hierarchy-cascade.scrml": {
     "COUNT-LENGTH": 5,
-    "EXTRA-FIELD": 176,
-    "FIELD-SHAPE": 60,
-    "KIND-NAME": 49,
-    "MISSING-FIELD": 146,
+    "EXTRA-FIELD": 94,
+    "FIELD-SHAPE": 38,
+    "KIND-NAME": 22,
+    "MISSING-FIELD": 66,
     "SPAN-COORD": 46
   },
   "samples/compilation-tests/engine-013-payload-binding-bare.scrml": {
     "COUNT-LENGTH": 5,
-    "EXTRA-FIELD": 97,
-    "FIELD-SHAPE": 30,
-    "KIND-NAME": 22,
-    "MISSING-FIELD": 83,
+    "EXTRA-FIELD": 51,
+    "FIELD-SHAPE": 14,
+    "KIND-NAME": 10,
+    "MISSING-FIELD": 41,
     "SPAN-COORD": 26
   },
   "samples/compilation-tests/engine-014-payload-binding-paren.scrml": {
     "COUNT-LENGTH": 3,
-    "EXTRA-FIELD": 97,
-    "FIELD-SHAPE": 32,
-    "KIND-NAME": 24,
-    "MISSING-FIELD": 89,
-    "SPAN-COORD": 32
+    "EXTRA-FIELD": 43,
+    "FIELD-SHAPE": 14,
+    "KIND-NAME": 6,
+    "MISSING-FIELD": 33,
+    "SPAN-COORD": 34
   },
   "samples/compilation-tests/engine-modern-001-basic.scrml": {
     "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 65,
-    "FIELD-SHAPE": 27,
-    "KIND-NAME": 20,
-    "MISSING-FIELD": 66,
+    "EXTRA-FIELD": 15,
+    "FIELD-SHAPE": 7,
+    "KIND-NAME": 6,
+    "MISSING-FIELD": 22,
     "SPAN-COORD": 17
   },
   "samples/compilation-tests/engine-modern-002-effects.scrml": {
     "COUNT-LENGTH": 3,
-    "EXTRA-FIELD": 125,
-    "FIELD-SHAPE": 45,
-    "KIND-NAME": 34,
-    "MISSING-FIELD": 128,
-    "SPAN-COORD": 35
+    "EXTRA-FIELD": 39,
+    "FIELD-SHAPE": 15,
+    "KIND-NAME": 10,
+    "MISSING-FIELD": 46,
+    "SPAN-COORD": 39
   },
   "samples/compilation-tests/error-001-basic.scrml": {
     "EXTRA-FIELD": 2,
@@ -5022,18 +5022,18 @@
   },
   "samples/compilation-tests/machine-002-traffic-light.scrml": {
     "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 68,
-    "FIELD-SHAPE": 28,
-    "KIND-NAME": 21,
-    "MISSING-FIELD": 80,
+    "EXTRA-FIELD": 18,
+    "FIELD-SHAPE": 8,
+    "KIND-NAME": 7,
+    "MISSING-FIELD": 36,
     "SPAN-COORD": 98
   },
   "samples/compilation-tests/machine-basic.scrml": {
     "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 97,
-    "FIELD-SHAPE": 39,
-    "KIND-NAME": 28,
-    "MISSING-FIELD": 100,
+    "EXTRA-FIELD": 15,
+    "FIELD-SHAPE": 7,
+    "KIND-NAME": 6,
+    "MISSING-FIELD": 28,
     "SPAN-COORD": 21
   },
   "samples/compilation-tests/match-001-nested-with-call.scrml": {
@@ -6315,10 +6315,10 @@
   },
   "samples/rust-dev-debate-dashboard.scrml": {
     "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 63,
-    "FIELD-SHAPE": 47,
-    "KIND-NAME": 26,
-    "MISSING-FIELD": 212,
+    "EXTRA-FIELD": 55,
+    "FIELD-SHAPE": 39,
+    "KIND-NAME": 18,
+    "MISSING-FIELD": 204,
     "SPAN-COORD": 114
   },
   "samples/rust-dev-lin-lift-edge-cases.scrml": {

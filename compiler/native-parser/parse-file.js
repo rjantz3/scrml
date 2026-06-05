@@ -158,11 +158,26 @@ export function nativeParseFile(filePath, source) {
     //     carries no if-chains passes through unchanged.
     const nodes = collapseIfChainNodes(mapped, errors);
 
-    // 3. ASSEMBLE the hoisted collections — the A3 bridge. `collectHoisted`
-    //    folds the native block-stream into the seven file-level outputs,
-    //    sharing the same `idGen` so synthesized declaration nodes draw from
-    //    the one id space. `source` is threaded so a synthesized engine's
-    //    `rulesRaw` can be sliced.
+    // 2b. DERIVE `machineDecls` FROM `nodes` (S163 instance-sharing fix). Live
+    //     `collectHoisted(nodes)` pushes each `engine-decl` instance already in
+    //     `nodes` into `machineDecls` (ast-builder.js L13616) — ONE instance,
+    //     two collections. `collectMachineDeclsFromNodes` mirrors that walk
+    //     (incl. the nested-engine `bodyChildren` recursion), so the engine
+    //     codegen reads (via `collectC12EngineDecls`, machineDecls-first) the
+    //     SAME instance SYM PASS 10/11 stamps with `_record`/`engineMeta`. The
+    //     prior shape — `collectHoisted` re-synthesizing a SEPARATE engine into
+    //     `machineDecls` — produced an un-stamped copy, so `isC12EngineDecl`
+    //     returned false and the entire §51.0 substrate silently dropped.
+    const machineDecls = collectMachineDeclsFromNodes(nodes);
+
+    // 3. ASSEMBLE the remaining hoisted collections — the A3 bridge.
+    //    `collectHoisted` folds the native block-stream into the file-level
+    //    outputs (imports / exports / typeDecls / components / channelDecls /
+    //    hasProgramRoot), sharing the same `idGen` so synthesized declaration
+    //    nodes draw from the one id space. `source` is threaded so a
+    //    synthesized component's `raw` can be sliced. NOTE: `collectHoisted`
+    //    no longer synthesizes `machineDecls` (S163) — that list is derived
+    //    from `nodes` above to preserve engine-decl instance identity.
     const hoisted = collectHoisted(blocks, idGen, safeSource);
 
     // 4. PRODUCE the FileAST. The shape is the live `buildAST` literal
@@ -177,7 +192,7 @@ export function nativeParseFile(filePath, source) {
         exports: hoisted.exports,
         components: hoisted.components,
         typeDecls: hoisted.typeDecls,
-        machineDecls: hoisted.machineDecls,
+        machineDecls,
         channelDecls: hoisted.channelDecls,
         hasProgramRoot: hoisted.hasProgramRoot,
         authConfig: null,
@@ -267,13 +282,13 @@ function mapOneBlock(block, idGen, source, errors) {
         // block. The LIVE pipeline emits an `engine-decl` ASTNode in
         // `FileAST.nodes` (ast-builder.js `buildBlock` L11099) AND ALSO
         // pushes it into `machineDecls` (ast-builder.js L11930). A3's
-        // `collectHoisted` already mirrors the `machineDecls` side; this
-        // branch mirrors the `nodes` side — route an engine block to a
-        // live-parity `engine-decl` ASTNode rather than `markup`. (The
-        // `machineDecls` count stays equal: both pipelines carry the
-        // engine in `machineDecls` exactly once — A3 there, the live
-        // file-level pass here. No double-count.)
-        return synthEngineNode(block, idGen, source);
+        // branch routes an engine block to a live-parity `engine-decl`
+        // ASTNode in `nodes` rather than `markup`. `machineDecls` is then
+        // built from `nodes` (S163 — `collectMachineDeclsFromNodes` in
+        // `nativeParseFile`), so the SAME instance lands in both collections
+        // (live parity: ast-builder.js L13616 `machineDecls.push(node)`). A3's
+        // `collectHoisted` no longer synthesizes a SECOND engine instance.
+        return synthEngineNode(block, idGen, source, errors);
     }
     if (kind === "Markup" && isEachBlock(block)) {
         // #2f native-each structural-promotion. The native parser models an
@@ -572,17 +587,73 @@ function synthStateNode(block, idGen, source, errors) {
 // `stampId(idGen)` — and threads `source` so the engine's `rulesRaw` body
 // slice is recoverable.
 //
-// The same engine block is ALSO walked by A3's `collectHoisted` into
-// `machineDecls` (an independent `synthEngineDecl` call). Two synthesized
-// nodes for one engine is intentional and matches the live pipeline: the
-// live `buildBlock` emits the `engine-decl` into `nodes`, and the live
-// file-level pass (ast-builder.js L11930) ALSO pushes that node into
-// `machineDecls`. The ids differ between the `nodes` copy and the
-// `machineDecls` copy here (two `stampId` draws) — the canary counts
-// nodes, never compares ids, so this is faithful for the ledger flip. A
-// deep follow-up could share ONE node instance across both collections.
-function synthEngineNode(block, idGen, source) {
-    return synthEngineDecl(block, () => stampId(idGen), source);
+// INSTANCE SHARING (S163 fix). The live pipeline builds ONE `engine-decl`
+// node (live `buildBlock`), places it into `nodes`, and the live file-level
+// `collectHoisted(nodes)` pass (ast-builder.js L13616 `machineDecls.push(node)`)
+// pushes the SAME object into `machineDecls` — one instance, two collections.
+// SYM PASS 10/11 (`walkRegisterEngines` / `walkValidateEngineStateChildrenAndRules`)
+// stamp `_record`/`engineMeta` onto that single instance, so codegen
+// (`collectC12EngineDecls`, which reads `machineDecls` first) sees the stamped
+// engine and emits the §51.0 substrate (transition table, §51.0.C var-init,
+// §51.0.D mount, §51.0.F `_scrml_engine_direct_set` rule-validated writes).
+//
+// The native pipeline now mirrors this: `nativeParseFile` builds `machineDecls`
+// from the already-mapped `nodes` (see `collectMachineDeclsFromNodes`), so each
+// `machineDecls[]` entry IS the `nodes` engine-decl instance — NOT a separate
+// `synthEngineDecl` draw. A3's `collectHoisted` no longer synthesizes engines
+// (that duplicate push was the bug: a SECOND un-stamped instance landed in
+// `machineDecls`, codegen read it, `isC12EngineDecl` returned false on the
+// missing `_record.engineMeta`, and the whole engine silently dropped to a dumb
+// `_scrml_reactive_set` cell).
+//
+// `bodyChildren` is mapped to AST nodes here (via `mapBlocksToNodes`, the same
+// recursion `synthMarkupNode`/`synthEachBlockNode` use) rather than left as raw
+// native blocks. This is REQUIRED for nested engines: a `<engine>` inside an
+// engine state-child body is promoted to its own `engine-decl` AST node inside
+// `bodyChildren`, so SYM's `walkRegisterEngines`/`collectMachineDeclsFromNodes`
+// bodyChildren-recursion (both keyed on `kind === "engine-decl"`) reach + stamp
+// it — exactly as live's `buildBlock`-per-child does (ast-builder.js L12685-12722).
+// The raw native engine block stays available to the native-walker via the
+// `_nativeEngineBlock` field `synthEngineDecl` already stamps (the walker reads
+// `_nativeEngineBlock.children`, never `bodyChildren`).
+function synthEngineNode(block, idGen, source, errors) {
+    const node = synthEngineDecl(block, () => stampId(idGen), source);
+    // Override `synthEngineDecl`'s raw-block `bodyChildren` (`block.children`)
+    // with the recursively-mapped ASTNode form so nested `<engine>` bodies are
+    // structural engine-decl nodes (live parity — ast-builder.js bodyChildren).
+    node.bodyChildren = mapBlocksToNodes(block.children, idGen, source, errors);
+    return node;
+}
+
+// collectMachineDeclsFromNodes — calculation. Mirror live `collectHoisted`'s
+// engine branch (ast-builder.js L13615-13627): walk the ALREADY-MAPPED `nodes`
+// tree, push each `engine-decl` instance into `machineDecls`, and recurse into
+// `bodyChildren` to discover NESTED engines (§51.0.Q.1). Returns the SAME node
+// instances that live in `nodes` — instance sharing, exactly as live. The walk
+// descends `children` (markup/state containers) and `bodyChildren` (engine
+// bodies); it does NOT descend logic/meta bodies (engines are file-scope markup
+// children only, §51.0.K Machine Cohesion — matching live's `walk`).
+function collectMachineDeclsFromNodes(nodes) {
+    const machineDecls = [];
+    function walk(list) {
+        if (!Array.isArray(list)) return;
+        for (const node of list) {
+            if (node === undefined || node === null) continue;
+            if (node.kind === "engine-decl") {
+                machineDecls.push(node);
+                // Recurse engine bodyChildren for nested engines (live parity).
+                if (Array.isArray(node.bodyChildren)) {
+                    walk(node.bodyChildren);
+                }
+            }
+            // markup/state containers carry engine-decls as children.
+            if (Array.isArray(node.children)) {
+                walk(node.children);
+            }
+        }
+    }
+    walk(nodes);
+    return machineDecls;
 }
 
 // =============================================================================

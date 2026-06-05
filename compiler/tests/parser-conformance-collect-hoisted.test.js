@@ -43,6 +43,7 @@ import {
   collectHoisted,
   hasProgramRoot,
 } from "../native-parser/collect-hoisted.js";
+import { nativeParseFile } from "../native-parser/parse-file.js";
 import { enumerateScrmlCorpus } from "./parser-conformance/corpus-enumerator.js";
 
 import { splitBlocks } from "../src/block-splitter.js";
@@ -67,8 +68,17 @@ function liveSurface(source, filePath = "conf.scrml") {
 }
 
 // nativeSurface — drive the native parser + collectHoisted for `source`.
+// S163 — `machineDecls` is no longer a `collectHoisted` output; engine
+// synthesis moved to `parse-file.js` (`collectMachineDeclsFromNodes`, derived
+// from the mapped `nodes` so the engine-decl instance is SHARED with
+// `FileAST.nodes`). Read the engine surface from `nativeParseFile` (the
+// production FileAST) and merge it over the `collectHoisted` surface so every
+// other F3 section (imports/exports/typeDecls/components/channelDecls/
+// hasProgramRoot) keeps probing `collectHoisted` directly, unchanged.
 function nativeSurface(source) {
-  return collectHoisted(parseMarkup(source));
+  const hoisted = collectHoisted(parseMarkup(source));
+  const { ast } = nativeParseFile("conf.scrml", source);
+  return { ...hoisted, machineDecls: ast.machineDecls ?? [] };
 }
 
 // =============================================================================
@@ -249,7 +259,14 @@ describe("F3 §4 — typeDecls / components / machineDecls empty for non-decl in
 });
 
 // =============================================================================
-// F3 §7 — A3 machineDecls SYNTHESIS. A native `Markup` block named "engine"
+// F3 §7 — machineDecls engine SYNTHESIS. A native `Markup` block named "engine"
+// is synthesized into an `engine-decl` and placed on `FileAST.machineDecls`.
+// S163 — synthesis now happens in `parse-file.js` (`synthEngineNode` ->
+// `synthEngineDecl`, instance-shared with `nodes`); `nativeSurface` reads the
+// FileAST machineDecls so these assertions probe the production surface. The
+// `synthEngineDecl` field-derivation is unchanged, so every field assertion
+// below holds identically.
+// (legacy header preserved:) A native `Markup` block named "engine"
 // (or the legacy "machine") is synthesized into a 14-field EngineDeclNode.
 // =============================================================================
 describe("F3 §7 — machineDecls engine synthesis", () => {
@@ -332,21 +349,21 @@ describe("F3 §7 — machineDecls engine synthesis", () => {
     ).toBe(false);
   });
 
-  test("bodyChildren is the native children block array (walkable body)", () => {
+  test("bodyChildren is the walkable body (mapped ASTNodes — S163)", () => {
+    // S163 — bodyChildren are now mapped ASTNodes (synthEngineNode maps them via
+    // mapBlocksToNodes, so a nested <engine> is a structural engine-decl), not
+    // raw native blocks. Still a non-empty walkable array.
     const e = nativeSurface("<engine for=Foo>\n.A => .B\n</engine>").machineDecls[0];
     expect(Array.isArray(e.bodyChildren)).toBe(true);
     expect(e.bodyChildren.length).toBeGreaterThan(0);
   });
 
   test("rulesRaw is the engine body text when source is threaded through", () => {
+    // S163 — machineDecls now lives on the FileAST (nativeParseFile threads
+    // `source` so rulesRaw is sliced). collectHoisted no longer synthesizes it.
     const src = "<engine for=Foo>\n.A => .B\n</engine>";
-    const r = collectHoisted(parseMarkup(src), { next: 0 }, src);
-    expect(r.machineDecls[0].rulesRaw).toBe(".A => .B");
-  });
-
-  test("rulesRaw is \"\" when no source buffer is passed (documented partial)", () => {
-    const r = collectHoisted(parseMarkup("<engine for=Foo>\n.A => .B\n</engine>"));
-    expect(r.machineDecls[0].rulesRaw).toBe("");
+    const e = nativeSurface(src).machineDecls[0];
+    expect(e.rulesRaw).toBe(".A => .B");
   });
 
   test("a NESTED engine in a composite state-child is discovered", () => {

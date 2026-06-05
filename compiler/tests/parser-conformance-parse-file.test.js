@@ -29,15 +29,35 @@ import { describe, test, expect } from "bun:test";
 import { nativeParseFile } from "../native-parser/parse-file.js";
 
 // allIds — collect every numeric `id` reachable in the FileAST: the `nodes`
-// tree (recursing markup `children` + logic/meta `body`) plus the hoisted
-// declaration collections. Used by the single-id-space assertions.
+// tree (recursing markup `children`, engine `bodyChildren`, + logic/meta
+// `body`) plus the hoisted declaration collections. Used by the single-id-
+// space assertions.
+//
+// INSTANCE SHARING (S163): `machineDecls` SHARES its `engine-decl` instances
+// with `nodes` — `nativeParseFile` derives `machineDecls` by walking `nodes`
+// and pushing the same engine-decl objects (live parity: ast-builder.js L13616
+// `machineDecls.push(node)`). The same engine-decl is therefore reachable BOTH
+// as a top-level `nodes` entry AND as a `machineDecls` entry, so a naive
+// id-concatenation double-counts its id. Collection is keyed by NODE INSTANCE
+// (a Set of visited objects) so each id is gathered exactly once regardless of
+// how many collections reference the same node — this is the faithful
+// "single id space" check (one id per distinct node), not "each collection
+// holds distinct nodes" (which would forbid the live instance-sharing shape).
 function allIds(ast) {
   const ids = [];
+  const seen = new Set();
   function walkNode(n) {
-    if (n === undefined || n === null) return;
+    if (n === undefined || n === null || typeof n !== "object") return;
+    if (seen.has(n)) return;
+    seen.add(n);
     if (typeof n.id === "number") ids.push(n.id);
     if (Array.isArray(n.children)) {
       for (const c of n.children) walkNode(c);
+    }
+    // S163 — engine-decl bodyChildren are now mapped ASTNodes (nested engines
+    // live here). Recurse them so a nested engine's id is gathered once.
+    if (Array.isArray(n.bodyChildren)) {
+      for (const c of n.bodyChildren) walkNode(c);
     }
     if (Array.isArray(n.body)) {
       for (const s of n.body) walkNode(s);
@@ -48,9 +68,10 @@ function allIds(ast) {
     ...ast.imports, ...ast.exports, ...ast.typeDecls,
     ...ast.components, ...ast.machineDecls,
   ];
-  for (const d of decls) {
-    if (d !== undefined && d !== null && typeof d.id === "number") ids.push(d.id);
-  }
+  // machineDecls entries are (S163) the SAME instances already walked via
+  // `nodes`; `walkNode`'s `seen` guard de-dups them. imports/exports/typeDecls/
+  // components are distinct hoisted instances and contribute their ids.
+  for (const d of decls) walkNode(d);
   return ids;
 }
 
@@ -303,6 +324,72 @@ describe("C1 §5 — single id space", () => {
     expect(r.ast.components.length).toBeGreaterThan(0);
     expect(r.ast.machineDecls.length).toBeGreaterThan(0);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  // S163 — machineDecls instance sharing. Each `machineDecls` engine-decl IS
+  // the SAME object that lives in `nodes` (top-level OR nested in another
+  // engine's bodyChildren), mirroring live `collectHoisted(nodes)`'s
+  // `machineDecls.push(node)` (ast-builder.js L13616). SYM PASS 10/11 stamp
+  // `_record`/`engineMeta` onto the `nodes` instance; codegen reads
+  // `machineDecls` — instance sharing is what makes the §51.0 substrate emit.
+  test("each machineDecls engine-decl is the SAME instance reachable in nodes (S163)", () => {
+    const src = "${ type Cart : enum = { Open, Closed } }\n"
+      + "<engine for=Cart initial=.Open>\n"
+      + "  <Open rule=.Closed></>\n"
+      + "  <Closed rule=.Open></>\n"
+      + "</>";
+    const r = nativeParseFile("app.scrml", src);
+    expect(r.ast.machineDecls.length).toBe(1);
+    // Collect every engine-decl object reachable from `nodes` (incl. nested
+    // engines via bodyChildren), then assert each machineDecls entry is one of
+    // them BY IDENTITY — not a separate synthEngineDecl draw (the pre-S163 bug).
+    const nodeEngines = new Set();
+    (function walk(list) {
+      if (!Array.isArray(list)) return;
+      for (const n of list) {
+        if (n === undefined || n === null || typeof n !== "object") continue;
+        if (n.kind === "engine-decl") nodeEngines.add(n);
+        if (Array.isArray(n.children)) walk(n.children);
+        if (Array.isArray(n.bodyChildren)) walk(n.bodyChildren);
+      }
+    })(r.ast.nodes);
+    for (const md of r.ast.machineDecls) {
+      expect(nodeEngines.has(md)).toBe(true);
+    }
+  });
+
+  test("nested <engine> is shared between nodes and machineDecls (S163)", () => {
+    const src = "${ type AppMode : enum = { Title, Playing } }\n"
+      + "${ type PlayMode : enum = { Exploring, Battle } }\n"
+      + "<engine for=AppMode initial=.Title>\n"
+      + "  <Title rule=.Playing></>\n"
+      + "  <Playing rule=.Title>\n"
+      + "    <engine for=PlayMode initial=.Exploring>\n"
+      + "      <Exploring rule=.Battle></>\n"
+      + "      <Battle rule=.Exploring></>\n"
+      + "    </>\n"
+      + "  </>\n"
+      + "</>";
+    const r = nativeParseFile("app.scrml", src);
+    // BOTH the outer (appMode) and the nested (playMode) engine land in
+    // machineDecls — the live shape (ast-builder.js L13624 bodyChildren recurse).
+    expect(r.ast.machineDecls.length).toBe(2);
+    const vars = r.ast.machineDecls.map(m => m.varName).sort();
+    expect(vars).toEqual(["appMode", "playMode"]);
+    // The nested engine is reachable in nodes via the outer engine's
+    // bodyChildren (it is a structural engine-decl ASTNode, not a raw block).
+    const outer = r.ast.machineDecls.find(m => m.varName === "appMode");
+    const nestedInNodes = (outer.bodyChildren || []).some(function find(c) {
+      return c && (c.kind === "engine-decl" && c.varName === "playMode");
+    }) || (function deep(list) {
+      for (const c of list || []) {
+        if (c && c.kind === "engine-decl" && c.varName === "playMode") return true;
+        if (c && Array.isArray(c.children) && deep(c.children)) return true;
+        if (c && Array.isArray(c.bodyChildren) && deep(c.bodyChildren)) return true;
+      }
+      return false;
+    })(outer.bodyChildren);
+    expect(nestedInNodes).toBe(true);
   });
 
   test("every node id is a positive integer", () => {

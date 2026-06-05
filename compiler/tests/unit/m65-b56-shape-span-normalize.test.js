@@ -170,8 +170,16 @@ describe("M6.5.b.5 — sourceText strip on translated markup attrs", () => {
   });
 
   test("the raw native engine block (walker source) KEEPS sourceText", () => {
-    // The engine state-child walker reads sourceText off _nativeEngineBlock /
-    // machineDecls[].bodyChildren — those raw blocks must be UNTOUCHED.
+    // The engine state-child walker reads sourceText off `_nativeEngineBlock`
+    // (the RAW native engine Markup block, PascalCase kind) — symbol-table.ts
+    // L6007 reads `engineDecl._nativeEngineBlock`, NOT `bodyChildren`. That raw
+    // block + its children must be UNTOUCHED by the normalizer.
+    //
+    // S163 — `machineDecls[].bodyChildren` are now MAPPED ASTNodes (live parity;
+    // `synthEngineNode` maps them via `mapBlocksToNodes` so a nested <engine>
+    // is a structural engine-decl). Translated markup attrs on those mapped
+    // nodes carry NO sourceText (the normalizer strips it, same invariant as
+    // the test above). The raw-block walker source is `_nativeEngineBlock`.
     const src =
       "<engine for=Phase>\n" +
       "  <Idle rule=.Active if=\"@x == 1\">\n" +
@@ -180,10 +188,23 @@ describe("M6.5.b.5 — sourceText strip on translated markup attrs", () => {
     const nat = nativeAST(src);
     const md = nat.machineDecls && nat.machineDecls[0];
     expect(md).toBeTruthy();
+    // bodyChildren are mapped ASTNodes (lowercase kind), NOT raw blocks.
     expect(Array.isArray(md.bodyChildren)).toBe(true);
-    // find a raw native Markup child carrying an attr with sourceText
-    let found = false;
     for (const bc of md.bodyChildren) {
+      if (bc && bc.kind === "markup") {
+        for (const attr of bc.attrs || []) {
+          if (attr && attr.value && typeof attr.value === "object") {
+            // mapped markup attrs carry NO sourceText (normalizer stripped it).
+            expect(Object.prototype.hasOwnProperty.call(attr.value, "sourceText")).toBe(false);
+          }
+        }
+      }
+    }
+    // The walker source — `_nativeEngineBlock` — is the RAW native block
+    // (PascalCase Markup), and ITS children KEEP sourceText (untouched).
+    expect(md._nativeEngineBlock && md._nativeEngineBlock.kind).toBe("Markup");
+    let found = false;
+    for (const bc of (md._nativeEngineBlock.children || [])) {
       if (bc && bc.kind === "Markup" && Array.isArray(bc.attrs)) {
         for (const attr of bc.attrs) {
           if (attr && attr.value && typeof attr.value === "object"
@@ -193,9 +214,7 @@ describe("M6.5.b.5 — sourceText strip on translated markup attrs", () => {
         }
       }
     }
-    expect(found).toBe(true); // walker source preserved
-    // and _nativeEngineBlock is the same raw block (PascalCase kind)
-    expect(md._nativeEngineBlock && md._nativeEngineBlock.kind).toBe("Markup");
+    expect(found).toBe(true); // walker source (_nativeEngineBlock) preserved
   });
 });
 

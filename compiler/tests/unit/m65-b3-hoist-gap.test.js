@@ -35,6 +35,7 @@ import { fileURLToPath } from "node:url";
 
 import { parseMarkupTrace, liftBareBlocks } from "../../native-parser/parse-markup.js";
 import { collectHoisted, hasProgramRoot } from "../../native-parser/collect-hoisted.js";
+import { nativeParseFile } from "../../native-parser/parse-file.js";
 
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
@@ -262,7 +263,13 @@ describe("M6.5.b.3 §6 — brief-cited example fixtures match the live oracle", 
     const ctx = run && run.ctx ? run.ctx : null;
     const rawBlocks = ctx && Array.isArray(ctx.nodes) ? ctx.nodes : [];
     const blocks = liftBareBlocks(rawBlocks, src, null, ctx);
-    return collectHoisted(blocks, { next: 0 }, src);
+    const hoisted = collectHoisted(blocks, { next: 0 }, src);
+    // S163 — `machineDecls` is no longer a `collectHoisted` output; it is
+    // derived from the mapped `nodes` in `nativeParseFile` (instance sharing
+    // with `FileAST.nodes`). Read the engine surface from the FileAST so this
+    // regression-lock probes the production contract, not the internal helper.
+    const { ast } = nativeParseFile(fp, src);
+    return { ...hoisted, machineDecls: ast.machineDecls ?? [] };
   }
 
   test("examples/22-multifile/app.scrml — imports match live (was native 0)", () => {

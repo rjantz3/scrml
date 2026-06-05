@@ -125,16 +125,23 @@ export function collectHoisted(blocks, idGen, source) {
                 if (block.name === "channel") {
                     channelDecls.push(block);
                 }
-                // A3 — live: `engine-decl` -> machineDecls. The native parser
-                // models an engine as a `Markup` block named "engine" (or the
-                // legacy "machine"). SYNTHESIZE the EngineDeclNode and push it.
-                if (block.name === "engine" || block.name === "machine") {
-                    machineDecls.push(synthEngineDecl(block, stampId, source));
-                }
+                // S163 — `machineDecls` is NO LONGER synthesized here. The
+                // engine branch used to `synthEngineDecl` a SECOND engine-decl
+                // instance into `machineDecls`, distinct from the one
+                // `parse-file.js` places into `FileAST.nodes`. SYM PASS 10/11
+                // stamp `_record`/`engineMeta` onto the `nodes` instance ONLY,
+                // so the `machineDecls` copy codegen reads (machineDecls-first)
+                // was un-stamped — `isC12EngineDecl` returned false and the
+                // whole §51.0 engine substrate silently dropped. `nativeParseFile`
+                // now derives `machineDecls` from `nodes` (the mapped engine-decl
+                // instances) via `collectMachineDeclsFromNodes`, mirroring live
+                // `collectHoisted(nodes)`'s `machineDecls.push(node)` instance
+                // sharing (ast-builder.js L13616). This walker keeps recursing
+                // `children` for the OTHER hoisted collections.
+                //
                 // live: `markup`/`state` -> recurse `children`. The recursion
-                // ALSO discovers NESTED engines inside composite state-children
-                // (the live walker recurses `bodyChildren` — see ast-builder.js
-                // L11936-11940; the native engine's `children` IS that body).
+                // walks the nested element tree for channel/import/export/type
+                // collection (engines are handled out-of-band, see above).
                 if (Array.isArray(block.children)) {
                     walkBlocks(block.children);
                 }
