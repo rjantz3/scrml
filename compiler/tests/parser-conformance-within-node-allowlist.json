@@ -3527,7 +3527,7 @@
     "FIELD-SHAPE": 5,
     "KIND-NAME": 4,
     "MISSING-FIELD": 38,
-    "SPAN-COORD": 6
+    "SPAN-COORD": 12
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-literal-no-wildcard-102.scrml": {
     "COUNT-LENGTH": 1,
@@ -3535,7 +3535,7 @@
     "FIELD-SHAPE": 4,
     "KIND-NAME": 3,
     "MISSING-FIELD": 27,
-    "SPAN-COORD": 5
+    "SPAN-COORD": 9
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-match-optional-no-arms-076.scrml": {
     "COUNT-LENGTH": 2,
@@ -6265,7 +6265,7 @@
     "FIELD-SHAPE": 79,
     "KIND-NAME": 38,
     "MISSING-FIELD": 328,
-    "SPAN-COORD": 223
+    "SPAN-COORD": 235
   },
   "samples/login.scrml": {
     "COUNT-LENGTH": 2,

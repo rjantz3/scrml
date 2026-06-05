@@ -62,7 +62,7 @@ import {
     IsCheckOp,
     makeNotValue, makeTilde, makeSql, makeInputStateRef, makeIsCheck,
     makeMatch, makeMatchArm, makeVariantPattern, makeWildcardPattern,
-    makeIsPattern, makeMatchBinding, makeRender, makeLift, makeFail,
+    makeIsPattern, makeLiteralPattern, makeMatchBinding, makeRender, makeLift, makeFail,
     makeYield, makeMarkupValue,
     // M5-swap Wave 2 — postfix-`?` / `!{}` scrml-extension constructors.
     makePropagate, makeGuardedExpr,
@@ -3226,6 +3226,20 @@ export function parseMatchArmPattern(ctx) {
         const endPos = (bindings === null) ? nameTok.span.end : cursor.tokens[cursor.idx - 1].span.end;
         const span = makeSpan(typeTok.span.start, endPos, typeTok.span.line, typeTok.span.col);
         return makeVariantPattern(typeTok.name, nameTok.name, bindings, span);
+    }
+
+    // Literal arm-pattern — `"..." => result` (§18.16 literal-arm-pattern).
+    // A string-literal pattern (single- or double-quoted). The native token
+    // carries `cooked` (interpreted value) + `text` (verbatim source INCLUDING
+    // quote delimiters); the bridge re-serializes `raw` back to source so the
+    // live emitter's re-parse (emit-control-flow.ts parseMatchArm Forms 3/4)
+    // recognizes the arm. SPEC §18.16 also defines number- and boolean-literal
+    // arms, but the LIVE emitter has no number/boolean arm form (both silently
+    // drop on the default path) — those are a separate dual-front-end backlog
+    // item, so the native parser recognizes ONLY the string form here.
+    if (kind === TokenKind.StringLit) {
+        const tok = advance(cursor);
+        return makeLiteralPattern("string", tok.text, tok.cooked, tok.span);
     }
 
     const here = current(cursor);

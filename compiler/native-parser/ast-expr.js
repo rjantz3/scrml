@@ -126,6 +126,11 @@ export const MatchArmPatternKind = Object.freeze({
     Variant:  "Variant",
     Wildcard: "Wildcard",
     Is:       "Is",
+    // Literal  — a literal-value arm `"..." => result` (§18.16 literal-arm-
+    // pattern). String literals only at present; boolean/number literal arms
+    // are a separate dual-front-end backlog item (the live emitter has no
+    // boolean/number arm form — see translate-expr.js reconstructArmPattern).
+    Literal:  "Literal",
 });
 
 // --- Primary-expression node constructors ---
@@ -372,6 +377,16 @@ export function makeWildcardPattern(keyword, span) {
 // the match subject.
 export function makeIsPattern(variantName, span) {
     return { patternKind: MatchArmPatternKind.Is, variantName, span };
+}
+
+// makeLiteralPattern — a literal-value arm pattern (§18.16). `litKind` is the
+// literal sub-tag ("string" — string-literal arms only at present). `raw` is
+// the verbatim source text INCLUDING quote delimiters, so the bridge can
+// re-serialize the arm back to its original source form for the live emitter's
+// re-parse path (translate-expr.js reconstructArmPattern). `value` is the
+// interpreted literal value (retained for any future structured consumer).
+export function makeLiteralPattern(litKind, raw, value, span) {
+    return { patternKind: MatchArmPatternKind.Literal, litKind, raw, value, span };
 }
 
 // makeMatchBinding — one payload binding inside a variant-pattern's

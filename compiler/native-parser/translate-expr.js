@@ -1039,6 +1039,17 @@ function reconstructArmPattern(pattern) {
         // `is .V` — an is-pattern in arm position.
         return "is ." + identText(pattern.variantName);
     }
+    if (pattern.patternKind === "Literal") {
+        // `"..." => result` — a string-literal arm (§18.16). `raw` is the
+        // verbatim source text INCLUDING quote delimiters; the live emitter's
+        // re-parse (emit-control-flow.ts parseMatchArm Forms 3/4) expects the
+        // quotes present, so emit `raw` directly. A missing `raw` (defensive —
+        // the native parser always retains it) re-quotes the interpreted value.
+        if (pattern.raw !== undefined && pattern.raw !== null) {
+            return String(pattern.raw);
+        }
+        return JSON.stringify(pattern.value === undefined ? "" : pattern.value);
+    }
     // a `Variant` pattern — `.V` / `Type.V`, optional `( bindings )`.
     let text = "";
     if (pattern.typeName !== undefined && pattern.typeName !== null) {
