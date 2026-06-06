@@ -97,6 +97,11 @@
 52. [State Authority Declarations](#52-state-authority-declarations)
 53. [Inline Type Predicates](#53-inline-type-predicates)
 54. [Nested Substates and State-Local Transitions](#54-nested-substates-and-state-local-transitions)
+55. [Validators and the Auto-Synthesized Validity Surface](#55-validators-and-the-auto-synthesized-validity-surface)
+56. [Promotion Ergonomics — `I-MATCH-PROMOTABLE` and `bun scrml promote`](#56-promotion-ergonomics--i-match-promotable-and-bun-scrml-promote)
+57. [Wire Format](#57-wire-format)
+58. [Build Story](#58-build-story)
+59. [Value-Native Maps](#59-value-native-maps)
 
 ---
 
@@ -2637,6 +2642,8 @@ let items = [1, 2, 3]
 ```
 
 ---
+
+**Value-native maps — the reactive-collection sibling.** Maps (§59) share this reassignment-canonical / COW model: a map "write" returns a new map reassigned to the cell (`@m = @m.insert(k, v)`), exactly as array updates reassign. A bracket-WRITE on a map (`@m[k] = v`) is rejected — `E-MAP-BRACKET-WRITE` (§59.7) — because the COW bracket-write path is array/object-shaped; map writes are method-native. Map reads ARE bracket-native (`@m[k]` → `V | not`, §59.6).
 
 #### 6.5.10 Compiler Implementation Notes (Non-Normative)
 
@@ -7445,6 +7452,7 @@ type user:struct = {
 - `!type` — type negation. The field's value SHALL NOT be of the given type.
 - `(!A && !B)` — conjunction of constraints. The value must satisfy all constraints simultaneously.
 - `A | B` — union. The value is one of the listed types.
+- `[KeyT: ValT]` — value-native **map** type (with an optional `@ordered` postfix affix). The bracketed `key-type : value-type` form registers as a concrete type (not a generic — scrml has no type parameters). The full key/value/iteration/equality/serialization rules live in §59 (Value-Native Maps); the key type SHALL itself be comparable (§59.4).
 
 #### 14.3.1 Optional Struct Fields
 
@@ -16309,6 +16317,13 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | W-PROGRAM-TITLE-NESTED | §40.7 | A documentary attribute (`title=`, `description=`, `version=`, `author=`, `license=`) appears on a nested `<program>`. Documentary attributes are meaningful only at the top level (HTML `<head>` semantics); workers have no DOM `<head>`. Move the attribute to the top-level `<program>` or remove it. (Phase A1a) | Warning |
 | E-STORY-UNKNOWN | §58.9 | A `story="<name>"` attribute on a nested `<program>` references a `<name>` with no corresponding `[story.<name>]` entry in the project manifest (`scrml.toml`). Declare the build story in the manifest's `[story]` table, or correct the name. (S118 — Build Story, §58) | Error |
 | W-STORY-ON-TOP-LEVEL | §58.8 | A `story=` attribute appears on the top-level `<program>` (§40.8). The attribute is ignored — the top-level build story is owned exclusively by `[story] default` in `scrml.toml`. Remove the attribute, or set the project default in the manifest. (S118 — Build Story, §58) | Warning |
+| E-MAP-KEY-NOT-COMPARABLE | §59.4 | A value-native map (§59) key type is not §45-comparable (the general code; cross-references `E-EQ-003` for a function-containing key type). Map keys are identified by structural `==`, so a key type must be comparable. Resolution: use a comparable key type (primitive, struct of comparables, enum). (S168 — Value-Native Maps, §59) | Error |
+| E-MAP-KEY-IS-MAP | §59.4 | A map (or `@ordered` map) is used as a map key type — out for v1. An `@ordered` map's `==` is order-sensitive, which would break the §59.5 hash-consistency keystone; leaving map-as-key out keeps the door open to add unordered-map keys later without a breaking change. (S168 — Value-Native Maps, §59.4/§59.12) | Error |
+| E-MAP-BRACKET-WRITE | §59.7 | A bracket-WRITE `@m[k] = v` is attempted on a map-typed cell (at any nesting level). Map reads are bracket-native (`@m[k]` → `V | not`); map writes are method-native. The bracket-write COW lowering is array/object-shaped and would corrupt the map representation. Fix-it: use `.insert(k, v)`. (S168 — Value-Native Maps, §59.7) | Error |
+| E-MAP-LITERAL-MALFORMED | §59.3 | A map literal has a bracket-depth-1 entry-colon but a missing key or value, a trailing colon, or an entry count error. (S168 — Value-Native Maps, §59.3) | Error |
+| W-MAP-ITERATION-ORDER | §59.8 | (Phase-c, info) A non-`@ordered` map is iterated without `.sorted()` in a position where order may matter; names `.sorted()` / `@ordered`. Partitions into `result.warnings` (non-fatal) per the info-level diagnostic-stream convention. (S168 — Value-Native Maps, §59.8) | Info |
+| W-MAP-STRUCT-KEY-LITERAL | §59.3 | A struct/enum-key map literal (`[ {a:1}: {b:2} ]`) appears in v1 — the grammar admits it but v1 codegen requires the `.insert` form for struct/enum keys. Parse-accepted, codegen-deferred; names the `.insert` form. (S168 — Value-Native Maps, §59.3/§59.12) | Info |
+| W-MAP-DUPLICATE-LITERAL-KEY | §59.3 | A map literal has two bracket-depth-1 entries whose keys are §45-equal (`[ "DAL": 3, "DAL": 5 ]`); the later entry wins (last-wins, matching `.insert` overwrite). Surfaces the overwrite. (S168 — Value-Native Maps, §59.3) | Info |
 | E-SQL-004 | §8.1.1 | `?{}` block has no `db=` declaration in any ancestor `<program>` | Error |
 | E-SQL-005 | §8.1.1 | Unrecognized database connection string prefix in `db=` attribute | Error |
 | E-WASM-001 | §23.3 | Call char not in default registry and no `callchar=` declaration | Error |
@@ -21124,6 +21139,8 @@ ${ let x: string = not }           // compile error E-TYPE-041
 
 The compiler SHALL infer `T | not` when a variable is initialized with `not` and later assigned a value of type `T`.
 
+**Union-`not` normalization.** A union type SHALL be normalized so that duplicate `not` members collapse: `(T | not) | not` is `T | not`. There is exactly one `not` member in a normalized optional union; re-optionalizing an already-optional type is idempotent. This is load-bearing for value-native maps (§59.6): a bracket-read on a `[K: V | not]` map yields `(V | not) | not`, which normalizes to `V | not`, so a bare read cannot distinguish a stored `not` value from an absent key — `.has(k)` (§59.6) is the disambiguator.
+
 #### 42.3.2 Equality and `is not`
 
 `x is not` is the only normative absence check. Using `== not` or `=== not` SHALL be compile error E-TYPE-042. Comparing against `null` or `undefined` SHALL be compile error E-SYNTAX-042.
@@ -21468,6 +21485,7 @@ The compiler derives structural comparability automatically:
 - **`not`**: `x == not` is NOT valid. Use `x is not` instead (compile error E-EQ-002).
 - **Functions**: NOT comparable. `==` on a type containing function fields is compile error E-EQ-003.
 - **`asIs` values**: `==` generates `===` in JS output with compiler warning W-EQ-001.
+- **Maps** (§59): comparable. Two maps are `==` iff they have the same key→value entries — order-independent (§59.9), even for `@ordered` maps. A map's **key** type must itself be comparable (§59.4); a non-comparable key type is `E-MAP-KEY-NOT-COMPARABLE` / `E-EQ-003` (function-containing key). Comparing a map to a non-map value is a cross-type comparison and is `E-EQ-001` (§45.3 / §59.9).
 
 ### 45.3 Cross-Type Comparison
 
@@ -21498,6 +21516,8 @@ There is no identity comparison operator in scrml. The reactive runtime handles 
 | E-EQ-004 | `===` operator used (not valid in scrml) | Error |
 | W-EQ-001 | `==` on `asIs`-typed values | Warning |
 
+`==` on maps is order-independent structural comparison (§59.9). It reuses the existing structural `==` path — no new code; `E-EQ-003` covers function-containing key/value types, `E-EQ-001` (§45.3) covers map-vs-non-map cross-type comparison.
+
 ### 45.8 Normative Statements
 
 - `==` SHALL be the sole equality operator in scrml.
@@ -21507,6 +21527,7 @@ There is no identity comparison operator in scrml. The reactive runtime handles 
 - `==` between incompatible types SHALL be a compile error (E-EQ-001).
 - `x == not` SHALL be a compile error (E-EQ-002); use `x is not`.
 - `==` on types containing function fields SHALL be a compile error (E-EQ-003).
+- `==` on maps SHALL be structural and order-independent (§59.9); a map key type SHALL itself be comparable (§59.4). `==` between a map and a non-map value SHALL be a cross-type compile error (E-EQ-001).
 
 ### 45.9 Word-form boolean operators — `or` / `and`
 
@@ -21728,6 +21749,16 @@ Valid — first string primitive binding with hash `pstr0000`:
 _ppstr00000
 ```
 (`_` prefix, `p` kind, `pstr0000` hash, `0` seq.)
+
+#### 47.1.6 Value-Canonical Key Hashing (Maps)
+
+Value-native maps (§59) hash a **runtime key value** rather than a `ResolvedType`. Map key-hashing reuses the §47.1.3 FNV-1a-32 parameters and the §47.1.4 canonicalization *discipline* (struct fields alpha-sorted by field name; enums as `tag(payload…)`; arrays element-ordered; primitives by literal form), but applies it to the runtime **value** — producing a **value-canonical string** that is the hash input. This is the value-level sibling of the §47.1.4 type-level codec; the two are orthogonal (a type codec dedups `ResolvedType`s; the value codec buckets map keys).
+
+**Normative statements:**
+
+- The value-canonical key codec SHALL be **deterministic**: two §45-structurally-equal key values SHALL produce byte-identical value-canonical strings (the alpha-sort makes field order irrelevant), hence identical hashes — the §59.5 hash-consistency keystone.
+- The codec SHALL be **injective modulo collision**: distinct key values MAY collide in the 32-bit hash space, and a collision is **not** an error (the opposite disposition from §47.1.5's `E-CG-010` hard error). A bucket-level §45 `==` check is the injectivity backstop — structural equality is the ground truth; the hash is only a bucket index.
+- **Termination** is guaranteed by the acyclic-keys precondition (§59.5; scrmlTS `8d9db4e1`): a cyclic key value cannot be constructed in scrml source, so the value-canonical walk always terminates. (The §47.1.4 `&Name` recursive-*type* guard is orthogonal — recursive types are first-class; cyclic *values* are forbidden.)
 
 ---
 
@@ -31241,6 +31272,7 @@ This forward-compatibility guarantee is intentional and is part of why OQ-2 (b) 
 - §42.5 — codegen `not` → JS `null` (the runtime ABI; §57 is wire-only).
 - §42.8 — runtime representation (JS `null`; §57.6 forward-compat with a hypothetical sentinel migration).
 - §42.9 — JS interop boundary (foreign `null` / `undefined` normalised to scrml `not` at assignment; §57 is the wire-side analogue).
+- §59.10 — value-native maps round-trip losslessly via §59's entries-array codec (NOT raw JS `Map`, which `JSON.stringify` drops). A `[K: V | not]` map whose stored values include `not` round-trips losslessly: a stored `not` value is encoded via this section's absence-envelope (`{"__scrml_absent": true}`) inside the entries array, preserving a present-`not` value distinctly from an absent key across the wire.
 
 ---
 
@@ -31548,4 +31580,175 @@ Manifest-level faults (a malformed or missing `[story]` table entry) are project
 
 ---
 
+## 59. Value-Native Maps
 
+**Added: S168, 2026-06-06. Source: JS-host-boundary DD + map-surface debate (grafted hybrid 53/60) + user ratifications S167–S168.**
+
+> **Nominal — spec-ahead-of-implementation.** This section specifies the value-native map type. The compiler implementation (type-system recognition, parser, runtime, codegen) is the phase-c build arc; until it lands, `*`-marked clauses are specified-but-not-yet-proven. The hard ship-gate prerequisite — acyclic value-data (no cyclic keys) — landed at scrmlTS `8d9db4e1` (the cycles-prereq: COW-all bracket-write + a seen-set guard in `_scrml_structural_eq`).
+
+### 59.1 Overview
+
+A **map** is scrml's value-native runtime-keyed dictionary: an immutable value that associates keys with values, where the keys are **runtime values** (not compile-time-fixed field names). It is the collection scrml structs cannot express — a struct's keys are fixed at declaration; a map's keys are values not known until runtime.
+
+A map is a **value**, not an object with identity (§45.6): two maps with the same entries are `==` (§59.9), maps have no reference identity, and maps carry no methods that mutate in place — every "write" produces a new map (§59.7), exactly as arrays are reassignment-canonical (§6.5, DQ-2). The raw JS `Map` is **not** scrml's map: it is identity-keyed (violates §45.6) and `JSON.stringify` drops it (violates §59.10). scrml's map is a distinct value-semantics type.
+
+**When to reach for a map vs a struct:** a struct when the key set is known at authoring time (`User { name, email }`); a map when the keys are runtime values (`fare by lane id`, `user by id`, `price by route`).
+
+### 59.2 Type grammar
+
+A map type is written `[KeyT: ValT]` — a concrete type affix, **not** a generic (scrml has no type parameters, §10/PRIMER §10). `KeyT` is the key type (§59.4 constrains it); `ValT` is the value type.
+
+```scrml
+<fareByLane>:   [string: Money] = [:]
+<userById>:     [int: User]     = [:]
+<priceByRoute>: [Route: Money]  = [:]      // struct key — §45 structural ==
+```
+
+The `@ordered` affix (§59.8) requests insertion-order iteration at a stated cost: `<ranked>: [string: Money]@ordered = [:]`. `@ordered` is a **postfix TYPE affix** (it modifies the map type, like the `[]` array affix) — it is **not** an attribute, and the leading `@` here is **not** the §6 reactive-`@`-sigil; it is part of the affix spelling on the type.
+
+A map type registers in the type system (§14) like any other type; the full key/value/iteration rules live here in §59.
+
+### 59.3 Literals
+
+- `[:]` is the **empty-map literal** (unambiguous: a bracket pair containing exactly a single colon).
+- `[k: v, k2: v2, …]` is a **map literal** — entries are `key: value` pairs, comma-separated.
+
+**Disambiguation rule (parse-time).** A bracketed expression is a **map literal** iff it is the empty form `[:]`, **or** it contains an entry-colon at **bracket-depth 1** (the outermost bracket level) **that is NOT the alternative-separator of a ternary** — i.e. a depth-1 colon that is not preceded, at the same bracket-depth, by an unmatched `?`. A bracketed expression with no such depth-1 entry-colon is an **array literal** (`[a, b, c]`, §6.5). Colons nested deeper (inside a struct-literal value, a nested map, a refinement, etc.) do not count, and the alternative-colon of a depth-1 ternary does not count. Worked disambiguation:
+
+```scrml
+[ "DAL": 3, "HOU": 5 ]          // MAP literal — depth-1 colons separate entries
+[ {a: 1}: {b: 2} ]              // MAP literal — the depth-1 colon (between the two struct values)
+                                //   is the entry colon; a:1 / b:2 are depth-2 (inside the {})
+[ @cond ? a : b ]              // ARRAY literal — the depth-1 `:` is the ternary alternative-separator
+                                //   (preceded by an unmatched depth-1 `?`), excluded; one element
+[ 1, 2, 3 ]                     // ARRAY literal — no depth-1 entry-colon
+[:]                             // EMPTY MAP
+[]                              // EMPTY ARRAY
+```
+
+*(Phase-c implementation note.* A map literal is not valid JS — Acorn rejects a `:` inside `[...]`. The Acorn-path expression parser (`compiler/src/expression-parser.ts`) therefore requires a pre-Acorn rewrite or a plugin to admit the depth-1 entry-colon (precedent: `preprocessForAcorn`, §45.9); the native-parser path applies the depth-1 + ternary-exclusion discipline directly. The `[:]` empty form MAY be tokenized specially before Acorn, as `::` is.*)*
+
+**Duplicate literal keys.** A literal with two depth-1 entries whose keys are §45-equal — `[ "DAL": 3, "DAL": 5 ]` — is **last-wins** (the later entry overwrites the earlier, matching `.insert` overwrite semantics, §59.7). The compiler MAY surface the surviving overwrite with `W-MAP-DUPLICATE-LITERAL-KEY` (Info, §59.11).
+
+**v1 literal scope-cut (M-cut):** a **primitive-key** literal (`["DAL": 4500]`, `[1: x]`) ships in v1. A **struct/enum-key** literal is built via `.insert` rather than literal syntax in v1 — the struct-key literal is bracket syntax's weakest case (Swift programmers reach for `.insert` here anyway). `[ {a:1}: {b:2} ]` parses (the grammar admits it), but the v1 codegen requires the `.insert` form for struct keys; a struct/enum-key literal is **parse-accepted, codegen-deferred** and surfaces `W-MAP-STRUCT-KEY-LITERAL` (Info, §59.11) naming the `.insert` form. This is documented on-purpose, not a silent gap.
+
+A malformed map literal (a depth-1 colon with a missing key or value, an odd/even-count error, a trailing-colon) is **`E-MAP-LITERAL-MALFORMED`** (§59.11).
+
+### 59.4 Keys — the key domain
+
+A map key may be **any §45-comparable value**: primitives (number, string, boolean), structs (all fields comparable, deep), and enums (tag + payload). Struct keys "just work" — structural `==` (§45.2) is the key-identity, so two structurally-equal struct values are the same key.
+
+The **value type may itself be a map** (`[string: [int: Money]]` is a map of maps) — only the **key type** is constrained. Nested-map values are first-class (§59.7 worked example).
+
+A key type that is **not** §45-comparable is rejected:
+
+- A key type containing **function fields** is not comparable (§45.2) → **`E-EQ-003`** (reuse the §45 code; the diagnostic names the map-key context).
+- A key type that is itself a **map** is **out for v1** → **`E-MAP-KEY-IS-MAP`** (§59.11). Rationale: an `@ordered` map's `==` is order-sensitive (§59.9), which would break the hash-consistency keystone (§59.5); leaving map-as-key out keeps the door open to add it later (only for unordered maps) without a breaking change. (See §59.12.)
+- Any other non-§45-comparable key type → **`E-MAP-KEY-NOT-COMPARABLE`** (§59.11; the general code, cross-referencing `E-EQ-003` for the function case).
+
+### 59.5 Key-hash — the value-canonical codec (the hash-consistency keystone)
+
+Maps need O(1)-ish key lookup, which requires hashing the **runtime key value**. scrml realizes this by **mirroring the §47.1.4 canonical-string discipline at the VALUE level** (not the type level — §47.1.4 hashes a `ResolvedType`'s canonical string; map keys hash a value):
+
+- The **value-canonical string** of a key serializes the runtime value deterministically: struct fields **alpha-sorted by field name** (mirroring §47.1.4 struct canonicalization), enums as `tag(payload…)`, arrays element-ordered, primitives by literal form. The string is hashed with **FNV-1a-32** (the §47.1.3 parameters: prime `16777619`, offset basis `2166136261`, over the UTF-8 bytes).
+- **Hash-consistency `(x == y) ⇒ (hash x == hash y)` falls out of §45 for free** (the validated keystone): two §45-structurally-equal values produce byte-identical value-canonical strings (the alpha-sort makes field order irrelevant), hence the same hash. Hash collisions between distinct keys are **expected and resolved** by a §45 `==` check in the bucket — structural equality is the ground truth; the hash is only a bucket index. This is the **opposite disposition** from §47.1.5's `E-CG-010` (a type-codec hash collision is a hard error, because the type-encoding scheme is required to be injective with no fallback); the value-canonical key codec instead carries a runtime injectivity backstop, so a value-level collision is a normal, silently-resolved condition rather than a defect.
+- **Termination is guaranteed by the acyclic-keys precondition.** A cyclic key value would make the value-canonical walk non-terminating (and would have stack-overflowed `_scrml_structural_eq`). The cycles-prereq (scrmlTS `8d9db4e1`: COW-all bracket-write forbids constructing a value-cycle in scrml source + the seen-set guard) makes "keys are acyclic" true by construction. (The §47.1.4 `&Name` guard handles recursive TYPE definitions — e.g. `Node { next: Node|not }` — and is orthogonal: recursive *types* are first-class; cyclic *values* are forbidden.)
+
+### 59.6 Read — bracket-native
+
+Reading is **bracket-native** (allocation-free, terse, composes with existing absence machinery):
+
+```scrml
+const fare = @fareByLane["DAL-001"]              // -> Money | not   (key-miss yields not)
+given f = @fareByLane["DAL-001"] { use(f) }      // composes with given / is some — ZERO new rules
+const f2 = @fareByLane.getOr("DAL-001", 0)       // fallback-read in one expression
+const have = @fareByLane.has("DAL-001")          // -> bool
+```
+
+- `@m[k]` evaluates to **`ValT | not`** (§42): a present key yields its value; a key-miss yields `not`. This composes with `given` / `is some` / `match` and with `(not to T)` narrowing — no new discrimination rules.
+- `.getOr(k, default)` returns the value or the supplied default in one expression.
+- `.has(k) → bool` reports presence. It is the **disambiguator** for `[K: V|not]` maps: the map read type is `ValT | not` regardless of whether `ValT` itself admits `not` (union-`not` normalization, §42 amendment — `(V|not)|not` is `V|not`). Therefore a bare bracket-read on a `[K: V|not]` map cannot distinguish a stored `not` value from an absent key; `.has(k)` decides it.
+- `.size → int` is the entry count. The map count member is `.size`, whereas the array length member is `.length` (§6.5.4). This divergence is **intentional** — it mirrors the JS `Map.size` / `Array.length` split — not an oversight.
+
+### 59.7 Write / remove — method-native (the grafted hybrid)
+
+Writes and removals are **method-native** and **reassignment-canonical** — each returns a new map, reassigned to the cell, exactly as array updates reassign (`@arr = [...@arr, x]`, §6.5 DQ-2):
+
+```scrml
+@fareByLane = @fareByLane.insert("DAL-001", 4500)              // add/overwrite one entry
+@fareByLane = @fareByLane.remove("DAL-001")                    // remove a key (distinct verb)
+@fareByLane = @fareByLane.update("DAL-001", f => (f ?? 0) + 100) // upsert via fn, no read-modify-write race
+@fareByLane = @fareByLane.insertAll(more)                      // BULK — one clone (defuses O(n^2) loop)
+```
+
+- `.insert(k, v)` returns a new map with `k → v` (overwriting any prior `k`).
+- `.remove(k)` returns a new map without `k` (no-op if absent).
+- `.update(k, fn)` returns a new map with `k → fn(currentOrNot)` — the upsert form; `fn` receives the current value or `not`.
+- `.insertAll(pairs)` returns a new map with all of `pairs`' entries inserted in **one** clone (the bulk form; use it in place of an `.insert`-in-a-loop to avoid O(n²) reallocation). scrml has no tuple type, so **`pairs` is itself another `[K: V]` map** of the same key/value types — `.insertAll` inserts all of its entries (last-wins on key collision, §59.3). This composes directly with `.entries()` / map-literal construction and avoids inventing a pair-list shape.
+
+**`.remove()` is the ONLY removal — `=not` is NOT a remove (M6).** This closes the capability-hole the debate surfaced: a `[K: V|not]` map CAN store `not` as a legitimate value via `.insert(k, not)`, remove a key via `.remove(k)`, and distinguish the two via `.has(k)`. (If `=not` meant "remove," a `[K: V|not]` map could never store `not` distinctly from absence.)
+
+**Bracket-WRITE on a map is an error (the prereq interaction).** `@m[k] = v` is **`E-MAP-BRACKET-WRITE`** (§59.11), with a fix-it naming `.insert(k, v)`. Rationale: the cycles-prereq routes `@name[i] = x` bracket-writes through the COW `_scrml_deep_set` array/object path (scrmlTS `8d9db4e1`); applied to a map cell that would corrupt the map's internal representation. The type-system gates a bracket-write whose receiver is map-typed and fires `E-MAP-BRACKET-WRITE` before the COW lowering. Read is bracket; write is method. *(Phase-c implementation note: the bracket-write parser path is shared with arrays; the map-vs-array discrimination is at the typer, keyed on the receiver cell's resolved type.)*
+
+**Nested maps — reassignment-canonical at every level.** When the value type is itself a map, an inner-map update rebuilds the inner map and `.insert`s it back into the outer map — there is no in-place deep write, and `E-MAP-BRACKET-WRITE` applies at **every** level (you cannot `@outer[k1][k2] = v`):
+
+```scrml
+<feeByLaneByCarrier>: [string: [string: Money]] = [:]
+// set carrier "ACME" lane "DAL-001" -> 4500, rebuilding the inner map:
+const inner = @feeByLaneByCarrier["ACME"] ?? [:]          // read inner (or empty), -> [string: Money]
+@feeByLaneByCarrier = @feeByLaneByCarrier.insert(
+    "ACME", inner.insert("DAL-001", 4500)                 // rebuild inner, re-insert into outer
+)
+```
+
+### 59.8 Iteration — unordered by default + loud
+
+`.keys()`, `.values()`, `.entries()` each return a **value-native array** (a real scrml array, not a host iterator), composing with `<each>` and every array operation:
+
+```scrml
+<each (k, v) in @fareByLane.entries()> … </each>              // UNSPECIFIED order
+<each (k, v) in @fareByLane.entries().sorted()> … </each>     // .sorted() = cheap explicit stabilizer
+```
+
+- **Iteration order is UNSPECIFIED by default, and the language says so loudly** — the spec, the docs, and (phase-c) a lint nudge make non-determinism explicit, avoiding the silent "small maps look ordered" cliff that bites Clojure adopters. Code that needs order asks for it.
+- **Positional correspondence.** For one map value, `.keys()`, `.values()`, and `.entries()` SHALL share **one consistent ordering** within that observation — `.keys()[i]` is the key of the entry whose value is `.values()[i]` and whose pair is `.entries()[i]`. The ordering itself is unspecified (unless `@ordered` or `.sorted()` is applied), but the three views agree positionally.
+- `.sorted()` / `.sortedBy(fn)` return an order-stabilized entries array (the cheap, explicit way to get determinism).
+- The `@ordered` affix (§59.2) opts a map into **insertion-order** iteration. It **visibly costs more** (the runtime tracks insertion order) and is the deliberate opt-in for order-significant maps.
+- `<each (k, v) in @m.entries()>` destructures entry pairs; alternatively iterate `.keys()` / `.values()` directly.
+- The `W-MAP-ITERATION-ORDER` code (§59.11) is **Info-level**: it partitions into `result.warnings` (non-fatal), per the §34 info-level diagnostic-stream convention — never into `result.errors`.
+
+### 59.9 Equality — structural, order-independent
+
+`@m1 == @m2` (§45) is **structural and order-independent**: two maps are equal iff they have the same key→value entries, regardless of insertion/iteration order. **This holds even for `@ordered` maps** — `==` ignores order; `@ordered` governs *iteration*, not *equality*. (This is precisely why an `@ordered` map may not be a key, §59.4 / §59.12: an order-sensitive `==` would break the §59.5 hash-consistency keystone, but map `==` is deliberately order-INsensitive, so `@ordered` does not change equality.)
+
+Comparing a map to a non-map value — `@m == @arr`, `@m == 5` — is a **cross-type comparison** and is **`E-EQ-001`** (§45.3); the type system rejects it before the operator is evaluated.
+
+### 59.10 Serialization — lossless
+
+A map round-trips losslessly across every value boundary: the §57 wire format (server-fn returns, channels, SSE), SQL/JSON columns, and `==`. The map serializes via a **lossless codec** (an entries-array encoding, canonically ordered for stability), **not** raw JS `Map` (which `JSON.stringify` silently drops — `JSON.stringify(new Map([["a",1]]))` is `"{}"`). The decoder reconstructs the value-native map. A `[K: V|not]` map whose stored values include `not` round-trips **losslessly**: a stored `not` value is encoded via the §57 absence-envelope (`{"__scrml_absent": true}`) inside the entries array, so a present-`not` value is preserved distinctly from an absent key across the wire. *(Phase-c: the codec is a sibling of the §57 absence-envelope encoder; the canonical entry ordering reuses §59.5's value-canonical key order for bit-stability.)*
+
+### 59.11 Error and warning codes
+
+| Code | Trigger | Severity |
+|---|---|---|
+| `E-MAP-KEY-NOT-COMPARABLE` | map key type is not §45-comparable (general; cross-ref `E-EQ-003` for function fields) | Error |
+| `E-MAP-KEY-IS-MAP` | a map (or `@ordered` map) used as a key type — out for v1 (§59.4/§59.12) | Error |
+| `E-MAP-BRACKET-WRITE` | `@m[k] = v` bracket-write on a map-typed cell (at any nesting level); fix-it names `.insert(k, v)` (§59.7) | Error |
+| `E-MAP-LITERAL-MALFORMED` | map literal with a depth-1 colon but missing key/value, trailing colon, or count error (§59.3) | Error |
+| `W-MAP-ITERATION-ORDER` | (phase-c) iterating a non-`@ordered` map without `.sorted()` where order may matter; names `.sorted()` / `@ordered`. Partitions into `result.warnings`. | Info |
+| `W-MAP-STRUCT-KEY-LITERAL` | a struct/enum-key map literal (`[ {a:1}: {b:2} ]`) in v1 — parse-accepted, codegen-deferred to `.insert`; names the `.insert` form (§59.3/§59.12) | Info |
+| `W-MAP-DUPLICATE-LITERAL-KEY` | a map literal with two depth-1 entries whose keys are §45-equal — last-wins; surfaces the overwrite (§59.3) | Info |
+
+(`E-EQ-003` is reused, not re-minted, for the function-key case — consistent with §45. `E-EQ-001` (§45.3) covers map-vs-non-map cross-type comparison, §59.9.)
+
+### 59.12 v1 scope-cuts (decided on purpose)
+
+- **Map-as-key: NOT in v1.** Keys are "any §45-comparable EXCEPT another map." The unordered-by-default equality (§59.9) keeps the door open to add unordered-map-keys later without breaking `==`; an `@ordered` map could never be a key (order-sensitive `==` breaks hash-consistency). Documented; not a silent gap.
+- **Struct/enum-key literals: built via `.insert` in v1** (primitive-key literal `["DAL": 4500]` ships; §59.3). The struct-key bracket literal is the form's weakest case; a struct/enum-key literal parse-accepts and surfaces `W-MAP-STRUCT-KEY-LITERAL` (Info).
+- **`set`: a decoupled follow-on** (not §59). Either derived from `map` (a `set` is a `map` keyed to itself) or via `scrml:data` helpers — the thinner S166 warrant, decided separately.
+
+### 59.13 Cross-references
+
+§6.5 (reactive arrays — the reassignment-canonical / COW sibling) · §14 (type system — `[KeyT:ValT]` registration) · §42 (`not` — bracket-read `V|not`, union-`not` normalization) · §45 (equality — key comparability, order-independent map `==`, cross-type `E-EQ-001`, `E-EQ-003`) · §47.1.3/§47.1.4/§47.1.5 (the canonical-string discipline §59.5 mirrors at the value level; the §47.1.5 collision disposition §59.5 contrasts with) · §57 (wire format — lossless serialization, absence-envelope for stored `not`) · §17.7 (`<each>` — iteration over `.entries()`) · the cycles-prereq (scrmlTS `8d9db4e1` — the acyclic-keys precondition).
+
+---
