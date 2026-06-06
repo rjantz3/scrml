@@ -88,9 +88,9 @@ ${
     <filter>: Filter = .All
 
     const <visible> = match @filter {
-        .All    => @tasks
-        .Active => @tasks.filter(t => !t.done)
-        .Done   => @tasks.filter(t => t.done)
+        .All    :> @tasks
+        .Active :> @tasks.filter(t => !t.done)
+        .Done   :> @tasks.filter(t => t.done)
     }
 
     function addTask() {
@@ -205,7 +205,7 @@ ${
     function submit() {
         @phase = .Saving
         createTask(@newTask) !{
-            | ::Network msg -> { @phase = .ErrorState(msg); return }
+            | ::Network msg :> { @phase = .ErrorState(msg); return }
         }
         reset(@newTask)
         @phase = .Saved
@@ -222,9 +222,9 @@ ${
 <newTask req length(>=1)> = <input placeholder="What needs doing?"/>
 
 const <visible> = match @filter {
-    .All    => @tasks
-    .Active => @tasks.filter(isActive)
-    .Done   => @tasks.filter(t => !isActive(t))
+    .All    :> @tasks
+    .Active :> @tasks.filter(isActive)
+    .Done   :> @tasks.filter(t => !isActive(t))
 }
 
 ~{
@@ -581,7 +581,7 @@ scrml uses sigil-delimited contexts to separate concerns within a single file:
 | Logic   | `${}` | JavaScript expressions and functions |
 | SQL     | `?{}` | Database queries (Bun.SQL tagged-template; SQLite shipping, Postgres in progress); auto-batched N+1 + envelope |
 | CSS     | `#{}` | Scoped styles |
-| Error   | `!{}` | Typed error handling (failable `!{ \| ::V -> ... }` arms) |
+| Error   | `!{}` | Typed error handling (failable `!{ \| ::V :> ... }` arms) |
 | Meta    | `^{}` | Compile-time (or runtime) code generation |
 | Test    | `~{}` | Inline tests + `test-bind` server-fn mocks (stripped from production) |
 | Foreign | `_{}` | Inline foreign code *(specced, not yet implemented)* |
