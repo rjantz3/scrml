@@ -1,6 +1,6 @@
 # test.map.md
 # project: scrmlts
-# updated: 2026-06-06T08:10:00Z  commit: 9d12d980
+# updated: 2026-06-06T17:30:00Z  commit: 75431e9e
 
 ## Test Framework
 Runner: bun test (built-in Bun test runner)
@@ -8,21 +8,21 @@ Config: bunfig.toml (timeout + happy-dom preload settings)
 Run all: `bun test compiler/tests/`
 Run single: `bun test compiler/tests/unit/<filename>.test.js`
 Coverage: `bun test compiler/tests/ --coverage`
-Full suite at S165 close: 23,054 pass / 0 fail / 220 skip / 1 todo / 912 files (on 26a24b71); within-node native-parser parity 1005/0
+Full suite at S167 close: 23,075 pass / 0 fail / 220 skip / 1 todo (on 75431e9e; was 23,054 at S165 — +21 from the S167 deep-set position matrix); within-node native-parser parity 1005/0
 
 ## Test Categories
 
 | Category | Location | Count |
 |----------|----------|-------|
-| Unit | compiler/tests/unit/ | ~623 files |
-| Browser (DOM) | compiler/tests/browser/ | ~32 files |
+| Unit | compiler/tests/unit/ | ~624 files (+1 S167: deepset-write-loss-position) |
+| Browser (DOM) | compiler/tests/browser/ | ~33 files (+1 S167: browser-deepset-write-loss) |
 | Conformance | compiler/tests/conformance/ | ~40 files |
 | Integration | compiler/tests/integration/ | ~30 files |
 | Parser conformance | compiler/tests/parser-conformance*.test.js | 10 files |
 | LSP | compiler/tests/lsp/ | ~8 files |
 | Self-host | compiler/tests/self-host/ | ~5 files |
 | CLI commands | compiler/tests/commands/ | ~5 files |
-| **Total** | compiler/tests/ | **912 .test.js files (S165)** |
+| **Total** | compiler/tests/ | **914 .test.js files (S167; +2 over S165)** |
 
 ## S153 New Test Files (each-in-dynamic-context sweep)
 
@@ -99,7 +99,7 @@ Full suite at S165 close: 23,054 pass / 0 fail / 220 skip / 1 todo / 912 files (
 | compiler/tests/unit/native-sql-chained-form-f2a.test.js | S164 F2a: chained `?{}.method()` SQL promotion in statement position (translate-stmt.js `reconstructChainedSql`). |
 | compiler/tests/unit/native-tablefor-struct-field-drop.test.js | S164: `typeBodyText`/`joinWithNewlines` preserve struct/enum field-separator newlines (`<tableFor>` no longer drops fields). |
 | compiler/tests/unit/m66-b2-engine-statechild-walker.test.js | S164 B2 (updated): `native-walker/engine-statechild-walker.ts` populates `messageArms` from `parseMessageArms(bodyRaw).arms` + `synthEngineDecl` reads `accepts=`. |
-| compiler/tests/parser-conformance-within-node.test.js + within-node-allowlist.json | updated S164-S165 — native↔live within-node parity (1005/0); the allowlist tracks remaining per-family gaps. |
+| compiler/tests/parser-conformance-within-node.test.js + within-node-allowlist.json | updated S164-S167 — native↔live within-node parity (1005/0); the allowlist tracks remaining per-family gaps (S167: +4 native-lag on samples/gauntlet-r11-elixir-chat.scrml — see below). |
 | compiler/tests/integration/m6.4a-native-p2-form1.test.js (§B) | S166 ROOT-2: emitted-output regression for the native cross-file `${...}`-wrapped `export const Name = <markup>` raw-slice fix — `<Badge/>` markup EXPANDS in consumer HTML, E-COMPONENT-020/035 GONE (was `raw=""` → empty CE registry). |
 
 NOTE: S165's four families (F2-match string-lit arms, promote-each, R1 typed-`@cell`, server-fn-star) were
@@ -112,6 +112,20 @@ S166 landed two re-triage roots: bare-`function` failable `76059024` (within-nod
 1005→991→1005; full suite 23,054/0) + cross-file `${...}`-export `9d12d980` (within-node 1005/0 with NO allowlist
 rebump — resolved via a `bodyStart` STRIP_KEY in within-node-classifier.ts; cross-file integration 48/0).
 
+## S167 New Test Files (HIGH multi-statement deep-set / array-mutation write-loss — LIVE parser fix)
+
+| File | What it covers |
+|------|----------------|
+| compiler/tests/unit/deepset-write-loss-position.test.js | **NEW (16 emit-shape tests / 87 asserts).** Full position matrix for the `collectExpr` depth-0 statement-boundary fix (ast-builder.js): consecutive dotted-path deep-set writes (`@obj.field = value` → `reactive-nested-assign` §5.2.3) AND array-mutations (`@arr.push(...)` et al. → `reactive-array-mutation`) survive at EVERY body position, in source order, with the right `_scrml_deep_set(...)` path + value — not just as the first statement. Includes the RHS-operand guard (`@y = @x.prop` collects `@x.prop` as the RHS read, NOT a swallowed new statement). Emit-shape lower bound (S139/S140/S152 — string check; the runtime proof is the browser file). |
+| compiler/tests/browser/browser-deepset-write-loss.test.js | **NEW (4 happy-dom runtime acceptance).** Drives the DOM-event → handler → reactive-set path and asserts the deep-set MUTATIONS ACTUALLY APPLY at runtime: every deep-set in a multi-statement body takes effect, last-write-wins ordering. Uses a FLAT object cell `<a> = { ref: "" }` to isolate the parser fix (a STRUCTURAL-COMPOUND cell — `<a><ref></>` — lowers to a derived composite that fails at runtime even for a single deep-set; that is Bug B, a SEPARATE pre-existing codegen mistarget filed but NOT fixed this session). |
+
+NOTE (S167): the deep-set fix is a LIVE-pipeline (ast-builder.js `collectExpr`/`parseLogicBody`) fix, not a
+native-parser swap-closer. Real-corpus impact: `samples/gauntlet-r11-elixir-chat.scrml` had `@messages.push(msg)`
+after a `let msg = {...}` decl silently dropped — now correctly emitted. Within-node allowlist bumped +4 on that
+file (EXTRA-FIELD 31→32, FIELD-SHAPE 20→21, KIND-NAME 12→13, SPAN-COORD 110→111) because the NATIVE parser still
+folds `@arr.push` to a bare-expr — a SEPARATE native swap-grind parity item (correct-shadow: the live fix is now
+ahead of native, the bump records the lag, it is NOT masking a regression). within-node stayed 1005/0.
+
 ## Fixtures & Factories
 
 | Path | Contents |
@@ -122,7 +136,8 @@ rebump — resolved via a `bodyStart` STRIP_KEY in within-node-classifier.ts; cr
 | compiler/tests/conformance/s32-fn-state-machine/ | fn-as-state-machine conformance + REGISTRY.md |
 | compiler/tests/conformance/tab/ | TAB-stage conformance fixtures |
 | compiler/tests/integration/fixtures/ | integration test .scrml inputs |
-| compiler/tests/parser-conformance-within-node-allowlist.json | native-parser parity allowlist (updated GITI-024) |
+| compiler/tests/parser-conformance-within-node-allowlist.json | native-parser parity allowlist (S167: +4 native-lag on r11-elixir-chat) |
+| docs/changes/high-deepset-write-loss-2026-06-06/repro-multi-deepset.scrml | S167 minimal reproducer (multi-statement deep-set) — change-dir artifact, not a test runner input |
 
 ## Pattern
 
@@ -136,7 +151,9 @@ Browser tests use happy-dom via `@happy-dom/global-registrator` to run emitted c
 in a DOM environment and assert reactive behavior. The S153 each-in-dynamic-context fixes AND
 the S158-S159 per-item-reactivity / handler-live-keying fixes are gated by happy-dom canaries
 (not emit-string-only checks) — the S140/S152 lesson that emit-string tests mask runtime
-miscompiles applies directly to these classes.
+miscompiles applies directly to these classes. The S167 deep-set write-loss fix follows the same
+pairing: an emit-shape unit file (deepset-write-loss-position) PLUS a happy-dom runtime acceptance
+file (browser-deepset-write-loss) that proves the mutations actually apply.
 Parser conformance tests compare live-pipeline (block-splitter + ast-builder) output to
 native-parser output for a large corpus; parity gaps are tracked in the within-node allowlist.
 Bug 73 emit-shape tests assert the resolver-prelude pattern in the emitted JS and complement the
@@ -147,7 +164,7 @@ S160 ruling (c) tests cover the full Shape 4 dispatch matrix including the refin
 SATISFIES/VIOLATES/UNDETERMINABLE trichotomy and the `synthesizedFromNoRhs` lifecycle note path.
 
 ## Tags
-#scrmlts #map #test #bun #conformance #parser-parity #happy-dom #each-in-dynamic-context #per-item-reactivity #live-keyed #bug64 #bug65 #bug72 #bug73 #colon-shorthand-html #colon-shorthand-canonical #shape4-no-rhs #s153 #s154 #s155 #s156 #s157 #s158 #s159 #s160 #native-parser #native-parser-swap #each-promotion #match-promotion #f3-match-arm #f2-match #promote-each #typed-atcell #server-fn-star #exprnode-walker #within-node-1005 #flip-451 #bare-function-failable #cross-file-export-bodystart #s161 #s162 #s163 #s164 #s165 #s166
+#scrmlts #map #test #bun #conformance #parser-parity #happy-dom #each-in-dynamic-context #per-item-reactivity #live-keyed #bug64 #bug65 #bug72 #bug73 #colon-shorthand-html #colon-shorthand-canonical #shape4-no-rhs #s153 #s154 #s155 #s156 #s157 #s158 #s159 #s160 #native-parser #native-parser-swap #each-promotion #match-promotion #f3-match-arm #f2-match #promote-each #typed-atcell #server-fn-star #exprnode-walker #within-node-1005 #flip-451 #bare-function-failable #cross-file-export-bodystart #deepset-write-loss #reactive-nested-assign #reactive-array-mutation #s161 #s162 #s163 #s164 #s165 #s166 #s167
 
 ## Links
 - [primary.map.md](./primary.map.md)

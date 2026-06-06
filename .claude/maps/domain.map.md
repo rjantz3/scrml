@@ -1,6 +1,6 @@
 # domain.map.md
 # project: scrmlts
-# updated: 2026-06-06T08:10:00Z  commit: 9d12d980
+# updated: 2026-06-06T17:30:00Z  commit: 75431e9e
 
 The domain is the scrml COMPILER pipeline. scrml is a single-file, full-stack reactive web
 language compiled by this TypeScript/JS toolchain running on Bun. The compiler converts `.scrml`
@@ -151,7 +151,7 @@ I-FN-PROMOTABLE — info diagnostic suggesting function promotion
 | compiler/src/component-expander.ts | each-in-component-body: legacy re-parse fallback + substituteProps each-block string fields + tokenized-sigil collapse (S153) |
 | compiler/src/engine-statechild-parser.ts (2418L) | `:`-shorthand-child closer-pairing fix (S153); `accepts=` + message-arm lexer `parseMessageArms()` (S154) |
 | compiler/src/enum-subset-refinement.ts (143L NEW) | Shared pure `parseEnumSubsetAnnotation()` recognizer; used by type-system.ts + symbol-table.ts to agree on the §53.15.1 grammar |
-| compiler/src/ast-builder.js (**14003L**) | Bug 72 (S158): `_parseLiftAttrValue` bare-`@` branch collects `@.` token run as expr value; Bug 71 (S157): derived `const <x> = match` dual-parse hook; Bug 67 (S157): `return match` hook; S159 R1: `buildBlock()` body-child synthesis for non-void HTML `:`-shorthand bodies |
+| compiler/src/ast-builder.js (**~14231L** at S167) | Bug 72 (S158): `_parseLiftAttrValue` bare-`@` branch collects `@.` token run as expr value; Bug 71 (S157): derived `const <x> = match` dual-parse hook; Bug 67 (S157): `return match` hook; S159 R1: `buildBlock()` body-child synthesis for non-void HTML `:`-shorthand bodies; **S167 (HIGH Bug A): `parseLogicBody`/`collectExpr` depth-0 statement-boundary recognizer (~L2747) for dotted-path reactive statements — forward-scans the `(.ident)+` chain and breaks at a terminating deep-set `=` (`reactive-nested-assign`) or array-mutation `(` (`reactive-array-mutation`), so multi-statement deep-sets / `@arr.push(...)` no longer get swallowed into the preceding statement's RHS; codegen untouched** |
 | compiler/src/block-splitter.js (**2950L**) | S159 R4a: `shorthand && !selfClosing` branch placed BEFORE void/self-closing short-circuit so `<void : expr>` reaches the type-system guard |
 | compiler/src/type-system.ts (**17436L**) | Bug 63 (S157): markup event-handler attr `.advance` two-plane checking; E-SYNTAX-064 emitted for `@.` outside each body scope; Bug 67/71: match-as-expr exhaustiveness wired; S159 R4b: `E-COLON-SHORTHAND-ON-VOID` guard + R3 `@.`-shorthand-body E-SYNTAX-064 extension |
 
@@ -246,7 +246,7 @@ r24-bug-31 if-as-expr/`<state>` block (multi-gap, decompose first). **F8 await =
 A fix-dispatch agent MUST re-run the flip harness to re-rank before picking — counts above are S165-close snapshots (S166 closed two roots without a re-run).
 
 ## Tags
-#scrmlts #map #domain #compiler #pipeline #reactive #state-machine #scrml #match-arrow #engine-graph #source-map #cross-file-modules #each #each-in-dynamic-context #engine-statechild #enum-subset #message-dispatch #bug60 #bug62 #bug63 #bug64 #bug65 #bug70 #bug71 #bug72 #bug73 #r28-1c #per-item-reactivity #live-keyed #colon-shorthand-html #s149 #s151 #s152 #s153 #s154 #s155 #s156 #s157 #s158 #s159 #native-parser #native-parser-swap #each-promotion #match-promotion #flip-failure-families #f1-engine-substrate-closed #engine-substrate-fix #machinedecls-instance-share #b2-message-arm-closed #native-exprnode-walker #f2-match #promote-each #typed-atcell #server-fn-star #bare-function-failable #cross-file-export-bodystart #flip-451 #s160 #s161 #s162 #s163 #s164 #s165 #s166
+#scrmlts #map #domain #compiler #pipeline #reactive #state-machine #scrml #match-arrow #engine-graph #source-map #cross-file-modules #each #each-in-dynamic-context #engine-statechild #enum-subset #message-dispatch #bug60 #bug62 #bug63 #bug64 #bug65 #bug70 #bug71 #bug72 #bug73 #r28-1c #per-item-reactivity #live-keyed #colon-shorthand-html #s149 #s151 #s152 #s153 #s154 #s155 #s156 #s157 #s158 #s159 #native-parser #native-parser-swap #each-promotion #match-promotion #flip-failure-families #f1-engine-substrate-closed #engine-substrate-fix #machinedecls-instance-share #b2-message-arm-closed #native-exprnode-walker #f2-match #promote-each #typed-atcell #server-fn-star #bare-function-failable #cross-file-export-bodystart #flip-451 #deepset-write-loss #reactive-nested-assign #reactive-array-mutation #s160 #s161 #s162 #s163 #s164 #s165 #s166 #s167
 
 ## Links
 - [primary.map.md](./primary.map.md)
