@@ -1,6 +1,6 @@
 # test.map.md
 # project: scrmlts
-# updated: 2026-06-05T20:30:00Z  commit: e947c924
+# updated: 2026-06-06T08:10:00Z  commit: 9d12d980
 
 ## Test Framework
 Runner: bun test (built-in Bun test runner)
@@ -90,7 +90,7 @@ Full suite at S165 close: 23,054 pass / 0 fail / 220 skip / 1 todo / 912 files (
 | compiler/tests/native-match-arm-same-line.test.js | S162 F3: same-line match-arm boundary detection in `parse-expr.js isAtArmBoundary` (NEWLINE gate dropped; `inMatchArmBody` + `peekStartsArmPattern`). |
 | compiler/tests/parser-conformance-markup.test.js | updated S162 for the markup-classification parity surface (touched by the each-promotion arc). |
 
-## S164-S165 New Test Files (native-parser-swap parity-closers)
+## S164-S166 New Test Files (native-parser-swap parity-closers)
 
 | File | What it covers |
 |------|----------------|
@@ -100,12 +100,17 @@ Full suite at S165 close: 23,054 pass / 0 fail / 220 skip / 1 todo / 912 files (
 | compiler/tests/unit/native-tablefor-struct-field-drop.test.js | S164: `typeBodyText`/`joinWithNewlines` preserve struct/enum field-separator newlines (`<tableFor>` no longer drops fields). |
 | compiler/tests/unit/m66-b2-engine-statechild-walker.test.js | S164 B2 (updated): `native-walker/engine-statechild-walker.ts` populates `messageArms` from `parseMessageArms(bodyRaw).arms` + `synthEngineDecl` reads `accepts=`. |
 | compiler/tests/parser-conformance-within-node.test.js + within-node-allowlist.json | updated S164-S165 — native↔live within-node parity (1005/0); the allowlist tracks remaining per-family gaps. |
+| compiler/tests/integration/m6.4a-native-p2-form1.test.js (§B) | S166 ROOT-2: emitted-output regression for the native cross-file `${...}`-wrapped `export const Name = <markup>` raw-slice fix — `<Badge/>` markup EXPANDS in consumer HTML, E-COMPONENT-020/035 GONE (was `raw=""` → empty CE registry). |
 
 NOTE: S165's four families (F2-match string-lit arms, promote-each, R1 typed-`@cell`, server-fn-star) were
 landed with parser-conformance + within-node coverage (1005/0) and the swap flip-harness re-measure; the
 S165 dispatch BRIEFs (docs/changes/native-f2match-literal-arm-2026-06-05/ etc.) record the per-family R26
 byte-identity checks. The flip harness (default exit-0 vs `--parser=scrml-native`) is the family-level gate;
 a fix-dispatch agent re-runs it to re-rank the remaining 451.
+S166 landed two re-triage roots: bare-`function` failable `76059024` (within-node residual-preserving rebump —
+27 class-budgets across 14 failable fixtures whose now-reachable bodies surface PRE-EXISTING native residuals;
+1005→991→1005; full suite 23,054/0) + cross-file `${...}`-export `9d12d980` (within-node 1005/0 with NO allowlist
+rebump — resolved via a `bodyStart` STRIP_KEY in within-node-classifier.ts; cross-file integration 48/0).
 
 ## Fixtures & Factories
 
@@ -142,7 +147,7 @@ S160 ruling (c) tests cover the full Shape 4 dispatch matrix including the refin
 SATISFIES/VIOLATES/UNDETERMINABLE trichotomy and the `synthesizedFromNoRhs` lifecycle note path.
 
 ## Tags
-#scrmlts #map #test #bun #conformance #parser-parity #happy-dom #each-in-dynamic-context #per-item-reactivity #live-keyed #bug64 #bug65 #bug72 #bug73 #colon-shorthand-html #colon-shorthand-canonical #shape4-no-rhs #s153 #s154 #s155 #s156 #s157 #s158 #s159 #s160 #native-parser #native-parser-swap #each-promotion #match-promotion #f3-match-arm #f2-match #promote-each #typed-atcell #server-fn-star #exprnode-walker #within-node-1005 #flip-451 #s161 #s162 #s163 #s164 #s165
+#scrmlts #map #test #bun #conformance #parser-parity #happy-dom #each-in-dynamic-context #per-item-reactivity #live-keyed #bug64 #bug65 #bug72 #bug73 #colon-shorthand-html #colon-shorthand-canonical #shape4-no-rhs #s153 #s154 #s155 #s156 #s157 #s158 #s159 #s160 #native-parser #native-parser-swap #each-promotion #match-promotion #f3-match-arm #f2-match #promote-each #typed-atcell #server-fn-star #exprnode-walker #within-node-1005 #flip-451 #bare-function-failable #cross-file-export-bodystart #s161 #s162 #s163 #s164 #s165 #s166
 
 ## Links
 - [primary.map.md](./primary.map.md)
