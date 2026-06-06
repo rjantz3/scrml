@@ -2137,9 +2137,21 @@ function collectReferencedNames(body: LogicStatement[]): Set<string> {
         return;
 
       // ---- Reactive setters with structured exprs ----
-      case "reactive-nested-assign":
+      case "reactive-nested-assign": {
         walkExprOrString(n.valueExpr, n.value);
+        // cycles-prereq (S168): a bracket-index COMPUTED path segment carries
+        // an index ExprNode (`@arr[serverFn()] = x`) — walk it so a route/
+        // server reference inside the index is not invisible to the walker.
+        const rnaPath = n.path;
+        if (Array.isArray(rnaPath)) {
+          for (const seg of rnaPath) {
+            if (seg && typeof seg === "object") {
+              walkExprOrString(seg.index, seg.raw);
+            }
+          }
+        }
         return;
+      }
       case "reactive-array-mutation":
       case "reactive-explicit-set":
         // Args remain raw strings on these escape-hatch nodes; nothing to

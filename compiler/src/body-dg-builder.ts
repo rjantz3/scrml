@@ -403,6 +403,17 @@ function collectStatementFacts(stmt: LogicStatement): StatementFacts {
         facts.reads.add(reactiveName(target));
       }
       collectExprFacts(node.valueExpr as ExprNode | undefined, facts.reads);
+      // cycles-prereq (S168): a bracket-index COMPUTED path segment carries an
+      // index ExprNode (e.g. `@arr[@sel] = x` reads @sel) — collect its reads
+      // so the statement's reactive dependencies are complete.
+      const rnaPath = (node as { path?: unknown }).path;
+      if (Array.isArray(rnaPath)) {
+        for (const seg of rnaPath) {
+          if (seg && typeof seg === "object") {
+            collectExprFacts((seg as { index?: ExprNode }).index, facts.reads);
+          }
+        }
+      }
       break;
     }
 

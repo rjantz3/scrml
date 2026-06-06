@@ -2496,6 +2496,83 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   }
 
   /**
+   * cycles-prereq (S168 COW-all): collect a heterogeneous reactive path-segment
+   * chain off an `@name` root, accepting BOTH `.ident` AND `[indexExpr]`
+   * segments. Used by the two AT_IDENT dotted-path collectors so that a
+   * bracket-index WRITE (`@arr[i] = x`, `@m["DAL"] = v`, `@obj.f[i].x = v`)
+   * routes through the same `reactive-nested-assign` -> `_scrml_deep_set` COW
+   * path as a dotted write, instead of falling through to a raw in-place
+   * bare-expr (which could construct a live value-cycle: `@arr[0] = @arr`).
+   *
+   * Caller MUST have already confirmed `peek().text === "." || peek().text === "["`.
+   * Consumes the full `(.ident | [idx])+` chain and leaves the cursor on the
+   * first token AFTER the chain (the `=` / `(` / etc.).
+   *
+   * Segment representation (consumed by emit-logic `reactive-nested-assign`):
+   *   - `.ident`            -> the ident string (unchanged dotted form).
+   *   - `[<int>]` / `[<str>]` (bare literal) -> the literal value as a STRING
+   *     segment ("0" / "DAL"). JS array-index coercion makes arr["0"] === arr[0]
+   *     and object["DAL"] === object.DAL, so a literal index rides the existing
+   *     string representation with no computed segment.
+   *   - `[<expr>]` (non-literal) -> a COMPUTED segment `{ index: ExprNode, raw }`.
+   *
+   * Returns `{ segments, reconstruct }` where `reconstruct` is the faithful
+   * source-text suffix (`.field[i].x` / `[0]`) for the bare-expr READ fallback
+   * (a bracket access NOT followed by `=` is a read, not COW'd).
+   */
+  function collectAtPathSegments() {
+    const segments = [];
+    let reconstruct = "";
+    while (peek().text === "." || peek().text === "[") {
+      if (peek().text === ".") {
+        consume(); // consume "."
+        if (peek().kind === "IDENT" || peek().kind === "KEYWORD") {
+          const segTok = consume();
+          segments.push(segTok.text);
+          reconstruct += "." + segTok.text;
+        } else {
+          // Malformed dotted segment — caller reconstructs the rest verbatim.
+          reconstruct += ".";
+          break;
+        }
+      } else {
+        // Bracket-index segment: scan to the matching `]`, bracket-depth aware.
+        const openTok = consume(); // consume "["
+        const innerParts = [];
+        let bracketDepth = 1;
+        while (bracketDepth > 0 && peek().kind !== "EOF") {
+          const t = peek();
+          if (t.kind === "PUNCT" && t.text === "[") bracketDepth++;
+          if (t.kind === "PUNCT" && t.text === "]") {
+            bracketDepth--;
+            if (bracketDepth === 0) { consume(); break; }
+          }
+          innerParts.push(consume());
+        }
+        const innerToks = innerParts;
+        const innerText = innerToks.map((t) => t.text).join(" ").trim();
+        // Literal-index optimization: a SINGLE bare NUMBER or STRING token rides
+        // the existing string-segment representation (no computed segment).
+        if (innerToks.length === 1 && (innerToks[0].kind === "NUMBER" || innerToks[0].kind === "STRING")) {
+          const litTok = innerToks[0];
+          segments.push(litTok.text);
+          // Faithful reconstruction: STRING tokens lose their quotes during
+          // tokenization, so re-quote for the READ-fallback source text.
+          reconstruct += litTok.kind === "STRING"
+            ? "[" + JSON.stringify(litTok.text) + "]"
+            : "[" + litTok.text + "]";
+        } else {
+          // Non-literal index -> computed segment carrying the index ExprNode.
+          const idxStart = (openTok.span && typeof openTok.span.end === "number") ? openTok.span.end : 0;
+          segments.push({ index: safeParseExprToNode(innerText, idxStart), raw: innerText });
+          reconstruct += "[" + innerText + "]";
+        }
+      }
+    }
+    return { segments, reconstruct };
+  }
+
+  /**
    * Collect tokens into a raw expression string up to (but not including)
    * the next statement boundary. Returns { expr: string, span }.
    *
@@ -2767,31 +2844,56 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             // statement. The forward scan only confirms the path TERMINATES as a
             // statement (a bare `=`, not `==`, after the chain — a deep-set; or
             // a 1-segment array-mutation method immediately followed by `(`).
+            //
+            // cycles-prereq (S168 COW-all): the chain also accepts `[idx]`
+            // bracket segments so a bracket-index WRITE (`@arr[i] = value`)
+            // following another statement is recognized as a NEW statement.
+            // Pre-fix, a bracket-write's peek(1) is `[` (not `.`/`=`), so none
+            // of the boundary checks fired and the preceding statement's
+            // collectExpr swallowed it (same write-loss class as the S167
+            // deep-set fix, now generalized to bracket targets).
             if (
               tok.kind === "AT_IDENT" &&
               lastPart !== "=" && lastPart !== "." &&
-              next1 && next1.kind === "PUNCT" && next1.text === "."
+              next1 && next1.kind === "PUNCT" && (next1.text === "." || next1.text === "[")
             ) {
               const ARRAY_MUTATIONS = new Set(["push", "pop", "shift", "unshift", "splice", "sort", "reverse", "fill"]);
-              // Walk the `(.ident)+` chain starting at peek(1) === `.`.
+              // Walk the heterogeneous `(.ident | [idx])+` chain from peek(1).
               let k = 1;
-              const segs = [];
-              while (peek(k)?.kind === "PUNCT" && peek(k)?.text === ".") {
-                const segTok = peek(k + 1);
-                if (segTok && (segTok.kind === "IDENT" || segTok.kind === "KEYWORD")) {
-                  segs.push(segTok.text);
-                  k += 2;
+              const segs = [];           // dotted-ident segments (for mutation check)
+              let sawBracket = false;
+              let valid = true;
+              while (peek(k)?.kind === "PUNCT" && (peek(k)?.text === "." || peek(k)?.text === "[")) {
+                if (peek(k).text === ".") {
+                  const segTok = peek(k + 1);
+                  if (segTok && (segTok.kind === "IDENT" || segTok.kind === "KEYWORD")) {
+                    segs.push(segTok.text);
+                    k += 2;
+                  } else {
+                    break;
+                  }
                 } else {
-                  break;
+                  // `[ ... ]` — skip to the matching `]`, bracket-depth aware.
+                  sawBracket = true;
+                  let bd = 1;
+                  let j = k + 1;
+                  while (bd > 0 && peek(j)?.kind !== "EOF") {
+                    const pt = peek(j);
+                    if (pt.kind === "PUNCT" && pt.text === "[") bd++;
+                    else if (pt.kind === "PUNCT" && pt.text === "]") bd--;
+                    j++;
+                  }
+                  if (bd !== 0) { valid = false; break; }
+                  k = j;
                 }
               }
-              if (segs.length > 0) {
+              if (valid && (segs.length > 0 || sawBracket)) {
                 const afterChain = peek(k);
-                // Array-mutation: `@arr.method(` (single segment, known method).
+                // Array-mutation: `@arr.method(` (single dotted segment, no bracket).
                 const isArrayMutation =
-                  segs.length === 1 && ARRAY_MUTATIONS.has(segs[0]) &&
+                  !sawBracket && segs.length === 1 && ARRAY_MUTATIONS.has(segs[0]) &&
                   afterChain && afterChain.kind === "PUNCT" && afterChain.text === "(";
-                // Deep-set: `@obj.path... = value` (bare `=`, not `==`).
+                // Deep-set / bracket-write: `@obj.path... = value` (bare `=`, not `==`).
                 const isDeepSet =
                   afterChain && afterChain.kind === "PUNCT" && afterChain.text === "=" &&
                   peek(k + 1)?.text !== "=";
@@ -5504,30 +5606,19 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       const startTok = consume();
       const name = tok.text.slice(1);
 
-      // Check for dotted path: @obj.path.to.prop = value  OR  @arr.push(...)
-      if (peek().text === ".") {
-        // Collect the dot-separated path segments
-        const pathSegments = [];
-        let peekIdx = 0;
-        let tempTokens = [];
-
-        // Lookahead to collect .ident chains
-        while (peek().text === ".") {
-          const dotTok = consume();
-          tempTokens.push(dotTok);
-          if (peek().kind === "IDENT" || peek().kind === "KEYWORD") {
-            const segTok = consume();
-            tempTokens.push(segTok);
-            pathSegments.push(segTok.text);
-          } else {
-            break;
-          }
-        }
+      // Check for a reactive path: @obj.path.to.prop = value  OR  @arr.push(...)
+      // OR (cycles-prereq S168) a bracket-index WRITE @arr[i] = value /
+      // @m["DAL"] = value / @obj.field[i].x = value. Bracket-writes route
+      // through the same COW (_scrml_deep_set) path as dotted writes.
+      if (peek().text === "." || peek().text === "[") {
+        // Collect the heterogeneous (.ident | [idx])+ path-segment chain.
+        const { segments: pathSegments, reconstruct: pathStr } = collectAtPathSegments();
 
         // Check for array mutation patterns: @arr.push(...), @arr.splice(...)
+        // — only a dotted single-segment (string) method, never a bracket index.
         const ARRAY_MUTATIONS = ["push", "pop", "shift", "unshift", "splice", "sort", "reverse", "fill"];
         const lastSeg = pathSegments[pathSegments.length - 1];
-        if (pathSegments.length === 1 && ARRAY_MUTATIONS.includes(lastSeg) && peek().text === "(") {
+        if (pathSegments.length === 1 && typeof lastSeg === "string" && ARRAY_MUTATIONS.includes(lastSeg) && peek().text === "(") {
           // @arr.push(item) → reactive-array-mutation node
           consume(); // consume "("
           const argParts = [];
@@ -5550,7 +5641,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           };
         }
 
-        // Check for nested assignment: @obj.path = value
+        // Check for nested assignment: @obj.path = value / @arr[i] = value
         if (peek().text === "=" && peek(1)?.text !== "=") {
           consume(); // consume "="
           const { expr, span } = collectExpr();
@@ -5565,8 +5656,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           };
         }
 
-        // Not a nested assignment or array mutation — reconstruct as bare-expr
-        const pathStr = "." + pathSegments.join(".");
+        // Not a write — a READ (e.g. @arr[i].foo()) — reconstruct as bare-expr
+        // verbatim from the faithful path source-text suffix. Reads are NOT COW'd.
         const { expr, span } = collectExpr();
         const _be4 = startTok.text + pathStr + (expr ? " " + expr : "");
         return { id: ++counter.next, kind: "bare-expr", expr: _be4, exprNode: safeParseExprToNode(_be4, 0), span: spanOf(startTok, peek()) };
@@ -8563,27 +8654,16 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       const startTok = consume();
       const name = tok.text.slice(1); // strip @
 
-      // Check for dotted path: @obj.path.to.prop = value  OR  @arr.push(...)
-      if (peek().text === ".") {
-        const pathSegments = [];
-        const tempTokens = [];
+      // Check for a reactive path: @obj.path.to.prop = value  OR  @arr.push(...)
+      // OR (cycles-prereq S168) a bracket-index WRITE @arr[i] = value etc.
+      if (peek().text === "." || peek().text === "[") {
+        const { segments: pathSegments, reconstruct: pathStr } = collectAtPathSegments();
 
-        while (peek().text === ".") {
-          const dotTok = consume();
-          tempTokens.push(dotTok);
-          if (peek().kind === "IDENT" || peek().kind === "KEYWORD") {
-            const segTok = consume();
-            tempTokens.push(segTok);
-            pathSegments.push(segTok.text);
-          } else {
-            break;
-          }
-        }
-
-        // Array mutation patterns: @arr.push(...), @arr.splice(...)
+        // Array mutation patterns: @arr.push(...), @arr.splice(...) — dotted
+        // single-segment (string) method only, never a bracket index.
         const ARRAY_MUTATIONS = ["push", "pop", "shift", "unshift", "splice", "sort", "reverse", "fill"];
         const lastSeg = pathSegments[pathSegments.length - 1];
-        if (pathSegments.length === 1 && ARRAY_MUTATIONS.includes(lastSeg) && peek().text === "(") {
+        if (pathSegments.length === 1 && typeof lastSeg === "string" && ARRAY_MUTATIONS.includes(lastSeg) && peek().text === "(") {
           consume(); // consume "("
           const argParts = [];
           let parenDepth = 1;
@@ -8606,7 +8686,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           continue;
         }
 
-        // Nested assignment: @obj.path = value
+        // Nested assignment: @obj.path = value / @arr[i] = value
         if (peek().text === "=" && peek(1)?.text !== "=") {
           consume(); // consume "="
           const { expr, span } = collectExpr();
@@ -8622,8 +8702,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           continue;
         }
 
-        // Not a nested assignment or array mutation — reconstruct as bare-expr
-        const pathStr = "." + pathSegments.join(".");
+        // Not a write — a READ — reconstruct as bare-expr from the faithful
+        // path source-text suffix. Reads are NOT COW'd.
         const { expr, span } = collectExpr();
         const _be9 = startTok.text + pathStr + (expr ? " " + expr : "");
         nodes.push({

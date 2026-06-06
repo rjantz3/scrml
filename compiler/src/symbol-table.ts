@@ -3615,7 +3615,12 @@ function checkReactiveNestedAssign(
     }
   }
   if (derivedRec) {
-    const tail = n.path.slice(derivedPath.length - 1);
+    // cycles-prereq (S168): a bracket-index COMPUTED segment ({ index }) renders
+    // as "[…]" in the diagnostic tail (mirrors scanPrefixesAndFireAssign's index
+    // convention) — never the raw object (which would print "[object Object]").
+    const tail = n.path
+      .slice(derivedPath.length - 1)
+      .map((seg: unknown) => (typeof seg === "string" ? seg : "[…]"));
     firePropertyAssign(
       errors,
       derivedPath,

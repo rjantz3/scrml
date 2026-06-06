@@ -164,30 +164,31 @@ describe("A1a Step 10 — mutation shape verification (MemberCall / MemberAssign
   });
 
   // ---------------------------------------------------------------------------
-  // §M10.4 — `@arr[0] = "x"` (computed index assignment) flows through bare-expr
+  // §M10.4 — `@arr[0] = "x"` (bracket-index WRITE) → reactive-nested-assign (COW)
   //
-  // Computed-index access does NOT match the `reactive-nested-assign` shape
-  // (which expects dotted-path segments via the IDENT/KEYWORD continuation in
-  // ast-builder.js:3519). It flows through bare-expr; `target.kind === "index"`
-  // distinguishes it from dotted-path forms.
+  // cycles-prereq (S168 COW-all): a bracket-index write now routes through the
+  // same `reactive-nested-assign` -> `_scrml_deep_set` clone-mutate-replace path
+  // as a dotted write (SPEC §6.5.1 reassignment-canonical), instead of falling
+  // through to a raw in-place bare-expr (`_scrml_reactive_get("arr")[0] = ...`)
+  // which could construct a live value-cycle (`@arr[0] = @arr`). A BARE-LITERAL
+  // index (`[0]`) lowers to a STRING path segment ("0") — JS array-index
+  // coercion makes arr["0"] === arr[0], so it rides the existing dotted-path
+  // representation with no computed segment. (Pre-S168 this asserted the old
+  // cycle-capable bare-expr/index shape — updated to the COW shape.)
   // ---------------------------------------------------------------------------
-  test("§M10.4 `@arr[0] = \"x\"` → kind: bare-expr; exprNode.target.kind=index", () => {
+  test("§M10.4 `@arr[0] = \"x\"` → kind: reactive-nested-assign with path=[\"0\"] (COW)", () => {
     const src = `<program>\${ @arr[0] = "x" }</program>`;
     const { ast, errors } = parse(src);
     expect(errors.length).toBe(0);
     const body = getLogicBody(ast);
     expect(body.length).toBe(1);
     const node = body[0];
-    expect(node.kind).toBe("bare-expr");
-    expect(node.exprNode.kind).toBe("assign");
-    expect(node.exprNode.op).toBe("=");
-    // target is an index expression (computed access)
-    expect(node.exprNode.target.kind).toBe("index");
-    expect(node.exprNode.target.object.kind).toBe("ident");
-    expect(node.exprNode.target.object.name).toBe("@arr");
-    // index is the literal 0
-    expect(node.exprNode.target.index.kind).toBe("lit");
-    expect(node.exprNode.target.index.value).toBe(0);
+    expect(node.kind).toBe("reactive-nested-assign");
+    expect(node.target).toBe("arr");
+    // bare-literal index → STRING path segment (no computed segment)
+    expect(node.path).toEqual(["0"]);
+    expect(node.valueExpr.kind).toBe("lit");
+    expect(node.valueExpr.value).toBe("x");
   });
 
   // ---------------------------------------------------------------------------

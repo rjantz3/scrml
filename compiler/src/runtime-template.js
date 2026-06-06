@@ -2488,16 +2488,32 @@ function _scrml_input_gamepad_destroy(id, scopeId) {
 // §45 Structural equality — deep value comparison for structs and enums
 // ---------------------------------------------------------------------------
 
-function _scrml_structural_eq(a, b) {
+function _scrml_structural_eq(a, b, seen) {
   if (a === b) return true;
   if (a === null || b === null || a === undefined || b === undefined) return false;
   if (typeof a !== typeof b) return false;
   if (typeof a !== "object") return a === b;
+  // Cycle guard: value-cycles are FORBIDDEN in scrml (§6.5.1 reassignment-
+  // canonical), but a malformed JS-host value reaching == could still carry
+  // one. Track visited (a, b) pairs so a revisit terminates instead of
+  // stack-overflowing. seen maps each a-object to the WeakSet of b-objects
+  // already compared against it. The standard structural-eq cycle convention
+  // is assume-equal-on-revisit: the only way to reach a matching (a, b)
+  // revisit is a structurally-matching cyclic shape.
+  if (seen === undefined) seen = new WeakMap();
+  let seenBs = seen.get(a);
+  if (seenBs === undefined) {
+    seenBs = new WeakSet();
+    seen.set(a, seenBs);
+  } else if (seenBs.has(b)) {
+    return true;
+  }
+  seenBs.add(b);
   // Array comparison (for tuple-like fields)
   if (Array.isArray(a)) {
     if (!Array.isArray(b) || a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) {
-      if (!_scrml_structural_eq(a[i], b[i])) return false;
+      if (!_scrml_structural_eq(a[i], b[i], seen)) return false;
     }
     return true;
   }
@@ -2510,7 +2526,7 @@ function _scrml_structural_eq(a, b) {
     if (aKeys.length !== bKeys.length) return false;
     for (const key of aKeys) {
       if (key === "_tag") continue;
-      if (!_scrml_structural_eq(a[key], b[key])) return false;
+      if (!_scrml_structural_eq(a[key], b[key], seen)) return false;
     }
     return true;
   }
@@ -2520,7 +2536,7 @@ function _scrml_structural_eq(a, b) {
   if (aKeys.length !== bKeys.length) return false;
   for (const key of aKeys) {
     if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
-    if (!_scrml_structural_eq(a[key], b[key])) return false;
+    if (!_scrml_structural_eq(a[key], b[key], seen)) return false;
   }
   return true;
 }

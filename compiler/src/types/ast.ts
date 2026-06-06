@@ -758,8 +758,15 @@ export interface ReactiveNestedAssignNode extends BaseNode {
   kind: "reactive-nested-assign";
   /** Root reactive variable name (without `@`). */
   target: string;
-  /** Dot-separated path segments (e.g. ["path", "to", "prop"]). */
-  path: string[];
+  /**
+   * Heterogeneous path segments. A dotted `.field` segment (and a bare-literal
+   * bracket index like `[0]` / `["DAL"]`) is a STRING (e.g. ["path", "to",
+   * "prop"]). A NON-literal bracket index (`@arr[@sel] = x`, cycles-prereq
+   * S168 COW-all) is a COMPUTED segment `{ index: ExprNode }` carrying the
+   * index expression; codegen emits it inline so the path reaches
+   * `_scrml_deep_set` as a JS array literal.
+   */
+  path: (string | { index?: ExprNode; raw?: string })[];
   /** Structured ExprNode form of the value. Populated by ast-builder. */
   valueExpr?: ExprNode;
 }

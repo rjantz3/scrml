@@ -7238,7 +7238,8 @@ function annotateNodes(
         // terminal substate, the write is illegal regardless of path depth.
         if (stateTypeRegistry) {
           const rnaTarget = (n as Record<string, unknown>).target as string | undefined;
-          const rnaPath = (n as Record<string, unknown>).path as string[] | undefined;
+          // cycles-prereq (S168): path is heterogeneous (string | { index }).
+          const rnaPath = (n as Record<string, unknown>).path as Array<string | { index?: unknown }> | undefined;
           if (rnaTarget && Array.isArray(rnaPath) && rnaPath.length > 0) {
             const entry = scopeChain.lookup(rnaTarget);
             const rt = entry?.resolvedType;
@@ -7248,7 +7249,8 @@ function annotateNodes(
                 const transitions = stateType.transitions;
                 const isTerminal = !transitions || transitions.size === 0;
                 if (isTerminal) {
-                  const fieldName = rnaPath[0];
+                  // A computed bracket-index first segment renders as "[…]".
+                  const fieldName = typeof rnaPath[0] === "string" ? rnaPath[0] : "[…]";
                   errors.push(new TSError(
                     "E-STATE-TERMINAL-MUTATION",
                     `E-STATE-TERMINAL-MUTATION: Cannot write field \`${fieldName}\` on \`${stateType.name}\` — ` +

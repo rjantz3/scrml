@@ -1609,7 +1609,14 @@ function substitutePropsInLogicStmt(
     }
     case "reactive-nested-assign": {
       const n = stmt as ReactiveNestedAssignNode;
-      return { ...n, valueExpr: subInExpr(n.valueExpr) } as ReactiveNestedAssignNode;
+      // cycles-prereq (S168): substitute props into any bracket-index COMPUTED
+      // path segment ({ index: ExprNode }) too; STRING segments pass through.
+      const newPath = n.path.map((seg) =>
+        (seg !== null && typeof seg === "object")
+          ? { ...seg, index: subInExpr(seg.index) }
+          : seg,
+      );
+      return { ...n, path: newPath, valueExpr: subInExpr(n.valueExpr) } as ReactiveNestedAssignNode;
     }
     case "function-decl": {
       const n = stmt as FunctionDeclNode;

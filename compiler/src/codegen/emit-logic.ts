@@ -3004,9 +3004,25 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       const ctx = opts.encodingCtx;
       const encodedTarget = ctx ? ctx.encode(node.target) : node.target;
       const target = JSON.stringify(encodedTarget);
-      const path = JSON.stringify(node.path ?? []);
+      // cycles-prereq (S168 COW-all): the path is a heterogeneous segment list.
+      // A STRING segment (dotted `.field` OR a bare-literal bracket index that
+      // the parser already lowered to a string, e.g. "0" / "DAL") emits as a
+      // JSON string literal. A COMPUTED segment `{ index: ExprNode }` (a
+      // non-literal bracket index, `@arr[@sel] = x`) emits its index expression
+      // inline, so the path reaches `_scrml_deep_set` as a JS array literal —
+      // e.g. `[_scrml_reactive_get("sel")]`. The clone-then-set inside
+      // `_scrml_deep_set` breaks any self-reference into a stale (acyclic)
+      // snapshot, so even `@arr[0] = @arr` produces no live cycle.
+      const exprCtx = _makeExprCtx(opts);
+      const segments: any[] = node.path ?? [];
+      const pathParts = segments.map((seg: any) =>
+        (seg !== null && typeof seg === "object")
+          ? emitExprField(seg.index, seg.raw ?? "null", exprCtx)
+          : JSON.stringify(seg),
+      );
+      const path = `[${pathParts.join(", ")}]`;
       // M-7C-D-12 Track 3: fallback uses "null" not "undefined" per §42.5/§42.8.
-      const value = emitExprField(node.valueExpr, node.value ?? "null", _makeExprCtx(opts));
+      const value = emitExprField(node.valueExpr, node.value ?? "null", exprCtx);
       return `_scrml_reactive_set(${target}, _scrml_deep_set(_scrml_reactive_get(${target}), ${path}, ${value}));`;
     }
 

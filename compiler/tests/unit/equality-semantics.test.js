@@ -211,15 +211,24 @@ describe("E-EQ-002 — == not and != not are not valid", () => {
 function buildStructuralEq() {
   // Extract just the structural eq function and eval it
   const fn = new Function(`
-    function _scrml_structural_eq(a, b) {
+    function _scrml_structural_eq(a, b, seen) {
       if (a === b) return true;
       if (a === null || b === null || a === undefined || b === undefined) return false;
       if (typeof a !== typeof b) return false;
       if (typeof a !== "object") return a === b;
+      if (seen === undefined) seen = new WeakMap();
+      let seenBs = seen.get(a);
+      if (seenBs === undefined) {
+        seenBs = new WeakSet();
+        seen.set(a, seenBs);
+      } else if (seenBs.has(b)) {
+        return true;
+      }
+      seenBs.add(b);
       if (Array.isArray(a)) {
         if (!Array.isArray(b) || a.length !== b.length) return false;
         for (let i = 0; i < a.length; i++) {
-          if (!_scrml_structural_eq(a[i], b[i])) return false;
+          if (!_scrml_structural_eq(a[i], b[i], seen)) return false;
         }
         return true;
       }
@@ -230,7 +239,7 @@ function buildStructuralEq() {
         if (aKeys.length !== bKeys.length) return false;
         for (const key of aKeys) {
           if (key === "_tag") continue;
-          if (!_scrml_structural_eq(a[key], b[key])) return false;
+          if (!_scrml_structural_eq(a[key], b[key], seen)) return false;
         }
         return true;
       }
@@ -239,7 +248,7 @@ function buildStructuralEq() {
       if (aKeys.length !== bKeys.length) return false;
       for (const key of aKeys) {
         if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
-        if (!_scrml_structural_eq(a[key], b[key])) return false;
+        if (!_scrml_structural_eq(a[key], b[key], seen)) return false;
       }
       return true;
     }
@@ -334,6 +343,56 @@ describe("_scrml_structural_eq — deep value comparison (§45.4)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Cycle-guard (cycles-prereq, S168) — value-cycles are FORBIDDEN, but a
+// malformed JS-host value reaching `==` must terminate, not stack-overflow.
+// ---------------------------------------------------------------------------
+
+describe("_scrml_structural_eq — cycle guard (cycles-prereq S168)", () => {
+  const eq = buildStructuralEq();
+
+  test("two distinct-but-equal self-cyclic objects compare without RangeError", () => {
+    const a = { x: 1 };
+    a.self = a; // a.self === a (self-cycle)
+    const b = { x: 1 };
+    b.self = b; // b.self === b (self-cycle, distinct object)
+    // Pre-guard this threw `RangeError: Maximum call stack size exceeded`.
+    // Assume-equal-on-revisit: structurally identical cyclic shape → true.
+    expect(() => eq(a, b)).not.toThrow();
+    expect(eq(a, b)).toBe(true);
+  });
+
+  test("distinct-but-equal mutually-cyclic arrays terminate", () => {
+    const a = [1, 2, 3];
+    a[0] = a; // self-cycle at index 0
+    const b = [1, 2, 3];
+    b[0] = b;
+    expect(() => eq(a, b)).not.toThrow();
+    expect(eq(a, b)).toBe(true);
+  });
+
+  test("cyclic objects that DIFFER on a non-cyclic field still return false", () => {
+    const a = { x: 1 };
+    a.self = a;
+    const b = { x: 2 }; // differs on x
+    b.self = b;
+    expect(() => eq(a, b)).not.toThrow();
+    expect(eq(a, b)).toBe(false);
+  });
+
+  test("acyclic comparisons sharing a sub-object reference are unaffected", () => {
+    const shared = { v: 7 };
+    expect(eq({ a: shared, b: shared }, { a: { v: 7 }, b: { v: 7 } })).toBe(true);
+    expect(eq({ a: shared, b: shared }, { a: { v: 7 }, b: { v: 8 } })).toBe(false);
+  });
+
+  test("identity short-circuit on a cyclic object returns true immediately", () => {
+    const a = {};
+    a.self = a;
+    expect(eq(a, a)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // §31-§33: Full pipeline and runtime integration
 // ---------------------------------------------------------------------------
 
@@ -351,5 +410,13 @@ describe("Full codegen pipeline — equality in JS output", () => {
   test("§33 runtime template contains _scrml_structural_eq", () => {
     expect(SCRML_RUNTIME).toContain("_scrml_structural_eq");
     expect(SCRML_RUNTIME).toContain("§45 Structural equality");
+  });
+
+  test("§34 runtime structural-eq carries the cycle-guard seen param (S168)", () => {
+    // Regression guard: the inline test copy above mirrors the runtime; this
+    // ensures the runtime template itself ships the seen-set guard so the
+    // mirror cannot silently drift back to the cycle-unsafe form.
+    expect(SCRML_RUNTIME).toContain("function _scrml_structural_eq(a, b, seen)");
+    expect(SCRML_RUNTIME).toContain("seen = new WeakMap()");
   });
 });
