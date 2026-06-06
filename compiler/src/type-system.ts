@@ -590,8 +590,50 @@ function tArray(element: ResolvedType): ArrayType {
   return { kind: "array", element };
 }
 
+/**
+ * §42.3.1 — Union-`not` normalization.
+ *
+ * A union type is normalized so that (a) nested-union members are flattened
+ * (spliced in) and (b) duplicate `not` members collapse to exactly one. This
+ * makes re-optionalizing an already-optional type idempotent:
+ * `(T | not) | not` normalizes to `T | not`. Load-bearing for value-native
+ * maps (§59.6): a bracket-read on a `[K: V | not]` map yields `(V | not) | not`,
+ * which must collapse to `V | not` so the EXACTLY-`[T, not]` nullable-union
+ * recognizers (schemaFor §41.15.8 / tableFor §41.16.6) still fire.
+ *
+ * SCOPE (hard constraint): the ONLY transformations are (a) flatten nested
+ * unions and (b) dedup `not`. Non-`not` members are NOT reordered, deduped, or
+ * canonicalized — that would break the exactly-2-member, member-order-agnostic
+ * recognizers. Returns the normalized member list.
+ */
+function normalizeUnion(members: ResolvedType[]): ResolvedType[] {
+  const out: ResolvedType[] = [];
+  let sawNot = false;
+  for (const member of members) {
+    if (member.kind === "union") {
+      // Flatten: splice the inner union's (already-constructed, hence already-
+      // normalized) members in. Each spliced member is re-checked for `not`
+      // dedup below.
+      for (const inner of (member as UnionType).members) {
+        if (inner.kind === "not") {
+          if (sawNot) continue;
+          sawNot = true;
+        }
+        out.push(inner);
+      }
+      continue;
+    }
+    if (member.kind === "not") {
+      if (sawNot) continue;
+      sawNot = true;
+    }
+    out.push(member);
+  }
+  return out;
+}
+
 function tUnion(members: ResolvedType[]): UnionType {
-  return { kind: "union", members };
+  return { kind: "union", members: normalizeUnion(members) };
 }
 
 function tAsIs(constraint: ResolvedType | null = null): AsIsType {
