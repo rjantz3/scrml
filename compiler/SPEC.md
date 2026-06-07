@@ -2164,7 +2164,7 @@ const <badge>     = <span class="badge">${@userName}</span>    // markup-typed d
 ```
 
 - `<name>: T` is exact sugar for `<name>: T = <canonical-empty-of-T>`; the explicit form remains valid and compiles identically. A canonical-empty cell `is some` (§9.4/§42.2.5) — `""`/`0`/`false`/`[]` are DEFINED values (§42.1.1), NOT absence.
-- **`date` / `timestamp`** (registered string-shaped primitives) have no meaningful canonical empty → `not` (next bullet). scrml has no `float`/`real` type and no anonymous record/map annotation type — every record-shaped cell is a named `:struct`, which has required fields and therefore no canonical empty → `not`.
+- **`date` / `timestamp`** (registered string-shaped primitives) have no meaningful canonical empty → `not` (next bullet). scrml has no `float`/`real` type and no anonymous *record* annotation type — every record-shaped cell is a named `:struct`, which has required fields and therefore no canonical empty → `not`. (The value-native *map* type `[K:V]` — §59 — is a distinct keyed-collection annotation, not a record; its empty form is the `[:]` map literal.)
 
 **No-canonical-empty types → `not`.** A bare `T` with no canonical empty — a named `:struct` (`{}` does not inhabit its required fields), an `:enum` (the compiler must not pick a default variant — engines choose the start via `initial=`, §51.0.E), `date`/`timestamp`, an opaque/custom/`lin` type — initializes to **`not`** and the cell acquires an **implicit `(not to T)` lifecycle** (§14.12):
 
@@ -31584,7 +31584,7 @@ Manifest-level faults (a malformed or missing `[story]` table entry) are project
 
 **Added: S168, 2026-06-06. Source: JS-host-boundary DD + map-surface debate (grafted hybrid 53/60) + user ratifications S167–S168.**
 
-> **Nominal — spec-ahead-of-implementation.** This section specifies the value-native map type. The compiler implementation (type-system recognition, parser, runtime, codegen) is the phase-c build arc; until it lands, `*`-marked clauses are specified-but-not-yet-proven. The hard ship-gate prerequisite — acyclic value-data (no cyclic keys) — landed at scrmlTS `8d9db4e1` (the cycles-prereq: COW-all bracket-write + a seen-set guard in `_scrml_structural_eq`).
+> **Implemented — phase-c landed at S169 (scrmlTS).** This section specifies the value-native map type, and the **default-pipeline implementation is complete**: type-system recognition + key-comparability + the `E-MAP-BRACKET-WRITE` gate (D1), the legacy-pipeline `[:]`/`[k:v]` literal parser (D2a), the runtime — value-canonical hasher + map structure + the method surface + the lossless codec + order-independent `==` (D3) — and codegen lowering (D4). Maps compile **end-to-end on the default pipeline** (R26-verified: compile + `node --check` + runtime correctness). **Follow-ons NOT yet landed:** the native-parser path (D2b — the native parser is shadow-only), the `as (k, v)` iteration-destructure sugar (D2c — the `as e` + `e.key`/`e.value` baseline IS landed), and `set` (D5, decoupled). The hard ship-gate prerequisite — acyclic value-data (no cyclic keys) — landed earlier at scrmlTS `8d9db4e1` (the cycles-prereq: COW-all bracket-write + a seen-set guard in `_scrml_structural_eq`).
 
 ### 59.1 Overview
 
@@ -31738,6 +31738,8 @@ Comparing a map to a non-map value — `@m == @arr`, `@m == 5` — is a **cross-
 ### 59.10 Serialization — lossless
 
 A map round-trips losslessly across every value boundary: the §57 wire format (server-fn returns, channels, SSE), SQL/JSON columns, and `==`. The map serializes via a **lossless codec** (an entries-array encoding, canonically ordered for stability), **not** raw JS `Map` (which `JSON.stringify` silently drops — `JSON.stringify(new Map([["a",1]]))` is `"{}"`). The decoder reconstructs the value-native map. A `[K: V|not]` map whose stored values include `not` round-trips **losslessly**: a stored `not` value is encoded via the §57 absence-envelope (`{"__scrml_absent": true}`) inside the entries array, so a present-`not` value is preserved distinctly from an absent key across the wire. *(Phase-c: the codec is a sibling of the §57 absence-envelope encoder; the canonical entry ordering reuses §59.5's value-canonical key order for bit-stability.)*
+
+**`@ordered` iteration order is NOT wire-preserved (S169 clarification).** The codec encodes entries in canonical key order (the bit-stability requirement above), so an `@ordered` map's *insertion order* does not survive a §57-wire / SQL round-trip — a decoded `@ordered` map iterates in canonical order (and remains `@ordered` for subsequent inserts). This is **lossless at the value level**: `==` is order-independent even for `@ordered` maps (§59.9), so the round-tripped map is `==` to the original — "lossless" means `==`-preserving, not iteration-order-preserving. Order-significant code re-establishes order after a round-trip via `.sorted()` / re-insertion. (The two properties are mutually exclusive for `@ordered`: two `==`-equal `@ordered` maps can carry different insertion orders, so preserving insertion order across the wire would *break* bit-stability; §59.9's order-independence resolves the tension in favor of bit-stability.)
 
 ### 59.11 Error and warning codes
 
