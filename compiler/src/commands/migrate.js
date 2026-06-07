@@ -265,6 +265,20 @@ export function rewriteMatchArmArrows(source, filePath) {
         const aspan = arm.span;
         recordArm(arm.armArrow, aspan && typeof aspan.start === "number" ? aspan.start : -1);
       }
+    } else if (kind === "engine-decl" && Array.isArray(n.inlineMatchArmArrows)) {
+      // S171 — §51.0.J derived-engine `derived=match @VAR { ... }` arms join the
+      // `:>` deprecation. The body is captured as RAW TEXT (no structured arm
+      // nodes), so the parser stamps `inlineMatchArmArrows`: one entry per arm
+      // with the separator glyph + its ABSOLUTE source offset (already the exact
+      // glyph position, computed arm-context-scoped — never a body-internal
+      // arrow-fn `=>` / `->`). Record each directly by offset (no indexOf needed
+      // — the offset IS the glyph's first char). recordArm's indexOf(glyph,
+      // offset) is a no-op (the glyph is already at `offset`), and the
+      // right-to-left splice + byte-check apply uniformly.
+      for (const a of n.inlineMatchArmArrows) {
+        if (!a || typeof a !== "object") continue;
+        recordArm(a.glyph, typeof a.srcOffset === "number" ? a.srcOffset : -1);
+      }
     }
     for (const k of Object.keys(n)) {
       if (k === "span") continue;

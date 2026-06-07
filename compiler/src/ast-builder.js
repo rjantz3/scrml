@@ -1691,6 +1691,139 @@ function matchArrowGlyphAt(peek, k = 0) {
   return null;
 }
 
+/**
+ * Scan a `derived=match @VAR { ... }` engine-attribute match BODY (the raw text
+ * between the outer `{` and `}` — `engine-decl.inlineMatchBody`) for its
+ * arm-separator arrow glyphs. Returns one entry per ARM, in source order:
+ *   { glyph: ":>" | "=>" | "->", srcOffset: <absolute source index of the glyph> }
+ *
+ * S171 — the §51.0.J derived-engine `derived=match` match arms join the §18.2
+ * `:>` arm-separator deprecation: `=>` / `->` are deprecated aliases of the
+ * canonical `:>` (all three lower identically through `rewriteExpr`, byte-
+ * identical JS). This scanner is the arm-context-scoped locator the
+ * W-MATCH-ARROW-LEGACY lint (type-system.ts) + `bun scrml migrate --fix`
+ * (commands/migrate.js) both consume — the body is captured as RAW TEXT (no
+ * structured arm nodes, unlike block-form / value-return match), so the
+ * `armArrow`-field path the other loci use is unavailable here.
+ *
+ * ARM-CONTEXT-SCOPED: an arm separator is the FIRST arrow glyph at
+ * bracket-depth 0 (outside any `()`/`{}`/`[]`) following each arm-pattern
+ * start (`.Variant`, `_`, `else`, `not`, or a `|`-continued multi-pattern).
+ * After recording an arm's separator we skip its body region (everything up to
+ * the next depth-0 arm-pattern start), so a body-internal `=>` arrow-function
+ * or `->` is NEVER mis-recorded. The §51.0.J value-return shape is the typical
+ * input (`.Small => .Healthy`), but the depth/skip discipline tolerates block
+ * (`{ ... }`) and payload (`.V(x) => ...`) arm bodies too.
+ *
+ * `bodyAbsStart` is the absolute source offset of the FIRST char of `bodyText`
+ * (so the returned `srcOffset` values index the original source directly).
+ * Uses the module-level `tokenizeLogic` (the live tokenizer) with that base so
+ * arrow tokens carry absolute spans; an `->` is a `-` PUNCT + `>` PUNCT pair,
+ * matching `matchArrowGlyphAt`.
+ *
+ * Returns [] on any tokenizer trouble (fail-safe: never invent a position).
+ */
+function scanInlineMatchArmArrows(bodyText, bodyAbsStart) {
+  if (typeof bodyText !== "string" || bodyText.length === 0) return [];
+  let tokens;
+  try {
+    tokens = tokenizeLogic(bodyText, bodyAbsStart, 1, 1, []);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(tokens) || tokens.length === 0) return [];
+
+  // Token-relative peek + glyph reader (mirrors matchArrowGlyphAt's pair logic).
+  const at = (k) => tokens[k];
+  const glyphAt = (k) => {
+    const t = at(k);
+    if (t && t.kind === "OPERATOR" && (t.text === "=>" || t.text === ":>")) {
+      return { glyph: t.text, len: 1, startTok: t };
+    }
+    if (t && t.kind === "PUNCT" && t.text === "-") {
+      const t2 = at(k + 1);
+      if (t2 && t2.kind === "PUNCT" && t2.text === ">") {
+        return { glyph: "->", len: 2, startTok: t };
+      }
+    }
+    return null;
+  };
+  // The absolute source offset of a token's first char. The tokenizer stamps
+  // `start` (absolute, with the supplied base) on each token; fall back to
+  // `span.start` for tokenizer-override shapes.
+  const tokStart = (t) => {
+    if (t == null) return -1;
+    if (typeof t.start === "number") return t.start;
+    if (t.span && typeof t.span.start === "number") return t.span.start;
+    return -1;
+  };
+
+  const isPatternStart = (k) => {
+    const t = at(k);
+    if (!t) return false;
+    // `.Variant` enum-pattern, `else` / `not` wildcard/absence, or `_` discard.
+    if (t.kind === "PUNCT" && t.text === ".") {
+      const n = at(k + 1);
+      return !!(n && n.kind === "IDENT" && /^[A-Z]/.test(n.text));
+    }
+    if (t.kind === "KEYWORD" && (t.text === "else" || t.text === "not")) return true;
+    if (t.kind === "IDENT" && t.text === "_") return true;
+    return false;
+  };
+
+  const out = [];
+  let depth = 0;
+  let i = 0;
+  // Walk to the first depth-0 arm-pattern start, then for each arm: record the
+  // first depth-0 arrow as its separator and advance to the next pattern start.
+  while (i < tokens.length) {
+    const t = tokens[i];
+    if (t.kind === "PUNCT" && (t.text === "(" || t.text === "{" || t.text === "[")) { depth++; i++; continue; }
+    if (t.kind === "PUNCT" && (t.text === ")" || t.text === "}" || t.text === "]")) { if (depth > 0) depth--; i++; continue; }
+    if (depth !== 0) { i++; continue; }
+    if (isPatternStart(i)) {
+      // Scan forward (staying at depth 0) for the first arm-separator arrow.
+      let j = i;
+      let d = 0;
+      let recorded = false;
+      while (j < tokens.length) {
+        const tj = tokens[j];
+        if (tj.kind === "PUNCT" && (tj.text === "(" || tj.text === "{" || tj.text === "[")) { d++; j++; continue; }
+        if (tj.kind === "PUNCT" && (tj.text === ")" || tj.text === "}" || tj.text === "]")) { if (d > 0) d--; j++; continue; }
+        if (d === 0) {
+          const g = glyphAt(j);
+          if (g) {
+            const off = tokStart(g.startTok);
+            if (off >= 0) out.push({ glyph: g.glyph, srcOffset: off });
+            recorded = true;
+            j += g.len; // step past the arrow into the body region
+            break;
+          }
+          // A new pattern start at depth 0 before any arrow → malformed arm;
+          // bail to that pattern (the outer loop re-enters there).
+          if (j > i && isPatternStart(j)) break;
+        }
+        j++;
+      }
+      // Advance past the arm body to the NEXT depth-0 pattern start (so the
+      // body's own arrows are never re-scanned as separators).
+      let k = j;
+      let bd = 0;
+      while (k < tokens.length) {
+        const tk = tokens[k];
+        if (tk.kind === "PUNCT" && (tk.text === "(" || tk.text === "{" || tk.text === "[")) { bd++; k++; continue; }
+        if (tk.kind === "PUNCT" && (tk.text === ")" || tk.text === "}" || tk.text === "]")) { if (bd > 0) bd--; k++; continue; }
+        if (bd === 0 && isPatternStart(k)) break;
+        k++;
+      }
+      i = recorded ? Math.max(k, i + 1) : i + 1;
+      continue;
+    }
+    i++;
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Known boolean HTML attributes (E-ATTR-002 set)
 // ---------------------------------------------------------------------------
@@ -12807,6 +12940,46 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           ));
         }
 
+        // S171 — §51.0.J derived-engine `derived=match @VAR { ... }` arm-arrow
+        // deprecation coverage. `inlineMatchBody` is captured as RAW TEXT (the
+        // arms are NOT structured into match-arm nodes, so the `armArrow` field
+        // the block-form / value-return loci carry is absent here). Scan the
+        // body for its arm-separator glyphs + ABSOLUTE source offsets so the
+        // W-MATCH-ARROW-LEGACY lint (type-system.ts `engine-decl` case) and
+        // `bun scrml migrate --fix` (commands/migrate.js) can both surface /
+        // rewrite a deprecated `=>` / `->` arm separator here in lockstep with
+        // every other match-shaped arm. ZERO codegen impact: emit-engine.ts
+        // reconstructs `match @VAR {BODY}` and lowers it via `rewriteExpr`,
+        // which treats all three arrows identically. `null` for non-derived /
+        // legacy `derived=@x` engines; `[]` when the body has no recognizable
+        // arm separator. The absolute offset is `block.span.start` (the opener
+        // start) + the body's position inside the verbatim `block.raw` slice.
+        let inlineMatchArmArrows = null;
+        if (inlineMatchBody != null && inlineMatchBody.length > 0 && sourceVar) {
+          const rawBlk = typeof block.raw === "string" ? block.raw : "";
+          const blkStart = (span && typeof span.start === "number") ? span.start : 0;
+          // Locate the body inside the verbatim opener slice. The opener is
+          // `... derived = match @VAR { BODY }`; anchor on the `{` that follows
+          // the `match @VAR` prefix (brace-aware via the same `derived\s*=\s*
+          // match\s+@VAR\s*{` shape the capture regex used). The body starts at
+          // the char after that `{`. `inlineMatchBody` was `.trim()`-ed, so we
+          // search the untrimmed region for its first non-space char.
+          const openerRe = new RegExp(
+            `\\bderived\\s*=\\s*match\\s+@${sourceVar.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{`,
+          );
+          const m = openerRe.exec(rawBlk);
+          if (m) {
+            const afterBrace = m.index + m[0].length; // index just past the `{`
+            // Skip leading whitespace to align with the `.trim()`-ed body.
+            let bodyRel = afterBrace;
+            while (bodyRel < rawBlk.length && /\s/.test(rawBlk[bodyRel])) bodyRel++;
+            const bodyAbsStart = blkStart + bodyRel;
+            inlineMatchArmArrows = scanInlineMatchArmArrows(inlineMatchBody, bodyAbsStart);
+          } else {
+            inlineMatchArmArrows = [];
+          }
+        }
+
         // §51.0.C — compute the auto-declared variable name. Resolution order:
         //   1. `var=NAME` override → use NAME verbatim
         //   2. `name=NAME` legacy form → use NAME verbatim (back-compat)
@@ -12942,6 +13115,12 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           // and `}`). `null` for the legacy `derived=@x` form and for non-
           // derived engines.
           inlineMatchBody,
+          // S171 — arm-separator glyphs of the `derived=match` body, in source
+          // order, each `{ glyph: ":>"|"=>"|"->", srcOffset: <absolute> }`.
+          // Consumed by the W-MATCH-ARROW-LEGACY lint (type-system.ts) +
+          // `migrate --fix` (commands/migrate.js). `null` unless this is an
+          // inline-match derived engine; `[]` when no arm separator was found.
+          inlineMatchArmArrows,
           // §51.0 canonical fields (S67/S68 — A1b B14):
           //   varName            — the resolved auto-declared variable name (§51.0.C).
           //                        Always set when parse succeeds; equals

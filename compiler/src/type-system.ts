@@ -7928,6 +7928,38 @@ function annotateNodes(
       // Bare-identifier refs (`${msg}`) are TS territory and require the
       // body-walk re-enablement landing here.
       case "engine-decl": {
+        // §18.2 / §51.0.J / §34 — W-MATCH-ARROW-LEGACY (S171). A derived engine
+        // `<engine for=T derived=match @VAR { .A => .X  _ -> .Y }>` is a match-
+        // shaped construct whose arms join the `:>` arm-separator deprecation.
+        // The parser captures the match body as RAW TEXT (no structured arm
+        // nodes), but stamps `inlineMatchArmArrows` — one entry per arm with the
+        // separator glyph + its absolute source offset. Fire the SAME info-level
+        // lint here that the block-form / value-return / `!{}` arms fire, once
+        // per deprecated-alias arm. ARM-CONTEXT-SCOPED: `inlineMatchArmArrows`
+        // records only the arm-separator positions, never a body-internal `=>`
+        // arrow-fn or `->`. All three arrows lower identically through
+        // emit-engine.ts's `rewriteExpr` reconstruction — ZERO codegen change.
+        {
+          const armArrows = (n as { inlineMatchArmArrows?: Array<{ glyph?: string; srcOffset?: number }> })
+            .inlineMatchArmArrows;
+          if (Array.isArray(armArrows)) {
+            const engSpan = (n.span as Span | undefined)
+              ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+            const upstream = String((n as { sourceVar?: unknown }).sourceVar ?? "");
+            for (const a of armArrows) {
+              if (!a || (a.glyph !== "=>" && a.glyph !== "->")) continue;
+              errors.push(new TSError(
+                "W-MATCH-ARROW-LEGACY",
+                matchArrowLegacyMessage(
+                  `\`derived=match${upstream ? ` @${upstream}` : ""}\` engine arm`,
+                  a.glyph,
+                ),
+                engSpan,
+                "info",
+              ));
+            }
+          }
+        }
         const bodyChildren = (n as { bodyChildren?: ASTNodeLike[] }).bodyChildren;
         if (Array.isArray(bodyChildren)) {
           for (const child of bodyChildren) {
