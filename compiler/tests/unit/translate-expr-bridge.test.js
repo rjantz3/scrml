@@ -50,7 +50,7 @@ function translate(source) {
 const LIVE_KINDS = new Set([
     "ident", "lit", "array", "object", "spread", "unary", "binary", "assign",
     "ternary", "member", "index", "call", "new", "lambda", "cast", "match-expr",
-    "sql-ref", "input-state-ref", "escape-hatch", "reset-expr",
+    "sql-ref", "input-state-ref", "escape-hatch", "reset-expr", "map-lit",
 ]);
 
 // =============================================================================
@@ -622,7 +622,9 @@ describe("§11 — catalog coverage: native ExprKind → live ExprNode kind", ()
         // review. M5-swap Wave 2 (B1/B2) added `Propagate` + `GuardedExpr`
         // (40 -> 42); the bridge routes both to `escape-hatch` (the statement
         // bridge un-wraps the common ExprStmt-position case before A2 runs).
-        expect(ALL_KINDS.length).toBe(42);
+        // D2b (§59 value-native maps, S169) added `MapLit` (42 -> 43); the
+        // bridge translates it to the live `map-lit` ExprNode (translateMapLit).
+        expect(ALL_KINDS.length).toBe(43);
     });
 
     for (const kind of ALL_KINDS) {

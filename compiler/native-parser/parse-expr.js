@@ -49,10 +49,12 @@ import { TokenKind } from "./token.js";
 import { makeSpan } from "./span.js";
 import { ParseMode, initialParseMode, getParseMode, setParseMode, enterMode, exitMode } from "./parse-mode.js";
 import {
+    ExprKind,
     makeIdent, makeNumberLit, makeStringLit, makeBoolLit, makeRegexLit,
     makeTemplateLit, makeTemplateQuasi, makeAtCell, makeBareVariant,
     makeThis, makeSuper,
     makeArray, makeArrayItem, makeArraySpread, makeArrayHole,
+    makeMapLit, makeMapEntry,
     makeObject, makeObjectKeyValue, makeObjectShorthand, makeObjectSpread,
     makeObjectMethod, makeParen,
     makeUnary, makeUpdate, makeBinary, makeLogical, makeAssignment,
@@ -3321,12 +3323,147 @@ export function parseParenExpression(ctx) {
     return makeParen(inner, span);
 }
 
-// --- parseArrayLiteral — [ elem, elem, ... ] ---
-// Each element parses at ASSIGNMENT level (parseAssignmentExpr) — a comma
-// SEPARATES elements; it must not be swallowed as a sequence.
+// --- §59.3 value-native map-literal disambiguation (D2b) ----------------------
+// findMapEntryColonOffset — token-level mirror of the legacy (Acorn-path)
+// `findMapEntryColonInLiteral` (expression-parser.ts). Given a cursor positioned
+// just PAST the opening `[`, return the token OFFSET (relative to the cursor) of
+// the first depth-0 entry-`Colon` that is NOT a ternary alternative-separator,
+// or -1 if there is none (→ the bracket is an array literal, not a map).
+//
+// The native path scans TOKENS, not raw source — which makes two of the legacy
+// scan's carve-outs automatic: (1) string interiors need no special handling (a
+// `:` inside `"a:b"` is part of a single `String` token, never a `Colon`); and
+// (2) `::` is its own `DoubleColon` token (the §14.4 member-access alias), so a
+// `Type::Variant` key never false-matches an entry-colon. Depth is tracked on
+// `( [ {` openers / `) ] }` closers; the matching close of the array's own `[`
+// (depth back below 0) terminates the scan. A `?` (`Question`) at depth 0 arms a
+// pending-ternary counter; a depth-0 `:` while the counter is positive is a
+// ternary alt-colon — consume one pending `?` and skip it (§59.3 exclusion).
+function findMapEntryColonOffset(cursor) {
+    let depth = 0;
+    let pendingTernary = 0;
+    let offset = 0;
+    while (true) {
+        const k = peekKind(cursor, offset);
+        if (k === TokenKind.EOF) {
+            return -1;
+        }
+        if (k === TokenKind.LParen || k === TokenKind.LBracket || k === TokenKind.LBrace) {
+            depth = depth + 1;
+            offset = offset + 1;
+            continue;
+        }
+        if (k === TokenKind.RParen || k === TokenKind.RBrace) {
+            depth = depth - 1;
+            offset = offset + 1;
+            continue;
+        }
+        if (k === TokenKind.RBracket) {
+            if (depth === 0) {
+                // The array's own closing `]` — end of the bracket body.
+                return -1;
+            }
+            depth = depth - 1;
+            offset = offset + 1;
+            continue;
+        }
+        if (depth === 0) {
+            if (k === TokenKind.Question) {
+                pendingTernary = pendingTernary + 1;
+                offset = offset + 1;
+                continue;
+            }
+            if (k === TokenKind.Colon) {
+                if (pendingTernary > 0) {
+                    pendingTernary = pendingTernary - 1;   // ternary alt-colon — skip
+                    offset = offset + 1;
+                    continue;
+                }
+                return offset;
+            }
+        }
+        offset = offset + 1;
+    }
+}
+
+// mapKeyIsStructOrEnum — does the PARSED key Expr node carry a struct-literal
+// (`{ … }`) or enum-variant (`.V` / `Type.V` / `Type::V`) shape? Such a key
+// parse-accepts in v1 but is codegen-deferred to `.insert` (§59.3 M-cut) →
+// `W-MAP-STRUCT-KEY-LITERAL`. The native path inspects the parsed node directly
+// (cleaner than the legacy regex over source text): a struct literal is an
+// `Object` node; a bare variant is a `BareVariant`; a qualified variant is a
+// `Member` whose property name starts uppercase. A bare-string / number /
+// boolean primitive key does NOT trigger this.
+function mapKeyIsStructOrEnum(keyExpr) {
+    if (keyExpr === undefined || keyExpr === null) {
+        return false;
+    }
+    if (keyExpr.kind === ExprKind.Object) {
+        return true;                                  // struct literal `{ … }`
+    }
+    if (keyExpr.kind === ExprKind.BareVariant) {
+        return true;                                  // `.Variant`
+    }
+    if (keyExpr.kind === ExprKind.Member) {
+        // `Type.Variant` / `Type::Variant` — a capitalized-property member.
+        const prop = keyExpr.property;
+        const propName = (prop && typeof prop === "object" && prop.name !== undefined)
+            ? prop.name
+            : (typeof prop === "string" ? prop : "");
+        if (typeof propName === "string" && /^[A-Z]/.test(propName)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// mapKeySignature — a normalized source-text signature of a map-literal key,
+// for duplicate-key detection (`W-MAP-DUPLICATE-LITERAL-KEY`, §59.3 last-wins).
+// Mirrors the legacy `keyText.replace(/\s+/g, " ")` normalization, but built
+// from the KEY token slice `[startIdx, colonOffset)` (relative to the cursor):
+// each token's `.text` joined with a single space. This is a best-effort
+// structural proxy at parse time — the runtime applies true §45-equality
+// last-wins. `startIdx`/`colonOffset` are cursor-relative token offsets.
+function mapKeySignature(cursor, startOffset, colonOffset) {
+    const parts = [];
+    for (let o = startOffset; o < colonOffset; o = o + 1) {
+        const tok = peek(cursor, o);
+        if (tok && tok.text !== undefined && tok.text !== null) {
+            parts.push(String(tok.text));
+        }
+    }
+    return parts.join(" ");
+}
+
+// --- parseArrayLiteral — [ elem, elem, ... ] OR a §59.3 value-native map ---
+// Each ARRAY element parses at ASSIGNMENT level (parseAssignmentExpr) — a comma
+// SEPARATES elements; it must not be swallowed as a sequence. D2b adds the
+// §59.3 MAP-literal fork: the empty `[:]` form and the `[k: v, …]` form (a
+// bracket with a depth-1 entry-colon that is not a ternary alt-colon) parse to
+// a `MapLit` node instead of an `Array`. The fork is decided up-front (before
+// the array loop) by a non-consuming token scan; the array path is byte-for-
+// byte unchanged when no qualifying entry-colon is present.
 export function parseArrayLiteral(ctx) {
     const cursor = ctx.cursor;
     const open = advance(cursor);   // consume [
+
+    // §59.3 — empty-map literal `[:]`. A `Colon` immediately followed by the
+    // closing `]` is the canonical empty map (distinct from `[]` the empty
+    // array). Consume both and return a zero-entry MapLit.
+    if (currentKind(cursor) === TokenKind.Colon && peekKind(cursor, 1) === TokenKind.RBracket) {
+        advance(cursor);   // consume :
+        const closeSpan = advance(cursor).span;   // consume ]
+        const span = makeSpan(open.span.start, closeSpan.end, open.span.line, open.span.col);
+        return makeMapLit([], [], span);
+    }
+
+    // §59.3 — a NON-empty map literal iff there is a depth-1 entry-colon that is
+    // not a ternary alt-colon. Decided WITHOUT consuming tokens; if found, parse
+    // the bracket body as map entries instead of array elements.
+    if (findMapEntryColonOffset(cursor) !== -1) {
+        return parseMapLiteralBody(ctx, open);
+    }
+
     const prior = enterMode(ctx, ParseMode.InArrayLiteral);
     // M4.2 — the array body is a no-In carve-out: `[a in b]` is legal even
     // when the outer context is no-In. Save+clear+restore noIn for the body.
@@ -3369,6 +3506,146 @@ export function parseArrayLiteral(ctx) {
     const close = expectRBracket(ctx, open);
     const span = makeSpan(open.span.start, close.end, open.span.line, open.span.col);
     return makeArray(elements, span);
+}
+
+// --- parseMapLiteralBody — the §59.3 `[k: v, …]` map-entry parse (D2b) ---
+// Entered by parseArrayLiteral AFTER the opening `[` is consumed and the up-
+// front scan confirmed a depth-1 entry-colon. `open` is the `[` token. Each
+// entry is `key : value`: the KEY parses at ASSIGNMENT level (parseAssignmentExpr
+// stops at the entry `:` — it consumes a ternary's `?…:` only when it owns the
+// `?`, so a key that is itself a ternary `@c ? a : b` parses whole and the
+// scan's depth-1 entry-colon is the one AFTER it), then a `Colon` separates,
+// then the VALUE parses at ASSIGNMENT level (stops at `,` or `]`). A comma
+// separates entries; the closing `]` ends the literal.
+//
+// §59.3 parse-time diagnostics mirror the legacy (Acorn-path) scanner exactly:
+//   E-MAP-LITERAL-MALFORMED      — an empty entry (stray/trailing comma), an
+//                                  entry with no `:` colon, or a missing
+//                                  key/value (`[ "k": ]` / `[ : 5 ]`).
+//   W-MAP-STRUCT-KEY-LITERAL     — a struct/enum-key literal (v1 codegen wants
+//                                  the `.insert(key, …)` form). Info-level.
+//   W-MAP-DUPLICATE-LITERAL-KEY  — a duplicate depth-1 key (last-wins §59.3).
+//                                  Info-level. Keys compared by normalized
+//                                  source-text signature (a parse-time proxy).
+// Every entry is kept (so a downstream pass surfaces each notice); the runtime/
+// codegen lowering applies last-wins. The notices ride on the MapLit's
+// `diagnostics` field — the SAME surface the legacy MapLitExpr.diagnostics uses.
+function parseMapLiteralBody(ctx, open) {
+    const cursor = ctx.cursor;
+    const prior = enterMode(ctx, ParseMode.InArrayLiteral);
+    // Mirror the array body's no-In carve-out (§M4.2) for sub-expressions.
+    const inPrior = withInAllowedSubExpr(ctx);
+
+    const entries = [];
+    const diagnostics = [];
+    const seenKeys = [];
+
+    while (atEnd(cursor) === false && currentKind(cursor) !== TokenKind.RBracket) {
+        // An empty entry — a stray or trailing comma (`[ "a": 1, , "b": 2 ]`
+        // / `[ "a": 1, ]`). Record the count error, consume the comma, recover.
+        if (currentKind(cursor) === TokenKind.Comma) {
+            diagnostics.push({
+                code: "E-MAP-LITERAL-MALFORMED",
+                message: "E-MAP-LITERAL-MALFORMED: empty entry in map literal (stray or trailing comma) (§59.3).",
+            });
+            advance(cursor);   // consume the stray ,
+            continue;
+        }
+
+        // Capture the duplicate-key SIGNATURE from the key token slice BEFORE
+        // parsing (parseAssignmentExpr advances the cursor past the key onto the
+        // `:`). The entry-colon offset is relative to the cursor's CURRENT
+        // position (the key start); the signature is the key tokens `[0, colon)`.
+        const colonOffset = findMapEntryColonOffset(cursor);
+        const keySig = (colonOffset === -1) ? "" : mapKeySignature(cursor, 0, colonOffset);
+
+        const innerPriorK = enterMode(ctx, ParseMode.InExpression);
+        const keyExpr = parseAssignmentExpr(ctx);
+        exitMode(ctx, innerPriorK);
+
+        // After the key the cursor MUST sit on the entry `:`. If it does not,
+        // the entry is missing its `key: value` colon (`[ "a": 1, "b" ]`).
+        if (currentKind(cursor) !== TokenKind.Colon) {
+            diagnostics.push({
+                code: "E-MAP-LITERAL-MALFORMED",
+                message: "E-MAP-LITERAL-MALFORMED: a map-literal entry is missing a `key: value` colon (§59.3).",
+            });
+            // Recover: skip to the next `,` or the closing `]`.
+            while (atEnd(cursor) === false
+                && currentKind(cursor) !== TokenKind.Comma
+                && currentKind(cursor) !== TokenKind.RBracket) {
+                advance(cursor);
+            }
+            if (currentKind(cursor) === TokenKind.Comma) {
+                advance(cursor);
+            }
+            continue;
+        }
+        advance(cursor);   // consume the entry :
+
+        // A trailing colon with no value (`[ "k": ]` / `[ "k": , … ]`).
+        if (atEnd(cursor)
+            || currentKind(cursor) === TokenKind.RBracket
+            || currentKind(cursor) === TokenKind.Comma) {
+            diagnostics.push({
+                code: "E-MAP-LITERAL-MALFORMED",
+                message: "E-MAP-LITERAL-MALFORMED: a map-literal entry has a missing value (§59.3).",
+            });
+            if (currentKind(cursor) === TokenKind.Comma) {
+                advance(cursor);
+            }
+            continue;
+        }
+
+        const innerPriorV = enterMode(ctx, ParseMode.InExpression);
+        const valueExpr = parseAssignmentExpr(ctx);
+        exitMode(ctx, innerPriorV);
+
+        // §59.3 M-cut — a struct/enum-key literal parse-accepts but is codegen-
+        // deferred to `.insert` in v1. Surface once per offending key.
+        if (mapKeyIsStructOrEnum(keyExpr)) {
+            diagnostics.push({
+                code: "W-MAP-STRUCT-KEY-LITERAL",
+                message: "W-MAP-STRUCT-KEY-LITERAL: struct/enum-key map literal parse-accepts but v1 codegen requires the `.insert(key, …)` form (§59.3/§59.12).",
+            });
+        }
+
+        // §59.3 duplicate depth-1 keys — last-wins; surface the overwrite. The
+        // signature (captured above, pre-key-parse) is the normalized key source
+        // text — a best-effort structural proxy at parse time; the runtime
+        // applies true §45-equality last-wins.
+        if (keySig !== "" && seenKeys.includes(keySig)) {
+            diagnostics.push({
+                code: "W-MAP-DUPLICATE-LITERAL-KEY",
+                message: `W-MAP-DUPLICATE-LITERAL-KEY: duplicate map-literal key \`${keySig}\` — last entry wins (§59.3).`,
+            });
+        }
+        seenKeys.push(keySig);
+
+        entries.push(makeMapEntry(keyExpr, valueExpr));
+
+        // After an entry: either a `,` separator or the closing `]`.
+        if (currentKind(cursor) === TokenKind.Comma) {
+            advance(cursor);   // consume the separator ,
+            // A trailing comma (`[ "a": 1, ]`) is a malformed empty entry —
+            // the legacy (Acorn-path) scanner's top-level comma split produces
+            // an empty trailing segment → E-MAP-LITERAL-MALFORMED. Match it.
+            if (currentKind(cursor) === TokenKind.RBracket) {
+                diagnostics.push({
+                    code: "E-MAP-LITERAL-MALFORMED",
+                    message: "E-MAP-LITERAL-MALFORMED: empty entry in map literal (stray or trailing comma) (§59.3).",
+                });
+            }
+        } else {
+            break;
+        }
+    }
+
+    restoreNoIn(ctx, inPrior);
+    exitMode(ctx, prior);
+    const close = expectRBracket(ctx, open);
+    const span = makeSpan(open.span.start, close.end, open.span.line, open.span.col);
+    return makeMapLit(entries, diagnostics, span);
 }
 
 // --- parseObjectLiteral — { prop, prop, ... } ---

@@ -1,0 +1,18 @@
+// map-001-fare-by-lane.scrml
+// Value-native map (§59). Tests: [string: int] map cell with a literal init,
+// reassignment-canonical .insert, and a bracket-read @m[k]. Re-added in D2b
+// now that the native parser parses map literals (D4 removed the standalone
+// map sample because native could not parse it); this is the within-node
+// parity sample (native ≡ default byte-for-byte).
+
+<div class="fare-board">
+    ${
+        <fareByLane>: [string: int] = ["DAL-001": 4500]
+        function addFare() {
+            @fareByLane = @fareByLane.insert("HOU-002", 3800)
+        }
+    }
+    <h1>Fares by lane</>
+    <p>DAL-001: ${@fareByLane["DAL-001"]}</>
+    <button onclick=addFare()>Add HOU-002</>
+</div>

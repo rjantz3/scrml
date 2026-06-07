@@ -856,6 +856,13 @@
     "MISSING-FIELD": 2,
     "SPAN-COORD": 2
   },
+  "samples/compilation-tests/map-001-fare-by-lane.scrml": {
+    "EXTRA-FIELD": 5,
+    "FIELD-SHAPE": 4,
+    "KIND-NAME": 1,
+    "MISSING-FIELD": 15,
+    "SPAN-COORD": 12
+  },
   "samples/compilation-tests/comp-002-card.scrml": {
     "EXTRA-FIELD": 2,
     "MISSING-FIELD": 7,

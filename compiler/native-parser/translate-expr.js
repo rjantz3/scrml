@@ -46,6 +46,9 @@
 //     native BareVariant    -> live ident   (carries the `.` in `name`)
 //     native Array          -> live array
 //     native Object         -> live object
+//     native MapLit         -> live map-lit  (§59.3 value-native map literal;
+//                              entries carry parsed key/value children — no
+//                              re-serialize round-trip, unlike the legacy path)
 //     native Unary          -> live unary
 //     native Binary         -> live binary
 //     native Assignment     -> live assign
@@ -197,6 +200,8 @@ export function translateExpr(nativeExpr) {
             return translateArray(nativeExpr);
         case ExprKind.Object:
             return translateObject(nativeExpr);
+        case ExprKind.MapLit:
+            return translateMapLit(nativeExpr);
         case ExprKind.Paren:
             // Parentheses are a parse-grouping artifact — the live catalog has
             // no `paren` kind; unwrap to the inner expression (non-lossy —
@@ -515,6 +520,39 @@ function spanFromExpr(nativeExpr) {
         return nativeExpr.span;
     }
     return null;
+}
+
+// translateMapLit — native `MapLit{entries,diagnostics}` -> live `map-lit`
+// (§59.3; the D2a/Acorn-path shape — ast.ts:1925 MapLitExpr). The native
+// `entries` already carry fully-parsed native Expr children (`{ key, value }`);
+// each child is translated via translateExpr so a nested `@cell` / bare-variant
+// inside a key or value is visible to the downstream codegen walk. This is
+// CLEANER than the legacy unmask path: D2a re-serializes raw key/value source
+// slices through the full pipeline at unmask time (the scanner ran pre-Acorn so
+// it had no parsed children); the native parser parsed the children inline, so
+// no round-trip is needed. The output is structurally identical to D2a's:
+// `{ kind:"map-lit", span, entries:[{key,value}], diagnostics? }`. An empty
+// `entries` list is the `[:]` empty map. `diagnostics` (§59.3 notices —
+// E-MAP-LITERAL-MALFORMED / W-MAP-STRUCT-KEY-LITERAL / W-MAP-DUPLICATE-LITERAL-
+// KEY) rides through verbatim and is surfaced downstream the same way the
+// legacy MapLitExpr.diagnostics is (absent on a clean primitive-key literal).
+function translateMapLit(nativeExpr) {
+    const nativeEntries = Array.isArray(nativeExpr.entries) ? nativeExpr.entries : [];
+    const entries = [];
+    for (const e of nativeEntries) {
+        if (e === undefined || e === null) {
+            continue;
+        }
+        entries.push({
+            key: translateExpr(e.key),
+            value: translateExpr(e.value),
+        });
+    }
+    const lit = { kind: "map-lit", span: spanOrZero(nativeExpr.span), entries };
+    if (Array.isArray(nativeExpr.diagnostics) && nativeExpr.diagnostics.length > 0) {
+        lit.diagnostics = nativeExpr.diagnostics;
+    }
+    return lit;
 }
 
 // translateObject — native `Object{properties}` -> live `object`. The native

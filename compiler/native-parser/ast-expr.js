@@ -25,6 +25,15 @@ export const ExprKind = Object.freeze({
     Object: "Object",
     Paren:  "Paren",
 
+    // Value-native map literal (§59.3) — `[k: v, …]` / empty `[:]`. The native
+    // parser disambiguates a bracketed expression as a MAP (this kind) vs an
+    // ARRAY (`Array` above) by a depth-1 entry-colon that is NOT a ternary
+    // alternative-separator. `entries` is a `MapEntry[]` (see makeMapEntry);
+    // `diagnostics` carries any parse-time §59.3 notices. The expression
+    // bridge (translate-expr.js) maps this to the live `map-lit` ExprNode
+    // (D2a's shape — `{ kind:"map-lit", span, entries:[{key,value}], … }`).
+    MapLit: "MapLit",
+
     // Operators (M2.2)
     Unary:       "Unary",
     Update:      "Update",
@@ -192,6 +201,29 @@ export function makeObject(properties, span) {
 
 export function makeParen(expression, span) {
     return { kind: ExprKind.Paren, expression, span };
+}
+
+// makeMapLit — a value-native map literal `[k: v, …]` / empty `[:]` (§59.3).
+// `entries` is a `MapEntry[]` in source order (each `{ key, value }` carrying
+// fully-parsed native Expr children — see makeMapEntry). An empty `entries`
+// list is the `[:]` empty map. `diagnostics` is an array of `{ code, message }`
+// §59.3 notices (`E-MAP-LITERAL-MALFORMED` / `W-MAP-STRUCT-KEY-LITERAL` /
+// `W-MAP-DUPLICATE-LITERAL-KEY`) the parser attached — mirrors the legacy
+// (Acorn-path) MapLitExpr.diagnostics surface. Absent when no notices fired.
+export function makeMapLit(entries, diagnostics, span) {
+    const node = { kind: ExprKind.MapLit, entries, span };
+    if (Array.isArray(diagnostics) && diagnostics.length > 0) {
+        node.diagnostics = diagnostics;
+    }
+    return node;
+}
+
+// makeMapEntry — one `key: value` entry inside a value-native map literal
+// (§59.3). `key` and `value` are native Expr nodes (the same catalog every
+// other expression child carries). The expression bridge translates both via
+// translateExpr when lowering the MapLit to the live `map-lit` ExprNode.
+export function makeMapEntry(key, value) {
+    return { key, value };
 }
 
 // --- Array-element constructors ---
