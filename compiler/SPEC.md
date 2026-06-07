@@ -5273,9 +5273,9 @@ The cancel-then-apply ordering from §6.8.2 (debounced/throttled interaction pre
 ```scrml
 <state>: (not to User) = not
 @state = someUser                    // transition fires; per-access: pre → post
-print(@state.name)                   // OK (post-transitioned)
+const shown = @state.name            // OK (post-transitioned)
 reset(@state)                        // writes `not`; satisfies pre-type → per-access reverts to pre
-print(@state.name)                   // E-TYPE-001 (pre-transition again)
+const shownAgain = @state.name       // E-TYPE-001 (pre-transition again)
 ```
 
 **No-RHS implicit-`(not to T)` cell (Shape 4, §6.2).** For a no-RHS typed cell that defaulted to `not` with an *implicit* `(not to T)` lifecycle (`<user>: User` with no `= …`), the "re-evaluated init expression result" above is the SYNTHESIZED `not` (there is no written init expression). It satisfies the pre-type, so `reset(@user)` reverts the per-access state to `pre` exactly as for an explicit `<user>: (not to User) = not`. The implicit and explicit forms behave identically under reset.
@@ -8166,8 +8166,8 @@ const u = loadUser(42)
 given u => {
     // INSIDE this block: u is typed as User AND lifecycle-transitioned.
     // The act of discriminating proves presence; the lifecycle transition is implicit.
-    print(u.name)        // OK — post-transition access
-    print(u.email)
+    const name = u.name  // OK — post-transition access
+    const email = u.email
 }
 // OUTSIDE: u remains `User | not`. Direct access fires E-TYPE-001.
 ```
@@ -8179,7 +8179,7 @@ const u = loadUser(42)
 if (u is not) return     // discrimination: the `not` arm exits
 // After the early-return discrimination, u is narrowed to User
 // AND lifecycle-transitioned. Subsequent access passes.
-print(u.name)            // OK — post-transition access
+const name = u.name      // OK — post-transition access
 ```
 
 **Caller form 3 — `match u { ... }` (§18):**
@@ -8191,7 +8191,7 @@ match u {
     not :> handleAbsence()         // the `not` arm — u is `not`
     given u => {
         // INSIDE this arm: u is typed as User AND lifecycle-transitioned.
-        print(u.name)               // OK — post-transition access
+        const name = u.name         // OK — post-transition access
     }
 }
 ```
@@ -8202,7 +8202,7 @@ In all three forms, the act of discriminating the `not` variant IS the transitio
 
 ```scrml
 const u = loadUser(42)
-print(u.name)                 // E-TYPE-001 — u was not discriminated; still pre-transition
+const name = u.name           // E-TYPE-001 — u was not discriminated; still pre-transition
 ```
 
 ##### 14.12.6.2 Variant-progression — `(.VariantA to .VariantB)` — explicit `transition()`
@@ -8228,7 +8228,7 @@ if (a is .Draft) {
     // SOURCE variant discriminated. The lifecycle says (.Draft to .Published);
     // calling transition() advances per-access state.
     transition(a)
-    print(a.publishedAt)       // OK — post-transition access of B-shape field
+    const publishedAt = a.publishedAt  // OK — post-transition access of B-shape field
 }
 ```
 
@@ -8238,7 +8238,7 @@ if (a is .Draft) {
 const a = publish(42)
 
 if (a is .Draft) {
-    print(a.publishedAt)       // E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED:
+    const publishedAt = a.publishedAt  // E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED:
                                 //   accessed .Published-shape field `publishedAt`
                                 //   after discriminating .Draft but without
                                 //   calling transition(a).

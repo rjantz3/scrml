@@ -250,10 +250,10 @@ type User:struct = {
 }
 
 const u: User = { id: 1, email: "a@b.com", passwordHash: not }
-print(u.passwordHash)                     // E-TYPE-001 — pre-transition access
+const hash = u.passwordHash               // E-TYPE-001 — pre-transition access
 
 u.passwordHash = hashPassword(rawPw)
-print(u.passwordHash)                     // OK — transitioned
+const hashAfter = u.passwordHash          // OK — transitioned
 ```
 
 The canonical glyph is `to` — a contextual keyword inside the parens (parallel to `from` in `import`). The legacy `->` glyph still parses but lints `W-LIFECYCLE-LEGACY-ARROW`. Use `to` in new code.
@@ -294,7 +294,7 @@ For value-shape progression on a cell that is NOT an engine cell, declare as Sha
 server fn loadUser(id: number) -> (not to User) { ... }
 
 const u = loadUser(42)
-given u => { print(u.name) }              // OK — `given` discriminates AND transitions
+given u => { const name = u.name }        // OK — `given` discriminates AND transitions
 
 // Variant-progression (.A to .B) — explicit transition()
 server fn publish(id: number) -> (.Draft to .Published) { ... }
@@ -302,7 +302,7 @@ server fn publish(id: number) -> (.Draft to .Published) { ... }
 const a = publish(42)
 if (a is .Draft) {
     transition(a)                         // explicit per-access transition signal
-    print(a.publishedAt)                  // OK
+    const publishedAt = a.publishedAt     // OK
 }
 ```
 

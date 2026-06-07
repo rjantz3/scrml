@@ -479,10 +479,10 @@ type User:struct = {
 }
 
 const u: User = { id: 1, email: "a@b.com", passwordHash: not }
-print(u.passwordHash)                     // E-TYPE-001 — pre-transition access
+const hash = u.passwordHash               // E-TYPE-001 — pre-transition access
 
 u.passwordHash = hashPassword(rawPassword)
-print(u.passwordHash)                     // OK — post-transition access
+const hashAfter = u.passwordHash          // OK — post-transition access
 ```
 
 The annotation is a **type-system** mechanism, NOT a state-machine. For variant-graph progression with explicit `from` / `to` declarations, use an engine (§7 / Tier 2). Engines and lifecycle annotations are complementary; the engine-cell carve-out below preserves the separation.
@@ -599,22 +599,22 @@ const u = loadUser(42)
 
 // Form 1 — given presence-guard (§42.2.3)
 given u => {
-    print(u.name)                         // OK — discrimination = transition
+    const name = u.name                   // OK — discrimination = transition
 }
 
 // Form 2 — if-is-not early-return
 if (u is not) return
-print(u.name)                             // OK — narrowed + transitioned
+const name = u.name                       // OK — narrowed + transitioned
 
 // Form 3 — match
 match u {
     not => handleAbsence()
-    given u => { print(u.name) }          // OK — arm discriminates + transitions
+    given u => { const name = u.name }    // OK — arm discriminates + transitions
 }
 
 // Pre-transition access — fires E-TYPE-001
 const u2 = loadUser(42)
-print(u2.name)                            // E-TYPE-001 — u2 was not discriminated
+const u2name = u2.name                    // E-TYPE-001 — u2 was not discriminated
 ```
 
 **Variant-progression — explicit `transition(u)`:**
@@ -634,12 +634,12 @@ const a = publish(42)
 
 if (a is .Draft) {
     transition(a)                         // explicit per-access transition signal
-    print(a.publishedAt)                  // OK — post-transition access of B-shape field
+    const publishedAt = a.publishedAt     // OK — post-transition access of B-shape field
 }
 
 // Missing-transition — fires E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED
 if (a is .Draft) {
-    print(a.publishedAt)                  // accessed .Published-shape field after
+    const publishedAt = a.publishedAt     // accessed .Published-shape field after
                                           // discriminating .Draft without transition()
 }
 ```
