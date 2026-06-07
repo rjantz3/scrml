@@ -1,0 +1,7 @@
+# D2a — Legacy (Acorn) map-literal parser — progress
+
+2026-06-06T23:46:44Z — start at /home/bryan-maclee/scrmlMaster/scrmlTS/.claude/worktrees/agent-a9507c08ac253d668. Merge-startup: Already up to date (D1 inherited; findMapEntryColon present=1). bun install + pretest OK. Baseline expected 23,143/0/220/1/918.
+2026-06-06T23:51:52Z — Unit 1 DONE (aa2cfb5c): MapLitExpr/MapEntry in ast.ts + union arm + 6 exhaustive-switch map-lit cases in expression-parser.ts. Pre-commit gate green. Next: Unit 2 scanner preprocessMapLiterals.
+2026-06-06T23:57:14Z — Units 2+3 DONE (5b353b03). Units 4+5: forEachMapLitExprInExprNode walker + ast-builder 2 wrapper-site surfacing. E-MAP-LITERAL-MALFORMED (fatal) + W-MAP-STRUCT-KEY-LITERAL / W-MAP-DUPLICATE-LITERAL-KEY (info -> result.warnings) verified through buildAST. Next: Unit 6 unit tests.
+2026-06-06T23:59:08Z — Units 4+5 DONE (29d2ab1f). Unit 6: value-native-map-literal-parser-s169.test.js (24 tests, 73 assertions, all green) — recognition/node-shape, array+ternary-colon exclusion, E-MAP-LITERAL-MALFORMED, W-MAP-STRUCT-KEY-LITERAL, W-MAP-DUPLICATE-LITERAL-KEY, clean-no-false-positive. Next: full suite + within-node regression check.
+2026-06-07T00:03:07Z — Unit 6 DONE (bb92a538). VERIFICATION: full suite 23167 pass / 0 fail / 220 skip / 1 todo / 919 files (baseline 23143/0/220/1/918 + 24 new D2a tests, +1 file). within-node parity 1005/0 unchanged (no map samples). R26 N/A (no end-to-end map compile until D4). DONE — all 6 units committed, status clean.

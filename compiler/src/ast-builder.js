@@ -44,7 +44,7 @@ import {
   tokenizePassthrough as _defaultTokenizePassthrough,
 } from "./tokenizer.ts";
 
-import { parseExprToNode, forEachResetExprInExprNode } from "./expression-parser.ts";
+import { parseExprToNode, forEachResetExprInExprNode, forEachMapLitExprInExprNode } from "./expression-parser.ts";
 import { decorateValidatorsWithExprNodes } from "./validator-arg-parser.ts";
 import { splitBlocks as _splitBlocksForP2Form1 } from "./block-splitter.js";
 import { scanForTopLevelSemicolon, isEventHandlerAttrName } from "./multi-statement-scan.ts";
@@ -254,6 +254,15 @@ export function safeParseExprToNodeGlobal(expr, filePath, startOffset, errors) {
             resetNode.diagnostic.message,
             resetNode.span,
           ));
+        }
+      });
+      // §59.3 (Units 4+5) — surface map-literal parse-time diagnostics attached
+      // by the legacy scanner (E-MAP-LITERAL-MALFORMED fatal; W-MAP-STRUCT-KEY-
+      // LITERAL / W-MAP-DUPLICATE-LITERAL-KEY info → result.warnings via the
+      // W-/I- prefix partition at api.js). Same surfacing pattern as reset-expr.
+      forEachMapLitExprInExprNode(node, (mapNode) => {
+        for (const d of mapNode.diagnostics ?? []) {
+          errors.push(new TABError(d.code, d.message, mapNode.span));
         }
       });
     }
@@ -2485,6 +2494,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
               resetNode.diagnostic.message,
               resetNode.span,
             ));
+          }
+        });
+        // §59.3 (Units 4+5) — surface map-literal parse-time diagnostics
+        // (E-MAP-LITERAL-MALFORMED fatal; W-MAP-* info → result.warnings).
+        forEachMapLitExprInExprNode(node, (mapNode) => {
+          for (const d of mapNode.diagnostics ?? []) {
+            errors.push(new TABError(d.code, d.message, mapNode.span));
           }
         });
       }

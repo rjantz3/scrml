@@ -1887,6 +1887,53 @@ export interface MatchExpr {
   rawArms: string[];
 }
 
+// ---- Value-Native Map Literal (§59.3) ----
+
+/**
+ * One `key: value` entry inside a value-native map literal (§59.3).
+ * Both `key` and `value` are fully-parsed ExprNodes — the legacy (Acorn)
+ * scanner round-trips the raw key/value text through the full expression
+ * pipeline (the same JSON-quote-then-reparse trick `MatchExpr.rawArms` uses).
+ */
+export interface MapEntry {
+  /** The entry key expression (`"DAL"`, `1`, a struct/enum value, …). */
+  key: ExprNode;
+  /** The entry value expression. */
+  value: ExprNode;
+}
+
+/**
+ * `[k: v, k2: v2, …]` value-native map literal, or `[:]` empty-map literal (§59.3).
+ *
+ * The parser disambiguates a bracketed expression as a MAP iff it is the empty
+ * form `[:]` OR it contains a bracket-depth-1 entry-colon that is NOT a ternary
+ * alternative-separator (§59.3). An empty `entries` list is the `[:]` empty map.
+ *
+ * Entry ordering is source order. Duplicate depth-1 keys are last-wins (§59.3)
+ * — the parser keeps every entry (so a downstream pass can surface
+ * `W-MAP-DUPLICATE-LITERAL-KEY`); the runtime/codegen lowering (D3/D4) applies
+ * last-wins when building the map value.
+ *
+ * Parse-time diagnostics for a malformed literal (missing key/value, trailing
+ * colon, count error → `E-MAP-LITERAL-MALFORMED`) and the two info-level
+ * notices (`W-MAP-STRUCT-KEY-LITERAL` for a struct/enum-key literal,
+ * `W-MAP-DUPLICATE-LITERAL-KEY` for a last-wins duplicate) are carried on the
+ * `diagnostics` field and surfaced by the ast-builder wrapper as TABErrors —
+ * the same surfacing pattern `ResetExpr.diagnostic` uses (the scanner runs
+ * pre-Acorn, so it cannot push into an errors array directly).
+ */
+export interface MapLitExpr {
+  kind: "map-lit";
+  span: ExprSpan;
+  /** Ordered list of `key: value` entries. Empty list = the `[:]` empty map. */
+  entries: MapEntry[];
+  /**
+   * Parse-time diagnostics (Error + Info) attached by the legacy scanner.
+   * Surfaced by the ast-builder wrapper; absent on a clean primitive-key literal.
+   */
+  diagnostics?: { code: string; message: string }[];
+}
+
 // ---- SQL Block Reference ----
 
 /**
@@ -2000,6 +2047,7 @@ export type ExprNode =
   | LambdaExpr
   | CastExpr
   | MatchExpr
+  | MapLitExpr
   | SqlRefExpr
   | InputStateRefExpr
   | EscapeHatchExpr

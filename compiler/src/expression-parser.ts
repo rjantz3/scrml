@@ -27,7 +27,7 @@ import type {
   UnaryExpr, BinaryExpr, AssignExpr, TernaryExpr,
   MemberExpr, IndexExpr, CallExpr, NewExpr,
   LambdaExpr, LambdaParam,
-  CastExpr, MatchExpr, SqlRefExpr, InputStateRefExpr, EscapeHatchExpr,
+  CastExpr, MatchExpr, MapLitExpr, MapEntry, SqlRefExpr, InputStateRefExpr, EscapeHatchExpr,
   ResetExpr,
 } from "./types/ast.ts";
 
@@ -1052,6 +1052,15 @@ function preprocessForAcorn(raw: string, opts?: { tildeActive?: boolean }): stri
   // This is processed first because match may contain `is` operators inside arms.
   s = preprocessMatchExprs(s);
 
+  // §59.3 — value-native map literal rewrite. Acorn rejects a `:` inside
+  // `[...]`, so a map literal (`[:]` / `[k: v, …]`) is rewritten to a
+  // placeholder call `__scrml_map_lit__(<diagJSON>, k1, v1, k2, v2, …)` here,
+  // BEFORE the bare-variant rewrite and `not`-lowering. Runs AFTER
+  // preprocessMatchExprs so a `[k: v]` inside a match arm is already masked as
+  // a JSON string arg and is not re-scanned. Each key/value text round-trips
+  // through the full pipeline at unmask time (same as match `rawArms`).
+  s = preprocessMapLiterals(s);
+
   // ─── `is …` predicate rewriting (Phase A: S99 / Phase B: 2026-05-17) ───
   //
   // Phase A (A4, S99) introduced a regex-based LHS capture: a base ident
@@ -1265,6 +1274,235 @@ function preprocessForAcorn(raw: string, opts?: { tildeActive?: boolean }): stri
   s = s.replace(/(?<![A-Za-z0-9_$])~(?![A-Za-z0-9_$])/g, "__scrml_tilde__");
 
   return s;
+}
+
+// ---------------------------------------------------------------------------
+// §59.3 — value-native map literal scanner (legacy / Acorn pre-rewrite)
+// ---------------------------------------------------------------------------
+
+/** A diagnostic the map scanner attaches to a `__scrml_map_lit__` placeholder. */
+type MapLitDiag = { code: string; message: string };
+
+/**
+ * Given source `s` and the index of an opening `[`, return the index of its
+ * matching `]` (string/template-literal aware, depth-tracked), or -1 if the
+ * bracket is never closed. The returned index points AT the closing `]`.
+ */
+function findMatchingBracket(s: string, openIdx: number): number {
+  let depth = 0;
+  let inString: string | null = null;
+  for (let i = openIdx; i < s.length; i++) {
+    const c = s[i];
+    if (inString !== null) {
+      if (c === "\\") { i++; continue; }      // skip the escaped char
+      if (c === inString) inString = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") { inString = c; continue; }
+    if (c === "(" || c === "[" || c === "{") { depth++; continue; }
+    if (c === ")" || c === "]" || c === "}") {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * §59.3 disambiguation, value-level. Given the INNER body of a `[ … ]`
+ * (brackets already stripped), return the index in `inner` of the first
+ * **depth-0 entry-colon that is NOT a ternary alternative-separator**, or -1
+ * if there is none (→ the bracket is an array literal, not a map).
+ *
+ * Mirrors `findMapEntryColon` (type-system.ts) — track bracket/brace/paren
+ * depth + an unmatched-`?` counter at depth 0 — and additionally skips
+ * string/template-literal interiors (a `:` inside `"a:b"` is not an entry-colon).
+ */
+function findMapEntryColonInLiteral(inner: string): number {
+  let depth = 0;
+  let pendingTernary = 0;
+  let inString: string | null = null;
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i];
+    if (inString !== null) {
+      if (ch === "\\") { i++; continue; }
+      if (ch === inString) inString = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") { inString = ch; continue; }
+    if (ch === "(" || ch === "[" || ch === "{") { depth++; continue; }
+    if (ch === ")" || ch === "]" || ch === "}") { depth--; continue; }
+    if (depth !== 0) continue;
+    if (ch === "?") { pendingTernary++; continue; }
+    if (ch === ":") {
+      // A depth-0 colon. An unmatched `?` before it makes it a ternary
+      // alternative-separator (§59.3 exclusion) — consume the `?` and skip.
+      if (pendingTernary > 0) { pendingTernary--; continue; }
+      return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Split a map-literal inner body into its top-level (depth-0) entry segments
+ * on commas, skipping commas nested inside brackets/braces/parens and string
+ * interiors. Mirrors the comma-split discipline used elsewhere in the parser.
+ */
+function splitMapEntriesTopLevel(inner: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let inString: string | null = null;
+  let start = 0;
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i];
+    if (inString !== null) {
+      if (ch === "\\") { i++; continue; }
+      if (ch === inString) inString = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") { inString = ch; continue; }
+    if (ch === "(" || ch === "[" || ch === "{") { depth++; continue; }
+    if (ch === ")" || ch === "]" || ch === "}") { depth--; continue; }
+    if (ch === "," && depth === 0) {
+      out.push(inner.slice(start, i));
+      start = i + 1;
+    }
+  }
+  out.push(inner.slice(start));
+  return out;
+}
+
+/**
+ * Is `keyText` a struct/enum key literal (`{ … }` or a `.Variant` /
+ * `Type.Variant` enum value)? Such a literal parse-accepts in v1 but is
+ * codegen-deferred to `.insert` (§59.3 M-cut) → `W-MAP-STRUCT-KEY-LITERAL`.
+ * A bare-string / number / boolean primitive key does NOT trigger this.
+ */
+function mapKeyIsStructOrEnum(keyText: string): boolean {
+  const t = keyText.trim();
+  if (t.startsWith("{")) return true;                          // struct literal
+  if (/^\.[A-Z]/.test(t)) return true;                          // .Variant
+  if (/^[A-Z][A-Za-z0-9_]*\s*(?:::|\.)\s*[A-Z]/.test(t)) return true; // Type.Variant / Type::Variant
+  return false;
+}
+
+/**
+ * §59.3 — rewrite value-native map literals to a placeholder call so Acorn can
+ * parse them. A bracketed expression is a MAP iff it is the empty form `[:]`
+ * OR it contains a depth-1 entry-colon that is not a ternary alternative-colon
+ * (`findMapEntryColonInLiteral`). Array literals and index accesses (which never
+ * carry a qualifying depth-1 entry-colon) are left untouched.
+ *
+ * Emitted shape: `__scrml_map_lit__(<diagJSON>, k1, v1, k2, v2, …)` where
+ * `<diagJSON>` is a JSON-string of the attached diagnostics array (Error +
+ * Info) and the remaining args are the JSON-quoted key/value source slices —
+ * round-tripped through the full pipeline at unmask time (mirrors match arms).
+ * An empty map (`[:]`) emits `__scrml_map_lit__(<diagJSON>)` (no pairs).
+ *
+ * Processed right-to-left so earlier indices stay valid after each rewrite.
+ */
+function preprocessMapLiterals(s: string): string {
+  // Collect candidate map-literal brackets (left-to-right), then rewrite
+  // right-to-left so prior-index slices remain valid.
+  const rewrites: Array<{ start: number; end: number; replacement: string }> = [];
+
+  let inString: string | null = null;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inString !== null) {
+      if (c === "\\") { i++; continue; }
+      if (c === inString) inString = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") { inString = c; continue; }
+    if (c !== "[") continue;
+
+    const closeIdx = findMatchingBracket(s, i);
+    if (closeIdx === -1) continue;                       // unclosed — leave to acorn
+    const inner = s.slice(i + 1, closeIdx);
+    const innerTrim = inner.trim();
+
+    // Empty-map literal `[:]` (exactly a single colon, possibly padded).
+    if (innerTrim === ":") {
+      rewrites.push({ start: i, end: closeIdx + 1, replacement: `__scrml_map_lit__(${JSON.stringify(JSON.stringify([]))})` });
+      i = closeIdx;                                       // skip past — no nested re-scan of this bracket
+      continue;
+    }
+
+    // Map iff there is a depth-1 entry-colon that is not a ternary alt-colon.
+    const entryColon = findMapEntryColonInLiteral(inner);
+    if (entryColon === -1) continue;                     // array literal / index — not a map
+
+    const diags: MapLitDiag[] = [];
+    const segments = splitMapEntriesTopLevel(inner);
+    const pairArgs: string[] = [];
+    const seenKeys: string[] = [];
+
+    for (const seg of segments) {
+      const segTrim = seg.trim();
+      if (segTrim === "") {
+        // An empty entry segment (a stray / trailing comma) — count error.
+        diags.push({
+          code: "E-MAP-LITERAL-MALFORMED",
+          message: "E-MAP-LITERAL-MALFORMED: empty entry in map literal (stray or trailing comma) (§59.3).",
+        });
+        continue;
+      }
+      const colon = findMapEntryColonInLiteral(seg);
+      if (colon === -1) {
+        // An entry with no key:value colon (e.g. `[ "a": 1, "b" ]`) — malformed.
+        diags.push({
+          code: "E-MAP-LITERAL-MALFORMED",
+          message: `E-MAP-LITERAL-MALFORMED: map-literal entry \`${segTrim}\` is missing a \`key: value\` colon (§59.3).`,
+        });
+        continue;
+      }
+      const keyText = seg.slice(0, colon).trim();
+      const valText = seg.slice(colon + 1).trim();
+      if (keyText === "" || valText === "") {
+        // Missing key or value, or a trailing colon (`["k":]`, `[:5]`).
+        diags.push({
+          code: "E-MAP-LITERAL-MALFORMED",
+          message: `E-MAP-LITERAL-MALFORMED: map-literal entry \`${segTrim}\` has a ${keyText === "" ? "missing key" : "missing value"} (§59.3).`,
+        });
+        continue;
+      }
+      // §59.3 M-cut — struct/enum-key literal parse-accepts but is codegen-
+      // deferred to `.insert` in v1. Surface once per offending key.
+      if (mapKeyIsStructOrEnum(keyText)) {
+        diags.push({
+          code: "W-MAP-STRUCT-KEY-LITERAL",
+          message: `W-MAP-STRUCT-KEY-LITERAL: struct/enum-key map literal \`${keyText}: …\` parse-accepts but v1 codegen requires the \`.insert(${keyText}, …)\` form (§59.3/§59.12).`,
+        });
+      }
+      // §59.3 duplicate depth-1 keys — last-wins; surface the overwrite. Keys
+      // are compared by normalized source text (a best-effort structural proxy
+      // at parse time; the runtime applies true §45-equality last-wins).
+      const keyNorm = keyText.replace(/\s+/g, " ");
+      if (seenKeys.includes(keyNorm)) {
+        diags.push({
+          code: "W-MAP-DUPLICATE-LITERAL-KEY",
+          message: `W-MAP-DUPLICATE-LITERAL-KEY: duplicate map-literal key \`${keyText}\` — last entry wins (§59.3).`,
+        });
+      }
+      seenKeys.push(keyNorm);
+      pairArgs.push(JSON.stringify(keyText), JSON.stringify(valText));
+    }
+
+    const diagArg = JSON.stringify(JSON.stringify(diags));
+    const allArgs = [diagArg, ...pairArgs].join(", ");
+    rewrites.push({ start: i, end: closeIdx + 1, replacement: `__scrml_map_lit__(${allArgs})` });
+    i = closeIdx;
+  }
+
+  if (rewrites.length === 0) return s;
+  let result = s;
+  for (let k = rewrites.length - 1; k >= 0; k--) {
+    const { start, end, replacement } = rewrites[k];
+    result = result.slice(0, start) + replacement + result.slice(end);
+  }
+  return result;
 }
 
 /** Pre-process `match subject { arms }` expressions. */
@@ -1714,6 +1952,34 @@ export function esTreeToExprNode(
           const rawArmNodes = rawArgs.slice(1) as ESNode[];
           const rawArmsArr = rawArmNodes.map(a => a.value as string ?? "");
           return { kind: "match-expr", span, subject, rawArms: rawArmsArr } satisfies MatchExpr;
+        }
+
+        // §59.3 — value-native map literal placeholder unmask. The scanner
+        // (preprocessMapLiterals) emitted `__scrml_map_lit__(<diagJSON>, k1, v1,
+        // k2, v2, …)`. The first arg is a JSON string of the attached
+        // diagnostics array; the remaining args are alternating key/value source
+        // slices, each re-parsed through the full pipeline (so nested map
+        // literals, bare variants, etc. inside a key/value are handled). An
+        // empty `[:]` map carries only the diag arg → zero entries.
+        if (calleeName === "__scrml_map_lit__") {
+          const diagRaw = (rawArgs[0] as ESNode | undefined)?.value as string ?? "[]";
+          let diagnostics: { code: string; message: string }[] = [];
+          try {
+            const parsed = JSON.parse(diagRaw);
+            if (Array.isArray(parsed)) diagnostics = parsed;
+          } catch { /* malformed diag payload — treat as none */ }
+          const pairNodes = rawArgs.slice(1) as ESNode[];
+          const entries: MapEntry[] = [];
+          for (let p = 0; p + 1 < pairNodes.length; p += 2) {
+            const keyText = (pairNodes[p].value as string) ?? "";
+            const valText = (pairNodes[p + 1].value as string) ?? "";
+            const key = parseExprToNode(keyText, filePath, baseOffset);
+            const value = parseExprToNode(valText, filePath, baseOffset);
+            entries.push({ key, value });
+          }
+          const lit: MapLitExpr = { kind: "map-lit", span, entries };
+          if (diagnostics.length > 0) lit.diagnostics = diagnostics;
+          return lit;
         }
 
         // §6.8.2 — `reset(<expr>)` is a language keyword expression. Lift the
@@ -2268,6 +2534,15 @@ export function emitStringFromTree(node: ExprNode): string {
       // nodes still emit the same string (the diagnostic surfaces separately
       // through the ast-builder wrapper); this keeps the round-trip stable.
       return `reset(${emitStringFromTree(node.target)})`;
+    }
+
+    case "map-lit": {
+      // §59.3 — round-trip emit as `[:]` (empty) or `[k: v, …]` (map literal).
+      if (node.entries.length === 0) return "[:]";
+      const entries = node.entries
+        .map(e => `${emitStringFromTree(e.key)}: ${emitStringFromTree(e.value)}`)
+        .join(", ");
+      return `[${entries}]`;
     }
 
     default: {
@@ -3004,6 +3279,17 @@ export function forEachIdentInExprNode(
       return;
     }
 
+    case "map-lit": {
+      // §59.3 — recurse into every entry key + value so identifier-based
+      // analyses (dep-graph, reactive deps) see @cell reads in either position.
+      const n = node as MapLitExpr;
+      for (const entry of n.entries) {
+        forEachIdentInExprNode(entry.key, callback);
+        forEachIdentInExprNode(entry.value, callback);
+      }
+      return;
+    }
+
     default: {
       // TypeScript exhaustiveness check. If this fires, a new ExprNode kind was
       // added without updating this function. Stop-and-report trigger per spec.
@@ -3088,6 +3374,8 @@ export function exprNodeContainsCall(node: ExprNode, calleeName?: string): boole
       // Recurse into target so a call appearing inside the target counts.
       return exprNodeContainsCall((node as ResetExpr).target, calleeName);
     }
+    case "map-lit": return (node as MapLitExpr).entries.some(e =>
+      exprNodeContainsCall(e.key, calleeName) || exprNodeContainsCall(e.value, calleeName));
     default: { const _never: never = node; return false; }
   }
 }
@@ -3212,6 +3500,76 @@ export function forEachResetExprInExprNode(node: ExprNode, cb: (resetNode: Reset
     }
     case "cast": forEachResetExprInExprNode((node as CastExpr).expression, cb); return;
     case "match-expr": forEachResetExprInExprNode((node as MatchExpr).subject, cb); return;
+    case "map-lit": {
+      for (const e of (node as MapLitExpr).entries) {
+        forEachResetExprInExprNode(e.key, cb);
+        forEachResetExprInExprNode(e.value, cb);
+      }
+      return;
+    }
+    default: { const _never: never = node; return; }
+  }
+}
+
+/**
+ * Walk an ExprNode tree and invoke `cb` for every `MapLitExpr` (§59.3).
+ *
+ * Mirrors `forEachResetExprInExprNode`. The ast-builder wrapper uses this to
+ * surface a map literal's attached parse-time diagnostics
+ * (`E-MAP-LITERAL-MALFORMED`, `W-MAP-STRUCT-KEY-LITERAL`,
+ * `W-MAP-DUPLICATE-LITERAL-KEY`) as TABErrors — the scanner runs pre-Acorn and
+ * cannot push into an errors array directly, so it attaches them to the node.
+ * Recurses into entry keys/values (a nested map literal is visited too).
+ */
+export function forEachMapLitExprInExprNode(node: ExprNode, cb: (mapNode: MapLitExpr) => void): void {
+  if (!node) return;
+  switch (node.kind) {
+    case "map-lit": {
+      const n = node as MapLitExpr;
+      cb(n);
+      for (const e of n.entries) {
+        forEachMapLitExprInExprNode(e.key, cb);
+        forEachMapLitExprInExprNode(e.value, cb);
+      }
+      return;
+    }
+    case "ident": case "lit": case "sql-ref": case "input-state-ref": case "escape-hatch": return;
+    case "array": { for (const el of (node as ArrayExpr).elements) forEachMapLitExprInExprNode(el as ExprNode, cb); return; }
+    case "object": {
+      for (const p of (node as ObjectExpr).props) {
+        if (p.kind === "prop") { if (typeof p.key !== "string") forEachMapLitExprInExprNode(p.key as ExprNode, cb); forEachMapLitExprInExprNode(p.value, cb); }
+        else if (p.kind === "spread") forEachMapLitExprInExprNode(p.argument, cb);
+      }
+      return;
+    }
+    case "spread": forEachMapLitExprInExprNode((node as SpreadExpr).argument, cb); return;
+    case "unary": forEachMapLitExprInExprNode((node as UnaryExpr).argument, cb); return;
+    case "binary": { const n = node as BinaryExpr; forEachMapLitExprInExprNode(n.left, cb); forEachMapLitExprInExprNode(n.right, cb); return; }
+    case "assign": { const n = node as AssignExpr; forEachMapLitExprInExprNode(n.target, cb); forEachMapLitExprInExprNode(n.value, cb); return; }
+    case "ternary": { const n = node as TernaryExpr; forEachMapLitExprInExprNode(n.condition, cb); forEachMapLitExprInExprNode(n.consequent, cb); forEachMapLitExprInExprNode(n.alternate, cb); return; }
+    case "member": forEachMapLitExprInExprNode((node as MemberExpr).object, cb); return;
+    case "index": { const n = node as IndexExpr; forEachMapLitExprInExprNode(n.object, cb); forEachMapLitExprInExprNode(n.index, cb); return; }
+    case "call": {
+      const n = node as CallExpr;
+      forEachMapLitExprInExprNode(n.callee, cb);
+      for (const a of n.args) forEachMapLitExprInExprNode(a as ExprNode, cb);
+      return;
+    }
+    case "new": {
+      const n = node as NewExpr;
+      forEachMapLitExprInExprNode(n.callee, cb);
+      for (const a of n.args) forEachMapLitExprInExprNode(a as ExprNode, cb);
+      return;
+    }
+    case "lambda": {
+      const n = node as LambdaExpr;
+      for (const p of n.params) { if (p.defaultValue) forEachMapLitExprInExprNode(p.defaultValue, cb); }
+      if (n.body.kind === "expr") forEachMapLitExprInExprNode(n.body.value, cb);
+      return;
+    }
+    case "cast": forEachMapLitExprInExprNode((node as CastExpr).expression, cb); return;
+    case "match-expr": forEachMapLitExprInExprNode((node as MatchExpr).subject, cb); return;
+    case "reset-expr": forEachMapLitExprInExprNode((node as ResetExpr).target, cb); return;
     default: { const _never: never = node; return; }
   }
 }
@@ -3267,6 +3625,8 @@ export function exprNodeContainsAssignment(node: ExprNode): boolean {
     case "cast": return exprNodeContainsAssignment((node as CastExpr).expression);
     case "match-expr": return exprNodeContainsAssignment((node as MatchExpr).subject);
     case "reset-expr": return exprNodeContainsAssignment((node as ResetExpr).target);
+    case "map-lit": return (node as MapLitExpr).entries.some(e =>
+      exprNodeContainsAssignment(e.key) || exprNodeContainsAssignment(e.value));
     default: { const _never: never = node; return false; }
   }
 }
@@ -3313,6 +3673,8 @@ export function exprNodeContainsMemberAccess(node: ExprNode, props: string[]): b
     case "cast": return exprNodeContainsMemberAccess((node as CastExpr).expression, props);
     case "match-expr": return exprNodeContainsMemberAccess((node as MatchExpr).subject, props);
     case "reset-expr": return exprNodeContainsMemberAccess((node as ResetExpr).target, props);
+    case "map-lit": return (node as MapLitExpr).entries.some(e =>
+      exprNodeContainsMemberAccess(e.key, props) || exprNodeContainsMemberAccess(e.value, props));
     default: { const _never: never = node; return false; }
   }
 }
