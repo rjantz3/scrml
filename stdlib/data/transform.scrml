@@ -127,21 +127,193 @@ ${
      * Example: unique([1, 2, 2, 3]) → [1, 2, 3]
      *          unique(users, u => u.id) → deduplicated by id
      */
+    /**
+     * Value-canonical string codec (§59.5 / §47.1.4).
+     *
+     * Serializes a value deterministically so two §45-structurally-equal values
+     * produce BYTE-IDENTICAL strings. This is what makes `unique`'s no-key path
+     * and the set-algebra helpers below value-correct for STRUCT/enum/nested
+     * elements (JS `Set`/`Array.includes` key by reference, so value-equal
+     * structs would otherwise be treated as distinct), and makes them agree with
+     * scrml's `==` and the §59 value-native map key.
+     *
+     * REPLICATED (not imported) from the runtime template's
+     * `_scrml_value_canonical` — see compiler/runtime/stdlib/data.js for the
+     * lockstep rationale (data.js is bundled both standalone and inside an IIFE,
+     * so the runtime global is not reliably reachable). Acyclic by S168, so no
+     * cycle-guard is needed.
+     */
+    function _data_value_canonical(v) {
+        if (v is not) return "0:"
+        const t = typeof v
+        if (t == "boolean") return v ? "b1" : "b0"
+        if (t == "number") {
+            const n = v == 0 ? 0 : v
+            return "n" + String(n)
+        }
+        if (t == "string") {
+            return "s" + v.length + ":" + v
+        }
+        if (Array.isArray(v)) {
+            let out = "a" + v.length + "["
+            for (let i = 0; i < v.length; i++) out += _data_value_canonical(v[i])
+            return out + "]"
+        }
+        if (v is some && v.__scrml_map == true) {
+            const mkeys = Object.keys(v.entries).sort()
+            let mout = "M{"
+            for (let mi = 0; mi < mkeys.length; mi++) {
+                const ck = mkeys[mi]
+                mout += ck.length + ":" + ck + _data_value_canonical(v.entries[ck].v)
+            }
+            return mout + "}"
+        }
+        if (v is some && v._tag is some) {
+            const tag = String(v._tag)
+            let eout = "E" + tag.length + ":" + tag + "("
+            const eKeys = Object.keys(v).filter((k) => k != "_tag").sort()
+            for (let ei = 0; ei < eKeys.length; ei++) {
+                const ek = eKeys[ei]
+                eout += ek.length + ":" + ek + _data_value_canonical(v[ek])
+            }
+            return eout + ")"
+        }
+        const sKeys = Object.keys(v).sort()
+        let sout = "S{"
+        for (let si = 0; si < sKeys.length; si++) {
+            const sk = sKeys[si]
+            sout += sk.length + ":" + sk + _data_value_canonical(v[sk])
+        }
+        return sout + "}"
+    }
+
     export function unique(array, keyOrFn) {
+        // No-key path: dedup by the value-canonical key (§59.5), NOT JS Set
+        // reference identity — so value-equal structs collapse to one element.
         if (!keyOrFn) {
-            return [...new Set(array)]
+            const seen = new Set()
+            const result = []
+            for (const item of array) {
+                const key = _data_value_canonical(item)
+                if (!seen.has(key)) {
+                    seen.add(key)
+                    result.push(item)
+                }
+            }
+            return result
         }
         const fn = typeof keyOrFn == "function" ? keyOrFn : (item) => item[keyOrFn]
         const seen = new Set()
         const result = []
         for (const item of array) {
-            const key = fn(item)
+            const key = _data_value_canonical(fn(item))
             if (!seen.has(key)) {
                 seen.add(key)
                 result.push(item)
             }
         }
         return result
+    }
+
+    /**
+     * keyOrFn helper for the set-algebra functions: maps an element to its
+     * value-canonical comparison key. Default = the full value-canonical string.
+     */
+    function _data_key_fn(keyOrFn) {
+        if (!keyOrFn) return _data_value_canonical
+        if (typeof keyOrFn == "function") {
+            return (item) => _data_value_canonical(keyOrFn(item))
+        }
+        return (item) => _data_value_canonical(item[keyOrFn])
+    }
+
+    /**
+     * Set union — value-distinct elements in a OR b (a ∪ b).
+     * Value-correct for structs (compares via §59.5, not reference). No mutation;
+     * returns a plain array. Reassignment-canonical: @x = union(@a, @b).
+     *
+     * Example: union([1,2], [2,3]) → [1,2,3]
+     *          union([{id:1}], [{id:1},{id:2}]) → [{id:1},{id:2}]
+     */
+    export function union(a, b, keyOrFn) {
+        const key = _data_key_fn(keyOrFn)
+        const seen = new Set()
+        const result = []
+        for (const item of a) {
+            const k = key(item)
+            if (!seen.has(k)) {
+                seen.add(k)
+                result.push(item)
+            }
+        }
+        for (const item of b) {
+            const k = key(item)
+            if (!seen.has(k)) {
+                seen.add(k)
+                result.push(item)
+            }
+        }
+        return result
+    }
+
+    /**
+     * Set intersection — value-distinct elements in BOTH a and b (a ∩ b).
+     *
+     * Example: intersection([1,2,3], [2,3,4]) → [2,3]
+     *          intersection([{id:1},{id:2}], [{id:2}]) → [{id:2}]
+     */
+    export function intersection(a, b, keyOrFn) {
+        const key = _data_key_fn(keyOrFn)
+        const inB = new Set()
+        for (const item of b) inB.add(key(item))
+        const seen = new Set()
+        const result = []
+        for (const item of a) {
+            const k = key(item)
+            if (inB.has(k) && !seen.has(k)) {
+                seen.add(k)
+                result.push(item)
+            }
+        }
+        return result
+    }
+
+    /**
+     * Set difference — value-distinct elements in a but NOT in b (a ∖ b).
+     *
+     * Example: difference([1,2,3], [2]) → [1,3]
+     *          difference([{id:1},{id:2}], [{id:2}]) → [{id:1}]
+     */
+    export function difference(a, b, keyOrFn) {
+        const key = _data_key_fn(keyOrFn)
+        const inB = new Set()
+        for (const item of b) inB.add(key(item))
+        const seen = new Set()
+        const result = []
+        for (const item of a) {
+            const k = key(item)
+            if (!inB.has(k) && !seen.has(k)) {
+                seen.add(k)
+                result.push(item)
+            }
+        }
+        return result
+    }
+
+    /**
+     * Value-correct membership test (`.includes` stays primitive-only — it is
+     * value-broken for structs). Returns a bool.
+     *
+     * Example: member([1,2,3], 2) → true
+     *          member([{id:1},{id:2}], {id:2}) → true  (.includes would be false)
+     */
+    export function member(arr, x, keyOrFn) {
+        const key = _data_key_fn(keyOrFn)
+        const target = key(x)
+        for (const item of arr) {
+            if (key(item) == target) return true
+        }
+        return false
     }
 
     /**
@@ -291,7 +463,7 @@ ${
     }
 
     ~{
-        import { assertEqual, assertTruthy } from 'scrml:test'
+        import { assertEqual, assertTruthy, assertFalsy } from 'scrml:test'
 
         // pick
         assertEqual(pick({ a: 1, b: 2, c: 3 }, ["a", "c"]), { a: 1, c: 3 })
@@ -316,9 +488,30 @@ ${
         const sortedDesc = sortBy([{n:1},{n:3},{n:2}], "n", "desc")
         assertEqual(sortedDesc[0].n, 3)
 
-        // unique
+        // unique — primitives
         assertEqual(unique([1,2,2,3,1]), [1,2,3])
+        // unique — keyed path still works
         assertEqual(unique([{id:1},{id:2},{id:1}], "id").length, 2)
+        // unique — struct-safety fix (S170): value-equal structs collapse to one
+        assertEqual(unique([{id:1},{id:1}]).length, 1)
+        assertEqual(unique([{a:1,b:2},{b:2,a:1}]).length, 1)
+
+        // union — primitives + structs (value-correct)
+        assertEqual(union([1,2], [2,3]), [1,2,3])
+        assertEqual(union([{id:1}], [{id:1},{id:2}]).length, 2)
+        // intersection
+        assertEqual(intersection([1,2,3], [2,3,4]), [2,3])
+        assertEqual(intersection([{id:1},{id:2}], [{id:2},{id:3}]).length, 1)
+        // difference
+        assertEqual(difference([1,2,3], [2]), [1,3])
+        assertEqual(difference([{id:1},{id:2}], [{id:2}]).length, 1)
+        // member — value-safe (structs found by value, unlike .includes)
+        assertTruthy(member([1,2,3], 2))
+        assertFalsy(member([1,2,3], 9))
+        assertTruthy(member([{id:1},{id:2}], {id:2}))
+        assertFalsy(member([{id:1}], {id:9}))
+        // keyOrFn arg mirrors unique's family
+        assertEqual(union([{id:1,n:"a"}], [{id:1,n:"b"}], "id").length, 1)
 
         // chunk
         assertEqual(chunk([1,2,3,4,5], 2), [[1,2],[3,4],[5]])

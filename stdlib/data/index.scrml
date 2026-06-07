@@ -15,6 +15,7 @@ ${
              custom, emailField, passwordField, passwordConfirmField } from './validate.scrml'
 
     export { pick, omit, mapKeys, mapValues, groupBy, indexBy, sortBy, unique,
+             union, intersection, difference, member,
              flatten, flattenDeep, chunk, toSnakeCase, toCamelCase, camelizeKeys,
              snakifyKeys, deepMerge, clamp, paginate } from './transform.scrml'
 

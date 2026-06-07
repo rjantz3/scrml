@@ -957,7 +957,34 @@ The v0.3.0 critical-path investment. Five sub-waves, ALL CLOSED end-to-end:
 **App-building primitives:**
 - `scrml:auth` — `hashPassword`, `verifyPassword`, `generatePassword`, `signJwt`, `verifyJwt`, `decodeJwt`, `createRateLimiter`, TOTP (generate/verify)
 - `scrml:oauth` (NEW S58) — OAuth 2.0 + PKCE (RFC 7636). Core: `startFlow`, `exchangeCode`, `refreshToken`, `getUserInfo`, `revoke`. PKCE: `generateVerifier`, `deriveChallenge`. Storage: `memoryAdapter()` (dev only); caller injects production adapter. Provider presets: `googleConfig` + `parseGoogleIdToken` (decode-only, no JWKS verify yet — v0.3.0), `githubConfig`, `microsoftConfig`, `discordConfig`. Typed errors caught by `err.name`: `OAuthStateMismatch`, `OAuthVerifierMissing`, `OAuthTokenError`, `OAuthUserInfoError`, `OAuthRevocationError`. **Deferred:** JWKS sig verification, OIDC discovery (RFC 8414).
-- `scrml:data` — `validate(data, schema)`, `isValid`, `firstError`; predicate builders; transforms (`pick`, `omit`, `groupBy`, `sortBy`, `unique`, `flatten`, etc.) — vocabulary alignment task pending B3. **Plus (S65)** `parseVariant(json, EnumType)` — boundary-parsing primitive for tagged-variant JSON; FIRST general-position member of the type-as-argument feature family (cross-ref §13.6 + SPEC §41.13 + §53.14). Failure type `ParseError:enum` with variants `MissingDiscriminator`, `UnknownVariant(tag: string)`, `InvalidPayload(field: string, reason: string)`, `Malformed(reason: string)` — first stdlib-declared enum.
+- `scrml:data` — `validate(data, schema)`, `isValid`, `firstError`; predicate builders; transforms (`pick`, `omit`, `groupBy`, `sortBy`, `unique`, `flatten`, etc.) — vocabulary alignment task pending B3. **Set-algebra (S170 — "defer the set type, ship the helpers"):** `union(a, b)` / `intersection(a, b)` / `difference(a, b)` return plain arrays of value-DISTINCT elements (∪ / ∩ / ∖); `member(arr, x)` is value-safe membership (a bool). All are **value-correct for struct / enum / nested elements** — they key by the §59.5 value-canonical codec, so they agree with `==` (§45) and the §59 map key, where `Array.includes` / JS `Set` are reference-keyed and would be wrong. Each takes an optional `keyOrFn` 3rd arg mirroring `unique(array, keyOrFn)` (a field-name string or a projection fn; default keys by the full value-canonical string). No mutation; reassignment-canonical (`@x = union(@a, @b)`). **`unique` was also made struct-safe** in the same arc — its no-key path dedup'd by JS-`Set` reference identity (value-broken for structs); it now dedups by the value-canonical key. (There is NO `set` type — the warrant was thin; `set[K]`-over-map is on the shelf as the reversible upgrade. SPEC §59.12.) **Plus (S65)** `parseVariant(json, EnumType)` — boundary-parsing primitive for tagged-variant JSON; FIRST general-position member of the type-as-argument feature family (cross-ref §13.6 + SPEC §41.13 + §53.14). Failure type `ParseError:enum` with variants `MissingDiscriminator`, `UnknownVariant(tag: string)`, `InvalidPayload(field: string, reason: string)`, `Malformed(reason: string)` — first stdlib-declared enum.
+**Set idioms (S170 — there is NO `set` type; these are the blessed shapes):**
+- **Multi-select toggle** — the dominant set-shape. Use an array + `.includes` for primitive ids (zero-friction, what the corpus already does):
+  ```scrml
+  <selectedIds>: integer[] = []
+  // toggle:
+  if (@selectedIds.includes(id)) { @selectedIds = @selectedIds.filter(x => x != id) }
+  else { @selectedIds = [...@selectedIds, id] }
+  ```
+- **O(1) keyed membership over many keys** — use the §59 value-native map keyed to `bool`:
+  ```scrml
+  <seen>: [string: bool] = [:]
+  @seen = @seen.insert(key, true)
+  given _ = @seen[key] { /* present */ }      // or @seen.has(key)
+  ```
+- **Dedup a list** — `unique` (now struct-safe, §59.5-keyed):
+  ```scrml
+  <distinctTags>: string[] = ${ unique(@allTags) }
+  ```
+- **Set-algebra** — the `scrml:data` helpers (value-correct for structs):
+  ```scrml
+  ${ import { union, intersection, difference, member } from 'scrml:data' }
+  <both>:    integer[] = ${ union(@listA, @listB) }          // ∪
+  <common>:  integer[] = ${ intersection(@listA, @listB) }   // ∩
+  <onlyA>:   integer[] = ${ difference(@listA, @listB) }     // ∖
+  const have = member(@selectedRows, @row)                    // value-safe membership
+  ```
+
 - `scrml:router` — `match(pattern, path)`, `parseQuery`, `buildUrl`, `navigate`, `currentPath`, `onNavigate`
 - `scrml:store` — `createStore`, `createSessionStore`, `createCounter` (KV / session via SQLite)
 

@@ -18,6 +18,7 @@
 //
 //   from transform.scrml:
 //     pick, omit, mapKeys, mapValues, groupBy, indexBy, sortBy, unique,
+//     union, intersection, difference, member,
 //     flatten, flattenDeep, chunk, toSnakeCase, toCamelCase,
 //     camelizeKeys, snakifyKeys, deepMerge, clamp, paginate
 //
@@ -113,21 +114,198 @@ export function sortBy(array, keyOrFn, direction) {
   });
 }
 
-export function unique(array, keyOrFn) {
-  if (!keyOrFn) {
-    return [...new Set(array)];
+// _data_value_canonical(v) — value-canonical string codec (§59.5 / §47.1.4).
+//
+// Serializes a runtime value deterministically so that two §45-structurally-equal
+// values produce BYTE-IDENTICAL strings. This is what makes the set-algebra
+// helpers (union/intersection/difference/member) and `unique`'s no-key path
+// agree with scrml's `==` and the §59 value-native map's key identity for STRUCT
+// (and enum / nested) elements — JS `Set`/`Array.includes` key by reference, so
+// two value-equal structs would otherwise be treated as distinct.
+//
+// REPLICATED (not imported) from the runtime template's `_scrml_value_canonical`
+// (compiler/src/runtime-template.js, §59.5). The two MUST stay byte-identical so
+// these helpers agree with the map key. Reuse was not possible: data.js is
+// bundled BOTH as a standalone server module (where the runtime global is absent)
+// AND inside an IIFE in the client runtime — a correctness invariant cannot ride
+// a maybe-present global, so the algorithm is transcribed locally here.
+//
+// Acyclic precondition (S168 cycles-prereq, scrmlTS 8d9db4e1): value cycles are
+// forbidden in scrml source by construction, so this walk needs NO cycle-guard
+// and always terminates.
+//
+// Format (every variable-length piece is length-prefixed so concatenation is
+// unambiguous):
+//   not / null / undefined  ->  "0:"
+//   boolean                 ->  "b1" | "b0"
+//   number                  ->  "n" + canonical-number   (-0 normalized to 0)
+//   string                  ->  "s" + length + ":" + raw
+//   array                   ->  "a" + count + "[" canon(e0) canon(e1)... "]"
+//   map (nested value)      ->  "M{" entries ORDERED by canonical key string "}"
+//   enum                    ->  "E" + tagLen + ":" + tag + "(" payload... ")"
+//   struct                  ->  "S{" fields ALPHA-SORTED by name "}"
+function _data_value_canonical(v) {
+  if (v === null || v === undefined) return "0:";
+  const t = typeof v;
+  if (t === "boolean") return v ? "b1" : "b0";
+  if (t === "number") {
+    const n = v === 0 ? 0 : v; // collapse -0 to +0 (-0 === 0)
+    return "n" + String(n);
   }
+  if (t === "string") {
+    return "s" + v.length + ":" + v;
+  }
+  if (Array.isArray(v)) {
+    let out = "a" + v.length + "[";
+    for (let i = 0; i < v.length; i++) out += _data_value_canonical(v[i]);
+    return out + "]";
+  }
+  // Nested value-native map (§59.4 — a map may be a VALUE; only KEY types are
+  // constrained). Canonicalize entries ordered by canonical key string.
+  if (v && v.__scrml_map === true) {
+    const mkeys = Object.keys(v.entries).sort();
+    let mout = "M{";
+    for (let mi = 0; mi < mkeys.length; mi++) {
+      const ck = mkeys[mi];
+      mout += ck.length + ":" + ck + _data_value_canonical(v.entries[ck].v);
+    }
+    return mout + "}";
+  }
+  // Enum: _tag + alpha-sorted payload fields.
+  if (v && v._tag !== undefined) {
+    const tag = String(v._tag);
+    let eout = "E" + tag.length + ":" + tag + "(";
+    const eKeys = Object.keys(v).filter((k) => k !== "_tag").sort();
+    for (let ei = 0; ei < eKeys.length; ei++) {
+      const ek = eKeys[ei];
+      eout += ek.length + ":" + ek + _data_value_canonical(v[ek]);
+    }
+    return eout + ")";
+  }
+  // Struct: fields ALPHA-SORTED by name.
+  const sKeys = Object.keys(v).sort();
+  let sout = "S{";
+  for (let si = 0; si < sKeys.length; si++) {
+    const sk = sKeys[si];
+    sout += sk.length + ":" + sk + _data_value_canonical(v[sk]);
+  }
+  return sout + "}";
+}
+
+export function unique(array, keyOrFn) {
+  // No-key path: dedup by the value-canonical key (§59.5), NOT JS `Set` reference
+  // identity — so value-equal structs collapse to one element, matching scrml `==`.
+  if (!keyOrFn) {
+    const seen = new Set();
+    const result = [];
+    for (const item of array) {
+      const key = _data_value_canonical(item);
+      if (!seen.has(key)) {
+        seen.add(key);
+        result.push(item);
+      }
+    }
+    return result;
+  }
+  // Keyed path: dedup by the projected key, also via the value-canonical codec so
+  // a non-primitive projection (e.g. a struct-valued field) stays value-correct.
   const fn = typeof keyOrFn === "function" ? keyOrFn : (item) => item[keyOrFn];
   const seen = new Set();
   const result = [];
   for (const item of array) {
-    const key = fn(item);
+    const key = _data_value_canonical(fn(item));
     if (!seen.has(key)) {
       seen.add(key);
       result.push(item);
     }
   }
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Set-algebra helpers (S170 — "defer the set type, ship the helpers").
+//
+// union / intersection / difference operate on plain arrays and return plain
+// arrays of value-DISTINCT elements, comparing via the §59.5 value-canonical
+// codec so they are value-correct for struct / enum / nested elements (where
+// `Array.includes` and JS `Set` are reference-keyed and would be wrong). No
+// mutation; reassignment-canonical (`@x = union(@a, @b)`), consistent with how
+// reactive arrays update. Each takes an optional `keyOrFn` that mirrors the
+// `unique(array, keyOrFn)` family: a field name (string) or a projection fn;
+// the default keys by the full value-canonical string.
+//
+// `member(arr, x)` is the value-correct membership test (`.includes` stays
+// primitive-only — value-broken for structs). Returns a bool.
+// ---------------------------------------------------------------------------
+
+function _data_key_fn(keyOrFn) {
+  if (!keyOrFn) return _data_value_canonical;
+  if (typeof keyOrFn === "function") {
+    return (item) => _data_value_canonical(keyOrFn(item));
+  }
+  return (item) => _data_value_canonical(item[keyOrFn]);
+}
+
+export function union(a, b, keyOrFn) {
+  const key = _data_key_fn(keyOrFn);
+  const seen = new Set();
+  const result = [];
+  for (const item of a) {
+    const k = key(item);
+    if (!seen.has(k)) {
+      seen.add(k);
+      result.push(item);
+    }
+  }
+  for (const item of b) {
+    const k = key(item);
+    if (!seen.has(k)) {
+      seen.add(k);
+      result.push(item);
+    }
+  }
+  return result;
+}
+
+export function intersection(a, b, keyOrFn) {
+  const key = _data_key_fn(keyOrFn);
+  const inB = new Set();
+  for (const item of b) inB.add(key(item));
+  const seen = new Set();
+  const result = [];
+  for (const item of a) {
+    const k = key(item);
+    if (inB.has(k) && !seen.has(k)) {
+      seen.add(k);
+      result.push(item);
+    }
+  }
+  return result;
+}
+
+export function difference(a, b, keyOrFn) {
+  const key = _data_key_fn(keyOrFn);
+  const inB = new Set();
+  for (const item of b) inB.add(key(item));
+  const seen = new Set();
+  const result = [];
+  for (const item of a) {
+    const k = key(item);
+    if (!inB.has(k) && !seen.has(k)) {
+      seen.add(k);
+      result.push(item);
+    }
+  }
+  return result;
+}
+
+export function member(arr, x, keyOrFn) {
+  const key = _data_key_fn(keyOrFn);
+  const target = key(x);
+  for (const item of arr) {
+    if (key(item) === target) return true;
+  }
+  return false;
 }
 
 export function flatten(array) {
