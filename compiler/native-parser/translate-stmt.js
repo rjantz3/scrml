@@ -237,6 +237,23 @@ function appendTranslatedStmt(out, stmt, counter) {
                 out.push(makeYieldStmt(e, stmt.span, counter));
                 return;
             }
+            // FIX-NATIVE (DEEPSET / ARRAY-MUTATION) — a reactive deep-set
+            // (`@a.ref = "p"` / `@arr[i] = x`) or array-mutation (`@arr.push(5)`)
+            // rooted at an `@`-cell must NOT route through `makeBareExpr` (which
+            // emits an in-place mutation with no COW + no reactive trigger,
+            // breaking the `${@a.ref}` / `${@arr}` bindings). Recognize it here
+            // and synthesize the live `reactive-nested-assign` /
+            // `reactive-array-mutation` node (mirroring ast-builder.js:5620-5673),
+            // which emit-logic.ts lowers to the COW deep-set / triggered form.
+            // A non-`@`-cell-rooted write (`obj.x = y` on a plain local) returns
+            // null and keeps its bare-expr semantics.
+            {
+                const reactiveWrite = tryReactiveWrite(e, stmt.span, counter);
+                if (reactiveWrite !== null) {
+                    out.push(reactiveWrite);
+                    return;
+                }
+            }
             out.push(makeBareExpr(e, stmt.span, counter));
             return;
         }
@@ -592,6 +609,232 @@ function reconstructChainedSql(nativeExpr, span, counter) {
     return node;
 }
 
+// =============================================================================
+// FIX-NATIVE (DEEPSET / ARRAY-MUTATION node-synth — the a-parser variant).
+//
+// THE BUG. A reactive deep-set (`@a.ref = "p"`) or array-mutation
+// (`@arr.push(5)`) at statement position parsed (native, pre-translate) to a
+// generic `Assignment` / `Call` Expr and routed through `makeBareExpr`. Its
+// translated `exprNode` (an `assign` with a MEMBER target, or a `call` on a
+// member) emitted an IN-PLACE mutation:
+//     `_scrml_reactive_get("a").ref = "p"`        (no COW, no trigger)
+//     `_scrml_reactive_get("arr").push(5)`        (no COW, no trigger)
+// So the `${@a.ref}` / `${@arr}` bindings never updated — a reactivity break.
+//
+// THE LIVE SHAPE. The LIVE ast-builder (ast-builder.js:5620-5673) recognizes
+// these forms at the `@name` statement lead and synthesizes two dedicated AST
+// kinds — `reactive-nested-assign` (deep-set) and `reactive-array-mutation`
+// (array-mutation) — which codegen's emit-logic.ts (3014 / 3079) lowers to the
+// COW deep-set / triggered-mutation forms:
+//     `_scrml_reactive_set("a", _scrml_deep_set(_scrml_reactive_get("a"), ["ref"], "p"))`
+//     `{ _scrml_reactive_get("arr").push(5); _scrml_reactive_set("arr", _scrml_reactive_get("arr")); }`
+//
+// THE FIX. Recognize the same two forms HERE, on the native `Assignment` /
+// `Call` Expr (BEFORE the `makeBareExpr` fallthrough), and synthesize the live
+// node kinds. The gate is STRICT — the root object MUST be an `@`-cell
+// (`AtCell`); a plain-local `obj.x = y` keeps its in-place `makeBareExpr`
+// semantics untouched (mirroring the LIVE root gate `tok.kind === "AT_IDENT"`).
+//
+// The synthesized node shapes match what emit-logic.ts reads (verified against
+// ast-builder.js:5649-5672 + emit-logic.ts:3014/3079):
+//   reactive-nested-assign:  { target, path, value, valueExpr, span }
+//   reactive-array-mutation: { target, method, args, argsExpr, span }
+// `path` is the heterogeneous segment list (string for `.field` / literal-
+// index; `{ index: ExprNode, raw }` for a computed bracket index) the
+// S168 COW-all `_scrml_deep_set` path expects. Downstream the deep-set node
+// also benefits from the S170 Bug-B structural-compound leaf-retarget stamping
+// (reactive-deps.ts) for free — these node kinds are its input.
+// =============================================================================
+
+// ARRAY_MUTATIONS — the array-method names the LIVE ast-builder recognizes for
+// `reactive-array-mutation` (ast-builder.js:5635). MUST match the LIVE list
+// exactly: emit-logic.ts:3089 has a dedicated `switch` arm for each of these
+// eight + a no-op `default`. `copyWithin` is intentionally EXCLUDED (the LIVE
+// recognizer omits it, so a native `@arr.copyWithin(...)` stays a bare-expr to
+// match LIVE — surfaced to PA in the report). The order mirrors L5635.
+const REACTIVE_ARRAY_MUTATIONS = [
+    "push", "pop", "shift", "unshift", "splice", "sort", "reverse", "fill",
+];
+
+// atCellRootName — predicate+extractor. Walk a native Member chain inward; if
+// the innermost object is an `AtCell`, return its bare name (the `@`-cell the
+// path is rooted at). Otherwise return null (a non-cell root — NOT a reactive
+// write/mutation, leave the in-place bare-expr semantics intact). `node` is the
+// outermost native Member.
+function atCellRootName(node) {
+    let cursor = node;
+    while (cursor && cursor.kind === "Member") {
+        cursor = cursor.object;
+    }
+    if (cursor && cursor.kind === "AtCell" && typeof cursor.name === "string") {
+        return cursor.name;
+    }
+    return null;
+}
+
+// collectMemberPathSegments — walk a native left-nested Member chain rooted at
+// an `AtCell` and produce the live heterogeneous path-segment list the
+// `reactive-nested-assign` codegen expects. OUTER-first traversal prepends, so
+// the returned list is in source order (root-adjacent segment first). MIRRORS
+// the live `collectAtPathSegments` (ast-builder.js:2539) segment shapes:
+//   - `.field`          -> the field name STRING.
+//   - `[<literal>]`     -> the literal value as a STRING ("0" / "DAL"); JS
+//                          index-coercion makes arr["0"] === arr[0] and
+//                          obj["DAL"] === obj.DAL, so a literal index rides the
+//                          string representation with no computed segment.
+//   - `[<expr>]`        -> a COMPUTED segment `{ index: <live ExprNode>, raw }`;
+//                          emit-logic.ts emits `seg.index` inline.
+// Returns `null` if any segment is malformed (the caller falls back to the
+// in-place bare-expr — never silently drops the statement).
+function collectMemberPathSegments(memberNode) {
+    const segments = [];
+    let cursor = memberNode;
+    while (cursor && cursor.kind === "Member") {
+        if (cursor.computed === true) {
+            // `[<expr>]` — a literal NumberLit/StringLit rides the string
+            // representation; any other index expression becomes a computed
+            // segment carrying its translated ExprNode.
+            const prop = cursor.property;
+            if (prop && prop.kind === "StringLit") {
+                segments.unshift(prop.value === undefined ? "" : prop.value);
+            } else if (prop && prop.kind === "NumberLit") {
+                segments.unshift(prop.raw === undefined ? "" : prop.raw);
+            } else {
+                const idxExpr = translateExpr(prop);
+                if (idxExpr === undefined || idxExpr === null) {
+                    return null;
+                }
+                segments.unshift({ index: idxExpr, raw: "" });
+            }
+        } else {
+            // `.field` — `property` is an Ident node carrying the field name.
+            const prop = cursor.property;
+            const fieldName = (prop && typeof prop === "object" && typeof prop.name === "string")
+                ? prop.name
+                : (typeof prop === "string" ? prop : "");
+            if (fieldName === "") {
+                return null;
+            }
+            segments.unshift(fieldName);
+        }
+        cursor = cursor.object;
+    }
+    return segments;
+}
+
+// makeReactiveNestedAssignNode — synthesize the live `reactive-nested-assign`
+// from a native `Assignment` whose target is a Member chain rooted at an
+// `@`-cell. Shape matches ast-builder.js:5664-5672 + emit-logic.ts:3014.
+// `value` (legacy raw) is "" (the native parser retains no raw text on Exprs);
+// `valueExpr` carries the translated RHS ExprNode emit-logic.ts prefers.
+function makeReactiveNestedAssignNode(rootName, segments, valueExpr, span, counter) {
+    return {
+        id: stampId(counter),
+        kind: "reactive-nested-assign",
+        target: rootName,
+        path: segments,
+        value: "",
+        valueExpr,
+        span: spanOrZero(span),
+    };
+}
+
+// makeReactiveArrayMutationNode — synthesize the live `reactive-array-mutation`
+// from a native `Call` whose callee is `@cell.<method>` with `<method>` an
+// array-mutation. Shape matches ast-builder.js:5649-5657 + emit-logic.ts:3079
+// (`{ target, method, args, argsExpr, span }`). emit-logic emits
+// `emitExprField(node.argsExpr, node.args ?? "", ...)` — it prefers `argsExpr`
+// when present, else `rewriteExpr`s the raw `args` string.
+//
+// SINGLE-arg (`push(5)` / `push(@x)`, the dominant corpus form): translate the
+// one argument to a live ExprNode on `argsExpr` (the robust path — the arg
+// rides the shared expr emitter exactly as a let-RHS would; `@x` -> `_scrml_
+// reactive_get("x")`). `args` is left "".
+//
+// MULTI-arg (`splice(idx, 1)`): there is no single live ExprNode that renders a
+// comma list, so we mirror the LIVE form, which lowers a multi-arg call through
+// the raw-text escape-hatch (`safeParseExprToNode("idx, 1")` -> escape-hatch ->
+// `rewriteExpr`). We serialize the native arg list to the same ` , `-joined
+// token form on `args` and leave `argsExpr` null, so emit-logic's fallback
+// `rewriteExpr(args)` produces the identical `splice(idx , 1)` output.
+function makeReactiveArrayMutationNode(rootName, method, argsExpr, argsRaw, span, counter) {
+    return {
+        id: stampId(counter),
+        kind: "reactive-array-mutation",
+        target: rootName,
+        method,
+        args: typeof argsRaw === "string" ? argsRaw : "",
+        argsExpr: argsExpr === undefined ? null : argsExpr,
+        span: spanOrZero(span),
+    };
+}
+
+// tryReactiveWrite — the FIX-NATIVE recognizer. Given a native ExprStmt
+// expression `e`, return a synthesized `reactive-nested-assign` /
+// `reactive-array-mutation` node when `e` is a reactive deep-set / array-
+// mutation rooted at an `@`-cell; otherwise return null (the caller falls
+// through to `makeBareExpr`). `span` is the statement span.
+function tryReactiveWrite(e, span, counter) {
+    if (e === undefined || e === null) {
+        return null;
+    }
+
+    // (1) DEEP-SET: `@a.ref = "p"` / `@arr[i] = x` / `@obj.f[i].x = v`.
+    // A plain `=` assignment whose TARGET is a Member chain rooted at an
+    // `@`-cell. Compound assignments (`+=` etc.) are NOT deep-sets here — the
+    // LIVE recognizer (ast-builder.js:5661 `peek().text === "="`) gates on a
+    // plain `=`; a compound write keeps its bare-expr semantics.
+    if (e.kind === "Assignment" && e.op === "=" && e.target && e.target.kind === "Member") {
+        const rootName = atCellRootName(e.target);
+        if (rootName !== null) {
+            const segments = collectMemberPathSegments(e.target);
+            if (segments !== null && segments.length > 0) {
+                const valueExpr = translateExpr(e.value);
+                return makeReactiveNestedAssignNode(rootName, segments, valueExpr, span, counter);
+            }
+        }
+        return null;
+    }
+
+    // (2) ARRAY-MUTATION: `@arr.push(5)` / `@arr.splice(0, 2)`.
+    // A `Call` whose callee is a NON-computed `Member` (`@cell.method`) where
+    // `method` is an array-mutation AND the object is the `@`-cell directly
+    // (single dotted segment — mirrors the LIVE `pathSegments.length === 1`
+    // gate at ast-builder.js:5637). A deeper chain (`@obj.list.push(...)`) is
+    // NOT recognized by the LIVE recognizer (which gates on a single segment),
+    // so it stays a bare-expr to match LIVE.
+    if (e.kind === "Call" && e.callee && e.callee.kind === "Member" && e.callee.computed !== true) {
+        const callee = e.callee;
+        const prop = callee.property;
+        const methodName = (prop && typeof prop === "object" && typeof prop.name === "string")
+            ? prop.name
+            : (typeof prop === "string" ? prop : "");
+        if (REACTIVE_ARRAY_MUTATIONS.includes(methodName) &&
+            callee.object && callee.object.kind === "AtCell" &&
+            typeof callee.object.name === "string") {
+            const rootName = callee.object.name;
+            const nativeArgs = Array.isArray(e.args) ? e.args : [];
+            // SINGLE arg -> a translated live ExprNode on `argsExpr`. MULTI arg
+            // -> the ` , `-joined raw text on `args` (mirroring the LIVE multi-
+            // arg escape-hatch lowering); `argsExpr` stays null so emit-logic's
+            // `rewriteExpr(args)` fallback renders the comma list. ARG-LESS
+            // (`pop()` / `shift()` / `sort()` / `reverse()`) -> both empty.
+            let argsExpr = null;
+            let argsRaw = "";
+            if (nativeArgs.length === 1) {
+                argsExpr = translateExpr(nativeArgs[0]);
+            } else if (nativeArgs.length > 1) {
+                const serialized = serializeNativeArgList(nativeArgs);
+                argsRaw = serialized === null ? "" : serialized;
+            }
+            return makeReactiveArrayMutationNode(rootName, methodName, argsExpr, argsRaw, span, counter);
+        }
+        return null;
+    }
+
+    return null;
+}
+
 // isUpperInitial — predicate. True iff `name`'s first character is an ASCII
 // uppercase letter (the live component-call gate — ast-builder.js L2993 / the
 // parse-file.js `isUpperInitial` discipline).
@@ -881,6 +1124,18 @@ function makeVarDeclNode(declKind, declarator, counter) {
         init: "",
         span: spanOrZero(declarator ? declarator.span : null),
     };
+    // FIX-NATIVE C — thread the declarator's type annotation onto the decl node.
+    // `parseVarDeclarator` (parse-stmt.js) CAPTURES `declarator.typeAnnotation`
+    // (the `const x: T = e` annotation, §53), but it was never copied here — so
+    // `const bad: Post = { role: .Viewer }` reached the type-system with
+    // `typeAnnotation: undefined`, giving the bare-variant resolver no struct /
+    // subset context -> native fired E-VARIANT-AMBIGUOUS where LIVE fired
+    // E-CONTRACT-001. Mirror `makeStateDeclNode` (which DOES copy it): emit the
+    // field only when non-empty (undefined-is-falsy parity with the LIVE node).
+    if (declarator && declarator.typeAnnotation !== undefined &&
+        declarator.typeAnnotation !== null && declarator.typeAnnotation !== "") {
+        node.typeAnnotation = declarator.typeAnnotation;
+    }
     // `initExpr` is present only when the declarator HAS an initializer — the
     // live ast-builder omits it for an init-free `let x;`.
     // R4-U4: wrap with translateExpr so emit-expr / type-system / dependency-
@@ -1455,6 +1710,35 @@ function serializeNativeExprToText(node) {
             if (inner === null) return null;
             return "( " + inner + " )";
         }
+        case ExprKind.Object: {
+            // `{ k : v , ... }` — used for a default-parameter object value
+            // (`function f({a, b} = {a:0, b:0})`, FIX-NATIVE B). Live tokenized
+            // form: `{ key : value , ... }` (`{`/`}`/`:`/`,` are tokens). Only
+            // the KeyValue / Shorthand / Spread property kinds serialize; a
+            // Method / computed key is outside the default-value catalog -> null.
+            const props = Array.isArray(node.properties) ? node.properties : [];
+            const parts = [];
+            for (const prop of props) {
+                if (prop === undefined || prop === null) return null;
+                if (prop.kind === "KeyValue") {
+                    if (prop.computed === true) return null;
+                    const key = exprKeyName(prop.key);
+                    const val = serializeNativeExprToText(prop.value);
+                    if (key === "" || val === null) return null;
+                    parts.push(key + " : " + val);
+                } else if (prop.kind === "Shorthand") {
+                    if (typeof prop.name !== "string" || prop.name === "") return null;
+                    parts.push(prop.name);
+                } else if (prop.kind === "Spread") {
+                    const val = serializeNativeExprToText(prop.expression);
+                    if (val === null) return null;
+                    parts.push("... " + val);
+                } else {
+                    return null;
+                }
+            }
+            return parts.length === 0 ? "{ }" : "{ " + parts.join(" , ") + " }";
+        }
         case ExprKind.Binary:
         case ExprKind.Logical: {
             const l = serializeNativeExprToText(node.left);
@@ -1857,22 +2141,77 @@ function makeFunctionDecl(stmt, counter) {
 //                         `params: string[]` carries no default text; the
 //                         live ast-builder param parser has a structured
 //                         default path the string surface does not expose)
-//   ObjectPat/ArrayPat -> "{...}" / "[...]" placeholder (the live
-//                         `params: string[]` cannot carry a structured
-//                         pattern; a destructured param is a rare logic-body
-//                         shape — best-effort placeholder, not lossless)
+//   ObjectPat/ArrayPat -> a STRUCTURED param object `{ name: DestructurePattern }`
+//                         (FIX-NATIVE B — was the lossy "{...}" / "[...]"
+//                         placeholder string). The LIVE param parser
+//                         (ast-builder.js:7783) emits `{ name: <pattern> }` for
+//                         a destructured param; the type-system scope-binder
+//                         (type-system.ts:5945, gated on `isDestructurePattern`)
+//                         walks that pattern to bind each destructured name into
+//                         the function scope. Against the old string placeholder
+//                         the destructure path was skipped, so body refs to the
+//                         destructured names fired E-SCOPE-001. The param surface
+//                         is therefore HETEROGENEOUS: a plain ident stays a
+//                         STRING (type-system.ts:5953 handles `typeof param ===
+//                         "string"`), a destructured param is the structured
+//                         object.
 function translateParams(params) {
     if (Array.isArray(params) === false) {
         return [];
     }
     const out = [];
     for (const p of params) {
-        out.push(paramName(p));
+        out.push(translateParam(p));
     }
     return out;
 }
 
-// paramName — one native param node -> its live string surface.
+// translateParam — one native param node -> its live param surface. Returns a
+// STRING for a plain-ident / rest / ident-default param, or a STRUCTURED
+// `{ name: DestructurePattern }` object for an ObjectPat / ArrayPat (incl. a
+// destructure wrapped in an AssignmentPattern default, `function f({a,b}={...})`).
+// FIX-NATIVE B.
+function translateParam(p) {
+    if (p === undefined || p === null) {
+        return "";
+    }
+    if (p.bindingKind === "ObjectPat") {
+        return { name: translateObjectPattern(p) };
+    }
+    if (p.bindingKind === "ArrayPat") {
+        return { name: translateArrayPattern(p) };
+    }
+    if (p.bindingKind === "AssignmentPattern") {
+        // `target = default`. When the target is a destructure pattern, the
+        // STRUCTURED form must survive so the scope-binder walks it. The default
+        // expression is preserved on `defaultValue` (the LIVE param shape —
+        // ast-builder.js:7787 — codegen utils.ts emits `name = defaultValue`):
+        // serialize the native default Expr to its source text via the shared
+        // serializer. An unserializable default (an arrow / template / etc.
+        // outside the serializer catalog) falls back to the no-default form
+        // rather than emitting a malformed signature.
+        const left = p.left;
+        if (left && (left.bindingKind === "ObjectPat" || left.bindingKind === "ArrayPat")) {
+            const out = {
+                name: (left.bindingKind === "ObjectPat")
+                    ? translateObjectPattern(left)
+                    : translateArrayPattern(left),
+            };
+            const def = serializeNativeExprToText(p.right);
+            if (typeof def === "string" && def.length > 0) {
+                out.defaultValue = def;
+            }
+            return out;
+        }
+        return paramName(left);
+    }
+    // Plain ident / rest / arrow-head Ident — the legacy string surface.
+    return paramName(p);
+}
+
+// paramName — one native param node -> its live STRING surface (plain-ident
+// shapes only; ObjectPat/ArrayPat now route through `translateParam` to the
+// structured `{ name }` form per FIX-NATIVE B).
 function paramName(p) {
     if (p === undefined || p === null) {
         return "";
@@ -1885,12 +2224,6 @@ function paramName(p) {
     }
     if (p.bindingKind === "AssignmentPattern") {
         return paramName(p.left);
-    }
-    if (p.bindingKind === "ObjectPat") {
-        return "{...}";
-    }
-    if (p.bindingKind === "ArrayPat") {
-        return "[...]";
     }
     // A native param can also be a plain `Ident` Expr (the M2.3 stand-in
     // surface for arrow heads). Read its `name` if present.

@@ -133,6 +133,11 @@ import {
     makeGivenGuard,
 } from "./ast-stmt.js";
 import {
+    // FIX-NATIVE (leaf-gap Group P, §6.7.1b) — expression-node makers for the
+    // `on dismount { body }` -> `cleanup(() => body)` synthesis.
+    makeIdent, makeCall, makeArrow,
+} from "./ast-expr.js";
+import {
     SyncToken,
     makeRecovery, beginRecovery, accumulateSkipped, markResync, resumeNormal,
 } from "./error-recovery.js";
@@ -525,6 +530,27 @@ export function parseStatement(ctx) {
         }
     }
 
+    // FIX-NATIVE (leaf-gap Group P, §6.6 derived) — `const @name = expr` /
+    // `const @name: T = expr`: the LEGACY expression-form DERIVED reactive
+    // value (ADR Option A FOLD, ratified S60). The live oracle
+    // (ast-builder.js:5498-5508) recognizes a `const` keyword followed by an
+    // `@`-ident and builds a `state-decl{ name: <stripped @>, shape:"derived",
+    // isConst:true, structuralForm:false }` — NOT a plain `const-decl`. Without
+    // this arm `const @gate = ...` reached the generic var-decl path, whose
+    // `parseBindingIdent` rejects the `ScrmlAt` binding target -> E-STMT-
+    // BINDING-NAME + E-STMT-MISSING-SEMICOLON, bailing the `${...}` logic
+    // block (~40 corpus files + cascade — `const @name` is the dominant
+    // derived-decl shape). The guard is precise: `const` + a DECLARABLE
+    // `@`-cell (a ScrmlAt whose name is non-empty and does not start with `.` —
+    // the `@.`-contextual sigil is never a declaration LHS). A bare
+    // `const name = e` (a plain Ident) stays on the generic var-decl path.
+    if (kind === TokenKind.KwConst
+        && peekKind(ctx.cursor, 1) === TokenKind.ScrmlAt
+        && constAtCellDeclNameFollows(ctx.cursor)) {
+        advance(ctx.cursor);   // consume `const`
+        return parseConstAtStateDecl(ctx);
+    }
+
     // A variable declaration — `let` / `const` / `var`.
     if (kind === TokenKind.KwLet || kind === TokenKind.KwConst || kind === TokenKind.KwVar) {
         return parseVarDecl(ctx);
@@ -550,6 +576,31 @@ export function parseStatement(ctx) {
     // `type:enum Name` lead is not mis-read as a `type:`-prefixed label.
     if (isContextualTypeLead(cursor)) {
         return parseTypeDecl(ctx);
+    }
+
+    // FIX-NATIVE (leaf-gap Group P, §6.7.1a/b) — `on mount { body }` /
+    // `on dismount { body }` lifecycle blocks. `on` / `mount` / `dismount`
+    // all lex as plain `TokenKind.Ident` (no keyword), so without this arm a
+    // statement-position `on mount { ... }` parses as two bare-ident expr
+    // statements (`on`, then `mount`) -> E-SCOPE-001 (Undeclared `on` /
+    // `mount`) + E-STMT-MISSING-SEMICOLON, and the whole `${...}` logic block
+    // bails. The live oracle (ast-builder.js:7226-7248) recognizes the
+    // `on` IDENT + `mount`/`dismount` IDENT + `{` lead by TEXT and desugars
+    // BEFORE the TAB pass completes (SPEC §6.7.1a/b): `on mount { body }`
+    // becomes the bare expression `body`; `on dismount { body }` becomes
+    // `cleanup(() => body)`. The three-token lookahead is the disambiguation
+    // seam — a bare `on` identifier use (`on` not followed by `mount`/
+    // `dismount` + `{`) still flows to the expression-statement path. Sits
+    // BEFORE the labeled-statement arm so `on:` (a label named `on`) is not
+    // shadowed (the `peek(2) === LBrace` guard already declines a label).
+    if (currentKind(cursor) === TokenKind.Ident
+        && current(cursor).name === "on"
+        && peekKind(cursor, 2) === TokenKind.LBrace) {
+        const second = peek(cursor, 1);
+        const secondName = (second === undefined || second === null) ? "" : second.name;
+        if (secondName === "mount" || secondName === "dismount") {
+            return parseOnLifecycleBlock(ctx, secondName);
+        }
     }
 
     // M5-swap Wave 2 — a `~name = pipeline` tilde declaration (B3, SPEC §32).
@@ -838,6 +889,79 @@ export function parseExprStatement(ctx) {
     const endE = (endTok === undefined || endTok === null) ? nodeEnd(expr) : endTok.span.end;
     const span = makeSpan(startS, Math.max(endE, nodeEnd(expr)), nodeLine(expr), nodeCol(expr));
     return makeExprStmt(expr, span);
+}
+
+// --- parseOnLifecycleBlock — `on mount { body }` / `on dismount { body }` ---
+// FIX-NATIVE (leaf-gap Group P, SPEC §6.7.1a/b). The caller has already
+// confirmed the `on` IDENT + `mount`/`dismount` IDENT + `{` lead; `which`
+// is "mount" or "dismount". Mirrors the LIVE desugar (ast-builder.js:7226-
+// 7248): the live path captures the brace-delimited body and re-parses it as
+// a SINGLE expression (`safeParseExprToNode(body, 0)`) — a multi-statement
+// body keeps only its first expression. This native helper reproduces that
+// EXACTLY: it parses ONE expression from the body, then skips the remaining
+// body tokens to the matching `}`. For `mount` it returns a plain `ExprStmt`
+// carrying the body expression (translate-stmt's ExprStmt path lowers it to a
+// `bare-expr` — the live mount shape). For `dismount` it wraps the body in
+// `cleanup(() => body)`: a `Call` to the `cleanup` lifecycle built-in (SPEC
+// §6.7.3) whose single argument is a concise-body arrow over the body
+// expression (the live `cleanup(() => { body })` block-body collapses to the
+// same single-expression semantics — the corpus has no `on dismount`, and the
+// live block form keeps only the first body expression too).
+function parseOnLifecycleBlock(ctx, which) {
+    const cursor = ctx.cursor;
+    const onTok = advance(cursor);   // consume `on`
+    advance(cursor);                 // consume `mount` / `dismount`
+    const openBrace = advance(cursor);   // consume `{`
+
+    // Parse ONE expression from the body (the live single-expression seam).
+    // An EMPTY body (`on mount {}`) yields a null body expression — the native
+    // ExprStmt path tolerates a null expression (makeBareExpr maps it to a
+    // null exprNode), so `on mount {}` is a clean no-op bare-expr.
+    let bodyExpr = null;
+    if (currentKind(cursor) !== TokenKind.RBrace) {
+        const prior = enterMode(ctx, ParseMode.InExpression);
+        bodyExpr = parseExpression(ctx);
+        exitMode(ctx, prior);
+        reenterBlockStubs(bodyExpr);   // tie off any callback body in the expr
+    }
+
+    // Skip any remaining body tokens to the matching `}` (the live re-parse
+    // discards everything past the first expression).
+    let depth = 1;
+    while (atEnd(cursor) === false && depth > 0) {
+        const k = currentKind(cursor);
+        if (k === TokenKind.LBrace) {
+            depth = depth + 1;
+        } else if (k === TokenKind.RBrace) {
+            depth = depth - 1;
+            if (depth === 0) {
+                advance(cursor);   // consume the matching `}`
+                break;
+            }
+        }
+        advance(cursor);
+    }
+    if (depth > 0) {
+        recordError(ctx, "E-STMT-ON-LIFECYCLE-UNCLOSED",
+            "expected '}' to close an `on " + which + "` block", openBrace.span);
+    }
+
+    const prevTok = lastTokenBefore(ctx);
+    const endE = (prevTok === undefined || prevTok === null) ? openBrace.span.end : prevTok.span.end;
+    const span = makeSpan(onTok.span.start, endE, onTok.span.line, onTok.span.col);
+
+    if (which === "dismount") {
+        // `cleanup(() => body)` — Call(Ident "cleanup", [Arrow([], body)]).
+        const cleanupCallee = makeIdent("cleanup", span);
+        const arrowBody = (bodyExpr === undefined || bodyExpr === null)
+            ? makeIdent("undefined", span)   // empty `on dismount {}` -> no-op arrow
+            : bodyExpr;
+        const arrow = makeArrow([], arrowBody, false, span);
+        const call = makeCall(cleanupCallee, [arrow], false, span);
+        return makeExprStmt(call, span);
+    }
+    // `on mount` -> the bare body expression.
+    return makeExprStmt(bodyExpr, span);
 }
 
 // =============================================================================
@@ -3855,6 +3979,109 @@ function parseTypedAtStateDecl(ctx) {
         structuralForm: false,
         isConst: false,
         shape: "plain",
+        defaultExprRaw: null,
+        pinned: false,
+        server: false,
+        debouncedRaw: null,
+        throttledRaw: null,
+        validators: [],
+        init,
+        span,
+    };
+}
+
+// --- constAtCellDeclNameFollows — `const @name` declarable-cell predicate ---
+// FIX-NATIVE (leaf-gap Group P). The dispatcher has already confirmed the
+// `const` lead + a `ScrmlAt` at peek(1). This confirms the `@`-cell is a
+// DECLARABLE name (non-empty, not the `@.`-contextual sigil), mirroring
+// atCellDeclNameFollows but reading the token at peek(1) (one past `const`).
+function constAtCellDeclNameFollows(cursor) {
+    const at = peek(cursor, 1);
+    if (at === undefined || at === null) return false;
+    const nm = at.name === undefined || at.name === null ? "" : at.name;
+    return nm.length > 0 && nm.charAt(0) !== ".";
+}
+
+// --- parseConstAtStateDecl — `const @name [: T] = expr` derived state-decl ---
+// FIX-NATIVE (leaf-gap Group P, SPEC §6.6). The caller has consumed the
+// `const` keyword; the cursor sits on the `@name` ScrmlAt. Mirrors the LIVE
+// `const @name` derived path (ast-builder.js:5498-5508): a `state-decl` with
+// `shape:"derived", isConst:true, structuralForm:false`, the cell name with
+// the `@` sigil stripped, an OPTIONAL `:T` type annotation, and the `=`
+// initializer. Structurally identical to parseTypedAtStateDecl minus the
+// REQUIRED `:` (here the annotation is optional) plus the const/derived flags.
+// translate-stmt's makeStateDeclNode reads `shape:"derived"`+`isConst:true` to
+// emit the live derived-reactive node (`_scrml_derived_declare`).
+function parseConstAtStateDecl(ctx) {
+    const cursor = ctx.cursor;
+    const atTok = advance(cursor);       // consume `@name` (ScrmlAt)
+    const atText = atTok.text === undefined || atTok.text === null ? "" : atTok.text;
+    const name = atText.charAt(0) === "@" ? atText.slice(1) : atText;
+
+    // OPTIONAL `:T` type annotation — `const @name: Type = expr` (live
+    // ast-builder.js:5501). Consume the annotation tokens raw up to the `=`,
+    // depth-tracking delimiters (the SAME collector parseTypedAtStateDecl uses).
+    let typeAnnotation = "";
+    if (currentKind(cursor) === TokenKind.Colon) {
+        advance(cursor);   // consume `:`
+        const annParts = [];
+        let parenDepth = 0;
+        let braceDepth = 0;
+        let bracketDepth = 0;
+        while (atEnd(cursor) === false) {
+            const k = currentKind(cursor);
+            const topLevel = (parenDepth === 0 && braceDepth === 0 && bracketDepth === 0);
+            if (topLevel && k === TokenKind.Assign) {
+                break;
+            }
+            if (k === TokenKind.LParen) parenDepth = parenDepth + 1;
+            else if (k === TokenKind.RParen && parenDepth > 0) parenDepth = parenDepth - 1;
+            else if (k === TokenKind.LBrace) braceDepth = braceDepth + 1;
+            else if (k === TokenKind.RBrace && braceDepth > 0) braceDepth = braceDepth - 1;
+            else if (k === TokenKind.LBracket) bracketDepth = bracketDepth + 1;
+            else if (k === TokenKind.RBracket && bracketDepth > 0) bracketDepth = bracketDepth - 1;
+            const annTok = advance(cursor);
+            annParts.push(annTok.text === undefined || annTok.text === null ? "" : annTok.text);
+        }
+        typeAnnotation = annParts.join(" ");
+    }
+
+    // The initializer. A derived `const @name` REQUIRES an `=` RHS (a derived
+    // cell with no expression is E-DECL-NEEDS-INITIALIZER, a later-stage
+    // concern; we record a parse note and emit a null init for recovery,
+    // mirroring parseTypedAtStateDecl).
+    let init = null;
+    if (currentKind(cursor) === TokenKind.Assign) {
+        advance(cursor);   // consume `=`
+        const prior = enterMode(ctx, ParseMode.InExpression);
+        const sdPrior = ctx.atStateDeclStmtPos;
+        ctx.atStateDeclStmtPos = true;
+        init = parseAssignmentExpr(ctx);
+        ctx.atStateDeclStmtPos = sdPrior;
+        exitMode(ctx, prior);
+        reenterBlockStubs(init);
+    } else {
+        recordError(ctx, "E-STMT-STATE-DECL-INIT",
+            "a derived `const @name` declaration must have an initializer ('const @name = expr')",
+            spanHere(ctx));
+    }
+
+    const prevTok = lastTokenBefore(ctx);
+    consumeSemicolon(ctx, prevTok);
+
+    const endE = (init === undefined || init === null) ? atTok.span.end : nodeEnd(init);
+    const span = makeSpan(atTok.span.start, endE, atTok.span.line, atTok.span.col);
+
+    // Native StateDecl — legacy `@`-form, derived (const). Field set mirrors
+    // parseTypedAtStateDecl; the derived/const flags + structuralForm:false
+    // match the live `const @name` node (ast-builder.js:5505).
+    return {
+        kind: "StateDecl",
+        name,
+        typeAnnotation,
+        structuralForm: false,
+        isConst: true,
+        shape: "derived",
         defaultExprRaw: null,
         pinned: false,
         server: false,

@@ -14,6 +14,7 @@ import { splitBlocks } from "./block-splitter.js";
 import { buildAST } from "./ast-builder.js";
 import { nativeParseFile } from "../native-parser/parse-file.js";
 import { populateNativeAttrValueExprNodes } from "./native-walker/attrvalue-exprnode-walker.ts";
+import { backfillNativeExprText } from "./native-walker/exprtext-backfill-walker.ts";
 import { computePGOFlags } from "./compute-pgo-flags.ts";
 import { computeProgramConfig } from "./compute-program-config.ts";
 import { runCE } from "./component-expander.ts";
@@ -945,6 +946,18 @@ export function compileScrml(options = {}) {
           if (Array.isArray(result.errors) === false) result.errors = [];
           populateNativeAttrValueExprNodes(
             result.ast, result.filePath || bsResult.filePath, result.errors);
+          // M5-swap — native string-`.expr`/`.init`/`.condition` backfill. The
+          // native make*/translate* builders set these legacy string fields empty
+          // (carrying the structured exprNode/initExpr/condExpr sibling instead).
+          // Codegen is migrated to the structured siblings, but the type-system's
+          // lifecycle / bare-variant / enum-subset enforcement is regex-over-TEXT
+          // (checkLifecycleBindingAccess's statementText reads node.expr/init/
+          // condition) and is un-migrated. Backfill the string fields from the
+          // structured siblings (round-tripped via emitStringFromTree) so those
+          // text-passes see the expression. Inert for codegen (never overwrites a
+          // non-empty string; consumers with the sibling keep reading it).
+          // Native-path-ONLY; the default pipeline is untouched.
+          backfillNativeExprText(result.ast);
         }
         return result;
       }
