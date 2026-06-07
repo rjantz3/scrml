@@ -364,7 +364,18 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       : null;
   // Convenience EmitExprContext spread for direct emitExprField calls below
   // (Case B arrow functions etc. that don't pass through rewriteBlockBody).
-  const engineExprCtxExtras = engineRewriteCtx?.exprCtxExtras ?? {};
+  //
+  // §59 (D4) — `mapVarNames` is threaded UNCONDITIONALLY (not gated on the
+  // engine presence that gates `engineRewriteCtx`): an event handler like
+  // `onclick=@m.insert(k, v)` in a map-only file (no `<engine>`) still needs
+  // the map interception. Merged into the extras spread so direct
+  // `emitExprField(..., { ...engineExprCtxExtras })` calls below see it.
+  const { collectMapVarNames } = require("./reactive-deps.ts");
+  const mapVarNames: Set<string> = collectMapVarNames(ctx.fileAST);
+  const engineExprCtxExtras = {
+    ...(engineRewriteCtx?.exprCtxExtras ?? {}),
+    ...(mapVarNames.size > 0 ? { mapVarNames } : {}),
+  };
 
   lines.push("");
   lines.push("// --- Event handler wiring (compiler-generated) ---");

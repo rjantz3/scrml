@@ -4,7 +4,7 @@ import { exprNodeContainsCall } from "../expression-parser.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
 import { assembleRuntime, RUNTIME_CHUNK_ORDER, applyChunkDependencies } from "./runtime-chunks.ts";
-import { buildFunctionBodyRegistry, iterableHasReactiveRefs } from "./reactive-deps.ts";
+import { buildFunctionBodyRegistry, iterableHasReactiveRefs, collectMapVarNames, fileHasMapUsage } from "./reactive-deps.ts";
 import { CGError } from "./errors.ts";
 import { escapeRegex } from "./utils.ts";
 import { rewriteCodeSegments } from "./code-segments.ts";
@@ -369,6 +369,20 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
     chunks.add("equality");
   }
   const __equalityExprDefinitivelyAbsent = __hasEqualityExprFlag === false;
+
+  // §59 (D4) — `map` chunk gate. Light up the `'map'` runtime chunk (which
+  // carries `_scrml_fnv1a` + `_scrml_value_canonical` + all `_scrml_map_*`
+  // helpers) whenever this file USES a value-native map — a declared `[KeyT:
+  // ValT]` cell, a `map-lit` literal anywhere, a bracket-read/method/`.size` on
+  // a map cell (all of which require a declared map cell → covered by
+  // `collectMapVarNames` inside `fileHasMapUsage`). WITHOUT this gate the
+  // helpers are tree-shaken out of the assembled runtime and the first
+  // `_scrml_map_get` throws `ReferenceError` (SURVEY-SYNTHESIS D4 R2 — the #1
+  // integration risk). Conservative: a false positive costs a few KB; a false
+  // negative crashes at runtime.
+  if (fileHasMapUsage(fileAST?.ast ?? fileAST ?? {})) {
+    chunks.add("map");
+  }
 
   // A-4.3 + A-4.5 — `prefetch` chunk lights up when the Stage 7.6 RS has
   // produced EITHER:

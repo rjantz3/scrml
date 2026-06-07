@@ -17,6 +17,7 @@
 
 import { getNodes } from "./collect.ts";
 import { extractReactiveDepsFromAST, forEachIdentInExprNode, emitStringFromTree } from "../expression-parser.ts";
+import { findMapEntryColon } from "../type-system.ts";
 
 /** A loosely-typed AST node. */
 type ASTNode = Record<string, unknown>;
@@ -291,6 +292,183 @@ export function collectDerivedVarNames(fileAST: Record<string, unknown>): Set<st
 
   visit(nodes as unknown[]);
   return names;
+}
+
+// ---------------------------------------------------------------------------
+// collectMapVarNames (§59 — value-native maps, D4)
+// ---------------------------------------------------------------------------
+
+/**
+ * §59.4 — Recognise whether a raw type-annotation string is a value-native map
+ * type `[KeyT: ValT]` (optionally suffixed `@ordered`, §59.8).
+ *
+ * This MIRRORS the typer's map-type recognizer branch in
+ * `type-system.ts:resolveTypeExpr` (the §59.2/§59.3 block): strip a trailing
+ * `@ordered` affix, require the body to be a `[...]` bracket, and require a
+ * depth-1 entry-colon that is NOT a ternary alternative-separator (via the
+ * shared, exported `findMapEntryColon`). The array affix `T[]` ends in `[]`
+ * with no internal colon, so it is correctly excluded.
+ *
+ * Codegen has NO resolved type at the emit site (it re-parses expressions), so
+ * this string-level recognizer reproduces the typer's decision from the raw
+ * annotation text carried on the decl node (`typeAnnotation`). The recognition
+ * is deliberately conservative: a string that does not match the map shape is
+ * simply not a map (it falls through to ordinary array/index/call emission).
+ */
+export function isMapTypeAnnotation(annotation: string): boolean {
+  if (!annotation) return false;
+  let body = annotation.trim();
+  if (body.endsWith("@ordered")) {
+    body = body.slice(0, -"@ordered".length).trim();
+  }
+  if (!body.startsWith("[") || !body.endsWith("]")) return false;
+  const inner = body.slice(1, -1);
+  return findMapEntryColon(inner) >= 0;
+}
+
+/**
+ * §59 (D4) — Collect the names of every cell that holds a value-native MAP, so
+ * `emit-expr.ts` can intercept `@m[k]` reads, `@m.<method>(…)` calls, and the
+ * `@m.size` member and lower them to the `_scrml_map_*` runtime (§59.6/§59.7/
+ * §59.8). Names are bare (no `@` prefix), mirroring `collectEngineVarNames`.
+ *
+ * A cell is a map iff EITHER:
+ *   (a) its `state-decl` type annotation resolves to a `[KeyT: ValT]` map type
+ *       (`<fareByLane>: [string: Money] = [:]`), OR
+ *   (b) its initializer RHS is a `map-lit` expression (`<m> = ["a": 1]` makes
+ *       `m` a map even without an annotation — and `<m> = [:]` the empty map).
+ *
+ * This is the name-set the survey (SURVEY-SYNTHESIS D4 Q2) prescribes: codegen
+ * cannot key the map-vs-array branch on a resolved type (there is none at the
+ * emit site), so it keys on this collected name-set, exactly as `.advance`
+ * interception keys on `engineVarNames`.
+ *
+ * The fileAST walk mirrors `collectDerivedVarNames` (logic bodies, children,
+ * control-flow bodies) so map cells declared inside `${…}` logic blocks /
+ * control flow are discovered. Both `state-decl` (the reactive `@m` cells that
+ * brackets/methods operate on) and plain `let`/`const` decls are scanned; only
+ * `state-decl` carries `typeAnnotation`, so let/const map-ness comes solely from
+ * a `map-lit` RHS.
+ */
+export function collectMapVarNames(fileAST: Record<string, unknown>): Set<string> {
+  const names = new Set<string>();
+  // Null-safe: synthetic test harnesses (and some emit paths) may pass a null /
+  // undefined fileAST. `getNodes` dereferences `.nodes`, so guard before it.
+  if (!fileAST || typeof fileAST !== "object") return names;
+  const nodes = getNodes(fileAST);
+
+  function visit(nodeList: unknown[]): void {
+    if (!Array.isArray(nodeList)) return;
+    for (const node of nodeList) {
+      if (!node || typeof node !== "object") continue;
+      const n = node as ASTNode;
+
+      // Map-cell signals: an annotated map-typed state-decl OR a map-lit RHS.
+      if (
+        (n.kind === "state-decl" ||
+          n.kind === "let-decl" ||
+          n.kind === "const-decl") &&
+        typeof n.name === "string" &&
+        n.name.length > 0
+      ) {
+        // (a) typed `[KeyT: ValT]` annotation (state-decl only carries it).
+        const anno = (n as any).typeAnnotation;
+        if (typeof anno === "string" && isMapTypeAnnotation(anno)) {
+          names.add(n.name as string);
+        }
+        // (b) `map-lit` initializer RHS — including the `[:]` empty map. This
+        // makes an un-annotated cell a map by inference from its literal.
+        const init = (n as any).initExpr;
+        if (init && typeof init === "object" && (init as any).kind === "map-lit") {
+          names.add(n.name as string);
+        }
+      }
+
+      // Recurse the same structures as collectDerivedVarNames so map cells
+      // declared inside logic blocks / compounds / control flow are found.
+      if (n.kind === "logic" && Array.isArray(n.body)) {
+        visit(n.body as unknown[]);
+      }
+      if (Array.isArray(n.children)) {
+        visit(n.children as unknown[]);
+      }
+      if (n.kind === "match-stmt" && Array.isArray((n as any).body)) {
+        visit((n as any).body as unknown[]);
+      }
+      if (n.kind === "if-stmt") {
+        if (Array.isArray((n as any).consequent)) visit((n as any).consequent as unknown[]);
+        if (Array.isArray((n as any).alternate)) visit((n as any).alternate as unknown[]);
+      }
+      if ((n.kind === "for-stmt" || n.kind === "while-stmt") && Array.isArray((n as any).body)) {
+        visit((n as any).body as unknown[]);
+      }
+      if (n.kind === "try-stmt") {
+        if (Array.isArray((n as any).body)) visit((n as any).body as unknown[]);
+        if ((n as any).catchNode && Array.isArray((n as any).catchNode.body)) visit((n as any).catchNode.body as unknown[]);
+        if (Array.isArray((n as any).finallyBody)) visit((n as any).finallyBody as unknown[]);
+      }
+    }
+  }
+
+  visit(nodes as unknown[]);
+  return names;
+}
+
+/**
+ * §59 (D4) — Does this file USE a value-native map ANYWHERE? Drives the `'map'`
+ * runtime chunk gate in `emit-client.ts:detectRuntimeChunks` — without the
+ * chunk, a map-using build ReferenceErrors on `_scrml_map_get` (the helpers are
+ * tree-shaken out of the assembled runtime).
+ *
+ * Returns true iff EITHER (a) the file declares at least one map cell (a
+ * `[KeyT: ValT]` annotation or a `map-lit` RHS — via `collectMapVarNames`), OR
+ * (b) a `map-lit` ExprNode appears ANYWHERE in the AST (a standalone literal, a
+ * `.insertAll(["a": 1])` argument, a nested-map value literal, etc.).
+ *
+ * The (b) deep scan uses `forEachMapLitExprInExprNode` (expression-parser.ts) on
+ * every `exprNode`/`initExpr` field reachable in the AST, so a map literal that
+ * is never bound to a cell still lights up the chunk. Conservative by design:
+ * a false positive (chunk included, map not used) is a few KB; a false negative
+ * is a runtime crash (SURVEY-SYNTHESIS D4 R2).
+ */
+export function fileHasMapUsage(fileAST: Record<string, unknown>): boolean {
+  if (!fileAST || typeof fileAST !== "object") return false;
+  // (a) any declared map cell.
+  if (collectMapVarNames(fileAST).size > 0) return true;
+  // (b) any map-lit ExprNode anywhere — deep walk over all exprNode-bearing
+  // fields. We require the structured walker lazily to avoid a cycle at module
+  // load and to keep this dependency-light.
+  const { forEachMapLitExprInExprNode } = require("../expression-parser.ts") as {
+    forEachMapLitExprInExprNode: (n: any, cb: (m: any) => void) => void;
+  };
+  let found = false;
+  const seen = new WeakSet<object>();
+  const EXPR_FIELDS = ["exprNode", "initExpr", "inExprNode", "defaultExpr", "condExprNode", "bodyExprNode", "handlerExprNode", "value"];
+  function walk(node: unknown): void {
+    if (found || !node || typeof node !== "object") return;
+    if (seen.has(node as object)) return;
+    seen.add(node as object);
+    const n = node as Record<string, unknown>;
+    // Direct map-lit node.
+    if ((n.kind as string) === "map-lit") { found = true; return; }
+    // Any expr-bearing field — descend the ExprNode tree for a nested map-lit.
+    for (const f of EXPR_FIELDS) {
+      const e = n[f];
+      if (e && typeof e === "object" && (e as any).kind) {
+        try { forEachMapLitExprInExprNode(e, () => { found = true; }); } catch { /* non-ExprNode shape */ }
+        if (found) return;
+      }
+    }
+    // Recurse arrays + child objects (logic bodies, children, control flow).
+    for (const key in n) {
+      const v = n[key];
+      if (Array.isArray(v)) { for (const c of v) { walk(c); if (found) return; } }
+      else if (v && typeof v === "object") { walk(v); if (found) return; }
+    }
+  }
+  const nodes = getNodes(fileAST);
+  for (const node of nodes as unknown[]) { walk(node); if (found) break; }
+  return found;
 }
 
 // ---------------------------------------------------------------------------

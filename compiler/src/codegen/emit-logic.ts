@@ -127,6 +127,14 @@ export interface EmitLogicOpts {
    */
   engineBindings?: Map<string, import("./emit-engine.ts").EngineBindingInfo> | null;
   /**
+   * §59 (D4): Value-native MAP variable names in the file's scope. Used by
+   * `emit-expr.ts` to intercept `@m[k]` reads → `_scrml_map_get`, `@m.<method>(…)`
+   * calls → `_scrml_map_<method>`, and `@m.size` → `_scrml_map_size`. NULL or
+   * empty → no map interception. Computed once per file via `collectMapVarNames`
+   * (reactive-deps.ts). Sibling to `engineVarNames`.
+   */
+  mapVarNames?: Set<string> | null;
+  /**
    * C13 (§51.0.G): Engine variable names in the file's scope. Used by
    * `emit-expr.ts:emitCall` to detect `.advance` calls on engine variables
    * (e.g., `@marioState.advance(.Big)`) and dispatch to the runtime hook.
@@ -640,6 +648,9 @@ function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
     synthCellKeys: opts.synthCellKeys ?? null,
     tildeVar: opts.tildeContext?.var ?? null,
     dbVar: opts.dbVar,
+    // §59 (D4) — map variable name set so emit-expr can intercept `@m[k]`
+    // reads / `@m.<method>(…)` calls / `@m.size` and lower them to `_scrml_map_*`.
+    mapVarNames: opts.mapVarNames ?? null,
     // C13 (§51.0.G) — engine variable name set so emit-expr can detect
     // `.advance` calls on engine-bound `@vars`.
     engineVarNames: opts.engineVarNames ?? null,

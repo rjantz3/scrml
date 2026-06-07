@@ -46,6 +46,7 @@ import { runIMatchPromotable } from "./lint-i-match-promotable.js";
 import { runIFnPromotable } from "./lint-i-fn-promotable.js";
 import { runWEachPromotable } from "./lint-w-each-promotable.js";
 import { runWEachKey } from "./lint-w-each-key.js";
+import { runWMapIterationOrder } from "./lint-w-map-iteration-order.js";
 import { findUnsupportedTailwindShapes, findUnrecognizedClasses } from "./tailwind-classes.js";
 import { runGauntletPhase1Checks } from "./gauntlet-phase1-checks.js";
 import { runGauntletPhase3EqChecks } from "./gauntlet-phase3-eq-checks.js";
@@ -1754,6 +1755,22 @@ export function compileScrml(options = {}) {
       }
     } catch (e) {
       if (verbose) log(`  [LINT] W-EACH-KEY-001 pass threw: ${e?.message ?? String(e)}`);
+    }
+  }
+
+  // Stage 6.4e: W-MAP-ITERATION-ORDER info-level lint (SPEC §59.8 / §59.11).
+  // Nudges `<each in=@m.entries()|.keys()|.values()>` on a NON-`@ordered` map
+  // with no `.sorted()` stabilizer — iteration order is unspecified. Info-level:
+  // partitions into result.warnings (W- prefix), never result.errors.
+  if (Array.isArray(tsResult.files) && tsResult.files.length > 0) {
+    try {
+      const mapOrderDiags = runWMapIterationOrder(tsResult.files);
+      for (const d of mapOrderDiags) {
+        allLintDiagnostics.push(d);
+        if (verbose) log(`  [LINT] ${d.filePath}:${d.line}:${d.column} ${d.code}: ${d.message}`);
+      }
+    } catch (e) {
+      if (verbose) log(`  [LINT] W-MAP-ITERATION-ORDER pass threw: ${e?.message ?? String(e)}`);
     }
   }
 

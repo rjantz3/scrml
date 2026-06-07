@@ -36,6 +36,7 @@ import type {
   SqlRefExpr,
   InputStateRefExpr,
   EscapeHatchExpr,
+  MapLitExpr,
 } from "../types/ast.ts";
 import { rewriteExpr, rewriteServerExpr, rewriteExprArrowBody, rewriteServerExprArrowBody, rewriteExprWithDerived } from "./rewrite.js";
 import { emitParseVariantCall, isParseVariantCall } from "./emit-parse-variant.ts";
@@ -171,7 +172,50 @@ export interface EmitExprContext {
    * engineBindings covers `@<name> = <expr>` direct writes.
    */
   engineBindings?: Map<string, import("./emit-engine.ts").EngineBindingInfo> | null;
+  /**
+   * §59 (D4) — value-native MAP variable names in the file's scope (bare, no
+   * `@`). Populated by `collectMapVarNames(fileAST)` (reactive-deps.ts) and
+   * threaded alongside `engineVarNames`. Sibling to `engineVarNames`:
+   *
+   *   - `emitIndex` lowers `@m[k]` (root in this set) → `_scrml_map_get(m, k)`
+   *     returning `V | not` (JS null on miss) — §59.6.
+   *   - `emitCall` intercepts `@m.<method>(…)` (`m` in this set) → the matching
+   *     `_scrml_map_<method>(m, …args)` pure helper — §59.7/§59.8.
+   *   - `emitMember` lowers `@m.size` → `_scrml_map_size(m)` — §59.6.
+   *
+   * Codegen re-parses expressions and has NO resolved type at the emit site
+   * (SURVEY-SYNTHESIS D4 Q2), so the map-vs-array discrimination keys on this
+   * collected name-set rather than a resolved type — exactly as the `.advance`
+   * interception keys on `engineVarNames`. NULL or empty → no map interception
+   * (the expression falls through to ordinary array/index/member/call emission).
+   */
+  mapVarNames?: Set<string> | null;
 }
+
+// ---------------------------------------------------------------------------
+// §59 (D4) — map method surface → runtime helper name table.
+//
+// The camelCase scrml surface method maps to the snake_case `_scrml_map_*`
+// runtime helper (runtime-template.js). Read/getOr/has + write/insert/remove/
+// update/insertAll + iteration keys/values/entries/sorted/sortedBy. The first
+// helper arg is always the map receiver; surface args follow. `.size` is a
+// MEMBER access (not a call) and is handled in `emitMember`, not here. `.get`
+// is the method form of the bracket-read (`@m.get(k)` ≡ `@m[k]`).
+// ---------------------------------------------------------------------------
+const MAP_METHOD_HELPERS: Record<string, string> = {
+  get: "_scrml_map_get",
+  has: "_scrml_map_has",
+  getOr: "_scrml_map_get_or",
+  insert: "_scrml_map_insert",
+  remove: "_scrml_map_remove",
+  update: "_scrml_map_update",
+  insertAll: "_scrml_map_insert_all",
+  keys: "_scrml_map_keys",
+  values: "_scrml_map_values",
+  entries: "_scrml_map_entries",
+  sorted: "_scrml_map_sorted",
+  sortedBy: "_scrml_map_sorted_by",
+};
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -236,6 +280,7 @@ export function emitExpr(node: ExprNode, ctx: EmitExprContext): string {
     case "sql-ref":     return emitSqlRef(node, ctx);
     case "input-state-ref": return emitInputStateRef(node);
     case "escape-hatch": return emitEscapeHatch(node, ctx);
+    case "map-lit":     return emitMapLit(node, ctx);
     case "reset-expr": {
       // §6.8.2 — A1c Step C5 — lower reset(<target>) to the runtime helper.
       //
@@ -447,6 +492,41 @@ function emitProp(prop: ObjectProp, ctx: EmitExprContext): string {
 
 function emitSpread(node: SpreadExpr, ctx: EmitExprContext): string {
   return `...${emitExpr(node.argument, ctx)}`;
+}
+
+/**
+ * §59.3 (D4) — Lower a `map-lit` ExprNode to the runtime constructor.
+ *
+ *   [:]                → _scrml_map_from_entries([], false)            (empty map)
+ *   ["a": 1, "b": 2]   → _scrml_map_from_entries([["a", 1], ["b", 2]], false)
+ *
+ * The runtime `_scrml_map_from_entries(pairs, ordered)` (runtime-template.js)
+ * takes an array of `[key, value]` 2-element arrays + an `ordered` flag, and
+ * applies last-wins on duplicate keys (§59.3) via `_scrml_value_canonical`
+ * key-canonicalization. This REPLACES `emitStringFromTree`'s source-text
+ * round-trip (`[k: v]`, which is NOT valid JS) at the JS-emit site.
+ *
+ * `ordered` is `false` here: `@ordered` is a TYPE affix on the cell, not on the
+ * literal, and codegen has no annotation context at the literal site. A fresh
+ * literal builds an unordered map; the cell's order semantics on subsequent
+ * reassignment ride the clone's `ordered` flag (an `@ordered` cell initialized
+ * with a literal is a documented v1 gap — see progress-d4.md).
+ *
+ * v1 struct/enum-key scope-cut (§59.3 M-cut): the runtime hashes ANY §45-
+ * comparable key (`_scrml_value_canonical` walks structs/enums), so a struct-key
+ * literal lowers correctly here. The `W-MAP-STRUCT-KEY-LITERAL` Info notice
+ * (fired at parse by D2a) names the `.insert` form as the recommended v1 shape,
+ * but we EMIT the literal rather than fail it — the notice is advisory, the
+ * runtime handles it, and failing valid hashable keys would be a regression.
+ */
+function emitMapLit(node: MapLitExpr, ctx: EmitExprContext): string {
+  if (node.entries.length === 0) {
+    return `_scrml_map_from_entries([], false)`;
+  }
+  const pairs = node.entries
+    .map(e => `[${emitExpr(e.key, ctx)}, ${emitExpr(e.value, ctx)}]`)
+    .join(", ");
+  return `_scrml_map_from_entries([${pairs}], false)`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1071,6 +1151,25 @@ function emitMember(node: MemberExpr, ctx: EmitExprContext): string {
     }
   }
 
+  // §59.6 (D4) — map `.size` MEMBER lowering. `@m.size` (m a known map) → the
+  // entry count via `_scrml_map_size(m)`. The map count member is `.size`
+  // (divergent from the array `.length` member — §59.6, intentional). This is a
+  // MEMBER access, not a call, so it lives here rather than in `emitCall`. Only
+  // the exact `.size` property on a direct `@m` map root is intercepted; any
+  // other property on a map cell, or `.size` on a non-map cell, falls through.
+  if (
+    ctx.mode === "client" &&
+    !node.optional &&
+    node.property === "size" &&
+    ctx.mapVarNames && ctx.mapVarNames.size > 0 &&
+    node.object.kind === "ident" &&
+    typeof (node.object as IdentExpr).name === "string" &&
+    (node.object as IdentExpr).name.startsWith("@") &&
+    ctx.mapVarNames.has((node.object as IdentExpr).name.slice(1))
+  ) {
+    return `_scrml_map_size(${emitExpr(node.object, ctx)})`;
+  }
+
   const obj = emitExpr(node.object, ctx);
   const dot = node.optional ? "?." : ".";
   return `${obj}${dot}${node.property}`;
@@ -1106,7 +1205,47 @@ function synthDottedKey(node: MemberExpr): string | null {
   return [rootName.slice(1), ...segments].join(".");
 }
 
+/**
+ * §59.6 (D4) — Resolve the bare ROOT cell name of an index chain, returning it
+ * only if it is a known value-native map (in `ctx.mapVarNames`). Walks through
+ * nested `index` objects so a nested-map chain `@outer["a"]["b"]` reports the
+ * outermost root `outer`. Returns null for any non-map root or a non-`@`-rooted
+ * chain. The `@`-prefix gate matches the reactive-cell sigil; non-`@` array
+ * locals are never map cells.
+ */
+function mapIndexRootName(node: IndexExpr, ctx: EmitExprContext): string | null {
+  if (!ctx.mapVarNames || ctx.mapVarNames.size === 0) return null;
+  let cursor: ExprNode = node;
+  // Descend through nested index objects to the chain root.
+  while (cursor.kind === "index") {
+    cursor = (cursor as IndexExpr).object;
+  }
+  if (cursor.kind !== "ident") return null;
+  const rootName = (cursor as IdentExpr).name;
+  if (typeof rootName !== "string" || !rootName.startsWith("@")) return null;
+  const bare = rootName.slice(1);
+  return ctx.mapVarNames.has(bare) ? bare : null;
+}
+
 function emitIndex(node: IndexExpr, ctx: EmitExprContext): string {
+  // §59.6 — map bracket-READ. When the chain ROOT is a known map cell, lower
+  // `@m[k]` to `_scrml_map_get(m, k)` (returns `V | not` — JS null on a key-miss,
+  // composing with `given` / `is some`). For a NESTED chain `@outer["a"]["b"]`
+  // (the SURVEY-SYNTHESIS D4 Q1 case), the inner map-ness is a VALUE type
+  // invisible to the name-set, so we lower the WHOLE chain as nested map-gets:
+  // `_scrml_map_get(_scrml_map_get(outer, "a"), "b")`. The runtime
+  // `_scrml_map_get` degrades GRACEFULLY on a non-map receiver (returns null,
+  // runtime-template.js line 3981) — a mis-assumed nested read does not throw,
+  // it yields `not`, the safe map-read semantics. `emitExpr(node.object)`
+  // recurses: an inner `index` whose root is the same map cell re-enters this
+  // branch and emits its own `_scrml_map_get`, so a chain of N brackets nests N
+  // map-gets without special-casing depth.
+  if (ctx.mode === "client" && mapIndexRootName(node, ctx) !== null) {
+    const receiver = emitExpr(node.object, ctx);
+    const key = emitExpr(node.index, ctx);
+    return `_scrml_map_get(${receiver}, ${key})`;
+  }
+
   const obj = emitExpr(node.object, ctx);
   const idx = emitExpr(node.index, ctx);
   const bracket = node.optional ? "?.[" : "[";
@@ -1137,6 +1276,44 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   // Dispatch to the monomorphized parser emitter (emit-parse-variant.ts).
   if (isParseVariantCall(node)) {
     return emitParseVariantCall(node, ctx);
+  }
+
+  // §59.7/§59.8 (D4) — map METHOD interception. `@m.<method>(…args)` where `m`
+  // is a known value-native map (ctx.mapVarNames) lowers to the matching
+  // `_scrml_map_<method>(m, …args)` PURE runtime helper (the write methods
+  // return a NEW map; `@m = @m.insert(k, v)` rides the existing reactive-
+  // reassignment path — `emitAssign` → `_scrml_reactive_set` — so NO new
+  // reactivity is introduced). Mirrors the `.advance` interception below:
+  // fires BEFORE the standard MemberExpr path, because the cell value is the
+  // plain `{ __scrml_map, … }` object with no `.insert` method on it.
+  //
+  // The camelCase SURFACE method maps to the snake_case helper name
+  // (`.getOr` → `_scrml_map_get_or`, `.insertAll` → `_scrml_map_insert_all`,
+  // `.sortedBy` → `_scrml_map_sorted_by`).
+  if (
+    ctx.mode === "client" &&
+    ctx.mapVarNames && ctx.mapVarNames.size > 0 &&
+    node.callee.kind === "member" &&
+    !node.callee.optional &&
+    typeof node.callee.property === "string" &&
+    node.callee.object.kind === "ident" &&
+    typeof (node.callee.object as IdentExpr).name === "string" &&
+    (node.callee.object as IdentExpr).name.startsWith("@")
+  ) {
+    const bareName = (node.callee.object as IdentExpr).name.slice(1);
+    if (ctx.mapVarNames.has(bareName)) {
+      const helper = MAP_METHOD_HELPERS[node.callee.property as string];
+      if (helper) {
+        const receiver = emitExpr(node.callee.object, ctx);
+        const args = node.args.map(a => emitExpr(a as ExprNode, ctx));
+        return `${helper}(${[receiver, ...args].join(", ")})`;
+      }
+      // A `@m.<unknown>(...)` call on a map cell whose method is not in the
+      // surface table falls through to the standard member-call path (e.g. an
+      // array method chained off `.entries()` would already have been emitted
+      // by the recursive `.entries()` lowering; a genuinely-unknown method
+      // surfaces as a runtime-undefined error, the loudest signal).
+    }
   }
 
   // C13 §51.0.G — `.advance(.X)` interception for engine variables.

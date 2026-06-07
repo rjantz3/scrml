@@ -1647,6 +1647,14 @@ export function emitEachBodyRenderForFile(
   // feeds emit-event-wiring (the non-each path).
   const engineCtx = buildEachEngineCtx(ctx.fileAST ?? fileAST);
 
+  // §59.8 (D4) — value-native MAP cell names so a `<each in=@m.entries()>`
+  // iterable lowers the map methods to the `_scrml_map_*` runtime (the plain
+  // map object has no `.entries`/`.keys`/`.values`/`.sorted` methods). Computed
+  // once per file; empty Set when the file declares no maps (the iterable then
+  // takes the byte-identical pre-D4 `rewriteAtCellAccess` path).
+  const { collectMapVarNames } = require("./reactive-deps.ts");
+  const eachMapVarNames: Set<string> = collectMapVarNames(ctx.fileAST ?? fileAST);
+
   const eachBlocks = collectEachBlocks(fileAST);
   for (const node of eachBlocks) {
     // Tree-shake (rare): empty block.
@@ -1688,7 +1696,8 @@ export function emitEachBodyRenderForFile(
     if (node.iterShape === "in") {
       const inExpr = node.inExprRaw ?? "[]";
       // Rewrite `@cell` to `_scrml_reactive_get("cell")` for V5-strict reactivity.
-      itemsExpr = rewriteAtCellAccess(inExpr);
+      // §59.8 (D4) — map-aware: `@m.entries()` etc. lower to `_scrml_map_*`.
+      itemsExpr = rewriteMapAwareIterable(inExpr, eachMapVarNames);
     } else if (node.iterShape === "of") {
       const ofExpr = node.ofExprRaw ?? "0";
       // The expression may be a literal (`10`) or a cell (`@daysLeft`).
@@ -1756,4 +1765,43 @@ function rewriteAtCellAccess(text: string): string {
   if (!text || typeof text !== "string") return text;
   // Order matters: handle `@ident` (excluding `@.`).
   return text.replace(/@([A-Za-z_$][A-Za-z0-9_$]*)/g, (_m, name) => `_scrml_reactive_get(${JSON.stringify(name)})`);
+}
+
+/**
+ * §59.8 (D4) — Map-aware `<each in=…>` iterable rewrite. A map iterable such as
+ * `@m.entries()` / `@m.keys()` / `@m.values()` / `@m.entries().sorted()` must
+ * lower the map methods to the `_scrml_map_*` runtime (the plain map object has
+ * NO `.entries` method — `rewriteAtCellAccess` alone would emit
+ * `_scrml_reactive_get("m").entries()` → undefined at runtime).
+ *
+ * When `inExpr` references a known map cell (root `@m` ∈ `mapVarNames`), parse it
+ * to an ExprNode and emit via `emitExprField` with `mapVarNames` threaded — that
+ * reuses emit-expr's method-surface lowering (handles `.entries()`/`.sorted()`
+ * chains correctly). Otherwise fall back to the plain `rewriteAtCellAccess`
+ * regex path (byte-identical to pre-D4 for non-map iterables).
+ */
+function rewriteMapAwareIterable(inExpr: string, mapVarNames: Set<string>): string {
+  if (!inExpr || mapVarNames.size === 0) return rewriteAtCellAccess(inExpr);
+  // Cheap pre-filter: only attempt the structured path when the expression
+  // mentions a known map cell (`@<mapName>`). Avoids parsing every iterable.
+  let mentionsMap = false;
+  for (const name of mapVarNames) {
+    if (inExpr.includes("@" + name)) { mentionsMap = true; break; }
+  }
+  if (!mentionsMap) return rewriteAtCellAccess(inExpr);
+  try {
+    const { parseExprToNode } = require("../expression-parser.ts") as {
+      parseExprToNode: (raw: string, filePath: string, offset: number) => any;
+    };
+    const node = parseExprToNode(inExpr, "", 0);
+    if (!node) return rewriteAtCellAccess(inExpr);
+    const { emitExprField } = require("./emit-expr.ts") as {
+      emitExprField: (n: any, fallback: string, ctx: Record<string, unknown>) => string;
+    };
+    return emitExprField(node, inExpr, { mode: "client", mapVarNames });
+  } catch {
+    // Parse failure → conservative fallback (the iterable is then non-map or
+    // a shape the parser can't structure; the regex path preserves behavior).
+    return rewriteAtCellAccess(inExpr);
+  }
 }
