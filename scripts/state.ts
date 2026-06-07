@@ -1,9 +1,17 @@
-// scripts/state.ts — DD3 Fork 3A (print-half). change-id: dd3-state-self-evidence-2026-06-07
+// scripts/state.ts — DD3 Fork 3A/3B/4. change-id: dd3-state-self-evidence-2026-06-07
 //
-// PRINTS a derive-don't-declare "state at HEAD" report to stdout. READ-ONLY: writes nothing.
-// Run with: `bun scripts/state.ts`. Dependency-free (Bun built-ins only).
+// THREE MODES (single source of truth = the @gap tokens + git/fs; derive-don't-declare):
+//   `bun scripts/state.ts`         PRINT  — read-only "state at HEAD" report to stdout (Fork 3A).
+//   `bun scripts/state.ts --write` WRITE  — in-place-regenerate every `@generated:*` section in the
+//                                           docs from the same derive functions (Fork 3B). Idempotent.
+//   `bun scripts/state.ts --check` CHECK  — regenerate every `@generated:*` section in memory + compare
+//                                           to on-disk; exit 1 on any stale section (Fork 4). Maps-behind
+//                                           is WARN-only (maps are refreshed by project-mapper, a
+//                                           different seam — see GEN policy note below; a future pa.md
+//                                           wrap-gate calls this).
+// Run with Bun. Dependency-free (Bun built-ins only).
 //
-// House style mirrors scripts/regen-spec-index.ts (plain bun-run TS, readFileSync, anchor parsing).
+// House style mirrors scripts/regen-spec-index.ts (plain bun-run TS, readFileSync, anchor find/replace).
 //
 // COUNT BASIS (the whole point of DD3 Fork 2 — see docs/known-gaps.md §0 "Count basis" legend):
 //   Every gap in docs/known-gaps.md carries a grep token
@@ -16,7 +24,7 @@
 //   The §R28/§R27 cluster-table OPEN rows DO count (their tokens live inline in each row's final cell).
 //   This reproduces the canonical S170 hand-count HIGH 0 · MED 9 · LOW 18 · Nominal 9.
 
-import { readFileSync } from "fs";
+import { readFileSync, writeFileSync } from "fs";
 import { spawnSync } from "child_process";
 
 const ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
@@ -39,6 +47,170 @@ function gapCounts() {
   const low = openBy("LOW");
   const nominal = tokens.filter((t) => t.sev === "NOMINAL" && t.status === "nominal").length;
   return { tokens, high, med, low, nominal };
+}
+
+// ── Generated-section registry (Fork 3B/4) ──────────────────────────────────
+// Each entry names a doc file + an anchor NAME and a `produce()` that returns the BETWEEN-content
+// (the text the rewriter places between the START/END markers). The same derive functions feed
+// both PRINT and WRITE/CHECK, so the doc artifact can never silently diverge from the report.
+//
+// Anchor convention (mirrors regen-spec-index.ts determinism):
+//   <!-- @generated:<NAME> START (do not edit — `bun scripts/state.ts --write`) -->
+//   ...generated content...
+//   <!-- @generated:<NAME> END -->
+type GenSection = { name: string; file: string; produce: () => string };
+
+const GEN_SECTIONS: GenSection[] = [
+  {
+    name: "gap-counts",
+    file: `${ROOT}/docs/known-gaps.md`,
+    // The §0 at-a-glance table's four data rows — derived from the @gap tokens, so they always
+    // equal what PRINT reports. Header + separator + the "Count basis" legend stay STATIC (hand-doc).
+    produce: () => {
+      const g = gapCounts();
+      return [
+        `| HIGH | ${g.high} |`,
+        `| MED | ${g.med} |`,
+        `| LOW | ${g.low} |`,
+        `| Nominal (spec-ahead-of-impl) | ${g.nominal} |`,
+      ].join("\n");
+    },
+  },
+];
+
+// Find the START/END anchor pair for NAME in `text`. Returns the byte offsets of the content
+// region (between the START line's trailing newline and the END line's leading newline) plus the
+// current between-content, or null if either marker is missing.
+type AnchorSpan = { betweenStart: number; betweenEnd: number; current: string };
+function findAnchorSpan(text: string, name: string): AnchorSpan | null {
+  // START marker may carry the parenthetical "(do not edit …)" tail; match the prefix only.
+  const startRe = new RegExp(`<!--\\s*@generated:${escapeRe(name)}\\s+START\\b[^>]*-->`);
+  const endRe = new RegExp(`<!--\\s*@generated:${escapeRe(name)}\\s+END\\b[^>]*-->`);
+  const sm = startRe.exec(text);
+  if (!sm) return null;
+  const em = endRe.exec(text);
+  if (!em) return null;
+  const startMarkerEnd = sm.index + sm[0].length;
+  const endMarkerStart = em.index;
+  if (endMarkerStart < startMarkerEnd) return null; // END before START → malformed
+  // Content lives between the newline after START and the newline before END.
+  let betweenStart = startMarkerEnd;
+  if (text[betweenStart] === "\n") betweenStart += 1;
+  let betweenEnd = endMarkerStart;
+  if (text[betweenEnd - 1] === "\n") betweenEnd -= 1;
+  return { betweenStart, betweenEnd, current: text.slice(betweenStart, betweenEnd) };
+}
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Regenerate one section's content in-place within `text`. Returns the new text + whether it
+// changed, or null if the anchor pair is missing (caller reports, does not crash).
+function regenInText(text: string, sec: GenSection): { text: string; changed: boolean } | null {
+  const span = findAnchorSpan(text, sec.name);
+  if (!span) return null;
+  const fresh = sec.produce();
+  if (span.current === fresh) return { text, changed: false };
+  const next = text.slice(0, span.betweenStart) + fresh + text.slice(span.betweenEnd);
+  return { text: next, changed: true };
+}
+
+// ── WRITE mode (Fork 3B) ─────────────────────────────────────────────────────
+function runWrite(): number {
+  // Group sections by file so each file is read/written once (idempotent across multiple sections).
+  const byFile = new Map<string, GenSection[]>();
+  for (const s of GEN_SECTIONS) {
+    const arr = byFile.get(s.file) ?? [];
+    arr.push(s);
+    byFile.set(s.file, arr);
+  }
+  let anyChanged = false;
+  const missing: string[] = [];
+  for (const [file, secs] of byFile) {
+    let text = readFileSync(file, "utf8");
+    let fileChanged = false;
+    for (const sec of secs) {
+      const r = regenInText(text, sec);
+      if (r === null) {
+        missing.push(`@generated:${sec.name} (in ${rel(file)})`);
+        continue;
+      }
+      if (r.changed) {
+        text = r.text;
+        fileChanged = true;
+        console.log(`  regenerated @generated:${sec.name} in ${rel(file)}`);
+      } else {
+        console.log(`  @generated:${sec.name} already current in ${rel(file)}`);
+      }
+    }
+    if (fileChanged) {
+      writeFileSync(file, text);
+      anyChanged = true;
+    }
+  }
+  if (missing.length) {
+    console.log("");
+    console.log("⚠ MISSING anchor pair(s) — not regenerated:");
+    for (const m of missing) console.log(`  ${m}`);
+  }
+  console.log("");
+  console.log(anyChanged ? "--write: sections regenerated." : "--write: no changes (already current).");
+  // Missing anchors are a report, not a crash (per brief); WRITE still exits 0.
+  return 0;
+}
+
+// ── CHECK mode (Fork 4) ──────────────────────────────────────────────────────
+// Regenerate every @generated section in memory + compare to on-disk. FAIL (exit 1) on any stale
+// section OR any missing anchor pair. Maps-behind is WARN-ONLY: maps are refreshed by project-mapper
+// (a different seam), so the future pa.md wrap-gate should NOT block doc-currency on map staleness —
+// it prints the maps line for visibility but does not gate on it yet. (TODO future pa.md wrap-gate:
+// decide whether to promote maps-behind to a hard fail once map-refresh joins the wrap flow.)
+function runCheck(): number {
+  const stale: string[] = [];
+  const missing: string[] = [];
+  const ok: string[] = [];
+  // Read each file once.
+  const fileText = new Map<string, string>();
+  for (const sec of GEN_SECTIONS) {
+    if (!fileText.has(sec.file)) fileText.set(sec.file, readFileSync(sec.file, "utf8"));
+    const text = fileText.get(sec.file)!;
+    const span = findAnchorSpan(text, sec.name);
+    if (!span) {
+      missing.push(`@generated:${sec.name} (in ${rel(sec.file)})`);
+      continue;
+    }
+    const fresh = sec.produce();
+    if (span.current === fresh) ok.push(`@generated:${sec.name} (${rel(sec.file)})`);
+    else stale.push(`@generated:${sec.name} (${rel(sec.file)})`);
+  }
+
+  const maps = mapsStaleness();
+  const failed = stale.length > 0 || missing.length > 0;
+
+  console.log("══════════════════════════════════════════════════════════════════");
+  console.log("  bun scripts/state.ts --check  —  @generated currency gate");
+  console.log("══════════════════════════════════════════════════════════════════");
+  for (const s of ok) console.log(`  PASS  ${s}`);
+  for (const s of stale) console.log(`  STALE ${s}  ← run \`bun scripts/state.ts --write\``);
+  for (const m of missing) console.log(`  MISSING ${m}`);
+  console.log("");
+  // Maps-staleness: WARN-only this unit (do NOT gate). See policy note above.
+  console.log(`  ${maps.note}  [WARN-only — not gated; project-mapper seam]`);
+  console.log("");
+  if (failed) {
+    const names = [...stale, ...missing].join(", ");
+    console.log(`  FAIL — stale/missing @generated section(s): ${names}`);
+    console.log("══════════════════════════════════════════════════════════════════");
+    return 1;
+  }
+  console.log("  PASS — all @generated sections current.");
+  console.log("══════════════════════════════════════════════════════════════════");
+  return 0;
+}
+
+function rel(abs: string): string {
+  return abs.startsWith(ROOT + "/") ? abs.slice(ROOT.length + 1) : abs;
 }
 
 // ── bun test (pre-commit subset) ────────────────────────────────────────────
@@ -146,4 +318,12 @@ function main() {
   console.log(L.join("\n"));
 }
 
-main();
+// ── dispatch ──────────────────────────────────────────────────────────────────
+const argv = process.argv.slice(2);
+if (argv.includes("--write")) {
+  process.exit(runWrite());
+} else if (argv.includes("--check")) {
+  process.exit(runCheck());
+} else {
+  main();
+}
