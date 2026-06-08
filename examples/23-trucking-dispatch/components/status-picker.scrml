@@ -16,7 +16,7 @@
 ${
     // Pure helper — given a current status, returns the list of valid next
     // states. `cancelled` and `paid` are terminal (return []).
-    export fn validNextStates(current: string) -> any {
+    export fn validNextStates(current: string) -> string[] {
         if (current == "tendered")   return ["booked", "cancelled"]
         if (current == "booked")     return ["dispatched", "cancelled"]
         if (current == "dispatched") return ["loaded", "cancelled"]
@@ -61,8 +61,8 @@ ${
 
     export const StatusPicker = <div class="flex items-center gap-3" props={
         currentStatus: string,
-        nextStates: any,
-        onTransition: any,
+        nextStates: string[],
+        onTransition: asIs,
     }>
         <span class="text-sm text-slate-500">Current:</span>
         <span class="text-sm font-semibold text-slate-900">${pickerLabel(currentStatus)}</span>

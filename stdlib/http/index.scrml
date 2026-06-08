@@ -6,7 +6,7 @@ ${
     // Typed fetch wrapper with timeout, retry, and response normalization.
     //
     // All functions return a normalized response object:
-    //   { ok: boolean, status: number, data: any, headers: Headers, raw: Response }
+    //   { ok: boolean, status: number, data: asIs, headers: Headers, raw: Response }
     //
     //   ok     — true if status is 2xx
     //   data   — parsed JSON if Content-Type includes "application/json", else string

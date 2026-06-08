@@ -186,7 +186,7 @@
         }
 
         // Pure helper — does this invoice match the dropdown filter?
-        fn matchesFilter(inv: any, filter: string, today: string) -> boolean {
+        fn matchesFilter(inv: asIs, filter: string, today: string) -> boolean {
             if (filter == "all") return true
             const s = invoiceStatus(inv, today)
             return s == filter

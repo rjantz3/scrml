@@ -7424,6 +7424,18 @@ Again no async coloring; `chunkArray` is a generator, but `processInChunks` cons
 
 scrml has an independent type system. It is NOT modeled after TypeScript. The type system is developed progressively; this section defines the constructs specified in this version.
 
+### 14.1.1 `any` is not a type — there is no `any`
+
+**Canonical rule (S174 — hard line).** scrml has **no `any` type.** `any` is NOT a scrml type — not on a struct field, not on a state-cell type annotation, not on a `fn` / `function` parameter or return type, not anywhere a type annotation is valid. This reinforces §14.1: the type system is NOT modeled after TypeScript, and TypeScript's `any` — the type-checking opt-out that silently erases type safety — has no scrml equivalent. User-voice S174 verbatim: *"I have made that a hard line in scrml. There is no any. … I am only begrudgingly allowing 'asis' because I don't know everything someone might try with the language."*
+
+The sanctioned untyped escape hatch is **`asIs`** — a deliberate, *named* opt-out for a value whose shape genuinely cannot be expressed (a foreign value, an unmodeled SQL-query row, a polymorphic payload). `asIs` is explicit and greppable; `any` is the silent TypeScript reflex this rule forecloses.
+
+The literal type-token `any` in any type-annotation position is rejected with **`E-TYPE-ANY-FORBIDDEN`** (§34); the diagnostic points the author to `asIs`.
+
+Parallel shape to the other "what scrml is NOT" rules: §42.1 (`null` / `undefined` do not exist in scrml source, S89) · §19.9.8 (no `async` / `await`, S114).
+
+> **Note — `any`-token-specific.** This rule rejects the literal `any` token. A *different* unrecognized type name (a typo'd or undefined type) that also currently resolves silently to `asIs` is a separate, broader gap tracked as a follow-on — it is not what this rule covers.
+
 ### 14.2 Type Declaration Syntax
 
 ```scrml
@@ -16443,6 +16455,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | W-DEAD-FUNCTION | §12.2 | A function is declared but called from neither a server-classified context nor a client-classified context, is not exported, is not server-annotated, and is not referenced from markup. The function will be tree-shaken from the output. Remove the declaration if intended dead, or wire it up to a caller. RI does not yet track all markup reference patterns; if the diagnostic is a false positive, exporting the function or adding an explicit caller suppresses it. **Fires:** emitted by RI (`compiler/src/route-inference.ts` Step 5d, D4) at the function's declaration site. Added 2026-05-08 (Insight 26 Batch 1) as the in-vacuum complement to caller-context propagation (Trigger 5). | Warning |
 | E-TYPE-030 | §14.7, §15.2 | `asIs` value used past resolution requirement | Error |
 | E-TYPE-031 | §15.3, §15.10 | Prop value fails declared type constraint | Error |
+| E-TYPE-ANY-FORBIDDEN | §14.1.1 | The literal type-token `any` appears in a type-annotation position (struct field, state-cell annotation, `fn`/`function` parameter or return type). `any` is not a scrml type — there is no `any` (S174 hard line; TypeScript's type-checking opt-out has no scrml equivalent). Use a concrete type, or `asIs` for a deliberate, named untyped escape hatch. `any`-token-specific (an arbitrary undefined type name that also silently resolves to `asIs` is a separate broader gap, tracked as a follow-on). (Catalog addition S174; emitted at `compiler/src/type-system.ts` `checkAnyTypeForbidden`.) | Error |
 | E-TYPE-040 | §16.4 | Slot fill type incompatible with declared slot shape | Error |
 | E-TYPE-050 | §14.8.5 | Two tables produce the same generated type name | Error |
 | E-TYPE-051 | §14.8.5 | SQLite column type unmappable; typed `any` | Warning |
@@ -18000,7 +18013,7 @@ Examples:
 
 #### 36.4.2 Named events
 
-When the yielded value is an object with the shape `{ event: string, data: any }`, the compiler emits a named SSE event:
+When the yielded value is an object with the shape `{ event: string, data: asIs }`, the compiler emits a named SSE event:
 
 ```
 event: <value.event>\n
@@ -30589,9 +30602,9 @@ type ValidationError = enum {
   PatternMismatch(re: regex),
   MinFailed(threshold: number),
   MaxFailed(threshold: number),
-  GtFailed(expected: any),    LtFailed(expected: any),
-  GteFailed(expected: any),   LteFailed(expected: any),
-  EqFailed(expected: any),    NeqFailed(forbidden: any),
+  GtFailed(expected: asIs),    LtFailed(expected: asIs),
+  GteFailed(expected: asIs),   LteFailed(expected: asIs),
+  EqFailed(expected: asIs),    NeqFailed(forbidden: asIs),
   OneOfFailed(set: array),    NotInFailed(set: array),
   Custom(tag: string),        // for developer-defined custom validators (Edge G)
 }

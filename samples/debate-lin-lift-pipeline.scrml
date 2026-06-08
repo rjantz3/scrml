@@ -23,7 +23,7 @@ ${
         return 42
     }
 
-    function buildOrderRow(order: any, token: string) -> string {
+    function buildOrderRow(order: asIs, token: string) -> string {
         // token consumed here — only once
         return "order-" + order.id + "-auth-" + token
     }

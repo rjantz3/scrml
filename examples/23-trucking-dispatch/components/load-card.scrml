@@ -36,7 +36,7 @@ ${
     }
 
     export const LoadCard = <a class="block bg-white border border-slate-200 rounded-lg p-3 shadow-sm hover:shadow-md hover:border-blue-300 transition" props={
-        load: any,
+        load: asIs,
         customerName?: string,
     }
         href="/dispatch/loads/${load.id}"

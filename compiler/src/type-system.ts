@@ -3462,6 +3462,188 @@ function checkLogShadowing(
   for (const node of topNodes) walk(node);
 }
 
+// ---------------------------------------------------------------------------
+// §14.x / E-TYPE-ANY-FORBIDDEN — `any` is not a type in scrml (hard line)
+// ---------------------------------------------------------------------------
+
+/**
+ * Does a raw type-annotation string mention the literal type-token `any` in a
+ * TYPE position?
+ *
+ * `any` is NOT a scrml type — there is no `any` (S174 user hard line). Today the
+ * token falls through `resolveTypeExpr`'s unresolvable path to `asIs`/`unknown`
+ * with NO diagnostic, so an `any` annotation silently masquerades as the
+ * sanctioned `asIs` escape hatch. This recognizer catches the LITERAL `any`
+ * token BEFORE that collapse so it can be rejected.
+ *
+ * The scan strips the structural type-punctuation that separates type atoms
+ * (`|`, `[]`, `()`, `{}`, `,`, leading/trailing affixes) and reports `true` iff
+ * any resulting atom is exactly `any`. This catches `any`, `any[]`, `any | not`,
+ * `[string: any]`, an inline-struct field `{ payload: any }`, etc., while NOT
+ * mis-firing on a real type whose NAME merely contains the substring (`Company`,
+ * `anyField` as a field name, `manyThings`) — those are not the bare `any` atom.
+ *
+ * Field/param NAMES are not scanned (only the type portion after a `:` colon),
+ * so a parameter literally named `any` (e.g. `any: number`) is unaffected.
+ */
+function typeTextMentionsAnyToken(typeText: string): boolean {
+  if (typeof typeText !== "string") return false;
+  // Replace every non-identifier character with a space so identifier atoms
+  // stand alone, then test for a bare `any` atom. `@ordered` map affix and the
+  // `to`/`->`/`=>` glyphs all reduce to separators/atoms that are not `any`.
+  const atoms = typeText.replace(/[^A-Za-z0-9_$]+/g, " ").trim().split(/\s+/);
+  return atoms.includes("any");
+}
+
+/**
+ * §14.x / E-TYPE-ANY-FORBIDDEN — reject the literal type-token `any` in EVERY
+ * type-annotation position.
+ *
+ * `any` is not a scrml type. There is no `any` (S174: "I have made that a hard
+ * line in scrml. There is no any. I am only begrudgingly allowing 'asIs'
+ * because I don't know everything someone might try with the language."). The
+ * sanctioned untyped escape hatch is `asIs` — a deliberate, named opt-out, NOT
+ * `any`.
+ *
+ * This is `any`-TOKEN-specific. An arbitrary undefined type name (`Frobnicate`)
+ * that ALSO silently resolves to `asIs` is a SEPARATE, broader leak (a deferred
+ * follow-on arc); this check does NOT attempt it.
+ *
+ * Fire site rationale: `resolveTypeExpr` is span-free and error-free by contract
+ * (it runs in many non-decl contexts and cannot distinguish an `any`→asIs
+ * collapse from a legitimate downstream `asIs`). So this is a span-bearing scan
+ * over the RAW type-annotation text at the decl-binding sites — the same shape
+ * as `checkFunctionTypedStructFields` / `checkMapKeyComparability`. The token is
+ * caught while it is still visible in source, before the `asIs` collapse.
+ *
+ * Positions scanned (every place a type goes):
+ *   - struct / error decl field types (`decl.raw` field clauses)
+ *   - cell `typeAnnotation` strings (state-decl `<x>: any`, including inline
+ *     struct / array / map / union members)
+ *   - function-decl `params[]` (each `name: Type` param's type slot) and the
+ *     trailing return-type annotation (`-> any`)
+ *
+ * @param typeDecls — struct/enum/error decls (same input as buildTypeRegistry)
+ * @param topNodes  — file top-level nodes (deep-walked for cells + fn-decls)
+ * @param errors    — diagnostic accumulator
+ * @param fileSpan  — fallback span when a decl/node has no span
+ */
+function checkAnyTypeForbidden(
+  typeDecls: ASTNodeLike[],
+  topNodes: ASTNodeLike[],
+  errors: TSError[],
+  fileSpan: Span,
+): void {
+  const seenSpans = new Set<string>();
+  function fire(where: string, typeText: string, span: Span): void {
+    // De-dupe: the same decl may be re-visited via multiple node references.
+    const key = `${span.start}:${span.end}:${where}:${typeText.trim()}`;
+    if (seenSpans.has(key)) return;
+    seenSpans.add(key);
+    errors.push(new TSError(
+      "E-TYPE-ANY-FORBIDDEN",
+      `E-TYPE-ANY-FORBIDDEN: '${where}' is annotated with 'any', which is not a ` +
+      `type in scrml — there is no 'any'. Use a concrete type, or 'asIs' for a ` +
+      `deliberate untyped escape hatch. See SPEC §14.`,
+      span,
+      "error",
+    ));
+  }
+
+  // Scan a raw struct/inline-struct body (the inner `{ ... }` field list, braces
+  // optional) for `any`-typed fields, recursing into array-element / nested
+  // inline-struct field types. Mirrors checkFunctionTypedStructFields'
+  // scanStructBodyRaw shape so the field-clause split is identical.
+  function scanStructBodyRaw(raw: string, structLabel: string, span: Span): void {
+    let body = (raw ?? "").trim();
+    if (body.startsWith("{")) body = body.slice(1);
+    if (body.endsWith("}")) body = body.slice(0, -1);
+    body = body.trim();
+    if (!body) return;
+    for (const line of splitTopLevel(body, [",", "\n"])) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const colonIdx = trimmed.indexOf(":");
+      if (colonIdx === -1) continue;
+      const fieldName = trimmed.slice(0, colonIdx).trim();
+      const fieldType = trimmed.slice(colonIdx + 1).trim();
+      if (!fieldName || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(fieldName)) continue;
+      if (typeTextMentionsAnyToken(fieldType)) {
+        fire(structLabel ? `${structLabel}.${fieldName}` : fieldName, fieldType, span);
+        continue;
+      }
+      // Recurse into a nested inline-struct field type (`f: { g: any }` and the
+      // array form `f: { g: any }[]`).
+      let nested = fieldType;
+      while (nested.endsWith("[]")) nested = nested.slice(0, -2).trim();
+      if (nested.startsWith("{") && nested.endsWith("}")) {
+        scanStructBodyRaw(nested, structLabel ? `${structLabel}.${fieldName}` : fieldName, span);
+      }
+    }
+  }
+
+  // 1. Named struct / error declarations.
+  if (Array.isArray(typeDecls)) {
+    for (const decl of typeDecls) {
+      if (!decl) continue;
+      if (decl.typeKind !== "struct" && decl.typeKind !== "error") continue;
+      const span = (decl.span as Span | undefined) ?? fileSpan;
+      scanStructBodyRaw((decl.raw as string) ?? "", (decl.name as string) ?? "", span);
+    }
+  }
+
+  // 2. Cells (state-decls etc.) carrying a `typeAnnotation`, and function-decl
+  // params + return types. Deep-walk the file nodes.
+  const seenNodes = new WeakSet<object>();
+  function walk(node: unknown): void {
+    if (!node || typeof node !== "object") return;
+    if (seenNodes.has(node as object)) return;
+    seenNodes.add(node as object);
+    const n = node as Record<string, unknown>;
+
+    // Cell type annotation (`<x>: any`, `<x>: any[]`, `<x>: [string: any]`, ...).
+    const ann = n.typeAnnotation;
+    if (typeof ann === "string" && ann.trim()) {
+      if (typeTextMentionsAnyToken(ann)) {
+        const span = (n.span as Span | undefined) ?? fileSpan;
+        const label = typeof n.name === "string" && n.name ? n.name : "type annotation";
+        fire(label, ann, span);
+      }
+    }
+
+    // Function declaration params + return type.
+    if (n.kind === "function-decl") {
+      const span = (n.span as Span | undefined) ?? fileSpan;
+      const fnName = typeof n.name === "string" && n.name ? n.name : "function";
+      const params = n.params;
+      if (Array.isArray(params)) {
+        for (const p of params) {
+          if (typeof p !== "string") continue;
+          const colonIdx = p.indexOf(":");
+          if (colonIdx === -1) continue;
+          const paramName = p.slice(0, colonIdx).trim();
+          const paramType = p.slice(colonIdx + 1).trim();
+          if (typeTextMentionsAnyToken(paramType)) {
+            fire(`${fnName}(${paramName})`, paramType, span);
+          }
+        }
+      }
+      // Return type, when carried as a discrete field. (`-> any`.)
+      const ret = (n.returnType ?? n.returnTypeAnnotation ?? n.retType);
+      if (typeof ret === "string" && ret.trim() && typeTextMentionsAnyToken(ret)) {
+        fire(`${fnName}() return`, ret as string, span);
+      }
+    }
+
+    for (const key in n) {
+      const v = n[key];
+      if (Array.isArray(v)) { for (const c of v) walk(c); }
+      else if (v && typeof v === "object") walk(v);
+    }
+  }
+  for (const node of topNodes) walk(node);
+}
+
 /**
  * Format a ResolvedType for a diagnostic message (compact human label).
  * Used by E-TYPE-001 lifecycle messages so adopters see the actual pre/post
@@ -14822,6 +15004,10 @@ function processFile(
     // §20.6.7 / W-LOG-SHADOWED — a user-declared `function log` / `fn log`
     // shadows the location-transparent log() builtin; info-level nudge.
     checkLogShadowing(fnFieldTopNodes, errors, fileSpan);
+    // §14 / E-TYPE-ANY-FORBIDDEN — `any` is not a type in scrml (S174 hard
+    // line). Reject the literal type-token `any` in every type-annotation
+    // position; `asIs` is the sanctioned untyped escape hatch.
+    checkAnyTypeForbidden(typeDecls, fnFieldTopNodes, errors, fileSpan);
   }
 
   // TS-B Step 1.2: Seed type registry with imported types from dependency files (§21.3).

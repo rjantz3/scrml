@@ -26,10 +26,10 @@ ${
     }
 
     export const CustomerCard = <tr class="border-b border-slate-200 hover:bg-slate-50" props={
-        customer: any,
+        customer: asIs,
         outstandingCount: number,
         expanded: boolean,
-        onToggle: any,
+        onToggle: asIs,
     }>
         <td class="px-3 py-3">
             <button onclick=onToggle(customer.id) class="text-sm font-semibold text-slate-900 hover:text-blue-700 text-left">

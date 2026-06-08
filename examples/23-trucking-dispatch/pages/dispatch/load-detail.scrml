@@ -37,7 +37,7 @@
       // Inlined transition validator — duplicates status-picker's validNextStates
       // because cross-file `fn` calls inside server functions trigger
       // server-escalation cascades on the importer (cf. F-COMPONENT-002).
-      fn _validNextStatesInline(current: string) -> any {
+      fn _validNextStatesInline(current: string) -> string[] {
           if (current == "tendered")   return ["booked", "cancelled"]
           if (current == "booked")     return ["dispatched", "cancelled"]
           if (current == "dispatched") return ["loaded", "cancelled"]
