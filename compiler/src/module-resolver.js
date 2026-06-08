@@ -71,6 +71,86 @@ function isLegalImportSpecifier(source) {
 }
 
 // ---------------------------------------------------------------------------
+// E-EXPORT-001 — reactive state-cell export discriminator (§21.2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Collect the set of LOCAL reactive state-cell names declared in a file's AST.
+ *
+ * A reactive state cell is any `kind: "state-decl"` node — both plain Shape-1
+ * cells (`<count> = 0`, `shape: "plain"`) AND derived cells
+ * (`const <total> = @a + @b`, `shape: "derived"`). Both qualify: they are the
+ * same reactive-state family (§21.2 — a reactive cell is NOT in the Form-2
+ * exportable set `type / function / fn / const / let`).
+ *
+ * Walks `ast.nodes` recursively, descending into nested logic-block bodies
+ * (`body`), markup children (`children`), engine bodyChildren, and compound
+ * (Variant C) state-decl `children` — so a cell declared inside a `${ }` block
+ * or as a compound sub-cell is still collected. Component-as-const, channels,
+ * engines, functions, types, and `let`/`const` bindings are NOT `state-decl`
+ * nodes and are intentionally absent — keying on `kind: "state-decl"` (not on
+ * name-case) is what keeps `export const Greeting = <markup>` and friends legal.
+ *
+ * @param {object} ast — a FileAST (`file.ast`)
+ * @returns {Set<string>} — every local state-cell name in the file
+ */
+function collectStateCellNames(ast) {
+  const names = new Set();
+  if (!ast || typeof ast !== "object") return names;
+  const seen = new Set();
+  function walk(node) {
+    if (Array.isArray(node)) {
+      for (const c of node) walk(c);
+      return;
+    }
+    if (!node || typeof node !== "object") return;
+    if (seen.has(node)) return;
+    seen.add(node);
+    if (node.kind === "state-decl" && typeof node.name === "string" && node.name.length > 0) {
+      names.add(node.name);
+    }
+    for (const key of [
+      "nodes", "body", "children", "bodyChildren",
+      "consequent", "alternate", "then", "else",
+    ]) {
+      const v = node[key];
+      if (Array.isArray(v)) walk(v);
+    }
+  }
+  walk(ast.nodes || []);
+  return names;
+}
+
+/**
+ * Extract the exported name(s) from an `export-decl` AST node for the
+ * E-EXPORT-001 state-cell check. Handles both the braced/named form
+ * (`export { count }` → `exportedName: "count"`, possibly comma-separated) and
+ * the `@`-form (`export @count` → `exportedName: null`, name recoverable only
+ * from the `raw` slice `export @count`). Re-exports (`export { x } from '...'`)
+ * carry a `reExportSource` and reference a binding in ANOTHER file — they are
+ * NOT a local cell export, so they are excluded.
+ *
+ * @param {object} exp — an export-decl entry from `ast.exports`
+ * @returns {string[]} — local exported names to check against the cell set
+ */
+function exportedLocalNames(exp) {
+  if (!exp || exp.reExportSource || exp.isReExportAll) return [];
+  const out = [];
+  if (typeof exp.exportedName === "string" && exp.exportedName.length > 0) {
+    for (const n of exp.exportedName.split(",").map((s) => s.trim()).filter(Boolean)) {
+      out.push(n);
+    }
+  }
+  // `@`-form: the name survives only in `raw` (`export @count`, `export @a, @b`).
+  // Strip a leading `export`, then collect every `@ident` token.
+  if (out.length === 0 && typeof exp.raw === "string" && exp.raw.includes("@")) {
+    const m = exp.raw.match(/@([A-Za-z_$][A-Za-z0-9_$]*)/g);
+    if (m) for (const tok of m) out.push(tok.slice(1));
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Import graph construction
 // ---------------------------------------------------------------------------
 
@@ -201,6 +281,38 @@ export function buildImportGraph(fileASTs) {
 
     // Collect exports from AST
     const astExports = file.ast?.exports || [];
+
+    // E-EXPORT-001 (§21.2) — a reactive state cell (plain Shape-1 OR derived)
+    // SHALL NOT be exported. It is not in the Form-2 exportable set
+    // (type / function / fn / const / let); exporting one previously passed
+    // SILENTLY (the export was swallowed; emitted JS had no export; a cross-file
+    // import resolved to garbage). Build the local cell-name set once per file
+    // and reject any export whose name binds to a state-decl. SHARED — the MOD
+    // stage runs for both pipelines (legacy ast-builder + native collect-hoisted
+    // both feed `file.ast.exports`), so this one check covers both. Keyed on the
+    // `kind:"state-decl"` binding, NOT name-case, so `export const Greeting`
+    // (component-as-const), `export <channel>`, and exported engines stay legal.
+    const _stateCellNames = collectStateCellNames(file.ast);
+    if (_stateCellNames.size > 0) {
+      for (const exp of astExports) {
+        if (exp.isReExportAll || exp.reExportSource) continue;
+        for (const name of exportedLocalNames(exp)) {
+          if (_stateCellNames.has(name)) {
+            errors.push(new ModuleError(
+              "E-EXPORT-001",
+              `E-EXPORT-001: \`${name}\` is a reactive state cell and cannot be exported. ` +
+              `A state cell is not in the exportable set (type / function / fn / const / let, ` +
+              `\u00a721.2); a reactive cell holds per-instance runtime state, so exporting it ` +
+              `has no cross-file meaning. To share a value across files, export a function ` +
+              `that returns it, or a \`const\` of its current value. To share reactive behaviour, ` +
+              `wrap the cell in a component and export that (the wrapping-component idiom).`,
+              exp.span ? { ...exp.span, file: filePath } : null,
+            ));
+          }
+        }
+      }
+    }
+
     for (const exp of astExports) {
       // F2 (ast-builder-grammar-fixes): `export * from './x'` — emit a
       // single `re-export-all` entry. The seeder/resolver chase via

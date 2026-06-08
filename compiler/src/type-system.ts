@@ -1900,6 +1900,48 @@ function isFunctionShapedAnnotation(raw: string): boolean {
   return false;
 }
 
+/**
+ * §14.3 / W-TYPE-FN-FIELD — Is a (raw) type-expression annotation a FUNCTION
+ * TYPE in struct-field position? This is the diagnostic recognizer for the
+ * `W-TYPE-FN-FIELD` info-level lint (a function-typed struct field is currently
+ * resolved as opaque `asIs`; first-class support is an open question, deferred).
+ *
+ * Recognizes all three function-type shapes:
+ *   - `fn(...)`  / `fn (...)`               — explicit fn type
+ *   - `(...) => ...`                          — fat-arrow function type
+ *   - `(...) -> RetType`                      — thin-arrow function type
+ *
+ * The thin-arrow form `(...) -> RetType` MUST be disambiguated from a lifecycle
+ * annotation. A LIFECYCLE annotation (`(A to B)` / `(A -> B)`, §14.12) is the
+ * arrow WRAPPED in outer parens — the trimmed expression STARTS with `(` AND
+ * ENDS with `)`. A function-type thin-arrow `() -> void` has the arrow AFTER a
+ * param-paren and does NOT end with `)` (it ends with the return type). The
+ * `startsWith("(") && endsWith(")")` gate is the exact disambiguator used by
+ * `isLifecycleAnnotation` (checkLifecycleOnEngineCells); we reuse it here in the
+ * negative so a lifecycle field never mis-fires W-TYPE-FN-FIELD.
+ *
+ * Reuses `findTopLevelArrow` (defined below; function-hoisted) for the
+ * top-level thin-arrow scan so `() -> void` is recognized but `[A -> B]` (an
+ * arrow nested inside brackets — not a top-level function type) is not.
+ */
+function isFunctionTypeAnnotation(raw: string): boolean {
+  if (typeof raw !== "string") return false;
+  const s = raw.trim();
+  if (s.length === 0) return false;
+  // `fn(...)` and `(...) => ...` — keep the existing recognizer's coverage.
+  if (isFunctionShapedAnnotation(s)) return true;
+  // Thin-arrow function type `(...) -> RetType`: a top-level `->` (or `to`)
+  // arrow that is NOT wrapped as a lifecycle `(A -> B)`. The lifecycle form is
+  // the ONLY arrow shape that starts-and-ends with parens; everything else
+  // with a top-level arrow following a param-paren is a function type.
+  const arrow = findTopLevelArrow(s);
+  if (arrow !== null) {
+    const isLifecycleWrapped = s.startsWith("(") && s.endsWith(")");
+    if (!isLifecycleWrapped && s.startsWith("(")) return true;
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // §59.4 / §45.2 — Map key comparability
 // ---------------------------------------------------------------------------
@@ -3230,6 +3272,143 @@ function checkLifecycleOnEngineCells(
   }
 
   walk(nodes);
+}
+
+// ---------------------------------------------------------------------------
+// §14.3 / W-TYPE-FN-FIELD — Function-typed struct field nudge
+// ---------------------------------------------------------------------------
+
+/**
+ * §14.3 — A struct (or inline-struct) field whose TYPE is a function type
+ * (`onClick: () -> void`, `cb: fn()`, `handler: (x: int) => string`) is
+ * currently resolved as an opaque `asIs` value — the type system has no
+ * resolved function-kind for struct fields, so the function-ness is dropped.
+ * Whether function-typed struct fields are a first-class supported feature is
+ * an OPEN question (deferred); rather than decide it silently, we surface the
+ * field with an info-level `W-TYPE-FN-FIELD` nudge so adopters and the language
+ * design loop both see it. The W- prefix routes the diagnostic to
+ * `result.warnings` (non-fatal) — this is a nudge, not a hard stop.
+ *
+ * Two field positions surface:
+ *   1. Named struct decls (`type T :struct = { onClick: () -> void }`) — the
+ *      field clauses live in `decl.raw`; we split top-level (commas/newlines)
+ *      and check each clause's type-expr.
+ *   2. Inline-struct annotations on a state-decl (`<x>: { f: fn() } = ...`) —
+ *      the inline-struct body is the cell's `typeAnnotation` string; we recurse
+ *      into it (and into array element types `{...}[]` / nested structs).
+ *
+ * Fires once per field. The disambiguation that keeps a lifecycle field
+ * (`passwordHash: (not to string)` / `status: (Idle to Done)` / `(A -> B)`)
+ * from mis-firing lives in `isFunctionTypeAnnotation` (lifecycle is the only
+ * arrow shape wrapped start-and-end in parens).
+ *
+ * @param typeDecls — same input as `buildTypeRegistry` (struct/enum/error decls)
+ * @param topNodes  — file top-level nodes (for inline-struct state-decl scan)
+ * @param errors    — diagnostic accumulator
+ * @param fileSpan  — fallback span when a decl/node has no span
+ */
+function checkFunctionTypedStructFields(
+  typeDecls: ASTNodeLike[],
+  topNodes: ASTNodeLike[],
+  errors: TSError[],
+  fileSpan: Span,
+): void {
+  // Fire one W-TYPE-FN-FIELD for a function-typed field.
+  function fire(structLabel: string, fieldName: string, typeExpr: string, span: Span): void {
+    const qualified = structLabel ? `${structLabel}.${fieldName}` : fieldName;
+    errors.push(new TSError(
+      "W-TYPE-FN-FIELD",
+      `W-TYPE-FN-FIELD: Struct field '${qualified}' is declared with a function ` +
+      `type ('${typeExpr.trim()}'). The compiler currently resolves a ` +
+      `function-typed struct field as an opaque 'asIs' value — its function ` +
+      `shape is not type-checked, and whether function-typed struct fields are ` +
+      `a first-class supported feature is an open question (deferred). See SPEC §14.3.`,
+      span,
+      "warning",
+    ));
+  }
+
+  // Scan a raw struct body (the inner `{ ... }` field list, braces optional)
+  // for function-typed fields, recursing into array-element / nested-struct
+  // field types. `structLabel` qualifies the diagnostic; `span` is the field's
+  // best-available span (the host decl/node span).
+  function scanStructBodyRaw(raw: string, structLabel: string, span: Span): void {
+    let body = (raw ?? "").trim();
+    if (body.startsWith("{")) body = body.slice(1);
+    if (body.endsWith("}")) body = body.slice(0, -1);
+    body = body.trim();
+    if (!body) return;
+    for (const line of splitTopLevel(body, [",", "\n"])) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const colonIdx = trimmed.indexOf(":");
+      if (colonIdx === -1) continue;
+      const fieldName = trimmed.slice(0, colonIdx).trim();
+      const fieldType = trimmed.slice(colonIdx + 1).trim();
+      if (!fieldName || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(fieldName)) continue;
+      if (isFunctionTypeAnnotation(fieldType)) {
+        fire(structLabel, fieldName, fieldType, span);
+        continue;
+      }
+      // Recurse into a nested inline-struct field type — `f: { g: fn() }` and
+      // the array form `f: { g: fn() }[]` both contain a function field one
+      // level down. Strip a trailing `[]` (array element) before recursing.
+      let nested = fieldType;
+      while (nested.endsWith("[]")) nested = nested.slice(0, -2).trim();
+      if (nested.startsWith("{") && nested.endsWith("}")) {
+        scanStructBodyRaw(nested, structLabel ? `${structLabel}.${fieldName}` : fieldName, span);
+      }
+    }
+  }
+
+  // 1. Named struct declarations.
+  if (Array.isArray(typeDecls)) {
+    for (const decl of typeDecls) {
+      if (!decl || decl.typeKind !== "struct") continue;
+      const span = (decl.span as Span | undefined) ?? fileSpan;
+      scanStructBodyRaw((decl.raw as string) ?? "", (decl.name as string) ?? "", span);
+    }
+  }
+
+  // 2. Inline-struct annotations on state-decls (and other typed cells). Walk
+  // the file nodes; for each node carrying a `typeAnnotation` that is an inline
+  // struct (`{...}` possibly with a trailing `[]`), scan its body. Skip
+  // function-decl bodies (their nested writes are runtime mutations, not
+  // declarations — same carve-out as checkLifecycleOnEngineCells).
+  function walkNodes(ns: ASTNodeLike[]): void {
+    if (!Array.isArray(ns)) return;
+    for (const n of ns) {
+      if (!n || typeof n !== "object") continue;
+      if (n.kind === "function-decl") continue;
+      const ann = (n as ASTNodeLike).typeAnnotation as string | undefined;
+      if (typeof ann === "string") {
+        let inner = ann.trim();
+        while (inner.endsWith("[]")) inner = inner.slice(0, -2).trim();
+        if (inner.startsWith("{") && inner.endsWith("}")) {
+          const span = (n.span as Span | undefined) ?? fileSpan;
+          const label = typeof n.name === "string" ? n.name : "";
+          scanStructBodyRaw(inner, label, span);
+        }
+      }
+      for (const key of [
+        "body", "children", "bodyChildren",
+        "consequent", "alternate", "then", "else",
+        "nodes", "ast",
+      ]) {
+        const val = (n as Record<string, unknown>)[key];
+        if (Array.isArray(val)) walkNodes(val as ASTNodeLike[]);
+      }
+      const arms = (n as Record<string, unknown>).arms;
+      if (Array.isArray(arms)) {
+        for (const arm of arms) {
+          if (!arm || typeof arm !== "object") continue;
+          const armBody = (arm as Record<string, unknown>).body;
+          if (Array.isArray(armBody)) walkNodes(armBody as ASTNodeLike[]);
+        }
+      }
+    }
+  }
+  walkNodes(topNodes);
 }
 
 /**
@@ -14570,6 +14749,18 @@ function processFile(
     ?? ((fileAST.ast as FileAST | undefined)?.typeDecls as ASTNodeLike[] | undefined)
     ?? [];
   const typeRegistry = buildTypeRegistry(typeDecls, errors, fileSpan);
+
+  // §14.3 / W-TYPE-FN-FIELD — surface function-typed struct fields (named
+  // struct decls + inline-struct state-decl annotations) with an info-level
+  // nudge. Runs once, right after registry build, so the diagnostic fires
+  // exactly once per field (not per Pass-2/Pass-3 re-parse). The resolved type
+  // is unchanged (still `asIs`); this is a diagnostic-only addition.
+  {
+    const fnFieldTopNodes = (fileAST.nodes as ASTNodeLike[] | undefined)
+      ?? ((fileAST.ast as FileAST | undefined)?.nodes as ASTNodeLike[] | undefined)
+      ?? [];
+    checkFunctionTypedStructFields(typeDecls, fnFieldTopNodes, errors, fileSpan);
+  }
 
   // TS-B Step 1.2: Seed type registry with imported types from dependency files (§21.3).
   // When file B imports type TaskStatus from file A, TS must recognize TaskStatus

@@ -7453,6 +7453,7 @@ type user:struct = {
 - `(!A && !B)` — conjunction of constraints. The value must satisfy all constraints simultaneously.
 - `A | B` — union. The value is one of the listed types.
 - `[KeyT: ValT]` — value-native **map** type (with an optional `@ordered` postfix affix). The bracketed `key-type : value-type` form registers as a concrete type (not a generic — scrml has no type parameters). The full key/value/iteration/equality/serialization rules live in §59 (Value-Native Maps); the key type SHALL itself be comparable (§59.4).
+- A field whose type is a **function type** (`onClick: () -> void`, `cb: fn()`, `handler: (x: int) => string`) is currently resolved as an opaque `asIs` value — the type system carries no resolved function-kind for struct fields, so the function shape is not type-checked. Such a field surfaces the info-level lint `W-TYPE-FN-FIELD` (§34, partitions to `result.warnings`). Whether function-typed struct fields are a first-class supported feature is an OPEN question (deferred); the lint surfaces the construct without deciding it. NOTE the disambiguation from a lifecycle annotation: `(A to B)` / `(A -> B)` is the arrow WRAPPED in outer parens and is NOT a function type; only the param-paren-then-arrow shape `(...) -> RetType` (which does not end in `)`) is a function type.
 
 #### 14.3.1 Optional Struct Fields
 
@@ -13961,6 +13962,19 @@ export const Card = <div class="card-body" class="component" props={ title: stri
 - Form 2: The `export` keyword inside a `${ }` logic context SHALL be valid
   before `type`, `function`, `fn`, `const` (including component-as-const),
   and `let` declarations.
+- A **reactive state cell SHALL NOT be exported** — neither a plain Shape-1
+  cell (`<count> = 0`) nor a derived cell (`const <total> = @a + @b`). A
+  reactive cell is not in the exportable set (`type` / `function` / `fn` /
+  `const` / `let`); it holds per-instance runtime state, so an `export`
+  referencing it (`export { count }` in a `${ }` block, or the `@`-form
+  `export @count`) has no cross-file meaning. Such an export is `E-EXPORT-001`
+  (§21.6). To share a value across files, export a `function` that returns it
+  (or a `const` of its current value); to share reactive behaviour, wrap the
+  cell in a component and export that (the wrapping-component idiom, DD4 §8.2).
+  NOTE this is keyed on the cell's `state-decl` BINDING, not on name-case —
+  `export const Greeting = <markup>` (component-as-const), `export <channel>`,
+  and exported engines (§21.8) all remain valid because they are not reactive
+  cells.
 - A Form 2 `export type X:kind = {...}` declaration SHALL produce both a
   `type-decl` AST node (with parsed `name`, `typeKind`, and body) AND an
   `export-decl` AST node (with `exportKind="type"` and `exportedName=X`).
@@ -14174,6 +14188,7 @@ without `export`).
 | E-IMPORT-007 | Auto-gather closure exceeded sane-limit (5000 files) — W2 §21.7 | Error |
 | E-IMPORT-008 | (S114 — §21.3.1.) `import:host` used in a file outside the manifest's `[capabilities] host-import` allow-list. Default for adopter projects is `"disabled"`; the bootstrap stdlib sets `"self-host-only"` permitting `scrml/stdlib/compiler/**`. | Error |
 | E-IMPORT-009 | (S114 — §21.3.1.) `import:host` uses a host-tag other than `host`. v1 recognizes only `host`; future-reserved tags (`wasm` / `wat` / `c` / `zig` / etc.) require SPEC amendment. | Error |
+| E-EXPORT-001 | A reactive state cell (plain Shape-1 `<count> = 0` OR derived `const <total> = @a + @b`) is exported (`export { count }` or `export @count`, §21.2). Reactive cells are not in the exportable set (`type` / `function` / `fn` / `const` / `let`). Keyed on the `state-decl` binding (not name-case), so component-as-const / channel / engine exports remain valid | Error |
 | E-EXPORT-002 | Form 1 (§21.2) component body is empty, contains only text, or has more than one top-level markup root — body MUST be single-rooted markup | Error |
 | E-EXPORT-003 | Form 1 (§21.2) outer attribute name collides with the body-root's attribute name (other than `class`, which merges per §15.5) | Error |
 
@@ -16324,6 +16339,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | W-MAP-ITERATION-ORDER | §59.8 | (Phase-c, info) A non-`@ordered` map is iterated without `.sorted()` in a position where order may matter; names `.sorted()` / `@ordered`. Partitions into `result.warnings` (non-fatal) per the info-level diagnostic-stream convention. (S168 — Value-Native Maps, §59.8) | Info |
 | W-MAP-STRUCT-KEY-LITERAL | §59.3 | A struct/enum-key map literal (`[ {a:1}: {b:2} ]`) appears in v1 — the grammar admits it but v1 codegen requires the `.insert` form for struct/enum keys. Parse-accepted, codegen-deferred; names the `.insert` form. (S168 — Value-Native Maps, §59.3/§59.12) | Info |
 | W-MAP-DUPLICATE-LITERAL-KEY | §59.3 | A map literal has two bracket-depth-1 entries whose keys are §45-equal (`[ "DAL": 3, "DAL": 5 ]`); the later entry wins (last-wins, matching `.insert` overwrite). Surfaces the overwrite. (S168 — Value-Native Maps, §59.3) | Info |
+| W-TYPE-FN-FIELD | §14.3 | A struct field (named `type T :struct = {...}` decl OR inline-struct annotation `<x>: { f: fn() }`) is declared with a FUNCTION type (`() -> void`, `fn()`, `(x: int) => string`). The type system carries no resolved function-kind for struct fields, so such a field resolves to an opaque `asIs` value and its function shape is not type-checked. Whether function-typed struct fields are a first-class supported feature is an open question (deferred); the lint surfaces the construct without deciding it. The lint does NOT fire on a lifecycle annotation `(A to B)` / `(A -> B)` (the arrow wrapped in outer parens is a lifecycle, not a function type). Partitions into `result.warnings` (non-fatal). (S173 — ratified S171 (item) + S173 (severity/code/scope).) | Info/Warning |
 | E-SQL-004 | §8.1.1 | `?{}` block has no `db=` declaration in any ancestor `<program>` | Error |
 | E-SQL-005 | §8.1.1 | Unrecognized database connection string prefix in `db=` attribute | Error |
 | E-WASM-001 | §23.3 | Call char not in default registry and no `callchar=` declaration | Error |
@@ -16389,6 +16405,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-IMPORT-002 | §21.3 | Circular import detected | Error |
 | E-IMPORT-003 | §21.3 | `import` inside a function body (not file top-level) | Error |
 | E-IMPORT-004 | §21.3 | Imported name not found in target file's exports | Error |
+| E-EXPORT-001 | §21.2 | A reactive state cell (plain Shape-1 OR derived) is exported (`export { count }` / `export @count`). A reactive cell is not in the Form-2 exportable set (type / function / fn / const / let); it holds per-instance runtime state and has no cross-file export meaning. Keyed on the `state-decl` binding (not name-case) so component-as-const, `<channel>`, and engine (§21.8) exports stay valid. Fix-it: export a function returning the value, or wrap the cell in a component and export that. (S173 — ratified S171 (item) + S173 (severity/code/scope).) | Error |
 | E-EXPORT-002 | §21.2 | Form 1 component body is empty / text-only / multi-rooted (must be single-rooted markup) | Error |
 | E-EXPORT-003 | §21.2 | Form 1 outer attribute conflicts with body-root attribute name | Error |
 | E-COMPONENT-001 | §15.7 | Caller targets or overrides a `fixed` element | Error |
