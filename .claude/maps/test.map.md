@@ -1,6 +1,6 @@
 # test.map.md
 # project: scrmlts
-# updated: 2026-06-07T07:00:00Z  commit: cc69c62d
+# updated: 2026-06-09T10:30:00Z  commit: 049954e0
 
 ## Test Framework
 Runner: bun test (built-in Bun test runner)
@@ -8,21 +8,37 @@ Config: bunfig.toml (timeout + happy-dom preload settings)
 Run all: `bun test compiler/tests/`
 Run single: `bun test compiler/tests/unit/<filename>.test.js`
 Coverage: `bun test compiler/tests/ --coverage`
-Full suite at S167 close: 23,075 pass / 0 fail / 220 skip / 1 todo (on 75431e9e). S168 added 2 NEW test files (cow-bracket-write-emit 7 + browser-cow-bracket-write 3) + extended equality-semantics (+6 cycle-guard) + parse-mutation-shapes (+1 COW node-shape) — not re-counted into a fresh suite total here (no full re-run); within-node native-parser parity 1005/0 (UNCHANGED — S168 bracket-write COW is a LIVE-pipeline change; native still folds bracket-write to in-place, but no new flip-failure was registered) — S169 added 13 NEW value-native-map / each-tuple / union-not test files (see S169 section below); not re-counted into a fresh suite total here. **S170: Bug B (`72aa6836`) +9 tests (5 emit-shape + 4 happy-dom) with 2 mistarget-locking tests corrected per Rule-4; set-algebra (`df08f282`) +16 value-correct unit; native-parser fix-wave-1 (`5a346faa`) +24 regression with the within-node allowlist surgically reconciled (34 over-budget → current; PARSE-FAILURE:0 / NESTED-SHAPE:0); fix-wave-2 (`cc69c62d`) +5 statement-survival canary, full suite at fix-wave-2 23405 pass / 0 fail.** native-parser flip-failures re-measured 605 on `df08f282` → ~508 after the two waves (default BS+Acorn 0-fail / fully green throughout)
+Full suite at S167 close: 23,075 pass / 0 fail / 220 skip / 1 todo (on 75431e9e). S168 added 2 NEW test files (cow-bracket-write-emit 7 + browser-cow-bracket-write 3) + extended equality-semantics (+6 cycle-guard) + parse-mutation-shapes (+1 COW node-shape) — not re-counted into a fresh suite total here (no full re-run); within-node native-parser parity 1005/0 (UNCHANGED — S168 bracket-write COW is a LIVE-pipeline change; native still folds bracket-write to in-place, but no new flip-failure was registered) — S169 added 13 NEW value-native-map / each-tuple / union-not test files (see S169 section below); not re-counted into a fresh suite total here. **S170: Bug B (`72aa6836`) +9 tests (5 emit-shape + 4 happy-dom) with 2 mistarget-locking tests corrected per Rule-4; set-algebra (`df08f282`) +16 value-correct unit; native-parser fix-wave-1 (`5a346faa`) +24 regression with the within-node allowlist surgically reconciled (34 over-budget → current; PARSE-FAILURE:0 / NESTED-SHAPE:0); fix-wave-2 (`cc69c62d`) +5 statement-survival canary, full suite at fix-wave-2 23405 pass / 0 fail.** native-parser flip-failures re-measured 605 on `df08f282` → ~508 after the two waves (default BS+Acorn 0-fail / fully green throughout). **S173 added +2 (E-EXPORT-001 export-reject + W-TYPE-FN-FIELD); S174 added log()-builtin / any-reject coverage; S175 added +5 typed-SQL-row files (sql-projection-extract 13 cases, sql-row-typing 4, sql-row-tranche2-width-subtype 18, sql-row-tranche3-typeflow 17, struct-fn-field-reject 11 — see the S175 section below).** Current find-count (on `049954e0`): 934 total .test.js / 588 unit / 37 browser / 106 integration.
 
 ## Test Categories
 
 | Category | Location | Count |
 |----------|----------|-------|
-| Unit | compiler/tests/unit/ | 639 files (find-count at cc69c62d; +9 S169 value-native-map arc; +S170: structural-compound-deepset, data-set-algebra, native-on-lifecycle-block, native-const-at-derived-decl, native-reactive-write-deepset-mutation, native-destructured-param-structuring, native-vardecl-type-annotation-thread, native-exprtext-backfill, native-blockstub-verbatim-body) |
+| Unit | compiler/tests/unit/ | 588 files (find-count at 049954e0; +S169 value-native-map arc; +S170 native-parser regression set; +S173 export-reject/fn-field; +S174 log()/any-reject; **+S175: sql-projection-extract, sql-row-typing, sql-row-tranche2-width-subtype, sql-row-tranche3-typeflow, struct-fn-field-reject**) |
 | Browser (DOM) | compiler/tests/browser/ | 37 files (+1 S169 each-as-tuple-destructure-d2c.browser; +1 S170 browser-structural-compound-deepset) |
 | Conformance | compiler/tests/conformance/ | ~40 files |
-| Integration | compiler/tests/integration/ | 105 files (+1 S169: value-native-map-e2e-d4) |
+| Integration | compiler/tests/integration/ | 106 files (+1 S169: value-native-map-e2e-d4) |
 | Parser conformance | compiler/tests/parser-conformance*.test.js | 10 files |
 | LSP | compiler/tests/lsp/ | ~8 files |
 | Self-host | compiler/tests/self-host/ | ~5 files |
 | CLI commands | compiler/tests/commands/ | ~5 files |
-| **Total** | compiler/tests/ | **923 .test.js files (find-count at cc69c62d; +~10 S170 across Bug-B / set-algebra / native-parser regression / BlockStub)** |
+| **Total** | compiler/tests/ | **934 .test.js files (find-count at 049954e0; +S170 Bug-B/set-algebra/native-parser regression, +S173, +S174, +5 S175 typed-SQL-row)** |
+
+## S175 New Test Files (typed-SQL-row arc — the flagship typed-data delivery + function-boundary rule)
+
+| File | What it covers |
+|------|----------------|
+| compiler/tests/unit/sql-projection-extract.test.js | **NEW (13 cases).** `extractSelectProjection(query)` (sql-projection.ts) — explicit column lists, `t.col` qualified sources, `AS` aliases, the FROM-JOIN alias map, and GRACEFUL DEGRADATION on the deferred long tail (`*` wildcard / CTE / UNION / subquery-in-FROM return an under-determined projection). Pure extractor unit test (no type pass). |
+| compiler/tests/unit/sql-row-typing.test.js | **NEW (4 cases, §14.8.7).** Tranche-1 read-site row typing: `resolveSqlRowType` joins the SELECT projection against the generated table types so a `?{ SELECT ... }` host node resolves to a typed projection-row struct; the untyped long tail degrades to `asIs` + `W-SQL-ROW-UNTYPED`. |
+| compiler/tests/unit/sql-row-tranche2-width-subtype.test.js | **NEW (18 cases, §14.8.8).** The bounded width-subtyping helper (`checkSqlRowWidthSubtype`): every contract field present + assignable, EXTRA row columns allowed, one-directional, general struct-to-struct stays nominal. **T2a** — typed loop-var row access end-to-end (`r.<unknown>` → E-TYPE-004). **T2b** — call-site prop-contract check (`checkPropContract` → `E-SQL-ROW-CONTRACT-MISMATCH` per unsatisfied field, fed by the `__propContractChecks` descriptor). |
+| compiler/tests/unit/sql-row-tranche3-typeflow.test.js | **NEW (17 cases, §14.8.8).** End-to-end type-flow: **T3b** — `unwrapStructContractElement` + `checkSqlRowAgainstCellContract` (width-check INTO a `:struct`-typed state cell at the cell boundary). **T3c** — `resolveSqlRowSourceFromExpr` / `inferReturnTypeFromBody` (a server-fn body returning a projection row over-approximates via the `<fn-return>` sentinel; those inferred types are EXEMPT from the reject). |
+| compiler/tests/unit/struct-fn-field-reject.test.js | **NEW (11 cases, §14.3/§15.11).** `E-STRUCT-FUNCTION-FIELD` — POSITIVE (a named struct decl with a function-typed field is rejected), NEGATIVE (lifecycle annotations `(A to B)` + plain fields do NOT reject — the conservative `isFunctionTypeAnnotation` predicate), and NATIVE-PARSER parity (the reject fires under `--parser=scrml-native` too). The escalation of the retired S173 W-TYPE-FN-FIELD Info-nudge to a hard Error. |
+
+NOTE (S175): all five are type-pass / extractor unit tests (no happy-dom needed — the typed-SQL-row arc is a
+type-checking feature, not a runtime/codegen one). The diagnostics are decl-site/read-site scans wired in
+type-system.ts (~15917 `checkFunctionTypedStructFields` / row-typing read sites). Cross-stream assertion
+applies for `W-SQL-ROW-UNTYPED` (Info → result.warnings — a `result.errors.filter` on a W- code silently
+passes; see the diagnostic-stream-partition note). No new AST node shapes; default pipeline output UNCHANGED.
 
 ## S153 New Test Files (each-in-dynamic-context sweep)
 
@@ -218,7 +234,7 @@ S160 ruling (c) tests cover the full Shape 4 dispatch matrix including the refin
 SATISFIES/VIOLATES/UNDETERMINABLE trichotomy and the `synthesizedFromNoRhs` lifecycle note path.
 
 ## Tags
-#scrmlts #map #test #bun #conformance #parser-parity #happy-dom #each-in-dynamic-context #per-item-reactivity #live-keyed #bug64 #bug65 #bug72 #bug73 #colon-shorthand-html #colon-shorthand-canonical #shape4-no-rhs #s153 #s154 #s155 #s156 #s157 #s158 #s159 #s160 #native-parser #native-parser-swap #each-promotion #match-promotion #f3-match-arm #f2-match #promote-each #typed-atcell #server-fn-star #exprnode-walker #within-node-1005 #flip-605 #flip-508 #bare-function-failable #cross-file-export-bodystart #deepset-write-loss #reactive-nested-assign #reactive-array-mutation #s161 #s162 #s163 #s164 #s165 #s166 #s167 #s168 #s169 #value-native-maps #map-type #each-tuple-destructure #union-not-normalization #s170 #set-algebra #scrml-data #bug-b-structural-compound-deepset #structural-compound-deepset #data-set-algebra #native-on-lifecycle-block #const-at-derived-decl #blockstub-verbatim-body #mario-match-arm-fix
+#scrmlts #map #test #bun #conformance #parser-parity #happy-dom #each-in-dynamic-context #per-item-reactivity #live-keyed #bug64 #bug65 #bug72 #bug73 #colon-shorthand-html #colon-shorthand-canonical #shape4-no-rhs #s153 #s154 #s155 #s156 #s157 #s158 #s159 #s160 #native-parser #native-parser-swap #each-promotion #match-promotion #f3-match-arm #f2-match #promote-each #typed-atcell #server-fn-star #exprnode-walker #within-node-1005 #flip-605 #flip-508 #bare-function-failable #cross-file-export-bodystart #deepset-write-loss #reactive-nested-assign #reactive-array-mutation #s161 #s162 #s163 #s164 #s165 #s166 #s167 #s168 #s169 #value-native-maps #map-type #each-tuple-destructure #union-not-normalization #s170 #set-algebra #scrml-data #bug-b-structural-compound-deepset #structural-compound-deepset #data-set-algebra #native-on-lifecycle-block #const-at-derived-decl #blockstub-verbatim-body #mario-match-arm-fix #s173 #s174 #s175 #typed-sql-row #sql-projection #width-subtyping #e-sql-row-contract-mismatch #w-sql-row-untyped #e-struct-function-field #function-boundary #fn-return-inference #flagship-typed-data
 
 ## Links
 - [primary.map.md](./primary.map.md)
