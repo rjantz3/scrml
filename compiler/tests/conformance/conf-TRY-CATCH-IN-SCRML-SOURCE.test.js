@@ -163,8 +163,9 @@ describe("CONF-TRY-CATCH-IN-SCRML-SOURCE: stdlib/http regression-fire verificati
       w => w.code === "W-TRY-CATCH-IN-SCRML-SOURCE",
     );
 
-    // Hand-off-89 inventory: lines 65 + 264 are the two remaining try/catch
-    // sites pending Phase 3c migration. Exactly two fires expected.
+    // Hand-off-89 inventory: the two remaining try/catch sites pending Phase 3c
+    // migration. (Line numbers shifted +4 by the scrml:random de-leak import added
+    // at the top of the ${} block — DD1 Fork 1 follow-on.) Exactly two fires expected.
     expect(hits.length).toBe(2);
 
     // Sites carry span info; collect line numbers and assert they match the
@@ -174,7 +175,7 @@ describe("CONF-TRY-CATCH-IN-SCRML-SOURCE: stdlib/http regression-fire verificati
       .filter(n => typeof n === "number")
       .sort((a, b) => a - b);
 
-    expect(lines).toContain(65);
-    expect(lines).toContain(264);
+    expect(lines).toContain(69);
+    expect(lines).toContain(268);
   });
 });

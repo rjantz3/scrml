@@ -450,10 +450,10 @@
   "examples/23-trucking-dispatch/pages/dispatch/billing.scrml": {
     "COUNT-LENGTH": 4,
     "EXTRA-FIELD": 44,
-    "FIELD-SHAPE": 90,
+    "FIELD-SHAPE": 92,
     "KIND-NAME": 11,
-    "MISSING-FIELD": 148,
-    "SPAN-COORD": 377
+    "MISSING-FIELD": 149,
+    "SPAN-COORD": 379
   },
   "examples/23-trucking-dispatch/pages/dispatch/board.scrml": {
     "COUNT-LENGTH": 4,
@@ -482,10 +482,10 @@
   "examples/23-trucking-dispatch/pages/dispatch/load-detail.scrml": {
     "COUNT-LENGTH": 3,
     "EXTRA-FIELD": 74,
-    "FIELD-SHAPE": 192,
+    "FIELD-SHAPE": 194,
     "KIND-NAME": 25,
-    "MISSING-FIELD": 335,
-    "SPAN-COORD": 928
+    "MISSING-FIELD": 336,
+    "SPAN-COORD": 930
   },
   "examples/23-trucking-dispatch/pages/dispatch/load-new.scrml": {
     "COUNT-LENGTH": 2,
@@ -517,7 +517,7 @@
     "FIELD-SHAPE": 218,
     "KIND-NAME": 62,
     "MISSING-FIELD": 572,
-    "SPAN-COORD": 723
+    "SPAN-COORD": 725
   },
   "examples/23-trucking-dispatch/pages/driver/load-log.scrml": {
     "COUNT-LENGTH": 3,
@@ -5122,10 +5122,11 @@
     "SPAN-COORD": 4
   },
   "samples/compilation-tests/meta-003-function.scrml": {
+    "COUNT-LENGTH": 1,
     "EXTRA-FIELD": 3,
-    "FIELD-SHAPE": 1,
-    "MISSING-FIELD": 6,
-    "SPAN-COORD": 7
+    "FIELD-SHAPE": 3,
+    "MISSING-FIELD": 7,
+    "SPAN-COORD": 8
   },
   "samples/compilation-tests/meta-003-runtime-var-error.scrml": {
     "EXTRA-FIELD": 2,
@@ -5942,7 +5943,7 @@
     "FIELD-SHAPE": 1
   },
   "samples/gauntlet-r11/rust-state-machine.scrml": {
-    "COUNT-LENGTH": 1,
+    "COUNT-LENGTH": 2,
     "EXTRA-FIELD": 58,
     "FIELD-SHAPE": 52,
     "KIND-NAME": 20,
@@ -6617,12 +6618,12 @@
     "SPAN-COORD": 10
   },
   "stdlib/http/index.scrml": {
-    "COUNT-LENGTH": 3,
+    "COUNT-LENGTH": 4,
     "EXTRA-FIELD": 122,
-    "FIELD-SHAPE": 92,
+    "FIELD-SHAPE": 94,
     "KIND-NAME": 31,
-    "MISSING-FIELD": 350,
-    "SPAN-COORD": 239
+    "MISSING-FIELD": 351,
+    "SPAN-COORD": 241
   },
   "stdlib/mcp/index.scrml": {
     "COUNT-LENGTH": 2,
@@ -6695,6 +6696,14 @@
     "KIND-NAME": 5,
     "MISSING-FIELD": 98,
     "SPAN-COORD": 15
+  },
+  "stdlib/random/index.scrml": {
+    "COUNT-LENGTH": 2,
+    "EXTRA-FIELD": 18,
+    "FIELD-SHAPE": 8,
+    "KIND-NAME": 3,
+    "MISSING-FIELD": 42,
+    "SPAN-COORD": 6
   },
   "stdlib/redis/index.scrml": {
     "COUNT-LENGTH": 3,

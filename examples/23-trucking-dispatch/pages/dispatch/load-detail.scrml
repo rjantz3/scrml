@@ -29,6 +29,7 @@
       import { AssignmentPicker } from '../../components/assignment-picker.scrml'
       import { formatRate, formatPickupAt } from '../../components/load-card.scrml'
       import { createSessionStore } from 'scrml:store'
+      import { randomInt } from 'scrml:random'
       import { SESSION_DB_PATH } from '../../models/auth.scrml'
       // M5: centralized real-time channels — see SPEC §38.12.6.
       import { "dispatch-board" as dispatchBoard } from '../../channels/dispatch-board.scrml'
@@ -150,7 +151,7 @@
             // acceptance token for the load.
             let mintedToken = ""
             if (load.status == "tendered" && newStatus == "booked") {
-                mintedToken = `acc_${loadId}_${Date.now()}_${Math.floor(Math.random() * 100000)}`
+                mintedToken = `acc_${loadId}_${Date.now()}_${randomInt(0, 100000)}`
                 ?{`
                     INSERT INTO lin_tokens (token, load_id, kind)
                     VALUES (${mintedToken}, ${loadId}, 'acceptance')

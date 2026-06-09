@@ -27,6 +27,10 @@
 //   - multipart(fields)            → FormData
 //   - uploadFile(url, file, opts?)
 
+// De-leak the retry-jitter through the sanctioned non-deterministic source
+// (scrml:random) — the one place http reads host entropy (§41.20).
+import { random } from "./random.js";
+
 async function _request(url, options) {
   const opts = options || {};
   const timeout = opts.timeout !== null && opts.timeout !== undefined ? opts.timeout : 10000;
@@ -187,7 +191,7 @@ export async function retry(fn, opts) {
       if (attempt === maxRetries) break;
       if (!shouldRetry(err)) break;
       const base = baseDelay * Math.pow(factor, attempt);
-      const jitterAmt = base * jitter * (Math.random() * 2 - 1);
+      const jitterAmt = base * jitter * (random() * 2 - 1);
       const delay = Math.max(0, base + jitterAmt);
       await new Promise((r) => setTimeout(r, delay));
     }

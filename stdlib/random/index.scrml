@@ -1,0 +1,88 @@
+<program>
+${
+    // ---------------------------------------------------------------------------
+    // scrml:random — capability-scoped non-deterministic random source
+    //
+    // Every member is NON-DETERMINISTIC (class-C IO) — the SAME capability class
+    // as the wall clock `scrml:time.now()` (§41.19). A random source reads host
+    // entropy, so it is NOT pure: per §48.3.4 these members MUST NOT be called
+    // from a pure `fn` / `pure` body (E-FN-004). Call them from a `function` or
+    // `server function` and pass the result into pure code as a parameter.
+    //
+    // This module is the sanctioned, centralized touch of the host
+    // `Math.random()` surface — the one place randomness is read — so it also
+    // closes the stdlib-ouroboros (scrml's own stdlib routes its jitter through
+    // here instead of reaching `Math.random()` directly).
+    //
+    // Usage:
+    //   ${ import { random, randomInt } from 'scrml:random' }
+    // ---------------------------------------------------------------------------
+
+    /**
+     * A pseudo-random float in the half-open interval [0, 1) — `0` inclusive,
+     * `1` exclusive. The primitive (an exact mirror of the host RNG).
+     *
+     * CAPABILITY-SCOPED (DD1 Fork 1 follow-on): NON-DETERMINISTIC. Per §48.3.4
+     * it MUST NOT be called from a pure `fn` / `pure` body (E-FN-004); call it
+     * from a `function` / `server function` and pass the value into pure code.
+     *
+     * Example:
+     *   function rollChance() { return random() < 0.5 }       // OK in function
+     *   server function pickJitter() { return random() * 50 } // OK in server fn
+     *   // fn noisy(x) { return x + random() }                // E-FN-004 — non-det in fn
+     */
+    export function random() {
+        return Math.random()
+    }
+
+    /**
+     * A pseudo-random integer uniformly in [min, max] — INCLUSIVE of BOTH
+     * bounds (the closed interval). `randomInt(0, 100000)` can return `0` and
+     * can return `100000`; `randomInt(1, 6)` is a fair die.
+     *
+     * Inclusivity convention: BOTH endpoints are reachable. This is the dominant
+     * corpus idiom (it replaces `Math.floor(Math.random() * N)`-style token
+     * minting). Fractional bounds are floored/ceiled into the closed interval;
+     * if `min > max` the bounds are swapped so the call never returns `not`.
+     *
+     * CAPABILITY-SCOPED: NON-DETERMINISTIC (same E-FN-004 rule as `random()`).
+     *
+     * Example:
+     *   function mintToken(id) { return `tok_${id}_${randomInt(0, 100000)}` }
+     *   function rollDie() { return randomInt(1, 6) }
+     */
+    export function randomInt(min, max) {
+        let lo = Math.ceil(min)
+        let hi = Math.floor(max)
+        if (lo > hi) {
+            const t = lo
+            lo = hi
+            hi = t
+        }
+        return lo + Math.floor(Math.random() * (hi - lo + 1))
+    }
+
+    ~{
+        import { assertTruthy, assertInRange } from 'scrml:test'
+
+        // random() — a float in [0, 1): 0 inclusive, 1 exclusive.
+        const r = random()
+        assertTruthy(typeof r == "number")
+        assertTruthy(r >= 0 && r < 1)
+
+        // randomInt — INCLUSIVE of both bounds; many draws stay in range.
+        for (let i = 0; i < 200; i++) {
+            const n = randomInt(1, 6)
+            assertTruthy(n >= 1 && n <= 6)
+            assertTruthy(n == Math.floor(n))  // integer
+        }
+
+        // A single-value closed interval always returns that value.
+        assertTruthy(randomInt(7, 7) == 7)
+
+        // Swapped bounds never produce `not` — they are normalized.
+        const swapped = randomInt(6, 1)
+        assertTruthy(swapped >= 1 && swapped <= 6)
+    }
+}
+</program>

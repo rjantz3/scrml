@@ -6565,46 +6565,70 @@ function annotateNodes(
   collectParseVariantImports(_allTopNodes);
 
   // ---------------------------------------------------------------------------
-  // DD1 Fork 1 (1C) — capability-scoped wall clock `scrml:time.now()`.
+  // DD1 Fork 1 — capability-scoped NON-DETERMINISTIC stdlib primitives.
   //
-  // `now()` reads the host clock — it is NON-DETERMINISTIC (§48.3.4) and so
-  // MUST NOT be called from a pure `fn` / `pure` body (E-FN-004). The existing
-  // E-FN-004 check is identifier-keyed on HOST member-expressions (`Date.now`,
-  // `Math.random`, ...). An adopter writes `import { now } from 'scrml:time'`
-  // then a BARE `now()` — which no host-member string matches. We must fire on
-  // the IMPORTED binding WITHOUT false-positiving on a user's own
-  // `function now() {}`. So we resolve the import binding (mirroring the
-  // `parseVariant`-from-`scrml:data` precedent above): collect the local names
-  // bound to `now` from imports of `scrml:time`, then thread the set into the
-  // fn-purity walker so E-FN-004 fires only on those bindings. A user-declared
-  // `now` (not imported from `scrml:time`) is never in this set.
+  // Some stdlib members read host state that is non-deterministic (§48.3.4):
+  //   - `scrml:time.now()`          — the wall clock (S176, DD1 Fork 1 / 1C)
+  //   - `scrml:random.random()` / `.randomInt()` — host entropy (the follow-on)
+  // They are NON-DETERMINISTIC and so MUST NOT be called from a pure `fn` /
+  // `pure` body (E-FN-004). The existing E-FN-004 check is identifier-keyed on
+  // HOST member-expressions (`Date.now`, `Math.random`, ...). An adopter writes
+  // `import { now } from 'scrml:time'` (or `{ random } from 'scrml:random'`)
+  // then a BARE `now()` / `random()` — which no host-member string matches. We
+  // must fire on the IMPORTED binding WITHOUT false-positiving on a user's own
+  // `function now() {}` / `function random() {}`. So we resolve the import
+  // binding (mirroring the `parseVariant`-from-`scrml:data` precedent above):
+  // collect the local names bound to each registered non-det member, then thread
+  // the set (+ a per-name origin label for the diagnostic) into the fn-purity
+  // walker so E-FN-004 fires only on those bindings. A user-declared name not
+  // imported from the registered module is never in this set.
+  //
+  // Registry-driven so the next non-det primitive extends trivially: add a
+  // `"scrml:module": ["member", ...]` row.
   // ---------------------------------------------------------------------------
-  const nowFromScrmlTime = new Set<string>();
-  function collectNowFromScrmlTime(nodesArg: ASTNodeLike[]): void {
+  const NONDET_STDLIB: Record<string, string[]> = {
+    "scrml:time": ["now"],
+    "scrml:random": ["random", "randomInt"],
+  };
+  // local-name → set of bound non-det members (a single local could in theory
+  // shadow across modules, but the common case is one binding per name).
+  const nonDetStdlibBindings = new Set<string>();
+  // local-name → "scrml:module.member" origin, for the E-FN-004 message.
+  const nonDetStdlibOrigin = new Map<string, string>();
+  function collectNonDetStdlibBindings(nodesArg: ASTNodeLike[]): void {
     for (const n of nodesArg) {
       if (!n || typeof n !== "object") continue;
-      if (n.kind === "import-decl" && (n as ASTNodeLike).source === "scrml:time") {
-        const specifiers = (n as ASTNodeLike).specifiers as Array<{ imported?: string; local?: string }> | undefined;
-        if (Array.isArray(specifiers)) {
-          for (const spec of specifiers) {
-            if (spec && spec.imported === "now" && typeof spec.local === "string") {
-              nowFromScrmlTime.add(spec.local);
+      if (n.kind === "import-decl" && typeof (n as ASTNodeLike).source === "string") {
+        const source = (n as ASTNodeLike).source as string;
+        const members = NONDET_STDLIB[source];
+        if (members) {
+          const memberSet = new Set(members);
+          const specifiers = (n as ASTNodeLike).specifiers as Array<{ imported?: string; local?: string }> | undefined;
+          if (Array.isArray(specifiers)) {
+            for (const spec of specifiers) {
+              if (spec && typeof spec.imported === "string" && memberSet.has(spec.imported) && typeof spec.local === "string") {
+                nonDetStdlibBindings.add(spec.local);
+                nonDetStdlibOrigin.set(spec.local, `${source}.${spec.imported}`);
+              }
             }
-          }
-        } else if (Array.isArray(n.names)) {
-          // Defensive fallback when specifiers wasn't populated.
-          for (const name of n.names as unknown[]) {
-            if (typeof name === "string" && name === "now") nowFromScrmlTime.add("now");
+          } else if (Array.isArray(n.names)) {
+            // Defensive fallback when specifiers wasn't populated.
+            for (const name of n.names as unknown[]) {
+              if (typeof name === "string" && memberSet.has(name)) {
+                nonDetStdlibBindings.add(name);
+                nonDetStdlibOrigin.set(name, `${source}.${name}`);
+              }
+            }
           }
         }
       }
       const body = n.body as ASTNodeLike[] | undefined;
-      if (Array.isArray(body)) collectNowFromScrmlTime(body);
+      if (Array.isArray(body)) collectNonDetStdlibBindings(body);
       const children = n.children as ASTNodeLike[] | undefined;
-      if (Array.isArray(children)) collectNowFromScrmlTime(children);
+      if (Array.isArray(children)) collectNonDetStdlibBindings(children);
     }
   }
-  collectNowFromScrmlTime(_allTopNodes);
+  collectNonDetStdlibBindings(_allTopNodes);
 
   // Step 2: wire fnErrorTypes / fnCanFail so `!{}` exhaustiveness fires.
   for (const localName of parseVariantLocals) {
@@ -7306,7 +7330,7 @@ function annotateNodes(
         // same walker that fn bodies use so the same E-FN-001..E-FN-005
         // codes surface uniformly — users already understand these codes.
         if (Array.isArray(txBody)) {
-          checkFnBodyProhibitions(n, txBody, errors, filePath, stateTypeRegistry, nonPureFnNames, scopeChain, nowFromScrmlTime);
+          checkFnBodyProhibitions(n, txBody, errors, filePath, stateTypeRegistry, nonPureFnNames, scopeChain, nonDetStdlibBindings, nonDetStdlibOrigin);
         }
 
         scopeChain.pop();
@@ -7545,7 +7569,7 @@ function annotateNodes(
         // §48 fn body prohibition checks (E-FN-001 through E-FN-008)
         // E-STATE-COMPLETE (§54.6.1) is emitted from within for fn bodies.
         if (n.fnKind === "fn" && Array.isArray(fnBody)) {
-          checkFnBodyProhibitions(n, fnBody, errors, filePath, stateTypeRegistry, nonPureFnNames, scopeChain, nowFromScrmlTime);
+          checkFnBodyProhibitions(n, fnBody, errors, filePath, stateTypeRegistry, nonPureFnNames, scopeChain, nonDetStdlibBindings, nonDetStdlibOrigin);
         }
 
         // §54.6.1 E-STATE-COMPLETE universal widening (S32 Phase 1b).
@@ -16981,11 +17005,14 @@ function checkFnBodyProhibitions(
   stateTypeRegistry?: Map<string, ResolvedType>,
   nonPureFnNames?: Set<string>,
   scopeChain?: ScopeChain,
-  // DD1 Fork 1 (1C): local names bound to `now` from `import ... 'scrml:time'`.
-  // A bare `now()` call to one of these inside a pure `fn` body is E-FN-004
-  // (non-deterministic wall-clock read). Binding-aware — a user's own
-  // `function now() {}` is NOT in this set and never fires.
-  nowFromScrmlTime?: Set<string>,
+  // DD1 Fork 1: local names bound to a NON-DETERMINISTIC stdlib member (the
+  // wall clock `scrml:time.now`, or `scrml:random.random`/`.randomInt`). A bare
+  // call to one of these inside a pure `fn` body is E-FN-004 (non-deterministic).
+  // Binding-aware — a user's own `function now() {}` / `function random() {}` is
+  // NOT in this set and never fires.
+  nonDetStdlibBindings?: Set<string>,
+  // local-name -> "scrml:module.member" origin label, for the E-FN-004 message.
+  nonDetStdlibOrigin?: Map<string, string>,
 ): void {
   const fnName = (fnNode.name as string) ?? "<anonymous>";
   const fnSpan = (fnNode.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as Span;
@@ -17460,29 +17487,32 @@ function checkFnBodyProhibitions(
           }
         }
 
-        // E-FN-004 (DD1 Fork 1, 1C): the imported `scrml:time.now()` wall clock.
-        // Binding-aware — fires only on a BARE call to a local name bound to
-        // `now` from `import ... 'scrml:time'`, so a user's own `function now()`
-        // never trips it, and member access `obj.now()` / `nowInTimezone()` do
-        // not match (CALL_RE keys on the bare leading identifier). The host
-        // `Date.now` member string is already covered by NON_DET_CALLS above;
-        // this leg covers the value-import binding the adopter actually writes.
-        if (nowFromScrmlTime && nowFromScrmlTime.size > 0) {
-          const NOW_CALL_RE = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
+        // E-FN-004 (DD1 Fork 1): an imported NON-DETERMINISTIC stdlib primitive
+        // (the `scrml:time.now()` wall clock, or `scrml:random.random()` /
+        // `.randomInt()` host entropy). Binding-aware — fires only on a BARE
+        // call to a local name resolved (above) to a registered non-det member,
+        // so a user's own `function now()` / `function random()` never trips it,
+        // and member access `obj.now()` / `nowInTimezone()` do not match
+        // (CALL_RE keys on the bare leading identifier). The host member strings
+        // (`Date.now`, `Math.random`) are already covered by NON_DET_CALLS
+        // above; this leg covers the value-import binding the adopter writes.
+        if (nonDetStdlibBindings && nonDetStdlibBindings.size > 0) {
+          const NONDET_CALL_RE = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
           let mn: RegExpExecArray | null;
-          while ((mn = NOW_CALL_RE.exec(txt)) !== null) {
+          while ((mn = NONDET_CALL_RE.exec(txt)) !== null) {
             // Skip member accesses (`x.now(`) — a preceding `.` means this is
             // not the imported bare binding.
             if (mn.index > 0 && txt[mn.index - 1] === ".") continue;
             const callee = mn[1];
-            if (nowFromScrmlTime.has(callee)) {
+            if (nonDetStdlibBindings.has(callee)) {
+              const origin = nonDetStdlibOrigin?.get(callee) ?? callee;
               errors.push(new TSError(
                 "E-FN-004",
-                `E-FN-004: \`fn ${fnName}\` body calls \`${callee}()\` (\`scrml:time.now\`), which is non-deterministic — it reads the host wall clock. ` +
-                `\`fn\` must be a pure function of its inputs. Call \`${callee}()\` from a \`function\` or \`server function\` and pass the timestamp into \`fn ${fnName}\` as a parameter.`,
+                `E-FN-004: \`fn ${fnName}\` body calls \`${callee}()\` (\`${origin}\`), which is non-deterministic — it reads host state. ` +
+                `\`fn\` must be a pure function of its inputs. Call \`${callee}()\` from a \`function\` or \`server function\` and pass the result into \`fn ${fnName}\` as a parameter.`,
                 stmtSpan,
               ));
-              break; // one E-FN-004 per statement for the imported now()
+              break; // one E-FN-004 per statement for the imported non-det call
             }
           }
         }

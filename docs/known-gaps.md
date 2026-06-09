@@ -17,7 +17,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
 | MED | 10 |
-| LOW | 23 |
+| LOW | 22 |
 | Nominal (spec-ahead-of-impl) | 9 |
 <!-- @generated:gap-counts END -->
 
@@ -71,8 +71,8 @@ Deferred across the typed-SQL-row arc (T1 stripped the keyword-based view-select
 
 > Surfaced by the DD1 Fork 1 build (`scrml:math` + capability clock, landed S176). The clock + math vocabulary shipped (closing the scalar-vocab gap + the `time.js` Math-leak); these are the bounded follow-ons the build deliberately did not fold in.
 
-### G-RANDOM-PRIMITIVE — no value-native `random()`; `Math.random` (class-C non-det) still reaches the host — `NEW S176; LOW`
-DD1 Fork 1 shipped `scrml:math` (pure) + `scrml:time.now()` (capability-scoped non-det via E-FN-004 binding-aware gate). `Math.random` (~5 corpus sites) is the SAME class-C non-det as the clock but is neither a clock (doesn't fit `scrml:time`) nor pure (doesn't fit `scrml:math`). Recommended home: a thin `scrml:random` module exporting `random()` (and friends), gated EXACTLY like `now()` — the `collectNowFromScrmlTime` binding-aware E-FN-004 mechanism (type-system.ts) generalizes to any imported non-det binding; mirror it for `scrml:random.random`. Cohesive with the `now()` precedent. Low priority (5 sites; clear shape). <!-- @gap id=g-random-primitive sev=LOW status=open -->
+### G-RANDOM-PRIMITIVE — ~~no value-native `random()`~~ — **RESOLVED** (DD1 Fork 1 follow-on) — `NEW S176; LOW; RESOLVED`
+**RESOLVED.** Shipped `scrml:random` (capability-scoped class-C non-det): `random()` → float `[0,1)` + `randomInt(min,max)` → integer `[min,max]` INCLUSIVE. `stdlib/random/index.scrml` + `compiler/runtime/stdlib/random.js` (the ONE sanctioned `Math.random()` touch). The `collectNowFromScrmlTime` binding-aware E-FN-004 mechanism was GENERALIZED to a registry-driven `collectNonDetStdlibBindings` (`NONDET_STDLIB = { scrml:time: [now], scrml:random: [random, randomInt] }`) — `random()`/`randomInt()` fire E-FN-004 in pure `fn`/`pure`, allowed in `function`/`server function`, binding-aware. All 6 corpus `Math.random` sites migrated (3 trucking → `randomInt(0,100000)`; rust-state-machine → `random()`; meta-003 → `random()`; stdlib/http retry-jitter DE-LEAKED — http is server-only-bundled, not client-inlined, so `copyTransitiveShimSiblings` copies `random.js` cleanly). SPEC §41.20 + §41.18 note + PRIMER §10 (18 modules). <!-- @gap id=g-random-primitive sev=LOW status=resolved -->
 
 ### G-STDLIB-CLIENTINLINE-SHIM-IMPORT — a client-inlined stdlib shim cannot import a sibling shim (blocks `data.js` Math de-leak) — `NEW S176; MED`
 DD1 Fork 1 de-leaked `time.js` (15→0 raw `Math.*`, routed through `scrml:math`'s shim) but `data.js` stayed leaking 2× (`clamp` = `Math.min(Math.max(...))`). Root: `data.js` is one of the 4 statically CLIENT-INLINED shims, and the client inliner STRIPS all imports before IIFE-wrapping — so a `data.js → import from math.js` keeps the call reference but loses the import = browser `ReferenceError`. The build correctly DEFERRED rather than ship a client-breaking de-leak (Rule 3). The real fix is in the client inliner (follow cross-shim imports when inlining, or inline the transitive closure). Until then `data.js`'s 2 Math touches stay (server-correct, client-correct, just not de-leaked). The S176 build DID fix the related server-bundler gap (`bundleStdlibForRun` now copies sibling-FILE shim imports — also closed a latent `scrml:oauth`→http/crypto bug). <!-- @gap id=g-stdlib-clientinline-shim-import sev=MED status=open -->

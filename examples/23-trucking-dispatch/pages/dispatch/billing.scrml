@@ -15,6 +15,7 @@
       } from '../../components/invoice-card.scrml'
       import { formatRate } from '../../components/load-card.scrml'
       import { createSessionStore } from 'scrml:store'
+      import { randomInt } from 'scrml:random'
       import { SESSION_DB_PATH } from '../../models/auth.scrml'
       // M5: centralized real-time channel — see SPEC §38.12.6.
       import { "customer-events" as customerEvents } from '../../channels/customer-events.scrml'
@@ -100,7 +101,7 @@
 
             for (let i = 0; i < newlyInvoiced.length; i = i + 1) {
                 const lid = newlyInvoiced[i].load_id
-                const t = `pay_${lid}_${Date.now()}_${Math.floor(Math.random() * 100000)}`
+                const t = `pay_${lid}_${Date.now()}_${randomInt(0, 100000)}`
                 ?{`
                     INSERT INTO lin_tokens (token, load_id, kind)
                     VALUES (${t}, ${lid}, 'payment')

@@ -21239,7 +21239,7 @@ The `scrml:compiler` family — the umbrella `scrml:compiler` plus 13 per-stage 
 - Every `scrml:math` member is pure (§33 / §48). Because they are plain value imports, they are CALLABLE inside pure `fn` / `pure function` bodies — the §48.6.2 `fn`-purity walker (E-FN-003) treats imported stdlib `function` calls exactly as it treats `scrml:format` / `scrml:regex` calls (imported bindings are not added to the local non-pure-callee set). A pure calc — `round` / `floor` / `abs` of inputs — is the primary use.
 - `parseInt` SHALL default `radix` to 10 when omitted. The implicit-octal behavior of bare JS `parseInt` is not reproduced.
 - `scrml:math` is import-only (§41.5). There is no ambient `Math` global in scrml (DD1 Fork 1, 1B ambient builtins DEFERRED). Reach a member via `import { round } from 'scrml:math'`.
-- `scrml:math` deliberately EXCLUDES `random()`. A random source is non-deterministic (the same capability class as the wall clock, §41.19) and so does not belong in a pure module; its home is a separate design decision (DD1 Fork 1 follow-on — `scrml:random` vs an impure carve-out).
+- `scrml:math` deliberately EXCLUDES `random()`. A random source is non-deterministic (the same capability class as the wall clock, §41.19) and so does not belong in a pure module; its home was decided: the capability-scoped `scrml:random` module (§41.20).
 
 **Cross-references:** §33 (`pure`) · §48 / §48.6.2 (`fn` purity, E-FN-003) · §41.5 (resolution) · §42.1 (the parallel "what scrml is NOT" rule shape). Shim: `compiler/runtime/stdlib/math.js`; source: `stdlib/math/index.scrml`.
 
@@ -21261,6 +21261,32 @@ The `scrml:compiler` family — the umbrella `scrml:compiler` plus 13 per-stage 
 - `now()` is import-only (`import { now } from 'scrml:time'`); there is no ambient clock (1B ambient builtins DEFERRED).
 
 **Cross-references:** §48.3.4 (non-deterministic-call rule) · §48 / §48.6.2 (`fn` purity) · §33 (`pure`) · §34 (E-FN-004 catalog row) · §41.18 (the sibling pure module — `random()`'s non-det classification is the same as the clock's). Shim: `compiler/runtime/stdlib/time.js`; source: `stdlib/time/index.scrml`.
+
+---
+
+### 41.20 `scrml:random` — capability-scoped non-deterministic random source
+
+**Added:** S176+ — DD1 Fork 1 follow-on (`g-random-primitive`). Decides the `scrml:math` `random()`-exclusion (§41.18): a random source belongs in its own capability-scoped module, NOT in the pure `scrml:math`.
+
+`scrml:random` is the sanctioned, centralized touch of the host random source — the one place `Math.random()` is read (scrml's own stdlib routes its randomness, e.g. `scrml:http`'s retry-jitter, through it). It is import-only (`import { random, randomInt } from 'scrml:random'`); there is no ambient random global.
+
+**Surface (v1):**
+
+- `random()` → a float in the half-open interval `[0, 1)` (`0` inclusive, `1` exclusive). The primitive — an exact mirror of the host RNG.
+- `randomInt(min, max)` → an integer uniformly in `[min, max]` **INCLUSIVE of BOTH bounds** (the closed interval). `randomInt(0, 100000)` can return `0` and `100000`; `randomInt(1, 6)` is a fair die. This inclusivity convention is normative: both endpoints are reachable (it replaces the `Math.floor(Math.random() * N)` token-minting idiom). Fractional bounds are normalized into the closed interval; `min > max` is swapped so the call never returns `not`.
+
+**Capability rule (normative) — identical to `scrml:time.now()` (§41.19):**
+
+- `random()` and `randomInt()` are NON-DETERMINISTIC — they read host entropy (the SAME capability class as the wall clock, §41.19; class-C IO). Per §48.3.4 they SHALL NOT be called from a pure `fn` body; doing so is **E-FN-004**. (The same gate applies to the canonical pure form `fn`; `pure function` purity-enforcement is the broader, uniform §48 gate — see §48.6.2.)
+- They SHALL be permitted in `function` (event-handler / effect class) bodies and in `server function` bodies. Generate the value there and pass it into pure code as a parameter.
+- The E-FN-004 gate is BINDING-AWARE. The compiler resolves the callee to its import origin: a bare `random()` / `randomInt()` whose binding came from `import ... 'scrml:random'` is non-deterministic and fires E-FN-004 inside a `fn` body; a user's OWN `function random() { ... }` (not imported from `scrml:random`) is NOT gated. Aliased imports (`import { random as rng } from 'scrml:random'`) fire on the alias. Member access (`x.random()`) does not match. (Implementation: the host member-expression `Math.random` remains covered by the existing E-FN-004 `NON_DET_CALLS` list; the imported-binding leg is the value-import companion an adopter writes. The binding-aware leg is registry-driven — `scrml:time.now` and `scrml:random.{random,randomInt}` share one collector.)
+
+**Normative statements:**
+
+- No new §34 code is introduced. The capability is enforced by the existing **E-FN-004** (non-deterministic call); its message names the offending callee and its origin (`scrml:random.random`) and directs the author to call it from a `function` / `server function`.
+- `scrml:random` is import-only (§41.5). There is no ambient random source (1B ambient builtins DEFERRED).
+
+**Cross-references:** §48.3.4 (non-deterministic-call rule) · §48 / §48.6.2 (`fn` purity) · §33 (`pure`) · §34 (E-FN-004 catalog row) · §41.18 (`scrml:math`, which deliberately excludes `random()` — its home is here) · §41.19 (`scrml:time.now()`, the sibling capability-scoped non-det primitive — same E-FN-004 rule). Shim: `compiler/runtime/stdlib/random.js`; source: `stdlib/random/index.scrml`.
 
 ---
 

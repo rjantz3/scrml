@@ -12,6 +12,8 @@
 <program>
 
 ${
+    import { random } from 'scrml:random'
+
     type AppState:enum = {
         Idle
         Loading
@@ -97,7 +99,7 @@ ${
     }
 
     function simulateFetch() {
-        if (Math.random() < 0.5) {
+        if (random() < 0.5) {
             throw new Error("Connection refused: remote host unreachable")
         }
         return "Record 42: {name: Alice, score: 99}"

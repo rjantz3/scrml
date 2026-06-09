@@ -26,6 +26,10 @@ ${
     //   ${ import { get, post, withBaseUrl, isOk } from 'scrml:http' }
     // ---------------------------------------------------------------------------
 
+    // De-leak the retry-jitter through scrml:random — the sanctioned
+    // non-deterministic source (closes the stdlib-ouroboros, §41.20).
+    import { random } from 'scrml:random'
+
     async function _request(url, options) {
         const opts = options || {}
         const timeout = opts.timeout is some ? opts.timeout : 10000
@@ -268,7 +272,7 @@ ${
                 if (attempt == maxRetries) break
                 if (!shouldRetry(err)) break
                 const base = baseDelay * Math.pow(factor, attempt)
-                const jitterAmt = base * jitter * (Math.random() * 2 - 1)
+                const jitterAmt = base * jitter * (random() * 2 - 1)
                 const delay = Math.max(0, base + jitterAmt)
                 await new Promise(r => setTimeout(r, delay))
             }
