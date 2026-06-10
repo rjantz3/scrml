@@ -1,5 +1,11 @@
 # Native-Parser-Swap Flip-Failure RE-TRIAGE — S166 (451 remaining)
 
+> **⚠ PARTIALLY CONSUMED — superseded for current-state by the S170 roadmap banner (S178 currency-stamp).** Several of the "grind-now / recommended" families below are ALREADY SHIPPED — do NOT re-scope a dispatch off this grind-order without checking `git log`:
+> - **#1 bare-`function` failable → DONE** (`76059024`, S166 — `parse-stmt.js parseFunctionDecl` now carries the `!`/error-type handling; verified compiling under `--parser=scrml-native` at S178).
+> - **#2 cross-file export ROOT-2 → DONE** (`9d12d980`).
+> - promote-each (`785f24d1`), F2-match string-literal arms (`2c2e5bb2`), server-fn-star (`26a24b71`) → DONE.
+> The CURRENT flip baseline + buckets live in `docs/changes/native-parser-front-end/IMPLEMENTATION-ROADMAP.md` **S170 banner** (~508 flip-failures; dominant bucket = MISSING-FIELD emit-shape ~296, engine-statechild ~116 — NOT this S166 family list). The next flip-grind dispatch needs a FRESH re-triage against the live baseline, not this doc. (S178 caught a near-dispatch of the already-shipped #1 — the forward-doc-drift class, sibling to the gap-token drift.)
+
 **Date:** 2026-06-05 · **HEAD at triage:** `e947c924` · **Flip:** `parser = null`→`"scrml-native"` at `api.js:631`, full `bun test compiler/tests/` → **451 fail / control 0** (matches S165). · **Method:** 6 read-only survey agents (workflow `wf_710bd4b6-df1`), each reproduced default-clean/native-fail with `bun compiler/bin/scrml.js compile <repro>` ± `--parser=scrml-native` and **byte/shape-diffed emitted output** (not exit code — the S163/S165 silent-miscompile trap).
 
 **Supersedes** the S164 `docs/changes/native-swap-triage-s164/TRIAGE.md` for the post-S165 451 set. S164's clean-single targets (lift/F2a/table-for/F2-generator=server-fn-star/F2-match-recognition/promote-each/R1) are all consumed.

@@ -24544,6 +24544,8 @@ it. Plain-markup elements opened inside a state-child body (e.g. a `<button>` or
 open their own free-text bodies per §4.18.1 — the code-default mode is the state-child
 body's own, not inherited by nested plain markup.
 
+**S178 amendment (2026-06-10) — the engine-singleton IS scrml's typed global reactive store (DD1 Fork 2 = 2A+2B).** scrml ships NO free-shaped / untyped global store (the Svelte-stores / Riverpod pole) by design. The engine-singleton already IS scrml's typed global reactive state: an engine is singleton-by-design (trait 1 above), a cross-file `<EngineName/>` mount references the SAME instance at every use-site (§51.0.D), and a component **ambient-reads** the engine's auto-declared cell via `@cellName` from its enclosing scope — establishing a live reactive subscription per §15.13.4 (a transition re-fires the subscription and the component re-renders). Genuinely-shared reactive state SHALL be modeled as an engine; everything else flows explicitly (props, parameters, return values). This explicit-data-flow + typed-engine-singleton model is scrml's **final** shared-state design. Two clarifications: (a) the "no shared reactive state" rule (§43 — nested-`<program>` shared-nothing execution contexts) is scoped to cross-`<program>` boundaries and does NOT constrain the in-program engine-singleton (within a single program the engine-singleton IS shared reactive state, by design); (b) `E-COMPONENT-ENGINE-SCOPE` (trait 4) forbids a component from *declaring* an engine — it does NOT prevent a component from *reading* engine state, which is the supported §15.13.4 ambient-read pattern above.
+
 #### 51.0.B Engine declaration syntax
 
 ```scrml

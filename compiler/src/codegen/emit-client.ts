@@ -1708,6 +1708,16 @@ export function generateClientJs(ctx: CompileContext): string {
   // `n . lines` in record literal values because the emitter outputs
   // spaces around `.`, so the fixed-width `(?<!\.)` lookbehind saw a
   // space instead of a dot. Extended to variable-length `(?<!\.\s*)`.
+  //
+  // g-spread (2026-06-10): the plain `(?<!\.\s*)` lookbehind ALSO rejected
+  // a spread-call callee — in `[...makeList()]` the third spread `.` directly
+  // precedes `makeList`, so the rename was skipped and the user name leaked
+  // (runtime ReferenceError; the mangled decl exists but the bare name does
+  // not). The lookbehind now rejects ONLY a GENUINE member-access dot — a `.`
+  // that is itself preceded by an identifier-char / `)` / `]` (`x.foo`,
+  // `f().foo`, `a[0].foo`). A spread's operative dot is preceded by another
+  // `.`, not an identifier-char, so `...foo` renames while `x.foo` does not.
+  // The trailing call/statement lookahead `(?=\s*[(;,}\]\n)]|$)` is unchanged.
   // §20.6 — POST-EMIT `log` chunk gate. The location-transparent log()
   // builtin lowers to a `_scrml_log(...)` call ONLY when it actually fired
   // (not shadowed by a user `log`, not production-stripped). Scanning the
@@ -1743,9 +1753,10 @@ export function generateClientJs(ctx: CompileContext): string {
       //     would already prevent `foo` from matching inside `fooBar`, but
       //     sorting also guards against future name shapes where a name
       //     happens to be a prefix of another at a word boundary.
-      //   * The lookbehind `(?<!\.\s*)` and the lookahead
-      //     `(?=\s*[(;,}\]\n)]|$)` are preserved BIT-FOR-BIT from the
-      //     per-name regex so behavior remains byte-identical.
+      //   * The member-access lookbehind `(?<![A-Za-z0-9_$)\]]\s*\.\s*)`
+      //     and the call/statement lookahead `(?=\s*[(;,}\]\n)]|$)` are
+      //     shared by every name; see the g-spread note above for why the
+      //     lookbehind rejects only a genuine member dot (not a spread dot).
       //   * A single capture group around the alternation lets the
       //     replacer recover the matched name and look up its mangled form
       //     via the fnNameMap.
@@ -1754,7 +1765,7 @@ export function generateClientJs(ctx: CompileContext): string {
       );
       const alternation = sortedNames.map(escapeRegex).join("|");
       const combinedRegex = new RegExp(
-        `(?<!\\.\\s*)\\b(${alternation})\\b(?=\\s*[(;,}\\]\\n)]|$)`,
+        `(?<![A-Za-z0-9_$)\\]]\\s*\\.\\s*)\\b(${alternation})\\b(?=\\s*[(;,}\\]\\n)]|$)`,
         "g",
       );
       // 6nz Bug Z (S144): the mangle is a raw-string regex pass with no
@@ -2051,7 +2062,16 @@ export function generateClientJs(ctx: CompileContext): string {
       // Preserve imports whose source is managed by the scrml runtime.
       if (src.startsWith("scrml:") || src.startsWith("vendor:") || src.endsWith(".client.js")) continue;
       const usedInBody = imp.names.some(name => {
-        const useRe = new RegExp(`(?<![.\\w$])${escapeRegex(name)}(?![\\w$])`, "");
+        // g-spread (2026-06-10): the old `(?<![.\\w$])` lookbehind rejected a
+        // spread-used import — `[...makeRange()]` was read as NOT used because
+        // the third spread `.` precedes the name, so a spread-only-used import
+        // was wrongly pruned (runtime ReferenceError). Split into a
+        // member-access-only lookbehind (a `.` itself preceded by ident-char /
+        // `)` / `]`, e.g. `obj.makeRange`) plus a word-boundary lookbehind, so
+        // a genuine member access of a DIFFERENT object still doesn't count as
+        // a use, while a spread call (`...makeRange`) does. Mirrors the
+        // rename-pass lookbehind above.
+        const useRe = new RegExp(`(?<![A-Za-z0-9_$)\\]]\\s*\\.\\s*)(?<![\\w$])${escapeRegex(name)}(?![\\w$])`, "");
         return useRe.test(body);
       });
       if (!usedInBody) toDrop.add(i);

@@ -949,7 +949,15 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     const generatedName = genVar(name);
     fnNameMap.set(name, generatedName);
 
-    lines.push(`${asyncPrefix}function ${generatedName}(${paramSigs.join(", ")}) {`);
+    // bug-16 (S178): preserve the generator star for a non-SSE `function*` in a
+    // `${ }` logic block. Mirrors the emit-library.ts:428 `generatorStar` pattern.
+    // §13.6 — `function*`/`yield` are admissible in any function position. Without
+    // this branch the star was dropped, landing `yield` inside a plain function =
+    // invalid JS (E-CODEGEN-INVALID-JS "keyword 'yield' is reserved"). Computed
+    // independently of asyncPrefix; a generator does not take the server-call CPS
+    // path, so the two should not co-occur, but the fix is defensive either way.
+    const generatorStar = (fnNode as { isGenerator?: boolean }).isGenerator ? "*" : "";
+    lines.push(`${asyncPrefix}function${generatorStar} ${generatedName}(${paramSigs.join(", ")}) {`);
 
     // A1c C16 — §53.9.1 client-side param boundary checks (Locus 3).
     // Mirrors emit-server.ts §53.9.4 wiring, but throws E-CONTRACT-001-RT

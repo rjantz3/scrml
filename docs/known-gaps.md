@@ -16,7 +16,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
-| MED | 7 |
+| MED | 6 |
 | LOW | 12 |
 | Nominal (spec-ahead-of-impl) | 9 |
 <!-- @generated:gap-counts END -->
@@ -991,13 +991,27 @@ MCP V0 sub-units A+B+C+D shipped S125-S130. V0.E (E2E + adopter docs + fixture m
 
 ---
 
-### Bug 16 — Generator policy — `open` (S114)
-<!-- @gap id=bug-16 sev=MED status=open -->
+### Bug 16 — Generator policy + non-SSE codegen — `RESOLVED S178`
+<!-- @gap id=bug-16 sev=MED status=resolved -->
 
-`yield` / `yield*` / `function*` are NOT covered by the S114 "no async/await" rule (preserved in the JS-subset bound at M4.3 per S114). Semantic policy is open: do generators belong in scrml, and if so under what discipline (compiler-managed iteration vs user-authored protocol)?
+Two halves, both now closed. **POLICY: ratified S131** (SPEC §13.6 — `function*`/`yield`/`yield*` are FULL LANGUAGE VOCABULARY; admissible in any function position; the S114 no-async/await rule does NOT extend to generators — local-not-viral rationale + §37 SSE prior-art). The original "semantic policy is open" framing was stale from S131 onward — a same-landing-discipline miss (S131 landed SPEC §13.6 but never flipped this token; caught S178 when PA compiled the §13.6 worked example to verify before deliberating). **CODEGEN: RESOLVED S178 (rides the wrap commit; agent `ac41cf75`).** A non-SSE `function*` in a `${ }` logic block dropped its generator `*` on the client emit path (`emit-functions.ts:952` lacked the `generatorStar` branch `emit-library.ts:428` already had) → `yield` inside a plain function → `E-CODEGEN-INVALID-JS` "keyword 'yield' is reserved" (S141/S142 emit gate). The SPEC's own §13.6 worked example didn't compile. Fix (`emit-functions.ts:960`): mirror the emit-library generatorStar pattern, computed independently of asyncPrefix. PA-independent R26: both reproducers (SPEC §13.6 Fibonacci + minimal `function* counts()`) compile clean + `node --check` valid + `function*` preserved; +12 tests; full suite 23,734→23,746 / 0 fail. §37 SSE path untouched (separate codegen). Object-literal generator-method `{ *m(){} }` DEFERRED (no object-literal-method AST/emit support at all; §13.6 doesn't list it as a codegen position).
 
-- **Workaround:** use generators if needed; they parse. Compiler doesn't generate diagnostic surface around them either way.
-- **Status:** open. Filed S114; not dispatched.
+- **Status:** RESOLVED S178. Policy S131 §13.6; codegen S178.
+- **Spawned `g-derived-rhs-fnname` (below):** the star-drop fix UNMASKED a separate runtime-ReferenceError gap in the derived-decl RHS path (the file was previously uncompilable, hiding it).
+
+---
+
+### Bug g-spread-fnname-rename — spread-call `[...localFn()]` escapes the client fnNameMap rename (runtime ReferenceError, compiles clean) — `RESOLVED S178`
+<!-- @gap id=g-spread-fnname-rename sev=MED status=resolved -->
+
+A SPREAD of a local-function call — `[...localFn()]` / `{...localFn()}` / `f(...localFn())` — emits the USER-source callee name, NOT the codegen-mangled name → runtime `ReferenceError` (the user name is undefined; only `_scrml_<name>_N` exists). **Compiles CLEAN + passes `node --check`** (the leaked name is a syntactically-valid bare identifier) — the canary class: no compile diagnostic, fails only at runtime.
+
+**Root cause (S178 triage):** the client fnNameMap rename pass (`emit-client.ts:1757` `combinedRegex`) uses a negative lookbehind `(?<!\.\s*)` to skip member-access (`obj.makeList()` must NOT rename — comment ~1696-1710). The spread operator `...` ends in a `.`, so a spread-call callee is immediately preceded by a `.` and the lookbehind wrongly rejects it. The lookbehind can't distinguish member-`.` from spread-`...`.
+
+**Scope (CORRECTED from the initial derived-RHS-specific filing):** NOT generator-specific, NOT derived-specific. Confirmed via PLAIN-function reproducers: `const <items> = [...makeList()]` (derived-RHS) AND `${[...makeList()]}` (markup-interp) both leak `makeList`; a non-spread call (`double(21)`) renames correctly (`_scrml_double_2`). The bug-16 generator-star fix did not cause this — it UNMASKED it (a generator-spread `[...counts()]` was the first thing to compile far enough to hit it). Sibling regex `emit-client.ts:2054` `(?<![.\w$])` may have the same escape — under check.
+
+- **Workaround:** spread of a *local* fn → assign the call to a `let` first (`let xs = makeList(); const <items> = [...xs]`), OR declare the fn at file scope.
+- **Status:** **RESOLVED S178** (agent `a35a4e5c`, FINAL_SHA `74014b44`, staged into main batched-for-wrap). Tightened the lookbehind to `(?<![A-Za-z0-9_$)\]]\s*\.\s*)` (reject only a genuine member-access dot — one preceded by ident-char/`)`/`]`; spread's dot is preceded by another `.`, so `...foo` renames while `x.foo`/`f().foo`/`a[0].foo` skip). **Bonus find:** the SAME spread-escape existed in a SECOND regex (`emit-client.ts:2054`, the import-usage detector) — a spread-only-used import (`[...importedFn()]`) was read as unused → false-pruned → runtime ReferenceError. Both fixed. +11 tests, suite 23,734→23,745/0. PA-independent R26: plain-fn spread renames; member-access + string-literal (6nz Bug Z) controls preserved. **Combined-with-bug-16 proof:** generator-spread `[...counts()]` now emits `function* _scrml_counts_2()` + `[..._scrml_counts_2()]`, `node --check` valid, zero bare-name leak — the two fixes compose end-to-end.
 
 ---
 

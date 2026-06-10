@@ -673,6 +673,8 @@ The hybrid mechanism specifies the binary case. Multi-variant chains — `(.Draf
 
 Engines are the v0.next centerpiece. Singleton-by-design (one declaration mounts the singleton; cross-file mount via `<EngineName/>`). Components are the multi-instance vehicle (Move 20 — components and engines are distinct, do not collapse).
 
+**The engine-singleton IS scrml's typed global reactive store (S178 — DD1 Fork 2 = 2A+2B).** A cross-file `<EngineName/>` mounts the SAME singleton everywhere, and a component **ambient-reads** its auto-cell via `@cellName` from the enclosing scope (a live reactive subscription per §15.13.4 — compiler-proven: emits `_scrml_effect(() => …_scrml_reactive_get("var"))`). So genuinely-shared reactive state is modeled as an engine; scrml ships NO free-shaped global store (Svelte-stores/Riverpod pole) by design — explicit-data-flow + typed-engine-singleton is the *final* shared-state model. `E-COMPONENT-ENGINE-SCOPE` bans a component *declaring* an engine, NOT *reading* one. See SPEC §51.0.A S178 amendment.
+
 ```scrml
 type Phase:enum = { Idle, Loading, Error(msg: string), Empty, Success(count: int) }
 
