@@ -19,11 +19,12 @@
  * Acceptance is RUNTIME CALLABILITY, not compile-clean: the inlined sibling
  * fns must actually execute inside the client IIFE. data.js routes clamp/
  * paginate through scrml:math; auth.js routes its JWT/TOTP/rate-limit
- * arithmetic through scrml:math (Date.now() stays raw — separate leak class).
+ * arithmetic through scrml:math AND its wall-clock through scrml:time
+ * (clockNow — the S177-deferred clock de-leak, completed S179).
  *
  * §1  data chunk inlines math (mathMin/mathMax/ceil), no bare import.
  * §2  data.clamp / data.paginate are CALLABLE + correct in the evaluated runtime.
- * §3  auth chunk inlines floor/mathMax, no bare import, Date.now() preserved.
+ * §3  auth chunk inlines floor/mathMax/clockNow, no bare import, clock via scrml:time.
  * §4  auth.createRateLimiter is CALLABLE + correct (the local-`max` collision case).
  * §5  the de-leaked shims emit NO bare `import` anywhere in SCRML_RUNTIME.
  * §6  EXTERNAL imports still STRIP (synthetic shim importing `bun:sqlite`).
@@ -122,25 +123,27 @@ describe("client-inliner follows sibling-shim imports (S177)", () => {
     expect(typeof v.check).toBe("function");
   });
 
-  test("§3  auth chunk inlines floor/mathMax, no bare import, Date.now() preserved", () => {
+  test("§3  auth chunk inlines floor/mathMax/clockNow, no bare import, clock via scrml:time", () => {
     const chunk = sliceChunk(SCRML_RUNTIME, "auth");
     expect(chunk.length).toBeGreaterThan(0);
     expect(/function floor\b/.test(chunk)).toBe(true);
     expect(/function mathMax\b/.test(chunk)).toBe(true);
+    expect(/function clockNow\b/.test(chunk)).toBe(true); // scrml:time now() inlined (S179 clock de-leak)
     expect(/^import\b/m.test(chunk)).toBe(false);
-    // The wall-clock touch is a SEPARATE leak class — Date.now() stays raw.
-    expect(/Date\.now\(\)/.test(chunk)).toBe(true);
-    // auth's OWN arithmetic now routes through the inlined helpers — the only
-    // `Math.*` left is INSIDE the inlined scrml:math wrappers (the sanctioned
-    // single touch), never in auth's own JWT/TOTP/rate-limit code. Assert the
-    // de-leaked call shapes are present and the old raw shapes are gone.
-    expect(/floor\(Date\.now\(\) \/ 1000\)/.test(chunk)).toBe(true);
+    // auth's OWN arithmetic AND wall-clock now route through the inlined helpers —
+    // the only `Math.*` / `Date.now()` left are INSIDE the inlined scrml:math /
+    // scrml:time wrappers (the sanctioned single touches), never in auth's own
+    // JWT/TOTP/rate-limit code. Assert the de-leaked shapes are present and the
+    // old raw shapes are gone.
+    expect(/floor\(clockNow\(\) \/ 1000\)/.test(chunk)).toBe(true);    // de-leaked clock shape (was Date.now())
     expect(/mathMax\(0, max - entry\.count\)/.test(chunk)).toBe(true);
-    expect(/Math\.floor\(Date\.now/.test(chunk)).toBe(false); // old raw shape gone
-    expect(/Math\.max\(0,/.test(chunk)).toBe(false);          // old raw shape gone
-    // The ONLY surviving `Math.floor`/`Math.max` are the inlined math wrappers.
+    expect(/floor\(Date\.now\(\) \/ 1000\)/.test(chunk)).toBe(false);  // old raw clock shape gone (S179)
+    expect(/Math\.floor\(Date\.now/.test(chunk)).toBe(false);          // old raw shape gone
+    expect(/Math\.max\(0,/.test(chunk)).toBe(false);                   // old raw shape gone
+    // The ONLY surviving raw host touches are the inlined wrappers — one each:
     expect((chunk.match(/Math\.floor/g) || []).length).toBe(1); // function floor(n){ return Math.floor(n); }
     expect((chunk.match(/Math\.max/g) || []).length).toBe(1);   // function mathMax(...){ return Math.max(...); }
+    expect((chunk.match(/Date\.now\(\)/g) || []).length).toBe(1); // function clockNow(){ return Date.now(); } only
   });
 
   test("§4  auth.createRateLimiter is CALLABLE + correct (local-`max` collision case)", () => {

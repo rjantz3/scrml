@@ -12,6 +12,8 @@
 // will throw because `bun:sqlite` cannot be imported.
 
 import { Database } from "bun:sqlite";
+// host wall-clock via the single sanctioned scrml:time touch (S179 clock de-leak)
+import { now as clockNow } from "./time.js";
 
 function _initDb(db) {
   db.run(`
@@ -52,7 +54,7 @@ export function createStore(dbPath, namespace) {
 
   return {
     get(key) {
-      const now = Date.now();
+      const now = clockNow();
       const row = stmtGet.get(ns, key);
       if (!row) return null;
       if (row.expires_at !== null && row.expires_at <= now) {
@@ -66,14 +68,14 @@ export function createStore(dbPath, namespace) {
       }
     },
     set(key, value, ttl) {
-      const expiresAt = ttl ? Date.now() + ttl * 1000 : null;
+      const expiresAt = ttl ? clockNow() + ttl * 1000 : null;
       stmtSet.run(ns, key, JSON.stringify(value), expiresAt);
     },
     delete(key) {
       stmtDelete.run(ns, key);
     },
     has(key) {
-      const now = Date.now();
+      const now = clockNow();
       const row = stmtGet.get(ns, key);
       if (!row) return false;
       if (row.expires_at !== null && row.expires_at <= now) {
@@ -83,7 +85,7 @@ export function createStore(dbPath, namespace) {
       return true;
     },
     keys(prefix) {
-      const now = Date.now();
+      const now = clockNow();
       if (prefix) {
         const escaped = prefix.replace(/[%_\\]/g, "\\$&");
         const rows = stmtKeysPrefix.all(ns, escaped + "%", now);
@@ -99,7 +101,7 @@ export function createStore(dbPath, namespace) {
       db.close();
     },
     purgeExpired() {
-      stmtDeleteExpired.run(ns, Date.now());
+      stmtDeleteExpired.run(ns, clockNow());
     },
   };
 }

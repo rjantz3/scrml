@@ -28,14 +28,15 @@
 // password.scrml — Argon2id hash + verify, random password generation
 // ---------------------------------------------------------------------------
 
-// auth.js's arithmetic routes through scrml:math — the single sanctioned
-// touch of the host arithmetic surface (closes the stdlib-ouroboros).
-// `max` is ALIASED (mathMax) because createRateLimiter has a LOCAL `max`
-// variable (the rate-limit ceiling) that would otherwise shadow it. The
-// `Date.now()` wall-clock reads stay raw — that is a SEPARATE leak class
-// (scrml:time.now()), out of scope here (JWT/TOTP timing is security-
-// sensitive and routed deliberately, not folded into this Math de-leak).
+// auth.js's arithmetic routes through scrml:math and its wall-clock reads
+// through scrml:time — the single sanctioned touches of the host arithmetic
+// and clock surfaces (closes the stdlib-ouroboros). Both `max` and `now` are
+// ALIASED (mathMax / clockNow) because createRateLimiter has LOCAL `max` and
+// `now` variables that would otherwise shadow the imports. The clock routing
+// (scrml:time now()) was the deliberate S177-deferred follow-on to the Math
+// de-leak; completed S179 across auth.js, oauth.js, and store.js.
 import { floor, max as mathMax } from "./math.js";
+import { now as clockNow } from "./time.js";
 
 export async function hashPassword(password) {
   // Argon2id via Bun.password (server-only). Mirrors stdlib/auth/password.scrml
@@ -96,7 +97,7 @@ function _base64urlDecode(str) {
 }
 
 export async function signJwt(payload, secret, expiresIn) {
-  const now = floor(Date.now() / 1000);
+  const now = floor(clockNow() / 1000);
   const exp = now + (expiresIn !== undefined ? expiresIn : 3600);
   const header = { alg: "HS256", typ: "JWT" };
   const claims = { ...payload, iat: now, exp };
@@ -135,7 +136,7 @@ export async function verifyJwt(token, secret) {
   }
 
   // Check expiry first (before signature) so expired tokens get the right reason
-  if (payload.exp && payload.exp < floor(Date.now() / 1000)) {
+  if (payload.exp && payload.exp < floor(clockNow() / 1000)) {
     return { valid: false, reason: "expired" };
   }
 
@@ -181,7 +182,7 @@ export function createRateLimiter(options) {
 
   return {
     check(key) {
-      const now = Date.now();
+      const now = clockNow();
       let entry = store.get(key);
       if (!entry || entry.resetAt <= now) {
         entry = { count: 0, resetAt: now + windowMs };
@@ -196,7 +197,7 @@ export function createRateLimiter(options) {
       store.delete(key);
     },
     peek(key) {
-      const now = Date.now();
+      const now = clockNow();
       const entry = store.get(key);
       if (!entry || entry.resetAt <= now) {
         return { count: 0, remaining: max, resetAt: now + windowMs };
@@ -239,7 +240,7 @@ export function generateTotpSecret(options) {
 
 export async function verifyTotp(code, secret) {
   // Mirrors stdlib/auth/index.scrml line 148-161 + 167-210.
-  const now = floor(Date.now() / 1000);
+  const now = floor(clockNow() / 1000);
   const timeStep = 30;
   const counter = floor(now / timeStep);
 

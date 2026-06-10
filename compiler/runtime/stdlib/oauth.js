@@ -32,6 +32,8 @@ export { discordConfig } from "./oauth/discord.js";
 import { post as httpPost, get as httpGet } from "./http.js";
 import { generateToken } from "./crypto.js";
 import { generateVerifier, deriveChallenge, PKCE_METHOD } from "./oauth/pkce.js";
+// host wall-clock via the single sanctioned scrml:time touch (S179 clock de-leak)
+import { now as clockNow } from "./time.js";
 
 // ---------------------------------------------------------------------------
 // Storage adapter — in-memory dev-only.
@@ -40,11 +42,11 @@ import { generateVerifier, deriveChallenge, PKCE_METHOD } from "./oauth/pkce.js"
 export function memoryAdapter() {
   const store = new Map();
   function expired(entry) {
-    return entry.expiresAt !== null && entry.expiresAt !== undefined && entry.expiresAt <= Date.now();
+    return entry.expiresAt !== null && entry.expiresAt !== undefined && entry.expiresAt <= clockNow();
   }
   return {
     put(key, value, ttlSeconds) {
-      const expiresAt = ttlSeconds && ttlSeconds > 0 ? Date.now() + ttlSeconds * 1000 : null;
+      const expiresAt = ttlSeconds && ttlSeconds > 0 ? clockNow() + ttlSeconds * 1000 : null;
       store.set(key, { value, expiresAt });
     },
     get(key) {
@@ -296,7 +298,7 @@ async function _tokenRequest(config, bodyObj) {
       : typeof data.expires_in === "string"
         ? parseInt(data.expires_in, 10)
         : null;
-  const expiresAt = expiresIn ? Date.now() + expiresIn * 1000 : null;
+  const expiresAt = expiresIn ? clockNow() + expiresIn * 1000 : null;
 
   return {
     accessToken: data.access_token || null,
