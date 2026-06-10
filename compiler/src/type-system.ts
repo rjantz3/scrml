@@ -15189,6 +15189,17 @@ function walkAndExpandFormForNodes(
       // bind-site resolves against — so the lookup resolves once the cell exists.
       const cBodyChildren = (child as ASTNodeLike).bodyChildren as ASTNodeLike[] | undefined;
       if (Array.isArray(cBodyChildren)) walkAndSplice(cBodyChildren);
+      // g-formfor-in-match-arm (S177) — also recurse into a `match-block`'s
+      // `armBodyChildren` (the walkable per-arm body markup ast-builder builds
+      // from `armsRaw`). Each arm wrapper hosts its body under `.children`, so
+      // a `<formFor>` inside a match arm is found + spliced here, and its
+      // compound state-decl is hoisted to the file-scope synth logic node
+      // below — exactly as the engine state-child path does (r27-c6). Without
+      // this the formFor leaked raw into the arm render fn AND
+      // `bind:value=@<cell>.field` false-fired E-SCOPE-001 (the cell never
+      // existed because the formFor was never expanded).
+      const cArmBodyChildren = (child as ASTNodeLike).armBodyChildren as ASTNodeLike[] | undefined;
+      if (Array.isArray(cArmBodyChildren)) walkAndSplice(cArmBodyChildren);
     }
   }
 
@@ -16408,6 +16419,15 @@ function walkAndExpandTableForNodes(
       if (Array.isArray(cChildren)) walkAndSplice(cChildren);
       const cBody = (child as ASTNodeLike).body as ASTNodeLike[] | undefined;
       if (Array.isArray(cBody)) walkAndSplice(cBody);
+      // g-formfor-in-match-arm (S177) — sibling-pass parity with the formFor
+      // walker: a `<tableFor>` inside an engine state-child (`bodyChildren`) or
+      // a `<match>` arm (`armBodyChildren`) had the SAME `.children`-only blind
+      // spot and leaked raw `<tableFor>` into the arm render fn (silent
+      // non-render). Recurse into both wrapper arrays so it expands.
+      const cBodyChildren = (child as ASTNodeLike).bodyChildren as ASTNodeLike[] | undefined;
+      if (Array.isArray(cBodyChildren)) walkAndSplice(cBodyChildren);
+      const cArmBodyChildren = (child as ASTNodeLike).armBodyChildren as ASTNodeLike[] | undefined;
+      if (Array.isArray(cArmBodyChildren)) walkAndSplice(cArmBodyChildren);
     }
   }
 

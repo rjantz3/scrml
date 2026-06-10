@@ -12103,13 +12103,95 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           // _bodyErrors intentionally discarded — see comment block above.
         }
 
+        // g-formfor-in-match-arm (S177) — assign the match-block's own id
+        // FIRST so the per-arm wrapper ids (built below, each `++counter.next`)
+        // come AFTER it and do NOT shift the match-block id downstream
+        // (`data-scrml-match-mount="match_<id>"` + the render-fn names key on it).
+        const _matchBlockId = ++counter.next;
+        // build a WALKABLE per-arm body AST
+        // (`armBodyChildren`) so the markup-EXPANSION passes (component-expander
+        // CE + the type-system formFor walker) can reach a `<formFor>` / a
+        // user-component USE-SITE inside a match arm. BS captures the match body
+        // as a single raw text run (`armsRaw`) — `bodyChildren` above is that
+        // text node, NOT walkable arm bodies. So a `<formFor>`/`<Badge>` inside
+        // an arm was NEVER expanded: the raw tag leaked into the arm render fn
+        // (silent non-render) and, for formFor, its compound state cell was never
+        // hoisted/bound. Mirrors the engine-decl `bodyChildren` shape: one markup
+        // WRAPPER per arm (tag = variant name), whose `.children` are the
+        // re-parsed arm-body markup nodes. The walkers expand IN PLACE; codegen
+        // `buildMatchArms` consumes the (expanded) wrappers when present and
+        // hoists the formFor compound to file scope at TS, exactly as the engine
+        // path does. Falls back to the existing `armsRaw` re-parse when this is
+        // absent (empty / parse-failure). The each-in-arm path keeps using
+        // `bodyChildren` (codegen attaches lifted each-blocks there) — left
+        // untouched.
+        const armBodyChildren = (function buildMatchArmBodyChildren() {
+          if (!armsRaw || typeof armsRaw !== "string") return undefined;
+          let parsed;
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { parseMatchArms } = require("./match-statechild-parser.ts");
+            parsed = parseMatchArms(armsRaw);
+          } catch (_e) { return undefined; }
+          if (!parsed || !Array.isArray(parsed.arms) || parsed.arms.length === 0) return undefined;
+          const wrappers = [];
+          for (const arm of parsed.arms) {
+            // Only bare-body arms host nested markup (formFor / components live in
+            // markup bodies). self-closing has no body; `:`-shorthand is a single
+            // expression (no nested element to expand). Skip those — codegen's
+            // existing per-arm handling renders them.
+            // Skip non-bare-body arms (no nested markup to expand) AND
+            // each-bearing arm bodies. The each-block transform + globally-unique
+            // id re-stamping for an arm-body `<each>` lives in codegen
+            // `buildMatchArms` (each-in-block-form-match S153); building a SECOND
+            // each-block here (with a different id) would create a phantom
+            // each-block that `collectEachBlocks(fileAST)` picks up. A formFor /
+            // component never co-occurs with an each in the v1 arm surface, so
+            // each-bearing arms keep the codegen `armsRaw` re-parse path intact.
+            if (
+              arm.bodyForm !== "bare-body" ||
+              !arm.bodyRaw ||
+              !arm.bodyRaw.trim() ||
+              /<\s*each\b/.test(arm.bodyRaw)
+            ) {
+              wrappers.push({
+                id: ++counter.next,
+                kind: "markup",
+                tag: arm.variantName,
+                attrs: [],
+                children: [],
+                span,
+                _matchArmBodyForm: arm.bodyForm,
+              });
+              continue;
+            }
+            let armNodes = [];
+            try {
+              const reBs = _splitBlocksForP2Form1(filePath || "<match-arm>", arm.bodyRaw);
+              const reTab = buildAST(reBs);
+              if (reTab && reTab.ast && Array.isArray(reTab.ast.nodes)) armNodes = reTab.ast.nodes;
+            } catch (_e) { armNodes = []; }
+            wrappers.push({
+              id: ++counter.next,
+              kind: "markup",
+              tag: arm.variantName,
+              attrs: [],
+              children: armNodes,
+              span,
+              _matchArmBodyForm: arm.bodyForm,
+            });
+          }
+          return wrappers.length > 0 ? wrappers : undefined;
+        })();
+
         return {
-          id: ++counter.next,
+          id: _matchBlockId,
           kind: "match-block",
           forType,       // bareword type name (REQUIRED per §18.0.1; SYM PASS validates)
           onExprRaw,     // raw text of on= attribute (Phase 2 parses via ExprNode pipeline)
           armsRaw,       // raw body text — Phase 2's match-statechild-parser produces MatchArmEntry[]
           bodyChildren,  // Phase 3 — walkable arm-body AST mirroring block.children (additive; engine-decl precedent)
+          armBodyChildren, // g-formfor-in-match-arm (S177) — walkable per-arm bodies for the expansion passes (undefined when no bare-body arms)
           span,
           openerHadSpaceAfterLt: block.openerHadSpaceAfterLt === true,
         };

@@ -2819,6 +2819,72 @@ function walkAndExpand(
       continue;
     }
 
+    // g-formfor-in-match-arm (S177) — engine state-children (`engine-decl`)
+    // host their renderable arm bodies under `bodyChildren` (a walkable AST
+    // mirror, ast-builder Phase A10). A user-component USE-SITE inside an
+    // engine state-child (`<Draft><Badge label="hi"/></>`) lives in that
+    // subtree, which the `.children`-only recursion above never reaches — so
+    // the `<Badge>` leaked RAW into the engine arm render fn (silent
+    // non-render). Recurse into `bodyChildren` here so the component is
+    // expanded, exactly as the type-system formFor walker does (r27-c6).
+    //
+    // (Match block-form `<match>` arm bodies are NOT walkable at this stage —
+    // they are raw text in `armsRaw`, re-parsed at codegen. ast-builder now
+    // pre-populates `match-block.bodyChildren` with the walkable arm-body AST
+    // [g-formfor-in-match-arm], so this same recursion expands a component in a
+    // match arm too. The `.arms` field carries no walkable body and is left
+    // alone.)
+    // `bodyChildren` entries for an engine are the STATE-CHILD wrappers
+    // (`<Draft>` / `<Submitted>` / …) — PascalCase markup whose tag is a STATE
+    // name, NOT a component. Running the full component-ref walk on the wrapper
+    // would mis-fire `isUserComponentMarkup` (E-COMPONENT-020 "`Draft` is not
+    // defined"). So descend into each wrapper's OWN `.children` (where the real
+    // use-site lives) and into the wrapper's `bodyChildren` (nested engines),
+    // leaving the wrapper node itself intact.
+    //
+    // **IN-PLACE mutation (object identity is load-bearing).** ast-builder
+    // stamps a `fileAST.machineDecls` snapshot holding references to the
+    // ORIGINAL engine-decl nodes (S163 F1 two-instance-identity precedent);
+    // codegen's `collectC12EngineDecls` prefers that snapshot over `ast.nodes`.
+    // Match-block arm-body each-blocks are likewise attached BY REFERENCE at
+    // codegen. Cloning the engine/match node (`{ ...node, bodyChildren }`)
+    // would orphan the expansion from those consumers — so we MUTATE the
+    // node's bodyChildren array contents in place (the wrapper's `.children`
+    // array is replaced in place too) and push the SAME node ref. The
+    // type-system formFor walker uses the same in-place-splice discipline.
+    // Expand component use-sites inside the STATE-CHILD / ARM-BODY wrapper
+    // arrays. `bodyChildren` = engine state-children (`engine-decl`).
+    // `armBodyChildren` = match-block arm bodies (g-formfor-in-match-arm S177;
+    // built by ast-builder from `armsRaw`). Both are arrays of markup WRAPPERS
+    // whose tag is a state/variant NAME (NOT a component) and whose `.children`
+    // host the real use-site. Mutate each wrapper's `.children` in place.
+    const expandWrapperArray = (wrappers: ASTNode[]): void => {
+      for (const bc of wrappers) {
+        if (!bc || typeof bc !== "object") continue;
+        const bcNode = bc as MarkupNode & { bodyChildren?: ASTNode[] };
+        if (Array.isArray(bcNode.children)) {
+          const nc = walkAndExpand(bcNode.children, registry, filePath, counter, ceErrors);
+          if (nc.length !== bcNode.children.length || nc.some((c, i) => c !== bcNode.children![i])) {
+            // Replace the wrapper's children array contents in place.
+            bcNode.children.length = 0;
+            bcNode.children.push(...nc);
+          }
+        }
+        // Nested engine/match inside this wrapper — recurse so deeper
+        // wrapper arrays (and their use-sites) expand too. walkAndExpand
+        // mutates the nested node's arrays in place via this same arm.
+        if (Array.isArray(bcNode.bodyChildren) || Array.isArray((bcNode as { armBodyChildren?: ASTNode[] }).armBodyChildren)) {
+          walkAndExpand([bcNode as ASTNode], registry, filePath, counter, ceErrors);
+        }
+      }
+    };
+    const nodeBodyChildren = (node as { bodyChildren?: ASTNode[] }).bodyChildren;
+    if (Array.isArray(nodeBodyChildren)) expandWrapperArray(nodeBodyChildren);
+    const nodeArmBodyChildren = (node as { armBodyChildren?: ASTNode[] }).armBodyChildren;
+    if (Array.isArray(nodeArmBodyChildren)) expandWrapperArray(nodeArmBodyChildren);
+    // node ref unchanged — wrapper arrays mutated in place. Fall through to
+    // the pass-through tail so the SAME node ref is pushed.
+
     // All other node kinds: pass through unchanged
     result.push(node);
   }

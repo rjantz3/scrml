@@ -111,6 +111,19 @@ const STRIP_KEYS: ReadonlySet<string> = new Set([
                               // FileAST; it is pipeline-internal metadata, NOT
                               // a semantic divergence (native-cross-file-export
                               // ROOT-2).
+  "armBodyChildren",          // g-formfor-in-match-arm (S177) — LIVE-only
+                              // walkable per-arm body AST that ast-builder
+                              // builds from a `match-block`'s `armsRaw` so the
+                              // markup-expansion passes (CE / formFor / tableFor
+                              // walkers) can reach a use-site inside a match arm.
+                              // The native parser handles arm bodies via its own
+                              // route (no `armsRaw` re-parse enrichment); this is
+                              // a live-pipeline-internal expansion-support field
+                              // with no native analogue, NOT a semantic
+                              // divergence — both routes render identically.
+  "_matchArmBodyForm",        // companion tag on each armBodyChildren wrapper
+                              // (self-closing / shorthand / bare-body) — same
+                              // live-only expansion-support metadata class.
 ]);
 
 // ---------------------------------------------------------------------------

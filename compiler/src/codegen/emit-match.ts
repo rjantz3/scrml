@@ -653,7 +653,46 @@ function buildMatchArms(
     // parser path resolves bare identifiers, literals, member access,
     // function calls — anything `${expr}` accepts inside markup.
     let body: any[] = [];
-    if (entry.bodyForm === "shorthand" && entry.bodyRaw && entry.bodyRaw.trim().length > 0) {
+
+    // g-formfor-in-match-arm (S177) — when the arm body hosted a `<formFor>` or
+    // a user-component USE-SITE, the markup-expansion passes (CE + the
+    // type-system formFor walker) have already expanded it IN PLACE inside the
+    // ast-builder-built `matchBlock.armBodyChildren` wrapper for this variant
+    // (mirrors the engine state-child `bodyChildren` path). Consume that
+    // EXPANDED wrapper body — re-parsing `entry.bodyRaw` here would re-introduce
+    // the RAW `<formFor>` / `<Badge>` tag (silent non-render; for an empty
+    // `onsubmit=${}` also invalid JS). Gate: bare-body arm, an armBodyChildren
+    // wrapper exists for this variant, AND the raw body actually contained a
+    // formFor or a (PascalCase) component opener — so plain arms + the
+    // each-in-arm path (which needs codegen's each-block id-restamping below)
+    // keep the existing `armsRaw` re-parse. `<each>` bodies stay on the
+    // re-parse path even when they also carry a formFor/component (rare) so the
+    // each id-restamping is not lost; such a combination is not in the v1
+    // adopter surface and degrades to the prior (each-correct) behavior.
+    let consumedExpandedArmBody = false;
+    if (
+      entry.bodyForm === "bare-body" &&
+      entry.bodyRaw &&
+      Array.isArray((matchBlock as any).armBodyChildren) &&
+      !/<\s*each\b/.test(entry.bodyRaw) &&
+      (/<\s*(?:formFor|tableFor)\b/i.test(entry.bodyRaw) || /<\s*[A-Z][A-Za-z0-9_]*[\s/>]/.test(entry.bodyRaw))
+    ) {
+      const wrapper = ((matchBlock as any).armBodyChildren as any[]).find(
+        (w) => w && w.kind === "markup" && w.tag === entry.variantName,
+      );
+      if (wrapper && Array.isArray(wrapper.children) && wrapper.children.length > 0) {
+        // Raw `<formFor>` / un-expanded component would still be present if
+        // expansion did NOT run (e.g. CE short-circuited) — only consume the
+        // wrapper when expansion actually landed (no residual user-component
+        // markup; formFor lowered to a `<form data-scrml-formfor>` element).
+        body = wrapper.children;
+        consumedExpandedArmBody = true;
+      }
+    }
+
+    if (consumedExpandedArmBody) {
+      // body already set from the expanded armBodyChildren wrapper.
+    } else if (entry.bodyForm === "shorthand" && entry.bodyRaw && entry.bodyRaw.trim().length > 0) {
       const trimmed = entry.bodyRaw.trim();
       // S138 Bug 53 — markup-as-value `:`-shorthand body (e.g., `<Idle> : <p>Idle</p>`)
       // routes through the bare-body markup parser instead of parseExprToNode.

@@ -16,7 +16,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
-| MED | 9 |
+| MED | 8 |
 | LOW | 12 |
 | Nominal (spec-ahead-of-impl) | 9 |
 <!-- @generated:gap-counts END -->
@@ -86,14 +86,26 @@ Pre-existing UNIFORM gap surfaced by the `now()` capability work: the §48 fn-bo
 
 > Surfaced by the bug-tail 6-fix batch (R26-triage of the open registry → 6 fixes + 6 stale-open closes + 6 defer re-confirmations). This one NEW finding is the sibling gap the r27-c6 fix disclosed.
 
-### G-FORMFOR-IN-MATCH-ARM — a `<formFor>` nested in a `<match>` block-form ARM fails codegen (E-CODEGEN-INVALID-JS) — `NEW S177; MED; gate-caught (loud, not silent)`
-<!-- @gap id=g-formfor-in-match-arm sev=MED status=open -->
+### G-FORMFOR-IN-MATCH-ARM — markup-expansion passes skip `<match>` arms + engine `bodyChildren` → formFor + COMPONENTS silently don't render there — `RESOLVED S177 (the whole class)`
+<!-- @gap id=g-formfor-in-match-arm sev=MED status=resolved -->
 
-The S177 r27-c6 fix added `bodyChildren` recursion to the formFor-expansion walker (`walkAndExpandFormForNodes`), which now ALSO reaches a `<formFor>` nested inside a `<match>` block-form arm — but the match-arm codegen path cannot yet handle the EXPANDED formFor form, so it fails with **E-CODEGEN-INVALID-JS**. **PRE-EXISTING** (broken on the pre-r27-c6 base too — not introduced, just now reachable for expansion). The engine-state-child formFor (r27-c6) is fixed; the match-arm sibling is a separate codegen fix in the match-arm emit path.
+**RESOLVED S177 (formfor-component-expand-in-arms-s177-2026-06-09; PA-independent-RENDER-verified, not just compile).** The 3 slices + a 4th sibling (tableFor) all now expand + render:
+- the formFor walker (`walkAndSplice`) + tableFor walker + component walker (`walkAndExpand`) recurse into engine `.bodyChildren` AND a NEW `match-block.armBodyChildren`;
+- **ast-builder builds `armBodyChildren`** — a walkable per-arm body AST re-parsed from `armsRaw` (a `<match>` stores arm bodies as RAW TEXT, re-parsed only at codegen, so `.arms` was `undefined` at expansion time — the brief's "purely walker recursion" was empirically wrong; the agent surfaced this Rule-4 correction);
+- **emit-match `buildMatchArms`** consumes the expanded `armBodyChildren` wrapper for formFor/tableFor/component arms (gated; plain + each arms keep the `armsRaw` re-parse — no double-render);
+- within-node STRIP_KEYS += `armBodyChildren`/`_matchArmBodyForm` (live-only; canary 1008/0).
+- **PA RENDER-verification** (the canary lesson — this class hid behind compile-only tests): formFor-match (empty `${}` + valid handler) → `<form data-scrml-formfor>` + fields; component-engine/component-match → `<span class="badge">`; r27-c6 formFor-in-engine STILL renders; over-trigger (nested engine/match in arm) benign (identical pre/post). 13 happy-dom render tests (real DOM `querySelector` assertions) + emit-level raw-tag-absence. empty-`onsubmit=${}` `()` self-resolved by expansion. +13 tests. Full suite 23,727/0.
 
-- **Mitigation:** gate-caught (exit 1, LOUD) — NOT silent-wrong-output, so the adopter gets a clear error rather than broken runtime; but the legitimate composition (a form inside a match arm) doesn't work yet. A clear "formFor in match-arm not yet supported" diagnostic would beat the generic gate.
-- **Severity MED:** a real flagship-shaped composition fails; mitigated by the loud gate-catch. Disclosed by the r27-c6 agent; PA-verified pre-existing.
-- **Cross-refs:** r27-c6 (RESOLVED S177, the sibling fix); `docs/changes/bugtail-6fix-s177-2026-06-09/progress.md`.
+**BROADENED S177 (PA investigation — the original filed framing was too narrow).** The root is NOT "match-arm codegen can't handle the expanded form" — it is that BOTH markup-expansion passes recurse `.children`/`.body` but NOT engine `.bodyChildren` or match `.arms`: the formFor walker (`walkAndSplice` in `walkAndExpandFormForNodes`, type-system.ts) AND the component walker (`walkAndExpand`, component-expander.ts:~2710). r27-c6 patched ONLY the formFor walker's `.bodyChildren` arm. **Three broken slices** (PA-verified via raw-tag-in-emitted-output):
+- `<formFor>` in a `<match>` block-form arm → raw `<formFor>` tag emitted (empty `onsubmit=${}` → `event.preventDefault(); ();` = E-CODEGEN-INVALID-JS [the originally-filed loud case]; a VALID handler → valid-JS-but-**SILENT non-render**).
+- a custom **component** in an `<engine>` state-child body → raw `<Badge>` tag (r27-c6 fixed formFor here, NOT components).
+- a custom **component** in a `<match>` arm → raw `<Badge>` tag.
+
+[formFor in an engine state-child WORKS — r27-c6, render-verified (`<form data-scrml-formfor=...>` + field wiring emitted).]
+
+- **Severity:** silent-wrong-output (valid JS; the browser ignores the raw `<formFor>`/`<Badge>` tag; the form/component never renders — the §1 HIGH shape) on a CANONICAL composition (render a component/form per state variant). The render paths are already correct (r27-c6 proved the engine render emits the expanded formFor once expansion reaches it) — it is PURELY the walker recursion. The empty-`onsubmit=${}` loud-gate-catch is one sub-case, not the whole bug. Kept MED (zero current corpus usage — which is NOT a downgrade reason per Rule 2: the corpus is empty because the composition is undertested, not unwanted) + fix-in-flight this session.
+- **Fix shape:** extend both walkers to recurse `.bodyChildren` + `.arms`; sweep for sibling passes (tableFor, others) with the same `.children`-only blind spot; **happy-dom RENDER tests** (this whole class hid because there were only compile/emit-string tests, no render verification — the canary lesson).
+- **Cross-refs:** r27-c6 (RESOLVED S177, the formFor-in-engine slice); fix dispatch BRIEF below.
 
 ---
 

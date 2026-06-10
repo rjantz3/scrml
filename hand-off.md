@@ -30,7 +30,7 @@
 
 User picked the **bug-tail** thread ("3"). Method: R26 reverse-direction triage workflow (18 gaps, `wf_487ef351-f5a`) → classify REPRODUCES / NOT-REPRODUCED on HEAD → 6 fixable bugs (user: "All 6 reproducing bugs") + 6 stale-open closes + 6 defer re-confirms.
 
-### LANDED (staged in main, NOT yet committed — pending user commit auth)
+### LANDED + COMMITTED `b1931f02` (no push — user "commit, no push")
 - **6-fix combined dispatch** (`scrml-js-codegen-engineer`, isolation:worktree, branch `worktree-agent-a19a4331e945385f6`, FINAL_SHA `fabd1a0c`, BRIEF.md archived). File-delta'd into main (S147/S99 dual-verify CLEAN — local main 0/0, no leak). **All 6 PA-INDEPENDENT-R26-verified** + pre-commit subset **16,512/0** + full suite (agent) **23,714/0**:
   1. `bug-74` → `<span :@thing/>` fires **E-CLOSER-001** (new `isGenuineShorthandBodyNotDirective` guard; `:let.../>` directive preserved). block-splitter.js. +5.
   2. `bug-4` → `looksLikeCloser` refined: fires at EOF / before-new-opener, NOT before a close tag. **Rule-4 call: corrected 2 LOCKED tests** that locked the over-fire (SPEC §4 L13832 verified; CONF-015 EOF preserved). block-splitter.js. +7.
@@ -41,13 +41,23 @@ User picked the **bug-tail** thread ("3"). Method: R26 reverse-direction triage 
 - **NEW gap filed:** `g-formfor-in-match-arm` (MED, gate-caught-loud) — formFor in a `<match>` arm fails E-CODEGEN-INVALID-JS; PRE-EXISTING, now reachable post-r27-c6. Sibling codegen fix.
 - **Registry currency:** 6 stale-open closes (r27-c4 S151 · bug-45 S141 · bug-26 S139 · bug-34 · bug-27 not-a-bug · r27-c8 resolved-by-gate) + 6 defer re-confirms (bug-21/bug-12-vkill/bug-22/bug-75[WONTFIX-candidate]/g-component-001-coverage/r28-2b). **Count MED 10→9 · LOW 22→12 (11 net cleared).** `state.ts --check` PASS.
 
-### Commit plan (one PA-authored landing commit, pending auth)
-Staged: 5 src + 9 tests + progress.md. To add: known-gaps.md (re-marks) + BRIEF.md + master-list.md (recent-sessions regen) + hand-off.md + handOffs/hand-off-181.md. Message: `fix(s177): bug-tail 6-fix batch + registry currency pass (12 gaps re-marked, +1 filed)`.
+### Landing — COMMITTED `b1931f02` "fix(s177): bug-tail 6-fix batch + registry currency pass"
+15 fix files + known-gaps re-marks + BRIEF.md + master-list (recent-sessions regen) + hand-off + hand-off-181. Pre-commit gate PASS. Coherence **0 behind / 1 ahead of origin (PUSH-PENDING)**. Agent worktree CLEANED (worktree list = main only). All 6 fixes re-marked RESOLVED; `g-formfor-in-match-arm` filed; `state.ts --check` PASS.
+
+## 🟢 S177 (cont) — g-formfor full-class fix VERIFIED + STAGED (pending commit auth)
+
+**Agent branch `worktree-agent-abf96c71b4dfbc640` FINAL_SHA `c42f74bb`; file-delta'd into main (staged), NOT committed.** S147/S99 dual-verify CLEAN (local main 0/1 = bug-tail only). **PA-independent RENDER-verified all 4 slices** (not just compile — the canary lesson): formFor-match (empty+valid) → `<form data-scrml-formfor>`; component-engine + component-match → `<span class="badge">`; tableFor (sibling, also fixed); r27-c6 formFor-in-engine still renders; over-trigger (nested engine/match in arm) benign (identical pre/post). Agent's 13 happy-dom tests = real DOM `querySelector` assertions, 0 fail. Pre-commit subset 16,512/0; within-node 1008/0; full suite 23,727/0. Rule-4 scope-correction (the agent's, sound): match arms store bodies as raw `armsRaw` → needed a NEW walkable `match-block.armBodyChildren` (ast-builder) + emit-match consume + within-node STRIP_KEYS, not just walker recursion. g-formfor-in-match-arm RE-MARKED resolved → **MED 9→8**. Files staged: ast-builder.js · emit-match.ts · component-expander.ts · within-node-classifier.ts · type-system.ts · browser test · BRIEF.md · progress.md · known-gaps · hand-off.
+
+User picked "g-formfor" → PA investigation found it's NOT one MED bug but a **silent-non-render CLASS**: the markup-expansion walkers (formFor `walkAndSplice` type-system.ts + component `walkAndExpand` component-expander.ts) recurse `.children`/`.body` but NOT engine `.bodyChildren` or match `.arms`. **3 broken slices** (PA-verified raw-tag-in-output): formFor-in-match-arm · component-in-engine-state-child · component-in-match-arm. [formFor-in-engine WORKS — r27-c6, render-verified.] Silent-wrong-output (valid JS, raw tag browser-ignores). User ruled **"Dispatch the full-class fix."**
+- **Dispatched** (`scrml-js-codegen-engineer`, isolation:worktree, BRIEF archived at `docs/changes/formfor-component-expand-in-arms-s177-2026-06-09/BRIEF.md`): extend both walkers to recurse `.bodyChildren`+`.arms`, sweep tableFor/siblings, **mandatory happy-dom RENDER tests** (the class hid behind compile-only tests = the canary lesson).
+- **known-gaps.md `g-formfor-in-match-arm` BROADENED** (uncommitted in main; rides the fix landing) to the 3-slice class.
+- **ON LANDING:** S147 branch-leak + S99 dual-verify → **independent RENDER-verify each slice** (NOT just compile — the form/component must appear in the DOM) → file-delta → re-mark g-formfor RESOLVED + regen → commit. Then this + the broadened-gap edit + post-commit hand-off edits all land together.
 
 ## Open questions to surface immediately
-1. **COMMIT + PUSH auth** — the 6-fix batch + currency pass is verified-green, staged, NOT committed (per "confirm before first commit"). Awaiting "commit and push" / "commit, no push" / hold.
-2. **bug-75 WONTFIX?** — after-`>` engine `:`-shorthand E2E failure is on a *deprecated* form (S160). Marked WONTFIX-candidate; your call whether the deprecated form must work during its window.
-3. **Worktree cleanup** — agent worktree `agent-a19a4331e945385f6` retained until landing committed; a pre-existing stray stash (`stash@{0}` "WIP on worktree-wf_fcf9da39") noted in it, NOT the agent's.
+1. **PUSH-PENDING** — `b1931f02` is on LOCAL main (1 ahead of origin), NOT pushed (user "commit, no push"). The g-formfor fix will add a 2nd unpushed commit. Push when authorized — pre-push gate = full suite + TodoMVC (~5min). scrml-support clean (0/0), no cross-repo notices sent this session.
+2. **bug-75 — RULED keep-open** (user S177: a deprecated form should compile-with-warning during its window, not hard-fail; real bug). known-gaps updated; no longer an open question.
+3. **Stray stash** `stash@{0}` — "WIP on worktree-wf_fcf9da39" = a 1-line `compiler/src/api.js` change from S170 (orphaned; its worktree is gone). LEFT in place (not dropped — paranoia principle). Next session may `git stash show -p stash@{0}` + drop if confirmed dead.
+4. **g-formfor-in-match-arm (MED, NEW)** — formFor in a `<match>` arm fails E-CODEGEN-INVALID-JS (gate-caught loud; pre-existing, reachable post-r27-c6). Sibling codegen fix in the match-arm emit path; candidate for a future bug pass.
 
 ## Tags
 #session-177 #profile-a-full-start #open
