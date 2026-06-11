@@ -3340,6 +3340,114 @@ describe("§30 D5 — Insight 26: W-DEPRECATED-SERVER-MODIFIER", () => {
 });
 
 // ---------------------------------------------------------------------------
+// §30.1 — S180 D3.1 Gap A: W-DEPRECATED-SERVER-MODIFIER fires on lift-bearing
+// escalating server functions.
+//
+// S93 added a `!hasLiftInFunctionBody` suppression to skip ANY lift-bearing
+// body, on the (now-stale) premise that dropping `server` would trip
+// E-SYNTAX-002 (`lift` illegal in a plain `function`). S180 D1 (§10.4) made
+// lift-as-return VALID in an inferred-server plain `function`, so a
+// `lift ?{...}.all()` body supplies a `server-only-resource` escalation reason
+// and stays inferred-server after the keyword drops — the keyword IS redundant
+// and the lint SHOULD fire. D3.1 removed the suppression. The independent
+// `triggerDesc !== null` guard still protects a lift-PURE function.
+//
+// A `lift-expr` body node carrying a `{ kind: "sql" }` child mirrors the
+// `lift ?{...}.method()` AST (route-inference.ts lift-expr handler ~:1124).
+// ---------------------------------------------------------------------------
+
+describe("§30.1 D3.1 — Gap A: W-DEPRECATED fires on lift-bearing escalating server fns", () => {
+  /** A `lift ?{ SELECT ... }.all()` body statement: lift-expr wrapping a sql child. */
+  function makeLiftSql(spanStart = 30, file = "/test/app.scrml") {
+    return {
+      id: spanStart,
+      kind: "lift-expr",
+      expr: {
+        id: spanStart + 1,
+        kind: "sql",
+        query: { raw: "SELECT id FROM users" },
+        chainedCalls: [{ method: "all", args: [] }],
+        span: span(spanStart + 1, file),
+      },
+      span: span(spanStart, file),
+    };
+  }
+
+  test("server function with a lift-SQL body — fires deprecation (the SQL-lift class)", () => {
+    // The 03/07/08/17 corpus class: `server function f(){ lift ?{...}.all() }`.
+    // Pre-D3.1 this was SKIPPED by the lift-suppression; now it fires.
+    const fn = makeFunctionDecl({
+      name: "loadContacts",
+      isServer: true,
+      body: [makeLiftSql(30)],
+      spanStart: 10,
+    });
+    const fileAST = makeFileAST("/test/gapa-liftsql.scrml", [fn]);
+    fileAST.exports = [{
+      id: 5, kind: "export-decl", raw: "", exportedName: "loadContacts", exportKind: "function", span: span(5),
+    }];
+    const { errors } = runRIClean([fileAST]);
+
+    const deprec = errors.filter(e => e.code === "W-DEPRECATED-SERVER-MODIFIER");
+    expect(deprec).toHaveLength(1);
+    expect(deprec[0].severity).toBe("warning");
+    expect(deprec[0].message).toContain("loadContacts");
+    // The trigger reason is the lift's SQL → server-only-resource (sql-query).
+    expect(deprec[0].message).toContain("sql-query");
+  });
+
+  test("server function with a lift-PURE body (no escalation reason) — does NOT fire", () => {
+    // A `lift`-bearing body with NO sql/protected/channel/handle reason and no
+    // server callers: the `server` keyword is the SOLE escalation signal, so
+    // the function would client-flip if stripped. The `triggerDesc !== null`
+    // guard (preserved by D3.1) keeps the lint silent — Migration 4 leaves it.
+    const liftPure = {
+      id: 31,
+      kind: "lift-expr",
+      // No `sql` child — a lift over plain markup/expr supplies no trigger.
+      expr: { id: 32, kind: "bare-expr", expr: "someMarkup", span: span(32) },
+      span: span(31),
+    };
+    const fn = makeFunctionDecl({
+      name: "pureLift",
+      isServer: true,
+      body: [liftPure],
+      spanStart: 10,
+    });
+    const fileAST = makeFileAST("/test/gapa-liftpure.scrml", [fn]);
+    fileAST.exports = [{
+      id: 5, kind: "export-decl", raw: "", exportedName: "pureLift", exportKind: "function", span: span(5),
+    }];
+    const { errors } = runRIClean([fileAST]);
+
+    const deprec = errors.filter(e => e.code === "W-DEPRECATED-SERVER-MODIFIER");
+    expect(deprec).toHaveLength(0);
+  });
+
+  test("server function with a lift-SQL body AND a protected-field reason — still fires once", () => {
+    // Two triggers (lift-SQL + something else) must not double-fire the lint.
+    const fn = makeFunctionDecl({
+      name: "loadMessages",
+      isServer: true,
+      body: [
+        makeLiftSql(30),
+        makeLetDecl("u", "?{`SELECT 1`}.get()", 60),
+      ],
+      spanStart: 10,
+    });
+    const fileAST = makeFileAST("/test/gapa-multi.scrml", [fn]);
+    fileAST.exports = [{
+      id: 5, kind: "export-decl", raw: "", exportedName: "loadMessages", exportKind: "function", span: span(5),
+    }];
+    const { errors } = runRIClean([fileAST]);
+
+    const deprec = errors.filter(e => e.code === "W-DEPRECATED-SERVER-MODIFIER");
+    expect(deprec).toHaveLength(1);
+    expect(deprec[0].message).toContain("loadMessages");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // §31 — Bug 4 (S87 Trio A) regression: walkMarkupContext must collect
 // identifiers from string-typed expression fields on AST nodes nested INSIDE
 // markup-context logic blocks. Without the string-fallback, functions called

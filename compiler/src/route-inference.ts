@@ -3081,31 +3081,10 @@ export function runRI(input: RIInput): RIOutput {
     for (const top of nodes) walkMarkupContext(top);
   }
 
-  // Walk a function-decl's body subtree looking for any `lift-expr` node.
-  // Used by D5 (W-DEPRECATED-SERVER-MODIFIER) to suppress the "redundant
-  // keyword" lint on functions whose bodies use `lift` — `lift` requires
-  // `server function` body context per SPEC §49.6.2; removing the keyword
-  // would trip E-SYNTAX-002 at parse time. (S93 fix.)
-  function hasLiftInFunctionBody(fnNode: { body?: unknown }): boolean {
-    function walk(n: unknown): boolean {
-      if (!n || typeof n !== "object") return false;
-      const node = n as Record<string, unknown>;
-      if (node.kind === "lift-expr") return true;
-      for (const key in node) {
-        const v = node[key];
-        if (Array.isArray(v)) {
-          for (const item of v) if (walk(item)) return true;
-        } else if (v && typeof v === "object" && (v as any).kind) {
-          if (walk(v)) return true;
-        }
-      }
-      return false;
-    }
-    const body = (fnNode as any).body;
-    if (!Array.isArray(body)) return false;
-    for (const stmt of body) if (walk(stmt)) return true;
-    return false;
-  }
+  // (S93's `hasLiftInFunctionBody` lift-suppression helper was removed in S180
+  // D3.1 — see the D5 fire-path comment below. `lift` is now valid in an
+  // inferred-server plain `function` body, so a lift-bearing escalating
+  // `server function` IS a redundant-keyword site and SHOULD fire the lint.)
 
   // Now emit D4 (W-DEAD-FUNCTION) + D5 (W-DEPRECATED-SERVER-MODIFIER).
   for (const [fnNodeId, record] of analysisMap) {
@@ -3150,26 +3129,26 @@ export function runRI(input: RIInput): RIOutput {
 
     // -- D5: W-DEPRECATED-SERVER-MODIFIER -------------------------------
     //
-    // The `server` modifier is redundant ONLY when removing it leaves a
-    // syntactically + semantically equivalent function. Two cases where
-    // removal would BREAK compilation, so the lint must NOT fire:
+    // The `server` modifier is redundant exactly when removing it leaves a
+    // function that STILL escalates to server on its own — i.e. when the
+    // function has at least one NON-explicit-annotation escalation reason
+    // (the `triggerDesc !== null` guard below). The keyword adds nothing in
+    // that case, so the lint fires and Migration 4 (commands/migrate.js) can
+    // safely strip it.
     //
-    //   1. Body contains `lift-expr` nodes. Per SPEC §49.6.2, `lift` is
-    //      not valid inside a standard `function` body (E-SYNTAX-002).
-    //      `server function` bodies ARE permitted to use `lift` — the
-    //      keyword is therefore load-bearing for body context, not just
-    //      escalation. The lint's "redundant" framing is wrong for these.
-    //
-    //   2. (future) — any other syntax that requires `server function`
-    //      body context. None known today; placeholder for additions.
-    //
-    // S93 fix: tighten the predicate to skip when the body has any
-    // lift-expr descendant. Surfaced by S93 corpus-cleanup migration:
-    // 7 of 7 W-DEPRECATED-SERVER-MODIFIER sites were "remove server,
-    // file fails to compile" because their bodies used `lift ?{}.all()`.
-    // The lint correctly identified the body's escalation but missed
-    // the body-context constraint.
-    if (isExplicitServer && !hasLiftInFunctionBody(record.fnNode)) {
+    // S180 D3.1 — removed the S93 `!hasLiftInFunctionBody` suppression.
+    // S93 skipped any `lift`-bearing body on the premise that dropping
+    // `server` would trip E-SYNTAX-002 (`lift` illegal in a plain `function`).
+    // S180 D1 (§10.4, type-system.ts:14497) made `lift`-as-return VALID in an
+    // INFERRED-server plain `function` (the boundary is inferred from the body,
+    // not the keyword). So a `lift ?{...}.all()` body supplies a
+    // `server-only-resource` escalation reason (see the lift-expr handler
+    // above) and stays inferred-server after the keyword is dropped — the
+    // keyword IS redundant and the lint SHOULD fire. The `triggerDesc !== null`
+    // guard still protects a `lift`-PURE function (a `lift` body with NO
+    // sql/protected/channel/handle reason and no server callers): its
+    // `otherReasons` is empty → triggerDesc stays null → no fire.
+    if (isExplicitServer) {
       const escalation = escalationResults.get(fnNodeId);
       const otherReasons = (escalation?.deduped ?? []).filter(
         r => r.kind !== "explicit-annotation",

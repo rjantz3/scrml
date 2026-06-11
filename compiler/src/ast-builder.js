@@ -1270,6 +1270,13 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
         closerForm: null,
         isComponent: false,
         _synthetic: true,   // diagnostic marker
+        // S180 D3.1 — this synthetic block PREPENDS a fictional `${` to raw while
+        // keeping span at body[0]; the `case "logic"` handler keys on this flag
+        // to NOT advance bodyOffset past the (non-existent) `${` (else every
+        // child node span is shifted +2 — see W-DEPRECATED-SERVER-MODIFIER /
+        // Migration 4). Distinct from `_synthetic` (the export-pairing synthetic
+        // blocks carry `_synthetic` but DO have a real `${` and need the +2).
+        _bareDeclLift: true,
       });
       continue;
     }
@@ -1298,6 +1305,13 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
         isComponent: false,
         _synthetic: true,
         _toplevelStateDecl: true, // diagnostic marker
+        // S180 D3.1 — this synthetic block PREPENDS a fictional `${` to raw while
+        // keeping span at body[0]; the `case "logic"` handler keys on this flag
+        // to NOT advance bodyOffset past the (non-existent) `${` (else every
+        // child node span is shifted +2 — see W-DEPRECATED-SERVER-MODIFIER /
+        // Migration 4). Distinct from `_synthetic` (the export-pairing synthetic
+        // blocks carry `_synthetic` but DO have a real `${` and need the +2).
+        _bareDeclLift: true,
       });
       continue;
     }
@@ -1330,6 +1344,13 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
         isComponent: false,
         _synthetic: true,
         _tildeBearingLift: true,  // diagnostic marker
+        // S180 D3.1 — this synthetic block PREPENDS a fictional `${` to raw while
+        // keeping span at body[0]; the `case "logic"` handler keys on this flag
+        // to NOT advance bodyOffset past the (non-existent) `${` (else every
+        // child node span is shifted +2 — see W-DEPRECATED-SERVER-MODIFIER /
+        // Migration 4). Distinct from `_synthetic` (the export-pairing synthetic
+        // blocks carry `_synthetic` but DO have a real `${` and need the +2).
+        _bareDeclLift: true,
       });
       continue;
     }
@@ -1358,6 +1379,13 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
         isComponent: false,
         _synthetic: true,
         _atWriteLift: true,  // diagnostic marker — Unit CC lift origin
+        // S180 D3.1 — this synthetic block PREPENDS a fictional `${` to raw while
+        // keeping span at body[0]; the `case "logic"` handler keys on this flag
+        // to NOT advance bodyOffset past the (non-existent) `${` (else every
+        // child node span is shifted +2 — see W-DEPRECATED-SERVER-MODIFIER /
+        // Migration 4). Distinct from `_synthetic` (the export-pairing synthetic
+        // blocks carry `_synthetic` but DO have a real `${` and need the +2).
+        _bareDeclLift: true,
       });
       continue;
     }
@@ -13485,9 +13513,18 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       // (Phase 4a) push a `logic` frame on a bare `{` — 1-char opener.
       const prefixLen = block.raw && block.raw.startsWith("${") ? 2 : 1;
       const bodyRaw = preprocessWorkerAndStateRefs(block.raw.slice(prefixLen, block.raw.length - 1));
-      const bodyOffset = block.span.start + prefixLen;
+      // S180 D3.1 — `_bareDeclLift` blocks (liftBareDeclarations 4 sites) PREPEND
+      // a FICTIONAL `${` to `raw` but keep `span` at body[0] (the original text).
+      // For a REAL `${...}` block, span.start points at the `$`, so the body
+      // starts `prefixLen` chars in. For these synthetic blocks span.start ALREADY
+      // points at the body, so the body-offset must NOT advance — otherwise every
+      // child node span is shifted +prefixLen in source coords (breaking the
+      // W-DEPRECATED-SERVER-MODIFIER span Migration 4 reads, and others). We slice
+      // `raw` by prefixLen (the `${` IS in raw) but anchor the offset at span.start.
+      const _bodyShift = block._bareDeclLift === true ? 0 : prefixLen;
+      const bodyOffset = block.span.start + _bodyShift;
       const bodyLine = block.span.line;
-      const bodyCol = block.span.col + prefixLen;
+      const bodyCol = block.span.col + _bodyShift;
 
       // R25-Bug-42 (S138): synthetic logic blocks created by liftBareDeclarations
       // (file lines ~999/1099/1222/1248/1275/1307/1335) are wrapped in `${...}`
@@ -13524,12 +13561,16 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
             ? _subResult.blocks.find((b) => b && b.type === "logic")
             : null;
           if (_innerLogic && Array.isArray(_innerLogic.children) && _innerLogic.children.length > 0) {
-            // Adjust spans: splitBlocks's spans are relative to _wrappedSrc
-            // (whose byte 0 we treat as block.span.start). After the +block.span.start
-            // shift, child.span.start = bodyOffset + relativePositionInBodyRaw,
-            // which is what tokenizeLogic expects (it computes
-            // relStart = child.span.start - bodyOffset).
-            const _shift = block.span.start;
+            // Adjust spans: splitBlocks's spans are relative to _wrappedSrc =
+            // "${" + bodyRaw + "}" (whose body bytes start at index 2). We need
+            // child.span.start - bodyOffset === relativePositionInBodyRaw so
+            // tokenizeLogic (relStart = child.span.start - bodyOffset) recovers
+            // the position. A child at _wrappedSrc index (2 + relPos) plus _shift
+            // must equal (bodyOffset + relPos) → _shift = bodyOffset - 2. For a
+            // normal synthetic block bodyOffset = span.start + 2 so _shift =
+            // span.start (the prior value); for an S180 D3.1 `_bareDeclLift`
+            // block bodyOffset = span.start so _shift = span.start - 2.
+            const _shift = bodyOffset - 2;
             function _shiftSpans(n) {
               if (!n || typeof n !== "object") return;
               if (n.span && typeof n.span.start === "number") {

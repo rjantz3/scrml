@@ -438,3 +438,163 @@ describe("§9 no-client-flip — stripped server stays server-side", () => {
     expect(fatal).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// §10  BARE-DECL — S180 D3.1 Gaps A+B: the bare-decl (auto-lifted, no `${...}`
+//      wrapper) shape — `server function NAME(` at <program>/<page>/<channel>
+//      direct-child position. This is the example-20 / 03/07/08/17 corpus
+//      shape that the §1/§6 wrapped fixtures did NOT exercise:
+//        - Gap A: a lift-SQL body now fires W-DEPRECATED (the lift-suppression
+//          was removed).
+//        - Gap B: the bare-decl auto-lift span was off-by-2 ("rver function")
+//          so Migration 4's readWordAt skipped it — now anchored at `server`.
+//      Both must STRIP. A lift-pure bare-decl (no escalation reason) must NOT.
+// ---------------------------------------------------------------------------
+
+describe("§10 bare-decl shape (Gaps A+B) — lift-SQL + handle strip, lift-pure untouched", () => {
+  test("bare-decl `server function handle(request, resolve)` (Gap B span) → stripped", () => {
+    // The example-20 shape: handle as a <program> direct-child bare decl (no
+    // `${...}` wrapper). Pre-D3.1 the W-DEPRECATED span landed on "rver
+    // function handle" (byte+2), so readWordAt read "rver" and SKIPPED. Now
+    // anchored at `server` → stripped.
+    const source = `<program>
+  server function handle(request, resolve) {
+    const response = resolve(request)
+    response.headers.set("X-Request-Id", "abc")
+    return response
+  }
+</program>`;
+    const path = stage("bare-handle.scrml", source);
+    const r = rewriteServerFunctionKeyword(source, path);
+
+    expect(r.changed).toBe(true);
+    expect(r.count).toBe(1);
+    expect(r.rewritten).toContain(`function handle(request, resolve)`);
+    expect(r.rewritten).not.toContain(`server function handle(request, resolve)`);
+
+    // No client flip: still compiles + handle stays middleware-server.
+    const { fatal } = compileOutput(r.rewritten, path);
+    expect(fatal).toHaveLength(0);
+  });
+
+  test("bare-decl `server function f() { lift ?{...}.all() }` (Gaps A+B) → stripped", () => {
+    // The 03/07/08/17 SQL-lift class as a bare decl. Gap A (lint now fires on
+    // lift-bearing escalating fns) + Gap B (bare-decl span anchored at
+    // `server`) together let Migration 4 reach it.
+    const source = `<program>
+  server function loadContacts() {
+    lift ?{ select id, name from contacts }.all()
+  }
+  <div onclick="loadContacts()">x</>
+</program>`;
+    const path = stage("bare-liftsql.scrml", source);
+    const r = rewriteServerFunctionKeyword(source, path);
+
+    expect(r.changed).toBe(true);
+    expect(r.count).toBe(1);
+    expect(r.rewritten).toContain(`function loadContacts()`);
+    expect(r.rewritten).not.toContain(`server function loadContacts()`);
+    // The lift body is untouched.
+    expect(r.rewritten).toContain(`lift ?{ select id, name from contacts }.all()`);
+
+    // No client flip: the SQL must stay server-side.
+    const { fatal, clientJs, serverJs } = compileOutput(r.rewritten, path);
+    expect(fatal).toHaveLength(0);
+    expect(clientJs.includes("from contacts")).toBe(false);
+    expect(serverJs.includes("from contacts")).toBe(true);
+  });
+
+  test("bare-decl lift-PURE `server function` (no escalation reason) → UNTOUCHED", () => {
+    // A bare-decl `lift`-bearing body with NO sql/protected/channel/handle
+    // reason: the `server` keyword is the SOLE escalation signal. Dropping it
+    // would client-flip the fn, so W-DEPRECATED does NOT fire (the
+    // `triggerDesc !== null` guard, preserved by Gap A) → Migration 4 leaves
+    // it. This is the danger case in bare-decl form.
+    const source = `<program>
+  server function pureLift(label) {
+    lift <span>$\{label}</span>
+  }
+  <div onclick="pureLift('hi')">x</>
+</program>`;
+    const path = stage("bare-liftpure.scrml", source);
+    const r = rewriteServerFunctionKeyword(source, path);
+
+    expect(r.changed).toBe(false);
+    expect(r.count).toBe(0);
+    expect(r.rewritten).toBe(source);
+    expect(r.rewritten).toContain(`server function pureLift(label)`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §11  INTEGRATION — a single file with all four classes through the full
+//      `migrateFile --fix` path:
+//        (a) a bare-decl lift-SQL `server function`      → STRIPPED (Gaps A+B)
+//        (b) a bare-decl `server function handle(...)`    → STRIPPED (Gap B)
+//        (c) a `server fn` (pure pin)                     → UNTOUCHED
+//        (d) a bare-decl lift-PURE `server function`      → UNTOUCHED (danger)
+//      Confirms (a)+(b) strip and (c)+(d) are left, and the result compiles.
+// ---------------------------------------------------------------------------
+
+describe("§11 integration — migrate --fix reaches the SQL-lift + handle classes, preserves fn + danger", () => {
+  test("4-class fixture: (a)+(b) stripped, (c)+(d) untouched, still compiles", () => {
+    const source = `<program>
+  server function handle(request, resolve) {
+    return resolve(request)
+  }
+
+  server function loadContacts() {
+    lift ?{ select id, name from contacts }.all()
+  }
+
+  server fn pinnedPure() -> int {
+    return 1
+  }
+
+  server function pureLift(label) {
+    lift <span>$\{label}</span>
+  }
+
+  <div onclick="loadContacts()">$\{pinnedPure()}</>
+</program>`;
+    const path = stage("integration-4class.scrml", source);
+
+    // dry-run first: the Migration-4 counter must report exactly 2 strips
+    // (handle + loadContacts), NOT 4.
+    const dry = migrateFile(path, { dryRun: true, check: false, fix: true }, tmpDir);
+    expect(dry.status).toBe("changed");
+    expect(dry.migrations).toBeDefined();
+    expect(dry.migrations.serverFnKeyword).toBe(2);
+    // dry-run leaves the file unchanged.
+    expect(readFileSync(path, "utf8")).toBe(source);
+
+    // in-place --fix.
+    const r = migrateFile(path, { dryRun: false, check: false, fix: true }, tmpDir);
+    expect(r.status).toBe("changed");
+    const written = readFileSync(path, "utf8");
+
+    // (a) lift-SQL → stripped.
+    expect(written).toContain(`function loadContacts()`);
+    expect(written).not.toContain(`server function loadContacts()`);
+    // (b) handle → stripped.
+    expect(written).toContain(`function handle(request, resolve)`);
+    expect(written).not.toContain(`server function handle(request, resolve)`);
+    // (c) server fn → UNTOUCHED.
+    expect(written).toContain(`server fn pinnedPure()`);
+    // (d) lift-pure → UNTOUCHED (the keyword is the sole escalation signal).
+    expect(written).toContain(`server function pureLift(label)`);
+
+    // The migrated file still compiles (migrateFile's sanityCheckParse already
+    // proved a parse; assert no fatal compile errors for the record).
+    const compiled = compileScrml({
+      inputFiles: [path],
+      write: false,
+      gather: true,
+      log: () => {},
+    });
+    const fatal = (compiled.errors || []).filter(
+      (e) => !e.severity || e.severity === "error",
+    );
+    expect(fatal).toHaveLength(0);
+  });
+});
