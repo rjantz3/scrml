@@ -261,6 +261,26 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
   const chunks = ctx.usedRuntimeChunks;
   const allNodes: any[] = fileAST?.ast?.nodes ?? fileAST?.nodes ?? [];
 
+  // server-keyword-eliminate-2026-06-10 (D1): resolve a function-decl node's
+  // INFERRED server boundary from route-inference (§12), so the `wire`-chunk
+  // gate (case "function-decl" below) lights up for a keyless-but-escalating
+  // server fn — not just one carrying the deprecated `server` KEYWORD. Mirrors
+  // route-inference's `makeFunctionNodeId` (`${filePath}::${fnNode.span.start}`)
+  // and the canonical TS resolver (type-system.ts `functionBoundary`). The
+  // keyword (`node.isServer`) is kept as a defensive OR-fallback for any node
+  // RI did not classify (synthetic AST / no-RI call path / older FileAST shape).
+  const __riFns: Map<string, { boundary?: string }> | undefined =
+    ctx.routeMap?.functions;
+  const __chunkFilePath: string = ctx.filePath ?? fileAST?.filePath ?? "";
+  function functionDeclIsServerBoundary(node: any): boolean {
+    if (node?.isServer === true) return true;
+    if (!__riFns) return false;
+    const start = node?.span?.start;
+    if (typeof start !== "number") return false;
+    const entry = __riFns.get(`${__chunkFilePath}::${start}`);
+    return entry?.boundary === "server";
+  }
+
   // PGO Phase 3 follow-up C2 (S108) — fused TAB-time presence flags for the
   // markup-tag + for-stmt chunk-gate surfaces. The walker
   // `detectMarkupForStmtChunkPresence` (ast-builder.js) runs once at TAB time
@@ -725,8 +745,21 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
       // detectRuntimeChunks walk runs before return-type analysis would
       // be available here). A future tightening could gate on
       // `returnTypeAllowsAbsence(fn.returnTypeAnnotation)` per server-fn.
+      //
+      // server-keyword-eliminate-2026-06-10 (D1): gate on the INFERRED
+      // server boundary (route-inference §12), NOT the deprecated `server`
+      // KEYWORD. A function with an escalating body (a `?{}` SQL block, a
+      // server-only import, file-IO, a protected-field access, a server
+      // callee) is server-boundary even WITHOUT the `server` keyword —
+      // RI escalated it. Keying on `node.isServer` (the keyword flag) would
+      // drop the `wire` chunk for a keyless-but-escalating server fn, and its
+      // emitted fetch stub's `_scrml_wire_decode` reference would crash at
+      // runtime. `functionDeclIsServerBoundary` resolves the node's boundary
+      // via `ctx.routeMap` (keyed `${filePath}::${span.start}`, RI's
+      // `makeFunctionNodeId`), with the keyword as a defensive OR-fallback for
+      // any node RI did not classify (synthetic AST / no-RI call path).
       case "function-decl":
-        if ((node as any).isServer === true) {
+        if (functionDeclIsServerBoundary(node)) {
           chunks.add("wire");
         }
         break;

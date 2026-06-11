@@ -2416,7 +2416,10 @@ export function compileScrml(options = {}) {
       // sidecar — every adopter app gets the four files unconditionally so
       // the MCP server has predictable contracts to read.
       // ---------------------------------------------------------------------
-      const mcpDescriptors = buildMcpDescriptors(tabResults);
+      // server-keyword-eliminate-2026-06-10 (D1): thread the RI routeMap so the
+      // server-fn descriptor extractor surfaces INFERRED-server fns (escalating
+      // body, no `server` keyword) — not just keyword-marked `server function`s.
+      const mcpDescriptors = buildMcpDescriptors(tabResults, riResult.routeMap);
       const sidecarSpecs = [
         { name: "engines.json", body: mcpDescriptors.engines },
         { name: "forms.json", body: mcpDescriptors.forms },

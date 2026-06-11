@@ -818,17 +818,38 @@ function extractParamDescriptors(params: unknown): ServerFnParamDescriptor[] {
   return out;
 }
 
-/** Discover every `server`-prefixed function-decl across all files. Walks the
- *  file ASTs directly (FunctionDeclNode.isServer is the canonical marker per
- *  `compiler/src/types/ast.ts:827`). Cross-references `riResult.routeMap` is
- *  NOT required for discovery — `isServer` already marks server boundary at
- *  AST time. (`routeMap.functions` is keyed by node-id and is useful for
- *  AUTO-escalated server functions; for v0 we surface only EXPLICITLY-marked
- *  `server function`s — those are what an adopter authored as RPC-callable.) */
-function collectServerFnNodes(fileAST: any): Array<{ node: any; file: string }> {
+/** Discover every server-boundary function-decl across all files for MCP RPC
+ *  discovery. Walks the file ASTs directly, classifying each `function-decl`
+ *  by its INFERRED server boundary (route-inference §12), NOT the deprecated
+ *  `server` KEYWORD.
+ *
+ *  server-keyword-eliminate-2026-06-10 (D1): previously this keyed on
+ *  `FunctionDeclNode.isServer === true` (the keyword). That dropped a
+ *  keyless-but-escalating server fn — one whose body content (a `?{}` SQL
+ *  block, a server-only import, file-IO, a protected-field access, a server
+ *  callee) escalated it to the server boundary without the `server` keyword.
+ *  Such a fn IS an RPC-callable route and MUST surface in the MCP descriptors.
+ *  We now consult `routeMap.functions` (RI output, keyed
+ *  `${filePath}::${fnNode.span.start}` per `makeFunctionNodeId`); the keyword
+ *  is kept as a defensive OR-fallback for any node RI did not classify
+ *  (synthetic AST / no-RI call path). */
+function collectServerFnNodes(
+  fileAST: any,
+  routeMap?: { functions?: Map<string, { boundary?: string }> },
+): Array<{ node: any; file: string }> {
   const out: Array<{ node: any; file: string }> = [];
   if (!fileAST) return out;
   const filePath = typeof fileAST.filePath === "string" ? fileAST.filePath : "";
+  const riFns = routeMap?.functions;
+
+  function isServerBoundary(node: any): boolean {
+    if (node.isServer === true) return true;
+    if (!riFns) return false;
+    const start = node?.span?.start;
+    if (typeof start !== "number") return false;
+    const entry = riFns.get(`${filePath}::${start}`);
+    return entry?.boundary === "server";
+  }
 
   // Server fns are declared at file top or inside markup body bodies (per §12,
   // §38 channel bodies). Walk every nestable container.
@@ -838,7 +859,7 @@ function collectServerFnNodes(fileAST: any): Array<{ node: any; file: string }> 
     if (!Array.isArray(list)) return;
     for (const node of list) {
       if (!node || typeof node !== "object") continue;
-      if (node.kind === "function-decl" && node.isServer === true) {
+      if (node.kind === "function-decl" && isServerBoundary(node)) {
         out.push({ node, file: filePath });
       }
       // Descend into block-bearing containers.
@@ -851,8 +872,14 @@ function collectServerFnNodes(fileAST: any): Array<{ node: any; file: string }> 
   return out;
 }
 
-/** Collect every server-fn descriptor across every file. */
-export function collectServerFnDescriptors(tabResults: any[]): ServerFnDescriptor[] {
+/** Collect every server-fn descriptor across every file.
+ *  server-keyword-eliminate-2026-06-10 (D1): `routeMap` (RI output) is threaded
+ *  through so a keyless-but-escalating server fn surfaces, not just keyword-
+ *  marked `server function`s. */
+export function collectServerFnDescriptors(
+  tabResults: any[],
+  routeMap?: { functions?: Map<string, { boundary?: string }> },
+): ServerFnDescriptor[] {
   const descriptors: ServerFnDescriptor[] = [];
   if (!Array.isArray(tabResults)) return descriptors;
 
@@ -865,7 +892,7 @@ export function collectServerFnDescriptors(tabResults: any[]): ServerFnDescripto
     const fileAST = tab?.ast;
     if (!fileAST) continue;
 
-    const serverFns = collectServerFnNodes(fileAST);
+    const serverFns = collectServerFnNodes(fileAST, routeMap);
     for (const { node, file } of serverFns) {
       const name = typeof node.name === "string" ? node.name : null;
       if (!name) continue;
@@ -911,12 +938,17 @@ export interface McpDescriptors {
 
 /** Build all four descriptor arrays in one pass over the per-file `tabResults`.
  *  Each sub-extractor is independent — the v0 emitter SHOULD call each as a
- *  separate sidecar write (per SCOPING §3 Sub-unit A's per-sidecar shape). */
-export function buildMcpDescriptors(tabResults: any[]): McpDescriptors {
+ *  separate sidecar write (per SCOPING §3 Sub-unit A's per-sidecar shape).
+ *  server-keyword-eliminate-2026-06-10 (D1): `routeMap` (RI output) is threaded
+ *  to the server-fn extractor so inferred-server fns surface (§12). */
+export function buildMcpDescriptors(
+  tabResults: any[],
+  routeMap?: { functions?: Map<string, { boundary?: string }> },
+): McpDescriptors {
   return {
     engines: collectEngineDescriptors(tabResults),
     forms: collectFormDescriptors(tabResults),
     channels: collectChannelDescriptors(tabResults),
-    serverFns: collectServerFnDescriptors(tabResults),
+    serverFns: collectServerFnDescriptors(tabResults, routeMap),
   };
 }

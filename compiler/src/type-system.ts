@@ -14366,12 +14366,34 @@ function checkAnimationFrame(nodes: ASTNodeLike[], errors: TSError[], filePath: 
   walk(nodes, false);
 }
 
-function checkLoopControl(nodes: ASTNodeLike[], errors: TSError[], filePath: string): void {
+function checkLoopControl(
+  nodes: ASTNodeLike[],
+  errors: TSError[],
+  filePath: string,
+  routeMap?: RouteMap,
+): void {
   const LOOP_KINDS = new Set(["for-stmt", "while-stmt", "do-while-stmt", "for-loop", "while-loop"]);
   const FN_KINDS = new Set(["function-decl", "fn-decl", "fn", "function", "closure"]);
 
   function mkSpan(node: ASTNodeLike): Span {
     return (node.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+  }
+
+  // server-keyword-eliminate-2026-06-10 (D1): resolve a function-decl node's
+  // INFERRED server boundary from route-inference (§12). RI runs BEFORE TS, so
+  // `routeMap` is populated here. Used by the §10.4 lift-as-return permission
+  // (`checkLiftInFn`) so an inferred-server fn (escalating body, no `server`
+  // keyword) STILL gets lift-as-return — mirrors the canonical `functionBoundary`
+  // resolver (annotateNodes) and RI's `makeFunctionNodeId`
+  // (`${filePath}::${fnNode.span.start}`). The keyword (`node.isServer`) is kept
+  // as a defensive OR-fallback for any node RI did not classify.
+  function functionDeclIsServerBoundary(node: ASTNodeLike): boolean {
+    if ((node as { isServer?: boolean }).isServer === true) return true;
+    if (!routeMap || !routeMap.functions) return false;
+    const start = (node.span as Span | undefined)?.start;
+    if (typeof start !== "number") return false;
+    const entry = routeMap.functions.get(`${filePath}::${start}`);
+    return entry ? entry.boundary === "server" : false;
   }
 
   // E-LOOP-006: duplicate label identifiers across sibling loops in a body (§49.2.2).
@@ -14492,9 +14514,16 @@ function checkLoopControl(nodes: ASTNodeLike[], errors: TSError[], filePath: str
           mkSpan(node),
         ));
       }
-      // §10.4 targets plain `function name() {...}` only. `server function`
-      // allows lift-as-return; `fn` shorthand is covered by E-FN-008 (§48).
-      const isServer = (node as { isServer?: boolean }).isServer === true;
+      // §10.4 targets plain `function name() {...}` only. A SERVER-boundary
+      // `function` allows lift-as-return; `fn` shorthand is covered by E-FN-008
+      // (§48). server-keyword-eliminate-2026-06-10 (D1): key on the INFERRED
+      // server boundary (route-inference §12), NOT the deprecated `server`
+      // KEYWORD — an escalating-body fn (a `?{}` SQL block, a server-only
+      // import, file-IO, a protected-field access, a server callee) is
+      // server-boundary even without the keyword and must STILL be permitted
+      // lift-as-return. Keying on `node.isServer` alone would surface a spurious
+      // E-SYNTAX-002 on a keyless inferred-server fn that lifts.
+      const isServer = kind === "function-decl" && functionDeclIsServerBoundary(node);
       const fnKind = (node as { fnKind?: string }).fnKind;
       const enterFn = kind === "function-decl" && (node as { name?: string }).name && !isServer && fnKind !== "fn";
       const innerNamed = enterFn ? true : insideNamedFn;
@@ -17224,7 +17253,9 @@ function processFile(
     ?? ((fileAST.ast as FileAST | undefined)?.nodes as ASTNodeLike[] | undefined)
     ?? [];
   if (allNodes.length > 0) {
-    checkLoopControl(allNodes, errors, filePath);
+    // server-keyword-eliminate-2026-06-10 (D1): pass routeMap so the §10.4
+    // lift-as-return permission keys on the INFERRED server boundary.
+    checkLoopControl(allNodes, errors, filePath, routeMap);
   }
 
   // TS-I: §6.7.9 animationFrame diagnostics (E-LIFECYCLE-015 / E-LIFECYCLE-017).
