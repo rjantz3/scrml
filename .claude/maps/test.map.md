@@ -1,6 +1,6 @@
 # test.map.md
 # project: scrmlts
-# updated: 2026-06-11T08:36:42-06:00  commit: 5a51c1ca
+# updated: 2026-06-11T13:59:05-06:00  commit: 065fa06c
 
 ## Test Framework
 Runner: bun test (built-in Bun test runner)
@@ -227,6 +227,16 @@ NOTE (S179): these are type-pass / route-inference unit tests. Cross-stream asse
 (I-FN-PROMOTABLE is Info → result.warnings). No happy-dom needed — E-ROUTE-003/004 is a type-pass check with
 no runtime behaviour change.
 
+## S182 New Test Files (engine `effect=` diagnostics — E-ENGINE-EFFECT-NOT-INTERPOLATED + dedup engine-var double-fire)
+
+1 new file (`aba5392f`):
+
+| File | Loc | Tests | Covers |
+|------|-----|-------|--------|
+| compiler/tests/unit/engine-effect-not-interpolated.test.js | tests/unit/ | 7 (4 describe blocks) | `E-ENGINE-EFFECT-NOT-INTERPOLATED` (Error, §51.0.B / §51.0.H + §34) at BOTH loci: Fix 1 opener / Form 3 (bare `effect=load()`; empty `${ }` braces → error), Fix 1 state-child / Form 1 (bare `effect=foo()` → error, message names the tag), Fix 1 canonical-`${...}` regression (opener boot-call + state-child hook STILL emit, no false-fire), Fix 2 duplicate-engine-var mutual exclusivity (canonical `<engine>` → `E-ENGINE-VAR-DUPLICATE` only, NOT `E-ENGINE-003`; legacy `<machine>` → `E-ENGINE-003` only). |
+
+NOTE (S182): diagnostic/parser-only — the error is severity:error → asserts on `result.errors`. The canonical-`${...}` regression cases verify the boot-call / hook-firing JS is still emitted (no over-fire). Zero codegen change.
+
 ## S181 New Test Files (W-DISPLAY-TEXT-OVERQUOTE inverse-footgun lint + deprecated-`server function` diagnostic reword)
 
 2 new files (`0058c462` overquote-lint / `339f37c2` server-keyword diagnostic reword):
@@ -309,7 +319,7 @@ S160 ruling (c) tests cover the full Shape 4 dispatch matrix including the refin
 SATISFIES/VIOLATES/UNDETERMINABLE trichotomy and the `synthesizedFromNoRhs` lifecycle note path.
 
 ## Tags
-#scrmlts #map #test #bun #conformance #parser-parity #happy-dom #each-in-dynamic-context #per-item-reactivity #live-keyed #bug64 #bug65 #bug72 #bug73 #colon-shorthand-html #colon-shorthand-canonical #shape4-no-rhs #s153 #s154 #s155 #s156 #s157 #s158 #s159 #s160 #native-parser #native-parser-swap #each-promotion #match-promotion #f3-match-arm #f2-match #promote-each #typed-atcell #server-fn-star #exprnode-walker #within-node-1005 #flip-605 #flip-508 #bare-function-failable #cross-file-export-bodystart #deepset-write-loss #reactive-nested-assign #reactive-array-mutation #s161 #s162 #s163 #s164 #s165 #s166 #s167 #s168 #s169 #value-native-maps #map-type #each-tuple-destructure #union-not-normalization #s170 #set-algebra #scrml-data #bug-b-structural-compound-deepset #structural-compound-deepset #data-set-algebra #native-on-lifecycle-block #const-at-derived-decl #blockstub-verbatim-body #mario-match-arm-fix #s173 #s174 #s175 #typed-sql-row #sql-projection #width-subtyping #e-sql-row-contract-mismatch #w-sql-row-untyped #e-struct-function-field #function-boundary #fn-return-inference #flagship-typed-data #s176 #e-type-unknown-name #unrecognized-type-name #w-pure-deprecated #pure-deprecation #migration-3 #scrml-math #scrml-random #scrml-time-now #capability-scoped #non-deterministic #e-fn-004 #transitive-shim-copy #s177 #g-formfor #bug-4 #bug-48 #bug-74 #r27-c6 #r28-7b #s169-map-inline-insert #client-stdlib-inliner #s179 #e-route-003 #e-route-004 #wire-serializability #i-fn-promotable #e-fn-001 #inferred-server #s180 #w-deprecated-server-modifier #migration-4 #server-keyword-eliminate #channel-broadcast #trigger-7 #trigger-8 #handle-middleware #trucking-dispatch-smoke #s181 #w-display-text-overquote #display-text-overquote #inverse-footgun #e-unquoted-display-text #server-keyword-reword #server-keyword-canon
+#scrmlts #map #test #bun #conformance #parser-parity #happy-dom #each-in-dynamic-context #per-item-reactivity #live-keyed #bug64 #bug65 #bug72 #bug73 #colon-shorthand-html #colon-shorthand-canonical #shape4-no-rhs #s153 #s154 #s155 #s156 #s157 #s158 #s159 #s160 #native-parser #native-parser-swap #each-promotion #match-promotion #f3-match-arm #f2-match #promote-each #typed-atcell #server-fn-star #exprnode-walker #within-node-1005 #flip-605 #flip-508 #bare-function-failable #cross-file-export-bodystart #deepset-write-loss #reactive-nested-assign #reactive-array-mutation #s161 #s162 #s163 #s164 #s165 #s166 #s167 #s168 #s169 #value-native-maps #map-type #each-tuple-destructure #union-not-normalization #s170 #set-algebra #scrml-data #bug-b-structural-compound-deepset #structural-compound-deepset #data-set-algebra #native-on-lifecycle-block #const-at-derived-decl #blockstub-verbatim-body #mario-match-arm-fix #s173 #s174 #s175 #typed-sql-row #sql-projection #width-subtyping #e-sql-row-contract-mismatch #w-sql-row-untyped #e-struct-function-field #function-boundary #fn-return-inference #flagship-typed-data #s176 #e-type-unknown-name #unrecognized-type-name #w-pure-deprecated #pure-deprecation #migration-3 #scrml-math #scrml-random #scrml-time-now #capability-scoped #non-deterministic #e-fn-004 #transitive-shim-copy #s177 #g-formfor #bug-4 #bug-48 #bug-74 #r27-c6 #r28-7b #s169-map-inline-insert #client-stdlib-inliner #s179 #e-route-003 #e-route-004 #wire-serializability #i-fn-promotable #e-fn-001 #inferred-server #s180 #w-deprecated-server-modifier #migration-4 #server-keyword-eliminate #channel-broadcast #trigger-7 #trigger-8 #handle-middleware #trucking-dispatch-smoke #s181 #w-display-text-overquote #display-text-overquote #inverse-footgun #e-unquoted-display-text #server-keyword-reword #server-keyword-canon #s182 #e-engine-effect-not-interpolated #engine-effect #effect-interpolated #engine-var-dedup #e-engine-003
 
 ## Links
 - [primary.map.md](./primary.map.md)

@@ -1,6 +1,6 @@
 # error.map.md
 # project: scrmlts
-# updated: 2026-06-11T08:36:42-06:00  commit: 5a51c1ca
+# updated: 2026-06-11T13:59:05-06:00  commit: 065fa06c
 
 scrml's own language error model is values-not-exceptions (SPEC §19.1 — no try/catch, no throw).
 The compiler itself surfaces structured CGError objects to the caller; it never throws on bad input.
@@ -36,8 +36,9 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 | E-DERIVED-* | 7 | Derived-value errors (circular-dep, engine-no-initial/rules/write, value-mutate) |
 | E-DG-* | 2 | Dependency graph errors — E-DG-002 false-positive fix: credits lambda-body @var reads + `<match on=@cell>` block-form headers [dependency-graph.ts]; Bug 60 (S157): render-by-tag tag-name structural-read credit added (cells consumed ONLY through render-by-tag no longer fire E-DG-002); S159: `<span : @label>` body synthesis in ast-builder.js clears the prior false-fire for cells consumed via `:`-shorthand |
 | E-EACH-ITER-SHAPE | 1 | Each iteration shape errors: missing-or-both `of`/`in` attrs [ast-builder.js] |
-| E-ENGINE-* | ~20 | Engine declaration errors (incl. E-ENGINE-010: `given` guard in type-level transitions block); +4 NEW S154-S155 codes (see Key New Codes below) |
+| E-ENGINE-* | ~21 | Engine declaration errors (incl. E-ENGINE-010: `given` guard in type-level transitions block); +4 NEW S154-S155 codes + E-ENGINE-EFFECT-NOT-INTERPOLATED (S182 NEW) (see Key New Codes below) |
 | E-ENGINE-ACCEPTS-NOT-ENUM | 1 | **(S154-S155 NEW)** `<engine for=T accepts=MsgType>` — `MsgType` is not a declared `:enum` type (or is absent from typeDecls). Fired at SYM PASS 11 in symbol-table.ts [symbol-table.ts:5939] |
+| E-ENGINE-EFFECT-NOT-INTERPOLATED | 1 | **(S182 NEW — SPEC §51.0.B / §51.0.H + §34, Error)** A `effect=` value (engine opener Form 3 boot-effect AND state-child Form 1) is a bare / non-`${...}` expression (`effect=load()`, empty/unbalanced braces) instead of the REQUIRED §7 logic-context `${...}` block. Previously captured as null → SILENTLY tree-shaken (the effect never ran); now a hard error. The bare single-expression handler sugar (`onclick=load()`, §5.2.3) does NOT extend to `effect=`. Fires at BOTH loci: opener boot-effect (SYM PASS 10.A) + state-child `effect=` (SYM PASS 17). [symbol-table.ts:5463 `fireEngineEffectNotInterpolated`]. Fatal. |
 | E-ENGINE-MSG-WITHOUT-ACCEPTS | 1 | **(S155 NEW)** A state-child declares a message arm (`\| .V :>`) but the engine opener has no `accepts=` attribute. Fired at PASS 20 [symbol-table.ts:6512] |
 | E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE | 1 | **(S155 NEW)** A state-child has message arms but the set does not cover all `accepts=` enum variants and carries no wildcard `\| _ :>` arm. Fired at PASS 20 [symbol-table.ts:6543] |
 | E-ENGINE-MSG-UNKNOWN | 1 | **(S155 NEW)** `.advance(.X)` targets a variant in NEITHER the state-transition plane NOR the message-dispatch plane [type-system.ts:8322] |
@@ -126,6 +127,10 @@ No new diagnostics; existing codes extended. `accepts=MsgType` is recorded verba
 - **E-ENGINE-MSG-WITHOUT-ACCEPTS** — state-child has message arms but engine has no `accepts=`. SYM PASS 20, symbol-table.ts. Fatal.
 - **E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE** — message-arm set does not cover all `accepts=` enum variants and has no wildcard. SYM PASS 20, symbol-table.ts. Fatal.
 - **E-ENGINE-MSG-UNKNOWN** — `.advance(.X)` variant is in neither the state-transition plane nor the message-dispatch plane. type-system.ts. Fatal.
+
+### S182 — engine `effect=` diagnostics (aba5392f)
+- **E-ENGINE-EFFECT-NOT-INTERPOLATED** (NEW, Error) — `effect=` (engine opener Form 3 boot-effect §51.0.H + state-child Form 1 §51.0.H) must be the §7 logic-context `${...}` block; a bare / non-`${...}` value (`effect=load()`, empty/unbalanced braces) was previously captured as null and SILENTLY tree-shaken (the effect never ran). Now a hard error at BOTH loci: opener boot-effect (SYM PASS 10.A) + state-child `effect=` (SYM PASS 17). The bare single-expression handler sugar (`onclick=load()`, §5.2.3) does NOT extend to `effect=`. Fire helper `fireEngineEffectNotInterpolated(decl, locus, subject, badSlice, ...)` [symbol-table.ts:5447]. Parser threads `openerEffectMalformed` / `effectMalformed` flags (ast-builder.js markup branch + engine-statechild-parser.ts). SPEC §34 row + §51.0.B/§51.0.H `${...}`-REQUIRED clauses (Rule 4). Fatal.
+- **E-ENGINE-VAR-DUPLICATE / E-ENGINE-003 double-fire DE-DUPED** — a duplicate engine var previously fired BOTH E-ENGINE-VAR-DUPLICATE (§51.0.C, symbol-table.ts) AND legacy E-ENGINE-003 (type-system.ts buildMachineRegistry). A symmetric gate keyed on `legacyMachineKeyword` now makes them mutually exclusive: the canonical `<engine>` form yields E-ENGINE-VAR-DUPLICATE only; the legacy `<machine>` form yields E-ENGINE-003 only. Exactly one code per form. Gate at symbol-table.ts:5395 (`isLegacyMachine = engineDecl.legacyMachineKeyword === true`). Zero codegen change.
 
 ### S156 — Bug 62 + (d)-A enum-subset (4 batches)
 - **E-MATCH-SUBSET-DEAD-ARM** — dead arm inside a `<match>` on a subset-refined cell. Batch 2: type-system.ts (type-resolution path, both match loci). Batch 4: symbol-table.ts PASS 20 (string-based path, constructor-form + member-access). Both fire independently when the matched cell's type has `subsetVariants`. Fatal.
