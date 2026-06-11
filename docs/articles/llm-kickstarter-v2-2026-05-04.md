@@ -47,7 +47,7 @@ Start from the canonical shape below and modify what you need. Don't write from 
     <email> = ""
     <phone> = ""
 
-    server function persistContact(name, email, phone) {
+    function persistContact(name, email, phone) {
       ?{`INSERT INTO contacts (name, email, phone) VALUES (${name}, ${email}, ${phone})`}.run()
     }
 
@@ -58,11 +58,11 @@ Start from the canonical shape below and modify what you need. Don't write from 
       @phone = ""
     }
 
-    server function deleteContact(id) {
+    function deleteContact(id) {
       ?{`DELETE FROM contacts WHERE id = ${id}`}.run()
     }
 
-    server function loadContacts() {
+    function loadContacts() {
       lift ?{`SELECT id, name, email, phone FROM contacts ORDER BY name`}.all()
     }
   }
@@ -782,7 +782,7 @@ let email:   string(pattern(EMAIL_RE)) = "" // pattern-constrained string
 **SPARK three-zone semantics** (§53.6.1 / §53.6.2 — boundary + trusted + static zones). Briefly: predicates ONLY runtime-check at the **boundary zone** (where untrusted input enters: form submit, server-fn arg, JSON.parse result). Inside the **trusted zone** (after a predicate passed at the boundary), the type is statically narrowed; no re-check. The **static zone** is compile-time literal evaluation (`let x: number(>0) = 5` constant-folds the predicate check away). Adopters get runtime safety without the runtime cost of pervasive re-validation.
 
 ```scrml
-server function createUser(email: string(pattern(EMAIL_RE))) {
+function createUser(email: string(pattern(EMAIL_RE))) {
     // email is in the BOUNDARY zone here — runtime check happens at entry.
     // Inside this body, email is in the TRUSTED zone — no re-checks.
     ?{`INSERT INTO users (email) VALUES (${email})`}.run()
@@ -799,7 +799,7 @@ If you have any JS/TS background, your fingers will type `await` in front of eve
 
 ```scrml
 // CORRECT — no async, no await, no Promise:
-server function loadUser(id) {
+function loadUser(id) {
   return ?{`SELECT * FROM users WHERE id = ${id}`}.get()
 }
 
@@ -983,7 +983,7 @@ The validator surface above (§6.1-§6.7) covers FORM-DATA errors (the user's in
 ```scrml
 type LoadError:enum = { Network(msg: string), Empty, Unauthorized }
 
-server function loadDashboard()! -> LoadError {
+function loadDashboard()! -> LoadError {
     const rows = ?{`SELECT * FROM dashboard WHERE user_id = ${@currentUser.id}`}.all()
     if (rows.length == 0) fail LoadError::Empty
     return rows
@@ -1191,7 +1191,7 @@ ${
     Failed(message: string)
   }
 
-  server function fetchRows() {
+  function fetchRows() {
     return ?{`SELECT id, name FROM items ORDER BY name`}.all()
   }
 
@@ -1237,13 +1237,13 @@ Notes:
   ${
     import { hashPassword, verifyPassword, signJwt } from 'scrml:auth'
 
-    server function signup(email, password) {
+    function signup(email, password) {
       const hash = hashPassword(password)
       ?{`INSERT INTO users (email, password_hash) VALUES (${email}, ${hash})`}.run()
       return signJwt({ email }, process.env.JWT_SECRET, 3600)
     }
 
-    server function login(email, password) {
+    function login(email, password) {
       const user = ?{`SELECT password_hash FROM users WHERE email = ${email}`}.get()
       if (!user) return not
       return verifyPassword(password, user.password_hash)
@@ -1292,12 +1292,12 @@ ${
   })
 
   // Step 1 — user clicks "Sign in with Google" → server returns the redirect URL.
-  server function googleSigninStart(sessionId) {
+  function googleSigninStart(sessionId) {
     return startFlow(cfg, sessionId)
   }
 
   // Step 2 — Google redirects back with ?code=...&state=...
-  server function googleSigninCallback(sessionId, code, state) {
+  function googleSigninCallback(sessionId, code, state) {
     const tokens = exchangeCode(cfg, sessionId, code, state)
     const profile = getUserInfo(cfg, tokens.accessToken)
     // Persist (profile.sub, profile.email) → user row; mint your own session JWT.
@@ -1335,7 +1335,7 @@ Channels live **inside `<program>`** in v0.3 — a sibling of `<page>` (reversed
 <channel name="chat" topic="lobby">
   <messages> = []                              // synced across all clients
 
-  server function postMessage(author, body) {
+  function postMessage(author, body) {
     @messages = [...@messages, { author, body, ts: Date.now() }]
   }
 </>
@@ -1541,7 +1541,7 @@ For the remaining 20%, `server function handle(request, resolve)` is the onion-m
 ```scrml
 <program log="structured" headers="strict">
 
-${ server function handle(request, resolve) {
+${ function handle(request, resolve) {
     const reqId = crypto.randomUUID()
     const start = Date.now()
 
@@ -1560,7 +1560,7 @@ ${ server function handle(request, resolve) {
 When a value must be consumed exactly once on every execution path (auth tokens, transaction handles, payment intents, idempotency keys), declare it `lin`. The compiler refuses to let it be silently dropped or used twice. Compile-time guarantee, no runtime check.
 
 ```scrml
-server function redeem(lin ticket: string, username: string) {
+server fn redeem(lin ticket: string, username: string) {
   const consumed = ticket           // single read counts as consumption
   return `Redeemed ${consumed} for ${username}`
 }
@@ -1586,11 +1586,11 @@ type Contact:struct = { id: string, name: string, email: string }
 
 <contacts>: Contact[] = []
 
-server function loadContacts() {
+function loadContacts() {
   lift ?{`SELECT id, name, email FROM contacts ORDER BY name`}.all()
 }
 
-server function deleteContact(id) {
+function deleteContact(id) {
   ?{`DELETE FROM contacts WHERE id = ${id}`}.run()
 }
 
@@ -1764,7 +1764,7 @@ Three first-class scrml primitives for compute that needs isolation from the mai
     <program restart="never">
       // This inner <program> runs in a Worker — full scrml semantics, isolated from main.
       ${
-        server function compressImage(blob: Blob, quality: int) {
+        function compressImage(blob: Blob, quality: int) {
           // ... heavy compression work ...
           return processedBlob
         }
@@ -1811,7 +1811,7 @@ ${
   <#name="indexer">
   <program type="sidecar" restart="on-error" autostart="true">
     ${
-      server function indexNewDocs() {
+      function indexNewDocs() {
         // ... runs periodically; restarted-on-error per supervisor config ...
       }
     }

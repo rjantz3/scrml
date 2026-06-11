@@ -140,7 +140,7 @@ type LoadError:enum = {
     Empty
 }
 
-server function fetchItems()! -> LoadError {
+function fetchItems()! -> LoadError {
     const result = ?{ select * from items }
     if (result.length == 0) fail LoadError::Empty
     return result
@@ -593,7 +593,7 @@ Lifecycle on function-return type is fully tracked end-to-end. The transition me
 **Presence-progression — discrimination IS transition:**
 
 ```scrml
-server function loadUser(id: number) -> (not to User) {
+function loadUser(id: number) -> (not to User) {
     const row = ?{ select * from users where id = ${id} }.get()
     return row     // returns `User | not`; lifecycle declares the post-transition contract
 }
@@ -628,7 +628,7 @@ type Article:enum = {
     Published(body: string, publishedAt: number)
 }
 
-server function publish(id: number) -> (.Draft to .Published) {
+function publish(id: number) -> (.Draft to .Published) {
     const a = ?{ select * from articles where id = ${id} }.get()
     return a as .Published                // callee transitions; returns Published-shape
 }
@@ -816,7 +816,7 @@ D3 landed S58 — `compiler/SPEC.md` §38 / §39 / §42 / §53 / §34 are now au
 
   <channel name="chat" topic="lobby">
     <messages> = []                                    // V5-strict — auto-syncs across clients
-    ${ server function postMessage(author, body) {
+    ${ function postMessage(author, body) {
         @messages = [...@messages, { author, body, ts: Date.now() }]
     } }
   </>

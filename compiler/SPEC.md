@@ -818,7 +818,7 @@ parent's compiled output.
 
 use foreign:ml { predict }
 
-${ server function getPrediction(features, modelId) {
+${ function getPrediction(features, modelId) {
     return predict({ features, modelId })
 } }
 
@@ -835,12 +835,12 @@ applications with clear scope boundaries.
 <program db="sqlite:./primary.db">
 
 <program db="postgres://analytics:5432/metrics">
-    ${ server function getMetrics(period) {
+    ${ function getMetrics(period) {
         return ?{`SELECT * FROM daily_metrics WHERE period = ${period}`}.all()
     } }
 </>
 
-${ server function getUser(id) {
+${ function getUser(id) {
     return ?{`SELECT * FROM users WHERE id = ${id}`}.get()
 } }
 
@@ -1364,7 +1364,7 @@ Both forms are valid. The expression form is required when:
 
 ```scrml
 <items> = [{ id: 1, name: "Alpha" }, { id: 2, name: "Beta" }]
-${ server function deleteItem(id) {
+${ function deleteItem(id) {
     ?{`DELETE FROM items WHERE id = ${id}`}.run()
 } }
 
@@ -3282,7 +3282,7 @@ Cycle: @a → @b → @a
 <price> = 10
 const <total> = @price * 3
 
-${ server function saveOrder() {
+${ function saveOrder() {
     let amount = @total    // Error E-REACTIVE-003
     ?{`INSERT INTO orders (amount) VALUES (${amount})`}.run()
 } }
@@ -5410,7 +5410,7 @@ The placeholder pinning composes the static-surface invariant of `pinned` (§6.1
 
     <cards server pinned>: Card[] = []     // placeholder pinned
 
-    server function loadCards() {
+    function loadCards() {
         return ?{`SELECT * FROM cards`}.all()
     }
 
@@ -5969,7 +5969,7 @@ All scrml `?{}` source-language method semantics (bound parameters, `.all()`, `.
 
 ```scrml
 <program db="postgres://user:pass@localhost:5432/myapp">
-    ${ server function getUsers(role) {
+    ${ function getUsers(role) {
         return ?{`SELECT id, name FROM users WHERE role = ${role}`}.all()
     } }
 </>
@@ -5983,7 +5983,7 @@ driver's rows-returning method.
 
 ```scrml
 <program>
-    ${ server function getUsers() {
+    ${ function getUsers() {
         return ?{`SELECT * FROM users`}.all()   // Error E-SQL-004
     } }
 </>
@@ -6016,7 +6016,7 @@ When a SQL template contains one or more `${}` expressions, the compiler SHALL:
 **Worked example — valid (single parameter):**
 ```scrml
 < db src="auth.sql" tables="users">
-    ${ server function findUser(email) {
+    ${ function findUser(email) {
         let user = ?{`SELECT id, name FROM users WHERE email = ${email}`}.get();
         return user;
     } }
@@ -6032,7 +6032,7 @@ const [user] = await _scrml_sql`SELECT id, name FROM users WHERE email = ${email
 
 **Worked example — valid (two distinct parameters):**
 ```scrml
-${ server function findPost(userId, category) {
+${ function findPost(userId, category) {
     let posts = ?{`SELECT * FROM posts WHERE user_id = ${userId} AND category = ${category}`}.all();
     return posts;
 } }
@@ -6045,7 +6045,7 @@ db.prepare("SELECT * FROM posts WHERE user_id = ?1 AND category = ?2").all(userI
 
 **Worked example — valid (parameter deduplication):**
 ```scrml
-${ server function userActivity(userId) {
+${ function userActivity(userId) {
     let row = ?{`SELECT * FROM activity WHERE created_by = ${userId} OR updated_by = ${userId}`}.get();
     return row;
 } }
@@ -6099,7 +6099,7 @@ tagged-template, auto-`await`), see §44.
 **Worked example — dynamic query with bound parameter:**
 ```scrml
 < db src="db.sql" tables="posts">
-    ${ server function loadPosts(authorId) {
+    ${ function loadPosts(authorId) {
         let posts = ?{`SELECT title, body FROM posts WHERE author_id = ${authorId}`}.all();
         return posts;
     } }
@@ -6111,7 +6111,7 @@ tagged-template, auto-`await`), see §44.
 The canonical scrml pattern for optional filter parameters in a WHERE clause is the SQLite null-coalescing idiom: `($param IS NULL OR column = $param)`. The SQL keyword `IS NULL` is SQL vocabulary (a SQLite token, not a scrml token); the scrml-level value bound into the placeholder is `not` (§42), which the `?{}` SQL binding layer maps to SQL NULL at the wire level.
 
 ```scrml
-${ server function getPosts(category) {
+${ function getPosts(category) {
     // category may be not — pass not to retrieve all posts regardless of category
     let posts = ?{`SELECT * FROM posts WHERE (${category} IS NULL OR category = ${category})`}.all();
     return posts;
@@ -6145,7 +6145,7 @@ await _scrml_sql`SELECT * FROM posts WHERE (${category} IS NULL OR category = ${
 
 **Worked example — valid (multi-filter optional search):**
 ```scrml
-${ server function searchPosts(category, authorId) {
+${ function searchPosts(category, authorId) {
     let results = ?{`
         SELECT title, body, author_id, category
         FROM posts
@@ -6159,7 +6159,7 @@ ${ server function searchPosts(category, authorId) {
 
 **Worked example — invalid (dynamic SQL construction — not supported):**
 ```scrml
-${ server function badQuery(filterCol) {
+${ function badQuery(filterCol) {
     // INVALID: cannot construct the SQL template string at runtime
     // The content of ?{`...`} must be a fixed template, not a computed string
     let sql = "SELECT * FROM posts WHERE " + filterCol + " = 1";
@@ -6217,7 +6217,7 @@ write outcome is needed.
 
 ```scrml
 < db src="./app.db" tables="users">
-    ${ server function createUser(name, email) {
+    ${ function createUser(name, email) {
         let [row] = ?{`INSERT INTO users (name, email) VALUES (${name}, ${email}) RETURNING id`}.all()
         return row.id
     } }
@@ -6227,7 +6227,7 @@ write outcome is needed.
 **Worked example — DELETE (no return value needed):**
 
 ```scrml
-${ server function deleteSession(token) {
+${ function deleteSession(token) {
     ?{`DELETE FROM sessions WHERE token = ${token}`}.run()
 } }
 ```
@@ -6242,7 +6242,7 @@ For batch inserts, write the same `?{}` query inside a loop — Bun.SQL caches t
 statement across iterations:
 
 ```scrml
-${ server function bulkInsert(users) {
+${ function bulkInsert(users) {
     for (u of users) {
         ?{`INSERT INTO users (name, email) VALUES (${u.name}, ${u.email})`}.run()
     }
@@ -6254,7 +6254,7 @@ ${ server function bulkInsert(users) {
 Write operations that must succeed or fail atomically are wrapped in a `transaction` block:
 
 ```scrml
-${ server function transferFunds(fromId, toId, amount) {
+${ function transferFunds(fromId, toId, amount) {
     transaction {
         ?{`UPDATE accounts SET balance = balance - ${amount} WHERE id = ${fromId}`}.run()
         ?{`UPDATE accounts SET balance = balance + ${amount} WHERE id = ${toId}`}.run()
@@ -7029,7 +7029,7 @@ Return values are serialized as JSON. Supported return types:
 The compiler-generated fetch wrapper deserializes the JSON response and returns it as the declared return type. The developer uses the return value directly — no manual `fetch`, `JSON.parse`, or `await` required:
 
 ```scrml
-${ server function getUser(id) {
+${ function getUser(id) {
     return ?{`SELECT id, name, email FROM users WHERE id = ${id}`}.get()
 } }
 
@@ -7136,13 +7136,13 @@ inlined into the caller's server handler.
 **Worked example — server function calling a helper server function (valid):**
 
 ```scrml
-${ server function validateUser(id) {
+${ function validateUser(id) {
     let user = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
     if (not user) { throw "User not found" }
     return user
 } }
 
-${ server function getOrderHistory(userId) {
+${ function getOrderHistory(userId) {
     let user = validateUser(userId)   // calls another server function
     let orders = ?{`SELECT * FROM orders WHERE user_id = ${userId}`}.all()
     return { user, orders }
@@ -7210,7 +7210,7 @@ ${
 
     <usersState> = UsersState.NotAsked
 
-    server function fetchUsers() {
+    function fetchUsers() {
         return ?{`SELECT id, name, email FROM users`}.all()
     }
 
@@ -7271,7 +7271,7 @@ ${
     <submitState> = OrderSubmit.Idle
     <orders>      = []
 
-    server function createOrder(product, qty) {
+    function createOrder(product, qty) {
         ?{`INSERT INTO orders (product, qty) VALUES (${product}, ${qty})`}.run()
         return ?{`SELECT * FROM orders ORDER BY id DESC`}.all()
     }
@@ -7899,7 +7899,7 @@ warning message.
         // user has type: Users (client) = { id: number, email: string, createdAt: string }
         return user.email;
     } }
-    ${ server function authenticate(email, password) {
+    ${ function authenticate(email, password) {
         // This function is server-escalated (explicit annotation).
         // In scope: Users (full schema) — id, email, passwordHash, createdAt.
         let user = ?{`SELECT passwordHash FROM users WHERE email = ${email}`}.get();
@@ -8286,7 +8286,7 @@ The callee declares a `(not to T)` return type. The caller receives a value type
 **Server-fn declaration:**
 
 ```scrml
-server function loadUser(id: number) -> (not to User) {
+function loadUser(id: number) -> (not to User) {
     const row = ?{ select * from users where id = ${id} }.get()
     return row     // returns `User | not`; lifecycle declares the post-transition contract
 }
@@ -8351,7 +8351,7 @@ type Article:enum = {
     Published(body: string, publishedAt: number)
 }
 
-server function publish(id: number) -> (.Draft to .Published) {
+function publish(id: number) -> (.Draft to .Published) {
     const a = ?{ select * from articles where id = ${id} }.get()
     return a as .Published    // callee transitions; returns Published-shape
 }
@@ -12425,7 +12425,7 @@ against future variant additions.
 **Example 4 — Valid: partial match in function body (statement position)**
 
 ```scrml
-${ server function processEvent(event: AppEvent) {
+${ function processEvent(event: AppEvent) {
     partial match event {
         .UserLogin(userId) :> recordLogin(userId)
         .UserLogout(userId) :> recordLogout(userId)
@@ -12912,7 +12912,11 @@ If a server function is declared with `!`, the CPS-generated client wrapper SHAL
 
 ```scrml
 // Developer writes:
-server function loadUser(id)! -> UserError { ... }
+function loadUser(id)! -> UserError {
+    const row = ?{`SELECT * FROM users WHERE id = ${id}`}.get()   // ?{} escalates to server
+    if (!row) fail UserError::NotFound(id)
+    return row
+}
 
 // Compiler generates client wrapper (conceptual):
 // function loadUser(id)! -> UserError { /* CPS fetch call */ }
@@ -13561,7 +13565,7 @@ type PaymentError:enum = {
 
 ```scrml
 ${
-    server function processPayment(amount, customerId)! -> PaymentError {
+    function processPayment(amount, customerId)! -> PaymentError {
         if (amount <= 0) fail PaymentError::InvalidAmount("Amount must be positive")
         if (amount > 10000) fail PaymentError::InvalidAmount("Amount exceeds maximum")
 
@@ -13627,7 +13631,7 @@ type AuthError:enum = {
 }
 
 ${
-    server function register(email, password)! -> AuthError {
+    function register(email, password)! -> AuthError {
         if (!isValidEmail(email)) fail AuthError::InvalidEmail(email)
         if (password.length < 8) fail AuthError::WeakPassword("Password must be at least 8 characters")
 
@@ -13667,7 +13671,7 @@ type CrudError:enum = {
 }
 
 ${
-    server function updateUserProfile(userId, updates)! -> CrudError {
+    function updateUserProfile(userId, updates)! -> CrudError {
         transaction {
             let current = ?{`SELECT * FROM users WHERE id = ${userId}`}.get()
             if (!current) fail CrudError::NotFound("User", userId)
@@ -13933,7 +13937,7 @@ parsing numeric IDs (e.g., `let id = parseInt(route.params.id)`).
 ```scrml
 ${ let userId = route.params.id }
 < db src="db.sql" tables="users">
-    ${ server function loadProfile() {
+    ${ function loadProfile() {
         let user = ?{`SELECT name, avatar FROM users WHERE id = ${userId}`}.get()
         lift <div>
             <img src=user.avatar>
@@ -15751,7 +15755,7 @@ declaration inside the nested `<program>`).
 
     use foreign:ml { predict }
 
-    ${ server function getPrediction(features, modelId) {
+    ${ function getPrediction(features, modelId) {
         return predict({ features, modelId })
     } }
 </>
@@ -17335,8 +17339,8 @@ function processToken(lin token: string) {
     useToken(token)   // consumed exactly once — valid
 }
 
-server function submitRequest(lin ticket: RequestTicket) {
-    sendTicket(ticket)
+function submitRequest(lin ticket: RequestTicket) {
+    ?{`INSERT INTO requests (ticket_id) VALUES (${ticket.id})`}.run()   // consumed once; ?{} escalates to server
 }
 
 fn transform(lin src: Data, dst: Data) {
@@ -18174,7 +18178,7 @@ ${
 
 ```scrml
 ${
-    server function badFn() {
+    function badFn() {
         yield 1     // Error E-SSE-001: yield outside generator
     }
 }
@@ -18374,7 +18378,7 @@ A `<channel>` is a **scrml-defined structural element** that provides persistent
   <channel name="chat" topic="lobby">
     <messages> = []                            // V5-strict declaration; auto-syncs across clients
 
-    server function postMessage(author, body) {
+    function postMessage(author, body) {
       @messages = [...@messages, { author, body, ts: Date.now() }]
     }
   </>
@@ -18427,7 +18431,7 @@ A `<channel>` is a **scrml-defined structural element** that provides persistent
     <count> = 0                              // V5-strict declaration; auto-syncs across clients
     <messages> = []
 
-    server function postMessage(body) {
+    function postMessage(body) {
       @messages = [...@messages, { body, ts: Date.now() }]
     }
   </>
@@ -18502,7 +18506,7 @@ Reactive variables declared inside a `<channel>` body are **automatically synchr
   <messages> = []                            // auto-synced — declared inside channel body
   <count>    = 0                             // auto-synced
 
-  server function postMessage(body) {
+  function postMessage(body) {
     @messages = [...@messages, { body, ts: Date.now() }]
     @count    = @count + 1
   }
@@ -18585,7 +18589,7 @@ The `auth=` attribute on `<channel>` accepts `"required" | "optional" | "none"` 
 <channel name="chat" topic=@room>
   <count> = 0                                 // V5-strict; auto-synced
 
-  server function sendMessage(text) {
+  function sendMessage(text) {
     ?{`INSERT INTO messages (body) VALUES (${text})`}.run()
     broadcast({ type: "new_message", body: text })
   }
@@ -18598,7 +18602,7 @@ within the `<channel name="chat">` lexical scope.
 **Worked example — invalid (broadcast outside channel scope):**
 
 ```scrml
-server function sendGlobal(text) {
+function sendGlobal(text) {
   broadcast({ type: "msg", body: text })   // E-CHANNEL-004
 }
 
@@ -18639,7 +18643,7 @@ in the call expression names the value the compiler will inject, not a variable 
 <channel name="chat"
          onserver:message=handleMessage(msg)>
   ${
-    server function handleMessage(msg) {
+    function handleMessage(msg) {
       broadcast({ type: "echo", body: msg.text })
     }
   }
@@ -18862,7 +18866,7 @@ payload at receive time:
 ```scrml
 <channel name="driver-events">
   <events> = []                              // V5-strict; auto-synced
-  server function postEvent(driverId, body) {
+  function postEvent(driverId, body) {
     broadcast({ targetDriverId: driverId, body, ts: Date.now() })
   }
 </>
@@ -18964,7 +18968,7 @@ being declared inside a channel body, see §38.4.)
 // channels/dispatch.scrml — PURE-CHANNEL-FILE (see §38.12.6)
 export <channel name="chat" topic="lobby">
   <messages> = []                              // V5-strict; auto-synced via channel body
-  server function postMessage(author, body) {
+  function postMessage(author, body) {
     @messages = [...@messages, { author, body, ts: Date.now() }]
   }
 </>
@@ -19153,7 +19157,7 @@ A `<schema>` block appears as an immediate child of the `<program>` root, alongs
 </>
 
 < db src="./app.db" protect="password_hash" tables="users, posts">
-    ${ server function getUser(id) {
+    ${ function getUser(id) {
         return ?{`SELECT id, email, name FROM users WHERE id = ${id}`}.get()
     } }
 </>
@@ -19735,7 +19739,7 @@ INTEGER timestamps for cross-driver portability. TTL eviction is lazy on read; c
 ```scrml
 <program db="./app.db" log="structured" cors="*">
 
-${ server function handle(request, resolve) {
+${ function handle(request, resolve) {
     // Pre-middleware: runs before the matched route handler
     const start = Date.now()
 
@@ -19754,7 +19758,7 @@ ${ server function handle(request, resolve) {
 #### 39.3.2 Signature
 
 ```
-server function handle(request: Request, resolve: (req: Request) => Response) -> Response
+function handle(request: Request, resolve: (req: Request) => Response) -> Response
 ```
 
 - `request` is the raw Bun `Request` object.
@@ -19786,7 +19790,7 @@ The compiler-auto middleware order relative to `handle()` is fixed. If the devel
 `handle()` MAY return a response directly without calling `resolve()`. This short-circuits the pipeline and prevents the route handler from running.
 
 ```scrml
-${ server function handle(request, resolve) {
+${ function handle(request, resolve) {
     if (!isAllowedIP(request)) {
         return new Response("Forbidden", { status: 403 })
     }
@@ -19808,7 +19812,7 @@ The developer MAY combine `<program>` attributes with `handle()`. They are not m
 ```scrml
 <program db="./app.db" cors="*" log="structured" headers="strict">
 
-${ server function handle(request, resolve) {
+${ function handle(request, resolve) {
     // Add request ID before dispatch
     const reqId = crypto.randomUUID()
     const response = resolve(request)
@@ -20607,7 +20611,7 @@ import { parseVariant } from 'scrml:data'
 type LoadResult:enum = { Success(rows: int), Empty, Failed(reason: string) }
 type LoadError:enum  = { Malformed(reason: string), Network(msg: string) }
 
-server function loadResult()! -> LoadError {
+function loadResult()! -> LoadError {
     const raw = fetch("https://api.example.com/results")
     const result = parseVariant(raw, LoadResult) !{
         | ::ParseError msg :> { fail LoadError::Malformed(msg) }
@@ -20681,7 +20685,7 @@ type Signup:struct = {
     agree:   boolean req
 }
 
-server function persistSignup(values: Signup) ! SignupError {
+function persistSignup(values: Signup) ! SignupError {
     ?{ insert into users { ${values} } }
 }
 
@@ -28479,13 +28483,13 @@ ${
     // server-authoritative source they derive from.
     const <todoCards> = @cards.filter(c => c.column == Column.Todo)
 
-    server function createCard(title, desc, col) {
+    function createCard(title, desc, col) {
         ?{`INSERT INTO cards (title, description, column_name, position)
            VALUES (${title}, ${desc}, ${col}, ${@cards.length})`}.run()
         return ?{`SELECT * FROM cards WHERE id = last_insert_rowid()`}.get()
     }
 
-    server function updateCard(id, title, desc) {
+    function updateCard(id, title, desc) {
         ?{`UPDATE cards SET title = ${title}, description = ${desc} WHERE id = ${id}`}.run()
     }
 
@@ -28554,7 +28558,7 @@ This restriction prevents a single type from appearing in two authority contexts
 <CardDraft> @draft      // client-local
 
 // The authority boundary is explicit: submitDraft is the crossing point.
-server function submitDraft(draft: CardDraft): Card {
+function submitDraft(draft: CardDraft): Card {
     ?{`INSERT INTO cards (title, column_name) VALUES (${draft.title}, ${draft.column})`}.run()
     return ?{`SELECT * FROM cards WHERE id = last_insert_rowid()`}.get()
 }
@@ -28637,11 +28641,11 @@ A `<varName server>` with an initial value of `not` (§42) means "no placeholder
 const <todoCards> = @cards.filter(c => c.column == "Todo")
 
 ${
-    server function loadCards() {
+    function loadCards() {
         return ?{`SELECT * FROM cards ORDER BY position ASC`}.all()
     }
 
-    server function createCard(title, desc, col, pos) {
+    function createCard(title, desc, col, pos) {
         ?{`INSERT INTO cards (title, description, column_name, position)
            VALUES (${title}, ${desc}, ${col}, ${pos})`}.run()
         return ?{`SELECT * FROM cards WHERE id = last_insert_rowid()`}.get()
@@ -28706,7 +28710,7 @@ E-AUTH-002: '<doubleCount server>' is declared server-authoritative, but its ini
   value derives from '@localCount', which is client-local.
   A server-authoritative cell's initial value must not derive directly from a
   client-local cell. Use a server function as the authority boundary:
-    server function computeDouble(n) { return n * 2 }
+    server fn computeDouble(n) { return n * 2 }
     <doubleCount server> = computeDouble(@localCount)
   Or reconsider whether @doubleCount should be server-authoritative.
 ```
@@ -28775,7 +28779,7 @@ ${
     // Somewhere in the logic block:
     @cards = loadCards()
 
-    server function loadCards() {
+    function loadCards() {
         return ?{`SELECT * FROM cards ORDER BY position ASC`}.all()
     }
 }
@@ -29008,7 +29012,7 @@ This decomposition follows the same shape as scrml's other type-vs-instance bina
     <cartItemCount server>: number = 0       // independent singleton
     <draftMessage>: string = ""              // client-local for comparison
 
-    server function loadCurrentUser() {
+    function loadCurrentUser() {
         return ?{`SELECT id FROM users WHERE session = ${@sessionToken}`}.get().id
     }
 
@@ -29039,7 +29043,7 @@ This decomposition follows the same shape as scrml's other type-vs-instance bina
     <Card> @archivedCards       // also server-authoritative — same type, same contract
     <Card> @templateCards       // and again
 
-    server function loadCards() {
+    function loadCards() {
         return ?{`SELECT * FROM cards`}.all()
     }
 
@@ -29654,7 +29658,7 @@ write or business logic, independently of any client-side check. A server functi
 constraint cannot be bypassed by raw HTTP requests.
 
 ```scrml
-server function submitPayment(amount: number(>0 && <10000)) {
+function submitPayment(amount: number(>0 && <10000)) {
     // Compiler emits server-side boundary check at function entry
     // This check runs even if the client has already validated the value
     ?{`INSERT INTO payments (amount) VALUES (${amount})`}.run()
@@ -29678,7 +29682,7 @@ The interaction is fully composable:
 
 ```scrml
 < db src="app.db" tables="payments" protect="internalNotes">
-    server function submitPayment(amount: number(>0 && <10000)) {
+    function submitPayment(amount: number(>0 && <10000)) {
         // protect= enforced: caller must have permission to call this server function
         // predicate enforced: amount must satisfy (>0 && <10000)
         // Both are compiler-generated, not developer-written
@@ -29820,7 +29824,7 @@ Normative statements:
 ```scrml
 <program>
 
-server function submitInvoice(amount: number(>0 && <10000) [invoice_amount]) {
+function submitInvoice(amount: number(>0 && <10000) [invoice_amount]) {
     ?{`INSERT INTO invoices (amount) VALUES (${amount})`}.run()
 }
 
@@ -30183,7 +30187,7 @@ base-enum churn (§53.15.2.2). A range form in enum-subset position SHALL be rej
 const ok  = Post { title: "x", role: .Admin }    // static: OK, no runtime check
 const bad = Post { title: "x", role: .Viewer }   // static: COMPILE ERROR (.Viewer ∉ subset)
 
-server function loadPost(id: number) Post {
+function loadPost(id: number) Post {
   const row = ?{`SELECT title, role FROM posts WHERE id = ${id}`}.one()
   return Post { title: row.title, role: row.role }   // boundary: runtime check → E-CONTRACT-001-RT if .Viewer
 }
@@ -31144,7 +31148,7 @@ Two rejected alternatives:
 
     <cards server req length(>=1)>: Card[] = []
 
-    server function loadCards() {
+    function loadCards() {
         return ?{`SELECT * FROM cards`}.all()
     }
 
