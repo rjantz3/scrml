@@ -16,7 +16,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
-| MED | 6 |
+| MED | 7 |
 | LOW | 11 |
 | Nominal (spec-ahead-of-impl) | 9 |
 <!-- @generated:gap-counts END -->
@@ -51,6 +51,9 @@ Surfaced by the function-boundary recon: in `23-trucking-dispatch` callback prop
 
 ### G-ROUTE-ARG-FN — wire-serializability gate (return + arg) — `NEW S174; RESOLVED S179`
 `E-ROUTE-003` (§12.5) gates non-serializable RETURN types (recursive into struct fields). There was NO symmetric ARGUMENT-direction gate. **S179 SURVEY finding (corrected the premise):** `E-ROUTE-003` itself was SPEC-ONLY — emitted in ZERO source files; a spec-vs-impl divergence (§12.5 mandated a `SHALL`-error the compiler silently skipped, generating ser/deser without validating). So NEITHER direction was built. **RESOLVED S179** (dispatch `e-route-serializability-gate-2026-06-10`, agent `a9c1a0c46f5d52beb`): a wire-serializability gate (`isWireSerializable` + `checkRouteWireSerializability`) in the type pass (consuming the §12 route map + resolved types) now fires **`E-ROUTE-003`** (return) + **NEW `E-ROUTE-004`** (param) on non-serializable kinds (function, markup/`html-element`, snippet, cssClass, engine, state object), recursing struct fields / array / union / map; `asIs` allowed (escape hatch). SPEC §12.5.3 + §34 amended. PA-independent repro fired both codes; full suite 23,772/0. Deferred follow-ons (small): SSE yield-element-type check (`.skip`); un-annotated inferred-return (already rejected at decl sites). <!-- @gap id=g-route-arg-fn sev=LOW status=resolved -->
+
+### G-FN-SQL-UNENFORCED — `fn`+`?{}` SQL compiles clean (E-FN-001 unenforced) + I-FN-PROMOTABLE false-fires on inferred-server fns — `NEW S179; MED`
+**Spec-vs-impl divergence (BUG, per `feedback_dont_soft_classify_bugs`).** §48.3.1 / `E-FN-001` says `?{}` SQL inside a `fn` body SHALL be a compile error. But a live `export fn f() -> R[] { return ?{ select … }.all() }` **compiles CLEAN** — surfaced by S179 dog-fooding, PA-verified. **Scope NARROW** (probed): `E-FN-003` (state mutation) + `E-FN-004` (non-det `Date.now`) BOTH fire correctly; ONLY `E-FN-001` (SQL) is unenforced. **Mechanism:** the `?{}` server-escalates the `fn` at Route Inference (Stage 5, BEFORE TS); the fn is reclassified server, so the fn-purity walker `checkFnBodyProhibitions` (`type-system.ts:17666`, which HAS the E-FN-001 check) is skipped for it. **Sibling symptom — I-FN-PROMOTABLE false-fire:** `lint-i-fn-promotable.js:230` skips only `node.isServer` (the deprecated `server` KEYWORD), NOT body-content-escalation — so a keyword-free `function` with `?{}` (server-by-inference) wrongly gets the "promote to `fn`" lint (a promotion that would error E-FN-001). Same keyword-vs-inference blind spot as `g-server-keyword-drift`. **Fix (narrow):** (A) fire E-FN-001 on a `fn`-declared fn with `?{}`, independent of RI escalation; (B) extend the I-FN-PROMOTABLE skip-list to also skip inferred-server (body-escalated) fns. DISPATCHED S179 `e-fn-001-sql-enforce-2026-06-10` (agent). <!-- @gap id=g-fn-sql-unenforced sev=MED status=open -->
 
 ---
 
