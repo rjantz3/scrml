@@ -31,7 +31,12 @@
  *                                            stdlib `async function` is a carve-out
  *                                            and is NOT promotable to fn since fn is sync)
  *   - isGenerator                           (no `fn*` form; fn is sync + returns once)
- *   - isServer                              (server fn is its own surface §12.5)
+ *   - isServer                              (EXPLICIT `server` keyword — its own surface §12.5)
+ *   - inferred-server (RI escalated)        (body-content-escalated to the server
+ *                                            boundary: `?{}` SQL / server-only import /
+ *                                            file-IO / protected-field / server callee.
+ *                                            `node.isServer` is FALSE here — the keyword-
+ *                                            vs-inference blind spot. §56.9.1)
  *   - canFail                               (`function name!()` failable — not fn)
  *   - isHandleEscapeHatch                   (the `handle()` escape hatch §39.3.1)
  *   - errors from probe                     (body has a §48.3 violation — not fn-eligible)
@@ -65,9 +70,18 @@ import { checkFnBodyProhibitions } from "./type-system.ts";
  * @param {Map<string, object> | undefined} stateTypeRegistry — type-name → ResolvedType
  *        (the cross-file state-type registry; passed through to
  *        `checkFnBodyProhibitions` so the probe can run E-STATE-COMPLETE.)
+ * @param {Set<string> | undefined} inferredServerKeys — set of
+ *        `${filePath}::${fnNode.span.start}` keys for functions route-inference
+ *        escalated to the SERVER boundary (§12.2). Built in api.js from
+ *        `riResult.routeMap.functions`. A function in this set runs on the
+ *        server (by body-content `?{}`/`Bun.*`/file-IO/caller-context OR by the
+ *        explicit `server` keyword) and therefore must NOT be suggested for
+ *        promotion to a pure `fn` (§56.9.1 skip-list) — the keyword-only
+ *        `node.isServer` flag misses the body-content-escalated case (the
+ *        keyword-vs-inference blind spot, g-server-keyword-drift).
  * @returns {Array<LintDiagnostic & { filePath: string }>}
  */
-export function runIFnPromotable(files, stateTypeRegistry) {
+export function runIFnPromotable(files, stateTypeRegistry, inferredServerKeys) {
   const diagnostics = [];
   if (!files || !Array.isArray(files)) return diagnostics;
 
@@ -97,7 +111,7 @@ export function runIFnPromotable(files, stateTypeRegistry) {
     const nonPureFnNames = collectNonPureFnNames(root);
 
     for (const node of candidates) {
-      if (!isStructurallyEligible(node)) continue;
+      if (!isStructurallyEligible(node, filePath, inferredServerKeys)) continue;
 
       // Probe: invoke checkFnBodyProhibitions against a discarded errors
       // sink. The walker is non-mutating w.r.t. the AST; if it produces
@@ -220,14 +234,36 @@ function collectNonPureFnNames(file) {
  * doc-comment "skip-list" for the full rationale.
  *
  * @param {object} node — function-decl node
+ * @param {string} [filePath] — owning file path (for the inferred-server key)
+ * @param {Set<string> | undefined} [inferredServerKeys] — RI server-boundary
+ *        keys (`${filePath}::${span.start}`); see `runIFnPromotable` param doc
  * @returns {boolean}
  */
-function isStructurallyEligible(node) {
+function isStructurallyEligible(node, filePath, inferredServerKeys) {
   if (!node || node.kind !== "function-decl") return false;
   if (node.fnKind === "fn") return false;               // already promoted
   if (node.isAsync) return false;                       // sync vs async mismatch
   if (node.isGenerator) return false;                   // no fn* form
-  if (node.isServer) return false;                      // server fn is its own surface
+  if (node.isServer) return false;                      // EXPLICIT `server` keyword
+  // Route-inference (§12.2) escalated this function to the server boundary by
+  // BODY CONTENT (`?{}` SQL, a `scrml:fs`/server-only import, file-IO, a
+  // protected-field access, or a transitive server callee) — NOT the `server`
+  // keyword. `node.isServer` is the deprecated keyword flag and is FALSE for
+  // this inferred-server case (the keyword-vs-inference blind spot,
+  // g-server-keyword-drift). A server function is never a pure-`fn` candidate,
+  // so skip it. The key shape mirrors route-inference's `makeFunctionNodeId`
+  // (`${filePath}::${fnNode.span.start}`). Defensive: only consult the set when
+  // both it and a usable `span.start` are present (a single-file / no-RI call
+  // path passes `undefined` and falls through to the probe, unchanged).
+  if (
+    inferredServerKeys &&
+    inferredServerKeys.size > 0 &&
+    node.span &&
+    typeof node.span.start === "number" &&
+    inferredServerKeys.has(`${filePath || ""}::${node.span.start}`)
+  ) {
+    return false;
+  }
   if (node.canFail) return false;                       // failable form is `function name!()`
   if (node.isHandleEscapeHatch) return false;           // §39.3.1 escape hatch
   if (!Array.isArray(node.body)) return false;          // nothing to probe

@@ -1783,7 +1783,26 @@ export function compileScrml(options = {}) {
   // CLI `bun scrml promote --fn` is a deferred follow-up (S122+).
   if (Array.isArray(tsResult.files) && tsResult.files.length > 0) {
     try {
-      const fnPromotableDiags = runIFnPromotable(tsResult.files, tsResult.stateTypeRegistry);
+      // Build the inferred-server skip set (e-fn-001-sql-enforce-2026-06-10
+      // Fix B): every function route-inference escalated to the SERVER boundary
+      // (§12.2) — by body content (`?{}` SQL / server-only import / file-IO /
+      // protected-field / server callee) OR the explicit `server` keyword. Key
+      // shape mirrors route-inference `makeFunctionNodeId`
+      // (`${filePath}::${fnNode.span.start}`). I-FN-PROMOTABLE must NOT suggest
+      // promoting a server function to a pure `fn`; the lint's keyword-only
+      // `node.isServer` flag misses the body-content-escalated case.
+      const inferredServerKeys = new Set();
+      const riFns = riResult.routeMap?.functions;
+      if (riFns) {
+        for (const [key, fnRoute] of riFns) {
+          if (fnRoute && fnRoute.boundary === "server") inferredServerKeys.add(key);
+        }
+      }
+      const fnPromotableDiags = runIFnPromotable(
+        tsResult.files,
+        tsResult.stateTypeRegistry,
+        inferredServerKeys,
+      );
       for (const d of fnPromotableDiags) {
         allLintDiagnostics.push(d);
         if (verbose) log(`  [LINT] ${d.filePath}:${d.line}:${d.column} ${d.code}: ${d.message}`);

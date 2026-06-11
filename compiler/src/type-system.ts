@@ -17673,13 +17673,19 @@ function checkFnBodyProhibitions(
           stmtSpan,
         ));
       }
-      // v0.2.4 bug-1-anomaly-2: `let x = ?{...}` / `const x = ?{...}` now
-      // attaches a structured sqlNode (see ast-builder tryConsumeSqlInit
-      // wired into let/const-decl paths). The text-heuristic at line ~9555
-      // below scans nodeText(stmt) but with sqlNode the init text is "" —
-      // miss. Catch the structured form explicitly.
-      if ((stmt.kind === "let-decl" || stmt.kind === "const-decl") &&
-          (stmt as any).sqlNode && (stmt as any).sqlNode.kind === "sql") {
+      // v0.2.4 bug-1-anomaly-2 + e-fn-001-sql-enforce-2026-06-10: a structured
+      // `sqlNode` is attached to the carrying statement when `?{...}` appears in
+      // an init/return position (ast-builder `tryConsumeSqlInit` for let/const
+      // decls, and the return-stmt `?{...}.method()` path which stamps
+      // `return-stmt.sqlNode` with `expr === ""`). In every such case the raw
+      // text is stripped, so the `/\?\{/.test(nodeText(stmt))` heuristic below
+      // MISSES it. Fire E-FN-001 on ANY statement carrying a structured sqlNode,
+      // kind-agnostic — covers `let x = ?{}` / `const x = ?{}` / `return ?{}`
+      // and any future statement shape that stamps a sqlNode. This is the
+      // declaration-site purity contract (§48.3.1): a `fn` body with `?{}` SQL
+      // is E-FN-001 REGARDLESS of route-inference server-escalation (SPEC
+      // §48.3.1 + §33.3: "E-FN-001 fires regardless of the execution context").
+      if ((stmt as any).sqlNode && (stmt as any).sqlNode.kind === "sql") {
         errors.push(new TSError(
           "E-FN-001",
           `E-FN-001: \`fn ${fnName}\` body contains a \`?{}\` SQL access. ` +
