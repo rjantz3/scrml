@@ -85,6 +85,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `065fa06c` — wrap(s182): hand-off CLOSE + changelog S182 + master-list (23830->23837) + known-gaps (g-formfor-unimported-silent filed; LOW 11->12) + 6d state-regen + master-inbox pa-base-vendoring notice + handoff-186 rotation — **pushed**
 - `06d6c37d` — wrap(s181): hand-off CLOSE + changelog S181 + master-list (23816->23830) + known-gaps (g-server-keyword-error-msg + g-display-text-overquote RESOLVED + SSE-DD keep-deferred) + 6d state-regen (gap-counts MED6/LOW11 + recent-sessions) + 6b worktree-cleanup x2 + handoff-185 rotation — **pushed**
 - `b81fe03f` — wrap(s180): hand-off CLOSE + changelog S180 + master-list (23779->23816) + known-gaps (g-server-keyword-drift RESOLVED + g-sse-server-keyword + g-server-keyword-error-msg) + 6d state-regen + 6b worktree-cleanup x6 + handoff-184 rotation — **pushed**
 - `6e83b3dc` — wrap(s179): hand-off CLOSE + changelog S179 + master-list (23757->23779) + 6c maps PARTIAL (project-mapper crash; error.map + watermark d70f6bd8) + 6d state-doc PASS + handoff-183 rotation — **pushed**
@@ -92,7 +93,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `7c41cad2` — wrap(s177): hand-off CLOSE + changelog S177 (3 arcs) + master-list test-marker (23680->23734) + 6c maps refresh (35172d78->c48c4f71) + 6d state-doc — **pushed**
 - `0aa54fc2` — wrap(s176): hand-off CLOSE + changelog S176 (4 arcs) + master-list test-marker (23538->23680) + 6c maps refresh (049954e0->35172d78) + 6d state-doc + handoff-180 rotation — **pushed**
 - `efdec093` — wrap(s175): 6c maps refresh (f0b3cb04->049954e0) — **pushed**
-- `26b5f1e5` — wrap(s174): hand-off CLOSE + changelog S174 + known-gaps (+4 gaps) + 6c maps refresh (642950a2->f0b3cb04) + 6d state-doc + §14.8 any->asIs currency — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core

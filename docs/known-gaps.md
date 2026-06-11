@@ -17,7 +17,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
 | MED | 6 |
-| LOW | 12 |
+| LOW | 11 |
 | Nominal (spec-ahead-of-impl) | 9 |
 <!-- @generated:gap-counts END -->
 
@@ -1625,7 +1625,9 @@ Same-shape bug class surfaced by the R25-Bug-37 dispatch agent (`1ce963d0`). Bug
 ---
 
 ### G-FORMFOR-UNIMPORTED-SILENT — `<formFor>` (and likely `<schemaFor>`/`<tableFor>`) without its `scrml:data` import silently forwards as a literal tag — `NEW S182; LOW; diagnostic gap`
-<!-- @gap id=g-formfor-unimported-silent sev=LOW status=open -->
+<!-- @gap id=g-formfor-unimported-silent sev=LOW status=resolved -->
+
+**RESOLVED S183 (`10d94a29`, severity ERROR per user ruling).** New codes `E-FORMFOR-NOT-IMPORTED` + `E-TABLEFOR-NOT-IMPORTED` (both Error) fire when a `<formFor>` / `<tableFor>` markup element is present but the `scrml:data` primitive is not imported (the import-locals set is empty so the expansion walker never runs). Fix is an additive `else`-arm scan in `type-system.ts` (`scanForUnimportedTypeDataElement`) that mirrors the expansion walker's exact descent; happy path byte-unchanged. SPEC §41.14.1 / §41.16.1 normative bullets + §34 rows. **Empirical correction to this entry's S182 hypothesis:** `schemaFor` does NOT generalize — its call form (`${ schemaFor(T) }`) already hard-errors on the unimported case via `E-SCOPE-001` (which even names the missing import); only the two markup-element members were affected. Coupled fixture fix: `builtin-types-date-timestamp.test.js` §3 was locking the silent-pass bug (unimported `<tableFor>` asserting `errors === []`) — import added. PA-independent R26 verified (ff-bad/tf-bad exit 1 with the codes; ff-good still expands; corpus clean).
 
 **Surfaced S182 dog-food (round 3), empirically isolated.** A `<formFor for=Signup onsubmit=fn/>` markup element used **without** `import { formFor } from 'scrml:data'` compiles **clean — no error, no warning** — and is emitted as a **literal `<formFor>` HTML tag**, which renders as *nothing* in the browser. The form is silently NOT generated. `<formFor>` is a KNOWN registered structural element (`compiler/src/html-elements.js:656`; the type-system walker consumes it per `component-expander.ts:2829`), so the compiler recognizes the tag but silently forwards it when the expansion doesn't fire (no import in scope, or an unresolvable `for=` struct).
 
