@@ -1,6 +1,6 @@
 # test.map.md
 # project: scrmlts
-# updated: 2026-06-09T23:35:55Z  commit: c48c4f71
+# updated: 2026-06-11T00:00:00Z  commit: b81fe03f
 
 ## Test Framework
 Runner: bun test (built-in Bun test runner)
@@ -8,7 +8,7 @@ Config: bunfig.toml (timeout + happy-dom preload settings)
 Run all: `bun test compiler/tests/`
 Run single: `bun test compiler/tests/unit/<filename>.test.js`
 Coverage: `bun test compiler/tests/ --coverage`
-Full suite at S167 close: 23,075 pass / 0 fail / 220 skip / 1 todo (on 75431e9e). S168 added 2 NEW test files (cow-bracket-write-emit 7 + browser-cow-bracket-write 3) + extended equality-semantics (+6 cycle-guard) + parse-mutation-shapes (+1 COW node-shape) — not re-counted into a fresh suite total here (no full re-run); within-node native-parser parity 1005/0 (UNCHANGED — S168 bracket-write COW is a LIVE-pipeline change; native still folds bracket-write to in-place, but no new flip-failure was registered) — S169 added 13 NEW value-native-map / each-tuple / union-not test files (see S169 section below); not re-counted into a fresh suite total here. **S170: Bug B (`72aa6836`) +9 tests (5 emit-shape + 4 happy-dom) with 2 mistarget-locking tests corrected per Rule-4; set-algebra (`df08f282`) +16 value-correct unit; native-parser fix-wave-1 (`5a346faa`) +24 regression with the within-node allowlist surgically reconciled (34 over-budget → current; PARSE-FAILURE:0 / NESTED-SHAPE:0); fix-wave-2 (`cc69c62d`) +5 statement-survival canary, full suite at fix-wave-2 23405 pass / 0 fail.** native-parser flip-failures re-measured 605 on `df08f282` → ~508 after the two waves (default BS+Acorn 0-fail / fully green throughout). **S173 added +2 (E-EXPORT-001 export-reject + W-TYPE-FN-FIELD); S174 added log()-builtin / any-reject coverage; S175 added +5 typed-SQL-row files (sql-projection-extract 13 cases, sql-row-typing 4, sql-row-tranche2-width-subtype 18, sql-row-tranche3-typeflow 17, struct-fn-field-reject 11 — see the S175 section below). S176 added +6 files (unknown-type-forbidden 25, unknown-type-name-predicate 38, stdlib-math 28, stdlib-random-capability 13, stdlib-time-now-capability 8, stdlib-transitive-shim-copy 3 — see the S176 section below) + extended scrml-migrate (+Migration-3 `pure`→`fn` cases) and stdlib-shim-resolution (+2).** Current find-count (on `c48c4f71`): 948 total .test.js (940 + 8 S177; full-suite total not re-run post-S177; master-list test-marker 23538→23680 at S176 wrap).
+Full suite at S167 close: 23,075 pass / 0 fail / 220 skip / 1 todo (on 75431e9e). S168 added 2 NEW test files (cow-bracket-write-emit 7 + browser-cow-bracket-write 3) + extended equality-semantics (+6 cycle-guard) + parse-mutation-shapes (+1 COW node-shape) — not re-counted into a fresh suite total here (no full re-run); within-node native-parser parity 1005/0 (UNCHANGED — S168 bracket-write COW is a LIVE-pipeline change; native still folds bracket-write to in-place, but no new flip-failure was registered) — S169 added 13 NEW value-native-map / each-tuple / union-not test files (see S169 section below); not re-counted into a fresh suite total here. **S170: Bug B (`72aa6836`) +9 tests (5 emit-shape + 4 happy-dom) with 2 mistarget-locking tests corrected per Rule-4; set-algebra (`df08f282`) +16 value-correct unit; native-parser fix-wave-1 (`5a346faa`) +24 regression with the within-node allowlist surgically reconciled (34 over-budget → current; PARSE-FAILURE:0 / NESTED-SHAPE:0); fix-wave-2 (`cc69c62d`) +5 statement-survival canary, full suite at fix-wave-2 23405 pass / 0 fail.** native-parser flip-failures re-measured 605 on `df08f282` → ~508 after the two waves (default BS+Acorn 0-fail / fully green throughout). **S173 added +2 (E-EXPORT-001 export-reject + W-TYPE-FN-FIELD); S174 added log()-builtin / any-reject coverage; S175 added +5 typed-SQL-row files (sql-projection-extract 13 cases, sql-row-typing 4, sql-row-tranche2-width-subtype 18, sql-row-tranche3-typeflow 17, struct-fn-field-reject 11 — see the S175 section below). S176 added +6 files (unknown-type-forbidden 25, unknown-type-name-predicate 38, stdlib-math 28, stdlib-random-capability 13, stdlib-time-now-capability 8, stdlib-transitive-shim-copy 3 — see the S176 section below) + extended scrml-migrate (+Migration-3 `pure`→`fn` cases) and stdlib-shim-resolution (+2).** Current find-count (on `b81fe03f`): **955 total .test.js** (955 at S180 wrap — S179 added +2 [route-inference.test.js, server-keyword-eliminate-d1.test.js]; S180 added +5 [channel-broadcast-escalation-trigger7.test.js, handle-middleware-ri.test.js, middleware-handle.test.js, migrate-server-keyword.test.js, trucking-dispatch-smoke-integration.test.js]; master-list test-marker 23779→23816 at S180 wrap).
 
 ## Test Categories
 
@@ -22,7 +22,7 @@ Full suite at S167 close: 23,075 pass / 0 fail / 220 skip / 1 todo (on 75431e9e)
 | LSP | compiler/tests/lsp/ | ~8 files |
 | Self-host | compiler/tests/self-host/ | ~5 files |
 | CLI commands | compiler/tests/commands/ | ~5 files |
-| **Total** | compiler/tests/ | **948 .test.js files (find-count at c48c4f71; +S173, +S174, +5 S175 typed-SQL-row, +6 S176 unknown-type-name / scalar-vocabulary stdlib, +8 S177 g-formfor/bug-tail/client-stdlib-inliner)** |
+| **Total** | compiler/tests/ | **955 .test.js files (find-count at b81fe03f; +S173, +S174, +5 S175, +6 S176, +8 S177, +2 S179, +5 S180)** |
 
 ## S175 New Test Files (typed-SQL-row arc — the flagship typed-data delivery + function-boundary rule)
 
@@ -214,6 +214,34 @@ file (EXTRA-FIELD 31→32, FIELD-SHAPE 20→21, KIND-NAME 12→13, SPAN-COORD 11
 folds `@arr.push` to a bare-expr — a SEPARATE native swap-grind parity item (correct-shadow: the live fix is now
 ahead of native, the bump records the lag, it is NOT masking a regression). within-node stayed 1005/0.
 
+## S179 New Test Files (E-ROUTE-003/004 enforcement + I-FN-PROMOTABLE inferred-server skip + E-FN-001 broadening)
+
+2 new files (`d70f6bd8`):
+
+| File | Loc | Tests | Covers |
+|------|-----|-------|--------|
+| compiler/tests/unit/route-inference.test.js | tests/unit/ | ~12 | E-ROUTE-003 now enforced (non-serializable return type fires); E-ROUTE-004 NEW (non-serializable param fires); inferred-server `function` (no `server` keyword, RI-escalated) is NOT flagged by I-FN-PROMOTABLE; E-FN-001 fires on `return ?{}` inside a `fn` body |
+| compiler/tests/unit/server-keyword-eliminate-d1.test.js | tests/unit/ | ~8 | D1 codegen: the wire-chunk gate in emit-client.ts keys on inferred boundary (not `node.isServer` keyword); a keyword-free inferred-server function still gets the wire-chunk; MCP RPC discovery in mcp-descriptors.ts also keys on inferred boundary |
+
+NOTE (S179): these are type-pass / route-inference unit tests. Cross-stream assertion applies for W-/I-* codes
+(I-FN-PROMOTABLE is Info → result.warnings). No happy-dom needed — E-ROUTE-003/004 is a type-pass check with
+no runtime behaviour change.
+
+## S180 New Test Files (T7/T8 escalation + W-DEPRECATED-SERVER-MODIFIER + Migration 4 + trucking-dispatch smoke)
+
+5 new files (`bf4e51c4` D2 / `e1d4f88c` D3 / `7f641010` D4a):
+
+| File | Loc | Tests | Covers |
+|------|-----|-------|--------|
+| compiler/tests/unit/channel-broadcast-escalation-trigger7.test.js | tests/unit/ | ~8 | Trigger 7 (D2): a plain `function` inside a `<channel>` that writes a channel cell OR calls `broadcast()`/`disconnect()` is escalated to server boundary by RI; a channel function that does neither stays client; a function outside channel scope is unaffected |
+| compiler/tests/unit/handle-middleware-ri.test.js | tests/unit/ | ~5 | Trigger 8 (D2): a function named `handle` is escalated to middleware boundary by RI regardless of body content; the W-DEPRECATED-SERVER-MODIFIER lint is suppressed for `handle`-named functions (the name IS the authority) |
+| compiler/tests/unit/middleware-handle.test.js | tests/unit/ | ~4 | `handle(request, resolve)` middleware boundary classification — shape validation, `isSSE=false` for middleware, boundary===`"middleware"` |
+| compiler/tests/commands/migrate-server-keyword.test.js | tests/commands/ | ~14 | Migration 4 end-to-end: W-DEPRECATED-SERVER-MODIFIER fire-site detection + `server ` prefix strip at each diagnostic span; fail-closed (compile-error → no edit); `function*` generator excluded; `server fn` never stripped; idempotent (second run = no-op); D3.1 lift-suppression (non-triggered `server function` does NOT fire W-DEPRECATED, so Migration 4 makes no edit) |
+| compiler/tests/integration/trucking-dispatch-smoke-integration.test.js | tests/integration/ | ~26 | Full compile + codegen smoke on the migrated 23-trucking-dispatch app (channels + main files post-`server function` elimination); asserts the compile exits 0 and the trucking-dispatch routes are correctly classified server vs client after T7/T8 and Migration 4 |
+
+NOTE (S180): S180 adds ZERO new §34 codes. The W-DEPRECATED-SERVER-MODIFIER fires as Info → result.warnings
+(cross-stream helper required for test assertions). The within-node parity allowlist (`parser-conformance-within-node-allowlist.json`) was reconciled for the channel-file shape changes introduced by D4a example migration.
+
 ## S177 New Test Files (g-formfor + bug-tail batch + client stdlib-inliner)
 
 8 new files (`b1931f02` bug-tail · `75f724af` g-formfor · `c48c4f71` client stdlib-inliner):
@@ -270,7 +298,7 @@ S160 ruling (c) tests cover the full Shape 4 dispatch matrix including the refin
 SATISFIES/VIOLATES/UNDETERMINABLE trichotomy and the `synthesizedFromNoRhs` lifecycle note path.
 
 ## Tags
-#scrmlts #map #test #bun #conformance #parser-parity #happy-dom #each-in-dynamic-context #per-item-reactivity #live-keyed #bug64 #bug65 #bug72 #bug73 #colon-shorthand-html #colon-shorthand-canonical #shape4-no-rhs #s153 #s154 #s155 #s156 #s157 #s158 #s159 #s160 #native-parser #native-parser-swap #each-promotion #match-promotion #f3-match-arm #f2-match #promote-each #typed-atcell #server-fn-star #exprnode-walker #within-node-1005 #flip-605 #flip-508 #bare-function-failable #cross-file-export-bodystart #deepset-write-loss #reactive-nested-assign #reactive-array-mutation #s161 #s162 #s163 #s164 #s165 #s166 #s167 #s168 #s169 #value-native-maps #map-type #each-tuple-destructure #union-not-normalization #s170 #set-algebra #scrml-data #bug-b-structural-compound-deepset #structural-compound-deepset #data-set-algebra #native-on-lifecycle-block #const-at-derived-decl #blockstub-verbatim-body #mario-match-arm-fix #s173 #s174 #s175 #typed-sql-row #sql-projection #width-subtyping #e-sql-row-contract-mismatch #w-sql-row-untyped #e-struct-function-field #function-boundary #fn-return-inference #flagship-typed-data #s176 #e-type-unknown-name #unrecognized-type-name #w-pure-deprecated #pure-deprecation #migration-3 #scrml-math #scrml-random #scrml-time-now #capability-scoped #non-deterministic #e-fn-004 #transitive-shim-copy #s177 #g-formfor #bug-4 #bug-48 #bug-74 #r27-c6 #r28-7b #s169-map-inline-insert #client-stdlib-inliner
+#scrmlts #map #test #bun #conformance #parser-parity #happy-dom #each-in-dynamic-context #per-item-reactivity #live-keyed #bug64 #bug65 #bug72 #bug73 #colon-shorthand-html #colon-shorthand-canonical #shape4-no-rhs #s153 #s154 #s155 #s156 #s157 #s158 #s159 #s160 #native-parser #native-parser-swap #each-promotion #match-promotion #f3-match-arm #f2-match #promote-each #typed-atcell #server-fn-star #exprnode-walker #within-node-1005 #flip-605 #flip-508 #bare-function-failable #cross-file-export-bodystart #deepset-write-loss #reactive-nested-assign #reactive-array-mutation #s161 #s162 #s163 #s164 #s165 #s166 #s167 #s168 #s169 #value-native-maps #map-type #each-tuple-destructure #union-not-normalization #s170 #set-algebra #scrml-data #bug-b-structural-compound-deepset #structural-compound-deepset #data-set-algebra #native-on-lifecycle-block #const-at-derived-decl #blockstub-verbatim-body #mario-match-arm-fix #s173 #s174 #s175 #typed-sql-row #sql-projection #width-subtyping #e-sql-row-contract-mismatch #w-sql-row-untyped #e-struct-function-field #function-boundary #fn-return-inference #flagship-typed-data #s176 #e-type-unknown-name #unrecognized-type-name #w-pure-deprecated #pure-deprecation #migration-3 #scrml-math #scrml-random #scrml-time-now #capability-scoped #non-deterministic #e-fn-004 #transitive-shim-copy #s177 #g-formfor #bug-4 #bug-48 #bug-74 #r27-c6 #r28-7b #s169-map-inline-insert #client-stdlib-inliner #s179 #e-route-003 #e-route-004 #wire-serializability #i-fn-promotable #e-fn-001 #inferred-server #s180 #w-deprecated-server-modifier #migration-4 #server-keyword-eliminate #channel-broadcast #trigger-7 #trigger-8 #handle-middleware #trucking-dispatch-smoke
 
 ## Links
 - [primary.map.md](./primary.map.md)
