@@ -17,7 +17,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
 | MED | 6 |
-| LOW | 11 |
+| LOW | 12 |
 | Nominal (spec-ahead-of-impl) | 9 |
 <!-- @generated:gap-counts END -->
 
@@ -1621,6 +1621,20 @@ Same-shape bug class surfaced by the R25-Bug-37 dispatch agent (`1ce963d0`). Bug
 - **Suggested fix scope:** mechanical — extend each of the three sibling finders with the same `parenDepth`+`bracketDepth` tracking pattern Bug 37 applied to `_findEachOpenerEnd`. ~30L total across three sites + a few regression tests.
 - **Trigger to elevate:** ≥1 adopter friction report exercising inline-arrow attribute values on `<match>` / `<machine>` / `<engine>` openers OR any audit that demonstrates the shape is canonical (would re-elevate to MED).
 - **Cross-refs:** Bug 37 RESOLVED S137 `1ce963d0`; agent dispatch BRIEF.md + progress.md at `docs/changes/r25-bug-37-each-arrow-truncation-2026-05-27/`.
+
+---
+
+### G-FORMFOR-UNIMPORTED-SILENT — `<formFor>` (and likely `<schemaFor>`/`<tableFor>`) without its `scrml:data` import silently forwards as a literal tag — `NEW S182; LOW; diagnostic gap`
+<!-- @gap id=g-formfor-unimported-silent sev=LOW status=open -->
+
+**Surfaced S182 dog-food (round 3), empirically isolated.** A `<formFor for=Signup onsubmit=fn/>` markup element used **without** `import { formFor } from 'scrml:data'` compiles **clean — no error, no warning** — and is emitted as a **literal `<formFor>` HTML tag**, which renders as *nothing* in the browser. The form is silently NOT generated. `<formFor>` is a KNOWN registered structural element (`compiler/src/html-elements.js:656`; the type-system walker consumes it per `component-expander.ts:2829`), so the compiler recognizes the tag but silently forwards it when the expansion doesn't fire (no import in scope, or an unresolvable `for=` struct).
+
+**Why it matters (the failure mode, not the trigger).** It only triggers on a user mistake (a missing/misplaced import, or a malformed struct), BUT the failure mode is a **silent blank page on the flagship `formFor` demo with zero diagnostic signal** — exactly the production-fidelity footgun a "did you forget `import { formFor } from 'scrml:data'`?" diagnostic should catch. Same **silent-drop-of-a-known-construct class** as the engine opener `effect=` footgun (`engine-effect-diagnostics-2026-06-11`, the `E-ENGINE-EFFECT-NOT-INTERPOLATED` dispatch, S182). LOW because the happy path is correct + the trigger is a clear user error; the impactful failure mode is why it still earns a diagnostic.
+
+- **Empirical isolation (S182):** the canonical struct/handler (`import { formFor }` + `string req length(>=2)` space-form fields + `server function persistSignup(values: Signup) ! string`) → `<formFor>` EXPANDS to a real `<form ... action="/api/__ri_route_persistSignup_1" method="POST">` with CSRF + per-field input dispatch (string→`text`, boolean→`checkbox`) + bind wiring + labels (validated working). The SAME source **minus only the import** → silent literal `<formFor>` forward, zero diagnostic.
+- **Likely generalizes** to `<schemaFor>` / `<tableFor>` (the L22 markup-element family) — verify on fix; the recognition seam is shared (`attribute-registry.js:307` / `html-elements.js:629`).
+- **Suggested fix scope:** when an L22 markup element (`<formFor>`/`<schemaFor>`/`<tableFor>`) is present but does NOT expand (primitive not imported / `for=` struct unresolved), fire a diagnostic (W- or E-) naming the missing import. Natural follow-on to the `engine-effect-diagnostics` dispatch (same silent-drop theme). Small.
+- **Trigger to elevate:** ≥1 adopter friction report of a blank flagship form → MED.
 
 ---
 
