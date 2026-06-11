@@ -989,17 +989,17 @@ S130 HU-2 Q7 ratified `<schema>` placement as immediate child of `<program>` (pe
 
 ---
 
-### Bug 14 — MCP V0 partial-impl + deferred items — `partial-impl`
+### Bug 14 — MCP V0.D deferred runtime items (V0.E shipped S131) — `partial-impl`
 <!-- @gap id=bug-14 sev=MED status=open -->
 
-MCP V0 sub-units A+B+C+D shipped S125-S130. V0.E (E2E + adopter docs + fixture multi-page app) pending. V0.D (this session S130) has 3 deferred items that limit current capability:
+MCP V0 sub-units A+B+C+D shipped S125-S130. **V0.E (E2E + adopter docs + fixture multi-page app) SHIPPED S131 `152797ee`** — `docs/adopter/mcp-setup.md` + `compiler/tests/integration/mcp-v0-e2e.test.js` (26 blocks, all 11 tools) + `compiler/samples/mcp-v0-fixture/routes/`. What remains open are the **3 V0.D runtime items** (from S130) that limit current capability:
 
 1. **Runtime-helper registration on globalThis** — today's boot reads `globalThis._scrml_reactive_get` which is never set (runtime is module-scoped per generated `.server.js`). Tool resolvers gracefully degrade for V0 (descriptor sidecars carry topology data; runtime cell reads return undefined).
 2. **`scrml dev` (in-process Bun.serve)** gets NO MCP wiring — boot lives only in build-time `_server.js`. Use `scrml build` + run the server entry to get MCP working in dev.
 3. **"dev-only" semantics use RUNTIME NODE_ENV gate** (not compile-time) — no §58 Build Story hook exists yet; revisit when §58 implementation lands.
 
-- **Workaround:** for V0.E specifically, no workaround — the adopter setup doc + E2E examples don't exist. For deferred items: use `<program mcp="always">` to override the dev-only gate; build via `scrml build` not `scrml dev`.
-- **Status:** V0.E queued (~10-12h per SCOPING §3.E). Deferred items revisit at §58 land.
+- **Workaround:** for the V0.D items — use `<program mcp="always">` to override the dev-only gate; build via `scrml build` not `scrml dev`.
+- **Status:** V0.E SHIPPED S131; the 3 V0.D runtime items revisit at §58 land. **S179 currency fix:** the prior "V0.E queued ~10-12h / adopter doc + E2E examples don't exist" text was STALE — V0.E shipped at S131 `152797ee` but this token was never re-scoped (bug-16-precedent same-landing miss; caught by the S179 staleness check). Token stays `open` for the V0.D items.
 
 ---
 

@@ -85,6 +85,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `0729e529` — wrap(s178): hand-off CLOSE + changelog S178 + master-list (23734->23757, MED 7->6) + 6d state-doc + 6b worktree-cleanup ×2 + handoff-182 rotation — **pushed**
 - `7c41cad2` — wrap(s177): hand-off CLOSE + changelog S177 (3 arcs) + master-list test-marker (23680->23734) + 6c maps refresh (35172d78->c48c4f71) + 6d state-doc — **pushed**
 - `0aa54fc2` — wrap(s176): hand-off CLOSE + changelog S176 (4 arcs) + master-list test-marker (23538->23680) + 6c maps refresh (049954e0->35172d78) + 6d state-doc + handoff-180 rotation — **pushed**
 - `efdec093` — wrap(s175): 6c maps refresh (f0b3cb04->049954e0) — **pushed**
@@ -92,7 +93,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `9e306082` — wrap(s173): hand-off CLOSE + changelog S173 + master-list + 6c maps refresh (e05dbb17->642950a2) — **pushed**
 - `9e607bad` — wrap(s172): hand-off CLOSE + master-list §0.6 + changelog S172 + 6c maps refresh (cc69c62d→e05dbb17) — **pushed**
 - `170424f3` — wrap(s171): orientation + doc-currency + 3 DDs (DD3 ratified) — no code change — **pushed**
-- `9b65d386` — wrap(s170): hand-off CLOSE + master-list + changelog + maps refresh (cc69c62d) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
