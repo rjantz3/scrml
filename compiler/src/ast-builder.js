@@ -46,6 +46,7 @@ import {
 
 import { parseExprToNode, forEachResetExprInExprNode, forEachMapLitExprInExprNode } from "./expression-parser.ts";
 import { decorateValidatorsWithExprNodes } from "./validator-arg-parser.ts";
+import { isUniversalCorePredicate } from "./validator-catalog.js";
 import { splitBlocks as _splitBlocksForP2Form1 } from "./block-splitter.js";
 import { scanForTopLevelSemicolon, isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { getElementShape } from "./html-elements.js";
@@ -5050,6 +5051,70 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // peek(1) is IDENT (cell name). Validators start at peek(2).
     let scanIdx = 2;
     const validators = [];
+
+    // ─── S185 — colon-form inline-message override detection + recovery ───
+    // The §55.10-normative Level-1 inline override is the PAREN form: a trailing
+    // string-literal ARG inside the validator parens (`<name req("…")>`,
+    // `<name length(>=2, "…")>`). The COLON form `<name req:"…">` /
+    // `<name length(>=2):"…">` is NOT valid scrml — the `:`-after-validator
+    // collides with the decl scanner's `:`-handling (the typed-cell annotation
+    // path detects a `>` then `:` AFTER the closer; the §4.14 colon-shorthand
+    // path runs elsewhere) and, pre-fix, fell through to the final `return null`
+    // below — declining the whole structural-decl scan so the cell never
+    // registered for `@`-access. Every later `@cell` / `@parent.field` ref then
+    // fired a MISLEADING E-SCOPE-001 ("undeclared `@cell`"), pointing at the cell
+    // rather than the malformed validator (g-validator-inline-msg-colon-form).
+    //
+    // `tryRecoverColonInlineMessage(afterValidatorIdx)` — `afterValidatorIdx` is
+    // the scan index (relative to `i`) of the token immediately AFTER a
+    // just-pushed validator. If that token is `:` and the one after it is a
+    // STRING, AND the validator just pushed is a KNOWN universal-core predicate
+    // (so we never false-fire on a legit typed-cell `<name>: T` — that `:` lives
+    // AFTER the `>` and is handled by the `typedDecl` branch, never reached
+    // here), this is the colon-form. We:
+    //   1. push E-VALIDATOR-INLINE-COLON naming the paren form as the fix, and
+    //   2. RECOVER by attaching the string (JSON-stringified, so it reads as a
+    //      static string-literal arg) to the just-pushed validator's args — i.e.
+    //      treat `req:"…"` exactly as `req("…")`, the canonical paren override.
+    //      The cell then registers fully (with the inline override), so the
+    //      misleading E-SCOPE-001 cascade does NOT fire.
+    // Returns the new scanIdx (past the `:` and the STRING) on recovery, or
+    // `null` when this is not a colon-form (caller proceeds unchanged).
+    function tryRecoverColonInlineMessage(afterValidatorIdx) {
+      if (validators.length === 0) return null;
+      const colonTok = tokens[i + afterValidatorIdx];
+      if (!colonTok || colonTok.kind !== "PUNCT" || colonTok.text !== ":") return null;
+      const msgTok = tokens[i + afterValidatorIdx + 1];
+      if (!msgTok || msgTok.kind !== "STRING") return null;
+      const last = validators[validators.length - 1];
+      // Only a recognised universal-core predicate carries an inline override.
+      // An unknown bareword followed by `:` STRING is some other (also invalid)
+      // shape — decline so the existing dispatch surfaces it unchanged.
+      if (!isUniversalCorePredicate(last.name)) return null;
+      // Recover: append the message as the trailing inline-override arg, exactly
+      // as the paren form `req("…")` would have produced. `length(...)` etc. keep
+      // their leading relational/required arg; the message becomes the trailing
+      // slot (decorateValidatorsWithExprNodes treats the trailing string slot as
+      // the Level-1 override). JSON.stringify restores the quotes stripped by the
+      // tokenizer so the raw arg is a parseable JS string literal.
+      const recoveredArg = JSON.stringify(msgTok.text);
+      if (Array.isArray(last.args)) {
+        last.args.push(recoveredArg);
+      } else {
+        last.args = [recoveredArg];
+      }
+      last.span = { ...last.span, end: msgTok.span.end };
+      errors.push(new TABError(
+        "E-VALIDATOR-INLINE-COLON",
+        `Inline message override on validator \`${last.name}\` uses the colon form ` +
+          `\`${last.name}:"…"\` — this is not valid scrml. The §55.10 inline override is the ` +
+          `paren form: move the message inside the validator's parens — \`${last.name}("…")\` ` +
+          `(e.g. \`${last.name}("${msgTok.text}")\`), not \`${last.name}:"…"\`.`,
+        tokenSpan(colonTok, filePath),
+      ));
+      // Advance past `:` and the STRING.
+      return afterValidatorIdx + 2;
+    }
     // Phase A1a Step 6 — `default=expr` raw text + span (parsed into ExprNode by caller).
     let defaultExprRaw = null;
     let defaultExprSpan = null;
@@ -5513,6 +5578,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             span: { ...validatorStart, end: lastTok.span.end },
           });
           scanIdx = argIdx;
+          // S185 — colon-form override after a call-form validator
+          // (`length(>=2):"…"`). The token after the closing `)` is at
+          // `i + argIdx`; recover-and-diagnose if it's `:` STRING.
+          const recoveredCall = tryRecoverColonInlineMessage(argIdx);
+          if (recoveredCall !== null) scanIdx = recoveredCall;
           continue;
         }
         // Bareword: no args.
@@ -5522,6 +5592,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           span: validatorStart,
         });
         scanIdx++;
+        // S185 — colon-form override after a bareword validator
+        // (`req:"…"`). After `scanIdx++`, `scanIdx` points just past the
+        // validator name (at the `:`); recover-and-diagnose if it's `:` STRING.
+        const recoveredBare = tryRecoverColonInlineMessage(scanIdx);
+        if (recoveredBare !== null) scanIdx = recoveredBare;
         continue;
       }
 

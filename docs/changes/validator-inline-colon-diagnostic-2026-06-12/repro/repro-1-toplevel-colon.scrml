@@ -1,0 +1,7 @@
+<program title="R1">
+<ref req:"A load reference is required."> = <input type="text"/>
+<form>
+    <label>R <ref/></>
+    <div if=@ref>has ref</>
+</form>
+</program>

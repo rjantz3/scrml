@@ -1,0 +1,10 @@
+<program title="R2">
+<signup>
+    <name req:"Please enter your name"> = <input type="text"/>
+</>
+<form>
+    <label>Name <name/></>
+    <errors of=@signup.name/>
+    <div if=@signup.isValid>valid</>
+</form>
+</program>

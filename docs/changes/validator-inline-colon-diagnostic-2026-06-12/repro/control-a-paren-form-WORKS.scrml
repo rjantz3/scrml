@@ -1,0 +1,10 @@
+<program title="CA">
+<signup>
+    <name req("Please enter your name") length(>=2, "Name too short")> = <input type="text"/>
+</>
+<form>
+    <label>Name <name/></>
+    <errors of=@signup.name/>
+    <div if=@signup.isValid>valid</>
+</form>
+</program>

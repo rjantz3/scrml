@@ -1,0 +1,6 @@
+<program title="CB">
+type Phase:enum = { Idle, Done }
+<phase>: Phase = .Idle
+<count>: int = 0
+<div if=(@phase is .Done)>${@count}</>
+</program>

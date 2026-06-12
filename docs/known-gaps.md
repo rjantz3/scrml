@@ -1730,7 +1730,7 @@ Fix SCOPE/BRIEF/reproducers at `docs/changes/errarm-refail-lowering-2026-06-11/`
 
 ---
 
-<!-- @gap id=g-validator-inline-msg-colon-form sev=MED status=open -->
+<!-- @gap id=g-validator-inline-msg-colon-form sev=MED status=resolved -->
 
 **Surfaced S185 dog-food (§55 validators / auto-synth validity surface). DOC migration DONE S185 (paren-canonical, user-ruled); compiler diagnostic fix OPEN.**
 
@@ -1742,7 +1742,9 @@ Fix SCOPE/BRIEF/reproducers at `docs/changes/errarm-refail-lowering-2026-06-11/`
 
 **DONE S185 (doc migration):** PRIMER §8:797 + SPEC §41.12:20616 colon-form → paren form (`req("…")`), each with a "the colon form `req:"…"` is NOT valid scrml" note. SPEC §55.10 + §34 were already paren (normative-correct). Kickstarter + corpus already clean.
 
-**OPEN (compiler diagnostic fix — MED):** the colon form should emit a CLEAR diagnostic (e.g. `E-VALIDATOR-INLINE-COLON` → "inline message override uses the paren form `req(\"…\")`, not `req:\"…\"`") instead of silently corrupting cell registration + emitting the misleading `E-SCOPE-001` about the cell being undeclared. Per don't-soft-classify: a malformed validator that mis-reports an unrelated identifier as undeclared is a diagnostic bug. Locus hint: the structural-decl / validator scanner (`ast-builder.js scanStructuralDecl*` + `symbol-table.ts` validator-arg parse, where the `:`-after-validator breaks the decl) + the `@`-access E-SCOPE-001 path (`type-system.ts:6165`). Reproducers staged at `/tmp/dogfood-validators/` (move into a change dir at fix dispatch).
+**RESOLVED S185 (compiler diagnostic fix).** `ast-builder.js scanStructuralDeclLookahead` now detects the colon-form inline-message override — a KNOWN universal-core predicate (per `validator-catalog.ts`) immediately followed by `:` STRING INSIDE the opener (before `>`), in both the bareword (`req:"…"`) and call-form (`length(>=2):"…"`) shapes — via the new `tryRecoverColonInlineMessage` helper. It fires the new Error `E-VALIDATOR-INLINE-COLON` (§34 + §55 summary; cross-ref §55.10/§41.12) naming the paren form `req("…")` as the resolution, AND RECOVERS by attaching the message as the paren-form inline-override arg (JSON-stringified trailing string slot) — so the cell registers WITH the inline override and the misleading `E-SCOPE-001` cascade does NOT fire. The legit typed-cell `<name>: T` decl (the `:` lives AFTER the `>`, handled by the `typedDecl` branch) and the canonical paren form are untouched. Verified R26 (repro-1 top-level + repro-2 compound → 1×COLON / 0×SCOPE; control-a paren + control-b typed-cell → 0/0) + the original dog-food reproducers (primer-verbatim/bisect-h/dispatch-form → 1×COLON / 0×SCOPE each). +coupled unit test `compiler/tests/unit/validator-inline-colon.test.js` (10 tests). Reproducers at `docs/changes/validator-inline-colon-diagnostic-2026-06-12/repro/`.
+
+**Fix prescription (LANDED S185 — see RESOLVED note above; retained for the record):** the colon form emits a CLEAR diagnostic (`E-VALIDATOR-INLINE-COLON` → "inline message override uses the paren form `req(\"…\")`, not `req:\"…\"`") instead of silently corrupting cell registration + emitting the misleading `E-SCOPE-001` about the cell being undeclared. Per don't-soft-classify: a malformed validator that mis-reports an unrelated identifier as undeclared is a diagnostic bug. Fire site: the structural-decl / validator scanner (`ast-builder.js scanStructuralDeclLookahead` `tryRecoverColonInlineMessage`); the `@`-access `E-SCOPE-001` cascade is suppressed by the cell-registration recovery. Reproducers: `docs/changes/validator-inline-colon-diagnostic-2026-06-12/repro/`.
 
 ---
 
