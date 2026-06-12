@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # verify-tutorial.sh
-# Compile-verify every tutorial snippet against the v0.2.4 compiler.
+# Compile-verify every tutorial snippet against the v0.7.0 compiler.
 # Exits non-zero if any snippet fails to compile.
 #
 # Run from the worktree root:

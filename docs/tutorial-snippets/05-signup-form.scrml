@@ -5,21 +5,18 @@
 // per-field surfaces (@signup.name.isValid, @signup.name.errors, ...).
 // All synth properties are read-only — the compiler computes them.
 //
-// The engine lives at file level; markup uses `match` to switch on the phase.
-
-${
-  type SignupPhase:enum = { Editing, Submitting, Done }
-}
-
-<engine for=SignupPhase initial=.Editing>
-  <Editing    rule=.Submitting></>
-  <Submitting rule=.Done></>
-  <Done       rule=.Editing></>
-</>
+// The engine lives inside <program>; markup uses `match` to switch on the phase.
 
 <program>
 
-${
+  type SignupPhase:enum = { Editing, Submitting, Done }
+
+  <engine for=SignupPhase initial=.Editing>
+    <Editing    rule=.Submitting></>
+    <Submitting rule=.Done></>
+    <Done       rule=.Editing></>
+  </>
+
   <signup>
     <name     req length(>=2)>             = <input type="text"/>
     <email    req pattern(/^[^@]+@[^@]+$/)> = <input type="email"/>
@@ -29,7 +26,7 @@ ${
   </>
 
   function submit() {
-    if (not @signup.isValid) return
+    if (!@signup.isValid) return
     @signupPhase = SignupPhase.Submitting
     persistSignup(@signup.name, @signup.email, @signup.password)
     @signupPhase = SignupPhase.Done
@@ -40,12 +37,11 @@ ${
   function persistSignup(name, email, password) {
     ?{`INSERT INTO users (name, email, password_hash) VALUES (${name}, ${email}, ${password})`}.run()
   }
-}
 
-<div>
+  <div>
   ${
     match @signupPhase {
-      .Editing => {
+      .Editing :> {
         lift <form onsubmit=submit()>
           <h1>Sign up</h1>
           <label>Name      <name/>     <errors of=@signup.name/></label>
@@ -56,16 +52,16 @@ ${
             <agree/> I agree to the terms
             <errors of=@signup.agree/>
           </label>
-          <button type="submit" disabled=not @signup.isValid>Create account</button>
+          <button type="submit" disabled=!@signup.isValid>Create account</button>
         </form>
       }
-      .Submitting => { lift <p>Creating your account…</p> }
-      .Done => {
+      .Submitting :> { lift <p>Creating your account…</p> }
+      .Done :> {
         lift <p>Welcome, ${@signup.name}!</p>
         lift <button onclick=${@signupPhase = SignupPhase.Editing}>Sign up another</button>
       }
     }
   }
-</div>
+  </div>
 
 </program>
