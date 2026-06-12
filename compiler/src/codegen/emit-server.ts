@@ -385,11 +385,25 @@ export function generateServerJs(
     return !suppressed;
   }
   const serverFns: Array<{ fnNode: any; route: any }> = [];
+  // Bug 2b (channel-codegen-fixes-2026-06-12): onserver:* channel attribute
+  // handlers are server-boundary but invoked from the WS `_scrml_ws_handlers`
+  // path (§38.6.1 / §38.7), NOT an HTTP RPC route. They are emitted as plain
+  // callable server functions (with broadcast injection) and DO NOT get a route
+  // handler or a client fetch stub. Collected here, emitted below.
+  const channelWsHandlerFns: Array<{ fnNode: any; route: any }> = [];
 
   for (const fnNode of fnNodes) {
     const fnNodeId = `${filePath}::${fnNode.span.start}`;
     const route = routeMap.functions.get(fnNodeId);
     if (!route || route.boundary !== "server") continue;
+
+    // Bug 2b: divert onserver:* WS attribute handlers to the plain-function
+    // emit path BEFORE the no-route E-CG-002 check (they legitimately have no
+    // generated route name).
+    if (route.isChannelWsHandler === true) {
+      channelWsHandlerFns.push({ fnNode, route });
+      continue;
+    }
 
     // §12.6 (Library-mode emission). In `--mode library` there is no client
     // and nothing fetches a generated route, so the §12.3 infrastructure
@@ -1563,6 +1577,63 @@ export function generateServerJs(
     lines.push(`  handler: ${mhHandlerName},`);
     lines.push(`};`);
     lines.push("");
+  }
+
+  // Bug 2b (channel-codegen-fixes-2026-06-12): onserver:* channel attribute
+  // handlers as PLAIN callable server functions. Per §38.6.1 / §38.7 these are
+  // invoked by name from the WS `_scrml_ws_handlers` message/lifecycle path
+  // (`message(ws, raw) { ...; handleMessage(msg); }`), NOT from an HTTP RPC
+  // route — so they emit as ordinary `function name(params) { ... }` here with
+  // `broadcast()`/`disconnect()` injected (same as a channel-owned server fn),
+  // and NO route handler / client fetch stub (route was suppressed in RI). The
+  // body's channel-cell writes lower to the broadcast wire via emit-logic's
+  // server-arm bare-expr handling (the `channelOwnedCells` opt), so the
+  // function syncs to subscribers exactly as a channel publisher does.
+  if (channelWsHandlerFns.length > 0) {
+    for (const { fnNode, route } of channelWsHandlerFns) {
+      const name: string = fnNode.name ?? "anon";
+      const params: any[] = fnNode.params ?? [];
+      const wsParamNames: string[] = params.map((p: any, i: number) =>
+        typeof p === "string" ? p.split(":")[0].trim() : (p.name ?? `_scrml_arg_${i}`)
+      );
+      lines.push(`// §38.6.1 onserver:* handler "${name}" — invoked from _scrml_ws_handlers (no HTTP route)`);
+      lines.push(`function ${name}(${wsParamNames.join(", ")}) {`);
+
+      const _wsOwnerChannel = channelFnMap.get(name);
+      if (_wsOwnerChannel) {
+        for (const l of emitBroadcastInjection(_wsOwnerChannel, "  ")) lines.push(l);
+      }
+      const _wsChannelOwnedCells = _wsOwnerChannel ? channelCellMap.get(_wsOwnerChannel) ?? null : null;
+      const _wsFnOpts = {
+        boundary: "server" as const,
+        channelOwnedCells: _wsChannelOwnedCells,
+        declaredNames: new Set<string>(wsParamNames),
+        insideFunctionBody: true,
+      };
+      const wsBody: any[] = fnNode.body ?? [];
+      const _wsBodyLines: string[] = [];
+      for (const stmt of wsBody) {
+        const code = serverRewriteEmitted(emitLogicNode(stmt, _wsFnOpts));
+        if (code) {
+          for (const line of code.split("\n")) _wsBodyLines.push(`  ${line}`);
+        }
+      }
+      // Server-mode `@cell` reads lower to `_scrml_body["cell"]` (the HTTP
+      // request-body shape). A WS-invoked handler has NO request body, so define
+      // an empty fallback to avoid a bare `_scrml_body` ReferenceError. NOTE:
+      // server-side authoritative channel-cell READ state is SPEC-silent (§38.4
+      // defines the client-held + `__sync`-wire model, not a server cell store),
+      // so a handler that READS a channel cell resolves to the empty default.
+      // The canonical §38.6.1 onserver:message form (broadcast from the parsed
+      // message, no channel-cell read) is unaffected. See DEFERRED note in the
+      // change-id progress log.
+      if (_wsBodyLines.some(l => l.includes("_scrml_body"))) {
+        lines.push(`  const _scrml_body = {};`);
+      }
+      for (const l of _wsBodyLines) lines.push(l);
+      lines.push(`}`);
+      lines.push("");
+    }
   }
 
   // Channel WebSocket infrastructure (§35)

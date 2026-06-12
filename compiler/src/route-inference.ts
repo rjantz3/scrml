@@ -78,7 +78,7 @@ import type { ExprNode } from "./types/ast.ts";
 // module, so a value import would form a runtime cycle. `import type` is
 // erased at compile time and is cycle-safe.
 import type { MonotonicityVerdict } from "./monotonicity-analyzer.ts";
-import { collectChannelFunctionMap, collectChannelCellMap } from "./codegen/emit-channel.ts";
+import { collectChannelFunctionMap, collectChannelCellMap, collectChannelAttrHandlerNames } from "./codegen/emit-channel.ts";
 // Ext 1 M1.2 + M1.3 — statement-grain body-DG + multi-batch CPS planner.
 import { buildBodyDG } from "./body-dg-builder.ts";
 import { planMultiBatchCPS } from "./cps-batch-planner.ts";
@@ -99,7 +99,15 @@ export type EscalationReason =
   | { kind: "channel-broadcast"; detail: string; span: Span }
   // §12.2 Trigger 8 (D2): the reserved-name handle(request, resolve) middleware
   // escape hatch, recognized by name+signature (§39.3.2), keyword-independent.
-  | { kind: "middleware-handle"; span: Span };
+  | { kind: "middleware-handle"; span: Span }
+  // Bug 2b (channel-codegen-fixes-2026-06-12): the function is the handler for
+  // an `onserver:*` channel ATTRIBUTE (`onserver:message=handleMessage(msg)`
+  // etc.). Per §38.6.1 / §38.7 it runs server-side, invoked from the WS
+  // `_scrml_ws_handlers` message/lifecycle path — NOT an HTTP RPC route. This
+  // reason FORCE-escalates the handler to the server boundary (it is server
+  // regardless of body content) and the route record's `isChannelWsHandler`
+  // flag suppresses the dead HTTP route + client fetch stub.
+  | { kind: "channel-ws-handler"; span: Span };
 
 /**
  * One server batch in a CPS split plan (Ext 1, M1.1).
@@ -241,6 +249,9 @@ export class CPSSplit {
 /** A resolved route entry for a single function. */
 export interface FunctionRoute {
   functionNodeId: string;
+  /** The declared function name (or null for anonymous). Read by codegen +
+   * scheduling.ts::hasServerCallees. */
+  functionName?: string | null;
   boundary: "client" | "server" | "middleware";
   escalationReasons: EscalationReason[];
   generatedRouteName: string | null;
@@ -249,6 +260,16 @@ export interface FunctionRoute {
   isSSE: boolean;
   serverEntrySpan: Span | null;
   cpsSplit: CPSSplit | null;
+  /**
+   * Bug 2b (channel-codegen-fixes-2026-06-12): true for a server-boundary
+   * function that is the handler for an `onserver:*` channel ATTRIBUTE
+   * (`onserver:message=handleMessage(msg)` etc.). Such a function is invoked
+   * from the WS `_scrml_ws_handlers` message/lifecycle path (§38.6.1 / §38.7),
+   * NOT from an HTTP RPC route — so codegen emits it as a plain callable server
+   * function and SUPPRESSES the (dead) HTTP route + client fetch stub the
+   * standard server-fn path would otherwise generate.
+   */
+  isChannelWsHandler?: boolean;
 }
 
 /** A page route entry derived from file-based routing. */
@@ -2481,11 +2502,23 @@ export function runRI(input: RIInput): RIOutput {
   const perFileChannelFnMap = new Map<string, Map<string, string>>();
   /** filePath → (channelName → Set<cellName>) */
   const perFileChannelCellMap = new Map<string, Map<string, Set<string>>>();
+  // Bug 2b (channel-codegen-fixes-2026-06-12): per-file function-name sets for
+  // channel ATTRIBUTE handlers, partitioned by side. `onclient` names stay
+  // CLIENT (§38.10 — never escalate); `onserver` names are server but invoked
+  // via the WS handler path, so their HTTP route + client fetch stub are
+  // suppressed (codegen emits them as plain callable server functions).
+  /** filePath → Set<onclient-handler-name> */
+  const perFileOnclientHandlerNames = new Map<string, Set<string>>();
+  /** filePath → Set<onserver-handler-name> */
+  const perFileOnserverHandlerNames = new Map<string, Set<string>>();
   for (const fileAST of files) {
     const nodes: any[] = (fileAST as any).nodes ?? ((fileAST as any).ast ? (fileAST as any).ast.nodes : []);
     if (!Array.isArray(nodes)) continue;
     perFileChannelFnMap.set(fileAST.filePath, collectChannelFunctionMap(nodes));
     perFileChannelCellMap.set(fileAST.filePath, collectChannelCellMap(nodes));
+    const _attrHandlers = collectChannelAttrHandlerNames(nodes);
+    perFileOnclientHandlerNames.set(fileAST.filePath, _attrHandlers.onclient);
+    perFileOnserverHandlerNames.set(fileAST.filePath, _attrHandlers.onserver);
   }
 
   // ------------------------------------------------------------------
@@ -2556,11 +2589,33 @@ export function runRI(input: RIInput): RIOutput {
         const _ownerChannel = typeof _fnName === "string"
           ? perFileChannelFnMap.get(filePath)?.get(_fnName)
           : undefined;
-        if (_ownerChannel != null) {
+        // Bug 2b (channel-codegen-fixes-2026-06-12): an `onclient:*` handler
+        // function is CLIENT-ONLY per §38.10 — the compiler SHALL NOT emit any
+        // server-side code for it. §38.10 is explicit + normative and WINS over
+        // §12.2 Trigger 7: even when the handler body writes a channel cell, the
+        // write runs on the client and syncs via the normal `__sync` wire path.
+        // Skip the channel-cell-write / broadcast escalation for these names so
+        // they stay client (and thus call locally from `ws.onopen`/`onclose`/
+        // `onerror`, not through a server round-trip fetch stub).
+        const _isOnclientHandler =
+          typeof _fnName === "string" &&
+          (perFileOnclientHandlerNames.get(filePath)?.has(_fnName) ?? false);
+        if (_ownerChannel != null && !_isOnclientHandler) {
           const _channelCells =
             perFileChannelCellMap.get(filePath)?.get(_ownerChannel) ?? new Set<string>();
           const _reason = detectChannelBroadcastReason(body, _channelCells);
           if (_reason !== null) channelTriggers.push(_reason);
+        }
+        // Bug 2b: an `onserver:*` handler is server-side by §38.6.1 regardless
+        // of whether its body writes a channel cell. Force-escalate it so it is
+        // ALWAYS server-boundary; codegen then emits it as a plain callable
+        // server function (no HTTP route, no client fetch stub) via the
+        // `isChannelWsHandler` flag set in Step 6.
+        const _isOnserverHandler =
+          typeof _fnName === "string" &&
+          (perFileOnserverHandlerNames.get(filePath)?.has(_fnName) ?? false);
+        if (_isOnserverHandler) {
+          channelTriggers.push({ kind: "channel-ws-handler", span: fnNode.span });
         }
       }
 
@@ -3364,8 +3419,14 @@ export function runRI(input: RIInput): RIOutput {
     }
 
     // Build the FunctionRoute entry.
+    // Bug 2b (channel-codegen-fixes-2026-06-12): an `onserver:*` handler is
+    // server-side but invoked from the WS `_scrml_ws_handlers` path, NOT an
+    // HTTP RPC route. Suppress its generated route (→ no client fetch stub via
+    // emit-functions, no HTTP route handler via emit-server) and flag it so
+    // emit-server emits it as a plain callable server function instead.
+    const _isChannelWsHandler = deduped.some(r => r.kind === "channel-ws-handler");
     const hasExplicitRoute = !!(record.fnNode as any).route;
-    const generatedRouteName = isServer
+    const generatedRouteName = (isServer && !_isChannelWsHandler)
       ? (hasExplicitRoute ? (record.fnNode as any).route : generateRouteName(record.fnNode.name ?? "anon"))
       : null;
 
@@ -3410,6 +3471,7 @@ export function runRI(input: RIInput): RIOutput {
       isSSE,
       serverEntrySpan,
       cpsSplit,
+      isChannelWsHandler: _isChannelWsHandler,
     });
   }
 
@@ -3711,6 +3773,9 @@ function deduplicateReasons(reasons: EscalationReason[]): EscalationReason[] {
       key = "cbr";
     } else if (r.kind === "middleware-handle") {
       key = "mwh";
+    } else if (r.kind === "channel-ws-handler") {
+      // Bug 2b — one channel-ws-handler reason per function is sufficient.
+      key = "cwh";
     } else {
       key = JSON.stringify(r);
     }

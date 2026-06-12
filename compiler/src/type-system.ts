@@ -10396,6 +10396,19 @@ function annotateNodes(
     // `ref=@var` declares the variable (§6.7.2) — don't flag it as unresolved.
     if (attr.name === "ref") return;
 
+    // Bug 1 (channel-codegen-fixes-2026-06-12): `reconnect` (§38.3) and
+    // `channel-reconnect` (§38.3.1) are spec-typed `integer (ms)` attributes.
+    // Their canonical worked-example form is the BARE integer
+    // (`<channel reconnect=2000>` / `<program channel-reconnect=500>`, §38.2/
+    // §38.6.2). The block-splitter parses a bare integer attribute value as a
+    // `variable-ref` whose `name` is the digit string ("2000"), so the
+    // scope-check below would false-fire E-SCOPE-001 on it. `<each of=>` /
+    // `<onTimeout after=>` avoid this via dedicated walkers; `<channel>` /
+    // `<program>` route through visitAttr. Exempt ONLY these two spec-typed
+    // integer-ms attrs — a bare numeric on a generic HTML attr
+    // (`<input value=42>`) still scope-checks (and errors) as before.
+    if (attr.name === "reconnect" || attr.name === "channel-reconnect") return;
+
     const value = attr.value as ASTNodeLike;
 
     if (value.kind === "variable-ref") {

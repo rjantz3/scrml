@@ -100,8 +100,21 @@ function makeIdentAttr(name, ident) {
   return { name, value: { kind: "variable-ref", name: ident } };
 }
 
+// S138 R26 canary close (channel-codegen-fixes-2026-06-12 / Bug 2c): the REAL
+// parser emits a channel handler attribute value as `kind:"call-ref"` with an
+// `args` ARRAY (not the synthetic `kind:"call"` + string `args` this helper used
+// to produce). Emitting the synthetic shape masked the Bug 2 miscompile (the
+// extractors only recognized `kind:"call"`, so a real-source handler returned
+// `null` → EMPTY listener). This helper now produces the real `call-ref` shape
+// so the existing synthetic-node tests exercise the production parse path; the
+// §25/§26 blocks below add real-source `parseSource → emit` assertions as the
+// belt-and-braces end-to-end canary.
 function makeCallAttr(name, fnName, args = "") {
-  return { name, value: { kind: "call", name: fnName, args } };
+  const argList =
+    typeof args === "string"
+      ? args.split(",").map(a => a.trim()).filter(Boolean)
+      : (Array.isArray(args) ? args : []);
+  return { name, value: { kind: "call-ref", name: fnName, args: argList, argExprNodes: [] } };
 }
 
 // ---------------------------------------------------------------------------
@@ -1238,6 +1251,19 @@ describe("§25 (C18): collectChannelFunctionMap + collectChannelCellMap", () => 
 // ---------------------------------------------------------------------------
 
 import { compileScrml } from "../../src/api.js";
+import { parse as _acornParse } from "acorn";
+
+// Parse an emitted JS MODULE string (sourceType:"module" so top-level
+// `export`/`import` are accepted). Returns null on success, the SyntaxError
+// message on failure. Mirrors arrow-object-literal-body.test.js::parseModule.
+function _parseModule(jsSrc) {
+  try {
+    _acornParse(jsSrc, { ecmaVersion: 2024, sourceType: "module", allowAwaitOutsideFunction: true, allowReturnOutsideFunction: true });
+    return null;
+  } catch (e) {
+    return String(e?.message ?? e);
+  }
+}
 import { mkdtempSync as _mkdtempSync, writeFileSync as _writeFileSync, rmSync as _rmSync } from "fs";
 import { join as _join } from "path";
 import { tmpdir as _tmpdir } from "os";
@@ -1570,3 +1596,171 @@ describe("§27 (S83 B4): V5-strict structural decls at channel body top level", 
   });
 });
 
+
+// ---------------------------------------------------------------------------
+// §27 (channel-codegen-fixes-2026-06-12): Bug 1 — bare-integer `reconnect=` /
+// `channel-reconnect=` accepted (no spurious E-SCOPE-001).
+//
+// §38.2 / §38.3 worked-example shape is the BARE integer (`reconnect=2000`,
+// typed "integer (ms)"). The block-splitter parses a bare integer attr value
+// as a `variable-ref` whose name is the digit string, so the type pass'
+// scope-check (visitAttr) false-fired E-SCOPE-001. The fix exempts ONLY these
+// two spec-typed integer-ms attrs; a bare numeric on a generic HTML attr
+// (`<input value=42>`) still errors.
+// ---------------------------------------------------------------------------
+
+describe("§27 (Bug 1): bare-integer reconnect= / channel-reconnect= accepted", () => {
+  test("bare `reconnect=2000` on <channel> does NOT fire E-SCOPE-001", () => {
+    const src = `<program>
+  <channel name="chat" topic="lobby" reconnect=2000>
+    <messages> = []
+    function postMessage(body) { @messages = [...@messages, body] }
+  </>
+  <ul>\${ for (let m of @messages) { lift <li>\${m}</li> } }</ul>
+</program>`;
+    const { result } = _compileFixture(src);
+    const codes = (result.errors ?? []).map(e => e.code);
+    expect(codes).not.toContain("E-SCOPE-001");
+  });
+
+  test("bare `reconnect=2000` emits setTimeout(_connect, 2000) in client onclose", () => {
+    const src = `<program>
+  <channel name="chat" topic="lobby" reconnect=2000>
+    <messages> = []
+    function postMessage(body) { @messages = [...@messages, body] }
+  </>
+  <ul>\${ for (let m of @messages) { lift <li>\${m}</li> } }</ul>
+</program>`;
+    const { result, file } = _compileFixture(src);
+    const out = result.outputs?.get(file);
+    const clientJs = out?.clientJs ?? "";
+    expect(clientJs).toContain("setTimeout(_connect, 2000)");
+  });
+
+  test("quoted `reconnect=\"2000\"` is still clean (unchanged behavior)", () => {
+    const src = `<program>
+  <channel name="chat" topic="lobby" reconnect="2000">
+    <messages> = []
+    function postMessage(body) { @messages = [...@messages, body] }
+  </>
+  <ul>\${ for (let m of @messages) { lift <li>\${m}</li> } }</ul>
+</program>`;
+    const { result } = _compileFixture(src);
+    const codes = (result.errors ?? []).map(e => e.code);
+    expect(codes).not.toContain("E-SCOPE-001");
+  });
+
+  test("bare `<program channel-reconnect=500>` does NOT fire E-SCOPE-001", () => {
+    const src = `<program channel-reconnect=500>
+  <channel name="chat" topic="lobby">
+    <messages> = []
+    function postMessage(body) { @messages = [...@messages, body] }
+  </>
+  <ul>\${ for (let m of @messages) { lift <li>\${m}</li> } }</ul>
+</program>`;
+    const { result } = _compileFixture(src);
+    const codes = (result.errors ?? []).map(e => e.code);
+    expect(codes).not.toContain("E-SCOPE-001");
+  });
+
+  test("NO OVER-RELAX: bare numeric on a generic HTML attr (`<input value=42>`) STILL errors", () => {
+    const src = `<program>
+  <input value=42/>
+</program>`;
+    const { result } = _compileFixture(src);
+    const codes = (result.errors ?? []).map(e => e.code);
+    expect(codes).toContain("E-SCOPE-001");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §28 (channel-codegen-fixes-2026-06-12): Bug 2 — real-source channel handler
+// wiring (the S138 R26 canary close). The REAL parser emits handler attrs as
+// `kind:"call-ref"`; the prior `attrToCall` only recognized `kind:"call"`, so a
+// real-source `onserver:message` / `onclient:*` returned null → EMPTY listener.
+// These tests compile ACTUAL scrml end-to-end and assert on the emitted JS so a
+// future parser-shape drift is caught (a synthetic-node test would mask it).
+// ---------------------------------------------------------------------------
+
+describe("§28 (Bug 2): real-source onserver:message / onclient:* wired end-to-end", () => {
+  const SRC = `<program>
+  <channel name="chat" topic="lobby" onserver:message=handleMessage(msg) onclient:open=onOpen() onclient:close=onClose()>
+    <log> = []
+    \${
+      function handleMessage(msg) { broadcast({ type: "echo", body: msg }) }
+      function onOpen() { @log = [...@log, "open"] }
+      function onClose() { @log = [...@log, "close"] }
+    }
+  </>
+  <ul>\${ for (let l of @log) { lift <li>\${l}</li> } }</ul>
+</program>`;
+
+  test("server message(ws, raw) binds the param and calls the onserver handler (§38.6.1)", () => {
+    const { result, file } = _compileFixture(SRC);
+    const out = result.outputs?.get(file);
+    const serverJs = out?.serverJs ?? "";
+    expect(serverJs).toContain("message(ws, raw)");
+    expect(serverJs).toContain("JSON.parse(raw)");
+    // §38.6.1: the call expression's param name is bound to the parsed payload.
+    expect(serverJs).toContain("const msg = d;");
+    expect(serverJs).toContain("handleMessage(msg)");
+    // onserver handler emits as a PLAIN callable server function (not just a route).
+    expect(serverJs).toContain("function handleMessage(msg)");
+  });
+
+  test("onserver handler gets NO HTTP RPC route (dead route suppressed)", () => {
+    const { result, file } = _compileFixture(SRC);
+    const out = result.outputs?.get(file);
+    const serverJs = out?.serverJs ?? "";
+    expect(serverJs).not.toContain("__ri_route_handleMessage");
+  });
+
+  test("client wires onclient:open/close to ws.onopen/onclose calling the handler LOCALLY (§38.10)", () => {
+    const { result, file } = _compileFixture(SRC);
+    const out = result.outputs?.get(file);
+    const clientJs = out?.clientJs ?? "";
+    expect(clientJs).toContain(".onopen");
+    expect(clientJs).toContain(".onclose");
+    // §38.10: onclient handlers run on the client only — local call, NO fetch stub.
+    expect(clientJs).not.toContain("_scrml_fetch_onOpen");
+    expect(clientJs).not.toContain("_scrml_fetch_onClose");
+  });
+
+  test("onclient handler functions are CLIENT-ONLY: no server route, no server leak (§38.10)", () => {
+    const { result, file } = _compileFixture(SRC);
+    const out = result.outputs?.get(file);
+    const serverJs = out?.serverJs ?? "";
+    const clientJs = out?.clientJs ?? "";
+    // No server-side route handler / route export for the onclient handlers.
+    expect(serverJs).not.toContain("__ri_route_onOpen");
+    expect(serverJs).not.toContain("__ri_route_onClose");
+    // The onclient handler bodies live on the client (the mangled fn name
+    // appears there); they are not fetch stubs.
+    expect(clientJs).not.toContain("_scrml_fetch_onClose");
+  });
+
+  test("emitted client + server JS parse cleanly (no syntax error)", () => {
+    const { result, file } = _compileFixture(SRC);
+    const out = result.outputs?.get(file);
+    expect(_parseModule(out?.serverJs ?? "")).toBeNull();
+    expect(_parseModule(out?.clientJs ?? "")).toBeNull();
+  });
+
+  test("SPEC-canonical §38.6.1 onserver:message (broadcast from msg, no cell read) is clean", () => {
+    const src = `<program>
+  <channel name="chat" topic="lobby" onserver:message=handleMessage(msg)>
+    <count> = 0
+    \${
+      function handleMessage(msg) { broadcast({ type: "echo", body: msg.text }) }
+    }
+  </>
+  <p>\${@count}</p>
+</program>`;
+    const { result, file } = _compileFixture(src);
+    const out = result.outputs?.get(file);
+    const serverJs = out?.serverJs ?? "";
+    expect(serverJs).toContain("function handleMessage(msg)");
+    expect(serverJs).toContain("broadcast({type: \"echo\", body: msg.text})");
+    expect(_parseModule(serverJs)).toBeNull();
+  });
+});

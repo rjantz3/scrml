@@ -1,0 +1,11 @@
+<program>
+  <channel name="chat" topic="lobby" onserver:message=handleMessage(msg) onclient:open=onOpen() onclient:close=onClose()>
+    <log> = []
+    ${
+      function handleMessage(msg) { @log = [...@log, msg] }
+      function onOpen() { @log = [...@log, "open"] }
+      function onClose() { @log = [...@log, "close"] }
+    }
+  </>
+  <ul>${ for (let l of @log) { lift <li>${l}</li> } }</ul>
+</program>

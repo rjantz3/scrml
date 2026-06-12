@@ -35,6 +35,14 @@ interface ChannelHandlers {
   open: string | null;
   message: string | null;
   close: string | null;
+  /**
+   * The binding name for the `onserver:message` payload (the parameter in the
+   * call expression, e.g. `msg` in `onserver:message=handleMessage(msg)`).
+   * Per §38.6.1 the server `message()` handler binds this name to
+   * `JSON.parse(raw)` before invoking the handler. `null` when the message
+   * handler is absent or takes no parameter.
+   */
+  messageParam: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -284,6 +292,52 @@ function extractChannelAttrs(node: any, projectReconnectDefault: number | null =
 }
 
 /**
+ * Lower a channel lifecycle-handler attribute value to a JS call-expression
+ * string (`handler(arg, ...)`), or `null` when the attribute is absent.
+ *
+ * Bug 2 (channel-codegen-fixes-2026-06-12): a real-source handler attribute
+ * (`onserver:message=handleMessage(msg)` / `onclient:open=onOpen()`) parses to
+ * `kind:"call-ref"` with `name` + an `args` ARRAY. Before this fix the
+ * extractors only recognized the synthetic `kind:"call"` (string `args`), so a
+ * real-source handler returned `null` and emitted an EMPTY listener. We handle
+ * `call-ref` (array args) alongside the legacy `call` (string args) /
+ * `variable-ref` (bare name) / `string-literal` shapes.
+ */
+function channelAttrToCall(attr: any): string | null {
+  if (!attr) return null;
+  const v = attr.value;
+  if (!v) return null;
+  // Real-source parse shape: kind:"call-ref", args is an array of arg strings.
+  if (v.kind === "call-ref") {
+    const args = Array.isArray(v.args) ? v.args.join(", ") : "";
+    return `${v.name}(${args})`;
+  }
+  // Synthetic / legacy parse shape: kind:"call", args is a pre-joined string.
+  if (v.kind === "call") return `${v.name}(${v.args ?? ""})`;
+  if (v.kind === "variable-ref") return `${v.name}()`;
+  if (v.kind === "string-literal") return v.value;
+  return null;
+}
+
+/**
+ * Extract the first parameter name from a channel handler attribute value
+ * (the §38.6.1 / §38.10.1 payload/event binding name). Returns `null` when the
+ * handler is absent or takes no parameter.
+ */
+function channelAttrParam(attr: any): string | null {
+  if (!attr) return null;
+  const v = attr.value;
+  if (!v) return null;
+  if (v.kind === "call-ref" && Array.isArray(v.args) && v.args.length > 0) {
+    return String(v.args[0]).trim() || null;
+  }
+  if (v.kind === "call" && typeof v.args === "string" && v.args.trim().length > 0) {
+    return v.args.split(",")[0].trim() || null;
+  }
+  return null;
+}
+
+/**
  * Extract `onserver:` lifecycle attribute handlers from a channel node.
  * These are server-side handlers used in `_scrml_ws_handlers` (Bun WebSocket server callbacks).
  */
@@ -291,20 +345,11 @@ function extractChannelHandlers(node: any): ChannelHandlers {
   const attrs: any[] = node.attrs ?? node.attributes ?? [];
   const attrMap = new Map<string, any>(attrs.map((a: any) => [a.name, a]));
 
-  function attrToCall(attr: any): string | null {
-    if (!attr) return null;
-    const v = attr.value;
-    if (!v) return null;
-    if (v.kind === "call") return `${v.name}(${v.args ?? ""})`;
-    if (v.kind === "variable-ref") return `${v.name}()`;
-    if (v.kind === "string-literal") return v.value;
-    return null;
-  }
-
   return {
-    open: attrToCall(attrMap.get("onserver:open")),
-    message: attrToCall(attrMap.get("onserver:message")),
-    close: attrToCall(attrMap.get("onserver:close")),
+    open: channelAttrToCall(attrMap.get("onserver:open")),
+    message: channelAttrToCall(attrMap.get("onserver:message")),
+    close: channelAttrToCall(attrMap.get("onserver:close")),
+    messageParam: channelAttrParam(attrMap.get("onserver:message")),
   };
 }
 
@@ -320,20 +365,10 @@ function extractClientHandlers(node: any): { open: string | null; close: string 
   const attrs: any[] = node.attrs ?? node.attributes ?? [];
   const attrMap = new Map<string, any>(attrs.map((a: any) => [a.name, a]));
 
-  function attrToCall(attr: any): string | null {
-    if (!attr) return null;
-    const v = attr.value;
-    if (!v) return null;
-    if (v.kind === "call") return `${v.name}(${v.args ?? ""})`;
-    if (v.kind === "variable-ref") return `${v.name}()`;
-    if (v.kind === "string-literal") return v.value;
-    return null;
-  }
-
   return {
-    open: attrToCall(attrMap.get("onclient:open")),
-    close: attrToCall(attrMap.get("onclient:close")),
-    error: attrToCall(attrMap.get("onclient:error")),
+    open: channelAttrToCall(attrMap.get("onclient:open")),
+    close: channelAttrToCall(attrMap.get("onclient:close")),
+    error: channelAttrToCall(attrMap.get("onclient:error")),
   };
 }
 
@@ -477,6 +512,79 @@ export function collectChannelCellMap(nodes: any[]): Map<string, Set<string>> {
 
   visit(nodes);
   return result;
+}
+
+/**
+ * Walk an AST and collect the function names referenced by channel lifecycle
+ * ATTRIBUTE handlers, partitioned by side.
+ *
+ * Bug 2b (channel-codegen-fixes-2026-06-12): route inference needs this to
+ * keep the two handler classes on the correct boundary:
+ *
+ *  - `onclient` names (`onclient:open=onOpen()` etc.) are CLIENT-ONLY per
+ *    §38.10 ("onclient:* SHALL execute on the client only; the compiler SHALL
+ *    NOT emit any server-side code"). RI MUST NOT escalate them to the server
+ *    even when their body writes a channel cell (§12.2 Trigger 7). §38.10 is
+ *    explicit + normative and WINS over Trigger 7 for these functions: their
+ *    channel-cell write runs client-side and syncs via the normal `__sync`
+ *    wire path.
+ *
+ *  - `onserver` names (`onserver:message=handleMessage(msg)` etc.) ARE
+ *    server-side, but they are invoked from the WS message/lifecycle handler
+ *    (`_scrml_ws_handlers`, §38.6.1 / §38.7), NOT from an HTTP RPC route. The
+ *    duplicate HTTP route + client fetch stub the standard server-fn path
+ *    would generate is DEAD code (nothing fetches it). RI marks them so codegen
+ *    emits them as plain callable server functions and suppresses the dead
+ *    route.
+ *
+ * The handler attribute value parses to `kind:"call-ref"` (real source) with a
+ * `.name`; the synthetic test form is `kind:"call"`. We read the name from
+ * either shape, plus the bare `variable-ref` form (`onclient:open=onOpen`).
+ *
+ * Returns `{ onclient, onserver }` as two name Sets.
+ */
+export function collectChannelAttrHandlerNames(
+  nodes: any[],
+): { onclient: Set<string>; onserver: Set<string> } {
+  const onclient = new Set<string>();
+  const onserver = new Set<string>();
+
+  function handlerName(attr: any): string | null {
+    if (!attr) return null;
+    const v = attr.value;
+    if (!v) return null;
+    if ((v.kind === "call-ref" || v.kind === "call" || v.kind === "variable-ref") &&
+        typeof v.name === "string" && v.name.length > 0) {
+      return v.name;
+    }
+    return null;
+  }
+
+  function visit(nodeList: any[]): void {
+    for (const n of nodeList) {
+      if (!n || typeof n !== "object") continue;
+      if (n.kind === "markup" && (n.tag ?? "") === "channel") {
+        const attrs: any[] = n.attrs ?? n.attributes ?? [];
+        for (const a of attrs) {
+          if (!a || typeof a.name !== "string") continue;
+          if (a.name.startsWith("onclient:")) {
+            const hn = handlerName(a);
+            if (hn) onclient.add(hn);
+          } else if (a.name.startsWith("onserver:")) {
+            const hn = handlerName(a);
+            if (hn) onserver.add(hn);
+          }
+        }
+        // Channel bodies do not nest channels; still recurse children so a
+        // handler reference inside a non-channel descendant is not missed.
+      }
+      if (Array.isArray(n.children)) visit(n.children);
+      if (n.kind === "logic" && Array.isArray(n.body)) visit(n.body);
+    }
+  }
+
+  visit(nodes);
+  return { onclient, onserver };
 }
 
 // ---------------------------------------------------------------------------
@@ -654,7 +762,7 @@ export function emitChannelWsHandlers(channelNodes: any[], errors: CGError[], fi
   lines.push(`      const __ch = ws.data.__ch;`);
   for (const node of channelNodes) {
     const { name } = extractChannelAttrs(node);
-    const { message: msgHandler } = extractChannelHandlers(node);
+    const { message: msgHandler, messageParam } = extractChannelHandlers(node);
     const sharedVars = extractSharedVars(node);
 
     lines.push(`      if (__ch === ${JSON.stringify(name)}) {`);
@@ -668,6 +776,13 @@ export function emitChannelWsHandlers(channelNodes: any[], errors: CGError[], fi
     }
 
     if (msgHandler) {
+      // §38.6.1: bind the call expression's parameter name to the parsed
+      // message payload (`JSON.parse(raw)`, already in `d`) before invoking the
+      // handler. A no-parameter handler (`onserver:message=handleMessage()`)
+      // skips the binding — the raw event is NOT passed (§38.6.1 normative).
+      if (messageParam) {
+        lines.push(`        const ${messageParam} = d;`);
+      }
       lines.push(`        ${msgHandler};`);
     }
 

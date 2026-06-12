@@ -1,0 +1,7 @@
+<program>
+  <channel name="chat" topic="lobby" reconnect=2000>
+    <messages> = []
+    function postMessage(body) { @messages = [...@messages, body] }
+  </>
+  <ul>${ for (let m of @messages) { lift <li>${m}</li> } }</ul>
+</program>

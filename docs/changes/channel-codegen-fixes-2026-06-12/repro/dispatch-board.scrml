@@ -1,0 +1,57 @@
+<program title="Live Dispatch Board">
+
+  <channel name="dispatch"
+           topic="lobby"
+           reconnect=3000
+           onserver:message=handleUpdate(msg)
+           onclient:open=onConnected()
+           onclient:close=onDisconnected()>
+
+    <updates>       = []                    // V5-strict; auto-synced across clients
+    <activeDrivers> = 0                      // auto-synced
+    <connStatus>    = "connecting"           // driven by onclient:* hooks
+
+    function postUpdate(driver, status) {
+      @updates = [...@updates, { driver, status, ts: Date.now() }]
+      @activeDrivers = @activeDrivers + 1
+      broadcast({ type: "update", driver, status })
+    }
+
+    function handleUpdate(msg) {
+      @updates = [...@updates, msg]
+    }
+
+    function onConnected() {
+      @connStatus = "connected"
+    }
+
+    function onDisconnected() {
+      @connStatus = "disconnected"
+    }
+  </>
+
+  ${
+    <driverName> = ""
+    <statusText> = ""
+
+    function send() {
+      if (@driverName.trim() == "" || @statusText.trim() == "") return
+      postUpdate(@driverName, @statusText)
+      @statusText = ""
+    }
+  }
+
+  <h1>Live Dispatch Board</h1>
+  <p>Status: ${@connStatus} — ${@activeDrivers} updates posted</p>
+
+  <ul>
+    ${ for (let u of @updates) { lift <li><strong>${u.driver}</strong>: ${u.status}</li> } }
+  </ul>
+
+  <form onsubmit=send()>
+    <input bind:value=@driverName placeholder="Driver"/>
+    <input bind:value=@statusText placeholder="Status update"/>
+    <button type="submit">Post</button>
+  </form>
+
+</program>

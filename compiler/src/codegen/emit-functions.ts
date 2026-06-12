@@ -496,6 +496,14 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     const route = routeMap.functions.get(fnNodeId);
     if (!route || route.boundary !== "server") continue;
 
+    // Bug 2b (channel-codegen-fixes-2026-06-12): onserver:* channel attribute
+    // handlers are server-boundary but invoked from the WS message/lifecycle
+    // path (§38.6.1 / §38.7), NOT an HTTP RPC route — so they get NO client
+    // fetch stub. (Their route was suppressed in RI, so the generatedRouteName
+    // guard below would catch them anyway; this is the explicit, self-
+    // documenting form.)
+    if ((route as { isChannelWsHandler?: boolean }).isChannelWsHandler === true) continue;
+
     if (!route.generatedRouteName) continue; // error already recorded in server gen
 
     const name = (fnNode.name as string) ?? "anon";
