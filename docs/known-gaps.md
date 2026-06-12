@@ -17,7 +17,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
 | MED | 6 |
-| LOW | 11 |
+| LOW | 12 |
 | Nominal (spec-ahead-of-impl) | 9 |
 <!-- @generated:gap-counts END -->
 
@@ -1707,6 +1707,12 @@ SPEC §4.18 landed Wave 1 S111 — the code-default body mode + `"..."` display-
 **Surfaced S184 dog-food (components/L22).** The ghost-pattern lint pass (`lint-ghost-patterns.js`, the React/Vue/Angular "did you mean?" warnings) + `W-EACH-PROMOTABLE` false-positive on CANONICAL scrml forms. (1) The parametric-snippet-fill `prop={ (p) => <markup> }` (PRIMER §6.4(5)/§16.6; SPEC §955; 3 corpus files: examples/07, examples/27, samples/snippet-002-parametric) trips **W-LINT-007** (`<Comp prop={val}>`), **W-LINT-021** (Angular `(click)=` on the lambda param `(label) =>`), and **W-LINT-004** (`onChange={handler}`) — the pass mistakes the snippet-lambda for JSX/Angular bindings. (2) `tableFor` `<tableFor for=T rows=@x/>` trips **W-EACH-PROMOTABLE** (`lint-w-each-promotable.js`) on its INTERNALLY-GENERATED `for...lift`, telling the adopter to promote code they did not write. Info/warning-level (non-blocking) but noise on canonical adopter forms. Same class as the W-LINT-007-on-struct-literal FIXED S184 `3587af46` (the `isTypedCellDeclObjectLiteral` skipIf). SCOPE at `docs/changes/ghost-lint-canonical-exempt-2026-06-11/`.
 
 **RESOLVED S184.** Fix A (lint-ghost-patterns.js): new helper `bracedBodyOpensParenArrowLambda` exempts `prop={ (params) => <Tag` (the §16.6 snippet-fill — markup-RETURN clause required so a genuine JSX scalar arrow `onClick={(e)=>fn()}` STILL fires, per the R25 Bug 44 lock) from W-LINT-007/004/021. Fix B (lint-w-each-promotable.js): skip `_tableForSynth`-marked generated for-stmts (W-EACH-PROMOTABLE). +20 tests; genuine catches preserved; PA-independent R26 verified.
+
+---
+
+<!-- @gap id=g-errarm-fail-and-parsevariant-handler sev=LOW status=open -->
+
+**Surfaced S184 dog-food (parseVariant/L22), deferred at the Gaps-1+2 landing.** Two residual `!{}` error-handler-arm issues beyond Gap 1 (`::V(a,b)` multi-field binding, FIXED `7fe7044f`): (1) **`fail` is undeclared inside a `!{}` handler arm body** — GENERAL (user-enum AND parseVariant; verified: a user-enum arm `{ fail BErr::Y(...) }` fires `E-SCOPE-001` on `fail`). The arm-body scope-check (`type-system.ts:9286` `checkLogicExprIdents`) doesn't recognize the `fail` keyword. Needs a SPEC §6/§19 cross-check FIRST (is re-`fail` from a handler arm canonical? the SPEC §41.13 parseVariant example re-fails, so it SHOULD be — but verify) then a typer fix. (2) **SPEC §41.13 parseVariant worked example is BLOCKED** — the original `::ParseError msg` form doesn't compile (`::ParseError` is the enum, not a variant); the corrected individual-variant example ALSO won't compile until (1) is fixed (it re-`fail`s). So the SPEC §41.13 example stays broken-but-known until this cluster lands (Gap 3 deferred). (3) **`:`-shorthand block-form match-arm interpolation** (`<Done count> : "got ${count}"`) compiles clean but codegen emits the body LITERALLY (`${count}` un-interpolated) — agent-surfaced pre-existing gap, out of Gap-2 scope. SCOPE/reproducers at `docs/changes/payload-binding-gaps-2026-06-11/`.
 
 ---
 
