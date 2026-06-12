@@ -603,7 +603,7 @@ function loadUser(id: number) -> (not to User) {
 const u = loadUser(42)
 
 // Form 1 — given presence-guard (§42.2.3)
-given u => {
+given u :> {
     const name = u.name                   // OK — discrimination = transition
 }
 
@@ -614,7 +614,7 @@ const name = u.name                       // OK — narrowed + transitioned
 // Form 3 — match
 match u {
     not => handleAbsence()
-    given u => { const name = u.name }    // OK — arm discriminates + transitions
+    given u :> { const name = u.name }    // OK — arm discriminates + transitions
 }
 
 // Pre-transition access — fires E-TYPE-001
@@ -879,7 +879,7 @@ Both predicates exist; both are needed; they coexist in the validator vocabulary
 
 **Advanced `not` forms** (§42.2.3 / §42 union form / §42.1.1 — S135 cluster N catch-up, F-045):
 
-- **`given x => …` presence-guard** — the canonical narrow-to-present form. `given x => @x.name` is type-equivalent to `if (@x is some) @x.name` but the bound `x` is narrowed to the non-`not` type within the body. Reach for `given` when you need to USE the value; reach for `if (x is some)` when you only need to BRANCH.
+- **`given x :> …` presence-guard** — the canonical narrow-to-present form. `given x :> @x.name` is type-equivalent to `if (@x is some) @x.name` but the bound `x` is narrowed to the non-`not` type within the body. Reach for `given` when you need to USE the value; reach for `if (x is some)` when you only need to BRANCH.
 - **`T | not` union form** — the canonical type for absence-possible values. A server fn returning `User | not` cleanly composes with the §6.8.3 reset × lifecycle semantic. The compiler wire-format envelope (§57) round-trips `not` losslessly.
 - **`""` / `0` / `false` / `[]` / `{}` are DEFINED values, NOT absence** (§42.1.1, S89 ratification). `is some "" → TRUE`; `req "" → FALSE`. Don't conflate "empty" with "absent" — they're distinct concepts in scrml.
 

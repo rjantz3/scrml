@@ -296,7 +296,7 @@ For value-shape progression on a cell that is NOT an engine cell, declare as Sha
 server fn loadUser(id: number) -> (not to User) { ... }
 
 const u = loadUser(42)
-given u => { const name = u.name }        // OK — `given` discriminates AND transitions
+given u :> { const name = u.name }        // OK — `given` discriminates AND transitions
 
 // Variant-progression (.A to .B) — explicit transition()
 server fn publish(id: number) -> (.Draft to .Published) { ... }
@@ -1085,7 +1085,7 @@ If your instinct from another framework fires, stop and use the scrml form. Thes
 | `<phase>: (Idle to Done) = .Idle` next to `<engine for=Phase initial=.Idle>` over the same cell | (extrapolation) | **Engine cells reject lifecycle annotation** (`E-TYPE-LIFECYCLE-ON-ENGINE-CELL`). Engines own variant-graph progression via `rule=`. For lifecycle on a NON-engine cell, declare as plain Shape 1. For variant-graph state, use the engine — don't put a lifecycle annotation on its auto-declared variable (§3.2). |
 | `(A -> B)` lifecycle annotation in new code | legacy glyph | Use `to`: `(A to B)`. The `->` glyph is accepted during the deprecation window and surfaces `W-LIFECYCLE-LEGACY-ARROW`. `to` is the canonical (§3.2). |
 | `transition(u)` on every assignment defensively | over-application | `transition()` is for **variant-progression** `(.A to .B)` returns after discrimination. **Presence-progression** `(not to T)` discriminates via `given` / `if-is-not` / `match` — the act of discriminating IS the transition; an additional `transition()` is redundant (§3.2). |
-| `if (@u is some) { use(@u.name) }` to narrow + use | habit from `if (x !== null)` patterns | **`given x => use(x.name)`** is the canonical narrow-AND-use form (§42.2.3). The bound `x` is type-narrowed to non-`not` inside the body. `if (x is some)` only BRANCHES; `given` BINDS the narrowed value. (Also: `T \| not` is the canonical absence-possible union; `""` / `0` / `false` are defined values, NOT absence — §42.1.1.) |
+| `if (@u is some) { use(@u.name) }` to narrow + use | habit from `if (x !== null)` patterns | **`given x :> use(x.name)`** is the canonical narrow-AND-use form (§42.2.3). The bound `x` is type-narrowed to non-`not` inside the body. `if (x is some)` only BRANCHES; `given` BINDS the narrowed value. (Also: `T \| not` is the canonical absence-possible union; `""` / `0` / `false` are defined values, NOT absence — §42.1.1.) |
 
 **If you don't see your case in the table, default to the canonical shape from §2.** Do not invent syntax.
 
@@ -1112,7 +1112,7 @@ The compiler lowers word-form to symbol-form at the JS-host boundary; both paths
 
 - `not` — the ABSENCE value, NOT a logical-NOT operator. `not` ≠ `!`. Use `is not` / `is some` for absence predicates; use `!` for logical negation (still JS-host); see §42 (PRIMER §9.5).
 - `is` / `is not` / `is some` — presence + variant predicates with no JS-host equivalent.
-- `given X => {}` — narrow-AND-use form with no JS-host equivalent.
+- `given X :> {}` — narrow-AND-use form with no JS-host equivalent.
 
 ---
 

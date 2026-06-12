@@ -8233,7 +8233,7 @@ Lifecycle annotation `(A to B)` is permitted at every typed location EXCEPT engi
 
 Each position's semantics — when the compiler considers the transition fired — inherits from the per-access transition-state tracker in `compiler/src/type-system.ts` (Landing 1). For struct fields, transition fires on `instance.field = value` where `value` is type B-shaped. For Shape 1 reactive cells, transition fires on `@cell = value` where the cell's initial value is A-shaped and the written value is B-shaped. Function-parameter and schema-field transition semantics follow the same per-access tracker shape. Function-return position uses the hybrid transition-marker mechanism — discrimination IS transition for presence-progression `(not to T)` returns, explicit `transition()` for variant-progression `(.VariantA to .VariantB)` returns — per §14.12.6.
 
-**Shape 1 presence-progression — assignment OR discrimination (S160).** A Shape 1 reactive cell carrying an implicit OR explicit **`(not to T)`** annotation (pre-type `not`) transitions to `post` on EITHER a `T`-shaped assignment (`@cell = value`, the base mechanism above) OR a presence-discrimination on the cell (`given c => …`, `if (@cell is not) return`, `match @cell { … }` — the §14.12.6.1 presence-progression mechanism, reused at the Shape-1 cell locus). This unifies the Shape-1 cell and the function-return cases for presence-progression: discrimination IS transition wherever the pre-type is `not`. **Implicit `(not to T)` (Shape 4, §6.2):** a no-RHS typed cell whose type has no canonical empty (a bare `:struct` / `:enum` / opaque type) initializes to `not` and acquires this `(not to T)` annotation *implicitly* — the developer wrote no annotation, so the E-TYPE-001 message fired on a pre-transition read of such a cell SHALL name that the lifecycle was synthesized from the no-RHS declaration.
+**Shape 1 presence-progression — assignment OR discrimination (S160).** A Shape 1 reactive cell carrying an implicit OR explicit **`(not to T)`** annotation (pre-type `not`) transitions to `post` on EITHER a `T`-shaped assignment (`@cell = value`, the base mechanism above) OR a presence-discrimination on the cell (`given c :> …`, `if (@cell is not) return`, `match @cell { … }` — the §14.12.6.1 presence-progression mechanism, reused at the Shape-1 cell locus). This unifies the Shape-1 cell and the function-return cases for presence-progression: discrimination IS transition wherever the pre-type is `not`. **Implicit `(not to T)` (Shape 4, §6.2):** a no-RHS typed cell whose type has no canonical empty (a bare `:struct` / `:enum` / opaque type) initializes to `not` and acquires this `(not to T)` annotation *implicitly* — the developer wrote no annotation, so the E-TYPE-001 message fired on a pre-transition read of such a cell SHALL name that the lifecycle was synthesized from the no-RHS declaration.
 
 #### 14.12.4 Engine-cell carve-out
 
@@ -8315,7 +8315,7 @@ function loadUser(id: number) -> (not to User) {
 ```scrml
 const u = loadUser(42)
 
-given u => {
+given u :> {
     // INSIDE this block: u is typed as User AND lifecycle-transitioned.
     // The act of discriminating proves presence; the lifecycle transition is implicit.
     const name = u.name  // OK — post-transition access
@@ -8341,7 +8341,7 @@ const u = loadUser(42)
 
 match u {
     not :> handleAbsence()         // the `not` arm — u is `not`
-    given u => {
+    given u :> {
         // INSIDE this arm: u is typed as User AND lifecycle-transitioned.
         const name = u.name         // OK — post-transition access
     }
@@ -17099,7 +17099,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-TYPE-081 | §18.16 | `partial match` used in a rendering or `lift` context. `partial match` returns `T | not` (a possibly-`not` value; §42), which is incoherent in positions that must produce concrete markup. Resolution: cover all variants, or convert to a value-position match. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts:3753, 4838`.) | Error |
 | E-PROTECT-003 | §8.10.7 | A `BatchPlan.rowCacheColumns` entry includes a `protect` column that also appears in the handler's client-visible return type. Protected fields must not leak to client-visible cache rows. (Catalog addition S78 audit; emitted at `compiler/src/batch-planner.ts:552`.) | Error |
 | E-SYNTAX-042 | §17.6, §45 | `null` or `undefined` appears in a scrml value position. scrml's absence sentinel is `not`; `null`/`undefined` are not valid scrml literals. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase3-eq-checks.js:519, 613`.) | Error |
-| E-SYNTAX-043 | §17.6 | `(x) =>` presence-guard syntax used — replaced by `given x =>`. The old form is removed from the language. (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js:5002, 7661`.) | Error |
+| E-SYNTAX-043 | §17.6 | `(x) =>` presence-guard syntax used — replaced by `given x :>`. The old form is removed from the language. (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js:5002, 7661`.) | Error |
 | E-SYNTAX-044 | §17.6 | Property path in `given` position (e.g., `given obj.field =>`) — reserved; not yet supported in v1. `given` accepts only simple identifiers. (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js:4440, 7573`.) | Error |
 | E-SYNTAX-064 | §17.7.3, §3.4 | The `@.` contextual iteration sigil ("the current iteration value" / `@.field` for a field of the current item) appears OUTSIDE any `<each>` body scope, where it has no referent. Fires at every reachable `@.`-bearing position outside an each-body: an attribute value (`<li title=@.name>` / `class:done=@.done`), a Tier-0 `${for (it of @items) { lift ... }}` handler-call arg (`onclick=ping(@.id)`), and a Tier-0 lifted interpolation (`lift <li>${@.name}</li>`). A Tier-0 `${for...lift}` is NOT an `<each>` body scope — use the bare loop variable (`it.field`) there; in a `<each>` element use `@.` inside the body or bind an alias with `as name` (`<each in=@items as item>` → `item.field`). Replaces the prior confusing leak (raw `@.` reaching codegen → `E-CODEGEN-INVALID-JS`) and the misleading `E-SCOPE-001` on the base `@` token. (Catalog addition S157 Bug 70 — wired the previously-queued code; emitted at `compiler/src/type-system.ts` visitAttr + lift-expr scan.) | Error |
 | E-BATCH-001 | §8.9.3, §19.10.5 | Explicit `transaction { }` block composed with an implicit per-handler transaction. The two cannot compose. Resolution: `.nobatch()` the outer calls, or wrap the whole handler in the explicit `transaction { }`. (Catalog addition S78 audit; emitted at `compiler/src/batch-planner.ts:677`.) | Error |
@@ -17140,7 +17140,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | W-REACTIVE-001 | §6.6.3 | A reactive-dependency tracker invoked a function `f` whose source is unavailable at compile time (e.g., imported from a vanilla `.js` file). The compiler cannot statically resolve which `@variable` reads occur inside `f`; the reads are NOT tracked as dependencies of the enclosing reactive expression. Resolution: rewrite `f` in scrml, or accept the warning if the function genuinely has no reactive dependencies. (Catalog addition S84 Wave 2 #5; full prose at §6.6.3 line 2484.) | Warning |
 | E-KEY-001 | §10.6 | A `key=` value on a `for`/`lift` block is not a string or number expression. The keyed-iteration runtime requires primitive keys for stable diffing; object or array keys would defeat structural-sharing. (Catalog addition S84 Wave 2 #5; full prose at §10 lines 2095-2096 + §10.6 line 2256.) | Error |
 | W-KEY-001 | §10.6 | Two `key=` values within the same `for`/`lift` block evaluate to the same primitive — the keyed-iteration runtime would diff incorrectly. The compiler MAY also emit this warning for collections of objects without a declared `key`. Resolution: derive `key=` from a primary-key-shaped field. (Catalog addition S84 Wave 2 #5; full prose at §10 line 2095 + §10.6 line 2257 + §17.2 line 9122.) | Warning |
-| E-SYNTAX-004 | §17.4, §51.5 | An `if` keyword appears in a `<machine>` rule guard position. Rule guards are predicate-shaped (§51 grammar); using JS `if` blocks here is a category error. Resolution: use the rule-guard predicate syntax (`given x =>` etc.). (Catalog addition S84 Wave 2 #5; full prose at §17.4 line 650.) | Error |
+| E-SYNTAX-004 | §17.4, §51.5 | An `if` keyword appears in a `<machine>` rule guard position. Rule guards are predicate-shaped (§51 grammar); using JS `if` blocks here is a category error. Resolution: use the rule-guard predicate syntax (`given x :>` etc.). (Catalog addition S84 Wave 2 #5; full prose at §17.4 line 650.) | Error |
 | E-LIFT-002 | §17.6 | Two or more `lift` statements appear on the same reachable execution path inside a single value-lift arm body. In an if-as-expression each arm produces exactly one value; multiple lifts on the same path would emit multiple values. Resolution: remove or consolidate the extra `lift` calls, or restructure into a separate accumulation context. (Catalog addition S84 Wave 2 #5; full prose at §17.6 lines 6027-6035, worked example line 9426.) | Error |
 | W-LIFT-001 | §17.6 | A value-lift arm body in an if-as-expression executes no `lift` statement on any reachable path. The arm contributes `not` to the expression type. Resolution: if intentional (side-effect-only arm), annotate the binding with `: T \| not` to silence; otherwise add a `lift` to the arm body. (Catalog addition S84 Wave 2 #5; full prose at §17.6 lines 9204-9207.) | Warning |
 | E-CTRL-010 | §17.2 | An `else` body appears on a bare `for` loop (one without `lift`). `else` on a `for/lift` loop fires when the source iterable is empty; on a plain `for` loop the else has no defined semantics. Resolution: convert to `for/lift`, or replace `else` with a post-loop conditional. (Catalog addition S84 Wave 2 #5; full prose at §17.2 line 9101.) | Error |
@@ -21421,7 +21421,7 @@ ${ if (@name is some) { displayName(@name) } }
 
 - `expr is some` SHALL evaluate to `true` when `expr` is not `not`, and `false` when `expr` is `not`.
 - `expr is some` is definitionally equivalent to `not (expr is not)`. The compiler MAY desugar either form to a single absence check.
-- `expr is some` does NOT narrow the type of `expr`. To narrow from `T | not` to `T`, use `given expr => { ... }` (§42.2.3).
+- `expr is some` does NOT narrow the type of `expr`. To narrow from `T | not` to `T`, use `given expr :> { ... }` (§42.2.3).
 - `is some` is a two-keyword operator parsed as a single boolean test, symmetric to `is not`.
 
 **Design note:** `is some` exists to avoid the double-negative `not (x is not)` in common presence checks.
@@ -21475,14 +21475,14 @@ Multi-narrowing is all-or-nothing. If any listed variable is `not`, the body is 
 ${
     match x {
         not        :> handleAbsence()
-        given x    => handlePresence(x)
+        given x :> handlePresence(x)
     }
 }
 ```
 
 **Nesting:**
 
-`given` guards MAY be nested. Prefer the multi-variable form `given x, y => { ... }` over nested single-variable guards when semantics are identical.
+`given` guards MAY be nested. Prefer the multi-variable form `given x, y :> { ... }` over nested single-variable guards when semantics are identical.
 
 **Property path note (pending):**
 
@@ -21583,8 +21583,8 @@ A function that may return no value SHALL declare its return type as `T | not`. 
 
 - `not` literal → `null` in JavaScript output
 - `x is not` → `x === null || x === undefined` in JavaScript output
-- `given x => body` → `if (x !== null && x !== undefined) { body }` in JavaScript output
-- `given x, y => body` → `if (x !== null && x !== undefined && y !== null && y !== undefined) { body }` in JavaScript output
+- `given x :> body` → `if (x !== null && x !== undefined) { body }` in JavaScript output
+- `given x, y :> body` → `if (x !== null && x !== undefined && y !== null && y !== undefined) { body }` in JavaScript output
 - `given x` in a match arm → the arm's generated condition is `x !== null && x !== undefined`
 
 ### 42.6 Error Codes
@@ -21593,7 +21593,7 @@ A function that may return no value SHALL declare its return type as `T | not`. 
 |---|---|---|
 | E-SYNTAX-042 | `null` or `undefined` appears in scrml value position | Error |
 | W-ABSENCE-IN-SCRML-SOURCE | `null` or `undefined` token detected in scrml source (regression-guard info lint companion to E-SYNTAX-042 — see §34 row for the full reject grammar and exclusion list) | Info |
-| E-SYNTAX-043 | `(x) =>` presence guard syntax used — replaced by `given x =>` | Error |
+| E-SYNTAX-043 | `(x) =>` presence guard syntax used — replaced by `given x :>` | Error |
 | E-SYNTAX-044 | Property path in `given` position (reserved; not yet supported) | Error |
 | E-TYPE-041 | `not` assigned to a variable of non-optional type `T` | Error |
 | E-TYPE-042 | Absence checked with `== not`, `=== not`, `== null`, etc. | Error |
@@ -21630,8 +21630,8 @@ A function that may return no value SHALL declare its return type as `T | not`. 
 
   The compiler SHALL NOT silently accept any of the above shapes in one position while rejecting it in another.
 - `x is not` SHALL be the only normative absence check.
-- `given x => body` SHALL narrow `x` from `T | not` to `T` inside `body`.
-- `given x, y => body` SHALL narrow `x` and `y` independently. The body SHALL execute only when all listed variables are not `not`.
+- `given x :> body` SHALL narrow `x` from `T | not` to `T` inside `body`.
+- `given x, y :> body` SHALL narrow `x` and `y` independently. The body SHALL execute only when all listed variables are not `not`.
 - The old `(x) =>` presence guard form SHALL NOT be valid. Any occurrence SHALL be compile error E-SYNTAX-043.
 - `given` SHALL accept only simple identifiers for v1. Property paths SHALL be compile error E-SYNTAX-044.
 - A `match` on `T | not` without a `not` arm or `else` arm SHALL be compile error E-MATCH-012.
@@ -21654,7 +21654,7 @@ A function that may return no value SHALL declare its return type as `T | not`. 
 
 - scrml-absence (`not`) is represented as JavaScript `null` at runtime per §42.5 above. This is the canonical scaffold encoding ratified by §42.1 exclusions (S89).
 - A scrml-author inspecting a variable via browser DevTools, the JavaScript Console, or any JS-host debugger SHALL see the JS bit-pattern (`null`) — NOT the scrml-language token (`not`). This is the **expected** behavior under the scaffold encoding; the JS-host debugger is unaware of scrml semantics.
-- scrml-language predicates classify correctly regardless of the bit-pattern surface: `x is some` returns `false` for the cell, `x is not` returns `true`, `given x => ...` skips the body, `match x { not => ..., given x => ... }` enters the `not` arm. The scrml-author's source-level reasoning is not affected.
+- scrml-language predicates classify correctly regardless of the bit-pattern surface: `x is some` returns `false` for the cell, `x is not` returns `true`, `given x :> ...` skips the body, `match x { not => ..., given x :> ... }` enters the `not` arm. The scrml-author's source-level reasoning is not affected.
 - Native scrml debugger experience (a debugger that re-presents `null` as the scrml token `not` in its UI) is a **post-v1.0 self-host concern** — the eventual from-scratch scrml self-host (per pa.md self-host-is-from-scratch rule, S89 user ruling) MAY choose any presentation idiom for the absence sentinel in its native debugger. The TypeScript scaffold compiler does not invest in DevTools instrumentation; the JS `null` bit-pattern surface is accepted as the scaffold-lifetime trade-off.
 - **Adopter guidance:** When debugging a scrml program at the JavaScript layer (sourcemaps disabled, runtime introspection, network-payload inspection), treat a JS `null` value as the canonical surface form of scrml `not`. At the scrml source layer, continue writing `is some` / `is not` / `given` / `not`-arm match — those continue to mean what they say.
 
