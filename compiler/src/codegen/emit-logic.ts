@@ -372,6 +372,51 @@ interface LogicArm {
   pattern?: string;
   binding?: string;
   handler?: string;
+  // errarm-refail (§19.5.2 / §19.3): the fail-expr node attached by
+  // ast-builder.js (parseErrorTokens) when this arm's body is a bare re-`fail`
+  // (`{ fail EnumType::Variant(args) }`). When present, emitArmBody lowers it
+  // via the shared fail-expr emitter (`return { __scrml_error, ... }`).
+  failExpr?: FailExprLike;
+}
+
+/** Shape of the fail-expr node (subset emitFailExpr reads). */
+interface FailExprLike {
+  kind?: string;
+  enumType?: string;
+  variant?: string;
+  args?: string;
+  argsExpr?: unknown;
+}
+
+/**
+ * errarm-refail (§19.3.2): emit a `fail EnumType::Variant(args)` to the canonical
+ * tagged-error envelope `return { __scrml_error: true, type, variant, data };`.
+ * `fail` ≡ `return ErrorType::Variant` — it returns from the ENCLOSING function,
+ * not the local construct, so the emission is a `return` statement. Shared by the
+ * `case "fail-expr"` statement emitter AND the `!{}` arm-body / match-arm-value
+ * re-fail paths (which previously emitted `fail …` literally -> invalid JS).
+ */
+function emitFailExpr(node: FailExprLike, opts: EmitLogicOpts): string {
+  const enumType: string = node.enumType ?? "";
+  const variant: string = node.variant ?? "";
+  const rawArgs: string = (node.args ?? "").trim();
+  let data: string;
+  if (rawArgs.length === 0) {
+    data = "null";
+  } else {
+    const argParts = _splitTopLevelCommas(rawArgs);
+    if (argParts.length <= 1) {
+      data = emitExprField(node.argsExpr as Parameters<typeof emitExprField>[0], rawArgs, _makeExprCtx(opts));
+    } else {
+      const schema = getVariantFieldSchema(variant);
+      const props = argParts.map((a, i) => {
+        const field = schema && i < schema.length ? schema[i] : `_${i}`;
+        return `${field}: ${emitExprField(null, a.trim(), _makeExprCtx(opts))}`;
+      });
+      data = `{ ${props.join(", ")} }`;
+    }
+  }
+  return `return { __scrml_error: true, type: ${JSON.stringify(enumType)}, variant: ${JSON.stringify(variant)}, data: ${data} };`;
 }
 
 // ---------------------------------------------------------------------------
@@ -452,7 +497,15 @@ function _emitNestedGuardedArmBody(inner: string, opts: EmitLogicOpts): string |
   }
 }
 
-function emitArmBody(arm: LogicArm, errVar: string, machineBindings?: Map<string, { engineName: string; tableName: string; rules: any[]; auditTarget?: string | null }> | null): string {
+function emitArmBody(arm: LogicArm, errVar: string, machineBindings?: Map<string, { engineName: string; tableName: string; rules: any[]; auditTarget?: string | null }> | null, opts?: EmitLogicOpts): string {
+  // errarm-refail (§19.5.2 / §19.3): a bare re-`fail` arm body lowers via the
+  // shared fail-expr emitter (`return { __scrml_error, ... }`). The returned
+  // `return …;` is consumed by emitArmAssign, whose terminator-tail path keeps
+  // it a `return` inside the (always `!`, per NS-1) enclosing function — so the
+  // re-failed error escapes the function exactly like statement-position `fail`.
+  if (arm.failExpr) {
+    return emitFailExpr(arm.failExpr, opts ?? { boundary: "client", machineBindings: machineBindings ?? null });
+  }
   const handler = (arm.handler ?? "").trim();
   if (!handler) return "";
   // Block bodies `{ @var = expr; ... }` must go through rewriteBlockBody so that
@@ -2616,39 +2669,13 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
     }
 
     case "fail-expr": {
-      const enumType: string = node.enumType ?? "";
-      const variant: string = node.variant ?? "";
-      const rawArgs: string = (node.args ?? "").trim();
-      // M-7C-D-12 Track 3: when fail() carries no payload, emit `data: null`
-      // (was `data: undefined` pre-S90) per §42.5/§42.8 canonical absence.
-      //
-      // gate-found-invalid-js-fix-wave (S141): a MULTI-field payload
-      // (`fail HostError::Thrown(message, name)`) must emit `data` as a
-      // FIELD-KEYED OBJECT matching the enum CONSTRUCTOR's shape
-      // (emit-client.ts:emitEnumVariantObjects emits `data: { message, name }`),
-      // so the consuming `!{ ::Thrown(message, name) -> ... }` arm reads
-      // `result.data.message` / `result.data.name`. The pre-fix path emitted
-      // `data: arg0, arg1` (a bare comma list in object-value position) ->
-      // invalid JS (the gate's E-CODEGEN-INVALID-JS). A SINGLE-arg payload keeps
-      // the established raw-value shape (`data: value`), read whole by a
-      // single-name arm binding.
-      let data: string;
-      if (rawArgs.length === 0) {
-        data = "null";
-      } else {
-        const argParts = _splitTopLevelCommas(rawArgs);
-        if (argParts.length <= 1) {
-          data = emitExprField(node.argsExpr, rawArgs, _makeExprCtx(opts));
-        } else {
-          const schema = getVariantFieldSchema(variant);
-          const props = argParts.map((a, i) => {
-            const field = schema && i < schema.length ? schema[i] : `_${i}`;
-            return `${field}: ${emitExprField(null, a.trim(), _makeExprCtx(opts))}`;
-          });
-          data = `{ ${props.join(", ")} }`;
-        }
-      }
-      return `return { __scrml_error: true, type: ${JSON.stringify(enumType)}, variant: ${JSON.stringify(variant)}, data: ${data} };`;
+      // M-7C-D-12 Track 3: no-payload `fail` emits `data: null` (§42.5/§42.8).
+      // S141 gate-fix-wave: a MULTI-field payload (`fail HostError::Thrown(
+      // message, name)`) emits `data` as a FIELD-KEYED OBJECT matching the enum
+      // CONSTRUCTOR shape; a SINGLE-arg payload keeps the raw-value shape.
+      // Shared with the `!{}` arm-body / match-arm-value re-fail paths via
+      // emitFailExpr (errarm-refail).
+      return emitFailExpr(node as FailExprLike, opts);
     }
 
     case "propagate-expr": {
@@ -2721,7 +2748,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
             if (arm.binding && arm.binding !== "_") {
               lines.push(`    const ${arm.binding} = ${errVar};`);
             }
-            const armCode = emitArmBody(arm, errVar, opts.machineBindings ?? null);
+            const armCode = emitArmBody(arm, errVar, opts.machineBindings ?? null, opts);
             for (const line of armCode.split("\n")) lines.push(`    ${line}`);
             lines.push(`  }`);
           } else {
@@ -2731,7 +2758,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
             if (arm.binding && arm.binding !== "_") {
               lines.push(`    const ${arm.binding} = ${errVar};`);
             }
-            const armCode = emitArmBody(arm, errVar, opts.machineBindings ?? null);
+            const armCode = emitArmBody(arm, errVar, opts.machineBindings ?? null, opts);
             for (const line of armCode.split("\n")) lines.push(`    ${line}`);
             lines.push(`  }`);
           }
@@ -2936,7 +2963,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         const hasWildcard = arms.some((a: LogicArm) => a.pattern === "_");
         let isFirst = true;
         for (const arm of arms) {
-          const armCode = emitArmBody(arm, resultVar, opts.machineBindings ?? null);
+          const armCode = emitArmBody(arm, resultVar, opts.machineBindings ?? null, opts);
           if (arm.pattern === "_") {
             lines.push(`  ${isFirst ? "" : "else "}{`);
             if (arm.binding && arm.binding !== "_") {
@@ -3768,16 +3795,24 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
       continue;
     }
 
-    // Raw result: assign rewritten expression to tilde var
+    // errarm-refail (§19.5.2 / §19.3): a bare re-`fail` value-arm lowers via the
+    // shared `fail-expr` emitter to `return { __scrml_error, … };` — `fail`
+    // returns from the ENCLOSING (always `!`, per NS-1) function, so it does NOT
+    // assign to the tilde var; the `return` exits the function directly. The
+    // pre-fix path emitted `tildeVar = fail "V"(args)` -> E-CODEGEN-INVALID-JS.
+    const armResultLine = (a: MatchArm): string =>
+      a.failExpr ? `  ${emitFailExpr(a.failExpr as FailExprLike, opts)}` : `  ${tildeVar} = ${emitExprField(null, a.result, _makeExprCtx(opts))};`;
+
+    // Raw result: assign rewritten expression to tilde var (or re-fail).
     if (arm.kind === "wildcard") {
       lines.push(`else {`);
       if (arm.binding) lines.push(`  const ${arm.binding} = ${tmpVar};`);
-      lines.push(`  ${tildeVar} = ${emitExprField(null, arm.result, _makeExprCtx(opts))};`);
+      lines.push(armResultLine(arm));
       lines.push(`}`);
     } else if (arm.kind === "not") {
       const prefix = conditionIndex === 0 ? "if" : "else if";
       lines.push(`${prefix} (${tmpVar} === null || ${tmpVar} === undefined) {`);
-      lines.push(`  ${tildeVar} = ${emitExprField(null, arm.result, _makeExprCtx(opts))};`);
+      lines.push(armResultLine(arm));
       lines.push(`}`);
       conditionIndex++;
     } else {
@@ -3787,7 +3822,7 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
         : `${tmpVar} === ${arm.test}`;
       lines.push(`${prefix} (${cmp}) {`);
       if (bindingPrelude) lines.push(`  ${bindingPrelude.trimEnd()}`);
-      lines.push(`  ${tildeVar} = ${emitExprField(null, arm.result, _makeExprCtx(opts))};`);
+      lines.push(armResultLine(arm));
       lines.push(`}`);
       conditionIndex++;
     }

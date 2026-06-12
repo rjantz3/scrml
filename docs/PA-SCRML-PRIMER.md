@@ -794,7 +794,7 @@ Compound state with validators auto-synthesizes a reactive validity surface at T
 **Errors are enum tags, not strings.** `@signup.name.errors[0]` is `.Required` or `.LengthFailed(predicate)` — consumers pattern-match on the tag. The `ValidationError` enum at SPEC §55.9 has tag-per-predicate (`Required`, `NotSome`, `LengthFailed(predicate)`, `PatternMismatch(re)`, `MinFailed(threshold)`, `MaxFailed(threshold)`, `GtFailed(expected)`, `LtFailed(expected)`, `GteFailed(expected)`, `LteFailed(expected)`, `EqFailed(expected)`, `NeqFailed(forbidden)`, `OneOfFailed(set)`, `NotInFailed(set)`, `Custom(tag: string)`).
 
 **4-level error message resolution chain** (§55.5, L12):
-1. Inline on decl (`<name req:"Please enter your name">`)
+1. Inline on decl (`<name req("Please enter your name")>` — trailing string-literal ARG inside the validator parens, §55.10-normative; the colon form `req:"…"` is NOT valid scrml)
 2. Project-registered (a project-level message catalog)
 3. `scrml:data` defaults (English)
 4. Match escape hatch (`<match for=ValidationError>`)

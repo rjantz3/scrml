@@ -1,0 +1,14 @@
+type BErr:enum = { X(reason: string), Y }
+type AErr:enum = { Wrapped(reason: string) }
+
+function inner()! -> BErr {
+    fail BErr::X("boom")
+}
+
+function outer()! -> AErr {
+    const v = inner() !{
+        | ::X reason :> { fail AErr::Wrapped(reason) }
+        | ::Y        :> { fail AErr::Wrapped("y") }
+    }
+    return v
+}

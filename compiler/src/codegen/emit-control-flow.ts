@@ -875,6 +875,15 @@ export interface MatchArm {
   result: string;
   /** Structured AST body for match-arm-block nodes — bypasses rewriteBlockBody */
   structuredBody?: any[] | null;
+  /**
+   * errarm-refail (§19.5.2 / §19.3): the fail-expr node attached by
+   * ast-builder.js (parseOneMatchAsExpr) when this VALUE-arm's result is a bare
+   * re-`fail` (`::X(reason) :> fail AErr::Wrapped(reason)`). When present,
+   * emitMatchExpr lowers it via the `fail-expr` emitter (`return { __scrml_error,
+   * … }`) so it escapes the match IIFE -> the enclosing (always `!`, per NS-1)
+   * function, instead of emitting `fail …` literally (E-CODEGEN-INVALID-JS).
+   */
+  failExpr?: any | null;
 }
 
 /**
@@ -1100,17 +1109,19 @@ export function matchArmInlineToMatchArm(node: any): MatchArm | null {
   // diagnostic the developer sees (no duplicate generic invalid-JS report).
   const result: string = String(node.result ?? "").replace(/,\s*$/, "");
   const binding: string | null = node.binding ?? null;
+  // errarm-refail: a bare re-`fail` value-arm carries a fail-expr node.
+  const failExpr = node.failExpr ?? null;
 
   // Determine arm kind from test pattern
   if (test === "else") {
-    return { kind: "wildcard", test: null, binding: null, result };
+    return { kind: "wildcard", test: null, binding: null, result, failExpr };
   }
   if (test === "not") {
-    return { kind: "not", test: null, binding: null, result };
+    return { kind: "not", test: null, binding: null, result, failExpr };
   }
   // String literal arms: test starts with " or '
   if (test.startsWith('"') || test.startsWith("'")) {
-    return { kind: "string", test, binding: null, result };
+    return { kind: "string", test, binding: null, result, failExpr };
   }
   // §18 pipe-alternation: test is `.A | .B | .C` (no payload binding form).
   // Tried BEFORE the single-variant regex so the alternation chain wins.
@@ -1129,6 +1140,7 @@ export function matchArmInlineToMatchArm(node: any): MatchArm | null {
       tests: [first, ...rest],
       binding: null,
       result,
+      failExpr,
     };
   }
   // Variant arms: test starts with . or ::
@@ -1139,6 +1151,7 @@ export function matchArmInlineToMatchArm(node: any): MatchArm | null {
       test: variantMatch[1],
       binding: variantMatch[2]?.trim() ?? binding ?? null,
       result,
+      failExpr,
     };
   }
   // Fallback: try parsing as raw text (shouldn't normally happen)
@@ -1822,7 +1835,18 @@ export function emitMatchExpr(node: any, opts?: any): string {
     const inlineEngineWrite = !isBlockBody && engineBindings
       ? detectInlineEngineWrite(arm.result, engineBindings)
       : null;
-    const emitResult = isBlockBody
+    // errarm-refail (§19.5.2 / §19.3): a bare re-`fail` value-arm lowers via the
+    // shared `fail-expr` emitter (emit-logic.ts case "fail-expr") to
+    // `return { __scrml_error, … };`. The match-expr's IIFE returns that
+    // envelope as its value; since `fail` is valid only inside a `!` function
+    // (NS-1) and the canonical adopter shape is `const v = match …; return v`,
+    // the enclosing function returns the error envelope — the §19.5.2 semantics.
+    const failArmEmit = arm.failExpr
+      ? `{ ${bindingPrelude}${emitLogicNode(arm.failExpr, _matchMode === "server" ? { boundary: "server" } : { boundary: "client" })} }`
+      : null;
+    const emitResult = failArmEmit
+      ? failArmEmit
+      : isBlockBody
       ? (() => {
           const inner = arm.result.trim().slice(1, -1).trim();
           return inner ? `{ ${bindingPrelude}${rewriteBlockBody(inner, null, engineCtx, _matchMode)} }` : (bindingPrelude ? `{ ${bindingPrelude.trimEnd()} }` : `{}`);
@@ -1836,11 +1860,9 @@ export function emitMatchExpr(node: any, opts?: any): string {
     if (arm.kind === "wildcard") {
       if (arm.binding) {
         // §42 presence arm: (x) => expr — bind x to the matched value
-        if (isBlockBody) {
-          iifeLines.push(`  else { const ${arm.binding} = ${tmpVar}; ${emitResult} }`);
-        } else if (inlineEngineWrite) {
-          // Bug 1.7 inline-arm (S88 v0.3) — engine-write in a presence arm result.
-          // The `emitResult` already wraps the guard lines in braces.
+        if (isBlockBody || inlineEngineWrite || failArmEmit) {
+          // `emitResult` already wraps the body in braces (the engine-write /
+          // block-body / errarm-refail re-`fail` cases).
           iifeLines.push(`  else { const ${arm.binding} = ${tmpVar}; ${emitResult} }`);
         } else {
           iifeLines.push(`  else { const ${arm.binding} = ${tmpVar}; return ${emitExprField(null, arm.result, _matchCtx)}; }`);

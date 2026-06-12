@@ -1,0 +1,6 @@
+type AErr:enum = { Wrapped(reason: string) }
+function inner()! -> AErr { fail AErr::Wrapped("boom") }
+function outer()! -> AErr {
+    const v = inner()?
+    return v
+}

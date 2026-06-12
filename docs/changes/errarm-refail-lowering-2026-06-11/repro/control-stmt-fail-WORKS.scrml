@@ -1,0 +1,5 @@
+type AErr:enum = { Bad(reason: string) }
+function check(amount)! -> AErr {
+    if (amount <= 0) fail AErr::Bad("must be positive")
+    return amount
+}

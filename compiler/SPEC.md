@@ -20613,7 +20613,7 @@ ${
 
 **The 4-level resolution chain (cross-ref §55.10):**
 
-1. **Inline override on field declaration** — `<name req:"Please enter your name">` (highest priority; static-string only).
+1. **Inline override on field declaration** — `<name req("Please enter your name")>` (highest priority; static-string only). The override is a trailing string-literal ARG inside the validator's parens (the §55.10-normative form, cross-ref §34 `E-VALIDATOR-INLINE-DYNAMIC`); the colon form `req:"…"` is NOT valid scrml.
 2. **Project-registered messages** — this section's `registerMessages` API. Project-wide; brand-voice + i18n hook.
 3. **`scrml:data` shipped English defaults** — fallback for unregistered variants.
 4. **Match escape hatch** — `<match for=ValidationError>` for full programmatic control (lowest precedence; used when the writer needs to render markup, not just a string).
@@ -20642,9 +20642,12 @@ type LoadError:enum  = { Malformed(reason: string), Network(msg: string) }
 function loadResult()! -> LoadError {
     const raw = fetch("https://api.example.com/results")
     const result = parseVariant(raw, LoadResult) !{
-        | ::ParseError msg :> { fail LoadError::Malformed(msg) }
+        | ::MissingDiscriminator          :> { fail LoadError::Malformed("missing discriminator") }
+        | ::UnknownVariant(tag)           :> { fail LoadError::Malformed("unknown variant: " + tag) }
+        | ::InvalidPayload(field, reason) :> { fail LoadError::Malformed(field + ": " + reason) }
+        | ::Malformed(reason)             :> { fail LoadError::Malformed(reason) }
     }
-    return result    // typed as LoadResult; <match> exhaustive
+    return result    // typed as LoadResult; the handler matches the four ParseError variants exhaustively
 }
 ```
 

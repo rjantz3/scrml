@@ -8179,8 +8179,16 @@ function annotateNodes(
                 }
               }
             }
-            // Recurse over known child containers.
-            for (const key of ["children", "body", "thenBody", "elseBody", "arms", "armBody", "consequent", "alternate", "cases"]) {
+            // Recurse over known child containers. `failExpr` (errarm-refail)
+            // is the fail-expr node a `!{}` handler arm OR a `match` value-arm
+            // carries when its body/value is a bare re-`fail` (ast-builder.js
+            // parseErrorTokens / parseOneMatchAsExpr); descending into it routes
+            // the NS-1 gate at the top of this walker — so a re-`fail` from an
+            // arm whose ENCLOSING function is non-`!` fires E-ERROR-001.
+            // `matchExpr` is the structural match-expr side-field attached to a
+            // let/const-decl / return-stmt (S157 Bug 71); descending into it
+            // reaches the match-arm-inline `failExpr` nodes.
+            for (const key of ["children", "body", "thenBody", "elseBody", "arms", "armBody", "consequent", "alternate", "cases", "failExpr", "matchExpr"]) {
               const v = (stmt as Record<string, unknown>)[key];
               if (Array.isArray(v)) v.forEach((c) => visitStmt(c as ASTNodeLike));
               else if (v && typeof v === "object") visitStmt(v as ASTNodeLike);
@@ -9225,7 +9233,7 @@ function annotateNodes(
       // ------------------------------------------------------------------
       case "guarded-expr": {
         const guardedNode = n.guardedNode as ASTNodeLike | undefined;
-        const errorArms = (n.arms as Array<{pattern?: string; binding?: string; handler?: string; handlerExpr?: unknown; armArrow?: string; span?: Span}> | undefined) ?? [];
+        const errorArms = (n.arms as Array<{pattern?: string; binding?: string; handler?: string; handlerExpr?: unknown; failExpr?: unknown; armArrow?: string; span?: Span}> | undefined) ?? [];
 
         // §18.2 / §34 — W-MATCH-ARROW-LEGACY (S147), `!{}`-handler-arm lockstep.
         // The match and `!{}` handler arms share the §18.2 arm-arrow rule:
@@ -9339,6 +9347,32 @@ function annotateNodes(
         const gExprSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
         for (const arm of errorArms) {
           const handlerExpr = arm.handlerExpr;
+          // errarm-refail (§19.5.2 / §19.3): a bare re-`fail` arm body. The
+          // string-captured `handlerExpr` mis-parses `fail` as a bare ident, so
+          // routing it through checkLogicExprIdents fired a spurious E-SCOPE-001.
+          // Skip the ident walker for the `fail` keyword; instead scope-check the
+          // fail's PAYLOAD args (a real expression — e.g. the arm binding) under
+          // the arm's child scope. The NS-1 gate (E-ERROR-001 in a non-`!`
+          // function) is enforced by the function-body walker, which now descends
+          // into `arm.failExpr` (see the visitStmt recurse keys above).
+          if (arm.failExpr) {
+            scopeChain.push("error-arm");
+            if (typeof arm.binding === "string" && arm.binding.length > 0) {
+              for (const rawName of arm.binding.split(",")) {
+                const bindName = rawName.trim();
+                if (bindName.length > 0) {
+                  scopeChain.bind(bindName, { kind: "variable", resolvedType: tAsIs() });
+                }
+              }
+            }
+            const failArgsExpr = (arm.failExpr as { argsExpr?: unknown }).argsExpr;
+            if (failArgsExpr && typeof failArgsExpr === "object") {
+              const armSpan = (arm.span as Span | undefined) ?? gExprSpan;
+              checkLogicExprIdents(failArgsExpr, armSpan, scopeChain, typeRegistry, errors, undefined, fnAllDeclared);
+            }
+            scopeChain.pop();
+            continue;
+          }
           if (!handlerExpr) continue;
           scopeChain.push("error-arm");
           // §19.4.3 — a multi-field error variant binds ALL its payload fields.

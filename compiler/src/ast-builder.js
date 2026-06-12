@@ -5727,6 +5727,27 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           return { id: ++counter.next, kind: "const-decl", name, init: "", sqlNode: _sqlInitConst, ...(typeAnnotation ? { typeAnnotation } : {}), span: spanOf(startTok, peek()) };
         }
         const { expr, span } = collectExpr();
+        // §19.5: `const x = fallible()?` — propagate-expr binding. Mirrors the
+        // let-decl `?`-propagate hook above (ast-builder.js ~5630). Without this
+        // the const path captured `inner()?` whole in `init`, leaving the `?`
+        // to emit LITERALLY (E-CODEGEN-INVALID-JS — `const v = _scrml_inner_1()?`).
+        // The `?` propagation operator is a §19.5 flagship primitive; both decl
+        // forms must desugar it identically to the `propagate-expr` node that
+        // emit-logic.ts:case "propagate-expr" lowers (the §19.5.2 match/handler
+        // rewrap). The typer's NS-1 gate fires E-ERROR-003 for non-`!` callers.
+        const strippedConst = expr.trimEnd();
+        if (strippedConst.endsWith("?")) {
+          const innerConst = strippedConst.slice(0, -1).trimEnd();
+          return {
+            id: ++counter.next,
+            kind: "propagate-expr",
+            binding: name,
+            expr: innerConst,
+            exprNode: safeParseExprToNode(innerConst, spanOf(startTok, peek())?.start ?? 0),
+            ...(typeAnnotation ? { typeAnnotation } : {}),
+            span: spanOf(startTok, peek()),
+          };
+        }
         return { id: ++counter.next, kind: "const-decl", name, init: expr, initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0), ...(typeAnnotation ? { typeAnnotation } : {}), span: spanOf(startTok, peek()) };
       } else {
         return { id: ++counter.next, kind: "const-decl", name, init: "", ...(typeAnnotation ? { typeAnnotation } : {}), span: tokenSpan(startTok, filePath) };
@@ -7897,6 +7918,19 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     if (peek().text === "{") {
       consume();
       body = parseRecursiveBody();
+    }
+    // errarm-refail (§19.5.2 / §19.3): recognize a bare re-`fail` VALUE-arm
+    // (`::X(reason) :> fail AErr::Wrapped(reason)`). The inline-arm `result` is
+    // captured as a string where `fail` is a leading ident, so it emitted
+    // LITERALLY (`return fail "Wrapped"(reason)` -> E-CODEGEN-INVALID-JS).
+    // Attach a `failExpr` so codegen (emit-control-flow.ts:emitMatchExpr) lowers
+    // it via the fail-expr path (`return { __scrml_error, … }`) and the typer's
+    // NS-1 gate fires E-ERROR-001 when the enclosing function is non-`!`.
+    for (const armNode of body) {
+      if (armNode && armNode.kind === "match-arm-inline" && typeof armNode.result === "string") {
+        const failNode = _parseFailExprString(armNode.result, filePath, armNode.span?.start ?? 0);
+        if (failNode) armNode.failExpr = failNode;
+      }
     }
     return {
       id: ++counter.next,
@@ -11870,7 +11904,115 @@ function parseErrorTokens(tokens, filePath) {
     }
   }
 
+  // errarm-refail (§19.5.2 / §19.3): recognize a bare re-`fail` arm body. When
+  // an arm's handler is exactly `fail EnumType::Variant(args)` (optionally
+  // braced), attach a `failExpr` (fail-expr node) so the typer routes it
+  // through the NS-1 gate (E-ERROR-001 in a non-`!` function) instead of the
+  // ident scope-check (which mis-read `fail` as undeclared -> spurious
+  // E-SCOPE-001), and codegen emits the `return { __scrml_error, ... }` shape
+  // (instead of the literal `fail …` -> E-CODEGEN-INVALID-JS).
+  for (const arm of arms) {
+    const h = (arm.handler ?? "").trim();
+    const inner = (h.startsWith("{") && h.endsWith("}")) ? h.slice(1, -1).trim() : h;
+    const failNode = _parseFailExprString(inner, filePath, arm.span?.start ?? 0);
+    if (failNode) arm.failExpr = failNode;
+  }
+
   return arms;
+}
+
+/**
+ * errarm-refail (§19.5.2 / §19.3): detect + parse a leading `fail` statement
+ * embedded in an ARM body/value STRING into a `fail-expr` node — the same node
+ * `parseFailStmt` produces at statement position. Arm bodies/values are
+ * captured as strings (the `!{}` handler text + the match-arm-inline `result`),
+ * so the keyword `fail` that the statement parser recognizes never reaches a
+ * `fail-expr` node along the arm path. Re-`fail`-from-an-arm is canonical scrml
+ * (it is the literal §19.5.2 desugaring of the `?` propagation operator); this
+ * helper closes the recognition gap so the typer NS-1 gate (E-ERROR-001 when
+ * the enclosing function is non-`!`) and the codegen `fail-expr` emitter
+ * (`return { __scrml_error, ... }`) both apply.
+ *
+ * `text` is the already-trimmed arm body/value (the `{ … }` braces, if any, are
+ * stripped by the caller). Returns a `fail-expr` node when `text` is exactly a
+ * single `fail EnumType(::|.)Variant(args)` statement, else null (so the caller
+ * keeps its existing string/ExprNode path for non-`fail` arm bodies).
+ */
+function _parseFailExprString(text, filePath, startOffset) {
+  if (typeof text !== "string") return null;
+  const trimmed = text.trim();
+  // Leading `fail` keyword as a whole word (the tokenizer space-joins arm
+  // bodies, so `fail` is always followed by whitespace).
+  const m = /^fail\s+([\s\S]+)$/.exec(trimmed);
+  if (!m) return null;
+  let rest = m[1].trim();
+  // Reject multi-statement bodies — a `fail` mixed with other statements is not
+  // a bare re-fail; leave those to the existing block-body path. A top-level
+  // `;` or newline (depth 0, outside string literals) signals a second stmt.
+  {
+    let depth = 0;
+    let q = null;
+    for (let i = 0; i < rest.length; i++) {
+      const ch = rest[i];
+      if (q !== null) { if (ch === "\\") { i++; continue; } if (ch === q) q = null; continue; }
+      if (ch === '"' || ch === "'" || ch === "`") { q = ch; continue; }
+      if (ch === "(" || ch === "{" || ch === "[") depth++;
+      else if (ch === ")" || ch === "}" || ch === "]") depth--;
+      else if ((ch === ";" || ch === "\n") && depth === 0) {
+        const tail = rest.slice(i + 1).trim();
+        if (tail) return null; // a second statement follows -> not a bare re-fail
+        rest = rest.slice(0, i).trim();
+        break;
+      }
+    }
+  }
+  // EnumType (optional — a bare `.Variant` form omits it).
+  let enumType = "";
+  let variant = "";
+  let args = "";
+  const typeMatch = /^([A-Za-z_$][A-Za-z0-9_$]*)\s*(::|\.)/.exec(rest);
+  if (typeMatch) {
+    enumType = typeMatch[1];
+    rest = rest.slice(typeMatch[0].length).trim();
+  } else {
+    // Bare `.Variant` (canonical §14.10 bare-variant): leading separator, no type.
+    const bareSep = /^(::|\.)/.exec(rest);
+    if (!bareSep) return null;
+    rest = rest.slice(bareSep[0].length).trim();
+  }
+  const variantMatch = /^([A-Za-z_$][A-Za-z0-9_$]*)/.exec(rest);
+  if (!variantMatch) return null;
+  variant = variantMatch[1];
+  rest = rest.slice(variantMatch[0].length).trim();
+  // Optional `( args )` — capture the balanced inner text verbatim so string
+  // literals / interpolations survive into the argsExpr re-parse.
+  if (rest.startsWith("(")) {
+    let depth = 0;
+    let q = null;
+    let end = -1;
+    for (let i = 0; i < rest.length; i++) {
+      const ch = rest[i];
+      if (q !== null) { if (ch === "\\") { i++; continue; } if (ch === q) q = null; continue; }
+      if (ch === '"' || ch === "'" || ch === "`") { q = ch; continue; }
+      if (ch === "(") depth++;
+      else if (ch === ")") { depth--; if (depth === 0) { end = i; break; } }
+    }
+    if (end === -1) return null; // unbalanced parens -> not a clean fail
+    args = rest.slice(1, end).trim();
+    const after = rest.slice(end + 1).trim();
+    if (after) return null; // trailing tokens after the fail call -> not a bare re-fail
+  } else if (rest.length > 0) {
+    return null; // unexpected trailing tokens (no parens) -> not a bare re-fail
+  }
+  return {
+    id: 0,
+    kind: "fail-expr",
+    enumType,
+    variant,
+    args,
+    argsExpr: args ? safeParseExprToNodeGlobal(args, filePath, startOffset) : undefined,
+    span: { file: filePath, start: startOffset, end: startOffset, line: 1, col: 1 },
+  };
 }
 
 /**
