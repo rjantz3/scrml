@@ -166,12 +166,30 @@ describe("forEachTypeNameLeaf — leaf extraction over raw type text", () => {
     expect(leaves("!not")).toEqual([]);
   });
 
-  test("lifecycle `(not to string)` → string (post-type)", () => {
+  test("lifecycle PRESENCE `(not to string)` → string (post-type IS a real type)", () => {
+    // Presence-progression `(not to T)`: pre-expr is `not`, post-expr T is a
+    // REAL type — classify it as a name leaf so a typo'd T still RED-fires.
     expect(leaves("(not to string)")).toEqual(["string"]);
   });
 
-  test("lifecycle `(Idle to Frobnicate)` → Frobnicate (post-type, the unknown side)", () => {
-    expect(leaves("(Idle to Frobnicate)")).toEqual(["Frobnicate"]);
+  test("lifecycle PRESENCE `(not to Frobnicate)` → Frobnicate (unknown post-type still classified)", () => {
+    expect(leaves("(not to Frobnicate)")).toEqual(["Frobnicate"]);
+  });
+
+  test("lifecycle VARIANT `(Idle to Done)` → no leaf (S184 — variants are NOT type names)", () => {
+    // S184 (option (i) INFER): a VARIANT-progression annotation `(A to B)` /
+    // `(.A to .B)` names enum VARIANTS, not types. The pre-expr (`Idle`) is not
+    // `not`, so this is a variant-progression — the post-expr (`Done`) is a
+    // VARIANT name and must NOT be classified as a type-name leaf (it formerly
+    // mis-fired E-TYPE-UNKNOWN-NAME on the bare `(Idle to Done)` cell annotation;
+    // the dotted `(.Idle to .Done)` form already escaped). A typo'd variant
+    // surfaces via the initializer's enum-inference channel (E-VARIANT-AMBIGUOUS
+    // on no-match), not the type-name channel.
+    expect(leaves("(Idle to Done)")).toEqual([]);
+  });
+
+  test("lifecycle VARIANT `(.Idle to .Done)` → no leaf (dotted form, already escaped)", () => {
+    expect(leaves("(.Idle to .Done)")).toEqual([]);
   });
 
   test("snippet param `snippet(x: Frobnicate)` → Frobnicate", () => {

@@ -4269,7 +4269,20 @@ function forEachTypeNameLeaf(
     const inner = trimmed.slice(1, -1);
     const glyph = findTopLevelArrow(inner);
     if (glyph !== null) {
-      forEachTypeNameLeaf(inner.slice(glyph.idx + glyph.len), visit, opts, depth + 1);
+      // S184 — distinguish PRESENCE-progression `(not to T)` from
+      // VARIANT-progression `(A to B)` / `(.A to .B)`. In a presence form the
+      // post-expr T is a REAL type (classify it as a name leaf, as before). In a
+      // variant form the pre AND post are VARIANT names of some enum (NOT type
+      // names) — the bare `(Idle to Done)` form was spuriously firing
+      // E-TYPE-UNKNOWN-NAME on `Done` (the dotted `(.Idle to .Done)` form already
+      // escaped because `.Done` is not a leading-ident leaf). The canonical
+      // distinguisher mirrors `parseLifecycleReturnAnnotation`: pre-expr `not` →
+      // presence; anything else → variant-progression. For a variant form, do
+      // NOT classify the post-expr as a type-name leaf.
+      const preExpr = inner.slice(0, glyph.idx).trim();
+      if (preExpr === "not") {
+        forEachTypeNameLeaf(inner.slice(glyph.idx + glyph.len), visit, opts, depth + 1);
+      }
       return;
     }
     forEachTypeNameLeaf(inner, visit, opts, depth + 1);
@@ -8667,6 +8680,24 @@ function annotateNodes(
             let bvCtxType: ResolvedType | null = null;
             if (reactAnnot) {
               bvCtxType = resolvedType;
+              // S184 — Shape-1 variant-progression lifecycle initializer. A
+              // lifecycle annotation `<status>: (.A to .B) = .A` (bare `(A to
+              // B)` form too) resolves to `asIs` via `resolveTypeExpr` (the
+              // post-type B is a VARIANT, not a registered type) → no enum
+              // context → the bare `.A` initializer fired a spurious
+              // E-VARIANT-AMBIGUOUS. Per the S184 user ruling (option (i)
+              // INFER), recover the enum from the annotation's variant NAMES:
+              // the unique enum whose variant set contains both {A, B}. A
+              // genuine two-enum match stays ambiguous (leave bvCtxType=asIs so
+              // the no-context diagnostic fires); no match also leaves it
+              // unchanged. Mirrors the fn-return path (which also names no enum)
+              // rather than the struct-field path (named enum).
+              if (resolvedType.kind === "asIs" || resolvedType.kind === "unknown") {
+                const lifecycleEnum = inferEnumFromVariantLifecycleAnnotation(reactAnnot, typeRegistry);
+                if (lifecycleEnum && "enum" in lifecycleEnum) {
+                  bvCtxType = lifecycleEnum.enum;
+                }
+              }
             } else if (typeof n.name === "string" && n.name.length > 0) {
               const prior = scopeChain.lookup(`@${n.name}`) as
                 | { kind?: string; resolvedType?: ResolvedType }
@@ -19575,6 +19606,63 @@ function parseLifecycleReturnAnnotation(
     preVariantName: preVariant,
     postVariantName: postVariant,
   };
+}
+
+/**
+ * S184 — Shape-1 variant-progression lifecycle initializer enum-inference.
+ *
+ * A Shape-1 reactive cell with a VARIANT-progression lifecycle annotation
+ * `<status>: (.A to .B) = .A` (or the bare `(A to B)` form) names the variants
+ * but NOT the enum. The `= .A` initializer is a VALUE that needs the enum to
+ * resolve (B20 bare-variant inference); the annotation itself, being a lifecycle
+ * `(A to B)` shape, resolves to `asIs` via `resolveTypeExpr` and supplies NO
+ * enum context — so the initializer fired a spurious E-VARIANT-AMBIGUOUS.
+ *
+ * Per the S184 user ruling (option (i) INFER), the enum is inferred from the
+ * annotation's variant NAMES: the UNIQUE enum in the type registry whose variant
+ * set contains BOTH the pre and post variant of `(.A to .B)`. That inferred enum
+ * is then the context the initializer (and the bare-annotation-variant scan)
+ * resolves against. This mirrors the fn-return path (`(.A to .B)` names no enum
+ * either) rather than the struct-field path (`status: TicketStatus (Open to
+ * Closed)` names the enum explicitly).
+ *
+ * Disposition:
+ *   - exactly one enum contains {pre, post} → `{ enum: <that EnumType> }`
+ *   - two+ enums contain {pre, post}        → `{ ambiguous: true }` (genuine
+ *     cross-enum ambiguity stays E-VARIANT-AMBIGUOUS)
+ *   - no enum contains {pre, post}          → `null` (the variants name no enum;
+ *     the caller's existing no-context diagnostic fires)
+ *
+ * Only VARIANT-progression annotations are inferable; presence-progression
+ * `(not to T)` returns null (its post-type IS a real type, resolved normally).
+ *
+ * @returns `{ enum }` on a unique match, `{ ambiguous: true }` on 2+, else null.
+ */
+function inferEnumFromVariantLifecycleAnnotation(
+  annotation: string | undefined,
+  typeRegistry: Map<string, ResolvedType>,
+): { enum: EnumType } | { ambiguous: true } | null {
+  if (typeof annotation !== "string") return null;
+  const spec = parseLifecycleReturnAnnotation(annotation, typeRegistry);
+  if (!spec || spec.kind !== "variant") return null;
+  const pre = spec.preVariantName;
+  const post = spec.postVariantName;
+  if (!pre || !post) return null;
+  const matches: EnumType[] = [];
+  const seen = new Set<string>();
+  for (const t of typeRegistry.values()) {
+    if (!t || t.kind !== "enum") continue;
+    const en = t as EnumType;
+    if (seen.has(en.name)) continue;
+    const names = new Set(en.variants.map((v) => v.name));
+    if (names.has(pre) && names.has(post)) {
+      seen.add(en.name);
+      matches.push(en);
+    }
+  }
+  if (matches.length === 1) return { enum: matches[0] };
+  if (matches.length >= 2) return { ambiguous: true };
+  return null;
 }
 
 /**
