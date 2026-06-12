@@ -895,6 +895,14 @@ export function splitBlocks(filePath, source) {
     let braceDepth = 0;   // track '{' nesting inside attribute values (sigil-prefixed or bare)
     let parenDepth = 0;   // §5.5.2: track '(' nesting so '>' in (expr) doesn't close the tag
     let bracketDepth = 0; // R25-Bug-40: track '[' nesting so '>' in [expr] (array-access etc.) doesn't close the tag
+    // cluster-A (S188) — track depth-0 ternary `?` so the `:` branch separator
+    // of a stray unquoted ternary condition (`if=@n ? @m : @n`) is NOT mistaken
+    // for a `:`-shorthand body introducer. Without this, the ` : ` shreds the
+    // opener into a closer-less shorthand leaf and surfaces a misleading
+    // E-CTX-001 on the element's real closer. (The whole unquoted-ternary
+    // condition is then captured by the attribute tokenizer as an
+    // ATTR_OP_REJECT → E-ATTR-UNQUOTED-OPERATOR, the canonical reject.)
+    let ternaryDepth = 0;
 
     while (pos < len) {
       const c = source[pos];
@@ -943,6 +951,23 @@ export function splitBlocks(filePath, source) {
       }
 
       if (!localDouble && !localSingle) {
+        // cluster-A (S188 "reject + parens") — `g-attr-gte-tagclose` early
+        // guard. A depth-0 `>=` sequence (a `>` IMMEDIATELY followed by `=`)
+        // is never an opener terminator: the tag close is `>` and the
+        // self-close is `/>`; no valid scrml opener ends with `>` adjacent to
+        // `=`. Such a `>=` only arises as a stray comparison operator inside an
+        // unquoted condition attribute value (`if=@n >= 3`). If we let the `>`
+        // close the tag here, the trailing `= 3>` shreds into body content and
+        // surfaces the misleading E-CTX-001 "no matching tag" cascade. Instead,
+        // keep scanning — the `>=` (and the rest of the operator condition)
+        // flows into attrRaw, the attribute tokenizer captures it as an
+        // ATTR_OP_REJECT, and the AST builder fires the clean
+        // E-ATTR-UNQUOTED-OPERATOR (parens/quotes steer) ONCE.
+        if (c === ">" && ch(1) === "=") {
+          attrRaw += c;
+          step();
+          continue;
+        }
         if (c === ">") {
           attrRaw += c;
           step();
@@ -974,6 +999,17 @@ export function splitBlocks(filePath, source) {
         // Mandatory whitespace BEFORE `:` distinguishes from namespace
         // attribute prefixes (`bind:value`, `class:active`, `on:click`,
         // `aria-foo:bar`) which have NO whitespace before `:`.
+        if (c === ":" && ch(1) !== ":" && ternaryDepth > 0) {
+          // cluster-A (S188) — this `:` is the alternative-branch separator of
+          // an open depth-0 ternary (`if=@n ? @m : @n`), NOT a `:`-shorthand
+          // body introducer. Consume it as opener content and close the
+          // ternary so the rest of the operator condition flows into attrRaw
+          // (to be captured as an ATTR_OP_REJECT downstream).
+          ternaryDepth--;
+          attrRaw += c;
+          step();
+          continue;
+        }
         if (c === ":" && ch(1) !== ":") {
           // Look back in attrRaw for previous char. SPEC §4.14: "opens with
           // a single `:` token preceded by at least one whitespace
@@ -1003,6 +1039,17 @@ export function splitBlocks(filePath, source) {
           attrRaw += c;
           step();
           attrRaw += source[pos];
+          step();
+          continue;
+        }
+        // cluster-A (S188) — a bare depth-0 `?` (NOT the `?{` SQL sigil handled
+        // above) opens a ternary. Track it so the matching `:` is consumed as
+        // the alternative-branch separator (above) rather than mistaken for a
+        // `:`-shorthand body introducer. (`if=@n ? @m : @n` is a stray unquoted
+        // ternary — rejected downstream via ATTR_OP_REJECT.)
+        if (c === "?") {
+          ternaryDepth++;
+          attrRaw += c;
           step();
           continue;
         }
@@ -1149,6 +1196,13 @@ export function splitBlocks(filePath, source) {
         continue;
       }
       if (!inDouble && !inSingle) {
+        // cluster-A (S188) — `g-attr-gte-tagclose`: a `>=` (a `>` immediately
+        // followed by `=`) inside an opener is a stray comparison operator
+        // (`if=@n >= 3`), never the opener terminator. Skip past it so this
+        // peek does not mis-read the `=` of `>=` as a Shape-1 state-decl `=`
+        // signal (which would gobble the whole `<p if=@n >= 3>` opener as a
+        // text/decl block and surface a misleading E-CTX-001 on `</p>`).
+        if (c === ">" && p + 1 < len && source[p + 1] === "=") { p += 2; continue; }
         if (c === ">") { p++; break; }
         if (c === "/" && p + 1 < len && source[p + 1] === ">") return false; // self-closing — not state-decl
         if ((c === "$" || c === "?" || c === "#" || c === "!" || c === "^" || c === "~") && p + 1 < len && source[p + 1] === "{") {

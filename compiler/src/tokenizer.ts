@@ -30,6 +30,8 @@
  *   ATTR_BLOCK    {...} brace-block attribute value (raw content between braces, for props={...})
  *   ATTR_TYPED_DECL  name(type) typed attribute in state blocks
  *   ATTR_EXPR     boolean expression value for if= attribute (negation, equality, logical ops)
+ *   ATTR_OP_REJECT  unquoted CONDITION attribute value with a bare binary/ternary operator
+ *                   (cluster-A S188 — fires E-ATTR-UNQUOTED-OPERATOR; payload {name,value,op})
  *   TAG_OPEN      < name
  *   TAG_CLOSE_GT  >
  *   TAG_SELF_CLOSE />
@@ -265,6 +267,89 @@ function isPrefixNotOperandAhead(raw: string, pos: number): boolean {
   if (c === ">" || (c === "/" && i + 1 < raw.length && raw[i + 1] === ">")) return false;
   // Operand starts: `@`-ref, identifier, or parenthesized sub-expression.
   return c === "@" || c === "(" || /[A-Za-z_$]/.test(c);
+}
+
+/**
+ * cluster-A (S188 "reject + parens") — the markup attributes whose unquoted
+ * value is a boolean CONDITION (§17.1 `if=` / §17.2 `show=` / §17.1.1
+ * `else-if=`). Per SPEC §5.1/§5.2 an unquoted condition admits ONLY the
+ * atomic forms — identifier (`@var` / `obj.prop`), call (`fn()`), or prefix
+ * `!` — never a binary/ternary operator. Operator/compound conditions SHALL
+ * be parenthesized `if=(expr)` or quoted `if="expr"`.
+ *
+ * NOT included: event-handler attributes (`onclick=` etc., §5.2.3 bare-form),
+ * `class:` / `bind:` / `style:` directives (their own grammars, §5.4/§5.5.2),
+ * and `while=` (no such markup attribute exists — §17 has only `if=`/`show=`;
+ * a `while` CONDITION lives in `${ while (...) }` statement position).
+ */
+function isConditionAttrName(name: string): boolean {
+  return name === "if" || name === "show" || name === "else-if";
+}
+
+/**
+ * cluster-A — at the boundary where the unquoted-value reader has just
+ * terminated the first atomic ident of a CONDITION attribute (`if=`/`show=`/
+ * `else-if=`), detect whether what follows is a stray binary/ternary OPERATOR
+ * rather than a clean attribute boundary (`>` tag-close, `/>` self-close, or
+ * whitespace-then-next-attribute).
+ *
+ * Returns the offending operator string when an operator is detected, else
+ * `null`. The caller (the ATTR_IDENT-emit branch) uses a non-null return to
+ * capture the whole operator run as a single ATTR_OP_REJECT token — which
+ * fires E-ATTR-UNQUOTED-OPERATOR exactly once and steers to parens/quotes,
+ * instead of silently shredding the operator + RHS (the dangerous class) or
+ * letting the first `>` of `>=` close the tag early (the misleading
+ * E-CTX-001 cascade).
+ *
+ * Detection rules (operate on the chars AFTER the atomic ident):
+ *   - Skip leading inline whitespace (` ` / `\t`) only — a newline before an
+ *     operator is unusual and treated as a non-operator boundary.
+ *   - `>=`            -> ">="  (the `>` would otherwise close the tag early)
+ *   - `> ` / `> <op>` -> ">"   (bare `>` operator: `>` followed by inline ws,
+ *                               i.e. the canonical `@n > 3` spaced form; a bare
+ *                               `>` with NO preceding ws is the tag close and
+ *                               is NOT matched — `if=@n>` stays atomic)
+ *   - `<` `<=` `==` `!=` `&&` `||` `+` `-` `*` `/` `?` (ternary) when they
+ *     appear after the ident (with or without leading ws) -> that operator.
+ *
+ * Boundary safety: a bare `>` or `/>` with no leading whitespace is the tag
+ * close and returns `null`. A `/` that is immediately `/>` (self-close) also
+ * returns `null` — only a `/` used as a division operator (followed by an
+ * operand, not `>`) is matched.
+ */
+function attrConditionOperatorAhead(raw: string, pos: number): string | null {
+  let i = pos;
+  let sawWs = false;
+  while (i < raw.length && (raw[i] === " " || raw[i] === "\t")) { i++; sawWs = true; }
+  if (i >= raw.length) return null;
+  const c = raw[i];
+  const n = i + 1 < raw.length ? raw[i + 1] : "";
+
+  // `>=` — intercept BEFORE the outer tag-close test consumes the `>`.
+  if (c === ">" && n === "=") return ">=";
+  // bare `>` as a comparison operator: only when separated from the ident by
+  // inline whitespace (`@n > 3`). An adjacent `>` (`@n>` / `@n>3`) is the tag
+  // close in this grammar and stays atomic (genuinely ambiguous; left to the
+  // pre-existing tag-close behavior).
+  if (c === ">" && sawWs) return ">";
+
+  // `<` / `<=` — `<` never closes a tag in value position.
+  if (c === "<") return n === "=" ? "<=" : "<";
+  // `==` / `!=`
+  if (c === "=" && n === "=") return "==";
+  if (c === "!" && n === "=") return "!=";
+  // `&&` / `||`
+  if (c === "&" && n === "&") return "&&";
+  if (c === "|" && n === "|") return "||";
+  // ternary `?` (no-space `@n?@m:@n` and spaced `@n ? @m : @n`)
+  if (c === "?") return "?";
+  // arithmetic / concat: `+` `-` `*` `/`. `/` is only an operator when it is
+  // NOT the start of a self-close `/>` — a self-close has no preceding operand
+  // continuation. Require an operand-ish char (or ws-then-operand) after `/`.
+  if (c === "+" || c === "-" || c === "*") return c;
+  if (c === "/" && n !== ">") return "/";
+
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -769,6 +854,76 @@ export function tokenizeAttributes(raw: string, baseOffset: number, baseLine: nu
               }
               tokens.push(makeToken("ATTR_EXPR", expr.replace(/\s+$/, ""), vs, absOff(), vl, vc));
             }
+          } else if (
+            isConditionAttrName(name) &&
+            attrConditionOperatorAhead(raw, pos) !== null
+          ) {
+            // cluster-A (S188 "reject + parens") — a CONDITION attribute
+            // (`if=`/`show=`/`else-if=`) whose unquoted value continues past
+            // the first atomic ident into a BINARY/TERNARY operator
+            // (`>= > < <= == != && || + - * /` or ternary `?:`). SPEC §5.1/§5.2
+            // admit only the ATOMIC unquoted forms for a condition; operator
+            // conditions SHALL be parenthesized `if=(expr)` or quoted
+            // `if="expr"`.
+            //
+            // Before this branch, the value-reader stopped at the operator and
+            // the operator + RHS were either silently shredded (the operator
+            // and its operand DROPPED at token level — the dangerous class) or
+            // the first `>` of `>=` closed the tag early (the misleading
+            // E-CTX-001 "no matching tag" cascade). Here we CAPTURE the whole
+            // operator run as a single ATTR_OP_REJECT token so the AST builder
+            // can fire E-ATTR-UNQUOTED-OPERATOR exactly ONCE, naming the real
+            // cause and steering to parens/quotes — no silent drop, no stray
+            // DOM-leaked operand, no E-CTX-001 cascade.
+            //
+            // The run is read in expression-mode (paren/brace/bracket/string-
+            // tracked) up to the attribute boundary so the captured text
+            // mirrors the author's intent in the diagnostic. The `>=` / spaced
+            // `>` cases are intercepted here BEFORE the outer tag-close test
+            // would consume the `>`.
+            const op = attrConditionOperatorAhead(raw, pos)!;
+            let expr = ident;
+            // Consume the leading inline whitespace + the detected operator
+            // chars FIRST, so the boundary loop below reads only the RHS. This
+            // lets a bare spaced `>` operator (`@n > 3`) be captured whole — the
+            // operator's `>` is consumed here, and the boundary loop then breaks
+            // on the genuine tag-close `>` after the RHS.
+            while (pos < raw.length && (raw[pos] === " " || raw[pos] === "\t")) { expr += raw[pos]; advance(); }
+            for (let k = 0; k < op.length && pos < raw.length; k++) { expr += raw[pos]; advance(); }
+            let parenDepth = 0;
+            let braceDepth = 0;
+            let bracketDepth = 0;
+            let stringCh: string | null = null;
+            while (pos < raw.length) {
+              const c2 = raw[pos];
+              if (stringCh !== null) {
+                if (c2 === "\\" && pos + 1 < raw.length) { expr += c2 + raw[pos + 1]; advance(2); continue; }
+                if (c2 === stringCh) stringCh = null;
+                expr += c2; advance(); continue;
+              }
+              const atDepthZero = parenDepth === 0 && braceDepth === 0 && bracketDepth === 0;
+              if (atDepthZero) {
+                // `/>` self-close and a bare `>` tag-close end the RHS run. The
+                // leading operator (incl. the `>` of `>=` / spaced `>`) was
+                // already consumed above, so any `>` reached here is a genuine
+                // tag boundary.
+                if (c2 === "/" && raw[pos + 1] === ">") break;
+                if (c2 === ">") break;
+              }
+              if (c2 === '"' || c2 === "'" || c2 === "`") { stringCh = c2; expr += c2; advance(); continue; }
+              if (c2 === "(") { parenDepth++; expr += c2; advance(); continue; }
+              if (c2 === ")") { parenDepth--; expr += c2; advance(); continue; }
+              if (c2 === "[") { bracketDepth++; expr += c2; advance(); continue; }
+              if (c2 === "]") { bracketDepth--; expr += c2; advance(); continue; }
+              if (c2 === "{") { braceDepth++; expr += c2; advance(); continue; }
+              if (c2 === "}") { braceDepth--; expr += c2; advance(); continue; }
+              expr += c2; advance();
+            }
+            tokens.push(makeToken(
+              "ATTR_OP_REJECT",
+              JSON.stringify({ name, value: expr.replace(/\s+$/, ""), op }),
+              vs, absOff(), vl, vc,
+            ));
           } else {
             tokens.push(makeToken("ATTR_IDENT", ident, vs, absOff(), vl, vc));
           }

@@ -1349,6 +1349,7 @@ scrml attributes follow a three-way distinction based on quoting:
 - `attr=fn()` on a non-event attribute SHALL be a compile error (E-ATTR-001) unless `fn` returns a value compatible with the attribute's expected type.
 - The compiler SHALL validate unquoted identifiers against the current scope. An unquoted identifier that cannot be resolved SHALL be a compile error (E-SCOPE-001).
 - A bare identifier in an attribute value or logic expression (`${ }`) whose name matches a declared reactive variable SHALL be a compile error (E-SCOPE-001). Reactive reads require the `@` sigil — `@name` — so the compiler can wire reactivity. The diagnostic SHALL name the reactive variable and point the author at the sigil form.
+- **Unquoted attribute CONDITIONS are atomic-only (cluster-A, S188).** An unquoted *condition* attribute value — `if=` (§17.1), `show=` (§17.2), `else-if=` (§17.1.1) — admits ONLY the atomic forms: an identifier reference (`@var` / `obj.prop`), a call (`fn()`), or a prefix-`!` negation (`!@var`). It SHALL NOT contain a binary or ternary operator (`>= > < <= == != && || + - * /`, string concatenation, or ternary `?:`). An operator/compound condition SHALL be parenthesized — `if=(@n >= 3)` — or quoted — `if="@n >= 3"`. The parenthesized and quoted forms handle ALL operators; only the *bare unquoted* form is restricted to atomics. A bare operator in an unquoted condition SHALL be compile error `E-ATTR-UNQUOTED-OPERATOR`, fired exactly once per offending attribute, naming the operator and steering to the parens/quotes form. (This is the binary/ternary-operator companion to the prefix-`not` rule §42.10: a bare `not` in an attribute condition fires E-TYPE-045; a bare *binary/ternary operator* fires E-ATTR-UNQUOTED-OPERATOR. For a condition mixing both — `if=@x && not @y` — the binary-operator reject fires first on the unquoted-compound structure; once parenthesized, the inner `not` then surfaces E-TYPE-045.)
 
 ### 5.2.1 Event Handler Argument Passing
 
@@ -10002,7 +10003,7 @@ The `if=` attribute is a structural boolean conditional.
 
 - When `expr` evaluates to false, the element is NOT rendered. It does not exist in the DOM.
 - `if=` is sugar over `${ if(expr) { lift <element>...</element> } }`.
-- `expr` SHALL be an unquoted expression (per Section 5 quoting rules).
+- `expr` SHALL be a condition expression (per Section 5 quoting rules). **A *bare unquoted* `if=` condition is atomic-only** (§5.2): an identifier reference (`@var` / `obj.prop`), a call (`fn()`), or a prefix-`!` negation. **An operator condition — any binary or ternary operator (`>= > < <= == != && || + - * /` or `?:`) — SHALL be parenthesized (`if=(@n >= 3)`) or quoted (`if="@n >= 3"`).** A bare operator in an unquoted `if=` is compile error `E-ATTR-UNQUOTED-OPERATOR` (§5.2, §34). The same atomic-only-when-bare rule applies to `show=` (§17.2) and `else-if=` (§17.1.1).
 - `if=expr` MAY appear on any HTML element or component. It SHALL NOT appear on a state object opener.
 
 **Worked example:**
@@ -16695,6 +16696,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-ATTR-010 | §5.4 | `bind:` target is not an `@` reactive variable | Error |
 | E-ATTR-011 | §5.4 | `bind:` used on an unsupported attribute name | Error |
 | E-ATTR-012 | §5.4 | `bind:` and explicit event handler conflict on same element | Error |
+| E-ATTR-UNQUOTED-OPERATOR | §5.1, §17.1 | An unquoted attribute CONDITION (`if=`/`show=`/`else-if=`) contains a bare binary/ternary operator (`>= > < <= == != && \|\| + - * /` or ternary `?:`). An unquoted condition admits only the atomic forms (`@var` / `obj.prop` / `fn()` / prefix `!`); operator conditions SHALL be parenthesized `if=(expr)` or quoted `if="expr"`. Fires ONCE per offending attribute (cluster-A, S188 "reject + parens"). | Error |
 | E-SCOPE-001 | §5.2 | Unquoted identifier not resolvable in scope | Error |
 | E-SCOPE-010 | §20.4 | Developer declares variable with reserved binding name (`route`, `session`) | Error |
 | E-SCOPE-011 | §20.4 | Access to undeclared route parameter name | Error |
@@ -21683,6 +21685,8 @@ The keyword `not` serves exactly one role in scrml: it is the absence value. It 
 - `not` as the right-hand side of `is` (e.g., `x is not`) is the absence predicate operator.
 - The boolean negation operator in scrml is `!`. `!(a == b)` and `!@x` are valid. `not (a == b)` and `not @x` are NOT valid.
 - `not` SHALL NOT appear in prefix position before a boolean expression — in EITHER form (bare `not @x` / `not f(...)` / `not obj.prop`, OR parenthesized `not (expr)`) and in ANY expression position (if/while condition, attribute `if=`/`while=`, `${...}` interpolation, ternary, `&&`/`||` operand, return, call-arg, derived-cell RHS). The compiler SHALL emit E-TYPE-045 in all such positions.
+
+> **Note (cluster-A, S188) — operand positions vs. bare unquoted attribute conditions.** The `&&`/`||`-operand and `if=`/`while=`-condition positions enumerated above describe where a prefix-`not` is rejected *within an expression*; those operator-bearing expressions are themselves written in the **quoted or parenthesized** condition form (`if="@a && not @b"`, `if=(@a || not @b)`, a `${...}` interpolation, etc.). A *bare unquoted* attribute condition containing a binary or ternary operator is independently rejected by `E-ATTR-UNQUOTED-OPERATOR` (§5.2, §17.1) — this rule does NOT authorize bare operators in an unquoted `if=`. For a bare unquoted condition mixing both (`if=@a && not @b`), the binary-operator reject fires first; once parenthesized, the inner `not` then surfaces E-TYPE-045.
 
 | Code | Trigger | Severity |
 |---|---|---|

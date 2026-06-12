@@ -45,6 +45,9 @@ function codes(errors) {
 function fires045(src, name) {
   return codes(compileWholeScrml(src, name).errors).includes("E-TYPE-045");
 }
+function firesCode(src, code, name) {
+  return codes(compileWholeScrml(src, name).errors).includes(code);
+}
 
 // =============================================================================
 // FORBIDDEN positions — E-TYPE-045 MUST fire (bare + paren, all positions).
@@ -104,11 +107,15 @@ describe("E-TYPE-045 fires — bare `not @x` in every expression position", () =
     expect(fires045(src, "attr-bare-member")).toBe(true);
   });
 
-  test("attribute compound condition (`if=@x && not @y`) — §5.5.2 unquoted-compound shred", () => {
-    // A compound boolean attr condition must be parenthesized (§5.5.2). The
-    // unquoted form shreds `@x && not @y`; the leading bare `not` of the shred
-    // is still a prefix-`not`-as-negation and MUST surface E-TYPE-045 (naming
-    // the real cause) rather than only a misleading downstream E-SCOPE-001.
+  test("attribute compound condition (`if=@x && not @y`) — cluster-A precedence: binary-operator reject wins over inner `not`", () => {
+    // cluster-A (S188 "reject + parens"): an unquoted attribute CONDITION cannot
+    // contain a binary operator. The tokenizer captures the whole `@x && not @y`
+    // run on hitting `&&` and fires E-ATTR-UNQUOTED-OPERATOR (the more-structural
+    // violation — the unquoted compound itself) BEFORE the inner `not` is ever
+    // isolated as a stray attribute. PRECEDENCE: the binary-operator reject wins;
+    // E-TYPE-045 does NOT also fire (never both, never silent). Once the author
+    // parenthesizes per the steer, the paren form then fires E-TYPE-045 on the
+    // inner `not` (the second test below) — a coherent two-step correction.
     const src = `<program>
 \${
     <x> = true
@@ -116,7 +123,24 @@ describe("E-TYPE-045 fires — bare `not @x` in every expression position", () =
 }
     <p if=@x && not @y>z</>
 </>`;
-    expect(fires045(src, "attr-bare-compound")).toBe(true);
+    expect(firesCode(src, "E-ATTR-UNQUOTED-OPERATOR", "attr-bare-compound")).toBe(true);
+    // Precedence: the operator-reject is the ONLY diagnostic for the bare form.
+    expect(fires045(src, "attr-bare-compound-no045")).toBe(false);
+  });
+
+  test("parenthesized attribute compound with inner `not` (`if=(@x && not @y)`) — E-TYPE-045 fires on the `not`", () => {
+    // The paren form is the canonical operator-condition vehicle: it tokenizes
+    // as ATTR_EXPR and routes through the parseExprToNode lowering choke-point,
+    // so the inner prefix-`not`-as-negation surfaces E-TYPE-045 (the §42.10
+    // violation) — the second step of the two-step correction.
+    const src = `<program>
+\${
+    <x> = true
+    <y> = true
+}
+    <p if=(@x && not @y)>z</>
+</>`;
+    expect(fires045(src, "attr-paren-compound")).toBe(true);
   });
 
   test("`${...}` interpolation (bare)", () => {

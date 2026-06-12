@@ -2047,6 +2047,33 @@ function parseAttributes(tokens, filePath, errors, isComponent = false) {
             // overlap across attributes).
             emitForbiddenSwitchInRaw(raw, valSpan, valSpan?.start ?? 0, filePath, errors);
             value = { kind: "expr", raw, refs, exprNode: safeParseExprToNodeGlobal(raw, filePath, valSpan?.start ?? 0, errors), span: valSpan };
+          } else if (valTok.kind === "ATTR_OP_REJECT") {
+            // cluster-A (S188 "reject + parens") — an unquoted CONDITION
+            // attribute (`if=`/`show=`/`else-if=`) whose value contains a bare
+            // binary/ternary operator (`>= > < <= == != && || + - * /` or
+            // ternary `?:`). SPEC §5.1/§5.2: an unquoted condition admits ONLY
+            // the atomic forms (`@var` / `obj.prop` / `fn()` / prefix `!`);
+            // operator conditions SHALL be parenthesized `if=(expr)` or quoted
+            // `if="expr"`. The tokenizer captured the whole operator run (rather
+            // than silently shredding the operator + RHS, or letting the `>` of
+            // `>=` close the tag early) and handed us {name, value, op}. Fire
+            // E-ATTR-UNQUOTED-OPERATOR exactly ONCE here, naming the cause and
+            // steering to parens/quotes, then recover the value as `absent` so
+            // the rejected condition does not cascade into a misleading
+            // E-CTX-001 / E-SCOPE-001 downstream.
+            let _rej;
+            try { _rej = JSON.parse(valTok.text); } catch { _rej = { name, value: valTok.text, op: "" }; }
+            const _opName = _rej.op || "an operator";
+            const _shown = (_rej.value || "").trim();
+            errors.push(new TABError(
+              "E-ATTR-UNQUOTED-OPERATOR",
+              `E-ATTR-UNQUOTED-OPERATOR: \`${name}=\` is an unquoted condition — it cannot contain ` +
+              `the operator \`${_opName}\`. An unquoted attribute condition admits only the atomic ` +
+              `forms (\`@var\`, \`obj.prop\`, \`fn()\`, or prefix \`!\`). Parenthesize or quote the ` +
+              `operator condition: \`${name}=(${_shown})\` or \`${name}="${_shown}"\`.`,
+              valSpan,
+            ));
+            value = { kind: "absent" };
           } else {
             // E-ATTR-001: unexpected token type as attribute value
             errors.push(new TABError(
