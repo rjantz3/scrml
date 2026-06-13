@@ -1759,26 +1759,61 @@ export function generateHtml(
             }
           }
         } else if (val.kind === "call-ref") {
-          // Defense-in-depth: server-only call names must not become client event bindings.
-          // This can occur if the tokenizer misparses ^{} meta content in attribute position.
-          const SERVER_ONLY_CALL = /^(bun\.eval|Bun\.|process\.|fs\.)/;
-          if (SERVER_ONLY_CALL.test(val.name ?? "")) {
-            // Silently drop — tokenizer fix should prevent this from reaching CG.
-          } else {
+          if (name === "if" || name === "show") {
+            // §5.1 line 1352 (g-attr-if-fn-call-misroute, S191): an unquoted
+            // CONDITION attribute admits a bare call `fn()` as a valid atomic
+            // form. Route it as a reactive conditional — NOT a (nonexistent)
+            // "if"/"show" DOM event binding. Mirrors the `val.kind === "expr"`
+            // if/show block above (the paren form `if=(fn())` already works
+            // this way). The fn name is auto-mangled by the whole-buffer
+            // `post-fn-name-mangle` pass (emit-client.ts), and `@`-ref args are
+            // rewritten by `rewriteExprWithDerived` inside `emitExprField`, so a
+            // raw condExpr string (condExprNode undefined) lowers identically to
+            // the paren form. `refs` is advisory only — the runtime `_scrml_effect`
+            // dynamically subscribes to whatever cells the call reads at run time
+            // (the FIX(IS-VARIANT-ATTR) gate in emit-event-wiring accepts empty refs).
             const placeholderId = genVar(`attr_${name}`);
-            parts.push(` data-scrml-bind-${name}="${placeholderId}"`);
+            const dataAttr = name === "show" ? "data-scrml-bind-show" : "data-scrml-bind-if";
+            parts.push(` ${dataAttr}="${placeholderId}"`);
             if (registry) {
-              registry.addEventBinding({
+              const condRaw = `${val.name}(${(val.args ?? []).join(", ")})`;
+              // Extract @-prefixed reactive refs from the args (bare names, no @);
+              // empty is fine — dynamic effect tracking covers the rest.
+              const condRefs = (val.args ?? [])
+                .filter((a) => typeof a === "string" && a.startsWith("@"))
+                .map((a) => a.replace(/^@/, "").split(/[.[(]/)[0]);
+              registry.addLogicBinding({
                 placeholderId,
-                eventName: name,
-                handlerName: val.name,
-                handlerArgs: val.args ?? [],
-                handlerArgExprNodes: val.argExprNodes,
-                // Bug 58 (S140): propagate the formFor compound cell name so the
-                // submit handler sets `@<cell>.submitted = true` + passes `values`
-                // (the collected compound value) into the handler per §41.14.3.
-                formForSubmitCell: (val as { formForSubmitCell?: string }).formForSubmitCell,
+                expr: condRaw,
+                ...(name === "show" ? { isVisibilityToggle: true } : { isConditionalDisplay: true }),
+                condExpr: condRaw,
+                refs: condRefs,
+                ...(transitionEnter ? { transitionEnter } : {}),
+                ...(transitionExit ? { transitionExit } : {}),
               });
+            }
+          } else {
+            // Defense-in-depth: server-only call names must not become client event bindings.
+            // This can occur if the tokenizer misparses ^{} meta content in attribute position.
+            const SERVER_ONLY_CALL = /^(bun\.eval|Bun\.|process\.|fs\.)/;
+            if (SERVER_ONLY_CALL.test(val.name ?? "")) {
+              // Silently drop — tokenizer fix should prevent this from reaching CG.
+            } else {
+              const placeholderId = genVar(`attr_${name}`);
+              parts.push(` data-scrml-bind-${name}="${placeholderId}"`);
+              if (registry) {
+                registry.addEventBinding({
+                  placeholderId,
+                  eventName: name,
+                  handlerName: val.name,
+                  handlerArgs: val.args ?? [],
+                  handlerArgExprNodes: val.argExprNodes,
+                  // Bug 58 (S140): propagate the formFor compound cell name so the
+                  // submit handler sets `@<cell>.submitted = true` + passes `values`
+                  // (the collected compound value) into the handler per §41.14.3.
+                  formForSubmitCell: (val as { formForSubmitCell?: string }).formForSubmitCell,
+                });
+              }
             }
           }
         }
