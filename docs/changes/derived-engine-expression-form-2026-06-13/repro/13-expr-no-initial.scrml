@@ -1,0 +1,6 @@
+type Level:enum = { High, Low }
+<miles>: int = 600
+<engine for=Level initial=.Low derived=@miles > 500 ? .High : .Low>
+  <High : "High">
+  <Low : "Low">
+</>

@@ -1,0 +1,9 @@
+type Level:enum = { High, Mid, Low }
+<miles>: int = 600
+<bonus>: int = 100
+<engine for=Level derived=@miles + @bonus > 500 ? .High : .Low>
+  <High : "High">
+  <Mid : "Mid">
+  <Low : "Low">
+</>
+<div>${@level}</div>

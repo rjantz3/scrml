@@ -3062,7 +3062,15 @@ function collectDerivedEngineDeps(derivedExpr: unknown): string[] {
   if (obj.kind === "inline-match" && typeof obj.upstream === "string" && obj.upstream.length > 0) {
     return [obj.upstream];
   }
-  // Future: rich-expr shape — walk parsed ExprNode via forEachIdentInExprNode.
+  // §51.0.J modern EXPRESSION form (S190) — ternary / call / conditional. The
+  // upstreams were enumerated at SYM time (every `@cell` the expression reads)
+  // and stored on `upstreams`; codegen subscribes the derived cell to each so
+  // a change in ANY referenced cell recomputes the variant.
+  if (obj.kind === "expr" && Array.isArray(obj.upstreams)) {
+    return (obj.upstreams as unknown[]).filter(
+      (u): u is string => typeof u === "string" && u.length > 0,
+    );
+  }
   return [];
 }
 
@@ -3147,6 +3155,28 @@ function buildDerivedEngineClosureBody(derivedExpr: unknown, varName: string): s
         `if (__scrml_derived_v == null) {`,
         `  throw new Error("E-DERIVED-ENGINE-INITIAL-UNDEFINED-RT: derived engine '${varName}' yielded no value " +`,
         `    "(no match arm fired for upstream '${upstream}'). " +`,
+        `    "Per §51.0.J + §34: derived=expr must produce a defined variant for the source's initial state. " +`,
+        `    "Add a default arm or a wildcard arm in the derivation.");`,
+        `}`,
+        `return __scrml_derived_v;`,
+      ].join("\n  ");
+    }
+    // §51.0.J modern EXPRESSION form (S190) — ternary / call / conditional.
+    // Lower the raw expression source through the standard `rewriteExpr`
+    // pipeline (the same lowering markup `${}` interpolations + handlers use):
+    // its Pass 7 (rewriteReactiveRefs) turns every `@cell` into
+    // `_scrml_reactive_get("cell")`, and the §14.10 bare-variant pass turns
+    // `.High` into the enum string. The result is the engine's variant; the
+    // standard E-DERIVED-ENGINE-INITIAL-ABSENT guard wraps it.
+    if (obj.kind === "expr" && typeof obj.exprText === "string" && obj.exprText.length > 0) {
+      const { rewriteExpr } = require("./rewrite.ts");
+      const lowered = rewriteExpr(obj.exprText);
+      return [
+        `const __scrml_derived_v = (${lowered});`,
+        // `== null` covers canonical absence (JS null) + not-registered (undefined).
+        `if (__scrml_derived_v == null) {`,
+        `  throw new Error("E-DERIVED-ENGINE-INITIAL-UNDEFINED-RT: derived engine '${varName}' yielded no value " +`,
+        `    "(the derived= expression produced no defined variant). " +`,
         `    "Per §51.0.J + §34: derived=expr must produce a defined variant for the source's initial state. " +`,
         `    "Add a default arm or a wildcard arm in the derivation.");`,
         `}`,

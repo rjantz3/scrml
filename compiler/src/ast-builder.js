@@ -13384,7 +13384,43 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
             if (c === ")") { if (parenDepth > 0) parenDepth--; continue; }
             if (c === "[") { bracketDepth++; continue; }
             if (c === "]") { if (bracketDepth > 0) bracketDepth--; continue; }
-            if (c === ">" && depth === 0 && parenDepth === 0 && bracketDepth === 0) return i;
+            if (c === "<" && depth === 0 && parenDepth === 0 && bracketDepth === 0) {
+              // §51.0.J (S190) — a comparison `<` / `<=` / `<<` inside a
+              // `derived=<expr>` opener value (e.g. `derived=@n < 5 ? .A : .B`)
+              // is an OPERATOR, not a nested tag. Skip the operator run so its
+              // `<` does not perturb the scan. A `<` that introduces a body tag
+              // would be on a later line / after the close `>`, not here.
+              let j = i + 1;
+              while (j < s.length && (s[j] === "=" || s[j] === "<")) j++;
+              i = j - 1;
+              continue;
+            }
+            if (c === ">" && depth === 0 && parenDepth === 0 && bracketDepth === 0) {
+              // §51.0.J (S190) — distinguish a comparison `>` / `>=` / `>>` /
+              // `>>>` inside a `derived=<expr>` opener value (the ternary form
+              // `derived=@miles > 500 ? .High : .Low`) from the opener's true
+              // closing `>`. A comparison operator is followed (after optional
+              // whitespace) by another operand — a digit, `(`, `@`, `.`,
+              // identifier char, `"`, `'`, or a `!`/unary lead — whereas the
+              // tag-close `>` is followed by whitespace+newline, EOF, a body
+              // `<` tag, or a `/`. Pre-S190 the first `>` (the comparison)
+              // was mis-read as the opener close, shredding the ternary.
+              const opLen = (s[i + 1] === ">" ? (s[i + 2] === ">" ? 3 : 2) : (s[i + 1] === "=" ? 2 : 1));
+              let k = i + opLen;
+              while (k < s.length && (s[k] === " " || s[k] === "\t")) k++;
+              const nxt = k < s.length ? s[k] : "";
+              const isOperandLead =
+                nxt !== "" && (
+                  /[0-9A-Za-z_$@.("'!+\-]/.test(nxt)
+                );
+              // `>=`/`>>`/`>>>` are unambiguously operators; a bare `>` whose
+              // next non-space char leads an operand is a comparison.
+              if (opLen > 1 || isOperandLead) {
+                i = i + opLen - 1;
+                continue;
+              }
+              return i;
+            }
           }
           return -1;
         }
@@ -13403,19 +13439,55 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         const IDENT = /[A-Za-z_$][A-Za-z0-9_$]*/;
         const nameMatch = header.match(new RegExp(`\\bname\\s*=\\s*(${IDENT.source})\\b`));
         const forMatch = header.match(new RegExp(`\\bfor\\s*=\\s*(${IDENT.source})\\b`));
-        const derivedMatch = header.match(new RegExp(`\\bderived\\s*=\\s*@(${IDENT.source})\\b`));
-        // S83 B3 — Move-14 inline-expression body: `derived=match @VAR { ... }`.
-        // SPEC §51.0.J: the rich form lets the derived projection be an arbitrary
-        // expression. Today's scope: detect the `match @VAR { BODY }` shape,
-        // capture VAR (as the single upstream) and BODY (raw text), and store
-        // both for codegen. Codegen (emit-engine.ts) re-uses the existing
-        // `rewriteExpr` pipeline to lower the match body to a JS IIFE. Other
-        // inline-expression forms (`derived=fn(@x)`, `derived=if ... else ...`,
-        // etc.) are NOT covered in this slice — see B3 follow-on.
-        const inlineMatchRe = new RegExp(
-          `\\bderived\\s*=\\s*match\\s+@(${IDENT.source})\\s*\\{([\\s\\S]*)\\}\\s*$`,
+        // §51.0.J derived value classification (S190). Capture the FULL raw
+        // value after `derived=` first (`derivedRawValue`), then classify into
+        // ONE of three forms — bare `@ident` (legacy §51.9), `match @x {...}`
+        // (the inline-match form), or an arbitrary EXPRESSION (ternary / call /
+        // conditional, the new §51.0.J modern form). Pre-S190 the bare-ident
+        // regex below greedily matched the `@miles` LEAD of a ternary value
+        // (`derived=@miles > 500 ? ...`) and the rest leaked, so a ternary /
+        // call form silently mis-routed as a legacy source-var.
+        let derivedValMatch = header.match(/\bderived\s*=\s*([\s\S]*)$/);
+        let derivedRawValue = derivedValMatch ? derivedValMatch[1].trim() : null;
+        // Strip a trailing self-close `/` so `derived=@x/` reads as `@x`.
+        if (derivedRawValue) derivedRawValue = derivedRawValue.replace(/\/\s*$/, "").trim();
+        // (a) Legacy §51.9 — a BARE single `@ident`. The value may be FOLLOWED
+        //     by another opener attribute (`derived=@upstream initial=.A`),
+        //     so a bare ident is matched as the LEAD of the value followed by
+        //     end / whitespace+`attr=` / `>` — NOT a `$`-anchored whole-value
+        //     match (which would mis-classify the legacy-plus-trailing-attr
+        //     form as the modern expr form). The ternary / operator forms
+        //     (`@miles > 500`) are excluded because the char after the ident is
+        //     an operator, not an attribute keyword `=` boundary.
+        //     Note: the opener-close `>` is already stripped from
+        //     `derivedRawValue` (the header slice ends BEFORE it), so a bare
+        //     ident value is `@ident` (end) or `@ident <attr>=...` — there is
+        //     no trailing `>` to confuse with a comparison `>` operator.
+        const bareIdentLeadRe = new RegExp(
+          `^@(${IDENT.source})(?:\\s+[A-Za-z_$][A-Za-z0-9_$]*\\s*=[\\s\\S]*)?$`,
         );
-        const inlineMatchMatch = derivedMatch ? null : header.match(inlineMatchRe);
+        const bareIdentMatch = derivedRawValue ? derivedRawValue.match(bareIdentLeadRe) : null;
+        // `derivedMatch[1]` is the bare upstream var name (no `@`), mirroring
+        // the pre-S190 `derived=@(IDENT)` capture-group shape downstream code
+        // reads (`if (derivedMatch) sourceVar = derivedMatch[1]`).
+        const derivedMatch = bareIdentMatch ? [bareIdentMatch[0], bareIdentMatch[1]] : null;
+        // (b) Inline-match §51.0.J — `match @VAR { BODY }`.
+        const inlineMatchRe = new RegExp(
+          `^match\\s+@(${IDENT.source})\\s*\\{([\\s\\S]*)\\}\\s*$`,
+        );
+        const inlineMatchMatch = (!bareIdentMatch && derivedRawValue)
+          ? derivedRawValue.match(inlineMatchRe)
+          : null;
+        // (c) Modern EXPRESSION form §51.0.J — anything else (a ternary, a
+        //     function call, a conditional). `derivedExprText` carries the raw
+        //     expression source; symbol-table tags `derivedExpr.kind:"expr"`,
+        //     codegen lowers it via `rewriteExpr` and subscribes to every
+        //     `@cell` it reads. Parsed to a `derivedExprNode` below (after the
+        //     errors[] accumulator is in scope) for DG dep-edge enumeration.
+        const derivedExprText =
+          (derivedRawValue && !bareIdentMatch && !inlineMatchMatch)
+            ? derivedRawValue
+            : null;
         // §51.0.B (S67/S68 — A1b B14): canonical engine syntax extensions
         //   var=NAME       — override auto-derived variable name (§51.0.C)
         //   initial=.X     — starting variant (§51.0.E; B14 RECORDS, B15 validates)
@@ -13743,6 +13815,26 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         }
         rulesRaw = rulesRaw.trim();
 
+        // §51.0.J modern EXPRESSION form (S190) — parse `derivedExprText`
+        // (ternary / call / conditional) into a structured ExprNode so codegen
+        // can lower it via `rewriteExpr` and the DG can enumerate every `@cell`
+        // it reads (the reactive dependencies). The byte offset anchors the
+        // expression inside the source: it begins at the engine block start
+        // (`span.start`) plus the offset of the value text inside the raw
+        // opener slice. `null` for the legacy / inline-match / non-derived
+        // forms. Parse failures fall back to an escape-hatch node (via
+        // `safeParseExprToNodeGlobal`), which still round-trips the raw text.
+        let derivedExprNode = null;
+        if (derivedExprText && derivedExprText.length > 0) {
+          const rawForOffset = typeof block.raw === "string" ? block.raw : "";
+          const blkStart = (span && typeof span.start === "number") ? span.start : 0;
+          const valIdx = rawForOffset.indexOf(derivedExprText);
+          const exprAbsStart = blkStart + (valIdx >= 0 ? valIdx : 0);
+          derivedExprNode = safeParseExprToNodeGlobal(
+            derivedExprText, filePath, exprAbsStart, errors,
+          ) ?? null;
+        }
+
         return {
           id: ++counter.next,
           kind: "engine-decl",
@@ -13765,6 +13857,14 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           // and `}`). `null` for the legacy `derived=@x` form and for non-
           // derived engines.
           inlineMatchBody,
+          // §51.0.J modern EXPRESSION form (S190) — the raw expression source
+          // (`@n > 5 ? .A : .B`, `classify(@n)`, etc.) and its parsed ExprNode.
+          // Both `null` for the legacy `@ident` / inline-match / non-derived
+          // forms. symbol-table tags `derivedExpr.kind:"expr"` from these;
+          // codegen lowers `derivedExprText` via `rewriteExpr` and subscribes
+          // to every `@cell` `derivedExprNode` reads (DG dep edges).
+          derivedExprText,
+          derivedExprNode,
           // S171 — arm-separator glyphs of the `derived=match` body, in source
           // order, each `{ glyph: ":>"|"=>"|"->", srcOffset: <absolute> }`.
           // Consumed by the W-MATCH-ARROW-LEGACY lint (type-system.ts) +

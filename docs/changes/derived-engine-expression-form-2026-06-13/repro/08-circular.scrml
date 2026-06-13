@@ -1,0 +1,10 @@
+type A:enum = { X, Y }
+type B:enum = { P, Q }
+<engine for=A derived=match @b { .P :> .X  _ :> .Y }>
+  <X : "X">
+  <Y : "Y">
+</>
+<engine for=B derived=match @a { .X :> .P  _ :> .Q }>
+  <P : "P">
+  <Q : "Q">
+</>

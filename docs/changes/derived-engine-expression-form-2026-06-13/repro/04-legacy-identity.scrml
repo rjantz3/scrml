@@ -1,0 +1,17 @@
+<program>
+${
+  type Phase:enum = { Idle, Loading, Done }
+  type Health:enum = { Idle, Loading, Done }
+  @order: Phase = Phase.Idle
+}
+<engine for=Phase initial=.Idle>
+  <Idle rule=.Loading></>
+  <Loading rule=.Done></>
+  <Done></>
+</>
+<engine for=Health derived=@order>
+  <Idle></>
+  <Loading></>
+  <Done></>
+</>
+</program>

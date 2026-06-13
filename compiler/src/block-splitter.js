@@ -476,8 +476,31 @@ function scanOpenerBody(source, openerNameEnd) {
   let parenDepth = 0;
   let bracketDepth = 0;
   let braceDepth = 0;
+  // §51.0.J derived-engine EXPRESSION form (S190) — the `derived=<expr>` opener
+  // value (ternary `derived=@n > 5 ? .A : .B`, call `derived=classify(@n)`,
+  // conditional) is a scrml expression, so inside it a `>` / `<` / `>=` / `<=`
+  // is a COMPARISON OPERATOR (not the opener terminator) and a `?`-introduced
+  // `:` is the TERNARY alternative separator (not a §4.14 `:`-shorthand body).
+  // `inDerivedExpr` flips true once we pass a depth-0 `derived=`; `ternaryDepth`
+  // counts unmatched `?` so the matching `:` is recognized as ternary, mirror
+  // of the S188 cluster-A `?`-depth guard. The `match @x {...}` form's braces
+  // and the bare `@ident` legacy form are unaffected (neither carries a stray
+  // operator/ternary `:`).
+  let inDerivedExpr = false;
+  let ternaryDepth = 0;
   while (i < len) {
     const c = source[i];
+    // Detect the start of a depth-0 `derived=` attribute value.
+    if (!inDerivedExpr && !inDq && !inSq &&
+        parenDepth === 0 && bracketDepth === 0 && braceDepth === 0 &&
+        c === "d" && /(?:^|\s)derived\s*=/.test(source.slice(Math.max(0, i - 1), i + 9))) {
+      const m = /^derived\s*=/.exec(source.slice(i));
+      if (m && (i === openerNameEnd || /\s/.test(source[i - 1]))) {
+        inDerivedExpr = true;
+        i += m[0].length;
+        continue;
+      }
+    }
     // String tracking.
     if (inDq) {
       if (c === "\\" && i + 1 < len) { i += 2; continue; }
@@ -511,6 +534,30 @@ function scanOpenerBody(source, openerNameEnd) {
       if (c !== "{") i++; // skip the sigil char; the `{` is consumed next iteration
       i++;
       continue;
+    }
+    // §51.0.J (S190) — inside a `derived=<expr>` value, track ternary `?` depth
+    // and treat a comparison `>` / `<` (incl. `>=` / `<=` / `>>` / `<<`) as an
+    // operator, not the opener terminator.
+    if (inDerivedExpr) {
+      if (c === "?") { ternaryDepth++; i++; continue; }
+      if (c === ":" && ternaryDepth > 0) { ternaryDepth--; i++; continue; }
+      if (c === "<") {
+        let j = i + 1; while (j < len && (source[j] === "=" || source[j] === "<")) j++;
+        i = j; continue;
+      }
+      if (c === ">") {
+        // A comparison `>` / `>=` / `>>` / `>>>` is followed (after optional
+        // whitespace) by another operand; the opener-close `>` is followed by
+        // whitespace+newline, EOF, a body `<` tag, or `/`.
+        const opLen = (source[i + 1] === ">" ? (source[i + 2] === ">" ? 3 : 2)
+          : (source[i + 1] === "=" ? 2 : 1));
+        let k = i + opLen;
+        while (k < len && (source[k] === " " || source[k] === "\t")) k++;
+        const nxt = k < len ? source[k] : "";
+        const isOperandLead = nxt !== "" && /[0-9A-Za-z_$@.("'!+\-]/.test(nxt);
+        if (opLen > 1 || isOperandLead) { i = i + opLen; continue; }
+        // Genuine opener close — fall through to the `>` return below.
+      }
     }
     // SPEC §4.14 `:`-shorthand introducer at depth-0.
     if (c === ":" && source[i + 1] !== ":") {
@@ -903,6 +950,17 @@ export function splitBlocks(filePath, source) {
     // condition is then captured by the attribute tokenizer as an
     // ATTR_OP_REJECT → E-ATTR-UNQUOTED-OPERATOR, the canonical reject.)
     let ternaryDepth = 0;
+    // §51.0.J derived-engine EXPRESSION form (S190) — once the scanner passes a
+    // depth-0 `derived=` attribute name, the value is a scrml EXPRESSION (the
+    // ternary `derived=@n > 5 ? .A : .B`, call `derived=classify(@n)`, or
+    // conditional form). Inside it a comparison `>` / `<` (incl. `>=` / `<=` /
+    // `>>` / `<<`) is an OPERATOR, NOT the opener terminator — the OPPOSITE of
+    // the S188 cluster-A condition-attr reject (where the operator is illegal).
+    // `inDerivedExpr` flips true at the `derived=` boundary; the ternary `?`
+    // tracking below (shared with cluster-A) already makes the ternary `:` not
+    // a `:`-shorthand. Legacy `derived=@ident` and `derived=match @x {...}` are
+    // unaffected (no stray comparison operator at depth-0).
+    let inDerivedExpr = false;
 
     while (pos < len) {
       const c = source[pos];
@@ -963,6 +1021,35 @@ export function splitBlocks(filePath, source) {
         // flows into attrRaw, the attribute tokenizer captures it as an
         // ATTR_OP_REJECT, and the AST builder fires the clean
         // E-ATTR-UNQUOTED-OPERATOR (parens/quotes steer) ONCE.
+        // §51.0.J (S190) — detect crossing the `derived=` attribute-name
+        // boundary. attrRaw accumulates the opener content; when it just
+        // closed a `derived=` token we are now reading the derived EXPRESSION.
+        if (!inDerivedExpr && /(?:^|\s)derived\s*=$/.test(attrRaw)) {
+          inDerivedExpr = true;
+        }
+        // §51.0.J (S190) — inside a `derived=<expr>` value, a comparison
+        // `>` / `<` (incl. `>=` / `<=` / `>>` / `>>>` / `<<`) is an operator,
+        // not the opener close. The opener-close `>` is followed (after
+        // optional whitespace) by EOF / newline / a body `<` tag / `/`, never
+        // by another operand. (For the legacy `if=`/`show=` condition attrs,
+        // inDerivedExpr stays false and the S188 cluster-A reject below fires.)
+        if (inDerivedExpr && c === "<") {
+          attrRaw += c; step();
+          while (pos < len && (ch(0) === "=" || ch(0) === "<")) { attrRaw += source[pos]; step(); }
+          continue;
+        }
+        if (inDerivedExpr && c === ">") {
+          const opLen = (ch(1) === ">" ? (ch(2) === ">" ? 3 : 2) : (ch(1) === "=" ? 2 : 1));
+          let k = pos + opLen;
+          while (k < len && (source[k] === " " || source[k] === "\t")) k++;
+          const nxt = k < len ? source[k] : "";
+          const isOperandLead = nxt !== "" && /[0-9A-Za-z_$@.("'!+\-]/.test(nxt);
+          if (opLen > 1 || isOperandLead) {
+            for (let q = 0; q < opLen; q++) { attrRaw += source[pos]; step(); }
+            continue;
+          }
+          // else: genuine opener close — fall through to the `>` handler below.
+        }
         if (c === ">" && ch(1) === "=") {
           attrRaw += c;
           step();

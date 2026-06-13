@@ -1,0 +1,13 @@
+type OrderState:enum = { Draft, Submitted, Paid, Shipping, Delivered, Cancelled, Refunded }
+type OrderMachine:machine = OrderState
+type UIState:enum = { Editable, ReadOnly, Terminal }
+
+<order>: OrderMachine = OrderState.Draft
+
+< engine name=UI for=UIState derived=@order>
+    .Draft                          => .Editable
+    .Submitted | .Paid | .Shipping  => .ReadOnly
+    .Delivered | .Cancelled | .Refunded => .Terminal
+</>
+
+<div>${@ui}</div>

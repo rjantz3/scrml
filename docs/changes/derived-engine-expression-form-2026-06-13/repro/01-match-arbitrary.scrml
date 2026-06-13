@@ -1,0 +1,18 @@
+type MarioState:enum = { Small, Big, Fire, Cape, Dead }
+type Health:enum = { Healthy, AtRisk, Critical }
+
+<marioState>: MarioState = MarioState.Small
+
+<engine for=Health derived=match @marioState {
+  .Small | .Big => .Healthy
+  .Fire | .Cape => .AtRisk
+  _             => .Critical
+}>
+  <Healthy : "OK">
+  <AtRisk : "Careful">
+  <Critical : "Danger">
+</>
+
+<div>
+  <p>${@health}</p>
+</div>

@@ -5115,6 +5115,40 @@ function buildMachineRegistry(
     // `isLegacyArrowRulesBody` heuristic, which checks the inverse).
     const hasStateChildOpener = /<\s*[A-Z]/.test(rulesRaw);
 
+    // §51.0.J MODERN derived-engine EXPRESSION form (S190) — discrimination.
+    // The legacy §51.9 `derived=@machineVar` projection form (handled in the
+    // `if (sourceVar)` block below) requires the source to be a MACHINE-BOUND
+    // reactive and enforces E-ENGINE-018 exhaustiveness over the source enum.
+    // The §51.0.J modern form — `derived=match @x {...}` (inline match) or
+    // `derived=<expr>` (ternary / call / conditional) — is an ARBITRARY
+    // reactive expression of the engine's OWN type. Its exhaustiveness is the
+    // match's own (`_`/`else` arm + the runtime E-DERIVED-ENGINE-INITIAL-ABSENT
+    // guard codegen already emits), NOT the §51.9 projection check, so it MUST
+    // NOT enter the §51.9 `validateDerivedMachines` path (which would mis-fire
+    // E-ENGINE-004 / E-ENGINE-018). The parser stamps `inlineMatchBody`
+    // (non-empty) for the match form and `derivedExprNode` for the expr forms;
+    // either signal marks the modern shape. SYM (symbol-table.ts:5191) already
+    // tags `engineMeta.derivedExpr.kind` ("inline-match" / "expr") for these,
+    // and codegen (emit-engine.ts) drives the reactive recompute from that —
+    // independent of this machineRegistry entry. We register the engine as an
+    // ordinary (non-§51.9) MachineType with empty rules so downstream codegen
+    // still sees the engine name; B15/B16 own its diagnostics.
+    const isModernDerivedExprForm =
+      (typeof decl.inlineMatchBody === "string" && (decl.inlineMatchBody as string).length > 0) ||
+      decl.derivedExprNode != null;
+    if (isModernDerivedExprForm) {
+      registry.set(name, {
+        kind: "machine",
+        name,
+        governedTypeName: govName,
+        governedType: govType,
+        rules: [],
+        auditTarget,
+        acceptsMessageType,
+      });
+      continue;
+    }
+
     // §51.9 — derived / projection machine. The source enum type is
     // resolved at this call's caller (after all type + machine decls are
     // registered), so we defer source-var validation to that later pass.

@@ -1,0 +1,17 @@
+<program>
+${
+  type Phase:enum = { Idle, Loading, Done }
+  type Health:enum = { Idle, Loading, Done }
+}
+<engine for=Phase initial=.Idle>
+  <Idle rule=.Loading></>
+  <Loading rule=.Done></>
+  <Done></>
+</>
+<engine for=Health var=hh derived=@phase>
+  <Idle></>
+  <Loading></>
+  <Done></>
+</>
+<div>${@hh}</div>
+</program>

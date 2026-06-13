@@ -1,0 +1,7 @@
+type MarioState:enum = { Small, Big }
+type Health:enum = { Healthy, AtRisk }
+<marioState>: MarioState = MarioState.Small
+<engine for=Health effect=${ log("boot") } derived=match @marioState { .Small :> .Healthy  _ :> .AtRisk }>
+  <Healthy : "OK">
+  <AtRisk : "Careful">
+</>

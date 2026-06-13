@@ -25470,11 +25470,38 @@ state is FUNCTION of an upstream source rather than authored.
 </>
 ```
 
+The `match` block is the typical shape, but `derived=expr` accepts **any
+reactive expression of the engine's type** — a conditional (ternary) or a
+function call work identically:
+
+```scrml
+// Conditional (ternary) — recomputes whenever @miles changes.
+<engine for=AlertLevel derived=@miles > 500 ? .High : .Low>
+  <High : "High mileage">
+  <Low  : "Within range">
+</>
+
+// Function call — recomputes whenever any @cell the call reads changes.
+<engine for=AlertLevel derived=classifyMileage(@miles, @threshold)>
+  <High/>
+  <Low/>
+</>
+```
+
+The compiler subscribes the derived engine to **every** reactive cell the
+expression reads (`@miles` and `@threshold` in the call form above), so a change
+in any of them recomputes the variant. A comparison operator (`>` / `<` / `>=`)
+inside the opener value is part of the expression, not the opener-terminating
+`>`. The expression's exhaustiveness is its OWN: a `match` must cover every case
+(its `_` / `else` arm, §18), and a ternary / call must yield a defined variant —
+a result of scrml-absence (`not`) for the source's initial state is
+`E-DERIVED-ENGINE-INITIAL-ABSENT` (below).
+
 **Rules for derived engines:**
 
 | Rule | Behavior |
 |---|---|
-| `derived=expr` | REQUIRED. Any reactive expression of the engine's type. JS-style `match` block is the typical shape; function calls and conditionals also work. |
+| `derived=expr` | REQUIRED. Any reactive expression of the engine's type. JS-style `match` block is the typical shape; function calls and conditionals also work. The compiler subscribes to every reactive cell the expression reads. |
 | `rule=` on state-children | REJECTED — `E-DERIVED-ENGINE-NO-RULES` (§34). Transitions are determined by the source, not authored. |
 | `initial=` on the engine | REJECTED — `E-DERIVED-ENGINE-NO-INITIAL` (§34). Initial value computed from `derived=expr` at engine-init time. |
 | Direct writes to the auto-declared variable | REJECTED — `E-DERIVED-ENGINE-NO-WRITE` (§34). The variable is read-only. |

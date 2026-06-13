@@ -311,7 +311,9 @@ describe("E-DERIVED-ENGINE-NO-RULES — authored transitions on derived engine",
     const b16Errors = runB16Pass(ast, sym);
     const errs = getErrorsByCode(b16Errors, "E-DERIVED-ENGINE-NO-RULES");
     expect(errs.length).toBe(1);
-    expect(errs[0].message).toMatch(/declares transition rules/);
+    // S190 — message reworded to cover BOTH the `.From => .To` arrow line and
+    // the modern state-child `rule=` attribute shape.
+    expect(errs[0].message).toMatch(/declares authored transitions/);
   });
 
   test("Move-14 shape (simulated): does NOT fire NO-RULES when body is empty", () => {

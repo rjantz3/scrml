@@ -1580,9 +1580,21 @@ export function runDG(input: DGInput): DGOutput {
             (dgNode as any)._pendingEngineDerivedReads = [upstream];
           }
         }
-        // Future: when `derivedExpr` becomes a parsed ExprNode, walk it
-        // here with `forEachIdentInExprNode` to collect upstream `@cell`
-        // reads.
+        // §51.0.J modern EXPRESSION form (S190) — ternary / call / conditional.
+        // SYM already enumerated every `@cell` the expression reads onto
+        // `upstreams`; draw a dep edge per upstream so a change in ANY of them
+        // recomputes the variant AND so cycle detection sees the full edge set
+        // (a multi-cell derived expr that transitively depends on its own
+        // engine variant fires E-DERIVED-ENGINE-CIRCULAR).
+        if (derivedKind === "expr") {
+          const ups = (derivedExpr as Record<string, unknown>).upstreams;
+          if (Array.isArray(ups)) {
+            const reads = (ups as unknown[]).filter(
+              (u): u is string => typeof u === "string" && u.length > 0,
+            );
+            if (reads.length > 0) (dgNode as any)._pendingEngineDerivedReads = reads;
+          }
+        }
       }
     }
 

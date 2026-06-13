@@ -144,6 +144,19 @@ const STRIP_KEYS: ReadonlySet<string> = new Set([
                               // atom and never goes through this stamp, so it
                               // never carries the flag; a live-pipeline-internal
                               // diagnostic field, NOT a semantic divergence.
+  "derivedExprText",          // S190 (§51.0.J derived-engine EXPRESSION form) —
+                              // LIVE-only fields on an engine-decl: the raw
+                              // `derived=<expr>` source (ternary / call /
+                              // conditional) and its parsed ExprNode. The native
+                              // parser does NOT yet recognize the `derived=<expr>`
+                              // form (it handles only bare `@ident` + the
+                              // `match @x {...}` inline form), so it never carries
+                              // these; live-pipeline-internal codegen-support
+                              // fields with no native analogue, NOT a semantic
+                              // divergence (the native-parser swap cuts over the
+                              // expression form at ~v0.8 per the swap roadmap).
+  "derivedExprNode",          // companion parsed ExprNode for the above — same
+                              // live-only codegen-support metadata class.
 ]);
 
 // ---------------------------------------------------------------------------

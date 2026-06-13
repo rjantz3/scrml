@@ -1,0 +1,13 @@
+type Level:enum = { High, Low }
+${
+  fn classify(m: int): Level {
+    given m > 500 :> { return .High }
+    return .Low
+  }
+}
+<miles>: int = 600
+<engine for=Level derived=classify(@miles)>
+  <High : "High">
+  <Low : "Low">
+</>
+<div>${@level}</div>

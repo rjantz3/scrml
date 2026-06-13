@@ -5178,21 +5178,47 @@ function makeEngineRecord(
       : null;
   const isPinned: boolean = engineDecl.pinned === true;
   const isExported: boolean = engineDecl.isExported === true;
-  // Derived expression — current parser provides `sourceVar` (legacy
-  // `derived=@varname`). B16 will widen this to the §51.0.J expression-tree
-  // form. Until then, sourceVar is the only signal.
-  //
-  // S83 B3 — Move-14 inline-expression body. When `inlineMatchBody` is
-  // present, store the rich shape so codegen can emit a match-style
-  // projection closure (lowering the match body via `rewriteExpr`).
-  // The `upstream` field carries the same single-source data as legacy
-  // shape, so DG cycle-detection and `_scrml_derived_subscribe` emission
-  // continue to work identically (the closure body just differs).
-  const derivedExpr: unknown | null = engineDecl.sourceVar != null
-    ? (typeof engineDecl.inlineMatchBody === "string" && engineDecl.inlineMatchBody.length > 0
-      ? { kind: "inline-match", upstream: engineDecl.sourceVar, matchBody: engineDecl.inlineMatchBody }
-      : { kind: "legacy-source-var", varName: engineDecl.sourceVar })
-    : null;
+  // Derived expression — three §51.0.J / §51.9 shapes (S190 completes the set):
+  //   - `legacy-source-var` — `derived=@varname` bare ident (§51.9 1:1
+  //     projection); `sourceVar` set, no `inlineMatchBody` / `derivedExprNode`.
+  //   - `inline-match`       — `derived=match @x {...}` (§51.0.J match form);
+  //     `sourceVar` + `inlineMatchBody` set (S83 B3).
+  //   - `expr`               — `derived=<expr>` ternary / call / conditional
+  //     (§51.0.J modern expression form, S190); `derivedExprText` +
+  //     `derivedExprNode` set, `sourceVar` null. `upstreams` enumerates every
+  //     `@cell` the expression reads so codegen subscribes to ALL of them and
+  //     the DG draws a dep edge per upstream (multi-cell derivations work).
+  // B16 lights up the NO-RULES / NO-INITIAL / NO-WRITE / CIRCULAR rejections
+  // for every kind whose discriminant is NOT `legacy-source-var`.
+  let derivedExpr: unknown | null = null;
+  if (engineDecl.sourceVar != null) {
+    derivedExpr =
+      typeof engineDecl.inlineMatchBody === "string" && engineDecl.inlineMatchBody.length > 0
+        ? { kind: "inline-match", upstream: engineDecl.sourceVar, matchBody: engineDecl.inlineMatchBody }
+        : { kind: "legacy-source-var", varName: engineDecl.sourceVar };
+  } else if (
+    typeof engineDecl.derivedExprText === "string" && engineDecl.derivedExprText.length > 0
+  ) {
+    // Collect every distinct `@cell` the derived expression reads.
+    const upstreams: string[] = [];
+    const seen = new Set<string>();
+    const exprNode = engineDecl.derivedExprNode;
+    if (exprNode && typeof exprNode === "object") {
+      forEachIdentInExprNode(exprNode as any, (ident: IdentExpr) => {
+        if (typeof ident.name !== "string" || !ident.name.startsWith("@")) return;
+        const bare = ident.name.slice(1);
+        if (!bare || seen.has(bare)) return;
+        seen.add(bare);
+        upstreams.push(bare);
+      });
+    }
+    derivedExpr = {
+      kind: "expr",
+      exprText: engineDecl.derivedExprText,
+      exprNode: engineDecl.derivedExprNode ?? null,
+      upstreams,
+    };
+  }
 
   // §51.0.H Form 3 (S148, Insight 33 Fork C1) — boot-only opener `effect=`.
   // The parser captures the raw logic body (no `${}` wrapper) into
@@ -6859,15 +6885,23 @@ function lookupDerivedEngineMeta(
  * `rule=` on state-children — the rules-body should be EMPTY (or contain
  * only `<onTransition>` blocks per §51.0.J line 20409, which are LEGAL).
  *
- * Today's parser places transition rule lines like `.From => .To` inside
- * `rulesRaw`. We detect the presence of `=>` outside of comments and
- * outside of `<onTransition>` blocks as the trigger for NO-RULES. (The
- * `audit @name` clause is also stripped before B16 sees the body via
+ * Two authored-transition shapes are detected:
+ *   1. The LEGACY arrow-rule shape (`.From => .To`) — a bare arrow line in
+ *      `rulesRaw` (the §51.3 / §51.9 body form an `<engine>` MAY carry).
+ *   2. The MODERN state-child `rule=` ATTRIBUTE shape (S190) — a derived
+ *      engine in the §51.0.J bodied form (`<engine derived=match @x {...}>
+ *      <Variant rule=.Other>...</></>`) carries its state-children in
+ *      `rulesRaw`; an authored `rule=` (or `internal:rule=`, §51.0.O) on
+ *      one of those state-children is the same §51.0.J violation as the
+ *      arrow line. Pre-S190 only the arrow shape was detected, so a
+ *      `rule=` attribute on a derived-match state-child slipped through.
+ *
+ * (The `audit @name` clause is stripped before B16 sees the body via
  * `type-system.ts:buildMachineRegistry`, but B16 reads the unsplit
  * `rulesRaw` — we conservatively skip lines that look like `audit @ident`
  * to avoid false positives even though those don't compile to rules.)
  *
- * Returns true if at least one rule-shaped line is present.
+ * Returns true if at least one authored-transition shape is present.
  */
 function derivedEngineHasAuthoredRules(rulesRaw: string): boolean {
   if (typeof rulesRaw !== "string" || rulesRaw.length === 0) return false;
@@ -6880,12 +6914,20 @@ function derivedEngineHasAuthoredRules(rulesRaw: string): boolean {
     if (line.length === 0) continue;
     // Skip audit clause if present.
     if (/^audit\s+@[A-Za-z_$][A-Za-z0-9_$]*\s*$/.test(line)) continue;
-    // A transition rule line contains `=>` separating from-spec and to-spec.
+    // (1) Legacy arrow-rule line: `=>` separating from-spec and to-spec.
     // We don't deeply parse here; presence of `=>` is the authored-rule
     // signal. Note: `<onTransition>` markup blocks would not contain `=>`
     // at the top level of `rulesRaw` (they're tag-shaped), so this check
     // is robust against the legal transition-handler form.
     if (line.includes("=>")) return true;
+    // (2) Modern state-child `rule=` attribute (S190). Match a `rule=` (or
+    // `internal:rule=`, §51.0.O — `\brule\s*=` catches the `rule=` tail of
+    // the colon-prefixed form too) inside a `<Variant ...>` state-child
+    // opener. The leading-`<` guard avoids a false-positive on a body that
+    // somehow mentions the literal text `rule=` outside an opener (e.g. a
+    // display-text literal); a derived-engine state-child's `rule=` always
+    // sits in a `<Variant ... rule=...>` opener.
+    if (/<\s*[A-Z][A-Za-z0-9_$]*\b[^>]*\brule\s*=/.test(line)) return true;
   }
   return false;
 }
@@ -6969,12 +7011,13 @@ function fireDerivedEngineNoRules(
     code: "E-DERIVED-ENGINE-NO-RULES",
     message:
       `E-DERIVED-ENGINE-NO-RULES: derived engine \`@${varName}\` declares ` +
-      `transition rules (\`.From => .To\` form) in its body. Derived engines ` +
-      `do NOT permit authored transitions — transitions are determined by the ` +
-      `\`derived=\` source expression, not authored (SPEC §51.0.J + §34). ` +
-      `Remove the rule lines; if you need transition handlers, use ` +
-      `\`<onTransition>\` elements or \`effect=\` attributes on state-children ` +
-      `(those remain LEGAL on derived engines).`,
+      `authored transitions in its body (a \`.From => .To\` rule line or a ` +
+      `\`rule=\` attribute on a state-child). Derived engines do NOT permit ` +
+      `authored transitions — transitions are determined by the \`derived=\` ` +
+      `source expression, not authored (SPEC §51.0.J + §34). ` +
+      `Remove the \`rule=\` attributes / rule lines; if you need transition ` +
+      `handlers, use \`<onTransition>\` elements or \`effect=\` attributes on ` +
+      `state-children (those remain LEGAL on derived engines).`,
     span,
     severity: "error",
   });
