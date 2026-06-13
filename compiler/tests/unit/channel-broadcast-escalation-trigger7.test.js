@@ -1,21 +1,29 @@
 /**
- * §12.2 Trigger 7 (D2, server-keyword-eliminate-2026-06-10) — channel-cell-write
- * / broadcast() / disconnect() escalation.
+ * §12.2 Trigger 7b (server-keyword-eliminate D2; AMENDED RULING A, S189,
+ * change-id `channel-cell-write-client-side-A-2026-06-12`) — broadcast() /
+ * disconnect() escalation ONLY.
+ *
+ * RULING A: channel state is CLIENT-HELD (§38.4 — no server-authoritative cell
+ * store). A channel-CELL WRITE is therefore a CLIENT-side sync-emitting
+ * operation (the `syncShared` effect distributes it via the `__sync` wire path,
+ * §38.7), NOT a server-placement signal. The former Trigger 7a (channel-cell
+ * write → server) is DROPPED. Only `broadcast(...)` / `disconnect()` (§38.6
+ * server hub ops) remain server-placement signals (Trigger 7b).
  *
  * A standalone `function` DECLARATION lexically inside a `<channel>` body
- * escalates to the server boundary WITHOUT the deprecated `server` keyword when
- * its body either (a) WRITES a channel-declared cell, or (b) calls
- * `broadcast(...)` / `disconnect()`. This breaks the keyword's last hold on
- * channel publishers (the §12.2 Trigger-4 note's "every case the keyword
- * previously communicated" claim is now complete with Triggers 7+8).
+ * escalates WITHOUT the deprecated `server` keyword ONLY when its body calls
+ * `broadcast(...)` / `disconnect()`. A pure channel-cell-write publisher stays
+ * CLIENT (it does what an onclient:* cell-write handler already does, §38.10).
  *
- * Over-fire guards (LOAD-BEARING — §38.4 allows client-originated writes too;
- * channel bodies hold onclient:/onserver: ATTRIBUTE handlers):
- *   §1  POSITIVE — keyword-less channel publisher writing a channel cell escalates server.
+ * Test map:
+ *   §1  POSITIVE — a pure channel-cell-write publisher STAYS CLIENT (RULING A).
  *   §2  POSITIVE — keyword-less channel publisher calling broadcast() escalates server.
  *   §3  GUARD    — a channel-scope READ-ONLY function does NOT escalate via Trigger 7.
  *   §4  GUARD    — a non-channel function (outside any <channel> scope) is unaffected.
- *   §5  PARITY   — a channel publisher WITH the `server` keyword still escalates.
+ *   §5  PARITY   — a channel publisher WITH the `server` keyword still escalates (via
+ *                  explicit-annotation, NOT channel-broadcast — the cell write no longer
+ *                  contributes a channel-broadcast reason).
+ *   §6  GUARD    — an onclient: attribute handler is unaffected by Trigger 7.
  */
 
 import { describe, test, expect } from "bun:test";
@@ -70,8 +78,8 @@ function routeForFn(routeMap, fnName, fileAST) {
 // §1 — POSITIVE: keyword-less channel publisher writing a channel cell escalates
 // ---------------------------------------------------------------------------
 
-describe("Trigger 7 §1 — keyword-less channel-cell write escalates server", () => {
-  test("function (no `server`) writing a channel cell gets boundary:server", () => {
+describe("Trigger 7 §1 — pure channel-cell write STAYS CLIENT (RULING A)", () => {
+  test("function (no `server`) writing a channel cell does NOT escalate", () => {
     const source = `<program>
   <channel name="chat" topic="lobby">
     <count> = 0
@@ -85,8 +93,10 @@ describe("Trigger 7 §1 — keyword-less channel-cell write escalates server", (
     const { routeMap } = runRIClean(fileAST);
     const route = routeForFn(routeMap, "bump", fileAST);
     expect(route).toBeDefined();
-    expect(route.boundary).toBe("server");
-    expect(route.escalationReasons.some(r => r.kind === "channel-broadcast")).toBe(true);
+    // RULING A: a channel-cell write is a client-side sync-emitting operation
+    // (§38.4 client-held + §38.7 syncShared), not a server-placement signal.
+    expect(route.escalationReasons.some(r => r.kind === "channel-broadcast")).toBe(false);
+    expect(route.boundary).not.toBe("server");
   });
 });
 
@@ -167,7 +177,7 @@ describe("Trigger 7 §4 — non-channel function unaffected", () => {
 // §5 — PARITY: a channel publisher WITH the `server` keyword still escalates
 // ---------------------------------------------------------------------------
 
-describe("Trigger 7 §5 — keyword-bearing channel publisher still escalates", () => {
+describe("Trigger 7 §5 — keyword-bearing channel publisher still escalates (via annotation)", () => {
   test("server function writing a channel cell still gets boundary:server", () => {
     const source = `<program>
   <channel name="chat" topic="lobby">
@@ -183,9 +193,11 @@ describe("Trigger 7 §5 — keyword-bearing channel publisher still escalates", 
     const route = routeForFn(routeMap, "bumpServer", fileAST);
     expect(route).toBeDefined();
     expect(route.boundary).toBe("server");
-    // It now carries BOTH the explicit-annotation (keyword) AND the
-    // channel-broadcast (Trigger 7) reasons — so the keyword is redundant.
-    expect(route.escalationReasons.some(r => r.kind === "channel-broadcast")).toBe(true);
+    // RULING A: the cell write no longer contributes a channel-broadcast reason.
+    // The keyword (explicit-annotation, §12.2 Trigger 4) still escalates on its
+    // own — a deliberate `server function` is honored even when client-held would
+    // otherwise be the default.
+    expect(route.escalationReasons.some(r => r.kind === "channel-broadcast")).toBe(false);
     expect(route.escalationReasons.some(r => r.kind === "explicit-annotation")).toBe(true);
   });
 });
@@ -216,5 +228,89 @@ describe("Trigger 7 §6 — onclient: attribute handler unaffected", () => {
     expect(route).toBeDefined();
     expect(route.escalationReasons.some(r => r.kind === "channel-broadcast")).toBe(false);
     expect(route.boundary).not.toBe("server");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §7 — POSITIVE: a publisher that writes a channel cell AND calls broadcast()
+//      still escalates (via broadcast — Trigger 7b), RULING A.
+// ---------------------------------------------------------------------------
+
+describe("Trigger 7 §7 — broadcast()-bearing publisher escalates even when it also writes a cell", () => {
+  test("function writing a channel cell AND calling broadcast() gets boundary:server", () => {
+    const source = `<program>
+  <channel name="chat" topic="lobby">
+    <count> = 0
+
+    \${ function bumpAndAnnounce(text) {
+      @count = @count + 1
+      broadcast({ type: "msg", body: text })
+    } }
+  </>
+</program>`;
+    const fileAST = parseFileAST(source);
+    const { routeMap } = runRIClean(fileAST);
+    const route = routeForFn(routeMap, "bumpAndAnnounce", fileAST);
+    expect(route).toBeDefined();
+    // The cell write alone would NOT escalate (RULING A); broadcast() does.
+    expect(route.boundary).toBe("server");
+    expect(route.escalationReasons.some(r => r.kind === "channel-broadcast")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §7 — RULING A Part 2: E-CHANNEL-SERVER-CELL-READ — a SERVER-context channel
+// function that READS a channel cell is rejected (channel cells are client-held,
+// §38.4; the read has no server-side value). change-id
+// `channel-cell-write-client-side-A-2026-06-12`.
+// ---------------------------------------------------------------------------
+
+function errorsOf(fileAST) {
+  return runRIClean(fileAST).errors ?? [];
+}
+function hasServerCellRead(errs) {
+  return errs.some(e => (e.code || "").includes("E-CHANNEL-SERVER-CELL-READ"));
+}
+
+describe("Trigger 7 §7 — E-CHANNEL-SERVER-CELL-READ (RULING A Part 2)", () => {
+  test("onserver:* handler reading a channel cell FIRES", () => {
+    const source = `<program>
+  <channel name="board" topic="lobby" onserver:message=handleUpdate(msg)>
+    <updates> = []
+    \${ function handleUpdate(msg) { @updates = [...@updates, msg] } }
+  </>
+</program>`;
+    expect(hasServerCellRead(errorsOf(parseFileAST(source)))).toBe(true);
+  });
+
+  test("broadcast()-escalated publisher reading a channel cell FIRES", () => {
+    const source = `<program>
+  <channel name="board" topic="lobby">
+    <items> = []
+    \${ function pub(x) { @items = [...@items, x]
+        broadcast({ t: "n" }) } }
+  </>
+</program>`;
+    expect(hasServerCellRead(errorsOf(parseFileAST(source)))).toBe(true);
+  });
+
+  test("pure channel-cell-write publisher (client under A) does NOT fire", () => {
+    const source = `<program>
+  <channel name="chat" topic="lobby">
+    <messages> = []
+    \${ function postMessage(a, b) { @messages = [...@messages, { a, b }] } }
+  </>
+</program>`;
+    expect(hasServerCellRead(errorsOf(parseFileAST(source)))).toBe(false);
+  });
+
+  test("broadcast()-escalated publisher with NO cell read does NOT fire", () => {
+    const source = `<program>
+  <channel name="board" topic="lobby">
+    <items> = []
+    \${ function ping(x) { broadcast({ t: "ping", x }) } }
+  </>
+</program>`;
+    expect(hasServerCellRead(errorsOf(parseFileAST(source)))).toBe(false);
   });
 });

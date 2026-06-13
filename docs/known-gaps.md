@@ -15,9 +15,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 1 |
-| MED | 8 |
-| LOW | 15 |
+| HIGH | 0 |
+| MED | 7 |
+| LOW | 16 |
 | Nominal (spec-ahead-of-impl) | 9 |
 <!-- @generated:gap-counts END -->
 
@@ -1796,15 +1796,15 @@ Fix SCOPE/BRIEF/reproducers at `docs/changes/errarm-refail-lowering-2026-06-11/`
 
 ---
 
-### G-CHANNEL-ONSERVER-CELL-READ — an `onserver:*` handler that READS a channel cell server-side is SPEC-silent → compiles clean but can runtime-throw (no server-authoritative cell store per §38.4) — `NEW S186; MED; SPEC-silent design Q`
-<!-- @gap id=g-channel-onserver-cell-read sev=MED status=open -->
+### G-CHANNEL-ONSERVER-CELL-READ — an `onserver:*` handler that READS a channel cell server-side is SPEC-silent → compiles clean but can runtime-throw (no server-authoritative cell store per §38.4) — `RESOLVED S189 (E-CHANNEL-SERVER-CELL-READ, RULING A — folded into g-channel-publisher-server-cell-read arc)`
+<!-- @gap id=g-channel-onserver-cell-read sev=MED status=resolved -->
 
 **Surfaced S186 by the `g-channel-handler-wiring` fix dispatch (agent `a06f1df4c51155e5e`), not yet closed.** After onserver:* handlers were correctly wired into the WS `message()` path (§38.6.1), a handler body that READS a channel-declared cell server-side — e.g. `onserver:message=handleUpdate(msg)` where `function handleUpdate(msg) { @updates = [...@updates, msg] }` — lowers the `@updates` read to `_scrml_body["updates"]`. But the WS message path has NO HTTP request body, and §38.4 defines channel state as **client-held + `__sync`-wired**, with NO server-authoritative cell store. So the read has no defined value server-side. The agent guarded it with `const _scrml_body = {};` (so no ReferenceError + `node --check` passes), but `[...undefined]` would THROW at runtime. **The SPEC-canonical §38.6.1 form is fully correct** (the handler broadcasts from the parsed `msg`, does not read a cell) — this only bites the NON-canonical "read a channel cell inside an onserver handler" pattern (which the S186 dog-food board happened to use). **Classification (don't-soft-classify):** compiles clean + node-checks clean but runtime-throws with no diagnostic = the silent-crash class → MED. **Design ruling needed (SPEC-silent):** should an onserver handler reading a channel cell (a) fire a compile diagnostic (`E-CHANNEL-…` "onserver handlers cannot read client-held channel cells; broadcast from the message payload per §38.6.1"); (b) be DEFINED (give the server a synced cell mirror — a bigger §38.4 model change); or (c) stay UB-but-documented? Recommend (a) — a clear compile error steering to the §38.6.1 broadcast form — pending a user/SPEC ruling. Repro: `/tmp/df-channels/dispatch-board.scrml` (`handleUpdate(msg){ @updates = [...@updates, msg] }`). Cross-ref `g-channel-handler-wiring` (RESOLVED — the wiring this residual rode in on).
 
 ---
 
-### G-CHANNEL-PUBLISHER-SERVER-CELL-READ — the CANONICAL channel publisher idiom (`@channelCell = [...@channelCell, x]`, PRIMER §9.1) crashes server-side: a server-escalated publisher reads the channel cell from an EMPTY request body → `[...undefined]` runtime throw — `NEW S189; HIGH; codegen/route-inference × §38.4 × Trigger-7 model`
-<!-- @gap id=g-channel-publisher-server-cell-read sev=HIGH status=open -->
+### G-CHANNEL-PUBLISHER-SERVER-CELL-READ — the CANONICAL channel publisher idiom (`@channelCell = [...@channelCell, x]`, PRIMER §9.1) crashes server-side: a server-escalated publisher reads the channel cell from an EMPTY request body → `[...undefined]` runtime throw — `RESOLVED S189 (RULING A — drop Trigger 7a + E-CHANNEL-SERVER-CELL-READ)`
+<!-- @gap id=g-channel-publisher-server-cell-read sev=HIGH status=resolved -->
 
 **Surfaced S189 while scoping `g-channel-onserver-cell-read` (verify-all-the-way-down per the S188 disambiguation lesson).** The filed onserver gap framed itself as "only the NON-canonical onserver-handler-reads-a-cell pattern bites; the canonical publisher form is correct." **That premise is WRONG.** The CANONICAL channel publisher idiom — `function postMessage(...) { @messages = [...@messages, x] }` (PRIMER §9.1, the documented flagship channel pattern) — ALSO crashes server-side, for the SAME root, more seriously.
 
@@ -1823,6 +1823,15 @@ Fix SCOPE/BRIEF/reproducers at `docs/changes/errarm-refail-lowering-2026-06-11/`
 - **(C) Client threads the cell value into the publisher request body** — wasteful (ships the whole array each call), and onserver handlers (no client request) still can't → keeps (a). Middle option.
 
 **Fix loci (for whichever direction):** `compiler/src/route-inference.ts` (Trigger 7 `detectChannelBroadcastReason` / channel-cell-write escalation), `compiler/src/codegen/emit-channel.ts` (publisher lowering), `compiler/src/codegen/emit-server.ts` / `emit-functions.ts` (the `_scrml_body[cell]` read lowering). SPEC §38.4 / §12.2 Trigger 7 / §38.6. Repros above. Cross-ref [[g-channel-onserver-cell-read]] (the coupled onserver instance — same root).
+
+**RESOLVED S189 (RULING A, change-id `channel-cell-write-client-side-A-2026-06-12`; user ruled A = "keep client-held, re-examine Trigger 7a"; dispatched to `scrml-js-codegen-engineer` which CRASHED mid-Part-2 [socket error, 86 tool-uses], PA-recovered + finished + landed). Closes BOTH this HIGH and [[g-channel-onserver-cell-read]] (MED) — same root.** **Part 1** — SPEC §12.2 Trigger 7 amended: sub-clause (a) channel-cell-WRITE escalation DROPPED (a cell-write is a CLIENT-side sync-emit via `syncShared`/`__sync` §38.4/§38.7, proven by the onclient Bug-2b path §38.10; not a server-placement signal); only (b) `broadcast()`/`disconnect()` remain (Trigger 7b). `route-inference.ts detectChannelBroadcastReason` drops the cell-write reason. Result: every corpus channel publisher (pure cell-write, zero `.scrml` migration) now emits CLIENT-side. **Part 2** — NEW Error `E-CHANNEL-SERVER-CELL-READ` (§34 + §38.6.1): a SERVER-context channel function (onserver:* handler / `broadcast`/`disconnect`/SQL-escalated) reading a channel cell is rejected (client-held, no server value); `detectServerContextChannelCellRead` walker in route-inference. **Minimal-A ruling (user S189 "land min A"):** a deprecated `server function` channel-cell-write publisher is NOT auto-migrated — the `server` is now load-bearing (migration keeps it), and the server-side cell READ fires E-CHANNEL-SERVER-CELL-READ steering the author to drop `server` → client by hand. **Crash-recovery:** Part 1 was committed on the dead branch (`2f678c81`) + R26-verified; Part 2 salvaged from the worktree working-tree; PA re-applied + reconciled 3 old-model migration/MCP tests (all the deprecated `server function` channel-publisher shape) + added the Part-2 diagnostic tests. **PA-independent R26 (S138):** 15-channel-chat + trucking publishers → client-side (`_scrml_reactive_set` + `syncShared`, no `_scrml_body[cell]`, `node --check` clean); onserver-read + broadcast-read → E-CHANNEL-SERVER-CELL-READ fires; pure-client-publisher + broadcast-no-read → no false fire. Full pre-commit subset 16,829/0. Follow-up filed: [[g-channel-server-keyword-auto-migrate]] (Enhanced-A — teach the migration to auto-strip a pure-cell-write `server function` channel publisher → client; deferred, zero corpus demand).
+
+---
+
+### G-CHANNEL-SERVER-KEYWORD-AUTO-MIGRATE — `bun scrml migrate` does not auto-strip a deprecated `server function` channel-cell-write publisher → client under RULING A (it fires E-CHANNEL-SERVER-CELL-READ + leaves it for manual fix) — `NEW S189; LOW; migration ergonomics (Enhanced-A deferred)`
+<!-- @gap id=g-channel-server-keyword-auto-migrate sev=LOW status=open -->
+
+**Filed S189 as the deferred Enhanced-A half of [[g-channel-publisher-server-cell-read]] (the user ruled "land min A").** Under RULING A (S189), a channel-cell WRITE is a CLIENT-side operation (Trigger 7a dropped). The `server`-keyword migration (`rewriteServerFunctionKeyword`, S180) strips `server` only where it is *redundant* (the function escalates anyway). A deprecated `server function` channel publisher that ONLY writes a channel cell does NOT self-escalate under A → `server` is load-bearing → the migration KEEPS it. The author is instead steered by the new `E-CHANNEL-SERVER-CELL-READ` hard error (the server-side cell read) to drop `server` → client by hand. **Enhanced-A would** teach the migration (+ the `W-DEPRECATED-SERVER-MODIFIER` lint fire conditions) to recognize a pure-cell-write `server function` channel publisher as "belongs on the client under A" → auto-strip `server` → client (smoother UX; no hard error). **Severity LOW** — ZERO corpus demand (no real app has a `server function` channel publisher; all corpus publishers are the canonical no-`server` form, already client-side per Part 1); the minimal-A diagnostic is a clear, guided fix. **Re-trigger:** an adopter reports friction migrating a legacy `server function` channel publisher, OR a corpus `server function` channel publisher appears. **Fix loci:** `compiler/src/commands/migrate.js rewriteServerFunctionKeyword` (the redundancy/strip decision) + the `W-DEPRECATED-SERVER-MODIFIER` fire conditions (route-inference / type-system) — recognize channel-cell-write publishers as strip-to-client.
 
 ---
 

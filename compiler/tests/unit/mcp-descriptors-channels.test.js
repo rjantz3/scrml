@@ -36,7 +36,7 @@ const CHANNEL_FIXTURE = `<program title="Chat">
   \${
     <messages> = []
     <count> = 0
-    server function postMessage(author: string, body: string) {
+    function postMessage(author: string, body: string) {
       @messages = [...@messages, { author, body }]
     }
   }

@@ -1393,37 +1393,45 @@ function extractReactiveAssignmentCellName(node: LogicStatement): string | null 
 }
 
 // ---------------------------------------------------------------------------
-// §12.2 Trigger 7 (D2, server-keyword-eliminate) — channel-cell-write /
-// broadcast() / disconnect() escalation.
+// §12.2 Trigger 7b (server-keyword-eliminate D2; AMENDED change-id
+// `channel-cell-write-client-side-A-2026-06-12`, RULING A) — broadcast() /
+// disconnect() escalation.
 // ---------------------------------------------------------------------------
 
 /**
- * Scan a standalone-function body for the §12.2 Trigger-7 escalation signals
- * and return the `channel-broadcast` reason(s) found. The function is presumed
- * to already be lexically inside a `<channel>` body (the caller gates on
- * `perFileChannelFnMap`). The two escalating signals are:
+ * Scan a standalone-function body for the §12.2 Trigger-7b escalation signal and
+ * return the `channel-broadcast` reason found. The function is presumed to
+ * already be lexically inside a `<channel>` body (the caller gates on
+ * `perFileChannelFnMap`). The ONE escalating signal is:
  *
- *   (a) a source-level WRITE to a channel-DECLARED cell — an `@<cell> = <expr>`
- *       (state-decl reassign / bare-expr assign) whose LHS cell name is one of
- *       the V5-strict cells declared in that channel's body
- *       (`channelCells`); OR
- *   (b) a call to `broadcast(...)` or `disconnect()` anywhere in the body.
+ *   - a call to `broadcast(...)` or `disconnect()` anywhere in the body (§38.6
+ *     server hub ops — server-placement signals).
+ *
+ * RULING A amendment (S189, change-id `channel-cell-write-client-side-A`):
+ *   A source-level WRITE to a channel-declared cell is NO LONGER an escalation
+ *   signal. Under the v0.3 client-held channel model (§38.4 — there is NO
+ *   server-authoritative cell store), a channel-cell write is a CLIENT-side
+ *   sync-emitting operation: the client mutates the cell locally and the
+ *   `syncShared` reactive effect distributes the write via the `__sync` wire
+ *   path (§38.7, emit-channel.ts). This is exactly what `onclient:*` handlers
+ *   that write a channel cell already do (§38.10). Dropping the former
+ *   sub-clause (a) makes a pure cell-write publisher stay client-side, so the
+ *   former server-side `_scrml_body["<cell>"]`-undefined read crash is gone.
+ *   Only `broadcast()`/`disconnect()` (server hub ops) remain placement signals.
  *
  * Over-fire discipline (LOAD-BEARING):
- *   - READS of a channel cell do NOT escalate. Only writes (LHS) and the two
- *     broadcast/disconnect built-in calls.
+ *   - READS of a channel cell do NOT escalate; WRITES no longer escalate either.
+ *     Only the two broadcast/disconnect built-in calls escalate here.
  *   - Does NOT descend into nested `function-decl` bodies — each declaration is
  *     analyzed for its own direct triggers (mirrors `walkBodyForTriggers`).
- *   - Returns AT MOST ONE reason; the presence of any signal is enough to
- *     escalate, and a single reason keeps the diagnostic surface clean.
+ *   - Returns AT MOST ONE reason; a single reason keeps the diagnostic surface
+ *     clean.
  *
  * The detection is deliberately syntactic (string + structured exprNode) to
- * match the rest of RI's direct-trigger machinery; the channel-cell ownership
- * itself is resolved structurally upstream (`collectChannelCellMap`).
+ * match the rest of RI's direct-trigger machinery.
  */
 function detectChannelBroadcastReason(
   body: LogicStatement[],
-  channelCells: Set<string>,
 ): EscalationReason | null {
   if (!Array.isArray(body) || body.length === 0) return null;
 
@@ -1441,18 +1449,7 @@ function detectChannelBroadcastReason(
     if (found !== null) return;
     if (!node || typeof node !== "object") return;
 
-    // (a) WRITE to a channel-declared cell.
-    const writtenCell = extractReactiveAssignmentCellName(node as LogicStatement);
-    if (writtenCell !== null && channelCells.has(writtenCell)) {
-      found = {
-        kind: "channel-broadcast",
-        detail: `channel cell write @${writtenCell}`,
-        span: (node as any).span,
-      };
-      return;
-    }
-
-    // (b) broadcast(...) / disconnect() call — match a call expression at the
+    // broadcast(...) / disconnect() call — match a call expression at the
     // start of a callee token. `\b` boundaries prevent matching a member
     // suffix like `obj.broadcast(` only when it is a method call; the §38.6
     // built-ins are bare calls, so we require a non-member boundary.
@@ -1477,6 +1474,96 @@ function detectChannelBroadcastReason(
     // Recurse into array-valued children (if/for/while bodies, etc.).
     for (const key of Object.keys(node)) {
       if (key === "span" || key === "id" || key === "exprNode" || key === "valueExpr") continue;
+      const val = (node as any)[key];
+      if (Array.isArray(val)) {
+        for (const child of val) {
+          visit(child);
+          if (found !== null) return;
+        }
+      }
+    }
+  }
+
+  for (const stmt of body) {
+    visit(stmt);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// §38.4 / §38.6.1 — server-context channel-cell READ detection
+// (change-id `channel-cell-write-client-side-A-2026-06-12`, RULING A, Part 2).
+// ---------------------------------------------------------------------------
+
+/**
+ * Scan a SERVER-context channel function's body for a READ of a channel-declared
+ * cell. Returns the first offending cell name + span, or `null` when the body
+ * reads no channel cell.
+ *
+ * RULING A (S189): channel cells are CLIENT-HELD (§38.4 — no server-authoritative
+ * cell store). A function the compiler has placed on the SERVER (escalated via
+ * `broadcast()`/`disconnect()`, an `onserver:*` handler per §38.6.1, or any other
+ * §12.2 trigger such as a `?{}` SQL block) therefore has NO server-side value for
+ * a channel cell — a read lowers to `_scrml_body["<cell>"]` (HTTP body) or the
+ * empty `{}` fallback (WS handler), both of which are `undefined` at runtime, so
+ * `[...@cell, x]` crashes silently. This is `E-CHANNEL-SERVER-CELL-READ` (§34).
+ *
+ * Detection (deliberately structural, mirroring the rest of RI):
+ *   - Walk every ExprNode-bearing field of each body statement
+ *     (`initExpr` / `exprNode` / `valueExpr`) via `forEachIdentInExprNode`, which
+ *     visits IdentExpr nodes (including the `@`-prefixed reactive reads) and does
+ *     NOT scan inside string-literal content (avoids the F-RI-001 string class).
+ *   - An `@<name>` IdentExpr whose bare name (`<name>` without the `@`) is a
+ *     channel-declared cell is a channel-cell READ.
+ *   - The LHS write-target name of a `state-decl` reactive assignment is NOT a
+ *     read (it is the assignment target). A `@<cell>` on the RHS of that same
+ *     assignment IS a read (e.g. `@updates = [...@updates, x]` reads `@updates`).
+ *   - Does NOT descend into nested `function-decl` bodies (own scope, own
+ *     analysis), mirroring `detectChannelBroadcastReason`.
+ */
+function detectServerContextChannelCellRead(
+  body: LogicStatement[],
+  channelCells: Set<string>,
+): { cell: string; span: Span | undefined } | null {
+  if (!Array.isArray(body) || body.length === 0) return null;
+  if (channelCells.size === 0) return null;
+
+  let found: { cell: string; span: Span | undefined } | null = null;
+
+  function scanExprForCellRead(exprNode: any, span: Span | undefined): void {
+    if (found !== null || !exprNode) return;
+    forEachIdentInExprNode(exprNode, (ident: any) => {
+      if (found !== null) return;
+      const nm: string = ident?.name ?? "";
+      if (nm.length > 1 && nm[0] === "@") {
+        const bare = nm.slice(1);
+        if (channelCells.has(bare)) {
+          found = { cell: bare, span };
+        }
+      }
+    });
+  }
+
+  function visit(node: any): void {
+    if (found !== null) return;
+    if (!node || typeof node !== "object") return;
+
+    // Walk the value-expression fields for `@<channelCell>` reads. The LHS
+    // write-target of a state-decl is `node.name` (no `@`), which these expr
+    // fields never contain — so a RHS read of the same cell is still caught.
+    const sp: Span | undefined = (node as any).span;
+    scanExprForCellRead((node as any).initExpr, sp);
+    scanExprForCellRead((node as any).exprNode, sp);
+    scanExprForCellRead((node as any).valueExpr, sp);
+    if (found !== null) return;
+
+    // Do NOT recurse into nested function-decl bodies — own scope.
+    if (node.kind === "function-decl") return;
+
+    for (const key of Object.keys(node)) {
+      if (key === "span" || key === "id" || key === "initExpr"
+          || key === "exprNode" || key === "valueExpr") continue;
       const val = (node as any)[key];
       if (Array.isArray(val)) {
         for (const child of val) {
@@ -2576,11 +2663,15 @@ export function runRI(input: RIInput): RIOutput {
       // -------------------------------------------------------------
       // Trigger 7 (D2): channel-cell-write / broadcast() / disconnect()
       // escalation. A standalone `function` DECLARATION lexically inside a
-      // <channel> body escalates server when its body WRITES a channel-
-      // declared cell or calls broadcast()/disconnect(). The channel
-      // ownership maps (Step 2d) gate this so onclient:/onserver: ATTRIBUTE
-      // handlers, `fn`, and functions outside any channel scope are never
-      // reached: `collectChannelFunctionMap` only registers standalone
+      // <channel> body escalates server when its body calls broadcast()/
+      // disconnect() (§38.6 server hub ops). RULING A (S189, change-id
+      // `channel-cell-write-client-side-A-2026-06-12`): a channel-CELL WRITE no
+      // longer escalates — under the v0.3 client-held model (§38.4) it is a
+      // client-side sync-emitting operation distributed by the `syncShared`
+      // effect (§38.7), exactly like an onclient:* cell write (§38.10). The
+      // channel ownership maps (Step 2d) gate this so onclient:/onserver:
+      // ATTRIBUTE handlers, `fn`, and functions outside any channel scope are
+      // never reached: `collectChannelFunctionMap` only registers standalone
       // function-decl names inside a <channel> body.
       // -------------------------------------------------------------
       const channelTriggers: EscalationReason[] = [];
@@ -2592,18 +2683,16 @@ export function runRI(input: RIInput): RIOutput {
         // Bug 2b (channel-codegen-fixes-2026-06-12): an `onclient:*` handler
         // function is CLIENT-ONLY per §38.10 — the compiler SHALL NOT emit any
         // server-side code for it. §38.10 is explicit + normative and WINS over
-        // §12.2 Trigger 7: even when the handler body writes a channel cell, the
-        // write runs on the client and syncs via the normal `__sync` wire path.
-        // Skip the channel-cell-write / broadcast escalation for these names so
-        // they stay client (and thus call locally from `ws.onopen`/`onclose`/
-        // `onerror`, not through a server round-trip fetch stub).
+        // §12.2 Trigger 7b: an onclient handler stays client even if its body
+        // contains a broadcast()/disconnect() token, so it always calls locally
+        // from `ws.onopen`/`onclose`/`onerror`, never through a server round-trip
+        // fetch stub. (Under RULING A a cell write never escalated either, but
+        // this skip keeps the §38.10 client-only invariant explicit + intact.)
         const _isOnclientHandler =
           typeof _fnName === "string" &&
           (perFileOnclientHandlerNames.get(filePath)?.has(_fnName) ?? false);
         if (_ownerChannel != null && !_isOnclientHandler) {
-          const _channelCells =
-            perFileChannelCellMap.get(filePath)?.get(_ownerChannel) ?? new Set<string>();
-          const _reason = detectChannelBroadcastReason(body, _channelCells);
+          const _reason = detectChannelBroadcastReason(body);
           if (_reason !== null) channelTriggers.push(_reason);
         }
         // Bug 2b: an `onserver:*` handler is server-side by §38.6.1 regardless
@@ -3218,8 +3307,8 @@ export function runRI(input: RIInput): RIOutput {
         } else if (first.kind === "protected-field-access") {
           triggerDesc = `protected field access (${first.field})`;
         } else if (first.kind === "channel-broadcast") {
-          // §12.2 Trigger 7 (D2).
-          triggerDesc = `channel broadcast/cell-write (${first.detail})`;
+          // §12.2 Trigger 7b (broadcast()/disconnect() only — RULING A).
+          triggerDesc = `channel broadcast/disconnect (${first.detail})`;
         } else if (first.kind === "middleware-handle") {
           // §12.2 Trigger 8 (D2): the reserved name handle() is the escalation.
           triggerDesc = "the reserved middleware name handle()";
@@ -3306,6 +3395,44 @@ export function runRI(input: RIInput): RIOutput {
 
     if (isServer) {
       const body = Array.isArray(record.fnNode.body) ? record.fnNode.body : [];
+
+      // §38.4 / §38.6.1 (RULING A, change-id
+      // `channel-cell-write-client-side-A-2026-06-12`, Part 2):
+      // a SERVER-context channel function SHALL NOT READ a channel-declared
+      // cell. Channel cells are client-held — there is no server-side value, so
+      // a read lowers to `_scrml_body["<cell>"]` (HTTP body) or the empty `{}`
+      // WS-handler fallback, both `undefined` at runtime → `[...@cell, x]`
+      // crashes silently. We are here only when the function is server-placed:
+      // escalated via broadcast()/disconnect() (Trigger 7b), recognized as an
+      // `onserver:*` handler (`channel-ws-handler`), or escalated by any other
+      // §12.2 trigger (e.g. a `?{}` SQL block). Fire E-CHANNEL-SERVER-CELL-READ.
+      // A CLIENT-side function reading a channel cell never reaches this arm
+      // (it is not server-escalated), so the client read is unaffected.
+      {
+        const _fnName = record.fnNode.name ?? "";
+        const _ownerChannel = _fnName
+          ? perFileChannelFnMap.get(record.filePath)?.get(_fnName)
+          : undefined;
+        if (_ownerChannel != null) {
+          const _channelCells =
+            perFileChannelCellMap.get(record.filePath)?.get(_ownerChannel) ?? null;
+          if (_channelCells != null && _channelCells.size > 0) {
+            const _read = detectServerContextChannelCellRead(body, _channelCells);
+            if (_read !== null) {
+              errors.push(new RIError(
+                "E-CHANNEL-SERVER-CELL-READ",
+                `E-CHANNEL-SERVER-CELL-READ: Server-side channel function \`${_fnName}\` ` +
+                `reads the client-held channel cell \`@${_read.cell}\`. Channel cells are ` +
+                `client-held (§38.4) — they have no server-side value, so this read is ` +
+                `\`undefined\` at request time. Operate on the message payload / the function's ` +
+                `arguments instead, and broadcast a value derived from them (§38.6.1). ` +
+                `(A channel-cell WRITE runs on the client and syncs automatically — RULING A, §38.4.)`,
+                _read.span ?? record.fnNode.span,
+              ));
+            }
+          }
+        }
+      }
 
       // §36: SSE generator functions — skip E-RI-002 and CPS analysis.
       if ((record.fnNode as any).isGenerator === true) {

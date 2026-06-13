@@ -190,15 +190,21 @@ describe("§4 keyword-only-no-trigger `server function` → untouched (client-fl
 });
 
 // ---------------------------------------------------------------------------
-// §5  POSITIVE — channel publisher (T7) → STRIPPED
+// §5  NEGATIVE — channel cell-write publisher (T7a dropped, RULING A) → NOT STRIPPED
 // ---------------------------------------------------------------------------
 
-describe("§5 channel publisher (Trigger 7) → `server` stripped", () => {
-  test("`server function` writing a channel cell inside <channel> → `function`", () => {
-    // A standalone `function` decl inside a <channel> body that WRITES a
-    // channel-declared cell escalates server via Trigger 7 (D2). With the
-    // `server` keyword present, that keyword is redundant → W-DEPRECATED fires
-    // → Migration 4 strips it.
+describe("§5 channel cell-write publisher → `server` NOT stripped (RULING A)", () => {
+  test("`server function` writing a channel cell → `server` is load-bearing, kept", () => {
+    // RULING A (S189, change-id `channel-cell-write-client-side-A-2026-06-12`):
+    // §12.2 Trigger 7a (channel-cell-write escalation) was DROPPED — a channel
+    // cell-write now runs CLIENT-side and syncs via __sync (§38.4). So a
+    // `server function` that ONLY writes a channel cell does NOT self-escalate
+    // without the keyword → `server` is LOAD-BEARING (not redundant) →
+    // W-DEPRECATED-SERVER-MODIFIER does NOT fire → Migration 4 does NOT strip it
+    // (stripping would flip the boundary server→client). The deprecated form is
+    // separately flagged: the server-side cell READ fires E-CHANNEL-SERVER-CELL-READ
+    // (§34), which steers the author to drop `server` → client by hand. (Auto-
+    // migrating it to client is the deferred Enhanced-A enhancement.)
     const source = `<program>
   <channel name="chat" topic="lobby">
     <count> = 0
@@ -211,13 +217,10 @@ describe("§5 channel publisher (Trigger 7) → `server` stripped", () => {
     const path = stage("channel.scrml", source);
     const r = rewriteServerFunctionKeyword(source, path);
 
-    expect(r.changed).toBe(true);
-    expect(r.count).toBe(1);
-    expect(r.rewritten).toContain(`function bumpServer()`);
-    expect(r.rewritten).not.toContain(`server function bumpServer()`);
-    // The channel scaffolding + cell write are untouched.
-    expect(r.rewritten).toContain(`<channel name="chat" topic="lobby">`);
-    expect(r.rewritten).toContain(`@count = @count + 1`);
+    expect(r.changed).toBe(false);
+    expect(r.count).toBe(0);
+    expect(r.rewritten).toBe(source);
+    expect(r.rewritten).toContain(`server function bumpServer()`);
   });
 });
 
@@ -403,7 +406,14 @@ describe("§9 no-client-flip — stripped server stays server-side", () => {
     expect(serverJs.includes("secretcol")).toBe(true);
   });
 
-  test("stripped channel publisher still compiles + the cell-write stays server", () => {
+  test("channel cell-write publisher (RULING A) — `server` not stripped; server-context cell read fires E-CHANNEL-SERVER-CELL-READ", () => {
+    // RULING A (S189): Trigger 7a dropped — a channel cell-write runs client-side.
+    // Migration 4 does NOT strip the now-load-bearing `server` (stripping would
+    // flip server→client); the deprecated `server function` channel publisher
+    // therefore stays server, and its server-side READ of the channel cell
+    // `@count` (the `@count = @count + 1` read-modify-write) is flagged
+    // E-CHANNEL-SERVER-CELL-READ (§34) — channel cells are client-held (§38.4),
+    // so there is no server-side value. The author drops `server` → client.
     const source = `<program>
   <channel name="chat" topic="lobby">
     <count> = 0
@@ -415,11 +425,11 @@ describe("§9 no-client-flip — stripped server stays server-side", () => {
 </program>`;
     const path = stage("flip-channel.scrml", source);
     const r = rewriteServerFunctionKeyword(source, path);
-    expect(r.changed).toBe(true);
-    expect(r.rewritten).toContain(`function bumpServer()`);
+    expect(r.changed).toBe(false);
+    expect(r.rewritten).toContain(`server function bumpServer()`);
 
     const { fatal } = compileOutput(r.rewritten, path);
-    expect(fatal).toHaveLength(0);
+    expect(JSON.stringify(fatal)).toContain("E-CHANNEL-SERVER-CELL-READ");
   });
 
   test("stripped handle() still compiles + stays middleware-server", () => {

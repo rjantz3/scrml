@@ -69,7 +69,7 @@ type Health:enum = { Healthy, AtRisk, Critical }
   \${
     <messages> = []
     <count> = 0
-    server function postMessage(author: string, body: string) {
+    function postMessage(author: string, body: string) {
       @messages = [...@messages, { author, body }]
     }
   }
@@ -149,9 +149,12 @@ describe("MCP-V0 integration — sidecar emission", () => {
     expect(compiled.engines.map((e) => e.name).sort()).toEqual(["health", "loadPhase"]);
     expect(compiled.forms.map((f) => f.formName)).toEqual(["signup"]);
     expect(compiled.channels.map((c) => c.name).sort()).toEqual(["chat", "presence"]);
+    // RULING A (S189): a channel cell-write publisher (`postMessage` writes the
+    // channel cell `@messages`) runs CLIENT-side and syncs via __sync (§38.4,
+    // §12.2 Trigger 7a dropped) — it is NOT a server fn. Only `loadRows` /
+    // `saveName` (SQL → server) surface as server fns.
     expect(compiled.serverFns.map((f) => f.name).sort()).toEqual([
       "loadRows",
-      "postMessage",
       "saveName",
     ]);
   });
