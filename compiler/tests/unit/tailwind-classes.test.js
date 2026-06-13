@@ -389,11 +389,16 @@ describe("§10 Border utilities", () => {
 // ---------------------------------------------------------------------------
 
 describe("§11 Effect utilities", () => {
-  test("shadow sizes", () => {
-    expect(getTailwindCSS("shadow")).toContain("box-shadow:");
-    expect(getTailwindCSS("shadow-sm")).toContain("box-shadow:");
-    expect(getTailwindCSS("shadow-lg")).toContain("box-shadow:");
-    expect(getTailwindCSS("shadow-none")).toContain("box-shadow: 0 0 #0000");
+  test("shadow sizes — Approach C: set --tw-shadow + emit the compose shorthand (§26.7)", () => {
+    // Named shadow-* utilities set the --tw-shadow custom property and emit the
+    // composing box-shadow shorthand (so a shadow stacks with a ring instead of
+    // one single-property box-shadow clobbering the other).
+    expect(getTailwindCSS("shadow")).toContain("--tw-shadow:");
+    expect(getTailwindCSS("shadow")).toContain("box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow, 0 0 #0000)");
+    expect(getTailwindCSS("shadow-sm")).toContain("--tw-shadow:");
+    expect(getTailwindCSS("shadow-lg")).toContain("--tw-shadow:");
+    // shadow-none sets the transparent layer via the var (not a single-property box-shadow).
+    expect(getTailwindCSS("shadow-none")).toContain("--tw-shadow: 0 0 #0000");
   });
 
   test("opacity values", () => {

@@ -16166,6 +16166,44 @@ The `:where()` wrapping inside the `:not()` keeps the opt-out condition at speci
 - Custom theme overrides for prose (e.g., adopter-provided body / heading color schemes) — cross-ref §26.5 SPEC-ISSUE-012.
 - Per-element prose modifiers (`prose-headings:`, `prose-a:`, etc.) — Tailwind v3 plugin extension; deferred to future revision.
 
+### 26.7 Composing Utilities — Inline-Fallback `var()` Model (S191)
+
+Some Tailwind utility families do NOT map to a single CSS declaration; they **compose** several independent contributions into ONE CSS property. The first such family is **ring / ring-offset / shadow**, which all contribute to a single `box-shadow`. If each member emitted its own single-property `box-shadow:` declaration, two members on one element (`ring-2 shadow-lg`) would collide — CSS class-order last-write-wins, and one obliterates the other. This is incorrect: the author asked for a ring AND a shadow.
+
+scrml resolves this with the **inline-fallback `var()` model** (the once-built foundation for every composing family — ring/shadow is Phase 1; gradient, transform, filter, and backdrop-filter follow). Every composing-family utility emits a shared **composing shorthand** built from `var()` references, and each utility additionally **sets one `--tw-*` custom property** that the shorthand consumes:
+
+```css
+/* the composing shorthand — emitted by EVERY ring / ring-offset / shadow utility */
+box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow, 0 0 #0000);
+```
+
+The `var()` references carry **INLINE fallbacks** (`, 0 0 #0000`). This is the load-bearing design choice: an element with ONLY `ring-2` (no `shadow-*`) resolves `var(--tw-shadow, 0 0 #0000)` to a transparent layer; an element with ONLY `shadow-lg` resolves the two ring vars to `0 0 #0000`. Either way the shorthand is valid CSS with no missing-variable breakage. `ring-2 shadow-lg` sets both `--tw-ring-shadow` and `--tw-shadow`, and the shorthand composes all three layers. CORRECT, and partial application is always valid.
+
+**No global preflight defaults block.** scrml SHALL NOT emit a global `*, ::before, ::after { --tw-*: …; }` defaults block (Tailwind v3's `@tailwind base` approach). The inline fallbacks make every `var()` reference self-defaulting, so the global block is unnecessary. Omitting it preserves the §26.1/§26.2 **"only what's used" minimalism axiom** — a file that uses no composing utility pays zero composing-family CSS cost; a file that uses `ring-2 shadow-lg` pays only for those two rules plus their inline-fallback shorthands. This mirrors the existing `space-x-reverse` self-fallback precedent (the utility supplies its own consumer-side default rather than relying on a global initializer).
+
+**Per-utility setters (Tailwind v3 model):**
+
+```css
+/* ring-{w} (named: ring-0/1/2/4/8; bare `ring` == 3px) — set --tw-ring-shadow + the shorthand */
+.ring-2 { --tw-ring-shadow: var(--tw-ring-inset,) 0 0 0 calc(2px + var(--tw-ring-offset-width, 0px)) var(--tw-ring-color, currentColor); box-shadow: <shorthand>; }
+/* ring-offset-{w} — set the offset width + the offset shadow var + the shorthand */
+.ring-offset-2 { --tw-ring-offset-width: 2px; --tw-ring-offset-shadow: var(--tw-ring-inset,) 0 0 0 2px var(--tw-ring-offset-color, #fff); box-shadow: <shorthand>; }
+/* ring-inset — set the inset keyword var (no shorthand; it only modifies a ring) */
+.ring-inset { --tw-ring-inset: inset; }
+/* ring-{color} / ring-offset-{color} (named scale + arbitrary ring-[#hex]) — set the color var */
+.ring-blue-500 { --tw-ring-color: #3b82f6; }
+/* shadow-{size} (named: sm/(base)/md/lg/xl/2xl/inner/none) — set --tw-shadow + the shorthand */
+.shadow-lg { --tw-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); box-shadow: <shorthand>; }
+```
+
+`shadow-none` sets `--tw-shadow: 0 0 #0000` (a transparent layer), not a single-property `box-shadow`, so a `ring-2 shadow-none` pairing still draws the ring.
+
+**Arbitrary `ring-[…]`.** The **color** form (`ring-[#ff0000]`, `ring-[var(--c)]`, `ring-[red]`, `ring-[currentColor]`) follows the composing model: it sets `--tw-ring-color` and emits the shorthand (with a default 3px ring via `--tw-ring-shadow`), so it composes with a named `shadow-*` / `ring-{w}`. The **width-only** form (`ring-[3px]`, `ring-[2.5rem]`) keeps a single-property `box-shadow: 0 0 0 <w> currentColor` — an arbitrary ring width with no companion color is self-contained and has no second var to compose with.
+
+**Default ring color = `currentColor` (deliberate scrml divergence).** Tailwind v3 defaults `--tw-ring-color` to `rgb(59 130 246 / 0.5)` (blue-500/50). scrml instead defaults to `currentColor` (the convention already established by scrml's arbitrary `ring-[3px]` width form), via the `var(--tw-ring-color, currentColor)` inline fallback in the ring setter. A bare `ring-2` with no `ring-{color}` therefore draws a `currentColor` ring, not blue. This is intentional consistency with scrml's existing ring convention; adopters wanting blue write `ring-blue-500` explicitly. The corpus does NOT introduce a blue ring default.
+
+**Phase status.** ring / ring-offset / shadow is **Phase 1** of the composing-family arc. gradient (`bg-gradient-to-*` / `from-*` / `via-*` / `to-*`), transform, filter, and backdrop-filter are subsequent phases under the same inline-fallback model; until they land, their class tokens continue to fire `W-TAILWIND-UNRECOGNIZED-CLASS` (§26.5) as deferred-family regression guards.
+
 ---
 
 ## 27. Comment Syntax

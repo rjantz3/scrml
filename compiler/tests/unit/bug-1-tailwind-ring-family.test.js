@@ -1,22 +1,25 @@
 /**
- * bug-1-tailwind-ring-family.test.js — Bug 1 partial closure S109: add ring-*
- * arbitrary-value emission with kind-dispatch (length → box-shadow with
- * currentColor; color/var/keyword → box-shadow with default 3px width).
+ * bug-1-tailwind-ring-family.test.js — Bug 1 ring/shadow composing family.
  *
- * Documented limitations (deferred):
- *   - ring-offset-* — needs preflight CSS (custom properties on `*, ::before, ::after`)
- *   - ring-inset    — named utility, not arbitrary-value
- *   - bg-gradient-* / from-* / to-* / via-* — needs preflight + multi-utility coordination
- *   - composing ring-[N] with shadow-[...] — last-write-wins per CSS class order
+ * S109 partial closure added arbitrary `ring-*` (single-property box-shadow).
+ * Phase 1 (S191, Approach C / §26.7) made ring + shadow COMPOSE: the COLOR
+ * arbitrary forms now set `--tw-ring-color` and emit the composing box-shadow
+ * shorthand (`box-shadow: var(--tw-ring-offset-shadow,...), var(--tw-ring-shadow,...),
+ * var(--tw-shadow,...)`) with INLINE var() fallbacks (no global preflight block).
+ * The WIDTH-only arbitrary form keeps its single-property emit.
+ *
+ * Phase-1 landed (no longer deferred): ring-offset-*, ring-inset, ring-{color},
+ * shadow-* composition. STILL deferred (Phase 2): bg-gradient-* / from-* / to-*
+ * / via-*.
  *
  * Coverage:
- *   §1  ring-[length] — width with currentColor
- *   §2  ring-[color]  — color with default 3px width
- *   §3  ring-[var()] — var defaults to color shape
- *   §4  ring-[keyword] — currentColor / transparent
+ *   §1  ring-[length] — width-only form, single-property box-shadow with currentColor (KEPT)
+ *   §2  ring-[color]  — C-style: sets --tw-ring-color + compose shorthand
+ *   §3  ring-[var()] — C-style: var as ring-color + compose shorthand
+ *   §4  ring-[keyword] — C-style: currentColor / transparent ring-color + compose shorthand
  *   §5  lint regression — ring-[N] no longer fires W-TAILWIND-UNRECOGNIZED-CLASS
- *   §6  still-deferred — ring-offset / bg-gradient still fire the lint (regression guard)
- *   §7  responsive + dark variants — md:ring-[3px] / dark:ring-[red] compose
+ *   §6  ring-offset-[2px] now RECOGNIZED (no lint); bg-gradient/from/to/via STILL fire (Phase 2)
+ *   §7  responsive + dark variants — md:ring-[3px] (width) / dark:ring-[red] (C-style color) compose
  */
 
 import { describe, test, expect } from "bun:test";
@@ -30,25 +33,34 @@ function cssFor(classNames) {
 // §1: ring-[length] — set ring width with currentColor
 // ---------------------------------------------------------------------------
 
-describe("§1: ring-[length] emits box-shadow with currentColor", () => {
-  test("ring-[3px] emits the canonical Tailwind ring default width", () => {
+describe("§1: ring-[length] sets --tw-ring-shadow (currentColor) and composes", () => {
+  // S191 consistency fix: arbitrary ring-[<width>] is now C-style (composes with
+  // shadow-*), matching named ring-{w}; was single-property (collided) before.
+  test("ring-[3px] sets the width via --tw-ring-shadow + the compose shorthand (now composes)", () => {
     const css = cssFor("ring-[3px]");
-    expect(css).toContain("box-shadow: 0 0 0 3px currentColor");
+    expect(css).toContain("calc(3px + var(--tw-ring-offset-width, 0px))");
+    expect(css).toContain("var(--tw-ring-color, currentColor)");
+    expect(css).toContain(
+      "box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow, 0 0 #0000)",
+    );
+    // the old single-property collision form is gone
+    expect(css).not.toContain("box-shadow: 0 0 0 3px currentColor");
   });
 
-  test("ring-[1px] emits 1px ring", () => {
+  test("ring-[1px] composes with 1px width", () => {
     const css = cssFor("ring-[1px]");
-    expect(css).toContain("box-shadow: 0 0 0 1px currentColor");
+    expect(css).toContain("calc(1px + var(--tw-ring-offset-width, 0px))");
+    expect(css).toContain("box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000)");
   });
 
   test("ring-[2.5rem] accepts rem unit", () => {
     const css = cssFor("ring-[2.5rem]");
-    expect(css).toContain("box-shadow: 0 0 0 2.5rem currentColor");
+    expect(css).toContain("calc(2.5rem + var(--tw-ring-offset-width, 0px))");
   });
 
   test("ring-[0.5em] accepts em unit", () => {
     const css = cssFor("ring-[0.5em]");
-    expect(css).toContain("box-shadow: 0 0 0 0.5em currentColor");
+    expect(css).toContain("calc(0.5em + var(--tw-ring-offset-width, 0px))");
   });
 });
 
@@ -56,25 +68,34 @@ describe("§1: ring-[length] emits box-shadow with currentColor", () => {
 // §2: ring-[color] — set ring color with default 3px width
 // ---------------------------------------------------------------------------
 
-describe("§2: ring-[color] emits box-shadow with default 3px width", () => {
-  test("ring-[#ff0000] uses hex color with 3px default width", () => {
+describe("§2: ring-[color] sets --tw-ring-color and emits the compose shorthand", () => {
+  test("ring-[#ff0000] sets the ring-color var (3px default ring) and composes", () => {
     const css = cssFor("ring-[#ff0000]");
-    expect(css).toContain("box-shadow: 0 0 0 3px #ff0000");
+    expect(css).toContain("--tw-ring-color: #ff0000");
+    // composing shorthand with the three inline-fallback layers
+    expect(css).toContain(
+      "box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow, 0 0 #0000)",
+    );
+    // default 3px ring width via --tw-ring-shadow
+    expect(css).toContain("calc(3px + var(--tw-ring-offset-width, 0px))");
   });
 
-  test("ring-[red] uses bare color keyword with 3px default", () => {
+  test("ring-[red] uses a bare color keyword as the ring color", () => {
     const css = cssFor("ring-[red]");
-    expect(css).toContain("box-shadow: 0 0 0 3px red");
+    expect(css).toContain("--tw-ring-color: red");
+    expect(css).toContain("box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000)");
   });
 
-  test("ring-[rgb(255,0,0)] uses rgb() function with 3px default", () => {
+  test("ring-[rgb(255,0,0)] uses an rgb() function color", () => {
     const css = cssFor("ring-[rgb(255,0,0)]");
-    expect(css).toContain("box-shadow: 0 0 0 3px rgb(255,0,0)");
+    expect(css).toContain("--tw-ring-color: rgb(255,0,0)");
+    expect(css).toContain("box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000)");
   });
 
-  test("ring-[hsl(120,100%,50%)] uses hsl() function with 3px default", () => {
+  test("ring-[hsl(120,100%,50%)] uses an hsl() function color", () => {
     const css = cssFor("ring-[hsl(120,100%,50%)]");
-    expect(css).toContain("box-shadow: 0 0 0 3px hsl(120,100%,50%)");
+    expect(css).toContain("--tw-ring-color: hsl(120,100%,50%)");
+    expect(css).toContain("box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000)");
   });
 });
 
@@ -82,15 +103,17 @@ describe("§2: ring-[color] emits box-shadow with default 3px width", () => {
 // §3: ring-[var()] — CSS custom property reference
 // ---------------------------------------------------------------------------
 
-describe("§3: ring-[var()] uses CSS variable with default 3px width", () => {
-  test("ring-[var(--ring-color)] emits box-shadow with var ref", () => {
+describe("§3: ring-[var()] uses a CSS variable as the ring color (C-style)", () => {
+  test("ring-[var(--ring-color)] sets the ring-color var and composes", () => {
     const css = cssFor("ring-[var(--ring-color)]");
-    expect(css).toContain("box-shadow: 0 0 0 3px var(--ring-color)");
+    expect(css).toContain("--tw-ring-color: var(--ring-color)");
+    expect(css).toContain("box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000)");
   });
 
-  test("ring-[var(--my-color,red)] supports fallback in var()", () => {
+  test("ring-[var(--my-color,red)] supports a fallback inside var()", () => {
     const css = cssFor("ring-[var(--my-color,red)]");
-    expect(css).toContain("box-shadow: 0 0 0 3px var(--my-color,red)");
+    expect(css).toContain("--tw-ring-color: var(--my-color,red)");
+    expect(css).toContain("box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000)");
   });
 });
 
@@ -98,15 +121,17 @@ describe("§3: ring-[var()] uses CSS variable with default 3px width", () => {
 // §4: ring-[keyword] — currentColor / transparent / inherit etc.
 // ---------------------------------------------------------------------------
 
-describe("§4: ring-[keyword] uses CSS keyword as color with 3px default", () => {
-  test("ring-[currentColor] is supported", () => {
+describe("§4: ring-[keyword] uses a CSS keyword as the ring color (C-style)", () => {
+  test("ring-[currentColor] sets the ring-color var and composes", () => {
     const css = cssFor("ring-[currentColor]");
-    expect(css).toContain("box-shadow: 0 0 0 3px currentColor");
+    expect(css).toContain("--tw-ring-color: currentColor");
+    expect(css).toContain("box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000)");
   });
 
-  test("ring-[transparent] is supported", () => {
+  test("ring-[transparent] sets a transparent ring color", () => {
     const css = cssFor("ring-[transparent]");
-    expect(css).toContain("box-shadow: 0 0 0 3px transparent");
+    expect(css).toContain("--tw-ring-color: transparent");
+    expect(css).toContain("box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000)");
   });
 });
 
@@ -136,14 +161,13 @@ describe("§5: lint regression — ring-* now recognized", () => {
 // §6: still-deferred families STILL fire the lint (regression guard)
 // ---------------------------------------------------------------------------
 
-describe("§6: still-deferred ring/gradient families fire W-TAILWIND-UNRECOGNIZED-CLASS", () => {
-  test("ring-offset-[2px] fires the unrecognized-class lint (deferred — needs preflight)", () => {
+describe("§6: ring-offset recognized (Phase 1); gradient still fires W-TAILWIND-UNRECOGNIZED-CLASS (Phase 2)", () => {
+  test("ring-offset-2 is now RECOGNIZED — no lint (Phase 1 landed the named utility)", () => {
     const diags = findUnrecognizedClasses(
-      '<div class="ring-offset-[2px]">x</div>',
+      '<div class="ring-offset-2">x</div>',
       "test.scrml"
     );
-    expect(diags.length).toBeGreaterThan(0);
-    expect(diags[0].code).toBe("W-TAILWIND-UNRECOGNIZED-CLASS");
+    expect(diags).toEqual([]);
   });
 
   test("bg-gradient-to-r fires the lint (deferred — needs preflight + multi-utility)", () => {
@@ -188,27 +212,147 @@ describe("§6: still-deferred ring/gradient families fire W-TAILWIND-UNRECOGNIZE
 // ---------------------------------------------------------------------------
 
 describe("§7: ring-* composes with variant prefixes", () => {
-  test("md:ring-[3px] wraps in @media (min-width: 768px)", () => {
+  test("md:ring-[3px] wraps the C-style width emit in @media (min-width: 768px)", () => {
     const css = cssFor("md:ring-[3px]");
     expect(css).toContain("@media (min-width: 768px)");
-    expect(css).toContain("box-shadow: 0 0 0 3px currentColor");
+    expect(css).toContain("calc(3px + var(--tw-ring-offset-width, 0px))");
+    expect(css).toContain("box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000)");
   });
 
-  test("dark:ring-[red] wraps in @media (prefers-color-scheme: dark)", () => {
+  test("dark:ring-[red] wraps the C-style color emit in @media (prefers-color-scheme: dark)", () => {
     const css = cssFor("dark:ring-[red]");
     expect(css).toContain("@media (prefers-color-scheme: dark)");
-    expect(css).toContain("box-shadow: 0 0 0 3px red");
+    expect(css).toContain("--tw-ring-color: red");
+    expect(css).toContain("box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000)");
   });
 
-  test("hover:ring-[3px] uses :hover state selector", () => {
+  test("hover:ring-[3px] uses :hover state selector (C-style width)", () => {
     const css = cssFor("hover:ring-[3px]");
     expect(css).toContain(":hover");
-    expect(css).toContain("box-shadow: 0 0 0 3px currentColor");
+    expect(css).toContain("calc(3px + var(--tw-ring-offset-width, 0px))");
+    expect(css).toContain("box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000)");
   });
 
-  test("focus:ring-[2px] uses :focus state selector", () => {
+  test("focus:ring-[2px] uses :focus state selector (C-style width)", () => {
     const css = cssFor("focus:ring-[2px]");
     expect(css).toContain(":focus");
-    expect(css).toContain("box-shadow: 0 0 0 2px currentColor");
+    expect(css).toContain("calc(2px + var(--tw-ring-offset-width, 0px))");
+    expect(css).toContain("box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000)");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §8: named ring widths — ring-2 alone sets --tw-ring-shadow + compose shorthand
+// ---------------------------------------------------------------------------
+
+describe("§8: named ring-{width} sets --tw-ring-shadow and the compose shorthand", () => {
+  test("ring-2 alone emits the --tw-ring-shadow setter with inline fallbacks", () => {
+    const css = cssFor("ring-2");
+    // the per-utility setter (2px width + offset accounting + currentColor default)
+    expect(css).toContain(
+      "--tw-ring-shadow: var(--tw-ring-inset,) 0 0 0 calc(2px + var(--tw-ring-offset-width, 0px)) var(--tw-ring-color, currentColor)",
+    );
+    // the composing shorthand with all three inline-fallback layers
+    expect(css).toContain(
+      "box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow, 0 0 #0000)",
+    );
+  });
+
+  test("bare ring == 3px default width", () => {
+    const css = cssFor("ring");
+    expect(css).toContain("calc(3px + var(--tw-ring-offset-width, 0px))");
+  });
+
+  test("ring-0 sets a 0px ring", () => {
+    const css = cssFor("ring-0");
+    expect(css).toContain("calc(0px + var(--tw-ring-offset-width, 0px))");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §9: shadow-{size} sets --tw-shadow + compose shorthand
+// ---------------------------------------------------------------------------
+
+describe("§9: shadow-{size} sets --tw-shadow and the compose shorthand", () => {
+  test("shadow-lg alone sets --tw-shadow and emits the shorthand", () => {
+    const css = cssFor("shadow-lg");
+    expect(css).toContain(
+      "--tw-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)",
+    );
+    expect(css).toContain(
+      "box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow, 0 0 #0000)",
+    );
+  });
+
+  test("bare shadow sets the default --tw-shadow", () => {
+    const css = cssFor("shadow");
+    expect(css).toContain("--tw-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)");
+    expect(css).toContain("box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000)");
+  });
+
+  test("shadow-none sets the transparent --tw-shadow layer", () => {
+    const css = cssFor("shadow-none");
+    expect(css).toContain("--tw-shadow: 0 0 #0000");
+    expect(css).toContain("box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000)");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §10: ring + shadow COMPOSE on one element — the bug-1 core fix
+// ---------------------------------------------------------------------------
+
+describe("§10: ring-2 shadow-lg compose (both set their var; shorthand stacks)", () => {
+  test("ring-2 shadow-lg both emit setters AND the composing shorthand", () => {
+    const css = cssFor("ring-2 shadow-lg");
+    // ring half
+    expect(css).toContain(
+      "--tw-ring-shadow: var(--tw-ring-inset,) 0 0 0 calc(2px + var(--tw-ring-offset-width, 0px)) var(--tw-ring-color, currentColor)",
+    );
+    // shadow half
+    expect(css).toContain(
+      "--tw-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)",
+    );
+    // the composing shorthand — all three var() layers present so both compose
+    expect(css).toContain("var(--tw-ring-offset-shadow, 0 0 #0000)");
+    expect(css).toContain("var(--tw-ring-shadow, 0 0 #0000)");
+    expect(css).toContain("var(--tw-shadow, 0 0 #0000)");
+    // NO bare single-property collision — every box-shadow is the var() shorthand
+    expect(css).not.toContain("box-shadow: 0 10px 15px");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §11: ring-offset / ring-inset
+// ---------------------------------------------------------------------------
+
+describe("§11: ring-offset-{w} and ring-inset", () => {
+  test("ring-offset-2 sets the offset width + the offset shadow var", () => {
+    const css = cssFor("ring-offset-2");
+    expect(css).toContain("--tw-ring-offset-width: 2px");
+    expect(css).toContain(
+      "--tw-ring-offset-shadow: var(--tw-ring-inset,) 0 0 0 2px var(--tw-ring-offset-color, #fff)",
+    );
+    expect(css).toContain("box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000)");
+  });
+
+  test("ring-inset sets the inset keyword var", () => {
+    const css = cssFor("ring-inset");
+    expect(css).toContain("--tw-ring-inset: inset");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §12: ring-{color} / ring-offset-{color} named scales
+// ---------------------------------------------------------------------------
+
+describe("§12: ring-{color} and ring-offset-{color} named utilities", () => {
+  test("ring-blue-500 sets --tw-ring-color to the blue-500 hex", () => {
+    const css = cssFor("ring-blue-500");
+    expect(css).toContain("--tw-ring-color: #3b82f6");
+  });
+
+  test("ring-offset-white sets --tw-ring-offset-color", () => {
+    const css = cssFor("ring-offset-white");
+    expect(css).toContain("--tw-ring-offset-color: #ffffff");
   });
 });

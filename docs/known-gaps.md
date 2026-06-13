@@ -970,13 +970,17 @@ The `const <state>` deep-freeze debate (S134) ratified a **sequenced** verdict: 
 
 Major families shipped S108-S109: grid / flex / aspect / transition / timing / individual transforms + shorthand + directional / outline / ring (length/color/var/keyword). The `W-TAILWIND-UNRECOGNIZED-CLASS` floor lint catches typos + unsupported arbitrary-values today.
 
-**Still open:**
-- **`ring-offset-*`** + **`bg-gradient-*` / `from-*` / `to-*` / `via-*`** — require Tailwind's preflight `*, ::before, ::after` custom-property layer (`--tw-ring-offset-shadow` / `--tw-ring-shadow` / `--tw-gradient-stops`). scrml has no preflight CSS emission infrastructure.
-- **String-shaped arbitrary values** — `content-["text"]` + `font-[Inter]` need bracket-parser extension.
-- **Safelist / `@apply`** — to distinguish custom user-defined classes from typos so the lint is precise on mixed Tailwind+custom-CSS codebases.
+**APPROACH RULED S191 = C (inline `var()` fallbacks, NO global `*,::before,::after` defaults block).** Deep-dive `scrml-support/docs/deep-dives/tailwind-preflight-css-2026-06-13.md`; data-first byte-validated (A/B block = 824B fixed/file; C wins everywhere realistic; preserves §26.1 minimalism + correctness). SPEC §26.7 documents the composing model. Phased: P1 ring/shadow (DONE) → P2 gradient (**closes filed scope**) → P3 transform → P4 filter/backdrop.
 
-- **Workaround:** drop a `#{}` CSS shim block with the rules written by hand.
-- **Status:** preflight blocker is the load-bearing piece; ring-offset + gradient unblock together when preflight infrastructure lands. Filed S108-S109; queued.
+**Phase 1 LANDED S191** (ring / ring-offset / shadow, C-style): `ring-{0,1,2,4,8}` + bare `ring` + `ring-inset` + `ring-offset-{w}` + `ring-{color}` named utils + arbitrary `ring-[w]`/`ring-[color]` + `shadow-*` all emit the inline-fallback `box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow, 0 0 #0000)` shorthand → COMPOSE (no more single-property last-write-wins). Default ring color = `currentColor` (user-ratified scrml-divergence from TW blue-500). PA consistency fix: arbitrary `ring-[<width>]` was left single-property by the agent (brief ambiguity) → PA-direct'd to C-style (reuses `ringShadowSetter`/`BOX_SHADOW_COMPOSE`) so it composes like named `ring-{w}`. +11 agent tests +§1/§7 width-form updates; §6 ring-offset guard inverted. PA-R26: `ring-2 ring-offset-2 shadow-lg` + `ring-[3px] shadow-lg` compose, 0 single-property collisions.
+
+**Still open (subsequent phases + sub-arcs):**
+- **Phase 2 — `bg-gradient-*` / `from-*` / `to-*` / `via-*`** (the other filed bug-1 family; closes filed scope). Phase 3 — transform (behavior-change: current translate/scale/rotate use modern individual CSS props, not `--tw-*` vars). Phase 4 — filter/backdrop. All C-style under §26.7.
+- **String-shaped arbitrary values** — `content-["text"]` + `font-[Inter]` need bracket-parser extension. SEPARATE arc (out of the preflight deep-dive).
+- **Safelist / `@apply`** — lint precision for custom-vs-typo classes. SEPARATE arc.
+
+- **Workaround (for not-yet-landed phases):** drop a `#{}` CSS shim block with the rules written by hand.
+- **Status:** Phase 1 LANDED S191. Gradient (Phase 2) next closes the filed scope. String-shaped + safelist remain separate smaller arcs.
 
 ---
 

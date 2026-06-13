@@ -542,6 +542,87 @@ function registerBorders() {
 // Effects: shadow, opacity
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Composing box-shadow family (ring / ring-offset / shadow) — Approach C.
+//
+// SPEC §26.7. The ring/ring-offset/shadow utilities compose a SINGLE
+// `box-shadow` from three independent custom properties instead of each
+// writing its own single-property `box-shadow` (which last-write-wins and
+// obliterates siblings — the bug-1 blocker). Every ring/shadow utility that
+// participates emits BOX_SHADOW_COMPOSE; the per-utility setters fill one
+// `--tw-*` var each.
+//
+// INLINE `var()` FALLBACKS (the Approach-C minimalism choice): the shorthand
+// carries `, 0 0 #0000` defaults inline, so an element with ONLY `ring-2` (no
+// `shadow-*`) resolves `var(--tw-shadow, 0 0 #0000)` to a transparent layer —
+// no global `*, ::before, ::after` preflight defaults block is needed. This
+// preserves the §26.1/§26.2 "only what's used" minimalism axiom (mirrors the
+// existing `space-x-reverse` self-fallback precedent at registry line ~189).
+//
+// `--tw-ring-inset` has NO fallback (its absence yields a non-inset ring,
+// which is the correct default) — matching Tailwind v3's empty `--tw-ring-inset: ;`.
+// ---------------------------------------------------------------------------
+
+// The composing shorthand emitted by EVERY ring/ring-offset/shadow utility.
+const BOX_SHADOW_COMPOSE =
+  "box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow, 0 0 #0000)";
+
+// The `--tw-ring-shadow` setter body for a given ring WIDTH (px or a CSS
+// length). Shared by the named ring scale and the arbitrary `ring-[<len>]`
+// width form. `var(--tw-ring-inset,)` resolves to the inset keyword when
+// `ring-inset` is present, else empty. The width adds `--tw-ring-offset-width`
+// so a ring sits OUTSIDE any offset. Color defaults to `currentColor` (scrml
+// divergence from Tailwind v3's blue-500/50 — see §26.7 + §2-§4 ring tests).
+function ringShadowSetter(width) {
+  return `--tw-ring-shadow: var(--tw-ring-inset,) 0 0 0 calc(${width} + var(--tw-ring-offset-width, 0px)) var(--tw-ring-color, currentColor)`;
+}
+
+// ---------------------------------------------------------------------------
+// Ring / ring-offset / ring-inset / ring-color (named utilities, §26.7).
+// ---------------------------------------------------------------------------
+
+function registerRing() {
+  // ring-{width} — named widths. Bare `ring` == ring-3px (Tailwind's default).
+  // Each sets --tw-ring-shadow and emits the composing shorthand.
+  const RING_WIDTHS = { "0": "0px", "1": "1px", "2": "2px", "4": "4px", "8": "8px" };
+  registry.set("ring", `.ring { ${ringShadowSetter("3px")}; ${BOX_SHADOW_COMPOSE} }`);
+  for (const [k, px] of Object.entries(RING_WIDTHS)) {
+    registry.set(`ring-${k}`, `.ring-${k} { ${ringShadowSetter(px)}; ${BOX_SHADOW_COMPOSE} }`);
+  }
+
+  // ring-inset — sets the inset keyword var consumed by the ring setters above.
+  registry.set("ring-inset", ".ring-inset { --tw-ring-inset: inset }");
+
+  // ring-offset-{width} — sets the offset width + the offset shadow var (a
+  // solid ring in the offset color that sits between the element and the ring).
+  const RING_OFFSET_WIDTHS = { "0": "0px", "1": "1px", "2": "2px", "4": "4px", "8": "8px" };
+  for (const [k, px] of Object.entries(RING_OFFSET_WIDTHS)) {
+    registry.set(
+      `ring-offset-${k}`,
+      `.ring-offset-${k} { --tw-ring-offset-width: ${px}; --tw-ring-offset-shadow: var(--tw-ring-inset,) 0 0 0 ${px} var(--tw-ring-offset-color, #fff); ${BOX_SHADOW_COMPOSE} }`,
+    );
+  }
+
+  // ring-{color}-{shade} and ring-offset-{color}-{shade} — set the color vars
+  // consumed by the ring / offset setters. These do NOT emit the shorthand
+  // (a color alone draws no ring; pairing with `ring-{w}` does).
+  for (const [colorName, shades] of Object.entries(COLOR_PALETTE)) {
+    for (const shade of COLOR_SHADES) {
+      const hex = shades[shade];
+      if (!hex) continue;
+      registry.set(`ring-${colorName}-${shade}`, `.ring-${colorName}-${shade} { --tw-ring-color: ${hex} }`);
+      registry.set(`ring-offset-${colorName}-${shade}`, `.ring-offset-${colorName}-${shade} { --tw-ring-offset-color: ${hex} }`);
+    }
+  }
+  // Special ring / ring-offset colors.
+  registry.set("ring-white", ".ring-white { --tw-ring-color: #ffffff }");
+  registry.set("ring-black", ".ring-black { --tw-ring-color: #000000 }");
+  registry.set("ring-transparent", ".ring-transparent { --tw-ring-color: transparent }");
+  registry.set("ring-offset-white", ".ring-offset-white { --tw-ring-offset-color: #ffffff }");
+  registry.set("ring-offset-black", ".ring-offset-black { --tw-ring-offset-color: #000000 }");
+  registry.set("ring-offset-transparent", ".ring-offset-transparent { --tw-ring-offset-color: transparent }");
+}
+
 function registerEffects() {
   const SHADOWS = {
     "sm": "0 1px 2px 0 rgb(0 0 0 / 0.05)",
@@ -554,9 +635,13 @@ function registerEffects() {
     "none": "0 0 #0000",
   };
 
+  // shadow-{size} sets --tw-shadow and emits the composing shorthand (§26.7),
+  // so a shadow stacks WITH any ring on the same element instead of one
+  // single-property `box-shadow` clobbering the other. shadow-none sets the
+  // var to the transparent layer (`0 0 #0000`).
   for (const [k, v] of Object.entries(SHADOWS)) {
     const cls = k ? `shadow-${k}` : "shadow";
-    registry.set(cls, `.${escapeCssClass(cls)} { box-shadow: ${v} }`);
+    registry.set(cls, `.${escapeCssClass(cls)} { --tw-shadow: ${v}; ${BOX_SHADOW_COMPOSE} }`);
   }
 
   // Opacity
@@ -1209,46 +1294,45 @@ const ARBITRARY_DECL_TRANSFORM = {
   "rotate-z": (v) => `transform: rotateZ(${v.css})`,
   "skew-x":   (v) => `transform: skewX(${v.css})`,
   "skew-y":   (v) => `transform: skewY(${v.css})`,
-  // Ring — single-property emit, kind-dispatched (S109 Bug 1 partial closure).
+  // Ring (arbitrary value) — Approach C, kind-dispatched (§26.7).
   //
-  //   `ring-[3px]`         -> `box-shadow: 0 0 0 3px currentColor`     (length)
-  //   `ring-[2.5rem]`      -> `box-shadow: 0 0 0 2.5rem currentColor`  (length)
-  //   `ring-[#ff0000]`     -> `box-shadow: 0 0 0 3px #ff0000`          (color → default 3px width)
-  //   `ring-[red]`         -> `box-shadow: 0 0 0 3px red`              (color keyword)
-  //   `ring-[var(--c)]`    -> `box-shadow: 0 0 0 3px var(--c)`         (var defaults to color)
-  //   `ring-[currentColor]`-> `box-shadow: 0 0 0 3px currentColor`     (keyword)
+  //   `ring-[3px]`         -> `box-shadow: 0 0 0 3px currentColor`     (length — width-only form, kept)
+  //   `ring-[2.5rem]`      -> `box-shadow: 0 0 0 2.5rem currentColor`  (length — width-only form, kept)
+  //   `ring-[#ff0000]`     -> `--tw-ring-color: #ff0000` + compose shorthand   (color → C-style)
+  //   `ring-[red]`         -> `--tw-ring-color: red` + compose shorthand        (color keyword)
+  //   `ring-[var(--c)]`    -> `--tw-ring-color: var(--c)` + compose shorthand   (var → color)
+  //   `ring-[currentColor]`-> `--tw-ring-color: currentColor` + compose shorthand (keyword)
   //
-  // Length values set the ring width with color = currentColor. Color/var/
-  // color-keyword values use a 3px default width (matches Tailwind's named
-  // `ring` utility = `ring-3`).
+  // LENGTH form: keeps the single-property `box-shadow: 0 0 0 <w> currentColor`
+  // width-only emit (an arbitrary ring WIDTH with no companion color is a
+  // self-contained ring — there is no second var to compose with, and keeping
+  // the literal preserves the §1-§4 ring-family golden tests).
   //
-  // KNOWN LIMITATIONS (deferred per S109 Bug 1 partial closure — `docs/known-gaps.md`):
-  //   - `ring-offset-[N]` is NOT supported. Tailwind's offset machinery requires
-  //     the `--tw-ring-offset-shadow` + `--tw-ring-shadow` custom-property layer
-  //     emitted as preflight on `*, ::before, ::after`. scrml has no preflight
-  //     emission infrastructure yet (filed as deferred follow-on).
-  //   - `ring-inset` is NOT supported (Tailwind v3 named utility; not arbitrary-value).
-  //   - composing `ring-[N]` with `shadow-[...]` overwrites — last `box-shadow:`
-  //     declaration wins per CSS class order. Tailwind's `*, ::before, ::after`
-  //     preflight is the layer that lets `box-shadow: var(--tw-ring-offset-shadow),
-  //     var(--tw-ring-shadow), var(--tw-shadow)` compose at runtime; without
-  //     that preflight, scrml emits single-property `box-shadow` and last-write-wins.
+  // COLOR / var / keyword form: Approach C — set `--tw-ring-color` and emit the
+  // composing `box-shadow` shorthand (BOX_SHADOW_COMPOSE), so an arbitrary ring
+  // color COMPOSES with a named `shadow-*` / `ring-{w}` on the same element
+  // instead of one single-property `box-shadow` clobbering the other (the bug-1
+  // blocker). The default ring color when no `ring-{w}` width is present is
+  // 3px (Tailwind's `ring` default) via `--tw-ring-shadow`; pairing with a
+  // named `ring-{w}` overrides the width. Default color = `currentColor`
+  // (scrml divergence from Tailwind v3 blue-500/50 — see §26.7).
   //
-  // The companion `bg-gradient-*` / `from-*` / `to-*` / `via-*` family is NOT
-  // implemented for the same reason (multi-utility coordination via custom
-  // properties on `*, ::before, ::after`). Documented in `docs/known-gaps.md`.
+  // The companion `bg-gradient-*` / `from-*` / `to-*` / `via-*` family is
+  // Phase 2 of the composing-family arc (still deferred — `docs/known-gaps.md`).
   "ring": (v) => {
     if (v.kind === "length" || v.kind === "number") {
-      return `box-shadow: 0 0 0 ${v.css} currentColor`;
+      // Width form — C-style so `ring-[<width>]` COMPOSES with shadow-* / ring-color
+      // (S191 consistency fix: was single-property `box-shadow: 0 0 0 <w> currentColor`,
+      // which collided with shadow-* last-write-wins, unlike named `ring-{w}`). Reuses
+      // the same ringShadowSetter + BOX_SHADOW_COMPOSE as the named ring utilities.
+      return `${ringShadowSetter(v.css)}; ${BOX_SHADOW_COMPOSE}`;
     }
     if (v.kind === "color" || v.kind === "var" || v.kind === "keyword") {
-      return `box-shadow: 0 0 0 3px ${v.css}`;
+      // C-style: set the ring color var, default to a 3px ring, and compose.
+      return `--tw-ring-color: ${v.css}; ${ringShadowSetter("3px")}; ${BOX_SHADOW_COMPOSE}`;
     }
-    // list / ratio / url / unknown — emit something sensible (length-shape
-    // fallback). Lists like `ring-[3px_red]` would arrive as kind "list" and
-    // composing the full multi-value box-shadow at this layer isn't supported
-    // yet — caller's validation will already have rejected list-shape via the
-    // single-token requirement in tryArbitraryValuePrefix below.
+    // list / ratio / url / unknown — length-shape width-only fallback (lists
+    // are rejected upstream by the single-token requirement).
     return `box-shadow: 0 0 0 ${v.css} currentColor`;
   },
 };
@@ -2423,5 +2507,6 @@ registerTypography();
 registerColors();
 registerBorders();
 registerEffects();
+registerRing();
 registerLayout();
 registerProse();
