@@ -1,0 +1,11 @@
+<program>
+  ${
+    import { schemaFor } from 'scrml:data'
+    type Driver:struct = { id: integer, name: string }
+  }
+  <db src="m.db" tables="ghosts"/>
+  <schema>
+    ${ schemaFor(Driver) }
+  </>
+  <p>x</p>
+</program>

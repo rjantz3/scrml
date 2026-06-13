@@ -1,0 +1,22 @@
+<program>
+  ${
+    import { schemaFor } from 'scrml:data'
+    type Driver:struct = {
+      id: integer,
+      email: string,
+      name: string req length(>=2),
+      age: number min(18) max(120)
+    }
+  }
+  <db src="q.db" tables="drivers"/>
+  <schema>
+    ${ schemaFor(Driver) }
+  </>
+  ${
+    server function loadNames() {
+      let rows = ?{ SELECT name, age FROM drivers }.all()
+      return rows
+    }
+  }
+  <p>ok</p>
+</program>

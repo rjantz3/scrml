@@ -1,0 +1,4 @@
+<program>
+  <db src="x.db" tables="ghosts"/>
+  <p>no schema for ghosts</p>
+</program>

@@ -1,0 +1,10 @@
+<program>
+  <db src="t2.db" tables="drivers"/>
+  <schema>
+    drivers {
+      id: integer primary key
+      name: text
+    }
+  </>
+  <p>schema generated</p>
+</program>

@@ -15,8 +15,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 0 |
-| MED | 9 |
+| HIGH | 1 |
+| MED | 8 |
 | LOW | 17 |
 | Nominal (spec-ahead-of-impl) | 9 |
 <!-- @generated:gap-counts END -->
@@ -1803,6 +1803,29 @@ Fix SCOPE/BRIEF/reproducers at `docs/changes/errarm-refail-lowering-2026-06-11/`
 
 ---
 
+### G-CHANNEL-PUBLISHER-SERVER-CELL-READ — the CANONICAL channel publisher idiom (`@channelCell = [...@channelCell, x]`, PRIMER §9.1) crashes server-side: a server-escalated publisher reads the channel cell from an EMPTY request body → `[...undefined]` runtime throw — `NEW S189; HIGH; codegen/route-inference × §38.4 × Trigger-7 model`
+<!-- @gap id=g-channel-publisher-server-cell-read sev=HIGH status=open -->
+
+**Surfaced S189 while scoping `g-channel-onserver-cell-read` (verify-all-the-way-down per the S188 disambiguation lesson).** The filed onserver gap framed itself as "only the NON-canonical onserver-handler-reads-a-cell pattern bites; the canonical publisher form is correct." **That premise is WRONG.** The CANONICAL channel publisher idiom — `function postMessage(...) { @messages = [...@messages, x] }` (PRIMER §9.1, the documented flagship channel pattern) — ALSO crashes server-side, for the SAME root, more seriously.
+
+**Root (empirically confirmed, 3 sources).** A channel publisher that writes a channel cell escalates to a server fn (§12.2 **Trigger 7**, channel-cell-write / broadcast — landed S180). The escalated server fn lowers the channel-cell READ inside the read-modify-write to `_scrml_body["<cell>"]`. But the client fetch stub serializes only the fn ARGS into the request body — NEVER the channel cell (§38.4: channel state is client-held; there is NO server-authoritative cell store). So `_scrml_body["<cell>"]` is **undefined** server-side, and `[...undefined, x]` throws `TypeError: undefined is not iterable` at runtime on first publish. Compiles clean, `node --check` clean, NO diagnostic.
+
+**Empirical (verify-before-claim):**
+- `examples/15-channel-chat.scrml` (the CANONICAL channel example) → `server.js`: `broadcast({ __type: "__sync", __key: "messages", __val: ([..._scrml_body["messages"], {...}]) })` — `_scrml_body` has only `{author, body}`; `["messages"]` undefined → crash.
+- `examples/23-trucking-dispatch/channels/dispatch-board.scrml` (the FLAGSHIP app) → `[..._scrml_body["boardEvents"], {...}]` — same crash.
+- `/tmp/df-channels/dispatch-board.scrml` (the onserver-gap repro) → `postUpdate` (publisher, line 47) AND `handleUpdate` (onserver, line 77) BOTH crash. (`examples/08-chat.scrml` is NOT affected — its `@messages` is a plain reactive cell, NOT a channel cell, so the append runs client-side.)
+
+**Classification (don't-soft-classify):** silent-compile + node-check-clean + runtime-throw on the CANONICAL idiom of a shipped flagship feature, affecting the canonical example + the flagship app → **HIGH**. Context the user should weight: channels are an unverified-end-to-end surface (no `VERIFIED.md` entry; examples need a running server) + no current adopters — so it is a LATENT high, not a live-user regression. But the severity of the defect itself is HIGH per the rule.
+
+**This couples to `g-channel-onserver-cell-read` (the (a) ruling) through the §38.4 model — needs a UNIFIED model ruling before either is fixed.** The fork:
+- **(A) Keep "no server channel store" (the (a)-onserver model) + fix the publisher to NOT round-trip the cell-read through the server.** Direction: a function whose only server-needing-reason is a channel-cell WRITE should keep the cell write CLIENT-side (the client has the cell → mutate locally → `__sync` broadcast relays it; the server is a dumb relay per `server.js` message() `if (d.__type === "__sync") { ws.publish(...); return }`). This RE-EXAMINES §12.2 Trigger 7a (S180): channel-cell-WRITE may NOT warrant server escalation (only `broadcast()`/`disconnect()` — Trigger 7b — genuinely need the server hub). Under (A), the onserver (a) diagnostic stands (onserver handlers run purely server-side, never have the cell). **PA lean.**
+- **(B) Server-authoritative channel mirror** (the heavy §38.4 change): give the server channel state. Then BOTH publisher read-modify-write AND onserver reads become DEFINED → the (a) onserver diagnostic becomes WRONG. Bigger model change; contradicts client-held.
+- **(C) Client threads the cell value into the publisher request body** — wasteful (ships the whole array each call), and onserver handlers (no client request) still can't → keeps (a). Middle option.
+
+**Fix loci (for whichever direction):** `compiler/src/route-inference.ts` (Trigger 7 `detectChannelBroadcastReason` / channel-cell-write escalation), `compiler/src/codegen/emit-channel.ts` (publisher lowering), `compiler/src/codegen/emit-server.ts` / `emit-functions.ts` (the `_scrml_body[cell]` read lowering). SPEC §38.4 / §12.2 Trigger 7 / §38.6. Repros above. Cross-ref [[g-channel-onserver-cell-read]] (the coupled onserver instance — same root).
+
+---
+
 ### G-CHANNEL-SPEC-38-9-STALE — §38.9 error-code table + §38.2/§38.3.1 bare-vs-quoted reconnect are SPEC-internally inconsistent post-v0.3-reversal — `NEW S186; LOW; SPEC doc`
 <!-- @gap id=g-channel-spec-38-9-stale sev=LOW status=open -->
 
@@ -1817,10 +1840,12 @@ Fix SCOPE/BRIEF/reproducers at `docs/changes/errarm-refail-lowering-2026-06-11/`
 
 ---
 
-### G-SCHEMAFOR-PA-UNRECOGNIZED — `schemaFor`-generated `<schema>` DDL is invisible to the protect-analyzer → false `E-PA-002` on the canonical §41.15 Form-B when no db file pre-exists — `NEW S186; MED; stage-ordering`
-<!-- @gap id=g-schemafor-pa-unrecognized sev=MED status=open -->
+### G-SCHEMAFOR-PA-UNRECOGNIZED — `schemaFor`-generated `<schema>` DDL is invisible to the protect-analyzer → false `E-PA-002` on the canonical §41.15 Form-B when no db file pre-exists — `RESOLVED S189 (PA-side Form-B recognition)`
+<!-- @gap id=g-schemafor-pa-unrecognized sev=MED status=resolved -->
 
 **Surfaced S186 dog-food (schema §39 / L22 `schemaFor`).** The canonical §41.15 Form-B usage — `<schema> ${ schemaFor(Driver) } </>` (the function-call form ratified at OQ-SCH-1; "define a struct → get the SQL schema without writing DDL") — fires `E-PA-002` ("Database file `…` does not exist and no CREATE TABLE statement was found … for table `drivers`") whenever the db file does NOT pre-exist (the common dev / first-run case). **Isolated (verify-before-claim):** a LITERAL `<schema> drivers { … } </>` block with the identical no-db-file setup compiles CLEAN — the protect-analyzer recognizes a literal `<schema>` table-block as a table-definition source (satisfying E-PA-002) but does NOT recognize a `schemaFor`-generated one. **Root (stage-ordering):** the protect-analyzer (`protect-analyzer.ts`, an early pipeline stage) scans for table-definition sources BEFORE the L22 `schemaFor` codegen expansion (`emit-schema-for.ts`, codegen stage); at PA time the `<schema>` body is still the unexpanded `${ schemaFor(Driver) }` interpolation, so PA sees no `drivers` table-block → E-PA-002. Table name is NOT the issue — `schemaFor` pluralizes per §41.15.2 (`Driver`→`drivers`), matching `<db tables="drivers">`; both the plural and singular `tables=` forms fire. **Severity MED** — it false-fires on the canonical Form-B of a SHIPPED flagship-adjacent L22 member (schemaFor, S104) and undercuts its whole value-prop (you still need the db file to pre-exist OR a literal CREATE TABLE in a `?{}`, defeating "no DDL"). Workaround: pre-create the db file, or use a literal `<schema>` block (but then schemaFor is pointless). **Fix direction:** teach the protect-analyzer to recognize a `${ schemaFor(StructType) }` interpolation inside `<schema>` as a table-definition source for the pluralized table name (resolve the struct + its §41.15.2 table name at PA time, without needing the full codegen expansion) — OR run the table-source-discovery after schemaFor expansion. Repros: `/tmp/df-schema/schemafor.scrml` + `sf2.scrml` (E-PA-002) vs `schema2.scrml` (literal `<schema>`, clean) — all with no db file present.
+
+**RESOLVED S189 (`g-schemafor-pa-unrecognized-2026-06-12`, agent `aab252e80c605044c`, FINAL_SHA `13ea8e7e`, PA-landed via file-delta).** Fix locus = the brief's recommended PA-side recognition (no stage reorder). `protect-analyzer.ts` gains a FOURTH (lowest-precedence) ColumnDef source: `extractSchemaForCreateTableStatements` resolves `schemaFor` import-locals (alias-aware), builds a struct-name→raw registry from `type-decl` nodes (both available at the PA stage), walks `<schema>` block children for `schemaFor(Struct)` calls, pluralizes per §41.15.2 (local mirror with a keep-in-sync comment to `emit-schema-for.ts`), synthesizes a literal-`<schema>`-shaped body, and feeds it through the SAME `parseSchemaBlock` + `generateCreateTable` lowering as the literal path — so the shadow-DB columns are byte-consistent with the literal form, no schemaFor-codegen duplication. Lowest-precedence wire-in (`if (!createTableMap.has(tableKey))`) — never overrides a `?{}`-harvested or literal-`<schema>` table. Robust fall-through (unresolved struct / unparseable body / zero columns → skip → existing missing-table behavior). Guard `if (schemaForLocals.size === 0) return` so a user's own `schemaFor` (no `scrml:data` import) is not assumed ours. **PA-independent R26 (S138 dual-verify) at landing:** case 1 Form-B no-db → CLEAN (E-PA-002 gone); case 2 literal control → CLEAN (no regression); case 3 genuine-missing → E-PA-002 STILL fires; case 4 mismatch `schemaFor(Driver)` + `tables="ghosts"` → E-PA-002 fires precisely for `ghosts` (only `drivers` registered — no over-suppression). +158-line regression test (6/6). Pre-commit subset green.
 
 ---
 

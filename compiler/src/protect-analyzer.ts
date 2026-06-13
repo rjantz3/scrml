@@ -530,6 +530,211 @@ function extractSchemaCreateTableStatements(nodes: ASTNode[]): Map<string, strin
 }
 
 // ---------------------------------------------------------------------------
+// g-schemafor-pa-unrecognized — Form-B `schemaFor(StructType)` inside `< schema>`
+// as a fourth ColumnDef source (§41.15, §41.15.2)
+// ---------------------------------------------------------------------------
+
+/**
+ * §41.15.2 pluralization — "lowercase the identifier; append `s` unless it
+ * already ends in `s`". Local mirror of `pluralizeStructName` in
+ * `codegen/emit-schema-for.ts` (kept here so the early PA stage does not pull a
+ * codegen module). KEEP IN SYNC with §41.15.2 / emit-schema-for.ts.
+ *
+ *   "Driver" -> "drivers"   "User" -> "users"   "News" -> "news"
+ */
+function paPluralizeStructName(structName: string): string {
+  if (!structName) return structName;
+  const lower = structName.toLowerCase();
+  return lower.endsWith("s") ? lower : lower + "s";
+}
+
+/**
+ * Split a struct-body field list on TOP-LEVEL commas (commas not nested inside
+ * `()` / `[]` / `{}`). The struct `raw` carried on a `type-decl` node is the
+ * brace-wrapped field list, e.g.
+ *   `{ id : integer , name : string req length ( >= 2 ) , age : number min(18) }`
+ * Validator clauses (`length(>=2)`, `oneOf([.A,.B])`) carry internal commas, so
+ * a naive `split(",")` would shred them.
+ */
+function splitStructFieldsTopLevel(body: string): string[] {
+  const fields: string[] = [];
+  let depth = 0;
+  let cur = "";
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}") depth = Math.max(0, depth - 1);
+    if (ch === "," && depth === 0) {
+      fields.push(cur);
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur.trim().length > 0) fields.push(cur);
+  return fields;
+}
+
+/**
+ * F-SCHEMA-001 companion — recognize the canonical §41.15 Form-B
+ * `< schema> ${ schemaFor(StructType) } </>` usage as a table-definition source.
+ *
+ * Why this exists: the F-SCHEMA-001 path (`extractSchemaCreateTableStatements`)
+ * reads only the LITERAL `text`-kind children of a `< schema>` block. The Form-B
+ * surface puts a `${ schemaFor(Driver) }` logic-escape interpolation in the
+ * block body instead — the L22 codegen expansion (`emit-schema-for.ts`) runs in
+ * the CODEGEN stage, long AFTER this early PA stage, so at PA time the body is
+ * still the unexpanded call and `parseSchemaBlock` sees no table. Result: a
+ * FALSE `E-PA-002` ("no CREATE TABLE … for table `drivers`") whenever the db
+ * file does not pre-exist (the common first-run / dev case), even though the
+ * literal-`< schema>` equivalent compiles clean.
+ *
+ * Fix (PA-side recognition): resolve each `schemaFor(StructType)` call in a
+ * `< schema>` block to the struct's `type-decl`, pluralize per §41.15.2, and
+ * synthesize a `< schema>`-shaped table body (`< plural> { <struct fields> }`)
+ * that we feed through the SAME literal-path lowering (`parseSchemaBlock` +
+ * `generateCreateTable`). This gives the shadow DB the same columns the literal
+ * form would, so E-PA-002 does not false-fire AND the generated table type is
+ * available downstream — without duplicating the full schemaFor lowering.
+ *
+ * Robustness: if the struct can't be resolved (forward-ref / unresolved import)
+ * or the synthesized body yields no columns, we skip that call and fall through
+ * to the existing behavior (a genuinely missing table still errors). Returns a
+ * `Map<tableName (lowercased), CREATE TABLE SQL>`.
+ */
+function extractSchemaForCreateTableStatements(nodes: ASTNode[]): Map<string, string> {
+  const result = new Map<string, string>();
+
+  // 1. Local names bound to `schemaFor` via `import { schemaFor } from "scrml:data"`
+  //    (supports aliasing: `import { schemaFor as sf }`). If no scrml:data import
+  //    is present we make NO assumption — an undefined `schemaFor` is not ours.
+  const schemaForLocals = new Set<string>();
+  // 2. Struct registry: struct type-name -> raw brace-wrapped field-list body.
+  const structRaw = new Map<string, string>();
+
+  const collect = (value: unknown, depth: number): void => {
+    if (value === null || typeof value !== "object" || depth > 64) return;
+    if (Array.isArray(value)) {
+      for (const item of value) collect(item, depth + 1);
+      return;
+    }
+    const node = value as Record<string, unknown>;
+    if (node.kind === "import-decl" && node.source === "scrml:data") {
+      const specifiers = node.specifiers as Array<{ imported?: string; local?: string }> | undefined;
+      if (Array.isArray(specifiers)) {
+        for (const spec of specifiers) {
+          if (spec && spec.imported === "schemaFor" && typeof spec.local === "string") {
+            schemaForLocals.add(spec.local);
+          }
+        }
+      } else if (Array.isArray(node.names) && (node.names as unknown[]).includes("schemaFor")) {
+        schemaForLocals.add("schemaFor");
+      }
+    }
+    if (node.kind === "type-decl" && node.typeKind === "struct" &&
+        typeof node.name === "string" && typeof node.raw === "string") {
+      // First declaration of a struct name wins (a later duplicate is a separate
+      // E-TYPE-001 concern; PA just needs one resolvable body).
+      if (!structRaw.has(node.name)) structRaw.set(node.name, node.raw);
+    }
+    for (const key of Object.keys(node)) {
+      if (key === "span" || key.startsWith("_")) continue;
+      collect(node[key], depth + 1);
+    }
+  };
+  collect(nodes, 0);
+
+  if (schemaForLocals.size === 0) return result;
+
+  // Extract the struct-arg name from a `schemaFor(Struct[, options])` call node.
+  const schemaForStructArg = (exprNode: unknown): string | null => {
+    if (!exprNode || typeof exprNode !== "object") return null;
+    const call = exprNode as { kind?: string; callee?: { kind?: string; name?: string }; args?: unknown[] };
+    if (call.kind !== "call" || !call.callee || call.callee.kind !== "ident") return null;
+    if (typeof call.callee.name !== "string" || !schemaForLocals.has(call.callee.name)) return null;
+    const firstArg = Array.isArray(call.args) ? call.args[0] : undefined;
+    const arg = firstArg as { kind?: string; name?: string } | undefined;
+    if (!arg || arg.kind !== "ident" || typeof arg.name !== "string") return null;
+    return arg.name;
+  };
+
+  // Resolve a struct name to a synthesized CREATE TABLE for its pluralized table,
+  // reusing the literal-`< schema>` lowering. Returns null on any failure so the
+  // caller can fall through to the existing missing-table behavior.
+  const synthCreateTable = (structName: string): { key: string; sql: string } | null => {
+    const raw = structRaw.get(structName);
+    if (typeof raw !== "string") return null; // unresolved struct — fall through
+    // Strip the outer braces from the struct raw body, split fields on top-level
+    // commas, and re-join with newlines so `parseColumns` (which splits on `\n`)
+    // sees one field per line.
+    let body = raw.trim();
+    if (body.startsWith("{")) body = body.slice(1);
+    if (body.endsWith("}")) body = body.slice(0, -1);
+    const fields = splitStructFieldsTopLevel(body)
+      .map((f) => f.trim())
+      .filter((f) => f.length > 0);
+    if (fields.length === 0) return null;
+    const tableName = paPluralizeStructName(structName);
+    // A `< schema>`-shaped table block: `< plural> {\n  field: type preds\n  ... }`.
+    const schemaBody = `${tableName} {\n${fields.join("\n")}\n}`;
+    let parsed: { tables: Array<{ name: string; columns: unknown[] }> };
+    try {
+      parsed = parseSchemaBlock(schemaBody) as typeof parsed;
+    } catch {
+      return null;
+    }
+    const table = (parsed.tables ?? [])[0];
+    if (!table || typeof table.name !== "string" ||
+        !Array.isArray(table.columns) || table.columns.length === 0) {
+      return null; // no resolvable columns — fall through
+    }
+    try {
+      return { key: tableName.toLowerCase(), sql: generateCreateTable(table) };
+    } catch {
+      return null;
+    }
+  };
+
+  // Walk `< schema>` blocks for `schemaFor(Struct)` calls in their logic-escape
+  // children and register the synthesized table.
+  const visitSchemaCall = (value: unknown, depth: number): void => {
+    if (value === null || typeof value !== "object" || depth > 64) return;
+    const structName = schemaForStructArg((value as { exprNode?: unknown }).exprNode);
+    if (structName) {
+      const synth = synthCreateTable(structName);
+      if (synth && !result.has(synth.key)) result.set(synth.key, synth.sql);
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) visitSchemaCall(item, depth + 1);
+      return;
+    }
+    const node = value as Record<string, unknown>;
+    for (const key of Object.keys(node)) {
+      if (key === "span" || key.startsWith("_")) continue;
+      visitSchemaCall(node[key], depth + 1);
+    }
+  };
+
+  const visitSchemaBlocks = (value: unknown, depth: number): void => {
+    if (value === null || typeof value !== "object" || depth > 64) return;
+    if (Array.isArray(value)) {
+      for (const item of value) visitSchemaBlocks(item, depth + 1);
+      return;
+    }
+    const node = value as Record<string, unknown>;
+    if (node.kind === "state" && node.stateType === "schema") {
+      visitSchemaCall(node.children, 0);
+    }
+    for (const key of Object.keys(node)) {
+      if (key === "span" || key.startsWith("_")) continue;
+      visitSchemaBlocks(node[key], depth + 1);
+    }
+  };
+  visitSchemaBlocks(nodes, 0);
+
+  return result;
+}
+// ---------------------------------------------------------------------------
 // DB resolution helper (real file vs shadow)
 // ---------------------------------------------------------------------------
 
@@ -692,6 +897,19 @@ export function runPA(input: PAInput): { protectAnalysis: ProtectAnalysis; error
       // generated table types without bootstrapping a throwaway `.db`.
       const schemaCreateTableMap = extractSchemaCreateTableStatements(nodes);
       for (const [tableKey, createSql] of schemaCreateTableMap) {
+        if (!createTableMap.has(tableKey)) createTableMap.set(tableKey, createSql);
+      }
+
+      // g-schemafor-pa-unrecognized — FOURTH (lowest-precedence) ColumnDef
+      // source: recognize the canonical §41.15 Form-B
+      // `< schema> ${ schemaFor(StructType) } </>` usage as a table-definition
+      // source so it does not false-fire E-PA-002 (the L22 schemaFor codegen
+      // expansion runs in the CG stage, long after this PA stage — at PA time
+      // the `< schema>` body is still the unexpanded interpolation). Only fills
+      // a table that neither a `?{}`-harvested CREATE TABLE nor a literal
+      // `< schema>` DDL block already defined.
+      const schemaForCreateTableMap = extractSchemaForCreateTableStatements(nodes);
+      for (const [tableKey, createSql] of schemaForCreateTableMap) {
         if (!createTableMap.has(tableKey)) createTableMap.set(tableKey, createSql);
       }
 

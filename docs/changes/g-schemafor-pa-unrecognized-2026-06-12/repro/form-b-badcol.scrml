@@ -1,0 +1,17 @@
+<program>
+  ${
+    import { schemaFor } from 'scrml:data'
+    type Driver:struct = { id: integer, name: string }
+  }
+  <db src="b.db" tables="drivers"/>
+  <schema>
+    ${ schemaFor(Driver) }
+  </>
+  ${
+    server function bad() {
+      let rows = ?{ SELECT nonexistent_col FROM drivers }.all()
+      return rows
+    }
+  }
+  <p>x</p>
+</program>
