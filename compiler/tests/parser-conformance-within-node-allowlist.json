@@ -586,6 +586,14 @@
     "MISSING-FIELD": 25,
     "SPAN-COORD": 68
   },
+  "examples/28-flux.scrml": {
+    "COUNT-LENGTH": 1,
+    "EXTRA-FIELD": 111,
+    "FIELD-SHAPE": 197,
+    "KIND-NAME": 40,
+    "MISSING-FIELD": 325,
+    "SPAN-COORD": 806
+  },
   "samples/admin-panel.scrml": {
     "COUNT-LENGTH": 6,
     "EXTRA-FIELD": 103,
