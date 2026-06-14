@@ -176,6 +176,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 
 - [x][x] 01-hello (Tailwind), 02-counter (Tailwind, reactive), 04-live-search (Tailwind, reactive)
 - [x][x] 10-inline-tests (Tailwind), 14-mario-state-machine (Tailwind, fully interactive — machine, derived, match, if=)
+- [x][x] 28-flux (S193 — the "Flux" shifting-labyrinth dog-food game; derived ASCII board + fog + per-cell re-roll + 2-tier memory + level/vision/XP progression + seed-fixed goal/win; canonical scrml; runtime-sim test `compiler/tests/unit/28-flux-runtime-sim.test.js` 6/6; will replace 14-mario)
 - [x][ ] 05-multi-step-form — step components expand, onclick wiring fix landed, interactive testing incomplete
 - [x][ ] 06-kanban-board — compiles, renders, call-ref handler fixed (S13), needs interactive verification
 - [x][ ] 03-contact-book, 07-admin-dashboard, 08-chat — need running server

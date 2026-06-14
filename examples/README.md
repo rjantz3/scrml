@@ -58,6 +58,10 @@ bun compiler/src/cli.js compile examples/01-hello.scrml -o dist/
 | `22-multifile/` | `import`/`export` across .scrml files — pure-type files + component reuse (§21) |
 | `23-trucking-dispatch/` | Multi-page reference app (logistics dispatch) — multiple `<page>` files under `routes/`, full-stack with auth + DB + per-page server functions; canonical adopter-scale shape |
 | `24-tilde-pipeline.scrml` | `~` last-unbound-expression carry-forward — bare-call + next-line consume; function-body pipelines; no naming intermediates used once (§32) |
+| `25-triage-board.scrml` | Drag-and-drop triage board — enum lanes + reactive card moves |
+| `26-type-derived-schema.scrml` | `schemaFor(StructType)` — `<schema>` DB DDL generated from a struct (L22 type-as-argument family, §41.15) |
+| `27-type-derived-table.scrml` | `tableFor(StructType, rows)` — an admin `<table>` generated from a struct + rows (L22 family, §41.16) |
+| `28-flux.scrml` | **Flux** — a shifting-labyrinth game: a derived ASCII board, fog-of-war, per-cell re-roll ("flux"), 2-tier memory locking, and level/vision/XP progression. Canonical-scrml dog-food (§6.6 derived cells, §48 pure `fn`, §17/§18). Will replace `14-mario` as the flagship game example. |
 
 ---
 

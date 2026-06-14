@@ -23,7 +23,9 @@ The PA does NOT mark rows checked. PA's compile-tests are recorded in audit repo
 
 ---
 
-## Examples (22 files)
+## Examples (28 files)
+
+> NB — rows 23-27 are pending a VERIFIED sync (pre-existing gap); 28-flux added S193.
 
 | # | Example | Verified | Verified at | Notes |
 |---|---|---|---|---|
@@ -49,6 +51,7 @@ The PA does NOT mark rows checked. PA's compile-tests are recorded in audit repo
 | 20 | `20-middleware.scrml` | [ ] | — | NEW S42 — §40 `<program>` attrs + `handle()` |
 | 21 | `21-navigation.scrml` | [ ] | — | NEW S42 — §20 `navigate()` + `route` |
 | 22 | `22-multifile/app.scrml` | [ ] | — | NEW S42 — §21 cross-file imports + pure-type files. 3 files in subdir. |
+| 28 | `28-flux.scrml` | [ ] | — | NEW S193 — the Flux shifting-labyrinth game (dog-food; will replace 14-mario). Runtime-sim test at `compiler/tests/unit/28-flux-runtime-sim.test.js`. |
 
 ---
 
