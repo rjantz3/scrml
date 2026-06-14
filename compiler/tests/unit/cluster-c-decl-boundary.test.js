@@ -289,7 +289,7 @@ describe("Cluster-C Bug 2 — markup const over-consuming siblings", () => {
   const B = <div class="b">bb</div>
   <name> = "Ada"
 }
-<p>\${@name}</p>\${@A}\${@B}
+<p>\${@name}</p><A/><B/>
 </page>`;
     const ast = parseAST(src);
     expect(findDecl(ast, "component-def", "A")).toBeDefined();

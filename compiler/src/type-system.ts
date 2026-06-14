@@ -6236,8 +6236,61 @@ function checkLogicExprIdents(
     // here so a well-formed `~` consumption doesn't surface a duplicate /
     // misleading "undeclared identifier" diagnostic.
     if (raw === "~") return;
-    // Skip reactive refs — validated by the DG sweep.
-    if (raw.startsWith("@")) return;
+    // ----------------------------------------------------------------------
+    // S192 read-side E-STATE-UNDECLARED (bug-12-vkill, post-CE relocation).
+    // A `@name` read references a reactive cell. Previously this walker
+    // blanket-skipped every `@`-prefixed ident ("validated by the DG sweep"),
+    // which silently let `@typo` reads of UNDECLARED cells compile — the exact
+    // silent-bug class that produced the 7 flagship `@currentCustomerEvents`/
+    // `@currentDriverEvents` typos at S192. TS runs POST-CE and owns a complete
+    // `@name` resolution table (the SYM-stage prototype could not see CE-inlined
+    // channel cells / `<each>` row locals / engine boot cells; TS resolves all
+    // of them — verified Phase-0 S192, agent a6ddcb97). So we resolve the read
+    // here: a `reactive` (state cell / engine cell / markup-derived cell) OR a
+    // `variable` (the `<each>`/`<tableFor>` `as`-name loop local) OR an `import`
+    // binding resolves it. A miss on BOTH the sigil and the bare form, with no
+    // import binding, is a genuine undeclared-cell read — fire E-STATE-UNDECLARED.
+    if (raw.startsWith("@")) {
+      // §17.7.3 — `@.` / `@.field` is the `<each>`-only contextual iteration
+      // sigil. It is rewritten to the loop variable at codegen and validated
+      // by the dedicated E-SYNTAX-064 path (attribute walker); here we only
+      // need to NOT flag it as an undeclared cell.
+      if (raw === "@." || raw.startsWith("@.")) return;
+      // Strip the `@` sigil and the member-chain tail to recover the cell base.
+      const atBase = raw.includes(".")
+        ? raw.slice(1, raw.indexOf("."))
+        : raw.slice(1);
+      if (!atBase) return;
+      // Runtime helpers / underscore convention (`@_internal`) — never a typo.
+      if (atBase.startsWith("_")) return;
+      // Defensive: a `@TypeName` / `@fnName` read is not idiomatic, but if the
+      // base IS a declared type or known function name, exempt rather than fire
+      // a confusing undeclared-cell diagnostic (mirrors the bare-name guards).
+      if (typeRegistry.has(atBase)) return;
+      if (knownFnNames && knownFnNames.has(atBase)) return;
+      // Resolve via the post-CE scopeChain. The reactive double-bind binds BOTH
+      // `@name` (8928) and `name` (8929); the `<each>` `as`-name binds the bare
+      // loop local; imports bind the bare local under kind:"import". Look up the
+      // sigil form first, then the bare form — either resolves the read.
+      const atEntry = scopeChain.lookup(raw.includes(".") ? raw.slice(0, raw.indexOf(".")) : raw)
+        ?? scopeChain.lookup(atBase);
+      if (atEntry) return; // resolves to a cell / loop local / import — in scope.
+      // Genuine undeclared-cell read. Message ported from the SYM-stage
+      // prototype (symbol-table.ts @22205aba ~2380), retargeted for the
+      // post-CE TS relocation.
+      errors.push(new TSError(
+        "E-STATE-UNDECLARED",
+        `E-STATE-UNDECLARED: bare \`@${atBase}\` read with no reactive cell in ` +
+        `scope. Reactive state cells SHALL be declared via the structural form ` +
+        `\`<${atBase}>\` (SPEC §6.1.1 + §6.2) before they are read with the ` +
+        `canonical \`@${atBase}\` form. Fix: add a \`<${atBase}> = <init>\` ` +
+        `declaration (or \`const <${atBase}> = <expr>\` for a derived cell), ` +
+        `import the name if it is cross-file, or remove the \`@\` prefix if a ` +
+        `local identifier was intended.`,
+        span,
+      ));
+      return;
+    }
     // Skip runtime helpers / underscore convention.
     if (raw.startsWith("_")) return;
     // Split off member-chain base.
@@ -10721,16 +10774,75 @@ function annotateNodes(
   // This matches `preBindExportedNames`' `if (!scopeChain.lookup(name))`
   // guard pattern and lets the SYM-layer diagnostic surface uncontested.
   for (const [_engineName, machine] of machineRegistry) {
-    const varName = machine.name;
-    if (typeof varName !== "string" || varName.length === 0) continue;
+    const machineName = machine.name;
+    if (typeof machineName !== "string" || machineName.length === 0) continue;
     const rt = machine.governedType;
     if (!rt) continue;
-    // Skip if either form is already bound (collision will be flagged at
-    // SYM PASS 10.A as E-ENGINE-VAR-DUPLICATE).
-    if (scopeChain.lookup(`@${varName}`) || scopeChain.lookup(varName)) continue;
-    scopeChain.bind(`@${varName}`, { kind: "reactive", resolvedType: rt, isServer: false });
-    scopeChain.bind(varName, { kind: "reactive", resolvedType: rt, isServer: false });
+    // §51.0.C / §51.9 — the CANONICAL reactive read name of a machine is its
+    // projected/auto-derived var name, NOT the raw PascalCase machine name:
+    // `< machine name=UI >` is read as `${@ui}` (and codegen emits
+    // `_scrml_reactive_get("ui")`). Derived machines carry the projection in
+    // `projectedVarName`; non-derived machines auto-derive it via the ONE §51.0.C
+    // rule (engine-varname.ts), so `UI` → `ui`, `OrderMachine` → `orderMachine`.
+    // Bind BOTH the canonical projected name AND the raw machine name so the
+    // read-side undeclared-cell walker (E-STATE-UNDECLARED at 6253) resolves the
+    // lowercased read form without false-firing. (Pre-S192 this loop bound only
+    // `machine.name`, which the bare attribute/E-SCOPE walkers tolerated because
+    // they never reached the lowercased read; the read-side fire surfaced the gap.)
+    const projectedName = machine.projectedVarName ?? engineNameToProjectedVar(machineName);
+    for (const varName of new Set([projectedName, machineName])) {
+      if (typeof varName !== "string" || varName.length === 0) continue;
+      // Skip if either form is already bound (collision flagged at SYM PASS 10.A
+      // as E-ENGINE-VAR-DUPLICATE — leave it uncontested).
+      if (scopeChain.lookup(`@${varName}`) || scopeChain.lookup(varName)) continue;
+      scopeChain.bind(`@${varName}`, { kind: "reactive", resolvedType: rt, isServer: false });
+      scopeChain.bind(varName, { kind: "reactive", resolvedType: rt, isServer: false });
+    }
   }
+
+  // §51.0.H Form 3 — engine boot-`effect=` implicit cell pre-bind (S192).
+  // An engine opener effect `effect=${ @tasks = loadTasks() ... }` may WRITE a
+  // bare `@cell = …` that has NO structural `<cell>` decl. The WRITE-side V-kill
+  // (S123) intentionally EXEMPTS these in engine boot context (SPEC §51.0.H), and
+  // codegen materializes them as fully-registered reactive cells (`_scrml_reactive_
+  // set("tasks")` + `_scrml_init_set("tasks")`). But the opener-effect body is
+  // captured as RAW TEXT (`engine-decl.openerEffect`) — TS never parses it into a
+  // walkable state-decl, so the scope-builder cannot see `tasks`. A later
+  // `${@tasks.length}` read would then false-fire the read-side E-STATE-UNDECLARED
+  // at 6253. Pre-bind every bare `@name = …` write target in each engine's
+  // openerEffect raw text as a reactive cell (mirrors `preBindReactiveStateCells`
+  // + the engine machineRegistry pre-bind). SHALL-NOT-overwrite guard preserves a
+  // richer prior bind. Scans deep-set / index writes (`@a.x = …` / `@a[i] = …`)
+  // too — those also imply the base cell exists.
+  function preBindEngineOpenerEffectCells(nodes: ASTNodeLike[]): void {
+    // Write-target form: `@name` (optionally followed by `.member` / `[index]`)
+    // then an assignment op (`=`, `+=`, …) — but NOT an equality `==`/`===`.
+    const writeTargetRe = /@([A-Za-z_$][A-Za-z0-9_$]*)(?:\.[A-Za-z_$][A-Za-z0-9_$]*|\[[^\]]*\])*\s*(?:\+|-|\*|\/|%|\?\?)?=(?!=)/g;
+    for (const n of nodes) {
+      if (!n || typeof n !== "object") continue;
+      if (n.kind === "engine-decl") {
+        const effectText = (n as { openerEffect?: unknown }).openerEffect;
+        if (typeof effectText === "string" && effectText.length > 0) {
+          let m: RegExpExecArray | null;
+          writeTargetRe.lastIndex = 0;
+          while ((m = writeTargetRe.exec(effectText)) !== null) {
+            const cellName = m[1];
+            if (!cellName || cellName.startsWith("_")) continue;
+            const atName = `@${cellName}`;
+            if (scopeChain.lookup(atName) || scopeChain.lookup(cellName)) continue;
+            scopeChain.bind(atName, { kind: "reactive", resolvedType: tAsIs(), isServer: false });
+            scopeChain.bind(cellName, { kind: "reactive", resolvedType: tAsIs(), isServer: false });
+          }
+        }
+      }
+      // Recurse into container blocks that may wrap an engine-decl.
+      for (const key of ["nodes", "body", "children", "bodyChildren"] as const) {
+        const v = (n as Record<string, unknown>)[key];
+        if (Array.isArray(v)) preBindEngineOpenerEffectCells(v as ASTNodeLike[]);
+      }
+    }
+  }
+  preBindEngineOpenerEffectCells(topNodes);
 
   for (const node of topNodes) {
     visitNode(node);

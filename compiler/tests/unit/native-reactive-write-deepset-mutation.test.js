@@ -165,13 +165,18 @@ describe("native reactive-write deep-set + array-mutation node synthesis (FIX A)
 
   for (const { name, decls, lines } of matrix) {
     test(`${name}: native client.js byte-matches default`, () => {
+      // Read the FIRST declared cell in markup so the page has a valid reactive
+      // read (the read-side E-STATE-UNDECLARED fire, S192, surfaces a markup read
+      // of an undeclared cell — earlier this hardcoded `@arr`, which is undeclared
+      // in the dotted/nested/string-index cases that declare `<a>`/`<obj>`/`<m>`).
+      const firstCell = (decls[0].match(/^<([A-Za-z_$][\w$]*)>/) || [])[1] || "arr";
       const src = [
         ...decls,
         "function op() {",
         ...lines.map((l) => "    " + l),
         "}",
         "<button onclick=op()>go</button>",
-        "<p>${@arr}</p>",
+        `<p>\${@${firstCell}}</p>`,
       ].join("\n") + "\n";
 
       const live = compileWith(src, null, "live");
