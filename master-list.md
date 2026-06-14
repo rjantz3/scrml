@@ -85,6 +85,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `46377508` — wrap(s193): Flux v1 built+pushed + MMORPG reframe + 2 deep-dives + G1 HIGH filed — **pushed**
 - `572e29d1` — wrap(s192): bug-12-vkill CLOSED (3-stage arc: §51.0.C var-name → SYM cell-registration → read-side fire at TS) + hand-off CLOSE + changelog S192 + 6b worktree-clean x6 + 6d state-regen PASS (gap-counts MED 5->4/LOW 14 + recent-sessions) + handoff-196 rotation — **pushed**
 - `1b207e6e` — wrap(s191) 6c: maps refresh 1e17213e->7f2092cf (5 maps; +§26.7 Tailwind composing-family routing + if=fn 3-seam routing — the gaps agents flagged 3x) + hand-off map-currency line — **pushed**
 - `7ba053e6` — wrap(s190): hand-off CLOSE + changelog S190 (3 source arcs: Cluster C ${}-decl-boundary + §51.0.J derived-engine EXPRESSION form + §51.9 clearer-error/2B-close) + decision pass (L19 KEEP via DD) + master-list (16,836->16,873 subset) + 6c maps refresh (a00624f5->1e17213e, error/primary/structure/test) + 6d state-regen PASS + 6b worktree-clean x4 + handoff-194 rotation — **pushed**
@@ -92,7 +93,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `abc742e5` — wrap(s188): hand-off CLOSE + changelog S188 (3 arcs: g-not-negation E-TYPE-045 all-positions + g-division collectExpr-ternary + cluster-A E-ATTR-UNQUOTED-OPERATOR) + master-list (~23957->~24038) + 6c maps refresh (d47177fc->1ad740b4, error/structure/primary) + 6d state-regen PASS + handoff-192 rotation. known-gaps: g-not-negation/g-division/g-attr-gte/g-attr-unquoted-compound RESOLVED; g-derived-rhs-interp-wrapped + g-given-rebind-not-rejected + g-attr-if-fn-call-misroute NEW. MED 9 LOW 17. — **pushed**
 - `a25cd3ea` — wrap(s187): hand-off CLOSE (recovery) + changelog S186-reconstruct+S187 + master-list (23946->23957) + 6c maps refresh (a4726dd3->d47177fc, 3 maps) + 6d state-regen PASS + handoff-191 rotation — **pushed**
 - `1de0848a` — wrap(s185): hand-off CLOSE + changelog S185 (2 arcs: errarm re-fail-from-arm + validator inline-msg colon-form) + master-list (23921->23946) + 6c maps refresh (7fe7044f->a4726dd3, 4 maps) + 6d state-regen + 6b worktree-cleanup x2 (errarm/colon) + handoff-189 rotation. known-gaps: g-errarm + g-validator-inline-msg-colon-form RESOLVED; g-derived-engine-expression-form NEW LOW (engine dog-food). Full suite 23,946/0/221/1. Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com> — **pushed**
-- `a250348a` — wrap(s184): hand-off CLOSE + changelog S184 (6 arcs) + 6c maps refresh (1734b81b->7fe7044f, 4 maps) + 6d state-regen + known-gaps (g-lifecycle-struct-field-const-notfire + g-ghost-lint-canonical-form-false-positive RESOLVED; g-errarm-fail-and-parsevariant-handler NEW/deferred) + handoff-188 rotation — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core

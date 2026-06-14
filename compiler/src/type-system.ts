@@ -7958,6 +7958,28 @@ function annotateNodes(
             ctorTransitions,
           );
 
+          // W-AUTH-002 (interim honesty, §52.6.1 / §52.3.3): a Tier-1
+          // `authority="server" table=` state type declares read-authority but
+          // the compiler does not YET generate the `SELECT *` initial-load /
+          // SSR pre-render codegen for it (that is a committed follow-on — see
+          // change-id g1-server-sync-codegen-2026-06-14). Without this warning
+          // the type compiles CLEAN with zero sync codegen and zero signal — a
+          // silent no-op (a dev declares server authority and silently gets a
+          // client-local app). Surface the residual gap until the read codegen
+          // lands. The WRITE is always the dev's own `?{}` server fn (§52.6.2).
+          if (ctorAuthority === "server" && ctorTableName) {
+            errors.push(new TSError(
+              "W-AUTH-002",
+              `W-AUTH-002: state type '< ${ctorName}>' declares authority="server" table="${ctorTableName}", ` +
+              `but the compiler does not yet generate its read-authority sync (the SELECT * initial load + ` +
+              `SSR pre-render). Instances will display their local placeholder until you load them explicitly ` +
+              `(e.g. an 'on mount' block that assigns from a server function). The persist write is your own ` +
+              `?{} server fn (§52.6.2). Auto-load codegen is a tracked follow-on.`,
+              ctorSpan,
+              "warning",
+            ));
+          }
+
           for (const ta of (n.typedAttrs as ASTNodeLike[])) {
             scopeChain.bind(ta.name as string, {
               kind: "state-attr",

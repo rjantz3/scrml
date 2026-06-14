@@ -38,7 +38,7 @@ and bun:test files.
 | `emit-worker.ts` | §4.12.4 `<program name="...">` — self-contained worker JS bundles. |
 | `emit-machines.ts` | §51.5 — transition tables + runtime guards for `< machine>` and enums with `transitions{}`. |
 | `emit-predicates.ts` | §53 inline type predicates — boundary runtime checks (`E-CONTRACT-001-RT`) + HTML attr derivation. |
-| `emit-sync.ts` | §52.6 sync infrastructure for `server @var` (initial load, optimistic update, sync stub). |
+| `emit-sync.ts` | §52.6 READ-authority sync for `<var server>` (initial load + §8.11 mount-hydrate coalesce). The persist write is the dev's `?{}` server fn — no sync stub, no optimistic subscriber (Q1=C). |
 | `emit-test.ts` | `~{}` inline test codegen — emits `bun:test` `describe`/`test`/`expect` from `TestGroup[]` IR. |
 | `emit-library.ts` | Library mode emission — exports for compiled scrml modules used as libraries. |
 | `compat/parser-workarounds.js` | Parser bug workarounds (leaked comments, merged statements). |

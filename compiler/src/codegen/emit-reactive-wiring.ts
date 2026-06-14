@@ -12,7 +12,7 @@ import {
 } from "./collect.ts";
 import { collectDerivedVarNames, buildFunctionBodyRegistry, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { collectChannelNodes, emitChannelClientJs, parseChannelReconnect } from "./emit-channel.ts";
-import { emitInitialLoad, emitOptimisticUpdate, emitServerSyncStub, emitUnifiedMountHydrate } from "./emit-sync.ts";
+import { emitInitialLoad, emitUnifiedMountHydrate } from "./emit-sync.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
 
@@ -578,28 +578,32 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     }
   }
 
-  // Step 4c: Generate server @var sync infrastructure (§52.6)
+  // Step 4c: Generate <var server> READ-authority sync infrastructure (§52.6).
+  // Under the Q1=C / Q2=WF ruling §52 generates the READ path only (initial
+  // load + SSR + E-AUTH). The WRITE is the developer's own `?{}` server fn
+  // (§52.6.2 / §52.6.6) — NO `_scrml_server_sync_<var>` stub and NO optimistic
+  // subscriber are emitted. An assignment lands locally via the ordinary
+  // reactive set (that IS the immediate-local property); errors surface at the
+  // dev's awaited server-fn call site.
   const serverVarDecls = collectServerVarDecls(fileAST);
   if (serverVarDecls.length > 0) {
     lines.push("");
-    lines.push("// --- server @var sync infrastructure (§52.6, compiler-generated) ---");
+    lines.push("// --- <var server> read-authority sync (§52.6, compiler-generated) ---");
     // §8.11: if ≥2 callable initExprs share this page, coalesce their initial
     // loads into one /__mountHydrate fetch instead of N per-var async IIFEs.
-    // Writes (optimistic update + sync stub) remain 1:1 per §8.11.3.
+    // There is no write route to coalesce (§8.11.3) — writes are the dev's `?{}`.
     const callableDecls = callableServerVarDecls(serverVarDecls);
     const coalesceMount = callableDecls.length >= 2;
     for (const decl of serverVarDecls) {
       const varName: string = decl.name as string;
       // Phase 4d: ExprNode-first, string fallback
       const initExpr: string = (decl as any).initExpr ? emitStringFromTree((decl as any).initExpr) : (typeof decl.init === "string" ? decl.init : "");
-      for (const l of emitServerSyncStub(varName)) lines.push(l);
-      // Emit per-var IIFE only when NOT coalescing OR when this var is not
-      // callable (callable subset is handled by the unified fetch below).
+      // Emit per-var initial-load IIFE only when NOT coalescing OR when this var
+      // is not callable (callable subset is handled by the unified fetch below).
       const isCallable = !!initExpr && initExpr.includes("(");
       if (!coalesceMount || !isCallable) {
         for (const l of emitInitialLoad(varName, initExpr)) lines.push(l);
       }
-      for (const l of emitOptimisticUpdate(varName)) lines.push(l);
     }
     if (coalesceMount) {
       const coalescedNames = callableDecls.map((d) => d.name as string);

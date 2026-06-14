@@ -2088,7 +2088,7 @@ validator-attr   ::= /* per §55.1 universal-core predicate vocabulary */
 - `'<' identifier`: opening tag with the cell's name. Identifier rules follow §1.2.
 - `(decl-attr ws)*`: zero or more bare flag attributes inside the opening tag. Each attribute is a single keyword (no `=value`).
   - `pinned` — identity-stable cell, no forward-reference resolution through this cell (§6.10).
-  - `server` — server-authoritative cell; compiler synthesizes fetch-on-mount + optimistic update + rollback (§52.4).
+  - `server` — server-authoritative cell; compiler synthesizes fetch-on-mount + SSR pre-render + the E-AUTH boundary checks. The persist write is the developer's own `?{}` server fn, not compiler-generated (§52.4 / §52.6.2).
   - `validator-attr` — any predicate from §55.1 universal-core vocabulary (`req`, `length(>=N)`, `pattern(...)`, etc.). Validators contribute to the auto-synthesized validity surface (§55).
 - `'>'`: closing of the opening tag.
 - `[ ws ':' ws type-expr ]`: optional type annotation; `type-expr` per §7.5.
@@ -5440,10 +5440,10 @@ A V-kill structural decl MAY carry both the `server` flag (§52.4 — Tier 2 ser
 
 - The placeholder is initialized exactly at its source position, same as any §6.10.2 pinned cell.
 - `reset(@cells)` SHALL NOT restore the placeholder; the pinned-on-placeholder rule prevents placeholder re-installation through the reset path.
-- The server-fetched value, once it arrives, is **normal-reactive** thereafter — writes propagate through optimistic-update + server-write + rollback per §52.4.2, and downstream reactive dependencies fire normally.
+- The server-fetched value, once it arrives, is **normal-reactive** thereafter — assignments land locally (immediate-local, §52.6.2) and persist through the developer's own `?{}` server fn, and downstream reactive dependencies fire normally.
 - Forward references to `@cells` from source positions before the decl site remain `E-STATE-PINNED-FORWARD-REF` per §6.10.2 — the `pinned` semantic is preserved for the placeholder lifecycle, even though the eventually-fetched value participates in normal reactive flow.
 
-The placeholder pinning composes the static-surface invariant of `pinned` (§6.10 — identity-stable, hoisting-exempt) with the dynamic-surface invariant of `server` (§52.4 — fetch-on-mount, optimistic update). Neither modifier's semantic is overloaded; they apply to non-overlapping aspects of the cell's lifecycle.
+The placeholder pinning composes the static-surface invariant of `pinned` (§6.10 — identity-stable, hoisting-exempt) with the dynamic-surface invariant of `server` (§52.4 — fetch-on-mount + immediate-local landing on assignment). Neither modifier's semantic is overloaded; they apply to non-overlapping aspects of the cell's lifecycle.
 
 **Operational interpretation.** "Skip the placeholder reset — only the real data matters." Common case for cache hydration / on-mount data-load patterns where the empty placeholder is a startup artifact rather than adopter-meaningful state. Adopters who want `reset(@cells)` to restore the empty initial value omit `pinned`.
 
@@ -6477,7 +6477,7 @@ The key column is the column referenced by the single equality predicate in the 
 
 #### 8.10.5 Writes Out of Scope for v1
 
-`.run()` inside a loop (UPDATE/DELETE/INSERT) is NOT rewritten in v1. Write batching collides with `<machine>` transition enforcement (§51) and `<var server>` optimistic-rollback granularity (§52.4.2). Tier 2 writes queued for post-v1 spec extension.
+`.run()` inside a loop (UPDATE/DELETE/INSERT) is NOT rewritten in v1. Write batching collides with `<machine>` transition enforcement (§51) and the per-operation granularity of `<var server>` writes (the developer's own `?{}` server fns — §52.6.2). Tier 2 write batching queued for post-v1 spec extension.
 
 #### 8.10.6 Parameter Count Bound
 
@@ -6495,7 +6495,7 @@ Tier 2 introduces a new sibling DGNode (the hoisted pre-loop query). The lift-ch
 
 #### 8.11.1 Scope
 
-On-mount initial-load fetches for `<var server>` declarations (§52.4.2) SHALL be coalesced into a single synthetic server handler named `__mountHydrate` per page/component. Individual `<var server>` *assignments* (which carry optimistic-update + rollback semantics) SHALL remain 1:1 with their own routes.
+On-mount initial-load fetches for `<var server>` declarations (§52.4.2) SHALL be coalesced into a single synthetic server handler named `__mountHydrate` per page/component. This coalescing applies to the **read** (initial-load) path only. Individual `<var server>` *assignments* do not generate any compiler-owned write route (the persist is the developer's own `?{}` server fn — §52.6.2 retraction); they land locally and persist through the developer's fn, so there is nothing to coalesce on the write side.
 
 #### 8.11.2 Synthetic Handler
 
@@ -6503,7 +6503,7 @@ The boundary pass SHALL emit a `__mountHydrate` RouteSpec whose handler body con
 
 #### 8.11.3 Write Isolation
 
-`<var server>` assignments continue to generate per-var routes. Coalescing writes would collapse per-assignment rollback scopes (§52.4.2 (3)) and is forbidden.
+`<var server>` assignments do not generate compiler-owned write routes (the persist is the developer's own `?{}` server fn — §52.6.2 retraction, ratified 2026-06-14). The developer's server functions are emitted as ordinary RPC routes (one per fn) and are NOT subject to mount-hydrate coalescing — coalescing is a read-side optimization (§8.11.1). There is therefore no compiler-generated per-assignment write route to isolate.
 
 ---
 
@@ -28661,7 +28661,7 @@ Authority declarations give the compiler enough information to:
 
 - Enforce that client-local variables are never persisted to the database (E-AUTH-001).
 - Enforce that server-authoritative variables are not derived from client-local values without an explicit crossing point (E-AUTH-002).
-- Generate server-sync infrastructure automatically (initial load, optimistic update, rollback, re-fetch).
+- Generate read-authority infrastructure automatically (initial load on mount + SSR pre-render). The persist write itself is the developer's explicit `?{}` server function, not compiler-generated (§52.6.2 — retraction ratified 2026-06-14).
 - Distinguish variables that SHALL be pre-rendered in SSR from variables that are client-only and SHALL be skipped during SSR.
 - Derive DDL and schema from structured state type definitions (interacting with §39 Schema and Migrations).
 
@@ -28711,7 +28711,7 @@ A state type with `authority="server"` SHALL also specify `table=` naming the da
 The compiler uses `table=` for:
 
 - Schema derivation: the declared fields are checked against (or used to generate) the table DDL.
-- Query generation: the initial load query, optimistic INSERT/UPDATE, and rollback logic all reference this table.
+- Query generation: the initial load query (`SELECT *` from this table on mount) references this table. The write queries (INSERT/UPDATE/DELETE) are the developer's own `?{}` server functions against this table — not compiler-generated (§52.6.2).
 - SSR: instances of this type are pre-rendered from the table on the server.
 
 A state type with `authority="server"` and no `table=` attribute SHALL be a compile error (E-AUTH-003).
@@ -28791,7 +28791,7 @@ ${
 </program>
 ```
 
-Expected compiler output: no errors. `@cards` is server-authoritative (type contract). Compiler generates initial load from `cards` table on mount, optimistic update on assignment, rollback on server error. `@ui` is client-local; no sync. `@todoCards` is a derived value.
+Expected compiler output: no errors. `@cards` is server-authoritative (type contract). The compiler generates the read-authority infrastructure: initial load (`SELECT *` from the `cards` table on mount) + SSR pre-render + the E-AUTH boundary checks. Assignments to `@cards` land locally (§52.6.2); the persist is the developer's own `?{}` INSERT/UPDATE server fn — the compiler generates no separate server-write route. `@ui` is client-local; no sync. `@todoCards` is a derived value.
 
 #### 52.3.6 Worked Example — Invalid (Missing `table=` on Server-Authority Type)
 
@@ -28870,9 +28870,9 @@ The `server` attribute in this position parallels — but is NOT — the (deprec
 A `<var server>` declaration tells the compiler:
 
 1. **Initial value on mount:** The compiler generates a fetch from the server to populate `@var` on component/page mount. The initial value in the declaration (e.g., `<cards server> = []`) is the client-side placeholder displayed until the fetch completes.
-2. **Optimistic update:** When `@var` is assigned in client code, the compiler generates: (a) an immediate local update for responsiveness, and (b) a server write call. If the server write fails, the previous value is restored.
-3. **Rollback on error:** If the server write returns an error, the compiler restores `@var` to its pre-assignment value and surfaces the error through the standard error state (§19).
-4. **Re-fetch on success:** After a successful server write, the compiler MAY re-fetch the authoritative value from the server to ensure the local value matches the persisted state.
+2. **Immediate-local landing on assignment:** When `@var` is assigned in client code, the compiler performs the immediate local update (the ordinary reactive set) for responsiveness. The **persist write is the developer's own `?{}` server function** (§52.6.2 / §52.6.6) — the compiler does NOT generate a server-write route.
+3. **Error handling on a failed write:** Because the persist is the developer's server fn, a failed write surfaces at the assignment call site and is owned by the developer's `!{}` / `on error` handling (§19). There is no compiler-generated automatic rollback (§52.6.3).
+4. **Re-fetch:** The developer's server fn performs its own re-fetch (e.g., `return ?{`SELECT ...`}.all()` after the write); the assignment lands that authoritative value. There is no separate compiler-generated re-fetch (§52.6.4).
 5. **SSR pre-render:** Server-authoritative vars are populated on the server during SSR and emitted into the initial HTML. Client-local vars are not pre-rendered; they use their declared initial value.
 
 A `<var server>` declaration at the instance level is appropriate for primitive reactive state: loading flags, counters, IDs, simple scalar values. For structured data that maps to a database table, Tier 1 (type-level authority via `< Type authority="server" table="...">`) SHOULD be used instead.
@@ -28891,8 +28891,8 @@ A `<varName server>` with an initial value of `not` (§42) means "no placeholder
 #### 52.4.4 Normative Statements — Instance-Level Authority
 
 - A `<varName server>` declaration SHALL cause the compiler to generate an initial load fetch on mount.
-- A `<varName server>` declaration SHALL cause the compiler to generate optimistic update logic on every assignment to `@varName` in client code.
-- A `<varName server>` declaration SHALL cause the compiler to generate rollback logic that restores the pre-assignment value if the server write returns an error.
+- A `<varName server>` declaration SHALL cause every assignment to `@varName` in client code to perform an immediate local update (the ordinary reactive set, §52.6.2). The persist write is NOT compiler-generated: it is the developer's explicit `?{}` server function (§52.6.6).
+- The compiler SHALL NOT generate an automatic server-write route or automatic rollback for `<varName server>` assignments. A failed write surfaces at the assignment call site through the developer's `!{}` / `on error` handling (§52.6.3).
 - A `<varName server>` cell SHALL be treated as server-authoritative for all E-AUTH rule checks.
 - A `<varName>` cell without the `server` attribute SHALL be treated as client-local. No sync infrastructure SHALL be generated for it.
 - The compiler SHALL emit an error (E-AUTH-002) when a `<varName server>` is declared with an initial value that is derived from a client-local reactive variable, unless the derivation passes through an explicit server function call.
@@ -28904,8 +28904,8 @@ A `<varName server>` with an initial value of `not` (§42) means "no placeholder
 <program db="sqlite:./kanban.db">
 
 // Tier 2: server-authoritative primitive var.
-// Compiler generates initial load on mount.
-// Assignment triggers optimistic update + server write.
+// Compiler generates initial load on mount + SSR pre-render.
+// Assignment lands locally; the persist is the dev's ?{} server fn (§52.6.2).
 <cards server> = []
 
 // Client-local vars: no sync, no server interaction.
@@ -28930,7 +28930,7 @@ ${
 
     function addCard() {
         let newCard = createCard(@draftTitle, @draftDescription, @addingToColumn, @cards.length)
-        @cards = [...@cards, newCard]    // optimistic update + server write (auto-generated)
+        @cards = [...@cards, newCard]    // immediate-local landing; the write was createCard()'s INSERT above (§52.6.2)
         @draftTitle = ""
         @draftDescription = ""
     }
@@ -28939,7 +28939,7 @@ ${
 </program>
 ```
 
-Expected compiler output: no errors. `@cards` is server-authoritative (instance-level). Compiler generates initial load (calls `loadCards` on mount), optimistic update on `@cards =` assignment, rollback on error. Client-local vars (`@editingId`, `@draftTitle`, etc.) generate no sync.
+Expected compiler output: no errors. `@cards` is server-authoritative (instance-level). The compiler generates the read-authority infrastructure — initial load (calls `loadCards` on mount), SSR pre-render, and the E-AUTH boundary checks. The `@cards =` assignment lands locally (§52.6.2); the persist was `createCard()`'s explicit `?{}` INSERT — the compiler generates no separate server-write route. Client-local vars (`@editingId`, `@draftTitle`, etc.) generate no sync infrastructure.
 
 #### 52.4.6 Worked Example — Invalid (E-AUTH-001: Local var in `?{}`)
 
@@ -28997,15 +28997,17 @@ E-AUTH-002: '<doubleCount server>' is declared server-authoritative, but its ini
 | Construct | Authority | Sync Generated | SSR Pre-Rendered | `?{}` Access |
 |-----------|-----------|---------------|------------------|-------------|
 | `<var> = expr` | Local | None | No | Blocked (E-AUTH-001) |
-| `<var server> = expr` | Server | Load + optimistic update + rollback | Yes | Allowed (inside server fn) |
-| `<Type> @var` where `Type.authority = "server"` | Server | Load + optimistic update + rollback | Yes | Allowed (inside server fn) |
+| `<var server> = expr` | Server | Load + SSR + E-AUTH (write is dev's `?{}`) | Yes | Allowed (inside server fn) |
+| `<Type> @var` where `Type.authority = "server"` | Server | Load + SSR + E-AUTH (write is dev's `?{}`) | Yes | Allowed (inside server fn) |
 | `<Type> @var` where `Type.authority = "local"` | Local | None | No | Blocked (E-AUTH-001) |
 | `const <derived> = expr` | Derived (always local) | None (derived from source) | Only if source is server | Read-only (cannot be persisted) |
 | `<input>` / `<form>` fields | Form (ephemeral) | None | No | Not applicable |
 
 ### 52.6 Compiler-Generated Sync Infrastructure
 
-When a variable is server-authoritative (either Tier 1 or Tier 2), the compiler generates the following infrastructure. The developer SHALL NOT write any of this manually.
+When a variable is server-authoritative (either Tier 1 or Tier 2), the compiler generates the read-authority infrastructure described below: initial load, SSR pre-render, and the E-AUTH boundary checks. The developer SHALL NOT write any of *that* infrastructure manually.
+
+The **persist write** is the one piece §52 does NOT auto-generate: it is the developer's own explicit `?{}` server function (§52.6.2). §52 is a **read-authority + reactive-wiring layer** — it knows the cell is server-sourced (so it hydrates it, pre-renders it in SSR, and blocks the E-AUTH-001 local-leak), but the mutation verb is the developer's `?{}`, which is the one place that can assign server IDs, enforce server invariants, and choose INSERT vs UPDATE vs DELETE per-operation.
 
 #### 52.6.1 Initial Load
 
@@ -29013,35 +29015,65 @@ On component/page mount, the compiler generates a fetch call to load the authori
 
 The initial value in the declaration is displayed while the fetch is in flight (the placeholder). Once the fetch resolves, the placeholder is replaced by the authoritative value and dependents re-render.
 
-#### 52.6.2 Optimistic Update
+#### 52.6.2 Assignment Semantics — Local Landing, Developer-Owned Persist
+
+> **Retraction (ratified 2026-06-14, server-state-persist-semantics deep-dive, Q1=C/Q2=WF).** Earlier
+> drafts of this subsection claimed the compiler generates "a server write call: a generated server route
+> receives the new value and persists it." **That auto-persist route is RETRACTED.** It was never
+> implemented (the emitter shipped a `console.warn` no-op), was contradicted by §52's own flagship example
+> (§52.4.5), and is absent from 100% of the corpus, every other spec example, and the founding debate —
+> all of which already route the write through the developer's explicit `?{}` server function. §52 is a
+> read-authority layer; the persist verb is the developer's `?{}`.
 
 When client code assigns to a server-authoritative variable:
 
 ```scrml
-@cards = [...@cards, newCard]
+@cards = addCard(@draftTitle)   // addCard is a server fn: it ?{} INSERTs, then returns the re-fetched rows
 ```
 
-The compiler generates:
-1. Immediate local update: `@cards` is set to the new value client-side for responsiveness.
-2. Server write call: a generated server route receives the new value and persists it.
-3. The UI reflects the new value immediately (optimistic).
+The compiler's behavior is:
 
-If the server write succeeds, the optimistic value is confirmed. If it fails, rollback (§52.6.3) is triggered.
+1. **Immediate local update (the assignment itself).** `@cards` is set client-side via the ordinary reactive
+   set. This is the responsiveness ("optimistic-local") property — it is the plain reactive assignment, not a
+   separately-generated subscriber.
+2. **The persist is the developer's `?{}`.** The right-hand side is a developer-authored server function whose
+   body runs the explicit `?{}` INSERT/UPDATE/DELETE (server-escalated by the `?{}`). That server fn is the
+   single write path. It assigns server IDs (`last_insert_rowid()`), enforces server invariants, and chooses
+   the operation per-call. The assignment lands the function's return value (the re-fetched authoritative
+   state) on the client.
+3. **No compiler-generated server-write route.** The compiler does NOT synthesize a `POST /_scrml/sync/<var>`
+   route. The `_scrml_server_sync_<var>` stub and the auto-rollback subscriber are NOT emitted.
 
-#### 52.6.3 Rollback on Error
+The error path is the ordinary one: because the developer's server fn is `await`ed at the assignment call
+site (its client stub is an `await fetch(...)`), a network or SQL failure surfaces there and is owned by the
+developer's `!{}` / `on error` handling (§19) — not by a hidden compiler rollback.
 
-If a server write for an optimistic update returns an error:
-1. The compiler restores `@var` to its pre-assignment value.
-2. The error is surfaced through the standard reactive error state (§19).
-3. Dependents re-render with the rolled-back value.
+#### 52.6.3 Error Handling on a Failed Write
 
-The developer MAY handle the error state explicitly using `on error` blocks (§19). If no explicit error handler is present, the default behavior is rollback + silent error state update.
+Because the persist write is the developer's own server function (§52.6.2), a failed write surfaces as an
+error at the assignment call site:
+
+1. The developer's server fn `await`s its `?{}`; a failed write rejects the call.
+2. The error is surfaced through the standard reactive error state and the developer's `!{}` / `on error`
+   blocks (§19).
+3. The cell retains whatever value the (failed) assignment produced — there is no compiler-generated
+   automatic rollback, because there is no compiler-generated automatic write to roll back. If the developer
+   wants the pre-write value restored on failure, they handle it explicitly in `on error` (the prior value
+   is in scope at the call site).
+
+> **Why no auto-rollback.** Auto-rollback in earlier drafts existed only to undo the (now-retracted)
+> auto-persist route. With the persist owned by the developer's `?{}`, the "previous value" the compiler
+> would restore is not meaningful: the developer's fn may have already partially persisted, re-fetched, or
+> transformed the value. The honest contract is: the developer owns the write, so the developer owns the
+> failure recovery.
 
 #### 52.6.4 Re-fetch on Success
 
-After a successful server write, the compiler MAY generate a re-fetch of the authoritative value. This ensures that server-side transformations (auto-generated IDs, server-computed defaults, timestamps) are reflected in the client-side value.
-
-Whether a re-fetch is generated is a compiler optimization decision, not a developer-facing API. The developer SHALL assume the client-side value is eventually consistent with the server after any write.
+There is no compiler-generated write, so there is no compiler-generated re-fetch. The developer's server fn
+performs its own re-fetch (the `return ?{`SELECT ...`}.all()` after the write, as in §52.4.5 / §52.6.5), and
+the assignment lands that re-fetched authoritative value. This ensures server-side transformations
+(auto-generated IDs, server-computed defaults, timestamps) are reflected in the client-side value — by the
+developer's explicit re-fetch, not a compiler optimization.
 
 #### 52.6.5 Load Function Convention for Tier 2 `<var server>`
 
@@ -29076,6 +29108,45 @@ on mount {
 
 If neither pattern is present on a `<var server>` declaration, the compiler SHALL emit a warning (W-AUTH-001) indicating that no initial load was detected. The cell will display its placeholder value until an explicit assignment occurs.
 
+#### 52.6.6 Write Function Convention for Tier 2 `<var server>`
+
+> **Added 2026-06-14 (Q2=WF ruling).** This is the symmetric mirror of the §52.6.5 LOAD convention. Just as
+> §52 does not invent the load query for a scalar cell (the developer supplies `loadCount()` or an `on mount`
+> block), §52 does not invent the persist write either — the developer supplies it. The persist verb is the
+> developer's explicit `?{}` server function, at BOTH tiers (this Tier 2 convention mirrors the Tier 1
+> dev-owned write of §52.3 / §52.4.5). There is no synthetic compiler-owned key/value store.
+
+For a `<var server>` cell to persist client-initiated changes, the developer provides a WRITE path
+symmetric to the load convention: a server function that runs the `?{}` and returns the (re-fetched)
+authoritative value, assigned to the cell.
+
+**Pattern — dev-supplied write fn:**
+
+```scrml
+<count server> = 0                          // placeholder; §52 auto-loads via the §52.6.5 convention
+
+// LOAD (§52.6.5 Pattern A): assigned from a server fn → that fn is the mount load.
+function loadCount() { return ?{`SELECT n FROM counters WHERE id = 1`}.get().n }
+on mount { @count = loadCount() }
+
+// WRITE (this convention): the dev's server fn does the ?{}; the assignment lands the result.
+function bumpCount() {
+    ?{`UPDATE counters SET n = n + 1 WHERE id = 1`}.run()
+    return ?{`SELECT n FROM counters WHERE id = 1`}.get().n
+}
+function onClick() { @count = bumpCount() }   // §52 gives the immediate-local landing (§52.6.2)
+```
+
+The cell's `<count server> = 0` initializer is the placeholder (§52.4.3); the dev's `?{}` writes into the
+dev's own `< schema>` table (typed, queryable, migratable via §39). This keeps a **single** server store —
+the developer's schema — with no hidden compiler table.
+
+If a `<var server>` cell has a LOAD convention but **no detected WRITE path** and is nevertheless assigned
+in client code, the compiler SHALL surface a warning (W-AUTH-001, extended to name the missing write path):
+the assignment lands locally (§52.6.2) but is not persisted, because no server fn carrying a `?{}` is the
+assignment source. This is the honest "local placeholder forever" signal — the same shape as the missing-load
+warning.
+
 ### 52.7 Interaction with `protect=` (§52; see also §6.12)
 
 `protect=` and `authority=` address different concerns and SHALL NOT conflict:
@@ -29105,7 +29176,7 @@ In this example:
 **Normative statements:**
 
 - The combination of `authority="server"` and `protect=` on a single state type declaration SHALL be valid.
-- The compiler SHALL apply `protect=` field exclusion to the client-visible projection of the server-authoritative type. The protected fields SHALL NOT appear in client-side code or optimistic update payloads.
+- The compiler SHALL apply `protect=` field exclusion to the client-visible projection of the server-authoritative type. The protected fields SHALL NOT appear in client-side code or in any client-visible value of the server-authoritative cell.
 - The protected fields SHALL be accessible to server functions in the enclosing scope per §11.3.3.
 
 ### 52.8 Interaction with SSR
@@ -29137,13 +29208,13 @@ The two constructs are not interchangeable:
 | Feature | `<request>` | `<var server>` / Tier 1 authority |
 |---------|-------------|----------------------------------|
 | Load on mount | Yes | Yes |
-| Re-fetch on trigger | Yes (explicit) | Yes (on error, on mutation) |
-| Optimistic update | No | Yes (auto-generated) |
-| Rollback on error | No | Yes (auto-generated) |
+| Re-fetch on trigger | Yes (explicit) | Yes (developer's server fn re-fetches) |
+| Immediate-local landing on assignment | No | Yes (the ordinary reactive set, §52.6.2) |
+| Auto-persist route / auto-rollback | No | No (the write is the dev's `?{}`, §52.6.2/§52.6.6) |
 | SSR pre-render | Yes (§6.7.7 supports SSR) | Yes |
-| Mutation / write | No | Yes |
+| Mutation / write | No | Yes (developer's explicit `?{}` server fn) |
 
-A developer who needs read-only server data with manual re-fetch control SHOULD use `<request>`. A developer who needs read-write server state with automatic optimistic update SHOULD use `<var server>` (primitive) or a type with `authority="server"` (structured).
+A developer who needs read-only server data with manual re-fetch control SHOULD use `<request>`. A developer who needs read-write server state with automatic read-authority (load + SSR + E-AUTH boundary) and immediate-local landing on assignment — writing through their own `?{}` server fn — SHOULD use `<var server>` (primitive) or a type with `authority="server"` (structured).
 
 ### 52.10 Interaction with `server function` (Deprecated)
 
@@ -29160,7 +29231,7 @@ Under the V-kill canon (post-S123), the two constructs are syntactically distinc
 
 - The parser SHALL distinguish a `<var server>` state declaration from a (deprecated) `server function` declaration by the leading token: `<` opens the V-kill structural state-decl (§6.1.5); a bare leading `server` keyword indicates the deprecated function-modifier form. No ambiguity is possible.
 - During the deprecation window, the parser SHALL accept `server function` declarations and emit `W-DEPRECATED-SERVER-MODIFIER` (§34) per the firing conditions defined in route inference. After the deprecation cycle completes, `server function` SHALL be `E-DEPRECATED-SERVER-MODIFIER` and removed from the parser.
-- The `server` attribute on reactive cell declarations (`<var server>`, §52.4 / §6.1.5) is unaffected by this deprecation. It is a distinct construct that names a state authority contract (initial load + optimistic update + rollback), not a function-execution-placement directive. The cell-authority attribute remains canonical.
+- The `server` attribute on reactive cell declarations (`<var server>`, §52.4 / §6.1.5) is unaffected by this deprecation. It is a distinct construct that names a state authority contract (read-authority: initial load + SSR + E-AUTH boundary, with the write owned by the developer's `?{}` server fn — §52.6.2), not a function-execution-placement directive. The cell-authority attribute remains canonical.
 
 ### 52.11 Error Codes
 
@@ -29182,7 +29253,7 @@ The following questions are not resolved by this spec section. Each is a tracked
 
 **SPEC-ISSUE-025** (raised by this section): Does the compiler-generated initial load for `<var server>` happen in parallel with other mount-time fetches, or sequentially? Interaction with `lift` ordering and concurrent detection (§10.5.5) is underspecified.
 
-**SPEC-ISSUE-026** (raised by this section): When a Tier 2 `<var server>` cell is assigned a value derived from multiple server function calls (e.g., `@cards = mergeLocalAndRemote(loadCards(), @localEdits)`), does the compiler generate optimistic update for the assignment, or does it require explicit authority handling? The spec does not currently address partial-authority expressions.
+**SPEC-ISSUE-026** (RESOLVED 2026-06-14, Q1=C/Q2=WF deep-dive): When a Tier 2 `<var server>` cell is assigned a value derived from multiple server function calls (e.g., `@cards = mergeLocalAndRemote(loadCards(), @localEdits)`), the answer falls out cleanly from the read-authority model: the **assignment always gets the immediate-local landing** (§52.6.2 — that is the ordinary reactive set, applied uniformly regardless of how the right-hand side was derived); the **persist is whatever `?{}` the developer's server fn(s) ran** (none, if `mergeLocalAndRemote` performs no `?{}`). There is no special compiler handling for partial-authority expressions — the developer's fn decides what to persist. The auto-persist route this issue presupposed was retracted in §52.6.2.
 
 **SPEC-ISSUE-027** (raised by this section): For Tier 1 state types, the compiler generates `SELECT *` for initial load. Does the developer have a way to constrain the initial load query (e.g., load only the first page, add a WHERE clause)? The current spec has no syntax for this; it may require an `on mount` override pattern analogous to §52.6.5 Pattern B.
 

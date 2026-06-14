@@ -10,8 +10,9 @@
  *       Per-var IIFE path; no __mountHydrate route.
  *   §4  1 callable server @var → per-var IIFE path unchanged; no route.
  *   §5  0 server @var → no __mountHydrate route, no change.
- *   §6  Writes (assignments) still emit per-var sync stub + optimistic update
- *       (§8.11.3 — writes stay 1:1).
+ *   §6  No write route to coalesce — auto-persist retracted (Q1=C / §8.11.3):
+ *       the load coalescing stands, but no per-var sync stub / optimistic
+ *       subscriber is emitted (the write is the dev's ?{} server fn).
  *   §7  Route shape: POST /__mountHydrate exported as _scrml_route___mountHydrate.
  *   §8  Tier 1 coalescing integration — Batch Planner will see sibling DGNodes
  *       inside the synthetic handler. (Forward-looking: we verify the handler
@@ -90,8 +91,8 @@ describe("§1 two callable server @var → mount-hydrate coalescing", () => {
     const client = clientJsOf(compile(src));
     // Under coalescing, per-var §52.6.1 IIFE comments are suppressed for the
     // coalesced vars — only the unified /__mountHydrate block appears.
-    expect(client).not.toContain("server @a — initial load on mount");
-    expect(client).not.toContain("server @b — initial load on mount");
+    expect(client).not.toContain("<a server> — initial load on mount");
+    expect(client).not.toContain("<b server> — initial load on mount");
     expect(client).toContain("coalesced via /__mountHydrate");
   });
 });
@@ -166,7 +167,7 @@ describe("§3 one callable + one literal → no coalescing", () => {
     // The per-var §52.6.1 IIFE wraps the initial load in `(async () => {`.
     // Route inference rewrites `loadA()` → `_scrml_fetch_loadA_N()` on the
     // client; we just verify the IIFE exists for @a.
-    expect(client).toContain("server @a — initial load on mount");
+    expect(client).toContain("<a server> — initial load on mount");
     expect(client).toMatch(/\(async \(\) => \{[\s\S]*_scrml_reactive_set\("a"/);
   });
 });
@@ -195,7 +196,7 @@ describe("§4 single callable server @var → no coalescing", () => {
       "</>",
     ].join("\n");
     const client = clientJsOf(compile(src));
-    expect(client).toContain("server @a — initial load on mount");
+    expect(client).toContain("<a server> — initial load on mount");
     expect(client).not.toContain("/__mountHydrate");
   });
 });
@@ -222,8 +223,8 @@ describe("§5 no server @var → no route, no change", () => {
 // §6: writes stay 1:1 (§8.11.3)
 // ---------------------------------------------------------------------------
 
-describe("§6 server @var writes stay 1:1 under coalescing", () => {
-  test("per-var sync stub + optimistic subscribe still emitted", () => {
+describe("§6 no write route to coalesce — auto-persist retracted (Q1=C, §8.11.3)", () => {
+  test("coalesced loads emit no per-var sync stub or optimistic subscriber", () => {
     const src = [
       '<program db="test.db">',
       "${ server function loadA() { return 1 } }",
@@ -233,10 +234,12 @@ describe("§6 server @var writes stay 1:1 under coalescing", () => {
       "</>",
     ].join("\n");
     const client = clientJsOf(compile(src));
-    expect(client).toContain("async function _scrml_server_sync_a");
-    expect(client).toContain("async function _scrml_server_sync_b");
-    expect(client).toContain('_scrml_reactive_subscribe("a"');
-    expect(client).toContain('_scrml_reactive_subscribe("b"');
+    // The READ (load) path coalesces via /__mountHydrate (§8.11) — verified in §1/§2.
+    // The WRITE path is the dev's ?{} server fn; no compiler write artefacts:
+    expect(client).not.toContain("_scrml_server_sync_a");
+    expect(client).not.toContain("_scrml_server_sync_b");
+    expect(client).not.toContain('_scrml_reactive_subscribe("a"');
+    expect(client).not.toContain('_scrml_reactive_subscribe("b"');
   });
 });
 
