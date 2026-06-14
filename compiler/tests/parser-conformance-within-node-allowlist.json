@@ -401,18 +401,18 @@
   "examples/23-trucking-dispatch/pages/customer/home.scrml": {
     "COUNT-LENGTH": 6,
     "EXTRA-FIELD": 44,
-    "FIELD-SHAPE": 68,
+    "FIELD-SHAPE": 69,
     "KIND-NAME": 13,
     "MISSING-FIELD": 164,
-    "SPAN-COORD": 351
+    "SPAN-COORD": 365
   },
   "examples/23-trucking-dispatch/pages/customer/invoices.scrml": {
     "COUNT-LENGTH": 7,
-    "EXTRA-FIELD": 90,
-    "FIELD-SHAPE": 68,
-    "KIND-NAME": 24,
-    "MISSING-FIELD": 252,
-    "SPAN-COORD": 249
+    "EXTRA-FIELD": 96,
+    "FIELD-SHAPE": 71,
+    "KIND-NAME": 26,
+    "MISSING-FIELD": 265,
+    "SPAN-COORD": 252
   },
   "examples/23-trucking-dispatch/pages/customer/load-detail.scrml": {
     "COUNT-LENGTH": 7,
@@ -425,10 +425,10 @@
   "examples/23-trucking-dispatch/pages/customer/loads.scrml": {
     "COUNT-LENGTH": 7,
     "EXTRA-FIELD": 57,
-    "FIELD-SHAPE": 74,
+    "FIELD-SHAPE": 75,
     "KIND-NAME": 17,
     "MISSING-FIELD": 199,
-    "SPAN-COORD": 385
+    "SPAN-COORD": 399
   },
   "examples/23-trucking-dispatch/pages/customer/profile.scrml": {
     "COUNT-LENGTH": 1,
@@ -497,10 +497,10 @@
   "examples/23-trucking-dispatch/pages/driver/home.scrml": {
     "COUNT-LENGTH": 2,
     "EXTRA-FIELD": 58,
-    "FIELD-SHAPE": 112,
+    "FIELD-SHAPE": 113,
     "KIND-NAME": 21,
     "MISSING-FIELD": 242,
-    "SPAN-COORD": 606
+    "SPAN-COORD": 620
   },
   "examples/23-trucking-dispatch/pages/driver/hos.scrml": {
     "COUNT-LENGTH": 3,
@@ -529,10 +529,10 @@
   "examples/23-trucking-dispatch/pages/driver/messages.scrml": {
     "COUNT-LENGTH": 5,
     "EXTRA-FIELD": 55,
-    "FIELD-SHAPE": 95,
+    "FIELD-SHAPE": 96,
     "KIND-NAME": 14,
     "MISSING-FIELD": 185,
-    "SPAN-COORD": 456
+    "SPAN-COORD": 470
   },
   "examples/23-trucking-dispatch/pages/driver/profile.scrml": {
     "COUNT-LENGTH": 1,
@@ -2049,9 +2049,9 @@
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-reactive-file-level-003.scrml": {
     "EXTRA-FIELD": 2,
-    "FIELD-SHAPE": 2,
-    "MISSING-FIELD": 1,
-    "SPAN-COORD": 2
+    "FIELD-SHAPE": 4,
+    "MISSING-FIELD": 2,
+    "SPAN-COORD": 6
   },
   "samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-reactive-inside-component-018.scrml": {
     "COUNT-LENGTH": 1,
