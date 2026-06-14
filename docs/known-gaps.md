@@ -15,7 +15,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 0 |
+| HIGH | 1 |
 | MED | 5 |
 | LOW | 16 |
 | Nominal (spec-ahead-of-impl) | 9 |
@@ -150,6 +150,9 @@ The corpus-invariant idempotency audit (`compiler/tests/integration/expr-node-co
 
 ### G-ROUTE-001-LOCAL-COMPUTED-WRITE — E-ROUTE-001 over-fires on a pure-`fn` LOCAL computed-index array write — `NEW S193; LOW; open`
 A pure `fn` that does `let result = nonce.slice(); ... result[idx] = result[idx] + 1; return result` emits `warning [E-ROUTE-001]: Computed member access detected ... cannot statically determine the accessed property name ... it will not be detected by route inference`. But `result` is a freshly-`slice()`'d LOCAL array inside a pure `fn` — it can never be a protected-field access, and route inference has nothing to do with a pure local. The warning is a false positive on the local-computed-index-write class (route inference flags ALL computed member-assigns, not just ones reachable to protected DB/wire fields). Benign (warning only; compiles + runs; no workaround needed), but noise that erodes the diagnostic surface. Fix: scope E-ROUTE-001 to computed writes whose receiver can reach a protected/route-relevant binding, excluding pure-`fn`-local arrays. <!-- @gap id=g-route-001-local-computed-write sev=LOW status=open -->
+
+### G-SERVER-SYNC-CODEGEN-NOOP — §52 server-authoritative state never persists writes (server-sync codegen is a no-op stub) — `NEW S193; HIGH; open — the gate for server-authoritative state + the Flux MMORPG`
+The MMORPG architecture deep-dive (`scrml-support/docs/deep-dives/flux-mmorpg-architecture-2026-06-14.md`) verified at SOURCE that §52 server-authoritative state (`<x server>`) is non-functional beyond read-hydration: `compiler/src/codegen/emit-sync.ts:124-156` `emitServerSyncStub` is a `console.warn` NO-OP, and Tier-1 server-route generation is unstarted — reads hydrate (`/__mountHydrate`) but **writes NEVER persist**. This is the reality behind §52's documented W-AUTH-001 "scaffold until detection ships" (example 18). It gates ALL server-authoritative shared state — including the Flux MMORPG's shared persistent world (channel §38 spatial-sharding is confirmed-working as TRANSPORT, but the AUTHORITY layer is the hole; per S189 the authoritative world can't be a channel cell — it must be §52 server state). The DD recommends CRITICAL priority (→ HIGH in this ledger's enum). Fix = implement §52 server-sync codegen + Tier-1 server-route generation. The DD flagged 5 further MMORPG-readiness gaps (G2/G4/G5/G6/G7) detailed in the doc — file when the §52/MMORPG arc is scoped. <!-- @gap id=g-server-sync-codegen-noop sev=HIGH status=open -->
 
 ---
 

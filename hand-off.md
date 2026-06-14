@@ -1,41 +1,60 @@
-# scrmlTS — Session 192 (CLOSE)
+# scrmlTS — Session 193 (CLOSE)
 
-**Date:** 2026-06-13 → 2026-06-14.
-**Previous:** `handOffs/hand-off-196.md` (S191 CLOSE, rotated at this session's OPEN).
-**Next-session pickup:** rotate THIS file → `handOffs/hand-off-197.md` at next OPEN.
-**Profile:** A — FULL / ultracode (mid-session `/effort`).
+**Date:** 2026-06-14.
+**Previous:** `handOffs/hand-off-197.md` (S192 CLOSE, rotated at this session's OPEN).
+**Next-session pickup:** rotate THIS file → `handOffs/hand-off-198.md` at next OPEN.
+**Profile:** A — FULL ("read pa.md and start session" → default A). Plan-mode → build.
 
 ## What this session was
-**`bug-12-vkill` CLOSED** — the read-side `E-STATE-UNDECLARED` fire (a bare `@name` read with no declaration now errors, mirroring the S123 write-side fire) — landed after a **3-stage arc + a SYM-stage architectural dead-end**. User-driven with terse rulings; every stage PA-independent-dual-verified (caught 2 agent over-claims); staged scoping caught a reframe before each dispatch. **4 PA-authored landing commits.** Plus a dog-food gap find.
+**Built Flux v1** — a complete, playable, tested single-player canonical-scrml game (`examples/28-flux.scrml`), the S191 next-purpose dog-food. Then the user **reframed Flux into an MMORPG** (one shared persistent server-authoritative world) and commissioned a **deep-dive on the MMORPG architecture** (dispatched, running at close). v1 is the rendering/UX spike; the real game's architecture inverts (server-side world).
 
 ## Session-close state
-- **HEAD `a9d51a88`** (within-node allowlist regen; bug-12-vkill close = `2ef612ed`). **PUSHED — origin/main in sync (0/0).** 6 commits this session: `4494baa5` Part-2 · `5c2eca97` stage-1 · `77c80fcf` salvage · `2ef612ed` vkill-close · `572e29d1` wrap · `a9d51a88` within-node allowlist regen. scrml-support user-voice pushed too. **Pre-push gate caught a session-caused within-node over-budget** (the canonical-decl migration grew the live-vs-native divergence on the 6 migrated files — 5 trucking pages + phase1-003); fixed via allowlist regen (native-lag, live correct), NOT `--no-verify`. Full suite at push: 24261 pass / 0 fail.
-- **Board:** HIGH 0 · **MED 4** · LOW 14 · Nominal 9 (153 @gap tokens; `bun scripts/state.ts` for the live board). bug-12-vkill + g-readside-undeclared-postce → resolved; g-bare-literal-attr-value + g-export-channel-body-text NEW open.
-- **Tests:** full suite **24255 pass / 6 fail / 223 skip** — the 6 fails are PRE-EXISTING (6 within-node parity over-budget gates; +2 TodoMVC browser missing-dist in the full run = the 8-baseline). **0 new failures.** Gate subset ~17k/0.
-- **Version:** v0.7.0, no cut. **Inbox:** empty. **Commit-gate:** Configuration B. Leave as-is.
-- **Worktrees:** CLEAN — all 6 session worktrees removed at 6b (a217789c Part-2 · a368bced reg-arc · a06c7dd9 fixup · af9b984e stage-2 · a6ddcb97 Phase-0 · a27d0f5d Phase-1). Only main remains.
-- **Maps:** **NOT refreshed (user: "SKIP MAPS").** Watermark `7f2092cf`, **5 commits behind HEAD** — NEXT SESSION SHOULD REFRESH (the §51.0.C var-name + the SYM/TS resolution + the migrate-command changes are unmapped).
-- **scrml-support:** user-voice S192 appended (the verbatim rulings + the 3-stage-arc methodology). Committed/pushed at wrap? — **scrml-support has the user-voice append uncommitted; commit+push at wrap or surface.**
+- **HEAD `02dcd3ff` — PUSHED, origin/main in sync (0/0), tree clean** (except session bookkeeping: this hand-off + handOffs/hand-off-197.md untracked + a pending user-voice append; finalize at wrap). 9 commits this session (all PA-direct, no worktrees), coherence verified (all 9 mine, no leaks).
+- **Board:** HIGH 0 · **MED 5** · LOW 16 · Nominal 9 (3 Flux dog-food gaps filed S193). Live: `bun scripts/state.ts`.
+- **Tests:** pre-commit subset green; full pre-push suite PASSED (the push gate ran clean after the within-node fix). Flux runtime-sim 6/6.
+- **Maps:** refreshed at 6c this session (`a939fcaa`, watermark `0cafe665`); now 9 commits behind HEAD but those 9 are EXAMPLE/DOC/TEST-only (no compiler source) — maps content unaffected; a no-op-ish refresh at next wrap is fine.
+- **Version:** v0.7.0, no cut. **Inbox:** empty. **Commit-gate:** Config B.
 
-## The arc (4 commits — full detail in `docs/changelog.md` S192)
-1. **Part 2 — engine var-name canonicalization (`4494baa5`).** 4 divergent var-name rules → 1 acronym-run rule (`engine-varname.ts`); §51.0.C amended (A-amend ruling). Fixed corpus-latent silently-dead reactivity on acronym-leading engine types.
-2. **Stage 1 — SYM cell-registration completeness + fixup (`5c2eca97`).** refs registered (own commit) · `const @x`→`const <x>` migrate+deprecate · state-block bare-write migrate+deprecate (MIGRATE+DEPRECATE ruling). Fixup ("fix the impl") made both lints fire on canonical forms + Rule-4 SPEC corrections. 2 verification workflows / 9 agents.
-3. **Stage 2 — SYM-stage detour, salvaged (`77c80fcf`).** The SYM-stage read-side prototype was the WRONG LAYER (over-fires on post-SYM `@row`/engine-effect/channel surfaces). Gated off; PA caught the "0 false-positives" over-claim; salvage-and-rescope ruling → landed the flagship app-fix (7 `const <current*Events>` filtered cells — a REAL silent bug the prototype caught in `23-trucking-dispatch`) + the phase1-003 fixture migration + 2 gaps; DROPPED the gated fire.
-4. **bug-12-vkill CLOSED — fire at TS (`2ef612ed`).** Home = TS (`type-system.ts:6240`, one line lifted: `@`-skip → scopeChain resolution). The "channel cell is text post-CE" belief was a stale-scope artifact (S139 Bug 51 — PA-verified the cell wires as a registered cell). Class-B scan/fileASTMap/ReadSideCtx DROPPED. 2 in-scope gaps closed Rule-3 (preBindEngineOpenerEffectCells + UI→ui machineRegistry bind). `${@ComponentName}` correctly fires (misuse; user-ruled). **0 idiomatic false-positives across 4 sources** (PA 61-file census · agent census · 6-agent fan-out over all 805 nested fixtures · green gate) — the fan-out was load-bearing (conformance doesn't gate TS errors).
+## The 9 commits (Flux v1 arc)
+1. `a939fcaa` maps 6c refresh (owed S192).
+2. `f7435c9c` keystone — derived ASCII board re-renders on move (the gate question; PROVEN).
+3. `2f0c12fc` terrain — hand-rolled deterministic hash (no seeded PRNG exists) + corridor labyrinth + collision.
+4. `4adeeb7b` fog/vision — Chebyshev sight bubble; out-of-vision = flux void.
+5. `39e6c047` flux core — per-cell re-roll on re-entry + 2-tier memory (world-lock/home-pin).
+6. `01b54057` game loop — seed-fixed exit + compass + XP/level/vision progression + win.
+7. `b51a5be7` filed 3 dog-food gaps + regen counts (MED 4→5, LOW 14→16).
+8. `6b76ce4f` runtime-sim test (6/6) + example docs (README 25-28 / VERIFIED / master-list).
+9. `02dcd3ff` within-node allowlist regen for 28-flux (native-lag, live correct — the pre-push gate caught it).
 
-## Open questions to surface at next open
-1. **PUSH — DONE** (user "push it"). All 6 scrmlTS commits + the scrml-support user-voice pushed; both origins in sync (0/0). The pre-push gate caught a session-caused within-node over-budget (the canonical-decl migration) → fixed via allowlist regen (`a9d51a88`), not `--no-verify`.
-2. **V-kill stage-1 migration backlog (the live read-side fire now ERRORS on these).** The fire correctly catches genuine declared-by-first-write reads — corpus files that now fail to compile (NOT gated, suite stays green): `gauntlet-r10-bun-admin.scrml` (5: @showStockPanel ×3 / @showCategoryPanel ×2) + `phase1-reactive-inside-component-018.scrml` (4: @localCount, and its `.expected.json` says "clean" — now STALE). These are the V-kill backlog (add structural `<x>` decls). Worth a gap + a migration pass. NOT urgent (gauntlet/adoption fixtures).
-3. **🎮 Flux game (S191 next-purpose) STILL PENDING** — S192 went down the bug-12-vkill path instead. The Flux dog-food vision (memory `project_flux_game_dogfood` + S191 user-voice) is the standing next-purpose.
-4. **MED tail:** `bug-1` remaining sub-arcs (string-bracket-parser / safelist) · `bug-14` MCP · native-parser CHARTER B (~v0.8). LOW: `g-bare-literal-attr-value` (register §6.7.6 value-attrs, S186 pattern) · `g-export-channel-body-text` (Option 2b root-cleanliness).
+## 3 dog-food findings filed (docs/known-gaps.md §S193)
+- `g-emit-string-tree-paren-drop` (MED) — Phase-1 ExprNode round-trip drops `(a+b)%c` parens; corpus-invariant gate catches it; REAL codegen unaffected. Worked around with named intermediates.
+- `g-interp-in-raw-content` (LOW) — `${...}` in `<pre>`/`<code>` (§4.17) emits literally, silent. W-INTERP-IN-RAW-CONTENT candidate.
+- `g-route-001-local-computed-write` (LOW) — E-ROUTE-001 over-fires on a pure-`fn` local computed-index write.
 
-## Wrap execution (S192 — user "land it if clean, then wrap" + "SKIP MAPS")
-1 hand-off (this) · 2 master-list (state.ts recent-sessions regen) · 3 changelog S192 block · 4 inbox empty/no outbound · 5 tests (24255/6 — 0 new) · 6 tree clean at close · 6b worktrees CLEANED ×6 · **6c maps SKIPPED (user)** · 6d state-regen PASS (gap-counts + recent-sessions) · 7 PUSH-PENDING (surface) · 8 user-voice S192 + this hand-off.
+## ⭐ THE BIG REFRAME — Flux is an MMORPG (S193 user ruling, the next-session driver)
+v1 was a deliberately-thin single-player CLIENT render spike. The user clarified Flux's real nature:
+- **Fundamentally multiplayer, ONE shared persistent SERVER-AUTHORITATIVE world** (an MMORPG). The flux happens server-side; clients are thin synced views.
+- **World = a network of tunnels & caverns that shift/change when no one is looking.** (Dropped the Floor/Wall/Mountain palette.)
+- **Memory = an ANCHOR, not permanent terrain.** Locking captures a small internally-fixed cluster that floats "loosely relationally to the global map (always in flux)." Holding ≥2 anchors → real-time direction+distance to each, and the numbers **continuously drift** as the world flows. Navigation = triangulating off drifting anchors. (v1's goal-compass was the accidental seed.)
+- **Shared-memory landmarks** = clusters locked by collective memory (quest entrances / hubs); findable by all, also drift.
+- **Co-op quests, often mandatory.** D&D progression; persistent player + world.
+- **User's pointed feedback:** "this was supposed to replace the canonical ENGINE example, I'm not seeing much of that." CORRECT — v1 uses ZERO `<engine>`. The MMORPG fixes this: engines become central (player-phase FSM, quest-phase FSM, party FSM, connection FSM, render-mode FSM) — a richer §51 showcase than Mario.
+
+## Both deep-dives COMPLETE (committed + pushed in scrml-support 5a3b1d6)
+- **DD #1 MMORPG architecture** (`scrml-support/docs/deep-dives/flux-mmorpg-architecture-2026-06-14.md`, committed `84c211f`): **Readiness = PARTIAL** (source-verified). Buildable NOW: single-player + SQLite + ASCII + anchor-math. **BLOCKED on G1** (`emit-sync.ts:124-156` `emitServerSyncStub` = no-op; §52 writes never persist) — filed as NEW HIGH `g-server-sync-codegen-noop`. Channel spatial-sharding CONFIRMED (§38.6.2). Engine fork (2B parameterized-engine vs 2C components+plain-cells; §51.0.K prescribes 2C; 2B = new language work vs the singleton invariant; S174 vs §1.5 tension) = a real DEBATE. Forged `threejs-webgl-integration-expert`. 5 more gaps (G2/G4/G5/G6/G7) detailed IN THE DOC — file when the §52/MMORPG arc is scoped. CAVEAT: engine-fork dev signal is SYNTHESIZED (14 dev-persona agents not registered) — re-poll if the debate must anchor on live votes.
+- **DD #2 corpus idiomatic audit** (`scrml-support/docs/deep-dives/example-corpus-idiomatic-audit-2026-06-14.md`): the corpus "teaches the spelling of scrml and the grammar of React" — 0 files use `<each>`/§55-validators/clean-errors-as-states; 25 boolean-flag-soup vs 1 idiomatic engine. KEEP 8 / LIGHT-EDIT 9 / REWRITE 7+trucking+triage + rewrite plan + 6 pedagogical gaps + ~5 new examples + a re-sequenced teaching arc. Cross-flag: 14-mario is the ONLY idiomatic engine teacher — don't retire it until MMORPG-Flux (built engine-first) earns the slot.
+
+## NEXT SESSION (the pickup) — 3 arcs, all big
+1. **The 2B-vs-2C engine debate** (`@debate-curator`; FOR-2B elm+rust, FOR-2C solid+react+§51.0.K; weight S174 don't-god-ify vs §1.5 state-machine-north-star). Gates the MMORPG engine model AND the corpus's engine-teaching. (If anchoring on live dev votes matters, re-poll the dev personas first — they weren't registered this session.) A 2nd smaller debate rec exists: 16-remote-data `<match for=>` vs `<engine for=>` (corpus DD).
+2. **§52 server-sync codegen (G1 HIGH — the gate).** The compiler work that unblocks server-authoritative state + the MMORPG shared world. This is real codegen (emit-sync.ts + Tier-1 server-route gen), not "write scrml." File G2/G4/G5/G6/G7 from the MMORPG DD when scoping this.
+3. **The corpus rewrite** (DD #2 plan): Tier-0 `<each>` sweep → flagship Tier-1 rewrites (09/05/16/04 — each currently teaches the inverse of its lesson) → 06/03/08/25 → trucking re-conception + ~5 new architecture-pillar examples + fix the README lines that advertise anti-patterns as features.
+- v1 `28-flux.scrml` stays as-is (render/fog/compass substrate carries; client world-gen replaced by the server model). Game server was served at localhost:8099 this session (ephemeral; gone next session).
+
+## Wrap (S193 — EXECUTED)
+scrmlTS: 9 Flux commits pushed (gate-clean) · maps 6c (`a939fcaa`) · 3 Flux gaps + G1 HIGH filed + state.ts regen (board **HIGH 1 · MED 5 · LOW 16 · Nominal 9**, --check PASS) · runtime-sim 6/6 · example docs (README 25-28 / VERIFIED / master-list) · changelog S193 · this hand-off + handoff-197 rotation · final wrap commit + push (this commit). scrml-support: both DD docs + user-voice S193 committed+pushed (`5a3b1d6`, 0/0). Memory `project_flux_game_dogfood` + MEMORY.md hook updated (MMORPG reframe). Worktrees: none (all PA-direct). Maps now N behind HEAD but the post-6c commits are example/doc/test-only — content unaffected; refresh next session if source changes.
 
 ## pa.md directives in force
-- Rules R1–R5 · `---` answer-delimiter · Profile A/B · wrap=8 steps (6b/6c/6d) · full-wrap discriminator · 88% floor · ultracode (workflow-orchestration + adversarial-verify).
-- Dispatch: S88 isolation · F4 startup-verify · S90 CWD · S99/S126 Bash-edit + no-cd · S136 BRIEF.md archival · **S138 R26 dual-verify (caught 2 over-claims this session — load-bearing)** · S147 branch-leak coherence · S164 bg-commit-race · S180 waiting-time (dog-food found g-bare-literal) · S187 crash-recovery · S112 worktree-base-staleness (3 agents FF-merged stale base this session).
-- Memory live: `feedback_verify_before_claim` + `feedback_r26_empirical_verification` (the 2 over-claim catches) · `feedback_cookbook_vs_empirical` (the SCOPE-census-via-compileScrml under-count) · `feedback_dont_preclassify_fix_as_surgical` (each scoping reframe) · `feedback_no_batch_ratify_foundational_axioms` · `feedback_waiting_time_work_pattern` · `feedback_signal_ruling_scope`.
+Rules R1–R5 · `---` delimiter · Profile A/B · wrap 8-step · standing commit-authorization granted this session (incremental commits to main; surfaced before push; push authorized + done) · S88/F4/S90/S99/S126 dispatch discipline · S138 R26 dual-verify · S147 coherence (verified 0/0) · S164 bg-commit-race (waited for notifications) · S180 waiting-time (deep-dive dispatched + maintenance during waits).
 
 ## Tags
-#session-192 #close #profile-a #ultracode #bug-12-vkill-CLOSED #read-side-fire-at-TS #3-stage-arc #sym-stage-detour #engine-varname-acronym #migrate-deprecate #dual-verify-caught-2-overclaims #push-pending #maps-skipped
+#session-193 #flux-v1-built-pushed #mmorpg-reframe #deep-dive-dispatched #engine-showcase-gap #3-dogfood-gaps #profile-a
