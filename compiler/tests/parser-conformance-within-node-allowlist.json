@@ -109,19 +109,18 @@
   },
   "examples/04-live-search.scrml": {
     "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 7,
-    "FIELD-SHAPE": 9,
-    "KIND-NAME": 1,
-    "MISSING-FIELD": 14,
-    "SPAN-COORD": 97
+    "EXTRA-FIELD": 3,
+    "FIELD-SHAPE": 10,
+    "MISSING-FIELD": 16,
+    "SPAN-COORD": 142
   },
   "examples/05-multi-step-form.scrml": {
-    "COUNT-LENGTH": 4,
-    "EXTRA-FIELD": 26,
-    "FIELD-SHAPE": 28,
-    "KIND-NAME": 8,
-    "MISSING-FIELD": 67,
-    "SPAN-COORD": 94
+    "COUNT-LENGTH": 6,
+    "EXTRA-FIELD": 43,
+    "FIELD-SHAPE": 17,
+    "KIND-NAME": 10,
+    "MISSING-FIELD": 36,
+    "SPAN-COORD": 16
   },
   "examples/06-kanban-board.scrml": {
     "COUNT-LENGTH": 5,
@@ -204,12 +203,12 @@
     "SPAN-COORD": 167
   },
   "examples/16-remote-data.scrml": {
-    "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 12,
-    "FIELD-SHAPE": 7,
-    "KIND-NAME": 3,
-    "MISSING-FIELD": 33,
-    "SPAN-COORD": 57
+    "COUNT-LENGTH": 2,
+    "EXTRA-FIELD": 23,
+    "FIELD-SHAPE": 6,
+    "KIND-NAME": 4,
+    "MISSING-FIELD": 32,
+    "SPAN-COORD": 61
   },
   "examples/17-schema-migrations.scrml": {
     "COUNT-LENGTH": 3,
