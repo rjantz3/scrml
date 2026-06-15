@@ -18787,6 +18787,7 @@ The `auth=` attribute on `<channel>` accepts `"required" | "optional" | "none"` 
 
 - The compiler SHALL make `broadcast(data)` and `disconnect()` available in every `function` declaration and `onserver:*` handler declared inside a `<channel>` lexical scope. (The deprecated `server function` form remains accepted; the `server` keyword is no longer required — a `broadcast()`/`disconnect()` call escalates the enclosing function to the server boundary per §12.2 Trigger 7. Note: a channel-cell write alone does NOT escalate — it is a client-side sync-emitting operation per §38.4 / RULING A; only `broadcast()`/`disconnect()` are server-placement signals.)
 - `broadcast(data)` SHALL publish `data` to all clients currently subscribed to the channel's active topic.
+- **Server-initiated fan-out from a §52 server-authoritative store** is the explicit composition of a §52.6.2 dev-owned `?{}` persist with a `broadcast()` in the SAME server function — write the store, then fan the delta out. §52 does NOT auto-fan-out (there is no `broadcast=` attribute and no server-held reactive-store runtime in v1); the two primitives stay sharp and the developer composes them. See **§52.6.7** for the canonical worked example (the server world-tick) and the Q3-debate rationale.
 - The compiler SHALL reject (E-CHANNEL-004) any call to `broadcast()` or `disconnect()` that does not appear inside a function within a `<channel>` lexical scope.
 
 **Worked example — valid (broadcast from a server function, not an onserver: handler):**
@@ -29146,6 +29147,109 @@ in client code, the compiler SHALL surface a warning (W-AUTH-001, extended to na
 the assignment lands locally (§52.6.2) but is not persisted, because no server fn carrying a `?{}` is the
 assignment source. This is the honest "local placeholder forever" signal — the same shape as the missing-load
 warning.
+
+#### 52.6.7 Interaction with §38 Channels — Server-Initiated Fan-Out
+
+> **Added 2026-06-14 (Q3 debate, P1 wins 50 vs 38.5 — design-insight "§52↔§38 server-write fan-out
+> bridge").** This subsection documents the canonical way a **server-side** change to a
+> server-authoritative store reaches connected clients. The §52.6.1-52.6.6 machinery above covers the
+> **client-write** direction (a client assigns a server-authoritative cell, the persist runs in the
+> developer's `?{}`, the result lands locally). The **server-write** direction — a change that originates
+> on the server (a game tick, a cron job, a webhook handler, another player's action) and must fan out to
+> every subscribed client — is NOT a §52 mechanism. It is a **composition** of two sharp primitives.
+
+§52 declares the **authority** of a store (who owns the truth — §52.3/§52.4). §38 declares a **channel**
+(who gets told — the transport: a topic, its subscribers, and the `broadcast()`/`disconnect()` hub ops).
+When a server-side write to a server-authoritative store must reach clients, the developer composes the two
+explicitly **in one server function**:
+
+1. **Write the store** with an explicit `?{}` INSERT/UPDATE/DELETE against `table=` (the developer-owned
+   persist of §52.6.2 — §52 does not invent the write).
+2. **Fan the delta out** with an explicit `broadcast(...)` (§38.6) to the channel topic whose subscribers
+   should see the change.
+
+Both verbs are written by the developer, at the same call site, in the order they require. The compiler
+does not insert either one for the other.
+
+**§52 does NOT auto-fan-out.** There is **no `broadcast=` attribute** on a state-type or cell declaration,
+and **no server-held reactive-store runtime** in v1. The authority declaration (`authority="server"
+table=`) wires the read side (load + SSR + the E-AUTH leak-guard) and the client-write landing; it does
+**not** subscribe a channel to the store or push on every server-side mutation. The fan-out is the
+developer's explicit `broadcast()`, inside a function that is already server-placed (the `?{}` and/or the
+`broadcast()` call each escalate it per §12.2 Trigger 1/7). A server function that writes the store but
+does not `broadcast()` persists the change without telling any client; a server function that
+`broadcast()`s without writing the store tells clients about a change it did not persist. Composing both is
+the developer's deliberate choice — the two primitives stay orthogonal.
+
+**Worked example — the canonical server tick (the Flux MMORPG world loop).** A server-authoritative
+`<World>` store backed by the `cells` table; a fixed-timestep `worldTick()` re-rolls every unobserved cell
+with an explicit `?{}` UPDATE, then fans the batch out with **one** `broadcast()` per tick (the Colyseus
+`patchRate` shape — batch the write, broadcast once):
+
+```scrml
+<program db="sqlite:./flux.db">
+
+  ${
+      // The authority: the server owns the world. Tier-1 type-level authority (§52.3).
+      < World authority="server" table="cells">
+          idx: int
+          nonce: int
+          lockedBy: int
+      </>
+      < World> @cells          // server-authoritative; read-side sync auto-generated (§52.3.2)
+  }
+
+  <channel name="world" topic="world">
+      // The transport: clients subscribe to the world topic; the server broadcast()s
+      // world deltas to them. §38 owns who-gets-told. (A real MMORPG would shard the
+      // topic per-region — topic=@region — for interest-management; a single static
+      // topic keeps this bridge example focused on the composition.)
+      ${
+          // Server tick: write the store (?{}), then fan out ONCE (broadcast()).
+          // Both verbs are explicit and developer-owned — §52 generates neither.
+          // worldTick lives in the <channel> scope so its broadcast() sits inside a
+          // channel lexical scope (REQUIRED — §38.9 / E-CHANNEL-004) and fans out to
+          // this channel's "world" topic. It UPDATEs the cells table directly — a
+          // server fn does NOT read the client-held @cells cell (§38.4 / RULING A: a
+          // server-context fn SHALL NOT read a client cell).
+          function worldTick() {
+              ?{`UPDATE cells SET nonce = nonce + 1 WHERE locked_by = 0`}.run()   // §52.6.2 dev-owned persist (one batched write)
+              broadcast({ type: "world_roll", tick: Date.now() })                 // §38.6 explicit fan-out (one per tick)
+          }
+      }
+  </channel>
+
+</program>
+```
+
+`worldTick()` lives in the `<channel>` lexical scope (so its `broadcast()` is legal — §38.9 /
+E-CHANNEL-004 requires `broadcast()` to appear inside a `<channel>` scope) and is server-placed (the `?{}`
+SQL and the `broadcast()` each escalate it — §12.2). It UPDATEs the `cells` table directly (the §52.6.2
+dev-owned persist; it does not assign `@cells`, which would be the client-landing path) and then broadcasts
+a single delta-notification to the channel topic's subscribers.
+The subscribed clients receive the `broadcast()` payload and re-fetch / patch their view — the channel is
+the transport, not the source of truth (§38.4: channel cells are client-held; the server SHALL NOT read a
+channel cell — operate on payload/args and broadcast a value derived from them, per §38.6.1 /
+`E-CHANNEL-SERVER-CELL-READ`).
+
+> **Why explicit composition, not an auto-fan-out attribute (P2/P3 rejected; reconsideration conditions).**
+> The Q3 debate weighed P1 (this explicit composition) against P2 (a `broadcast=` attribute that makes the
+> authority declaration auto-fan-out to a topic on every server-side write) and P3 (a dedicated server-push
+> primitive, eliminated upstream). P1 won on 5 of 6 dimensions; the decisive reasons: P2 would (a) require a
+> net-new **server-held reactive-store runtime** that does not exist (channel cells are client-held —
+> §38.4 / S189 RULING A), (b) re-open the push-delta-granularity question (whole-cell vs diff) on the push
+> side, and (c) **god-ify the authority axis to swallow the transport axis** (the S174 limit-the-primitive
+> rule — a sharper primitive is more powerful, not a smaller surface). P2's own cited prior art validates the
+> *goal* but not the *mechanism*: Solid's reactivity is client-side; Convex/Firestore fan out per-subscriber
+> **query**, not per-static-**topic** (closer to the eliminated P3); Colyseus, Phoenix Channels, and TEA all
+> independently land on explicit, batched broadcast (only-server-mutates + explicit `broadcast!`/patchRate).
+>
+> **Reconsider auto-fan-out only when ALL THREE hold:** (1) a server-held reactive store is built for an
+> independent reason (the runtime cost is already paid), AND (2) the fan-out target is **static** — not a
+> per-client `topic=@region` the server cannot resolve to one value, AND (3) uniform
+> whole-store-to-all-subscribers sync becomes the dominant corpus pattern (the Phoenix.Presence
+> promotion bar). Until then P3 stays eliminated and P2 stays deferred; the explicit composition documented
+> here is canonical.
 
 ### 52.7 Interaction with `protect=` (§52; see also §6.12)
 
