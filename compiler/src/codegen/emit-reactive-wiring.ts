@@ -9,10 +9,11 @@ import {
   isServerOnlyNode,
   collectServerVarDecls,
   callableServerVarDecls,
+  collectServerAuthorityTypes,
 } from "./collect.ts";
 import { collectDerivedVarNames, buildFunctionBodyRegistry, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { collectChannelNodes, emitChannelClientJs, parseChannelReconnect } from "./emit-channel.ts";
-import { emitInitialLoad, emitUnifiedMountHydrate } from "./emit-sync.ts";
+import { emitInitialLoad, emitUnifiedMountHydrate, emitServerAuthorityLoad } from "./emit-sync.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
 
@@ -608,6 +609,23 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     if (coalesceMount) {
       const coalescedNames = callableDecls.map((d) => d.name as string);
       for (const l of emitUnifiedMountHydrate(coalescedNames)) lines.push(l);
+    }
+  }
+
+  // Step 4c.1: §52.3.5 Tier-1 server-authority TYPE read-authority load.
+  // For each `< Type authority="server" table="…">` instance, emit the
+  // `SELECT * FROM <table>` initial load on mount (§52.6.1). The query runs
+  // server-side via the compiler-generated `/__serverLoad/<var>` route
+  // (emitted by generateServerJs); the client fetches it and lands the rows.
+  // The WRITE is the developer's own `?{}` server fn (§52.6.2, Q1=C).
+  const serverAuthorityTypes = collectServerAuthorityTypes(fileAST);
+  if (serverAuthorityTypes.length > 0) {
+    lines.push("");
+    lines.push("// --- Tier-1 server-authority type read-authority load (§52.3.5/§52.6.1) ---");
+    for (const decl of serverAuthorityTypes) {
+      const varName: string = decl.name as string;
+      const table: string = (decl as any).serverAuthorityTable as string;
+      for (const l of emitServerAuthorityLoad(varName, table)) lines.push(l);
     }
   }
 

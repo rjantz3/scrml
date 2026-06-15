@@ -1,7 +1,7 @@
 import { CGError } from "./errors.ts";
 import { genVar } from "./var-counter.ts";
 import { routePath } from "./utils.ts";
-import { collectFunctions, collectServerVarDecls, callableServerVarDecls, isServerOnlyNode } from "./collect.ts";
+import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collectServerAuthorityTypes, isServerOnlyNode } from "./collect.ts";
 import { emitLogicNode } from "./emit-logic.ts";
 import { getNodes } from "./collect.ts";
 import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
@@ -523,13 +523,22 @@ export function generateServerJs(
   const _mhCallableDecls = callableServerVarDecls(_mhAllServerVars);
   const _needsMountHydrate = _mhCallableDecls.length >= 2;
 
+  // §52.3.5 Tier-1 server-authority TYPE instances need a `/__serverLoad/<var>`
+  // route (the SELECT * read-authority load, §52.6.1). The emission gate must
+  // fire on them even when there are no developer-authored server fns (G1
+  // SCOPING §7 finding #2 — without this a Tier-1-only file early-returns ""
+  // and the load route has nowhere to live).
+  const _serverAuthorityInstances = collectServerAuthorityTypes(fileAST);
+  const _hasServerAuthorityCells = _serverAuthorityInstances.length > 0;
+
   if (
     serverFns.length === 0 &&
     !authMiddlewareEntry &&
     channelNodes.length === 0 &&
     !middlewareConfig &&
     !_scrml_handleNodeEarly &&
-    !_needsMountHydrate
+    !_needsMountHydrate &&
+    !_hasServerAuthorityCells
   ) return "";
 
   const lines: string[] = [];
@@ -1575,6 +1584,37 @@ export function generateServerJs(
     lines.push(`  path: "/__mountHydrate",`);
     lines.push(`  method: "POST",`);
     lines.push(`  handler: ${mhHandlerName},`);
+    lines.push(`};`);
+    lines.push("");
+  }
+
+  // §52.3.5 / §52.6.1 — synthetic /__serverLoad/<var> route per Tier-1
+  // server-authority TYPE instance. The handler runs the read-authority
+  // `SELECT * FROM <table>` server-side and returns the rows as JSON; the
+  // client-side load IIFE (emit-sync emitServerAuthorityLoad) POSTs to it on
+  // mount and lands the rows via the ordinary reactive set. The WRITE is the
+  // developer's own `?{}` server fn (§52.6.2, Q1=C) — no write route.
+  for (const inst of _serverAuthorityInstances) {
+    const varName = inst.name as string;
+    const table = (inst as any).serverAuthorityTable as string;
+    const slHandler = `_scrml_serverLoad_${varName}_handler`;
+    const slRoute = `_scrml_route___serverLoad_${varName}`;
+    // The table name comes from a `table="…"` literal in the type-decl; it is a
+    // SQL identifier, not user input, so it is interpolated directly. (The
+    // recogniser only accepts an opener `table=STRING`; there is no bound param.)
+    lines.push(`// --- §52.6.1 server-authority load route for < ${varName} > (SELECT * FROM ${table}) ---`);
+    lines.push(`async function ${slHandler}(_scrml_req) {`);
+    lines.push(`  const _scrml_rows = await _scrml_sql\`SELECT * FROM ${table}\`;`);
+    lines.push(`  return new Response(JSON.stringify(_scrml_rows), {`);
+    lines.push(`    status: 200,`);
+    lines.push(`    headers: { "Content-Type": "application/json" },`);
+    lines.push(`  });`);
+    lines.push(`}`);
+    lines.push("");
+    lines.push(`export const ${slRoute} = {`);
+    lines.push(`  path: "/__serverLoad/${varName}",`);
+    lines.push(`  method: "POST",`);
+    lines.push(`  handler: ${slHandler},`);
     lines.push(`};`);
     lines.push("");
   }

@@ -73,6 +73,51 @@ export function emitInitialLoad(varName: string, initExpr: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// §52.6.1 / §52.3.5 Tier-1 server-authority TYPE initial load (SELECT *)
+// ---------------------------------------------------------------------------
+
+/**
+ * Emit the client-side initial-load IIFE for a Tier-1 server-authority TYPE
+ * instance (`< Type authority="server" table="…"> … </>` + `< Type> @var`).
+ *
+ * Per §52.6.1: "For Tier 1 types with table=, the compiler generates a SELECT *
+ * from the table." The query runs server-side; the client fetches it through the
+ * compiler-generated `/__serverLoad/<var>` route (symmetric to /__mountHydrate)
+ * and lands the rows via the ordinary reactive set, replacing the local
+ * placeholder once the rows resolve (§52.6.1, second paragraph).
+ *
+ * The WRITE is the developer's own `?{}` server fn (§52.6.2, Q1=C) — nothing is
+ * emitted here for it.
+ *
+ * Pattern:
+ * ```javascript
+ * // < Type authority="server" table="cards"> @cards — SELECT * load on mount (§52.6.1)
+ * (async () => {
+ *   const _r = await fetch("/__serverLoad/cards", { method: "POST", ... });
+ *   _scrml_reactive_set("cards", await _r.json());
+ * })();
+ * ```
+ *
+ * @param varName - reactive variable name (no `@` prefix)
+ * @param table   - the `table=` name (the SELECT * source)
+ */
+export function emitServerAuthorityLoad(varName: string, table: string): string[] {
+  const varJs = JSON.stringify(varName);
+  const routeJs = JSON.stringify(`/__serverLoad/${varName}`);
+  return [
+    `// < ${varName} > server-authority type — SELECT * FROM ${table} load on mount (§52.6.1)`,
+    `(async () => {`,
+    `  const _scrml_sa_res = await fetch(${routeJs}, {`,
+    `    method: "POST",`,
+    `    headers: { "Content-Type": "application/json" },`,
+    `    body: "{}",`,
+    `  });`,
+    `  _scrml_reactive_set(${varJs}, await _scrml_sa_res.json());`,
+    `})();`,
+  ];
+}
+
+// ---------------------------------------------------------------------------
 // §52.6.2 Assignment Semantics — local landing only (NO emitter)
 // ---------------------------------------------------------------------------
 //

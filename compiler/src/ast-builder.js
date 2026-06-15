@@ -4454,6 +4454,16 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   // Cleared after the next statement that contains `~` is parsed.
   let _tildeActive = false;
 
+  // §52.3.5 server-authority TYPE-decl tracking (change-id
+  // state-decl-shape-disambiguation-2026-06-14). When a Tier-1 server-authority
+  // type-decl (`< Name authority="server" table="…"> colon-fields </>`) is
+  // recognised in THIS `${…}` logic block, we record `TypeName → table` here so
+  // a later INSTANCE `< Name> @var` in the same block can be tied to its table
+  // (the SELECT * read-authority load is keyed off the table). Gated entirely on
+  // `authority="server"` — substates / §35.2 constructors / local states never
+  // populate this map, so they fall through to the existing dispatch untouched.
+  const _serverAuthorityTypes = new Map();
+
   // Unit CC (S123) — nested-block depth counter. Used by the V5-strict
   // `@name = expr` parse site to discriminate between:
   //   (a) bare write at the IMMEDIATE body-top of the synthetic default-logic
@@ -4740,6 +4750,204 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    * `renderSpec` sub-node (kind: "render-spec" wrapping the markup AST), and
    * `validators[]` field carrying bareword/call-form validator entries.
    */
+  /**
+   * §52.3.5 server-authority TYPE-decl + INSTANCE recogniser (gated on
+   * `authority="server"`). change-id state-decl-shape-disambiguation-2026-06-14.
+   *
+   * Called from tryParseStructuralDecl after the `<` + IDENT prefix is matched.
+   * Pure lookahead first; only consumes tokens on a confirmed match. Returns the
+   * built node, or null to decline (caller falls through to the generic scanner
+   * — substates / constructors / local states are never touched).
+   *
+   *   peek()  === `<` (startTok)
+   *   peek(1) === IDENT (nameTok — the TypeName, or instance TypeName)
+   */
+  function tryParseServerAuthorityDecl(startTok, nameTok) {
+    const typeName = nameTok.text;
+
+    // ── Sub-shape I — INSTANCE `< Name> @var` of a known server-auth type ──
+    // peek(2) === `>`, peek(3) === AT_IDENT, AND Name is a server-auth type
+    // recognised earlier in this block. (A `< Name> @var` for an UNKNOWN name
+    // is not ours — decline so existing dispatch handles it.)
+    {
+      const gt = peek(2);
+      const at = peek(3);
+      if (
+        gt && gt.kind === "PUNCT" && gt.text === ">" &&
+        at && at.kind === "AT_IDENT" &&
+        _serverAuthorityTypes.has(typeName)
+      ) {
+        const table = _serverAuthorityTypes.get(typeName);
+        // Consume `<` Name `>` and the AT_IDENT.
+        consume(); consume(); consume();
+        const varTok = consume();
+        const varName = varTok.text.replace(/^@/, "");
+        // An optional `= placeholder` (the client-side initial value shown while
+        // the SELECT * is in flight, §52.6.1) — collect it as the init expr if
+        // present, else default to an empty-array placeholder for a collection.
+        let initRaw = "";
+        let initNode;
+        if (peek().kind === "PUNCT" && peek().text === "=") {
+          consume(); // `=`
+          const { expr } = collectExpr();
+          initRaw = expr.trim();
+          initNode = safeParseExprToNode(initRaw, 0);
+        }
+        return {
+          id: ++counter.next,
+          kind: "state-decl",
+          name: varName,
+          init: initRaw,
+          initExpr: initNode,
+          structuralForm: true,
+          isConst: false,
+          shape: "plain",
+          defaultExpr: null,
+          pinned: false,
+          // §52 Tier-1 read-authority markers — consumed by collect.ts
+          // collectServerAuthorityTypes + emit-sync emitInitialLoad (SELECT *).
+          isServer: true,
+          stateType: typeName,
+          serverAuthorityTable: table,
+          span: spanOf(startTok, peek()),
+        };
+      }
+    }
+
+    // ── Sub-shape T — server-authority TYPE-decl ──
+    // `< Name [opener-attrs incl authority="server" + table="…"] >
+    //     field: Type   (one or more)
+    //  </>`
+    // Lookahead: scan opener attrs (IDENT `=` STRING pairs) up to `>`; only
+    // proceed when an `authority="server"` pair is present (the gate).
+    let k = 2;
+    const openerAttrs = []; // { name, value }
+    let sawGt = false;
+    while (true) {
+      const t = peek(k);
+      if (!t || t.kind === "EOF") return null;
+      if (t.kind === "PUNCT" && t.text === ">") { sawGt = true; break; }
+      // Opener attr: IDENT `=` STRING.
+      if (
+        t.kind === "IDENT" &&
+        peek(k + 1)?.kind === "PUNCT" && peek(k + 1)?.text === "=" &&
+        peek(k + 2)?.kind === "STRING"
+      ) {
+        openerAttrs.push({ name: t.text, value: peek(k + 2).text, valTok: peek(k + 2) });
+        k += 3;
+        continue;
+      }
+      // Any other opener token (a paren-typed `id(int)`, a bareword, etc.) is
+      // not the server-authority body-field shape we recognise here. Decline so
+      // the existing dispatch (parseTypedAttributes / scanner) handles it.
+      return null;
+    }
+    if (!sawGt) return null;
+    const authorityAttr = openerAttrs.find((a) => a.name === "authority");
+    // THE GATE: only `authority="server"` is ours.
+    if (!authorityAttr || authorityAttr.value !== "server") return null;
+    const tableAttr = openerAttrs.find((a) => a.name === "table");
+    const tableName = tableAttr ? tableAttr.value : null;
+
+    // Body must be a colon-field-list: (IDENT `:` Type)+ then a `</>`-style
+    // closer (`<` `/` `>`). Type is a balanced run of tokens up to the next
+    // field-name (IDENT followed by `:`) or the closer.
+    let bk = k + 1; // first body token (past the opener `>`)
+    const fields = []; // { name, typeExpr }
+    while (true) {
+      const t = peek(bk);
+      if (!t || t.kind === "EOF") return null;
+      // Closer `</>` (or `</Name>`): `<` `/` …
+      if (t.kind === "PUNCT" && t.text === "<" &&
+          peek(bk + 1)?.kind === "PUNCT" && peek(bk + 1)?.text === "/") {
+        break;
+      }
+      // Field: IDENT `:` Type
+      if (t.kind === "IDENT" &&
+          peek(bk + 1)?.kind === "PUNCT" && peek(bk + 1)?.text === ":") {
+        const fName = t.text;
+        let tk = bk + 2;
+        const typeToks = [];
+        // Collect the type expression until the next field (IDENT `:`) or the
+        // `</…` closer, tracking bracket/paren/brace depth so a type like
+        // `number | not` or `Column` or `string(pattern(/…/))` stays intact.
+        let pd = 0, bd = 0, brd = 0;
+        while (true) {
+          const tt = peek(tk);
+          if (!tt || tt.kind === "EOF") return null;
+          const top = pd === 0 && bd === 0 && brd === 0;
+          if (top && tt.kind === "PUNCT" && tt.text === "<" &&
+              peek(tk + 1)?.kind === "PUNCT" && peek(tk + 1)?.text === "/") break;
+          if (top && tt.kind === "IDENT" &&
+              peek(tk + 1)?.kind === "PUNCT" && peek(tk + 1)?.text === ":") break;
+          if (tt.kind === "PUNCT" && tt.text === "(") pd++;
+          else if (tt.kind === "PUNCT" && tt.text === ")") { if (pd === 0) return null; pd--; }
+          else if (tt.kind === "PUNCT" && tt.text === "[") bd++;
+          else if (tt.kind === "PUNCT" && tt.text === "]") { if (bd === 0) return null; bd--; }
+          else if (tt.kind === "PUNCT" && tt.text === "{") brd++;
+          else if (tt.kind === "PUNCT" && tt.text === "}") { if (brd === 0) return null; brd--; }
+          typeToks.push(tt.text);
+          tk++;
+        }
+        if (typeToks.length === 0) return null;
+        fields.push({ name: fName, typeExpr: typeToks.join(" ").trim() });
+        bk = tk;
+        continue;
+      }
+      // Anything else in the body is not a colon-field — decline.
+      return null;
+    }
+    if (fields.length === 0) return null;
+    // Consume the closer `<` `/` (and `>` or `Name` `>`).
+    // bk currently points at the `<` of the closer.
+    let closeEnd = bk + 2; // past `<` `/`
+    const afterSlash = peek(bk + 2);
+    if (afterSlash && afterSlash.kind === "PUNCT" && afterSlash.text === ">") {
+      closeEnd = bk + 3; // `</>`
+    } else if (afterSlash && afterSlash.kind === "IDENT" &&
+               peek(bk + 3)?.kind === "PUNCT" && peek(bk + 3)?.text === ">") {
+      closeEnd = bk + 4; // `</Name>`
+    } else {
+      return null; // malformed closer — decline
+    }
+
+    // Confirmed match — consume through the closer. `closeEnd` is a lookahead
+    // index relative to the CURRENT `i`; capture the absolute stop ONCE (before
+    // the consume loop advances `i`).
+    const _stopAt = i + closeEnd;
+    while (i < _stopAt && peek().kind !== "EOF") consume();
+
+    // Record the type → table mapping so a later `< Name> @var` instance in this
+    // block can resolve its SELECT * load target (§52.6.1).
+    if (tableName) _serverAuthorityTypes.set(typeName, tableName);
+
+    // Build attrs (the non-typed opener attrs — authority/table/protect) in the
+    // shape the type-system state-constructor-def handler reads (n.attrs[].value
+    // is { kind:"string-literal", value }), and typedAttrs from the colon body.
+    const attrs = openerAttrs.map((a) => ({
+      name: a.name,
+      value: { kind: "string-literal", value: a.value },
+    }));
+    const typedAttrs = fields.map((f) => ({
+      name: f.name,
+      typeExpr: f.typeExpr,
+      optional: false,
+      defaultValue: undefined,
+      span: spanOf(startTok, peek()),
+    }));
+
+    return {
+      id: ++counter.next,
+      kind: "state-constructor-def",
+      stateType: typeName,
+      typedAttrs,
+      attrs,
+      children: [],
+      openerHadSpaceAfterLt: true,
+      span: spanOf(startTok, peek()),
+    };
+  }
+
   function tryParseStructuralDecl(startTok, isConst, opts = null) {
     // Phase A1a Step 11.0a — when called recursively from inside a Variant C
     // compound body, the child's RHS-collection must stop at the next
@@ -4756,6 +4964,36 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // construct of this shape.
     const nameTok = peek(1);
     if (!nameTok || nameTok.kind !== "IDENT") return null;
+
+    // ─────────────────────────────────────────────────────────────────────
+    // §52.3.5 server-authority TYPE-decl + INSTANCE recognition (gated)
+    // change-id: state-decl-shape-disambiguation-2026-06-14.
+    //
+    // The canonical Tier-1 shape (SPEC §52.3.5) lives inside a `${…}` logic
+    // block and was previously swallowed as `html-fragment` (the generic
+    // scanStructuralDeclLookahead declines: its validator loop reads
+    // `authority` as a bareword validator, then hits `=` and returns null).
+    //
+    // The DISCRIMINATOR is `authority="server"` in the opener (SPEC §52.3.3 —
+    // mandated together with `table=`; empirically unique to §52.3.5, never
+    // carried by a §54.2 substate or a §35.2 constructor). We gate ALL new
+    // recognition on it, so substates / local states / constructors fall
+    // through to the existing dispatch entirely untouched.
+    //
+    // Two sub-shapes are recognised here (both `const` declines — a server
+    // type-decl / instance is never `const`):
+    //   T (type-decl): `< Name authority="server" table="…"> colon-fields </>`
+    //                  → state-constructor-def carrying attrs[authority,table]
+    //                    + typedAttrs[{name,typeExpr}] from the colon body. This
+    //                    reuses the registerStateType + W-AUTH-002 path.
+    //   I (instance):  `< Name> @var`  where Name was a recognised server-auth
+    //                  type IN THIS BLOCK → a state-decl{ name:var, isServer,
+    //                    stateType:Name, serverAuthorityTable:table } so the
+    //                    Tier-2 collector/initial-load path emits the SELECT *.
+    if (!isConst) {
+      const _saNode = tryParseServerAuthorityDecl(startTok, nameTok);
+      if (_saNode) return _saNode;
+    }
 
     // ─── Step 5 — lookahead scan for optional validators between IDENT and `>` ───
     //

@@ -551,7 +551,54 @@ export function collectServerVarDecls(fileAST: FileAST): Node[] {
       if (!node || typeof node !== "object") continue;
       if (node.kind === "logic" && Array.isArray(node.body)) {
         for (const child of node.body) {
-          if (child && child.kind === "state-decl" && (child as any).isServer === true) {
+          if (
+            child && child.kind === "state-decl" && (child as any).isServer === true &&
+            // Tier-1 server-authority TYPE instances (serverAuthorityTable) are
+            // collected separately by collectServerAuthorityTypes — keep the two
+            // paths disjoint (§52.3 vs §52.4).
+            !(child as any).serverAuthorityTable
+          ) {
+            result.push(child);
+          }
+        }
+      }
+      if (Array.isArray(node.children)) visit(node.children);
+    }
+  }
+  visit(nodes);
+  return result;
+}
+
+/**
+ * §52.3.5 Tier-1 server-authority TYPE instances (read-authority codegen).
+ *
+ * change-id state-decl-shape-disambiguation-2026-06-14. The recogniser
+ * (ast-builder tryParseServerAuthorityDecl) produces, for each
+ * `< Name authority="server" table="…">` type-decl + its `< Name> @var`
+ * instance, a `state-decl{ isServer:true, stateType, serverAuthorityTable }`
+ * node. This collector returns those instances so the read-authority codegen
+ * (the `SELECT * FROM <table>` mount load + SSR pre-render, §52.6.1/§52.8) can
+ * attach. These are the Tier-1 cells; `collectServerVarDecls` above returns the
+ * Tier-2 `<var server>` cells. They are disjoint (Tier-1 carries
+ * `serverAuthorityTable`; Tier-2 does not), and a cell is in exactly one.
+ *
+ * The WRITE is always the developer's own `?{}` server fn (§52.6.2, Q1=C) — no
+ * write route is generated here.
+ */
+export function collectServerAuthorityTypes(fileAST: FileAST): Node[] {
+  const nodes = getNodes(fileAST);
+  const result: Node[] = [];
+  function visit(list: Node[]): void {
+    for (const node of list) {
+      if (!node || typeof node !== "object") continue;
+      if (node.kind === "logic" && Array.isArray(node.body)) {
+        for (const child of node.body) {
+          if (
+            child && child.kind === "state-decl" &&
+            (child as any).isServer === true &&
+            typeof (child as any).serverAuthorityTable === "string" &&
+            (child as any).serverAuthorityTable.length > 0
+          ) {
             result.push(child);
           }
         }

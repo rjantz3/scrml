@@ -7958,23 +7958,24 @@ function annotateNodes(
             ctorTransitions,
           );
 
-          // W-AUTH-002 (interim honesty, §52.6.1 / §52.3.3): a Tier-1
-          // `authority="server" table=` state type declares read-authority but
-          // the compiler does not YET generate the `SELECT *` initial-load /
-          // SSR pre-render codegen for it (that is a committed follow-on — see
-          // change-id g1-server-sync-codegen-2026-06-14). Without this warning
-          // the type compiles CLEAN with zero sync codegen and zero signal — a
-          // silent no-op (a dev declares server authority and silently gets a
-          // client-local app). Surface the residual gap until the read codegen
-          // lands. The WRITE is always the dev's own `?{}` server fn (§52.6.2).
+          // W-AUTH-002 (interim honesty, §52.8): a Tier-1 `authority="server"
+          // table=` state type now gets its `SELECT *` initial-load codegen
+          // (§52.6.1, change-id state-decl-shape-disambiguation-2026-06-14 — the
+          // recogniser + emit-sync emitServerAuthorityLoad + the /__serverLoad
+          // route). The ONE remaining read-authority residual is SSR pre-render
+          // (§52.8): instances are loaded client-side on mount (a brief
+          // placeholder flash on first paint), not yet pre-rendered into the
+          // initial HTML. W-AUTH-002 now NARROWLY surfaces only that SSR residual
+          // (split to the committed follow-on g-tier1-read-authority-codegen).
+          // The WRITE is always the dev's own `?{}` server fn (§52.6.2).
           if (ctorAuthority === "server" && ctorTableName) {
             errors.push(new TSError(
               "W-AUTH-002",
-              `W-AUTH-002: state type '< ${ctorName}>' declares authority="server" table="${ctorTableName}", ` +
-              `but the compiler does not yet generate its read-authority sync (the SELECT * initial load + ` +
-              `SSR pre-render). Instances will display their local placeholder until you load them explicitly ` +
-              `(e.g. an 'on mount' block that assigns from a server function). The persist write is your own ` +
-              `?{} server fn (§52.6.2). Auto-load codegen is a tracked follow-on.`,
+              `W-AUTH-002: state type '< ${ctorName}>' (authority="server" table="${ctorTableName}") ` +
+              `gets its SELECT * initial load on mount, but is not yet SSR pre-rendered (§52.8): ` +
+              `instances load client-side after first paint (a brief placeholder flash), rather than ` +
+              `being populated into the initial server-rendered HTML. SSR pre-render is a tracked ` +
+              `follow-on. The persist write is your own ?{} server fn (§52.6.2).`,
               ctorSpan,
               "warning",
             ));
@@ -9029,7 +9030,14 @@ function annotateNodes(
                         : "");
                   return initRaw ? initRaw.includes("(") : false;
                 })();
-            if (!hasInitCall) {
+            // §52.3.5 Tier-1 server-authority TYPE instances carry an
+            // auto-generated SELECT * read-authority load (serverAuthorityTable);
+            // their initial load is compiler-generated, so W-AUTH-001 (which
+            // nudges the Tier-2 dev to supply a loader) does NOT apply.
+            const _isTier1AuthInstance =
+              typeof (n as ASTNodeLike).serverAuthorityTable === "string" &&
+              ((n as ASTNodeLike).serverAuthorityTable as string).length > 0;
+            if (!hasInitCall && !_isTier1AuthInstance) {
               errors.push(new TSError(
                 "W-AUTH-001",
                 `W-AUTH-001: 'server @${n.name as string}' has no detected initial load. ` +

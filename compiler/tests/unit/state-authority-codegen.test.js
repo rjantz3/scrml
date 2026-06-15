@@ -383,33 +383,33 @@ describe("state-authority-codegen §8: client JS does NOT contain sync for plain
 });
 
 // ---------------------------------------------------------------------------
-// §9: Tier 1 — authority="server" + table= (scaffold: no crash, no SELECT yet)
-//
-// Tier 1 auto-SELECT (read-authority) is a committed follow-on. These tests
-// verify:
-//   a) The compiler does not crash on Tier 1 declarations
-//   b) No erroneous output is produced
-//   c) This test file defines the contract for when Tier 1 lands
-//
-// When Tier 1 SELECT generation lands, the "does NOT contain" assertion below
-// should be flipped to verify the generated SELECT query.
+// §9: Tier 1 — authority="server" + table= READ-authority codegen
+//     (change-id state-decl-shape-disambiguation-2026-06-14)
 // ---------------------------------------------------------------------------
+//
+// The canonical §52.3.5 shape (`< Card authority="server" table="cards"> body
+// fields </>` + `<Card> @cards`, inside a `${…}` block) is now recognised by
+// the AST builder (tryParseServerAuthorityDecl) and gets its read-authority
+// SELECT * initial load (emit-sync emitServerAuthorityLoad + the /__serverLoad
+// route in emit-server). The WRITE stays the dev's own `?{}` server fn (Q1=C);
+// SSR pre-render (§52.8) is the split follow-on.
 
-describe("state-authority-codegen §9: Tier 1 authority='server' — no crash (scaffold)", () => {
-  test("state type with authority='server' + table= compiles without crashing", () => {
-    // The type system accepts the declaration. CG should not crash.
-    // Tier 1 SELECT is a follow-on; this just verifies no fatal errors.
-    const source = `<program db="sqlite:./test.db">
+const TIER1_SRC = `<program db="sqlite:./test.db">
 \${
   < Card authority="server" table="cards">
     id: number
     title: string
   </>
+  <Card> @cards
 }
-</>`;
+<ul><each in=@cards key=@.id><li : @.title></each></ul>
+</program>`;
+
+describe("state-authority-codegen §9: Tier 1 authority='server' — READ-authority codegen", () => {
+  test("compiles without crashing", () => {
     let didThrow = false;
     try {
-      const ast = parseAST(source);
+      const ast = parseAST(TIER1_SRC);
       runCG({
         files: [ast],
         routeMap: makeRouteMap(),
@@ -422,20 +422,47 @@ describe("state-authority-codegen §9: Tier 1 authority='server' — no crash (s
     expect(didThrow).toBe(false);
   });
 
-  test("Tier 1 scaffold: server JS does not yet contain auto-SELECT for state type (pre-implementation contract)", () => {
-    // This test documents the current state: Tier 1 SELECT is NOT yet generated.
-    // When Tier 1 read-authority lands, update this assertion to
-    // expect(serverJs).toContain("SELECT * FROM cards").
-    const source = `<program db="sqlite:./test.db">
+  test("client JS emits the SELECT * initial-load IIFE for the @cards instance (§52.6.1)", () => {
+    const clientJs = compileClientJs(TIER1_SRC);
+    // The load fetches the per-instance serverLoad route and lands the rows.
+    expect(clientJs).toContain("/__serverLoad/cards");
+    expect(clientJs).toContain('_scrml_reactive_set("cards"');
+  });
+
+  test("server JS emits the /__serverLoad/cards route running SELECT * FROM cards (§52.6.1)", () => {
+    const serverJs = compileServerJs(TIER1_SRC);
+    expect(serverJs).toContain("/__serverLoad/cards");
+    expect(serverJs).toContain("SELECT * FROM cards");
+    // The route must be a real handler + export (symmetric to /__mountHydrate).
+    expect(serverJs).toContain("_scrml_route___serverLoad_cards");
+  });
+
+  test("server file IS emitted even with no developer-authored server fns (emission gate)", () => {
+    // G1 SCOPING §7 finding #2: the server-file emission gate must fire on a
+    // server-authority type instance, else the load route has nowhere to live.
+    const serverJs = compileServerJs(TIER1_SRC);
+    expect(serverJs.length).toBeGreaterThan(0);
+    expect(serverJs).toContain("_scrml_serverLoad_cards_handler");
+  });
+
+  test("the WRITE path is NOT generated (Q1=C — dev owns the `?{}` persist)", () => {
+    const serverJs = compileServerJs(TIER1_SRC);
+    const clientJs = compileClientJs(TIER1_SRC);
+    // No auto-persist route / sync stub for the Tier-1 cell.
+    expect(serverJs).not.toContain("/_scrml/sync/cards");
+    expect(clientJs).not.toContain("_scrml_server_sync_cards");
+  });
+
+  test("a `authority='local'` type instance gets NO server-authority load", () => {
+    const src = `<program db="sqlite:./test.db">
 \${
-  < Card authority="server" table="cards">
+  < Note authority="local" table="notes">
     id: number
-    title: string
   </>
+  <Note> @notes
 }
-</>`;
-    const serverJs = compileServerJs(source);
-    // Tier 1 SELECT not yet implemented — confirm no phantom SELECT is emitted
-    expect(serverJs).not.toContain("SELECT * FROM cards WHERE");
+</program>`;
+    const clientJs = compileClientJs(src);
+    expect(clientJs).not.toContain("/__serverLoad/notes");
   });
 });
