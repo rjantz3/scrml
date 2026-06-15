@@ -26545,11 +26545,13 @@ match block-form arm grammar (`| .Variant(binding) :> body`) verbatim; payload b
 
   <Idle rule=.Dragging>
     | .Start(id) :> .Dragging(id)              <!-- (Idle × Start) → Dragging, carrying id -->
+    | _          :> @dragPhase                 <!-- ignore Drop/End while Idle (§51.0.S.2.4 wildcard; self-target no-op §51.0.F.1) -->
   </>
 
   <Dragging(id) rule=.Idle>                     <!-- id bound from the .Dragging payload (§51.0.B.1) -->
     | .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); .Idle }   <!-- id (state) + col (msg) in scope -->
     | .End       :> .Idle
+    | _          :> @dragPhase                 <!-- ignore Start while Dragging (§51.0.S.2.4 wildcard) -->
   </>
 
 </>
@@ -26683,10 +26685,12 @@ type DragMsg:enum   = { Start(id: number), Drop(col: string), End }
 <engine for=DragPhase initial=.Idle accepts=DragMsg>
   <Idle rule=.Dragging>
     | .Start(id) :> .Dragging(id)
+    | _          :> @dragPhase
   </>
   <Dragging(id) rule=.Idle>
     | .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); .Idle }
     | .End       :> .Idle
+    | _          :> @dragPhase
   </>
 </>
 
