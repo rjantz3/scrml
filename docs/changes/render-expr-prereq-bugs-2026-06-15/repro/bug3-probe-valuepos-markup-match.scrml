@@ -1,0 +1,13 @@
+// Probe — markup-as-value in a JS-style value-match arm, VALUE position (const decl).
+// SPEC §1.4 line 5745 says markup may sit in a match arm RHS. Does it compile?
+<program>
+  ${
+    type LoadError:enum = { NotFound, Forbidden }
+    <err>: LoadError = .NotFound
+    const view = match @err {
+      .NotFound  :> <p>Not found.</p>
+      .Forbidden :> <p>Forbidden.</p>
+    }
+  }
+  <div>x</div>
+</program>

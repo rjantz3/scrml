@@ -1589,8 +1589,23 @@ export function rewriteEnumVariantAccess(expr: string): string {
   // The `(?!\s*\()` negative lookahead excludes any payload-variant constructor
   // call form (now handled by `_rewritePayloadVariantConstructorCalls` above).
   expr = expr.replace(/(?<![A-Za-z0-9_$.])\.\s*([A-Z][A-Za-z0-9_]*)\b(?!\s*\()/g, '"$1"');
-  expr = expr.replace(/\b[A-Z][A-Za-z0-9_]*\s*::\s*([A-Z][A-Za-z0-9_]*)/g, '"$1"');
-  expr = expr.replace(/\s*::\s*([A-Z][A-Za-z0-9_]*)/g, '"$1"');
+  // Qualified unit-variant READ (`Enum::Variant` / `::Variant`, NOT a call) → the
+  // bare string tag. The `(?!\s*\()` negative lookahead is load-bearing: a
+  // qualified payload-bearing CONSTRUCTOR CALL (`LoadError::NotFound(id)`) must
+  // NOT be stripped to `"NotFound"(id)` — a string invoked as a function (the
+  // g-failable-arm-nested-constructor-crash runtime crash). The call form is
+  // collapsed to a valid frozen-enum constructor call below instead.
+  expr = expr.replace(/\b[A-Z][A-Za-z0-9_]*\s*::\s*([A-Z][A-Za-z0-9_]*)\b(?!\s*\()/g, '"$1"');
+  expr = expr.replace(/(?<![A-Za-z0-9_$])::\s*([A-Z][A-Za-z0-9_]*)\b(?!\s*\()/g, '"$1"');
+  // A surviving qualified CONSTRUCTOR CALL (`Enum::Variant(args)` — the
+  // `::`-strips above skipped it via the `(?!\s*\()` guard) collapses to the
+  // standard member-access form `Enum.Variant(args)`, which invokes the frozen
+  // enum object's `Variant` constructor (emit-client.ts:emitEnumVariantObjects)
+  // and produces the canonical `{ variant, data }` tagged-object at runtime —
+  // byte-identical to how the structured-AST path lowers the same construct in a
+  // plain `function` body (the control). Closes g-failable-arm-nested-
+  // constructor-crash (S195/S196).
+  expr = expr.replace(/(\b[A-Z][A-Za-z0-9_]*)\s*::\s*([A-Z][A-Za-z0-9_]*)(\s*\()/g, '$1.$2$3');
   return expr;
 }
 

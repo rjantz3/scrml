@@ -1,0 +1,12 @@
+// Control — a string-returning JS-style value-match. MUST compile clean (no false fire).
+<program>
+  ${
+    type LoadError:enum = { NotFound, Forbidden(reason: string) }
+    <err>: LoadError = .NotFound
+    const msg = match @err {
+      .NotFound        :> "Not found."
+      .Forbidden(reason) :> "Forbidden: " + reason
+    }
+  }
+  <div>${@err}</div>
+</program>

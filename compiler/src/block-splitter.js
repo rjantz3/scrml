@@ -271,24 +271,6 @@ function skipDollarBrace(source, startPos) {
 }
 
 /**
- * Skip past a quoted string starting at `startPos` (which SHALL be the
- * opening quote). Returns the position immediately after the matching
- * close quote. Handles `\"` / `\\` escapes.
- */
-function skipQuotedString(source, startPos) {
-  const len = source.length;
-  const quote = source[startPos];
-  let i = startPos + 1;
-  while (i < len) {
-    const c = source[i];
-    if (c === "\\" && i + 1 < len) { i += 2; continue; }
-    if (c === quote) return i + 1;
-    i++;
-  }
-  return len;
-}
-
-/**
  * Skip past an HTML comment `<!-- ... -->` starting at `startPos` (which
  * SHALL be the `<` byte; caller has confirmed `<!--` prefix). Returns the
  * position immediately after the closing `-->`.
@@ -612,10 +594,19 @@ function findStructuralBodyEnd(source, startPos, outerTagName) {
       i = skipDollarBrace(source, i);
       continue;
     }
-    if (c === '"' || c === "'") {
-      i = skipQuotedString(source, i);
-      continue;
-    }
+    // g-match-arm-apostrophe-bs (S195/S196) — a `'` / `"` at the MARKUP-TEXT level
+    // (between tags, outside `${...}`) is PROSE, NOT a string-span delimiter. The
+    // body-level scan must NOT skip a quoted span here: a possessive apostrophe or
+    // contraction in arm free-text (`<Failed> <p>We'll try again later.</p> </>`)
+    // would otherwise open a phantom string that consumes the `</p>` / `</>`
+    // closers through to EOF — the tag-stack never unwinds and the scan surfaces a
+    // misleading E-CTX-001/003 "Unclosed <match>". This mirrors the S109 locus
+    // ruling (bug-4 deep-dive): strings live in LOGIC context (inside `${...}`,
+    // already opaque via skipDollarBrace above) and in ATTRIBUTE VALUES (handled
+    // with local quote-state inside scanOpenerBody) — markup-text body is text with
+    // no string concept. (A paired-quote string containing `/<X` in markup prose is
+    // the documented narrow edge case with an entity-escape workaround, same as the
+    // S109 main-loop ruling.)
     if (c === "/" && source[i + 1] === "/") {
       i = skipLineComment(source, i);
       continue;

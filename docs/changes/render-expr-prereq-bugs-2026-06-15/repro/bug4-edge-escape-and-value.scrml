@@ -1,0 +1,15 @@
+<program>
+  ${
+    type S:enum = { A(x: string), B, C }
+    <s>: S = .B
+    <label> = "hi"
+    fn caption() -> string { return "cap" }
+  }
+  <div>
+    <match for=S on=@s>
+      <A x : "x is ${x} & <ok>">
+      <B : "plain text">
+      <C : caption()>
+    </>
+  </div>
+</program>

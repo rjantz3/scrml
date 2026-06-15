@@ -1,0 +1,17 @@
+// Bug 2 control — `We will` (no apostrophe) must compile clean.
+<program>
+  ${
+    type Phase:enum = { Editing, Failed }
+    <phase>: Phase = .Editing
+  }
+  <div>
+    <match for=Phase on=@phase>
+      <Editing>
+        <p>Edit your form.</p>
+      </>
+      <Failed>
+        <p>We will try again later.</p>
+      </>
+    </>
+  </div>
+</program>

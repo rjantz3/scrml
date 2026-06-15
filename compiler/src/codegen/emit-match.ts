@@ -519,6 +519,62 @@ function resolveVariantFields(forType: string, fileAST: any): Map<string, string
  * file-scope state via canonical `@cell` access which is resolved at
  * codegen-time emission, not at AST construction).
  */
+/**
+ * g-shorthand-interp-match-arm-codegen (S195 MED / S196 prereq-bug Bucket 4) —
+ * recognise a `:`-shorthand arm body that is a §4.18.3 DISPLAY-TEXT LITERAL
+ * (`"..."`, possibly carrying `${...}` interpolation per §4.18.4). Returns the
+ * literal's INNER content with the three §4.18.3 escapes decoded (`\"` -> `"`,
+ * `\\` -> `\`, `\${` -> `${`), or `null` when the body is NOT a single
+ * well-formed display-text literal (a value-expression `@cell` / `fn()` /
+ * `.Variant` / a markup-as-value `<p>` element — those take their own paths).
+ *
+ * The inner content is then routed through the SAME free-text fragment lowering
+ * the bare-body form uses (nativeParseFile) so the literal segments are
+ * HTML-escaped (§4.18.6) and the `${...}` interpolations are wired (§4.18.4) —
+ * byte-equivalent display to `<Variant ...><p>${...}</p></>`. Pre-fix the body
+ * went through parseExprToNode, which parsed `"Failed: ${reason}"` as a plain JS
+ * string literal and emitted `return "Failed: ${reason}"` LITERALLY (the `${...}`
+ * dead text, no `data-scrml-logic` wire) — silent wrong output.
+ *
+ * A display-text literal is `"` ... `"` with the ONLY unescaped `"` being the
+ * delimiters. We require the FIRST char to be `"` and the matching close `"` to
+ * be the LAST char (a single literal, not `"a" + "b"` concatenation — that is a
+ * value-expression, handled by parseExprToNode). Backtick / apostrophe are
+ * ordinary interior chars (§4.18.3) and need no special handling here.
+ */
+function displayTextLiteralInner(raw: string): string | null {
+  const s = raw.trim();
+  if (s.length < 2 || s[0] !== '"') return null;
+  // Scan for the matching close `"`, honouring the three §4.18.3 escapes. The
+  // close must be the LAST non-trailing-whitespace char — otherwise this is a
+  // concatenation / larger expression, not a single display-text literal.
+  let i = 1;
+  const out: string[] = [];
+  while (i < s.length) {
+    const c = s[i];
+    if (c === "\\") {
+      const next = s[i + 1];
+      if (next === '"' || next === "\\") { out.push(next); i += 2; continue; }
+      // `\${` -> literal `${` (the interpolation-opener escape, §4.18.3/§4.18.4).
+      if (next === "$" && s[i + 2] === "{") { out.push("${"); i += 3; continue; }
+      // Any other backslash escape is malformed inside a display-text literal —
+      // bail out (not our shape; let the existing path surface a diagnostic).
+      return null;
+    }
+    if (c === '"') {
+      // Found the close. It must terminate the literal (only trailing whitespace
+      // may follow). Otherwise it is not a single display-text literal.
+      if (i === s.length - 1) return out.join("");
+      return null;
+    }
+    out.push(c);
+    i++;
+  }
+  // Unterminated — not a well-formed display-text literal; let the existing path
+  // surface E-CTX-001 / the diagnostic.
+  return null;
+}
+
 function buildMatchArms(
   matchBlock: MatchBlockAstNode,
   fileAST: any,
@@ -739,6 +795,24 @@ function buildMatchArms(
         try {
           const synthLabel = `<match:${matchBlock.id}:${tag}>`;
           const synthResult = nativeParseFile(synthLabel, trimmed);
+          if (synthResult && Array.isArray(synthResult.ast?.nodes)) {
+            body = synthResult.ast.nodes;
+          }
+        } catch (_e) {
+          // Defensive — leave body empty on parse failure.
+        }
+      } else if (displayTextLiteralInner(trimmed) !== null) {
+        // g-shorthand-interp-match-arm-codegen (S196 Bucket 4) — a §4.18.3
+        // display-text literal (`"Failed: ${reason}"`). Route its INNER content
+        // through the SAME free-text fragment lowering the bare-body form uses,
+        // so literal segments HTML-escape (§4.18.6) and `${...}` interpolations
+        // wire (§4.18.4) — byte-equivalent to the bare-body `<Variant ...>...</>`
+        // form. (Pre-fix parseExprToNode parsed it as a plain JS string literal
+        // and emitted `return "Failed: ${reason}"` literally — silent wrong output.)
+        const inner = displayTextLiteralInner(trimmed) as string;
+        try {
+          const synthLabel = `<match:${matchBlock.id}:${tag}>`;
+          const synthResult = nativeParseFile(synthLabel, inner);
           if (synthResult && Array.isArray(synthResult.ast?.nodes)) {
             body = synthResult.ast.nodes;
           }

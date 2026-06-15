@@ -1,0 +1,9 @@
+// INVESTIGATE — §4.14 element `:`-shorthand display-text literal with ${interp}.
+<program>
+  ${
+    <label> = "world"
+  }
+  <div>
+    <span : "Hello ${@label}!">
+  </div>
+</program>

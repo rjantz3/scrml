@@ -1,0 +1,14 @@
+// Bug 3 (Seam 2) — payload var in ${...} inside a JS-style value-match arm
+// returning markup. Today: E-SCOPE-001 "Undeclared identifier" (payload not in scope).
+<program>
+  ${
+    type LoadError:enum = { NotFound(id: string), Forbidden }
+    <err>: LoadError = .Forbidden
+  }
+  <div>
+    ${match @err {
+      .NotFound(id) :> <p>Missing: ${id}</p>
+      .Forbidden    :> <p>Forbidden.</p>
+    }}
+  </div>
+</program>

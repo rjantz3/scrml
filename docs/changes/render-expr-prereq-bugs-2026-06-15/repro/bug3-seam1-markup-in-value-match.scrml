@@ -1,0 +1,14 @@
+// Bug 3 (Seam 1) — a JS-style value-match arm RETURNING MARKUP. The natural reflex.
+// Today: E-CODEGEN-INVALID-JS / E-CG-003 (wrong altitude — CG "compiler defect").
+<program>
+  ${
+    type LoadError:enum = { NotFound, Forbidden }
+    <err>: LoadError = .NotFound
+  }
+  <div>
+    ${match @err {
+      .NotFound  :> <p>Not found.</p>
+      .Forbidden :> <p>Forbidden.</p>
+    }}
+  </div>
+</program>

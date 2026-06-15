@@ -1,0 +1,12 @@
+<program>
+  ${
+    type Phase:enum = { Editing, Failed(reason: string) }
+    <phase>: Phase = .Editing
+  }
+  <div>
+    <match for=Phase on=@phase>
+      <Editing : "Editing...">
+      <Failed reason>"Failed: ${reason}"</>
+    </>
+  </div>
+</program>

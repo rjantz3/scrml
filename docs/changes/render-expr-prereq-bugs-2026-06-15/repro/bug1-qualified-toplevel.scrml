@@ -1,0 +1,23 @@
+// Probe — a QUALIFIED payload constructor call as a direct (non-nested) RHS in
+// an `!{}` arm. Tests whether the string-rewrite path mangles the qualified form
+// even without the `.Failed(...)` outer wrapper.
+<program>
+  ${
+    type LoadError:enum = {
+        NotFound(id: string)
+        Forbidden
+    }
+    <held>: LoadError = .Forbidden
+    <id> = "abc"
+
+    function loadIt(rid: string) ! LoadError {
+        if (rid == "") fail .Forbidden
+    }
+    function tryLoad() {
+        loadIt(@id) !{
+            | err :> { @held = LoadError::NotFound(@id); return }
+        }
+    }
+  }
+  <div><button onclick=tryLoad()>Load</button></div>
+</program>

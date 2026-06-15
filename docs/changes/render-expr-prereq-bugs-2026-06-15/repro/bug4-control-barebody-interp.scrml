@@ -1,0 +1,13 @@
+// Bug 4 control — the bare-body form lowers ${reason} correctly (data-scrml-logic span).
+<program>
+  ${
+    type Phase:enum = { Editing, Failed(reason: string) }
+    <phase>: Phase = .Editing
+  }
+  <div>
+    <match for=Phase on=@phase>
+      <Editing><p>Editing...</p></>
+      <Failed reason><p>${reason}</p></>
+    </>
+  </div>
+</program>

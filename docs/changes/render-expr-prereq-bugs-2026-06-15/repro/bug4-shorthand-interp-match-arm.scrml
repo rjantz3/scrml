@@ -1,0 +1,14 @@
+// Bug 4 (H2) — `${...}` interpolation inside a `<match>`-arm `:`-shorthand
+// display-text literal (§4.18.4). COMPILES CLEAN but emits LITERALLY.
+<program>
+  ${
+    type Phase:enum = { Editing, Failed(reason: string) }
+    <phase>: Phase = .Editing
+  }
+  <div>
+    <match for=Phase on=@phase>
+      <Editing : "Editing...">
+      <Failed reason : "Failed: ${reason}">
+    </>
+  </div>
+</program>

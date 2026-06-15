@@ -9820,7 +9820,13 @@ function annotateNodes(
           }
         }
         const mBody = n.body as ASTNodeLike[] | undefined;
-        if (Array.isArray(mBody)) {
+        // H1 steer (S196) — when checkMatchDiagnostics fired
+        // E-MATCH-ARM-MARKUP-IN-VALUE, SKIP the arm-body visit so the steer is the
+        // ONLY diagnostic the adopter sees: visiting a markup-returning value-arm
+        // body re-derives the wrong-altitude E-SCOPE-001 (payload not in scope for
+        // value-match codegen) that the steer is meant to replace.
+        const markupSteered = (n as { __markupInValueSteered?: boolean }).__markupInValueSteered === true;
+        if (Array.isArray(mBody) && !markupSteered) {
           for (const c of mBody) {
             // §42.2.3 / §34 — mark direct given-guard children as in-match so
             // the given-guard case suppresses W-GIVEN-ARROW-LEGACY (an in-match
@@ -13281,6 +13287,65 @@ function checkMatchDiagnostics(
         "E-MATCH-ARM-SEPARATOR: `match` arm `" + test + " => …` is followed by a `,`. " +
         "Match arms are separated by newlines, not commas (§18.2) — there is no comma separator " +
         "between arms. Remove the trailing `,` and place each arm on its own line.",
+        armSpan,
+      ));
+    }
+  }
+
+  // H1 steer-to-block-form (S196 / error-handling-holistic DD §1.4 Seams 1+2,
+  // debate §6 prereqs 3+4) — a JS-style value-match arm whose body RETURNS
+  // MARKUP. §18.0 is explicit: the JS-style form `match expr { .V :> ... }`
+  // emits a VALUE (server logic, derivations); the block-form `<match for=Type>`
+  // emits MARKUP. The natural reflex `${match err { .V(p) :> <markup with ${p}> }}`
+  // sits on the value<->markup boundary the two forms split. Without this steer
+  // it surfaces a wrong-altitude failure at a LATER stage — Seam 1 (markup body)
+  // -> E-CODEGEN-INVALID-JS (a CG "compiler defect" message for a USER error),
+  // Seam 2 (payload var in a `${...}` inside the markup body) -> E-SCOPE-001
+  // "Undeclared identifier" (the payload isn't in scope for value-match codegen).
+  // Replace BOTH with ONE early TYPER-stage steer. We do NOT widen value-match to
+  // emit markup (that would godify the value-match primitive — limit-primitives-
+  // not-godify); we point the adopter at the structural `<match for=>` block (for
+  // a UI tree) or at firing a variant's `renders` via the render-expression.
+  //
+  // Detection signature (verified against the block-splitter-padded arm result):
+  // a markup-as-value opener at the START of the arm result (`< p > ...`,
+  // resultExpr.kind === "escape-hatch"). A markup arm result begins `<` + a
+  // tag-name char; a string arm (`:> "Failed: "+reason`) begins `"` and a value
+  // arm (`:> x`, `:> .Variant`, `:> obj.field`) never begins `<` + a tag name —
+  // so the string-/value-returning controls never false-fire. SCOPE: fires ONLY
+  // here, on `match-arm-inline` arms of a JS-style match-stmt/match-expr; the
+  // block-form `<match>` is a distinct `match-block` node that never reaches
+  // checkMatchDiagnostics, so it is structurally exempt.
+  {
+    const armBody = (node as { body?: ASTNodeLike[] }).body ?? [];
+    let steered = false;
+    for (const arm of armBody) {
+      if (steered) break;
+      if (!arm || typeof arm !== "object") continue;
+      if ((arm as ASTNodeLike).kind !== "match-arm-inline") continue;
+      const result = (arm as { result?: unknown }).result;
+      if (typeof result !== "string") continue;
+      // Markup-as-value opener at the arm-result start: `<` (optionally space-
+      // padded by the BS) then a tag-name char, then a separator (space / `>` /
+      // `/`). This excludes a comparison `a < b` (the `<` is never at result
+      // start) and a bare `<` typo.
+      if (!/^<\s*[A-Za-z][A-Za-z0-9-]*[\s>/]/.test(result.trim())) continue;
+      const armSpan = ((arm as { span?: Span }).span ?? span) as Span;
+      // One steer per match block — the first markup arm is enough to point the
+      // adopter at the right form; don't spam one error per arm. Stamp the node
+      // so the match-expr/stmt case skips the arm-body visit — the steer REPLACES
+      // the downstream wrong-altitude errors (Seam 2's E-SCOPE-001 on a markup-arm
+      // payload, Seam 1's E-CODEGEN-INVALID-JS), per the DD "ONE clear steer".
+      steered = true;
+      (node as { __markupInValueSteered?: boolean }).__markupInValueSteered = true;
+      errors.push(new TSError(
+        "E-MATCH-ARM-MARKUP-IN-VALUE",
+        "E-MATCH-ARM-MARKUP-IN-VALUE: a JS-style `match` arm returns a VALUE, not markup " +
+        "(§18.0) — but this arm body is a markup element. Use a `<match for=Type [on=expr]>` " +
+        "block (the structural Tier-1 form, §18.0.1) to render a UI tree per variant, or fire " +
+        "a variant's `renders` display via the render-expression. To compute a VALUE per " +
+        "variant (a string / number), have the arm return that value " +
+        "(e.g. `:> \"Failed: \" + reason`) and interpolate it in markup.",
         armSpan,
       ));
     }

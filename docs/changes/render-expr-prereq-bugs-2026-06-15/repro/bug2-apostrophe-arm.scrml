@@ -1,0 +1,19 @@
+// Bug 2 reproducer — an apostrophe in `<match>`-arm FREE-TEXT prose.
+// `We'll` breaks the block-splitter (reads `'` as a string delimiter) -> E-CTX-001.
+// Control `We will` compiles clean.
+<program>
+  ${
+    type Phase:enum = { Editing, Failed }
+    <phase>: Phase = .Editing
+  }
+  <div>
+    <match for=Phase on=@phase>
+      <Editing>
+        <p>Edit your form.</p>
+      </>
+      <Failed>
+        <p>We'll try again later.</p>
+      </>
+    </>
+  </div>
+</program>

@@ -1,0 +1,40 @@
+// Bug 1 reproducer — nested payload-bearing variant constructor in an `!{}` arm.
+// `.Failed(LoadError::NotFound(@id))` is the bug shape; the plain-function control
+// `buildErr()` lowers the SAME nested constructor correctly.
+<program>
+
+  ${
+    type LoadError:enum = {
+        NotFound(id: string)
+        Forbidden
+    }
+
+    type Phase:enum = { Idle, Failed(err: LoadError) }
+
+    <phase>: Phase = .Idle
+    <id> = "abc"
+
+    // CONTROL — the same nested constructor in a plain function body.
+    fn buildErr(rid: string) -> LoadError {
+        return LoadError::NotFound(rid)
+    }
+
+    // failable fn used to drive the `!{}` arm.
+    function loadIt(rid: string) ! LoadError {
+        if (rid == "") fail .Forbidden
+    }
+
+    // BUG — nested payload-bearing constructor as the arg to `.Failed(...)`
+    // inside an `!{}` arm body.
+    function tryLoad() {
+        loadIt(@id) !{
+            | err :> { @phase = .Failed(LoadError::NotFound(@id)); return }
+        }
+    }
+  }
+
+  <div>
+      <button onclick=tryLoad()>Load</button>
+  </div>
+
+</program>

@@ -1,0 +1,12 @@
+// INVESTIGATE — engine state-child `:`-shorthand display-text literal with ${interp}.
+<program>
+  ${
+    type Phase:enum = { Idle, Loading(pct: integer) }
+  }
+  <div>
+    <engine for=Phase initial=.Idle>
+      <Idle : "Ready.">
+      <Loading pct : "Loading ${pct}%">
+    </>
+  </div>
+</program>

@@ -320,25 +320,14 @@ export function parseMatchArms(armsRaw: string): MatchParseResult {
   // `<` characters inside quoted strings or balanced braces.
   function findNextArmOpener(at: number): number {
     let p = at;
-    let inDQ = false;
-    let inSQ = false;
     let braceDepth = 0;
     while (p < len) {
       const c = armsRaw[p];
-      if (inDQ) {
-        if (c === '"') inDQ = false;
-        else if (c === "\\") p++;
-        p++;
-        continue;
-      }
-      if (inSQ) {
-        if (c === "'") inSQ = false;
-        else if (c === "\\") p++;
-        p++;
-        continue;
-      }
-      if (c === '"') { inDQ = true; p++; continue; }
-      if (c === "'") { inSQ = true; p++; continue; }
+      // g-match-arm-apostrophe-bs (S195/S196) — same locus ruling as findArmCloser:
+      // a `'` / `"` at the arm-body MARKUP-TEXT level is prose, not a string-span
+      // delimiter, so it must not be tracked here (it would otherwise swallow the
+      // next `<Variant>` arm-opener). `${...}` logic-context strings are guarded by
+      // the braceDepth counter below (a `<` arm-opener only counts at braceDepth 0).
       if (c === "{") { braceDepth++; p++; continue; }
       if (c === "}") { if (braceDepth > 0) braceDepth--; p++; continue; }
       if (braceDepth === 0 && isArmOpener(p)) return p;
@@ -353,24 +342,19 @@ export function parseMatchArms(armsRaw: string): MatchParseResult {
   function findArmCloser(at: number, variantName: string): { contentEnd: number; closerEnd: number } | null {
     let p = at;
     let depth = 1;
-    let inDQ = false;
-    let inSQ = false;
     while (p < len) {
       const c = armsRaw[p];
-      if (inDQ) {
-        if (c === '"') inDQ = false;
-        else if (c === "\\") p++;
-        p++;
-        continue;
-      }
-      if (inSQ) {
-        if (c === "'") inSQ = false;
-        else if (c === "\\") p++;
-        p++;
-        continue;
-      }
-      if (c === '"') { inDQ = true; p++; continue; }
-      if (c === "'") { inSQ = true; p++; continue; }
+      // g-match-arm-apostrophe-bs (S195/S196) — a `'` / `"` at the ARM-BODY
+      // MARKUP-TEXT level (between tags) is PROSE, NOT a string-span delimiter.
+      // The outer close-finder must NOT track string state here: a contraction
+      // or possessive apostrophe in arm free-text (`<Failed> <p>We'll try again
+      // later.</p> </>`) would otherwise open a phantom string that consumes the
+      // `</p>` / `</>` closers, so the arm looks unclosed → a misleading
+      // E-MATCH-PARSE-001. Mirrors the S109 locus ruling (strings live in LOGIC
+      // context + ATTRIBUTE VALUES — markup-text body is text). Opener-INTERNAL
+      // strings (attribute values, `:`-shorthand display-text literals) are still
+      // tracked by the inner `q`-loop's qDQ/qSQ state below; `${...}` logic blocks
+      // are opaque there too.
       if (c === "<") {
         // Closer forms
         if (armsRaw.slice(p, p + 3) === "</>") {
