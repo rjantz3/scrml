@@ -17,7 +17,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
 | MED | 6 |
-| LOW | 16 |
+| LOW | 17 |
 | Nominal (spec-ahead-of-impl) | 9 |
 <!-- @generated:gap-counts END -->
 
@@ -172,6 +172,9 @@ Per the STOP/SPLIT gate (Rule 3): the S195 dispatch landed Phase 1 (the §52.6.7
 
 ### G-TIER1-SSR-PRERENDER — Tier-1 `authority="server"` instances load client-side on mount, not SSR pre-rendered (§52.8) — `NEW S196; MED; open — the read-authority SSR residual`
 The S196 read-authority core (change-id `state-decl-shape-disambiguation-2026-06-14`) landed the §52.6.1 `SELECT *` auto-load for Tier-1 `< Type authority="server" table=>` instances (recognition + client load IIFE + `/__serverLoad/<var>` route). The residual per §52.8: a server-authoritative instance SHALL be "populated on the server during SSR and included in the initial HTML … no loading placeholder is shown on first paint." Today the instance is loaded CLIENT-side on mount (a brief placeholder flash before the `/__serverLoad/<var>` fetch resolves), NOT pre-rendered into the server HTML. **No existing SSR-pre-render path exists to mirror** — route-splitter.ts:1167 marks the SSR-injected-`<script>` shape as "a v1.0 polish target." This is a substantial new subsystem: (1) server-render the markup with the loaded rows in scope, (2) inline the loaded state into the initial HTML, (3) flash-free client hydration that adopts the pre-rendered DOM + state instead of re-fetching. `W-AUTH-002` (type-system.ts, narrowed S196) is the tracking warning. Applies to BOTH tiers (§52.8 names Tier-1 and Tier-2); a unified server-authoritative-SSR pass would cover both. NOT a blocker — the client-side load works; first paint shows the local placeholder briefly. <!-- @gap id=g-tier1-ssr-prerender sev=MED status=open -->
+
+### G-S52-RETRACTION-DOC-STALENESS — two derived docs still teach the deleted §52 auto-persist/optimistic model — `NEW S194; LOW; open — doc-currency / ouroboros`
+The S194 §52.6.2 retraction (Q1=C/Q2=WF — §52 is read-authority; the dev owns the `?{}` write; the compiler-generated optimistic-update + rollback + auto-persist were DELETED) left two DERIVED docs stale (surfaced by the wrap 6c `project-mapper` non-compliance scan): (1) `docs/articles/components-are-states-devto-2026-04-29.md` (lines 139, 175) claims the compiler "generates the optimistic-update path, generates the rollback" for `authority="server"` — now FALSE (its own line-239 self-justification "the claim follows the spec" is void because the spec it followed was amended); (2) `docs/heads-up/spec-consolidation-2026-05-25.md` (lines 297, 332, 370) describes §52.4 as the compiler synthesizing "optimistic update on writes, rollback on server-error" — contradicts the retraction (also resolves that doc's S166 carried-uncertain §52.4 TBD flag). The initial-load/SSR claims in BOTH remain compliant (read-authority infra IS still compiler-generated). Fix: reword the optimistic/rollback/auto-persist claims to the read-authority-only model (or deref the heads-up to scrml-support). Deferred from the S194 wrap (Rule-1-adjacent article + end-of-wrap edit-risk); the normative SPEC §52.6 is correct, this is derived-doc lag. <!-- @gap id=g-s52-retraction-doc-staleness sev=LOW status=open -->
 
 ---
 
