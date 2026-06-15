@@ -6,29 +6,35 @@
 
 ${
     import { formatRate } from './load-card.scrml'
+    import { InvoiceStatus } from '../schema.scrml'
 
-    // Derives the visible status pill for an invoice.
-    //   paid       — paid_at present
-    //   overdue    — paid_at null AND due_at < today
-    //   outstanding — paid_at null AND due_at >= today
-    export fn invoiceStatus(inv: asIs, todayIso: string) -> string {
-        if (inv.paid_at is some && inv.paid_at != "") return "paid"
-        if (inv.due_at is some && inv.due_at != "" && inv.due_at < todayIso) return "overdue"
-        return "outstanding"
+    // Derives the visible status for an invoice — a DERIVED enum, computed from
+    // paid_at / due_at at render time, never stored in a column (no DB
+    // migration). Returns the InvoiceStatus VARIANT directly.
+    //   .Paid        — paid_at present
+    //   .Overdue     — paid_at absent AND due_at < today
+    //   .Outstanding — paid_at absent AND due_at >= today
+    export fn invoiceStatus(inv: asIs, todayIso: string) -> InvoiceStatus {
+        if (inv.paid_at is some && inv.paid_at != "") return .Paid
+        if (inv.due_at is some && inv.due_at != "" && inv.due_at < todayIso) return .Overdue
+        return .Outstanding
     }
 
-    export fn invoiceStatusClasses(status: string) -> string {
-        if (status == "paid")        return "bg-emerald-100 text-emerald-800 border-emerald-200"
-        if (status == "overdue")     return "bg-red-100 text-red-800 border-red-200"
-        if (status == "outstanding") return "bg-amber-100 text-amber-800 border-amber-200"
-        return "bg-slate-100 text-slate-700 border-slate-200"
+    // Pill classes — `match` over the InvoiceStatus variant is exhaustive.
+    export fn invoiceStatusClasses(status: InvoiceStatus) -> string {
+        return match status {
+            .Paid        :> "bg-emerald-100 text-emerald-800 border-emerald-200"
+            .Overdue     :> "bg-red-100 text-red-800 border-red-200"
+            .Outstanding :> "bg-amber-100 text-amber-800 border-amber-200"
+        }
     }
 
-    export fn invoiceStatusLabel(status: string) -> string {
-        if (status == "paid")        return "Paid"
-        if (status == "overdue")     return "Overdue"
-        if (status == "outstanding") return "Outstanding"
-        return status
+    export fn invoiceStatusLabel(status: InvoiceStatus) -> string {
+        return match status {
+            .Paid        :> "Paid"
+            .Overdue     :> "Overdue"
+            .Outstanding :> "Outstanding"
+        }
     }
 
     export fn formatIsoDate(at: string) -> string {

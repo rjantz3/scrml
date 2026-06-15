@@ -21,6 +21,7 @@
   ${
       import { formatRate, formatPickupAt } from '../../components/load-card.scrml'
       import { statusBadgeClasses, statusLabel } from '../../components/load-status-badge.scrml'
+      import { LoadStatus } from '../../schema.scrml'
       import { createSessionStore } from 'scrml:store'
       import { SESSION_DB_PATH } from '../../models/auth.scrml'
       // M5: centralized real-time channel — see SPEC §38.12.6.
@@ -103,7 +104,7 @@
             `}.get()
 
             // M6: lin token #1 — most recent unconsumed acceptance token
-            // for this load. When present + load.status == 'booked', the
+            // for this load. When present + load.status == 'Booked', the
             // customer sees a "Sign rate confirmation" button.
             const acceptance = ?{`
                 SELECT token, issued_at
@@ -144,7 +145,7 @@
             const load = ?{`SELECT id, customer_id, status FROM loads WHERE id = ${loadId}`}.get()
             if (load is not) return { error: "Load not found." }
             if (load.customer_id != customer.id) return { unauthorized: true }
-            if (load.status != "booked") return { error: "Load is not awaiting acceptance." }
+            if (load.status != "Booked") return { error: "Load is not awaiting acceptance." }
 
             // The lin_tokens UPDATE-with-WHERE-NULL is the durable single-use
             // guard. If consumed_at is already non-null, no rows update and
@@ -168,8 +169,8 @@
                 return { error: "Acceptance token already used or invalid." }
             }
 
-            // Advance the load: booked → dispatched.
-            ?{`UPDATE loads SET status = 'dispatched', updated_at = CURRENT_TIMESTAMP WHERE id = ${loadId}`}.run()
+            // Advance the load: Booked → Dispatched.
+            ?{`UPDATE loads SET status = 'Dispatched', updated_at = CURRENT_TIMESTAMP WHERE id = ${loadId}`}.run()
             return { ok: true }
         }
 
@@ -251,7 +252,7 @@
                 @errorMessage = result.error
                 return
             }
-            publishLoadEvent("rate-confirmed", @currentLoad.id, "dispatched", "")
+            publishLoadEvent("rate-confirmed", @currentLoad.id, "Dispatched", "")
             refresh()
         }
 
@@ -287,14 +288,22 @@
         // Whether the load is "in flight" — driver location is meaningful only
         // while in transit.
         fn showDriverLocation(loadStatus: string) -> boolean {
-            return loadStatus == "in_transit"
+            return loadStatus == "InTransit"
         }
 
-        // Whether to show invoice link.
-        fn hasInvoice(loadStatus: string) -> boolean {
-            if (loadStatus == "invoiced") return true
-            if (loadStatus == "paid")     return true
-            return false
+        // Whether to show the invoice link. Exhaustive `match` over LoadStatus.
+        fn hasInvoice(loadStatus: LoadStatus) -> boolean {
+            return match loadStatus {
+                .Invoiced   :> true
+                .Paid       :> true
+                .Tendered   :> false
+                .Booked     :> false
+                .Dispatched :> false
+                .Loaded     :> false
+                .InTransit  :> false
+                .Delivered  :> false
+                .Cancelled  :> false
+            }
         }
 
         <lastSeenLoadEventCount> = 0
@@ -446,17 +455,17 @@
               </section>
 
               <!-- No-driver-yet card for pre-dispatched states -->
-              <section if=(@assignment is not && @currentLoad.status != "tendered" && @currentLoad.status != "cancelled") class="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-900">
+              <section if=(@assignment is not && @currentLoad.status != "Tendered" && @currentLoad.status != "Cancelled") class="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-900">
                   Carrier not yet assigned. Your dispatcher is matching equipment now.
               </section>
 
-              <!-- M6: lin token #1 consumption — when load.status == "booked"
+              <!-- M6: lin token #1 consumption — when load.status == "Booked"
                    and an active acceptance token exists, the customer can
                    sign the rate confirmation. Click consumes the lin token
                    (single-use guard at the DB) + advances load to dispatched.
                    Replay protection: the second click hits a row with
                    consumed_at != NULL → server returns "already used". -->
-              <section if=(@currentLoad.status == "booked" && @acceptanceToken != "") class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <section if=(@currentLoad.status == "Booked" && @acceptanceToken != "") class="bg-blue-50 border border-blue-200 rounded-lg p-4">
                   <div class="flex items-start justify-between gap-4">
                       <div class="text-sm text-blue-900">
                           <strong>Rate confirmation pending.</strong> Your dispatcher has
@@ -479,13 +488,13 @@
               </div>
 
               <!-- Tendered: awaiting rate -->
-              <section if=(@currentLoad.status == "tendered") class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-900">
+              <section if=(@currentLoad.status == "Tendered") class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-900">
                   <strong>Quote pending.</strong> The dispatcher is preparing a rate for this load.
                   You'll see it here once it's ready.
               </section>
 
               <!-- Cancelled -->
-              <section if=(@currentLoad.status == "cancelled") class="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-900">
+              <section if=(@currentLoad.status == "Cancelled") class="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-900">
                   This load has been cancelled.
               </section>
 

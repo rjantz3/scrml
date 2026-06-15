@@ -71,7 +71,7 @@
                     pickup_at, deliver_by, commodity, weight_lbs, rate_dollars, status
                 FROM loads
                 WHERE customer_id = ${customer.id}
-                  AND status IN ('tendered', 'booked', 'dispatched', 'loaded', 'in_transit', 'delivered')
+                  AND status IN ('Tendered', 'Booked', 'Dispatched', 'Loaded', 'InTransit', 'Delivered')
                 ORDER BY created_at DESC
                 LIMIT 5
             `}.all()

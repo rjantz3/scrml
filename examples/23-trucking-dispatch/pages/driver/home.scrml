@@ -73,7 +73,7 @@
                 LEFT JOIN customers c ON c.id = l.customer_id
                 WHERE a.driver_id = ${driver.id}
                   AND a.unassigned_at IS NULL
-                  AND l.status IN ('dispatched', 'loaded', 'in_transit')
+                  AND l.status IN ('Dispatched', 'Loaded', 'InTransit')
                 ORDER BY a.assigned_at DESC
                 LIMIT 1
             `}.get()

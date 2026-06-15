@@ -29,6 +29,7 @@
       // §14.8.8 (typed-SQL-row Tranche 3) — the row contract the `loadRows`
       // cell carries. The SQL projection below width-subtypes into LoadCardRow[].
       import { LoadCardRow } from '../../components/load-card.scrml'
+      import { LoadStatus } from '../../schema.scrml'
       import { readSessionCookie } from '../../models/auth.scrml'
       import { createSessionStore } from 'scrml:store'
       import { SESSION_DB_PATH } from '../../models/auth.scrml'
@@ -94,19 +95,22 @@
             window.location.href = "/login"
         }
 
-        // Pure helpers — partition loads by kanban column.
-        // Left: tendered + booked
-        // Middle: dispatched + loaded + in_transit
-        // Right: delivered + invoiced + paid
-        // (cancelled is hidden from the board — visible on load-detail only)
-        fn isLeftColumn(status: string) -> boolean {
-            return status == "tendered" || status == "booked"
-        }
-        fn isMiddleColumn(status: string) -> boolean {
-            return status == "dispatched" || status == "loaded" || status == "in_transit"
-        }
-        fn isRightColumn(status: string) -> boolean {
-            return status == "delivered" || status == "invoiced" || status == "paid"
+        // Pure helper — which kanban column a load belongs in. One exhaustive
+        // `match` over the LoadStatus variant (the 06-kanban derived-grouping
+        // shape): adding a status forces a column decision here. `Cancelled` is
+        // hidden from the board (visible on load-detail only).
+        fn boardColumn(status: LoadStatus) -> string {
+            return match status {
+                .Tendered   :> "left"
+                .Booked     :> "left"
+                .Dispatched :> "middle"
+                .Loaded     :> "middle"
+                .InTransit  :> "middle"
+                .Delivered  :> "right"
+                .Invoiced   :> "right"
+                .Paid       :> "right"
+                .Cancelled  :> "hidden"
+            }
         }
 
         <lastSeenEventCount> = 0
@@ -173,7 +177,7 @@
 
             <div if=@loaded class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-                <!-- Left column: tendered + booked -->
+                <!-- Left column: Tendered + Booked -->
                 <section class="bg-white rounded-lg border border-slate-200 p-4">
                     <header class="flex items-center justify-between mb-3">
                         <h2 class="text-sm font-semibold text-blue-800 uppercase tracking-wider">
@@ -184,14 +188,14 @@
                     <div class="space-y-3">
                         ${
                             for (let l of @loadRows) {
-                                if (!isLeftColumn(l.status)) continue
+                                if (boardColumn(l.status) != "left") continue
                                 lift <div><LoadCard load=l customerName=l.customer_name/></div>
                             }
                         }
                     </div>
                 </section>
 
-                <!-- Middle column: dispatched + loaded + in_transit -->
+                <!-- Middle column: Dispatched + Loaded + InTransit -->
                 <section class="bg-white rounded-lg border border-slate-200 p-4">
                     <header class="flex items-center justify-between mb-3">
                         <h2 class="text-sm font-semibold text-amber-800 uppercase tracking-wider">
@@ -202,14 +206,14 @@
                     <div class="space-y-3">
                         ${
                             for (let l of @loadRows) {
-                                if (!isMiddleColumn(l.status)) continue
+                                if (boardColumn(l.status) != "middle") continue
                                 lift <div><LoadCard load=l customerName=l.customer_name/></div>
                             }
                         }
                     </div>
                 </section>
 
-                <!-- Right column: delivered + invoiced + paid -->
+                <!-- Right column: Delivered + Invoiced + Paid -->
                 <section class="bg-white rounded-lg border border-slate-200 p-4">
                     <header class="flex items-center justify-between mb-3">
                         <h2 class="text-sm font-semibold text-emerald-800 uppercase tracking-wider">
@@ -220,7 +224,7 @@
                     <div class="space-y-3">
                         ${
                             for (let l of @loadRows) {
-                                if (!isRightColumn(l.status)) continue
+                                if (boardColumn(l.status) != "right") continue
                                 lift <div><LoadCard load=l customerName=l.customer_name/></div>
                             }
                         }

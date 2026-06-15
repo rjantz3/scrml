@@ -4,7 +4,7 @@
 // origin (address+city+state), destination (address+city+state),
 // pickup_at, deliver_by, commodity, weight_lbs.
 //
-// On submit: creates a `loads` row with status='tendered',
+// On submit: creates a `loads` row with status='Tendered',
 // customer_id=current user's customers row, rate_dollars=NULL (dispatcher
 // will fill in rate when reviewing). Per scoping: the dispatcher's
 // /dispatch board picks tendered loads up automatically.
@@ -77,7 +77,7 @@
                 return { error: "Commodity is required." }
             }
 
-            // rate_dollars left NULL — dispatcher fills it in. status=tendered.
+            // rate_dollars left NULL — dispatcher fills it in. status=Tendered.
             ?{`
                 INSERT INTO loads (
                     customer_id,
@@ -92,7 +92,7 @@
                     ${destinationAddress}, ${destinationCity}, ${destinationState},
                     ${pickupAt}, ${deliverBy},
                     ${commodity}, ${weightLbs},
-                    'tendered'
+                    'Tendered'
                 )
             `}.run()
 
@@ -193,7 +193,7 @@
             }
             const newId = result.loadId
             // M5: broadcast new-load to dispatch-board.
-            publishBoardEvent("new-load", newId, "tendered")
+            publishBoardEvent("new-load", newId, "Tendered")
             window.location.href = `/customer/loads/${newId}`
         }
 

@@ -1,15 +1,15 @@
 // Trucking Dispatch — driver load detail (M3).
 //
 // Route: /driver/loads/:id. The driver's working surface for one load:
-// load summary header, status advance buttons (dispatched → loaded → in_transit
+// load summary header, status advance buttons (Dispatched → Loaded → InTransit
 // → delivered), BOL upload (mocked filename), POD upload (mocked filename),
 // fuel-stop form (amount + odometer), breakdown form (description), and a
 // link to the full per-load log.
 //
 // Driver-side load.status transitions are simpler than the dispatcher's:
-//   dispatched → loaded         (after pickup)
-//   loaded     → in_transit     (when departing origin)
-//   in_transit → delivered      (after drop)
+//   Dispatched → Loaded         (after pickup)
+//   Loaded     → InTransit     (when departing origin)
+//   InTransit  → Delivered      (after drop)
 // Each transition writes a log_entry AND updates loads.status. No
 // post-delivered transitions are driver-driven (invoiced/paid/cancelled
 // belong to dispatcher and customer).
@@ -42,6 +42,7 @@
       import { driverStatusClasses, driverStatusLabel } from '../../components/driver-card.scrml'
       import { formatRate, formatPickupAt } from '../../components/load-card.scrml'
       import { statusBadgeClasses, statusLabel } from '../../components/load-status-badge.scrml'
+      import { LoadStatus } from '../../schema.scrml'
       import { createSessionStore } from 'scrml:store'
       import { randomInt } from 'scrml:random'
       import { SESSION_DB_PATH } from '../../models/auth.scrml'
@@ -139,9 +140,9 @@
 
             // Driver-allowed transitions only.
             let allowed = false
-            if (load.status == "dispatched" && newStatus == "loaded")     { allowed = true }
-            if (load.status == "loaded"     && newStatus == "in_transit") { allowed = true }
-            if (load.status == "in_transit" && newStatus == "delivered")  { allowed = true }
+            if (load.status == "Dispatched" && newStatus == "Loaded")     { allowed = true }
+            if (load.status == "Loaded"     && newStatus == "InTransit") { allowed = true }
+            if (load.status == "InTransit" && newStatus == "Delivered")  { allowed = true }
             if (!allowed) return { error: `Cannot transition from ${load.status} to ${newStatus}.` }
 
             ?{`UPDATE loads SET status = ${newStatus}, updated_at = CURRENT_TIMESTAMP WHERE id = ${loadId}`}.run()
@@ -157,13 +158,13 @@
                 VALUES (${driver.id}, ${loadId}, 'hos_change', ${payload})
             `}.run()
 
-            // M6: lin token #2 — when load transitions dispatched → loaded,
+            // M6: lin token #2 — when load transitions Dispatched → Loaded,
             // mint a BOL submission token. Driver consumes it on first BOL
             // upload. Replayed POSTs hit the consumed_at != NULL guard and
             // get rejected (this is the "duplicate BOL upload prevented"
             // semantic the scoping doc calls out).
             let mintedBolToken = ""
-            if (load.status == "dispatched" && newStatus == "loaded") {
+            if (load.status == "Dispatched" && newStatus == "Loaded") {
                 mintedBolToken = `bol_${loadId}_${Date.now()}_${randomInt(0, 100000)}`
                 ?{`
                     INSERT INTO lin_tokens (token, load_id, kind)
@@ -360,9 +361,9 @@
             publishBoardEvent("status-change", loadId, target)
             publishLoadEvent("status", loadId, target, "")
             // Special: delivery is also a customer-event so the
-            // customer's loads list flips to "delivered" without
+            // customer's loads list flips to "Delivered" without
             // reload.
-            if (target == "delivered") {
+            if (target == "Delivered") {
                 const customerId = @currentLoad.customer_id
                 publishCustomerEvent("load-delivered", customerId, 0, loadId)
             }
@@ -496,31 +497,40 @@
 
         // Helpers — what's the next driver-allowed status from the current
         // status, and the button label for advancing.
-        fn nextDriverStatus(s: string) -> string {
-            if (s == "dispatched") return "loaded"
-            if (s == "loaded")     return "in_transit"
-            if (s == "in_transit") return "delivered"
-            return ""
+        fn nextDriverStatus(s: LoadStatus) -> string {
+            return match s {
+                .Dispatched :> "Loaded"
+                .Loaded     :> "InTransit"
+                .InTransit  :> "Delivered"
+                _           :> ""
+            }
         }
 
-        fn nextDriverButtonLabel(s: string) -> string {
-            if (s == "dispatched") return "Mark loaded"
-            if (s == "loaded")     return "Start trip"
-            if (s == "in_transit") return "Mark delivered"
-            return ""
+        fn nextDriverButtonLabel(s: LoadStatus) -> string {
+            return match s {
+                .Dispatched :> "Mark loaded"
+                .Loaded     :> "Start trip"
+                .InTransit  :> "Mark delivered"
+                _           :> ""
+            }
         }
 
-        fn isBolEligible(s: string) -> boolean {
-            // BOL upload happens at pickup once status >= loaded.
-            if (s == "loaded")     return true
-            if (s == "in_transit") return true
-            if (s == "delivered")  return true
-            return false
+        fn isBolEligible(s: LoadStatus) -> boolean {
+            // BOL upload happens at pickup once status >= Loaded.
+            return match s {
+                .Loaded     :> true
+                .InTransit  :> true
+                .Delivered  :> true
+                _           :> false
+            }
         }
 
-        fn isPodEligible(s: string) -> boolean {
-            // POD upload only after delivered.
-            return s == "delivered"
+        fn isPodEligible(s: LoadStatus) -> boolean {
+            // POD upload only after Delivered.
+            return match s {
+                .Delivered  :> true
+                _           :> false
+            }
         }
 
         @lastSeenLoadEventCount = 0

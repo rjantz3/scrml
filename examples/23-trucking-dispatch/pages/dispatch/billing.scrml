@@ -81,7 +81,7 @@
                 INSERT INTO invoices (load_id, customer_id, amount_dollars, due_at)
                 SELECT l.id, l.customer_id, l.rate_dollars, '2026-05-30'
                 FROM loads l
-                WHERE l.status IN ('delivered', 'invoiced', 'paid')
+                WHERE l.status IN ('Delivered', 'Invoiced', 'Paid')
                   AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.load_id = l.id)
             `}.run()
 
@@ -186,11 +186,16 @@
             @errorMessage = msg
         }
 
-        // Pure helper — does this invoice match the dropdown filter?
+        // Pure helper — does this invoice match the dropdown filter? `filter` is
+        // the dropdown <option value> ("all" or an InvoiceStatus variant name).
+        // The `match` dispatches the derived InvoiceStatus variant exhaustively.
         fn matchesFilter(inv: asIs, filter: string, today: string) -> boolean {
             if (filter == "all") return true
-            const s = invoiceStatus(inv, today)
-            return s == filter
+            return match invoiceStatus(inv, today) {
+                .Paid        :> filter == "Paid"
+                .Overdue     :> filter == "Overdue"
+                .Outstanding :> filter == "Outstanding"
+            }
         }
 
         on mount {
@@ -227,9 +232,9 @@
                   <label class="text-sm text-slate-600" for="invoice-filter">Filter:</label>
                   <select id="invoice-filter" bind:value=@filter class="text-sm px-2 py-1 border border-slate-300 rounded-md bg-white">
                       <option value="all">All invoices</option>
-                      <option value="outstanding">Outstanding</option>
-                      <option value="overdue">Overdue</option>
-                      <option value="paid">Paid</option>
+                      <option value="Outstanding">Outstanding</option>
+                      <option value="Overdue">Overdue</option>
+                      <option value="Paid">Paid</option>
                   </select>
               </div>
           </div>

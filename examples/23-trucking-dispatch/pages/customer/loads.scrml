@@ -20,6 +20,7 @@
   ${
       import { formatRate, formatPickupAt } from '../../components/load-card.scrml'
       import { statusBadgeClasses, statusLabel } from '../../components/load-status-badge.scrml'
+      import { LoadStatus } from '../../schema.scrml'
       import { createSessionStore } from 'scrml:store'
       import { SESSION_DB_PATH } from '../../models/auth.scrml'
       // M5: centralized real-time channel — see SPEC §38.12.6.
@@ -82,12 +83,12 @@
         <errorMessage> = ""
 
         // Filter dropdown state. Default "all". Other values:
-        //   "active"    -> booked / dispatched / loaded / in_transit
-        //   "tendered"  -> tendered (awaiting dispatcher rate)
-        //   "delivered" -> delivered
-        //   "invoiced"  -> invoiced
-        //   "paid"      -> paid
-        //   "cancelled" -> cancelled
+        //   "active"     -> Booked / Dispatched / Loaded / InTransit
+        //   "Tendered"   -> awaiting dispatcher rate
+        //   "Delivered"  -> Delivered
+        //   "Invoiced"   -> Invoiced
+        //   "Paid"       -> Paid
+        //   "Cancelled"  -> Cancelled
         <statusFilter> = "all"
 
         function getSessionToken() {
@@ -122,16 +123,28 @@
             window.location.href = "/login"
         }
 
-        // Pure helper — does this load match the dropdown filter?
+        // The "active" group — booked through in-transit. Exhaustive `match` over
+        // the LoadStatus variant: a new status forces an in-or-out decision here.
+        fn isActiveLoad(status: LoadStatus) -> boolean {
+            return match status {
+                .Booked     :> true
+                .Dispatched :> true
+                .Loaded     :> true
+                .InTransit  :> true
+                .Tendered   :> false
+                .Delivered  :> false
+                .Invoiced   :> false
+                .Paid       :> false
+                .Cancelled  :> false
+            }
+        }
+
+        // Pure helper — does this load match the dropdown filter? `filter` carries
+        // the dropdown group key ("all" / "active") or a LoadStatus variant name.
+        // `loadStatus` is the stored variant-name string from loads.status.
         fn matchesFilter(loadStatus: string, filter: string) -> boolean {
             if (filter == "all") return true
-            if (filter == "active") {
-                if (loadStatus == "booked")     return true
-                if (loadStatus == "dispatched") return true
-                if (loadStatus == "loaded")     return true
-                if (loadStatus == "in_transit") return true
-                return false
-            }
+            if (filter == "active") return isActiveLoad(loadStatus)
             return loadStatus == filter
         }
 
@@ -186,12 +199,12 @@
                   <label class="text-sm text-slate-600" for="status-filter">Filter:</label>
                   <select id="status-filter" bind:value=@statusFilter class="text-sm px-2 py-1 border border-slate-300 rounded-md bg-white">
                       <option value="all">All loads</option>
-                      <option value="tendered">Tendered (awaiting rate)</option>
+                      <option value="Tendered">Tendered (awaiting rate)</option>
                       <option value="active">Active (booked → in transit)</option>
-                      <option value="delivered">Delivered</option>
-                      <option value="invoiced">Invoiced</option>
-                      <option value="paid">Paid</option>
-                      <option value="cancelled">Cancelled</option>
+                      <option value="Delivered">Delivered</option>
+                      <option value="Invoiced">Invoiced</option>
+                      <option value="Paid">Paid</option>
+                      <option value="Cancelled">Cancelled</option>
                   </select>
               </div>
           </div>

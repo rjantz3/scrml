@@ -342,12 +342,12 @@
     "SPAN-COORD": 8
   },
   "examples/23-trucking-dispatch/components/invoice-card.scrml": {
-    "COUNT-LENGTH": 3,
-    "EXTRA-FIELD": 11,
-    "FIELD-SHAPE": 17,
     "KIND-NAME": 3,
-    "MISSING-FIELD": 71,
-    "SPAN-COORD": 12
+    "FIELD-SHAPE": 19,
+    "MISSING-FIELD": 72,
+    "EXTRA-FIELD": 11,
+    "COUNT-LENGTH": 3,
+    "SPAN-COORD": 14
   },
   "examples/23-trucking-dispatch/components/load-card.scrml": {
     "COUNT-LENGTH": 4,
@@ -358,20 +358,20 @@
     "SPAN-COORD": 11
   },
   "examples/23-trucking-dispatch/components/load-status-badge.scrml": {
-    "COUNT-LENGTH": 2,
-    "EXTRA-FIELD": 8,
-    "FIELD-SHAPE": 9,
     "KIND-NAME": 2,
-    "MISSING-FIELD": 43,
-    "SPAN-COORD": 6
+    "FIELD-SHAPE": 11,
+    "MISSING-FIELD": 44,
+    "EXTRA-FIELD": 8,
+    "COUNT-LENGTH": 3,
+    "SPAN-COORD": 8
   },
   "examples/23-trucking-dispatch/components/status-picker.scrml": {
-    "COUNT-LENGTH": 2,
-    "EXTRA-FIELD": 8,
-    "FIELD-SHAPE": 13,
     "KIND-NAME": 2,
-    "MISSING-FIELD": 53,
-    "SPAN-COORD": 8
+    "FIELD-SHAPE": 15,
+    "MISSING-FIELD": 54,
+    "EXTRA-FIELD": 8,
+    "COUNT-LENGTH": 3,
+    "SPAN-COORD": 10
   },
   "examples/23-trucking-dispatch/models/auth.scrml": {
     "COUNT-LENGTH": 2,
@@ -414,20 +414,20 @@
     "SPAN-COORD": 252
   },
   "examples/23-trucking-dispatch/pages/customer/load-detail.scrml": {
-    "COUNT-LENGTH": 7,
-    "EXTRA-FIELD": 130,
-    "FIELD-SHAPE": 109,
     "KIND-NAME": 30,
-    "MISSING-FIELD": 347,
-    "SPAN-COORD": 496
+    "FIELD-SHAPE": 111,
+    "MISSING-FIELD": 348,
+    "EXTRA-FIELD": 130,
+    "COUNT-LENGTH": 7,
+    "SPAN-COORD": 498
   },
   "examples/23-trucking-dispatch/pages/customer/loads.scrml": {
-    "COUNT-LENGTH": 7,
-    "EXTRA-FIELD": 57,
-    "FIELD-SHAPE": 75,
     "KIND-NAME": 17,
-    "MISSING-FIELD": 199,
-    "SPAN-COORD": 399
+    "FIELD-SHAPE": 74,
+    "MISSING-FIELD": 200,
+    "EXTRA-FIELD": 60,
+    "COUNT-LENGTH": 7,
+    "SPAN-COORD": 381
   },
   "examples/23-trucking-dispatch/pages/customer/profile.scrml": {
     "COUNT-LENGTH": 1,
@@ -446,12 +446,12 @@
     "SPAN-COORD": 625
   },
   "examples/23-trucking-dispatch/pages/dispatch/billing.scrml": {
-    "COUNT-LENGTH": 4,
-    "EXTRA-FIELD": 51,
-    "FIELD-SHAPE": 96,
     "KIND-NAME": 13,
-    "MISSING-FIELD": 178,
-    "SPAN-COORD": 415
+    "FIELD-SHAPE": 94,
+    "MISSING-FIELD": 179,
+    "EXTRA-FIELD": 52,
+    "COUNT-LENGTH": 4,
+    "SPAN-COORD": 407
   },
   "examples/23-trucking-dispatch/pages/dispatch/board.scrml": {
     "COUNT-LENGTH": 1,
@@ -542,12 +542,12 @@
     "SPAN-COORD": 424
   },
   "examples/23-trucking-dispatch/schema.scrml": {
-    "COUNT-LENGTH": 3,
-    "EXTRA-FIELD": 14,
-    "FIELD-SHAPE": 28,
     "KIND-NAME": 4,
-    "MISSING-FIELD": 73,
-    "SPAN-COORD": 21
+    "FIELD-SHAPE": 24,
+    "MISSING-FIELD": 84,
+    "EXTRA-FIELD": 14,
+    "COUNT-LENGTH": 3,
+    "SPAN-COORD": 24
   },
   "examples/23-trucking-dispatch/seeds.scrml": {
     "COUNT-LENGTH": 3,

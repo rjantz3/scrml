@@ -11,7 +11,7 @@
 //   - 1 dispatcher user account (password = "demo")
 //   - 3 tractors (Peterbilt 389, Kenworth T880, Freightliner Cascadia)
 //   - 4 trailers (1 dry van, 1 reefer, 1 flatbed, 1 tanker)
-//   - 8 loads (2 tendered, 2 booked, 2 in_transit, 2 delivered)
+//   - 8 loads (2 Tendered, 2 Booked, 2 InTransit, 2 Delivered)
 //
 // All users share password "demo" so the example is trivially testable.
 // Real auth out of scope — see README + scoping §10.
@@ -156,7 +156,7 @@ ${
             commodity:         "Crude oil",
             weight_lbs:        47000,
             rate_dollars:      2350.00,
-            status:            "tendered"
+            status:            "Tendered"
         },
         {
             customer_email:    "dispatch@uintahfield.example",
@@ -171,7 +171,7 @@ ${
             commodity:         "Frac sand",
             weight_lbs:        46500,
             rate_dollars:      1875.00,
-            status:            "tendered"
+            status:            "Tendered"
         },
         {
             customer_email:    "billing@vernalops.example",
@@ -186,7 +186,7 @@ ${
             commodity:         "Drill pipe",
             weight_lbs:        42000,
             rate_dollars:      2100.00,
-            status:            "booked"
+            status:            "Booked"
         },
         {
             customer_email:    "ops@basinenergy.example",
@@ -201,7 +201,7 @@ ${
             commodity:         "Liquid CO2",
             weight_lbs:        49500,
             rate_dollars:      2675.00,
-            status:            "booked"
+            status:            "Booked"
         },
         {
             customer_email:    "dispatch@uintahfield.example",
@@ -216,7 +216,7 @@ ${
             commodity:         "Refined diesel",
             weight_lbs:        48000,
             rate_dollars:      2450.00,
-            status:            "in_transit"
+            status:            "InTransit"
         },
         {
             customer_email:    "billing@vernalops.example",
@@ -231,7 +231,7 @@ ${
             commodity:         "Crude oil",
             weight_lbs:        47500,
             rate_dollars:      2225.00,
-            status:            "in_transit"
+            status:            "InTransit"
         },
         {
             customer_email:    "ops@basinenergy.example",
@@ -246,7 +246,7 @@ ${
             commodity:         "Crude oil",
             weight_lbs:        46800,
             rate_dollars:      2300.00,
-            status:            "delivered"
+            status:            "Delivered"
         },
         {
             customer_email:    "dispatch@uintahfield.example",
@@ -261,7 +261,7 @@ ${
             commodity:         "Heavy equipment",
             weight_lbs:        38000,
             rate_dollars:      1950.00,
-            status:            "delivered"
+            status:            "Delivered"
         }
     ]
 

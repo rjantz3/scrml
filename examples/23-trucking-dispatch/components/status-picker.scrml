@@ -6,57 +6,70 @@
 //
 // State machine (per scoping §7):
 //
-//   tendered → booked → dispatched → loaded → in_transit → delivered → invoiced → paid
-//                                                                ↘ cancelled (terminal)
+//   Tendered → Booked → Dispatched → Loaded → InTransit → Delivered → Invoiced → Paid
+//                                                               ↘ Cancelled (terminal)
 //
 // `<engine>` deferred to M3 — see progress.md decision log. The transition
 // rules live as a pure helper here so the dispatcher pages can call
-// `validNextStates(currentStatus)` directly. If invalid → empty array.
+// `validNextStates(currentStatus)` directly. If terminal → empty array.
+//
+// This file owns the canonical transition table. The next-state lists are the
+// LoadStatus variant-name strings ("Booked", "Cancelled", …) — the same strings
+// the DB stores, so a returned target writes straight back via SQL bind.
 
 ${
-    // Pure helper — given a current status, returns the list of valid next
-    // states. `cancelled` and `paid` are terminal (return []).
-    export fn validNextStates(current: string) -> string[] {
-        if (current == "tendered")   return ["booked", "cancelled"]
-        if (current == "booked")     return ["dispatched", "cancelled"]
-        if (current == "dispatched") return ["loaded", "cancelled"]
-        if (current == "loaded")     return ["in_transit", "cancelled"]
-        if (current == "in_transit") return ["delivered", "cancelled"]
-        if (current == "delivered")  return ["invoiced"]
-        if (current == "invoiced")   return ["paid"]
-        if (current == "paid")       return []
-        if (current == "cancelled")  return []
-        return []
+    import { LoadStatus } from '../schema.scrml'
+
+    // Pure helper — given a current status, returns the list of valid next-state
+    // variant-name strings. `Cancelled` and `Paid` are terminal (return []). The
+    // `current` param is typed `LoadStatus`, so this `match` is exhaustive: a new
+    // variant forces a transition rule here (E-TYPE-020 otherwise).
+    export fn validNextStates(current: LoadStatus) -> string[] {
+        return match current {
+            .Tendered   :> ["Booked", "Cancelled"]
+            .Booked     :> ["Dispatched", "Cancelled"]
+            .Dispatched :> ["Loaded", "Cancelled"]
+            .Loaded     :> ["InTransit", "Cancelled"]
+            .InTransit  :> ["Delivered", "Cancelled"]
+            .Delivered  :> ["Invoiced"]
+            .Invoiced   :> ["Paid"]
+            .Paid       :> []
+            .Cancelled  :> []
+        }
     }
 
-    // Pure helper — formats "in_transit" as "In transit". Mirrors the same
-    // helper in load-status-badge but kept local so the picker doesn't
+    // Pure helper — pill text for a status ("InTransit" → "In transit"). Mirrors
+    // the same helper in load-status-badge but kept local so the picker doesn't
     // need to import the badge file.
-    export fn pickerLabel(s: string) -> string {
-        if (s == "in_transit") return "In transit"
-        if (s == "tendered")   return "Tendered"
-        if (s == "booked")     return "Booked"
-        if (s == "dispatched") return "Dispatched"
-        if (s == "loaded")     return "Loaded"
-        if (s == "delivered")  return "Delivered"
-        if (s == "invoiced")   return "Invoiced"
-        if (s == "paid")       return "Paid"
-        if (s == "cancelled")  return "Cancelled"
-        return s
+    export fn pickerLabel(s: LoadStatus) -> string {
+        return match s {
+            .Tendered   :> "Tendered"
+            .Booked     :> "Booked"
+            .Dispatched :> "Dispatched"
+            .Loaded     :> "Loaded"
+            .InTransit  :> "In transit"
+            .Delivered  :> "Delivered"
+            .Invoiced   :> "Invoiced"
+            .Paid       :> "Paid"
+            .Cancelled  :> "Cancelled"
+        }
     }
 
-    // Pure helper — describes the verb of the transition (used in the
+    // Pure helper — the verb of the transition INTO `target` (used in the
     // dropdown label so dispatchers don't have to read the state machine).
-    export fn transitionVerb(target: string) -> string {
-        if (target == "booked")     return "Book"
-        if (target == "dispatched") return "Dispatch"
-        if (target == "loaded")     return "Mark loaded"
-        if (target == "in_transit") return "Start transit"
-        if (target == "delivered")  return "Mark delivered"
-        if (target == "invoiced")   return "Send invoice"
-        if (target == "paid")       return "Mark paid"
-        if (target == "cancelled")  return "Cancel"
-        return pickerLabel(target)
+    // `target` is one of the next-state variant names from validNextStates.
+    export fn transitionVerb(target: LoadStatus) -> string {
+        return match target {
+            .Booked     :> "Book"
+            .Dispatched :> "Dispatch"
+            .Loaded     :> "Mark loaded"
+            .InTransit  :> "Start transit"
+            .Delivered  :> "Mark delivered"
+            .Invoiced   :> "Send invoice"
+            .Paid       :> "Mark paid"
+            .Cancelled  :> "Cancel"
+            .Tendered   :> "Re-tender"
+        }
     }
 
     export const StatusPicker = <div class="flex items-center gap-3" props={

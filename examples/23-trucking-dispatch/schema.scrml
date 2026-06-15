@@ -26,7 +26,7 @@ ${
     }
 
     // Load status state machine. M2 (dispatcher) drives the state
-    // transitions; M3 (driver) reports loaded → in_transit → delivered;
+    // transitions; M3 (driver) reports Loaded → InTransit → Delivered;
     // M4 (customer) sees status changes via real-time channel (M5).
     export type LoadStatus:enum = {
         Tendered
@@ -79,6 +79,15 @@ ${
         FuelStop
         Breakdown
         HosChange
+    }
+
+    // DERIVED invoice status — computed from paid_at/due_at at render time,
+    // never stored in a column (no DB migration). The cleanest match case:
+    // invoiceStatus(inv, today) -> InvoiceStatus dispatches on this.
+    export type InvoiceStatus:enum = {
+        Paid
+        Overdue
+        Outstanding
     }
 }
 

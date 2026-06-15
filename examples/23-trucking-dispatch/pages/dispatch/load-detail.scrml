@@ -25,31 +25,16 @@
 
   ${
       import { LoadStatusBadge } from '../../components/load-status-badge.scrml'
-      import { StatusPicker } from '../../components/status-picker.scrml'
+      import { StatusPicker, validNextStates } from '../../components/status-picker.scrml'
       import { AssignmentPicker } from '../../components/assignment-picker.scrml'
       import { formatRate, formatPickupAt } from '../../components/load-card.scrml'
       import { createSessionStore } from 'scrml:store'
       import { randomInt } from 'scrml:random'
+      import { LoadStatus } from '../../schema.scrml'
       import { SESSION_DB_PATH } from '../../models/auth.scrml'
       // M5: centralized real-time channels — see SPEC §38.12.6.
       import { "dispatch-board" as dispatchBoard } from '../../channels/dispatch-board.scrml'
       import { "load-events" as loadEvents } from '../../channels/load-events.scrml'
-
-      // Inlined transition validator — duplicates status-picker's validNextStates
-      // because cross-file `fn` calls inside server functions trigger
-      // server-escalation cascades on the importer (cf. F-COMPONENT-002).
-      fn _validNextStatesInline(current: string) -> string[] {
-          if (current == "tendered")   return ["booked", "cancelled"]
-          if (current == "booked")     return ["dispatched", "cancelled"]
-          if (current == "dispatched") return ["loaded", "cancelled"]
-          if (current == "loaded")     return ["in_transit", "cancelled"]
-          if (current == "in_transit") return ["delivered", "cancelled"]
-          if (current == "delivered")  return ["invoiced"]
-          if (current == "invoiced")   return ["paid"]
-          if (current == "paid")       return []
-          if (current == "cancelled")  return []
-          return []
-      }
   }
 
   <db src="../../dispatch.db" protect="password_hash" tables="users, loads, customers, assignments, drivers, tractors, trailers, log_entries, lin_tokens">
@@ -129,7 +114,7 @@
             if (load is not) return { error: "Load not found." }
 
             // Validate transition with the same helper the picker uses.
-            const valid = _validNextStatesInline(load.status)
+            const valid = validNextStates(load.status)
             let ok = false
             for (let i = 0; i < valid.length; i = i + 1) {
                 if (valid[i] == newStatus) { ok = true }
@@ -138,19 +123,19 @@
 
             ?{`UPDATE loads SET status = ${newStatus}, updated_at = CURRENT_TIMESTAMP WHERE id = ${loadId}`}.run()
 
-            // M6: lin token mint #1 — when transitioning tendered → booked,
+            // M6: lin token mint #1 — when transitioning Tendered → Booked,
             // mint an acceptance token. Customer redeems it on /customer/loads/:id
-            // to advance the load from booked → dispatched (i.e. "sign rate
+            // to advance the load from Booked → Dispatched (i.e. "sign rate
             // confirmation"). The lin_tokens table provides the durable
             // single-use guard (consumed_at IS NULL → still active).
             //
-            // Idempotency: if the load was previously tendered → booked and
+            // Idempotency: if the load was previously Tendered → Booked and
             // someone reverted, a NEW token is minted on each re-mint. The
             // previous token remains in the table (consumed or not). The
             // customer page always queries the most recent unconsumed
             // acceptance token for the load.
             let mintedToken = ""
-            if (load.status == "tendered" && newStatus == "booked") {
+            if (load.status == "Tendered" && newStatus == "Booked") {
                 mintedToken = `acc_${loadId}_${Date.now()}_${randomInt(0, 100000)}`
                 ?{`
                     INSERT INTO lin_tokens (token, load_id, kind)
@@ -328,11 +313,20 @@
             return t
         }
 
-        // Whether the assignment block should show. Available once status >= booked.
-        fn isAssignableStatus(s: string) -> boolean {
-            if (s == "tendered")  return false
-            if (s == "cancelled") return false
-            return true
+        // Whether the assignment block should show — once the load is past tender
+        // and not cancelled. Exhaustive `match` over the LoadStatus variant.
+        fn isAssignableStatus(s: LoadStatus) -> boolean {
+            return match s {
+                .Tendered   :> false
+                .Cancelled  :> false
+                .Booked     :> true
+                .Dispatched :> true
+                .Loaded     :> true
+                .InTransit  :> true
+                .Delivered  :> true
+                .Invoiced   :> true
+                .Paid       :> true
+            }
         }
 
         @lastSeenLoadEventCount = 0
@@ -458,7 +452,7 @@
                    already consumed) provides the durable lin enforcement,
                    and at the call site each fn declares its lin parameter
                    exactly once per §35.2.1. -->
-              <section if=(@currentLoad.status == "booked" && @acceptanceToken != "") class="bg-amber-50 border border-amber-200 rounded-lg p-4">
+              <section if=(@currentLoad.status == "Booked" && @acceptanceToken != "") class="bg-amber-50 border border-amber-200 rounded-lg p-4">
                   <div class="flex items-center justify-between text-sm">
                       <div class="text-amber-900">
                           <strong>Rate confirmation pending.</strong>

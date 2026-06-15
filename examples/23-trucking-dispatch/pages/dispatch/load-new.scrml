@@ -1,7 +1,7 @@
 // Trucking Dispatch — book-a-load form (M2).
 //
 // Route: /dispatch/loads/new. Dispatcher books a new load tendered by a
-// customer. On submit, creates a `loads` row with status='tendered' and
+// customer. On submit, creates a `loads` row with status='Tendered' and
 // redirects to /dispatch/loads/:id.
 //
 // Per F-AUTH-001 + F-AUTH-002 (M1) + F-COMPONENT-001 (M2): same auth
@@ -83,7 +83,7 @@
                     ${destinationAddress}, ${destinationCity}, ${destinationState},
                     ${pickupAt}, ${deliverBy},
                     ${commodity}, ${weightLbs}, ${rateDollars},
-                    'tendered'
+                    'Tendered'
                 )
             `}.run()
 
@@ -195,7 +195,7 @@
 
             // M5: publish new-load event so other dispatchers see the new
             // tender land on their board immediately.
-            publishBoardEvent("new-load", result.loadId, "tendered")
+            publishBoardEvent("new-load", result.loadId, "Tendered")
 
             window.location.href = `/dispatch/loads/${result.loadId}`
         }
