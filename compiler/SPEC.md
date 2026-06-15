@@ -7379,7 +7379,7 @@ Per §13.3, the compiler detects that `fetchUsers()` and `fetchMetrics()` are in
 - The manual boolean pattern (`@isLoading = true; @data = serverFn(); @isLoading = false`) remains valid but is NOT the recommended idiom. It allows impossible states and does not compose with exhaustive matching.
 - Optimistic update state SHOULD be carried as variant payloads (e.g., `Saving(optimisticData)`), not as separate boolean flags.
 - Each independent server call SHOULD have its own enum state variable. Parallel calls transition independently.
-- Future compiler sugar (e.g., a `loading` keyword) MAY desugar to this enum pattern. Any such sugar MUST preserve the enum's impossible-state guarantee and variant payload capability.
+- Future compiler sugar (e.g., a `loading` keyword) MAY desugar to this enum pattern. Any such sugar MUST preserve the enum's impossible-state guarantee and variant payload capability. **(Deep-dived S197 → DON'T-BUILD: a sugar that generates the per-screen enum FAILS the §53.14.4 synonym-detection gate — it produces the same first-class artifact this section already mandates. This MAY-door remains permissive future-work, NOT a roadmap commitment; re-open ONLY if a fresh gauntlet-fluency measurement confirms a standing gap the shipped surfaces don't fill AND variant-name canonicalization ratifies — then only a no-new-keyword transparent form with the desugared enum visible in compiler errors. The per-screen enum is the RATIFIED canonical async-loading model. See `scrml-support/docs/deep-dives/remotedata-loading-sugar-2026-06-15.md`.)**
 
 ### 13.6 Generators — Full Language Vocabulary
 

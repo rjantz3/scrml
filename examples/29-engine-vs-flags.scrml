@@ -1,0 +1,128 @@
+// Example 29: Engine vs. flag soup — make impossible states impossible.
+//
+// THE LESSON (one, and only one): you were about to write three booleans.
+// Reach for an engine instead. The engine makes the impossible
+// combinations UNREPRESENTABLE — not "validated against," but impossible
+// to even write down. This is Elm's "make impossible states impossible"
+// in scrml's vocabulary (§51, kickstarter §4 + §7 rows 1047/1048).
+//
+// The domain is deliberately trivial — load a short list of items — so the
+// LESSON is the whole point, not the domain.
+
+<program>
+
+    // ─────────────────────────────────────────────────────────────────────
+    // (a) THE SMELL — three booleans. DO NOT WRITE THIS. (Kept in a comment
+    //     so the contrast is visible; the canonical version is below.)
+    //
+    //     <isLoading> = false
+    //     <hasError>  = false
+    //     <isLoaded>  = false
+    //     <items>     = []          // … and a fourth cell for the payload
+    //
+    //     Three booleans = 2^3 = EIGHT representable combinations. Only THREE
+    //     of them are real screen states. The other five are nonsense that
+    //     the type system happily lets you create:
+    //
+    //       isLoading  hasError  isLoaded   meaning
+    //       ─────────  ────────  ────────   ─────────────────────────────────
+    //         false      false     false    Idle           ✓ real
+    //         true       false     false    Loading        ✓ real
+    //         false      true      false    Failed         ✓ real
+    //         false      false     true     Loaded         ✓ real
+    //         true       true      false    loading AND failed?      ✗ nonsense
+    //         true       false     true     loading AND loaded?      ✗ nonsense
+    //         false      true      true     failed AND loaded?       ✗ nonsense
+    //         true       true      true     all three at once?       ✗ nonsense
+    //
+    //     Every `if (@isLoading) … else if (@hasError) …` chain has to
+    //     defend against the five nonsense rows by hand, forever. Forget one
+    //     guard and you render a spinner on top of an error. The bug is not
+    //     in the rendering — the bug is that the STATE SHAPE allowed it.
+    // ─────────────────────────────────────────────────────────────────────
+
+    // (b) THE CANONICAL FORM — a per-screen Phase enum. The four variants ARE
+    //     the four real screen states; there is no fifth thing to represent.
+    //     "loading AND failed" cannot be written down: the cell holds exactly
+    //     ONE variant at a time. Impossible states are impossible.
+    //
+    //     This is a DEVELOPER-WRITTEN per-screen enum (§11.5). There is no
+    //     built-in RemoteData<T> — scrml has no generics, so name the variants
+    //     in domain terms and give the success arm a concrete payload type.
+    type Item:struct = {
+        id:   int
+        name: string
+    }
+
+    type ItemsPhase:enum = {
+        Idle                        // before any fetch
+        Loading                     // request in flight
+        Loaded(items: Item[])       // success — payload carries the typed rows
+        Failed(message: string)     // failure — payload carries the message
+    }
+
+    // The failable fetch (§19). `! string` declares it can fail; the `?{}` SQL
+    // escalates it to the server via §12 inference. The call-site `!{}` routes
+    // the failure INTO the .Failed phase variant — errors are STATES, not a
+    // separate `<hasError>` boolean.
+    function fetchItems() ! string {
+        return ?{`SELECT id, name FROM items ORDER BY name`}.all()
+    }
+
+    // load() writes bare .Variants through the engine variable @itemsPhase.
+    // The engine validates each write against the current state's rule=.
+    function load() {
+        @itemsPhase = .Loading
+        const rows = fetchItems() !{
+            | err :> { @itemsPhase = .Failed("Couldn't load items."); return }
+        }
+        @itemsPhase = .Loaded(rows)
+    }
+
+    // ONE engine replaces the four cells + the hand-written render chain.
+    // The variable @itemsPhase is auto-declared by the engine (§51.0.C); we do
+    // NOT also write <itemsPhase> = .Idle.
+    //
+    // CLEAN ENGINE FORM (gap-184): each state-child uses a bare body with a
+    // `</>` closer — the robust shape when the body is real markup. The boot
+    // effect (effect= on the OPENER, §51.0.H Form 3) runs the load ONCE on
+    // mount; the write @itemsPhase = .Loading inside it is checked against
+    // .Idle's rule= (.Loading is in the set, so it is legal).
+    <engine for=ItemsPhase initial=.Idle effect=${ load() }>
+
+        <Idle rule=.Loading>
+            <p class="hint">Press Reload to fetch.</p>
+        </>
+
+        <Loading rule=(.Loaded | .Failed)>
+            <p class="loading">Loading…</p>
+        </>
+
+        <Loaded items rule=.Loading>
+            <ul class="rows">
+                <each in=items key=@.id>
+                    <li>${@.name}</li>
+                    <empty>
+                        <li class="hint">No items.</li>
+                    </empty>
+                </each>
+            </ul>
+            <button onclick=load()>Reload</button>
+        </>
+
+        <Failed message rule=.Loading>
+            <p class="error">Failed: ${message}</p>
+            <button onclick=load()>Retry</button>
+        </>
+
+    </>
+
+    #{
+        .hint    { color: #6b7280; }
+        .loading { color: #2563eb; }
+        .error   { color: #dc2626; }
+        .rows    { list-style: none; padding: 0; margin: 0; }
+        .rows li { padding: 0.4rem 0; border-bottom: 1px solid #f3f4f6; }
+    }
+
+</program>

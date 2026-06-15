@@ -1,0 +1,139 @@
+// Example 30: Validated form — validators live ON the declaration (§55).
+//
+// THE ONE LESSON: a form's validity is DECLARED, not computed. You attach
+// validators as bare attributes to each field's decl, and the compiler
+// auto-synthesizes the entire validity surface for you:
+//
+//     @signup.isValid          — true iff every field passes its validators
+//     @signup.errors           — { name: [...tags], email: [...tags], ... }
+//     @signup.submitted        — has the form been submitted once?
+//     @signup.name.isValid     — per-field validity
+//     @signup.name.errors      — per-field error tags (ValidationError enum)
+//     @signup.name.touched     — has the user interacted with this field?
+//
+// All of it READ-ONLY and reactive. You never write a validate() function,
+// never keep an @isValid boolean, never carry @nameError strings. This is
+// the "no zod" differentiator: validation is a property of the type/decl,
+// not an imperative pass you run by hand.
+//
+// THE SMELL THIS REPLACES (do NOT write this — it is the anti-pattern):
+//   <usernameError> = ""                       // hand-rolled error-string flags
+//   <isValid> = false                          // hand-rolled validity boolean
+//   function validate() {                      // imperative validate() pass
+//     @usernameError = ""
+//     if (@username.length < 3) { @usernameError = "..." }
+//     @isValid = (@username.length >= 3 && ...)
+//   }
+//   ${ if (@usernameError.length > 0) { lift <span>${@usernameError}</> } }
+// Every one of those lines is replaced by a bare attribute on the decl plus
+// one <errors of=.../> element. This file is the cure for that smell.
+//
+// Pillars in play (PRIMER §2):
+//   Pillar 1 (markup-as-value) — each field's RHS is bindable markup; the
+//     decl-coupled <input/> IS the cell's render-spec (§6.2 Shape 2).
+//   Pillar 5b (reach discipline) — validity is a state property the compiler
+//     describes for you; there is no calculation to reach for fn/function.
+//
+// Cross-references:
+//   SPEC §55       — validators, validity surface, <errors of=>
+//   SPEC §55.1     — the 14 universal-core predicates
+//   SPEC §55.8     — the <errors of=expr/> first-class element
+//   SPEC §6.2      — Shape 2 (decl-coupled-with-render-spec)
+//   kickstarter §6 — validators + validity surface + error rendering
+//   PRIMER §8      — auto-synthesized validity surface
+
+<program>
+
+    // The form is ONE compound state cell. Each child is a Shape 2 decl:
+    // RHS is bindable markup (the render-spec), and the validators ride as
+    // BARE ATTRIBUTES on the decl tag. No separate validation code anywhere.
+    //
+    // Predicates used (all from the 14 universal-core, §55.1):
+    //   req            — non-empty (string "" fails; `not` fails)
+    //   length(>=N)    — string/array length predicate
+    //   pattern(/re/)  — string matches the regex
+    //   eq(@cell)      — cross-field equality (falls out automatically; the
+    //                    compiler tracks the dep and re-validates on change)
+    //
+    // The trailing string in `req("...")` is the §55.10 Level-1 inline message
+    // override — static-string only, no ${} interpolation.
+    <signup>
+        <name  req("Please enter your name") length(>=2)>     = <input type="text"/>
+        <email req pattern(/^[^@\s]+@[^@\s]+\.[^@\s]+$/)>      = <input type="email"/>
+        <password req length(>=8)>                            = <input type="password"/>
+        <confirm  req eq(@signup.password)>                   = <input type="password"/>
+        <agree req("You must accept the terms")>              = <input type="checkbox"/>
+    </>
+
+    // The ONLY function in the file — and it does NOT validate. By the time it
+    // runs, @signup.isValid has already gated the submit button (the button is
+    // disabled until valid), so the data reaching submit() is known-good. A real
+    // app persists it here; this stub just marks the seam. The form's auto-synth
+    // @signup.submitted flag flips true on submit (§55.7) and drives the
+    // confirmation below — another piece of the surface you never wrote.
+    function submit() {
+        // Persist the known-good data here, e.g. an INSERT via a ?{ } server
+        // query over @signup.name / @signup.email. (Omitted — this example has
+        // no <db>; the lesson is the validity surface, not persistence.)
+    }
+
+    <div class="max-w-md mx-auto my-12 p-8 bg-white rounded-xl shadow font-sans">
+        <h1 class="text-2xl font-semibold mb-6">Create your account</h1>
+
+        // The submit button is disabled until @signup.isValid, so submit()
+        // only ever fires on good data. No guard clause inside submit().
+        <form onsubmit=submit() class="flex flex-col gap-4">
+
+            <div class="flex flex-col gap-1">
+                <label class="text-sm font-medium text-slate-700">Name</label>
+                // Render-by-tag: <name/> expands to the bound <input>, wired
+                // with bind:value=@signup.name from the decl's render-spec.
+                <signup><name class="p-2 border border-slate-300 rounded"/></>
+                // First-class error element. Reads @signup.name.errors and
+                // renders the first error (nothing at all when the field is
+                // valid). No `if (errors.length)` check, no string flag.
+                <errors of=@signup.name/>
+            </div>
+
+            <div class="flex flex-col gap-1">
+                <label class="text-sm font-medium text-slate-700">Email</label>
+                <signup><email class="p-2 border border-slate-300 rounded"/></>
+                <errors of=@signup.email/>
+            </div>
+
+            <div class="flex flex-col gap-1">
+                <label class="text-sm font-medium text-slate-700">Password</label>
+                <signup><password class="p-2 border border-slate-300 rounded"/></>
+                <errors of=@signup.password/>
+            </div>
+
+            <div class="flex flex-col gap-1">
+                <label class="text-sm font-medium text-slate-700">Confirm password</label>
+                // Cross-field validation: the `eq(@signup.password)` predicate
+                // on the decl makes the compiler re-check this field whenever
+                // EITHER cell changes. No hand-wired "passwords match" logic.
+                <signup><confirm class="p-2 border border-slate-300 rounded"/></>
+                <errors of=@signup.confirm/>
+            </div>
+
+            <label class="flex items-center gap-2 text-sm text-slate-700">
+                <signup><agree/></>
+                I accept the terms of service
+            </label>
+            <errors of=@signup.agree/>
+
+            // The submit button READS the auto-synthesized rollup. `isValid`
+            // is true only when every field passes. Read-only surface — a
+            // write to it would be E-SYNTHESIZED-WRITE.
+            <button type="submit" disabled=!@signup.isValid
+                    class="mt-2 px-4 py-2 bg-slate-900 text-white rounded disabled:opacity-40 disabled:cursor-not-allowed">
+                Create account
+            </button>
+        </form>
+
+        // Reads the auto-synthesized @signup.submitted flag — true after the
+        // first submit attempt. Another piece of the surface you never wrote.
+        <p class="mt-4 text-green-700 text-sm" if=@signup.submitted>Account created.</p>
+    </div>
+
+</program>

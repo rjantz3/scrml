@@ -52,6 +52,9 @@ The PA does NOT mark rows checked. PA's compile-tests are recorded in audit repo
 | 21 | `21-navigation.scrml` | [ ] | — | NEW S42 — §20 `navigate()` + `route` |
 | 22 | `22-multifile/app.scrml` | [ ] | — | NEW S42 — §21 cross-file imports + pure-type files. 3 files in subdir. |
 | 28 | `28-flux.scrml` | [ ] | — | NEW S193 — the Flux shifting-labyrinth game (dog-food; will replace 14-mario). Runtime-sim test at `compiler/tests/unit/28-flux-runtime-sim.test.js`. |
+| 29 | `29-engine-vs-flags.scrml` | [ ] | — | NEW S197 — flags→engine teaching example (gap G1). PA-R26 clean (exit 0; bare-body engine, gap-184-safe). Awaiting human verification. |
+| 30 | `30-validated-form.scrml` | [ ] | — | NEW S197 — decl-coupled validators + `@signup.isValid` + `<errors of=>` (gap G4, the "no zod" lesson). PA-R26 clean (info-only I-FN-PROMOTABLE on the persist stub). |
+| 31 | `31-reach-discipline.scrml` | [ ] | — | NEW S197 — state-vs-`fn` reach discipline (gap G3, Pillar 5b). PA-R26 clean. |
 
 ---
 

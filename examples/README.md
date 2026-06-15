@@ -62,6 +62,9 @@ bun compiler/src/cli.js compile examples/01-hello.scrml -o dist/
 | `26-type-derived-schema.scrml` | `schemaFor(StructType)` — `<schema>` DB DDL generated from a struct (L22 type-as-argument family, §41.15) |
 | `27-type-derived-table.scrml` | `tableFor(StructType, rows)` — an admin `<table>` generated from a struct + rows (L22 family, §41.16) |
 | `28-flux.scrml` | **Flux** — a shifting-labyrinth game: a derived ASCII board, fog-of-war, per-cell re-roll ("flux"), 2-tier memory locking, and level/vision/XP progression. Canonical-scrml dog-food (§6.6 derived cells, §48 pure `fn`, §17/§18). Will replace `14-mario` as the flagship game example. |
+| `29-engine-vs-flags.scrml` | **Engine vs. flag soup** — the same UI as three booleans (2³ = 8 states, 5 of them impossible) vs. a per-screen `Phase` enum where the impossible states are unrepresentable by construction. Elm's "make impossible states impossible" in scrml — the flags→engine reflex (§51; the teaching counter to kickstarter §7 rows 1047/1048). |
+| `30-validated-form.scrml` | **Validated form** — validators ride as bare attributes on each field decl (`<email req pattern(…)>`); the compiler auto-synthesizes the read-only validity surface (`@signup.isValid`, per-field `.errors`/`.touched`) and `<errors of=…/>` renders it. No `validate()`, no `@isValid` boolean, no error-string flags — the "no zod" differentiator (§55). |
+| `31-reach-discipline.scrml` | **Reach discipline** — the state-vs-`fn` decision, side by side over one domain: a source scanner's MODE is an `<engine>` (named conditions + a transition contract) while a numeric literal's VALUE is a pure `fn` (total, input→output). Pillar 5b — reach for state when it has named conditions + a contract; reach for `fn` when it's pure compute. |
 
 ---
 

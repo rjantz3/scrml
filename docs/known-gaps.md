@@ -15,10 +15,10 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 1 |
+| HIGH | 2 |
 | MED | 8 |
 | LOW | 20 |
-| Nominal (spec-ahead-of-impl) | 9 |
+| Nominal (spec-ahead-of-impl) | 8 |
 <!-- @generated:gap-counts END -->
 
 > The four data rows above are a GENERATED artifact derived from the `<!-- @gap … -->` tokens — run `bun scripts/state.ts --write` to refresh (and `--check` to gate). For WHAT closed each arc, see [`docs/changelog.md`](changelog.md); the old per-severity "Closed-this-arc" narrative cells were retired (DD3 Fork 2B, `dd3-state-self-evidence-2026-06-07`).
@@ -175,6 +175,14 @@ The S196 read-authority core (change-id `state-decl-shape-disambiguation-2026-06
 
 ### G-S52-RETRACTION-DOC-STALENESS — two derived docs still teach the deleted §52 auto-persist/optimistic model — `NEW S194; LOW; open — doc-currency / ouroboros`
 The S194 §52.6.2 retraction (Q1=C/Q2=WF — §52 is read-authority; the dev owns the `?{}` write; the compiler-generated optimistic-update + rollback + auto-persist were DELETED) left two DERIVED docs stale (surfaced by the wrap 6c `project-mapper` non-compliance scan): (1) `docs/articles/components-are-states-devto-2026-04-29.md` (lines 139, 175) claims the compiler "generates the optimistic-update path, generates the rollback" for `authority="server"` — now FALSE (its own line-239 self-justification "the claim follows the spec" is void because the spec it followed was amended); (2) `docs/heads-up/spec-consolidation-2026-05-25.md` (lines 297, 332, 370) describes §52.4 as the compiler synthesizing "optimistic update on writes, rollback on server-error" — contradicts the retraction (also resolves that doc's S166 carried-uncertain §52.4 TBD flag). The initial-load/SSR claims in BOTH remain compliant (read-authority infra IS still compiler-generated). Fix: reword the optimistic/rollback/auto-persist claims to the read-authority-only model (or deref the heads-up to scrml-support). Deferred from the S194 wrap (Rule-1-adjacent article + end-of-wrap edit-risk); the normative SPEC §52.6 is correct, this is derived-doc lag. <!-- @gap id=g-s52-retraction-doc-staleness sev=LOW status=open -->
+
+---
+
+## §S197 — gaps filed S197 (2026-06-15, corpus-rewrite wave-3 new examples)
+
+### G-MARKUP-VALUE-TERNARY-FNRETURN-CODEGEN — markup as a ternary value OR a `fn` return value mis-compiles `E-CODEGEN-INVALID-JS` — `NEW S197; HIGH; open`
+Markup-as-first-class-value (Pillar 1) fails to codegen in three DOCUMENTED forms: (a) inline ternary in interpolation `${ cond ? <a/> : <b/> }` (PRIMER §6.4(2)); (b) derived-cell ternary `const <badge> = cond ? <a/> : <b/>` (PRIMER §6.6.17); (c) `fn f() -> markup { return <m/> }` (kickstarter §6.4). All three → `E-CODEGEN-INVALID-JS`, exit 1, NO output emitted. Isolated S197 via 4 minimal probes (`/tmp/cw3/p{A,B,C,D}.scrml`): A (inline ternary) / B (fn-return markup) / C (derived-cell ternary) FAIL; **D (plain non-ternary markup-typed derived cell `const <x> = <span>${@n}</span>`) COMPILES** — so the gap is specifically markup-in-TERNARY (inline + derived-cell) + markup-as-FN-RETURN; plain markup-typed derived cells already work. **BLOCKED the wave-3 markup-as-value teaching example (gap G6)** — its whole lesson is "branch it / return it," both broken — so G6 is DEFERRED (reserved as future example 32) behind this gap; it also blocks the corpus teaching Pillar 1's branch/return forms at all. The PRIMER + kickstarter document these as VALID; the compiler hard-errors → spec-vs-impl drift on the load-bearing pillar (Pillar 1). Fix is in codegen — the markup-value emit path for ternary consequent/alternate + fn-return-of-markup. Surfaced by the wave-3 markup-as-value drafter + adversarial reviewer (who ALSO caught a free-standing `snippet name(){}` decl + file-scope `${render name()}` emitting two different undefined-function names → runtime ReferenceError, exit-0-but-broken — a SEPARATE silent-runtime-break in the free-standing-snippet codegen path worth its own check).
+<!-- @gap id=g-markup-value-ternary-fnreturn-codegen sev=HIGH status=open -->
 
 ---
 
@@ -1824,10 +1832,10 @@ SPEC §4.18 landed Wave 1 S111 — the code-default body mode + `"..."` display-
 
 §23.4 — `use foreign:name { fn }` for declaring server-side sidecar processes (HTTP/socket services). Specced, not yet implemented.
 
-### Nominal-7 — `RemoteData` enum — `nominal`
-<!-- @gap id=nominal-7 sev=NOMINAL status=nominal -->
+### Nominal-7 — `RemoteData` enum — `resolved` (S197 — mislabeled; resolved-by-pattern)
+<!-- @gap id=nominal-7 sev=NOMINAL status=resolved -->
 
-§13.5 — built-in `Loading / Loaded(T) / Failed(Error)` enum for modeling async fetch state. Pattern-matchable with exhaustive checking. Specced, not yet implemented.
+§13.5 — **RESOLVED-BY-PATTERN + reclassified S197.** This entry was factually wrong on three axes (RemoteData scope-lock + loading-sugar deep-dive: `scrml-support/docs/deep-dives/remotedata-no-generics-scope-2026-06-15.md` + `remotedata-loading-sugar-2026-06-15.md`): (1) NOT built-in — §13.5 specs a developer-written per-screen enum PATTERN (§13.5.6 SHALL), not a built-in type; (2) `Loaded(T)` is structurally IMPOSSIBLE — scrml has no generics; (3) NOT unimplemented — the per-screen-enum pattern is SHIPPED (SPEC §13.5 + corpus `16-remote-data` + render-of §19.15). RATIFIED S197: the per-screen enum is the canonical async-loading model (A), composed with engine §51 / §52 Tier-1 / render-of §19.15 / errors-as-states (D); a built-in (B) is vetoed (god-ify); the §13.5.6 `loading`-sugar (C) was deep-dived → **DON'T-BUILD** (fails the §53.14.4 synonym gate; re-open gated on fresh-fluency + variant-name-canonicalization). The standing fluency-discoverability signal routes to the corpus-rewrite arc, not a sugar.
 
 ---
 

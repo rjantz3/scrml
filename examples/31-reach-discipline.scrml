@@ -1,0 +1,138 @@
+// Example 32: Reach discipline — the procedural form of the state-vs-logic
+// axiom (PRIMER §2 Pillar 5b, S98 ratification).
+//
+// THE ONE LESSON: before you write code for a locus, ASK what shape it is.
+//
+//   Does this locus have a finite, NAMED set of conditions, where the code
+//   that runs depends on WHICH condition is active — AND a transition contract
+//   (legal/illegal moves) — AND a sensible "what condition is this in right
+//   now?" question?
+//       -> YES on any of those -> it is a STATE problem. Reach for <engine>.
+//
+//   Is the locus total — same shape of work regardless of context, a pure
+//   function from input to output, result wholly determined by the input
+//   value (no ambient "before/after")?
+//       -> YES on any of those -> it is a CALCULATION problem. Reach for fn.
+//
+// The lesson is the DECISION, not either artifact. This file puts the two
+// side by side over the SAME domain (a tiny source scanner) so the contrast
+// is unmistakable: the scanner's MODE is state; reading a numeric literal's
+// VALUE is calculation. Same file, two reaches, one principle.
+//
+// This is Pillar 5b's own canonical example pair (scanner/lexer mode = state;
+// numeric-literal value = calculation), named verbatim in the charter.
+//
+// Cross-references:
+//   PRIMER §2 Pillar 5b   — the reach-discipline charter + the YES/NO test
+//   PRIMER §6 / §6.1      — fn = canonical pure form; function = impure work
+//   kickstarter §4        — engines (the state primitive)
+//   kickstarter §11.1     — the engine recipe
+//   examples/14-mario-state-machine.scrml — engine = state (mirror)
+//   examples/02-counter.scrml             — calculation = function (mirror)
+
+<program>
+
+    // ────────────────────────────────────────────────────────────────────
+    // (a) STATE — the scanner's MODE.
+    //
+    // Apply the YES/NO test:
+    //   - Finite, NAMED conditions?              YES: InCode / InString / InComment.
+    //   - Code depends on WHICH is active?        YES: a quote means 'enter a string'
+    //                                                  in code, but is just a character
+    //                                                  inside a comment.
+    //   - Transitions with a contract?            YES: from InCode you may enter a
+    //                                                  string or a comment; from inside
+    //                                                  either you may only return to code.
+    //   - Sensible 'what mode am I in?' question? YES.
+    //
+    // Three YESes. This is STATE. Reach for <engine>. The SMELL we are
+    // avoiding here is a fistful of booleans — @inString, @inComment — gating
+    // the same scan loop. That shape drifts: nothing stops both being true at
+    // once, and no contract says which transitions are legal. The engine makes
+    // the condition set a closed enum and the legal moves a rule= contract the
+    // compiler checks.
+    // ────────────────────────────────────────────────────────────────────
+    type ScanMode:enum = { InCode, InString, InComment }
+
+    // Plain reactive cell — a status line the engine's boot effect seeds.
+    // (Single-value Tier-1 cell; display via ${@bootNote} interpolation.)
+    <bootNote> = ""
+
+    // §51.0.H Form 3 — the boot effect. effect=${...} on the ENGINE OPENER
+    // fires ONCE at module-init (the implicit init->initial= edge; Elm
+    // init+Cmd). It is a §7 logic-context block, so the ${...} wrapper is
+    // REQUIRED here — a bare effect=fn() is E-ENGINE-EFFECT-NOT-INTERPOLATED.
+    // This is the canonical 'do init work as the engine boots' seam.
+    <engine for=ScanMode initial=.InCode effect=${ @bootNote = "scanner armed — starting in InCode" }>
+
+        // State-child bodies are sugar over if=(@scanMode == .ThisVariant).
+        // rule= names the LEGAL transitions OUT of this mode (the contract).
+        // Direct writes (@scanMode = .Variant) are statically validated
+        // against the current state's rule= — an illegal move is a compile
+        // error, not a silent runtime drift.
+        <InCode rule=(.InString | .InComment)>
+            <p class="note">${@bootNote}</p>
+            <p>Mode: <strong>InCode</strong> — a quote starts a string; a slash-slash starts a comment.</p>
+            <div class="row">
+                <button onclick=@scanMode = .InString>see a quote</button>
+                <button onclick=@scanMode = .InComment>see a comment</button>
+            </div>
+        </>
+
+        <InString rule=.InCode>
+            <p>Mode: <strong>InString</strong> — characters are string contents until the closing quote.</p>
+            <button onclick=@scanMode = .InCode>close the string</button>
+        </>
+
+        <InComment rule=.InCode>
+            <p>Mode: <strong>InComment</strong> — characters are comment text until end-of-line.</p>
+            <button onclick=@scanMode = .InCode>end of line</button>
+        </>
+
+    </>
+
+    // ────────────────────────────────────────────────────────────────────
+    // (b) CALCULATION — a numeric literal's VALUE.
+    //
+    // Apply the SAME test, get the opposite answer:
+    //   - Total — same work regardless of context?  YES: a hex literal is a hex
+    //                                                    literal no matter what mode
+    //                                                    the scanner was in.
+    //   - Pure function input -> output?             YES: '0xff' is 255, always.
+    //   - Result determined by the input value?      YES: no ambient 'before/after'.
+    //
+    // This is CALCULATION. Reach for fn. A fn body is statically PURE: no SQL,
+    // no DOM, no state writes, no non-determinism (no Date.now() /
+    // Math.random()), and it must return a value on every path. The call site
+    // ${numericLiteralValue('0xff')} reads as 'this is a calculation,' NOT
+    // 'this is a state machine.' Using a fn here is the signal.
+    //
+    // Note what does NOT belong on this side: there is no @scanMode read in
+    // this function, no transition, no 'what condition is this in?' — if you
+    // reached for an engine to compute 255 you would be modeling a machine
+    // that has no states. That is the over-reach the discipline prevents.
+    // ────────────────────────────────────────────────────────────────────
+    fn numericLiteralValue(raw: string) -> number {
+        if (raw.startsWith("0x") or raw.startsWith("0X")) return parseInt(raw.slice(2), 16)
+        if (raw.startsWith("0o") or raw.startsWith("0O")) return parseInt(raw.slice(2), 8)
+        if (raw.startsWith("0b") or raw.startsWith("0B")) return parseInt(raw.slice(2), 2)
+        return parseFloat(raw)
+    }
+
+    <div class="calc">
+        <p>Numeric-literal value (pure <code>fn</code>, no state in sight):</p>
+        <ul>
+            <li>"255" → ${numericLiteralValue("255")}</li>
+            <li>"0xff" → ${numericLiteralValue("0xff")}</li>
+            <li>"0o17" → ${numericLiteralValue("0o17")}</li>
+            <li>"1.5e3" → ${numericLiteralValue("1.5e3")}</li>
+        </ul>
+    </div>
+
+    #{
+        .note { color: #2563eb; font-size: 0.85rem; }
+        .row { display: flex; gap: 0.5rem; }
+        .calc { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #e5e7eb; }
+    }
+
+</program>
