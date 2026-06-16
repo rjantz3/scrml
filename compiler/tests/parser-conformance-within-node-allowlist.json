@@ -502,8 +502,8 @@
     "SPAN-COORD": 620
   },
   "examples/23-trucking-dispatch/pages/driver/hos.scrml": {
-    "COUNT-LENGTH": 3,
-    "EXTRA-FIELD": 65,
+    "COUNT-LENGTH": 11,
+    "EXTRA-FIELD": 121,
     "FIELD-SHAPE": 143,
     "KIND-NAME": 23,
     "MISSING-FIELD": 260,

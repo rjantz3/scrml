@@ -8,11 +8,14 @@
 // ("OffDuty", "OnDuty", "Driving", "SleeperBerth") — the same strings the
 // state machine and the match helpers dispatch on. Color-coded pill.
 //
-// This file ALSO owns the canonical HOS transition table (slice 1b). The
-// `<engine for=DriverStatus>` showcase is DEFERRED to the E-leg (`<engine
-// server>` §52 fetch-on-mount) — see progress.md / hos.scrml deferral note —
-// so the transition rules live as pure `match`-based helpers here, the same
-// pattern status-picker.scrml uses for the LoadStatus machine.
+// This file owns the canonical HOS transition table (slice 1b) + the status
+// label/class helpers. The `<engine for=DriverStatus server=@source>` showcase
+// LANDED S199 (the E-leg, §51.0.E / §52) — it lives in pages/driver/hos.scrml
+// and hydrates the engine guard-free from the server-loaded driver status.
+// These helpers are RETAINED: driverStatusClasses/Label render the driver-table
+// card (DriverCard below); driverNextStates/isValidHosTransition are the
+// server-side transition validator (changeHosServer + driver/home.scrml). The
+// engine's `rule=` contract mirrors driverNextStates (the same transitions).
 
 ${
     import { DriverStatus } from '../schema.scrml'

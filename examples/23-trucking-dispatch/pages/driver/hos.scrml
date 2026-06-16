@@ -4,20 +4,20 @@
 // time-in-current-state, hours-driven-today, hours-on-duty-today, plus
 // the last 24h of hos_change log entries for cycle history.
 //
-// Scoping §7 calls for a `<engine for=DriverStatus>` here, but the engine
-// showcase is DEFERRED to the E-leg (slice 1b decision — see the deferral
-// note above the `<db>` block below). HOS loads `current_status` client-side
-// `on mount` (cookie session token); the engine-hydration A-leg
-// (`initial=@cell`) snapshots at CONSTRUCTION, so it does NOT fit HOS as
-// architected — the real engine wants `<engine server>` (§52) fetch-on-mount.
-// Until that ships, this page is the `match`-based transition validator: the
-// DriverStatus variant set, the transition rules, and the compile-time
-// exhaustiveness forcing-function all live in the shared `match` helpers in
+// Scoping §7 calls for a `<engine for=DriverStatus>` here, and S199 LANDED it:
+// the server-authoritative engine (the E-leg, §51.0.E / §52). The engine
+// `<engine for=DriverStatus server=@currentDriver.current_status>` HYDRATES
+// guard-free + reactively from the fetch-on-mount driver status (the A-leg
+// `initial=@cell` snapshots at CONSTRUCTION, which did NOT fit — HOS loads
+// `current_status` client-side `on mount`; the E-leg `server=@source` reflects
+// it whenever it lands/changes). The engine renders the current-state badge +
+// owns the typed transition contract via `rule=` (matching the shared
+// driverNextStates validator); the page reads `@driverStatus` (the engine cell).
+// Server-side validation + persistence stay in the shared `match` helpers in
 // components/driver-card.scrml (`driverStatusClasses` / `driverStatusLabel` /
-// `driverNextStates` / `isValidHosTransition`), mirroring status-picker.scrml
-// for the LoadStatus machine. The page tracks `@currentDriver.current_status`
-// (the stored DriverStatus variant name: "OffDuty" / "OnDuty" / "Driving" /
-// "SleeperBerth"). The simplified 11/14 FMCSA-ish transitions:
+// `driverNextStates` / `isValidHosTransition`). current_status is the stored
+// DriverStatus variant name ("OffDuty" / "OnDuty" / "Driving" / "SleeperBerth").
+// The simplified 11/14 FMCSA-ish transitions:
 //   OffDuty      ⇄ OnDuty,  OffDuty → SleeperBerth
 //   OnDuty       ⇄ Driving
 //   Driving      → OffDuty | OnDuty
@@ -48,11 +48,10 @@
 // v0.3 canonical non-entry-page shape (S94 hos-restructure, 2026-05-15 — SPEC §4.15
 // / §40 Wave 1 + DEFERRED §2):
 //   - `<page db= auth=>` wrapper (matches 19 sibling pages in this corpus)
-//   - the `<engine>` declaration is DEFERRED (E-leg) — slice 1b replaced it
-//     with the shared `match`-based transition validator; when the engine
-//     lands it lives INSIDE `<page>` body (file-scope-extension per §51.0.K
-//     Machine Cohesion footnote — page body is logic-default and
-//     mode-equivalent to `<program>` body per §4.15)
+//   - the `<engine>` declaration LANDED S199 (the E-leg) — it lives in the
+//     `<page>` body markup (the "Current state" section), nested in the
+//     loaded-state conditional; it renders the current-state badge + hydrates
+//     `@driverStatus` from the server driver status (`server=@source`, §52)
 //   - Single imports `${}` block at the top of `<page>` body (consolidated
 //     from prior file-top imports + inner imports)
 //   - No `<program>` wrapper — only the entry file (`app.scrml`) carries the
@@ -74,17 +73,14 @@
       import { SESSION_DB_PATH } from '../../models/auth.scrml'
   }
 
-  // HOS state machine is a `match`-based transition validator here (the
-  // `isValidHosTransition` / `driverNextStates` helpers in
-  // components/driver-card.scrml); the `<engine for=DriverStatus>` form is
-  // DEFERRED pending engine-hydration-from-persisted-state (the E-leg,
-  // `<engine server>` §52 fetch-on-mount). HOS loads `current_status`
-  // client-side `on mount` (cookie session token), which the
-  // construction-snapshot `initial=@cell` A-leg does not fit — the engine
-  // would snapshot whatever `current_status` held at construction, not the
-  // value fetched on mount. Until the E-leg ships, the variant set, the
-  // transition rules, and the exhaustiveness forcing-function all live in the
-  // shared `match` helpers; the page tracks `@currentDriver.current_status`.
+  // HOS state machine — the server-authoritative `<engine for=DriverStatus
+  // server=@currentDriver.current_status>` LANDED S199 (the E-leg). It renders
+  // the current-state badge (the "Current state" section below) + owns the typed
+  // transition contract via `rule=`. `@driverStatus` (the engine cell) HYDRATES
+  // guard-free from the fetch-on-mount driver status. Server-side validation +
+  // the persist `?{}` stay in changeHosServer (+ the shared isValidHosTransition
+  // / driverNextStates helpers in driver-card.scrml); a client transition
+  // persists, then the re-fetch re-hydrates the engine.
 
   <db src="../../dispatch.db" protect="password_hash" tables="users, drivers, log_entries">
 
@@ -342,9 +338,27 @@
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Current state</div>
-                            <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${driverStatusClasses(@currentDriver.current_status)}">
-                                ${driverStatusLabel(@currentDriver.current_status)}
-                            </span>
+                            <!-- The HOS engine — server-authoritative (the E-leg, §51.0.E / §52, S199). -->
+                            <!-- @driverStatus HYDRATES guard-free from the server-loaded -->
+                            <!-- @currentDriver.current_status whenever the fetch-on-mount lands (or -->
+                            <!-- changeHosServer re-fetches); each state-child renders its own badge. -->
+                            <!-- rule= is the typed HOS transition contract (matches the shared -->
+                            <!-- driverNextStates validator); client moves persist via changeHosServer -->
+                            <!-- (§52.6.2 — the dev owns the ?{} write), then the re-fetch re-hydrates. -->
+                            <engine for=DriverStatus server=@currentDriver.current_status initial=.OffDuty>
+                                <OffDuty rule=(.OnDuty | .SleeperBerth)>
+                                    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border bg-slate-100 text-slate-700 border-slate-200">Off duty</span>
+                                </>
+                                <OnDuty rule=(.OffDuty | .Driving)>
+                                    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border bg-blue-100 text-blue-800 border-blue-200">On duty</span>
+                                </>
+                                <Driving rule=(.OffDuty | .OnDuty)>
+                                    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border bg-amber-100 text-amber-800 border-amber-200">Driving</span>
+                                </>
+                                <SleeperBerth rule=(.OnDuty | .OffDuty)>
+                                    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border bg-violet-100 text-violet-800 border-violet-200">Sleeper berth</span>
+                                </>
+                            </>
                         </div>
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Time in state</div>
@@ -375,22 +389,22 @@
                         <button
                             onclick=setStatus("OffDuty")
                             class="px-3 py-2 text-sm font-medium rounded-md border border-slate-300 hover:bg-slate-100 disabled:opacity-50"
-                            disabled=(@currentDriver.current_status == "OffDuty")
+                            disabled=(@driverStatus == .OffDuty)
                         >Off duty</button>
                         <button
                             onclick=setStatus("OnDuty")
                             class="px-3 py-2 text-sm font-medium rounded-md border border-blue-300 text-blue-800 hover:bg-blue-50 disabled:opacity-50"
-                            disabled=(@currentDriver.current_status == "OnDuty")
+                            disabled=(@driverStatus == .OnDuty)
                         >On duty</button>
                         <button
                             onclick=setStatus("Driving")
                             class="px-3 py-2 text-sm font-medium rounded-md border border-amber-300 text-amber-800 hover:bg-amber-50 disabled:opacity-50"
-                            disabled=(@currentDriver.current_status == "Driving")
+                            disabled=(@driverStatus == .Driving)
                         >Driving</button>
                         <button
                             onclick=setStatus("SleeperBerth")
                             class="px-3 py-2 text-sm font-medium rounded-md border border-violet-300 text-violet-800 hover:bg-violet-50 disabled:opacity-50"
-                            disabled=(@currentDriver.current_status == "SleeperBerth")
+                            disabled=(@driverStatus == .SleeperBerth)
                         >Sleeper berth</button>
                     </div>
 

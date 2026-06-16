@@ -332,6 +332,13 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
     "W-CG-CHUNK-EMPTY": 1,
     "W-CG-CHUNK-PREFETCH-UNRESOLVED": 1,
     "W-DEAD-FUNCTION": 1,
+    // S199 — the HOS `<engine for=DriverStatus server=@currentDriver.current_status>`
+    // showcase (pages/driver/hos.scrml, the E-leg dog-food): @currentDriver is a
+    // server-LOADED PLAIN cell (not a `<var server>` §52 cell — it rides the cookie-
+    // session fetchHosData flow), so the engine's server-source nudge fires once
+    // (info; the hydration mechanism works regardless — the cell IS server-owned).
+    // Aggregate 73 -> 74.
+    "W-ENGINE-SERVER-SOURCE-NOT-AUTHORITATIVE": 1,
     "W-PROGRAM-001": 4,
     "W-PROGRAM-REDUNDANT-LOGIC": 18,
     "W-SQL-ROW-UNTYPED": 6,
