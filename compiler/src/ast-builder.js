@@ -13911,6 +13911,16 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         //   pinned         — bareword modifier (§51.0.B + §6.10)
         const varMatch = header.match(new RegExp(`\\bvar\\s*=\\s*(${IDENT.source})\\b`));
         const initialMatch = header.match(new RegExp(`\\binitial\\s*=\\s*\\.(${IDENT.source})\\b`));
+        // §51.0.E (S198 — Approach F A-leg) — RUNTIME-cell hydration form
+        // `initial=@cell`. DISTINCT from the `initial=.Variant` static literal: the
+        // value is snapshotted from the named reactive cell at engine-construction
+        // (boot-only) and routed through the GUARD-FREE construction hook, NOT the
+        // transition guard (hydration asserts the machine WAS at that state). B14
+        // RECORDS the bare cell name; B15 validates the cell EXISTS + is type-
+        // compatible (for=T enum OR a string holding a variant name). Mutually
+        // exclusive with `initial=.Variant`; FORBIDDEN on derived engines. The `@`
+        // sigil is the discriminator vs the `.Variant` form above.
+        const initialCellMatch = header.match(new RegExp(`\\binitial\\s*=\\s*@(${IDENT.source})\\b`));
         // §51.0.S.2.2 (S154 — #14 event-payload-transition, PARSER batch 1) —
         // `accepts=MsgType` engine-OPENER attribute. Value is a bare enum-type
         // identifier (e.g. `accepts=DragMsg`) declaring the message vocabulary
@@ -14146,6 +14156,12 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // the type's variant set + emits W-ENGINE-INITIAL-MISSING if absent.
         const initialVariant = initialMatch ? initialMatch[1] : null;
 
+        // §51.0.E (S198 — Approach F A-leg) — record initial=@cell (runtime-cell
+        // hydration). B14 records the bare cell NAME; B15 validates existence +
+        // type-compat. Mutually exclusive with initialVariant (E-ENGINE-INITIAL-
+        // BOTH-FORMS fires at B15 when both are present).
+        const initialCell = initialCellMatch ? initialCellMatch[1] : null;
+
         // §51.0.S.2.2 (S154) — record accepts=MsgType. PARSER batch 1 RECORDS
         // the raw enum-type identifier; BATCH 2 (typer) resolves + validates.
         const acceptsType = acceptsMatch ? acceptsMatch[1] : null;
@@ -14299,11 +14315,16 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           //   varNameOverride    — non-null iff `var=` was present.
           //   initialVariant     — non-null iff `initial=.X` was present.
           //   pinned             — true iff `pinned` bareword was present.
+          //   initialCell        — non-null bare cell name iff `initial=@cell`
+          //                        was present (§51.0.E runtime-cell hydration,
+          //                        S198 Approach F A-leg). Mutually exclusive with
+          //                        initialVariant; FORBIDDEN on derived engines.
           //   isExported         — set later by export Form 1 detection (or
           //                        false if the engine was not exported).
           varName,
           varNameOverride,
           initialVariant,
+          initialCell,
           // §51.0.S.2.2 (S154 — #14 event-payload-transition, PARSER batch 1):
           //   acceptsType — non-null raw enum-type identifier iff `accepts=Type`
           //                 was present on the opener; null otherwise. BATCH 2

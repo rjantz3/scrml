@@ -3818,6 +3818,64 @@ function _scrml_engine_direct_set(varName, target, table, timersTable, idleEntry
 }
 
 // ---------------------------------------------------------------------------
+// 51.0.E engine hydration — S198 (#Approach F A-leg, dynamic initial=@cell)
+// ---------------------------------------------------------------------------
+// Boot-only runtime-cell hydration. \`initial=@cell\` snapshots the named cell's
+// value at engine-construction and seeds the engine variable to it. Hydration is
+// CONSTRUCTION, not transition: it asserts the machine WAS at that state, so the
+// from-state \`rule=\` guard does NOT apply. This is the GUARD-FREE counterpart of
+// _scrml_engine_direct_set — it performs a bare reactive set, never routing
+// through the transition guard (which would hard-throw E-ENGINE-INVALID-TRANSITION
+// on a non-rule=-legal target).
+//
+// Decoder boundary: a guard-free construction must not silently corrupt the cell.
+// The snapshot may be any persisted value (a DB-status string, a localStorage
+// read). If it is absence (null/undefined) or not a legal variant of the engine's
+// for=T type, this throws E-ENGINE-INITIAL-INVALID-VARIANT — the runtime
+// counterpart of the compile-time static-literal check (symbol-table B15).
+//   varName     — the engine's auto-declared variable (51.0.C).
+//   snapshot    — the cell value read at construction (a variant string, or a
+//                 \`{ variant, data }\` tagged-object for a payload variant).
+//   validTags   — the engine's legal state tags (its for=T variant set).
+//   forType     — the engine's for= type name (for the error message).
+function _scrml_engine_hydrate_init(varName, snapshot, validTags, forType) {
+  // Absence is never a valid hydration source (null + undefined do not exist in
+  // scrml; an empty/absent persisted value is a decode failure, not a state).
+  if (snapshot == null) {
+    throw new Error(
+      "E-ENGINE-INITIAL-INVALID-VARIANT: engine '" + varName + "' (for=" + forType +
+      ") hydrates from a cell that resolved to absence at construction. " +
+      "An initial=@cell source must hold a defined " + forType + " variant " +
+      "(its value must be resolved at construction — e.g. an SSR/server-loaded " +
+      "value, not an async-fetch-on-mount that is not ready yet)."
+    );
+  }
+  // Normalize to the tag: a unit variant is a bare string; a payload variant is
+  // a \`{ variant, data }\` tagged-object (the tag selects the legal-state check).
+  var tag = _scrml_engine_variant_tag(snapshot);
+  var ok = false;
+  if (Array.isArray(validTags)) {
+    for (var i = 0; i < validTags.length; i++) {
+      if (validTags[i] === tag) { ok = true; break; }
+    }
+  }
+  if (!ok) {
+    var listed = Array.isArray(validTags) && validTags.length > 0
+      ? validTags.map(function (v) { return "." + String(v); }).join(", ")
+      : "(none)";
+    throw new Error(
+      "E-ENGINE-INITIAL-INVALID-VARIANT: engine '" + varName + "' (for=" + forType +
+      ") hydrated from a cell whose value '" + String(tag) + "' is not a valid " +
+      forType + " variant. Valid variants: " + listed + ". " +
+      "The persisted value must decode to a legal " + forType + " state."
+    );
+  }
+  // Guard-free construction set — bare reactive set, NOT _scrml_engine_direct_set
+  // (hydration is construction, not a guarded transition).
+  _scrml_reactive_set(varName, snapshot);
+}
+
+// ---------------------------------------------------------------------------
 // 51.0.S engine message dispatch — S155 batch 3 (#14 event-payload-transition)
 // ---------------------------------------------------------------------------
 // Runtime backbone for \`@<engineVar>.advance(.MsgVariant)\` — the message-plane

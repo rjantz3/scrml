@@ -2788,6 +2788,18 @@ export function runDG(input: DGInput): DGOutput {
             emitMarkupReadEdge(node.span, varName);
           }
         }
+        // §51.0.E (S198 — Approach F A-leg) — `initial=@cell` runtime-cell
+        // hydration READS the referenced cell at engine-construction. Credit it
+        // as a reader so E-DG-002 ("declared but never consumed") does not
+        // false-fire on a persisted-status cell whose only consumer is the
+        // engine's hydration. Mirrors the engine self-read credit above.
+        const initialCell = engineMeta?.initialCell;
+        if (typeof initialCell === "string" && initialCell.length > 0) {
+          creditReader(initialCell);
+          if (markupContextEmitEdges && node.span) {
+            emitMarkupReadEdge(node.span, initialCell);
+          }
+        }
         // A-1.5 Shape 1 — engine state-child body raw text.
         // The engine body lives in engineMeta.stateChildren[i].bodyRaw (raw
         // text, not walkable AST — see engine-statechild-parser.ts, primer §13.7 B14).

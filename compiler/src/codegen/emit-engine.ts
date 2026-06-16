@@ -1577,6 +1577,17 @@ function emitInitialVariantValue(initialVariant: string): string {
  */
 export function emitEngineVariantCellInit(meta: EngineMetadata): string[] {
   const lines: string[] = [];
+  // §51.0.E (S198 — Approach F A-leg) — the runtime-cell hydration form
+  // (`initial=@cell`) does NOT seed its construction value here. The cell read
+  // must run AFTER the referenced cell's own init (which `emitReactiveWiring`
+  // emits LATER in the module-init sequence), so the construction set is
+  // DEFERRED to `emitEngineCellHydrationInit` (emitted post-reactiveLines by
+  // emit-client.ts, mirroring the each-render-before-cell-init deferral). Skip
+  // the EARLY static-set entirely so the engine cell is never briefly seeded to
+  // a wrong (first-state fallback) value before the cell snapshot lands.
+  if (typeof meta.initialCell === "string" && meta.initialCell.length > 0) {
+    return lines;
+  }
   const initial = resolveEngineInitialVariant(meta);
   if (!initial) {
     // No way to resolve initial — defensive skip. B15 should have fired
@@ -1586,6 +1597,68 @@ export function emitEngineVariantCellInit(meta: EngineMetadata): string[] {
 
   lines.push(`// §51.0.C auto-declared engine variable: ${meta.varName} (${meta.forType})`);
   lines.push(`_scrml_reactive_set(${JSON.stringify(meta.varName)}, ${emitInitialVariantValue(initial)});`);
+  return lines;
+}
+
+/**
+ * §51.0.E (S198 — Approach F A-leg) — emit the DEFERRED runtime-cell hydration
+ * construction set for an engine declared `initial=@cell`.
+ *
+ * Shape:
+ *   // §51.0.E engine hydration: hosStatus <- @persistedStatus (snapshot @ construction)
+ *   _scrml_engine_hydrate_init("hosStatus", _scrml_reactive_get("persistedStatus"),
+ *     ["Driving","OnDuty","OffDuty","Sleeper"], "HOSStatus");
+ *
+ * Semantics — hydration is CONSTRUCTION, not transition:
+ *   - The engine cell is set to the snapshot of `@cell` at engine-construction
+ *     (boot-only). The dev is responsible for `@cell` holding the intended value
+ *     at construction (an SSR/server `?{}` resolves before render; a synchronous
+ *     read). There is NO re-hydration after construction.
+ *   - The set is GUARD-FREE — it routes through the runtime hydration helper
+ *     (`_scrml_engine_hydrate_init`), which performs a bare reactive set, NOT the
+ *     transition guard `_scrml_engine_direct_set` (hydration asserts the machine
+ *     WAS at that state; `rule=` does not apply).
+ *   - The helper enforces the DECODER BOUNDARY: a guard-free construction must
+ *     not silently corrupt the cell. If the resolved snapshot is `not`/absence or
+ *     not a valid `for=T` variant, it throws `E-ENGINE-INITIAL-INVALID-VARIANT`
+ *     (the runtime counterpart of the static-literal compile-time check).
+ *
+ * Ordering: this is emitted AFTER `emitReactiveWiring` (the user `@cell = init`
+ * line) so the snapshot reads the cell's REAL value, not undefined — mirroring
+ * the each-render-before-cell-init deferral. Empty array unless `initial=@cell`.
+ *
+ * @param meta — the engine's `engineMeta`
+ * @returns lines of JS code; empty when the engine is not an `initial=@cell` engine
+ */
+export function emitEngineCellHydrationInit(meta: EngineMetadata): string[] {
+  const cell = meta.initialCell;
+  if (typeof cell !== "string" || cell.length === 0) return [];
+
+  // The valid-variant set for the decoder boundary. Prefer the resolved enum
+  // variants (B15 populates `meta.variants` from the for=T type); fall back to
+  // the state-children tags when the variant set is unavailable (synthetic ASTs
+  // or unresolved types). Both are the engine's legal state names.
+  let variantSet: string[] = Array.isArray(meta.variants) ? meta.variants.filter(
+    (v): v is string => typeof v === "string" && v.length > 0,
+  ) : [];
+  if (variantSet.length === 0) {
+    const sc = meta.stateChildren;
+    if (Array.isArray(sc)) {
+      variantSet = sc
+        .map((c) => (c && typeof c.tag === "string" ? c.tag : ""))
+        .filter((t) => t.length > 0);
+    }
+  }
+
+  const lines: string[] = [];
+  lines.push(
+    `// §51.0.E engine hydration: ${meta.varName} <- @${cell} (snapshot @ construction, guard-free)`,
+  );
+  lines.push(
+    `_scrml_engine_hydrate_init(${JSON.stringify(meta.varName)}, ` +
+    `_scrml_reactive_get(${JSON.stringify(cell)}), ` +
+    `${JSON.stringify(variantSet)}, ${JSON.stringify(meta.forType)});`,
+  );
   return lines;
 }
 
@@ -1644,6 +1717,28 @@ export function emitEngineInitialArmsForFile(fileAST: any): string[] {
     const meta = decl._record!.engineMeta!;
     const armLines = emitEngineInitialArm(meta);
     for (const l of armLines) lines.push(l);
+  }
+  return lines;
+}
+
+/**
+ * §51.0.E (S198 — Approach F A-leg) — Emit the DEFERRED runtime-cell hydration
+ * construction sets for every `initial=@cell` engine in the file. Sibling to
+ * `emitEngineInitialArmsForFile`. Empty when no engine declares `initial=@cell`
+ * (tree-shake).
+ *
+ * Called by `emit-client.ts` AFTER `emitReactiveWiring` so the snapshot reads
+ * the referenced cell's REAL value (its `@cell = init` line ran first), not
+ * undefined — the each-render-before-cell-init ordering precedent.
+ */
+export function emitEngineCellHydrationInitsForFile(fileAST: any): string[] {
+  const decls = collectC12EngineDecls(fileAST);
+  if (decls.length === 0) return [];
+  const lines: string[] = [];
+  for (const decl of decls) {
+    const meta = decl._record!.engineMeta!;
+    const hydrationLines = emitEngineCellHydrationInit(meta);
+    for (const l of hydrationLines) lines.push(l);
   }
   return lines;
 }

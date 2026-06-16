@@ -349,6 +349,14 @@ export interface EngineMetadata {
   /** Value of `initial=.X` if present; `null` otherwise. B15 validates
    *  against `variants` and emits W-ENGINE-INITIAL-MISSING when null. */
   initialVariant: string | null;
+  /** Bare cell name of `initial=@cell` if present; `null` otherwise
+   *  (§51.0.E runtime-cell hydration — S198 Approach F A-leg). The engine
+   *  cell is set to the snapshot of this reactive cell at engine-construction
+   *  (boot-only, guard-free — hydration is CONSTRUCTION not transition). B15
+   *  validates the cell EXISTS + is type-compatible (for=T enum OR a string
+   *  holding a variant name). MUTUALLY EXCLUSIVE with `initialVariant`;
+   *  FORBIDDEN on derived engines (E-DERIVED-ENGINE-NO-INITIAL). */
+  initialCell: string | null;
   /** Reactive expression string from `derived=expr`, when present.
    *  Stored as the raw AST shape for B16 to consume in cycle detection.
    *  Today's parser stores `engine-decl.sourceVar` (legacy single-var form)
@@ -5170,6 +5178,13 @@ function makeEngineRecord(
     typeof engineDecl.initialVariant === "string" && engineDecl.initialVariant.length > 0
       ? engineDecl.initialVariant
       : null;
+  // §51.0.E (S198 — Approach F A-leg) — runtime-cell hydration form. B14
+  // records the bare cell NAME; B15 validates existence + type-compat +
+  // mutual-exclusion with initialVariant + forbidden-on-derived.
+  const initialCell: string | null =
+    typeof engineDecl.initialCell === "string" && engineDecl.initialCell.length > 0
+      ? engineDecl.initialCell
+      : null;
   const isPinned: boolean = engineDecl.pinned === true;
   const isExported: boolean = engineDecl.isExported === true;
   // Derived expression — three §51.0.J / §51.9 shapes (S190 completes the set):
@@ -5237,6 +5252,7 @@ function makeEngineRecord(
     forType,
     variants: [], // B14 leaves empty; B15 populates from the type system.
     initialVariant,
+    initialCell,
     derivedExpr,
     varName,
     isExported,
@@ -6189,8 +6205,34 @@ export function validateEngineStateChildrenAndRules(
 
   // Step 2 — initial= validation (§51.0.E). Skip for derived engines
   // (B16 owns derived-specific rejections per audit §1.4 boundary).
+  //
+  // §51.0.E has TWO mutually-exclusive value forms (S198 — Approach F A-leg):
+  //   - `initial=.Variant`  — STATIC literal (validated against the variant set here).
+  //   - `initial=@cell`     — RUNTIME-cell hydration (the cell's value is snapshotted
+  //                           at engine-construction, guard-free). Validated here for
+  //                           existence + type-compat; the actual value is unknown
+  //                           until runtime, where the construction-site decoder-
+  //                           boundary guard (E-ENGINE-INITIAL-INVALID-VARIANT,
+  //                           emitted by codegen) re-validates.
   if (!isDerived) {
-    if (meta.initialVariant === null) {
+    if (meta.initialVariant !== null && meta.initialCell !== null) {
+      // MUTUAL EXCLUSION — both forms present is contradictory.
+      fireB15Diagnostic(
+        errors,
+        "E-ENGINE-INITIAL-BOTH-FORMS",
+        `E-ENGINE-INITIAL-BOTH-FORMS: \`<engine for=${forType}>\` declares BOTH ` +
+        `\`initial=.${meta.initialVariant}\` (static literal) AND \`initial=@${meta.initialCell}\` ` +
+        `(runtime-cell hydration). Per SPEC §51.0.E, \`initial=\` accepts EXACTLY ONE value ` +
+        `form. Keep the static literal for a fixed start state, OR the \`@cell\` form to ` +
+        `hydrate from a persisted value — not both.`,
+        engineDecl,
+        filePath,
+        "error",
+      );
+    } else if (meta.initialCell !== null) {
+      // §51.0.E runtime-cell hydration form. Validate the referenced cell.
+      validateInitialCellHydration(meta, engineDecl, errors, filePath, variants);
+    } else if (meta.initialVariant === null) {
       fireB15Diagnostic(
         errors,
         "W-ENGINE-INITIAL-MISSING",
@@ -7049,13 +7091,96 @@ function derivedEngineHasAuthoredRules(rulesRaw: string): boolean {
 }
 
 /**
+ * §51.0.E (S198 — Approach F A-leg) — validate the `initial=@cell` runtime-cell
+ * hydration form. The engine cell is snapshotted from the named reactive cell at
+ * engine-construction (boot-only, guard-free — hydration is CONSTRUCTION, not a
+ * transition). B15 checks, at COMPILE time:
+ *   1. EXISTENCE — the referenced cell resolves in the engine's scope chain. A
+ *      non-existent cell fires `E-ENGINE-INITIAL-CELL-UNDECLARED` (E-STATE-
+ *      UNDECLARED-class).
+ *   2. TYPE-COMPAT (best-effort) — the cell's declared type is the engine's
+ *      `for=T` enum (the value IS a variant) OR a `string`/`text` (a DB-status
+ *      column holding a variant NAME, the canonical case — mirrors the slice-1a
+ *      `<match for=Enum on=@stringCell>` precedent). An UNTYPED / inferred cell
+ *      passes conservatively (no concrete annotation to contradict). A concrete,
+ *      clearly-incompatible annotation (a different enum, a number, a struct)
+ *      fires `E-ENGINE-INITIAL-CELL-TYPE`.
+ * The actual runtime VALUE is unknown at compile time; the construction-site
+ * decoder-boundary guard (`E-ENGINE-INITIAL-INVALID-VARIANT`, emitted by codegen)
+ * re-validates it at runtime.
+ */
+function validateInitialCellHydration(
+  meta: EngineMetadata,
+  engineDecl: any,
+  errors: SYMDiagnostic[],
+  filePath: string,
+  variants: string[],
+): void {
+  const cellName = meta.initialCell;
+  if (typeof cellName !== "string" || cellName.length === 0) return;
+  const forType = meta.forType;
+  const record: StateCellRecord | undefined = engineDecl._record;
+  const scope = record?.scope ?? null;
+
+  // 1. EXISTENCE — resolve the cell up the scope chain.
+  const cellRec = lookupStateCell(scope, cellName);
+  if (!cellRec) {
+    fireB15Diagnostic(
+      errors,
+      "E-ENGINE-INITIAL-CELL-UNDECLARED",
+      `E-ENGINE-INITIAL-CELL-UNDECLARED: \`<engine for=${forType} initial=@${cellName}>\` ` +
+      `hydrates from \`@${cellName}\`, but no such reactive cell is declared in scope. ` +
+      `Per SPEC §51.0.E, the \`initial=@cell\` value must reference a declared cell whose ` +
+      `value is resolved at engine-construction (e.g. a server-loaded DB column or a ` +
+      `\`localStorage\` read). Declare \`<${cellName}> = ...\` before the engine, or correct ` +
+      `the cell name.`,
+      engineDecl,
+      filePath,
+      "error",
+    );
+    return;
+  }
+
+  // 2. TYPE-COMPAT (best-effort). Read the cell's declared type annotation. An
+  //    untyped / inferred cell (no concrete annotation) passes conservatively.
+  const ann =
+    typeof cellRec.declNode?.typeAnnotation === "string"
+      ? cellRec.declNode.typeAnnotation.trim()
+      : "";
+  if (ann.length === 0) return; // untyped — conservative pass.
+  // Strip a leading `:` if present (some annotation captures retain it).
+  const annType = ann.replace(/^:\s*/, "").trim();
+  // The base type name (before any refinement / subset braces / generics).
+  const baseType = annType.split(/[\s({<|]/)[0] ?? annType;
+  // Acceptable: the engine's for=T enum (value IS a variant), OR a string/text
+  // scalar (holds a variant NAME — the canonical persisted-status case).
+  const STRING_TYPES = new Set(["string", "text", "String", "Text"]);
+  if (baseType === forType || STRING_TYPES.has(baseType)) return;
+  // A concrete, clearly-incompatible annotation. Fire the type diagnostic.
+  fireB15Diagnostic(
+    errors,
+    "E-ENGINE-INITIAL-CELL-TYPE",
+    `E-ENGINE-INITIAL-CELL-TYPE: \`<engine for=${forType} initial=@${cellName}>\` hydrates ` +
+    `from \`@${cellName}\`, but that cell's type \`${annType}\` is neither the engine's ` +
+    `\`for=\` enum (\`${forType}\`) nor a \`string\` holding a variant name. Per SPEC ` +
+    `§51.0.E, an \`initial=@cell\` source must be a \`${forType}\` value or a \`string\` ` +
+    `whose value is a \`${forType}\` variant name` +
+    (variants.length > 0 ? ` (one of: ${variants.map((v) => `.${v}`).join(", ")})` : "") +
+    `.`,
+    engineDecl,
+    filePath,
+    "error",
+  );
+}
+
+/**
  * Fire `E-DERIVED-ENGINE-NO-INITIAL` on a derived engine that has an
  * `initial=` attribute set. Per SPEC §51.0.J line 20407 + §34 catalog row.
  */
 function fireDerivedEngineNoInitial(
   engineDecl: any,
   varName: string,
-  initialVariant: string,
+  initialDisplay: string,
   errors: SYMDiagnostic[],
   filePath: string,
 ): void {
@@ -7066,7 +7191,7 @@ function fireDerivedEngineNoInitial(
     code: "E-DERIVED-ENGINE-NO-INITIAL",
     message:
       `E-DERIVED-ENGINE-NO-INITIAL: derived engine \`@${varName}\` has an ` +
-      `\`initial=.${initialVariant}\` attribute. Derived engines compute their ` +
+      `\`initial=${initialDisplay}\` attribute. Derived engines compute their ` +
       `initial value from the \`derived=\` expression at engine-init time; ` +
       `\`initial=\` is meaningless on a derived engine and contradicts the ` +
       `derivation contract (SPEC §51.0.J + §34). Remove the \`initial=\` ` +
@@ -7234,7 +7359,16 @@ export function walkDerivedEngineDeclRejections(
       // NO-INITIAL: `initial=` on a derived engine.
       if (meta.initialVariant !== null && meta.initialVariant !== undefined) {
         fireDerivedEngineNoInitial(
-          node, varName, meta.initialVariant, errors, filePath,
+          node, varName, `.${meta.initialVariant}`, errors, filePath,
+        );
+      }
+      // §51.0.E (S198 — Approach F A-leg) — `initial=@cell` is FORBIDDEN on a
+      // derived engine just like `initial=.Variant` (a derived engine COMPUTES
+      // its value; runtime-cell hydration would contradict the derivation
+      // contract). Same E-DERIVED-ENGINE-NO-INITIAL code.
+      if (meta.initialCell !== null && meta.initialCell !== undefined) {
+        fireDerivedEngineNoInitial(
+          node, varName, `@${meta.initialCell}`, errors, filePath,
         );
       }
       // NO-RULES: authored transition rules in the body.

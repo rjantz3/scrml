@@ -119,7 +119,7 @@
     "EXTRA-FIELD": 43,
     "FIELD-SHAPE": 17,
     "KIND-NAME": 10,
-    "MISSING-FIELD": 36,
+    "MISSING-FIELD": 37,
     "SPAN-COORD": 16
   },
   "examples/06-kanban-board.scrml": {
@@ -191,7 +191,7 @@
     "EXTRA-FIELD": 34,
     "FIELD-SHAPE": 35,
     "KIND-NAME": 12,
-    "MISSING-FIELD": 114,
+    "MISSING-FIELD": 118,
     "SPAN-COORD": 130
   },
   "examples/15-channel-chat.scrml": {
@@ -506,7 +506,7 @@
     "EXTRA-FIELD": 65,
     "FIELD-SHAPE": 143,
     "KIND-NAME": 23,
-    "MISSING-FIELD": 258,
+    "MISSING-FIELD": 260,
     "SPAN-COORD": 744
   },
   "examples/23-trucking-dispatch/pages/driver/load-detail.scrml": {
@@ -566,7 +566,7 @@
   "examples/25-triage-board.scrml": {
     "KIND-NAME": 8,
     "FIELD-SHAPE": 37,
-    "MISSING-FIELD": 63,
+    "MISSING-FIELD": 65,
     "EXTRA-FIELD": 35,
     "COUNT-LENGTH": 8,
     "SPAN-COORD": 293
@@ -598,7 +598,7 @@
     "EXTRA-FIELD": 109,
     "FIELD-SHAPE": 33,
     "KIND-NAME": 21,
-    "MISSING-FIELD": 80,
+    "MISSING-FIELD": 82,
     "SPAN-COORD": 62
   },
   "examples/30-validated-form.scrml": {
@@ -614,7 +614,7 @@
     "EXTRA-FIELD": 116,
     "FIELD-SHAPE": 37,
     "KIND-NAME": 20,
-    "MISSING-FIELD": 95,
+    "MISSING-FIELD": 97,
     "SPAN-COORD": 68
   },
   "samples/admin-panel.scrml": {
@@ -1195,7 +1195,7 @@
     "EXTRA-FIELD": 51,
     "FIELD-SHAPE": 15,
     "KIND-NAME": 10,
-    "MISSING-FIELD": 31,
+    "MISSING-FIELD": 32,
     "SPAN-COORD": 23
   },
   "samples/compilation-tests/engine-007-cancel-timer.scrml": {
@@ -1235,7 +1235,7 @@
     "EXTRA-FIELD": 46,
     "FIELD-SHAPE": 11,
     "KIND-NAME": 10,
-    "MISSING-FIELD": 30,
+    "MISSING-FIELD": 31,
     "SPAN-COORD": 21
   },
   "samples/compilation-tests/engine-012-hierarchy-cascade.scrml": {

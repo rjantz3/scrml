@@ -13,7 +13,7 @@ import { emitBindings } from "./emit-bindings.ts";
 import { emitReactiveWiring } from "./emit-reactive-wiring.ts";
 import { filterChannelImportSpecifiers } from "./emit-channel.ts";
 import { emitEventWiring } from "./emit-event-wiring.ts";
-import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEngineMountsForFile, emitEngineHookFiringFunctionsForFile, emitEngineInitialArmsForFile, emitEngineOpenerEffectsForFile, emitEngineBodyRenderForFile, emitDerivedEngineBodyRenderForFile } from "./emit-engine.ts";
+import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEngineMountsForFile, emitEngineHookFiringFunctionsForFile, emitEngineInitialArmsForFile, emitEngineCellHydrationInitsForFile, emitEngineOpenerEffectsForFile, emitEngineBodyRenderForFile, emitDerivedEngineBodyRenderForFile } from "./emit-engine.ts";
 import { setVariantFieldsForFile } from "./emit-control-flow.ts";
 import { setVariantFieldsForRewriter } from "./rewrite.js";
 import { EncodingContext, emitDecodeTable, emitRuntimeReflect } from "./type-encoding.ts";
@@ -1676,6 +1676,22 @@ export function generateClientJs(ctx: CompileContext): string {
       lines.push(disp);
       lines.push("");
     }
+  }
+
+  // §51.0.E (S198 — Approach F A-leg) — runtime-cell hydration construction.
+  // `initial=@cell` engines DEFER their construction set to HERE (after
+  // emitReactiveWiring) so the snapshot reads the referenced cell's REAL value
+  // (its `@cell = init` line ran first), not undefined — the each-render-before-
+  // cell-init ordering precedent. Emitted BEFORE the onTimeout/onIdle initial-
+  // arms + opener effects (which observe the constructed state). The set is
+  // guard-free (hydration is construction, not transition) and carries a
+  // decoder-boundary runtime guard (E-ENGINE-INITIAL-INVALID-VARIANT). Tree-
+  // shake: empty unless an engine declares `initial=@cell`.
+  const engineHydrationLines = clientStage(ctx, "emit-engine-cell-hydration-inits", () => emitEngineCellHydrationInitsForFile(fileAST));
+  if (engineHydrationLines.length > 0) {
+    lines.push("");
+    lines.push("// --- engine runtime-cell hydration (deferred post-cell-init, §51.0.E) ---");
+    for (const line of engineHydrationLines) lines.push(line);
   }
 
   // A5-4 (§51.0.M) — Initial-arm for engines with <onTimeout>. Emitted AFTER

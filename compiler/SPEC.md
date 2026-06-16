@@ -17131,7 +17131,10 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-ENGINE-MOUNT-NOT-ENGINE | §51.0.D, §21.8 | A self-closing tag `<EngineName/>` mounts an imported binding whose source export is NOT an engine (e.g., a component, channel, type, function, or arbitrary const). Cross-file engine mount via `<EngineName/>` requires the imported name to be the variable of an exported `<engine>` declaration. Either import an engine binding from the source file, or use the appropriate mount form for the imported kind (e.g., component instantiation for components, expression read for const values). (Catalog addition S68 — A1b B14.) | Error |
 | E-ENGINE-STATE-CHILD-MISSING | §51.0.B, §51.0.F | A variant of the engine's `for=Type` has no matching state-child tag in the engine body. Per §51.0.F, every variant must have a corresponding state-child (`<Variant>...</>`) — exhaustiveness over the variant set is what gives `<engine>` its compile-time guarantees. Add the missing `<Variant>` state-child(ren). (Catalog addition S68 — A1b B15.) | Error |
 | E-ENGINE-STATE-CHILD-INVALID-VARIANT | §51.0.B | A state-child tag in the engine body does not match any variant of the engine's `for=Type`. State-child tags are PascalCase variant names; `<UnknownTag>` inside an `<engine for=MarioState>` is rejected because `UnknownTag` is not a `MarioState` variant. Either rename the tag to a valid variant or add the variant to the type. (Catalog addition S68 — A1b B15.) | Error |
-| E-ENGINE-INITIAL-INVALID-VARIANT | §51.0.E | `initial=.X` references a variant `.X` that is not in the engine's `for=Type` variants. Either correct the variant reference or add `.X` to the type. (Catalog addition S68 — A1b B15.) | Error |
+| E-ENGINE-INITIAL-INVALID-VARIANT | §51.0.E | `initial=.X` references a variant `.X` that is not in the engine's `for=Type` variants. Either correct the variant reference or add `.X` to the type. (Catalog addition S68 — A1b B15.) **RUNTIME extension (S198):** the `initial=@cell` form (runtime-cell hydration) ALSO fires this code at engine-construction — the decoder boundary — when the cell's snapshotted value is absence (`not`) or is not a legal `for=T` variant. A guard-free construction must not silently corrupt the cell. | Error |
+| E-ENGINE-INITIAL-BOTH-FORMS | §51.0.E | An `<engine>` declares BOTH `initial=.Variant` (static literal) AND `initial=@cell` (runtime-cell hydration). `initial=` accepts EXACTLY ONE value form. Keep the static literal for a fixed start state, OR the `@cell` form to hydrate from a persisted value — not both. (Catalog addition S198 — Approach F A-leg, B15.) | Error |
+| E-ENGINE-INITIAL-CELL-UNDECLARED | §51.0.E | `initial=@cell` references a reactive cell that is not declared in scope. The `initial=@cell` source must reference a declared cell whose value is resolved at engine-construction (a server-loaded DB column, a `localStorage` read). Declare the cell before the engine, or correct the cell name. (Catalog addition S198 — Approach F A-leg, B15.) | Error |
+| E-ENGINE-INITIAL-CELL-TYPE | §51.0.E | `initial=@cell` references a cell whose declared type is neither the engine's `for=` enum nor a `string` holding a variant name. An `initial=@cell` source must be a `for=T` value or a `string` whose value is a `for=T` variant name (the canonical persisted-status case; mirrors `<match for=Enum on=@stringCell>`). An untyped/inferred cell passes conservatively (the runtime `E-ENGINE-INITIAL-INVALID-VARIANT` is the backstop). (Catalog addition S198 — Approach F A-leg, B15.) | Error |
 | E-ENGINE-RULE-INVALID-VARIANT | §51.0.F | A `rule=` value references a variant (`rule=.X` or one of `rule=(.A \| .B)`) that is not in the engine's `for=Type` variants. The `rule=` contract is over the engine type's variants; foreign-type variants are rejected. (Catalog addition S68 — A1b B15.) | Error |
 | E-ENGINE-RULE-LEGACY-SYNTAX | §51.0.F | A `rule=` value uses the legacy event-arrow form (`rule="event -> Variant"`). On `<engine>`, `rule=` must use one of the three §51.0.F target-only forms: single-target (`rule=.NextVariant`), multi-target (`rule=(.A \| .B \| .C)`), or wildcard (`rule=*`). Event-arrow rules belong to the legacy `<machine>` syntax (§51.3, deprecated). Migrate by writing the targets directly. (Catalog addition S68 — A1b B15.) | Error |
 | E-HISTORY-NO-INNER-ENGINE | §51.0.N, §51.0.Q | The `history` attribute appears on a state-child whose body does not contain a nested `<engine>`. `history` is meaningful only on composite state-children (those with an inner engine to track). Either add a nested `<engine>` to the body, or remove `history`. (Catalog addition S67 — DD-Harel Approach C Hybrid, Insight 23 grammar decision #2.) | Error |
@@ -25245,7 +25248,14 @@ the body lives at the declaration site. Adding a body at the use-site is a parse
 
 #### 51.0.E The `initial=` attribute — required (lint) on non-derived engines
 
-`initial=.Variant` sets the engine's starting state.
+`initial=` sets the engine's starting state. It accepts EXACTLY ONE of two
+mutually-exclusive value forms:
+
+- `initial=.Variant` — a STATIC literal (the fixed start state, validated at
+  compile time against the `for=T` variant set).
+- `initial=@cell` — RUNTIME-CELL HYDRATION (S198, Approach F A-leg): the engine
+  is seeded from the snapshot of a reactive `@cell` at engine-construction. See
+  "Runtime-cell hydration (`initial=@cell`)" below.
 
 **Lint behavior:**
 - On a NON-derived engine, `initial=` is REQUIRED. If omitted, the compiler emits
@@ -25272,6 +25282,65 @@ Fix:
   ...
 </>
 ```
+
+**Runtime-cell hydration (`initial=@cell`) — S198 (Approach F A-leg).**
+
+An engine may boot to a PERSISTED state loaded at runtime — a DB/server column, a
+`localStorage` read — when that state could be ANY variant, not one `rule=`-legal
+step from a static `initial=`. The `initial=@cell` form widens `initial=`'s value
+grammar from `{static literal}` to `{static literal | runtime cell}`:
+
+```scrml
+type HOSStatus:enum = { OffDuty, Driving, OnDuty, Sleeper }
+
+<!-- @persistedStatus is resolved AT CONSTRUCTION (e.g. server-side ?{} SSR, or a
+     synchronous localStorage read). Its value is a HOSStatus variant NAME. -->
+<persistedStatus> : string = serverLoadedHosStatus
+
+<engine for=HOSStatus initial=@persistedStatus>
+  <OffDuty rule=(.Driving | .OnDuty | .Sleeper) : "Off duty">
+  <Driving rule=(.OnDuty | .OffDuty)            : "Driving">
+  <OnDuty  rule=(.Driving | .OffDuty | .Sleeper) : "On duty">
+  <Sleeper rule=(.OffDuty | .OnDuty)            : "Sleeper berth">
+</>
+```
+
+**Semantics — hydration is CONSTRUCTION, not transition.** Booting a machine to a
+persisted state ASSERTS the machine WAS there; the from-state `rule=` guard does
+NOT apply. `initial=@cell` routes through the SAME guard-free construction hook the
+static literal uses (a bare reactive set), NOT the transition guard — a disallowed
+`rule=` move would otherwise hard-fail with `E-ENGINE-INVALID-TRANSITION` (§51.0.G).
+Hydration deliberately bypasses that: the persisted state may be any variant.
+
+**Snapshot-at-construction; boot-only.** The engine cell is set to whatever `@cell`
+holds AT engine-construction (module-init). The developer is responsible for `@cell`
+holding the intended value at construction — an SSR/server-side `?{}` resolves before
+render; a synchronous read is ready. There is NO re-hydration after construction
+(`initial=` fires once; there is no anytime "restore" verb). An async-fetch-on-mount
+source that is NOT ready at construction is the DEFERRED `<engine server>` E-leg (§52
+fetch-on-mount), NOT this form.
+
+**Cell type.** The referenced cell's type must be the engine's `for=T` enum (its
+value IS a variant) OR a `string` holding a variant NAME (the canonical persisted-
+status case — a DB-status column; mirrors `<match for=Enum on=@stringCell>`). An
+untyped/inferred cell passes the compile-time check conservatively; the runtime
+decoder boundary (below) is the backstop.
+
+**Validation.**
+- COMPILE time (§34): a non-existent cell fires `E-ENGINE-INITIAL-CELL-UNDECLARED`;
+  a concretely type-incompatible cell fires `E-ENGINE-INITIAL-CELL-TYPE`; declaring
+  BOTH `initial=.Variant` AND `initial=@cell` fires `E-ENGINE-INITIAL-BOTH-FORMS`.
+  `initial=@cell` is FORBIDDEN on a DERIVED engine (same as `initial=.Variant` —
+  `E-DERIVED-ENGINE-NO-INITIAL`).
+- RUNTIME (§34, the DECODER BOUNDARY): the snapshot's actual value is unknown until
+  runtime. At construction, if the resolved value is absence (`not`) or is not a
+  legal `for=T` variant, the engine throws `E-ENGINE-INITIAL-INVALID-VARIANT` (the
+  runtime counterpart of the static-literal compile-time check) — a guard-free
+  construction must not silently corrupt the cell.
+
+> Authority: deep-dive `docs/deep-dives/engine-hydration-from-persisted-state-2026-06-15.md`
+> + the F-vs-B debate (F won 48.5 vs 41.0); design-insight "Persisted-engine
+> hydration SURFACE … VERDICT F" (S198).
 
 #### 51.0.F The `rule=` contract — three forms; compile-time + runtime enforcement
 
