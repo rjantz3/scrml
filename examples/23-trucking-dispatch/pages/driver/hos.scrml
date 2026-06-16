@@ -4,26 +4,32 @@
 // time-in-current-state, hours-driven-today, hours-on-duty-today, plus
 // the last 24h of hos_change log entries for cycle history.
 //
-// Scoping §7 calls for a `<engine>` here (canonical keyword P1+; legacy `<machine>`
-// remains a deprecated alias emitting W-DEPRECATED-001). HOS is client-driven (the app
-// derives state + cumulative hours from log entries + clock); unlike
-// load.status (server-persisted), the machine fits cleanly. The state
-// transitions are simplified 11/14 FMCSA-ish:
-//   off_duty ⇄ on_duty
-//   on_duty  ⇄ driving
-//   off_duty → sleeper_berth
-//   sleeper_berth → on_duty
-//   on_duty | driving → off_duty
+// Scoping §7 calls for a `<engine for=DriverStatus>` here, but the engine
+// showcase is DEFERRED to the E-leg (slice 1b decision — see the deferral
+// note above the `<db>` block below). HOS loads `current_status` client-side
+// `on mount` (cookie session token); the engine-hydration A-leg
+// (`initial=@cell`) snapshots at CONSTRUCTION, so it does NOT fit HOS as
+// architected — the real engine wants `<engine server>` (§52) fetch-on-mount.
+// Until that ships, this page is the `match`-based transition validator: the
+// DriverStatus variant set, the transition rules, and the compile-time
+// exhaustiveness forcing-function all live in the shared `match` helpers in
+// components/driver-card.scrml (`driverStatusClasses` / `driverStatusLabel` /
+// `driverNextStates` / `isValidHosTransition`), mirroring status-picker.scrml
+// for the LoadStatus machine. The page tracks `@currentDriver.current_status`
+// (the stored DriverStatus variant name: "OffDuty" / "OnDuty" / "Driving" /
+// "SleeperBerth"). The simplified 11/14 FMCSA-ish transitions:
+//   OffDuty      ⇄ OnDuty,  OffDuty → SleeperBerth
+//   OnDuty       ⇄ Driving
+//   Driving      → OffDuty | OnDuty
+//   SleeperBerth → OnDuty | OffDuty
 //
 // NOTE: Real FMCSA rules are far more complex (30-min rest after 8h driving,
 // 60/70-hour cycle limits, sleeper-berth split-shift exceptions, etc.).
 // This is a simplified v1 per scoping §7. M6 polish may extend to layered
 // machines (per-cycle vs per-shift).
 //
-// F-ENGINE-001 RESOLVED (P3.B, 2026-05-02 — SPEC §51.16). `<engine for=Type>`
-// now resolves `Type` cross-file via TAB type-decl synthesis (SPEC §21.2 normative
-// for `export type X = {...}`). `DriverStatus` is imported from schema.scrml
-// directly; the local re-declaration workaround has been removed.
+// `DriverStatus` is imported from schema.scrml (the enum decl) and threaded
+// through the shared `match` helpers — no local re-declaration.
 //
 // FRICTION (F-NULL-001 — see FRICTION.md): file with a `<engine>` block (or
 // `<machine>` deprecated alias)
@@ -42,8 +48,10 @@
 // v0.3 canonical non-entry-page shape (S94 hos-restructure, 2026-05-15 — SPEC §4.15
 // / §40 Wave 1 + DEFERRED §2):
 //   - `<page db= auth=>` wrapper (matches 19 sibling pages in this corpus)
-//   - `<engine>` declaration lives INSIDE `<page>` body (file-scope-extension
-//     per §51.0.K Machine Cohesion footnote — page body is logic-default and
+//   - the `<engine>` declaration is DEFERRED (E-leg) — slice 1b replaced it
+//     with the shared `match`-based transition validator; when the engine
+//     lands it lives INSIDE `<page>` body (file-scope-extension per §51.0.K
+//     Machine Cohesion footnote — page body is logic-default and
 //     mode-equivalent to `<program>` body per §4.15)
 //   - Single imports `${}` block at the top of `<page>` body (consolidated
 //     from prior file-top imports + inner imports)
@@ -58,22 +66,25 @@
 <page db="../../dispatch.db" auth="required">
 
   ${
-      // F-ENGINE-001 RESOLVED (P3.B, 2026-05-02 — SPEC §51.16).
-      // `<engine for=ImportedType>` now resolves cross-file via TAB type-decl
-      // synthesis, so we import `DriverStatus` from schema.scrml instead of
-      // re-declaring it locally.
+      // `DriverStatus` is the shared enum (schema.scrml); the `match` helpers
+      // below + in driver-card.scrml dispatch on its variant names.
       import { DriverStatus } from '../../schema.scrml'
-      import { driverStatusClasses, driverStatusLabel } from '../../components/driver-card.scrml'
+      import { driverStatusClasses, driverStatusLabel, isValidHosTransition } from '../../components/driver-card.scrml'
       import { createSessionStore } from 'scrml:store'
       import { SESSION_DB_PATH } from '../../models/auth.scrml'
   }
 
-  <engine for=DriverStatus initial=.OffDuty>
-      <OffDuty      rule=(.OnDuty | .SleeperBerth)></>
-      <OnDuty       rule=(.OffDuty | .Driving)></>
-      <Driving      rule=(.OffDuty | .OnDuty)></>
-      <SleeperBerth rule=(.OnDuty | .OffDuty)></>
-  </>
+  // HOS state machine is a `match`-based transition validator here (the
+  // `isValidHosTransition` / `driverNextStates` helpers in
+  // components/driver-card.scrml); the `<engine for=DriverStatus>` form is
+  // DEFERRED pending engine-hydration-from-persisted-state (the E-leg,
+  // `<engine server>` §52 fetch-on-mount). HOS loads `current_status`
+  // client-side `on mount` (cookie session token), which the
+  // construction-snapshot `initial=@cell` A-leg does not fit — the engine
+  // would snapshot whatever `current_status` held at construction, not the
+  // value fetched on mount. Until the E-leg ships, the variant set, the
+  // transition rules, and the exhaustiveness forcing-function all live in the
+  // shared `match` helpers; the page tracks `@currentDriver.current_status`.
 
   <db src="../../dispatch.db" protect="password_hash" tables="users, drivers, log_entries">
 
@@ -141,17 +152,14 @@
             const driver = ?{`SELECT id, current_status FROM drivers WHERE user_id = ${user.id}`}.get()
             if (driver is not) return { error: "No driver record." }
 
+            // Validate the HOS transition via the shared `match`-based validator
+            // (components/driver-card.scrml). `cur` and `newStatus` are the
+            // stored DriverStatus variant names; they flow into the
+            // DriverStatus-typed params directly (no mapper).
             const cur = driver.current_status
-            let allowed = false
-            if (cur == "off_duty"      && newStatus == "on_duty")        { allowed = true }
-            if (cur == "off_duty"      && newStatus == "sleeper_berth")  { allowed = true }
-            if (cur == "on_duty"       && newStatus == "off_duty")       { allowed = true }
-            if (cur == "on_duty"       && newStatus == "driving")        { allowed = true }
-            if (cur == "driving"       && newStatus == "off_duty")       { allowed = true }
-            if (cur == "driving"       && newStatus == "on_duty")        { allowed = true }
-            if (cur == "sleeper_berth" && newStatus == "on_duty")        { allowed = true }
-            if (cur == "sleeper_berth" && newStatus == "off_duty")       { allowed = true }
-            if (!allowed) return { error: `Cannot transition from ${cur} to ${newStatus}.` }
+            if (!isValidHosTransition(cur, newStatus)) {
+                return { error: `Cannot transition from ${cur} to ${newStatus}.` }
+            }
 
             ?{`UPDATE drivers SET current_status = ${newStatus} WHERE id = ${driver.id}`}.run()
 
@@ -347,12 +355,12 @@
                     <div class="grid grid-cols-2 gap-4 mt-6 pt-6 border-t border-slate-200">
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Hours driving (24h)</div>
-                            <div class="text-2xl font-bold text-slate-900">${computeHoursIn("driving")}</div>
+                            <div class="text-2xl font-bold text-slate-900">${computeHoursIn("Driving")}</div>
                             <div class="text-xs text-slate-500 mt-0.5">11h cap</div>
                         </div>
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Hours on duty (24h)</div>
-                            <div class="text-2xl font-bold text-slate-900">${computeHoursIn("driving") + computeHoursIn("on_duty")}</div>
+                            <div class="text-2xl font-bold text-slate-900">${computeHoursIn("Driving") + computeHoursIn("OnDuty")}</div>
                             <div class="text-xs text-slate-500 mt-0.5">14h window</div>
                         </div>
                     </div>
@@ -365,24 +373,24 @@
                     </h2>
                     <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
                         <button
-                            onclick=setStatus("off_duty")
+                            onclick=setStatus("OffDuty")
                             class="px-3 py-2 text-sm font-medium rounded-md border border-slate-300 hover:bg-slate-100 disabled:opacity-50"
-                            disabled=(@currentDriver.current_status == "off_duty")
+                            disabled=(@currentDriver.current_status == "OffDuty")
                         >Off duty</button>
                         <button
-                            onclick=setStatus("on_duty")
+                            onclick=setStatus("OnDuty")
                             class="px-3 py-2 text-sm font-medium rounded-md border border-blue-300 text-blue-800 hover:bg-blue-50 disabled:opacity-50"
-                            disabled=(@currentDriver.current_status == "on_duty")
+                            disabled=(@currentDriver.current_status == "OnDuty")
                         >On duty</button>
                         <button
-                            onclick=setStatus("driving")
+                            onclick=setStatus("Driving")
                             class="px-3 py-2 text-sm font-medium rounded-md border border-amber-300 text-amber-800 hover:bg-amber-50 disabled:opacity-50"
-                            disabled=(@currentDriver.current_status == "driving")
+                            disabled=(@currentDriver.current_status == "Driving")
                         >Driving</button>
                         <button
-                            onclick=setStatus("sleeper_berth")
+                            onclick=setStatus("SleeperBerth")
                             class="px-3 py-2 text-sm font-medium rounded-md border border-violet-300 text-violet-800 hover:bg-violet-50 disabled:opacity-50"
-                            disabled=(@currentDriver.current_status == "sleeper_berth")
+                            disabled=(@currentDriver.current_status == "SleeperBerth")
                         >Sleeper berth</button>
                     </div>
 

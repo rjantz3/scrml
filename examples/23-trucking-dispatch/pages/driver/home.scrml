@@ -1,8 +1,8 @@
 // Trucking Dispatch — driver landing (M3).
 //
 // Route: /driver. Greeting + HOS status pill + current location, current
-// load card (if assigned + active), HOS quick-actions (off_duty / on_duty
-// / driving / sleeper_berth), recent log entries (5 newest), logout.
+// load card (if assigned + active), HOS quick-actions (OffDuty / OnDuty
+// / Driving / SleeperBerth), recent log entries (5 newest), logout.
 //
 // Per F-AUTH-001 + F-AUTH-002 carryforward: every driver page declares its
 // own <program db= auth=>, inlines its own getCurrentUser + role gate, and
@@ -22,7 +22,7 @@
 <page db="../../dispatch.db" auth="required">
 
   ${
-      import { driverStatusClasses, driverStatusLabel } from '../../components/driver-card.scrml'
+      import { driverStatusClasses, driverStatusLabel, isValidHosTransition } from '../../components/driver-card.scrml'
       import { formatRate, formatPickupAt } from '../../components/load-card.scrml'
       import { statusBadgeClasses, statusLabel } from '../../components/load-status-badge.scrml'
       import { createSessionStore } from 'scrml:store'
@@ -103,18 +103,14 @@
             const driver = ?{`SELECT id, current_status FROM drivers WHERE user_id = ${user.id}`}.get()
             if (driver is not) return { error: "No driver record." }
 
-            // Validate transition per HOS rules (simplified 11/14 — see hos.scrml).
+            // Validate transition via the shared `match`-based validator
+            // (components/driver-card.scrml — single source of truth for the
+            // HOS transition table, also used by hos.scrml). `cur` and
+            // `newStatus` are the stored DriverStatus variant names.
             const cur = driver.current_status
-            let allowed = false
-            if (cur == "off_duty"      && newStatus == "on_duty")        { allowed = true }
-            if (cur == "off_duty"      && newStatus == "sleeper_berth")  { allowed = true }
-            if (cur == "on_duty"       && newStatus == "off_duty")       { allowed = true }
-            if (cur == "on_duty"       && newStatus == "driving")        { allowed = true }
-            if (cur == "driving"       && newStatus == "off_duty")       { allowed = true }
-            if (cur == "driving"       && newStatus == "on_duty")        { allowed = true }
-            if (cur == "sleeper_berth" && newStatus == "on_duty")        { allowed = true }
-            if (cur == "sleeper_berth" && newStatus == "off_duty")       { allowed = true }
-            if (!allowed) return { error: `Cannot transition from ${cur} to ${newStatus}.` }
+            if (!isValidHosTransition(cur, newStatus)) {
+                return { error: `Cannot transition from ${cur} to ${newStatus}.` }
+            }
 
             ?{`UPDATE drivers SET current_status = ${newStatus} WHERE id = ${driver.id}`}.run()
 
@@ -275,24 +271,24 @@
                   </h2>
                   <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       <button
-                          onclick=setStatus("off_duty")
+                          onclick=setStatus("OffDuty")
                           class="px-3 py-2 text-sm font-medium rounded-md border border-slate-300 hover:bg-slate-100 disabled:opacity-50"
-                          disabled=(@currentDriver.current_status == "off_duty")
+                          disabled=(@currentDriver.current_status == "OffDuty")
                       >Off duty</button>
                       <button
-                          onclick=setStatus("on_duty")
+                          onclick=setStatus("OnDuty")
                           class="px-3 py-2 text-sm font-medium rounded-md border border-blue-300 text-blue-800 hover:bg-blue-50 disabled:opacity-50"
-                          disabled=(@currentDriver.current_status == "on_duty")
+                          disabled=(@currentDriver.current_status == "OnDuty")
                       >On duty</button>
                       <button
-                          onclick=setStatus("driving")
+                          onclick=setStatus("Driving")
                           class="px-3 py-2 text-sm font-medium rounded-md border border-amber-300 text-amber-800 hover:bg-amber-50 disabled:opacity-50"
-                          disabled=(@currentDriver.current_status == "driving")
+                          disabled=(@currentDriver.current_status == "Driving")
                       >Driving</button>
                       <button
-                          onclick=setStatus("sleeper_berth")
+                          onclick=setStatus("SleeperBerth")
                           class="px-3 py-2 text-sm font-medium rounded-md border border-violet-300 text-violet-800 hover:bg-violet-50 disabled:opacity-50"
-                          disabled=(@currentDriver.current_status == "sleeper_berth")
+                          disabled=(@currentDriver.current_status == "SleeperBerth")
                       >Sleeper berth</button>
                   </div>
 

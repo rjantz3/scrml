@@ -4,25 +4,67 @@
 // picker context). Renders the driver's name, phone, status pill, current
 // location, current assignment summary, and CDL expiration.
 //
-// Per scoping §1, driver.current_status is one of:
-//   off_duty / on_duty / driving / sleeper_berth
-// (DriverStatus enum string in users.role spelling). Color-coded pill.
+// Per §1, `drivers.current_status` stores the DriverStatus variant name
+// ("OffDuty", "OnDuty", "Driving", "SleeperBerth") — the same strings the
+// state machine and the match helpers dispatch on. Color-coded pill.
+//
+// This file ALSO owns the canonical HOS transition table (slice 1b). The
+// `<engine for=DriverStatus>` showcase is DEFERRED to the E-leg (`<engine
+// server>` §52 fetch-on-mount) — see progress.md / hos.scrml deferral note —
+// so the transition rules live as pure `match`-based helpers here, the same
+// pattern status-picker.scrml uses for the LoadStatus machine.
 
 ${
-    export fn driverStatusClasses(status: string) -> string {
-        if (status == "driving")        return "bg-amber-100 text-amber-800 border-amber-200"
-        if (status == "on_duty")        return "bg-blue-100 text-blue-800 border-blue-200"
-        if (status == "sleeper_berth")  return "bg-violet-100 text-violet-800 border-violet-200"
-        if (status == "off_duty")       return "bg-slate-100 text-slate-700 border-slate-200"
-        return "bg-slate-100 text-slate-700 border-slate-200"
+    import { DriverStatus } from '../schema.scrml'
+
+    // Pure helper — picks the Tailwind class set for a status. `fn` is the
+    // pure-function form (§48): no @reactive reads, no I/O. The `status`
+    // param is typed `DriverStatus`, so this `match` is exhaustive: adding a
+    // new variant to the enum is a compile-time forcing function here (every
+    // arm must exist — E-TYPE-020 otherwise). The stored DB string flows into
+    // the DriverStatus param directly; the match dispatches on the variant name.
+    export fn driverStatusClasses(status: DriverStatus) -> string {
+        return match status {
+            .OffDuty      :> "bg-slate-100 text-slate-700 border-slate-200"
+            .OnDuty       :> "bg-blue-100 text-blue-800 border-blue-200"
+            .Driving      :> "bg-amber-100 text-amber-800 border-amber-200"
+            .SleeperBerth :> "bg-violet-100 text-violet-800 border-violet-200"
+        }
     }
 
-    export fn driverStatusLabel(status: string) -> string {
-        if (status == "off_duty")      return "Off duty"
-        if (status == "on_duty")       return "On duty"
-        if (status == "driving")       return "Driving"
-        if (status == "sleeper_berth") return "Sleeper berth"
-        return status
+    // Friendly label — turns the variant into pill text ("OffDuty" → "Off duty").
+    export fn driverStatusLabel(status: DriverStatus) -> string {
+        return match status {
+            .OffDuty      :> "Off duty"
+            .OnDuty       :> "On duty"
+            .Driving      :> "Driving"
+            .SleeperBerth :> "Sleeper berth"
+        }
+    }
+
+    // Pure helper — given the current HOS state, returns the list of valid
+    // next-state variant-name strings (simplified 11/14 FMCSA-ish):
+    //   OffDuty      ⇄ OnDuty,  OffDuty → SleeperBerth
+    //   OnDuty       ⇄ Driving
+    //   Driving      → OffDuty | OnDuty
+    //   SleeperBerth → OnDuty | OffDuty
+    // `current` is typed `DriverStatus`, so this `match` is exhaustive: a new
+    // variant forces a transition rule here (E-TYPE-020 otherwise). Mirrors
+    // status-picker.validNextStates for the LoadStatus machine.
+    export fn driverNextStates(current: DriverStatus) -> DriverStatus[] {
+        return match current {
+            .OffDuty      :> [.OnDuty, .SleeperBerth]
+            .OnDuty       :> [.OffDuty, .Driving]
+            .Driving      :> [.OffDuty, .OnDuty]
+            .SleeperBerth :> [.OnDuty, .OffDuty]
+        }
+    }
+
+    // Pure helper — the HOS transition validator the driver pages call before
+    // writing `drivers.current_status`. Single source of truth via the table
+    // above, so the two driver pages don't carry duplicate if-chains.
+    export fn isValidHosTransition(from: DriverStatus, to: DriverStatus) -> boolean {
+        return driverNextStates(from).includes(to)
     }
 
     // Pure formatter — CDL expiration is an ISO date. We highlight if it's

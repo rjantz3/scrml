@@ -321,7 +321,7 @@ ${
             if (u) {
                 ?{`
                     INSERT INTO drivers (user_id, name, phone, cdl_number, cdl_state, cdl_expires, current_status, current_location)
-                    SELECT ${u.id}, ${d.name}, ${d.phone}, ${d.cdl_number}, ${d.cdl_state}, ${d.cdl_expires}, 'off_duty', NULL
+                    SELECT ${u.id}, ${d.name}, ${d.phone}, ${d.cdl_number}, ${d.cdl_state}, ${d.cdl_expires}, 'OffDuty', NULL
                     WHERE NOT EXISTS (SELECT 1 FROM drivers WHERE user_id = ${u.id})
                 `}.run()
             }

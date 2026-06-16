@@ -121,10 +121,10 @@
                   <label class="text-sm text-slate-600" for="status-filter">Filter:</label>
                   <select id="status-filter" bind:value=@statusFilter class="text-sm px-2 py-1 border border-slate-300 rounded-md bg-white">
                       <option value="all">All statuses</option>
-                      <option value="off_duty">Off duty</option>
-                      <option value="on_duty">On duty</option>
-                      <option value="driving">Driving</option>
-                      <option value="sleeper_berth">Sleeper berth</option>
+                      <option value="OffDuty">Off duty</option>
+                      <option value="OnDuty">On duty</option>
+                      <option value="Driving">Driving</option>
+                      <option value="SleeperBerth">Sleeper berth</option>
                   </select>
               </div>
           </div>
