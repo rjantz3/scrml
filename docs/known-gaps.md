@@ -16,7 +16,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 2 |
-| MED | 8 |
+| MED | 10 |
 | LOW | 20 |
 | Nominal (spec-ahead-of-impl) | 8 |
 <!-- @generated:gap-counts END -->
@@ -183,6 +183,18 @@ The S194 §52.6.2 retraction (Q1=C/Q2=WF — §52 is read-authority; the dev own
 ### G-MARKUP-VALUE-TERNARY-FNRETURN-CODEGEN — markup as a ternary value OR a `fn` return value mis-compiles `E-CODEGEN-INVALID-JS` — `NEW S197; HIGH; open`
 Markup-as-first-class-value (Pillar 1) fails to codegen in three DOCUMENTED forms: (a) inline ternary in interpolation `${ cond ? <a/> : <b/> }` (PRIMER §6.4(2)); (b) derived-cell ternary `const <badge> = cond ? <a/> : <b/>` (PRIMER §6.6.17); (c) `fn f() -> markup { return <m/> }` (kickstarter §6.4). All three → `E-CODEGEN-INVALID-JS`, exit 1, NO output emitted. Isolated S197 via 4 minimal probes (`/tmp/cw3/p{A,B,C,D}.scrml`): A (inline ternary) / B (fn-return markup) / C (derived-cell ternary) FAIL; **D (plain non-ternary markup-typed derived cell `const <x> = <span>${@n}</span>`) COMPILES** — so the gap is specifically markup-in-TERNARY (inline + derived-cell) + markup-as-FN-RETURN; plain markup-typed derived cells already work. **BLOCKED the wave-3 markup-as-value teaching example (gap G6)** — its whole lesson is "branch it / return it," both broken — so G6 is DEFERRED (reserved as future example 32) behind this gap; it also blocks the corpus teaching Pillar 1's branch/return forms at all. The PRIMER + kickstarter document these as VALID; the compiler hard-errors → spec-vs-impl drift on the load-bearing pillar (Pillar 1). Fix is in codegen — the markup-value emit path for ternary consequent/alternate + fn-return-of-markup. Surfaced by the wave-3 markup-as-value drafter + adversarial reviewer (who ALSO caught a free-standing `snippet name(){}` decl + file-scope `${render name()}` emitting two different undefined-function names → runtime ReferenceError, exit-0-but-broken — a SEPARATE silent-runtime-break in the free-standing-snippet codegen path worth its own check).
 <!-- @gap id=g-markup-value-ternary-fnreturn-codegen sev=HIGH status=open -->
+
+---
+
+## §S198 — gaps filed S198 (2026-06-15, trucking corpus slice-1a + engine-hydration arc)
+
+### G-MATCH-ALTERNATION-VALUE-VS-DERIVED — value-return `match`/`return match`/`const=match` REJECT `|`-pattern-alternation arms while `derived=match` ACCEPTS them — `NEW S198; MED; open`
+The JS-style value-return `match expr { .A | .B :> v ... }` (and `return match`, `const <x> = match`) hard-errors `E-SYNTAX-011` ("Match arm guard clauses (`| cond` or `if cond`) are not supported in v1 (§18.10)") on a `|`-PATTERN-alternation arm (`.Small | .Big :> "alive"`) — mis-classifying multi-pattern alternation as a guard clause. But the engine `derived=match @x { .Small | .Big :> .Healthy ... }` form ACCEPTS the same alternation and compiles clean (PA-probed S198: value-return `/tmp/alt-probe/p.scrml` FAILs E-SYNTAX-011; `derived=match /tmp/alt-probe/dm3.scrml` with the SAME alternation COMPILES). The kickstarter §4.10 (lines 552-554) ships `<engine for=Health derived=match @marioState { .Small | .Big :> .Healthy ... }>` — so a dev who learns `.A | .B :> v` from the kickstarter's derived=match hits E-SYNTAX-011 the moment they use it in a value-return helper (EXACTLY what trucking slice-1a tripped on — worked around one-arm-per-variant, still exhaustive). Parser inconsistency: the two match forms parse `|`-alternation differently. Fix needs a §18.2/§18.10 cross-check — is `.A | .B` (pattern-alternation, NOT a `| cond` guard) valid in value-return match? If yes, the value-return parser mis-rejects it; if no, the kickstarter §4.10 derived=match example teaches a non-portable form. Either way: align the two forms (fix the E-SYNTAX-011 over-fire) OR correct the kickstarter. Surfaced by trucking slice-1a (S198).
+<!-- @gap id=g-match-alternation-value-vs-derived sev=MED status=open -->
+
+### G-ENGINE-SERVER-FLAG-SILENT-SWALLOW — `<engine ... server ...>` silently swallows the `server` flag (zero diagnostics, byte-identical JS) while SPEC §51.0.A asserts engine cells MAY be server-authoritative — `NEW S198; MED; open`
+`<engine for=DriverStatus server initial=.OffDuty>` compiles with ZERO diagnostics and emits JS byte-identical to a plain engine — the `server` flag is parsed-and-dropped (PA-probed during the engine-hydration DD, S198). SPEC §51.0.A asserts "an engine cell MAY itself be `server`-authoritative (§52 Tier 2)" but no codegen wiring exists — the §52 read/load-into-an-engine-cell path is unbuilt. This is the READ/hydrate leg of the engine-hydration Approach-F E-leg (DEFERRED to the §52 program); independent of Gap G1 (the §52 WRITE-back no-op). Silent-swallow of a documented attribute is the issue (per `feedback_dont_soft_classify_bugs` — a silent no-op of an asserted-valid attribute is worse than an error): at minimum `<engine server>` should fire a `W-ENGINE-SERVER-DEFERRED` (not-yet-wired) rather than silently dropping it, until the E-leg lands. The F hydration primitive build (S198) covers the A-leg `initial=@cell` only; the E-leg + this silent-swallow are deferred. Surfaced by the engine-hydration DD (S198).
+<!-- @gap id=g-engine-server-flag-silent-swallow sev=MED status=open -->
 
 ---
 
