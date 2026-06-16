@@ -334,12 +334,12 @@
     "SPAN-COORD": 8
   },
   "examples/23-trucking-dispatch/components/driver-card.scrml": {
-    "COUNT-LENGTH": 2,
-    "EXTRA-FIELD": 8,
-    "FIELD-SHAPE": 13,
-    "KIND-NAME": 2,
-    "MISSING-FIELD": 53,
-    "SPAN-COORD": 8
+    "COUNT-LENGTH": 3,
+    "EXTRA-FIELD": 17,
+    "FIELD-SHAPE": 23,
+    "KIND-NAME": 6,
+    "MISSING-FIELD": 110,
+    "SPAN-COORD": 17
   },
   "examples/23-trucking-dispatch/components/invoice-card.scrml": {
     "KIND-NAME": 3,
