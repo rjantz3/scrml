@@ -8,8 +8,14 @@
 
 ---
 
-## ⚡ THE BIG ONE — S200 = repo rename (do FIRST next session; user-chosen timing)
-`scrml` → **`scrml-native`** (pure self-host) AND `scrmlTS` → **`scrml`** (the working compiler becomes the public canonical name — points at the artifact adopters use through v1.0; `-native` names the self-host). **Big careful sweep — SCOPE FIRST. Do NOT do mid-session or with an agent in flight.** Targets: home-dir paths (`/home/bryan-maclee/scrmlMaster/scrmlTS` → `.../scrml`), git remotes, `pa.md` + `pa-core-scrmlTS.md` + `vpa-scrmlTS.md` + primer + master-list + PA memory + hand-off cross-refs, dropbox outbox paths, the S100 path-discipline hook (hardcodes `scrmlTS`), agent-brief absolute paths, resource-maps, `.claude/worktrees/` paths. User (S199): *"session 200 would be great for the name change."*
+## ⚡ THE BIG ONE — S200 = repo rename (IN PROGRESS — Phase 3 is the next session's job)
+`scrml` → **`scrml-native`** (pure self-host) AND `scrmlTS` → **`scrml`** (the working compiler becomes the public canonical name). **Scope ratified SURGICAL** (current-truth + config + paths; preserve historical records). **Full plan + Phase-3 target list: `docs/changes/s200-repo-rename/SCOPING.md`.**
+
+- **Phase 1 — GitHub repo renames: ✅ DONE** (user, web UI — `scrml`→`scrml-native`, `scrmlTS`→`scrml`).
+- **Phase 2 — local switchover: SCRIPT READY** at `/home/bryan-maclee/scrmlMaster/RENAME-S200-switchover.sh` (dir renames + `git remote set-url` ×2 + memory-slug `mv` + hook `sed`). **User runs it from a terminal NOT inside the scrmlTS session, then reopens Claude in `/home/bryan-maclee/scrmlMaster/scrml`.** It could NOT be done inside the S199 session (self-rename breaks the harness CWD + memory slug; `gh` not installed so GitHub was manual).
+- **Phase 3 — content sweep: YOUR JOB (this fresh session, running in `/…/scrml`).** Execute `docs/changes/s200-repo-rename/SCOPING.md` §"Phase 3" — current-truth docs (pa.md/vpa.md/master-list/README/package.json), `git mv` the scrml-support sidecar files (`pa-scrmlTS.md`→`pa-scrml.md` etc., decision D-a), re-run project-mapper + resource-mapper, update ~/.claude (CLAUDE.md slug + agents + memory path-refs), then verify (full suite green + grep current-truth clean) + push `scrml` + `scrml-native` + `scrml-support`. Cross-machine: repeat Phase 2 on machine B + pull.
+
+User (S199): *"session 200 would be great for the name change."*
 
 ---
 
