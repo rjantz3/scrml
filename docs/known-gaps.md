@@ -15,9 +15,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 0 |
-| MED | 11 |
-| LOW | 20 |
+| HIGH | 1 |
+| MED | 14 |
+| LOW | 21 |
 | Nominal (spec-ahead-of-impl) | 8 |
 <!-- @generated:gap-counts END -->
 
@@ -228,6 +228,30 @@ The `<each>`-over-a-component-list pattern (the trucking board flagship + the ca
 <!-- @gap id=g-each-inline-component-prop-member-unsubstituted sev=HIGH status=resolved -->
 
 ---
+
+## §S202 — gaps filed S202 (2026-06-17, L1 e2e render-map triage)
+
+All five surfaced by the new L1 e2e render-map harness (`compiler/tests/e2e-render-map/`; DD `scrml-support/docs/deep-dives/e2e-known-failure-map-2026-06-17.md`). The map ran 438 cells / 434 apps; these are the real-gap residue after triage (the 125 fails-compile were ~all corpus-filter over-inclusion of non-app compile-probe fixtures — 0 from `examples/` — not flagship regression; pending the filter refine).
+
+### G-EACH-OVER-ARM-PAYLOAD-BINDING-UNBOUND — an `<each>` over a match/engine arm PAYLOAD BINDING emits the binding UNBOUND in the each mount-setup scope → ReferenceError at mount — `NEW S202; HIGH; open (fix dispatched S202)`
+A variant `.Loaded(rows)` whose arm body renders `<each>` over the payload (`rows`/`items`): the arm render fn receives the binding (`_render_Loaded(rows)`) but the each per-item mount-setup emits `const _items = rows;` in a scope WITHOUT the binding → `ReferenceError: rows is not defined` at happy-dom mount. Compiles exit 0 + `node --check` OK (silent-wrong class). **Repros (single-file):** `examples/16-remote-data.scrml` (`rows`, `<match for=ContactsPhase>` arm `.Loaded(rows)`) + `examples/29-engine-vs-flags.scrml` (`items`, `<engine for=ItemsPhase>` arm `.Loaded(items)`). ONE shared root (emitted shape identical across match-arm + engine-arm). Likely loci: `emit-each.ts` + `emit-variant-guard.ts` (thread the payload binding into the each-setup scope). Fix DISPATCHED S202 (`each-over-arm-payload-binding-unbound-2026-06-17`).
+<!-- @gap id=g-each-over-arm-payload-binding-unbound sev=HIGH status=open -->
+
+### G-FULLSTACK-EMPTY-MOUNT-THROWS — full-stack apps throw at the no-data / empty client mount instead of degrading to a loading/empty state — `NEW S202; MED; open`
+`examples/17-schema-migrations.scrml` (`{} is not iterable`), `examples/22-multifile/app.scrml`, `examples/23-trucking-dispatch/app.scrml` (server-dep destructure-from-null) compile clean but THROW at the client mount when server data is absent (the `#empty` cell), rather than rendering a loading/empty state. The trucking-dispatch BOARD (`pages/dispatch/board.scrml`) renders fine — this is the APP SHELL (`app.scrml`), a DISTINCT file. A robustness gap: an app should degrade gracefully at the data-absent mount, not throw. Partly entangled with happy-dom client-only mounting (no server); the principled read is apps should not throw on the no-data mount. Surfaced by the L1 render-map (`#empty` cells = compiles-but-throws / D1-MOUNT-THROW).
+<!-- @gap id=g-fullstack-empty-mount-throws sev=MED status=open -->
+
+### G-RENDER-NULLISH-TEXT — a cell/field renders literal `undefined` text into the DOM — `NEW S202; MED; open`
+`examples/03-contact-book.scrml#populated` renders literal `undefined` as a text node (S-NULLISH-TEXT); `samples/compilation-tests/gauntlet-s20-meta/meta-in-component-001.scrml` likewise. A value resolving to JS `undefined` (NOT scrml `not`) reaches `textContent`/interpolation and stringifies to `"undefined"` — silent-wrong display. The `#empty` cell of 03-contact-book renders clean (the empty-vs-populated split). Root TBD (a field/derived absent-at-populated-time; possibly a §42 absence-vs-`undefined` display gap). Surfaced by the L1 render-map.
+<!-- @gap id=g-render-nullish-text sev=MED status=open -->
+
+### G-RAW-INTERP-CHANNEL-META-CORNERS — literal `${...}` survives into rendered text in channel / for-lift-outside-logic / meta paths (bug-3 class NOT fully closed by the S202 B fix) — `NEW S202; MED; open`
+S-RAW-INTERP (a literal `${x}`/`${msg}`/`${n}` in the rendered DOM) fires on `samples/compilation-tests/gauntlet-s20-channels/channel-basic-001.scrml`, `…/channel-multiple-001.scrml`, and `…/gauntlet-s19-phase2-control-flow/phase2-for-lift-outside-logic-109.scrml`. The S202 B fix (`d830ec59`) closed the `${}`-in-string-literal-attr lowering for the each/lift markup-emitter path; the SAME raw-interp class survives in channel-body + for-lift-outside-logic + meta emission paths. Samples-tier (not a curated example) but a real codegen-gap class. Surfaced by the L1 render-map (smell-detected-wrong).
+<!-- @gap id=g-raw-interp-channel-meta-corners sev=MED status=open -->
+
+### G-MOUNT-HANG-RAILS-DEV — a sample app hangs indefinitely at happy-dom mount (compiles fine) — `NEW S202; LOW; open`
+`samples/gauntlet-r18/rails-dev.scrml` compiles in ~0.8s but HANGS at happy-dom mount (0% CPU = blocked, not looping) — a real runtime-mount pathology (the reason the render-map harness needs subprocess isolation). The map records it as HARNESS-TIMEOUT. Stress-sample (gauntlet), low urgency; root TBD (a mount-time await/effect that never resolves in happy-dom). Surfaced by the L1 render-map.
+<!-- @gap id=g-mount-hang-rails-dev sev=LOW status=open -->
 
 ## §S195 — gaps filed S195 (2026-06-15, corpus-rewrite wave-1a)
 
