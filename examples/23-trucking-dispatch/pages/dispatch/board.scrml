@@ -113,6 +113,14 @@
             }
         }
 
+        // Tier-1 derived columns — each kanban column is a reactive filtered
+        // view of @loadRows by boardColumn(...). Recompute automatically when
+        // @loadRows changes (refresh / channel ack). The `<each>` blocks below
+        // iterate these, replacing the per-column inline `for/lift` filter.
+        const <incomingLoads> = @loadRows.filter(l => boardColumn(l.status) == "left")
+        const <activeLoads>   = @loadRows.filter(l => boardColumn(l.status) == "middle")
+        const <closedLoads>   = @loadRows.filter(l => boardColumn(l.status) == "right")
+
         <lastSeenEventCount> = 0
         function ackEvents() {
             @lastSeenEventCount = @boardEvents.length
@@ -186,12 +194,10 @@
                         <span class="text-xs text-slate-500">tendered · booked</span>
                     </header>
                     <div class="space-y-3">
-                        ${
-                            for (let l of @loadRows) {
-                                if (boardColumn(l.status) != "left") continue
-                                lift <div><LoadCard load=l customerName=l.customer_name/></div>
-                            }
-                        }
+                        <each in=@incomingLoads as l key=@.id>
+                            <div><LoadCard load=l customerName=l.customer_name/></div>
+                            <empty>No incoming loads.</empty>
+                        </each>
                     </div>
                 </section>
 
@@ -204,12 +210,10 @@
                         <span class="text-xs text-slate-500">dispatched · loaded · in transit</span>
                     </header>
                     <div class="space-y-3">
-                        ${
-                            for (let l of @loadRows) {
-                                if (boardColumn(l.status) != "middle") continue
-                                lift <div><LoadCard load=l customerName=l.customer_name/></div>
-                            }
-                        }
+                        <each in=@activeLoads as l key=@.id>
+                            <div><LoadCard load=l customerName=l.customer_name/></div>
+                            <empty>No active loads.</empty>
+                        </each>
                     </div>
                 </section>
 
@@ -222,12 +226,10 @@
                         <span class="text-xs text-slate-500">delivered · invoiced · paid</span>
                     </header>
                     <div class="space-y-3">
-                        ${
-                            for (let l of @loadRows) {
-                                if (boardColumn(l.status) != "right") continue
-                                lift <div><LoadCard load=l customerName=l.customer_name/></div>
-                            }
-                        }
+                        <each in=@closedLoads as l key=@.id>
+                            <div><LoadCard load=l customerName=l.customer_name/></div>
+                            <empty>No closed loads.</empty>
+                        </each>
                     </div>
                 </section>
 

@@ -456,10 +456,10 @@
   "examples/23-trucking-dispatch/pages/dispatch/board.scrml": {
     "COUNT-LENGTH": 1,
     "EXTRA-FIELD": 24,
-    "FIELD-SHAPE": 51,
+    "FIELD-SHAPE": 54,
     "KIND-NAME": 4,
-    "MISSING-FIELD": 108,
-    "SPAN-COORD": 326
+    "MISSING-FIELD": 119,
+    "SPAN-COORD": 355
   },
   "examples/23-trucking-dispatch/pages/dispatch/customers.scrml": {
     "COUNT-LENGTH": 10,
