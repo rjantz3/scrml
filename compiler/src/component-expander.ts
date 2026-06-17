@@ -3445,6 +3445,16 @@ export function runCEFile(
     const seen = new Set<string>();
     const work: WorkItem[] = [];
 
+    // Pre-gather every name the consumer already imports (across all import
+    // nodes) so the helper-import augmentation below never adds a colliding
+    // binding (g-each-component-body-invalid-js).
+    const alreadyImported = new Set<string>();
+    for (const imp of (ast.imports ?? [])) {
+      const importExt = imp as ImportWithSpecifiers;
+      if (importExt.specifiers) for (const s of importExt.specifiers) alreadyImported.add(s.local || s.imported);
+      else for (const n of (imp.names ?? [])) alreadyImported.add(n);
+    }
+
     // Seed worklist from the consumer file's direct imports.
     for (const imp of (ast.imports ?? [])) {
       const importExt = imp as ImportWithSpecifiers;
@@ -3454,6 +3464,7 @@ export function runCEFile(
       const pairs = importExt.specifiers
         ? importExt.specifiers.map((s) => ({ imported: s.imported, local: s.local || s.imported }))
         : (imp.names ?? []).map((n: string) => ({ imported: n, local: n }));
+      let importHasComponent = false;
       for (const { imported, local } of pairs) {
         const info = targetExports.get(imported);
         if (!info) continue;
@@ -3461,7 +3472,31 @@ export function runCEFile(
           info.category === "user-component" ||
           (info.category == null && info.isComponent === true);
         if (!isUserComponent) continue;
+        importHasComponent = true;
         work.push({ sourceKey: key, importedName: imported, localName: local, rawSource: imp.source as string });
+      }
+      // g-each-component-body-invalid-js — when the consumer imports a component
+      // from module M, CE inlines the component's body, whose helper calls (e.g.
+      // formatRate) resolve to M's NON-component exports. The consumer bound only
+      // the component name, so those helper refs are unbound: a hard E-SCOPE-001
+      // at TS on the `<each>` per-item path, and a silently-swallowed runtime
+      // ReferenceError on the Tier-0 `${for…lift}` path (the inlined helper call
+      // survives into the client bundle unbound). Fix: add M's non-component
+      // exports to this import so the inlined body resolves in BOTH the TS symbol
+      // table AND the codegen `_scrml_modules[key]` destructure. Over-inclusion
+      // is harmless (an unused `const { fmt }` binding is free / tree-shaken);
+      // collisions are guarded by `alreadyImported`.
+      if (importHasComponent) {
+        for (const [expName, expInfo] of targetExports) {
+          const expIsComponent =
+            expInfo.category === "user-component" ||
+            (expInfo.category == null && expInfo.isComponent === true);
+          if (expIsComponent) continue;            // components inline; add only helpers
+          if (alreadyImported.has(expName)) continue;
+          alreadyImported.add(expName);
+          if (importExt.specifiers) importExt.specifiers.push({ imported: expName, local: expName });
+          else (imp.names ??= []).push(expName);
+        }
       }
     }
 
