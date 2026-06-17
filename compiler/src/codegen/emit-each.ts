@@ -308,7 +308,19 @@ function renderTemplateChildToJs(
     // class:/interpolation re-evaluates against its current value per render
     // (same re-dispatch model the per-item match-block already uses).
     const attrs: any[] = (child as any).attributes ?? (child as any).attrs ?? [];
+    // g-each-peritem-if-predicate — a per-item `if=` conditional. Build the
+    // element, then gate its append on the lowered predicate below (the each
+    // render-fn re-runs on collection change, so the conditional re-evaluates).
+    let ifCond: string | null = null;
     for (const attr of attrs) {
+      if (attr && String(attr.name ?? "") === "if") {
+        const v = attr.value;
+        const raw = v && v.kind === "expr" ? String(v.raw ?? "")
+          : v && v.kind === "variable-ref" ? String(v.name ?? "")
+          : v && v.kind === "string-literal" ? JSON.stringify(String(v.value ?? "")) : "";
+        if (raw) ifCond = lowerEachExpr(raw, iterVarName);
+        continue;                                 // conditional, not a setAttribute
+      }
       renderTemplateAttrToJs(attr, iterVarName, _iterIdxName, elVar, lines, indent, engineCtx);
     }
 
@@ -332,7 +344,11 @@ function renderTemplateChildToJs(
     }
     // self-closing: no body.
 
-    lines.push(`${indent}${fragmentVar}.appendChild(${elVar});`);
+    if (ifCond) {
+      lines.push(`${indent}if (${ifCond}) ${fragmentVar}.appendChild(${elVar});`);
+    } else {
+      lines.push(`${indent}${fragmentVar}.appendChild(${elVar});`);
+    }
     return;
   }
 
@@ -386,9 +402,9 @@ function renderTemplateChildToJs(
     }
     // Rewrite `@.` → iter var; rewrite `@cell` → reactive_get; pass through
     // bare idents (`contact.name` etc. — the iter var binding is the for-arg
-    // of the factory closure).
-    let rewritten = rewriteContextualSigil(inner, iterVarName);
-    rewritten = rewriteAtCellAccess(rewritten);
+    // of the factory closure). lowerEachExpr ADDS §42 predicate lowering
+    // (`is some`/`is not`/`not`) when present — g-each-peritem-if-predicate C1.
+    let rewritten = lowerEachExpr(inner, iterVarName);
     // Bug 64 / R28-1c (S159) — inside a reconciled per-item factory, make this
     // `${...}` interpolation LIVE-KEYED: a stable text node + a live-keyed
     // effect that re-resolves the item by key on every reconcile (and tracks
@@ -565,6 +581,35 @@ function rewriteIterScopeOnly(text: string, iterVarName: string): string {
 }
 
 /**
+ * g-each-peritem-if-predicate-not-lowered — lower a per-item expression that may
+ * carry a §42 absence predicate (`is some` / `is not` / `is not not` / `not`).
+ * The text-based `rewriteIterValueExpr` lowers iter-scope (`@.field`→iterVar) +
+ * `@cell`→reactive-get but does NOT lower predicates, so `String((x is some))`
+ * leaks as invalid JS. When a predicate IS present, route the (iter-lowered)
+ * text through the STRUCTURED emitter (parseExprToNode → emitExprField), which
+ * lowers `is some` → `(v !== null && v !== undefined)` etc.; fall back to the
+ * text path on a parse failure or when no predicate is present (common case —
+ * avoids the parse round-trip + any emit-expr divergence).
+ */
+function lowerEachExpr(text: string, iterVarName: string): string {
+  const preRewritten = rewriteIterValueExpr(text, iterVarName);
+  if (!/\bis\s+(?:some|not|given)\b|(?:^|[^.\w@])not\s/.test(preRewritten)) return preRewritten;
+  try {
+    const { parseExprToNode } = require("../expression-parser.ts") as {
+      parseExprToNode: (raw: string, filePath: string, offset: number) => unknown;
+    };
+    const node = parseExprToNode(preRewritten, "", 0);
+    if (!node || typeof node !== "object") return preRewritten;
+    const { emitExprField } = require("./emit-expr.ts") as {
+      emitExprField: (n: unknown, fallback: string, ctx: Record<string, unknown>) => string;
+    };
+    return emitExprField(node, preRewritten, { mode: "client" });
+  } catch (_e) {
+    return preRewritten;
+  }
+}
+
+/**
  * Detect the DOM event name for an event-handler attribute, or null when the
  * attribute is not an event handler.
  *   - `onclick`     → "click"   (canonical §5.2.2 form)
@@ -707,14 +752,14 @@ function renderTemplateAttrToJs(
   // Bug 64 / R28-1c (S159) — per-item attr interpolation is live-keyed too so
   // an attr value bound to item data refreshes on reconcile (matches Tier-0).
   if (valKind === "expr") {
-    const expr = rewriteIterValueExpr(String(val.raw ?? ""), iterVarName);
+    const expr = lowerEachExpr(String(val.raw ?? ""), iterVarName);
     for (const _l of maybeWrapEachPerItemEffect(
       [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, String(${expr}));`], iterVarName, indent,
     )) lines.push(_l);
     return;
   }
   if (valKind === "variable-ref") {
-    const expr = rewriteIterValueExpr(String(val.name ?? ""), iterVarName);
+    const expr = lowerEachExpr(String(val.name ?? ""), iterVarName);
     for (const _l of maybeWrapEachPerItemEffect(
       [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, String(${expr}));`], iterVarName, indent,
     )) lines.push(_l);
