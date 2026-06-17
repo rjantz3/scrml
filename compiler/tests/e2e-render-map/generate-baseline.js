@@ -108,6 +108,7 @@ export function runCorpus(onProgress) {
       const cell = observeCellSubprocess(app.relpath, seedLabel);
       const key = `${app.relpath}#${seedLabel}`;
       map[key] = {
+        tier: app.tier, // S202 filter-refine — flagship/probe/stress/perf/sample (lands on next full regen)
         state: cell.state,
         smells: cell.smells ?? [],
         seeded: cell.seeded ?? seedLabel !== "empty",

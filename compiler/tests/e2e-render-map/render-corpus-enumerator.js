@@ -132,6 +132,24 @@ function classifyApp(relpath) {
 }
 
 /**
+ * Corpus TIER by relpath (S202 filter-refine) — separates FLAGSHIP apps (whose
+ * fails-compile / render bugs are real regressions) from PROBE / STRESS / SAMPLE
+ * fixtures (whose fails-compile is mostly intentional edge-probing, NOT
+ * regression — the S202 triage found 0 of 125 fails-compile in examples/). First-
+ * class field so the next baseline + delta-gate can filter/weight by tier rather
+ * than re-parse the cell key. ADDITIVE: no app is excluded, the signal is kept —
+ * a probe fixture's render smell (e.g. S-RAW-INTERP) still surfaces, just attributed.
+ */
+function tierOf(relpath) {
+  if (relpath.startsWith("examples/")) return "flagship";
+  if (relpath.startsWith("samples/compilation-tests/")) return "probe";
+  if (relpath.startsWith("samples/gauntlet")) return "stress";
+  if (relpath.startsWith("benchmarks/")) return "perf";
+  if (relpath.startsWith("samples/")) return "sample";
+  return "other";
+}
+
+/**
  * Enumerate every `<program`-rooted .scrml render-corpus app.
  *
  * For MULTI-FILE apps, only the ENTRY file (app.scrml if present, else the
@@ -175,6 +193,7 @@ export function enumerateRenderCorpus() {
             source: src.name,
             path: f,
             relpath,
+            tier: tierOf(relpath),
             kind: "single",
             appDir: null,
             inputFiles: [f],
@@ -197,6 +216,7 @@ export function enumerateRenderCorpus() {
       source: entry.source,
       path: chosen.path,
       relpath: chosen.relpath,
+      tier: tierOf(chosen.relpath),
       kind: "multi",
       appDir,
       inputFiles: entry.allScrml.map((s) => s.path),
