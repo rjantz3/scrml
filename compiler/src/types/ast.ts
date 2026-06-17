@@ -2025,6 +2025,24 @@ export interface ResetExpr {
   diagnostic?: { code: string; message: string };
 }
 
+/**
+ * markup-value-in-expression-2026-06-17 (a)+(b) — markup-as-first-class-value
+ * (Pillar 1, SPEC §1.4 / §7.4) appearing in EXPRESSION position: a ternary
+ * consequent/alternate, or any sub-expression. The ast-builder
+ * `parseExprWithMarkupValues` helper recovers each markup span to a real markup
+ * element node (via the canonical `parseLiftTag` machinery) and substitutes a
+ * `markup-value` leaf into the surrounding expression tree. Codegen lowers it
+ * to the markup→DOM-node IIFE (emit-lift.js `emitMarkupValueExpr`) — the same
+ * lowering the `return <markup>` value (form (c)) and the bare markup-typed
+ * derived control use.
+ */
+export interface MarkupValueExpr {
+  kind: "markup-value";
+  span: ExprSpan;
+  /** The recovered markup element node (from `parseLiftTag`). */
+  node: ASTNode;
+}
+
 // ---- Union ----
 
 /**
@@ -2051,4 +2069,5 @@ export type ExprNode =
   | SqlRefExpr
   | InputStateRefExpr
   | EscapeHatchExpr
+  | MarkupValueExpr
   | ResetExpr;

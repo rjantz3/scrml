@@ -1472,13 +1472,107 @@ export function splitBlocks(filePath, source) {
       }
       return -1; // unterminated
     }
-    // Expression RHS (Shape 1 or Shape 3 derived). Return -1 to let the
-    // legacy per-char text accumulation handle it. Expression RHS may span
-    // multiple lines (`const <display> = match @phase { ... multi-line ... }`)
-    // — scanning to end-of-line truncates the body and breaks the match/etc.
-    // recognition downstream. Legacy accumulation continues char-by-char
-    // until something special (markup-opener, comment, etc.) interrupts —
-    // which doesn't happen inside a balanced expression body.
+    // Expression RHS (Shape 1 or Shape 3 derived).
+    //
+    // markup-value-in-expression-2026-06-17 (b) — markup-as-value in EXPRESSION
+    // position (a ternary arm: `const <badge> = @n > 0 ? <span>p</span> :
+    // <span>n</span>`; SPEC §1.4 / §7.4, PRIMER §6.6.17). Pre-fix this branch
+    // unconditionally returned -1, ceding to legacy per-char text accumulation —
+    // which STOPS at the first `<span` markup-opener and splits the ternary arms
+    // into SEPARATE top-level markup blocks. The parser then saw only the text
+    // `const <badge> = @n > 0 ?` → the arms were DROPPED → `() => ... > 0 ?)` →
+    // E-CODEGEN-INVALID-JS.
+    //
+    // Fix: scan the full balanced expression; if it CONTAINS a markup element,
+    // gobble the whole decl (including the markup arms) as ONE text block so the
+    // arms survive to codegen. When the RHS has NO markup, return -1 to preserve
+    // the legacy path EXACTLY (multi-line `match @phase { ... }` bodies, etc. —
+    // the orphan-brace accumulation already handles those, and end-of-line
+    // scanning would truncate them).
+    {
+      let q = p;
+      let bd = 0;     // () [] {} delimiter depth
+      let ad = 0;     // markup element nesting depth
+      let inD = false, inS = false, inT = false; // " ' ` string state
+      let sawMarkup = false;
+      while (q < len) {
+        const c = source[q];
+        if (inD) { if (c === "\\") { q += 2; continue; } if (c === '"') inD = false; q++; continue; }
+        if (inS) { if (c === "\\") { q += 2; continue; } if (c === "'") inS = false; q++; continue; }
+        if (inT) { if (c === "\\") { q += 2; continue; } if (c === "`") inT = false; q++; continue; }
+        if (c === '"') { inD = true; q++; continue; }
+        if (c === "'") { inS = true; q++; continue; }
+        if (c === "`") { inT = true; q++; continue; }
+        if (c === "(" || c === "[" || c === "{") { bd++; q++; continue; }
+        if (c === ")" || c === "]" || c === "}") { if (bd > 0) bd--; q++; continue; }
+        if (c === "<") {
+          // Markup close `</X>` / `</>` — decrement element depth.
+          if (source[q + 1] === "/") {
+            if (ad > 0) ad--;
+            q += 2;
+            while (q < len && source[q] !== ">" && source[q] !== "\n") q++;
+            if (q < len && source[q] === ">") q++;
+            continue;
+          }
+          // Markup opener `<X ...>` — only when followed by an identifier char
+          // (a `<` preceded by a value is the less-than operator; but a markup
+          // VALUE element opener is always `<` + letter/underscore). Self-close
+          // `<X/>` is balanced inline.
+          if (/[A-Za-z_]/.test(source[q + 1] || "")) {
+            // markup-value-in-expression-2026-06-17 — DISCRIMINATOR. A markup
+            // element is part of the RHS expression VALUE only when it sits in
+            // operand position: at the RHS head, or after an operator/opener
+            // (`?`, `:`, `(`, `,`, `=`, `&`, `|`, etc.). When the nearest
+            // preceding non-ws char is a VALUE-TERMINATOR (alphanumeric / `_` /
+            // `)` `]` `}` / quote), the RHS value already COMPLETED and this `<`
+            // opens a SEPARATE SIBLING markup element — e.g. `<x> = 1<div>…`,
+            // `<x> = null<div>…`, `<x> = true<div class:active=@x>…`. In that
+            // case the decl ended before the `<`; cede to the legacy per-char
+            // path (return -1) which correctly stops at the markup opener. Only
+            // applies at the top level (no open delimiter / element) — markup
+            // nested inside `(...)`/another element is always part of the value.
+            if (bd === 0 && ad === 0) {
+              let b = q - 1;
+              while (b >= p && /\s/.test(source[b])) b--;
+              const prev = b >= p ? source[b] : "";
+              if (prev && /[A-Za-z0-9_)\]}"'`]/.test(prev)) {
+                return -1; // sibling markup — RHS value already complete
+              }
+            }
+            sawMarkup = true;
+            // Scan the opener to its `>` or `/>`.
+            let r = q + 1;
+            let rbd = 0, rD = false, rS = false;
+            let selfClose = false;
+            while (r < len) {
+              const rc = source[r];
+              if (rD) { if (rc === '"') rD = false; r++; continue; }
+              if (rS) { if (rc === "'") rS = false; r++; continue; }
+              if (rbd > 0) { if (rc === "{") rbd++; else if (rc === "}") rbd--; r++; continue; }
+              if (rc === '"') { rD = true; r++; continue; }
+              if (rc === "'") { rS = true; r++; continue; }
+              if (rc === "{") { rbd++; r++; continue; }
+              if (rc === "/" && source[r + 1] === ">") { selfClose = true; r += 2; break; }
+              if (rc === ">") { r++; break; }
+              r++;
+            }
+            if (!selfClose) ad++;
+            q = r;
+            continue;
+          }
+          // `<` not opening markup — treat as less-than operator, keep scanning.
+          q++;
+          continue;
+        }
+        // A depth-0 newline OUTSIDE any open markup ends the decl. (Markup
+        // arms on their own lines stay attached because ad > 0 keeps us in.)
+        if (c === "\n" && bd === 0 && ad === 0) break;
+        q++;
+      }
+      // Only divert from the legacy path when the RHS actually carried markup;
+      // otherwise the orphan-brace per-char accumulation owns it (unchanged).
+      if (sawMarkup && ad === 0 && bd === 0 && q > p) return q;
+    }
     return -1;
   }
 

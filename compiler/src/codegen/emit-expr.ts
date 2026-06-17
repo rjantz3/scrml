@@ -37,6 +37,7 @@ import type {
   InputStateRefExpr,
   EscapeHatchExpr,
   MapLitExpr,
+  MarkupValueExpr,
 } from "../types/ast.ts";
 import { rewriteExpr, rewriteServerExpr, rewriteExprArrowBody, rewriteServerExprArrowBody, rewriteExprWithDerived } from "./rewrite.js";
 import { emitParseVariantCall, isParseVariantCall } from "./emit-parse-variant.ts";
@@ -44,6 +45,9 @@ import { emitMatchExpr as emitStructuredMatchExpr } from "./emit-control-flow.ts
 import { SYNTH_PROPERTY_NAMES } from "../symbol-table.ts";
 import { srcmapMark } from "./srcmap-provenance.ts";
 import { resolveLogLoc } from "./log-loc.ts";
+// markup-value-in-expression-2026-06-17 (a)+(b) — DOM-node lowering for
+// markup-as-value in expression position (shared with form (c) `return <markup>`).
+import { emitMarkupValueExpr } from "./emit-lift.js";
 
 // ---------------------------------------------------------------------------
 // §20.6 (F4=A) — production strip toggle for the log() builtin.
@@ -329,6 +333,17 @@ export function emitExpr(node: ExprNode, ctx: EmitExprContext): string {
     case "input-state-ref": return emitInputStateRef(node);
     case "escape-hatch": return emitEscapeHatch(node, ctx);
     case "map-lit":     return emitMapLit(node, ctx);
+    case "markup-value": {
+      // markup-value-in-expression-2026-06-17 (a)+(b) — markup-as-first-class-value
+      // (Pillar 1, SPEC §1.4 / §7.4) in expression position (a ternary arm:
+      // `${ @n > 0 ? <span>pos</span> : <span>neg</span> }`, PRIMER §6.4(2); or a
+      // derived-cell ternary `const <badge> = @n > 0 ? <span>pos</span> : ...`,
+      // PRIMER §6.6.17). The ast-builder's `parseExprWithMarkupValues` recovered
+      // the markup arm to a real element node (`node.node`). Lower it via the
+      // markup→DOM-node IIFE (the SAME primitive form (c)'s `return <markup>`
+      // uses) so the arm evaluates to a real DOM node, not a dropped/raw `<span>`.
+      return emitMarkupValueExpr((node as MarkupValueExpr).node);
+    }
     case "reset-expr": {
       // §6.8.2 — A1c Step C5 — lower reset(<target>) to the runtime helper.
       //

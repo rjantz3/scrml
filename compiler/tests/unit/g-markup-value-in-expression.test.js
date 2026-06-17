@@ -11,14 +11,13 @@
  * while the plain markup-typed derived control (`const <x> = <span>${@n}</span>`)
  * compiled fine.
  *
- * STATUS (S201): form (c) LANDED — salvaged from the dispatched
- * `scrml-js-codegen-engineer` agent's committed work (`47d75516`) after a
- * mid-dispatch write-permission revocation. The fix routes a `return <markup>`
- * value through the new `emitMarkupValueExpr` IIFE primitive (emit-lift.js) — the
- * same DOM-node lowering the plain-derived control uses. Forms (a)/(b) (the
- * ternary forms) are PENDING (their parse layers were salvaged but the
- * emit-expr `markup-value` integration was unproven when the dispatch blocked);
- * `.skip`ped below until they land.
+ * STATUS: ALL FORMS LANDED. Form (c) `return <markup>` routes through the
+ * `emitMarkupValueExpr` IIFE primitive (emit-lift.js). Forms (a)/(b) (the ternary
+ * forms) reuse that SAME primitive: the salvaged parse layers (block-splitter
+ * full-RHS scan + ast-builder `sawTernaryAtRoot` guard + `parseExprWithMarkupValues`)
+ * recover each ternary markup arm to a `markup-value` ExprNode leaf, and emit-expr's
+ * `case "markup-value"` lowers it via `emitMarkupValueExpr` — a real createElement-built
+ * DOM node. None of the four forms emit E-CODEGEN-INVALID-JS / dropped arms / raw `< span >`.
  */
 import { describe, test, expect } from "bun:test";
 import { resolve } from "path";
@@ -63,21 +62,36 @@ const <x> = <span>\${@n}</span>
     expect(clientJs).toContain('createElement("span")');
   });
 
-  // Forms (a) inline-ternary + (b) derived-ternary — PENDING (S201). Parse layers
-  // salvaged from the blocked dispatch; emit-expr `markup-value` integration unproven.
-  // Un-skip when they land.
-  test.skip("(a) inline ternary markup arms lower (PENDING)", () => {
+  // Forms (a) inline-ternary + (b) derived-ternary — LANDED (markup-value-in-expression-
+  // 2026-06-17). The salvaged parse layers (block-splitter full-RHS scan + ast-builder
+  // sawTernaryAtRoot guard + parseExprWithMarkupValues) recover each ternary markup arm
+  // to a `markup-value` ExprNode leaf; emit-expr's `case "markup-value"` lowers it via
+  // the form-(c) `emitMarkupValueExpr` IIFE primitive (a real createElement-built DOM
+  // node) — so the arms are no longer dropped/raw `< span >`.
+  test("(a) inline ternary markup arms lower → real createElement, no dropped arm", () => {
     const src = `<n> = 0
 <div>\${ @n > 0 ? <span>pos</span> : <span>neg</span> }</div>`;
-    const { errors } = compileToClient(src, "mv-inline");
+    const { errors, clientJs } = compileToClient(src, "mv-inline");
     expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    // Both ternary arms survive as real markup-value IIFEs (not a dropped alternate
+    // arm `> 0 ?)` and not a raw mangled `< span >`).
+    expect(clientJs).toContain('createElement("span")');
+    expect(clientJs).toContain('document.createTextNode("pos")');
+    expect(clientJs).toContain('document.createTextNode("neg")');
+    expect(clientJs).not.toMatch(/<\s+span\s+>/);
   });
 
-  test.skip("(b) derived-cell ternary markup arms lower (PENDING)", () => {
+  test("(b) derived-cell ternary markup arms lower → real createElement, no dropped arm", () => {
     const src = `<n> = 0
 const <badge> = @n > 0 ? <span>pos</span> : <span>neg</span>
 <div>\${@badge}</div>`;
-    const { errors } = compileToClient(src, "mv-derived");
+    const { errors, clientJs } = compileToClient(src, "mv-derived");
     expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    // The derived cell factory evaluates a ternary of markup-value IIFEs — both arms
+    // present, real DOM-node lowering, no raw `< span >`.
+    expect(clientJs).toContain('createElement("span")');
+    expect(clientJs).toContain('document.createTextNode("pos")');
+    expect(clientJs).toContain('document.createTextNode("neg")');
+    expect(clientJs).not.toMatch(/<\s+span\s+>/);
   });
 });

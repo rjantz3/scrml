@@ -2852,6 +2852,11 @@ function parsePropsBlock(raw, span, errors) {
 export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, counter, errors, blockContext) {
   const nodes = [];
   let i = 0;
+  // markup-value-in-expression-2026-06-17 (a)+(b) — re-entry guard for
+  // parseExprWithMarkupValues. safeParseExprToNode tries the markup-aware path
+  // when markup is present; that path recurses (via safeParseExprToNode on a
+  // placeholder skeleton). This flag suppresses re-entry on the skeleton parse.
+  let _inMarkupValueParse = false;
 
   function peek(n = 0) {
     return i + n < tokens.length ? tokens[i + n] : { kind: "EOF", text: "", span: { start: 0, end: 0, line: 1, col: 1 } };
@@ -2878,6 +2883,20 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    */
   function safeParseExprToNode(expr, startOffset) {
     if (!expr || typeof expr !== "string" || !expr.trim()) return undefined;
+    // markup-value-in-expression-2026-06-17 (a)+(b) — markup-as-value in an
+    // expression. acorn can't parse `<span>`, so a markup-bearing expression
+    // would otherwise become an escape-hatch emitted verbatim (raw `< span >`).
+    // Try the markup-aware path first when markup is present (guarded against
+    // re-entry — parseExprWithMarkupValues recurses on a placeholder skeleton
+    // that contains no markup). On any failure it returns null → plain path.
+    if (!_inMarkupValueParse && /<\s*[A-Za-z_]/.test(expr)) {
+      _inMarkupValueParse = true;
+      let mvNode = null;
+      try { mvNode = parseExprWithMarkupValues(expr, startOffset); }
+      catch (_e) { mvNode = null; }
+      finally { _inMarkupValueParse = false; }
+      if (mvNode) return mvNode;
+    }
     // Phase 4d: when shouldSkipExprParse is true, produce an escape-hatch node
     // so ExprNode fields are always populated when a string expression exists.
     if (shouldSkipExprParse(expr)) {
@@ -2920,6 +2939,176 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // Phase 4d: produce escape-hatch on parse failure instead of undefined
       return { kind: "escape-hatch", span: { file: filePath, start: startOffset ?? 0, end: (startOffset ?? 0) + expr.length, line: 1, col: 1 }, nativeKind: "ParseError", raw: expr };
     }
+  }
+
+  /**
+   * markup-value-in-expression-2026-06-17 (a)+(b) — parse an expression string
+   * that may contain MARKUP in expression position (ternary consequent/alternate,
+   * or any sub-expression) into a structured ExprNode whose markup elements are
+   * `{kind:"markup-value", node:<markupNode>}` leaves (markup-as-first-class-value,
+   * Pillar 1, SPEC §1.4 / §7.4).
+   *
+   * acorn cannot parse `<span>` markup, so a markup-bearing expression otherwise
+   * degrades to an escape-hatch whose `raw` is emitted verbatim (raw `< span >`
+   * → E-CODEGEN-INVALID-JS). This helper:
+   *   1. scans the (tokenizer-spaced) expr for balanced markup element spans,
+   *   2. replaces each span with a placeholder ident `__scrml_mv_N__`,
+   *   3. parses the placeholder SKELETON via safeParseExprToNode (acorn-clean),
+   *   4. recovers each markup span to a real markup node by re-tokenizing
+   *      `lift <span>…` and running parseLogicBody (reusing the canonical
+   *      parseLiftTag machinery — no bespoke spaced-markup parser),
+   *   5. walks the skeleton tree, substituting placeholder idents with
+   *      `markup-value` ExprNodes.
+   *
+   * Returns the substituted ExprNode, or null when no markup is present (caller
+   * falls back to plain safeParseExprToNode).
+   */
+  function parseExprWithMarkupValues(expr, startOffset) {
+    if (!expr || typeof expr !== "string") return null;
+    // Cheap gate: a markup opener in the tokenizer-spaced form is `<` followed
+    // (allowing one optional space) by an identifier-start char. A `<` used as a
+    // less-than operator is followed by a value token / whitespace+value; the
+    // markup case is `< span` / `<span`. Bail fast when there is no such opener.
+    if (!/<\s*[A-Za-z_]/.test(expr)) return null;
+
+    // Balanced markup-span scanner over the spaced expression. Collects each
+    // top-level markup element span [start,end). Nested elements are absorbed
+    // into the enclosing top-level span (parseLogicBody re-parses them).
+    const spans = [];
+    let i2 = 0;
+    let inD = false, inS = false, inT = false;
+    while (i2 < expr.length) {
+      const c = expr[i2];
+      if (inD) { if (c === "\\") { i2 += 2; continue; } if (c === '"') inD = false; i2++; continue; }
+      if (inS) { if (c === "\\") { i2 += 2; continue; } if (c === "'") inS = false; i2++; continue; }
+      if (inT) { if (c === "\\") { i2 += 2; continue; } if (c === "`") inT = false; i2++; continue; }
+      if (c === '"') { inD = true; i2++; continue; }
+      if (c === "'") { inS = true; i2++; continue; }
+      if (c === "`") { inT = true; i2++; continue; }
+      if (c === "<") {
+        // Is this `<` (after optional ws) an identifier-start? → markup opener.
+        let j = i2 + 1;
+        while (j < expr.length && /\s/.test(expr[j])) j++;
+        if (j < expr.length && /[A-Za-z_]/.test(expr[j]) && expr[j] !== "/") {
+          // Scan one balanced top-level markup element.
+          const spanStart = i2;
+          let ad = 0;
+          let k = i2;
+          let kD = false, kS = false, kT = false;
+          while (k < expr.length) {
+            const kc = expr[k];
+            if (kD) { if (kc === "\\") { k += 2; continue; } if (kc === '"') kD = false; k++; continue; }
+            if (kS) { if (kc === "\\") { k += 2; continue; } if (kc === "'") kS = false; k++; continue; }
+            if (kT) { if (kc === "\\") { k += 2; continue; } if (kc === "`") kT = false; k++; continue; }
+            if (kc === '"') { kD = true; k++; continue; }
+            if (kc === "'") { kS = true; k++; continue; }
+            if (kc === "`") { kT = true; k++; continue; }
+            if (kc === "<") {
+              // close `< / X >` (with optional ws)
+              let m = k + 1;
+              while (m < expr.length && /\s/.test(expr[m])) m++;
+              if (expr[m] === "/") {
+                // `< / X >` close OR `< / >` anonymous close
+                ad--;
+                k = m + 1;
+                while (k < expr.length && expr[k] !== ">") k++;
+                if (k < expr.length) k++; // past `>`
+                if (ad === 0) { spans.push([spanStart, k]); break; }
+                continue;
+              }
+              // nested opener / self-close — scan its opener to `>` or `/>`
+              if (/[A-Za-z_]/.test((function(){let n=k+1; while(n<expr.length&&/\s/.test(expr[n]))n++; return expr[n]||"";})())) {
+                let oD = false, oS = false, obd = 0;
+                let n = k + 1;
+                let selfClose = false;
+                while (n < expr.length) {
+                  const nc = expr[n];
+                  if (oD) { if (nc === '"') oD = false; n++; continue; }
+                  if (oS) { if (nc === "'") oS = false; n++; continue; }
+                  if (obd > 0) { if (nc === "{") obd++; else if (nc === "}") obd--; n++; continue; }
+                  if (nc === '"') { oD = true; n++; continue; }
+                  if (nc === "'") { oS = true; n++; continue; }
+                  if (nc === "{") { obd++; n++; continue; }
+                  if (nc === "/" && /\s*>/.test(expr.slice(n + 1, n + 3))) { selfClose = true; while (n < expr.length && expr[n] !== ">") n++; if (n < expr.length) n++; break; }
+                  if (nc === ">") { n++; break; }
+                  n++;
+                }
+                if (!selfClose) ad++;
+                k = n;
+                if (ad === 0 && selfClose) { spans.push([spanStart, k]); break; }
+                continue;
+              }
+              k++;
+              continue;
+            }
+            k++;
+          }
+          // Advance the outer scanner past this element.
+          if (spans.length && spans[spans.length - 1][0] === spanStart) {
+            i2 = spans[spans.length - 1][1];
+            continue;
+          }
+          // Unbalanced — bail to plain parse.
+          return null;
+        }
+      }
+      i2++;
+    }
+    if (spans.length === 0) return null;
+
+    // Build the placeholder skeleton + recover each markup node.
+    let skeleton = "";
+    let last = 0;
+    const markupNodes = [];
+    for (let s = 0; s < spans.length; s++) {
+      const [a, b] = spans[s];
+      skeleton += expr.slice(last, a);
+      const ph = `__scrml_mv_${s}__`;
+      skeleton += ph;
+      last = b;
+      // Recover the markup node by re-tokenizing `lift <markup>` and parsing.
+      const markupSrc = expr.slice(a, b);
+      let mkNode = null;
+      try {
+        const liftToks = tokenizeLogic("lift " + markupSrc, 0, 1, 1, []);
+        const liftNodes = parseLogicBody(liftToks, filePath, [], { type: "logic" }, counter, [], null);
+        const lift = (liftNodes || []).find((n) => n.kind === "lift-expr");
+        if (lift && lift.expr && lift.expr.kind === "markup" && lift.expr.node) {
+          mkNode = lift.expr.node;
+        }
+      } catch (_e) { /* fall through — mkNode stays null */ }
+      if (!mkNode) return null; // couldn't recover — bail to plain parse
+      markupNodes.push(mkNode);
+    }
+    skeleton += expr.slice(last);
+
+    // Parse the placeholder skeleton (acorn-clean — placeholders are plain idents).
+    const skel = safeParseExprToNode(skeleton, startOffset);
+    if (!skel || skel.kind === "escape-hatch") return null;
+
+    // Walk the skeleton tree, substituting placeholder idents with markup-value
+    // leaves. The placeholder name encodes the markupNodes index.
+    const substitute = (n) => {
+      if (!n || typeof n !== "object") return n;
+      if (n.kind === "ident" && typeof n.name === "string") {
+        const m = /^__scrml_mv_(\d+)__$/.exec(n.name);
+        if (m) {
+          const idx = Number(m[1]);
+          return { kind: "markup-value", span: n.span, node: markupNodes[idx] };
+        }
+        return n;
+      }
+      for (const key of Object.keys(n)) {
+        const v = n[key];
+        if (Array.isArray(v)) {
+          for (let q = 0; q < v.length; q++) v[q] = substitute(v[q]);
+        } else if (v && typeof v === "object" && typeof v.kind === "string") {
+          n[key] = substitute(v);
+        }
+      }
+      return n;
+    };
+    return substitute(skel);
   }
 
   /**
@@ -3065,6 +3254,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // mid-expression at depth 0 — false for a ternary consequent `cond ? @cell
     // : alt`. Incremented on a depth-0 `?`, decremented on the matching `:`.
     let ternaryDepth = 0;
+    // markup-value-in-expression-2026-06-17 (b) — markup-as-value in a ternary
+    // ARM. `sawTernaryAtRoot` latches true once a depth-0 `?` opens a ternary in
+    // this RHS. When set, the `markupRootClosed` boundary (the Cluster-C S190
+    // markup-RHS over-consumption break, below) must STAND DOWN: a markup arm
+    // closing (`<span>p</span>`) does NOT complete the RHS value — the `:` and
+    // the alternate arm `<span>n</span>` still follow. Pre-fix, the consequent
+    // arm's close set markupRootClosed → the break fired at the `:` → the
+    // alternate arm was DROPPED → `() => ... > 0 ?)` → E-CODEGEN-INVALID-JS.
+    let sawTernaryAtRoot = false;
 
     const STMT_KEYWORDS = new Set(["lift", "function", "fn", "const", "let", "import", "export", "use", "type", "server", "for", "while", "do", "if", "return", "match", "partial", "switch", "try", "fail", "transaction", "throw", "continue", "break", "when", "given"]);
     const DECL_KEYWORDS = new Set(["const", "let", "type", "function", "fn"]);
@@ -3089,7 +3287,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // skipped; a `;`/`}` would have broken via the existing depth-0 guards. The
       // only thing this break can affect is a genuine markup-value RHS, since
       // `markupRootClosed` is set only after real markup (`markupEverOpened`).
-      if (markupRootClosed && depth === 0) break;
+      // markup-value-in-expression-2026-06-17 (b): when the RHS is a ternary
+      // (sawTernaryAtRoot), a closed markup ARM does NOT complete the value —
+      // the alternate arm still follows. Suppress the markup-RHS-complete break
+      // so the whole `cond ? <markup> : <markup>` ternary survives to codegen.
+      if (markupRootClosed && depth === 0 && !sawTernaryAtRoot) break;
       if (stopAt && tok.text === stopAt && depth === 0) break;
       // BLOCK_REF at depth 0 is a statement boundary — the child block
       // (sql, error-effect, meta) should be its own AST node, not part of a bare-expr.
@@ -3513,7 +3715,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // correct ternary state. `?.`/`??` tokenize as OPERATOR (not PUNCT "?"),
       // so optional-chaining / nullish-coalescing do not perturb the count.
       if (depth === 0 && angleDepth === 0 && tok.kind === "PUNCT") {
-        if (tok.text === "?") ternaryDepth++;
+        if (tok.text === "?") { ternaryDepth++; sawTernaryAtRoot = true; }
         else if (tok.text === ":" && ternaryDepth > 0) ternaryDepth--;
       }
       // Track angle-bracket depth as ELEMENT NESTING (not delimiter nesting).
