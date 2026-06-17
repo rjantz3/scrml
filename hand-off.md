@@ -1,67 +1,50 @@
-# scrml — Session 201 (CLOSE — full wrap)
+# scrml — Session 202 (CLOSE)
 
-**Date:** 2026-06-17 (opened 2026-06-16 as a warm-vPA boot).
-**Previous:** `handOffs/hand-off-205.md` (S200 CLOSE — the second live baton-pass; rotated here at the S201 wrap).
-**Next-session pickup:** rotate THIS file → `handOffs/hand-off-206.md` at next OPEN.
-**Profile:** A — FULL.
-**Repo:** **`scrml`** (the working TS compiler; self-host sibling = `scrml-native`). `origin = git@github.com:bryanmaclee/scrml.git`.
+**Date:** 2026-06-17. **Previous:** `handOffs/hand-off-206.md` (S201 CLOSE). **Next-session pickup:** rotate THIS → `handOffs/hand-off-207.md` at OPEN. **Profile:** A — FULL. **Repo:** `scrml` (working TS compiler; self-host = `scrml-native`).
 
-**Session shape.** This instance booted as the **warm vPA** (off `vpa.md`), absorbed the S199 delta-log through the baton, **took the baton** (became the PA), and ran the **S200 wrap WARM** (the second live baton-pass). It then continued PA-direct: the member-arg fix, then the **2-HIGH pass** the user directed (`g-each-body-bare-variant-arg` + `g-markup-value-ternary-fnreturn-codegen`), and this full wrap. No warm vPA successor exists right now → this is a normal 8-step wrap, not a baton.
+**Session shape.** A long Profile-A session that ran TWO interleaved arcs: (1) a **compiler arc** — closed the lone open HIGH (`g-each-inline-component-prop-member-unsubstituted`), completed the trucking board flagship (`<each>` conversion), built the L1 e2e render-map which surfaced + I fixed **Class A**; (2) a deep **PA↔user design conversation** (format → flograph → dock → e2e → block-lease + vPA-deputy) that produced **4 DDs + 3 adoptions**. Session-open finding: the commit-gate `hooksPath` was orphaned by the S200 rename (every commit ungated S200→S201) — **fixed** (`git config --unset core.hooksPath` → default `.git/hooks`; confirmed firing).
 
 ---
 
 ## Session-close state (verified)
-- **HEAD:** `wrap(s201)` (this wrap commit). Substantive S201 landings (all pushed): member-arg `7d3855a6` · each-inline gap-filing `24cdc4dd` · HIGH#2 each-body-bare-variant `17d2711a` · markup-value form-c `268a27c5` · markup-value codegen `2b4ea4d8` · markup-value render `fa2edccf`.
-- **Sync:** all 3 repos **0/0** (scrml · scrml-support · scrml-native). Clean.
-- **Board:** **HIGH 1 · MED 12 · LOW 20 · Nominal 8** (S200-close was HIGH 2 · MED 12). S201 RESOLVED 2 HIGH (`g-each-body-bare-variant-arg`, `g-markup-value-ternary-fnreturn-codegen`) + the earlier member-arg HIGH; FILED 1 HIGH (`g-each-inline-component-prop-member-unsubstituted`) + 1 MED (`g-inlined-component-root-class-interp-raw`). **Only open HIGH = `g-each-inline-component-prop-member-unsubstituted`** (the board-`<each>` blocker).
-- **Tests:** full suite **24,402 / 0** (1015 files); pre-commit subset **17,137 / 90 / 0** (live `bun scripts/state.ts`). TodoMVC 49/0 (dist rebuilt from the new runtime). within-node 1012/0 (allowlist UNMODIFIED — parser untouched all session).
-- **Maps:** REFRESHED to watermark **`fa2edccf`** (was `b1f5f8bf`) via `project-mapper` incremental — primary/structure/domain, on the 11-file S201 compiler-source surface (markup-value end-to-end + member-arg + bare-variant). (test.map.md body not regenerated — out of routing scope; delta annotated in primary's test row.) Committed explicit-pathspec.
-- **Inbox:** empty. **Worktrees:** main only (all S201 dispatch worktrees 6b-cleaned).
-- **Experts staged** (`~/.claude/agents/`): `xstate-expert` · `elm-architecture-expert` · `threejs-webgl-integration-expert`.
-- **Version:** v0.7.0.
+- **HEAD:** `60d547e1` (Class A) + the S202 wrap commit (this wrap — hand-off/changelog/master-list/maps/state). **Both repos pushed:** scrml `0/0` (origin `60d547e1` + wrap), scrml-support `5c3186a` (design docs + banners).
+- **Board:** **HIGH 0 · MED 14 · LOW 21 · Nominal 8.** S201-close was HIGH 1. S202 resolved 3 (the each-inline HIGH `g-each-inline-component-prop-member-unsubstituted` + case-c MED `g-inlined-component-root-class-interp-raw` via B `d830ec59`; Class A `g-each-over-arm-payload-binding-unbound` via `60d547e1`); FILED 5 (1 HIGH→resolved-same-session + 4 carried: see backlog). **No open HIGH.**
+- **Tests:** full suite green at the wrap push (pre-push gate); pre-commit subset 17,137/90/0. New this session: e2e-render-map suite (7) + detector-validation (3) + Class-A browser regression (10) + each-inline browser regression (10). within-node 1012/0 (board.scrml allowlist re-baselined for the for→each parse-shape; Class A no over-budget).
+- **Maps:** refreshing `fa2edccf`→`60d547e1` (project-mapper incremental, the S202 codegen + the NEW `compiler/tests/e2e-render-map/` capability + `scripts/flograph.ts`). [verify watermark advanced before next session trusts them]
+- **Version:** v0.7.0. **Worktrees:** main only. **Experts staged** (`~/.claude/agents/`): xstate · elm-architecture · threejs-webgl-integration.
 
----
+## What landed S202 (commits, oldest→newest)
+- `b0346f28` **flograph** MVP harness (`scripts/flograph.ts`) — the project-graph: parses `@node`/`@gap` + typed `[[edges]]` over the .md corpus; round-trips 180 @gap exactly.
+- `d830ec59` **B / each-inline CE fix** — CE markup-attr prop substitution; `g-each-inline-component-prop-member-unsubstituted` + `g-inlined-component-root-class-interp-raw` RESOLVED. DD overturned the premise: scrml has NO component-instance model — for-lift INLINES like `<each>` + was silently runtime-broken too.
+- `a0f93c92` **board `<each>` conversion** — Tier-0 for/lift → Tier-1 `<each>` + 3 derived filtered cells; **trucking flagship COMPLETE**.
+- `0a0e0391` **L1 e2e render-map harness** (`compiler/tests/e2e-render-map/`) — compile+happy-dom-mount+D0-D7 smell detectors over the corpus → baseline known-failure map (438 cells); NO error-class suppression; subprocess-isolated; non-gating delta-gate.
+- `42413515` **5 gaps filed** from the render-map triage + §0 regen.
+- `04ad76e3` **filter-refine** — tier-tag corpus apps (flagship 31 / probe 375 / …) so next map's fails-compile noise is attributable (code-only; tier lands in baseline on next full regen).
+- `60d547e1` **Class A** — `<each>` over a match/engine arm payload binding resolves in-scope (`stampArmPayloadEaches` at lift-time; `g-each-over-arm-payload-binding-unbound` RESOLVED). Dog-food: the render-map found it + verified the fix (3 cells flipped green).
 
-## What landed S201 (detail)
+## The 4 DDs (all in `scrml-support/docs/deep-dives/*2026-06-17.md`)
+1. **each-inline-component-architecture** — premise-overturn (no instance model; Approach B near-term, A = long-term gated arc).
+2. **agentic-code-provenance-dock** — **ADOPTED** (user "skip the debate"): the "dock" = inline `#dock` edge-into-the-graph (NOT state); carried-comment containment-keyed anchoring; agent-self-gate enforcement; truth-ceiling stated. The block-ID = the dock anchor = the block-lease unit (thought 1).
+3. **e2e-known-failure-map** — **ADOPTED** (L1 built): known-failure MAP not pass/fail gate; oracle-free smell detectors (L1); baseline + regression-gate-on-delta. L2/L3 oracle fork deferred.
+4. **vpa-deputy-reframe** — **ADOPTED** (decisive): baton RETIRED (saved wall-clock not tokens; relocated the wrap tax). Deputy = persistent, never-authority, NARROW role (projection/maintenance never deliberation = the feasibility property). Honest dilation ~7-10% (volatile half; stable expert reads not digestible), concentrated on the wrap. **Build thin, Function-2 (maintenance) first**; rides flograph/dock.
 
-**1. `g-nested-component-member-arg-misparse` RESOLVED (member-arg leg, `7d3855a6`, PA-direct).** A member-access arg to a NESTED component (`<Badge s=row.name/>`) was space-padded by the logic tokenizer (`row . name`) in component bodies + not collapsed by CE → phantom attr / member-drop. Fix: one general member-access collapse regex in `component-expander.ts` `normalizeComponentBodyRaw` (mirrors the existing call-form + `@.` collapses). Spec: no change (§5.2 sanctions `obj.prop`). **case-c SPLIT** → `g-inlined-component-root-class-interp-raw` (MED).
+## ⏭️ OPEN THREADS / NEXT PRIORITIES (partner-mode, not a checklist)
+1. **vPA-deputy BUILD** — the biggest next arc (changes the PA loop). Thin, Function-2 (the disjoint-surface maintenance: maps/changelog/graphs/state.ts) FIRST; rides the flograph/dock seams (deputy = the natural graph + block-lease owner). The one open sub-fork = the deputy COMMIT MODEL (own-branch-PA-merges vs direct-to-main-pathspec) — PA-direct-first against the coherence-memory record (forge `git-multi-writer-coherence` only if a close call). DD: `vpa-deputy-reframe-2026-06-17.md`.
+2. **flograph / dock / block-lease** — flograph MVP committed scrml-side (the TS harness); the **flogeance-in-scrml product** is the build target; the dock (adopted) thin-build rides the doc-checker first; the block-lease (parallelism — disjoint blocks + git 3-way merge; lease covers the block's BLAST region) is the dock's follow-on.
+3. **e2e render-map** — the L2/L3 oracle fork (deferred until L1 surfaces data); the 125-fails-compile triage (filter now tier-tagged → next full `generate-baseline.js --write` separates flagship-real from probe-noise).
+4. **The triage backlog (filed S202, open):** `g-fullstack-empty-mount-throws` (MED — 17/22/23-app throw at no-data mount), `g-render-nullish-text` (MED — 03-contact-book `undefined`), `g-raw-interp-channel-meta-corners` (MED — bug-3 class still alive in channel/for-lift-outside-logic/meta), `g-mount-hang-rails-dev` (LOW).
+5. **flogeance** — the private repo that HOMES the deputy + flograph + dock + block-lease (user adds the remote; `flogeance/docs/ideas.md` §Settled needs the baton→deputy update — USER's repo).
+6. **Trucking corpus slices 2-5** (S193 carried): decl-coupled validators · `<each>` sweep · errors-as-states · typed props.
 
-**2. `g-each-body-bare-variant-arg` RESOLVED (HIGH #2, `17d2711a`, PA-direct).** A bare `.Variant` call-arg in an `<each>` handler (`onclick=moveTo(card.id, .InProgress)`) emitted raw `.InProgress` → E-CODEGEN-INVALID-JS. Root: `lowerEachExpr` only structured-emitted on §42 predicates, and the event-handler call-ref bypassed it. Fix (`emit-each.ts`): broadened the `lowerEachExpr` guard to detect bare `.Variant` (member-access excluded) + new `serializeCallArgsLowered` for the NON-engine call-ref fallback (engine path keeps the raw callText so `.advance(.X)` detection still fires).
+## Recordkeeping (S202)
+- **DONE:** baton RETIRED banners on `pa-scrml.md` §S199-addendum + `vpa-scrml.md` (superseded by deputy); memory `project_flogeance_vpa_workflow` updated; user-voice S202 appended.
+- **PENDING:** the full deputy-spec authoring (replaces vpa-scrml.md's baton body — next-session, part of the deputy build); `flogeance/docs/ideas.md` §Settled (user's private repo).
 
-**3. `g-markup-value-ternary-fnreturn-codegen` RESOLVED (HIGH #1, codegen `2b4ea4d8` + render `fa2edccf`).** Markup-as-value (Pillar 1) in expression position — now works END-TO-END (all 4 forms render in happy-dom). Two layers:
-   - **Codegen** — markup-in-expression lowers to a real DOM-node value: form (c) `return <markup>` via new `emitMarkupValueExpr` IIFE primitive (`emit-lift.js`); forms (a) inline-ternary + (b) derived-ternary via the parse layers (block-splitter full-RHS scan + ast-builder `sawTernaryAtRoot` guard + `parseExprWithMarkupValues` + new `MarkupValueExpr` ExprNode + emit-expr `case "markup-value"`).
-   - **Render** — the deeper bug a render-level check caught: `${markup}` assigned the node to `el.textContent` → `"[object HTMLSpanElement]"`. **Pre-existing + universal** (even the (d) "control"; markup-as-value had never rendered). Fixed via a node-aware `_scrml_render_value(el,v)` core-chunk runtime helper wired into `emit-event-wiring.ts`; string path observable-identical.
-   - **+ a Bug-57-class tree-shake gap** (`emit-client.ts`): markup-typed-derived cells didn't pull the `derived` chunk → `_scrml_derived_declare` undefined at mount (blocked form-d render). One-line fix.
-   - NEW `compiler/tests/browser/markup-value-render.browser.test.js` (6 render tests) + 7 coupled emit-shape test updates. **`examples/32-markup-as-value` (G6) now UNBLOCKED.**
-
-**Process — 3 dispatches, all recovered (worth reading before the next codegen dispatch):**
-- **Write-revocation mid-dispatch** (1st markup-value agent): it committed + verified form (c), left a/b parse-layers uncommitted+non-compiling. Salvaged (per S83/S89) the a/b work to `docs/changes/markup-value-in-expression-2026-06-17/SALVAGE-form-ab-uncommitted.diff` BEFORE cleanup; file-delta'd form (c).
-- **Re-dispatch** finished a/b codegen (salvage applied clean; caught + fixed a discriminator regression).
-- **Worktree-base-staleness** (render dispatch): the worktree branched from origin/main (the last **PUSHED** HEAD), NOT my local-unpushed codegen commit. Stopped it; re-dispatched with an FF-merge STEP-0 (`git merge --ff-only <local-sha>`). **LESSON (memory updated):** `isolation:worktree` branches from origin/main, not local commits — to give a dispatch a local commit, brief an FF-merge of its SHA, OR push first.
-- **Verify-before-claim earned its keep twice:** caught the render bug (compile≠render — all "compile-verified" markup forms rendered "[object]") AND an over-claim in an agent's own report ("form (b) is clean" — it wasn't). Held the codegen-alone push so origin never carried the silent-wrong intermediate (codegen + render pushed together).
-
----
-
-## ⏭️ OPEN THREADS / NEXT PRIORITIES
-
-1. **The ONE remaining HIGH — `g-each-inline-component-prop-member-unsubstituted`** (the board-`<each>` blocker, filed `24cdc4dd`). The `<each>` path INLINES a cross-file component but doesn't substitute its prop in a nested member-arg (`<LoadStatusBadge status=load.status/>`) → `E-SCOPE-001`. For-lift module-imports the component + works; each inlines + breaks. **Does NOT minimally reproduce** (needs the board's full shape). **DD-worthy design question:** make the `<each>` path module-import components like for-lift (sidesteps the whole inline-prop-substitution class) vs patch the inline substitution. Gates the board `<each>` conversion + the ENTIRE `<each>`-over-component-list corpus pattern.
-2. **Board `<each>` conversion** — authored + REVERTED (correct idiomatic scrml: 3 derived filtered cells + `<each>`/`<empty>`; the conversion is captured in `g-each-inline...`'s repro note). Re-applies trivially once #1 lands. Completes the trucking board flagship.
-3. **`examples/32-markup-as-value` (G6)** — NOW UNBLOCKED (markup-value works end-to-end). The deferred wave-3 teaching example.
-4. **flogeance / MPA** — the vPA workflow → Master PA Orchestrator; 6-DD slate in `flogeance/docs/ideas.md` (LOCAL-ONLY, commit `d846fec`, no remote — user adds it). The PA↔vPA system is LIVE + proven across S199 + S200 baton-passes.
-5. **Trucking corpus rewrite** (S193 "show real scrml"): slices 2–5 — decl-coupled validators · `<each>` sweep · errors-as-states · typed props.
-
-## Carried backlog (lower priority)
-- `g-inlined-component-root-class-interp-raw` (MED, S201) — INLINED component-ROOT class-attr `${…}` interp emits raw (`setAttribute("class","base ${cls(status)}")`; silent-wrong). NOT a board blocker (board badge module-imported). Repro `/tmp/g-nested-arg/v6-classinterp.scrml` (regenerate — /tmp may be cleared). Sibling of the markup-value render fix — likely the same node-aware-display family.
-- `g-colon-shorthand-markup-misparse` (MED, S199) — BS `:`-shorthand-markup mis-parse → misleading `E-STRUCTURAL-ELEMENT-MISPLACED`.
-- Gauntlet measurement; value-native map §59 phase-c build (Nominal); the broader §59/Nominal-spec-ahead slate (8 Nominal entries).
-
----
-
-## The vPA / flogeance workflow — LIVE (orientation for the next vPA)
-The model (`scrml-support/vpa-scrml.md` + `handOffs/delta-log.md` header): the vPA boots ONCE (full PA-style start, overlapped with PA productivity), stays current by absorbing the PA's `delta-log` on poke, and takes the baton when the PA nears wrap. Rolling baton: vPA → PA → (fresh) vPA. **Single-writer:** only the LIVE PA commits/appends-to-delta-log; the vPA is read-only until the baton. The delta-log WINS over this hand-off on conflict. **S201 ran WITHOUT a parallel vPA** (this instance was the PA the whole time, having taken the S200 baton); so this is a normal wrap. If the user boots a fresh vPA next, it absorbs `delta-log` [1]–[20] (incl. the S201 entries [11]–[20]).
+## Meta theme (load-bearing for the next session's framing)
+"**Compiled-green ≠ actually works**" bit THREE times this session (markup-value-never-rendered [S201], the silent for-lift board, raw-`${}`-in-corners). The whole design arc is ONE spine — **route every claim to ground truth; make what's-unverified visible** — across flograph (typed graph + provenance bit), the dock (edge→live-state), the e2e render-map (known-failure map), the verify-before-claim doctrine. The render-map is the verification surface that turns silent bugs into a recorded inventory. The deputy is what dilates the window we spend running all this.
 
 ## pa.md directives in force
-R1–R5 · `---` delimiter · Profile A · S88 isolation-explicit · S99/S126 path-discipline · S112 merge-main · S136 BRIEF.md archival · S138 R26 dual-verify (incl. RENDER-level, not just compile — the markup-value lesson) · S147 coherence · S180 waiting-time 3-tier · S198 wrap-calibration + context-economics + partner-not-list + within-node-allowlist brief-rule · S199 baton-pass · wrap 8-step (6b worktree-clean + 6c maps + 6d state-regen). **Worktree base = origin/main (PUSHED), not local-unpushed-HEAD** — FF-merge a local commit into a dispatch's worktree, or push first (memory `feedback_worktree_base_session_start_staleness`, sharpened S201).
+R1–R5 · `---` delimiter · Profile A · S88 isolation-explicit · S99/S126 path-discipline · S112 merge-main · S136 BRIEF.md archival · S138 R26 dual-verify · S147 coherence (left-right + branch-tip) · S164 background-commit-race (verify HEAD only AFTER the commit notification — fired repeatedly this session) · S180 waiting-time 3-tier · S198 context-economics/partner-not-list/within-node+full-suite · wrap 8-step (6b worktree-clean + 6c maps + 6d state-regen). **Baton RETIRED S202 → deputy reframe** (pa.md S199 addendum bannered).
 
 ## Tags
-#session-201 #close #full-wrap #2-high-pass-done #markup-as-value-resolved #each-body-bare-variant-resolved #member-arg-resolved #board-high-1 #each-inline-blocker-open #flogeance-mpa
+#session-202 #close #profile-a #each-inline-resolved #class-a-resolved #flagship-complete #flograph-built #render-map-built+triaged #dock-adopted #e2e-adopted #deputy-adopted #baton-retired #hook-gate-fixed #4-DDs #board-high-0
