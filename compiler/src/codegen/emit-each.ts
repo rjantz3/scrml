@@ -623,6 +623,50 @@ function lowerEachExpr(text: string, iterVarName: string): string {
  *   - `on:dblclick` → "dblclick" (namespaced §5.2.3 form)
  * Conservative: `on` alone (no event suffix) and `on-...` are not events.
  */
+/**
+ * g-each-inline-component-prop-member-unsubstituted (Approach B, step 2/3).
+ *
+ * Build a JS template literal from a string-literal attr value that may carry
+ * `${expr}` interpolations (`href="/x/${@.id}"`, an inlined component root
+ * `class="pill ${cls(@.status)}"`). The per-item attr path previously emitted the
+ * raw literal via JSON.stringify, so the `${}` shipped UNEVALUATED into the DOM.
+ * Each `${...}` segment's interior is lowered via `lowerEachExpr` (iter-scope
+ * rewrite + §42-predicate / bare-variant lowering); literal text is escaped for
+ * the backtick context. Returns null when the value has no `${}` (caller keeps
+ * the plain JSON.stringify set, byte-identical to pre-fix).
+ */
+function buildEachAttrTemplate(value: string, iterVarName: string): string | null {
+  if (!value.includes("${")) return null;
+  let tpl = "`";
+  let i = 0;
+  const n = value.length;
+  while (i < n) {
+    if (value[i] === "$" && i + 1 < n && value[i + 1] === "{") {
+      // Find the matching `}` (brace-balanced).
+      let depth = 1;
+      let j = i + 2;
+      while (j < n && depth > 0) {
+        const c = value[j];
+        if (c === "{") depth++;
+        else if (c === "}") depth--;
+        if (depth === 0) break;
+        j++;
+      }
+      const inner = value.slice(i + 2, j);
+      tpl += "${" + lowerEachExpr(inner, iterVarName) + "}";
+      i = j + 1;
+    } else {
+      const c = value[i];
+      if (c === "`") tpl += "\\`";
+      else if (c === "\\") tpl += "\\\\";
+      else tpl += c;
+      i++;
+    }
+  }
+  tpl += "`";
+  return tpl;
+}
+
 function eventNameForAttr(aName: string): string | null {
   if (aName.startsWith("on:")) {
     const ev = aName.slice(3);
@@ -787,7 +831,20 @@ function renderTemplateAttrToJs(
 
   // ---- (4) literal string / absent (bareword) attr ------------------------
   if (valKind === "string-literal") {
-    lines.push(`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${JSON.stringify(String(val.value ?? ""))});`);
+    // g-each-inline-component-prop-member-unsubstituted (Approach B, step 2/3):
+    // a string-literal attr value with `${}` interp (`href="/x/${@.id}"`, an
+    // inlined component root `class="pill ${cls(@.status)}"`) must be lowered to a
+    // template literal, not JSON.stringify'd raw. Live-keyed (per-item effect) so
+    // the attr re-evaluates on reconcile, matching the interpolation/text paths.
+    const sv = String(val.value ?? "");
+    const tpl = buildEachAttrTemplate(sv, iterVarName);
+    if (tpl !== null) {
+      for (const _l of maybeWrapEachPerItemEffect(
+        [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${tpl});`], iterVarName, indent,
+      )) lines.push(_l);
+      return;
+    }
+    lines.push(`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${JSON.stringify(sv)});`);
     return;
   }
   if (valKind === "absent" || val == null) {

@@ -1146,6 +1146,29 @@ function applyPropSubstitutions(text: string, props: Map<string, string>): strin
 }
 
 /**
+ * g-each-inline-component-prop-member-unsubstituted (Approach B, step 1).
+ *
+ * Substitute prop references that appear as LEADING identifiers inside the
+ * `${...}` interpolation segments of a string-literal markup-attr value. The
+ * whole-prop-name pass (`applyPropSubstitutions`) only rewrites a bare `${load}`;
+ * this handles `${load.id}` (member-access base) and `${cls(status)}` (call arg)
+ * by applying the same leading-identifier discipline as `substitutePropsInRawExpr`
+ * to each segment's interior text — `load`->`l`, `status`->`load.status`, leaving
+ * `.id` / `.status` tails, sigil members, and longer-identifier substrings alone.
+ *
+ * Literal (non-`${}`) text is left untouched: a class string `"pill rounded"` is
+ * not an expression and must not have a word that happens to match a prop name
+ * rewritten. Only `${...}` interiors are expression context.
+ */
+function substituteInterpSegments(text: string, props: Map<string, string>): string {
+  if (props.size === 0 || !text.includes("${")) return text;
+  return text.replace(/\$\{([^}]*)\}/g, (_match: string, inner: string) => {
+    const subbed = substitutePropsInRawExpr(inner, props);
+    return "${" + subbed + "}";
+  });
+}
+
+/**
  * F-COMPONENT-004: Build a parallel map of prop name → ExprNode form of the prop value.
  *
  * For each caller-side attribute value:
@@ -1912,7 +1935,20 @@ function substituteProps(
       cloned.attrs = (cloned.attrs as AttrNode[]).map((attr: AttrNode) => {
         if (!attr || !attr.value) return attr;
         if (attr.value.kind === "string-literal") {
-          const newVal = applyPropSubstitutions(attr.value.value, props);
+          // First the whole-prop-name `${name}` substitution (string values).
+          let newVal = applyPropSubstitutions(attr.value.value, props);
+          // g-each-inline-component-prop-member-unsubstituted (Approach B, step 1):
+          // a string-literal markup attr may carry `${expr}` interpolations whose
+          // expr references a prop as a member-access BASE (`href="/x/${load.id}"`)
+          // or a call-arg (root `class="pill ${cls(status)}"`). The whole-name pass
+          // above only rewrites a bare `${load}`. Substitute prop refs as LEADING
+          // identifiers INSIDE each `${...}` segment (leaving `.field` tails, sigil
+          // members, and longer-identifier substrings alone — same discipline as
+          // substitutePropsInRawExpr). The for-arg cascade (`load`->`l`, then the
+          // transitive Badge's `status`->`load.status`->`l.status`) flows through
+          // the OUTER-FIRST walkAndExpand order. The raw `${}` still ships literal
+          // out of CE; the loop markup emitters (emit-lift / emit-each) lower it.
+          newVal = substituteInterpSegments(newVal, props);
           if (newVal !== attr.value.value) {
             return { ...attr, value: { ...attr.value, value: newVal } };
           }
@@ -1988,6 +2024,33 @@ function substituteProps(
               return { ...attr, value: { ...varVal, name: raw, exprNode: replaced } };
             }
           }
+          // g-each-inline-component-prop-member-unsubstituted (Approach B, step 1):
+          // a nested-component member-arg `<Badge status=load.status/>` round-trips
+          // as a variable-ref whose `name` is the member-access `load.status` with
+          // NO exprNode. The direct-prop lookup above misses (`load.status` is not a
+          // prop key; `load` is) and there is no exprNode to walk. Parse the member
+          // chain into an ExprNode and run the STRUCTURED substitution: the propExprMap
+          // resolves the leading identifier to the prop's typed value (var prop `load`
+          // -> IdentExpr `l` => `l.status`; string prop `row="x"` -> LitExpr "x" =>
+          // `"x".name`). Only commit when the substitution actually changed the leading
+          // identifier — a plain free identifier (no matching prop) is left untouched.
+          if (substitutePropsInRawExpr(varVal.name, props) !== varVal.name) {
+            try {
+              const parsed = parseExprToNode(varVal.name, filePath ?? "", varVal.span?.start ?? 0);
+              const replaced = substitutePropsInExprNode(parsed, propExprMap, new Set());
+              const raw = emitStringFromTree(replaced);
+              if (raw !== varVal.name) {
+                return { ...attr, value: { kind: "expr", raw, refs: [], exprNode: replaced, span: varVal.span } };
+              }
+            } catch (_e) {
+              // Parse/emit failure — fall back to the leading-identifier raw rewrite
+              // (still better than leaving the prop unsubstituted).
+              const subbed = substitutePropsInRawExpr(varVal.name, props);
+              if (subbed !== varVal.name) {
+                return { ...attr, value: { ...varVal, name: subbed } };
+              }
+            }
+          }
         }
         if (propExprMap && attr.value.kind === "expr") {
           const exprVal = attr.value as { raw: string; refs: string[]; exprNode?: ExprNode; span: ExprSpan };
@@ -1999,6 +2062,22 @@ function substituteProps(
                 raw = emitStringFromTree(replaced);
               } catch (_e) { /* keep original */ }
               return { ...attr, value: { ...exprVal, raw, exprNode: replaced } };
+            }
+          }
+          // g-each-inline-component-prop-member-unsubstituted (Approach B, step 1):
+          // an `expr` markup attr with NO exprNode (`if=(load.weight_lbs is some)`)
+          // is consumed downstream by the loop emitters as RAW text. The raw may
+          // carry §42 predicate keywords (`is some`/`is not`) that are NOT plain JS,
+          // so a structured re-parse is unreliable here — use the leading-identifier
+          // raw rewrite (`load`->`l`, `.field` tails untouched). String-literal props
+          // would substitute a bare name (`row`->`x`); that is the same value the
+          // string-form `props` map carries everywhere and the predicate lowering
+          // downstream consumes it as the member-access base. When an exprNode is
+          // present the structured path above already handled it.
+          if (!exprVal.exprNode && typeof exprVal.raw === "string") {
+            const subbed = substitutePropsInRawExpr(exprVal.raw, props);
+            if (subbed !== exprVal.raw) {
+              return { ...attr, value: { ...exprVal, raw: subbed } };
             }
           }
         }
@@ -2396,8 +2475,15 @@ function expandComponentNode(
   let expanded = substituteProps(defNode, props, propExprMap) as MarkupNode;
 
   // Merge class attribute:
-  // Find the base class on the definition root element
-  const defAttrs: AttrNode[] = defNode.attrs ?? [];
+  // Find the base class on the definition root element.
+  // g-each-inline-component-prop-member-unsubstituted (Approach B, step 3):
+  // read the base class from the POST-substitution `expanded` node, not the raw
+  // `defNode`. The def root class may carry a `${...}` interp that references a
+  // prop (`class="pill ${cls(status)}"`); `substituteProps`/`substituteInterpSegments`
+  // already rewrote that prop on `expanded.attrs` (`status`->`l.status`). Sourcing
+  // from `defNode` here would discard the substitution and ship the raw prop-name
+  // (the `g-inlined-component-root-class-interp-raw` case-c symptom).
+  const defAttrs: AttrNode[] = expanded.attrs ?? defNode.attrs ?? [];
   const baseClassAttr = defAttrs.find((a: AttrNode) => a && a.name === "class");
   const baseClassValue = baseClassAttr && baseClassAttr.value && baseClassAttr.value.kind === "string-literal"
     ? baseClassAttr.value.value
@@ -3583,6 +3669,87 @@ export function runCEFile(
       }
     }
 
+    // STEP 2-A helper-import synthesis, factored so it can run for BOTH the
+    // transitively-reached component's OWN module AND the third-party modules that
+    // module imports its helpers from (g-each-inline: a component `UserBadge`
+    // imported from `components.scrml` calls `badgeColor` which `components.scrml`
+    // imports from `types.scrml` — a TWO-HOP helper the consumer must bind so the
+    // inlined `${badgeColor(role)}` resolves at runtime). Over-inclusion is harmless
+    // (unused `const { x } = _scrml_modules[...]` is free); collisions are guarded by
+    // `alreadyImported`. Returns true when an import was synthesized.
+    const synthHelperImport = (modKey: string): boolean => {
+      if (syntheticHelperImportKeys.has(modKey)) return false;
+      const modExports = exportRegistry.get(modKey);
+      if (!modExports) return false;
+      // The module's NON-component (helper) exports the consumer has NOT yet bound.
+      // Components inline; only helpers need a binding. `alreadyImported` (seeded
+      // from every existing import + each prior synth) guards against collisions.
+      const helperNames = [...modExports.entries()]
+        .filter(([, info]) => !exportIsUserComponent(info))
+        .map(([n]) => n)
+        .filter((n) => !alreadyImported.has(n));
+      if (helperNames.length === 0) return false;
+      for (const n of helperNames) alreadyImported.add(n);
+
+      // When the consumer ALREADY has a DIRECT import node for this module (it
+      // imports, say, only an enum/type from it), AUGMENT that node's specifiers
+      // rather than synthesizing a second `import … from '<same source>'` (which
+      // would emit a duplicate `const { … } = _scrml_modules[key]` destructure).
+      // This is the two-hop helper case: app directly imports `UserRole` from
+      // types.scrml but NOT `badgeColor`; UserBadge (inlined from components.scrml)
+      // calls `badgeColor` → augment app's existing types.scrml import.
+      if (directImportKeys.has(modKey)) {
+        const existing = (ast.imports ?? []).find((imp) => lookupKey(filePath, imp, importGraph) === modKey);
+        if (existing) {
+          const ext = existing as ImportWithSpecifiers;
+          for (const n of helperNames) {
+            if (ext.specifiers) ext.specifiers.push({ imported: n, local: n });
+            else (existing.names ??= []).push(n);
+          }
+          // The codegen importGraph edge for a direct import already carries the
+          // module key; the destructure is regenerated from the (now-augmented)
+          // import node, so no separate graph push is needed.
+          return true;
+        }
+        // No node found despite the direct-key flag — fall through to synthesize.
+      }
+
+      syntheticHelperImportKeys.add(modKey);
+      // A CONSUMER-relative `.scrml` specifier derived from the module's abs path.
+      const relSource = relImportSource(filePath, modKey);
+      const synthSpan = { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+      const synthImport = {
+        kind: "import-decl",
+        raw: `import { ${helperNames.join(", ")} } from '${relSource}'`,
+        names: helperNames,
+        specifiers: helperNames.map((n) => ({ imported: n, local: n })),
+        source: relSource,
+        isDefault: false,
+        span: synthSpan,
+      } as ImportDeclNode;
+      (ast.imports ??= []).push(synthImport);
+      const findImportLogicBody = (nodes: ASTNode[] | undefined): ASTNode[] | null => {
+        for (const nd of nodes ?? []) {
+          if (!nd || typeof nd !== "object") continue;
+          const body = (nd as { body?: ASTNode[] }).body;
+          if ((nd as { kind?: string }).kind === "logic" && Array.isArray(body) &&
+              body.some((b) => b && (b as { kind?: string }).kind === "import-decl")) {
+            return body;
+          }
+          const found = findImportLogicBody((nd as { children?: ASTNode[] }).children);
+          if (found) return found;
+        }
+        return null;
+      };
+      const hostBody = findImportLogicBody(ast.nodes);
+      if (hostBody) hostBody.push(synthImport as unknown as ASTNode);
+      const consumerGraph = importGraph?.get(filePath);
+      if (consumerGraph && Array.isArray(consumerGraph.imports)) {
+        consumerGraph.imports.push({ names: helperNames, source: relSource, absSource: modKey } as (typeof consumerGraph.imports)[number]);
+      }
+      return true;
+    };
+
     while (work.length > 0) {
       const { sourceKey, importedName, localName, rawSource } = work.shift()!;
       const seenKey = `${sourceKey}::${localName}`;
@@ -3666,58 +3833,15 @@ export function runCEFile(
       // BOTH the TS symbol table and the codegen `_scrml_modules[key]` destructure.
       // The transitive module is already loaded at runtime (the directly-imported
       // component's module imports it), so its registry footer exists.
-      if (!directImportKeys.has(sourceKey) && !syntheticHelperImportKeys.has(sourceKey)) {
-        const modExports = exportRegistry.get(sourceKey);
-        if (modExports) {
-          const helperNames = [...modExports.entries()]
-            .filter(([, info]) => !exportIsUserComponent(info))
-            .map(([n]) => n)
-            .filter((n) => !alreadyImported.has(n));
-          if (helperNames.length > 0) {
-            syntheticHelperImportKeys.add(sourceKey);
-            for (const n of helperNames) alreadyImported.add(n);
-            const relSource = relImportSource(filePath, sourceKey);
-            const synthSpan = { file: filePath, start: 0, end: 0, line: 1, col: 1 };
-            const synthImport = {
-              kind: "import-decl",
-              raw: `import { ${helperNames.join(", ")} } from '${relSource}'`,
-              names: helperNames,
-              specifiers: helperNames.map((n) => ({ imported: n, local: n })),
-              source: relSource,
-              isDefault: false,
-              span: synthSpan,
-            } as ImportDeclNode;
-            // (1) collected list — read by CE seed loop + codegen import emission.
-            (ast.imports ??= []).push(synthImport);
-            // (2) node tree — TS's scope walk descends `${...}` logic blocks to
-            //     bind import-decl names; without this the names never enter the
-            //     TS scope chain (TS runs on ast.nodes, not ast.imports). The
-            //     consumer's imports live in a logic block NESTED in the markup
-            //     tree (e.g. `<program>${ import … }</program>`), so recurse.
-            const findImportLogicBody = (nodes: ASTNode[] | undefined): ASTNode[] | null => {
-              for (const nd of nodes ?? []) {
-                if (!nd || typeof nd !== "object") continue;
-                const body = (nd as { body?: ASTNode[] }).body;
-                if ((nd as { kind?: string }).kind === "logic" && Array.isArray(body) &&
-                    body.some((b) => b && (b as { kind?: string }).kind === "import-decl")) {
-                  return body;
-                }
-                const found = findImportLogicBody((nd as { children?: ASTNode[] }).children);
-                if (found) return found;
-              }
-              return null;
-            };
-            const hostBody = findImportLogicBody(ast.nodes);
-            if (hostBody) hostBody.push(synthImport as unknown as ASTNode);
-            // (3) importGraph edge — codegen resolves the module key by matching
-            //     `source` then reading `absSource`.
-            const consumerGraph = importGraph?.get(filePath);
-            if (consumerGraph && Array.isArray(consumerGraph.imports)) {
-              consumerGraph.imports.push({ names: helperNames, source: relSource, absSource: sourceKey } as (typeof consumerGraph.imports)[number]);
-            }
-          }
-        }
-      }
+      // STEP 2-A (g-each-component-body-invalid-js): transitive helper imports.
+      // This component was reached TRANSITIVELY — its module `sourceKey` is not
+      // among the consumer's direct imports — and CE inlines its body here, whose
+      // helper calls (e.g. statusLabel) resolve to `sourceKey`'s NON-component
+      // exports, which the consumer never imported. STEP 1's seed-loop
+      // augmentation only reaches directly-imported modules. Synthesize a consumer
+      // import + matching importGraph edge for those helpers so they resolve in
+      // BOTH the TS symbol table and the codegen `_scrml_modules[key]` destructure.
+      synthHelperImport(sourceKey);
 
       // A6 transitive enrichment: enqueue user-component imports of the
       // target file. The target's own `ast.imports` resolves via
@@ -3733,10 +3857,14 @@ export function runCEFile(
         const tPairs = tImpExt.specifiers
           ? tImpExt.specifiers.map((s) => ({ imported: s.imported, local: s.local || s.imported }))
           : (tImp.names ?? []).map((n: string) => ({ imported: n, local: n }));
+        let tImpHasHelper = false;
         for (const { imported: tImported, local: tLocal } of tPairs) {
           const tInfo = tTargetExports.get(tImported);
           if (!tInfo) continue;
-          if (!exportIsUserComponent(tInfo)) continue;
+          if (!exportIsUserComponent(tInfo)) {
+            tImpHasHelper = true;   // a NON-component import — a transitive helper dep
+            continue;
+          }
           work.push({
             sourceKey: tKey,
             importedName: tImported,
@@ -3744,6 +3872,17 @@ export function runCEFile(
             rawSource: tImp.source as string,
           });
         }
+        // g-each-inline (two-hop helper): the inlined component's body may CALL a
+        // helper its OWN module imports from a third file (`components.scrml`
+        // imports `badgeColor` from `types.scrml`, UserBadge's body calls it). That
+        // helper-source module (`tKey`) is neither a direct consumer import nor a
+        // component on the work-queue, so the single-hop synth above never reaches
+        // it → the inlined `${badgeColor(role)}` ships an unbound call. Synthesize a
+        // consumer import for `tKey`'s helpers when this module brings a helper into
+        // the inlined component's scope. (Previously masked: the root markup-attr
+        // `${}` interp shipped RAW and never evaluated; the loop-emitter ${} lowering
+        // now evaluates it, so the binding must exist.)
+        if (tImpHasHelper) synthHelperImport(tKey);
       }
     }
   }

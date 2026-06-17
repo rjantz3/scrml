@@ -1079,7 +1079,39 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
     if (!val || val.kind === "absent") {
       lines.push(`${elVar}.setAttribute(${JSON.stringify(name)}, "");`);
     } else if (val.kind === "string-literal") {
-      lines.push(`${elVar}.setAttribute(${JSON.stringify(name)}, ${JSON.stringify(val.value)});`);
+      // g-each-inline-component-prop-member-unsubstituted (Approach B, step 2/3):
+      // a string-literal markup attr may carry `${expr}` interpolations
+      // (`href="/x/${l.id}"`, an inlined component root `class="pill ${cls(l.status)}"`).
+      // The AST-attrs path previously emitted the raw literal via JSON.stringify, so
+      // the `${}` shipped UNEVALUATED. Lower it the same way the attrs-string path
+      // (emitSetAttrs) and the text path (emitSetContent) do: build a template
+      // literal with each `${...}` segment routed through emitExprField, then set
+      // the attribute. Inside a reconciled per-item factory, drive it from a live-
+      // keyed effect so the attr re-evaluates on reconcile / in-place mutation
+      // (matching the interpolated-text path). No-`${}` literals stay the plain
+      // JSON.stringify set (byte-identical to pre-fix).
+      const sv = String(val.value ?? "");
+      if (sv.includes("${") || /\$\s*\{/.test(sv)) {
+        const parts = [];
+        parseLiftContentParts(sv, parts);
+        let tpl = "`";
+        for (const pt of parts) {
+          if (pt.type === "expr") {
+            tpl += "${" + emitExprField(null, rewriteRenderCall(pt.value), { mode: "client" }) + "}";
+          } else {
+            tpl += pt.value.replace(/`/g, "\\`").replace(/\$\{/g, "\\${");
+          }
+        }
+        tpl += "`";
+        const _setStmt = `${elVar}.setAttribute(${JSON.stringify(name)}, ${tpl});`;
+        if (currentLiftReconcileCtx()) {
+          for (const _l of maybeWrapLiftPerItemEffect([_setStmt])) lines.push(_l);
+        } else {
+          lines.push(_setStmt);
+        }
+      } else {
+        lines.push(`${elVar}.setAttribute(${JSON.stringify(name)}, ${JSON.stringify(val.value)});`);
+      }
     } else if (val.kind === "variable-ref") {
       // Bug 65 (S157) — a bare `@engineVar` reference is NOT an engine transition
       // (no `.advance` / no assign); it stays a plain handler ref. Engine

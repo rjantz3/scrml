@@ -101,8 +101,17 @@ describe("known-gaps-#6 §3 — exporter footer assertion", () => {
 describe("known-gaps-#6 §4 — importer read assertion", () => {
   test("app.client.js reads its cross-file imports from _scrml_modules (not a raw import)", () => {
     const c = compileMultifile();
+    // The destructure reads from `_scrml_modules` (not a raw ESM import). It binds
+    // at least `UserRole`; S201 (g-each-inline two-hop helper-hoist) AUGMENTS this
+    // same `types.client.js` destructure with `badgeColor` — the helper UserBadge's
+    // inlined body calls (`${badgeColor(role)}`), which the loop-emitter ${} lowering
+    // now evaluates — so the binding allows additional names beyond `UserRole`.
     expect(c.app.clientJs).toMatch(
-      /const \{ UserRole \} = _scrml_modules\["types\.client\.js"\];/,
+      /const \{[^}]*\bUserRole\b[^}]*\} = _scrml_modules\["types\.client\.js"\];/,
+    );
+    // The two-hop helper IS bound on that destructure (not left unbound).
+    expect(c.app.clientJs).toMatch(
+      /const \{[^}]*\bbadgeColor\b[^}]*\} = _scrml_modules\["types\.client\.js"\];/,
     );
     expect(c.app.clientJs).toMatch(
       /const \{ UserBadge \} = _scrml_modules\["components\.client\.js"\];/,

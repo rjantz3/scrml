@@ -87,6 +87,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `caa8f77b` — wrap(s201): close — the 2-HIGH pass DONE (each-body-bare-variant + markup-value end-to-end) + member-arg; board HIGH 1 — **pushed**
 - `535de409` — wrap(s200) 6c: maps refresh 76d03aa9->b1f5f8bf + delta-log [10] (S200 wrap complete) — **pushed**
 - `b727c24a` — wrap(s199): E-leg server-auth engine + HOS showcase + gap-184 §11.1 + flogeance/vPA workflow [FIRST live baton-pass] — **pushed**
 - `13c3c978` — wrap(s198): close — trucking 1a/1b + engine-hydration F-primitive landed; E-leg designed-not-built; vPA workflow open; context-economics locked in — **pushed**
@@ -94,7 +95,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `441e1645` — wrap(s196): render-expression `<render of=X/>` built + corpus wave 2 + 4 prereq bugs + §51.0.S fix — **pushed**
 - `8e5cab33` — wrap(s195) 6c: maps refresh a78272e5→4646ec13 (primary/structure/error/test) — **pushed**
 - `cd822f7a` — wrap(s194): §52/MMORPG design layer complete — G1 + §52↔§38 P1 bridge + Tier-1 read-authority + 3 ratifications (persist=C/WF · server-push=P1 · engine=2C) — **pushed**
-- `46377508` — wrap(s193): Flux v1 built+pushed + MMORPG reframe + 2 deep-dives + G1 HIGH filed — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core

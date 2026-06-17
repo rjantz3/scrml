@@ -19,6 +19,15 @@
  *
  * Scope: component-body-only — a top-level `${for…lift}` nested-component arg
  * was never affected (it doesn't go through the component-body re-tokenization).
+ *
+ * S201 follow-on (g-each-inline-component-prop-member-unsubstituted, Approach B):
+ * CE now also SUBSTITUTES the component's own prop when it is the leading
+ * identifier of a member-access arg — `<Badge s=row.name/>` where the caller
+ * passed `row=@val` becomes `s=@val.name` (the member-access TAIL is preserved;
+ * the BASE is substituted to the caller value). The S200 regression these tests
+ * guard is the TAIL preservation (the `.name`/`.inner.name`/`.status` survives,
+ * not stranded as a phantom attr); they pass a VARIABLE prop so the substituted
+ * base (`@val`) is recognizable end-to-end.
  */
 import { describe, test, expect } from "bun:test";
 import { splitBlocks } from "../../src/block-splitter.js";
@@ -32,45 +41,54 @@ function runCEOn(source) {
 }
 
 describe("g-nested-component-member-arg-misparse (S200)", () => {
-  test("single member-access arg to a nested component — no E-COMPONENT-011, member preserved", () => {
+  test("single member-access arg to a nested component — no E-COMPONENT-011, member tail preserved + base substituted", () => {
     const source = `<program>
 \${ const Badge = <span props={ s: string } data-s="\${s}"/> }
 \${ const Card = <div props={ row: string }><Badge s=row.name/></div> }
-<Card row="x"/>
+<Card row=@val/>
 </program>`;
     const { ast, errors } = runCEOn(source);
-    // Regression: the `.name` was stranded as a phantom bare attr → E-COMPONENT-011.
+    // Regression (S200): the `.name` was stranded as a phantom bare attr → E-COMPONENT-011.
     const e011 = errors.filter(e => e.code === "E-COMPONENT-011");
     expect(e011).toHaveLength(0);
-    // Member preserved end-to-end (not dropped to bare `row`).
-    expect(JSON.stringify(ast)).toContain("row.name");
+    // S201: the member-access BASE prop `row` is substituted to the caller value
+    // `@val`; the `.name` TAIL is preserved (not stranded, not dropped).
+    const j = JSON.stringify(ast);
+    expect(j).toContain("@val.name");
+    expect(j).not.toContain("row.name");
   });
 
-  test("chained member-access arg (row.inner.name) — no E-COMPONENT-011, chain preserved", () => {
+  test("chained member-access arg (row.inner.name) — no E-COMPONENT-011, chain tail preserved + base substituted", () => {
     const source = `<program>
 \${ const Badge = <span props={ s: string } data-s="\${s}"/> }
 \${ const Card = <div props={ row: string }><Badge s=row.inner.name/></div> }
-<Card row="x"/>
+<Card row=@val/>
 </program>`;
     const { ast, errors } = runCEOn(source);
     const e011 = errors.filter(e => e.code === "E-COMPONENT-011");
     expect(e011).toHaveLength(0);
-    expect(JSON.stringify(ast)).toContain("row.inner.name");
+    // S201: base `row` -> `@val`; the full `.inner.name` chain tail survives.
+    const j = JSON.stringify(ast);
+    expect(j).toContain("@val.inner.name");
+    expect(j).not.toContain("row.inner.name");
   });
 
-  test("member-arg whose stranded segment matches a declared prop — no silent member-drop", () => {
+  test("member-arg whose stranded segment matches a declared prop — no silent member-drop, base substituted", () => {
     // The case-b shape: `status=load.status`. Pre-fix the `.status` stranded as a
     // phantom bare `status` (a DECLARED prop → no E-011) and the value dropped to
-    // bare `load`. Post-fix the value is the full `load.status`.
+    // bare `load`. Post-S200 the member-access is preserved; post-S201 the BASE
+    // prop `load` is also substituted to the caller value (`@row`).
     const source = `<program>
 \${ const Badge = <span props={ status: string } data-st="\${status}"/> }
 \${ const Card = <div props={ load: string }><Badge status=load.status/></div> }
-<Card load="x"/>
+<Card load=@row/>
 </program>`;
     const { ast, errors } = runCEOn(source);
     const e011 = errors.filter(e => e.code === "E-COMPONENT-011");
     expect(e011).toHaveLength(0);
-    // member NOT dropped — the full `load.status` survives (not bare `load`).
-    expect(JSON.stringify(ast)).toContain("load.status");
+    // member NOT dropped + base substituted — `@row.status` (not bare `load` / `load.status`).
+    const j = JSON.stringify(ast);
+    expect(j).toContain("@row.status");
+    expect(j).not.toContain("load.status");
   });
 });
