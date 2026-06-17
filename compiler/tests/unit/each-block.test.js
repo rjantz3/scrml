@@ -761,3 +761,51 @@ function clk(i) {
     expect(clientJs).toContain('.setAttribute("data-i", String(_scrml_each_item));');
   });
 });
+
+// ---------------------------------------------------------------------------
+// g-each-body-bare-variant-arg (S201) — a bare `.Variant` enum literal as an
+// event-handler call-ARG in an <each> per-item body must lower to its frozen
+// string (the Tier-0/static/<match> lowering, previously MISSING in emit-each.ts
+// → raw `.InProgress` leaked → E-CODEGEN-INVALID-JS).
+// ---------------------------------------------------------------------------
+describe("g-each-body-bare-variant-arg — bare .Variant call-arg lowering", () => {
+  test("bare .Variant call-arg lowers to its frozen string (non-engine handler)", () => {
+    const src = `type Status:enum = { Todo, InProgress, Done }
+type Card:struct = { id: int, status: Status }
+<cards>: Card[] = []
+\${ function moveTo(id: int, s: Status) { } }
+<ul>
+    <each in=@cards as card>
+        <li><button onclick=moveTo(card.id, .InProgress)>Start</button></li>
+    </each>
+</ul>`;
+    const { errors, clientJs } = compileToOutputs(src, "ebv-bare");
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    // The bare-variant is lowered to its frozen string, not left raw.
+    expect(clientJs).toContain('"InProgress"');
+    expect(clientJs).not.toMatch(/moveTo_\d+\([^)]*\.InProgress/);
+  });
+
+  test("engine .advance(.X) in an each body still lowers via the engine path (regression)", () => {
+    const src = `type Phase:enum = { Idle, Active, Done }
+type Card:struct = { id: int }
+<cards>: Card[] = []
+<engine for=Phase initial=.Idle>
+    <Idle rule=.Active>idle</>
+    <Active rule=.Done>active</>
+    <Done>done</>
+</engine>
+<ul>
+    <each in=@cards as card>
+        <li><button onclick=@phase.advance(.Active)>Go</button></li>
+    </each>
+</ul>`;
+    const { errors, clientJs } = compileToOutputs(src, "ebv-engine");
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-JS")).toHaveLength(0);
+    // The engine transition routes through the canonical engine machinery — NOT
+    // the bare-variant string-lowering fallback (the engine path keeps the raw
+    // callText so `.advance(.X)` variant detection still fires).
+    expect(clientJs).toContain('_scrml_engine_advance("phase", "Active"');
+    expect(clientJs).not.toContain('advance("Active")');
+  });
+});

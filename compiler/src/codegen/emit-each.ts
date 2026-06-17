@@ -593,7 +593,14 @@ function rewriteIterScopeOnly(text: string, iterVarName: string): string {
  */
 function lowerEachExpr(text: string, iterVarName: string): string {
   const preRewritten = rewriteIterValueExpr(text, iterVarName);
-  if (!/\bis\s+(?:some|not|given)\b|(?:^|[^.\w@])not\s/.test(preRewritten)) return preRewritten;
+  // Route through the structured emitter when the text carries a §42 absence
+  // predicate (`is some`/`is not`/`is given`/`not`) OR a bare `.Variant` enum
+  // literal (leading-dot + uppercase, NOT preceded by an ident-char/`)`/`]`/`.`
+  // so member access `card.id` / method-chain `foo().Bar` / `obj.Foo` are
+  // EXCLUDED) — g-each-body-bare-variant-arg (S201): emit-expr.ts:295 lowers
+  // `.InProgress` → its frozen string `"InProgress"`; the text path does not,
+  // so a bare-variant leaked raw into the each-render-fn → E-CODEGEN-INVALID-JS.
+  if (!/\bis\s+(?:some|not|given)\b|(?:^|[^.\w@])not\s|(?:^|[^.\w$)\]])\.[A-Z]/.test(preRewritten)) return preRewritten;
   try {
     const { parseExprToNode } = require("../expression-parser.ts") as {
       parseExprToNode: (raw: string, filePath: string, offset: number) => unknown;
@@ -705,9 +712,14 @@ function renderTemplateAttrToJs(
       // existing plain-call emission stands (no regression to `onclick=fn(@.id)`).
       const callText = `${fnName}(${serializeCallArgs(val, iterVarName)})`;
       const engineLowered = engineCtx ? emitEngineHandlerBody(callText, engineCtx) : null;
+      // NON-engine fallback: lower the args through the STRUCTURED emitter so a
+      // bare `.Variant` call-arg (`moveTo(card.id, .InProgress)`) becomes its
+      // frozen string — g-each-body-bare-variant-arg (S201). The engine path
+      // above keeps the RAW serializeCallArgs callText so emitEngineHandlerBody
+      // still sees the intact `.X` for `.advance(.X)` variant detection.
       handlerBody = engineLowered !== null
         ? `${engineLowered};`
-        : `${fnName}(${serializeCallArgs(val, iterVarName)});`;
+        : `${fnName}(${serializeCallArgsLowered(val, iterVarName)});`;
     } else if (valKind === "expr") {
       // `${...}` form — could be an arrow/lambda or a call/assign expression.
       // Bug 62 (S156) — engine direct-write `${@phase = .Active}` (AssignExpr) and
@@ -797,6 +809,26 @@ function serializeCallArgs(callRef: any, iterVarName: string): string {
   const args: any[] = Array.isArray(callRef?.args) ? callRef.args : [];
   return args
     .map((a) => rewriteIterValueExpr(String(a ?? ""), iterVarName))
+    .join(", ");
+}
+
+/**
+ * g-each-body-bare-variant-arg (S201) — like serializeCallArgs, but routes each
+ * RAW arg through lowerEachExpr so a bare `.Variant` enum literal
+ * (`moveTo(id, .InProgress)`) lowers to its frozen string (`"InProgress"`) via
+ * the structured emitter (emit-expr.ts:295) — the each-render-fn analog of the
+ * Tier-0 / static-markup / `<match>`-arm bare-variant lowering, which the plain
+ * serializeCallArgs (iter-scope text-rewrite only) omitted, leaking raw `.X`
+ * into the handler → E-CODEGEN-INVALID-JS. Per-arg (the fn name is never routed
+ * through emit-expr, so no double-encoding). Used ONLY in the NON-engine
+ * call-ref handler fallback; the engine path keeps the raw serializeCallArgs
+ * callText so `.advance(.X)` variant detection (emitEngineHandlerBody) still
+ * sees the intact bare-variant.
+ */
+function serializeCallArgsLowered(callRef: any, iterVarName: string): string {
+  const args: any[] = Array.isArray(callRef?.args) ? callRef.args : [];
+  return args
+    .map((a) => lowerEachExpr(String(a ?? ""), iterVarName))
     .join(", ");
 }
 
