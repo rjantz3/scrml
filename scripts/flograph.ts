@@ -39,9 +39,9 @@ const SUPPORT = `${ROOT}/../scrml-support`;
 // "scrml first" (S202 ruling): default = scrml's OWN durable docs only. The scrml-support design
 // corpus (design-insights + deep-dives) is OPT-IN via --with-support (it adds ~230 doc-nodes of
 // noise that drowns scrml's own graph). --corpus a,b,c overrides entirely.
-function defaultCorpus(): string[] {
+export function defaultCorpus(withSupport = process.argv.includes("--with-support")): string[] {
   const files: string[] = [`${ROOT}/docs/known-gaps.md`, `${ROOT}/master-list.md`];
-  if (process.argv.includes("--with-support")) {
+  if (withSupport) {
     const insights = `${SUPPORT}/design-insights.md`;
     if (existsSync(insights)) files.push(insights);
     const ddDir = `${SUPPORT}/docs/deep-dives`;
@@ -51,11 +51,11 @@ function defaultCorpus(): string[] {
 }
 
 const EDGE_TYPES = new Set(["blocks", "supersedes", "decided-by", "cites"]);
-const LOAD_BEARING = new Set(["resolved", "current"]); // statuses whose claims should be ground-truthed
-const SUPERSEDED = new Set(["superseded", "partially-superseded"]); // write-once-tier stale statuses (spec §2.1)
+export const LOAD_BEARING = new Set(["resolved", "current"]); // statuses whose claims should be ground-truthed
+export const SUPERSEDED = new Set(["superseded", "partially-superseded"]); // write-once-tier stale statuses (spec §2.1)
 
-type Node = { id: string; kind: string; status: string; sev: string | null; file: string; line: number };
-type Edge = { from: string; type: string; target: string; verified: boolean; file: string; line: number };
+export type Node = { id: string; kind: string; status: string; sev: string | null; file: string; line: number };
+export type Edge = { from: string; type: string; target: string; verified: boolean; file: string; line: number };
 
 // ── Parse ────────────────────────────────────────────────────────────────────
 const GAP_RE = /<!--\s*@gap\s+id=(\S+)\s+sev=(HIGH|MED|LOW|NOMINAL)\s+status=(\S+)\s*-->/;
@@ -146,7 +146,7 @@ function parseFile(file: string, nodes: Map<string, Node>, dupes: string[], edge
   }
 }
 
-function build(corpus: string[]) {
+export function build(corpus: string[]) {
   const nodes = new Map<string, Node>();
   const dupes: string[] = [];
   const edges: Edge[] = [];
@@ -313,28 +313,32 @@ function check(corpus: string[]): number {
   return errors ? 1 : 0;
 }
 
-function rel(abs: string): string { return abs.startsWith(ROOT + "/") ? abs.slice(ROOT.length + 1) : abs.replace(SUPPORT + "/", "../scrml-support/"); }
+export function rel(abs: string): string { return abs.startsWith(ROOT + "/") ? abs.slice(ROOT.length + 1) : abs.replace(SUPPORT + "/", "../scrml-support/"); }
 
-// ── main ──────────────────────────────────────────────────────────────────
-const args = process.argv.slice(2);
-const cIdx = args.indexOf("--corpus");
-const corpus = cIdx >= 0 ? args[cIdx + 1].split(",").map(p => p.startsWith("/") ? p : `${ROOT}/${p}`) : defaultCorpus();
-const expandedCorpus = corpus.flatMap(p => p.includes("*") ? globSync(p) : [p]).filter(existsSync);
-
-function globSync(pat: string): string[] {
+export function globSync(pat: string): string[] {
   const dir = pat.slice(0, pat.lastIndexOf("/"));
   const re = new RegExp("^" + pat.slice(pat.lastIndexOf("/") + 1).replace(/[.]/g, "\\.").replace(/\*/g, ".*") + "$");
   return existsSync(dir) ? readdirSync(dir).filter(f => re.test(f)).map(f => `${dir}/${f}`) : [];
 }
 
-const fIdx = args.indexOf("--filter");
-const filter = parseFilter(fIdx >= 0 ? args[fIdx + 1] : undefined);
-const focIdx = args.indexOf("--focus");
-const focus = focIdx >= 0 ? args[focIdx + 1] : null;
-const depIdx = args.indexOf("--depth");
-const depth = depIdx >= 0 ? (parseInt(args[depIdx + 1], 10) || 1) : 1;
+// ── main (guarded so dock.ts can `import { build, defaultCorpus } from "./flograph"` without
+//    triggering this dispatch — S205 dock-thin-build refactor) ───────────────────────────────
+// #dock[ cites=agentic-code-provenance-dock-2026-06-17 ]
+if (import.meta.main) {
+  const args = process.argv.slice(2);
+  const cIdx = args.indexOf("--corpus");
+  const corpus = cIdx >= 0 ? args[cIdx + 1].split(",").map(p => p.startsWith("/") ? p : `${ROOT}/${p}`) : defaultCorpus();
+  const expandedCorpus = corpus.flatMap(p => p.includes("*") ? globSync(p) : [p]).filter(existsSync);
 
-if (args.includes("--emit")) process.exit(emit(expandedCorpus));
-else if (args.includes("--check")) process.exit(check(expandedCorpus));
-else if (args.includes("--mmd")) process.exit(mmdMode(expandedCorpus, filter, focus, depth));
-else report(expandedCorpus);
+  const fIdx = args.indexOf("--filter");
+  const filter = parseFilter(fIdx >= 0 ? args[fIdx + 1] : undefined);
+  const focIdx = args.indexOf("--focus");
+  const focus = focIdx >= 0 ? args[focIdx + 1] : null;
+  const depIdx = args.indexOf("--depth");
+  const depth = depIdx >= 0 ? (parseInt(args[depIdx + 1], 10) || 1) : 1;
+
+  if (args.includes("--emit")) process.exit(emit(expandedCorpus));
+  else if (args.includes("--check")) process.exit(check(expandedCorpus));
+  else if (args.includes("--mmd")) process.exit(mmdMode(expandedCorpus, filter, focus, depth));
+  else report(expandedCorpus);
+}

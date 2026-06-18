@@ -1,4 +1,5 @@
 // scripts/state.ts — DD3 Fork 3A/3B/4. change-id: dd3-state-self-evidence-2026-06-07
+// #dock[ implements=project-state-self-evidence-2026-06-07 · verified ]
 //
 // THREE MODES (single source of truth = the @gap tokens + git/fs; derive-don't-declare):
 //   `bun scripts/state.ts`         PRINT  — read-only "state at HEAD" report to stdout (Fork 3A).
