@@ -9,10 +9,10 @@ partition); the deputy maintains it on the `deputy-maint` branch. The PA reads i
 
 ## Deputy status
 
-- **State:** LIVE — steady-state (S204). First deputy instance, booted S203. On tick 10.
+- **State:** LIVE — steady-state (S204). First deputy instance, booted S203. On tick 11.
 - **Self-poke loop:** `/loop 30m` — cron job `39fed15c`, `7,37 * * * *`. CronDelete `39fed15c` to cancel.
-- **Last-absorbed delta seq:** S204 **[5]** (`scrml/handOffs/delta-log.md` — absorbed [S199 1] … [S204 5]).
-- **`deputy-maint` branch:** worktree `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint`. Base rebased onto main `5295a61c` (tick 10). **Tip:** `git rev-parse deputy-maint` (tick-10 commits: digest + this).
+- **Last-absorbed delta seq:** S204 **[6]** (`scrml/handOffs/delta-log.md` — absorbed [S199 1] … [S204 6]).
+- **`deputy-maint` branch:** worktree `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint`. Base rebased onto main `d9fee6d8` (tick 11). **Tip:** `git rev-parse deputy-maint` (tick-11 commits: digest + this).
 - **Owed maintenance:** **MAPS REFRESH owed** (deferred — see below). Digest/recent-sessions/gap-counts current.
 
 ## ⚠ OWED: maps refresh (DEFERRED) + a mechanism gap for the PA
@@ -24,6 +24,8 @@ The #3 landing `a6405053` touched `compiler/src/ast-builder.js` (the `E-CONTROL-
 
 **MECHANISM GAP → route to the PA (deliberation-shaped, NOT a deputy call):** the contract says "deputy owns `.claude/maps/*` via project-mapper incremental" but doesn't specify HOW the deputy runs project-mapper safely from its worktree. **Proposed mechanism for the PA to bless:** dispatch project-mapper with the Bash CWD set to `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint` + a strict worktree-only-path brief + a post-dispatch `git -C <main> status` clean-verify (the same path-discipline the PA uses for its own agent dispatches; the S100 hook Write/Edit-protects map writes, but has a Bash blind-spot). Until blessed: the PA does maps at wrap-6c.
 
+**ESCALATED (S204 [6] measurement):** F2-maps value is currently UNREALIZED because of this deferral, and the PA's planned clean-cycle RE-MEASURE requires it resolved (deputy-DONE wrap incl. maps) + merge-before-push (for F1, which realized 0 this session — digest booted STALE). Deputy can proceed on a PA go/no-go: dispatch project-mapper CWD=deputy-maint worktree + worktree-only brief + post-dispatch main-clean verify. Not done unilaterally (prior-tick routing to PA stands).
+
 ## PA-side learning from S204 [1] (route to PA)
 
 [1] (cold S204 boot) reports the fresh PA's step-0 digest read **STALE → authoritative fallback** — because the S203 wrap was **PUSHED before deputy-maint was merged** (tick 7 flagged this). So origin carried the old digest; the deputy's current one didn't reach the fresh PA in time → thin-start benefit LOST for that boot. **Suggest the PA-side contract enforce "merge deputy-maint BEFORE pushing the wrap"** so the current digest reaches origin. (The freshness guard worked — no harm, just lost dilation.)
@@ -34,13 +36,13 @@ The #3 landing `a6405053` touched `compiler/src/ast-builder.js` (the `E-CONTROL-
 
 ## Tick log (compressed)
 
-T1 boot [1-5]; T2 [6-7] F1 LIVE; T3 [8-9] source-freshness+GO-LIVE; T4 [10] rebase; T5 [11-13]; **T6-T7 reboot-gap** (wrap #3-in-flight → bridged: digest current at wrap HEAD, watched af88c53a); **T8 gap-CLOSED** (fresh PA S204 merged deputy-maint + re-attached #3); **T9** absorbed S204 [1-3] (#3 LANDED a6405053); digest regen; maps owed→deferred. **T10** [4-5] flograph corpus-annotation slices (dog-food, docs/tooling); digest regen; maps STILL owed/deferred (no PA mechanism-ruling yet).
+T1 boot [1-5]; T2 [6-7] F1 LIVE; T3 [8-9] source-freshness+GO-LIVE; T4 [10] rebase; T5 [11-13]; **T6-T7 reboot-gap** (wrap #3-in-flight → bridged: digest current at wrap HEAD, watched af88c53a); **T8 gap-CLOSED** (fresh PA S204 merged deputy-maint + re-attached #3); **T9** absorbed S204 [1-3] (#3 LANDED a6405053); digest regen; maps owed→deferred. **T10** [4-5] flograph corpus-annotation slices (dog-food, docs/tooling); digest regen; maps STILL owed/deferred (no PA mechanism-ruling yet). **T11** [6] DEPUTY-DILATION measured ~1.5%/1M (~3% eff), not 7-10% (frame-conflation corrected; deputy net-positive); digest regen; maps still owed (escalated).
 
 ## Currency snapshot (@ tick 9)
 
 - **Board:** HIGH 0 · MED 12 · LOW 23 · Nominal 8 (g-raw-interp resolved via #3; PA regen'd §0).
 - **maps:** watermark `60d547e1` — **STALE / OWED** (ast-builder.js #3 landing). Deferred (see above).
-- **digest:** current (head `5e326e3e`, delta-seq 5).
+- **digest:** current (head `bcfeeac0`, delta-seq 6).
 - **recent-sessions / gap-counts:** PASS.
 - **flograph:** `--mmd`/`--filter`/`--focus` [S203 14]; round-trip intact.
 
