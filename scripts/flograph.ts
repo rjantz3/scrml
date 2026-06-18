@@ -1,11 +1,11 @@
-// scripts/flograph.ts — flogeance Project-Graph MVP (validation harness; runs against scrml's corpus).
+// scripts/flograph.ts — flogence Project-Graph MVP (validation harness; runs against scrml's corpus).
 //
-// Spec: scrml-support/docs/flogeance-graph-mvp-spec-2026-06-17.md
+// Spec: scrml-support/docs/flogence-graph-mvp-spec-2026-06-17.md
 // House style mirrors scripts/state.ts + scripts/regen-spec-index.ts (plain bun-run TS, readFileSync,
 // regex token parse, deterministic output, no timestamps so --check is stable).
 //
 // THIS IS A THROWAWAY VALIDATION HARNESS for the typed-edge + provenance VOCABULARY, run against
-// scrml's own durable corpus (the richest project-graph test bed). The product is flogeance-in-scrml;
+// scrml's own durable corpus (the richest project-graph test bed). The product is flogence-in-scrml;
 // this proves the vocabulary cheaply first (see spec §6).
 //
 // MODES:

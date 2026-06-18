@@ -33,7 +33,7 @@ the `pa-scrml.md` §"S199 addendum — vPA deputy (PA side)" + `handOffs/delta-l
 `handOffs/deputy-state.md`). The directives live in `scrml-support` because they are *not*
 language/compiler content — they are about how the user, the PA, and the deputy interact
 to build the language (scrml is public/MIT; this three-party exchange is the wrong audience
-for the public repo). The generalized, productized form is **flogeance** (a private repo,
+for the public repo). The generalized, productized form is **flogence** (a private repo,
 itself built in scrml); `vpa-scrml.md` migrates there when it exists.
 
 > **Note (S203):** the deputy REPLACES the retired S199 baton model (the vPA *becoming* the

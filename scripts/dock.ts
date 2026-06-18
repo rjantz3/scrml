@@ -1,11 +1,11 @@
-// scripts/dock.ts — flogeance agentic CODE-PROVENANCE DOCK checker (thin slice; RIDES flograph).
+// scripts/dock.ts — flogence agentic CODE-PROVENANCE DOCK checker (thin slice; RIDES flograph).
 //
 // Design: scrml-support/docs/deep-dives/agentic-code-provenance-dock-2026-06-17.md (ADOPTED S202).
 // Companion: scripts/flograph.ts (the doc-side checker this docks INTO — we resolve dock edges against
 // its @node graph, exactly as flograph resolves [[edges]] against @node tokens).
 //
 // THROWAWAY VALIDATION HARNESS for the #dock token + edge-resolution VOCABULARY, run against scrml's OWN
-// code (the richest live code-graph test bed). The product is the dock built in flogeance-in-scrml; this
+// code (the richest live code-graph test bed). The product is the dock built in flogence-in-scrml; this
 // proves the vocabulary cheaply first — same "scrml-first" play as flograph (DD frontmatter: "build the
 // thin version riding the doc-side checker (flograph)").
 //
@@ -187,7 +187,7 @@ function check(corpus: string[]): number {
 //   inv3 boundary coherence: a #dock with NO definition within [dockLine, dockLine+2] is ORPHANED. → WARN.
 // Deliberately scopes to the SUBSTANTIVE definition forms (not every `<x>=0` state cell — that is part of
 // its enclosing unit, and the `chore` escape covers genuinely-reasonless code). Thin regex extraction —
-// no scrml-parser integration (stays a harness; flogeance-in-scrml uses the real parser later).
+// no scrml-parser integration (stays a harness; flogence-in-scrml uses the real parser later).
 const SCRML_DEFS: { kind: string; re: RegExp }[] = [
   { kind: "engine",    re: /<engine\b[^>]*?\b(?:for|var)=\.?(\w+)/ },
   { kind: "channel",   re: /<channel\b[^>]*?\bname=["']?(\w+)/ },
@@ -253,7 +253,7 @@ function coverageMode(corpus: string[]): number {
 
 // ── Block-scope (S206 — block-lease interim; DD block-lease-parallelism-2026-06-18 §1/§5/§7) ─────────────
 // The interim that makes "parallel dispatches on the SAME file" safe WITHOUT the lease registry / anchoring-
-// proof / blast-region those need (deferred to flogeance-in-scrml). Two thin modes on the units the coverage
+// proof / blast-region those need (deferred to flogence-in-scrml). Two thin modes on the units the coverage
 // walker already finds:
 //   --units <file>                         enumerate leasable BLOCKS with extents → the PA allocates disjoint
 //                                          sets at dispatch time ("cherry-picking with a plan", §5).

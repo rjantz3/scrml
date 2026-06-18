@@ -55,7 +55,7 @@ all (the `bubbleClasses [191..301]`-swallows-the-render-body case). Combined sta
 
 - **Named-def parallelism:** blocks identifiable (a `--units`), anchor proven + drop-caught (b1) →
   the prove-anchoring gate is GREEN. block-lease-for-code is no longer blocked on *anchoring* — only
-  on the *build* (lease registry + lifecycle + blast-region), which is flogeance-in-scrml work.
+  on the *build* (lease registry + lifecycle + blast-region), which is flogence-in-scrml work.
 - **Render-markup parallelism:** still unanchored → **(b2): the markup-subtree anchor** (element-keyed
   ID) is where the remaining anchoring risk is concentrated, and where the markup-heavy flagship corpus
   (trucking) actually needs it.
