@@ -1,9 +1,9 @@
-<!-- @digest head=492b4bb9 delta-seq=10 -->
+<!-- @digest head=ccd3c511 delta-seq=10 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `492b4bb9`** + delta-log **[10]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `492b4bb9`
+> **HEAD `ccd3c511`** + delta-log **[10]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `ccd3c511`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,7 +13,7 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `492b4bb9`
+## Board — from `@gap` tokens @ `ccd3c511`
 - **HIGH 0** · MED 10 · LOW 23 · Nominal 8
 - Named open HIGHs: _none_
 
@@ -29,7 +29,7 @@
 - `[10]` state · WIRED the deputy flograph/dock GUARDRAIL checks (user "wire the deputy checks") — the "start benefiting from flograph NOW" lever (turns the built harnesses into… → vpa-scrml.md §3c · (vpa: NEW standing tick-step — re-read vpa-scrml.md §"Steady state" 3c; and THIS tick run `bun scripts/flograph.ts --check --with-support --with-archive` + `bun scripts/dock.ts --check` + `bun scripts/dock.ts --coverage`, record a health-snapshot line in deputy-state.md, route only NEW actionable findings to the PA per 3c)
 
 ## State
-- Version: 0.7.0 · maps: 30 commits behind HEAD (watermark cc765a5a, HEAD 492b4bb9)
+- Version: 0.7.0 · maps: 1 commits behind HEAD (watermark 492b4bb9, HEAD ccd3c511)
 - Recent wraps:
   - e723de04 chore(s204): wrap-finalize — recent-sessions + digest regen at settled HEAD d64d4519
   - 69172d25 wrap(s203): close — vPA-deputy LIVE (F1/F2/F3 + self-poke loop) + e2e backlog triaged + flograph filter; #3 fix left in-flight (first F3 reboot-bridge use)

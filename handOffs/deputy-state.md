@@ -9,11 +9,11 @@ partition); the deputy maintains it on the `deputy-maint` branch. The PA reads i
 
 ## Deputy status
 
-- **State:** LIVE — steady-state (S205 active, PA in a multi-agent dispatch burst). First deputy instance, booted S203. On tick 32.
+- **State:** LIVE — steady-state (S205 active, PA in a multi-agent dispatch burst). First deputy instance, booted S203. On tick 33.
 - **Self-poke loop:** `/loop 30m` — cron job `39fed15c`, `7,37 * * * *`. CronDelete `39fed15c` to cancel.
 - **Last-absorbed delta seq:** S205 **[10]** (the S205 landings aren't logged as delta entries past [10]).
 - **`deputy-maint` branch:** worktree `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint`, descends main (PA integrates via the pre-push merge gate). **Tip:** `git rev-parse deputy-maint`.
-- **Owed maintenance:** **maps REFRESHED this tick** (`cc765a5a`→`492b4bb9`, the 3-change batch). A **2nd maps batch** is now owed (slice2 .scrml + engine-autodecl compiler/src, both in flight) → batch for when those land. Else current.
+- **Owed maintenance:** **maps REFRESHED this tick** (`cc765a5a`→`492b4bb9`, the 3-change batch). maps refresh `ccd3c511` PENDING PA integration (clean FF). **2nd maps batch** owed (slice2 + engine-autodecl + block-splitter in flight) → batch on their landings.
 
 ## Standing facts (durable)
 
@@ -30,8 +30,9 @@ partition); the deputy maintains it on the `deputy-maint` branch. The PA reads i
 ## In-flight dispatches (F3 watch list — PA alive, tracking only, no `(deputy)` entries)
 
 - **LANDED (in the T32 maps batch; worktrees 6b-cleanup PA-pending):** `a3a475168766ceba8` trucking slice-3 (`f4fae410`) · `a634857265ed2b578` g-match-alternation (`9a7bc3a5`).
-- **`aeca43607dd011a51`** — trucking **slice-2** (login.scrml Shape-2 compound `<loginForm>` + §5). @ tick 32: WIP + dirty → in-flight. `.scrml` corpus → 2nd maps batch.
-- **`af5ed82479580631c`** — **engine-autodecl** (auto-declare engine state). @ tick 32: WIP start → in-flight, early. Likely compiler/src → 2nd maps batch.
+- **`aeca43607dd011a51`** — trucking **slice-2** (advanced to customer/quote 10-field `<quoteForm>`). @ tick 33: WIP + dirty → in-flight. `.scrml` corpus → 2nd batch.
+- **`ab4fe40551c515110`** — **block-splitter angleDepth** (`:`-shorthand fix). @ tick 33: `708b07bc` WIP + dirty → in-flight (NEW). compiler/src → 2nd batch.
+- **`af5ed82479580631c`** — **engine-autodecl** (auto-declare engine state). @ tick 33: `ca43c723` flipping g-engine-autodecl-bare-variant-write gap, clean → **near-complete**. compiler/src → 2nd batch.
 
 ## Tick log (compressed)
 
@@ -40,12 +41,13 @@ partition); the deputy maintains it on the `deputy-maint` branch. The PA reads i
 - **T15** S205 [1-6] — gate RATIFIED + F1 realized ~8.3k + dock built. **T16-25** PA idle (10 no-ops).
 - **T26** S205 [7-9] (corpus deref + flograph --with-archive + harness capstone; gate fired). **T27** S205 [10] — §3c guardrail wired. **T28** no-op. **T29-31** trucking burst: slice-3 + g-match dispatched→complete→LANDED (f4fae410/9a7bc3a5); maps batched.
 - **T32** maps REFRESHED cc765a5a→492b4bb9 (3-change batch: emit + slice-3 + g-match; leak-verified clean); 2 NEW agents dispatched (slice2 + engine-autodecl) → 2nd batch owed; digest regen; §3c green.
+- **T33** maps `ccd3c511` pending integration; digest regen (my maps commit staled it); 5 agents (2 landed + 3 in-flight: slice2/block-splitter/engine-autodecl) → 2nd batch held; §3c unchanged.
 
 ## Currency snapshot (@ tick 32)
 
 - **Board:** HIGH 0 · gap-counts + recent-sessions PASS (PA regen'd §0 across the S205 landings).
 - **maps:** watermark **`492b4bb9`** (REFRESHED T32) — current for the 3-change batch; 2nd batch (slice2/engine-autodecl) pending their landing.
-- **digest:** current (head `492b4bb9`, delta-seq S205 [10]).
+- **digest:** current (head `ccd3c511`, delta-seq S205 [10]).
 - **flograph/dock:** §3c PASS (snapshot above).
 
 ## Function 3 — agent monitoring (LIVE)
