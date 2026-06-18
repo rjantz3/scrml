@@ -52,6 +52,7 @@ function defaultCorpus(): string[] {
 
 const EDGE_TYPES = new Set(["blocks", "supersedes", "decided-by", "cites"]);
 const LOAD_BEARING = new Set(["resolved", "current"]); // statuses whose claims should be ground-truthed
+const SUPERSEDED = new Set(["superseded", "partially-superseded"]); // write-once-tier stale statuses (spec §2.1)
 
 type Node = { id: string; kind: string; status: string; sev: string | null; file: string; line: number };
 type Edge = { from: string; type: string; target: string; verified: boolean; file: string; line: number };
@@ -71,12 +72,30 @@ function stem(file: string): string {
   return file.split("/").pop()!.replace(/\.md$/, "");
 }
 
+// Read the write-once-tier YAML frontmatter (spec §2.1): a doc's `status:` drives node currency, and
+// `superseded-by:` is the authored INVERSE of a supersedes edge (the corpus records it on the OLD doc) —
+// so we synthesize the supersedes edge FROM the named successor automatically. Zero manual annotation.
+function parseFrontmatter(lines: string[]): { status: string | null; supersededBy: string | null } {
+  if ((lines[0] ?? "").trim() !== "---") return { status: null, supersededBy: null };
+  let status: string | null = null, supersededBy: string | null = null;
+  for (let i = 1; i < lines.length && i < 60; i++) {
+    if (lines[i].trim() === "---") break;
+    const s = lines[i].match(/^status:\s*(\S+)/); if (s && !status) status = s[1];
+    // first `<stem>.md` in the value (handles path-prefixed, multi-target `A + B`, and prose forms)
+    const sb = lines[i].match(/^superseded-by:.*?([A-Za-z0-9._-]+)\.md/); if (sb && !supersededBy) supersededBy = sb[1];
+  }
+  return { status, supersededBy };
+}
+
 function parseFile(file: string, nodes: Map<string, Node>, dupes: string[], edges: Edge[]) {
   const text = readFileSync(file, "utf8");
   const lines = text.split("\n");
-  // Every file is implicitly a node (id = stem, kind=doc) so file-level links have a home.
-  const fileNode: Node = { id: stem(file), kind: "doc", status: "current", sev: null, file, line: 1 };
+  // Every file is implicitly a node (id = stem, kind=doc); its currency is the frontmatter `status:` (§2.1).
+  const fm = parseFrontmatter(lines);
+  const fileNode: Node = { id: stem(file), kind: "doc", status: fm.status ?? "current", sev: null, file, line: 1 };
   if (!nodes.has(fileNode.id)) nodes.set(fileNode.id, fileNode);
+  // `superseded-by:` → a synthesized supersedes edge FROM the successor TO this (now-stale) doc.
+  if (fm.supersededBy) edges.push({ from: fm.supersededBy, type: "supersedes", target: fileNode.id, verified: false, file, line: 1 });
   let current = fileNode.id;
   let inFence = false;
 
@@ -241,6 +260,11 @@ function report(corpus: string[]) {
 
   const sweep = edges.filter(e => (e.type === "decided-by" || e.type === "cites") && !e.verified && LOAD_BEARING.has(nodes.get(e.from)?.status ?? ""));
   console.log(`  provenance sweep: ${sweep.length} load-bearing decided-by/cites edge(s) NOT verified (assert→verify candidates)`);
+
+  const superseded = [...nodes.values()].filter(n => SUPERSEDED.has(n.status));
+  console.log(`  superseded nodes: ${superseded.length} (write-once-tier docs marked stale via frontmatter)`);
+  const currency = edges.filter(e => e.type !== "supersedes" && SUPERSEDED.has(nodes.get(e.target)?.status ?? "") && !SUPERSEDED.has(nodes.get(e.from)?.status ?? "current"));
+  console.log(`  currency sweep: ${currency.length} edge(s) from a LIVE node into a SUPERSEDED node (references-stale-truth candidates)`);
   if (dupes.length) console.log(`  DUPLICATE node ids: ${dupes.length}`);
 }
 
@@ -280,7 +304,12 @@ function check(corpus: string[]): number {
   for (const e of sweep.slice(0, 12)) console.log(`  INFO   ${e.from} [[${e.type}: ${e.target}]] is asserted, not verified (${rel(e.file)}:${e.line})`);
   if (sweep.length > 12) console.log(`  INFO   … +${sweep.length - 12} more assert→verify candidates`);
 
-  console.log(`  ${errors ? "FAIL" : "PASS"} — ${dupes.length} dup · ${dangling.length} dangling(warn) · ${sweep.length} unverified(info) · ${errors} error(s)`);
+  // 5. currency sweep → INFO (a LIVE node references a SUPERSEDED node = citing stale truth; the ouroboros catch)
+  const currency = edges.filter(e => e.type !== "supersedes" && SUPERSEDED.has(nodes.get(e.target)?.status ?? "") && !SUPERSEDED.has(nodes.get(e.from)?.status ?? "current"));
+  for (const e of currency.slice(0, 12)) console.log(`  INFO   ${e.from} [[${e.type === "relates" ? "" : e.type + ": "}${e.target}]] references SUPERSEDED ${e.target} (${rel(e.file)}:${e.line})`);
+  if (currency.length > 12) console.log(`  INFO   … +${currency.length - 12} more references-stale-truth`);
+
+  console.log(`  ${errors ? "FAIL" : "PASS"} — ${dupes.length} dup · ${dangling.length} dangling(warn) · ${sweep.length} unverified · ${currency.length} stale-ref (info) · ${errors} error(s)`);
   return errors ? 1 : 0;
 }
 
