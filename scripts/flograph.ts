@@ -27,6 +27,8 @@
 //                [[<target>]]          untyped "relates"
 //                [[<type>: <target> verified]]  + the single provenance bit (on decided-by|cites)
 //   attribution: an edge belongs to the nearest-preceding @node in document order; else the file-node.
+//   examples   : edge syntax inside a code fence OR an inline-code span (`[[...]]`) is NOT parsed —
+//                a real edge is BARE [[type: target]]; backtick-wrapped is a syntax-reference.
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "fs";
 
@@ -103,9 +105,13 @@ function parseFile(file: string, nodes: Map<string, Node>, dupes: string[], edge
       continue;
     }
 
-    // edges — skip inside code fences (reduces false positives from code samples)
+    // edges — skip inside code fences AND inline-code spans, so edge syntax DISCUSSED as an
+    // example (e.g. `[[decided-by: X]]` in a DD that is ABOUT the graph) is not parsed as a real
+    // edge. CONVENTION: a real edge is BARE `[[type: target]]`; backtick-wrapped / fenced is a
+    // syntax-reference, not an assertion. (Mirrors the existing scrml-support [[links]] style.)
     if (inFence) continue;
-    for (const lm of line.matchAll(LINK_RE)) {
+    const scanLine = line.replace(/`[^`]*`/g, "");
+    for (const lm of scanLine.matchAll(LINK_RE)) {
       const inner = lm[1].trim();
       const colon = inner.indexOf(":");
       if (colon > 0 && EDGE_TYPES.has(inner.slice(0, colon).trim())) {
