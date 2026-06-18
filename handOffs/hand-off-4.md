@@ -54,7 +54,7 @@ A previous Opus agent attempted to delete Pass 2 and regressed 3 e2e scenarios p
 
 ## Headline wins this session
 
-1. **Committed to structured expression AST migration.** No more string-scan hacks for semantic passes. The decision artifact: `scrml-support/docs/deep-dives/expression-ast-phase-0-design-2026-04-11.md` (2028 lines, 10 OQs all decided).
+1. **Committed to structured expression AST migration.** No more string-scan hacks for semantic passes. The decision artifact: `../../scrml-support/archive/deep-dives/expression-ast-phase-0-design-2026-04-11.md` (2028 lines, 10 OQs all decided).
 2. **Phase 1 + 1.5 merged.** ExprNode discriminated union, ESTree converter, idempotency invariant, parallel fields populated by parser. Zero regressions. 84 new unit tests, 13 new integration tests.
 3. **Phase 2 Slice 1 merged.** `lin` is now a KEYWORD, parser emits `lin-decl` nodes, codegen emits `const x = ...` (was previously dropped silently). 13 new integration tests for lin-decl emission.
 4. **§35.2.1 lin-params work end-to-end.** Slice 2's e2e test scenario 5 proves it. This was the original motivation for the entire migration — Batch B (S3) added the parser support but the body-reference path was broken; Slice 2's ExprNode walker closes the loop.
@@ -140,7 +140,7 @@ Integration baseline already includes the 9 lin-enforcement-e2e scenarios from S
 - [master-list.md](./master-list.md) — current inventory + structured expression AST migration entry under P5
 - [handOffs/hand-off-3.md](./handOffs/hand-off-3.md) — S3 final
 - [scrml-support/docs/deep-dives/lin-enforcement-ast-wiring-2026-04-11.md](../scrml-support/docs/deep-dives/lin-enforcement-ast-wiring-2026-04-11.md) — root-cause discovery
-- [scrml-support/docs/deep-dives/expression-ast-phase-0-design-2026-04-11.md](../scrml-support/docs/deep-dives/expression-ast-phase-0-design-2026-04-11.md) — the migration design (2028 lines)
+- [../../scrml-support/archive/deep-dives/expression-ast-phase-0-design-2026-04-11.md](../../scrml-support/archive/deep-dives/expression-ast-phase-0-design-2026-04-11.md) — the migration design (2028 lines)
 - [docs/changes/lin-batch-c-step1/anomaly-report.md](./docs/changes/lin-batch-c-step1/anomaly-report.md) — the anomaly that started the chain
 - [docs/changes/expr-ast-phase-1/anomaly-report.md](./docs/changes/expr-ast-phase-1/anomaly-report.md) — Phase 1 land
 - [docs/changes/expr-ast-phase-1-audit/anomaly-report.md](./docs/changes/expr-ast-phase-1-audit/anomaly-report.md) — Phase 1.5 idempotency fix

@@ -113,7 +113,7 @@ All briefs at `scrmlTS/docs/changes/v0next-spec-impact/`.
 
 | Commit | File(s) | Action |
 |---|---|---|
-| `31e3785` | `user-voice-scrmlTS.md`, `docs/deep-dives/v0next-s56-deliberation-outcomes-2026-05-04.md`, `docs/deep-dives/v0next-spec-impact-stub-2026-05-04.md` | Initial S56 cross-repo commit — outcomes ledger L1-L20 with full §3.x detail, user-voice S56 entries (pillar revelation + L11-L20 dispositions + context-budget directive), spec-impact stub pointing to scrmlTS canonical |
+| `31e3785` | `user-voice-scrmlTS.md`, `docs/deep-dives/v0next-s56-deliberation-outcomes-2026-05-04.md`, `../../scrml-support/archive/deep-dives/v0next-spec-impact-stub-2026-05-04.md` | Initial S56 cross-repo commit — outcomes ledger L1-L20 with full §3.x detail, user-voice S56 entries (pillar revelation + L11-L20 dispositions + context-budget directive), spec-impact stub pointing to scrmlTS canonical |
 | `bf6473d` | `docs/deep-dives/v0next-s56-deliberation-outcomes-2026-05-04.md` | Outcomes ledger §3.14 (L15) extended to all-scope |
 | `2791701` | `docs/deep-dives/v0next-s56-deliberation-outcomes-2026-05-04.md` | Outcomes ledger §3.14 const-immutability semantics formalized + open Q on `E-DERIVED-VALUE-MUTATE` queued |
 
@@ -206,7 +206,7 @@ All briefs at `scrmlTS/docs/changes/v0next-spec-impact/`.
 - **S55 close (deliberation arc complete):** `handOffs/hand-off-56.md`
 - **S56 outcomes ledger (L1-L20 detail):** `scrml-support/docs/deep-dives/v0next-s56-deliberation-outcomes-2026-05-04.md`
 - **S55 outcomes ledger (M1-M21 detail):** `scrml-support/docs/deep-dives/v0next-s55-deliberation-outcomes-2026-05-04.md`
-- **S54 synthesis:** `scrml-support/docs/deep-dives/state-as-primitive-redesign-synthesis-2026-05-03.md`
+- **S54 synthesis:** `../../scrml-support/archive/deep-dives/state-as-primitive-redesign-synthesis-2026-05-03.md`
 - **Kickstarter v2 (locked anchor doc):** `docs/articles/llm-kickstarter-v2-2026-05-04.md`
 - **Stage 0a impact assessment:** `docs/changes/v0next-spec-impact/IMPACT-ASSESSMENT.md`
 - **Stage 0b dispatch briefs:** `docs/changes/v0next-spec-impact/DISPATCH-{1,2,3,4}-BRIEF-*.md`

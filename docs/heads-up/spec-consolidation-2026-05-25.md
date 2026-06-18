@@ -261,7 +261,7 @@ Beyond the §34 catalog row, F-003 (a) requires compiler-source cleanup at 8 sit
 
 ### Open from HU-2 lifecycle thread (carry to HU-3)
 
-- **state-dynamics-design DD extension question** (DD at `scrml-support/docs/deep-dives/state-dynamics-design-2026-04-08.md` — `status: active` since 2026-04-08). The DD asks "should `(A to B)` lifecycle annotations extend beyond struct fields to enum-state-cells, or do engines/Tier-2 subsume that use case?" Lifecycle annotation is foundational; the extension question is "did we accidentally narrow scrml's type-system in ratification?" PA recommends: read the DD in full + the debate sibling DD before HU-3 ratifies.
+- **state-dynamics-design DD extension question** (DD at `../../../scrml-support/archive/deep-dives/state-dynamics-design-2026-04-08.md` — `status: active` since 2026-04-08). The DD asks "should `(A to B)` lifecycle annotations extend beyond struct fields to enum-state-cells, or do engines/Tier-2 subsume that use case?" Lifecycle annotation is foundational; the extension question is "did we accidentally narrow scrml's type-system in ratification?" PA recommends: read the DD in full + the debate sibling DD before HU-3 ratifies.
 
 ## HU-2 (continued) — Q5 closure: V-kill cluster ratified
 
@@ -559,7 +559,7 @@ S131 lockdown wave 3.5. After PA research surfaced concrete findings on `~snapsh
 
 **User direction:** `a` (PA-recommended).
 
-**Decision:** The state-dynamics-design DD (`scrml-support/docs/deep-dives/state-dynamics-design-2026-04-08.md`, 544L, `status: active`) is in fact CLOSED end-to-end — all 6 open Qs have been answered by subsequent ratifications between S57 and S130. Mark `status: superseded` with `superseded-by:` references + one-line closure addendum per Q.
+**Decision:** The state-dynamics-design DD (`../../../scrml-support/archive/deep-dives/state-dynamics-design-2026-04-08.md`, 544L, `status: active`) is in fact CLOSED end-to-end — all 6 open Qs have been answered by subsequent ratifications between S57 and S130. Mark `status: superseded` with `superseded-by:` references + one-line closure addendum per Q.
 
 **The 6 closures:**
 | DD Open Q | Answered by |

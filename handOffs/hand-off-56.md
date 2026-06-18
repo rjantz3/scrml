@@ -32,7 +32,7 @@ The session opened by recovering from an S54 interrupt, then pivoted from the di
 
 ## 1. The 21 architectural moves (full catalog)
 
-This catalog is the load-bearing artifact of S55 plus carry-forward from S54. Cross-reference: synthesis (`scrml-support/docs/deep-dives/state-as-primitive-redesign-synthesis-2026-05-03.md`) for S54 conversation context; outcomes ledger (`scrml-support/docs/deep-dives/v0next-s55-deliberation-outcomes-2026-05-04.md`) for the formal decisions. Detail in user-voice-scrmlTS.md S55 entry.
+This catalog is the load-bearing artifact of S55 plus carry-forward from S54. Cross-reference: synthesis (`../../scrml-support/archive/deep-dives/state-as-primitive-redesign-synthesis-2026-05-03.md`) for S54 conversation context; outcomes ledger (`scrml-support/docs/deep-dives/v0next-s55-deliberation-outcomes-2026-05-04.md`) for the formal decisions. Detail in user-voice-scrmlTS.md S55 entry.
 
 | # | Move | Status | Origin | Notes |
 |---|---|---|---|---|
@@ -261,7 +261,7 @@ This is months of work. The S54 "no holds barred" framing enables it. **NOT carr
 
 ## 9. Cross-references
 
-- **Synthesis (S54 conversation capture):** `scrml-support/docs/deep-dives/state-as-primitive-redesign-synthesis-2026-05-03.md` (1,064 lines)
+- **Synthesis (S54 conversation capture):** `../../scrml-support/archive/deep-dives/state-as-primitive-redesign-synthesis-2026-05-03.md` (1,064 lines)
 - **S55 outcomes ledger (decisions):** `scrml-support/docs/deep-dives/v0next-s55-deliberation-outcomes-2026-05-04.md` (NEW)
 - **Mario design artifact (S55 early-session, NOW SUPERSEDED in parts):** `scrml-support/docs/deep-dives/v0next-mario-design-2026-05-04.scrml` (header notes mark 11 superseded constructs)
 - **DD5 debate (still relevant; framing needs amendment):** `scrml-support/docs/debates/debate-01-dd5-at-var-survival-2026-05-03.md`

@@ -39,7 +39,7 @@ Single-thread session focused on the Phase A10 unblock thread. **Phase A10 engin
 
 **Plus 2 scrml-support commits:**
 15. `[support]` debounce/throttle re-deliberation deep-dive landed at `scrml-support/docs/deep-dives/debounce-and-timing-2026-05-10.md` (Approach C/B comparison; Approach B ratified post-PA review)
-16. `[support]` old `scrml-support/docs/deep-dives/debounce-and-timing.md` (2026-03-28) frontmatter flipped to `status: superseded` with forward pointer
+16. `[support]` old `../../scrml-support/archive/deep-dives/debounce-and-timing.md` (2026-03-28) frontmatter flipped to `status: superseded` with forward pointer
 
 **Total: 16 commits / +90 pass / -6 fail (closed) / 0 regressions.**
 
@@ -132,7 +132,7 @@ Awaiting user direction. Carrying the S77-close menu forward:
 
 ### Debounce/throttle re-deliberation — RATIFIED Approach B (clean cut)
 - Refresh dive at `scrml-support/docs/deep-dives/debounce-and-timing-2026-05-10.md` (676 lines, post-S55 framing).
-- Old dive at `scrml-support/docs/deep-dives/debounce-and-timing.md` marked `status: superseded` with forward pointer.
+- Old dive at `../../scrml-support/archive/deep-dives/debounce-and-timing.md` marked `status: superseded` with forward pointer.
 - **Verdict: Approach B (DD5 attribute-form `<name debounced=Nms> = expr` as canonical; retire `@debounced(N)` keyword form entirely; no deprecation cycle since no real adopters per S30 pivot).**
 - Cost estimate: ~12-21h across SPEC + parser + codegen + AST kind retirement + test refactor + sample updates. Not dispatched yet.
 - 9 OQ follow-ups identified in the dive's §7 (all bounded, none blockers).

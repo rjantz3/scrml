@@ -20325,7 +20325,7 @@ The original OQ framed a binary — explicit `<program spa>` marker vs pure file
 
 ### 40.9 Closure Analysis (Minimal Playable Surface)
 
-**Added:** 2026-05-12 (v0.3 Approach A spec-amendment target). Direction RATIFIED via Insight 29 (`scrml-support/design-insights.md` line 1827; 5-voice debate verdict 2026-05-11) underwritten by the S84 empirical static-resolvability diagnostic (`scrml-support/docs/diagnostics/reactive-graph-static-resolvability-S84.md` — 99-100% gate PASS across 501 reactive-graph reads/writes / 33 files). Source dive: `scrml-support/docs/deep-dives/smart-app-splitting-feel-of-performance-2026-04-26.md` (Components 1-5 in §"The 'Minimal Playable Surface' Formalization" are the load-bearing normative source).
+**Added:** 2026-05-12 (v0.3 Approach A spec-amendment target). Direction RATIFIED via Insight 29 (`scrml-support/design-insights.md` line 1827; 5-voice debate verdict 2026-05-11) underwritten by the S84 empirical static-resolvability diagnostic (`scrml-support/docs/diagnostics/reactive-graph-static-resolvability-S84.md` — 99-100% gate PASS across 501 reactive-graph reads/writes / 33 files). Source dive: `../../scrml-support/archive/deep-dives/smart-app-splitting-feel-of-performance-2026-04-26.md` (Components 1-5 in §"The 'Minimal Playable Surface' Formalization" are the load-bearing normative source).
 
 This section authors the language-level surface for whole-stack reachability analysis. The compiler implementation of the analysis (the 300-640h band per Insight 29) is staged across later v0.3 waves; this section is the SPEC anchor that subsequent compiler waves implement against. Approach B (telemetry-PGO) is OUT OF SCOPE and explicitly deferred to v2 per Insight 29; Approach C (`^{}` overrides) is gated on dive E and not in v0.3 scope.
 
@@ -20594,7 +20594,7 @@ prefetch_tier_2(/)       = {} (no N=2 surface)
 - PIPELINE.md Stage 7.6 (Reachability Solver) — the compiler pass that implements §40.9 (placement: after Stage 7 DG, after Stage 7.5 Batch Planner, before Stage 8 CG).
 - Insight 29 (`scrml-support/design-insights.md` line 1827) — debate verdict ratifying A as v0.3.0 spec-amendment target.
 - S84 diagnostic (`scrml-support/docs/diagnostics/reactive-graph-static-resolvability-S84.md`) — the empirical 99-100% gate PASS underwriting §40.9.2 / §40.9.3.
-- Dive H (`scrml-support/docs/deep-dives/smart-app-splitting-feel-of-performance-2026-04-26.md`) — the formal analysis source for Components 1-5.
+- Dive H (`../../scrml-support/archive/deep-dives/smart-app-splitting-feel-of-performance-2026-04-26.md`) — the formal analysis source for Components 1-5.
 
 #### 40.9.11 Error codes
 
@@ -29746,7 +29746,7 @@ The Tier 2 example has three independent singleton cells — the right reach whe
 
 ## 53. Inline Type Predicates
 
-**Added:** 2026-04-08. Stateless value constraints via inline type predicates. Approach C (Partial Unification) from radical doubt debate. See `docs/deep-dives/radical-doubt-machine-contract-unification-2026-04-08.md`. Cross-references: §51, §52, §15.3, §12.
+**Added:** 2026-04-08. Stateless value constraints via inline type predicates. Approach C (Partial Unification) from radical doubt debate. See `../../scrml-support/archive/deep-dives/radical-doubt-machine-contract-unification-2026-04-08.md`. Cross-references: §51, §52, §15.3, §12.
 
 
 ---

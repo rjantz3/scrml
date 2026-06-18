@@ -47,11 +47,11 @@ This was THE major thread of S43. State of the entire arc:
 | A | Recoverability + comp-time-shape | 1,068 | Landed | `scrml-support/docs/deep-dives/living-compiler-recoverability-and-comp-time-shape-2026-04-26.md` |
 | B | Mid-compile config swap (`<compiler config=...>`) | 876 | Landed | `scrml-support/docs/deep-dives/living-compiler-mid-compile-config-swap-2026-04-26.md` |
 | C | Bridge architecture | — | Landed (re-dispatch after stall) | `scrml-support/docs/deep-dives/living-compiler-bridge-architecture-2026-04-26.md` |
-| E | Meta-system capability frontier (`^{}`) | 638 | Landed | `scrml-support/docs/deep-dives/meta-system-capability-frontier-2026-04-26.md` |
-| F | Per-dev keyword alias layer | — | Landed (no debate per Phase 5) | `scrml-support/docs/deep-dives/editor-keyword-alias-layer-2026-04-26.md` |
+| E | Meta-system capability frontier (`^{}`) | 638 | Landed | `../../scrml-support/archive/deep-dives/meta-system-capability-frontier-2026-04-26.md` |
+| F | Per-dev keyword alias layer | — | Landed (no debate per Phase 5) | `../../scrml-support/archive/deep-dives/editor-keyword-alias-layer-2026-04-26.md` |
 | G | File storage model (source vs AST canonical) | — | Landed | `scrml-support/docs/deep-dives/file-storage-model-source-vs-ast-canonical-2026-04-26.md` |
-| H | Smart app splitting / "feel of performance" | 588 | Landed (re-dispatch after stall) | `scrml-support/docs/deep-dives/smart-app-splitting-feel-of-performance-2026-04-26.md` |
-| **Superposition** | Foundational pillar formalization | 788 | Landed (PA-write hybrid after 3rd stall) | `scrml-support/docs/deep-dives/superposition-as-language-pillar-2026-04-26.md` |
+| H | Smart app splitting / "feel of performance" | 588 | Landed (re-dispatch after stall) | `../../scrml-support/archive/deep-dives/smart-app-splitting-feel-of-performance-2026-04-26.md` |
+| **Superposition** | Foundational pillar formalization | 788 | Landed (PA-write hybrid after 3rd stall) | `../../scrml-support/archive/deep-dives/superposition-as-language-pillar-2026-04-26.md` |
 | **Joint A+B** | Coupling synthesis (PA-written) | ~150 | Landed | `scrml-support/docs/deep-dives/joint-coupling-synthesis-A-B-2026-04-26.md` |
 
 ### 2.2 The strategic vector (load-bearing meta-finding)
@@ -362,11 +362,11 @@ If the next session is on the OTHER machine: per the new cross-machine sync hygi
 - [scrml-support/docs/deep-dives/living-compiler-recoverability-and-comp-time-shape-2026-04-26.md](../scrml-support/docs/deep-dives/living-compiler-recoverability-and-comp-time-shape-2026-04-26.md)
 - [scrml-support/docs/deep-dives/living-compiler-mid-compile-config-swap-2026-04-26.md](../scrml-support/docs/deep-dives/living-compiler-mid-compile-config-swap-2026-04-26.md)
 - [scrml-support/docs/deep-dives/living-compiler-bridge-architecture-2026-04-26.md](../scrml-support/docs/deep-dives/living-compiler-bridge-architecture-2026-04-26.md)
-- [scrml-support/docs/deep-dives/meta-system-capability-frontier-2026-04-26.md](../scrml-support/docs/deep-dives/meta-system-capability-frontier-2026-04-26.md)
-- [scrml-support/docs/deep-dives/editor-keyword-alias-layer-2026-04-26.md](../scrml-support/docs/deep-dives/editor-keyword-alias-layer-2026-04-26.md)
+- [../../scrml-support/archive/deep-dives/meta-system-capability-frontier-2026-04-26.md](../../scrml-support/archive/deep-dives/meta-system-capability-frontier-2026-04-26.md)
+- [../../scrml-support/archive/deep-dives/editor-keyword-alias-layer-2026-04-26.md](../../scrml-support/archive/deep-dives/editor-keyword-alias-layer-2026-04-26.md)
 - [scrml-support/docs/deep-dives/file-storage-model-source-vs-ast-canonical-2026-04-26.md](../scrml-support/docs/deep-dives/file-storage-model-source-vs-ast-canonical-2026-04-26.md)
-- [scrml-support/docs/deep-dives/smart-app-splitting-feel-of-performance-2026-04-26.md](../scrml-support/docs/deep-dives/smart-app-splitting-feel-of-performance-2026-04-26.md)
-- [scrml-support/docs/deep-dives/superposition-as-language-pillar-2026-04-26.md](../scrml-support/docs/deep-dives/superposition-as-language-pillar-2026-04-26.md) — **READ FIRST when picking up the design arc**
+- [../../scrml-support/archive/deep-dives/smart-app-splitting-feel-of-performance-2026-04-26.md](../../scrml-support/archive/deep-dives/smart-app-splitting-feel-of-performance-2026-04-26.md)
+- [../../scrml-support/archive/deep-dives/superposition-as-language-pillar-2026-04-26.md](../../scrml-support/archive/deep-dives/superposition-as-language-pillar-2026-04-26.md) — **READ FIRST when picking up the design arc**
 - [scrml-support/docs/deep-dives/joint-coupling-synthesis-A-B-2026-04-26.md](../scrml-support/docs/deep-dives/joint-coupling-synthesis-A-B-2026-04-26.md)
 - `scrml-support/user-voice-scrmlTS.md` — S43 entries appended throughout session
 - `~/.claude/agents/{nix,unison,bazel,lean-lake,security}-expert.md` — 5 foundational tech-experts forged

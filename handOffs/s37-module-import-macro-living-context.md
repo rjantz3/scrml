@@ -73,9 +73,9 @@ Stdlib content (per the 2026-04-02 DD): 14 real `.scrml` files under `stdlib/` i
 
 ### 2.3 Deep-dives on file
 
-1. `/home/bryan/scrmlMaster/scrml-support/docs/deep-dives/import-system-2026-03-30.md` — six import CATEGORIES enumerated (local files, stdlib, transpilation alternatives, community keywords, syntax extensions, meta-defined context blocks), four approaches (A protocol prefix, B `<program>` attrs, C `use` keyword, D `^{}` meta only). Recommends hybrid A+C. This is the DD that seeded §41.
-2. `/home/bryan/scrmlMaster/scrml-support/docs/deep-dives/use-import-system-2026-04-02.md` — follow-up: implementation-shaped DD. Approach A (current SS40) vs B (add `user:` prefix) vs C (config-based collections) vs D (third `extend` keyword for living compiler). **Recommendation: ship Approach A as-is; defer `user:` until per-dev-stdlib work; do NOT add `extend` keyword pre-living-compiler.**
-3. `/home/bryan/scrmlMaster/scrml-support/docs/deep-dives/dependency-model-no-npm-2026-03-30.md` — four approaches (A Stdlib+Vendor Odin model, B git-e native, C living-compiler extensions, D minimal manifest Zig-style). **Recommendation: A+D combined** — stdlib first, minimal manifest for external deps, vendoring underneath, git-e as eventual hosting. Four-phase rollout: Phase 1 stdlib+`scrml:`, Phase 2 `scrml.toml` manifest + `dep:` prefix, Phase 3 git-e hosting, Phase 4 living-compiler registry (separate).
+1. `../../scrml-support/archive/deep-dives/import-system-2026-03-30.md` — six import CATEGORIES enumerated (local files, stdlib, transpilation alternatives, community keywords, syntax extensions, meta-defined context blocks), four approaches (A protocol prefix, B `<program>` attrs, C `use` keyword, D `^{}` meta only). Recommends hybrid A+C. This is the DD that seeded §41.
+2. `../../scrml-support/archive/deep-dives/use-import-system-2026-04-02.md` — follow-up: implementation-shaped DD. Approach A (current SS40) vs B (add `user:` prefix) vs C (config-based collections) vs D (third `extend` keyword for living compiler). **Recommendation: ship Approach A as-is; defer `user:` until per-dev-stdlib work; do NOT add `extend` keyword pre-living-compiler.**
+3. `../../scrml-support/archive/deep-dives/dependency-model-no-npm-2026-03-30.md` — four approaches (A Stdlib+Vendor Odin model, B git-e native, C living-compiler extensions, D minimal manifest Zig-style). **Recommendation: A+D combined** — stdlib first, minimal manifest for external deps, vendoring underneath, git-e as eventual hosting. Four-phase rollout: Phase 1 stdlib+`scrml:`, Phase 2 `scrml.toml` manifest + `dep:` prefix, Phase 3 git-e hosting, Phase 4 living-compiler registry (separate).
 4. `/home/bryan/scrmlMaster/scrml-support/docs/deep-dives/stdlib-design-2026-03-30.md` — stdlib inventory + priority ordering.
 5. `/home/bryan/scrmlMaster/scrml-support/docs/deep-dives/nested-program-semantics-2026-04-03.md` — ratifies that workers/sidecars don't inherit `use`.
 
@@ -194,7 +194,7 @@ Error codes the engineer would emit: `MACRO_BOUNDARY_INJECTION`, `MACRO_INVALID_
 
 ### 3.5 Deep-dives
 
-- `/home/bryan/scrmlMaster/scrml-support/docs/deep-dives/jai-comptime-vs-scrml-meta-2026-04-02.md` — compares scrml `^{}` + `emit()` against Jai's `#run`/`#insert`/compiler-message-loop. Treats `^{}` + `emit()` as scrml's macro substitute. Quote (line 253): "String-based generation is fragile (no syntax checking until parse time)." Recommendation: Approach D (Hybrid — `emit()` now, compiler API later). Current status: "`emit()` already exists in `META_BUILTINS`... needs actual implementation: take the emitted string, parse it through BS/TAB/AST, and splice the resulting nodes into the parent AST at the `^{}` position."
+- `../../scrml-support/archive/deep-dives/jai-comptime-vs-scrml-meta-2026-04-02.md` — compares scrml `^{}` + `emit()` against Jai's `#run`/`#insert`/compiler-message-loop. Treats `^{}` + `emit()` as scrml's macro substitute. Quote (line 253): "String-based generation is fragile (no syntax checking until parse time)." Recommendation: Approach D (Hybrid — `emit()` now, compiler API later). Current status: "`emit()` already exists in `META_BUILTINS`... needs actual implementation: take the emitted string, parse it through BS/TAB/AST, and splice the resulting nodes into the parent AST at the `^{}` position."
 - `runtime-meta-system-2026-04-02.md` — runtime `^{}` design. 13/13 devs from Meta Gauntlet R1 unanimous on need for reactive bridges (meta.watch, meta.set, meta.onCleanup). Phased recommendation: Approach C hybrid (explicit API now, auto-tracking later).
 
 ### 3.6 How macros intersect with imports
@@ -258,11 +258,11 @@ Scores: Go (Approach D) 48.5 > Rust (A) 48.0 > Odin (Vendor) 47.0.
 
 ### 4.5 Deep-dives on file
 
-- `/home/bryan/scrmlMaster/scrml-support/docs/deep-dives/transformation-registry-design-2026-04-08.md` — the foundational DD. Four approaches: A content-addressed / Unison, B Go-style decentralized, C Elm-style curated, D hybrid. 600+ lines.
-- `/home/bryan/scrmlMaster/scrml-support/docs/deep-dives/debate-transformation-registry-2026-04-08.md` — the 2026-04-08 debate that produced the insight.
-- `/home/bryan/scrmlMaster/scrml-support/docs/deep-dives/compiler-modularity-architecture-2026-04-08.md` — plugin architecture prior to the registry (Approach D hybrid — typed stage slots + hooks).
-- `/home/bryan/scrmlMaster/scrml-support/docs/deep-dives/debate-compiler-modularity-2026-04-08.md` — the debate.
-- `/home/bryan/scrmlMaster/scrml-support/docs/deep-dives/jai-comptime-vs-scrml-meta-2026-04-02.md` — treats living-compiler enablement as the goal state for `^{}`/`emit()` work.
+- `../../scrml-support/archive/deep-dives/transformation-registry-design-2026-04-08.md` — the foundational DD. Four approaches: A content-addressed / Unison, B Go-style decentralized, C Elm-style curated, D hybrid. 600+ lines.
+- `../../scrml-support/archive/deep-dives/debate-transformation-registry-2026-04-08.md` — the 2026-04-08 debate that produced the insight.
+- `../../scrml-support/archive/deep-dives/compiler-modularity-architecture-2026-04-08.md` — plugin architecture prior to the registry (Approach D hybrid — typed stage slots + hooks).
+- `../../scrml-support/archive/deep-dives/debate-compiler-modularity-2026-04-08.md` — the debate.
+- `../../scrml-support/archive/deep-dives/jai-comptime-vs-scrml-meta-2026-04-02.md` — treats living-compiler enablement as the goal state for `^{}`/`emit()` work.
 
 ### 4.6 User voice on living compiler
 
@@ -370,23 +370,23 @@ Honest statements of what I did NOT find after a reasonable sweep:
 - `/home/bryan/scrmlMaster/scrmlTS/compiler/src/module-resolver.ts` (not read in this dispatch, but cited as the implementation surface)
 
 **Deep-dives — modules/imports:**
-- `/home/bryan/scrmlMaster/scrml-support/docs/deep-dives/import-system-2026-03-30.md`
-- `/home/bryan/scrmlMaster/scrml-support/docs/deep-dives/use-import-system-2026-04-02.md`
-- `/home/bryan/scrmlMaster/scrml-support/docs/deep-dives/dependency-model-no-npm-2026-03-30.md`
+- `../../scrml-support/archive/deep-dives/import-system-2026-03-30.md`
+- `../../scrml-support/archive/deep-dives/use-import-system-2026-04-02.md`
+- `../../scrml-support/archive/deep-dives/dependency-model-no-npm-2026-03-30.md`
 - `/home/bryan/scrmlMaster/scrml-support/docs/deep-dives/stdlib-design-2026-03-30.md`
 - `/home/bryan/scrmlMaster/scrml-support/docs/deep-dives/nested-program-semantics-2026-04-03.md`
 
 **Deep-dives — macros / meta:**
-- `/home/bryan/scrmlMaster/scrml-support/docs/deep-dives/jai-comptime-vs-scrml-meta-2026-04-02.md`
-- `/home/bryan/scrmlMaster/scrml-support/docs/deep-dives/runtime-meta-system-2026-04-02.md`
+- `../../scrml-support/archive/deep-dives/jai-comptime-vs-scrml-meta-2026-04-02.md`
+- `../../scrml-support/archive/deep-dives/runtime-meta-system-2026-04-02.md`
 - `/home/bryan/scrmlMaster/scrml-support/archive/spec-issues/SPEC-ISSUE-002-runtime-macros.md`
 - `/home/bryan/scrmlMaster/scrml-support/archive/spec-issues/SPEC-ISSUE-004-preprocessor-macro-syntax.md`
 
 **Deep-dives — living compiler / transformation registry:**
-- `/home/bryan/scrmlMaster/scrml-support/docs/deep-dives/transformation-registry-design-2026-04-08.md`
-- `/home/bryan/scrmlMaster/scrml-support/docs/deep-dives/debate-transformation-registry-2026-04-08.md`
-- `/home/bryan/scrmlMaster/scrml-support/docs/deep-dives/compiler-modularity-architecture-2026-04-08.md`
-- `/home/bryan/scrmlMaster/scrml-support/docs/deep-dives/debate-compiler-modularity-2026-04-08.md`
+- `../../scrml-support/archive/deep-dives/transformation-registry-design-2026-04-08.md`
+- `../../scrml-support/archive/deep-dives/debate-transformation-registry-2026-04-08.md`
+- `../../scrml-support/archive/deep-dives/compiler-modularity-architecture-2026-04-08.md`
+- `../../scrml-support/archive/deep-dives/debate-compiler-modularity-2026-04-08.md`
 - `/home/bryan/scrmlMaster/scrml-support/docs/research/threat-assessment-type-in-name.md` (Threat 6)
 
 **Insights, voice, design:**

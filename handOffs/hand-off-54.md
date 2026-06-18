@@ -37,7 +37,7 @@ User reviewed and **identified the §21.2 SHALL NOT as unacceptable** — locks 
 
 User direction: *"deep dive. start multiple if its worth it"*. PA dispatched 3 parallel scrml-deep-dive agents.
 
-- **DD1 — State-as-Primary Architectural Unification** (master conceptual, T3) — output ~1170 lines at `scrml-support/docs/deep-dives/state-as-primary-unification-2026-04-30.md`. Recommends Approach A. Scores Approach A 51/60 vs W6-shipped C 28/60 on 12-dimension matrix. Catalogs 8 historical concessions. Convergent dev-agent signal: 3 friction reports independently reach for Approach A-shaped fixes.
+- **DD1 — State-as-Primary Architectural Unification** (master conceptual, T3) — output ~1170 lines at `../../scrml-support/archive/deep-dives/state-as-primary-unification-2026-04-30.md`. Recommends Approach A. Scores Approach A 51/60 vs W6-shipped C 28/60 on 12-dimension matrix. Catalogs 8 historical concessions. Convergent dev-agent signal: 3 friction reports independently reach for Approach A-shaped fixes.
 - **DD2 — Parser Disambiguation Feasibility** (T2-large) — ~700 lines at `parser-disambiguation-feasibility-2026-04-30.md`. Verdict **FEASIBLE-WITH-COST**. Built on existing W2 canonical-key infrastructure already in LSP. Eliminates Approach B (name-table-at-parse breaks per-file parallelism, lexer-hack risk).
 - **DD3 — Prior Art Survey** (T2-large) — **FAILED at 600s agent stall**. PA decided to skip re-launch (DD1 §7 had 14-system catalog autonomously). Progress file remains as artifact.
 
@@ -572,9 +572,9 @@ scrml-support: `f016dad` pushed clean. The wrap commit (P3 deep-dive + progress 
 ### scrml-support — committed `f016dad` + this wrap
 
 Committed `f016dad`:
-- `docs/deep-dives/state-as-primary-unification-2026-04-30.md` (DD1)
-- `docs/deep-dives/parser-disambiguation-feasibility-2026-04-30.md` (DD2)
-- `docs/deep-dives/state-type-body-grammar-uniform-extensions-2026-04-30.md` (DD4)
+- `../../scrml-support/archive/deep-dives/state-as-primary-unification-2026-04-30.md` (DD1)
+- `../../scrml-support/archive/deep-dives/parser-disambiguation-feasibility-2026-04-30.md` (DD2)
+- `../../scrml-support/archive/deep-dives/state-type-body-grammar-uniform-extensions-2026-04-30.md` (DD4)
 - `docs/deep-dives/progress-prior-art-unified-declaration-models-2026-04-30.md` (DD3 progress)
 - `docs/deep-dives/progress-state-type-body-grammar-2026-04-30.md` (DD4 progress)
 - `user-voice-scrmlTS.md` — appended S52 entry
@@ -598,9 +598,9 @@ Committed in this wrap:
 - [docs/changelog.md](./docs/changelog.md) — S52 close entry
 - `docs/changes/{p1,p1.e,p2,p2-wrapper,f-component-004}/`
 - `examples/23-trucking-dispatch/FRICTION.md` — current adopter-friction inventory
-- `scrml-support/docs/deep-dives/state-as-primary-unification-2026-04-30.md` — DD1
-- `scrml-support/docs/deep-dives/parser-disambiguation-feasibility-2026-04-30.md` — DD2
-- `scrml-support/docs/deep-dives/state-type-body-grammar-uniform-extensions-2026-04-30.md` — DD4
+- `../../scrml-support/archive/deep-dives/state-as-primary-unification-2026-04-30.md` — DD1
+- `../../scrml-support/archive/deep-dives/parser-disambiguation-feasibility-2026-04-30.md` — DD2
+- `../../scrml-support/archive/deep-dives/state-type-body-grammar-uniform-extensions-2026-04-30.md` — DD4
 - `scrml-support/docs/deep-dives/p3-cross-file-inline-expansion-2026-05-02.md` — P3 design dive (8 OQs in §14)
 - `scrml-support/user-voice-scrmlTS.md` — S52 entry
 - `~/.claude/design-insights.md` — debate insight (## State-as-Primary)

@@ -1089,7 +1089,7 @@ User-voice anchors active: cohesion + falls-under-fingers ([[feedback_cohesion_a
 
 **Arc 4 — PA-direct cross-repo work:**
 
-- `0829ead` (scrml-support) — `docs/deep-dives/state-dynamics-design-2026-04-08.md` frontmatter (status: active → superseded; superseded-by: + last-reviewed:) + CLOSURE BANNER prepended + S131 Closure Addendum appended. Closes DD per S131 lockdown wave 3.5 HU-5 Q-W35-2 (a). PA-direct via `git -C scrml-support` discipline per pa.md S90.
+- `0829ead` (scrml-support) — `../../scrml-support/archive/deep-dives/state-dynamics-design-2026-04-08.md` frontmatter (status: active → superseded; superseded-by: + last-reviewed:) + CLOSURE BANNER prepended + S131 Closure Addendum appended. Closes DD per S131 lockdown wave 3.5 HU-5 Q-W35-2 (a). PA-direct via `git -C scrml-support` discipline per pa.md S90.
 
 **State at close:**
 
@@ -3559,7 +3559,7 @@ Post-wrap audit-thread fold-in commits added after initial S78 wrap (`71fee50`):
 - **`efe6ca9` docs(s78-audit): hardcoded thresholds sweep — 12 found, 2 refactor-priority.** Sweep audit at `docs/audits/hardcoded-thresholds-2026-05-10.md`. 2 Bucket A (E-IMPORT-007 shape) + 1 Bucket B + 3 Bucket C (1 already done) + 6 Bucket D (genuine constants). Top 5 prioritized refactors ~4h total.
 
 **scrml-support commits (debounce/throttle re-deliberation):**
-- Old `scrml-support/docs/deep-dives/debounce-and-timing.md` (2026-03-28) frontmatter → `status: superseded` with forward pointer.
+- Old `../../scrml-support/archive/deep-dives/debounce-and-timing.md` (2026-03-28) frontmatter → `status: superseded` with forward pointer.
 - New `scrml-support/docs/deep-dives/debounce-and-timing-2026-05-10.md` (676 lines, post-S55 framing). 5 approaches debated under L1-L22 lock compatibility. Approach B/C dominate; PA + user ratified Approach B (clean cut — no deprecation cycle since no real adopters per S30 pivot).
 
 **Open threads at S78 close (queued for S79+):** A5-6 Feature 1 dispatch (~2-3h, unblocked), Approach B implementation (~12-21h, ratified), 5 threshold refactors (~4h), 11 phantom-code disposition (middleware family biggest gap), Bootstrap L3 root-cause fix, multi-token threshold deep-read, project-mapper refresh, versioning-discipline thread.
@@ -4351,7 +4351,7 @@ The catalyst was the W6 dispatch (carry-over from S51 plan): it shipped a §21.2
 **Track A — W6 dispatch (PARKED, NOT MERGED).** F-MACHINE-001 fully RESOLVED (TAB synthesizes sibling type-decl for `export type X:kind = {...}`; cross-file `<machine for=ImportedType>` works; SPEC §51.3.2.5 + §41.2). F-CHANNEL-003 PARTIAL — agent unilaterally shipped the §21.2 SHALL NOT against `export <markup>` (E-EXPORT-001) instead of the diagnosis's recommended inline-expansion. User identified the SHALL NOT as wrong direction (locks in wrap-in-const concession permanently). W6 worktree at `changes/w6` 10 commits never merged. F-MACHINE-001 fix in W6 is salvageable but redundant once P3 lands cross-file resolution architecturally.
 
 **Track B — Three parallel deep-dives (DD1+DD2+DD3).** User direction: *"deep dive. start multiple if its worth it"*. PA dispatched 3 parallel scrml-deep-dive agents.
-- **DD1 — State-as-Primary Architectural Unification** (master conceptual, T3) at `scrml-support/docs/deep-dives/state-as-primary-unification-2026-04-30.md` (~1170 lines). Recommends Approach A. Scores A 51/60 vs W6-shipped C 28/60 on 12-dimension matrix. Catalogs 8 historical concessions Approach A removes (PascalCase, wrap-in-const, whitespace-after-`<`, separate state/markup categories, dual naming patterns, §21.2 SHALL NOT, §38.4.1 channel carveout, F-AUTH-002 modifier prefix asymmetry). Convergent dev-agent signal: 3 friction reports independently reach for Approach A-shaped fixes. 7 OQs with defaults proposed.
+- **DD1 — State-as-Primary Architectural Unification** (master conceptual, T3) at `../../scrml-support/archive/deep-dives/state-as-primary-unification-2026-04-30.md` (~1170 lines). Recommends Approach A. Scores A 51/60 vs W6-shipped C 28/60 on 12-dimension matrix. Catalogs 8 historical concessions Approach A removes (PascalCase, wrap-in-const, whitespace-after-`<`, separate state/markup categories, dual naming patterns, §21.2 SHALL NOT, §38.4.1 channel carveout, F-AUTH-002 modifier prefix asymmetry). Convergent dev-agent signal: 3 friction reports independently reach for Approach A-shaped fixes. 7 OQs with defaults proposed.
 - **DD2 — Parser Disambiguation Feasibility** (T2-large) at `parser-disambiguation-feasibility-2026-04-30.md` (~700 lines). Verdict **FEASIBLE-WITH-COST**. T2-large × 3 phases (~2-3 weeks). Built on existing W2 canonical-key infrastructure already in LSP. Eliminates Approach B (name-table-at-parse breaks per-file parallelism, lexer-hack risk).
 - **DD3 — Prior Art Survey** (T2-large) — **FAILED at 600s agent stall**. PA decided to skip re-launch (DD1 §7 had 14-system catalog autonomously). Progress file remains as untracked artifact.
 - Both DD1 and DD2 agents delivered as inline messages instead of writing to disk; PA had to manually persist them. Pattern noted for future deep-dive briefs.

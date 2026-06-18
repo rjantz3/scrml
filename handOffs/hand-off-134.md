@@ -74,7 +74,7 @@ All 4 dispatches landed clean. **Closes open Phase 2 sub-Q from Lifecycle Landin
 
 Cross-repo work block per pa.md S90 (CWD discipline, `git -C scrml-support` for all commands):
 
-- `0829ead` (scrml-support) — `docs/deep-dives/state-dynamics-design-2026-04-08.md` frontmatter changed (status: active → superseded; superseded-by: + last-reviewed:) + CLOSURE BANNER prepended + S131 Closure Addendum appended. Closes the DD per S131 lockdown wave 3.5 HU-5 Q-W35-2 (a).
+- `0829ead` (scrml-support) — `../../scrml-support/archive/deep-dives/state-dynamics-design-2026-04-08.md` frontmatter changed (status: active → superseded; superseded-by: + last-reviewed:) + CLOSURE BANNER prepended + S131 Closure Addendum appended. Closes the DD per S131 lockdown wave 3.5 HU-5 Q-W35-2 (a).
 
 ---
 

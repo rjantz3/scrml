@@ -645,9 +645,9 @@ No external dependencies block A-4 once A-2.7 closes.
 ### 8.4 Design-insight + deep-dive anchors
 
 - `scrml-support/design-insights.md` L1827-1925 — **Insight 29** (perf-feel debate verdict — A-4 is the per-route artifact splitter named in the engineering decomposition at L1880).
-- `scrml-support/docs/deep-dives/smart-app-splitting-feel-of-performance-2026-04-26.md` — 588-line formal analysis underwriting §40.9 (dive H).
+- `../../../../scrml-support/archive/deep-dives/smart-app-splitting-feel-of-performance-2026-04-26.md` — 588-line formal analysis underwriting §40.9 (dive H).
 - `scrml-support/docs/deep-dives/living-compiler-recoverability-and-comp-time-shape-2026-04-26.md` — R1-R4 reproducibility (A-4 preserves R1 by construction per §40.9.8).
-- `scrml-support/docs/deep-dives/dependency-model-no-npm-2026-03-30.md` — vendor model context (A-4 treats vendor units as opaque atoms per §40.9.6).
+- `../../../../scrml-support/archive/deep-dives/dependency-model-no-npm-2026-03-30.md` — vendor model context (A-4 treats vendor units as opaque atoms per §40.9.6).
 
 ### 8.5 Adjacent SCOPING docs
 
@@ -688,8 +688,8 @@ deep-dive, scoping, a-4, per-route-artifact-splitter, chunk-emission, codegen-st
 - `/home/bryan-maclee/scrmlMaster/scrmlTS/docs/changes/a-2-8-emit-reachability-canonical/`
 - `/home/bryan-maclee/scrmlMaster/scrmlTS/examples/23-trucking-dispatch/`
 - `/home/bryan-maclee/scrmlMaster/scrml-support/design-insights.md` L1827-1925 (Insight 29)
-- `/home/bryan-maclee/scrmlMaster/scrml-support/docs/deep-dives/smart-app-splitting-feel-of-performance-2026-04-26.md`
+- `../../../../scrml-support/archive/deep-dives/smart-app-splitting-feel-of-performance-2026-04-26.md`
 - `/home/bryan-maclee/scrmlMaster/scrml-support/docs/deep-dives/living-compiler-recoverability-and-comp-time-shape-2026-04-26.md`
-- `/home/bryan-maclee/scrmlMaster/scrml-support/docs/deep-dives/dependency-model-no-npm-2026-03-30.md`
+- `../../../../scrml-support/archive/deep-dives/dependency-model-no-npm-2026-03-30.md`
 - `/home/bryan-maclee/scrmlMaster/scrml-support/docs/diagnostics/reactive-graph-static-resolvability-S84.md`
 - `/home/bryan-maclee/scrmlMaster/scrmlTS/docs/changes/a-4-per-route-artifact-splitter-SCOPING/progress.md`

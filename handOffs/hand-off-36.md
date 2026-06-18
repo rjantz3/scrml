@@ -275,7 +275,7 @@ If dispatching: candidate experts per DD are `scrml-dev-cs-phd` + `rust-traits` 
 
 ### 8.4 Option C (STARTED — step 1 shipped this session, S36 picks up step 2)
 
-Finish Phase 3→4 of the pre-existing AST-based codegen migration (`scrml-support/docs/deep-dives/expression-ast-phase-0-design-2026-04-11.md`). 4–6 + 1–2 sessions total.
+Finish Phase 3→4 of the pre-existing AST-based codegen migration (`../../scrml-support/archive/deep-dives/expression-ast-phase-0-design-2026-04-11.md`). 4–6 + 1–2 sessions total.
 
 **S35 step 1 (`3f8d88c`):** Removed 3 dead `rewriteExpr` imports from `scheduling.ts`, `emit-reactive-wiring.ts`, `emit-server.ts`. Zero behavior change. Cuts import surface from 11 files → 8.
 
@@ -344,7 +344,7 @@ Scaffold `package.json` + `README.md` + inline orientation comments. Cheap side-
 ### Deep-dive corpus (updated)
 
 - `scrml-support/docs/deep-dives/DD-codegen-seams-2026-04-20.md` — NEW.
-- `scrml-support/docs/deep-dives/expression-ast-phase-0-design-2026-04-11.md` — referenced by DD, pre-existing.
+- `../../scrml-support/archive/deep-dives/expression-ast-phase-0-design-2026-04-11.md` — referenced by DD, pre-existing.
 
 ### Live touch-point map
 

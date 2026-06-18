@@ -499,6 +499,6 @@ Multiple S53 dispatches reported that fresh worktrees lacked `compiler/node_modu
 - `docs/changes/{p3.b,p3.a,p3.a-follow,p3-follow,p3-spec-paperwork,p3-rename,p3-error-rename,doc-e-rename,p4-scrml-migrate,ast-shape-rename}/`
 - `examples/23-trucking-dispatch/FRICTION.md` — F-CHANNEL-003 + F-ENGINE-001 RESOLVED markers
 - `scrml-support/docs/deep-dives/p3-cross-file-inline-expansion-2026-05-02.md` — P3 design dive (8 OQs ratified at S53 open)
-- `scrml-support/docs/deep-dives/state-as-primary-unification-2026-04-30.md` — DD1 (Approach A foundation)
+- `../../scrml-support/archive/deep-dives/state-as-primary-unification-2026-04-30.md` — DD1 (Approach A foundation)
 - `scrml-support/user-voice-scrmlTS.md` — S53 entry
 - `~/.claude/design-insights.md` — S52 debate insight (## State-as-Primary)

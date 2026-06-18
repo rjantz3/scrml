@@ -4,7 +4,7 @@ date: 2026-05-12
 session: S86
 status: DRAFT — awaits user authorization to dispatch
 scope-authority:
-  - scrml-support/docs/deep-dives/smart-app-splitting-feel-of-performance-2026-04-26.md (THE dive — Approach A definition)
+  - ../../../../scrml-support/archive/deep-dives/smart-app-splitting-feel-of-performance-2026-04-26.md (THE dive — Approach A definition)
   - scrml-support/docs/diagnostics/reactive-graph-static-resolvability-S84.md (99-100% gate PASS)
   - scrml-support/design-insights.md Insight 29 (A ratified for v0.3.0; B deferred to v2; D rejected)
   - scrml-support/docs/deep-dives/perf-feel-debate-plan-2026-05-11.md Phase 2 (post-debate execution)
@@ -189,7 +189,7 @@ Recommended agent: `general-purpose` (per pa.md note for spec-rewrite work; `scr
 
 ## Links
 
-- Dive H — `scrml-support/docs/deep-dives/smart-app-splitting-feel-of-performance-2026-04-26.md`
+- Dive H — `../../../../scrml-support/archive/deep-dives/smart-app-splitting-feel-of-performance-2026-04-26.md`
 - Empirical study S84 — `scrml-support/docs/diagnostics/reactive-graph-static-resolvability-S84.md`
 - Insight 29 — `scrml-support/design-insights.md` (line 1827, 2026-05-11)
 - Phase 2 execution plan — `scrml-support/docs/deep-dives/perf-feel-debate-plan-2026-05-11.md` §"Phase 2"

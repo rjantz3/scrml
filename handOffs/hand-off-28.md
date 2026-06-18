@@ -89,7 +89,7 @@ Single-line match-arm form (`match x { .A => 1 .B => 2 }`) worked in spec's work
 
 ### High-impact (ordered by natural-next-ness)
 
-1. **Static-elision arc with fresh deep-dive.** Task #14. The SPARK-style "emit runtime guard only when not trivially provable" design from `scrml-support/docs/deep-dives/radical-doubt-machine-contract-unification-2026-04-08.md` line 236 is ratified but not implemented. Every machine-bound assignment pays the runtime-guard cost today, including `@order = S.X` where both sides are compile-time literals. The design is 10+ days stale and the compiler surface has changed substantially (the §51.11 + §51.14 work in S27 expanded the guard IIFE). Open with a fresh deep-dive to re-confirm direction before implementation. The user specifically queued this one up with "lets plan on queuing that arc and deep-dive."
+1. **Static-elision arc with fresh deep-dive.** Task #14. The SPARK-style "emit runtime guard only when not trivially provable" design from `../../scrml-support/archive/deep-dives/radical-doubt-machine-contract-unification-2026-04-08.md` line 236 is ratified but not implemented. Every machine-bound assignment pays the runtime-guard cost today, including `@order = S.X` where both sides are compile-time literals. The design is 10+ days stale and the compiler surface has changed substantially (the §51.11 + §51.14 work in S27 expanded the guard IIFE). Open with a fresh deep-dive to re-confirm direction before implementation. The user specifically queued this one up with "lets plan on queuing that arc and deep-dive."
 
 2. **§51.13 phase 7 — guarded projection machines.** Still queued from S26. First-match-wins projection-guard evaluation against simulated reactive state. Blocked on parametrization-model decision.
 
