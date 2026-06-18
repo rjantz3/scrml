@@ -1,8 +1,8 @@
-# scrml — Session 203 (CLOSE — WRAP PRE-DRAFT)
+# scrml — Session 203 (CLOSE)
 
 **Date:** 2026-06-17. **Previous:** `handOffs/hand-off-207.md` (S202 CLOSE). **Next-session pickup:** rotate THIS → `handOffs/hand-off-208.md` at OPEN. **Profile:** A — FULL.
 
-> **WRAP PRE-DRAFT (pre-staged while the #3 fix agent runs).** FINALIZE AT WRAP: the #3 landing outcome + final HEAD SHA + full-suite test counts + maps refresh (6c) + state regen (6d) + push (7) + user-voice S203 append (8) + the changelog S203 block (deputy-owned — see "Recordkeeping"). Everything else below is current as of this draft.
+> **WRAPPED WITH #3 IN-FLIGHT — F3's first reboot-bridge use.** The PA did NOT hold for the #3 fix agent (`af88c53a8985b37fb`); it stays RUNNING across this wrap, and the deputy (F3) monitors it. **NEXT-PA FIRST TASK:** boot (step-0 digest + delta-log tail), find the deputy's `(deputy) state` entry for #3 (or check the agent's branch/progress.md directly), then RE-ATTACH it: file-delta its compiler/src + SPEC §34 + §17.4 note + the 3-fixtures expected-error reclassification + the e2e-render-map baseline regen; **R26-dual-verify** (S138 — observe-one: S-RAW-INTERP gone + canonical `${ for/lift }` still-clean); flip `g-raw-interp-channel-meta-corners` → resolved; refresh maps (6c) + state §0 (6d) for #3's effect; push. (If #3 STOP-surfaced, read its report.) This is the in-flight-across-reboot pattern the deputy was built for; the deputy WATCHES + RECORDS only — landing is substantive/PA-owned.
 
 ## ⭐ THE HEADLINE — the vPA-deputy system is LIVE (this changes how the next session operates)
 
