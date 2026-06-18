@@ -13,6 +13,8 @@
 //   bun scripts/flograph.ts --emit           EMIT   — write docs/graph/graph.json + graph.mmd (@generated)
 //   bun scripts/flograph.ts --check          CHECK  — dangling(WARN) + dup-id(ERROR) + drift(ERROR) + sweep(INFO); exit 1 on ERROR
 //   bun scripts/flograph.ts --mmd            MMD    — print a SCOPED mermaid to stdout (the readable-view filter; S203)
+//   bun scripts/flograph.ts --derivation <id> DERIVE — the cites/decided-by/supersedes provenance CHAIN of
+//                                            <id>, both directions (S205 slice 4): RESTS-ON + SUPPORTS.
 //   bun scripts/flograph.ts --corpus a,b,c   override the default corpus globs (for the fixture demo)
 //
 //   --mmd MODIFIERS (the full-corpus graph is unreadable at scale → scope it; canonical --emit stays FULL):
@@ -75,16 +77,23 @@ function stem(file: string): string {
 // Read the write-once-tier YAML frontmatter (spec §2.1): a doc's `status:` drives node currency, and
 // `superseded-by:` is the authored INVERSE of a supersedes edge (the corpus records it on the OLD doc) —
 // so we synthesize the supersedes edge FROM the named successor automatically. Zero manual annotation.
-function parseFrontmatter(lines: string[]): { status: string | null; supersededBy: string | null } {
-  if ((lines[0] ?? "").trim() !== "---") return { status: null, supersededBy: null };
+function parseFrontmatter(lines: string[]): { status: string | null; supersededBy: string | null; companions: string[] } {
+  if ((lines[0] ?? "").trim() !== "---") return { status: null, supersededBy: null, companions: [] };
   let status: string | null = null, supersededBy: string | null = null;
+  const companions: string[] = [];
   for (let i = 1; i < lines.length && i < 60; i++) {
     if (lines[i].trim() === "---") break;
     const s = lines[i].match(/^status:\s*(\S+)/); if (s && !status) status = s[1];
     // first `<stem>.md` in the value (handles path-prefixed, multi-target `A + B`, and prose forms)
     const sb = lines[i].match(/^superseded-by:.*?([A-Za-z0-9._-]+)\.md/); if (sb && !supersededBy) supersededBy = sb[1];
+    // companion: → cites (the DERIVATION layer, S205 slice 4): "this doc builds alongside / docks INTO X".
+    // The authored INVERSE-free derivation edge — same frontmatter-driven, zero-manual-annotation pattern
+    // as superseded-by (§2.1). Multi-target (`A.md · B.md`) supported; targets not yet @node'd dangle (a
+    // finding: the cited doc lives outside the graph corpus, e.g. a docs/ sibling not in deep-dives/).
+    const cm = lines[i].match(/^companion:\s*(.+)/);
+    if (cm) for (const m of cm[1].matchAll(/([A-Za-z0-9._-]+)\.md/g)) companions.push(m[1]);
   }
-  return { status, supersededBy };
+  return { status, supersededBy, companions };
 }
 
 function parseFile(file: string, nodes: Map<string, Node>, dupes: string[], edges: Edge[]) {
@@ -96,6 +105,8 @@ function parseFile(file: string, nodes: Map<string, Node>, dupes: string[], edge
   if (!nodes.has(fileNode.id)) nodes.set(fileNode.id, fileNode);
   // `superseded-by:` → a synthesized supersedes edge FROM the successor TO this (now-stale) doc.
   if (fm.supersededBy) edges.push({ from: fm.supersededBy, type: "supersedes", target: fileNode.id, verified: false, file, line: 1 });
+  // `companion:` → a synthesized `cites` derivation edge FROM this doc TO each named companion (slice 4).
+  for (const c of fm.companions) edges.push({ from: fileNode.id, type: "cites", target: c, verified: false, file, line: 1 });
   let current = fileNode.id;
   let inFence = false;
 
@@ -236,6 +247,44 @@ function mmdMode(corpus: string[], f: Scope, focus: string | null, depth: number
   return 0;
 }
 
+// ── Derivation traversal (S205 slice 4 — the cites/derivation layer made QUERYABLE) ─────────
+// Walks the PROVENANCE edge set {cites, decided-by, supersedes} from <id> in both directions:
+//   RESTS ON  (outgoing) = what this node's content derives from / cites / supersedes;
+//   SUPPORTS  (incoming) = what rests on / was decided-by / is superseded-by this node.
+// This is the derivation-chain query the bare edge counts couldn't answer ("what does decision X
+// rest on, transitively?"). Distinct from --focus (which walks ALL typed edges 1 hop); --derivation
+// is provenance-only + transitive + directional.
+const PROVENANCE = new Set(["cites", "decided-by", "supersedes"]);
+function deriveMode(corpus: string[], id: string): number {
+  const { nodes, edges } = build(corpus);
+  if (!nodes.has(id)) { process.stderr.write(`flograph --derivation: '${id}' is not a node (try a @node id)\n`); return 1; }
+  const prov = edges.filter(e => PROVENANCE.has(e.type));
+  const status = (x: string) => nodes.has(x) ? nodes.get(x)!.status : "dangling — not a @node";
+  function walk(dir: "out" | "in"): { id: string; via: string; depth: number }[] {
+    const seen = new Set([id]); const order: { id: string; via: string; depth: number }[] = [];
+    let frontier = [{ id, depth: 0 }];
+    while (frontier.length) {
+      const next: { id: string; depth: number }[] = [];
+      for (const f of frontier) for (const e of prov) {
+        const [a, b] = dir === "out" ? [e.from, e.target] : [e.target, e.from];
+        if (a === f.id && !seen.has(b)) { seen.add(b); order.push({ id: b, via: e.type, depth: f.depth + 1 }); next.push({ id: b, depth: f.depth + 1 }); }
+      }
+      frontier = next;
+    }
+    return order;
+  }
+  console.log(`flograph --derivation: ${id}  [${status(id)}]`);
+  const restsOn = walk("out");
+  console.log(`  RESTS ON (${restsOn.length}) — what ${id} derives from:`);
+  for (const r of restsOn) console.log(`    ${"  ".repeat(r.depth - 1)}└ ${r.via} → ${r.id} [${status(r.id)}]`);
+  if (!restsOn.length) console.log(`    (no outgoing cites/decided-by/supersedes — no recorded basis)`);
+  const supports = walk("in");
+  console.log(`  SUPPORTS (${supports.length}) — what rests on ${id}:`);
+  for (const s of supports) console.log(`    ${"  ".repeat(s.depth - 1)}└ ${s.via} ← ${s.id} [${status(s.id)}]`);
+  if (!supports.length) console.log(`    (nothing recorded as resting on this node)`);
+  return 0;
+}
+
 // ── Report ─────────────────────────────────────────────────────────────────
 function report(corpus: string[]) {
   const { nodes, dupes, edges } = build(corpus);
@@ -337,8 +386,11 @@ if (import.meta.main) {
   const depIdx = args.indexOf("--depth");
   const depth = depIdx >= 0 ? (parseInt(args[depIdx + 1], 10) || 1) : 1;
 
+  const derIdx = args.indexOf("--derivation");
+
   if (args.includes("--emit")) process.exit(emit(expandedCorpus));
   else if (args.includes("--check")) process.exit(check(expandedCorpus));
   else if (args.includes("--mmd")) process.exit(mmdMode(expandedCorpus, filter, focus, depth));
+  else if (derIdx >= 0) process.exit(deriveMode(expandedCorpus, args[derIdx + 1]));
   else report(expandedCorpus);
 }
