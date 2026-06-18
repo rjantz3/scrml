@@ -9,9 +9,9 @@ partition); the deputy maintains it on the `deputy-maint` branch. The PA reads i
 
 ## Deputy status
 
-- **State:** LIVE — steady-state (S205 active). First deputy instance, booted S203. On tick 26.
+- **State:** LIVE — steady-state (S205 active). First deputy instance, booted S203. On tick 27.
 - **Self-poke loop:** `/loop 30m` — cron job `39fed15c`, `7,37 * * * *`. CronDelete `39fed15c` to cancel.
-- **Last-absorbed delta seq:** S205 **[9]** (`scrml/handOffs/delta-log.md` — absorbed [S199 1] … [S205 6]).
+- **Last-absorbed delta seq:** S205 **[10]** (`scrml/handOffs/delta-log.md` — absorbed [S199 1] … [S205 6]).
 - **`deputy-maint` branch:** worktree `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint`. Descends main `0d448fec` (PA integrated ticks 12-15 via the pre-push merge gate). **Tip:** `git rev-parse deputy-maint` (tick-26: digest regen + this).
 - **Owed maintenance:** none.
 
@@ -29,19 +29,25 @@ The clean-cycle re-measure (the S204 [6] follow-up) ran: digest booted current �
 - **flograph** slice 4 ([5], `7d53119f`) — cites/derivation layer + `--derivation` traversal. (Earlier: `--mmd`/`--filter`/`--focus` + slices 1-3 supersession/currency.)
 - The S204 update message to flogeance's inbox (baton-retired/deputy/dilation/flograph/dock) was delivered 2026-06-18 (flogeance `e5c3991`, local — no remote).
 
+## Graph/dock health (§3c — recorded per tick, S205 [10] standing step)
+
+- **Snapshot @ tick 27 (PASS):** flograph 428n/103e (--with-support --with-archive) · currency-sweep **0 (clean)** · provenance/unverified 14 · dangling 15 · 0 dup · 0 err. dock --check PASS (0 malformed/dangling/superseded · 1 unverified info). dock --coverage 0/628 (0.0%) · 0 orphans.
+- **vs [10] baseline (426n/96e · curr-sweep 0 · prov 7 · dock PASS · cov 0%):** curr-sweep still 0 ✓, dock PASS ✓, cov 0% ✓; node/edge + unverified grew (new [9] harness-validation capstone + block-lease DD cites = asserted-not-verified, benign). **No NEW actionable finding** (no new currency-sweep hit · no dock ERROR · dangling decided-by/cites are standing-or-PA-authored · no dup-id).
+- **route to PA (tooling nit, once):** §3 says plain `bun scripts/flograph.ts --emit` but §3c checks `--with-support --with-archive` → following §3 literally leaves graph.json at the default 190n corpus, so the 3c check ALWAYS reports a stale/drift ERROR. The deputy compensates by emitting `--with-support --with-archive`. Align §3 emit flags with the §3c check flags (or make --check corpus-aware) so the standing guardrail is green without the deputy working around it.
+
 ## In-flight dispatches (F3 watch list)
 
 - _(empty)_ — `af88c53a` landed (#3); `abcf64f7` closed tick 5.
 
 ## Tick log (compressed)
 
-T1 boot [S199-S203]; T2-T3 F1 LIVE + GO-LIVE; T4-T5 e2e/flograph; **T6-T8 reboot-gap** (#3 in-flight bridged → fresh PA re-attached + LANDED); **T9-T11** S204 [1-6] (#3 landed, flograph slices, dilation ~3% frame-fix); **T12** maps REFRESHED (60d547e1→cc765a5a, user ruling); **T13** 2nd merge-before-push miss flagged; **T14** PA caught up; **T15** absorbed S205 [1-6] — merge-before-push gate RATIFIED + F1 realized ~8.3k + dock built; digest regen. **LESSON (T15):** the source-based digest oracle CAUGHT an absorb-miss (pre-rebase delta-log read showed [8], missed the S205 block) → **always re-check the delta-log AFTER sync/rebase, not before.** **T16-25** PA idle — 10 consecutive no-op ticks (held surface current, no commits). **T26** PA resumed: absorbed S205 [7] corpus-hygiene deref (48 superseded DDs→archive/) + [8] flograph --with-archive provenance tier + [9] flogeance harness-validation capstone; gate fired (f07f8406); digest regen.
+T1 boot [S199-S203]; T2-T3 F1 LIVE + GO-LIVE; T4-T5 e2e/flograph; **T6-T8 reboot-gap** (#3 in-flight bridged → fresh PA re-attached + LANDED); **T9-T11** S204 [1-6] (#3 landed, flograph slices, dilation ~3% frame-fix); **T12** maps REFRESHED (60d547e1→cc765a5a, user ruling); **T13** 2nd merge-before-push miss flagged; **T14** PA caught up; **T15** absorbed S205 [1-6] — merge-before-push gate RATIFIED + F1 realized ~8.3k + dock built; digest regen. **LESSON (T15):** the source-based digest oracle CAUGHT an absorb-miss (pre-rebase delta-log read showed [8], missed the S205 block) → **always re-check the delta-log AFTER sync/rebase, not before.** **T16-25** PA idle — 10 consecutive no-op ticks (held surface current, no commits). **T26** PA resumed: absorbed S205 [7] corpus-hygiene deref (48 superseded DDs→archive/) + [8] flograph --with-archive provenance tier + [9] flogeance harness-validation capstone; gate fired (f07f8406); digest regen. **T16-25** PA idle (no-ops). Wait — T26 already covered. **T27** absorbed [10] (§3c guardrail wired); ran first health check: flograph PASS (curr-sweep 0), dock PASS, cov 0%; drift self-fixed (re-emit --with-support --with-archive); 1 tooling-nit routed (§3/§3c emit-flag mismatch); digest regen.
 
 ## Currency snapshot (@ tick 15)
 
 - **Board:** HIGH 0 · MED 11 · LOW 23 · Nominal 8 (S204 wrap: MED 12→11).
 - **maps:** watermark `cc765a5a` — CURRENT for compiler-source (no compiler-source since; S205 work is all `scripts/` tooling — dock/flograph/state). In main (origin) since the S205 boot integration.
-- **digest:** current (head `0d448fec`, delta-seq S205 [9]).
+- **digest:** current (head `e14462a6`, delta-seq S205 [10]).
 - **recent-sessions / gap-counts:** PASS.
 - **flograph/dock:** building (see above) — `scripts/flograph.ts` + `scripts/dock.ts`.
 
