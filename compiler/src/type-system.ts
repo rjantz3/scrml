@@ -10038,6 +10038,28 @@ function annotateNodes(
         const retExprNode = (n as Record<string, unknown>).exprNode;
         if (retExprNode) {
           checkLogicExprIdents(retExprNode, retSpan, scopeChain, typeRegistry, errors, undefined, fnAllDeclared);
+          // g-engine-autodecl-bare-variant-write (S205) — comparison-site
+          // pre-pass at the return-stmt value, parity with the if/while
+          // condition (line ~9786) and reactive-init (line ~9037) sites.
+          // A `return @phase == .Loading` in a sibling `function` body
+          // carries the bare `.Loading` at a comparison position whose
+          // type context is fixed by `@phase`'s cell type (the engine
+          // auto-cell's `for=T` enum per §51.0.C, OR any typed cell per
+          // §14.10 normative position #2 — `@cell == .V` resolves against
+          // the cell's enum). Without this pre-pass the return-stmt fed
+          // the bare `.Loading` straight to `inferBareVariantsInExpr` with
+          // the FN RETURN type as context (`-> bool` here), which is not
+          // the variant's enum → spurious E-VARIANT-AMBIGUOUS. The helper
+          // looks the cell up in the scopeChain (file-level scope per
+          // §7.6.1 makes the engine auto-cell visible from any fn body),
+          // resolves the variant, and stamps `_bareVariantInferredAtBinaryExpr`
+          // so the contextType-driven walker below SKIPS it (line ~11516) —
+          // no double-fire. A bare `.V` NOT at a comparison position (e.g.
+          // `return .V`) stays unstamped and the return-type walker resolves
+          // it as before; a genuinely-ambiguous comparison (union-shared
+          // `.V`, or `.V` not in the cell's enum) still errors inside the
+          // helper (E-VARIANT-AMBIGUOUS / E-TYPE-063).
+          inferBareVariantsAtComparisonSites(retExprNode, scopeChain, retSpan, errors);
           // S84 v0.2.4 #5-followon (Gap B.3) — bare-variant inference at
           // return-stmt value. Read the enclosing function's return type
           // from the stack pushed at function-decl entry; when present
