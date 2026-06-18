@@ -1,48 +1,40 @@
-# scrml — Session 206 (OPEN)
+# scrml — Session 206 (CLOSE)
 
-**Date:** 2026-06-18. **Previous:** `handOffs/hand-off-210.md` (S205 CLOSE). **Next pickup:** rotate THIS → `handOffs/hand-off-211.md` at OPEN. **Profile:** A — FULL (digest-thinned boot; full PRIMER/SPEC-INDEX cold reads DEFERRED pending session direction — read SPEC sections on demand per Rule 4). **Deputy:** worktree present (`../scrml-deputy-maint` @ deputy-maint, fully merged `^main==0`); liveness of the cron loop `39fed15c` not re-confirmed at boot.
+**Date:** 2026-06-18. **Previous:** `handOffs/hand-off-210.md` (S205 CLOSE). **Next pickup:** rotate THIS → `handOffs/hand-off-211.md` at OPEN. **Profile:** A — FULL. **Deputy:** LIVE all session (ticks 34→48).
 
-> **Thinned wrap (S42 re-scope S205).** Mechanical state lives in: `bun scripts/state.ts` + `handOffs/digest.md` (board/counts/version/maps) · `handOffs/delta-log.md` (in-flight/landings/rulings) · `handOffs/deputy-state.md` (deputy + F3 watch). This hand-off carries only the irreducible.
+> **Thinned wrap (S42 re-scope S205).** Mechanical state lives in: `bun scripts/state.ts` + `handOffs/digest.md` (board/counts/version/maps) · `handOffs/delta-log.md` S206 `[1]–[17]` (landings/rulings/findings) · `handOffs/deputy-state.md` (deputy + F3 watch). This hand-off carries the IRREDUCIBLE only.
 
-## Boot state (S206 OPEN)
-- Digest **CURRENT** (stamp 74d7d0e2) → board trusted: **HIGH 0 · MED 10 · LOW 23 · Nominal 8**, v0.7.0, subset 17161/90/0, maps 4 behind HEAD (492b4bb9 vs 9f203d82).
-- Git: main `9f203d82`, origin **0/0**, `deputy-maint ^main == 0`. Inbox **empty**. scrml-support sync: not yet checked at OPEN.
-- Untracked `handOffs/hand-off-209.md` (S204 close, rotated S205-OPEN, never committed) — git-add at next commit.
+## ⭐ S206 — a deep partner-mode session: landed S205's deferred agents, then BIRTHED the flogence satellite architecture
+Two arcs. **(A) Execution:** landed the 3 S205-deferred F3 agents (g-colon, g-engine, slice-2) + pushed; full suite green. **(B) Design (the bulk) — flogence:** the user's "get flograph to launch parallel disps on the same file safely" pulled a long thread → built the `dock` block-scope interim (a) + proved Scheme-C anchoring (b1) → surfaced that the answer is **the compiler emits a block-analysis the tooling consumes (drift-avoidance), not a 2nd parser** → scoped it (Plan agent) → built v1 (D1 + D2 BOTH LANDED; D3/D4 queued). Alongside: 4 flogence-design DDs (markup-lease, dPA, vPA-comms-surface, + the block-naming-via-compiler conclusion). **Dev-model directive (user-voice S206):** flogence is DELIBERATELY birthed/prototyped HERE by the trusted PA (not "wrong PA"); the satellites + flogence-PA OPERATE the proven result. flogence is the LOCKED product name (respell of flogeance).
 
-## ⏭️ OPEN THREADS
+## ⏭️ OPEN THREADS (the irreducible)
 
-### 1. ✅ LANDED the 3 deferred F3-bridged agents (S206) — push HELD per user
-All 3 branched off the S205 **session-start** base (`feedback_worktree_base_session_start_staleness`), reconciled at landing. Coherence 0/3, no leak.
-- **g-colon-shorthand** `e2516298` — clean file-delta block-splitter.js + test; targeted gap flip → resolved. Rule-4 verified §4.14:986/:990.
-- **g-engine-autodecl** `105f1ee4` — cherry-pick `d9ef8ee3` (clean auto-merge, non-overlapping w/ match-alt's type-system.ts); targeted gap flip → resolved. S138 dual-verify: comparison-in-return probe clean post-fix / `E-VARIANT-AMBIGUOUS` pre-fix.
-- **trucking slice-2** `e1c20e3a` — reconciled via `git merge main` into the branch (3 slice-3 overlaps, conflict-free); merged app EXIT 0 baseline-preserved; file-delta 7 forms + progress; within-node allowlist re-baselined (6 fixtures, gate 1012/0); NEW gap filed (below).
-- **NEW gap (slice-2 todo b):** `g-compound-field-render-by-tag-unexpanded` (MED, open) — Shape-2 field that's a CHILD of a Variant-C compound doesn't expand its render-by-tag `<field/>`; silently emits literal `<field />` (no input, no diagnostic). Top-level Shape-2 works. Durable repro `docs/changes/g-compound-field-render-by-tag-unexpanded-2026-06-18/repro/`. Workaround: raw `bind:value=@compound.field`.
+### 1. block-analysis-emit v1 — D1 + D2 LANDED; D3 + D4 NEXT
+- **D1 LANDED** `696a53d0` — `block-analysis-footprint.ts` `footprintForBlock` (SHALLOW dotted-path, reuses reactive-deps.ts `_deepSetLeafKey`; ADD-ALONGSIDE → body-dg-builder.ts ZERO diff; BREAK-1 canary green).
+- **D2 LANDED** (this wrap) — `block-analysis.ts` builder (mirrors engine-graph.ts; imports D1's REAL module, no stub; reuses FileAST collections + collectC12/C14EngineDecls). BREAK-1 survives end-to-end (`bump`→writes `quoteForm.weightLbs`, dotted not root-collapsed); body-dg-builder + D1-module ZERO diff (new-files-only); full suite 24492/0/237. (Re-dispatched after the first D2 `a8ad5f2b` stalled environmentally — zero loss; the S112 stale-base guard FF'd the re-run to D1's HEAD.)
+- **NEXT — D3** (emit: `--emit-block-analysis` flag + api.js `blockAnalysisJson` ~2551 + compile.js write-site, mirror engine-graph's 4 sites; integration test over a REAL compiled engine file — `_record.engineMeta` is a SYM-pass product) **+ D4** (rewire `scripts/dock.ts`: `.scrml`→artifact / `.ts`→keep TS_DEFS; kills the `bubbleClasses[191..301]` swallow + the b1 residual). Full plan: `docs/changes/block-analysis-emit-2026-06-18/SCOPE-AND-DECOMPOSITION.md` (+ BRIEF-D1/D2.md). **D2 SCOPE-table correction for D3/D4:** functions live in `logic.body` (NOT `FileAST.nodes` — tree-walk); `buildBlockAnalysisJson` is per-FILE (D3 write-loop iterates `buildBlockAnalysis(files)`). v2 (markup-regions) is the follow-on that unblocks the D-vs-G debate.
 
-All 3 LANDED + PUSHED (origin `359a1d83`); full suite 24463/0. Board HIGH 0 · MED 9 · LOW 23.
+### 2. flogence design — DECISIONS PENDING (all DDs in the shared hub; birthed here, flogence-PA inherits)
+- **dPA** (`dpa-deliberation-satellite-2026-06-18.md`): 9-item ratification → stand-up (roster in `flogence/.claude/agents/` [harness-VERIFIED realizable], relocate ~8 debate experts out of global to de-bloat every scrml boot, `dpa-scrml.md`+stub, `dpa-queue.md`, RUN-not-RATIFY boundary, offload-safe-vs-inline class).
+- **vPA-comms-surface** (`vpa-communication-surface-2026-06-18.md`): adopt as deputy Function 4 (inbox-triage + pub/sub + pointer-router + transcript-tail capture). Honest break: transcript ack-vs-ruling is substantive → deputy TAILS, PA keeps the judgment.
+- **CC-to-vPA** candidate (fold into the comms-surface). **D-vs-G markup-lease debate** (the dPA's intended FIRST batch; its BREAK-1 is now cheap — the compiler already resolves dotted-path via `_deepSetLeafKey`).
 
-### 2. ⭐ flograph / block-lease "safe parallel same-file dispatch" arc (the S206 design thread — at a decision point)
-User goal: "get flograph to the point of being able to launch parallel disps affecting the same file safely." Built + proven this session (all pushed):
-- **(a) the block-scope INTERIM** (`scripts/dock.ts` `1b15f701`): `dock --units <file>` (enumerate leasable blocks w/ thin extents, lang-aware scrml+TS) + `dock --diff-scope <range> --owns id,…` (post-landing containment check, exit 1 on stray). **Dog-fooded:** code-def overlap (`type-system.ts` g-engine vs match-alt) PROVABLY DISJOINT → **code-def parallel dispatch is now enforceable**; markup overlap (`messages.scrml`) FALSE-collides (render-markup sits in no named def). block-lease DD §7.1.
-- **(b1) anchoring PROVEN for named defs** (`10255c94` + DD §7.2): Scheme-C carried-comment survives rename/move; the dropped-anchor failure is caught by the inv3 orphan WARN. → block-lease-for-CODE no longer blocked on anchoring, only the BUILD (registry/lifecycle/blast-region = flogence-in-scrml).
-- **(b2) markup-anchor DD DONE** (`scrml-support/docs/deep-dives/markup-lease-anchor-2026-06-18.md`, pushed): user REJECTED b2-ii componentize-to-lease (**co-location-of-behaviour axiom** + no-refactor-tax, user-voice S206 + memory `feedback_colocation_of_behaviour_axiom`). DD verdict: the **state-keyed seed** (lease a region by the reactive STATE it touches, not its structure) VALIDATES on the real case w/ zero file change; **D (state-footprint) vs G (hybrid+escalation)** survive every constraint (0/8 dev-polls favor prior A/B/C). **Two breaks:** BREAK-1 (compound `@form`→cell-grain needs DOTTED-PATH footprints; **PA-verified the DG is ROOT-CELL today** at `body-dg-builder.ts:399` → dotted-path write-tracking is a BUILD PREREQ for both D+G, feasible) · BREAK-2 (transitive-write hazard = the D/G differentiator). Feeds a DEBATE.
-- **DECISION PENDING:** run the **D-vs-G debate** (becomes the dPA's first batch — see thread 2b) / **spike the dotted-path DG extension** first (common prereq, grounds BREAK-1) / continue.
+### 3. Carried (board / other arcs) — mechanical in digest/delta-log
+Board HIGH 0 · MED 9 · LOW 23 · Nominal 8. Open MEDs incl. NEW `g-compound-field-render-by-tag-unexpanded` (S206). Trucking slices 4/5. flogence harness (flograph/dock/block-lease substrate).
 
-### 2b. ⭐ Satellite-session architecture (dPA + CC-to-vPA) — 2 DDs done, ratification PENDING
-The context-economics thread's conclusion: "the PA holds only what needs full scrml context; everything else gets a context-scoped SATELLITE." vPA-deputy = maintenance satellite; **dPA = deliberation-research satellite** (owns banked debates + DDs).
-- **dPA DD DONE** (`scrml-support/docs/deep-dives/dpa-deliberation-satellite-2026-06-18.md`, `eb7a216`). Fork-1 VERIFIED via claude-code-guide: global `~/.claude/agents/` loads EVERY session regardless of cwd; project-local `<dir>/.claude/agents/` loads ONLY for sessions rooted there; no settings-key scope → **roster goes in `flogence/.claude/agents/`** (realizable exactly, the user's idea works). **Immediate de-bloat win:** ~8 debate/DD experts sit in global NOW, bloating every scrml PA boot → relocating them is the cheap first action. Boundary: **axiom-level Qs can't offload** (framing IS the deliberation) → stay inline; D-vs-G is offload-safe. dPA RUNS-not-RATIFIES (advisory artifacts; PA+user ratify). Honest savings: PA-window win (boot de-bloat + episodic offload), not total-token.
-- **9-item ratification (§10)** to stand it up = ONE architecture decomposed: 3-role model · roster in flogence/.claude/agents + relocate 8 experts (keep scrml-deep-dive + thin inline roster) · forge-researches/dPA-authors-direct · `handOffs/dpa-queue.md` ledger + `(dpa:)` breadcrumbs · author `dpa-scrml.md` + `scrml/dpa.md` stub · digest `dpa-queue:` field · orchestrate-not-subsume + on-demand-batch · RUN-not-RATIFY boundary · offload-safe-vs-inline classification.
-- **CANDIDATE banked (CC-to-vPA, user "just a thought"):** CC user-prompts to the vPA via **transcript-tail** (~free) → (1) vPA does mechanical user-voice capture (PA curates the durable axioms) + (2) vPA as a context **INDEX/ROUTER** (returns a POINTER to the source, NOT a cached answer — dodges the cheap-reset + asserted-not-verified tensions). Extends the PA↔vPA-comms-protocol DD (`pa-vpa-communication-protocol-2026-06-18.md`). Fold in WITH the dPA stand-up (both are satellite-protocol).
-- **BOOTSTRAP:** this dPA DD is the LAST DD the PA runs INLINE; once stood up, the dPA owns DDs/debates. First dPA batch = D-vs-G.
+## ⚠ Anomalies / lessons (irreducible)
+- **D2 first dispatch (a8ad5f2b) STALLED environmentally** (stream watchdog, 600s, zero work — flaky env, not logic) → re-dispatched clean against D1's landed module. Dead worktree swept at 6b. (1st crash → re-dispatch, not PA-direct.)
+- **CWD-slip push bug:** a backgrounded scrml push inherited the scrml-support CWD (prior `cd`) → ran `git push` from scrml-support ("up-to-date"); scrml didn't push. Caught via 0/N coherence. FIX: explicit `cd <repo> && pwd` in EVERY push command (the recurring S90/CWD-reset class).
+- **Over-read of "flogence, thats it":** PA built a project-scope narrative onto a 3-word SPELLING correction; retracted in user-voice. Then resolved: the 3 core = flograph+dock+block-lease (substrate) + the vPA-deputy/dPA satellites, all core to flogence.
 
-### 3. Carried (board / other arcs)
-- Open MEDs: g-shorthand-interp-engine-element-loci · g-engine-server-flag-silent-swallow (entangled w/ E-leg) · g-tier1-ssr-prerender · r28-c2 · a5 · bug-1 · bug-14 · **g-compound-field-render-by-tag-unexpanded** (NEW S206). e2e LOW residue: g-reflect-variant-shape · g-rendermap-server-classification · g-mount-hang-rails · meta-in-component-001.
-- Trucking slices: slice-2 LANDED → slice-4 (errors-as-states, 148 `?{}` / 0 `!{}` — biggest idiom gap) → slice-5 (typed props, mostly verification).
-
-### 4. Worktree cleanup (6b owed — ALL 5 agent worktrees now landed → removable)
-All 5 S205 agent worktrees are landed (slice-3 a3a475 · match-alt a634857 · g-colon ab4fe40 · g-engine af5ed82 · slice-2 aeca436) → all removable at wrap. NEVER remove `../scrml-deputy-maint` (persistent deputy).
+## Recordkeeping
+- **6b worktrees:** removed ALL 8 agent worktrees this wrap (slice-3 a3a475 · match-alt a634857 · g-colon ab4fe40 · g-engine af5ed82 · slice-2 aeca436 · D1 a4e06003 · dead-D2 a8ad5f2b · D2 a2322e040 — all landed/dead); RETAINED only the persistent `../scrml-deputy-maint`.
+- **Rename:** flogeance→flogence — ~200 occ swept (scrml+scrml-support+memory) + 2 files renamed + the `flogence/` dir renamed (hooksPath unset, S202). Historical left: user-voice + 7 rotated hand-offs.
+- **Statusline:** `~/.claude/statusline.sh` now color-codes the project (scrml=blue, flogence=magenta, …) + fixed the `% left`→`0.000000e+00ft` printf bug (`%b`). Per-machine — copy to the other machine.
+- **Push:** see the wrap commit + the merge-before-push gate; pushed at wrap (D2 in-flight stays unlanded).
 
 ## pa.md directives in force
-R1–R5 · `---` delimiter · Profile A · digest-first (S203) · S88 isolation · S99/S126 path-discipline · S136 BRIEF.md · S138 R26 · S147 coherence · S164 bg-commit-race · S205 merge-before-push gate · S205 S42 wrap-thinning · S205 PA↔vPA sharpen-async · deputy + step-3c guardrail · wrap 8-step (thinned).
+R1–R5 · `---` delimiter · Profile A · digest-first (S203) · S88 isolation · S99/S126 path-discipline · S136 BRIEF.md · S138 R26 · S147 coherence · S164 bg-commit-race · S205 merge-before-push gate + wrap-thinning · deputy + step-3c · wrap 8-step (thinned) · **S206 flogence-dev-model (birth-here, satellites-operate-proven) · co-location-of-behaviour axiom · block-naming-via-compiler**.
 
 ## Tags
-#session-206 #open #profile-a #digest-thinned-boot #land-3-deferred-agents #f3-bridged #reconcile-at-landing #board-high-0-med-10
+#session-206 #close #profile-a #flogence-architecture-birthed #block-analysis-emit-scoped-d1-landed-d2-inflight #markup-lease-dd #dpa-dd #vpa-comms-surface-dd #flogeance-to-flogence-rename #statusline-colorcoded #co-location-axiom #deep-partner-session
