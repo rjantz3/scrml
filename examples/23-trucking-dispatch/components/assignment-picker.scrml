@@ -28,13 +28,11 @@ ${
                     class="w-full px-2 py-1.5 border border-slate-300 rounded-md text-sm bg-white"
                 >
                     <option value="">— Select driver —</option>
-                    ${
-                        for (let d of drivers) {
-                            lift <option value=d.id selected=(d.id == currentDriverId)>
-                                ${d.name} (${d.current_status})
-                            </option>
-                        }
-                    }
+                    <each in=drivers as d key=__index__>
+                        <option value=d.id selected=(d.id == currentDriverId)>
+                            ${d.name} (${d.current_status})
+                        </option>
+                    </each>
                 </select>
             </div>
 
@@ -45,13 +43,11 @@ ${
                     class="w-full px-2 py-1.5 border border-slate-300 rounded-md text-sm bg-white"
                 >
                     <option value="">— Select tractor —</option>
-                    ${
-                        for (let t of tractors) {
-                            lift <option value=t.id selected=(t.id == currentTractorId)>
-                                ${t.unit_number} · ${t.make} ${t.model} (${t.status})
-                            </option>
-                        }
-                    }
+                    <each in=tractors as t key=__index__>
+                        <option value=t.id selected=(t.id == currentTractorId)>
+                            ${t.unit_number} · ${t.make} ${t.model} (${t.status})
+                        </option>
+                    </each>
                 </select>
             </div>
 
@@ -62,13 +58,11 @@ ${
                     class="w-full px-2 py-1.5 border border-slate-300 rounded-md text-sm bg-white"
                 >
                     <option value="">— Select trailer —</option>
-                    ${
-                        for (let tr of trailers) {
-                            lift <option value=tr.id selected=(tr.id == currentTrailerId)>
-                                ${tr.unit_number} · ${tr.type} (${tr.length_ft}ft)
-                            </option>
-                        }
-                    }
+                    <each in=trailers as tr key=__index__>
+                        <option value=tr.id selected=(tr.id == currentTrailerId)>
+                            ${tr.unit_number} · ${tr.type} (${tr.length_ft}ft)
+                        </option>
+                    </each>
                 </select>
             </div>
         </div>

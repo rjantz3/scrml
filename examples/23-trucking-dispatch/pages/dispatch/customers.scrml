@@ -119,9 +119,8 @@
                       </tr>
                   </thead>
                   <tbody>
-                      ${
-                          for (let c of @customerRows) {
-                              lift <tr class="border-b border-slate-200 hover:bg-slate-50">
+                      <each in=@customerRows as c key=@.id>
+                              <tr class="border-b border-slate-200 hover:bg-slate-50">
                                   <td class="px-3 py-3">
                                       <button onclick=toggle(c.id) class="text-sm font-semibold text-slate-900 hover:text-blue-700 text-left">
                                           ${c.name}
@@ -159,8 +158,7 @@
                                   </td>
                               </tr>
 
-                              if (c.id == @expandedId) {
-                                  lift <tr class="bg-slate-50 border-b border-slate-200">
+                              <tr if=(c.id == @expandedId) class="bg-slate-50 border-b border-slate-200">
                                       <td colspan="6" class="px-6 py-4">
                                           <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
                                               <div>
@@ -187,9 +185,7 @@
                                           </div>
                                       </td>
                                   </tr>
-                              }
-                          }
-                      }
+                      </each>
                   </tbody>
               </table>
 

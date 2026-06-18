@@ -503,24 +503,22 @@
                   </p>
 
                   <ol if=(@logEntries.length > 0) class="space-y-3">
-                      ${
-                          for (let entry of @logEntries) {
-                              lift <li class="flex items-start gap-3 text-sm">
-                                  <span class="text-xs text-slate-500 font-mono w-32 flex-shrink-0 pt-0.5">
-                                      ${entry.at ? entry.at.substring(0, 16) : ""}
-                                  </span>
-                                  <span class="font-medium text-slate-900 w-48 flex-shrink-0">
-                                      ${logTypeLabel(entry.type)}
-                                  </span>
-                                  <span class="text-slate-600">
-                                      ${entry.driver_name ? entry.driver_name : "—"}
-                                      <span if=(entry.payload && entry.payload != "") class="text-xs text-slate-500 block">
-                                          ${entry.payload}
-                                      </>
-                                  </span>
-                              </li>
-                          }
-                      }
+                      <each in=@logEntries as entry key=__index__>
+                          <li class="flex items-start gap-3 text-sm">
+                              <span class="text-xs text-slate-500 font-mono w-32 flex-shrink-0 pt-0.5">
+                                  ${entry.at ? entry.at.substring(0, 16) : ""}
+                              </span>
+                              <span class="font-medium text-slate-900 w-48 flex-shrink-0">
+                                  ${logTypeLabel(entry.type)}
+                              </span>
+                              <span class="text-slate-600">
+                                  ${entry.driver_name ? entry.driver_name : "—"}
+                                  <span if=(entry.payload && entry.payload != "") class="text-xs text-slate-500 block">
+                                      ${entry.payload}
+                                  </>
+                              </span>
+                          </li>
+                      </each>
                   </ol>
               </section>
 

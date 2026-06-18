@@ -82,16 +82,14 @@ ${
 
         <div if=(nextStates.length > 0) class="flex items-center gap-2 ml-2">
             <span class="text-slate-400">→</span>
-            ${
-                for (let target of nextStates) {
-                    lift <button
-                        onclick=onTransition(target)
-                        class="text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium"
-                    >
-                        ${transitionVerb(target)}
-                    </button>
-                }
-            }
+            <each in=nextStates as target key=__index__>
+                <button
+                    onclick=onTransition(target)
+                    class="text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium"
+                >
+                    ${transitionVerb(target)}
+                </button>
+            </each>
         </div>
 
         <div if=(nextStates.length == 0) class="text-xs text-slate-400">

@@ -235,35 +235,29 @@
                     </p>
 
                     <div if=(@messageHistory.length > 0) class="space-y-3">
-                        ${
-                            for (let m of @messageHistory) {
-                                lift <div class="max-w-md rounded-lg px-4 py-2 ${bubbleClasses(m.from_role)}">
-                                    <div class="text-xs opacity-75 mb-0.5">
-                                        ${senderLabel(m.from_role, m.from_email)}
-                                        <span class="ml-2">${m.at == "" ? "" : m.at.substring(0, 16)}</span>
-                                    </div>
-                                    <div class="text-sm break-words">${m.body}</div>
+                        <each in=@messageHistory as m key=__index__>
+                            <div class="max-w-md rounded-lg px-4 py-2 ${bubbleClasses(m.from_role)}">
+                                <div class="text-xs opacity-75 mb-0.5">
+                                    ${senderLabel(m.from_role, m.from_email)}
+                                    <span class="ml-2">${m.at == "" ? "" : m.at.substring(0, 16)}</span>
                                 </div>
-                            }
-                        }
+                                <div class="text-sm break-words">${m.body}</div>
+                            </div>
+                        </each>
 
                         <!-- M5: live messages section — events received via
                              driver-events channel since page load. Filtered
                              to this driver. The DB also has them (server
                              persistence) but we render the live ones here
                              so they appear without a refresh. -->
-                        ${
-                            for (let ev of @currentDriverEvents) {
-                                if (ev.type != "message") continue
-                                if (!isForThisDriver(ev.targetDriverId, @currentDriver.id)) continue
-                                lift <div class="max-w-md rounded-lg px-4 py-2 bg-blue-50 border border-blue-200 text-blue-900 ml-auto">
-                                    <div class="text-xs opacity-75 mb-0.5">
-                                        Live · ${ev.at == "" ? "" : ev.at.substring(11, 16)}
-                                    </div>
-                                    <div class="text-sm break-words">${ev.body}</div>
+                        <each in=@currentDriverEvents as ev key=__index__>
+                            <div if=(ev.type == "message" && isForThisDriver(ev.targetDriverId, @currentDriver.id)) class="max-w-md rounded-lg px-4 py-2 bg-blue-50 border border-blue-200 text-blue-900 ml-auto">
+                                <div class="text-xs opacity-75 mb-0.5">
+                                    Live · ${ev.at == "" ? "" : ev.at.substring(11, 16)}
                                 </div>
-                            }
-                        }
+                                <div class="text-sm break-words">${ev.body}</div>
+                            </div>
+                        </each>
                     </div>
                 </section>
 

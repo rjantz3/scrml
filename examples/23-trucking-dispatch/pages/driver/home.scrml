@@ -361,24 +361,22 @@
                   </p>
 
                   <ol if=(@recentEntries.length > 0) class="space-y-2">
-                      ${
-                          for (let entry of @recentEntries) {
-                              lift <li class="flex items-start gap-3 text-sm">
-                                  <span class="text-xs text-slate-500 font-mono w-32 flex-shrink-0 pt-0.5">
-                                      ${entry.at is not ? "" : entry.at.substring(0, 16)}
-                                  </span>
-                                  <span class="font-medium text-slate-900 flex-1">
-                                      ${logTypeLabel(entry.type)}
-                                      <span if=(entry.load_id) class="text-xs text-slate-500 block">
-                                          Load #${entry.load_id}
-                                      </>
-                                      <span if=(entry.payload is some && entry.payload != "") class="text-xs text-slate-500 block break-all">
-                                          ${entry.payload}
-                                      </>
-                                  </span>
-                              </li>
-                          }
-                      }
+                      <each in=@recentEntries as entry key=__index__>
+                          <li class="flex items-start gap-3 text-sm">
+                              <span class="text-xs text-slate-500 font-mono w-32 flex-shrink-0 pt-0.5">
+                                  ${entry.at is not ? "" : entry.at.substring(0, 16)}
+                              </span>
+                              <span class="font-medium text-slate-900 flex-1">
+                                  ${logTypeLabel(entry.type)}
+                                  <span if=(entry.load_id) class="text-xs text-slate-500 block">
+                                      Load #${entry.load_id}
+                                  </>
+                                  <span if=(entry.payload is some && entry.payload != "") class="text-xs text-slate-500 block break-all">
+                                      ${entry.payload}
+                                  </>
+                              </span>
+                          </li>
+                      </each>
                   </ol>
               </section>
 
