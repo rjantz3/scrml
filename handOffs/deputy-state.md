@@ -9,57 +9,59 @@ partition); the deputy maintains it on the `deputy-maint` branch. The PA reads i
 
 ## Deputy status
 
-- **State:** LIVE — steady-state (reboot-gap ENDED tick 8; fresh PA S204 booted, merged deputy-maint, re-attached #3). First deputy instance, booted S203. On tick 8.
+- **State:** LIVE — steady-state (S204). First deputy instance, booted S203. On tick 9.
 - **Self-poke loop:** `/loop 30m` — cron job `39fed15c`, `7,37 * * * *`. CronDelete `39fed15c` to cancel.
-- **Last-absorbed delta seq:** S203 **[15]** (committed). S204 **[1][2] are UNCOMMITTED** in main's working tree (fresh PA mid-landing) — absorb when committed.
-- **`deputy-maint` branch:** worktree `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint`. Synced to main `73c7e688` (== main; the fresh PA FF-merged the reboot-gap maintenance). **Tip:** `git rev-parse deputy-maint`.
-- **Owed maintenance:** none (digest current @ 69172d25/seq15; recent-sessions/gap-counts PASS). **Next tick will be substantive** — see below.
+- **Last-absorbed delta seq:** S204 **[3]** (`scrml/handOffs/delta-log.md` — absorbed [S199 1] … [S204 3]).
+- **`deputy-maint` branch:** worktree `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint`. Base rebased onto main `bdd6e1c9` (tick 9). **Tip:** `git rev-parse deputy-maint` (tick-9 commits: digest `15367e8a` + this).
+- **Owed maintenance:** **MAPS REFRESH owed** (deferred — see below). Digest/recent-sessions/gap-counts current.
 
-## Reboot-gap outcome (F3's first real use — CLOSED)
+## ⚠ OWED: maps refresh (DEFERRED) + a mechanism gap for the PA
 
-The S203 PA wrapped (`69172d25`) with #3 in-flight + rebooted. Deputy bridged the gap (ticks 6-7): kept the digest current at the wrap HEAD + watched agent `af88c53a`. Fresh PA **S204 booted, `git merge deputy-maint` (FF to `73c7e688`), re-attached #3** (wrote S204 [2] "#3 RE-ATTACH READY") and is now LANDING it (uncommitted in main: `SPEC.md` §34 row · `ast-builder.js` diagnostic · `e2e-render-map-baseline.json` · within-node allowlist · `control-flow-in-markup-reject.test.js` · `known-gaps.md` g-raw-interp flip). **af88c53a is PA-owned now** — deputy appended NO `(deputy) state` entry (the exception is PA-ABSENT only; the PA re-attached while alive). Net: the bridge worked — no agent work lost across the reboot, digest was current for the fresh PA's step-0.
+The #3 landing `a6405053` touched `compiler/src/ast-builder.js` (the `E-CONTROL-FLOW-IN-MARKUP` detector) — the FIRST compiler-source change since the maps watermark `60d547e1`. Maps are genuinely stale (no longer the benign docs-only WARN). **Deferred this tick** because the deputy cannot SAFELY refresh them right now:
+- `project-mapper` is NON-isolated → it stages into the index of wherever it runs; if it runs in/near the MAIN checkout it risks the S119 shared-index sweep + corrupting the LIVE PA's working tree (the PA holds main).
+- The deputy must never touch main → a first-time risky dispatch isn't worth it; the maps WARN is ungated and the PA's wrap-6c is the proven fallback.
+- The deputy will NOT fake-bump the watermark on a partial manual edit (soft-overclaim).
+
+**MECHANISM GAP → route to the PA (deliberation-shaped, NOT a deputy call):** the contract says "deputy owns `.claude/maps/*` via project-mapper incremental" but doesn't specify HOW the deputy runs project-mapper safely from its worktree. **Proposed mechanism for the PA to bless:** dispatch project-mapper with the Bash CWD set to `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint` + a strict worktree-only-path brief + a post-dispatch `git -C <main> status` clean-verify (the same path-discipline the PA uses for its own agent dispatches; the S100 hook Write/Edit-protects map writes, but has a Bash blind-spot). Until blessed: the PA does maps at wrap-6c.
+
+## PA-side learning from S204 [1] (route to PA)
+
+[1] (cold S204 boot) reports the fresh PA's step-0 digest read **STALE → authoritative fallback** — because the S203 wrap was **PUSHED before deputy-maint was merged** (tick 7 flagged this). So origin carried the old digest; the deputy's current one didn't reach the fresh PA in time → thin-start benefit LOST for that boot. **Suggest the PA-side contract enforce "merge deputy-maint BEFORE pushing the wrap"** so the current digest reaches origin. (The freshness guard worked — no harm, just lost dilation.)
 
 ## In-flight dispatches (F3 watch list)
 
-- _(empty)_ — `af88c53a8985b37fb` handed to the live PA (landing #3); `abcf64f7198fe9cf3` closed tick 5.
+- _(empty)_ — `af88c53a` landed (#3, `a6405053`, worktree cleaned); `abcf64f7` closed tick 5.
 
-## Next-tick expectations
+## Tick log (compressed)
 
-When the fresh PA commits the #3 landing + the S204 delta entries, the next tick will:
-- FF/rebase onto the new main; absorb S204 [1][2][3…];
-- regen the digest (delta-log + known-gaps will have moved — projected sources);
-- **MAPS REFRESH becomes genuinely owed** — #3 touches `compiler/src/ast-builder.js` (+ `SPEC.md`, PA-owned). First non-benign maps-staleness since boot → run `project-mapper` incremental on the changed source, advance the watermark off `60d547e1`, commit `.claude/maps/`. (If the PA's own wrap-6c already refreshed maps, the deputy's run is a no-op / FF.)
+T1 boot [1-5]; T2 [6-7] F1 LIVE; T3 [8-9] source-freshness+GO-LIVE; T4 [10] rebase; T5 [11-13]; **T6-T7 reboot-gap** (wrap #3-in-flight → bridged: digest current at wrap HEAD, watched af88c53a); **T8 gap-CLOSED** (fresh PA S204 merged deputy-maint + re-attached #3); **T9** absorbed S204 [1-3] (#3 LANDED a6405053); digest regen; maps owed→deferred.
 
-## Tick log
+## Currency snapshot (@ tick 9)
 
-**T1 (boot):** [1]…[5]; recent-sessions regen; init. **T2:** [6]+[7] (F1 LIVE); first digest. **T3:** [8]+[9] (source-freshness + GO-LIVE). **T4:** [10] (abcf64f7 dispatched); rebased. **T5:** [11..13] (abcf64f7 closed; board MED→12/LOW→23; af88c53a dispatched). **T6 (reboot-gap):** [14]+[15] (WRAP #3-in-flight); FF→wrap HEAD; digest+recent-sessions. **T7 (reboot-gap):** wrap pushed → recent-sessions push-flip; af88c53a advanced; flagged unmerged-before-push. **T8 (gap END):** fresh PA S204 merged deputy-maint (main==`73c7e688`) + re-attached #3; af88c53a→PA-owned; watch cleared; no owed maint (digest current, S204 deltas still uncommitted).
-
-## Currency snapshot (@ tick 8)
-
-- **Board:** HIGH 0 · MED 12 · LOW 23 · Nominal 8 (committed; the in-flight #3 will flip g-raw-interp once landed).
-- **maps:** watermark `60d547e1` — CURRENT for compiler-source as of committed HEAD; **WILL go owed** on the #3 landing (ast-builder.js).
-- **digest:** current (head `69172d25`, delta-seq 15).
+- **Board:** HIGH 0 · MED 12 · LOW 23 · Nominal 8 (g-raw-interp resolved via #3; PA regen'd §0).
+- **maps:** watermark `60d547e1` — **STALE / OWED** (ast-builder.js #3 landing). Deferred (see above).
+- **digest:** current (head `3207ef0a` → rebased; stamped at regen-time HEAD; delta-seq 3).
 - **recent-sessions / gap-counts:** PASS.
-- **flograph:** `--mmd`/`--filter`/`--focus` [14]; round-trip intact.
+- **flograph:** `--mmd`/`--filter`/`--focus` [S203 14]; round-trip intact.
 
 ## Function 3 — agent monitoring (LIVE)
 
-Each tick: `ls .claude/worktrees/` + `git -C <agent-wt> log/status` for branch tip + dirty state; scan delta-log for `disp` without `land`/`find`-close. **Append a `(deputy) state` delta-log entry ONLY when** an agent COMPLETED **and the PA is absent/rebooting** (the narrow single-writer exception — observation-only). NEVER land (PA S67 file-delta). No reliable task-notification (it went to the dead PA) → poll git-state.
+Each tick: `ls .claude/worktrees/` + `git -C <agent-wt> log/status` for branch tip + dirty state; scan delta-log for `disp` without `land`/`find`-close. **Append a `(deputy) state` delta-log entry ONLY when** an agent COMPLETED **and the PA is absent/rebooting** (the narrow single-writer exception — observation-only). NEVER land (PA S67 file-delta). Poll git-state (no reliable task-notification — it goes to the dispatching PA).
 
 ## Sync rule (each tick)
 
-`git merge --ff-only main`; if NOT clean FF → `git rebase main` (clean on the disjoint surface; a real conflict = partition breach to surface). Main may move/push mid-tick independent of deputy-maint — absorb up to the HEAD seen at tick start.
+`git merge --ff-only main`; if NOT clean FF → `git rebase main` (clean on the disjoint surface; a real conflict = partition breach to surface). Main may move/push mid-tick — absorb up to the HEAD seen at tick start.
 
 ## Operational notes (for re-hydration)
 
 - **node_modules:** fresh worktree has NONE → symlink main's in (survives FF+rebase): `ln -s /home/bryan-maclee/scrmlMaster/scrml/node_modules ./node_modules` · `ln -s /home/bryan-maclee/scrmlMaster/scrml/compiler/node_modules ./compiler/node_modules`
 - **CWD slip:** Bash CWD resets to MAIN — `cd` the worktree (or `git -C`) before worktree ops.
 - **Untracked new file:** `git add` before commit; tracked modifications commit by plain pathspec.
-- **Commit gate:** pre-commit WARNS on non-main; runs ~17k subset (~80-120s); deputy commits derived-only → always passes; never `--no-verify`. `git rebase` does NOT run the gate.
+- **Commit gate:** pre-commit WARNS on non-main; runs ~17k subset (~75-120s); deputy commits derived-only → always passes; never `--no-verify`. `git rebase` does NOT run the gate.
 
 ## Maintenance seams (Function 2)
 
-- `.claude/maps/*` — `project-mapper` incremental; watermark `.claude/maps/primary.map.md` (`60d547e1`).
+- `.claude/maps/*` — `project-mapper` incremental; watermark `.claude/maps/primary.map.md` (`60d547e1`). **[mechanism unresolved — see OWED above]**
 - `docs/changelog.md` — session block. · `@generated` §0 rollup (`docs/known-gaps.md`) + `master-list.md` §0.6 — `bun scripts/state.ts --write` (gate `--check`).
 - `handOffs/digest.md` — `bun scripts/state.ts --digest` (F1; per tick when a projected source moved).
 - flograph — `scripts/flograph.ts`. · block-lease registry — (not built yet).
