@@ -8,7 +8,7 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 
 ## Deputy status
 
-- **State:** LIVE — steady-state. S205 WRAPPED (74d7d0e2); 3 agents deferred to F3. First deputy instance, booted S203. On tick 34.
+- **State:** LIVE — steady-state. S205 WRAPPED (74d7d0e2); 3 agents deferred to F3. First deputy instance, booted S203. On tick 35.
 - **Self-poke loop:** `/loop 30m` — cron job `39fed15c` (`7,37 * * * *`). CronDelete to cancel.
 - **Last-absorbed delta seq:** S205 **[21]** (PA-source; the deputy appended F3 entry **[22]** itself).
 - **`deputy-maint`:** worktree `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint`, descends main (PA integrates via the merge-before-push gate). **Tip:** `git rev-parse deputy-maint`.
@@ -16,10 +16,10 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 
 ## PA↔vPA protocol — ACK + HEARTBEAT (S205 [19] ratification — record each tick)
 
-- **heartbeat:** tick **T34** · last-absorbed **[S205 21]** · deputy-maint tip = this commit (`git rev-parse deputy-maint`).
+- **heartbeat:** tick **T35** · last-absorbed **[S205 21]** (PA-source; S206 landings not yet delta-logged) · deputy-maint tip = this commit (`git rev-parse deputy-maint`).
 - **ACK (vpa:) [S205 10]** → re-read §3c; run flograph/dock --check + record health each tick (standing since T27).
 - **ACK (vpa:) [S205 19]** → adopted the ACK+heartbeat block (this tick T34); recording each tick going forward.
-- **ACK (F3 defer, wrap [21]) → DONE:** monitored the 3 deferred agents; **RESOLVED [20]'s block-splitter "CHECK status"** — appended delta-log **[22]** confirming `ab4fe40551c515110` COMPLETE @ `d67534d8`. All 3 deferred agents now confirmed done for the next-session landing.
+- **ACK (F3 defer, wrap [21]) → DELIVERED:** all 3 deferred agents LANDED in S206 (g-colon-shorthand e2516298 · g-engine-autodecl 105f1ee4 · slice-2 e1c20e3a). The reboot-bridge worked end-to-end; my delta-log [22] confirmed the block-splitter the S206 PA then landed.
 
 ## Standing facts (durable)
 
@@ -30,13 +30,12 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 
 ## Graph/dock health (§3c — per-tick standing step)
 
-- **Snapshot @ tick 34 (PASS):** flograph 428n/103e+ · currency-sweep **0 (clean)** · 17 unverified · 19 dangling · 0 dup · 0 err. dock --check PASS · coverage 0/628 (0.0%) · 0 orphans. dangling/unverified grew (new S205 docs: harness capstone + PA-vPA-protocol DD, asserted-not-verified) — benign, **no NEW finding**.
+- **Snapshot @ tick 35 (PASS):** PASS — 0 dup · 19 dangling(warn) · 17 unverified · 0 stale-ref (info) · 0 error(s) · dock PASS · cov 0/628 (0.0%). currency-sweep 0 (clean); dangling/unverified track new S205-S206 docs — **no NEW finding**.
 - **route to PA (open nit):** §3 plain `flograph --emit` vs §3c `--check --with-support --with-archive` → graph.json drifts to 190n default; deputy emits with matching flags. Align §3 with §3c.
 
 ## In-flight dispatches (F3 watch list)
 
-- **3 S205-deferred agents — ALL CONFIRMED DONE, awaiting next-session landing (S67 file-delta):** `aeca43607dd011a51` slice2 decl-coupled-validators (`5e39ab89` — needs within-node re-baseline + compound-field-rbt BUG file at landing) · `af5ed82479580631c` g-engine-autodecl (`ca43c723`) · `ab4fe40551c515110` g-colon-shorthand (`d67534d8` — deputy-confirmed, delta-log [22]). Worktrees retained (wrap deferred 6b-cleanup).
-- LANDED earlier S205: slice-3 (f4fae410) · g-match (9a7bc3a5).
+- _(none in flight)_ — the 5 S205 agents ALL LANDED: slice-3 (f4fae410) · g-match (9a7bc3a5) · g-colon-shorthand (e2516298) · g-engine-autodecl (105f1ee4) · slice-2 (e1c20e3a). Worktrees retained — 6b-cleanup PA-pending.
 
 ## Tick log (compressed)
 
@@ -45,11 +44,12 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 - **T15** S205 [1-6] gate RATIFIED + F1 realized + dock built. **T16-25** PA idle (10 no-ops).
 - **T26** S205 [7-9] (deref + flograph --with-archive + harness capstone). **T27** §3c wired. **T28** no-op. **T29-31** trucking burst (slice-3+g-match dispatched→LANDED; maps batched). **T32** maps REFRESHED cc765a5a→492b4bb9 (3-change batch). **T33** 5-agent watch; maps batch-2 held.
 - **T34** S205 WRAPPED — absorbed [11-21]; adopted ACK+heartbeat ([19]); F3-recorded block-splitter [22] (resolved [20] CHECK-status); recent-sessions regen (wrap anchor); §3c PASS. 3 agents deferred → next session lands.
+- **T35** all 3 S205-deferred agents LANDED in S206 (bridge delivered); maps REFRESHED 492b4bb9→359a1d83 (batch-2, leak-clean); digest regen; §3c PASS.
 
 ## Currency snapshot (@ tick 34)
 
 - **Board:** HIGH 0 · MED 10 (S205 closed 3 MED) · gap-counts + recent-sessions PASS.
-- **maps:** watermark `492b4bb9` — current for compiler-src (no new since; S205 deferred-agent fixes land next session → 2nd batch then).
+- **maps:** watermark **`359a1d83`** (REFRESHED T35, batch-2: g-colon-shorthand + g-engine-autodecl + slice-2; leak-verified clean; zero new E-codes; new gap g-compound-field-render-by-tag-unexpanded filed).
 - **digest:** current (head `74d7d0e2`, PA wrap-regen).
 - **flograph/dock:** §3c PASS (snapshot above).
 

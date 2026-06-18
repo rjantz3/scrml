@@ -1,9 +1,9 @@
-<!-- @digest head=74d7d0e2 delta-seq=21 -->
+<!-- @digest head=359a1d83 delta-seq=21 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `74d7d0e2`** + delta-log **[21]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `74d7d0e2`
+> **HEAD `359a1d83`** + delta-log **[21]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `359a1d83`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,8 +13,8 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `74d7d0e2`
-- **HIGH 0** · MED 10 · LOW 23 · Nominal 8
+## Board — from `@gap` tokens @ `359a1d83`
+- **HIGH 0** · MED 9 · LOW 23 · Nominal 8
 - Named open HIGHs: _none_
 
 ## Recent rulings — last 4 `rule` (delta-log S205 — 2026-06-18)
@@ -32,7 +32,7 @@
 - `[20]` state · COMPLETED-but-DEFERRED to next session (F3): g-engine-autodecl (ca43c723, done) + slice2 (5e39ab89, done — needs within-node re-baseline + compound-field-rbt BU… → hand-off S205-CLOSE open-thread #1
 
 ## State
-- Version: 0.7.0 · maps: 3 commits behind HEAD (watermark 492b4bb9, HEAD 74d7d0e2)
+- Version: 0.7.0 · maps: 8 commits behind HEAD (watermark 492b4bb9, HEAD 359a1d83)
 - Recent wraps:
   - 74d7d0e2 wrap(s205): close — 3 MED gaps + slice-3 <each> + 3 ratifications; 3 agent landings deferred (F3)
   - e723de04 chore(s204): wrap-finalize — recent-sessions + digest regen at settled HEAD d64d4519
