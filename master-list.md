@@ -87,7 +87,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `e723de04` — chore(s204): wrap-finalize — recent-sessions + digest regen at settled HEAD d64d4519 — **LOCAL-ONLY**
+- `e723de04` — chore(s204): wrap-finalize — recent-sessions + digest regen at settled HEAD d64d4519 — **pushed**
 - `69172d25` — wrap(s203): close — vPA-deputy LIVE (F1/F2/F3 + self-poke loop) + e2e backlog triaged + flograph filter; #3 fix left in-flight (first F3 reboot-bridge use) — **pushed**
 - `1bcf5c71` — wrap(s202): close — each-inline arc closed (board HIGH 0) + trucking flagship complete + flograph & L1 render-map built + 4 DDs (dock/e2e/deputy adopted, baton retired) — **pushed**
 - `caa8f77b` — wrap(s201): close — the 2-HIGH pass DONE (each-body-bare-variant + markup-value end-to-end) + member-arg; board HIGH 1 — **pushed**
