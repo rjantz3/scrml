@@ -12,7 +12,14 @@
 //   bun scripts/flograph.ts                  REPORT — node/edge counts + provenance sweep (stdout)
 //   bun scripts/flograph.ts --emit           EMIT   — write docs/graph/graph.json + graph.mmd (@generated)
 //   bun scripts/flograph.ts --check          CHECK  — dangling(WARN) + dup-id(ERROR) + drift(ERROR) + sweep(INFO); exit 1 on ERROR
+//   bun scripts/flograph.ts --mmd            MMD    — print a SCOPED mermaid to stdout (the readable-view filter; S203)
 //   bun scripts/flograph.ts --corpus a,b,c   override the default corpus globs (for the fixture demo)
+//
+//   --mmd MODIFIERS (the full-corpus graph is unreadable at scale → scope it; canonical --emit stays FULL):
+//     --filter k=v[,k=v]   keep nodes matching ALL predicates (k ∈ kind|status|sev). e.g. `--mmd --filter status=open`
+//                          = the actionable open-work subgraph; `--mmd --filter sev=HIGH` = criticals only.
+//     --focus <id> [--depth N]   keep <id> + its N-hop typed-edge neighborhood (default depth 1; both directions).
+//                          combine with --filter to intersect (neighborhood ∩ predicates).
 //
 // DATA MODEL (spec §2):
 //   node token : <!-- @node id=<id> kind=<kind> status=<status> [sev=<sev>] -->   (+ @gap alias → kind=gap)
@@ -151,6 +158,59 @@ function toMermaid(nodes: Map<string, Node>, edges: Edge[]): string {
   return out.join("\n") + "\n";
 }
 
+// ── Scoped render (S203 — the full-corpus .mmd is unreadable at scale; this filters a READABLE
+// subgraph to STDOUT). Applies ONLY to `--mmd`; the canonical `--emit` artifacts + `--check` drift
+// gate + the `--report` state.ts round-trip stay FULL/unfiltered (deputy + gate depend on them). ──
+type Scope = { kind?: string; status?: string; sev?: string };
+function parseFilter(s: string | undefined): Scope {
+  const out: Scope = {};
+  if (!s) return out;
+  for (const kv of s.split(",")) {
+    const [k, v] = kv.split("=").map((x) => x.trim());
+    if (k === "kind" || k === "status" || k === "sev") out[k] = v;
+  }
+  return out;
+}
+function nodeMatches(n: Node, f: Scope): boolean {
+  if (f.kind && n.kind !== f.kind) return false;
+  if (f.status && n.status !== f.status) return false;
+  if (f.sev && n.sev !== f.sev) return false;
+  return true;
+}
+// Attribute filter (keep nodes matching ALL of k=v) OR a focus node + N-hop typed-edge neighborhood
+// (both directions; `relates` edges excluded so the topology stays the typed-edge graph). When both
+// are given, the focus neighborhood is intersected with the attribute filter. Edges kept iff both
+// endpoints are kept.
+function applyScope(nodes: Map<string, Node>, edges: Edge[], f: Scope, focus: string | null, depth: number): { nodes: Map<string, Node>; edges: Edge[] } {
+  const keep = new Set<string>();
+  if (focus) {
+    keep.add(focus);
+    for (let d = 0; d < depth; d++) {
+      let grew = false;
+      for (const e of edges) {
+        if (e.type === "relates") continue;
+        if (keep.has(e.from) && !keep.has(e.target)) { keep.add(e.target); grew = true; }
+        if (keep.has(e.target) && !keep.has(e.from)) { keep.add(e.from); grew = true; }
+      }
+      if (!grew) break;
+    }
+    if (f.kind || f.status || f.sev) for (const id of [...keep]) { const n = nodes.get(id); if (n && !nodeMatches(n, f)) keep.delete(id); }
+  } else {
+    for (const [id, n] of nodes) if (nodeMatches(n, f)) keep.add(id);
+  }
+  const sn = new Map<string, Node>();
+  for (const id of keep) { const n = nodes.get(id); if (n) sn.set(id, n); }
+  const se = edges.filter((e) => keep.has(e.from) && keep.has(e.target));
+  return { nodes: sn, edges: se };
+}
+function mmdMode(corpus: string[], f: Scope, focus: string | null, depth: number): number {
+  const { nodes, edges } = build(corpus);
+  const scoped = (f.kind || f.status || f.sev || focus) ? applyScope(nodes, edges, f, focus, depth) : { nodes, edges };
+  process.stderr.write(`flograph --mmd: ${scoped.nodes.size}/${nodes.size} nodes${focus ? ` (focus ${focus}, depth ${depth})` : ""}${(f.kind || f.status || f.sev) ? ` (filter ${[f.kind && "kind=" + f.kind, f.status && "status=" + f.status, f.sev && "sev=" + f.sev].filter(Boolean).join(",")})` : ""}\n`);
+  process.stdout.write(toMermaid(scoped.nodes, scoped.edges));
+  return 0;
+}
+
 // ── Report ─────────────────────────────────────────────────────────────────
 function report(corpus: string[]) {
   const { nodes, dupes, edges } = build(corpus);
@@ -232,6 +292,14 @@ function globSync(pat: string): string[] {
   return existsSync(dir) ? readdirSync(dir).filter(f => re.test(f)).map(f => `${dir}/${f}`) : [];
 }
 
+const fIdx = args.indexOf("--filter");
+const filter = parseFilter(fIdx >= 0 ? args[fIdx + 1] : undefined);
+const focIdx = args.indexOf("--focus");
+const focus = focIdx >= 0 ? args[focIdx + 1] : null;
+const depIdx = args.indexOf("--depth");
+const depth = depIdx >= 0 ? (parseInt(args[depIdx + 1], 10) || 1) : 1;
+
 if (args.includes("--emit")) process.exit(emit(expandedCorpus));
 else if (args.includes("--check")) process.exit(check(expandedCorpus));
+else if (args.includes("--mmd")) process.exit(mmdMode(expandedCorpus, filter, focus, depth));
 else report(expandedCorpus);
