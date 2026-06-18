@@ -1,9 +1,9 @@
-<!-- @digest head=ccd3c511 delta-seq=10 -->
+<!-- @digest head=74d7d0e2 delta-seq=21 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `ccd3c511`** + delta-log **[10]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `ccd3c511`
+> **HEAD `74d7d0e2`** + delta-log **[21]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `74d7d0e2`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,27 +13,30 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `ccd3c511`
+## Board — from `@gap` tokens @ `74d7d0e2`
 - **HIGH 0** · MED 10 · LOW 23 · Nominal 8
 - Named open HIGHs: _none_
 
-## Recent rulings — last 1 `rule` (delta-log S205 — 2026-06-18)
+## Recent rulings — last 4 `rule` (delta-log S205 — 2026-06-18)
 - `[2]` rule/land · "push it and adopt the merge-before-push gate" — PUSHED the 3 deputy-maintenance commits (origin e723de04→0bc9fe0e, gate-checked deputy-maint ^main==0). RATIFIE… → pa-scrml.md S199 addendum + user-voice S205
+- `[15]` rule · MERGE-BEFORE-PUSH gate RATIFIED (user "adopt the merge-before-push gate") — pa.md S199 + wrap step 7; text corrected after a live-deputy divergence race (plain…
+- `[16]` rule · DEPUTY GUARDRAIL CHECKS wired (user "wire the deputy checks") — vpa-scrml.md step 3c: flograph/dock --check per tick + health snapshot + route-new-findings. (vp…
+- `[19]` rule/land · WRAP-EXAMINATION → ratified (a) S42 WRAP-THINNING (bloat irreducible, reference digest/delta-log/deputy-state for mechanical) + PA↔vPA PROTOCOL sharpen-async (DD decisive: OTP cast model; ACK+heartbeat in deputy-state; OQ-2 priority-flag NOT adopted). Encoded pa-scrml.md + vpa-scrml.md; DD committed. (vpa: adopt the ACK+heartbeat block per vpa-scrml.md §steady-state S205 — record it each tick going forward.)
 
 ## Recent activity — last 6 `disp`/`land`/`find`/`state`
-- `[5]` land · FLOGRAPH SLICE 4 (7d53119f) — cites/derivation layer. companion: frontmatter → synthesized cites edges (slice-3 pattern; corpus had 0 cites before); NEW --deriv… → 7d53119f
-- `[6]` land · DOCK SLICE 2 (686dc795) — coverage walker over scrml .scrml defs (inv1+inv3). --coverage: thin regex def-extractor (engine/channel/fn/type/component), inv1 dock… → 686dc795
-- `[7]` land · CORPUS-HYGIENE DEREF (user "act on the corpus-hygiene finding"; scrml 9ccbd0d4 + scrml-support 02055c8). 48 fully-superseded deep-dives → archive/deep-dives/ (4… → archive/deep-dives/ (48) + the two deref commits
-- `[8]` land · FLOGRAPH --with-archive PROVENANCE TIER (40-… commit). Completes the currency model: the deref cleaned the live DIR but left lineage dangling; --with-archive ad… → scripts/flograph.ts defaultCorpus + dock.ts nodeGraph
-- `[9]` land · FLOGEANCE HARNESS VALIDATION REPORT (capstone; scrml-support 9672d26). Records what S204-S205 built+PROVED (additive to the design DDs which predate the build):… → flogeance-harness-validation-2026-06-18.md
-- `[10]` state · WIRED the deputy flograph/dock GUARDRAIL checks (user "wire the deputy checks") — the "start benefiting from flograph NOW" lever (turns the built harnesses into… → vpa-scrml.md §3c · (vpa: NEW standing tick-step — re-read vpa-scrml.md §"Steady state" 3c; and THIS tick run `bun scripts/flograph.ts --check --with-support --with-archive` + `bun scripts/dock.ts --check` + `bun scripts/dock.ts --coverage`, record a health-snapshot line in deputy-state.md, route only NEW actionable findings to the PA per 3c)
+- `[13]` disp/land · MATCH-ALTERNATION — dispatched (a634857265ed2b578) + LANDED (9a7bc3a5). g-match-alternation-value-vs-derived (MED) closed; ast-builder S27 arm-scanner + parseAr…
+- `[14]` find/land · WITHIN-NODE PARITY push-FAILED (S198 omission recurred — slice-3 brief lacked the re-baseline+full-suite mandate). Re-baselined 13 over-budget trucking fixtures… → origin). LESSON: fold the re-baseline into every corpus-rewrite brief.
+- `[17]` find · DEPUTY-DILATION re-measure (clean cycle, digest booted current): F1 ~8.3k realized, total ~1.5% confirmed. + corpus-hygiene DEREF (48 superseded → archive/deep-dives, exhaustive 802-ref rewrite) + flograph --with-archive currency tier + flogeance-harness-validation capstone.
+- `[18]` disp · 3 dev agents + 1 DD dispatched (F3-bridged): slice2 decl-coupled-validators (aeca436) · g-engine-autodecl (af5ed82) · g-colon-shorthand (ab4fe40) · PA↔vPA-proto…
+- `[19]` rule/land · WRAP-EXAMINATION → ratified (a) S42 WRAP-THINNING (bloat irreducible, reference digest/delta-log/deputy-state for mechanical) + PA↔vPA PROTOCOL sharpen-async (DD decisive: OTP cast model; ACK+heartbeat in deputy-state; OQ-2 priority-flag NOT adopted). Encoded pa-scrml.md + vpa-scrml.md; DD committed. (vpa: adopt the ACK+heartbeat block per vpa-scrml.md §steady-state S205 — record it each tick going forward.)
+- `[20]` state · COMPLETED-but-DEFERRED to next session (F3): g-engine-autodecl (ca43c723, done) + slice2 (5e39ab89, done — needs within-node re-baseline + compound-field-rbt BU… → hand-off S205-CLOSE open-thread #1
 
 ## State
-- Version: 0.7.0 · maps: 1 commits behind HEAD (watermark 492b4bb9, HEAD ccd3c511)
+- Version: 0.7.0 · maps: 3 commits behind HEAD (watermark 492b4bb9, HEAD 74d7d0e2)
 - Recent wraps:
+  - 74d7d0e2 wrap(s205): close — 3 MED gaps + slice-3 <each> + 3 ratifications; 3 agent landings deferred (F3)
   - e723de04 chore(s204): wrap-finalize — recent-sessions + digest regen at settled HEAD d64d4519
   - 69172d25 wrap(s203): close — vPA-deputy LIVE (F1/F2/F3 + self-poke loop) + e2e backlog triaged + flograph filter; #3 fix left in-flight (first F3 reboot-bridge use)
-  - 1bcf5c71 wrap(s202): close — each-inline arc closed (board HIGH 0) + trucking flagship complete + flograph & L1 render-map built + 4 DDs (dock/e2e/deputy adopted, baton retired)
 
 ## NOT in the digest (read source for these)
 - Open questions awaiting you → `hand-off.md` §"OPEN THREADS / Open questions"
