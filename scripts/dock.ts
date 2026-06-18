@@ -110,9 +110,10 @@ function scan(corpus: string[]): Dock[] {
 
 // ── Resolve dock edges against the flograph node graph (the "riding") ──────────
 function nodeGraph(): Map<string, Node> {
-  // resolve against the FULL graph (with-support) — dock edges naturally point at DD / insight / gap nodes
-  // that live in the scrml-support design corpus.
-  return build(defaultCorpus(true)).nodes;
+  // resolve against the FULL graph (with-support + with-archive) — dock edges naturally point at DD /
+  // insight / gap nodes in the live design corpus, AND a dock may ground code in a now-SUPERSEDED decision
+  // (archive tier) — which inv2b (superseded-target) exists to catch. Including archive makes that check fire.
+  return build(defaultCorpus(true, true)).nodes;
 }
 
 type Resolved = { dock: Dock; edge: DockEdge; node: Node | undefined };

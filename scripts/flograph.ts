@@ -15,6 +15,9 @@
 //   bun scripts/flograph.ts --mmd            MMD    — print a SCOPED mermaid to stdout (the readable-view filter; S203)
 //   bun scripts/flograph.ts --derivation <id> DERIVE — the cites/decided-by/supersedes provenance CHAIN of
 //                                            <id>, both directions (S205 slice 4): RESTS-ON + SUPPORTS.
+//   bun scripts/flograph.ts --with-support   add the live design corpus (deep-dives + design-insights)
+//   bun scripts/flograph.ts --with-archive   ALSO add archive/deep-dives/ (the dereffed superseded tier) so
+//                                            supersession + derivation LINEAGE resolves; live dir stays clean.
 //   bun scripts/flograph.ts --corpus a,b,c   override the default corpus globs (for the fixture demo)
 //
 //   --mmd MODIFIERS (the full-corpus graph is unreadable at scale → scope it; canonical --emit stays FULL):
@@ -41,13 +44,26 @@ const SUPPORT = `${ROOT}/../scrml-support`;
 // "scrml first" (S202 ruling): default = scrml's OWN durable docs only. The scrml-support design
 // corpus (design-insights + deep-dives) is OPT-IN via --with-support (it adds ~230 doc-nodes of
 // noise that drowns scrml's own graph). --corpus a,b,c overrides entirely.
-export function defaultCorpus(withSupport = process.argv.includes("--with-support")): string[] {
+export function defaultCorpus(
+  withSupport = process.argv.includes("--with-support"),
+  withArchive = process.argv.includes("--with-archive"),
+): string[] {
   const files: string[] = [`${ROOT}/docs/known-gaps.md`, `${ROOT}/master-list.md`];
-  if (withSupport) {
+  // --with-archive implies the live design corpus too (you want history ON TOP of current, not instead).
+  if (withSupport || withArchive) {
     const insights = `${SUPPORT}/design-insights.md`;
     if (existsSync(insights)) files.push(insights);
     const ddDir = `${SUPPORT}/docs/deep-dives`;
     if (existsSync(ddDir)) for (const f of readdirSync(ddDir)) if (f.endsWith(".md")) files.push(`${ddDir}/${f}`);
+  }
+  // --with-archive (S205): ALSO include the dereffed superseded tier (archive/deep-dives/) so the
+  // supersession + derivation LINEAGE resolves as nodes (frontmatter status:superseded marks them). The
+  // live DIRECTORY stays clean (the deref's goal — dev-agent navigation); this is a DIAGNOSTIC provenance
+  // tier for currency/derivation queries. Completes the currency model: the sweep can now catch a LIVE
+  // node citing an ARCHIVED (superseded) node — the ouroboros — with the archived docs as resolvable nodes.
+  if (withArchive) {
+    const archDir = `${SUPPORT}/archive/deep-dives`;
+    if (existsSync(archDir)) for (const f of readdirSync(archDir)) if (f.endsWith(".md")) files.push(`${archDir}/${f}`);
   }
   return files.filter(existsSync);
 }
