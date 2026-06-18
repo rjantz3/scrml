@@ -1,48 +1,43 @@
-# scrml — Session 204 (CLOSE)
+# scrml — Session 205 (CLOSE)
 
-**Date:** 2026-06-17. **Previous:** `handOffs/hand-off-208.md` (S203 CLOSE). **Next pickup:** rotate THIS → `handOffs/hand-off-209.md` at OPEN. **Profile:** A — FULL ("read pa.md and start session" → default A).
+**Date:** 2026-06-18. **Previous:** `handOffs/hand-off-209.md` (S204 CLOSE). **Next pickup:** rotate THIS → `handOffs/hand-off-210.md` at OPEN. **Profile:** A — FULL. **Deputy:** LIVE all session.
 
-> **PUSH-PENDING (user said "wrap", not "wrap and push").** scrml is **0/N ahead** of origin with the wrap batch (the deputy-merge `24bff7f9` + 5 deputy maintenance commits + the wrap commit). scrml-support is 0/0 (all flograph/DD work pushed during the session). **NEXT-PA / user: authorize the push** (`git push origin main` — pre-push gate will re-run the full suite). Everything from the substantive session (#3 landing + flograph slices 1-3 + deputy-dilation) is ALREADY on origin; only the wrap-doc commit + the merged deputy maintenance are unpushed.
+> **FIRST thinned wrap (S42 re-scope ratified S205).** This hand-off bloats the IRREDUCIBLE (narrative · open-questions · anomalies) and REFERENCES the digest / delta-log / deputy-state for the MECHANICAL state — do NOT expect board tables / counts / in-flight-agent write-ups here; read them from:
+> - **Board / counts / maps / version** → `bun scripts/state.ts` + the digest (`handOffs/digest.md`, booted CURRENT).
+> - **In-flight detail / landings / rulings** → `handOffs/delta-log.md` S205 tail.
+> - **Deputy state / agent F3 watch / ACK+heartbeat** → `handOffs/deputy-state.md`.
 
-## ⭐ HEADLINE — a 4-arc session, all landed + (substantively) pushed
-1. **#3 landed** (`a6405053`) — `E-CONTROL-FLOW-IN-MARKUP` reject+recover diagnostic, the **F3 reboot-bridge's first real use** (S203 wrapped with #3 in-flight; this fresh PA re-attached + landed it). Board: g-raw-interp resolved, **MED 12→11**.
-2. **flograph arc (slices 1-3)** — validated the full typed-edge + provenance + currency vocabulary against scrml's corpus (the spec §6 de-risk before flogeance-in-scrml). Found + fixed a real parse bug; surfaced real findings.
-3. **deputy-dilation loop closed** — measured the deputy's actual token offload (~1.5-3%, **NOT the projected 7-10%** — frame-conflation); corrected + verified. The verify-before-claim system caught its own parent project's optimism.
-4. **The deputy ran live the whole session** (F1/F2/F3) — reboot-bridge + digest/recent-sessions/deputy-state maintenance; PA integrated `deputy-maint` at commit-points + this wrap.
+## ⭐ S205 — a context-economics-enforced deep session
+The user enforced context-economics hard (user-voice S205 verbatim): ~50% of a session is fixed start/stop ceremony; don't burn the warm ~38% on ceremony/hedging/wrap-reflexes; and **with F3, agent landings persist across sessions → don't hold back DISPATCHING on budget grounds** (dispatching is ~free on PA context; the next session lands the in-flight). The PA's drift to wrap-proposals + "land before I run out" was the called-out waste. Net: 4 agents dispatched, 2 landed in-session, 3 deferred to next session (F3) by design — not by failure.
 
-## Session-close state
-- **HEAD:** scrml `24bff7f9` (the deputy-merge; the wrap commit lands on top) — **PUSH-PENDING**. scrml-support `2b9d6e3` (0/0, pushed). origin scrml at `0a9fdc8e` (slice 3).
-- **Board:** **HIGH 0 · MED 11 · LOW 23 · Nominal 8** (S204: g-raw-interp-channel-meta-corners MED→resolved). v0.7.0.
-- **Tests:** full `bun run test` **24434 / 0 / 231 skip** + TodoMVC PASS (pre-push gate, run 3× this session — slices 1/2/3 + deputy-measure pushes, all green).
-- **Coherence:** scrml 0/N-ahead (wrap batch, push-pending); scrml-support 0/0.
-- **Worktrees:** main + `../scrml-deputy-maint` (PERSISTENT — do NOT remove). Agent worktree `agent-af88c53a` cleaned at the #3 landing (6b).
-- **Maps:** watermark `60d547e1` — **STALE; 6c OWED** (#3 touched `compiler/src/ast-builder.js`). DEFERRED to the deputy (it owns maps; flagged "owed" at its tick 9). `state.ts --check` WARNs on it. NOT silent. The deputy refreshes on its next tick OR the next session does it.
-- **Digest:** the deputy regen'd through [6]; **regen at the settled wrap HEAD** (`bun scripts/state.ts --digest`) so next session opens `digest: current`. (Pending the wrap commit.)
-- **Experts staged:** xstate · elm-architecture · threejs-webgl-integration.
+## ⏭️ OPEN THREADS / Open questions (the irreducible)
 
-## ⏭️ OPEN THREADS / Open questions
-1. **PUSH the wrap batch** (above) — first action if the user authorizes.
-2. **Maps 6c owed** — the deputy's job (deferred); flagged non-silent. If the deputy hasn't done it by next session-start, run `project-mapper` incremental on `compiler/src/ast-builder.js`.
-3. **NEW finding — 53 superseded docs physically in `docs/deep-dives/`** (the live corpus), not `archive/`. flograph slice 3 surfaced the count (it now reads `superseded-by:` frontmatter). Per pa.md scope principle they're **deref-to-archive candidates** — a corpus-hygiene thread for a future session. NOT urgent.
-4. **Re-measure deputy dilation on a CLEAN cycle** (current digest at start + a deputy-done wrap) to capture the F1 that was 0 this session (booted STALE) + tighten the ~1.5-3% band. The vpa-deputy DD §S204-measurement carries the open follow-up.
-5. **flograph next** (if continued): slice 4 = the `cites`/derivation layer · the dock thin-build (rides flograph) · block-lease · the flogeance-in-scrml product (sibling repo, separate Claude instance).
-6. **e2e triage residue (LOW, open):** `g-reflect-variant-shape-inconsistent` · `g-rendermap-needs-server-classification` · `g-mount-hang-rails-dev` (#4) · meta-in-component-001 sample bug (optional).
-7. **Trucking corpus slices 2-5** (S193 carried): decl-coupled validators · `<each>` sweep · errors-as-states · typed props.
-8. **Deputy follow-ups (deferred):** the commit-gate path-scoped skip (the ~17k-test overhead on derived/doc commits — hit ~6× this session); docs/graph/ is untracked-not-ignored (gitignore it OR deputy-commit it — deputy-surface decision).
+### 1. LAND the 3 deferred agents (F3-bridged; their worktrees + branches persist)
+- **g-engine-autodecl** — agent `af5ed82479580631c`, FINAL_SHA `ca43c723`, branch `worktree-agent-af5ed82479580631c`. COMPLETE. Type-system fix (the genuine root was a bare-variant at a **comparison-in-`return`** position, NOT the engine-write I scoped — R26 reverse-direction caught it). Land: file-delta `compiler/src/type-system.ts` + the new test `compiler/tests/unit/engine-autodecl-bare-variant-write.test.js`; **reconcile known-gaps via TARGETED flip** (its base predates the other S205 known-gaps changes — do NOT wholesale file-delta); PA-independent repro-verify; full suite. Agent ran full `bun run test` 24444/0.
+- **slice 2 (decl-coupled validators)** — agent `aeca43607dd011a51`, FINAL_SHA `5e39ab89`, branch `worktree-agent-aeca43607dd011a51`. COMPLETE. 9 forms → Shape-2 compound + §55 validity surface (7 files). **TWO landing-todos:** (a) **re-baseline the within-node parity allowlist** for its changed fixtures BEFORE pushing — it reported only the pre-commit SUBSET (17148), not the full suite, so the parity gate WILL reject like slice 3 did (run `bun test compiler/tests/parser-conformance-within-node.test.js`, set over-budget entries to printed `raw`). (b) **File the compiler bug it found:** compound-field Shape-2 render-by-tag — `<field/>` for a Shape-2 field that's a CHILD of a Variant-C compound emits a LITERAL `<field />` tag silently (the input never renders; the §55 surface itself wires fine). Agent worked around with raw `bind:value=@compound.field`. Repro `/tmp/probe-compound-rbt.scrml` (won't survive — re-derive). Sev MED.
+- **g-colon-shorthand-markup-misparse** — agent `ab4fe40551c515110`, branch `worktree-agent-ab4fe40551c515110`. **CHECK STATUS** (was IN-FLIGHT at wrap — may have completed; deputy-state F3 watch + delta-log `disp` will show). Block-splitter fix (the `:`-shorthand-markup-body misparse → misleading E-STRUCTURAL). If complete: file-delta block-splitter.js + test + targeted known-gaps flip.
+- **Reconcile note:** all 3 agents' bases predate sibling S205 landings → known-gaps + (possibly) ast-builder/§11.1 touch overlaps; land via TARGETED known-gaps flips (not wholesale file-delta), per the S205 pattern. Fix-files were kept disjoint (type-system / trucking / block-splitter) to minimize this.
 
-## flograph arc detail (S204)
-- **Slice 1** (`d7f7226c` + scrml-support `499f482`): board-`<each>` saga topology (blocks-chain + sibling relates + decided-by-verified) + Insight 25←26 supersedes + **acceptance #4** ("what blocks the board" answers from the graph). **Tool bug found + fixed:** inline-code-span `[[...]]` (backtick-wrapped example syntax) parsed as real edges → polluted the sweep; fixed (strip inline-code before the edge scan); **bare-edge convention** ratified in spec §2.2.
-- **Slice 2** (scrml-support `e248ebd` + scrml `5295a61c`): 4 design-arc DDs with `decided-by` provenance, honest verified/asserted split → **the provenance sweep surfaces real asserted claims** (deputy-dilation + flux-mmorpg).
-- **deputy-dilation measured** (scrml-support `d547a69` + scrml `d9fee6d8`): ~1.5-3% PA-window dilation (not 7-10%); the projection conflated PA-context-window with total-session-token-cost. Edge flipped to verified; addendum in the DD.
-- **Slice 3** (scrml `0a9fdc8e` + scrml-support `2b9d6e3`): flograph now **consumes write-once frontmatter** (`status:` → node currency; `superseded-by:` → auto-synthesized supersedes edges — **52 edges free, zero annotation**) + **currency-sweep** check. Surfaced the 53-superseded-in-live-corpus finding. GAP round-trip intact.
-- Graph state (`--with-support`): 426 nodes, 89 edges (blocks:3 decided-by:6 relates:28 supersedes:52), provenance-sweep 1 (flux), currency-sweep 0, superseded-nodes 53. `docs/graph/` artifacts are deputy-owned (untracked).
+### 2. RATIFIED + encoded this session (all on origin / committed)
+- **Merge-before-push HARD gate** (pa.md S199 + wrap step 7). **S42 wrap-thinning re-scope** (pa.md — this hand-off is its first use). **PA↔vPA protocol = sharpen-async** (vpa-scrml.md ACK+heartbeat; DD `pa-vpa-communication-protocol-2026-06-18.md`; OQ-2 priority-flag NOT adopted). **Deputy guardrail checks** (vpa-scrml.md step 3c — flograph/dock `--check` per tick).
 
-## Recordkeeping (S204)
-- **DONE:** #3 landing + R26 dual-verify + gap flip; flograph slices 1-3 + the tool fix + spec §2.2/§2.1/§4.5; deputy-dilation measurement + DD addendum; delta-log [1]-[7]; deputy-maint merged; this hand-off + master-list §0 + changelog S204 + user-voice S204.
-- **PENDING AT WRAP-CLOSE:** push the wrap batch (authorize); digest regen at settled HEAD; maps 6c (deputy).
+### 3. Carried threads
+- **flogeance/flograph:** slice 4 (derivation corpus-annotation) · dock production-integration · block-lease build · the harness-validation capstone (`flogeance-harness-validation-2026-06-18.md`) is the handoff to flogeance-in-scrml (separate instance).
+- **Trucking slices:** slice 2 landing → slice 4 (errors-as-states — 148 `?{}` / 0 `!{}` today, the biggest idiom gap) → slice 5 (typed props — mostly verification).
+- **Open MEDs** (board): g-shorthand-interp-engine-element-loci · g-engine-server-flag-silent-swallow (entangled w/ E-leg) · g-tier1-ssr-prerender · g-match-alternation... (resolved) · r28-c2 · a5 · bug-1 · bug-14. **e2e LOW residue:** g-reflect-variant-shape · g-rendermap-server-classification · g-mount-hang-rails · meta-in-component-001.
+- **Corpus hygiene (carried):** 53→5 superseded-in-live-corpus closed via the deref; `--with-archive` is the diagnostic-lineage tier.
+
+## ⚠ Anomalies / lessons (irreducible)
+- **The S198 within-node-parity omission RECURRED** (slice-3 brief didn't mandate the re-baseline + full-suite → pre-push gate rejected → re-baselined). **FOLD INTO EVERY corpus-rewrite brief:** "run FULL `bun run test`; re-baseline the M6.5.b.0 allowlist for over-budget fixtures IN THE LANDING." Slice-2's landing has this todo pending (above).
+- **Reconcile-at-landing for sibling agents:** when ≥2 agents touch known-gaps (each flips its gap) off bases that predate each other's landings, land via TARGETED flips, not wholesale file-delta (would clobber sibling flips + my precedence-resolve + BUG-1). Did this for match-alternation; pending for the 3 deferred.
+- **Push "exit 0" ≠ push succeeded** when the push is a compound bg command (the last `git rev-list` exits 0); always grep the push output for `main -> main` / `rejected` + verify `origin...HEAD 0/0`.
+
+## Recordkeeping
+- **Worktrees (6b DEFERRED to next session):** 5 agent worktrees live — RETAIN the 3 unlanded (af5ed82 g-engine, aeca436 slice2, ab4fe40 g-colon) for landing; the 2 landed (a3a475 slice3, a634857 match-alt) can be removed next session; + the PERSISTENT `../scrml-deputy-maint` (NEVER remove). Light disk debt, non-blocking.
+- **Push state:** scrml main + scrml-support — see the wrap-close coherence line in delta-log; pushed at wrap.
 
 ## pa.md directives in force
-R1–R5 · `---` delimiter · Profile A · step-0 digest-first (S203) · S88 isolation-explicit · S99/S126 path-discipline · S136 BRIEF.md archival · S138 R26 dual-verify · S147 coherence · S164 bg-commit-race · S180 waiting-time 3-tier · S198 context-economics/partner-not-list · deputy LIVE (S203, PA integrates `deputy-maint`) · wrap 8-step.
+R1–R5 · `---` delimiter · Profile A · digest-first (S203) · S88 isolation · S99/S126 path-discipline · S136 BRIEF.md · S138 R26 · S147 coherence · S164 bg-commit-race · **S205 merge-before-push gate · S205 S42 wrap-thinning · S205 PA↔vPA sharpen-async (ACK+heartbeat)** · deputy LIVE + step-3c guardrail checks · wrap 8-step (thinned).
 
 ## Tags
-#session-204 #close #profile-a #3-landed #e-control-flow-in-markup #f3-reboot-bridge-first-use #flograph-slices-1-2-3 #provenance-sweep #currency-sweep #deputy-dilation-measured-2-3pct #53-superseded-in-live-corpus #board-high-0 #push-pending #maps-6c-owed-deputy
+#session-205 #close #profile-a #thinned-wrap-first-use #context-economics-enforced #merge-before-push-gate #wrap-thinning #pa-vpa-protocol-sharpen-async #deputy-guardrail-checks #3-MED-gaps-closed #slice-3-each-sweep #4-agents-dispatched #3-deferred-landings-f3 #board-high-0-med-10
