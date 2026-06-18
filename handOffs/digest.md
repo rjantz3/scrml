@@ -1,9 +1,9 @@
-<!-- @digest head=ffb44a7f delta-seq=9 -->
+<!-- @digest head=376f1d76 delta-seq=10 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `ffb44a7f`** + delta-log **[9]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `ffb44a7f`
+> **HEAD `376f1d76`** + delta-log **[10]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `376f1d76`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,7 +13,7 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `ffb44a7f`
+## Board — from `@gap` tokens @ `376f1d76`
 - **HIGH 0** · MED 14 · LOW 21 · Nominal 8
 - Named open HIGHs: _none_
 
@@ -23,15 +23,15 @@
 - `[9]` land/rule · FULL GO-LIVE (user "lets get this system live while warm"; scope = Full). All 3 deputy functions now LIVE: F3 reboot-bridge staged→LIVE (continuous dispatched-a… → vpa-scrml.md §"Operating the live system" + pa-scrml.md S199-addendum + 7d91005
 
 ## Recent activity — last 6 `disp`/`land`/`find`/`state`
-- `[4]` land · THIN FUNCTION-2 DEPUTY SPEC AUTHORED (PA-direct; NOT yet committed): (1) `vpa-scrml.md` rewritten baton→deputy — 3 functions (F2 maintenance LIVE / F1 digest +… → vpa-scrml.md · pa-scrml.md · handOffs/{delta-log,deputy-state}.md · memory
 - `[5]` land · DEPUTY SPEC COMMITTED + PUSHED — scrml-support e041f4c (vpa-scrml.md + pa-scrml.md; 0/0) · scrml 181e2f00 (delta-log + deputy-state + hand-off; pre-push 24429/0… → scrml/vpa.md + scrml-support/vpa-scrml.md
 - `[6]` state · FIRST DEPUTY RUN VALIDATED (smoke-test PASS). Deputy provisioned `../scrml-deputy-maint` (sibling, OUTSIDE .claude/worktrees/ — resolves the S83 wrap-6b collisi… → 68ce0ee1 + scrml-support 9822ae4
 - `[7]` land · FUNCTION 1 (digest) LIVE. Built the generator `bun scripts/state.ts --digest` → `handOffs/digest.md` (extends state.ts; DRY — reuses gapCounts/mapsStaleness/ver… → scripts/state.ts + scrml-support 1085301
 - `[8]` find/land · DIGEST FRESHNESS FLAW found + fixed (verify-before-claim, on the FIRST real deputy digest). The digest's OWN commit advances HEAD past its `head=` stamp → the s… → scripts/state.ts digestStaleness + scrml-support dcdda6f
 - `[9]` land/rule · FULL GO-LIVE (user "lets get this system live while warm"; scope = Full). All 3 deputy functions now LIVE: F3 reboot-bridge staged→LIVE (continuous dispatched-a… → vpa-scrml.md §"Operating the live system" + pa-scrml.md S199-addendum + 7d91005
+- `[10]` disp · e2e-backlog OPENED (user "e2e backlog"). R26-reverse VERIFIED all 3 classes reproduce on current build (observe-one): #2 nullish-text (03-contact-book#populated… → docs/changes/g-raw-interp-channel-meta-corners-2026-06-17/BRIEF.md + agent abcf64f7198fe9cf3
 
 ## State
-- Version: 0.7.0 · maps: 11 commits behind HEAD (watermark 60d547e1, HEAD ffb44a7f)
+- Version: 0.7.0 · maps: 14 commits behind HEAD (watermark 60d547e1, HEAD 376f1d76)
 - Recent wraps:
   - 1bcf5c71 wrap(s202): close — each-inline arc closed (board HIGH 0) + trucking flagship complete + flograph & L1 render-map built + 4 DDs (dock/e2e/deputy adopted, baton retired)
   - caa8f77b wrap(s201): close — the 2-HIGH pass DONE (each-body-bare-variant + markup-value end-to-end) + member-arg; board HIGH 1
