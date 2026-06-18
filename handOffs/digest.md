@@ -1,9 +1,9 @@
-<!-- @digest head=f69219d3 delta-seq=12 -->
+<!-- @digest head=a93154ac delta-seq=15 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `f69219d3`** + delta-log **[12]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `f69219d3`
+> **HEAD `a93154ac`** + delta-log **[15]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `a93154ac`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,25 +13,26 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `f69219d3`
+## Board — from `@gap` tokens @ `a93154ac`
 - **HIGH 0** · MED 9 · LOW 23 · Nominal 8
 - Named open HIGHs: _none_
 
-## Recent rulings — last 3 `rule` (delta-log S206 — 2026-06-18)
+## Recent rulings — last 4 `rule` (delta-log S206 — 2026-06-18)
 - `[5]` rule/land · "land all 3, hold push" then "push" — PUSHED (gate caught deputy tick-34 strand → FF-merged first). origin 9f203d82→359a1d83. full suite 24463/0. board HIGH0/ME… → 359a1d83
 - `[6]` rule/land · user "get flograph to safe parallel same-file disps; a then b" → built (a) block-scope INTERIM: dock --units + dock --diff-scope --owns (PA-direct, thin; lang-a… → scrml 1b15f701 + DD 4ba445c
 - `[8]` rule/disp · user REJECTED b2-ii componentize-to-lease — co-location-of-behaviour axiom + no-refactor-tax (user-voice S206, banked memory feedback_colocation_of_behaviour_ax… → user-voice 1f129fe
+- `[14]` rule · BLOCK-NAMING via the COMPILER not a 2nd parser (user Q) — for block-lease block-ID/extent extraction the scrml compiler's real parser/AST/symbol-table/RW-DG is… → conversation S206
 
 ## Recent activity — last 6 `disp`/`land`/`find`/`state`
-- `[7]` find/land · (b1) Scheme-C carried-comment anchor PROVEN for named defs — rename/move survive (inv1 100%), the DROPPED-anchor failure CAUGHT by the inv3 orphan WARN, split s… → scrml 10255c94 + DD d538a75
-- `[8]` rule/disp · user REJECTED b2-ii componentize-to-lease — co-location-of-behaviour axiom + no-refactor-tax (user-voice S206, banked memory feedback_colocation_of_behaviour_ax… → user-voice 1f129fe
 - `[9]` find · DD DONE (markup-lease-anchor-2026-06-18, b44d94b) — state-keyed seed VALIDATED on the real messages.scrml case (zero file change, false-collision fixed = co-loc… → markup-lease-anchor DD
 - `[10]` state · pushed scrml-support batch (DD §7.2 + user-voice + DD doc → origin b44d94b); scrml batch in flight (b1 10255c94 + deputy ticks 36/37 FF'd). NEXT: user decision… → push
 - `[11]` disp/find · dPA DELIBERATION-SATELLITE DD done (dpa-deliberation-satellite-2026-06-18, scrml-support eb7a216) — user idea "bank debates/DDs, run batched in a dPA sub-sessio… → dpa DD §10
 - `[12]` state · CANDIDATE banked (user "just a thought", NOT ratified): CC user-prompts to vPA via transcript-tail (~free) → (1) vPA mechanical user-voice capture + PA curates… → hand-off thread 2b
+- `[13]` find · vPA-COMMUNICATION-SURFACE DD done (vpa-communication-surface-2026-06-18, scrml-support 0c8e136) — folds inbox-triage + pub/sub + pointer-router + transcript-cap… → vpa-comms-surface DD
+- `[15]` disp/find · BLOCK-ANALYSIS-EMIT SCOPE done (Plan agent → docs/changes/block-analysis-emit-2026-06-18/SCOPE-AND-DECOMPOSITION.md) — the compiler-emits-block-analysis impl pl… → SCOPE-AND-DECOMPOSITION.md
 
 ## State
-- Version: 0.7.0 · maps: 8 commits behind HEAD (watermark 359a1d83, HEAD f69219d3)
+- Version: 0.7.0 · maps: 10 commits behind HEAD (watermark 359a1d83, HEAD a93154ac)
 - Recent wraps:
   - 74d7d0e2 wrap(s205): close — 3 MED gaps + slice-3 <each> + 3 ratifications; 3 agent landings deferred (F3)
   - e723de04 chore(s204): wrap-finalize — recent-sessions + digest regen at settled HEAD d64d4519

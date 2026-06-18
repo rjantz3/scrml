@@ -8,15 +8,15 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 
 ## Deputy status
 
-- **State:** LIVE — steady-state. S206 active; flogeance renamed → flogence (S206); block-lease primitive building. First deputy instance, booted S203. On tick 44.
+- **State:** LIVE — steady-state. S206 active; flogeance renamed → flogence (S206); block-lease primitive building. First deputy instance, booted S203. On tick 47.
 - **Self-poke loop:** `/loop 30m` — cron job `39fed15c` (`7,37 * * * *`). CronDelete to cancel.
-- **Last-absorbed delta seq:** S206 **[12]** (PA-source; deputy appended S205 F3 [22]).
+- **Last-absorbed delta seq:** S206 **[15]** (PA-source; deputy appended S205 F3 [22]).
 - **`deputy-maint`:** worktree `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint`, descends main (PA integrates via the merge-before-push gate). **Tip:** `git rev-parse deputy-maint`.
 - **Owed maintenance:** none. (digest current — PA wrap-regen 74d7d0e2; recent-sessions regen'd this tick; maps current.)
 
 ## PA↔vPA protocol — ACK + HEARTBEAT (S205 [19] ratification — record each tick)
 
-- **heartbeat:** tick **T44** · last-absorbed **[S206 12]** · deputy-maint tip = this commit (`git rev-parse deputy-maint`) · deputy-maint tip = this commit (`git rev-parse deputy-maint`).
+- **heartbeat:** tick **T47** · last-absorbed **[S206 15]** · deputy-maint tip = this commit (`git rev-parse deputy-maint`).
 - **ACK (vpa:) [S205 10]** → re-read §3c; run flograph/dock --check + record health each tick (standing since T27).
 - **ACK (vpa:) [S205 19]** → adopted the ACK+heartbeat block (this tick T34); recording each tick going forward.
 - **ACK (F3 defer, wrap [21]) → DELIVERED:** all 3 deferred agents LANDED in S206 (g-colon-shorthand e2516298 · g-engine-autodecl 105f1ee4 · slice-2 e1c20e3a). The reboot-bridge worked end-to-end; my delta-log [22] confirmed the block-splitter the S206 PA then landed.
