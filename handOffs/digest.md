@@ -1,9 +1,9 @@
-<!-- @digest head=72dc4fdb delta-seq=6 -->
+<!-- @digest head=06d99651 delta-seq=9 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `72dc4fdb`** + delta-log **[6]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `72dc4fdb`
+> **HEAD `06d99651`** + delta-log **[9]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `06d99651`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,22 +13,24 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `72dc4fdb`
+## Board — from `@gap` tokens @ `06d99651`
 - **HIGH 0** · MED 9 · LOW 23 · Nominal 8
 - Named open HIGHs: _none_
 
-## Recent rulings — last 1 `rule` (delta-log S209 — 2026-06-19)
+## Recent rulings — last 2 `rule` (delta-log S209 — 2026-06-19)
 - `[6]` rule · GRAFT RATIFIED (user "record pa direct") — ship a-A(reason-death list)+b-B(footprint surface) as INVESTIGATION-SURFACES-WITH-CONTEXT not scores; gate b-A(dock-r… → design-insights.md
+- `[9]` rule · sPA AUTONOMY CORRECTION (user "they need to run autonomously. I had to nudge 1 along" + "Im still answering Qs for 11"). ENCODED: spa-scrml.md §"Standing autono… → spa-scrml.md + spa.md
 
-## Recent activity — last 5 `disp`/`land`/`find`/`state`
-- `[1]` state · COLD S209 boot (Profile A FULL "read pa.md and start session"; digest CURRENT @fb7ac8ff sources-unchanged@d0c5a96a → volatile board trusted). scrml+scrml-suppor… → hand-off-213
+## Recent activity — last 6 `disp`/`land`/`find`/`state`
 - `[2]` disp/find · dock-for-codebase-health DD (user "DD it"; scrml-deep-dive, no-worktree pure-research). VERIFIED CONTRADICTION vs PA brief: coverage NOT the central gate — TWO… → DD doc
 - `[3]` disp/find · debate (user "run the debate"; debate-curator autonomous-COMPOSED — the 3 DD-recommended experts NOT loadable mid-session [S198 harness-cache friction]; ran com… → debate transcript (curator return)
 - `[4]` land · dock-health.ts BUILT (user "build the ungated"; b-B, PA-direct, standalone scripts/dock-health.ts imports flograph globSync/rel + shells --emit-block-analysis).… → scripts/dock-health.ts
 - `[5]` find · DOG-FOOD REFINEMENT beyond the debate: scrml cell identity is FILE-LOCAL (17 pages each own a distinct <errorMessage>) — bare-name cross-file agg conflates; cha… → dock-health.ts ④
+- `[7]` disp/land · sPA ss1 FIRST LIVE RUN re-integrated (user "go, integrate") — the sPA contract's untested-first-run PROOF, clean end-to-end. ss1 (server-emit-route-inference) r… → 37a9a8c9 + known-gaps
+- `[8]` land · PUSHED ss1 batch origin 72dc4fdb→df62b44f (ss1 x2 + PA reconcile + deputy 5-tick merge; merge-before-push gate fired [deputy 5 ahead: ticks 86/88/89/89b/86-wrap… → df62b44f
 
 ## State
-- Version: 0.7.0 · maps: 8 commits behind HEAD (watermark 9afc746e, HEAD 72dc4fdb)
+- Version: 0.7.0 · maps: 19 commits behind HEAD (watermark 9afc746e, HEAD 06d99651)
 - Recent wraps:
   - d0c5a96a chore(s208): wrap-finalize — recent-sessions + digest regen at settled HEAD
   - 916fe3ae wrap(s207): close — block-analysis-emit arc complete (D3-D5) + 2 MED codegen fixes + flogence pure-module HIGH (Fix A in-flight)
