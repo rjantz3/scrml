@@ -503,14 +503,64 @@ export function tokenizeAttributes(raw: string, baseOffset: number, baseLine: nu
           const vc = col;
           advance(); // consume opening `"`
           let str = "";
-          while (pos < raw.length && raw[pos] !== '"') {
-            if (raw[pos] === "\\" && pos + 1 < raw.length) {
-              str += raw[pos] + raw[pos + 1];
+          // g-each-peritem-attr-ternary-quoted-arms (2026-06-18) — a `"` that
+          // lives INSIDE a `${...}` (or `?{`/`#{`/`!{`/`^{`/`~{`/bare-`{`)
+          // interpolation is a string-literal delimiter of the INTERPOLATED
+          // EXPRESSION (`${ cond ? "bg-yellow" : "bg-white" }`), NOT the
+          // terminator of the attribute string. The pre-fix reader stopped at
+          // the first such inner `"`, truncating the value to `${... ? ` (both
+          // ternary arms dropped) → emit-each/emit-html later emitted invalid
+          // JS (`...) ? }`) → E-CODEGEN-INVALID-JS. Track interpolation depth
+          // (brace-balanced, opened by `${`/sigil-`{`/bare-`{`) so the
+          // value-terminating `"` is only the one seen at depth 0. Inside an
+          // interpolation we also skip over nested string literals (`'…'` /
+          // `"…"`) so their braces/quotes are opaque to the depth scan.
+          let interpDepth = 0;       // brace depth inside any `${…}` interpolation
+          let interpStringCh = "";   // active string delimiter inside the interpolation, "" when none
+          while (pos < raw.length) {
+            const sc = raw[pos];
+            if (interpDepth === 0 && sc === '"') break; // depth-0 `"` terminates the attr value
+            if (sc === "\\" && pos + 1 < raw.length) {
+              str += sc + raw[pos + 1];
               advance(2);
-            } else {
-              str += raw[pos];
-              advance();
+              continue;
             }
+            if (interpDepth > 0 && interpStringCh) {
+              // Inside a string literal within the interpolation — opaque until
+              // its matching delimiter (the leading `\\` escape is handled above).
+              if (sc === interpStringCh) interpStringCh = "";
+              str += sc;
+              advance();
+              continue;
+            }
+            if (interpDepth > 0 && (sc === '"' || sc === "'" || sc === "`")) {
+              // Open a nested string literal inside the interpolation.
+              interpStringCh = sc;
+              str += sc;
+              advance();
+              continue;
+            }
+            // Open an interpolation: `${`, `?{`, `#{`, `!{`, `^{`, `~{`, or bare `{`.
+            if (sc === "{") {
+              interpDepth++;
+              str += sc;
+              advance();
+              continue;
+            }
+            if ((sc === "$" || sc === "?" || sc === "#" || sc === "!" || sc === "^" || sc === "~") && pos + 1 < raw.length && raw[pos + 1] === "{") {
+              interpDepth++;
+              str += sc + "{";
+              advance(2);
+              continue;
+            }
+            if (sc === "}" && interpDepth > 0) {
+              interpDepth--;
+              str += sc;
+              advance();
+              continue;
+            }
+            str += sc;
+            advance();
           }
           if (ch() === '"') advance(); // consume closing `"`
           if (name === "if") {
