@@ -1,9 +1,9 @@
-<!-- @digest head=d931f8be delta-seq=14 -->
+<!-- @digest head=099207c0 delta-seq=14 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `d931f8be`** + delta-log **[14]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `d931f8be`
+> **HEAD `099207c0`** + delta-log **[14]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `099207c0`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,7 +13,7 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `d931f8be`
+## Board — from `@gap` tokens @ `099207c0`
 - **HIGH 1** · MED 8 · LOW 23 · Nominal 8
 - Named open HIGHs: `g-pure-module-server-emit-missing`
 
@@ -29,7 +29,7 @@
 - `[14]` state · g-pure-module-server-emit FIX IN-FLIGHT (agent a56577f8 RATE-LIMITED @72-tool-uses — 5th env crash; worktree CLEAN, no loss). Fix A COMMITTED in-branch @9b3fe86… → 9b3fe86a + progress.md
 
 ## State
-- Version: 0.7.0 · maps: current
+- Version: 0.7.0 · maps: 1 commits behind HEAD (watermark d931f8be, HEAD 099207c0)
 - Recent wraps:
   - 916fe3ae wrap(s207): close — block-analysis-emit arc complete (D3-D5) + 2 MED codegen fixes + flogence pure-module HIGH (Fix A in-flight)
   - 6512b592 wrap(s206): close — landed block-analysis-emit D1+D2; birthed the flogence satellite architecture; flogeance→flogence rename

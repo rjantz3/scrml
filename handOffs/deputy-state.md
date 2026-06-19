@@ -8,7 +8,7 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 
 ## Deputy status
 
-- **State:** LIVE — steady-state. **S207 WRAPPED** (916fe3ae): block-analysis-emit v1 arc COMPLETE (D1-D5) + 3 MED codegen fixes; the **g-pure-module-server-emit HIGH fix is IN-FLIGHT (agent CRASHED, deferred to S208)**. flogence (renamed S206). On tick 76.
+- **State:** LIVE — steady-state. **S207 WRAPPED** (916fe3ae): block-analysis-emit v1 arc COMPLETE (D1-D5) + 3 MED codegen fixes; the **g-pure-module-server-emit HIGH fix is IN-FLIGHT (agent CRASHED, deferred to S208)**. flogence (renamed S206). On tick 77.
 - **Self-poke loop:** `/loop 30m` — cron job `39fed15c` (`7,37 * * * *`). CronDelete to cancel.
 - **Last-absorbed delta seq:** S207 **[14]** (PA-source; deputy appended S205 F3 [22]).
 - **`deputy-maint`:** worktree, descends main via the merge-before-push gate. **Tip:** `git rev-parse deputy-maint`.
@@ -16,7 +16,7 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 
 ## PA↔vPA protocol — ACK + HEARTBEAT (S205 [19], each tick)
 
-- **heartbeat:** tick **T76** · last-absorbed **[S207 14]** · deputy-maint tip = this commit (`git rev-parse deputy-maint`).
+- **heartbeat:** tick **T77** · last-absorbed **[S207 14]** · deputy-maint tip = this commit (`git rev-parse deputy-maint`).
 - **ACK (vpa:) [S205 10]** → §3c health-check each tick (standing). **ACK (vpa:) [S205 19]** → ACK+heartbeat each tick (standing). No new `(vpa:)` in S207.
 
 ## Standing facts (durable)
@@ -43,12 +43,13 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 - **T51-T56** S207 burst: D3+D4+D5 + each-ternary + g-compound landed; maps batch REFRESHED →c553dd84 (T54); g-compound held.
 - **T57-73** PA idle (17 no-op ticks). **T74-75** PA resumed: g-pure-module HIGH fix dispatched.
 - **T76** S207 WRAPPED — absorbed [1-14]; PA integrated my ~5 pending commits + skipped maps-6c → deputy refreshed maps c553dd84→d931f8be (g-compound + new E-CELL-AMBIGUOUS-MEMBER-RENDER code); recent-sessions + digest regen; §3c PASS. g-pure-module HIGH fix in-flight-CRASHED → S208 re-dispatches.
+- **T77** digest regen (cleared the T76 bundled-maps stamp artifact so S208-boot reads current); main idle post-wrap; g-pure-module still crashed-pending-S208.
 
 ## Currency snapshot (@ tick 76)
 
 - **Board:** gap-counts PASS; recent-sessions regen'd (wrap anchor). g-compound-rbt MED closed; g-pure-module HIGH open (fix in-flight-crashed).
 - **maps:** watermark **`d931f8be`** (REFRESHED T76) — current.
-- **digest:** current (head `d931f8be`, delta-seq S207 14).
+- **digest:** current (head `099207c0`, delta-seq S207 14).
 - **flograph/dock:** §3c PASS.
 
 ## Function 3 — agent monitoring (LIVE)
