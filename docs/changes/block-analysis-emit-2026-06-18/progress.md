@@ -43,3 +43,31 @@
 - R26 BREAK-1 (real CLI, trucking load-new.scrml): setOriginCity writes ["loadForm.originCity"], setOriginState writes ["loadForm.originState"], setDestinationCity writes ["loadForm.destinationCity"] — DISTINCT dotted grain, NOT root-collapsed. 13 blocks.
 - R26 byte-determinism: app/components/types + load-new each byte-IDENTICAL across two compiles (diff clean).
 - Wrote compiler/tests/integration/emit-block-analysis-integration.test.js (9 tests / 106 assertions). In-process content (mario: 3 type/4 fn/2 engine, eatPowerUp footprint, engine-via-SYM, source-order); BREAK-1 dotted-grain on real load-new (loadForm.originCity != loadForm.originState; gather→5 analyses>1 input proves identity-match needed); CLI write-loop end-to-end via Bun.spawn of compiler/src/cli.js (written + parses + only-own-blocks; honest-empty <program><page> markup-only blocks:[]; multi-file mario+triage DISTINCT sidecars (merged-blob guard: DragPhase in triage NOT mario); byte-determinism + trailing-newline). 9 pass / 0 fail.
+
+---
+
+## D4 — dock rewire (consumer) — `scrml-js-codegen-engineer`, isolation:worktree
+
+**Start:** 2026-06-18, worktree `/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-ad29442024ceb727d`, base SHA `7a2da79c` (D3 present — no merge needed).
+
+- [step 0] Startup verification PASS: pwd under worktree, toplevel==worktree, tree clean, D3 flag present (`grep emit-block-analysis cli.js`=1, block-analysis*.ts both exist), `bun install` + `bun run pretest` OK.
+- [step 0] Smoke-tested D3 emit on `examples/23-trucking-dispatch/pages/driver/messages.scrml` → `/tmp/d4-smoke/messages.block-analysis.json` (4564 bytes, 13 blocks). Verified `BlockAnalysisBlock` fields: `id`, `kind`, `name`, `span:{start,end,line,endLine}`, `reads`, `writes`, `footprintDepth`.
+- [step 0] HEADLINE BEFORE captured: `dock --units messages.scrml` (regex) = 12 blocks; `bubbleClasses [191..301]` (SWALLOW: render markup 192-300 + last fn lumped to EOF). ALSO regex hallucinates a phantom `driver [10..31] channel` from a COMMENT line 10 (`// - <channel name="driver-events">`), and MISSES the real `publishDriverEvent` fn (line 27). Artifact has neither defect.
+- [step 0] SURFACED DEFECT (D2/D3, out of D4 scope): the emitted artifact's `span.endLine` is COLLAPSED to `span.line` for EVERY block — `buildBlockAnalysis(metaFiles)` in api.js:2564 calls `buildBlockAnalysisForFile(file)` WITHOUT threading source, so `projectSpan` falls back to `endLine=line`. Byte spans (`span.start`/`span.end`) ARE correct against RAW source (verified bubbleClasses [7741..7936] slices to the real fn body, 5 newlines). The builder machinery is present; it's just not fed source at the metaFiles stage. D4 consumes `span.endLine` per the brief; the collapse is a deferred D2/D3 follow-on.
+
+- [step 1] Imports added (mkdtempSync/rmSync/tmpdir/join/basename). Committed.
+- [step 2] Rewired `defsWithExtents` seam + NEW `blockAnalysisDefExts(relpath, absSourcePath)` helper + extracted `regexDefsWithExtents` (the retained fallback). `.scrml`+on-disk-path → artifact (worktree compiler `--emit-block-analysis` → `<base>.block-analysis.json` → map blocks via `span.line`/`span.endLine`); on any failure → logged regex fallback. `.ts`/`.js`/`.mjs` → TS_DEFS verbatim. Callers: `unitsMode` passes `abs`; `diffScopeMode` passes the working-tree abs ONLY for `branch===""` (Option (b): git-ref content stays regex). dock.ts type-builds clean. Committed.
+
+### Phase 3 — R26 empirical verification (ALL PASS)
+- **HEADLINE (units):** `dock --units messages.scrml` BEFORE `bubbleClasses [191..301]` (swallow: render-markup 192-300 lumped into the last fn) + phantom `driver [10..31] channel` (regex matched a COMMENT) + MISSING `publishDriverEvent`. AFTER `bubbleClasses [191..191]` (swallow GONE) + phantom dropped + `publishDriverEvent [27..27]` surfaced. Render markup correctly UNSCOPED.
+- **HEADLINE (diff-scope):** transient render-markup edit at line 247 (the `bubbleClasses(...)` USE site inside `<page>`). BEFORE (regex) `ok ...::bubbleClasses` (line 247 FALSELY owned by the bubbleClasses logic block via the next-def swallow). AFTER (artifact) `warn ... 1 changed line in no named block (render-markup)` — correctly unscoped, false-collision GONE. (transient edit reverted; tree clean.)
+- **`.ts` UNCHANGED:** `dock --units compiler/src/type-system.ts` (359 blocks) BYTE-IDENTICAL before/after (`diff` empty). TS_DEFS path untouched.
+- **FALLBACK fires + logs + degrades:** a compile-FAILING `.scrml` → `[dock] block-analysis artifact unavailable for <relpath>; falling back to regex defs` + regex defs returned (`greet [3..7]`), exit 0, no crash.
+- **Determinism:** two compiles → byte-identical artifact; two `--units` runs → identical output.
+- **No regressions:** pre-commit gate (unit+integration+conformance) **17221 pass / 90 skip / 1 todo / 0 fail** across 947 files (ran at commit; dock.ts is not compiler-imported, so 0-fail confirms no compiler-source touch).
+
+### Git-ref decision: Option (b)
+Artifact-backed ONLY for the working-tree path (`branch===""`); git-ref CONTENT (`gitShow(branch, relpath)`) stays the regex path. Rationale: compiling a PAST version requires materializing the file AND resolving imports-at-that-ref (out of v1 scope per brief); the headline proof is the working-tree case; the regex fallback handles past content acceptably.
+
+### DEFERRED (D2/D3 follow-on — surfaced, NOT fixed here)
+**`span.endLine` collapse.** The emitted artifact reports `endLine == line` for EVERY block because `buildBlockAnalysis(metaFiles)` (api.js:2564) calls `buildBlockAnalysisForFile(file)` WITHOUT threading source → `projectSpan` hits its documented `endLine=line` fallback. Byte spans (`span.start`/`span.end`) ARE correct against RAW source (verified). Consequence: artifact-backed `--units` shows every block as `[N..N]` (single-line), so logic-block bodies + between-def lines show as unscoped. The swallow-kill headline holds regardless (last block bounded by its real `endLine`, not EOF). Minimal D3 fix: thread the file's raw source into `buildBlockAnalysisForFile` at api.js:2564 (the builder machinery already derives `endLine` from a source slice — it's just not fed). D4 consumes `span.endLine` per the brief's literal mapping; not papered over (Rule 4).

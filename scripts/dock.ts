@@ -39,9 +39,11 @@
 //   #dock[ chore ]   — the cheap escape: no decision edge, declares "no reasoning here" (filterable out)
 //   edges: implements|decided-by|cites = a flograph @node id ; bare `verified` = the dock-level grounding bit.
 
-import { existsSync, readdirSync } from "fs";
+import { existsSync, readdirSync, mkdtempSync, rmSync } from "fs";
 import { readFileSync } from "fs";
 import { execSync } from "child_process";
+import { tmpdir } from "os";
+import { join, basename } from "path";
 import { build, defaultCorpus, SUPERSEDED, globSync, rel, type Node } from "./flograph.ts";
 
 const ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
@@ -271,7 +273,79 @@ const TS_DEFS: { kind: string; re: RegExp }[] = [
 ];
 
 type DefExt = { kind: string; name: string; line: number; end: number };
-function defsWithExtents(relpath: string, content: string): DefExt[] {
+
+// ── Artifact-backed `.scrml` block extraction (block-analysis-emit D4) ────────
+// CONSUME the compiler's emitted truth instead of running a second (regex)
+// parser over `.scrml` source. We shell out to the SAME compiler that built dock's
+// world (`compiler/bin/scrml.js compile <file> --emit-block-analysis`, D3's flag),
+// read the per-file `<base>.block-analysis.json` sidecar (D2's builder), and map
+// each block to a `DefExt` using its TRUE AST span — `line`/`endLine` are the real
+// def boundaries, NOT the old regex "next-def-start − 1" guess. This is what kills
+// the `bubbleClasses[191..301]` swallow (the last def no longer lumps the whole
+// render-markup tail) AND the regex's coincidental comment-match phantoms (the
+// artifact only sees real AST nodes). No second parser, no drift — the headline of
+// the whole block-analysis-emit architecture (SCOPE §1.4 / §7 D4).
+//
+// CRITICAL: compile the file AT ITS REAL on-disk path (so its imports + sibling
+// types resolve — engine `engineMeta` is a SYM-pass product that needs them), NOT
+// an isolated temp copy. Output goes to a fresh temp dir we clean up. Any failure
+// (compile error, missing artifact, parse error) → return null; the caller logs a
+// one-line notice and falls back to the SCRML_DEFS regex path (the logged safety
+// net is retained, never deleted).
+function blockAnalysisDefExts(relpath: string, absSourcePath: string): DefExt[] | null {
+  if (!relpath.endsWith(".scrml")) return null;
+  if (!existsSync(absSourcePath)) return null;
+  let tmpOut: string | null = null;
+  try {
+    tmpOut = mkdtempSync(join(tmpdir(), "dock-ba-"));
+    // Compile with the WORKTREE compiler (dog-foods D3's --emit-block-analysis).
+    // Quiet: we only want the sidecar; stdout/stderr are discarded (a non-zero
+    // exit throws → caught → null → regex fallback).
+    execSync(
+      `bun ${ROOT}/compiler/bin/scrml.js compile ${absSourcePath} --emit-block-analysis -o ${tmpOut}`,
+      { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "ignore", "ignore"], maxBuffer: 1 << 28 },
+    );
+    // The write-loop names the sidecar `<base>.block-analysis.json` in the OUTPUT
+    // ROOT (NOT a mirrored sub-dir), where base = basename(file, ".scrml").
+    const base = basename(absSourcePath, ".scrml");
+    const artifactPath = join(tmpOut, `${base}.block-analysis.json`);
+    if (!existsSync(artifactPath)) return null;
+    const parsed = JSON.parse(readFileSync(artifactPath, "utf8")) as {
+      blocks?: Array<{ kind?: string; name?: string; span?: { line?: number; endLine?: number } }>;
+    };
+    if (!parsed || !Array.isArray(parsed.blocks)) return null;
+    const defs: DefExt[] = [];
+    for (const b of parsed.blocks) {
+      const line = b?.span?.line;
+      if (typeof line !== "number") continue;
+      const endLine = typeof b?.span?.endLine === "number" ? b.span.endLine : line;
+      defs.push({
+        kind: typeof b.kind === "string" ? b.kind : "block",
+        name: typeof b.name === "string" ? b.name : "(anon)",
+        line,
+        // `end` = the block's TRUE last line (`span.endLine`), bounded below by
+        // `line` (never a negative-width span). This is the load-bearing replacement
+        // for the regex next-def-boundary guess.
+        end: Math.max(line, endLine),
+      });
+    }
+    // Source order (matches the regex path's contract: sorted by opener line).
+    defs.sort((a, b) => a.line - b.line);
+    return defs;
+  } catch {
+    return null; // caller logs + falls back to regex.
+  } finally {
+    if (tmpOut) { try { rmSync(tmpOut, { recursive: true, force: true }); } catch { /* best-effort */ } }
+  }
+}
+
+// Regex (next-def-boundary) extraction — RETAINED as the logged fallback for
+// `.scrml` (artifact unavailable) AND the canonical path for `.ts`/`.js`/`.mjs`
+// (the compiler does not parse its own TS, so there is no artifact to consume and
+// no drift to avoid — keeping TS_DEFS preserves the compiler-source parallel-edit
+// surface, DD §7.1). Crude: a def owns [line, nextDefStart−1]; trailing content
+// lumps into the last def.
+function regexDefsWithExtents(relpath: string, content: string): DefExt[] {
   const lines = content.split("\n");
   const set = relpath.endsWith(".scrml") ? SCRML_DEFS : TS_DEFS;
   const raw: { kind: string; name: string; line: number }[] = [];
@@ -283,6 +357,22 @@ function defsWithExtents(relpath: string, content: string): DefExt[] {
   }
   raw.sort((a, b) => a.line - b.line);
   return raw.map((d, i) => ({ ...d, end: i + 1 < raw.length ? raw[i + 1].line - 1 : lines.length }));
+}
+
+// The seam feeding both `--units` and `--diff-scope`. `.scrml` → the emitted
+// block-analysis artifact (true spans, via the worktree compiler) when an on-disk
+// `absSourcePath` is available; on any failure, log a one-line notice and fall back
+// to the regex path. `.ts`/`.js`/`.mjs` → the regex path verbatim (TS_DEFS).
+// `absSourcePath` is omitted for git-ref CONTENT (a past version on no real path —
+// compiling it with imports-at-that-ref is out of v1 scope; the regex path handles
+// it, the working-tree case is the headline proof).
+function defsWithExtents(relpath: string, content: string, absSourcePath?: string): DefExt[] {
+  if (relpath.endsWith(".scrml") && absSourcePath) {
+    const fromArtifact = blockAnalysisDefExts(relpath, absSourcePath);
+    if (fromArtifact) return fromArtifact;
+    console.error(`[dock] block-analysis artifact unavailable for ${relpath}; falling back to regex defs`);
+  }
+  return regexDefsWithExtents(relpath, content);
 }
 
 function toRel(file: string): string {
@@ -318,7 +408,7 @@ function unitsMode(file: string): number {
   const relpath = toRel(file);
   const abs = `${ROOT}/${relpath}`;
   if (!existsSync(abs)) { console.error(`dock --units: no such file: ${relpath}`); return 1; }
-  const defs = defsWithExtents(relpath, readFileSync(abs, "utf8"));
+  const defs = defsWithExtents(relpath, readFileSync(abs, "utf8"), abs);
   console.log(`dock --units ${relpath}  (${defs.length} leasable block(s))`);
   for (const d of defs) console.log(`  ${relpath}::${d.name}  [${d.line}..${d.end}]  ${d.kind}`);
   return 0;
@@ -331,7 +421,10 @@ function diffScopeMode(range: string, owns: Set<string>): number {
   console.log(`dock --diff-scope ${range}${owns.size ? `  (owns: ${[...owns].join(", ")})` : "  (no --owns: enumerate only)"}`);
   for (const [relpath, ranges] of [...changed].sort()) {
     const content = branch ? gitShow(branch, relpath) : (existsSync(`${ROOT}/${relpath}`) ? readFileSync(`${ROOT}/${relpath}`, "utf8") : "");
-    const defs = defsWithExtents(relpath, content);
+    // Option (b): artifact-backed only for the WORKING-TREE file (branch === "");
+    // git-ref CONTENT is a past version on no real path — regex handles it.
+    const absSource = branch ? undefined : `${ROOT}/${relpath}`;
+    const defs = defsWithExtents(relpath, content, absSource);
     const touched = new Set<string>();
     let fileUnscoped = 0;
     for (const [s, e] of ranges) for (let ln = s; ln <= e; ln++) {
