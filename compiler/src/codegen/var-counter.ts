@@ -23,3 +23,18 @@ export function genVar(baseName: string): string {
 export function resetVarCounter(): void {
   _varCounter = 0;
 }
+
+// ss1 — save/restore the per-compile counter around an ADDITIVE emit pass that
+// must NOT perturb the global mangling sequence. The module value-export block
+// (emit-server.ts `emitModuleValueExports`) re-emits already-declared pure
+// helpers via `emitFnShortcutBody`, which may advance the counter; snapshotting
+// it before and restoring after keeps every OTHER file's `_scrml_handler_*_<N>`
+// / mangled-user-fn suffixes byte-stable (the value-export bindings themselves
+// are emitted under their public names, so they need no counter value).
+export function getVarCounter(): number {
+  return _varCounter;
+}
+
+export function setVarCounter(n: number): void {
+  _varCounter = n;
+}

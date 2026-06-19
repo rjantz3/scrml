@@ -55,7 +55,9 @@
  *   W-CG-UNDEFINED-INTERPOLATION          =  0   (was 53; S93 codegen leak fixes)
  *   --- aggregate ---
  *   errors:    0
- *   warnings:  67   (was 87 pre-S98 — 20 page-file false-positives suppressed)
+ *   warnings:  74   (80 pre-ss1; ss1 dropped 6 W-SERVER-IMPORT-UNEMITTED by emitting
+ *                       pure-module value exports into .server.js. was 67 @ S98,
+ *                       87 pre-S98 — 20 page-file false-positives suppressed)
  *   chunks:    >= 1 (per-route)
  *   manifest entryPoints: >= 1
  *
@@ -342,18 +344,18 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
     "W-PROGRAM-001": 4,
     "W-PROGRAM-REDUNDANT-LOGIC": 18,
     "W-SQL-ROW-UNTYPED": 6,
-    // S208 Fix B (W-SERVER-IMPORT-UNEMITTED, g-pure-module-server-emit): the
-    // cross-file server-import invariant surfaces trucking's PRE-EXISTING
-    // route-mis-inference bug — 6 distinct broken-import shapes (deduped by
-    // target + missing-name set) where a server-CALLED exported helper
-    // route-infers into a handler, so its `.server.js` emits the ROUTE, not the
-    // value `export` the consumer imports: auth `rolePath`/`SESSION_TTL_SECONDS`/
-    // `SESSION_DB_PATH` (login/register/billing/app), status-picker
-    // `validNextStates` (load-detail), driver-card `isValidHosTransition` (home).
-    // All TRUE positives — baseline-main's trucking server bundles throw
-    // missing-export at runtime; tracked as
-    // g-route-mis-inference-server-called-pure-helper. Aggregate 74 -> 80.
-    "W-SERVER-IMPORT-UNEMITTED": 6,
+    // S208 Fix B (W-SERVER-IMPORT-UNEMITTED, g-pure-module-server-emit) fired 6
+    // distinct missing-EXPORT shapes here — a server-CALLED exported helper
+    // route-inferred into a handler, so its `.server.js` emitted the ROUTE but
+    // NOT the value `export` the consumer's by-name server import expected
+    // (auth `rolePath`/`SESSION_*`, status-picker `validNextStates`, driver-card
+    // `isValidHosTransition`). ss1 (g-route-mis-inference-server-called-pure-
+    // helper) RESOLVED that: `.server.js` now ALSO emits each module's exported
+    // VALUE bindings (constants + pure fns) as native ESM exports ADDITIVELY
+    // (the route handler / `__ri_route_*` / `routes` / `fetch` are unchanged),
+    // so every by-name import resolves and the warning no longer fires.
+    // W-SERVER-IMPORT-UNEMITTED is therefore REMOVED from the baseline.
+    // Aggregate 80 -> 74.
   };
 
   test("aggregate diagnostic count matches baseline", () => {

@@ -1,8 +1,8 @@
 import { CGError } from "./errors.ts";
-import { genVar } from "./var-counter.ts";
-import { routePath } from "./utils.ts";
+import { genVar, getVarCounter, setVarCounter } from "./var-counter.ts";
+import { routePath, paramSignature } from "./utils.ts";
 import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collectServerAuthorityTypes, isServerOnlyNode } from "./collect.ts";
-import { emitLogicNode } from "./emit-logic.ts";
+import { emitLogicNode, emitFnShortcutBody } from "./emit-logic.ts";
 import { getNodes } from "./collect.ts";
 import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
 import { serverRewriteEmitted, setVariantFieldsForRewriter } from "./rewrite.js";
@@ -13,6 +13,7 @@ import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicate
 import { resolveDbDriver } from "./db-driver.ts";
 import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
 import { SERVER_LOG_HELPER } from "./log-loc.ts";
+import { parseExprToNode } from "../expression-parser.ts";
 
 // g-pure-module-server-emit (S207): sentinel line marking where deferred
 // local-`.scrml` server imports are re-injected after usage-pruning. Pruned by
@@ -335,6 +336,208 @@ function isBodyOnlyEscalation(route: any, fnNode: any): boolean {
   if (body.some((stmt) => isServerOnlyNode(stmt))) return false;
 
   return true;
+}
+
+/**
+ * ss1 (g-route-mis-inference-server-called-pure-helper) — emit a module's
+ * exported VALUE bindings (constants + pure functions) as native ESM exports
+ * in its `.server.js`.
+ *
+ * BACKGROUND. A `.server.js` emits route handlers (`__ri_route_*` + `routes` +
+ * `fetch`) but, in default (browser) mode, has NO value-export emission path —
+ * only `--mode library` emits plain bindings. So a sibling SERVER bundle that
+ * imports a module's exported constant or pure function by-name
+ * (`import { rolePath, SESSION_TTL_SECONDS } from "./models/auth.server.js"`)
+ * link-errors at RUNTIME: `SyntaxError: Export named 'rolePath' not found`
+ * (a missing ESM export is a link error, not a syntax error — green compile,
+ * `node --check` passes). This is the SERVER analog of the CLIENT's cross-file
+ * module registry footer (emit-client.ts `buildModuleRegistryFooter`); the
+ * server uses native ESM, so we emit standard `export` declarations rather than
+ * a `_scrml_modules` registry.
+ *
+ * WHAT IS EMITTED.
+ *   - `export const NAME = <lowered-init>;`  for each `export const` VALUE decl.
+ *   - `export function NAME(...) { <lowered-body> }`  for each exported pure
+ *     `function`/`fn`, INCLUDING a route-classified one (e.g. `rolePath`): the
+ *     plain `export function` is ADDITIVE — the route handler `_scrml_handler_*`
+ *     + `export const __ri_route_*` + `routes` + `fetch` all STAY (no collision:
+ *     the handler/route carry `_scrml_*` / `__ri_route_*` prefixes).
+ *
+ * WHAT IS NOT EMITTED (correctness).
+ *   - TYPE exports (`export type`) + type re-exports (`export { T } from ...`) —
+ *     types have no runtime export; emitting them reintroduces the link error
+ *     that the sibling Fix A (S208) guarded against.
+ *   - COMPONENT consts (`export const Card = <markup/>`) — a markup-valued const
+ *     is a component resolved at markup-mount time, NOT a runtime JS value (same
+ *     class the client's `buildModuleRegistryFooter` `declaredBinding` probe
+ *     filters out). Detected by a leading `<` in the initializer.
+ *   - Channels / re-export / rename / local — no runtime VALUE export here.
+ *   - Any binding ALREADY declared in the assembled body (no double-decl).
+ *
+ * The function bodies are lowered with `boundary: "client"` ON PURPOSE: an
+ * exported pure helper is environment-agnostic, and client lowering produces a
+ * SYNCHRONOUS body. Server (`boundary:"server"`) lowering wraps a `match` in
+ * `await (async function(){...})()` (it assumes the enclosing async route
+ * handler), which would make a plain `export function` non-async-but-`await`ing
+ * (a SyntaxError) AND silently turn a synchronous `match`-helper into a
+ * Promise-returning one — breaking synchronous callers (`if (!isValidHosTransition(a,b))`).
+ * `==` still lowers to `_scrml_structural_eq` and `not` to `null` identically in
+ * both modes; pure helpers touch no reactive cells, so no `_scrml_reactive_get`
+ * is emitted. Const initializers are parsed (`parseExprToNode`) and lowered
+ * (`emitExprField`, server mode — string/number literals, no cell refs).
+ *
+ * Returns the emitted lines as an array (empty when nothing to emit). The caller
+ * appends them to `lines` BEFORE the helper-inline scans (structural-eq / wire /
+ * log / SQL) so a `_scrml_structural_eq(` introduced ONLY by an exported helper
+ * still triggers the helper's top-of-file inlining.
+ */
+function emitModuleValueExportLines(
+  fileAST: any,
+  filePath: string,
+  assembledBody: string,
+): string[] {
+  // Collect logic blocks (the `${ ... }` bodies). Mirrors emit-library's
+  // collectLogicBlocks — exported value decls live in the file's logic body.
+  const logicBlocks: any[] = [];
+  const collectLogic = (nodeList: any[]): void => {
+    for (const node of nodeList) {
+      if (!node || typeof node !== "object") continue;
+      if (node.kind === "logic" && Array.isArray(node.body)) logicBlocks.push(node);
+      if (Array.isArray(node.children)) collectLogic(node.children);
+    }
+  };
+  collectLogic(getNodes(fileAST));
+  if (logicBlocks.length === 0) return [];
+
+  // Already-declared guard: skip a binding whose name is already declared at
+  // top level in the assembled body (avoids double-decl).
+  const isAlreadyDeclared = (name: string): boolean => {
+    const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(
+      `^(?:export\\s+)?(?:async\\s+)?(?:function\\*?|const|let|var)\\s+${esc}\\b`,
+      "m",
+    );
+    return re.test(assembledBody);
+  };
+
+  // Index the synthetic `function-decl` nodes (the EXPORT branch produces one
+  // per exported function, carrying full params + body) by name. `emitLogicNode`
+  // skips `fromExport` nodes, so we emit them here via `emitFnShortcutBody`.
+  const fnDeclByName = new Map<string, any>();
+  for (const logic of logicBlocks) {
+    for (const stmt of (logic.body ?? [])) {
+      if (stmt && stmt.kind === "function-decl" && stmt.fromExport === true && stmt.name) {
+        fnDeclByName.set(stmt.name, stmt);
+      }
+    }
+  }
+
+  // Recursive server-only-body check. An exported function whose body contains
+  // a `?{}` SQL / transaction / server-context-meta node ANYWHERE (top level or
+  // nested in a loop / branch / match arm) is NOT an environment-agnostic pure
+  // helper — it is a server OPERATION (e.g. a `runSeeds()` DB seeder). Emitting
+  // it as a synchronous value export would (a) produce `await` outside an async
+  // function and (b) lower its `?{}` to the client-cannot-evaluate `const x =
+  // null` stub. Skip such functions entirely (their server route handler, if
+  // any, is emitted above by the route path).
+  const bodyHasServerOnlyNode = (nodes: any[]): boolean => {
+    if (!Array.isArray(nodes)) return false;
+    for (const n of nodes) {
+      if (!n || typeof n !== "object") continue;
+      if (isServerOnlyNode(n)) return true;
+      if (bodyHasServerOnlyNode(n.body)) return true;
+      if (bodyHasServerOnlyNode(n.consequent)) return true;
+      if (Array.isArray(n.alternate) ? bodyHasServerOnlyNode(n.alternate) : (n.alternate && bodyHasServerOnlyNode([n.alternate]))) return true;
+      if (bodyHasServerOnlyNode(n.arms)) return true;
+      if (bodyHasServerOnlyNode(n.cases)) return true;
+      if (bodyHasServerOnlyNode(n.children)) return true;
+    }
+    return false;
+  };
+
+  const constLines: string[] = [];
+  const fnBlocks: string[] = [];
+
+  for (const logic of logicBlocks) {
+    for (const stmt of (logic.body ?? [])) {
+      if (!stmt || stmt.kind !== "export-decl") continue;
+      const kind: string = stmt.exportKind;
+      const name: string = stmt.exportedName;
+      if (!name) continue;
+
+      // Value constant. The export-decl carries no paired const-decl / initExpr,
+      // only `raw` (tokenized source). Split off the initializer and lower it.
+      if (kind === "const") {
+        if (isAlreadyDeclared(name)) continue;
+        const raw: string = String(stmt.raw ?? "");
+        const m = raw.match(/^\s*export\s+const\s+\w+\s*=\s*([\s\S]+)$/);
+        if (!m) continue;
+        const init = m[1].trim();
+        if (!init) continue;
+        // A markup-valued const is a COMPONENT (resolved at markup-mount time),
+        // not a runtime JS value — skip it. No scrml VALUE expression begins
+        // with `<` (comparison operators are binary, never leading).
+        if (init.startsWith("<")) continue;
+        // A `?{}`-initialized const is a server-only SQL read, not a pure value.
+        if (init.includes("?{")) continue;
+        const initNode = parseExprToNode(init, filePath, 0);
+        const lowered = emitExprField(initNode, init, { mode: "server" });
+        constLines.push(`export const ${name} = ${lowered};`);
+        continue;
+      }
+
+      // Exported pure function. Emit a plain `export function` ADDITIVELY.
+      if (kind === "function" || kind === "fn") {
+        if (isAlreadyDeclared(name)) continue;
+        const fnNode = fnDeclByName.get(name);
+        if (!fnNode || !Array.isArray(fnNode.body)) continue;
+        // Skip a server-OPERATION function (its body does `?{}` SQL / a
+        // transaction / server-context meta) — not a pure value export.
+        if (bodyHasServerOnlyNode(fnNode.body)) continue;
+        const params: any[] = fnNode.params ?? [];
+        const paramSigs = params.map((p, i) => paramSignature(p, i));
+        const generatorStar: string = fnNode.isGenerator ? "*" : "";
+        const asyncPrefix: string = fnNode.isAsync ? "async " : "";
+        const declaredNames = new Set<string>(
+          params.map((p) => (typeof p === "string" ? p : p?.name)).filter(Boolean),
+        );
+        // Client-boundary lowering → synchronous body (see fn-doc rationale).
+        const bodyCodes = emitFnShortcutBody(
+          fnNode.body,
+          { boundary: "client", declaredNames, insideFunctionBody: true },
+          fnNode.fnKind,
+          fnNode.hasReturnType,
+        );
+        const out: string[] = [];
+        out.push(`export ${asyncPrefix}function${generatorStar} ${name}(${paramSigs.join(", ")}) {`);
+        for (const code of bodyCodes) {
+          for (const line of code.split("\n")) out.push(`  ${line}`);
+        }
+        out.push(`}`);
+        fnBlocks.push(out.join("\n"));
+        continue;
+      }
+
+      // All other export kinds (type / re-export / re-export-all / rename /
+      // local / channel) have NO runtime VALUE export here — skip.
+    }
+  }
+
+  if (constLines.length === 0 && fnBlocks.length === 0) return [];
+
+  const out: string[] = [];
+  out.push("");
+  out.push("// --- ss1: module value exports (constants + pure fns) for cross-file server imports ---");
+  // Consts first (dependency order / readability — a referencing fn reads them
+  // at call time, but emitting consts first keeps the file readable).
+  for (const l of constLines) out.push(l);
+  if (constLines.length > 0 && fnBlocks.length > 0) out.push("");
+  for (let i = 0; i < fnBlocks.length; i++) {
+    out.push(fnBlocks[i]);
+    if (i < fnBlocks.length - 1) out.push("");
+  }
+  out.push("");
+  return out;
 }
 
 /**
@@ -1778,6 +1981,22 @@ export function generateServerJs(
     lines.push("  return null;");
     lines.push("}");
     lines.push("");
+  }
+
+  // ss1 (g-route-mis-inference-server-called-pure-helper) — emit the module's
+  // exported VALUE bindings (constants + pure functions) as native ESM exports,
+  // so a sibling SERVER bundle's by-name import (`import { rolePath, ... } from
+  // "./models/auth.server.js"`) resolves at runtime. Appended to `lines` HERE
+  // (after the route handlers + `routes`/`fetch`, before `finalEmitted` is first
+  // joined) so the helper-inline scans below (`_scrml_structural_eq` / wire / log
+  // / SQL) also see references the exported helpers introduce. Additive — the
+  // route content stays byte-stable; the mangling counter is snapshotted +
+  // restored so no OTHER file's `_scrml_*_<N>` suffix shifts.
+  {
+    const _veSnapshot = getVarCounter();
+    const _veLines = emitModuleValueExportLines(fileAST, filePath, lines.join("\n"));
+    setVarCounter(_veSnapshot);
+    for (const _l of _veLines) lines.push(_l);
   }
 
   // A9 Ext 5 (§19.9.6): idempotency-key storage helper inlining. When

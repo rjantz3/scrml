@@ -26,7 +26,7 @@ wire-serializability boundary (`type-system.ts checkRouteWireSerializability`) +
 These warmed the whole triangle; the residual items below reuse that understanding.
 
 ### 1. `g-route-mis-inference-server-called-pure-helper` — fix the route-mis-inference
-`[open]` · bug · **MED** · tier **med**
+`[landed-on-branch]` (spa/ss1; agent a6eb2c2fd9ba6086b) · bug · **MED** · tier **med**
 A server-CALLED exported helper route-infers into a `__ri_route_*` HANDLER, so its `.server.js` emits
 the route, not the value `export` the consumer imports by-name → runtime missing-export. **Filed S208**
 (surfaced by Fix B's MISSING-EXPORT warning — 6 distinct shapes across trucking auth/status-picker/

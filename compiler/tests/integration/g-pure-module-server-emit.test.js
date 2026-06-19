@@ -143,3 +143,98 @@ p \${pureHelper(3)}
     expect(importLine).not.toMatch(/pureHelper/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// §3. ss1 (g-route-mis-inference-server-called-pure-helper) — a module's
+//     exported VALUE bindings (constants + pure fns) are emitted into its
+//     `.server.js` as native ESM exports, so a sibling SERVER bundle's by-name
+//     import resolves at runtime. The route-classified helper gets BOTH the
+//     plain `export function` AND its route handler (additive — no collision).
+// ---------------------------------------------------------------------------
+describe("g-pure-module-server-emit §3 (ss1): server-called exported helper emits its value export AND its route", () => {
+  test(".server.js exports the constant + the pure fn (and its route handler stays)", () => {
+    const dir = join(TMP, "s3");
+    // The module exports a constant and two pure fns. `rolePath` is CALLED only
+    // from a server-classified caller (login) → it route-infers into a handler.
+    // Pre-ss1: auth.server.js emitted the ROUTE but NOT `export function rolePath`
+    // / `export const SESSION_TTL` → the consumer's by-name server import
+    // link-errored at runtime. Post-ss1: both value exports are emitted.
+    const AUTH_MODULE = `\${
+  export const SESSION_TTL = 7 * 24 * 60 * 60
+
+  export function rolePath(role) {
+    if (role == "admin") return "/admin"
+    return "/"
+  }
+
+  export function greet(name) {
+    return "hi " + name
+  }
+}
+`;
+    const CONSUMER = `<program db="sqlite::memory:">
+\${
+  import { SESSION_TTL, rolePath, greet } from './auth.scrml'
+  server function login(role) {
+    const path = rolePath(role)
+    const ttl = SESSION_TTL
+    return { path: path, ttl: ttl, hello: greet("there") }
+  }
+}
+h1 "ss1 regression"
+
+</program>
+`;
+    const pagePath = fx(join(dir, "src/page.scrml"), CONSUMER);
+    fx(join(dir, "src/auth.scrml"), AUTH_MODULE);
+
+    const outDir = join(dir, "out");
+    compileScrml({ inputFiles: [pagePath], outputDir: outDir, write: true, log: () => {} });
+
+    // auth.server.js IS emitted (rolePath route-infers into a handler).
+    const authServerPath = join(outDir, "auth.server.js");
+    expect(existsSync(authServerPath)).toBe(true);
+    const authServer = readFileSync(authServerPath, "utf8");
+
+    // VALUE exports present (the ss1 fix).
+    expect(authServer).toMatch(/export\s+const\s+SESSION_TTL\b/);
+    expect(authServer).toMatch(/export\s+function\s+rolePath\s*\(/);
+    expect(authServer).toMatch(/export\s+function\s+greet\s*\(/);
+
+    // The route handler / __ri_route_* for the route-classified helper STAYS
+    // (additive — the plain `export function rolePath` does not replace it).
+    expect(authServer).toMatch(/_scrml_handler_rolePath_\d+/);
+    expect(authServer).toMatch(/export\s+const\s+__ri_route_rolePath_\d+/);
+
+    // The plain export function is SYNCHRONOUS (no `async` / `await` leak from a
+    // server-mode match wrapper — these are pure helpers).
+    const rolePathDecl = authServer.match(/export\s+(async\s+)?function\s+rolePath/);
+    expect(rolePathDecl).not.toBeNull();
+    expect(rolePathDecl[1]).toBeUndefined();
+
+    // The consumer's server bundle imports those names by-name; every imported
+    // name is now an actual export of auth.server.js (no missing-export link error).
+    const serverPath = join(outDir, "page.server.js");
+    expect(existsSync(serverPath)).toBe(true);
+    const server = readFileSync(serverPath, "utf8");
+    const importLine = server.split("\n").find((l) => /from\s+["']\.\/auth\.server\.js["']/.test(l));
+    if (importLine) {
+      // Every specifier the consumer imports must be a real export of auth.server.js.
+      const names = (importLine.match(/\{([^}]*)\}/)?.[1] ?? "")
+        .split(",")
+        .map((s) => s.trim().split(/\s+as\s+/)[0].trim())
+        .filter(Boolean);
+      const exported = new Set(
+        [...authServer.matchAll(/export\s+(?:async\s+)?(?:const|function\*?)\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1]),
+      );
+      for (const n of names) expect(exported.has(n)).toBe(true);
+    }
+
+    // The emitted server JS still parses (the value-export block is valid JS).
+    // A markup-free pure module's server.js is plain ESM — assert no obvious
+    // `not` / `<` token leaked into the value-export block.
+    const veBlock = authServer.slice(authServer.indexOf("ss1: module value exports"));
+    expect(veBlock).not.toMatch(/\breturn not\b/);
+    expect(veBlock).not.toMatch(/=\s*</);
+  });
+});
