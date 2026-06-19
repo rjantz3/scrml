@@ -16,7 +16,7 @@ not deliberation, so nothing irreplaceable lives in its transcript; `scrml-suppo
 ## Deputy status (RESUME POINT)
 
 - **State:** LIVE — steady-state, RE-HYDRATED instance. **S209 active** (S208 wrapped: g-pure-module HIGH closed; sPA execution-agent role + dock-health tool built). flogence (renamed from flogeance S206). On tick **89**.
-- **Self-poke loop:** `/loop 30m`. **OLD cron `39fed15c` is DEAD** (died with the prior instance; CronList confirmed empty at boot — no CronDelete needed). This instance re-arms a fresh `/loop 30m`.
+- **Self-poke loop:** `/loop 30m` → **cron `e5b76890` (`7,37 * * * *`), session-only, armed T89.** (OLD cron `39fed15c` died with the prior instance — CronList empty at boot, no CronDelete needed. A future re-hydration: CronDelete `e5b76890` if still alive, then re-arm its own.)
 - **Last-absorbed delta seq:** S209 **[6]** (current — [6] is the latest PA-source entry; the deputy itself appended the S205 F3 entry [22]).
 - **`deputy-maint` branch:** worktree `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint` (scrmlMaster sibling, OUTSIDE `.claude/worktrees/`). **Tip:** `git rev-parse deputy-maint`. FF onto main at boot.
 - **node_modules:** the worktree already has the symlinks (re-create if missing): `ln -s …/scrml/node_modules ./node_modules` · `…/scrml/compiler/node_modules ./compiler/node_modules`.
