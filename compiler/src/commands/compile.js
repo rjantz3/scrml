@@ -10,6 +10,7 @@
 import { statSync, watch, readFileSync, existsSync, writeFileSync } from "fs";
 import { resolve, dirname, join, relative, basename } from "path";
 import { compileScrml, scanDirectory } from "../api.js";
+import { serializeBlockAnalysis } from "../block-analysis.ts";
 
 // ---------------------------------------------------------------------------
 // ANSI color helpers — no dependencies
@@ -96,6 +97,7 @@ function parseArgs(args) {
   let emitBatchPlan = false;
   let emitReachability = false;
   let emitEngineGraph = false;
+  let emitBlockAnalysis = false;
   let emitPerRoute = false;
   // §20.6 (F4=A) — `--production` strips the location-transparent log()
   // builtin to 0 bytes (the dev-only convenience is removed from release
@@ -167,6 +169,8 @@ function parseArgs(args) {
       emitReachability = true;
     } else if (arg === "--emit-engine-graph") {
       emitEngineGraph = true;
+    } else if (arg === "--emit-block-analysis") {
+      emitBlockAnalysis = true;
     } else if (arg === "--production" || arg === "--prod") {
       // §20.6 (F4=A) — production strip for the log() builtin.
       production = true;
@@ -276,7 +280,7 @@ function parseArgs(args) {
     }
   }
 
-  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, watchMode, mode, selfHost, emitBatchPlan, emitReachability, emitEngineGraph, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit, production };
+  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, watchMode, mode, selfHost, emitBatchPlan, emitReachability, emitEngineGraph, emitBlockAnalysis, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit, production };
 }
 
 // ---------------------------------------------------------------------------
@@ -406,7 +410,7 @@ function formatLintDiagnostic(diag, cwd) {
  * @returns {{ success: boolean }}
  */
 function runOnce(opts, selfHostModules = null) {
-  const { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, mode, emitBatchPlan, emitReachability, emitEngineGraph, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit, production } = opts;
+  const { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, mode, emitBatchPlan, emitReachability, emitEngineGraph, emitBlockAnalysis, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit, production } = opts;
   const cwd = process.cwd();
 
   if (verbose) {
@@ -591,6 +595,48 @@ function runOnce(opts, selfHostModules = null) {
       const dest = join(destDir, `${base}.engine-graph.json`);
       writeFileSync(dest, json);
       if (verbose) console.log(c.dim(`  [EG] Wrote engine-graph JSON: ${base}.engine-graph.json`));
+    }
+  }
+
+  // block-analysis-emit-2026-06-18 — write <base>.block-analysis.json next to
+  // each compiled output. UNLIKE the engine-graph sidecar above (one merged
+  // graph written to every file), block-analysis is PER-FILE: each sidecar
+  // carries ONLY that source file's own blocks. `result.blockAnalyses()`
+  // returns one `BlockAnalysis` per compiled file (each with its own `.file`
+  // relpath); we match each input file to its analysis by IDENTITY — the
+  // analysis `.file` is the repo-relative tail of the input's resolved absolute
+  // path (block-analysis.ts derives `.file` by stripping the prefix up to the
+  // first project-root anchor, so it is always a suffix of the absolute path).
+  // Order-zip with `metaFiles` is NOT safe: the api.js gather pass pulls
+  // imported .scrml files into the file set, so `blockAnalyses()` can be a
+  // superset of `inputFiles` in a different order. A file with no leasable
+  // blocks still gets an honest-empty `{ blocks: [] }` sidecar (mirrors the
+  // engine-graph honest-empty contract). Emission lives here (CLI-only flag);
+  // the api.js write loop stays single-purpose.
+  if (emitBlockAnalysis && typeof result.blockAnalyses === "function") {
+    const analyses = result.blockAnalyses();
+    const destDir = result.outputDir;
+    for (const f of inputFiles) {
+      const base = basename(f, ".scrml");
+      const absNorm = resolve(f).replace(/\\/g, "/");
+      // Identity match: the analysis whose `.file` equals the in-repo tail of
+      // this input's absolute path. Exact-equal first (absolute paths with no
+      // anchor), then suffix (the common case — `.file` is a repo-relative
+      // segment of `absNorm`). Falls back to basename match only if neither
+      // resolves (defensive; should not happen for a real compile).
+      let analysis =
+        analyses.find((a) => a.file === absNorm) ||
+        analyses.find((a) => a.file && absNorm.endsWith(`/${a.file}`)) ||
+        analyses.find((a) => a.file && basename(a.file, ".scrml") === base);
+      // Honest-empty fallback: a file the builder produced no analysis for
+      // (should not occur — every compiled file yields a BlockAnalysis) still
+      // gets a well-formed empty sidecar so the consumer never sees a gap.
+      if (!analysis) {
+        analysis = { version: 1, file: base, blocks: [] };
+      }
+      const dest = join(destDir, `${base}.block-analysis.json`);
+      writeFileSync(dest, serializeBlockAnalysis(analysis));
+      if (verbose) console.log(c.dim(`  [BA] Wrote block-analysis JSON: ${base}.block-analysis.json`));
     }
   }
 

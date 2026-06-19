@@ -32,6 +32,7 @@ import { runDG } from "./dependency-graph.ts";
 import { runBatchPlanner, serializeBatchPlan } from "./batch-planner.ts";
 import { runReachabilitySolver, serializeReachabilityRecord } from "./reachability-solver.ts";
 import { buildEngineGraphJson } from "./engine-graph.ts";
+import { buildBlockAnalysis } from "./block-analysis.ts";
 import { runAuthGraph } from "./auth-graph.ts";
 import { serializeChunksManifest } from "./codegen/route-splitter.ts";
 import { buildMcpDescriptors } from "./codegen/mcp-descriptors.ts";
@@ -2549,6 +2550,18 @@ export function compileScrml(options = {}) {
     // (`{ "engines": [] }`) when the file declares no engines. The function form
     // mirrors `reachabilityRecordJson` / `batchPlanJson` — no cost unless called.
     engineGraphJson: () => buildEngineGraphJson(metaFiles),
+    // Block-analysis PER-FILE static sidecar (block-analysis-emit-2026-06-18).
+    // Lazy projection of every named block (function / component / engine / type
+    // / channel) in each compiled file into its OWN deterministic JSON artifact
+    // — `<base>.block-analysis.json`, written by commands/compile.js under
+    // `--emit-block-analysis`. UNLIKE `engineGraphJson` (which merges all engines
+    // across all files into ONE graph), this returns ONE `BlockAnalysis` PER
+    // file (each carrying its own `.file` relpath + only that file's blocks), so
+    // the write loop matches each input file to its own analysis and never
+    // writes a merged blob. Honest-empty (`blocks: []`) for a file with no
+    // leasable blocks. The function form mirrors `engineGraphJson` — no cost
+    // unless called.
+    blockAnalyses: () => buildBlockAnalysis(metaFiles),
     // Stage 7.55 — A-3.5 wire (S91). The AuthGraph is the per-gate
     // classification surface consumed by RS Component 4 and (future)
     // A-4 per-role chunk emission. Surfaced on the return so integration
