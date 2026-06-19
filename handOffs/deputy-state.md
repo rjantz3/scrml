@@ -8,11 +8,11 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 
 ## Deputy status
 
-- **State:** LIVE — steady-state. **S207 WRAPPED** (916fe3ae): block-analysis-emit v1 arc COMPLETE (D1-D5) + 3 MED codegen fixes; the **g-pure-module-server-emit HIGH fix is IN-FLIGHT (agent CRASHED, deferred to S208)**. flogence (renamed S206). On tick 77.
+- **State:** LIVE — steady-state. **S208 active** — g-pure-module-server-emit HIGH RESOLVED (432c28b6, salvaged from the crashed agent). flogence (renamed S206). On tick 77.
 - **Self-poke loop:** `/loop 30m` — cron job `39fed15c` (`7,37 * * * *`). CronDelete to cancel.
-- **Last-absorbed delta seq:** S207 **[14]** (PA-source; deputy appended S205 F3 [22]).
+- **Last-absorbed delta seq:** S207 **[14]** (S208 boot landed g-pure-module but not yet delta-logged; git-inferred).
 - **`deputy-maint`:** worktree, descends main via the merge-before-push gate. **Tip:** `git rev-parse deputy-maint`.
-- **Owed maintenance:** none. (Maps REFRESHED this tick c553dd84→d931f8be [g-compound fix + new E-CELL-AMBIGUOUS-MEMBER-RENDER code]; recent-sessions regen [wrap anchor]; digest after maps; §3c green.)
+- **Owed maintenance:** maps batch (g-pure-module `432c28b6` tree-shake fix, 1 compiler/src file) — BATCHED for S208 next compiler-src (1 fresh change; per the firm rule). Else current.
 
 ## PA↔vPA protocol — ACK + HEARTBEAT (S205 [19], each tick)
 
@@ -35,7 +35,7 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 
 ## In-flight dispatches (F3 watch list)
 
-- **`a56577f8b37aab3b2`** — **g-pure-module-server-emit-missing** HIGH fix (S207 [13]). **Status @ tick 76: IN-FLIGHT but the agent CRASHED** (rate-limited @72 tool-uses — 5th env crash, per [14]); worktree has a partial `fix` commit (9b3fe86a) but UNVERIFIED/incomplete. **NOT a clean completion** → deputy appended NO `(deputy)` entry (the PA logged [14]). **S208 re-dispatches / salvages it** (its first task). All other S207 worktrees 6b-cleaned at the wrap.
+- _(none in flight)_ — g-pure-module-server-emit HIGH LANDED at S208 boot (432c28b6; the crashed agent work salvaged). In the deferred maps batch; worktree stale.
 
 ## Tick log (compressed)
 
@@ -44,6 +44,7 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 - **T57-73** PA idle (17 no-op ticks). **T74-75** PA resumed: g-pure-module HIGH fix dispatched.
 - **T76** S207 WRAPPED — absorbed [1-14]; PA integrated my ~5 pending commits + skipped maps-6c → deputy refreshed maps c553dd84→d931f8be (g-compound + new E-CELL-AMBIGUOUS-MEMBER-RENDER code); recent-sessions + digest regen; §3c PASS. g-pure-module HIGH fix in-flight-CRASHED → S208 re-dispatches.
 - **T77** digest regen (cleared the T76 bundled-maps stamp artifact so S208-boot reads current); main idle post-wrap; g-pure-module still crashed-pending-S208.
+- **T81** S208 booted (T78-80 no-ops): g-pure-module HIGH LANDED (432c28b6 salvaged) + my tick-76/77 integrated + pushed (maps reached origin). digest regen (HIGH gap closed); maps batch (g-pure-module) held.
 
 ## Currency snapshot (@ tick 76)
 
