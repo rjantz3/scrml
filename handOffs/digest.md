@@ -1,9 +1,9 @@
-<!-- @digest head=fb7ac8ff delta-seq=9 -->
+<!-- @digest head=72dc4fdb delta-seq=6 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `fb7ac8ff`** + delta-log **[9]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `fb7ac8ff`
+> **HEAD `72dc4fdb`** + delta-log **[6]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `72dc4fdb`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,26 +13,24 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `fb7ac8ff`
+## Board — from `@gap` tokens @ `72dc4fdb`
 - **HIGH 0** · MED 9 · LOW 23 · Nominal 8
 - Named open HIGHs: _none_
 
-## Recent rulings — last 2 `rule` (delta-log S208 — 2026-06-19)
-- `[4]` rule · **sPA (Specific Project Agent) role RATIFIED** (user design) — a fast-booting EXECUTION agent grinding ONE speciality-clustered work-list, sourcing per-item und… → user-voice S208
-- `[8]` rule · **dock-for-codebase-health = flogence DD-candidate** (user Q "track threading/spaghettification + dead/orphaned code via the dock?") — YES, natural fit: SEMANTI… → user-voice S208 + flogence
+## Recent rulings — last 1 `rule` (delta-log S209 — 2026-06-19)
+- `[6]` rule · GRAFT RATIFIED (user "record pa direct") — ship a-A(reason-death list)+b-B(footprint surface) as INVESTIGATION-SURFACES-WITH-CONTEXT not scores; gate b-A(dock-r… → design-insights.md
 
-## Recent activity — last 6 `disp`/`land`/`find`/`state`
-- `[1]` state · COLD S208 boot (Profile A FULL; digest STALE → authoritative fallback; deputy ALIVE [misread as down at boot — it had just-committed ticks 76/77]). Opener: fini… → hand-off-212 (S207 rotated)
-- `[2]` land · g-pure-module-server-emit-missing (HIGH) **Fix A FINISHED + RESOLVED** (432c28b6) — emit-server.ts tree-shake (Option 2; Option 1 link-errors on erased TYPE imp… → 432c28b6
-- `[3]` land · **PUSHED** origin d931f8be→7337ddff (Fix A + hand-off rotation + deputy ticks 76/77 merge; merge-before-push gate fired [deputy 2 ahead]; coherence 0/0; pre-pus… → 7337ddff
-- `[5]` disp/find · **spa-list-builder WORKFLOW** (multi-agent, user opt-in) — scanned the whole project scope (known-gaps + master-list + SPEC-Nominal + deferred-corpus + source-T… → wf_4c184883-41e
-- `[6]` land · Fix B **W-SERVER-IMPORT-UNEMITTED** (05b88433) — cross-file post-codegen invariant (api.js checkServerImportInvariant, runs on the COMPILE before the write gate… → 05b88433
-- `[7]` land · **sPA scaffold + 14-list registry** committed (3e06cfba scaffold + 0587a9d1 expansion; scrml-support 451e9d2 contract). INDEX consolidated 26→14 Bucket-A subsys… → spa-lists/
+## Recent activity — last 5 `disp`/`land`/`find`/`state`
+- `[1]` state · COLD S209 boot (Profile A FULL "read pa.md and start session"; digest CURRENT @fb7ac8ff sources-unchanged@d0c5a96a → volatile board trusted). scrml+scrml-suppor… → hand-off-213
+- `[2]` disp/find · dock-for-codebase-health DD (user "DD it"; scrml-deep-dive, no-worktree pure-research). VERIFIED CONTRADICTION vs PA brief: coverage NOT the central gate — TWO… → DD doc
+- `[3]` disp/find · debate (user "run the debate"; debate-curator autonomous-COMPOSED — the 3 DD-recommended experts NOT loadable mid-session [S198 harness-cache friction]; ran com… → debate transcript (curator return)
+- `[4]` land · dock-health.ts BUILT (user "build the ungated"; b-B, PA-direct, standalone scripts/dock-health.ts imports flograph globSync/rel + shells --emit-block-analysis).… → scripts/dock-health.ts
+- `[5]` find · DOG-FOOD REFINEMENT beyond the debate: scrml cell identity is FILE-LOCAL (17 pages each own a distinct <errorMessage>) — bare-name cross-file agg conflates; cha… → dock-health.ts ④
 
 ## State
-- Version: 0.7.0 · maps: 4 commits behind HEAD (watermark 9afc746e, HEAD fb7ac8ff)
+- Version: 0.7.0 · maps: 8 commits behind HEAD (watermark 9afc746e, HEAD 72dc4fdb)
 - Recent wraps:
-  - ebf6a607 wrap(s208): close — g-pure-module HIGH closed (Fix A+B) + sPA execution-agent role built (14-list registry)
+  - d0c5a96a chore(s208): wrap-finalize — recent-sessions + digest regen at settled HEAD
   - 916fe3ae wrap(s207): close — block-analysis-emit arc complete (D3-D5) + 2 MED codegen fixes + flogence pure-module HIGH (Fix A in-flight)
   - 6512b592 wrap(s206): close — landed block-analysis-emit D1+D2; birthed the flogence satellite architecture; flogeance→flogence rename
 
