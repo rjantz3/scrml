@@ -8,7 +8,7 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 
 ## Deputy status
 
-- **State:** LIVE — steady-state. **S206 WRAPPED** (6512b592); flogence (renamed from flogeance S206); block-analysis-emit v1 (block-lease groundwork) landed. First deputy instance, booted S203. On tick 50.
+- **State:** LIVE — steady-state. **S206 WRAPPED** (6512b592); flogence (renamed from flogeance S206); block-analysis-emit v1 (block-lease groundwork) landed. First deputy instance, booted S203. On tick 51.
 - **Self-poke loop:** `/loop 30m` — cron job `39fed15c` (`7,37 * * * *`). CronDelete to cancel.
 - **Last-absorbed delta seq:** S206 **[18]** (PA-source; deputy appended S205 F3 entry [22]).
 - **`deputy-maint`:** worktree, descends main via the merge-before-push gate. **Tip:** `git rev-parse deputy-maint`.
@@ -16,7 +16,7 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 
 ## PA↔vPA protocol — ACK + HEARTBEAT (S205 [19], each tick)
 
-- **heartbeat:** tick **T50** · last-absorbed **[S206 18]** · deputy-maint tip = this commit (`git rev-parse deputy-maint`).
+- **heartbeat:** tick **T51** · last-absorbed **[S206 18]** · deputy-maint tip = this commit (`git rev-parse deputy-maint`).
 - **ACK (vpa:) [S205 10]** → §3c health-check run + recorded each tick (standing).
 - **ACK (vpa:) [S205 19]** → ACK+heartbeat block recorded each tick (standing).
 - No new `(vpa:)` directives since [S205 19]; the S206 burst ([1]-[18]) carried none.
@@ -26,7 +26,7 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 - **Merge-before-push gate (S205 [15]):** PA asserts `deputy-maint ^main == 0` before any push. Working — caught my strands at S205 + S206 [5] pushes; my maintenance reaches origin each cycle.
 - **F1 dilation REALIZED (S205 [3]/[17]):** F1 ~8.3k; total ~1.5%/1M. Net-positive. S206 cold-boot was digest-thinned again ([S206 1]).
 - **S42 WRAP-THINNING (S205 [19]):** wraps reference digest/delta-log/deputy-state (deputy-enabled).
-- **Maps mechanism (T12) + cadence:** `project-mapper` into the worktree (CWD-pinned, worktree-only brief, NO isolation) + verify `git -C <main> status --porcelain -- .claude/maps/` EMPTY before commit. BATCH compiler-src/.scrml changes into one run (each ~100-130k sub-agent tokens; PA-window saving ~6-7k → minimize invocations). Ran T12/T32/T35/T50, all leak-clean. **Regen the digest AFTER the maps commit** (maps watermark otherwise stales the digest — T36). **maps-owed check scope:** `examples/**/*.scrml` + `samples/**/*.scrml` (NOT bare `**/*.scrml` — catches docs/changes/ fixtures = false signal, T37).
+- **Maps mechanism (T12) + cadence:** `project-mapper` into the worktree (CWD-pinned, worktree-only brief, NO isolation) + verify `git -C <main> status --porcelain -- .claude/maps/` EMPTY before commit. BATCH compiler-src/.scrml changes into one run (each ~100-130k sub-agent tokens; PA-window saving ~6-7k → minimize invocations). Ran T12/T32/T35/T50, all leak-clean. **Regen the digest the tick AFTER a bundled maps refresh** (a same-commit maps+digest bundle leaves the stamp one behind its own commit → next-tick STALE artifact; T36/T51). **maps-owed check scope:** `examples/**/*.scrml` + `samples/**/*.scrml` (NOT bare `**/*.scrml` — catches docs/changes/ fixtures = false signal, T37).
 - **Partition-breach edge case (T44):** a cross-cutting text-rename (flogeance→flogence) touches deputy-owned files → rebase conflict. Resolve by reset deputy-maint to renamed main + rebuild (deputy commits are regenerable; no info loss).
 
 ## Graph/dock health (§3c — per-tick standing step)
@@ -36,7 +36,7 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 
 ## In-flight dispatches (F3 watch list)
 
-- _(none in flight)_ — **all worktrees 6b-cleaned at the S206 wrap.** S206 landed: block-analysis-emit D1 (696a53d0 footprintForBlock) + D2 (91e4fc38 builder/serializer) [in the T50 maps batch]; earlier S206/S205 landings all in. F3 bridge delivered cleanly across S205→S206 (3 deferred agents + block-analysis D1/D2 re-dispatch).
+- **1 in-flight (block-analysis-emit D3, PA alive → track):** `a2806a039d1651b47` (7729cf5b WIP emit-block-analysis-integration). compiler/src → maps batch on landing. (S206 D1/D2 landed; all prior worktrees 6b-cleaned at the wrap.)
 
 ## Tick log (compressed)
 
@@ -46,12 +46,13 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 - **T28-T35** trucking + match burst; maps batches 1+2 (→492b4bb9→359a1d83); S205 wrap absorbed; ACK+heartbeat adopted; F3 [22] block-splitter confirm; all 5 S205 agents landed in S206.
 - **T36-T49** S206 burst: dock block-scope + block-lease Scheme-C anchor proven; flogeance→flogence rename (T44 partition-breach, reset+rebuild); block-analysis-emit D1+D2 dispatched.
 - **T50** S206 WRAPPED — maps batch REFRESHED 359a1d83→d12fdef7 (D1 footprint + D2 builder/serializer, 2 new modules + 2 tests; leak-clean; zero new E-codes); digest + recent-sessions regen; §3c PASS; all worktrees cleaned.
+- **T51** PA integrated tick-50; digest regen (cleared the bundled-maps stamp artifact); D3 block-analysis-integration dispatched → 1 in-flight F3-watched.
 
 ## Currency snapshot (@ tick 50)
 
 - **Board:** gap-counts + recent-sessions PASS (PA regen'd §0 across S206).
 - **maps:** watermark **`d12fdef7`** (REFRESHED T50) — current.
-- **digest:** current (head `d12fdef7`, delta-seq S206 18).
+- **digest:** current (head `9a838b8f`, delta-seq S206 18).
 - **flograph/dock:** §3c PASS (snapshot above).
 
 ## Function 3 — agent monitoring (LIVE)
