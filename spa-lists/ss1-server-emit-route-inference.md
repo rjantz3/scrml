@@ -36,29 +36,29 @@ bundle, ALSO emit `export const <name>` (or don't route-infer an exported-and-by
 trucking after (R26 + rebaseline trucking-smoke 80→74).
 
 ### 2. `server-generator-yield-serializability` — wire E-ROUTE-003 on `server function*` yields
-`[open]` · bug · LOW · tier med
+`[parked → PA]` (needs value-expr typer + canonical-fixture decision; blast-radius > list) · bug · LOW · tier med
 E-ROUTE-003 not fired on a non-serializable yield-element type of an SSE generator.
 **Entry:** type-system.ts `checkRouteWireSerializability` + `route-wire-serializability.test.js:306-322`.
 
 ### 3. `g-sql-row-protect-leak` — protected-column-projection leak (static data-flow)
-`[open]` · feature · LOW · tier high
+`[parked → PA]` (SPEC §14.8 DEFERRED follow-on; net-new HIGH-tier data-flow, needs design) · feature · LOW · tier high
 A server fn SELECTing a protected column and returning the row isn't statically caught. New §14.8
 SELECT-projection → struct-return/wire data-flow analysis. **Entry:** type-system.ts E-ROUTE-003 gate
 (:3667-3882) + `case sql` (:9326) + protectAnalysis (:6701); SPEC §14.8 deferral (SPEC.md:8024-8026).
 
 ### 4. `bunsql-postgres-mysql-phases` — Postgres URI introspection (in progress) + MySQL driver
-`[open]` · feature · n-a · tier med
+`[parked → PA]` (Phase 2.5 real introspection needs async protect-analyzer migration; architectural arc) · feature · n-a · tier med
 Complete Postgres real compile-time introspection (Phase 2.5 — needs async PA migration) + add the
 MySQL branch. **Entry:** db-driver.ts §44.2 URI resolution + protect-analyzer.ts.
 
 ### 5. `p4-sql-batching-deferred-complexity` — P4 batcher post-v1 extensions
-`[open]` · feature · n-a · tier med
+`[parked → PA]` (explicitly POST-V1 per list; prioritization-deferred) · feature · n-a · tier med
 Five named post-v1 extensions to the shipped batcher (writes×transitions, optimistic rollback,
 tuple-WHERE, F9-in-tx, `--show-batch-plan`). **Entry:** batch-planner.ts (Stage 7.5) + master-list.md
 + the sql-batching DD.
 
 ### 6. `phase-a4-schema-refinement-pinned` — STALE phase-row, currency-correct then close
-`[open]` · feature · n-a · tier high
+`[landed-on-branch]` (spa/ss1; A4 row closed — all 3 parts verified shipped) · feature · n-a · tier high
 Legacy S58 phase row; substance already shipped (refinement three-zone S69, schemaFor S104).
 **Entry:** master-list.md §0.1 row A4 — verify shipped, mark closed (not real build work).
 
