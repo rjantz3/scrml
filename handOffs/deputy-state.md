@@ -8,7 +8,7 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 
 ## Deputy status
 
-- **State:** LIVE — steady-state. **S207 active** (block-analysis-emit D1-D5 arc COMPLETE + g-each-peritem fix). flogence (renamed S206). First deputy instance, booted S203. On tick 56.
+- **State:** LIVE — steady-state. **S207 active** (block-analysis-emit D1-D5 arc COMPLETE + g-each-peritem fix). flogence (renamed S206). First deputy instance, booted S203. On tick 74.
 - **Self-poke loop:** `/loop 30m` — cron job `39fed15c` (`7,37 * * * *`). CronDelete to cancel.
 - **Last-absorbed delta seq:** S206 **[18]** (PA-source; deputy appended S205 F3 [22]). **S207 burst is UNLOGGED past [18]** — D3-D5 + each-ternary landed without delta entries; my landing/agent state is git-inferred this session.
 - **`deputy-maint`:** worktree, descends main via the merge-before-push gate. **Tip:** `git rev-parse deputy-maint`.
@@ -16,7 +16,7 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 
 ## PA↔vPA protocol — ACK + HEARTBEAT (S205 [19], each tick)
 
-- **heartbeat:** tick **T56** · last-absorbed **[S206 18]** (S207 git-inferred) · deputy-maint tip = this commit (`git rev-parse deputy-maint`).
+- **heartbeat:** tick **T74** · last-absorbed **[S206 18]** (S207 git-inferred) · deputy-maint tip = this commit (`git rev-parse deputy-maint`).
 - **ACK (vpa:) [S205 10]** → §3c health-check each tick (standing). **ACK (vpa:) [S205 19]** → ACK+heartbeat each tick (standing). No new `(vpa:)` since.
 
 ## Standing facts (durable)
@@ -33,7 +33,7 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 
 ## In-flight dispatches (F3 watch list)
 
-- _(none in flight)_ — g-compound-field-render-by-tag LANDED (36e022bc, non-lexical compound-member render-by-tag; in the deferred maps batch). All S207 worktrees stale (6b-pending).
+- **1 in-flight (git-inferred; PA resumed after ~17 idle ticks):** g-pure-module-server-emit tree-shake fix `a56577f8b37aab3b2` (9b3fe86a fix, clean → complete-looking, awaiting PA landing). compiler/src → adds to the maps batch on landing. g-compound-rbt LANDED (36e022bc, in the held batch); other S207 worktrees stale.
 
 ## Tick log (compressed)
 
@@ -43,6 +43,7 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 - **T54** S207 block-analysis-emit arc COMPLETE (D5 + g-each-peritem fix landed) — maps batch REFRESHED d12fdef7→c553dd84 (D3 cli/api/compile + each-ternary tokenizer + D5 span-fix; 3 changes; leak-clean; zero new E-codes; find-count 1013); gap-counts + recent-sessions regen (PA skipped); digest after maps; §3c PASS; no in-flight.
 - **T55** digest regen (cleared the T54 bundled-maps stamp artifact); g-compound-rbt fix dispatched (adf911416) → 1 in-flight. Maps current on deputy-maint (c553dd84); origin lags (d12fdef7) until PA integrates tick-54.
 - **T56** g-compound-rbt LANDED (36e022bc) — maps batch owed (1 file) → BATCHED for next settling point; digest regen; no in-flight; burst settled.
+- **T57-73** PA idle (17 no-op ticks; maps batch g-compound held). **T74** PA resumed: g-pure-module-server-emit fix agent dispatched (a56577f8, complete-looking) → 1 in-flight F3-watched; digest current; maps batch still held (g-compound + g-pure-module-pending).
 
 ## Currency snapshot (@ tick 54)
 
