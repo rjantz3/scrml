@@ -1,9 +1,9 @@
-<!-- @digest head=414ca194 delta-seq=17 -->
+<!-- @digest head=d12fdef7 delta-seq=18 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `414ca194`** + delta-log **[17]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `414ca194`
+> **HEAD `d12fdef7`** + delta-log **[18]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `d12fdef7`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,7 +13,7 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `414ca194`
+## Board — from `@gap` tokens @ `d12fdef7`
 - **HIGH 0** · MED 9 · LOW 23 · Nominal 8
 - Named open HIGHs: _none_
 
@@ -32,11 +32,11 @@
 - `[17]` land/disp · D1 LANDED (696a53d0) — block-analysis-footprint.ts footprintForBlock (add-alongside; body-dg-builder.ts ZERO diff verified 2 ways; BREAK-1 canary on real compil… → 696a53d0 + agent a2322e040
 
 ## State
-- Version: 0.7.0 · maps: 16 commits behind HEAD (watermark 359a1d83, HEAD 414ca194)
+- Version: 0.7.0 · maps: current
 - Recent wraps:
+  - 6512b592 wrap(s206): close — landed block-analysis-emit D1+D2; birthed the flogence satellite architecture; flogeance→flogence rename
   - 74d7d0e2 wrap(s205): close — 3 MED gaps + slice-3 <each> + 3 ratifications; 3 agent landings deferred (F3)
   - e723de04 chore(s204): wrap-finalize — recent-sessions + digest regen at settled HEAD d64d4519
-  - 69172d25 wrap(s203): close — vPA-deputy LIVE (F1/F2/F3 + self-poke loop) + e2e backlog triaged + flograph filter; #3 fix left in-flight (first F3 reboot-bridge use)
 
 ## NOT in the digest (read source for these)
 - Open questions awaiting you → `hand-off.md` §"OPEN THREADS / Open questions"
