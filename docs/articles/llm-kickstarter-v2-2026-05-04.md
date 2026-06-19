@@ -2,7 +2,7 @@
 
 **One-paste context for any LLM about to write scrml.** Read this in full before generating any scrml code. If you've been pasted this document, do not skim.
 
-> v2 supersedes v1 (2026-04-25). v1 described **pre-v0.next** scrml; v2 describes the language **after the S52-S56 deliberation arc** (locks L1-L20, captured in `scrml-support/docs/deep-dives/v0next-s56-deliberation-outcomes-2026-05-04.md`). The two languages share much of their vocabulary (file extension, Bun runtime, `< db>` + `?{}`, `<program>`, `lift`, `bind:value`, `onclick=fn()`, `${expr}`, `#{}`, `lin`, components, stdlib) but the **state model has changed materially**, **engines are now the centerpiece**, and **markup is a first-class value type that can sit anywhere expressions sit** (the load-bearing pillar held since the scrml8 era). If a v1 recipe contradicts a v2 recipe, v2 is correct. Do not back-fill from v1.
+> v2 supersedes v1 (2026-04-25). v1 described **pre-v0.next** scrml; v2 describes the language **after the S52-S56 deliberation arc** (locks L1-L20, captured in `scrml-support/docs/deep-dives/v0next-s56-deliberation-outcomes-2026-05-04.md`). The two languages share much of their vocabulary (file extension, Bun runtime, `<db>` + `?{}`, `<program>`, `lift`, `bind:value`, `onclick=fn()`, `${expr}`, `#{}`, `lin`, components, stdlib) but the **state model has changed materially**, **engines are now the centerpiece**, and **markup is a first-class value type that can sit anywhere expressions sit** (the load-bearing pillar held since the scrml8 era). If a v1 recipe contradicts a v2 recipe, v2 is correct. Do not back-fill from v1.
 
 ---
 
@@ -40,7 +40,7 @@ Start from the canonical shape below and modify what you need. Don't write from 
 ```scrml
 <program auth="required">
 
-< db src="contacts.db" protect="password_hash" tables="contacts">
+<db src="contacts.db" protect="password_hash" tables="contacts">
 
   ${
     <name>  = ""
@@ -101,7 +101,7 @@ Note the parts:
 | Element | Purpose |
 |---|---|
 | `<program ...>` | Root element. **Required.** Without it, the compiler emits W-PROGRAM-001. |
-| `< db src="..." tables="...">` | DB block. Compile-time schema introspection runs here. `protect="a, b"` (**comma-separated**) marks fields server-only. |
+| `<db src="..." tables="...">` | DB block. Compile-time schema introspection runs here. `protect="a, b"` (**comma-separated**) marks fields server-only. |
 | `${ ... }` | **Logic block.** All declarations and functions live here, not in a separate `<script>` tag. |
 | `<varname> = expr` | **Reactive state DECLARATION** (V5-strict structural form). Bare `let var` is non-reactive. |
 | `@varname` | **Reactive state EXPRESSION ACCESS** (V5-strict canonical form). Reads, writes, and compound assignments use the `@` sigil. Bare names in expressions are LOCALS only. |
@@ -1059,7 +1059,7 @@ If your instinct from another framework fires, stop and use the scrml form. Thes
 | `bind:value={x}` | Svelte | `bind:value=@x` (no braces; `@` sigil required because it is an expression-position read of state) |
 | `v-model="x"` | Vue | `bind:value=@x` |
 | `on:click={fn}`, `@click="fn"`, `onClick={fn}` | Svelte/Vue/React | `onclick=fn()` (bare call, parens included) |
-| `import Database from 'better-sqlite3'` | Node | Don't. Use `< db src="...">` + `?{}` blocks. |
+| `import Database from 'better-sqlite3'` | Node | Don't. Use `<db src="...">` + `?{}` blocks. |
 | `db.prepare(sql).all(params)` | better-sqlite3 | `?{`SELECT …`}.all()` — `.prepare()` does not exist (E-SQL-006) |
 | `await prisma.product.findMany({where: {…}})` | Prisma | `?{`SELECT * FROM products WHERE …`}.all()` |
 | `socket.io`, Phoenix Channels | Node, LiveView | `<channel>` (file-level — see §11.3 real-time recipe) |
@@ -1070,7 +1070,7 @@ If your instinct from another framework fires, stop and use the scrml form. Thes
 | Hand-rolled debounce in `effect()` | (invented) | `@debounced(300) <debouncedQuery> = @query` — declaration modifier, NOT `.debounced()` postfix. |
 | zod / yup / joi schema for runtime validation | (npm) | Compile-time: `let x: number(>0 && <100)`. Runtime: `import { validate } from 'scrml:data'` |
 | `bcrypt`, `jsonwebtoken`, custom session table | npm | `import { hashPassword, signJwt } from 'scrml:auth'` — built in |
-| `pg`, `mysql2`, `better-sqlite3` packages | npm | Bun.SQL via `?{}` — driver picked from `< db src="...">` URL scheme |
+| `pg`, `mysql2`, `better-sqlite3` packages | npm | Bun.SQL via `?{}` — driver picked from `<db src="...">` URL scheme |
 | `scrml migrate v0next` to translate old code | (anticipated) | **Does not exist.** v0.next IS scrml. There is no compat mode. |
 | `function validate() { if (@x.field == "") ... }` | React/Vue imperative | Declarative: `<x.field req>` on the cell decl. `@x.isValid` and `@x.errors` are auto-synthesized (see §6). |
 | Per-field `if (@signup.errors.name.length > 0) <p>...</p>` | (verbose) | `<errors of=@signup.name/>` — first-class markup element (§6.3). |
@@ -1122,7 +1122,7 @@ These are the questions every LLM silently guesses wrong on. The right answers:
 
 1. **File extension:** `.scrml`
 2. **Runtime:** **Bun**, not Node. Bun.SQL handles SQLite + Postgres natively. MySQL deferred.
-3. **DB layer:** Built into the language via `?{}` blocks. **DO NOT npm install any DB driver.** `< db src="./app.db">` for SQLite, `< db src="postgres://...">` for Postgres.
+3. **DB layer:** Built into the language via `?{}` blocks. **DO NOT npm install any DB driver.** `<db src="./app.db">` for SQLite, `<db src="postgres://...">` for Postgres.
 4. **Form mutations:** `server function name(args)` inside `${ ... }`. Bare-call event handlers in markup: `<form onsubmit=addItem()>`. No separate `.server.js` files.
 5. **Template syntax:** `${expr}` for interpolation. Control flow uses `if=` attribute on elements, or `${ if (cond) {...} }` and `${ for (let x of xs) {...} }` inside logic blocks. NOT JSX, NOT Svelte braces. **No `<if>` or `<for>` markup tags exist.**
 6. **State model:** `<var> = init` to declare; `@var` to read; `@var = X` to write. **V5-strict — read §3 in full.** State machines are first-class via `<engine>` — read §4 in full.
@@ -1241,7 +1241,7 @@ Notes:
 ```scrml
 <program>
 
-< db src="users.db" protect="password_hash" tables="users">
+<db src="users.db" protect="password_hash" tables="users">
 
   ${
     import { hashPassword, verifyPassword, signJwt } from 'scrml:auth'
@@ -1459,14 +1459,14 @@ Why per-screen, not stdlib generic: a generic `AsyncPhase<T>` strips the domain 
 
 If a v1 codebase uses `RemoteData<T>` or similar imported generic shape, port it screen-by-screen to a per-screen `<Name>Phase` enum.
 
-### 11.6 Schema recipe — `< schema>` declarative DDL
+### 11.6 Schema recipe — `<schema>` declarative DDL
 
 Declare what the database SHOULD look like. The compiler diffs against the live DB and generates migration SQL. **You never write `ALTER TABLE` by hand.**
 
 ```scrml
 <program db="./notes.db">
 
-< schema>
+<schema>
     users {
         id:           integer primary key
         email:        text not null unique
@@ -1482,7 +1482,7 @@ Declare what the database SHOULD look like. The compiler diffs against the live 
     }
 </>
 
-< db src="./notes.db" tables="users, notes">
+<db src="./notes.db" tables="users, notes">
   <!-- ?{} queries here -->
 </>
 
@@ -1490,10 +1490,10 @@ Declare what the database SHOULD look like. The compiler diffs against the live 
 ```
 
 Notes:
-- `< schema>` requires `<program db="...">` — the database path comes from the `<program>` attribute.
+- `<schema>` requires `<program db="...">` — the database path comes from the `<program>` attribute.
 - Column types: `text`, `integer`, `real`, `blob`, `boolean`, `timestamp`. Constraints: `primary key`, `not null`, `unique`, `default(literal)`, `references table(col)`.
 - **Backend:** scrml's database layer is **Bun.SQL-backed** (Bun ≥1.3). The `db=` URI selects the driver: `:memory:` / `./path.db` / `sqlite:...` → SQLite; `postgres://...` / `postgresql://...` → PostgreSQL. MySQL (`mysql://...`) is queued for a later phase. Same scrml schema + `?{}` queries run against any supported backend without source changes.
-- `< schema>` and `< db src=>` are sibling blocks that both reference the same DB path.
+- `<schema>` and `<db src=>` are sibling blocks that both reference the same DB path.
 
 ### 11.7 Multi-page routing
 
@@ -1967,7 +1967,7 @@ If you find yourself writing `await` in front of a server-fn call, stop.
 
 If you find yourself writing `~name = expr` for derived reactive, stop. Use `const <name> = expr` (read at `@name`).
 
-If you find yourself writing `import Database from 'better-sqlite3'`, stop. Use `< db src="...">`.
+If you find yourself writing `import Database from 'better-sqlite3'`, stop. Use `<db src="...">`.
 
 If you find yourself writing chains of `if (@phase === 'loading') ... else if (@phase === 'loaded') ...`, stop. **Reach for an engine.** That is the v0.next idiom.
 
