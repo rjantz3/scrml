@@ -8,9 +8,9 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 
 ## Deputy status
 
-- **State:** LIVE — steady-state. **S208 WRAPPED** (ebf6a607): g-pure-module HIGH closed (Fix A+B) + sPA execution-agent role ratified. flogence (renamed S206). On tick 77.
+- **State:** LIVE — steady-state. **S209 active** (S208 wrapped: g-pure-module HIGH closed; sPA role + dock-health tool built). flogence (renamed S206). On tick 77.
 - **Self-poke loop:** `/loop 30m` — cron job `39fed15c` (`7,37 * * * *`). CronDelete to cancel.
-- **Last-absorbed delta seq:** S208 **[9]** (PA-source; deputy appended S205 F3 [22]).
+- **Last-absorbed delta seq:** S209 **[6]** (PA-source; deputy appended S205 F3 [22]).
 - **`deputy-maint`:** worktree, descends main via the merge-before-push gate. **Tip:** `git rev-parse deputy-maint`.
 - **Owed maintenance:** none. (Maps REFRESHED this tick d931f8be→9afc746e [g-pure-module tree-shake + Fix-B W-SERVER-IMPORT-UNEMITTED]; digest after maps; §3c green.)
 
@@ -47,12 +47,13 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 - **T81** S208 booted (T78-80 no-ops): g-pure-module HIGH LANDED (432c28b6 salvaged) + my tick-76/77 integrated + pushed (maps reached origin). digest regen (HIGH gap closed); maps batch (g-pure-module) held.
 - **T82** Fix B landed (05b88433, W-SERVER-IMPORT-UNEMITTED) — maps batch hit ≥2 (g-pure-module + Fix B) → REFRESHED d931f8be→9afc746e (incl. the new W-code); digest after maps; §3c PASS; no in-flight.
 - **T83** S208 WRAPPED — absorbed [1-9] (g-pure-module HIGH closed Fix A+B; sPA role ratified; my ticks 81/82 integrated at the wrap). recent-sessions regen (wrap anchor); digest current (PA wrap-finalize); maps current; no in-flight. NOTE: S208-boot read digest STALE (deputy misread as down) — heartbeat is the fix.
+- **T84-85** no-ops (PA idle post-S208-wrap). **T86** S209 booted: absorbed [1-6] (dock-for-codebase-health DD + debate + dock-health.ts built + graft ratified; all design/flogence). **S209-boot read digest CURRENT → thin-start delivered** (contrast S208 stale — the merge worked). digest regen; maps current; no in-flight.
 
 ## Currency snapshot (@ tick 76)
 
 - **Board:** gap-counts PASS; recent-sessions regen'd (wrap anchor). g-compound-rbt MED closed; g-pure-module HIGH open (fix in-flight-crashed).
 - **maps:** watermark **`9afc746e`** (REFRESHED T82) — current.
-- **digest:** current (head `9afc746e`, delta-seq S207 14).
+- **digest:** current (head `72dc4fdb`, delta-seq S209 6).
 - **flograph/dock:** §3c PASS.
 
 ## Function 3 — agent monitoring (LIVE)
