@@ -5,21 +5,23 @@ off THIS file + the delta-log + the maintenance read-list (cheap + lossless: the
 not deliberation, so nothing irreplaceable lives in its transcript; `scrml-support/vpa-scrml.md`
 §"Re-hydration"). **Deputy-owned** (write-surface partition); maintained on the `deputy-maint` branch.
 
-> **REBOOT-READY anchor refreshed at tick 86 (S209).** A fresh deputy: open a 2nd terminal in `scrml`,
-> say **"read vpa.md and boot"** → maintenance boot → FF the existing `deputy-maint` worktree → read
-> this file + the delta-log tail → resume the `/loop 30m` self-poke. Resume point below.
+> **RE-HYDRATED at tick 89 (S209).** This instance IS the reboot the tick-86 anchor prepared for: a fresh
+> deputy booted via "read vpa.md and boot", FF'd the existing `deputy-maint` worktree (already current —
+> main idle @72dc4fdb), confirmed last-absorbed S209 [6], ran a boot tick (oracle + §3c + F3), re-armed its
+> own `/loop 30m` (the old cron `39fed15c` died with the prior instance — CronList empty, as predicted).
+> A future fresh deputy repeats this off the resume point below.
 
 ---
 
 ## Deputy status (RESUME POINT)
 
-- **State:** LIVE — steady-state. **S209 active** (S208 wrapped: g-pure-module HIGH closed; sPA execution-agent role + dock-health tool built). flogence (renamed from flogeance S206). On tick 88.
-- **Self-poke loop:** `/loop 30m` — cron job `39fed15c` (`7,37 * * * *`). **A fresh deputy must re-arm its own `/loop`** (the cron dies with the old instance). CronDelete `39fed15c` to cancel the old one if still alive.
-- **Last-absorbed delta seq:** S209 **[6]** (PA-source; the deputy itself appended the S205 F3 entry [22]).
+- **State:** LIVE — steady-state, RE-HYDRATED instance. **S209 active** (S208 wrapped: g-pure-module HIGH closed; sPA execution-agent role + dock-health tool built). flogence (renamed from flogeance S206). On tick **89**.
+- **Self-poke loop:** `/loop 30m`. **OLD cron `39fed15c` is DEAD** (died with the prior instance; CronList confirmed empty at boot — no CronDelete needed). This instance re-arms a fresh `/loop 30m`.
+- **Last-absorbed delta seq:** S209 **[6]** (current — [6] is the latest PA-source entry; the deputy itself appended the S205 F3 entry [22]).
 - **`deputy-maint` branch:** worktree `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint` (scrmlMaster sibling, OUTSIDE `.claude/worktrees/`). **Tip:** `git rev-parse deputy-maint`. FF onto main at boot.
 - **node_modules:** the worktree already has the symlinks (re-create if missing): `ln -s …/scrml/node_modules ./node_modules` · `…/scrml/compiler/node_modules ./compiler/node_modules`.
-- **Owed maintenance:** none. (digest current head=72dc4fdb; maps watermark `9afc746e`; §0 + recent-sessions PASS; §3c green.)
-- **Coherence:** deputy-maint `0 1` ahead of main (tick-86, awaiting the PA's next integration — clean FF).
+- **Owed maintenance:** none. (digest current stamp=72dc4fdb sources-unchanged; maps watermark `9afc746e` = 11 commits behind by raw count but ZERO mapped-corpus change since [S209 = DD/debate/dock-health/deputy-tick commits only] → NOT owed per the scope rule; §0 + recent-sessions PASS; §3c green.)
+- **Coherence:** deputy-maint **4 ahead** of main after this tick (ticks 86/86-wrap/88/89), 0 behind — clean FF, awaiting the PA's next integration.
 
 ## The deputy tick (steady-state — what each `/loop` fire does)
 
@@ -33,7 +35,7 @@ not deliberation, so nothing irreplaceable lives in its transcript; `scrml-suppo
 
 ## PA↔vPA protocol — ACK + HEARTBEAT (S205 [19], each tick)
 
-- **heartbeat:** tick **T88** · last-absorbed **[S209 6]** · deputy-maint tip = `git rev-parse deputy-maint`.
+- **heartbeat:** tick **T89** (re-hydrated instance) · last-absorbed **[S209 6]** · deputy-maint tip = `git rev-parse deputy-maint`.
 - **ACK (vpa:) [S205 10]** → §3c health-check each tick (standing). **ACK (vpa:) [S205 19]** → ACK+heartbeat each tick (standing). No new `(vpa:)` in S206-S209.
 
 ## Standing facts (durable)
@@ -57,16 +59,18 @@ not deliberation, so nothing irreplaceable lives in its transcript; `scrml-suppo
 
 ## Graph/dock health (§3c)
 
-- **Snapshot @ tick 86 (PASS):** flograph ~428n/103e (--with-support --with-archive) · currency-sweep **0 (clean — the ouroboros catch holds)** · ~30 unverified · ~29 dangling · 0 dup · 0 err. dock --check PASS · coverage 0/628 (0.0%) · 0 orphans. dangling/unverified track new S206-S209 design docs — no NEW finding.
+- **Snapshot @ tick 89 (PASS):** flograph 438n/154e (--with-support --with-archive) · currency-sweep **0 (clean — the ouroboros catch holds)** · 36 unverified · 29 dangling · 0 dup · 0 err. dock --check PASS (1 INFO, the self-dock) · coverage 0/628 (0.0%) · 0 orphans. **Re-emitted graph.json/.mmd at boot to clear a 2-ERROR drift** (deputy-owned untracked projection; emitted with --with-support --with-archive to match §3c). unverified 30→36 = the fresh S209 `dock-for-codebase-health` DD cites (asserted-not-verified, expected) — no NEW actionable finding.
+- **Snapshot @ tick 86 (PASS):** flograph ~428n/103e · currency-sweep 0 · ~30 unverified · ~29 dangling · 0 dup · 0 err. dock PASS · coverage 0/628 · 0 orphans.
 - **route to PA (open nit):** §3 plain `flograph --emit` vs §3c `--check --with-support --with-archive` → graph.json drifts to the 190n default; the deputy compensates by emitting with the matching flags. Align §3 with §3c (or make --check corpus-aware).
 
 ## In-flight dispatches (F3 watch list)
 
-- **1 in-flight (S209, PA alive → track):** sPA "ss1" `a6eb2c2fd9ba6086b` — `ss1-route-misinference-server-value-export` (emit-server.ts + var-counter.ts; the S208-filed trucking route-mis-inference gap). compiler/src → maps batch on landing. (All prior S205-S208 agents landed + cleaned; g-pure-module crash→S208-salvage loop closed.)
+- **ss1 `a6eb2c2fd9ba6086b` COMPLETED CLEANLY (T89, awaiting PA/sPA landing):** `ss1-route-misinference-server-value-export` (the S208-filed trucking route-mis-inference gap). 2 commits ahead of base 72dc4fdb — `4a19ae98` feat(codegen): emit pure-module VALUE exports into .server.js (ss1) + tests · `254346e0` docs(ss1): progress — full suite green (24529/0 incl browser); worktree CLEAN. **NOT delta-log-recorded** — PA alive (S209 active) → watch+record-in-deputy-state only; the `(deputy) state` delta-append is the reboot-gap exception, not for a live PA. The PA/sPA lands via S67 file-delta (substantive — never the deputy). compiler/src (emit-server.ts) → maps batch on landing. **IF a later tick shows a PA cold-boot delta entry without ss1 landed → THEN append the `(deputy) state` reboot-gap entry.**
+- (All prior S205-S208 agents landed + cleaned; g-pure-module crash→S208-salvage loop closed.)
 
-## Currency snapshot (@ tick 86)
+## Currency snapshot (@ tick 89)
 
-- **maps:** watermark `9afc746e` (REFRESHED T82) — current (no mapped-corpus change since). **digest:** current (head `72dc4fdb`, delta-seq S209 6). **§0:** gap-counts + recent-sessions PASS. **§3c:** PASS.
+- **maps:** watermark `9afc746e` (REFRESHED T82) — current (no mapped-corpus change since; 11-commits-behind by raw count is benign — all S209 non-mapped). **digest:** current (stamp `72dc4fdb`, sources-unchanged @ HEAD). **§0:** gap-counts + recent-sessions PASS. **§3c:** PASS (438n/154e). **Next maps refresh** will be triggered by the ss1 landing (emit-server.ts = compiler/src) per the refresh rule.
 
 ## Maintenance seams (Function 2)
 
