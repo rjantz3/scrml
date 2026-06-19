@@ -8,9 +8,9 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 
 ## Deputy status
 
-- **State:** LIVE — steady-state. **S208 active** — g-pure-module-server-emit HIGH RESOLVED (432c28b6, salvaged from the crashed agent). flogence (renamed S206). On tick 77.
+- **State:** LIVE — steady-state. **S208 WRAPPED** (ebf6a607): g-pure-module HIGH closed (Fix A+B) + sPA execution-agent role ratified. flogence (renamed S206). On tick 77.
 - **Self-poke loop:** `/loop 30m` — cron job `39fed15c` (`7,37 * * * *`). CronDelete to cancel.
-- **Last-absorbed delta seq:** S207 **[14]** (S208 boot landed g-pure-module but not yet delta-logged; git-inferred).
+- **Last-absorbed delta seq:** S208 **[9]** (PA-source; deputy appended S205 F3 [22]).
 - **`deputy-maint`:** worktree, descends main via the merge-before-push gate. **Tip:** `git rev-parse deputy-maint`.
 - **Owed maintenance:** none. (Maps REFRESHED this tick d931f8be→9afc746e [g-pure-module tree-shake + Fix-B W-SERVER-IMPORT-UNEMITTED]; digest after maps; §3c green.)
 
@@ -25,7 +25,7 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 - **F1 dilation REALIZED:** F1 ~8.3k; total ~1.5%/1M; net-positive. S207 cold-boot was digest-thinned (S207 [1]).
 - **S42 WRAP-THINNING (S205 [19]):** wraps reference digest/delta-log/deputy-state.
 - **Maps mechanism (T12) + cadence:** `project-mapper` into the worktree (CWD-pinned, worktree-only brief, NO isolation) + verify `git -C <main> status --porcelain -- .claude/maps/` EMPTY before commit. **Refresh rule (firm, T76):** at a WRAP boundary if any compiler-src owed · OR ≥2 changes accumulate · OR an owed change has sat ≥10 ticks; else batch. project-mapper > manual (T76 it caught a new E-code a manual edit would miss). Ran T12/T32/T35/T50/T54/T76 leak-clean. Regen digest the tick AFTER a bundled maps refresh (T51). maps-owed scope: `examples/**/*.scrml`+`samples/**/*.scrml` (T37).
-- **Partition-breach (T44):** cross-cutting rename → reset+rebuild. **PA may skip §0/maps during fast bursts** → deputy regens (T54/T76).
+- **Partition-breach (T44):** cross-cutting rename → reset+rebuild. **PA may skip §0/maps during fast bursts** → deputy regens (T54/T76). **S208-boot digest-stale RECURRED ([1]): the PA MISREAD the deputy as DOWN → did not merge deputy-maint first → read stale digest, lost thin-start. The HEARTBEAT in this file is the alive+current signal the PA should check at boot (S205 [19]) — route to PA: read it before deciding the deputy is down.**
 - **perl -e:** NO apostrophes in replacement (single-quote terminates — T52); `{}` delimiters or escape `/`; heredoc fallback. **delta-log edits:** python.
 
 ## Graph/dock health (§3c — per-tick standing step)
@@ -46,6 +46,7 @@ when the transcript grows (cheap + lossless: projection, not deliberation; `scrm
 - **T77** digest regen (cleared the T76 bundled-maps stamp artifact so S208-boot reads current); main idle post-wrap; g-pure-module still crashed-pending-S208.
 - **T81** S208 booted (T78-80 no-ops): g-pure-module HIGH LANDED (432c28b6 salvaged) + my tick-76/77 integrated + pushed (maps reached origin). digest regen (HIGH gap closed); maps batch (g-pure-module) held.
 - **T82** Fix B landed (05b88433, W-SERVER-IMPORT-UNEMITTED) — maps batch hit ≥2 (g-pure-module + Fix B) → REFRESHED d931f8be→9afc746e (incl. the new W-code); digest after maps; §3c PASS; no in-flight.
+- **T83** S208 WRAPPED — absorbed [1-9] (g-pure-module HIGH closed Fix A+B; sPA role ratified; my ticks 81/82 integrated at the wrap). recent-sessions regen (wrap anchor); digest current (PA wrap-finalize); maps current; no in-flight. NOTE: S208-boot read digest STALE (deputy misread as down) — heartbeat is the fix.
 
 ## Currency snapshot (@ tick 76)
 
