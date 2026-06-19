@@ -113,6 +113,26 @@ const TS_STATE_CHILD_STRUCTURAL_TAGS = new Set<string>([
   "machine",
 ]);
 
+// Bug `g-bare-literal-attr-value` (sPA ss3, 2026-06-19) — the family of
+// STRUCTURAL attributes spec-typed to accept a BARE numeric/duration/boolean
+// literal as the canonical worked-example form. The block-splitter parses such
+// a bare literal value as a `variable-ref` whose `name` IS the literal text, so
+// `visitAttr`'s scope check would false-fire E-SCOPE-001 on it. visitAttr
+// exempts the bare-literal SHAPE on these attrs (value-aware, NOT an
+// unconditional attr-name skip — `running=@bogus` still scope-checks).
+//   - `reconnect` (§38.3) / `channel-reconnect` (§38.6.2)  — integer (ms) (S186)
+//   - `interval` (§6.7.5 `<timer>` / §6.7.6 `<poll>`)       — integer-literal
+//   - `running`  (§6.7.5 / §6.7.6)                          — `@id` | boolean-literal
+//   - `delay`    (§6.7.8 `<timeout>`)                       — integer-literal
+// NOT included: `after=` (§51.0.M `<onTimeout>`) — handled by a dedicated
+// walker (verified well-formed `<onTimeout after=500ms>` compiles clean);
+// `debounced=`/`throttled=` (§6.13) route through the decl scanner, not visitAttr.
+const TS_SPEC_BARE_LITERAL_ATTRS = new Set<string>([
+  "reconnect", "channel-reconnect",
+  "interval", "running",
+  "delay",
+]);
+
 // §51.0.B.1 — local-identifier shape (mirror of parsePayloadBindings'
 // validation regex in engine-statechild-parser.ts). Used to filter out
 // non-identifier attribute names that may slip into the TAB-stage attr list
@@ -10690,23 +10710,36 @@ function annotateNodes(
     // `ref=@var` declares the variable (§6.7.2) — don't flag it as unresolved.
     if (attr.name === "ref") return;
 
-    // Bug 1 (channel-codegen-fixes-2026-06-12): `reconnect` (§38.3) and
-    // `channel-reconnect` (§38.3.1) are spec-typed `integer (ms)` attributes.
-    // Their canonical worked-example form is the BARE integer
-    // (`<channel reconnect=2000>` / `<program channel-reconnect=500>`, §38.2/
-    // §38.6.2). The block-splitter parses a bare integer attribute value as a
-    // `variable-ref` whose `name` is the digit string ("2000"), so the
-    // scope-check below would false-fire E-SCOPE-001 on it. `<each of=>` /
-    // `<onTimeout after=>` avoid this via dedicated walkers; `<channel>` /
-    // `<program>` route through visitAttr. Exempt ONLY these two spec-typed
-    // integer-ms attrs — a bare numeric on a generic HTML attr
-    // (`<input value=42>`) still scope-checks (and errors) as before.
-    if (attr.name === "reconnect" || attr.name === "channel-reconnect") return;
+    // Bug `g-bare-literal-attr-value` (sPA ss3, 2026-06-19) — the spec-typed
+    // bare-literal STRUCTURAL attrs (interval/running/delay/reconnect/
+    // channel-reconnect) are exempted from the scope check by a VALUE-SHAPE-AWARE
+    // test in the `variable-ref` branch below (see TS_SPEC_BARE_LITERAL_ATTRS).
+    // The exemption is NOT an unconditional attr-name skip: `running=@bogus`
+    // still scope-checks (typos caught), and a bare numeric on a generic HTML
+    // attr (`<input value=42>`) still errors (`value` is not allowlisted).
 
     const value = attr.value as ASTNodeLike;
 
     if (value.kind === "variable-ref") {
       const name = value.name as string;
+      // Bug `g-bare-literal-attr-value` (sPA ss3) — VALUE-SHAPE-AWARE exemption
+      // for the spec-typed bare-literal STRUCTURAL attrs (TS_SPEC_BARE_LITERAL_ATTRS,
+      // declared at module scope). When an allowlisted attr's value is a bare
+      // numeric/duration/boolean literal, the block-splitter parsed it as a
+      // `variable-ref` whose `name` IS the literal text; it is NOT an identifier,
+      // so skip the scope check. `/^-?\d/` matches integers AND duration literals
+      // (`500ms`, `2s`); `true`/`false` cover boolean literals (`running=false`
+      // is grammatical — §6.7.5 — and additionally fires W-LIFECYCLE-007 in a
+      // separate pass, which this skip leaves intact). A reactive
+      // `running=@enabled` does NOT match this shape (name begins with `@`), so
+      // it still scope-checks below — `running=@bogus` on an undeclared var stays
+      // an E-SCOPE-001.
+      if (
+        TS_SPEC_BARE_LITERAL_ATTRS.has(attr.name as string) &&
+        (/^-?\d/.test(name) || name === "true" || name === "false")
+      ) {
+        return;
+      }
       // S130 HU-1 iteration Landing 2 (SPEC §17.7.3) — the `@.` contextual
       // sigil ("the current iteration value") is legal in attribute-value
       // position inside an `<each>` body scope. The BS/ast-builder parses
