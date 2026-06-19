@@ -14,6 +14,29 @@ import { resolveDbDriver } from "./db-driver.ts";
 import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
 import { SERVER_LOG_HELPER } from "./log-loc.ts";
 
+// g-pure-module-server-emit (S207): sentinel line marking where deferred
+// local-`.scrml` server imports are re-injected after usage-pruning. Pruned by
+// pruneUnusedLocalServerImports() against the assembled body. Distinctive +
+// comment-prefixed so it never collides with emitted JS and is a no-op if the
+// prune pass is somehow skipped (it is a bare comment line).
+const LOCAL_SERVER_IMPORT_SENTINEL = "// __SCRML_LOCAL_SERVER_IMPORTS__";
+
+// g-pure-module-server-emit (S207): conservative identifier-reference check.
+// Returns true if `name` appears in `body` as a standalone identifier token
+// (word-boundary, not a substring of a longer identifier). Used to decide
+// whether a deferred local-`.scrml` server-import specifier is actually
+// referenced in the emitted server body. Soundness > minimality: a false
+// "used" keeps a harmless import; a false "unused" would drop a needed one,
+// so the check errs toward keeping (any standalone occurrence counts).
+function localServerImportNameUsed(body: string, name: string): boolean {
+  if (!name) return false;
+  // \b is unreliable for `$`-prefixed names but scrml import locals are plain
+  // identifiers; guard the boundaries manually to avoid matching `name` inside
+  // `otherName` / `name2` / `_name`.
+  const re = new RegExp("(^|[^A-Za-z0-9_$])" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "([^A-Za-z0-9_$]|$)");
+  return re.test(body);
+}
+
 /**
  * S79 audit fix C.1 — parse `<program idempotency-ttl="...">` raw value into
  * a millisecond integer, or `null` for fall-back-to-default-24h.
@@ -558,11 +581,34 @@ export function generateServerJs(
   // by CHX at the consumer site, not resolved via ES module bindings, so
   // emitting a JS import for them either produces a SyntaxError (bare kebab)
   // or a module-link error (no matching export on the channel-file side).
+  // g-pure-module-server-emit (S207): server-import tree-shaking. A LOCAL
+  // `.scrml` import is rewritten to `<mod>.server.js`, but that file is only
+  // emitted when the imported MODULE has its own server content (server fns,
+  // auth, channels, server-authority cells). A PURE-helper module (types +
+  // pure `fn`s, no `?{}`) imported for CLIENT-side use only emits NO
+  // `.server.js`, yet the unconditional `import { ... } from "<mod>.server.js"`
+  // here dangles → the whole server bundle throws `Cannot find module` at
+  // RUNTIME (green compile; node --check passes — a missing FILE, not a syntax
+  // error). The two-sided gating (per-module `.server.js` emission vs the
+  // consumer's unconditional import) disagree for a client-only-used module.
+  //
+  // Fix: DEFER local-`.scrml` named imports and prune them by ACTUAL server-
+  // body usage. After the full server body is assembled below, a specifier is
+  // kept only if its local name is referenced in the emitted JS; an import line
+  // whose every specifier is unused (the bug case) is dropped entirely. Client/
+  // server both emit ALL named specifiers incl. erased TYPE imports — usage-
+  // pruning is also the only correct way to keep a `.server.js` import from
+  // referencing a type that has no runtime (server) export. `scrml:`/vendor:
+  // imports always resolve (stdlib shims / Bun vendor resolution) and default
+  // imports are left as-is — both are emitted inline here, unchanged.
   const allImports: any[] = fileAST?.ast?.imports ?? fileAST?.imports ?? [];
+  const deferredLocalImports: Array<{ jsSource: string; specs: Array<{ imported: string; local: string }> }> = [];
+  let _localImportSentinelIdx = -1;
   for (const stmt of allImports) {
     if ((stmt.kind === "import-decl" || stmt.kind === "use-decl") && stmt.source && stmt.names?.length > 0) {
       let jsSource: string = stmt.source;
-      if (jsSource.endsWith(".scrml")) {
+      const isLocalScrml = jsSource.endsWith(".scrml");
+      if (isLocalScrml) {
         jsSource = jsSource.replace(/\.scrml$/, ".server.js");
       }
       if (stmt.isDefault) {
@@ -574,6 +620,18 @@ export function generateServerJs(
       }
       const kept = filterChannelImportSpecifiers(stmt, filePath, ctxForCache?.exportRegistry ?? null);
       if (kept.length === 0) continue; // All specifiers are channels — skip emit entirely.
+      if (isLocalScrml) {
+        // Defer: emit at the sentinel after usage is known (see prune pass below).
+        if (_localImportSentinelIdx === -1) {
+          _localImportSentinelIdx = lines.length;
+          lines.push(LOCAL_SERVER_IMPORT_SENTINEL);
+        }
+        deferredLocalImports.push({
+          jsSource,
+          specs: kept.map((s) => ({ imported: s.imported, local: s.local })),
+        });
+        continue;
+      }
       const names = kept.map((s) => (s.imported === s.local ? s.imported : `${s.imported} as ${s.local}`)).join(", ");
       lines.push(`import { ${names} } from ${JSON.stringify(jsSource)};`);
     }
@@ -1988,6 +2046,41 @@ export function generateServerJs(
   // will re-populate for its own pass; clearing here keeps state from leaking
   // when only the server emit runs (e.g. dry-run / partial pipelines).
   setVariantFieldsForRewriter(null, null);
+
+  // g-pure-module-server-emit (S207): server-import tree-shaking — prune pass.
+  // Now that the full server body is assembled, decide which deferred local-
+  // `.scrml` imports survive: keep a specifier only if its local name is
+  // referenced in the body, and drop an import line entirely when every
+  // specifier is unused (the dangling-`.server.js` bug — a pure-helper module
+  // imported for client-side use only). Replace the sentinel with the surviving
+  // import lines (or remove it cleanly when none survive).
+  if (_localImportSentinelIdx !== -1) {
+    // The body to scan is finalEmitted MINUS the sentinel line itself (the
+    // sentinel is a bare comment, so it cannot contain a real identifier use,
+    // but exclude it for clarity). Imports themselves were deferred, so the
+    // assembled finalEmitted contains no local-`.scrml` import line yet — any
+    // occurrence of a local name is a genuine reference.
+    const scanBody = finalEmitted.split(LOCAL_SERVER_IMPORT_SENTINEL).join("");
+    const survivingLines: string[] = [];
+    for (const imp of deferredLocalImports) {
+      const keptSpecs = imp.specs.filter((s) => localServerImportNameUsed(scanBody, s.local));
+      if (keptSpecs.length === 0) continue; // whole import unused → drop (the fix).
+      const names = keptSpecs
+        .map((s) => (s.imported === s.local ? s.imported : `${s.imported} as ${s.local}`))
+        .join(", ");
+      survivingLines.push(`import { ${names} } from ${JSON.stringify(imp.jsSource)};`);
+    }
+    const replacement = survivingLines.join("\n");
+    // Replace the sentinel line in place. If nothing survives, the sentinel
+    // line collapses to empty; the surrounding blank line from `lines.push("")`
+    // keeps the header spacing intact.
+    finalEmitted = finalEmitted
+      .split(LOCAL_SERVER_IMPORT_SENTINEL + "\n")
+      .join(replacement === "" ? "" : replacement + "\n")
+      // Fallback if the sentinel was the final line (no trailing newline).
+      .split(LOCAL_SERVER_IMPORT_SENTINEL)
+      .join(replacement);
+  }
 
   return finalEmitted;
 }
