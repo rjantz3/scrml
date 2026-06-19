@@ -184,14 +184,14 @@ This block is an HTML comment so it does not render on dev.to.
 - Companion published: `lsp-and-giti-advantages-devto-2026-04-28.md` (E-PA-007 quick-fix prior framing).
 - Companion published: `npm-myth-devto-2026-04-28.md` (ORM-replaced-by-language line item).
 - Agent: `/home/bryan/.claude/agents/scrml-voice-author.md` (article mode, gate cleared per project memory bio-baked 2026-04-28).
-- SPEC: `/home/bryan/scrmlMaster/scrmlTS/compiler/SPEC.md` (§8, §11, §39, §44 cited; error codes E-PA-001/004/006/007, E-SQL-002/003/004/006).
+- SPEC: `/home/bryan/scrmlMaster/scrmlTS/compiler/SPEC.md` (§8, §39, §44, §52 cited; error codes E-PA-001/004/006/007, E-SQL-002/003/004/006).
 - LSP source: `/home/bryan/scrmlMaster/scrmlTS/lsp/l4.js` (Levenshtein quick-fix for E-PA-007, lines 21-30).
 - PA source: `/home/bryan/scrmlMaster/scrmlTS/compiler/src/protect-analyzer.ts` (`fullSchema` field at line 81; constructor lines 795-800).
 
 **Spec validation summary:**
 
 - ✅ `?{}` SQL block syntax current (§8 line 4361+; §44 line 14636+).
-- ✅ `<db src tables>` block syntax (§11.5; §44.2 driver resolution).
+- ✅ `<db src tables>` block syntax (§52 — `< db>` state-block schema reading; §11.5 folded into §52 S194; §44.2 driver resolution).
 - ✅ `<schema>` block syntax with worked example (§39.1 line 13620; §39.2 lines 13640-13670).
 - ✅ Schema introspection field path verified against compiler source (`protect-analyzer.ts:81, 795-800`).
 - ✅ E-PA-007 LSP L4 Levenshtein quick-fix shipped (`lsp/l4.js:21-30`).

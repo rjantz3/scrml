@@ -125,7 +125,7 @@ Same-file or cross-file, hover shows:
 - struct field types from `<state>` blocks
 - enum variant payload shape
 
-This isn't novel by itself. Every LSP does hover. The differentiator is what's *in* the hover. The "boundary" badge is impossible in TypeScript LSP, because TS doesn't have a server/client boundary concept. That's a scrml compile-time invariant the compiler enforces (SPEC §11 protected fields, §12 route inference). Showing it in hover means a dev never has to wonder "is this function safe to call from client code?". The LSP tells them on mouse-over.
+This isn't novel by itself. Every LSP does hover. The differentiator is what's *in* the hover. The "boundary" badge is impossible in TypeScript LSP, because TS doesn't have a server/client boundary concept. That's a scrml compile-time invariant the compiler enforces (SPEC §52 protected fields, §12 route inference). Showing it in hover means a dev never has to wonder "is this function safe to call from client code?". The LSP tells them on mouse-over.
 
 ### Document symbols with semantic meaning
 

@@ -34,7 +34,7 @@ Here's the punchline up front: **the npm-interop critique is mostly cargo-culted
 These categories account for most of a typical Node project's `package.json`. None of them have a place in a scrml app, because scrml *is* this layer.
 
 - **Framework + state + routing + forms.** React, Vue, Svelte, Redux, Zustand, Pinia, react-router, vue-router, Formik, react-hook-form. scrml's reactive primitives (`@var`, derived, effects), components, file-based routing, and bindings replace the entire stack. <!-- cite: bio §3d state-as-first-class voice-scrmlTS:290-291 + design-insights-2026-04-08 transformation-registry -->
-- **ORM / query builder.** Prisma, Drizzle, Kysely, TypeORM, Sequelize. scrml's `?{}` SQL block writes parameterized queries directly against Bun.SQL, with compile-time schema introspection (§39) and protected-field enforcement (§11), and `?{}` itself is specified at §44. <!-- cite: SPEC.md §44 ?{} multi-database adaptation; §39 schema and migrations; §11 protect= -->
+- **ORM / query builder.** Prisma, Drizzle, Kysely, TypeORM, Sequelize. scrml's `?{}` SQL block writes parameterized queries directly against Bun.SQL, with compile-time schema introspection (§39) and protected-field enforcement (§52), and `?{}` itself is specified at §44. <!-- cite: SPEC.md §44 ?{} multi-database adaptation; §39 schema and migrations; §52 protect= (folded from §11 S194) -->
 - **CSS-in-JS / scoping.** styled-components, emotion, vanilla-extract. scrml's `#{}` scoped CSS uses native `@scope` (§9.1, §25.6). <!-- cite: SPEC.md §9.1 inline CSS line 4918, §25.6 native @scope line 11579 -->
 - **HTTP client.** axios, got, ky. Server fns can call `fetch` directly. Markup-side fetches use `<request>` and `lift`.
 - **Build / bundle / dev server.** Vite, Webpack, esbuild, Parcel. `scrml dev`, `scrml build`, `scrml serve`. Done.
@@ -203,7 +203,7 @@ This section stays in the file but does not render meaningfully on dev.to (it's 
 | Bun stdlib coverage (`Bun.password`, `Bun.SQL`, `Bun.redis`, `Bun.spawn`, `dotenv`, `fs`) | External library; spot-checked via Bun docs general knowledge — all listed APIs are documented Bun primitives | ✅ ACCURATE |
 | §44 = `?{}` Multi-Database Adaptation | `compiler/SPEC-INDEX.md:63` confirms | ✅ |
 | §39 = Schema and Migrations | `compiler/SPEC-INDEX.md:58` confirms | ✅ |
-| §11 = State Objects and `protect=` | `compiler/SPEC-INDEX.md:25`; `SPEC.md:5347` "§11.3 `protect=` Type System and Routing Semantics" | ✅ |
+| §52 = State Authority (`protect=`, `< db>` schema reading); §11 folded here + §6.12 (S194) | `SPEC.md:28864` "## 52. State Authority Declarations"; `SPEC.md:6968` "## 11. … (Reserved — Content Folded)" | ✅ |
 | §9.1 = Inline CSS / scoped CSS | `SPEC.md:4912+` "Inline CSS"; `SPEC.md:4918` confirms native `@scope` compilation; `SPEC-INDEX.md:23` "CSS inline block (§9.1)" | ✅ |
 | §25.6 = Native `@scope` constructor-scoped CSS | `SPEC.md:11579` "### 25.6 Constructor-Scoped CSS — Native `@scope` (DQ-7)" | ✅ |
 | §38 = WebSocket Channels | `compiler/SPEC-INDEX.md:57` confirms | ✅ |
