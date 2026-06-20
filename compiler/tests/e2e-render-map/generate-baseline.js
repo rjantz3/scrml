@@ -41,8 +41,18 @@ export const BASELINE_PATH = join(__dirname, "e2e-render-map-baseline.json");
 // 20s lets the slow-but-finite apps through while bounding the hangers.
 const PER_CELL_TIMEOUT_MS = 20000;
 
-/** States that are NOT a gap (green). Everything else is a red/recorded cell. */
-export const GREEN_STATES = new Set(["renders-clean", "renders-empty"]);
+/**
+ * States that are NOT a gap (green). Everything else is a red/recorded cell.
+ * `needs-server` is non-gap: a server-dependent app mounted with NO server is
+ * NOT broken (harness-realism, S203 b+c) — so the delta-gate treats throw->
+ * needs-server as an improvement and needs-server->throw (a real codegen bug
+ * surfacing) as a green->red regression.
+ */
+export const GREEN_STATES = new Set([
+  "renders-clean",
+  "renders-empty",
+  "needs-server",
+]);
 
 /**
  * Observe one cell in a subprocess. Returns the recorded cell object. On

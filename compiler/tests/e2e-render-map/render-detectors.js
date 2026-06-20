@@ -75,6 +75,26 @@ function collectAttrValues(root) {
 }
 
 /**
+ * A no-server mount of a server-DEPENDENT app leaves a server-only binding/data
+ * source null; the client then throws (or console-errors) a null/undefined-ACCESS.
+ * That is server-ABSENCE (harness-realism, S203 b+c — NOT a compiler bug). A
+ * ReferenceError ("is not defined") or TDZ ("before initialization") is a genuine
+ * codegen bug and stays red even for a server app — so those are EXCLUDED here.
+ * Used only when obs.serverDependent is true (see the needs-server state).
+ */
+export function isServerAbsenceMessage(msg) {
+  const s = String(msg);
+  if (/is not defined/.test(s)) return false; // ReferenceError -> codegen, stays red
+  if (/before initialization/.test(s)) return false; // TDZ -> codegen, stays red
+  return (
+    /Cannot destructure property .* from null or undefined/.test(s) ||
+    /\bis not iterable\b/.test(s) ||
+    /(?:null|undefined) is not an object/.test(s) ||
+    /Cannot read propert(?:y|ies) of (?:null|undefined)/.test(s)
+  );
+}
+
+/**
  * Run the D0–D7 detectors against one mounted observation.
  *
  * @param {object} obs
@@ -84,6 +104,8 @@ function collectAttrValues(root) {
  * @param {Document|null} obs.document — the mounted happy-dom document, or null
  *                                       if mount threw / compile failed.
  * @param {boolean} obs.seeded — was a data fixture set before observing (D6)?
+ * @param {boolean} obs.serverDependent — does the app have a server side (emits
+ *   serverJs / uses a `?{}` SQL block)? Gates the needs-server classification.
  * @returns {{ state: string, smells: string[], detail: object }}
  */
 export function runDetectors(obs) {
@@ -104,10 +126,21 @@ export function runDetectors(obs) {
 
   // ---- D1 + D7: mount threw (no oracle) ----
   if (obs.throwMessage != null) {
+    const msg = String(obs.throwMessage);
+    detail.throwMessage = msg.slice(0, 400);
+    // needs-server: a server-dependent app mounted with NO server throws a
+    // null/undefined-ACCESS because a server-only binding/data source is null.
+    // Harness-realism non-gap (S203 b+c — NOT a compiler bug). EXCLUDES
+    // ReferenceError/TDZ (genuine codegen, stays red) via isServerAbsenceMessage.
+    if (obs.serverDependent && isServerAbsenceMessage(msg)) {
+      smells.push("NEEDS-SERVER");
+      detail.needsServer =
+        "server-dependent app mounted with no server — a server-only binding/data source resolved to null";
+      return { state: "needs-server", smells, detail };
+    }
     smells.push("D1-MOUNT-THROW");
-    detail.throwMessage = String(obs.throwMessage).slice(0, 400);
     // D7: an unbound-ref ReferenceError specifically (the board bug-2 shape).
-    if (/is not defined/.test(obs.throwMessage)) {
+    if (/is not defined/.test(msg)) {
       smells.push("S-UNBOUND-REF");
     }
     return { state: "compiles-but-throws", smells, detail };
@@ -178,6 +211,29 @@ export function runDetectors(obs) {
 
   // ---- Resolve the cell state from the accumulated smells (worst-wins) ----
   if (consoleErrors.length > 0) {
+    // needs-server: a server-dependent app whose ONLY mount error is a server-
+    // absence null/undefined-access console error — no genuine codegen error
+    // (ReferenceError/TDZ) and no hard render smell. Harness-realism non-gap
+    // (S203 b+c). The guards ensure a real bug is never masked: a codegen error
+    // or a smell keeps the cell red (compiles-but-throws).
+    const hasCodegenError = consoleErrors.some((m) =>
+      /is not defined|before initialization/.test(String(m)),
+    );
+    const hasHardSmell =
+      smells.includes("S-OBJECT-IN-DOM") ||
+      smells.includes("S-RAW-INTERP") ||
+      smells.includes("S-NULLISH-TEXT");
+    if (
+      obs.serverDependent &&
+      !hasCodegenError &&
+      !hasHardSmell &&
+      consoleErrors.some(isServerAbsenceMessage)
+    ) {
+      smells.push("NEEDS-SERVER");
+      detail.needsServer =
+        "server-dependent app mounted with no server — console error from a null server-only data source";
+      return { state: "needs-server", smells, detail };
+    }
     return { state: "compiles-but-throws", smells, detail };
   }
   if (
@@ -203,6 +259,7 @@ export const RENDER_STATES = [
   "fails-compile",
   "compiles-but-throws",
   "smell-detected-wrong",
+  "needs-server",
   "renders-empty",
   "renders-clean",
 ];

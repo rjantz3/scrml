@@ -100,12 +100,42 @@ export function compileApp(app) {
     compileThrew = String(e && e.message ? e.message : e);
   }
 
+  // serverDependent: does this app have a server side? Primary signal = the
+  // compile emitted serverJs for any output (a `<program db=>` / server-fn /
+  // auth app). Secondary = the source uses a `?{...}` SQL block (the client
+  // reads server-provided data via a server-var, with no separate serverJs
+  // file). Either way, mounting with NO server leaves a server-only binding /
+  // data source null — which the detectors classify as `needs-server` (a
+  // harness-realism non-gap per the S203 b+c disposition), NOT a codegen bug.
+  let serverDependent = false;
+  if (result && result.outputs) {
+    for (const o of result.outputs.values()) {
+      if (o && o.serverJs && o.serverJs.length > 0) {
+        serverDependent = true;
+        break;
+      }
+    }
+  }
+  if (!serverDependent) {
+    for (const f of inputFilesForCompile) {
+      try {
+        if (readFileSync(f, "utf8").includes("?{")) {
+          serverDependent = true;
+          break;
+        }
+      } catch (_) {
+        /* best-effort source scan */
+      }
+    }
+  }
+
   const out = {
     errors: result ? (result.errors ?? []) : [],
     html: "",
     clientJs: "",
     runtimeJs: "",
     compileThrew,
+    serverDependent,
     tmpDir, // caller cleans up
     outDir,
     entryBase,
@@ -371,6 +401,7 @@ export function observeApp(app, seed, seedLabel) {
     consoleErrors: obs.consoleErrors,
     document,
     seeded: seed != null,
+    serverDependent: artifacts.serverDependent,
   });
 
   cleanup(artifacts);
