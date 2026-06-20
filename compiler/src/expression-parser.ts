@@ -1725,8 +1725,28 @@ export function esTreeToExprNode(
         const litType = raw && raw.startsWith("`") ? "template" : "string";
         return { kind: "lit", span, raw, value, litType } satisfies LitExpr;
       }
-      // BigInt or other exotic literals
-      return makeEscapeHatch(node, span, rawSource ?? String(node.value));
+      // Regex literal — ESTree represents `/[^a-z0-9]+/g` as a `Literal` whose
+      // `value` is a RegExp object (typeof "object", so it falls past the
+      // number/boolean/null/string arms above) carrying a `regex` { pattern,
+      // flags } property and a `raw` field with the literal source.
+      //
+      // g-literal-arg-expr-serializer-wrong-span: the BigInt fallback below
+      // passes the OUTER `rawSource` (the whole enclosing expression) as the
+      // escape-hatch raw. For a regex in CALL-ARGUMENT position
+      // (`s.split(/[^a-z0-9]+/)`) that re-serialized the entire enclosing
+      // expression into the arg slot — silent miscompile (the emitted call took
+      // its own enclosing expression as its argument). The literal's OWN source
+      // (`node.raw` = `/[^a-z0-9]+/`) is the only correct raw to carry; the
+      // escape-hatch emitter passes it through `rewriteExpr`, and the
+      // code-segments fence treats a regex literal as opaque so its body is
+      // preserved verbatim.
+      if ((node as unknown as { regex?: unknown }).regex && typeof raw === "string") {
+        return makeEscapeHatch(node, span, raw);
+      }
+      // BigInt or other exotic literals — `raw` is the literal's own source
+      // text (e.g. `123n`); prefer it over the OUTER `rawSource` so a literal in
+      // call-argument position serializes only itself, not its enclosing expr.
+      return makeEscapeHatch(node, span, raw ?? rawSource ?? String(node.value));
     }
 
     // ---- Template Literal ----

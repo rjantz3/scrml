@@ -1,59 +1,57 @@
-# scrml — Session 209 (CLOSE)
+# scrml — Session 210 (OPEN)
 
-**Date:** 2026-06-19 → 2026-06-20. **This session:** S209 (crash-recovered + run to a full wrap). **Next pickup:** rotate THIS → `handOffs/hand-off-214.md` at OPEN, create fresh S210. **Profile:** A — FULL. **Deputy:** LIVE (`deputy-maint` @ ticking; FF'd + integrated through the wrap).
+**Date:** 2026-06-20. **This session:** S210. **Prev:** S209-CLOSE → `handOffs/hand-off-214.md`. **Profile:** A — FULL (booted "read pa.md and start session", no signal → default A). **Deputy:** present (`deputy-maint` merged, `^main==0`) but maps 21 behind + digest STALE → likely not actively ticking; fresh deputy boot likely owed.
 
-> **Thinned hand-off (S205).** Mechanical state lives in `bun scripts/state.ts` + `handOffs/digest.md` (board/counts/version/maps) · `handOffs/delta-log.md` [14-31] (the fine-grained S209 stream) · `handOffs/deputy-state.md`. This carries the IRREDUCIBLE.
+> **Thinned hand-off (S205).** Mechanical state → `bun scripts/state.ts` + digest (STALE this boot) · `delta-log.md` [S209 1-31] · `deputy-state.md`/`cpa-state.md`. This carries the IRREDUCIBLE + the OPEN intake.
 
-## ⚠️ FIRST THING NEXT SESSION — LAND THE IN-FLIGHT (user: "next pa can land everything")
+## Boot state (S210 OPEN)
+- scrml + scrml-support both **0/0 with origin** (clean cross-machine). HEAD `41422726` (Merge deputy-maint — S209 wrap).
+- Board **HIGH 0** · MED 11 · LOW 17 · Nominal 8. Tests **17350 pass / 76 skip / 0 fail** (pre-commit subset) @ v0.7.0.
+- Digest STALE (delta-log changed since stamp `c2f8f1fd`) → booted via authoritative fallback (master-list §0 + hand-off + delta-log tail). Expert reads cold (pa.md full + PRIMER + SPEC-INDEX).
+- **Working-tree (uncommitted, pre-session):** `M handOffs/cpa-state.md` (cPA S209 heartbeat, tick 2 19:16) · `?? docs/graph/` (flograph projection output graph.json+mmd, Jun 17). Neither is PA work; disposition TBD.
+- **Worktrees:** main · `../scrml-deputy-maint` (deputy, KEEP) · `../scrml-spa-ss4` (spa/ss4, RUNNING) · `../scrml-spa-ss13` (spa/ss13, list-complete — disposition in inbox) · **`.claude/worktrees/agent-a4e244bf6be547466` (LOCKED, STALE — cleanup candidate; verify landed before removal).**
 
-Two sPAs were left RUNNING at wrap (the user deferred their landing to you); the DD finished at wrap (verdict to surface):
+## ⚠️ S210 DISPATCHES IN FLIGHT (land via S67 file-delta on completion — PA sole committer, coherence-gated)
 
-1. **sPA ss4 (block-splitter-native-parser)** — RUNNING (`../scrml-spa-ss4`, branch `spa/ss4`). Re-integrate on its inbox re-integration message, EXACTLY like the S209 sPA wave (the protocol below). ss4's list carries a **7th item** (`derived-value-compound-mutate`, re-clustered from ss6 flag A — tokenizer splits `<<=`/`>>=` at markup `<`/`>`).
-2. **sPA ss13 (phantom-codegen-nominal-stdlib)** — RUNNING (`../scrml-spa-ss13`, branch `spa/ss13`). **It touches `SPEC.md` (Nominal flips)** — watch for a SPEC.md merge overlap at re-integration (ss2 had one; resolve deterministically = take main's SPEC + graft ss13's additions, like ss2's §34 row).
-3. **External-backend DD — DONE** (`scrml-support/docs/deep-dives/external-backend-frontend-only-2026-06-20.md`, status:current). **VERDICT = run a DEBATE** (MED-HIGH conf): **B** docs-only (reuse `<request>` + `parseVariant` §41.13 — scrml ALREADY has the response-typing half; the real gap is only request/endpoint-typing) vs **C** stay-full-stack (LiveView's bet) vs **A** `<api>` primitive (OpenAPI-codegen — tRPC is same-language-only); judge may land on **D** hybrid. SSR-of-external-data is GAPPED (needs a BFF tier → contradicts the "keep your backend" premise). **CAVEATS:** dev-agent polls were DENIED this env (segment-size OQ-2 un-quantified; the Dev-Signal section is synthesized-not-polled) + 2 SPEC-unverifiable claims flagged in-doc. **NEXT: surface the verdict to the user**; if debate, the `@debate-curator` command is at the bottom of the DD doc (poles B/C/A, allow D; consider forging openapi-codegen-expert). NOT in flight — done.
+The 3 HIGH inbox bugs were triaged (all CONFIRMED on HEAD `41422726`, filed `known-gaps §S210`, board HIGH 0→3) then dispatched (user "dispatch the 3 HIGH fixes"). **2 worktree agents running:**
+1. **AE** — `engine-name-attr-reject-2026-06-20` (agent acf01716d7d465ba0, branch will be `worktree-agent-acf...`). Ruling (a): REJECT `name=` on `<engine>` + NEW §34 code + §51.0.B note. Touches SPEC.md → watch for merge overlap at landing. Acceptance: AE sidecar now FAILS with the clear diagnostic (not exit-0-runtime-broken).
+2. **AD+regex** — `codegen-interp-literal-2026-06-20` (agent ac894d93280bac7c8). BUG1 attr-interp fn-name encoding + BUG2 call-arg literal-node serializer; codegen-only (no SPEC). Acceptance: AD class-attr emits `_scrml_tag_N()`; regex emits `s.split(/re/)` + string keeps quotes; R26 both.
 
-**The sPA re-integration protocol** (held 5× clean this session — ss14/ss2/ss5/ss6/ss9/ss10): read the inbox msg → S83 verify (tip==reported SHA · `git merge-base` 3-dot disjointness vs current main · no leak) → `git merge --no-ff spa/ssN` (resolve any SPEC.md overlap deterministically) → gap-reconcile known-gaps (flip resolved + file new) → `state.ts --write` (§0) → move inbox msg to `read/` → delta-log entry → `git worktree remove` + `git branch -D` (sPA + its dev-agents) → deputy-gate + push. The user fires sPAs (cPA can't spawn — OQ#2 resolved S209); you re-integrate (sole main-committer).
+BRIEF.md archived for both (S136). On completion: S83 verify (tip==FINAL_SHA · merge-base 3-dot disjointness · `git status` main clean for leaks) → S67 file-delta → PA-independent R26 dual-verify → commit (NEEDS commit-auth — not yet granted this session) → flip the 3 §S210 gaps resolved + `state.ts --write` → merge-before-push gate → push. **Uncommitted triage bookkeeping** (known-gaps §S210 + §0 regen + delta-log S210 [1-3] + this hand-off rotation + master-list §0 regen) rides the same eventual commit.
 
-## OPEN escalations awaiting the USER (carry — surfaced, not ruled)
+## ⚠️ IN-FLIGHT TO LAND (carried from S209 — user: "next pa can land everything")
 
-- **ss5 item3** `g-channel-server-keyword-auto-migrate` (Enhanced-A) — the user DEFERRED it S189 ("land min A", "zero corpus demand"). Stays deferred unless the user revives; building it reverses the ruling.
-- **ss9 §20.5 SPEC examples** (`server function getProfile`/`checkAuth`) — migrate vs keep-as-carve-out turns on whether `session`-access is a §12.2 escalation trigger. Escalation-semantics judgment (a ruling, not a scrub).
-- **ss10 item7** render-gap-ingestion — registry-placement ruling (auto-inject render-gaps into `known-gaps.md` board vs a SEPARATE render-gap registry; `needs-server` must be excluded). **ss10 item8** L2/L3 oracle-strategy — debate-fork (L2-snapshot-with-VERIFIED-provenance vs skip-L3-rely-on-within-node-canary).
-- **ss9 item4** `g-tier1-ssr-prerender` — architecture/DD (no SSR-prerender path to mirror); **ss9 item5 / flux-mmorpg** — project/Bucket-B.
-- **ss6 b17 cases 1-3** — gated on `g-component-body-markup-parser-absent` (NEW MED, design-track/Bucket-B, same shape as each-inline Approach A).
+1. **sPA ss13 (phantom-codegen-nominal-stdlib)** — **REPORTED BACK** (inbox `from-spa-ss13-disposition.md`). NO-EXECUTE disposition (docs-only branch `spa/ss13` tip `04b8397c`, base `e8a5491f`; no code, no SPEC.md). 5 dispositions: (1) stdlib Phase 3 → ESCALATE (design scope; needs §40.4 fail/!{}/bun-import ruling) · (2) §23 browser overclaims → PARK (user "no amendments to published articles") · (3) §29 vanilla interop → PARK (friction-gated) · (4) §58 build story → ESCALATE/re-bucket (agrees w/ ss14 item5) · (5) **§59 value-native maps → ALREADY BUILT** (currency correction: flip SPEC §59 Nominal→Implemented; 202/202 suites pass; reconcile §0 Nominal count + SPEC-INDEX banner). Re-integration: optional FF-merge (bookkeeping only) OR read+apply directly. **List-builder feedback:** ss13 mixed already-done/ratified-deferral/design-gated under a stale "Nominal-flip green-field" banner → footprint currency-pass owed on remaining Bucket-A lists before next sPA boots.
+2. **sPA ss4 (block-splitter-native-parser)** — **STILL RUNNING** (`../scrml-spa-ss4`, branch spa/ss4, tip `207064d9`). No inbox re-integration msg yet. 7th item = `derived-value-compound-mutate` (re-clustered from ss6 flag A). Re-integrate on its inbox message per the sPA protocol.
+3. **External-backend DD — DONE** (`scrml-support/docs/deep-dives/external-backend-frontend-only-2026-06-20.md`, status:current). **VERDICT = run a DEBATE** (MED-HIGH): B docs-only (reuse `<request>`+`parseVariant` §41.13 — response-typing half exists; gap is request/endpoint-typing) vs C stay-full-stack vs A `<api>` primitive; judge may land D hybrid. SSR-of-external-data GAPPED (needs BFF → contradicts premise). CAVEATS: dev-polls DENIED (signal synthesized) + 2 SPEC-unverifiable claims flagged in-doc. **NEXT: surface verdict to user**; `@debate-curator` command at bottom of DD doc; consider forging openapi-codegen-expert.
+
+**sPA re-integration protocol:** read inbox msg → S83 verify (tip==reported SHA · `git merge-base` 3-dot disjointness vs main · no leak) → `git merge --no-ff spa/ssN` (resolve SPEC.md overlap deterministically) → gap-reconcile known-gaps → `state.ts --write` → inbox→read/ → delta-log entry → worktree+branch cleanup → deputy-gate + push. User fires sPAs; PA re-integrates (sole main-committer).
+
+## NEW INBOX INTAKE (S210 — needs triage)
+
+- **6nz AD (HIGH)** — user fn in ATTR-value interp emits bare name → runtime ReferenceError (`class="box box-${tag()}"` → bare `tag()`; @cell + textContent-interp rewrite fine). Compile-clean-runtime-broken. Sidecar `bug-ad-attr-interp-fn-rename.scrml`. Adjacent Bug Z (rename-pass interp coverage). → likely §47 name-encoding / attr-interp rewrite.
+- **6nz AE (HIGH)** — `name=` on `<engine>` breaks the transition write-guard (looks up name-keyed table not the built transitions table) + SWALLOWS the `E-ENGINE-VAR-DUPLICATE` collision diagnostic the no-name form correctly fires. Runtime `E-ENGINE-001-RT` on every legal transition. Sidecar `bug-ae-engine-name-guard.scrml`. → §51.0.C var=/auto-decl + write-guard codegen.
+- **6nz AF (question)** — §36 input-state read in markup interp is render-once (no `_scrml_effect` wrapper) — non-reactive. Sidecar `question-af-input-state-markup-nonreactive.scrml`. Needs ruling: codegen-gap (wrap in effect) vs by-design (rAF→@cell bridge). → §36.
+- **6nz AA (still open)** — bare tail `match` in plain `function` silently dropped (value-discard IIFE → undefined). At-minimum a "match value unused" lint. (S13 batch X/Y/Z/AB/AC re-verified FIXED.)
+- **flogence regex-literal (HIGH)** — regex/string LITERAL in call-arg position mis-compiles: `s.split(/re/)` re-serializes the WHOLE enclosing expr (space-tokenized); secondary `"a-b-c"` → `a - b - c` (quotes stripped). Silent miscompile. Workaround: bind regex to `const`. → expression serializer literal-node fallback (wrong span).
+- **flogence raw-route ask (DESIGN/capability)** — author-declared raw HTTP route primitive for FSP open wire (`POST /fsp` JSON-RPC + `GET /fsp/deltas` SSE). Gap = author route PATH + multi-method dispatch + raw req/resp envelope + foreign-client bearer auth. scrml has ~80% (SSE §37 + channels §38 + library mode + `?{}`). 5 OQs for PA. Executable conformance target in flogence repo. Strawman `server function handleFsp(req) route="/fsp" method="POST" raw csrf="token"`. → §12 route-inference + §37 + emit-server.ts; DD-shaped.
+- **giti match-in-lift (LOW/DX)** — block `<match>` inside `${ for…lift }` mis-parses arms as components → misleading E-COMPONENT-035/020 ("cross-file component import"). Works inside `<each>`. Fix shape: support block-`<match>` in lift OR emit "use `<each>`" diagnostic.
+
+## OPEN escalations awaiting USER (carried from S209)
+- ss5 item3 `g-channel-server-keyword-auto-migrate` (Enhanced-A) — DEFERRED S189; stays unless revived.
+- ss9 §20.5 SPEC examples — migrate vs carve-out (turns on whether `session`-access is a §12.2 escalation trigger).
+- ss10 item7 render-gap-ingestion (registry-placement ruling); ss10 item8 L2/L3 oracle-strategy (debate-fork).
+- ss9 item4 `g-tier1-ssr-prerender` (architecture/DD); ss9 item5 / flux-mmorpg (project/Bucket-B).
+- ss6 b17 cases 1-3 — gated on `g-component-body-markup-parser-absent` (NEW MED, design-track).
 
 ## OTHER carry
-
-- **giti/6nz pa.md modernization** committed LOCAL but UNPUSHED in those sibling repos (giti `72fda7c` / 6nz `e6fc5e8`) — push from their own instances, or the user authorizes a here-push. (Modern-practices layer + 6nz currency fixes; scrml verified untouched.)
-- **DD dispatch delta-log entry** — I deferred recording the external-backend DD as delta-log [30]; the wrap entry [31] captures it. If you re-fire/track it, it's `a7fe7a80`.
-- **Maps OWED** — 17 commits behind HEAD (watermark `85d9e958`); deputy-owned. ss4/ss13 in flight will add more source → let the deputy batch the refresh after they land (don't refresh mid-flight).
-- **§20.5 + worked-example despace residual** — the despace arc (Part A+B) landed; ss11's escalated SPEC §4 despace + corpus migration (194 SPEC openers) is SEPARATE + still owed (ss11 items 4-8 never ran — the big v0.2.0 content rewrite, item6 marketing-shaped per Rule 1).
-
-## What S209 DID (the narrative — irreducible)
-
-Crash-recovered an interrupted S209 (the prior instance died mid ss3-reconcile; recovered via the delta-log + git-state), then ran a long execution wave:
-1. **Crash recovery** — completed the ss3 gap-reconcile (`2c5e7050`); re-integrated sPA **ss11** items 1-3 (doc-currency); re-sent the lost **giti-006** notice (verify-before-claim caught the stale [14] "sent" self-report); handled a **deputy death** (the session-only cron died with the crashed instance → PA-drove the push-gate; a fresh deputy later re-booted).
-2. **Despace arc** — Part A (the §4 opener prose + 5 EBNF + §51/§54 reconciled to no-space-canonical/NR-authoritative; **W-MACRO-001 RETIRED**; empirically verified vs the live compiler) + Part B (dispatched agent despaced 334 worked-example openers + 3 EBNF residuals; samples/ deliberately excluded = deprecation fixtures). The model was ALREADY settled (P1 + §15.15.6 + user S208) — this was Rule-4 currency reconciliation, NOT a fresh ruling.
-3. **cPA** — first-live-test surfaced the launch-limit (a Claude instance can't spawn a fresh sPA either — OQ#2 extends past PAs); corrected the contract to **monitor-not-launch** (the user drove the deeper point: landing is irreducible PA judgment, so the cPA bridges latency but never lands). Contract + DD OQ#2 + pointer updated.
-4. **giti/6nz pa.md modernization** (dispatched + verified) — brought the modern-practices layer to both sibling PAs + fixed 6nz's currency rot.
-5. **7 sPA re-integrations** — ss11(partial)/ss14/ss2/ss5/ss6(no-execute)/ss9/ss10. The autonomous-sPA model is now battle-tested end-to-end.
-6. **ss6 flags B + C TAKEN** — B: NEW `E-STATE-TRANSITION-NO-RETURN` (§54.6.5, spec-ahead) filling the §54.3 terminal-return hole CONF-S32-015 gates on; C: s32 REGISTRY currency.
-7. **External-backend DD dispatched** (in flight).
-
-## S209 ratifications / rulings (durable — also in user-voice)
-
-- **§2.1 deref-vs-mark** (user "ratify it"): `partially-superseded` stays live (mark-in-place); only FULLY `superseded` derefs to archive. (pa-scrml.md Doc-currency convention.)
-- **cPA launch→monitor correction** (user "I can fire sPAs manually" + "land the edit"): the cPA monitors sPAs the user/cron fires; never launches, never lands. Honest scope = latency-bridge.
-- **ss6 flags B+C taken** (user "take B and C"); item3 Enhanced-A stays deferred.
-- **External-backend question** raised (user) → DD'd: can scrml be a frontend for an external Rust/Go backend? VERIFIED: yes, client-only today (raw fetch isn't a §12.2 trigger), but no first-class `<api>` primitive; flagship server-boundary is given up. DD explores whether to court the segment.
-
-## State-as-of-close
-- Board **HIGH 0** · MED 11 · LOW 17 · Nominal 8. Tests **17350 pass / 76 skip / 0 fail** (subset) @ v0.7.0.
-- scrml main **0/0 with origin** (HEAD `e8a5491f` at wrap-start; wrap commits + deputy ride the wrap push). scrml-support pushed (cPA correction `33fd97d` + §2.1 `c7d8a2f`). giti/6nz pa.md local-unpushed.
-- In-flight worktrees: `../scrml-spa-ss4`, `../scrml-spa-ss13`, `../scrml-deputy-maint` (all KEPT — running). No stale agent worktrees.
+- **giti/6nz pa.md modernization** committed LOCAL+UNPUSHED in siblings (giti `72fda7c` / 6nz `e6fc5e8`) — push from their instances or user authorizes a here-push.
+- **Maps OWED** — 21 commits behind HEAD (watermark `85d9e958`); deputy-owned. ss4/ss13 in flight add more source → let deputy batch after they land (don't refresh mid-flight).
+- **§20.5 + worked-example despace residual** — ss11 escalated SPEC §4 despace + corpus migration (194 SPEC openers) still owed (ss11 items 4-8 never ran — big v0.2.0 content rewrite, item6 marketing-shaped per Rule 1).
+- **Stale locked worktree** `agent-a4e244bf6be547466` — verify its work landed, then 6b-clean.
 
 ## pa.md directives in force
-R1–R5 · `---` delimiter · Profile A · digest-first (S203) · S88 isolation · S99/S126 path-discipline · S136 BRIEF.md · S138 R26 verify-before-claim · S147 coherence · S164 bg-commit-race · S205 merge-before-push gate + wrap-thinning · deputy + step-0 digest-first · wrap 8-step · S206 flogence + co-location axiom · S208 sPA role · S209 cPA monitor-not-launch + §2.1 deref-vs-mark.
+R1–R5 · `---` delimiter · Profile A · digest-first (S203) · S88 isolation · S99/S126 path-discipline · S136 BRIEF.md · S138 R26 verify-before-claim (both directions) · S147 coherence · S164 bg-commit-race · S205 merge-before-push gate + wrap-thinning · deputy step-0 · wrap 8-step · S206 flogence + co-location axiom · S208 sPA role · S209 cPA monitor-not-launch + §2.1 deref-vs-mark.
 
 ## Tags
-#session-209 #close #profile-a #board-high-0 #ss4-ss13-DD-in-flight #spa-wave-7-integrated #despace-arc-landed #cpa-corrected #external-backend-dd
+#session-210 #open #profile-a #board-high-0 #ss13-reported #ss4-running #external-backend-dd-verdict #6nz-AD-AE-HIGH #flogence-regex-HIGH #flogence-raw-route-ask

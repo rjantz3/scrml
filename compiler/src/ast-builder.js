@@ -4030,7 +4030,27 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // token-walk helpers skip COMMENT tokens (tokenizer.ts ~995).
       lastTok = consume();
       if (lastTok.kind === "COMMENT") continue;
-      parts.push(lastTok.text);
+      // g-literal-arg-expr-serializer-wrong-span (string half): re-quote STRING
+      // tokens so their delimiters are preserved when the braced body is
+      // reassembled. The tokenizer stores a STRING token's `.text` as the
+      // content BETWEEN delimiters (quotes stripped, readString tokenizer.ts).
+      // Pushing the bare text leaks the string content into the body as CODE —
+      // e.g. an `on mount { f("a-b-c") }` body became `f(a-b-c)`, which
+      // `safeParseExprToNode` then parses as the subtraction `f(a - b - c)`
+      // (silent miscompile when valid, loud E-SCOPE-001 when the "idents" are
+      // undeclared). collectExpr / collectLiftExpr / the attr collector already
+      // apply this same re-quote (reemitJsStringLiteral for plain strings,
+      // backtick-wrap for template-derived strings so `${...}` survives); this
+      // brings the lifecycle braced-body collector to parity.
+      if (lastTok.kind === "STRING") {
+        if (lastTok.isTemplate) {
+          parts.push("`" + lastTok.text + "`");
+        } else {
+          parts.push(reemitJsStringLiteral(lastTok.text));
+        }
+      } else {
+        parts.push(lastTok.text);
+      }
       partLines.push(lastTok.span?.line ?? 0);
     }
 

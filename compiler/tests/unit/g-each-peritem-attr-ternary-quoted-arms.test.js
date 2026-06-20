@@ -107,8 +107,13 @@ fn cls(v: int): string = "x"
 </ul>
 `);
     expect(errors.find((e) => e.code === "E-CODEGEN-INVALID-JS")).toBeUndefined();
-    expect(clientJs).toContain("cls(");
-    expect(clientJs).toContain("base ");
+    // Bug 1 fix (g-attr-interp-fn-name-not-renamed, codegen-interp-literal-2026-06-20):
+    // the fn call inside the per-item attr template literal `base ${cls(r.n)}`
+    // is now correctly mangled to the encoded name `_scrml_cls_N(r.n)`. The
+    // prior assertion `toContain("cls(")` was LOCKING the pre-fix bare-name
+    // miscompile (a runtime ReferenceError on `cls`). Assert the encoded form.
+    expect(clientJs).toMatch(/base \$\{_scrml_cls_\d+\(r\.n\)\}/);
+    expect(clientJs).not.toMatch(/base \$\{\s*cls\s*\(/);
     expect(isParseableJs(clientJs)).toBe(true);
   });
 });
@@ -139,7 +144,13 @@ fn label(v: int): string = "hot"
 </ul>
 `);
     expect(errors.find((e) => e.code === "E-CODEGEN-INVALID-JS")).toBeUndefined();
-    expect(clientJs).toContain("label(");
+    // Bug 1 fix: the fn-call arm `label(r.n)` inside the ternary in the
+    // per-item attr template literal is now correctly mangled to `_scrml_label_N(`.
+    // The quoted `"cold"` arm is a string literal inside the interp and is NOT
+    // mangled (string-literal opacity preserved). Prior `toContain("label(")`
+    // asserted the pre-fix bare-name miscompile.
+    expect(clientJs).toMatch(/_scrml_label_\d+\(r\.n\)/);
+    expect(clientJs).not.toMatch(/\? \s*label\s*\(/);
     expect(clientJs).toContain("cold");
     expect(clientJs).not.toContain(") ? }");
     expect(isParseableJs(clientJs)).toBe(true);

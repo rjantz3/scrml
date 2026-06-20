@@ -60,6 +60,16 @@ export function regexAllowedAfter(codeBefore: string): boolean {
  * regions; non-code regions are emitted verbatim. Regex-vs-division is
  * disambiguated by regexAllowedAfter.
  *
+ * Template literals (backtick strings) are a hybrid: their static text spans are
+ * opaque string content (NEVER transformed), but their `${...}` interpolations
+ * are CODE and ARE descended into and transformed. This matters for the
+ * whole-buffer fn-name mangle (emit-client.ts) and the keyword-lowering passes:
+ * a user fn called inside a `class="x-${fn()}"` attr template literal, or a
+ * `not`/`is` operator inside any `${...}`, must be lowered the same as code in
+ * raw statement position. (S144 Bug Z fenced rewrites OUT of pure `"..."`/`'...'`
+ * string content; the `${...}` interior was never string content — it only
+ * looked opaque because backticks shared the plain-string scanner.)
+ *
  * This is the single shared fence used by every scrml keyword-lowering text
  * pass (see module header). Callers pass the substitution they want applied
  * only outside literals/comments.
@@ -71,7 +81,13 @@ export function rewriteCodeSegments(
   if (!expr || typeof expr !== "string") return expr;
 
   const result: string[] = [];
-  type Mode = "code" | "string" | "regex" | "line-comment" | "block-comment";
+  type Mode =
+    | "code"
+    | "string"
+    | "template"
+    | "regex"
+    | "line-comment"
+    | "block-comment";
   let mode: Mode = "code";
   let stringDelim = "";
   let i = 0;
@@ -105,8 +121,18 @@ export function rewriteCodeSegments(
         i++;
         continue;
       }
-      // String literal opener
-      if (ch === '"' || ch === "'" || ch === "`") {
+      // Template-literal opener — hybrid string: static spans opaque, `${...}`
+      // interpolations descended into (handled in "template" mode below).
+      if (ch === "`") {
+        result.push(transform(expr.slice(segStart, i)));
+        result.push("`"); // emit the opening backtick verbatim
+        mode = "template";
+        segStart = i + 1;
+        i++;
+        continue;
+      }
+      // String literal opener (single/double quote — fully opaque)
+      if (ch === '"' || ch === "'") {
         result.push(transform(expr.slice(segStart, i)));
         mode = "string";
         stringDelim = ch;
@@ -126,6 +152,125 @@ export function rewriteCodeSegments(
       if (ch === stringDelim) {
         i++;
         result.push(expr.slice(segStart, i)); // preserve string literal as-is
+        segStart = i;
+        mode = "code";
+        continue;
+      }
+      i++;
+      continue;
+    }
+
+    if (mode === "template") {
+      // Escaped char (incl. escaped backtick / escaped `${`) — opaque, skip.
+      if (ch === "\\") {
+        i += 2;
+        continue;
+      }
+      // Interpolation opener `${` — flush the static text span as opaque, then
+      // descend into the interpolation interior as CODE (recursively, so nested
+      // strings / regex / template literals inside the interpolation are fenced
+      // correctly). Brace-depth tracking finds the matching close `}`.
+      if (ch === "$" && expr[i + 1] === "{") {
+        result.push(expr.slice(segStart, i)); // static template text — opaque
+        const interpStart = i + 2;
+        let depth = 1;
+        let j = interpStart;
+        let innerMode: "code" | "string" | "template" | "regex" = "code";
+        let innerDelim = "";
+        let innerSegStart = interpStart; // start of the current code run (for regexAllowedAfter)
+        while (j < expr.length && depth > 0) {
+          const c = expr[j];
+          if (innerMode === "code") {
+            if (c === "\\") { j += 2; continue; }
+            if (c === "{") { depth++; j++; continue; }
+            if (c === "}") { depth--; j++; if (depth === 0) break; continue; }
+            if (c === '"' || c === "'") { innerMode = "string"; innerDelim = c; j++; continue; }
+            if (c === "`") { innerMode = "template"; j++; continue; }
+            if (c === "/" && expr[j + 1] !== "*" && expr[j + 1] !== "/" &&
+                regexAllowedAfter(expr.slice(innerSegStart, j))) {
+              innerMode = "regex"; j++; continue;
+            }
+            // Skip line/block comments inside an interpolation (rare, but keep
+            // brace counting honest — a `}` inside a comment must not close).
+            if (c === "/" && expr[j + 1] === "/") {
+              j += 2;
+              while (j < expr.length && expr[j] !== "\n") j++;
+              continue;
+            }
+            if (c === "/" && expr[j + 1] === "*") {
+              j += 2;
+              while (j < expr.length && !(expr[j] === "*" && expr[j + 1] === "/")) j++;
+              j += 2;
+              innerSegStart = j;
+              continue;
+            }
+            j++;
+            continue;
+          }
+          if (innerMode === "string") {
+            if (c === "\\") { j += 2; continue; }
+            if (c === innerDelim) { innerMode = "code"; j++; innerSegStart = j; continue; }
+            j++;
+            continue;
+          }
+          if (innerMode === "template") {
+            if (c === "\\") { j += 2; continue; }
+            if (c === "`") { innerMode = "code"; j++; innerSegStart = j; continue; }
+            // Nested template interpolation — track its braces so the outer
+            // depth counter is not corrupted by `}` inside the nested string.
+            if (c === "$" && expr[j + 1] === "{") {
+              let nd = 1;
+              j += 2;
+              while (j < expr.length && nd > 0) {
+                if (expr[j] === "\\") { j += 2; continue; }
+                if (expr[j] === "{") nd++;
+                else if (expr[j] === "}") nd--;
+                j++;
+              }
+              continue;
+            }
+            j++;
+            continue;
+          }
+          // innerMode === "regex"
+          if (c === "\\") { j += 2; continue; }
+          if (c === "[") {
+            j++;
+            while (j < expr.length) {
+              if (expr[j] === "\\") { j += 2; continue; }
+              if (expr[j] === "]") { j++; break; }
+              j++;
+            }
+            continue;
+          }
+          if (c === "/") {
+            j++;
+            while (j < expr.length && /[A-Za-z0-9_$]/.test(expr[j])) j++;
+            innerMode = "code";
+            innerSegStart = j;
+            continue;
+          }
+          if (c === "\n") { innerMode = "code"; innerSegStart = j; continue; }
+          j++;
+          continue;
+        }
+        // j now points just past the matching `}` (or end-of-string if
+        // unterminated). The interpolation interior is [interpStart, interpEnd).
+        const interpEnd = depth === 0 ? j - 1 : j;
+        const interior = expr.slice(interpStart, interpEnd);
+        // Recurse so nested literals/comments inside the interior are fenced.
+        result.push("${");
+        result.push(rewriteCodeSegments(interior, transform));
+        if (depth === 0) result.push("}");
+        i = j;
+        segStart = i;
+        continue;
+      }
+      // Closing backtick — flush the trailing static text, emit the backtick.
+      if (ch === "`") {
+        result.push(expr.slice(segStart, i)); // static template text — opaque
+        result.push("`");
+        i++;
         segStart = i;
         mode = "code";
         continue;
